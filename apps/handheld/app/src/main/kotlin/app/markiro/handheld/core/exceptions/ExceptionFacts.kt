@@ -107,6 +107,59 @@ fun ExceptionFact.toWireJson(): JsonObject {
     }
 }
 
+/** The two corrections the server accepts against a closed pallet. */
+enum class PalletExceptionKind(val wire: String) {
+    /**
+     * Taking a pallet apart. No producer on this device yet -- the handheld's
+     * pallet-exceptions screen is a later task -- but the storage and sync
+     * channel below carry it, because the server's `palletExceptionSchema`
+     * accepts exactly these two and a channel that can only express one would
+     * have to be reopened to add the other.
+     */
+    DISASSEMBLE("disassemble"),
+    REPRINT("reprint"),
+}
+
+/**
+ * One operator correction against a closed PALLET.
+ *
+ * A single class rather than the sealed hierarchy [ExceptionFact] uses, because
+ * unlike the box kinds -- which carry different fields and are cross-validated
+ * by a server `superRefine` that rejects the whole batch on a wrong shape --
+ * both pallet kinds carry the identical field set and differ only in `kind`.
+ *
+ * `reason` is non-null: `palletExceptionSchema` declares it `z.string().min(1)`
+ * for BOTH kinds, unlike the box channel where it is nullable.
+ */
+data class PalletExceptionFact(
+    val kind: PalletExceptionKind,
+    val palletId: String,
+    val shiftId: String,
+    /** Informational on the wire: the server always uses the authenticated device. */
+    val terminalId: String?,
+    val operatorId: String?,
+    val reason: String,
+    val occurredAt: String,
+)
+
+/**
+ * Every key, always present, nulls spelled out -- for the identical reason
+ * [ExceptionFact.toWireJson] spells its own out: `terminalId` and `operatorId`
+ * are `.nullable()` WITHOUT `.default()` on the server, and the Retrofit
+ * converter's lenient `Json` (`explicitNulls = false`, see
+ * `core/network/NetworkModule.kt`) DROPS a null-valued field, so an absent key
+ * fails validation for the whole batch -- which is then retried forever.
+ */
+fun PalletExceptionFact.toWireJson(): JsonObject = buildJsonObject {
+    put("kind", kind.wire)
+    put("palletId", palletId)
+    put("shiftId", shiftId)
+    put("terminalId", terminalId)
+    put("operatorId", operatorId)
+    put("reason", reason)
+    put("occurredAt", occurredAt)
+}
+
 /**
  * The audit text is a WIRE value, not UI copy, so it lives here rather than in
  * `strings.xml`: the server stores exactly this string and the station stores

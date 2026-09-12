@@ -69,8 +69,9 @@ class SyncEngine(
     /**
      * Everything this device still owes the server.
      *
-     * A box closure is queued work too, and so is a product-label event, an
-     * operator correction and a pallet closure. Counting only scans showed
+     * A box closure is queued work too, and so is a product-label event, a
+     * pallet closure, and an operator correction against either a box or a
+     * pallet. Counting only scans showed
      * «Очередь 0» while a closure sat unsent, and a queue that had stopped
      * moving would never read as stuck; every channel added since reintroduces
      * the identical gap if left out, and unlike a box, a pallet the operator
@@ -89,6 +90,7 @@ class SyncEngine(
         db.palletDao().observeUnackedCount(),
         db.productLabelEventDao().observeUnackedCount(),
         db.boxExceptionDao().observeUnackedCount(),
+        db.palletExceptionDao().observeUnackedCount(),
     ) { counts -> counts.sum() }
 
     val state: StateFlow<SyncState> =
@@ -179,6 +181,31 @@ class SyncEngine(
             MAX_PALLET_CLOSURES
         }
         val palletRows = if (palletLimit == 0) emptyList() else db.palletDao().unacked(palletLimit)
+        val palletIds = palletRows.map { it.palletId }
+        // Pallet corrections pin like everything else...
+        val palletExceptionLimit = if (pendingCeiling != null) {
+            meta.get(MetaStore.SYNC_PENDING_PALLET_EXCEPTION_COUNT)?.toIntOrNull() ?: 0
+        } else {
+            MAX_PALLET_EXCEPTIONS
+        }
+        // ...but their ordering rule is against the PALLET CLOSURE channel, not
+        // the outbox. `applyPalletExceptions` (`pallet-ingest.ts`) resolves a
+        // fact through the pallets this batch carries plus the ones the server
+        // already holds, and `continue`s past one it cannot resolve -- no
+        // error, no receipt, nothing. So a fact sent before its pallet's
+        // closure is not retried or quarantined: it is dropped in silence while
+        // this device marks it acknowledged. `palletIds` is exactly the set
+        // this batch carries, so a fact naming one of them, or a pallet already
+        // acknowledged, is safe; anything else waits. This is not a corner
+        // case -- the pallet channel is capped at MAX_PALLET_CLOSURES, so a
+        // device holding more unacknowledged closures than that defers the ones
+        // past the cap to a later batch while their reprints are already
+        // queued.
+        val palletExceptionRows = if (palletExceptionLimit == 0) {
+            emptyList()
+        } else {
+            db.palletExceptionDao().sendable(palletIds, palletExceptionLimit)
+        }
         // Corrections follow the same pinning rule as boxes and label events.
         val exceptionLimit = if (pendingCeiling != null) {
             meta.get(MetaStore.SYNC_PENDING_EXCEPTION_COUNT)?.toIntOrNull() ?: 0
@@ -199,39 +226,46 @@ class SyncEngine(
             db.boxExceptionDao().sendable(exceptionThrough, exceptionLimit)
         }
         // An empty outbox with unacknowledged boxes, pallets, events or
-        // corrections is not empty.
+        // corrections of either kind is not empty.
         if (rows.isEmpty() && boxRows.isEmpty() && palletRows.isEmpty() && labelRows.isEmpty() &&
-            exceptionRows.isEmpty()
+            exceptionRows.isEmpty() && palletExceptionRows.isEmpty()
         ) {
             if (pendingCeiling != null) clearPending()
             return Step.EMPTY
         }
         val maxId = rows.lastOrNull()?.id ?: pendingCeiling ?: 0L
         val boxIds = boxRows.map { it.boxId }
-        val palletIds = palletRows.map { it.palletId }
         val batchId = meta.get(MetaStore.SYNC_PENDING_BATCH_ID)?.takeIf { pendingCeiling != null } ?: run {
             // EVERY channel's set is folded in -- boxes, pallets, label events
-            // and corrections. Without it, a record of that channel closing
-            // while this batch awaits acknowledgement would be resent under an
-            // id the server has already applied, and it would vanish silently.
+            // and both kinds of correction. Without it, a record of that
+            // channel closing while this batch awaits acknowledgement would be
+            // resent under an id the server has already applied, and it would
+            // vanish silently.
             //
             // Every id here is a short hashed signature (`idSignature`), not
             // the raw ids themselves, so this key's worst-case length does not
-            // grow with a channel's own cap the way the station's
-            // concatenated form does: two UUIDs, one bounded integer and four
-            // bounded signatures stay well under the server's shared
-            // `MAX_SYNC_BATCH_ID_CHARS` (200) even fully loaded, so no folding
-            // digest is needed here the way the station needs one.
-            val id = "${cfg.deviceId}:${db.recovery.commit { meta.installId() }}:$maxId:" +
-                "${idSignature(boxIds)}:${idSignature(palletIds)}:" +
-                "${idSignature(labelRows.map { it.eventId })}:" +
-                idSignature(exceptionRows.map { it.id.toString() })
+            // grow with a channel's own cap the way the station's concatenated
+            // form does. It is no longer comfortably clear of the server's
+            // shared `MAX_SYNC_BATCH_ID_CHARS` (200) though: two UUIDs, a
+            // Long-valued ceiling and five bounded signatures come to roughly
+            // 195 fully loaded, so `boundedBatchId` folds an over-long key the
+            // way the station's own does -- an over-long key is a 400 on every
+            // retry forever, wedging every channel on the device, because the
+            // drain never drops data.
+            val id = boundedBatchId(
+                "${cfg.deviceId}:${db.recovery.commit { meta.installId() }}:$maxId:" +
+                    "${idSignature(boxIds)}:${idSignature(palletIds)}:" +
+                    "${idSignature(labelRows.map { it.eventId })}:" +
+                    "${idSignature(exceptionRows.map { it.id.toString() })}:" +
+                    idSignature(palletExceptionRows.map { it.id.toString() }),
+            )
             db.recovery.commit {
             meta.put(MetaStore.SYNC_PENDING_CEILING, maxId.toString())
             meta.put(MetaStore.SYNC_PENDING_BOX_COUNT, boxIds.size.toString())
             meta.put(MetaStore.SYNC_PENDING_PALLET_COUNT, palletIds.size.toString())
             meta.put(MetaStore.SYNC_PENDING_LABEL_COUNT, labelRows.size.toString())
             meta.put(MetaStore.SYNC_PENDING_EXCEPTION_COUNT, exceptionRows.size.toString())
+            meta.put(MetaStore.SYNC_PENDING_PALLET_EXCEPTION_COUNT, palletExceptionRows.size.toString())
             meta.put(MetaStore.SYNC_PENDING_BATCH_ID, id)
             }
             id
@@ -245,6 +279,7 @@ class SyncEngine(
                 palletRows.map { it.toClosure(cfg.deviceId) },
                 labelRows.map { json.parseToJsonElement(it.payloadJson) },
                 exceptionRows.map { json.parseToJsonElement(it.payloadJson) },
+                palletExceptionRows.map { json.parseToJsonElement(it.payloadJson) },
             ),
         )
         val result = transport.post("/station/scans", body) as? TransportResult.Ok ?: return Step.FAILED
@@ -283,12 +318,24 @@ class SyncEngine(
                 db.boxExceptionDao().markAcked(exceptionRows.map { it.id }, Iso.format(at))
                 db.boxExceptionDao().purgeAcked()
             }
+            // Unconditional, for the same reason the box corrections above are:
+            // this endpoint answers no per-pallet-exception receipt either, and
+            // a fact only ever leaves once `PalletExceptionDao.sendable` says
+            // the server can resolve its pallet -- which is precisely the one
+            // case `applyPalletExceptions` would otherwise drop in silence. A
+            // per-record ack, the way product-label events get one, is not
+            // available here: there is nothing per-record to read.
+            if (palletExceptionRows.isNotEmpty()) {
+                db.palletExceptionDao().markAcked(palletExceptionRows.map { it.id }, Iso.format(at))
+                db.palletExceptionDao().purgeAcked()
+            }
             db.metaDao().remove(MetaStore.SYNC_PENDING_BATCH_ID)
             db.metaDao().remove(MetaStore.SYNC_PENDING_CEILING)
             db.metaDao().remove(MetaStore.SYNC_PENDING_BOX_COUNT)
             db.metaDao().remove(MetaStore.SYNC_PENDING_PALLET_COUNT)
             db.metaDao().remove(MetaStore.SYNC_PENDING_LABEL_COUNT)
             db.metaDao().remove(MetaStore.SYNC_PENDING_EXCEPTION_COUNT)
+            db.metaDao().remove(MetaStore.SYNC_PENDING_PALLET_EXCEPTION_COUNT)
             parsed.denied?.let { db.metaDao().put(MetaEntity(MetaStore.SYNC_LAST_DENIED, it)) }
             db.metaDao().put(MetaEntity(MetaStore.SYNC_LAST_SUCCESS_AT, at.toString()))
             // A completed job the server has fully answered is dead weight, and
@@ -309,6 +356,37 @@ class SyncEngine(
         meta.remove(MetaStore.SYNC_PENDING_PALLET_COUNT)
         meta.remove(MetaStore.SYNC_PENDING_LABEL_COUNT)
         meta.remove(MetaStore.SYNC_PENDING_EXCEPTION_COUNT)
+        meta.remove(MetaStore.SYNC_PENDING_PALLET_EXCEPTION_COUNT)
+    }
+
+    /**
+     * The batch id actually posted: the assembled key, or a deterministic
+     * digest of it once it would exceed what the server's
+     * `syncBatchSchema.batchId` accepts.
+     *
+     * Ported from the station's `boundedBatchId` (`apps/station/src/lib/
+     * sync.ts`), which solved exactly this: the assembled form folds one
+     * signature per channel into the key so a retry changes exactly when the
+     * SET being sent changes, which makes its length grow with how many
+     * channels a batch carries. An over-long key is not cosmetic -- the server
+     * rejects it with a 400 and the drain, which treats every error as
+     * retryable and never drops data, resends the identical key forever,
+     * wedging every channel on that device.
+     *
+     * Folding preserves both properties the key must have: the digest is a pure
+     * function of the assembled key, so a retry of the same set produces the
+     * same id, and two genuinely different sets keep different ids. The `sync:`
+     * prefix keeps a folded key from colliding with a plain one. A key under
+     * the bound is returned untouched, so nothing changes for an ordinary
+     * batch -- and a batch already pinned in `meta` reads its stored id rather
+     * than reassembling, so this cannot change the identity of anything in
+     * flight across an upgrade.
+     */
+    internal fun boundedBatchId(batchId: String): String {
+        if (batchId.length <= MAX_SYNC_BATCH_ID_CHARS) return batchId
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(batchId.toByteArray(Charsets.UTF_8))
+        return "sync:" + digest.joinToString("") { "%02x".format(it) }
     }
 
     /**
@@ -505,6 +583,20 @@ class SyncEngine(
 
         /** The server's own cap on `exceptions[]`. */
         const val MAX_EXCEPTIONS = 200
+
+        /**
+         * The server's cap on `palletExceptions[]`.
+         *
+         * NOT a constant of its own on the server: `syncBatchSchema` bounds
+         * that array with `MAX_PALLET_CLOSURES_PER_SYNC_BATCH` -- "a batch
+         * cannot carry exceptions against more pallets than it could close" --
+         * so this is the same number as [MAX_PALLET_CLOSURES] on purpose, not
+         * by coincidence, and it must track that constant rather than acquire
+         * a life of its own. `SyncLimitsFixturesTest` asserts it against the
+         * committed `maxPalletClosuresPerSyncBatch`, so the generated fixture
+         * needs no new key and the pair cannot drift apart silently.
+         */
+        const val MAX_PALLET_EXCEPTIONS = MAX_PALLET_CLOSURES
 
         const val RECONCILE_PAGE = 200
         const val HEARTBEAT_MS = 15_000L

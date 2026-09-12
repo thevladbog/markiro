@@ -114,10 +114,12 @@ class SyncEngineTest {
         val body = Json.parseToJsonElement(request.body.readUtf8()).jsonObject
         val installId = MetaStore(db).installId()
         // deviceId:installId:outbox ceiling, then one signature per side
-        // channel, in order: boxes, pallets, product-label events, operator
-        // corrections. A different set must never sign the same, so this stays
-        // an exact comparison.
-        assertEquals("dev-1:$installId:3:0:0:0:0", body.getValue("batchId").jsonPrimitive.content)
+        // channel, in order: boxes, pallets, product-label events, box
+        // corrections, pallet corrections. A different set must never sign the
+        // same, so this stays an exact comparison -- and an ordinary key like
+        // this one is far under `MAX_SYNC_BATCH_ID_CHARS`, so `boundedBatchId`
+        // returns it untouched rather than folding it.
+        assertEquals("dev-1:$installId:3:0:0:0:0:0", body.getValue("batchId").jsonPrimitive.content)
         val items = body.getValue("items").jsonArray
         assertEquals(3, items.size)
         assertEquals("dev-1", items[0].jsonObject.getValue("terminalId").jsonPrimitive.content)

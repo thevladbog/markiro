@@ -30,8 +30,9 @@ import app.markiro.handheld.core.print.PrinterEntity
         ProductLabelEventEntity::class,
         BoxExceptionEntity::class,
         PalletEntity::class,
+        PalletExceptionEntity::class,
     ],
-    version = 10,
+    version = 11,
     exportSchema = false,
 )
 abstract class HandheldDatabase : RoomDatabase() {
@@ -49,6 +50,7 @@ abstract class HandheldDatabase : RoomDatabase() {
     abstract fun productLabelJobDao(): ProductLabelJobDao
     abstract fun productLabelEventDao(): ProductLabelEventDao
     abstract fun boxExceptionDao(): BoxExceptionDao
+    abstract fun palletExceptionDao(): PalletExceptionDao
 
     abstract fun inventoryTaskDao(): InventoryTaskDao
     abstract fun inventorySnapshotCodeDao(): InventorySnapshotCodeDao

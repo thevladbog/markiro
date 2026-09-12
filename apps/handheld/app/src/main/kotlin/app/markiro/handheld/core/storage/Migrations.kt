@@ -213,10 +213,12 @@ val MIGRATION_8_9 = object : Migration(8, 9) {
  * `ShiftEntities.kt` for why leaving that column in place, unread, is the
  * chosen trade over rebuilding the table.
  *
- * `pallet_exceptions` is created here too, ahead of the handheld's exceptions
- * screen (a later task in this slice). Nothing reads or writes it yet --
- * deliberately, not an oversight -- so there is no Room entity or DAO for it
- * until that screen lands and actually needs one.
+ * `pallet_exceptions` is created here too, ahead of the channel that fills it.
+ * The shape below is the one this migration shipped with and is NOT the shape
+ * Room expects today: `MIGRATION_10_11` rebuilds the table against
+ * `PalletExceptionEntity`. Leave this statement exactly as it is -- an
+ * installed terminal has already run it, and rewriting an applied migration
+ * only makes a fresh database look green.
  */
 val MIGRATION_9_10 = object : Migration(9, 10) {
     override fun migrate(db: SupportSQLiteDatabase) {
@@ -233,5 +235,39 @@ val MIGRATION_9_10 = object : Migration(9, 10) {
                 "`kind` TEXT NOT NULL, `palletId` TEXT NOT NULL, `shiftId` TEXT NOT NULL, `terminalId` TEXT, " +
                 "`operatorId` TEXT, `reason` TEXT NOT NULL, `occurredAt` TEXT NOT NULL)",
         )
+    }
+}
+
+/**
+ * `pallet_exceptions` becomes a real Room table, so the pallet half of the
+ * exceptions channel can be written and drained (`PalletExceptionEntity`,
+ * `PalletExceptionDao`, `SyncEngine`).
+ *
+ * DROPPED AND RECREATED rather than ALTERed, and that is safe here for one
+ * specific reason: nothing has ever written to this table. `MIGRATION_9_10`
+ * created it ahead of a feature that had not landed, and it had no entity, no
+ * DAO and no raw writer anywhere in the app, so on every installed terminal it
+ * is empty by construction. There is no data to preserve and no ALTER chain
+ * that could reach the new shape anyway -- it gains `payloadJson` NOT NULL and
+ * `ackedAt`, and SQLite cannot add a NOT NULL column without a default.
+ *
+ * Doing nothing was not an option. Room validates the on-disk schema against
+ * its entities every time it opens the database, so an upgraded terminal
+ * holding the v10 shape while the entity declares the new one is an
+ * `IllegalStateException` at startup on EVERY such device -- not a silent
+ * problem. A clean install has the opposite failure: Room builds a fresh
+ * database from the entity list, so before this version the table simply did
+ * not exist there at all and the first write would have crashed.
+ */
+val MIGRATION_10_11 = object : Migration(10, 11) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("DROP TABLE IF EXISTS `pallet_exceptions`")
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `pallet_exceptions` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                "`kind` TEXT NOT NULL, `palletId` TEXT NOT NULL, `shiftId` TEXT NOT NULL, `terminalId` TEXT, " +
+                "`operatorId` TEXT, `reason` TEXT NOT NULL, `occurredAt` TEXT NOT NULL, " +
+                "`payloadJson` TEXT NOT NULL, `ackedAt` TEXT)",
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_pallet_exceptions_ackedAt` ON `pallet_exceptions` (`ackedAt`)")
     }
 }

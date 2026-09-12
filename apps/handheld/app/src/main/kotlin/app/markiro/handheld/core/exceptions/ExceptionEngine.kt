@@ -3,6 +3,7 @@ package app.markiro.handheld.core.exceptions
 import app.markiro.handheld.core.storage.BoxExceptionEntity
 import app.markiro.handheld.core.storage.CodeEntity
 import app.markiro.handheld.core.storage.HandheldDatabase
+import app.markiro.handheld.core.storage.PalletExceptionEntity
 import app.markiro.handheld.core.storage.ScanEventEntity
 import app.markiro.handheld.core.util.Iso
 
@@ -154,10 +155,65 @@ class ExceptionEngine(
     }
 
     /**
+     * Records a pallet label reprint. The printing itself is the caller's
+     * business, exactly as it is for [reprint].
+     *
+     * The station records the same fact through `reprintPallet`
+     * (`apps/station/src/lib/pallets.ts`); without this the two surfaces close
+     * pallets off the same physical event and keep different ledgers.
+     */
+    suspend fun reprintPallet(
+        shiftId: String,
+        palletId: String,
+        reason: ReprintReason,
+        operatorId: String?,
+        terminalId: String?,
+    ) = db.recovery.work { reprintPalletOwned(shiftId, palletId, reason, operatorId, terminalId) }
+
+    private suspend fun reprintPalletOwned(
+        shiftId: String,
+        palletId: String,
+        reason: ReprintReason,
+        operatorId: String?,
+        terminalId: String?,
+    ) {
+        queuePallet(
+            PalletExceptionFact(
+                kind = PalletExceptionKind.REPRINT,
+                palletId = palletId, shiftId = shiftId, terminalId = terminalId,
+                operatorId = operatorId, occurredAt = Iso.format(clock()), reason = reason.audit,
+            ),
+        )
+    }
+
+    /**
      * The watermark is read here, inside the same transaction as the local
      * effect, so it names exactly the scans that preceded this correction.
      */
     private suspend fun queue(fact: ExceptionFact) = db.recovery.commit { queueOwned(fact) }
+
+    private suspend fun queuePallet(fact: PalletExceptionFact) = db.recovery.commit { queuePalletOwned(fact) }
+
+    /**
+     * No outbox watermark, unlike [queueOwned]: a pallet exception depends on
+     * the pallet CLOSURE channel, not on the scans. `PalletExceptionDao.
+     * sendable` is where that dependency is enforced.
+     */
+    private suspend fun queuePalletOwned(fact: PalletExceptionFact) {
+        db.palletExceptionDao().insert(
+            PalletExceptionEntity(
+                kind = fact.kind.wire,
+                palletId = fact.palletId,
+                shiftId = fact.shiftId,
+                terminalId = fact.terminalId,
+                operatorId = fact.operatorId,
+                reason = fact.reason,
+                occurredAt = fact.occurredAt,
+                payloadJson = fact.toWireJson().toString(),
+                ackedAt = null,
+            ),
+        )
+    }
 
     private suspend fun queueOwned(fact: ExceptionFact) {
         val undo = fact as? ExceptionFact.Undo

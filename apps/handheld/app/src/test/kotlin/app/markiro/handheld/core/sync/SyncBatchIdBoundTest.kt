@@ -8,10 +8,12 @@ import app.markiro.handheld.core.network.NetworkModule
 import app.markiro.handheld.core.network.RevocationBus
 import app.markiro.handheld.core.network.RevocationInterceptor
 import app.markiro.handheld.core.storage.BoxEntity
+import app.markiro.handheld.core.storage.BoxExceptionEntity
 import app.markiro.handheld.core.storage.DeviceConfigEntity
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.MetaStore
 import app.markiro.handheld.core.storage.PalletEntity
+import app.markiro.handheld.core.storage.PalletExceptionEntity
 import app.markiro.handheld.core.storage.ProductLabelEventEntity
 import app.markiro.handheld.core.storage.ProductLabelJobEntity
 import kotlinx.coroutines.CoroutineScope
@@ -29,6 +31,7 @@ import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -93,13 +96,17 @@ class SyncBatchIdBoundTest {
         ),
     )
 
-    private suspend fun closedPallet(closedAt: String) = db.palletDao().insert(
-        PalletEntity(
-            palletId = UUID.randomUUID().toString(), shiftId = "s1", terminalId = null, sscc = "046800899000000018",
-            openedAt = "2026-09-10T10:00:00.000Z", closedAt = closedAt, operatorId = "op-1",
-            printState = "pending", printReason = null, ackedAt = null,
-        ),
-    )
+    private suspend fun closedPallet(closedAt: String): String {
+        val id = UUID.randomUUID().toString()
+        db.palletDao().insert(
+            PalletEntity(
+                palletId = id, shiftId = "s1", terminalId = null, sscc = "046800899000000018",
+                openedAt = "2026-09-10T10:00:00.000Z", closedAt = closedAt, operatorId = "op-1",
+                printState = "pending", printReason = null, ackedAt = null,
+            ),
+        )
+        return id
+    }
 
     private suspend fun event(jobId: String, sequence: Int): String {
         val id = UUID.randomUUID().toString()
@@ -113,6 +120,32 @@ class SyncBatchIdBoundTest {
         )
         return id
     }
+
+    /**
+     * `kind = "clear"` with a zero watermark: `BoxExceptionDao.sendable` lets
+     * `undo`/`clear` past without waiting for a box closure, which is what
+     * makes this channel reachable at its ceiling in one batch.
+     */
+    private suspend fun boxException(index: Int) = db.boxExceptionDao().insert(
+        BoxExceptionEntity(
+            kind = "clear", boxId = "box-$index", codeHash = null, targetScannedAt = null,
+            shiftId = "s1", operatorId = "op-1", reason = null,
+            occurredAt = "2026-09-10T13:%02d:%02d.000Z".format(index / 60, index % 60),
+            payloadJson = """{"kind":"clear","boxId":"box-$index"}""",
+            afterOutboxId = 0, ackedAt = null,
+        ),
+    )
+
+    /** Names a pallet this same batch closes, which is what makes it sendable. */
+    private suspend fun palletException(palletId: String) = db.palletExceptionDao().insert(
+        PalletExceptionEntity(
+            kind = "reprint", palletId = palletId, shiftId = "s1", terminalId = "dev-1",
+            operatorId = "op-1", reason = "Результат печати неизвестен",
+            occurredAt = "2026-09-10T14:00:00.000Z",
+            payloadJson = """{"kind":"reprint","palletId":"$palletId"}""",
+            ackedAt = null,
+        ),
+    )
 
     private fun job(id: String) = ProductLabelJobEntity(
         jobId = id, shiftId = "s1", codeHash = "c".repeat(64), canonicalRaw = "raw",
@@ -135,8 +168,14 @@ class SyncBatchIdBoundTest {
     fun aFullyLoadedBatchIdStaysWithinTheSharedBound() = runTest {
         db.productLabelJobDao().insert(job("j1"))
         repeat(SyncEngine.MAX_BOX_CLOSURES) { closedBox("2026-09-10T11:%02d:%02d.000Z".format(it / 60, it % 60)) }
-        repeat(SyncEngine.MAX_PALLET_CLOSURES) { closedPallet("2026-09-10T12:%02d:%02d.000Z".format(it / 60, it % 60)) }
+        val palletIds = (0 until SyncEngine.MAX_PALLET_CLOSURES)
+            .map { closedPallet("2026-09-10T12:%02d:%02d.000Z".format(it / 60, it % 60)) }
         val eventIds = (0 until SyncEngine.MAX_PRODUCT_LABEL_EVENTS).map { event("j1", it) }
+        // Both correction channels, which the earlier version of this test left
+        // at their empty `"0"` signature -- under-measuring the worst case by
+        // roughly the length of two real signatures.
+        repeat(SyncEngine.MAX_EXCEPTIONS) { boxException(it) }
+        repeat(SyncEngine.MAX_PALLET_EXCEPTIONS) { palletException(palletIds[it]) }
 
         // The response acknowledges every event too, so this stays a single
         // round trip -- an unacknowledged event would otherwise ride a second,
@@ -150,11 +189,38 @@ class SyncBatchIdBoundTest {
         assertEquals(SyncEngine.MAX_BOX_CLOSURES, body.getValue("boxes").jsonArray.size)
         assertEquals(SyncEngine.MAX_PALLET_CLOSURES, body.getValue("pallets").jsonArray.size)
         assertEquals(SyncEngine.MAX_PRODUCT_LABEL_EVENTS, body.getValue("productLabelEvents").jsonArray.size)
+        assertEquals(SyncEngine.MAX_EXCEPTIONS, body.getValue("exceptions").jsonArray.size)
+        assertEquals(SyncEngine.MAX_PALLET_EXCEPTIONS, body.getValue("palletExceptions").jsonArray.size)
 
         val batchId = body.getValue("batchId").jsonPrimitive.content
         assertTrue(
             "batchId is ${batchId.length} chars, over SyncEngine.MAX_SYNC_BATCH_ID_CHARS (${SyncEngine.MAX_SYNC_BATCH_ID_CHARS})",
             batchId.length <= SyncEngine.MAX_SYNC_BATCH_ID_CHARS,
         )
+    }
+
+    // -- `boundedBatchId` itself. The loaded drain above measures today's worst
+    // case; these pin down the fold that keeps the NEXT channel (or a device
+    // whose outbox ceiling has grown into a 19-digit Long) from silently
+    // crossing the bound and wedging every channel behind a 400 forever. --
+
+    @Test
+    fun aKeyUnderTheBoundIsReturnedUntouched() {
+        val exact = "k".repeat(SyncEngine.MAX_SYNC_BATCH_ID_CHARS)
+        assertEquals(exact, engine().boundedBatchId(exact))
+        assertEquals("dev-1:inst-1:3:0:0:0:0:0", engine().boundedBatchId("dev-1:inst-1:3:0:0:0:0:0"))
+    }
+
+    @Test
+    fun anOverLongKeyFoldsToABoundedDeterministicDigest() {
+        val over = "k".repeat(SyncEngine.MAX_SYNC_BATCH_ID_CHARS + 1)
+        val folded = engine().boundedBatchId(over)
+        assertTrue("folded id is ${folded.length} chars", folded.length <= SyncEngine.MAX_SYNC_BATCH_ID_CHARS)
+        assertTrue("a folded id must not be mistakable for a plain one", folded.startsWith("sync:"))
+        // A retry of the SAME set must keep the same id, or the server applies it twice.
+        assertEquals(folded, engine().boundedBatchId(over))
+        // ...and two genuinely different sets must keep different ids, or the
+        // second is answered `alreadyApplied` and lost.
+        assertNotEquals(folded, engine().boundedBatchId(over + "x"))
     }
 }

@@ -38,5 +38,13 @@ class SyncLimitsFixturesTest {
             fixtures.getValue("maxSyncBatchIdChars").jsonPrimitive.int,
             SyncEngine.MAX_SYNC_BATCH_ID_CHARS,
         )
+        // `syncBatchSchema.palletExceptions` is bounded by the PALLET CLOSURE
+        // constant, not one of its own -- "a batch cannot carry exceptions
+        // against more pallets than it could close" -- so the fixture needs no
+        // new key and this asserts the Kotlin literal against the same number.
+        assertEquals(
+            fixtures.getValue("maxPalletClosuresPerSyncBatch").jsonPrimitive.int,
+            SyncEngine.MAX_PALLET_EXCEPTIONS,
+        )
     }
 }
