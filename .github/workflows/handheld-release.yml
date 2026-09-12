@@ -53,8 +53,7 @@ jobs:
       version_name: ${{ steps.version.outputs.version_name }}
       version_code: ${{ steps.version.outputs.version_code }}
     steps:
-      # Only so the changelog can be read: the refusal has to happen here,
-      # before the release job puts a signing key on a runner.
+      # Resolve the version with the tooling from this exact release source.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
@@ -85,7 +84,6 @@ jobs:
         env:
           CHANNEL: ${{ inputs.channel }}
           BUMP: ${{ inputs.bump }}
-          PUBLISH: ${{ inputs.publish }}
         run: |
           set -euo pipefail
           node tools/handheld-release/resolve.mjs

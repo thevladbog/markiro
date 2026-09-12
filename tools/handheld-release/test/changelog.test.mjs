@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 
-import { notesForVersion } from "../changelog.mjs";
+import { notesForVersion, readNotes } from "../changelog.mjs";
 
 const sample = `# Изменения ТСД
 
@@ -26,25 +28,34 @@ test("the entry for a version is read whole and without its neighbours", () => {
   assert.equal(notesForVersion(sample, "0.1.0"), "- Первая сборка");
 });
 
-test("a version with no entry cannot be published", () => {
-  // The whole point: a build published with nothing to say about it is how a
-  // line ends up asking the office what changed.
-  assert.throws(() => notesForVersion(sample, "0.3.0"), /no entry for 0\.3\.0/);
+test("a version with no entry gets automatic release notes without older changes", () => {
+  assert.equal(
+    notesForVersion(sample, "0.3.0"),
+    "Markiro ТСД 0.3.0. Обновление приложения для терминалов сбора данных.",
+  );
 });
 
-test("an empty entry is refused as firmly as a missing one", () => {
-  assert.throws(() => notesForVersion("# x\n\n## 0.2.0\n\n## 0.1.0\n- a\n", "0.2.0"), /is empty/);
+test("an empty entry gets automatic release notes", () => {
+  assert.equal(
+    notesForVersion("# x\n\n## 0.2.0\n\n## 0.1.0\n- a\n", "0.2.0"),
+    "Markiro ТСД 0.2.0. Обновление приложения для терминалов сбора данных.",
+  );
 });
 
-test("the committed changelog has an entry for the version the build declares", async () => {
-  // Keeps the file honest against `versionName` in the Gradle build, so the
-  // first real publication does not discover the gap.
-  const gradle = await readFile("apps/handheld/app/build.gradle.kts", "utf8");
-  const declared =
-    /versionName = \(findProperty\("markiro\.versionName"\) as String\?\) \?: "([^"]+)"/.exec(
-      gradle,
-    );
-  assert.ok(declared, "the build must declare a default versionName");
+test("a missing changelog file does not block publication", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "handheld-notes-"));
+  assert.equal(await readNotes("0.3.0", join(dir, "missing.md")), notesForVersion("", "0.3.0"));
+});
+
+test("changelog read errors other than a missing file remain visible", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "handheld-notes-"));
+  await assert.rejects(() => readNotes("0.3.0", dir), { code: "EISDIR" });
+});
+
+test("curated notes for the first published release remain unchanged", async () => {
   const markdown = await readFile("apps/handheld/CHANGELOG.md", "utf8");
-  assert.ok(notesForVersion(markdown, declared[1]).length > 0);
+  assert.equal(
+    notesForVersion(markdown, "0.1.0"),
+    "- Первая сборка для реального терминала: привязка, смена, агрегация коробов,\n  инвентаризация, печать этикеток и дубликатов, исключения.",
+  );
 });

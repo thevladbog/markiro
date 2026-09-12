@@ -128,8 +128,7 @@ if (process.argv[1] && import.meta.url.endsWith(process.argv[1].replaceAll("\\",
     );
     process.exit(2);
   }
-  // From the file, reviewed with the change it describes -- not from a box
-  // somebody filled in while dispatching.
+  // Use curated notes when available, otherwise generate the release description.
   const notes = await readNotes(versionName);
   const result = await publishHandheldRelease({
     apkPath,
