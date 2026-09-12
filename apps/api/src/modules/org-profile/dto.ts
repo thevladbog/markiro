@@ -15,10 +15,20 @@ const gs1PrefixSchema = z.string().regex(/^\d{4,12}$/, "gs1Prefixes entries must
 
 const timeZoneSchema = z.string().refine(isIanaTimeZone, "timeZone must be an IANA timezone");
 
-const categoryBoxLabelTemplateDefaultSchema = z.object({
+/** One `{product group -> template}` default; the box and pallet lists share the shape. */
+const categoryLabelTemplateDefaultSchema = z.object({
   chzProductGroupCode: z.number().int().positive(),
   templateId: z.string().uuid(),
 });
+
+const categoryLabelTemplateDefaultsSchema = (field: string) =>
+  z
+    .array(categoryLabelTemplateDefaultSchema)
+    .refine(
+      (items) => new Set(items.map((item) => item.chzProductGroupCode)).size === items.length,
+      { message: `${field} must not repeat a product group` },
+    )
+    .optional();
 
 export const putOrgProfileSchema = z.object({
   gln: glnSchema.nullable().optional(),
@@ -27,13 +37,23 @@ export const putOrgProfileSchema = z.object({
   timeZone: timeZoneSchema.optional(),
   defaultBoxLabelTemplateId: z.string().uuid().nullable().optional(),
   /** Full replacement of the per-category box-label defaults; omitted keeps the current list. */
-  categoryBoxLabelTemplateDefaults: z
-    .array(categoryBoxLabelTemplateDefaultSchema)
-    .refine(
-      (items) => new Set(items.map((item) => item.chzProductGroupCode)).size === items.length,
-      { message: "categoryBoxLabelTemplateDefaults must not repeat a product group" },
-    )
-    .optional(),
+  categoryBoxLabelTemplateDefaults: categoryLabelTemplateDefaultsSchema(
+    "categoryBoxLabelTemplateDefaults",
+  ),
+  /**
+   * The pallet counterparts, in full symmetry with the two box fields above
+   * (06d §1.5, "defaults mirror the box ones exactly"). They are not
+   * cosmetic: migration 0137 seeds the stock «Паллета 100×150» for every
+   * organisation and points `org_profiles.default_pallet_label_template_id`
+   * at it, and `LABEL_TEMPLATE_REFERENCE_CONSTRAINTS` refuses to disable or
+   * delete a template a default still names. Without a write path here that
+   * seeded template would be permanently undisableable for every tenant.
+   */
+  defaultPalletLabelTemplateId: z.string().uuid().nullable().optional(),
+  /** Full replacement of the per-category pallet-label defaults; omitted keeps the current list. */
+  categoryPalletLabelTemplateDefaults: categoryLabelTemplateDefaultsSchema(
+    "categoryPalletLabelTemplateDefaults",
+  ),
   pickupLimitsEnabled: z.boolean().optional(),
 });
 export type PutOrgProfileDto = z.infer<typeof putOrgProfileSchema>;
@@ -43,6 +63,9 @@ export interface CategoryBoxLabelTemplateDefaultDto {
   templateId: string;
 }
 
+/** Same `{product group -> template}` shape as the box entry, for pallet labels. */
+export type CategoryPalletLabelTemplateDefaultDto = CategoryBoxLabelTemplateDefaultDto;
+
 export interface OrgProfileDto {
   gln: string | null;
   gs1Prefixes: string[];
@@ -50,6 +73,8 @@ export interface OrgProfileDto {
   timeZone: string;
   defaultBoxLabelTemplateId: string | null;
   categoryBoxLabelTemplateDefaults: CategoryBoxLabelTemplateDefaultDto[];
+  defaultPalletLabelTemplateId: string | null;
+  categoryPalletLabelTemplateDefaults: CategoryPalletLabelTemplateDefaultDto[];
   /** Distinct ЧЗ product-group codes of non-archived products, ascending. A UI hint only. */
   productGroupsInUse: number[];
   pickupLimitsEnabled: boolean;
@@ -97,6 +122,16 @@ export type SsccCounterDto = z.infer<typeof ssccCounterSchema>;
 
 const uuidSchema = { type: "string", format: "uuid" } as const;
 
+const categoryLabelTemplateDefaultsOpenApiSchema: SchemaObject = {
+  type: "array",
+  items: {
+    type: "object",
+    additionalProperties: false,
+    required: ["chzProductGroupCode", "templateId"],
+    properties: { chzProductGroupCode: { type: "integer" }, templateId: uuidSchema },
+  },
+};
+
 export const orgProfileOpenApiSchema: SchemaObject = {
   type: "object",
   additionalProperties: false,
@@ -106,6 +141,8 @@ export const orgProfileOpenApiSchema: SchemaObject = {
     "inn",
     "defaultBoxLabelTemplateId",
     "categoryBoxLabelTemplateDefaults",
+    "defaultPalletLabelTemplateId",
+    "categoryPalletLabelTemplateDefaults",
     "productGroupsInUse",
     "pickupLimitsEnabled",
     "logoUrl",
@@ -116,15 +153,9 @@ export const orgProfileOpenApiSchema: SchemaObject = {
     gs1Prefixes: { type: "array", items: { type: "string", pattern: "^\\d{4,12}$" } },
     inn: { type: "string", nullable: true },
     defaultBoxLabelTemplateId: { ...uuidSchema, nullable: true },
-    categoryBoxLabelTemplateDefaults: {
-      type: "array",
-      items: {
-        type: "object",
-        additionalProperties: false,
-        required: ["chzProductGroupCode", "templateId"],
-        properties: { chzProductGroupCode: { type: "integer" }, templateId: uuidSchema },
-      },
-    },
+    categoryBoxLabelTemplateDefaults: { ...categoryLabelTemplateDefaultsOpenApiSchema },
+    defaultPalletLabelTemplateId: { ...uuidSchema, nullable: true },
+    categoryPalletLabelTemplateDefaults: { ...categoryLabelTemplateDefaultsOpenApiSchema },
     productGroupsInUse: { type: "array", items: { type: "integer" } },
     pickupLimitsEnabled: { type: "boolean" },
     logoUrl: { type: "string", nullable: true },
@@ -142,7 +173,7 @@ export const organizationLogoOpenApiSchema: SchemaObject = {
   },
 };
 
-/** `GET /org/profile/sscc` response; mirrors `SsccCounterStateDto` (../sscc/dto). */
+/** One entry of `GET /org/profile/sscc`'s `counters` list; mirrors `SsccCounterStateDto` (../sscc/dto). */
 export const ssccCounterStateOpenApiSchema: SchemaObject = {
   type: "object",
   additionalProperties: false,
@@ -187,5 +218,19 @@ export const ssccCounterStateOpenApiSchema: SchemaObject = {
         },
       ],
     },
+  },
+};
+
+/**
+ * `GET /org/profile/sscc` response; mirrors `SsccCounterListDto` (../sscc/dto):
+ * one entry per extension digit (boxes, then pallets) rather than two named
+ * fields, so a third numbering space later needs no schema change here.
+ */
+export const ssccCounterListOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["counters"],
+  properties: {
+    counters: { type: "array", items: ssccCounterStateOpenApiSchema },
   },
 };

@@ -1,4 +1,5 @@
 import { newImageCheckpoint } from "./national-catalog-image-state";
+import { readCatalogClassification } from "./national-catalog-classification";
 import {
   resolveCatalogProductGroup,
   type CatalogCategoryGroup,
@@ -60,6 +61,7 @@ export type ImportPreviewEntry =
       target: "category";
       source: "national_catalog";
       option: StoredCategoryOption;
+      classification?: ReturnType<typeof readCatalogClassification>["classification"] | undefined;
     }
   | {
       entryId: string;
@@ -238,7 +240,7 @@ export async function buildImportPreview(
   const requestedChoice = body.categoryChoices.find((choice) => choice.itemId === item.id);
   if (profile && requestedChoice)
     throw new UnprocessableEntityException("category_change_separate");
-  const choice = requestedChoice
+  let choice = requestedChoice?.optionId
     ? await resolveCategoryOption(tx, tenantId, session.id, item.id, requestedChoice.optionId)
     : null;
   const categoryIds = source.categories.map((category) => String(category.id));
@@ -279,6 +281,18 @@ export async function buildImportPreview(
       (!profile ||
         (profile.schemaVersionId === version.id && profile.categoryId === version.categoryId)),
   );
+  const unique = compatible.length === 1 ? compatible[0] : undefined;
+  if (!profile && !requestedChoice && unique) {
+    choice = {
+      optionId: randomUUID(),
+      label: unique.version.categoryName,
+      schemaVersionId: unique.version.id,
+      categoryId: unique.version.categoryId,
+      groupCode: unique.mapping.chzProductGroupCode,
+      mappingId: unique.mapping.id,
+      selected: true,
+    };
+  }
   const target = profile
     ? compatible.find(({ version }) => version.id === profile.schemaVersionId)
     : choice
@@ -330,6 +344,7 @@ export async function buildImportPreview(
       requiresEntryIds: [],
     });
   }
+  const importedAttributes = new Set<string>();
   let categoryEntryId: string | null = null;
   if (!choice && source.categories.length) {
     const resolvedGroup = resolveCatalogProductGroup(source.categories, categoryGroups);
@@ -373,29 +388,41 @@ export async function buildImportPreview(
         applicable: reason === null,
         reason,
         source: "national_catalog",
-        selectedByDefault: !product && reason === null,
+        selectedByDefault: before === null && reason === null,
         requiresEntryIds: [],
       });
     }
   }
   if (choice && target) {
+    const { classification, sourceAttributeIds } = readCatalogClassification(
+      source.attributes,
+      item.gtin14,
+    );
+    for (const id of sourceAttributeIds) importedAttributes.add(String(id));
     categoryEntryId = randomUUID();
     entries.push({
       entryId: categoryEntryId,
       target: "category",
       source: "national_catalog",
       option: choice,
+      classification,
     });
     fields.push({
       id: categoryEntryId,
       label: "Категория",
       labelKey: "category",
       before: null,
-      after: choice.label,
+      after: [
+        choice.label,
+        classification.tnVedCode ? `ТН ВЭД: ${classification.tnVedCode}` : null,
+        classification.okpd2Code ? `ОКПД2: ${classification.okpd2Code}` : null,
+      ]
+        .filter((value) => value !== null)
+        .join("\n"),
       applicable: true,
       reason: null,
       source: "national_catalog",
-      selectedByDefault: !product,
+      selectedByDefault: true,
       requiresEntryIds: [],
     });
   }
@@ -419,7 +446,6 @@ export async function buildImportPreview(
   }
   let stableMappings: NationalCatalogStableFieldMapping[] = [];
   const productFields = readCatalogProductFields(source.attributes, item.gtin14);
-  const importedAttributes = new Set<string>();
   if (target) {
     const definition = parseCategorySchemaDefinition(target.version.definition);
     const mappings = await tx
@@ -494,7 +520,7 @@ export async function buildImportPreview(
         applicable: true,
         reason: null,
         source: "national_catalog",
-        selectedByDefault: !product,
+        selectedByDefault: !product || entry.currentValue === null,
         requiresEntryIds: categoryEntryId ? [categoryEntryId] : [],
       });
     }
@@ -543,7 +569,11 @@ export async function buildImportPreview(
       applicable,
       reason: applicable ? null : "egais_code_limit",
       source: "national_catalog",
-      selectedByDefault: !product && applicable,
+      selectedByDefault:
+        applicable &&
+        (!product ||
+          (currentValue === null &&
+            (field.targetField !== "egais_code" || egaisCodes.length === 0))),
       requiresEntryIds: [],
     });
   }
@@ -643,7 +673,7 @@ export async function buildImportPreview(
       initialProduct: {
         chzProductGroupCode: choice?.groupCode ?? null,
         boxCapacity: null,
-        palletCapacity: null,
+        palletBoxCapacity: null,
         status: "draft",
       },
     },

@@ -92,7 +92,7 @@ describe("private National Catalog images (real PostgreSQL and normalized bytes)
       gtin14: GTIN,
       name: "Моё имя",
       boxCapacity: 12,
-      palletCapacity: 60,
+      palletBoxCapacity: 60,
       unitPrice: "19.20",
       externalRef: "1C-unchanged",
     });

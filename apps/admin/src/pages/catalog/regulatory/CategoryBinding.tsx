@@ -36,16 +36,21 @@ export function CategoryBinding({
   const [proposal, setProposal] = useState<CategoryProposal | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [failure, setFailure] = useState<string | null>(null);
-  const options = useRegulatoryCategoryOptions(profile.productId, editing);
+  const options = useRegulatoryCategoryOptions(profile.productId, canWrite);
   const preview = useCategoryChangePreview(profile.productId);
   const apply = useApplyCategory(profile.productId);
   const reload = useReloadRegulatoryProfile(profile.productId);
   const busy = preview.isPending || apply.isPending || reload.isPending;
   const target = options.data?.items.find((item) => item.schemaVersionId === schemaId);
+  const dirty =
+    editing &&
+    (schemaId !== "" ||
+      tnVed !== (baseline.binding?.tnVedCode ?? "") ||
+      okpd !== (baseline.binding?.okpd2Code ?? ""));
   useEffect(() => {
-    onDirtyChange(editing);
+    onDirtyChange(dirty);
     return () => onDirtyChange(false);
-  }, [editing, onDirtyChange]);
+  }, [dirty, onDirtyChange]);
   useEffect(() => {
     onBusyChange(busy);
     return () => onBusyChange(false);
@@ -138,7 +143,22 @@ export function CategoryBinding({
       ) : (
         <p>{t(p + "unbound")}</p>
       )}
-      {canWrite && !editing && (
+      {canWrite && !editing && options.isError && (
+        <Alert
+          tone="error"
+          action={
+            <Button type="button" onClick={() => void options.refetch()}>
+              {t(p + "retry")}
+            </Button>
+          }
+        >
+          {t(p + "optionsError")}
+        </Alert>
+      )}
+      {canWrite && !editing && options.data?.items.length === 0 && (
+        <Alert tone="info">{t(p + "noCategories")}</Alert>
+      )}
+      {canWrite && !editing && options.data && options.data.items.length > 0 && (
         <Button type="button" variant="secondary" disabled={disabled} onClick={() => void start()}>
           {t(p + (binding ? "changeCategory" : "chooseCategory"))}
         </Button>
@@ -164,7 +184,8 @@ export function CategoryBinding({
               ) : (
                 <>
                   <Select
-                    native
+                    searchable
+                    searchLabel={t(p + "categorySearch")}
                     label={t(p + "categoryName")}
                     disabled={disabled || busy}
                     value={schemaId}

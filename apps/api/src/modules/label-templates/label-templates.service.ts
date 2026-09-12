@@ -12,6 +12,7 @@ import {
   assertDuplicateTemplate,
   DomainError,
   isBoxLabelTemplateEligible,
+  isPalletLabelTemplateEligible,
   type LabelTemplatePurpose,
   type LabelTemplateSpec,
 } from "@markiro/domain";
@@ -19,6 +20,7 @@ import { DB } from "../../auth/auth.module";
 import {
   assertKnownProductGroupCodes,
   findLabelTemplateDefaultUsage,
+  findPalletLabelTemplateDefaultUsage,
 } from "./box-label-template-eligibility";
 import type {
   CreateLabelTemplateDto,
@@ -39,6 +41,12 @@ const LABEL_TEMPLATE_REFERENCE_CONSTRAINTS = new Set([
   "shifts_tenant_box_label_template_fk",
   "shifts_tenant_validation_print_template_fk",
   "inventories_tenant_box_label_template_fk",
+  // Pallet counterparts of the box constraints above (slice 06d): deleting
+  // or disabling a template a pallet default still points at must be
+  // refused the same way.
+  "org_pallet_label_template_defaults_template_tenant_fk",
+  "org_profiles_pallet_label_template_tenant_fk",
+  "shifts_tenant_pallet_label_template_fk",
 ]);
 
 @Injectable()
@@ -143,17 +151,25 @@ export class LabelTemplatesService {
           ? data.chzProductGroupCodes
           : current.chzProductGroupCodes;
       if (data.enabled !== undefined || data.chzProductGroupCodes !== undefined) {
-        const usage = await findLabelTemplateDefaultUsage(tx, tenantId, id);
         const next = {
           purpose: current.purpose,
           enabled: nextEnabled,
           chzProductGroupCodes: nextCodes,
         };
+        // A template's purpose is immutable (checked above), so only the
+        // usage table matching ITS purpose can ever reference it -- a box
+        // template can be an org/category BOX default, a pallet template a
+        // pallet one, never the other. Checking the matching pair keeps this
+        // to one usage query instead of always running both.
+        const usage =
+          current.purpose === "pallet"
+            ? await findPalletLabelTemplateDefaultUsage(tx, tenantId, id)
+            : await findLabelTemplateDefaultUsage(tx, tenantId, id);
+        const isEligible =
+          current.purpose === "pallet" ? isPalletLabelTemplateEligible : isBoxLabelTemplateEligible;
         const organizationDefault =
           usage.organizationDefault && (!nextEnabled || nextCodes !== null);
-        const categoryDefaults = usage.categoryDefaults.filter(
-          (code) => !isBoxLabelTemplateEligible(next, code),
-        );
+        const categoryDefaults = usage.categoryDefaults.filter((code) => !isEligible(next, code));
         if (organizationDefault || categoryDefaults.length > 0) {
           throw new ConflictException({
             code: "LABEL_TEMPLATE_IS_DEFAULT",

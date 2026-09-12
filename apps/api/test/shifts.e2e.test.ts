@@ -260,7 +260,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       status: "active",
       chzProductGroupCode: 8,
       boxCapacity: 10,
-      palletCapacity: 5,
+      palletBoxCapacity: 5,
     });
 
     await db.insert(schema.shifts).values({
@@ -285,7 +285,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     await request(app!.getHttpServer()).get("/shifts").expect(401);
   });
 
-  it("POST /shifts prefills boxCapacity/palletCapacity/counterpartyId from an active product", async () => {
+  it("POST /shifts prefills boxCapacity/palletBoxCapacity/counterpartyId from an active product", async () => {
     const agent = request.agent(app!.getHttpServer());
     const orgId = await signUpAndActivate(agent);
     await setDefaultBoxLabelTemplate(agent, orgId);
@@ -295,7 +295,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       status: "active",
       chzProductGroupCode: 8,
       boxCapacity: 12,
-      palletCapacity: 48,
+      palletBoxCapacity: 48,
       defaultCounterpartyId: counterpartyId,
     });
 
@@ -306,7 +306,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       mode: "aggregation",
       status: "planned",
       boxCapacity: 12,
-      palletCapacity: 48,
+      palletBoxCapacity: 48,
       counterpartyId,
       palletsEnabled: false,
       createdFrom: "admin",
@@ -322,7 +322,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       status: "active",
       chzProductGroupCode: 8,
       boxCapacity: 12,
-      palletCapacity: 48,
+      palletBoxCapacity: 48,
     });
 
     const created = await agent
@@ -368,7 +368,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       status: "active",
       chzProductGroupCode: 8,
       boxCapacity: 12,
-      palletCapacity: 48,
+      palletBoxCapacity: 48,
     });
 
     const explicitNull = await agent
@@ -390,7 +390,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
         status: "active",
         chzProductGroupCode: 8,
         boxCapacity: 12,
-        palletCapacity: 48,
+        palletBoxCapacity: 48,
       });
 
       await agent
@@ -407,7 +407,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       status: "active",
       chzProductGroupCode: 8,
       boxCapacity: 12,
-      palletCapacity: 48,
+      palletBoxCapacity: 48,
     });
     const created = await agent
       .post("/shifts")
@@ -431,7 +431,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       status: "active",
       chzProductGroupCode: 8,
       boxCapacity: 12,
-      palletCapacity: 48,
+      palletBoxCapacity: 48,
     });
     const created = await agent.post("/shifts").send({ productId, mode: "validation" }).expect(201);
     const id = created.body.id as string;
@@ -551,7 +551,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       status: "active",
       chzProductGroupCode: 8,
       boxCapacity: 12,
-      palletCapacity: 48,
+      palletBoxCapacity: 48,
     });
     const created = await agent
       .post("/shifts")
@@ -566,7 +566,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       status: "active",
       chzProductGroupCode: 8,
       boxCapacity: 12,
-      palletCapacity: 48,
+      palletBoxCapacity: 48,
     });
     const foreignShift = await foreignAgent
       .post("/shifts")
@@ -636,7 +636,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       status: "active",
       chzProductGroupCode: 8,
       boxCapacity: 12,
-      palletCapacity: 48,
+      palletBoxCapacity: 48,
     });
     const created = await agent
       .post("/shifts")
@@ -680,7 +680,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       status: "active",
       chzProductGroupCode: 8,
       boxCapacity: 12,
-      palletCapacity: 48,
+      palletBoxCapacity: 48,
       defaultCounterpartyId: counterpartyId,
     });
 
@@ -693,7 +693,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       productId,
       counterpartyId: null,
       boxCapacity: 12,
-      palletCapacity: 48,
+      palletBoxCapacity: 48,
     });
   });
 
@@ -706,7 +706,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       status: "active",
       chzProductGroupCode: 8,
       boxCapacity: 12,
-      palletCapacity: 48,
+      palletBoxCapacity: 48,
       defaultLabelTemplateId: templateId,
     });
 
@@ -742,7 +742,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       status: "active",
       chzProductGroupCode: 8,
       boxCapacity: 10,
-      palletCapacity: 20,
+      palletBoxCapacity: 20,
       archived: true,
     });
 
@@ -760,7 +760,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       status: "active",
       chzProductGroupCode: 8,
       boxCapacity: 12,
-      palletCapacity: 48,
+      palletBoxCapacity: 48,
     });
 
     // Explicit null overrides the product's boxCapacity prefill -> effective boxCapacity is null.
@@ -772,7 +772,10 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     expect(res.body.message).toEqual(expect.stringContaining("box capacity"));
   });
 
-  it("POST /shifts: palletsEnabled without an effective palletCapacity is rejected with 400", async () => {
+  // Reconciled onto assertPalletConfiguration (task 8): a pallet-specific
+  // capacity rule now lives in exactly one place and answers 422, not the
+  // 400 a since-removed duplicate check in assertCapacityRules used to.
+  it("POST /shifts: palletsEnabled without an effective palletBoxCapacity is rejected with 422", async () => {
     const agent = request.agent(app!.getHttpServer());
     const orgId = await signUpAndActivate(agent);
     await setDefaultBoxLabelTemplate(agent, orgId);
@@ -781,7 +784,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       status: "active",
       chzProductGroupCode: 8,
       boxCapacity: 12,
-      palletCapacity: 48,
+      palletBoxCapacity: 48,
     });
 
     const res = await agent
@@ -790,11 +793,11 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
         productId,
         mode: "aggregation",
         palletsEnabled: true,
-        palletCapacity: null,
+        palletBoxCapacity: null,
       })
-      .expect(400);
+      .expect(422);
 
-    expect(res.body.message).toEqual(expect.stringContaining("pallet capacity"));
+    expect(res.body.message).toEqual(expect.stringContaining("boxes-per-pallet count"));
   });
 
   it("POST /shifts rejects a nonexistent productId with 400", async () => {
@@ -816,7 +819,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       status: "active",
       chzProductGroupCode: 8,
       boxCapacity: 12,
-      palletCapacity: 48,
+      palletBoxCapacity: 48,
     });
 
     const agent2 = request.agent(app!.getHttpServer());
@@ -839,7 +842,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       status: "active",
       chzProductGroupCode: 8,
       boxCapacity: 12,
-      palletCapacity: 48,
+      palletBoxCapacity: 48,
     });
 
     const res = await agent2
@@ -861,7 +864,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       status: "active",
       chzProductGroupCode: 8,
       boxCapacity: 12,
-      palletCapacity: 48,
+      palletBoxCapacity: 48,
     });
 
     const res = await agent2
@@ -880,7 +883,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       status: "active",
       chzProductGroupCode: 8,
       boxCapacity: 12,
-      palletCapacity: 48,
+      palletBoxCapacity: 48,
     });
 
     const created = await agent.post("/shifts").send({ productId, mode: "validation" }).expect(201);
@@ -930,7 +933,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       status: "active",
       chzProductGroupCode: 8,
       boxCapacity: 12,
-      palletCapacity: 48,
+      palletBoxCapacity: 48,
     });
 
     const res = await agent
@@ -955,7 +958,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       status: "active",
       chzProductGroupCode: 8,
       boxCapacity: 12,
-      palletCapacity: 48,
+      palletBoxCapacity: 48,
     });
 
     const res = await agent.post("/shifts").send({ productId, mode: "validation" }).expect(201);
@@ -974,7 +977,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       status: "active",
       chzProductGroupCode: 8,
       boxCapacity: 12,
-      palletCapacity: 48,
+      palletBoxCapacity: 48,
     });
 
     const res = await agent2
@@ -998,7 +1001,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       status: "active",
       chzProductGroupCode: 8,
       boxCapacity: 12,
-      palletCapacity: 48,
+      palletBoxCapacity: 48,
     });
 
     const res = await agent
@@ -1024,7 +1027,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       status: "active",
       chzProductGroupCode: 8,
       boxCapacity: 12,
-      palletCapacity: 48,
+      palletBoxCapacity: 48,
     });
 
     const created = await agent
@@ -1052,7 +1055,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       status: "active",
       chzProductGroupCode: 8,
       boxCapacity: 12,
-      palletCapacity: 48,
+      palletBoxCapacity: 48,
     });
 
     const created = await agent
@@ -1075,7 +1078,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
         status: "active",
         chzProductGroupCode: 8,
         boxCapacity: 12,
-        palletCapacity: 48,
+        palletBoxCapacity: 48,
       });
       const before = await shiftRows(orgId);
 
@@ -1102,7 +1105,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       status: "active",
       chzProductGroupCode: 8,
       boxCapacity: 12,
-      palletCapacity: 48,
+      palletBoxCapacity: 48,
     });
 
     const created = await agent
@@ -1124,7 +1127,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       status: "active",
       chzProductGroupCode: 8,
       boxCapacity: 12,
-      palletCapacity: 48,
+      palletBoxCapacity: 48,
     });
 
     const res = await agent2
@@ -1151,7 +1154,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       status: "active",
       chzProductGroupCode: 8,
       boxCapacity: 12,
-      palletCapacity: 48,
+      palletBoxCapacity: 48,
     });
 
     const createRes = await agent
@@ -1187,7 +1190,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       status: "active",
       chzProductGroupCode: 8,
       boxCapacity: 12,
-      palletCapacity: 48,
+      palletBoxCapacity: 48,
     });
     const created = await agent.post("/shifts").send({ productId, mode: "validation" }).expect(201);
     expect(created.body.boxLabelTemplateId).toBe(snapshottedTemplateId);
@@ -1212,7 +1215,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       status: "active",
       chzProductGroupCode: 8,
       boxCapacity: 12,
-      palletCapacity: 48,
+      palletBoxCapacity: 48,
     });
     const created = await agent
       .post("/shifts")
@@ -1239,7 +1242,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       status: "active",
       chzProductGroupCode: 8,
       boxCapacity: 12,
-      palletCapacity: 48,
+      palletBoxCapacity: 48,
     });
     const created = await agent
       .post("/shifts")
@@ -1264,7 +1267,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       status: "active",
       chzProductGroupCode: 8,
       boxCapacity: 12,
-      palletCapacity: 48,
+      palletBoxCapacity: 48,
     });
     const line = await agent.post("/lines").send({ name: "Corrected line" }).expect(201);
     await setDefaultBoxLabelTemplate(agent, orgId, "Initial active template");
@@ -1312,7 +1315,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       status: "active",
       chzProductGroupCode: 8,
       boxCapacity: 12,
-      palletCapacity: 48,
+      palletBoxCapacity: 48,
     });
 
     const createRes = await agent
@@ -1341,7 +1344,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       status: "active",
       chzProductGroupCode: 8,
       boxCapacity: 12,
-      palletCapacity: 48,
+      palletBoxCapacity: 48,
     });
     const createRes = await agent1
       .post("/shifts")
@@ -1369,7 +1372,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       status: "active",
       chzProductGroupCode: 8,
       boxCapacity: 12,
-      palletCapacity: 48,
+      palletBoxCapacity: 48,
     });
     const createRes = await agent
       .post("/shifts")
@@ -1414,7 +1417,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       status: "active",
       chzProductGroupCode: 8,
       boxCapacity: 12,
-      palletCapacity: 48,
+      palletBoxCapacity: 48,
       defaultCounterpartyId: counterpartyId,
     });
     const lineRes = await agent.post("/lines").send({ name: "Joined Line" }).expect(201);
@@ -1503,7 +1506,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       status: "active",
       chzProductGroupCode: 8,
       boxCapacity: 12,
-      palletCapacity: 48,
+      palletBoxCapacity: 48,
     });
     const lineRes = await agent.post("/lines").send({ name: "Station line" }).expect(201);
     const stationLineId = lineRes.body.id as string;
@@ -1564,7 +1567,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       status: "active",
       chzProductGroupCode: 8,
       boxCapacity: 12,
-      palletCapacity: 48,
+      palletBoxCapacity: 48,
     });
     const lineRes = await agent.post("/lines").send({ name: "First line" }).expect(201);
     const firstLineId = lineRes.body.id as string;
@@ -1630,7 +1633,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       status: "active",
       chzProductGroupCode: 8,
       boxCapacity: 12,
-      palletCapacity: 48,
+      palletBoxCapacity: 48,
     });
     const created = await agent.post("/shifts").send({ productId, mode: "validation" }).expect(201);
     const id = created.body.id as string;

@@ -107,6 +107,9 @@ export function boxLabelFields(input: BoxLabelInput): Record<LabelField, string>
     date: formatLabelDate(effectiveDate),
     expiry: formatLabelDate(effectiveExpiry),
     qty: String(input.itemCount),
+    // A box holds units, not boxes. Empty rather than "0": a zero would print
+    // as «0 кор.» on any template that binds the field.
+    "qty.boxes": "",
     operator: input.operatorName ?? "",
     "counterparty.name": input.counterpartyName ?? "",
   };

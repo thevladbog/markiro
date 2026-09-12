@@ -197,6 +197,26 @@ export function BoxCardPage() {
             label={t("pages.codeSearch.boxCard.disassembledAtLabel")}
             value={box.disassembledAt ? formatCreatedAt(box.disassembledAt, i18n.language) : "—"}
           />
+          {/*
+            A link, not bare text: the pallet card is the box's own parent
+            aggregate, exactly as the code card links UP to its current box.
+            A pallet that has not closed yet has no SSCC to print, so the
+            link carries the same "no SSCC" wording the box title uses.
+          */}
+          <DetailField
+            label={t("pages.codeSearch.boxCard.palletLabel")}
+            value={
+              box.pallet ? (
+                <Link to={`/codes/pallet/${box.pallet.id}`}>
+                  {box.pallet.sscc
+                    ? formatSsccHri(box.pallet.sscc)
+                    : t("pages.codeSearch.boxCard.noSscc")}
+                </Link>
+              ) : (
+                "—"
+              )
+            }
+          />
         </div>
       </Card>
 

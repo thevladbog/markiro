@@ -47,19 +47,42 @@ data class BundleSsccDto(
     val consumedThroughSerial: Long? = null,
 )
 
+/** One label template as the bundle delivers it; the box and pallet slots share this shape. */
 @Serializable
-data class BundleBoxTemplateDto(val id: String, val name: String, val spec: JsonElement)
+data class BundleLabelTemplateDto(val id: String, val name: String, val spec: JsonElement)
 
-/** `GET /shifts/:id/bundle`. */
+/**
+ * `GET /shifts/:id/bundle`.
+ *
+ * The reader sets `ignoreUnknownKeys`, so a field missing HERE is dropped in
+ * silence rather than failing: every server field this device needs has to be
+ * declared, and `apps/api/src/modules/shifts/dto.ts` is the contract.
+ */
 @Serializable
 data class ShiftBundleDto(
     val shift: ShiftDto,
     val product: BundleProductDto,
     val operators: List<OperatorDto> = emptyList(),
-    val boxLabelTemplate: BundleBoxTemplateDto? = null,
+    val boxLabelTemplate: BundleLabelTemplateDto? = null,
+    /**
+     * The PALLET label's own template (06d). Null exactly when the shift's
+     * `palletLabelTemplateId` snapshot is null -- a shift without pallets, or
+     * one whose tenant configured no pallet template -- and a device that gets
+     * null says so rather than printing an empty label.
+     */
+    val palletLabelTemplate: BundleLabelTemplateDto? = null,
     val sscc: BundleSsccDto? = null,
     /** `fromSerial` of every block an admin has revoked since it was granted. */
     val ssccRevokedFrom: List<Long> = emptyList(),
+    /**
+     * This device's PALLET serial block, extension digit 1 (06d). A second,
+     * fully independent block from [sscc]; non-null only for a shift with
+     * pallets enabled. Without it no pallet can ever be numbered, and every
+     * close returns `NoSerials`.
+     */
+    val palletSscc: BundleSsccDto? = null,
+    /** [ssccRevokedFrom] for the pallet stream. Always present, `[]` when empty. */
+    val palletSsccRevokedFrom: List<Long> = emptyList(),
 )
 
 @Serializable

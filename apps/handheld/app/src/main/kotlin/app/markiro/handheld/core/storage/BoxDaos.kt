@@ -41,12 +41,24 @@ interface BoxDao {
     )
     suspend fun ordinal(shiftId: String, openedAt: String, boxId: String): Int
 
-    /** Guarded by `closedAt IS NULL` so a replayed close cannot renumber a box. */
+    /**
+     * Guarded by `closedAt IS NULL` so a replayed close cannot renumber a box.
+     *
+     * The pallet the box joined (06d) is written by this SAME statement rather
+     * than a follow-up UPDATE. The station learned that the hard way (task 14
+     * review): once closure and membership are two statements, anything landing
+     * between them -- a drain, a power cut -- leaves a closed box whose pallet
+     * nothing can reconstruct. `apps/station/src/lib/close-box.ts` resolves the
+     * pallet before its own guarded UPDATE for exactly this reason, and `close`
+     * therefore takes `palletId` (null for a shift with no pallets) rather than
+     * exposing a separate setter that could be called on its own.
+     */
     @Query(
         "UPDATE boxes SET sscc = :sscc, closedAt = :closedAt, operatorId = :operatorId, " +
-            "printState = 'pending', printReason = NULL WHERE boxId = :boxId AND closedAt IS NULL",
+            "palletId = :palletId, printState = 'pending', printReason = NULL " +
+            "WHERE boxId = :boxId AND closedAt IS NULL",
     )
-    suspend fun close(boxId: String, sscc: String, closedAt: String, operatorId: String?): Int
+    suspend fun close(boxId: String, sscc: String, closedAt: String, operatorId: String?, palletId: String?): Int
 
     @Query("UPDATE boxes SET printState = :state, printReason = :reason WHERE boxId = :boxId")
     suspend fun setPrintState(boxId: String, state: String, reason: String?)

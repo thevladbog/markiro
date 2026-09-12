@@ -28,6 +28,13 @@ enum class LabelField(val wire: String) {
     DATE("date"),
     EXPIRY("expiry"),
     QTY("qty"),
+    /**
+     * Boxes on a pallet, distinct from QTY, which stays a count of product
+     * units at whatever level the label describes. `fromWire` throws on an
+     * unknown field, so this entry is what lets a pallet template render here
+     * at all.
+     */
+    QTY_BOXES("qty.boxes"),
     OPERATOR("operator"),
     COUNTERPARTY_NAME("counterparty.name"),
     ;

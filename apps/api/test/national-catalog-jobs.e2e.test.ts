@@ -184,7 +184,7 @@ describe.skipIf(!process.env.DATABASE_URL)("National Catalog durable repair Post
       name: "Dispatch product",
       gtin14: "04601234567893",
       boxCapacity: 1,
-      palletCapacity: 1,
+      palletBoxCapacity: 1,
       status: "active",
     });
     const cp = newRefreshCheckpoint(

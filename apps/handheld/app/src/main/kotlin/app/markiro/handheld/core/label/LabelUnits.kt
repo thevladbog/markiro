@@ -10,6 +10,12 @@ private const val POINTS_PER_INCH = 72.0
 const val QTY_UNIT_SUFFIX = "шт."
 
 /**
+ * «кор.» — the unit the domain package appends to a numeric box count, so a
+ * pallet label's two counts cannot be read for one another.
+ */
+const val BOX_QTY_UNIT_SUFFIX = "кор."
+
+/**
  * Rounds the way JavaScript's `Math.round` does, which is what the emitters in
  * packages/domain/src/labels were written against: a tie goes toward positive infinity, so a value
  * of exactly minus one half becomes zero rather than minus one.
@@ -78,6 +84,10 @@ fun labelFieldDisplayValue(
     if (field == LabelField.QTY) {
         val digits = value.trim()
         if (DIGITS.matches(digits)) return "$digits $QTY_UNIT_SUFFIX"
+    }
+    if (field == LabelField.QTY_BOXES) {
+        val digits = value.trim()
+        if (DIGITS.matches(digits)) return "$digits $BOX_QTY_UNIT_SUFFIX"
     }
     return value
 }

@@ -1,7 +1,8 @@
 /**
  * Typed fetchers + TanStack Query hooks for the organisation-profile
  * endpoints: `GET/PUT /org/profile` (Plan 03 Task 4) and `GET/PUT
- * /org/profile/sscc` (06c Task 5, the tenant's own box SSCC counter). Thin
+ * /org/profile/sscc` (06c Task 5; a LIST of the tenant's own SSCC counters
+ * since 06d -- one per extension digit, boxes and pallets). Thin
  * wrapper over `../../api/client.ts`'s `apiFetch` -- see that module for the
  * shared base URL, credentials, and error-message parsing.
  */
@@ -9,9 +10,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 
 import { apiErrorFromResponse, apiFetch } from "../../api/client.js";
-import type { SsccCounterStateDto } from "../../lib/sscc-counter.js";
+import type { SsccCounterListDto, SsccCounterStateDto } from "../../lib/sscc-counter.js";
 
-export type { SsccCounterStateDto } from "../../lib/sscc-counter.js";
+export type { SsccCounterListDto, SsccCounterStateDto } from "../../lib/sscc-counter.js";
 
 /** Mirrors `apps/api/src/modules/org-profile/dto.ts`'s `OrgProfileDto`. */
 export interface CategoryBoxLabelTemplateDefaultDto {
@@ -51,7 +52,11 @@ export interface OrganizationLogoDto {
   logoUrl: string;
 }
 
-/** Mirrors `apps/api/src/modules/org-profile/dto.ts`'s `SsccCounterDto` -- the PUT body. */
+/**
+ * Mirrors `apps/api/src/modules/org-profile/dto.ts`'s `SsccCounterDto` -- the
+ * PUT body AND its echoed response. `extensionDigit` is required and names
+ * WHICH counter is being seeded; the digits are independent of each other.
+ */
 export interface SsccCounterDto {
   extensionDigit: number;
   nextSerial: number;
@@ -71,8 +76,9 @@ function putOrgProfile(input: PutOrgProfileInput): Promise<OrgProfileDto> {
   });
 }
 
-function fetchOrgProfileSscc(): Promise<SsccCounterStateDto> {
-  return apiFetch<SsccCounterStateDto>("/org/profile/sscc");
+async function fetchOrgProfileSscc(): Promise<SsccCounterStateDto[]> {
+  const response = await apiFetch<SsccCounterListDto>("/org/profile/sscc");
+  return response.counters;
 }
 
 function putOrgProfileSscc(input: SsccCounterDto): Promise<SsccCounterDto> {
@@ -151,7 +157,8 @@ export function useDeleteOrganizationLogo(): UseMutationResult<void, Error, void
 }
 
 /**
- * `GET /org/profile/sscc` -- the tenant's own box SSCC counter. `gln` is
+ * `GET /org/profile/sscc` -- the tenant's own SSCC counters, one per
+ * extension digit (boxes and pallets). `gln` is
  * nullable on `orgProfiles`, so every tenant starts with no GLN and thus no
  * derivable prefix; in that state the server refuses this endpoint with a
  * 400 ("organisation profile has no GLN"). `enabled` lets the caller gate
@@ -161,7 +168,7 @@ export function useDeleteOrganizationLogo(): UseMutationResult<void, Error, void
  */
 export function useOrgProfileSscc(options?: {
   enabled?: boolean;
-}): UseQueryResult<SsccCounterStateDto> {
+}): UseQueryResult<SsccCounterStateDto[]> {
   return useQuery({
     queryKey: ORG_PROFILE_SSCC_QUERY_KEY,
     queryFn: fetchOrgProfileSscc,

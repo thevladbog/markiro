@@ -54,9 +54,12 @@ import type {
 } from "./national-catalog.types";
 
 export function defaultAcceptedEntries(mode: "new" | "existing", fields: ImportField[]): string[] {
-  return mode === "existing"
-    ? []
-    : fields.filter((field) => field.applicable).map((field) => field.id);
+  return fields
+    .filter(
+      (field) =>
+        field.applicable && (mode === "new" || (field.selectedByDefault && field.before === null)),
+    )
+    .map((field) => field.id);
 }
 const preparations = schema.nationalCatalogImportPreparations;
 const previews = schema.nationalCatalogImportPreviews;
@@ -108,7 +111,14 @@ export class NationalCatalogImportPreviewService {
       }
       await this.selectedItems(tx, actor.tenantId, sessionId, body.itemIds);
       for (const choice of body.categoryChoices)
-        await resolveCategoryOption(tx, actor.tenantId, sessionId, choice.itemId, choice.optionId);
+        if (choice.optionId !== null)
+          await resolveCategoryOption(
+            tx,
+            actor.tenantId,
+            sessionId,
+            choice.itemId,
+            choice.optionId,
+          );
       await this.admission?.observe({
         tenantId: actor.tenantId,
         actor: { domain: "cabinet", id: actor.userId },

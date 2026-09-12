@@ -1,0 +1,5 @@
+{
+  "maxBoxClosuresPerSyncBatch": 50,
+  "maxPalletClosuresPerSyncBatch": 20,
+  "maxSyncBatchIdChars": 200
+}

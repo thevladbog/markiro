@@ -44,4 +44,16 @@ describe("box label fixtures shared with the handheld", () => {
     expect(shifted!.input.closedAt).toContain("2026-09-10");
     expect(shifted!.fields.date).toBe("11.09.2026");
   });
+
+  it("pallet fields cover the qty/qty.boxes split and the same calendar edges", () => {
+    const fixtures = generate();
+    const names = fixtures.palletFields.map((c) => c.name).join(" ");
+    for (const edge of ["qty and boxes", "leap day", "one-day shelf life"]) {
+      expect(names, edge).toContain(edge);
+    }
+    const split = fixtures.palletFields.find((c) => c.name.includes("qty and boxes"));
+    expect(split, "no qty split case").toBeDefined();
+    expect(split!.fields.qty).toBe("240");
+    expect(split!.fields["qty.boxes"]).toBe("12");
+  });
 });

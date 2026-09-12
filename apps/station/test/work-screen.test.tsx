@@ -1651,7 +1651,13 @@ describe("WorkScreen box progress, closing and printing", () => {
   it("closes the box automatically when it reaches capacity", async () => {
     const close = vi
       .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()
-      .mockResolvedValue({ status: "closed", sscc: SSCC, itemCount: 10, closedAt: CLOSED_AT });
+      .mockResolvedValue({
+        status: "closed",
+        sscc: SSCC,
+        itemCount: 10,
+        closedAt: CLOSED_AT,
+        pallet: null,
+      });
     renderWorkTracked({ boxCapacity: 10, boxItemCount: 9, closeCurrentBox: close });
     act(() => scan(KM));
     await waitFor(() => expect(close).toHaveBeenCalledOnce());
@@ -1660,7 +1666,13 @@ describe("WorkScreen box progress, closing and printing", () => {
   it("lets the operator close a partial box", async () => {
     const close = vi
       .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()
-      .mockResolvedValue({ status: "closed", sscc: SSCC, itemCount: 3, closedAt: CLOSED_AT });
+      .mockResolvedValue({
+        status: "closed",
+        sscc: SSCC,
+        itemCount: 3,
+        closedAt: CLOSED_AT,
+        pallet: null,
+      });
     renderWorkTracked({ boxCapacity: 10, boxItemCount: 3, closeCurrentBox: close });
     fireEvent.click(await screen.findByRole("button", { name: "Закрыть короб" }));
     await waitFor(() => expect(close).toHaveBeenCalledOnce());
@@ -1683,13 +1695,16 @@ describe("WorkScreen box progress, closing and printing", () => {
       announceClose = resolve;
     });
     const exec: SqlExecutor = {
-      all: base.all,
-      async run(sql, params = []) {
+      run: base.run,
+      // Task 14 review, Finding 1: `closeBox`'s guarded UPDATE now carries
+      // its own `RETURNING`, so it runs through `all`, not `run` -- gate
+      // the same call the fix itself makes.
+      async all<T>(sql: string, params?: unknown[]): Promise<T[]> {
         if (sql.includes("SET sscc = ?, closed_at = ?")) {
           announceClose();
           await closeGate;
         }
-        await base.run(sql, params);
+        return base.all<T>(sql, params);
       },
     };
     const registry = createFloorWorkRegistry();
@@ -1733,7 +1748,13 @@ describe("WorkScreen box progress, closing and printing", () => {
     await waitFor(() => expect(button.disabled).toBe(true));
     expect(close).toHaveBeenCalledTimes(1);
 
-    resolveClose?.({ status: "closed", sscc: SSCC, itemCount: 3, closedAt: CLOSED_AT });
+    resolveClose?.({
+      status: "closed",
+      sscc: SSCC,
+      itemCount: 3,
+      closedAt: CLOSED_AT,
+      pallet: null,
+    });
     expect(await screen.findByText("Для смены не выбран шаблон этикетки короба")).toBeDefined();
     // The closed box now remains blocked on durable print recovery, and the
     // original action cannot burn a second serial behind that dialog.
@@ -1840,7 +1861,13 @@ describe("WorkScreen box progress, closing and printing", () => {
   it("does not prompt for verification when the setting is off", async () => {
     const close = vi
       .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()
-      .mockResolvedValue({ status: "closed", sscc: SSCC, itemCount: 10, closedAt: CLOSED_AT });
+      .mockResolvedValue({
+        status: "closed",
+        sscc: SSCC,
+        itemCount: 10,
+        closedAt: CLOSED_AT,
+        pallet: null,
+      });
     renderWorkTracked({
       boxCapacity: 10,
       boxItemCount: 9,
@@ -1902,7 +1929,13 @@ describe("WorkScreen box progress, closing and printing", () => {
   it("keeps missing-printer recovery persistent with the complete SSCC and blocks scans", async () => {
     const close = vi
       .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()
-      .mockResolvedValue({ status: "closed", sscc: SSCC, itemCount: 10, closedAt: CLOSED_AT });
+      .mockResolvedValue({
+        status: "closed",
+        sscc: SSCC,
+        itemCount: 10,
+        closedAt: CLOSED_AT,
+        pallet: null,
+      });
     const source = manualSource();
     const onScan = vi.fn();
     const exec = makeExec();
@@ -2240,7 +2273,13 @@ describe("WorkScreen box progress, closing and printing", () => {
   it("prompts for print verification when the setting is on and a label was actually printed", async () => {
     const close = vi
       .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()
-      .mockResolvedValue({ status: "closed", sscc: SSCC, itemCount: 10, closedAt: CLOSED_AT });
+      .mockResolvedValue({
+        status: "closed",
+        sscc: SSCC,
+        itemCount: 10,
+        closedAt: CLOSED_AT,
+        pallet: null,
+      });
     const exec = makeExec();
     await seedLabelSpec(exec, "s1");
     renderWorkTracked({
@@ -2263,7 +2302,13 @@ describe("WorkScreen box progress, closing and printing", () => {
   it("drops the old box template when a refreshed bundle removes it without remounting work state", async () => {
     const close = vi
       .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()
-      .mockResolvedValue({ status: "closed", sscc: SSCC, itemCount: 1, closedAt: CLOSED_AT });
+      .mockResolvedValue({
+        status: "closed",
+        sscc: SSCC,
+        itemCount: 1,
+        closedAt: CLOSED_AT,
+        pallet: null,
+      });
     const print = vi.fn(async (_target: PrintTarget, _bytes: Uint8Array) => {});
     const exec = makeExec();
     await seedLabelSpec(exec, "s1");
@@ -2296,7 +2341,13 @@ describe("WorkScreen box progress, closing and printing", () => {
   it("logs only a fixed category when verification reprint transport rejects", async () => {
     const close = vi
       .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()
-      .mockResolvedValue({ status: "closed", sscc: SSCC, itemCount: 10, closedAt: CLOSED_AT });
+      .mockResolvedValue({
+        status: "closed",
+        sscc: SSCC,
+        itemCount: 10,
+        closedAt: CLOSED_AT,
+        pallet: null,
+      });
     const exec = makeExec();
     await seedLabelSpec(exec, "s1");
     const secret = "native COM7 secret-message";
@@ -2336,7 +2387,13 @@ describe("WorkScreen box progress, closing and printing", () => {
   it("shows durable missing-printer recovery instead of opening a verification prompt", async () => {
     const close = vi
       .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()
-      .mockResolvedValue({ status: "closed", sscc: SSCC, itemCount: 10, closedAt: CLOSED_AT });
+      .mockResolvedValue({
+        status: "closed",
+        sscc: SSCC,
+        itemCount: 10,
+        closedAt: CLOSED_AT,
+        pallet: null,
+      });
     const exec = makeExec();
     await seedLabelSpec(exec, "s1");
     renderWorkTracked({
@@ -2359,7 +2416,13 @@ describe("WorkScreen box progress, closing and printing", () => {
   it("actually sends the rendered label to the configured printer when a box closes", async () => {
     const close = vi
       .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()
-      .mockResolvedValue({ status: "closed", sscc: SSCC, itemCount: 10, closedAt: CLOSED_AT });
+      .mockResolvedValue({
+        status: "closed",
+        sscc: SSCC,
+        itemCount: 10,
+        closedAt: CLOSED_AT,
+        pallet: null,
+      });
     const print = vi.fn(async (_target: PrintTarget, _bytes: Uint8Array) => {});
     const exec = makeExec();
     await seedLabelSpec(exec, "s1");
@@ -2389,7 +2452,13 @@ describe("WorkScreen box progress, closing and printing", () => {
   it("prints using the box's own label template, never the item template, even when the item template is invalid", async () => {
     const close = vi
       .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()
-      .mockResolvedValue({ status: "closed", sscc: SSCC, itemCount: 10, closedAt: CLOSED_AT });
+      .mockResolvedValue({
+        status: "closed",
+        sscc: SSCC,
+        itemCount: 10,
+        closedAt: CLOSED_AT,
+        pallet: null,
+      });
     const print = vi.fn(async (_target: PrintTarget, _bytes: Uint8Array) => {});
     const exec = makeExec();
     await exec.run(
@@ -2431,6 +2500,7 @@ describe("WorkScreen box progress, closing and printing", () => {
         sscc: SSCC,
         itemCount: 10,
         closedAt: "2026-07-23T21:40:00.000Z",
+        pallet: null,
       });
     const print = vi.fn(async (_target: PrintTarget, _bytes: Uint8Array) => {});
     const exec = makeExec();
@@ -2466,6 +2536,7 @@ describe("WorkScreen box progress, closing and printing", () => {
         sscc: SSCC,
         itemCount: 10,
         closedAt: "2026-07-23T21:40:00.000Z",
+        pallet: null,
       });
     const print = vi.fn(async (_target: PrintTarget, _bytes: Uint8Array) => {});
     const exec = makeExec();
@@ -2540,7 +2611,13 @@ describe("WorkScreen box progress, closing and printing", () => {
   it("does not fall back to the item template when no box template is configured", async () => {
     const close = vi
       .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()
-      .mockResolvedValue({ status: "closed", sscc: SSCC, itemCount: 10, closedAt: CLOSED_AT });
+      .mockResolvedValue({
+        status: "closed",
+        sscc: SSCC,
+        itemCount: 10,
+        closedAt: CLOSED_AT,
+        pallet: null,
+      });
     const print = vi.fn(async (_target: PrintTarget, _bytes: Uint8Array) => {});
     const exec = makeExec();
     await exec.run(
@@ -2572,7 +2649,13 @@ describe("WorkScreen box progress, closing and printing", () => {
   it("awaits the label geometry load before deciding whether to print, even when a scan closes the box immediately", async () => {
     const close = vi
       .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()
-      .mockResolvedValue({ status: "closed", sscc: SSCC, itemCount: 1, closedAt: CLOSED_AT });
+      .mockResolvedValue({
+        status: "closed",
+        sscc: SSCC,
+        itemCount: 1,
+        closedAt: CLOSED_AT,
+        pallet: null,
+      });
     const baseExec = makeExec();
     await seedLabelSpec(baseExec, "s1");
     let resolveShiftMirrorRead: (() => void) | undefined;
@@ -2618,7 +2701,13 @@ describe("WorkScreen box progress, closing and printing", () => {
   it("records a skip on boxes_mirror when the operator chooses skip", async () => {
     const close = vi
       .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()
-      .mockResolvedValue({ status: "closed", sscc: SSCC, itemCount: 10, closedAt: CLOSED_AT });
+      .mockResolvedValue({
+        status: "closed",
+        sscc: SSCC,
+        itemCount: 10,
+        closedAt: CLOSED_AT,
+        pallet: null,
+      });
     const exec = makeExec();
     await seedLabelSpec(exec, "s1");
     renderWorkTracked({
@@ -2649,7 +2738,13 @@ describe("WorkScreen box progress, closing and printing", () => {
   it("records a verification on boxes_mirror when the printed label is scanned back", async () => {
     const close = vi
       .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()
-      .mockResolvedValue({ status: "closed", sscc: SSCC, itemCount: 10, closedAt: CLOSED_AT });
+      .mockResolvedValue({
+        status: "closed",
+        sscc: SSCC,
+        itemCount: 10,
+        closedAt: CLOSED_AT,
+        pallet: null,
+      });
     const exec = makeExec();
     await seedLabelSpec(exec, "s1");
     renderWorkTracked({

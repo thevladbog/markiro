@@ -79,7 +79,15 @@ export const shiftMirror = sqliteTable(
     plannedDate: text("planned_date"),
     productionDate: text("production_date"),
     boxCapacity: integer("box_capacity"),
+    /**
+     * Units-valued predecessor of `palletBoxCapacity`, left in place and
+     * unread. SQLite cannot drop a column without rebuilding the table, and
+     * rebuilding a mirror on a factory device to delete a dead integer is not
+     * a trade worth making; `mirror.ts` simply stops writing it.
+     */
     palletCapacity: integer("pallet_capacity"),
+    /** Boxes per pallet — see `products.palletBoxCapacity` in the Postgres schema. */
+    palletBoxCapacity: integer("pallet_box_capacity"),
     palletsEnabled: integer("pallets_enabled", { mode: "boolean" }).notNull().default(false),
     openedAt: text("opened_at"),
     stationClosePolicy: text("station_close_policy"),
@@ -92,6 +100,8 @@ export const shiftMirror = sqliteTable(
     // template. See migrations.ts's trailing ALTER for why this trails the
     // rest of the table too.
     boxLabelTemplateSpec: text("box_label_template_spec"),
+    /** The PALLET label's own template spec; null for a shift without pallets. */
+    palletLabelTemplateSpec: text("pallet_label_template_spec"),
     // Human-readable shift number (`AUG26-003`, `/S` = station-created) --
     // composed server-side; see migrations.ts's trailing ALTER.
     number: text("number"),
@@ -114,7 +124,9 @@ export const productMirror = sqliteTable("product_mirror", {
   printName: text("print_name"),
   productGroup: text("product_group"),
   boxCapacity: integer("box_capacity"),
+  /** Units-valued predecessor, left in place and unread — see `shift_mirror`. */
   palletCapacity: integer("pallet_capacity"),
+  palletBoxCapacity: integer("pallet_box_capacity"),
   status: text("status").notNull(),
   defaultCounterpartyId: text("default_counterparty_id"),
   defaultLabelTemplateId: text("default_label_template_id"),
@@ -240,6 +252,54 @@ export const boxesMirror = sqliteTable("boxes_mirror", {
   disassembledAt: text("disassembled_at"),
   printState: text("print_state").notNull().default("legacy"),
   printErrorCode: text("print_error_code"),
+  /**
+   * The pallet this box stands on, or null. Written at CLOSE, never at open —
+   * an open box is not yet on any physical stack — and never cleared, so a
+   * disassembled pallet still records which boxes stood on it.
+   */
+  palletId: text("pallet_id"),
+});
+
+/**
+ * Device-local mirror of this terminal's pallets. The shape of
+ * `boxesMirror` one level up, including its print-recovery columns: a pallet
+ * label fails, hangs and is deferred exactly the way a box label does.
+ *
+ * `printState` defaults to 'pending' rather than boxes_mirror's 'legacy' —
+ * that value exists there only for rows predating print recovery, and this
+ * table has no such history.
+ */
+export const palletsMirror = sqliteTable("pallets_mirror", {
+  palletId: text("pallet_id").primaryKey(),
+  shiftId: text("shift_id").notNull(),
+  terminalId: text("terminal_id"),
+  sscc: text("sscc"),
+  openedAt: text("opened_at").notNull(),
+  closedAt: text("closed_at"),
+  closedBy: text("closed_by"),
+  ackedAt: text("acked_at"),
+  printVerifiedAt: text("print_verified_at"),
+  printSkippedAt: text("print_skipped_at"),
+  disassembledAt: text("disassembled_at"),
+  printState: text("print_state").notNull().default("pending"),
+  printErrorCode: text("print_error_code"),
+});
+
+/**
+ * The device-local queue for pallet exception facts (disassemble/reprint).
+ * Rows are pure facts, never updated in place after insert, so a plain
+ * monotonic id ceiling is enough for ack tracking — the same shape and the
+ * same reasoning as `boxExceptionsMirror`.
+ */
+export const palletExceptionsMirror = sqliteTable("pallet_exceptions_mirror", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  kind: text("kind").notNull(),
+  palletId: text("pallet_id").notNull(),
+  shiftId: text("shift_id").notNull(),
+  terminalId: text("terminal_id"),
+  operatorId: text("operator_id"),
+  reason: text("reason").notNull(),
+  occurredAt: text("occurred_at").notNull(),
 });
 
 /**

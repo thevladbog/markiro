@@ -34,7 +34,7 @@ rerun the same runtime migration command. It resumes validation without replayin
 0135 or losing history. Separate SQL files alone do not provide this boundary:
 the ordinary Drizzle migrator groups pending files in one transaction.
 
-Migration `0137_device_retention` adds retention previews, one current selection
+Migration `0139_device_retention` adds retention previews, one current selection
 per tenant and effective boundary, tenant-scoped selected membership and a
 separate immutable event journal. It creates no initial choices and rewrites no
 device, work or commercial records. The selected set and confirmed preview

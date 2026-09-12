@@ -31,10 +31,36 @@ data class ScanItemDto(
  * the station's scan-the-label-back reconciliation and this device does not do
  * it. Nothing else in this payload can change after the box closes, which is
  * why acknowledgement here is unconditional — see `SyncEngine`.
+ *
+ * `devicePalletId` is the device-local pallet (06d) this box stood on, or null
+ * for a box on a pallet-less shift — see `PalletEntity`/`BoxEntity.palletId`.
  */
 @Serializable
 data class BoxClosureDto(
     val boxId: String,
+    val shiftId: String,
+    val terminalId: String?,
+    val sscc: String,
+    val closedAt: String,
+    val operatorId: String?,
+    val printVerifiedAt: String? = null,
+    val printSkippedAt: String? = null,
+    val devicePalletId: String? = null,
+)
+
+/**
+ * A pallet closure, scoped like [BoxClosureDto] because a device-local pallet
+ * id is not globally unique either.
+ *
+ * `printVerifiedAt` and `printSkippedAt` are always null for the same reason
+ * they are on a box closure: print verification is the station's own
+ * reconciliation and this device does not perform it. Acknowledgement of a
+ * pallet closure is unconditional for the identical reason box acknowledgement
+ * is — see `SyncEngine`.
+ */
+@Serializable
+data class PalletClosureDto(
+    val palletId: String,
     val shiftId: String,
     val terminalId: String?,
     val sscc: String,
@@ -49,6 +75,8 @@ data class SyncBatchRequest(
     val batchId: String,
     val items: List<ScanItemDto>,
     val boxes: List<BoxClosureDto> = emptyList(),
+    /** Pallet (06d) closures carried by this batch — see `SyncEngine.drainOnce`. */
+    val pallets: List<PalletClosureDto> = emptyList(),
     /**
      * Product-label events, sent as the stored JSON rather than re-encoded from
      * a class: the server's schema is a strict object per event kind, and a

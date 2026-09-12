@@ -337,7 +337,8 @@ export function ImportReview({
               />
               {preview.categoryOptions.length > 0 && (
                 <Select
-                  native
+                  searchable
+                  searchLabel={t("pages.catalog.regulatory.categorySearch")}
                   disabled={!canWrite || busy}
                   label={tr("initialCategory")}
                   value={

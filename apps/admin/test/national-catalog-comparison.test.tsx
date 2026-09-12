@@ -86,6 +86,7 @@ it("clears dependent proposed cells when retaining the current category", async 
       id: id(40),
       label: "Категория",
       labelKey: "category",
+      selectedByDefault: false,
       before: null,
       after: "Молочная продукция",
     },
@@ -230,7 +231,9 @@ it("keeps tab, drafts and matching choices through a new preparation without sub
   await user.click(screen.getByRole("checkbox", { name: /Подтверждаю замену/ }));
   await user.click(screen.getByRole("radio", { name: "Сохранить текущее фото" }));
   await user.type(screen.getByLabelText("Название вручную"), "Моё название");
-  await user.selectOptions(screen.getByLabelText("Начальная категория"), id(40));
+  await user.click(screen.getByRole("combobox", { name: "Начальная категория" }));
+  await user.type(screen.getByRole("searchbox", { name: "Поиск категории" }), "Молочная");
+  await user.click(screen.getByRole("option", { name: "Молочная продукция" }));
   await user.click(screen.getByRole("tab", { name: /Кефир/ }));
   const refreshed = structuredClone(props.data);
   refreshed.preparation.id = id(60);
@@ -244,7 +247,9 @@ it("keeps tab, drafts and matching choices through a new preparation without sub
   expect((screen.getByLabelText("Название вручную") as HTMLInputElement).value).toBe(
     "Моё название",
   );
-  expect((screen.getByLabelText("Начальная категория") as HTMLSelectElement).value).toBe(id(40));
+  expect(screen.getByRole("combobox", { name: "Начальная категория" }).textContent).toContain(
+    "Молочная продукция",
+  );
   expect(
     screen.getByRole("checkbox", { name: /Подтверждаю замену/ }).getAttribute("aria-checked"),
   ).toBe("false");

@@ -33,6 +33,14 @@ export type ListBoxesQueryDto = z.infer<typeof listBoxesQuerySchema>;
  *   station-scans.service.ts's "disassemble" branch): non-null once an
  *   operator has retired an already-closed box, so a cabinet UI can exclude
  *   it from an "active boxes" view.
+ * - `palletSscc` is the SSCC of the pallet this box stands on (06d), or null
+ *   for a box on no pallet. The pallet's OWN sscc, never this box's, and
+ *   null while that pallet is still open -- `pallets.sscc` is assigned by
+ *   the pallet's own closure. Deliberately the SSCC and not `boxes.palletId`:
+ *   a cabinet column shows an operator the number printed on the stack in
+ *   front of them, not a uuid. `boxes.palletId` survives a pallet's
+ *   disassembly (see its schema comment), so this keeps reading as the
+ *   record of what the box stood on.
  */
 export interface BoxDto {
   id: string;
@@ -46,6 +54,8 @@ export interface BoxDto {
   closedAt: Date | null;
   contentsChangedAfterClose: boolean;
   disassembledAt: Date | null;
+  /** 20-значный код паллеты с GS1 AI "00"; null — короб не стоит на паллете. */
+  palletSscc: string | null;
 }
 
 /** GET /boxes response. */
@@ -108,6 +118,7 @@ export const boxOpenApiSchema: SchemaObject = {
     "closedAt",
     "contentsChangedAfterClose",
     "disassembledAt",
+    "palletSscc",
   ],
   properties: {
     id: uuidSchema,
@@ -127,6 +138,12 @@ export const boxOpenApiSchema: SchemaObject = {
         "True when an item was displaced after the box closed: the taped, labelled box is short a position it can no longer physically correct.",
     },
     disassembledAt: { ...dateTimeSchema, nullable: true },
+    palletSscc: {
+      ...aiSsccSchema,
+      nullable: true,
+      description:
+        "SSCC of the pallet this box stands on; null when the box is on no pallet, or while that pallet is still open.",
+    },
   },
 };
 

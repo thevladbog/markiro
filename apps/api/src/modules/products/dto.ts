@@ -22,7 +22,7 @@ export const createProductSchema = z.object({
   printName: z.string().trim().min(1).max(200).nullable().optional(),
   chzProductGroupCode: z.number().int().positive().nullable().optional(),
   boxCapacity: z.number().int().min(1).nullable().optional(),
-  palletCapacity: z.number().int().min(1).nullable().optional(),
+  palletBoxCapacity: z.number().int().min(1).nullable().optional(),
   defaultCounterpartyId: z.string().uuid().nullable().optional(),
   unitPrice: z
     .string()
@@ -47,7 +47,7 @@ export const updateProductSchema = z.object({
   printName: z.string().trim().min(1).max(200).nullable().optional(),
   chzProductGroupCode: z.number().int().positive().nullable().optional(),
   boxCapacity: z.number().int().min(1).nullable().optional(),
-  palletCapacity: z.number().int().min(1).nullable().optional(),
+  palletBoxCapacity: z.number().int().min(1).nullable().optional(),
   defaultCounterpartyId: z.string().uuid().nullable().optional(),
   unitPrice: z
     .string()
@@ -104,7 +104,7 @@ export interface ProductDto {
   /** Chestny ZNAK numeric product group code; API clients resolve its alias when `pg` requires one. */
   chzProductGroupCode: number | null;
   boxCapacity: number | null;
-  palletCapacity: number | null;
+  palletBoxCapacity: number | null;
   status: ProductStatus;
   /** Operator-set "do not use" flag; archived products are hidden from selection surfaces except inventory. */
   archived: boolean;
@@ -158,7 +158,7 @@ export const productOpenApiSchema: SchemaObject = {
     "productGroup",
     "chzProductGroupCode",
     "boxCapacity",
-    "palletCapacity",
+    "palletBoxCapacity",
     "status",
     "archived",
     "defaultCounterpartyId",
@@ -222,7 +222,7 @@ export const productOpenApiSchema: SchemaObject = {
     },
     chzProductGroupCode: { type: "integer", nullable: true },
     boxCapacity: { type: "integer", minimum: 1, nullable: true },
-    palletCapacity: { type: "integer", minimum: 1, nullable: true },
+    palletBoxCapacity: { type: "integer", minimum: 1, nullable: true },
     status: { type: "string", enum: [...PRODUCT_STATUSES] },
     archived: {
       type: "boolean",

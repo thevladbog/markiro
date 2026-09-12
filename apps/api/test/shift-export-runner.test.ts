@@ -210,6 +210,7 @@ function source(snapshot?: Partial<ShiftExportSnapshot>): ShiftExportSourceServi
       productName: "Вода",
       shiftDate: "2026-08-13",
       organizationInn: null,
+      openPalletSuppressedBoxCount: 0,
       source: { mode: "flat", codes: ["code-a", "code-b"] },
       ...snapshot,
     }),
@@ -325,6 +326,42 @@ describe("ShiftExportRunnerService", () => {
         partCount: 2,
         totalCodeCount: 2,
         totalBoxCount: 0,
+        openPalletSuppressedBoxCount: 0,
+      },
+    });
+  });
+
+  it("carries the source's open-pallet-suppressed box count into the completed export's audit metadata", async () => {
+    const fake = fakeDb(
+      baseRow({ formatId: "shift_csv_pallets", formatVersion: 1, maxLines: null }),
+    );
+    const loader = source({
+      openPalletSuppressedBoxCount: 3,
+      source: {
+        mode: "pallets",
+        pallets: [
+          {
+            sscc: "046800899000256025",
+            boxes: [{ sscc: "046800899000256001", codes: ["code-a"] }],
+          },
+        ],
+        looseBoxes: [],
+      },
+    });
+    const objects = storage();
+
+    await new ShiftExportRunnerService(fake.db, loader, objects).run(EXPORT_ID, {
+      retryCount: 0,
+      retryLimit: 5,
+    });
+
+    expect(fake.state.row).toMatchObject({ status: "ready", errorCode: null });
+    expect(fake.state.audits.at(-1)).toMatchObject({
+      action: "shift_export.completed",
+      outcome: "success",
+      after: {
+        status: "ready",
+        openPalletSuppressedBoxCount: 3,
       },
     });
   });
@@ -583,10 +620,12 @@ describe("ShiftExportRunnerService", () => {
       "SHIFT_HAS_NO_CODES",
       "SHIFT_DATE_MISSING",
       "BOX_COVERAGE_INCOMPLETE",
+      "SHIFT_HAS_NO_PALLETS",
       "ORG_INN_MISSING",
       "FORMAT_NOT_FOUND",
       "INVALID_LINE_LIMIT",
       "BOX_EXCEEDS_LINE_LIMIT",
+      "PALLET_EXCEEDS_LINE_LIMIT",
       "INVALID_BOX_SSCC",
       "INVALID_CIS",
       "GENERATION_FAILED",

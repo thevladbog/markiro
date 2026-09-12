@@ -51,15 +51,24 @@ const STATUS_TO_CHIP: Record<ShiftExportStatus, StatusChipStatus> = {
   failed: "error",
 };
 
+/**
+ * Mirrors `SHIFT_EXPORT_SAFE_ERROR_CODES`
+ * (apps/api/src/modules/shift-exports/shift-export-runner.service.ts). A code
+ * missing here is not a cosmetic gap: the UI falls back to the generic
+ * infrastructure sentence and the operator never learns what actually went
+ * wrong. Keep the two lists in step.
+ */
 const SAFE_ERROR_CODES = new Set([
   "SHIFT_NOT_CLOSED",
   "SHIFT_HAS_NO_CODES",
   "SHIFT_DATE_MISSING",
   "BOX_COVERAGE_INCOMPLETE",
+  "SHIFT_HAS_NO_PALLETS",
   "ORG_INN_MISSING",
   "FORMAT_NOT_FOUND",
   "INVALID_LINE_LIMIT",
   "BOX_EXCEEDS_LINE_LIMIT",
+  "PALLET_EXCEEDS_LINE_LIMIT",
   "INVALID_BOX_SSCC",
   "INVALID_CIS",
   "GENERATION_FAILED",
@@ -310,11 +319,26 @@ export function ShiftExportsContent({
     onBusyChange?.(create.isPending);
   }, [create.isPending, onBusyChange]);
 
+  /**
+   * `GET /shift-exports/formats` advertises every format unfiltered -- the
+   * server has no shift in hand there. A pallet format ordered for a shift
+   * that never stacked pallets does not fail fast: it is accepted, queued,
+   * and only then fails asynchronously with `SHIFT_HAS_NO_PALLETS`, leaving a
+   * red row in the history for something that could never have worked. So the
+   * three `boxMode: "pallets"` formats are offered only for a shift that
+   * switched pallets on.
+   */
+  const offeredFormats = useMemo(
+    () =>
+      (formats.data ?? []).filter((format) => shift.palletsEnabled || format.boxMode !== "pallets"),
+    [formats.data, shift.palletsEnabled],
+  );
+
   useEffect(() => {
-    const firstFormat = formats.data?.[0];
+    const firstFormat = offeredFormats[0];
     if (!firstFormat || formatId) return;
     setFormatId(firstFormat.id);
-  }, [formatId, formats.data]);
+  }, [formatId, offeredFormats]);
 
   const parsedLineLimit = split ? parseLineLimit(lineLimit) : null;
   const lineLimitError =
@@ -344,7 +368,7 @@ export function ShiftExportsContent({
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!canSubmit || !formatId) return;
-    const selectedFormat = (formats.data ?? []).find((format) => format.id === formatId);
+    const selectedFormat = offeredFormats.find((format) => format.id === formatId);
     if (!selectedFormat) return;
     // A new deliberate submission after a failed request starts a new idempotency scope.
     const requestIdempotencyKey = idempotencyKey.current ?? crypto.randomUUID();
@@ -391,7 +415,7 @@ export function ShiftExportsContent({
               idempotencyKey.current = null;
               setFormatId(value as ShiftExportFormatId);
             }}
-            options={(formats.data ?? []).map((format) => ({
+            options={offeredFormats.map((format) => ({
               value: format.id,
               label: format.label,
             }))}

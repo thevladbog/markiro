@@ -28,6 +28,9 @@ sealed interface PrintOutcome {
 object PrintReason {
     const val BOX_MISSING = "box_missing"
     const val BOX_OPEN = "box_open"
+    /** `PalletPrinter`'s own equivalents of the two above (06d): a pallet is not a box. */
+    const val PALLET_MISSING = "pallet_missing"
+    const val PALLET_OPEN = "pallet_open"
     const val SHIFT_MISSING = "shift_missing"
     const val TEMPLATE_MISSING = "template_missing"
     const val TEMPLATE_INVALID = "template_invalid"

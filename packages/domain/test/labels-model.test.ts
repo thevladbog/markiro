@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  BOX_QTY_UNIT_SUFFIX,
   labelFieldDisplayValue,
+  LABEL_FIELDS,
   mmToDots,
   parseLabelTemplate,
   ptToDots,
@@ -278,6 +280,7 @@ describe("sampleLabelData", () => {
       date: "23.07.2026",
       expiry: "19.01.2027",
       qty: "20",
+      "qty.boxes": "12",
       operator: "Смирнов А.",
       "counterparty.name": "Завод Партнер",
     });
@@ -288,6 +291,15 @@ describe("labelFieldDisplayValue", () => {
   function withQty(qty: string): Record<LabelField, string> {
     return { ...sampleLabelData(), qty };
   }
+
+  function withQtyBoxes(boxes: string): Record<LabelField, string> {
+    return { ...sampleLabelData(), "qty.boxes": boxes };
+  }
+
+  it("offers a box-count field distinct from the unit count", () => {
+    expect(LABEL_FIELDS).toContain("qty.boxes");
+    expect(sampleLabelData()["qty.boxes"]).toBe("12");
+  });
 
   it("renders an 18-digit SSCC in GS1 HRI form", () => {
     expect(labelFieldDisplayValue("sscc", sampleLabelData())).toBe("(00)346006820000000014");
@@ -318,6 +330,41 @@ describe("labelFieldDisplayValue", () => {
   it("never doubles the unit on a value that already carries it", () => {
     expect(labelFieldDisplayValue("qty", withQty("5 шт."))).toBe("5 шт.");
     expect(labelFieldDisplayValue("qty", withQty("5 шт"))).toBe("5 шт");
+  });
+
+  /**
+   * BOX COUNT. A pallet label prints two counts, and a receiving clerk who
+   * reads the units figure as boxes has miscounted the pallet — so the two
+   * carry different units rather than relying on a caption the template
+   * author may or may not place. It is formatted in THIS layer for the same
+   * reason «шт.» is: `bounds.ts` resolves field text through here, so the
+   * longer string is accounted for by every containment check instead of
+   * overflowing a template the first time a caption is dropped.
+   */
+  it("appends the «кор.» unit to a plain numeric box count", () => {
+    expect(BOX_QTY_UNIT_SUFFIX).toBe("кор.");
+    expect(labelFieldDisplayValue("qty.boxes", withQtyBoxes("12"))).toBe("12 кор.");
+    expect(labelFieldDisplayValue("qty.boxes", withQtyBoxes("0"))).toBe("0 кор.");
+    expect(labelFieldDisplayValue("qty.boxes", withQtyBoxes("  7  "))).toBe("7 кор.");
+  });
+
+  it("never doubles the box unit on a value that already carries it", () => {
+    expect(labelFieldDisplayValue("qty.boxes", withQtyBoxes("12 кор."))).toBe("12 кор.");
+    expect(labelFieldDisplayValue("qty.boxes", withQtyBoxes("12 кор"))).toBe("12 кор");
+  });
+
+  it("passes an empty or non-numeric box count through untouched", () => {
+    for (const raw of ["", "   ", "—", "12 шт.", "5.5", "-3"]) {
+      expect(
+        labelFieldDisplayValue("qty.boxes", withQtyBoxes(raw)),
+        `qty.boxes=${JSON.stringify(raw)}`,
+      ).toBe(raw);
+    }
+  });
+
+  it("does not put the box unit on the units field, or the other way round", () => {
+    expect(labelFieldDisplayValue("qty", withQty("12"))).toBe("12 шт.");
+    expect(labelFieldDisplayValue("qty.boxes", withQtyBoxes("12"))).toBe("12 кор.");
   });
 
   it("passes an empty or non-numeric quantity through untouched", () => {

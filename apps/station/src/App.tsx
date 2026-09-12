@@ -256,6 +256,12 @@ export function App() {
   // read together with `shiftContext` below, off the same `shift_mirror` row,
   // and reset alongside it whenever the shift itself changes.
   const [boxCapacity, setBoxCapacity] = useState<number | null>(null);
+  // Mirrors `boxCapacity` immediately above: read off the same `shift_mirror`
+  // row, reset alongside it, and threaded into `WorkScreen`'s pallet strip
+  // (slice 06d) -- the ONLY thing that turns pallets on for a shift, since
+  // `close-box.ts` treats a non-null capacity as the sole "pallets enabled"
+  // signal (see its own `CloseBoxDeps` doc comment).
+  const [palletBoxCapacity, setPalletBoxCapacity] = useState<number | null>(null);
   const [issuerPrefix, setIssuerPrefix] = useState<string | null>(null);
   const [boxTemplateRecovery, setBoxTemplateRecovery] = useState<BoxTemplateRecoveryState | null>(
     null,
@@ -497,6 +503,7 @@ export function App() {
     if (!shift) {
       setShiftContext(null);
       setBoxCapacity(null);
+      setPalletBoxCapacity(null);
       setIssuerPrefix(null);
       setBoxTemplateRecovery(null);
       if (shiftRecoverySyncPaused.current) setResumeSyncAfterRecoveryCommit(true);
@@ -534,6 +541,7 @@ export function App() {
           if (!mirrorRead.ok) {
             if (ctx) setShiftContext(ctx);
             setBoxCapacity(null);
+            setPalletBoxCapacity(null);
             setIssuerPrefix(null);
             setBoxTemplateRecovery({ kind: "local-read", phase: "local-error" });
             stopPolling();
@@ -576,6 +584,7 @@ export function App() {
           }
           setShiftContext(ctx);
           setBoxCapacity(mirror?.boxCapacity ?? null);
+          setPalletBoxCapacity(mirror?.palletBoxCapacity ?? null);
           setIssuerPrefix(mirror?.issuerPrefix ?? null);
           setBoxTemplateRecovery(recovery ? { kind: "box", ...recovery, phase: "blocked" } : null);
           if (!recovery && ownsRecoveryPause && shiftRecoverySyncPaused.current) {
@@ -603,6 +612,7 @@ export function App() {
       .catch((error: unknown) => {
         if (cancelled) return;
         setBoxCapacity(null);
+        setPalletBoxCapacity(null);
         setIssuerPrefix(null);
         setBoxTemplateRecovery({ kind: "local-read", phase: "local-error" });
         console.error("station: sync recovery barrier failed", error);
@@ -819,6 +829,7 @@ export function App() {
       setShift(null);
       setShiftContext(null);
       setBoxCapacity(null);
+      setPalletBoxCapacity(null);
       setIssuerPrefix(null);
       setFloorView("select");
       setShowSetup(false);
@@ -1495,6 +1506,7 @@ export function App() {
           startNormalShiftMirrorRef.current(shift.id);
           setShiftContext(ctx);
           setBoxCapacity(mirror.boxCapacity);
+          setPalletBoxCapacity(mirror.palletBoxCapacity);
           setIssuerPrefix(mirror.issuerPrefix);
           setBoxTemplateRecovery(null);
           setResumeSyncAfterRecoveryCommit(true);
@@ -1527,6 +1539,7 @@ export function App() {
       }
       setShiftContext(ctx);
       setBoxCapacity(mirror.boxCapacity);
+      setPalletBoxCapacity(mirror.palletBoxCapacity);
       setIssuerPrefix(mirror.issuerPrefix);
       setBoxTemplateRecovery(null);
       setResumeSyncAfterRecoveryCommit(true);
@@ -1727,6 +1740,7 @@ export function App() {
               // which is exactly what turns WorkScreen's box UI off entirely.
               issuerPrefix={issuerPrefix}
               boxCapacity={boxCapacity}
+              palletBoxCapacity={palletBoxCapacity}
               bundleRevision={shiftBundleRevision}
               verifyPrintedLabel={hardwareConfig.verifyPrintedLabel}
               printing={

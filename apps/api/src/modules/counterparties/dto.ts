@@ -79,6 +79,7 @@ export const listCounterpartiesOpenApiSchema: SchemaObject = {
 /**
  * Hand-written mirror of `SsccCounterStateDto` (sscc/dto.ts), which is an
  * interface-only DTO. `blockedBy` is the `SsccSeedBlocker` union or null.
+ * One entry of `GET /counterparties/:id/sscc`'s `counters` list.
  */
 export const ssccCounterStateOpenApiSchema: SchemaObject = {
   type: "object",
@@ -119,5 +120,19 @@ export const ssccCounterStateOpenApiSchema: SchemaObject = {
         },
       ],
     },
+  },
+};
+
+/**
+ * `GET /counterparties/:id/sscc` response; mirrors `SsccCounterListDto`
+ * (sscc/dto.ts): one entry per extension digit (boxes, then pallets) rather
+ * than two named fields, so a third numbering space later needs no schema
+ * change here.
+ */
+export const ssccCounterListOpenApiSchema: SchemaObject = {
+  type: "object",
+  required: ["counters"],
+  properties: {
+    counters: { type: "array", items: ssccCounterStateOpenApiSchema },
   },
 };

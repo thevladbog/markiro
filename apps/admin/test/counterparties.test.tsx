@@ -92,10 +92,28 @@ const ACME = {
 };
 
 const COUNTER = { extensionDigit: 0, nextSerial: 45_000, minSerial: 40_000, blockedBy: null };
+/**
+ * The pallet counter is deliberately past its own floor (`minSerial > 0`), so
+ * the "nothing printed yet" assertions below stay unique to the BOX counter
+ * rather than matching both sections.
+ */
+const PALLET_COUNTER = { extensionDigit: 1, nextSerial: 300, minSerial: 250, blockedBy: null };
 const COUNTER_BLOCKED = {
   ...COUNTER,
   blockedBy: { kind: "active_shift", shiftId: "s-1", shiftNumber: "AUG26-003" },
 };
+
+/**
+ * `GET /counterparties/:id/sscc` returns a LIST of counters, one per extension
+ * digit (06d Task 11) -- never a single flat counter. Mocking the old shape is
+ * what let the admin ship reading `undefined` off it.
+ */
+function ssccList(...counters: unknown[]) {
+  return { counters: counters.length > 0 ? counters : [COUNTER, PALLET_COUNTER] };
+}
+
+const BOX_SERIAL_LABEL = "Начальный серийный номер короба";
+const BOX_SAVE_LABEL = "Сохранить счётчик коробов";
 
 describe("CounterpartiesPage", () => {
   it("keeps counterparty rows readable while hiding mutations without operations.write", async () => {
@@ -312,7 +330,7 @@ describe("CounterpartiesPage", () => {
   it("normalizes a historical box counter zero and blocks saving zero", async () => {
     const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
       if (url === "/api/counterparties/1/sscc") {
-        return jsonResponse(200, { extensionDigit: 0, nextSerial: 0 });
+        return jsonResponse(200, ssccList({ ...COUNTER, nextSerial: 0, minSerial: 1 }));
       }
       return jsonResponse(200, { items: [ACME] });
     });
@@ -322,12 +340,12 @@ describe("CounterpartiesPage", () => {
     await screen.findByText("Acme Ltd");
     fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
 
-    const input = (await screen.findByLabelText("Начальный серийный номер")) as HTMLInputElement;
+    const input = (await screen.findByLabelText(BOX_SERIAL_LABEL)) as HTMLInputElement;
     expect(input.value).toBe("1");
     fireEvent.change(input, { target: { value: "0" } });
     const section = input.closest(".mk-counterparty-panel-section");
     if (!section) throw new Error("SSCC section not found");
-    fireEvent.click(within(section as HTMLElement).getByRole("button", { name: "Сохранить SSCC" }));
+    fireEvent.click(within(section as HTMLElement).getByRole("button", { name: BOX_SAVE_LABEL }));
 
     expect(await screen.findByText("Введите целое число от 1 до 9 999 999")).toBeDefined();
     expect(
@@ -391,7 +409,7 @@ describe("CounterpartiesPage", () => {
   it("locks the counterparty sscc counter while a shift is active and names the shift", async () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (url === "/api/counterparties/1/sscc") {
-        return jsonResponse(200, COUNTER_BLOCKED);
+        return jsonResponse(200, ssccList(COUNTER_BLOCKED));
       }
       return jsonResponse(200, { items: [ACME] });
     });
@@ -401,20 +419,20 @@ describe("CounterpartiesPage", () => {
     await screen.findByText("Acme Ltd");
     fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
 
-    const input = (await screen.findByLabelText("Начальный серийный номер")) as HTMLInputElement;
+    const input = (await screen.findByLabelText(BOX_SERIAL_LABEL)) as HTMLInputElement;
     await waitFor(() => expect(input).toHaveProperty("disabled", true));
     expect(screen.getByText(/AUG26-003/)).toBeDefined();
     const section = input.closest(".mk-counterparty-panel-section");
     if (!section) throw new Error("SSCC section not found");
     expect(
-      within(section as HTMLElement).getByRole("button", { name: "Сохранить SSCC" }),
+      within(section as HTMLElement).getByRole("button", { name: BOX_SAVE_LABEL }),
     ).toHaveProperty("disabled", true);
   });
 
   it("shows the floor the server reported for the counterparty counter, not a hardcoded one", async () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (url === "/api/counterparties/1/sscc") {
-        return jsonResponse(200, COUNTER);
+        return jsonResponse(200, ssccList());
       }
       return jsonResponse(200, { items: [ACME] });
     });
@@ -424,12 +442,12 @@ describe("CounterpartiesPage", () => {
     await screen.findByText("Acme Ltd");
     fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
 
-    const input = (await screen.findByLabelText("Начальный серийный номер")) as HTMLInputElement;
+    const input = (await screen.findByLabelText(BOX_SERIAL_LABEL)) as HTMLInputElement;
     const section = input.closest(".mk-counterparty-panel-section");
     if (!section) throw new Error("SSCC section not found");
     await waitFor(() => expect(within(section as HTMLElement).getByText(/40\s?000/)).toBeDefined());
     expect(
-      within(section as HTMLElement).getByRole("button", { name: "Сохранить SSCC" }),
+      within(section as HTMLElement).getByRole("button", { name: BOX_SAVE_LABEL }),
     ).toHaveProperty("disabled", false);
   });
 
@@ -438,7 +456,7 @@ describe("CounterpartiesPage", () => {
       if (url === "/api/counterparties/1/sscc") {
         // The floor for a box counter with nothing printed is 1, which used
         // to interpolate as "Уже напечатано до 0".
-        return jsonResponse(200, { ...COUNTER, nextSerial: 1, minSerial: 1 });
+        return jsonResponse(200, ssccList({ ...COUNTER, nextSerial: 1, minSerial: 1 }));
       }
       return jsonResponse(200, { items: [ACME] });
     });
@@ -448,7 +466,7 @@ describe("CounterpartiesPage", () => {
     await screen.findByText("Acme Ltd");
     fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
 
-    const input = (await screen.findByLabelText("Начальный серийный номер")) as HTMLInputElement;
+    const input = (await screen.findByLabelText(BOX_SERIAL_LABEL)) as HTMLInputElement;
     const section = input.closest(".mk-counterparty-panel-section");
     if (!section) throw new Error("SSCC section not found");
     await waitFor(() =>

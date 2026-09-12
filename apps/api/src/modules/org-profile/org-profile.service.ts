@@ -11,19 +11,25 @@ import {
 } from "@nestjs/common";
 import { and, eq, inArray, isNotNull, isNull, lt, lte, notExists, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
-import { isBoxLabelTemplateEligible } from "@markiro/domain";
+import { isBoxLabelTemplateEligible, isPalletLabelTemplateEligible } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
 import {
   assertKnownProductGroupCodes,
   findLabelTemplateEligibility,
 } from "../label-templates/box-label-template-eligibility";
 import { isMissingObjectError, ObjectStorageService } from "../storage/object-storage.service";
-import { BOX_EXTENSION_DIGIT, deriveIssuerPrefix, SsccService } from "../sscc/sscc.service";
-import type { SsccCounterStateDto } from "../sscc/dto";
+import {
+  BOX_EXTENSION_DIGIT,
+  deriveIssuerPrefix,
+  PALLET_EXTENSION_DIGIT,
+  SsccService,
+} from "../sscc/sscc.service";
+import type { SsccCounterListDto } from "../sscc/dto";
 import { processLogo } from "./logo-processor";
 import { RasterImageInputError } from "../profile/raster-image-processor";
 import type {
   CategoryBoxLabelTemplateDefaultDto,
+  CategoryPalletLabelTemplateDefaultDto,
   KioskBrandingDto,
   OrganizationLogoDto,
   OrgProfileDto,
@@ -50,46 +56,55 @@ export class OrgProfileService {
 
   /** Returns the tenant's profile, or the empty defaults if no row exists yet. */
   async getProfile(tenantId: string): Promise<OrgProfileDto> {
-    const [[row], [pickupPolicy], [logo], categoryDefaults, groupsInUse] = await Promise.all([
-      this.db.select().from(schema.orgProfiles).where(eq(schema.orgProfiles.tenantId, tenantId)),
-      this.db
-        .select({ limitsEnabled: schema.pickupTenantPolicies.limitsEnabled })
-        .from(schema.pickupTenantPolicies)
-        .where(eq(schema.pickupTenantPolicies.tenantId, tenantId)),
-      this.db
-        .select({ revision: schema.organizationLogoAssets.id })
-        .from(schema.orgProfiles)
-        .innerJoin(
-          schema.organizationLogoAssets,
-          and(
-            eq(schema.organizationLogoAssets.tenantId, tenantId),
-            eq(schema.organizationLogoAssets.id, schema.orgProfiles.logoAssetId),
-            eq(schema.organizationLogoAssets.status, "active"),
-          ),
-        )
-        .where(eq(schema.orgProfiles.tenantId, tenantId))
-        .limit(1),
-      this.db
-        .select({
-          chzProductGroupCode: schema.orgBoxLabelTemplateDefaults.chzProductGroupCode,
-          templateId: schema.orgBoxLabelTemplateDefaults.templateId,
-        })
-        .from(schema.orgBoxLabelTemplateDefaults)
-        .where(eq(schema.orgBoxLabelTemplateDefaults.tenantId, tenantId))
-        .orderBy(schema.orgBoxLabelTemplateDefaults.chzProductGroupCode),
-      this.db
-        .select({ code: schema.products.chzProductGroupCode })
-        .from(schema.products)
-        .where(
-          and(
-            eq(schema.products.tenantId, tenantId),
-            eq(schema.products.archived, false),
-            isNotNull(schema.products.chzProductGroupCode),
-          ),
-        )
-        .groupBy(schema.products.chzProductGroupCode)
-        .orderBy(schema.products.chzProductGroupCode),
-    ]);
+    const [[row], [pickupPolicy], [logo], categoryDefaults, palletCategoryDefaults, groupsInUse] =
+      await Promise.all([
+        this.db.select().from(schema.orgProfiles).where(eq(schema.orgProfiles.tenantId, tenantId)),
+        this.db
+          .select({ limitsEnabled: schema.pickupTenantPolicies.limitsEnabled })
+          .from(schema.pickupTenantPolicies)
+          .where(eq(schema.pickupTenantPolicies.tenantId, tenantId)),
+        this.db
+          .select({ revision: schema.organizationLogoAssets.id })
+          .from(schema.orgProfiles)
+          .innerJoin(
+            schema.organizationLogoAssets,
+            and(
+              eq(schema.organizationLogoAssets.tenantId, tenantId),
+              eq(schema.organizationLogoAssets.id, schema.orgProfiles.logoAssetId),
+              eq(schema.organizationLogoAssets.status, "active"),
+            ),
+          )
+          .where(eq(schema.orgProfiles.tenantId, tenantId))
+          .limit(1),
+        this.db
+          .select({
+            chzProductGroupCode: schema.orgBoxLabelTemplateDefaults.chzProductGroupCode,
+            templateId: schema.orgBoxLabelTemplateDefaults.templateId,
+          })
+          .from(schema.orgBoxLabelTemplateDefaults)
+          .where(eq(schema.orgBoxLabelTemplateDefaults.tenantId, tenantId))
+          .orderBy(schema.orgBoxLabelTemplateDefaults.chzProductGroupCode),
+        this.db
+          .select({
+            chzProductGroupCode: schema.orgPalletLabelTemplateDefaults.chzProductGroupCode,
+            templateId: schema.orgPalletLabelTemplateDefaults.templateId,
+          })
+          .from(schema.orgPalletLabelTemplateDefaults)
+          .where(eq(schema.orgPalletLabelTemplateDefaults.tenantId, tenantId))
+          .orderBy(schema.orgPalletLabelTemplateDefaults.chzProductGroupCode),
+        this.db
+          .select({ code: schema.products.chzProductGroupCode })
+          .from(schema.products)
+          .where(
+            and(
+              eq(schema.products.tenantId, tenantId),
+              eq(schema.products.archived, false),
+              isNotNull(schema.products.chzProductGroupCode),
+            ),
+          )
+          .groupBy(schema.products.chzProductGroupCode)
+          .orderBy(schema.products.chzProductGroupCode),
+      ]);
     if (!pickupPolicy) {
       throw new InternalServerErrorException("Tenant pickup policy is not configured");
     }
@@ -100,6 +115,8 @@ export class OrgProfileService {
       timeZone: row?.timeZone ?? "Europe/Moscow",
       defaultBoxLabelTemplateId: row?.defaultBoxLabelTemplateId ?? null,
       categoryBoxLabelTemplateDefaults: categoryDefaults,
+      defaultPalletLabelTemplateId: row?.defaultPalletLabelTemplateId ?? null,
+      categoryPalletLabelTemplateDefaults: palletCategoryDefaults,
       productGroupsInUse: groupsInUse.flatMap((group) => (group.code === null ? [] : [group.code])),
       pickupLimitsEnabled: pickupPolicy.limitsEnabled,
       logoRevision: logo?.revision ?? null,
@@ -125,6 +142,9 @@ export class OrgProfileService {
     if (patch.timeZone !== undefined) setClause.timeZone = patch.timeZone;
     if (patch.defaultBoxLabelTemplateId !== undefined) {
       setClause.defaultBoxLabelTemplateId = patch.defaultBoxLabelTemplateId;
+    }
+    if (patch.defaultPalletLabelTemplateId !== undefined) {
+      setClause.defaultPalletLabelTemplateId = patch.defaultPalletLabelTemplateId;
     }
 
     try {
@@ -173,6 +193,55 @@ export class OrgProfileService {
             }
           }
         }
+        // The pallet counterparts of the two checks above, gated on
+        // `purpose === "pallet"` and `isPalletLabelTemplateEligible` instead.
+        // `findLabelTemplateEligibility` is tenant-scoped, so another
+        // tenant's template id reads as unknown here and never reaches the
+        // FK -- the same cross-tenant denial the box default already has.
+        if (patch.defaultPalletLabelTemplateId) {
+          const template = await findLabelTemplateEligibility(
+            tx,
+            tenantId,
+            patch.defaultPalletLabelTemplateId,
+            "share",
+          );
+          if (!template) {
+            throw new BadRequestException("Unknown pallet label template for this organization");
+          }
+          if (
+            template.purpose !== "pallet" ||
+            !template.enabled ||
+            template.chzProductGroupCodes !== null
+          ) {
+            throw new BadRequestException({
+              code: "PALLET_LABEL_TEMPLATE_NOT_ELIGIBLE",
+              message: "The organisation default must be an enabled template for all categories",
+              field: "defaultPalletLabelTemplateId",
+            });
+          }
+        }
+        if (patch.categoryPalletLabelTemplateDefaults !== undefined) {
+          await assertKnownProductGroupCodes(
+            tx,
+            patch.categoryPalletLabelTemplateDefaults.map((item) => item.chzProductGroupCode),
+          );
+          for (const item of patch.categoryPalletLabelTemplateDefaults) {
+            const template = await findLabelTemplateEligibility(
+              tx,
+              tenantId,
+              item.templateId,
+              "share",
+            );
+            if (!template || !isPalletLabelTemplateEligible(template, item.chzProductGroupCode)) {
+              throw new BadRequestException({
+                code: "PALLET_LABEL_TEMPLATE_NOT_ELIGIBLE",
+                message: "The category default must be an enabled template covering that category",
+                field: "categoryPalletLabelTemplateDefaults",
+                chzProductGroupCode: item.chzProductGroupCode,
+              });
+            }
+          }
+        }
 
         await tx
           .insert(schema.orgProfiles)
@@ -184,6 +253,9 @@ export class OrgProfileService {
             timeZone: patch.timeZone ?? "Europe/Moscow",
             ...(patch.defaultBoxLabelTemplateId !== undefined
               ? { defaultBoxLabelTemplateId: patch.defaultBoxLabelTemplateId }
+              : {}),
+            ...(patch.defaultPalletLabelTemplateId !== undefined
+              ? { defaultPalletLabelTemplateId: patch.defaultPalletLabelTemplateId }
               : {}),
           })
           .onConflictDoUpdate({
@@ -228,6 +300,44 @@ export class OrgProfileService {
           }
         }
 
+        if (patch.categoryPalletLabelTemplateDefaults !== undefined) {
+          const before: CategoryPalletLabelTemplateDefaultDto[] = await tx
+            .select({
+              chzProductGroupCode: schema.orgPalletLabelTemplateDefaults.chzProductGroupCode,
+              templateId: schema.orgPalletLabelTemplateDefaults.templateId,
+            })
+            .from(schema.orgPalletLabelTemplateDefaults)
+            .where(eq(schema.orgPalletLabelTemplateDefaults.tenantId, tenantId))
+            .orderBy(schema.orgPalletLabelTemplateDefaults.chzProductGroupCode);
+          const after: CategoryPalletLabelTemplateDefaultDto[] =
+            patch.categoryPalletLabelTemplateDefaults
+              .map((item) => ({
+                chzProductGroupCode: item.chzProductGroupCode,
+                templateId: item.templateId,
+              }))
+              .sort((a, b) => a.chzProductGroupCode - b.chzProductGroupCode);
+          await tx
+            .delete(schema.orgPalletLabelTemplateDefaults)
+            .where(eq(schema.orgPalletLabelTemplateDefaults.tenantId, tenantId));
+          if (after.length > 0) {
+            await tx
+              .insert(schema.orgPalletLabelTemplateDefaults)
+              .values(after.map((item) => ({ tenantId, ...item })));
+          }
+          if (JSON.stringify(before) !== JSON.stringify(after)) {
+            await tx.insert(schema.tenantAuditEvents).values({
+              organizationId: tenantId,
+              actorUserId,
+              action: "tenant.pallet_label_template_defaults.updated",
+              outcome: "success",
+              targetType: "tenant",
+              targetId: tenantId,
+              before: { defaults: before },
+              after: { defaults: after },
+            });
+          }
+        }
+
         if (patch.pickupLimitsEnabled !== undefined) {
           const [policy] = await tx
             .select({ limitsEnabled: schema.pickupTenantPolicies.limitsEnabled })
@@ -254,8 +364,11 @@ export class OrgProfileService {
         }
       });
     } catch (error) {
-      if (isDefaultBoxLabelTemplateForeignKey(error)) {
+      if (isDefaultLabelTemplateForeignKey(error, "org_profiles_box_label_template_tenant_fk")) {
         throw new BadRequestException("Unknown box label template for this organization");
+      }
+      if (isDefaultLabelTemplateForeignKey(error, "org_profiles_pallet_label_template_tenant_fk")) {
+        throw new BadRequestException("Unknown pallet label template for this organization");
       }
       throw error;
     }
@@ -597,22 +710,32 @@ export class OrgProfileService {
   }
 
   /**
-   * The tenant's own box SSCC counter plus everything the settings form needs
-   * to render its rules (floor, current blocker) -- see
-   * `SsccService.counterState`. Always reads `BOX_EXTENSION_DIGIT`: 06c only
-   * has boxes; 06d's pallets will need their own read path.
+   * The tenant's own SSCC counters -- one entry per extension digit the
+   * tenant has (boxes at `BOX_EXTENSION_DIGIT`, pallets at
+   * `PALLET_EXTENSION_DIGIT`) -- plus everything the settings form needs to
+   * render each one's rules (floor, current blocker); see
+   * `SsccService.counterState`. Returned as a list keyed by `extensionDigit`
+   * (06d) rather than two named fields, so a third numbering space later
+   * needs no response-shape change.
    */
-  async getSscc(tenantId: string): Promise<SsccCounterStateDto> {
+  async getSscc(tenantId: string): Promise<SsccCounterListDto> {
     const issuerPrefix = await this.ownIssuerPrefix(tenantId);
-    return this.sscc.counterState(tenantId, issuerPrefix, BOX_EXTENSION_DIGIT);
+    const counters = await Promise.all(
+      [BOX_EXTENSION_DIGIT, PALLET_EXTENSION_DIGIT].map((extensionDigit) =>
+        this.sscc.counterState(tenantId, issuerPrefix, extensionDigit),
+      ),
+    );
+    return { counters };
   }
 
   /**
-   * Seeds the tenant's own box counter. All of the rules -- the active-shift
-   * and out-of-sync-device guards, the printed-serial floor, the atomic
-   * write, the revocation of blocks devices still hold -- live in
-   * `SsccService.seedCounter`, shared verbatim with the counterparties
-   * module: this method's only job is naming WHOSE prefix is being seeded.
+   * Seeds one of the tenant's own counters -- `dto.extensionDigit` names
+   * which one (box or pallet); each digit's counter is independent of every
+   * other's. All of the rules -- the active-shift and out-of-sync-device
+   * guards, the printed-serial floor, the atomic write, the revocation of
+   * blocks devices still hold -- live in `SsccService.seedCounter`, shared
+   * verbatim with the counterparties module: this method's only job is
+   * naming WHOSE prefix is being seeded.
    */
   async putSscc(tenantId: string, dto: SsccCounterDto): Promise<SsccCounterDto> {
     const issuerPrefix = await this.ownIssuerPrefix(tenantId);
@@ -631,7 +754,13 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "unknown error";
 }
 
-function isDefaultBoxLabelTemplateForeignKey(error: unknown): boolean {
+/**
+ * A 23503 raised by one named composite tenant FK. The constraint is passed in
+ * rather than hard-coded so the box and pallet defaults each map to their OWN
+ * message: answering "unknown box label template" for a rejected pallet id
+ * would send an operator looking in the wrong library.
+ */
+function isDefaultLabelTemplateForeignKey(error: unknown, constraintName: string): boolean {
   const databaseError = error as {
     code?: string;
     constraint?: string;
@@ -639,5 +768,5 @@ function isDefaultBoxLabelTemplateForeignKey(error: unknown): boolean {
   };
   const code = databaseError?.code ?? databaseError?.cause?.code;
   const constraint = databaseError?.constraint ?? databaseError?.cause?.constraint;
-  return code === "23503" && constraint === "org_profiles_box_label_template_tenant_fk";
+  return code === "23503" && constraint === constraintName;
 }

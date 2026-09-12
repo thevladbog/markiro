@@ -9,6 +9,9 @@ import app.markiro.handheld.MainDispatcherRule
 import app.markiro.handheld.core.box.BoxPrint
 import app.markiro.handheld.core.box.BoxPrinter
 import app.markiro.handheld.core.box.BoxRepository
+import app.markiro.handheld.core.box.PalletLock
+import app.markiro.handheld.core.box.PalletPrinter
+import app.markiro.handheld.core.box.PalletRepository
 import app.markiro.handheld.core.auth.OperatorRecord
 import app.markiro.handheld.core.exceptions.ExceptionEngine
 import app.markiro.handheld.feature.signin.SessionHolder
@@ -21,7 +24,10 @@ import app.markiro.handheld.core.print.PrinterTransport
 import app.markiro.handheld.core.print.SendOutcome
 import app.markiro.handheld.core.storage.BoxEntity
 import app.markiro.handheld.core.storage.HandheldDatabase
+import app.markiro.handheld.core.storage.PalletEntity
+import app.markiro.handheld.core.storage.PalletPrint
 import app.markiro.handheld.core.storage.ShiftEntity
+import app.markiro.handheld.demoteInterruptedPrints
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
@@ -32,6 +38,7 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.io.IOException
 
 @RunWith(AndroidJUnit4::class)
 class LabelQueueViewModelTest {
@@ -63,10 +70,12 @@ class LabelQueueViewModelTest {
                 id = "s1", number = "SEP26-003", status = "open", mode = "aggregation", productId = "p1",
                 productName = "Вода", productPrintName = null, productGtin14 = "04680089900000", lineId = null,
                 lineName = null, counterpartyName = null, plannedQty = null, plannedDate = null,
-                productionDate = "2026-09-10", boxCapacity = 20, palletCapacity = null, palletsEnabled = false,
+                productionDate = "2026-09-10", boxCapacity = 20, palletBoxCapacity = null, palletsEnabled = false,
                 validationPrintMode = "none", closePolicyKind = null, closeOwnerDeviceId = null, openedAt = null,
                 listFetchedAt = 1L, shelfLifeDays = 365, ssccIssuerPrefix = "468008990",
                 boxLabelTemplate = """{"widthMm":58,"heightMm":40,"dpi":203,"language":"zpl","elements":[
+                    {"kind":"field","id":"s","xMm":2,"yMm":2,"field":"sscc","fontSizePt":8}]}""",
+                palletLabelTemplateSpec = """{"widthMm":100,"heightMm":150,"dpi":203,"language":"zpl","elements":[
                     {"kind":"field","id":"s","xMm":2,"yMm":2,"field":"sscc","fontSizePt":8}]}""",
             ),
         )
@@ -96,16 +105,32 @@ class LabelQueueViewModelTest {
         ),
     )
 
-    private fun model(config: app.markiro.handheld.core.storage.DeviceConfigDao = db.deviceConfigDao()) = main.track(
-        LabelQueueViewModel(
-            BoxRepository(db),
-            BoxPrinter(db, BoxRepository(db), LabelRenderer(RasterizeText { _, _ -> RasterResult("AA", 1, 1, 8, 8) }), transport),
-            ExceptionEngine(db),
-            session,
-            config,
-            db.recovery,
+    private suspend fun pallet(id: String, sscc: String, state: String, shiftId: String = "s1") = db.palletDao().insert(
+        PalletEntity(
+            palletId = id, shiftId = shiftId, terminalId = null, sscc = sscc, openedAt = "2026-09-10T07:00:00.000Z",
+            closedAt = "2026-09-10T08:00:00.000Z", operatorId = null, printState = state,
+            printReason = if (state == PalletPrint.FAILED) "no_paper" else null, ackedAt = null,
         ),
     )
+
+    private fun model(
+        config: app.markiro.handheld.core.storage.DeviceConfigDao = db.deviceConfigDao(),
+    ): LabelQueueViewModel {
+        val palletLock = PalletLock(db)
+        val pallets = PalletRepository(db, palletLock)
+        return main.track(
+            LabelQueueViewModel(
+                BoxRepository(db),
+                BoxPrinter(db, BoxRepository(db), LabelRenderer(RasterizeText { _, _ -> RasterResult("AA", 1, 1, 8, 8) }), transport),
+                pallets,
+                PalletPrinter(db, pallets, LabelRenderer(RasterizeText { _, _ -> RasterResult("AA", 1, 1, 8, 8) }), transport),
+                ExceptionEngine(db),
+                session,
+                config,
+                db.recovery,
+            ),
+        )
+    }
 
     /**
      * Brief §8: resolving an unknown outcome by printing again is "an explicit
@@ -176,7 +201,7 @@ class LabelQueueViewModelTest {
         box("b2", "046800899000000025", BoxPrint.PRINTED)
         box("b3", "046800899000000032", BoxPrint.DEFERRED)
         val items = model().state.first { it.items.size == 2 }.items
-        assertEquals(listOf("b1", "b3"), items.map { it.boxId })
+        assertEquals(listOf("b1", "b3"), items.map { it.id })
     }
 
     @Test
@@ -223,6 +248,90 @@ class LabelQueueViewModelTest {
         db.shiftDao().get("s1")!!.let { db.shiftDao().upsert(it.copy(status = "closed")) }
         assertEquals(1, model().state.first { it.items.isNotEmpty() }.items.size)
     }
+
+    // -- The pallet half of the queue (06d): `PalletPrinter` mirrors
+    // `BoxPrinter`, so its deferred and failed labels ride this same queue. --
+
+    @Test
+    fun theQueueAlsoListsClosedPalletsWhoseLabelIsNotResolved() = runTest {
+        box("b1", "046800899000000018", BoxPrint.PRINTED)
+        pallet("p1", "146800899000000012", PalletPrint.FAILED)
+        pallet("p2", "146800899000000029", PalletPrint.PRINTED)
+        val items = model().state.first { it.items.size == 1 }.items
+        assertEquals(listOf("p1"), items.map { it.id })
+        assertEquals(LabelKind.PALLET, items.single().kind)
+    }
+
+    @Test
+    fun aQueuedPalletCanBePrintedOneAtATimeByAPerson() = runTest {
+        pallet("p1", "146800899000000012", PalletPrint.FAILED)
+        val vm = model()
+        vm.state.first { it.items.size == 1 }
+        vm.printOne("p1")
+        vm.state.first { it.items.isEmpty() }
+        assertEquals(1, transport.printed.size)
+        assertEquals(PalletPrint.PRINTED, db.palletDao().get("p1")?.printState)
+    }
+
+    @Test
+    fun printAllReachesBothBoxesAndPalletsButSkipsWhicheverIsUnknown() = runTest {
+        box("b1", "046800899000000018", BoxPrint.FAILED)
+        pallet("p1", "146800899000000012", PalletPrint.UNKNOWN)
+        val vm = model()
+        vm.state.first { it.items.size == 2 }
+        vm.printAll()
+        vm.state.first { it.items.size == 1 }
+        assertEquals(1, transport.printed.size)
+        assertTrue(transport.printed.single().contains("046800899000000018"))
+        assertEquals(PalletPrint.UNKNOWN, db.palletDao().get("p1")?.printState)
+    }
+
+    @Test
+    fun resolvingAnUnknownPalletSendsNothing() = runTest {
+        pallet("p1", "146800899000000012", PalletPrint.UNKNOWN)
+        val vm = model()
+        vm.state.first { it.items.size == 1 }
+        vm.resolveUnknown("p1")
+        vm.state.first { it.items.isEmpty() }
+        assertEquals(0, transport.printed.size)
+        assertEquals(PalletPrint.PRINTED, db.palletDao().get("p1")?.printState)
+    }
+
+    @Test
+    fun aPalletPrintTheAppDiedInIsDemotedAtStartupAndThenSkippedByPrintAll() = runTest {
+        // `PalletPrinter` persists `printing` BEFORE the send, so an app death
+        // between handing bytes to the printer and hearing back leaves the row
+        // there permanently. `skippedByPrintAll` tests `unknown`, so a stuck
+        // `printing` row is not skipped and «Напечатать все» resends a label
+        // that may already be physically on the stack.
+        box("b1", "046800899000000018", BoxPrint.FAILED)
+        pallet("p1", "146800899000000012", PalletPrint.PENDING)
+
+        // The state is produced by the real printer dying mid-send, not written by hand.
+        val palletLock = PalletLock(db)
+        val pallets = PalletRepository(db, palletLock)
+        val dying = object : PrinterTransport {
+            override suspend fun status(printer: PrinterEntity) = PrinterStatus.Ready
+            override suspend fun send(printer: PrinterEntity, document: ByteArray): SendOutcome =
+                throw IOException("the process died holding the socket")
+        }
+        val renderer = LabelRenderer(RasterizeText { _, _ -> RasterResult("AA", 1, 1, 8, 8) })
+        runCatching { PalletPrinter(db, pallets, renderer, dying).print("p1") }
+        assertEquals(PalletPrint.PRINTING, db.palletDao().get("p1")?.printState)
+
+        // Startup, through the exact function `HandheldApp.onCreate` runs.
+        demoteInterruptedPrints(BoxRepository(db), pallets)
+        assertEquals(PalletPrint.UNKNOWN, db.palletDao().get("p1")?.printState)
+
+        val vm = model()
+        vm.state.first { it.items.size == 2 }
+        vm.printAll()
+        vm.state.first { it.items.size == 1 }
+        assertEquals(1, transport.printed.size)
+        assertTrue(transport.printed.single().contains("046800899000000018"))
+        assertEquals(PalletPrint.UNKNOWN, db.palletDao().get("p1")?.printState)
+    }
+
     @Test fun delayedAuditLookupCannotReprintUnderReplacementCredential() = runTest {
         box("b1", "046800899000000018", BoxPrint.UNKNOWN)
         val lookup = kotlinx.coroutines.CompletableDeferred<Unit>()
@@ -247,5 +356,4 @@ class LabelQueueViewModelTest {
         assertEquals(0, db.boxExceptionDao().unackedCount())
         assertEquals(BoxPrint.UNKNOWN, db.boxDao().get("b1")?.printState)
     }
-
 }

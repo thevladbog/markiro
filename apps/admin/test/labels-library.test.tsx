@@ -335,3 +335,19 @@ it("distinguishes product duplicate templates from box templates", async () => {
   expect(await screen.findByText("Дубликат товара")).toBeDefined();
   expect(screen.getByText("Короб")).toBeDefined();
 });
+
+// Slice 06d review fix: a pallet template's badge used to fall through the
+// old `purpose === "product_duplicate" ? duplicate : box` ternary straight to
+// "Короб" (box), because "pallet" matched neither branch. This pins the
+// pallet template to its own badge text, distinct from both other purposes.
+it("distinguishes pallet templates from box templates", async () => {
+  const items = [
+    { ...BOX_SUMMARY, purpose: "box" },
+    { ...UNIT_SUMMARY, purpose: "pallet" },
+  ];
+  stubFetch(items);
+  renderPage();
+  expect(await screen.findByText("Паллета")).toBeDefined();
+  expect(screen.getByText("Короб")).toBeDefined();
+  expect(screen.queryByText("Дубликат товара")).toBeNull();
+});

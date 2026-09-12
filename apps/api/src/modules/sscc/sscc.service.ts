@@ -29,6 +29,12 @@ type SsccTransaction = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
 /** Boxes take extension digit 0; 1 is reserved for pallets (06d). */
 export const BOX_EXTENSION_DIGIT = 0;
+/**
+ * Pallets. Reserved by 06c and claimed here. The two spaces never interleave:
+ * one serial space shared between them would put the same number on a box and
+ * on the pallet it stands on.
+ */
+export const PALLET_EXTENSION_DIGIT = 1;
 
 /** An issuer prefix is always the first 9 digits of a 13-digit GLN — see deriveIssuerPrefix. */
 const ISSUER_PREFIX_LENGTH = 9;

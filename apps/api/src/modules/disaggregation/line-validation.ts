@@ -122,3 +122,134 @@ export async function validateBoxCandidates(
   }
   return result;
 }
+
+export interface PalletCandidate {
+  palletId: string;
+  status: Exclude<LineStatus, "duplicate" | "not_found" | "written_off">;
+  productId: string | null;
+  codeCount: number;
+}
+
+/**
+ * Resolves each bare-18 SSCC to a PALLET and classifies it, reusing the same
+ * statuses `validateBoxCandidates` uses for boxes (Task 21 -- disaggregating
+ * a pallet from the cabinet). `written_off` never applies here: a pallet is
+ * invisible to the kiosk's box registry (see `pallets`' own schema comment),
+ * so there is no purchase path that could lock one. `codeCount` sums the
+ * active items of every member box (`boxes.pallet_id = pallets.id`), the
+ * same live predicate `validateBoxCandidates` uses per box.
+ */
+export async function validatePalletCandidates(
+  db: Pick<Db, "select">,
+  tenantId: string,
+  ssccs: string[],
+): Promise<Map<string, PalletCandidate>> {
+  const result = new Map<string, PalletCandidate>();
+  if (ssccs.length === 0) return result;
+
+  const rows = await db
+    .select({
+      palletId: schema.pallets.id,
+      sscc: schema.pallets.sscc,
+      closedAt: schema.pallets.closedAt,
+      closureReceivedAt: schema.pallets.closureReceivedAt,
+      disassembledAt: schema.pallets.disassembledAt,
+      shiftStatus: schema.shifts.status,
+      productId: schema.shifts.productId,
+      codeCount:
+        sql<number>`count(${schema.boxItems.codeHash}) filter (where ${schema.boxItems.displacedAt} is null and ${schema.boxItems.removedAt} is null)`.mapWith(
+          Number,
+        ),
+    })
+    .from(schema.pallets)
+    .innerJoin(
+      schema.shifts,
+      and(
+        eq(schema.shifts.tenantId, schema.pallets.tenantId),
+        eq(schema.shifts.id, schema.pallets.shiftId),
+      ),
+    )
+    .leftJoin(
+      schema.boxes,
+      and(
+        eq(schema.boxes.tenantId, schema.pallets.tenantId),
+        eq(schema.boxes.palletId, schema.pallets.id),
+      ),
+    )
+    .leftJoin(
+      schema.boxItems,
+      and(
+        eq(schema.boxItems.tenantId, schema.pallets.tenantId),
+        eq(schema.boxItems.boxId, schema.boxes.id),
+      ),
+    )
+    .where(and(eq(schema.pallets.tenantId, tenantId), inArray(schema.pallets.sscc, ssccs)))
+    .groupBy(schema.pallets.id, schema.shifts.status, schema.shifts.productId);
+
+  for (const row of rows) {
+    if (row.sscc === null) continue;
+    let status: PalletCandidate["status"];
+    if (row.closedAt === null || row.closureReceivedAt === null) status = "not_closed";
+    else if (row.shiftStatus !== "closed") status = "shift_open";
+    else if (row.disassembledAt !== null) status = "already_disassembled";
+    else status = "ok";
+    result.set(row.sscc, {
+      palletId: row.palletId,
+      status,
+      productId: row.productId,
+      codeCount: row.codeCount,
+    });
+  }
+  return result;
+}
+
+export interface LineTarget {
+  status: Exclude<LineStatus, "duplicate" | "not_found">;
+  productId: string | null;
+  codeCount: number;
+  boxId: string | null;
+  palletId: string | null;
+}
+
+/**
+ * Resolves each bare-18 SSCC to whichever it names -- a box or a pallet --
+ * for the disaggregation line validator. An SSCC is looked up among boxes
+ * first (the common case, and the one `pickup-order-locks.ts` also uses
+ * `validateBoxCandidates` for); only a miss there is checked against
+ * pallets, since box and pallet SSCCs are allocated from disjoint extension
+ * digits and never legitimately collide.
+ */
+export async function resolveLineTargets(
+  db: Pick<Db, "select" | "selectDistinct">,
+  tenantId: string,
+  ssccs: string[],
+): Promise<Map<string, LineTarget>> {
+  const result = new Map<string, LineTarget>();
+  if (ssccs.length === 0) return result;
+
+  const boxCandidates = await validateBoxCandidates(db, tenantId, ssccs);
+  for (const [sscc, box] of boxCandidates) {
+    result.set(sscc, {
+      status: box.status,
+      productId: box.productId,
+      codeCount: box.codeCount,
+      boxId: box.boxId,
+      palletId: null,
+    });
+  }
+
+  const remaining = ssccs.filter((sscc) => !boxCandidates.has(sscc));
+  if (remaining.length > 0) {
+    const palletCandidates = await validatePalletCandidates(db, tenantId, remaining);
+    for (const [sscc, pallet] of palletCandidates) {
+      result.set(sscc, {
+        status: pallet.status,
+        productId: pallet.productId,
+        codeCount: pallet.codeCount,
+        boxId: null,
+        palletId: pallet.palletId,
+      });
+    }
+  }
+  return result;
+}

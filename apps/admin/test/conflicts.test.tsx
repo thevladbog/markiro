@@ -132,7 +132,7 @@ const SHIFT_S1 = {
   plannedQty: null,
   plannedDate: "2026-07-28",
   boxCapacity: null,
-  palletCapacity: null,
+  palletBoxCapacity: null,
   palletsEnabled: false,
   createdFrom: "admin",
   openedAt: null,

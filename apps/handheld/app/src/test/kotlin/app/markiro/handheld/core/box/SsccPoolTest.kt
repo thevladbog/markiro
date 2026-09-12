@@ -72,6 +72,20 @@ class SsccPoolTest {
     }
 
     @Test
+    fun aFreshBlockIsSeededFromWhatTheServerKnowsWasConsumed() = runTest {
+        // The RE-APPLY case above only proves `advance`'s MAX-based update: the
+        // row already exists at 100 by the time the consumed cursor arrives, so
+        // `insertIgnore`'s own seed never gets a chance to matter. A device
+        // seeing this block for the very FIRST time -- reinstalled, or a range
+        // the server cuts already partially consumed elsewhere -- has no such
+        // row, and it is `insertIgnore`'s seed that lands as `nextSerial`. A
+        // device seeded from a fresh block whose server cursor has already
+        // advanced would otherwise reissue serials already on physical labels.
+        pool.addRange(range(100, 200, consumed = 150))
+        assertEquals(151L, pool.burn("468008990", 0))
+    }
+
+    @Test
     fun revokedRangesAreDeletedSoTheReplacementWins() = runTest {
         // Burning picks the lowest fromSerial with room, so a revoked low range
         // left in place would keep winning over the reseeded one and the

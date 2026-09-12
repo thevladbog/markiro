@@ -13,6 +13,7 @@ import { loadEnv } from "../src/env";
 import { atomicSeedSscc, seedFloor, SsccService } from "../src/modules/sscc/sscc.service";
 import { listenOnLoopback } from "./support/listen-loopback";
 import { createTestStationDevice, signUpAndActivate } from "./support/auth";
+import { findCounter } from "./support/sscc-counters";
 
 /**
  * Same env-gating as sscc.e2e.test.ts / org-profile.e2e.test.ts -- requires a
@@ -99,7 +100,7 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
       .send({ extensionDigit: 0, nextSerial: 45_000 })
       .expect(200);
     const res = await agent.get("/org/profile/sscc").expect(200);
-    expect(res.body).toMatchObject({ extensionDigit: 0, nextSerial: 45_000 });
+    expect(findCounter(res, 0)).toMatchObject({ extensionDigit: 0, nextSerial: 45_000 });
   });
 
   it("rejects an extension digit outside 0..9", async () => {
@@ -159,7 +160,7 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
       .send({ extensionDigit: 0, nextSerial: 900 })
       .expect(200);
     const own = await agent.get("/org/profile/sscc").expect(200);
-    expect(own.body.nextSerial).toBe(100);
+    expect(findCounter(own, 0).nextSerial).toBe(100);
   });
 
   it("reads back a counterparty's own seeded counter", async () => {
@@ -168,7 +169,7 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
       .send({ extensionDigit: 0, nextSerial: 12_345 })
       .expect(200);
     const res = await agent.get(`/counterparties/${counterpartyId}/sscc`).expect(200);
-    expect(res.body).toMatchObject({ extensionDigit: 0, nextSerial: 12_345 });
+    expect(findCounter(res, 0)).toMatchObject({ extensionDigit: 0, nextSerial: 12_345 });
   });
 
   it("404s a counterparty counter id that does not exist", async () => {
@@ -185,10 +186,10 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
     // Org B's own counter starts fresh at 1 -- NOT org A's 555. A missing
     // tenant filter in getSscc's WHERE clause would leak org A's row here.
     const res = await agent2.get("/org/profile/sscc").expect(200);
-    expect(res.body).toMatchObject({ extensionDigit: 0, nextSerial: 1 });
+    expect(findCounter(res, 0)).toMatchObject({ extensionDigit: 0, nextSerial: 1 });
 
     const stillOwn = await agent.get("/org/profile/sscc").expect(200);
-    expect(stillOwn.body.nextSerial).toBe(555);
+    expect(findCounter(stillOwn, 0).nextSerial).toBe(555);
   });
 
   it("tenant isolation: a second organization cannot read or seed org A's counterparty counter", async () => {
@@ -219,10 +220,10 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
     // tenantId filter (matching on issuerPrefix + extensionDigit alone)
     // would return SOME row here instead of none.
     const resB = await agentB.get("/org/profile/sscc").expect(200);
-    expect(resB.body).toMatchObject({ extensionDigit: 0, nextSerial: 1 });
+    expect(findCounter(resB, 0)).toMatchObject({ extensionDigit: 0, nextSerial: 1 });
 
     const resA = await agentA.get("/org/profile/sscc").expect(200);
-    expect(resA.body.nextSerial).toBe(700);
+    expect(findCounter(resA, 0).nextSerial).toBe(700);
   });
 
   it("tenant isolation: counterparties of two different tenants sharing a prefix keep separate counters", async () => {
@@ -248,7 +249,7 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
 
     // Same prefix as counterparty A, different tenant -- must read as fresh.
     const resB = await agentB.get(`/counterparties/${cpBId}/sscc`).expect(200);
-    expect(resB.body).toMatchObject({ extensionDigit: 0, nextSerial: 1 });
+    expect(findCounter(resB, 0)).toMatchObject({ extensionDigit: 0, nextSerial: 1 });
   });
 
   describe("putSscc floor (final review, finding 2)", () => {
@@ -272,7 +273,7 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
       await agent.put("/org/profile").send({ gln: freshGln() }).expect(200);
       await agent.put("/org/profile/sscc").send({ extensionDigit: 0, nextSerial: 777 }).expect(200);
       const res = await agent.get("/org/profile/sscc").expect(200);
-      expect(res.body).toMatchObject({ extensionDigit: 0, nextSerial: 777 });
+      expect(findCounter(res, 0)).toMatchObject({ extensionDigit: 0, nextSerial: 777 });
     });
 
     it("rejects seeding below the floor once a serial has been printed, but allows seeding at or above it", async () => {
@@ -299,7 +300,9 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
         .put("/org/profile/sscc")
         .send({ extensionDigit: 0, nextSerial: floor })
         .expect(200);
-      expect((await agent.get("/org/profile/sscc").expect(200)).body.nextSerial).toBe(floor);
+      expect(findCounter(await agent.get("/org/profile/sscc").expect(200), 0).nextSerial).toBe(
+        floor,
+      );
     });
 
     it("rejects seeding below the floor for a counterparty's counter once a serial has been printed", async () => {
@@ -333,9 +336,9 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
         .put(`/counterparties/${cpId}/sscc`)
         .send({ extensionDigit: 0, nextSerial: floor })
         .expect(200);
-      expect((await agent.get(`/counterparties/${cpId}/sscc`).expect(200)).body.nextSerial).toBe(
-        floor,
-      );
+      expect(
+        findCounter(await agent.get(`/counterparties/${cpId}/sscc`).expect(200), 0).nextSerial,
+      ).toBe(floor);
     });
 
     it("floors on what was printed, not on what was handed out", async () => {
@@ -353,7 +356,7 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
 
       await agent.put("/org/profile/sscc").send({ extensionDigit: 0, nextSerial: 10 }).expect(400);
       await agent.put("/org/profile/sscc").send({ extensionDigit: 0, nextSerial: 11 }).expect(200);
-      expect((await agent.get("/org/profile/sscc").expect(200)).body.nextSerial).toBe(11);
+      expect(findCounter(await agent.get("/org/profile/sscc").expect(200), 0).nextSerial).toBe(11);
     });
 
     it("floors at the box minimum when nothing was ever printed", async () => {
@@ -540,7 +543,7 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
       expect(res.body.code).toBe("sscc_seed_active_shift");
 
       const state = await agent.get("/org/profile/sscc").expect(200);
-      expect(state.body.blockedBy).toEqual({
+      expect(findCounter(state, 0).blockedBy).toEqual({
         kind: "active_shift",
         shiftId: shift.id,
         shiftNumber: shift.number,
@@ -559,8 +562,9 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
       await service.recordConsumedSerial(tenantId, buildSscc(0, prefix, 7));
 
       const res = await agent.get("/org/profile/sscc").expect(200);
-      expect(res.body.minSerial).toBe(8);
-      expect(res.body.blockedBy).toBeNull();
+      const boxCounter = findCounter(res, 0);
+      expect(boxCounter.minSerial).toBe(8);
+      expect(boxCounter.blockedBy).toBeNull();
     });
 
     it("revokes the device's live block when the value changes, and leaves it when it does not", async () => {
@@ -585,7 +589,7 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
       // Re-saving the value the counter already holds must NOT revoke: every
       // redundant "Save" would otherwise burn a whole block and tear a
       // 2000-serial hole in the numbering.
-      const unchanged = (await agent.get("/org/profile/sscc").expect(200)).body.nextSerial;
+      const unchanged = findCounter(await agent.get("/org/profile/sscc").expect(200), 0).nextSerial;
       await agent
         .put("/org/profile/sscc")
         .send({ extensionDigit: 0, nextSerial: unchanged })
@@ -614,7 +618,7 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
         .send({ extensionDigit: 0, nextSerial: 900 })
         .expect(409);
       expect(res.body.code).toBe("sscc_seed_device_out_of_sync");
-      expect((await agent.get("/org/profile/sscc").expect(200)).body.blockedBy).toEqual({
+      expect(findCounter(await agent.get("/org/profile/sscc").expect(200), 0).blockedBy).toEqual({
         kind: "device_out_of_sync",
         deviceId,
         deviceName: "Line 1 terminal",

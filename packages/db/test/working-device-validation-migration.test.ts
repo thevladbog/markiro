@@ -130,14 +130,17 @@ describe.skipIf(!databaseUrl)("working-device constraint validation upgrade", ()
       { conname: "working_device_events_action_check", convalidated: true },
       { conname: "working_device_events_replacement_check", convalidated: true },
     ]);
+    // The validation migration is no longer the chain's tail — 06d appended
+    // two more — so assert the runner journalled it as its own entry and then
+    // carried on through the rest of the chain, in order and exactly once.
+    const applied = (
+      await pool.query<{ hash: string }>(
+        "SELECT hash FROM drizzle.__drizzle_migrations ORDER BY id",
+      )
+    ).rows.map((row) => row.hash);
+    expect(applied.slice(135)).toEqual(migrations.slice(135).map((migration) => migration.hash));
+    expect(applied[136]).toBe(validationMigration?.hash);
     expect((await latest()).rows).toEqual([{ hash: migrations.at(-1)?.hash }]);
-    expect(
-      (
-        await pool.query("SELECT hash FROM drizzle.__drizzle_migrations WHERE hash=$1", [
-          validationMigration?.hash,
-        ])
-      ).rows,
-    ).toEqual([{ hash: validationMigration?.hash }]);
     expect((await pool.query("SELECT * FROM working_device_events ORDER BY id")).rows).toEqual(
       before,
     );

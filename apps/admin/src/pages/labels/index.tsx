@@ -4,7 +4,7 @@ import { Link } from "react-router";
 
 import { Alert, Badge, Button, EmptyState, PageHeader, Spinner } from "@markiro/ui";
 
-import { CABINET_CAPABILITY } from "@markiro/domain";
+import { CABINET_CAPABILITY, type LabelTemplatePurpose } from "@markiro/domain";
 
 import { useCan } from "../../access/context.js";
 import { ApiRequestError } from "../../api/client.js";
@@ -78,6 +78,18 @@ const FILTER_LABEL_KEY: Record<LibraryFilter, string> = {
   disabled: "pages.labels.filterDisabled",
 };
 
+/**
+ * Exhaustive over `LabelTemplatePurpose` (not a binary ternary) so a purpose
+ * added later cannot silently fall through to the box badge the way
+ * "pallet" did before this map existed -- TypeScript requires every key of
+ * the union to be present in a `Record<LabelTemplatePurpose, ...>` literal.
+ */
+const PURPOSE_BADGE_KEY: Record<LabelTemplatePurpose, string> = {
+  box: "pages.labels.purpose.box",
+  product_duplicate: "pages.labels.purpose.duplicate",
+  pallet: "pages.labels.purpose.pallet",
+};
+
 function TemplateCard({
   item,
   groups,
@@ -145,13 +157,7 @@ function TemplateCard({
             height: item.heightMm.toFixed(1),
           })}
         </Badge>
-        <Badge>
-          {t(
-            item.purpose === "product_duplicate"
-              ? "pages.labels.purpose.duplicate"
-              : "pages.labels.purpose.box",
-          )}
-        </Badge>
+        <Badge>{t(PURPOSE_BADGE_KEY[item.purpose])}</Badge>
         <Badge
           {...(scope.title ? { title: scope.title } : {})}
           style={{

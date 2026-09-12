@@ -83,7 +83,7 @@ describe("atomic National Catalog product application (real PostgreSQL services)
       gtin14: GTIN,
       name: "Моё имя",
       boxCapacity: 12,
-      palletCapacity: 60,
+      palletBoxCapacity: 60,
       unitPrice: "19.20",
       externalRef: "1C-unchanged",
     });
@@ -484,7 +484,7 @@ describe("atomic National Catalog product application (real PostgreSQL services)
       gtin14: GTIN,
       status: "draft",
       boxCapacity: null,
-      palletCapacity: null,
+      palletBoxCapacity: null,
       unitPrice: null,
       externalRef: null,
     });
@@ -534,7 +534,7 @@ describe("atomic National Catalog product application (real PostgreSQL services)
     source.categories = [{ id: 30064, name: "Категория" }];
     const p = await preview(undefined, undefined, [23]);
     const group = p.fields.find((field) => field.labelKey === "chz_product_group_code");
-    expect(group).toMatchObject({ applicable: true, selectedByDefault: false });
+    expect(group).toMatchObject({ applicable: true, selectedByDefault: true });
     const body = decision(p);
     body.decisions[0]!.acceptedEntryIds = [group!.id];
     const result = await apply(body);
@@ -712,7 +712,7 @@ describe("atomic National Catalog product application (real PostgreSQL services)
       chzProductGroupCode: 23,
       status: "active",
       boxCapacity: 12,
-      palletCapacity: 60,
+      palletBoxCapacity: 60,
       unitPrice: "19.20",
       externalRef: "1C-unchanged",
     });

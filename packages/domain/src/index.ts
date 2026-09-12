@@ -58,6 +58,7 @@ export {
 } from "./labels/model.js";
 export {
   isBoxLabelTemplateEligible,
+  isPalletLabelTemplateEligible,
   labelTemplateUsesField,
   resolveBoxLabelTemplateDefault,
 } from "./labels/eligibility.js";
@@ -75,6 +76,8 @@ export {
   localIsoDate,
 } from "./labels/box-label.js";
 export type { BoxLabelInput } from "./labels/box-label.js";
+export { palletLabelFields } from "./labels/pallet-label.js";
+export type { PalletLabelInput } from "./labels/pallet-label.js";
 export {
   code128ModuleCount,
   CODE128_FNC1_MODULES,
@@ -94,6 +97,7 @@ export {
   buildPrintNameBoxLabelTemplates,
 } from "./labels/defaults.js";
 export type { DefaultLabelTemplate, LegacyStockLabelTemplate } from "./labels/defaults.js";
+export { buildPalletLabelTemplates, PALLET_LABEL_TEMPLATE_NAME } from "./labels/pallet-defaults.js";
 export type {
   LabelBarcodeElement,
   LabelBoxElement,
@@ -165,7 +169,11 @@ export {
   verifyPhc,
 } from "./crypto/phc.js";
 export type { ParsedPhc } from "./crypto/phc.js";
-export { MAX_BOX_CLOSURES_PER_SYNC_BATCH } from "./sync/limits.js";
+export {
+  MAX_BOX_CLOSURES_PER_SYNC_BATCH,
+  MAX_PALLET_CLOSURES_PER_SYNC_BATCH,
+  MAX_SYNC_BATCH_ID_CHARS,
+} from "./sync/limits.js";
 export {
   isShiftCloseReasonCode,
   SHIFT_CLOSE_REASON_CODES,
@@ -322,6 +330,7 @@ export type {
   ShiftExportDomainErrorCode,
   ShiftExportFormatDescriptor,
   ShiftExportFormatId,
+  ShiftExportPalletGroup,
   ShiftExportPart,
   ShiftExportSource,
 } from "./shift-exports.js";

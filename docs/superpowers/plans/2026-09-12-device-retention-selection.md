@@ -22,7 +22,7 @@
 - Historical journal and receipts are immutable. Current selected set has optimistic revision, shared by cabinet/platform; no lost updates. Persist the full tenant-scoped selected membership.
 - Heartbeat time is not an empty-queue proof. Show known server work and local queues as unknown; no automatic transfer or deletion. Historical observations retain their original facts.
 - Strict shared contracts, OpenAPI and route inventories, RU/EN, existing @markiro/ui and keyboard/narrow layouts. Native DTOs remain unchanged. Retention transitions and rendering have one shared UI owner; transport authorization and query/cache registration remain surface-specific.
-- New forward migration after 0136 only; no edits to applied SQL/metadata. Rebuild changed shared packages before consumers; keep mutable outputs in this worktree.
+- New forward migration 0139 after the main-branch pallet migrations 0137/0138 only; no edits to applied SQL/metadata. Rebuild changed shared packages before consumers; keep mutable outputs in this worktree.
 - No commit, push, PR, deployment or cleanup in this delivery without subsequent user authorization. Reports and review packets are ignored local artifacts.
 
 ## Technical scope and boundary selection

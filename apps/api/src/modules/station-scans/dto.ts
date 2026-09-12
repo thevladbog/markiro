@@ -5,7 +5,9 @@ import {
   kmHash,
   MAX_BOX_CLOSURES_PER_SYNC_BATCH,
   MAX_KM_UTF8_BYTES,
+  MAX_PALLET_CLOSURES_PER_SYNC_BATCH,
   MAX_PRODUCT_LABEL_EVENTS,
+  MAX_SYNC_BATCH_ID_CHARS,
   productLabelEventSchema,
   productLabelReceiptSchema,
   type ProductLabelReceipt,
@@ -106,6 +108,10 @@ const boxClosureSchema = z
     // Defaults preserve compatibility with older stations that omit outcomes.
     printVerifiedAt: z.string().datetime().nullable().default(null),
     printSkippedAt: z.string().datetime().nullable().default(null),
+    // Which pallet this box stands on, as the DEVICE names it. Defaulted for
+    // compatibility with a station that predates 06d: its box is simply not
+    // on a pallet, which is exactly what it means.
+    devicePalletId: z.string().min(1).max(64).nullable().default(null),
   })
   .superRefine((closure, ctx) => {
     if (closure.printVerifiedAt !== null && closure.printSkippedAt !== null) {
@@ -116,6 +122,47 @@ const boxClosureSchema = z
       });
     }
   });
+
+/**
+ * A pallet closing on the device. `palletId` is the DEVICE-local pallet id, not
+ * a server uuid, and is scoped by shift/terminal for exactly the reason
+ * `boxClosureSchema.boxId` is: the device-local string alone is not unique.
+ */
+const palletClosureSchema = z
+  .object({
+    palletId: z.string().min(1).max(64),
+    shiftId: z.string().uuid().toLowerCase(),
+    terminalId: z.string().nullable(),
+    sscc: z.string().regex(/^\d{18}$/),
+    closedAt: z.string().datetime(),
+    operatorId: z.string().uuid().toLowerCase().nullable(),
+    printVerifiedAt: z.string().datetime().nullable().default(null),
+    printSkippedAt: z.string().datetime().nullable().default(null),
+  })
+  .superRefine((closure, ctx) => {
+    if (closure.printVerifiedAt !== null && closure.printSkippedAt !== null) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["printSkippedAt"],
+        message: "print verification outcomes are mutually exclusive",
+      });
+    }
+  });
+
+/**
+ * An operator exception against a closed pallet. Only two kinds exist:
+ * «закрыть паллету досрочно» is an ordinary close, not an exception.
+ */
+const palletExceptionSchema = z.object({
+  kind: z.enum(["disassemble", "reprint"]),
+  palletId: z.string().min(1).max(64),
+  shiftId: z.string().uuid().toLowerCase(),
+  terminalId: z.string().nullable(),
+  operatorId: z.string().uuid().toLowerCase().nullable(),
+  // Both kinds require one, exactly as box disassemble and reprint do.
+  reason: z.string().min(1).max(500),
+  occurredAt: z.string().datetime(),
+});
 
 export const syncBatchSchema = z.object({
   // Device-generated: "<machineId>:<per-installation id>:<highest outbox id
@@ -128,7 +175,13 @@ export const syncBatchSchema = z.object({
   // local database is recreated, so a device that lost just its local
   // database (but kept its enrollment) cannot collide with a key already
   // recorded for the database it replaced.
-  batchId: z.string().min(1).max(200),
+  // Bounded by the shared `MAX_SYNC_BATCH_ID_CHARS` rather than a literal:
+  // the station folds every channel's identity into this key, so its length
+  // grows with what a batch may carry, and an over-long key is the same
+  // permanent wedge an over-sized payload is (see that constant's own
+  // comment). The station folds an over-long key into a bounded digest, which
+  // only works while both sides read the bound from one place.
+  batchId: z.string().min(1).max(MAX_SYNC_BATCH_ID_CHARS),
   // Kept equal to the station drain size so the largest client-generated
   // payload remains below the API's JSON body ceiling.
   items: z.array(scanItemSchema).max(100),
@@ -155,6 +208,40 @@ export const syncBatchSchema = z.object({
     // item delivery on that device forever (the drain retries a rejected
     // batch indefinitely rather than ever dropping data).
     .max(MAX_BOX_CLOSURES_PER_SYNC_BATCH)
+    .default([]),
+  // Pallet closures carried by this batch. Independent of `boxes` for the
+  // same reason box closures are independent of items: a pallet closes long
+  // after the box that filled it, in a batch that may carry neither.
+  pallets: z
+    .array(palletClosureSchema)
+    // Shared with both devices' drain loops. The two sides MUST agree -- see
+    // MAX_PALLET_CLOSURES_PER_SYNC_BATCH's own comment for what a mismatch
+    // wedges.
+    .max(MAX_PALLET_CLOSURES_PER_SYNC_BATCH)
+    // One closure per pallet per batch, the same in-batch uniqueness rule
+    // `productLabelEvents` above carries. Without it, two closures for one
+    // pallet carrying DIFFERENT serials both reach the ingest: the first wins
+    // the `closed_at IS NULL` match, the second silently no-ops -- yet BOTH
+    // serials are marked consumed, so one of them is burned with no row
+    // naming it.
+    //
+    // Keyed on (shiftId, palletId) and deliberately NOT on terminalId: the
+    // ingest substitutes the authenticated device id into every record's
+    // `terminalId` before any of them is resolved to a pallet, so two closures
+    // differing only in their wire terminal name the SAME pallet by the time
+    // it matters.
+    .refine(
+      (pallets) =>
+        new Set(pallets.map((pallet) => `${pallet.shiftId}|${pallet.palletId}`)).size ===
+        pallets.length,
+      "Pallet closures must name each pallet at most once in a batch",
+    )
+    .default([]),
+  // Pallet exceptions (disassemble/reprint). Bounded by the same constant: a
+  // batch cannot carry exceptions against more pallets than it could close.
+  palletExceptions: z
+    .array(palletExceptionSchema)
+    .max(MAX_PALLET_CLOSURES_PER_SYNC_BATCH)
     .default([]),
   // Operator exceptions carried by this batch (undo/clear/disassemble/
   // reprint) -- see box-exceptions.ts. Independent of `items`/`boxes` for
@@ -273,7 +360,13 @@ export interface BatchConflictDto {
 }
 
 export interface DeniedStationRecordDto {
-  recordKind: "item" | "box" | "exception" | "product_label_event";
+  /**
+   * Must stay in step with `station_sync_quarantine_record_kind_check`
+   * (packages/db/src/schema/platform.ts): every kind the ingest can deny is
+   * also written to the quarantine table, and a kind missing from that CHECK
+   * raises 23514 and 500s the whole batch instead.
+   */
+  recordKind: "item" | "box" | "exception" | "product_label_event" | "pallet" | "pallet_exception";
   recordIndex: number;
   shiftId: string;
   code: ProductLabelRejectionCode | "legacy_unbound_replay";
@@ -338,7 +431,10 @@ const deniedStationRecordOpenApiSchema: SchemaObject = {
   additionalProperties: false,
   required: ["recordKind", "recordIndex", "shiftId", "code"],
   properties: {
-    recordKind: { type: "string", enum: ["item", "box", "exception", "product_label_event"] },
+    recordKind: {
+      type: "string",
+      enum: ["item", "box", "exception", "product_label_event", "pallet", "pallet_exception"],
+    },
     recordIndex: { type: "integer", minimum: 0 },
     shiftId: { type: "string", format: "uuid" },
     code: {

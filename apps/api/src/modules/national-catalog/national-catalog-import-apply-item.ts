@@ -294,7 +294,7 @@ export async function applyImportItem(
         status: productWriter.computeStatus({
           chzProductGroupCode: groupCode,
           boxCapacity: product.boxCapacity,
-          palletCapacity: product.palletCapacity,
+          palletBoxCapacity: product.palletBoxCapacity,
         }),
       })
       .where(and(eq(schema.products.tenantId, actor.tenantId), eq(schema.products.id, productId)));
@@ -348,8 +348,8 @@ export async function applyImportItem(
             schemaVersionId: version.id,
             categoryId: version.categoryId,
             categoryName: version.categoryName,
-            tnVedCode: null,
-            okpd2Code: null,
+            tnVedCode: category.classification?.tnVedCode ?? null,
+            okpd2Code: category.classification?.okpd2Code ?? null,
           },
           entries: [],
         },

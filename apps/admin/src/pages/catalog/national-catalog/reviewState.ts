@@ -9,12 +9,28 @@ export function initialChoice(preview: ImportPreview): ReviewChoice {
   const photo = !preview.productId
     ? preview.photos.find((p) => p.state === "ready" && p.selectedByDefault && p.reason === null)
     : undefined;
+  const selected = new Set(
+    preview.fields
+      .filter(
+        (f) => f.applicable && f.selectedByDefault && (!preview.productId || f.before === null),
+      )
+      .map((f) => f.id),
+  );
+  // Never submit a dependent value whose category was not selected.
+  let removed = true;
+  while (removed) {
+    removed = false;
+    for (const field of preview.fields) {
+      if (selected.has(field.id) && field.requiresEntryIds.some((id) => !selected.has(id))) {
+        selected.delete(field.id);
+        removed = true;
+      }
+    }
+  }
   return {
     decision: {
       previewId: preview.id,
-      acceptedEntryIds: preview.fields
-        .filter((f) => f.applicable && !preview.productId && f.selectedByDefault)
-        .map((f) => f.id),
+      acceptedEntryIds: [...selected],
       linkAction: preview.linkAction,
       photo: photo ? { kind: "candidate", candidateId: photo.candidateId } : { kind: "keep" },
     },

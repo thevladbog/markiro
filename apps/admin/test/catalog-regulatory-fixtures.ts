@@ -15,7 +15,7 @@ export function product(group = 23): ProductDto {
     productGroup: "Тестовая группа",
     chzProductGroupCode: group,
     boxCapacity: 12,
-    palletCapacity: 48,
+    palletBoxCapacity: 4,
     unitPrice: null,
     egaisCode: null,
     shelfLifeDays: 180,

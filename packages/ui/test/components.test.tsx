@@ -569,6 +569,34 @@ describe("Select", () => {
     expect(onValueChange).toHaveBeenCalledWith("Вода");
   });
 
+  it("edits a searchable select filter with selection, caret movement and paste", async () => {
+    const user = userEvent.setup();
+    const onValueChange = vi.fn();
+    render(
+      <Select
+        label="Категория"
+        searchable
+        searchLabel="Поиск категории"
+        options={["Соки", "Нектары"]}
+        onValueChange={onValueChange}
+      />,
+    );
+    await user.click(screen.getByRole("combobox", { name: "Категория" }));
+    const search = screen.getByRole("searchbox", { name: "Поиск категории" });
+    await user.type(search, "нек");
+    await user.keyboard("{Control>}a{/Control}{Backspace}");
+    expect(search).toHaveProperty("value", "");
+    await user.type(search, "соки");
+    await user.keyboard("{Home}{Delete}н");
+    expect(search).toHaveProperty("value", "ноки");
+    await user.keyboard("{Control>}a{/Control}");
+    await user.paste("нек");
+    expect(search).toHaveProperty("value", "нек");
+    expect(document.activeElement).toBe(search);
+    await user.keyboard("{ArrowDown}{Enter}");
+    expect(onValueChange).toHaveBeenCalledWith("Нектары");
+  });
+
   it("closes on Escape and returns focus to its trigger", async () => {
     const user = userEvent.setup();
     render(<Select label="Группа" options={["Пиво", "Вода"]} value="Пиво" />);

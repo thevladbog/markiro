@@ -18,6 +18,14 @@ export const LABEL_FIELDS = [
   "date",
   "expiry",
   "qty",
+  /**
+   * Boxes on a pallet. Distinct from `qty`, which stays a count of PRODUCT
+   * UNITS at whatever level the label describes: a pallet label normally
+   * prints both, and a receiving clerk who reads the units figure as boxes
+   * has miscounted the pallet. Renders empty on a box label — a box holds no
+   * boxes.
+   */
+  "qty.boxes",
   "operator",
   "counterparty.name",
 ] as const;
@@ -260,6 +268,7 @@ export function sampleLabelData(): Record<LabelField, string> {
     date: formatLabelDate("2026-07-23"),
     expiry: formatLabelDate("2027-01-19"),
     qty: "20",
+    "qty.boxes": "12",
     operator: "Смирнов А.",
     "counterparty.name": "Завод Партнер",
   };
@@ -271,6 +280,17 @@ export function sampleLabelData(): Record<LabelField, string> {
  * print shipped a bare `5`.
  */
 export const QTY_UNIT_SUFFIX = "шт.";
+
+/**
+ * The unit appended to a plain numeric `qty.boxes` — «кор.», short for
+ * «коробов».
+ *
+ * A pallet label prints two counts side by side, and they must not be
+ * mistakable for one another: the units figure carries «шт.» and the box
+ * count «кор.», so the label reads correctly even when a template author
+ * binds the field without a caption beside it.
+ */
+export const BOX_QTY_UNIT_SUFFIX = "кор.";
 
 /**
  * Resolves a `field` element's display text — the ONE display-formatting
@@ -287,6 +307,8 @@ export const QTY_UNIT_SUFFIX = "шт.";
  * - `qty` gains the unit «шт.» — a box label's quantity is a count of pieces
  *   and the approved mock-up prints the unit; a bare `5` is what the first
  *   physical print got wrong.
+ * - `qty.boxes` gains «кор.», so a pallet label's two counts cannot be read
+ *   for one another.
  *
  * Both are TOLERANT by design: preview/generation may run with empty or
  * arbitrary data, so anything that does not match the expected shape is
@@ -317,6 +339,13 @@ export function labelFieldDisplayValue(
   if (field === "qty") {
     const digits = value.trim();
     if (/^\d+$/.test(digits)) return `${digits} ${QTY_UNIT_SUFFIX}`;
+  }
+  // Same tolerance rule as `qty` above, for the same reasons: only an
+  // entirely-decimal value is suffixed, so "" stays empty and a value that
+  // already carries the unit is not doubled.
+  if (field === "qty.boxes") {
+    const digits = value.trim();
+    if (/^\d+$/.test(digits)) return `${digits} ${BOX_QTY_UNIT_SUFFIX}`;
   }
   return value;
 }

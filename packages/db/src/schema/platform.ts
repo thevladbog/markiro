@@ -92,7 +92,14 @@ export const products = pgTable(
     printName: text("print_name"),
     chzProductGroupCode: integer("chz_product_group_code").references(() => chzProductGroups.code),
     boxCapacity: integer("box_capacity"),
-    palletCapacity: integer("pallet_capacity"),
+    /**
+     * How many BOXES fit on a pallet. Renamed from `pallet_capacity` in 06d:
+     * the column used to hold product units, but a pallet fills with boxes,
+     * and a box closed short would otherwise make "full" land at an
+     * unpredictable box count. Migration 0137 converted the units values and
+     * nulled the ones it could not convert.
+     */
+    palletBoxCapacity: integer("pallet_box_capacity"),
     status: productStatus("status").notNull().default("draft"),
     // Operator-set "do not use" flag, orthogonal to the computed `status`:
     // an archived product stays for history (orders, shifts, reports) but is
@@ -204,8 +211,14 @@ export const shifts = pgTable(
     mode: shiftMode("mode").notNull(),
     plannedQty: integer("planned_qty"),
     boxCapacity: integer("box_capacity"),
-    palletCapacity: integer("pallet_capacity"),
+    /** Boxes per pallet — see `products.palletBoxCapacity`. */
+    palletBoxCapacity: integer("pallet_box_capacity"),
     palletsEnabled: boolean("pallets_enabled").notNull().default(false),
+    /**
+     * The shift's pallet-label snapshot. Resolved at creation the same way
+     * `boxLabelTemplateId` is: category default → organisation default → none.
+     */
+    palletLabelTemplateId: uuid("pallet_label_template_id"),
     createdFrom: shiftOrigin("created_from").notNull().default("admin"),
     /**
      * The shift's human number, split into its immutable parts: `AUG26` +
@@ -301,6 +314,11 @@ export const shifts = pgTable(
     foreignKey({
       name: "shifts_tenant_box_label_template_fk",
       columns: [t.tenantId, t.boxLabelTemplateId],
+      foreignColumns: [labelTemplates.tenantId, labelTemplates.id],
+    }),
+    foreignKey({
+      name: "shifts_tenant_pallet_label_template_fk",
+      columns: [t.tenantId, t.palletLabelTemplateId],
       foreignColumns: [labelTemplates.tenantId, labelTemplates.id],
     }),
   ],
@@ -615,9 +633,20 @@ export const stationSyncQuarantine = pgTable(
     ),
     index("station_sync_quarantine_tenant_time_idx").on(t.tenantId, t.quarantinedAt),
     check("station_sync_quarantine_digest_check", sql`${t.payloadDigest} ~ '^[0-9a-f]{64}$'`),
+    // Every record kind `/station/scans` can deny MUST appear here. A kind the
+    // ingest path denies but this CHECK rejects does not merely fail to
+    // quarantine: the insert raises 23514 and 500s the whole batch, and the
+    // station's drain retries a 5xx forever. The alternative the API took
+    // before 06d -- dropping the unlistable kind with only a log line -- is
+    // worse still: `sync_batches` stores a digest, never the body, and the
+    // drain acks and DELETEs its outbox rows unconditionally, so a physically
+    // labelled pallet's closure would be lost with no recoverable record
+    // anywhere. Widening this is additive and safe against an
+    // already-installed station, whose `isDeniedStationRecord` FILTERS
+    // unrecognised kinds rather than throwing.
     check(
       "station_sync_quarantine_record_kind_check",
-      sql`${t.recordKind} IN ('item', 'box', 'exception', 'product_label_event')`,
+      sql`${t.recordKind} IN ('item', 'box', 'exception', 'product_label_event', 'pallet', 'pallet_exception')`,
     ),
     check("station_sync_quarantine_record_index_check", sql`${t.recordIndex} >= 0`),
     check("station_sync_quarantine_reason_check", sql`char_length(${t.reason}) BETWEEN 1 AND 64`),
@@ -863,8 +892,45 @@ export const boxes = pgTable(
      * is retired: excluded from "active" listings, and its `sscc` is never
      * reissued — a box re-packed after disassembly is a brand-new row with
      * a brand-new SSCC through the ordinary `SsccService.allocate` path.
+     *
+     * This is the OPERATOR'S OWN ACCOUNT of when it happened: the station
+     * path writes the device-supplied `occurredAt` of the `disassemble`
+     * exception, from a terminal that may have been offline for a whole
+     * shift and whose clock has no skew bound. It belongs in the audit trail
+     * and is what the cabinet displays — it must NEVER be ordered against a
+     * server instant. Use `disassemblyReceivedAt` for that.
      */
     disassembledAt: timestamp("disassembled_at", { withTimezone: true }),
+    /**
+     * Server-assigned `now()` at the SAME statement that sets
+     * `disassembledAt`, for exactly the reason `closureReceivedAt` exists
+     * next to `closedAt`. The pallet list's `contentsChangedAfterClose`
+     * ("a member box came off this pallet AFTER it was closed and labelled"
+     * — the only way a manager learns a labelled pallet left the factory a
+     * box short) compares THIS column against `pallets.closureReceivedAt`,
+     * itself a server `now()`. Comparing the device's `disassembledAt`
+     * against a server instant is comparing two unrelated clocks: a station
+     * running behind makes a box that genuinely came off after the closure
+     * compare as before it, and the flag silently stays false.
+     *
+     * Also the key that matches a `box_items.removedAt` released BY this
+     * disassembly (`emptyBox`'s own server `now()`, written in the same
+     * transaction, so the two values are equal to the microsecond — `now()`
+     * is `transaction_timestamp()`), which is how the box report tells an
+     * item the disassembly released from one another scan displaced.
+     *
+     * Backfilled by migration 0137 from the `disassemble` exception's own
+     * server-assigned `recorded_at`; see that file for the reasoning.
+     */
+    disassemblyReceivedAt: timestamp("disassembly_received_at", { withTimezone: true }),
+    /**
+     * The pallet this box stands on, or null. Set in the box-closure
+     * statement itself — a box's membership and its closure are one fact —
+     * and never cleared: when a pallet is disassembled this stays as the
+     * record that the box stood on it, exactly as `box_items` are marked
+     * rather than deleted.
+     */
+    palletId: uuid("pallet_id"),
     registryVersion: bigint("registry_version", { mode: "bigint" })
       .notNull()
       .default(sql`0`),
@@ -924,6 +990,15 @@ export const boxes = pgTable(
       columns: [t.tenantId, t.operatorId],
       foreignColumns: [employees.tenantId, employees.id],
     }),
+    index("boxes_tenant_pallet_idx").on(t.tenantId, t.palletId),
+    // Nullable, so MATCH SIMPLE skips every box that is not on a pallet.
+    // `pallets` is declared below; the constraint callback is evaluated
+    // lazily, the same way `box_items` already references `boxes`.
+    foreignKey({
+      name: "boxes_tenant_pallet_fk",
+      columns: [t.tenantId, t.palletId],
+      foreignColumns: [pallets.tenantId, pallets.id],
+    }),
   ],
 );
 
@@ -957,6 +1032,137 @@ export const boxItems = pgTable(
       name: "box_items_tenant_box_fk",
       columns: [t.tenantId, t.boxId],
       foreignColumns: [boxes.tenantId, boxes.id],
+    }),
+  ],
+);
+
+/**
+ * A pallet: a stack of transport boxes built by ONE terminal inside one
+ * shift. The row is created by the first box closure that names it (see the
+ * pre-pass in `pallet-ingest.ts`), not by the pallet's own closure, for the
+ * same reason a box row is created by its first item.
+ *
+ * A pallet with a null `sscc` is one whose closure has not arrived yet —
+ * which is also exactly what an open pallet on the device looks like.
+ *
+ * Deliberately no `registry_version`: the kiosk's box registry sells boxes,
+ * and a pallet is invisible to it. Deliberately no `box_count`: the count is
+ * derived from `boxes`, the same way a box derives its item count from
+ * `box_items`, so it cannot disagree with what the pallet holds.
+ */
+export const pallets = pgTable(
+  "pallets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    shiftId: uuid("shift_id").notNull(),
+    terminalId: text("terminal_id"),
+    devicePalletId: text("device_pallet_id").notNull(),
+    sscc: char("sscc", { length: 18 }),
+    operatorId: uuid("operator_id"),
+    openedAt: timestamp("opened_at", { withTimezone: true }).notNull().defaultNow(),
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+    /**
+     * Server-assigned `now()` at the SAME statement that sets
+     * `closedAt`/`sscc`. `contentsChangedAfterClose` compares a member box's
+     * `disassemblyReceivedAt` against THIS column. BOTH sides must be
+     * server-assigned: `closedAt` is a device clock with no skew bound, and
+     * so is `boxes.disassembledAt`, so an ordering that takes either of them
+     * would report a change that did not happen, or miss one that did.
+     */
+    closureReceivedAt: timestamp("closure_received_at", { withTimezone: true }),
+    printVerifiedAt: timestamp("print_verified_at", { withTimezone: true }),
+    printSkippedAt: timestamp("print_skipped_at", { withTimezone: true }),
+    /**
+     * Set when this closed pallet was taken apart. Once set the pallet is
+     * retired and its `sscc` is never reissued. Its boxes are NOT touched:
+     * taking a pallet apart takes boxes off a stack, it does not open them.
+     */
+    disassembledAt: timestamp("disassembled_at", { withTimezone: true }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique("pallets_tenant_id_uq").on(t.tenantId, t.id),
+    unique("pallets_tenant_sscc_uq").on(t.tenantId, t.sscc),
+    // `.nullsNotDistinct()` is load-bearing for exactly the reason spelled
+    // out on `boxes_device_box_uq`: `terminalId` is nullable, a plain unique
+    // index treats every NULL as distinct, and the ingest's
+    // `ON CONFLICT (tenant_id, shift_id, terminal_id, device_pallet_id)`
+    // would then never fire for a null-terminal device — every batch would
+    // insert a NEW pallet row instead of resolving to the one already open.
+    // Unlike `boxes`, this table is CREATED by the migration that carries the
+    // constraint, so it is written correctly in the CREATE TABLE rather than
+    // hand-patched afterwards.
+    unique("pallets_device_pallet_uq")
+      .on(t.tenantId, t.shiftId, t.terminalId, t.devicePalletId)
+      .nullsNotDistinct(),
+    index("pallets_tenant_shift_idx").on(t.tenantId, t.shiftId),
+    foreignKey({
+      name: "pallets_tenant_shift_fk",
+      columns: [t.tenantId, t.shiftId],
+      foreignColumns: [shifts.tenantId, shifts.id],
+    }),
+    // Nullable — MATCH SIMPLE skips the check when a pallet closes before an
+    // operator is attributed, exactly as for boxes.
+    foreignKey({
+      name: "pallets_tenant_operator_fk",
+      columns: [t.tenantId, t.operatorId],
+      foreignColumns: [employees.tenantId, employees.id],
+    }),
+  ],
+);
+
+/**
+ * One exception fact against a closed pallet. A separate table rather than a
+ * widened `box_exceptions`: that table's `box_id` is NOT NULL with an FK and
+ * its payload CHECK already has three branches, and making the column
+ * nullable to fit pallets would weaken a hot audit table for no gain.
+ *
+ * «Закрыть паллету досрочно» is NOT here. Closing a short pallet is an
+ * ordinary close, exactly as closing a partial box is.
+ */
+export const palletExceptions = pgTable(
+  "pallet_exceptions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    kind: text("kind").$type<"disassemble" | "reprint">().notNull(),
+    palletId: uuid("pallet_id").notNull(),
+    shiftId: uuid("shift_id").notNull(),
+    terminalId: text("terminal_id"),
+    operatorId: uuid("operator_id"),
+    reason: text("reason").notNull(),
+    /**
+     * Set when a cabinet Disaggregation document did this rather than a
+     * station operator. No FK expressed HERE: `disaggregation.ts` imports
+     * FROM this file, so a composite FK in this Drizzle definition would be
+     * a hard import cycle. The FK DOES exist in the database, hand-spelled as
+     * `pallet_exceptions_tenant_disaggregation_document_fk` at the end of
+     * migration 0137 — the precedent `box_exceptions` already sets. Nullable,
+     * so MATCH SIMPLE skips every station-originated exception.
+     */
+    disaggregationDocumentId: uuid("disaggregation_document_id"),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("pallet_exceptions_tenant_pallet_idx").on(t.tenantId, t.palletId, t.recordedAt),
+    index("pallet_exceptions_tenant_shift_recorded_idx").on(t.tenantId, t.shiftId, t.recordedAt),
+    check("pallet_exceptions_kind_check", sql`${t.kind} IN ('disassemble', 'reprint')`),
+    foreignKey({
+      name: "pallet_exceptions_tenant_pallet_fk",
+      columns: [t.tenantId, t.palletId],
+      foreignColumns: [pallets.tenantId, pallets.id],
+    }),
+    foreignKey({
+      name: "pallet_exceptions_tenant_shift_fk",
+      columns: [t.tenantId, t.shiftId],
+      foreignColumns: [shifts.tenantId, shifts.id],
+    }),
+    foreignKey({
+      name: "pallet_exceptions_tenant_operator_fk",
+      columns: [t.tenantId, t.operatorId],
+      foreignColumns: [employees.tenantId, employees.id],
     }),
   ],
 );

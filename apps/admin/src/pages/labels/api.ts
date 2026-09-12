@@ -20,7 +20,7 @@ import type { LabelTemplateSpec } from "@markiro/domain";
 import { apiFetch } from "../../api/client.js";
 
 export interface LabelTemplateSummaryDto {
-  purpose: "box" | "product_duplicate";
+  purpose: "box" | "product_duplicate" | "pallet";
   id: string;
   name: string;
   widthMm: number;
@@ -34,7 +34,7 @@ export interface LabelTemplateSummaryDto {
 }
 
 export interface LabelTemplateDto {
-  purpose: "box" | "product_duplicate";
+  purpose: "box" | "product_duplicate" | "pallet";
   id: string;
   name: string;
   spec: LabelTemplateSpec;
@@ -75,7 +75,7 @@ function fetchLabelTemplate(id: string): Promise<LabelTemplateDto> {
 }
 
 export interface CreateLabelTemplateInput {
-  purpose?: "box" | "product_duplicate";
+  purpose?: "box" | "product_duplicate" | "pallet";
   name: string;
   spec: LabelTemplateSpec;
   enabled?: boolean;

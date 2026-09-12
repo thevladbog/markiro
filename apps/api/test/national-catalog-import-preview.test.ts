@@ -989,6 +989,110 @@ describe("immutable pre-product comparisons and durable preparation", () => {
     detail.mockResolvedValue(feed([value]));
     return { id, categoryId, value };
   }
+  it("preselects a sole compatible category and missing fields without changing an existing name", async () => {
+    await category();
+    const p = await local();
+    const result = await run();
+    const preview = result.items[0]!;
+    expect(preview.productId).toBe(p.id);
+    expect(preview.categoryOptions).toEqual([
+      expect.objectContaining({ selected: true, label: "Категория" }),
+    ]);
+    expect(preview.fields.find((f) => f.labelKey === "name")).toMatchObject({
+      selectedByDefault: false,
+    });
+    const binding = preview.fields.find((f) => f.labelKey === "category")!;
+    expect(binding).toMatchObject({ applicable: true, selectedByDefault: true });
+    expect(preview.fields.find((f) => f.label === "Цвет")).toMatchObject({
+      applicable: true,
+      selectedByDefault: true,
+      requiresEntryIds: [binding.id],
+    });
+    expect(
+      await db
+        .select()
+        .from(schema.productRegulatoryProfiles)
+        .where(eq(schema.productRegulatoryProfiles.productId, p.id)),
+    ).toEqual([]);
+  });
+
+  it("preserves an explicit category opt-out across preparations", async () => {
+    await category();
+    await run();
+    const result = await run({ ...request(), categoryChoices: [{ itemId, optionId: null }] });
+    expect(result.items[0]?.categoryOptions.every((option) => !option.selected)).toBe(true);
+    expect(result.items[0]?.fields.find((field) => field.labelKey === "category")).toBeUndefined();
+    expect(result.items[0]?.fields.find((field) => field.label === "Цвет")).toMatchObject({
+      applicable: false,
+      selectedByDefault: false,
+    });
+  });
+  it("shows classifier values before confirmation and saves them with the accepted category", async () => {
+    const c = await category();
+    const attribute = c.value.attributes[0]!;
+    c.value.attributes.push(
+      { ...attribute, id: 13933, name: "10 знаков ТН ВЭД", value: "2206005901" },
+      { ...attribute, id: 900003, name: "Код ОКПД2", value: "11.03.10.110" },
+    );
+    detail.mockResolvedValue(feed([c.value]));
+    const result = await run();
+    const preview = result.items[0]!;
+    expect(preview.fields.find((field) => field.labelKey === "category")?.after).toBe(
+      "Категория\nТН ВЭД: 2206005901\nОКПД2: 11.03.10.110",
+    );
+    expect(
+      preview.fields.filter((field) =>
+        ["10 знаков ТН ВЭД", "Код ОКПД2"].includes(field.label ?? ""),
+      ),
+    ).toEqual([]);
+    const { NationalCatalogImportApplyService } =
+      await import("../src/modules/national-catalog/national-catalog-import-apply.service");
+    const applies = new NationalCatalogImportApplyService(
+      new NationalCatalogImportRepository(db),
+      sessions,
+    );
+    const accepted = await applies.start(actor, sessionId, {
+      requestId: randomUUID(),
+      decisions: [
+        {
+          previewId: preview.id,
+          acceptedEntryIds: preview.fields
+            .filter((field) => field.applicable && field.selectedByDefault)
+            .map((field) => field.id),
+          linkAction: preview.linkAction,
+          photo: { kind: "keep" },
+        },
+      ],
+    });
+    await applies.resume(actor.tenantId, accepted.operationId);
+    const receipt = await applies.read(actor.tenantId, sessionId, accepted.operationId);
+    expect(receipt.items[0]?.product).toBe("applied");
+    const [profile] = await db
+      .select()
+      .from(schema.productRegulatoryProfiles)
+      .where(
+        and(
+          eq(schema.productRegulatoryProfiles.tenantId, actor.tenantId),
+          eq(schema.productRegulatoryProfiles.productId, receipt.items[0]!.productId!),
+        ),
+      );
+    expect(profile).toMatchObject({
+      categoryId: c.categoryId,
+      schemaVersionId: c.id,
+      tnVedCode: "2206005901",
+      okpd2Code: "11.03.10.110",
+      source: "national_catalog",
+    });
+  });
+  it("leaves multiple compatible categories for explicit choice", async () => {
+    const first = await category();
+    const second = await category();
+    second.value.categories.push(...first.value.categories);
+    detail.mockResolvedValue(feed([second.value]));
+    const result = await run();
+    expect(result.items[0]?.categoryOptions).toHaveLength(2);
+    expect(result.items[0]?.categoryOptions.every((option) => !option.selected)).toBe(true);
+  });
   it.each([
     { existingProfile: false, mapped: false },
     { existingProfile: true, mapped: false },
@@ -1009,7 +1113,12 @@ describe("immutable pre-product comparisons and durable preparation", () => {
         const p = await local();
         await db
           .update(schema.products)
-          .set({ chzProductGroupCode: 15, boxCapacity: 12, palletCapacity: 20, status: "active" })
+          .set({
+            chzProductGroupCode: 15,
+            boxCapacity: 12,
+            palletBoxCapacity: 20,
+            status: "active",
+          })
           .where(eq(schema.products.id, p.id));
         await db
           .update(schema.nationalCatalogImportItems)
@@ -1658,7 +1767,7 @@ describe("immutable pre-product comparisons and durable preparation", () => {
       expect(product?.printName).toBe(c.value.name);
     },
   );
-  it("requires an explicit persisted category option, creates dependent entries and never duplicates mapped name", async () => {
+  it("persists the automatic category option, creates dependent entries and never duplicates mapped name", async () => {
     const c = await category();
     await db.insert(schema.nationalCatalogAttributeMappings).values({
       schemaVersionId: c.id,
@@ -1668,7 +1777,7 @@ describe("immutable pre-product comparisons and durable preparation", () => {
       mappingVersion: 1,
     });
     const initial = await run();
-    expect(initial.items[0]?.fields.filter((f) => f.applicable)).toHaveLength(1);
+    expect(initial.items[0]?.fields.filter((f) => f.applicable)).toHaveLength(3);
     expect(initial.items[0]?.categoryOptions).toHaveLength(1);
     const choice = initial.items[0]!.categoryOptions[0]!;
     const selectedBody = { ...request(), categoryChoices: [{ itemId, optionId: choice.optionId }] };
@@ -1744,7 +1853,7 @@ describe("immutable pre-product comparisons and durable preparation", () => {
       initialProduct: {
         chzProductGroupCode: 23,
         boxCapacity: null,
-        palletCapacity: null,
+        palletBoxCapacity: null,
         status: "draft",
       },
     });
@@ -1795,7 +1904,7 @@ describe("immutable pre-product comparisons and durable preparation", () => {
     expect(result.items[0]?.categoryOptions).toEqual([]);
     expect(result.items[0]?.fields.find((f) => f.label === "Цвет")).toMatchObject({
       applicable: true,
-      selectedByDefault: false,
+      selectedByDefault: true,
     });
     const [row] = await db.select().from(previews).where(eq(previews.id, result.items[0]!.id));
     expect(row?.expectedProfileRevision).toBe(9);

@@ -54,6 +54,11 @@
     <string name="signin_number_short">№ %1$s</string>
     <string name="signin_pin">PIN</string>
 
+    <string name="hub_active_shift">АКТИВНАЯ СМЕНА</string>
+    <string name="hub_active_shift_title">Смена %1$s</string>
+    <string name="hub_active_shift_aggregation">агрегация</string>
+    <string name="hub_active_shift_local">На этом ТСД</string>
+    <string name="hub_active_shift_continue">Продолжить</string>
     <string name="hub_network">Сеть</string>
     <string name="hub_offline">Офлайн</string>
     <string name="hub_queue">Очередь %1$d</string>
@@ -374,6 +379,12 @@
     <!-- Aggregation: boxes -->
     <string name="work_box_header">Короб %1$d · %2$d / %3$d</string>
     <string name="work_close_box_early">Закрыть короб досрочно (%1$d)</string>
+    <!-- Aggregation: pallets (06d) -->
+    <string name="pallet_strip">%1$d / %2$d коробов</string>
+    <string name="work_close_pallet_early">Закрыть паллету досрочно</string>
+    <string name="pallet_close_confirm_title">Закрыть паллету досрочно?</string>
+    <string name="pallet_close_confirm_body">В паллете %1$d из %2$d коробов.</string>
+    <string name="pallet_close_confirm_confirm">Закрыть паллету</string>
     <plurals name="work_labels_unprinted">
         <item quantity="one">%d этикетка не напечатана</item>
         <item quantity="few">%d этикетки не напечатаны</item>
@@ -399,6 +410,11 @@
     <string name="box_refused_invalid_serial">Номер не подошёл под префикс</string>
     <string name="box_refused_invalid_serial_hint">Короб остался открытым. Попробуйте закрыть ещё раз.</string>
     <string name="box_refused_dismiss">Понятно</string>
+    <string name="pallet_close_title">Паллета закрыта</string>
+    <string name="pallet_close_boxes">%1$d коробов</string>
+    <string name="pallet_refused_empty">В паллете нет коробов</string>
+    <string name="pallet_refused_no_serials_hint">Паллета осталась открытой. Подключитесь к сети — устройство получит новый блок номеров.</string>
+    <string name="pallet_refused_invalid_serial_hint">Паллета осталась открытой. Попробуйте закрыть ещё раз.</string>
     <string name="print_reason_no_paper">Нет бумаги</string>
     <string name="print_reason_head_open">Открыта крышка</string>
     <string name="print_reason_unreachable">Принтер не отвечает</string>
@@ -415,6 +431,8 @@
     <string name="label_queue_unknown_skipped">Пропущено: результат неизвестен</string>
     <string name="label_queue_deferred">Отложена</string>
     <string name="label_queue_resolve">Этикетка напечаталась</string>
+    <string name="label_queue_kind_box">Короб</string>
+    <string name="label_queue_kind_pallet">Паллета</string>
 
     <!-- Печать дубликата Data Matrix -->
     <string name="duplicate_failed_title">Дубликат не напечатан</string>

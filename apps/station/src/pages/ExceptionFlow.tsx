@@ -26,6 +26,14 @@ export interface ExceptionFlowProps {
   /** Lets the operator pick the target box by scanning its label instead of tapping the list. */
   scanSource?: ScanSource;
   /**
+   * Opens the pallet-scoped exceptions screen (reprint/disassemble a closed
+   * pallet) -- omitted entirely on a shift with no pallets, which is why
+   * this stays a separate optional entry point rather than a fifth
+   * `BoxExceptionAction`: every pallet-less caller keeps exactly the same
+   * four-action screen it always had.
+   */
+  onPalletExceptions?: () => void;
+  /**
    * The station's window-mode control, rendered beside «Назад»: leaving
    * fullscreen must not require abandoning a half-done exception to reach
    * the status bar's expanded controls.
@@ -45,6 +53,7 @@ export function ExceptionFlow({
   onPendingChange,
   scanSource,
   windowControl,
+  onPalletExceptions,
 }: ExceptionFlowProps) {
   const { t } = useTranslation();
   const [stage, setStage] = useState<ExceptionStage>("action");
@@ -256,6 +265,11 @@ export function ExceptionFlow({
               hasClosedBoxes={boxes.length > 0}
               onSelect={selectAction}
             />
+            {onPalletExceptions ? (
+              <Button size="floor" variant="secondary" fullWidth onClick={onPalletExceptions}>
+                {t("pallet.exceptionsAction")}
+              </Button>
+            ) : null}
           </div>
         ) : null}
 

@@ -37,6 +37,8 @@ data class BoxEntity(
     val ackedAt: String?,
     /** Null until the box is retired; once set the SSCC is never reissued. */
     val disassembledAt: String? = null,
+    /** The pallet (06d) this box joined, or null for a box that stands alone. */
+    val palletId: String? = null,
 )
 
 /**

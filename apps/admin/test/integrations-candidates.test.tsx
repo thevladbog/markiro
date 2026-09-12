@@ -221,7 +221,7 @@ function renderProductCard({
             name: externalName,
             chzProductGroupCode: "",
             boxCapacity: "",
-            palletCapacity: "",
+            palletBoxCapacity: "",
             unitPrice: "",
             egaisCode: "",
             defaultCounterpartyId: "",

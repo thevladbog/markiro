@@ -64,6 +64,8 @@ for (const width of [390, 1280]) {
       } else if (["/api/counterparties", "/api/pickup-orders"].includes(path)) body = { items: [] };
       else if (path === "/api/chz-product-groups")
         body = { items: [{ code: 8, alias: "milk", name: "Молочная продукция" }] };
+      else if (path === `/api/products/${product.id}/regulatory-category-options`)
+        body = { items: [] };
       else if (path === `/api/products/${product.id}/regulatory-profile`)
         body = {
           productId: product.id,
@@ -134,7 +136,13 @@ for (const width of [390, 1280]) {
     for (const dimension of ["Производство", "Заказ кодов", "Ввод в оборот", "ЕГАИС"])
       await expect(readiness.getByText(dimension, { exact: true })).toBeVisible();
     await expect(readiness).toContainText("Подтвердите категорию Национального каталога.");
-    await expect(dialog.getByRole("button", { name: "Выбрать категорию" })).toBeVisible();
+    await expect(
+      dialog.getByText("Для этой товарной группы в Markiro пока не настроены категории.", {
+        exact: false,
+      }),
+    ).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Выбрать категорию" })).toHaveCount(0);
+    await expect(dialog.getByRole("button", { name: "Сохранить", exact: true })).toBeEnabled();
     expect(errors).toEqual([]);
   });
 }

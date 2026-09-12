@@ -7,6 +7,17 @@ export interface GismtAggregationBox {
   codes: readonly string[];
 }
 
+/**
+ * A pallet aggregate: its own SSCC plus the SSCCs of the boxes stacked on it.
+ * Rendered as a second `pack_content` whose children are `<sscc>`, never
+ * `<cis>` -- the boxes it names are aggregated elsewhere, in their OWN
+ * `pack_content` blocks (see the ordering note on `renderGismtAggregationXml`).
+ */
+export interface GismtAggregationPallet {
+  sscc: string;
+  boxSsccs: readonly string[];
+}
+
 export interface GismtAggregationRenderResult {
   bytes: Uint8Array;
   physicalLineCount: number;
@@ -34,12 +45,20 @@ export function gismtAggregationBoxLineCount(box: GismtAggregationBox): number {
   return 3 + box.codes.length;
 }
 
+/** The open/close wrapper lines plus one `<sscc>` line per member box. */
+export function gismtAggregationPalletLineCount(pallet: GismtAggregationPallet): number {
+  return 3 + pallet.boxSsccs.length;
+}
+
 export function renderGismtAggregationXml(input: {
   organizationInn: string;
   boxes: readonly GismtAggregationBox[];
+  pallets?: readonly GismtAggregationPallet[];
 }): GismtAggregationRenderResult {
   const organizationInn = input.organizationInn.trim();
   if (organizationInn === "") throw new GismtAggregationError("ORG_INN_MISSING");
+
+  const pallets = input.pallets ?? [];
 
   const lines = [
     '<?xml version="1.0" encoding="UTF-8"?>',
@@ -56,6 +75,19 @@ export function renderGismtAggregationXml(input: {
       ...box.codes.map((code) => `            <cis>${xmlText(stripKmCryptoTail(code))}</cis>`),
       "        </pack_content>",
     ]),
+    // Boxes first, pallets last. An aggregate cannot be nested before it
+    // exists, and the parts of a split document are submitted in
+    // part-number order -- so a pallet naming a box SSCC must never precede
+    // that box's own pack_content. The XSD permits either child (`cis` or
+    // `sscc`) under pack_content; the ORDER is ours to get right.
+    ...pallets.flatMap((pallet) => [
+      "        <pack_content>",
+      `            <pack_code>${xmlText(formatGismtAggregationSscc(pallet.sscc))}</pack_code>`,
+      ...pallet.boxSsccs.map(
+        (sscc) => `            <sscc>${xmlText(formatGismtAggregationSscc(sscc))}</sscc>`,
+      ),
+      "        </pack_content>",
+    ]),
     "    </Document>",
     "</unit_pack>",
   ];
@@ -64,7 +96,8 @@ export function renderGismtAggregationXml(input: {
     bytes: textEncoder.encode(`${lines.join("\n")}\n`),
     physicalLineCount:
       GISMT_AGGREGATION_OVERHEAD_LINE_COUNT +
-      input.boxes.reduce((count, box) => count + gismtAggregationBoxLineCount(box), 0),
+      input.boxes.reduce((count, box) => count + gismtAggregationBoxLineCount(box), 0) +
+      pallets.reduce((count, pallet) => count + gismtAggregationPalletLineCount(pallet), 0),
     codeCount: input.boxes.reduce((count, box) => count + box.codes.length, 0),
     boxCount: input.boxes.length,
   };

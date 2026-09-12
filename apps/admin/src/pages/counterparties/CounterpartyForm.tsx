@@ -1,6 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import type { TFunction } from "i18next";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { z } from "zod";
@@ -14,6 +14,11 @@ import {
   describeSsccBlocker,
   describeSsccNextLabelHint,
   describeSsccSeedError,
+  ssccCounterTitle,
+  ssccFirstSerial,
+  ssccNextSerialLabel,
+  ssccSaveLabel,
+  type SsccCounterStateDto,
 } from "../../lib/sscc-counter.js";
 import { toast } from "../../lib/toast.js";
 import {
@@ -59,7 +64,6 @@ export interface CounterpartyFormProps {
   onClose: () => void;
 }
 
-const BOX_EXTENSION_DIGIT = 0;
 const GLN_PATTERN = /^\d{13}$/;
 const FORM_ID = "counterparty-form";
 const EMPTY_VALUES: CounterpartyFormValues = {
@@ -70,20 +74,26 @@ const EMPTY_VALUES: CounterpartyFormValues = {
   notes: "",
 };
 
-const ssccFormSchema = z.object({
-  nextSerial: z
-    .string()
-    .trim()
-    .refine(
-      (value) => /^\d+$/.test(value),
-      "pages.counterparties.form.sscc.errors.nextSerialInvalid",
-    )
-    .refine(
-      (value) => Number(value) >= 1 && Number(value) <= 9_999_999,
-      "pages.counterparties.form.sscc.errors.nextSerialInvalid",
-    ),
-});
-type SsccFormValues = z.infer<typeof ssccFormSchema>;
+/**
+ * Same per-digit floor as the organisation settings card: only digit 0
+ * (boxes) must be at least 1, matching the server's own `superRefine`. A
+ * schema pinned to 1 would refuse to display a pallet counter sitting at 0.
+ */
+function buildSsccFormSchema(extensionDigit: number) {
+  const floor = ssccFirstSerial(extensionDigit);
+  const message =
+    floor === 0
+      ? "pages.counterparties.form.sscc.errors.nextSerialInvalidFromZero"
+      : "pages.counterparties.form.sscc.errors.nextSerialInvalid";
+  return z.object({
+    nextSerial: z
+      .string()
+      .trim()
+      .refine((value) => /^\d+$/.test(value), message)
+      .refine((value) => Number(value) >= floor && Number(value) <= 9_999_999, message),
+  });
+}
+type SsccFormValues = { nextSerial: string };
 
 function derivePrefix(gln: string | undefined): string | null {
   if (!gln || !GLN_PATTERN.test(gln)) return null;
@@ -226,51 +236,29 @@ function CounterpartySsccSection({
 }) {
   const { t } = useTranslation();
   const ssccQuery = useCounterpartySscc(counterpartyId);
-  const updateSscc = useUpdateCounterpartySscc();
-  const [saveError, setSaveError] = useState<string | null>(null);
   const derivedPrefix = derivePrefix(gln);
-  const {
-    register,
-    handleSubmit,
-    reset,
-    formState: { errors, isDirty },
-  } = useForm<SsccFormValues>({
-    resolver: zodResolver(ssccFormSchema),
-    defaultValues: { nextSerial: "1" },
-  });
+  // The panel's unsaved-changes guard and its busy lock cover the WHOLE
+  // section, so the per-counter flags are collected by extension digit and
+  // reported as an OR. Keyed by digit, never by position, so a third
+  // numbering space later cannot clobber another's flag.
+  const [dirtyByDigit, setDirtyByDigit] = useState<Record<number, boolean>>({});
+  const [busyByDigit, setBusyByDigit] = useState<Record<number, boolean>>({});
 
-  useEffect(() => {
-    if (ssccQuery.data && !isDirty) {
-      reset({ nextSerial: String(Math.max(1, ssccQuery.data.nextSerial)) });
-    }
-  }, [isDirty, reset, ssccQuery.data]);
-  useEffect(() => onDirtyChange(isDirty), [isDirty, onDirtyChange]);
-  useEffect(() => onBusyChange(updateSscc.isPending), [onBusyChange, updateSscc.isPending]);
+  const anyDirty = Object.values(dirtyByDigit).some(Boolean);
+  const anyBusy = Object.values(busyByDigit).some(Boolean);
+  useEffect(() => onDirtyChange(anyDirty), [anyDirty, onDirtyChange]);
+  useEffect(() => onBusyChange(anyBusy), [anyBusy, onBusyChange]);
 
-  const blocked = describeSsccBlocker(t, ssccQuery.data?.blockedBy ?? null);
-  const minSerial = ssccQuery.data?.minSerial ?? 1;
-
-  const submit = handleSubmit(async (values) => {
-    try {
-      setSaveError(null);
-      const saved = await updateSscc.mutateAsync({
-        id: counterpartyId,
-        input: { extensionDigit: BOX_EXTENSION_DIGIT, nextSerial: Number(values.nextSerial) },
-      });
-      reset({ nextSerial: String(saved.nextSerial) });
-      toast("ok", t("pages.counterparties.form.sscc.toasts.updateSuccess"));
-    } catch (error) {
-      setSaveError(
-        describeSsccSeedError(t, error, minSerial) ??
-          (error instanceof ApiRequestError
-            ? error.message
-            : t("pages.counterparties.form.sscc.toasts.updateError")),
-      );
-      // The floor and the blocker both live server-side; a rejection means
-      // this form's copy of them is stale.
-      await ssccQuery.refetch();
-    }
-  });
+  const setDirty = useCallback((digit: number, dirty: boolean) => {
+    setDirtyByDigit((current) =>
+      current[digit] === dirty ? current : { ...current, [digit]: dirty },
+    );
+  }, []);
+  const setBusy = useCallback((digit: number, busy: boolean) => {
+    setBusyByDigit((current) =>
+      current[digit] === busy ? current : { ...current, [digit]: busy },
+    );
+  }, []);
 
   return (
     <section className="mk-counterparty-panel-section mk-counterparty-panel-section--sscc">
@@ -291,7 +279,6 @@ function CounterpartySsccSection({
         </div>
       ) : (
         <div className="mk-counterparty-sscc-form">
-          {saveError ? <Alert tone="error">{saveError}</Alert> : null}
           <Input
             label={t("pages.counterparties.form.sscc.prefixLabel")}
             mono
@@ -302,34 +289,128 @@ function CounterpartySsccSection({
           {!derivedPrefix ? (
             <Alert tone="warn">{t("pages.counterparties.form.sscc.prefixUnavailable")}</Alert>
           ) : null}
-          <Input
-            label={t("pages.counterparties.form.sscc.nextSerialLabel")}
-            mono
-            inputMode="numeric"
-            disabled={blocked !== null}
-            {...errorProp(translateFieldError(t, errors.nextSerial?.message))}
-            {...register("nextSerial")}
-          />
-          {blocked ? (
-            <Alert tone="warn">{blocked}</Alert>
-          ) : (
-            <p style={{ font: "var(--text-caption)", color: "var(--fg-2)", margin: 0 }}>
-              {describeSsccNextLabelHint(t, minSerial)}
-            </p>
-          )}
-          <div>
-            <Button
-              type="button"
-              loading={updateSscc.isPending}
-              disabled={!derivedPrefix || blocked !== null}
-              onClick={() => void submit()}
-            >
-              {t("pages.counterparties.form.sscc.save")}
-            </Button>
-          </div>
+          {ssccQuery.data.map((counter) => (
+            <CounterpartySsccCounterForm
+              key={counter.extensionDigit}
+              counterpartyId={counterpartyId}
+              counter={counter}
+              hasPrefix={derivedPrefix !== null}
+              onDirtyChange={setDirty}
+              onBusyChange={setBusy}
+              onStaleReject={() => void ssccQuery.refetch()}
+            />
+          ))}
         </div>
       )}
     </section>
+  );
+}
+
+/**
+ * One extension digit's counter for this counterparty -- boxes and pallets
+ * draw from independent numbering spaces, each with its own floor, its own
+ * blocker and its own save. Its own component because each needs its own
+ * `useForm`, which cannot live inside a `.map()`.
+ */
+function CounterpartySsccCounterForm({
+  counterpartyId,
+  counter,
+  hasPrefix,
+  onDirtyChange,
+  onBusyChange,
+  onStaleReject,
+}: {
+  counterpartyId: string;
+  counter: SsccCounterStateDto;
+  hasPrefix: boolean;
+  onDirtyChange: (digit: number, dirty: boolean) => void;
+  onBusyChange: (digit: number, busy: boolean) => void;
+  onStaleReject: () => void;
+}) {
+  const { t } = useTranslation();
+  const updateSscc = useUpdateCounterpartySscc();
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const floor = ssccFirstSerial(counter.extensionDigit);
+  const {
+    register,
+    handleSubmit,
+    reset,
+    formState: { errors, isDirty },
+  } = useForm<SsccFormValues>({
+    resolver: zodResolver(buildSsccFormSchema(counter.extensionDigit)),
+    defaultValues: { nextSerial: String(Math.max(floor, counter.nextSerial)) },
+  });
+
+  const digit = counter.extensionDigit;
+  const serverSerial = counter.nextSerial;
+  useEffect(() => {
+    if (!isDirty) reset({ nextSerial: String(Math.max(floor, serverSerial)) });
+  }, [floor, isDirty, reset, serverSerial]);
+  useEffect(() => onDirtyChange(digit, isDirty), [digit, isDirty, onDirtyChange]);
+  useEffect(
+    () => onBusyChange(digit, updateSscc.isPending),
+    [digit, onBusyChange, updateSscc.isPending],
+  );
+
+  const blocked = describeSsccBlocker(t, counter.blockedBy);
+  const title = ssccCounterTitle(t, digit);
+
+  const submit = handleSubmit(async (values) => {
+    try {
+      setSaveError(null);
+      const saved = await updateSscc.mutateAsync({
+        id: counterpartyId,
+        input: { extensionDigit: digit, nextSerial: Number(values.nextSerial) },
+      });
+      reset({ nextSerial: String(saved.nextSerial) });
+      toast("ok", t("pages.counterparties.form.sscc.toasts.updateSuccess"));
+    } catch (error) {
+      setSaveError(
+        describeSsccSeedError(t, error, counter) ??
+          (error instanceof ApiRequestError
+            ? error.message
+            : t("pages.counterparties.form.sscc.toasts.updateError")),
+      );
+      // The floor and the blocker both live server-side; a rejection means
+      // this form's copy of them is stale.
+      onStaleReject();
+    }
+  });
+
+  return (
+    <div
+      role="group"
+      aria-label={title}
+      style={{ display: "flex", flexDirection: "column", gap: 12 }}
+    >
+      <h4 style={{ margin: 0, font: "600 14px/20px var(--font-ui)" }}>{title}</h4>
+      {saveError ? <Alert tone="error">{saveError}</Alert> : null}
+      <Input
+        label={ssccNextSerialLabel(t, digit)}
+        mono
+        inputMode="numeric"
+        disabled={blocked !== null}
+        {...errorProp(translateFieldError(t, errors.nextSerial?.message))}
+        {...register("nextSerial")}
+      />
+      {blocked ? (
+        <Alert tone="warn">{blocked}</Alert>
+      ) : (
+        <p style={{ font: "var(--text-caption)", color: "var(--fg-2)", margin: 0 }}>
+          {describeSsccNextLabelHint(t, counter)}
+        </p>
+      )}
+      <div>
+        <Button
+          type="button"
+          loading={updateSscc.isPending}
+          disabled={!hasPrefix || blocked !== null}
+          onClick={() => void submit()}
+        >
+          {ssccSaveLabel(t, digit)}
+        </Button>
+      </div>
+    </div>
   );
 }
 

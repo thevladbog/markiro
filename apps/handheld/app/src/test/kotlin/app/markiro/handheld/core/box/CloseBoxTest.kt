@@ -31,7 +31,14 @@ class CloseBoxTest {
             .allowMainThreadQueries().build()
         pool = SsccPool(db)
         boxes = BoxRepository(db) { now }
-        closer = CloseBox(db, boxes, pool) { now }
+        // No shift row is seeded in this file, so `palletBoxCapacity` reads as
+        // null and every case here behaves exactly as it did before pallets
+        // (06d) existed; that join/auto-close path has its own file,
+        // `ClosePalletTest`.
+        val palletLock = PalletLock(db)
+        val pallets = PalletRepository(db, palletLock) { now }
+        val closePallet = ClosePallet(db, pool, palletLock) { now }
+        closer = CloseBox(db, boxes, pool, pallets, closePallet, palletLock) { now }
         db.initializeRecoveryForTest()
     }
 

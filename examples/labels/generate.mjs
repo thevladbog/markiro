@@ -181,6 +181,11 @@ for (const category of categories) {
           date: "11.09.2026",
           expiry: "10.09.2027",
           qty: kind === "unit" ? "1" : "12",
+          // 06d added `qty.boxes` to the label field set. A box or unit
+          // label holds no boxes, so it is empty exactly as `boxLabelData`
+          // leaves it -- a "0" would print as «0 кор.» on any template
+          // that binds the field.
+          "qty.boxes": "",
           operator: "Оператор",
           "counterparty.name": "",
         },

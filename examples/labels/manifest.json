@@ -20,6 +20,7 @@
       "date": "11.09.2026",
       "expiry": "10.09.2027",
       "qty": "1",
+      "qty.boxes": "",
       "operator": "Оператор",
       "counterparty.name": ""
     }
@@ -45,6 +46,7 @@
       "date": "11.09.2026",
       "expiry": "10.09.2027",
       "qty": "1",
+      "qty.boxes": "",
       "operator": "Оператор",
       "counterparty.name": ""
     }
@@ -70,6 +72,7 @@
       "date": "11.09.2026",
       "expiry": "10.09.2027",
       "qty": "1",
+      "qty.boxes": "",
       "operator": "Оператор",
       "counterparty.name": ""
     }
@@ -95,6 +98,7 @@
       "date": "11.09.2026",
       "expiry": "10.09.2027",
       "qty": "12",
+      "qty.boxes": "",
       "operator": "Оператор",
       "counterparty.name": ""
     }
@@ -120,6 +124,7 @@
       "date": "11.09.2026",
       "expiry": "10.09.2027",
       "qty": "12",
+      "qty.boxes": "",
       "operator": "Оператор",
       "counterparty.name": ""
     }
@@ -145,6 +150,7 @@
       "date": "11.09.2026",
       "expiry": "10.09.2027",
       "qty": "12",
+      "qty.boxes": "",
       "operator": "Оператор",
       "counterparty.name": ""
     }
@@ -170,6 +176,7 @@
       "date": "11.09.2026",
       "expiry": "10.09.2027",
       "qty": "12",
+      "qty.boxes": "",
       "operator": "Оператор",
       "counterparty.name": ""
     }
@@ -195,6 +202,7 @@
       "date": "11.09.2026",
       "expiry": "10.09.2027",
       "qty": "1",
+      "qty.boxes": "",
       "operator": "Оператор",
       "counterparty.name": ""
     }
@@ -220,6 +228,7 @@
       "date": "11.09.2026",
       "expiry": "10.09.2027",
       "qty": "1",
+      "qty.boxes": "",
       "operator": "Оператор",
       "counterparty.name": ""
     }
@@ -245,6 +254,7 @@
       "date": "11.09.2026",
       "expiry": "10.09.2027",
       "qty": "1",
+      "qty.boxes": "",
       "operator": "Оператор",
       "counterparty.name": ""
     }
@@ -270,6 +280,7 @@
       "date": "11.09.2026",
       "expiry": "10.09.2027",
       "qty": "12",
+      "qty.boxes": "",
       "operator": "Оператор",
       "counterparty.name": ""
     }
@@ -295,6 +306,7 @@
       "date": "11.09.2026",
       "expiry": "10.09.2027",
       "qty": "12",
+      "qty.boxes": "",
       "operator": "Оператор",
       "counterparty.name": ""
     }
@@ -320,6 +332,7 @@
       "date": "11.09.2026",
       "expiry": "10.09.2027",
       "qty": "12",
+      "qty.boxes": "",
       "operator": "Оператор",
       "counterparty.name": ""
     }
@@ -345,6 +358,7 @@
       "date": "11.09.2026",
       "expiry": "10.09.2027",
       "qty": "12",
+      "qty.boxes": "",
       "operator": "Оператор",
       "counterparty.name": ""
     }
@@ -370,6 +384,7 @@
       "date": "11.09.2026",
       "expiry": "10.09.2027",
       "qty": "1",
+      "qty.boxes": "",
       "operator": "Оператор",
       "counterparty.name": ""
     }
@@ -395,6 +410,7 @@
       "date": "11.09.2026",
       "expiry": "10.09.2027",
       "qty": "1",
+      "qty.boxes": "",
       "operator": "Оператор",
       "counterparty.name": ""
     }
@@ -420,6 +436,7 @@
       "date": "11.09.2026",
       "expiry": "10.09.2027",
       "qty": "1",
+      "qty.boxes": "",
       "operator": "Оператор",
       "counterparty.name": ""
     }
@@ -445,6 +462,7 @@
       "date": "11.09.2026",
       "expiry": "10.09.2027",
       "qty": "12",
+      "qty.boxes": "",
       "operator": "Оператор",
       "counterparty.name": ""
     }
@@ -470,6 +488,7 @@
       "date": "11.09.2026",
       "expiry": "10.09.2027",
       "qty": "12",
+      "qty.boxes": "",
       "operator": "Оператор",
       "counterparty.name": ""
     }
@@ -495,6 +514,7 @@
       "date": "11.09.2026",
       "expiry": "10.09.2027",
       "qty": "12",
+      "qty.boxes": "",
       "operator": "Оператор",
       "counterparty.name": ""
     }
@@ -520,6 +540,7 @@
       "date": "11.09.2026",
       "expiry": "10.09.2027",
       "qty": "12",
+      "qty.boxes": "",
       "operator": "Оператор",
       "counterparty.name": ""
     }

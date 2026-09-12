@@ -132,7 +132,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
       name: "No-pallet product",
       status: "active",
       boxCapacity: 10,
-      palletCapacity: 5,
+      palletBoxCapacity: 5,
     });
     await attachPlan(tenantId, { palletsEnabled: false });
 
@@ -142,7 +142,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
         productId,
         mode: "aggregation",
         boxCapacity: 10,
-        palletCapacity: 5,
+        palletBoxCapacity: 5,
         palletsEnabled: true,
       })
       .expect(403);
@@ -246,7 +246,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
       name: "Recovery product",
       status: "active",
       boxCapacity: 10,
-      palletCapacity: 5,
+      palletBoxCapacity: 5,
     });
     const endsAt = new Date(Date.now() - 60_000);
     const eligibleShiftId = randomUUID();
@@ -314,7 +314,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
       name: "Other product",
       status: "active",
       boxCapacity: 10,
-      palletCapacity: 5,
+      palletBoxCapacity: 5,
     });
     await db.insert(schema.shifts).values({
       id: otherShiftId,
@@ -342,7 +342,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
       name: "Mixed recovery product",
       status: "active",
       boxCapacity: 10,
-      palletCapacity: 5,
+      palletBoxCapacity: 5,
     });
     const endsAt = new Date(Date.now() - 60_000);
     const eligibleShiftId = randomUUID();
@@ -381,7 +381,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
       name: "Foreign recovery product",
       status: "active",
       boxCapacity: 10,
-      palletCapacity: 5,
+      palletBoxCapacity: 5,
     });
     await db.insert(schema.shifts).values({
       id: foreignShiftId,
@@ -451,6 +451,45 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
           occurredAt: new Date().toISOString(),
         },
       ],
+      // Pallet closures are quarantined exactly like the four older kinds
+      // (migration 0137). Before it, an ineligible pallet closure was dropped
+      // with only a log line -- and since `sync_batches` stores a digest and
+      // never the body, and the drain acks and DELETEs its outbox rows
+      // unconditionally, the closure of a pallet already physically labelled
+      // would then have survived NOWHERE.
+      pallets: [
+        {
+          palletId: "eligible-pallet",
+          shiftId: eligibleShiftId,
+          terminalId: "spoofed",
+          sscc: "180000000400000021",
+          closedAt: new Date().toISOString(),
+          operatorId: null,
+          printVerifiedAt: null,
+          printSkippedAt: null,
+        },
+        {
+          palletId: "late-pallet",
+          shiftId: lateShiftId,
+          terminalId: "spoofed",
+          sscc: "180000000400000038",
+          closedAt: new Date().toISOString(),
+          operatorId: null,
+          printVerifiedAt: null,
+          printSkippedAt: null,
+        },
+      ],
+      palletExceptions: [
+        {
+          kind: "disassemble",
+          palletId: "foreign-pallet",
+          shiftId: foreignShiftId,
+          terminalId: "spoofed",
+          operatorId: null,
+          reason: "чужая смена",
+          occurredAt: new Date().toISOString(),
+        },
+      ],
     };
 
     const first = await request(app!.getHttpServer())
@@ -475,6 +514,18 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
       },
       {
         recordKind: "exception",
+        recordIndex: 0,
+        shiftId: foreignShiftId,
+        code: "subscription_read_only",
+      },
+      {
+        recordKind: "pallet",
+        recordIndex: 1,
+        shiftId: lateShiftId,
+        code: "subscription_read_only",
+      },
+      {
+        recordKind: "pallet_exception",
         recordIndex: 0,
         shiftId: foreignShiftId,
         code: "subscription_read_only",
@@ -505,6 +556,15 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
     expect(eligibleEvents).toContainEqual({ raw: eligibleRaw });
     expect(lateEvents).not.toContainEqual({ raw: lateRaw });
 
+    // The eligible pallet closure applied; the ineligible one wrote no row at
+    // all, so a pallet that reaches quarantine is recoverable ONLY from the
+    // quarantine table asserted below.
+    const palletRows = await db
+      .select({ devicePalletId: schema.pallets.devicePalletId, shiftId: schema.pallets.shiftId })
+      .from(schema.pallets)
+      .where(eq(schema.pallets.tenantId, tenantId));
+    expect(palletRows).toEqual([{ devicePalletId: "eligible-pallet", shiftId: eligibleShiftId }]);
+
     const quarantined = await db.execute<{
       record_kind: string;
       record_index: number;
@@ -516,12 +576,38 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
       where tenant_id = ${tenantId} and batch_id = ${batchId}
       order by record_kind, record_index
     `);
-    expect(quarantined.rows).toHaveLength(3);
+    expect(quarantined.rows).toHaveLength(5);
     expect(quarantined.rows).toContainEqual({
       record_kind: "item",
       record_index: 1,
       reason: "subscription_read_only",
       payload: expect.objectContaining({ raw: lateRaw }),
+    });
+    // The whole closure, not a count: the serial printed on the physical
+    // pallet is the fact that must survive, and the terminal stored is the
+    // authenticated device, never the wire's "spoofed".
+    expect(quarantined.rows).toContainEqual({
+      record_kind: "pallet",
+      record_index: 1,
+      reason: "subscription_read_only",
+      payload: expect.objectContaining({
+        palletId: "late-pallet",
+        shiftId: lateShiftId,
+        sscc: "180000000400000038",
+        terminalId: station.deviceId,
+      }),
+    });
+    expect(quarantined.rows).toContainEqual({
+      record_kind: "pallet_exception",
+      record_index: 0,
+      reason: "subscription_read_only",
+      payload: expect.objectContaining({
+        kind: "disassemble",
+        palletId: "foreign-pallet",
+        shiftId: foreignShiftId,
+        reason: "чужая смена",
+        terminalId: station.deviceId,
+      }),
     });
 
     const replay = await request(app!.getHttpServer())
@@ -541,7 +627,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
       from station_sync_quarantine
       where tenant_id = ${tenantId} and batch_id = ${batchId}
     `);
-    expect(replayedQuarantine.rows).toEqual([{ count: "3" }]);
+    expect(replayedQuarantine.rows).toEqual([{ count: "5" }]);
   });
 
   it("continues kiosk queue recovery record-by-record and keeps duplicate retry idempotent", async () => {

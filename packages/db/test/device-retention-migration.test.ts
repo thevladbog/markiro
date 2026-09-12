@@ -57,7 +57,7 @@ describe.skipIf(!databaseUrl)("working device retention forward migration", () =
     await copyMigrationsThroughIndex({
       sourceFolder: migrationsFolder,
       targetFolder: beforeRetention,
-      lastIncludedIndex: 136,
+      lastIncludedIndex: 138,
     });
     await migrate(drizzle(pool), { migrationsFolder: beforeRetention });
     const productId = randomUUID();

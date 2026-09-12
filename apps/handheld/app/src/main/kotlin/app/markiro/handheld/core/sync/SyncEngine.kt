@@ -4,6 +4,7 @@ import app.markiro.handheld.core.network.BatchConflictDto
 import app.markiro.handheld.core.network.BoxClosureDto
 import app.markiro.handheld.core.network.ConflictStatusRequest
 import app.markiro.handheld.core.network.ConflictStatusResponse
+import app.markiro.handheld.core.network.PalletClosureDto
 import app.markiro.handheld.core.network.ScanCodeDto
 import app.markiro.handheld.core.network.ScanItemDto
 import app.markiro.handheld.core.network.ShiftCloseRequest
@@ -16,6 +17,7 @@ import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.MetaEntity
 import app.markiro.handheld.core.storage.MetaStore
 import app.markiro.handheld.core.storage.OutboxEntity
+import app.markiro.handheld.core.storage.PalletEntity
 import app.markiro.handheld.core.storage.ShiftCloseEntity
 import app.markiro.handheld.core.util.Iso
 import kotlinx.coroutines.CoroutineScope
@@ -67,10 +69,13 @@ class SyncEngine(
     /**
      * Everything this device still owes the server.
      *
-     * A box closure is queued work too, and so is a product-label event and an
-     * operator correction. Counting only scans showed «Очередь 0» while a
-     * closure sat unsent, and a queue that had stopped moving would never read
-     * as stuck.
+     * A box closure is queued work too, and so is a product-label event, an
+     * operator correction and a pallet closure. Counting only scans showed
+     * «Очередь 0» while a closure sat unsent, and a queue that had stopped
+     * moving would never read as stuck; every channel added since reintroduces
+     * the identical gap if left out, and unlike a box, a pallet the operator
+     * forgets about while this reads clear is a physically labelled unit the
+     * server never learns about.
      *
      * Summed in its own flow so the state below stays a FOUR-argument combine:
      * the vararg overload infers one element type across every flow, which for
@@ -81,6 +86,7 @@ class SyncEngine(
     private val pending: Flow<Int> = combine(
         db.outboxDao().count(),
         db.boxDao().observeUnackedCount(),
+        db.palletDao().observeUnackedCount(),
         db.productLabelEventDao().observeUnackedCount(),
         db.boxExceptionDao().observeUnackedCount(),
     ) { counts -> counts.sum() }
@@ -161,6 +167,18 @@ class SyncEngine(
             MAX_PRODUCT_LABEL_EVENTS
         }
         val labelRows = if (labelLimit == 0) emptyList() else db.productLabelEventDao().unacked(labelLimit)
+        // Pallets (06d) follow the identical pinning rule, for the identical
+        // reason: a batch whose id is already fixed must carry the pallet set
+        // it chose and no more, or a pallet closing since gets answered
+        // `alreadyApplied` and lost -- and unlike a scan or a box, a lost
+        // pallet closure means a physically labelled pallet the server never
+        // learns about.
+        val palletLimit = if (pendingCeiling != null) {
+            meta.get(MetaStore.SYNC_PENDING_PALLET_COUNT)?.toIntOrNull() ?: 0
+        } else {
+            MAX_PALLET_CLOSURES
+        }
+        val palletRows = if (palletLimit == 0) emptyList() else db.palletDao().unacked(palletLimit)
         // Corrections follow the same pinning rule as boxes and label events.
         val exceptionLimit = if (pendingCeiling != null) {
             meta.get(MetaStore.SYNC_PENDING_EXCEPTION_COUNT)?.toIntOrNull() ?: 0
@@ -180,22 +198,38 @@ class SyncEngine(
         } else {
             db.boxExceptionDao().sendable(exceptionThrough, exceptionLimit)
         }
-        // An empty outbox with unacknowledged boxes, events or corrections is not empty.
-        if (rows.isEmpty() && boxRows.isEmpty() && labelRows.isEmpty() && exceptionRows.isEmpty()) {
+        // An empty outbox with unacknowledged boxes, pallets, events or
+        // corrections is not empty.
+        if (rows.isEmpty() && boxRows.isEmpty() && palletRows.isEmpty() && labelRows.isEmpty() &&
+            exceptionRows.isEmpty()
+        ) {
             if (pendingCeiling != null) clearPending()
             return Step.EMPTY
         }
         val maxId = rows.lastOrNull()?.id ?: pendingCeiling ?: 0L
         val boxIds = boxRows.map { it.boxId }
+        val palletIds = palletRows.map { it.palletId }
         val batchId = meta.get(MetaStore.SYNC_PENDING_BATCH_ID)?.takeIf { pendingCeiling != null } ?: run {
-            // The box set is folded in. Without it, a box closing while this batch
-            // awaits acknowledgement would be resent under an id the server has
-            // already applied, and the closure would vanish silently.
-            val id = "${cfg.deviceId}:${db.recovery.commit { meta.installId() }}:$maxId:${idSignature(boxIds)}:" +
-                "${idSignature(labelRows.map { it.eventId })}:${idSignature(exceptionRows.map { it.id.toString() })}"
+            // EVERY channel's set is folded in -- boxes, pallets, label events
+            // and corrections. Without it, a record of that channel closing
+            // while this batch awaits acknowledgement would be resent under an
+            // id the server has already applied, and it would vanish silently.
+            //
+            // Every id here is a short hashed signature (`idSignature`), not
+            // the raw ids themselves, so this key's worst-case length does not
+            // grow with a channel's own cap the way the station's
+            // concatenated form does: two UUIDs, one bounded integer and four
+            // bounded signatures stay well under the server's shared
+            // `MAX_SYNC_BATCH_ID_CHARS` (200) even fully loaded, so no folding
+            // digest is needed here the way the station needs one.
+            val id = "${cfg.deviceId}:${db.recovery.commit { meta.installId() }}:$maxId:" +
+                "${idSignature(boxIds)}:${idSignature(palletIds)}:" +
+                "${idSignature(labelRows.map { it.eventId })}:" +
+                idSignature(exceptionRows.map { it.id.toString() })
             db.recovery.commit {
             meta.put(MetaStore.SYNC_PENDING_CEILING, maxId.toString())
             meta.put(MetaStore.SYNC_PENDING_BOX_COUNT, boxIds.size.toString())
+            meta.put(MetaStore.SYNC_PENDING_PALLET_COUNT, palletIds.size.toString())
             meta.put(MetaStore.SYNC_PENDING_LABEL_COUNT, labelRows.size.toString())
             meta.put(MetaStore.SYNC_PENDING_EXCEPTION_COUNT, exceptionRows.size.toString())
             meta.put(MetaStore.SYNC_PENDING_BATCH_ID, id)
@@ -208,6 +242,7 @@ class SyncEngine(
                 batchId,
                 rows.map { it.toItem(cfg.deviceId) },
                 boxRows.map { it.toClosure(cfg.deviceId) },
+                palletRows.map { it.toClosure(cfg.deviceId) },
                 labelRows.map { json.parseToJsonElement(it.payloadJson) },
                 exceptionRows.map { json.parseToJsonElement(it.payloadJson) },
             ),
@@ -228,9 +263,13 @@ class SyncEngine(
             // When print verification is added, the station's conditional ack has to
             // come back with it.
             if (boxIds.isNotEmpty()) db.boxDao().markAcked(boxIds, Iso.format(at))
-            // NOT unconditional, unlike the boxes above: the server answers per
-            // event and may quarantine one. Acknowledging everything sent would
-            // drop an event it never took.
+            // Unconditional, for the identical reason the boxes above are: a
+            // pallet closure's payload cannot change after this device sends
+            // it, because print verification never leaves this device either.
+            if (palletIds.isNotEmpty()) db.palletDao().markAcked(palletIds, Iso.format(at))
+            // NOT unconditional, unlike the boxes and pallets above: the server
+            // answers per event and may quarantine one. Acknowledging
+            // everything sent would drop an event it never took.
             parsed.receipt?.let { receipt ->
                 if (receipt.accepted.isNotEmpty()) db.productLabelEventDao().markAcked(receipt.accepted, Iso.format(at))
                 for ((eventId, code) in receipt.quarantined) {
@@ -247,6 +286,7 @@ class SyncEngine(
             db.metaDao().remove(MetaStore.SYNC_PENDING_BATCH_ID)
             db.metaDao().remove(MetaStore.SYNC_PENDING_CEILING)
             db.metaDao().remove(MetaStore.SYNC_PENDING_BOX_COUNT)
+            db.metaDao().remove(MetaStore.SYNC_PENDING_PALLET_COUNT)
             db.metaDao().remove(MetaStore.SYNC_PENDING_LABEL_COUNT)
             db.metaDao().remove(MetaStore.SYNC_PENDING_EXCEPTION_COUNT)
             parsed.denied?.let { db.metaDao().put(MetaEntity(MetaStore.SYNC_LAST_DENIED, it)) }
@@ -266,6 +306,7 @@ class SyncEngine(
         meta.remove(MetaStore.SYNC_PENDING_BATCH_ID)
         meta.remove(MetaStore.SYNC_PENDING_CEILING)
         meta.remove(MetaStore.SYNC_PENDING_BOX_COUNT)
+        meta.remove(MetaStore.SYNC_PENDING_PALLET_COUNT)
         meta.remove(MetaStore.SYNC_PENDING_LABEL_COUNT)
         meta.remove(MetaStore.SYNC_PENDING_EXCEPTION_COUNT)
     }
@@ -293,6 +334,16 @@ class SyncEngine(
         terminalId = deviceId,
         sscc = checkNotNull(sscc) { "box $boxId is queued without an SSCC" },
         closedAt = checkNotNull(closedAt) { "box $boxId is queued while still open" },
+        operatorId = operatorId,
+        devicePalletId = palletId,
+    )
+
+    private fun PalletEntity.toClosure(deviceId: String) = PalletClosureDto(
+        palletId = palletId,
+        shiftId = shiftId,
+        terminalId = deviceId,
+        sscc = checkNotNull(sscc) { "pallet $palletId is queued without an SSCC" },
+        closedAt = checkNotNull(closedAt) { "pallet $palletId is queued while still open" },
         operatorId = operatorId,
     )
 
@@ -406,14 +457,55 @@ class SyncEngine(
     companion object {
         const val BATCH_SIZE = 100
 
-        /** The server's own `MAX_BOX_CLOSURES_PER_SYNC_BATCH`. */
+        /**
+         * The server's own `MAX_BOX_CLOSURES_PER_SYNC_BATCH` (`@markiro/domain`,
+         * `packages/domain/src/sync/limits.ts`). See `MAX_PALLET_CLOSURES` below
+         * for why this is a hand-copied literal and how it is kept from
+         * drifting: `SyncLimitsFixturesTest` asserts this value against
+         * `sync-limits-fixtures.json`, generated from the shared constant by
+         * `pnpm --filter @markiro/domain fixtures:sync-limits`.
+         */
         const val MAX_BOX_CLOSURES = 50
+
+        /**
+         * The server's own `MAX_PALLET_CLOSURES_PER_SYNC_BATCH` (`@markiro/domain`,
+         * `packages/domain/src/sync/limits.ts`).
+         *
+         * Hand-copied for the exact reason `MAX_BOX_CLOSURES` above already is,
+         * and it carries the identical risk: if this number and the shared
+         * constant ever disagree, a device that reads more closed-unacked
+         * pallets than the API accepts has its whole batch rejected every
+         * retry, wedging pallets, boxes AND item delivery on that device
+         * forever (the drain never drops data). Kotlin cannot import a
+         * TypeScript constant, so this is a second literal, not a shared one --
+         * flagged rather than silently added a second time. Kept from drifting
+         * by `SyncLimitsFixturesTest`, which asserts this value (and
+         * `MAX_BOX_CLOSURES`, `MAX_SYNC_BATCH_ID_CHARS`) against
+         * `sync-limits-fixtures.json` -- generated from `limits.ts` by
+         * `pnpm --filter @markiro/domain fixtures:sync-limits`, the same way
+         * `fixtures:km`/`fixtures:inventory` already generate checked Android
+         * test resources from TypeScript. `test/sync-limits-fixtures.test.ts`
+         * fails if that JSON is regenerated but not committed.
+         */
+        const val MAX_PALLET_CLOSURES = 20
 
         /** The server's own `MAX_PRODUCT_LABEL_EVENTS`. */
         const val MAX_PRODUCT_LABEL_EVENTS = 100
 
+        /**
+         * The server's own `MAX_SYNC_BATCH_ID_CHARS` (`@markiro/domain`,
+         * `packages/domain/src/sync/limits.ts`) -- the bound the batch-id
+         * construction comment in `drainOnce` argues this device's id stays
+         * under, fully loaded, by folding each channel into a short signature
+         * rather than concatenating raw ids. Hand-copied for the same reason
+         * and kept from drifting the same way `MAX_BOX_CLOSURES` and
+         * `MAX_PALLET_CLOSURES` are: see `SyncLimitsFixturesTest`.
+         */
+        const val MAX_SYNC_BATCH_ID_CHARS = 200
+
         /** The server's own cap on `exceptions[]`. */
         const val MAX_EXCEPTIONS = 200
+
         const val RECONCILE_PAGE = 200
         const val HEARTBEAT_MS = 15_000L
         const val STUCK_AFTER_MS = 15 * 60 * 1000L

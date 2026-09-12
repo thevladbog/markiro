@@ -25,10 +25,31 @@
         "deviceOutOfSync": "Station \"{{device}}\" has not checked in since the last shift closed. Wait for it to sync, or its boxes will take serials that were handed out again. If the station is decommissioned, revoke it under Devices."
       },
       "errors": {
-        "belowFloor": "The serial must be at least {{min}}: lower ones are already printed on boxes.",
+        "belowFloor": {
+          "box": "The serial must be at least {{min}}: lower ones are already printed on boxes.",
+          "pallet": "The serial must be at least {{min}}: lower ones are already printed on pallets."
+        },
+        "belowFloorOther": "The serial must be at least {{min}}: lower ones are already printed.",
         "floorMoved": "The counter changed while this form was open. Reload and try again.",
         "activeShift": "A shift opened while this form was open. Close it and try again.",
         "deviceOutOfSync": "A station fell out of sync. Reload and try again."
+      },
+      "kind": {
+        "box": {
+          "title": "Boxes",
+          "nextSerialLabel": "Box starting serial",
+          "save": "Save the box counter"
+        },
+        "pallet": {
+          "title": "Pallets",
+          "nextSerialLabel": "Pallet starting serial",
+          "save": "Save the pallet counter"
+        },
+        "other": {
+          "title": "Extension digit {{digit}}",
+          "nextSerialLabel": "Starting serial, extension digit {{digit}}",
+          "save": "Save the counter for extension digit {{digit}}"
+        }
       }
     }
   },
@@ -1526,7 +1547,8 @@
         "productGroupUnknownCode": "Code {{code}} (not in the directory)",
         "productGroupSearchLabel": "Search groups",
         "boxCapacityLabel": "Box capacity, units",
-        "palletCapacityLabel": "Pallet capacity, units",
+        "palletBoxCapacityLabel": "Boxes per pallet",
+        "palletBoxCapacityHint": "A count of boxes, not of product units.",
         "unitPriceLabel": "Price per unit, ₽",
         "egaisCodeLabel": "EGAIS code",
         "shelfLifeDaysLabel": "Shelf life, days",
@@ -1838,7 +1860,7 @@
       },
       "regulatory": {
         "readiness": "Readiness",
-        "readinessHint": "Production, code ordering and putting goods into circulation are checked separately.",
+        "readinessHint": "Readiness is checked against saved Markiro data separately for each operation.",
         "dimensions": {
           "production": "Production",
           "code_ordering": "Code ordering",
@@ -1871,7 +1893,7 @@
         "tnVed": "TN VED",
         "okpd": "OKPD2",
         "source": "Source",
-        "unbound": "The National Catalog category is not confirmed yet. Select a category to fill in its attributes.",
+        "unbound": "Match the product with a Chestny ZNAK card to import its category and attributes. The category refines the selected product group. If no card is available, choose a category manually.",
         "chooseCategory": "Select category",
         "changeCategory": "Change category",
         "chooseOption": "Select a category",
@@ -1881,7 +1903,7 @@
         "transferHint": "Selected values will transfer to the new category. Others will remain in history and no longer count towards current readiness.",
         "noTransfer": "There are no saved attributes to transfer.",
         "confirmCategory": "Confirm category",
-        "noCategories": "No schemas are available for this product group yet. A National Catalog schema must be loaded and confirmed.",
+        "noCategories": "Categories for this product group have not been configured in Markiro yet. Contact Markiro support. You can view the card using “Open Chestny ZNAK data” below and save the basic product fields.",
         "optionsError": "Could not load categories.",
         "numberedAttribute": "Attribute {{index}}",
         "dispositions": {
@@ -1935,7 +1957,8 @@
         "openChz": "Open Chestny ZNAK data",
         "viewTitle": "Product details",
         "reloadError": "Could not load the current product. Your edits are still in the form; try again.",
-        "cachedDataError": "Could not refresh the main details. The last loaded product is shown; your edits are still in the form."
+        "cachedDataError": "Could not refresh the main details. The last loaded product is shown; your edits are still in the form.",
+        "categorySearch": "Search categories"
       }
     },
     "counterparties": {
@@ -1990,16 +2013,15 @@
           "gs1PrefixesFormat": "Each prefix must be 4-12 digits"
         },
         "sscc": {
-          "cardTitle": "Box SSCC counter",
-          "description": "The box starting serial must be from 1 to 9,999,999 within the prefix below. Set it when migrating numbers already issued by another system under this GLN.",
+          "cardTitle": "SSCC counters",
+          "description": "Starting serials within the prefix below — one for boxes and one for pallets. Set them when migrating numbers already issued by another system under this GLN.",
           "prefixLabel": "Derived prefix",
-          "nextSerialLabel": "Starting serial",
-          "save": "Save SSCC",
           "loadError": "Could not load the SSCC sequence.",
           "retry": "Retry",
           "prefixUnavailable": "Saving is unavailable because a prefix could not be derived from the GLN.",
           "errors": {
-            "nextSerialInvalid": "Enter a whole number from 1 to 9,999,999"
+            "nextSerialInvalid": "Enter a whole number from 1 to 9,999,999",
+            "nextSerialInvalidFromZero": "Enter a whole number from 0 to 9,999,999"
           },
           "toasts": {
             "updateSuccess": "Counter saved",
@@ -2103,6 +2125,7 @@
           "date": "Date",
           "expiry": "Best before",
           "qty": "Quantity",
+          "qty.boxes": "Boxes per pallet",
           "operator": "Operator",
           "counterparty.name": "Counterparty"
         },
@@ -2129,6 +2152,7 @@
         "label": "Purpose",
         "box": "Box",
         "duplicate": "Product duplicate",
+        "pallet": "Pallet",
         "invalid": "One Data Matrix containing the full product code must fit inside the label. SSCC is not allowed.",
         "sample": "Synthetic sample code. The line prints the code received from the scanner.",
         "copy": "Create a copy",
@@ -2331,7 +2355,13 @@
         "boxLabelTemplateSearch": "Search templates",
         "boxCapacityLabel": "Box capacity, units",
         "palletsEnabledLabel": "Use pallets",
-        "palletCapacityLabel": "Pallet capacity, units",
+        "palletsNotEntitled": "Pallets are not part of the current plan. Add the feature to the subscription to switch them on in a shift.",
+        "palletsNotEntitledEnabled": "Pallets are not part of the current plan. This shift was planned with pallets: you can switch them off, but not back on.",
+        "palletBoxCapacityLabel": "Boxes per pallet",
+        "palletBoxCapacityHint": "How many closed boxes make up one full pallet.",
+        "palletLabelTemplateLabel": "Pallet label template",
+        "palletLabelTemplateHint": "Blank — the product category's default is used, then the organization's.",
+        "palletLabelTemplateDefault": "Organization default",
         "submitCreate": "Plan",
         "submitUpdate": "Save",
         "errors": {
@@ -2400,16 +2430,34 @@
           "SHIFT_HAS_NO_CODES": "The shift has no codes to include in a report.",
           "SHIFT_DATE_MISSING": "The shift has no date.",
           "BOX_COVERAGE_INCOMPLETE": "Not every shift code is assigned to a box.",
+          "SHIFT_HAS_NO_PALLETS": "The shift has no closed pallet: either no box was ever stacked on one, or no pallet has been closed yet.",
           "ORG_INN_MISSING": "Set the organization INN in the profile to generate the GIS MT report.",
           "FORMAT_NOT_FOUND": "The selected report format is no longer available.",
           "INVALID_LINE_LIMIT": "The lines-per-part limit is invalid.",
           "BOX_EXCEEDS_LINE_LIMIT": "A box does not fit within the lines-per-part limit.",
+          "PALLET_EXCEEDS_LINE_LIMIT": "A pallet together with its boxes does not fit within the lines-per-part limit.",
           "INVALID_BOX_SSCC": "One of the boxes has an invalid SSCC, so the report cannot be generated.",
           "INVALID_CIS": "The shift contains a marking code that could not be parsed for the report.",
           "GENERATION_FAILED": "Could not generate the report. Try again.",
           "STORAGE_FAILED": "Could not save the report. Try again.",
           "QUEUE_FAILED": "Could not queue the report. Try again.",
           "infrastructure": "Could not complete the operation. Try again later."
+        }
+      },
+      "pallets": {
+        "title": "Pallets",
+        "empty": "No pallets in this shift",
+        "loadError": "Could not load this shift's pallets.",
+        "contentsChangedAfterClose": "Contents changed after closing",
+        "disassembled": "Taken apart",
+        "noSscc": "No SSCC",
+        "table": {
+          "sscc": "SSCC",
+          "line": "Line",
+          "boxCount": "Boxes",
+          "unitCount": "Codes",
+          "closedAt": "Closed",
+          "status": "Status"
         }
       },
       "toasts": {
@@ -2497,6 +2545,7 @@
       },
       "table": {
         "sscc": "SSCC",
+        "pallet": "Pallet",
         "line": "Line",
         "operator": "Operator",
         "itemCount": "Count",
@@ -2598,6 +2647,7 @@
         "openedAtLabel": "Opened",
         "closedAtLabel": "Closed",
         "disassembledAtLabel": "Disassembled",
+        "palletLabel": "On pallet",
         "itemsTitle": "Composition",
         "itemsEmpty": "Box is empty",
         "table": {
@@ -2617,6 +2667,35 @@
         },
         "pickupOrdersTitle": "Pickup orders",
         "pickupOrdersEmpty": "No orders"
+      },
+      "palletCard": {
+        "noSscc": "No SSCC",
+        "status": {
+          "open": "Open",
+          "closed": "Closed",
+          "disassembled": "Taken apart"
+        },
+        "productLabel": "Product",
+        "shiftLabel": "Shift",
+        "lineLabel": "Line",
+        "openedAtLabel": "Started",
+        "closedAtLabel": "Closed",
+        "disassembledAtLabel": "Taken apart",
+        "boxesTitle": "Boxes on the pallet",
+        "boxesEmpty": "No boxes on this pallet",
+        "boxDisassembled": "Box disassembled",
+        "table": {
+          "sscc": "Box SSCC",
+          "itemCount": "Codes",
+          "closedAt": "Closed",
+          "state": "State"
+        },
+        "exceptionsTitle": "Exceptions",
+        "exceptionsEmpty": "No exceptions",
+        "exceptionKind": {
+          "disassemble": "Pallet taken apart",
+          "reprint": "Label reprint"
+        }
       },
       "history": {
         "scanned": "Scanned",
@@ -2937,17 +3016,22 @@
         "linesEmpty": "No lines added",
         "table": {
           "sscc": "SSCC",
+          "level": "Level",
           "productName": "Product",
           "codeCount": "Codes",
           "status": "Status",
           "actions": "Actions"
+        },
+        "level": {
+          "box": "Box",
+          "pallet": "Pallet"
         },
         "deleteLine": "Delete",
         "deleteLineNamed": "Delete line {{sscc}}",
         "deleteLineError": "Could not delete the line. Please try again.",
         "applyAction": "Apply",
         "applyConfirmTitle": "Apply this document?",
-        "applyConfirm": "This will disassemble {{boxes}} box(es), {{codes}} code(s).",
+        "applyConfirm": "This will disassemble {{lines}} line(s), {{codes}} code(s).",
         "applyConfirmAction": "Apply",
         "applyBlocked": "Some lines changed status and are not ready to apply. Check the table below.",
         "applyError": "Could not apply the document. Please try again.",
@@ -3728,14 +3812,13 @@
         "removeError": "Could not remove the logo"
       },
       "sscc": {
-        "cardTitle": "Box SSCC counter",
-        "description": "The box starting serial must be from 1 to 9,999,999 within the prefix below. Set it when migrating numbers already issued by another system under this GLN.",
+        "cardTitle": "SSCC counters",
+        "description": "Starting serials within the prefix below — one for boxes and one for pallets. Set them when migrating numbers already issued by another system under this GLN.",
         "prefixLabel": "Derived prefix",
         "prefixUnavailable": "Set the GLN above to see the derived prefix",
-        "nextSerialLabel": "Starting serial",
-        "save": "Save",
         "errors": {
-          "nextSerialInvalid": "Enter a whole number from 1 to 9,999,999"
+          "nextSerialInvalid": "Enter a whole number from 1 to 9,999,999",
+          "nextSerialInvalidFromZero": "Enter a whole number from 0 to 9,999,999"
         },
         "toasts": {
           "updateSuccess": "Counter saved",

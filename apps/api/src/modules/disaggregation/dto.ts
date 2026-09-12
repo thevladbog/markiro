@@ -65,6 +65,8 @@ export interface LineDto {
   ssccInput: string;
   sscc: string | null; // 20-digit AI form or null
   boxId: string | null;
+  /** Set INSTEAD of `boxId` when this line names a pallet (Task 21). */
+  palletId: string | null;
   status: LineStatus;
   productId: string | null;
   productName: string | null;
@@ -107,6 +109,7 @@ export const disaggregationLineOpenApiSchema: SchemaObject = {
     "ssccInput",
     "sscc",
     "boxId",
+    "palletId",
     "status",
     "productId",
     "productName",
@@ -123,6 +126,11 @@ export const disaggregationLineOpenApiSchema: SchemaObject = {
       description: '20-digit GS1 AI "00" form; null for unparseable input or duplicate markers.',
     },
     boxId: { ...uuidSchema, nullable: true },
+    palletId: {
+      ...uuidSchema,
+      nullable: true,
+      description: "Set instead of boxId when this line names a pallet.",
+    },
     status: {
       type: "string",
       enum: [

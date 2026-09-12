@@ -22,7 +22,14 @@ data class ShiftEntity(
     val plannedDate: String?,
     val productionDate: String?,
     val boxCapacity: Int?,
-    val palletCapacity: Int?,
+    /**
+     * Units-valued predecessor of `palletBoxCapacity` (06d), left in place and
+     * unread -- `ShiftRepository.toEntity` simply stops writing it. Dropping a
+     * Room column means rebuilding the table, which is not a trade worth making
+     * to delete a dead integer; see `packages/db`'s SQLite station schema for
+     * the same pattern server-side.
+     */
+    val palletCapacity: Int? = null,
     val palletsEnabled: Boolean,
     val validationPrintMode: String,
     val closePolicyKind: String?,
@@ -44,6 +51,10 @@ data class ShiftEntity(
     val duplicateTemplate: String? = null,
     val duplicateTemplateDigest: String? = null,
     val duplicatePolicyRevision: String? = null,
+    /** Boxes per pallet (06d) -- see `products.palletBoxCapacity` on the server. */
+    val palletBoxCapacity: Int? = null,
+    /** The pallet label template's spec as the bundle delivered it (06d), same shape as `boxLabelTemplate`. */
+    val palletLabelTemplateSpec: String? = null,
 )
 
 /** Accepted codes on this device, keyed by the KM hash device-wide (a code is one physical item). */

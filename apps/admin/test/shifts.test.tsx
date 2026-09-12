@@ -157,7 +157,7 @@ const PRODUCT_A: ProductDto = {
   productGroup: "Молочная продукция",
   chzProductGroupCode: 8,
   boxCapacity: 12,
-  palletCapacity: 48,
+  palletBoxCapacity: 48,
   unitPrice: null,
   egaisCode: null,
   shelfLifeDays: null,
@@ -175,7 +175,7 @@ const PRODUCT_B = {
   productGroup: "Молочная продукция",
   chzProductGroupCode: 8,
   boxCapacity: 6,
-  palletCapacity: 24,
+  palletBoxCapacity: 24,
   status: "active",
   defaultCounterpartyId: null,
   createdAt: "2026-01-02T00:00:00.000Z",
@@ -193,7 +193,7 @@ const DRAFT_PRODUCT = {
   productGroup: null,
   chzProductGroupCode: null,
   boxCapacity: null,
-  palletCapacity: null,
+  palletBoxCapacity: null,
   status: "draft",
   defaultCounterpartyId: null,
   createdAt: "2026-01-03T00:00:00.000Z",
@@ -219,8 +219,9 @@ const INITIAL_SHIFT_FORM_VALUES: ShiftFormValues = {
   counterpartyId: "",
   ssccIssuerCounterpartyId: "",
   boxLabelTemplateSelection: BOX_TEMPLATE_SELECTION.none,
+  palletLabelTemplateId: "",
   boxCapacity: "",
-  palletCapacity: "",
+  palletBoxCapacity: "",
   palletsEnabled: false,
 };
 
@@ -241,7 +242,7 @@ function DirtyReseedHarness() {
         products={[PRODUCT_A]}
         lines={[]}
         counterparties={[]}
-        formContext={{ labelTemplates: [] }}
+        formContext={{ labelTemplates: [], palletsEntitled: true }}
         onSubmit={() => undefined}
         onDirtyChange={() => undefined}
         onClose={() => undefined}
@@ -355,7 +356,7 @@ const PLANNED_SHIFT = {
   plannedDate: "2026-07-25",
   productionDate: null,
   boxCapacity: null,
-  palletCapacity: null,
+  palletBoxCapacity: null,
   palletsEnabled: false,
   createdFrom: "admin",
   openedAt: null,
@@ -381,7 +382,7 @@ const ACTIVE_TOLLING_SHIFT = {
   plannedQty: 1000,
   plannedDate: "2026-07-23",
   boxCapacity: 12,
-  palletCapacity: 48,
+  palletBoxCapacity: 48,
   palletsEnabled: true,
   openedAt: "2026-07-23T08:00:00.000Z",
   output: { mode: "aggregation", closedBoxes: 0, containedUnits: 0 },
@@ -1441,7 +1442,7 @@ describe("ShiftsPage", () => {
     ).toBe(false);
   });
 
-  it("shows box/pallet capacity fields only in aggregation mode, and pallet capacity only when pallets are enabled", async () => {
+  it("shows box capacity and boxes-per-pallet only in aggregation mode, and boxes-per-pallet only when pallets are enabled", async () => {
     const fetchMock = vi.fn(async (url: string) => {
       const path = String(url);
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
@@ -1461,10 +1462,10 @@ describe("ShiftsPage", () => {
     fireEvent.click(screen.getByLabelText("Агрегация"));
     expect(await screen.findByLabelText("Вместимость короба, шт")).toBeDefined();
     expect(screen.getByLabelText("Использовать паллеты")).toBeDefined();
-    expect(screen.queryByLabelText("Вместимость паллеты, шт")).toBeNull();
+    expect(screen.queryByLabelText("Коробов на паллете")).toBeNull();
 
     fireEvent.click(screen.getByLabelText("Использовать паллеты"));
-    expect(await screen.findByLabelText("Вместимость паллеты, шт")).toBeDefined();
+    expect(await screen.findByLabelText("Коробов на паллете")).toBeDefined();
 
     fireEvent.click(screen.getByLabelText("Валидация"));
     expect(screen.queryByLabelText("Вместимость короба, шт")).toBeNull();
@@ -1902,7 +1903,7 @@ describe("ShiftsPage", () => {
     expect(screen.queryByRole("combobox", { name: "Label template" })).toBeNull();
   });
 
-  it("sends POST with prefilled boxCapacity and mode aggregation; palletCapacity omitted while pallets disabled", async () => {
+  it("sends POST with prefilled boxCapacity and mode aggregation; palletBoxCapacity omitted while pallets disabled", async () => {
     const user = userEvent.setup();
     const created = {
       ...PLANNED_SHIFT,
@@ -1911,7 +1912,7 @@ describe("ShiftsPage", () => {
       productName: PRODUCT_A.name,
       mode: "aggregation",
       boxCapacity: PRODUCT_A.boxCapacity,
-      palletCapacity: null,
+      palletBoxCapacity: null,
       palletsEnabled: false,
     };
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
@@ -1962,13 +1963,13 @@ describe("ShiftsPage", () => {
         expect(body.lineId).toBeNull();
         expect(body.plannedQty).toBeNull();
         expect(body.plannedDate).toBeNull();
-        expect(body.palletCapacity).toBeUndefined();
+        expect(body.palletBoxCapacity).toBeUndefined();
       },
       { timeout: 3000 },
     );
   });
 
-  it("sends POST with palletsEnabled:true and prefilled palletCapacity when pallets checkbox is toggled", async () => {
+  it("sends POST with palletsEnabled:true and prefilled palletBoxCapacity when pallets checkbox is toggled", async () => {
     const user = userEvent.setup();
     const created = {
       ...PLANNED_SHIFT,
@@ -1977,7 +1978,7 @@ describe("ShiftsPage", () => {
       productName: PRODUCT_A.name,
       mode: "aggregation",
       boxCapacity: PRODUCT_A.boxCapacity,
-      palletCapacity: PRODUCT_A.palletCapacity,
+      palletBoxCapacity: PRODUCT_A.palletBoxCapacity,
       palletsEnabled: true,
     };
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
@@ -2010,11 +2011,11 @@ describe("ShiftsPage", () => {
       );
     });
 
-    // Toggle the pallets checkbox to show and prefill the pallet capacity field
+    // Toggle the pallets checkbox to show and prefill the pallet box capacity field
     await user.click(screen.getByLabelText("Использовать паллеты"));
     await waitFor(() => {
-      expect((screen.getByLabelText("Вместимость паллеты, шт") as HTMLInputElement).value).toBe(
-        String(PRODUCT_A.palletCapacity),
+      expect((screen.getByLabelText("Коробов на паллете") as HTMLInputElement).value).toBe(
+        String(PRODUCT_A.palletBoxCapacity),
       );
     });
 
@@ -2033,7 +2034,7 @@ describe("ShiftsPage", () => {
         expect(body.productId).toBe(PRODUCT_A.id);
         expect(body.boxCapacity).toBe(PRODUCT_A.boxCapacity);
         expect(body.palletsEnabled).toBe(true);
-        expect(body.palletCapacity).toBe(PRODUCT_A.palletCapacity);
+        expect(body.palletBoxCapacity).toBe(PRODUCT_A.palletBoxCapacity);
         expect(body.lineId).toBeNull();
         expect(body.plannedQty).toBeNull();
         expect(body.plannedDate).toBeNull();
