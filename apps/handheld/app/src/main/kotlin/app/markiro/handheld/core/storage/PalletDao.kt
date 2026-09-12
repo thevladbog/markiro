@@ -64,6 +64,22 @@ interface PalletDao {
     )
     suspend fun itemCount(palletId: String): Int
 
+    /**
+     * Pallets this device closed in a shift, for the shift-close summary.
+     *
+     * Deliberately UNFILTERED by anything else, and deliberately unlike
+     * [boxCount] one field up, which excludes a disassembled box. The two answer
+     * different questions: [boxCount] is "what is physically on this stack right
+     * now", so a box taken off must not count; this is "how many pallets did
+     * this shift close", a historical production fact that a later event does
+     * not undo. `BoxDao.closedCount` is the box-level twin, and
+     * `apps/station/src/lib/shift-close.ts` counts the station's
+     * `closedBoxCount` the same way -- one number reported by two surfaces has
+     * to mean one thing.
+     */
+    @Query("SELECT COUNT(*) FROM pallets WHERE shiftId = :shiftId AND closedAt IS NOT NULL")
+    suspend fun closedCount(shiftId: String): Int
+
     /** Guarded by `closedAt IS NULL` so a replayed close cannot reclose a pallet. */
     @Query(
         "UPDATE pallets SET sscc = :sscc, closedAt = :closedAt, operatorId = :operatorId, " +

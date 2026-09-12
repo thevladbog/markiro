@@ -20,7 +20,16 @@ sealed interface CloseStep {
     data class Confirm(val preview: ShiftCloser.Preview) : CloseStep
     data class Reason(val preview: ShiftCloser.Preview, val selected: String?) : CloseStep
     data class Draining(val pending: Int) : CloseStep
-    data class Summary(val accepted: Int, val errors: Int, val duplicates: Int, val conflicts: Int, val outcome: CloseOutcome) : CloseStep
+    /** `boxes`/`pallets` are null when the shift has none; see [ShiftCloser.Preview]. */
+    data class Summary(
+        val accepted: Int,
+        val errors: Int,
+        val duplicates: Int,
+        val conflicts: Int,
+        val outcome: CloseOutcome,
+        val boxes: Int? = null,
+        val pallets: Int? = null,
+    ) : CloseStep
 }
 
 @HiltViewModel
@@ -73,7 +82,10 @@ class CloseViewModel @Inject constructor(
                 else -> CloseOutcome.PENDING
             }
             val conflicts = db.conflictDao().count().first()
-            _step.value = CloseStep.Summary(preview.accepted, preview.errors, preview.duplicates, conflicts, outcome)
+            _step.value = CloseStep.Summary(
+                preview.accepted, preview.errors, preview.duplicates, conflicts, outcome,
+                boxes = preview.closedBoxes, pallets = preview.closedPallets,
+            )
         }
     }
 }

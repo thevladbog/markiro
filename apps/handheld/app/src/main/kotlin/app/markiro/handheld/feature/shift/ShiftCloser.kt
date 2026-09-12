@@ -18,6 +18,19 @@ class ShiftCloser(private val db: HandheldDatabase, private val clock: () -> Lon
         val alreadyClosed: Boolean,
         /** Duplicate labels still unresolved. Closing warns about them; it never waits. */
         val outstandingDuplicates: Int = 0,
+        /**
+         * Boxes and pallets this device closed, which design brief 10 §9 names
+         * as part of the close summary.
+         *
+         * Null means "this shift does not have them" rather than zero: a
+         * validation shift aggregates nothing and a shift without pallets closes
+         * none, and a permanent «Паллеты 0» on every such close is noise the
+         * operator learns to read past. Zero is reserved for the case that
+         * actually deserves attention -- an aggregation shift that closed no
+         * box.
+         */
+        val closedBoxes: Int? = null,
+        val closedPallets: Int? = null,
     )
 
     suspend fun preview(shiftId: String): Preview? {
@@ -25,6 +38,7 @@ class ShiftCloser(private val db: HandheldDatabase, private val clock: () -> Lon
         val accepted = db.codeDao().countForShift(shiftId)
         val errors = db.scanEventDao().count(shiftId, Verdict.INVALID.wire) + db.scanEventDao().count(shiftId, Verdict.WRONG_GTIN.wire)
         val duplicates = db.scanEventDao().count(shiftId, Verdict.DUPLICATE.wire)
+        val aggregation = shift.mode == "aggregation"
         return Preview(
             accepted = accepted,
             errors = errors,
@@ -33,6 +47,8 @@ class ShiftCloser(private val db: HandheldDatabase, private val clock: () -> Lon
             reasonRequired = reasonRequired(shift.plannedQty, accepted),
             alreadyClosed = db.shiftCloseDao().forShift(shiftId) != null,
             outstandingDuplicates = db.productLabelJobDao().outstandingCount(shiftId),
+            closedBoxes = if (aggregation) db.boxDao().closedCount(shiftId) else null,
+            closedPallets = if (aggregation && shift.palletsEnabled) db.palletDao().closedCount(shiftId) else null,
         )
     }
 
@@ -54,7 +70,18 @@ class ShiftCloser(private val db: HandheldDatabase, private val clock: () -> Lon
             operatorId = operatorId,
             plannedQtySnapshot = shift.plannedQty,
             actualQty = accepted,
-            closedBoxCount = 0,
+            // Counted, not zero. This rides `/station/shift-closures` into
+            // `station_shift_close_events.closed_box_count`, so a hardcoded 0
+            // did not leave a number unshown -- it recorded a FALSE one, for
+            // every shift a handheld has ever closed. Nothing reads that column
+            // today, which is why no test caught it; the first report that does
+            // would have been wrong retroactively.
+            //
+            // `closedCount` is the query the station already uses for the same
+            // field (`apps/station/src/lib/shift-close.ts`): closed boxes on
+            // this device for this shift, with no disassembly filter, because a
+            // box that was closed and later taken apart was still closed.
+            closedBoxCount = db.boxDao().closedCount(shiftId),
             reasonCode = reason,
             closedAt = Iso.format(clock()),
             state = "pending",
