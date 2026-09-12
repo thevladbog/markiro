@@ -284,7 +284,15 @@ class DeviceRecovery(private val db: HandheldDatabase, private val credential: C
                 OperatorEntity(it.operatorId, it.name, it.login, it.role, it.pinHash, it.badgeHash, it.active)
             })
             db.deviceConfigDao().upsert(config)
+            // BOTH kinds of label, exactly as startup demotes both
+            // (`HandheldApp.demoteInterruptedPrints`): re-pairing is the other
+            // way a process that died mid-print resumes. «Напечатать все»
+            // skips only `unknown`, so a pallet left in `printing` would be
+            // resent in bulk -- a second physical label on a stack the server
+            // may already have accepted, which is the single thing the
+            // `unknown` state exists to prevent.
             db.boxDao().demoteInterruptedPrints()
+            db.palletDao().demoteInterruptedPrints()
             db.deviceRecoveryDao().put(row.copy(phase = RecoveryPhase.ACTIVE.name, pendingId = null))
         }
         // A failed cleanup never revokes the published candidate. Startup can retry this cleanup.
@@ -292,11 +300,27 @@ class DeviceRecovery(private val db: HandheldDatabase, private val credential: C
         credential.clearStaged()
     }
 
+    /**
+     * What the operator staring at a blocked terminal is owed, channel by
+     * channel.
+     *
+     * `pallets` is its own line rather than folded into `boxes`: a closed
+     * pallet the server has not acknowledged is a physically labelled stack
+     * whose closure only this device knows about, counted here on the same
+     * `closedAt IS NOT NULL AND ackedAt IS NULL` terms the sync engine's own
+     * queue indicator already counts it on (`SyncEngine.observeUnackedCount`).
+     * Its interrupted and unknown prints join `unknownPrints` for the same
+     * reason a box's do -- `PalletPrinter` mirrors `BoxPrinter` state for
+     * state, so a pallet label with an unresolved outcome needs the same pair
+     * of eyes.
+     */
     suspend fun summary(): Map<String, Long> = db.withTransaction {
         mapOf("scans" to count("outbox"), "inventory" to count("inventory_outbox"),
             "labels" to count("product_label_events", "ackedAt IS NULL"), "boxes" to count("boxes", "closedAt IS NOT NULL AND ackedAt IS NULL"),
+            "pallets" to count("pallets", "closedAt IS NOT NULL AND ackedAt IS NULL"),
             "exceptions" to count("box_exceptions", "ackedAt IS NULL"), "closes" to count("shift_close_outbox", "state = 'pending'"),
             "conflicts" to count("conflicts_mirror"), "unknownPrints" to count("boxes", "printState IN ('printing','unknown')") +
+                count("pallets", "printState IN ('printing','unknown')") +
                 count("product_label_jobs", "attemptState IN ('sending','delivery_unknown')"))
     }
     private fun count(table: String, where: String = "1") = db.openHelper.readableDatabase.query("SELECT COUNT(*) FROM `$table` WHERE $where").use { it.moveToFirst(); it.getLong(0) }

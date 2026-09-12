@@ -57,11 +57,16 @@ class PairingScreenTest {
         var reconnect = false
         compose.setContent {
             MarkiroTheme { PairingScreen(PairingUi.Recovery("saved-device", mapOf("scans" to 12L, "inventory" to 4L,
-                "labels" to 3L, "boxes" to 2L, "exceptions" to 1L, "closes" to 1L, "conflicts" to 2L, "unknownPrints" to 1L), false),
+                "labels" to 3L, "boxes" to 2L, "pallets" to 5L, "exceptions" to 1L, "closes" to 1L,
+                "conflicts" to 2L, "unknownPrints" to 1L), false),
                 PairingCallbacks(onRetry = { reconnect = true })) }
         }
         compose.onNodeWithText("Доступ к устройству приостановлен").assertIsDisplayed()
         compose.onNodeWithText("Ожидают отправки: сканы 12", substring = true).assertExists()
+        // Pallets are named, not folded into the box count: a closed pallet the
+        // server has not acknowledged is its own physically labelled fact, and
+        // the operator deciding whether to reconnect is owed it.
+        compose.onNodeWithText("паллеты 5", substring = true).assertExists()
         compose.onNodeWithText("Подключить прежнее устройство").performScrollTo().performClick()
         assertEquals(true, reconnect)
     }

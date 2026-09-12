@@ -333,7 +333,70 @@ class DeviceRecoveryTest {
 
     @Test fun summaryUsesEveryActualQueueTable() = runTest {
         active()
-        assertEquals(setOf("scans", "inventory", "labels", "boxes", "exceptions", "closes", "conflicts", "unknownPrints"), recovery.summary().keys)
+        assertEquals(
+            setOf("scans", "inventory", "labels", "boxes", "pallets", "exceptions", "closes", "conflicts", "unknownPrints"),
+            recovery.summary().keys,
+        )
+    }
+
+    /**
+     * A closed pallet the server has not acknowledged is a physically labelled
+     * stack whose closure only this device knows about -- exactly the fact the
+     * operator line exists to account for, and one `SyncEngine` already counts
+     * in its own queue indicator. Leaving pallets out of this summary told an
+     * operator staring at a blocked terminal that less work was at stake than
+     * actually was.
+     */
+    @Test fun summaryCountsUnacknowledgedPalletClosuresAndTheirUnknownPrints() = runTest {
+        active()
+        db.palletDao().insert(
+            PalletEntity(
+                palletId = "p-closed", shiftId = "s1", terminalId = null, sscc = "104680089900000015",
+                openedAt = "2026-09-11T07:00:00.000Z", closedAt = "2026-09-11T08:00:00.000Z",
+                operatorId = "op1", printState = PalletPrint.UNKNOWN, printReason = "link lost", ackedAt = null,
+            ),
+        )
+        db.palletDao().insert(
+            PalletEntity(
+                palletId = "p-open", shiftId = "s1", terminalId = null, sscc = null,
+                openedAt = "2026-09-11T08:10:00.000Z", closedAt = null, operatorId = null,
+                printState = PalletPrint.PENDING, printReason = null, ackedAt = null,
+            ),
+        )
+        val summary = recovery.summary()
+        // Only the closed, unacknowledged one is owed to the server.
+        assertEquals(1L, summary["pallets"])
+        assertEquals(1L, summary["unknownPrints"])
+    }
+
+    /**
+     * Startup demotes both kinds of interrupted print; re-pairing the same
+     * device has to as well, since it is the other way a process that died
+     * mid-print resumes. A pallet left in `printing` is not skipped by
+     * «Напечатать все» -- only `unknown` is -- so leaving it would put a second
+     * physical label on a stack the server may already have accepted, which is
+     * the single thing the `unknown` state exists to prevent.
+     */
+    @Test fun rePairingDemotesInterruptedPrintsOfBothKinds() = runTest {
+        sealed()
+        db.boxDao().insert(
+            BoxEntity(
+                boxId = "b-printing", shiftId = "s1", sscc = "004680089900000014",
+                openedAt = "2026-09-11T07:00:00.000Z", closedAt = "2026-09-11T07:30:00.000Z",
+                operatorId = "op1", printState = "printing", printReason = null, ackedAt = null,
+            ),
+        )
+        db.palletDao().insert(
+            PalletEntity(
+                palletId = "p-printing", shiftId = "s1", terminalId = null, sscc = "104680089900000015",
+                openedAt = "2026-09-11T07:00:00.000Z", closedAt = "2026-09-11T08:00:00.000Z",
+                operatorId = "op1", printState = PalletPrint.PRINTING, printReason = null, ackedAt = null,
+            ),
+        )
+        recovery.restore(response(), config.serverUrl)
+        assertEquals(RecoveryPhase.ACTIVE, recovery.current().phase)
+        assertEquals("unknown", db.boxDao().get("b-printing")?.printState)
+        assertEquals(PalletPrint.UNKNOWN, db.palletDao().get("p-printing")?.printState)
     }
 }
 

@@ -57,6 +57,15 @@ class PalletStorageTest {
         ackedAt = null,
     )
 
+    private fun unit(hash: String, boxId: String) = CodeEntity(
+        codeHash = hash,
+        shiftId = "s1",
+        gtin14 = "04680089900000",
+        serial = hash,
+        scannedAt = "2026-09-11T08:10:00.000Z",
+        boxId = boxId,
+    )
+
     /**
      * Not an in-memory round trip: the whole point is that a pallet the
      * operator already opened is still the shift's open one after the app
@@ -155,6 +164,43 @@ class PalletStorageTest {
         db.boxDao().insert(box("b1", "s1").copy(palletId = "p1"))
         db.boxDao().insert(box("b2", "s1"))
         assertEquals(1, db.palletDao().boxCount("p1"))
+    }
+
+    /**
+     * A box the operator took back off the stack keeps its `palletId` -- the
+     * 06d spec is explicit that membership is never cleared, because it is the
+     * historical fact that this box stood on this pallet, mirroring `box_items`
+     * which are marked rather than deleted. So every pallet COUNT has to
+     * exclude a disassembled box instead, which is exactly what
+     * `apps/station/src/lib/pallets.ts` already does in `currentPallet` and
+     * `palletItemCount`.
+     *
+     * Both counts, not just one: `boxCount` feeding the strip and the label's
+     * `qty.boxes` while `itemCount` feeds `qty` is how a label came to overstate
+     * boxes and understate units at the same time, and a goods-in clerk
+     * counting boxes against it found a box missing.
+     */
+    @Test
+    fun aDisassembledBoxKeepsItsMembershipButLeavesEveryCount() = runTest {
+        db.palletDao().insert(pallet("p1", "s1"))
+        db.boxDao().insert(box("b1", "s1").copy(palletId = "p1", closedAt = "2026-09-11T08:30:00.000Z"))
+        db.boxDao().insert(box("b2", "s1").copy(palletId = "p1", closedAt = "2026-09-11T08:40:00.000Z"))
+        repeat(3) { db.codeDao().insert(unit("b1-$it", "b1")) }
+        repeat(2) { db.codeDao().insert(unit("b2-$it", "b2")) }
+        assertEquals(2, db.palletDao().boxCount("p1"))
+        assertEquals(5, db.palletDao().itemCount("p1"))
+
+        assertEquals(1, db.boxDao().markDisassembled("b1", "2026-09-11T09:00:00.000Z"))
+
+        assertEquals(1, db.palletDao().boxCount("p1"))
+        assertEquals(1, db.palletDao().observeBoxCount("p1").first())
+        // Counted off the box's own retirement rather than off its codes having
+        // been released: the two are one transaction today, and a count that
+        // only agrees while that holds is a count waiting to disagree.
+        assertEquals(2, db.palletDao().itemCount("p1"))
+        // The membership itself is untouched.
+        assertEquals("p1", db.boxDao().get("b1")?.palletId)
+        assertEquals("2026-09-11T09:00:00.000Z", db.boxDao().get("b1")?.disassembledAt)
     }
 
     /**

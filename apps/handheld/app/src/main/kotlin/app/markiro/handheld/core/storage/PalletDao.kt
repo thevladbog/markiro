@@ -22,22 +22,45 @@ interface PalletDao {
     /**
      * Derived, never stored, and correlated by pallet rather than by shift: a
      * box that joined a different pallet must never inflate this one's count.
+     *
+     * A DISASSEMBLED box does not count. It keeps its `palletId` -- the 06d
+     * spec (§1.3, and again in the disaggregation-document section) is explicit
+     * that membership is never cleared, because it is the historical fact that
+     * this box stood on this pallet, mirroring `box_items`, which are marked
+     * rather than deleted. So the exclusion belongs in the COUNT, not in a
+     * second writer clearing the pointer: the box is physically off the stack,
+     * and counting it closes the pallet one box short of full, overstates
+     * `qty.boxes` on the printed label, and leaves a goods-in clerk counting
+     * boxes against that label one box down.
+     *
+     * `apps/station/src/lib/pallets.ts` answers this the same way in
+     * `currentPallet`, `listClosedPallets` and `findUnresolvedPalletPrint`.
+     * Two surfaces closing pallets off the same physical event must not
+     * disagree about what that event means.
      */
-    @Query("SELECT COUNT(*) FROM boxes WHERE palletId = :palletId")
+    @Query("SELECT COUNT(*) FROM boxes WHERE palletId = :palletId AND disassembledAt IS NULL")
     suspend fun boxCount(palletId: String): Int
 
-    @Query("SELECT COUNT(*) FROM boxes WHERE palletId = :palletId")
+    @Query("SELECT COUNT(*) FROM boxes WHERE palletId = :palletId AND disassembledAt IS NULL")
     fun observeBoxCount(palletId: String): Flow<Int>
 
     /**
-     * Units across every box this pallet holds, derived rather than stored for
-     * the same reason `boxCount` is: it cannot disagree with what the pallet's
-     * boxes actually carry. Feeds the pallet label's own `qty`, which is a unit
-     * count, not the box count `qty.boxes` carries.
+     * Units across every box this pallet still carries, derived rather than
+     * stored for the same reason `boxCount` is: it cannot disagree with what
+     * the pallet's boxes actually carry. Feeds the pallet label's own `qty`,
+     * which is a unit count, not the box count `qty.boxes` carries.
+     *
+     * Excludes a disassembled box explicitly rather than relying on its codes
+     * having been released. `ExceptionEngine.disassemble` does both in one
+     * transaction today, so the two agree -- but a count that is only correct
+     * while that holds is a count waiting to disagree with `boxCount` beside
+     * it, which is precisely how one label came to overstate boxes and
+     * understate units at the same time. The station's `palletItemCount`
+     * carries the same filter.
      */
     @Query(
         "SELECT COUNT(*) FROM codes_mirror WHERE boxId IN " +
-            "(SELECT boxId FROM boxes WHERE palletId = :palletId)",
+            "(SELECT boxId FROM boxes WHERE palletId = :palletId AND disassembledAt IS NULL)",
     )
     suspend fun itemCount(palletId: String): Int
 

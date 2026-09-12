@@ -267,6 +267,75 @@ class ClosePalletTest {
         assertEquals('1', closed.sscc.first())
     }
 
+    /**
+     * The defect box disassembly and pallets shipped together produced: a box
+     * taken back off the stack kept counting toward the pallet, so the pallet
+     * filled -- and closed -- one box short of a full physical stack.
+     *
+     * Driven through the REAL `ExceptionEngine.disassemble`, not by stamping
+     * `disassembledAt` here: the point is that the shipped correction path is
+     * what the pallet count has to survive.
+     *
+     * Matches the station, where `currentPallet` in
+     * `apps/station/src/lib/pallets.ts` already excludes a disassembled box
+     * from its derived count, with the same reason in its comment: the box is
+     * physically off the stack, and counting it closes the pallet one box short.
+     */
+    @Test
+    fun aDisassembledBoxNeitherFillsThePalletNorClosesItEarly() = runTest {
+        givenShift(boxCapacity = 1, palletBoxCapacity = 2)
+        seedBoxPool()
+        seedPalletPool()
+        val exceptions = app.markiro.handheld.core.exceptions.ExceptionEngine(db) { now }
+
+        val first = fillAndCloseBox("h1")
+        val palletId = first.box.palletId!!
+        assertEquals(1, db.palletDao().boxCount(palletId))
+
+        // The operator lifts that box back off the stack.
+        assertEquals(
+            app.markiro.handheld.core.exceptions.DisassembleResult.Retired,
+            exceptions.disassemble(
+                "s1", first.box.boxId,
+                app.markiro.handheld.core.exceptions.DisassembleReason.DAMAGED_PACKAGE, "op1", null,
+            ),
+        )
+        assertEquals(0, db.palletDao().boxCount(palletId))
+        // Membership survives as the historical fact (06d §1.3).
+        assertEquals(palletId, db.boxDao().get(first.box.boxId)!!.palletId)
+
+        // The next box is this pallet's FIRST, so a pallet of capacity two must
+        // stay open -- the strip says 1/2 and one box is physically on it.
+        val second = fillAndCloseBox("h2")
+        assertEquals(palletId, second.box.palletId)
+        assertNull("a pallet holding one box of two must not close", second.pallet)
+        assertEquals(1, db.palletDao().boxCount(palletId))
+        assertNull(db.palletDao().get(palletId)!!.closedAt)
+
+        // A third box brings the physical stack to two, and only then does it close.
+        val third = fillAndCloseBox("h3")
+        val closed = third.pallet as ClosePalletResult.Closed
+        assertEquals(2, closed.boxCount)
+    }
+
+    @Test
+    fun aPalletWhoseEveryBoxWasTakenOffIsEmptyAndCostsNoSerial() = runTest {
+        // `ClosePallet` refuses an empty pallet before burning, so a stack the
+        // operator emptied must not mint a number no label will ever carry.
+        givenShift(boxCapacity = 1, palletBoxCapacity = 5)
+        seedBoxPool()
+        seedPalletPool()
+        val exceptions = app.markiro.handheld.core.exceptions.ExceptionEngine(db) { now }
+        val first = fillAndCloseBox("h1")
+        exceptions.disassemble(
+            "s1", first.box.boxId,
+            app.markiro.handheld.core.exceptions.DisassembleReason.WRONG_PRODUCT, "op1", null,
+        )
+        assertEquals(ClosePalletResult.Empty, closePallet.close("s1", PREFIX, "op1"))
+        assertEquals(200L, pool.remaining(PREFIX, SsccPool.PALLET_EXTENSION_DIGIT))
+        assertNull(db.palletDao().get(first.box.palletId!!)!!.closedAt)
+    }
+
     @Test
     fun keepsOneOverCapacityPalletWhenThePoolIsDry() = runTest {
         givenShift(boxCapacity = 2, palletBoxCapacity = 1)
