@@ -10,6 +10,7 @@ class DeviceWipe(private val db: HandheldDatabase, private val credential: Crede
             db.printerDao().clear()
             db.boxDao().clear()
             db.ssccPoolDao().clear()
+            db.palletDao().clear()
             // The duplicate flow carries no credential-ownership column precisely
             // because a revoked device keeps nothing. That is only true while
             // these two lines are here.

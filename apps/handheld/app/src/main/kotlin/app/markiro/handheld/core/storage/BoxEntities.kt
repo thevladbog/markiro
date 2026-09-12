@@ -35,6 +35,8 @@ data class BoxEntity(
     val printReason: String?,
     /** Null until the server has accepted the closure. */
     val ackedAt: String?,
+    /** The pallet (06d) this box joined, or null for a box that stands alone. */
+    val palletId: String? = null,
 )
 
 /**

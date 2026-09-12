@@ -43,7 +43,9 @@ class MigrationTest {
             legacy.version = 1
         }
         val db = Room.databaseBuilder(context, HandheldDatabase::class.java, name)
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+            .addMigrations(
+                MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8,
+            )
             .allowMainThreadQueries()
             .build()
         try {
@@ -75,6 +77,13 @@ class MigrationTest {
             assertEquals("b1", db.boxDao().open("s")?.boxId)
             db.ssccPoolDao().insertIgnore(SsccRangeEntity("468008990", 0, 1, 10, 1))
             assertEquals(10L, db.ssccPoolDao().remaining("468008990", 0))
+            db.palletDao().insert(
+                PalletEntity(
+                    palletId = "p1", shiftId = "s", terminalId = null, sscc = null, openedAt = "t",
+                    closedAt = null, operatorId = null, printState = "pending", printReason = null, ackedAt = null,
+                ),
+            )
+            assertEquals("p1", db.palletDao().open("s")?.palletId)
         } finally {
             db.close()
             context.deleteDatabase(name)

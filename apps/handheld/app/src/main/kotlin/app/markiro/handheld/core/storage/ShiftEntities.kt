@@ -53,6 +53,8 @@ data class ShiftEntity(
     val duplicatePolicyRevision: String? = null,
     /** Boxes per pallet (06d) -- see `products.palletBoxCapacity` on the server. */
     val palletBoxCapacity: Int? = null,
+    /** The pallet label template's spec as the bundle delivered it (06d), same shape as `boxLabelTemplate`. */
+    val palletLabelTemplateSpec: String? = null,
 )
 
 /** Accepted codes on this device, keyed by the KM hash device-wide (a code is one physical item). */
