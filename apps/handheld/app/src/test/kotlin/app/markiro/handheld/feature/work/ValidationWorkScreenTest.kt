@@ -42,10 +42,18 @@ class ValidationWorkScreenTest {
             }
         }
         val total=compose.onNodeWithText(compose.activity.getString(app.markiro.handheld.R.string.work_plan_of,"1","100")).fetchSemanticsNode().boundsInRoot
-        val mine=compose.onNodeWithText("1").fetchSemanticsNode().boundsInRoot
+        // Both the terminal and duplicate counters legitimately show one. Resolve
+        // the terminal value by the total row while retaining the geometry assertion.
+        val ones=compose.onAllNodesWithText("1").assertCountEquals(2).fetchSemanticsNodes()
+        val mine=ones.single { it.boundsInRoot.top == total.top }.boundsInRoot
         assertTrue("Counters need a visible gap",mine.left-total.right>=16)
-        val errors=compose.onNodeWithText(if(english) "Errors 0 · Duplicates 1" else "Ошибки 0 · Дубли 1").fetchSemanticsNode().boundsInRoot
+        compose.onNodeWithText(if(english) "Errors" else "Ошибки").assertIsDisplayed()
+        compose.onNodeWithText(if(english) "Duplicates" else "Дубли").assertIsDisplayed()
+        val errors=compose.onNodeWithText("0").fetchSemanticsNode().boundsInRoot
+        val duplicates=ones.single { it.boundsInRoot.top > total.top }.boundsInRoot
         assertTrue("Errors should have their own line",errors.top>=total.bottom)
+        assertEquals("Error and duplicate values share a row", errors.top, duplicates.top)
+        assertTrue("Counters need a visible gap",duplicates.left-errors.right>=16)
         compose.onNodeWithText("Вода 0,5").assertIsDisplayed()
         compose.onNodeWithText("SEP26-001").assertIsDisplayed()
         compose.onNodeWithContentDescription(if(english) "More" else "Ещё").assertIsDisplayed()
