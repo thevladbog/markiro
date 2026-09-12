@@ -989,6 +989,41 @@ test("guard CLI reports every independent release CDN failure without leaking pl
   });
 });
 
+test("production plan guard accepts handheld access only within the exact release prefixes", async () => {
+  const safe = await readFixture("safe");
+  assert.doesNotThrow(() => guardProductionPlan(safe));
+
+  for (const [sid, scope] of [
+    ["AllowPublicReleaseObjects", "public-resource"],
+    ["AllowPublisherReleaseObjects", "publisher-objects-resource"],
+    ["AllowPublisherReleaseBucketPreflight", "publisher-bucket-condition"],
+  ]) {
+    for (const mutation of ["missing-handheld", "extra-prefix", "wildcard"]) {
+      const plan = copy(safe);
+      const change = resource(
+        plan,
+        "module.station_releases.yandex_storage_bucket_policy.releases",
+      ).change;
+      const policy = JSON.parse(change.after.policy);
+      const statement = policy.Statement.find((candidate) => candidate.Sid === sid);
+      const prefixes =
+        sid === "AllowPublisherReleaseBucketPreflight"
+          ? statement.Condition.StringLike["s3:prefix"]
+          : statement.Resource;
+      if (mutation === "missing-handheld") prefixes.pop();
+      else if (mutation === "extra-prefix") {
+        prefixes.push(prefixes[0].replace("station/*", "private/*"));
+      } else prefixes.splice(0, prefixes.length, "*");
+      change.after.policy = JSON.stringify(policy);
+      assert.throws(
+        () => guardProductionPlan(plan),
+        { message: `production plan rejected (release-policy-${scope})` },
+        `${sid}: ${mutation}`,
+      );
+    }
+  }
+});
+
 test("production plan guard distinguishes release-policy failure classes", async () => {
   const safe = await readFixture("safe");
   const cases = [
