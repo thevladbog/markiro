@@ -309,53 +309,141 @@ it("crosses the server expiry on its interval and clears that interval on unmoun
   expect(vi.getTimerCount()).toBe(0);
 });
 
-it("uses the type-specific destructive endpoint only after confirmation", async () => {
-  const request = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    expect(String(input)).toBe("/api/kiosks/kiosk-1/unbind");
-    expect(init?.method).toBe("POST");
-    return { ok: true, status: 204, json: async () => undefined } as Response;
-  });
-  vi.stubGlobal("fetch", request);
-  const onPair = vi.fn();
-  const onReassign = vi.fn();
-  render(
-    <QueryClientProvider
-      client={new QueryClient({ defaultOptions: { mutations: { retry: false } } })}
-    >
+it.each([
+  {
+    type: "kiosk",
+    endpoint: "/api/kiosks/kiosk-1/unbind",
+    method: "POST",
+    action: "Отвязать",
+    title: "Отвязать киоск?",
+  },
+  {
+    type: "station",
+    endpoint: "/api/station-devices/station-1",
+    method: "DELETE",
+    action: "Отозвать",
+    title: "Отозвать устройство?",
+  },
+  {
+    type: "handheld",
+    endpoint: "/api/station-devices/handheld-1",
+    method: "DELETE",
+    action: "Отозвать",
+    title: "Отозвать устройство?",
+  },
+] as const)(
+  "uses the $type destructive endpoint only after confirmation",
+  async ({ type, endpoint, method, action, title }) => {
+    const request = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      return { ok: true, status: 204, json: async () => undefined } as Response;
+    });
+    vi.stubGlobal("fetch", request);
+    const onPair = vi.fn();
+    const onReassign = vi.fn();
+    render(
+      <QueryClientProvider
+        client={new QueryClient({ defaultOptions: { mutations: { retry: false } } })}
+      >
+        <ThemeProvider defaultTheme="light">
+          <MemoryRouter>
+            <DeviceActions
+              device={{
+                id: `${type}-1`,
+                type,
+                name: "Lobby",
+                place: { id: null, name: "Entrance" },
+                status: "online",
+                lastSeenAt: null,
+                paired: true,
+              }}
+              canReassign
+              canManageCredentials
+              onPair={onPair}
+              onReassign={onReassign}
+            />
+          </MemoryRouter>
+        </ThemeProvider>
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Переназначить" }));
+    fireEvent.click(screen.getByRole("button", { name: "Выдать новый код" }));
+    expect(onReassign).toHaveBeenCalledOnce();
+    expect(onPair).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: action }));
+    expect(request).not.toHaveBeenCalled();
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: title })).getByRole("button", {
+        name: action,
+      }),
+    );
+    await waitFor(() => expect(request).toHaveBeenCalledOnce());
+    expect(request.mock.calls[0]?.[0]).toBe(endpoint);
+    expect(request.mock.calls[0]?.[1]?.method).toBe(method);
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  },
+);
+
+it("blocks station mutations only for a cancelled or unknown reservation and leaves kiosk controls available", () => {
+  const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+  const base = {
+    name: "Packing",
+    place: { id: null, name: null },
+    status: "revoked" as const,
+    lastSeenAt: null,
+    paired: false,
+  };
+  const view = render(
+    <QueryClientProvider client={client}>
       <ThemeProvider defaultTheme="light">
         <MemoryRouter>
           <DeviceActions
-            device={{
-              id: "kiosk-1",
-              type: "kiosk",
-              name: "Lobby",
-              place: { id: null, name: "Entrance" },
-              status: "online",
-              lastSeenAt: null,
-              paired: true,
-            }}
+            device={{ ...base, id: "station-1", type: "station" }}
             canReassign
             canManageCredentials
-            onPair={onPair}
-            onReassign={onReassign}
+            reservationCancelledOrUnknown
+            onPair={vi.fn()}
+            onReassign={vi.fn()}
           />
         </MemoryRouter>
       </ThemeProvider>
     </QueryClientProvider>,
   );
-
-  fireEvent.click(screen.getByRole("button", { name: "Переназначить" }));
-  fireEvent.click(screen.getByRole("button", { name: "Выдать новый код" }));
-  expect(onReassign).toHaveBeenCalledOnce();
-  expect(onPair).toHaveBeenCalledOnce();
-  fireEvent.click(screen.getByRole("button", { name: "Отвязать" }));
-  expect(request).not.toHaveBeenCalled();
-  fireEvent.click(
-    within(screen.getByRole("dialog", { name: "Отвязать киоск?" })).getByRole("button", {
-      name: "Отвязать",
-    }),
+  expect(screen.queryByRole("button", { name: "Выдать новый код" })).toBeNull();
+  view.rerender(
+    <QueryClientProvider client={client}>
+      <ThemeProvider defaultTheme="light">
+        <MemoryRouter>
+          <DeviceActions
+            device={{ ...base, id: "station-1", type: "station" }}
+            canReassign
+            canManageCredentials
+            reservationCancelledOrUnknown={false}
+            onPair={vi.fn()}
+            onReassign={vi.fn()}
+          />
+        </MemoryRouter>
+      </ThemeProvider>
+    </QueryClientProvider>,
   );
-  await waitFor(() => expect(request).toHaveBeenCalledOnce());
+  expect(screen.getByRole("button", { name: "Выдать новый код" })).toBeDefined();
+  view.rerender(
+    <QueryClientProvider client={client}>
+      <ThemeProvider defaultTheme="light">
+        <MemoryRouter>
+          <DeviceActions
+            device={{ ...base, id: "kiosk-1", type: "kiosk" }}
+            canReassign
+            canManageCredentials
+            reservationCancelledOrUnknown
+            onPair={vi.fn()}
+            onReassign={vi.fn()}
+          />
+        </MemoryRouter>
+      </ThemeProvider>
+    </QueryClientProvider>,
+  );
+  expect(screen.getByRole("button", { name: "Выдать новый код" })).toBeDefined();
 });
 
 it("preserves a failed reassignment drawer and never issues or revokes a credential", async () => {

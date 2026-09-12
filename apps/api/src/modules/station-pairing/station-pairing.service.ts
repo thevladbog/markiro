@@ -23,6 +23,11 @@ import {
 import { OperatorsService } from "../operators/operators.service";
 import { SecurityAuditService } from "../../authorization/security-audit.service";
 import { EntitlementsService } from "../../subscriptions/entitlements.service";
+import {
+  assertReservationOpen,
+  workingAssignment,
+  transitionWorkingAssignment,
+} from "../../subscriptions/working-device-assignments";
 import type { StationDeviceKind } from "../station-devices/dto";
 import type {
   IssueStationPairingCodeResultDto,
@@ -136,63 +141,47 @@ export class StationPairingService {
     stationDeviceId: string,
     issuedByUserId: string,
   ): Promise<IssueStationPairingCodeResultDto> {
-    const [station] = await this.db
-      .select({ id: schema.stationDevices.id })
-      .from(schema.stationDevices)
-      .where(
-        and(
-          eq(schema.stationDevices.tenantId, tenantId),
-          eq(schema.stationDevices.id, stationDeviceId),
-        ),
-      );
-    if (!station) throw new NotFoundException();
-
-    await this.retireLiveCodes(tenantId, stationDeviceId);
-    const expiresAt = new Date(Date.now() + PAIRING_TTL_MS);
-    const pepper = loadEnv().PAIRING_CODE_PEPPER;
-    for (let attempt = 0; attempt < MINT_ATTEMPTS; attempt++) {
-      const code = mintPairingCode();
-      const codeHash = hashPairingCode(code, pepper);
-      const [clash] = await this.db
-        .select({ id: schema.stationPairingCodes.id })
-        .from(schema.stationPairingCodes)
-        .where(
-          and(
-            eq(schema.stationPairingCodes.codeHash, codeHash),
-            isNull(schema.stationPairingCodes.usedAt),
-            gt(schema.stationPairingCodes.expiresAt, new Date()),
-          ),
-        );
-      if (clash) continue;
-
-      try {
-        await this.db.insert(schema.stationPairingCodes).values({
-          tenantId,
-          stationDeviceId,
-          codeHash,
-          expiresAt,
-          issuedByUserId,
-        });
-      } catch (error) {
-        if (this.isHashCollision(error)) continue;
-        if (!this.isOneLiveCodeViolation(error)) throw error;
-        await this.retireLiveCodes(tenantId, stationDeviceId);
-        try {
-          await this.db.insert(schema.stationPairingCodes).values({
-            tenantId,
-            stationDeviceId,
-            codeHash,
-            expiresAt,
-            issuedByUserId,
-          });
-        } catch (retryError) {
-          if (this.isHashCollision(retryError)) continue;
-          throw retryError;
+    return this.db.transaction((tx) =>
+      this.entitlements.withQuotaLock(tx, tenantId, "stations", async () => {
+        const [station] = await tx
+          .select({ id: schema.stationDevices.id })
+          .from(schema.stationDevices)
+          .where(
+            and(
+              eq(schema.stationDevices.tenantId, tenantId),
+              eq(schema.stationDevices.id, stationDeviceId),
+            ),
+          )
+          .for("update");
+        if (!station) throw new NotFoundException();
+        assertReservationOpen(await workingAssignment(tx, tenantId, stationDeviceId));
+        await tx
+          .update(schema.stationPairingCodes)
+          .set({ usedAt: new Date() })
+          .where(
+            and(
+              eq(schema.stationPairingCodes.tenantId, tenantId),
+              eq(schema.stationPairingCodes.stationDeviceId, stationDeviceId),
+              isNull(schema.stationPairingCodes.usedAt),
+            ),
+          );
+        const expiresAt = new Date(Date.now() + PAIRING_TTL_MS);
+        const pepper = loadEnv().PAIRING_CODE_PEPPER;
+        for (let attempt = 0; attempt < MINT_ATTEMPTS; attempt++) {
+          const code = mintPairingCode();
+          const codeHash = hashPairingCode(code, pepper);
+          // The shared quota/device locks serialize code issuance and cancellation.
+          // A global hash collision skips the insert without aborting this transaction.
+          const [inserted] = await tx
+            .insert(schema.stationPairingCodes)
+            .values({ tenantId, stationDeviceId, codeHash, expiresAt, issuedByUserId })
+            .onConflictDoNothing()
+            .returning({ id: schema.stationPairingCodes.id });
+          if (inserted) return { code, expiresAt };
         }
-      }
-      return { code, expiresAt };
-    }
-    throw new Error("Could not mint a unique station pairing code");
+        throw new Error("Could not mint a unique station pairing code");
+      }),
+    );
   }
 
   async redeem(
@@ -367,6 +356,12 @@ export class StationPairingService {
             )
             .for("update");
           if (!lockedStation) throw new PairClaimLostError();
+          const assignment = await workingAssignment(
+            tx,
+            candidate.tenantId,
+            candidate.stationDeviceId,
+          );
+          if (assignment?.releaseReason === "reservation_cancelled") throw new PairClaimLostError();
           auditContext.action = lockedStation.apiKeyId === null ? "station.pair" : "station.repair";
           if (
             options.expectedRecoveryIdentity &&
@@ -423,8 +418,9 @@ export class StationPairingService {
                     : eq(schema.stationDevices.revokedAt, lockedStation.revokedAt),
                 ),
               )
-              .returning({ id: schema.stationDevices.id });
+              .returning();
             if (!paired) throw new PairClaimLostError();
+            await transitionWorkingAssignment(tx, paired, { domain: "device", id: paired.id });
           };
 
           if (lockedStation.revokedAt !== null) {
@@ -483,19 +479,6 @@ export class StationPairingService {
     }
   }
 
-  private async retireLiveCodes(tenantId: string, stationDeviceId: string): Promise<void> {
-    await this.db
-      .update(schema.stationPairingCodes)
-      .set({ usedAt: new Date() })
-      .where(
-        and(
-          eq(schema.stationPairingCodes.tenantId, tenantId),
-          eq(schema.stationPairingCodes.stationDeviceId, stationDeviceId),
-          isNull(schema.stationPairingCodes.usedAt),
-        ),
-      );
-  }
-
   private async deleteCandidateKey(keyId: string): Promise<void> {
     await this.deletePersistedApiKey(keyId);
   }
@@ -528,24 +511,5 @@ export class StationPairingService {
       // failure. An unlinked key is additionally rejected by TenantGuard.
     }
     throw new InternalServerErrorException("Station credential cleanup failed");
-  }
-
-  private isOneLiveCodeViolation(error: unknown): boolean {
-    return this.constraint(error) === "station_pairing_codes_one_live_uq";
-  }
-
-  private isHashCollision(error: unknown): boolean {
-    return this.constraint(error) === "station_pairing_codes_code_hash_live_uq";
-  }
-
-  private constraint(error: unknown): string | undefined {
-    const err = error as {
-      code?: string;
-      constraint?: string;
-      cause?: { code?: string; constraint?: string };
-    };
-    const code = err.code ?? err.cause?.code;
-    if (code !== "23505") return undefined;
-    return err.constraint ?? err.cause?.constraint;
   }
 }

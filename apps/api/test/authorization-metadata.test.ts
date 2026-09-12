@@ -11,6 +11,7 @@ import { BoxesController } from "../src/modules/boxes/boxes.controller";
 import { ConflictsController } from "../src/modules/conflicts/conflicts.controller";
 import { CounterpartiesController } from "../src/modules/counterparties/counterparties.controller";
 import { DevicesController } from "../src/modules/devices/devices.controller";
+import { DeviceLicensingController } from "../src/modules/device-licensing/device-licensing.controller";
 import { DashboardController } from "../src/modules/dashboard/dashboard.controller";
 import { EmployeesController } from "../src/modules/employees/employees.controller";
 import { LabelTemplatesController } from "../src/modules/label-templates/label-templates.controller";
@@ -293,6 +294,7 @@ const ADMINISTRATIVE_CONTROLLERS: readonly [
       issuePairingCode: credentialsPolicy,
     },
   ],
+  [DeviceLicensingController, { inspect: credentialsPolicy, cancelReservation: credentialsPolicy }],
   [
     KiosksController,
     {

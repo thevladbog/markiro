@@ -131,6 +131,15 @@ function stubFetch({
 
     const override = await onRequest?.(path, init);
     if (override) return override;
+    if (path === "/api/device-licensing")
+      return jsonResponse(200, {
+        tenantId: "org_1",
+        usage: 0,
+        limit: null,
+        canCancelReservations: true,
+        integrity: "ready",
+        devices: [],
+      });
     if (path === "/api/kiosks") return jsonResponse(200, { items: kiosks });
     if (path.startsWith("/api/devices"))
       return jsonResponse(200, {

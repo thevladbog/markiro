@@ -837,14 +837,8 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
 
   describe("cross-tenant device lookup (Task 7 finding 2)", () => {
     it("a device row mistakenly tagged with another tenant is not resolved by that tenant's own api-key", async () => {
-      // "Victim" tenant: exists only so its id can be written onto another
-      // tenant's station_devices row below, simulating a data-integrity
-      // slip. Nothing in the schema stops this: station_devices.api_key_id
-      // carries no unique constraint of its own (see
-      // sscc_blocks_tenant_device_fk's comment in platform.ts), so a
-      // tenant-scoped WHERE clause is the ONLY thing standing between "a
-      // row exists with this api-key id" and "MY tenant owns the row with
-      // this api-key id".
+      // A legacy/malformed credential link must not cross the key's own
+      // tenant boundary, independently of the licensed-assignment foreign keys.
       const victimAgent = request.agent(app!.getHttpServer());
       const victimOrgId = await signUpAndActivate(victimAgent);
 
@@ -868,15 +862,31 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
       const deviceId = device.deviceId;
       const apiKey = device.apiKey;
 
-      // The row keeps the caller's real api-key id but now claims the
-      // victim's tenantId -- TenantGuard must still resolve req.tenantId
-      // from the api-key's own referenceId (Better Auth's record, untouched
-      // by this update) and must refuse to hand back a device row that
-      // doesn't ALSO belong to that tenant.
+      // Current assignments prevent retagging a durable device. Preserve that
+      // database guarantee, then model the independent legacy api-key mismatch
+      // with a raw wrong-tenant row rather than disabling constraints/history.
+      await expect(
+        db
+          .update(schema.stationDevices)
+          .set({ tenantId: victimOrgId })
+          .where(eq(schema.stationDevices.id, deviceId)),
+      ).rejects.toMatchObject({ cause: { code: "23503" } });
+      const [linked] = await db
+        .select()
+        .from(schema.stationDevices)
+        .where(eq(schema.stationDevices.id, deviceId));
+      expect(linked?.apiKeyId).toBeTruthy();
       await db
         .update(schema.stationDevices)
-        .set({ tenantId: victimOrgId })
+        .set({ apiKeyId: null })
         .where(eq(schema.stationDevices.id, deviceId));
+      const wrongDeviceId = randomUUID();
+      await db.insert(schema.stationDevices).values({
+        id: wrongDeviceId,
+        tenantId: victimOrgId,
+        name: "Misbound legacy device",
+        apiKeyId: linked!.apiKeyId,
+      });
 
       await request(app!.getHttpServer())
         .get(`/shifts/${shiftId}/bundle`)
@@ -884,7 +894,7 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
         .expect(401);
 
       // A verified Better Auth key is not a station principal on its own.
-      // Once its durable row no longer matches the key's tenant, TenantGuard
+      // Its only credential-linked row belongs to another tenant; TenantGuard
       // rejects the orphaned credential instead of serving any bundle data.
 
       const blocks = await db

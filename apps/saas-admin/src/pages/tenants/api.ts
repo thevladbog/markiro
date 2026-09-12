@@ -28,6 +28,9 @@ import {
   type BankAccountArchiveInput,
   type BankAccountInput,
   type BillingProfileInput,
+  platformDeviceLicensingContracts,
+  cancelDeviceReservationSchema,
+  type CancelDeviceReservation,
 } from "@markiro/platform-contracts";
 
 import { platformApiFetch, CURRENT_COMMERCIAL_VERSION } from "../../api/client.js";
@@ -79,6 +82,33 @@ export async function getTenant(tenantId: string): Promise<TenantDetail> {
     headers: { [COMMERCIAL_VERSION_HEADER]: CURRENT_COMMERCIAL_VERSION },
     responseSchema: platformTenantV3Contracts.detail.response,
   });
+}
+export function getTenantDeviceLicensing(tenantId: string) {
+  const validatedId = platformTenantIdSchema.parse(tenantId);
+  return platformApiFetch(
+    platformDeviceLicensingContracts.inspect.path.replace(":tenantId", validatedId),
+    {
+      responseSchema: platformDeviceLicensingContracts.inspect.response,
+    },
+  );
+}
+export function cancelTenantDeviceReservation(
+  tenantId: string,
+  deviceId: string,
+  input: CancelDeviceReservation,
+) {
+  const validatedId = platformTenantIdSchema.parse(tenantId);
+  const body = cancelDeviceReservationSchema.parse(input);
+  return platformApiFetch(
+    platformDeviceLicensingContracts.cancelReservation.path
+      .replace(":tenantId", validatedId)
+      .replace(":deviceId", deviceId),
+    {
+      responseSchema: platformDeviceLicensingContracts.cancelReservation.response,
+      method: platformDeviceLicensingContracts.cancelReservation.method,
+      body: JSON.stringify(body),
+    },
+  );
 }
 
 export async function renewOwnerActivation(tenantId: string) {

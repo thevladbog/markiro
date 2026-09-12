@@ -479,6 +479,32 @@ function positiveInteger(value, fallback) {
   return Number.isSafeInteger(value) && value > 0 ? value : fallback;
 }
 
+async function requireWorkingDeviceCompatibility(dependencies, image, environment) {
+  const result = await mustRun(
+    dependencies,
+    "docker",
+    [
+      "run",
+      "--rm",
+      "--network",
+      "none",
+      "--read-only",
+      "--cap-drop",
+      "ALL",
+      "--security-opt",
+      "no-new-privileges:true",
+      "--entrypoint",
+      "node",
+      image,
+      "/opt/markiro/working-device-compatibility.mjs",
+    ],
+    environment,
+    dependencies.timeouts.command,
+  );
+  if (result.stdout.trim() !== "working-device-assignments-v1")
+    throw new Error("API image is incompatible with working device reservations");
+}
+
 async function waitForEdgeTls(dependencies, options) {
   const timeoutMs = positiveInteger(options.edgeReadinessTimeoutMs, EDGE_READINESS_TIMEOUT_MS);
   const intervalMs = positiveInteger(options.edgeReadinessIntervalMs, EDGE_READINESS_INTERVAL_MS);
@@ -661,6 +687,7 @@ export async function prepareRelease(options, supplied = {}) {
           dependencies.timeouts.command,
         )
       : undefined;
+    await requireWorkingDeviceCompatibility(dependencies, approvedApiImage, environment);
     candidate = {
       tag: preflight.imageTag,
       previousTag: previous?.tag ?? null,
@@ -810,6 +837,7 @@ export async function rollbackPreparedRelease(options, supplied = {}) {
     );
     requireApprovedDigest(candidate.vbtech.imageRef, vbtechImage.stdout.trim());
   }
+  await requireWorkingDeviceCompatibility(dependencies, previous.apiDigest, environment);
   await mustRun(
     dependencies,
     "docker",
@@ -944,6 +972,7 @@ export async function deployRelease(options, supplied = {}) {
           dependencies.timeouts.command,
         )
       : undefined;
+    await requireWorkingDeviceCompatibility(dependencies, approvedApiImage, environment);
     release = {
       tag,
       previousTag: await latestHealthyRelease(releaseDirectory),

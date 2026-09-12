@@ -3173,6 +3173,25 @@
       "allStatuses": "All statuses",
       "emptyTitle": "No devices yet",
       "emptyHint": "Add a station or kiosk to get started.",
+      "licensing": {
+        "title": "Working devices: Station and handheld",
+        "count": "{{usage}} of {{limit}}",
+        "unlimited": "{{usage}} · unlimited",
+        "loadError": "Could not load working device licensing.",
+        "cancel": "Cancel reservation",
+        "confirmTitle": "Cancel this reservation?",
+        "confirmBody": "One slot will be freed and the old pairing code will stop working.",
+        "confirm": "Free slot",
+        "retry": "The result is uncertain. Retry to use the same request.",
+        "permissionError": "Your session or permissions changed. Access was refreshed; review the current state before trying again.",
+        "stale": "The reservation changed. Review the refreshed state and confirm again.",
+        "state": {
+          "reserved": "Reserved",
+          "assigned": "Occupied",
+          "released": "Released",
+          "inconsistent": "Needs review"
+        }
+      },
       "type": {
         "station": "Station",
         "kiosk": "Kiosk",
@@ -3189,6 +3208,7 @@
         "type": "Type",
         "place": "Place",
         "status": "Status",
+        "licensing": "Working-device slot",
         "actions": "Actions"
       },
       "kioskSettings": "Kiosk settings",

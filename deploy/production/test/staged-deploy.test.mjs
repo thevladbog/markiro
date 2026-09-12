@@ -103,6 +103,8 @@ async function fixture({ failure, previousVbtech, withPrevious = true } = {}) {
         running.apiDigest = null;
         running.edgeDigest = null;
       }
+      if (args.includes("/opt/markiro/working-device-compatibility.mjs"))
+        return { code: 0, stdout: "working-device-assignments-v1\n", stderr: "" };
       if (args.includes("inspect"))
         return { code: 0, stdout: JSON.stringify([args.at(-1)]), stderr: "" };
       return { code: 0, stdout: "", stderr: "" };
@@ -166,7 +168,9 @@ test("prepare stops after local API and edge readiness with an exclusive pending
   );
   assert.deepEqual(
     calls
-      .filter(({ args }) => args.includes("run") || args.includes("up"))
+      .filter(
+        ({ args }) => args.includes("compose") && (args.includes("run") || args.includes("up")),
+      )
       .map(({ args }) => (args.includes("migrate") ? "migrate" : args.at(-1))),
     ["migrate", "api", "edge"],
   );
@@ -1300,5 +1304,61 @@ test("post-switch local failure restores the previous pair and verifies API and 
   assert.equal(
     (await records(releaseDirectory)).filter(({ name }) => name.endsWith(".failed.json")).length,
     1,
+  );
+});
+
+test("candidate compatibility failure stops before migration or API replacement", async () => {
+  const { calls, dependencies, releaseDirectory } = await fixture({
+    failure: ({ args }) => args.includes("/opt/markiro/working-device-compatibility.mjs"),
+  });
+  await assert.rejects(
+    prepareRelease({ environment: ENVIRONMENT, releaseDirectory }, dependencies),
+    /failed/,
+  );
+  assert.equal(
+    calls.some(({ args }) => args.includes("migrate") || args.includes("up")),
+    false,
+  );
+});
+
+test("rollback rejects a previous image without v1 support before restarting services", async () => {
+  const { calls, dependencies, releaseDirectory } = await fixture({
+    failure: ({ args }) =>
+      args.includes("/opt/markiro/working-device-compatibility.mjs") && args.includes(PREVIOUS_API),
+  });
+  const candidate = await prepareRelease(
+    { environment: ENVIRONMENT, releaseDirectory },
+    dependencies,
+  );
+  calls.length = 0;
+  await assert.rejects(
+    rollbackPreparedRelease(
+      { candidate, environment: ENVIRONMENT, releaseDirectory },
+      dependencies,
+    ),
+    /failed/,
+  );
+  assert.equal(
+    calls.some(({ args }) => args.includes("up")),
+    false,
+  );
+});
+
+test("candidate requires the exact successful capability receipt, not only exit zero", async () => {
+  const { calls, dependencies, releaseDirectory } = await fixture();
+  const run = dependencies.runner.run;
+  dependencies.runner.run = async (command, args, ...rest) => {
+    if (args.includes("/opt/markiro/working-device-compatibility.mjs")) {
+      return { code: 0, stdout: "legacy-reader\n", stderr: "" };
+    }
+    return run(command, args, ...rest);
+  };
+  await assert.rejects(
+    prepareRelease({ environment: ENVIRONMENT, releaseDirectory }, dependencies),
+    /incompatible/,
+  );
+  assert.equal(
+    calls.some(({ args }) => args.includes("migrate") || args.includes("up")),
+    false,
   );
 });

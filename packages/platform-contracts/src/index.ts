@@ -580,3 +580,16 @@ export type {
   StationRecoveryRequest,
   StationRecoveryResponse,
 } from "./station-recovery.js";
+
+export {
+  cabinetDeviceLicensingContracts,
+  cancelDeviceReservationSchema,
+  deviceReservationReceiptSchema,
+  platformDeviceLicensingContracts,
+  workingDevicePoolSchema,
+} from "./device-licensing.js";
+export type {
+  CancelDeviceReservation,
+  DeviceReservationReceipt,
+  WorkingDevicePool,
+} from "./device-licensing.js";

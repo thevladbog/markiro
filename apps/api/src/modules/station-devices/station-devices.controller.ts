@@ -87,7 +87,10 @@ export class StationDevicesController {
     @Body(new ZodValidationPipe(createStationDeviceSchema)) body: CreateStationDeviceDto,
   ): Promise<StationDeviceDto> {
     try {
-      const result = await this.service.create(req.tenantId!, body);
+      const result = await this.service.create(req.tenantId!, body, {
+        domain: "cabinet",
+        id: req.userId!,
+      });
       this.auditMutation(req, "station_device.create", result.id, "succeeded");
       return result;
     } catch (error) {
@@ -110,7 +113,10 @@ export class StationDevicesController {
     @Body(new ZodValidationPipe(updateStationDeviceSchema)) body: UpdateStationDeviceDto,
   ): Promise<StationDeviceDto> {
     try {
-      const result = await this.service.update(req.tenantId!, id, body);
+      const result = await this.service.update(req.tenantId!, id, body, {
+        domain: "cabinet",
+        id: req.userId!,
+      });
       this.auditMutation(req, "station_device.update", result.id, "succeeded");
       return result;
     } catch (error) {
@@ -128,7 +134,7 @@ export class StationDevicesController {
   @ApiHttpErrors(401, 403, 404)
   async revoke(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<void> {
     try {
-      await this.service.revoke(req.tenantId!, id);
+      await this.service.revoke(req.tenantId!, id, { domain: "cabinet", id: req.userId! });
     } catch (error) {
       this.auditMutation(req, "station_device.revoke", id, "failed");
       throw error;

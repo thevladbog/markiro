@@ -80,11 +80,14 @@ function assertDirectDeployWorkflow(source) {
   );
   assert.ok(checkout);
   assert.match(checkout.uses, /^actions\/checkout@[0-9a-f]{40}$/);
-  assert.equal(checkout.with.ref, "${{ steps.release.outputs.release-sha }}");
+  assert.equal(checkout.with.ref, "${{ github.sha }}");
+  assert.equal(deploy.if, "github.ref == 'refs/heads/main'");
   assert.equal(checkout.with["persist-credentials"], false);
 
   const validation = stepByName(deploy, "Validate exact release").run;
   assert.match(validation, /release-manifest[.]mjs validate/);
+  assert.match(validation, /git rev-parse HEAD.*EXPECTED_TOOLING_SHA/);
+  assert.match(validation, /commit !== process.env.EXPECTED_RELEASE_SHA/);
   assert.doesNotMatch(validation, /rehearsal|cleanup|ALB/i);
 
   const delivery = stepByName(deploy, "Deploy immutable Compose bundle");
@@ -532,9 +535,10 @@ test("direct deploy workflow rejects automatic, unpinned and credential-unsafe m
       source.replace(/actions\/checkout@[0-9a-f]{40}/, "actions/checkout@main"),
     ],
     ["conditional cleanup", source.replace("if: always()", "if: success()")],
+    ["missing main tooling guard", source.replace("    if: github.ref == 'refs/heads/main'\n", "")],
     [
       "wrong checkout",
-      source.replace("${{ steps.release.outputs.release-sha }}", "${{ github.sha }}"),
+      source.replace("ref: ${{ github.sha }}", "ref: ${{ steps.release.outputs.release-sha }}"),
     ],
   ];
   for (const [name, mutation] of mutations) {

@@ -27,6 +27,7 @@ concurrency:
 
 jobs:
   deploy:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: production-deploy
@@ -78,7 +79,7 @@ jobs:
 
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ steps.release.outputs.release-sha }}
+          ref: ${{ github.sha }}
           fetch-depth: 1
           persist-credentials: false
 
@@ -93,13 +94,15 @@ jobs:
 
       - name: Validate exact release
         env:
+          EXPECTED_TOOLING_SHA: ${{ github.sha }}
           EXPECTED_RELEASE_RUN_ID: ${{ steps.release.outputs.release-run-id }}
           EXPECTED_RELEASE_SHA: ${{ steps.release.outputs.release-sha }}
           RELEASE_MANIFEST_PATH: ${{ runner.temp }}/release-manifest/release-manifest.json
         run: |
           set -euo pipefail
           node deploy/production/release-manifest.mjs validate "$RELEASE_MANIFEST_PATH" "$EXPECTED_RELEASE_RUN_ID" > /dev/null
-          [[ "$(git rev-parse HEAD)" == "$EXPECTED_RELEASE_SHA" ]]
+          [[ "$(git rev-parse HEAD)" == "$EXPECTED_TOOLING_SHA" ]]
+          node -e 'const fs = require("node:fs"); if (JSON.parse(fs.readFileSync(process.env.RELEASE_MANIFEST_PATH, "utf8")).commit !== process.env.EXPECTED_RELEASE_SHA) process.exit(1)'
 
       - name: Deploy immutable Compose bundle
         env:

@@ -11,6 +11,7 @@ import { ShiftsModule } from "./modules/shifts/shifts.module";
 import { LabelTemplatesModule } from "./modules/label-templates/label-templates.module";
 import { StationDevicesModule } from "./modules/station-devices/station-devices.module";
 import { DevicesModule } from "./modules/devices/devices.module";
+import { DeviceLicensingModule } from "./modules/device-licensing/device-licensing.module";
 import { StationPairingModule } from "./modules/station-pairing/station-pairing.module";
 import { StationScansModule } from "./modules/station-scans/station-scans.module";
 import { EmployeesModule } from "./modules/employees/employees.module";
@@ -131,6 +132,7 @@ export class AppModule {
         LabelTemplatesModule,
         StationDevicesModule,
         DevicesModule,
+        DeviceLicensingModule,
         StationPairingModule,
         StationScansModule,
         EmployeesModule,
