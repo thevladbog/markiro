@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { afterEach, expect, it, vi } from "vitest";
@@ -55,6 +55,8 @@ function renderPage(
           pageSize: 8,
           total: items.length,
         });
+      if (url === "/api/device-licensing/replacements")
+        return response({ canPrepare: false, items: [] });
       if (url === "/api/device-licensing")
         return response({
           tenantId: "11111111-1111-4111-8111-111111111111",
@@ -148,6 +150,16 @@ it("does not leave auth cleanup tied to the jsdom window", async () => {
   try {
     renderPage();
     await vi.advanceTimersByTimeAsync(0);
+    // The licensing response mounts a second query. Settle its queued React Query
+    // notification before testing auth teardown without the browser global.
+    await act(async () => {
+      await vi.runOnlyPendingTimersAsync();
+    });
+    expect(
+      screen.getByText(
+        "Доступен просмотр сохранённых подготовок. Текущие права не позволяют изменять их.",
+      ),
+    ).toBeDefined();
     cleanup();
 
     Reflect.deleteProperty(globalThis, "window");

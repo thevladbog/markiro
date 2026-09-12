@@ -86,7 +86,9 @@ export async function getTenant(tenantId: string): Promise<TenantDetail> {
 export function getTenantDeviceLicensing(tenantId: string) {
   const validatedId = platformTenantIdSchema.parse(tenantId);
   return platformApiFetch(
-    platformDeviceLicensingContracts.inspect.path.replace(":tenantId", validatedId),
+    platformDeviceLicensingContracts.inspect.path
+      .replace(/^\/platform/u, "")
+      .replace(":tenantId", validatedId),
     {
       responseSchema: platformDeviceLicensingContracts.inspect.response,
     },
@@ -101,6 +103,7 @@ export function cancelTenantDeviceReservation(
   const body = cancelDeviceReservationSchema.parse(input);
   return platformApiFetch(
     platformDeviceLicensingContracts.cancelReservation.path
+      .replace(/^\/platform/u, "")
       .replace(":tenantId", validatedId)
       .replace(":deviceId", deviceId),
     {

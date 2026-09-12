@@ -58,6 +58,8 @@ it("shows unlimited shared usage and never sends security revoke when cancelling
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith("/device-licensing/replacements"))
+        return response({ canPrepare: false, items: [] });
       const url = String(input);
       calls.push({ url, ...(init?.method ? { method: init.method } : {}) });
       if (init?.method === "POST")
@@ -111,7 +113,13 @@ it("shows unlimited shared usage and never sends security revoke when cancelling
 it("keeps cancellation unavailable without both platform write capabilities", async () => {
   vi.stubGlobal(
     "fetch",
-    vi.fn(async () => response(POOL)),
+    vi.fn(async (input: RequestInfo | URL) =>
+      response(
+        String(input).endsWith("/device-licensing/replacements")
+          ? { canPrepare: false, items: [] }
+          : POOL,
+      ),
+    ),
   );
   render(
     <I18nextProvider i18n={i18n}>
@@ -132,17 +140,19 @@ it("closes confirmation and reports a known session denial on 401", async () => 
   vi.stubGlobal("crypto", { randomUUID: () => "33333333-3333-4333-8333-333333333333" });
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) =>
-      init?.method === "POST"
-        ? response(
-            {
-              code: "unauthorized",
-              message: "Unauthorized",
-              requestId: "55555555-5555-4555-8555-555555555555",
-            },
-            401,
-          )
-        : response(POOL),
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
+      String(input).endsWith("/device-licensing/replacements")
+        ? response({ canPrepare: false, items: [] })
+        : init?.method === "POST"
+          ? response(
+              {
+                code: "unauthorized",
+                message: "Unauthorized",
+                requestId: "55555555-5555-4555-8555-555555555555",
+              },
+              401,
+            )
+          : response(POOL),
     ),
   );
   render(
@@ -172,7 +182,13 @@ it("closes confirmation and reports a known session denial on 401", async () => 
 });
 
 it("closes an open confirmation before submit when write access changes", async () => {
-  const fetch = vi.fn(async () => response(POOL));
+  const fetch = vi.fn(async (input: RequestInfo | URL) =>
+    response(
+      String(input).endsWith("/device-licensing/replacements")
+        ? { canPrepare: false, items: [] }
+        : POOL,
+    ),
+  );
   vi.stubGlobal("fetch", fetch);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const frame = (canWrite: boolean) => (
@@ -190,7 +206,10 @@ it("closes an open confirmation before submit when write access changes", async 
   expect(screen.getByRole("alertdialog")).toBeDefined();
   view.rerender(frame(false));
   expect(screen.queryByRole("alertdialog")).toBeNull();
-  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(fetch.mock.calls.map(([url]) => String(url))).toEqual([
+    "/api/platform/tenants/tenant-1/device-licensing",
+    "/api/platform/tenants/tenant-1/device-licensing/replacements",
+  ]);
 });
 
 it("requires a fresh confirmation and request after a revision conflict", async () => {
@@ -200,7 +219,9 @@ it("requires a fresh confirmation and request after a revision conflict", async 
   let revision = 1;
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith("/device-licensing/replacements"))
+        return response({ canPrepare: false, items: [] });
       if (init?.method === "POST") {
         bodies.push(JSON.parse(String(init.body)));
         if (bodies.length === 1) {
@@ -271,7 +292,9 @@ it.each(["network", 401, 403, 409] as const)(
     let posts = 0;
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).endsWith("/device-licensing/replacements"))
+          return response({ canPrepare: false, items: [] });
         if (init?.method === "POST") {
           bodies.push(JSON.parse(String(init.body)));
           posts += 1;
@@ -343,7 +366,13 @@ it("renders zero unlimited usage in English", async () => {
   await i18n.changeLanguage("en");
   vi.stubGlobal(
     "fetch",
-    vi.fn(async () => response({ ...POOL, usage: 0 })),
+    vi.fn(async (input: RequestInfo | URL) =>
+      response(
+        String(input).endsWith("/device-licensing/replacements")
+          ? { canPrepare: false, items: [] }
+          : { ...POOL, usage: 0 },
+      ),
+    ),
   );
   render(
     <I18nextProvider i18n={i18n}>

@@ -295,7 +295,12 @@ subscription state without enabling creation or credential issuance. Separate ca
 and platform inspection routes expose licensing independently of connection status.
 The deployment image compatibility floor rejects old readers/writers for both deploy
 and rollback; see the [device reservations runbook](operations/entitlements-p1b2.md).
-Replacement preparation, downgrade retention and offline grants remain later deliveries.
+Replacement preparation uses separate previews and saved projects with the same
+tenant, actor and transactional journal boundaries. It records target intent and
+known server work while local queues remain unknown. Confirming or cancelling a
+project never changes the source assignment, credential or operational authority.
+Fresh source/pool/commercial facts invalidate stale previews and mark saved projects
+for review. Actual transfer, downgrade retention and offline grants remain later deliveries.
 
 Bank imports retain the bounded source row as reconciliation evidence, while the public match and
 audit contracts expose only the payer account's last four digits and whether it is a known active,
