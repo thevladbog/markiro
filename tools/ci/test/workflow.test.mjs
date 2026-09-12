@@ -168,6 +168,13 @@ test("every heavy job keeps its id and is gated by its classifier output", () =>
   }
 });
 
+test("inventory database suites receive the migrated CI database through Turbo", () => {
+  const job = workflow.jobs["verify-api-tests"];
+  assert.equal(job.env.INVENTORY_TEST_DATABASE_URL, job.env.DATABASE_URL);
+  const turbo = JSON.parse(readFileSync("turbo.json", "utf8"));
+  assert.ok(turbo.tasks.test.env.includes("INVENTORY_TEST_DATABASE_URL"));
+});
+
 test("Signer Windows verification includes the stable release contract", () => {
   const job = workflow.jobs["signer-windows-build"];
   assert.ok(job.steps.some((step) => step.run === "pnpm test:signer-release:contract"));
