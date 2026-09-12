@@ -56,7 +56,7 @@ export function CatalogP1Fields({
       <Select
         label={t("entitlements.policy")}
         hint={t("entitlements.policyHint")}
-        disabled={disabled || !policies?.length}
+        disabled={disabled || !policies || (policies.length === 0 && policyId === null)}
         value={policyId ?? ""}
         onValueChange={(value) => onPolicyChange(value || null)}
         options={[
@@ -67,12 +67,10 @@ export function CatalogP1Fields({
           })),
         ]}
       />
-      {policies && !policies.some((policy) => policy.id === policyId) ? (
-        <Alert tone="info">
-          {t(
-            policies.length === 0 ? "entitlements.policyUnavailable" : "entitlements.policyMissing",
-          )}
-        </Alert>
+      {policies && policyId === null ? (
+        <Alert tone="info">{t("entitlements.policyOptional")}</Alert>
+      ) : policies && !policies.some((policy) => policy.id === policyId) ? (
+        <Alert tone="info">{t("entitlements.policyMissing")}</Alert>
       ) : null}
     </fieldset>
   );

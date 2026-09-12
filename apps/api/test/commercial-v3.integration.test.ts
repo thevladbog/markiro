@@ -133,6 +133,20 @@ describe.skipIf(!process.env.DATABASE_URL)("Commercial V3 transaction boundaries
           principal,
           code,
           version.id,
+          {
+            ...identity,
+            lifecyclePolicyId: null,
+            lifecyclePolicyVersion: null,
+            lifecyclePolicyHash: null,
+          },
+          3,
+        ),
+      ).rejects.toMatchObject({ response: { code: "commercial_review_stale" } });
+      await expect(
+        catalog.publish(
+          principal,
+          code,
+          version.id,
           { ...identity, lifecyclePolicyHash: "f".repeat(64) },
           3,
         ),

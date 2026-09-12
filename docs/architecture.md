@@ -271,8 +271,11 @@ P1A adds an explicit Commercial V3 and a coherent entitlement snapshot with sepa
 candidate conditions. New module mappings remain nullable on legacy versions. Prepared temporary
 and compatibility sources retain their operation-version scope, immutable proof and audit; they
 affect shadow calculations only. Terms and occupied-capacity revisions commit with their owning
-writes, and confirmation also binds time and policy identity. New V3 publication requires an
-approved lifecycle policy and four explicit plan module values. The customer projection excludes
+writes, and confirmation also binds time and policy identity. V3 plans require four explicit
+module values. Catalog publication for plans, add-ons and services may omit the additional
+lifecycle policy and retain current subscription rules; this also permits offers and invoices.
+An explicitly selected policy must be approved and intact, and its identity remains bound to
+publication review. Publication does not activate candidate P1 restrictions. The customer projection excludes
 internal source metadata, while platform preparation requires both tenant and billing write
 capabilities. Tenant readiness/impact is a read-only current observation that does not assign or
 activate rights, migrate customers, or verify native clients. See the

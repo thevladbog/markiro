@@ -18,7 +18,10 @@ it("preserves four unresolved choices and only offers server-approved named poli
     </ThemeProvider>,
   );
   expect(screen.getAllByRole("combobox")).toHaveLength(5);
-  expect(screen.getByText(/Публикация недоступна/)).toBeDefined();
+  expect(screen.queryByText(/Публикация недоступна/)).toBeNull();
+  expect(screen.getByRole("combobox", { name: /Правила действия лицензии/ }).textContent).toContain(
+    "Без дополнительных правил",
+  );
   expect(screen.getByText(/Укажите явно значения/)).toBeDefined();
   expect(screen.queryByRole("checkbox")).toBeNull();
 });
@@ -35,12 +38,14 @@ it("explains license rules and disables an empty approved-policy selector", () =
       />
     </ThemeProvider>,
   );
-  const policy = screen.getByRole("combobox", { name: "Правила действия лицензии" });
+  const policy = screen.getByRole("combobox", { name: /Правила действия лицензии/ });
   expect(policy.hasAttribute("disabled")).toBe(true);
   const hint = document.getElementById(policy.getAttribute("aria-describedby") ?? "");
   expect(hint?.textContent).toContain("правила применения лицензии и ограничений");
-  expect(screen.getByRole("alert").textContent).toContain("в системе нет утверждённых правил");
-  expect(screen.getByRole("alert").textContent).toContain("Черновик можно сохранить");
+  expect(screen.getByRole("alert").textContent).toContain(
+    "Можно публиковать тарифы, дополнения и услуги",
+  );
+  expect(screen.getByRole("alert").textContent).toContain("Для подписок действуют текущие правила");
 });
 
 it("allows an approved policy to be chosen with the keyboard", async () => {
@@ -57,7 +62,7 @@ it("allows an approved policy to be chosen with the keyboard", async () => {
     </ThemeProvider>,
   );
   const user = userEvent.setup();
-  const policy = screen.getByRole("combobox", { name: "Правила действия лицензии" });
+  const policy = screen.getByRole("combobox", { name: /Правила действия лицензии/ });
   expect(policy.hasAttribute("disabled")).toBe(false);
   policy.focus();
   await user.keyboard("{Enter}");
@@ -78,7 +83,30 @@ it("does not claim there are no approved rules before the server context arrives
     </ThemeProvider>,
   );
   expect(
-    screen.getByRole("combobox", { name: "Правила действия лицензии" }).hasAttribute("disabled"),
+    screen.getByRole("combobox", { name: /Правила действия лицензии/ }).hasAttribute("disabled"),
   ).toBe(true);
   expect(screen.queryByRole("alert")).toBeNull();
+});
+
+it("lets an unavailable selected policy be cleared when no approved policies remain", async () => {
+  const onPolicyChange = vi.fn();
+  render(
+    <ThemeProvider>
+      <CatalogP1Fields
+        values={null}
+        policyId="policy-unavailable"
+        policies={[]}
+        onFeatureChange={vi.fn()}
+        onPolicyChange={onPolicyChange}
+      />
+    </ThemeProvider>,
+  );
+  const policy = screen.getByRole("combobox", { name: /Правила действия лицензии/ });
+  expect(policy.hasAttribute("disabled")).toBe(false);
+  expect(screen.getByRole("alert").textContent).toContain("Выбранные правила недоступны");
+  const user = userEvent.setup();
+  policy.focus();
+  await user.keyboard("{Enter}");
+  await user.keyboard("{Home}{Enter}");
+  expect(onPolicyChange).toHaveBeenCalledWith(null);
 });
