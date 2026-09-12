@@ -15,6 +15,33 @@ const product = (id: string, gtin14: string, externalRef: string | null, archive
 const known = [product("p-1", "00000000000017", "guid-1")];
 
 describe("decideApplication", () => {
+  it("keeps source link targets canonical as new links become known", () => {
+    const items = ["z-new", "a-known", "z-new"].map((externalRef) => ({
+      externalRef,
+      name: "Товар",
+      article: null,
+      unit: null,
+      barcode: externalRef === "z-new" ? "4680089900253" : null,
+      images: [],
+    }));
+    const linked = product("p-new", "04680089900253", null);
+    const existing = product("p-known", "00000000000017", "a-known");
+    const unrelated = product("p-unrelated", "00000000000024", "not-in-source");
+    const first = decideApplication({ products: [linked, existing, unrelated], items, offers: [] });
+    const retry = decideApplication({
+      products: [unrelated, existing, { ...linked, externalRef: "z-new" }],
+      items,
+      offers: [],
+    });
+    expect(first.links).toHaveLength(1);
+    expect(retry.links).toEqual([]);
+    expect(first.effectiveLinkTargets).toEqual([
+      { externalRef: "a-known", productId: "p-known" },
+      { externalRef: "z-new", productId: "p-new" },
+    ]);
+    expect(retry.effectiveLinkTargets).toEqual(first.effectiveLinkTargets);
+  });
+
   it("keeps CommerceML output outside the regulatory proposal/value boundary", () => {
     const plan = decideApplication({
       products: known,

@@ -109,7 +109,7 @@ export class LabelTemplatesController {
     @Req() req: RequestWithTenant,
     @Body(new ZodValidationPipe(createLabelTemplateSchema)) body: CreateLabelTemplateDto,
   ): Promise<LabelTemplateDto> {
-    return this.labelTemplatesService.createLabelTemplate(req.tenantId!, body);
+    return this.labelTemplatesService.createLabelTemplate(req.tenantId!, body, req.userId!);
   }
 
   @Patch(":id")
@@ -149,7 +149,7 @@ export class LabelTemplatesController {
     @Param("id") id: string,
     @Body(new ZodValidationPipe(updateLabelTemplateSchema)) body: UpdateLabelTemplateDto,
   ): Promise<LabelTemplateDto> {
-    return this.labelTemplatesService.updateLabelTemplate(req.tenantId!, id, body);
+    return this.labelTemplatesService.updateLabelTemplate(req.tenantId!, id, body, req.userId!);
   }
 
   @Delete(":id")
@@ -161,6 +161,6 @@ export class LabelTemplatesController {
   @ApiResponse({ status: 204, description: "Label template deleted." })
   @ApiHttpErrors(401, 403, 404, 409)
   async deleteLabelTemplate(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<void> {
-    return this.labelTemplatesService.deleteLabelTemplate(req.tenantId!, id);
+    return this.labelTemplatesService.deleteLabelTemplate(req.tenantId!, id, req.userId!);
   }
 }

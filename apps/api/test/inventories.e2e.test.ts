@@ -309,8 +309,28 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
     const agent = request.agent(app!.getHttpServer());
     const { tenantId } = await seedPreparation(agent);
     await setOnlyOrganizationMemberRole(db, tenantId, "member");
+    const observationsBefore = await db
+      .select({ id: schema.entitlementShadowObservations.id })
+      .from(schema.entitlementShadowObservations)
+      .where(eq(schema.entitlementShadowObservations.tenantId, tenantId));
+    const inventoriesBefore = await db
+      .select({ id: schema.inventories.id })
+      .from(schema.inventories)
+      .where(eq(schema.inventories.tenantId, tenantId));
     await agent.get("/inventories").expect(403);
     await agent.post("/inventories").send({}).expect(403);
+    expect(
+      await db
+        .select({ id: schema.entitlementShadowObservations.id })
+        .from(schema.entitlementShadowObservations)
+        .where(eq(schema.entitlementShadowObservations.tenantId, tenantId)),
+    ).toEqual(observationsBefore);
+    expect(
+      await db
+        .select({ id: schema.inventories.id })
+        .from(schema.inventories)
+        .where(eq(schema.inventories.tenantId, tenantId)),
+    ).toEqual(inventoriesBefore);
   });
 
   it("creates tenant-sequential immutable numbers and lists/reads only the tenant rows", async () => {
@@ -752,6 +772,10 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
     await agent.get(`/inventories/${inventory.id}`).expect(200);
     await markReady(tenantId, inventory.id);
     await agent.get(`/inventories/${inventory.id}/task-form`).expect(200);
+    const observationsBefore = await db
+      .select({ id: schema.entitlementShadowObservations.id })
+      .from(schema.entitlementShadowObservations)
+      .where(eq(schema.entitlementShadowObservations.tenantId, tenantId));
     await agent
       .post("/inventories")
       .send(createBody(productId, lineId))
@@ -763,6 +787,11 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
     await upload(agent, inventory.id, "INTRODUCED").expect(403, {
       code: "subscription_read_only",
     });
+    const observationsAfter = await db
+      .select({ id: schema.entitlementShadowObservations.id })
+      .from(schema.entitlementShadowObservations)
+      .where(eq(schema.entitlementShadowObservations.tenantId, tenantId));
+    expect(observationsAfter).toEqual(observationsBefore);
   });
 
   it("validates active same-tenant product, assigned line, mode, and date range", async () => {
@@ -1595,7 +1624,10 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
       else await realTransaction(callback, config);
       throw new Error("simulated lost transaction acknowledgement");
     };
-    const transactionSpy = vi.spyOn(db, "transaction").mockImplementationOnce(commitThenThrow);
+    const transactionSpy = vi
+      .spyOn(db, "transaction")
+      .mockImplementationOnce(realTransaction)
+      .mockImplementationOnce(commitThenThrow);
 
     try {
       const result = await inventories.importEvidence(
@@ -1652,6 +1684,7 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
     };
     const transactionSpy = vi
       .spyOn(db, "transaction")
+      .mockImplementationOnce(realTransaction)
       .mockImplementationOnce(rollbackThenLoseReconciliation);
 
     try {

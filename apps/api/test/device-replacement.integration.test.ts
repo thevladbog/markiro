@@ -12,6 +12,7 @@ import { DeviceReplacementService } from "../src/modules/device-licensing/device
 import { createDeviceReplacementListFactReader } from "../src/modules/device-licensing/device-replacement-facts";
 import { PlatformAuditService } from "../src/platform-auth/platform-audit.service";
 import { EntitlementsService } from "../src/subscriptions/entitlements.service";
+import type * as EntitlementSnapshotReader from "../src/subscriptions/entitlement-snapshot-reader";
 import { transitionWorkingAssignment } from "../src/subscriptions/working-device-assignments";
 import {
   createOrganization,
@@ -19,6 +20,16 @@ import {
   createPublishedPlan,
   createPublishedAddon,
 } from "./support/subscription-fixtures";
+
+const registryFingerprintOverride = vi.hoisted(() => ({ value: null as string | null }));
+vi.mock("../src/subscriptions/entitlement-snapshot-reader", async (importOriginal) => {
+  const actual = await importOriginal<typeof EntitlementSnapshotReader>();
+  return {
+    ...actual,
+    entitlementRegistryFingerprint: () =>
+      registryFingerprintOverride.value ?? actual.entitlementRegistryFingerprint(),
+  };
+});
 
 describe.skipIf(!process.env.DATABASE_URL)("device replacement preparation", () => {
   const name = `replacement_${randomUUID().replaceAll("-", "_")}`;
@@ -30,7 +41,10 @@ describe.skipIf(!process.env.DATABASE_URL)("device replacement preparation", () 
   const entitlements = new EntitlementsService(db, "managed_only");
   const service = new DeviceReplacementService(db, entitlements, new PlatformAuditService());
   let created = false;
-  afterEach(() => vi.useRealTimers());
+  afterEach(() => {
+    registryFingerprintOverride.value = null;
+    vi.useRealTimers();
+  });
   beforeAll(async () => {
     await maintenance.pool.query(`CREATE DATABASE "${name}"`);
     created = true;
@@ -69,6 +83,27 @@ describe.skipIf(!process.env.DATABASE_URL)("device replacement preparation", () 
       },
     };
   }
+  it("marks a prior-registry preparation for review while replaying its confirmed receipt", async () => {
+    const f = await fixture();
+    registryFingerprintOverride.value = `p1a.v1:${"a".repeat(64)}`;
+    const prior = await service.preview(f.tenantId, f.device.id, f.intent, f.actor);
+    const receipt = await service.confirm(
+      f.tenantId,
+      f.device.id,
+      { requestId: prior.requestId, previewId: prior.id },
+      f.actor,
+    );
+    registryFingerprintOverride.value = null;
+    expect((await service.list(f.tenantId, f.actor)).items[0]?.needsReview).toBe(true);
+    expect(
+      await service.confirm(
+        f.tenantId,
+        f.device.id,
+        { requestId: prior.requestId, previewId: prior.id },
+        f.actor,
+      ),
+    ).toEqual(receipt);
+  });
   async function operationalRows(tenantId: string) {
     return {
       devices: await db

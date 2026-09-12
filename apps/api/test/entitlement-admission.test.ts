@@ -2,12 +2,13 @@ import { randomUUID } from "node:crypto";
 import { createDb, schema } from "@markiro/db";
 import { eq, sql } from "drizzle-orm";
 import { Logger } from "@nestjs/common";
-import { afterAll, describe, expect, it, vi } from "vitest";
+import { afterAll, describe, expect, expectTypeOf, it, vi } from "vitest";
 import type { EntitlementSnapshotV1 } from "@markiro/platform-contracts";
 import { EntitlementsService } from "../src/subscriptions/entitlements.service";
 import {
   EntitlementAdmissionService,
   admissionScopeDigest,
+  type AdmissionActor,
 } from "../src/subscriptions/entitlement-admission.service";
 import { projectEntitlements } from "../src/subscriptions/entitlement-projection";
 import {
@@ -76,6 +77,10 @@ function snapshot(tenantId: string): EntitlementSnapshotV1 {
   });
 }
 describe.skipIf(!process.env.DATABASE_URL)("shadow admission", () => {
+  it("requires a verified ID for an exchange-session actor", () => {
+    expectTypeOf<{ domain: "exchange_session"; id: null }>().not.toMatchTypeOf<AdmissionActor>();
+    expectTypeOf<{ domain: "exchange_session"; id: string }>().toMatchTypeOf<AdmissionActor>();
+  });
   async function fixture() {
     const tenantId = await createOrganization(connection.db);
     const entitlements = new EntitlementsService(connection.db, "managed_only");
@@ -322,7 +327,7 @@ describe.skipIf(!process.env.DATABASE_URL)("shadow admission", () => {
     expect(row).toMatchObject({
       tenantId: input.tenantId,
       operationId: input.operationId,
-      registryVersion: "p1a.v1",
+      registryVersion: "p1b.v1",
       revision: 11n,
       usageRevision: 12n,
       actorType: "cabinet",
@@ -340,6 +345,21 @@ describe.skipIf(!process.env.DATABASE_URL)("shadow admission", () => {
     expect(
       await service.observe({ ...input, actor: { domain: "api_key", id: randomUUID() } }),
     ).toMatchObject({ decision: "deny" });
+  });
+  it("keeps exchange sessions separate from public API key scope", async () => {
+    const { service, input } = await fixture();
+    expect(
+      await service.observe({
+        ...input,
+        actor: { domain: "exchange_session", id: randomUUID() },
+      }),
+    ).toMatchObject({ decision: "allow" });
+  });
+  it("does not let an existing scoped grant authorize an additive operation ID", async () => {
+    const { service, input } = await realFixture();
+    expect(
+      await service.observe({ ...input, operationId: "inventory.task.create.v1" }),
+    ).not.toMatchObject({ decision: "allow" });
   });
   it("keeps unobserved runtime unknown and never treats registry gate labels as enabled", async () => {
     const { service, input } = await fixture();

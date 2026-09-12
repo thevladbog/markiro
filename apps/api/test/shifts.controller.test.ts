@@ -110,6 +110,7 @@ describe("ShiftsController.createShift", () => {
     const request = {
       tenantId: "tenant-1",
       authKind: "station",
+      deviceId: "device-1",
       deviceLineId: "11111111-1111-4111-8111-111111111111",
     } as RequestWithTenant;
     request.headers = { "x-station-capabilities": "validation-dm-duplicate-v1" };
@@ -134,6 +135,7 @@ describe("ShiftsController.createShift", () => {
         plannedDate: "2026-08-14",
         productionDate: "2026-08-13",
       },
+      { domain: "station_device", id: "device-1" },
       "station",
       "validation-dm-duplicate-v1",
     );

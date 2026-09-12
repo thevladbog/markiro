@@ -25,6 +25,31 @@ const inventory = [
   ["nk.apply.v1", "product-regulatory/product-regulatory-writer.ts", "applyInTransaction"],
   ["nk.worker.v1", "national-catalog/national-catalog-image-apply.ts", "applyAcceptedImage"],
   ["chz.export.create.v1", "chz-exports/chz-export-runner.service.ts", "claim"],
+  ["inventory.task.create.v1", "inventories/inventories.service.ts", "create"],
+  ["inventory.file.create.v1", "inventories/inventories.service.ts", "importEvidence"],
+  ["inventory.task.start.v1", "inventories/inventory-lifecycle.service.ts", "start"],
+  ["commerceMl.exchange.v1", "exchange/exchange-session.service.ts", "ensureOutstandingOrderQuery"],
+  ["commerceMl.exchange.v1", "exchange/exchange-session.service.ts", "observeImport"],
+  [
+    "labelEditor.template.write.v1",
+    "label-templates/label-templates.service.ts",
+    "createLabelTemplate",
+  ],
+  [
+    "labelEditor.template.write.v1",
+    "label-templates/label-templates.service.ts",
+    "updateLabelTemplate",
+  ],
+  [
+    "labelEditor.template.write.v1",
+    "label-templates/label-templates.service.ts",
+    "deleteLabelTemplate",
+  ],
+  ["pallets.shift.configure.v1", "shifts/shifts.service.ts", "createShift"],
+  ["pallets.shift.configure.station.v1", "shifts/shifts.service.ts", "createShift"],
+  ["pallets.shift.configure.v1", "shifts/shifts.service.ts", "updateShift"],
+  ["pallets.shift.start.v1", "shifts/shifts.service.ts", "openShift"],
+  ["pallets.shift.start.v1", "shifts/shifts.service.ts", "enterShift"],
 ] as const;
 function calls(node: ts.Node, operation: string): number {
   if (
@@ -40,8 +65,11 @@ function calls(node: ts.Node, operation: string): number {
         (property) =>
           ts.isPropertyAssignment(property) &&
           property.name.getText() === "operationId" &&
-          ts.isStringLiteral(property.initializer) &&
-          property.initializer.text === operation,
+          ((ts.isStringLiteral(property.initializer) && property.initializer.text === operation) ||
+            (ts.isConditionalExpression(property.initializer) &&
+              [property.initializer.whenTrue, property.initializer.whenFalse].some(
+                (branch) => ts.isStringLiteral(branch) && branch.text === operation,
+              ))),
       )
     )
       return 1;
@@ -49,6 +77,20 @@ function calls(node: ts.Node, operation: string): number {
   return node.getChildren().reduce((count, child) => count + calls(child, operation), 0);
 }
 describe("actual entitlement operation adapters", () => {
+  it("recognizes explicit actor-selected operation IDs only inside a real admission call", () => {
+    const source = ts.createSourceFile(
+      "actor.ts",
+      `
+      admission.observe({operationId: actor.domain === "cabinet" ? "pallets.shift.configure.v1" : "pallets.shift.configure.station.v1"});
+      const unused = "pallets.shift.start.v1";
+    `,
+      ts.ScriptTarget.Latest,
+      true,
+    );
+    expect(calls(source, "pallets.shift.configure.v1")).toBe(1);
+    expect(calls(source, "pallets.shift.configure.station.v1")).toBe(1);
+    expect(calls(source, "pallets.shift.start.v1")).toBe(0);
+  });
   it.each(inventory)(
     "%s at %s.%s is a callable owner with a real admission call",
     (operation, file, method) => {
@@ -73,26 +115,19 @@ describe("actual entitlement operation adapters", () => {
           ? 2
           : 1,
       );
-      expect(ENTITLEMENT_OPERATIONS[operation].coverage).toBe("p1a_adapter");
+      expect(["p1a_adapter", "p1b_adapter"]).toContain(ENTITLEMENT_OPERATIONS[operation].coverage);
     },
   );
   it("covers every registry P1A adapter, while keeping classified recovery and P1B/C deferred", () => {
     expect([...new Set(inventory.map(([operation]) => operation))].sort()).toEqual(
       Object.entries(ENTITLEMENT_OPERATIONS)
-        .filter(([, entry]) => entry.coverage === "p1a_adapter")
+        .filter(([, entry]) => ["p1a_adapter", "p1b_adapter"].includes(entry.coverage))
         .map(([id]) => id)
         .sort(),
     );
     expect(ENTITLEMENT_OPERATIONS["chz.export.poll.v1"].class).toBe("continuation");
     expect(ENTITLEMENT_OPERATIONS["chz.export.receipt.v1"].class).toBe("stored_read");
-    for (const id of [
-      "inventory.file.create.v1",
-      "commerceMl.exchange.v1",
-      "handheld.work.start.v1",
-      "publicApi.request.v1",
-      "labelEditor.template.write.v1",
-      "pallets.shift.configure.v1",
-    ] as const)
+    for (const id of ["handheld.work.start.v1", "publicApi.request.v1"] as const)
       expect(ENTITLEMENT_OPERATIONS[id].coverage).toBe("deferred");
   });
 });

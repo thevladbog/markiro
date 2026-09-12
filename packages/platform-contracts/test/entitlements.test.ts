@@ -34,7 +34,13 @@ describe("P1 entitlement registry and source boundaries", () => {
     expect(c.entitlementOperationIdSchema.safeParse("chz.submit.v1").success).toBe(false);
     expect(c.ENTITLEMENT_OPERATIONS["chz.export.poll.v1"].class).toBe("continuation");
     expect(c.ENTITLEMENT_OPERATIONS["chz.export.receipt.v1"].class).toBe("stored_read");
-    expect(c.ENTITLEMENT_OPERATIONS["commerceMl.exchange.v1"].coverage).toBe("deferred");
+    expect(c.ENTITLEMENT_OPERATIONS["inventory.task.create.v1"].features).toEqual(["inventory"]);
+    expect(c.ENTITLEMENT_OPERATIONS["inventory.task.start.v1"].features).toEqual(["inventory"]);
+    expect(c.ENTITLEMENT_OPERATIONS["inventory.task.start.v1"].class).toBe("new_work");
+    expect(c.ENTITLEMENT_OPERATIONS["inventory.task.start.v1"].coverage).toBe("p1b_adapter");
+    expect(c.ENTITLEMENT_REGISTRY_VERSION).toBe("p1b.v1");
+    expect(c.ENTITLEMENT_OPERATIONS["handheld.work.start.v1"].coverage).toBe("deferred");
+    expect(c.ENTITLEMENT_OPERATIONS["commerceMl.exchange.v1"].coverage).toBe("p1b_adapter");
   });
   it("requires positive bounded effects, explicit unique operations and finite temporary intervals", () => {
     expect(c.entitlementSourceCommandSchema.parse(command)).toEqual(command);
@@ -320,4 +326,26 @@ it("bounds effective addon contributions separately from per-unit source command
   expect(
     c.entitlementEffectSchema.safeParse({ key: "stations", quotaIncrement: 3_000_000_000 }).success,
   ).toBe(false);
+});
+
+it("classifies template/pallet online owners without granting deferred public or handheld work", () => {
+  expect(c.ENTITLEMENT_OPERATIONS["labelEditor.template.write.v1"].coverage).toBe("p1b_adapter");
+  expect(c.ENTITLEMENT_OPERATIONS["pallets.shift.configure.v1"]).toMatchObject({
+    authorization: "cabinet",
+    capability: "operations.write",
+    coverage: "p1b_adapter",
+  });
+  expect(c.ENTITLEMENT_OPERATIONS["pallets.shift.configure.station.v1"]).toMatchObject({
+    authorization: "station_device",
+    capability: null,
+    class: "new_work",
+    coverage: "p1b_adapter",
+  });
+  expect(c.ENTITLEMENT_OPERATIONS["pallets.shift.start.v1"]).toMatchObject({
+    authorization: "cabinet_or_station_device",
+    class: "new_work",
+    coverage: "p1b_adapter",
+  });
+  expect(c.ENTITLEMENT_OPERATIONS["publicApi.request.v1"].coverage).toBe("deferred");
+  expect(c.ENTITLEMENT_OPERATIONS["handheld.work.start.v1"].coverage).toBe("deferred");
 });

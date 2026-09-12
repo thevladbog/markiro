@@ -48,14 +48,23 @@ describe("LabelTemplatesService delete conflicts", () => {
     });
     const db = {
       select: vi.fn(() => ({
-        from: () => ({ where: async () => [{ id: "a0000000-0000-4000-8000-000000000001" }] }),
+        from: () => ({
+          where: () => ({ for: async () => [{ id: "a0000000-0000-4000-8000-000000000001" }] }),
+        }),
       })),
       delete: () => ({ where: async () => Promise.reject(databaseError) }),
     };
-    const service = new LabelTemplatesService(db as never);
+    const transactionDb = {
+      ...db,
+      transaction: async (run: (tx: typeof db) => Promise<unknown>) => run(db),
+    };
+    const service = new LabelTemplatesService(
+      transactionDb as never,
+      { capture: async () => undefined, observe: async () => undefined } as never,
+    );
 
     await expect(
-      service.deleteLabelTemplate("tenant-a", "a0000000-0000-4000-8000-000000000001"),
+      service.deleteLabelTemplate("tenant-a", "a0000000-0000-4000-8000-000000000001", "user-a"),
     ).rejects.toBe(databaseError);
   });
 });

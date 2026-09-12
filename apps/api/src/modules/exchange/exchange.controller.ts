@@ -898,6 +898,20 @@ export class ExchangeController {
       offset = 0;
     }
 
+    if (offset === 0 && (plan.links.length > 0 || worklist.length > 0)) {
+      await this.sessions.observeImport(session, {
+        action: "catalog_import",
+        // The cursor intentionally fingerprints only worklist keys. Price
+        // selection can change without changing those keys or uploaded bytes.
+        effectiveConfig: { priceType: configuredPriceType ?? null },
+        effectiveLinkTargets: plan.effectiveLinkTargets,
+        filename,
+        sourceFingerprint: createHash("sha256").update(bytes).digest("hex"),
+        fingerprint,
+        cursor: offset,
+      });
+    }
+
     if (offset === 0) {
       // Runs once, on the first batch of this import round (or again after a
       // fingerprint-mismatch restart above). Honest reason this is safe to
@@ -1180,6 +1194,22 @@ export class ExchangeController {
     let applied = stored?.applied ?? 0;
     let discrepancies = stored?.discrepancies ?? 0;
     const offset = stored?.offset ?? 0;
+    if (
+      offset === 0 &&
+      documents.some(
+        (document) =>
+          UUID_SHAPE_PATTERN.test(document.externalRef) &&
+          resolveMappedStatus(document.statusValue, effectiveStatusMapping ?? undefined) !== null,
+      )
+    ) {
+      await this.sessions.observeImport(session, {
+        action: "sale_import",
+        filename,
+        sourceFingerprint,
+        fingerprint,
+        cursor: offset,
+      });
+    }
     const end = Math.min(offset + IMPORT_BATCH_SIZE, documents.length);
     for (let index = offset; index < end; index++) {
       const document = documents[index]!;
@@ -1537,7 +1567,7 @@ export class ExchangeController {
       writeoffDocumentType: settings.writeoffDocumentType,
     });
 
-    const ensured = await this.sessions.ensureOutstandingOrderQuery(session.id, {
+    const ensured = await this.sessions.ensureOutstandingOrderQuery(session, {
       orderIds: plan.eligible.map((eligible) => eligible.order.id),
       xml,
     });
