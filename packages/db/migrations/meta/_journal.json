@@ -974,6 +974,13 @@
       "when": 1789224112604,
       "tag": "0138_drop_legacy_pallet_capacity",
       "breakpoints": true
+    },
+    {
+      "idx": 139,
+      "version": "7",
+      "when": 1789229692516,
+      "tag": "0139_device_retention",
+      "breakpoints": true
     }
   ]
 }

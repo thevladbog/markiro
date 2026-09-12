@@ -448,7 +448,9 @@ export class DeviceReplacementService {
               .for("update");
             return action(tx);
           },
-          { isolationLevel: "repeatable read" },
+          // Retention and replacement insertions share quota locks, but do not
+          // bump operational revisions. Capture facts after any lock wait.
+          { isolationLevel: "read committed" },
         );
       } catch (error) {
         let cursor: unknown = error;

@@ -1,3 +1,4 @@
+import type { DeviceRetentionInspection } from "@markiro/platform-contracts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -12,6 +13,12 @@ vi.mock("../src/auth/client.js", () => ({
   useAuthClient: () => ({ useSession: () => ({ refetch: authRefetch }) }),
 }));
 
+const RETENTION: DeviceRetentionInspection = {
+  canSelect: false,
+  observation: null,
+  selections: [],
+  currentShadow: { awaitingSelection: false, affectedDeviceIds: [], enforced: false },
+};
 const POOL = {
   tenantId: "tenant-1",
   usage: 0,
@@ -58,6 +65,7 @@ it("shows unlimited shared usage and never sends security revoke when cancelling
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith("/device-licensing/retention")) return response(RETENTION);
       if (String(input).endsWith("/device-licensing/replacements"))
         return response({ canPrepare: false, items: [] });
       const url = String(input);
@@ -115,9 +123,11 @@ it("keeps cancellation unavailable without both platform write capabilities", as
     "fetch",
     vi.fn(async (input: RequestInfo | URL) =>
       response(
-        String(input).endsWith("/device-licensing/replacements")
-          ? { canPrepare: false, items: [] }
-          : POOL,
+        String(input).endsWith("/device-licensing/retention")
+          ? RETENTION
+          : String(input).endsWith("/device-licensing/replacements")
+            ? { canPrepare: false, items: [] }
+            : POOL,
       ),
     ),
   );
@@ -141,18 +151,20 @@ it("closes confirmation and reports a known session denial on 401", async () => 
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
-      String(input).endsWith("/device-licensing/replacements")
-        ? response({ canPrepare: false, items: [] })
-        : init?.method === "POST"
-          ? response(
-              {
-                code: "unauthorized",
-                message: "Unauthorized",
-                requestId: "55555555-5555-4555-8555-555555555555",
-              },
-              401,
-            )
-          : response(POOL),
+      String(input).endsWith("/device-licensing/retention")
+        ? response(RETENTION)
+        : String(input).endsWith("/device-licensing/replacements")
+          ? response({ canPrepare: false, items: [] })
+          : init?.method === "POST"
+            ? response(
+                {
+                  code: "unauthorized",
+                  message: "Unauthorized",
+                  requestId: "55555555-5555-4555-8555-555555555555",
+                },
+                401,
+              )
+            : response(POOL),
     ),
   );
   render(
@@ -184,9 +196,11 @@ it("closes confirmation and reports a known session denial on 401", async () => 
 it("closes an open confirmation before submit when write access changes", async () => {
   const fetch = vi.fn(async (input: RequestInfo | URL) =>
     response(
-      String(input).endsWith("/device-licensing/replacements")
-        ? { canPrepare: false, items: [] }
-        : POOL,
+      String(input).endsWith("/device-licensing/retention")
+        ? RETENTION
+        : String(input).endsWith("/device-licensing/replacements")
+          ? { canPrepare: false, items: [] }
+          : POOL,
     ),
   );
   vi.stubGlobal("fetch", fetch);
@@ -209,6 +223,7 @@ it("closes an open confirmation before submit when write access changes", async 
   expect(fetch.mock.calls.map(([url]) => String(url))).toEqual([
     "/api/platform/tenants/tenant-1/device-licensing",
     "/api/platform/tenants/tenant-1/device-licensing/replacements",
+    "/api/platform/tenants/tenant-1/device-licensing/retention",
   ]);
 });
 
@@ -220,6 +235,7 @@ it("requires a fresh confirmation and request after a revision conflict", async 
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith("/device-licensing/retention")) return response(RETENTION);
       if (String(input).endsWith("/device-licensing/replacements"))
         return response({ canPrepare: false, items: [] });
       if (init?.method === "POST") {
@@ -293,6 +309,7 @@ it.each(["network", 401, 403, 409] as const)(
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).endsWith("/device-licensing/retention")) return response(RETENTION);
         if (String(input).endsWith("/device-licensing/replacements"))
           return response({ canPrepare: false, items: [] });
         if (init?.method === "POST") {
@@ -368,9 +385,11 @@ it("renders zero unlimited usage in English", async () => {
     "fetch",
     vi.fn(async (input: RequestInfo | URL) =>
       response(
-        String(input).endsWith("/device-licensing/replacements")
-          ? { canPrepare: false, items: [] }
-          : { ...POOL, usage: 0 },
+        String(input).endsWith("/device-licensing/retention")
+          ? RETENTION
+          : String(input).endsWith("/device-licensing/replacements")
+            ? { canPrepare: false, items: [] }
+            : { ...POOL, usage: 0 },
       ),
     ),
   );

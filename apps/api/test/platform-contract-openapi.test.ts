@@ -1,3 +1,5 @@
+import { PlatformDeviceRetentionController } from "../src/modules/device-licensing/platform-device-retention.controller";
+import { DeviceRetentionService } from "../src/modules/device-licensing/device-retention.service";
 import { PlatformDeviceReplacementController } from "../src/modules/device-licensing/platform-device-replacement.controller";
 import { DeviceReplacementService } from "../src/modules/device-licensing/device-replacement.service";
 import { PlatformEntitlementsController } from "../src/subscriptions/platform-entitlements.controller";
@@ -148,6 +150,7 @@ async function createPlatformDocument(): Promise<{
     NationalCatalogSchemaService,
     DeviceLicensingService,
     DeviceReplacementService,
+    DeviceRetentionService,
     DB,
   ].map((provide) => ({ provide, useValue: {} }));
   const moduleRef = await Test.createTestingModule({
@@ -172,6 +175,7 @@ async function createPlatformDocument(): Promise<{
       PlatformOperationsController,
       PlatformDeviceLicensingController,
       PlatformDeviceReplacementController,
+      PlatformDeviceRetentionController,
     ],
     providers,
   }).compile();
@@ -196,7 +200,7 @@ async function createPlatformDocument(): Promise<{
 
 describe("current SaaS platform OpenAPI contracts", () => {
   it("converts all current shared schemas to OpenAPI 3.0-compatible wire schemas", () => {
-    expect(CURRENT_SHARED_SCHEMAS).toHaveLength(173);
+    expect(CURRENT_SHARED_SCHEMAS).toHaveLength(178);
     for (const schema of CURRENT_SHARED_SCHEMAS) {
       expectOpenApi30Compatible(jsonSchema(schema));
     }

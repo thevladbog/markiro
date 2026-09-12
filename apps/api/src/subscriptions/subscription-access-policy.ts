@@ -9,7 +9,9 @@ export type SubscriptionLicensingOperation =
   | "cancel_reservation"
   | "replacement_preview"
   | "replacement_confirm"
-  | "replacement_cancel";
+  | "replacement_cancel"
+  | "retention_preview"
+  | "retention_confirm";
 
 export type SubscriptionAccessPolicy =
   | { mode: "write" }

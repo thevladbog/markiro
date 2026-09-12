@@ -164,8 +164,23 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
     }),
     routes: [
       "GET /device-licensing (DeviceLicensingController.inspect)",
+      "GET /device-licensing/retention (DeviceRetentionController.inspect)",
       "GET /device-licensing/replacements (DeviceReplacementController.list)",
     ],
+  },
+  {
+    contract: customerContract(CABINET_GUARDS, {
+      mode: "licensing",
+      operation: "retention_preview",
+    }),
+    routes: ["POST /device-licensing/retention/preview (DeviceRetentionController.preview)"],
+  },
+  {
+    contract: customerContract(CABINET_GUARDS, {
+      mode: "licensing",
+      operation: "retention_confirm",
+    }),
+    routes: ["POST /device-licensing/retention/confirm (DeviceRetentionController.confirm)"],
   },
   {
     contract: customerContract(CABINET_GUARDS, {
@@ -437,6 +452,12 @@ const profile: RouteExemption = {
 };
 
 const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
+  "PlatformDeviceRetentionController.preview": platform(
+    "retention requires fresh tenant and billing platform write capabilities",
+  ),
+  "PlatformDeviceRetentionController.confirm": platform(
+    "retention requires fresh tenant and billing platform write capabilities",
+  ),
   "PlatformDeviceReplacementController.preview": platform(
     "replacement preparation requires fresh tenant and billing platform write capabilities",
   ),

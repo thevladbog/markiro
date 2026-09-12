@@ -1,3 +1,4 @@
+import { DeviceRetentionPanel } from "./DeviceRetentionPanel.js";
 import { DeviceReplacementPanel } from "./DeviceReplacementPanel.js";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
@@ -166,6 +167,7 @@ export function DeviceLicensingPanel({
         ) : null}
       </Card>
       <DeviceReplacementPanel pool={pool} canWrite={canWrite} />
+      <DeviceRetentionPanel tenantId={pool.tenantId} canWrite={canWrite} />
     </>
   );
 }

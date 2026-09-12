@@ -2059,5 +2059,66 @@
     },
     "slotsSaved": "Slots at preparation: {{usage}} of {{limit}}.",
     "slotsSavedUnlimited": "Slots at preparation: {{usage}}, unlimited capacity."
+  },
+  "deviceRetention": {
+    "title": "Devices to retain after a reduction",
+    "intro": "Choose the complete set for the server-defined change. Nothing is selected automatically.",
+    "shadowOnly": "Execution is not enabled. Saving a selection does not change current access or device data.",
+    "readonly": "You can inspect selections, but do not have permission to change them.",
+    "currentShadow": "Current shadow calculation: {{count}} affected devices. This does not block current work.",
+    "noBoundary": "No future device reduction is currently known.",
+    "receipt": "Original confirmation receipt",
+    "saved": "Selection saved for {{at}}. Execution is not enabled.",
+    "needsReview": "Needs a new review of devices and conditions. Start an explicit new preview before confirming.",
+    "count": "Selected devices: {{count}}",
+    "choose": "Devices to keep",
+    "reason": "Reason",
+    "state": {
+      "reserved": "Reserved",
+      "assigned": "Assigned"
+    },
+    "ineligible": {
+      "device_inconsistent": "Device records are inconsistent.",
+      "device_released": "The device no longer occupies a slot.",
+      "handheld_unavailable": "Handheld work is unavailable under future conditions."
+    },
+    "previewSummary": "Selection preview",
+    "expires": "Preview expires: {{at}}",
+    "uncertain": "Outcome is unknown. Retry the unchanged request; editing is locked until the result is known.",
+    "authorization": "Permission was denied. Permissions and inspection have been refreshed.",
+    "conflict": "Conditions or selection revision changed. Review and explicitly preview again.",
+    "edit": "Edit saved selection",
+    "restart": "Start a new selection",
+    "retry": "Retry unchanged request",
+    "save": "Save selection",
+    "preview": "Preview selection",
+    "history": "Saved selection",
+    "revision": "Revision {{revision}}, saved {{at}}",
+    "reached": "Boundary has been reached. This saved intention is diagnostic; enforcement is not enabled.",
+    "originalFacts": "Original saved observations",
+    "boundary": "Change takes effect: {{at}} (Moscow time)",
+    "unlimited": "Future capacity is unlimited; a mandatory quota selection is not required.",
+    "capacity": "Future shared capacity: {{limit}}. Currently occupied: {{used}}.",
+    "handheldIncluded": "The handheld module is included in future conditions.",
+    "handheldNotIncluded": "The handheld module is not included or not confirmed in future conditions.",
+    "futureFacts": "Future quotas, features and entitlement sources",
+    "services": "Existing ordered services",
+    "serviceStatus": {
+      "ordered": "Ordered",
+      "in_progress": "In progress",
+      "completed": "Completed",
+      "cancelled": "Cancelled"
+    },
+    "execution": {
+      "enforcement_not_enabled": "Execution is not enabled.",
+      "local_data_unknown": "Local journals, outbox and print work are unknown.",
+      "lifecycle_policy_not_ready": "Lifecycle policy is not ready for execution; a selection may still be saved.",
+      "capacity_unavailable": "Future capacity is unavailable.",
+      "handheld_unavailable": "Future handheld work is unavailable."
+    },
+    "awaitingSelection": "The affected pool is awaiting an explicit selection; no devices are chosen automatically.",
+    "loading": "Loading device selections…",
+    "loadError": "Could not load device selections.",
+    "blank": "Start a blank selection"
   }
 }

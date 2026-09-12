@@ -26,6 +26,7 @@ import {
   platformErrorSchema,
   platformDeviceLicensingContracts,
   platformDeviceReplacementContracts,
+  platformDeviceRetentionContracts,
 } from "@markiro/platform-contracts";
 import type { ZodType } from "zod";
 
@@ -58,6 +59,26 @@ const route = (
 ): PlatformRouteContract => ({ method, path, status, response, ...options });
 
 export const CURRENT_SAAS_ROUTES = [
+  route(
+    "get",
+    "/platform/tenants/{tenantId}/device-licensing/retention",
+    "200",
+    platformDeviceRetentionContracts.inspect.response,
+  ),
+  route(
+    "post",
+    "/platform/tenants/{tenantId}/device-licensing/retention/preview",
+    "200",
+    platformDeviceRetentionContracts.preview.response,
+    { body: platformDeviceRetentionContracts.preview.body },
+  ),
+  route(
+    "post",
+    "/platform/tenants/{tenantId}/device-licensing/retention/confirm",
+    "200",
+    platformDeviceRetentionContracts.confirm.response,
+    { body: platformDeviceRetentionContracts.confirm.body },
+  ),
   route(
     "get",
     "/platform/tenants/{tenantId}/device-licensing/replacements",

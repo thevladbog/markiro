@@ -24,3 +24,5 @@ export * from "./schema/national-catalog-import.js";
 export * from "./schema/entitlements.js";
 export * from "./schema/device-licensing.js";
 export * from "./schema/device-replacements.js";
+
+export * from "./schema/device-retention.js";

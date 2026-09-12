@@ -595,3 +595,5 @@ export type {
 } from "./device-licensing.js";
 
 export * from "./device-replacements.js";
+
+export * from "./device-retention.js";

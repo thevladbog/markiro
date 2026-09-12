@@ -140,6 +140,7 @@ describe.skipIf(!databaseUrl)("working-device constraint validation upgrade", ()
     ).rows.map((row) => row.hash);
     expect(applied.slice(135)).toEqual(migrations.slice(135).map((migration) => migration.hash));
     expect(applied[136]).toBe(validationMigration?.hash);
+    expect((await latest()).rows).toEqual([{ hash: migrations.at(-1)?.hash }]);
     expect((await pool.query("SELECT * FROM working_device_events ORDER BY id")).rows).toEqual(
       before,
     );

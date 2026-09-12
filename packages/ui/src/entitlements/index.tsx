@@ -182,3 +182,11 @@ export function SourceEffects({
     </ul>
   );
 }
+
+export { DeviceRetentionView, emptyDeviceRetentionAttempt } from "./DeviceRetentionView.js";
+export type {
+  DeviceRetentionAttempt,
+  DeviceRetentionTranslate,
+  DeviceRetentionNotice,
+  DeviceRetentionViewProps,
+} from "./DeviceRetentionView.js";

@@ -1,3 +1,4 @@
+import { DeviceRetentionController } from "../src/modules/device-licensing/device-retention.controller";
 import { DeviceReplacementController } from "../src/modules/device-licensing/device-replacement.controller";
 import type { Type } from "@nestjs/common";
 import { GUARDS_METADATA, PATH_METADATA } from "@nestjs/common/constants";
@@ -302,6 +303,14 @@ const ADMINISTRATIVE_CONTROLLERS: readonly [
       preview: credentialsPolicy,
       confirm: credentialsPolicy,
       cancel: credentialsPolicy,
+    },
+  ],
+  [
+    DeviceRetentionController,
+    {
+      inspect: credentialsPolicy,
+      preview: { mode: "cabinet", capabilities: ["credentials.manage", "billing.request"] },
+      confirm: { mode: "cabinet", capabilities: ["credentials.manage", "billing.request"] },
     },
   ],
   [DeviceLicensingController, { inspect: credentialsPolicy, cancelReservation: credentialsPolicy }],
