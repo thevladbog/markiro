@@ -135,10 +135,30 @@ class LabelQueueViewModel @Inject constructor(
                 auditIfOutcomeUnknown(id)
                 printer.print(id)
             }
-            // No pallet analogue yet: `pallet_exceptions` exists in the
-            // database but nothing reads or writes it until the handheld's
-            // pallet exceptions screen lands, so a pallet reprint after an
-            // unknown outcome is not audited here rather than audited wrongly.
+            // KNOWN GAP, not an oversight: a pallet reprint after an unknown
+            // outcome writes no audit fact, so this device's trail is
+            // asymmetric with the station's, which does record one
+            // (`reprintPallet` in `apps/station/src/lib/pallets.ts`). Two
+            // blockers, both bigger than this call site:
+            //
+            //  1. `pallet_exceptions` has no Room entity. It is created only by
+            //     `MIGRATION_9_10`'s raw `execSQL`, and Room builds a fresh
+            //     database from its entity list -- so on a CLEAN INSTALL the
+            //     table does not exist at all, and writing here would crash a
+            //     reprint on a new terminal. Giving it an entity means a schema
+            //     version bump plus a migration reconciling the already-shipped
+            //     raw table with what Room then expects.
+            //  2. Nothing would drain it. The server accepts the channel
+            //     (`palletExceptions` in `apps/api/src/modules/station-scans/
+            //     dto.ts`), but `SyncEngine` has no reader for it, and its
+            //     retry identity folds EVERY channel into one batch id
+            //     signature with its own pinned counter -- so a fifth channel
+            //     is a change to batch identity, not an added query. A row
+            //     written today would sit on the device forever.
+            //
+            // Audited wrongly is worse than audited late: until the handheld's
+            // pallet-exceptions screen lands with both halves, this path prints
+            // and records nothing.
             LabelKind.PALLET -> palletPrinter.print(id)
         }
     }
