@@ -16,6 +16,21 @@ const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
 );
 
+const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gu;
+
+/**
+ * The serialised body with its identifiers masked, for searching it for a PIN.
+ *
+ * A four-digit PIN is four hex characters, so a plain substring search over a
+ * body carrying UUIDs fails whenever one happens to contain those digits --
+ * which it did, on an `employeeId` of `5f65ea37-eda8-4821-...`. Masking the ids
+ * keeps the assertion's reach, because a PIN echoed inside any message is still
+ * caught, and removes the only part of the body that is random.
+ */
+function withoutIds(body: unknown): string {
+  return JSON.stringify(body).replaceAll(UUID, "<id>");
+}
+
 describe.skipIf(!ready)("operators e2e", () => {
   let app: INestApplication | undefined;
   let moduleRef: TestingModule;
@@ -89,7 +104,7 @@ describe.skipIf(!ready)("operators e2e", () => {
       .expect(200);
     expect(granted.body.login).toBe("1042");
     expect(granted.body.active).toBe(true);
-    expect(JSON.stringify(granted.body)).not.toContain("4821");
+    expect(withoutIds(granted.body)).not.toContain("4821");
     expect(JSON.stringify(granted.body)).not.toContain("pbkdf2");
 
     const list = await agent.get("/operators").expect(200);
