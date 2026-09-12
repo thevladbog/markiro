@@ -14,7 +14,7 @@ import type { StatusChipStatus, TableColumn } from "@markiro/ui";
 import { CABINET_CAPABILITY, formatSsccHri } from "@markiro/domain";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useLocation, useNavigate } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
 
 import { useCan } from "../../access/context.js";
 import { ApiRequestError } from "../../api/client.js";
@@ -163,7 +163,13 @@ function ShiftPallets({ shift }: { shift: ShiftDto }) {
       key: "sscc",
       title: t("pages.shifts.pallets.table.sscc"),
       mono: true,
-      render: (row) => (row.sscc ? formatSsccHri(row.sscc) : "—"),
+      // The pallet card is the natural way into this stack's box list, so the
+      // SSCC is the link -- same contract as the box table's own SSCC.
+      render: (row) => (
+        <Link to={`/codes/pallet/${row.id}`}>
+          {row.sscc ? formatSsccHri(row.sscc) : t("pages.shifts.pallets.noSscc")}
+        </Link>
+      ),
     },
     {
       key: "lineName",

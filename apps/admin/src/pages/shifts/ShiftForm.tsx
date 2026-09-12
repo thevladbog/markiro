@@ -79,6 +79,15 @@ export type ShiftFormValues = z.infer<typeof shiftFormSchema>;
 export interface ShiftFormContext {
   /** Enabled templates only; the form narrows them to the selected product's category. */
   labelTemplates: LabelTemplateSummaryDto[];
+  /**
+   * Whether the tenant's subscription carries the `pallets` feature
+   * (`/access/me`'s `features.pallets`). Required, not optional: the server
+   * answers a shift that switches pallets on without it with a 403
+   * (`ShiftsService` calls `assertFeatureAccess(tenantId, "pallets")` on
+   * create and on any update that enables them), so every caller has to say
+   * which side of that line it is on rather than silently defaulting.
+   */
+  palletsEntitled: boolean;
 }
 
 export interface ShiftFormProps {
@@ -185,6 +194,14 @@ export function ShiftForm({
   const palletsEnabled = watch("palletsEnabled");
   const palletLabelTemplateId = watch("palletLabelTemplateId");
   const activeEdit = formMode === "edit" && editStatus === "active";
+  /**
+   * Locked only while the box is OFF. A shift planned back when the tenant
+   * still had the entitlement keeps a usable checkbox so pallets can be
+   * switched off again -- the server permits exactly that (its
+   * `assertFeatureAccess` fires on `palletsEnabled === true`, never on
+   * turning them off), and disabling the control would strand such a shift.
+   */
+  const palletsLocked = !formContext.palletsEntitled && !palletsEnabled;
 
   // The box-template default and the eligible template list both depend on
   // the selected product's ЧЗ category (see the 2026-09-02 scope design).
@@ -827,11 +844,27 @@ export function ShiftForm({
                   <Checkbox
                     label={t("pages.shifts.form.palletsEnabledLabel")}
                     checked={field.value}
-                    disabled={activeEdit}
+                    disabled={activeEdit || palletsLocked}
                     onCheckedChange={field.onChange}
                   />
                 )}
               />
+              {/*
+                An explanation, never a bare greyed-out box: without one, the
+                only feedback a tenant outside the pallets plan ever got was
+                a 403 after saving.
+              */}
+              {!formContext.palletsEntitled ? (
+                <div className="mk-shift-form__wide">
+                  <Alert tone="info">
+                    {t(
+                      palletsEnabled
+                        ? "pages.shifts.form.palletsNotEntitledEnabled"
+                        : "pages.shifts.form.palletsNotEntitled",
+                    )}
+                  </Alert>
+                </div>
+              ) : null}
               {palletsEnabled ? (
                 <Input
                   label={t("pages.shifts.form.palletBoxCapacityLabel")}

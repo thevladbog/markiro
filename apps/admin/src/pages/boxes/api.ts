@@ -19,6 +19,13 @@ export interface BoxDto {
   itemCount: number;
   closedAt: string | null;
   contentsChangedAfterClose: boolean;
+  /**
+   * SSCC of the pallet this box stands on (06d), AI-00-prefixed like every
+   * other cabinet-facing SSCC. `null` means the box is on no pallet -- or
+   * that its pallet has not closed yet, since a pallet's own SSCC is
+   * assigned by its closure.
+   */
+  palletSscc: string | null;
 }
 
 interface ListBoxesResponse {

@@ -3,6 +3,7 @@ import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate, useOutletContext, useParams } from "react-router";
 
+import { useAccess } from "../../access/context.js";
 import { ApiRequestError } from "../../api/client.js";
 import { toast } from "../../lib/toast.js";
 import { useRoutePanelGuard } from "../../lib/useRoutePanelGuard.js";
@@ -57,6 +58,19 @@ function usePanelContext() {
   const navigate = useNavigate();
   const close = useCallback(() => closeShiftPanel(location, navigate), [location, navigate]);
   return { context, close };
+}
+
+/**
+ * `features.pallets` from the cabinet access document. An access document
+ * that carries no `features` map at all is treated as ENTITLED: the server
+ * always sends one (an unmanaged tenant gets every feature), so a missing map
+ * means a stale or partial document, and locking a control on that guess
+ * would deny a paying tenant its own feature. The real gate is the server's
+ * `assertFeatureAccess`, which this only mirrors so the refusal is visible
+ * before the save rather than after it.
+ */
+function usePalletsEntitled(): boolean {
+  return useAccess().features?.pallets !== false;
 }
 
 function PanelState({ mode }: { mode: "create" | "edit" | "details" }) {
@@ -138,6 +152,7 @@ function CreateShiftPanel() {
   const mutation = useCreateShift();
   const [error, setError] = useState<string | null>(null);
   const guard = useRoutePanelGuard(close, mutation.isPending);
+  const palletsEntitled = usePalletsEntitled();
   if (context.panelPending || context.panelError) return <PanelState mode="create" />;
   return (
     <>
@@ -146,7 +161,7 @@ function CreateShiftPanel() {
         products={context.products}
         lines={context.lines}
         counterparties={context.counterparties}
-        formContext={{ labelTemplates: context.labelTemplates }}
+        formContext={{ labelTemplates: context.labelTemplates, palletsEntitled }}
         submitting={mutation.isPending}
         submissionError={error}
         onDirtyChange={guard.setDirty}
@@ -183,6 +198,7 @@ function EditShiftPanel() {
   const [error, setError] = useState<string | null>(null);
   const [criticalInput, setCriticalInput] = useState<UpdateShiftInput | null>(null);
   const guard = useRoutePanelGuard(close, mutation.isPending);
+  const palletsEntitled = usePalletsEntitled();
   const shift = context.shifts.find((item) => item.id === shiftId);
   const initialValues = useMemo<ShiftFormValues | undefined>(
     () =>
@@ -284,7 +300,7 @@ function EditShiftPanel() {
         products={context.products}
         lines={context.lines}
         counterparties={context.counterparties}
-        formContext={{ labelTemplates: context.labelTemplates }}
+        formContext={{ labelTemplates: context.labelTemplates, palletsEntitled }}
         submitting={mutation.isPending}
         submissionError={error}
         onDirtyChange={guard.setDirty}

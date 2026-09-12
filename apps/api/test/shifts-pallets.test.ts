@@ -304,6 +304,25 @@ describe.skipIf(!ready)("shift pallet configuration (task 8)", () => {
     ).rejects.toMatchObject({ status: 422 });
   });
 
+  /**
+   * The converse of the case above, and the half that 06d's widened
+   * `purposeSchema` puts at risk: now that a tenant can mint pallet
+   * templates of its own, a pallet template is a value an operator can
+   * actually pick in the BOX slot by mistake. It must still be refused.
+   */
+  it("refuses a pallet template in the box-label slot", async () => {
+    const { agent, tenantId, productId } = await setupOrg();
+    const palletTemplateId = await seedPalletLabelTemplate(tenantId, "Pallet In Box Slot");
+
+    await expect(
+      postShift(agent, productId, {
+        mode: "aggregation",
+        boxCapacity: 20,
+        boxLabelTemplateId: palletTemplateId,
+      }),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
   it("does not enable pallets on a validation shift", async () => {
     const { agent, productId } = await setupOrg();
     const createShift = (overrides: Record<string, unknown>) =>

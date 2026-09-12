@@ -82,7 +82,7 @@ async function setup() {
         ]}
         lines={[]}
         counterparties={[]}
-        formContext={{ labelTemplates: [] }}
+        formContext={{ labelTemplates: [], palletsEntitled: true }}
         onSubmit={submit}
         onDirtyChange={() => undefined}
         onClose={() => undefined}
@@ -191,7 +191,7 @@ it.each(["planned", "active"] as const)(
           products={[product]}
           lines={[]}
           counterparties={[]}
-          formContext={{ labelTemplates: [] }}
+          formContext={{ labelTemplates: [], palletsEntitled: true }}
           onSubmit={submit}
           onDirtyChange={() => undefined}
           onClose={() => undefined}

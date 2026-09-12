@@ -37,6 +37,7 @@ import {
   EGAIS_PRODUCT_GROUP_CODE,
   assertDuplicateTemplate,
   buildDuplicateLabelTemplate,
+  buildPalletLabelTemplates,
   type LabelTemplatePurpose,
   generateTspl,
   generateZpl,
@@ -83,6 +84,30 @@ const SIZE_PRESETS = [
 function matchPresetKey(widthMm: number, heightMm: number): string | null {
   const preset = SIZE_PRESETS.find((p) => p.widthMm === widthMm && p.heightMm === heightMm);
   return preset ? preset.key : null;
+}
+
+/**
+ * The layout a freshly picked purpose starts from.
+ *
+ * `pallet` starts from the SEEDED stock pallet label rather than the blank
+ * 58×40 `DEFAULT_SPEC`: a pallet label's whole point is a large SSCC symbol
+ * read from a metre away, and handing an operator an empty small label to
+ * rebuild that from scratch is not a starting point. `buildPalletLabelTemplates`
+ * is the same builder tenant provisioning seeds from, so the second pallet
+ * template a tenant mints begins life identical to its first (100×150, which
+ * is one of SIZE_PRESETS, so the size select stays on a preset).
+ */
+function startingSpecFor(purpose: LabelTemplatePurpose): LabelTemplateSpec {
+  if (purpose === "product_duplicate") return buildDuplicateLabelTemplate();
+  if (purpose === "pallet") return buildPalletLabelTemplates()[0]?.spec ?? DEFAULT_SPEC;
+  return DEFAULT_SPEC;
+}
+
+/** Narrows a Select's raw string value to the purpose union without a cast. */
+function toPurpose(value: string): LabelTemplatePurpose {
+  if (value === "product_duplicate") return "product_duplicate";
+  if (value === "pallet") return "pallet";
+  return "box";
 }
 
 /**
@@ -484,20 +509,24 @@ function LabelEditorContent({
             options={[
               { value: "box", label: t("pages.labels.purpose.box") },
               { value: "product_duplicate", label: t("pages.labels.purpose.duplicate") },
+              // Offered since 06d closed `purposeSchema` (apps/api's
+              // label-templates/dto.ts): a tenant whose shift form has a
+              // pallet-template picker needs more than the one seeded row to
+              // pick between.
+              { value: "pallet", label: t("pages.labels.purpose.pallet") },
             ]}
             onValueChange={(value) => {
-              setPurpose(value === "product_duplicate" ? "product_duplicate" : "box");
+              const next = toPurpose(value);
+              setPurpose(next);
               if (!copying) {
-                handleReplaceSpec(
-                  value === "product_duplicate" ? buildDuplicateLabelTemplate() : DEFAULT_SPEC,
-                );
+                handleReplaceSpec(startingSpecFor(next));
                 setCustomSize(false);
                 clearSizeDrafts();
               }
               markDirty();
             }}
           />
-          {editingExisting && purpose !== "pallet" ? (
+          {editingExisting ? (
             <Button
               type="button"
               variant="secondary"
@@ -509,18 +538,6 @@ function LabelEditorContent({
             >
               {t("pages.labels.purpose.copy")}
             </Button>
-          ) : null}
-          {/*
-            Copying builds a CREATE, and `POST /label-templates` accepts only
-            "box" or "product_duplicate" (`purposeSchema`, apps/api's
-            label-templates/dto.ts) -- a pallet copy would come back as an
-            opaque 400 after the operator had already laid the label out. The
-            stock pallet template can still be edited in place; only minting a
-            second one is unavailable, and the page says so rather than
-            offering a button that cannot work.
-          */}
-          {purpose === "pallet" ? (
-            <Alert tone="info">{t("pages.labels.purpose.palletCopyUnavailable")}</Alert>
           ) : null}
           {copying ? <Alert tone="info">{t("pages.labels.purpose.copyHint")}</Alert> : null}
           {duplicateInvalid ? (

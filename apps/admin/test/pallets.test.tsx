@@ -19,6 +19,9 @@ import { buildPalletLabelTemplates, CABINET_CAPABILITY } from "@markiro/domain";
 
 import type { AccessDocument } from "../src/access/api.js";
 import { AccessProvider } from "../src/access/context.js";
+import { BoxesPage } from "../src/pages/boxes/index.js";
+import { BoxCardPage } from "../src/pages/code-search/BoxCard.js";
+import { PalletCardPage } from "../src/pages/code-search/PalletCard.js";
 import { CounterpartyForm } from "../src/pages/counterparties/CounterpartyForm.js";
 import type { ProductDto } from "../src/pages/catalog/api.js";
 import type { LabelTemplateSummaryDto } from "../src/pages/labels/api.js";
@@ -264,7 +267,7 @@ const AGGREGATION_FORM_VALUES: ShiftFormValues = {
   palletsEnabled: false,
 };
 
-function renderShiftForm(initialValues: ShiftFormValues) {
+function renderShiftForm(initialValues: ShiftFormValues, palletsEntitled = true) {
   vi.stubGlobal(
     "fetch",
     vi.fn(async () => jsonResponse(200, { defaultBoxLabelTemplateId: null, defaultSource: null })),
@@ -278,7 +281,7 @@ function renderShiftForm(initialValues: ShiftFormValues) {
           products={[PRODUCT]}
           lines={[]}
           counterparties={[]}
-          formContext={{ labelTemplates: [BOX_TEMPLATE, PALLET_TEMPLATE] }}
+          formContext={{ labelTemplates: [BOX_TEMPLATE, PALLET_TEMPLATE], palletsEntitled }}
           onSubmit={() => undefined}
           onDirtyChange={() => undefined}
           onClose={() => undefined}
@@ -593,17 +596,17 @@ describe("counterparty SSCC counters", () => {
 
 describe("pallet label templates in the editor", () => {
   /**
-   * `POST /label-templates` only accepts `purpose` "box" or
-   * "product_duplicate" (`purposeSchema`, apps/api's label-templates/dto.ts),
-   * so "Копировать" on a pallet template would send a purpose the server
-   * rejects with an opaque 400. The button has to be absent and the reason
-   * stated, not discovered by an operator after laying out a label.
+   * `POST /label-templates` accepts `purpose: "pallet"` since the 06d review
+   * widened `purposeSchema` (apps/api's label-templates/dto.ts), so the
+   * editor offers the same "Создать копию" it offers every other purpose --
+   * a tenant whose shift form has a pallet-template picker needs more than
+   * the one seeded row to pick between.
    */
-  function renderEditor(template: unknown) {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => jsonResponse(200, template)),
-    );
+  function renderEditor(
+    template: unknown,
+    fetchImpl?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
+  ) {
+    vi.stubGlobal("fetch", vi.fn(fetchImpl ?? (async () => jsonResponse(200, template))));
     return render(
       <QueryClientProvider client={newQueryClient()}>
         <MemoryRouter initialEntries={["/labels/tpl-pallet"]}>
@@ -640,20 +643,327 @@ describe("pallet label templates in the editor", () => {
     updatedAt: "2026-09-01T00:00:00.000Z",
   };
 
-  it("refuses to copy a pallet template and says why", async () => {
+  it("offers the copy action for a pallet template", async () => {
     renderEditor(STOCK_PALLET_TEMPLATE);
 
-    expect(
-      await screen.findByText(
-        "Свои шаблоны этикеток паллет пока нельзя создавать: используйте стоковый шаблон.",
-      ),
-    ).toBeDefined();
-    expect(screen.queryByRole("button", { name: "Создать копию" })).toBeNull();
+    expect(await screen.findByRole("button", { name: "Создать копию" })).toBeDefined();
+    // The retired «нельзя создавать» alert must not come back: the server no
+    // longer refuses the create it warned about.
+    expect(screen.queryByText(/нельзя создавать/)).toBeNull();
   });
 
   it("still offers the copy action for a box template", async () => {
     renderEditor({ ...STOCK_PALLET_TEMPLATE, purpose: "box", name: "Короб 58×40" });
 
     expect(await screen.findByRole("button", { name: "Создать копию" })).toBeDefined();
+  });
+
+  it("copies a pallet template as a pallet-purpose create", async () => {
+    const bodies: string[] = [];
+    const user = userEvent.setup();
+    renderEditor(STOCK_PALLET_TEMPLATE, async (_input, init) => {
+      if (init?.method === "POST") {
+        bodies.push(String(init.body));
+        return jsonResponse(201, { ...STOCK_PALLET_TEMPLATE, id: "tpl-pallet-2" });
+      }
+      return jsonResponse(200, STOCK_PALLET_TEMPLATE);
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Создать копию" }));
+    await user.click(screen.getByRole("button", { name: "Сохранить" }));
+
+    await waitFor(() => {
+      expect(bodies).toHaveLength(1);
+    });
+    // The copy keeps the purpose it was made from -- a pallet layout saved as
+    // a box template would be silently unusable in the pallet slot.
+    expect(JSON.parse(bodies[0]!).purpose).toBe("pallet");
+  });
+
+  it("offers the pallet purpose when authoring a new template", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(200, { items: [] })),
+    );
+    const user = userEvent.setup();
+    render(
+      <QueryClientProvider client={newQueryClient()}>
+        <MemoryRouter initialEntries={["/labels/new"]}>
+          <Routes>
+            <Route
+              path="/labels/new"
+              element={
+                <LabelEditorPage
+                  rasterizeText={async () => ({
+                    hex: "00",
+                    totalBytes: 1,
+                    bytesPerRow: 1,
+                    width: 8,
+                    height: 1,
+                  })}
+                  checkFamilyCoverage={async () => true}
+                />
+              }
+            />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    await user.click(await screen.findByLabelText("Назначение"));
+    expect(await screen.findByRole("option", { name: "Паллета" })).toBeDefined();
+  });
+});
+
+const BOX_ON_PALLET = {
+  id: "box-1",
+  sscc: "00123460682000000101",
+  terminalId: "t1",
+  lineName: "Линия розлива № 1",
+  operatorId: null,
+  itemCount: 12,
+  closedAt: "2026-09-11T15:00:00.000Z",
+  contentsChangedAfterClose: false,
+  palletSscc: PALLET.sscc,
+};
+
+const LOOSE_BOX = {
+  ...BOX_ON_PALLET,
+  id: "box-2",
+  sscc: "00123460682000000102",
+  palletSscc: null,
+};
+
+describe("box list pallet column", () => {
+  function renderBoxes(boxes: unknown[]) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.startsWith("/api/boxes")) return jsonResponse(200, { items: boxes });
+        if (url.startsWith("/api/shifts")) return jsonResponse(200, { items: [SHIFT] });
+        return jsonResponse(200, { items: [] });
+      }),
+    );
+    return render(
+      <QueryClientProvider client={newQueryClient()}>
+        <MemoryRouter>
+          <BoxesPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+  }
+
+  it("shows the pallet a box stands on, and a dash for one that stands on none", async () => {
+    renderBoxes([BOX_ON_PALLET, LOOSE_BOX]);
+
+    const table = within(await screen.findByRole("table"));
+    expect(table.getByRole("columnheader", { name: "Паллета" })).toBeDefined();
+    // The same GS1 human-readable form the box's own SSCC uses.
+    expect(table.getByText("(00)103460068200000004")).toBeDefined();
+
+    const rows = table.getAllByRole("row");
+    const looseRow = rows.find((row) => within(row).queryByText("(00)123460682000000102"));
+    expect(looseRow).toBeDefined();
+    expect(within(looseRow!).queryByText("(00)103460068200000004")).toBeNull();
+  });
+});
+
+const BOX_CARD = {
+  id: "box-1",
+  sscc: "00123460682000000101",
+  status: "closed",
+  shiftId: SHIFT.id,
+  shiftNumber: "SEP26-001",
+  productId: "p1",
+  productName: "Молоко 1л",
+  terminalId: "t1",
+  operatorId: null,
+  openedAt: "2026-09-11T14:00:00.000Z",
+  closedAt: "2026-09-11T15:00:00.000Z",
+  disassembledAt: null,
+  pallet: { id: "pal-1", sscc: PALLET.sscc },
+  items: [],
+  exceptions: [],
+  pickupOrders: [],
+};
+
+const PALLET_CARD = {
+  id: "pal-1",
+  sscc: PALLET.sscc,
+  status: "closed",
+  shiftId: SHIFT.id,
+  shiftNumber: "SEP26-001",
+  productId: "p1",
+  productName: "Молоко 1л",
+  terminalId: "t1",
+  lineName: "Линия розлива № 1",
+  operatorId: null,
+  openedAt: "2026-09-11T14:00:00.000Z",
+  closedAt: "2026-09-11T15:00:00.000Z",
+  disassembledAt: null,
+  boxes: [
+    {
+      id: "box-1",
+      sscc: "00123460682000000101",
+      itemCount: 12,
+      closedAt: "2026-09-11T15:00:00.000Z",
+      disassembledAt: null,
+    },
+    {
+      id: "box-2",
+      sscc: "00123460682000000102",
+      itemCount: 0,
+      closedAt: "2026-09-11T15:00:00.000Z",
+      disassembledAt: "2026-09-11T16:30:00.000Z",
+    },
+  ],
+  exceptions: [],
+};
+
+/** Renders both cards behind their real routes, so the link between them is exercised. */
+function renderCodeSearchCards(entry: string, body: (url: string) => unknown) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => jsonResponse(200, body(String(input)))),
+  );
+  return render(
+    <QueryClientProvider client={newQueryClient()}>
+      <MemoryRouter initialEntries={[entry]}>
+        <Routes>
+          <Route path="/codes/box/:boxId" element={<BoxCardPage />} />
+          <Route path="/codes/pallet/:palletId" element={<PalletCardPage />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
+describe("box card pallet link", () => {
+  it("shows the pallet a box stands on and links to its card", async () => {
+    renderCodeSearchCards("/codes/box/box-1", () => BOX_CARD);
+
+    expect(await screen.findByText("На паллете")).toBeDefined();
+    const link = screen.getByRole("link", { name: "(00)103460068200000004" });
+    expect(link.getAttribute("href")).toBe("/codes/pallet/pal-1");
+  });
+
+  it("shows a dash for a box that stands on no pallet", async () => {
+    renderCodeSearchCards("/codes/box/box-1", () => ({ ...BOX_CARD, pallet: null }));
+
+    expect(await screen.findByText("На паллете")).toBeDefined();
+    expect(screen.queryByRole("link", { name: /103460068200000004/ })).toBeNull();
+  });
+});
+
+describe("pallet card", () => {
+  it("shows the pallet, its shift and line, and its member boxes", async () => {
+    renderCodeSearchCards("/codes/pallet/pal-1", () => PALLET_CARD);
+
+    expect(await screen.findByRole("heading", { name: "(00)103460068200000004" })).toBeDefined();
+    expect(screen.getByText("Линия розлива № 1")).toBeDefined();
+    expect(screen.getByRole("link", { name: "SEP26-001" })).toBeDefined();
+
+    const boxes = within(screen.getByRole("table"));
+    // Each member box links on to its OWN card rather than inlining its codes.
+    expect(boxes.getByRole("link", { name: "(00)123460682000000101" }).getAttribute("href")).toBe(
+      "/codes/box/box-1",
+    );
+    expect(boxes.getByText("12")).toBeDefined();
+  });
+
+  it("keeps a disassembled member box listed and flags it", async () => {
+    renderCodeSearchCards("/codes/pallet/pal-1", () => PALLET_CARD);
+
+    const boxes = within(await screen.findByRole("table"));
+    const row = boxes.getByRole("link", { name: "(00)123460682000000102" }).closest("tr");
+    expect(row).not.toBeNull();
+    // A word, not a colour: the pallet is short a box it can never recover.
+    expect(within(row!).getByText("Короб расформирован")).toBeDefined();
+  });
+
+  it("reports a pallet taken apart, with its exception reason", async () => {
+    renderCodeSearchCards("/codes/pallet/pal-1", () => ({
+      ...PALLET_CARD,
+      status: "disassembled",
+      disassembledAt: "2026-09-11T18:00:00.000Z",
+      exceptions: [
+        {
+          kind: "disassemble",
+          reason: "паллета разобрана на складе",
+          occurredAt: "2026-09-11T18:00:00.000Z",
+          operatorId: null,
+          disaggregationDocumentId: null,
+          disaggregationDocNo: null,
+        },
+      ],
+    }));
+
+    // Twice, deliberately: the status chip beside the title and the
+    // «Разобрана» timestamp field, exactly as the box card pairs its own
+    // status chip with «Расформирован».
+    expect(await screen.findAllByText("Разобрана")).toHaveLength(2);
+    expect(screen.getByText("Разбор паллеты")).toBeDefined();
+    expect(screen.getByText("паллета разобрана на складе")).toBeDefined();
+  });
+
+  it("reports a failed load rather than an empty pallet", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(500, { message: "boom" })),
+    );
+    render(
+      <QueryClientProvider client={newQueryClient()}>
+        <MemoryRouter initialEntries={["/codes/pallet/pal-1"]}>
+          <Routes>
+            <Route path="/codes/pallet/:palletId" element={<PalletCardPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText(/Не удалось загрузить данные/)).toBeDefined();
+    // An error, never the empty-pallet wording: "no boxes" and "could not
+    // ask" are different answers.
+    expect(screen.queryByText("На паллете нет коробов")).toBeNull();
+  });
+});
+
+describe("pallets entitlement gate on the shift form", () => {
+  it("lets a tenant with the feature switch pallets on", async () => {
+    const user = userEvent.setup();
+    renderShiftForm(AGGREGATION_FORM_VALUES, true);
+
+    const checkbox = screen.getByLabelText("Использовать паллеты");
+    expect((checkbox as HTMLInputElement).disabled).toBe(false);
+    await user.click(checkbox);
+    expect(await screen.findByLabelText("Коробов на паллете")).toBeDefined();
+    expect(screen.queryByText(/не входят в текущий тариф/)).toBeNull();
+  });
+
+  it("blocks the checkbox and explains why when the plan has no pallets", () => {
+    renderShiftForm(AGGREGATION_FORM_VALUES, false);
+
+    expect((screen.getByLabelText("Использовать паллеты") as HTMLInputElement).disabled).toBe(true);
+    expect(
+      screen.getByText(
+        "Паллеты не входят в текущий тариф. Чтобы включать их в сменах, добавьте функцию в подписку.",
+      ),
+    ).toBeDefined();
+  });
+
+  it("still lets a shift planned with pallets switch them off", () => {
+    renderShiftForm({ ...AGGREGATION_FORM_VALUES, palletsEnabled: true }, false);
+
+    // The server only asserts the entitlement when pallets are being turned
+    // ON, so disabling this control would strand such a shift for good.
+    expect((screen.getByLabelText("Использовать паллеты") as HTMLInputElement).disabled).toBe(
+      false,
+    );
+    expect(
+      screen.getByText(
+        "Паллеты не входят в текущий тариф. Эта смена была запланирована с паллетами: их можно выключить, но включить обратно — нет.",
+      ),
+    ).toBeDefined();
   });
 });

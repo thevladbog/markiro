@@ -2055,7 +2055,6 @@
         "copy": "Create a copy",
         "copyName": "{{name}} — copy",
         "copyHint": "A new template will be created. Check its purpose and content before saving.",
-        "palletCopyUnavailable": "Custom pallet label templates cannot be created yet: use the stock template.",
         "reset": "Use the 58 × 40 template"
       }
     },
@@ -2253,6 +2252,8 @@
         "boxLabelTemplateSearch": "Search templates",
         "boxCapacityLabel": "Box capacity, units",
         "palletsEnabledLabel": "Use pallets",
+        "palletsNotEntitled": "Pallets are not part of the current plan. Add the feature to the subscription to switch them on in a shift.",
+        "palletsNotEntitledEnabled": "Pallets are not part of the current plan. This shift was planned with pallets: you can switch them off, but not back on.",
         "palletBoxCapacityLabel": "Boxes per pallet",
         "palletBoxCapacityHint": "How many closed boxes make up one full pallet.",
         "palletLabelTemplateLabel": "Pallet label template",
@@ -2346,6 +2347,7 @@
         "loadError": "Could not load this shift's pallets.",
         "contentsChangedAfterClose": "Contents changed after closing",
         "disassembled": "Taken apart",
+        "noSscc": "No SSCC",
         "table": {
           "sscc": "SSCC",
           "line": "Line",
@@ -2440,6 +2442,7 @@
       },
       "table": {
         "sscc": "SSCC",
+        "pallet": "Pallet",
         "line": "Line",
         "operator": "Operator",
         "itemCount": "Count",
@@ -2541,6 +2544,7 @@
         "openedAtLabel": "Opened",
         "closedAtLabel": "Closed",
         "disassembledAtLabel": "Disassembled",
+        "palletLabel": "On pallet",
         "itemsTitle": "Composition",
         "itemsEmpty": "Box is empty",
         "table": {
@@ -2560,6 +2564,35 @@
         },
         "pickupOrdersTitle": "Pickup orders",
         "pickupOrdersEmpty": "No orders"
+      },
+      "palletCard": {
+        "noSscc": "No SSCC",
+        "status": {
+          "open": "Open",
+          "closed": "Closed",
+          "disassembled": "Taken apart"
+        },
+        "productLabel": "Product",
+        "shiftLabel": "Shift",
+        "lineLabel": "Line",
+        "openedAtLabel": "Started",
+        "closedAtLabel": "Closed",
+        "disassembledAtLabel": "Taken apart",
+        "boxesTitle": "Boxes on the pallet",
+        "boxesEmpty": "No boxes on this pallet",
+        "boxDisassembled": "Box disassembled",
+        "table": {
+          "sscc": "Box SSCC",
+          "itemCount": "Codes",
+          "closedAt": "Closed",
+          "state": "State"
+        },
+        "exceptionsTitle": "Exceptions",
+        "exceptionsEmpty": "No exceptions",
+        "exceptionKind": {
+          "disassemble": "Pallet taken apart",
+          "reprint": "Label reprint"
+        }
       },
       "history": {
         "scanned": "Scanned",

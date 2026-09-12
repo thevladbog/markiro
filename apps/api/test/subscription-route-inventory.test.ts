@@ -66,6 +66,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "GET /code-search/codes (CodeSearchController.listCodes)",
       "GET /code-search/codes/:codeHash (CodeSearchController.getCodeCard)",
       "GET /code-search/boxes/:boxId (CodeSearchController.getBoxCard)",
+      "GET /code-search/pallets/:palletId (CodeSearchController.getPalletCard)",
       "GET /code-search/boxes/:boxId/report (CodeSearchController.boxReport)",
       "GET /conflicts (ConflictsController.listConflicts)",
       "GET /counterparties (CounterpartiesController.listCounterparties)",

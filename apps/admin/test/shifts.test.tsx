@@ -242,7 +242,7 @@ function DirtyReseedHarness() {
         products={[PRODUCT_A]}
         lines={[]}
         counterparties={[]}
-        formContext={{ labelTemplates: [] }}
+        formContext={{ labelTemplates: [], palletsEntitled: true }}
         onSubmit={() => undefined}
         onDirtyChange={() => undefined}
         onClose={() => undefined}

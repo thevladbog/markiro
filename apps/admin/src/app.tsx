@@ -43,6 +43,7 @@ import {
 } from "./pages/employees/EmployeePanelRoute.js";
 import { BoxCardPage } from "./pages/code-search/BoxCard.js";
 import { CodeCardPage } from "./pages/code-search/CodeCard.js";
+import { PalletCardPage } from "./pages/code-search/PalletCard.js";
 import { CodeSearchPage } from "./pages/code-search/index.js";
 import { ChannelPage } from "./pages/integrations/ChannelPage.js";
 import { IntegrationsPage } from "./pages/integrations/index.js";
@@ -268,6 +269,14 @@ function appRouteElements() {
           element={
             <RequireCapability capability={C.OPERATIONS_READ}>
               <BoxCardPage />
+            </RequireCapability>
+          }
+        />
+        <Route
+          path="codes/pallet/:palletId"
+          element={
+            <RequireCapability capability={C.OPERATIONS_READ}>
+              <PalletCardPage />
             </RequireCapability>
           }
         />

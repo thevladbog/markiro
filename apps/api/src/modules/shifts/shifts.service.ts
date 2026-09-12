@@ -404,7 +404,10 @@ export class ShiftsService {
     if (template.purpose !== "box") {
       throw new BadRequestException({
         code: "BOX_LABEL_TEMPLATE_NOT_ELIGIBLE",
-        message: "A product duplicate template cannot label a box",
+        // Names the rule, not one offending purpose: since 06d a tenant can
+        // mint pallet templates of its own, so "a product duplicate
+        // template" was simply the wrong noun for half the rejections.
+        message: "Only a box-purpose template can label a box",
       });
     }
     if (!isBoxLabelTemplateEligible(template, chzProductGroupCode)) {

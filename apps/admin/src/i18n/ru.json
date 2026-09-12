@@ -2055,7 +2055,6 @@
         "copy": "Создать копию",
         "copyName": "{{name}} — копия",
         "copyHint": "Будет создан новый шаблон. Проверьте назначение и содержимое перед сохранением.",
-        "palletCopyUnavailable": "Свои шаблоны этикеток паллет пока нельзя создавать: используйте стоковый шаблон.",
         "reset": "Использовать шаблон 58 × 40"
       }
     },
@@ -2253,6 +2252,8 @@
         "boxLabelTemplateSearch": "Поиск шаблона",
         "boxCapacityLabel": "Вместимость короба, шт",
         "palletsEnabledLabel": "Использовать паллеты",
+        "palletsNotEntitled": "Паллеты не входят в текущий тариф. Чтобы включать их в сменах, добавьте функцию в подписку.",
+        "palletsNotEntitledEnabled": "Паллеты не входят в текущий тариф. Эта смена была запланирована с паллетами: их можно выключить, но включить обратно — нет.",
         "palletBoxCapacityLabel": "Коробов на паллете",
         "palletBoxCapacityHint": "Сколько закрытых коробов встаёт на одну паллету.",
         "palletLabelTemplateLabel": "Шаблон этикетки паллеты",
@@ -2346,6 +2347,7 @@
         "loadError": "Не удалось загрузить паллеты смены.",
         "contentsChangedAfterClose": "Состав изменился после закрытия",
         "disassembled": "Разобрана",
+        "noSscc": "Без SSCC",
         "table": {
           "sscc": "SSCC",
           "line": "Линия",
@@ -2440,6 +2442,7 @@
       },
       "table": {
         "sscc": "SSCC",
+        "pallet": "Паллета",
         "line": "Линия",
         "operator": "Оператор",
         "itemCount": "Кол-во",
@@ -2541,6 +2544,7 @@
         "openedAtLabel": "Открыт",
         "closedAtLabel": "Закрыт",
         "disassembledAtLabel": "Расформирован",
+        "palletLabel": "На паллете",
         "itemsTitle": "Состав",
         "itemsEmpty": "Короб пуст",
         "table": {
@@ -2560,6 +2564,35 @@
         },
         "pickupOrdersTitle": "Заказы на выдачу",
         "pickupOrdersEmpty": "Заказов нет"
+      },
+      "palletCard": {
+        "noSscc": "Без SSCC",
+        "status": {
+          "open": "Открыта",
+          "closed": "Закрыта",
+          "disassembled": "Разобрана"
+        },
+        "productLabel": "Товар",
+        "shiftLabel": "Смена",
+        "lineLabel": "Линия",
+        "openedAtLabel": "Начата",
+        "closedAtLabel": "Закрыта",
+        "disassembledAtLabel": "Разобрана",
+        "boxesTitle": "Короба на паллете",
+        "boxesEmpty": "На паллете нет коробов",
+        "boxDisassembled": "Короб расформирован",
+        "table": {
+          "sscc": "SSCC короба",
+          "itemCount": "Кодов",
+          "closedAt": "Закрыт",
+          "state": "Состояние"
+        },
+        "exceptionsTitle": "Исключения",
+        "exceptionsEmpty": "Исключений нет",
+        "exceptionKind": {
+          "disassemble": "Разбор паллеты",
+          "reprint": "Перепечать этикетки"
+        }
       },
       "history": {
         "scanned": "Скан",

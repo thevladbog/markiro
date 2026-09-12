@@ -62,6 +62,34 @@ describe.skipIf(!ready)("pallets e2e", () => {
   const BOX_CLOSED_AT = "2026-09-11T07:30:00.000Z";
   const PALLET_CLOSED_AT = "2026-09-11T08:00:00.000Z";
 
+  /**
+   * Describe-scoped rather than local to `beforeAll`: the fixtures below are
+   * built with them, and the box-list test also needs to add one box AFTER
+   * the shared pallet exists.
+   */
+  function item(label: string, boxId: string | null, scannedAt: string): ScanItemDto {
+    const raw = `01${VALID_GTIN14}21S-${label}`;
+    const km = canonicalizeKm(raw);
+    return {
+      shiftId,
+      terminalId: "t1",
+      raw,
+      verdict: "ok",
+      scannedAt,
+      code: { codeHash: kmHash(km), gtin14: km.gtin14, serial: km.serial },
+      boxId,
+      operatorId: null,
+    };
+  }
+
+  async function postBatch(body: Record<string, unknown>) {
+    return request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", stationKey)
+      .send({ batchId: `pallet-e2e-${randomUUID()}`, items: [], ...body })
+      .expect(201);
+  }
+
   beforeAll(async () => {
     const env = loadEnv();
     setup = setupAuth(env);
@@ -110,29 +138,6 @@ describe.skipIf(!ready)("pallets e2e", () => {
       .get(SsccService)
       .allocate(tenantId, ISSUER_PREFIX, PALLET_EXTENSION_DIGIT, stationDeviceId, 5);
     palletSscc = buildSscc(PALLET_EXTENSION_DIGIT, ISSUER_PREFIX, block.fromSerial);
-
-    function item(label: string, boxId: string | null, scannedAt: string): ScanItemDto {
-      const raw = `01${VALID_GTIN14}21S-${label}`;
-      const km = canonicalizeKm(raw);
-      return {
-        shiftId,
-        terminalId: "t1",
-        raw,
-        verdict: "ok",
-        scannedAt,
-        code: { codeHash: kmHash(km), gtin14: km.gtin14, serial: km.serial },
-        boxId,
-        operatorId: null,
-      };
-    }
-
-    async function postBatch(body: Record<string, unknown>) {
-      return request(app!.getHttpServer())
-        .post("/station/scans")
-        .set("x-api-key", stationKey)
-        .send({ batchId: `pallet-e2e-${randomUUID()}`, items: [], ...body })
-        .expect(201);
-    }
 
     const box1Items = Array.from({ length: BOX1_ITEM_COUNT }, (_, i) =>
       item(`b1-${i}`, "b1", new Date(ITEM_BASE + i * 1000).toISOString()),
@@ -201,6 +206,41 @@ describe.skipIf(!ready)("pallets e2e", () => {
     expect(pallet.closedAt).toBe(PALLET_CLOSED_AT);
     expect(pallet.contentsChangedAfterClose).toBe(false);
     expect(pallet.disassembledAt).toBeNull();
+  });
+
+  /**
+   * The box list's own «Паллета» column (06d review finding A). `b3` is
+   * closed WITHOUT a `devicePalletId`, so it is a box on no pallet at all --
+   * and because it carries no `palletId` it contributes to neither
+   * `boxCount` nor `unitCount` of the shared pallet the later tests assert.
+   */
+  it("reports each box's pallet SSCC in the shift's box list, null for a box on no pallet", async () => {
+    await postBatch({ items: [item("b3-0", "b3", new Date(ITEM_BASE + 500_000).toISOString())] });
+    await postBatch({
+      boxes: [
+        {
+          boxId: "b3",
+          shiftId,
+          terminalId: "t1",
+          sscc: "123460682000000103",
+          closedAt: BOX_CLOSED_AT,
+          operatorId,
+        },
+      ],
+    });
+
+    const res = await agent.get(`/boxes?shiftId=${shiftId}`).expect(200);
+    const bySscc = new Map<string, { palletSscc: string | null }>(
+      (res.body.items as { sscc: string; palletSscc: string | null }[]).map((box) => [
+        box.sscc,
+        box,
+      ]),
+    );
+    expect(bySscc.get("00123460682000000101")?.palletSscc).toBe(`00${palletSscc}`);
+    expect(bySscc.get("00123460682000000102")?.palletSscc).toBe(`00${palletSscc}`);
+    // Present in the list, explicitly on no pallet -- not absent, not "".
+    expect(bySscc.has("00123460682000000103")).toBe(true);
+    expect(bySscc.get("00123460682000000103")?.palletSscc).toBeNull();
   });
 
   it("excludes displaced and operator-removed items from the unit count", async () => {

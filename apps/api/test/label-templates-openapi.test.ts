@@ -44,6 +44,15 @@ function property(schema: JsonSchema, name: string): JsonSchema {
   return value;
 }
 
+function requestBodySchema(document: OpenAPIObject, path: string, method: Method): JsonSchema {
+  const body = operation(document, path, method).requestBody;
+  if (!body || "$ref" in body) throw new Error(`Missing inline request body`);
+  const content = body.content as Record<string, { schema?: JsonSchema }> | undefined;
+  const schema = content?.["application/json"]?.schema;
+  if (!schema) throw new Error(`Missing JSON request schema for ${method.toUpperCase()} ${path}`);
+  return schema;
+}
+
 /**
  * `LabelTemplatePurpose` (packages/domain/src/product-labels/contracts.ts) is
  * `"box" | "product_duplicate" | "pallet"`. Tenant provisioning seeds a
@@ -120,6 +129,42 @@ describe("label-templates OpenAPI contract", () => {
         type: "string",
         enum: EXPECTED_PURPOSE_ENUM,
       });
+    } finally {
+      await app.close();
+    }
+  });
+
+  /**
+   * The REQUEST side is a separate contract from the response side and was
+   * the one that lagged: `purposeSchema` accepted only "box" and
+   * "product_duplicate", so a tenant could never mint a pallet template even
+   * though every response schema documented the purpose. `@ApiZodBody`
+   * projects the zod schema straight into the document, so this assertion
+   * fails the moment the accepted input narrows again.
+   */
+  it("documents every purpose the create endpoint accepts as input", async () => {
+    const moduleRef = await Test.createTestingModule({
+      controllers: [LabelTemplatesController],
+      providers: [{ provide: LabelTemplatesService, useValue: {} }],
+    })
+      .overrideGuard(TenantGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(AuthorizationGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(SubscriptionAccessGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
+    const app = moduleRef.createNestApplication();
+    await app.init();
+
+    try {
+      const document = SwaggerModule.createDocument(
+        app,
+        new DocumentBuilder().setTitle("contract test").setVersion("test").build(),
+      );
+      expect(
+        property(requestBodySchema(document, "/label-templates", "post"), "purpose"),
+      ).toMatchObject({ enum: EXPECTED_PURPOSE_ENUM });
     } finally {
       await app.close();
     }

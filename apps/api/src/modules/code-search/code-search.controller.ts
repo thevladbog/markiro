@@ -42,6 +42,7 @@ import {
   codeHashParamSchema,
   listCodesOpenApiSchema,
   listCodesQuerySchema,
+  palletCardOpenApiSchema,
   type BoxCardDto,
   type BoxReportQueryDto,
   type ClassifyQueryDto,
@@ -49,6 +50,7 @@ import {
   type CodeCardDto,
   type ListCodesQueryDto,
   type ListCodesResponseDto,
+  type PalletCardDto,
 } from "./dto";
 import { CodeSearchService } from "./code-search.service";
 import { renderBoxReportHtml } from "./box-report";
@@ -193,6 +195,28 @@ export class CodeSearchController {
     @Param("boxId", new ParseUUIDPipe()) boxId: string,
   ): Promise<BoxCardDto> {
     return this.codeSearchService.getBoxCard(req.tenantId!, boxId);
+  }
+
+  /**
+   * The box card's counterpart one aggregation level up. Same trust domain,
+   * same manager-only capability, same tenant-scoped 404: a pallet belonging
+   * to another tenant is indistinguishable from one that does not exist.
+   */
+  @Get("pallets/:palletId")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiOperation({
+    summary: "Get a pallet card",
+    description:
+      "The pallet's identity, status, shift, terminal and line, plus its member boxes (disassembled ones included) and its own exception history.",
+  })
+  @ApiParam({ name: "palletId", schema: { type: "string", format: "uuid" } })
+  @ApiOkResponse({ schema: palletCardOpenApiSchema })
+  @ApiHttpErrors(401, 403, 404)
+  async getPalletCard(
+    @Req() req: RequestWithTenant,
+    @Param("palletId", new ParseUUIDPipe()) palletId: string,
+  ): Promise<PalletCardDto> {
+    return this.codeSearchService.getPalletCard(req.tenantId!, palletId);
   }
 
   /**

@@ -145,6 +145,13 @@ export interface BoxCardDto {
   openedAt: string;
   closedAt: string | null;
   disassembledAt: string | null;
+  /**
+   * The pallet this box stands on, or `null` (06d). Same `{ id, sscc }` shape
+   * as `CodeCardDto.currentBox`: the `sscc` is what the card shows, the `id`
+   * is what the link navigates to. `sscc` is `null` while that pallet is
+   * still open.
+   */
+  pallet: { id: string; sscc: string | null } | null;
   items: BoxCardItemDto[];
   exceptions: {
     kind: string;
@@ -155,6 +162,45 @@ export interface BoxCardDto {
     disaggregationDocNo: string | null;
   }[];
   pickupOrders: { orderId: string; orderNo: string; status: string }[];
+}
+
+/** Mirrors `apps/api/src/modules/code-search/dto.ts`'s `PalletCardBoxDto`, `Date` fields as `string`. */
+export interface PalletCardBoxDto {
+  id: string;
+  sscc: string | null;
+  /** Live items only, the same figure the box list reports for this box. */
+  itemCount: number;
+  closedAt: string | null;
+  /** Non-null once this box was taken apart; it stays listed, flagged. */
+  disassembledAt: string | null;
+}
+
+/** Mirrors `apps/api/src/modules/code-search/dto.ts`'s `PalletCardDto`, `Date` fields as `string`. */
+export interface PalletCardDto {
+  id: string;
+  sscc: string | null;
+  status: "open" | "closed" | "disassembled";
+  shiftId: string;
+  /** Saved human-readable shift number, e.g. `AUG26-003/S`. */
+  shiftNumber: string | null;
+  productId: string | null;
+  productName: string | null;
+  terminalId: string | null;
+  lineName: string | null;
+  operatorId: string | null;
+  openedAt: string;
+  closedAt: string | null;
+  disassembledAt: string | null;
+  boxes: PalletCardBoxDto[];
+  exceptions: {
+    kind: string;
+    /** NOT NULL server-side, unlike a box exception's reason. */
+    reason: string;
+    occurredAt: string;
+    operatorId: string | null;
+    disaggregationDocumentId: string | null;
+    disaggregationDocNo: string | null;
+  }[];
 }
 
 /** Shared TanStack Query cache key prefix for code-search queries (all variants). */
@@ -183,6 +229,10 @@ async function fetchCodeCard(codeHash: string): Promise<CodeCardDto> {
 
 async function fetchBoxCard(boxId: string): Promise<BoxCardDto> {
   return apiFetch<BoxCardDto>(`/code-search/boxes/${boxId}`);
+}
+
+async function fetchPalletCard(palletId: string): Promise<PalletCardDto> {
+  return apiFetch<PalletCardDto>(`/code-search/pallets/${palletId}`);
 }
 
 /**
@@ -220,6 +270,15 @@ export function useBoxCard(boxId: string | undefined): UseQueryResult<BoxCardDto
     queryKey: [...CODE_SEARCH_QUERY_KEY, "box", boxId],
     queryFn: () => fetchBoxCard(boxId!),
     enabled: Boolean(boxId),
+  });
+}
+
+/** `GET /code-search/pallets/:palletId`. Disabled while no palletId is given. */
+export function usePalletCard(palletId: string | undefined): UseQueryResult<PalletCardDto> {
+  return useQuery({
+    queryKey: [...CODE_SEARCH_QUERY_KEY, "pallet", palletId],
+    queryFn: () => fetchPalletCard(palletId!),
+    enabled: Boolean(palletId),
   });
 }
 
