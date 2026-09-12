@@ -2630,6 +2630,10 @@
     },
     "conflicts": {
       "title": "Конфликты",
+      "unavailableCode": "Код недоступен",
+      "unavailableShift": "Смена недоступна",
+      "unavailableTerminal": "Название терминала недоступно",
+      "unspecifiedTerminal": "Терминал не указан",
       "empty": "Конфликтов нет",
       "review": "Отметить рассмотренным",
       "reviewed": "Рассмотрено",

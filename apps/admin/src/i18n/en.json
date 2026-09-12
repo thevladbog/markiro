@@ -2630,6 +2630,10 @@
     },
     "conflicts": {
       "title": "Conflicts",
+      "unavailableCode": "Code unavailable",
+      "unavailableShift": "Shift unavailable",
+      "unavailableTerminal": "Terminal name unavailable",
+      "unspecifiedTerminal": "Terminal not specified",
       "empty": "No conflicts",
       "review": "Mark reviewed",
       "reviewed": "Reviewed",

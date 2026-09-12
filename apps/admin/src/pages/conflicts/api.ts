@@ -14,6 +14,10 @@ import { apiFetch } from "../../api/client.js";
 export interface ConflictDto {
   id: string;
   codeHash: string;
+  /** Full stored KM from the losing scan, including GS separators and crypto tail. */
+  rawKm: string | null;
+  losingTerminalName: string | null;
+  winningTerminalName: string | null;
   losingShiftId: string;
   losingTerminalId: string | null;
   losingScannedAt: string;

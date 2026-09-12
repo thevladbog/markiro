@@ -26,3 +26,11 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+.mk-conflicts-code {
+  display: block;
+  min-width: 16rem;
+  max-width: 26rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

@@ -85,6 +85,9 @@ async function chooseOption(
 const UNREVIEWED = {
   id: "c1",
   codeHash: "h1".padEnd(64, "0"),
+  rawKm: "010400638133393121SERIAL\u001d91ABCD\u001d92signature",
+  losingTerminalName: "Линия розлива",
+  winningTerminalName: "Склад",
   losingShiftId: "s1",
   losingTerminalId: "t1",
   losingScannedAt: "2026-07-28T10:00:00.000Z",
@@ -113,6 +116,7 @@ const NULL_LOSING_TERMINAL = {
   ...UNREVIEWED,
   id: "c3",
   losingTerminalId: null,
+  losingTerminalName: null,
 };
 
 // Minimal ShiftDto-shaped fixtures (only the fields the conflicts page's
@@ -175,13 +179,40 @@ function stubFetch(handlers: {
 }
 
 describe("ConflictsPage", () => {
+  it("shows the full stored KM and names without exposing hashes or IDs", async () => {
+    stubFetch({ conflicts: [UNREVIEWED], shifts: [SHIFT_S1] });
+    renderPage();
+    const table = await screen.findByRole("table");
+    expect(within(table).getByTitle(UNREVIEWED.rawKm).textContent).toBe(UNREVIEWED.rawKm);
+    expect(within(table).getByText("Линия розлива")).toBeDefined();
+    expect(within(table).getByText("Склад")).toBeDefined();
+    for (const value of [UNREVIEWED.codeHash, "s1", "t1", "t2"]) {
+      expect(within(table).queryByText(value)).toBeNull();
+      expect(within(table).queryByTitle(value)).toBeNull();
+    }
+  });
+
+  it("uses readable fallbacks when code, shift and terminal names are unavailable", async () => {
+    stubFetch({
+      conflicts: [
+        { ...UNREVIEWED, rawKm: null, losingTerminalName: null, winningTerminalName: null },
+      ],
+    });
+    renderPage();
+    const table = within(await screen.findByRole("table"));
+    expect(table.getByText("Код недоступен")).toBeDefined();
+    expect(table.getByText("Смена недоступна")).toBeDefined();
+    expect(table.getAllByText("Название терминала недоступно")).toHaveLength(2);
+    expect(table.queryByTitle(UNREVIEWED.codeHash)).toBeNull();
+  });
+
   it("keeps conflict details readable while hiding review without operations.write", async () => {
     stubFetch({ conflicts: [UNREVIEWED], shifts: [SHIFT_S1] });
 
     renderPage(OPERATIONS_READ_ONLY);
 
     expect(
-      (await screen.findByRole("table")).querySelector(`[title="${UNREVIEWED.codeHash}"]`),
+      (await screen.findByRole("table")).querySelector(`[title="${UNREVIEWED.rawKm}"]`),
     ).toBeDefined();
     expect(screen.queryByRole("button", { name: "Отметить рассмотренным" })).toBeNull();
     expect(writeHookMountSpy).not.toHaveBeenCalled();
@@ -246,12 +277,11 @@ describe("ConflictsPage", () => {
     renderPage();
 
     const table = within(await screen.findByRole("table"));
-    // codeHash is truncated for display (finding: a raw 64-char hash would
-    // dominate the table) -- the full value survives in the cell's `title`.
-    expect(table.getByTitle(UNREVIEWED.codeHash)).toBeDefined();
+    // The full KM is displayed; the internal hash is never a display fallback.
+    expect(table.getByTitle(UNREVIEWED.rawKm)).toBeDefined();
     expect(table.queryByText(UNREVIEWED.codeHash)).toBeNull();
-    expect(table.getByText("t1")).toBeDefined();
-    expect(table.getByText("t2")).toBeDefined();
+    expect(table.getByText("Линия розлива")).toBeDefined();
+    expect(table.getByText("Склад")).toBeDefined();
     // Defaults to the unreviewed filter (see the test below dedicated to it).
     expect(fetchMock).toHaveBeenCalledWith("/api/conflicts?reviewed=false", expect.any(Object));
   });
@@ -327,7 +357,7 @@ describe("ConflictsPage", () => {
 
     renderPage();
 
-    await screen.findByTitle(REVIEWED.codeHash);
+    await screen.findByTitle(REVIEWED.rawKm);
     expect(screen.getByText("Рассмотрено")).toBeDefined();
     expect(screen.queryByRole("button", { name: "Отметить рассмотренным" })).toBeNull();
   });
@@ -352,7 +382,7 @@ describe("ConflictsPage", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     renderPage();
-    await screen.findByTitle(UNREVIEWED.codeHash);
+    await screen.findByTitle(UNREVIEWED.rawKm);
 
     fireEvent.click(screen.getByRole("button", { name: "Отметить рассмотренным" }));
 
@@ -383,7 +413,7 @@ describe("ConflictsPage", () => {
     expect(table.getByText(winningTime)).toBeDefined();
   });
 
-  it("pins each terminal id to its own scan time cell, not the other column's", async () => {
+  it("pins each terminal name to its own scan time cell, not the other column's", async () => {
     stubFetch({ conflicts: [UNREVIEWED] });
 
     renderPage();
@@ -399,8 +429,8 @@ describe("ConflictsPage", () => {
     const losingTime = formatScanTime(UNREVIEWED.losingScannedAt, "ru");
     const winningTime = formatScanTime(UNREVIEWED.winningScannedAt, "ru");
 
-    const losingCell = screen.getByText("t1").closest("td");
-    const winningCell = screen.getByText("t2").closest("td");
+    const losingCell = screen.getByText("Линия розлива").closest("td");
+    const winningCell = screen.getByText("Склад").closest("td");
     if (!losingCell || !winningCell) throw new Error("expected terminal id cells to render");
 
     expect(within(losingCell).getByText(losingTime)).toBeDefined();
@@ -409,13 +439,13 @@ describe("ConflictsPage", () => {
     expect(within(winningCell).queryByText(losingTime)).toBeNull();
   });
 
-  it("renders an em dash, not a blank cell, when the losing terminal id is null", async () => {
+  it("explains when the losing terminal is unavailable", async () => {
     stubFetch({ conflicts: [NULL_LOSING_TERMINAL] });
 
     renderPage();
     const table = within(await screen.findByRole("table"));
 
-    expect(await table.findByText("—")).toBeDefined();
+    expect(await table.findByText("Терминал не указан")).toBeDefined();
   });
 
   it("renders a shift column attributing the row to its losing shift", async () => {
