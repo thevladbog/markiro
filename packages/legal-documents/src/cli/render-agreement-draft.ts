@@ -67,6 +67,7 @@ const BILINGUAL_DRAFTS: readonly BilingualArtifact[] = [
       operatorProfileId: "operator-2026-08-15",
       identityLabel: "[номер]",
       showMetadata: false,
+      showSummary: false,
       centredWordmark: true,
       content: pairLocaleContent(
         buildTenantAgreement({ customer: EMPTY_CUSTOMER }, "ru"),
@@ -90,6 +91,7 @@ const DRAFTS: readonly DraftArtifact[] = [
       operatorProfileId: "operator-2026-08-15",
       identityLabel: "[номер]",
       showMetadata: false,
+      showSummary: false,
       centredWordmark: true,
       content: buildTenantAgreement({ customer: EMPTY_CUSTOMER }, "ru"),
     },

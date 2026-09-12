@@ -315,6 +315,7 @@ export class AgreementDocumentsService {
       // have, so the metadata table is dropped rather than filled with them.
       identityLabel: agreement.number,
       showMetadata: false,
+      showSummary: false,
       centredWordmark: true,
     };
 

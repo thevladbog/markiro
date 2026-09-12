@@ -110,6 +110,13 @@ export interface LegalDocxDraft extends LegalDocxMeta {
    */
   readonly showMetadata?: boolean;
   /**
+   * The summary reads as catalogue copy describing the document. A contract
+   * opens with its own particulars and its draft warning; a paragraph about
+   * the document sitting above them is a second piece of meta-commentary. It
+   * stays in the file properties either way.
+   */
+  readonly showSummary?: boolean;
+  /**
    * Centres the wordmark against the symbol instead of sitting it on the
    * baseline, where it reads as having slipped below the mark. Off by
    * default: every published artifact is pinned byte-for-byte, so correcting
@@ -192,11 +199,15 @@ export async function renderLegalDocxDraft(
       children: [new TextRun(source.title)],
       spacing: { before: 220, after: 140 },
     }),
-    new Paragraph({
-      style: "DocumentSummary",
-      children: [new TextRun(source.summary)],
-      spacing: { after: 220 },
-    }),
+    ...(input.showSummary === false
+      ? []
+      : [
+          new Paragraph({
+            style: "DocumentSummary",
+            children: [new TextRun(source.summary)],
+            spacing: { after: 220 },
+          }),
+        ]),
     ...(input.showMetadata === false ? [] : [createMetadataTable(input, operator)]),
     ...source.sections.flatMap((section, index) => {
       let stepNumber = 0;
@@ -250,16 +261,20 @@ export async function renderLegalDocxBilingual(
       children: [new TextRun(source.title.en)],
       spacing: { before: 0, after: 140 },
     }),
-    new Paragraph({
-      style: "DocumentSummary",
-      children: [new TextRun(source.summary.ru)],
-      spacing: { after: 40 },
-    }),
-    new Paragraph({
-      style: "DocumentSummary",
-      children: [new TextRun(source.summary.en)],
-      spacing: { after: 220 },
-    }),
+    ...(input.showSummary === false
+      ? []
+      : [
+          new Paragraph({
+            style: "DocumentSummary",
+            children: [new TextRun(source.summary.ru)],
+            spacing: { after: 40 },
+          }),
+          new Paragraph({
+            style: "DocumentSummary",
+            children: [new TextRun(source.summary.en)],
+            spacing: { after: 220 },
+          }),
+        ]),
     ...(input.showMetadata === false ? [] : [createMetadataTable(input, operator)]),
     ...source.sections.flatMap((section, index) =>
       renderBilingualSection(section, index, input.locale, assets),
