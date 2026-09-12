@@ -178,6 +178,120 @@ export async function markPalletPrintFailed(
   );
 }
 
+/**
+ * Records that the operator confirmed a pallet label they could not have the
+ * device verify automatically -- the "unknown" print outcome shown when this
+ * device restarts mid-print and cannot tell whether the label reached the
+ * printer. Mirrors `boxes.ts`'s `markPrintVerified` exactly, including
+ * clearing `acked_at` on the SAME row (Task 13 review, Finding 1, restated in
+ * this task's brief): the sync engine's pallet-closure query is gated on
+ * `acked_at IS NULL`, and a closure this old has typically already been
+ * acknowledged by the time the operator resolves this prompt. Without
+ * re-clearing it here, this outcome would have no way off the device -- the
+ * closure was already acked and would never be read again. Clearing it
+ * un-gates exactly one more resend of THIS pallet's closure, now carrying the
+ * resolved outcome.
+ */
+export async function markPalletPrintVerified(
+  exec: SqlExecutor,
+  palletId: string,
+  at: string,
+): Promise<boolean> {
+  const rows = await exec.all<{ pallet_id: string }>(
+    `UPDATE pallets_mirror
+        SET print_state = 'printed', print_error_code = NULL,
+            print_verified_at = ?, acked_at = NULL
+      WHERE pallet_id = ? AND print_state IN ('pending', 'printed')
+        AND print_verified_at IS NULL AND print_skipped_at IS NULL
+      RETURNING pallet_id`,
+    [at, palletId],
+  );
+  return rows.length === 1;
+}
+
+/**
+ * Records that the operator explicitly chose NOT to print (or reprint) a
+ * closed pallet's label -- the pallet equivalent of `boxes.ts`'s
+ * `markPrintSkipped`. Clears `acked_at` for the same reason
+ * `markPalletPrintVerified` above does.
+ */
+export async function markPalletPrintSkipped(
+  exec: SqlExecutor,
+  palletId: string,
+  at: string,
+): Promise<boolean> {
+  const rows = await exec.all<{ pallet_id: string }>(
+    `UPDATE pallets_mirror
+        SET print_state = 'skipped', print_error_code = NULL,
+            print_skipped_at = ?, acked_at = NULL
+      WHERE pallet_id = ? AND print_state IN ('pending', 'printed')
+        AND print_verified_at IS NULL AND print_skipped_at IS NULL
+      RETURNING pallet_id`,
+    [at, palletId],
+  );
+  return rows.length === 1;
+}
+
+/**
+ * Units across every box this pallet still carries (a disassembled box no
+ * longer counts, the same exclusion `currentPallet`'s own `boxCount` and
+ * `boxes.ts`'s `DeviceBox.itemCount` already apply). Queried on demand,
+ * rather than carried on `ClosePalletResult`/`UnresolvedPalletPrint`,
+ * because it is needed in exactly one place -- composing this pallet's
+ * label fields (`palletLabelFields`'s `qty`) -- and every other caller of
+ * those two shapes has no use for it.
+ */
+export async function palletItemCount(exec: SqlExecutor, palletId: string): Promise<number> {
+  const rows = await exec.all<{ n: number }>(
+    `SELECT COUNT(*) AS n
+       FROM codes_mirror c
+       JOIN boxes_mirror b ON b.box_id = c.box_id
+      WHERE b.pallet_id = ? AND b.disassembled_at IS NULL`,
+    [palletId],
+  );
+  return Number(rows[0]?.n ?? 0);
+}
+
+export interface ClosedPalletSummary {
+  palletId: string;
+  sscc: string;
+  boxCount: number;
+  closedAt: string;
+}
+
+/**
+ * Closed, not-yet-disassembled pallets for this shift and terminal, most
+ * recently closed first -- the pallet equivalent of `boxes.ts`'s
+ * `listClosedBoxes`, the picker for the reprint/disassemble panel.
+ */
+export async function listClosedPallets(
+  exec: SqlExecutor,
+  shiftId: string,
+  terminalId: string | null,
+): Promise<ClosedPalletSummary[]> {
+  const rows = await exec.all<{
+    pallet_id: string;
+    sscc: string;
+    closed_at: string;
+    box_count: number;
+  }>(
+    `SELECT p.pallet_id AS pallet_id, p.sscc AS sscc, p.closed_at AS closed_at,
+            (SELECT COUNT(*) FROM boxes_mirror b
+              WHERE b.pallet_id = p.pallet_id AND b.disassembled_at IS NULL) AS box_count
+       FROM pallets_mirror p
+      WHERE p.shift_id = ? AND p.terminal_id IS ?
+        AND p.closed_at IS NOT NULL AND p.disassembled_at IS NULL
+      ORDER BY p.closed_at DESC`,
+    [shiftId, terminalId],
+  );
+  return rows.map((r) => ({
+    palletId: r.pallet_id,
+    sscc: r.sscc,
+    boxCount: Number(r.box_count),
+    closedAt: r.closed_at,
+  }));
+}
+
 export interface ReasonedPalletActionInput {
   palletId: string;
   shiftId: string;
@@ -186,6 +300,16 @@ export interface ReasonedPalletActionInput {
   reason: string;
   occurredAt: string;
 }
+
+/**
+ * The server rejects an exception `reason` over 500 characters with a 400 --
+ * and the sync drain retries a rejected batch forever, since a 400 is not
+ * one of the transient failures it backs off from. Clamped here, at the one
+ * place every pallet exception fact is written, so no caller (the operator's
+ * free-text "other reason" box, a future one) can queue a fact the server
+ * will refuse and the device can never work off.
+ */
+const MAX_REASON_LENGTH = 500;
 
 /**
  * Queues one pallet exception fact for the sync engine to drain, the pallet
@@ -211,7 +335,7 @@ async function insertPalletException(
       input.shiftId,
       input.terminalId,
       input.operatorId,
-      input.reason,
+      input.reason.slice(0, MAX_REASON_LENGTH),
       input.occurredAt,
     ],
   );

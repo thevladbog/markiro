@@ -4,6 +4,7 @@ import {
   classifyScan,
   validateShiftScan,
   type LabelTemplateSpec,
+  palletLabelFields,
   parseDuplicateKm,
   type ScanVerdict,
   type PrinterDpi,
@@ -24,11 +25,32 @@ import {
   markPrintVerified,
   openBox,
   reprintBox,
+  type BoxPrintErrorCode,
   type ClosedBoxSummary,
   type DeviceBox,
   type UnresolvedBoxPrint,
 } from "../lib/boxes.js";
 import { closeCurrentBox as closeCurrentBoxLib, type CloseBoxResult } from "../lib/close-box.js";
+import {
+  closeCurrentPallet as closeCurrentPalletLib,
+  type ClosePalletResult,
+} from "../lib/close-pallet.js";
+import {
+  currentPallet,
+  disassemblePallet,
+  findUnresolvedPalletPrint,
+  listClosedPallets,
+  markPalletPrintFailed,
+  markPalletPrinted,
+  markPalletPrintSkipped,
+  markPalletPrintVerified,
+  palletItemCount,
+  reprintPallet,
+  type ClosedPalletSummary,
+} from "../lib/pallets.js";
+import { PalletClose, type PalletPrintState } from "../components/PalletClose.js";
+import { PalletExceptions } from "../components/PalletExceptions.js";
+import { PalletStrip } from "../components/PalletStrip.js";
 import type { PrintTarget } from "../lib/hardware.js";
 import type { PrinterLanguage } from "../lib/hardware-config.js";
 import {
@@ -118,6 +140,15 @@ export interface WorkScreenProps {
   issuerPrefix: string | null;
   /** Items per box before it closes automatically (the shift's `boxCapacity`). */
   boxCapacity: number | null;
+  /**
+   * The shift's pallet capacity in boxes (`shift_mirror.palletBoxCapacity`),
+   * or null/omitted on a shift with no pallets. Mirrors `boxCapacity`'s
+   * null-means-off convention: there is no separate "pallets enabled" flag,
+   * the same way `close-box.ts`'s `CloseBoxDeps` has none (see its own doc
+   * comment) -- a non-null capacity is the one signal that turns the pallet
+   * strip, early-close action and pallet exceptions on.
+   */
+  palletBoxCapacity?: number | null;
   /** Bumps after a freshly downloaded bundle replaces the offline mirror. */
   bundleRevision?: number;
   /**
@@ -125,6 +156,11 @@ export interface WorkScreenProps {
    * bound to this device's `issuerPrefix`.
    */
   closeCurrentBox?: (shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>;
+  /**
+   * Injectable for tests; defaults to the real `closeCurrentPallet` bound to
+   * this device's `issuerPrefix`, used by the early-close overflow action.
+   */
+  closeCurrentPallet?: (shiftId: string, operatorId: string | null) => Promise<ClosePalletResult>;
   /** Fires for every raw payload the scan queue processes, whatever the verdict — test-only observability. */
   onScan?: (raw: string) => void;
   /** Opt-in per workstation: scan a closed box's printed label back before moving on. */
@@ -189,8 +225,10 @@ export function WorkScreen({
   exceptionWindowControl,
   issuerPrefix,
   boxCapacity,
+  palletBoxCapacity = null,
   bundleRevision = 0,
   closeCurrentBox: closeCurrentBoxProp,
+  closeCurrentPallet: closeCurrentPalletProp,
   onScan,
   verifyPrintedLabel,
   printing,
@@ -404,6 +442,435 @@ export function WorkScreen({
     void reloadClosedBoxes();
   }, [issuerPrefix, reloadClosedBoxes]);
 
+  // Pallet aggregation (slice 06d) -- off entirely, the same way the box
+  // section above is, whenever `palletBoxCapacity` is null or this device has
+  // no `issuerPrefix` (a pallet always burns a serial from the SAME pool a
+  // box does; see `close-box.ts`'s `CloseBoxDeps`).
+  const [pallet, setPallet] = useState<{ palletId: string; boxCount: number } | null>(null);
+  // Set when this device's serial pool could not close an over-capacity
+  // pallet (`close-box.ts` leaves it open rather than blocking further
+  // boxes). Text-only, per the project's accessibility rule -- `PalletStrip`
+  // is the one place this surfaces, and it never blocks scanning.
+  const [palletNoSerials, setPalletNoSerials] = useState(false);
+  const [closedPallets, setClosedPallets] = useState<ClosedPalletSummary[]>([]);
+  const [palletExceptionsOpen, setPalletExceptionsOpen] = useState(false);
+  const [palletMenuOpen, setPalletMenuOpen] = useState(false);
+  const [palletEarlyCloseConfirm, setPalletEarlyCloseConfirm] = useState(false);
+  const [shiftClosePalletConfirm, setShiftClosePalletConfirm] = useState<{
+    boxCount: number;
+  } | null>(null);
+  // Communicates from `confirmShiftClosePallet`/`dismissPalletClose` back to
+  // `performClose`: undefined means no shift-close is waiting on a pallet
+  // resolution; otherwise it carries the reason code to retry with once the
+  // operator has resolved the pallet's own label (or none was ever raised).
+  const pendingShiftCloseReasonRef = useRef<string | null | undefined>(undefined);
+
+  type PalletCloseScreenState = {
+    palletId: string;
+    sscc: string;
+    boxCount: number;
+    closedAt: string;
+    print: PalletPrintState;
+    errorCode: BoxPrintErrorCode | null;
+    pending: boolean;
+  };
+  const [palletClose, setPalletCloseState] = useState<PalletCloseScreenState | null>(null);
+  const palletCloseRef = useRef<PalletCloseScreenState | null>(null);
+  const updatePalletClose = useCallback((next: PalletCloseScreenState | null): void => {
+    palletCloseRef.current = next;
+    setPalletCloseState(next);
+  }, []);
+
+  const reloadPallet = useCallback(async (): Promise<void> => {
+    if (palletBoxCapacity === null || issuerPrefix === null) {
+      setPallet(null);
+      return;
+    }
+    try {
+      const current = await currentPallet(exec, shiftId, terminalId);
+      setPallet(current ? { palletId: current.palletId, boxCount: current.boxCount } : null);
+    } catch (err) {
+      console.error("station: failed to load the current pallet", err);
+    }
+  }, [exec, shiftId, terminalId, palletBoxCapacity, issuerPrefix]);
+
+  const reloadClosedPallets = useCallback(async (): Promise<void> => {
+    if (palletBoxCapacity === null || issuerPrefix === null) {
+      setClosedPallets([]);
+      return;
+    }
+    try {
+      setClosedPallets(await listClosedPallets(exec, shiftId, terminalId));
+    } catch (err) {
+      console.error("station: failed to list closed pallets", err);
+    }
+  }, [exec, shiftId, terminalId, palletBoxCapacity, issuerPrefix]);
+
+  useEffect(() => {
+    void reloadPallet();
+    void reloadClosedPallets();
+  }, [reloadPallet, reloadClosedPallets]);
+
+  // The pallet label's geometry, mirroring `labelSpecRef`/`labelSpecReady`
+  // below for the box template: cleared first so a refreshed bundle that
+  // removes the template never leaves a stale spec live, and resolved to a
+  // no-op when this shift has no pallets so a stray future await never hangs.
+  const palletLabelSpecRef = useRef<LabelTemplateSpec | null>(null);
+  const palletLabelSpecReady = useRef<Promise<void> | null>(null);
+  useEffect(() => {
+    palletLabelSpecRef.current = null;
+    if (palletBoxCapacity === null || issuerPrefix === null) {
+      palletLabelSpecReady.current = Promise.resolve();
+      return;
+    }
+    let cancelled = false;
+    palletLabelSpecReady.current = readShiftMirror(exec, shiftId)
+      .then((row) => {
+        if (cancelled || !row?.palletLabelTemplateSpec) return;
+        try {
+          palletLabelSpecRef.current = JSON.parse(row.palletLabelTemplateSpec) as LabelTemplateSpec;
+        } catch (err) {
+          console.error("station: failed to parse the pallet label template spec", err);
+        }
+      })
+      .catch((err: unknown) => {
+        console.error("station: failed to read the shift mirror for the pallet label spec", err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [exec, shiftId, palletBoxCapacity, issuerPrefix, bundleRevision]);
+
+  function fieldsForClosedPallet(result: {
+    sscc: string;
+    boxCount: number;
+    itemCount: number;
+    closedAt: string;
+  }): Record<string, string> {
+    return palletLabelFields({
+      sscc: result.sscc,
+      boxCount: result.boxCount,
+      itemCount: result.itemCount,
+      productName,
+      productPrintName: productPrintName ?? null,
+      gtin14: expectedGtin14,
+      egaisCode: productEgaisCode ?? null,
+      shelfLifeDays: productShelfLifeDays ?? null,
+      operatorName: null,
+      counterpartyName: counterpartyName ?? null,
+      closedAt: result.closedAt,
+      productionDate: productionDate ?? null,
+      shiftNumber: shiftNumber ?? null,
+    });
+  }
+
+  /** The pallet-label equivalent of `attemptClosedBoxPrint` below, defined here
+   * (rather than there) only because it needs `palletLabelSpecRef`/`Ready`,
+   * declared alongside the rest of this pallet section. */
+  async function attemptClosedPalletPrint(result: {
+    sscc: string;
+    boxCount: number;
+    itemCount: number;
+    closedAt: string;
+  }) {
+    await palletLabelSpecReady.current;
+    const currentPrinting = printingRef.current;
+    return attemptBoxPrint({
+      template: palletLabelSpecRef.current,
+      fields: fieldsForClosedPallet(result),
+      printing: currentPrinting
+        ? {
+            ...currentPrinting,
+            print: (target, bytes) => serializePrint(() => currentPrinting.print(target, bytes)),
+          }
+        : null,
+      render: (template, fields, language, dpi) =>
+        renderLabelBytes(template, fields, language, rasterizeText, { dpi }),
+    });
+  }
+
+  /**
+   * Attempts (or retries) printing the pallet label for `palletId`, and
+   * records the durable outcome exactly the way `attemptRecoveryPrint` does
+   * for a box: `markPalletPrintFailed`/`markPalletPrinted` before the
+   * screen's `print` state ever changes, so a crash mid-attempt is
+   * recovered from `findUnresolvedPalletPrint` on the next mount rather than
+   * silently lost. Only updates `palletClose` when it still names THIS
+   * pallet -- guards the same "a stale async result should not resurrect a
+   * dismissed screen" hazard `updatePrintRecovery` callers already guard.
+   */
+  async function attemptPalletPrintNow(
+    palletId: string,
+    sscc: string,
+    boxCount: number,
+    closedAt: string,
+  ): Promise<void> {
+    let itemCount = 0;
+    try {
+      itemCount = await palletItemCount(exec, palletId);
+    } catch (err) {
+      console.error("station: failed to read the pallet's item count", err);
+    }
+    const attempt = await attemptClosedPalletPrint({ sscc, boxCount, itemCount, closedAt });
+
+    if (attempt.kind === "failed") {
+      try {
+        await markPalletPrintFailed(exec, palletId, attempt.code);
+      } catch {
+        console.error("station: failed to persist pallet print category");
+      }
+      if (palletCloseRef.current?.palletId === palletId) {
+        updatePalletClose({
+          ...palletCloseRef.current,
+          print: "failed",
+          errorCode: attempt.code,
+          pending: false,
+        });
+      }
+      return;
+    }
+
+    try {
+      await markPalletPrinted(exec, palletId);
+    } catch {
+      console.error("station: failed to persist printed pallet label");
+      if (palletCloseRef.current?.palletId === palletId) {
+        updatePalletClose({
+          ...palletCloseRef.current,
+          print: "failed",
+          errorCode: "transport_failed",
+          pending: false,
+        });
+      }
+      return;
+    }
+    if (palletCloseRef.current?.palletId === palletId) {
+      updatePalletClose({
+        ...palletCloseRef.current,
+        print: "printed",
+        errorCode: null,
+        pending: false,
+      });
+    }
+    void reloadClosedPallets();
+  }
+
+  /**
+   * Reacts to a `ClosePalletResult` from either an automatic close (a box
+   * reaching pallet capacity, folded into `closeCurrentBox`) or the manual
+   * early-close overflow action. `empty`/`already-closed` are silent no-ops,
+   * mirroring how `performReservedClose` treats the box's own versions of
+   * those statuses -- nothing this device did actually needs surfacing.
+   * `no-serials` is the one rule the brief is explicit about: text-only, on
+   * the strip, never a block -- boxes and scanning continue unaffected.
+   */
+  async function handlePalletCloseResult(result: ClosePalletResult): Promise<void> {
+    if (result.status === "no-serials") {
+      setPalletNoSerials(true);
+      return;
+    }
+    if (result.status === "empty" || result.status === "already-closed") return;
+    if (result.status === "invalid-serial") {
+      console.error("station: pallet close produced an invalid serial");
+      return;
+    }
+    setPalletNoSerials(false);
+    updatePalletClose({
+      palletId: result.palletId,
+      sscc: result.sscc,
+      boxCount: result.boxCount,
+      closedAt: result.closedAt,
+      print: "printing",
+      errorCode: null,
+      pending: false,
+    });
+    await attemptPalletPrintNow(result.palletId, result.sscc, result.boxCount, result.closedAt);
+  }
+
+  /** Every pallet-close resolution path (continue/confirm-printed/skip) funnels here. */
+  function dismissPalletClose(): void {
+    updatePalletClose(null);
+    void reloadPallet();
+    void reloadClosedPallets();
+    const pendingReason = pendingShiftCloseReasonRef.current;
+    if (pendingReason !== undefined) {
+      pendingShiftCloseReasonRef.current = undefined;
+      void performClose(pendingReason);
+    }
+  }
+
+  function retryPalletPrint(): void {
+    const cur = palletCloseRef.current;
+    if (!cur || cur.pending) return;
+    updatePalletClose({ ...cur, print: "printing", pending: true });
+    void attemptPalletPrintNow(cur.palletId, cur.sscc, cur.boxCount, cur.closedAt).then(() => {
+      // `attemptPalletPrintNow` already clears `pending` via the branch it
+      // takes; this only guards the (unreachable in practice) case where
+      // neither branch matched because the screen moved on in the meantime.
+      if (palletCloseRef.current?.palletId === cur.palletId && palletCloseRef.current.pending) {
+        updatePalletClose({ ...palletCloseRef.current, pending: false });
+      }
+    });
+  }
+
+  function skipPalletPrint(): void {
+    const cur = palletCloseRef.current;
+    if (!cur || cur.pending) return;
+    updatePalletClose({ ...cur, pending: true });
+    void (async () => {
+      try {
+        const won = await markPalletPrintSkipped(exec, cur.palletId, new Date().toISOString());
+        if (won) dismissPalletClose();
+        else updatePalletClose({ ...cur, pending: false });
+      } catch {
+        console.error("station: recording pallet print skip failed");
+        updatePalletClose({ ...cur, pending: false });
+      }
+    })();
+  }
+
+  /** "unknown": the operator states the physical label already exists -- never reprints. */
+  function confirmPalletPrinted(): void {
+    const cur = palletCloseRef.current;
+    if (!cur || cur.pending) return;
+    updatePalletClose({ ...cur, pending: true });
+    void (async () => {
+      try {
+        const won = await markPalletPrintVerified(exec, cur.palletId, new Date().toISOString());
+        if (won) dismissPalletClose();
+        else updatePalletClose({ ...cur, pending: false });
+      } catch {
+        console.error("station: recording pallet print verification failed");
+        updatePalletClose({ ...cur, pending: false });
+      }
+    })();
+  }
+
+  function continuePalletClose(): void {
+    if (palletCloseRef.current?.print === "printed") dismissPalletClose();
+  }
+
+  /** The "Ещё" overflow action: close the current pallet before it reaches capacity. */
+  function enqueueManualPalletClose(): void {
+    if (issuerPrefix === null || palletBoxCapacity === null) return;
+    const capturedIssuerPrefix = issuerPrefix;
+    const capturedPalletBoxCapacity = palletBoxCapacity;
+    const impl =
+      closeCurrentPalletProp ??
+      ((sid: string, opId: string | null) =>
+        closeCurrentPalletLib(
+          {
+            exec,
+            issuerPrefix: capturedIssuerPrefix,
+            palletBoxCapacity: capturedPalletBoxCapacity,
+            terminalId,
+          },
+          sid,
+          opId,
+        ));
+    if (
+      !queue.enqueueJob(async () => {
+        try {
+          const result = await impl(shiftId, operatorId);
+          await handlePalletCloseResult(result);
+        } catch (err) {
+          console.error("station: manual pallet close failed", err);
+        }
+      })
+    ) {
+      console.error("station: manual pallet close was not admitted");
+    }
+  }
+
+  /** The shift-close flow's confirmed continuation: close the open pallet, then retry. */
+  async function confirmShiftClosePallet(): Promise<void> {
+    setShiftClosePalletConfirm(null);
+    if (issuerPrefix === null || palletBoxCapacity === null) {
+      pendingShiftCloseReasonRef.current = undefined;
+      return;
+    }
+    const capturedIssuerPrefix = issuerPrefix;
+    const capturedPalletBoxCapacity = palletBoxCapacity;
+    await new Promise<void>((resolve) => {
+      const accepted = queue.enqueueJob(async () => {
+        try {
+          const impl =
+            closeCurrentPalletProp ??
+            ((sid: string, opId: string | null) =>
+              closeCurrentPalletLib(
+                {
+                  exec,
+                  issuerPrefix: capturedIssuerPrefix,
+                  palletBoxCapacity: capturedPalletBoxCapacity,
+                  terminalId,
+                },
+                sid,
+                opId,
+              ));
+          const result = await impl(shiftId, operatorId);
+          await handlePalletCloseResult(result);
+        } catch (err) {
+          console.error("station: pallet close before shift close failed", err);
+        } finally {
+          resolve();
+        }
+      });
+      if (!accepted) resolve();
+    });
+    // No print screen was raised (empty/already-closed/invalid-serial/
+    // no-serials) -- `dismissPalletClose` will never fire for this pallet,
+    // so nothing else continues the shift close unless this does it now.
+    if (palletCloseRef.current === null) {
+      const reason = pendingShiftCloseReasonRef.current;
+      pendingShiftCloseReasonRef.current = undefined;
+      await performClose(reason);
+    }
+  }
+
+  function handlePalletReprint(palletId: string, reason: string): Promise<void> {
+    const target = closedPallets.find((candidate) => candidate.palletId === palletId);
+    if (!target) return Promise.reject(new Error("closed pallet is no longer available"));
+    return enqueueExceptionJob(async () => {
+      await reprintPallet(exec, {
+        palletId,
+        shiftId,
+        terminalId,
+        operatorId,
+        reason,
+        occurredAt: new Date().toISOString(),
+      });
+      // `target.closedAt` is the pallet's persisted closure timestamp, so a
+      // reprint reproduces the ORIGINAL label's dates, mirroring
+      // `handleReprint`'s own reasoning for a box.
+      const itemCount = await palletItemCount(exec, palletId).catch(() => 0);
+      await attemptClosedPalletPrint({
+        sscc: target.sscc,
+        boxCount: target.boxCount,
+        itemCount,
+        closedAt: target.closedAt,
+      });
+      await reloadClosedPallets();
+      live.current.onScanRecorded?.();
+    });
+  }
+
+  function handlePalletDisassemble(palletId: string, reason: string): Promise<void> {
+    const target = closedPallets.find((candidate) => candidate.palletId === palletId);
+    if (!target) return Promise.reject(new Error("closed pallet is no longer available"));
+    return enqueueExceptionJob(async () => {
+      await disassemblePallet(exec, {
+        palletId,
+        shiftId,
+        terminalId,
+        operatorId,
+        reason,
+        occurredAt: new Date().toISOString(),
+      });
+      await reloadClosedPallets();
+      live.current.onScanRecorded?.();
+    });
+  }
+
   const [noSerials, setNoSerials] = useState(false);
   // The box label's geometry -- a plain ref, not React state, the same shape
   // `keys` (above) already takes: nothing renders off this, and
@@ -572,7 +1039,12 @@ export function WorkScreen({
     closeReasonPicker ||
     closeRequestPending ||
     planReachedPrompt !== null ||
-    noSerials,
+    noSerials ||
+    palletClose ||
+    palletExceptionsOpen ||
+    palletMenuOpen ||
+    palletEarlyCloseConfirm ||
+    shiftClosePalletConfirm,
   );
 
   async function pauseProductLabels() {
@@ -599,6 +1071,24 @@ export function WorkScreen({
 
   async function performClose(reasonCode?: string | null): Promise<void> {
     if (!onCloseShift || closeRequestRef.current) return;
+    // A pallet still open with boxes on it must be closed (and its label
+    // resolved) before the shift itself does -- otherwise those boxes'
+    // pallet membership is never printed or reported. Checked BEFORE any of
+    // `closeRequestPending`/`onCloseShift` below, so confirming this prompt
+    // is the only thing that can start the actual shift-close request.
+    if (palletBoxCapacity !== null && issuerPrefix !== null) {
+      let openPallet: { boxCount: number } | null = null;
+      try {
+        openPallet = await currentPallet(exec, shiftId, terminalId);
+      } catch (err) {
+        console.error("station: failed to check for an open pallet before closing the shift", err);
+      }
+      if (openPallet && openPallet.boxCount > 0) {
+        pendingShiftCloseReasonRef.current = reasonCode ?? null;
+        setShiftClosePalletConfirm({ boxCount: openPallet.boxCount });
+        return;
+      }
+    }
     closeRequestRef.current = true;
     ordinaryScanBlockedRef.current = true;
     setCloseRequestPending(true);
@@ -811,6 +1301,38 @@ export function WorkScreen({
     updatePrintRecovery,
     verifyPrintedLabel,
   ]);
+
+  // Restores an unresolved pallet print left over from a restart -- the
+  // pallet equivalent of the box print-recovery hydration above. A `pending`
+  // row with a recorded error category becomes `failed` (retryable); one
+  // with none becomes `unknown` (an interruption mid-print this device
+  // cannot resolve on its own) -- and per the brief's rule, `unknown` NEVER
+  // triggers another print by itself. A `printed` row needs no screen at
+  // all: unlike boxes, pallets have no scan-back verification toggle, so a
+  // print this device already recorded as successful is simply done.
+  useEffect(() => {
+    if (palletBoxCapacity === null || issuerPrefix === null) return;
+    let cancelled = false;
+    void findUnresolvedPalletPrint(exec, shiftId, terminalId)
+      .then((unresolved) => {
+        if (cancelled || !unresolved || unresolved.state === "printed") return;
+        updatePalletClose({
+          palletId: unresolved.palletId,
+          sscc: unresolved.sscc,
+          boxCount: unresolved.boxCount,
+          closedAt: unresolved.closedAt,
+          print: unresolved.errorCode !== null ? "failed" : "unknown",
+          errorCode: unresolved.errorCode,
+          pending: false,
+        });
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) console.error("station: failed to restore pallet print recovery", err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [exec, shiftId, terminalId, palletBoxCapacity, issuerPrefix, updatePalletClose]);
 
   // Loads this shift's current open box, or opens a fresh one when this
   // device can aggregate (`issuerPrefix` present) but none is open yet --
@@ -1045,12 +1567,10 @@ export function WorkScreen({
         closeCurrentBoxProp ??
         ((sid: string, operatorId: string | null) =>
           closeCurrentBoxLib(
-            // Pallets (slice 06d) are not wired into this screen yet -- a
-            // later task threads the shift's own `palletBoxCapacity`
-            // through and consumes `result.pallet` to print its label.
-            // Passing null here keeps this call site's behaviour exactly
-            // what it was before `CloseBoxDeps` grew these fields.
-            { exec, issuerPrefix: reservedIssuerPrefix, palletBoxCapacity: null, terminalId },
+            // A non-null `palletBoxCapacity` is what actually turns pallets
+            // on (see `CloseBoxDeps`'s own doc comment) -- this is the one
+            // call site that makes a shift build pallets at all.
+            { exec, issuerPrefix: reservedIssuerPrefix, palletBoxCapacity, terminalId },
             sid,
             operatorId,
           ));
@@ -1099,6 +1619,7 @@ export function WorkScreen({
       updateBox(null);
       setBoxNumber(null);
       void reloadClosedBoxes();
+      void reloadPallet();
       await attemptRecoveryPrint({
         boxId: closingBoxId,
         sscc: result.sscc,
@@ -1108,6 +1629,11 @@ export function WorkScreen({
         errorCode: "transport_failed",
         pending: false,
       });
+      // This box brought its pallet to capacity (or tried to): print the
+      // pallet's own label. Independent of whether the BOX's own label just
+      // printed cleanly -- a pallet close is never skipped because its last
+      // box's label had trouble, and vice versa.
+      if (result.pallet) await handlePalletCloseResult(result.pallet);
     } finally {
       releaseClose();
     }
@@ -1519,13 +2045,25 @@ export function WorkScreen({
   // rejection from the loop underneath it.
   useEffect(() => {
     if (showExceptions && productLabelsRef.current.work) return source.start(() => {});
-    if (verification || confirmClear || boxActionPending || showExceptions) return;
-    // Keep the physical source subscribed while serial recovery owns the
-    // screen, but deliberately discard its payloads. A keyboard-wedge source
-    // must still preventDefault() on its terminating Enter; unsubscribing it
-    // would let that Enter activate the dialog's focused recovery button and
-    // dismiss a blocking state without an intentional operator action.
-    if (printRecovery || noSerials) return source.start(() => {});
+    if (
+      verification ||
+      confirmClear ||
+      boxActionPending ||
+      showExceptions ||
+      palletExceptionsOpen ||
+      palletMenuOpen ||
+      palletEarlyCloseConfirm ||
+      shiftClosePalletConfirm
+    ) {
+      return;
+    }
+    // Keep the physical source subscribed while serial recovery -- or the
+    // pallet close/print screen -- owns the screen, but deliberately discard
+    // its payloads. A keyboard-wedge source must still preventDefault() on
+    // its terminating Enter; unsubscribing it would let that Enter activate
+    // the dialog's focused button and dismiss a blocking state without an
+    // intentional operator action.
+    if (printRecovery || noSerials || palletClose) return source.start(() => {});
     let sourceActive = true;
     const stop = source.start((raw) => {
       if (!sourceActive) return;
@@ -1568,6 +2106,11 @@ export function WorkScreen({
     confirmClear,
     boxActionPending,
     showExceptions,
+    palletClose,
+    palletExceptionsOpen,
+    palletMenuOpen,
+    palletEarlyCloseConfirm,
+    shiftClosePalletConfirm,
   ]);
 
   const printBlocked =
@@ -1674,7 +2217,15 @@ export function WorkScreen({
   return (
     <main className="work-screen" aria-label={productName}>
       <div className="work-screen__content">
-        {showExceptions && productLabels.work ? (
+        {palletExceptionsOpen ? (
+          <PalletExceptions
+            pallets={closedPallets}
+            onReprint={handlePalletReprint}
+            onDisassemble={handlePalletDisassemble}
+            onBack={() => setPalletExceptionsOpen(false)}
+            onPendingChange={setBoxActionPending}
+          />
+        ) : showExceptions && productLabels.work ? (
           <ProductLabelHistory work={productLabels.work} onBack={() => setShowExceptions(false)} />
         ) : showExceptions ? (
           <ExceptionFlow
@@ -1689,6 +2240,14 @@ export function WorkScreen({
             onPendingChange={setBoxActionPending}
             scanSource={source}
             windowControl={exceptionWindowControl}
+            {...(palletBoxCapacity !== null
+              ? {
+                  onPalletExceptions: () => {
+                    setShowExceptions(false);
+                    setPalletExceptionsOpen(true);
+                  },
+                }
+              : {})}
           />
         ) : (
           <div className="work-screen__instruments">
@@ -1741,6 +2300,13 @@ export function WorkScreen({
                   onClear={() => setConfirmClear(true)}
                 />
               ) : null}
+              {palletBoxCapacity !== null && issuerPrefix !== null ? (
+                <PalletStrip
+                  boxCount={pallet?.boxCount ?? 0}
+                  capacity={palletBoxCapacity}
+                  serials={palletNoSerials ? "empty" : "available"}
+                />
+              ) : null}
             </div>
             <aside className="work-screen__secondary" aria-label={workLabels.summary}>
               <WorkCounters
@@ -1767,6 +2333,9 @@ export function WorkScreen({
         onPause={requestExit}
         onClose={() => void requestClose()}
         closeDisabled={closeRequestPending || productLabelsBlocked}
+        {...(palletBoxCapacity !== null && issuerPrefix !== null
+          ? { onMore: () => setPalletMenuOpen(true) }
+          : {})}
       />
 
       {productLabels.work && productLabelsBlocked && !showExceptions ? (
@@ -1867,6 +2436,79 @@ export function WorkScreen({
           <Alert tone="error" title={t("work.closeFailed")}>
             <p>{closeError}</p>
             <Button size="floor" onClick={() => setCloseError(null)}>
+              {t("work.stay")}
+            </Button>
+          </Alert>
+        ) : null}
+        {palletMenuOpen ? (
+          <Alert tone="info" title={t("work.more")} style={{ position: "relative", zIndex: 1 }}>
+            <Button
+              size="floor"
+              onClick={() => {
+                setPalletMenuOpen(false);
+                setPalletEarlyCloseConfirm(true);
+              }}
+            >
+              {t("pallet.earlyClose")}
+            </Button>
+            <Button size="floor" variant="secondary" onClick={() => setPalletMenuOpen(false)}>
+              {t("work.stay")}
+            </Button>
+          </Alert>
+        ) : null}
+        {palletEarlyCloseConfirm ? (
+          <Alert
+            tone="warn"
+            title={t("pallet.earlyClose")}
+            style={{ position: "relative", zIndex: 1 }}
+          >
+            <p>
+              {t("pallet.earlyCloseDetail", {
+                count: pallet?.boxCount ?? 0,
+                capacity: palletBoxCapacity ?? 0,
+              })}
+            </p>
+            <Button
+              size="floor"
+              onClick={() => {
+                setPalletEarlyCloseConfirm(false);
+                enqueueManualPalletClose();
+              }}
+            >
+              {t("box.confirmAction")}
+            </Button>
+            <Button
+              size="floor"
+              variant="secondary"
+              onClick={() => setPalletEarlyCloseConfirm(false)}
+            >
+              {t("work.stay")}
+            </Button>
+          </Alert>
+        ) : null}
+        {shiftClosePalletConfirm ? (
+          <Alert
+            tone="warn"
+            title={t("work.closeShift")}
+            style={{ position: "relative", zIndex: 1 }}
+          >
+            <p>
+              {t("work.palletOpenAtClose", {
+                count: shiftClosePalletConfirm.boxCount,
+                capacity: palletBoxCapacity ?? 0,
+              })}
+            </p>
+            <Button size="floor" onClick={() => void confirmShiftClosePallet()}>
+              {t("work.palletOpenAtCloseConfirm")}
+            </Button>
+            <Button
+              size="floor"
+              variant="secondary"
+              onClick={() => {
+                pendingShiftCloseReasonRef.current = undefined;
+                setShiftClosePalletConfirm(null);
+              }}
+            >
               {t("work.stay")}
             </Button>
           </Alert>
@@ -1976,6 +2618,21 @@ export function WorkScreen({
             });
           }}
           scanSource={source}
+        />
+      ) : null}
+
+      {palletClose ? (
+        <PalletClose
+          result={{ status: "closed", sscc: palletClose.sscc, boxCount: palletClose.boxCount }}
+          print={palletClose.print}
+          errorCode={palletClose.errorCode}
+          pending={palletClose.pending}
+          onRetry={retryPalletPrint}
+          onSetup={() => onOpenPrinterSetup?.()}
+          onSkip={skipPalletPrint}
+          onConfirmPrinted={confirmPalletPrinted}
+          onReprint={retryPalletPrint}
+          onContinue={continuePalletClose}
         />
       ) : null}
     </main>

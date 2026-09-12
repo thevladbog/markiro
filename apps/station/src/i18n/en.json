@@ -522,7 +522,10 @@
       "production_order_changed": "Production order changed",
       "planned_quantity_error": "Planned quantity error",
       "other_production_deviation": "Other production deviation"
-    }
+    },
+    "more": "More",
+    "palletOpenAtClose": "The pallet has {{count}} of {{capacity}} boxes — close it?",
+    "palletOpenAtCloseConfirm": "Close pallet and shift"
   },
   "setup": {
     "title": "Workstation setup",
@@ -723,6 +726,41 @@
     "hiddenByFilter_many": "{{count}} more boxes are hidden by the filter — erase the digits to see all",
     "hiddenByFilter_other": "{{count}} more boxes are hidden by the filter — erase the digits to see all",
     "noTailMatches": "No boxes end with those digits"
+  },
+  "pallet": {
+    "title": "Pallet",
+    "progress": "{{boxes}} / {{capacity}} boxes",
+    "noSerials": "no pallet serials left",
+    "closed": "Pallet closed",
+    "sscc": "Pallet SSCC",
+    "boxCount": "Boxes on pallet: {{count}}",
+    "printing": "Printing the pallet label…",
+    "printed": "Label printed",
+    "printUnknown": "Unknown whether the label printed",
+    "retry": "Retry printing",
+    "confirmPrinted": "The label already printed",
+    "reprint": "Print again",
+    "earlyClose": "Close pallet early",
+    "earlyCloseDetail": "The pallet has {{count}} of {{capacity}} boxes",
+    "reprintAction": "Reprint pallet",
+    "disassembleAction": "Disassemble pallet",
+    "exceptionsAction": "Pallet actions",
+    "selectTarget": "Select a closed pallet",
+    "noPallets": "There are no closed pallets right now.",
+    "disassembleIrreversibleTitle": "Disassemble the pallet permanently?",
+    "reasons": {
+      "disassemble": {
+        "damagedPallet": "Pallet damaged",
+        "wrongBoxes": "Wrong boxes on pallet",
+        "qualityRejected": "Rejected by quality control"
+      },
+      "reprint": {
+        "damagedLabel": "Label damaged",
+        "unreadableLabel": "Label unreadable",
+        "printerJam": "Printer jam / no output",
+        "qualityRequest": "Quality control request"
+      }
+    }
   },
   "productLabels": {
     "title": "Data Matrix duplicate",
