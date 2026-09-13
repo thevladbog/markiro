@@ -19,20 +19,27 @@ class ScanRouterAdapter(override val events: Flow<ScanEvent>) : ScanEvents
 /**
  * One trigger pull is one scan, however many sources saw it.
  *
- * Several profiles can be registered on one action, a terminal can be left in
- * both intent and wedge mode, and a service can send the same code under two
- * keys. None of that is a second unit, and a second unit is exactly what the
- * work screen would report it as. The window is anchored on the last ACCEPTED
- * scan, so a held trigger cannot be suppressed indefinitely.
+ * A terminal can be left in both intent and wedge mode, and a custom profile can
+ * name an action a built-in one already covers. Neither is a second unit, and a
+ * second unit is exactly what the work screen would report it as. Each code's
+ * window is anchored on the last time that code was ACCEPTED, so a held trigger
+ * cannot be suppressed indefinitely.
  */
-class ScanDedup(private val windowMs: Long = 200) {
-    private var lastRaw: String? = null
-    private var lastAt = Long.MIN_VALUE
+class ScanDedup(private val windowMs: Long = 200, private val capacity: Int = 32) {
+    /** Its own window per code: a single «last code» let A, B, A admit the repeat of A. */
+    private val acceptedAt = LinkedHashMap<String, Long>()
 
     fun accept(event: ScanEvent): Boolean {
-        if (event.raw == lastRaw && event.at - lastAt in 0 until windowMs) return false
-        lastRaw = event.raw
-        lastAt = event.at
+        val accepted = acceptedAt[event.raw]
+        if (accepted != null && event.at - accepted in 0 until windowMs) return false
+        // Anything outside the window can never suppress again, and a shift is
+        // thousands of scans: prune before inserting rather than grow with it.
+        // A clock that steps backwards leaves a negative age, which is outside
+        // the window too -- it drops the entry instead of swallowing real work.
+        acceptedAt.entries.removeAll { event.at - it.value !in 0 until windowMs }
+        acceptedAt.remove(event.raw)
+        acceptedAt[event.raw] = event.at
+        while (acceptedAt.size > capacity) acceptedAt.remove(acceptedAt.keys.first())
         return true
     }
 }
@@ -74,8 +81,16 @@ class ScanRouter(private val context: Context, private val preferences: ScanPref
             // cost a registration and nothing else -- and «which vendor made the
             // terminal in your hand» is a question the app can answer itself
             // instead of asking an operator on a factory floor.
-            for (profile in VendorProfiles.ALL + listOfNotNull(preferences.customProfile())) {
-                sources += IntentScanSource(context, profile) { reports.value = it }
+            //
+            // Grouped by the action they listen on, and by the category that
+            // action is filtered with: two receivers on one action would race to
+            // write the diagnostic report, and the profile that could not read
+            // the broadcast could win. A profile an operator typed goes first,
+            // because a value entered at the terminal beats one guessed from a
+            // table.
+            val profiles = listOfNotNull(preferences.customProfile()) + VendorProfiles.ALL
+            for ((_, group) in profiles.groupBy { it.action to it.category }) {
+                sources += IntentScanSource(context, group) { reports.value = it }
             }
         }
         if (BuildConfig.DEBUG_SCAN_SOURCE) sources += DebugScanSource(context)

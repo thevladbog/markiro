@@ -55,4 +55,39 @@ class ScanDedupTest {
         assertTrue(dedup.accept(scan("40318827", 5_000)))
         assertTrue(dedup.accept(scan("40318827", 4_000)))
     }
+
+    /**
+     * Each code owns its window. With a single «last code» a different code
+     * arriving between the two copies reset the comparison, and the second copy
+     * was admitted -- one trigger pull reported as two units, which is exactly
+     * what this class exists to prevent.
+     */
+    @Test
+    fun anotherCodeInBetweenDoesNotRevealTheRepeat() {
+        val dedup = ScanDedup()
+        assertTrue(dedup.accept(scan("A", 1_000)))
+        assertTrue(dedup.accept(scan("B", 1_050)))
+        assertFalse(dedup.accept(scan("A", 1_100)))
+        assertFalse(dedup.accept(scan("B", 1_120)))
+    }
+
+    /** Both codes leave their windows on their own schedule, not the other's. */
+    @Test
+    fun eachCodeLeavesItsOwnWindow() {
+        val dedup = ScanDedup()
+        assertTrue(dedup.accept(scan("A", 1_000)))
+        assertTrue(dedup.accept(scan("B", 1_150)))
+        assertTrue(dedup.accept(scan("A", 1_200)))
+        assertFalse(dedup.accept(scan("B", 1_300)))
+    }
+
+    /** A shift is thousands of scans; nothing here may grow with it or start refusing them. */
+    @Test
+    fun aLongRunOfDistinctCodesIsAdmittedInFull() {
+        val dedup = ScanDedup()
+        val codes = (0 until 5_000).map { "0104680089900383215Q$it" }
+        assertTrue(codes.withIndex().all { (index, code) -> dedup.accept(scan(code, 1_000L + index)) })
+        // And the window still holds for the code that just went through.
+        assertFalse(dedup.accept(scan(codes.last(), 1_000L + codes.size)))
+    }
 }

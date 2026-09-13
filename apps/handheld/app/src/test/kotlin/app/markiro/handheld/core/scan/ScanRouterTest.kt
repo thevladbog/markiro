@@ -98,6 +98,30 @@ class ScanRouterTest {
         assertEquals("intent:honeywell", scanned.await().source)
     }
 
+    /**
+     * Honeywell and Zebra share the app's own action. As one receiver each they
+     * raced to write the report, and Zebra -- which cannot read Honeywell's
+     * extras -- could land last, telling the operator the key was unrecognised
+     * about a scan that had just gone through.
+     */
+    @Test
+    fun aProfileThatCannotReadTheBroadcastDoesNotOverwriteTheOneThatCan() = runTest {
+        val router = router(ScanSourceKind.BUILTIN_INTENT)
+        assertEquals(VendorProfiles.HONEYWELL.action, VendorProfiles.ZEBRA.action)
+        broadcast(VendorProfiles.HONEYWELL.action) { putExtra("data", "40318827") }
+        assertEquals("honeywell", router.lastIntent.value?.profileId)
+    }
+
+    @Test
+    fun theOtherProfileOnTheSharedActionIsReadToo() = runTest {
+        val router = router(ScanSourceKind.BUILTIN_INTENT)
+        val scanned = async { router.events.first() }
+        yield()
+        broadcast(VendorProfiles.ZEBRA.action) { putExtra("com.symbol.datawedge.data_string", "40318827") }
+        assertEquals("intent:zebra", scanned.await().source)
+        assertEquals("zebra", router.lastIntent.value?.profileId)
+    }
+
     /** Filled in by an operator from the diagnostics below, and live without a release. */
     @Test
     fun aCustomProfileIsRegisteredToo() = runTest {
