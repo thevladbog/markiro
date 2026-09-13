@@ -180,6 +180,12 @@ All four variables absent or blank leave normal API startup available:
 Any partial or inconsistent configuration fails startup validation. No private
 key or production offline policy is seeded by this change.
 
+The Yandex runtime inventory requires every key in `.env.production.example` to
+exist in Lockbox. Before deploying this version, add all four entries to the
+runtime secret; keep their values empty until signing is configured as a complete
+set. Missing entries fail inventory validation even though empty values preserve
+normal API startup.
+
 `OFFLINE_GRANT_ORIGIN` is the server-configured canonical HTTP(S) origin, never a
 body override. The private key must be EC P-256 and match the active `kid` and
 public JWK `x`/`y` in the configured keyset. The keyset format is
