@@ -138,6 +138,22 @@ class DuplicateScreensTest {
     }
 
     /**
+     * The verification screen fills the display with the warn solid, and accent
+     * text on amber is the one combination it cannot draw: green on orange is
+     * unreadable on a terminal held at arm's length. Every action offered here
+     * draws its own surface, exactly like the buttons above and below it.
+     */
+    @Test
+    fun everyActionOnTheAmberFieldIsAButton() {
+        show(DuplicateStep.Awaiting("j1", "…ABC123"))
+        compose.onNodeWithText("Проблема с этикеткой").performClick()
+        val other = compose.onNodeWithText("Другой принтер").fetchSemanticsNode().size
+        val neighbour = compose.onNodeWithText("Вернуться к сканированию").fetchSemanticsNode().size
+        assertEquals(neighbour.height, other.height)
+        assertEquals(neighbour.width, other.width)
+    }
+
+    /**
      * A refusal before any job exists has nothing to retry or reprint; offering
      * either gave the operator buttons that silently did nothing.
      */

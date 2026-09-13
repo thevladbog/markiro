@@ -56,7 +56,11 @@ class AppShellViewModel(
                         session.state.value.operator != null && !session.state.value.locked -> StartDestination.HUB
                         else -> StartDestination.SIGN_IN
                     }
-                } else if (!active) _events.emit(ShellEvent.Revoked)
+                    // RESTORING is a credential being published, not one being taken away.
+                    // Every pairing passes through it on its way to ACTIVE, and emitting
+                    // here sent the operator back to the pairing screen the moment pairing
+                    // succeeded -- recoverable only by restarting the app.
+                } else if (!active && current.phase != RecoveryPhase.RESTORING) _events.emit(ShellEvent.Revoked)
             }
         }
         viewModelScope.launch {
