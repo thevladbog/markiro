@@ -15,7 +15,7 @@ import { useTranslation } from "react-i18next";
 import { Link, useParams } from "react-router";
 
 import { formatSsccHri } from "@markiro/domain";
-import { Alert, Badge, Card, PageHeader, Spinner, StatusChip, Table } from "@markiro/ui";
+import { Alert, Badge, Button, Card, PageHeader, Spinner, StatusChip, Table } from "@markiro/ui";
 import type { StatusChipStatus, TableColumn } from "@markiro/ui";
 
 import { formatCreatedAt } from "../../lib/datetime.js";
@@ -111,10 +111,24 @@ export function PalletCardPage() {
       <PageHeader
         title={title}
         actions={
-          <StatusChip
-            status={STATUS_TO_CHIP[pallet.status]}
-            label={t(`pages.codeSearch.palletCard.status.${pallet.status}`)}
-          />
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                const query = new URLSearchParams({
+                  timeZone: new Intl.DateTimeFormat().resolvedOptions().timeZone,
+                });
+                window.open(`/api/code-search/pallets/${pallet.id}/report?${query}`);
+              }}
+            >
+              {t("pages.codeSearch.palletCard.printAction")}
+            </Button>
+            <StatusChip
+              status={STATUS_TO_CHIP[pallet.status]}
+              label={t(`pages.codeSearch.palletCard.status.${pallet.status}`)}
+            />
+          </div>
         }
       />
 

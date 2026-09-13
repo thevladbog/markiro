@@ -291,6 +291,31 @@ describe.skipIf(!ready)("disaggregation pallets e2e", () => {
     expect(doc.lines[0]!.codeCount).toBe(35);
   });
 
+  /**
+   * The act used to resolve contents only through `boxId`, so a pallet line
+   * printed an empty contents block under a correct unit count — and nothing
+   * exercised the printed act for a pallet document at all.
+   */
+  it("prints the pallet's member boxes on the act, not an empty contents block", async () => {
+    const { palletSscc } = await createClosedPallet(20, 15);
+    const doc = await createDocument({ lines: [ai00(palletSscc)] });
+    await applyDocument(doc);
+
+    const res = await agent
+      .get(`/disaggregation/${doc.id}/report`)
+      .query({ variant: "full" })
+      .expect(200)
+      .expect("Content-Type", /text\/html/);
+
+    // Two member boxes underneath the pallet line, with their own counts.
+    expect(res.text.match(/<tr class="rep-code-row">/g)?.length).toBe(2);
+    expect(res.text).toContain(">20<");
+    expect(res.text).toContain(">15<");
+    expect(res.text).not.toContain("Содержимое упаковки недоступно");
+    // The footnote may not call a pallet a box.
+    expect(res.text).not.toContain("SSCC расформированного короба");
+  });
+
   it("refuses a pallet that is already disassembled", async () => {
     const { palletSscc } = await createClosedPallet();
     await applyDocument(await createDocument({ lines: [ai00(palletSscc)] }));

@@ -2692,6 +2692,7 @@
       },
       "palletCard": {
         "noSscc": "No SSCC",
+        "printAction": "Print",
         "status": {
           "open": "Open",
           "closed": "Closed",

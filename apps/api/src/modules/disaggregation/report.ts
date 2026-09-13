@@ -8,15 +8,34 @@ export interface DisaggregationReportCode {
   rawKm: string;
 }
 
-/** One box (= one document line with a parseable SSCC) on the printed report. */
+/** One member box of a disaggregated PALLET, as a contents row. */
+export interface DisaggregationReportBox {
+  /** 20-character machine form `00…`, or null for a box closed without one. */
+  sscc: string | null;
+  /** Live unit codes inside that box. */
+  codeCount: number;
+}
+
+/**
+ * One document line with a parseable SSCC on the printed report — a box or a
+ * pallet.
+ *
+ * Its contents differ by what the line IS, which is why they are two fields
+ * rather than one: taking a box apart releases unit CODES, while taking a
+ * pallet apart takes BOXES off a stack without opening any of them (see
+ * `applyPalletExceptions`). A pallet line used to carry neither, so it
+ * printed with an empty contents block under a correct unit count.
+ */
 export interface DisaggregationReportLine {
   n: number;
   /** 20-character machine form `00…` — fed to Code128 and to `formatHri` below. */
   sscc: string;
   productName: string | null;
   codeCount: number;
-  /** Populated only when `includeContents` is true. */
+  /** A box line's unit codes. Populated only when `includeContents` is true. */
   codes: DisaggregationReportCode[];
+  /** A pallet line's member boxes. Populated only when `includeContents` is true. */
+  boxes: DisaggregationReportBox[];
 }
 
 /**
@@ -256,7 +275,7 @@ function finalBlocks(data: DisaggregationReportData): string {
     <div class="rep-operation">
       <span class="rep-meta-label">Результат операции</span>
       <span>Перечисленные короба расформированы: агрегация упаковок аннулирована, коды содержимого возвращены в статус свободных единиц.</span>
-      <span class="rep-operation-note">SSCC расформированного короба повторно не используется. Изменения агрегации передаются в ГИС МТ автоматически.</span>
+      <span class="rep-operation-note">SSCC расформированной упаковки повторно не используется. Изменения агрегации передаются в ГИС МТ автоматически.</span>
     </div>
     <div class="rep-signatures">
       <div class="rep-signature">
@@ -327,20 +346,49 @@ function boxesUnits(data: DisaggregationReportData): ReportUnit[] {
   }));
 }
 
+function memberBoxRow(box: DisaggregationReportBox, isLast: boolean): string {
+  const label = box.sscc ? ssccHri(box.sscc) : "Без SSCC";
+  return `
+      <tr class="rep-code-row">
+        <td></td>
+        <td class="mono rep-km-label"><span class="rep-tree">${isLast ? "└" : "├"}</span>${escapeHtml(label)}</td>
+        <td></td>
+        <td class="mono rep-count">${box.codeCount}</td>
+        <td>${box.sscc ? `<span class="sscc-box">${ssccBarcode(box.sscc)}</span>` : ""}</td>
+      </tr>`;
+}
+
+function emptyContentsRow(text: string): ReportUnit {
+  return {
+    kind: "row",
+    heightMm: EMPTY_NOTE_MM,
+    html: `
+      <tr class="rep-code-row rep-code-row--empty">
+        <td></td>
+        <td class="rep-km-label" colspan="4"><span class="rep-tree">└</span>${escapeHtml(text)}</td>
+      </tr>`,
+  };
+}
+
 function contentsUnits(data: DisaggregationReportData): ReportUnit[] {
   const units: ReportUnit[] = [];
   for (const line of data.lines) {
     units.push({ kind: "band", heightMm: BOX_ROW_MM, html: boxRow(line) });
-    if (line.codes.length === 0) {
-      units.push({
-        kind: "row",
-        heightMm: EMPTY_NOTE_MM,
-        html: `
-      <tr class="rep-code-row rep-code-row--empty">
-        <td></td>
-        <td class="rep-km-label" colspan="4"><span class="rep-tree">└</span>Содержимое короба недоступно</td>
-      </tr>`,
+    // A pallet line lists the boxes it carried; a box line lists its codes.
+    // `boxes` is only ever non-empty for a pallet, so this needs no extra
+    // discriminator on the line.
+    if (line.boxes.length > 0) {
+      line.boxes.forEach((box, index) => {
+        units.push({
+          kind: "row",
+          heightMm: CODE_ROW_MM,
+          html: memberBoxRow(box, index === line.boxes.length - 1),
+        });
       });
+      continue;
+    }
+    if (line.codes.length === 0) {
+      units.push(emptyContentsRow("Содержимое упаковки недоступно"));
       continue;
     }
     line.codes.forEach((code, index) => {

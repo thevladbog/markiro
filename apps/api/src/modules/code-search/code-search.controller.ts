@@ -54,6 +54,7 @@ import {
 } from "./dto";
 import { CodeSearchService } from "./code-search.service";
 import { renderBoxReportHtml } from "./box-report";
+import { renderPalletReportHtml } from "./pallet-report";
 
 /**
  * Manager-only, entirely read-only module: classify a scanned/typed input
@@ -246,5 +247,35 @@ export class CodeSearchController {
     const data = await this.codeSearchService.boxReportData(req.tenantId!, boxId);
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     return renderBoxReportHtml(data, query.timeZone);
+  }
+
+  /**
+   * Print-ready A4 "Состав паллеты": the pallet row (SSCC + Code128) with each
+   * member box indented underneath (its own SSCC + Code128 and unit count).
+   * One level shallower than the box form — a pallet holds boxes, and printing
+   * every unit under every box would run to hundreds of symbols.
+   */
+  @Get("pallets/:palletId/report")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiOperation({
+    summary: "Render the pallet contents report",
+    description:
+      'Print-ready A4 HTML ("Состав паллеты") for opening in a new tab: the pallet row (SSCC + Code128) with each member box indented underneath. A box taken off the pallet is listed with the time it was removed and does not count towards the totals.',
+  })
+  @ApiParam({ name: "palletId", schema: { type: "string", format: "uuid" } })
+  @ApiProduces("text/html")
+  @ApiZodQuery(boxReportQuerySchema)
+  @ApiZodValidationError()
+  @ApiOkResponse({ schema: { type: "string" }, description: "Print-ready HTML document." })
+  @ApiHttpErrors(401, 403, 404)
+  async palletReport(
+    @Req() req: RequestWithTenant,
+    @Param("palletId", new ParseUUIDPipe()) palletId: string,
+    @Res({ passthrough: true }) res: Response,
+    @Query(new ZodValidationPipe(boxReportQuerySchema)) query: BoxReportQueryDto,
+  ): Promise<string> {
+    const data = await this.codeSearchService.palletReportData(req.tenantId!, palletId);
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    return renderPalletReportHtml(data, query.timeZone);
   }
 }

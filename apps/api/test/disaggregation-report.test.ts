@@ -28,6 +28,22 @@ function line(n: number, codeCount: number): DisaggregationReportLine {
       serial: `BOX${n}SER${index + 1}`,
       rawKm: `01${GTIN}21BOX${n}SER${index + 1}${GS}93Abcd`,
     })),
+    boxes: [],
+  };
+}
+
+/** A PALLET line: its contents are member boxes, never unit codes. */
+function palletLine(n: number, boxCount: number, perBox = 12): DisaggregationReportLine {
+  return {
+    n,
+    sscc: `0014600703496710${String(n).padStart(4, "0")}`,
+    productName: `Жигулёвское светлое 0,5 л (паллета ${n})`,
+    codeCount: boxCount * perBox,
+    codes: [],
+    boxes: Array.from({ length: boxCount }, (_, index) => ({
+      sscc: `0014600703496700${String(index + 1).padStart(4, "0")}`,
+      codeCount: perBox,
+    })),
   };
 }
 
@@ -186,5 +202,48 @@ describe("renderDisaggregationReportHtml", () => {
     );
     expect(fallbackHtml).not.toContain("javascript:alert(1)");
     expect(fallbackHtml).toContain('data-brand-logo="markiro"');
+  });
+});
+
+/**
+ * A pallet line's contents are the boxes it carried. Before this it carried
+ * neither codes nor boxes, so the act printed an empty contents block beneath
+ * a correct unit count — the reader could not tell an empty pallet from one
+ * the report simply could not describe.
+ */
+describe("pallet lines in the act", () => {
+  it("lists member boxes under a pallet line, with their own counts and barcodes", () => {
+    const html = renderDisaggregationReportHtml(
+      fixture({ includeContents: true, lines: [palletLine(1, 3)] }),
+    );
+    expect(html).toContain("(00)146007034967100001");
+    for (const index of [1, 2, 3]) {
+      expect(html).toContain(`(00)14600703496700000${index}`);
+    }
+    // Never the "contents unavailable" fallback, and never a unit-code row.
+    expect(html).not.toContain("Содержимое упаковки недоступно");
+    expect(html).not.toContain("01 04600682000013 21 ");
+    // Three member rows, the last one closing the tree. Counted on the row
+    // markup rather than the class name, which also appears in the stylesheet.
+    expect(html.match(/<tr class="rep-code-row">/g)?.length).toBe(3);
+    expect(html).toContain("└");
+  });
+
+  it("keeps the act's wording neutral between a box and a pallet", () => {
+    const html = renderDisaggregationReportHtml(
+      fixture({ includeContents: true, lines: [palletLine(1, 2)] }),
+    );
+    // The footnote is printed on every act, so it may not claim the subject
+    // was a box: this document disaggregated a pallet.
+    expect(html).toContain("SSCC расформированной упаковки повторно не используется");
+    expect(html).not.toContain("SSCC расформированного короба");
+  });
+
+  it("still renders unit codes for a box line beside a pallet one", () => {
+    const html = renderDisaggregationReportHtml(
+      fixture({ includeContents: true, lines: [line(1, 2), palletLine(2, 1)] }),
+    );
+    expect(html).toContain("01 04600682000013 21 BOX1SER1");
+    expect(html).toContain("(00)146007034967000001");
   });
 });

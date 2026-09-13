@@ -6,6 +6,7 @@ import { DB } from "../../auth/auth.module";
 import { upperBoundCondition } from "../../lib/date-range";
 import { classifySearchInput } from "./input-classifier";
 import type { BoxReportData } from "./box-report";
+import type { PalletReportData } from "./pallet-report";
 import type {
   BoxCardDto,
   ClassifySearchResponseDto,
@@ -1154,6 +1155,111 @@ export class CodeSearchService {
       closedAt: box.closedAt,
       disassembledAt: box.disassembledAt,
       codes: codeRows,
+    };
+  }
+
+  /**
+   * The printed "Состав паллеты" form's data: the pallet, its member boxes and
+   * each box's live unit count.
+   *
+   * One level shallower than [boxReportData] on purpose — a pallet holds
+   * boxes, so this counts each box's codes rather than listing them. The
+   * per-box count reuses that method's `box_items` predicate exactly (not a
+   * `code_registry` join, and honouring `displacedAt`/`removedAt` against the
+   * box's own `disassemblyReceivedAt`), because a count that disagreed with
+   * the box's own printed form would be worse than no count at all.
+   */
+  async palletReportData(tenantId: string, palletId: string): Promise<PalletReportData> {
+    const [pallet] = await this.db
+      .select({
+        sscc: schema.pallets.sscc,
+        openedAt: schema.pallets.openedAt,
+        closedAt: schema.pallets.closedAt,
+        disassembledAt: schema.pallets.disassembledAt,
+        productName: schema.products.name,
+      })
+      .from(schema.pallets)
+      .leftJoin(
+        schema.shifts,
+        and(
+          eq(schema.shifts.tenantId, schema.pallets.tenantId),
+          eq(schema.shifts.id, schema.pallets.shiftId),
+        ),
+      )
+      .leftJoin(
+        schema.products,
+        and(
+          eq(schema.products.tenantId, schema.shifts.tenantId),
+          eq(schema.products.id, schema.shifts.productId),
+        ),
+      )
+      .where(and(eq(schema.pallets.tenantId, tenantId), eq(schema.pallets.id, palletId)));
+
+    if (!pallet) throw new NotFoundException();
+
+    const [org] = await this.db
+      .select({
+        name: schema.organization.name,
+        inn: schema.orgProfiles.inn,
+        logo: schema.organization.logo,
+      })
+      .from(schema.organization)
+      .leftJoin(schema.orgProfiles, eq(schema.orgProfiles.tenantId, schema.organization.id))
+      .where(eq(schema.organization.id, tenantId));
+
+    const boxRows = await this.db
+      .select({
+        sscc: schema.boxes.sscc,
+        closedAt: schema.boxes.closedAt,
+        disassembledAt: schema.boxes.disassembledAt,
+        codeCount: sql<number>`count(${schema.boxItems.codeHash})::int`,
+      })
+      .from(schema.boxes)
+      .leftJoin(
+        schema.boxItems,
+        and(
+          eq(schema.boxItems.tenantId, schema.boxes.tenantId),
+          eq(schema.boxItems.boxId, schema.boxes.id),
+          isNull(schema.boxItems.displacedAt),
+          or(
+            isNull(schema.boxItems.removedAt),
+            eq(schema.boxItems.removedAt, schema.boxes.disassemblyReceivedAt),
+          ),
+        ),
+      )
+      .where(and(eq(schema.boxes.tenantId, tenantId), eq(schema.boxes.palletId, palletId)))
+      .groupBy(
+        schema.boxes.id,
+        schema.boxes.sscc,
+        schema.boxes.closedAt,
+        schema.boxes.disassembledAt,
+      )
+      // Stacking order: a box joins a pallet at its own close, so this is the
+      // order a clerk works down the stack. `id` only breaks a tie, so a
+      // reprint of the same pallet never renders differently.
+      .orderBy(schema.boxes.closedAt, schema.boxes.id);
+
+    const status: PalletReportData["status"] = pallet.disassembledAt
+      ? "disassembled"
+      : pallet.closedAt
+        ? "closed"
+        : "open";
+
+    return {
+      // `pallets.sscc` stores the bare 18 digits; the renderer expects the
+      // 20-character `00…` machine form, exactly as the box form does.
+      sscc: pallet.sscc === null ? null : formatSsccWithAi(pallet.sscc),
+      status,
+      productName: pallet.productName,
+      org: org ? { name: org.name, inn: org.inn, logo: org.logo } : null,
+      openedAt: pallet.openedAt,
+      closedAt: pallet.closedAt,
+      disassembledAt: pallet.disassembledAt,
+      boxes: boxRows.map((row) => ({
+        sscc: row.sscc === null ? null : formatSsccWithAi(row.sscc),
+        codeCount: row.codeCount,
+        disassembledAt: row.disassembledAt,
+      })),
     };
   }
 
