@@ -1,5 +1,6 @@
 package app.markiro.handheld.core.box
 
+import app.markiro.handheld.core.print.upsertAssigned
 import app.markiro.handheld.core.storage.initializeRecoveryForTest
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -34,8 +35,10 @@ class BoxPrinterTest {
         var outcome: SendOutcome = SendOutcome.Delivered,
     ) : PrinterTransport {
         var sent: ByteArray? = null
+        val destinations = mutableListOf<PrinterEntity>()
         override suspend fun status(printer: PrinterEntity) = nextStatus
         override suspend fun send(printer: PrinterEntity, document: ByteArray): SendOutcome {
+            destinations += printer
             sent = document
             return outcome
         }
@@ -84,7 +87,7 @@ class BoxPrinterTest {
             ),
         )
         if (withPrinter) {
-            db.printerDao().upsert(
+            db.printerDao().upsertAssigned(
                 PrinterEntity(
                     id = "p1", name = "Zebra", transport = "wifi", address = "127.0.0.1:9100",
                     language = "zpl", dpi = 203, selected = true, lastStatus = null, lastSeenAt = null,
@@ -99,6 +102,53 @@ class BoxPrinterTest {
             ),
         )
         repeat(units) { db.codeDao().insert(CodeEntity("h$it", "s1", "04680089900000", "$it", "t", "box-1")) }
+    }
+
+    @Test
+    fun legacySelectedFlagAloneDoesNotRouteANewDatabase() = runTest {
+        seedClosedBox()
+        db.printerDao().assign(app.markiro.handheld.core.print.PrinterAssignmentEntity("box", null))
+        val transport = FakeTransport()
+        assertEquals(PrintOutcome.Failed(PrintReason.PRINTER_UNCONFIGURED), printer(transport).print("box-1"))
+        assertNull(transport.sent)
+    }
+
+    @Test
+    fun reassignmentKeepsPendingDestinationUntilOperatorExplicitlyReplacesIt() = runTest {
+        seedClosedBox()
+        val transport = FakeTransport(nextStatus = PrinterStatus.NotReady(NotReadyReason.NO_PAPER))
+        printer(transport).print("box-1")
+        db.printerDao().upsertAssigned(PrinterEntity("replacement", "Pallet printer", "wifi", "other:9100", "tspl", 300, false, null, null))
+        transport.nextStatus = PrinterStatus.Ready
+        printer(transport).print("box-1")
+        assertEquals("127.0.0.1:9100", transport.destinations.last().address)
+        printer(transport).print("box-1", replacementPrinterId = "replacement")
+        assertEquals("other:9100", transport.destinations.last().address)
+        assertEquals("tspl", transport.destinations.last().language)
+        assertTrue(transport.sent!!.toString(Charsets.ISO_8859_1).startsWith("SIZE"))
+    }
+
+    @Test
+    fun aNewReprintUsesTheCurrentBoxAssignmentWhileCompletedPrintIsNotSentTwice() = runTest {
+        seedClosedBox()
+        val transport = FakeTransport()
+        val printing = printer(transport)
+        printing.print("box-1")
+        printing.print("box-1")
+        assertEquals(1, transport.destinations.size)
+        db.printerDao().upsertAssigned(PrinterEntity("next", "Next", "wifi", "next:9100", "zpl", 203, false, null, null))
+        printing.print("box-1", reprint = true)
+        assertEquals(listOf("p1", "next"), transport.destinations.map { it.id })
+    }
+
+    @Test
+    fun deferringAnUnknownDeliveryMustNotMakeItEligibleForBulkRetry() = runTest {
+        seedClosedBox()
+        val transport = FakeTransport(outcome = SendOutcome.Unknown("link lost"))
+        val printing = printer(transport)
+        printing.print("box-1")
+        printing.defer("box-1")
+        assertEquals(BoxPrint.UNKNOWN, db.boxDao().get("box-1")?.printState)
     }
 
     @Test
@@ -128,7 +178,8 @@ class BoxPrinterTest {
         seedClosedBox()
         printer(transport).print("box-1")
         val first = transport.sent!!.toString(Charsets.ISO_8859_1)
-        printer(transport).print("box-1")
+        printer(transport).print("box-1", reprint = true)
+        assertEquals(2, transport.destinations.size)
         assertEquals(first, transport.sent!!.toString(Charsets.ISO_8859_1))
     }
 

@@ -66,7 +66,7 @@ interface PrinterTransport {
  */
 class StreamPrinterTransport(private val connectors: (PrinterEntity) -> PrinterConnector) : PrinterTransport {
 
-    override suspend fun status(printer: PrinterEntity): PrinterStatus = withContext(Dispatchers.IO) {
+    override suspend fun status(printer: PrinterEntity): PrinterStatus = PrinterOutput.serialized(printer) { withContext(Dispatchers.IO) {
         val tspl = printer.language == "tspl"
         val reply = try {
             connectors(printer).open(printer).use { connection ->
@@ -79,9 +79,9 @@ class StreamPrinterTransport(private val connectors: (PrinterEntity) -> PrinterC
         }
         if (reply.isEmpty()) return@withContext PrinterStatus.NotReady(NotReadyReason.UNREACHABLE)
         if (tspl) decodeTsplStatus(reply) else decodeZplStatus(reply)
-    }
+    } }
 
-    override suspend fun send(printer: PrinterEntity, document: ByteArray): SendOutcome = withContext(Dispatchers.IO) {
+    override suspend fun send(printer: PrinterEntity, document: ByteArray): SendOutcome = PrinterOutput.serialized(printer) { withContext(Dispatchers.IO) {
         val connection = try {
             connectors(printer).open(printer)
         } catch (_: IOException) {
@@ -107,7 +107,7 @@ class StreamPrinterTransport(private val connectors: (PrinterEntity) -> PrinterC
             // The connection was open, so some or all of the document may already be on the printer.
             SendOutcome.Unknown(e.message ?: "link lost")
         }
-    }
+    } }
 
     private companion object {
         /**

@@ -1,4 +1,4 @@
-import { VALIDATION_REPROCESSING_PROTOCOL } from "@markiro/domain";
+import { resolvePrinter } from "../lib/printer-routing.js";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button, Card, DatePicker, Input, Pager } from "@markiro/ui";
@@ -7,6 +7,7 @@ import {
   DomainError,
   normalizeToGtin14,
   PRODUCT_LABEL_PROTOCOL,
+  VALIDATION_REPROCESSING_PROTOCOL,
   productLabelTemplateListSchema,
   productLabelValueDigest,
   validationPrintInputSchema,
@@ -454,11 +455,8 @@ export function NewShift({
           setError(t("shifts.productTemplateUnavailable"));
           return;
         }
-        if (
-          !hardwareConfig.printer ||
-          !hardwareConfig.printerDpi ||
-          !["zpl", "tspl"].includes(hardwareConfig.printerLanguage)
-        ) {
+        const duplicatePrinter = resolvePrinter(hardwareConfig, "duplicate");
+        if (!duplicatePrinter?.dpi) {
           setPrinterError(true);
           setError(t("shifts.printHardwareRequired"));
           return;

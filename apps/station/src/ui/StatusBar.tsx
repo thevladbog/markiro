@@ -32,6 +32,8 @@ export interface StatusBarProps {
   serverReachability: ServerReachability;
   scanner: ScannerIndicator;
   printerConfigured: boolean;
+  printerSummary?: { label: string; detail: string; complete?: boolean };
+  onOpenPrinters?: () => void;
   /** Scans queued on this device, not yet accepted by the server. */
   syncPending: number;
   /** The queue has work and has stopped moving — see sync.ts's STUCK_AFTER_MS. */
@@ -62,6 +64,8 @@ export function StatusBar({
   serverReachability,
   scanner,
   printerConfigured,
+  printerSummary,
+  onOpenPrinters,
   syncPending,
   syncStuck,
   conflicts,
@@ -213,24 +217,46 @@ export function StatusBar({
           valueShown={scanner !== "connected"}
           testId="scanner-status"
         />
-        <StatusPill
-          label={t("shell.printer")}
-          value={printerConfigured ? printerConfiguredLabel : notConfigured}
-          tone={printerConfigured ? "ok" : "neutral"}
-          valueShown={!printerConfigured}
-          testId="printer-status"
-        />
+        {onOpenPrinters && printerSummary ? (
+          <div className="station-status-item">
+            <dt className="station-visually-hidden">{t("setup.printer")}</dt>
+            <dd>
+              <Button
+                size="floor"
+                variant="secondary"
+                disabled={actionsDisabled}
+                aria-label={`${t("setup.printer")}: ${printerSummary.detail}`}
+                title={printerSummary.detail}
+                onClick={onOpenPrinters}
+              >
+                {t("setup.printer")}{" "}
+                <span data-testid="printer-status">{printerSummary.label}</span>
+              </Button>
+            </dd>
+          </div>
+        ) : (
+          <StatusPill
+            label={t("shell.printer")}
+            value={
+              printerSummary?.label ?? (printerConfigured ? printerConfiguredLabel : notConfigured)
+            }
+            tone={printerConfigured && printerSummary?.complete !== false ? "ok" : "neutral"}
+            valueShown={Boolean(printerSummary) || !printerConfigured}
+            {...(printerSummary ? { detail: printerSummary.detail } : {})}
+            testId="printer-status"
+          />
+        )}
       </dl>
       {collapsed ? (
         toggleButton
-      ) : (
+      ) : updateButton || operatorControl || windowControl || toggleButton ? (
         <div className="station-status-actions" role="group" aria-label={t("shell.stationActions")}>
           {updateButton}
           {operatorControl}
           {windowControl}
           {toggleButton}
         </div>
-      )}
+      ) : null}
     </header>
   );
 }
@@ -261,13 +287,24 @@ interface StatusPillProps {
   /** Paint the value next to the label; false leaves it to the dot (and AT). */
   valueShown?: boolean;
   live?: "polite";
+  detail?: string;
 }
 
-function StatusPill({ label, shortLabel, value, testId, tone, valueShown, live }: StatusPillProps) {
+function StatusPill({
+  label,
+  shortLabel,
+  value,
+  testId,
+  tone,
+  valueShown,
+  live,
+  detail,
+}: StatusPillProps) {
   return (
     <div
       className="station-status-item station-status-pill"
       data-tone={tone}
+      title={detail}
       data-value-shown={valueShown ? "true" : "false"}
     >
       <span aria-hidden="true" className="station-status-pill__dot" />
@@ -275,7 +312,11 @@ function StatusPill({ label, shortLabel, value, testId, tone, valueShown, live }
         <span className="station-status-label--long">{label}</span>
         {shortLabel ? <span className="station-status-label--short">{shortLabel}</span> : null}
       </dt>
-      <dd data-testid={testId} {...(live ? { role: "status", "aria-live": live } : {})}>
+      <dd
+        data-testid={testId}
+        {...(detail ? { "aria-label": detail } : {})}
+        {...(live ? { role: "status", "aria-live": live } : {})}
+      >
         {value}
       </dd>
     </div>

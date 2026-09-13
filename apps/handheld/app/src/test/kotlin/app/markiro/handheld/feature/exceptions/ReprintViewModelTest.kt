@@ -1,5 +1,6 @@
 package app.markiro.handheld.feature.exceptions
 
+import app.markiro.handheld.core.print.upsertAssigned
 import app.markiro.handheld.core.storage.initializeRecoveryForTest
 import app.markiro.handheld.core.storage.reconnectSameDeviceForTest
 import androidx.lifecycle.SavedStateHandle
@@ -89,7 +90,7 @@ class ReprintViewModelTest {
                     {"kind":"field","id":"s","xMm":2,"yMm":2,"field":"sscc","fontSizePt":8}]}""",
             ),
         )
-        db.printerDao().upsert(
+        db.printerDao().upsertAssigned(
             PrinterEntity(
                 id = "p1", name = "Zebra", transport = "wifi", address = "127.0.0.1:9100",
                 language = "zpl", dpi = 203, selected = true, lastStatus = null, lastSeenAt = null,

@@ -286,3 +286,20 @@ val MIGRATION_11_12 = object : Migration(11, 12) {
         db.execSQL("INSERT OR IGNORE INTO validation_occurrences SELECT e.shiftId,e.codeHash,e.scannedAt,e.raw,COALESCE(c.gtin14,s.productGtin14,''),COALESCE(c.serial,''),e.operatorId,COALESCE((SELECT deviceId FROM device_config LIMIT 1),''),NULL,NULL,'first_accepted','pending',NULL,1 FROM scan_events e JOIN shift_mirror s ON s.id=e.shiftId LEFT JOIN codes_mirror c ON c.codeHash=e.codeHash AND c.shiftId=e.shiftId AND c.scannedAt=e.scannedAt WHERE s.validationPrintMode='duplicate_dm' AND e.verdict='ok' AND e.codeHash IS NOT NULL ORDER BY (c.codeHash IS NOT NULL) DESC,e.id DESC")
     }
 }
+
+/** Only the shipped selected profile receives roles. Jobs and print outcomes remain untouched. */
+val MIGRATION_12_13 = object : Migration(12, 13) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS `printer_assignments` (`purpose` TEXT NOT NULL, `printerId` TEXT, PRIMARY KEY(`purpose`))")
+        for (purpose in listOf("box", "duplicate", "pallet")) {
+            db.execSQL("INSERT OR IGNORE INTO printer_assignments (purpose, printerId) VALUES (?, (SELECT id FROM printers WHERE selected = 1 ORDER BY id LIMIT 1))", arrayOf(purpose))
+        }
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `print_destinations` (`purpose` TEXT NOT NULL, `jobId` TEXT NOT NULL, `attemptId` TEXT NOT NULL, " +
+                "`printer_id` TEXT NOT NULL, `printer_name` TEXT NOT NULL, `printer_transport` TEXT NOT NULL, " +
+                "`printer_address` TEXT NOT NULL, `printer_language` TEXT NOT NULL, `printer_dpi` INTEGER NOT NULL, " +
+                "`printer_selected` INTEGER NOT NULL, `printer_lastStatus` TEXT, `printer_lastSeenAt` INTEGER, " +
+                "PRIMARY KEY(`purpose`, `jobId`, `attemptId`))",
+        )
+    }
+}

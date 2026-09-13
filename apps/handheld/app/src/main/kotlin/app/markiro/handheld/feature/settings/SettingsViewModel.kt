@@ -6,6 +6,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.markiro.handheld.BuildConfig
 import app.markiro.handheld.core.inventory.InventorySyncEngine
+import app.markiro.handheld.core.print.observeRouting
+import app.markiro.handheld.core.print.PrintPurpose
 import app.markiro.handheld.core.print.PrinterDao
 import app.markiro.handheld.core.scan.ScanEvent
 import app.markiro.handheld.core.scan.ScanEvents
@@ -52,6 +54,8 @@ data class SettingsUi(
     val installId: String = "",
     /** `null` until a printer is configured; the settings row falls back to a hint. */
     val printerLabel: String? = null,
+    val missingPrinterPurposes: List<PrintPurpose>? = null,
+    val printerAttentionPurposes: List<PrintPurpose> = emptyList(),
     /** `null` until the check has answered; it is read-only and never blocks a screen. */
     val update: UpdateState? = null,
     val install: InstallStep? = null,
@@ -105,9 +109,8 @@ class SettingsViewModel @Inject constructor(
         }
         viewModelScope.launch { val id = meta.installId(); _state.update { it.copy(installId = id) } }
         viewModelScope.launch {
-            printers.observeSelected().collect { printer ->
-                val label = printer?.let { "${it.name} · ${it.language.uppercase()} ${it.dpi} dpi" }
-                _state.update { it.copy(printerLabel = label) }
+            printers.observeRouting().collect { routing ->
+                _state.update { it.copy(missingPrinterPurposes = routing.missing, printerAttentionPurposes = routing.attention) }
             }
         }
     }

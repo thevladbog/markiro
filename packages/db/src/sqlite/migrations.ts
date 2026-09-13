@@ -3954,6 +3954,35 @@ export const STATION_MIGRATIONS: string[] = [
      DELETE FROM codes_mirror WHERE shift_id=NEW.shift_id AND code_hash=NEW.code_hash AND scanned_at=NEW.scanned_at;
      UPDATE validation_occurrences SET source_shift_id=NULL WHERE shift_id=NEW.shift_id AND code_hash=NEW.code_hash;
    END;`,
+  // Local output snapshots are deliberately separate from immutable server print events.
+  `CREATE TABLE IF NOT EXISTS printer_destinations (
+     scope TEXT NOT NULL,
+     purpose TEXT NOT NULL CHECK (purpose IN ('box', 'duplicate', 'pallet')),
+     job_id TEXT NOT NULL,
+     attempt_id TEXT NOT NULL,
+     profile_json TEXT NOT NULL CHECK (json_valid(profile_json)),
+     PRIMARY KEY (scope, purpose, job_id, attempt_id)
+   );`,
+  `CREATE TRIGGER IF NOT EXISTS product_label_destination_retention
+     AFTER DELETE ON product_label_accept_commands BEGIN
+       DELETE FROM printer_destinations WHERE scope=OLD.credential_ownership
+         AND purpose='duplicate' AND job_id=OLD.job_id;
+     END;`,
+  `CREATE TRIGGER IF NOT EXISTS box_destination_retention
+     AFTER DELETE ON boxes_mirror BEGIN
+       DELETE FROM printer_destinations WHERE scope=json_array(OLD.shift_id,OLD.terminal_id)
+         AND purpose='box' AND job_id=OLD.sscc;
+     END;`,
+  `CREATE TRIGGER IF NOT EXISTS pallet_destination_retention
+     AFTER DELETE ON pallets_mirror BEGIN
+       DELETE FROM printer_destinations WHERE scope=json_array(OLD.shift_id,OLD.terminal_id)
+         AND purpose='pallet' AND job_id=OLD.sscc;
+     END;`,
+  `CREATE TRIGGER IF NOT EXISTS inventory_box_destination_retention
+     AFTER DELETE ON inventory_repack_boxes_mirror BEGIN
+       DELETE FROM printer_destinations WHERE scope=json_array(OLD.inventory_id,OLD.snapshot_id,OLD.owner_device_id)
+         AND purpose='box' AND job_id=OLD.box_id;
+     END;`,
 ];
 
 export interface StationMigrationEntry {

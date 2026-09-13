@@ -1,0 +1,27 @@
+.printer-destination {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  gap: var(--sp-3);
+  text-align: left;
+}
+.printer-destination p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.printer-destination__editor {
+  display: grid;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+.printer-destination__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+}
+.printer-destination__actions > * {
+  flex: 1 1 220px;
+}
+.printer-destination .mk-select {
+  min-width: 0;
+}

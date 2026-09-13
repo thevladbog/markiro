@@ -75,6 +75,7 @@ class BoxCloseScreensTest {
             MarkiroTheme { BoxCloseScreen(BoxCloseStep.Refused(CloseResult.NoSerials), BoxCloseCallbacks()) }
         }
         compose.onNodeWithText("Закончились номера SSCC").assertIsDisplayed()
+        compose.onNodeWithText("Короб · Не назначен").assertDoesNotExist()
         compose.onNodeWithText("Короб остался открытым. Подключитесь к сети — устройство получит новый блок номеров.")
             .assertIsDisplayed()
     }

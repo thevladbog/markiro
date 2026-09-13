@@ -21,6 +21,15 @@ import {
 import { renderLabelBytes } from "../lib/print-label.js";
 import { rasterizeText } from "../lib/rasterizer.js";
 import type { SqlExecutor } from "../lib/mirror.js";
+import {
+  configuredPrinterRouting,
+  printerTargetKey,
+  parsePrinterProfile,
+  serializePrinterOutput,
+  type PrinterProfile,
+  type PrinterRouting,
+} from "../lib/printer-routing.js";
+import { PrinterRoutingPanel } from "../ui/setup/PrinterRoutingPanel.js";
 import { PrinterSetupPanel } from "../ui/setup/PrinterSetupPanel.js";
 import { ScannerSetupPanel, type AdditionalScannerRow } from "../ui/setup/ScannerSetupPanel.js";
 import { SetupTabs, type SetupTabId } from "../ui/setup/SetupTabs.js";
@@ -36,6 +45,7 @@ export interface WorkstationSetupProps {
   onResetCredential?: () => Promise<void>;
   credentialResetBlockedReason?: string;
   onDone: () => void;
+  initialTab?: SetupTabId;
 }
 
 const DEFAULT_BAUD = 9600;
@@ -71,9 +81,10 @@ export function WorkstationSetup({
   onResetCredential,
   credentialResetBlockedReason,
   onDone,
+  initialTab = "scanner",
 }: WorkstationSetupProps) {
   const { t } = useTranslation();
-  const [activeTab, setActiveTab] = useState<SetupTabId>("scanner");
+  const [activeTab, setActiveTab] = useState<SetupTabId>(initialTab);
   const activeTabRef = useRef(activeTab);
   activeTabRef.current = activeTab;
   const [ports, setPorts] = useState<string[]>([]);
@@ -93,6 +104,13 @@ export function WorkstationSetup({
   scannerCodeRef.current = scannerTestCode;
   const printedCodeRef = useRef(printedTestCode);
   printedCodeRef.current = printedTestCode;
+  const [routing, setRouting] = useState<PrinterRouting>({
+    printers: [],
+    assignments: { box: null, duplicate: null, pallet: null },
+  });
+  const [editorId, setEditorId] = useState<string | null>(null);
+  const [printerName, setPrinterName] = useState("");
+  const [removeConfirmationOpen, setRemoveConfirmationOpen] = useState(false);
   const [printerHost, setPrinterHost] = useState("");
   const [printerTcpPort, setPrinterTcpPort] = useState(String(DEFAULT_PRINTER_PORT));
   const [printerPort, setPrinterPort] = useState("");
@@ -143,22 +161,7 @@ export function WorkstationSetup({
             baud: String(scanner.baud),
           })),
         );
-        if (config.printer?.kind === "tcp") {
-          setPrinterTransport("tcp");
-          setPrinterHost(config.printer.host);
-          setPrinterTcpPort(String(config.printer.port));
-        } else if (config.printer?.kind === "serial") {
-          setPrinterTransport("serial");
-          setPrinterPort(config.printer.port);
-          setPrinterBaud(String(config.printer.baud));
-        } else if (config.printer?.kind === "usb") {
-          setPrinterTransport("usb");
-          setUsbPrinter(config.printer.printer);
-        } else {
-          setPrinterTransport("none");
-        }
-        setPrinterLanguage(config.printerLanguage);
-        setPrinterDpi(config.printerDpi ?? null);
+        setRouting(configuredPrinterRouting(config));
         setVerifyPrintedLabel(config.verifyPrintedLabel);
         setLoading(false);
       })
@@ -265,42 +268,145 @@ export function WorkstationSetup({
     }
   }
 
+  function openPrinter(printer?: PrinterProfile) {
+    setEditorId(printer?.id ?? crypto.randomUUID());
+    setPrinterName(
+      printer?.name ?? t("setup.defaultPrinterName", { number: routing.printers.length + 1 }),
+    );
+    setPrinterTransport(printer?.target.kind ?? "none");
+    setPrinterHost(printer?.target.kind === "tcp" ? printer.target.host : "");
+    setPrinterTcpPort(
+      String(printer?.target.kind === "tcp" ? printer.target.port : DEFAULT_PRINTER_PORT),
+    );
+    setPrinterPort(printer?.target.kind === "serial" ? printer.target.port : "");
+    setPrinterBaud(String(printer?.target.kind === "serial" ? printer.target.baud : DEFAULT_BAUD));
+    setUsbPrinter(printer?.target.kind === "usb" ? printer.target.printer : "");
+    setPrinterLanguage(printer?.language ?? "zpl");
+    setPrinterDpi(printer?.dpi ?? null);
+    setPrintedTestCode(null);
+    setPrinterCheck(null);
+    setTestResult(null);
+    setError(null);
+  }
+
+  function closePrinter() {
+    setEditorId(null);
+    setPrintedTestCode(null);
+    setPrinterCheck(null);
+    setTestResult(null);
+    setError(null);
+  }
+
+  function buildPrinter():
+    { ok: true; printer: PrinterProfile | null } | { ok: false; error: string } {
+    if (printerTransport === "none") {
+      if (routing.printers.some((printer) => printer.id === editorId))
+        return { ok: false, error: t("setup.printerFieldRequired") };
+      return { ok: true, printer: null };
+    }
+    const name = printerName.trim();
+    if (!name || !editorId) return { ok: false, error: t("setup.printerNameRequired") };
+    let target: PrintTarget;
+    if (printerTransport === "tcp") {
+      if (!printerHost.trim()) return { ok: false, error: t("setup.printerFieldRequired") };
+      const tcpPort = parseTcpPort(printerTcpPort);
+      if (tcpPort === null) return { ok: false, error: t("setup.invalidNumber") };
+      target = { kind: "tcp", host: printerHost.trim(), port: tcpPort };
+    } else if (printerTransport === "serial") {
+      if (!printerPort.trim()) return { ok: false, error: t("setup.printerFieldRequired") };
+      const serialBaud = parseBaud(printerBaud);
+      if (serialBaud === null) return { ok: false, error: t("setup.invalidNumber") };
+      target = { kind: "serial", port: canonicalScannerPort(printerPort), baud: serialBaud };
+    } else {
+      if (!usbPrinter.trim()) return { ok: false, error: t("setup.printerFieldRequired") };
+      target = { kind: "usb", printer: usbPrinter.trim() };
+    }
+    const duplicate = routing.printers.find(
+      (printer) =>
+        printer.id !== editorId && printerTargetKey(printer.target) === printerTargetKey(target),
+    );
+    if (duplicate)
+      return { ok: false, error: t("setup.duplicatePrinter", { name: duplicate.name }) };
+    const printer = parsePrinterProfile({
+      id: editorId,
+      name,
+      target,
+      language: printerLanguage,
+      dpi: printerDpi,
+    });
+    return printer ? { ok: true, printer } : { ok: false, error: t("setup.printerFieldRequired") };
+  }
+
+  function withPrinter(printer: PrinterProfile | null): PrinterRouting {
+    if (!printer) return routing;
+    const exists = routing.printers.some((saved) => saved.id === printer.id);
+    return {
+      printers: exists
+        ? routing.printers.map((saved) => (saved.id === printer.id ? printer : saved))
+        : [...routing.printers, printer],
+      assignments:
+        routing.printers.length === 0
+          ? { box: printer.id, duplicate: printer.id, pallet: printer.id }
+          : routing.assignments,
+    };
+  }
+
+  function savePrinter() {
+    const result = buildPrinter();
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
+    if (!result.printer) {
+      setError(t("setup.printerFieldRequired"));
+      return;
+    }
+    setRouting(withPrinter(result.printer));
+    closePrinter();
+  }
+
+  function removePrinter() {
+    setRouting((current) => ({
+      printers: current.printers.filter((printer) => printer.id !== editorId),
+      assignments: {
+        box: current.assignments.box === editorId ? null : current.assignments.box,
+        duplicate:
+          current.assignments.duplicate === editorId ? null : current.assignments.duplicate,
+        pallet: current.assignments.pallet === editorId ? null : current.assignments.pallet,
+      },
+    }));
+    setRemoveConfirmationOpen(false);
+    closePrinter();
+  }
+
   function buildConfig(): ConfigResult {
     const scannerResult = buildScanners();
     if (!scannerResult.ok) return scannerResult;
-    const scanners = scannerResult.scanners;
-
-    let printer: PrintTarget | null = null;
-    if (printerTransport === "tcp") {
-      if (printerHost === "") return { ok: false, error: t("setup.printerFieldRequired") };
-      const tcpPort = parseTcpPort(printerTcpPort);
-      if (tcpPort === null) return { ok: false, error: t("setup.invalidNumber") };
-      printer = { kind: "tcp", host: printerHost, port: tcpPort };
-    } else if (printerTransport === "serial") {
-      if (printerPort === "") return { ok: false, error: t("setup.printerFieldRequired") };
-      const serialBaud = parseBaud(printerBaud);
-      if (serialBaud === null) return { ok: false, error: t("setup.invalidNumber") };
-      printer = { kind: "serial", port: printerPort, baud: serialBaud };
-    } else if (printerTransport === "usb") {
-      if (usbPrinter === "") return { ok: false, error: t("setup.printerFieldRequired") };
-      printer = { kind: "usb", printer: usbPrinter };
+    let nextRouting = routing;
+    if (editorId !== null) {
+      const result = buildPrinter();
+      if (!result.ok) return result;
+      nextRouting = withPrinter(result.printer);
     }
-
+    const boxPrinter = nextRouting.printers.find(
+      (printer) => printer.id === nextRouting.assignments.box,
+    );
     return {
       ok: true,
       config: {
-        scanner: scanners[0] ?? null,
-        scanners,
-        printer,
-        printerLanguage,
-        printerDpi,
-        verifyPrintedLabel: printer === null ? false : verifyPrintedLabel,
+        scanner: scannerResult.scanners[0] ?? null,
+        scanners: scannerResult.scanners,
+        printer: boxPrinter?.target ?? null,
+        printerLanguage: boxPrinter?.language ?? "zpl",
+        printerDpi: boxPrinter?.dpi ?? null,
+        printerRouting: nextRouting,
+        verifyPrintedLabel: boxPrinter ? verifyPrintedLabel : false,
       },
     };
   }
 
   async function testPrint() {
-    const result = buildConfig();
+    const result = buildPrinter();
     if (!result.ok) {
       setError(result.error);
       return;
@@ -309,7 +415,7 @@ export function WorkstationSetup({
     setError(null);
     setTestResult(null);
     try {
-      if (!result.config.printer) throw new Error(t("setup.failed"));
+      if (!result.printer) throw new Error(t("setup.failed"));
       // A fresh code per print: scanning yesterday's test label must fail the
       // check, because the check certifies THIS print run, not the printer's
       // biography. The barcode makes the check end-to-end — transport,
@@ -319,7 +425,7 @@ export function WorkstationSetup({
         widthMm: 58,
         heightMm: 40,
         dpi: 203,
-        language: result.config.printerLanguage,
+        language: result.printer.language,
         elements: [
           // Plain ASCII on purpose: non-ASCII text switches the ZPL emitter to
           // its rasterized branch, which needs a 2D canvas the test print must
@@ -341,14 +447,18 @@ export function WorkstationSetup({
       const bytes = await renderLabelBytes(
         spec,
         sampleLabelData(),
-        result.config.printerLanguage,
+        result.printer.language,
         rasterizeText,
-        { dpi: result.config.printerDpi ?? null },
+        { dpi: result.printer.dpi ?? null },
       );
-      await hw.print(result.config.printer, bytes);
+      const target = result.printer.target;
+      await serializePrinterOutput(target, () => hw.print(target, bytes));
       setPrintedTestCode(code);
       setPrinterCheck(null);
-      setTestResult({ tab: "printer", text: t("setup.testPrintSent") });
+      setTestResult({
+        tab: "printer",
+        text: t("setup.testPrintSentTo", { name: result.printer.name }),
+      });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : t("setup.failed"));
     } finally {
@@ -456,35 +566,49 @@ export function WorkstationSetup({
     {
       id: "printer" as const,
       label: t("setup.printer"),
-      panel: (
-        <PrinterSetupPanel
-          printedCode={printedTestCode}
-          check={printerCheck}
-          transport={printerTransport}
-          host={printerHost}
-          tcpPort={printerTcpPort}
-          serialPort={printerPort}
-          serialBaud={printerBaud}
-          usbPrinters={usbPrinters}
-          usbPrinter={usbPrinter}
-          language={printerLanguage}
-          printerDpi={printerDpi}
-          onPrinterDpiChange={setPrinterDpi}
-          verifyPrintedLabel={verifyPrintedLabel}
-          disabled={loading}
-          busy={busy}
-          onTransportChange={setPrinterTransport}
-          onHostChange={setPrinterHost}
-          onTcpPortChange={setPrinterTcpPort}
-          onSerialPortChange={setPrinterPort}
-          onSerialBaudChange={setPrinterBaud}
-          onUsbPrinterChange={setUsbPrinter}
-          onUsbRefresh={() => void refreshUsbPrinters()}
-          onLanguageChange={setPrinterLanguage}
-          onVerifyPrintedLabelChange={setVerifyPrintedLabel}
-          onTestPrint={() => void testPrint()}
-        />
-      ),
+      panel:
+        editorId !== null ? (
+          <PrinterSetupPanel
+            name={printerName}
+            onNameChange={setPrinterName}
+            printedCode={printedTestCode}
+            check={printerCheck}
+            transport={printerTransport}
+            host={printerHost}
+            tcpPort={printerTcpPort}
+            serialPort={printerPort}
+            serialBaud={printerBaud}
+            usbPrinters={usbPrinters}
+            usbPrinter={usbPrinter}
+            language={printerLanguage}
+            printerDpi={printerDpi}
+            onPrinterDpiChange={setPrinterDpi}
+            disabled={loading || busy}
+            busy={busy}
+            onTransportChange={setPrinterTransport}
+            onHostChange={setPrinterHost}
+            onTcpPortChange={setPrinterTcpPort}
+            onSerialPortChange={setPrinterPort}
+            onSerialBaudChange={setPrinterBaud}
+            onUsbPrinterChange={setUsbPrinter}
+            onUsbRefresh={() => void refreshUsbPrinters()}
+            onLanguageChange={setPrinterLanguage}
+            onTestPrint={() => void testPrint()}
+          />
+        ) : (
+          <PrinterRoutingPanel
+            routing={routing}
+            disabled={loading || busy}
+            onAdd={() => openPrinter()}
+            onEdit={openPrinter}
+            onAssign={(purpose, printerId) =>
+              setRouting((current) => ({
+                ...current,
+                assignments: { ...current.assignments, [purpose]: printerId },
+              }))
+            }
+          />
+        ),
     },
     {
       id: "sound" as const,
@@ -500,6 +624,7 @@ export function WorkstationSetup({
     },
   ];
 
+  const showPrinterRouting = activeTab === "printer" && editorId === null;
   const soundTestUnavailable = sound.muted || sound.volume <= 0;
   const activeResult =
     testResult?.tab === activeTab && !(activeTab === "sound" && soundTestUnavailable)
@@ -513,7 +638,9 @@ export function WorkstationSetup({
         (credentialResetBlockedReason
           ? credentialResetBlockedReason
           : activeTab === "printer"
-            ? t("setup.testPrintHint")
+            ? editorId !== null
+              ? t("setup.testPrintHint")
+              : t("setup.printerRoutingHint")
             : activeTab === "sound" && soundTestUnavailable
               ? t("setup.soundTestUnavailable")
               : onResetCredential
@@ -528,21 +655,47 @@ export function WorkstationSetup({
         <h1 id="workstation-setup-title">{t("setup.title")}</h1>
       </header>
 
-      <SetupTabs tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />
+      <SetupTabs
+        tabs={tabs}
+        activeTab={activeTab}
+        onTabChange={(tab) => {
+          if (!busy) setActiveTab(tab);
+        }}
+      />
 
       <div
-        className={`workstation-setup__result${error ? " workstation-setup__result--error" : ""}`}
-        data-testid="setup-result"
-        role={error ? "alert" : "status"}
+        className={`workstation-setup__feedback${showPrinterRouting ? " workstation-setup__feedback--printers" : ""}`}
       >
-        {resultText}
+        {showPrinterRouting ? (
+          <label className="setup-touch-choice setup-touch-choice--checkbox setup-printer-verification">
+            <input
+              type="checkbox"
+              checked={routing.assignments.box !== null && verifyPrintedLabel}
+              disabled={loading || busy || routing.assignments.box === null}
+              onChange={(event) => setVerifyPrintedLabel(event.target.checked)}
+            />
+            <span>{t("setup.verifyPrintedLabel")}</span>
+          </label>
+        ) : null}
+        <div
+          className={`workstation-setup__result${error ? " workstation-setup__result--error" : ""}`}
+          data-testid="setup-result"
+          role={error ? "alert" : "status"}
+        >
+          {resultText}
+        </div>
       </div>
 
       <footer className="workstation-setup__footer" data-testid="setup-footer">
-        <Button size="floor" variant="secondary" disabled={busy} onClick={onDone}>
-          {t("setup.back")}
+        <Button
+          size="floor"
+          variant="secondary"
+          disabled={busy}
+          onClick={activeTab === "printer" && editorId !== null ? closePrinter : onDone}
+        >
+          {activeTab === "printer" && editorId !== null ? t("setup.cancel") : t("setup.back")}
         </Button>
-        {onResetCredential ? (
+        {onResetCredential && editorId === null ? (
           <Button
             size="floor"
             variant="secondary"
@@ -553,7 +706,28 @@ export function WorkstationSetup({
           </Button>
         ) : null}
         <span className="workstation-setup__footer-spacer" />
-        {activeTab !== "sound" ? (
+        {activeTab === "printer" && editorId !== null ? (
+          <>
+            {routing.printers.some((printer) => printer.id === editorId) ? (
+              <Button
+                size="floor"
+                variant="destructive"
+                disabled={busy}
+                onClick={() => setRemoveConfirmationOpen(true)}
+              >
+                {t("setup.removePrinter")}
+              </Button>
+            ) : null}
+            <Button
+              size="floor"
+              variant="secondary"
+              disabled={busy || loading}
+              onClick={savePrinter}
+            >
+              {t("setup.savePrinter")}
+            </Button>
+          </>
+        ) : activeTab !== "sound" ? (
           <Button size="floor" variant="secondary" disabled={busy} onClick={nextTab}>
             {t("setup.next")}
           </Button>
@@ -563,6 +737,26 @@ export function WorkstationSetup({
         </Button>
       </footer>
 
+      <FullScreenDialog
+        open={removeConfirmationOpen}
+        title={t("setup.removePrinterTitle")}
+        backLabel={t("setup.cancel")}
+        onClose={() => setRemoveConfirmationOpen(false)}
+        footer={
+          <Button size="floor" variant="destructive" disabled={busy} onClick={removePrinter}>
+            {t("setup.removePrinter")}
+          </Button>
+        }
+      >
+        <div className="workstation-setup__reset-confirmation">
+          <p>
+            {t("setup.removePrinterDetail", {
+              name:
+                routing.printers.find((printer) => printer.id === editorId)?.name ?? printerName,
+            })}
+          </p>
+        </div>
+      </FullScreenDialog>
       {onResetCredential ? (
         <FullScreenDialog
           open={resetConfirmationOpen}

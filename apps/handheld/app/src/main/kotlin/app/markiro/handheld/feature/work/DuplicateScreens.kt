@@ -15,6 +15,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.QrCodeScanner
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -40,6 +41,8 @@ import app.markiro.handheld.core.duplicate.ReprintReason
 
 sealed interface DuplicateStep {
     data object Idle : DuplicateStep
+    data class Sending(val jobId: String) : DuplicateStep
+    data class ReadyToResume(val jobId: String) : DuplicateStep
     data class Awaiting(val jobId: String, val tail: String) : DuplicateStep
     data class Verified(val jobId: String) : DuplicateStep
 
@@ -60,6 +63,8 @@ sealed interface DuplicateStep {
     data class Rejected(val jobId: String, val mismatch: Boolean) : DuplicateStep
 
     fun jobId(): String? = when (this) {
+        is Sending -> jobId
+        is ReadyToResume -> jobId
         is Awaiting -> jobId
         is Verified -> jobId
         is Failed -> jobId
@@ -75,6 +80,7 @@ data class DuplicateCallbacks(
     val onScanAgain: () -> Unit = {},
     val onDismiss: () -> Unit = {},
     val onSkip: () -> Unit = {},
+    val onOtherPrinter: () -> Unit = {},
 )
 
 /** The operator-facing name for a duplicate failure. Never a raw code. */
@@ -96,21 +102,37 @@ fun duplicateReasonLabel(reason: String): Int = when (reason) {
 }
 
 @Composable
-fun DuplicateScreen(step: DuplicateStep, cb: DuplicateCallbacks) {
+fun DuplicateScreen(step: DuplicateStep, cb: DuplicateCallbacks, destinationLabel: String? = null, replacementLabel: String? = null) {
     if (step is DuplicateStep.Awaiting || step is DuplicateStep.Verified) {
-        VerificationScreen(step, cb)
+        VerificationScreen(step, cb, destinationLabel, replacementLabel)
         return
     }
     val c = MarkiroTheme.colors
     val t = MarkiroTheme.type
     val tone = c.tone(if (step is DuplicateStep.Failed) Tone.Err else Tone.Warn)
     Column(
-        Modifier.fillMaxSize().background(tone.bg).padding(MarkiroSizes.sp4),
+        Modifier.fillMaxSize().background(tone.bg).verticalScroll(rememberScrollState()).padding(MarkiroSizes.sp4),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
+        Text(stringResource(R.string.printer_purpose_duplicate) + " · " + (destinationLabel ?: stringResource(R.string.printer_unassigned)),
+            style = t.caption, color = c.fg2, textAlign = TextAlign.Center)
+        replacementLabel?.let { Text(stringResource(R.string.printer_replacement_label, it), style = t.caption, color = c.accent) }
         when (step) {
             DuplicateStep.Idle, is DuplicateStep.Awaiting, is DuplicateStep.Verified -> Unit
+
+            is DuplicateStep.Sending -> {
+                CircularProgressIndicator(color = c.accent)
+                Text(stringResource(R.string.duplicate_printing), style = t.title, color = c.fg1, textAlign = TextAlign.Center)
+            }
+
+            is DuplicateStep.ReadyToResume -> {
+                Text(stringResource(R.string.printer_prepared_title), style = t.title, color = c.fg1, textAlign = TextAlign.Center)
+                Text(stringResource(R.string.printer_prepared_hint), style = t.body, color = c.fg2, textAlign = TextAlign.Center)
+                Spacer(Modifier.padding(MarkiroSizes.sp2))
+                if (replacementLabel == null) PrimaryButton(stringResource(R.string.printer_resume_print), cb.onRetry)
+                else ReprintReasons(cb)
+            }
 
             is DuplicateStep.Failed -> {
                 Text(stringResource(R.string.duplicate_failed_title), style = t.title, color = tone.fg, textAlign = TextAlign.Center)
@@ -123,7 +145,7 @@ fun DuplicateScreen(step: DuplicateStep, cb: DuplicateCallbacks) {
                 )
                 Spacer(Modifier.padding(MarkiroSizes.sp2))
                 if (step.jobId != null) {
-                    PrimaryButton(stringResource(R.string.duplicate_retry), cb.onRetry)
+                    if (replacementLabel == null) PrimaryButton(stringResource(R.string.duplicate_retry), cb.onRetry)
                     ReprintReasons(cb)
                 } else {
                     Text(
@@ -174,6 +196,8 @@ fun DuplicateScreen(step: DuplicateStep, cb: DuplicateCallbacks) {
                 ReprintReasons(cb)
             }
         }
+        if (step is DuplicateStep.Sending) return@Column
+        if (step.jobId() != null) MarkiroTextButton(stringResource(R.string.box_close_other_printer), cb.onOtherPrinter)
         Spacer(Modifier.padding(MarkiroSizes.sp1))
         MarkiroTextButton(stringResource(R.string.duplicate_dismiss), cb.onDismiss)
     }
@@ -192,7 +216,7 @@ private fun ReprintReasons(cb: DuplicateCallbacks) {
 
 /** The scanner remains owned by the work route while this screen explains its new purpose. */
 @Composable
-private fun VerificationScreen(step: DuplicateStep, cb: DuplicateCallbacks) {
+private fun VerificationScreen(step: DuplicateStep, cb: DuplicateCallbacks, destinationLabel: String?, replacementLabel: String?) {
     val verified = step is DuplicateStep.Verified
     val colors = MarkiroTheme.colors.tone(if (verified) Tone.Ok else Tone.Warn)
     val type = MarkiroTheme.type
@@ -206,15 +230,22 @@ private fun VerificationScreen(step: DuplicateStep, cb: DuplicateCallbacks) {
                     contentDescription = null, tint = colors.onSolid, modifier = Modifier.size(72.dp))
                 Text(stringResource(if (verified) R.string.duplicate_verified_title else R.string.duplicate_verify_title),
                     style = type.title, color = colors.onSolid, textAlign = TextAlign.Center)
+                Text(stringResource(R.string.printer_purpose_duplicate) + " · " + (destinationLabel ?: stringResource(R.string.printer_unassigned)),
+                    style = type.caption, color = colors.onSolid, textAlign = TextAlign.Center)
                 if (step is DuplicateStep.Awaiting) Text(step.tail, style = type.code, color = colors.onSolid)
                 Text(stringResource(if (verified) R.string.duplicate_verified_hint else R.string.duplicate_verify_hint),
                     style = type.body, color = colors.onSolid, textAlign = TextAlign.Center)
             }
         }
         if (!verified) {
+            replacementLabel?.let {
+                Text(stringResource(R.string.printer_replacement_label, it), style = type.caption, color = colors.onSolid,
+                    modifier = Modifier.padding(vertical = MarkiroSizes.sp2))
+            }
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2)) {
                 if (problems) {
                     ReprintReasons(cb)
+                    MarkiroTextButton(stringResource(R.string.box_close_other_printer), cb.onOtherPrinter)
                     SecondaryButton(stringResource(R.string.duplicate_return_to_scan), { problems = false })
                 } else {
                     SecondaryButton(stringResource(R.string.duplicate_label_problem), { problems = true })

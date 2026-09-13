@@ -2,6 +2,7 @@ package app.markiro.handheld.feature.work
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import app.markiro.handheld.core.print.PrinterEntity
 import app.markiro.handheld.core.box.BoxPrint
 import app.markiro.handheld.core.box.BoxPrinter
 import app.markiro.handheld.core.box.BoxRepository
@@ -35,6 +36,7 @@ data class LabelQueueItem(
     val printState: String,
     val reason: String?,
     val kind: LabelKind = LabelKind.BOX,
+    val destinationName: String? = null,
 ) {
     /**
      * An unknown outcome is not retried in bulk: a second label on a box the
@@ -43,7 +45,7 @@ data class LabelQueueItem(
     val skippedByPrintAll: Boolean get() = printState == BoxPrint.UNKNOWN
 }
 
-data class LabelQueueUi(val items: List<LabelQueueItem> = emptyList(), val printing: Boolean = false)
+data class LabelQueueUi(val items: List<LabelQueueItem> = emptyList(), val printing: Boolean = false, val printers: List<PrinterEntity> = emptyList())
 
 /**
  * Labels owed on this device, across both closed boxes and closed pallets.
@@ -78,21 +80,23 @@ class LabelQueueViewModel @Inject constructor(
         boxes.observeUnprinted(),
         pallets.observeUnprinted(),
         printing,
-    ) { boxRows, palletRows, inFlight ->
+        combine(printer.observeProfiles(), printer.observeDestinations()) { profiles, destinations -> profiles to destinations },
+    ) { boxRows, palletRows, inFlight, routing ->
         val boxItems = boxRows.mapNotNull { row ->
             val sscc = row.sscc ?: return@mapNotNull null
             val closedAt = row.closedAt ?: return@mapNotNull null
-            LabelQueueItem(row.boxId, sscc, closedAt, row.printState, row.printReason, LabelKind.BOX)
+            LabelQueueItem(row.boxId, sscc, closedAt, row.printState, row.printReason, LabelKind.BOX, routing.second.firstOrNull { it.purpose == "box" && it.attemptId == "initial" && it.jobId == row.boxId }?.printer?.name)
         }
         val palletItems = palletRows.mapNotNull { row ->
             val sscc = row.sscc ?: return@mapNotNull null
             val closedAt = row.closedAt ?: return@mapNotNull null
-            LabelQueueItem(row.palletId, sscc, closedAt, row.printState, row.printReason, LabelKind.PALLET)
+            LabelQueueItem(row.palletId, sscc, closedAt, row.printState, row.printReason, LabelKind.PALLET, routing.second.firstOrNull { it.purpose == "pallet" && it.attemptId == "initial" && it.jobId == row.palletId }?.printer?.name)
         }
-        LabelQueueUi(items = (boxItems + palletItems).sortedBy { it.closedAt }, printing = inFlight)
+        LabelQueueUi(items = (boxItems + palletItems).sortedBy { it.closedAt }, printing = inFlight, printers = routing.first)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, LabelQueueUi())
 
-    fun printOne(id: String) = runPrint { print(id) }
+    fun printOne(id: String) = runPrint { print(id, allowUnknown = true) }
+    fun reroute(id: String, printerId: String) = runPrint { print(id, printerId, allowUnknown = true) }
 
     /**
      * Printing again a box whose last attempt ended `unknown` is an explicit
@@ -153,15 +157,15 @@ class LabelQueueViewModel @Inject constructor(
         }
     }
 
-    private suspend fun print(id: String) {
+    private suspend fun print(id: String, replacementPrinterId: String? = null, allowUnknown: Boolean = false) {
         when (state.value.items.firstOrNull { it.id == id }?.kind ?: LabelKind.BOX) {
             LabelKind.BOX -> {
-                auditIfOutcomeUnknown(id)
-                printer.print(id)
+                if (allowUnknown) auditIfOutcomeUnknown(id)
+                printer.print(id, replacementPrinterId, allowUnknown = allowUnknown)
             }
             LabelKind.PALLET -> {
-                auditPalletIfOutcomeUnknown(id)
-                palletPrinter.print(id)
+                if (allowUnknown) auditPalletIfOutcomeUnknown(id)
+                palletPrinter.print(id, replacementPrinterId, allowUnknown = allowUnknown)
             }
         }
     }

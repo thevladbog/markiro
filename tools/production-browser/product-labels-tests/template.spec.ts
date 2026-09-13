@@ -1,4 +1,6 @@
 import { expect, test } from "@playwright/test";
+import { productLabelsEndpoints } from "../product-labels.playwright.config.js";
+const origin = productLabelsEndpoints().adminUrl;
 for (const rasterizer of ["admin", "station"]) {
   for (const dpi of [203, 300]) {
     for (const name of ["full", "short"]) {
@@ -9,7 +11,7 @@ for (const rasterizer of ["admin", "station"]) {
         const errors: string[] = [];
         page.on("pageerror", (error) => errors.push(error.message));
         await page.goto(
-          `http://127.0.0.1:43181/test/browser/product-label-template.html?rasterizer=${rasterizer}&dpi=${dpi}&name=${name}`,
+          `${origin}/test/browser/product-label-template.html?rasterizer=${rasterizer}&dpi=${dpi}&name=${name}`,
         );
         await expect(page.locator("html")).toHaveAttribute("data-label-raster", "ready");
         await expect(page.locator("html")).toHaveAttribute("data-cold-font-match", "true");

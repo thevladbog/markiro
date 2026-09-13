@@ -1,4 +1,7 @@
 import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
+import { PrinterDestination } from "../PrinterDestination.js";
+import type { PrinterProfile } from "../../lib/printer-routing.js";
 import { useTranslation } from "react-i18next";
 import { Alert, Button, FullScreenDialog } from "@markiro/ui";
 import type { ReprintReason } from "@markiro/domain";
@@ -10,11 +13,13 @@ export function ProductLabelReprintReason({
   onConfirm,
   onBack,
   error = false,
+  destination,
 }: {
   busy: boolean;
   onConfirm: (reason: ReprintReason) => void;
   onBack: () => void;
   error?: boolean;
+  destination?: ReactNode;
 }) {
   const { t } = useTranslation();
   const [reason, setReason] = useState<ReprintReason | null>(null);
@@ -40,6 +45,7 @@ export function ProductLabelReprintReason({
       }
     >
       {error ? <Alert tone="error" title={t("productLabels.reprintFailed")} /> : null}
+      {destination}
       <fieldset className="setup-choice-group">
         <legend>{t("productLabels.reasonHint")}</legend>
         {(["not_printed", "damaged", "lost"] as const).map((value) => (
@@ -76,14 +82,19 @@ export function ProductLabelVerification({
   const { t } = useTranslation();
   const [reasonOpen, setReasonOpen] = useState(false);
   const [error, setError] = useState(false);
+  const [replacement, setReplacement] = useState<PrinterProfile | null>(null);
   const job = state.job;
+  const compatiblePrinters = work
+    .printers()
+    .filter((printer) => printer.language === job?.language && printer.dpi === job.dpi);
   const awaiting = job?.status === "awaiting_verification" && !state.error;
   useEffect(() => () => work.setVerificationPaused(false), [work]);
   async function reprint(reason: ReprintReason) {
     if (!job) return;
     setError(false);
     try {
-      await work.reprint(job.jobId, reason);
+      await work.reprint(job.jobId, reason, replacement ?? undefined);
+      setReplacement(null);
       work.setVerificationPaused(false);
       setReasonOpen(false);
     } catch {
@@ -93,12 +104,27 @@ export function ProductLabelVerification({
   if (reasonOpen)
     return (
       <ProductLabelReprintReason
+        destination={
+          job ? (
+            <PrinterDestination
+              purpose="duplicate"
+              printer={replacement ?? job.printer ?? null}
+              printers={compatiblePrinters}
+              disabled={state.busy}
+              onChoose={(printer) => {
+                setReplacement(printer);
+                return Promise.resolve();
+              }}
+            />
+          ) : null
+        }
         busy={state.busy}
         error={error}
         onConfirm={(reason) => void reprint(reason)}
         onBack={() => {
           work.setVerificationPaused(false);
           setReasonOpen(false);
+          setReplacement(null);
         }}
       />
     );
@@ -178,6 +204,17 @@ export function ProductLabelVerification({
       }
     >
       <div className="print-verification">
+        {job ? (
+          <PrinterDestination
+            purpose="duplicate"
+            printer={job.printer ?? null}
+            printers={compatiblePrinters}
+            disabled={state.busy || job.ownershipConflict}
+            {...(job.status === "prepared"
+              ? { onChoose: (printer: PrinterProfile) => work.changePreparedPrinter(printer) }
+              : {})}
+          />
+        ) : null}
         <section className="print-verification__stage">
           {awaiting ? (
             <svg

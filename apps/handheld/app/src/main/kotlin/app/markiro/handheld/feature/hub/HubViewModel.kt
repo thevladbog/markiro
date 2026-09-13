@@ -6,7 +6,9 @@ import androidx.lifecycle.viewModelScope
 import app.markiro.handheld.R
 import app.markiro.handheld.core.inventory.InventorySyncEngine
 import app.markiro.handheld.core.print.PrinterDao
-import app.markiro.handheld.core.print.PrinterEntity
+import app.markiro.handheld.core.print.PrinterRouting
+import app.markiro.handheld.core.print.PrintPurpose
+import app.markiro.handheld.core.print.observeRouting
 import app.markiro.handheld.core.inventory.InventorySyncState
 import app.markiro.handheld.core.box.BoxRepository
 import app.markiro.handheld.core.network.ReachabilityTracker
@@ -61,6 +63,8 @@ data class HubUi(
     val continueInventoryNumber: String? = null,
     /** Drives both the settings tile's hint and the printer indicator's tone. */
     val printerConfigured: Boolean = false,
+    val missingPrinterPurposes: List<PrintPurpose> = emptyList(),
+    val printerAttentionPurposes: List<PrintPurpose> = emptyList(),
     /** Closed boxes on this device whose label is still owed, across every shift. */
     val unprintedLabels: Int = 0,
     val activeShift: HubActiveShift? = null,
@@ -172,7 +176,7 @@ class HubViewModel(
 
     val state: StateFlow<HubUi> = combine(
         config.observe(), session.state, reachability.lastSuccessAt, tick, sync.state, activeShift, inventorySync.state, activeInventory,
-        printers.observeSelected(), boxes.observeUnprintedCount(),
+        printers.observeRouting(), boxes.observeUnprintedCount(),
     ) { values ->
         val cfg = values[0] as DeviceConfigEntity?
         val ses = values[1] as SessionState
@@ -181,9 +185,11 @@ class HubViewModel(
         val current = (values[5] as HubActiveShift?)?.takeIf { it.shift.id == cfg?.activeShiftId }
         val inventoryState = values[6] as InventorySyncState
         val inventory = (values[7] as InventoryTaskEntity?)?.takeIf { it.state == "active" }
-        val printer = values[8] as PrinterEntity?
+        val printer = values[8] as PrinterRouting
         HubUi(
-            printerConfigured = printer != null,
+            printerConfigured = printer.missing.isEmpty() && printer.attention.isEmpty(),
+            missingPrinterPurposes = printer.missing,
+            printerAttentionPurposes = printer.attention,
             unprintedLabels = values[9] as Int,
             organization = cfg?.organizationName.orEmpty(),
             operatorName = ses.operator?.name.orEmpty(),

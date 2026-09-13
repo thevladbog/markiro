@@ -58,6 +58,48 @@ function migratedDb(): DatabaseSync {
 }
 
 describe("STATION_MIGRATIONS", () => {
+  it("adds local printer destinations without rewriting old journals and replays safely", () => {
+    const db = new DatabaseSync(":memory:");
+    const index = STATION_MIGRATIONS.findIndex((sql) =>
+      sql.includes("CREATE TABLE IF NOT EXISTS printer_destinations"),
+    );
+    expect(index).toBeGreaterThan(0);
+    applyStatements(db, STATION_MIGRATIONS.slice(0, index));
+    db.prepare("INSERT INTO station_meta(key,value) VALUES('legacy-printer','preserved')").run();
+    db.prepare(
+      "INSERT INTO validation_occurrences(shift_id,code_hash,scanned_at,credential_ownership,terminal_id,canonical_raw,source_shift_id,outcome,receipt_outcome,ownership_released) VALUES(?,?,?,?,?,?,?,?,?,?)",
+    ).run(
+      "shift",
+      "hash",
+      "now",
+      "owner",
+      "terminal",
+      "FULL\u001d92CRYPTO",
+      "old",
+      "reprocessed",
+      "reprocessed",
+      1,
+    );
+    const validationBefore = db.prepare("SELECT * FROM validation_occurrences").all();
+    applyStatements(db, STATION_MIGRATIONS.slice(index));
+    const insert = db.prepare(
+      "INSERT INTO printer_destinations(scope,purpose,job_id,attempt_id,profile_json) VALUES(?,?,?,?,?)",
+    );
+    insert.run("owner", "box", "job", "attempt", '{"name":"Box printer"}');
+    insert.run("other-owner", "box", "job", "attempt", "{}");
+    expect(() => insert.run("owner", "box", "job", "attempt", "{}")).toThrow(/UNIQUE/);
+    expect(() => insert.run("owner", "other", "other", "attempt", "{}")).toThrow(/CHECK/);
+    expect(() => insert.run("owner", "box", "other", "attempt", "invalid")).toThrow(/CHECK/);
+    applyStationMigrations(db);
+    expect(db.prepare("SELECT value FROM station_meta WHERE key='legacy-printer'").get()).toEqual({
+      value: "preserved",
+    });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM printer_destinations").get()).toEqual({
+      count: 2,
+    });
+    expect(db.prepare("SELECT * FROM validation_occurrences").all()).toEqual(validationBefore);
+    db.close();
+  });
   it("assigns unique append-only identities and names only the superseded audit steps", () => {
     expect(STATION_MIGRATION_ENTRIES.map((migration) => migration.id)).toEqual(
       STATION_MIGRATIONS.map(

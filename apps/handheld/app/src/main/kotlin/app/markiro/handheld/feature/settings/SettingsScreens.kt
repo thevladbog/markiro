@@ -77,7 +77,13 @@ fun SettingsScreen(
             SettingRow(stringResource(R.string.settings_scanner), sourceLabel(state), onScanner)
             SettingRow(
                 stringResource(R.string.printer_title),
-                state.printerLabel ?: stringResource(R.string.printer_none),
+                state.missingPrinterPurposes?.let { missing ->
+                    if (missing.isEmpty() && state.printerAttentionPurposes.isNotEmpty()) stringResource(R.string.printer_attention_purposes,
+                        state.printerAttentionPurposes.map { stringResource(app.markiro.handheld.feature.printer.purposeLabel(it)) }.joinToString(", "))
+                    else if (missing.isEmpty()) stringResource(R.string.printer_configured_purposes, 3)
+                    else stringResource(R.string.printer_missing_purposes,
+                        missing.map { stringResource(app.markiro.handheld.feature.printer.purposeLabel(it)) }.joinToString(", "))
+                } ?: state.printerLabel ?: stringResource(R.string.printer_none),
                 onPrinter,
             )
             SettingRow(stringResource(R.string.settings_language), if (state.language == "en") "English" else "Русский") {

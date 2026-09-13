@@ -145,6 +145,11 @@ function stubFetch(
   return fetchMock;
 }
 
+const renderedRouters: Array<{
+  queryClient: QueryClient;
+  router: ReturnType<typeof createMemoryRouter>;
+}> = [];
+
 function renderKiosksRouter(
   initialEntries: Array<string | { pathname: string; state: { kiosksBackground: true } }> = [
     "/devices",
@@ -194,6 +199,7 @@ function renderKiosksRouter(
     ),
     { initialEntries, initialIndex: initialEntries.length - 1 },
   );
+  renderedRouters.push({ queryClient, router });
   render(
     <QueryClientProvider client={queryClient}>
       <ThemeProvider defaultTheme="light">
@@ -207,11 +213,18 @@ function renderKiosksRouter(
 }
 
 afterEach(async () => {
-  cleanup();
+  await act(async () => {
+    cleanup();
+    for (const { queryClient, router } of renderedRouters.splice(0)) {
+      router.dispose();
+      await queryClient.cancelQueries();
+      queryClient.clear();
+    }
+    await i18n.changeLanguage("ru");
+  });
   vi.unstubAllGlobals();
   createHookMountSpy.mockClear();
   updateHookMountSpy.mockClear();
-  await i18n.changeLanguage("ru");
 });
 
 it("opens kiosk creation at the nested panel route", async () => {

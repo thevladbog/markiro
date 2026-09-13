@@ -23,7 +23,11 @@ export interface DeviceBox {
 export type BoxPrintState = "legacy" | "pending" | "printed" | "skipped";
 
 export type BoxPrintErrorCode =
-  "template_missing" | "printer_unconfigured" | "render_failed" | "transport_failed";
+  | "template_missing"
+  | "printer_unconfigured"
+  | "render_failed"
+  | "transport_failed"
+  | "persistence_failed";
 
 export interface UnresolvedBoxPrint {
   boxId: string;

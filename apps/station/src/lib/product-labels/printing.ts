@@ -13,6 +13,16 @@ import {
   requireProductLabelJob,
 } from "./store.js";
 import type { ProductLabelActor, ProductLabelJobView, ProductLabelPrintingDeps } from "./types.js";
+import {
+  bindPrintDestination,
+  readPrintDestination,
+  discardUncommittedPrintDestination,
+} from "../print-destinations.js";
+import {
+  outputPrinterProfile,
+  serializePrinterOutput,
+  type PrinterProfile,
+} from "../printer-routing.js";
 
 const activeSends = new Map<string, Promise<ProductLabelJobView>>();
 const sendKey = (owner: string, jobId: string) => JSON.stringify([owner, jobId]);
@@ -45,17 +55,27 @@ async function sendPreparedBody(
   const job = await requireProductLabelJob(exec, credentialOwnership, jobId);
   if (job.projection.attemptState !== "prepared") return presentProductLabelJob(job);
   const base = nextProductLabelEventBase(job, deps);
-  const target = deps.target;
+  const printer = await bindPrintDestination(
+    exec,
+    {
+      scope: job.credentialOwnership,
+      purpose: "duplicate",
+      jobId,
+      attemptId: job.projection.attemptId,
+    },
+    outputPrinterProfile(deps),
+  );
+  const target = printer?.target ?? null;
   if (
     target === null ||
-    deps.dpi === null ||
-    deps.language !== job.projection.language ||
-    deps.dpi !== job.projection.dpi
+    !printer?.dpi ||
+    printer.language !== job.projection.language ||
+    printer.dpi !== job.projection.dpi
   ) {
     await appendProductLabelEvent(exec, credentialOwnership, {
       ...base,
       kind: "failed_before_send",
-      errorCode: target === null || deps.dpi === null ? "printer_unconfigured" : "printer_changed",
+      errorCode: target === null || !printer?.dpi ? "printer_unconfigured" : "printer_changed",
     });
     return presentProductLabelJob(await requireProductLabelJob(exec, credentialOwnership, jobId));
   }
@@ -70,9 +90,25 @@ async function sendPreparedBody(
   );
   if (claimed !== "applied")
     return presentProductLabelJob(await requireProductLabelJob(exec, credentialOwnership, jobId));
+  // A compatible explicit choice may have won just before the sending claim.
+  // Once sending is durable, the replacement statement below cannot change it.
+  const claimedPrinter = await readPrintDestination(exec, {
+    scope: job.credentialOwnership,
+    purpose: "duplicate",
+    jobId,
+    attemptId: job.projection.attemptId,
+  });
+  if (
+    !claimedPrinter ||
+    claimedPrinter.language !== job.projection.language ||
+    claimedPrinter.dpi !== job.projection.dpi
+  )
+    throw new Error("Saved print destination unavailable");
   const bytes = Uint8Array.from(atob(job.bytesBase64), (char) => char.charCodeAt(0));
   try {
-    await deps.print(target, bytes);
+    await serializePrinterOutput(claimedPrinter.target, () =>
+      deps.print(claimedPrinter.target, bytes),
+    );
   } catch {
     await appendProductLabelEvent(exec, credentialOwnership, {
       ...base,
@@ -93,6 +129,40 @@ async function sendPreparedBody(
     kind: "sent",
   });
   return presentProductLabelJob(await requireProductLabelJob(exec, credentialOwnership, jobId));
+}
+
+export async function changePreparedProductLabelPrinter(
+  exec: SqlExecutor,
+  owner: string,
+  jobId: string,
+  attemptId: string,
+  printer: PrinterProfile,
+): Promise<void> {
+  const job = await requireProductLabelJob(exec, owner, jobId);
+  if (
+    job.ownershipConflict ||
+    job.projection.attemptState !== "prepared" ||
+    job.projection.attemptId !== attemptId ||
+    isProductLabelSendActive(owner, jobId)
+  )
+    throw new Error("Print attempt unavailable");
+  if (printer.language !== job.projection.language || printer.dpi !== job.projection.dpi)
+    throw new Error("Incompatible printer");
+  const guard = `EXISTS (SELECT 1 FROM product_label_jobs WHERE credential_ownership=? AND job_id=? AND ownership_conflict=0 AND status='prepared' AND json_extract(projection_json,'$.attemptState')='prepared' AND json_extract(projection_json,'$.attemptId')=?)`;
+  const guardParams = [job.credentialOwnership, jobId, attemptId];
+  const rows = await exec.all<{ profile_json: string }>(
+    `INSERT INTO printer_destinations(scope,purpose,job_id,attempt_id,profile_json) SELECT ?,'duplicate',?,?,? WHERE ${guard} ON CONFLICT(scope,purpose,job_id,attempt_id) DO UPDATE SET profile_json=excluded.profile_json WHERE ${guard} AND printer_destinations.profile_json=? RETURNING profile_json`,
+    [
+      job.credentialOwnership,
+      jobId,
+      attemptId,
+      JSON.stringify(printer),
+      ...guardParams,
+      ...guardParams,
+      job.printer ? JSON.stringify(job.printer) : null,
+    ],
+  );
+  if (rows.length !== 1) throw new Error("Print attempt changed");
 }
 
 export async function verifyProductLabel(
@@ -154,6 +224,10 @@ export async function prepareProductLabelReprint(
     credentialOwnership: string;
     reason: ReprintReason;
     recovery?: boolean;
+    /** Explicit operator-selected replacement; absent keeps the previous destination. */
+    printer?: PrinterProfile;
+    /** First explicit resume of a legacy job with no historical output snapshot. */
+    fallbackPrinter?: PrinterProfile | null;
   },
 ): Promise<string> {
   const reason = z.enum(["not_printed", "damaged", "lost"]).parse(input.reason);
@@ -163,6 +237,26 @@ export async function prepareProductLabelReprint(
   if (job.projection.attemptState === "prepared" || job.projection.attemptState === "sending")
     throw new DomainError("PRODUCT_LABEL_BUSY", "The current print attempt has not finished");
   const attemptId = input.newId();
+  const previousPrinter = await readPrintDestination(exec, {
+    scope: job.credentialOwnership,
+    purpose: "duplicate",
+    jobId: input.jobId,
+    attemptId: job.projection.attemptId,
+  });
+  const printer = input.printer ?? previousPrinter ?? input.fallbackPrinter ?? null;
+  if (
+    printer &&
+    (printer.language !== job.projection.language || printer.dpi !== job.projection.dpi)
+  )
+    throw new DomainError(
+      "PRODUCT_LABEL_PRINTER_CHANGED",
+      "Saved bytes require the same language and resolution",
+    );
+  await bindPrintDestination(
+    exec,
+    { scope: job.credentialOwnership, purpose: "duplicate", jobId: input.jobId, attemptId },
+    printer,
+  );
   const event: ProductLabelEvent = {
     ...nextProductLabelEventBase(job, input),
     kind: "prepared",
@@ -177,10 +271,17 @@ export async function prepareProductLabelReprint(
     (await appendProductLabelEvent(exec, input.credentialOwnership, event, {
       recovery: input.recovery ?? false,
     })) !== "applied"
-  )
+  ) {
+    await discardUncommittedPrintDestination(exec, {
+      scope: job.credentialOwnership,
+      purpose: "duplicate",
+      jobId: input.jobId,
+      attemptId,
+    });
     throw new DomainError(
       "PRODUCT_LABEL_STALE",
       "The print attempt changed; refresh the current label",
     );
+  }
   return attemptId;
 }

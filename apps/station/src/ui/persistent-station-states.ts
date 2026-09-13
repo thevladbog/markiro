@@ -126,6 +126,7 @@ export const PERSISTENT_STATION_STATE_GALLERY = {
     template_missing: "box-print-template-missing",
     printer_unconfigured: "box-print-printer-unconfigured",
     render_failed: "box-print-render-failed",
+    persistence_failed: "box-print-persistence-failed",
     transport_failed: "box-print-transport-failed",
     "skip-confirm": "box-print-skip-confirm",
   } as const satisfies Record<BoxPrintErrorCode | "skip-confirm", string>,

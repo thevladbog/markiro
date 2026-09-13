@@ -20,7 +20,7 @@ import type { ScanQueue } from "../src/lib/scan-queue.js";
 import * as signalSound from "../src/lib/signal-sound.js";
 import type { SoundSettings } from "../src/lib/signal-sound.js";
 import { addRange } from "../src/lib/sscc-pool.js";
-import { WorkScreen } from "../src/pages/WorkScreen.js";
+import { WorkScreen, type WorkScreenProps } from "../src/pages/WorkScreen.js";
 import { useTimeZone } from "./support/timezone.js";
 
 /**
@@ -302,6 +302,7 @@ const SSCC = buildSscc(0, TEST_ISSUER_PREFIX, 777);
  * pin it explicitly rather than letting `Date.now()` leak in. */
 const CLOSED_AT = "2026-07-23T09:15:00.000Z";
 interface RenderWorkOverrides extends RenderWorkScreenOverrides {
+  printers?: WorkScreenProps["printers"];
   issuerPrefix?: string | null;
   boxCapacity?: number | null;
   bundleRevision?: number;
@@ -414,6 +415,7 @@ function renderWork(overrides: RenderWorkOverrides = {}) {
     onScan,
     verifyPrintedLabel = false,
     printing,
+    printers = [],
     onOpenPrinterSetup,
     onPrintRecoveryChange,
     productShelfLifeDays,
@@ -467,6 +469,7 @@ function renderWork(overrides: RenderWorkOverrides = {}) {
       bundleRevision={revision}
       {...(closeCurrentBox ? { closeCurrentBox } : {})}
       {...(onScan ? { onScan } : {})}
+      printers={printers}
       verifyPrintedLabel={verifyPrintedLabel}
       {...(printing !== undefined ? { printing } : {})}
       {...(onOpenPrinterSetup ? { onOpenPrinterSetup } : {})}
@@ -1877,6 +1880,98 @@ describe("WorkScreen box progress, closing and printing", () => {
     act(() => scan(KM));
     await waitFor(() => expect(close).toHaveBeenCalled());
     expect(screen.queryByText("Отсканируйте распечатанную этикетку")).toBeNull();
+  });
+
+  it.each([false, true])(
+    "saves a successful box result without resending after durable failure (committed=%s)",
+    async (committed) => {
+      const base = makeExec();
+      await seedPendingPrint(base, "transport_failed");
+      const print = vi.fn(async () => {});
+      let failures = 2;
+      let updates = 0;
+      const exec: SqlExecutor = {
+        all: base.all,
+        run: async (sql, params) => {
+          if (sql.includes("UPDATE boxes_mirror") && sql.includes("SET print_state = 'printed'")) {
+            updates++;
+            if (failures-- > 0) {
+              if (committed) await base.run(sql, params);
+              throw new Error("printed result write failed");
+            }
+          }
+          return base.run(sql, params);
+        },
+      };
+      renderWorkTracked({
+        exec,
+        verifyPrintedLabel: true,
+        printers: [
+          {
+            id: "available",
+            name: "Available printer",
+            target: PRINT_TARGET,
+            language: "zpl",
+            dpi: 203,
+          },
+        ],
+        printing: { target: PRINT_TARGET, language: "zpl", print },
+      });
+      fireEvent.click(await screen.findByRole("button", { name: "Повторить печать" }));
+      for (let retry = 0; retry < 2; retry++) {
+        const save = await screen.findByRole("button", { name: "Сохранить результат" });
+        await waitFor(() => expect(save.hasAttribute("disabled")).toBe(false));
+        expect(screen.getByRole("alert").textContent).toContain("Этикетка отправлена");
+        expect(screen.queryByRole("button", { name: "Продолжить без этикетки" })).toBeNull();
+        expect(
+          screen.getByRole("button", { name: "Сменить принтер" }).hasAttribute("disabled"),
+        ).toBe(true);
+        fireEvent.click(save);
+        await waitFor(() => expect(updates).toBe(retry + 2));
+      }
+      await screen.findByText("Отсканируйте распечатанную этикетку");
+      expect(print).toHaveBeenCalledOnce();
+      expect(
+        await base.all("SELECT print_state FROM boxes_mirror WHERE box_id=?", [SEEDED_BOX_ID]),
+      ).toEqual([{ print_state: "printed" }]);
+    },
+  );
+
+  it("retries physical box output after a pre-send destination persistence failure", async () => {
+    const base = makeExec();
+    await seedPendingPrint(base, "transport_failed");
+    const print = vi.fn(async () => {});
+    let fail = true;
+    const exec: SqlExecutor = {
+      all: base.all,
+      run: async (sql, params) => {
+        if (fail && sql.includes("INSERT INTO printer_destinations")) {
+          fail = false;
+          throw new Error("binding failed");
+        }
+        return base.run(sql, params);
+      },
+    };
+    renderWorkTracked({
+      exec,
+      verifyPrintedLabel: true,
+      printers: [
+        {
+          id: "available",
+          name: "Available printer",
+          target: PRINT_TARGET,
+          language: "zpl",
+          dpi: 203,
+        },
+      ],
+      printing: { target: PRINT_TARGET, language: "zpl", print },
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Повторить печать" }));
+    await screen.findByText(i18n.t("printerRouting.storageFailed"));
+    expect(print).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Повторить печать" }));
+    await screen.findByText("Отсканируйте распечатанную этикетку");
+    expect(print).toHaveBeenCalledOnce();
   });
 
   it("drops a stale source callback after an immediately successful print with verification off", async () => {

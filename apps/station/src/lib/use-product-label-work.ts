@@ -16,6 +16,7 @@ import {
   sendPreparedProductLabel,
   verifyProductLabel,
   skipProductLabelVerification,
+  changePreparedProductLabelPrinter,
 } from "./product-labels/printing.js";
 import { restoreProductLabelWork } from "./product-labels/recovery.js";
 import {
@@ -32,6 +33,13 @@ import type {
 import type { HardwareConfig } from "./hardware-config.js";
 import type { PrintTarget } from "./hardware.js";
 import { rasterizeText } from "./rasterizer.js";
+import {
+  configuredPrinterRouting,
+  outputPrinterProfile,
+  resolvePrinter,
+  type PrinterProfile,
+} from "./printer-routing.js";
+import { bindPrintDestination, discardUnacceptedPrintDestination } from "./print-destinations.js";
 
 export interface ProductLabelWorkState {
   ready: boolean;
@@ -48,6 +56,7 @@ interface ProductLabelWorkOptions {
   generation?: CredentialGeneration;
   getPrinting(): ProductLabelPrintingDeps;
   canPrint?(): boolean;
+  printers?(): PrinterProfile[];
   isCurrent?(): boolean;
   prepare(raw: string): Promise<PreparedProductLabelAcceptance>;
 }
@@ -128,6 +137,7 @@ export function createProductLabelWork(options: ProductLabelWorkOptions) {
   }
   const api = {
     getSnapshot: () => state,
+    printers: () => options.printers?.() ?? [],
     setVerificationPaused(value: boolean) {
       verificationPaused = value;
     },
@@ -194,7 +204,10 @@ export function createProductLabelWork(options: ProductLabelWorkOptions) {
       if (!api.canAccept()) return { status: "busy" };
       return run(async () => {
         const input = await options.prepare(raw);
-        if (!current()) return { status: "busy" };
+        if (!current()) {
+          await discardUnacceptedPrintDestination(exec, input.credentialOwnership, input.jobId);
+          return { status: "busy" };
+        }
         let result: ProductLabelAcceptResult;
         try {
           result = await recordProductLabelAcceptance(exec, input);
@@ -210,6 +223,8 @@ export function createProductLabelWork(options: ProductLabelWorkOptions) {
               await refresh(input.jobId);
               return { status: "accepted", jobId: input.jobId };
             }
+            if (!saved)
+              await discardUnacceptedPrintDestination(exec, input.credentialOwnership, input.jobId);
             await refresh();
           } catch {
             /* Recovery will retry the saved journal from the blocked screen. */
@@ -217,7 +232,10 @@ export function createProductLabelWork(options: ProductLabelWorkOptions) {
           publish({ error: "storage" });
           throw error;
         }
-        if (result.status !== "accepted") return result;
+        if (result.status !== "accepted") {
+          await discardUnacceptedPrintDestination(exec, input.credentialOwnership, input.jobId);
+          return result;
+        }
         try {
           await refresh(result.jobId);
           await send(result.jobId);
@@ -288,15 +306,44 @@ export function createProductLabelWork(options: ProductLabelWorkOptions) {
       const jobId = state.job.jobId;
       await run(() => send(jobId));
     },
-    async reprint(jobId: string, reason: ReprintReason) {
+    async changePreparedPrinter(printer: PrinterProfile) {
       await run(async () => {
+        const view = state.job;
+        if (!view || view.status !== "prepared" || view.ownershipConflict)
+          throw new Error("Print attempt unavailable");
+        const selected = options
+          .printers?.()
+          .find((candidate) => JSON.stringify(candidate) === JSON.stringify(printer));
+        if (!selected || selected.language !== view.language || selected.dpi !== view.dpi)
+          throw new Error("Incompatible printer");
+        await changePreparedProductLabelPrinter(
+          exec,
+          credentialOwnership,
+          view.jobId,
+          view.attemptId,
+          selected,
+        );
+        await refresh(view.jobId);
+      });
+    },
+    async reprint(jobId: string, reason: ReprintReason, printer?: PrinterProfile) {
+      await run(async () => {
+        if (
+          printer &&
+          !options
+            .printers?.()
+            .some((candidate) => JSON.stringify(candidate) === JSON.stringify(printer))
+        )
+          throw new Error("Printer is no longer configured");
         await prepareProductLabelReprint(exec, {
           ...options.getPrinting(),
+          fallbackPrinter: outputPrinterProfile(options.getPrinting()),
           credentialOwnership,
           shiftId,
           jobId,
           reason,
           recovery: state.closed,
+          ...(printer ? { printer } : {}),
         });
         await refresh(jobId);
         await send(jobId);
@@ -388,15 +435,17 @@ export function useProductLabelWork(input: {
             live.environment.generation !== generation
           )
             throw new Error("Printing context missing");
+          const profile = resolvePrinter(config, "duplicate");
           return {
             exec,
             credentialOwnership: owner,
             operatorId: live.operatorId,
             now: () => new Date().toISOString(),
             newId: () => crypto.randomUUID(),
-            target: config.printer,
-            language: config.printerLanguage,
-            dpi: config.printerDpi ?? null,
+            profile,
+            target: profile?.target ?? null,
+            language: profile?.language ?? "zpl",
+            dpi: profile?.dpi ?? null,
             print: live.environment.print,
           };
         };
@@ -409,21 +458,27 @@ export function useProductLabelWork(input: {
             current.current.shiftId === shiftId &&
             current.current.environment?.generation === generation,
           getPrinting,
+          printers: () => {
+            const config = current.current.environment?.hardwareConfig;
+            return config ? configuredPrinterRouting(config).printers : [];
+          },
           canPrint: () => {
             const deps = getPrinting();
             // Any template prints on any printer; only the printer's own
             // resolution must be known (spec 2026-09-10).
             return deps.target !== null && deps.dpi !== null;
           },
-          prepare: (raw) => {
+          prepare: async (raw) => {
             const deps = getPrinting();
             const live = current.current;
             if (!deps.target || !live.environment) throw new Error("Printer is not configured");
-            return prepareProductLabelAcceptance({
+            const jobId = crypto.randomUUID();
+            const attemptId = crypto.randomUUID();
+            const prepared = await prepareProductLabelAcceptance({
               raw,
-              jobId: crypto.randomUUID(),
+              jobId,
               eventId: crypto.randomUUID(),
-              attemptId: crypto.randomUUID(),
+              attemptId,
               shiftId,
               terminalId: live.terminalId ?? live.environment.deviceId,
               deviceId: live.environment.deviceId,
@@ -439,6 +494,12 @@ export function useProductLabelWork(input: {
               printerDpi: deps.dpi,
               rasterizeText,
             });
+            await bindPrintDestination(
+              exec,
+              { scope: owner, purpose: "duplicate", jobId, attemptId },
+              deps.profile ?? null,
+            );
+            return prepared;
           },
         });
         await controller.open();

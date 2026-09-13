@@ -2,6 +2,13 @@ import type { LabelTemplateSpec, PrinterDpi } from "@markiro/domain";
 import type { BoxPrintErrorCode } from "./boxes.js";
 import type { PrintTarget } from "./hardware.js";
 import type { PrinterLanguage } from "./hardware-config.js";
+import type { SqlExecutor } from "./mirror.js";
+import { bindPrintDestination, type PrintDestinationKey } from "./print-destinations.js";
+import {
+  outputPrinterProfile,
+  serializePrinterOutput,
+  type PrinterProfile,
+} from "./printer-routing.js";
 
 export type BoxPrintAttempt =
   { kind: "printed"; bytes: Uint8Array } | { kind: "failed"; code: BoxPrintErrorCode };
@@ -9,7 +16,13 @@ export type BoxPrintAttempt =
 export interface BoxPrintInput {
   template: LabelTemplateSpec | null;
   fields: Record<string, string>;
+  destination?: {
+    exec: SqlExecutor;
+    key: PrintDestinationKey;
+    print?: (target: PrintTarget, bytes: Uint8Array) => Promise<void>;
+  };
   printing: {
+    profile?: PrinterProfile;
     target: PrintTarget;
     language: PrinterLanguage;
     /**
@@ -30,23 +43,29 @@ export interface BoxPrintInput {
 
 export async function attemptBoxPrint(input: BoxPrintInput): Promise<BoxPrintAttempt> {
   if (!input.template) return { kind: "failed", code: "template_missing" };
-  if (!input.printing) return { kind: "failed", code: "printer_unconfigured" };
+  const candidate = input.printing ? outputPrinterProfile(input.printing) : null;
+  let printer: PrinterProfile | null;
+  try {
+    printer = input.destination
+      ? await bindPrintDestination(input.destination.exec, input.destination.key, candidate)
+      : candidate;
+  } catch {
+    console.error("station: print destination could not be saved");
+    return { kind: "failed", code: "persistence_failed" };
+  }
+  const print = input.destination?.print ?? input.printing?.print;
+  if (!printer || !print) return { kind: "failed", code: "printer_unconfigured" };
 
   let bytes: Uint8Array;
   try {
-    bytes = await input.render(
-      input.template,
-      input.fields,
-      input.printing.language,
-      input.printing.dpi ?? null,
-    );
+    bytes = await input.render(input.template, input.fields, printer.language, printer.dpi);
   } catch {
     console.error("station: box label render failed");
     return { kind: "failed", code: "render_failed" };
   }
 
   try {
-    await input.printing.print(input.printing.target, bytes);
+    await serializePrinterOutput(printer.target, () => print(printer.target, bytes));
   } catch {
     console.error("station: box label transport failed");
     return { kind: "failed", code: "transport_failed" };

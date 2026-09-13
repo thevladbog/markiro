@@ -1,5 +1,6 @@
 package app.markiro.handheld.feature.work
 
+import app.markiro.handheld.core.print.upsertAssigned
 import app.markiro.handheld.core.storage.initializeRecoveryForTest
 import androidx.lifecycle.SavedStateHandle
 import androidx.room.Room
@@ -81,9 +82,11 @@ class WorkViewModelTest {
         var outcome: SendOutcome = SendOutcome.Delivered,
     ) : PrinterTransport {
         var sent = 0
+        var release: kotlinx.coroutines.CompletableDeferred<Unit>? = null
         override suspend fun status(printer: PrinterEntity) = nextStatus
         override suspend fun send(printer: PrinterEntity, document: ByteArray): SendOutcome {
             sent++
+            release?.await()
             return outcome
         }
     }
@@ -242,7 +245,7 @@ class WorkViewModelTest {
         )
         SsccPool(db).addRange(ServerRange("468008990", 0, 1, 100, null))
         if (withPrinter) {
-            db.printerDao().upsert(
+            db.printerDao().upsertAssigned(
                 PrinterEntity(
                     id = "p1", name = "Zebra", transport = "wifi", address = "127.0.0.1:9100",
                     language = "zpl", dpi = 203, selected = true, lastStatus = null, lastSeenAt = null,
@@ -475,7 +478,7 @@ class WorkViewModelTest {
                 productionDate = "2026-09-11",
             ),
         )
-        db.printerDao().upsert(
+        db.printerDao().upsertAssigned(
             PrinterEntity(
                 id = "p1", name = "Zebra", transport = "wifi", address = "10.0.0.1:9100",
                 language = "zpl", dpi = 203, selected = true, lastStatus = null, lastSeenAt = null,
@@ -493,9 +496,9 @@ class WorkViewModelTest {
         advanceUntilIdle()
         // Room answers on its own executor, so `advanceUntilIdle` returns while
         // the job is still being written. The UI state is set before the send
-        // too, so the only honest signal is the event log: prepared, sending,
-        // sent -- three, and only once the send is over.
+        // too. Wait for both the committed events and the UI continuation.
         db.productLabelEventDao().observeUnackedCount().first { it == 3 }
+        vm.duplicateStep.first { it == DuplicateStep.Idle }
         assertEquals(DuplicateStep.Idle, vm.duplicateStep.value)
         assertEquals(1, transport.sent)
         // Nothing took over the screen: the ordinary path stays quiet.
@@ -624,6 +627,46 @@ class WorkViewModelTest {
      * attempt failed was invisible after a restart -- and the next unit was then
      * refused with nothing on screen explaining why.
      */
+    @Test
+    fun aSlowDuplicateSendExposesItsSavedDestinationUntilOutputCompletes() = runTest {
+        duplicateShift()
+        val release = kotlinx.coroutines.CompletableDeferred<Unit>()
+        transport.release = release
+        val model = vm()
+        advanceUntilIdle()
+        scans.tryEmit(ScanEvent(duplicateRaw("AAA111"), null, "debug", 0))
+        val sending = model.duplicateStep.first { it is DuplicateStep.Sending } as DuplicateStep.Sending
+        val bound = model.printDestinations.first { rows -> rows.any { it.jobId == sending.jobId } }.single()
+        assertEquals("duplicate", bound.purpose)
+        assertEquals("Zebra", bound.printer.name)
+        release.complete(Unit)
+        model.duplicateStep.first { it == DuplicateStep.Idle }
+        assertEquals(1, transport.sent)
+    }
+
+    @Test
+    fun aLegacyPreparedJobRestoresAnExplicitContinueActionWithoutSending() = runTest {
+        duplicateShift()
+        val jobs = app.markiro.handheld.core.duplicate.DuplicateJobs(db, LabelRenderer(rasterize), transport)
+        val shift = checkNotNull(db.shiftDao().get("s1"))
+        val prepared = jobs.accept(shift, duplicateRaw("AAA111"), "c".repeat(64), "op-1", null, "2026-09-11T08:00:00.000Z")
+            as app.markiro.handheld.core.duplicate.DuplicateOutcome.Prepared
+        val before = checkNotNull(db.productLabelJobDao().get(prepared.jobId))
+        db.openHelper.writableDatabase.execSQL("DELETE FROM print_destinations WHERE purpose = 'duplicate' AND jobId = ?", arrayOf(prepared.jobId))
+        val restored = vm()
+        val step = restored.duplicateStep.first { it is DuplicateStep.ReadyToResume } as DuplicateStep.ReadyToResume
+        assertEquals(prepared.jobId, step.jobId)
+        assertEquals(0, transport.sent)
+        assertEquals(null, db.printerDao().destination("duplicate", prepared.jobId, before.attemptId))
+        restored.retryDuplicate()
+        restored.duplicateJob.first { it?.status == "completed" || (it == null && transport.sent == 1) }
+        val after = checkNotNull(db.productLabelJobDao().get(prepared.jobId))
+        assertEquals(before.bytesDigest, after.bytesDigest)
+        assertEquals(before.bytesBase64, after.bytesBase64)
+        assertEquals(1, transport.sent)
+        assertTrue(db.printerDao().destination("duplicate", prepared.jobId, before.attemptId) != null)
+    }
+
     @Test
     fun anOutstandingJobsScreenComesBackAfterARestart() = runTest {
         duplicateShift()

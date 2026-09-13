@@ -1,5 +1,6 @@
 package app.markiro.handheld.core.duplicate
 
+import app.markiro.handheld.core.print.upsertAssigned
 import app.markiro.handheld.core.storage.initializeRecoveryForTest
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -42,8 +43,10 @@ class DuplicateJobsTest {
         var outcome: SendOutcome = SendOutcome.Delivered,
     ) : PrinterTransport {
         val sent = mutableListOf<ByteArray>()
+        val targets = mutableListOf<PrinterEntity>()
         override suspend fun status(printer: PrinterEntity) = nextStatus
         override suspend fun send(printer: PrinterEntity, document: ByteArray): SendOutcome {
+            targets += printer
             sent += document
             return outcome
         }
@@ -89,7 +92,7 @@ class DuplicateJobsTest {
     )
 
     private suspend fun selectPrinter(language: String = "zpl", dpi: Int = 203, id: String = "p1") {
-        db.printerDao().upsert(
+        db.printerDao().upsertAssigned(
             PrinterEntity(
                 id = id, name = "Zebra", transport = "wifi", address = "10.0.0.1:9100",
                 language = language, dpi = dpi, selected = true, lastStatus = null, lastSeenAt = null,
@@ -255,11 +258,11 @@ class DuplicateJobsTest {
 
     /** The one refusal the protocol does name reaches the server. */
     @Test
-    fun aPrinterThatVanishedIsRecordedAsAnEvent() = runTest {
+    fun removingAProfilePreservesThePreparedDestination() = runTest {
         val jobId = (accept() as DuplicateOutcome.Prepared).jobId
         db.printerDao().clear()
-        assertEquals(DuplicateReason.PRINTER_UNCONFIGURED, (jobs().send(jobId) as DuplicateSend.Failed).reason)
-        assertEquals(listOf("prepared", "failed_before_send"), db.productLabelEventDao().bySequence(jobId).map { it.kind })
+        assertEquals(DuplicateSend.Sent, jobs().send(jobId))
+        assertEquals(listOf("prepared", "sending", "sent"), db.productLabelEventDao().bySequence(jobId).map { it.kind })
     }
 
     /**
@@ -306,14 +309,64 @@ class DuplicateJobsTest {
      * send is the only thing that stops a dead end.
      */
     @Test
-    fun changingThePrinterBetweenPrepareAndSendFailsBeforeSending() = runTest {
+    fun changingTheAssignmentBetweenPrepareAndSendRetainsTheOriginalDestination() = runTest {
         val jobId = (accept() as DuplicateOutcome.Prepared).jobId
         db.printerDao().clear()
         selectPrinter(language = "tspl", dpi = 300, id = "p2")
-        assertEquals(DuplicateReason.PRINTER_CHANGED, (jobs().send(jobId) as DuplicateSend.Failed).reason)
-        assertTrue(transport.sent.isEmpty())
+        assertEquals(DuplicateSend.Sent, jobs().send(jobId))
+        assertEquals("p1", transport.targets.single().id)
+        assertEquals("zpl", transport.targets.single().language)
+        assertEquals(203, transport.targets.single().dpi)
         val events = db.productLabelEventDao().bySequence(jobId)
-        assertEquals(listOf("prepared", "failed_before_send"), events.map { it.kind })
+        assertEquals(listOf("prepared", "sending", "sent"), events.map { it.kind })
+    }
+
+    @Test
+    fun retentionRemovesOnlySnapshotsOfCompletedFullyAcknowledgedDuplicateJobs() = runTest {
+        val settledId = (accept() as DuplicateOutcome.Prepared).jobId
+        jobs().send(settledId)
+        val settled = checkNotNull(db.productLabelJobDao().get(settledId))
+        db.productLabelEventDao().markAcked(db.productLabelEventDao().bySequence(settledId).map { it.eventId }, "acked")
+        val unackedId = (accept(RAW.replace("5Y7HG9", "SECOND")) as DuplicateOutcome.Prepared).jobId
+        jobs().send(unackedId)
+        val unacked = checkNotNull(db.productLabelJobDao().get(unackedId))
+        val pendingId = (accept(RAW.replace("5Y7HG9", "THIRD1")) as DuplicateOutcome.Prepared).jobId
+        val pending = checkNotNull(db.productLabelJobDao().get(pendingId))
+        val destinations = app.markiro.handheld.core.print.PrintDestinations(db)
+        destinations.retain(app.markiro.handheld.core.print.PrintPurpose.BOX, settledId)
+        db.productLabelJobDao().purgeSettledEverywhere()
+        assertEquals(null, db.printerDao().destination("duplicate", settledId, settled.attemptId))
+        assertTrue(db.printerDao().destination("box", settledId, "initial") != null)
+        assertTrue(db.printerDao().destination("duplicate", unackedId, unacked.attemptId) != null)
+        assertTrue(db.printerDao().destination("duplicate", pendingId, pending.attemptId) != null)
+        db.productLabelEventDao().markAcked(db.productLabelEventDao().bySequence(unackedId).map { it.eventId }, "acked")
+        db.productLabelEventDao().markAcked(db.productLabelEventDao().bySequence(pendingId).map { it.eventId }, "acked")
+        db.productLabelJobDao().purgeSettled(settled.shiftId)
+        assertEquals(null, db.printerDao().destination("duplicate", unackedId, unacked.attemptId))
+        assertTrue(db.printerDao().destination("duplicate", pendingId, pending.attemptId) != null)
+    }
+
+    @Test
+    fun unknownDeliveryRequiresExplicitCompatibleReplacementAndKeepsTheExactBytes() = runTest {
+        val jobId = (accept() as DuplicateOutcome.Prepared).jobId
+        transport.outcome = SendOutcome.Unknown("link lost")
+        jobs().send(jobId)
+        val before = checkNotNull(db.productLabelJobDao().get(jobId))
+        selectPrinter("tspl", 300, "incompatible")
+        assertEquals(DuplicateOutcome.Refused(DuplicateReason.PRINTER_CHANGED), jobs().reprint(jobId, ReprintReason.LOST, "incompatible"))
+        assertEquals(before, db.productLabelJobDao().get(jobId))
+        assertTrue(jobs().send(jobId) is DuplicateSend.Failed)
+        assertEquals(1, transport.sent.size)
+        selectPrinter("zpl", 203, "replacement")
+        assertTrue(jobs().reprint(jobId, ReprintReason.NOT_PRINTED, "replacement") is DuplicateOutcome.Prepared)
+        transport.outcome = SendOutcome.Delivered
+        assertEquals(DuplicateSend.Sent, jobs().send(jobId))
+        assertEquals("replacement", transport.targets.last().id)
+        assertTrue(transport.sent.first().contentEquals(transport.sent.last()))
+        val after = checkNotNull(db.productLabelJobDao().get(jobId))
+        assertEquals(before.bytesDigest, after.bytesDigest)
+        assertEquals(before.bytesBase64, after.bytesBase64)
+        assertEquals(before.attemptNo + 1, after.attemptNo)
     }
 
     /** Resuming would be an automatic resend of a label that may already exist. */

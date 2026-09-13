@@ -2,6 +2,8 @@ package app.markiro.handheld.core.storage
 
 import androidx.room.Database
 import androidx.room.RoomDatabase
+import app.markiro.handheld.core.print.PrinterAssignmentEntity
+import app.markiro.handheld.core.print.PrintDestinationEntity
 import app.markiro.handheld.core.print.PrinterDao
 import app.markiro.handheld.core.print.PrinterEntity
 
@@ -27,6 +29,8 @@ import app.markiro.handheld.core.print.PrinterEntity
         InventoryResultEntity::class,
         InventoryOutboxEntity::class,
         PrinterEntity::class,
+        PrinterAssignmentEntity::class,
+        PrintDestinationEntity::class,
         BoxEntity::class,
         SsccRangeEntity::class,
         ProductLabelJobEntity::class,
@@ -35,7 +39,7 @@ import app.markiro.handheld.core.print.PrinterEntity
         PalletEntity::class,
         PalletExceptionEntity::class,
     ],
-    version = 12,
+    version = 13,
     exportSchema = false,
 )
 abstract class HandheldDatabase : RoomDatabase() {

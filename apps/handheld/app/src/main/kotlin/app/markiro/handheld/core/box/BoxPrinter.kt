@@ -4,8 +4,13 @@ import app.markiro.handheld.core.label.LabelRenderException
 import app.markiro.handheld.core.label.LabelRenderer
 import app.markiro.handheld.core.label.LabelSpecCodec
 import app.markiro.handheld.core.label.PrinterLanguage
+import app.markiro.handheld.core.print.PrintDestinations
+import app.markiro.handheld.core.print.assigned
+import app.markiro.handheld.core.print.PrintPurpose
 import app.markiro.handheld.core.print.NotReadyReason
 import app.markiro.handheld.core.print.PrinterStatus
+import app.markiro.handheld.core.print.statusRemembered
+import app.markiro.handheld.core.print.sendRemembered
 import app.markiro.handheld.core.print.PrinterTransport
 import app.markiro.handheld.core.print.SendOutcome
 import app.markiro.handheld.core.storage.HandheldDatabase
@@ -58,15 +63,32 @@ class BoxPrinter(
     private val renderer: LabelRenderer,
     private val transport: PrinterTransport,
 ) {
-    suspend fun print(boxId: String): PrintOutcome = db.recovery.printing { printOwned(boxId) }
+    fun observeProfiles() = db.printerDao().observeAll()
+    fun observeDestinations() = db.printerDao().observeQueuedDestinations()
 
-    private suspend fun printOwned(boxId: String): PrintOutcome {
+    suspend fun print(boxId: String, replacementPrinterId: String? = null, allowUnknown: Boolean = false, reprint: Boolean = false): PrintOutcome = db.recovery.printing {
+        if (replacementPrinterId != null) {
+            val replacement = db.printerDao().get(replacementPrinterId)
+                ?: return@printing PrintOutcome.Failed(PrintReason.PRINTER_UNCONFIGURED)
+            PrintDestinations(db).replace(PrintPurpose.BOX, boxId, "initial", replacement)
+        }
+        printOwned(boxId, allowUnknown, reprint, replacementPrinterId != null)
+    }
+
+    private suspend fun printOwned(boxId: String, allowUnknown: Boolean, reprint: Boolean, replaced: Boolean): PrintOutcome {
         val box = db.boxDao().get(boxId) ?: return fail(boxId, PrintReason.BOX_MISSING)
+        if (box.printState == BoxPrint.PRINTED && !reprint && !replaced) return PrintOutcome.Printed
+        if (box.printState == BoxPrint.UNKNOWN && !allowUnknown) return PrintOutcome.Unknown(box.printReason ?: "interrupted")
         val closedAt = box.closedAt ?: return fail(boxId, PrintReason.BOX_OPEN)
         val sscc = box.sscc ?: return fail(boxId, PrintReason.BOX_OPEN)
         val shift = db.shiftDao().get(box.shiftId) ?: return fail(boxId, PrintReason.SHIFT_MISSING)
         val templateJson = shift.boxLabelTemplate ?: return fail(boxId, PrintReason.TEMPLATE_MISSING)
-        val printer = db.printerDao().selected() ?: return fail(boxId, PrintReason.PRINTER_UNCONFIGURED)
+        val destinations = PrintDestinations(db)
+        if (reprint && box.printState == BoxPrint.PRINTED && !replaced) {
+            val current = db.printerDao().assigned(PrintPurpose.BOX) ?: return fail(boxId, PrintReason.PRINTER_UNCONFIGURED)
+            destinations.replace(PrintPurpose.BOX, boxId, "initial", current)
+        }
+        val printer = destinations.retain(PrintPurpose.BOX, boxId) ?: return fail(boxId, PrintReason.PRINTER_UNCONFIGURED)
 
         val spec = try {
             LabelSpecCodec.parse(templateJson)
@@ -77,7 +99,7 @@ class BoxPrinter(
         // Asked before sending, so a refusal carries the printer's own reason
         // rather than a generic timeout. It is the only reason «Нет бумаги» can
         // exist as a state at all.
-        val status = transport.status(printer)
+        val status = transport.statusRemembered(printer, db.printerDao(), db.recovery)
         if (status is PrinterStatus.NotReady) return fail(boxId, status.reason.wire())
 
         val fields = boxLabelFields(
@@ -107,7 +129,7 @@ class BoxPrinter(
         if (!db.recovery.valid(checkNotNull(app.markiro.handheld.core.storage.DeviceRecovery.generationContext.get()))) {
             throw app.markiro.handheld.core.storage.RecoveryBlocked()
         }
-        return when (val outcome = transport.send(printer, document)) {
+        return when (val outcome = transport.sendRemembered(printer, document, db.printerDao(), db.recovery)) {
             SendOutcome.Delivered -> {
                 boxes.setPrintState(boxId, BoxPrint.PRINTED, null)
                 PrintOutcome.Printed
@@ -135,8 +157,11 @@ class BoxPrinter(
      */
     suspend fun defer(boxId: String) = db.recovery.commit { deferOwned(boxId) }
 
-    private suspend fun deferOwned(boxId: String) =
-        boxes.setPrintState(boxId, BoxPrint.DEFERRED, db.boxDao().get(boxId)?.printReason)
+    private suspend fun deferOwned(boxId: String) {
+        val row = db.boxDao().get(boxId) ?: return
+        if (row.printState == BoxPrint.UNKNOWN) return
+        boxes.setPrintState(boxId, BoxPrint.DEFERRED, row.printReason)
+    }
 
     private suspend fun fail(boxId: String, reason: String): PrintOutcome.Failed = db.recovery.commit { failOwned(boxId, reason) }
 

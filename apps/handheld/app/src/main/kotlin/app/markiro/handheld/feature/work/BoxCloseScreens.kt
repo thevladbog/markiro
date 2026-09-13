@@ -59,7 +59,7 @@ fun printReasonLabel(reason: String): Int = when (reason) {
  * for a person, because each one is a decision only they can make.
  */
 @Composable
-fun BoxCloseScreen(step: BoxCloseStep, cb: BoxCloseCallbacks) {
+fun BoxCloseScreen(step: BoxCloseStep, cb: BoxCloseCallbacks, destinationLabel: String? = null) {
     val c = MarkiroTheme.colors
     val t = MarkiroTheme.type
     if (step is BoxCloseStep.Printed) {
@@ -73,6 +73,10 @@ fun BoxCloseScreen(step: BoxCloseStep, cb: BoxCloseCallbacks) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
+        if (step.closedBox() != null) {
+            Text(stringResource(R.string.printer_purpose_box) + " · " + (destinationLabel ?: stringResource(R.string.printer_unassigned)),
+                style = t.caption, color = c.fg2, textAlign = TextAlign.Center)
+        }
         when (step) {
             BoxCloseStep.Idle -> Unit
             is BoxCloseStep.Refused -> Refused(step.reason, cb)
@@ -112,6 +116,7 @@ fun BoxCloseScreen(step: BoxCloseStep, cb: BoxCloseCallbacks) {
                     // second label on a box the server has already accepted.
                     PrimaryButton(stringResource(R.string.box_close_confirm_printed), cb.onConfirmPrinted)
                     SecondaryButton(stringResource(R.string.box_close_print_again), cb.onRetry)
+                    SecondaryButton(stringResource(R.string.box_close_other_printer), cb.onOtherPrinter)
                     MarkiroTextButton(stringResource(R.string.box_close_defer), cb.onDefer)
                 }
             }

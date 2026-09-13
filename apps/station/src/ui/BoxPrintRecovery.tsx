@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, FullScreenDialog } from "@markiro/ui";
@@ -6,6 +7,8 @@ import type { BoxPrintErrorCode } from "../lib/boxes.js";
 export type BoxPrintRecoveryErrorCode = BoxPrintErrorCode | "interrupted";
 
 export interface BoxPrintRecoveryProps {
+  destination?: ReactNode;
+  resultPending?: boolean;
   sscc: string;
   errorCode: BoxPrintRecoveryErrorCode;
   pending: boolean;
@@ -15,6 +18,7 @@ export interface BoxPrintRecoveryProps {
 }
 
 const ERROR_KEYS: Record<BoxPrintRecoveryErrorCode, string> = {
+  persistence_failed: "printerRouting.storageFailed",
   template_missing: "box.printRecovery.errors.templateMissing",
   printer_unconfigured: "box.printRecovery.errors.printerUnconfigured",
   render_failed: "box.printRecovery.errors.renderFailed",
@@ -24,6 +28,8 @@ const ERROR_KEYS: Record<BoxPrintRecoveryErrorCode, string> = {
 
 export function BoxPrintRecovery({
   sscc,
+  destination,
+  resultPending = false,
   errorCode,
   pending,
   onRetry,
@@ -67,7 +73,13 @@ export function BoxPrintRecovery({
     <FullScreenDialog
       open
       title={t("box.printRecovery.title")}
-      backLabel={t(pending ? "box.printRecovery.pending" : "box.printRecovery.retry")}
+      backLabel={t(
+        pending
+          ? "box.printRecovery.pending"
+          : resultPending
+            ? "printerRouting.saveResult"
+            : "box.printRecovery.retry",
+      )}
       backDisabled={pending}
       onClose={onRetry}
       initialFocus="dialog"
@@ -78,19 +90,24 @@ export function BoxPrintRecovery({
               {t("box.printRecovery.setup")}
             </Button>
           ) : null}
-          <Button
-            size="floor"
-            variant="secondary"
-            disabled={pending}
-            onClick={() => setConfirmingSkip(true)}
-          >
-            {t("box.printRecovery.continueWithoutLabel")}
-          </Button>
+          {!resultPending ? (
+            <Button
+              size="floor"
+              variant="secondary"
+              disabled={pending}
+              onClick={() => setConfirmingSkip(true)}
+            >
+              {t("box.printRecovery.continueWithoutLabel")}
+            </Button>
+          ) : null}
         </>
       }
     >
       <div className="box-print-recovery">
-        <p role="alert">{t(ERROR_KEYS[errorCode])}</p>
+        {destination}
+        <p role="alert">
+          {t(resultPending ? "printerRouting.resultNotSaved" : ERROR_KEYS[errorCode])}
+        </p>
         <p className="box-print-recovery__sscc">
           <span>{t("box.printRecovery.sscc")}</span>
           <strong>{sscc}</strong>

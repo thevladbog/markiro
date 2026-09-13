@@ -1,3 +1,5 @@
+import { outputPrinterProfile, type PrinterProfile } from "./printer-routing.js";
+import { bindPrintDestination } from "./print-destinations.js";
 import {
   inventoryEventSchema,
   isValidSscc,
@@ -40,6 +42,7 @@ export interface InventoryPrintAttemptView {
 }
 
 export interface InventoryBoxPrintingTransport {
+  profile?: PrinterProfile;
   target: PrintTarget;
   language: PrinterLanguage;
   /** Omitted or null = legacy settings: labels print at their authoring dpi. */
@@ -60,6 +63,7 @@ export interface AttemptInventoryBoxPrintInput {
   attemptedAt: string;
   completedAt: () => string;
   printing: InventoryBoxPrintingTransport | null;
+  printTransport?: (target: PrintTarget, bytes: Uint8Array) => Promise<void>;
   render?: (
     template: LabelTemplateSpec,
     fields: Record<LabelField, string>,
@@ -81,6 +85,7 @@ export interface ProcessNextInventoryRemoteReprintInput {
   createEventId: () => string;
   now: () => string;
   printing: InventoryBoxPrintingTransport | null;
+  printTransport?: (target: PrintTarget, bytes: Uint8Array) => Promise<void>;
   render?: AttemptInventoryBoxPrintInput["render"];
   rasterizeText?: RasterizeTextFn;
 }
@@ -420,12 +425,35 @@ async function attemptInternal(
         input.rasterizeText ?? rasterizeText,
         dpi,
       ));
-  const physical = await attemptBoxPrint({
-    template: input.manifest.boxLabelTemplate?.spec ?? null,
-    fields,
-    printing: input.printing,
-    render,
-  });
+  const destination = {
+    scope: JSON.stringify([input.inventoryId, input.snapshotId, input.deviceId]),
+    purpose: "box" as const,
+    jobId: input.boxId,
+    attemptId: "label",
+  };
+  let physical: Awaited<ReturnType<typeof attemptBoxPrint>>;
+  try {
+    const printer = await bindPrintDestination(
+      input.exec,
+      destination,
+      input.printing ? outputPrinterProfile(input.printing) : null,
+    );
+    // Keep each attempt's output facts after an explicit replacement of the label's destination.
+    await bindPrintDestination(input.exec, { ...destination, attemptId: input.attemptId }, printer);
+    physical = await attemptBoxPrint({
+      template: input.manifest.boxLabelTemplate?.spec ?? null,
+      fields,
+      printing: input.printing,
+      destination: {
+        exec: input.exec,
+        key: { ...destination, attemptId: input.attemptId },
+        ...(input.printTransport ? { print: input.printTransport } : {}),
+      },
+      render,
+    });
+  } catch {
+    physical = { kind: "failed", code: "persistence_failed" };
+  }
   const completedAt = input.completedAt();
   const result = physical.kind === "printed" ? "printed" : "failed";
   const errorCode = physical.kind === "printed" ? null : physical.code;
@@ -548,6 +576,7 @@ export async function processNextInventoryRemoteReprint(
       return completedAt;
     },
     printing: input.printing,
+    ...(input.printTransport ? { printTransport: input.printTransport } : {}),
     kind: "reprint",
     ...(input.render ? { render: input.render } : {}),
     ...(input.rasterizeText ? { rasterizeText: input.rasterizeText } : {}),

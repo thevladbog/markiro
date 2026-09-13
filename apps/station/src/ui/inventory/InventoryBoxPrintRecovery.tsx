@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Button } from "@markiro/ui";
 
 import type {
@@ -6,6 +7,7 @@ import type {
 } from "../../lib/inventory-box-printing.js";
 
 export interface InventoryBoxPrintRecoveryProps {
+  destination?: ReactNode;
   state: "printing" | "failed" | "printed";
   facts: Pick<InventoryBoxPrintResult, "sscc" | "quantity" | "productionDate">;
   errorCode?: InventoryPrintErrorCode | null;
@@ -27,6 +29,7 @@ export interface InventoryBoxPrintRecoveryProps {
 
 export function InventoryBoxPrintRecovery({
   state,
+  destination,
   facts,
   errorCode,
   busy,
@@ -49,6 +52,7 @@ export function InventoryBoxPrintRecovery({
           {state === "failed" && errorCode ? <p>{labels.errors[errorCode]}</p> : null}
         </div>
       </div>
+      {destination}
       <dl>
         <div>
           <dt>{labels.sscc}</dt>

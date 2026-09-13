@@ -4,6 +4,10 @@ import {
 } from "../ui/persistent-station-states.js";
 
 const VISUAL_STRESS_GALLERY_STATE_IDS = [
+  "printer-recovery-box",
+  "setup-printers",
+  "setup-printers-empty",
+  "setup-printers-many",
   "work-pallet-66",
   "work-aggregation-waiting",
   "pairing-recovery",
@@ -280,6 +284,13 @@ export const GALLERY_FIXTURES: readonly GalleryFixture[] = [
     variant: "render_failed",
     source: "synthetic",
   },
+
+  {
+    id: "box-print-persistence-failed",
+    kind: "box-print-recovery",
+    variant: "persistence_failed",
+    source: "synthetic",
+  },
   {
     id: "box-print-transport-failed",
     kind: "box-print-recovery",
@@ -316,6 +327,15 @@ export const GALLERY_FIXTURES: readonly GalleryFixture[] = [
   { id: "conflicts-page-2", kind: "conflicts", variant: "2", source: "synthetic" },
   { id: "setup-scanner", kind: "setup", variant: "scanner", source: "synthetic" },
   { id: "setup-printer", kind: "setup", variant: "printer", source: "synthetic" },
+  {
+    id: "printer-recovery-box",
+    kind: "box-print-recovery",
+    variant: "printer-destination",
+    source: "synthetic",
+  },
+  { id: "setup-printers", kind: "setup", variant: "printers", source: "synthetic" },
+  { id: "setup-printers-empty", kind: "setup", variant: "printers-empty", source: "synthetic" },
+  { id: "setup-printers-many", kind: "setup", variant: "printers-many", source: "synthetic" },
   { id: "setup-sound", kind: "setup", variant: "sound", source: "synthetic" },
   { id: "offline", kind: "sync", variant: "offline", source: "synthetic" },
   { id: "sync-stuck", kind: "sync", variant: "stuck", source: "synthetic" },
