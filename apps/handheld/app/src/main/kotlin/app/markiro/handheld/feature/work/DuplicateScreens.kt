@@ -245,7 +245,9 @@ private fun VerificationScreen(step: DuplicateStep, cb: DuplicateCallbacks, dest
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2)) {
                 if (problems) {
                     ReprintReasons(cb)
-                    MarkiroTextButton(stringResource(R.string.box_close_other_printer), cb.onOtherPrinter)
+                    // A button, not accent text: this screen is the warn solid edge to
+                    // edge, and green on amber is unreadable at arm's length.
+                    SecondaryButton(stringResource(R.string.box_close_other_printer), cb.onOtherPrinter)
                     SecondaryButton(stringResource(R.string.duplicate_return_to_scan), { problems = false })
                 } else {
                     SecondaryButton(stringResource(R.string.duplicate_label_problem), { problems = true })

@@ -5,11 +5,15 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.cash.turbine.test
 import app.markiro.handheld.core.auth.OperatorRecord
+import app.markiro.handheld.core.network.CredentialDto
+import app.markiro.handheld.core.network.DeviceDto
+import app.markiro.handheld.core.network.PairResponse
 import app.markiro.handheld.core.network.RevocationBus
 import app.markiro.handheld.core.storage.DeviceConfigEntity
 import app.markiro.handheld.core.storage.DeviceRecovery
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.InMemoryCredentialStore
+import app.markiro.handheld.core.storage.RecoveryPhase
 import app.markiro.handheld.feature.signin.SessionHolder
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.advanceTimeBy
@@ -80,6 +84,29 @@ class AppShellViewModelTest {
         db.deviceConfigDao().upsert(paired)
         credential.write("mk_live_abc")
         assertEquals(StartDestination.SIGN_IN, vm().start.first { it != null })
+    }
+
+    @Test
+    fun firstPairingIsNotMistakenForARevocation() = runTest {
+        // Publishing a credential walks UNPAIRED -> RESTORING -> ACTIVE. RESTORING is
+        // a publication in progress, not a revoked credential: treating it as one threw
+        // the operator back onto the pairing screen at the exact moment pairing
+        // succeeded, and nothing short of restarting the app got past it.
+        val shell = vm()
+        assertEquals(StartDestination.PAIRING, shell.start.first { it != null })
+        shell.events.test {
+            recovery.restore(
+                PairResponse(
+                    DeviceDto(paired.deviceId, paired.deviceName, paired.kind, paired.tenantId, paired.organizationName),
+                    CredentialDto("mk_live_abc", paired.serverUrl),
+                    emptyList(),
+                ),
+                paired.serverUrl,
+            )
+            advanceUntilIdle()
+            expectNoEvents()
+        }
+        assertEquals(RecoveryPhase.ACTIVE, recovery.current().phase)
     }
 
     @Test
