@@ -1334,7 +1334,8 @@ describe.skipIf(!ready)("platform tenant management", () => {
     const beforeSubscriptions = await setup.db
       .select({ id: schema.tenantSubscriptions.id, status: schema.tenantSubscriptions.status })
       .from(schema.tenantSubscriptions)
-      .where(eq(schema.tenantSubscriptions.tenantId, expiryTenantId));
+      .where(eq(schema.tenantSubscriptions.tenantId, expiryTenantId))
+      .orderBy(schema.tenantSubscriptions.id);
     const beforeEvents = await setup.db
       .select({ id: schema.subscriptionEvents.id })
       .from(schema.subscriptionEvents)
@@ -1397,7 +1398,8 @@ describe.skipIf(!ready)("platform tenant management", () => {
       await setup.db
         .select({ id: schema.tenantSubscriptions.id, status: schema.tenantSubscriptions.status })
         .from(schema.tenantSubscriptions)
-        .where(eq(schema.tenantSubscriptions.tenantId, expiryTenantId)),
+        .where(eq(schema.tenantSubscriptions.tenantId, expiryTenantId))
+        .orderBy(schema.tenantSubscriptions.id),
     ).toEqual(beforeSubscriptions);
     expect(
       await setup.db
