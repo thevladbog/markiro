@@ -22,10 +22,37 @@ const TOKEN_SAFETY_MARGIN: Duration = Duration::from_secs(5 * 60);
 const AUTH_TIMEOUT: Duration = Duration::from_secs(30);
 const AUTH_ATTEMPTS: u32 = 3;
 
-#[derive(Debug)]
 pub struct TrueApiToken {
     pub token: String,
     pub expires_at: String,
+}
+
+impl std::fmt::Debug for TrueApiToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TrueApiToken")
+            .field("token", &"[REDACTED]")
+            .field("expires_at", &self.expires_at)
+            .finish()
+    }
+}
+
+#[cfg(test)]
+mod token_debug_tests {
+    use super::TrueApiToken;
+
+    #[test]
+    fn token_debug_redacts_credentials_in_results_too() {
+        let token = TrueApiToken {
+            token: "synthetic-secret-marker".into(),
+            expires_at: "2026-10-10T12:00:00Z".into(),
+        };
+        let result: Result<_, ()> = Ok(token);
+        for output in [format!("{result:?}"), format!("{result:#?}")] {
+            assert!(!output.contains("synthetic-secret-marker"));
+            assert!(output.contains("[REDACTED]"));
+            assert!(output.contains("2026-10-10T12:00:00Z"));
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -373,7 +400,7 @@ mod tests {
         assert_eq!(token.token, "jwt-token");
         // Ten hours minus the safety margin, serialized with an offset because
         // the cloud's zod schema demands one.
-        assert!(token.expires_at.ends_with('Z'), "got {}", token.expires_at);
+        assert!(token.expires_at.ends_with('Z'), "expected a UTC expiry");
     }
 
     #[tokio::test]

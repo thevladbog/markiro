@@ -472,10 +472,12 @@ function assertAuthorityContract(adapted, { alb }) {
       );
       assert.match(contentSecurityPolicies[0], /script-src[^;]*https:\/\/mc\.yandex\.ru/);
       assert.match(contentSecurityPolicies[0], /connect-src[^;]*https:\/\/mc\.yandex\.ru/);
-      assert.match(
-        contentSecurityPolicies[0],
-        new RegExp(`script-src[^;]*${yandexWebmasterVerificationScript.replaceAll(".", "\\.")}`),
-      );
+      const scriptSources = contentSecurityPolicies[0]
+        .split(";")
+        .map((directive) => directive.trim().split(/\s+/))
+        .find(([name]) => name === "script-src")
+        ?.slice(1);
+      assert.ok(scriptSources?.includes(yandexWebmasterVerificationScript));
       assert.doesNotMatch(
         contentSecurityPolicies[0],
         /script-src[^;]*(?:^|\s)https:\/\/cdn\.jsdelivr\.net(?:\s|;)/,
