@@ -350,6 +350,39 @@ describe("immutable pre-product comparisons and durable preparation", () => {
     if (!p) throw new Error("fixture");
     return p;
   }
+  it("shows equal ordinary fields without adding writable entries or category dependencies", async () => {
+    const product = await local();
+    await db
+      .update(schema.nationalCatalogImportItems)
+      .set({ productId: product.id, match: "existing" })
+      .where(eq(schema.nationalCatalogImportItems.id, itemId));
+    await db
+      .update(schema.products)
+      .set({ egaisCode: "0300005753630000036", shelfLifeDays: 365 })
+      .where(eq(schema.products.id, product.id));
+    detail.mockResolvedValue(feed([cardWithProductFields()]));
+    const result = await run();
+    const preview = result.items[0]!;
+    for (const [key, value] of [
+      ["egais_code", "0300005753630000036"],
+      ["shelf_life_days", "365"],
+    ]) {
+      const field = preview.fields.find((entry) => entry.labelKey === key);
+      expect(field).toMatchObject({
+        before: value,
+        after: value,
+        applicable: false,
+        reason: "values_match",
+        selectedByDefault: false,
+        requiresEntryIds: [],
+      });
+    }
+    const [saved] = await db.select().from(previews).where(eq(previews.id, preview.id));
+    expect(
+      parseImportDiff(saved!.diff).entries.some((entry) => entry.target === "product_field"),
+    ).toBe(false);
+  });
+
   it("imports EGAIS and shelf life into unbound product fields with source evidence", async () => {
     const source = cardWithProductFields();
     detail.mockResolvedValue(feed([source]));
@@ -625,7 +658,7 @@ describe("immutable pre-product comparisons and durable preparation", () => {
       after: codes[1],
     });
   });
-  it("does not offer equal product fields or accept a provider ID shared by two field labels", async () => {
+  it("does not offer writes for equal fields or accept a provider ID shared by two field labels", async () => {
     const p = await local();
     const source = cardWithProductFields();
     await db
@@ -636,7 +669,9 @@ describe("immutable pre-product comparisons and durable preparation", () => {
     const same = (await run()).items[0]!;
     expect(
       same.fields.filter(
-        (field) => field.labelKey === "egais_code" || field.labelKey === "shelf_life_days",
+        (field) =>
+          field.applicable &&
+          (field.labelKey === "egais_code" || field.labelKey === "shelf_life_days"),
       ),
     ).toEqual([]);
     await db

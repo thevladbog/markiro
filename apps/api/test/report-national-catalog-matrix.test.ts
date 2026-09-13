@@ -3,6 +3,31 @@ import { describe, expect, it } from "vitest";
 import { summarizeNationalCatalogMatrix } from "../src/cli/report-national-catalog-matrix";
 
 describe("summarizeNationalCatalogMatrix", () => {
+  it("does not confuse several reviewed categories with unresolved candidates", () => {
+    const mappings = ["10", "20"].map((categoryId) => ({
+      chzProductGroupCode: 7,
+      state: "exact" as const,
+      categoryId,
+      schemaVersionId: `00000000-0000-4000-8000-${categoryId.padStart(12, "0")}`,
+    }));
+    const groups = [{ code: 7, name: "Пиво и слабоалкогольные напитки" }];
+    expect(summarizeNationalCatalogMatrix(groups, mappings)).toMatchObject({
+      exact: 1,
+      ambiguous: 0,
+    });
+    expect(
+      summarizeNationalCatalogMatrix(groups, [
+        ...mappings,
+        {
+          chzProductGroupCode: 7,
+          state: "ambiguous",
+          categoryId: "30",
+          schemaVersionId: "new",
+        },
+      ]),
+    ).toMatchObject({ exact: 0, ambiguous: 1 });
+  });
+
   it("reports every classifier group as exact, ambiguous, or unmapped deterministically", () => {
     expect(
       summarizeNationalCatalogMatrix(

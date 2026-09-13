@@ -370,7 +370,10 @@ export function ImportReview({
                   <span>{tr("proposedColumn")}</span>
                 </div>
                 {preview.fields
-                  .filter((field) => !showOnlyMappedFields || field.applicable)
+                  .filter(
+                    (field) =>
+                      !showOnlyMappedFields || field.applicable || field.reason === "values_match",
+                  )
                   .map((field) => {
                     const title = field.labelKey ? tr(`fields.${field.labelKey}`) : field.label;
                     const accepted = choice.decision.acceptedEntryIds.includes(field.id);

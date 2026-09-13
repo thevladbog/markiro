@@ -63,6 +63,19 @@ describe("platform National Catalog contracts", () => {
     ).toBe(false);
   });
 
+  it("accepts several explicitly reviewed categories for one group", () => {
+    const body = platformNationalCatalogContracts.reviewGroupMapping.body;
+    const first = "00000000-0000-4000-8000-000000000001";
+    const second = "00000000-0000-4000-8000-000000000002";
+    expect(body.safeParse({ state: "exact", schemaVersionIds: [first, second] }).success).toBe(
+      true,
+    );
+    expect(body.safeParse({ state: "exact", schemaVersionIds: [] }).success).toBe(false);
+    expect(body.safeParse({ state: "exact", schemaVersionIds: [first, first] }).success).toBe(
+      false,
+    );
+  });
+
   it("rejects provider payloads and unknown result keys", () => {
     expect(
       platformNationalCatalogContracts.refresh.response.safeParse({

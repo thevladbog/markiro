@@ -111,6 +111,35 @@ describe("NationalCatalogSchemaService", () => {
     );
   });
 
+  it("discovers newly added categories on refresh without changing activation or reviewed mappings", async () => {
+    const test = subject();
+    vi.mocked(test.client.listCategories).mockResolvedValue({
+      status: "ok",
+      value: { categories: [category, { ...category, id: 11, name: "Сидр", raw: { cat_id: 11 } }] },
+      etag: null,
+      contentHash: "new-categories",
+      usage: { total: null, method: null },
+    });
+    await expect(test.service.refresh("source-tenant")).resolves.toEqual({
+      categories: 2,
+      observed: 2,
+      unchanged: 0,
+      blocked: 0,
+      failed: 0,
+    });
+    expect(test.client.getAttributes).toHaveBeenCalledTimes(2);
+    expect(test.repository.observe).toHaveBeenCalledWith(
+      expect.objectContaining({
+        categoryId: "11",
+        categoryName: "Сидр",
+        gismtCodes: [7],
+        status: "observed",
+      }),
+    );
+    expect(test.repository.activate).not.toHaveBeenCalled();
+    expect(test.repository.reviewGroupMapping).not.toHaveBeenCalled();
+  });
+
   it("is idempotent and records a category read failure without inventing a schema", async () => {
     const unchanged = subject({ inserted: false });
     await expect(unchanged.service.refresh("source-tenant")).resolves.toMatchObject({

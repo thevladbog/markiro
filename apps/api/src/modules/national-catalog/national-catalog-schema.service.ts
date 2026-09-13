@@ -222,6 +222,7 @@ export class DrizzleNationalCatalogSchemaRepository implements NationalCatalogSc
         .select({ code: schema.chzProductGroups.code })
         .from(schema.chzProductGroups)
         .where(eq(schema.chzProductGroups.code, chzProductGroupCode))
+        .for("update")
         .limit(1);
       if (!group) throw new NotFoundException("ChZ product group not found");
       const versions =
@@ -237,11 +238,16 @@ export class DrizzleNationalCatalogSchemaRepository implements NationalCatalogSc
       if (versions.length !== review.schemaVersionIds.length) {
         throw new NotFoundException("National Catalog schema version not found");
       }
-      await tx
-        .delete(schema.nationalCatalogCategoryGroupMappings)
-        .where(
+      await tx.delete(schema.nationalCatalogCategoryGroupMappings).where(
+        and(
           eq(schema.nationalCatalogCategoryGroupMappings.chzProductGroupCode, chzProductGroupCode),
-        );
+          // Exact reviews add verified category/version pairs. Keep historical
+          // bindings and other categories, including still-unreviewed candidates.
+          review.state === "exact"
+            ? eq(schema.nationalCatalogCategoryGroupMappings.state, "unmapped")
+            : undefined,
+        ),
+      );
       const reviewedAt = new Date();
       if (review.state === "unmapped") {
         await tx.insert(schema.nationalCatalogCategoryGroupMappings).values({
@@ -254,16 +260,25 @@ export class DrizzleNationalCatalogSchemaRepository implements NationalCatalogSc
         });
       } else {
         const byId = new Map(versions.map((version) => [version.id, version]));
-        await tx.insert(schema.nationalCatalogCategoryGroupMappings).values(
-          review.schemaVersionIds.map((id) => ({
-            chzProductGroupCode,
-            schemaVersionId: id,
-            categoryId: byId.get(id)!.categoryId,
-            state: review.state,
-            reviewedAt,
-            reviewedBy: null,
-          })),
-        );
+        await tx
+          .insert(schema.nationalCatalogCategoryGroupMappings)
+          .values(
+            review.schemaVersionIds.map((id) => ({
+              chzProductGroupCode,
+              schemaVersionId: id,
+              categoryId: byId.get(id)!.categoryId,
+              state: review.state,
+              reviewedAt,
+              reviewedBy: null,
+            })),
+          )
+          .onConflictDoUpdate({
+            target: [
+              schema.nationalCatalogCategoryGroupMappings.chzProductGroupCode,
+              schema.nationalCatalogCategoryGroupMappings.schemaVersionId,
+            ],
+            set: { state: review.state, reviewedAt, reviewedBy: null, updatedAt: reviewedAt },
+          });
       }
       await tx.insert(schema.platformAuditEvents).values({
         actorPlatformUserId: principal.userId,

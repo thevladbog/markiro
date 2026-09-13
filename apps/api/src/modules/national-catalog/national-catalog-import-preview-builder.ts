@@ -544,7 +544,21 @@ export async function buildImportPreview(
       field.targetField === "egais_code"
         ? (product?.egaisCode ?? null)
         : (product?.shelfLifeDays ?? null);
-    if (currentValue === field.value) continue;
+    if (currentValue === field.value) {
+      fields.push({
+        id: randomUUID(),
+        label: field.targetField,
+        labelKey: field.targetField,
+        before: String(currentValue),
+        after: String(field.value),
+        applicable: false,
+        reason: "values_match",
+        source: "national_catalog",
+        selectedByDefault: false,
+        requiresEntryIds: [],
+      });
+      continue;
+    }
     const entry = productFieldEntrySchema.parse({
       targetField: field.targetField,
       sourceAttributeId: field.sourceAttributeId,
