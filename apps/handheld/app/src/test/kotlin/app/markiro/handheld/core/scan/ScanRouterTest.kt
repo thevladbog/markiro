@@ -1,23 +1,32 @@
 package app.markiro.handheld.core.scan
 
+import android.content.Intent
+import android.os.Looper
 import android.view.KeyEvent
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.Shadows.shadowOf
 
 @RunWith(AndroidJUnit4::class)
 class ScanRouterTest {
     private val context = ApplicationProvider.getApplicationContext<android.content.Context>()
 
     private fun router(kind: ScanSourceKind): ScanRouter {
-        val preferences = ScanPreferences(context).also { it.sourceKind = kind }
+        val preferences = ScanPreferences(context).also {
+            it.sourceKind = kind
+            it.customAction = ""
+            it.customDataExtra = ""
+        }
         return ScanRouter(context, preferences).also { it.configure() }
     }
 
@@ -58,5 +67,109 @@ class ScanRouterTest {
         yield()
         router.type("40318827")
         assertEquals("wedge", scanned.await().source)
+    }
+
+    private fun broadcast(action: String, fill: Intent.() -> Unit) {
+        context.sendBroadcast(Intent(action).apply(fill))
+        shadowOf(Looper.getMainLooper()).idle()
+    }
+
+    /**
+     * Nobody names the vendor of the terminal in their hand. A scanner in intent
+     * mode broadcasts exactly one action, so every profile is registered and the
+     * one that understands the extras answers.
+     */
+    @Test
+    fun aBroadcastFromAnyKnownVendorArrivesWithoutChoosingAProfile() = runTest {
+        val router = router(ScanSourceKind.BUILTIN_INTENT)
+        val scanned = async { router.events.first() }
+        yield()
+        broadcast(VendorProfiles.UROVO.action) { putExtra("barcode_string", "40318827") }
+        assertEquals("intent:urovo", scanned.await().source)
+    }
+
+    /** The profile confirmed on hardware keeps working with every other one registered. */
+    @Test
+    fun honeywellStillArrives() = runTest {
+        val router = router(ScanSourceKind.BUILTIN_INTENT)
+        val scanned = async { router.events.first() }
+        yield()
+        broadcast(VendorProfiles.HONEYWELL.action) { putExtra("data", "40318827") }
+        assertEquals("intent:honeywell", scanned.await().source)
+    }
+
+    /**
+     * Honeywell and Zebra share the app's own action. As one receiver each they
+     * raced to write the report, and Zebra -- which cannot read Honeywell's
+     * extras -- could land last, telling the operator the key was unrecognised
+     * about a scan that had just gone through.
+     */
+    @Test
+    fun aProfileThatCannotReadTheBroadcastDoesNotOverwriteTheOneThatCan() = runTest {
+        val router = router(ScanSourceKind.BUILTIN_INTENT)
+        assertEquals(VendorProfiles.HONEYWELL.action, VendorProfiles.ZEBRA.action)
+        broadcast(VendorProfiles.HONEYWELL.action) { putExtra("data", "40318827") }
+        assertEquals("honeywell", router.lastIntent.value?.profileId)
+    }
+
+    @Test
+    fun theOtherProfileOnTheSharedActionIsReadToo() = runTest {
+        val router = router(ScanSourceKind.BUILTIN_INTENT)
+        val scanned = async { router.events.first() }
+        yield()
+        broadcast(VendorProfiles.ZEBRA.action) { putExtra("com.symbol.datawedge.data_string", "40318827") }
+        assertEquals("intent:zebra", scanned.await().source)
+        assertEquals("zebra", router.lastIntent.value?.profileId)
+    }
+
+    /** Filled in by an operator from the diagnostics below, and live without a release. */
+    @Test
+    fun aCustomProfileIsRegisteredToo() = runTest {
+        val preferences = ScanPreferences(context).also {
+            it.sourceKind = ScanSourceKind.BUILTIN_INTENT
+            it.customAction = "com.example.UNKNOWN_SCANNER"
+            it.customDataExtra = "payload"
+        }
+        val router = ScanRouter(context, preferences).also { it.configure() }
+        val scanned = async { router.events.first() }
+        yield()
+        broadcast("com.example.UNKNOWN_SCANNER") { putExtra("payload", "40318827") }
+        assertEquals("intent:custom", scanned.await().source)
+    }
+
+    /**
+     * An unknown service is diagnosed from the terminal, not from adb: the
+     * screen reports the action and the keys that arrived even when no profile
+     * could read them.
+     */
+    @Test
+    fun anUnreadableBroadcastIsStillReported() = runTest {
+        val router = router(ScanSourceKind.BUILTIN_INTENT)
+        broadcast(VendorProfiles.UROVO.action) { putExtra("some_unknown_key", "40318827") }
+        val report = router.lastIntent.value
+        assertEquals(VendorProfiles.UROVO.action, report?.action)
+        assertEquals(listOf("some_unknown_key"), report?.extraKeys)
+        assertNull("no profile read it, so none may be named", report?.profileId)
+    }
+
+    @Test
+    fun aReadableBroadcastNamesTheProfileThatReadIt() = runTest {
+        val router = router(ScanSourceKind.BUILTIN_INTENT)
+        broadcast(VendorProfiles.UROVO.action) { putExtra("barcode_string", "40318827") }
+        assertEquals("urovo", router.lastIntent.value?.profileId)
+    }
+
+    /** A terminal left in both modes sends one pull twice; the work screen must see one unit. */
+    @Test
+    fun thePullThatArrivesTwiceIsEmittedOnce() = runTest {
+        val router = router(ScanSourceKind.BUILTIN_INTENT)
+        val seen = mutableListOf<ScanEvent>()
+        val collecting = launch { router.events.collect { seen += it } }
+        yield()
+        broadcast(VendorProfiles.UROVO.action) { putExtra("barcode_string", "40318827") }
+        router.type("40318827")
+        yield()
+        collecting.cancel()
+        assertEquals(listOf("40318827"), seen.map { it.raw })
     }
 }

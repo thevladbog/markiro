@@ -40,11 +40,13 @@ import app.markiro.handheld.core.design.AppBar
 import app.markiro.handheld.core.design.FullScreenState
 import app.markiro.handheld.core.design.MarkiroChip
 import app.markiro.handheld.core.design.MarkiroSizes
+import app.markiro.handheld.core.design.MarkiroTextButton
 import app.markiro.handheld.core.design.MarkiroTheme
 import app.markiro.handheld.core.design.PrimaryButton
 import app.markiro.handheld.core.design.ScreenColumn
 import app.markiro.handheld.core.design.StateAction
 import app.markiro.handheld.core.design.Tone
+import app.markiro.handheld.core.scan.IntentReport
 import app.markiro.handheld.core.scan.ScanEvent
 import app.markiro.handheld.core.scan.ScanSourceKind
 import app.markiro.handheld.core.scan.VendorProfiles
@@ -210,6 +212,7 @@ fun ScannerSettingsScreen(
     onSource: (ScanSourceKind) -> Unit,
     onProfile: (String) -> Unit,
     onDebugScan: (String) -> Unit,
+    onCustomProfile: (String, String, String) -> Unit = { _, _, _ -> },
 ) {
     val c = MarkiroTheme.colors
     val t = MarkiroTheme.type
@@ -230,11 +233,19 @@ fun ScannerSettingsScreen(
             ) { onSource(ScanSourceKind.KEYBOARD_WEDGE) }
             if (state.sourceKind == ScanSourceKind.BUILTIN_INTENT) {
                 Text(stringResource(R.string.scanner_profiles), style = t.label, color = c.fg3)
+                // Every profile is registered at once, so this list selects an
+                // instruction to follow, not a service to listen to. Picking the
+                // wrong row costs a scroll; it cannot cost a scan.
+                Text(stringResource(R.string.scanner_profiles_hint), style = t.caption, color = c.fg3)
                 VendorProfiles.ALL.forEach { profile ->
                     OptionRow(profile.label, stringResource(R.string.scanner_action, profile.action), state.profileId == profile.id) {
                         onProfile(profile.id)
                     }
                 }
+                Text(stringResource(R.string.scanner_received), style = t.label, color = c.fg3)
+                ReceivedIntent(state.lastIntent)
+                Text(stringResource(R.string.scanner_custom), style = t.label, color = c.fg3)
+                CustomProfile(state, onCustomProfile)
             }
             Text(stringResource(R.string.scanner_test), style = t.label, color = c.fg3)
             TestScan(state.lastScan)
@@ -253,6 +264,83 @@ fun ScannerSettingsScreen(
                 }, enabled = text.isNotEmpty())
             }
         }
+    }
+}
+
+/**
+ * What the terminal actually broadcast. Without it an unrecognised scanner
+ * service can only be identified over adb, which means the device has to leave
+ * the floor to be diagnosed.
+ */
+@Composable
+private fun ReceivedIntent(report: IntentReport?) {
+    val c = MarkiroTheme.colors
+    val t = MarkiroTheme.type
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(MarkiroSizes.radius)).background(c.surfaceCard)
+            .border(1.dp, c.line, RoundedCornerShape(MarkiroSizes.radius)).padding(MarkiroSizes.sp3),
+        verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp1),
+    ) {
+        if (report == null) {
+            Text(stringResource(R.string.scanner_received_hint), style = t.caption, color = c.fg3)
+            return@Column
+        }
+        Text(report.action, style = t.code.copy(fontSize = 14.sp), color = c.fg1)
+        Text(report.extraKeys.joinToString(" · "), style = t.code.copy(fontSize = 13.sp), color = c.fg2)
+        val matched = report.profileId?.let { id -> VendorProfiles.ALL.firstOrNull { it.id == id }?.label }
+        if (matched == null) {
+            Text(stringResource(R.string.scanner_received_unmatched), style = t.caption, color = c.warnFg)
+        } else {
+            Text(stringResource(R.string.scanner_received_matched, matched), style = t.caption, color = c.okFg)
+        }
+    }
+}
+
+/** Three fields and a save: cheaper than a release for every terminal we have not met. */
+@Composable
+private fun CustomProfile(state: SettingsUi, onSave: (String, String, String) -> Unit) {
+    val c = MarkiroTheme.colors
+    val t = MarkiroTheme.type
+    var action by remember(state.customAction) { mutableStateOf(state.customAction) }
+    var data by remember(state.customDataExtra) { mutableStateOf(state.customDataExtra) }
+    var symbology by remember(state.customSymbologyExtra) { mutableStateOf(state.customSymbologyExtra) }
+    Text(stringResource(R.string.scanner_custom_hint), style = t.caption, color = c.fg3)
+    OutlinedTextField(
+        value = action,
+        onValueChange = { action = it },
+        label = { Text(stringResource(R.string.scanner_custom_action)) },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    OutlinedTextField(
+        value = data,
+        onValueChange = { data = it },
+        label = { Text(stringResource(R.string.scanner_custom_data)) },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    OutlinedTextField(
+        value = symbology,
+        onValueChange = { symbology = it },
+        label = { Text(stringResource(R.string.scanner_custom_symbology)) },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    PrimaryButton(
+        stringResource(R.string.scanner_custom_save),
+        { onSave(action, data, symbology) },
+        enabled = action.isNotBlank() && data.isNotBlank(),
+    )
+    if (state.customAction.isNotEmpty()) {
+        MarkiroTextButton(
+            stringResource(R.string.scanner_custom_clear),
+            onClick = {
+                action = ""
+                data = ""
+                symbology = ""
+                onSave("", "", "")
+            },
+        )
     }
 }
 

@@ -153,6 +153,24 @@
     <string name="vendor_hint_datalogic">Settings → Scanner → Wedge → Intent Wedge: enable, action as above, delivery Broadcast.</string>
     <string name="vendor_hint_honeywell">Settings → Honeywell Settings → Scanning → Internal Scanner → Data Processing Settings → Data Intent: enable, Action = %1$s.</string>
     <string name="vendor_hint_zebra">DataWedge → profile for app.markiro.handheld → Intent output: enable, Intent action = %1$s, delivery Broadcast.</string>
+    <string name="vendor_hint_urovo">Scan Settings → Output Mode: Intent Mode. Turn the keyboard wedge off, or the code arrives twice.</string>
+    <string name="vendor_hint_xcheng">Barcode Utility → Scan Setting → Data Receive Method: Broadcast_Event. The default action name already matches.</string>
+    <string name="vendor_hint_hht">ScanWedge → Settings → Output mode: Output via intent. Turn «Send barcode data» off and «Broadcast intent» on.</string>
+    <string name="vendor_hint_newland">Settings → Scanner → Output Mode: Output via API. Broadcast action = %1$s, Result 1 extra = SCAN_BARCODE1.</string>
+    <string name="vendor_hint_chainway">Scanner → Output mode: Broadcast. Turn keyboard emulation off.</string>
+    <string name="vendor_hint_generic">In the terminal\'s scanner settings pick broadcast output and match the action shown above.</string>
+    <string name="scanner_profiles_hint">The app listens to every profile at once — there is no vendor to pick. The list is here so you can find the instructions for your terminal.</string>
+    <string name="scanner_custom">CUSTOM PROFILE</string>
+    <string name="scanner_custom_hint">If your terminal is not listed: almost every scanner service lets you name the action in its own settings. Type the same name here.</string>
+    <string name="scanner_custom_action">Action (intent action)</string>
+    <string name="scanner_custom_data">Data key (extra)</string>
+    <string name="scanner_custom_symbology">Symbology key (optional)</string>
+    <string name="scanner_custom_save">Save profile</string>
+    <string name="scanner_custom_clear">Clear</string>
+    <string name="scanner_received">LAST BROADCAST</string>
+    <string name="scanner_received_hint">The action and keys of the broadcast your terminal sent appear here. Fill the custom profile from them.</string>
+    <string name="scanner_received_unmatched">The data key was not recognised — put the right one in the custom profile.</string>
+    <string name="scanner_received_matched">Recognised by the «%1$s» profile.</string>
 
     <string name="shifts_title">Shifts</string>
     <string name="shifts_my_line">My line</string>

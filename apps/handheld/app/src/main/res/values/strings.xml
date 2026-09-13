@@ -161,6 +161,24 @@
     <string name="vendor_hint_datalogic">Настройки → Сканер → Wedge → Intent Wedge: включить, действие как выше, доставка Broadcast.</string>
     <string name="vendor_hint_honeywell">Настройки → Honeywell Settings → Scanning → Internal Scanner → Data Processing Settings → Data Intent: включить, Action = %1$s.</string>
     <string name="vendor_hint_zebra">DataWedge → профиль для app.markiro.handheld → Intent output: включить, Intent action = %1$s, delivery Broadcast.</string>
+    <string name="vendor_hint_urovo">Scan Settings → Output Mode: Intent Mode. Keyboard wedge выключить, иначе код придёт дважды.</string>
+    <string name="vendor_hint_xcheng">Barcode Utility → Scan Setting → Data Receive Method: Broadcast_Event. Имя действия по умолчанию уже совпадает.</string>
+    <string name="vendor_hint_hht">ScanWedge → Settings → Output mode: Output via intent. «Send barcode data» выключить, «Broadcast intent» включить.</string>
+    <string name="vendor_hint_newland">Settings → Scanner → Output Mode: Output via API. Broadcast action = %1$s, Result 1 extra = SCAN_BARCODE1.</string>
+    <string name="vendor_hint_chainway">Scanner → Output mode: Broadcast. Keyboard emulation выключить.</string>
+    <string name="vendor_hint_generic">В настройках сканера терминала выберите вывод через broadcast и сверьте действие с указанным выше.</string>
+    <string name="scanner_profiles_hint">Приложение слушает все профили сразу — выбирать вендора не нужно. Список нужен, только чтобы найти инструкцию для своего терминала.</string>
+    <string name="scanner_custom">СВОЙ ПРОФИЛЬ</string>
+    <string name="scanner_custom_hint">Если терминала нет в списке: почти любой сканерный сервис позволяет задать имя действия в своих настройках. Впишите сюда то же самое.</string>
+    <string name="scanner_custom_action">Действие (intent action)</string>
+    <string name="scanner_custom_data">Ключ данных (extra)</string>
+    <string name="scanner_custom_symbology">Ключ символики (необязательно)</string>
+    <string name="scanner_custom_save">Сохранить профиль</string>
+    <string name="scanner_custom_clear">Очистить</string>
+    <string name="scanner_received">ПОСЛЕДНИЙ BROADCAST</string>
+    <string name="scanner_received_hint">Здесь появится действие и ключи broadcast, который прислал терминал. По ним заполняется свой профиль.</string>
+    <string name="scanner_received_unmatched">Ключ данных не опознан — впишите нужный в свой профиль.</string>
+    <string name="scanner_received_matched">Опознан профилем «%1$s».</string>
 
     <string name="shifts_title">Смены</string>
     <string name="shifts_my_line">Моя линия</string>

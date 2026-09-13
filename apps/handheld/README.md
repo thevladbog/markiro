@@ -396,6 +396,32 @@ https://releases.markiro.app/handheld/download. Она обновляется а
 
 ## Scanner sources
 
-Built-in vendor intent (Datalogic Intent Wedge, Honeywell Data Intent, Zebra DataWedge; the
-device-side setup hint is shown in Settings → Сканер), keyboard wedge as the fallback. Vendor
-intent names are taken from documentation and are not yet verified on hardware.
+Built-in vendor intent and the keyboard wedge, which is always live regardless of the setting —
+a terminal that ships in HID mode has to be pairable by scanning before anyone can reach Settings.
+
+Nobody names the vendor of the terminal in their hand. A scanner in intent mode broadcasts exactly
+one action, so **every** profile is registered at once and the one that understands the extras
+answers; `ScanDedup` collapses the same code arriving twice within 200 ms into one scan, because a
+terminal left in both modes would otherwise report one trigger pull as two units.
+
+| Profile | Action | Data extras |
+| --- | --- | --- |
+| Datalogic Intent Wedge | `com.datalogic.decodewedge.decode_action` | `…intentwedge.barcode_string` |
+| Honeywell Data Intent | configured on the device (`app.markiro.handheld.SCAN`) | `data` |
+| Zebra DataWedge | configured on the device (`app.markiro.handheld.SCAN`) | `com.symbol.datawedge.data_string` |
+| Urovo ScanManager | `android.intent.ACTION_DECODE_DATA` | `barcode_string`, `barcode` (byte[] + `length`) |
+| АТОЛ Smart, Mertech (XCheng) | `com.xcheng.scanner.action.BARCODE_DECODING_BROADCAST` | `EXTRA_BARCODE_DECODING_DATA` |
+| АТОЛ Smart.Pro (HHT ScanWedge) | `com.hht.scanwedge` + category `DEFAULT` | `com.hht.datawedge.data_string` |
+| Newland | `nlscan.action.SCANNER_RESULT` | `SCAN_BARCODE1` |
+| Chainway | `com.scanner.broadcast` | `data`, `dataBytes` |
+
+Two shapes are easy to get wrong and fail silently. An extra is not always a String — Urovo sends a
+byte array padded to the decoder's buffer with the real length beside it — and a broadcast carrying a
+category matches only a filter that declares it. Both drop the scan without a trace while the scanner
+still beeps.
+
+**Only Honeywell is confirmed on a terminal.** Everything else is vendor documentation and integrator
+knowledge bases. That is why Settings → Сканер reports the action and extra keys of the last
+broadcast received, matched or not, and why a custom profile (action + data key + optional symbology
+key) can be typed there: almost every one of these services lets its action be renamed in its own
+settings, so an unknown terminal costs a field edit rather than a release.
