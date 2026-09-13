@@ -1,3 +1,4 @@
+import { refreshValidationHistory } from "./validation-reprocessing.js";
 import { DomainError } from "@markiro/domain";
 import { productLabelContextForBundle } from "./product-labels/context.js";
 import type { StationClient } from "./api-client.js";
@@ -149,6 +150,21 @@ async function mirrorShiftBundleBody(
   } else {
     await upsertReferenceBundle(exec, bundle);
   }
+  if (printContext?.policy.mode === "duplicate_dm") {
+    try {
+      await refreshValidationHistory(
+        exec,
+        client,
+        shiftId,
+        bundle.product.id,
+        () => !generation?.sealed && isEntryCurrent(),
+      );
+    } catch {
+      // Offline/old API/incomplete history retains the last complete publication.
+      console.warn("station: validation history remains unconfirmed");
+    }
+  }
+  if (generation?.sealed || !isEntryCurrent()) return false;
   if (client.download) {
     const mediaSync = syncStationProductImage(
       exec,

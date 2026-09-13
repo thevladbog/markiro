@@ -4,6 +4,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.markiro.handheld.core.design.MarkiroTheme
@@ -74,6 +75,20 @@ class WorkScreenTest {
         compose.onNodeWithContentDescription("Ещё").performClick()
         compose.onNodeWithText("Закрыть смену").performClick()
         assertEquals(true, closed)
+    }
+
+    @Test
+    fun validationStatusKeepsSeparateErrorAndDuplicateCounters() {
+        compose.setContent {
+            MarkiroTheme {
+                WorkScreen(ui.copy(validation = ValidationUi(pending = 9)), WorkCallbacks())
+            }
+        }
+        compose.onNodeWithText("Ожидают подтверждения: 9").assertIsDisplayed()
+        compose.onNodeWithText("Ошибки").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("4").assertIsDisplayed()
+        compose.onNodeWithText("Дубли").assertIsDisplayed()
+        compose.onNodeWithText("2").assertIsDisplayed()
     }
 
     @Test

@@ -113,6 +113,15 @@ function jobsForPath(path) {
     return [...sharedJobs["platform-contracts"], "handheld_android"];
   }
 
+  if (
+    path === "packages/domain/src/validation-reprocessing.ts" ||
+    path === "packages/domain/src/validation-reprocessing-fixtures.ts" ||
+    path === "packages/domain/src/product-labels/contracts.ts" ||
+    path === "packages/domain/scripts/export-validation-reprocessing-fixtures.mjs" ||
+    path === "packages/domain/test/validation-reprocessing-fixtures.test.ts"
+  )
+    return [...sharedJobs.domain, "handheld_android"];
+
   if (path.startsWith("apps/signer/")) {
     if (
       path.startsWith("apps/signer/src-tauri/") ||

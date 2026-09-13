@@ -204,10 +204,11 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--sp-4);
-  align-items: end;
+  align-items: start;
 }
 
 .mk-shift-form__grid > .mk-checkbox {
+  align-self: end;
   padding-bottom: 11px;
 }
 
@@ -388,4 +389,31 @@
   gap: var(--sp-1);
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.mk-validation-reprocessings {
+  display: grid;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+.mk-validation-reprocessings__item {
+  display: grid;
+  gap: var(--sp-2);
+  min-width: 0;
+  padding: var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  overflow-wrap: anywhere;
+}
+
+.mk-validation-reprocessings__item p {
+  margin: 0;
+  color: var(--fg-3);
+}
+
+.mk-validation-reprocessings__code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
 }

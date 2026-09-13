@@ -55,6 +55,8 @@ data class ShiftEntity(
     val palletBoxCapacity: Int? = null,
     /** The pallet label template's spec as the bundle delivered it (06d), same shape as `boxLabelTemplate`. */
     val palletLabelTemplateSpec: String? = null,
+    @androidx.room.ColumnInfo(defaultValue = "0")
+    val allowPreviouslyAcceptedCodes: Boolean = false,
 )
 
 /** Accepted codes on this device, keyed by the KM hash device-wide (a code is one physical item). */

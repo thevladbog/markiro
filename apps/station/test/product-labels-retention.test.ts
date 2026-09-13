@@ -31,6 +31,9 @@ async function acknowledge(h: Awaited<ReturnType<typeof fixture>>, quarantine = 
       : [],
   });
   await h.exec.run("DELETE FROM outbox");
+  await h.exec.run(
+    "UPDATE validation_occurrences SET outcome='first_accepted',receipt_outcome='first_accepted'",
+  );
 }
 describe("retiring delivered local print payloads", () => {
   it("keeps active-shift copies, then deletes only the current owner's closed and delivered copies", async () => {
@@ -73,6 +76,8 @@ describe("retiring delivered local print payloads", () => {
     "pin",
     "missing_receipt",
     "conflict",
+    "validation_pending",
+    "validation_conflict",
   ])("retains payloads while %s blocks retirement", async (block) => {
     const h = await fixture();
     if (block !== "product_outbox") await acknowledge(h, block === "quarantine");
@@ -99,6 +104,10 @@ describe("retiring delivered local print payloads", () => {
         "INSERT INTO conflicts_mirror(code_hash,winning_scanned_at,detected_at) VALUES (?, '2026-09-08T09:00:00Z', '2026-09-08T11:00:00Z')",
         [h.input.codeHash],
       );
+    if (block === "validation_pending" || block === "validation_conflict")
+      await h.exec.run("UPDATE validation_occurrences SET outcome=?", [
+        block === "validation_pending" ? "pending" : "conflict",
+      ]);
     if (block === "ownership")
       await h.exec.run("UPDATE product_label_jobs SET ownership_conflict=1");
     if (block === "close_outbox")
@@ -113,5 +122,6 @@ describe("retiring delivered local print payloads", () => {
     await h.exec.run("UPDATE shift_mirror SET status='closed'");
     expect(await purgeCompletedProductLabelJobs(h.exec, h.input.credentialOwnership)).toBe(0);
     expect((await h.exec.all("SELECT job_id FROM product_label_jobs")).length).toBe(1);
+    expect(await h.exec.all("SELECT * FROM printer_destinations")).toHaveLength(1);
   });
 });

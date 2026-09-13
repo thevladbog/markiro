@@ -1,5 +1,8 @@
 package app.markiro.handheld.feature.work
 
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -175,62 +178,80 @@ fun WorkScreen(state: WorkUi, cb: WorkCallbacks) {
                 }
             }
         }
-        val box = state.box
-        if (box != null) {
-            // Aggregation: the fill grid is what the operator reads, so the last
-            // scan collapses to one line above it.
-            LastScanStrip(state.last)
-            BoxHeader(
-                stringResource(R.string.work_box_header, box.ordinal, box.filled, box.capacity),
-                Modifier.padding(top = MarkiroSizes.sp2),
-            )
-            // The grid is the main zone in aggregation, so it takes the larger share
-            // and the recent-scan feed gives way; the strip above already carries the
-            // last verdict.
-            BoxFill(box.filled, box.capacity, Modifier.weight(0.62f).padding(MarkiroSizes.sp4))
-            state.pallet?.let { PalletStrip(it.boxCount, it.capacity) }
-        } else {
-            LastScanZone(state.last, state.duplicate, Modifier.weight(0.4f))
-        }
-        if (state.unprintedLabels > 0) {
-            Box(
-                Modifier.fillMaxWidth().clickable { cb.onLabelQueue() },
-            ) {
-                Banner(
-                    pluralStringResource(R.plurals.work_labels_unprinted, state.unprintedLabels, state.unprintedLabels),
-                    Tone.Warn,
-                    Icons.Outlined.Print,
+        state.validation?.let { ValidationStatus(it) }
+        Column(if (state.validation != null) Modifier.weight(1f).verticalScroll(rememberScrollState()) else Modifier.weight(1f)) {
+            val box = state.box
+            if (box != null) {
+                // Aggregation: the fill grid is what the operator reads, so the last
+                // scan collapses to one line above it.
+                LastScanStrip(state.last)
+                BoxHeader(
+                    stringResource(R.string.work_box_header, box.ordinal, box.filled, box.capacity),
+                    Modifier.padding(top = MarkiroSizes.sp2),
                 )
+                // The grid is the main zone in aggregation, so it takes the larger share
+                // and the recent-scan feed gives way; the strip above already carries the
+                // last verdict.
+                BoxFill(box.filled, box.capacity, Modifier.weight(0.62f).padding(MarkiroSizes.sp4))
+                state.pallet?.let { PalletStrip(it.boxCount, it.capacity) }
+            } else {
+                LastScanZone(state.last, state.duplicate, if (state.validation != null) Modifier.heightIn(min = 180.dp) else Modifier.weight(0.4f))
             }
-        }
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = MarkiroSizes.sp4, vertical = MarkiroSizes.sp2),
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            val total = state.plan?.let { stringResource(R.string.work_plan_of, numbers.format(state.total), numbers.format(it)) }
-                ?: numbers.format(state.total)
-            Counter(stringResource(R.string.work_total), total, modifier = Modifier.weight(1f))
-            Counter(stringResource(R.string.work_this_terminal), numbers.format(state.thisTerminal), modifier = Modifier.weight(1f))
-            Counter(stringResource(R.string.work_errors), numbers.format(state.errors), tone = if (state.errors > 0) Tone.Warn else Tone.Neutral, modifier = Modifier.weight(1f))
-            Counter(stringResource(R.string.work_duplicates), numbers.format(state.duplicates), tone = if (state.duplicates > 0) Tone.Warn else Tone.Neutral, modifier = Modifier.weight(1f))
-        }
-        Column(Modifier.weight(if (box != null) 0.38f else 0.6f).fillMaxWidth().padding(horizontal = MarkiroSizes.sp4)) {
-            if (state.feed.isEmpty()) Text(stringResource(R.string.work_feed_empty), style = t.caption, color = c.fg3)
-            state.feed.forEach { event ->
-                // An unknown verdict is shown as a plain row rather than taking
-                // the screen down; see `Verdict.fromWireOrNull`.
-                val verdict = Verdict.fromWireOrNull(event.verdict)
-                Row(Modifier.fillMaxWidth().height(32.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text(Iso.parse(event.scannedAt)?.let { TimeText.hhmm(it) } ?: "", style = t.caption, color = c.fg3)
-                    Text(feedTail(event.raw), style = t.code.copy(fontSize = 14.sp), color = c.fg1)
-                    Text(
-                        verdict?.let { stringResource(it.label()) } ?: event.verdict,
-                        style = t.caption,
-                        color = c.tone(verdict?.verdictTone() ?: Tone.Neutral).fg,
+            if (state.unprintedLabels > 0) {
+                Box(
+                    Modifier.fillMaxWidth().clickable { cb.onLabelQueue() },
+                ) {
+                    Banner(
+                        pluralStringResource(R.plurals.work_labels_unprinted, state.unprintedLabels, state.unprintedLabels),
+                        Tone.Warn,
+                        Icons.Outlined.Print,
                     )
                 }
             }
+            if (state.validation != null) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = MarkiroSizes.sp4, vertical = MarkiroSizes.sp2)) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp4)) {
+                        val total = state.plan?.let { stringResource(R.string.work_plan_of, numbers.format(state.total), numbers.format(it)) }
+                            ?: numbers.format(state.total)
+                        Box(Modifier.weight(1f)) { Counter(stringResource(R.string.work_total), total) }
+                        Box(Modifier.weight(1f)) { Counter(stringResource(R.string.work_this_terminal), numbers.format(state.thisTerminal)) }
+                    }
+                    Row(Modifier.fillMaxWidth().padding(top = MarkiroSizes.sp2), horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp4)) {
+                        Counter(stringResource(R.string.work_errors), numbers.format(state.errors), tone = if (state.errors > 0) Tone.Warn else Tone.Neutral, modifier = Modifier.weight(1f))
+                        Counter(stringResource(R.string.work_duplicates), numbers.format(state.duplicates), tone = if (state.duplicates > 0) Tone.Warn else Tone.Neutral, modifier = Modifier.weight(1f))
+                    }
+                }
+            } else {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = MarkiroSizes.sp4, vertical = MarkiroSizes.sp2),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                val total = state.plan?.let { stringResource(R.string.work_plan_of, numbers.format(state.total), numbers.format(it)) }
+                    ?: numbers.format(state.total)
+                Counter(stringResource(R.string.work_total), total, modifier = Modifier.weight(1f))
+                Counter(stringResource(R.string.work_this_terminal), numbers.format(state.thisTerminal), modifier = Modifier.weight(1f))
+                Counter(stringResource(R.string.work_errors), numbers.format(state.errors), tone = if (state.errors > 0) Tone.Warn else Tone.Neutral, modifier = Modifier.weight(1f))
+                Counter(stringResource(R.string.work_duplicates), numbers.format(state.duplicates), tone = if (state.duplicates > 0) Tone.Warn else Tone.Neutral, modifier = Modifier.weight(1f))
+            }
+            }
+            Column((if (state.validation != null) Modifier else Modifier.weight(if (box != null) 0.38f else 0.6f)).fillMaxWidth().padding(horizontal = MarkiroSizes.sp4)) {
+                if (state.feed.isEmpty()) Text(stringResource(R.string.work_feed_empty), style = t.caption, color = c.fg3)
+                state.feed.forEach { event ->
+                    // An unknown verdict is shown as a plain row rather than taking
+                    // the screen down; see `Verdict.fromWireOrNull`.
+                    val verdict = Verdict.fromWireOrNull(event.verdict)
+                    Row(Modifier.fillMaxWidth().height(32.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Text(Iso.parse(event.scannedAt)?.let { TimeText.hhmm(it) } ?: "", style = t.caption, color = c.fg3)
+                        Text(feedTail(event.raw), style = t.code.copy(fontSize = 14.sp), color = c.fg1)
+                        Text(
+                            verdict?.let { stringResource(it.label()) } ?: event.verdict,
+                            style = t.caption,
+                            color = c.tone(verdict?.verdictTone() ?: Tone.Neutral).fg,
+                        )
+                    }
+                }
         }
+    }
     }
     if (teamSheet) {
         ModalBottomSheet(onDismissRequest = { teamSheet = false }, containerColor = c.surfaceCard) {
@@ -315,7 +336,7 @@ private fun LastScanZone(last: LastScan?, duplicate: DuplicateUi?, modifier: Mod
                 else -> Icons.Outlined.ErrorOutline
             }
             Icon(icon, contentDescription = null, tint = colors.fg)
-            Text(stringResource(last.verdict.label()), style = t.title, color = colors.fg)
+            Text(stringResource(last.refusal?.label() ?: last.verdict.label()), style = if (last.refusal != null) t.strong else t.title, color = colors.fg, textAlign = TextAlign.Center)
             Text(last.tail, style = t.code, color = c.fg1)
             last.firstSeenAt?.let { seen ->
                 Text(stringResource(R.string.work_first_seen, Iso.parse(seen)?.let { TimeText.hhmm(it) } ?: seen), style = t.caption, color = c.fg2)
@@ -402,5 +423,23 @@ private fun Counter(label: String, value: String, tone: Tone = Tone.Neutral, mod
     Column(modifier.padding(end = MarkiroSizes.sp1), horizontalAlignment = Alignment.Start) {
         if (label.isNotEmpty()) Text(label, style = t.caption, color = c.fg3)
         Text(value, style = t.strong.copy(fontSize = 16.sp), color = if (tone == Tone.Neutral) c.fg1 else c.tone(tone).fg)
+    }
+}
+
+private fun app.markiro.handheld.core.scan.ValidationRefusal.label(): Int = when (this) {
+    app.markiro.handheld.core.scan.ValidationRefusal.SAME_SHIFT -> R.string.validation_same_shift
+    app.markiro.handheld.core.scan.ValidationRefusal.PREVIOUS_DISALLOWED -> R.string.validation_previous_disallowed
+    app.markiro.handheld.core.scan.ValidationRefusal.OTHER_ACTIVE -> R.string.validation_other_active
+    app.markiro.handheld.core.scan.ValidationRefusal.CLOSURE_UNKNOWN -> R.string.validation_closure_unknown
+}
+
+@Composable
+internal fun ValidationStatus(state: ValidationUi) {
+    val c = MarkiroTheme.colors
+    Column(Modifier.fillMaxWidth().padding(horizontal = MarkiroSizes.sp4)) {
+        if (state.pending > 0) Text(stringResource(R.string.validation_pending, state.pending), style = MarkiroTheme.type.caption, color = c.tone(Tone.Warn).fg)
+        if (state.conflicts > 0) Text(stringResource(R.string.validation_conflict, state.conflicts), style = MarkiroTheme.type.caption, color = c.tone(Tone.Err).fg)
+        Text(state.fetchedAt?.let { stringResource(R.string.validation_history_as_of, Iso.parse(it)?.let { at -> TimeText.ddmmHhmm(at) } ?: it) }
+            ?: stringResource(R.string.validation_history_unknown), style = MarkiroTheme.type.caption, color = c.fg3)
     }
 }

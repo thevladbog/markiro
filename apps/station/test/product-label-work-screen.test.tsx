@@ -117,6 +117,32 @@ describe("duplicate printing through the real WorkScreen scanner", () => {
       (await h.exec.all<{ n: number }>("SELECT count(*) n FROM scan_events_mirror"))[0]?.n,
     ).toBe(1);
   });
+  it("explains the active processing refusal without a new unit or print", async () => {
+    const { h, scan, idle } = await setup("none");
+    await h.exec.run(
+      "INSERT INTO validation_code_history(shift_id,code_hash,kind,source_shift_id,shift_number,shift_status,scanned_at) VALUES(?,?,'reprocessing',?,'ACTIVE','active',?)",
+      [h.input.shiftId, h.input.codeHash, crypto.randomUUID(), h.input.acceptedAt],
+    );
+    scan(h.input.raw);
+    await idle();
+    expect(await screen.findByText("Код обрабатывается в другой активной смене")).toBeTruthy();
+    expect(h.print).not.toHaveBeenCalled();
+    expect(await h.exec.all("SELECT * FROM validation_occurrences")).toHaveLength(0);
+  });
+
+  it("restores the main processed counter and pending confirmation after remount", async () => {
+    const { h, scan, idle, view, element } = await setup("none");
+    scan(h.input.raw);
+    await idle();
+    view.unmount();
+    render(element);
+    const summary = await screen.findByRole("complementary", { name: "Итоги смены" });
+    await waitFor(() =>
+      expect(within(summary).getByText("Принято").parentElement?.textContent).toContain("1"),
+    );
+    expect(within(summary).queryByText("Синхронизировано")).toBeNull();
+  });
+
   it("skips explicitly with an audit event and admits the next unit without a verified claim", async () => {
     const { h, scan, idle } = await setup();
     scan(h.input.raw);
@@ -143,6 +169,36 @@ describe("duplicate printing through the real WorkScreen scanner", () => {
     expect(h.print).toHaveBeenCalledTimes(2);
     await screen.findByRole("dialog", { name: "Отсканируйте напечатанную этикетку" });
   });
+  it("keeps same-shift refusal and durable processing counts after skipping verification", async () => {
+    const { h, scan, idle, view, element } = await setup();
+    scan(h.input.raw);
+    await idle();
+    const dialog = await screen.findByRole("dialog", {
+      name: "Отсканируйте напечатанную этикетку",
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Пропустить проверку" }));
+    await idle();
+    await screen.findByText("Проверка пропущена");
+    scan(h.input.raw);
+    await idle();
+    expect(await screen.findByText("Код уже обработан в этой смене")).toBeTruthy();
+    expect(h.print).toHaveBeenCalledTimes(1);
+    expect(await h.exec.all("SELECT * FROM validation_occurrences")).toHaveLength(1);
+    expect(await h.exec.all("SELECT * FROM product_label_jobs")).toHaveLength(1);
+    const summary = await screen.findByRole("complementary", { name: "Итоги смены" });
+    expect(within(summary).getByText("Ошибки").parentElement?.textContent).toContain("0");
+    expect(within(summary).getByText("Дубли").parentElement?.textContent).toContain("1");
+    view.unmount();
+    render(element);
+    const restored = await screen.findByRole("complementary", { name: "Итоги смены" });
+    await waitFor(() =>
+      expect(within(restored).getByText("Принято").parentElement?.textContent).toContain("1"),
+    );
+    expect(within(restored).queryByText("Синхронизировано")).toBeNull();
+    expect(screen.queryByText("Этикетка подтверждена")).toBeNull();
+    expect(h.print).toHaveBeenCalledTimes(1);
+  });
+
   it("recovers a committed acceptance after its reply is lost without losing the print prompt", async () => {
     const { h, scan, idle } = await setup();
     const run = h.exec.run;

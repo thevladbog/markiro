@@ -70,7 +70,17 @@ describe.skipIf(!databaseUrl)("working device retention forward migration", () =
       "INSERT INTO shifts(id,tenant_id,product_id,mode,status,number_month_key,number_seq,opened_at) VALUES($1,'retention-a',$2,'validation','active','SEP26',1,'2026-09-11T08:00:00Z')",
       [shiftId, productId],
     );
-    history = await readHistory();
+    // The later reprocessing migration adds a default-off policy field. Every
+    // pre-existing historical field must still match byte-for-byte, and the new
+    // field must stay false for this legacy validation shift.
+    history = (await readHistory()).map((rows, index) =>
+      index === 4
+        ? rows.map((row: Record<string, unknown>) => ({
+            ...row,
+            allow_previously_accepted_codes: false,
+          }))
+        : rows,
+    );
     await runRuntimeMigrations({
       databaseUrl: url.toString(),
       migrationsFolder,

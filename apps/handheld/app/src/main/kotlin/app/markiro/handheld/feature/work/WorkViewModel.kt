@@ -75,6 +75,7 @@ data class LastScan(
      * unresolved -- a lie, and one that sends them looking at the wrong thing.
      */
     val blocked: Boolean = false,
+    val refusal: app.markiro.handheld.core.scan.ValidationRefusal? = null,
 )
 
 /** The open box, as the fill grid needs it. Null outside an aggregation shift. */
@@ -171,7 +172,10 @@ data class WorkUi(
     val pallet: PalletUi? = null,
     /** Set while «Закрыть паллету досрочно» is asking to be confirmed. */
     val palletConfirm: PalletConfirm? = null,
+    val validation: ValidationUi? = null,
 )
+
+data class ValidationUi(val pending: Int = 0, val conflicts: Int = 0, val fetchedAt: String? = null)
 
 /** Printing status; verification also opens a dedicated screen. */
 data class DuplicateUi(val printing: Boolean, val awaitingVerification: Boolean)
@@ -291,6 +295,12 @@ class WorkViewModel(
         db.scanEventDao().observeCount(shiftId, Verdict.DUPLICATE.wire),
     ) { mine, invalid, wrong, dup -> Counters(mine, invalid + wrong, dup) }
 
+    private val validationUi = combine(
+        db.validationDao().observeCount(shiftId, "pending"),
+        db.validationDao().observeCount(shiftId, "conflict"),
+        db.validationDao().observePublication(shiftId),
+    ) { pending, conflicts, history -> ValidationUi(pending, conflicts, history?.fetchedAt) }
+
     val state: StateFlow<WorkUi> = combine(
         db.shiftDao().observe(shiftId),
         last,
@@ -305,6 +315,7 @@ class WorkViewModel(
         duplicateUi,
         palletUi,
         palletConfirmState,
+        validationUi,
     ) { values ->
         val shift = values[0] as ShiftEntity?
         val c = values[2] as Counters
@@ -330,6 +341,7 @@ class WorkViewModel(
             duplicate = values[10] as DuplicateUi?,
             pallet = values[11] as PalletUi?,
             palletConfirm = values[12] as PalletConfirm?,
+            validation = if (shift?.validationPrintMode == "duplicate_dm") values[13] as ValidationUi else null,
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, WorkUi(null, null, 0, null, 0, 0, 0, emptyList(), SyncState(), false, null))
 
@@ -731,6 +743,7 @@ class WorkViewModel(
         tail = feedTail(raw),
         firstSeenAt = firstSeenAt,
         at = scannedAt,
+        refusal = refusal,
     )
 
     /**

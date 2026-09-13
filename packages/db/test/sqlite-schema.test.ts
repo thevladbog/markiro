@@ -66,6 +66,21 @@ describe("STATION_MIGRATIONS", () => {
     expect(index).toBeGreaterThan(0);
     applyStatements(db, STATION_MIGRATIONS.slice(0, index));
     db.prepare("INSERT INTO station_meta(key,value) VALUES('legacy-printer','preserved')").run();
+    db.prepare(
+      "INSERT INTO validation_occurrences(shift_id,code_hash,scanned_at,credential_ownership,terminal_id,canonical_raw,source_shift_id,outcome,receipt_outcome,ownership_released) VALUES(?,?,?,?,?,?,?,?,?,?)",
+    ).run(
+      "shift",
+      "hash",
+      "now",
+      "owner",
+      "terminal",
+      "FULL\u001d92CRYPTO",
+      "old",
+      "reprocessed",
+      "reprocessed",
+      1,
+    );
+    const validationBefore = db.prepare("SELECT * FROM validation_occurrences").all();
     applyStatements(db, STATION_MIGRATIONS.slice(index));
     const insert = db.prepare(
       "INSERT INTO printer_destinations(scope,purpose,job_id,attempt_id,profile_json) VALUES(?,?,?,?,?)",
@@ -82,6 +97,7 @@ describe("STATION_MIGRATIONS", () => {
     expect(db.prepare("SELECT COUNT(*) AS count FROM printer_destinations").get()).toEqual({
       count: 2,
     });
+    expect(db.prepare("SELECT * FROM validation_occurrences").all()).toEqual(validationBefore);
     db.close();
   });
   it("assigns unique append-only identities and names only the superseded audit steps", () => {
@@ -2676,5 +2692,69 @@ describe("pallet mirror", () => {
           .run(),
       ).toThrow(/UNIQUE constraint failed/);
     });
+  });
+});
+
+describe("validation reprocessing SQLite persistence", () => {
+  it("preserves history entry identity and an occurrence independent of the global registry", () => {
+    const db = migratedDb();
+    try {
+      db.prepare(
+        "INSERT INTO validation_history_publications(shift_id,product_id,snapshot,fetched_at,expires_at,items_json) VALUES(?,?,?,?,?,?)",
+      ).run(
+        "shift",
+        "product",
+        "snapshot",
+        "now",
+        "later",
+        JSON.stringify([
+          {
+            codeHash: "hash",
+            kind: "original",
+            shiftId: "old",
+            shiftNumber: "OLD",
+            shiftStatus: "closed",
+            scannedAt: "before",
+          },
+          {
+            codeHash: "hash",
+            kind: "reprocessing",
+            shiftId: "active",
+            shiftNumber: "ACTIVE",
+            shiftStatus: "active",
+            scannedAt: "now",
+          },
+        ]),
+      );
+      expect(
+        db.prepare("SELECT kind,source_shift_id FROM validation_code_history ORDER BY kind").all(),
+      ).toEqual([
+        { kind: "original", source_shift_id: "old" },
+        { kind: "reprocessing", source_shift_id: "active" },
+      ]);
+      db.prepare(
+        "INSERT INTO validation_occurrences(shift_id,code_hash,scanned_at,credential_ownership,terminal_id,canonical_raw,source_shift_id) VALUES(?,?,?,?,?,?,?)",
+      ).run("shift", "hash", "now", "owner", "terminal", "FULL\u001d92CRYPTO", "old");
+      expect(db.prepare("SELECT COUNT(*) AS n FROM codes_mirror").get()).toEqual({ n: 0 });
+      expect(db.prepare("SELECT COUNT(*) AS n FROM station_processed_codes").get()).toEqual({
+        n: 1,
+      });
+      expect(() =>
+        db
+          .prepare(
+            "INSERT INTO validation_occurrences(shift_id,code_hash,scanned_at,credential_ownership,terminal_id,canonical_raw) VALUES(?,?,?,?,?,?)",
+          )
+          .run("shift", "hash", "later", "owner", "terminal", "FULL"),
+      ).toThrow("UNIQUE constraint");
+      db.prepare("UPDATE validation_occurrences SET outcome='conflict'").run();
+      expect(db.prepare("SELECT COUNT(*) AS n FROM station_processed_codes").get()).toEqual({
+        n: 0,
+      });
+      expect(db.prepare("SELECT canonical_raw FROM validation_occurrences").get()).toEqual({
+        canonical_raw: "FULL\u001d92CRYPTO",
+      });
+    } finally {
+      db.close();
+    }
   });
 });

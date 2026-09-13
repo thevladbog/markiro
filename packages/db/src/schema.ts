@@ -26,3 +26,4 @@ export * from "./schema/device-licensing.js";
 export * from "./schema/device-replacements.js";
 
 export * from "./schema/device-retention.js";
+export * from "./schema/validation-reprocessing.js";

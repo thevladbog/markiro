@@ -134,7 +134,19 @@ export async function applyStationProductLabelEvents(
     if (!shift) return "parent_missing";
     if (!operators.has(event.operatorId)) return "invalid_transition";
     const acceptedAt = new Date(event.acceptedAt);
-    const [code] = await tx
+    const [reprocessing] = await tx
+      .select()
+      .from(schema.validationCodeReprocessings)
+      .where(
+        and(
+          eq(schema.validationCodeReprocessings.tenantId, tenantId),
+          eq(schema.validationCodeReprocessings.shiftId, event.shiftId),
+          eq(schema.validationCodeReprocessings.codeHash, event.codeHash),
+          eq(schema.validationCodeReprocessings.terminalId, deviceId),
+          eq(schema.validationCodeReprocessings.scannedAt, acceptedAt),
+        ),
+      );
+    const [ordinaryCode] = await tx
       .select({ raw: schema.codes.canonicalRaw })
       .from(schema.codes)
       .where(
@@ -145,6 +157,7 @@ export async function applyStationProductLabelEvents(
           eq(schema.codes.scannedAt, acceptedAt),
         ),
       );
+    const code = reprocessing ? { raw: reprocessing.canonicalRaw } : ordinaryCode;
     if (!code) return "parent_missing";
     const scans = await tx
       .select({ raw: schema.scanEvents.raw, operatorId: schema.scanEvents.operatorId })
@@ -194,11 +207,13 @@ export async function applyStationProductLabelEvents(
           eq(schema.codeRegistry.codeHash, event.codeHash),
         ),
       );
+
     if (
-      !owner ||
-      owner.terminalId !== deviceId ||
-      owner.shiftId !== event.shiftId ||
-      owner.scannedAt.getTime() !== acceptedAt.getTime()
+      !reprocessing &&
+      (!owner ||
+        owner.terminalId !== deviceId ||
+        owner.shiftId !== event.shiftId ||
+        owner.scannedAt.getTime() !== acceptedAt.getTime())
     )
       return "ownership_conflict";
 

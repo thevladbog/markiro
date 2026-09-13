@@ -1,4 +1,9 @@
 import {
+  validationOccurrenceStatusQuerySchema,
+  validationOccurrenceStatusSchema,
+  type ValidationOccurrenceStatusQuery,
+} from "@markiro/domain";
+import {
   Body,
   Controller,
   ForbiddenException,
@@ -10,6 +15,7 @@ import {
 } from "@nestjs/common";
 import { ApiCreatedResponse, ApiOkResponse, ApiOperation, ApiTags } from "@nestjs/swagger";
 import {
+  zodApiSchema,
   ApiHttpErrors,
   ApiStationAuth,
   ApiZodBody,
@@ -48,6 +54,22 @@ import { StationScansService } from "./station-scans.service";
 @ApiStationAuth()
 export class StationScansController {
   constructor(private readonly service: StationScansService) {}
+
+  @Post("validation-occurrences/status")
+  @HttpCode(200)
+  @AllowSubscriptionRecovery("station")
+  @ApiOperation({ summary: "Reconcile own validation occurrences, including later displacement" })
+  @ApiZodBody(validationOccurrenceStatusQuerySchema)
+  @ApiOkResponse({ schema: zodApiSchema(validationOccurrenceStatusSchema) })
+  @ApiHttpErrors(400, 401, 403)
+  occurrenceStatus(
+    @Req() req: RequestWithTenant,
+    @Body(new ZodValidationPipe(validationOccurrenceStatusQuerySchema))
+    body: ValidationOccurrenceStatusQuery,
+  ) {
+    if (!req.deviceId) throw new ForbiddenException("Station device authentication required");
+    return this.service.validationOccurrenceStatus(req.tenantId!, req.deviceId, body);
+  }
 
   @Post("conflicts/status")
   @HttpCode(200)
@@ -112,7 +134,14 @@ export class StationScansController {
     if (!req.deviceId) {
       throw new ForbiddenException("Station device authentication required");
     }
-    const result = await this.service.applyBatch(req.tenantId!, body, req.deviceId);
+    const result = await this.service.applyBatch(req.tenantId!, body, req.deviceId, capabilities);
+    if (
+      !capabilities
+        ?.split(",")
+        .map((value) => value.trim())
+        .includes("validation-reprocessing-v1")
+    )
+      delete result.validationOccurrences;
     if (
       capabilities
         ?.split(",")
@@ -126,6 +155,9 @@ export class StationScansController {
       alreadyApplied: result.alreadyApplied,
       conflicts: result.conflicts,
       ...(result.productLabelReceipt ? { productLabelReceipt: result.productLabelReceipt } : {}),
+      ...(result.validationOccurrences
+        ? { validationOccurrences: result.validationOccurrences }
+        : {}),
     };
   }
 }

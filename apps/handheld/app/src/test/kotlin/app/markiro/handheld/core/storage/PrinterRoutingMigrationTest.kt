@@ -20,7 +20,7 @@ class PrinterRoutingMigrationTest {
             .allowMainThreadQueries().build()
         try {
             db.printerDao().upsert(PrinterEntity("a", "A", "wifi", "a:9100", "zpl", 203, false, null, null))
-            MIGRATION_11_12.migrate(db.openHelper.writableDatabase)
+            MIGRATION_12_13.migrate(db.openHelper.writableDatabase)
             PrintPurpose.entries.forEach { assertNull(db.printerDao().assigned(it)) }
         } finally { db.close() }
     }
@@ -36,20 +36,20 @@ class PrinterRoutingMigrationTest {
         old.openHelper.writableDatabase.apply {
             execSQL("DROP TABLE printer_assignments")
             execSQL("DROP TABLE print_destinations")
-            version = 11
+            version = 12
         }
         old.close()
         val upgraded = Room.databaseBuilder(context, HandheldDatabase::class.java, name)
-            .addMigrations(MIGRATION_11_12).allowMainThreadQueries().build()
+            .addMigrations(MIGRATION_12_13).allowMainThreadQueries().build()
         try {
-            assertEquals(12, upgraded.openHelper.readableDatabase.version)
+            assertEquals(13, upgraded.openHelper.readableDatabase.version)
             PrintPurpose.entries.forEach { assertEquals("b", upgraded.printerDao().assigned(it)?.id) }
             assertEquals(listOf("a", "b"), upgraded.printerDao().all().map { it.id })
             assertEquals("unknown", upgraded.boxDao().get("box")?.printState)
             assertEquals("link lost", upgraded.boxDao().get("box")?.printReason)
             assertNull(upgraded.printerDao().destination("box", "box", "initial"))
             upgraded.printerDao().assign(PrinterAssignmentEntity("pallet", null))
-            MIGRATION_11_12.migrate(upgraded.openHelper.writableDatabase)
+            MIGRATION_12_13.migrate(upgraded.openHelper.writableDatabase)
             assertNull(upgraded.printerDao().assigned(PrintPurpose.PALLET))
             assertEquals("b", upgraded.printerDao().assigned(PrintPurpose.BOX)?.id)
         } finally {

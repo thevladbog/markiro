@@ -67,6 +67,68 @@ class DuplicateSyncTest {
         db.close()
     }
 
+    @Test fun occurrenceReceiptReclassifiesProvisionalOriginalBeforeAcknowledgingScans() = runTest {
+        val raw = "010460068200001321AAA\u001d93CRYPTO"
+        val km = app.markiro.handheld.core.km.KmCodec.canonicalize(raw)
+        val hash = app.markiro.handheld.core.km.KmCodec.hash(km)
+        val shift = app.markiro.handheld.feature.shift.ShiftEntityFixtures.bundled("s1").copy(validationPrintMode="duplicate_dm")
+        db.shiftDao().upsert(shift)
+        val outcome = app.markiro.handheld.core.scan.ScanRecorder(db) { clock }.record(shift,raw,"op-1")
+        server.enqueue(MockResponse().setBody("""{"applied":1,"alreadyApplied":false,"conflicts":[],"validationOccurrences":[{"shiftId":"s1","codeHash":"$hash","scannedAt":"${outcome.scannedAt}","outcome":"reprocessed"}]}"""))
+        assertEquals(SyncEngine.Step.SENT, engine().drainOnce())
+        assertEquals("reprocessed",db.validationDao().get("s1",hash)?.outcome)
+        assertNull(db.codeDao().get(hash))
+        assertEquals(1,db.codeDao().countForShift("s1"))
+        assertEquals(0,db.outboxDao().countNow())
+    }
+
+    @Test fun acknowledgedOccurrenceCanLoseLaterWithoutLosingItsPrintEvidence() = runTest {
+        val job=db.productLabelJobDao().get("j1")!!.copy(status="completed")
+        db.productLabelJobDao().update(job)
+        val destination=app.markiro.handheld.core.print.PrinterEntity("printer", "Saved printer", "wifi", "printer:9100", "zpl", 203, false, null, null)
+        app.markiro.handheld.core.print.PrintDestinations(db).retain(app.markiro.handheld.core.print.PrintPurpose.DUPLICATE,job.jobId,job.attemptId,destination)
+        db.validationDao().insert(app.markiro.handheld.core.storage.ValidationOccurrenceEntity("s1",job.codeHash,job.acceptedAt,job.canonicalRaw,"04600682000013","AAA","op-1","dev-1",null,null,"reprocessed","reprocessed","reprocessed"))
+        server.enqueue(MockResponse().setBody("""{"protocol":"validation-reprocessing-v1","occurrences":[{"shiftId":"s1","codeHash":"${job.codeHash}","scannedAt":"${job.acceptedAt}","outcome":"conflict"}]}"""))
+        engine().reconcileValidationOccurrences()
+        val request=server.takeRequest()
+        assertEquals("/station/validation-occurrences/status",request.path)
+        assertTrue(request.body.readUtf8().contains(job.acceptedAt))
+        assertEquals("conflict",db.validationDao().get("s1",job.codeHash)?.outcome)
+        assertEquals(0,db.codeDao().countForShift("s1"))
+        db.productLabelJobDao().purgeSettledEverywhere()
+        db.productLabelJobDao().dropBytesForShift("s1")
+        assertEquals(job,db.productLabelJobDao().get("j1"))
+        assertEquals(destination,db.printerDao().destination("duplicate",job.jobId,job.attemptId)?.printer)
+    }
+
+    @Test fun pendingAndConflictingAcceptanceRetainsTheDestinationUntilReconciled() = runTest {
+        val job=db.productLabelJobDao().get("j1")!!.copy(status="completed")
+        db.productLabelJobDao().update(job)
+        val destination=app.markiro.handheld.core.print.PrinterEntity("printer", "Saved printer", "wifi", "printer:9100", "zpl", 203, false, null, null)
+        app.markiro.handheld.core.print.PrintDestinations(db).retain(app.markiro.handheld.core.print.PrintPurpose.DUPLICATE,job.jobId,job.attemptId,destination)
+        val occurrence=app.markiro.handheld.core.storage.ValidationOccurrenceEntity("s1",job.codeHash,job.acceptedAt,job.canonicalRaw,"04600682000013","AAA","op-1","dev-1",null,null,"reprocessed")
+        db.validationDao().insert(occurrence)
+        for (outcome in listOf("pending", "conflict")) {
+            db.validationDao().update(occurrence.copy(outcome=outcome))
+            db.productLabelJobDao().dropBytesForShift("s1")
+            db.productLabelJobDao().purgeSettled("s1")
+            db.productLabelJobDao().purgeSettledEverywhere()
+            assertEquals(job,db.productLabelJobDao().get(job.jobId))
+            assertEquals(destination,db.printerDao().destination("duplicate",job.jobId,job.attemptId)?.printer)
+        }
+        db.validationDao().update(occurrence.copy(outcome="reprocessed",lastReceipt="reprocessed"))
+        db.productLabelJobDao().purgeSettledEverywhere()
+        assertNull(db.productLabelJobDao().get(job.jobId))
+        assertNull(db.printerDao().destination("duplicate",job.jobId,job.attemptId))
+        assertEquals("reprocessed",db.validationDao().get("s1",job.codeHash)?.outcome)
+    }
+    @Test fun malformedOccurrenceReceiptDoesNotAcknowledgePinnedScans() = runTest {
+        scan("raw")
+        server.enqueue(MockResponse().setBody("""{"applied":1,"alreadyApplied":false,"validationOccurrences":{}}"""))
+        assertEquals(SyncEngine.Step.FAILED,engine().drainOnce())
+        assertEquals(1,db.outboxDao().countNow())
+    }
+
     private fun engine(): SyncEngine {
         val client = OkHttpClient.Builder().addInterceptor(RevocationInterceptor(bus, db.recovery, Json { ignoreUnknownKeys = true })).build()
         return SyncEngine(

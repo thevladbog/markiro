@@ -193,6 +193,25 @@ export class ShiftExportSourceService {
         and(eq(schema.codeRegistry.tenantId, tenantId), eq(schema.codeRegistry.shiftId, shiftId)),
       );
 
+    if (format.boxMode === "flat") {
+      const repeated = await tx
+        .select({
+          tenantId: schema.validationCodeReprocessings.tenantId,
+          shiftId: schema.validationCodeReprocessings.shiftId,
+          codeHash: schema.validationCodeReprocessings.codeHash,
+          scannedAt: schema.validationCodeReprocessings.scannedAt,
+          canonicalRaw: schema.validationCodeReprocessings.canonicalRaw,
+        })
+        .from(schema.validationCodeReprocessings)
+        .where(
+          and(
+            eq(schema.validationCodeReprocessings.tenantId, tenantId),
+            eq(schema.validationCodeReprocessings.shiftId, shiftId),
+          ),
+        );
+      const hashes = new Set(authoritativeRows.map((row) => row.codeHash));
+      authoritativeRows.push(...repeated.filter((row) => !hashes.has(row.codeHash)));
+    }
     const authoritative = authoritativeRows
       .filter((row) => row.tenantId === tenantId && row.shiftId === shiftId)
       .sort(compareAuthoritativeCodes);

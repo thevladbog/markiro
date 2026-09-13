@@ -168,6 +168,28 @@
 			}
 		}
 
+		@stationCodeHistory {
+			path_regexp stationCodeHistory ^/shifts/[^/]+/code-history$
+			method GET
+			header X-Api-Key *
+		}
+		handle @stationCodeHistory {
+			reverse_proxy api:3000 {
+				import standard_api_transport
+			}
+		}
+
+		@stationCodeHistoryPreflight {
+			path_regexp stationCodeHistoryPreflight ^/shifts/[^/]+/code-history$
+			method OPTIONS
+			header Access-Control-Request-Method GET
+		}
+		handle @stationCodeHistoryPreflight {
+			reverse_proxy api:3000 {
+				import standard_api_transport
+			}
+		}
+
 		@assets path /assets/*
 		handle @assets {
 			header Cache-Control "public, max-age=31536000, immutable"

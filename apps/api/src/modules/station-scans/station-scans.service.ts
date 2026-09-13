@@ -1,3 +1,8 @@
+import { loadValidationOccurrenceStatus } from "./validation-occurrence-status";
+import type { ValidationOccurrenceStatusQuery } from "@markiro/domain";
+import { assertProductLabelCapability } from "../shifts/validation-print-policy";
+import { admitValidationOccurrences } from "./validation-reprocessing";
+import type { ValidationOccurrenceOutcome } from "@markiro/domain";
 import { createHash } from "node:crypto";
 import { BadRequestException, ConflictException, Inject, Injectable, Logger } from "@nestjs/common";
 import { and, asc, eq, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
@@ -225,6 +230,7 @@ export class StationScansService {
       palletExceptions?: SyncBatchDto["palletExceptions"];
     },
     authenticatedTerminalId: string,
+    capabilities?: string,
   ): Promise<SyncBatchResponseDto> {
     let body: SyncBatchDto = {
       ...input,
@@ -368,6 +374,9 @@ export class StationScansService {
           applied: 0,
           alreadyApplied: true,
           conflicts: stored?.conflicts ?? [],
+          ...(stored?.validationOccurrences
+            ? { validationOccurrences: stored.validationOccurrences }
+            : {}),
           ...(stored?.denied ? { denied: stored.denied } : {}),
           ...(stored?.productLabelReceipt
             ? { productLabelReceipt: stored.productLabelReceipt }
@@ -403,13 +412,24 @@ export class StationScansService {
         allShiftIds.length === 0
           ? []
           : await tx
-              .select({ id: schema.shifts.id, openedAt: schema.shifts.openedAt })
+              .select({
+                id: schema.shifts.id,
+                openedAt: schema.shifts.openedAt,
+                allowPreviouslyAcceptedCodes: schema.shifts.allowPreviouslyAcceptedCodes,
+              })
               .from(schema.shifts)
               .where(
                 and(eq(schema.shifts.tenantId, tenantId), inArray(schema.shifts.id, allShiftIds)),
               )
               .orderBy(schema.shifts.id)
               .for("update");
+      for (const shift of shiftRows) {
+        if (shift.allowPreviouslyAcceptedCodes)
+          assertProductLabelCapability(
+            { mode: "duplicate_dm", allowPreviouslyAcceptedCodes: true },
+            capabilities,
+          );
+      }
       const shiftById = new Map(shiftRows.map((shift) => [shift.id, shift]));
       let denied: DeniedStationRecordDto[] = [];
       const deniedProductLabelEventIds = new Set<string>();
@@ -531,7 +551,8 @@ export class StationScansService {
       // return below without ever entering the `body.items.length > 0`
       // branch: `batchConflicts` stays empty, exactly as it is for any
       // batch that loses no claims of its own.
-      let batchConflicts: BatchConflictDto[] = [];
+      const batchConflicts: BatchConflictDto[] = [];
+      let validationOccurrences: ValidationOccurrenceOutcome[] = [];
 
       // Serialize every mutation of a device box before taking any registry
       // locks. The box row may not exist yet, so a transaction advisory lock
@@ -609,7 +630,12 @@ export class StationScansService {
       if (body.items.length > 0) {
         const shiftIds = [...new Set(body.items.map((i) => i.shiftId))];
         const owned = await tx
-          .select({ id: schema.shifts.id, status: schema.shifts.status })
+          .select({
+            id: schema.shifts.id,
+            status: schema.shifts.status,
+            mode: schema.shifts.mode,
+            validationPrintMode: schema.shifts.validationPrintMode,
+          })
           .from(schema.shifts)
           .where(and(eq(schema.shifts.tenantId, tenantId), inArray(schema.shifts.id, shiftIds)));
 
@@ -657,12 +683,25 @@ export class StationScansService {
 
         // Ownership is decided next, on the codes this batch actually stored
         // -- NOT last: the late-data stamp below still follows it.
-        const claimItems = coded.map((i) => ({
-          codeHash: i.code.codeHash,
-          shiftId: i.shiftId,
-          terminalId: i.terminalId,
-          scannedAt: new Date(i.scannedAt),
-        }));
+        const validationShiftIds = new Set(
+          owned
+            .filter(
+              (shift) =>
+                shift.mode === "validation" && shift.validationPrintMode === "duplicate_dm",
+            )
+            .map((shift) => shift.id),
+        );
+        const validationItems = new Set(
+          coded.filter((item) => validationShiftIds.has(item.shiftId)),
+        );
+        const claimItems = coded
+          .filter((i) => !validationItems.has(i))
+          .map((i) => ({
+            codeHash: i.code.codeHash,
+            shiftId: i.shiftId,
+            terminalId: i.terminalId,
+            scannedAt: new Date(i.scannedAt),
+          }));
 
         if (claimItems.length > 0) {
           // Sorted here, once, as the single source of truth for lock/claim
@@ -805,18 +844,20 @@ export class StationScansService {
           // batch's own scans -- so all of them, and only them, are this
           // batch's own losses; `displaced` names a scan from a batch other
           // than this one and must never be echoed back here.
-          batchConflicts = ownLosses.map((c) => ({
-            codeHash: c.codeHash,
-            winningTerminalId: c.winning.terminalId,
-            winningScannedAt: c.winning.scannedAt.toISOString(),
-          }));
+          batchConflicts.push(
+            ...ownLosses.map((c) => ({
+              codeHash: c.codeHash,
+              winningTerminalId: c.winning.terminalId,
+              winningScannedAt: c.winning.scannedAt.toISOString(),
+            })),
+          );
 
           // Box membership (Task 10). A boxed item is, by construction,
           // always a coded one -- `boxed` below is a subset of `coded` -- so
           // there is nothing for this section to do whenever `claimItems` (===
           // `coded` in length) is empty, which is exactly the branch this is
           // nested in.
-          const boxed = coded.filter((i) => i.boxId !== null);
+          const boxed = coded.filter((i) => i.boxId !== null && !validationItems.has(i));
           const retiredBoxScans: Array<{
             codeHash: string;
             shiftId: string;
@@ -1205,6 +1246,47 @@ export class StationScansService {
             }
           }
         }
+        // Existing ordinary claim/release semantics run first, then validation admission sees
+        // their final ownership even when one drained batch spans different shift modes.
+        const validation = await admitValidationOccurrences(tx, tenantId, authenticatedTerminalId, [
+          ...validationItems,
+        ]);
+        validationOccurrences = validation.outcomes;
+        if (validation.conflicts.length > 0) {
+          await tx.insert(schema.codeConflicts).values(
+            validation.conflicts.map((c) => ({
+              tenantId,
+              codeHash: c.codeHash,
+              losingShiftId: c.losing.shiftId,
+              losingTerminalId: c.losing.terminalId,
+              losingScannedAt: c.losing.scannedAt,
+              winningShiftId: c.winning.shiftId,
+              winningTerminalId: c.winning.terminalId,
+              winningScannedAt: c.winning.scannedAt,
+            })),
+          );
+        }
+        batchConflicts.push(
+          ...validation.outcomes
+            .filter((o) => o.outcome === "conflict")
+            .flatMap((o) => {
+              const conflict = validation.conflicts.find(
+                (c) =>
+                  c.codeHash === o.codeHash &&
+                  c.losing.shiftId === o.shiftId &&
+                  c.losing.scannedAt.getTime() === Date.parse(o.scannedAt),
+              );
+              return conflict
+                ? [
+                    {
+                      codeHash: o.codeHash,
+                      winningTerminalId: conflict.winning.terminalId,
+                      winningScannedAt: conflict.winning.scannedAt.toISOString(),
+                    },
+                  ]
+                : [];
+            }),
+        );
       }
 
       // Pallet pre-pass (Task 9, 06d): create every pallet this batch names,
@@ -1567,6 +1649,7 @@ export class StationScansService {
         conflicts: batchConflicts,
         ...(denied.length > 0 ? { denied } : {}),
         ...(productLabelReceipt ? { productLabelReceipt } : {}),
+        ...(validationOccurrences.length > 0 ? { validationOccurrences } : {}),
       };
       await tx
         .update(schema.syncBatches)
@@ -1579,6 +1662,14 @@ export class StationScansService {
         );
       return result;
     });
+  }
+
+  validationOccurrenceStatus(
+    tenantId: string,
+    deviceId: string,
+    query: ValidationOccurrenceStatusQuery,
+  ) {
+    return loadValidationOccurrenceStatus(this.db, tenantId, deviceId, query);
   }
 
   private async quarantine(

@@ -14,6 +14,9 @@ import app.markiro.handheld.core.print.PrinterEntity
         OperatorEntity::class,
         ShiftEntity::class,
         CodeEntity::class,
+        ValidationOccurrenceEntity::class,
+        ValidationHistoryEntity::class,
+        ValidationHistoryPublication::class,
         ScanEventEntity::class,
         OutboxEntity::class,
         ConflictEntity::class,
@@ -36,7 +39,7 @@ import app.markiro.handheld.core.print.PrinterEntity
         PalletEntity::class,
         PalletExceptionEntity::class,
     ],
-    version = 12,
+    version = 13,
     exportSchema = false,
 )
 abstract class HandheldDatabase : RoomDatabase() {
@@ -66,6 +69,7 @@ abstract class HandheldDatabase : RoomDatabase() {
     abstract fun operatorDao(): OperatorDao
     abstract fun shiftDao(): ShiftDao
     abstract fun codeDao(): CodeDao
+    abstract fun validationDao(): ValidationDao
     abstract fun scanEventDao(): ScanEventDao
     abstract fun outboxDao(): OutboxDao
     abstract fun conflictDao(): ConflictDao

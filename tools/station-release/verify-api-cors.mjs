@@ -26,6 +26,11 @@ export const STATION_PREFLIGHTS = Object.freeze([
     headers: "content-type,x-api-key,x-station-capabilities",
   },
   {
+    path: "/station/validation-occurrences/status",
+    method: "POST",
+    headers: "content-type,x-api-key,x-station-capabilities",
+  },
+  {
     path: "/station/codes/releases",
     method: "POST",
     headers: "content-type,x-api-key,x-station-capabilities",
@@ -114,6 +119,11 @@ export const STATION_PREFLIGHTS = Object.freeze([
   },
   {
     path: "/shifts/cors-probe/reference-bundle",
+    method: "GET",
+    headers: "content-type,x-api-key,x-station-capabilities",
+  },
+  {
+    path: "/shifts/cors-probe/code-history",
     method: "GET",
     headers: "content-type,x-api-key,x-station-capabilities",
   },

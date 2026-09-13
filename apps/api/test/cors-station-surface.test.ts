@@ -29,6 +29,7 @@ const documentedStationSurface = [
     "/station/products/00000000-0000-0000-0000-000000000000/image/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   ],
   ["POST", "/station/conflicts/status"],
+  ["POST", "/station/validation-occurrences/status"],
   ["POST", "/station/codes/releases"],
   ["POST", "/station/scans"],
   ["GET", "/station/inventory-tasks"],
@@ -48,6 +49,7 @@ const documentedStationSurface = [
   ["GET", "/shifts/planning-config"],
   ["GET", "/shifts/shift-1/bundle"],
   ["GET", "/shifts/shift-1/reference-bundle"],
+  ["GET", "/shifts/shift-1/code-history"],
   ["POST", "/shifts/shift-1/open"],
   ["GET", "/products"],
   ["POST", "/products/gtin-check"],
@@ -114,6 +116,16 @@ describe("station CORS surface", () => {
     ["POST", "/station/inventories/inventory-1/event-batches/extra"],
     ["GET", "/station/inventories/inventory-1/progress/extra"],
     ["POST", "/station/inventories/inventory-1/leave/extra"],
+    ["GET", "/station/validation-occurrences/status"],
+    ["PATCH", "/station/validation-occurrences/status"],
+    ["DELETE", "/station/validation-occurrences/status"],
+    ["POST", "/station/validation-occurrences/status/extra"],
+    ["POST", "/shifts/shift-1/code-history"],
+    ["PATCH", "/shifts/shift-1/code-history"],
+    ["DELETE", "/shifts/shift-1/code-history"],
+    ["GET", "/shifts/shift-1/code-history/extra"],
+    ["GET", "/shifts/shift-1/reprocessings"],
+    ["POST", "/shifts/shift-1/reprocessings"],
     ["GET", "/station/conflicts/status"],
     ["GET", "/station/codes/releases"],
     ["PATCH", "/shifts"],
@@ -139,6 +151,10 @@ describe("station CORS surface", () => {
   });
 
   it("denies an OPTIONS request whose requested method is absent or not the allowed method", () => {
+    for (const path of ["/shifts/shift-1/code-history", "/station/validation-occurrences/status"]) {
+      expect(selectedOrigins(delegate, "OPTIONS", path)).not.toContain(STATION_ORIGIN);
+      expect(selectedOrigins(delegate, "OPTIONS", path, "PATCH")).not.toContain(STATION_ORIGIN);
+    }
     expect(selectedOrigins(delegate, "OPTIONS", "/station/scans")).not.toContain(STATION_ORIGIN);
     expect(selectedOrigins(delegate, "OPTIONS", "/station/scans", "GET")).not.toContain(
       STATION_ORIGIN,

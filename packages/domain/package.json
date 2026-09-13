@@ -27,6 +27,7 @@
     "fixtures:labels": "pnpm run build && node scripts/export-label-fixtures.mjs",
     "fixtures:box-labels": "pnpm run build && node scripts/export-box-label-fixtures.mjs",
     "fixtures:product-labels": "pnpm run build && node scripts/export-product-label-fixtures.mjs",
+    "fixtures:validation-reprocessing": "pnpm run build && node scripts/export-validation-reprocessing-fixtures.mjs",
     "fixtures:sync-limits": "pnpm run build && node scripts/export-sync-limits-fixtures.mjs"
   },
   "peerDependencies": {

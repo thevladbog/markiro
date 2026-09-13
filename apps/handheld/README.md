@@ -131,8 +131,10 @@ printer refusal; test and production status from an old snapshot cannot overwrit
 assignments; «Не назначен» never falls back to another profile. Test printing belongs to the
 explicitly opened profile and leaves all three assignments intact.
 
-Room v12 adds `printer_assignments` and `print_destinations`. On upgrade, only the previously
+Room v13 adds `printer_assignments` and `print_destinations`. On upgrade, only the previously
 selected profile receives all three purposes once; other saved profiles and queued work survive.
+The upgrade follows the unchanged v11→v12 validation-occurrence migration, preserving its receipt
+and history facts before adding printer routing at v12→v13.
 Without a selected profile, all purposes remain unassigned. A destination is saved before a new
 attempt can send. Changing, removing or reassigning a profile preserves prepared work's saved name,
 address, language and DPI. «Другой принтер» in recovery explicitly replaces one label's destination;
@@ -211,9 +213,9 @@ That answers the operator's real question (did a label come out?) without puttin
 second sticker on the same unit. A reprint is the fallback and carries its reason:
 never printed, damaged or lost.
 
-**Retention runs in two steps at shift close.** Every job's bytes go, settled or not,
-because that is what bounds the disk; the rows go only once the server holds every one
-of their events. Closing never waits on the queue — an unresolved job is warned about,
+**Retention runs in two steps at shift close.** Bytes are removed unless the job’s acceptance
+is still pending or conflicting. Those jobs retain their print evidence until reconciliation.
+Other rows go only once the server holds every one of their events and the job is completed. Closing never waits on the queue — an unresolved job is warned about,
 the shift closes, and its events still sync.
 
 The event projection is pinned to `packages/domain` by a fifth fixture set

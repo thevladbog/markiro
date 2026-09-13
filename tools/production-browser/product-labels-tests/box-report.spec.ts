@@ -1,12 +1,13 @@
 import { expect, test } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { productLabelsEndpoints } from "../product-labels.playwright.config.js";
 
 const renderer = fileURLToPath(
   new URL("../../../apps/admin/test/browser/box-report-render.mjs", import.meta.url),
 );
 
-const origin = "http://127.0.0.1:43181";
+const origin = productLabelsEndpoints().adminUrl;
 const box = {
   id: "00000000-0000-4000-8000-000000000321",
   sscc: "00123456789012345675",

@@ -88,7 +88,12 @@ export interface CreateShiftInput {
 }
 
 export type ShiftOutputDto =
-  | { mode: "validation"; acceptedUnits: number }
+  | {
+      mode: "validation";
+      acceptedUnits: number;
+      firstAcceptedUnits?: number;
+      reprocessedUnits?: number;
+    }
   | { mode: "aggregation"; closedBoxes: number; containedUnits: number };
 
 export type UpdateShiftInput = Partial<CreateShiftInput>;
@@ -109,6 +114,7 @@ interface ListShiftsResponse {
 
 export interface ShiftPlanningConfigDto {
   validationPrintProtocol: "validation-dm-duplicate-v1" | null;
+  validationReprocessingProtocol?: "validation-reprocessing-v1" | null;
   defaultBoxLabelTemplateId: string | null;
   /** Which default answered: the product's category, the organisation, or none. */
   defaultSource: "category" | "organization" | null;
@@ -126,9 +132,7 @@ export interface ShiftParticipantDto {
 
 export interface ShiftSummaryDto {
   generatedAt: string;
-  output:
-    | { mode: "validation"; acceptedUnits: number }
-    | { mode: "aggregation"; closedBoxes: number; containedUnits: number };
+  output: ShiftOutputDto;
   participants: ShiftParticipantDto[];
   unattributed: { eventCount: number; acceptedScans: number; closedBoxes: number };
 }

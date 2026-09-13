@@ -207,6 +207,10 @@ function EditShiftPanel() {
             productId: shift.productId,
             mode: shift.mode,
             validationPrintMode: shift.validationPrint?.mode ?? "none",
+            allowPreviouslyAcceptedCodes:
+              shift.validationPrint?.mode === "duplicate_dm"
+                ? (shift.validationPrint.allowPreviouslyAcceptedCodes ?? false)
+                : false,
             verificationRequired:
               shift.validationPrint?.mode === "duplicate_dm"
                 ? shift.validationPrint.verification === "required"
