@@ -15,8 +15,16 @@ interface ScanSource {
     fun stop()
 }
 
+/** What a terminal actually sent, whether or not a profile understood it. */
+data class IntentReport(val action: String, val extraKeys: List<String>, val profileId: String?, val at: Long)
+
 /** Receives the vendor service's broadcast. Exported: the scanner service is another app. */
-class IntentScanSource(private val context: Context, private val profile: VendorProfile) : ScanSource {
+class IntentScanSource(
+    private val context: Context,
+    private val profile: VendorProfile,
+    /** Every received broadcast, matched or not: the only way to name an unknown service without adb. */
+    private val onReport: (IntentReport) -> Unit = {},
+) : ScanSource {
     override val id = "intent:${profile.id}"
     private var receiver: BroadcastReceiver? = null
 
@@ -26,10 +34,18 @@ class IntentScanSource(private val context: Context, private val profile: Vendor
             override fun onReceive(context: Context, intent: Intent) {
                 val bundle = intent.extras ?: return
                 val extras = bundle.keySet().associateWith { key -> @Suppress("DEPRECATION") bundle.get(key) }
-                extractor.extract(extras, System.currentTimeMillis())?.let(onEvent)
+                val now = System.currentTimeMillis()
+                val event = extractor.extract(extras, now)
+                onReport(IntentReport(profile.action, extras.keys.sorted(), event?.let { profile.id }, now))
+                event?.let(onEvent)
             }
         }.also {
-            ContextCompat.registerReceiver(context, it, IntentFilter(profile.action), ContextCompat.RECEIVER_EXPORTED)
+            // A broadcast that carries a category matches only a filter declaring
+            // it -- АТОЛ's ScanWedge sends DEFAULT, and without this the service
+            // and the app never meet.
+            val filter = IntentFilter(profile.action)
+            profile.category?.let(filter::addCategory)
+            ContextCompat.registerReceiver(context, it, filter, ContextCompat.RECEIVER_EXPORTED)
         }
     }
 

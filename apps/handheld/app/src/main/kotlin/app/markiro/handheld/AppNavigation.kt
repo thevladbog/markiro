@@ -637,6 +637,7 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                     onSource = vm::setSource,
                     onProfile = vm::setProfile,
                     onDebugScan = vm::submitDebugScan,
+                    onCustomProfile = vm::setCustomProfile,
                 )
             }
         }

@@ -9,6 +9,7 @@ import app.markiro.handheld.core.inventory.InventorySyncEngine
 import app.markiro.handheld.core.print.observeRouting
 import app.markiro.handheld.core.print.PrintPurpose
 import app.markiro.handheld.core.print.PrinterDao
+import app.markiro.handheld.core.scan.IntentReport
 import app.markiro.handheld.core.scan.ScanEvent
 import app.markiro.handheld.core.scan.ScanEvents
 import app.markiro.handheld.core.scan.ScanPreferences
@@ -44,6 +45,11 @@ data class SettingsUi(
     val theme: ThemeMode,
     val language: String,
     val lastScan: ScanEvent? = null,
+    /** The last broadcast a profile received, readable or not; names an unknown service. */
+    val lastIntent: IntentReport? = null,
+    val customAction: String = "",
+    val customDataExtra: String = "",
+    val customSymbologyExtra: String = "",
     val debugScanEnabled: Boolean = BuildConfig.DEBUG_SCAN_SOURCE,
     val version: String = BuildConfig.VERSION_NAME,
     val soundMuted: Boolean = false,
@@ -92,6 +98,9 @@ class SettingsViewModel @Inject constructor(
     private val _state = MutableStateFlow(
         SettingsUi(
             scan.sourceKind, scan.profileId, app.theme, app.language,
+            customAction = scan.customAction,
+            customDataExtra = scan.customDataExtra,
+            customSymbologyExtra = scan.customSymbologyExtra,
             soundMuted = app.soundMuted, soundVolume = app.soundVolume, vibrationEnabled = app.vibrationEnabled,
         ),
     )
@@ -100,6 +109,7 @@ class SettingsViewModel @Inject constructor(
 
     init {
         viewModelScope.launch { scans.events.collect { event -> _state.update { it.copy(lastScan = event) } } }
+        viewModelScope.launch { router.lastIntent.collect { report -> _state.update { it.copy(lastIntent = report) } } }
         viewModelScope.launch {
             // Both queues count: shift scans and inventory events share the «Очередь синхронизации» row.
             combine(sync.state, inventorySync.state) { s, i -> s to i }.collect { (s, i) ->
@@ -157,6 +167,25 @@ class SettingsViewModel @Inject constructor(
         scan.profileId = id
         router.configure()
         _state.update { it.copy(profileId = id) }
+    }
+
+    /**
+     * Registers a service no profile knows about. Saved and applied in one step
+     * because the operator is standing at the terminal with the trigger in hand:
+     * the next pull has to answer whether the values were right.
+     */
+    fun setCustomProfile(action: String, dataExtra: String, symbologyExtra: String) {
+        scan.customAction = action
+        scan.customDataExtra = dataExtra
+        scan.customSymbologyExtra = symbologyExtra
+        router.configure()
+        _state.update {
+            it.copy(
+                customAction = scan.customAction,
+                customDataExtra = scan.customDataExtra,
+                customSymbologyExtra = scan.customSymbologyExtra,
+            )
+        }
     }
 
     fun setTheme(mode: ThemeMode) {
