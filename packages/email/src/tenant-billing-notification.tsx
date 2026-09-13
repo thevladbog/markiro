@@ -85,8 +85,19 @@ const copy = {
 } as const;
 
 export function boundedBillingSubjectName(value: string): string {
-  const normalized = value
-    .replace(/<[^>]*>/g, "")
+  // Walk once: a regex searching for a closing '>' retries at every '<'
+  // in malformed input. An unfinished tag is discarded as well. This is
+  // plain-text cleanup; React still escapes text at the HTML boundary.
+  const text: string[] = [];
+  let inTag = false;
+  for (const character of value) {
+    if (character === "<") inTag = true;
+    else if (inTag) {
+      if (character === ">") inTag = false;
+    } else text.push(character);
+  }
+  const normalized = text
+    .join("")
     .replace(/[\r\n\t]+/g, " ")
     .trim();
   return truncateGraphemes(normalized, 120);

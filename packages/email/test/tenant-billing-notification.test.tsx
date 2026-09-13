@@ -1,7 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { renderEmail } from "../src/index.js";
+import { boundedBillingSubjectName } from "../src/tenant-billing-notification.js";
 
 describe("tenant billing notification email", () => {
+  it.each([
+    ["Invoice <script", "Invoice"],
+    ["<".repeat(50_000), ""],
+    ["<b>Счёт №42</b>\r\n\tготов", "Счёт №42 готов"],
+    ["<b><i>Invoice</i></b> & Co", "Invoice & Co"],
+  ])("removes complete and unfinished markup from billing names", (input, expected) => {
+    expect(boundedBillingSubjectName(input)).toBe(expected);
+  });
+
   it.each([
     {
       locale: "ru" as const,

@@ -8,7 +8,7 @@
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PairRequest {
     pub pairing_code: String,
@@ -16,12 +16,32 @@ pub struct PairRequest {
     pub app_version: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+impl std::fmt::Debug for PairRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PairRequest")
+            .field("pairing_code", &"[REDACTED]")
+            .field("hostname", &self.hostname)
+            .field("app_version", &self.app_version)
+            .finish()
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PairResponse {
     pub agent_id: String,
     pub agent_secret: String,
     pub tenant_name: String,
+}
+
+impl std::fmt::Debug for PairResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PairResponse")
+            .field("agent_id", &self.agent_id)
+            .field("agent_secret", &"[REDACTED]")
+            .field("tenant_name", &self.tenant_name)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -71,7 +91,7 @@ pub struct NextTaskResponse {
     pub task: Option<SignerTask>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TaskComplete {
     pub token: String,
@@ -83,6 +103,19 @@ pub struct TaskComplete {
     pub cert_inn: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cert_not_after: Option<String>,
+}
+
+impl std::fmt::Debug for TaskComplete {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TaskComplete")
+            .field("token", &"[REDACTED]")
+            .field("expires_at", &self.expires_at)
+            .field("cert_thumbprint", &self.cert_thumbprint)
+            .field("cert_subject", &self.cert_subject)
+            .field("cert_inn", &self.cert_inn)
+            .field("cert_not_after", &self.cert_not_after)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -143,6 +176,42 @@ pub fn cap_cert_subject(subject: &str) -> String {
 mod tests {
     use std::path::PathBuf;
     use crate::contracts::*;
+
+    #[test]
+    fn credential_contracts_redact_debug_without_changing_wire_values() {
+        let request = PairRequest {
+            pairing_code: "synthetic-pairing-marker".into(),
+            hostname: "test-host".into(),
+            app_version: "0.1.0".into(),
+        };
+        let response = PairResponse {
+            agent_id: "test-agent".into(),
+            agent_secret: "synthetic-agent-marker".into(),
+            tenant_name: "Test tenant".into(),
+        };
+        let complete = TaskComplete {
+            token: "synthetic-token-marker".into(),
+            expires_at: "2026-10-10T12:00:00Z".into(),
+            cert_thumbprint: "test-thumbprint".into(),
+            cert_subject: None,
+            cert_inn: None,
+            cert_not_after: None,
+        };
+        for (debug, secret) in [
+            (format!("{request:?}"), &request.pairing_code),
+            (format!("{request:#?}"), &request.pairing_code),
+            (format!("{response:?}"), &response.agent_secret),
+            (format!("{response:#?}"), &response.agent_secret),
+            (format!("{complete:?}"), &complete.token),
+            (format!("{complete:#?}"), &complete.token),
+        ] {
+            assert!(!debug.contains(secret));
+            assert!(debug.contains("[REDACTED]"));
+        }
+        assert_eq!(serde_json::to_value(&request).unwrap()["pairingCode"], request.pairing_code);
+        assert_eq!(serde_json::to_value(&response).unwrap()["agentSecret"], response.agent_secret);
+        assert_eq!(serde_json::to_value(&complete).unwrap()["token"], complete.token);
+    }
 
     fn fixture(name: &str) -> String {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
