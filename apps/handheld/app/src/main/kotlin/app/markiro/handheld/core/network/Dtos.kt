@@ -74,6 +74,11 @@ data class ShiftDto(
     val openedAt: String? = null,
     val closedAt: String? = null,
     val stationCloseAccess: StationCloseAccessDto? = null,
+    val counterpartyId: String? = "missing-offline-grant-fact",
+    val ssccIssuerCounterpartyId: String? = "missing-offline-grant-fact",
+    val boxLabelTemplateId: String? = "missing-offline-grant-fact",
+    val palletLabelTemplateId: String? = "missing-offline-grant-fact",
+    val createdFrom: String = "missing-offline-grant-fact",
 )
 
 @Serializable

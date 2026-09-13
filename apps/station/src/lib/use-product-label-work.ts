@@ -8,7 +8,10 @@ import {
   type CredentialGeneration,
   type FloorWorkBarrier,
 } from "./credential-recovery.js";
-import { recordProductLabelAcceptance } from "./product-labels/acceptance.js";
+import {
+  recordProductLabelAcceptance,
+  recordProductLabelAcceptanceWithOfflineGrant,
+} from "./product-labels/acceptance.js";
 import { readDuplicateLabelContext } from "./product-labels/context.js";
 import { prepareProductLabelAcceptance } from "./product-labels/fields.js";
 import {
@@ -210,7 +213,9 @@ export function createProductLabelWork(options: ProductLabelWorkOptions) {
         }
         let result: ProductLabelAcceptResult;
         try {
-          result = await recordProductLabelAcceptance(exec, input);
+          result = generation
+            ? await recordProductLabelAcceptanceWithOfflineGrant(exec, input, generation)
+            : await recordProductLabelAcceptance(exec, input);
         } catch (error) {
           // The statement may have committed before its response was lost. Only an exact
           // immutable command proves acceptance; showing its prepared job never sends it.

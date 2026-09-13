@@ -1,3 +1,4 @@
+import type { GrantEvidenceEnvelope } from "@markiro/platform-contracts";
 import type {
   CreateOrderAdmissionDto,
   CreateOrderAdmissionResultDto,
@@ -307,6 +308,32 @@ export async function pairKiosk(serverUrl: string, code: string): Promise<PairKi
 }
 
 export interface KioskClient {
+  submitGrantEvidence?(envelope: GrantEvidenceEnvelope): Promise<unknown>;
+  orderReconciled?(body: CreateOrderDto, result: CreateOrderResultDto): void;
+  grantKeyset?(): Promise<unknown>;
+  grantConfiguration?(request: {
+    protocol: "offline-grants-v1";
+    capability: "offline-grants-v1";
+    requestId: string;
+  }): Promise<unknown>;
+  issueDeviceGrant?(request: {
+    protocol: "offline-grants-v1";
+    capability: "offline-grants-v1";
+    requestId: string;
+  }): Promise<unknown>;
+  issueTaskGrant?(request: {
+    protocol: "offline-grants-v1";
+    capability: "offline-grants-v1";
+    requestId: string;
+    taskKind: "pickup";
+    taskId: string;
+  }): Promise<unknown>;
+  reserveGrantOrder?(request: {
+    protocol: "offline-grants-v1";
+    capability: "offline-grants-v1";
+    requestId: string;
+    order: CreateOrderAdmissionDto;
+  }): Promise<unknown>;
   readonly registryOwner?: BoxRegistryCredentialOwner;
   bootstrap(): Promise<KioskBootstrapDto>;
   downloadProductImage(productId: string, checksum: string): Promise<Blob>;
@@ -353,6 +380,17 @@ export function createKioskClient(cfg: {
 
   return {
     ...(registryOwner ? { registryOwner } : {}),
+    submitGrantEvidence: (envelope) =>
+      request<unknown>("POST", "/kiosk/grants/v1/evidence/orders", SUBMIT_TIMEOUT_MS, envelope),
+    grantConfiguration: (body) =>
+      request<unknown>("POST", "/kiosk/grants/v1/configuration", BOOTSTRAP_TIMEOUT_MS, body),
+    grantKeyset: () => request<unknown>("GET", "/kiosk/grants/v1/keyset", BOOTSTRAP_TIMEOUT_MS),
+    issueDeviceGrant: (body) =>
+      request<unknown>("POST", "/kiosk/grants/v1/device", BOOTSTRAP_TIMEOUT_MS, body),
+    issueTaskGrant: (body) =>
+      request<unknown>("POST", "/kiosk/grants/v1/tasks", BOOTSTRAP_TIMEOUT_MS, body),
+    reserveGrantOrder: (body) =>
+      request<unknown>("POST", "/kiosk/grants/v1/reservations", SUBMIT_TIMEOUT_MS, body),
     // Every authenticated call bumps `kiosks.last_seen_at` server-side, so a
     // periodic bootstrap doubles as the heartbeat — there is no separate one.
     bootstrap: () => request<KioskBootstrapDto>("GET", "/kiosk/bootstrap", BOOTSTRAP_TIMEOUT_MS),

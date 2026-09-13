@@ -169,3 +169,11 @@ does not use `TenantGuard` (no guard, or a bespoke device guard like
 `KioskDeviceGuard`) is out of scope for the two tables by construction — but
 note it here anyway, as above, so this list of exceptions does not silently go
 stale.
+
+## Public integration keys
+
+`/public/v1` is a separate public-key surface, guarded by `PublicApiGuard` and an explicit scope on every route. Public keys never authenticate Station/Handheld, kiosk or signer device APIs; device keys never authenticate public integration routes. Cabinet issuance and scope editing remain behind the cabinet integration permission boundary. Existing unscoped keys authorize no public operation.
+
+Public inventory preparation calls the existing create/import/snapshot/start owners with a durable API-key actor. It does not impersonate a cabinet user or return the native manifest/operator credentials. Reading public progress and results requires current `publicApi` and `inventory` rights; native recovery remains independent of those public rights. The combined entitlement registry is `p1c.native.v1`, with separate `public.*.v1` bindings.
+
+See [Public API operations](operations/public-api.md) for scopes, retries, projection and deployment rules. All new cabinet/CHZ/public imports use attempt-owned storage keys. Before exposing public routes, drain old cabinet/CHZ cleanup writers that still share historical content-addressed keys; new readers retain exact historical cabinet-path compatibility. This work does not activate strict offline grant enforcement.

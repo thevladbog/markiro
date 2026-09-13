@@ -1,9 +1,22 @@
 import { buildSscc, DomainError } from "@markiro/domain";
 import { closeBox, currentBox } from "./boxes.js";
-import { closeCurrentPallet, type ClosePalletResult } from "./close-pallet.js";
+import {
+  closeCurrentPallet,
+  closeCurrentPalletWithOfflineGrant,
+  type ClosePalletResult,
+} from "./close-pallet.js";
 import type { SqlExecutor } from "./mirror.js";
 import { currentPallet, openPallet, type DevicePallet } from "./pallets.js";
 import { burnSerial } from "./sscc-pool.js";
+import type { CredentialGeneration } from "./credential-recovery.js";
+import { acquireCredentialCommitLease } from "./credential-recovery.js";
+import {
+  StationGrantAdmission,
+  stationOperatorIsCurrentlyActive,
+} from "./offline-grants/admission.js";
+import { sampleGrantClock, type GrantClockSample } from "./offline-grants/clock.js";
+import { readShiftExecutionProjection } from "./offline-grants/semantic.js";
+import { OfflineGrantDeniedError } from "./journal.js";
 
 /**
  * Extension digit reserved for transport-box serial ranges. Pallet ranges
@@ -113,7 +126,7 @@ export interface CloseBoxDeps {
  * shift end) also costs nothing. This is why the serial is burned here, at
  * close, and not when the box was opened.
  */
-export async function closeCurrentBox(
+async function closeCurrentBoxLegacy(
   deps: CloseBoxDeps,
   shiftId: string,
   operatorId: string | null,
@@ -189,4 +202,154 @@ export async function closeCurrentBox(
   }
 
   return { status: "closed", sscc, itemCount: box.itemCount, closedAt, pallet };
+}
+
+/** Legacy entry point cannot bypass an installed grant owner. */
+export async function closeCurrentBox(
+  deps: CloseBoxDeps,
+  shiftId: string,
+  operatorId: string | null,
+): Promise<CloseBoxResult> {
+  const [active] = await deps.exec.all<{ active: number }>(
+    "SELECT 1 active FROM offline_grant_install_state WHERE id=1",
+  );
+  if (active?.active === 1) throw new OfflineGrantDeniedError("grant_aware_owner_required");
+  return closeCurrentBoxLegacy(deps, shiftId, operatorId);
+}
+
+/** Grant-aware box owner: allowance, optional pallet open, serial CAS and close are atomic. */
+export async function closeCurrentBoxWithOfflineGrant(
+  deps: CloseBoxDeps,
+  shiftId: string,
+  operatorId: string | null,
+  generation: CredentialGeneration,
+  clock: () => Promise<GrantClockSample> = sampleGrantClock,
+): Promise<CloseBoxResult> {
+  const lease = acquireCredentialCommitLease(generation);
+  if (!lease) throw new OfflineGrantDeniedError("stale_credential");
+  try {
+    const [state] = await deps.exec.all<{
+      tenant_id: string;
+      device_id: string;
+      owner_kind: "station";
+      credential_epoch: number;
+    }>(
+      "SELECT tenant_id,device_id,owner_kind,credential_epoch FROM offline_grant_install_state WHERE id=1",
+    );
+    if (!state) return closeCurrentBoxLegacy(deps, shiftId, operatorId);
+    if (!operatorId) throw new OfflineGrantDeniedError("operator_unauthorized");
+    if (!(await stationOperatorIsCurrentlyActive(deps.exec, operatorId)))
+      throw new OfflineGrantDeniedError("operator_unauthorized");
+    const box = await currentBox(deps.exec, shiftId);
+    if (!box || box.itemCount === 0) return { status: "empty" };
+    const [pool] = await deps.exec.all<{ rowid: number; serial: number }>(
+      "SELECT rowid,next_serial serial FROM sscc_pool WHERE issuer_prefix=? AND extension_digit=? AND next_serial<=to_serial ORDER BY from_serial LIMIT 1",
+      [deps.issuerPrefix, BOX_EXTENSION_DIGIT],
+    );
+    if (!pool) return { status: "no-serials" };
+    let sscc: string;
+    try {
+      sscc = buildSscc(BOX_EXTENSION_DIGIT, deps.issuerPrefix, pool.serial);
+    } catch (error) {
+      if (error instanceof DomainError && error.code === "SSCC_RANGE")
+        return { status: "invalid-serial" };
+      throw error;
+    }
+    const closedAt = new Date(deps.now ? deps.now() : Date.now()).toISOString();
+    let pallet =
+      deps.palletBoxCapacity === null
+        ? null
+        : await currentPallet(deps.exec, shiftId, deps.terminalId);
+    const newPallet =
+      deps.palletBoxCapacity !== null && pallet === null
+        ? { palletId: crypto.randomUUID(), terminalId: deps.terminalId }
+        : null;
+    const palletId = pallet?.palletId ?? newPallet?.palletId ?? null;
+    const [binding] = await deps.exec.all<{ snapshot_digest: string }>(
+      "SELECT json_extract(grant_json,'$.snapshotDigest') snapshot_digest FROM offline_grant_grants WHERE json_extract(grant_json,'$.kindOfGrant')='task' AND json_extract(grant_json,'$.taskKind')='shift' AND json_extract(grant_json,'$.taskId')=? ORDER BY installed_sequence DESC LIMIT 1",
+      [shiftId],
+    );
+    const eventId = crypto.randomUUID();
+    const result: CloseBoxResultClosed = {
+      status: "closed",
+      sscc,
+      itemCount: box.itemCount,
+      closedAt,
+      pallet: null,
+    };
+    const committed = await new StationGrantAdmission(deps.exec, clock).commitCompletion({
+      operatorId,
+      intent: {
+        owner: {
+          tenantId: state.tenant_id,
+          deviceId: state.device_id,
+          kind: state.owner_kind,
+          credentialEpoch: state.credential_epoch,
+        },
+        capability: "shift.start.v1",
+        taskId: shiftId,
+        snapshotDigest: binding?.snapshot_digest ?? "missing",
+        eventId,
+        eventType: "shift.box.close.v1",
+        cost: {},
+      },
+      execution: await readShiftExecutionProjection(deps.exec, shiftId),
+      event: {
+        eventId,
+        shiftId,
+        boxId: box.boxId,
+        sscc,
+        itemCount: box.itemCount,
+        closedAt,
+        operatorId,
+        palletId,
+        terminalId: deps.terminalId,
+      },
+      facts: { containers: 1 },
+      result,
+      wrapCommand(command) {
+        return {
+          sql: "INSERT INTO offline_grant_box_close_commands(event_id,payload_json) VALUES(?,?)",
+          values: [
+            eventId,
+            JSON.stringify({
+              grantCommand: JSON.parse(String(command.values[1])) as unknown,
+              poolRowId: pool.rowid,
+              serial: pool.serial,
+              shiftId,
+              boxId: box.boxId,
+              sscc,
+              closedAt,
+              operatorId,
+              palletId,
+              pallet: newPallet,
+            }),
+          ],
+        };
+      },
+    });
+    if (!committed.decision.allow)
+      throw new OfflineGrantDeniedError(committed.decision.reason ?? "denied");
+    pallet =
+      pallet ??
+      (newPallet
+        ? { ...newPallet, shiftId, openedAt: closedAt, boxCount: 0, lastBoxSscc: null }
+        : null);
+    if (
+      pallet &&
+      deps.palletBoxCapacity !== null &&
+      pallet.boxCount + 1 >= deps.palletBoxCapacity
+    ) {
+      result.pallet = await closeCurrentPalletWithOfflineGrant(
+        deps,
+        shiftId,
+        operatorId,
+        generation,
+        clock,
+      );
+    }
+    return result;
+  } finally {
+    lease.release();
+  }
 }

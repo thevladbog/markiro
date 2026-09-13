@@ -6,6 +6,27 @@ import { STATION_PREFLIGHTS, verifyStationCors } from "../verify-api-cors.mjs";
 const FAILURE = "Station CORS verification failed";
 const STATION_ORIGIN = "http://tauri.localhost";
 const expected = [
+  ["/station/grants/v1/keyset", "GET", "content-type,x-api-key,x-station-capabilities"],
+  ["/station/grants/v1/configuration", "POST", "content-type,x-api-key,x-station-capabilities"],
+  ["/station/grants/v1/device", "POST", "content-type,x-api-key,x-station-capabilities"],
+  ["/station/grants/v1/tasks", "POST", "content-type,x-api-key,x-station-capabilities"],
+  ["/station/grants/v1/evidence/scans", "POST", "content-type,x-api-key,x-station-capabilities"],
+  [
+    "/station/grants/v1/evidence/shift-closures",
+    "POST",
+    "content-type,x-api-key,x-station-capabilities",
+  ],
+  [
+    "/station/grants/v1/evidence/inventories/cors-probe/event-batches",
+    "POST",
+    "content-type,x-api-key,x-station-capabilities",
+  ],
+  [
+    "/station/grants/v1/evidence/inventories/cors-probe/leave",
+    "POST",
+    "content-type,x-api-key,x-station-capabilities",
+  ],
+
   ["/station/pair", "POST", "content-type,x-station-capabilities"],
   ["/station/identity", "GET", "content-type,x-api-key,x-station-capabilities"],
   ["/station/operators", "GET", "content-type,x-api-key,x-station-capabilities"],

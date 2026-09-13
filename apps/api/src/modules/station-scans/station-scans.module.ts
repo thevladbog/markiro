@@ -6,6 +6,7 @@ import { StationScansService } from "./station-scans.service";
 @Module({
   imports: [SsccModule],
   controllers: [StationScansController],
+  exports: [StationScansService],
   providers: [StationScansService],
 })
 export class StationScansModule {}

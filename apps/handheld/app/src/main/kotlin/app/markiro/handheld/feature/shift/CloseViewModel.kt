@@ -40,6 +40,8 @@ class CloseViewModel @Inject constructor(
     private val db: HandheldDatabase,
     private val session: SessionHolder,
 ) : ViewModel() {
+    val grantDenial = app.markiro.handheld.core.grants.GrantDenialUi()
+
     val shiftId: String = checkNotNull(handle["shiftId"])
     private val _step = MutableStateFlow<CloseStep>(CloseStep.Loading)
     val step: StateFlow<CloseStep> = _step
@@ -71,7 +73,12 @@ class CloseViewModel @Inject constructor(
     private fun finish(preview: ShiftCloser.Preview, reason: String?) {
         viewModelScope.launch {
             _step.value = CloseStep.Draining(sync.state.value.pending)
-            closer.close(shiftId, session.state.value.operator?.operatorId, reason)
+            try { closer.close(shiftId, session.state.value.operator?.operatorId, reason) }
+            catch (_: app.markiro.handheld.core.grants.GrantDenied) {
+                _step.value=CloseStep.Confirm(preview)
+                grantDenial.show()
+                return@launch
+            }
             val watcher = launch { sync.state.collect { if (_step.value is CloseStep.Draining) _step.value = CloseStep.Draining(it.pending) } }
             sync.drainAll()
             watcher.cancel()

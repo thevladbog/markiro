@@ -83,10 +83,12 @@ class InventoryWorkViewModel(
     private val session: SessionHolder,
     reachability: ReachabilityTracker,
 ) : ViewModel() {
+    val grantDenial = app.markiro.handheld.core.grants.GrantDenialUi()
+
     private val generation = db.recovery.token()
 
     private fun launchOwned(block: suspend CoroutineScope.() -> Unit) = viewModelScope.launch {
-        db.recovery.work(generation) { block() }
+        grantDenial.guard { db.recovery.work(generation) { block() } }
     }
 
     @Inject
@@ -163,7 +165,7 @@ class InventoryWorkViewModel(
     )
 
     init {
-        launchOwned { scans.events.collect { onScan(it.raw) } }
+        launchOwned { scans.events.collect { grantDenial.guard { onScan(it.raw) } } }
         sync.nudge()
     }
 

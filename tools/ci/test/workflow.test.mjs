@@ -173,6 +173,8 @@ test("inventory database suites receive the migrated CI database through Turbo",
   assert.equal(job.env.INVENTORY_TEST_DATABASE_URL, job.env.DATABASE_URL);
   const turbo = JSON.parse(readFileSync("turbo.json", "utf8"));
   assert.ok(turbo.tasks.test.env.includes("INVENTORY_TEST_DATABASE_URL"));
+  const apiTurbo = JSON.parse(readFileSync("apps/api/turbo.json", "utf8"));
+  assert.ok(apiTurbo.tasks.test.env.includes("INVENTORY_TEST_DATABASE_URL"));
 });
 
 test("Signer Windows verification includes the stable release contract", () => {
@@ -237,4 +239,16 @@ test("National Catalog fixtures use existing Chromium job and preserve portable 
   assert.match(config, /screenshot: "only-on-failure"/);
   assert.match(config, /retries: 0/);
   assert.match(config, /43183 --strictPort/);
+});
+
+test("Android gate verifies original signed and budget fixture byte parity before Gradle", () => {
+  const steps = workflow.jobs["handheld-android"].steps;
+  const parity = steps.findIndex((step) => step.name === "Verify shared offline grant fixtures");
+  const gradle = steps.findIndex((step) => step.name === "Unit tests, lint, debug build");
+  assert.ok(parity >= 0 && parity < gradle);
+  assert.match(steps[parity].run, /cmp .*offline-grants-v1\.json .*offline-grants-v1\.json/);
+  assert.match(
+    steps[parity].run,
+    /cmp .*offline-grant-budgets-v1\.json .*offline-grant-budgets-v1\.json/,
+  );
 });

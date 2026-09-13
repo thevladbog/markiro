@@ -1,0 +1,991 @@
+{
+  "protocol": "offline-grants-v1",
+  "warning": "Public synthetic fixtures only. Never trust this key in production.",
+  "expectationNotes": "cryptographic uses the fixed test public key regardless of protected header. admission is the expected future verifier/policy result; Task 1 validates definitions and signatures only.",
+  "publicKey": {
+    "kid": "test-only-p256-v1",
+    "jwk": {
+      "kty": "EC",
+      "x": "rf1DWb1geVpdSybqdmvRHp3KM4JKryjdJ5Xmj7aBoL4",
+      "y": "PIftroZqGcOYP9hJnTIjmlSHPRNf2jUHqpmwZVzjSQ8",
+      "crv": "P-256"
+    },
+    "spkiDerBase64": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAErf1DWb1geVpdSybqdmvRHp3KM4JKryjdJ5Xmj7aBoL48h+2uhmoZw5g/2EmdMiOaVIc9E1/aNQeqmbBlXONJDw=="
+  },
+  "producers": [
+    {
+      "id": "device",
+      "protectedHeaderJson": "{\"typ\":\"markiro-offline-grant+jws\",\"alg\":\"ES256\",\"kid\":\"test-only-p256-v1\"}",
+      "payloadJson": "{\"tenantId\":\"fixture-tenant\",\"deviceId\":\"fixture-device\",\"kind\":\"station\",\"credentialEpoch\":1,\"version\":1,\"issuer\":\"https://offline-grants.fixture.invalid\",\"grantId\":\"fixture-grant-device\",\"entitlementRevision\":\"fixture-e1\",\"policyRevision\":\"fixture-p1\",\"issuedAt\":1800000000000,\"notBefore\":1800000000000,\"kindOfGrant\":\"device\",\"startNotAfter\":1800000060000,\"capabilities\":[\"shift.start.v1\",\"inventory.start.v1\"]}",
+      "signingInput": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoiRVMyNTYiLCJraWQiOiJ0ZXN0LW9ubHktcDI1Ni12MSJ9.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LWRldmljZSIsImVudGl0bGVtZW50UmV2aXNpb24iOiJmaXh0dXJlLWUxIiwicG9saWN5UmV2aXNpb24iOiJmaXh0dXJlLXAxIiwiaXNzdWVkQXQiOjE4MDAwMDAwMDAwMDAsIm5vdEJlZm9yZSI6MTgwMDAwMDAwMDAwMCwia2luZE9mR3JhbnQiOiJkZXZpY2UiLCJzdGFydE5vdEFmdGVyIjoxODAwMDAwMDYwMDAwLCJjYXBhYmlsaXRpZXMiOlsic2hpZnQuc3RhcnQudjEiLCJpbnZlbnRvcnkuc3RhcnQudjEiXX0",
+      "compact": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoiRVMyNTYiLCJraWQiOiJ0ZXN0LW9ubHktcDI1Ni12MSJ9.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LWRldmljZSIsImVudGl0bGVtZW50UmV2aXNpb24iOiJmaXh0dXJlLWUxIiwicG9saWN5UmV2aXNpb24iOiJmaXh0dXJlLXAxIiwiaXNzdWVkQXQiOjE4MDAwMDAwMDAwMDAsIm5vdEJlZm9yZSI6MTgwMDAwMDAwMDAwMCwia2luZE9mR3JhbnQiOiJkZXZpY2UiLCJzdGFydE5vdEFmdGVyIjoxODAwMDAwMDYwMDAwLCJjYXBhYmlsaXRpZXMiOlsic2hpZnQuc3RhcnQudjEiLCJpbnZlbnRvcnkuc3RhcnQudjEiXX0.ehFJCA-P3HwJ8VCFS-BAydmnqlSPCEyko2flcNkYx95zQTgndLIoo7bZXMVC4Cs9Tw28M4db--rrBDsC3DGI7w"
+    },
+    {
+      "id": "task",
+      "protectedHeaderJson": "{\"typ\":\"markiro-offline-grant+jws\",\"alg\":\"ES256\",\"kid\":\"test-only-p256-v1\"}",
+      "payloadJson": "{\"tenantId\":\"fixture-tenant\",\"deviceId\":\"fixture-device\",\"kind\":\"station\",\"credentialEpoch\":1,\"version\":1,\"issuer\":\"https://offline-grants.fixture.invalid\",\"grantId\":\"fixture-grant-task\",\"entitlementRevision\":\"fixture-e1\",\"policyRevision\":\"fixture-p1\",\"issuedAt\":1800000000000,\"notBefore\":1800000000000,\"kindOfGrant\":\"task\",\"taskKind\":\"shift\",\"taskId\":\"fixture-task\",\"snapshotDigest\":\"sha256:fixture-frozen-snapshot\",\"completeNotAfter\":1800000120000,\"eventTypes\":[\"shift.scan.v1\",\"shift.box.close.v1\",\"shift.close.v1\"],\"budget\":[{\"id\":\"units\",\"unit\":\"unit\",\"maximum\":2},{\"id\":\"boxes\",\"unit\":\"container\",\"maximum\":1}]}",
+      "signingInput": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoiRVMyNTYiLCJraWQiOiJ0ZXN0LW9ubHktcDI1Ni12MSJ9.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LXRhc2siLCJlbnRpdGxlbWVudFJldmlzaW9uIjoiZml4dHVyZS1lMSIsInBvbGljeVJldmlzaW9uIjoiZml4dHVyZS1wMSIsImlzc3VlZEF0IjoxODAwMDAwMDAwMDAwLCJub3RCZWZvcmUiOjE4MDAwMDAwMDAwMDAsImtpbmRPZkdyYW50IjoidGFzayIsInRhc2tLaW5kIjoic2hpZnQiLCJ0YXNrSWQiOiJmaXh0dXJlLXRhc2siLCJzbmFwc2hvdERpZ2VzdCI6InNoYTI1NjpmaXh0dXJlLWZyb3plbi1zbmFwc2hvdCIsImNvbXBsZXRlTm90QWZ0ZXIiOjE4MDAwMDAxMjAwMDAsImV2ZW50VHlwZXMiOlsic2hpZnQuc2Nhbi52MSIsInNoaWZ0LmJveC5jbG9zZS52MSIsInNoaWZ0LmNsb3NlLnYxIl0sImJ1ZGdldCI6W3siaWQiOiJ1bml0cyIsInVuaXQiOiJ1bml0IiwibWF4aW11bSI6Mn0seyJpZCI6ImJveGVzIiwidW5pdCI6ImNvbnRhaW5lciIsIm1heGltdW0iOjF9XX0",
+      "compact": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoiRVMyNTYiLCJraWQiOiJ0ZXN0LW9ubHktcDI1Ni12MSJ9.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LXRhc2siLCJlbnRpdGxlbWVudFJldmlzaW9uIjoiZml4dHVyZS1lMSIsInBvbGljeVJldmlzaW9uIjoiZml4dHVyZS1wMSIsImlzc3VlZEF0IjoxODAwMDAwMDAwMDAwLCJub3RCZWZvcmUiOjE4MDAwMDAwMDAwMDAsImtpbmRPZkdyYW50IjoidGFzayIsInRhc2tLaW5kIjoic2hpZnQiLCJ0YXNrSWQiOiJmaXh0dXJlLXRhc2siLCJzbmFwc2hvdERpZ2VzdCI6InNoYTI1NjpmaXh0dXJlLWZyb3plbi1zbmFwc2hvdCIsImNvbXBsZXRlTm90QWZ0ZXIiOjE4MDAwMDAxMjAwMDAsImV2ZW50VHlwZXMiOlsic2hpZnQuc2Nhbi52MSIsInNoaWZ0LmJveC5jbG9zZS52MSIsInNoaWZ0LmNsb3NlLnYxIl0sImJ1ZGdldCI6W3siaWQiOiJ1bml0cyIsInVuaXQiOiJ1bml0IiwibWF4aW11bSI6Mn0seyJpZCI6ImJveGVzIiwidW5pdCI6ImNvbnRhaW5lciIsIm1heGltdW0iOjF9XX0.Uy8MtS4mzHs_RiydqDPHkHh6PQBiKq9jaed5mIQohF2wNJ1CjL5RRmDyhU6pIxj3CxXixqzm9Z2-8UbCrMa0AQ"
+    },
+    {
+      "id": "alternate-json",
+      "protectedHeaderJson": "{\n  \"kid\": \"test-only-p256-v1\",\n  \"alg\": \"ES256\",\n  \"typ\": \"markiro-offline-grant+jws\"\n}",
+      "payloadJson": "{\n  \"capabilities\": [\n    \"shift.start.v1\",\n    \"inventory.start.v1\"\n  ],\n  \"startNotAfter\": 1800000060000,\n  \"kindOfGrant\": \"device\",\n  \"notBefore\": 1800000000000,\n  \"issuedAt\": 1800000000000,\n  \"policyRevision\": \"fixture-p1\",\n  \"entitlementRevision\": \"fixture-e1\",\n  \"grantId\": \"fixture-grant-device\",\n  \"issuer\": \"https://offline-grants.fixture.invalid\",\n  \"version\": 1,\n  \"credentialEpoch\": 1,\n  \"kind\": \"station\",\n  \"deviceId\": \"fixture-device\",\n  \"tenantId\": \"fixture-tenant\"\n}",
+      "signingInput": "ewogICJraWQiOiAidGVzdC1vbmx5LXAyNTYtdjEiLAogICJhbGciOiAiRVMyNTYiLAogICJ0eXAiOiAibWFya2lyby1vZmZsaW5lLWdyYW50K2p3cyIKfQ.ewogICJjYXBhYmlsaXRpZXMiOiBbCiAgICAic2hpZnQuc3RhcnQudjEiLAogICAgImludmVudG9yeS5zdGFydC52MSIKICBdLAogICJzdGFydE5vdEFmdGVyIjogMTgwMDAwMDA2MDAwMCwKICAia2luZE9mR3JhbnQiOiAiZGV2aWNlIiwKICAibm90QmVmb3JlIjogMTgwMDAwMDAwMDAwMCwKICAiaXNzdWVkQXQiOiAxODAwMDAwMDAwMDAwLAogICJwb2xpY3lSZXZpc2lvbiI6ICJmaXh0dXJlLXAxIiwKICAiZW50aXRsZW1lbnRSZXZpc2lvbiI6ICJmaXh0dXJlLWUxIiwKICAiZ3JhbnRJZCI6ICJmaXh0dXJlLWdyYW50LWRldmljZSIsCiAgImlzc3VlciI6ICJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsCiAgInZlcnNpb24iOiAxLAogICJjcmVkZW50aWFsRXBvY2giOiAxLAogICJraW5kIjogInN0YXRpb24iLAogICJkZXZpY2VJZCI6ICJmaXh0dXJlLWRldmljZSIsCiAgInRlbmFudElkIjogImZpeHR1cmUtdGVuYW50Igp9",
+      "compact": "ewogICJraWQiOiAidGVzdC1vbmx5LXAyNTYtdjEiLAogICJhbGciOiAiRVMyNTYiLAogICJ0eXAiOiAibWFya2lyby1vZmZsaW5lLWdyYW50K2p3cyIKfQ.ewogICJjYXBhYmlsaXRpZXMiOiBbCiAgICAic2hpZnQuc3RhcnQudjEiLAogICAgImludmVudG9yeS5zdGFydC52MSIKICBdLAogICJzdGFydE5vdEFmdGVyIjogMTgwMDAwMDA2MDAwMCwKICAia2luZE9mR3JhbnQiOiAiZGV2aWNlIiwKICAibm90QmVmb3JlIjogMTgwMDAwMDAwMDAwMCwKICAiaXNzdWVkQXQiOiAxODAwMDAwMDAwMDAwLAogICJwb2xpY3lSZXZpc2lvbiI6ICJmaXh0dXJlLXAxIiwKICAiZW50aXRsZW1lbnRSZXZpc2lvbiI6ICJmaXh0dXJlLWUxIiwKICAiZ3JhbnRJZCI6ICJmaXh0dXJlLWdyYW50LWRldmljZSIsCiAgImlzc3VlciI6ICJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsCiAgInZlcnNpb24iOiAxLAogICJjcmVkZW50aWFsRXBvY2giOiAxLAogICJraW5kIjogInN0YXRpb24iLAogICJkZXZpY2VJZCI6ICJmaXh0dXJlLWRldmljZSIsCiAgInRlbmFudElkIjogImZpeHR1cmUtdGVuYW50Igp9.HiyWGQeZguYvwjwp1oCnDbmViFVKGwqH0O6AiI6N9ulr7LJDzzpBnQcitEC-b8GmGIv6YnSHfnbZXluM-JFs1w"
+    },
+    {
+      "id": "integral-number-spellings",
+      "protectedHeaderJson": "{\"typ\":\"markiro-offline-grant+jws\",\"alg\":\"ES256\",\"kid\":\"test-only-p256-v1\"}",
+      "payloadJson": "{\"tenantId\":\"fixture-tenant\",\"deviceId\":\"fixture-device\",\"kind\":\"station\",\"credentialEpoch\":1.0,\"version\":1,\"issuer\":\"https://offline-grants.fixture.invalid\",\"grantId\":\"fixture-grant-device\",\"entitlementRevision\":\"fixture-e1\",\"policyRevision\":\"fixture-p1\",\"issuedAt\":1.8e12,\"notBefore\":1800000000000,\"kindOfGrant\":\"device\",\"startNotAfter\":1800000060000,\"capabilities\":[\"shift.start.v1\",\"inventory.start.v1\"]}",
+      "signingInput": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoiRVMyNTYiLCJraWQiOiJ0ZXN0LW9ubHktcDI1Ni12MSJ9.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLjAsInZlcnNpb24iOjEsImlzc3VlciI6Imh0dHBzOi8vb2ZmbGluZS1ncmFudHMuZml4dHVyZS5pbnZhbGlkIiwiZ3JhbnRJZCI6ImZpeHR1cmUtZ3JhbnQtZGV2aWNlIiwiZW50aXRsZW1lbnRSZXZpc2lvbiI6ImZpeHR1cmUtZTEiLCJwb2xpY3lSZXZpc2lvbiI6ImZpeHR1cmUtcDEiLCJpc3N1ZWRBdCI6MS44ZTEyLCJub3RCZWZvcmUiOjE4MDAwMDAwMDAwMDAsImtpbmRPZkdyYW50IjoiZGV2aWNlIiwic3RhcnROb3RBZnRlciI6MTgwMDAwMDA2MDAwMCwiY2FwYWJpbGl0aWVzIjpbInNoaWZ0LnN0YXJ0LnYxIiwiaW52ZW50b3J5LnN0YXJ0LnYxIl19",
+      "compact": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoiRVMyNTYiLCJraWQiOiJ0ZXN0LW9ubHktcDI1Ni12MSJ9.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLjAsInZlcnNpb24iOjEsImlzc3VlciI6Imh0dHBzOi8vb2ZmbGluZS1ncmFudHMuZml4dHVyZS5pbnZhbGlkIiwiZ3JhbnRJZCI6ImZpeHR1cmUtZ3JhbnQtZGV2aWNlIiwiZW50aXRsZW1lbnRSZXZpc2lvbiI6ImZpeHR1cmUtZTEiLCJwb2xpY3lSZXZpc2lvbiI6ImZpeHR1cmUtcDEiLCJpc3N1ZWRBdCI6MS44ZTEyLCJub3RCZWZvcmUiOjE4MDAwMDAwMDAwMDAsImtpbmRPZkdyYW50IjoiZGV2aWNlIiwic3RhcnROb3RBZnRlciI6MTgwMDAwMDA2MDAwMCwiY2FwYWJpbGl0aWVzIjpbInNoaWZ0LnN0YXJ0LnYxIiwiaW52ZW50b3J5LnN0YXJ0LnYxIl19.6YcO5nKXz1WKT1sOBChmihW9A2Q8kbq1CUsKmmhi7k21MwT1PAMu5k-WqTV1V8SwDvjRZ2LajVP2boSbqHgKyA"
+    },
+    {
+      "id": "none-algorithm",
+      "protectedHeaderJson": "{\"typ\":\"markiro-offline-grant+jws\",\"alg\":\"none\",\"kid\":\"test-only-p256-v1\"}",
+      "payloadJson": "{\"tenantId\":\"fixture-tenant\",\"deviceId\":\"fixture-device\",\"kind\":\"station\",\"credentialEpoch\":1,\"version\":1,\"issuer\":\"https://offline-grants.fixture.invalid\",\"grantId\":\"fixture-grant-device\",\"entitlementRevision\":\"fixture-e1\",\"policyRevision\":\"fixture-p1\",\"issuedAt\":1800000000000,\"notBefore\":1800000000000,\"kindOfGrant\":\"device\",\"startNotAfter\":1800000060000,\"capabilities\":[\"shift.start.v1\",\"inventory.start.v1\"]}",
+      "signingInput": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoibm9uZSIsImtpZCI6InRlc3Qtb25seS1wMjU2LXYxIn0.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LWRldmljZSIsImVudGl0bGVtZW50UmV2aXNpb24iOiJmaXh0dXJlLWUxIiwicG9saWN5UmV2aXNpb24iOiJmaXh0dXJlLXAxIiwiaXNzdWVkQXQiOjE4MDAwMDAwMDAwMDAsIm5vdEJlZm9yZSI6MTgwMDAwMDAwMDAwMCwia2luZE9mR3JhbnQiOiJkZXZpY2UiLCJzdGFydE5vdEFmdGVyIjoxODAwMDAwMDYwMDAwLCJjYXBhYmlsaXRpZXMiOlsic2hpZnQuc3RhcnQudjEiLCJpbnZlbnRvcnkuc3RhcnQudjEiXX0",
+      "compact": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoibm9uZSIsImtpZCI6InRlc3Qtb25seS1wMjU2LXYxIn0.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LWRldmljZSIsImVudGl0bGVtZW50UmV2aXNpb24iOiJmaXh0dXJlLWUxIiwicG9saWN5UmV2aXNpb24iOiJmaXh0dXJlLXAxIiwiaXNzdWVkQXQiOjE4MDAwMDAwMDAwMDAsIm5vdEJlZm9yZSI6MTgwMDAwMDAwMDAwMCwia2luZE9mR3JhbnQiOiJkZXZpY2UiLCJzdGFydE5vdEFmdGVyIjoxODAwMDAwMDYwMDAwLCJjYXBhYmlsaXRpZXMiOlsic2hpZnQuc3RhcnQudjEiLCJpbnZlbnRvcnkuc3RhcnQudjEiXX0.PNdHW_DW6n9b4WONsgCSUH2EuLXATmXmV-p9JLjDYa8O1LnCEYIj9gVnkzdNYVWB1NvwVm_lBPnnMfyhbmVJkg"
+    },
+    {
+      "id": "hs256-algorithm",
+      "protectedHeaderJson": "{\"typ\":\"markiro-offline-grant+jws\",\"alg\":\"HS256\",\"kid\":\"test-only-p256-v1\"}",
+      "payloadJson": "{\"tenantId\":\"fixture-tenant\",\"deviceId\":\"fixture-device\",\"kind\":\"station\",\"credentialEpoch\":1,\"version\":1,\"issuer\":\"https://offline-grants.fixture.invalid\",\"grantId\":\"fixture-grant-device\",\"entitlementRevision\":\"fixture-e1\",\"policyRevision\":\"fixture-p1\",\"issuedAt\":1800000000000,\"notBefore\":1800000000000,\"kindOfGrant\":\"device\",\"startNotAfter\":1800000060000,\"capabilities\":[\"shift.start.v1\",\"inventory.start.v1\"]}",
+      "signingInput": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoiSFMyNTYiLCJraWQiOiJ0ZXN0LW9ubHktcDI1Ni12MSJ9.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LWRldmljZSIsImVudGl0bGVtZW50UmV2aXNpb24iOiJmaXh0dXJlLWUxIiwicG9saWN5UmV2aXNpb24iOiJmaXh0dXJlLXAxIiwiaXNzdWVkQXQiOjE4MDAwMDAwMDAwMDAsIm5vdEJlZm9yZSI6MTgwMDAwMDAwMDAwMCwia2luZE9mR3JhbnQiOiJkZXZpY2UiLCJzdGFydE5vdEFmdGVyIjoxODAwMDAwMDYwMDAwLCJjYXBhYmlsaXRpZXMiOlsic2hpZnQuc3RhcnQudjEiLCJpbnZlbnRvcnkuc3RhcnQudjEiXX0",
+      "compact": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoiSFMyNTYiLCJraWQiOiJ0ZXN0LW9ubHktcDI1Ni12MSJ9.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LWRldmljZSIsImVudGl0bGVtZW50UmV2aXNpb24iOiJmaXh0dXJlLWUxIiwicG9saWN5UmV2aXNpb24iOiJmaXh0dXJlLXAxIiwiaXNzdWVkQXQiOjE4MDAwMDAwMDAwMDAsIm5vdEJlZm9yZSI6MTgwMDAwMDAwMDAwMCwia2luZE9mR3JhbnQiOiJkZXZpY2UiLCJzdGFydE5vdEFmdGVyIjoxODAwMDAwMDYwMDAwLCJjYXBhYmlsaXRpZXMiOlsic2hpZnQuc3RhcnQudjEiLCJpbnZlbnRvcnkuc3RhcnQudjEiXX0.U7bIV75uFCV4rYt9BUqLn0BqXlEuD4PdFjOOkj6EZZVe0Xz1pXNAd4jTPCbr817suWsQaiKHGW0j5uPxeF80KQ"
+    },
+    {
+      "id": "unknown-key",
+      "protectedHeaderJson": "{\"typ\":\"markiro-offline-grant+jws\",\"alg\":\"ES256\",\"kid\":\"unknown-test-key\"}",
+      "payloadJson": "{\"tenantId\":\"fixture-tenant\",\"deviceId\":\"fixture-device\",\"kind\":\"station\",\"credentialEpoch\":1,\"version\":1,\"issuer\":\"https://offline-grants.fixture.invalid\",\"grantId\":\"fixture-grant-device\",\"entitlementRevision\":\"fixture-e1\",\"policyRevision\":\"fixture-p1\",\"issuedAt\":1800000000000,\"notBefore\":1800000000000,\"kindOfGrant\":\"device\",\"startNotAfter\":1800000060000,\"capabilities\":[\"shift.start.v1\",\"inventory.start.v1\"]}",
+      "signingInput": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoiRVMyNTYiLCJraWQiOiJ1bmtub3duLXRlc3Qta2V5In0.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LWRldmljZSIsImVudGl0bGVtZW50UmV2aXNpb24iOiJmaXh0dXJlLWUxIiwicG9saWN5UmV2aXNpb24iOiJmaXh0dXJlLXAxIiwiaXNzdWVkQXQiOjE4MDAwMDAwMDAwMDAsIm5vdEJlZm9yZSI6MTgwMDAwMDAwMDAwMCwia2luZE9mR3JhbnQiOiJkZXZpY2UiLCJzdGFydE5vdEFmdGVyIjoxODAwMDAwMDYwMDAwLCJjYXBhYmlsaXRpZXMiOlsic2hpZnQuc3RhcnQudjEiLCJpbnZlbnRvcnkuc3RhcnQudjEiXX0",
+      "compact": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoiRVMyNTYiLCJraWQiOiJ1bmtub3duLXRlc3Qta2V5In0.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LWRldmljZSIsImVudGl0bGVtZW50UmV2aXNpb24iOiJmaXh0dXJlLWUxIiwicG9saWN5UmV2aXNpb24iOiJmaXh0dXJlLXAxIiwiaXNzdWVkQXQiOjE4MDAwMDAwMDAwMDAsIm5vdEJlZm9yZSI6MTgwMDAwMDAwMDAwMCwia2luZE9mR3JhbnQiOiJkZXZpY2UiLCJzdGFydE5vdEFmdGVyIjoxODAwMDAwMDYwMDAwLCJjYXBhYmlsaXRpZXMiOlsic2hpZnQuc3RhcnQudjEiLCJpbnZlbnRvcnkuc3RhcnQudjEiXX0.Mzr0q5nbX459rYi7elgRQOQp_RkDDyTWVS464YsUmm8wkM4tV-V-08mbC9Av1EtyqdFe8JXylOn7CIoEbzp3-w"
+    },
+    {
+      "id": "wrong-type",
+      "protectedHeaderJson": "{\"typ\":\"JWT\",\"alg\":\"ES256\",\"kid\":\"test-only-p256-v1\"}",
+      "payloadJson": "{\"tenantId\":\"fixture-tenant\",\"deviceId\":\"fixture-device\",\"kind\":\"station\",\"credentialEpoch\":1,\"version\":1,\"issuer\":\"https://offline-grants.fixture.invalid\",\"grantId\":\"fixture-grant-device\",\"entitlementRevision\":\"fixture-e1\",\"policyRevision\":\"fixture-p1\",\"issuedAt\":1800000000000,\"notBefore\":1800000000000,\"kindOfGrant\":\"device\",\"startNotAfter\":1800000060000,\"capabilities\":[\"shift.start.v1\",\"inventory.start.v1\"]}",
+      "signingInput": "eyJ0eXAiOiJKV1QiLCJhbGciOiJFUzI1NiIsImtpZCI6InRlc3Qtb25seS1wMjU2LXYxIn0.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LWRldmljZSIsImVudGl0bGVtZW50UmV2aXNpb24iOiJmaXh0dXJlLWUxIiwicG9saWN5UmV2aXNpb24iOiJmaXh0dXJlLXAxIiwiaXNzdWVkQXQiOjE4MDAwMDAwMDAwMDAsIm5vdEJlZm9yZSI6MTgwMDAwMDAwMDAwMCwia2luZE9mR3JhbnQiOiJkZXZpY2UiLCJzdGFydE5vdEFmdGVyIjoxODAwMDAwMDYwMDAwLCJjYXBhYmlsaXRpZXMiOlsic2hpZnQuc3RhcnQudjEiLCJpbnZlbnRvcnkuc3RhcnQudjEiXX0",
+      "compact": "eyJ0eXAiOiJKV1QiLCJhbGciOiJFUzI1NiIsImtpZCI6InRlc3Qtb25seS1wMjU2LXYxIn0.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LWRldmljZSIsImVudGl0bGVtZW50UmV2aXNpb24iOiJmaXh0dXJlLWUxIiwicG9saWN5UmV2aXNpb24iOiJmaXh0dXJlLXAxIiwiaXNzdWVkQXQiOjE4MDAwMDAwMDAwMDAsIm5vdEJlZm9yZSI6MTgwMDAwMDAwMDAwMCwia2luZE9mR3JhbnQiOiJkZXZpY2UiLCJzdGFydE5vdEFmdGVyIjoxODAwMDAwMDYwMDAwLCJjYXBhYmlsaXRpZXMiOlsic2hpZnQuc3RhcnQudjEiLCJpbnZlbnRvcnkuc3RhcnQudjEiXX0.Cw_pjpmtjlzBas93HE9hoIraOSs7_oJ3U1Vx82qY2v5l_G9sG-jPYfIAKX85IqDZoklZwG6jPlKytskp1jFejQ"
+    },
+    {
+      "id": "unknown-critical-header",
+      "protectedHeaderJson": "{\"typ\":\"markiro-offline-grant+jws\",\"alg\":\"ES256\",\"kid\":\"test-only-p256-v1\",\"crit\":[\"fixture\"],\"fixture\":true}",
+      "payloadJson": "{\"tenantId\":\"fixture-tenant\",\"deviceId\":\"fixture-device\",\"kind\":\"station\",\"credentialEpoch\":1,\"version\":1,\"issuer\":\"https://offline-grants.fixture.invalid\",\"grantId\":\"fixture-grant-device\",\"entitlementRevision\":\"fixture-e1\",\"policyRevision\":\"fixture-p1\",\"issuedAt\":1800000000000,\"notBefore\":1800000000000,\"kindOfGrant\":\"device\",\"startNotAfter\":1800000060000,\"capabilities\":[\"shift.start.v1\",\"inventory.start.v1\"]}",
+      "signingInput": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoiRVMyNTYiLCJraWQiOiJ0ZXN0LW9ubHktcDI1Ni12MSIsImNyaXQiOlsiZml4dHVyZSJdLCJmaXh0dXJlIjp0cnVlfQ.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LWRldmljZSIsImVudGl0bGVtZW50UmV2aXNpb24iOiJmaXh0dXJlLWUxIiwicG9saWN5UmV2aXNpb24iOiJmaXh0dXJlLXAxIiwiaXNzdWVkQXQiOjE4MDAwMDAwMDAwMDAsIm5vdEJlZm9yZSI6MTgwMDAwMDAwMDAwMCwia2luZE9mR3JhbnQiOiJkZXZpY2UiLCJzdGFydE5vdEFmdGVyIjoxODAwMDAwMDYwMDAwLCJjYXBhYmlsaXRpZXMiOlsic2hpZnQuc3RhcnQudjEiLCJpbnZlbnRvcnkuc3RhcnQudjEiXX0",
+      "compact": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoiRVMyNTYiLCJraWQiOiJ0ZXN0LW9ubHktcDI1Ni12MSIsImNyaXQiOlsiZml4dHVyZSJdLCJmaXh0dXJlIjp0cnVlfQ.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LWRldmljZSIsImVudGl0bGVtZW50UmV2aXNpb24iOiJmaXh0dXJlLWUxIiwicG9saWN5UmV2aXNpb24iOiJmaXh0dXJlLXAxIiwiaXNzdWVkQXQiOjE4MDAwMDAwMDAwMDAsIm5vdEJlZm9yZSI6MTgwMDAwMDAwMDAwMCwia2luZE9mR3JhbnQiOiJkZXZpY2UiLCJzdGFydE5vdEFmdGVyIjoxODAwMDAwMDYwMDAwLCJjYXBhYmlsaXRpZXMiOlsic2hpZnQuc3RhcnQudjEiLCJpbnZlbnRvcnkuc3RhcnQudjEiXX0.GWk5LozVNy5fsvZJcD8xI2uLmACcpRbpjFWzEFD2UcgERd9dDy46GRgJNCxU-71oBFfizSk2wSx45eUcqYVUBw"
+    }
+  ],
+  "vectors": [
+    {
+      "id": "valid-device",
+      "input": {
+        "compact": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoiRVMyNTYiLCJraWQiOiJ0ZXN0LW9ubHktcDI1Ni12MSJ9.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LWRldmljZSIsImVudGl0bGVtZW50UmV2aXNpb24iOiJmaXh0dXJlLWUxIiwicG9saWN5UmV2aXNpb24iOiJmaXh0dXJlLXAxIiwiaXNzdWVkQXQiOjE4MDAwMDAwMDAwMDAsIm5vdEJlZm9yZSI6MTgwMDAwMDAwMDAwMCwia2luZE9mR3JhbnQiOiJkZXZpY2UiLCJzdGFydE5vdEFmdGVyIjoxODAwMDAwMDYwMDAwLCJjYXBhYmlsaXRpZXMiOlsic2hpZnQuc3RhcnQudjEiLCJpbnZlbnRvcnkuc3RhcnQudjEiXX0.ehFJCA-P3HwJ8VCFS-BAydmnqlSPCEyko2flcNkYx95zQTgndLIoo7bZXMVC4Cs9Tw28M4db--rrBDsC3DGI7w",
+        "context": {
+          "owner": {
+            "tenantId": "fixture-tenant",
+            "deviceId": "fixture-device",
+            "kind": "station",
+            "credentialEpoch": 1
+          },
+          "issuer": "https://offline-grants.fixture.invalid",
+          "now": 1800000000000,
+          "capability": "shift.start.v1"
+        }
+      },
+      "expected": {
+        "cryptographic": "valid",
+        "admission": "allow"
+      }
+    },
+    {
+      "id": "valid-task",
+      "input": {
+        "compact": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoiRVMyNTYiLCJraWQiOiJ0ZXN0LW9ubHktcDI1Ni12MSJ9.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LXRhc2siLCJlbnRpdGxlbWVudFJldmlzaW9uIjoiZml4dHVyZS1lMSIsInBvbGljeVJldmlzaW9uIjoiZml4dHVyZS1wMSIsImlzc3VlZEF0IjoxODAwMDAwMDAwMDAwLCJub3RCZWZvcmUiOjE4MDAwMDAwMDAwMDAsImtpbmRPZkdyYW50IjoidGFzayIsInRhc2tLaW5kIjoic2hpZnQiLCJ0YXNrSWQiOiJmaXh0dXJlLXRhc2siLCJzbmFwc2hvdERpZ2VzdCI6InNoYTI1NjpmaXh0dXJlLWZyb3plbi1zbmFwc2hvdCIsImNvbXBsZXRlTm90QWZ0ZXIiOjE4MDAwMDAxMjAwMDAsImV2ZW50VHlwZXMiOlsic2hpZnQuc2Nhbi52MSIsInNoaWZ0LmJveC5jbG9zZS52MSIsInNoaWZ0LmNsb3NlLnYxIl0sImJ1ZGdldCI6W3siaWQiOiJ1bml0cyIsInVuaXQiOiJ1bml0IiwibWF4aW11bSI6Mn0seyJpZCI6ImJveGVzIiwidW5pdCI6ImNvbnRhaW5lciIsIm1heGltdW0iOjF9XX0.Uy8MtS4mzHs_RiydqDPHkHh6PQBiKq9jaed5mIQohF2wNJ1CjL5RRmDyhU6pIxj3CxXixqzm9Z2-8UbCrMa0AQ",
+        "context": {
+          "owner": {
+            "tenantId": "fixture-tenant",
+            "deviceId": "fixture-device",
+            "kind": "station",
+            "credentialEpoch": 1
+          },
+          "issuer": "https://offline-grants.fixture.invalid",
+          "now": 1800000000000,
+          "taskKind": "shift",
+          "taskId": "fixture-task",
+          "snapshotDigest": "sha256:fixture-frozen-snapshot",
+          "eventType": "shift.scan.v1",
+          "consumption": [
+            {
+              "id": "units",
+              "used": 0,
+              "requested": 1
+            }
+          ]
+        }
+      },
+      "expected": {
+        "cryptographic": "valid",
+        "admission": "allow"
+      }
+    },
+    {
+      "id": "original-bytes-whitespace-and-order",
+      "input": {
+        "compact": "ewogICJraWQiOiAidGVzdC1vbmx5LXAyNTYtdjEiLAogICJhbGciOiAiRVMyNTYiLAogICJ0eXAiOiAibWFya2lyby1vZmZsaW5lLWdyYW50K2p3cyIKfQ.ewogICJjYXBhYmlsaXRpZXMiOiBbCiAgICAic2hpZnQuc3RhcnQudjEiLAogICAgImludmVudG9yeS5zdGFydC52MSIKICBdLAogICJzdGFydE5vdEFmdGVyIjogMTgwMDAwMDA2MDAwMCwKICAia2luZE9mR3JhbnQiOiAiZGV2aWNlIiwKICAibm90QmVmb3JlIjogMTgwMDAwMDAwMDAwMCwKICAiaXNzdWVkQXQiOiAxODAwMDAwMDAwMDAwLAogICJwb2xpY3lSZXZpc2lvbiI6ICJmaXh0dXJlLXAxIiwKICAiZW50aXRsZW1lbnRSZXZpc2lvbiI6ICJmaXh0dXJlLWUxIiwKICAiZ3JhbnRJZCI6ICJmaXh0dXJlLWdyYW50LWRldmljZSIsCiAgImlzc3VlciI6ICJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsCiAgInZlcnNpb24iOiAxLAogICJjcmVkZW50aWFsRXBvY2giOiAxLAogICJraW5kIjogInN0YXRpb24iLAogICJkZXZpY2VJZCI6ICJmaXh0dXJlLWRldmljZSIsCiAgInRlbmFudElkIjogImZpeHR1cmUtdGVuYW50Igp9.HiyWGQeZguYvwjwp1oCnDbmViFVKGwqH0O6AiI6N9ulr7LJDzzpBnQcitEC-b8GmGIv6YnSHfnbZXluM-JFs1w",
+        "context": {
+          "owner": {
+            "tenantId": "fixture-tenant",
+            "deviceId": "fixture-device",
+            "kind": "station",
+            "credentialEpoch": 1
+          },
+          "issuer": "https://offline-grants.fixture.invalid",
+          "now": 1800000000000,
+          "capability": "shift.start.v1"
+        }
+      },
+      "expected": {
+        "cryptographic": "valid",
+        "admission": "allow"
+      }
+    },
+    {
+      "id": "integral-decimal-and-exponent",
+      "input": {
+        "compact": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoiRVMyNTYiLCJraWQiOiJ0ZXN0LW9ubHktcDI1Ni12MSJ9.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLjAsInZlcnNpb24iOjEsImlzc3VlciI6Imh0dHBzOi8vb2ZmbGluZS1ncmFudHMuZml4dHVyZS5pbnZhbGlkIiwiZ3JhbnRJZCI6ImZpeHR1cmUtZ3JhbnQtZGV2aWNlIiwiZW50aXRsZW1lbnRSZXZpc2lvbiI6ImZpeHR1cmUtZTEiLCJwb2xpY3lSZXZpc2lvbiI6ImZpeHR1cmUtcDEiLCJpc3N1ZWRBdCI6MS44ZTEyLCJub3RCZWZvcmUiOjE4MDAwMDAwMDAwMDAsImtpbmRPZkdyYW50IjoiZGV2aWNlIiwic3RhcnROb3RBZnRlciI6MTgwMDAwMDA2MDAwMCwiY2FwYWJpbGl0aWVzIjpbInNoaWZ0LnN0YXJ0LnYxIiwiaW52ZW50b3J5LnN0YXJ0LnYxIl19.6YcO5nKXz1WKT1sOBChmihW9A2Q8kbq1CUsKmmhi7k21MwT1PAMu5k-WqTV1V8SwDvjRZ2LajVP2boSbqHgKyA",
+        "context": {
+          "owner": {
+            "tenantId": "fixture-tenant",
+            "deviceId": "fixture-device",
+            "kind": "station",
+            "credentialEpoch": 1
+          },
+          "issuer": "https://offline-grants.fixture.invalid",
+          "now": 1800000000000,
+          "capability": "shift.start.v1"
+        }
+      },
+      "expected": {
+        "cryptographic": "valid",
+        "admission": "allow"
+      }
+    },
+    {
+      "id": "none-algorithm",
+      "input": {
+        "compact": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoibm9uZSIsImtpZCI6InRlc3Qtb25seS1wMjU2LXYxIn0.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LWRldmljZSIsImVudGl0bGVtZW50UmV2aXNpb24iOiJmaXh0dXJlLWUxIiwicG9saWN5UmV2aXNpb24iOiJmaXh0dXJlLXAxIiwiaXNzdWVkQXQiOjE4MDAwMDAwMDAwMDAsIm5vdEJlZm9yZSI6MTgwMDAwMDAwMDAwMCwia2luZE9mR3JhbnQiOiJkZXZpY2UiLCJzdGFydE5vdEFmdGVyIjoxODAwMDAwMDYwMDAwLCJjYXBhYmlsaXRpZXMiOlsic2hpZnQuc3RhcnQudjEiLCJpbnZlbnRvcnkuc3RhcnQudjEiXX0.PNdHW_DW6n9b4WONsgCSUH2EuLXATmXmV-p9JLjDYa8O1LnCEYIj9gVnkzdNYVWB1NvwVm_lBPnnMfyhbmVJkg",
+        "context": {
+          "owner": {
+            "tenantId": "fixture-tenant",
+            "deviceId": "fixture-device",
+            "kind": "station",
+            "credentialEpoch": 1
+          },
+          "issuer": "https://offline-grants.fixture.invalid",
+          "now": 1800000000000,
+          "capability": "shift.start.v1"
+        }
+      },
+      "expected": {
+        "cryptographic": "valid",
+        "admission": "unsupported_algorithm"
+      }
+    },
+    {
+      "id": "hs256-algorithm",
+      "input": {
+        "compact": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoiSFMyNTYiLCJraWQiOiJ0ZXN0LW9ubHktcDI1Ni12MSJ9.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LWRldmljZSIsImVudGl0bGVtZW50UmV2aXNpb24iOiJmaXh0dXJlLWUxIiwicG9saWN5UmV2aXNpb24iOiJmaXh0dXJlLXAxIiwiaXNzdWVkQXQiOjE4MDAwMDAwMDAwMDAsIm5vdEJlZm9yZSI6MTgwMDAwMDAwMDAwMCwia2luZE9mR3JhbnQiOiJkZXZpY2UiLCJzdGFydE5vdEFmdGVyIjoxODAwMDAwMDYwMDAwLCJjYXBhYmlsaXRpZXMiOlsic2hpZnQuc3RhcnQudjEiLCJpbnZlbnRvcnkuc3RhcnQudjEiXX0.U7bIV75uFCV4rYt9BUqLn0BqXlEuD4PdFjOOkj6EZZVe0Xz1pXNAd4jTPCbr817suWsQaiKHGW0j5uPxeF80KQ",
+        "context": {
+          "owner": {
+            "tenantId": "fixture-tenant",
+            "deviceId": "fixture-device",
+            "kind": "station",
+            "credentialEpoch": 1
+          },
+          "issuer": "https://offline-grants.fixture.invalid",
+          "now": 1800000000000,
+          "capability": "shift.start.v1"
+        }
+      },
+      "expected": {
+        "cryptographic": "valid",
+        "admission": "unsupported_algorithm"
+      }
+    },
+    {
+      "id": "unknown-key",
+      "input": {
+        "compact": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoiRVMyNTYiLCJraWQiOiJ1bmtub3duLXRlc3Qta2V5In0.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LWRldmljZSIsImVudGl0bGVtZW50UmV2aXNpb24iOiJmaXh0dXJlLWUxIiwicG9saWN5UmV2aXNpb24iOiJmaXh0dXJlLXAxIiwiaXNzdWVkQXQiOjE4MDAwMDAwMDAwMDAsIm5vdEJlZm9yZSI6MTgwMDAwMDAwMDAwMCwia2luZE9mR3JhbnQiOiJkZXZpY2UiLCJzdGFydE5vdEFmdGVyIjoxODAwMDAwMDYwMDAwLCJjYXBhYmlsaXRpZXMiOlsic2hpZnQuc3RhcnQudjEiLCJpbnZlbnRvcnkuc3RhcnQudjEiXX0.Mzr0q5nbX459rYi7elgRQOQp_RkDDyTWVS464YsUmm8wkM4tV-V-08mbC9Av1EtyqdFe8JXylOn7CIoEbzp3-w",
+        "context": {
+          "owner": {
+            "tenantId": "fixture-tenant",
+            "deviceId": "fixture-device",
+            "kind": "station",
+            "credentialEpoch": 1
+          },
+          "issuer": "https://offline-grants.fixture.invalid",
+          "now": 1800000000000,
+          "capability": "shift.start.v1"
+        }
+      },
+      "expected": {
+        "cryptographic": "valid",
+        "admission": "unknown_key"
+      }
+    },
+    {
+      "id": "wrong-type",
+      "input": {
+        "compact": "eyJ0eXAiOiJKV1QiLCJhbGciOiJFUzI1NiIsImtpZCI6InRlc3Qtb25seS1wMjU2LXYxIn0.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LWRldmljZSIsImVudGl0bGVtZW50UmV2aXNpb24iOiJmaXh0dXJlLWUxIiwicG9saWN5UmV2aXNpb24iOiJmaXh0dXJlLXAxIiwiaXNzdWVkQXQiOjE4MDAwMDAwMDAwMDAsIm5vdEJlZm9yZSI6MTgwMDAwMDAwMDAwMCwia2luZE9mR3JhbnQiOiJkZXZpY2UiLCJzdGFydE5vdEFmdGVyIjoxODAwMDAwMDYwMDAwLCJjYXBhYmlsaXRpZXMiOlsic2hpZnQuc3RhcnQudjEiLCJpbnZlbnRvcnkuc3RhcnQudjEiXX0.Cw_pjpmtjlzBas93HE9hoIraOSs7_oJ3U1Vx82qY2v5l_G9sG-jPYfIAKX85IqDZoklZwG6jPlKytskp1jFejQ",
+        "context": {
+          "owner": {
+            "tenantId": "fixture-tenant",
+            "deviceId": "fixture-device",
+            "kind": "station",
+            "credentialEpoch": 1
+          },
+          "issuer": "https://offline-grants.fixture.invalid",
+          "now": 1800000000000,
+          "capability": "shift.start.v1"
+        }
+      },
+      "expected": {
+        "cryptographic": "valid",
+        "admission": "invalid_header"
+      }
+    },
+    {
+      "id": "unknown-critical-header",
+      "input": {
+        "compact": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoiRVMyNTYiLCJraWQiOiJ0ZXN0LW9ubHktcDI1Ni12MSIsImNyaXQiOlsiZml4dHVyZSJdLCJmaXh0dXJlIjp0cnVlfQ.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LWRldmljZSIsImVudGl0bGVtZW50UmV2aXNpb24iOiJmaXh0dXJlLWUxIiwicG9saWN5UmV2aXNpb24iOiJmaXh0dXJlLXAxIiwiaXNzdWVkQXQiOjE4MDAwMDAwMDAwMDAsIm5vdEJlZm9yZSI6MTgwMDAwMDAwMDAwMCwia2luZE9mR3JhbnQiOiJkZXZpY2UiLCJzdGFydE5vdEFmdGVyIjoxODAwMDAwMDYwMDAwLCJjYXBhYmlsaXRpZXMiOlsic2hpZnQuc3RhcnQudjEiLCJpbnZlbnRvcnkuc3RhcnQudjEiXX0.GWk5LozVNy5fsvZJcD8xI2uLmACcpRbpjFWzEFD2UcgERd9dDy46GRgJNCxU-71oBFfizSk2wSx45eUcqYVUBw",
+        "context": {
+          "owner": {
+            "tenantId": "fixture-tenant",
+            "deviceId": "fixture-device",
+            "kind": "station",
+            "credentialEpoch": 1
+          },
+          "issuer": "https://offline-grants.fixture.invalid",
+          "now": 1800000000000,
+          "capability": "shift.start.v1"
+        }
+      },
+      "expected": {
+        "cryptographic": "valid",
+        "admission": "invalid_header"
+      }
+    },
+    {
+      "id": "altered-payload",
+      "input": {
+        "compact": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoiRVMyNTYiLCJraWQiOiJ0ZXN0LW9ubHktcDI1Ni12MSJ9.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoyLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LWRldmljZSIsImVudGl0bGVtZW50UmV2aXNpb24iOiJmaXh0dXJlLWUxIiwicG9saWN5UmV2aXNpb24iOiJmaXh0dXJlLXAxIiwiaXNzdWVkQXQiOjE4MDAwMDAwMDAwMDAsIm5vdEJlZm9yZSI6MTgwMDAwMDAwMDAwMCwia2luZE9mR3JhbnQiOiJkZXZpY2UiLCJzdGFydE5vdEFmdGVyIjoxODAwMDAwMDYwMDAwLCJjYXBhYmlsaXRpZXMiOlsic2hpZnQuc3RhcnQudjEiLCJpbnZlbnRvcnkuc3RhcnQudjEiXX0.ehFJCA-P3HwJ8VCFS-BAydmnqlSPCEyko2flcNkYx95zQTgndLIoo7bZXMVC4Cs9Tw28M4db--rrBDsC3DGI7w",
+        "context": {
+          "owner": {
+            "tenantId": "fixture-tenant",
+            "deviceId": "fixture-device",
+            "kind": "station",
+            "credentialEpoch": 1
+          },
+          "issuer": "https://offline-grants.fixture.invalid",
+          "now": 1800000000000,
+          "capability": "shift.start.v1"
+        }
+      },
+      "expected": {
+        "cryptographic": "invalid",
+        "admission": "invalid_signature"
+      }
+    },
+    {
+      "id": "altered-r",
+      "input": {
+        "compact": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoiRVMyNTYiLCJraWQiOiJ0ZXN0LW9ubHktcDI1Ni12MSJ9.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LWRldmljZSIsImVudGl0bGVtZW50UmV2aXNpb24iOiJmaXh0dXJlLWUxIiwicG9saWN5UmV2aXNpb24iOiJmaXh0dXJlLXAxIiwiaXNzdWVkQXQiOjE4MDAwMDAwMDAwMDAsIm5vdEJlZm9yZSI6MTgwMDAwMDAwMDAwMCwia2luZE9mR3JhbnQiOiJkZXZpY2UiLCJzdGFydE5vdEFmdGVyIjoxODAwMDAwMDYwMDAwLCJjYXBhYmlsaXRpZXMiOlsic2hpZnQuc3RhcnQudjEiLCJpbnZlbnRvcnkuc3RhcnQudjEiXX0.exFJCA-P3HwJ8VCFS-BAydmnqlSPCEyko2flcNkYx95zQTgndLIoo7bZXMVC4Cs9Tw28M4db--rrBDsC3DGI7w",
+        "context": {
+          "owner": {
+            "tenantId": "fixture-tenant",
+            "deviceId": "fixture-device",
+            "kind": "station",
+            "credentialEpoch": 1
+          },
+          "issuer": "https://offline-grants.fixture.invalid",
+          "now": 1800000000000,
+          "capability": "shift.start.v1"
+        }
+      },
+      "expected": {
+        "cryptographic": "invalid",
+        "admission": "invalid_signature"
+      }
+    },
+    {
+      "id": "altered-s",
+      "input": {
+        "compact": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoiRVMyNTYiLCJraWQiOiJ0ZXN0LW9ubHktcDI1Ni12MSJ9.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LWRldmljZSIsImVudGl0bGVtZW50UmV2aXNpb24iOiJmaXh0dXJlLWUxIiwicG9saWN5UmV2aXNpb24iOiJmaXh0dXJlLXAxIiwiaXNzdWVkQXQiOjE4MDAwMDAwMDAwMDAsIm5vdEJlZm9yZSI6MTgwMDAwMDAwMDAwMCwia2luZE9mR3JhbnQiOiJkZXZpY2UiLCJzdGFydE5vdEFmdGVyIjoxODAwMDAwMDYwMDAwLCJjYXBhYmlsaXRpZXMiOlsic2hpZnQuc3RhcnQudjEiLCJpbnZlbnRvcnkuc3RhcnQudjEiXX0.ehFJCA-P3HwJ8VCFS-BAydmnqlSPCEyko2flcNkYx95yQTgndLIoo7bZXMVC4Cs9Tw28M4db--rrBDsC3DGI7w",
+        "context": {
+          "owner": {
+            "tenantId": "fixture-tenant",
+            "deviceId": "fixture-device",
+            "kind": "station",
+            "credentialEpoch": 1
+          },
+          "issuer": "https://offline-grants.fixture.invalid",
+          "now": 1800000000000,
+          "capability": "shift.start.v1"
+        }
+      },
+      "expected": {
+        "cryptographic": "invalid",
+        "admission": "invalid_signature"
+      }
+    },
+    {
+      "id": "der-instead-of-raw",
+      "input": {
+        "compact": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoiRVMyNTYiLCJraWQiOiJ0ZXN0LW9ubHktcDI1Ni12MSJ9.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LWRldmljZSIsImVudGl0bGVtZW50UmV2aXNpb24iOiJmaXh0dXJlLWUxIiwicG9saWN5UmV2aXNpb24iOiJmaXh0dXJlLXAxIiwiaXNzdWVkQXQiOjE4MDAwMDAwMDAwMDAsIm5vdEJlZm9yZSI6MTgwMDAwMDAwMDAwMCwia2luZE9mR3JhbnQiOiJkZXZpY2UiLCJzdGFydE5vdEFmdGVyIjoxODAwMDAwMDYwMDAwLCJjYXBhYmlsaXRpZXMiOlsic2hpZnQuc3RhcnQudjEiLCJpbnZlbnRvcnkuc3RhcnQudjEiXX0.MEQCIHoRSQgPj9x8CfFQhUvgQMnZp6pUjwhMpKNn5XDZGMfeAiBzQTgndLIoo7bZXMVC4Cs9Tw28M4db--rrBDsC3DGI7w",
+        "context": {
+          "owner": {
+            "tenantId": "fixture-tenant",
+            "deviceId": "fixture-device",
+            "kind": "station",
+            "credentialEpoch": 1
+          },
+          "issuer": "https://offline-grants.fixture.invalid",
+          "now": 1800000000000,
+          "capability": "shift.start.v1"
+        }
+      },
+      "expected": {
+        "cryptographic": "invalid",
+        "admission": "invalid_signature"
+      }
+    },
+    {
+      "id": "all-zero-raw-signature",
+      "input": {
+        "compact": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoiRVMyNTYiLCJraWQiOiJ0ZXN0LW9ubHktcDI1Ni12MSJ9.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LWRldmljZSIsImVudGl0bGVtZW50UmV2aXNpb24iOiJmaXh0dXJlLWUxIiwicG9saWN5UmV2aXNpb24iOiJmaXh0dXJlLXAxIiwiaXNzdWVkQXQiOjE4MDAwMDAwMDAwMDAsIm5vdEJlZm9yZSI6MTgwMDAwMDAwMDAwMCwia2luZE9mR3JhbnQiOiJkZXZpY2UiLCJzdGFydE5vdEFmdGVyIjoxODAwMDAwMDYwMDAwLCJjYXBhYmlsaXRpZXMiOlsic2hpZnQuc3RhcnQudjEiLCJpbnZlbnRvcnkuc3RhcnQudjEiXX0.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "context": {
+          "owner": {
+            "tenantId": "fixture-tenant",
+            "deviceId": "fixture-device",
+            "kind": "station",
+            "credentialEpoch": 1
+          },
+          "issuer": "https://offline-grants.fixture.invalid",
+          "now": 1800000000000,
+          "capability": "shift.start.v1"
+        }
+      },
+      "expected": {
+        "cryptographic": "invalid",
+        "admission": "invalid_signature"
+      }
+    },
+    {
+      "id": "missing-segment",
+      "input": {
+        "compact": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoiRVMyNTYiLCJraWQiOiJ0ZXN0LW9ubHktcDI1Ni12MSJ9.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LWRldmljZSIsImVudGl0bGVtZW50UmV2aXNpb24iOiJmaXh0dXJlLWUxIiwicG9saWN5UmV2aXNpb24iOiJmaXh0dXJlLXAxIiwiaXNzdWVkQXQiOjE4MDAwMDAwMDAwMDAsIm5vdEJlZm9yZSI6MTgwMDAwMDAwMDAwMCwia2luZE9mR3JhbnQiOiJkZXZpY2UiLCJzdGFydE5vdEFmdGVyIjoxODAwMDAwMDYwMDAwLCJjYXBhYmlsaXRpZXMiOlsic2hpZnQuc3RhcnQudjEiLCJpbnZlbnRvcnkuc3RhcnQudjEiXX0",
+        "context": {
+          "owner": {
+            "tenantId": "fixture-tenant",
+            "deviceId": "fixture-device",
+            "kind": "station",
+            "credentialEpoch": 1
+          },
+          "issuer": "https://offline-grants.fixture.invalid",
+          "now": 1800000000000,
+          "capability": "shift.start.v1"
+        }
+      },
+      "expected": {
+        "cryptographic": "not_checked",
+        "admission": "malformed_compact"
+      }
+    },
+    {
+      "id": "extra-segment",
+      "input": {
+        "compact": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoiRVMyNTYiLCJraWQiOiJ0ZXN0LW9ubHktcDI1Ni12MSJ9.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LWRldmljZSIsImVudGl0bGVtZW50UmV2aXNpb24iOiJmaXh0dXJlLWUxIiwicG9saWN5UmV2aXNpb24iOiJmaXh0dXJlLXAxIiwiaXNzdWVkQXQiOjE4MDAwMDAwMDAwMDAsIm5vdEJlZm9yZSI6MTgwMDAwMDAwMDAwMCwia2luZE9mR3JhbnQiOiJkZXZpY2UiLCJzdGFydE5vdEFmdGVyIjoxODAwMDAwMDYwMDAwLCJjYXBhYmlsaXRpZXMiOlsic2hpZnQuc3RhcnQudjEiLCJpbnZlbnRvcnkuc3RhcnQudjEiXX0.ehFJCA-P3HwJ8VCFS-BAydmnqlSPCEyko2flcNkYx95zQTgndLIoo7bZXMVC4Cs9Tw28M4db--rrBDsC3DGI7w.extra",
+        "context": {
+          "owner": {
+            "tenantId": "fixture-tenant",
+            "deviceId": "fixture-device",
+            "kind": "station",
+            "credentialEpoch": 1
+          },
+          "issuer": "https://offline-grants.fixture.invalid",
+          "now": 1800000000000,
+          "capability": "shift.start.v1"
+        }
+      },
+      "expected": {
+        "cryptographic": "not_checked",
+        "admission": "malformed_compact"
+      }
+    },
+    {
+      "id": "empty-header",
+      "input": {
+        "compact": ".eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LWRldmljZSIsImVudGl0bGVtZW50UmV2aXNpb24iOiJmaXh0dXJlLWUxIiwicG9saWN5UmV2aXNpb24iOiJmaXh0dXJlLXAxIiwiaXNzdWVkQXQiOjE4MDAwMDAwMDAwMDAsIm5vdEJlZm9yZSI6MTgwMDAwMDAwMDAwMCwia2luZE9mR3JhbnQiOiJkZXZpY2UiLCJzdGFydE5vdEFmdGVyIjoxODAwMDAwMDYwMDAwLCJjYXBhYmlsaXRpZXMiOlsic2hpZnQuc3RhcnQudjEiLCJpbnZlbnRvcnkuc3RhcnQudjEiXX0.ehFJCA-P3HwJ8VCFS-BAydmnqlSPCEyko2flcNkYx95zQTgndLIoo7bZXMVC4Cs9Tw28M4db--rrBDsC3DGI7w",
+        "context": {
+          "owner": {
+            "tenantId": "fixture-tenant",
+            "deviceId": "fixture-device",
+            "kind": "station",
+            "credentialEpoch": 1
+          },
+          "issuer": "https://offline-grants.fixture.invalid",
+          "now": 1800000000000,
+          "capability": "shift.start.v1"
+        }
+      },
+      "expected": {
+        "cryptographic": "not_checked",
+        "admission": "malformed_compact"
+      }
+    },
+    {
+      "id": "invalid-base64url",
+      "input": {
+        "compact": "*.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LWRldmljZSIsImVudGl0bGVtZW50UmV2aXNpb24iOiJmaXh0dXJlLWUxIiwicG9saWN5UmV2aXNpb24iOiJmaXh0dXJlLXAxIiwiaXNzdWVkQXQiOjE4MDAwMDAwMDAwMDAsIm5vdEJlZm9yZSI6MTgwMDAwMDAwMDAwMCwia2luZE9mR3JhbnQiOiJkZXZpY2UiLCJzdGFydE5vdEFmdGVyIjoxODAwMDAwMDYwMDAwLCJjYXBhYmlsaXRpZXMiOlsic2hpZnQuc3RhcnQudjEiLCJpbnZlbnRvcnkuc3RhcnQudjEiXX0.ehFJCA-P3HwJ8VCFS-BAydmnqlSPCEyko2flcNkYx95zQTgndLIoo7bZXMVC4Cs9Tw28M4db--rrBDsC3DGI7w",
+        "context": {
+          "owner": {
+            "tenantId": "fixture-tenant",
+            "deviceId": "fixture-device",
+            "kind": "station",
+            "credentialEpoch": 1
+          },
+          "issuer": "https://offline-grants.fixture.invalid",
+          "now": 1800000000000,
+          "capability": "shift.start.v1"
+        }
+      },
+      "expected": {
+        "cryptographic": "not_checked",
+        "admission": "malformed_compact"
+      }
+    },
+    {
+      "id": "invalid-json-header",
+      "input": {
+        "compact": "ew.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LWRldmljZSIsImVudGl0bGVtZW50UmV2aXNpb24iOiJmaXh0dXJlLWUxIiwicG9saWN5UmV2aXNpb24iOiJmaXh0dXJlLXAxIiwiaXNzdWVkQXQiOjE4MDAwMDAwMDAwMDAsIm5vdEJlZm9yZSI6MTgwMDAwMDAwMDAwMCwia2luZE9mR3JhbnQiOiJkZXZpY2UiLCJzdGFydE5vdEFmdGVyIjoxODAwMDAwMDYwMDAwLCJjYXBhYmlsaXRpZXMiOlsic2hpZnQuc3RhcnQudjEiLCJpbnZlbnRvcnkuc3RhcnQudjEiXX0.ehFJCA-P3HwJ8VCFS-BAydmnqlSPCEyko2flcNkYx95zQTgndLIoo7bZXMVC4Cs9Tw28M4db--rrBDsC3DGI7w",
+        "context": {
+          "owner": {
+            "tenantId": "fixture-tenant",
+            "deviceId": "fixture-device",
+            "kind": "station",
+            "credentialEpoch": 1
+          },
+          "issuer": "https://offline-grants.fixture.invalid",
+          "now": 1800000000000,
+          "capability": "shift.start.v1"
+        }
+      },
+      "expected": {
+        "cryptographic": "not_checked",
+        "admission": "malformed_compact"
+      }
+    },
+    {
+      "id": "padded-base64url",
+      "input": {
+        "compact": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoiRVMyNTYiLCJraWQiOiJ0ZXN0LW9ubHktcDI1Ni12MSJ9=.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LWRldmljZSIsImVudGl0bGVtZW50UmV2aXNpb24iOiJmaXh0dXJlLWUxIiwicG9saWN5UmV2aXNpb24iOiJmaXh0dXJlLXAxIiwiaXNzdWVkQXQiOjE4MDAwMDAwMDAwMDAsIm5vdEJlZm9yZSI6MTgwMDAwMDAwMDAwMCwia2luZE9mR3JhbnQiOiJkZXZpY2UiLCJzdGFydE5vdEFmdGVyIjoxODAwMDAwMDYwMDAwLCJjYXBhYmlsaXRpZXMiOlsic2hpZnQuc3RhcnQudjEiLCJpbnZlbnRvcnkuc3RhcnQudjEiXX0.ehFJCA-P3HwJ8VCFS-BAydmnqlSPCEyko2flcNkYx95zQTgndLIoo7bZXMVC4Cs9Tw28M4db--rrBDsC3DGI7w",
+        "context": {
+          "owner": {
+            "tenantId": "fixture-tenant",
+            "deviceId": "fixture-device",
+            "kind": "station",
+            "credentialEpoch": 1
+          },
+          "issuer": "https://offline-grants.fixture.invalid",
+          "now": 1800000000000,
+          "capability": "shift.start.v1"
+        }
+      },
+      "expected": {
+        "cryptographic": "not_checked",
+        "admission": "malformed_compact"
+      }
+    },
+    {
+      "id": "tenant-mismatch",
+      "input": {
+        "compact": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoiRVMyNTYiLCJraWQiOiJ0ZXN0LW9ubHktcDI1Ni12MSJ9.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LWRldmljZSIsImVudGl0bGVtZW50UmV2aXNpb24iOiJmaXh0dXJlLWUxIiwicG9saWN5UmV2aXNpb24iOiJmaXh0dXJlLXAxIiwiaXNzdWVkQXQiOjE4MDAwMDAwMDAwMDAsIm5vdEJlZm9yZSI6MTgwMDAwMDAwMDAwMCwia2luZE9mR3JhbnQiOiJkZXZpY2UiLCJzdGFydE5vdEFmdGVyIjoxODAwMDAwMDYwMDAwLCJjYXBhYmlsaXRpZXMiOlsic2hpZnQuc3RhcnQudjEiLCJpbnZlbnRvcnkuc3RhcnQudjEiXX0.ehFJCA-P3HwJ8VCFS-BAydmnqlSPCEyko2flcNkYx95zQTgndLIoo7bZXMVC4Cs9Tw28M4db--rrBDsC3DGI7w",
+        "context": {
+          "owner": {
+            "tenantId": "other-fixture-tenant",
+            "deviceId": "fixture-device",
+            "kind": "station",
+            "credentialEpoch": 1
+          },
+          "issuer": "https://offline-grants.fixture.invalid",
+          "now": 1800000000000,
+          "capability": "shift.start.v1"
+        }
+      },
+      "expected": {
+        "cryptographic": "valid",
+        "admission": "owner_mismatch"
+      }
+    },
+    {
+      "id": "device-mismatch",
+      "input": {
+        "compact": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoiRVMyNTYiLCJraWQiOiJ0ZXN0LW9ubHktcDI1Ni12MSJ9.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LWRldmljZSIsImVudGl0bGVtZW50UmV2aXNpb24iOiJmaXh0dXJlLWUxIiwicG9saWN5UmV2aXNpb24iOiJmaXh0dXJlLXAxIiwiaXNzdWVkQXQiOjE4MDAwMDAwMDAwMDAsIm5vdEJlZm9yZSI6MTgwMDAwMDAwMDAwMCwia2luZE9mR3JhbnQiOiJkZXZpY2UiLCJzdGFydE5vdEFmdGVyIjoxODAwMDAwMDYwMDAwLCJjYXBhYmlsaXRpZXMiOlsic2hpZnQuc3RhcnQudjEiLCJpbnZlbnRvcnkuc3RhcnQudjEiXX0.ehFJCA-P3HwJ8VCFS-BAydmnqlSPCEyko2flcNkYx95zQTgndLIoo7bZXMVC4Cs9Tw28M4db--rrBDsC3DGI7w",
+        "context": {
+          "owner": {
+            "tenantId": "fixture-tenant",
+            "deviceId": "other-fixture-device",
+            "kind": "station",
+            "credentialEpoch": 1
+          },
+          "issuer": "https://offline-grants.fixture.invalid",
+          "now": 1800000000000,
+          "capability": "shift.start.v1"
+        }
+      },
+      "expected": {
+        "cryptographic": "valid",
+        "admission": "owner_mismatch"
+      }
+    },
+    {
+      "id": "epoch-mismatch",
+      "input": {
+        "compact": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoiRVMyNTYiLCJraWQiOiJ0ZXN0LW9ubHktcDI1Ni12MSJ9.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LWRldmljZSIsImVudGl0bGVtZW50UmV2aXNpb24iOiJmaXh0dXJlLWUxIiwicG9saWN5UmV2aXNpb24iOiJmaXh0dXJlLXAxIiwiaXNzdWVkQXQiOjE4MDAwMDAwMDAwMDAsIm5vdEJlZm9yZSI6MTgwMDAwMDAwMDAwMCwia2luZE9mR3JhbnQiOiJkZXZpY2UiLCJzdGFydE5vdEFmdGVyIjoxODAwMDAwMDYwMDAwLCJjYXBhYmlsaXRpZXMiOlsic2hpZnQuc3RhcnQudjEiLCJpbnZlbnRvcnkuc3RhcnQudjEiXX0.ehFJCA-P3HwJ8VCFS-BAydmnqlSPCEyko2flcNkYx95zQTgndLIoo7bZXMVC4Cs9Tw28M4db--rrBDsC3DGI7w",
+        "context": {
+          "owner": {
+            "tenantId": "fixture-tenant",
+            "deviceId": "fixture-device",
+            "kind": "station",
+            "credentialEpoch": 2
+          },
+          "issuer": "https://offline-grants.fixture.invalid",
+          "now": 1800000000000,
+          "capability": "shift.start.v1"
+        }
+      },
+      "expected": {
+        "cryptographic": "valid",
+        "admission": "owner_mismatch"
+      }
+    },
+    {
+      "id": "kind-mismatch",
+      "input": {
+        "compact": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoiRVMyNTYiLCJraWQiOiJ0ZXN0LW9ubHktcDI1Ni12MSJ9.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LWRldmljZSIsImVudGl0bGVtZW50UmV2aXNpb24iOiJmaXh0dXJlLWUxIiwicG9saWN5UmV2aXNpb24iOiJmaXh0dXJlLXAxIiwiaXNzdWVkQXQiOjE4MDAwMDAwMDAwMDAsIm5vdEJlZm9yZSI6MTgwMDAwMDAwMDAwMCwia2luZE9mR3JhbnQiOiJkZXZpY2UiLCJzdGFydE5vdEFmdGVyIjoxODAwMDAwMDYwMDAwLCJjYXBhYmlsaXRpZXMiOlsic2hpZnQuc3RhcnQudjEiLCJpbnZlbnRvcnkuc3RhcnQudjEiXX0.ehFJCA-P3HwJ8VCFS-BAydmnqlSPCEyko2flcNkYx95zQTgndLIoo7bZXMVC4Cs9Tw28M4db--rrBDsC3DGI7w",
+        "context": {
+          "owner": {
+            "tenantId": "fixture-tenant",
+            "deviceId": "fixture-device",
+            "kind": "handheld",
+            "credentialEpoch": 1
+          },
+          "issuer": "https://offline-grants.fixture.invalid",
+          "now": 1800000000000,
+          "capability": "shift.start.v1"
+        }
+      },
+      "expected": {
+        "cryptographic": "valid",
+        "admission": "owner_mismatch"
+      }
+    },
+    {
+      "id": "snapshot-mismatch",
+      "input": {
+        "compact": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoiRVMyNTYiLCJraWQiOiJ0ZXN0LW9ubHktcDI1Ni12MSJ9.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LXRhc2siLCJlbnRpdGxlbWVudFJldmlzaW9uIjoiZml4dHVyZS1lMSIsInBvbGljeVJldmlzaW9uIjoiZml4dHVyZS1wMSIsImlzc3VlZEF0IjoxODAwMDAwMDAwMDAwLCJub3RCZWZvcmUiOjE4MDAwMDAwMDAwMDAsImtpbmRPZkdyYW50IjoidGFzayIsInRhc2tLaW5kIjoic2hpZnQiLCJ0YXNrSWQiOiJmaXh0dXJlLXRhc2siLCJzbmFwc2hvdERpZ2VzdCI6InNoYTI1NjpmaXh0dXJlLWZyb3plbi1zbmFwc2hvdCIsImNvbXBsZXRlTm90QWZ0ZXIiOjE4MDAwMDAxMjAwMDAsImV2ZW50VHlwZXMiOlsic2hpZnQuc2Nhbi52MSIsInNoaWZ0LmJveC5jbG9zZS52MSIsInNoaWZ0LmNsb3NlLnYxIl0sImJ1ZGdldCI6W3siaWQiOiJ1bml0cyIsInVuaXQiOiJ1bml0IiwibWF4aW11bSI6Mn0seyJpZCI6ImJveGVzIiwidW5pdCI6ImNvbnRhaW5lciIsIm1heGltdW0iOjF9XX0.Uy8MtS4mzHs_RiydqDPHkHh6PQBiKq9jaed5mIQohF2wNJ1CjL5RRmDyhU6pIxj3CxXixqzm9Z2-8UbCrMa0AQ",
+        "context": {
+          "owner": {
+            "tenantId": "fixture-tenant",
+            "deviceId": "fixture-device",
+            "kind": "station",
+            "credentialEpoch": 1
+          },
+          "issuer": "https://offline-grants.fixture.invalid",
+          "now": 1800000000000,
+          "taskKind": "shift",
+          "taskId": "fixture-task",
+          "snapshotDigest": "other-snapshot",
+          "eventType": "shift.scan.v1",
+          "consumption": [
+            {
+              "id": "units",
+              "used": 0,
+              "requested": 1
+            }
+          ]
+        }
+      },
+      "expected": {
+        "cryptographic": "valid",
+        "admission": "snapshot_mismatch"
+      }
+    },
+    {
+      "id": "task-mismatch",
+      "input": {
+        "compact": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoiRVMyNTYiLCJraWQiOiJ0ZXN0LW9ubHktcDI1Ni12MSJ9.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LXRhc2siLCJlbnRpdGxlbWVudFJldmlzaW9uIjoiZml4dHVyZS1lMSIsInBvbGljeVJldmlzaW9uIjoiZml4dHVyZS1wMSIsImlzc3VlZEF0IjoxODAwMDAwMDAwMDAwLCJub3RCZWZvcmUiOjE4MDAwMDAwMDAwMDAsImtpbmRPZkdyYW50IjoidGFzayIsInRhc2tLaW5kIjoic2hpZnQiLCJ0YXNrSWQiOiJmaXh0dXJlLXRhc2siLCJzbmFwc2hvdERpZ2VzdCI6InNoYTI1NjpmaXh0dXJlLWZyb3plbi1zbmFwc2hvdCIsImNvbXBsZXRlTm90QWZ0ZXIiOjE4MDAwMDAxMjAwMDAsImV2ZW50VHlwZXMiOlsic2hpZnQuc2Nhbi52MSIsInNoaWZ0LmJveC5jbG9zZS52MSIsInNoaWZ0LmNsb3NlLnYxIl0sImJ1ZGdldCI6W3siaWQiOiJ1bml0cyIsInVuaXQiOiJ1bml0IiwibWF4aW11bSI6Mn0seyJpZCI6ImJveGVzIiwidW5pdCI6ImNvbnRhaW5lciIsIm1heGltdW0iOjF9XX0.Uy8MtS4mzHs_RiydqDPHkHh6PQBiKq9jaed5mIQohF2wNJ1CjL5RRmDyhU6pIxj3CxXixqzm9Z2-8UbCrMa0AQ",
+        "context": {
+          "owner": {
+            "tenantId": "fixture-tenant",
+            "deviceId": "fixture-device",
+            "kind": "station",
+            "credentialEpoch": 1
+          },
+          "issuer": "https://offline-grants.fixture.invalid",
+          "now": 1800000000000,
+          "taskKind": "shift",
+          "taskId": "other-task",
+          "snapshotDigest": "sha256:fixture-frozen-snapshot",
+          "eventType": "shift.scan.v1",
+          "consumption": [
+            {
+              "id": "units",
+              "used": 0,
+              "requested": 1
+            }
+          ]
+        }
+      },
+      "expected": {
+        "cryptographic": "valid",
+        "admission": "task_mismatch"
+      }
+    },
+    {
+      "id": "issuer-mismatch",
+      "input": {
+        "compact": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoiRVMyNTYiLCJraWQiOiJ0ZXN0LW9ubHktcDI1Ni12MSJ9.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LWRldmljZSIsImVudGl0bGVtZW50UmV2aXNpb24iOiJmaXh0dXJlLWUxIiwicG9saWN5UmV2aXNpb24iOiJmaXh0dXJlLXAxIiwiaXNzdWVkQXQiOjE4MDAwMDAwMDAwMDAsIm5vdEJlZm9yZSI6MTgwMDAwMDAwMDAwMCwia2luZE9mR3JhbnQiOiJkZXZpY2UiLCJzdGFydE5vdEFmdGVyIjoxODAwMDAwMDYwMDAwLCJjYXBhYmlsaXRpZXMiOlsic2hpZnQuc3RhcnQudjEiLCJpbnZlbnRvcnkuc3RhcnQudjEiXX0.ehFJCA-P3HwJ8VCFS-BAydmnqlSPCEyko2flcNkYx95zQTgndLIoo7bZXMVC4Cs9Tw28M4db--rrBDsC3DGI7w",
+        "context": {
+          "owner": {
+            "tenantId": "fixture-tenant",
+            "deviceId": "fixture-device",
+            "kind": "station",
+            "credentialEpoch": 1
+          },
+          "issuer": "https://other.fixture.invalid",
+          "now": 1800000000000,
+          "capability": "shift.start.v1"
+        }
+      },
+      "expected": {
+        "cryptographic": "valid",
+        "admission": "issuer_mismatch"
+      }
+    },
+    {
+      "id": "default-port-origin",
+      "input": {
+        "compact": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoiRVMyNTYiLCJraWQiOiJ0ZXN0LW9ubHktcDI1Ni12MSJ9.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LWRldmljZSIsImVudGl0bGVtZW50UmV2aXNpb24iOiJmaXh0dXJlLWUxIiwicG9saWN5UmV2aXNpb24iOiJmaXh0dXJlLXAxIiwiaXNzdWVkQXQiOjE4MDAwMDAwMDAwMDAsIm5vdEJlZm9yZSI6MTgwMDAwMDAwMDAwMCwia2luZE9mR3JhbnQiOiJkZXZpY2UiLCJzdGFydE5vdEFmdGVyIjoxODAwMDAwMDYwMDAwLCJjYXBhYmlsaXRpZXMiOlsic2hpZnQuc3RhcnQudjEiLCJpbnZlbnRvcnkuc3RhcnQudjEiXX0.ehFJCA-P3HwJ8VCFS-BAydmnqlSPCEyko2flcNkYx95zQTgndLIoo7bZXMVC4Cs9Tw28M4db--rrBDsC3DGI7w",
+        "context": {
+          "owner": {
+            "tenantId": "fixture-tenant",
+            "deviceId": "fixture-device",
+            "kind": "station",
+            "credentialEpoch": 1
+          },
+          "issuer": "https://offline-grants.fixture.invalid:443",
+          "now": 1800000000000,
+          "capability": "shift.start.v1"
+        }
+      },
+      "expected": {
+        "cryptographic": "valid",
+        "admission": "issuer_mismatch"
+      }
+    },
+    {
+      "id": "case-normalized-origin",
+      "input": {
+        "compact": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoiRVMyNTYiLCJraWQiOiJ0ZXN0LW9ubHktcDI1Ni12MSJ9.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LWRldmljZSIsImVudGl0bGVtZW50UmV2aXNpb24iOiJmaXh0dXJlLWUxIiwicG9saWN5UmV2aXNpb24iOiJmaXh0dXJlLXAxIiwiaXNzdWVkQXQiOjE4MDAwMDAwMDAwMDAsIm5vdEJlZm9yZSI6MTgwMDAwMDAwMDAwMCwia2luZE9mR3JhbnQiOiJkZXZpY2UiLCJzdGFydE5vdEFmdGVyIjoxODAwMDAwMDYwMDAwLCJjYXBhYmlsaXRpZXMiOlsic2hpZnQuc3RhcnQudjEiLCJpbnZlbnRvcnkuc3RhcnQudjEiXX0.ehFJCA-P3HwJ8VCFS-BAydmnqlSPCEyko2flcNkYx95zQTgndLIoo7bZXMVC4Cs9Tw28M4db--rrBDsC3DGI7w",
+        "context": {
+          "owner": {
+            "tenantId": "fixture-tenant",
+            "deviceId": "fixture-device",
+            "kind": "station",
+            "credentialEpoch": 1
+          },
+          "issuer": "HTTPS://OFFLINE-GRANTS.FIXTURE.INVALID",
+          "now": 1800000000000,
+          "capability": "shift.start.v1"
+        }
+      },
+      "expected": {
+        "cryptographic": "valid",
+        "admission": "issuer_mismatch"
+      }
+    },
+    {
+      "id": "before-not-before",
+      "input": {
+        "compact": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoiRVMyNTYiLCJraWQiOiJ0ZXN0LW9ubHktcDI1Ni12MSJ9.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LWRldmljZSIsImVudGl0bGVtZW50UmV2aXNpb24iOiJmaXh0dXJlLWUxIiwicG9saWN5UmV2aXNpb24iOiJmaXh0dXJlLXAxIiwiaXNzdWVkQXQiOjE4MDAwMDAwMDAwMDAsIm5vdEJlZm9yZSI6MTgwMDAwMDAwMDAwMCwia2luZE9mR3JhbnQiOiJkZXZpY2UiLCJzdGFydE5vdEFmdGVyIjoxODAwMDAwMDYwMDAwLCJjYXBhYmlsaXRpZXMiOlsic2hpZnQuc3RhcnQudjEiLCJpbnZlbnRvcnkuc3RhcnQudjEiXX0.ehFJCA-P3HwJ8VCFS-BAydmnqlSPCEyko2flcNkYx95zQTgndLIoo7bZXMVC4Cs9Tw28M4db--rrBDsC3DGI7w",
+        "context": {
+          "owner": {
+            "tenantId": "fixture-tenant",
+            "deviceId": "fixture-device",
+            "kind": "station",
+            "credentialEpoch": 1
+          },
+          "issuer": "https://offline-grants.fixture.invalid",
+          "now": 1799999999999,
+          "capability": "shift.start.v1"
+        }
+      },
+      "expected": {
+        "cryptographic": "valid",
+        "admission": "not_yet_valid"
+      }
+    },
+    {
+      "id": "last-start-millisecond",
+      "input": {
+        "compact": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoiRVMyNTYiLCJraWQiOiJ0ZXN0LW9ubHktcDI1Ni12MSJ9.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LWRldmljZSIsImVudGl0bGVtZW50UmV2aXNpb24iOiJmaXh0dXJlLWUxIiwicG9saWN5UmV2aXNpb24iOiJmaXh0dXJlLXAxIiwiaXNzdWVkQXQiOjE4MDAwMDAwMDAwMDAsIm5vdEJlZm9yZSI6MTgwMDAwMDAwMDAwMCwia2luZE9mR3JhbnQiOiJkZXZpY2UiLCJzdGFydE5vdEFmdGVyIjoxODAwMDAwMDYwMDAwLCJjYXBhYmlsaXRpZXMiOlsic2hpZnQuc3RhcnQudjEiLCJpbnZlbnRvcnkuc3RhcnQudjEiXX0.ehFJCA-P3HwJ8VCFS-BAydmnqlSPCEyko2flcNkYx95zQTgndLIoo7bZXMVC4Cs9Tw28M4db--rrBDsC3DGI7w",
+        "context": {
+          "owner": {
+            "tenantId": "fixture-tenant",
+            "deviceId": "fixture-device",
+            "kind": "station",
+            "credentialEpoch": 1
+          },
+          "issuer": "https://offline-grants.fixture.invalid",
+          "now": 1800000059999,
+          "capability": "shift.start.v1"
+        }
+      },
+      "expected": {
+        "cryptographic": "valid",
+        "admission": "allow"
+      }
+    },
+    {
+      "id": "exact-start-deadline",
+      "input": {
+        "compact": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoiRVMyNTYiLCJraWQiOiJ0ZXN0LW9ubHktcDI1Ni12MSJ9.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LWRldmljZSIsImVudGl0bGVtZW50UmV2aXNpb24iOiJmaXh0dXJlLWUxIiwicG9saWN5UmV2aXNpb24iOiJmaXh0dXJlLXAxIiwiaXNzdWVkQXQiOjE4MDAwMDAwMDAwMDAsIm5vdEJlZm9yZSI6MTgwMDAwMDAwMDAwMCwia2luZE9mR3JhbnQiOiJkZXZpY2UiLCJzdGFydE5vdEFmdGVyIjoxODAwMDAwMDYwMDAwLCJjYXBhYmlsaXRpZXMiOlsic2hpZnQuc3RhcnQudjEiLCJpbnZlbnRvcnkuc3RhcnQudjEiXX0.ehFJCA-P3HwJ8VCFS-BAydmnqlSPCEyko2flcNkYx95zQTgndLIoo7bZXMVC4Cs9Tw28M4db--rrBDsC3DGI7w",
+        "context": {
+          "owner": {
+            "tenantId": "fixture-tenant",
+            "deviceId": "fixture-device",
+            "kind": "station",
+            "credentialEpoch": 1
+          },
+          "issuer": "https://offline-grants.fixture.invalid",
+          "now": 1800000060000,
+          "capability": "shift.start.v1"
+        }
+      },
+      "expected": {
+        "cryptographic": "valid",
+        "admission": "expired"
+      }
+    },
+    {
+      "id": "last-completion-millisecond",
+      "input": {
+        "compact": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoiRVMyNTYiLCJraWQiOiJ0ZXN0LW9ubHktcDI1Ni12MSJ9.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LXRhc2siLCJlbnRpdGxlbWVudFJldmlzaW9uIjoiZml4dHVyZS1lMSIsInBvbGljeVJldmlzaW9uIjoiZml4dHVyZS1wMSIsImlzc3VlZEF0IjoxODAwMDAwMDAwMDAwLCJub3RCZWZvcmUiOjE4MDAwMDAwMDAwMDAsImtpbmRPZkdyYW50IjoidGFzayIsInRhc2tLaW5kIjoic2hpZnQiLCJ0YXNrSWQiOiJmaXh0dXJlLXRhc2siLCJzbmFwc2hvdERpZ2VzdCI6InNoYTI1NjpmaXh0dXJlLWZyb3plbi1zbmFwc2hvdCIsImNvbXBsZXRlTm90QWZ0ZXIiOjE4MDAwMDAxMjAwMDAsImV2ZW50VHlwZXMiOlsic2hpZnQuc2Nhbi52MSIsInNoaWZ0LmJveC5jbG9zZS52MSIsInNoaWZ0LmNsb3NlLnYxIl0sImJ1ZGdldCI6W3siaWQiOiJ1bml0cyIsInVuaXQiOiJ1bml0IiwibWF4aW11bSI6Mn0seyJpZCI6ImJveGVzIiwidW5pdCI6ImNvbnRhaW5lciIsIm1heGltdW0iOjF9XX0.Uy8MtS4mzHs_RiydqDPHkHh6PQBiKq9jaed5mIQohF2wNJ1CjL5RRmDyhU6pIxj3CxXixqzm9Z2-8UbCrMa0AQ",
+        "context": {
+          "owner": {
+            "tenantId": "fixture-tenant",
+            "deviceId": "fixture-device",
+            "kind": "station",
+            "credentialEpoch": 1
+          },
+          "issuer": "https://offline-grants.fixture.invalid",
+          "now": 1800000119999,
+          "taskKind": "shift",
+          "taskId": "fixture-task",
+          "snapshotDigest": "sha256:fixture-frozen-snapshot",
+          "eventType": "shift.scan.v1",
+          "consumption": [
+            {
+              "id": "units",
+              "used": 0,
+              "requested": 1
+            }
+          ]
+        }
+      },
+      "expected": {
+        "cryptographic": "valid",
+        "admission": "allow"
+      }
+    },
+    {
+      "id": "exact-completion-deadline",
+      "input": {
+        "compact": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoiRVMyNTYiLCJraWQiOiJ0ZXN0LW9ubHktcDI1Ni12MSJ9.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LXRhc2siLCJlbnRpdGxlbWVudFJldmlzaW9uIjoiZml4dHVyZS1lMSIsInBvbGljeVJldmlzaW9uIjoiZml4dHVyZS1wMSIsImlzc3VlZEF0IjoxODAwMDAwMDAwMDAwLCJub3RCZWZvcmUiOjE4MDAwMDAwMDAwMDAsImtpbmRPZkdyYW50IjoidGFzayIsInRhc2tLaW5kIjoic2hpZnQiLCJ0YXNrSWQiOiJmaXh0dXJlLXRhc2siLCJzbmFwc2hvdERpZ2VzdCI6InNoYTI1NjpmaXh0dXJlLWZyb3plbi1zbmFwc2hvdCIsImNvbXBsZXRlTm90QWZ0ZXIiOjE4MDAwMDAxMjAwMDAsImV2ZW50VHlwZXMiOlsic2hpZnQuc2Nhbi52MSIsInNoaWZ0LmJveC5jbG9zZS52MSIsInNoaWZ0LmNsb3NlLnYxIl0sImJ1ZGdldCI6W3siaWQiOiJ1bml0cyIsInVuaXQiOiJ1bml0IiwibWF4aW11bSI6Mn0seyJpZCI6ImJveGVzIiwidW5pdCI6ImNvbnRhaW5lciIsIm1heGltdW0iOjF9XX0.Uy8MtS4mzHs_RiydqDPHkHh6PQBiKq9jaed5mIQohF2wNJ1CjL5RRmDyhU6pIxj3CxXixqzm9Z2-8UbCrMa0AQ",
+        "context": {
+          "owner": {
+            "tenantId": "fixture-tenant",
+            "deviceId": "fixture-device",
+            "kind": "station",
+            "credentialEpoch": 1
+          },
+          "issuer": "https://offline-grants.fixture.invalid",
+          "now": 1800000120000,
+          "taskKind": "shift",
+          "taskId": "fixture-task",
+          "snapshotDigest": "sha256:fixture-frozen-snapshot",
+          "eventType": "shift.scan.v1",
+          "consumption": [
+            {
+              "id": "units",
+              "used": 0,
+              "requested": 1
+            }
+          ]
+        }
+      },
+      "expected": {
+        "cryptographic": "valid",
+        "admission": "expired"
+      }
+    },
+    {
+      "id": "exhausted-budget",
+      "input": {
+        "compact": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoiRVMyNTYiLCJraWQiOiJ0ZXN0LW9ubHktcDI1Ni12MSJ9.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LXRhc2siLCJlbnRpdGxlbWVudFJldmlzaW9uIjoiZml4dHVyZS1lMSIsInBvbGljeVJldmlzaW9uIjoiZml4dHVyZS1wMSIsImlzc3VlZEF0IjoxODAwMDAwMDAwMDAwLCJub3RCZWZvcmUiOjE4MDAwMDAwMDAwMDAsImtpbmRPZkdyYW50IjoidGFzayIsInRhc2tLaW5kIjoic2hpZnQiLCJ0YXNrSWQiOiJmaXh0dXJlLXRhc2siLCJzbmFwc2hvdERpZ2VzdCI6InNoYTI1NjpmaXh0dXJlLWZyb3plbi1zbmFwc2hvdCIsImNvbXBsZXRlTm90QWZ0ZXIiOjE4MDAwMDAxMjAwMDAsImV2ZW50VHlwZXMiOlsic2hpZnQuc2Nhbi52MSIsInNoaWZ0LmJveC5jbG9zZS52MSIsInNoaWZ0LmNsb3NlLnYxIl0sImJ1ZGdldCI6W3siaWQiOiJ1bml0cyIsInVuaXQiOiJ1bml0IiwibWF4aW11bSI6Mn0seyJpZCI6ImJveGVzIiwidW5pdCI6ImNvbnRhaW5lciIsIm1heGltdW0iOjF9XX0.Uy8MtS4mzHs_RiydqDPHkHh6PQBiKq9jaed5mIQohF2wNJ1CjL5RRmDyhU6pIxj3CxXixqzm9Z2-8UbCrMa0AQ",
+        "context": {
+          "owner": {
+            "tenantId": "fixture-tenant",
+            "deviceId": "fixture-device",
+            "kind": "station",
+            "credentialEpoch": 1
+          },
+          "issuer": "https://offline-grants.fixture.invalid",
+          "now": 1800000000000,
+          "taskKind": "shift",
+          "taskId": "fixture-task",
+          "snapshotDigest": "sha256:fixture-frozen-snapshot",
+          "eventType": "shift.scan.v1",
+          "consumption": [
+            {
+              "id": "units",
+              "used": 2,
+              "requested": 1
+            }
+          ]
+        }
+      },
+      "expected": {
+        "cryptographic": "valid",
+        "admission": "budget_exhausted"
+      }
+    },
+    {
+      "id": "exact-budget",
+      "input": {
+        "compact": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoiRVMyNTYiLCJraWQiOiJ0ZXN0LW9ubHktcDI1Ni12MSJ9.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LXRhc2siLCJlbnRpdGxlbWVudFJldmlzaW9uIjoiZml4dHVyZS1lMSIsInBvbGljeVJldmlzaW9uIjoiZml4dHVyZS1wMSIsImlzc3VlZEF0IjoxODAwMDAwMDAwMDAwLCJub3RCZWZvcmUiOjE4MDAwMDAwMDAwMDAsImtpbmRPZkdyYW50IjoidGFzayIsInRhc2tLaW5kIjoic2hpZnQiLCJ0YXNrSWQiOiJmaXh0dXJlLXRhc2siLCJzbmFwc2hvdERpZ2VzdCI6InNoYTI1NjpmaXh0dXJlLWZyb3plbi1zbmFwc2hvdCIsImNvbXBsZXRlTm90QWZ0ZXIiOjE4MDAwMDAxMjAwMDAsImV2ZW50VHlwZXMiOlsic2hpZnQuc2Nhbi52MSIsInNoaWZ0LmJveC5jbG9zZS52MSIsInNoaWZ0LmNsb3NlLnYxIl0sImJ1ZGdldCI6W3siaWQiOiJ1bml0cyIsInVuaXQiOiJ1bml0IiwibWF4aW11bSI6Mn0seyJpZCI6ImJveGVzIiwidW5pdCI6ImNvbnRhaW5lciIsIm1heGltdW0iOjF9XX0.Uy8MtS4mzHs_RiydqDPHkHh6PQBiKq9jaed5mIQohF2wNJ1CjL5RRmDyhU6pIxj3CxXixqzm9Z2-8UbCrMa0AQ",
+        "context": {
+          "owner": {
+            "tenantId": "fixture-tenant",
+            "deviceId": "fixture-device",
+            "kind": "station",
+            "credentialEpoch": 1
+          },
+          "issuer": "https://offline-grants.fixture.invalid",
+          "now": 1800000000000,
+          "taskKind": "shift",
+          "taskId": "fixture-task",
+          "snapshotDigest": "sha256:fixture-frozen-snapshot",
+          "eventType": "shift.scan.v1",
+          "consumption": [
+            {
+              "id": "units",
+              "used": 1,
+              "requested": 1
+            }
+          ]
+        }
+      },
+      "expected": {
+        "cryptographic": "valid",
+        "admission": "allow"
+      }
+    },
+    {
+      "id": "unknown-budget",
+      "input": {
+        "compact": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoiRVMyNTYiLCJraWQiOiJ0ZXN0LW9ubHktcDI1Ni12MSJ9.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LXRhc2siLCJlbnRpdGxlbWVudFJldmlzaW9uIjoiZml4dHVyZS1lMSIsInBvbGljeVJldmlzaW9uIjoiZml4dHVyZS1wMSIsImlzc3VlZEF0IjoxODAwMDAwMDAwMDAwLCJub3RCZWZvcmUiOjE4MDAwMDAwMDAwMDAsImtpbmRPZkdyYW50IjoidGFzayIsInRhc2tLaW5kIjoic2hpZnQiLCJ0YXNrSWQiOiJmaXh0dXJlLXRhc2siLCJzbmFwc2hvdERpZ2VzdCI6InNoYTI1NjpmaXh0dXJlLWZyb3plbi1zbmFwc2hvdCIsImNvbXBsZXRlTm90QWZ0ZXIiOjE4MDAwMDAxMjAwMDAsImV2ZW50VHlwZXMiOlsic2hpZnQuc2Nhbi52MSIsInNoaWZ0LmJveC5jbG9zZS52MSIsInNoaWZ0LmNsb3NlLnYxIl0sImJ1ZGdldCI6W3siaWQiOiJ1bml0cyIsInVuaXQiOiJ1bml0IiwibWF4aW11bSI6Mn0seyJpZCI6ImJveGVzIiwidW5pdCI6ImNvbnRhaW5lciIsIm1heGltdW0iOjF9XX0.Uy8MtS4mzHs_RiydqDPHkHh6PQBiKq9jaed5mIQohF2wNJ1CjL5RRmDyhU6pIxj3CxXixqzm9Z2-8UbCrMa0AQ",
+        "context": {
+          "owner": {
+            "tenantId": "fixture-tenant",
+            "deviceId": "fixture-device",
+            "kind": "station",
+            "credentialEpoch": 1
+          },
+          "issuer": "https://offline-grants.fixture.invalid",
+          "now": 1800000000000,
+          "taskKind": "shift",
+          "taskId": "fixture-task",
+          "snapshotDigest": "sha256:fixture-frozen-snapshot",
+          "eventType": "shift.scan.v1",
+          "consumption": [
+            {
+              "id": "unknown",
+              "used": 0,
+              "requested": 1
+            }
+          ]
+        }
+      },
+      "expected": {
+        "cryptographic": "valid",
+        "admission": "budget_unknown"
+      }
+    },
+    {
+      "id": "event-not-allowed",
+      "input": {
+        "compact": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoiRVMyNTYiLCJraWQiOiJ0ZXN0LW9ubHktcDI1Ni12MSJ9.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LXRhc2siLCJlbnRpdGxlbWVudFJldmlzaW9uIjoiZml4dHVyZS1lMSIsInBvbGljeVJldmlzaW9uIjoiZml4dHVyZS1wMSIsImlzc3VlZEF0IjoxODAwMDAwMDAwMDAwLCJub3RCZWZvcmUiOjE4MDAwMDAwMDAwMDAsImtpbmRPZkdyYW50IjoidGFzayIsInRhc2tLaW5kIjoic2hpZnQiLCJ0YXNrSWQiOiJmaXh0dXJlLXRhc2siLCJzbmFwc2hvdERpZ2VzdCI6InNoYTI1NjpmaXh0dXJlLWZyb3plbi1zbmFwc2hvdCIsImNvbXBsZXRlTm90QWZ0ZXIiOjE4MDAwMDAxMjAwMDAsImV2ZW50VHlwZXMiOlsic2hpZnQuc2Nhbi52MSIsInNoaWZ0LmJveC5jbG9zZS52MSIsInNoaWZ0LmNsb3NlLnYxIl0sImJ1ZGdldCI6W3siaWQiOiJ1bml0cyIsInVuaXQiOiJ1bml0IiwibWF4aW11bSI6Mn0seyJpZCI6ImJveGVzIiwidW5pdCI6ImNvbnRhaW5lciIsIm1heGltdW0iOjF9XX0.Uy8MtS4mzHs_RiydqDPHkHh6PQBiKq9jaed5mIQohF2wNJ1CjL5RRmDyhU6pIxj3CxXixqzm9Z2-8UbCrMa0AQ",
+        "context": {
+          "owner": {
+            "tenantId": "fixture-tenant",
+            "deviceId": "fixture-device",
+            "kind": "station",
+            "credentialEpoch": 1
+          },
+          "issuer": "https://offline-grants.fixture.invalid",
+          "now": 1800000000000,
+          "taskKind": "shift",
+          "taskId": "fixture-task",
+          "snapshotDigest": "sha256:fixture-frozen-snapshot",
+          "eventType": "shift.label.prepare.v1",
+          "consumption": [
+            {
+              "id": "units",
+              "used": 0,
+              "requested": 1
+            }
+          ]
+        }
+      },
+      "expected": {
+        "cryptographic": "valid",
+        "admission": "event_not_allowed"
+      }
+    },
+    {
+      "id": "capability-not-allowed",
+      "input": {
+        "compact": "eyJ0eXAiOiJtYXJraXJvLW9mZmxpbmUtZ3JhbnQrandzIiwiYWxnIjoiRVMyNTYiLCJraWQiOiJ0ZXN0LW9ubHktcDI1Ni12MSJ9.eyJ0ZW5hbnRJZCI6ImZpeHR1cmUtdGVuYW50IiwiZGV2aWNlSWQiOiJmaXh0dXJlLWRldmljZSIsImtpbmQiOiJzdGF0aW9uIiwiY3JlZGVudGlhbEVwb2NoIjoxLCJ2ZXJzaW9uIjoxLCJpc3N1ZXIiOiJodHRwczovL29mZmxpbmUtZ3JhbnRzLmZpeHR1cmUuaW52YWxpZCIsImdyYW50SWQiOiJmaXh0dXJlLWdyYW50LWRldmljZSIsImVudGl0bGVtZW50UmV2aXNpb24iOiJmaXh0dXJlLWUxIiwicG9saWN5UmV2aXNpb24iOiJmaXh0dXJlLXAxIiwiaXNzdWVkQXQiOjE4MDAwMDAwMDAwMDAsIm5vdEJlZm9yZSI6MTgwMDAwMDAwMDAwMCwia2luZE9mR3JhbnQiOiJkZXZpY2UiLCJzdGFydE5vdEFmdGVyIjoxODAwMDAwMDYwMDAwLCJjYXBhYmlsaXRpZXMiOlsic2hpZnQuc3RhcnQudjEiLCJpbnZlbnRvcnkuc3RhcnQudjEiXX0.ehFJCA-P3HwJ8VCFS-BAydmnqlSPCEyko2flcNkYx95zQTgndLIoo7bZXMVC4Cs9Tw28M4db--rrBDsC3DGI7w",
+        "context": {
+          "owner": {
+            "tenantId": "fixture-tenant",
+            "deviceId": "fixture-device",
+            "kind": "station",
+            "credentialEpoch": 1
+          },
+          "issuer": "https://offline-grants.fixture.invalid",
+          "now": 1800000000000,
+          "capability": "pickup.start.v1"
+        }
+      },
+      "expected": {
+        "cryptographic": "valid",
+        "admission": "capability_not_allowed"
+      }
+    }
+  ]
+}

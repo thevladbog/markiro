@@ -1,0 +1,189 @@
+{
+  "version": 1,
+  "events": [
+    {
+      "event": "shift.scan.v1",
+      "budget": [
+        {
+          "id": "shift.scan.v1:events",
+          "unit": "event",
+          "maximum": 5
+        },
+        {
+          "id": "shift.scan.v1:units",
+          "unit": "unit",
+          "maximum": 7
+        }
+      ],
+      "cost": {
+        "shift.scan.v1:events": 1,
+        "shift.scan.v1:units": 2
+      }
+    },
+    {
+      "event": "shift.box.close.v1",
+      "budget": [
+        {
+          "id": "shift.box.close.v1:events",
+          "unit": "event",
+          "maximum": 5
+        },
+        {
+          "id": "shift.box.close.v1:containers",
+          "unit": "container",
+          "maximum": 3
+        }
+      ],
+      "cost": {
+        "shift.box.close.v1:events": 1,
+        "shift.box.close.v1:containers": 1
+      }
+    },
+    {
+      "event": "shift.pallet.close.v1",
+      "budget": [
+        {
+          "id": "shift.pallet.close.v1:events",
+          "unit": "event",
+          "maximum": 5
+        },
+        {
+          "id": "shift.pallet.close.v1:containers",
+          "unit": "container",
+          "maximum": 3
+        }
+      ],
+      "cost": {
+        "shift.pallet.close.v1:events": 1,
+        "shift.pallet.close.v1:containers": 1
+      }
+    },
+    {
+      "event": "shift.label.prepare.v1",
+      "budget": [
+        {
+          "id": "shift.label.prepare.v1:events",
+          "unit": "event",
+          "maximum": 5
+        },
+        {
+          "id": "shift.label.prepare.v1:units",
+          "unit": "unit",
+          "maximum": 7
+        }
+      ],
+      "cost": {
+        "shift.label.prepare.v1:events": 1,
+        "shift.label.prepare.v1:units": 2
+      }
+    },
+    {
+      "event": "shift.close.v1",
+      "budget": [
+        {
+          "id": "shift.close.v1:events",
+          "unit": "event",
+          "maximum": 5
+        }
+      ],
+      "cost": {
+        "shift.close.v1:events": 1
+      }
+    },
+    {
+      "event": "inventory.scan.v1",
+      "budget": [
+        {
+          "id": "inventory.scan.v1:events",
+          "unit": "event",
+          "maximum": 5
+        },
+        {
+          "id": "inventory.scan.v1:units",
+          "unit": "unit",
+          "maximum": 7
+        }
+      ],
+      "cost": {
+        "inventory.scan.v1:events": 1,
+        "inventory.scan.v1:units": 2
+      }
+    },
+    {
+      "event": "inventory.repack.v1",
+      "budget": [
+        {
+          "id": "inventory.repack.v1:events",
+          "unit": "event",
+          "maximum": 5
+        },
+        {
+          "id": "inventory.repack.v1:units",
+          "unit": "unit",
+          "maximum": 7
+        }
+      ],
+      "cost": {
+        "inventory.repack.v1:events": 1,
+        "inventory.repack.v1:units": 2
+      }
+    },
+    {
+      "event": "inventory.box.close.v1",
+      "budget": [
+        {
+          "id": "inventory.box.close.v1:events",
+          "unit": "event",
+          "maximum": 5
+        },
+        {
+          "id": "inventory.box.close.v1:containers",
+          "unit": "container",
+          "maximum": 3
+        }
+      ],
+      "cost": {
+        "inventory.box.close.v1:events": 1,
+        "inventory.box.close.v1:containers": 1
+      }
+    },
+    {
+      "event": "inventory.close.v1",
+      "budget": [
+        {
+          "id": "inventory.close.v1:events",
+          "unit": "event",
+          "maximum": 5
+        }
+      ],
+      "cost": {
+        "inventory.close.v1:events": 1
+      }
+    },
+    {
+      "event": "pickup.complete.v1",
+      "budget": [
+        {
+          "id": "pickup.complete.v1:events",
+          "unit": "event",
+          "maximum": 5
+        },
+        {
+          "id": "pickup.complete.v1:units",
+          "unit": "unit",
+          "maximum": 7
+        },
+        {
+          "id": "pickup.complete.v1:containers",
+          "unit": "container",
+          "maximum": 3
+        }
+      ],
+      "cost": {
+        "pickup.complete.v1:events": 1,
+        "pickup.complete.v1:units": 2,
+        "pickup.complete.v1:containers": 1
+      }
+    }
+  ]
+}

@@ -27,6 +27,7 @@ import {
 } from "../src/lib/inventory-outbox.js";
 import { addRange } from "../src/lib/sscc-pool.js";
 import { makeExec } from "./support/sqlite-exec.js";
+import { createCredentialGeneration } from "../src/lib/credential-recovery.js";
 
 const INVENTORY_ID = "11111111-1111-4111-8111-111111111111";
 const SNAPSHOT_ID = "22222222-2222-4222-8222-222222222222";
@@ -44,7 +45,28 @@ function raw(serial: string): string {
 
 async function setup(capacity = 2) {
   const db = new DatabaseSync(":memory:");
-  const exec = makeExec(db);
+  const baseExec = makeExec(db);
+  const exec: SqlExecutor = {
+    ...baseExec,
+    async atomic(statements) {
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        const changes = statements.map((statement) => {
+          const changed = Number(
+            db.prepare(statement.sql).run(...([...(statement.values ?? [])] as never[])).changes,
+          );
+          if (statement.expectedChanges !== undefined && changed !== statement.expectedChanges)
+            throw new Error("station transaction owner conflict");
+          return changed;
+        });
+        db.exec("COMMIT");
+        return changes;
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+    },
+  };
   await applyMigrations(exec);
   db.prepare(
     `INSERT INTO inventory_task_mirror
@@ -114,7 +136,196 @@ function input(rawValue: string, eventId: string, capacity: number) {
   };
 }
 
+function seedPendingLeave(db: DatabaseSync): void {
+  db.prepare(
+    `INSERT INTO offline_grant_inventory_leave_intents
+       (intent_key,inventory_id,snapshot_id,device_id,operator_id,event_id,
+        credential_ownership,pointer_value,payload_json,created_at)
+     VALUES ('leave-1',?,?,?,?,?,'owner','{}','{"pendingEventCount":0,"openBoxCount":0}',
+             '2026-08-25T10:01:00.000Z')`,
+  ).run(INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID, OPERATOR_ID, "leave-event");
+}
+
+function enableStrictGrant(db: DatabaseSync, boxMaximum = 1) {
+  const manifest = { mode: "repack" };
+  db.prepare(
+    "UPDATE inventory_task_mirror SET active_combined_digest=?,active_content_digest=?,active_manifest_json=? WHERE inventory_id=?",
+  ).run("combined", "content", JSON.stringify(manifest), INVENTORY_ID);
+  db.prepare(
+    "INSERT INTO operators_mirror(operator_id,name,role,pin_hash,active) VALUES(?,?,?,?,1)",
+  ).run(OPERATOR_ID, "Operator", "operator", "hash");
+  const grant = {
+    version: 1,
+    kindOfGrant: "task",
+    issuer: "https://issuer.invalid",
+    grantId: "inventory-grant",
+    tenantId: "tenant",
+    deviceId: DEVICE_ID,
+    kind: "station",
+    credentialEpoch: 1,
+    entitlementRevision: "e",
+    policyRevision: "p",
+    issuedAt: 1,
+    notBefore: 1,
+    taskKind: "inventory",
+    taskId: INVENTORY_ID,
+    snapshotDigest: "snapshot-digest",
+    completeNotAfter: 1000,
+    eventTypes: ["inventory.repack.v1", "inventory.box.close.v1"],
+    budget: [
+      { id: "inventory.repack.v1:events", unit: "event", maximum: 1 },
+      { id: "inventory.repack.v1:units", unit: "unit", maximum: 1 },
+      { id: "inventory.box.close.v1:events", unit: "event", maximum: boxMaximum },
+      { id: "inventory.box.close.v1:containers", unit: "container", maximum: boxMaximum },
+    ],
+  };
+  db.exec(
+    "INSERT INTO offline_grant_install_state(id,tenant_id,device_id,owner_kind,credential_epoch,request_sequence,mode) VALUES(1,'tenant','33333333-3333-4333-8333-333333333333','station',1,1,'strict'); INSERT INTO offline_grant_clock(id,server_ms,monotonic_ms,boot_id,high_water_ms,wall_high_water_ms) VALUES(1,100,10,'boot',100,100)",
+  );
+  db.prepare(
+    "INSERT INTO offline_grant_grants(grant_id,kid,compact,grant_json,credential_epoch,installed_sequence) VALUES(?,?,?,?,1,1)",
+  ).run("inventory-grant", "kid", "compact", JSON.stringify(grant));
+  db.prepare(
+    "INSERT INTO offline_grant_snapshots(task_kind,task_id,snapshot_digest,canonical,scope_json,installed_sequence) VALUES('inventory',?,?,?,?,1)",
+  ).run(
+    INVENTORY_ID,
+    "snapshot-digest",
+    "canonical",
+    JSON.stringify({
+      manifest,
+      snapshotId: SNAPSHOT_ID,
+      combinedDigest: "combined",
+      contentDigest: "content",
+    }),
+  );
+  return createCredentialGeneration("secret");
+}
+
 describe("durable inventory repacking", () => {
+  it("blocks new repack work during pending leave while preserving exact replay", async () => {
+    const { db, exec, capacity, seed } = await setup();
+    const existing = input(OLD_SSCC, "77777777-7777-4777-8777-777777777777", capacity);
+    await recordInventoryRepackScan(exec, existing);
+    seedPendingLeave(db);
+
+    await expect(recordInventoryRepackScan(exec, existing)).resolves.toMatchObject({
+      verdict: "old-box-selected",
+      boxId: BOX_ID,
+    });
+    const item = seed("PENDING-LEAVE");
+    await expect(
+      recordInventoryRepackScan(
+        exec,
+        input(item.km.raw, "88888888-8888-4888-8888-888888888888", capacity),
+      ),
+    ).rejects.toThrow("inventory leave is pending");
+  });
+  it("keeps recovery-only box selection uncharged while fencing serial and sequence", async () => {
+    const { db, exec } = await setup(1);
+    const generation = enableStrictGrant(db);
+    await expect(
+      recordInventoryRepackScan(exec, {
+        ...input(OLD_SSCC, "77777777-7777-4777-8777-777777777770", 1),
+        credentialGeneration: generation,
+      }),
+    ).resolves.toMatchObject({ verdict: "old-box-selected" });
+    expect(db.prepare("SELECT count(*) count FROM offline_grant_decisions").get()).toEqual({
+      count: 0,
+    });
+    expect(db.prepare("SELECT count(*) count FROM offline_grant_consumption").get()).toEqual({
+      count: 0,
+    });
+    expect(db.prepare("SELECT next_serial FROM sscc_pool").get()).toEqual({ next_serial: 2 });
+    expect(db.prepare("SELECT next_device_sequence FROM inventory_terminal_state").get()).toEqual({
+      next_device_sequence: 2,
+    });
+  });
+
+  it("atomically charges both accepted-item and capacity-close dimensions", async () => {
+    const { db, exec, seed } = await setup(1);
+    await recordInventoryRepackScan(
+      exec,
+      input(OLD_SSCC, "77777777-7777-4777-8777-777777777771", 1),
+    );
+    const item = seed("DUAL");
+    const generation = enableStrictGrant(db);
+    await expect(
+      recordInventoryRepackScan(exec, {
+        ...input(item.km.raw, "88888888-8888-4888-8888-888888888881", 1),
+        credentialGeneration: generation,
+        sampleGrantClock: async () => ({ bootId: "boot", monotonicMs: 11, wallMs: 101 }),
+      }),
+    ).resolves.toMatchObject({ verdict: "capacity-closed" });
+    expect(
+      db
+        .prepare(
+          "SELECT budget_line_id,consumed FROM offline_grant_consumption ORDER BY budget_line_id",
+        )
+        .all(),
+    ).toEqual([
+      { budget_line_id: "inventory.box.close.v1:containers", consumed: 1 },
+      { budget_line_id: "inventory.box.close.v1:events", consumed: 1 },
+      { budget_line_id: "inventory.repack.v1:events", consumed: 1 },
+      { budget_line_id: "inventory.repack.v1:units", consumed: 1 },
+    ]);
+    expect(
+      db.prepare("SELECT state FROM inventory_repack_boxes_mirror WHERE box_id=?").get(BOX_ID),
+    ).toEqual({ state: "closed" });
+    expect(
+      db
+        .prepare(
+          "SELECT count(*) count FROM offline_grant_decisions WHERE json_extract(decision_json,'$.allow')=1",
+        )
+        .get(),
+    ).toEqual({ count: 2 });
+  });
+
+  it("rolls back the accepted item and both charges when its capacity close is denied", async () => {
+    const { db, exec, seed } = await setup(1);
+    await recordInventoryRepackScan(
+      exec,
+      input(OLD_SSCC, "77777777-7777-4777-8777-777777777772", 1),
+    );
+    const item = seed("DENIED");
+    const generation = enableStrictGrant(db, 1);
+    db.exec(`INSERT INTO offline_grant_consumption(tenant_id,device_id,credential_epoch,task_kind,task_id,snapshot_digest,budget_line_id,consumed) VALUES
+      ('tenant','${DEVICE_ID}',1,'inventory','${INVENTORY_ID}','snapshot-digest','inventory.box.close.v1:events',1),
+      ('tenant','${DEVICE_ID}',1,'inventory','${INVENTORY_ID}','snapshot-digest','inventory.box.close.v1:containers',1)`);
+    await expect(
+      recordInventoryRepackScan(exec, {
+        ...input(item.km.raw, "88888888-8888-4888-8888-888888888882", 1),
+        credentialGeneration: generation,
+        sampleGrantClock: async () => ({ bootId: "boot", monotonicMs: 11, wallMs: 101 }),
+      }),
+    ).rejects.toBeInstanceOf(Error);
+    expect(db.prepare("SELECT count(*) count FROM inventory_repack_items_mirror").get()).toEqual({
+      count: 0,
+    });
+    expect(
+      db
+        .prepare(
+          "SELECT budget_line_id,consumed FROM offline_grant_consumption ORDER BY budget_line_id",
+        )
+        .all(),
+    ).toEqual([
+      { budget_line_id: "inventory.box.close.v1:containers", consumed: 1 },
+      { budget_line_id: "inventory.box.close.v1:events", consumed: 1 },
+    ]);
+    expect(
+      db
+        .prepare(
+          "SELECT count(*) count FROM offline_grant_decisions WHERE json_extract(decision_json,'$.allow')=0",
+        )
+        .get(),
+    ).toEqual({ count: 2 });
+    expect(
+      db.prepare("SELECT state FROM inventory_repack_boxes_mirror WHERE box_id=?").get(BOX_ID),
+    ).toEqual({ state: "open" });
+    expect(db.prepare("SELECT next_device_sequence FROM inventory_terminal_state").get()).toEqual({
+      next_device_sequence: 2,
+    });
+  });
+
   it("reserves one SSCC while atomically journalling an old-box context and open box", async () => {
     const { db, exec, capacity } = await setup();
     const result = await recordInventoryRepackScan(

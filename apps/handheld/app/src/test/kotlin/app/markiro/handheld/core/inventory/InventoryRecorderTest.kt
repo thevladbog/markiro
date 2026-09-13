@@ -140,4 +140,16 @@ class InventoryRecorderTest {
             json,
         )
     }
+
+    @Test fun strictDenialRollsBackClaimsAndDeviceSequenceTogether() = runTest {
+        db.grants.beginRefresh()
+        db.grantDao().state(checkNotNull(db.grantDao().state()).copy(mode="strict"))
+        val before=db.inventoryTerminalStateDao().get("i1")
+        val denied=runCatching { recorder().record("i1",raw("A1"),"op-1",eventId="denied") }.exceptionOrNull()
+        org.junit.Assert.assertTrue(denied is app.markiro.handheld.core.grants.GrantDenied)
+        assertEquals(null,db.inventoryEventDao().get("denied"))
+        assertEquals(null,db.inventoryResultDao().get("i1",hash("A1")))
+        assertEquals(before,db.inventoryTerminalStateDao().get("i1"))
+        assertEquals(0,db.inventoryOutboxDao().count("i1"))
+    }
 }

@@ -1138,9 +1138,9 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
     const agent = request.agent(app!.getHttpServer());
     const { tenantId, productId, lineId } = await seedPreparation(agent);
     const inventory = await createInventory(agent, productId, lineId);
-    const expectedKey = `tenants/${tenantId}/inventories/${inventory.id}/imports/EMITTED/${INTRODUCED_DIGEST}.csv`;
 
     const statusMismatch = await upload(agent, inventory.id, "EMITTED").expect(422);
+    const expectedKey = `tenants/${tenantId}/inventories/${inventory.id}/imports/EMITTED/attempt/${statusMismatch.body.id}/${INTRODUCED_DIGEST}.csv`;
     expect(statusMismatch.body).toEqual({
       id: expect.any(String),
       declaredStatus: "EMITTED",
@@ -1299,7 +1299,6 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
     const agent = request.agent(app!.getHttpServer());
     const { tenantId, productId, lineId } = await seedPreparation(agent);
     const inventory = await createInventory(agent, productId, lineId);
-    const expectedKey = `tenants/${tenantId}/inventories/${inventory.id}/imports/INTRODUCED/${INTRODUCED_DIGEST}.csv`;
     parseChzImportFault.unexpectedFailuresRemaining = 1;
     const transactionSpy = vi.spyOn(db, "transaction");
 
@@ -1315,7 +1314,7 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
     }
     expect(storage.putVerified).toHaveBeenCalledTimes(1);
     expect(storage.delete).toHaveBeenCalledTimes(1);
-    expect(storage.delete).toHaveBeenCalledWith(expectedKey);
+    expect(storage.delete).toHaveBeenCalledWith(storage.putVerified.mock.calls[0]?.[0]);
     expect(objects.size).toBe(0);
 
     const importsAfterFailure = await db
@@ -1357,7 +1356,10 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
     });
     expect(storage.putVerified).toHaveBeenCalledTimes(2);
     expect(storage.delete).toHaveBeenCalledTimes(1);
-    expect([...objects.keys()]).toEqual([expectedKey]);
+    expect([...objects.keys()]).toEqual([
+      `tenants/${tenantId}/inventories/${inventory.id}/imports/INTRODUCED/attempt/${retry.body.id}/${INTRODUCED_DIGEST}.csv`,
+    ]);
+    expect(storage.putVerified.mock.calls[0]?.[0]).not.toBe(storage.putVerified.mock.calls[1]?.[0]);
 
     const durableImports = await db
       .select({ id: schema.inventoryImports.id })
@@ -1377,7 +1379,6 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
     const agent = request.agent(app!.getHttpServer());
     const { tenantId, productId, lineId } = await seedPreparation(agent);
     const inventory = await createInventory(agent, productId, lineId);
-    const expectedKey = `tenants/${tenantId}/inventories/${inventory.id}/imports/INTRODUCED/${INTRODUCED_DIGEST}.csv`;
     storage.putVerified.mockImplementationOnce(
       async (key: string, body: Buffer, _contentType: string, sha256: string) => {
         await db
@@ -1392,7 +1393,7 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
     await upload(agent, inventory.id, "INTRODUCED").expect(409, {
       code: "INVENTORY_PRODUCT_GTIN_CHANGED",
     });
-    expect(storage.delete).toHaveBeenCalledWith(expectedKey);
+    expect(storage.delete).toHaveBeenCalledWith(storage.putVerified.mock.calls[0]?.[0]);
     expect(objects.size).toBe(0);
     const imports = await db
       .select({ id: schema.inventoryImports.id })
@@ -1417,12 +1418,13 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
       upload(agent, firstInventory.id, "INTRODUCED").expect(201),
     ]);
     expect(repeated.body).toEqual(first.body);
-    const expectedKey = `tenants/${tenantId}/inventories/${firstInventory.id}/imports/INTRODUCED/${INTRODUCED_DIGEST}.csv`;
+    const expectedKey = `tenants/${tenantId}/inventories/${firstInventory.id}/imports/INTRODUCED/attempt/${first.body.id}/${INTRODUCED_DIGEST}.csv`;
     expect(storage.putVerified).toHaveBeenCalled();
-    expect(new Set(storage.putVerified.mock.calls.map(([key]) => key))).toEqual(
-      new Set([expectedKey]),
+    expect(storage.putVerified.mock.calls.map(([key]) => key)).toContain(expectedKey);
+    expect(new Set(storage.putVerified.mock.calls.map(([key]) => key)).size).toBe(
+      storage.putVerified.mock.calls.length,
     );
-    expect([...objects.keys()]).toEqual([expectedKey]);
+    expect(objects.get(expectedKey)).toEqual(INTRODUCED_BYTES);
     const deduplicatedRows = await db
       .select({ id: schema.inventoryImports.id })
       .from(schema.inventoryImports)
@@ -1679,7 +1681,10 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
         .where(eq(schema.inventoryImports.inventoryId, inventory.id)),
     ).toHaveLength(1);
     expect(storage.delete).not.toHaveBeenCalled();
-    expect(objects.size).toBe(1);
+    expect(objects.size).toBe(2);
+    const winningKey = `tenants/${tenantId}/inventories/${inventory.id}/imports/INTRODUCED/attempt/${winningId}/${INTRODUCED_DIGEST}.csv`;
+    expect(objects.get(winningKey)).toEqual(INTRODUCED_BYTES);
+    expect(new Set(storage.putVerified.mock.calls.map(([key]) => key)).size).toBe(2);
   });
 
   it("reconciles a committed deterministic object when transaction acknowledgement is lost", async () => {
@@ -1712,7 +1717,7 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
       fault.restore();
     }
 
-    const expectedKey = `tenants/${tenantId}/inventories/${inventory.id}/imports/INTRODUCED/${INTRODUCED_DIGEST}.csv`;
+    const expectedKey = storage.putVerified.mock.calls[0]?.[0];
     expect([...objects.keys()]).toEqual([expectedKey]);
     expect(
       storage.delete.mock.calls.filter(([key]) =>
@@ -1725,11 +1730,10 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
     expect([...objects.keys()]).toEqual([expectedKey]);
   });
 
-  it("preserves an ambiguous object when reconciliation is unavailable and safely reuses its key", async () => {
+  it("preserves an ambiguous object when reconciliation is unavailable and retries with a separately owned key", async () => {
     const agent = request.agent(app!.getHttpServer());
     const { tenantId, productId, lineId } = await seedPreparation(agent);
     const inventory = await createInventory(agent, productId, lineId);
-    const expectedKey = `tenants/${tenantId}/inventories/${inventory.id}/imports/INTRODUCED/${INTRODUCED_DIGEST}.csv`;
     const fault = injectImportAcknowledgementFault(
       tenantId,
       inventory.id,
@@ -1751,12 +1755,9 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
     }
 
     expect(storage.putVerified).toHaveBeenCalledTimes(1);
-    expect(
-      storage.delete.mock.calls.filter(([key]) =>
-        key.startsWith(`tenants/${tenantId}/inventories/${inventory.id}/imports/`),
-      ),
-    ).toEqual([]);
-    expect([...objects.keys()]).toEqual([expectedKey]);
+    expect(storage.delete).not.toHaveBeenCalled();
+    const ambiguousKey = storage.putVerified.mock.calls[0]?.[0];
+    expect([...objects.keys()]).toEqual([ambiguousKey]);
     const importsBeforeRetry = await db
       .select({ id: schema.inventoryImports.id })
       .from(schema.inventoryImports)
@@ -1789,13 +1790,11 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
     });
     expect(JSON.stringify(retry.body)).not.toMatch(/objectKey|fileName|tenants\//i);
     expect(storage.putVerified).toHaveBeenCalledTimes(2);
-    expect(storage.putVerified.mock.calls.map(([key]) => key)).toEqual([expectedKey, expectedKey]);
-    expect(
-      storage.delete.mock.calls.filter(([key]) =>
-        key.startsWith(`tenants/${tenantId}/inventories/${inventory.id}/imports/`),
-      ),
-    ).toEqual([]);
-    expect([...objects.keys()]).toEqual([expectedKey]);
+    const expectedKey = `tenants/${tenantId}/inventories/${inventory.id}/imports/INTRODUCED/attempt/${retry.body.id}/${INTRODUCED_DIGEST}.csv`;
+    expect(expectedKey).not.toBe(ambiguousKey);
+    expect(storage.putVerified.mock.calls.map(([key]) => key)).toEqual([ambiguousKey, expectedKey]);
+    expect(storage.delete).not.toHaveBeenCalled();
+    expect([...objects.keys()]).toEqual([ambiguousKey, expectedKey]);
 
     const storedImports = await db
       .select({

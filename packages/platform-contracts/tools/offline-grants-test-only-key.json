@@ -1,0 +1,10 @@
+{
+  "warning": "PUBLIC TEST FIXTURE KEY ONLY. Never trust or use for production signing.",
+  "privateJwk": {
+    "kty": "EC",
+    "x": "rf1DWb1geVpdSybqdmvRHp3KM4JKryjdJ5Xmj7aBoL4",
+    "y": "PIftroZqGcOYP9hJnTIjmlSHPRNf2jUHqpmwZVzjSQ8",
+    "crv": "P-256",
+    "d": "iOEcVOqxwVdf8l5IIbhGogJuw2s96dAh4Eq_Davmu7o"
+  }
+}

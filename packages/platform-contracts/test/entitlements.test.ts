@@ -38,7 +38,7 @@ describe("P1 entitlement registry and source boundaries", () => {
     expect(c.ENTITLEMENT_OPERATIONS["inventory.task.start.v1"].features).toEqual(["inventory"]);
     expect(c.ENTITLEMENT_OPERATIONS["inventory.task.start.v1"].class).toBe("new_work");
     expect(c.ENTITLEMENT_OPERATIONS["inventory.task.start.v1"].coverage).toBe("p1b_adapter");
-    expect(c.ENTITLEMENT_REGISTRY_VERSION).toBe("p1b.v1");
+    expect(c.ENTITLEMENT_REGISTRY_VERSION).toBe("p1c.native.v1");
     expect(c.ENTITLEMENT_OPERATIONS["handheld.work.start.v1"].coverage).toBe("deferred");
     expect(c.ENTITLEMENT_OPERATIONS["commerceMl.exchange.v1"].coverage).toBe("p1b_adapter");
   });

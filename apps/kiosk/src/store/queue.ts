@@ -1,8 +1,45 @@
+import type { GrantEvidenceEnvelope, GrantEvidenceReceipt } from "@markiro/platform-contracts";
+import {
+  sameBoxRegistryCredentialOwner,
+  type BoxRegistryCredentialOwner,
+} from "./installation-binding.js";
+import { draftKey, type PickupDraft } from "../grants/drafts.js";
+import { commitPickupCompletion } from "../grants/completion.js";
+import { pickupOwnerCost } from "../grants/pickup-owner.js";
+import type { StoredBoxRegistryRow, BoxRegistryMeta } from "./box-registry.js";
+import { buildBadgeIndex } from "../credentials/badge.js";
+import { effectivePickupPolicy } from "../session/day-count.js";
+import type { CachedSnapshot } from "./cache.js";
+import { orderContent, sha256 } from "../grants/scope.js";
+import { readGrantState, runChecked, withGrantTransaction } from "../grants/store.js";
+import { assertNewWork, GrantDenied } from "../grants/admission.js";
 import type { CreateOrderDto } from "../api/types.js";
 import type { BoxConflict } from "../api/types.js";
-import { STORE_QUARANTINE, STORE_QUEUE, updateEach, withStore } from "./db.js";
+import {
+  STORE_QUARANTINE,
+  STORE_QUEUE,
+  STORE_SNAPSHOT,
+  STORE_CONFIG,
+  STORE_BOX_REGISTRY_ACTIVE,
+  STORE_BOX_REGISTRY_META,
+  updateEach,
+  withStore,
+} from "./db.js";
 
 export interface QueuedOrder {
+  /** Selected only for work accepted after authenticated protocol configuration. */
+  evidenceProtocol?: "offline-grants-v1";
+  evidenceEnvelope?: GrantEvidenceEnvelope;
+  grantReceipt?: GrantEvidenceReceipt;
+  /** Durable local evidence seam; never added to legacy order DTOs implicitly. */
+  grantEvidence?: {
+    eventId: string;
+    deviceGrantId?: string;
+    taskGrantId?: string;
+    credentialEpoch: number;
+    mode: "observe" | "strict";
+    cost: Record<string, number>;
+  };
   deviceSeq: number;
   /**
    * Which employee this device opened the session for. Alongside the body
@@ -47,6 +84,7 @@ export async function enqueueOrder(
   employeeId: string,
   admissionState?: "pending_attestation",
   estimatedBottleCount?: number,
+  expectedOwner?: BoxRegistryCredentialOwner,
 ): Promise<void> {
   if (
     estimatedBottleCount !== undefined &&
@@ -63,7 +101,161 @@ export async function enqueueOrder(
     ...(admissionState ? { admissionState } : {}),
     ...(estimatedBottleCount !== undefined ? { estimatedBottleCount } : {}),
   };
-  await withStore(STORE_QUEUE, "readwrite", (s) => s.put(record));
+  const content = orderContent(body);
+  const state = await readGrantState();
+  const payloadDigest = state ? await sha256(content) : null;
+  await withGrantTransaction(
+    [STORE_QUEUE, STORE_SNAPSHOT, STORE_BOX_REGISTRY_ACTIVE, STORE_BOX_REGISTRY_META],
+    (context) => {
+      if (expectedOwner && !sameBoxRegistryCredentialOwner(context.owner, expectedOwner))
+        throw new GrantDenied("wrong_owner");
+      if (
+        context.state?.configurationReceived &&
+        sameBoxRegistryCredentialOwner(context.state, context.owner)
+      )
+        record.evidenceProtocol = "offline-grants-v1";
+      const queue = context.tx.objectStore(STORE_QUEUE);
+      const existing = queue.get(body.deviceSeq);
+      existing.onsuccess = () =>
+        runChecked(context.tx, () => {
+          const old = existing.result as QueuedOrder | undefined;
+          if (old) {
+            if (orderContent(old.body) !== content || old.employeeId !== employeeId)
+              throw new Error("kiosk_order_sequence_conflict");
+            return;
+          }
+          const eventKey = JSON.stringify([
+            "accepted",
+            context.owner?.binding.serverUrl,
+            context.owner?.binding.kioskId,
+            body.deviceSeq,
+          ]);
+          const savedRequest = context.store.get(eventKey);
+          savedRequest.onsuccess = () =>
+            runChecked(context.tx, () => {
+              const saved = savedRequest.result as
+                { payloadDigest: string; employeeId: string } | undefined;
+              if (saved) {
+                if (
+                  !payloadDigest ||
+                  saved.payloadDigest !== payloadDigest ||
+                  saved.employeeId !== employeeId
+                )
+                  throw new Error("kiosk_order_sequence_conflict");
+                return;
+              }
+              if (context.state?.mode !== "strict") assertNewWork(context);
+              const snapshotRequest = context.tx.objectStore(STORE_SNAPSHOT).get("current");
+              const rowsRequest = context.tx.objectStore(STORE_BOX_REGISTRY_ACTIVE).getAll();
+              const metaRequest = context.tx.objectStore(STORE_BOX_REGISTRY_META).get("active");
+              let pending = 3;
+              const complete = () =>
+                runChecked(context.tx, () => {
+                  if (--pending) return;
+                  if (context.state?.mode === "strict") {
+                    const snapshot = snapshotRequest.result as CachedSnapshot | undefined;
+                    const policy = snapshot
+                      ? effectivePickupPolicy(snapshot.bootstrap, employeeId)
+                      : null;
+                    if (
+                      !payloadDigest ||
+                      !snapshot ||
+                      !policy ||
+                      !body.badgeDigest ||
+                      buildBadgeIndex(snapshot.bootstrap).get(body.badgeDigest) !== employeeId ||
+                      (body.reason === "writeoff" &&
+                        (!policy.canWriteoff ||
+                          !snapshot.bootstrap.reasons.some(
+                            (reason) => reason.id === body.writeoffReasonId,
+                          )))
+                    )
+                      throw new GrantDenied("wrong_owner");
+                    const cost = pickupOwnerCost(
+                      body,
+                      snapshot,
+                      rowsRequest.result as StoredBoxRegistryRow[],
+                      (metaRequest.result as BoxRegistryMeta | undefined) ?? null,
+                      context.owner,
+                    );
+                    commitPickupCompletion(
+                      context,
+                      body,
+                      employeeId,
+                      payloadDigest,
+                      snapshot,
+                      rowsRequest.result as StoredBoxRegistryRow[],
+                      cost,
+                      (task) => {
+                        record.grantEvidence = {
+                          eventId: `pickup:${body.deviceSeq}`,
+                          taskGrantId: task.grant.grantId,
+                          credentialEpoch: task.grant.credentialEpoch,
+                          mode: "strict",
+                          cost,
+                        };
+                        context.store.put(
+                          {
+                            payloadDigest,
+                            employeeId,
+                            ...record.grantEvidence,
+                            kind: "completion",
+                          },
+                          eventKey,
+                        );
+                        queue.add(record);
+                      },
+                    );
+                    return;
+                  }
+                  const acceptLegacy = (reserved = false) => {
+                    if (reserved && payloadDigest)
+                      context.store.put(
+                        { payloadDigest, employeeId, kind: "observe_reserved_recovery" },
+                        eventKey,
+                      );
+                    if (expectedOwner && !reserved) {
+                      if (
+                        !context.config ||
+                        context.config.nextDeviceSeq !== body.deviceSeq ||
+                        !Number.isSafeInteger(body.deviceSeq + 1)
+                      )
+                        throw new Error("kiosk_order_sequence_conflict");
+                      context.tx
+                        .objectStore(STORE_CONFIG)
+                        .put({ ...context.config, nextDeviceSeq: body.deviceSeq + 1 }, "current");
+                    }
+                    queue.add(record);
+                  };
+                  if (context.owner) {
+                    const owner = context.owner;
+                    const draftRequest = context.store.get(draftKey(owner, body.deviceSeq));
+                    draftRequest.onsuccess = () =>
+                      runChecked(context.tx, () => {
+                        const draft = draftRequest.result as PickupDraft | undefined;
+                        if (draft) {
+                          if (
+                            draft.status !== "pending" ||
+                            !sameBoxRegistryCredentialOwner(draft.owner, owner) ||
+                            draft.employeeId !== employeeId ||
+                            orderContent(draft.body) !== content
+                          )
+                            throw new GrantDenied("wrong_task");
+                          context.store.put(
+                            { ...draft, status: "accepted" },
+                            draftKey(owner, body.deviceSeq),
+                          );
+                          acceptLegacy(true);
+                        } else acceptLegacy();
+                      });
+                  } else acceptLegacy();
+                });
+              snapshotRequest.onsuccess = complete;
+              rowsRequest.onsuccess = complete;
+              metaRequest.onsuccess = complete;
+            });
+        });
+    },
+  );
 }
 
 /**

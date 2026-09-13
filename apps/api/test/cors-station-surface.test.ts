@@ -21,6 +21,15 @@ const env = loadEnv({
 });
 
 const documentedStationSurface = [
+  ["GET", "/station/grants/v1/keyset"],
+  ["POST", "/station/grants/v1/configuration"],
+  ["POST", "/station/grants/v1/device"],
+  ["POST", "/station/grants/v1/tasks"],
+  ["POST", "/station/grants/v1/evidence/scans"],
+  ["POST", "/station/grants/v1/evidence/shift-closures"],
+  ["POST", "/station/grants/v1/evidence/inventories/inventory-1/event-batches"],
+  ["POST", "/station/grants/v1/evidence/inventories/inventory-1/leave"],
+
   ["POST", "/station/pair"],
   ["GET", "/station/identity"],
   ["GET", "/station/operators"],

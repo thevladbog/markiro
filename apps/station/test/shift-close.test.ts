@@ -1,8 +1,10 @@
 import { DatabaseSync } from "node:sqlite";
 import { STATION_MIGRATIONS } from "@markiro/db/station-sqlite";
+import type * as DomainModule from "@markiro/domain";
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("@markiro/domain", () => ({
+vi.mock("@markiro/domain", async (importOriginal) => ({
+  ...(await importOriginal<typeof DomainModule>()),
   isShiftCloseReasonCode: (value: unknown) =>
     value === "production_defect" || value === "material_shortage" || value === "equipment_stop",
   shiftCloseReasonRequired: (plannedQty: number | null, actualQty: number) =>

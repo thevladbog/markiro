@@ -365,6 +365,18 @@ describe("credential rejection recovery", () => {
     expect(snapshotQueries).toBe(1);
   });
 
+  it("includes a durable pending inventory leave even after its scan queue is empty", async () => {
+    const exec = await migratedExec();
+    await exec.run(`INSERT INTO offline_grant_inventory_leave_intents
+      (intent_key,inventory_id,snapshot_id,device_id,operator_id,event_id,credential_ownership,pointer_value,payload_json,created_at)
+      VALUES('leave','inventory','snapshot','device','operator','event','owner','{}','{}','2026-09-14T00:00:00Z')`);
+    expect(await readSealedWorkSummary(exec)).toMatchObject({
+      inventoryScans: 0,
+      closes: 1,
+      total: 1,
+    });
+  });
+
   it("waits for an accepted floor scan to finish journalling before taking the summary snapshot", async () => {
     const exec = await migratedExec();
     let releaseWrite!: () => void;

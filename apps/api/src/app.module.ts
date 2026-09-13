@@ -1,3 +1,5 @@
+import { DeviceGrantsModule } from "./modules/device-grants/device-grants.module";
+import { PublicApiModule } from "./modules/public-api/public-api.module";
 import { PlatformEntitlementsModule } from "./subscriptions/platform-entitlements.module";
 import { Module, type DynamicModule } from "@nestjs/common";
 import { AuthModule } from "./auth/auth.module";
@@ -94,6 +96,7 @@ export class AppModule {
       imports: [
         PlatformHttpModule,
         AuthModule.forRoot(setup),
+        DeviceGrantsModule.forRoot(env),
         ...(setup.platformAuth
           ? [
               PlatformAuthModule.forRoot(setup.platformAuth, env.SAAS_ADMIN_ORIGIN),
@@ -126,6 +129,7 @@ export class AppModule {
         ShiftsModule.forRoot(env.VALIDATION_DM_DUPLICATE_ENABLED),
         DashboardModule,
         InventoriesModule,
+        PublicApiModule,
         ChzExportsModule.forRoot(env),
         ChzCodeStatusesModule.forRoot(env),
         ShiftExportsModule,

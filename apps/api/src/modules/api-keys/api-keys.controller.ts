@@ -5,6 +5,7 @@ import {
   Get,
   HttpCode,
   Param,
+  Patch,
   Post,
   Req,
   UseGuards,
@@ -19,7 +20,12 @@ import {
   type SchemaObject,
 } from "@nestjs/swagger";
 import { CABINET_CAPABILITY } from "@markiro/domain";
-import { z } from "zod";
+import type { z } from "zod";
+import {
+  PUBLIC_API_SCOPES,
+  publicApiKeyCreateSchema as createApiKeySchema,
+  publicApiKeyUpdateSchema,
+} from "@markiro/platform-contracts";
 import {
   ApiCabinetAuth,
   ApiHttpErrors,
@@ -39,9 +45,6 @@ import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access
 import { ApiKeysService, type ApiKeyIssuedDto, type ApiKeySummaryDto } from "./api-keys.service";
 
 /** POST /integrations/public_api/keys body. */
-const createApiKeySchema = z.object({
-  name: z.string().min(1).max(200),
-});
 type CreateApiKeyDto = z.infer<typeof createApiKeySchema>;
 
 const apiKeySummaryListOpenApiSchema: SchemaObject = {
@@ -54,10 +57,15 @@ const apiKeySummaryListOpenApiSchema: SchemaObject = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["id", "name", "kind", "createdAt", "lastRequest"],
+        required: ["id", "name", "kind", "createdAt", "lastRequest", "scopes"],
         properties: {
           id: { type: "string" },
           name: { type: "string", nullable: true },
+          scopes: {
+            type: "array",
+            uniqueItems: true,
+            items: { type: "string", enum: [...PUBLIC_API_SCOPES] },
+          },
           kind: { type: "string", enum: ["public"] },
           createdAt: { type: "string", format: "date-time" },
           lastRequest: { type: "string", format: "date-time", nullable: true },
@@ -70,9 +78,14 @@ const apiKeySummaryListOpenApiSchema: SchemaObject = {
 const apiKeyIssuedOpenApiSchema: SchemaObject = {
   type: "object",
   additionalProperties: false,
-  required: ["id", "key"],
+  required: ["id", "key", "scopes"],
   properties: {
     id: { type: "string" },
+    scopes: {
+      type: "array",
+      uniqueItems: true,
+      items: { type: "string", enum: [...PUBLIC_API_SCOPES] },
+    },
     key: { type: "string", description: "One-time plaintext key reveal; never returned again." },
   },
 };
@@ -122,7 +135,7 @@ export class ApiKeysController {
     @Req() req: RequestWithTenant,
     @Body(new ZodValidationPipe(createApiKeySchema)) body: CreateApiKeyDto,
   ): Promise<ApiKeyIssuedDto> {
-    const result = await this.service.create(req.tenantId!, req.userId!, body.name);
+    const result = await this.service.create(req.tenantId!, req.userId!, body.name, body.scopes);
     this.audit.credentialMutation({
       tenantId: req.tenantId!,
       userId: req.userId!,
@@ -131,6 +144,41 @@ export class ApiKeysController {
       outcome: "succeeded",
     });
     return result;
+  }
+
+  @Patch(":id")
+  @AllowSubscriptionReadOnly("security")
+  @ApiOperation({
+    summary: "Replace public API key scopes",
+    description:
+      "Scope additions require active public API access; reductions remain available for security recovery.",
+  })
+  @ApiParam({ name: "id", description: "Better Auth api-key id." })
+  @ApiZodBody(publicApiKeyUpdateSchema)
+  @ApiOkResponse({
+    schema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["id", "scopes"],
+      properties: {
+        id: { type: "string" },
+        scopes: {
+          type: "array",
+          uniqueItems: true,
+          items: { type: "string", enum: [...PUBLIC_API_SCOPES] },
+        },
+      },
+    },
+  })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403, 404)
+  async updateScopes(
+    @Req() req: RequestWithTenant,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(publicApiKeyUpdateSchema))
+    body: z.infer<typeof publicApiKeyUpdateSchema>,
+  ) {
+    return this.service.updateScopes(req.tenantId!, req.userId!, id, body.scopes);
   }
 
   @Delete(":id")

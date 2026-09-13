@@ -45,9 +45,14 @@ import {
   type DeviceBox,
   type UnresolvedBoxPrint,
 } from "../lib/boxes.js";
-import { closeCurrentBox as closeCurrentBoxLib, type CloseBoxResult } from "../lib/close-box.js";
+import {
+  closeCurrentBox as closeCurrentBoxLib,
+  closeCurrentBoxWithOfflineGrant,
+  type CloseBoxResult,
+} from "../lib/close-box.js";
 import {
   closeCurrentPallet as closeCurrentPalletLib,
+  closeCurrentPalletWithOfflineGrant,
   type ClosePalletResult,
 } from "../lib/close-pallet.js";
 import {
@@ -74,6 +79,7 @@ import {
   listRecentOperations,
   loadCodeKeys,
   recordScan,
+  recordScanWithOfflineGrant,
   undoLastScan,
   type RecentOperation,
 } from "../lib/journal.js";
@@ -81,7 +87,7 @@ import { applyMigrations, readShiftMirror, type SqlExecutor } from "../lib/mirro
 import { renderLabelBytes } from "../lib/print-label.js";
 import { subscribeStationProductImageCache } from "../lib/product-image-cache.js";
 import { rasterizeText } from "../lib/rasterizer.js";
-import type { FloorWorkBarrier } from "../lib/credential-recovery.js";
+import type { CredentialGeneration, FloorWorkBarrier } from "../lib/credential-recovery.js";
 import { createScanQueue, type ScanOutcome, type ScanQueue } from "../lib/scan-queue.js";
 import type { ScanSource } from "../lib/scan-source.js";
 import type { OfflineShiftCloseSummary } from "../lib/shift-close.js";
@@ -110,6 +116,9 @@ export interface WorkScreenProps {
   shiftId: string;
   terminalId: string | null;
   operatorId: string;
+  /** Current API-key generation whose lease fences every grant-backed local commit. */
+  credentialGeneration?: CredentialGeneration;
+  offlineGrantNotice?: string | null;
   expectedGtin14: string;
   productName: string;
   /** The catalog's short print name for the label's `product.printName` field; null = full name. */
@@ -222,6 +231,8 @@ export function WorkScreen({
   shiftId,
   terminalId,
   operatorId,
+  credentialGeneration,
+  offlineGrantNotice,
   expectedGtin14,
   productName,
   productPrintName,
@@ -827,17 +838,17 @@ export function WorkScreen({
     const capturedPalletBoxCapacity = palletBoxCapacity;
     const impl =
       closeCurrentPalletProp ??
-      ((sid: string, opId: string | null) =>
-        closeCurrentPalletLib(
-          {
-            exec,
-            issuerPrefix: capturedIssuerPrefix,
-            palletBoxCapacity: capturedPalletBoxCapacity,
-            terminalId,
-          },
-          sid,
-          opId,
-        ));
+      ((sid: string, opId: string | null) => {
+        const deps = {
+          exec,
+          issuerPrefix: capturedIssuerPrefix,
+          palletBoxCapacity: capturedPalletBoxCapacity,
+          terminalId,
+        };
+        return credentialGeneration
+          ? closeCurrentPalletWithOfflineGrant(deps, sid, opId, credentialGeneration)
+          : closeCurrentPalletLib(deps, sid, opId);
+      });
     if (
       !queue.enqueueJob(async () => {
         try {
@@ -874,17 +885,17 @@ export function WorkScreen({
         try {
           const impl =
             closeCurrentPalletProp ??
-            ((sid: string, opId: string | null) =>
-              closeCurrentPalletLib(
-                {
-                  exec,
-                  issuerPrefix: capturedIssuerPrefix,
-                  palletBoxCapacity: capturedPalletBoxCapacity,
-                  terminalId,
-                },
-                sid,
-                opId,
-              ));
+            ((sid: string, opId: string | null) => {
+              const deps = {
+                exec,
+                issuerPrefix: capturedIssuerPrefix,
+                palletBoxCapacity: capturedPalletBoxCapacity,
+                terminalId,
+              };
+              return credentialGeneration
+                ? closeCurrentPalletWithOfflineGrant(deps, sid, opId, credentialGeneration)
+                : closeCurrentPalletLib(deps, sid, opId);
+            });
           result = await impl(shiftId, operatorId);
           await handlePalletCloseResult(result);
         } catch (err) {
@@ -1681,15 +1692,16 @@ export function WorkScreen({
       const closingBoxId = boxRef.current?.boxId ?? null;
       const impl =
         closeCurrentBoxProp ??
-        ((sid: string, operatorId: string | null) =>
-          closeCurrentBoxLib(
+        ((sid: string, operatorId: string | null) => {
+          const deps =
             // A non-null `palletBoxCapacity` is what actually turns pallets
             // on (see `CloseBoxDeps`'s own doc comment) -- this is the one
             // call site that makes a shift build pallets at all.
-            { exec, issuerPrefix: reservedIssuerPrefix, palletBoxCapacity, terminalId },
-            sid,
-            operatorId,
-          ));
+            { exec, issuerPrefix: reservedIssuerPrefix, palletBoxCapacity, terminalId };
+          return credentialGeneration
+            ? closeCurrentBoxWithOfflineGrant(deps, sid, operatorId, credentialGeneration)
+            : closeCurrentBoxLib(deps, sid, operatorId);
+        });
 
       let result: CloseBoxResult;
       try {
@@ -1886,6 +1898,7 @@ export function WorkScreen({
           }
           const scannedAt = new Date().toISOString();
           const event = {
+            eventId: crypto.randomUUID(),
             shiftId,
             terminalId,
             raw,
@@ -1934,9 +1947,7 @@ export function WorkScreen({
                 ...(planReached ? { planReached } : {}),
               };
             }
-            const result = await recordScan(
-              exec,
-              event,
+            const acceptedCode =
               km && codeHash
                 ? {
                     codeHash,
@@ -1946,8 +1957,10 @@ export function WorkScreen({
                     scannedAt,
                     boxId,
                   }
-                : null,
-            );
+                : null;
+            const result = credentialGeneration
+              ? await recordScanWithOfflineGrant(exec, event, acceptedCode, credentialGeneration)
+              : await recordScan(exec, event, acceptedCode);
             if (result.alreadyPresent && codeHash) {
               // The in-memory duplicate index missed this one; codes_mirror's
               // PRIMARY KEY is the real backstop (see journal.ts's recordScan
@@ -1983,7 +1996,9 @@ export function WorkScreen({
             return { raw, verdict, firstSeen: null, ...(planReached ? { planReached } : {}) };
           }
 
-          await recordScan(exec, event, null);
+          if (credentialGeneration)
+            await recordScanWithOfflineGrant(exec, event, null, credentialGeneration);
+          else await recordScan(exec, event, null);
           const firstSeen =
             verdict.status === "duplicate"
               ? (duplicateFirstSeen ?? (await findFirstSeen(exec, verdict.key)))
@@ -2051,7 +2066,15 @@ export function WorkScreen({
           showTimedSignal("error", liveT("signal.systemError"));
         },
       }),
-    [exec, shiftId, terminalId, expectedGtin14, publishVerdict, showTimedSignal],
+    [
+      credentialGeneration,
+      exec,
+      shiftId,
+      terminalId,
+      expectedGtin14,
+      publishVerdict,
+      showTimedSignal,
+    ],
   );
 
   function handleUndo(): Promise<void> {
@@ -2424,6 +2447,7 @@ export function WorkScreen({
 
   return (
     <main className="work-screen" aria-label={productName}>
+      {offlineGrantNotice ? <Alert tone="info">{offlineGrantNotice}</Alert> : null}
       <div className="work-screen__content">
         {palletExceptionsOpen ? (
           <PalletExceptions

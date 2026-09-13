@@ -1,3 +1,7 @@
+import { prepareStrictPickup } from "../grants/preparation.js";
+import { recoverPickupDraft, abandonPickupDrafts } from "../grants/drafts.js";
+import { GrantNotice, GrantDiagnostic } from "./GrantNotice.js";
+import { admitNewCart, GrantDenied, readGrantStatus } from "../grants/admission.js";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { Button, Modal } from "@markiro/ui";
 import { useTranslation } from "react-i18next";
@@ -45,7 +49,10 @@ import {
 } from "../session/flow.js";
 import { readSnapshot, type CachedSnapshot } from "../store/cache.js";
 import { lookupBox, readBoxRegistryMeta } from "../store/box-registry.js";
-import { boxRegistryBindingOf } from "../store/installation-binding.js";
+import {
+  boxRegistryBindingOf,
+  boxRegistryCredentialOwnerOf,
+} from "../store/installation-binding.js";
 import {
   brandingOwnerOf,
   invalidateCachedBranding,
@@ -145,6 +152,8 @@ async function recoverGrantedPort(): Promise<SerialPort | null> {
  */
 export function KioskShell(): React.JSX.Element {
   const { t } = useTranslation();
+  const [grantStatus, setGrantStatus] = useState<Awaited<ReturnType<typeof readGrantStatus>>>(null);
+  const [grantBlocked, setGrantBlocked] = useState<GrantDenied["reason"] | null>(null);
 
   const [configLoaded, setConfigLoaded] = useState(false);
   const [config, setConfig] = useState<KioskConfig | null>(null);
@@ -335,6 +344,21 @@ export function KioskShell(): React.JSX.Element {
     });
     return {
       ...(base.registryOwner ? { registryOwner: base.registryOwner } : {}),
+      ...(base.submitGrantEvidence
+        ? { submitGrantEvidence: base.submitGrantEvidence.bind(base) }
+        : {}),
+      orderReconciled: (body, result) => {
+        const waiting = awaited.current;
+        if (waiting?.deviceSeq === body.deviceSeq) waiting.result = result;
+        setOnline(true);
+      },
+      ...(base.grantConfiguration
+        ? { grantConfiguration: base.grantConfiguration.bind(base) }
+        : {}),
+      ...(base.grantKeyset ? { grantKeyset: () => base.grantKeyset!() } : {}),
+      ...(base.issueDeviceGrant ? { issueDeviceGrant: base.issueDeviceGrant.bind(base) } : {}),
+      ...(base.issueTaskGrant ? { issueTaskGrant: base.issueTaskGrant.bind(base) } : {}),
+      ...(base.reserveGrantOrder ? { reserveGrantOrder: base.reserveGrantOrder.bind(base) } : {}),
       // Called rather than passed along: `KioskClient` declares these as
       // methods, so handing the reference over would detach it from its object.
       bootstrap: () => base.bootstrap(),
@@ -409,6 +433,11 @@ export function KioskShell(): React.JSX.Element {
    * count the queue also swallow the quarantine.
    */
   const refreshCounts = useCallback(async () => {
+    try {
+      setGrantStatus(await readGrantStatus());
+    } catch {
+      console.warn("kiosk: grant status unavailable");
+    }
     try {
       setQueuedCount((await listQueue()).length);
     } catch (err) {
@@ -879,10 +908,8 @@ export function KioskShell(): React.JSX.Element {
    * app) would allocate the SAME sequence, and the later submission would be
    * answered by the server's idempotency with the earlier one's order. The
    * kiosk is a fullscreen PWA on a wall-mounted tablet with no way to open a
-   * second window, so this is deliberately not defended against here; making it
-   * safe needs the counter to be read-modify-written inside the same IndexedDB
-   * transaction as the enqueue, which is the fix if the device ever grows a
-   * second entry point (a service worker, a second display, a debug tab).
+   * second window. The durable owner also compares the current generation and
+   * advances its sequence in the same IndexedDB transaction as queue acceptance.
    */
   const submitting = useRef(false);
 
@@ -902,33 +929,31 @@ export function KioskShell(): React.JSX.Element {
         dispatchFlow({ type: "submitFailed" });
         return;
       }
-      const deviceSeq = cfg.nextDeviceSeq;
+      let deviceSeq = cfg.nextDeviceSeq;
       // The scan time, not the sync time: an order queued through an outage
       // replays hours later and must still be filed under when it happened.
-      const body: CreateOrderDto = createConfirmedOrderBody(
+      let body: CreateOrderDto = createConfirmedOrderBody(
         confirmed,
         deviceSeq,
         scannedAt().toISOString(),
       );
       try {
-        // THE COUNTER FIRST, and this ordering is load-bearing.
-        //
-        // The two writes can only be torn apart one way or the other, and the
-        // failure is ONE-SIDED. Burning a sequence nobody used costs nothing:
-        // `(tenantId, kioskId, deviceSeq)` is the server's idempotency key and
-        // it only has to be MONOTONIC, never dense, so a gap is invisible to
-        // everything downstream. Reusing one is catastrophic and silent: the
-        // server answers a repeated key by returning the FIRST order rather
-        // than filing a second, so the next worker's whole cart evaporates and
-        // `Done` confirms it to them under a stranger's order number.
-        //
-        // So the window this leaves — a config write that lands while the
-        // order behind it does not — loses an order that was never promised:
-        // nothing is queued, no confirmation is shown, and the worker is still
-        // standing at a cart they can submit again. The reverse window loses an
-        // order that WAS promised, to somebody who has already walked away.
-        const advanced = { ...cfg, nextDeviceSeq: deviceSeq + 1 };
-        applyConfig(await writeConfig(advanced));
+        // Enqueue atomically advances the live counter under this credential generation.
+        // A stale screen cannot restore a captured token after replacement/re-pairing.
+        const enqueueOwner = boxRegistryCredentialOwnerOf(cfg);
+        if (!enqueueOwner) throw new GrantDenied("wrong_owner");
+        const client = clientFor(cfg);
+        if (!client) throw new GrantDenied("wrong_owner");
+        const prepared = await prepareStrictPickup(
+          client,
+          enqueueOwner,
+          confirmed,
+          body.createdAt ?? scannedAt().toISOString(),
+        );
+        if (prepared) {
+          body = prepared;
+          deviceSeq = prepared.deviceSeq;
+        }
         // DURABLE BEFORE ANY NETWORK ATTEMPT, and still before any of it. The
         // queue is what makes a pickup survive a crash, a reload or a battery
         // pull between here and the server, and `flushQueue`'s
@@ -940,7 +965,14 @@ export function KioskShell(): React.JSX.Element {
         // answer, so this is device-local bookkeeping — it is what lets the
         // day count charge an order that has not synced yet to the worker who
         // took it, and what `flushQueue` copies into the journal.
-        await enqueueOrder(body, active.employee.id, "pending_attestation", bottleCount(state));
+        await enqueueOrder(
+          body,
+          active.employee.id,
+          prepared?.admissionProof ? undefined : "pending_attestation",
+          bottleCount(state),
+          enqueueOwner,
+        );
+        applyConfig(await readConfig());
         // Attestation belongs to the same globally serialized drain as submit.
         // Splitting it here let an interval drain read and submit this durable
         // proofless record while the reservation request was still in flight.
@@ -969,11 +1001,13 @@ export function KioskShell(): React.JSX.Element {
         // write is the one that failed, under the next one if it succeeded and
         // the queue write did not. Neither path can use a sequence twice.
         awaited.current = null;
+        applyConfig(await readConfig());
         dispatchFlow({ type: "submitFailed" });
-        console.error("kiosk: the order could not be filed", err);
+        if (err instanceof GrantDenied) setGrantBlocked(err.reason);
+        else console.error("kiosk: the order could not be filed", err);
       }
     },
-    [applyConfig, drain, scannedAt],
+    [applyConfig, clientFor, drain, scannedAt],
   );
 
   /**
@@ -1180,7 +1214,14 @@ export function KioskShell(): React.JSX.Element {
         writeoffAvailable={snapshot.bootstrap.reasons.length > 0}
         onChoose={(reason) => dispatchFlow({ type: "chooseOperation", reason })}
         onBack={() => dispatchFlow({ type: "back" })}
-        onCancel={() => dispatchFlow({ type: "cancelConfirmed" })}
+        onCancel={() => {
+          const owner = boxRegistryCredentialOwnerOf(configRef.current);
+          if (owner && session)
+            void abandonPickupDrafts(owner, session.employee.id, session.cart)
+              .then(() => dispatchFlow({ type: "cancelConfirmed" }))
+              .catch((error) => console.error("kiosk: draft cancellation failed", error));
+          else dispatchFlow({ type: "cancelConfirmed" });
+        }}
       />
     );
   } else if (view === "reason" && session && snapshot) {
@@ -1191,7 +1232,14 @@ export function KioskShell(): React.JSX.Element {
         onSelect={(id) => dispatchFlow({ type: "chooseWriteoffReason", id })}
         onContinue={() => dispatchFlow({ type: "continue" })}
         onBack={() => dispatchFlow({ type: "back" })}
-        onCancel={() => dispatchFlow({ type: "cancelConfirmed" })}
+        onCancel={() => {
+          const owner = boxRegistryCredentialOwnerOf(configRef.current);
+          if (owner && session)
+            void abandonPickupDrafts(owner, session.employee.id, session.cart)
+              .then(() => dispatchFlow({ type: "cancelConfirmed" }))
+              .catch((error) => console.error("kiosk: draft cancellation failed", error));
+          else dispatchFlow({ type: "cancelConfirmed" });
+        }}
       />
     );
   } else if (view === "confirmation" && flow.screen === "confirmation" && snapshot) {
@@ -1208,7 +1256,14 @@ export function KioskShell(): React.JSX.Element {
         reasonName={reasonName}
         pending={flow.submitting}
         onBack={() => dispatchFlow({ type: "back" })}
-        onCancel={() => dispatchFlow({ type: "cancelConfirmed" })}
+        onCancel={() => {
+          const owner = boxRegistryCredentialOwnerOf(configRef.current);
+          if (owner && session)
+            void abandonPickupDrafts(owner, session.employee.id, session.cart)
+              .then(() => dispatchFlow({ type: "cancelConfirmed" }))
+              .catch((error) => console.error("kiosk: draft cancellation failed", error));
+          else dispatchFlow({ type: "cancelConfirmed" });
+        }}
         onConfirm={() => {
           if (
             flow.session.cart.reason === "writeoff" &&
@@ -1280,12 +1335,25 @@ export function KioskShell(): React.JSX.Element {
             const unviewed = owner
               ? await findOldestUnviewedOutcome(owner, admitted.employee.id)
               : null;
+            const draftOwner = boxRegistryCredentialOwnerOf(configRef.current);
+            const draft =
+              !unviewed && draftOwner
+                ? await recoverPickupDraft(draftOwner, admitted.employee.id, admitted.badgeDigest)
+                : null;
+            if (draft) {
+              dispatchFlow({ type: "draftRecovered", session: { ...session, cart: draft.cart } });
+              return;
+            }
+            if (!unviewed) await admitNewCart();
             dispatchFlow(
               unviewed
                 ? { type: "outcomeRecovered", session, outcome: unviewed }
                 : { type: "sessionStarted", session },
             );
-          })();
+          })().catch((error) => {
+            if (error instanceof GrantDenied) setGrantBlocked(error.reason);
+            else console.error("kiosk: session admission failed", error);
+          });
         }}
         // The ONLY way back into scanner setup once a kiosk is running: the
         // pairing screen's own entry is gone the moment the device is paired,
@@ -1320,11 +1388,17 @@ export function KioskShell(): React.JSX.Element {
   return (
     <>
       <KioskLayout
-        status={status}
+        status={
+          <>
+            {status}
+            <GrantDiagnostic status={grantStatus} />
+          </>
+        }
         {...(session !== null && submitted === null ? { onActivity: restartInactivityTimers } : {})}
       >
         <>
           {screen}
+          <GrantNotice reason={grantBlocked} onClose={() => setGrantBlocked(null)} />
           <Modal
             open={inactivityWarning}
             width={520}

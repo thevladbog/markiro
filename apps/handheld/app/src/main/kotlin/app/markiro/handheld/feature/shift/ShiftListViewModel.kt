@@ -86,10 +86,13 @@ class ShiftListViewModel(
         },
     )
 
+    val grantDenial = app.markiro.handheld.core.grants.GrantDenialUi()
+
     private val generation = recovery.token()
 
     private fun launchOwned(block: suspend CoroutineScope.() -> Unit) = viewModelScope.launch {
-        recovery.work(generation) { block() }
+        try { recovery.work(generation) { block() } }
+        catch (_: app.markiro.handheld.core.grants.GrantDenied) { dialog.value=null; grantDenial.show() }
     }
 
     private val now: () -> Long = System::currentTimeMillis

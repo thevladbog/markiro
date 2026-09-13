@@ -29,6 +29,8 @@ export default defineConfig({
     "./src/schema/shift-exports.ts",
     "./src/schema/disaggregation.ts",
     "./src/schema/inventory.ts",
+    "./src/schema/public-api.ts",
+    "./src/schema/device-grants.ts",
     "./src/schema/chz.ts",
     "./src/schema/product-regulatory.ts",
     "./src/schema/national-catalog-import.ts",

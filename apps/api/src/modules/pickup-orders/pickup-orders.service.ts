@@ -1,4 +1,9 @@
 import {
+  withEvidenceTransaction,
+  type EvidenceTransactionHook,
+} from "../device-grants/evidence-transaction";
+import type { SubscriptionTransaction } from "../../subscriptions/entitlements.types";
+import {
   BadRequestException,
   ConflictException,
   Inject,
@@ -25,7 +30,9 @@ import {
   type SQL,
 } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
-import { formatPhc, PHC_ITERATIONS, validatePickupKm } from "@markiro/domain";
+import { formatPhc, PHC_ITERATIONS, validatePickupKm, type GrantOwner } from "@markiro/domain";
+import { lockTenantBoxRegistry } from "../boxes/box-registry-lock";
+import { freezeKioskOrderScope } from "../device-grants/kiosk-frozen-scope";
 import { DB } from "../../auth/auth.module";
 import { getOrCreateBadgeSalt, readBadgeSalt } from "../../lib/badge-salt";
 import { nextOrderNo } from "../../pickup/order-number";
@@ -227,11 +234,21 @@ export class PickupOrdersService {
     tenantId: string,
     kioskId: string,
     dto: CreateOrderDto,
+    evidence?: EvidenceTransactionHook<CreateOrderResultDto>,
   ): Promise<CreateOrderResultDto> {
     const processing = kioskOrderProcessingLines(dto);
     // 1. Idempotency: a replayed sync for the same device sequence returns the same order, unchanged.
     const existing = await this.findKioskOrderOutcome(tenantId, kioskId, dto.deviceSeq);
     if (existing) {
+      if (evidence)
+        return this.db.transaction((tx) =>
+          withEvidenceTransaction(tx, evidence, async () => {
+            const winner = await this.findKioskOrderOutcome(tenantId, kioskId, dto.deviceSeq, tx);
+            if (!winner) throw new Error("Durable kiosk outcome disappeared");
+            await this.consumeKioskAdmission(tx, tenantId, kioskId, dto.deviceSeq);
+            return this.kioskResultFromOutcome(winner);
+          }),
+        );
       // The order is already durable, so any reservation left behind for this
       // idempotency key has served its only purpose. This also repairs the
       // crash window where the order committed but an older deployment did
@@ -333,7 +350,8 @@ export class PickupOrdersService {
       const winner = processing.vNext
         ? await this.persistSerializedEarlyRejection(row, hasLines)
         : await this.persistLegacyEarlyRejection(row, hasLines);
-      if (winner) return this.kioskResultFromOutcome(winner);
+      if (winner)
+        return this.finishKioskEvidence(tenantId, kioskId, dto.deviceSeq, winner, evidence);
       throw new UnprocessableEntityException("Unknown or inactive badge");
     }
     const employeeId = employee.id;
@@ -352,7 +370,8 @@ export class PickupOrdersService {
       const winner = processing.vNext
         ? await this.persistSerializedEarlyRejection(row, true)
         : await this.persistLegacyEarlyRejection(row, true);
-      if (winner) return this.kioskResultFromOutcome(winner);
+      if (winner)
+        return this.finishKioskEvidence(tenantId, kioskId, dto.deviceSeq, winner, evidence);
       throw new UnprocessableEntityException({
         code: "writeoff_forbidden",
         message: "Employee is not allowed to create writeoffs",
@@ -389,7 +408,8 @@ export class PickupOrdersService {
       const winner = processing.vNext
         ? await this.persistSerializedEarlyRejection(row, true)
         : await this.persistLegacyEarlyRejection(row, true);
-      if (winner) return this.kioskResultFromOutcome(winner);
+      if (winner)
+        return this.finishKioskEvidence(tenantId, kioskId, dto.deviceSeq, winner, evidence);
       throw error;
     }
 
@@ -413,6 +433,7 @@ export class PickupOrdersService {
       processing.items,
       processing.boxes,
       processing.vNext,
+      evidence,
     );
 
     if (order.writeoffForbidden) {
@@ -445,11 +466,13 @@ export class PickupOrdersService {
     tenantId: string,
     kioskId: string,
     dto: CreateOrderAdmissionDto,
+    grantOwner?: GrantOwner,
+    transaction?: SubscriptionTransaction,
   ): Promise<CreateOrderAdmissionResultDto> {
-    return this.db.transaction(async (tx) => {
+    const attest = async (tx: SubscriptionTransaction): Promise<CreateOrderAdmissionResultDto> => {
       const claimedAt = new Date();
       const requestedToken = dto.admissionNonce;
-      if (requestedToken) {
+      if (requestedToken && !grantOwner) {
         const [existing] = await tx
           .select({ claimedAt: schema.kioskOrderAdmissions.claimedAt })
           .from(schema.kioskOrderAdmissions)
@@ -473,14 +496,33 @@ export class PickupOrdersService {
       }
       const token = requestedToken ?? issueOpaqueKioskAdmissionToken();
       // Serialize reservations for this authenticated device. One deviceSeq
-      // owns one constant-sized row (the request body itself is not stored),
+      // owns one row; negotiated grants additionally retain validated exact scope,
       // while distinct offline records are bounded by the per-kiosk outstanding
       // cap: a kiosk that queued a genuine backlog can drain it record-by-record.
-      await tx
-        .select({ id: schema.kiosks.id })
+      // Native negotiated freeze follows registry-before-kiosk ordering used by order commit.
+      if (grantOwner) await lockTenantBoxRegistry(tx, tenantId);
+      const [lockedKiosk] = await tx
+        .select({
+          id: schema.kiosks.id,
+          credentialEpoch: schema.kiosks.credentialEpoch,
+          status: schema.kiosks.status,
+        })
         .from(schema.kiosks)
         .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, kioskId)))
         .for("update");
+      if (
+        grantOwner &&
+        (!lockedKiosk ||
+          grantOwner.kind !== "kiosk" ||
+          grantOwner.tenantId !== tenantId ||
+          grantOwner.deviceId !== kioskId ||
+          grantOwner.credentialEpoch !== lockedKiosk.credentialEpoch ||
+          lockedKiosk.status !== "active")
+      )
+        throw new ConflictException({ code: "kiosk_credential_changed" });
+      const frozenScope = grantOwner
+        ? await freezeKioskOrderScope(tx, tenantId, kioskId, dto)
+        : null;
       const durableRow = (
         await tx
           .select({ maxDurableSeq: max(schema.pickupOrders.deviceSeq) })
@@ -528,6 +570,8 @@ export class PickupOrdersService {
           subscriptionId: subscription.id,
           tokenHash: kioskAdmissionTokenHash(token),
           payloadDigest: kioskOrderPayloadDigest(dto),
+          frozenScope,
+          credentialEpoch: frozenScope && grantOwner ? grantOwner.credentialEpoch : null,
           claimedAt,
           notAfter: subscription.endsAt,
         })
@@ -541,13 +585,16 @@ export class PickupOrdersService {
             subscriptionId: subscription.id,
             tokenHash: kioskAdmissionTokenHash(token),
             payloadDigest: kioskOrderPayloadDigest(dto),
+            frozenScope,
+            credentialEpoch: frozenScope && grantOwner ? grantOwner.credentialEpoch : null,
             claimedAt,
             notAfter: subscription.endsAt,
             issuedAt: claimedAt,
           },
         });
       return { claimedAt: claimedAt.toISOString(), admissionProof: token };
-    });
+    };
+    return transaction ? attest(transaction) : this.db.transaction(attest);
   }
 
   /** Offline-cache payload: everything a kiosk needs to operate without a round-trip per scan. */
@@ -1598,6 +1645,24 @@ export class PickupOrdersService {
     });
   }
 
+  private async finishKioskEvidence(
+    tenantId: string,
+    kioskId: string,
+    deviceSeq: number,
+    outcome: KioskOrderOutcome,
+    evidence: EvidenceTransactionHook<CreateOrderResultDto> | undefined,
+  ): Promise<CreateOrderResultDto> {
+    const result = this.kioskResultFromOutcome(outcome);
+    if (!evidence) return result;
+    return this.db.transaction((tx) =>
+      withEvidenceTransaction(tx, evidence, async () => {
+        const winner = await this.findKioskOrderOutcome(tenantId, kioskId, deviceSeq, tx);
+        if (!winner) throw new Error("Durable kiosk outcome disappeared");
+        return this.kioskResultFromOutcome(winner);
+      }),
+    );
+  }
+
   private kioskResultFromOutcome(outcome: KioskOrderOutcome): CreateOrderResultDto {
     if (outcome.rejected) this.throwPersistedKioskRejection(outcome);
     return {
@@ -2088,6 +2153,7 @@ export class PickupOrdersService {
     rawItems: CreateOrderDto["items"],
     requestedBoxes: NonNullable<CreateOrderDto["boxes"]>,
     vNext: boolean,
+    evidence?: EvidenceTransactionHook<CreateOrderResultDto>,
   ): Promise<KioskOrderOutcome> {
     let remaining = [...items];
     const accumulatedConflicts = [...conflicts];
@@ -2121,27 +2187,128 @@ export class PickupOrdersService {
             .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, kioskId)))
             .for("update");
 
-          // The optimistic lookup at createFromKiosk's entry keeps ordinary
-          // replays cheap. This second lookup is the race-free one: it runs
-          // after both locks, so a concurrent winner is committed and visible
-          // before this request makes any policy or allowance decision.
-          const serializedWinner = await findSerializedKioskWinner({
-            findOrder: () => this.findKioskOrderOutcome(tenantId, kioskId, deviceSeq, tx),
-            ...(vNext
-              ? {
-                  findRejection: () =>
-                    this.findKioskRejectionOutcome(tenantId, kioskId, deviceSeq, tx),
-                }
-              : {}),
-          });
-          if (serializedWinner) {
-            await this.consumeKioskAdmission(tx, tenantId, kioskId, deviceSeq);
-            return serializedWinner;
-          }
+          await evidence?.before(tx);
+          const apply = async (): Promise<KioskOrderOutcome> => {
+            // The optimistic lookup at createFromKiosk's entry keeps ordinary
+            // replays cheap. This second lookup is the race-free one: it runs
+            // after both locks, so a concurrent winner is committed and visible
+            // before this request makes any policy or allowance decision.
+            const serializedWinner = await findSerializedKioskWinner({
+              findOrder: () => this.findKioskOrderOutcome(tenantId, kioskId, deviceSeq, tx),
+              ...(vNext
+                ? {
+                    findRejection: () =>
+                      this.findKioskRejectionOutcome(tenantId, kioskId, deviceSeq, tx),
+                  }
+                : {}),
+            });
+            if (serializedWinner) {
+              await this.consumeKioskAdmission(tx, tenantId, kioskId, deviceSeq);
+              return serializedWinner;
+            }
 
-          const policy = await this.resolveLivePickupPolicy(tx, tenantId, employeeId);
-          if (reason === "writeoff" && !policy.canWriteoff) {
-            if (rawItems.length + requestedBoxes.length > 0) {
+            const policy = await this.resolveLivePickupPolicy(tx, tenantId, employeeId);
+            if (reason === "writeoff" && !policy.canWriteoff) {
+              if (rawItems.length + requestedBoxes.length > 0) {
+                await this.recordScanRejection(tx, {
+                  tenantId,
+                  kioskId,
+                  employeeId,
+                  badgeCode: null,
+                  orderId: null,
+                  deviceSeq,
+                  codes: [
+                    ...rawItems.map((item) => ({
+                      rawKm: item.rawKm,
+                      reason: "writeoff_forbidden",
+                    })),
+                    ...requestedBoxes.map((box) => ({
+                      source: "box" as const,
+                      sscc: box.sscc,
+                      bottleCount: null,
+                      reason: "writeoff_forbidden",
+                    })),
+                    ...(vNext
+                      ? [kioskOrderRequestMarker({ boxes: requestedBoxes }, "writeoff_forbidden")!]
+                      : []),
+                  ],
+                  scannedAt: when,
+                });
+              }
+              await this.consumeKioskAdmission(tx, tenantId, kioskId, deviceSeq);
+              return {
+                orderNo: "",
+                itemCount: 0,
+                conflicts: [],
+                boxConflicts: [],
+                acceptedBoxes: [],
+                writeoffForbidden: true as const,
+              };
+            }
+
+            const resolved = await resolveOrderBoxes(tx, tenantId, remainingBoxes);
+            const allMemberKeys = resolved.boxes.flatMap((box) =>
+              box.members.map((member) => member.kmKey),
+            );
+            const keysToCheck = [
+              ...new Set([...remaining.map((item) => item.kmKey), ...allMemberKeys]),
+            ];
+            const usedRows =
+              keysToCheck.length === 0
+                ? []
+                : await tx
+                    .select({ kmKey: schema.pickupOrderItems.kmKey })
+                    .from(schema.pickupOrderItems)
+                    .where(
+                      and(
+                        eq(schema.pickupOrderItems.tenantId, tenantId),
+                        eq(schema.pickupOrderItems.voided, false),
+                        inArray(schema.pickupOrderItems.kmKey, keysToCheck),
+                      ),
+                    );
+            const usedKeys = new Set(usedRows.map((row) => row.kmKey));
+            const duplicateLooseConflicts: OrderConflict[] = [];
+            const uniqueLoose = remaining.filter((item) => {
+              if (!usedKeys.has(item.kmKey)) return true;
+              duplicateLooseConflicts.push({ rawKm: item.rawKm, reason: "duplicate" });
+              return false;
+            });
+            const boxDedup = classifyResolvedBoxConflicts({
+              boxes: resolved.boxes,
+              looseKeys: new Set(uniqueLoose.map((item) => item.kmKey)),
+              usedKeys,
+            });
+            const existingCount = await this.countTakenToday(tx, tenantId, employeeId, when);
+            const limited = applyOrderLineLimit({
+              existingCount,
+              dayLimit: policy.dayLimit,
+              limited: policy.limited,
+              loose: uniqueLoose,
+              boxes: boxDedup.accepted,
+              looseConflict: (item) => ({ rawKm: item.rawKm, reason: "over_limit" }),
+            });
+            attemptedAccepted = limited.acceptedLoose;
+            attemptedBoxes = limited.acceptedBoxes;
+            const attemptConflicts = [
+              ...accumulatedConflicts,
+              ...duplicateLooseConflicts,
+              ...limited.looseConflicts,
+            ];
+            const attemptBoxConflicts = [
+              ...accumulatedBoxConflicts,
+              ...resolved.conflicts,
+              ...boxDedup.conflicts,
+              ...limited.boxConflicts,
+            ];
+            const storedConflicts = this.joinStoredConflicts(attemptConflicts, attemptBoxConflicts);
+            const acceptedBottleCount =
+              limited.acceptedLoose.length +
+              limited.acceptedBoxes.reduce((total, box) => total + box.bottleCount, 0);
+
+            // A non-empty scan that produced only conflicts must not create an
+            // empty pending order. The rejection and admission consumption are
+            // committed under the same employee/day lock as the decision.
+            if (acceptedBottleCount === 0 && rawItems.length + requestedBoxes.length > 0) {
               await this.recordScanRejection(tx, {
                 tenantId,
                 kioskId,
@@ -2150,242 +2317,159 @@ export class PickupOrdersService {
                 orderId: null,
                 deviceSeq,
                 codes: [
-                  ...rawItems.map((item) => ({
-                    rawKm: item.rawKm,
-                    reason: "writeoff_forbidden",
-                  })),
-                  ...requestedBoxes.map((box) => ({
-                    source: "box" as const,
-                    sscc: box.sscc,
-                    bottleCount: null,
-                    reason: "writeoff_forbidden",
-                  })),
+                  ...storedConflicts,
                   ...(vNext
-                    ? [kioskOrderRequestMarker({ boxes: requestedBoxes }, "writeoff_forbidden")!]
+                    ? [kioskOrderRequestMarker({ boxes: requestedBoxes }, "order_rejected")!]
                     : []),
                 ],
+                scannedAt: when,
+              });
+              await this.consumeKioskAdmission(tx, tenantId, kioskId, deviceSeq);
+              this.logger.warn(
+                `kiosk ${kioskId}: all ${rawItems.length + requestedBoxes.length} submitted line(s) refused for employee ${employeeId} — ${storedConflicts.map((conflict) => conflict.reason).join(", ")}`,
+              );
+              return {
+                orderNo: "",
+                itemCount: 0,
+                conflicts: attemptConflicts,
+                boxConflicts: attemptBoxConflicts,
+                acceptedBoxes: [],
+                ...(vNext ? { rejected: true as const } : {}),
+              };
+            }
+
+            // nextOrderNo's `tx` param is deliberately loosely typed (Task 7) so it
+            // doesn't have to import drizzle's transaction type; adapt the real
+            // transaction handle's `execute` to that shape at the call site instead
+            // of widening `order-number.ts`'s own signature.
+            const orderNo = await nextOrderNo(
+              {
+                execute: (q) => tx.execute<{ seq: number }>(q as Parameters<typeof tx.execute>[0]),
+              },
+              tenantId,
+              when,
+            );
+            const [order] = await tx
+              .insert(schema.pickupOrders)
+              .values({
+                tenantId,
+                orderNo,
+                kioskId,
+                employeeId,
+                reason,
+                writeoffReasonId,
+                status: "pending",
+                itemCount: acceptedBottleCount,
+                totalPrice: computeTotalPrice([
+                  ...limited.acceptedLoose,
+                  ...limited.acceptedBoxes.flatMap((box) =>
+                    box.members.map(() => ({ unitPrice: box.unitPrice })),
+                  ),
+                ]),
+                deviceSeq,
+                createdAt: when,
+                syncConflicts: storedConflicts.length > 0 ? storedConflicts : null,
+              })
+              .returning();
+            if (!order) throw new Error("Failed to insert pickup order");
+            const orderBoxIds = new Map<string, string>();
+            if (limited.acceptedBoxes.length > 0) {
+              const insertedBoxes = await tx
+                .insert(schema.pickupOrderBoxes)
+                .values(
+                  limited.acceptedBoxes.map((box) => ({
+                    tenantId,
+                    orderId: order.id,
+                    boxId: box.boxId,
+                    sscc: box.sscc,
+                    productId: box.productId,
+                    bottleCount: box.bottleCount,
+                    unitPrice: box.unitPrice,
+                  })),
+                )
+                .returning({
+                  id: schema.pickupOrderBoxes.id,
+                  boxId: schema.pickupOrderBoxes.boxId,
+                });
+              for (const box of insertedBoxes) orderBoxIds.set(box.boxId, box.id);
+              for (const box of limited.acceptedBoxes) {
+                if (!orderBoxIds.has(box.boxId)) {
+                  throw new Error("Failed to persist pickup order box provenance");
+                }
+              }
+            }
+            if (acceptedBottleCount > 0) {
+              await tx.insert(schema.pickupOrderItems).values([
+                ...limited.acceptedLoose.map((item) => ({
+                  tenantId,
+                  orderId: order.id,
+                  productId: item.productId,
+                  gtin14: item.gtin14,
+                  serial: item.serial,
+                  rawKm: item.rawKm,
+                  kmKey: item.kmKey,
+                  unitPrice: item.unitPrice,
+                  scannedAt: when,
+                })),
+                ...limited.acceptedBoxes.flatMap((box) => {
+                  const orderBoxId = orderBoxIds.get(box.boxId);
+                  if (!orderBoxId) throw new Error("Missing pickup order box provenance");
+                  return box.members.map((member) => ({
+                    tenantId,
+                    orderId: order.id,
+                    orderBoxId,
+                    productId: box.productId,
+                    gtin14: member.gtin14,
+                    serial: member.serial,
+                    rawKm: member.rawKm,
+                    kmKey: member.kmKey,
+                    unitPrice: box.unitPrice,
+                    scannedAt: when,
+                  }));
+                }),
+              ]);
+            }
+            // Same transaction as the order on purpose: the kmKey-race retry
+            // below rolls this back with it, so a rejection row can never
+            // outlive the order attempt that produced it.
+            if (storedConflicts.length > 0) {
+              await this.recordScanRejection(tx, {
+                tenantId,
+                kioskId,
+                employeeId,
+                badgeCode: null,
+                orderId: order.id,
+                deviceSeq,
+                codes: storedConflicts,
                 scannedAt: when,
               });
             }
             await this.consumeKioskAdmission(tx, tenantId, kioskId, deviceSeq);
             return {
-              orderNo: "",
-              itemCount: 0,
-              conflicts: [],
-              boxConflicts: [],
-              acceptedBoxes: [],
-              writeoffForbidden: true as const,
-            };
-          }
-
-          const resolved = await resolveOrderBoxes(tx, tenantId, remainingBoxes);
-          const allMemberKeys = resolved.boxes.flatMap((box) =>
-            box.members.map((member) => member.kmKey),
-          );
-          const keysToCheck = [
-            ...new Set([...remaining.map((item) => item.kmKey), ...allMemberKeys]),
-          ];
-          const usedRows =
-            keysToCheck.length === 0
-              ? []
-              : await tx
-                  .select({ kmKey: schema.pickupOrderItems.kmKey })
-                  .from(schema.pickupOrderItems)
-                  .where(
-                    and(
-                      eq(schema.pickupOrderItems.tenantId, tenantId),
-                      eq(schema.pickupOrderItems.voided, false),
-                      inArray(schema.pickupOrderItems.kmKey, keysToCheck),
-                    ),
-                  );
-          const usedKeys = new Set(usedRows.map((row) => row.kmKey));
-          const duplicateLooseConflicts: OrderConflict[] = [];
-          const uniqueLoose = remaining.filter((item) => {
-            if (!usedKeys.has(item.kmKey)) return true;
-            duplicateLooseConflicts.push({ rawKm: item.rawKm, reason: "duplicate" });
-            return false;
-          });
-          const boxDedup = classifyResolvedBoxConflicts({
-            boxes: resolved.boxes,
-            looseKeys: new Set(uniqueLoose.map((item) => item.kmKey)),
-            usedKeys,
-          });
-          const existingCount = await this.countTakenToday(tx, tenantId, employeeId, when);
-          const limited = applyOrderLineLimit({
-            existingCount,
-            dayLimit: policy.dayLimit,
-            limited: policy.limited,
-            loose: uniqueLoose,
-            boxes: boxDedup.accepted,
-            looseConflict: (item) => ({ rawKm: item.rawKm, reason: "over_limit" }),
-          });
-          attemptedAccepted = limited.acceptedLoose;
-          attemptedBoxes = limited.acceptedBoxes;
-          const attemptConflicts = [
-            ...accumulatedConflicts,
-            ...duplicateLooseConflicts,
-            ...limited.looseConflicts,
-          ];
-          const attemptBoxConflicts = [
-            ...accumulatedBoxConflicts,
-            ...resolved.conflicts,
-            ...boxDedup.conflicts,
-            ...limited.boxConflicts,
-          ];
-          const storedConflicts = this.joinStoredConflicts(attemptConflicts, attemptBoxConflicts);
-          const acceptedBottleCount =
-            limited.acceptedLoose.length +
-            limited.acceptedBoxes.reduce((total, box) => total + box.bottleCount, 0);
-
-          // A non-empty scan that produced only conflicts must not create an
-          // empty pending order. The rejection and admission consumption are
-          // committed under the same employee/day lock as the decision.
-          if (acceptedBottleCount === 0 && rawItems.length + requestedBoxes.length > 0) {
-            await this.recordScanRejection(tx, {
-              tenantId,
-              kioskId,
-              employeeId,
-              badgeCode: null,
-              orderId: null,
-              deviceSeq,
-              codes: [
-                ...storedConflicts,
-                ...(vNext
-                  ? [kioskOrderRequestMarker({ boxes: requestedBoxes }, "order_rejected")!]
-                  : []),
-              ],
-              scannedAt: when,
-            });
-            await this.consumeKioskAdmission(tx, tenantId, kioskId, deviceSeq);
-            this.logger.warn(
-              `kiosk ${kioskId}: all ${rawItems.length + requestedBoxes.length} submitted line(s) refused for employee ${employeeId} — ${storedConflicts.map((conflict) => conflict.reason).join(", ")}`,
-            );
-            return {
-              orderNo: "",
-              itemCount: 0,
+              orderNo: order.orderNo,
+              itemCount: order.itemCount,
               conflicts: attemptConflicts,
               boxConflicts: attemptBoxConflicts,
-              acceptedBoxes: [],
-              ...(vNext ? { rejected: true as const } : {}),
+              acceptedBoxes: limited.acceptedBoxes
+                .map((box) => ({ sscc: box.sscc, bottleCount: box.bottleCount }))
+                .toSorted((left, right) => left.sscc.localeCompare(right.sscc)),
             };
-          }
-
-          // nextOrderNo's `tx` param is deliberately loosely typed (Task 7) so it
-          // doesn't have to import drizzle's transaction type; adapt the real
-          // transaction handle's `execute` to that shape at the call site instead
-          // of widening `order-number.ts`'s own signature.
-          const orderNo = await nextOrderNo(
-            { execute: (q) => tx.execute<{ seq: number }>(q as Parameters<typeof tx.execute>[0]) },
-            tenantId,
-            when,
-          );
-          const [order] = await tx
-            .insert(schema.pickupOrders)
-            .values({
-              tenantId,
-              orderNo,
-              kioskId,
-              employeeId,
-              reason,
-              writeoffReasonId,
-              status: "pending",
-              itemCount: acceptedBottleCount,
-              totalPrice: computeTotalPrice([
-                ...limited.acceptedLoose,
-                ...limited.acceptedBoxes.flatMap((box) =>
-                  box.members.map(() => ({ unitPrice: box.unitPrice })),
-                ),
-              ]),
-              deviceSeq,
-              createdAt: when,
-              syncConflicts: storedConflicts.length > 0 ? storedConflicts : null,
-            })
-            .returning();
-          if (!order) throw new Error("Failed to insert pickup order");
-          const orderBoxIds = new Map<string, string>();
-          if (limited.acceptedBoxes.length > 0) {
-            const insertedBoxes = await tx
-              .insert(schema.pickupOrderBoxes)
-              .values(
-                limited.acceptedBoxes.map((box) => ({
-                  tenantId,
-                  orderId: order.id,
-                  boxId: box.boxId,
-                  sscc: box.sscc,
-                  productId: box.productId,
-                  bottleCount: box.bottleCount,
-                  unitPrice: box.unitPrice,
-                })),
-              )
-              .returning({ id: schema.pickupOrderBoxes.id, boxId: schema.pickupOrderBoxes.boxId });
-            for (const box of insertedBoxes) orderBoxIds.set(box.boxId, box.id);
-            for (const box of limited.acceptedBoxes) {
-              if (!orderBoxIds.has(box.boxId)) {
-                throw new Error("Failed to persist pickup order box provenance");
-              }
-            }
-          }
-          if (acceptedBottleCount > 0) {
-            await tx.insert(schema.pickupOrderItems).values([
-              ...limited.acceptedLoose.map((item) => ({
-                tenantId,
-                orderId: order.id,
-                productId: item.productId,
-                gtin14: item.gtin14,
-                serial: item.serial,
-                rawKm: item.rawKm,
-                kmKey: item.kmKey,
-                unitPrice: item.unitPrice,
-                scannedAt: when,
-              })),
-              ...limited.acceptedBoxes.flatMap((box) => {
-                const orderBoxId = orderBoxIds.get(box.boxId);
-                if (!orderBoxId) throw new Error("Missing pickup order box provenance");
-                return box.members.map((member) => ({
-                  tenantId,
-                  orderId: order.id,
-                  orderBoxId,
-                  productId: box.productId,
-                  gtin14: member.gtin14,
-                  serial: member.serial,
-                  rawKm: member.rawKm,
-                  kmKey: member.kmKey,
-                  unitPrice: box.unitPrice,
-                  scannedAt: when,
-                }));
-              }),
-            ]);
-          }
-          // Same transaction as the order on purpose: the kmKey-race retry
-          // below rolls this back with it, so a rejection row can never
-          // outlive the order attempt that produced it.
-          if (storedConflicts.length > 0) {
-            await this.recordScanRejection(tx, {
-              tenantId,
-              kioskId,
-              employeeId,
-              badgeCode: null,
-              orderId: order.id,
-              deviceSeq,
-              codes: storedConflicts,
-              scannedAt: when,
-            });
-          }
-          await this.consumeKioskAdmission(tx, tenantId, kioskId, deviceSeq);
-          return {
-            orderNo: order.orderNo,
-            itemCount: order.itemCount,
-            conflicts: attemptConflicts,
-            boxConflicts: attemptBoxConflicts,
-            acceptedBoxes: limited.acceptedBoxes
-              .map((box) => ({ sscc: box.sscc, bottleCount: box.bottleCount }))
-              .toSorted((left, right) => left.sscc.localeCompare(right.sscc)),
           };
+          const outcome = await apply();
+          if (evidence && !outcome.rejected && !outcome.writeoffForbidden)
+            await evidence.after(tx, this.kioskResultFromOutcome(outcome));
+          return outcome;
         });
       } catch (error) {
         if (this.isDeviceSeqRace(error)) {
           const winner = await this.findKioskOrderOutcome(tenantId, kioskId, deviceSeq);
           if (!winner) throw error; // shouldn't happen, but avoid looping forever
+          if (evidence)
+            await this.db.transaction((tx) =>
+              withEvidenceTransaction(tx, evidence, () =>
+                Promise.resolve(this.kioskResultFromOutcome(winner)),
+              ),
+            );
           await this.consumeKioskAdmission(this.db, tenantId, kioskId, deviceSeq);
           return winner;
         }

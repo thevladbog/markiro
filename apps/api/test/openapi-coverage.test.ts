@@ -1,7 +1,7 @@
 import "reflect-metadata";
 import { readdirSync } from "node:fs";
 import { join, relative } from "node:path";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
 /**
  * Static OpenAPI coverage gate: every Nest route must carry an
@@ -46,14 +46,22 @@ interface RouteProblem {
   problems: string[];
 }
 
-async function collectProblems(): Promise<RouteProblem[]> {
+type ControllerModule = { file: string; exports: Record<string, unknown> };
+let controllerModules: ControllerModule[] = [];
+
+// Loading controller dependencies includes cold Vite transforms and module setup.
+// Keep that setup under the normal hook deadline; the test deadline applies to
+// the complete metadata walk and every assertion, with no route exclusions.
+beforeAll(async () => {
   const files = findControllerFiles(SRC_DIR).sort();
-  expect(files.length).toBeGreaterThan(40); // guard against a silently-empty walk
+  controllerModules = [];
+  for (const file of files) controllerModules.push({ file, exports: await import(file) });
+});
 
+function collectProblems(): RouteProblem[] {
+  expect(controllerModules.length).toBeGreaterThan(40); // guard against a silently-empty walk
   const failures: RouteProblem[] = [];
-
-  for (const file of files) {
-    const moduleExports: Record<string, unknown> = await import(file);
+  for (const { file, exports: moduleExports } of controllerModules) {
     for (const exported of Object.values(moduleExports)) {
       if (typeof exported !== "function") continue;
       const controllerPath: unknown = Reflect.getMetadata(PATH_METADATA, exported);
@@ -118,8 +126,8 @@ async function collectProblems(): Promise<RouteProblem[]> {
 }
 
 describe("OpenAPI documentation coverage", () => {
-  it("documents a summary and a success response for every route", async () => {
-    const failures = await collectProblems();
+  it("documents a summary and a success response for every route", () => {
+    const failures = collectProblems();
     const report = failures
       .map(({ route, problems }) => `${route}\n  - ${problems.join("\n  - ")}`)
       .join("\n");

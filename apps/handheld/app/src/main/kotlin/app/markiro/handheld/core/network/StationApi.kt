@@ -8,6 +8,18 @@ import retrofit2.http.Query
 
 /** Station-only endpoints; the handheld authenticates exactly like a station (`x-api-key`). */
 interface StationApi {
+    @POST("station/grants/v1/configuration")
+    suspend fun grantConfiguration(@Body body: kotlinx.serialization.json.JsonObject): kotlinx.serialization.json.JsonObject
+
+    @GET("station/grants/v1/keyset")
+    suspend fun grantKeyset(): kotlinx.serialization.json.JsonObject
+
+    @POST("station/grants/v1/device")
+    suspend fun deviceGrant(@Body body: kotlinx.serialization.json.JsonObject): kotlinx.serialization.json.JsonObject
+
+    @POST("station/grants/v1/tasks")
+    suspend fun taskGrant(@Body body: kotlinx.serialization.json.JsonObject): kotlinx.serialization.json.JsonObject
+
     @GET("station/identity")
     suspend fun identity(): IdentityResponse
 
@@ -36,6 +48,9 @@ interface StationApi {
 
     @POST("station/inventories/{id}/leave")
     suspend fun leaveInventory(@Path("id") id: String, @Body body: LeaveInventoryRequest): LeaveInventoryResponse
+
+    @POST("station/grants/v1/evidence/inventories/{id}/leave")
+    suspend fun grantInventoryLeave(@Path("id") id: String, @Body body: kotlinx.serialization.json.JsonObject): kotlinx.serialization.json.JsonObject
 
     @POST("shifts/{id}/enter")
     suspend fun enter(@Path("id") id: String): ShiftDto

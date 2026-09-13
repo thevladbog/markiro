@@ -60,7 +60,9 @@ describe.skipIf(!databaseUrl)("working device forward migration", () => {
         );
       }
     }
-    beforeDevices = (await pool.query("SELECT * FROM station_devices ORDER BY id")).rows;
+    beforeDevices = (
+      await pool.query("SELECT *, 1 AS credential_epoch FROM station_devices ORDER BY id")
+    ).rows;
     legacyOccupied = (
       await pool.query(
         "SELECT tenant_id,count(*)::int AS count FROM station_devices WHERE revoked_at IS NULL GROUP BY tenant_id ORDER BY tenant_id",

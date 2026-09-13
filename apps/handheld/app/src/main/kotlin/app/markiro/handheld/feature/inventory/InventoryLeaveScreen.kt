@@ -36,6 +36,20 @@ fun InventoryLeaveScreen(step: LeaveStep, onDone: () -> Unit, onBack: () -> Unit
                 tone = Tone.Warn,
                 primaryIsAccent = false,
             )
+            LeaveStep.GrantDenied -> FullScreenState(
+                Icons.Outlined.ErrorOutline,
+                stringResource(R.string.offline_grant_denied_title),
+                stringResource(R.string.offline_grant_denied_body),
+                primary = StateAction(stringResource(R.string.common_back), onBack),
+                tone = Tone.Warn,
+            )
+            LeaveStep.Quarantined -> FullScreenState(
+                Icons.Outlined.ErrorOutline,
+                stringResource(R.string.inventory_leave_review_title),
+                stringResource(R.string.inventory_leave_review_body),
+                primary = StateAction(stringResource(R.string.common_back), onBack),
+                tone = Tone.Warn,
+            )
             LeaveStep.Failed -> FullScreenState(
                 Icons.Outlined.ErrorOutline,
                 stringResource(R.string.inventory_leave_failed),

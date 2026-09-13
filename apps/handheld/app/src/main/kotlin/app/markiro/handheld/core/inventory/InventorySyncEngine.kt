@@ -1,5 +1,7 @@
 package app.markiro.handheld.core.inventory
 
+import app.markiro.handheld.core.grants.GrantEvidenceTransport
+
 import app.markiro.handheld.core.network.EventBatchResponseDto
 import app.markiro.handheld.core.network.ProgressPageDto
 import app.markiro.handheld.core.storage.DeviceConfigDao
@@ -111,13 +113,14 @@ class InventorySyncEngine(
 
     internal enum class Step { SENT, EMPTY, FAILED }
 
-    private class Pin(val batchId: String, val payloadDigest: String, val ceilingId: Long, val request: String)
+    private class Pin(val batchId: String, val payloadDigest: String, val ceilingId: Long, val request: String, val negotiated: Boolean = false)
 
     private fun pinJson(pin: Pin) = CanonicalJson.obj(
         "batchId" to CanonicalJson.str(pin.batchId),
         "payloadDigest" to CanonicalJson.str(pin.payloadDigest),
         "ceilingId" to CanonicalJson.num(pin.ceilingId),
         "request" to CanonicalJson.str(pin.request),
+        "negotiated" to CanonicalJson.bool(pin.negotiated),
     )
 
     private fun parsePin(text: String): Pin? = runCatching {
@@ -127,6 +130,7 @@ class InventorySyncEngine(
             o.getValue("payloadDigest").jsonPrimitive.content,
             o.getValue("ceilingId").jsonPrimitive.content.toLong(),
             o.getValue("request").jsonPrimitive.content,
+            o["negotiated"]?.jsonPrimitive?.content == "true",
         )
     }.getOrNull()
 
@@ -135,24 +139,30 @@ class InventorySyncEngine(
     private suspend fun drainOnceOwned(task: InventoryTaskEntity): Step {
         val id = task.inventoryId
         val pinned = meta.get(MetaStore.inventoryPin(id))?.let(::parsePin)
-        val rows = if (pinned != null) db.inventoryOutboxDao().headThrough(id, pinned.ceilingId, BATCH_SIZE) else db.inventoryOutboxDao().head(id, BATCH_SIZE)
+        var rows = if (pinned != null) db.inventoryOutboxDao().headThrough(id, pinned.ceilingId, BATCH_SIZE) else db.inventoryOutboxDao().head(id, BATCH_SIZE)
         if (rows.isEmpty()) {
             if (pinned != null) db.recovery.commit { meta.remove(MetaStore.inventoryPin(id)) }
             return Step.EMPTY
         }
+        val evidence = GrantEvidenceTransport(db)
+        val negotiated = pinned?.negotiated ?: evidence.negotiated(rows.first().eventId)
+        if (pinned == null) rows = rows.takeWhile { evidence.negotiated(it.eventId) == negotiated }
         val pin = pinned ?: run {
             val payload = InventoryBatchCodec.payloadJson(
                 task.snapshotId, rows.last().deviceSequence, db.inventoryOutboxDao().countAfter(id, rows.last().id), rows.map { it.payloadJson },
             )
             val digest = InventoryBatchCodec.digest(payload)
             val batchId = UUID.randomUUID().toString()
-            Pin(batchId, digest, rows.last().id, InventoryBatchCodec.requestJson(batchId, digest, payload)).also {
+            Pin(batchId, digest, rows.last().id, InventoryBatchCodec.requestJson(batchId, digest, payload), negotiated).also {
                 db.recovery.commit { meta.put(MetaStore.inventoryPin(id), pinJson(it)) }
             }
         }
-        val result = transport.post("/station/inventories/$id/event-batches", pin.request) as? TransportResult.Ok ?: return Step.FAILED
+        val links = rows.mapIndexed { i, row -> "/events/$i#inventory.scan.v1" to row.eventId }.toMap()
+        val request = evidence.prepare("inventory:$id", pin.batchId, "/station/inventories/$id/event-batches", pin.request, links, pin.negotiated)
+        val result = transport.post(request.path, request.body) as? TransportResult.Ok ?: return Step.FAILED
         if (result.code !in 200..299) return Step.FAILED
-        val response = runCatching { json.decodeFromString(EventBatchResponseDto.serializer(), result.body) }.getOrNull() ?: return Step.FAILED
+        val native = evidence.nativeResult(request, result.body) ?: return Step.FAILED
+        val response = runCatching { json.decodeFromString(EventBatchResponseDto.serializer(), native) }.getOrNull() ?: return Step.FAILED
         if (!acknowledges(response, task, pin, rows.map { it.eventId })) return Step.FAILED
         val at = clock()
         var quarantined = false

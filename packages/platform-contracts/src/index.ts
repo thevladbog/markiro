@@ -597,3 +597,26 @@ export type {
 export * from "./device-replacements.js";
 
 export * from "./device-retention.js";
+export {
+  PUBLIC_API_SCOPES,
+  publicApiScopesSchema,
+  publicApiKeyCreateSchema,
+  publicApiKeyUpdateSchema,
+} from "./public-api.js";
+export type { PublicApiScope } from "./public-api.js";
+export * from "./offline-grants.js";
+
+export {
+  publicInventoryStatusSchema,
+  publicInventorySchema,
+  publicInventoriesSchema,
+  publicProductSchema,
+  publicProductsSchema,
+  publicImportSchema,
+  publicSnapshotSchema,
+  publicInventoryStartSchema,
+  publicInventoryProgressSchema,
+  publicResultClassificationSchema,
+  publicInventoryResultSchema,
+  publicInventoryResultsSchema,
+} from "./public-api.js";

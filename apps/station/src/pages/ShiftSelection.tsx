@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useTranslation } from "react-i18next";
 import { Alert, Button, Pager } from "@markiro/ui";
 import { StationApiError, type StationClient } from "../lib/api-client.js";
+import { OfflineGrantDeniedError } from "../lib/journal.js";
 import { paginate } from "../lib/pagination.js";
 import { FloorFooter } from "../ui/FloorFooter.js";
 import { ShiftCard } from "../ui/ShiftCard.js";
@@ -94,6 +95,8 @@ export interface ShiftSelectionProps {
   title?: string;
   actionsLabel?: string;
   refreshLabel?: string;
+  /** Observe-mode diagnostic; it must never claim that productive work is blocked. */
+  offlineGrantNotice?: string | null;
 }
 
 export interface ShiftSelectionRouteIntent {
@@ -141,6 +144,7 @@ export function ShiftSelection({
   title,
   actionsLabel,
   refreshLabel,
+  offlineGrantNotice,
 }: ShiftSelectionProps) {
   const { t, i18n } = useTranslation();
   const [items, setItems] = useState<ShiftListItem[]>([]);
@@ -328,7 +332,17 @@ export function ShiftSelection({
       else await onSelected(entered);
     } catch (err) {
       if (current()) {
-        setError(err instanceof StationApiError ? err.message : t("shifts.actionFailed"));
+        setError(
+          err instanceof StationApiError
+            ? err.message
+            : err instanceof OfflineGrantDeniedError
+              ? t(
+                  err.reason === "clock_untrusted"
+                    ? "shifts.offlineGrantClock"
+                    : "shifts.offlineGrantDenied",
+                )
+              : t("shifts.actionFailed"),
+        );
       }
     } finally {
       if (!committed && intent) {
@@ -397,7 +411,13 @@ export function ShiftSelection({
     }
   }
 
-  const message = error ? <Alert tone="error">{error}</Alert> : <span aria-hidden="true" />;
+  const message = error ? (
+    <Alert tone="error">{error}</Alert>
+  ) : offlineGrantNotice ? (
+    <Alert tone="info">{offlineGrantNotice}</Alert>
+  ) : (
+    <span aria-hidden="true" />
+  );
 
   return (
     <StationScreen

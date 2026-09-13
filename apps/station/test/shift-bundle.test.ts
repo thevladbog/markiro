@@ -71,6 +71,42 @@ const bundle: StationBundle = {
 };
 
 describe("mirrorShiftBundle", () => {
+  it("binds raw nullable shift capacities without inheriting product defaults", async () => {
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+    const currentBundle: StationBundle = {
+      ...bundle,
+      shift: {
+        ...bundle.shift,
+        validationPrint: {
+          mode: "none",
+          verification: "none",
+          templateId: null,
+          snapshot: null,
+          policyRevision: null,
+        },
+        ssccIssuerCounterpartyId: null,
+        boxLabelTemplateId: null,
+        palletLabelTemplateId: null,
+        createdFrom: "admin",
+        stationCloseAccess: { kind: "admin_only" },
+        boxCapacity: null,
+        palletBoxCapacity: null,
+        palletsEnabled: true,
+      },
+      palletLabelTemplate: null,
+    };
+    await expect(
+      mirrorShiftBundle({ get: vi.fn().mockResolvedValue(currentBundle) }, exec, "s1"),
+    ).resolves.toBe(true);
+    const [row] = await exec.all<{ execution_scope_json: string }>(
+      "SELECT execution_scope_json FROM shift_mirror WHERE id='s1'",
+    );
+    expect(JSON.parse(row!.execution_scope_json).shift).toEqual(
+      expect.objectContaining({ boxCapacity: null, palletsEnabled: true, palletBoxCapacity: null }),
+    );
+  });
+
   it("does not let a late stale bundle overwrite the authoritative live roster", async () => {
     const exec = nodeExecutor();
     await applyMigrations(exec);

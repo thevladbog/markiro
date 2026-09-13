@@ -1,5 +1,6 @@
 package app.markiro.handheld.feature.shift
 
+import app.markiro.handheld.core.grants.*
 import app.markiro.handheld.core.box.ServerRange
 import app.markiro.handheld.core.box.SsccPool
 import app.markiro.handheld.core.network.BundleSsccDto
@@ -137,6 +138,7 @@ class ShiftRepository(
     suspend fun enter(shiftId: String): EnterResult = db.recovery.work { enterOwned(shiftId) }
 
     private suspend fun enterOwned(shiftId: String): EnterResult {
+        GrantTransport(db,api).refreshConfiguredDevice()
         val cached = db.shiftDao().get(shiftId)
         val entered = try {
             api.enter(shiftId)
@@ -155,6 +157,7 @@ class ShiftRepository(
         val now = clock()
         applySsccBlock(bundle)
         db.recovery.commit {
+            if(cached?.enteredAt == null) db.grants.start(TaskKind.SHIFT,shiftId,"shift.enter:$shiftId")
             db.shiftDao().upsert(
                 bundle.shift.toEntity(cached, now).copy(
                     status = entered.status,
@@ -176,9 +179,11 @@ class ShiftRepository(
                     leftAt = null,
                 ),
             )
+            db.grants.saveProvenance(TaskKind.SHIFT,shiftId,Json { encodeDefaults=true; explicitNulls=true }.encodeToString(ShiftBundleDto.serializer(),bundle))
             // As on the station, `bundle.operators` is ignored: pairing and the roster refresh are the authoritative sources.
             db.deviceConfigDao().get()?.let { db.deviceConfigDao().upsert(it.copy(activeShiftId = shiftId)) }
         }
+        GrantTransport(db,api).refreshConfiguredTask(TaskKind.SHIFT,shiftId)
         if (bundle.shift.validationPrint.mode == "duplicate_dm") history.refresh(shiftId, bundle.product.id)
         return EnterResult.Ok
     }
@@ -270,6 +275,7 @@ class ShiftRepository(
     private suspend fun enterOfflineOwned(cached: ShiftEntity) {
         val now = clock()
         db.recovery.commit {
+            if(cached.enteredAt == null) db.grants.start(TaskKind.SHIFT,cached.id,"shift.enter:${cached.id}")
             db.shiftDao().upsert(cached.copy(enteredAt = now, leftAt = null))
             db.deviceConfigDao().get()?.let { db.deviceConfigDao().upsert(it.copy(activeShiftId = cached.id)) }
         }

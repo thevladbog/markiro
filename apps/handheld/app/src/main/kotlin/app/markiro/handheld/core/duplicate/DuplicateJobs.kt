@@ -1,5 +1,6 @@
 package app.markiro.handheld.core.duplicate
 
+import app.markiro.handheld.core.grants.*
 import android.util.Base64
 import app.markiro.handheld.core.box.PrintReason
 import app.markiro.handheld.core.km.KmException
@@ -223,6 +224,7 @@ class DuplicateJobs(
         val projection = applyProductLabelEvent(null, event, verification)
 
         db.recovery.commit {
+            db.grants.complete(TaskKind.SHIFT,shift.id,event.eventId,GrantEventType.SHIFT_LABEL_PREPARE,units=1,payload=event.payloadDigest,executionFingerprint=GrantTaskMatcher.fingerprint(shift))
             PrintDestinations(db).retain(PrintPurpose.DUPLICATE, jobId, attemptId, printer)
             db.productLabelJobDao().insert(
                 ProductLabelJobEntity(

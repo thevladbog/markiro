@@ -36,13 +36,14 @@ class PrinterRoutingMigrationTest {
         old.openHelper.writableDatabase.apply {
             execSQL("DROP TABLE printer_assignments")
             execSQL("DROP TABLE print_destinations")
+            listOf("grant_state", "grant_tokens", "grant_counters", "grant_evidence", "grant_task_bindings", "grant_task_provenance").forEach { execSQL("DROP TABLE $it") }
             version = 12
         }
         old.close()
         val upgraded = Room.databaseBuilder(context, HandheldDatabase::class.java, name)
-            .addMigrations(MIGRATION_12_13).allowMainThreadQueries().build()
+            .addMigrations(MIGRATION_12_13, MIGRATION_13_14).allowMainThreadQueries().build()
         try {
-            assertEquals(13, upgraded.openHelper.readableDatabase.version)
+            assertEquals(14, upgraded.openHelper.readableDatabase.version)
             PrintPurpose.entries.forEach { assertEquals("b", upgraded.printerDao().assigned(it)?.id) }
             assertEquals(listOf("a", "b"), upgraded.printerDao().all().map { it.id })
             assertEquals("unknown", upgraded.boxDao().get("box")?.printState)

@@ -1,5 +1,7 @@
 package app.markiro.handheld.feature.inventory
 
+import app.markiro.handheld.core.grants.GrantEvidenceTransport
+import app.markiro.handheld.core.inventory.InventoryLeaveJournal
 import app.markiro.handheld.core.inventory.InventoryBundleMirror
 import app.markiro.handheld.core.inventory.MirrorResult
 import app.markiro.handheld.core.network.ErrorBody
@@ -13,6 +15,7 @@ import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.InventoryTaskEntity
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
 import retrofit2.HttpException
 import java.io.IOException
 
@@ -30,6 +33,7 @@ sealed interface LeaveResult {
     data class Pending(val queued: Int) : LeaveResult
     data object Offline : LeaveResult
     data object Failed : LeaveResult
+    data object Quarantined : LeaveResult
 }
 
 data class ResolvedTask(val task: InventoryTaskDto, val requiresConfirmation: Boolean)
@@ -98,6 +102,7 @@ class InventoryRepository(
     private suspend fun activateOwned(inventoryId: String) {
         val now = clock()
         db.recovery.commit {
+            InventoryLeaveJournal(db).activate(inventoryId)
             db.inventoryTaskDao().setJoinedAt(inventoryId, now)
             db.deviceConfigDao().get()?.let { db.deviceConfigDao().upsert(it.copy(activeInventoryId = inventoryId)) }
         }
@@ -107,10 +112,21 @@ class InventoryRepository(
     override suspend fun leave(inventoryId: String): LeaveResult = db.recovery.work { leaveOwned(inventoryId) }
 
     private suspend fun leaveOwned(inventoryId: String): LeaveResult {
-        val queued = db.inventoryOutboxDao().count(inventoryId)
-        if (queued > 0) return LeaveResult.Pending(queued)
+        val journal = InventoryLeaveJournal(db)
+        if (journal.completed(inventoryId)) return LeaveResult.Left
+        var queued = 0
+        val request = db.recovery.commit {
+            queued = db.inventoryOutboxDao().count(inventoryId)
+            if (queued > 0) null else journal.prepare(inventoryId, json.encodeToString(LeaveInventoryRequest.serializer(), LeaveInventoryRequest(0, 0)))
+        } ?: return LeaveResult.Pending(queued)
         return try {
-            val response = api.leaveInventory(inventoryId, LeaveInventoryRequest(0, 0))
+            val response = if (!request.negotiated) api.leaveInventory(inventoryId, json.decodeFromString(LeaveInventoryRequest.serializer(), request.body)) else {
+                val receipt = api.grantInventoryLeave(inventoryId, json.parseToJsonElement(request.body).jsonObject)
+                val evidence = GrantEvidenceTransport(db)
+                val native = evidence.nativeResult(request, receipt.toString())
+                    ?: return if (evidence.receipt(request) != null) LeaveResult.Quarantined else LeaveResult.Failed
+                json.decodeFromString(app.markiro.handheld.core.network.LeaveInventoryResponse.serializer(), native)
+            }
             if (response.outcome != "left") return LeaveResult.Failed
             val now = clock()
             db.recovery.commit {

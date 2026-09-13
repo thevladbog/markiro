@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import { grantEvidenceBodyParser } from "./modules/device-grants/evidence-body-parser";
 import express, { type Express } from "express";
 import { Logger } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
@@ -80,6 +81,7 @@ async function bootstrap() {
   // `excludeExchangeRoute`'s own comment for why registration order alone
   // cannot be trusted to keep a mismatched `Content-Type: application/json`
   // request out of this parser.
+  server.use(grantEvidenceBodyParser);
   server.use(stationScansBodyParser);
   server.use(nationalCatalogBodyParser);
   server.use(excludeExchangeRoute(express.json()));
@@ -106,6 +108,7 @@ async function bootstrap() {
             "",
             "Authentication depends on the caller:",
             "- **Cabinet** routes use the Better Auth session cookie issued by `/api/auth/*` (not part of this document).",
+            "- **Public integrations** use a scoped public `x-api-key` on `/public/v1/*` (production edge: `/api/public/v1/*`).",
             "- **Station** routes use the `x-api-key` header issued once during station pairing.",
             "- **Kiosk** routes use the `x-kiosk-token` header issued once during kiosk pairing.",
             "- **Signer agent** routes use the `x-signer-token` header issued once during agent pairing.",
@@ -120,6 +123,15 @@ async function bootstrap() {
             description: "Cabinet session cookie issued by Better Auth (`/api/auth/*`).",
           },
           CABINET_SESSION_SECURITY,
+        )
+        .addApiKey(
+          {
+            type: "apiKey",
+            name: "x-api-key",
+            in: "header",
+            description: "Public integration key with explicit scopes; no cabinet cookie.",
+          },
+          "publicApiKey",
         )
         .addApiKey(
           {

@@ -13,6 +13,14 @@ import {
 import type { SqlExecutor } from "./mirror.js";
 import { setInventoryProductionDate } from "./inventory-date.js";
 import { burnSerial } from "./sscc-pool.js";
+import { acquireCredentialCommitLease, type CredentialGeneration } from "./credential-recovery.js";
+import {
+  StationGrantAdmission,
+  stationOperatorIsCurrentlyActive,
+} from "./offline-grants/admission.js";
+import { sampleGrantClock, type GrantClockSample } from "./offline-grants/clock.js";
+import { readInventoryExecutionProjection } from "./offline-grants/semantic.js";
+import { OfflineGrantDeniedError } from "./journal.js";
 
 const BOX_EXTENSION_DIGIT = 0;
 
@@ -31,6 +39,8 @@ export interface RecordInventoryRepackScanInput {
   createItemId?: () => string;
   /** Оператор осознанно зачёл код с текущей датой короба. */
   acceptSourceDateMismatch?: boolean;
+  credentialGeneration?: CredentialGeneration;
+  sampleGrantClock?: () => Promise<GrantClockSample>;
 }
 
 export interface InventoryRepackBoxView {
@@ -226,6 +236,18 @@ async function existingJournal(
   return rows[0] ?? null;
 }
 
+async function assertNoPendingInventoryLeave(
+  exec: SqlExecutor,
+  input: Pick<RecordInventoryRepackScanInput, "inventoryId" | "snapshotId" | "deviceId">,
+): Promise<void> {
+  const rows = await exec.all<{ pending: number }>(
+    `SELECT 1 pending FROM offline_grant_inventory_leave_intents
+      WHERE inventory_id=? AND snapshot_id=? AND device_id=? AND left_at IS NULL LIMIT 1`,
+    [input.inventoryId, input.snapshotId, input.deviceId],
+  );
+  if (rows[0]) throw new Error("inventory leave is pending");
+}
+
 async function allocateSequence(
   exec: SqlExecutor,
   inventoryId: string,
@@ -281,15 +303,25 @@ async function writeJournal(exec: SqlExecutor, input: JournalWriteInput): Promis
     }
     return;
   }
-  await exec.run(
-    `INSERT INTO inventory_repack_journal
+  const statement = journalStatement(input);
+  await exec.run(statement.sql, [...statement.values]);
+  const stored = await existingJournal(exec, input.inventoryId, input.snapshotId, event.eventId);
+  if (!stored || stored.payload_json !== JSON.stringify(event)) {
+    throw new Error("inventory repack journal persistence failed");
+  }
+}
+
+function journalStatement(input: JournalWriteInput): { sql: string; values: readonly unknown[] } {
+  const event = input.event;
+  return {
+    sql: `INSERT INTO inventory_repack_journal
        (inventory_id, snapshot_id, event_id, device_id, device_sequence, operator_id,
         occurred_at, event_kind, normalized_identity, code_hash, canonical_raw,
         active_production_date, local_verdict, action, box_id, item_id, old_sscc,
         new_sscc, capacity, production_date, position, close_box,
         source_parent_mismatch, payload_json)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
+    values: [
       input.inventoryId,
       input.snapshotId,
       event.eventId,
@@ -315,10 +347,174 @@ async function writeJournal(exec: SqlExecutor, input: JournalWriteInput): Promis
       input.sourceParentMismatch ? 1 : 0,
       JSON.stringify(event),
     ],
-  );
-  const stored = await existingJournal(exec, input.inventoryId, input.snapshotId, event.eventId);
-  if (!stored || stored.payload_json !== JSON.stringify(event)) {
-    throw new Error("inventory repack journal persistence failed");
+  };
+}
+
+async function writeProductiveJournal(
+  exec: SqlExecutor,
+  input: JournalWriteInput,
+  generation: CredentialGeneration,
+  kind: "repack" | "box" | "dual",
+  clock: () => Promise<GrantClockSample>,
+): Promise<void> {
+  const lease = acquireCredentialCommitLease(generation);
+  if (!lease) throw new OfflineGrantDeniedError("stale_credential");
+  try {
+    const [state] = await exec.all<{
+      tenant_id: string;
+      device_id: string;
+      owner_kind: "station";
+      credential_epoch: number;
+    }>(
+      "SELECT tenant_id,device_id,owner_kind,credential_epoch FROM offline_grant_install_state WHERE id=1",
+    );
+    if (!state) {
+      await writeJournal(exec, input);
+      return;
+    }
+    if (!(await stationOperatorIsCurrentlyActive(exec, input.event.operatorId)))
+      throw new OfflineGrantDeniedError("operator_unauthorized");
+    const [binding] = await exec.all<{ snapshot_digest: string }>(
+      "SELECT json_extract(grant_json,'$.snapshotDigest') snapshot_digest FROM offline_grant_grants WHERE json_extract(grant_json,'$.kindOfGrant')='task' AND json_extract(grant_json,'$.taskKind')='inventory' AND json_extract(grant_json,'$.taskId')=? ORDER BY installed_sequence DESC LIMIT 1",
+      [input.inventoryId],
+    );
+    const snapshotDigest = binding?.snapshot_digest ?? "missing";
+    const owner = {
+      tenantId: state.tenant_id,
+      deviceId: state.device_id,
+      kind: state.owner_kind,
+      credentialEpoch: state.credential_epoch,
+    } as const;
+    const execution = await readInventoryExecutionProjection(exec, input.inventoryId);
+    const statement = journalStatement(input);
+    const sequenceStatement = (decisionGuard: string, decisionIds: readonly string[]) => ({
+      sql: `UPDATE inventory_terminal_state SET next_device_sequence=next_device_sequence+1 WHERE inventory_id=? AND snapshot_id=? AND device_id=? AND next_device_sequence=? AND ${decisionGuard}`,
+      values: [
+        input.inventoryId,
+        input.snapshotId,
+        input.deviceId,
+        input.event.deviceSequence,
+        ...decisionIds,
+      ],
+    });
+    const guardedJournal = (decisionGuard: string, decisionIds: readonly string[]) => ({
+      sql: statement.sql.replace(
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        `SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${decisionGuard} AND EXISTS(SELECT 1 FROM inventory_terminal_state WHERE inventory_id=? AND snapshot_id=? AND device_id=? AND next_device_sequence=?)`,
+      ),
+      values: [
+        ...statement.values,
+        ...decisionIds,
+        input.inventoryId,
+        input.snapshotId,
+        input.deviceId,
+        input.event.deviceSequence + 1,
+      ],
+    });
+    const base = {
+      owner,
+      capability: "inventory.start.v1" as const,
+      taskId: input.inventoryId,
+      snapshotDigest,
+      cost: {},
+    };
+    const admission = new StationGrantAdmission(exec, clock);
+    if (kind === "dual") {
+      const firstId = `${input.event.eventId}#inventory.repack.v1`,
+        secondId = `${input.event.eventId}#inventory.box.close.v1`;
+      const guard =
+        "json_extract((SELECT decision_json FROM offline_grant_decisions WHERE event_id=?),'$.allow')=1 AND json_extract((SELECT decision_json FROM offline_grant_decisions WHERE event_id=?),'$.allow')=1";
+      const committed = await admission.commitCompletionPair({
+        first: {
+          operatorId: input.event.operatorId,
+          intent: { ...base, eventId: firstId, eventType: "inventory.repack.v1" },
+          execution,
+          event: { eventType: "inventory.repack.v1", event: input.event },
+          facts: { units: 1 },
+          result: {},
+        },
+        second: {
+          operatorId: input.event.operatorId,
+          intent: { ...base, eventId: secondId, eventType: "inventory.box.close.v1" },
+          execution,
+          event: { eventType: "inventory.box.close.v1", event: input.event },
+          facts: { containers: 1 },
+          result: {},
+        },
+        ownerStatements: [
+          sequenceStatement(guard, [firstId, secondId]),
+          guardedJournal(guard, [firstId, secondId]),
+        ],
+      });
+      if (!committed.first.allow)
+        throw new OfflineGrantDeniedError(committed.first.reason ?? "denied");
+      if (!committed.second.allow)
+        throw new OfflineGrantDeniedError(committed.second.reason ?? "denied");
+    } else {
+      const eventType = kind === "box" ? "inventory.box.close.v1" : "inventory.repack.v1";
+      const eventId = `${input.event.eventId}#${eventType}`;
+      const committed = await admission.commitCompletion({
+        operatorId: input.event.operatorId,
+        intent: { ...base, eventId, eventType },
+        execution,
+        event: { eventType, event: input.event },
+        facts: kind === "box" ? { containers: 1 } : { units: 1 },
+        result: {},
+        ownerStatements: [
+          sequenceStatement(
+            "json_extract((SELECT decision_json FROM offline_grant_decisions WHERE event_id=?),'$.allow')=1",
+            [eventId],
+          ),
+          guardedJournal(
+            "json_extract((SELECT decision_json FROM offline_grant_decisions WHERE event_id=?),'$.allow')=1",
+            [eventId],
+          ),
+        ],
+      });
+      if (!committed.decision.allow)
+        throw new OfflineGrantDeniedError(committed.decision.reason ?? "denied");
+    }
+  } finally {
+    lease.release();
+  }
+}
+
+async function writeRecoveryJournal(
+  exec: SqlExecutor,
+  input: JournalWriteInput,
+  generation: CredentialGeneration,
+  ownerStatements: readonly { sql: string; values?: readonly unknown[] }[] = [],
+): Promise<void> {
+  const lease = acquireCredentialCommitLease(generation);
+  if (!lease) throw new OfflineGrantDeniedError("stale_credential");
+  try {
+    if (!exec.atomic) throw new Error("offline grant recovery transaction unavailable");
+    if (!(await stationOperatorIsCurrentlyActive(exec, input.event.operatorId)))
+      throw new OfflineGrantDeniedError("operator_unauthorized");
+    const statement = journalStatement(input);
+    await exec.atomic([
+      {
+        sql: "UPDATE inventory_terminal_state SET next_device_sequence=next_device_sequence+1 WHERE inventory_id=? AND snapshot_id=? AND device_id=? AND next_device_sequence=?",
+        values: [input.inventoryId, input.snapshotId, input.deviceId, input.event.deviceSequence],
+        expectedChanges: 1,
+      },
+      ...ownerStatements,
+      {
+        sql: statement.sql.replace(
+          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS(SELECT 1 FROM inventory_terminal_state WHERE inventory_id=? AND snapshot_id=? AND device_id=? AND next_device_sequence=?)",
+        ),
+        values: [
+          ...statement.values,
+          input.inventoryId,
+          input.snapshotId,
+          input.deviceId,
+          input.event.deviceSequence + 1,
+        ],
+      },
+    ]);
+  } finally {
+    lease.release();
   }
 }
 
@@ -438,8 +634,14 @@ async function recordInternal(
   exec: SqlExecutor,
   input: RecordInventoryRepackScanInput,
 ): Promise<InventoryRepackScanResult> {
+  const [activeGrant] = await exec.all<{ active: number }>(
+    "SELECT 1 active FROM offline_grant_install_state WHERE id=1",
+  );
+  if (activeGrant?.active === 1 && !input.credentialGeneration)
+    throw new OfflineGrantDeniedError("grant_aware_owner_required");
   const prior = await existingJournal(exec, input.inventoryId, input.snapshotId, input.eventId);
   if (prior) return replayResult(exec, input, prior);
+  await assertNoPendingInventoryLeave(exec, input);
   const terminalState = await terminal(exec, input);
   const state = await readInventoryRepackState(
     exec,
@@ -467,7 +669,11 @@ async function recordInternal(
     }
     const seeded = await oldBoxSourceDate(exec, input, oldSscc);
     const boxDate = seeded ?? terminalState.active_production_date!;
-    if (seeded !== null && seeded !== terminalState.active_production_date) {
+    if (
+      seeded !== null &&
+      seeded !== terminalState.active_production_date &&
+      !input.credentialGeneration
+    ) {
       // Not range-checked against [productionDateFrom, productionDateTo]
       // here: `seeded` only ever comes from `expected = 1` rows, and
       // inventory-mirror.ts's bundle validation (classifyInventorySnapshotRow
@@ -491,16 +697,21 @@ async function recordInternal(
         updatedAt: input.scannedAt,
       });
     }
-    const serial = await burnSerial(exec, input.issuerPrefix, BOX_EXTENSION_DIGIT);
+    const [poolClaim] = input.credentialGeneration
+      ? await exec.all<{ rowid: number; serial: number }>(
+          "SELECT rowid,next_serial serial FROM sscc_pool WHERE issuer_prefix=? AND extension_digit=? AND next_serial<=to_serial ORDER BY from_serial LIMIT 1",
+          [input.issuerPrefix, BOX_EXTENSION_DIGIT],
+        )
+      : [];
+    const serial = input.credentialGeneration
+      ? (poolClaim?.serial ?? null)
+      : await burnSerial(exec, input.issuerPrefix, BOX_EXTENSION_DIGIT);
     if (serial === null) throw new Error("inventory repack SSCC pool is exhausted");
     const newSscc = buildSscc(BOX_EXTENSION_DIGIT, input.issuerPrefix, serial);
     const boxId = input.createBoxId?.() ?? crypto.randomUUID();
-    const sequence = await allocateSequence(
-      exec,
-      input.inventoryId,
-      input.snapshotId,
-      input.deviceId,
-    );
+    const sequence = input.credentialGeneration
+      ? terminalState.next_device_sequence
+      : await allocateSequence(exec, input.inventoryId, input.snapshotId, input.deviceId);
     const repack: InventoryRepackMutation = {
       action: "open-box",
       boxId,
@@ -522,7 +733,7 @@ async function recordInternal(
       localVerdict: "unknown",
       repack,
     });
-    await writeJournal(exec, {
+    const journalInput: JournalWriteInput = {
       inventoryId: input.inventoryId,
       snapshotId: input.snapshotId,
       deviceId: input.deviceId,
@@ -533,7 +744,32 @@ async function recordInternal(
       newSscc,
       capacity: input.capacity,
       productionDate: boxDate,
-    });
+    };
+    if (input.credentialGeneration) {
+      if (!poolClaim) throw new Error("inventory repack SSCC pool is exhausted");
+      const ownerStatements = [
+        ...(seeded !== null && seeded !== terminalState.active_production_date
+          ? [
+              {
+                sql: "UPDATE inventory_terminal_state SET active_production_date=?,updated_at=? WHERE inventory_id=? AND snapshot_id=? AND device_id=?",
+                values: [
+                  seeded,
+                  input.scannedAt,
+                  input.inventoryId,
+                  input.snapshotId,
+                  input.deviceId,
+                ],
+              },
+            ]
+          : []),
+        {
+          sql: "UPDATE sscc_pool SET next_serial=next_serial+1 WHERE rowid=? AND next_serial=? AND next_serial<=to_serial",
+          values: [poolClaim.rowid, poolClaim.serial],
+          expectedChanges: 1,
+        },
+      ];
+      await writeRecoveryJournal(exec, journalInput, input.credentialGeneration, ownerStatements);
+    } else await writeJournal(exec, journalInput);
     return replayResult(exec, input, { payload_json: JSON.stringify(event) });
   }
 
@@ -601,12 +837,9 @@ async function recordInternal(
       sourceProductionDate: sourceDate,
     };
   }
-  const sequence = await allocateSequence(
-    exec,
-    input.inventoryId,
-    input.snapshotId,
-    input.deviceId,
-  );
+  const sequence = input.credentialGeneration
+    ? terminalState.next_device_sequence
+    : await allocateSequence(exec, input.inventoryId, input.snapshotId, input.deviceId);
   const dateMatches = terminalState.active_production_date === box.productionDate;
   const sourceParentMismatch = facts.row?.parentSscc !== box.oldSsccContext;
   const position = box.itemCount + 1;
@@ -629,7 +862,7 @@ async function recordInternal(
     localVerdict: classification.kind,
     ...(repack ? { repack } : {}),
   });
-  await writeJournal(exec, {
+  const journalInput: JournalWriteInput = {
     inventoryId: input.inventoryId,
     snapshotId: input.snapshotId,
     deviceId: input.deviceId,
@@ -641,7 +874,18 @@ async function recordInternal(
     position: repack ? position : null,
     closeBox,
     sourceParentMismatch,
-  });
+  };
+  if (repack && input.credentialGeneration) {
+    await writeProductiveJournal(
+      exec,
+      journalInput,
+      input.credentialGeneration,
+      closeBox ? "dual" : "repack",
+      input.sampleGrantClock ?? sampleGrantClock,
+    );
+  } else {
+    await writeJournal(exec, journalInput);
+  }
   const after = await readInventoryRepackState(
     exec,
     input.inventoryId,
@@ -680,6 +924,8 @@ interface CorrectionInput {
   operatorId: string;
   eventId: string;
   changedAt: string;
+  credentialGeneration?: CredentialGeneration;
+  sampleGrantClock?: () => Promise<GrantClockSample>;
 }
 
 export interface ResolveInvalidatedInventoryRepackBoxInput extends CorrectionInput {
@@ -693,6 +939,28 @@ async function correction(
   itemId?: string,
   productionDate?: string,
 ): Promise<void> {
+  const [activeGrant] = await exec.all<{ active: number }>(
+    "SELECT 1 active FROM offline_grant_install_state WHERE id=1",
+  );
+  if (activeGrant?.active === 1 && !input.credentialGeneration)
+    throw new OfflineGrantDeniedError("grant_aware_owner_required");
+  const prior = await existingJournal(exec, input.inventoryId, input.snapshotId, input.eventId);
+  if (prior) {
+    const event = parseStoredEvent(prior);
+    if (
+      event.operatorId !== input.operatorId ||
+      event.scannedAt !== input.changedAt ||
+      event.repack?.action !== action ||
+      (itemId !== undefined &&
+        (event.repack.action !== "remove-last" || event.repack.itemId !== itemId)) ||
+      (productionDate !== undefined &&
+        (event.repack.action !== "change-date" || event.repack.productionDate !== productionDate))
+    ) {
+      throw new Error("inventory repack event identity changed");
+    }
+    return;
+  }
+  if (action === "close-incomplete") await assertNoPendingInventoryLeave(exec, input);
   const state = await readInventoryRepackState(
     exec,
     input.inventoryId,
@@ -706,12 +974,9 @@ async function correction(
   if (action === "change-date" && state.box.itemCount > 0) {
     throw new Error("inventory repack non-empty box date is frozen");
   }
-  const sequence = await allocateSequence(
-    exec,
-    input.inventoryId,
-    input.snapshotId,
-    input.deviceId,
-  );
+  const sequence = input.credentialGeneration
+    ? (await terminal(exec, input)).next_device_sequence
+    : await allocateSequence(exec, input.inventoryId, input.snapshotId, input.deviceId);
   const repack: InventoryRepackMutation =
     action === "remove-last"
       ? { action, boxId: state.box.boxId, itemId: itemId!, changedAt: input.changedAt }
@@ -736,7 +1001,7 @@ async function correction(
     localVerdict: "repack-action",
     repack,
   });
-  await writeJournal(exec, {
+  const journalInput: JournalWriteInput = {
     inventoryId: input.inventoryId,
     snapshotId: input.snapshotId,
     deviceId: input.deviceId,
@@ -745,7 +1010,20 @@ async function correction(
     boxId: state.box.boxId,
     itemId: itemId ?? null,
     productionDate: productionDate ?? null,
-  });
+  };
+  if (action === "close-incomplete" && input.credentialGeneration) {
+    await writeProductiveJournal(
+      exec,
+      journalInput,
+      input.credentialGeneration,
+      "box",
+      input.sampleGrantClock ?? sampleGrantClock,
+    );
+  } else if (input.credentialGeneration) {
+    await writeRecoveryJournal(exec, journalInput, input.credentialGeneration);
+  } else {
+    await writeJournal(exec, journalInput);
+  }
 }
 
 export async function removeLastInventoryRepackItem(
@@ -803,6 +1081,11 @@ async function resolveInvalidatedInternal(
   exec: SqlExecutor,
   input: ResolveInvalidatedInventoryRepackBoxInput,
 ): Promise<void> {
+  const [activeGrant] = await exec.all<{ active: number }>(
+    "SELECT 1 active FROM offline_grant_install_state WHERE id=1",
+  );
+  if (activeGrant?.active === 1 && !input.credentialGeneration)
+    throw new OfflineGrantDeniedError("grant_aware_owner_required");
   const prior = await existingJournal(exec, input.inventoryId, input.snapshotId, input.eventId);
   if (prior) {
     const event = parseStoredEvent(prior);
@@ -831,12 +1114,9 @@ async function resolveInvalidatedInternal(
   if (state.box.invalidationSource !== "claim_lost") {
     throw new Error("inventory repack box is not a claim-lost conflict");
   }
-  const sequence = await allocateSequence(
-    exec,
-    input.inventoryId,
-    input.snapshotId,
-    input.deviceId,
-  );
+  const sequence = input.credentialGeneration
+    ? (await terminal(exec, input)).next_device_sequence
+    : await allocateSequence(exec, input.inventoryId, input.snapshotId, input.deviceId);
   const repack: InventoryRepackMutation = {
     action: "resolve-conflict",
     boxId: state.box.boxId,
@@ -856,14 +1136,17 @@ async function resolveInvalidatedInternal(
     localVerdict: "repack-action",
     repack,
   });
-  await writeJournal(exec, {
+  const journalInput: JournalWriteInput = {
     inventoryId: input.inventoryId,
     snapshotId: input.snapshotId,
     deviceId: input.deviceId,
     event,
     action: "resolve-conflict",
     boxId: state.box.boxId,
-  });
+  };
+  if (input.credentialGeneration)
+    await writeRecoveryJournal(exec, journalInput, input.credentialGeneration);
+  else await writeJournal(exec, journalInput);
 }
 
 export function resolveInvalidatedInventoryRepackBox(

@@ -27,3 +27,6 @@ export * from "./schema/device-replacements.js";
 
 export * from "./schema/device-retention.js";
 export * from "./schema/validation-reprocessing.js";
+
+export * from "./schema/public-api.js";
+export * from "./schema/device-grants.js";

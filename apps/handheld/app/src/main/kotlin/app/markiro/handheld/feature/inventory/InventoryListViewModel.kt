@@ -65,10 +65,13 @@ class InventoryListViewModel @Inject constructor(
     reachability: ReachabilityTracker,
     scans: ScanEvents,
 ) : ViewModel() {
+    val grantDenial = app.markiro.handheld.core.grants.GrantDenialUi()
+
     private val generation = recovery.token()
 
     private fun launchOwned(block: suspend CoroutineScope.() -> Unit) = viewModelScope.launch {
-        recovery.work(generation) { block() }
+        try { recovery.work(generation) { block() } }
+        catch (_: app.markiro.handheld.core.grants.GrantDenied) { dialog.value=null; grantDenial.show() }
     }
 
     private val now: () -> Long = System::currentTimeMillis
@@ -122,7 +125,10 @@ class InventoryListViewModel @Inject constructor(
     private suspend fun ownLineId(): String? = config.get()?.lineId
 
     init {
-        launchOwned { scans.events.collect { onScan(it.raw) } }
+        launchOwned { scans.events.collect { event ->
+            try { onScan(event.raw) }
+            catch (_: app.markiro.handheld.core.grants.GrantDenied) { dialog.value=null; grantDenial.show() }
+        } }
         refresh()
     }
 

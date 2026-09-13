@@ -70,6 +70,14 @@ function isStationRequest(req: Request): boolean {
   }
 
   return (
+    (method === "GET" && path === "/station/grants/v1/keyset") ||
+    (method === "POST" && /^\/station\/grants\/v1\/(?:configuration|device|tasks)$/.test(path)) ||
+    (method === "POST" &&
+      /^\/station\/grants\/v1\/evidence\/(?:scans|shift-closures)$/.test(path)) ||
+    (method === "POST" &&
+      /^\/station\/grants\/v1\/evidence\/inventories\/[^/]+\/(?:event-batches|leave)$/.test(
+        path,
+      )) ||
     (method === "GET" && /^\/station\/products\/[^/]+\/image\/[^/]+$/.test(path)) ||
     (method === "GET" && path === "/station/inventory-tasks") ||
     (method === "POST" && path === "/station/inventory-tasks/resolve-barcode") ||

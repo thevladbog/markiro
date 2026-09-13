@@ -48,6 +48,38 @@ class ValidationReprocessingTest {
             } finally { db.close() }
         }
     }
+    @Test fun reprocessingRequiresCurrentBoundPolicyAndChargesOccurrenceOnlyOnce() = runTest {
+        withDb { db ->
+            val previous=ShiftEntityFixtures.bundled("s1").copy(validationPrintMode="duplicate_dm",allowPreviouslyAcceptedCodes=false)
+            db.shiftDao().upsert(previous)
+            app.markiro.handheld.core.grants.installStrictShiftAuthority(db,"s1")
+            val current=previous.copy(allowPreviouslyAcceptedCodes=true)
+            db.shiftDao().upsert(current)
+            val raw="010460068200001321bound-repeat\u001d93CRYPTO"
+            val km=KmCodec.canonicalize(raw); val hash=KmCodec.hash(km)
+            val original=CodeEntity(hash,"old",km.gtin14,km.serial,"2026-09-01T00:00:00Z")
+            db.codeDao().insert(original)
+            db.validationDao().stage(listOf(ValidationHistoryEntity("pub",hash,"original","old","OLD-001","closed",original.scannedAt)))
+            db.validationDao().publish(ValidationHistoryPublication("s1","p1","pub","a".repeat(64),"2026-09-12T00:00:00Z","2026-09-12T01:00:00Z"))
+            val recorder=ScanRecorder(db)
+            assertTrue(runCatching { recorder.record(current,raw,"operator") }.exceptionOrNull() is app.markiro.handheld.core.grants.GrantDenied)
+            assertNull(db.validationDao().get("s1",hash))
+            assertEquals(0,db.outboxDao().countNow())
+            db.openHelper.readableDatabase.query("SELECT count(*) FROM grant_counters").use { assertTrue(it.moveToFirst()); assertEquals(0,it.getInt(0)) }
+            app.markiro.handheld.core.grants.installStrictShiftAuthority(db,"s1")
+            assertEquals(Verdict.OK,recorder.record(current,raw,"operator").verdict)
+            val occurrence=checkNotNull(db.validationDao().get("s1",hash))
+            assertEquals(raw,occurrence.raw)
+            assertEquals(original,db.codeDao().get(hash))
+            assertEquals(Verdict.DUPLICATE,recorder.record(current,raw,"operator").verdict)
+            assertEquals(occurrence,db.validationDao().get("s1",hash))
+            db.openHelper.readableDatabase.query("SELECT budgetId, consumed FROM grant_counters ORDER BY budgetId").use {
+                assertTrue(it.moveToFirst()); assertEquals("shift.scan.v1:events",it.getString(0)); assertEquals(1,it.getInt(1))
+                assertTrue(it.moveToNext()); assertEquals("shift.scan.v1:units",it.getString(0)); assertEquals(1,it.getInt(1)); assertFalse(it.moveToNext())
+            }
+        }
+    }
+
     private suspend fun withDb(block: suspend (HandheldDatabase) -> Unit) {
         val db = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), HandheldDatabase::class.java).allowMainThreadQueries().build()
         db.initializeRecoveryForTest()

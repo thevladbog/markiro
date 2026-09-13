@@ -3,6 +3,7 @@ package app.markiro.handheld.feature.settings
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.width
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -47,6 +48,31 @@ class SettingsScreenTest {
         version = "0.1.0",
         installId = "0123456789abcdef",
     )
+
+    @Test fun observationDiagnosticIsVisibleWithoutClaimingWorkIsBlocked() {
+        compose.setContent {
+            MarkiroTheme {
+                SettingsScreen(ui,config,onBack={},onScanner={},onTheme={},onLanguage={})
+            }
+        }
+        compose.onNodeWithText("Режим наблюдения — работа не блокируется").performScrollTo().assertExists()
+        compose.onNodeWithText("Обновить офлайн-допуск").performScrollTo().assertExists()
+    }
+
+    @Test fun clockRecoveryStatusOffersRefreshWithoutRemovingSavedDataNavigation() {
+        var refreshes=0
+        compose.setContent {
+            MarkiroTheme {
+                SettingsScreen(ui,config,onBack={},onScanner={},onTheme={},onLanguage={},
+                    grantStatus=app.markiro.handheld.core.grants.GrantStatus.CLOCK_UNTRUSTED,
+                    onRefreshGrants={refreshes++})
+            }
+        }
+        compose.onNodeWithText("Время не подтверждено. Подключитесь и обновите допуск").performScrollTo().assertExists()
+        compose.onNodeWithText("Сохранённые данные и синхронизация доступны").performScrollTo().assertExists()
+        compose.onNodeWithText("Обновить офлайн-допуск").performScrollTo().performClick()
+        assertEquals(1,refreshes)
+    }
 
     @Test
     fun longSyncValueKeepsAGapAndAlignsEveryLineToTheTrailingEdge() {

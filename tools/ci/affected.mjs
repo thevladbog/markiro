@@ -122,6 +122,22 @@ function jobsForPath(path) {
   )
     return [...sharedJobs.domain, "handheld_android"];
 
+  // Shared signed protocol and its mirrored Android fixtures own all native gates.
+  if (
+    path.startsWith("packages/domain/src/offline-grants/") ||
+    path.startsWith("packages/domain/test/offline-grant") ||
+    path === "packages/domain/src/product-labels/km.ts" ||
+    path === "apps/handheld/app/src/test/resources/grant-evidence-digests.json" ||
+    path === "apps/handheld/tools/generate-grant-evidence-fixtures.mjs" ||
+    path === "packages/platform-contracts/src/offline-grants.ts" ||
+    /^packages\/platform-contracts\/(?:fixtures|tools|test)\/(?:generate-)?offline-grants?[-.]/u.test(
+      path,
+    ) ||
+    /^apps\/handheld\/app\/src\/test\/resources\/offline-grants?[-.]/u.test(path)
+  ) {
+    return [...sharedJobs.domain, "handheld_android"];
+  }
+
   if (path.startsWith("apps/signer/")) {
     if (
       path.startsWith("apps/signer/src-tauri/") ||

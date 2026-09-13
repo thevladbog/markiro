@@ -339,6 +339,37 @@ project never changes the source assignment, credential or operational authority
 Fresh source/pool/commercial facts invalidate stale previews and mark saved projects
 for review. Actual transfer, downgrade retention and offline grants remain later deliveries.
 
+P1B.3b adds a separate scoped public-token boundary at `/public/v1`: product reads and
+inventory reads, creation, source import, explicit snapshot selection and start. Device
+execution stays on native routes and does not require the `publicApi` module. Public
+mutations bind an idempotency receipt to the authenticated key and request, preserve
+the original API-key actor, and commit with their business owner. Scope changes and
+current credentials are revalidated at protected boundaries. Public projections exclude
+native credentials, operator details and private storage references. See the
+[public API operations guide](operations/public-api.md).
+
+P1C uses separately signed finite device-start and frozen-task completion grants.
+Actual device credentials authenticate transport; signed grants never replace current
+authentication or the operator's independent permissions. Grants bind tenant, device,
+credential epoch, immutable task scope, explicit event dimensions and exclusive
+deadlines. Renewing a token or credential does not replenish the same task's consumed
+budget. SQLite, Room and IndexedDB owners assess and debit productive operations in
+the same durable transaction as their local event/outbox. Previously saved bytes and
+recovery queues remain available when new production is denied. Trusted time uses a
+server anchor, monotonic elapsed time and persisted high-water; a browser process
+restart needs authenticated time recovery.
+
+The approved lifecycle policy can select an explicit protocol-supported device cohort.
+Default observation preserves existing work; no policy durations or strict production
+cohort are seeded. Configuration recovery is independent of productive issuance and
+remains available after subscription expiry. Immutable server mode history preserves
+strict mode when a policy disappears; an approved observe transition permits rollback.
+Retired signing keys remain retired across refresh and credential recovery. Commercial
+catalog items, tariffs, services, offers and invoices acquire no additional policy
+prerequisite. See the [offline grants operations guide](operations/offline-device-grants.md)
+and [acceptance evidence](acceptance/offline-device-grants.md). Production activation
+and physical device acceptance remain separate P1D decisions.
+
 Bank imports retain the bounded source row as reconciliation evidence, while the public match and
 audit contracts expose only the payer account's last four digits and whether it is a known active,
 known archived, unknown, or unavailable account. Active known accounts may be suggested. Archived

@@ -1,0 +1,33 @@
+[
+  {
+    "payload": {
+      "batchId": "fixture",
+      "items": [
+        {
+          "raw": "010460068200001321АБВ\u001d93x\n\"\\",
+          "verdict": "ok",
+          "sequence": 9007199254740991
+        }
+      ],
+      "optional": null,
+      "enabled": true
+    },
+    "digest": "ce3310974df085cb316ac198cb55e17ade7cd1d509512c34120d675068856b8d"
+  },
+  {
+    "payload": {
+      "z": [
+        2,
+        1,
+        0
+      ],
+      "a": {
+        "2": 2,
+        "10": 10,
+        "😀": "emoji",
+        "\ud800": "\udfff"
+      }
+    },
+    "digest": "da63416da87e33cfc91b541b94ba2b4c3da8659f07bc5e228a14ee92383aa553"
+  }
+]

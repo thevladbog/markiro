@@ -15,6 +15,8 @@ sealed interface LeaveStep {
     data class Draining(val pending: Int) : LeaveStep
     data class Offline(val pending: Int) : LeaveStep
     data object Failed : LeaveStep
+    data object Quarantined : LeaveStep
+    data object GrantDenied : LeaveStep
     data object Left : LeaveStep
 }
 
@@ -42,7 +44,10 @@ class InventoryLeaveViewModel(
                     is LeaveResult.Pending -> LeaveStep.Offline(result.queued)
                     LeaveResult.Offline -> LeaveStep.Offline(repository.queued(inventoryId))
                     LeaveResult.Failed -> LeaveStep.Failed
+                    LeaveResult.Quarantined -> LeaveStep.Quarantined
                 }
+            } catch (_: app.markiro.handheld.core.grants.GrantDenied) {
+                LeaveStep.GrantDenied
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Exception) {

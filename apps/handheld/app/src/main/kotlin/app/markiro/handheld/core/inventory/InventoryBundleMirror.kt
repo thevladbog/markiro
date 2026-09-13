@@ -1,5 +1,7 @@
 package app.markiro.handheld.core.inventory
 
+import app.markiro.handheld.core.grants.*
+import kotlinx.serialization.json.Json
 import app.markiro.handheld.core.network.InventoryBundleCodeDto
 import app.markiro.handheld.core.network.InventoryBundlePageDto
 import app.markiro.handheld.core.network.InventoryManifestDto
@@ -33,12 +35,17 @@ class InventoryBundleMirror(
         if (manifest.snapshotRevision != 1 || manifest.productionDateFrom > manifest.productionDateTo || manifest.mode != "check") {
             return MirrorResult.Invalid("manifest")
         }
+        GrantTransport(db,api).refreshConfiguredDevice()
         val id = manifest.inventoryId
         val existing = db.inventoryTaskDao().get(id)
         if (existing != null && existing.snapshotId == manifest.snapshotId && existing.state == "active" &&
             existing.contentDigest == manifest.contentDigest
         ) {
-            db.recovery.commit { db.inventoryTaskDao().setJoinedAt(id, clock()) }
+            db.recovery.commit {
+                db.inventoryTaskDao().setJoinedAt(id, clock())
+                db.grants.saveProvenance(TaskKind.INVENTORY,id,Json.encodeToString(InventoryManifestDto.serializer(),manifest))
+            }
+            GrantTransport(db,api).refreshConfiguredTask(TaskKind.INVENTORY,id)
             return MirrorResult.Active
         }
         var task = existing
@@ -134,7 +141,12 @@ class InventoryBundleMirror(
         }
         if (count != manifest.codeCount || digest.finish() != manifest.contentDigest) return discard(manifest, "content digest")
         val expectedCount = db.inventorySnapshotCodeDao().countExpected(manifest.snapshotId)
-        db.recovery.commit { db.inventoryTaskDao().activate(manifest.inventoryId, expectedCount, clock()) }
+        db.recovery.commit {
+            db.grants.start(TaskKind.INVENTORY,manifest.inventoryId,"inventory.enter:${manifest.inventoryId}:${manifest.snapshotId}")
+            db.inventoryTaskDao().activate(manifest.inventoryId, expectedCount, clock())
+            db.grants.saveProvenance(TaskKind.INVENTORY,manifest.inventoryId,Json.encodeToString(InventoryManifestDto.serializer(),manifest))
+        }
+        GrantTransport(db,api).refreshConfiguredTask(TaskKind.INVENTORY,manifest.inventoryId)
         return MirrorResult.Active
     }
 

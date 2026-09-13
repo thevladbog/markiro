@@ -1,3 +1,4 @@
+import { publicApiKeyIdentities } from "./public-api.js";
 import { sql } from "drizzle-orm";
 import {
   bigint,
@@ -220,12 +221,12 @@ export const inventories = pgTable(
     activeSnapshotId: uuid("active_snapshot_id"),
     stationManifest: jsonb("station_manifest"),
     resultRevision: integer("result_revision").notNull().default(0),
-    createdByUserId: text("created_by_user_id")
-      .notNull()
-      .references(() => user.id),
+    createdByUserId: text("created_by_user_id").references(() => user.id),
+    createdByPublicKeyId: text("created_by_public_key_id"),
     cancelledByUserId: text("cancelled_by_user_id").references(() => user.id),
     cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
     startedByUserId: text("started_by_user_id").references(() => user.id),
+    startedByPublicKeyId: text("started_by_public_key_id"),
     startedAt: timestamp("started_at", { withTimezone: true }),
     closedByUserId: text("closed_by_user_id").references(() => user.id),
     closedAt: timestamp("closed_at", { withTimezone: true }),
@@ -244,6 +245,20 @@ export const inventories = pgTable(
   (table) => {
     const snapshot = activeSnapshotForeignKeyTarget();
     return [
+      foreignKey({
+        name: "inventories_started_public_key_fk",
+        columns: [table.tenantId, table.startedByPublicKeyId],
+        foreignColumns: [publicApiKeyIdentities.tenantId, publicApiKeyIdentities.keyId],
+      }),
+      check(
+        "inventories_created_actor_check",
+        sql`num_nonnulls(${table.createdByUserId}, ${table.createdByPublicKeyId}) = 1`,
+      ),
+      foreignKey({
+        name: "inventories_created_public_key_fk",
+        columns: [table.tenantId, table.createdByPublicKeyId],
+        foreignColumns: [publicApiKeyIdentities.tenantId, publicApiKeyIdentities.keyId],
+      }),
       unique("inventories_tenant_id_uq").on(table.tenantId, table.id),
       unique("inventories_tenant_number_uq").on(table.tenantId, table.number),
       foreignKey({
@@ -321,8 +336,8 @@ export const inventories = pgTable(
       ),
       check(
         "inventories_started_fields_check",
-        sql`(${table.startedByUserId} is null and ${table.startedAt} is null)
-          or (${table.startedByUserId} is not null and ${table.startedAt} is not null)`,
+        sql`(num_nonnulls(${table.startedByUserId},${table.startedByPublicKeyId}) = 0 and ${table.startedAt} is null)
+          or (num_nonnulls(${table.startedByUserId},${table.startedByPublicKeyId}) = 1 and ${table.startedAt} is not null)`,
       ),
       check(
         "inventories_closed_fields_check",
@@ -509,13 +524,21 @@ export const inventoryImports = pgTable(
     errorCount: integer("error_count").notNull().default(0),
     duplicateCount: integer("duplicate_count").notNull().default(0),
     errorCode: text("error_code"),
-    createdByUserId: text("created_by_user_id")
-      .notNull()
-      .references(() => user.id),
+    createdByUserId: text("created_by_user_id").references(() => user.id),
+    createdByPublicKeyId: text("created_by_public_key_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     parsedAt: timestamp("parsed_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
+    check(
+      "inventory_imports_created_actor_check",
+      sql`num_nonnulls(${table.createdByUserId}, ${table.createdByPublicKeyId}) = 1`,
+    ),
+    foreignKey({
+      name: "inventory_imports_created_public_key_fk",
+      columns: [table.tenantId, table.createdByPublicKeyId],
+      foreignColumns: [publicApiKeyIdentities.tenantId, publicApiKeyIdentities.keyId],
+    }),
     unique("inventory_imports_tenant_id_uq").on(table.tenantId, table.id),
     unique("inventory_imports_tenant_id_inventory_status_uq").on(
       table.tenantId,
@@ -592,12 +615,20 @@ export const inventorySnapshots = pgTable(
     expectedCount: integer("expected_count").notNull(),
     packageCount: integer("package_count").notNull(),
     looseCount: integer("loose_count").notNull(),
-    fixedByUserId: text("fixed_by_user_id")
-      .notNull()
-      .references(() => user.id),
+    fixedByUserId: text("fixed_by_user_id").references(() => user.id),
+    fixedByPublicKeyId: text("fixed_by_public_key_id"),
     fixedAt: timestamp("fixed_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
+    check(
+      "inventory_snapshots_fixed_actor_check",
+      sql`num_nonnulls(${table.fixedByUserId}, ${table.fixedByPublicKeyId}) = 1`,
+    ),
+    foreignKey({
+      name: "inventory_snapshots_fixed_public_key_fk",
+      columns: [table.tenantId, table.fixedByPublicKeyId],
+      foreignColumns: [publicApiKeyIdentities.tenantId, publicApiKeyIdentities.keyId],
+    }),
     unique("inventory_snapshots_tenant_id_uq").on(table.tenantId, table.id),
     unique("inventory_snapshots_tenant_id_inventory_uq").on(
       table.tenantId,

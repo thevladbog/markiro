@@ -124,7 +124,12 @@ type ReconciliationTransaction = Parameters<Parameters<Db["transaction"]>[0]>[0]
 export class InventoryReconciliationService {
   constructor(@Inject(DB) private readonly db: Db) {}
 
-  async getProgress(tenantId: string, inventoryId: string): Promise<InventoryProgressDto> {
+  async getProgress(
+    tenantId: string,
+    inventoryId: string,
+    tx?: ReconciliationTransaction,
+  ): Promise<InventoryProgressDto> {
+    if (tx) return this.getProgressFromTransaction(tx, tenantId, inventoryId);
     return this.db.transaction((tx) => this.getProgressFromTransaction(tx, tenantId, inventoryId), {
       isolationLevel: "repeatable read",
       accessMode: "read only",
@@ -356,7 +361,9 @@ export class InventoryReconciliationService {
     tenantId: string,
     inventoryId: string,
     query: ListInventoryEvidenceQueryDto,
+    tx?: ReconciliationTransaction,
   ): Promise<ListInventoryEvidenceResponseDto> {
+    if (tx) return this.listEvidenceFromTransaction(tx, tenantId, inventoryId, query);
     return this.db.transaction(
       (tx) => this.listEvidenceFromTransaction(tx, tenantId, inventoryId, query),
       { isolationLevel: "repeatable read", accessMode: "read only" },

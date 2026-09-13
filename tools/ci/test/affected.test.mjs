@@ -334,3 +334,36 @@ test("validation reprocessing wire producers select Android parity", () => {
   ])
     assert.equal(classifyChangedFiles([path]).jobs.handheld_android, true, path);
 });
+
+test("offline grant protocol and signed fixture changes exercise every native consumer", () => {
+  for (const path of [
+    "packages/domain/src/offline-grants/types.ts",
+    "packages/domain/src/product-labels/km.ts",
+    "packages/domain/test/offline-grant-evidence-fixture.test.ts",
+    "apps/handheld/app/src/test/resources/grant-evidence-digests.json",
+    "apps/handheld/tools/generate-grant-evidence-fixtures.mjs",
+    "packages/domain/test/offline-grants-decision.test.ts",
+    "packages/platform-contracts/src/offline-grants.ts",
+    "packages/platform-contracts/fixtures/offline-grants-v1.json",
+    "packages/platform-contracts/fixtures/offline-grant-budgets-v1.json",
+    "packages/platform-contracts/tools/generate-offline-grant-fixtures.mjs",
+    "apps/handheld/app/src/test/resources/offline-grants-v1.json",
+    "apps/handheld/app/src/test/resources/offline-grant-budgets-v1.json",
+  ]) {
+    const result = classifyChangedFiles([path]);
+    assert.equal(result.full, false, path);
+    assert.deepEqual(
+      enabledJobs(result),
+      [
+        "verify_static",
+        "verify_api_tests",
+        "verify_app_tests",
+        "production_bundle",
+        "station_rust",
+        "station_windows_build",
+        "handheld_android",
+      ],
+      path,
+    );
+  }
+});

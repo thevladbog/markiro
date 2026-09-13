@@ -127,6 +127,8 @@ export const shiftMirror = sqliteTable(
     number: text("number"),
     /** Atomically published validation policy and its complete product label context. */
     validationPrintContext: text("validation_print_context"),
+    /** Complete authenticated bundle projection used to bind an offline task grant. */
+    executionScopeJson: text("execution_scope_json"),
   },
   (table) => [
     check(
@@ -1220,4 +1222,252 @@ export const validationOccurrences = sqliteTable(
     }),
   },
   (table) => [primaryKey({ columns: [table.shiftId, table.codeHash] })],
+); /** Authenticated offline-grant owner and rollout state, published by one install trigger. */
+export const offlineGrantInstallState = sqliteTable(
+  "offline_grant_install_state",
+  {
+    id: integer("id").primaryKey(),
+    tenantId: text("tenant_id").notNull(),
+    deviceId: text("device_id").notNull(),
+    ownerKind: text("owner_kind").notNull(),
+    credentialEpoch: integer("credential_epoch").notNull(),
+    requestSequence: integer("request_sequence").notNull(),
+    mode: text("mode").notNull(),
+  },
+  (t) => [
+    check("offline_grant_install_state_singleton", sql`${t.id} = 1`),
+    check("offline_grant_install_state_epoch", sql`${t.credentialEpoch} > 0`),
+    check("offline_grant_install_state_sequence", sql`${t.requestSequence} >= 0`),
+    check("offline_grant_install_state_mode", sql`${t.mode} IN ('observe','strict')`),
+  ],
+);
+
+export const offlineGrantConfiguration = sqliteTable("offline_grant_configuration", {
+  id: integer("id").primaryKey(),
+  tenantId: text("tenant_id").notNull(),
+  deviceId: text("device_id").notNull(),
+  ownerKind: text("owner_kind").notNull(),
+  credentialEpoch: integer("credential_epoch").notNull(),
+  requestSequence: integer("request_sequence").notNull(),
+  mode: text("mode", { enum: ["observe", "strict"] }).notNull(),
+  policyRevision: text("policy_revision"),
+});
+
+export const offlineGrantKeysets = sqliteTable("offline_grant_keysets", {
+  origin: text("origin").primaryKey(),
+  revision: text("revision").notNull(),
+  keysetJson: text("keyset_json").notNull(),
+});
+
+export const offlineGrantRetiredKids = sqliteTable(
+  "offline_grant_retired_kids",
+  {
+    origin: text("origin").notNull(),
+    kid: text("kid").notNull(),
+    retiredSequence: integer("retired_sequence").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.origin, t.kid] })],
+);
+
+export const offlineGrantGrants = sqliteTable("offline_grant_grants", {
+  grantId: text("grant_id").primaryKey(),
+  kid: text("kid").notNull(),
+  compact: text("compact").notNull().unique(),
+  grantJson: text("grant_json").notNull(),
+  credentialEpoch: integer("credential_epoch").notNull(),
+  installedSequence: integer("installed_sequence").notNull(),
+});
+
+export const offlineGrantSnapshots = sqliteTable(
+  "offline_grant_snapshots",
+  {
+    taskKind: text("task_kind").notNull(),
+    taskId: text("task_id").notNull(),
+    snapshotDigest: text("snapshot_digest").notNull(),
+    canonical: text("canonical").notNull(),
+    scopeJson: text("scope_json").notNull(),
+    installedSequence: integer("installed_sequence").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.taskKind, t.taskId, t.snapshotDigest] })],
+);
+
+export const offlineGrantClock = sqliteTable(
+  "offline_grant_clock",
+  {
+    id: integer("id").primaryKey(),
+    serverMs: integer("server_ms").notNull(),
+    monotonicMs: integer("monotonic_ms").notNull(),
+    bootId: text("boot_id").notNull(),
+    highWaterMs: integer("high_water_ms").notNull(),
+    wallHighWaterMs: integer("wall_high_water_ms").notNull(),
+  },
+  (t) => [
+    check("offline_grant_clock_singleton", sql`${t.id} = 1`),
+    check(
+      "offline_grant_clock_bounds",
+      sql`${t.serverMs} >= 0 AND ${t.monotonicMs} >= 0 AND ${t.highWaterMs} >= ${t.serverMs} AND ${t.wallHighWaterMs} >= 0`,
+    ),
+  ],
+);
+
+export const offlineGrantConsumption = sqliteTable(
+  "offline_grant_consumption",
+  {
+    tenantId: text("tenant_id").notNull(),
+    deviceId: text("device_id").notNull(),
+    credentialEpoch: integer("credential_epoch").notNull(),
+    taskKind: text("task_kind").notNull(),
+    taskId: text("task_id").notNull(),
+    snapshotDigest: text("snapshot_digest").notNull(),
+    budgetLineId: text("budget_line_id").notNull(),
+    consumed: integer("consumed").notNull(),
+  },
+  (t) => [
+    primaryKey({
+      columns: [t.tenantId, t.deviceId, t.taskKind, t.taskId, t.snapshotDigest, t.budgetLineId],
+    }),
+    check("offline_grant_consumption_nonnegative", sql`${t.consumed} >= 0`),
+  ],
+);
+
+export const offlineGrantDecisions = sqliteTable("offline_grant_decisions", {
+  eventId: text("event_id").primaryKey(),
+  eventDigest: text("event_digest").notNull(),
+  decisionJson: text("decision_json").notNull(),
+  resultJson: text("result_json").notNull(),
+  createdAt: text("created_at")
+    .notNull()
+    .default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const offlineGrantTaskAdmissions = sqliteTable(
+  "offline_grant_task_admissions",
+  {
+    tenantId: text("tenant_id").notNull(),
+    deviceId: text("device_id").notNull(),
+    ownerKind: text("owner_kind").notNull(),
+    credentialEpoch: integer("credential_epoch").notNull(),
+    taskKind: text("task_kind").notNull(),
+    taskId: text("task_id").notNull(),
+    snapshotDigest: text("snapshot_digest").notNull(),
+    admittedAt: integer("admitted_at").notNull(),
+  },
+  (t) => [
+    primaryKey({
+      columns: [
+        t.tenantId,
+        t.deviceId,
+        t.ownerKind,
+        t.credentialEpoch,
+        t.taskKind,
+        t.taskId,
+        t.snapshotDigest,
+      ],
+    }),
+  ],
+);
+
+export const offlineGrantTaskAdmissionCommands = sqliteTable(
+  "offline_grant_task_admission_commands",
+  {
+    admissionId: text("admission_id").primaryKey(),
+    payloadJson: text("payload_json").notNull(),
+  },
+);
+
+/** Insert-only command whose authoritative migration trigger publishes a complete install. */
+export const offlineGrantInstallCommands = sqliteTable("offline_grant_install_commands", {
+  requestSequence: integer("request_sequence").primaryKey(),
+  payloadJson: text("payload_json").notNull(),
+});
+
+export const offlineGrantKeysetCommands = sqliteTable("offline_grant_keyset_commands", {
+  requestSequence: integer("request_sequence").primaryKey(),
+  payloadJson: text("payload_json").notNull(),
+});
+
+export const offlineGrantConfigurationCommands = sqliteTable(
+  "offline_grant_configuration_commands",
+  {
+    requestSequence: integer("request_sequence").primaryKey(),
+    payloadJson: text("payload_json").notNull(),
+  },
+);
+
+export const offlineGrantEventCommands = sqliteTable("offline_grant_event_commands", {
+  eventId: text("event_id").primaryKey(),
+  payloadJson: text("payload_json").notNull(),
+});
+
+export const offlineGrantScanCommands = sqliteTable("offline_grant_scan_commands", {
+  eventId: text("event_id").primaryKey(),
+  payloadJson: text("payload_json").notNull(),
+  storedCode: integer("stored_code", { mode: "boolean" }).notNull().default(false),
+});
+
+/** One-statement grant owner for a box SSCC allocation and durable close. */
+export const offlineGrantBoxCloseCommands = sqliteTable("offline_grant_box_close_commands", {
+  eventId: text("event_id").primaryKey(),
+  payloadJson: text("payload_json").notNull(),
+});
+
+/** One-statement grant owner for a pallet SSCC allocation and durable close. */
+export const offlineGrantPalletCloseCommands = sqliteTable("offline_grant_pallet_close_commands", {
+  eventId: text("event_id").primaryKey(),
+  payloadJson: text("payload_json").notNull(),
+});
+/** Immutable evidence bytes are separate from the revocable authorization cache. */
+export const offlineGrantEventEvidence = sqliteTable("offline_grant_event_evidence", {
+  eventId: text("event_id").primaryKey(),
+  grantId: text("grant_id"),
+  compact: text("compact"),
+  outboxId: integer("outbox_id").unique(),
+  scanPending: integer("scan_pending").notNull().default(0),
+});
+
+export const offlineGrantInventoryLeaveIntents = sqliteTable(
+  "offline_grant_inventory_leave_intents",
+  {
+    intentKey: text("intent_key").primaryKey(),
+    inventoryId: text("inventory_id").notNull(),
+    snapshotId: text("snapshot_id").notNull(),
+    deviceId: text("device_id").notNull(),
+    operatorId: text("operator_id").notNull(),
+    eventId: text("event_id").notNull().unique(),
+    credentialOwnership: text("credential_ownership").notNull(),
+    pointerValue: text("pointer_value").notNull(),
+    payloadJson: text("payload_json").notNull(),
+    createdAt: text("created_at").notNull(),
+    leftAt: text("left_at"),
+    receiptJson: text("receipt_json"),
+  },
+  (t) => [
+    uniqueIndex("offline_grant_inventory_leave_pending_task")
+      .on(t.inventoryId, t.snapshotId)
+      .where(sql`${t.leftAt} IS NULL`),
+  ],
+);
+export const offlineGrantInventoryLeaveCommands = sqliteTable(
+  "offline_grant_inventory_leave_commands",
+  {
+    commandId: text("command_id").primaryKey(),
+    payloadJson: text("payload_json").notNull(),
+  },
+);
+export const offlineGrantInventoryLeaveAckCommands = sqliteTable(
+  "offline_grant_inventory_leave_ack_commands",
+  {
+    commandId: text("command_id").primaryKey(),
+    payloadJson: text("payload_json").notNull(),
+  },
+);
+
+/** A short-lived assertion inside the held productive acknowledgement transaction. */
+export const offlineGrantEvidenceCommitGuards = sqliteTable(
+  "offline_grant_evidence_commit_guards",
+  {
+    id: integer("id").primaryKey(),
+    currentOwner: text("current_owner").notNull(),
+    originalOwner: text("original_owner").notNull(),
+  },
 );

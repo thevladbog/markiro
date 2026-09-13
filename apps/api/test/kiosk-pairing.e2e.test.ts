@@ -26,6 +26,11 @@ import { schema, type Db } from "@markiro/db";
 import { listenOnLoopback } from "./support/listen-loopback";
 import { createTestEmployee, createTestStationDevice } from "./support/auth";
 import { SecurityAuditService } from "../src/authorization/security-audit.service";
+import { createManagedSubscription } from "./support/subscription-fixtures";
+import { KiosksService } from "../src/modules/kiosks/kiosks.service";
+import { freezeGrantTask } from "../src/modules/device-grants/frozen-task";
+import { parseApprovedGrantPolicy } from "../src/modules/device-grants/grant-policy";
+import { entitlementDigest } from "../src/subscriptions/entitlement-snapshot-reader";
 
 // Only `randomInt` is ever mocked (F3 below, one call, one test) -- every
 // other export (including `randomUUID`, used throughout this file) passes
@@ -279,6 +284,114 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
     vi.spyOn(audit, "deviceCredentialMutation").mockImplementation(() => undefined);
   });
 
+  it("freezes negotiated exact kiosk scope while legacy reservations remain unbounded", async () => {
+    await createManagedSubscription(db, { tenantId });
+    await app!.get(KiosksService).enroll(tenantId, kioskId);
+    const [device] = await db.select().from(schema.kiosks).where(eq(schema.kiosks.id, kioskId));
+    if (!device) throw new Error("fixture");
+    const owner = {
+      tenantId,
+      deviceId: kioskId,
+      kind: "kiosk" as const,
+      credentialEpoch: device.credentialEpoch,
+    };
+    const rawKm = `010460068200001321TESTSERIAL123\u001d93ABCD`;
+    const dto = {
+      deviceSeq: 1,
+      badgeDigest: Buffer.alloc(32, 1).toString("base64"),
+      reason: "buy" as const,
+      items: [{ rawKm }],
+      boxes: [],
+    };
+    const service = app!.get(PickupOrdersService);
+    await service.attestKioskOrder(tenantId, kioskId, dto, owner);
+    const [reservation] = await db
+      .select()
+      .from(schema.kioskOrderAdmissions)
+      .where(
+        and(
+          eq(schema.kioskOrderAdmissions.tenantId, tenantId),
+          eq(schema.kioskOrderAdmissions.deviceSeq, 1),
+        ),
+      );
+    expect(reservation?.frozenScope).toMatchObject({
+      unitCount: 1,
+      containerCount: 0,
+      items: [{ rawKm }],
+    });
+    expect(reservation?.credentialEpoch).toBe(owner.credentialEpoch);
+    if (!reservation) throw new Error("reservation missing");
+    const approval = randomUUID();
+    await db.insert(schema.platformUsers).values({
+      id: approval,
+      name: "Test",
+      email: `${approval}@example.invalid`,
+      role: "platform_admin",
+    });
+    const payload = {
+      offlineGrant: {
+        version: 1,
+        maxOfflineMs: 1000,
+        maxCompletionMs: 2000,
+        taskBounds: {
+          pickup: { "pickup.complete.v1": { maxEvents: 4, maxUnits: 20, maxContainers: 20 } },
+        },
+      },
+    };
+    const [policyRow] = await db
+      .insert(schema.entitlementLifecyclePolicies)
+      .values({
+        policyKey: `test-${approval}`,
+        version: 1,
+        status: "approved",
+        payload,
+        payloadHash: entitlementDigest(payload),
+        decisionReference: "test-only",
+        approvedAt: new Date(),
+        approvedByPlatformUserId: approval,
+        createdByPlatformUserId: approval,
+      })
+      .returning();
+    const policy = parseApprovedGrantPolicy(policyRow);
+    if (!policy) throw new Error("policy missing");
+    const reference = { taskKind: "pickup" as const, taskId: reservation.id };
+    const result = await db.transaction((tx) => freezeGrantTask(tx, owner, reference, policy));
+    expect(result).toMatchObject({
+      status: "ready",
+      task: {
+        budget: [
+          { id: "pickup.complete.v1:events", maximum: 1 },
+          { id: "pickup.complete.v1:units", maximum: 1 },
+          { id: "pickup.complete.v1:containers", maximum: 0 },
+        ],
+      },
+    });
+    expect(await db.transaction((tx) => freezeGrantTask(tx, owner, reference, policy))).toEqual(
+      result,
+    );
+    await service.attestKioskOrder(tenantId, kioskId, { ...dto, deviceSeq: 2 });
+    const [legacy] = await db
+      .select()
+      .from(schema.kioskOrderAdmissions)
+      .where(
+        and(
+          eq(schema.kioskOrderAdmissions.tenantId, tenantId),
+          eq(schema.kioskOrderAdmissions.deviceSeq, 2),
+        ),
+      );
+    if (!legacy) throw new Error("legacy missing");
+    expect(
+      await db.transaction((tx) =>
+        freezeGrantTask(tx, owner, { taskKind: "pickup", taskId: legacy.id }, policy),
+      ),
+    ).toEqual({ status: "denied", reason: "bounds_required" });
+    await app!.get(KiosksService).enroll(tenantId, kioskId);
+    expect(await db.transaction((tx) => freezeGrantTask(tx, owner, reference, policy))).toEqual({
+      status: "denied",
+      reason: "task_not_frozen",
+    });
+  });
+
   it("issues an 8-digit code that expires in 15 minutes", async () => {
     const res = await agent
       .post(`/kiosks/${kioskId}/pairing-code`)
@@ -415,6 +528,10 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
   });
 
   it("audits re-pair as a distinct unauthenticated-device credential rotation", async () => {
+    const [beforeEpoch] = await db
+      .select({ epoch: schema.kiosks.credentialEpoch })
+      .from(schema.kiosks)
+      .where(eq(schema.kiosks.id, kioskId));
     const first = await agent.post(`/kiosks/${kioskId}/pairing-code`).send({}).expect(201);
     await request(app!.getHttpServer())
       .post("/kiosk/pair")
@@ -436,6 +553,11 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
       resourceId: kioskId,
       outcome: "succeeded",
     });
+    const [afterEpoch] = await db
+      .select({ epoch: schema.kiosks.credentialEpoch })
+      .from(schema.kiosks)
+      .where(eq(schema.kiosks.id, kioskId));
+    expect(afterEpoch?.epoch).toBe((beforeEpoch?.epoch ?? 0) + 2);
   });
 
   it("classifies a failed bootstrap after a resolved existing credential as re-pair", async () => {

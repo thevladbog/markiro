@@ -130,6 +130,27 @@ class InventorySyncEngineTest {
     }
 
     @Test
+    fun negotiatedInventoryUsesOriginalPayloadAndRejectedReceiptKeepsQueue() = runTest {
+        event(1)
+        db.grants.beginRefresh()
+        db.grantDao().state(checkNotNull(db.grantDao().state()).copy(epoch = 3))
+        db.grants.complete(app.markiro.handheld.core.grants.TaskKind.INVENTORY, "i1", "e1", app.markiro.handheld.core.grants.GrantEventType.INVENTORY_SCAN, units = 1)
+        server.enqueue(MockResponse().setResponseCode(503))
+        assertFalse(engine().drainAll())
+        val first = checkNotNull(server.takeRequest(2, java.util.concurrent.TimeUnit.SECONDS))
+        assertEquals("/station/grants/v1/evidence/inventories/i1/event-batches", first.path)
+        val original = first.body.readUtf8()
+        val envelope = Json.parseToJsonElement(original).jsonObject
+        val batch = envelope.getValue("batchId").jsonPrimitive.content
+        assertTrue(envelope.getValue("grants").jsonArray.isEmpty())
+        server.enqueue(MockResponse().setBody("""{"protocol":"offline-grants-v1","batchId":"$batch","outcome":"quarantined","reason":"late_no_proof","receiptId":"22222222-2222-4222-8222-222222222222","reconciliation":{"status":"not_applied","statusCode":null,"result":null}}"""))
+        assertFalse(engine().drainAll())
+        assertEquals(original, server.takeRequest().body.readUtf8())
+        assertEquals(1, db.inventoryOutboxDao().count("i1"))
+        assertEquals("late_no_proof", db.metaDao().get(MetaStore.SYNC_LAST_DENIED))
+    }
+
+    @Test
     fun postsADigestedBatchAndAcknowledgesIt() = runTest {
         event(1)
         event(2)

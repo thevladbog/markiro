@@ -6,12 +6,13 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { STATION_MIGRATIONS } from "@markiro/db/station-sqlite";
+import { productLabelValueDigest } from "@markiro/domain";
 
 import {
   acknowledgeInventoryOutboxBatch,
   prepareInventoryOutboxBatch,
 } from "../src/lib/inventory-outbox.js";
-import { applyMigrations } from "../src/lib/mirror.js";
+import { applyMigrations, type SqlExecutor } from "../src/lib/mirror.js";
 import { makeExec, makeRotatingExec, openFileDatabase } from "./support/sqlite-exec.js";
 
 const INVENTORY_ID = "11111111-1111-4111-8111-111111111111";
@@ -104,7 +105,131 @@ function queue(db: DatabaseSync, eventId: string, sequence: number) {
   ).run(INVENTORY_ID, SNAPSHOT_ID, eventId, sequence, payload(eventId, sequence));
 }
 
+function seedNegotiatedEvidence(db: DatabaseSync, eventId: string): void {
+  const executionScope = {
+    manifest: { mode: "scan" },
+    snapshotId: SNAPSHOT_ID,
+    combinedDigest: "combined",
+    contentDigest: "content",
+  };
+  db.prepare(
+    `UPDATE inventory_task_mirror
+        SET active_combined_digest=?,active_content_digest=?,active_manifest_json=?
+      WHERE inventory_id=?`,
+  ).run("combined", "content", JSON.stringify(executionScope.manifest), INVENTORY_ID);
+  db.prepare(
+    "INSERT OR IGNORE INTO operators_mirror(operator_id,name,role,pin_hash,active) VALUES(?,'Operator','operator','hash',1)",
+  ).run(OPERATOR_ID);
+  db.prepare(
+    `INSERT OR IGNORE INTO offline_grant_install_state
+       (id,tenant_id,device_id,owner_kind,credential_epoch,request_sequence,mode)
+     VALUES(1,'tenant',?,'station',1,1,'observe')`,
+  ).run(DEVICE_ID);
+  db.prepare(
+    `INSERT OR IGNORE INTO offline_grant_grants
+       (grant_id,kid,compact,grant_json,credential_epoch,installed_sequence)
+     VALUES('77777777-7777-4777-8777-777777777777','kid','original.compact.bytes','{}',1,1)`,
+  ).run();
+  db.prepare("INSERT INTO offline_grant_event_commands(event_id,payload_json) VALUES(?,?)").run(
+    eventId,
+    JSON.stringify({
+      owner: { tenantId: "tenant", deviceId: DEVICE_ID, kind: "station", credentialEpoch: 1 },
+      operatorId: OPERATOR_ID,
+      mode: "observe",
+      grantId: "77777777-7777-4777-8777-777777777777",
+      taskKind: "inventory",
+      executionScope,
+      taskId: INVENTORY_ID,
+      snapshotDigest: "snapshot-digest",
+      eventDigest: `${eventId}-digest`,
+      preDecision: { allow: false, reason: "wrong_task" },
+      cost: {},
+      clockHighWater: 0,
+      wallHighWater: 0,
+      resultJson: "{}",
+    }),
+  );
+}
+
+async function acknowledgeApplied(
+  exec: SqlExecutor,
+  batch: NonNullable<Awaited<ReturnType<typeof prepareInventoryOutboxBatch>>>,
+): Promise<void> {
+  const event = batch.request.events[0];
+  if (!event?.codeHash) throw new Error("expected item event");
+  await acknowledgeInventoryOutboxBatch(exec, batch, {
+    inventoryId: INVENTORY_ID,
+    snapshotId: SNAPSHOT_ID,
+    snapshotRevision: 1,
+    batchId: batch.request.batchId,
+    payloadDigest: batch.request.payloadDigest,
+    sequenceCeiling: batch.request.sequenceCeiling,
+    resultRevision: 1,
+    outcomes: [
+      {
+        eventId: event.eventId,
+        status: "applied",
+        reasonCode: "CLAIM_APPLIED",
+        claimedCount: 1,
+        conflictCount: 0,
+        claims: [
+          {
+            codeHash: event.codeHash,
+            status: "claimed",
+            winner: {
+              codeHash: event.codeHash,
+              eventId: event.eventId,
+              deviceId: DEVICE_ID,
+              scannedAt: event.scannedAt,
+            },
+          },
+        ],
+      },
+    ],
+  });
+}
+
 describe("inventory outbox transport", () => {
+  it.each([
+    { order: "legacy-first", negotiatedSequence: 2, firstNegotiated: false },
+    { order: "negotiated-first", negotiatedSequence: 1, firstNegotiated: true },
+  ])(
+    "pins a contiguous provenance prefix for $order mixed unpinned rows",
+    async ({ negotiatedSequence, firstNegotiated }) => {
+      const { db, exec } = await setup();
+      const firstId = "55555555-5555-4555-8555-555555555555";
+      const secondId = "66666666-6666-4666-8666-666666666666";
+      queue(db, firstId, 1);
+      queue(db, secondId, 2);
+      seedNegotiatedEvidence(db, negotiatedSequence === 1 ? firstId : secondId);
+
+      const first = await prepareInventoryOutboxBatch(exec, {
+        inventoryId: INVENTORY_ID,
+        snapshotId: SNAPSHOT_ID,
+        createBatchId: () => `first-${negotiatedSequence}`,
+      });
+      if (!first) throw new Error("expected first prefix");
+      expect(first.request.events.map((event) => event.eventId)).toEqual([firstId]);
+      expect(first.request.sequenceCeiling).toBe(1);
+      expect(first.request.pendingEventCount).toBe(1);
+      expect(first.negotiated).toBe(firstNegotiated);
+      expect(first.evidenceLinks).toHaveLength(firstNegotiated ? 1 : 0);
+      await acknowledgeApplied(exec, first);
+
+      const second = await prepareInventoryOutboxBatch(exec, {
+        inventoryId: INVENTORY_ID,
+        snapshotId: SNAPSHOT_ID,
+        createBatchId: () => `second-${negotiatedSequence}`,
+      });
+      if (!second) throw new Error("expected follow-on prefix");
+      expect(second.request.events.map((event) => event.eventId)).toEqual([secondId]);
+      expect(second.request.sequenceCeiling).toBe(2);
+      expect(second.request.pendingEventCount).toBe(0);
+      expect(second.negotiated).toBe(!firstNegotiated);
+      expect(second.evidenceLinks).toHaveLength(firstNegotiated ? 0 : 1);
+    },
+  );
+
   it("pins one exact ordered range and reuses its batch id, digest, and payload after restart", async () => {
     const { db, exec } = await setup();
     queue(db, "55555555-5555-4555-8555-555555555555", 1);
@@ -123,6 +248,58 @@ describe("inventory outbox transport", () => {
     expect(restarted?.request.events.map((item) => item.eventId)).toEqual([
       "55555555-5555-4555-8555-555555555555",
     ]);
+    expect(first?.negotiated).toBe(false);
+    expect(first?.evidenceLinks).toEqual([]);
+    const pin = db
+      .prepare("SELECT value FROM station_meta WHERE key LIKE 'inventory_sync_batch_v1:%'")
+      .get() as { value: string };
+    expect(JSON.parse(pin.value)).not.toHaveProperty("negotiated");
+    const evidenceMetadata = { pinValue: pin.value, negotiated: false, evidenceLinks: [] };
+    expect(
+      JSON.parse(
+        (
+          db
+            .prepare(
+              "SELECT value FROM station_meta WHERE key='inventory_sync_evidence_v1:batch-pinned'",
+            )
+            .get() as { value: string }
+        ).value,
+      ),
+    ).toEqual({
+      metadata: evidenceMetadata,
+      digest: productLabelValueDigest(evidenceMetadata),
+    });
+  });
+
+  it("pins negotiated inventory links from the immutable productive decision archive", async () => {
+    const { db, exec } = await setup();
+    const eventId = "55555555-5555-4555-8555-555555555555";
+    queue(db, eventId, 1);
+    seedNegotiatedEvidence(db, eventId);
+
+    const batch = await prepareInventoryOutboxBatch(exec, {
+      inventoryId: INVENTORY_ID,
+      snapshotId: SNAPSHOT_ID,
+      createBatchId: () => "negotiated-batch",
+    });
+
+    expect(batch?.negotiated).toBe(true);
+    expect(batch?.evidenceLinks).toEqual([
+      {
+        pointer: "/events/0#inventory.scan.v1",
+        grantId: "77777777-7777-4777-8777-777777777777",
+        compact: "original.compact.bytes",
+      },
+    ]);
+    db.prepare(
+      "UPDATE station_meta SET value=json_set(value,'$.metadata.negotiated',false) WHERE key='inventory_sync_evidence_v1:negotiated-batch'",
+    ).run();
+    await expect(
+      prepareInventoryOutboxBatch(exec, {
+        inventoryId: INVENTORY_ID,
+        snapshotId: SNAPSHOT_ID,
+      }),
+    ).rejects.toThrow("inventory evidence pin is invalid");
   });
 
   it("fails closed when a pinned event payload is mutated", async () => {

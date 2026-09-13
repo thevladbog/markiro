@@ -16,6 +16,7 @@ import type { StationClient } from "../lib/api-client.js";
 import type { SqlExecutor } from "../lib/mirror.js";
 import type { ScanSource } from "../lib/scan-source.js";
 import type { ShiftEntryLease } from "../lib/shift-entry-lease.js";
+import { OfflineGrantDeniedError } from "../lib/journal.js";
 import {
   acquireCredentialCommitLease,
   createFloorCommitLifecycle,
@@ -53,13 +54,14 @@ export interface TaskSelectionProps {
   operatorId: string;
   currentLineName: string | null;
   onShiftSelected: ShiftSelectionProps["onSelected"];
-  onInventorySelected: (task: InventoryFloorTask, lease?: ShiftEntryLease) => void;
+  onInventorySelected: (task: InventoryFloorTask, lease?: ShiftEntryLease) => void | Promise<void>;
   onNew: () => void;
   onSetup?: () => void;
   onConflicts?: () => void;
   isCurrent?: () => boolean;
   credentialGeneration?: CredentialGeneration;
   onFloorWorkRegister?: (barrier: FloorWorkBarrier) => () => void;
+  offlineGrantNotice?: string | null;
 }
 
 function taskMatchesManifest(
@@ -96,6 +98,7 @@ export function TaskSelection({
   isCurrent,
   credentialGeneration,
   onFloorWorkRegister,
+  offlineGrantNotice,
 }: TaskSelectionProps) {
   const { t } = useTranslation();
   const [category, setCategory] = useState<TaskCategory>("production");
@@ -436,20 +439,28 @@ export function TaskSelection({
           const transferredPointer = ownedPointer.current;
           ownedPointer.current = null;
           try {
-            if (shiftEntryLease) onInventorySelected(active, shiftEntryLease);
-            else onInventorySelected(active);
+            if (shiftEntryLease) await onInventorySelected(active, shiftEntryLease);
+            else await onInventorySelected(active);
           } catch (error) {
             ownedPointer.current = transferredPointer;
             throw error;
           }
         }
-      } catch {
+      } catch (caught) {
         if (
           mounted.current &&
           lifecycleGeneration.current === originGeneration &&
           isCurrentRef.current?.() !== false
         )
-          setError(t("inventory.joinFailed"));
+          setError(
+            caught instanceof OfflineGrantDeniedError
+              ? t(
+                  caught.reason === "clock_untrusted"
+                    ? "inventory.offlineGrantClock"
+                    : "inventory.offlineGrantDenied",
+                )
+              : t("inventory.joinFailed"),
+          );
       } finally {
         shiftEntryLease?.release();
         if (lifecycleGeneration.current === originGeneration) {
@@ -626,6 +637,7 @@ export function TaskSelection({
         title={category === "warehouse" ? t("inventory.warehouseTitle") : t("shifts.title")}
         actionsLabel={category === "warehouse" ? t("inventory.actions") : t("shifts.actions")}
         refreshLabel={category === "warehouse" ? t("inventory.refresh") : t("shifts.refresh")}
+        {...(offlineGrantNotice !== undefined ? { offlineGrantNotice } : {})}
         productionActionsVisible={category === "production"}
         alternateActive={category === "warehouse"}
         alternateContent={inventoryPanel}

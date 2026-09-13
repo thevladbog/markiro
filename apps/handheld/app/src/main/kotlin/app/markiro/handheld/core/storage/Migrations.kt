@@ -303,3 +303,15 @@ val MIGRATION_12_13 = object : Migration(12, 13) {
         )
     }
 }
+
+/** Add grant authorization state without rewriting any business journal or print bytes. */
+val MIGRATION_13_14 = object : Migration(13, 14) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS grant_state (id INTEGER NOT NULL PRIMARY KEY, ownerKey TEXT NOT NULL, generation INTEGER NOT NULL, epoch INTEGER NOT NULL, mode TEXT NOT NULL, requestedSequence INTEGER NOT NULL, installedSequence INTEGER NOT NULL, keysetRevision TEXT NOT NULL, retiredKids TEXT NOT NULL, keysetJson TEXT NOT NULL, serverMs INTEGER NOT NULL, monotonicMs INTEGER NOT NULL, bootId TEXT NOT NULL, serverHighWater INTEGER NOT NULL, wallHighWater INTEGER NOT NULL, clockValid INTEGER NOT NULL)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS grant_tokens (slot TEXT NOT NULL PRIMARY KEY, ownerKey TEXT NOT NULL, generation INTEGER NOT NULL, epoch INTEGER NOT NULL, taskKind TEXT NOT NULL, taskId TEXT NOT NULL, snapshotDigest TEXT NOT NULL, kid TEXT NOT NULL, compact TEXT NOT NULL)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS grant_counters (ownerKey TEXT NOT NULL, taskKind TEXT NOT NULL, taskId TEXT NOT NULL, snapshotDigest TEXT NOT NULL, budgetId TEXT NOT NULL, consumed INTEGER NOT NULL, PRIMARY KEY(ownerKey,taskKind,taskId,snapshotDigest,budgetId))")
+        db.execSQL("CREATE TABLE IF NOT EXISTS grant_evidence (ownerKey TEXT NOT NULL, eventId TEXT NOT NULL, taskKind TEXT NOT NULL, taskId TEXT NOT NULL, snapshotDigest TEXT NOT NULL, payloadDigest TEXT NOT NULL, costs TEXT NOT NULL, grantId TEXT, compact TEXT, mode TEXT NOT NULL, reason TEXT, trustedTime INTEGER, generation INTEGER NOT NULL, epoch INTEGER NOT NULL, PRIMARY KEY(ownerKey,eventId))")
+        db.execSQL("CREATE TABLE IF NOT EXISTS grant_task_bindings (ownerKey TEXT NOT NULL, taskKind TEXT NOT NULL, taskId TEXT NOT NULL, snapshotDigest TEXT NOT NULL, canonical TEXT NOT NULL, executionFingerprint TEXT NOT NULL, PRIMARY KEY(ownerKey,taskKind,taskId))")
+        db.execSQL("CREATE TABLE IF NOT EXISTS grant_task_provenance (taskKind TEXT NOT NULL, taskId TEXT NOT NULL, ownerKey TEXT NOT NULL, generation INTEGER NOT NULL, original TEXT NOT NULL, PRIMARY KEY(taskKind,taskId))")
+    }
+}
