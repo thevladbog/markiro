@@ -1742,6 +1742,7 @@
           "product_group_unknown": "This ChZ group is not yet in the Markiro reference list.",
           "product_group_change_separate": "The product already has another group or configured attributes. Change the group separately in the product form.",
           "egais_code_limit": "This product already has 20 EGAIS codes. To add another, first edit the code list in the product card.",
+          "values_match": "Matches the National Catalog data.",
           "attribute_not_importable": "Import from Chestny ZNAK is not configured for this field. You can view the value in the source card and enter it in Markiro manually.",
           "compatible_schema_required": "Importing attributes requires a category with a configured Chestny ZNAK mapping.",
           "barcode_mismatch": "The photo GTIN differs from this product. Select only after checking it.",

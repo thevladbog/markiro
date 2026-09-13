@@ -36,12 +36,11 @@ export function summarizeNationalCatalogMatrix(
       const schemaVersionIds = [
         ...new Set(candidates.flatMap((candidate) => candidate.schemaVersionId ?? [])),
       ].sort();
-      const state =
-        candidates.some((candidate) => candidate.state === "ambiguous") || exactCount > 1
-          ? ("ambiguous" as const)
-          : exactCount === 1
-            ? ("exact" as const)
-            : ("unmapped" as const);
+      const state = candidates.some((candidate) => candidate.state === "ambiguous")
+        ? ("ambiguous" as const)
+        : exactCount > 0
+          ? ("exact" as const)
+          : ("unmapped" as const);
       return { code: group.code, name: group.name, state, categoryIds, schemaVersionIds };
     });
   return {

@@ -62,6 +62,18 @@ for (const width of [390, 1280]) {
               reason: null,
               requiresEntryIds: [id(40)],
             },
+            ...["egais_code", "shelf_life_days"].map((key, index) => ({
+              id: id(42 + index),
+              label: key,
+              labelKey: key,
+              before: index === 0 ? "0300005753630000027" : "730",
+              after: index === 0 ? "0300005753630000027" : "730",
+              applicable: false,
+              reason: "values_match",
+              source: "national_catalog",
+              selectedByDefault: false,
+              requiresEntryIds: [],
+            })),
           ],
           photos: [
             {
@@ -121,6 +133,14 @@ for (const width of [390, 1280]) {
       `/test/browser/national-catalog-harness.html?locale=ru&route=${encodeURIComponent(route)}`,
     );
     const item = page.locator(".mk-nc-review-item");
+    await page.getByRole("checkbox", { name: "Отображать только сопоставимые поля" }).check();
+    await expect(item.getByText("Совпадает с данными Честного знака.")).toHaveCount(2);
+    await expect(
+      item.getByRole("radio", { name: "Код ЕГАИС — Предлагаемое значение", exact: true }),
+    ).toBeDisabled();
+    await expect(
+      item.getByRole("radio", { name: "Срок годности, дни — Предлагаемое значение", exact: true }),
+    ).toBeDisabled();
     const current = item.getByRole("radio", {
       name: "Название товара — Сейчас в Markiro",
       exact: true,
@@ -183,7 +203,7 @@ for (const width of [390, 1280]) {
       }),
     );
     expect(bounds).toEqual(
-      Array.from({ length: 3 }, () => ({
+      Array.from({ length: 5 }, () => ({
         sameTop: true,
         sameWidth: true,
         separated: true,

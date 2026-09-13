@@ -37,7 +37,7 @@ export const nationalCatalogGroupMappingReviewBodySchema = z
   .superRefine((value, context) => {
     const expected = value.state === "exact" ? 1 : value.state === "ambiguous" ? 2 : 0;
     const valid =
-      value.state === "ambiguous"
+      value.state !== "unmapped"
         ? value.schemaVersionIds.length >= expected
         : value.schemaVersionIds.length === expected;
     if (!valid || new Set(value.schemaVersionIds).size !== value.schemaVersionIds.length) {

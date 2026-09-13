@@ -358,3 +358,29 @@ it("filters only unmapped fields across tabs without changing the batch decision
     { previewId: id(50), acceptedEntryIds: [], linkAction: "attach", photo: { kind: "keep" } },
   ]);
 });
+
+it("keeps matching fields visible under the comparable filter without offering a write", async () => {
+  const { props, preview } = review();
+  preview.fields.push({
+    id: id(95),
+    label: "Срок годности, дней",
+    before: "730",
+    after: "730",
+    applicable: false,
+    reason: "values_match",
+    source: "national_catalog",
+    selectedByDefault: false,
+    requiresEntryIds: [],
+  });
+  render(<ImportReview {...props} />, { wrapper: MemoryRouter });
+  await userEvent
+    .setup()
+    .click(screen.getByRole("checkbox", { name: "Отображать только сопоставимые поля" }));
+  const row = screen.getByRole("group", { name: "Срок годности, дней" });
+  expect(within(row).getByText("Совпадает с данными Честного знака.")).toBeDefined();
+  expect(
+    within(row)
+      .getAllByRole("radio")
+      .every((radio) => radio.hasAttribute("disabled")),
+  ).toBe(true);
+});
