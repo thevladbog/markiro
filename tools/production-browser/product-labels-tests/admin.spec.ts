@@ -3,7 +3,9 @@ import {
   buildDuplicateLabelTemplate,
   productLabelValueDigest,
 } from "../../../packages/domain/dist/index.js";
-const origin = "http://127.0.0.1:43181";
+import type { ShiftDto } from "../../../apps/admin/src/pages/shifts/api.js";
+import { productLabelsEndpoints } from "../product-labels.playwright.config.js";
+const origin = productLabelsEndpoints().adminUrl;
 const productId = "11111111-1111-4111-8111-111111111111",
   shiftId = "22222222-2222-4222-8222-222222222222",
   templateId = "33333333-3333-4333-8333-333333333333",
@@ -16,7 +18,7 @@ const product = {
   productGroup: null,
   chzProductGroupCode: 15,
   boxCapacity: null,
-  palletCapacity: null,
+  palletBoxCapacity: null,
   unitPrice: null,
   printName: null,
   egaisCode: null,
@@ -30,11 +32,12 @@ const product = {
   image: null,
 };
 const template = { id: templateId, name: "Дубликат 58×40", spec: buildDuplicateLabelTemplate() };
-const active = {
+const active: ShiftDto = {
   id: shiftId,
   number: "SEP26-001",
   status: "active",
   mode: "validation",
+  output: { mode: "validation", acceptedUnits: 1 },
   productId,
   productName: product.name,
   lineId: null,
@@ -47,7 +50,8 @@ const active = {
   plannedDate: "2026-09-08",
   productionDate: "2026-09-08",
   boxCapacity: null,
-  palletCapacity: null,
+  palletBoxCapacity: null,
+  palletLabelTemplateId: null,
   palletsEnabled: false,
   createdFrom: "admin",
   openedAt: "2026-09-08T10:00:00.000Z",

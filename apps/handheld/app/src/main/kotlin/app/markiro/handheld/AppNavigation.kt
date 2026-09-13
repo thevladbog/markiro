@@ -337,7 +337,7 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                             onDismiss = vm::dismissDuplicate,
                             onSkip = vm::skipDuplicateVerification,
                         ),
-                        destinationLabel = destinations.firstOrNull { it.purpose == "duplicate" && it.jobId == duplicateStep.jobId() }?.printer?.name,
+                        destinationLabel = destinations.firstOrNull { it.purpose == "duplicate" && it.jobId == duplicateStep.jobId() && it.attemptId == duplicateJob?.attemptId }?.printer?.name,
                         replacementLabel = profiles.firstOrNull { it.id == duplicateReplacement }?.name,
                     )
                 }

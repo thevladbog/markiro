@@ -68,3 +68,16 @@ export async function discardUnacceptedPrintDestination(
     [scope, jobId, scope, jobId],
   );
 }
+
+/** Remove only a provisional attempt whose journal definitely did not commit. */
+export async function discardUncommittedPrintDestination(
+  exec: SqlExecutor,
+  key: PrintDestinationKey,
+): Promise<void> {
+  await exec.run(
+    `DELETE FROM printer_destinations WHERE ${where} AND purpose='duplicate'
+      AND NOT EXISTS (SELECT 1 FROM product_label_attempts WHERE credential_ownership=? AND job_id=? AND attempt_id=?)
+      AND NOT EXISTS (SELECT 1 FROM product_label_events WHERE credential_ownership=? AND job_id=? AND json_extract(event_json,'$.attemptId')=?)`,
+    [...values(key), key.scope, key.jobId, key.attemptId, key.scope, key.jobId, key.attemptId],
+  );
+}

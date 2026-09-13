@@ -1893,7 +1893,8 @@ const GALLERY_RECOVERY_SSCC = "046012345600000016";
 
 function BoxPrintRecoveryFixture({ variant, locale }: { variant: string; locale: GalleryLocale }) {
   const printers = useMemo(() => galleryPrinterProfiles("printers", locale), [locale]);
-  const [printer, setPrinter] = useState(printers[0] ?? null);
+  const [printerId, setPrinterId] = useState(printers[0]?.id ?? null);
+  const printer = printers.find((candidate) => candidate.id === printerId) ?? null;
   const rootRef = useRef<HTMLDivElement>(null);
   const errorCode = galleryRecoveryErrorCode(variant);
 
@@ -1915,7 +1916,7 @@ function BoxPrintRecoveryFixture({ variant, locale }: { variant: string; locale:
                   printer={printer}
                   printers={printers}
                   onChoose={(next) => {
-                    setPrinter(next);
+                    setPrinterId(next.id);
                     return Promise.resolve();
                   }}
                 />

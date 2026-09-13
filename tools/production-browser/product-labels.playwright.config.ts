@@ -1,8 +1,26 @@
 import { defineConfig } from "@playwright/test";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-const adminPort = Number(process.env.PRODUCT_LABELS_ADMIN_PORT ?? 43181);
-const stationPort = Number(process.env.PRODUCT_LABELS_STATION_PORT ?? 43182);
+export function productLabelsEndpoints(env: NodeJS.ProcessEnv = process.env) {
+  function port(key: string, fallback: number): number {
+    const raw = env[key];
+    if (raw === undefined) return fallback;
+    const value = raw.trim();
+    const parsed = Number(value);
+    if (!/^\d+$/.test(value) || !Number.isInteger(parsed) || parsed < 1 || parsed > 65535)
+      throw new Error(`${key} must be an integer TCP port from 1 to 65535`);
+    return parsed;
+  }
+  const adminPort = port("PRODUCT_LABELS_ADMIN_PORT", 43181);
+  const stationPort = port("PRODUCT_LABELS_STATION_PORT", 43182);
+  return {
+    adminPort,
+    stationPort,
+    adminUrl: `http://127.0.0.1:${adminPort}`,
+    stationUrl: env.STATION_PRODUCT_LABELS_URL ?? `http://127.0.0.1:${stationPort}`,
+  };
+}
+const { adminPort, stationPort, stationUrl } = productLabelsEndpoints();
 export default defineConfig({
   testDir: "./product-labels-tests",
   fullyParallel: false,
@@ -14,6 +32,7 @@ export default defineConfig({
   reporter: "list",
   outputDir: join(tmpdir(), "markiro-dm-browser"),
   use: {
+    baseURL: stationUrl,
     browserName: "chromium",
     // Capture the scrolling affordances that are present in the installed Station shell.
     launchOptions: { ignoreDefaultArgs: ["--hide-scrollbars"] },

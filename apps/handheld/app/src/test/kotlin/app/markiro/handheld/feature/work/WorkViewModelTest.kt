@@ -495,9 +495,9 @@ class WorkViewModelTest {
         advanceUntilIdle()
         // Room answers on its own executor, so `advanceUntilIdle` returns while
         // the job is still being written. The UI state is set before the send
-        // too, so the only honest signal is the event log: prepared, sending,
-        // sent -- three, and only once the send is over.
+        // too. Wait for both the committed events and the UI continuation.
         db.productLabelEventDao().observeUnackedCount().first { it == 3 }
+        vm.duplicateStep.first { it == DuplicateStep.Idle }
         assertEquals(DuplicateStep.Idle, vm.duplicateStep.value)
         assertEquals(1, transport.sent)
         // Nothing took over the screen: the ordinary path stays quiet.

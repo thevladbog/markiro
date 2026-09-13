@@ -26,6 +26,7 @@ export interface PalletCloseResult {
 
 export interface PalletCloseProps {
   destination?: ReactNode;
+  resultPending?: boolean;
   result: PalletCloseResult;
   print: PalletPrintState;
   /** Only meaningful when `print === "failed"`. */
@@ -67,6 +68,7 @@ const ERROR_KEYS: Record<BoxPrintErrorCode, string> = {
 export function PalletClose({
   result,
   destination,
+  resultPending = false,
   print,
   errorCode = null,
   pending = false,
@@ -82,7 +84,16 @@ export function PalletClose({
 
   const header =
     print === "failed"
-      ? { label: t(pending ? "box.printRecovery.pending" : "pallet.retry"), onClose: onRetry }
+      ? {
+          label: t(
+            pending
+              ? "box.printRecovery.pending"
+              : resultPending
+                ? "printerRouting.saveResult"
+                : "pallet.retry",
+          ),
+          onClose: onRetry,
+        }
       : print === "unknown"
         ? {
             label: t(pending ? "box.printRecovery.pending" : "pallet.confirmPrinted"),
@@ -100,9 +111,11 @@ export function PalletClose({
             {t("box.printRecovery.setup")}
           </Button>
         ) : null}
-        <Button size="floor" variant="secondary" disabled={pending} onClick={onSkip}>
-          {t("box.printRecovery.continueWithoutLabel")}
-        </Button>
+        {!resultPending ? (
+          <Button size="floor" variant="secondary" disabled={pending} onClick={onSkip}>
+            {t("box.printRecovery.continueWithoutLabel")}
+          </Button>
+        ) : null}
       </>
     ) : print === "unknown" ? (
       <Button size="floor" variant="secondary" disabled={pending} onClick={onReprint}>
@@ -129,12 +142,19 @@ export function PalletClose({
         </p>
         {print === "printing" ? (
           <p className="pallet-close__status" role="status">
-            {t("pallet.printing")}
+            {t(resultPending ? "box.printRecovery.pending" : "pallet.printing")}
           </p>
         ) : null}
         {print === "printed" ? <Alert tone="ok" title={t("pallet.printed")} /> : null}
         {print === "failed" ? (
-          <Alert tone="error" title={t(ERROR_KEYS[errorCode ?? "transport_failed"])} />
+          <Alert
+            tone="error"
+            title={t(
+              resultPending
+                ? "printerRouting.resultNotSaved"
+                : ERROR_KEYS[errorCode ?? "transport_failed"],
+            )}
+          />
         ) : null}
         {print === "unknown" ? <Alert tone="warn" title={t("pallet.printUnknown")} /> : null}
       </div>

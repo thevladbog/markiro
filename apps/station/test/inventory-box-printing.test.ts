@@ -136,6 +136,65 @@ function input(exec: SqlExecutor) {
 }
 
 describe("durable inventory box printing", () => {
+  it.each([
+    ["initial", "label"],
+    ["initial", ATTEMPT_ID],
+    ["remote", "label"],
+    ["remote", ATTEMPT_ID],
+  ] as const)(
+    "finalizes %s when binding destination %s fails after claiming",
+    async (kind, failedKey) => {
+      const { db, exec } = await setup({ printState: kind === "remote" ? "printed" : "pending" });
+      if (kind === "remote")
+        db.prepare(
+          `INSERT INTO inventory_remote_reprint_requests
+         (inventory_id, snapshot_id, correction_id, box_id, owner_device_id, requested_at)
+       VALUES (?, ?, ?, ?, ?, '2026-08-25T10:02:00.000Z')`,
+        ).run(INVENTORY_ID, SNAPSHOT_ID, ATTEMPT_ID, BOX_ID, DEVICE_ID);
+      const failedExec: SqlExecutor = {
+        all: (sql, params) => exec.all(sql, params),
+        run: async (sql, params) => {
+          if (sql.includes("INSERT INTO printer_destinations") && params?.[3] === failedKey)
+            throw new Error("destination disk failure");
+          await exec.run(sql, params);
+        },
+      };
+      const configured = input(failedExec);
+      const result =
+        kind === "initial"
+          ? attemptInventoryBoxPrint(configured)
+          : processNextInventoryRemoteReprint({
+              exec: failedExec,
+              manifest: MANIFEST,
+              inventoryId: INVENTORY_ID,
+              snapshotId: SNAPSHOT_ID,
+              deviceId: DEVICE_ID,
+              operatorId: OPERATOR_ID,
+              createEventId: () => EVENT_ID,
+              now: () => "2026-08-25T10:02:01.000Z",
+              printing: configured.printing,
+              render: configured.render,
+            });
+      await expect(result).resolves.toMatchObject({
+        state: "failed",
+        errorCode: "persistence_failed",
+      });
+      expect(configured.printing.print).not.toHaveBeenCalled();
+      expect(await listInventoryBoxPrintAttempts(exec, INVENTORY_ID, SNAPSHOT_ID, BOX_ID)).toEqual([
+        expect.objectContaining({
+          attemptId: ATTEMPT_ID,
+          state: "failed",
+          errorCode: "persistence_failed",
+          eventId: EVENT_ID,
+        }),
+      ]);
+      if (kind === "remote")
+        expect(
+          db.prepare("SELECT completed_at FROM inventory_remote_reprint_requests").get(),
+        ).toEqual({ completed_at: "2026-08-25T10:02:01.000Z" });
+    },
+  );
+
   it("keeps the failed label destination when the box assignment changes before retry", async () => {
     const { exec } = await setup();
     const first = input(exec);

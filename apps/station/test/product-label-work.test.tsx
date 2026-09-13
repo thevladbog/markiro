@@ -2,6 +2,8 @@ import { waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { createProductLabelWork } from "../src/lib/use-product-label-work.js";
 import { openProductLabelWork } from "./support/product-label-work.js";
+import { bindPrintDestination, readPrintDestination } from "../src/lib/print-destinations.js";
+import { outputPrinterProfile } from "../src/lib/printer-routing.js";
 import { sendPreparedProductLabel } from "../src/lib/product-labels/printing.js";
 import type { PrinterProfile } from "../src/lib/printer-routing.js";
 import {
@@ -32,6 +34,58 @@ afterEach(() => {
   for (const h of resources.splice(0)) h.close();
 });
 describe("product label floor controller", () => {
+  it.each(["absent", "unreadable", "committed"] as const)(
+    "cleans an unaccepted destination only after durable absence is proven (%s)",
+    async (outcome) => {
+      const h = await openProductLabelWork("required", undefined, false);
+      resources.push(h);
+      const key = {
+        scope: h.input.credentialOwnership,
+        purpose: "duplicate" as const,
+        jobId: h.input.jobId,
+        attemptId: h.input.preparedEvent.attemptId,
+      };
+      const exec: typeof h.exec = {
+        run: async (sql, params) => {
+          if (!sql.includes("INSERT INTO product_label_accept_commands"))
+            return h.exec.run(sql, params);
+          if (outcome === "committed") await h.exec.run(sql, params);
+          throw new Error("accept response lost");
+        },
+        all: async (sql, params) => {
+          if (
+            outcome === "unreadable" &&
+            sql.includes("SELECT command_digest FROM product_label_accept_commands")
+          )
+            throw new Error("recovery read failed");
+          return h.exec.all(sql, params);
+        },
+      };
+      const work = createProductLabelWork({
+        exec,
+        shiftId: h.input.shiftId,
+        credentialOwnership: key.scope,
+        generation: createCredentialGeneration("test-label-key"),
+        getPrinting: () => h.deps,
+        prepare: async () => {
+          await bindPrintDestination(exec, key, outputPrinterProfile(h.deps));
+          return h.input;
+        },
+      });
+      await work.open();
+      if (outcome === "committed")
+        await expect(work.accept(h.input.raw)).resolves.toMatchObject({ status: "accepted" });
+      else await expect(work.accept(h.input.raw)).rejects.toThrow("accept response lost");
+      expect(await readPrintDestination(h.exec, key)).toEqual(
+        outcome === "absent" ? null : outputPrinterProfile(h.deps),
+      );
+      expect(await h.exec.all("SELECT * FROM product_label_jobs")).toHaveLength(
+        outcome === "committed" ? 1 : 0,
+      );
+      expect(h.print).not.toHaveBeenCalled();
+    },
+  );
+
   it("cannot replace a prepared destination from a stale controller while another send owns it", async () => {
     const replacement: PrinterProfile = {
       id: "new",

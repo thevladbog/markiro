@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import type {} from "../../../apps/station/test/browser/product-labels-types.js";
-const station = process.env.STATION_PRODUCT_LABELS_URL ?? "http://127.0.0.1:43182";
+import { productLabelsEndpoints } from "../product-labels.playwright.config.js";
+const station = productLabelsEndpoints().stationUrl;
 async function open(page: Page, verification = "required") {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto(

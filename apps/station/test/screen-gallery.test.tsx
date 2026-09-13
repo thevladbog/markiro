@@ -18,6 +18,38 @@ afterEach(() => {
 });
 
 describe("development screen gallery", () => {
+  it.each(["ru", "en"] as const)(
+    "keeps the selected recovery printer when switching from %s",
+    async (locale) => {
+      const next = locale === "ru" ? "en" : "ru";
+      const view = render(
+        <StationScreenGallery request={{ state: "printer-recovery-box", locale }} />,
+      );
+      fireEvent.click(
+        await screen.findByRole("button", {
+          name: locale === "ru" ? "Сменить принтер" : "Change printer",
+        }),
+      );
+      fireEvent.change(screen.getByRole("combobox"), { target: { value: "gallery-printer-1" } });
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: locale === "ru" ? "Использовать для этой этикетки" : "Use for this label",
+        }),
+      );
+      await waitFor(() => expect(screen.queryByRole("combobox")).toBeNull());
+      view.rerender(
+        <StationScreenGallery request={{ state: "printer-recovery-box", locale: next }} />,
+      );
+      expect(
+        await screen.findByText(
+          next === "ru"
+            ? "TSC у оператора — дубли кодов товара"
+            : "TSC at operator — product code duplicates",
+        ),
+      ).toBeDefined();
+    },
+  );
+
   const inventoryGalleryStateIds = [
     "inventory-task-selection",
     "inventory-other-line-confirmation",

@@ -13,7 +13,11 @@ import {
   requireProductLabelJob,
 } from "./store.js";
 import type { ProductLabelActor, ProductLabelJobView, ProductLabelPrintingDeps } from "./types.js";
-import { bindPrintDestination, readPrintDestination } from "../print-destinations.js";
+import {
+  bindPrintDestination,
+  readPrintDestination,
+  discardUncommittedPrintDestination,
+} from "../print-destinations.js";
 import {
   outputPrinterProfile,
   serializePrinterOutput,
@@ -267,10 +271,17 @@ export async function prepareProductLabelReprint(
     (await appendProductLabelEvent(exec, input.credentialOwnership, event, {
       recovery: input.recovery ?? false,
     })) !== "applied"
-  )
+  ) {
+    await discardUncommittedPrintDestination(exec, {
+      scope: job.credentialOwnership,
+      purpose: "duplicate",
+      jobId: input.jobId,
+      attemptId,
+    });
     throw new DomainError(
       "PRODUCT_LABEL_STALE",
       "The print attempt changed; refresh the current label",
     );
+  }
   return attemptId;
 }

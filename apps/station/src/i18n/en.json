@@ -892,6 +892,8 @@
     "cancel": "Cancel",
     "changeFailed": "Could not save the printer. Choose again.",
     "loading": "Loading printer…",
+    "saveResult": "Save result",
+    "resultNotSaved": "The label was sent, but the result was not saved. Retry saving; no new label will print.",
     "storageFailed": "Could not save the print job. Please try again."
   }
 }

@@ -297,6 +297,7 @@ export function App() {
     setPrintRecoveryBlocked(false);
   }, []);
   const openPrintRecoverySetup = useCallback((): void => {
+    setSetupPrinterTab(true);
     printRecoverySetupLatch.current = "awaiting-remount";
     setPrintRecoveryBlocked(true);
     setShowSetup(true);

@@ -2430,6 +2430,9 @@ describe("App", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "Set up printer" }));
       expect(await screen.findByRole("heading", { name: "Workstation setup" })).toBeDefined();
+      expect(screen.getByRole("tab", { name: "Printers" }).getAttribute("aria-selected")).toBe(
+        "true",
+      );
       expect(
         (screen.getByRole("button", { name: "↻ Updates" }) as HTMLButtonElement).disabled,
       ).toBe(true);

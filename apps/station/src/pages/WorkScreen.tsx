@@ -499,6 +499,8 @@ export function WorkScreen({
   const pendingShiftCloseReasonRef = useRef<string | null | undefined>(undefined);
 
   type PalletCloseScreenState = {
+    /** Process-local successful output: retry only its durable result while this screen owns it. */
+    resultPending?: boolean;
     palletId: string;
     sscc: string;
     boxCount: number;
@@ -665,7 +667,11 @@ export function WorkScreen({
     } catch (err) {
       console.error("station: failed to read the pallet's item count", err);
     }
-    const attempt = await attemptClosedPalletPrint({ sscc, boxCount, itemCount, closedAt });
+    const resultPending =
+      palletCloseRef.current?.palletId === palletId && palletCloseRef.current.resultPending;
+    const attempt = resultPending
+      ? { kind: "printed" as const }
+      : await attemptClosedPalletPrint({ sscc, boxCount, itemCount, closedAt });
 
     if (attempt.kind === "failed") {
       try {
@@ -684,6 +690,9 @@ export function WorkScreen({
       return;
     }
 
+    if (palletCloseRef.current?.palletId === palletId) {
+      updatePalletClose({ ...palletCloseRef.current, resultPending: true });
+    }
     try {
       await markPalletPrinted(exec, palletId);
     } catch {
@@ -692,7 +701,7 @@ export function WorkScreen({
         updatePalletClose({
           ...palletCloseRef.current,
           print: "failed",
-          errorCode: "transport_failed",
+          errorCode: "persistence_failed",
           pending: false,
         });
       }
@@ -702,6 +711,7 @@ export function WorkScreen({
       updatePalletClose({
         ...palletCloseRef.current,
         print: "printed",
+        resultPending: false,
         errorCode: null,
         pending: false,
       });
@@ -769,7 +779,7 @@ export function WorkScreen({
 
   function skipPalletPrint(): void {
     const cur = palletCloseRef.current;
-    if (!cur || cur.pending) return;
+    if (!cur || cur.pending || cur.resultPending) return;
     updatePalletClose({ ...cur, pending: true });
     void (async () => {
       try {
@@ -967,6 +977,8 @@ export function WorkScreen({
   const labelSpecReady = useRef<Promise<void> | null>(null);
   type PrintRecoveryState = Omit<UnresolvedBoxPrint, "errorCode"> & {
     errorCode: BoxPrintRecoveryErrorCode;
+    /** Retain successful output through result-write failures, including bytes for scan-back. */
+    printedBytes?: Uint8Array;
     pending: boolean;
   };
   const [printRecovery, setPrintRecoveryState] = useState<PrintRecoveryState | null>(null);
@@ -1571,7 +1583,9 @@ export function WorkScreen({
 
   async function attemptRecoveryPrint(job: PrintRecoveryState): Promise<void> {
     updatePrintRecovery({ ...job, pending: true });
-    const attempt = await attemptClosedBoxPrint(job);
+    const attempt = job.printedBytes
+      ? { kind: "printed" as const, bytes: job.printedBytes }
+      : await attemptClosedBoxPrint(job);
 
     if (attempt.kind === "failed") {
       try {
@@ -1583,11 +1597,13 @@ export function WorkScreen({
       return;
     }
 
+    const sentJob = { ...job, printedBytes: attempt.bytes };
+    updatePrintRecovery({ ...sentJob, pending: true });
     try {
       await markBoxPrinted(exec, job.boxId);
     } catch {
       console.error("station: failed to persist printed box label");
-      updatePrintRecovery({ ...job, errorCode: "transport_failed", pending: false });
+      updatePrintRecovery({ ...sentJob, errorCode: "persistence_failed", pending: false });
       return;
     }
     updatePrintRecovery(null);
@@ -2291,8 +2307,12 @@ export function WorkScreen({
     if (
       !printers.some((candidate) => JSON.stringify(candidate) === JSON.stringify(selected)) ||
       (purpose === "box"
-        ? !box || box.sscc !== sscc || box.pending
-        : !pallet || pallet.sscc !== sscc || pallet.pending || pallet.print === "printing")
+        ? !box || box.sscc !== sscc || box.pending || !!box.printedBytes
+        : !pallet ||
+          pallet.sscc !== sscc ||
+          pallet.pending ||
+          pallet.resultPending ||
+          pallet.print === "printing")
     )
       return Promise.reject(new Error("Print attempt unavailable"));
     if (purpose === "box" && box) updatePrintRecovery({ ...box, pending: true });
@@ -2344,7 +2364,7 @@ export function WorkScreen({
 
   function skipPrintRecovery(): void {
     const job = printRecoveryRef.current;
-    if (!job || job.pending) return;
+    if (!job || job.pending || job.printedBytes) return;
     updatePrintRecovery({ ...job, pending: true });
     const admitted = queue.enqueueJob(async () => {
       try {
@@ -2751,13 +2771,14 @@ export function WorkScreen({
               }}
               revision={`${printerDestinationRevision}:${printRecovery.pending}`}
               printers={printers}
-              disabled={printRecovery.pending}
+              disabled={printRecovery.pending || !!printRecovery.printedBytes}
               onChoose={(printer) => changeLabelPrinter("box", printRecovery.sscc, printer)}
             />
           }
           sscc={printRecovery.sscc}
           errorCode={printRecovery.errorCode}
           pending={printRecovery.pending}
+          resultPending={!!printRecovery.printedBytes}
           onRetry={retryPrintRecovery}
           onSetup={() => onOpenPrinterSetup?.()}
           onSkip={skipPrintRecovery}
@@ -2867,7 +2888,11 @@ export function WorkScreen({
               }}
               revision={`${printerDestinationRevision}:${palletClose.print}:${palletClose.pending}`}
               printers={printers}
-              disabled={palletClose.pending || palletClose.print === "printing"}
+              disabled={
+                palletClose.pending ||
+                palletClose.print === "printing" ||
+                !!palletClose.resultPending
+              }
               {...(palletClose.print === "failed" || palletClose.print === "unknown"
                 ? {
                     onChoose: (printer: PrinterProfile) =>
@@ -2880,6 +2905,7 @@ export function WorkScreen({
           print={palletClose.print}
           errorCode={palletClose.errorCode}
           pending={palletClose.pending}
+          resultPending={!!palletClose.resultPending}
           onRetry={retryPalletPrint}
           onSetup={() => onOpenPrinterSetup?.()}
           onSkip={skipPalletPrint}

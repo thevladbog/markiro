@@ -39,6 +39,54 @@ describe("product label printing", () => {
       attemptId,
     });
 
+  it.each(["stale", "replayed", "uncertain-before", "uncertain-after"] as const)(
+    "cleans only an uncommitted provisional reprint destination (%s)",
+    async (outcome) => {
+      await sendPreparedProductLabel(work.deps, work.input.jobId);
+      const key = {
+        scope: work.input.credentialOwnership,
+        purpose: "duplicate" as const,
+        jobId: work.input.jobId,
+        attemptId: work.input.preparedEvent.attemptId,
+      };
+      const original = await readPrintDestination(work.exec, key);
+      expect(original).not.toBeNull();
+      const attemptId = crypto.randomUUID();
+      let ids = 0;
+      const run = work.exec.run;
+      work.exec.run = async (sql, params) => {
+        if (!sql.includes("INSERT INTO product_label_event_commands")) return run(sql, params);
+        if (outcome === "stale") throw new Error("PRODUCT_LABEL_STALE");
+        if (outcome === "uncertain-before") throw new Error("lost write response");
+        if (outcome === "replayed") {
+          const competing = [...(params ?? [])];
+          competing[3] = crypto.randomUUID();
+          return run(sql, competing);
+        }
+        await run(sql, params);
+        throw new Error("lost write response");
+      };
+      await expect(
+        prepareProductLabelReprint(work.exec, {
+          ...work.actor,
+          newId: () => (ids++ === 0 ? attemptId : work.actor.newId()),
+          credentialOwnership: key.scope,
+          shiftId: work.input.shiftId,
+          jobId: key.jobId,
+          reason: "damaged",
+        }),
+      ).rejects.toThrow();
+      expect(await readPrintDestination(work.exec, { ...key, attemptId })).toEqual(
+        outcome === "stale" ? null : original,
+      );
+      expect(await readPrintDestination(work.exec, key)).toEqual(original);
+      expect((await stored())?.projection.attemptId).toBe(
+        outcome === "replayed" || outcome === "uncertain-after" ? attemptId : key.attemptId,
+      );
+      expect(work.print).toHaveBeenCalledOnce();
+    },
+  );
+
   it("journals an explicit skip atomically, survives restart and never marks the label verified", async () => {
     await sendPreparedProductLabel(work.deps, work.input.jobId);
     expect(await skip("stale-attempt")).toBe(false);

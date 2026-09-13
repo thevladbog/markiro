@@ -223,6 +223,8 @@ export function createProductLabelWork(options: ProductLabelWorkOptions) {
               await refresh(input.jobId);
               return { status: "accepted", jobId: input.jobId };
             }
+            if (!saved)
+              await discardUnacceptedPrintDestination(exec, input.credentialOwnership, input.jobId);
             await refresh();
           } catch {
             /* Recovery will retry the saved journal from the blocked screen. */

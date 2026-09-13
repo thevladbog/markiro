@@ -20,7 +20,7 @@ import type { PrinterLanguage } from "../src/lib/hardware-config.js";
 import type { SqlExecutor } from "../src/lib/mirror.js";
 import type { ScanListener, ScanSource } from "../src/lib/scan-source.js";
 import { addRange } from "../src/lib/sscc-pool.js";
-import { WorkScreen } from "../src/pages/WorkScreen.js";
+import { WorkScreen, type WorkScreenProps } from "../src/pages/WorkScreen.js";
 
 /**
  * This test file predates neither the interfaces nor the RU/EN copy it
@@ -163,6 +163,7 @@ async function seedPallet(exec: SqlExecutor, options: SeedPalletOptions): Promis
 }
 
 interface RenderWorkOptions {
+  printers?: WorkScreenProps["printers"];
   exec?: SqlExecutor;
   shiftId?: string;
   terminalId?: string | null;
@@ -197,6 +198,7 @@ function renderWork(overrides: RenderWorkOptions = {}) {
     issuerPrefix = TEST_ISSUER_PREFIX,
     onCloseShift,
     printing,
+    printers = [],
     palletPrinting,
     source = manualSource(),
   } = overrides;
@@ -217,6 +219,7 @@ function renderWork(overrides: RenderWorkOptions = {}) {
       issuerPrefix={issuerPrefix}
       boxCapacity={null}
       palletBoxCapacity={palletBoxCapacity}
+      printers={printers}
       verifyPrintedLabel={false}
       {...(printing !== undefined ? { printing } : {})}
       {...(palletPrinting !== undefined ? { palletPrinting } : {})}
@@ -681,6 +684,122 @@ describe("WorkScreen shift close blocked by an open pallet", () => {
 });
 
 describe("pallet print recovery", () => {
+  it.each([false, true])(
+    "saves a successful pallet result without resending after durable failure (committed=%s)",
+    async (committed) => {
+      const base = makeExec();
+      await seedShift(base, {
+        shiftId: "s1",
+        palletBoxCapacity: 12,
+        palletLabelTemplateSpec: PALLET_LABEL_SPEC,
+      });
+      await seedPallet(base, {
+        palletId: "p1",
+        shiftId: "s1",
+        terminalId: "dev-1",
+        boxCount: 3,
+        closedAt: "2026-07-29T09:20:00.000Z",
+        sscc: "103460068200000099",
+        printState: "pending",
+        printErrorCode: "transport_failed",
+      });
+      const print = vi.fn(async () => {});
+      let failures = 2;
+      let updates = 0;
+      const exec: SqlExecutor = {
+        all: base.all,
+        run: async (sql, params) => {
+          if (
+            sql.includes("UPDATE pallets_mirror") &&
+            sql.includes("SET print_state = 'printed'")
+          ) {
+            updates++;
+            if (failures-- > 0) {
+              if (committed) await base.run(sql, params);
+              throw new Error("printed result write failed");
+            }
+          }
+          return base.run(sql, params);
+        },
+      };
+      renderWork({
+        exec,
+        palletBoxCapacity: 12,
+        printers: [
+          {
+            id: "available",
+            name: "Available printer",
+            target: PRINT_TARGET,
+            language: "zpl",
+            dpi: 203,
+          },
+        ],
+        palletPrinting: { target: PRINT_TARGET, language: "zpl", print },
+      });
+      fireEvent.click(await screen.findByRole("button", { name: i18n.t("pallet.retry") }));
+      for (let retry = 0; retry < 2; retry++) {
+        const save = await screen.findByRole("button", { name: "Сохранить результат" });
+        await waitFor(() => expect(save.hasAttribute("disabled")).toBe(false));
+        expect(screen.getByRole("alert").textContent).toContain("Этикетка отправлена");
+        expect(
+          screen.queryByRole("button", { name: i18n.t("box.printRecovery.continueWithoutLabel") }),
+        ).toBeNull();
+        expect(
+          screen.getByRole("button", { name: "Сменить принтер" }).hasAttribute("disabled"),
+        ).toBe(true);
+        fireEvent.click(save);
+        await waitFor(() => expect(updates).toBe(retry + 2));
+      }
+      await screen.findByText(i18n.t("pallet.printed"));
+      expect(print).toHaveBeenCalledOnce();
+      expect(await base.all("SELECT print_state FROM pallets_mirror WHERE pallet_id='p1'")).toEqual(
+        [{ print_state: "printed" }],
+      );
+    },
+  );
+
+  it("retries physical pallet output after a pre-send destination persistence failure", async () => {
+    const base = makeExec();
+    await seedShift(base, {
+      shiftId: "s1",
+      palletBoxCapacity: 12,
+      palletLabelTemplateSpec: PALLET_LABEL_SPEC,
+    });
+    await seedPallet(base, {
+      palletId: "p1",
+      shiftId: "s1",
+      terminalId: "dev-1",
+      boxCount: 3,
+      closedAt: "2026-07-29T09:20:00.000Z",
+      sscc: "103460068200000099",
+      printState: "pending",
+      printErrorCode: "transport_failed",
+    });
+    const print = vi.fn(async () => {});
+    let fail = true;
+    const exec: SqlExecutor = {
+      all: base.all,
+      run: async (sql, params) => {
+        if (fail && sql.includes("INSERT INTO printer_destinations")) {
+          fail = false;
+          throw new Error("binding failed");
+        }
+        return base.run(sql, params);
+      },
+    };
+    renderWork({
+      exec,
+      palletBoxCapacity: 12,
+      palletPrinting: { target: PRINT_TARGET, language: "zpl", print },
+    });
+    fireEvent.click(await screen.findByRole("button", { name: i18n.t("pallet.retry") }));
+    await screen.findByText(i18n.t("printerRouting.storageFailed"));
+    expect(print).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("pallet.retry") }));
+    await screen.findByText(i18n.t("pallet.printed"));
+    expect(print).toHaveBeenCalledOnce();
+  });
+
   it("reads a pallet left printing at startup as unknown, and WorkScreen never resends it", async () => {
     const exec = makeExec();
     await seedShift(exec, {

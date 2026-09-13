@@ -73,8 +73,10 @@ fun BoxCloseScreen(step: BoxCloseStep, cb: BoxCloseCallbacks, destinationLabel: 
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Text(stringResource(R.string.printer_purpose_box) + " · " + (destinationLabel ?: stringResource(R.string.printer_unassigned)),
-            style = t.caption, color = c.fg2, textAlign = TextAlign.Center)
+        if (step.closedBox() != null) {
+            Text(stringResource(R.string.printer_purpose_box) + " · " + (destinationLabel ?: stringResource(R.string.printer_unassigned)),
+                style = t.caption, color = c.fg2, textAlign = TextAlign.Center)
+        }
         when (step) {
             BoxCloseStep.Idle -> Unit
             is BoxCloseStep.Refused -> Refused(step.reason, cb)
