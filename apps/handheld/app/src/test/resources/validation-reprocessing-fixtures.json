@@ -1,0 +1,126 @@
+{
+  "raw": "010460068200001321repeat\u001d93CRYPTO",
+  "codeHash": "d674b18ce43d30904ae6ae8b82c2d9dc34c21cccc4a161e05af705ca10dd56f6",
+  "policies": [
+    {
+      "input": {
+        "mode": "duplicate_dm",
+        "verification": "none",
+        "templateId": "22222222-2222-4222-8222-222222222222"
+      },
+      "expected": {
+        "mode": "duplicate_dm",
+        "verification": "none",
+        "allowPreviouslyAcceptedCodes": false,
+        "templateId": "22222222-2222-4222-8222-222222222222"
+      }
+    },
+    {
+      "input": {
+        "mode": "duplicate_dm",
+        "verification": "none",
+        "templateId": "22222222-2222-4222-8222-222222222222",
+        "allowPreviouslyAcceptedCodes": false
+      },
+      "expected": {
+        "mode": "duplicate_dm",
+        "verification": "none",
+        "allowPreviouslyAcceptedCodes": false,
+        "templateId": "22222222-2222-4222-8222-222222222222"
+      }
+    },
+    {
+      "input": {
+        "mode": "duplicate_dm",
+        "verification": "none",
+        "templateId": "22222222-2222-4222-8222-222222222222",
+        "allowPreviouslyAcceptedCodes": true
+      },
+      "expected": {
+        "mode": "duplicate_dm",
+        "verification": "none",
+        "allowPreviouslyAcceptedCodes": true,
+        "templateId": "22222222-2222-4222-8222-222222222222"
+      }
+    }
+  ],
+  "history": {
+    "protocol": "validation-reprocessing-v1",
+    "shiftId": "11111111-1111-4111-8111-111111111111",
+    "productId": "22222222-2222-4222-8222-222222222222",
+    "snapshot": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "fetchedAt": "2026-09-12T08:00:00.000Z",
+    "expiresAt": "2026-09-12T09:00:00.000Z",
+    "nextCursor": null,
+    "complete": true,
+    "items": [
+      {
+        "codeHash": "d674b18ce43d30904ae6ae8b82c2d9dc34c21cccc4a161e05af705ca10dd56f6",
+        "kind": "original",
+        "shiftId": "33333333-3333-4333-8333-333333333333",
+        "shiftNumber": "SEP26-003",
+        "shiftStatus": "closed",
+        "scannedAt": "2026-09-12T08:00:00.000Z"
+      }
+    ]
+  },
+  "status": {
+    "protocol": "validation-reprocessing-v1",
+    "occurrences": [
+      {
+        "shiftId": "11111111-1111-4111-8111-111111111111",
+        "codeHash": "d674b18ce43d30904ae6ae8b82c2d9dc34c21cccc4a161e05af705ca10dd56f6",
+        "scannedAt": "2026-09-12T08:00:00.000Z",
+        "outcome": "first_accepted"
+      },
+      {
+        "shiftId": "11111111-1111-4111-8111-111111111111",
+        "codeHash": "d674b18ce43d30904ae6ae8b82c2d9dc34c21cccc4a161e05af705ca10dd56f6",
+        "scannedAt": "2026-09-12T08:00:00.000Z",
+        "outcome": "reprocessed"
+      },
+      {
+        "shiftId": "11111111-1111-4111-8111-111111111111",
+        "codeHash": "d674b18ce43d30904ae6ae8b82c2d9dc34c21cccc4a161e05af705ca10dd56f6",
+        "scannedAt": "2026-09-12T08:00:00.000Z",
+        "outcome": "pending"
+      },
+      {
+        "shiftId": "11111111-1111-4111-8111-111111111111",
+        "codeHash": "d674b18ce43d30904ae6ae8b82c2d9dc34c21cccc4a161e05af705ca10dd56f6",
+        "scannedAt": "2026-09-12T08:00:00.000Z",
+        "outcome": "conflict"
+      }
+    ]
+  },
+  "releasedReceipt": {
+    "shiftId": "11111111-1111-4111-8111-111111111111",
+    "codeHash": "d674b18ce43d30904ae6ae8b82c2d9dc34c21cccc4a161e05af705ca10dd56f6",
+    "scannedAt": "2026-09-12T08:00:00.000Z",
+    "outcome": "first_accepted",
+    "ownership": "released"
+  },
+  "invalidReleasedReceipts": [
+    {
+      "shiftId": "11111111-1111-4111-8111-111111111111",
+      "codeHash": "d674b18ce43d30904ae6ae8b82c2d9dc34c21cccc4a161e05af705ca10dd56f6",
+      "scannedAt": "2026-09-12T08:00:00.000Z",
+      "outcome": "reprocessed",
+      "ownership": "released"
+    },
+    {
+      "shiftId": "11111111-1111-4111-8111-111111111111",
+      "codeHash": "d674b18ce43d30904ae6ae8b82c2d9dc34c21cccc4a161e05af705ca10dd56f6",
+      "scannedAt": "2026-09-12T08:00:00.000Z",
+      "outcome": "conflict",
+      "ownership": "released"
+    },
+    {
+      "shiftId": "11111111-1111-4111-8111-111111111111",
+      "codeHash": "d674b18ce43d30904ae6ae8b82c2d9dc34c21cccc4a161e05af705ca10dd56f6",
+      "scannedAt": "2026-09-12T08:00:00.000Z",
+      "outcome": "pending",
+      "ownership": "released"
+    }
+  ]
+}

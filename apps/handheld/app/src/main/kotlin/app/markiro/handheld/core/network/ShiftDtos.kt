@@ -18,6 +18,7 @@ data class ValidationPrintDto(
     val verification: String? = null,
     val snapshot: DuplicateTemplateDto? = null,
     val policyRevision: String? = null,
+    val allowPreviouslyAcceptedCodes: Boolean = false,
 )
 
 @Serializable

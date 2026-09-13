@@ -53,7 +53,10 @@ describe("validation printing policy", () => {
     expect(domain.validationPrintInputSchema.parse({ mode: "none" })).toEqual({ mode: "none" });
     for (const verification of ["required", "none"]) {
       const input = { mode: "duplicate_dm", verification, templateId: ID };
-      expect(domain.validationPrintInputSchema.parse(input)).toEqual(input);
+      expect(domain.validationPrintInputSchema.parse(input)).toEqual({
+        ...input,
+        allowPreviouslyAcceptedCodes: false,
+      });
       expect(
         domain.validationPrintPolicySchema.parse({ ...enabled, verification }).verification,
       ).toBe(verification);

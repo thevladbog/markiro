@@ -10,6 +10,7 @@ import {
   assertValidationPrintCompatible,
   validationPrintFromStorage,
   validationPrintToStorage,
+  projectDeviceValidationPrint,
 } from "../src/modules/shifts/validation-print-policy";
 import { createShiftSchema, updateShiftSchema } from "../src/modules/shifts/dto";
 
@@ -43,6 +44,14 @@ describe("validation print policy boundary", () => {
     ).not.toThrow();
   });
 
+  it("requires the new capability only for explicit reprocessing", () => {
+    const enabled = { ...policy, allowPreviouslyAcceptedCodes: true };
+    expect(() => assertProductLabelCapability(enabled, PRODUCT_LABEL_PROTOCOL)).toThrow();
+    expect(() =>
+      assertProductLabelCapability(enabled, `${PRODUCT_LABEL_PROTOCOL},validation-reprocessing-v1`),
+    ).not.toThrow();
+  });
+
   it("preserves old clients in ordinary shifts", () => {
     const none = validationPrintFromStorage({
       validationPrintMode: "none",
@@ -68,7 +77,7 @@ describe("validation print policy boundary", () => {
         mode: "validation",
         validationPrint: input,
       }).validationPrint,
-    ).toEqual(input);
+    ).toEqual({ ...input, allowPreviouslyAcceptedCodes: false });
     expect(updateShiftSchema.parse({ validationPrint: { mode: "none" } }).validationPrint).toEqual({
       mode: "none",
     });
@@ -76,5 +85,29 @@ describe("validation print policy boundary", () => {
     expect(() =>
       updateShiftSchema.parse({ validationPrint: { ...input, snapshot: template } }),
     ).toThrow();
+  });
+  it("projects legacy output even for no-print policies", () => {
+    const value = {
+      validationPrint: validationPrintPolicySchema.parse({
+        mode: "none",
+        verification: "none",
+        templateId: null,
+        snapshot: null,
+        policyRevision: null,
+      }),
+      output: {
+        mode: "validation" as const,
+        acceptedUnits: 3,
+        firstAcceptedUnits: 2,
+        reprocessedUnits: 1,
+      },
+    };
+    expect(projectDeviceValidationPrint(value, undefined).output).toEqual({
+      mode: "validation",
+      acceptedUnits: 3,
+    });
+    expect(projectDeviceValidationPrint(value, "validation-reprocessing-v1").output).toEqual(
+      value.output,
+    );
   });
 });

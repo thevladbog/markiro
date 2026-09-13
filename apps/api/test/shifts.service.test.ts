@@ -70,6 +70,7 @@ const SHIFT_ROW: typeof schema.shifts.$inferSelect = {
   ssccIssuerCounterpartyId: null,
   boxLabelTemplateId: null,
   validationPrintMode: "none",
+  allowPreviouslyAcceptedCodes: false,
   validationPrintVerification: "none",
   validationPrintTemplateId: null,
   validationPrintSnapshot: null,

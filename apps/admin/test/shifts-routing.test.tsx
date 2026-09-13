@@ -4,7 +4,7 @@ import { userEvent } from "@testing-library/user-event";
 import { createMemoryRouter, createRoutesFromElements, Route, RouterProvider } from "react-router";
 import { afterEach, expect, it, vi } from "vitest";
 
-import { CABINET_CAPABILITY } from "@markiro/domain";
+import { buildDuplicateLabelTemplate, CABINET_CAPABILITY } from "@markiro/domain";
 
 import type { AccessDocument } from "../src/access/api.js";
 import { AccessProvider } from "../src/access/context.js";
@@ -115,7 +115,8 @@ function stubDependencies(shifts = [SHIFT], createError?: string) {
         });
       }
       if (path === "/api/shift-exports/formats") return jsonResponse(200, [EXPORT_FORMAT]);
-      if (path === "/api/shifts/s1/exports") return jsonResponse(200, []);
+      if (path.startsWith("/api/shifts/") && path.endsWith("/exports"))
+        return jsonResponse(200, []);
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: shifts });
       if (path.startsWith("/api/products")) return jsonResponse(200, { items: [PRODUCT] });
       return jsonResponse(200, { items: [] });
@@ -316,4 +317,134 @@ it("blocks Back after a planning field changes until discard", async () => {
   expect(router.state.location.pathname).toBe("/shifts/new");
   await user.click(await screen.findByRole("button", { name: "Не сохранять" }));
   await waitFor(() => expect(router.state.location.pathname).toBe("/shifts"));
+});
+
+const repeatPolicy = {
+  mode: "duplicate_dm" as const,
+  verification: "required" as const,
+  templateId: "33333333-3333-4333-8333-333333333333",
+  allowPreviouslyAcceptedCodes: true,
+  policyRevision: "44444444-4444-4444-8444-444444444444",
+  snapshot: {
+    id: "33333333-3333-4333-8333-333333333333",
+    name: "Дубликат",
+    spec: buildDuplicateLabelTemplate(),
+    digest: "a".repeat(64),
+  },
+};
+it("roundtrips enabled reprocessing from the routed planned shift", async () => {
+  stubDependencies([{ ...SHIFT, validationPrint: repeatPolicy }]);
+  renderPanel(["/shifts/s1/edit"]);
+  const checkbox = await screen.findByLabelText(
+    "Разрешить повторную обработку кодов из предыдущих смен",
+  );
+  expect(checkbox.getAttribute("aria-checked")).toBe("true");
+});
+
+const rawRepeat = "010460000000001521FULL-SERIAL\u001d91ABCD\u001d92CryptoTail/+=";
+function stubRepeatReport(
+  output: unknown = {
+    mode: "validation",
+    acceptedUnits: 3,
+    firstAcceptedUnits: 2,
+    reprocessedUnits: 1,
+  },
+  error = false,
+  allowPreviouslyAcceptedCodes = true,
+) {
+  stubDependencies([
+    {
+      ...SHIFT,
+      status: "active",
+      validationPrint: { ...repeatPolicy, allowPreviouslyAcceptedCodes },
+    },
+    { ...SHIFT, id: "55555555-5555-4555-8555-555555555555", number: "SEP26-007", status: "closed" },
+  ]);
+  const base = vi.mocked(fetch).getMockImplementation();
+  vi.mocked(fetch).mockImplementation(async (url, init) => {
+    const path = String(url);
+    if (path === "/api/shifts/s1/summary")
+      return jsonResponse(200, {
+        generatedAt: SHIFT.createdAt,
+        output,
+        participants: [],
+        unattributed: { eventCount: 0, acceptedScans: 0, closedBoxes: 0 },
+      });
+    if (path === "/api/shifts/55555555-5555-4555-8555-555555555555/summary")
+      return jsonResponse(200, {
+        generatedAt: SHIFT.createdAt,
+        output: { mode: "validation", acceptedUnits: 10 },
+        participants: [],
+        unattributed: { eventCount: 0, acceptedScans: 0, closedBoxes: 0 },
+      });
+    if (path.includes("/reprocessings"))
+      return jsonResponse(error ? 503 : 200, {
+        items: [
+          {
+            codeHash: "b".repeat(64),
+            canonicalRaw: rawRepeat,
+            sourceShift: {
+              id: "55555555-5555-4555-8555-555555555555",
+              number: "SEP26-007",
+              productName: "Молоко 1л",
+              date: "2026-09-10",
+            },
+            occurrence: {
+              shiftId: "11111111-1111-4111-8111-111111111111",
+              deviceId: "66666666-6666-4666-8666-666666666666",
+              operatorId: null,
+              scannedAt: "2026-09-12T10:00:00.000Z",
+            },
+          },
+        ],
+        nextCursor: null,
+      });
+    if (path.includes("/product-labels"))
+      return jsonResponse(200, {
+        summary: { sentAttempts: 1, verifiedAttempts: 1, unresolvedJobs: 0, reprintAttempts: 0 },
+        items: [],
+        nextCursor: null,
+      });
+    return base?.(url, init) ?? jsonResponse(500, {});
+  });
+}
+it("shows processed = first + repeated, full raw code and navigable source shift", async () => {
+  stubRepeatReport();
+  const { router, user } = renderPanel(["/shifts/s1"]);
+  await screen.findByText("Повторные обработки");
+  const panel = within(screen.getByRole("dialog"));
+  await panel.findByText("Обработано");
+  expect(panel.getByText("Обработано").parentElement?.textContent).toBe("3Обработано");
+  expect(panel.getByText("Впервые").parentElement?.textContent).toBe("2Впервые");
+  expect(panel.getByText("Повторно").parentElement?.textContent).toBe("1Повторно");
+  const code = await screen.findByText(
+    (_, node) => node?.tagName === "CODE" && node.textContent === rawRepeat,
+  );
+  expect(code.textContent).toBe(rawRepeat);
+  expect(panel.queryByText("b".repeat(64))).toBeNull();
+  await user.click(panel.getByRole("link", { name: "SEP26-007" }));
+  expect(router.state.location.pathname).toBe("/shifts/55555555-5555-4555-8555-555555555555");
+  await screen.findByRole("dialog", { name: "Смена SEP26-007" });
+});
+it("does not invent first or repeat counts when enabled output lacks them", async () => {
+  stubRepeatReport({ mode: "validation", acceptedUnits: 3 });
+  renderPanel(["/shifts/s1"]);
+  expect((await screen.findByText("Впервые")).parentElement?.textContent).toBe("—Впервые");
+  expect(screen.getByText("Повторно").parentElement?.textContent).toBe("—Повторно");
+});
+it("shows a recoverable reprocessing error without claiming an empty report", async () => {
+  stubRepeatReport(undefined, true);
+  renderPanel(["/shifts/s1"]);
+  await screen.findByText("Не удалось загрузить повторные обработки");
+  expect(screen.queryByText("Повторных обработок пока нет")).toBeNull();
+});
+
+it("uses legacy false-policy counts without requesting the new report endpoint", async () => {
+  stubRepeatReport({ mode: "validation", acceptedUnits: 3 }, false, false);
+  renderPanel(["/shifts/s1"]);
+  expect((await screen.findByText("Впервые")).parentElement?.textContent).toBe("3Впервые");
+  expect(screen.getByText("Повторно").parentElement?.textContent).toBe("0Повторно");
+  expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("/reprocessings"))).toBe(
+    false,
+  );
 });

@@ -1055,15 +1055,18 @@ describe.skipIf(!ready)("platform tenant management", () => {
       const beforeAddons = await setup.db
         .select({ id: schema.subscriptionAddons.id })
         .from(schema.subscriptionAddons)
-        .where(eq(schema.subscriptionAddons.tenantId, boundaryTenantId));
+        .where(eq(schema.subscriptionAddons.tenantId, boundaryTenantId))
+        .orderBy(schema.subscriptionAddons.id);
       const beforeEvents = await setup.db
         .select({ id: schema.subscriptionEvents.id })
         .from(schema.subscriptionEvents)
-        .where(eq(schema.subscriptionEvents.tenantId, boundaryTenantId));
+        .where(eq(schema.subscriptionEvents.tenantId, boundaryTenantId))
+        .orderBy(schema.subscriptionEvents.id);
       const beforeAudits = await setup.db
         .select({ id: schema.platformAuditEvents.id })
         .from(schema.platformAuditEvents)
-        .where(eq(schema.platformAuditEvents.tenantId, boundaryTenantId));
+        .where(eq(schema.platformAuditEvents.tenantId, boundaryTenantId))
+        .orderBy(schema.platformAuditEvents.id);
 
       await admin
         .post(`/platform/tenants/${boundaryTenantId}/subscription/addons`)
@@ -1081,19 +1084,22 @@ describe.skipIf(!ready)("platform tenant management", () => {
         await setup.db
           .select({ id: schema.subscriptionAddons.id })
           .from(schema.subscriptionAddons)
-          .where(eq(schema.subscriptionAddons.tenantId, boundaryTenantId)),
+          .where(eq(schema.subscriptionAddons.tenantId, boundaryTenantId))
+          .orderBy(schema.subscriptionAddons.id),
       ).toEqual(beforeAddons);
       expect(
         await setup.db
           .select({ id: schema.subscriptionEvents.id })
           .from(schema.subscriptionEvents)
-          .where(eq(schema.subscriptionEvents.tenantId, boundaryTenantId)),
+          .where(eq(schema.subscriptionEvents.tenantId, boundaryTenantId))
+          .orderBy(schema.subscriptionEvents.id),
       ).toEqual(beforeEvents);
       expect(
         await setup.db
           .select({ id: schema.platformAuditEvents.id })
           .from(schema.platformAuditEvents)
-          .where(eq(schema.platformAuditEvents.tenantId, boundaryTenantId)),
+          .where(eq(schema.platformAuditEvents.tenantId, boundaryTenantId))
+          .orderBy(schema.platformAuditEvents.id),
       ).toEqual(beforeAudits);
     }
   });

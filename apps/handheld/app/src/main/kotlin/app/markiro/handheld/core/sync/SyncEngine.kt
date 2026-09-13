@@ -1,5 +1,11 @@
 package app.markiro.handheld.core.sync
 
+import app.markiro.handheld.core.storage.applyValidationReceipt
+import app.markiro.handheld.core.network.ValidationOccurrenceIdentity
+import app.markiro.handheld.core.network.ValidationOccurrenceReceipt
+import app.markiro.handheld.core.network.ValidationOccurrenceStatusRequest
+import app.markiro.handheld.core.network.ValidationOccurrenceStatusResponse
+import app.markiro.handheld.core.network.VALIDATION_REPROCESSING_PROTOCOL
 import app.markiro.handheld.core.network.BatchConflictDto
 import app.markiro.handheld.core.network.BoxClosureDto
 import app.markiro.handheld.core.network.ConflictStatusRequest
@@ -91,6 +97,7 @@ class SyncEngine(
         db.productLabelEventDao().observeUnackedCount(),
         db.boxExceptionDao().observeUnackedCount(),
         db.palletExceptionDao().observeUnackedCount(),
+        db.validationDao().pendingCount(),
     ) { counts -> counts.sum() }
 
     val state: StateFlow<SyncState> =
@@ -137,6 +144,7 @@ class SyncEngine(
             }
         }
         if (!drainCloses()) return false
+        reconcileValidationOccurrences()
         reconcileConflicts()
         true
     }
@@ -289,6 +297,11 @@ class SyncEngine(
         if (!parsed.alreadyApplied && parsed.applied != rows.size) return Step.FAILED
         val at = clock()
         db.recovery.commit {
+            for (receipt in parsed.occurrences) {
+                if (rows.any { it.shiftId == receipt.shiftId && it.codeHash == receipt.codeHash && it.scannedAt == receipt.scannedAt }) {
+                    db.applyValidationReceipt(receipt)
+                }
+            }
             db.conflictDao().insertIgnore(
                 parsed.conflicts.map { ConflictEntity(it.codeHash, it.winningTerminalId, it.winningScannedAt!!, Iso.format(at)) },
             )
@@ -431,6 +444,7 @@ class SyncEngine(
         val conflicts: List<BatchConflictDto>,
         val denied: String?,
         val receipt: ProductLabelReceipt?,
+        val occurrences: List<ValidationOccurrenceReceipt>,
     )
 
     /** Per-event outcomes. Absent when the batch carried no events, or on an older server. */
@@ -445,7 +459,15 @@ class SyncEngine(
             .mapNotNull { runCatching { json.decodeFromJsonElement(BatchConflictDto.serializer(), it) }.getOrNull() }
             .filter { it.winningScannedAt != null && Iso.parse(it.winningScannedAt) != null }
         val denied = obj["denied"]?.takeIf { it !is JsonNull }?.toString()
-        return BatchResponse(applied, alreadyApplied, conflicts, denied, parseReceipt(obj))
+        val occurrences = obj["validationOccurrences"]?.let { value ->
+            val array = value as? kotlinx.serialization.json.JsonArray ?: return null
+            array.map { entry ->
+                val receipt = runCatching { json.decodeFromJsonElement(ValidationOccurrenceReceipt.serializer(), entry) }.getOrNull() ?: return null
+                if (receipt.outcome !in setOf("first_accepted", "reprocessed", "conflict") || Iso.parse(receipt.scannedAt) == null) return null
+                receipt
+            }
+        }.orEmpty()
+        return BatchResponse(applied, alreadyApplied, conflicts, denied, parseReceipt(obj), occurrences)
     }
 
     /**
@@ -489,6 +511,30 @@ class SyncEngine(
             }
         }
         return true
+    }
+
+    /** Includes acknowledged occurrences: an earlier competing scan may arrive in a later batch. */
+    internal suspend fun reconcileValidationOccurrences() = db.recovery.work {
+        var afterShift = ""
+        var afterHash = ""
+        while (true) {
+            val page = db.validationDao().page(afterShift, afterHash, 500)
+            if (page.isEmpty()) break
+            val identities = page.map { ValidationOccurrenceIdentity(it.shiftId, it.codeHash, it.scannedAt) }
+            val body = json.encodeToString(ValidationOccurrenceStatusRequest.serializer(), ValidationOccurrenceStatusRequest(identities))
+            val result = transport.post("/station/validation-occurrences/status", body) as? TransportResult.Ok ?: break
+            if (result.code !in 200..299) break
+            val response = runCatching { json.decodeFromString(ValidationOccurrenceStatusResponse.serializer(), result.body) }.getOrNull() ?: break
+            if (response.protocol != VALIDATION_REPROCESSING_PROTOCOL || response.occurrences.size > 500 ||
+                response.occurrences.any { it.outcome !in setOf("first_accepted", "reprocessed", "pending", "conflict") }) break
+            db.recovery.commit {
+                for (receipt in response.occurrences) {
+                    if (ValidationOccurrenceIdentity(receipt.shiftId, receipt.codeHash, receipt.scannedAt) in identities) db.applyValidationReceipt(receipt)
+                }
+            }
+            afterShift = page.last().shiftId; afterHash = page.last().codeHash
+            if (page.size < 500) break
+        }
     }
 
     private suspend fun reconcileConflicts() = try { db.recovery.work { reconcileConflictsOwned() } } catch (_: app.markiro.handheld.core.storage.RecoveryBlocked) { Unit }

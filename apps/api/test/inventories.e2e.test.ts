@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -127,6 +128,74 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
     parseChzImportFault.unexpectedFailuresRemaining = 0;
     vi.clearAllMocks();
   });
+
+  function injectImportAcknowledgementFault(
+    tenantId: string,
+    inventoryId: string,
+    outcome: "committed" | "rollback-with-unavailable-reconciliation",
+  ) {
+    const ownerContext = new AsyncLocalStorage<boolean>();
+    const counts = { owner: 0, reconciliation: 0, readOnly: 0, outsideOwner: 0 };
+    const originalImport = inventories.importEvidence.bind(inventories);
+    const realTransaction: Db["transaction"] = db.transaction.bind(db);
+    const realSelect = db.select.bind(db);
+    const ownerError = new Error("simulated lost inventory publication acknowledgement");
+    let reconciliationArmed = false;
+    const importSpy = vi.spyOn(inventories, "importEvidence").mockImplementation((...args) => {
+      if (args[0] !== tenantId || args[2] !== inventoryId) return originalImport(...args);
+      return ownerContext.run(true, () => originalImport(...args));
+    });
+    const selectSpy = vi.spyOn(db, "select").mockImplementation((...args) => {
+      if (ownerContext.getStore() && reconciliationArmed) {
+        reconciliationArmed = false;
+        counts.reconciliation += 1;
+        throw new Error("simulated reconciliation read unavailable");
+      }
+      return realSelect(...args);
+    });
+    const transactionWithFault: Db["transaction"] = async (callback, config) => {
+      if (!ownerContext.getStore()) {
+        counts.outsideOwner += 1;
+        return realTransaction(callback, config);
+      }
+      // Entitlement capture is deliberately fail-open and must never consume
+      // the publication fault. Jobs outside this exact import are also real.
+      if (config?.accessMode === "read only") {
+        counts.readOnly += 1;
+        return realTransaction(callback, config);
+      }
+      if (counts.owner !== 0) return realTransaction(callback, config);
+      if (outcome === "committed") {
+        const result = await realTransaction(callback, config);
+        expect(result).toMatchObject({ result: "succeeded", sha256: INTRODUCED_DIGEST });
+        counts.owner += 1;
+        throw ownerError;
+      }
+      try {
+        return await realTransaction(async (tx) => {
+          const result = await callback(tx);
+          expect(result).toMatchObject({ result: "succeeded", sha256: INTRODUCED_DIGEST });
+          counts.owner += 1;
+          // Throw inside the owner transaction: this case must roll back,
+          // unlike the committed receipt/lost acknowledgement control above.
+          throw ownerError;
+        }, config);
+      } catch (error) {
+        if (error === ownerError) reconciliationArmed = true;
+        throw error;
+      }
+    };
+    const transactionSpy = vi.spyOn(db, "transaction").mockImplementation(transactionWithFault);
+    return {
+      counts,
+      restore() {
+        transactionSpy.mockRestore();
+        selectSpy.mockRestore();
+        importSpy.mockRestore();
+        ownerContext.disable();
+      },
+    };
+  }
 
   async function seedProduct(
     tenantId: string,
@@ -1618,18 +1687,11 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
     const { tenantId, productId, lineId } = await seedPreparation(agent);
     const inventory = await createInventory(agent, productId, lineId);
     const userId = await actorUserId(tenantId);
-    const realTransaction: Db["transaction"] = db.transaction.bind(db);
-    const commitThenThrow: Db["transaction"] = async (callback, config) => {
-      if (config === undefined) await realTransaction(callback);
-      else await realTransaction(callback, config);
-      throw new Error("simulated lost transaction acknowledgement");
-    };
-    const transactionSpy = vi
-      .spyOn(db, "transaction")
-      .mockImplementationOnce(realTransaction)
-      .mockImplementationOnce(commitThenThrow);
+    const fault = injectImportAcknowledgementFault(tenantId, inventory.id, "committed");
 
     try {
+      await db.transaction(async () => undefined);
+      expect(fault.counts.owner).toBe(0);
       const result = await inventories.importEvidence(
         tenantId,
         userId,
@@ -1642,13 +1704,21 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
         },
       );
       expect(result).toMatchObject({ result: "succeeded", sha256: INTRODUCED_DIGEST });
+      expect(fault.counts.owner).toBe(1);
+      expect(fault.counts.reconciliation).toBe(0);
+      expect(fault.counts.readOnly).toBeGreaterThanOrEqual(1);
+      expect(fault.counts.outsideOwner).toBeGreaterThanOrEqual(1);
     } finally {
-      transactionSpy.mockRestore();
+      fault.restore();
     }
 
     const expectedKey = `tenants/${tenantId}/inventories/${inventory.id}/imports/INTRODUCED/${INTRODUCED_DIGEST}.csv`;
     expect([...objects.keys()]).toEqual([expectedKey]);
-    expect(storage.delete).not.toHaveBeenCalled();
+    expect(
+      storage.delete.mock.calls.filter(([key]) =>
+        key.startsWith(`tenants/${tenantId}/inventories/${inventory.id}/imports/`),
+      ),
+    ).toEqual([]);
     const retry = await upload(agent, inventory.id, "INTRODUCED").expect(201);
     expect(retry.body.sha256).toBe(INTRODUCED_DIGEST);
     expect(storage.putVerified).toHaveBeenCalledTimes(1);
@@ -1660,44 +1730,32 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
     const { tenantId, productId, lineId } = await seedPreparation(agent);
     const inventory = await createInventory(agent, productId, lineId);
     const expectedKey = `tenants/${tenantId}/inventories/${inventory.id}/imports/INTRODUCED/${INTRODUCED_DIGEST}.csv`;
-    const ambiguousError = new Error("simulated ambiguous transaction outcome");
-    const realTransaction: Db["transaction"] = db.transaction.bind(db);
-    const reconciliationSelectSpy = vi.spyOn(db, "select");
-    const rollbackThenLoseReconciliation: Db["transaction"] = async (callback, config) => {
-      try {
-        if (config === undefined) {
-          return await realTransaction(async (tx) => {
-            await callback(tx);
-            throw ambiguousError;
-          });
-        }
-        return await realTransaction(async (tx) => {
-          await callback(tx);
-          throw ambiguousError;
-        }, config);
-      } catch {
-        reconciliationSelectSpy.mockImplementationOnce(() => {
-          throw new Error("simulated reconciliation read unavailable");
-        });
-        throw ambiguousError;
-      }
-    };
-    const transactionSpy = vi
-      .spyOn(db, "transaction")
-      .mockImplementationOnce(realTransaction)
-      .mockImplementationOnce(rollbackThenLoseReconciliation);
+    const fault = injectImportAcknowledgementFault(
+      tenantId,
+      inventory.id,
+      "rollback-with-unavailable-reconciliation",
+    );
 
     try {
+      await db.transaction(async () => undefined);
+      expect(fault.counts.owner).toBe(0);
       const first = await upload(agent, inventory.id, "INTRODUCED").expect(500);
       expect(first.body).toEqual({ statusCode: 500, message: "Internal server error" });
+      expect(fault.counts.owner).toBe(1);
+      expect(fault.counts.reconciliation).toBe(1);
+      expect(fault.counts.readOnly).toBeGreaterThanOrEqual(1);
+      expect(fault.counts.outsideOwner).toBeGreaterThanOrEqual(1);
       expect(JSON.stringify(first.body)).not.toMatch(/objectKey|fileName|tenants\//i);
     } finally {
-      transactionSpy.mockRestore();
-      reconciliationSelectSpy.mockRestore();
+      fault.restore();
     }
 
     expect(storage.putVerified).toHaveBeenCalledTimes(1);
-    expect(storage.delete).not.toHaveBeenCalled();
+    expect(
+      storage.delete.mock.calls.filter(([key]) =>
+        key.startsWith(`tenants/${tenantId}/inventories/${inventory.id}/imports/`),
+      ),
+    ).toEqual([]);
     expect([...objects.keys()]).toEqual([expectedKey]);
     const importsBeforeRetry = await db
       .select({ id: schema.inventoryImports.id })
@@ -1732,7 +1790,11 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
     expect(JSON.stringify(retry.body)).not.toMatch(/objectKey|fileName|tenants\//i);
     expect(storage.putVerified).toHaveBeenCalledTimes(2);
     expect(storage.putVerified.mock.calls.map(([key]) => key)).toEqual([expectedKey, expectedKey]);
-    expect(storage.delete).not.toHaveBeenCalled();
+    expect(
+      storage.delete.mock.calls.filter(([key]) =>
+        key.startsWith(`tenants/${tenantId}/inventories/${inventory.id}/imports/`),
+      ),
+    ).toEqual([]);
     expect([...objects.keys()]).toEqual([expectedKey]);
 
     const storedImports = await db

@@ -37,7 +37,7 @@ interface ProductLabelJobDao {
     suspend fun interrupted(): List<ProductLabelJobEntity>
 
     /** Retention, step one: the bytes exist only for a reprint, and a closed shift takes none. */
-    @Query("UPDATE product_label_jobs SET bytesBase64 = NULL WHERE shiftId = :shiftId")
+    @Query("UPDATE product_label_jobs SET bytesBase64 = NULL WHERE shiftId = :shiftId AND NOT EXISTS (SELECT 1 FROM validation_occurrences o WHERE o.shiftId=product_label_jobs.shiftId AND o.codeHash=product_label_jobs.codeHash AND o.scannedAt=product_label_jobs.acceptedAt AND o.outcome IN ('pending','conflict'))")
     suspend fun dropBytesForShift(shiftId: String)
 
     /**
@@ -60,7 +60,7 @@ interface ProductLabelJobDao {
     @Query(
         "SELECT jobId FROM product_label_jobs WHERE shiftId = :shiftId AND status = 'completed' AND NOT EXISTS (" +
             "SELECT 1 FROM product_label_events WHERE product_label_events.jobId = product_label_jobs.jobId " +
-            "AND ackedAt IS NULL AND quarantineCode IS NULL)",
+            "AND ackedAt IS NULL AND quarantineCode IS NULL) AND NOT EXISTS (SELECT 1 FROM validation_occurrences o WHERE o.shiftId=product_label_jobs.shiftId AND o.codeHash=product_label_jobs.codeHash AND o.scannedAt=product_label_jobs.acceptedAt AND o.outcome IN ('pending','conflict'))",
     )
     suspend fun settledJobIds(shiftId: String): List<String>
 
@@ -76,7 +76,7 @@ interface ProductLabelJobDao {
     @Query(
         "SELECT jobId FROM product_label_jobs WHERE status = 'completed' AND NOT EXISTS (" +
             "SELECT 1 FROM product_label_events WHERE product_label_events.jobId = product_label_jobs.jobId " +
-            "AND ackedAt IS NULL AND quarantineCode IS NULL)",
+            "AND ackedAt IS NULL AND quarantineCode IS NULL) AND NOT EXISTS (SELECT 1 FROM validation_occurrences o WHERE o.shiftId=product_label_jobs.shiftId AND o.codeHash=product_label_jobs.codeHash AND o.scannedAt=product_label_jobs.acceptedAt AND o.outcome IN ('pending','conflict'))",
     )
     suspend fun settledJobIdsEverywhere(): List<String>
 

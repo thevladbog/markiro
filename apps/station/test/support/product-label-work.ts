@@ -16,13 +16,18 @@ export async function openProductLabelWork(
   ownership?: string,
   accept = true,
   durableTerminal = false,
+  allowPreviouslyAcceptedCodes = false,
 ) {
   const directory = mkdtempSync(join(tmpdir(), "markiro-label-work-"));
   const path = join(directory, "station.sqlite");
   let databases = [openFileDatabase(path), openFileDatabase(path)];
   let exec = makeRotatingExec(databases);
   await applyMigrations(exec);
-  const f = productLabelAcceptanceFixture({ verification, ...(ownership ? { ownership } : {}) });
+  const f = productLabelAcceptanceFixture({
+    verification,
+    allowPreviouslyAcceptedCodes,
+    ...(ownership ? { ownership } : {}),
+  });
   const context = {
     productName: "Кега",
     productPrintName: null,

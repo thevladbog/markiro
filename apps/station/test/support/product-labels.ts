@@ -18,6 +18,7 @@ export function productLabelAcceptanceFixture(
     serial?: string;
     verification?: VerificationPolicy;
     ownership?: string;
+    allowPreviouslyAcceptedCodes?: boolean;
   } = {},
 ): PreparedProductLabelAcceptance {
   const raw = `]d2010460000000001521${options.serial ?? "SERIAL-42"}\u001d91Key1\u001d92Crypto(93)^FNC1"tail`;
@@ -65,6 +66,7 @@ export function productLabelAcceptanceFixture(
     acceptedAt,
     policy: {
       mode: "duplicate_dm",
+      allowPreviouslyAcceptedCodes: options.allowPreviouslyAcceptedCodes ?? false,
       verification: options.verification ?? "required",
       templateId: template.id,
       snapshot: { ...template, digest: templateDigest },

@@ -507,7 +507,7 @@ function assertAuthorityContract(adapted, { alb }) {
     assert.deepEqual(
       methods,
       host === adminHost
-        ? [["OPTIONS"], ["OPTIONS"], ["GET", "HEAD"]]
+        ? [["OPTIONS"], ["OPTIONS"], ["GET"], ["OPTIONS"], ["GET", "HEAD"]]
         : host === kioskHost || host === saasAdminHost
           ? [["GET", "HEAD"]]
           : [["POST"], ...Array.from({ length: 14 }, () => ["GET", "HEAD"])],
@@ -552,12 +552,14 @@ function assertAuthorityContract(adapted, { alb }) {
     ],
     ["^/shifts/[^/]+/(open|enter|bundle|reference-bundle|summary)$"],
     ["^/shifts/[^/]+/(open|enter|bundle|reference-bundle|summary)$"],
+    ["^/shifts/[^/]+/code-history$"],
+    ["^/shifts/[^/]+/code-history$"],
   ];
   const adminProxies = proxyRoutes(admin);
   const adminReverseProxies = nestedObjects(admin).filter(
     (candidate) => candidate.handler === "reverse_proxy",
   );
-  assert.equal(adminReverseProxies.length, 8);
+  assert.equal(adminReverseProxies.length, 10);
   assert.deepEqual(
     adminProxies.map(({ paths }) => paths),
     expectedAdminPaths,
@@ -1274,10 +1276,10 @@ test("every API proxy has a finite route-appropriate transport timeout profile",
     (match) => match[1],
   );
 
-  assert.equal(reverseProxies.length, 12);
+  assert.equal(reverseProxies.length, 14);
   assert.equal(
     reverseProxies.filter((block) => /import standard_api_transport/.test(block)).length,
-    11,
+    13,
   );
   assert.equal(
     reverseProxies.filter((block) => /import commerce_ml_transport/.test(block)).length,
@@ -1320,6 +1322,18 @@ test("direct Caddy adapter isolates the Markiro and v-b authorities", async () =
       read_timeout: 300_000_000_000,
       response_header_timeout: 300_000_000_000,
       write_timeout: 300_000_000_000,
+    },
+    {
+      protocol: "http",
+      read_timeout: 60_000_000_000,
+      response_header_timeout: 30_000_000_000,
+      write_timeout: 60_000_000_000,
+    },
+    {
+      protocol: "http",
+      read_timeout: 60_000_000_000,
+      response_header_timeout: 30_000_000_000,
+      write_timeout: 60_000_000_000,
     },
     {
       protocol: "http",
@@ -1764,4 +1778,48 @@ test("edge runtime accepts only the fixed direct Caddyfile without dynamic evalu
   assert.doesNotMatch(entrypoint, /behind-alb|Caddyfile\.alb/);
   assert.match(entrypoint, /exec caddy run --config \/etc\/caddy\/Caddyfile --adapter caddyfile/);
   assert.doesNotMatch(entrypoint, /\beval\b|\$\(|`/);
+});
+
+test("direct Caddy adapter admits only exact validation history requests", async () => {
+  const admin = applicationRoute(
+    await adaptCaddy(await readFile("deploy/production/Caddyfile", "utf8")),
+    adminHost,
+  );
+  const routeTable = applicationOrderedRouteTable(admin);
+  const path = "/shifts/shift-1/code-history";
+  const headers = { "x-api-key": "station-test-key" };
+  for (const request of [
+    { method: "GET", path, headers },
+    { method: "OPTIONS", path, headers: { "access-control-request-method": "GET" } },
+    { method: "POST", path: "/station/validation-occurrences/status", headers },
+  ]) {
+    const selected = selectedAdaptedRoute(routeTable, request);
+    assert.equal(
+      nestedObjects(selected).filter((candidate) => candidate.handler === "reverse_proxy").length,
+      1,
+      `${request.method} ${request.path} must reach the API exactly once`,
+    );
+    assert.ok(nestedObjects(selected).every((candidate) => candidate.handler !== "file_server"));
+  }
+  for (const request of [
+    ...["POST", "PATCH", "DELETE"].map((method) => ({ method, path, headers })),
+    { method: "OPTIONS", path },
+    { method: "OPTIONS", path, headers: { "access-control-request-method": "POST" } },
+    {
+      method: "OPTIONS",
+      path: "/shifts/shift-1/reprocessings",
+      headers: { "access-control-request-method": "GET" },
+    },
+  ]) {
+    assertOnlyPlain404(selectedAdaptedRoute(routeTable, request), request);
+  }
+  for (const request of [
+    { method: "GET", path },
+    { method: "GET", path: `${path}/extra`, headers },
+    { method: "GET", path: "/shifts/shift-1/reprocessings", headers },
+  ]) {
+    const selected = selectedAdaptedRoute(routeTable, request);
+    assert.ok(nestedObjects(selected).some((candidate) => candidate.handler === "file_server"));
+    assert.ok(nestedObjects(selected).every((candidate) => candidate.handler !== "reverse_proxy"));
+  }
 });

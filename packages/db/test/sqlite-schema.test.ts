@@ -2652,3 +2652,67 @@ describe("pallet mirror", () => {
     });
   });
 });
+
+describe("validation reprocessing SQLite persistence", () => {
+  it("preserves history entry identity and an occurrence independent of the global registry", () => {
+    const db = migratedDb();
+    try {
+      db.prepare(
+        "INSERT INTO validation_history_publications(shift_id,product_id,snapshot,fetched_at,expires_at,items_json) VALUES(?,?,?,?,?,?)",
+      ).run(
+        "shift",
+        "product",
+        "snapshot",
+        "now",
+        "later",
+        JSON.stringify([
+          {
+            codeHash: "hash",
+            kind: "original",
+            shiftId: "old",
+            shiftNumber: "OLD",
+            shiftStatus: "closed",
+            scannedAt: "before",
+          },
+          {
+            codeHash: "hash",
+            kind: "reprocessing",
+            shiftId: "active",
+            shiftNumber: "ACTIVE",
+            shiftStatus: "active",
+            scannedAt: "now",
+          },
+        ]),
+      );
+      expect(
+        db.prepare("SELECT kind,source_shift_id FROM validation_code_history ORDER BY kind").all(),
+      ).toEqual([
+        { kind: "original", source_shift_id: "old" },
+        { kind: "reprocessing", source_shift_id: "active" },
+      ]);
+      db.prepare(
+        "INSERT INTO validation_occurrences(shift_id,code_hash,scanned_at,credential_ownership,terminal_id,canonical_raw,source_shift_id) VALUES(?,?,?,?,?,?,?)",
+      ).run("shift", "hash", "now", "owner", "terminal", "FULL\u001d92CRYPTO", "old");
+      expect(db.prepare("SELECT COUNT(*) AS n FROM codes_mirror").get()).toEqual({ n: 0 });
+      expect(db.prepare("SELECT COUNT(*) AS n FROM station_processed_codes").get()).toEqual({
+        n: 1,
+      });
+      expect(() =>
+        db
+          .prepare(
+            "INSERT INTO validation_occurrences(shift_id,code_hash,scanned_at,credential_ownership,terminal_id,canonical_raw) VALUES(?,?,?,?,?,?)",
+          )
+          .run("shift", "hash", "later", "owner", "terminal", "FULL"),
+      ).toThrow("UNIQUE constraint");
+      db.prepare("UPDATE validation_occurrences SET outcome='conflict'").run();
+      expect(db.prepare("SELECT COUNT(*) AS n FROM station_processed_codes").get()).toEqual({
+        n: 0,
+      });
+      expect(db.prepare("SELECT canonical_raw FROM validation_occurrences").get()).toEqual({
+        canonical_raw: "FULL\u001d92CRYPTO",
+      });
+    } finally {
+      db.close();
+    }
+  });
+});

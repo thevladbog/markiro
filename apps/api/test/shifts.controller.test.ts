@@ -1,3 +1,10 @@
+import {
+  buildDuplicateLabelTemplate,
+  PRODUCT_LABEL_PROTOCOL,
+  VALIDATION_REPROCESSING_PROTOCOL,
+  productLabelValueDigest,
+  validationPrintPolicySchema,
+} from "@markiro/domain";
 import { describe, expect, it, vi } from "vitest";
 import { request as expressRequest } from "express";
 
@@ -167,4 +174,103 @@ describe("ShiftsController.enterShift", () => {
       "validation-dm-duplicate-v1",
     );
   });
+});
+
+describe("shift owner identity and device policy projection", () => {
+  const template = {
+    id: "40000000-0000-4000-8000-000000000004",
+    name: "Saved duplicate",
+    spec: buildDuplicateLabelTemplate(),
+  };
+  const policy = validationPrintPolicySchema.parse({
+    mode: "duplicate_dm",
+    verification: "required",
+    allowPreviouslyAcceptedCodes: false,
+    templateId: template.id,
+    snapshot: { ...template, digest: productLabelValueDigest(template) },
+    policyRevision: "40000000-0000-4000-8000-000000000005",
+  });
+  const saved: ShiftDto = {
+    ...shiftFixture,
+    validationPrint: policy,
+    output: { mode: "validation", acceptedUnits: 1, firstAcceptedUnits: 1, reprocessedUnits: 0 },
+  };
+
+  for (const surface of ["legacy station", "capable station", "cabinet"] as const) {
+    const station = surface !== "cabinet";
+    const capabilities =
+      surface === "capable station"
+        ? `${PRODUCT_LABEL_PROTOCOL}, ${VALIDATION_REPROCESSING_PROTOCOL}`
+        : PRODUCT_LABEL_PROTOCOL;
+    const actor = station
+      ? { domain: "station_device", id: "device-owner" }
+      : { domain: "cabinet", id: "cabinet-owner" };
+    const authenticatedRequest = () => {
+      const request = {
+        tenantId: "tenant-owner",
+        authKind: station ? "station" : "session",
+        userId: "cabinet-owner",
+        ...(station
+          ? { deviceId: "device-owner", deviceLineId: "11111111-1111-4111-8111-111111111111" }
+          : {}),
+      } as RequestWithTenant;
+      request.headers = { "x-station-capabilities": capabilities };
+      request.get = expressRequest.get;
+      return request;
+    };
+    const expected =
+      surface === "legacy station"
+        ? {
+            ...saved,
+            validationPrint: {
+              mode: policy.mode,
+              verification: policy.verification,
+              templateId: policy.templateId,
+              snapshot: policy.snapshot,
+              policyRevision: policy.policyRevision,
+            },
+            output: { mode: "validation", acceptedUnits: 1 },
+          }
+        : saved;
+
+    it(`create forwards the authenticated owner and preserves the ${surface} response`, async () => {
+      const createShift = vi.fn(async () => saved);
+      const controller = new ShiftsController({ createShift } as unknown as ShiftsService);
+      const body = createShiftSchema.parse({
+        productId: shiftFixture.productId,
+        mode: "validation",
+        lineId: "33333333-3333-4333-8333-333333333333",
+      });
+      expect(await controller.createShift(authenticatedRequest(), body)).toEqual(expected);
+      expect(createShift.mock.calls).toEqual([
+        station
+          ? [
+              "tenant-owner",
+              { ...body, lineId: shiftFixture.lineId },
+              actor,
+              "station",
+              capabilities,
+            ]
+          : ["tenant-owner", body, actor, "admin"],
+      ]);
+      // Projection must not mutate the persisted policy, snapshot, or split count result.
+      expect(saved.validationPrint).toEqual(policy);
+      expect(saved.output).toEqual({
+        mode: "validation",
+        acceptedUnits: 1,
+        firstAcceptedUnits: 1,
+        reprocessedUnits: 0,
+      });
+    });
+
+    it(`open forwards the authenticated owner and preserves the ${surface} response`, async () => {
+      const openShift = vi.fn(async () => saved);
+      const controller = new ShiftsController({ openShift } as unknown as ShiftsService);
+      expect(await controller.openShift(authenticatedRequest(), saved.id)).toEqual(expected);
+      expect(openShift.mock.calls).toEqual([
+        ["tenant-owner", saved.id, actor, station ? "device-owner" : undefined, capabilities],
+      ]);
+      expect(saved.validationPrint).toEqual(policy);
+    });
+  }
 });

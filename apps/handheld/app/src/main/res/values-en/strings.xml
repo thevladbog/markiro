@@ -515,4 +515,12 @@
     <string name="duplicate_label_problem">Label problem</string>
     <string name="duplicate_return_to_scan">Back to scanning</string>
     <string name="duplicate_skip_verification">Skip verification</string>
+    <string name="validation_pending">Awaiting confirmation: %1$d</string>
+    <string name="validation_conflict">Acceptance conflict: %1$d. Print history retained.</string>
+    <string name="validation_history_as_of">History checked at %1$s</string>
+    <string name="validation_history_unknown">History unavailable · acceptance is provisional</string>
+    <string name="validation_same_shift">Already processed in this shift</string>
+    <string name="validation_previous_disallowed">Previous shift codes are not allowed</string>
+    <string name="validation_other_active">Code belongs to another active shift</string>
+    <string name="validation_closure_unknown">Source shift closure is not confirmed</string>
 </resources>

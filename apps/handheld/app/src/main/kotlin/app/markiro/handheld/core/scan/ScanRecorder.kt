@@ -21,6 +21,7 @@ data class ScanOutcome(
     /** For duplicates: when the code was first accepted on this device. */
     val firstSeenAt: String?,
     val scannedAt: String,
+    val refusal: ValidationRefusal? = null,
 )
 
 /**
@@ -66,10 +67,12 @@ class ScanRecorder(private val db: HandheldDatabase, private val clock: () -> Lo
                     var verdict = Verdict.OK
                     var firstSeen: String? = null
                     val existing = db.codeDao().get(c.hash)
-                    if (existing != null) {
+                    val processing = shift.mode == "validation" && shift.validationPrintMode == "duplicate_dm"
+                    val admission = if (processing) validationAdmission(db, shift, c.hash) else null
+                    if (admission?.refusal != null || (!processing && existing != null)) {
                         verdict = Verdict.DUPLICATE
-                        firstSeen = existing.scannedAt
-                    } else {
+                        firstSeen = existing?.scannedAt ?: db.validationDao().history(shift.id, c.hash).firstOrNull()?.scannedAt
+                    } else if (admission?.source == null) {
                         try {
                             db.codeDao().insert(CodeEntity(c.hash, shift.id, c.km.gtin14, c.km.serial, scannedAt, boxId))
                         } catch (_: SQLiteConstraintException) {
@@ -78,11 +81,20 @@ class ScanRecorder(private val db: HandheldDatabase, private val clock: () -> Lo
                         }
                     }
                     val accepted = verdict == Verdict.OK
+                    if (accepted && processing) {
+                        db.validationDao().insert(app.markiro.handheld.core.storage.ValidationOccurrenceEntity(
+                            shiftId = shift.id, codeHash = c.hash, scannedAt = scannedAt, raw = raw,
+                            gtin14 = c.km.gtin14, serial = c.km.serial, operatorId = operatorId,
+                            deviceId = db.recovery.token().owner.deviceId,
+                            sourceShiftId = admission?.source?.shiftId, sourceShiftNumber = admission?.source?.shiftNumber,
+                            kind = if (admission?.source != null) "reprocessed" else "first_accepted",
+                        ))
+                    }
                     write(
                         shift.id, raw, verdict, scannedAt, operatorId,
                         if (accepted) c.km else null, if (accepted) c.hash else null, if (accepted) boxId else null,
                     )
-                    ScanOutcome(verdict, c.km, c.hash, firstSeen, scannedAt)
+                    ScanOutcome(verdict, c.km, c.hash, firstSeen, scannedAt, admission?.refusal)
                 }
             }
         }
