@@ -99,10 +99,7 @@ export const servicePeriods = pgTable(
       "service_periods_included_minutes_check",
       sql`${table.includedMinutes} between 1 and 100000`,
     ),
-    check(
-      "service_periods_revision_check",
-      sql`${table.revision} between 1 and 2147483647`,
-    ),
+    check("service_periods_revision_check", sql`${table.revision} between 1 and 2147483647`),
   ],
 );
 
@@ -113,9 +110,7 @@ export const serviceUsageEntries = pgTable(
     tenantId: text("tenant_id").notNull(),
     servicePeriodId: uuid("service_period_id").notNull(),
     kind: text("kind").$type<"usage" | "correction">().notNull(),
-    classification: text("classification")
-      .$type<"customer_service" | "product_defect">()
-      .notNull(),
+    classification: text("classification").$type<"customer_service" | "product_defect">().notNull(),
     originalEntryId: uuid("original_entry_id"),
     workReference: text("work_reference").notNull(),
     description: text("description").notNull(),

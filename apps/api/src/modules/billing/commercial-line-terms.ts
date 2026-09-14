@@ -1,9 +1,10 @@
 import { BadRequestException, ConflictException } from "@nestjs/common";
 import { isCommercialTaxAllowed } from "@markiro/domain";
 import {
-  commercialLineTermsSchema,
+  commercialLineTermsV4Schema,
   isCommercialPlanSequenceValid,
-  type CommercialLineTerms,
+  monthlyServiceTermsSchema,
+  type CommercialLineTermsV4,
 } from "@markiro/platform-contracts";
 import type { schema } from "@markiro/db";
 import {
@@ -23,38 +24,48 @@ type Line = {
 export function freezeCommercialLineTerms(
   version: Version | undefined,
   line: Line,
-): CommercialLineTerms | null {
+): CommercialLineTermsV4 | null {
   if (line.kind === "plan" && line.quantity !== 1)
     throw new BadRequestException({ code: "commercial_plan_quantity_invalid" });
+  if (version?.billingMode === "recurring" && line.kind === "service" && line.quantity !== 1)
+    throw new BadRequestException({ code: "commercial_service_quantity_invalid" });
   const supplied =
-    line.commercialTerms == null ? null : commercialLineTermsSchema.parse(line.commercialTerms);
+    line.commercialTerms == null ? null : commercialLineTermsV4Schema.parse(line.commercialTerms);
   if (!version) return supplied;
   if (!version.documentNameRu || !version.subject || !version.sellerPolicyRevision) return null;
   const license = line.kind === "plan" || line.kind === "addon";
-  const resolved = commercialLineTermsSchema.parse({
-    version: 1,
-    subject: version.subject,
-    documentNameRu: version.documentNameRu,
-    documentNameEn: version.documentNameEn,
-    sellerPolicyRevision: version.sellerPolicyRevision,
-    billingPeriod: license ? version.billingPeriod : null,
-    billingTimezone: license ? "Europe/Moscow" : null,
-    activationRule: license
-      ? line.activationPolicy === "after_current"
-        ? "after_current"
-        : line.activationPolicy === "manual" ||
-            (line.kind === "addon" && line.activationPolicy == null)
-          ? (supplied?.activationRule ?? "on_application")
-          : "on_application"
-      : null,
-  });
-  if (
-    supplied &&
-    Object.keys(resolved).some(
-      (key) =>
-        supplied[key as keyof CommercialLineTerms] !== resolved[key as keyof CommercialLineTerms],
-    )
-  ) {
+  const resolved = commercialLineTermsV4Schema.parse(
+    version.billingMode === "recurring" && line.kind === "service"
+      ? {
+          version: 2,
+          subject: version.subject,
+          documentNameRu: version.documentNameRu,
+          documentNameEn: version.documentNameEn,
+          sellerPolicyRevision: version.sellerPolicyRevision,
+          billingPeriod: "month",
+          billingTimezone: "Europe/Moscow",
+          activationRule: "after_current",
+          serviceTerms: monthlyServiceTermsSchema.parse(version.serviceTerms),
+        }
+      : {
+          version: 1,
+          subject: version.subject,
+          documentNameRu: version.documentNameRu,
+          documentNameEn: version.documentNameEn,
+          sellerPolicyRevision: version.sellerPolicyRevision,
+          billingPeriod: license ? version.billingPeriod : null,
+          billingTimezone: license ? "Europe/Moscow" : null,
+          activationRule: license
+            ? line.activationPolicy === "after_current"
+              ? "after_current"
+              : line.activationPolicy === "manual" ||
+                  (line.kind === "addon" && line.activationPolicy == null)
+                ? (supplied?.activationRule ?? "on_application")
+                : "on_application"
+            : null,
+        },
+  );
+  if (supplied && JSON.stringify(supplied) !== JSON.stringify(resolved)) {
     throw new ConflictException({ code: "commercial_review_stale" });
   }
   return resolved;
@@ -75,14 +86,15 @@ export async function validateCommercialIssuance(
   const seller = await readSellerPolicy(tx);
   if (!seller.taxPolicy) throw new ConflictException({ code: "seller_tax_policy_unconfigured" });
   for (const line of lines) {
-    const parsed = commercialLineTermsSchema.safeParse(line.commercialTerms);
+    const parsed = commercialLineTermsV4Schema.safeParse(line.commercialTerms);
     if (!parsed.success) throw new ConflictException({ code: "commercial_terms_review_required" });
     if (parsed.data.sellerPolicyRevision !== seller.revision)
       throw new ConflictException({ code: "commercial_review_stale" });
     const license = line.kind === "plan" || line.kind === "addon";
     if (
       license !== (parsed.data.subject === "software_license") ||
-      (line.kind === "plan" && line.quantity !== 1)
+      (line.kind === "plan" && line.quantity !== 1) ||
+      (parsed.data.version === 2 && (line.kind !== "service" || line.quantity !== 1))
     ) {
       throw new BadRequestException({ code: "commercial_line_terms_invalid" });
     }
@@ -97,8 +109,8 @@ export async function validateCommercialIssuance(
   }
 }
 
-export function readStoredCommercialTerms(value: unknown): CommercialLineTerms | null {
-  return value == null ? null : commercialLineTermsSchema.parse(value);
+export function readStoredCommercialTerms(value: unknown): CommercialLineTermsV4 | null {
+  return value == null ? null : commercialLineTermsV4Schema.parse(value);
 }
 
 export function commercialTermDescription(
@@ -106,6 +118,20 @@ export function commercialTermDescription(
   legacyDescription: string | null | undefined,
 ): string | null {
   const terms = readStoredCommercialTerms(value);
+  if (terms?.version === 2) {
+    const details = [
+      `Абонентское сопровождение: ${terms.serviceTerms.includedMinutes} минут в месяц.`,
+      `Состав: ${terms.serviceTerms.scopeRu}`,
+      terms.serviceTerms.operatingHoursRu
+        ? `Часы работы: ${terms.serviceTerms.operatingHoursRu}`
+        : null,
+      terms.serviceTerms.schedulingTermsRu
+        ? `Порядок планирования: ${terms.serviceTerms.schedulingTermsRu}`
+        : null,
+      "Неиспользованные минуты не переносятся. Работы сверх лимита выполняются после отдельного согласования.",
+    ].filter((item): item is string => item !== null);
+    return [legacyDescription, ...details].filter(Boolean).join("\n");
+  }
   if (!terms || terms.subject !== "software_license") return legacyDescription ?? null;
   const rule =
     terms.activationRule === "after_current"

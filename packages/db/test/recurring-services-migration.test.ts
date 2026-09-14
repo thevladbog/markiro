@@ -19,13 +19,11 @@ function readMigration(name: string) {
 describe("recurring service migrations", () => {
   it("adds overlap protection and defers the populated catalog check", () => {
     const migration = readMigration("0157_recurring_services.sql");
-    expect(migration).toContain("CREATE EXTENSION IF NOT EXISTS \"btree_gist\"");
+    expect(migration).toContain('CREATE EXTENSION IF NOT EXISTS "btree_gist"');
     expect(migration).toContain(
       'EXCLUDE USING gist ("tenant_id" WITH =, "catalog_item_id" WITH =, tstzrange("starts_at", "ends_at", \'[)\') WITH &&)',
     );
-    expect(migration).toContain(
-      'ADD CONSTRAINT "catalog_item_versions_kind_billing_check" CHECK',
-    );
+    expect(migration).toContain('ADD CONSTRAINT "catalog_item_versions_kind_billing_check" CHECK');
     expect(migration).toContain("NOT VALID");
   });
 
@@ -33,6 +31,17 @@ describe("recurring service migrations", () => {
     expect(readMigration("0158_validate_recurring_services.sql")).toContain(
       'VALIDATE CONSTRAINT "catalog_item_versions_kind_billing_check"',
     );
+  });
+
+  it("widens commercial snapshots without validating populated tables in the same migration", () => {
+    const migration = readMigration("0159_recurring_commercial_terms.sql");
+    expect(migration).toContain("\"commercial_terms\"->'version' = '2'::jsonb");
+    expect(migration.match(/NOT VALID/g)).toHaveLength(2);
+    const validation = readMigration("0160_validate_recurring_commercial_terms.sql");
+    expect(validation).toContain(
+      'VALIDATE CONSTRAINT "commercial_offer_lines_commercial_terms_check"',
+    );
+    expect(validation).toContain('VALIDATE CONSTRAINT "invoice_lines_commercial_terms_check"');
   });
 });
 
@@ -132,6 +141,8 @@ describe.skipIf(!databaseUrl)("recurring service forward migration", () => {
       "SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint WHERE conname='service_periods_no_overlap'",
     );
     expect(result.rows[0]?.definition).toContain("EXCLUDE USING gist");
-    expect(result.rows[0]?.definition).toContain("tstzrange(starts_at, ends_at, '[)'::text) WITH &&");
+    expect(result.rows[0]?.definition).toContain(
+      "tstzrange(starts_at, ends_at, '[)'::text) WITH &&",
+    );
   });
 });

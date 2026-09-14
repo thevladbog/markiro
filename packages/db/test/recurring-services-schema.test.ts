@@ -26,12 +26,18 @@ describe("recurring service storage schema", () => {
   it("pins period source facts to the tenant", () => {
     const references = getTableConfig(table("servicePeriods")).foreignKeys.map((key) => ({
       name: key.getName(),
-      columns: key.reference().columns.map((column) => column.name).join(","),
+      columns: key
+        .reference()
+        .columns.map((column) => column.name)
+        .join(","),
     }));
 
     expect(references).toEqual(
       expect.arrayContaining([
-        { name: "service_periods_tenant_ordered_service_fk", columns: "tenant_id,ordered_service_id" },
+        {
+          name: "service_periods_tenant_ordered_service_fk",
+          columns: "tenant_id,ordered_service_id",
+        },
         { name: "service_periods_tenant_invoice_fk", columns: "tenant_id,invoice_id" },
         { name: "service_periods_tenant_invoice_line_fk", columns: "tenant_id,invoice_line_id" },
         {
@@ -54,8 +60,10 @@ describe("recurring service storage schema", () => {
       expect(
         config.foreignKeys.some(
           (key) =>
-            key.reference().columns.map((column) => column.name).join(",") ===
-            "tenant_id,service_period_id",
+            key
+              .reference()
+              .columns.map((column) => column.name)
+              .join(",") === "tenant_id,service_period_id",
         ),
       ).toBe(true);
     }

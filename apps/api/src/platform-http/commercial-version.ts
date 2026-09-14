@@ -75,7 +75,7 @@ function assertNoV4CommercialRepresentation(value: unknown): void {
       "billingMode" in value &&
       value.kind === "service" &&
       value.billingMode === "recurring") ||
-    ("serviceTerms" in value && value.serviceTerms !== null)
+    ("serviceTerms" in value && value.serviceTerms != null)
   )
     throw new ConflictException({ code: "client_update_required" });
   for (const [key, item] of Object.entries(value)) {

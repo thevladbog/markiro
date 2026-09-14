@@ -7,7 +7,7 @@ import {
   freezeCommercialLineTerms,
   assertCommercialPlanSequence,
 } from "../billing/commercial-line-terms";
-import type { CommercialLineTerms } from "@markiro/platform-contracts";
+import type { CommercialLineTermsV4 } from "@markiro/platform-contracts";
 import type { CreateOfferDto } from "./dto";
 import { calculateOfferAmounts } from "./offer-totals";
 import { normalizeOfferTerms } from "./offer-terms";
@@ -40,7 +40,7 @@ export async function prepareOfferDraft(
   const validatedLines: Array<{
     line: CreateOfferDto["lines"][number];
     catalogUnitPrice: string | null;
-    commercialTerms: CommercialLineTerms | null;
+    commercialTerms: CommercialLineTermsV4 | null;
     priceOverrideReason: string | null;
   }> = [];
   for (const line of input.lines) {

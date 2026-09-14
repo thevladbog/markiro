@@ -3,6 +3,7 @@ import { ApiOperation, ApiQuery, ApiTags } from "@nestjs/swagger";
 import {
   platformCommercialContracts,
   platformCommercialV2Contracts,
+  platformCommercialV4Contracts,
 } from "@markiro/platform-contracts";
 import { RequirePlatformCapabilities } from "../../platform-auth/platform-access-policy";
 import type { RequestWithPlatformPrincipal } from "../../platform-auth/platform-auth.guard";
@@ -58,6 +59,7 @@ export class BillingController {
   @PlatformApiProtectedOk({
     response: platformCommercialContracts.invoices.detail.response,
     commercialV2: platformCommercialV2Contracts.invoices.detail,
+    commercialV4: platformCommercialV4Contracts.invoices.detail,
   })
   @RequirePlatformCapabilities("billing.read")
   async get(
@@ -69,6 +71,8 @@ export class BillingController {
       platformCommercialContracts.invoices.detail.response,
       platformCommercialV2Contracts.invoices.detail.response,
       await this.billing.get(id),
+      undefined,
+      platformCommercialV4Contracts.invoices.detail.response,
     );
   }
 
@@ -78,6 +82,7 @@ export class BillingController {
     body: platformCommercialContracts.invoices.create.body,
     response: platformCommercialContracts.invoices.create.response,
     commercialV2: platformCommercialV2Contracts.invoices.create,
+    commercialV4: platformCommercialV4Contracts.invoices.create,
   })
   @RequirePlatformCapabilities("billing.write")
   async create(@Req() req: RequestWithPlatformPrincipal, @Body() body: unknown) {
@@ -86,10 +91,13 @@ export class BillingController {
       await this.billing.create(
         req.platformPrincipal!,
         commercialBody(
-          commercialVersion(req) >= 2
-            ? platformCommercialV2Contracts.invoices.create.body
-            : platformCommercialContracts.invoices.create.body,
+          commercialVersion(req) === 4
+            ? platformCommercialV4Contracts.invoices.create.body
+            : commercialVersion(req) >= 2
+              ? platformCommercialV2Contracts.invoices.create.body
+              : platformCommercialContracts.invoices.create.body,
           body,
+          commercialVersion(req),
         ),
         commercialVersion(req),
       ),

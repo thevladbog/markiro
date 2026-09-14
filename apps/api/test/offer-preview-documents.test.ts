@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { createDb, schema } from "@markiro/db";
-import { offerDetailV2Schema } from "@markiro/platform-contracts";
+import { offerDetailV2Schema, offerDetailV4Schema } from "@markiro/platform-contracts";
 import { eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -17,6 +17,7 @@ import { EntitlementsService } from "../src/subscriptions/entitlements.service";
 import { OfferPreviewService } from "../src/modules/platform-offers/offer-preview.service";
 import { OfferDocumentsService } from "../src/modules/platform-offers/offer-documents.service";
 import { PlatformOffersService } from "../src/modules/platform-offers/platform-offers.service";
+import { BillingService } from "../src/modules/billing/billing.service";
 import { OfferWorkspaceService } from "../src/modules/platform-offers/offer-workspace.service";
 import { PlatformAuditService } from "../src/platform-auth/platform-audit.service";
 import type { PlatformPrincipal } from "../src/platform-auth/platform-access-policy";
@@ -42,6 +43,7 @@ describe.skipIf(!databaseUrl)("offer previews and immutable variants on isolated
   const notifications = noopTenantBillingNotifications();
   const enqueue = vi.spyOn(notifications, "enqueueInTransaction");
   const offers = new PlatformOffersService(db, audit, notifications);
+  const billing = new BillingService(db, audit, notifications);
   const preview = new OfferPreviewService(db);
   const workspace = new OfferWorkspaceService(db);
   const objects = new Map<string, Buffer>();
@@ -157,6 +159,141 @@ describe.skipIf(!databaseUrl)("offer previews and immutable variants on isolated
       .where(eq(schema.commercialOffers.id, offer.id));
     return offer.id;
   }
+
+  it("freezes a published recurring service policy for V4 previews after catalog changes", async () => {
+    const catalogItemId = randomUUID();
+    const catalogVersionId = randomUUID();
+    const initialServiceTerms = {
+      cadence: "month" as const,
+      includedMinutes: 180,
+      carryover: "none" as const,
+      excessPolicy: "external_approval" as const,
+      scopeRu: "Консультации и настройка Маркиро",
+      scopeEn: "Markiro consulting and configuration",
+      operatingHoursRu: null,
+      operatingHoursEn: null,
+      schedulingTermsRu: "По согласованной заявке",
+      schedulingTermsEn: "By an approved request",
+    };
+    await db.insert(schema.catalogItems).values({
+      id: catalogItemId,
+      code: `support-${randomUUID()}`,
+      nameRu: "Поддержка",
+      nameEn: "Support",
+      kind: "service",
+    });
+    await db.insert(schema.catalogItemVersions).values({
+      id: catalogVersionId,
+      catalogItemId,
+      kind: "service",
+      version: 1,
+      status: "published",
+      documentNameRu: "Абонентское сопровождение",
+      documentNameEn: "Monthly support",
+      subject: "service",
+      sellerPolicyRevision: 1,
+      nameRu: "Поддержка",
+      nameEn: "Support",
+      unit: "month",
+      billingMode: "recurring",
+      billingPeriod: "month",
+      serviceTerms: initialServiceTerms,
+      unitPrice: "30000.00",
+      vatRate: "20.00",
+      vatIncluded: false,
+      publishedAt: new Date(),
+      publishedByPlatformUserId: actor.userId,
+    });
+
+    const offer = offerDetailV4Schema.parse(
+      await offers.create(
+        actor,
+        {
+          tenantId,
+          expiresAt: null,
+          termsMarkdown: null,
+          lines: [
+            {
+              kind: "service",
+              catalogVersionId,
+              nameRu: "Поддержка",
+              nameEn: "Support",
+              unit: "month",
+              quantity: 1,
+              agreedUnitPrice: "30000.00",
+              vatRateBps: 2000,
+              vatIncluded: false,
+              activationPolicy: null,
+            },
+          ],
+        },
+        4,
+      ),
+    );
+    expect(offer.lines[0]?.commercialTerms).toMatchObject({
+      version: 2,
+      billingPeriod: "month",
+      billingTimezone: "Europe/Moscow",
+      activationRule: "after_current",
+      serviceTerms: { includedMinutes: 180, carryover: "none" },
+    });
+    const first = await preview.preview(actor, offer.id);
+    expect(first.html).toContain("180 минут в месяц");
+    expect(first.html).toContain("Консультации и настройка Маркиро");
+
+    await db.insert(schema.catalogItemVersions).values({
+      catalogItemId,
+      kind: "service",
+      version: 2,
+      status: "draft",
+      documentNameRu: "Абонентское сопровождение",
+      documentNameEn: "Monthly support",
+      subject: "service",
+      sellerPolicyRevision: 1,
+      nameRu: "Поддержка",
+      nameEn: "Support",
+      unit: "month",
+      billingMode: "recurring",
+      billingPeriod: "month",
+      serviceTerms: { ...initialServiceTerms, includedMinutes: 240, scopeRu: "Новый состав" },
+      unitPrice: "45000.00",
+      vatRate: "20.00",
+      vatIncluded: false,
+    });
+
+    const second = await preview.preview(actor, offer.id);
+    expect(second).toEqual(first);
+    expect(second.html).not.toContain("Новый состав");
+
+    const invoice = await billing.create(
+      actor,
+      {
+        tenantId,
+        dueDate: null,
+        applicationMode: "automatic",
+        lines: [
+          {
+            kind: "service",
+            catalogVersionId,
+            nameRu: "Поддержка",
+            nameEn: "Support",
+            unit: "month",
+            quantity: 1,
+            agreedUnitPrice: "30000.00",
+            vatRateBps: 2000,
+            vatIncluded: false,
+            activationPolicy: null,
+          },
+        ],
+      },
+      4,
+    );
+    const [invoiceLine] = await db
+      .select({ commercialTerms: schema.invoiceLines.commercialTerms })
+      .from(schema.invoiceLines)
+      .where(eq(schema.invoiceLines.invoiceId, invoice.id));
+    expect(invoiceLine?.commercialTerms).toEqual(offer.lines[0]?.commercialTerms);
+  });
 
   it("refuses preview and publication of inconsistent frozen totals without repairing the stored line", async () => {
     const id = await draft();

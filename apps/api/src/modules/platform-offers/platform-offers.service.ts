@@ -11,9 +11,13 @@ import { and, asc, desc, eq } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import {
   platformCommercialV2Contracts,
+  platformCommercialV4Contracts,
   platformOfferDraftContracts,
+  platformOfferDraftV4Contracts,
   type OfferDraftUpdate,
+  type OfferDraftUpdateV4,
   offerServiceDetailV2Schema,
+  offerServiceDetailV4Schema,
   type OfferPaymentResultSource,
   type OfferReviseDto,
   type OfferServiceDetailSource,
@@ -65,7 +69,7 @@ export class PlatformOffersService {
   async updateDraft(
     actor: PlatformPrincipal,
     id: string,
-    input: OfferDraftUpdate,
+    input: OfferDraftUpdate | OfferDraftUpdateV4,
     clientVersion: CommercialVersion = 2,
   ) {
     if (!actor.capabilities.includes("billing.write")) throw new ForbiddenException();
@@ -87,7 +91,11 @@ export class PlatformOffersService {
         actorPlatformUserId: actor.userId,
       });
       if (mutation.kind === "committed")
-        return platformOfferDraftContracts.update.response.parse(mutation.result);
+        return (
+          clientVersion === 4
+            ? platformOfferDraftV4Contracts.update.response
+            : platformOfferDraftContracts.update.response
+        ).parse(mutation.result);
       await acquireBillingWorkflowLocks(tx, located.tenantId, [
         { kind: "offer_family", id: located.familyId },
         { kind: "offer", id: offerId },
@@ -132,9 +140,11 @@ export class PlatformOffersService {
       await tx
         .insert(schema.commercialOfferLines)
         .values(prepared.lines.map((line) => ({ ...line, offerId })));
-      const result = platformOfferDraftContracts.update.response.parse(
-        await this.detailWith(tx, draft.tenantId, offerId),
-      );
+      const result = (
+        clientVersion === 4
+          ? platformOfferDraftV4Contracts.update.response
+          : platformOfferDraftContracts.update.response
+      ).parse(await this.detailWith(tx, draft.tenantId, offerId));
       await this.audit.record(tx, {
         actorPlatformUserId: actor.userId,
         actorRole: actor.role,
@@ -355,10 +365,14 @@ export class PlatformOffersService {
         actorPlatformUserId: actor.userId,
       });
       if (mutation.kind === "committed") {
-        const replay = platformCommercialV2Contracts.offers.revise.response.parse(
-          normalizeLegacyReplay(mutation.result),
-        );
-        return offerServiceDetailV2Schema.parse({
+        const replay = (
+          commercialVersion === 4
+            ? platformCommercialV4Contracts.offers.revise.response
+            : platformCommercialV2Contracts.offers.revise.response
+        ).parse(normalizeLegacyReplay(mutation.result));
+        return (
+          commercialVersion === 4 ? offerServiceDetailV4Schema : offerServiceDetailV2Schema
+        ).parse({
           ...replay,
           expiresAt: replay.expiresAt ? new Date(replay.expiresAt) : null,
           publishedAt: replay.publishedAt ? new Date(replay.publishedAt) : null,

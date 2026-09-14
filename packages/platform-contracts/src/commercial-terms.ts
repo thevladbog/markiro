@@ -138,7 +138,7 @@ export function validateCommercialLineKind(
   line: {
     kind: string;
     quantity: number;
-    commercialTerms?: z.output<typeof commercialLineTermsSchema> | null | undefined;
+    commercialTerms?: z.output<typeof commercialLineTermsV4Schema> | null | undefined;
   },
   ctx: z.RefinementCtx,
 ): void {
@@ -155,6 +155,12 @@ export function validateCommercialLineKind(
       code: "custom",
       path: ["quantity"],
       message: "A plan line quantity must be one",
+    });
+  if (line.commercialTerms?.version === 2 && (line.kind !== "service" || line.quantity !== 1))
+    ctx.addIssue({
+      code: "custom",
+      path: ["quantity"],
+      message: "A recurring service line quantity must be one",
     });
 }
 export type CommercialLineTerms = z.output<typeof commercialLineTermsSchema>;

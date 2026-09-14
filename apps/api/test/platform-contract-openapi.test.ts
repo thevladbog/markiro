@@ -366,9 +366,9 @@ describe("current SaaS platform OpenAPI contracts", () => {
         }>;
       };
 
-      expect(body.anyOf).toHaveLength(3);
+      expect(body.anyOf).toHaveLength(4);
       const alternatives = body.anyOf?.flatMap((representation) => representation.anyOf ?? []);
-      expect(alternatives).toHaveLength(12);
+      expect(alternatives).toHaveLength(16);
       const direct = alternatives?.filter(
         (candidate) =>
           !("sourceOfferId" in (candidate.properties ?? {})) &&
@@ -383,9 +383,10 @@ describe("current SaaS platform OpenAPI contracts", () => {
         expect.objectContaining({ additionalProperties: false }),
         expect.objectContaining({ additionalProperties: false }),
         expect.objectContaining({ additionalProperties: false }),
+        expect.objectContaining({ additionalProperties: false }),
       ]);
       expect(direct?.[0]?.required ?? []).not.toContain("idempotencyKey");
-      expect(linked).toHaveLength(9);
+      expect(linked).toHaveLength(12);
       for (const candidate of linked ?? []) {
         const sourceProperties = Object.keys(candidate.properties ?? {}).filter((property) =>
           property.startsWith("source"),

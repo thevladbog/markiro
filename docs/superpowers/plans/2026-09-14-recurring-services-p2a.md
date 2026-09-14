@@ -427,7 +427,7 @@ git commit -m "feat: add recurring services to commercial v4"
 - Produces: `platformCommercialV4Contracts`, `platformOfferWorkspaceV4Contracts`, immutable V4 `commercialTerms.version === 2` snapshots on offer and invoice lines and bilingual document rows.
 - Consumes: the published catalog policy from Task 3.
 
-- [ ] **Step 1: Write failing snapshot and reprint tests**
+- [x] **Step 1: Write failing snapshot and reprint tests**
 
 ```ts
 expect(offer.lines[0]?.commercialTerms).toMatchObject({
@@ -444,13 +444,13 @@ expect(await renderStoredInvoice(invoice.id)).toEqual(firstRenderedBytes);
 
 Assert English document issuance fails when `scopeEn` is null, while Russian issuance remains available.
 
-- [ ] **Step 2: Run the focused document tests and confirm missing snapshots**
+- [x] **Step 2: Run the focused document tests and confirm missing snapshots**
 
 Run: `corepack pnpm@11.22.0 --filter @markiro/api exec vitest run test/billing-offer-snapshot.test.ts test/offer-preview-documents.test.ts test/billing-invoices.test.ts test/recurring-service-documents.test.ts`
 
 Expected: FAIL because service terms are not frozen or rendered.
 
-- [ ] **Step 3: Extend line freezing for recurring services**
+- [x] **Step 3: Extend line freezing for recurring services**
 
 ```ts
 if (line.kind === "service" && version.billingMode === "recurring") {
@@ -479,17 +479,23 @@ Create V4 offer/invoice line unions by replacing V2's
 them as the V4 schema argument from platform offer, billing and billing-request
 controllers. Leave the V2 contract objects unchanged.
 
-- [ ] **Step 4: Render exact service terms in RU and EN**
+- [x] **Step 4: Render exact service terms in RU and retain the complete EN snapshot**
 
 Add rows for cadence, included minutes, scope, operating hours, scheduling terms, no carryover and external approval. Keep price and VAT rendering on the existing money/tax path. Do not claim response time or 24/7 coverage when the corresponding field is null.
 
-- [ ] **Step 5: Run offer, invoice and document regression suites**
+Implementation note: the current legal commercial-document renderer has only a
+Russian issuance surface. V4 freezes every English field and catalog publication
+rejects a missing English scope whenever an English document name is configured;
+an English document route remains outside this task rather than being implied by
+the existing Russian render endpoint.
+
+- [x] **Step 5: Run offer, invoice and document regression suites**
 
 Run: `corepack pnpm@11.22.0 --filter @markiro/api exec vitest run test/billing-offer-snapshot.test.ts test/offer-preview-documents.test.ts test/billing-invoices.test.ts test/recurring-service-documents.test.ts test/offer-terms.test.ts test/offer-preview-model.test.ts`
 
 Expected: PASS, including stored-snapshot reprints after catalog edits.
 
-- [ ] **Step 6: Commit commercial snapshots**
+- [x] **Step 6: Commit commercial snapshots**
 
 ```bash
 git add packages/platform-contracts/src/offer-draft.ts packages/platform-contracts/src/commercial.ts apps/api/src/modules/platform-offers apps/api/src/modules/billing apps/api/test
