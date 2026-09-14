@@ -43,6 +43,24 @@ export {
   platformGrantReadinessPreviewResponseSchema,
   platformGrantReadinessRowSchema,
 } from "./offline-grant-readiness.js";
+export {
+  grantActivationCancelRequestSchema,
+  grantActivationConfirmRequestSchema,
+  grantActivationMemberSchema,
+  grantActivationPreparationSchema,
+  grantActivationPrepareRequestSchema,
+  grantActivationStateSchema,
+  platformGrantActivationContracts,
+} from "./offline-grant-activations.js";
+export type {
+  GrantActivationMember,
+  GrantActivationState,
+  PlatformGrantActivationCancelRequest,
+  PlatformGrantActivationConfirmRequest,
+  PlatformGrantActivationPreparation,
+  PlatformGrantActivationPrepareRequest,
+  PlatformGrantActivationReceipt,
+} from "./offline-grant-activations.js";
 export type {
   GrantReadinessReason,
   PlatformGrantReadinessListQuery,

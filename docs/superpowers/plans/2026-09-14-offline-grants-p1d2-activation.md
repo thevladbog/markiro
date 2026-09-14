@@ -45,7 +45,7 @@
 - Produces: `platformGrantActivationContracts`, `PlatformGrantActivationPrepareRequest`, `PlatformGrantActivationConfirmRequest`, `PlatformGrantActivationCancelRequest`, `PlatformGrantActivationPreparation`, `PlatformGrantActivationReceipt`, `GrantActivationState`, and capability `offlineGrants.activate`.
 - The API service in Tasks 3–5 must parse every response through these exported schemas.
 
-- [ ] **Step 1: Write failing strict-schema tests**
+- [x] **Step 1: Write failing strict-schema tests**
 
 Add cases proving 1 and 200 unique device IDs pass, 201 IDs fail, duplicates fail, unknown fields fail, hashes require 64 lowercase hexadecimal characters, cancellation reasons are trimmed to 1–1000 characters, and every response rejects missing actor, policy or state fields.
 
@@ -77,7 +77,7 @@ expect(() =>
 ).toThrow();
 ```
 
-- [ ] **Step 2: Write the failing capability test**
+- [x] **Step 2: Write the failing capability test**
 
 Assert that `platform_admin` contains `offlineGrants.activate`, while `support` and `accountant` do not. Continue deriving principal fixtures from `platformCapabilitiesForRole`.
 
@@ -87,7 +87,7 @@ expect(platformCapabilitiesForRole.support).not.toContain("offlineGrants.activat
 expect(platformCapabilitiesForRole.accountant).not.toContain("offlineGrants.activate");
 ```
 
-- [ ] **Step 3: Run the focused tests and verify RED**
+- [x] **Step 3: Run the focused tests and verify RED**
 
 Run:
 
@@ -98,7 +98,7 @@ corepack pnpm --filter @markiro/platform-contracts exec vitest run \
 
 Expected: failure because the activation exports and capability do not exist.
 
-- [ ] **Step 4: Implement the exact contract surface**
+- [x] **Step 4: Implement the exact contract surface**
 
 Define strict Zod schemas with these discriminants and states:
 
@@ -142,11 +142,11 @@ export const grantActivationCancelRequestSchema = z
 
 Expose list, detail, prepare, confirm and cancel contracts. The preparation response must contain exact device members, base policy identity, preview identity, preparation digest, actors, timestamps, state and nullable result policy. The receipt must contain the confirmed policy and exact activation IDs.
 
-- [ ] **Step 5: Add the capability without weakening role equality**
+- [x] **Step 5: Add the capability without weakening role equality**
 
 Append `offlineGrants.activate` to `platformCapabilitySchema` and only to `platformCapabilitiesForRole.platform_admin`. Update assertions that enumerate platform-admin capabilities; do not hard-code new fixture arrays outside the shared role map.
 
-- [ ] **Step 6: Run package gates**
+- [x] **Step 6: Run package gates**
 
 Run:
 
@@ -159,7 +159,7 @@ corepack pnpm --filter @markiro/platform-contracts build
 
 Expected: all pass.
 
-- [ ] **Step 7: Commit Task 1**
+- [x] **Step 7: Commit Task 1**
 
 ```bash
 git add packages/platform-contracts/src/offline-grant-activations.ts \
