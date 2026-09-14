@@ -18,6 +18,7 @@ import {
   prepareOfflineGrantActivation,
 } from "./offline-grant-activation-api.js";
 import { activationKeys, type GrantActivationAttempt } from "./offline-grant-activation-state.js";
+import { OfflineGrantRollbackPanel } from "./OfflineGrantRollbackPanel.js";
 
 type PrepareAttempt = GrantActivationAttempt<
   PlatformGrantActivationPrepareRequest,
@@ -48,6 +49,7 @@ export function OfflineGrantActivationPanel({
   const [decisionReference, setDecisionReference] = useState("");
   const [cancellation, setCancellation] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState<"uncertain" | "stale" | null>(null);
+  const [rollbackDirty, setRollbackDirty] = useState(false);
   const items = list.data?.pages.flatMap((page) => page.items) ?? [];
   const prepareAttempt = queryClient.getQueryData<PrepareAttempt>(activationKeys.prepare);
   const mutationUncertain = items.some(
@@ -61,7 +63,8 @@ export function OfflineGrantActivationPanel({
     decisionReference.length > 0 ||
     Object.values(cancellation).some(Boolean) ||
     prepareAttempt?.notice === "uncertain" ||
-    mutationUncertain;
+    mutationUncertain ||
+    rollbackDirty;
 
   useEffect(() => onDirtyChange?.(dirty), [dirty, onDirtyChange]);
   useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
@@ -272,6 +275,11 @@ export function OfflineGrantActivationPanel({
           </article>
         );
       })}
+      <OfflineGrantRollbackPanel
+        canActivate={canActivate}
+        currentUserId={currentUserId}
+        onDirtyChange={setRollbackDirty}
+      />
     </section>
   );
 }

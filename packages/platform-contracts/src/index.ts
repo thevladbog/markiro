@@ -52,6 +52,30 @@ export {
   grantActivationStateSchema,
   platformGrantActivationContracts,
 } from "./offline-grant-activations.js";
+export {
+  grantRollbackCancelRequestSchema,
+  grantRollbackCandidateSchema,
+  grantRollbackConfirmRequestSchema,
+  grantRollbackMemberSchema,
+  grantRollbackPreparationSchema,
+  grantRollbackPrepareRequestSchema,
+  grantRollbackReasonSchema,
+  grantRollbackStateSchema,
+  platformGrantRollbackContracts,
+} from "./offline-grant-rollbacks.js";
+export type {
+  GrantRollbackCandidate,
+  GrantRollbackMember,
+  GrantRollbackReason,
+  GrantRollbackState,
+  PlatformGrantRollbackCancelRequest,
+  PlatformGrantRollbackCandidatesQuery,
+  PlatformGrantRollbackConfirmRequest,
+  PlatformGrantRollbackListQuery,
+  PlatformGrantRollbackPreparation,
+  PlatformGrantRollbackPrepareRequest,
+  PlatformGrantRollbackReceipt,
+} from "./offline-grant-rollbacks.js";
 export type {
   GrantActivationMember,
   GrantActivationState,

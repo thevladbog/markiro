@@ -1,4 +1,4 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { schema } from "@markiro/db";
 import type { GrantEventType, GrantOwner } from "@markiro/domain";
 import { offlineGrantPolicySchema, type OfflineGrantPolicy } from "@markiro/platform-contracts";
@@ -120,12 +120,61 @@ export async function loadEffectiveGrantPolicy(
       ),
     )
     .limit(1);
-  if (!row) return { policy: base, activationId: null, basePolicyId: base.id };
-  const rollout = parseApprovedGrantPolicy(row.rollout);
-  const effective = effectiveGrantPolicyOverlay(base, rollout, owner.deviceId);
+  if (row) {
+    const rollout = parseApprovedGrantPolicy(row.rollout);
+    const effective = effectiveGrantPolicyOverlay(base, rollout, owner.deviceId);
+    return {
+      policy: effective,
+      activationId: effective === rollout ? row.activation.id : null,
+      basePolicyId: base.id,
+    };
+  }
+  const [rolledBack] = await tx
+    .select({
+      activation,
+      observe: schema.entitlementLifecyclePolicies,
+      rollbackState: schema.offlineGrantRollbackPreparations.state,
+      rollbackBasePolicyId: schema.offlineGrantRollbackPreparations.basePolicyId,
+      rollbackObservePolicyId: schema.offlineGrantRollbackPreparations.observePolicyId,
+    })
+    .from(activation)
+    .leftJoin(
+      schema.offlineGrantRollbackPreparations,
+      eq(schema.offlineGrantRollbackPreparations.id, activation.rollbackPreparationId),
+    )
+    .leftJoin(
+      schema.entitlementLifecyclePolicies,
+      eq(schema.entitlementLifecyclePolicies.id, activation.observePolicyId),
+    )
+    .where(
+      and(
+        eq(activation.tenantId, owner.tenantId),
+        eq(activation.subscriptionId, subscriptionId),
+        eq(activation.ownerKind, owner.kind),
+        eq(activation.credentialEpoch, owner.credentialEpoch),
+        eq(activation.basePolicyId, base.id),
+        owner.kind === "kiosk"
+          ? eq(activation.kioskId, owner.deviceId)
+          : eq(activation.stationDeviceId, owner.deviceId),
+      ),
+    )
+    .orderBy(desc(activation.activatedAt), desc(activation.id))
+    .limit(1);
+  if (
+    !rolledBack ||
+    rolledBack.rollbackState !== "confirmed" ||
+    rolledBack.rollbackBasePolicyId !== rolledBack.activation.basePolicyId ||
+    rolledBack.rollbackObservePolicyId !== rolledBack.activation.observePolicyId ||
+    !rolledBack.activation.rollbackPreparationId ||
+    !rolledBack.activation.observePolicyId ||
+    !rolledBack.activation.rolledBackAt ||
+    !rolledBack.observe
+  )
+    return { policy: base, activationId: null, basePolicyId: base.id };
+  const observe = parseApprovedGrantPolicy(rolledBack.observe);
   return {
-    policy: effective,
-    activationId: effective === rollout ? row.activation.id : null,
+    policy: effectiveGrantPolicyOverlay(base, observe, owner.deviceId, "observe"),
+    activationId: null,
     basePolicyId: base.id,
   };
 }
@@ -134,10 +183,11 @@ export function effectiveGrantPolicyOverlay(
   base: ApprovedGrantPolicy,
   rollout: ApprovedGrantPolicy | null,
   deviceId: string,
+  expectedMode: "observe" | "strict" = "strict",
 ): ApprovedGrantPolicy {
   if (
     !rollout ||
-    rollout.rollout?.mode !== "strict" ||
+    rollout.rollout?.mode !== expectedMode ||
     !rollout.rollout.deviceIds.includes(deviceId) ||
     rollout.maxOfflineMs !== base.maxOfflineMs ||
     rollout.maxCompletionMs !== base.maxCompletionMs ||

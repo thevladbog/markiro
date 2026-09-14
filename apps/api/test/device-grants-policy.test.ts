@@ -194,5 +194,12 @@ describe("explicit server-owned rollout", () => {
     expect(
       effectiveGrantPolicyOverlay(base, { ...rollout, taskBounds: { pickup: {} } }, deviceId),
     ).toBe(base);
+    const observe = {
+      ...rollout,
+      id: "policy-3",
+      rollout: { ...rollout.rollout!, mode: "observe" as const },
+    };
+    expect(effectiveGrantPolicyOverlay(base, observe, deviceId, "observe")).toBe(observe);
+    expect(effectiveGrantPolicyOverlay(base, observe, deviceId)).toBe(base);
   });
 });

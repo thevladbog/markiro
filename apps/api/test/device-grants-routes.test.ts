@@ -70,6 +70,10 @@ describe.skipIf(!ready)("native grant route boundaries", () => {
       .send({})
       .expect(404);
     await request(app.getHttpServer()).get("/platform/offline-grants/activations").expect(404);
+    await request(app.getHttpServer()).get("/platform/offline-grants/rollbacks").expect(404);
+    await request(app.getHttpServer())
+      .get("/platform/offline-grants/rollbacks/candidates")
+      .expect(404);
     await request(app.getHttpServer())
       .post("/platform/offline-grants/activations")
       .send({})
@@ -84,6 +88,19 @@ describe.skipIf(!ready)("native grant route boundaries", () => {
       .expect(404);
     await request(app.getHttpServer())
       .post(`/platform/offline-grants/activations/${id}/cancel`)
+      .send({})
+      .expect(404);
+    await request(app.getHttpServer())
+      .post("/platform/offline-grants/rollbacks")
+      .send({})
+      .expect(404);
+    await request(app.getHttpServer()).get(`/platform/offline-grants/rollbacks/${id}`).expect(404);
+    await request(app.getHttpServer())
+      .post(`/platform/offline-grants/rollbacks/${id}/confirm`)
+      .send({})
+      .expect(404);
+    await request(app.getHttpServer())
+      .post(`/platform/offline-grants/rollbacks/${id}/cancel`)
       .send({})
       .expect(404);
   });

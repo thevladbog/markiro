@@ -10,6 +10,7 @@ import { configureGrantSigning } from "../src/modules/device-grants/grant-keyset
 import { loadEffectiveGrantPolicy } from "../src/modules/device-grants/grant-policy";
 import { resolveGrantRollout } from "../src/modules/device-grants/grant-rollout";
 import { PlatformGrantActivationService } from "../src/modules/device-grants/platform-grant-activation.service";
+import { PlatformGrantRollbackService } from "../src/modules/device-grants/platform-grant-rollback.service";
 import { PlatformGrantReadinessService } from "../src/modules/device-grants/platform-grant-readiness.service";
 import { PlatformAuditService } from "../src/platform-auth/platform-audit.service";
 import { entitlementDigest } from "../src/subscriptions/entitlement-snapshot-reader";
@@ -56,6 +57,7 @@ describe.skipIf(!databaseUrl)("offline grant activation preparation", () => {
   const audit = new PlatformAuditService();
   const readiness = new PlatformGrantReadinessService(db, signing, audit, () => now.getTime());
   const activation = new PlatformGrantActivationService(db, signing, audit, () => now.getTime());
+  const rollback = new PlatformGrantRollbackService(db, audit, () => now.getTime());
   const policyId = randomUUID();
   const deviceId = randomUUID();
   let tenantId = "";
@@ -63,6 +65,7 @@ describe.skipIf(!databaseUrl)("offline grant activation preparation", () => {
   let preparedDigest = "";
   let expiredPreparedId = "";
   let created = false;
+  let confirmedActivationId = "";
 
   beforeAll(async () => {
     await admin.pool.query(`CREATE DATABASE "${databaseName}"`);
@@ -343,6 +346,7 @@ describe.skipIf(!databaseUrl)("offline grant activation preparation", () => {
       .from(schema.tenantSubscriptions);
     const receipt = await activation.confirm(preparedId, confirmer, confirmRequest);
     if (receipt.status !== "confirmed") throw new Error("Expected confirmed activation");
+    confirmedActivationId = receipt.activationIds[0]!;
     expect(receipt).toMatchObject({
       status: "confirmed",
       requestId: confirmRequest.requestId,
@@ -443,6 +447,107 @@ describe.skipIf(!databaseUrl)("offline grant activation preparation", () => {
         requestId: randomUUID(),
       }),
     ).rejects.toMatchObject({ status: 409 });
+  });
+
+  it("selectively rolls a confirmed strict activation back to observe with a second operator", async () => {
+    const candidates = await rollback.candidates({ limit: 10 });
+    expect(candidates.items).toEqual([
+      expect.objectContaining({
+        activationId: confirmedActivationId,
+        deviceId,
+        deviceKind: "station",
+      }),
+    ]);
+    const beforePlans = await db
+      .select({ id: schema.tenantSubscriptions.id, plan: schema.tenantSubscriptions.planVersionId })
+      .from(schema.tenantSubscriptions);
+    const prepared = await rollback.prepare(principal, {
+      protocol: "offline-grants-rollback-v1",
+      activationIds: [confirmedActivationId],
+      decisionReference: "CAB-2026-0914-RB",
+      requestId: randomUUID(),
+    });
+    expect(prepared).toMatchObject({
+      state: "prepared",
+      members: [{ activationId: confirmedActivationId, deviceId }],
+    });
+    const confirmRequest = {
+      protocol: "offline-grants-rollback-v1" as const,
+      rollbackDigest: prepared.rollbackDigest,
+      requestId: randomUUID(),
+    };
+    await expect(rollback.confirm(prepared.id, principal, confirmRequest)).rejects.toMatchObject({
+      status: 403,
+    });
+    const receipt = await rollback.confirm(prepared.id, confirmer, confirmRequest);
+    expect(receipt).toMatchObject({
+      status: "confirmed",
+      preparation: {
+        state: "confirmed",
+        observePolicy: { offlineGrant: { rollout: { mode: "observe", deviceIds: [deviceId] } } },
+      },
+    });
+    expect(
+      await db
+        .select({
+          id: schema.tenantSubscriptions.id,
+          plan: schema.tenantSubscriptions.planVersionId,
+        })
+        .from(schema.tenantSubscriptions),
+    ).toEqual(beforePlans);
+    const subscriptionId = prepared.members[0]!.subscriptionId;
+    const effective = await db.transaction((tx) =>
+      loadEffectiveGrantPolicy(
+        tx,
+        { tenantId, deviceId, kind: "station", credentialEpoch: 1 },
+        subscriptionId,
+      ),
+    );
+    expect(effective).toMatchObject({
+      activationId: null,
+      basePolicyId: policyId,
+      policy: { id: receipt.preparation.observePolicy!.id, rollout: { mode: "observe" } },
+    });
+    const configuration = await db.transaction((tx) =>
+      resolveGrantRollout(
+        tx,
+        { tenantId, deviceId, kind: "station", credentialEpoch: 1 },
+        effective.policy,
+        true,
+        effective.activationId,
+      ),
+    );
+    expect(configuration).toMatchObject({
+      mode: "observe",
+      activationId: null,
+      policyId: receipt.preparation.observePolicy!.id,
+      decisionReference: "CAB-2026-0914-RB",
+    });
+    const reactivationId = randomUUID();
+    await db.insert(schema.offlineGrantDeviceActivations).values({
+      id: reactivationId,
+      preparationId: preparedId,
+      tenantId,
+      subscriptionId,
+      ownerKind: "station",
+      stationDeviceId: deviceId,
+      credentialEpoch: 1,
+      basePolicyId: policyId,
+      rolloutPolicyId: receipt.preparation.members[0]!.strictPolicyId,
+      activatedByPlatformUserId: confirmer.userId,
+      activatedAt: new Date(now.getTime() + 1),
+    });
+    const reactivated = await db.transaction((tx) =>
+      loadEffectiveGrantPolicy(
+        tx,
+        { tenantId, deviceId, kind: "station", credentialEpoch: 1 },
+        subscriptionId,
+      ),
+    );
+    expect(reactivated).toMatchObject({
+      activationId: reactivationId,
+      policy: { rollout: { mode: "strict" } },
+    });
   });
 
   async function count(table: string): Promise<number> {

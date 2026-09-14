@@ -521,6 +521,15 @@ const profile: RouteExemption = {
 };
 
 const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
+  "PlatformGrantRollbackController.prepare": platform(
+    "offline grant rollback requires the dedicated platform activation capability",
+  ),
+  "PlatformGrantRollbackController.confirm": platform(
+    "offline grant rollback confirmation requires the dedicated platform activation capability",
+  ),
+  "PlatformGrantRollbackController.cancel": platform(
+    "offline grant rollback cancellation requires the dedicated platform activation capability",
+  ),
   "PlatformGrantActivationController.prepare": platform(
     "offline grant activation requires the dedicated platform activation capability",
   ),
