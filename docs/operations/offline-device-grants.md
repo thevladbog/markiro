@@ -13,11 +13,13 @@ provided by this change.
 | `POST /station/grants/v1/configuration` | Station or Handheld device key | Current mode, owner, clock and keys during subscription restriction |
 | `POST /station/grants/v1/device`        | Station or Handheld device key | Device capabilities                                                 |
 | `POST /station/grants/v1/tasks`         | Station or Handheld device key | Frozen shift or inventory task                                      |
+| `POST /station/grants/v1/readiness`     | Station or Handheld device key | Durable client readiness report                                     |
 | `GET /station/grants/v1/keyset`         | Station or Handheld device key | Verifier keys, including during subscription restriction            |
 | `POST /kiosk/grants/v1/configuration`   | Kiosk token                    | Current mode, owner, clock and keys during subscription restriction |
 | `POST /kiosk/grants/v1/device`          | Kiosk token                    | Kiosk device capabilities                                           |
 | `POST /kiosk/grants/v1/reservations`    | Kiosk token                    | Canonical order attestation and frozen reservation                  |
 | `POST /kiosk/grants/v1/tasks`           | Kiosk token                    | Frozen reservation task                                             |
+| `POST /kiosk/grants/v1/readiness`       | Kiosk token                    | Durable client readiness report                                     |
 | `GET /kiosk/grants/v1/keyset`           | Kiosk token                    | Verifier keys, including during subscription restriction            |
 
 Cabinet sessions and public API keys cannot authorize these routes. Device bodies
@@ -90,6 +92,55 @@ strict mode. An approved replacement policy selecting observation is the rollbac
 authority. Credential recovery preserves this mode history. Fresh unconfigured
 clients remain in observation; they acquire no signed authority from absent data.
 The transition records do not enable a production cohort on their own.
+
+## Rollout readiness and pilot preview
+
+P1D.1 adds a readiness inventory under **Catalog → Offline policies → Pilot
+readiness**. It remains an observation tool. It neither changes a policy nor
+enables strict admission. The platform routes are:
+
+| Method and route                                  | Capabilities                                    | Purpose                         |
+| ------------------------------------------------- | ----------------------------------------------- | ------------------------------- |
+| `GET /platform/offline-grants/readiness`          | `tenants.read`, `catalog.read`                  | Filter current readiness        |
+| `POST /platform/offline-grants/readiness/preview` | `tenants.read`, `catalog.read`, `catalog.write` | Snapshot a proposed pilot group |
+
+Station, Handheld and kiosk create a readiness report only after configuration,
+keyset and a verified server-issued device grant have been written to their
+durable store and read back. The report is append-only and scoped to the current
+device credential epoch. `accepted: true` confirms that the server retained the
+report; it does not mean the device is eligible. The server derives eligibility
+again from current subscription, policy, assignment, credential, keyset,
+configuration, issuance and authentication facts.
+
+A current report is at most 24 hours old according to server time. Missing,
+older or contradictory facts block the row and produce stable reason codes.
+Client build and storage revision are diagnostics. Accepted offline evidence is
+shown separately because it records protocol use but is neither required for a
+new client nor proof of physical acceptance.
+
+Preview accepts up to 200 unique eligible device IDs and returns a single `asOf`,
+the exact rows, reason aggregates and a digest. A new successful preview gets a
+new request ID, time and digest; retry after an uncertain HTTP outcome reuses the
+unchanged request. The digest is input for the future P1D.2 prepare/confirm flow.
+P1D.1 has no confirm, activation or cohort-policy mutation route.
+
+### Deployment order for P1D.1
+
+1. Back up the production PostgreSQL database and record the restore point.
+2. Apply migration `0149_offline_grant_readiness` before starting any API binary
+   that accepts readiness reports or reads the platform readiness inventory.
+3. Deploy the API while every device remains in `observe`.
+4. Deploy Station, Handheld and kiosk client versions with durable readiness
+   reporting.
+5. Wait for reports no older than 24 hours and resolve every blocking reason.
+6. Create and review a pilot preview in SaaS Admin.
+7. Stop before activation and pass the preview digest and exact cohort to P1D.2.
+
+Rollback deploys a compatible API and client set that preserves observation.
+Keep migration 0149, readiness history, verified grant stores and native outboxes.
+Do not delete local stores to manufacture a clean status. If a client is rolled
+back, its earlier report naturally becomes stale after 24 hours and cannot make
+the device eligible for a new strict preview.
 
 ## Retry and authority boundaries
 
@@ -192,6 +243,11 @@ operation registry revision changes fingerprints and invalidates old previews.
 Unconfirmed entitlement-source previews must be prepared again after the update;
 confirmed receipts still replay their original result under current authorization.
 Existing customers and old native DTOs retain their current flows.
+
+Migration **0149 must complete before deploying any binary that accepts client
+readiness reports or reads rollout readiness**. An older client remains compatible
+and continues productive observation, but it is classified with
+`client_report_missing` until upgraded and cannot enter a strict preview.
 
 All four variables absent or blank leave normal API startup available:
 `OFFLINE_GRANT_ORIGIN`, `OFFLINE_GRANT_KID`, `OFFLINE_GRANT_PRIVATE_KEY_PEM`,

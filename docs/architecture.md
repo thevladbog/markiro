@@ -370,6 +370,16 @@ prerequisite. See the [offline grants operations guide](operations/offline-devic
 and [acceptance evidence](acceptance/offline-device-grants.md). Production activation
 and physical device acceptance remain separate P1D decisions.
 
+P1D.1 adds append-only native readiness self-reports after a durable configuration,
+keyset and verified-grant round trip. A platform inventory combines the latest report
+with current server-owned subscription, assignment, credential, policy, signing and
+issuance facts. Reports older than 24 hours fail closed. A bounded platform preview
+captures the exact proposed cohort, one server time and a digest without changing
+policy, configuration mode, subscription or device authority. Migration 0149 must
+precede every readiness writer and reader. The preview digest is only continuity input
+for P1D.2; it grants no authority. Automated reports and accepted protocol evidence do
+not establish physical hardware, factory-network or pilot acceptance.
+
 Bank imports retain the bounded source row as reconciliation evidence, while the public match and
 audit contracts expose only the payer account's last four digits and whether it is a known active,
 known archived, unknown, or unavailable account. Active known accounts may be suggested. Archived
