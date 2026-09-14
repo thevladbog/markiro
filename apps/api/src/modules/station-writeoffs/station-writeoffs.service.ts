@@ -79,7 +79,11 @@ export class StationWriteoffsService {
         )
         .orderBy(asc(schema.pickupOrderReasons.sortOrder)),
       this.db
-        .select({ gtin14: schema.products.gtin14, name: schema.products.name })
+        .select({
+          id: schema.products.id,
+          gtin14: schema.products.gtin14,
+          name: schema.products.name,
+        })
         .from(schema.products)
         .where(and(eq(schema.products.tenantId, tenantId), eq(schema.products.archived, false))),
       this.db
