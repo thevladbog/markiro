@@ -1,5 +1,14 @@
 import { offlineGrantPolicySchema } from "@markiro/platform-contracts";
-import { Alert, Button, Input, StatusChip, Table, Textarea, type TableColumn } from "@markiro/ui";
+import {
+  Alert,
+  Button,
+  DataTabs,
+  Input,
+  StatusChip,
+  Table,
+  Textarea,
+  type TableColumn,
+} from "@markiro/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -10,6 +19,7 @@ import {
   listOfflineGrantPolicies,
   type OfflineGrantPolicyDto,
 } from "./api.js";
+import { OfflineGrantReadinessPanel } from "./OfflineGrantReadinessPanel.js";
 
 const POLICY_QUERY_KEY = ["platform", "catalog", "lifecycle-policies"] as const;
 const EMPTY_BOUNDS = "{}";
@@ -32,17 +42,20 @@ export function OfflineGrantPoliciesPanel({
   const [selectedDraft, setSelectedDraft] = useState<string | null>(null);
   const [decisionReference, setDecisionReference] = useState("");
   const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
+  const [activeTab, setActiveTab] = useState<"policies" | "readiness">("policies");
+  const [readinessDirty, setReadinessDirty] = useState(false);
 
   useEffect(() => {
     onDirtyChange?.(
-      Boolean(
-        policyKey ||
-        version !== "1" ||
-        maxOfflineHours ||
-        maxCompletionHours ||
-        taskBounds !== EMPTY_BOUNDS ||
-        decisionReference,
-      ),
+      readinessDirty ||
+        Boolean(
+          policyKey ||
+          version !== "1" ||
+          maxOfflineHours ||
+          maxCompletionHours ||
+          taskBounds !== EMPTY_BOUNDS ||
+          decisionReference,
+        ),
     );
   }, [
     decisionReference,
@@ -50,6 +63,7 @@ export function OfflineGrantPoliciesPanel({
     maxOfflineHours,
     onDirtyChange,
     policyKey,
+    readinessDirty,
     taskBounds,
     version,
   ]);
@@ -144,91 +158,110 @@ export function OfflineGrantPoliciesPanel({
 
   return (
     <div className="catalog-form">
-      <Alert tone="info">{t("catalog.offlinePolicies.observeOnly")}</Alert>
-      <Table
-        columns={columns}
-        rows={policies.data.items}
-        empty={t("catalog.offlinePolicies.empty")}
-        onRowClick={(policy) => setSelectedDraft(policy.status === "draft" ? policy.id : null)}
+      <DataTabs
+        items={[
+          { id: "policies", label: t("catalog.offlinePolicies.tabs.policies") },
+          { id: "readiness", label: t("catalog.offlinePolicies.tabs.readiness") },
+        ]}
+        activeId={activeTab}
+        onChange={setActiveTab}
+        label={t("catalog.offlinePolicies.tabs.label")}
       />
-      {canWrite ? (
+      {activeTab === "readiness" ? (
+        <OfflineGrantReadinessPanel
+          policies={policies.data.items}
+          canPreview={canWrite}
+          onDirtyChange={setReadinessDirty}
+        />
+      ) : (
         <>
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              setMessage(null);
-              create.mutate();
-            }}
-          >
-            <fieldset disabled={create.isPending || approve.isPending}>
-              <legend>{t("catalog.offlinePolicies.newDraft")}</legend>
-              <div className="form-grid form-grid--two">
-                <Input
-                  label={t("catalog.offlinePolicies.key")}
-                  value={policyKey}
-                  onChange={(event) => setPolicyKey(event.target.value)}
-                  required
-                />
-                <Input
-                  label={t("catalog.offlinePolicies.version")}
-                  value={version}
-                  onChange={(event) => setVersion(event.target.value)}
-                  inputMode="numeric"
-                  required
-                />
-                <Input
-                  label={t("catalog.offlinePolicies.maxOffline")}
-                  value={maxOfflineHours}
-                  onChange={(event) => setMaxOfflineHours(event.target.value)}
-                  inputMode="numeric"
-                  required
-                />
-                <Input
-                  label={t("catalog.offlinePolicies.maxCompletion")}
-                  value={maxCompletionHours}
-                  onChange={(event) => setMaxCompletionHours(event.target.value)}
-                  inputMode="numeric"
-                  required
-                />
-                <Textarea
-                  className="catalog-form__full-width"
-                  label={t("catalog.offlinePolicies.taskBounds")}
-                  value={taskBounds}
-                  onChange={(event) => setTaskBounds(event.target.value)}
-                  rows={10}
-                  required
-                />
-              </div>
-              <Button type="submit" disabled={create.isPending}>
-                {t("catalog.offlinePolicies.create")}
-              </Button>
-            </fieldset>
-          </form>
-          {selectedDraft ? (
-            <form
-              onSubmit={(event) => {
-                event.preventDefault();
-                setMessage(null);
-                approve.mutate();
-              }}
-            >
-              <fieldset disabled={approve.isPending}>
-                <legend>{t("catalog.offlinePolicies.approval")}</legend>
-                <Input
-                  label={t("catalog.offlinePolicies.decisionReference")}
-                  value={decisionReference}
-                  onChange={(event) => setDecisionReference(event.target.value)}
-                  required
-                />
-                <Button type="submit" disabled={approve.isPending}>
-                  {t("catalog.offlinePolicies.approve")}
-                </Button>
-              </fieldset>
-            </form>
+          <Alert tone="info">{t("catalog.offlinePolicies.observeOnly")}</Alert>
+          <Table
+            columns={columns}
+            rows={policies.data.items}
+            empty={t("catalog.offlinePolicies.empty")}
+            onRowClick={(policy) => setSelectedDraft(policy.status === "draft" ? policy.id : null)}
+          />
+          {canWrite ? (
+            <>
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  setMessage(null);
+                  create.mutate();
+                }}
+              >
+                <fieldset disabled={create.isPending || approve.isPending}>
+                  <legend>{t("catalog.offlinePolicies.newDraft")}</legend>
+                  <div className="form-grid form-grid--two">
+                    <Input
+                      label={t("catalog.offlinePolicies.key")}
+                      value={policyKey}
+                      onChange={(event) => setPolicyKey(event.target.value)}
+                      required
+                    />
+                    <Input
+                      label={t("catalog.offlinePolicies.version")}
+                      value={version}
+                      onChange={(event) => setVersion(event.target.value)}
+                      inputMode="numeric"
+                      required
+                    />
+                    <Input
+                      label={t("catalog.offlinePolicies.maxOffline")}
+                      value={maxOfflineHours}
+                      onChange={(event) => setMaxOfflineHours(event.target.value)}
+                      inputMode="numeric"
+                      required
+                    />
+                    <Input
+                      label={t("catalog.offlinePolicies.maxCompletion")}
+                      value={maxCompletionHours}
+                      onChange={(event) => setMaxCompletionHours(event.target.value)}
+                      inputMode="numeric"
+                      required
+                    />
+                    <Textarea
+                      className="catalog-form__full-width"
+                      label={t("catalog.offlinePolicies.taskBounds")}
+                      value={taskBounds}
+                      onChange={(event) => setTaskBounds(event.target.value)}
+                      rows={10}
+                      required
+                    />
+                  </div>
+                  <Button type="submit" disabled={create.isPending}>
+                    {t("catalog.offlinePolicies.create")}
+                  </Button>
+                </fieldset>
+              </form>
+              {selectedDraft ? (
+                <form
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    setMessage(null);
+                    approve.mutate();
+                  }}
+                >
+                  <fieldset disabled={approve.isPending}>
+                    <legend>{t("catalog.offlinePolicies.approval")}</legend>
+                    <Input
+                      label={t("catalog.offlinePolicies.decisionReference")}
+                      value={decisionReference}
+                      onChange={(event) => setDecisionReference(event.target.value)}
+                      required
+                    />
+                    <Button type="submit" disabled={approve.isPending}>
+                      {t("catalog.offlinePolicies.approve")}
+                    </Button>
+                  </fieldset>
+                </form>
+              ) : null}
+            </>
           ) : null}
+          {message ? <Alert tone={message.tone}>{message.text}</Alert> : null}
         </>
-      ) : null}
-      {message ? <Alert tone={message.tone}>{message.text}</Alert> : null}
+      )}
     </div>
   );
 }
