@@ -45,7 +45,13 @@ export interface PickupScanRejectionRowDto {
   id: string;
   /** Derived from `employeeId === null`; the DB check constraint keeps it honest. */
   kind: "items_refused" | "unknown_badge";
-  kioskId: string;
+  /**
+   * NULL for a rejection produced by a handheld, which has no kiosk row.
+   * Plan 2 replaces this pair with a device descriptor carrying the kind and
+   * name of whichever device produced the row; until then a handheld rejection
+   * reads as a null id with an empty name.
+   */
+  kioskId: string | null;
   kioskName: string;
   employeeName: string | null;
   badgeCode: string | null;
@@ -134,7 +140,7 @@ export const pickupScanRejectionRowOpenApiSchema: SchemaObject = {
   properties: {
     id: { type: "string", format: "uuid" },
     kind: { type: "string", enum: ["items_refused", "unknown_badge"] },
-    kioskId: { type: "string", format: "uuid" },
+    kioskId: { type: "string", format: "uuid", nullable: true },
     kioskName: { type: "string" },
     employeeName: { type: "string", nullable: true },
     badgeCode: { type: "string", nullable: true },

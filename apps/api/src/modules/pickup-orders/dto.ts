@@ -132,6 +132,21 @@ export const createOrderSchema = z
   .refine(hasUniqueBoxes, "Box SSCC values must be unique");
 export type CreateOrderDto = z.infer<typeof createOrderSchema>;
 
+/**
+ * What `PickupOrdersService` accepts, which is deliberately WIDER than the
+ * kiosk's wire DTO.
+ *
+ * `createOrderSchema` refines with `hasExactlyOneBadgeIdentity`, and that refine
+ * must not be relaxed: it is what stops a kiosk body carrying a plaintext badge
+ * beside the digest meant to replace it. A handheld has no badge at all — its
+ * operator is already signed in and the device asserts them the way
+ * `station-scans` does — so the operator identity is added HERE, at the service
+ * boundary, rather than by weakening the schema the kiosk posts through.
+ *
+ * Exactly one identity is still required; the service decides which branch runs.
+ */
+export type CreatePickupDocumentInput = CreateOrderDto & { operatorId?: string };
+
 /** A scanned item that could not be accepted into the order, and why. */
 export interface OrderConflict {
   rawKm: string;

@@ -114,6 +114,9 @@ describe.skipIf(!url)("pickup schema constraints", () => {
   const foreignOrder = randomUUID();
   const orderBoxId = randomUUID();
   const foreignOrderBoxId = randomUUID();
+  const handheldId = randomUUID();
+  const stationKindDeviceId = randomUUID();
+  const writeoffOrderIds = [randomUUID(), randomUUID(), randomUUID()];
 
   beforeAll(async () => {
     await db.insert(organization).values([org, foreignOrg]);
@@ -124,6 +127,10 @@ describe.skipIf(!url)("pickup schema constraints", () => {
     await db.insert(schema.kiosks).values([
       { id: kioskId, tenantId: org.id, name: "Киоск-1" },
       { id: foreignKioskId, tenantId: foreignOrg.id, name: "Чужой киоск" },
+    ]);
+    await db.insert(schema.stationDevices).values([
+      { id: handheldId, tenantId: org.id, name: "ТСД-1", kind: "handheld" },
+      { id: stationKindDeviceId, tenantId: org.id, name: "Станция-1", kind: "station" },
     ]);
     await db.insert(schema.products).values([
       {
@@ -217,7 +224,159 @@ describe.skipIf(!url)("pickup schema constraints", () => {
     ]);
   });
 
+  type PickupOrderInsert = typeof schema.pickupOrders.$inferInsert;
+  const writeoffRow = (
+    over: Partial<PickupOrderInsert> & { orderNo: string },
+  ): PickupOrderInsert => ({
+    tenantId: org.id,
+    employeeId: empId,
+    reason: "writeoff",
+    itemCount: 1,
+    ...over,
+  });
+
+  it("rejects a pickup order naming two source devices", async () => {
+    await expect(
+      db.insert(schema.pickupOrders).values(
+        writeoffRow({
+          orderNo: "ORD-26-9001",
+          sourceKind: "kiosk",
+          kioskId,
+          stationDeviceId: handheldId,
+        }),
+      ),
+    ).rejects.toMatchObject({
+      cause: { code: "23514", constraint: "pickup_orders_source_check" },
+    });
+  });
+
+  it("rejects a pickup order naming no source device", async () => {
+    await expect(
+      db
+        .insert(schema.pickupOrders)
+        .values(writeoffRow({ orderNo: "ORD-26-9002", sourceKind: "kiosk" })),
+    ).rejects.toMatchObject({
+      cause: { code: "23514", constraint: "pickup_orders_source_check" },
+    });
+  });
+
+  it("rejects a handheld order pointing at a station device of the wrong kind", async () => {
+    await expect(
+      db.insert(schema.pickupOrders).values(
+        writeoffRow({
+          orderNo: "ORD-26-9003",
+          sourceKind: "handheld",
+          stationDeviceId: stationKindDeviceId,
+        }),
+      ),
+    ).rejects.toMatchObject({
+      cause: { code: "23503", constraint: "pickup_orders_tenant_station_device_fk" },
+    });
+  });
+
+  it("keeps device_seq idempotency per device kind", async () => {
+    await db.insert(schema.pickupOrders).values(
+      writeoffRow({
+        id: writeoffOrderIds[0],
+        orderNo: "ORD-26-9004",
+        sourceKind: "handheld",
+        stationDeviceId: handheldId,
+        deviceSeq: 7,
+      }),
+    );
+    await expect(
+      db.insert(schema.pickupOrders).values(
+        writeoffRow({
+          orderNo: "ORD-26-9005",
+          sourceKind: "handheld",
+          stationDeviceId: handheldId,
+          deviceSeq: 7,
+        }),
+      ),
+    ).rejects.toMatchObject({
+      cause: { code: "23505", constraint: "pickup_orders_handheld_device_seq_uq" },
+    });
+  });
+
+  it("exempts a null device_seq from idempotency", async () => {
+    await db.insert(schema.pickupOrders).values(
+      writeoffRow({
+        id: writeoffOrderIds[1],
+        orderNo: "ORD-26-9006",
+        sourceKind: "handheld",
+        stationDeviceId: handheldId,
+        deviceSeq: null,
+      }),
+    );
+    await expect(
+      db.insert(schema.pickupOrders).values(
+        writeoffRow({
+          id: writeoffOrderIds[2],
+          orderNo: "ORD-26-9007",
+          sourceKind: "handheld",
+          stationDeviceId: handheldId,
+          deviceSeq: null,
+        }),
+      ),
+    ).resolves.toBeDefined();
+  });
+
+  type RejectionInsert = typeof schema.pickupScanRejections.$inferInsert;
+  const rejectionRow = (
+    over: Partial<RejectionInsert> & { deviceSeq: number },
+  ): RejectionInsert => ({
+    tenantId: org.id,
+    employeeId: empId,
+    codes: [],
+    scannedAt: new Date(),
+    ...over,
+  });
+
+  it("rejects a scan rejection naming two source devices", async () => {
+    await expect(
+      db.insert(schema.pickupScanRejections).values(
+        rejectionRow({
+          deviceSeq: 900,
+          sourceKind: "kiosk",
+          kioskId,
+          stationDeviceId: handheldId,
+        }),
+      ),
+    ).rejects.toMatchObject({
+      cause: { code: "23514", constraint: "pickup_scan_rejections_source_check" },
+    });
+  });
+
+  it("rejects a handheld scan rejection pointing at a station-kind device", async () => {
+    await expect(
+      db.insert(schema.pickupScanRejections).values(
+        rejectionRow({
+          deviceSeq: 901,
+          sourceKind: "handheld",
+          stationDeviceId: stationKindDeviceId,
+        }),
+      ),
+    ).rejects.toMatchObject({
+      cause: { code: "23503", constraint: "pickup_scan_rejections_tenant_station_device_fk" },
+    });
+  });
+
+  it("keeps scan-rejection idempotency per device kind", async () => {
+    const row = rejectionRow({
+      deviceSeq: 902,
+      sourceKind: "handheld",
+      stationDeviceId: handheldId,
+    });
+    await db.insert(schema.pickupScanRejections).values(row);
+    await expect(db.insert(schema.pickupScanRejections).values(row)).rejects.toMatchObject({
+      cause: { code: "23505", constraint: "pickup_scan_rejections_handheld_device_seq_uq" },
+    });
+  });
+
   afterAll(async () => {
+    await db
+      .delete(schema.pickupScanRejections)
+      .where(eq(schema.pickupScanRejections.tenantId, org.id));
     await db
       .delete(schema.employeePickupPolicies)
       .where(inArray(schema.employeePickupPolicies.employeeId, [empId, foreignEmpId]));
@@ -229,7 +388,10 @@ describe.skipIf(!url)("pickup schema constraints", () => {
       .where(inArray(schema.pickupOrderBoxes.id, [orderBoxId, foreignOrderBoxId]));
     await db
       .delete(schema.pickupOrders)
-      .where(inArray(schema.pickupOrders.id, [order1, order2, foreignOrder]));
+      .where(inArray(schema.pickupOrders.id, [order1, order2, foreignOrder, ...writeoffOrderIds]));
+    await db
+      .delete(schema.stationDevices)
+      .where(inArray(schema.stationDevices.id, [handheldId, stationKindDeviceId]));
     await db.delete(schema.boxes).where(inArray(schema.boxes.id, [boxId, foreignBoxId]));
     await db.delete(schema.shifts).where(inArray(schema.shifts.id, [shiftId, foreignShiftId]));
     await db.delete(schema.kiosks).where(inArray(schema.kiosks.id, [kioskId, foreignKioskId]));
