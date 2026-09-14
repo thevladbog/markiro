@@ -4,6 +4,8 @@ import { PlatformAuditModule } from "../../platform-auth/platform-audit.module";
 import { GRANT_SIGNING_CONFIGURATION, configureGrantSigning } from "./grant-keyset";
 import { PlatformGrantReadinessController } from "./platform-grant-readiness.controller";
 import { PlatformGrantReadinessService } from "./platform-grant-readiness.service";
+import { PlatformGrantActivationController } from "./platform-grant-activation.controller";
+import { PlatformGrantActivationService } from "./platform-grant-activation.service";
 
 @Module({})
 export class PlatformGrantReadinessModule {
@@ -11,10 +13,11 @@ export class PlatformGrantReadinessModule {
     return {
       module: PlatformGrantReadinessModule,
       imports: [PlatformAuditModule],
-      controllers: [PlatformGrantReadinessController],
+      controllers: [PlatformGrantReadinessController, PlatformGrantActivationController],
       providers: [
         { provide: GRANT_SIGNING_CONFIGURATION, useValue: configureGrantSigning(env) },
         PlatformGrantReadinessService,
+        PlatformGrantActivationService,
       ],
     };
   }

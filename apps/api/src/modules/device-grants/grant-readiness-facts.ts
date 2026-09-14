@@ -59,6 +59,8 @@ export interface GrantReadinessFacts {
   assignmentId: string | null;
   lastSeenAt: Date | null;
   subscriptionActive: boolean;
+  subscriptionId: string | null;
+  entitlementRevision: string;
   currentPolicy: GrantReadinessTargetPolicy | null;
   signingConfigured: boolean;
   currentKeysetRevision: string | null;
@@ -187,6 +189,8 @@ export async function readGrantReadinessFacts(
         case when assignment.state in ('reserved', 'assigned') then assignment.id else null end as "assignmentId",
         station_devices.last_seen_at as "lastSeenAt",
         (subscription.id is not null) as "subscriptionActive",
+        subscription.id as "subscriptionId",
+        coalesce(entitlement_revisions.revision, 0)::text as "entitlementRevision",
         subscription.policy_id as "policyId",
         subscription.policy_version as "policyVersion",
         subscription.policy_status as "policyStatus",
@@ -228,6 +232,8 @@ export async function readGrantReadinessFacts(
        and assignment.device_id = station_devices.id
       left join (${activeSubscriptionPolicySql(asOf)}) subscription
         on subscription.tenant_id = station_devices.tenant_id
+      left join entitlement_revisions
+        on entitlement_revisions.tenant_id = station_devices.tenant_id
       left join lateral (
         select id, credential_epoch, mode, policy_revision
         from device_grant_configurations
@@ -294,6 +300,8 @@ export async function readGrantReadinessFacts(
         null::uuid as "assignmentId",
         kiosks.last_seen_at as "lastSeenAt",
         (subscription.id is not null) as "subscriptionActive",
+        subscription.id as "subscriptionId",
+        coalesce(entitlement_revisions.revision, 0)::text as "entitlementRevision",
         subscription.policy_id as "policyId",
         subscription.policy_version as "policyVersion",
         subscription.policy_status as "policyStatus",
@@ -331,6 +339,8 @@ export async function readGrantReadinessFacts(
       inner join organization on organization.id = kiosks.tenant_id
       left join (${activeSubscriptionPolicySql(asOf)}) subscription
         on subscription.tenant_id = kiosks.tenant_id
+      left join entitlement_revisions
+        on entitlement_revisions.tenant_id = kiosks.tenant_id
       left join lateral (
         select id, credential_epoch, mode, policy_revision
         from device_grant_configurations
@@ -388,6 +398,8 @@ interface RawGrantReadinessRow extends Record<string, unknown> {
   assignmentId: string | null;
   lastSeenAt: Date | string | null;
   subscriptionActive: boolean;
+  subscriptionId: string | null;
+  entitlementRevision: string;
   policyId: string | null;
   policyVersion: number | null;
   policyStatus: "draft" | "approved" | null;
@@ -583,6 +595,8 @@ function mapRawFacts(
     assignmentId: row.assignmentId,
     lastSeenAt: databaseDate(row.lastSeenAt),
     subscriptionActive: row.subscriptionActive,
+    subscriptionId: row.subscriptionId,
+    entitlementRevision: row.entitlementRevision,
     currentPolicy,
     signingConfigured: signing.configured,
     currentKeysetRevision: signing.keysetRevision,

@@ -26,9 +26,13 @@ const EMPTY_BOUNDS = "{}";
 
 export function OfflineGrantPoliciesPanel({
   canWrite,
+  canActivate,
+  currentUserId,
   onDirtyChange,
 }: {
   canWrite: boolean;
+  canActivate: boolean;
+  currentUserId: string;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
   const { t } = useTranslation();
@@ -180,6 +184,8 @@ export function OfflineGrantPoliciesPanel({
           <OfflineGrantReadinessPanel
             policies={policies.data.items}
             canPreview={canWrite}
+            canActivate={canActivate}
+            currentUserId={currentUserId}
             onDirtyChange={setReadinessDirty}
           />
         </div>

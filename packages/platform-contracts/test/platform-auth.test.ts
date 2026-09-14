@@ -17,6 +17,7 @@ const ADMIN_CAPABILITIES = [
   "tenants.write",
   "catalog.read",
   "catalog.write",
+  "offlineGrants.activate",
   "billing.read",
   "billing.write",
   "agreements.read",
@@ -252,5 +253,13 @@ describe("agreement capabilities", () => {
       twoFactorReady: true,
     });
     expect(result.success).toBe(false);
+  });
+});
+
+describe("offline grant activation capabilities", () => {
+  it("allows only platform administrators to activate strict cohorts", () => {
+    expect(platformCapabilitiesForRole.platform_admin).toContain("offlineGrants.activate");
+    expect(platformCapabilitiesForRole.support).not.toContain("offlineGrants.activate");
+    expect(platformCapabilitiesForRole.accountant).not.toContain("offlineGrants.activate");
   });
 });

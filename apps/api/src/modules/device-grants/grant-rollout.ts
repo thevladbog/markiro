@@ -13,6 +13,7 @@ export async function resolveGrantRollout(
   owner: GrantOwner,
   policy: ApprovedGrantPolicy | null,
   signingConfigured: boolean,
+  activationId: string | null = null,
 ) {
   const t = schema.deviceGrantConfigurations;
   const [previous] = await tx
@@ -35,10 +36,12 @@ export async function resolveGrantRollout(
       : null;
   if (!approved && previous) return previous;
   const mode = grantRolloutMode(approved, owner.deviceId);
+  const appliedActivationId = mode === "strict" ? activationId : null;
   if (
     previous &&
     previous.mode === mode &&
-    previous.policyRevision === (approved?.revision ?? null)
+    previous.policyRevision === (approved?.revision ?? null) &&
+    previous.activationId === appliedActivationId
   )
     return previous;
   const [record] = await tx
@@ -54,6 +57,7 @@ export async function resolveGrantRollout(
       policyRevision: approved?.revision ?? null,
       decisionReference:
         approved?.rollout?.decisionReference ?? approved?.approvalReference ?? null,
+      activationId: appliedActivationId,
     })
     .returning();
   if (!record) throw new Error("Grant configuration transition was not persisted");

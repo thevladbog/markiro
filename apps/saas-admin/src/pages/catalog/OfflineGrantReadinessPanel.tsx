@@ -23,14 +23,19 @@ import {
   listOfflineGrantReadiness,
   previewOfflineGrantReadiness,
 } from "./offline-grant-readiness-api.js";
+import { OfflineGrantActivationPanel } from "./OfflineGrantActivationPanel.js";
 
 export function OfflineGrantReadinessPanel({
   policies,
   canPreview,
+  canActivate,
+  currentUserId,
   onDirtyChange,
 }: {
   policies: OfflineGrantPolicyDto[];
   canPreview: boolean;
+  canActivate: boolean;
+  currentUserId: string;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
   const { t } = useTranslation();
@@ -47,6 +52,7 @@ export function OfflineGrantReadinessPanel({
   const [selected, setSelected] = useState<string[]>([]);
   const [intent, setIntent] = useState<PlatformGrantReadinessPreviewRequest | null>(null);
   const [preview, setPreview] = useState<PlatformGrantReadinessPreviewResponse | null>(null);
+  const [activationDirty, setActivationDirty] = useState(false);
   const filters = useMemo(
     () => ({
       ...(tenantId ? { tenantId } : {}),
@@ -67,8 +73,11 @@ export function OfflineGrantReadinessPanel({
   });
 
   useEffect(
-    () => onDirtyChange?.(selected.length > 0 || intent !== null || preview !== null),
-    [intent, onDirtyChange, preview, selected.length],
+    () =>
+      onDirtyChange?.(
+        selected.length > 0 || intent !== null || preview !== null || activationDirty,
+      ),
+    [activationDirty, intent, onDirtyChange, preview, selected.length],
   );
   useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
   useEffect(() => {
@@ -342,6 +351,12 @@ export function OfflineGrantReadinessPanel({
           />
         </section>
       ) : null}
+      <OfflineGrantActivationPanel
+        preview={preview}
+        canActivate={canActivate}
+        currentUserId={currentUserId}
+        onDirtyChange={setActivationDirty}
+      />
     </div>
   );
 }
