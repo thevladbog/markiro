@@ -8,7 +8,7 @@
 document the pickup kiosk already produces for `reason='writeoff'`. Units and
 whole boxes, no prices, one reason per document chosen after scanning.
 
-**Supersedes:** the "write-offs on the handheld" line in the *Out of v1* section
+**Supersedes:** the "write-offs on the handheld" line in the _Out of v1_ section
 of [design brief 10](../../design-briefs/10-tsd-handheld.md), updated alongside
 this spec.
 
@@ -28,21 +28,21 @@ assuming its source device is a kiosk.
 
 Prices are absent from every handheld screen. On the kiosk a write-off is one of
 two operations and the cart must show what the goods are worth; on the handheld
-write-off is the *only* operation in the mode, and a price would be noise at
+write-off is the _only_ operation in the mode, and a price would be noise at
 best and a wrong number at worst.
 
 ## Decisions
 
-| Question | Decision |
-| --- | --- |
-| Document identity | The same `pickup_orders` document as a kiosk write-off. One list, one act, one export, one reason dictionary. |
-| Attribution | The signed-in operator. `employees` is already the single people registry (see the comment on `operator_credentials` in `packages/db/src/schema/pickup.ts`), so the handheld operator and the kiosk employee are the same row. No second badge scan. |
-| Scannable input | Loose marking codes **and** whole boxes by SSCC. |
-| Reason granularity | One reason per document, chosen after the list is complete. Different reasons mean different documents. |
-| Reason dictionary | The existing shared `pickup_order_reasons`, managed in the cabinet. No handheld-specific dictionary. |
-| Catalog scope | The whole tenant catalog, mirrored on the device. Floor damage is not scoped to a line. |
-| Day limits | A write-off never spends an employee's daily allowance — on the handheld **and** on the kiosk. |
-| After confirmation | A result screen, plus an in-mode history of recent write-offs with their sync state. |
+| Question           | Decision                                                                                                                                                                                                                                             |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Document identity  | The same `pickup_orders` document as a kiosk write-off. One list, one act, one export, one reason dictionary.                                                                                                                                        |
+| Attribution        | The signed-in operator. `employees` is already the single people registry (see the comment on `operator_credentials` in `packages/db/src/schema/pickup.ts`), so the handheld operator and the kiosk employee are the same row. No second badge scan. |
+| Scannable input    | Loose marking codes **and** whole boxes by SSCC.                                                                                                                                                                                                     |
+| Reason granularity | One reason per document, chosen after the list is complete. Different reasons mean different documents.                                                                                                                                              |
+| Reason dictionary  | The existing shared `pickup_order_reasons`, managed in the cabinet. No handheld-specific dictionary.                                                                                                                                                 |
+| Catalog scope      | The whole tenant catalog, mirrored on the device. Floor damage is not scoped to a line.                                                                                                                                                              |
+| Day limits         | A write-off never spends an employee's daily allowance — on the handheld **and** on the kiosk.                                                                                                                                                       |
+| After confirmation | A result screen, plus an in-mode history of recent write-offs with their sync state.                                                                                                                                                                 |
 
 ## Data model
 
@@ -93,8 +93,7 @@ sites. Replace it with
 
 ```ts
 type PickupDocumentSource =
-  | { kind: "kiosk"; kioskId: string }
-  | { kind: "handheld"; stationDeviceId: string };
+  { kind: "kiosk"; kioskId: string } | { kind: "handheld"; stationDeviceId: string };
 ```
 
 The refactor is mechanical but wide, and it is the main cost of keeping one
@@ -176,7 +175,7 @@ requires a shift nor disturbs an active one.
 **История** lives inside the mode (icon in `hh/AppBar`): the last 20 documents
 filed from this device with their sync state, opening one shows contents and
 reason, read-only. Offline this is the only way to see what has already been
-filed. It is a *display* of what this device sent; it is explicitly not consulted
+filed. It is a _display_ of what this device sent; it is explicitly not consulted
 when deciding whether a fresh scan is a duplicate (see below).
 
 ### Signals
@@ -220,7 +219,7 @@ not notice would write them off twice.
 current list only (`kmKey`, plus a box's `contentKeys`). The device does not
 check a scan against previously filed documents — not even the ones in its own
 history screen. It is not the authority on what has already been written off
-tenant-wide, and a device that refuses a code because *it* filed one earlier
+tenant-wide, and a device that refuses a code because _it_ filed one earlier
 would still miss every code another terminal filed, while inventing refusals
 offline. Cross-document conflicts are the server's call and surface as partial
 acceptance in the result.
@@ -241,7 +240,12 @@ and an operator wipes production data believing nothing is pending.
 `device: { kioskId, kioskName, place }` become
 
 ```ts
-device: { kind: "kiosk" | "handheld"; id: string; name: string; place: string | null }
+device: {
+  kind: "kiosk" | "handheld";
+  id: string;
+  name: string;
+  place: string | null;
+}
 ```
 
 Formally a breaking OpenAPI change, but the blast radius is closed: the 1С
@@ -292,7 +296,7 @@ Four branches, each independently green:
 
 - Printing the act from the device. The handheld drives label printers
   (ZPL/TSPL); an act is an A4 document generated in the cabinet.
-- Reporting withdrawal to Chestny ZNAK. Markiro currently only *reads* code
+- Reporting withdrawal to Chestny ZNAK. Markiro currently only _reads_ code
   statuses (`withdrawReason` in `chz-exports/true-api.types.ts`); 1С owns the
   outbound side.
 - Cancelling or correcting a write-off from the device.
