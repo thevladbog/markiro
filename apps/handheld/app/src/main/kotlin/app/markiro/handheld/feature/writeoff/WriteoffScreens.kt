@@ -32,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.markiro.handheld.R
@@ -265,14 +266,12 @@ private fun WriteoffConfirmScreen(state: WriteoffUi, onBack: () -> Unit, onConfi
             verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3),
         ) {
             SummaryLine(stringResource(R.string.writeoff_summary_reason), state.selectedReason?.name.orEmpty())
-            SummaryLine(
-                stringResource(R.string.writeoff_summary_units),
-                pluralStringResource(R.plurals.writeoff_units, state.unitCount, state.unitCount),
-            )
-            SummaryLine(
-                stringResource(R.string.writeoff_summary_boxes),
-                pluralStringResource(R.plurals.writeoff_boxes, state.boxCount, state.boxCount),
-            )
+            // Bare counts: «Единиц» and «Коробов» already carry the noun, and the
+            // plural forms exist for the list screen's one-line «Всего 24 шт ·
+            // коробов 1», where the noun does belong. Reusing them here printed
+            // «Коробов — коробов 0».
+            SummaryLine(stringResource(R.string.writeoff_summary_units), state.unitCount.toString())
+            SummaryLine(stringResource(R.string.writeoff_summary_boxes), state.boxCount.toString())
             SummaryLine(stringResource(R.string.writeoff_summary_operator), state.operatorName)
             Banner(stringResource(R.string.writeoff_irreversible), Tone.Warn, Icons.Outlined.Warning)
             Spacer(Modifier.height(MarkiroSizes.sp1))
@@ -288,12 +287,31 @@ private fun WriteoffConfirmScreen(state: WriteoffUi, onBack: () -> Unit, onConfi
     }
 }
 
+/**
+ * A label on the left, its value anchored right.
+ *
+ * `SpaceBetween` alone put the two strings flush against each other and left the
+ * wrapped lines of a long value ragged on the right, which on a handheld read as
+ * the value sitting on top of its own label. Weights keep a gap the value can
+ * never eat into, and `TextAlign.End` keeps every wrapped line in the value
+ * column instead of indenting the tail of an operator's name.
+ */
 @Composable
 private fun SummaryLine(label: String, value: String) {
     val c = MarkiroTheme.colors
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(label, style = MarkiroTheme.type.caption, color = c.fg3)
-        Text(value, style = MarkiroTheme.type.strong, color = c.fg1)
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Text(label, style = MarkiroTheme.type.caption, color = c.fg3, modifier = Modifier.weight(1f))
+        Text(
+            value,
+            style = MarkiroTheme.type.strong,
+            color = c.fg1,
+            textAlign = TextAlign.End,
+            modifier = Modifier.weight(2f),
+        )
     }
 }
 
