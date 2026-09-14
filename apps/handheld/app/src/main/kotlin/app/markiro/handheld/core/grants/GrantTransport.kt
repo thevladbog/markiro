@@ -1,6 +1,8 @@
 package app.markiro.handheld.core.grants
 
+import app.markiro.handheld.BuildConfig
 import app.markiro.handheld.core.network.StationApi
+import app.markiro.handheld.core.storage.HANDHELD_DATABASE_VERSION
 import app.markiro.handheld.core.storage.HandheldDatabase
 import kotlinx.serialization.json.*
 import java.math.BigInteger
@@ -125,7 +127,78 @@ internal class GrantTransport(private val db: HandheldDatabase, private val api:
                 db.grantDao().binding(binding)
             }
             verified.tokens.forEach { db.grantDao().token(it) }
+            if (kind == null) {
+                val deviceGrantId = checkNotNull(verified.deviceGrantId)
+                val requestId = UUID.randomUUID().toString()
+                val body = buildJsonObject {
+                    put("protocol", "offline-grants-v1")
+                    put("capability", "offline-grants-readiness-v1")
+                    put("requestId", requestId)
+                    put("clientBuild", "handheld:${BuildConfig.VERSION_NAME}")
+                    put("storageRevision", HANDHELD_DATABASE_VERSION)
+                    put("installed", buildJsonObject {
+                        put("mode", state.mode)
+                        put("policyRevision", policy?.let(::JsonPrimitive) ?: JsonNull)
+                        put("keysetRevision", state.keysetRevision)
+                        put("verifiedGrantId", deviceGrantId)
+                    })
+                }
+                db.grantDao().readiness(
+                    GrantReadinessOutboxEntity(requestId, state.ownerKey, ticket.token.generation, body.toString()),
+                )
+            }
         }
+    }
+
+    suspend fun flushReadinessIfAvailable(): Boolean = try {
+        flushReadiness()
+    } catch (_: java.io.IOException) { false }
+      catch (_: retrofit2.HttpException) { false }
+      catch (_: IllegalArgumentException) { false }
+      catch (_: IllegalStateException) { false }
+      catch (_: NoSuchElementException) { false }
+      catch (_: ClassCastException) { false }
+
+    suspend fun flushReadiness(): Boolean = db.recovery.work {
+        val token = db.recovery.token()
+        val owner = token.owner.grantOwnerKey()
+        var acknowledged = false
+        for (row in db.grantDao().pendingReadiness(owner, token.generation)) {
+            val body = readinessBody(row)
+            val admitted = db.recovery.commit(token) {
+                db.grantDao().markReadinessAttempt(row.requestId, owner, token.generation) == 1
+            }
+            if (!admitted || !db.recovery.valid(token)) continue
+            val response = api.grantReadiness(body)
+            require(response.keys == setOf("protocol", "requestId", "receivedAt", "accepted", "matchesCurrentConfiguration", "verifiedGrantMatched"))
+            require(response.string("protocol") == "offline-grants-v1")
+            require(response.string("requestId") == row.requestId)
+            require(response.string("receivedAt").isNotEmpty())
+            require(response.getValue("accepted").jsonPrimitive.boolean)
+            response.getValue("matchesCurrentConfiguration").jsonPrimitive.boolean
+            response.getValue("verifiedGrantMatched").jsonPrimitive.boolean
+            acknowledged = db.recovery.commit(token) {
+                db.grantDao().acknowledgeReadiness(row.requestId, owner, token.generation) == 1
+            } || acknowledged
+        }
+        acknowledged
+    }
+
+    private fun readinessBody(row: GrantReadinessOutboxEntity): JsonObject {
+        val body = Json.parseToJsonElement(row.bodyJson).jsonObject
+        require(body.keys == setOf("protocol", "capability", "requestId", "clientBuild", "storageRevision", "installed"))
+        require(body.string("protocol") == "offline-grants-v1")
+        require(body.string("capability") == "offline-grants-readiness-v1")
+        require(body.string("requestId") == row.requestId && UUID.fromString(row.requestId).toString() == row.requestId)
+        require(body.string("clientBuild").isNotEmpty())
+        require(body.number("storageRevision") == HANDHELD_DATABASE_VERSION.toLong())
+        val installed = body.getValue("installed").jsonObject
+        require(installed.keys == setOf("mode", "policyRevision", "keysetRevision", "verifiedGrantId"))
+        require(installed.string("mode") in setOf("observe", "strict"))
+        installed["policyRevision"]?.takeUnless { it == JsonNull }?.jsonPrimitive?.also { require(it.isString && it.content.isNotEmpty()) }
+        require(installed.string("keysetRevision").isNotEmpty())
+        require(UUID.fromString(installed.string("verifiedGrantId")).toString() == installed.string("verifiedGrantId"))
+        return body
     }
 
     private fun anchor(state: GrantStateEntity, ticket: GrantRefreshTicket, requestClock: ClockSample, serverTime: Long): GrantStateEntity {
@@ -151,7 +224,7 @@ internal class GrantTransport(private val db: HandheldDatabase, private val api:
         return owner.number("credentialEpoch").also { require(it > 0) }
     }
 
-    private data class Envelope(val epoch: Long, val mode: String, val serverTime: Long, val retired: Set<String>, val tokens: List<GrantTokenEntity>, val snapshots: List<Pair<TaskGrant,String>>)
+    private data class Envelope(val epoch: Long, val mode: String, val serverTime: Long, val retired: Set<String>, val tokens: List<GrantTokenEntity>, val snapshots: List<Pair<TaskGrant,String>>, val deviceGrantId: String?)
     private data class Keyset(val keys: List<VerificationKey>, val retired: Set<String>)
     private fun verifyKeyset(ticket: GrantRefreshTicket, keyset: JsonObject): Keyset {
         val origin = ticket.token.owner.serverOrigin
@@ -207,7 +280,7 @@ internal class GrantTransport(private val db: HandheldDatabase, private val api:
             GrantTokenEntity(grantSlot(ownerKey,task?.taskKind?.wire ?: "device",task?.taskId ?: ""),ownerKey,ticket.token.generation,epoch,task?.taskKind?.wire ?: "device",task?.taskId ?: "",task?.snapshotDigest ?: "",signed.first,signed.second)
         }
         require(tokens.map { it.slot }.toSet().size == tokens.size)
-        return Envelope(epoch,mode,serverTime,retired,tokens,snapshots)
+        return Envelope(epoch,mode,serverTime,retired,tokens,snapshots,grants.map { it.first }.filterIsInstance<DeviceGrant>().singleOrNull()?.grantId)
     }
     private fun JsonObject.string(name: String) = getValue(name).jsonPrimitive.also { require(it.isString) }.content
     private fun JsonObject.number(name: String) = getValue(name).jsonPrimitive.also { require(!it.isString) }.long.also { require(safe(it)) }

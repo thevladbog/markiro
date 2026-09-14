@@ -10,7 +10,7 @@ import app.markiro.handheld.core.print.PrinterEntity
 
 @Database(
     entities = [
-        GrantStateEntity::class, GrantTokenEntity::class, GrantCounterEntity::class, GrantEvidenceEntity::class, GrantTaskBindingEntity::class, GrantTaskProvenanceEntity::class,
+        GrantStateEntity::class, GrantTokenEntity::class, GrantCounterEntity::class, GrantEvidenceEntity::class, GrantTaskBindingEntity::class, GrantTaskProvenanceEntity::class, GrantReadinessOutboxEntity::class,
         DeviceConfigEntity::class,
         DeviceRecoveryEntity::class,
         OperatorEntity::class,
@@ -41,7 +41,7 @@ import app.markiro.handheld.core.print.PrinterEntity
         PalletEntity::class,
         PalletExceptionEntity::class,
     ],
-    version = 14,
+    version = HANDHELD_DATABASE_VERSION,
     exportSchema = false,
 )
 abstract class HandheldDatabase : RoomDatabase() {
@@ -80,3 +80,5 @@ abstract class HandheldDatabase : RoomDatabase() {
     abstract fun shiftCloseDao(): ShiftCloseDao
     abstract fun metaDao(): MetaDao
 }
+
+const val HANDHELD_DATABASE_VERSION = 15

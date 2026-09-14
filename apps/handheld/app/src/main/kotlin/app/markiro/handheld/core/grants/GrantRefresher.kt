@@ -25,7 +25,9 @@ class GrantRefresher @Inject constructor(private val db: HandheldDatabase, priva
         try {
             recovery.work {
                 val transport = GrantTransport(db,api)
+                transport.flushReadinessIfAvailable()
                 if(!transport.refreshIfAvailable()) return@work
+                transport.flushReadinessIfAvailable()
                 db.shiftDao().all().filter { it.enteredAt != null && it.status != "closed" }.forEach { transport.refreshIfAvailable(TaskKind.SHIFT,it.id) }
                 db.grantDao().provenances().filter { it.taskKind == "inventory" }.forEach {
                     if(db.inventoryTaskDao().get(it.taskId)?.state == "active") transport.refreshIfAvailable(TaskKind.INVENTORY,it.taskId)

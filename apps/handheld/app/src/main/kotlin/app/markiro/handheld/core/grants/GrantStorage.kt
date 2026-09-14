@@ -6,6 +6,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.PrimaryKey
 import androidx.room.Query
+import androidx.room.Index
 
 @Entity(tableName = "grant_state")
 data class GrantStateEntity(
@@ -28,6 +29,11 @@ data class GrantEvidenceEntity(val ownerKey: String, val eventId: String, val ta
 data class GrantTaskBindingEntity(val ownerKey: String, val taskKind: String, val taskId: String, val snapshotDigest: String, val canonical: String, val executionFingerprint: String)
 @Entity(tableName = "grant_task_provenance", primaryKeys = ["taskKind", "taskId"])
 data class GrantTaskProvenanceEntity(val taskKind: String, val taskId: String, val ownerKey: String, val generation: Long, val original: String)
+@Entity(tableName = "grant_readiness_outbox", indices = [Index(value = ["ownerKey", "generation"])])
+data class GrantReadinessOutboxEntity(
+    @PrimaryKey val requestId: String, val ownerKey: String, val generation: Long,
+    val bodyJson: String, val attempts: Long = 0,
+)
 
 @Dao
 interface GrantDao {
@@ -46,4 +52,8 @@ interface GrantDao {
     @Query("SELECT * FROM grant_task_provenance") suspend fun provenances(): List<GrantTaskProvenanceEntity>
     @Query("SELECT * FROM grant_task_provenance WHERE taskKind=:kind AND taskId=:task") suspend fun provenance(kind: String, task: String): GrantTaskProvenanceEntity?
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun provenance(value: GrantTaskProvenanceEntity)
+    @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun readiness(value: GrantReadinessOutboxEntity): Long
+    @Query("SELECT * FROM grant_readiness_outbox WHERE ownerKey=:owner AND generation=:generation ORDER BY requestId") suspend fun pendingReadiness(owner: String, generation: Long): List<GrantReadinessOutboxEntity>
+    @Query("UPDATE grant_readiness_outbox SET attempts=attempts+1 WHERE requestId=:requestId AND ownerKey=:owner AND generation=:generation") suspend fun markReadinessAttempt(requestId: String, owner: String, generation: Long): Int
+    @Query("DELETE FROM grant_readiness_outbox WHERE requestId=:requestId AND ownerKey=:owner AND generation=:generation") suspend fun acknowledgeReadiness(requestId: String, owner: String, generation: Long): Int
 }
