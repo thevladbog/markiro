@@ -90,6 +90,17 @@ export class PlatformOperationsController {
     );
   }
 
+  @Get("national-catalog/schemas")
+  @ApiOperation({ summary: "List discovered National Catalog schema versions and reviews" })
+  @PlatformApiProtectedOk({ response: platformNationalCatalogContracts.listSchemas.response })
+  @RequirePlatformCapabilities("catalog.read")
+  async listNationalCatalogSchemas() {
+    return parsePlatformResponse(
+      platformNationalCatalogContracts.listSchemas.response,
+      await this.nationalCatalogSchemas.list(),
+    );
+  }
+
   @Post("national-catalog/schema-versions/:id/activate")
   @HttpCode(200)
   @ApiOperation({ summary: "Activate one reviewed National Catalog schema version" })

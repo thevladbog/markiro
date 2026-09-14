@@ -39,6 +39,11 @@ const MonitoringPage = lazy(() =>
     default: module.MonitoringPage,
   })),
 );
+const NationalCatalogPage = lazy(() =>
+  import("./pages/national-catalog/NationalCatalogPage.js").then((module) => ({
+    default: module.NationalCatalogPage,
+  })),
+);
 const TenantsPage = lazy(() =>
   import("./pages/tenants/TenantsPage.js").then((module) => ({ default: module.TenantsPage })),
 );
@@ -193,6 +198,7 @@ export const appRoutes = createRoutesFromElements(
         <Route path="/billing/new" element={<LegacyBillingRedirect target="new" />} />
         <Route path="/billing/:invoiceId" element={<LegacyBillingRedirect target="detail" />} />
         <Route path="/monitoring" element={<MonitoringPage />} />
+        <Route path="/national-catalog" element={<NationalCatalogPage />} />
         <Route path="/team" element={<TeamPage />} />
         <Route path="/audit" element={<AuditPage />} />
         <Route path="/reports" element={<ReportsPage />} />

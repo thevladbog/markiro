@@ -290,6 +290,12 @@ export const CURRENT_SAAS_ROUTES = [
     platformOperationsContracts.monitoring.response,
   ),
   route(
+    "get",
+    "/platform/operations/national-catalog/schemas",
+    "200",
+    platformNationalCatalogContracts.listSchemas.response,
+  ),
+  route(
     "post",
     "/platform/operations/national-catalog/schema-refresh",
     "200",
