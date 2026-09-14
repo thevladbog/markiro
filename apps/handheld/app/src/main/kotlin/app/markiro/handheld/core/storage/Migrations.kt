@@ -323,3 +323,30 @@ val MIGRATION_14_15 = object : Migration(14, 15) {
         db.execSQL("CREATE INDEX IF NOT EXISTS index_grant_readiness_outbox_ownerKey_generation ON grant_readiness_outbox (ownerKey, generation)")
     }
 }
+
+/**
+ * The write-off contour: one outbox of whole documents plus four caches the
+ * bootstrap and box-registry mirror replace. Column names and nullability must
+ * match `WriteoffEntities.kt` exactly — Room validates the migrated schema
+ * against the entities at open and fails loudly on a mismatch, which is the
+ * point of writing this by hand rather than trusting a generated diff.
+ */
+val MIGRATION_15_16 = object : Migration(15, 16) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS writeoff_outbox (documentId TEXT NOT NULL PRIMARY KEY, deviceSeq INTEGER NOT NULL, " +
+                "operatorId TEXT NOT NULL, reasonId TEXT NOT NULL, reasonName TEXT NOT NULL, unitCount INTEGER NOT NULL, " +
+                "boxCount INTEGER NOT NULL, requestJson TEXT NOT NULL, createdAt TEXT NOT NULL, state TEXT NOT NULL, " +
+                "orderNo TEXT, acceptedCount INTEGER, conflictsJson TEXT, lastAttemptAt TEXT)",
+        )
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_writeoff_outbox_deviceSeq ON writeoff_outbox (deviceSeq)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS writeoff_reasons (id TEXT NOT NULL PRIMARY KEY, name TEXT NOT NULL, sortOrder INTEGER NOT NULL)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS writeoff_products (gtin14 TEXT NOT NULL PRIMARY KEY, id TEXT NOT NULL, name TEXT NOT NULL)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_writeoff_products_id ON writeoff_products (id)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS writeoff_permissions (employeeId TEXT NOT NULL PRIMARY KEY, canWriteoff INTEGER NOT NULL)")
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS writeoff_boxes (sscc TEXT NOT NULL PRIMARY KEY, boxId TEXT NOT NULL, productId TEXT NOT NULL, " +
+                "bottleCount INTEGER NOT NULL, contentKeysJson TEXT NOT NULL, updatedAt TEXT NOT NULL)",
+        )
+    }
+}
