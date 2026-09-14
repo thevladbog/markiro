@@ -2151,6 +2151,9 @@ export class PickupOrdersService {
           eq(schema.pickupOrderItems.tenantId, tenantId),
           ne(schema.pickupOrders.kioskId, kioskId),
           ne(schema.pickupOrders.status, "cancelled"),
+          // Identical to `countTakenToday`'s predicate set, deliberately: what a
+          // device plans with and what the server enforces must not drift.
+          ne(schema.pickupOrders.reason, "writeoff"),
           eq(schema.pickupOrderItems.voided, false),
           sql`(${schema.pickupOrders.createdAt} at time zone 'utc')::date = ${dateStr}`,
         ),
@@ -2183,6 +2186,7 @@ export class PickupOrdersService {
           eq(schema.pickupOrderItems.tenantId, tenantId),
           eq(schema.pickupOrders.employeeId, employeeId),
           ne(schema.pickupOrders.status, "cancelled"),
+          ne(schema.pickupOrders.reason, "writeoff"),
           eq(schema.pickupOrderItems.voided, false),
           sql`(${schema.pickupOrders.createdAt} at time zone 'utc')::date = ${dateStr}`,
         ),
@@ -2334,11 +2338,21 @@ export class PickupOrdersService {
               looseKeys: new Set(uniqueLoose.map((item) => item.kmKey)),
               usedKeys,
             });
-            const existingCount = await this.countTakenToday(tx, tenantId, employeeId, when);
+            // A write-off is not a withdrawal. The allowance answers "how much
+            // may this employee take home today", which says nothing about how
+            // much damaged stock exists -- so a write-off neither spends it nor,
+            // via the two day-count queries, is counted as having spent it.
+            // Both halves must move together: skipping enforcement while still
+            // counting history would let yesterday's write-offs eat today's
+            // allowance.
+            const isWriteoff = reason === "writeoff";
+            const existingCount = isWriteoff
+              ? 0
+              : await this.countTakenToday(tx, tenantId, employeeId, when);
             const limited = applyOrderLineLimit({
               existingCount,
               dayLimit: policy.dayLimit,
-              limited: policy.limited,
+              limited: policy.limited && !isWriteoff,
               loose: uniqueLoose,
               boxes: boxDedup.accepted,
               looseConflict: (item) => ({ rawKm: item.rawKm, reason: "over_limit" }),

@@ -593,6 +593,93 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
     ]);
   });
 
+  it("does not refuse a write-off that exceeds the employee's daily allowance", async () => {
+    const subject = await createPolicySubject({
+      limitMode: "limited",
+      dayLimit: 2,
+      canWriteoff: true,
+    });
+    const reasonId = randomUUID();
+    await db
+      .insert(schema.pickupOrderReasons)
+      .values({ id: reasonId, tenantId, name: "Бой", sortOrder: 0, archived: false });
+
+    const res = await request(app!.getHttpServer())
+      .post("/kiosk/orders")
+      .set("x-kiosk-token", subject.token)
+      .send({
+        deviceSeq: 1,
+        badgeCode: subject.badge,
+        reason: "writeoff",
+        writeoffReasonId: reasonId,
+        items: [
+          { rawKm: distinctKm("WOA") },
+          { rawKm: distinctKm("WOB") },
+          { rawKm: distinctKm("WOC") },
+        ],
+      })
+      .expect(201);
+    expect(res.body.conflicts).toHaveLength(0);
+    expect(res.body.itemCount).toBe(3);
+  });
+
+  it("does not let an earlier write-off consume the allowance for a later purchase", async () => {
+    const subject = await createPolicySubject({
+      limitMode: "limited",
+      dayLimit: 2,
+      canWriteoff: true,
+    });
+    const reasonId = randomUUID();
+    await db
+      .insert(schema.pickupOrderReasons)
+      .values({ id: reasonId, tenantId, name: "Просрочка", sortOrder: 0, archived: false });
+
+    await request(app!.getHttpServer())
+      .post("/kiosk/orders")
+      .set("x-kiosk-token", subject.token)
+      .send({
+        deviceSeq: 1,
+        badgeCode: subject.badge,
+        reason: "writeoff",
+        writeoffReasonId: reasonId,
+        items: [{ rawKm: distinctKm("WOD") }, { rawKm: distinctKm("WOE") }],
+      })
+      .expect(201);
+
+    const buy = await request(app!.getHttpServer())
+      .post("/kiosk/orders")
+      .set("x-kiosk-token", subject.token)
+      .send({
+        deviceSeq: 2,
+        badgeCode: subject.badge,
+        reason: "buy",
+        items: [{ rawKm: distinctKm("WOF") }, { rawKm: distinctKm("WOG") }],
+      })
+      .expect(201);
+    expect(buy.body.conflicts).toHaveLength(0);
+    expect(buy.body.itemCount).toBe(2);
+  });
+
+  it("still enforces the daily allowance for a purchase", async () => {
+    const subject = await createPolicySubject({ limitMode: "limited", dayLimit: 2 });
+    const res = await request(app!.getHttpServer())
+      .post("/kiosk/orders")
+      .set("x-kiosk-token", subject.token)
+      .send({
+        deviceSeq: 1,
+        badgeCode: subject.badge,
+        reason: "buy",
+        items: [
+          { rawKm: distinctKm("BUA") },
+          { rawKm: distinctKm("BUB") },
+          { rawKm: distinctKm("BUC") },
+        ],
+      })
+      .expect(201);
+    expect(res.body.itemCount).toBe(2);
+    expect(res.body.conflicts).toContainEqual(expect.objectContaining({ reason: "over_limit" }));
+  });
+
   it("requires a non-archived writeoffReasonId of this tenant for reason=writeoff", async () => {
     const writeoffEmployeeId = randomUUID();
     const writeoffBadge = `badge-writeoff-${randomUUID()}`;
