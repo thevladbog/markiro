@@ -281,6 +281,19 @@ export interface PairKioskResultDto {
   bootstrap: KioskBootstrapDto;
 }
 
+/**
+ * Which device produced a document. `kind` comes from `pickup_orders.source_kind`,
+ * so it is authoritative rather than inferred from which left join matched.
+ * `place` is the kiosk's location; a handheld has a line rather than a place and
+ * carries null.
+ */
+export interface PickupDeviceDto {
+  kind: "kiosk" | "handheld";
+  id: string;
+  name: string;
+  place: string | null;
+}
+
 const PICKUP_ORDER_STATUSES = ["pending", "punched", "writtenoff", "cancelled"] as const;
 export type PickupOrderStatus = (typeof PICKUP_ORDER_STATUSES)[number];
 
@@ -291,6 +304,7 @@ const dateOnlySchema = z.string().date();
 export const listPickupOrdersQuerySchema = z.object({
   status: z.enum(PICKUP_ORDER_STATUSES).optional(),
   reason: z.enum(["buy", "writeoff"]).optional(),
+  source: z.enum(["kiosk", "handheld"]).optional(),
   from: dateOnlySchema.optional(),
   to: dateOnlySchema.optional(),
 });
@@ -310,7 +324,7 @@ export interface PickupOrderRowDto {
   id: string;
   orderNo: string;
   employeeName: string;
-  kioskName: string;
+  device: PickupDeviceDto;
   reason: "buy" | "writeoff";
   writeoffReasonName: string | null;
   itemCount: number;
@@ -552,7 +566,7 @@ export const pickupOrderRowOpenApiSchema: SchemaObject = {
     "id",
     "orderNo",
     "employeeName",
-    "kioskName",
+    "device",
     "reason",
     "writeoffReasonName",
     "itemCount",
@@ -566,7 +580,16 @@ export const pickupOrderRowOpenApiSchema: SchemaObject = {
     id: uuidSchema,
     orderNo: { type: "string" },
     employeeName: { type: "string" },
-    kioskName: { type: "string" },
+    device: {
+      type: "object",
+      required: ["kind", "id", "name", "place"],
+      properties: {
+        kind: { type: "string", enum: ["kiosk", "handheld"] },
+        id: { type: "string", format: "uuid" },
+        name: { type: "string" },
+        place: { type: "string", nullable: true },
+      },
+    },
     reason: { type: "string", enum: ["buy", "writeoff"] },
     writeoffReasonName: { type: "string", nullable: true },
     itemCount: { type: "integer", minimum: 0 },

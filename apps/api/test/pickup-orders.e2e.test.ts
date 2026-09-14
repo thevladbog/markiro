@@ -35,6 +35,9 @@ describe.skipIf(!ready)("pickup orders admin e2e", () => {
   let employeeId: string;
   let productId: string;
   let kioskId: string;
+  let handheldId: string;
+  const handheldOrderNo = `ORD-26-HH${Math.floor(Math.random() * 9000 + 1000)}`;
+  const kioskOrderNo = `ORD-26-KK${Math.floor(Math.random() * 9000 + 1000)}`;
   let agent: ReturnType<typeof request.agent>;
   const TOKEN = `kiosk-token-${randomUUID()}`;
   const BADGE = `badge-${randomUUID()}`;
@@ -86,10 +89,74 @@ describe.skipIf(!ready)("pickup orders admin e2e", () => {
       .update(schema.kiosks)
       .set({ deviceTokenHash: hashDeviceToken(TOKEN) })
       .where(eq(schema.kiosks.id, kioskId));
+
+    handheldId = randomUUID();
+    await db
+      .insert(schema.stationDevices)
+      .values({ id: handheldId, tenantId, name: "ТСД-1", kind: "handheld" });
+    await db.insert(schema.pickupOrders).values([
+      {
+        tenantId,
+        orderNo: kioskOrderNo,
+        sourceKind: "kiosk",
+        kioskId,
+        employeeId,
+        reason: "buy",
+        itemCount: 1,
+      },
+      {
+        tenantId,
+        orderNo: handheldOrderNo,
+        sourceKind: "handheld",
+        stationDeviceId: handheldId,
+        employeeId,
+        reason: "writeoff",
+        itemCount: 1,
+      },
+    ]);
   });
 
   afterAll(async () => {
     await app?.close();
+  });
+
+  it("names a handheld as the source device of its write-off", async () => {
+    const list = await pickupOrdersService.list(tenantId, {});
+    const row = list.items.find((item) => item.orderNo === handheldOrderNo);
+    expect(row?.device).toEqual({
+      kind: "handheld",
+      id: handheldId,
+      name: "ТСД-1",
+      place: null,
+    });
+  });
+
+  it("still names the kiosk as the source device of a kiosk order", async () => {
+    const list = await pickupOrdersService.list(tenantId, {});
+    const row = list.items.find((item) => item.orderNo === kioskOrderNo);
+    expect(row?.device).toEqual({
+      kind: "kiosk",
+      id: kioskId,
+      name: "Киоск А",
+      place: null,
+    });
+  });
+
+  it("filters the list to one source kind", async () => {
+    const handhelds = await pickupOrdersService.list(tenantId, { source: "handheld" });
+    const handheldNos = handhelds.items.map((i) => i.orderNo);
+    expect(handheldNos).toContain(handheldOrderNo);
+    expect(handheldNos).not.toContain(kioskOrderNo);
+
+    const kiosks = await pickupOrdersService.list(tenantId, { source: "kiosk" });
+    const kioskNos = kiosks.items.map((i) => i.orderNo);
+    expect(kioskNos).toContain(kioskOrderNo);
+    expect(kioskNos).not.toContain(handheldOrderNo);
+
+    const all = await pickupOrdersService.list(tenantId, {});
+    expect(all.items.map((i) => i.orderNo)).toEqual(
+      expect.arrayContaining([kioskOrderNo, handheldOrderNo]),
+    );
   });
 
   async function signUpWithInactiveOrg(a: ReturnType<typeof request.agent>): Promise<string> {
@@ -172,7 +239,7 @@ describe.skipIf(!ready)("pickup orders admin e2e", () => {
       id: idList,
       orderNo: orderList.body.orderNo,
       employeeName: "Иван Иванов",
-      kioskName: "Киоск А",
+      device: { kind: "kiosk", id: kioskId, name: "Киоск А", place: null },
       reason: "buy",
       writeoffReasonName: null,
       itemCount: 1,
