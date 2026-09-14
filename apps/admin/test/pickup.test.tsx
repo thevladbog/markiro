@@ -101,7 +101,7 @@ const ORDER_A = {
   id: "o1",
   orderNo: "37",
   employeeName: "Смирнов Алексей",
-  kioskName: "Киоск-1",
+  device: { kind: "kiosk", id: "k1", name: "Киоск-1", place: null },
   reason: "buy",
   writeoffReasonName: null,
   itemCount: 3,
@@ -114,7 +114,7 @@ const ORDER_B = {
   id: "o2",
   orderNo: "36",
   employeeName: "Гусева Наталья",
-  kioskName: "Киоск-1",
+  device: { kind: "handheld", id: "d1", name: "ТСД-1", place: null },
   reason: "writeoff",
   writeoffReasonName: "Маркетинг",
   itemCount: 2,
@@ -204,6 +204,36 @@ describe("PickupPage", () => {
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/pickup-orders?status=pending",
+        expect.any(Object),
+      );
+    });
+  });
+
+  it("names the device that produced each order and marks a handheld as ТСД", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse(200, { items: [ORDER_A, ORDER_B] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+
+    expect(await screen.findByText("Киоск-1")).toBeDefined();
+    expect(await screen.findByText("ТСД-1")).toBeDefined();
+    expect(await screen.findByText("ТСД")).toBeDefined();
+  });
+
+  it("refetches with ?source=handheld when the source filter changes to ТСД", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async () => jsonResponse(200, { items: [ORDER_A, ORDER_B] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("Смирнов Алексей");
+
+    await user.click(screen.getByRole("combobox", { name: "Источник" }));
+    await user.click(await screen.findByRole("option", { name: "ТСД" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/pickup-orders?source=handheld",
         expect.any(Object),
       );
     });

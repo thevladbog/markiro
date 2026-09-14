@@ -1,6 +1,6 @@
 import type { SchemaObject } from "@nestjs/swagger";
 import { z } from "zod";
-import type { BoxConflictReason, OrderConflict } from "../pickup-orders/dto";
+import type { BoxConflictReason, OrderConflict, PickupDeviceDto } from "../pickup-orders/dto";
 
 /**
  * The kiosk's own six refusal reasons plus `unknown_badge` and
@@ -34,7 +34,7 @@ const dateOnlySchema = z.string().date();
  * the server learned -- inclusive whole days, matching the list's own sort.
  */
 export const listPickupRejectionsQuerySchema = z.object({
-  kioskId: z.string().uuid().optional(),
+  deviceId: z.string().uuid().optional(),
   from: dateOnlySchema.optional(),
   to: dateOnlySchema.optional(),
   state: z.enum(["open", "acknowledged", "all"]).default("all"),
@@ -45,14 +45,8 @@ export interface PickupScanRejectionRowDto {
   id: string;
   /** Derived from `employeeId === null`; the DB check constraint keeps it honest. */
   kind: "items_refused" | "unknown_badge";
-  /**
-   * NULL for a rejection produced by a handheld, which has no kiosk row.
-   * Plan 2 replaces this pair with a device descriptor carrying the kind and
-   * name of whichever device produced the row; until then a handheld rejection
-   * reads as a null id with an empty name.
-   */
-  kioskId: string | null;
-  kioskName: string;
+  /** Which device produced the rejection. Shared shape with the order row. */
+  device: PickupDeviceDto;
   employeeName: string | null;
   badgeCode: string | null;
   orderId: string | null;
@@ -125,8 +119,7 @@ export const pickupScanRejectionRowOpenApiSchema: SchemaObject = {
   required: [
     "id",
     "kind",
-    "kioskId",
-    "kioskName",
+    "device",
     "employeeName",
     "badgeCode",
     "orderId",
@@ -140,8 +133,16 @@ export const pickupScanRejectionRowOpenApiSchema: SchemaObject = {
   properties: {
     id: { type: "string", format: "uuid" },
     kind: { type: "string", enum: ["items_refused", "unknown_badge"] },
-    kioskId: { type: "string", format: "uuid", nullable: true },
-    kioskName: { type: "string" },
+    device: {
+      type: "object",
+      required: ["kind", "id", "name", "place"],
+      properties: {
+        kind: { type: "string", enum: ["kiosk", "handheld"] },
+        id: { type: "string", format: "uuid" },
+        name: { type: "string" },
+        place: { type: "string", nullable: true },
+      },
+    },
     employeeName: { type: "string", nullable: true },
     badgeCode: { type: "string", nullable: true },
     orderId: { type: "string", format: "uuid", nullable: true },

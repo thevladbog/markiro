@@ -837,6 +837,7 @@ export class PickupOrdersService {
     const conditions: SQL[] = [eq(schema.pickupOrders.tenantId, tenantId)];
     if (query.status) conditions.push(eq(schema.pickupOrders.status, query.status));
     if (query.reason) conditions.push(eq(schema.pickupOrders.reason, query.reason));
+    if (query.source) conditions.push(eq(schema.pickupOrders.sourceKind, query.source));
     if (query.from)
       conditions.push(gte(schema.pickupOrders.createdAt, new Date(`${query.from}T00:00:00.000Z`)));
     if (query.to)
@@ -1078,6 +1079,13 @@ export class PickupOrdersService {
       .leftJoin(schema.employees, eq(schema.employees.id, schema.pickupOrders.employeeId))
       .leftJoin(schema.kiosks, eq(schema.kiosks.id, schema.pickupOrders.kioskId))
       .leftJoin(
+        schema.stationDevices,
+        and(
+          eq(schema.stationDevices.tenantId, schema.pickupOrders.tenantId),
+          eq(schema.stationDevices.id, schema.pickupOrders.stationDeviceId),
+        ),
+      )
+      .leftJoin(
         schema.pickupOrderReasons,
         eq(schema.pickupOrderReasons.id, schema.pickupOrders.writeoffReasonId),
       )
@@ -1174,13 +1182,22 @@ export class PickupOrdersService {
         employeeId: schema.pickupOrders.employeeId,
         employeeFullName: schema.employees.fullName,
         employeeRole: schema.employees.role,
+        sourceKind: schema.pickupOrders.sourceKind,
         kioskName: schema.kiosks.name,
+        stationDeviceName: schema.stationDevices.name,
         kioskPrintEmployeeQrOnSlip: schema.kiosks.printEmployeeQrOnSlip,
         writeoffReasonName: schema.pickupOrderReasons.name,
       })
       .from(schema.pickupOrders)
       .leftJoin(schema.employees, eq(schema.employees.id, schema.pickupOrders.employeeId))
       .leftJoin(schema.kiosks, eq(schema.kiosks.id, schema.pickupOrders.kioskId))
+      .leftJoin(
+        schema.stationDevices,
+        and(
+          eq(schema.stationDevices.tenantId, schema.pickupOrders.tenantId),
+          eq(schema.stationDevices.id, schema.pickupOrders.stationDeviceId),
+        ),
+      )
       .leftJoin(
         schema.pickupOrderReasons,
         eq(schema.pickupOrderReasons.id, schema.pickupOrders.writeoffReasonId),
@@ -1246,7 +1263,10 @@ export class PickupOrdersService {
         role: row.employeeRole,
         badgeCode: badge?.badgeCode ?? null,
       },
-      kioskName: row.kioskName ?? "",
+      // The slip names whichever device produced the document. Keeping the field
+      // called `kioskName` avoids churning the render contract for what is one
+      // value; a handheld write-off would otherwise print an empty line here.
+      kioskName: (row.sourceKind === "handheld" ? row.stationDeviceName : row.kioskName) ?? "",
       reason: row.reason,
       writeoffReasonName: row.writeoffReasonName,
       printEmployeeQrOnSlip: row.kioskPrintEmployeeQrOnSlip ?? false,
@@ -1523,6 +1543,13 @@ export class PickupOrdersService {
       .leftJoin(schema.employees, eq(schema.employees.id, schema.pickupOrders.employeeId))
       .leftJoin(schema.kiosks, eq(schema.kiosks.id, schema.pickupOrders.kioskId))
       .leftJoin(
+        schema.stationDevices,
+        and(
+          eq(schema.stationDevices.tenantId, schema.pickupOrders.tenantId),
+          eq(schema.stationDevices.id, schema.pickupOrders.stationDeviceId),
+        ),
+      )
+      .leftJoin(
         schema.pickupOrderReasons,
         eq(schema.pickupOrderReasons.id, schema.pickupOrders.writeoffReasonId),
       )
@@ -1535,7 +1562,12 @@ export class PickupOrdersService {
       id: schema.pickupOrders.id,
       orderNo: schema.pickupOrders.orderNo,
       employeeName: schema.employees.fullName,
+      sourceKind: schema.pickupOrders.sourceKind,
+      kioskId: schema.pickupOrders.kioskId,
       kioskName: schema.kiosks.name,
+      kioskPlace: schema.kiosks.location,
+      stationDeviceId: schema.pickupOrders.stationDeviceId,
+      stationDeviceName: schema.stationDevices.name,
       reason: schema.pickupOrders.reason,
       writeoffReasonName: schema.pickupOrderReasons.name,
       itemCount: schema.pickupOrders.itemCount,
@@ -1551,7 +1583,12 @@ export class PickupOrdersService {
     id: string;
     orderNo: string;
     employeeName: string | null;
+    sourceKind: "kiosk" | "handheld";
+    kioskId: string | null;
     kioskName: string | null;
+    kioskPlace: string | null;
+    stationDeviceId: string | null;
+    stationDeviceName: string | null;
     reason: "buy" | "writeoff";
     writeoffReasonName: string | null;
     itemCount: number;
@@ -1565,7 +1602,24 @@ export class PickupOrdersService {
       id: row.id,
       orderNo: row.orderNo,
       employeeName: row.employeeName ?? "",
-      kioskName: row.kioskName ?? "",
+      // The `?? ""` fallbacks are unreachable under `pickup_orders_source_check`,
+      // which guarantees the named column is set. They exist because the joins
+      // are LEFT joins, so the row type is nullable; a non-null assertion here
+      // would be a lie the lint rules rightly forbid.
+      device:
+        row.sourceKind === "handheld"
+          ? {
+              kind: "handheld" as const,
+              id: row.stationDeviceId ?? "",
+              name: row.stationDeviceName ?? "",
+              place: null,
+            }
+          : {
+              kind: "kiosk" as const,
+              id: row.kioskId ?? "",
+              name: row.kioskName ?? "",
+              place: row.kioskPlace,
+            },
       reason: row.reason,
       writeoffReasonName: row.writeoffReasonName,
       itemCount: row.itemCount,

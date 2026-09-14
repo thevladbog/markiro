@@ -134,8 +134,14 @@ allowlist.
 `resolveItems` currently calls `kioskAllowlist(tenantId, kioskId)` and reports
 `not_allowed` for a product that exists but is not listed for that kiosk. It
 takes an allowlist resolver instead. For a handheld the allowlist is the tenant
-catalog, so `not_allowed` is structurally unreachable and `unknown_product`
-remains the only catalog conflict.
+catalog.
+
+**Correction, 2026-09-14 (review of PR 568):** this spec originally claimed
+`not_allowed` was then structurally unreachable for a handheld. It is not.
+`existingProductGtins` does not filter archived products while the handheld
+allowlist does, so an **archived** tenant product scanned on a handheld is
+"exists but not allowed" and reports exactly `not_allowed`. The cabinet's
+wording for that reason is therefore device-neutral rather than naming a kiosk.
 
 ### Endpoints
 

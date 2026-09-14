@@ -70,7 +70,7 @@ const ORDER = {
   id: "o1",
   orderNo: "37",
   employeeName: "Смирнов Алексей",
-  kioskName: "Киоск-1",
+  device: { kind: "kiosk", id: "k-1", name: "Киоск-1", place: null },
   reason: "buy",
   writeoffReasonName: null,
   itemCount: 2,

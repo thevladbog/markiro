@@ -522,7 +522,9 @@ git commit -m "refactor(api): thread a pickup document source instead of a kiosk
 `resolveItems` calls `kioskAllowlist(tenantId, kioskId)` and reports
 `not_allowed` for a product that exists but is not listed for that kiosk. A
 handheld writes off whatever it finds on the floor, so its allowlist is the
-tenant catalog and `not_allowed` becomes unreachable.
+tenant catalog, so `not_allowed` becomes rare — though not unreachable: an
+archived product still counts as "exists but not allowed" (see the correction in
+the spec).
 
 **Files:**
 

@@ -2794,6 +2794,12 @@
           "all": "Все причины",
           "buy": "Покупка",
           "writeoff": "Списание"
+        },
+        "sourceLabel": "Источник",
+        "source": {
+          "all": "Все",
+          "kiosk": "Киоски",
+          "handheld": "ТСД"
         }
       },
       "status": {
@@ -2809,7 +2815,6 @@
       "table": {
         "orderNo": "№ заявки",
         "employeeName": "Сотрудник",
-        "kioskName": "Киоск",
         "createdAt": "Когда",
         "reason": "Причина",
         "itemCount": "Кодов",
@@ -2817,7 +2822,8 @@
         "status": "Статус",
         "actions": "Действия",
         "openAction": "Открыть",
-        "openOrder": "Открыть заявку {{orderNo}}"
+        "openOrder": "Открыть заявку {{orderNo}}",
+        "device": "Устройство"
       },
       "bulkExport": {
         "toggleAction": "Массовая выгрузка",
@@ -2828,7 +2834,6 @@
       "detail": {
         "backAction": "← Заявки",
         "employeeLabel": "Сотрудник",
-        "kioskLabel": "Киоск",
         "reasonLabel": "Причина",
         "createdAtLabel": "Создана",
         "totalLabel": "Итого",
@@ -2875,7 +2880,8 @@
           "confirmAction": "Отменить заявку"
         },
         "codeUnavailable": "Код не отображается",
-        "loadError": "Не удалось загрузить заявку. Обновите страницу или войдите заново."
+        "loadError": "Не удалось загрузить заявку. Обновите страницу или войдите заново.",
+        "deviceLabel": "Устройство"
       },
       "conflicts": {
         "title": "Отклонено при синхронизации: {{count}}",
@@ -2884,7 +2890,7 @@
           "not_km": "не код маркировки",
           "incomplete": "код прочитан не полностью",
           "unknown_product": "товара нет в каталоге",
-          "not_allowed": "товар недоступен на киоске",
+          "not_allowed": "товар недоступен на этом устройстве",
           "duplicate": "дубль — код уже в другой заявке",
           "over_limit": "превышен дневной лимит",
           "unknown_badge": "бейдж не опознан",
@@ -2901,15 +2907,12 @@
       "rejections": {
         "title": "Отклонённые сканы",
         "bannerTitle": "Отклонённые сканы: {{count}}",
-        "bannerKiosks": "Киоски: {{kiosks}}",
         "bannerMore": "и ещё {{count}}",
         "bannerAction": "Разобрать",
         "backAction": "← Заявки",
         "emptyTitle": "Отклонённых сканов нет",
         "emptyHint": "Здесь появятся сканы, коды которых сервер не принял: например, товара нет в каталоге или бейдж уже отозван.",
         "filters": {
-          "kioskLabel": "Киоск",
-          "kioskAll": "Все киоски",
           "stateLabel": "Состояние",
           "fromLabel": "С даты",
           "toLabel": "По дату",
@@ -2917,17 +2920,19 @@
             "all": "Все",
             "open": "Не отработаны",
             "acknowledged": "Отработаны"
-          }
+          },
+          "deviceAll": "Все устройства",
+          "deviceLabel": "Устройство"
         },
         "table": {
           "syncedAt": "Синхронизировано",
           "scannedAt": "Сканировано",
-          "kioskName": "Киоск",
           "employeeName": "Сотрудник",
           "codeCount": "Кодов",
           "order": "Заявка",
           "state": "Состояние",
-          "actions": "Действия"
+          "actions": "Действия",
+          "device": "Устройство"
         },
         "unknownBadge": "Бейдж не опознан",
         "badgeCodeLabel": "Бейдж: {{code}}",
@@ -2944,7 +2949,8 @@
         "toasts": {
           "acknowledged": "Отмечено как отработанное",
           "acknowledgeError": "Не удалось отметить. Обновите страницу."
-        }
+        },
+        "bannerDevices": "Устройства: {{devices}}"
       },
       "toasts": {
         "resolveSuccess": "Заявка проведена",
@@ -2953,6 +2959,10 @@
         "cancelError": "Не удалось отменить заявку",
         "exportSuccess": "Коды выгружены",
         "exportError": "Не удалось выгрузить коды"
+      },
+      "deviceKind": {
+        "kiosk": "Киоск",
+        "handheld": "ТСД"
       }
     },
     "disaggregation": {
