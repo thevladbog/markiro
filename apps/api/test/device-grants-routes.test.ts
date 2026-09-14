@@ -11,6 +11,7 @@ import { schema, type Db } from "@markiro/db";
 import {
   grantIssueResultSchema,
   grantConfigurationSchema,
+  grantClientReadinessResponseSchema,
   grantKeysetSchema,
   kioskGrantReservationResultSchema,
 } from "@markiro/platform-contracts";
@@ -171,6 +172,58 @@ describe.skipIf(!ready)("native grant route boundaries", () => {
       .set("x-api-key", f.apiKey)
       .send(negotiate())
       .expect(403);
+  });
+  it("accepts a strict readiness report only through the native station boundary", async () => {
+    const f = await fixture();
+    await request(app.getHttpServer())
+      .post("/station/grants/v1/configuration")
+      .set("x-api-key", f.apiKey)
+      .send(negotiate())
+      .expect(200);
+    await request(app.getHttpServer())
+      .post("/station/grants/v1/device")
+      .set("x-api-key", f.apiKey)
+      .send(negotiate())
+      .expect(200);
+    const [configuration] = await db
+      .select()
+      .from(schema.deviceGrantConfigurations)
+      .where(eq(schema.deviceGrantConfigurations.tenantId, f.tenantId));
+    const [issuance] = await db
+      .select()
+      .from(schema.deviceGrantIssuances)
+      .where(eq(schema.deviceGrantIssuances.tenantId, f.tenantId));
+    if (!configuration || !issuance) throw new Error("Readiness fixture was not issued");
+    const body = {
+      protocol: "offline-grants-v1",
+      capability: "offline-grants-readiness-v1",
+      requestId: randomUUID(),
+      clientBuild: "station:test",
+      storageRevision: 14,
+      installed: {
+        mode: configuration.mode,
+        policyRevision: configuration.policyRevision,
+        keysetRevision: "v1",
+        verifiedGrantId: issuance.grantId,
+      },
+    };
+    const result = await request(app.getHttpServer())
+      .post("/station/grants/v1/readiness")
+      .set("x-api-key", f.apiKey)
+      .send(body)
+      .expect(200);
+    expect(grantClientReadinessResponseSchema.parse(result.body)).toMatchObject({
+      requestId: body.requestId,
+      accepted: true,
+      matchesCurrentConfiguration: true,
+      verifiedGrantMatched: true,
+    });
+    await f.agent.post("/station/grants/v1/readiness").send(body).expect(403);
+    await request(app.getHttpServer())
+      .post("/station/grants/v1/readiness")
+      .set("x-api-key", f.apiKey)
+      .send({ ...body, clientBuild: "station:changed" })
+      .expect(409);
   });
   it("returns policy_not_configured without disturbing existing native reads", async () => {
     const f = await fixture(false);

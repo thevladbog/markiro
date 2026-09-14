@@ -10,6 +10,7 @@ import { DeviceGrantsController } from "./device-grants.controller";
 import { KioskGrantsController } from "./kiosk-grants.controller";
 import { GrantIssuerService } from "./grant-issuer.service";
 import { configureGrantSigning, GRANT_SIGNING_CONFIGURATION } from "./grant-keyset";
+import { GrantClientReadinessService } from "./grant-client-readiness.service";
 @Module({})
 export class DeviceGrantsModule {
   static forRoot(env: Env): DynamicModule {
@@ -22,6 +23,7 @@ export class DeviceGrantsModule {
         GrantIssuerService,
         GrantEvidenceService,
         GrantEvidenceNativeService,
+        GrantClientReadinessService,
       ],
       exports: [GrantIssuerService],
     };

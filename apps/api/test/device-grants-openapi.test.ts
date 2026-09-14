@@ -5,6 +5,7 @@ import { SwaggerModule, DocumentBuilder } from "@nestjs/swagger";
 import { DeviceGrantsController } from "../src/modules/device-grants/device-grants.controller";
 import { KioskGrantsController } from "../src/modules/device-grants/kiosk-grants.controller";
 import { GrantIssuerService } from "../src/modules/device-grants/grant-issuer.service";
+import { GrantClientReadinessService } from "../src/modules/device-grants/grant-client-readiness.service";
 import { PickupOrdersService } from "../src/modules/pickup-orders/pickup-orders.service";
 import { TenantGuard } from "../src/tenancy/tenant.guard";
 import { StationOnlyGuard } from "../src/tenancy/station-only.guard";
@@ -15,12 +16,15 @@ describe("negotiated offline grants OpenAPI", () => {
   it("generates all negotiated native contracts and keeps credential domains distinct", async () => {
     const builder = Test.createTestingModule({
       controllers: [DeviceGrantsController, KioskGrantsController],
-      providers: [GrantIssuerService, PickupOrdersService, GrantEvidenceNativeService].map(
-        (provide) => ({
-          provide,
-          useValue: {},
-        }),
-      ),
+      providers: [
+        GrantIssuerService,
+        GrantClientReadinessService,
+        PickupOrdersService,
+        GrantEvidenceNativeService,
+      ].map((provide) => ({
+        provide,
+        useValue: {},
+      })),
     });
     for (const guard of [TenantGuard, StationOnlyGuard, KioskDeviceGuard, SubscriptionAccessGuard])
       builder.overrideGuard(guard).useValue({ canActivate: () => true });
@@ -33,6 +37,7 @@ describe("negotiated offline grants OpenAPI", () => {
         "/kiosk/grants/v1/device",
         "/kiosk/grants/v1/evidence/orders",
         "/kiosk/grants/v1/keyset",
+        "/kiosk/grants/v1/readiness",
         "/kiosk/grants/v1/reservations",
         "/kiosk/grants/v1/tasks",
         "/station/grants/v1/configuration",
@@ -42,6 +47,7 @@ describe("negotiated offline grants OpenAPI", () => {
         "/station/grants/v1/evidence/scans",
         "/station/grants/v1/evidence/shift-closures",
         "/station/grants/v1/keyset",
+        "/station/grants/v1/readiness",
         "/station/grants/v1/tasks",
       ]);
       for (const [path, item] of Object.entries(doc.paths)) {
@@ -83,6 +89,20 @@ describe("negotiated offline grants OpenAPI", () => {
       expect(
         JSON.stringify(doc.paths["/kiosk/grants/v1/reservations"]?.post?.responses["200"]),
       ).toContain("admissionProof");
+      for (const path of ["/station/grants/v1/readiness", "/kiosk/grants/v1/readiness"]) {
+        expect(doc.paths[path]?.post?.requestBody).toMatchObject({
+          content: {
+            "application/json": {
+              schema: {
+                required: expect.arrayContaining(["clientBuild", "storageRevision", "installed"]),
+              },
+            },
+          },
+        });
+        expect(JSON.stringify(doc.paths[path]?.post?.responses["200"])).toContain(
+          "matchesCurrentConfiguration",
+        );
+      }
     } finally {
       await app.close();
     }
