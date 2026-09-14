@@ -5,14 +5,24 @@ import {
   grantKeysetResultSchema,
   type GrantIssueResult,
   type GrantKeyset,
+  grantClientReadinessResponseSchema,
 } from "@markiro/platform-contracts";
 import type { StationClient } from "../api-client.js";
 import type { GrantOwner } from "@markiro/domain";
-import { acquireCredentialCommitLease, type CredentialGeneration } from "../credential-recovery.js";
+import {
+  acquireCredentialCommitLease,
+  credentialGenerationIsCurrent,
+  type CredentialGeneration,
+} from "../credential-recovery.js";
 import type { SqlExecutor } from "../mirror.js";
 import { sampleGrantClock } from "./clock.js";
 import type { GrantClockSample } from "./clock.js";
-import { installStationGrant } from "./store.js";
+import {
+  acknowledgeStationGrantReadiness,
+  installStationGrant,
+  markStationGrantReadinessAttempt,
+  prepareStationGrantReadiness,
+} from "./store.js";
 import {
   assertExecutionScopeMatches,
   readInventoryExecutionProjection,
@@ -301,4 +311,24 @@ export async function refreshStationGrantConfiguration(input: {
     lease.release();
   }
   return configuration;
+}
+
+export async function reportStationGrantReadiness(input: {
+  exec: SqlExecutor;
+  client: Pick<StationClient, "post">;
+  configuredOrigin: string;
+  generation: CredentialGeneration;
+  expectedDevice: Pick<GrantOwner, "tenantId" | "deviceId" | "kind">;
+  clientBuild: string;
+}): Promise<boolean> {
+  const intent = await prepareStationGrantReadiness(input);
+  if (!intent) return false;
+  if (!(await markStationGrantReadinessAttempt(input.exec, intent, input.generation))) return false;
+  if (!credentialGenerationIsCurrent(input.generation)) return false;
+  const response = grantClientReadinessResponseSchema.parse(
+    await input.client.post("/station/grants/v1/readiness", intent.body),
+  );
+  if (response.requestId !== intent.requestId)
+    throw new Error("offline grant readiness response identity mismatch");
+  return acknowledgeStationGrantReadiness(input.exec, intent, input.generation);
 }

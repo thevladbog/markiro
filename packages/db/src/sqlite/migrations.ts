@@ -4640,6 +4640,26 @@ export const STATION_MIGRATIONS: string[] = [
   `CREATE TRIGGER IF NOT EXISTS offline_grant_evidence_commit_guard_clear
    AFTER INSERT ON offline_grant_evidence_commit_guards
    BEGIN DELETE FROM offline_grant_evidence_commit_guards WHERE id=NEW.id; END;`,
+  `CREATE TABLE IF NOT EXISTS offline_grant_readiness_outbox (
+     request_id TEXT PRIMARY KEY,
+     state_key TEXT NOT NULL UNIQUE,
+     body_json TEXT NOT NULL CHECK(json_valid(body_json)),
+     credential_ownership TEXT NOT NULL,
+     attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts>=0),
+     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+     acknowledged_at TEXT,
+     cancelled_at TEXT,
+     CHECK(acknowledged_at IS NULL OR cancelled_at IS NULL)
+   );`,
+  `CREATE INDEX IF NOT EXISTS offline_grant_readiness_pending_idx
+     ON offline_grant_readiness_outbox(credential_ownership,acknowledged_at,cancelled_at);`,
+  `CREATE TRIGGER IF NOT EXISTS offline_grant_readiness_cancel_on_recovery
+   AFTER UPDATE OF phase ON station_device_recovery
+   WHEN NEW.phase IN ('sealing','sealed','owner_unresolved')
+   BEGIN
+     UPDATE offline_grant_readiness_outbox SET cancelled_at=CURRENT_TIMESTAMP
+      WHERE acknowledged_at IS NULL AND cancelled_at IS NULL;
+   END;`,
 ];
 
 export interface StationMigrationEntry {

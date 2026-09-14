@@ -1,12 +1,23 @@
-import { verifyGrant, type GrantOwner, type OfflineGrant } from "@markiro/domain";
 import {
+  offlineGrantSchema,
+  verifyGrant,
+  type GrantOwner,
+  type OfflineGrant,
+} from "@markiro/domain";
+import {
+  grantClientReadinessRequestSchema,
+  type GrantClientReadinessRequest,
   grantEnvelopeSchema,
   grantKeysetSchema,
   type GrantEnvelope,
   type GrantKeyset,
 } from "@markiro/platform-contracts";
 import type { SqlExecutor } from "../mirror.js";
-import { acquireCredentialCommitLease, type CredentialGeneration } from "../credential-recovery.js";
+import {
+  acquireCredentialCommitLease,
+  credentialGenerationOwnership,
+  type CredentialGeneration,
+} from "../credential-recovery.js";
 import {
   assertExecutionScopeMatches,
   readInventoryExecutionProjection,
@@ -22,6 +33,14 @@ export interface VerifiedStationGrantInstall {
     canonical: string;
     scope: unknown;
   }[];
+}
+
+export const STATION_OFFLINE_GRANT_READINESS_STORAGE_REVISION = 1;
+
+export interface StationGrantReadinessIntent {
+  requestId: string;
+  body: GrantClientReadinessRequest;
+  credentialOwnership: string;
 }
 const sameOwner = (a: GrantOwner, b: GrantOwner) =>
   a.tenantId === b.tenantId &&
@@ -197,4 +216,202 @@ export async function installStationGrant(input: {
   } finally {
     lease.release();
   }
+}
+
+export async function hasStationReadinessDeviceGrant(input: {
+  exec: SqlExecutor;
+  configuredOrigin: string;
+  expectedDevice: Pick<GrantOwner, "tenantId" | "deviceId" | "kind">;
+}): Promise<boolean> {
+  const rows = await readReadinessInstall(input);
+  return rows.length === 1;
+}
+
+export async function prepareStationGrantReadiness(input: {
+  exec: SqlExecutor;
+  configuredOrigin: string;
+  generation: CredentialGeneration;
+  expectedDevice: Pick<GrantOwner, "tenantId" | "deviceId" | "kind">;
+  clientBuild: string;
+}): Promise<StationGrantReadinessIntent | null> {
+  const credentialOwnership = await credentialGenerationOwnership(input.generation);
+  if (!credentialOwnership) return null;
+  const lease = acquireCredentialCommitLease(input.generation);
+  if (!lease) return null;
+  try {
+    const [row] = await readReadinessInstall(input);
+    if (!row) return null;
+    const grant = offlineGrantSchema.parse(JSON.parse(row.grant_json) as unknown);
+    if (
+      grant.kindOfGrant !== "device" ||
+      grant.tenantId !== input.expectedDevice.tenantId ||
+      grant.deviceId !== input.expectedDevice.deviceId ||
+      grant.kind !== input.expectedDevice.kind ||
+      grant.credentialEpoch !== row.credential_epoch ||
+      grant.policyRevision !== row.policy_revision
+    )
+      return null;
+    const stateKey = await readinessStateKey({
+      credentialOwnership,
+      requestSequence: row.request_sequence,
+      mode: row.mode,
+      policyRevision: row.policy_revision,
+      keysetRevision: row.keyset_revision,
+      grantId: grant.grantId,
+      clientBuild: input.clientBuild,
+      storageRevision: STATION_OFFLINE_GRANT_READINESS_STORAGE_REVISION,
+    });
+    const existing = await input.exec.all<ReadinessOutboxRow>(
+      `SELECT request_id,body_json,credential_ownership,acknowledged_at,cancelled_at
+         FROM offline_grant_readiness_outbox WHERE state_key=?`,
+      [stateKey],
+    );
+    const saved = existing[0];
+    if (saved) return pendingIntent(saved);
+    const requestId = crypto.randomUUID();
+    const body = grantClientReadinessRequestSchema.parse({
+      protocol: "offline-grants-v1",
+      capability: "offline-grants-readiness-v1",
+      requestId,
+      clientBuild: input.clientBuild,
+      storageRevision: STATION_OFFLINE_GRANT_READINESS_STORAGE_REVISION,
+      installed: {
+        mode: row.mode,
+        policyRevision: row.policy_revision,
+        keysetRevision: row.keyset_revision,
+        verifiedGrantId: grant.grantId,
+      },
+    });
+    await input.exec.run(
+      `INSERT OR IGNORE INTO offline_grant_readiness_outbox
+        (request_id,state_key,body_json,credential_ownership) VALUES(?,?,?,?)`,
+      [requestId, stateKey, JSON.stringify(body), credentialOwnership],
+    );
+    const [created] = await input.exec.all<ReadinessOutboxRow>(
+      `SELECT request_id,body_json,credential_ownership,acknowledged_at,cancelled_at
+         FROM offline_grant_readiness_outbox WHERE state_key=?`,
+      [stateKey],
+    );
+    if (!created) throw new Error("offline grant readiness intent was not stored");
+    return pendingIntent(created);
+  } finally {
+    lease.release();
+  }
+}
+
+export async function markStationGrantReadinessAttempt(
+  exec: SqlExecutor,
+  intent: StationGrantReadinessIntent,
+  generation: CredentialGeneration,
+): Promise<boolean> {
+  const lease = acquireCredentialCommitLease(generation);
+  if (!lease) return false;
+  try {
+    await exec.run(
+      `UPDATE offline_grant_readiness_outbox SET attempts=attempts+1
+        WHERE request_id=? AND credential_ownership=?
+          AND acknowledged_at IS NULL AND cancelled_at IS NULL`,
+      [intent.requestId, intent.credentialOwnership],
+    );
+    const [pending] = await exec.all<{ request_id: string }>(
+      `SELECT request_id FROM offline_grant_readiness_outbox
+        WHERE request_id=? AND credential_ownership=?
+          AND acknowledged_at IS NULL AND cancelled_at IS NULL`,
+      [intent.requestId, intent.credentialOwnership],
+    );
+    return pending?.request_id === intent.requestId;
+  } finally {
+    lease.release();
+  }
+}
+
+export async function acknowledgeStationGrantReadiness(
+  exec: SqlExecutor,
+  intent: StationGrantReadinessIntent,
+  generation: CredentialGeneration,
+): Promise<boolean> {
+  const lease = acquireCredentialCommitLease(generation);
+  if (!lease) return false;
+  try {
+    await exec.run(
+      `UPDATE offline_grant_readiness_outbox SET acknowledged_at=CURRENT_TIMESTAMP
+        WHERE request_id=? AND credential_ownership=?
+          AND acknowledged_at IS NULL AND cancelled_at IS NULL`,
+      [intent.requestId, intent.credentialOwnership],
+    );
+    const [acknowledged] = await exec.all<{ acknowledged_at: string | null }>(
+      "SELECT acknowledged_at FROM offline_grant_readiness_outbox WHERE request_id=?",
+      [intent.requestId],
+    );
+    return typeof acknowledged?.acknowledged_at === "string";
+  } finally {
+    lease.release();
+  }
+}
+
+interface ReadinessInstallRow {
+  credential_epoch: number;
+  request_sequence: number;
+  mode: "observe" | "strict";
+  policy_revision: string | null;
+  keyset_revision: string;
+  grant_json: string;
+}
+
+interface ReadinessOutboxRow {
+  request_id: string;
+  body_json: string;
+  credential_ownership: string;
+  acknowledged_at: string | null;
+  cancelled_at: string | null;
+}
+
+function readReadinessInstall(input: {
+  exec: SqlExecutor;
+  configuredOrigin: string;
+  expectedDevice: Pick<GrantOwner, "tenantId" | "deviceId" | "kind">;
+}): Promise<ReadinessInstallRow[]> {
+  return input.exec.all<ReadinessInstallRow>(
+    `SELECT config.credential_epoch,config.request_sequence,config.mode,
+            config.policy_revision,keyset.revision keyset_revision,grant.grant_json
+       FROM offline_grant_configuration config
+       JOIN offline_grant_install_state state
+         ON state.id=config.id AND state.tenant_id=config.tenant_id
+        AND state.device_id=config.device_id AND state.owner_kind=config.owner_kind
+        AND state.credential_epoch=config.credential_epoch
+       JOIN offline_grant_keysets keyset ON keyset.origin=?
+       JOIN offline_grant_grants grant
+         ON json_extract(grant.grant_json,'$.kindOfGrant')='device'
+        AND json_extract(grant.grant_json,'$.tenantId')=config.tenant_id
+        AND json_extract(grant.grant_json,'$.deviceId')=config.device_id
+        AND json_extract(grant.grant_json,'$.kind')=config.owner_kind
+        AND json_extract(grant.grant_json,'$.credentialEpoch')=config.credential_epoch
+        AND json_extract(grant.grant_json,'$.policyRevision') IS config.policy_revision
+      WHERE config.id=1 AND config.tenant_id=? AND config.device_id=? AND config.owner_kind=?
+      ORDER BY grant.installed_sequence DESC LIMIT 1`,
+    [
+      input.configuredOrigin,
+      input.expectedDevice.tenantId,
+      input.expectedDevice.deviceId,
+      input.expectedDevice.kind,
+    ],
+  );
+}
+
+function pendingIntent(row: ReadinessOutboxRow): StationGrantReadinessIntent | null {
+  if (row.acknowledged_at !== null || row.cancelled_at !== null) return null;
+  const body = grantClientReadinessRequestSchema.parse(JSON.parse(row.body_json) as unknown);
+  if (body.requestId !== row.request_id)
+    throw new Error("offline grant readiness identity mismatch");
+  return {
+    requestId: row.request_id,
+    body,
+    credentialOwnership: row.credential_ownership,
+  };
+}
+
+async function readinessStateKey(value: unknown): Promise<string> {
+  const bytes = new TextEncoder().encode(JSON.stringify(value));
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  return Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }

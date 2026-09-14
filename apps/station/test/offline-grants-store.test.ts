@@ -9,13 +9,17 @@ import {
 } from "../src/lib/credential-recovery.js";
 import type { SqlExecutor } from "../src/lib/mirror.js";
 import type { StationClient } from "../src/lib/api-client.js";
-import { installStationGrant } from "../src/lib/offline-grants/store.js";
+import {
+  installStationGrant,
+  prepareStationGrantReadiness,
+} from "../src/lib/offline-grants/store.js";
 import {
   fetchStationDeviceGrant,
   fetchStationGrantConfiguration,
   fetchStationTaskGrant,
   refreshStationGrantConfiguration,
   refreshStationOfflineGrant,
+  reportStationGrantReadiness,
   refreshStationTaskAuthority,
 } from "../src/lib/offline-grants/transport.js";
 import { assertExecutionScopeMatches } from "../src/lib/offline-grants/semantic.js";
@@ -228,6 +232,7 @@ describe("signed Station grant installation", () => {
   };
   const producer = fixtures.producers.find((candidate) => candidate.id === "device");
   if (!producer) throw new Error("missing device fixture");
+  const readinessGrantId = "11111111-1111-4111-8111-111111111111";
   const keyset = {
     protocol: "offline-grants-v1" as const,
     origin,
@@ -253,6 +258,153 @@ describe("signed Station grant installation", () => {
     grants: [producer.compact],
     taskSnapshots: [],
   };
+
+  async function installedReadinessFixture() {
+    const state = migratedExec();
+    const generation = createCredentialGeneration("fixture-secret");
+    await installStationGrant({
+      exec: state.exec,
+      envelope,
+      keyset,
+      configuredOrigin: origin,
+      generation,
+      expectedDevice: { tenantId: owner.tenantId, deviceId: owner.deviceId, kind: owner.kind },
+      requestSequence: 1,
+      clock: { serverMs: envelope.serverTime, monotonicMs: 10, bootId: "boot", wallMs: 20 },
+    });
+    state.db
+      .prepare(
+        "UPDATE offline_grant_grants SET grant_id=?,grant_json=json_set(grant_json,'$.grantId',?)",
+      )
+      .run(readinessGrantId, readinessGrantId);
+    state.db
+      .prepare(
+        `INSERT INTO offline_grant_configuration
+          (id,tenant_id,device_id,owner_kind,credential_epoch,request_sequence,mode,policy_revision)
+         VALUES(1,?,?,?,?,1,'observe','fixture-p1')`,
+      )
+      .run(owner.tenantId, owner.deviceId, owner.kind, owner.credentialEpoch);
+    return { ...state, generation };
+  }
+
+  it("builds readiness only from configuration, keyset and a verified device grant reread from SQLite", async () => {
+    const { db, exec, generation } = await installedReadinessFixture();
+    const intent = await prepareStationGrantReadiness({
+      exec,
+      configuredOrigin: origin,
+      generation,
+      expectedDevice: { tenantId: owner.tenantId, deviceId: owner.deviceId, kind: owner.kind },
+      clientBuild: "station:0.1.0",
+    });
+    expect(intent?.body).toMatchObject({
+      protocol: "offline-grants-v1",
+      capability: "offline-grants-readiness-v1",
+      clientBuild: "station:0.1.0",
+      storageRevision: 1,
+      installed: {
+        mode: "observe",
+        policyRevision: "fixture-p1",
+        keysetRevision: "fixture-r1",
+        verifiedGrantId: readinessGrantId,
+      },
+    });
+    expect(db.prepare("SELECT count(*) count FROM offline_grant_readiness_outbox").get()).toEqual({
+      count: 1,
+    });
+  });
+
+  it("retries a lost readiness response with the same durable request identity and body", async () => {
+    const { db, exec, generation } = await installedReadinessFixture();
+    const bodies: unknown[] = [];
+    let fail = true;
+    const client: Pick<StationClient, "get" | "post"> = {
+      async get<T>() {
+        return keyset as T;
+      },
+      async post<T>(path: string, body?: unknown) {
+        if (path === "/station/grants/v1/readiness") {
+          bodies.push(body);
+          if (fail) {
+            fail = false;
+            throw new Error("response lost");
+          }
+          const requestId = (body as { requestId: string }).requestId;
+          return {
+            protocol: "offline-grants-v1",
+            requestId,
+            receivedAt: "2026-09-14T12:00:00.000Z",
+            accepted: true,
+            matchesCurrentConfiguration: true,
+            verifiedGrantMatched: true,
+          } as T;
+        }
+        throw new Error(`unexpected ${path}`);
+      },
+    };
+    const input = {
+      exec,
+      client,
+      configuredOrigin: origin,
+      generation,
+      expectedDevice: { tenantId: owner.tenantId, deviceId: owner.deviceId, kind: owner.kind },
+      clientBuild: "station:0.1.0",
+    } as const;
+    await expect(reportStationGrantReadiness(input)).rejects.toThrow("response lost");
+    await expect(reportStationGrantReadiness(input)).resolves.toBe(true);
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1]).toEqual(bodies[0]);
+    expect(
+      db
+        .prepare(
+          "SELECT attempts,acknowledged_at IS NOT NULL acknowledged FROM offline_grant_readiness_outbox",
+        )
+        .get(),
+    ).toEqual({ attempts: 2, acknowledged: 1 });
+  });
+
+  it("does not create or send readiness after the credential generation is sealed", async () => {
+    const { db, exec, generation } = await installedReadinessFixture();
+    await sealCredentialGeneration(generation);
+    const client = { post: async () => Promise.reject(new Error("must not send")) };
+    await expect(
+      reportStationGrantReadiness({
+        exec,
+        client,
+        configuredOrigin: origin,
+        generation,
+        expectedDevice: { tenantId: owner.tenantId, deviceId: owner.deviceId, kind: owner.kind },
+        clientBuild: "station:0.1.0",
+      }),
+    ).resolves.toBe(false);
+    expect(db.prepare("SELECT count(*) count FROM offline_grant_readiness_outbox").get()).toEqual({
+      count: 0,
+    });
+  });
+
+  it("does not send readiness when the durable intent cannot be stored", async () => {
+    const { exec, generation } = await installedReadinessFixture();
+    const failingExec: SqlExecutor = {
+      all: exec.all.bind(exec),
+      async run(sql, params) {
+        if (sql.includes("INSERT OR IGNORE INTO offline_grant_readiness_outbox")) {
+          throw new Error("sqlite write failed");
+        }
+        return exec.run(sql, params);
+      },
+    };
+    const post = vi.fn();
+    await expect(
+      reportStationGrantReadiness({
+        exec: failingExec,
+        client: { post },
+        configuredOrigin: origin,
+        generation,
+        expectedDevice: { tenantId: owner.tenantId, deviceId: owner.deviceId, kind: owner.kind },
+        clientBuild: "station:0.1.0",
+      }),
+    ).rejects.toThrow("sqlite write failed");
+    expect(post).not.toHaveBeenCalled();
+  });
 
   it("verifies committed fixture bytes and atomically installs under the current credential generation", async () => {
     const { db, exec } = migratedExec();

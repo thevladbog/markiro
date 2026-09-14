@@ -1394,6 +1394,35 @@ export const offlineGrantConfigurationCommands = sqliteTable(
   },
 );
 
+/** Durable native readiness deliveries; acknowledged and cancelled rows retain retry identity. */
+export const offlineGrantReadinessOutbox = sqliteTable(
+  "offline_grant_readiness_outbox",
+  {
+    requestId: text("request_id").primaryKey(),
+    stateKey: text("state_key").notNull().unique(),
+    bodyJson: text("body_json").notNull(),
+    credentialOwnership: text("credential_ownership").notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    acknowledgedAt: text("acknowledged_at"),
+    cancelledAt: text("cancelled_at"),
+  },
+  (t) => [
+    check("offline_grant_readiness_attempts", sql`${t.attempts} >= 0`),
+    check(
+      "offline_grant_readiness_terminal",
+      sql`${t.acknowledgedAt} IS NULL OR ${t.cancelledAt} IS NULL`,
+    ),
+    index("offline_grant_readiness_pending_idx").on(
+      t.credentialOwnership,
+      t.acknowledgedAt,
+      t.cancelledAt,
+    ),
+  ],
+);
+
 export const offlineGrantEventCommands = sqliteTable("offline_grant_event_commands", {
   eventId: text("event_id").primaryKey(),
   payloadJson: text("payload_json").notNull(),
