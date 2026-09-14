@@ -11,6 +11,36 @@ export type ServicePeriodCreatedEvent = {
   endsAt: string;
 };
 
+export type ServiceLedgerEvent =
+  | ServicePeriodCreatedEvent
+  | {
+      event: "usage_posted" | "defect_work_posted";
+      count: 1;
+      periodId: string;
+      actualMinutes: number;
+      allowanceMinutes: number;
+    }
+  | {
+      event: "correction_posted";
+      count: 1;
+      periodId: string;
+      actualMinutesDelta: number;
+      allowanceMinutesDelta: number;
+    }
+  | {
+      event: "allowance_blocked";
+      count: 1;
+      periodId: string;
+      requestedMinutes: number;
+      remainingMinutes: number;
+    }
+  | {
+      event: "excess_approved" | "approval_withdrawn";
+      count: 1;
+      periodId: string;
+      minuteDelta: number;
+    };
+
 @Injectable()
 export class ServicePeriodObservability {
   readonly #logger = new Logger(ServicePeriodObservability.name);
@@ -32,6 +62,10 @@ export class ServicePeriodObservability {
   }
 
   periodCreated(event: ServicePeriodCreatedEvent): void {
+    this.record(event);
+  }
+
+  record(event: ServiceLedgerEvent): void {
     try {
       this.#logger.log(JSON.stringify(event));
     } catch {

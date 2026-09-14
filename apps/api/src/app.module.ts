@@ -71,6 +71,7 @@ import { ChzCodeStatusesModule } from "./modules/chz-code-statuses/chz-code-stat
 import { DashboardModule } from "./modules/dashboard/dashboard.module";
 import { ProductRegulatoryModule } from "./modules/product-regulatory/product-regulatory.module";
 import { NationalCatalogModule } from "./modules/national-catalog/national-catalog.module";
+import { PlatformServicePeriodsModule } from "./modules/service-periods/platform-service-periods.module";
 
 @Module({})
 export class AppModule {
@@ -116,6 +117,7 @@ export class AppModule {
               BillingActsModule,
               PlatformBillingRequestsModule,
               PlatformOperationsModule.forRoot(env),
+              PlatformServicePeriodsModule,
             ]
           : []),
         AuthorizationModule,

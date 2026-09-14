@@ -600,7 +600,7 @@ git commit -m "feat: activate paid recurring service periods"
 - Produces: cursor list, detail, usage, correction, approval and withdrawal routes under `/platform/service-periods`, registered only inside the `setup.platformAuth` branch.
 - Consumes: Task 1 contracts, Task 2 ledgers, `PlatformAuthGuard`, `@RequirePlatformCapabilities` and platform audit conventions.
 
-- [ ] **Step 1: Write failing balance, correction and concurrency tests**
+- [x] **Step 1: Write failing balance, correction and concurrency tests**
 
 ```ts
 const usage = await service.postUsage(support, period.id, {
@@ -625,17 +625,21 @@ expect(usage.revision).toBe(2);
 
 Race two 100-minute posts against 180 minutes and assert one succeeds and one returns `SERVICE_ALLOWANCE_EXCEEDED`. Add defect usage with zero allowance, a negative correction, exact request replay and changed-body request conflict.
 
-- [ ] **Step 2: Write failing capability and tenant-isolation tests**
+- [x] **Step 2: Write failing capability and reference-isolation tests**
 
-Assert support can post usage, accountant cannot post usage, accountant can register approval through `billing.write`, support cannot register approval, platform admin can do both, and a period UUID from another tenant returns the established not-found/denied envelope without leaking its fields.
+Assert support can post usage, accountant cannot post usage, accountant can register approval through `billing.write`, support cannot register approval, platform admin can do both, cross-period references return the established not-found envelope, and the controller module is absent without platform auth.
 
-- [ ] **Step 3: Run focused service API tests and confirm module absence**
+Implementation note: platform operators are intentionally cross-tenant. This task denies
+cross-period correction and withdrawal references without exposing the referenced row;
+customer-session tenant isolation is applied to the tenant projection in Task 7.
+
+- [x] **Step 3: Run focused service API tests and confirm module absence**
 
 Run: `corepack pnpm@11.22.0 --filter @markiro/api exec vitest run test/service-periods.service.test.ts test/service-periods.integration.test.ts test/service-periods.authorization.test.ts`
 
 Expected: FAIL because the service-period module is not registered.
 
-- [ ] **Step 4: Implement transactionally consistent reads and mutations**
+- [x] **Step 4: Implement transactionally consistent reads and mutations**
 
 ```ts
 await lockServiceNamespace(tx, tenantId);
@@ -656,7 +660,7 @@ const [updated] = await tx
 
 For corrections and withdrawals, lock the referenced row after the period and reject a cross-period reference. A correction records its resulting classification; changing `customer_service` to `product_defect` uses a negative allowance delta that returns the original charge. Store canonical request hash and exact response. Map only the matching `(tenant_id, request_id)` unique violation to request conflict; rethrow all other database errors.
 
-- [ ] **Step 5: Add exact audit facts and bounded pagination**
+- [x] **Step 5: Add exact audit facts and bounded pagination**
 
 Audit actor, role, tenant, target, request ID, source period, deltas and before/after aggregates. List SQL must apply cursor boundary and `limit + 1`; compute balance aggregates separately so pagination never changes totals. Detail returns the complete chronological ledger ordered by posting time and ID.
 
@@ -667,13 +671,13 @@ After a transaction commits a new row, emit exactly one structured event through
 minute fields; an idempotent replay emits nothing. Test event name and numeric
 fields with an injected observability fake rather than matching log text.
 
-- [ ] **Step 6: Run service API and authorization suites**
+- [x] **Step 6: Run service API and authorization suites**
 
 Run: `corepack pnpm@11.22.0 --filter @markiro/api exec vitest run test/service-periods.service.test.ts test/service-periods.integration.test.ts test/service-periods.authorization.test.ts test/platform-auth.guard.test.ts test/platform-auth.e2e.test.ts test/platform-audit.service.test.ts`
 
 Expected: PASS with exact audit assertions and no platform controller when platform auth is not configured.
 
-- [ ] **Step 7: Commit the platform ledger API**
+- [x] **Step 7: Commit the platform ledger API**
 
 ```bash
 git add apps/api/src/modules/service-periods apps/api/src/app.module.ts apps/api/test/service-periods.service.test.ts apps/api/test/service-periods.integration.test.ts apps/api/test/service-periods.authorization.test.ts

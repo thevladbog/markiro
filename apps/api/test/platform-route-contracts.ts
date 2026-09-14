@@ -35,6 +35,7 @@ import {
   platformGrantReadinessContracts,
   platformGrantActivationContracts,
   platformGrantRollbackContracts,
+  platformServicePeriodContracts,
 } from "@markiro/platform-contracts";
 import type { ZodType } from "zod";
 
@@ -75,6 +76,43 @@ const route = (
 ): PlatformRouteContract => ({ method, path, status, response, ...options });
 
 export const CURRENT_SAAS_ROUTES = [
+  route("get", "/platform/service-periods", "200", platformServicePeriodContracts.list.response, {
+    query: platformServicePeriodContracts.list.query,
+  }),
+  route(
+    "get",
+    "/platform/service-periods/{id}",
+    "200",
+    platformServicePeriodContracts.detail.response,
+  ),
+  route(
+    "post",
+    "/platform/service-periods/{id}/usage",
+    "200",
+    platformServicePeriodContracts.postUsage.response,
+    { body: platformServicePeriodContracts.postUsage.body },
+  ),
+  route(
+    "post",
+    "/platform/service-periods/{id}/usage/{entryId}/corrections",
+    "200",
+    platformServicePeriodContracts.correctUsage.response,
+    { body: platformServicePeriodContracts.correctUsage.body },
+  ),
+  route(
+    "post",
+    "/platform/service-periods/{id}/approvals",
+    "200",
+    platformServicePeriodContracts.addApproval.response,
+    { body: platformServicePeriodContracts.addApproval.body },
+  ),
+  route(
+    "post",
+    "/platform/service-periods/{id}/approvals/{approvalId}/withdrawals",
+    "200",
+    platformServicePeriodContracts.withdrawApproval.response,
+    { body: platformServicePeriodContracts.withdrawApproval.body },
+  ),
   route(
     "get",
     "/platform/offline-grants/rollbacks/candidates",
