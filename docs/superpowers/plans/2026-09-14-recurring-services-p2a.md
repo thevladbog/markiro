@@ -328,7 +328,7 @@ git commit -m "feat: persist recurring service periods and ledgers"
 - Produces: `CommercialVersion = 1 | 2 | 3 | 4`, V4 catalog create/read/update/publish behavior and explicit downgrade rejection.
 - Consumes: Task 1 schemas and Task 2 catalog constraint.
 
-- [ ] **Step 1: Write failing negotiation and downgrade tests**
+- [x] **Step 1: Write failing negotiation and downgrade tests**
 
 ```ts
 expect(commercialVersion({ headers: { "x-markiro-commercial-version": "4" } })).toBe(4);
@@ -342,13 +342,13 @@ await request(app.getHttpServer())
 
 Also prove V1–V3 can still create and read one-time services byte-for-byte through their existing response schemas.
 
-- [ ] **Step 2: Run the focused API tests and confirm V4 is rejected**
+- [x] **Step 2: Run the focused API tests and confirm V4 is rejected**
 
 Run: `corepack pnpm@11.22.0 --filter @markiro/api exec vitest run test/commercial-version.test.ts test/commercial-v4.integration.test.ts test/platform-catalog.e2e.test.ts`
 
 Expected: FAIL because header value `4` and recurring service payloads are unsupported.
 
-- [ ] **Step 3: Extend version selection without changing older schemas**
+- [x] **Step 3: Extend version selection without changing older schemas**
 
 ```ts
 export type CommercialVersion = 1 | 2 | 3 | 4;
@@ -383,19 +383,19 @@ Update every controller that reads the version header so value `4` reaches its
 V4 schema rather than falling through to the legacy branch. Routes without new
 fields reuse their V3/V2 schema explicitly.
 
-- [ ] **Step 4: Store and map the recurring service payload**
+- [x] **Step 4: Store and map the recurring service payload**
 
 Persist Task 1's service policy in `catalog_item_versions.service_terms`. Parse every declared payload with `monthlyServiceTermsSchema`; null means a one-time service, while malformed stored JSON raises a data-integrity error and never becomes `{}`.
 
 Publication must reject annual recurrence, missing English scope when English document metadata exists, quantity semantics other than one and any unsupported policy value.
 
-- [ ] **Step 5: Run API catalog and compatibility tests**
+- [x] **Step 5: Run API catalog and compatibility tests**
 
 Run: `corepack pnpm@11.22.0 --filter @markiro/api exec vitest run test/commercial-version.test.ts test/commercial-v4.integration.test.ts test/platform-catalog.e2e.test.ts test/commercial-catalog-review.test.ts test/catalog-sales-without-lifecycle-policy.test.ts`
 
 Expected: PASS with V4 recurring behavior and unchanged V1–V3 one-time behavior.
 
-- [ ] **Step 6: Commit protocol negotiation and catalog persistence**
+- [x] **Step 6: Commit protocol negotiation and catalog persistence**
 
 ```bash
 git add apps/api/src/platform-http apps/api/src/modules/platform-catalog apps/api/test/commercial-version.test.ts apps/api/test/commercial-v4.integration.test.ts apps/api/test/platform-catalog.e2e.test.ts

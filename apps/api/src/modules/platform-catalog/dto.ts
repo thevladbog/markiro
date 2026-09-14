@@ -1,15 +1,15 @@
 export {
   catalogItemReferenceSchema,
   catalogMachineCodeSchema,
-  catalogVersionCreateSchema as createCatalogVersionSchema,
+  catalogVersionCreateV4Schema as createCatalogVersionSchema,
   catalogVersionIdSchema,
-  catalogVersionPatchSchema as updateCatalogVersionSchema,
+  catalogVersionPatchV4Schema as updateCatalogVersionSchema,
   planEntitlementsSchema as planEntitlementSchema,
   setDefaultDemoPlanSchema,
 } from "@markiro/platform-contracts";
 export type {
-  CatalogVersion as CatalogVersionDto,
-  CatalogVersionCreate as CreateCatalogVersionDto,
-  CatalogVersionPatch as UpdateCatalogVersionDto,
+  CatalogVersionV4 as CatalogVersionDto,
+  CatalogVersionCreateV4 as CreateCatalogVersionDto,
+  CatalogVersionPatchV4 as UpdateCatalogVersionDto,
   SetDefaultDemoPlan as SetDefaultDemoPlanDto,
 } from "@markiro/platform-contracts";

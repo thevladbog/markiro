@@ -4,6 +4,7 @@ import {
   platformCatalogContracts,
   platformCatalogV2Contracts,
   platformCatalogV3Contracts,
+  platformCatalogV4Contracts,
   platformOfflineGrantPolicyContracts,
   platformUuidSchema,
   type ApproveOfflineGrantPolicy,
@@ -13,6 +14,7 @@ import {
   commercialVersion,
   commercialBody,
   commercialResponse,
+  type CommercialVersion,
 } from "../../platform-http/commercial-version";
 import { parsePlatformResponse } from "../../platform-http/platform-response";
 import {
@@ -91,11 +93,12 @@ export class PlatformCatalogController {
     response: platformCatalogV2Contracts.editorContext.response,
     commercialV2: platformCatalogV2Contracts.editorContext,
     commercialV3: platformCatalogV3Contracts.editorContext,
+    commercialV4: platformCatalogV4Contracts.editorContext,
   })
   @RequirePlatformCapabilities("catalog.read")
   async editorContext(@Req() request: RequestWithPlatformPrincipal) {
     return parsePlatformResponse(
-      commercialVersion(request) === 3
+      commercialVersion(request) >= 3
         ? platformCatalogV3Contracts.editorContext.response
         : platformCatalogV2Contracts.editorContext.response,
       await this.catalog.editorContext(request.platformPrincipal!, commercialVersion(request)),
@@ -109,6 +112,7 @@ export class PlatformCatalogController {
     response: platformCatalogV2Contracts.reviewVersion.response,
     commercialV2: platformCatalogV2Contracts.reviewVersion,
     commercialV3: platformCatalogV3Contracts.reviewVersion,
+    commercialV4: platformCatalogV4Contracts.reviewVersion,
   })
   @RequirePlatformCapabilities("catalog.write")
   async review(
@@ -117,7 +121,7 @@ export class PlatformCatalogController {
     @Param("versionId", new ZodValidationPipe(catalogVersionIdSchema)) versionId: string,
   ) {
     return parsePlatformResponse(
-      commercialVersion(request) === 3
+      commercialVersion(request) >= 3
         ? platformCatalogV3Contracts.reviewVersion.response
         : platformCatalogV2Contracts.reviewVersion.response,
       await this.catalog.review(
@@ -135,6 +139,7 @@ export class PlatformCatalogController {
     response: platformCatalogContracts.list.response,
     commercialV2: platformCatalogV2Contracts.list,
     commercialV3: platformCatalogV3Contracts.list,
+    commercialV4: platformCatalogV4Contracts.list,
   })
   @RequirePlatformCapabilities("catalog.read")
   async list(@Req() request: RequestWithPlatformPrincipal) {
@@ -144,6 +149,7 @@ export class PlatformCatalogController {
       platformCatalogV2Contracts.list.response,
       await this.catalog.list(request.platformPrincipal!),
       platformCatalogV3Contracts.list.response,
+      platformCatalogV4Contracts.list.response,
     );
   }
 
@@ -153,6 +159,7 @@ export class PlatformCatalogController {
     response: platformCatalogContracts.listVersions.response,
     commercialV2: platformCatalogV2Contracts.listVersions,
     commercialV3: platformCatalogV3Contracts.listVersions,
+    commercialV4: platformCatalogV4Contracts.listVersions,
   })
   @RequirePlatformCapabilities("catalog.read")
   async listVersions(
@@ -165,6 +172,7 @@ export class PlatformCatalogController {
       platformCatalogV2Contracts.listVersions.response,
       await this.catalog.listVersions(request.platformPrincipal!, id),
       platformCatalogV3Contracts.listVersions.response,
+      platformCatalogV4Contracts.listVersions.response,
     );
   }
 
@@ -174,6 +182,7 @@ export class PlatformCatalogController {
     response: platformCatalogContracts.getVersion.response,
     commercialV2: platformCatalogV2Contracts.getVersion,
     commercialV3: platformCatalogV3Contracts.getVersion,
+    commercialV4: platformCatalogV4Contracts.getVersion,
   })
   @RequirePlatformCapabilities("catalog.read")
   async getVersion(
@@ -187,6 +196,7 @@ export class PlatformCatalogController {
       platformCatalogV2Contracts.getVersion.response,
       await this.catalog.getVersion(request.platformPrincipal!, id, versionId),
       platformCatalogV3Contracts.getVersion.response,
+      platformCatalogV4Contracts.getVersion.response,
     );
   }
 
@@ -197,6 +207,7 @@ export class PlatformCatalogController {
     response: platformCatalogContracts.createVersion.response,
     commercialV2: platformCatalogV2Contracts.createVersion,
     commercialV3: platformCatalogV3Contracts.createVersion,
+    commercialV4: platformCatalogV4Contracts.createVersion,
   })
   @RequirePlatformCapabilities("catalog.write")
   async createVersion(
@@ -211,18 +222,11 @@ export class PlatformCatalogController {
       await this.catalog.createVersion(
         request.platformPrincipal!,
         id,
-        commercialBody(
-          commercialVersion(request) === 3
-            ? platformCatalogV3Contracts.createVersion.body
-            : commercialVersion(request) === 2
-              ? platformCatalogV2Contracts.createVersion.body
-              : platformCatalogContracts.createVersion.body,
-          body,
-          commercialVersion(request),
-        ),
+        createCatalogVersionBody(commercialVersion(request), body),
         commercialVersion(request),
       ),
       platformCatalogV3Contracts.createVersion.response,
+      platformCatalogV4Contracts.createVersion.response,
     );
   }
 
@@ -233,6 +237,7 @@ export class PlatformCatalogController {
     response: platformCatalogContracts.updateVersion.response,
     commercialV2: platformCatalogV2Contracts.updateVersion,
     commercialV3: platformCatalogV3Contracts.updateVersion,
+    commercialV4: platformCatalogV4Contracts.updateVersion,
   })
   @RequirePlatformCapabilities("catalog.write")
   async updateVersion(
@@ -249,18 +254,11 @@ export class PlatformCatalogController {
         request.platformPrincipal!,
         id,
         versionId,
-        commercialBody(
-          commercialVersion(request) === 3
-            ? platformCatalogV3Contracts.updateVersion.body
-            : commercialVersion(request) === 2
-              ? platformCatalogV2Contracts.updateVersion.body
-              : platformCatalogContracts.updateVersion.body,
-          body,
-          commercialVersion(request),
-        ),
+        updateCatalogVersionBody(commercialVersion(request), body),
         commercialVersion(request),
       ),
       platformCatalogV3Contracts.updateVersion.response,
+      platformCatalogV4Contracts.updateVersion.response,
     );
   }
 
@@ -271,6 +269,7 @@ export class PlatformCatalogController {
     response: platformCatalogContracts.publishVersion.response,
     commercialV2: platformCatalogV2Contracts.publishVersion,
     commercialV3: platformCatalogV3Contracts.publishVersion,
+    commercialV4: platformCatalogV4Contracts.publishVersion,
   })
   @RequirePlatformCapabilities("catalog.write")
   async publish(
@@ -287,7 +286,7 @@ export class PlatformCatalogController {
         request.platformPrincipal!,
         id,
         versionId,
-        commercialVersion(request) === 3
+        commercialVersion(request) >= 3
           ? commercialBody(platformCatalogV3Contracts.publishVersion.body, body)
           : commercialVersion(request) === 2
             ? commercialBody(platformCatalogV2Contracts.publishVersion.body, body)
@@ -295,6 +294,7 @@ export class PlatformCatalogController {
         commercialVersion(request),
       ),
       platformCatalogV3Contracts.publishVersion.response,
+      platformCatalogV4Contracts.publishVersion.response,
     );
   }
 
@@ -305,6 +305,7 @@ export class PlatformCatalogController {
     response: platformCatalogContracts.retireVersion.response,
     commercialV2: platformCatalogV2Contracts.retireVersion,
     commercialV3: platformCatalogV3Contracts.retireVersion,
+    commercialV4: platformCatalogV4Contracts.retireVersion,
   })
   @RequirePlatformCapabilities("catalog.write")
   async retire(
@@ -323,6 +324,7 @@ export class PlatformCatalogController {
         commercialVersion(request),
       ),
       platformCatalogV3Contracts.retireVersion.response,
+      platformCatalogV4Contracts.retireVersion.response,
     );
   }
 
@@ -340,6 +342,20 @@ export class PlatformCatalogController {
       await this.catalog.archive(request.platformPrincipal!, id),
     );
   }
+}
+
+function createCatalogVersionBody(version: CommercialVersion, body: unknown) {
+  if (version === 4) return commercialBody(platformCatalogV4Contracts.createVersion.body, body, 4);
+  if (version === 3) return commercialBody(platformCatalogV3Contracts.createVersion.body, body, 3);
+  if (version === 2) return commercialBody(platformCatalogV2Contracts.createVersion.body, body, 2);
+  return commercialBody(platformCatalogContracts.createVersion.body, body, 1);
+}
+
+function updateCatalogVersionBody(version: CommercialVersion, body: unknown) {
+  if (version === 4) return commercialBody(platformCatalogV4Contracts.updateVersion.body, body, 4);
+  if (version === 3) return commercialBody(platformCatalogV3Contracts.updateVersion.body, body, 3);
+  if (version === 2) return commercialBody(platformCatalogV2Contracts.updateVersion.body, body, 2);
+  return commercialBody(platformCatalogContracts.updateVersion.body, body, 1);
 }
 
 @ApiTags("platform-catalog")
@@ -368,6 +384,7 @@ export class PlatformSettingsController {
     response: platformCatalogContracts.setDefaultDemo.response,
     commercialV2: platformCatalogV2Contracts.setDefaultDemo,
     commercialV3: platformCatalogV3Contracts.setDefaultDemo,
+    commercialV4: platformCatalogV4Contracts.setDefaultDemo,
   })
   @RequirePlatformCapabilities("catalog.write")
   async setDefaultDemo(

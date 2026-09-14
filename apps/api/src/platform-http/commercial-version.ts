@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException } from "@nestjs/common";
 import { COMMERCIAL_VERSION_HEADER } from "@markiro/platform-contracts";
 import type { ZodType } from "zod";
 
-export type CommercialVersion = 1 | 2 | 3;
+export type CommercialVersion = 1 | 2 | 3 | 4;
 export function commercialVersion(request: {
   headers?: Record<string, unknown>;
   rawHeaders?: string[];
@@ -16,6 +16,7 @@ export function commercialVersion(request: {
   if (version === undefined) return 1;
   if (version === "2") return 2;
   if (version === "3") return 3;
+  if (version === "4") return 4;
   throw new BadRequestException({ code: "commercial_version_unsupported" });
 }
 const p1Fields = new Set([
@@ -27,6 +28,8 @@ const p1Fields = new Set([
 ]);
 const p1Effects = new Set(["chzIntegration", "inventory", "commerceMl", "handheld"]);
 export function projectCommercialResponse(version: CommercialVersion, value: unknown): unknown {
+  if (version === 4) return value;
+  assertNoV4CommercialRepresentation(value);
   if (version === 3) return value;
   if (Array.isArray(value)) return value.map((item) => projectCommercialResponse(version, item));
   if (!value || typeof value !== "object" || value instanceof Date) return value;
@@ -61,25 +64,42 @@ const metadata = new Set([
 ]);
 const opaque = new Set(["before", "after", "sellerSnapshot", "buyerSnapshot", "documentSnapshot"]);
 const quotas = new Set(["maxLines", "maxStations", "maxKiosks", "maxCabinetUsers"]);
+function assertNoV4CommercialRepresentation(value: unknown): void {
+  if (Array.isArray(value)) {
+    for (const item of value) assertNoV4CommercialRepresentation(item);
+    return;
+  }
+  if (!value || typeof value !== "object" || value instanceof Date) return;
+  if (
+    ("kind" in value &&
+      "billingMode" in value &&
+      value.kind === "service" &&
+      value.billingMode === "recurring") ||
+    ("serviceTerms" in value && value.serviceTerms !== null)
+  )
+    throw new ConflictException({ code: "client_update_required" });
+  for (const [key, item] of Object.entries(value)) {
+    if (!opaque.has(key)) assertNoV4CommercialRepresentation(item);
+  }
+}
 export function assertLegacyCommercialRepresentation(value: unknown): void {
   projectCommercialResponse(1, value);
 }
 export function legacyCommercialProjection(value: unknown): unknown {
   return projectCommercialResponse(1, value);
 }
-export function commercialResponse<T, V, W = V>(
+export function commercialResponse<T, V, W = V, X = W>(
   version: CommercialVersion,
   legacy: ZodType<T>,
   current: ZodType<V>,
   value: unknown,
   v3?: ZodType<W>,
-): T | V | W {
+  v4?: ZodType<X>,
+): T | V | W | X {
   const projected = projectCommercialResponse(version, value);
-  return version === 3
-    ? (v3 ?? current).parse(projected)
-    : version === 2
-      ? current.parse(projected)
-      : legacy.parse(projected);
+  if (version === 4) return (v4 ?? v3 ?? current).parse(projected);
+  if (version === 3) return (v3 ?? current).parse(projected);
+  return version === 2 ? current.parse(projected) : legacy.parse(projected);
 }
 export function commercialBody<T>(
   schema: ZodType<T>,

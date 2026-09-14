@@ -252,6 +252,7 @@ describe("current SaaS platform OpenAPI contracts", () => {
                   jsonSchema(contract.response),
                   jsonSchema(contract.commercialV2.response),
                   jsonSchema((contract.commercialV3 ?? contract.commercialV2).response),
+                  ...(contract.commercialV4 ? [jsonSchema(contract.commercialV4.response)] : []),
                 ],
               }
             : jsonSchema(contract.response),
@@ -264,7 +265,12 @@ describe("current SaaS platform OpenAPI contracts", () => {
           );
         expectOpenApi30Compatible(successSchema);
 
-        if (contract.body || contract.commercialV2?.body || contract.commercialV3?.body) {
+        if (
+          contract.body ||
+          contract.commercialV2?.body ||
+          contract.commercialV3?.body ||
+          contract.commercialV4?.body
+        ) {
           if (contract.multipart) {
             expect(inlineJsonSchema(documented.requestBody)).toBeUndefined();
             const multipartSchema = inlineContentSchema(
@@ -287,6 +293,7 @@ describe("current SaaS platform OpenAPI contracts", () => {
               contract.body,
               contract.commercialV2?.body,
               (contract.commercialV3 ?? contract.commercialV2)?.body,
+              contract.commercialV4?.body,
             ].filter((body): body is ZodType => body !== undefined);
             expect(bodySchema).toEqual(
               bodies.length === 1 ? jsonSchema(bodies[0]!) : { anyOf: bodies.map(jsonSchema) },
