@@ -16,6 +16,7 @@ import {
   type PaymentMatchResolveDto,
   type PaymentMatchServiceSource,
   PaymentImportServiceResultSource,
+  type InvoiceApplicationResultSource,
 } from "@markiro/platform-contracts";
 import { lockInvoiceCommercialOrigin } from "../billing/commercial-sale-origin";
 import { DB } from "../../auth/auth.module";
@@ -86,7 +87,8 @@ export class BillingPaymentsService {
     invoiceId: string,
     input: ManualPaymentDto,
   ): Promise<ManualBillingPaymentServiceResultSource> {
-    return this.db.transaction(async (tx) => {
+    let applicationResult: InvoiceApplicationResultSource | undefined;
+    return this.db.transaction<ManualBillingPaymentServiceResultSource>(async (tx) => {
       await tx.execute(
         sql`select pg_advisory_xact_lock(hashtextextended(${`billing-payment:${input.idempotencyKey}`}, 0))`,
       );
@@ -212,7 +214,7 @@ export class BillingPaymentsService {
           );
         }
         if (invoice.applicationMode === "automatic") {
-          await this.application.applyAutomaticInTransaction(
+          applicationResult = await this.application.applyAutomaticInTransaction(
             tx,
             principal,
             { ...invoice, status: "paid", paidAt: input.paidAt },
@@ -249,6 +251,9 @@ export class BillingPaymentsService {
         confirmedAmount: money(confirmedAfter),
         remainingAmount: money(total - confirmedAfter),
       };
+    }).then((result) => {
+      this.application.observeCommitted(applicationResult);
+      return result;
     });
   }
 
@@ -351,7 +356,8 @@ export class BillingPaymentsService {
     matchId: string,
     input: PaymentMatchResolveDto,
   ): Promise<PaymentMatchServiceSource> {
-    return this.db.transaction(async (tx) => {
+    let applicationResult: InvoiceApplicationResultSource | undefined;
+    return this.db.transaction<PaymentMatchServiceSource>(async (tx) => {
       const [match] = await tx
         .select()
         .from(schema.paymentMatches)
@@ -531,7 +537,7 @@ export class BillingPaymentsService {
             );
           }
           if (invoice.applicationMode === "automatic") {
-            await this.application.applyAutomaticInTransaction(
+            applicationResult = await this.application.applyAutomaticInTransaction(
               tx,
               principal,
               { ...invoice, status: "paid", paidAt: row.operationDate },
@@ -583,6 +589,9 @@ export class BillingPaymentsService {
         requestId: null,
       });
       return matchSource(updated, row, invoice.number);
+    }).then((result) => {
+      this.application.observeCommitted(applicationResult);
+      return result;
     });
   }
 }

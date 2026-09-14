@@ -518,7 +518,7 @@ git commit -m "feat: snapshot recurring service commercial terms"
 - Produces: `activatePaidServicePeriod(tx, input): Promise<ServicePeriodRow>`.
 - Consumes: invoice line V4 snapshot, existing `resolveCommercialPeriod`, Task 2 tables and current invoice/payment lock order.
 
-- [ ] **Step 1: Write failing activation and idempotency tests**
+- [x] **Step 1: Write failing activation and idempotency tests**
 
 ```ts
 const first = await applyPaidInvoice(recurringInvoice.id, payment.id);
@@ -531,13 +531,13 @@ expect(first.lines[0]?.result).toMatchObject({ includedMinutes: 180, revision: 1
 
 Add a concurrency case applying two advance-renewal invoice lines for the same tenant and catalog item; assert consecutive, non-overlapping intervals.
 
-- [ ] **Step 2: Run activation tests and confirm no period is created**
+- [x] **Step 2: Run activation tests and confirm no period is created**
 
 Run: `corepack pnpm@11.22.0 --filter @markiro/api exec vitest run test/billing-application-flow.test.ts test/service-period-activation.integration.test.ts`
 
 Expected: FAIL because only `ordered_services` is inserted.
 
-- [ ] **Step 3: Implement the locked activation function**
+- [x] **Step 3: Implement the locked activation function**
 
 ```ts
 await tx.execute(
@@ -562,17 +562,17 @@ Return whether the activation inserted a new period. After the enclosing payment
 application transaction commits, emit `period_created` once through
 `ServicePeriodObservability`; an exact payment replay emits no event.
 
-- [ ] **Step 4: Cover unpaid and rollback behavior**
+- [x] **Step 4: Cover unpaid and rollback behavior**
 
 Add assertions that document generation, invoice issuance and unapplied payments create no period. Force the period insert to fail and assert the ordered service and application success event are also absent.
 
-- [ ] **Step 5: Run payment and period tests**
+- [x] **Step 5: Run payment and period tests**
 
 Run: `corepack pnpm@11.22.0 --filter @markiro/api exec vitest run test/billing-application-flow.test.ts test/service-period-activation.integration.test.ts test/billing-workflow-locks.test.ts test/commercial-paid-period.test.ts`
 
 Expected: PASS with exactly one period per paid recurring line and unchanged one-time service fulfilment.
 
-- [ ] **Step 6: Commit paid period activation**
+- [x] **Step 6: Commit paid period activation**
 
 ```bash
 git add apps/api/src/modules/service-periods/service-period-activation.ts apps/api/src/modules/billing apps/api/test/billing-application-flow.test.ts apps/api/test/service-period-activation.integration.test.ts
