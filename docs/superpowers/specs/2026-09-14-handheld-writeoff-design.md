@@ -1,0 +1,317 @@
+# Handheld (ТСД) Write-off — Design Spec
+
+**Date:** 2026-09-14
+
+**Status:** Approved in brainstorming 2026-09-14. Not yet implemented.
+
+**Scope:** A write-off contour on the handheld terminal, producing the same
+document the pickup kiosk already produces for `reason='writeoff'`. Units and
+whole boxes, no prices, one reason per document chosen after scanning.
+
+**Supersedes:** the "write-offs on the handheld" line in the *Out of v1* section
+of [design brief 10](../../design-briefs/10-tsd-handheld.md). That brief must be
+updated when this ships.
+
+## Outcome
+
+The handheld gains a fourth hub mode, **Списание**. An operator walking the floor
+scans damaged units and boxes, picks one reason from the tenant's shared reason
+dictionary, confirms, and the device files a `pickup_orders` row with
+`reason='writeoff'` — the same document, the same act, the same 1С export the
+kiosk already produces.
+
+The single structural change that makes this possible: `pickup_orders` stops
+assuming its source device is a kiosk.
+
+Prices are absent from every handheld screen. On the kiosk a write-off is one of
+two operations and the cart must show what the goods are worth; on the handheld
+write-off is the *only* operation in the mode, and a price would be noise at
+best and a wrong number at worst.
+
+## Decisions
+
+| Question | Decision |
+| --- | --- |
+| Document identity | The same `pickup_orders` document as a kiosk write-off. One list, one act, one export, one reason dictionary. |
+| Attribution | The signed-in operator. `employees` is already the single people registry (see the comment on `operator_credentials` in `packages/db/src/schema/pickup.ts`), so the handheld operator and the kiosk employee are the same row. No second badge scan. |
+| Scannable input | Loose marking codes **and** whole boxes by SSCC. |
+| Reason granularity | One reason per document, chosen after the list is complete. Different reasons mean different documents. |
+| Reason dictionary | The existing shared `pickup_order_reasons`, managed in the cabinet. No handheld-specific dictionary. |
+| Catalog scope | The whole tenant catalog, mirrored on the device. Floor damage is not scoped to a line. |
+| Day limits | A write-off never spends an employee's daily allowance — on the handheld **and** on the kiosk. |
+| After confirmation | A result screen, plus an in-mode history of recent write-offs with their sync state. |
+
+## Data model
+
+### `pickup_orders` becomes device-agnostic
+
+Today `kiosk_id` is `NOT NULL` with a composite FK to `kiosks`, and idempotency
+is `unique (tenant_id, kiosk_id, device_seq)`
+(`packages/db/src/schema/pickup.ts`). A handheld does not fit.
+
+New migration:
+
+1. `kiosk_id` becomes nullable.
+2. New `station_device_id uuid`, composite FK
+   `(tenant_id, station_device_id) → station_devices (tenant_id, id)`.
+   A handheld is already a `station_devices` row with `kind='handheld'`
+   (`packages/db/src/schema/platform.ts`, `station_devices_kind_check`).
+3. `CHECK (num_nonnulls(kiosk_id, station_device_id) = 1)` — a document always
+   names exactly one source device.
+4. Drop `pickup_orders_kiosk_device_seq_uq`; replace with two partial unique
+   indexes:
+   - `(tenant_id, kiosk_id, device_seq) WHERE kiosk_id IS NOT NULL AND device_seq IS NOT NULL`
+   - `(tenant_id, station_device_id, device_seq) WHERE station_device_id IS NOT NULL AND device_seq IS NOT NULL`
+
+   The `device_seq IS NOT NULL` half preserves today's exemption for
+   admin-created rows, which the current constraint gets from `MATCH SIMPLE`
+   NULL semantics.
+
+Existing rows are unaffected: every one of them has a `kiosk_id` and a NULL
+`station_device_id`, which satisfies the new `CHECK`.
+
+`pickup_order_items`, `pickup_order_boxes` and `pickup_order_reasons` are
+untouched. Reusing the reason dictionary unchanged is the point of choosing one
+document over two.
+
+### `total_price` on a handheld write-off
+
+Stays `NULL`. The column is already nullable and the 1С export already types it
+`string | null` (`ExportCandidatesResult` in
+`apps/api/src/modules/pickup-orders/pickup-orders.service.ts`), so a price-less
+document needs no contract change downstream.
+
+## Server
+
+### `PickupDocumentSource`
+
+`PickupOrdersService` threads `kioskId: string` through roughly seventy call
+sites. Replace it with
+
+```ts
+type PickupDocumentSource =
+  | { kind: "kiosk"; kioskId: string }
+  | { kind: "handheld"; stationDeviceId: string };
+```
+
+The refactor is mechanical but wide, and it is the main cost of keeping one
+document. Branch on `kind` only where behaviour genuinely differs: the
+idempotency lookup, the admission-token path (kiosk only), and the product
+allowlist.
+
+### Product resolution
+
+`resolveItems` currently calls `kioskAllowlist(tenantId, kioskId)` and reports
+`not_allowed` for a product that exists but is not listed for that kiosk. It
+takes an allowlist resolver instead. For a handheld the allowlist is the tenant
+catalog, so `not_allowed` is structurally unreachable and `unknown_product`
+remains the only catalog conflict.
+
+### Endpoints
+
+All under `StationOnlyGuard` + `TenantGuard`, the contour the handheld already
+uses for shifts, inventory and the operator roster.
+
+- `POST /station/writeoffs` —
+  `{ deviceSeq, operatorId, writeoffReasonId, items[], boxes[], createdAt }`.
+  The device asserts `operatorId`, exactly as `station-scans` does, so the
+  server re-checks `employee_pickup_policies.can_writeoff` for that operator.
+  **A client-side permission check is a UI affordance, not the gate.**
+  `reason` is fixed server-side to `writeoff`; the endpoint cannot create a
+  purchase.
+- `GET /station/writeoff-bootstrap` — reason dictionary, tenant catalog
+  (GTIN → product name), per-operator `can_writeoff`.
+- `GET /station/box-registry` — the existing `BoxRegistryService` behind station
+  auth. It is already revision-bounded and cursor-paged; only the guard and the
+  route are new.
+
+### Day limits
+
+`applyOrderLineLimit` is not called when `reason='writeoff'`, and
+`countTakenToday` / `takenTodayElsewhereByEmployee` stop counting write-off
+orders. Both halves are required: skipping enforcement while still counting
+history would let yesterday's write-offs eat today's allowance.
+
+This changes existing kiosk behaviour. Write-offs already recorded stop
+consuming allowance retroactively, so an employee may find their limit freed the
+day this ships.
+
+**Prerequisite, tracked separately:** limits are being switched off by default
+tenant-wide (defaults flipped, existing tenants switched off, the cabinet toggle
+`pickupLimitsEnabled` retained). That is its own task and its own branch. The
+carve-out above is still specified and still implemented, so that re-enabling the
+toggle later cannot silently make write-offs spend allowance again.
+
+## Handheld
+
+### Hub
+
+A fourth tile, **Списание**, beside Смена / Инвентаризация / Настройки. Its
+status line reads «нет прав» when the operator lacks `can_writeoff`, or «2 не
+отправлены» when documents are queued. The mode is self-contained: it neither
+requires a shift nor disturbs an active one.
+
+### Flow
+
+1. **Приём сканов.** `hh/AppBar` «Списание» over `hh/StatusStrip`; the body reads
+   «Отсканируйте код или короб». Hardware trigger only; the phone variant adds
+   `hh/ScanButton`.
+2. **Список.** `hh/ScanResultCompact` carries the one-line verdict of the last
+   scan (принят / дубль / нет в каталоге / короб не найден). `hh/CounterRow`
+   below it: «Всего 24 шт · Коробов 1». Rows are `hh/ListRow` 56 dp — product
+   name, code tail or SSCC, «20 шт» for a box — removable by swipe. Footer:
+   `hh/Button/Primary` «Далее».
+3. **Причина.** Tiles from `pickup_order_reasons` ordered by `sort_order`,
+   2 × 3 per page with paging, as on the kiosk. «Подтвердить» stays disabled
+   until one is chosen.
+4. **Подтверждение.** Reason, unit count, box count, operator.
+   `hh/Button/Destructive` «Списать 24 шт» — the action cannot be undone from
+   the device and the control says so.
+5. **Результат.** Online: the act number. Offline: «В очереди, отправим при
+   связи».
+
+**История** lives inside the mode (icon in `hh/AppBar`): the last 20 documents
+filed from this device with their sync state, opening one shows contents and
+reason, read-only. Offline this is the only way to see what has already been
+filed. It is a *display* of what this device sent; it is explicitly not consulted
+when deciding whether a fresh scan is a duplicate (see below).
+
+### Signals
+
+Full-screen `hh/SignalOverlay` is deliberately **not** used here. In a shift the
+overlays exist because the operator's eyes are on the conveyor; during a
+write-off the operator is reading the list, and a full-screen flash per scan
+would be noise. The compact verdict plus vibration is the whole signal channel.
+
+### States
+
+No permission; empty reason dictionary («Причины не заданы — добавьте в
+кабинете»); offline banner; catalog never synced. A box whose unit is already in
+the list as a loose line is caught locally through `contentKeys`, as the kiosk
+does.
+
+## Offline, queue and conflicts
+
+**Its own outbox, the shared engine.** `OutboxEntity` is shift-scoped
+(`apps/handheld/.../storage/ShiftEntities.kt`), so write-offs need
+`writeoff_outbox`, modelled on `shift_close_outbox`. It joins the existing
+`SyncEngine` drain: one drain at a time, shared backoff, and `SyncState.pending`
+summed across sources — otherwise the queue indicator in `hh/StatusStrip` and
+the hub tile's «2 не отправлены» would disagree.
+
+**`deviceSeq` is assigned at confirmation, before the network.** A monotonic
+counter in `MetaStore`. The whole document — lines, reason, operator,
+`createdAt` — is persisted to the outbox first. A retry therefore resends the
+same sequence, and the server returns the existing document's outcome instead of
+creating a second act (the handheld twin of `findKioskOrderOutcome`). Because
+idempotency covers it, a blind retry is safe and no separate outcome-polling
+protocol is needed.
+
+**Partial acceptance.** The server may reject some lines (`duplicate`,
+`unknown_product`, a box already disassembled). The result screen and history
+show «Списано 22 из 24 · 2 отклонено», expandable to which lines and why.
+Rejected lines are **not** returned to the working list — an operator who does
+not notice would write them off twice.
+
+**What is checked locally, and what is not.** Locally: repetition within the
+current list only (`kmKey`, plus a box's `contentKeys`). The device does not
+check a scan against previously filed documents — not even the ones in its own
+history screen. It is not the authority on what has already been written off
+tenant-wide, and a device that refuses a code because *it* filed one earlier
+would still miss every code another terminal filed, while inventing refusals
+offline. Cross-document conflicts are the server's call and surface as partial
+acceptance in the result.
+
+**Mirrors.** The catalog (GTIN → name) and the box registry sync in the
+background like the operator roster, each carrying a «данные на 10:42» stamp.
+With a catalog that has never synced, the mode shows `hh/State` «Нужна первая
+синхронизация» rather than letting someone write off blind.
+
+**Device recovery.** `DeviceRecovery` enumerates outbox tables by name when it
+counts unsent work (`apps/handheld/.../storage/DeviceRecovery.kt`).
+`writeoff_outbox` must be registered there, or the recovery screen under-reports
+and an operator wipes production data believing nothing is pending.
+
+## Cabinet
+
+`PickupOrderListItem.kioskName: string` and the detail's
+`device: { kioskId, kioskName, place }` become
+
+```ts
+device: { kind: "kiosk" | "handheld"; id: string; name: string; place: string | null }
+```
+
+Formally a breaking OpenAPI change, but the blast radius is closed: the 1С
+export carries no device field at all (`ExportCandidatesResult`), and pickup
+orders are not exposed through the public API. The change lands in the API DTO,
+`apps/admin/src/pages/pickup/*` and their tests.
+
+The orders list gains a source filter: Все / Киоски / ТСД.
+
+Reasons management (`ReasonsPage.tsx`) is unchanged. Permissions are unchanged —
+`can_writeoff` is already edited in `EmployeePickupPolicySection.tsx`; only its
+help text needs to say the right now also applies to handhelds.
+
+## Testing
+
+Per the minimum-checks table in the root `AGENTS.md`:
+
+- **`packages/db`** — the `CHECK` rejects a document naming two devices and one
+  naming none; each partial unique index catches a repeated `device_seq` for its
+  own device kind; existing kiosk rows survive the migration.
+- **`apps/api`** — e2e on `/station/writeoffs`: idempotency on
+  `(station_device_id, device_seq)`; refusal when `can_writeoff` is false,
+  asserted **server-side** with the device claiming an operator it should not;
+  cross-tenant denial; partial acceptance; and, with limits explicitly enabled,
+  that a write-off neither spends nor counts against the daily allowance.
+- **`apps/kiosk`** — regression: a kiosk write-off no longer spends the limit, a
+  purchase still does.
+- **`apps/handheld`** — Kotlin: `writeoff_outbox` survives restart; a retry
+  resends the same `deviceSeq`; `DeviceRecovery` counts queued write-offs; the
+  view model refuses to confirm without a reason.
+
+If the request body is shared across the TypeScript/Kotlin boundary, update the
+contract fixtures described in `apps/handheld/AGENTS.md`. TypeScript tests alone
+do not prove parity.
+
+## Sequencing
+
+Four branches, each independently green:
+
+0. Limits off by default (separate task, already agreed).
+1. DB + API: migration, `PickupDocumentSource`, `/station/writeoffs`,
+   write-off bootstrap, `station/box-registry`.
+2. Cabinet: device descriptor, source filter.
+3. Handheld: mode, outbox, screens, and mockups in
+   `docs/design-briefs/markiro-tsd.pen`.
+
+## Out of v1
+
+- Printing the act from the device. The handheld drives label printers
+  (ZPL/TSPL); an act is an A4 document generated in the cabinet.
+- Reporting withdrawal to Chestny ZNAK. Markiro currently only *reads* code
+  statuses (`withdrawReason` in `chz-exports/true-api.types.ts`); 1С owns the
+  outbound side.
+- Cancelling or correcting a write-off from the device.
+- Pallets. The kiosk document has no pallet line type and this spec does not add
+  one.
+- An admission-token equivalent of `kiosk_order_admissions`, i.e. filing
+  write-offs while the subscription is expired. The handheld follows the
+  station's ordinary subscription policy.
+
+## Open questions
+
+- Design brief 10 lists write-offs under *Out of v1*; it needs updating once
+  this ships.
+- Whether the mode should eventually allow «Отменить последний документ» within
+  some short window, or stay cabinet-only for corrections as specified here.
+
+## References
+
+- [Design brief 10 — Handheld (ТСД)](../../design-briefs/10-tsd-handheld.md)
+- `packages/db/src/schema/pickup.ts` — `pickup_orders`, `pickup_order_reasons`,
+  `employee_pickup_policies`, `operator_credentials`
+- `packages/db/src/schema/platform.ts` — `station_devices`
+- `apps/api/src/modules/pickup-orders/pickup-orders.service.ts`
+- `apps/kiosk/src/screens/WriteoffReason.tsx`, `apps/kiosk/src/session/flow.ts`
+- `apps/handheld/app/src/main/kotlin/app/markiro/handheld/core/sync/SyncEngine.kt`
