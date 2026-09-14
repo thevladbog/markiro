@@ -81,6 +81,50 @@ describe("offline grant provenance schema", () => {
     );
   });
 
+  it("models selective rollback preparations and terminal activation provenance", () => {
+    expect(schema).toHaveProperty("offlineGrantRollbackPreparations");
+    expect(schema).toHaveProperty("offlineGrantRollbackMembers");
+
+    const preparations = getTableConfig(schema.offlineGrantRollbackPreparations);
+    expect(preparations.name).toBe("offline_grant_rollback_preparations");
+    expect(preparations.checks.map((constraint) => constraint.name)).toEqual(
+      expect.arrayContaining([
+        "offline_grant_rollback_state_check",
+        "offline_grant_rollback_interval_check",
+        "offline_grant_rollback_confirm_actor_check",
+        "offline_grant_rollback_payload_check",
+      ]),
+    );
+
+    const members = getTableConfig(schema.offlineGrantRollbackMembers);
+    expect(members.name).toBe("offline_grant_rollback_members");
+    expect(members.indexes.map((index) => index.config.name)).toContain(
+      "offline_grant_rollback_members_active_reservation_uq",
+    );
+    expect(members.foreignKeys.map((key) => key.getName())).toEqual(
+      expect.arrayContaining([
+        "offline_grant_rollback_members_activation_fk",
+        "offline_grant_rollback_members_subscription_fk",
+        "offline_grant_rollback_members_station_fk",
+        "offline_grant_rollback_members_kiosk_fk",
+      ]),
+    );
+
+    const activations = getTableConfig(schema.offlineGrantDeviceActivations);
+    const columns = new Map(activations.columns.map((column) => [column.name, column]));
+    for (const name of [
+      "rollback_preparation_id",
+      "observe_policy_id",
+      "rolled_back_by_platform_user_id",
+      "rolled_back_at",
+    ]) {
+      expect(columns.has(name), name).toBe(true);
+    }
+    expect(activations.checks.map((constraint) => constraint.name)).toContain(
+      "offline_grant_device_activations_rollback_check",
+    );
+  });
+
   it("models append-only client readiness with tenant-scoped matched facts", () => {
     expect(schema).toHaveProperty("deviceGrantClientReadinessReports");
     const config = getTableConfig(schema.deviceGrantClientReadinessReports);

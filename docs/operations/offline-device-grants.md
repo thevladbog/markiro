@@ -330,3 +330,32 @@ Room or IndexedDB versions. Disable strict admission through an approved observe
 configuration and refresh devices; do not delete grant stores to reset admission.
 Explicit retired keys remain retired across renewal and rollback. Production policy
 values, the approved device cohort and physical acceptance belong to P1D.
+
+## Selective strict-to-observe rollback
+
+Migration `0155_offline_grant_rollback` must complete before deploying API code
+that reads rollback candidates or provenance columns. Migration
+`0156_validate_offline_grant_rollback` validates the additive foreign keys after
+the first transaction commits. Neither migration changes existing activation or
+commercial rows.
+
+In SaaS Admin, select the exact active strict devices, enter the approved decision
+reference and prepare the rollback. Preparation reserves those activation IDs for
+30 minutes and changes no runtime authority. A different platform administrator
+must review and confirm the saved digest. If device, credential, assignment,
+subscription, configuration or policy facts changed, confirmation records
+`needs_review`, releases the reservation and changes no device mode.
+
+Successful confirmation records terminal provenance on the selected activation
+rows and creates an approved observe policy for exactly those devices. Other
+strict devices stay strict. Each selected device receives observe on its next
+authenticated configuration refresh; confirmation alone does not prove delivery.
+An uncertain prepare, confirm or cancel result must be retried with the unchanged
+request ID and payload. A later return to strict requires a new P1D.2 preview,
+preparation and second-operator confirmation.
+
+Existing compact grants, frozen task authority, accepted evidence and pending
+native recovery queues remain available. Do not retire signing keys, delete local
+stores or revoke credentials as a substitute for selective rollback. Production
+cohort approval, device refresh, Windows/scanner/printer checks and customer
+acceptance remain separate operational gates.

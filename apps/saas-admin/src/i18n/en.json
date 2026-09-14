@@ -1342,6 +1342,24 @@
         "needs_review": "Needs review"
       }
     },
+    "offlineRollback": {
+      "title": "Selective return to observe",
+      "compatibility": "Only selected devices return to observe after their next authenticated configuration refresh. Tariffs, subscriptions, completed work and recoverable offline evidence stay unchanged.",
+      "candidates": "Active strict devices",
+      "empty": "No active strict devices are available.",
+      "decisionReference": "Rollback decision reference",
+      "prepare": "Prepare rollback",
+      "confirm": "Confirm observe",
+      "cancel": "Cancel preparation",
+      "cancelReason": "Cancellation reason",
+      "loadError": "Could not load rollback data.",
+      "summary": "{{count}} selected devices; expires {{expiresAt}}.",
+      "secondOperator": "Confirmation must be completed by another platform administrator.",
+      "notice": {
+        "uncertain": "The outcome could not be confirmed. Retry sends the unchanged request.",
+        "stale": "Server facts changed. Review this preparation before trying again."
+      }
+    },
     "offlineReadiness": {
       "previewOnly": "Readiness is calculated from current server facts and the latest client reports. Preview does not activate strict mode or issue grants.",
       "tenant": "Tenant ID",

@@ -1086,6 +1086,20 @@
       "when": 1789400805558,
       "tag": "0154_pickup_limits_off_by_default",
       "breakpoints": true
+    },
+    {
+      "idx": 155,
+      "version": "7",
+      "when": 1789401956837,
+      "tag": "0155_offline_grant_rollback",
+      "breakpoints": true
+    },
+    {
+      "idx": 156,
+      "version": "7",
+      "when": 1789401956838,
+      "tag": "0156_validate_offline_grant_rollback",
+      "breakpoints": true
     }
   ]
 }

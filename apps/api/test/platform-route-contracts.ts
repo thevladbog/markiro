@@ -30,6 +30,7 @@ import {
   platformOfflineGrantPolicyContracts,
   platformGrantReadinessContracts,
   platformGrantActivationContracts,
+  platformGrantRollbackContracts,
 } from "@markiro/platform-contracts";
 import type { ZodType } from "zod";
 
@@ -62,6 +63,47 @@ const route = (
 ): PlatformRouteContract => ({ method, path, status, response, ...options });
 
 export const CURRENT_SAAS_ROUTES = [
+  route(
+    "get",
+    "/platform/offline-grants/rollbacks/candidates",
+    "200",
+    platformGrantRollbackContracts.candidates.response,
+    { query: platformGrantRollbackContracts.candidates.query },
+  ),
+  route(
+    "get",
+    "/platform/offline-grants/rollbacks",
+    "200",
+    platformGrantRollbackContracts.list.response,
+    { query: platformGrantRollbackContracts.list.query },
+  ),
+  route(
+    "post",
+    "/platform/offline-grants/rollbacks",
+    "200",
+    platformGrantRollbackContracts.prepare.response,
+    { body: platformGrantRollbackContracts.prepare.body },
+  ),
+  route(
+    "get",
+    "/platform/offline-grants/rollbacks/{id}",
+    "200",
+    platformGrantRollbackContracts.detail.response,
+  ),
+  route(
+    "post",
+    "/platform/offline-grants/rollbacks/{id}/confirm",
+    "200",
+    platformGrantRollbackContracts.confirm.response,
+    { body: platformGrantRollbackContracts.confirm.body },
+  ),
+  route(
+    "post",
+    "/platform/offline-grants/rollbacks/{id}/cancel",
+    "200",
+    platformGrantRollbackContracts.cancel.response,
+    { body: platformGrantRollbackContracts.cancel.body },
+  ),
   route(
     "get",
     "/platform/offline-grants/activations",

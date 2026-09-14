@@ -22,6 +22,7 @@ import { kiosks } from "./pickup.js";
 import { tenantSubscriptions } from "./saas.js";
 
 export type OfflineGrantActivationState = "prepared" | "confirmed" | "cancelled" | "needs_review";
+export type OfflineGrantRollbackState = "prepared" | "confirmed" | "cancelled" | "needs_review";
 
 /** A bounded two-operator decision snapshot. Prepare never changes runtime authority. */
 export const offlineGrantActivationPreparations = pgTable(
@@ -186,6 +187,88 @@ export const offlineGrantActivationMembers = pgTable(
   ],
 );
 
+/** A bounded two-operator snapshot of exact active strict assignments. */
+export const offlineGrantRollbackPreparations = pgTable(
+  "offline_grant_rollback_preparations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    state: text("state").$type<OfflineGrantRollbackState>().notNull().default("prepared"),
+    basePolicyId: uuid("base_policy_id").notNull(),
+    observePolicyId: uuid("observe_policy_id"),
+    rollbackDigest: text("rollback_digest").notNull(),
+    prepareRequestId: uuid("prepare_request_id").notNull(),
+    prepareRequestHash: text("prepare_request_hash").notNull(),
+    prepareResponse: jsonb("prepare_response").$type<Record<string, unknown>>().notNull(),
+    decisionReference: text("decision_reference").notNull(),
+    snapshot: jsonb("snapshot").$type<Record<string, unknown>>().notNull(),
+    preparedByPlatformUserId: text("prepared_by_platform_user_id").notNull(),
+    preparedAt: timestamp("prepared_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    confirmRequestId: uuid("confirm_request_id"),
+    confirmRequestHash: text("confirm_request_hash"),
+    confirmResponse: jsonb("confirm_response").$type<Record<string, unknown>>(),
+    confirmedByPlatformUserId: text("confirmed_by_platform_user_id"),
+    confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
+    cancelRequestId: uuid("cancel_request_id"),
+    cancelRequestHash: text("cancel_request_hash"),
+    cancelResponse: jsonb("cancel_response").$type<Record<string, unknown>>(),
+    cancelledByPlatformUserId: text("cancelled_by_platform_user_id"),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    cancellationReason: text("cancellation_reason"),
+  },
+  (t) => [
+    unique("offline_grant_rollback_prepare_request_uq").on(t.prepareRequestId),
+    unique("offline_grant_rollback_confirm_request_uq").on(t.confirmRequestId),
+    unique("offline_grant_rollback_cancel_request_uq").on(t.cancelRequestId),
+    unique("offline_grant_rollback_digest_uq").on(t.rollbackDigest),
+    foreignKey({
+      name: "offline_grant_rollback_base_policy_fk",
+      columns: [t.basePolicyId],
+      foreignColumns: [entitlementLifecyclePolicies.id],
+    }),
+    foreignKey({
+      name: "offline_grant_rollback_observe_policy_fk",
+      columns: [t.observePolicyId],
+      foreignColumns: [entitlementLifecyclePolicies.id],
+    }),
+    foreignKey({
+      name: "offline_grant_rollback_prepared_by_fk",
+      columns: [t.preparedByPlatformUserId],
+      foreignColumns: [platformUsers.id],
+    }),
+    foreignKey({
+      name: "offline_grant_rollback_confirmed_by_fk",
+      columns: [t.confirmedByPlatformUserId],
+      foreignColumns: [platformUsers.id],
+    }),
+    foreignKey({
+      name: "offline_grant_rollback_cancelled_by_fk",
+      columns: [t.cancelledByPlatformUserId],
+      foreignColumns: [platformUsers.id],
+    }),
+    check(
+      "offline_grant_rollback_state_check",
+      sql`${t.state} in ('prepared','confirmed','cancelled','needs_review') and
+        ((${t.state} = 'prepared' and ${t.observePolicyId} is null and ${t.confirmRequestId} is null and ${t.confirmRequestHash} is null and ${t.confirmResponse} is null and ${t.confirmedByPlatformUserId} is null and ${t.confirmedAt} is null and ${t.cancelRequestId} is null and ${t.cancelRequestHash} is null and ${t.cancelResponse} is null and ${t.cancelledByPlatformUserId} is null and ${t.cancelledAt} is null and ${t.cancellationReason} is null)
+        or (${t.state} = 'confirmed' and ${t.observePolicyId} is not null and ${t.confirmRequestId} is not null and ${t.confirmRequestHash} is not null and ${t.confirmResponse} is not null and ${t.confirmedByPlatformUserId} is not null and ${t.confirmedAt} is not null and ${t.cancelRequestId} is null and ${t.cancelRequestHash} is null and ${t.cancelResponse} is null and ${t.cancelledByPlatformUserId} is null and ${t.cancelledAt} is null and ${t.cancellationReason} is null)
+        or (${t.state} = 'needs_review' and ${t.observePolicyId} is null and ${t.confirmRequestId} is not null and ${t.confirmRequestHash} is not null and ${t.confirmResponse} is not null and ${t.confirmedByPlatformUserId} is not null and ${t.confirmedAt} is not null and ${t.cancelRequestId} is null and ${t.cancelRequestHash} is null and ${t.cancelResponse} is null and ${t.cancelledByPlatformUserId} is null and ${t.cancelledAt} is null and ${t.cancellationReason} is null)
+        or (${t.state} = 'cancelled' and ${t.observePolicyId} is null and ((${t.confirmRequestId} is null and ${t.confirmRequestHash} is null and ${t.confirmResponse} is null and ${t.confirmedByPlatformUserId} is null and ${t.confirmedAt} is null) or (${t.confirmRequestId} is not null and ${t.confirmRequestHash} is not null and ${t.confirmResponse} is not null and ${t.confirmedByPlatformUserId} is not null and ${t.confirmedAt} is not null)) and ${t.cancelRequestId} is not null and ${t.cancelRequestHash} is not null and ${t.cancelResponse} is not null and ${t.cancelledByPlatformUserId} is not null and ${t.cancelledAt} is not null and ${t.cancellationReason} is not null))`,
+    ),
+    check(
+      "offline_grant_rollback_interval_check",
+      sql`isfinite(${t.preparedAt}) and isfinite(${t.expiresAt}) and ${t.expiresAt} = ${t.preparedAt} + interval '30 minutes' and (${t.confirmedAt} is null or (isfinite(${t.confirmedAt}) and ${t.confirmedAt} >= ${t.preparedAt} and ${t.confirmedAt} < ${t.expiresAt})) and (${t.cancelledAt} is null or (isfinite(${t.cancelledAt}) and ${t.cancelledAt} >= ${t.preparedAt}))`,
+    ),
+    check(
+      "offline_grant_rollback_confirm_actor_check",
+      sql`${t.confirmedByPlatformUserId} is null or ${t.confirmedByPlatformUserId} <> ${t.preparedByPlatformUserId}`,
+    ),
+    check(
+      "offline_grant_rollback_payload_check",
+      sql`${t.rollbackDigest} ~ '^[0-9a-f]{64}$' and ${t.prepareRequestHash} ~ '^[0-9a-f]{64}$' and (${t.confirmRequestHash} is null or ${t.confirmRequestHash} ~ '^[0-9a-f]{64}$') and (${t.cancelRequestHash} is null or ${t.cancelRequestHash} ~ '^[0-9a-f]{64}$') and jsonb_typeof(${t.prepareResponse}) = 'object' and jsonb_typeof(${t.snapshot}) = 'object' and octet_length(${t.prepareResponse}::text) <= 262144 and octet_length(${t.snapshot}::text) <= 262144 and (${t.confirmResponse} is null or (jsonb_typeof(${t.confirmResponse}) = 'object' and octet_length(${t.confirmResponse}::text) <= 262144)) and (${t.cancelResponse} is null or (jsonb_typeof(${t.cancelResponse}) = 'object' and octet_length(${t.cancelResponse}::text) <= 262144)) and length(btrim(${t.decisionReference})) between 1 and 1000 and (${t.cancellationReason} is null or length(btrim(${t.cancellationReason})) between 1 and 1000)`,
+    ),
+  ],
+);
+
 /** Current exact-device rollout overlay; null revoked_at means active. */
 export const offlineGrantDeviceActivations = pgTable(
   "offline_grant_device_activations",
@@ -203,6 +286,10 @@ export const offlineGrantDeviceActivations = pgTable(
     activatedByPlatformUserId: text("activated_by_platform_user_id").notNull(),
     activatedAt: timestamp("activated_at", { withTimezone: true }).notNull(),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    rollbackPreparationId: uuid("rollback_preparation_id"),
+    observePolicyId: uuid("observe_policy_id"),
+    rolledBackByPlatformUserId: text("rolled_back_by_platform_user_id"),
+    rolledBackAt: timestamp("rolled_back_at", { withTimezone: true }),
   },
   (t) => [
     unique("offline_grant_device_activations_tenant_id_uq").on(t.tenantId, t.id),
@@ -239,6 +326,21 @@ export const offlineGrantDeviceActivations = pgTable(
       foreignColumns: [platformUsers.id],
     }),
     foreignKey({
+      name: "offline_grant_device_activations_rollback_preparation_fk",
+      columns: [t.rollbackPreparationId],
+      foreignColumns: [offlineGrantRollbackPreparations.id],
+    }),
+    foreignKey({
+      name: "offline_grant_device_activations_observe_policy_fk",
+      columns: [t.observePolicyId],
+      foreignColumns: [entitlementLifecyclePolicies.id],
+    }),
+    foreignKey({
+      name: "offline_grant_device_activations_rolled_back_by_fk",
+      columns: [t.rolledBackByPlatformUserId],
+      foreignColumns: [platformUsers.id],
+    }),
+    foreignKey({
       name: "offline_grant_device_activations_subscription_fk",
       columns: [t.tenantId, t.subscriptionId],
       foreignColumns: [tenantSubscriptions.tenantId, tenantSubscriptions.id],
@@ -261,6 +363,100 @@ export const offlineGrantDeviceActivations = pgTable(
       "offline_grant_device_activations_state_check",
       sql`${t.credentialEpoch} > 0 and ${t.rolloutPolicyId} <> ${t.basePolicyId} and isfinite(${t.activatedAt}) and (${t.revokedAt} is null or (isfinite(${t.revokedAt}) and ${t.revokedAt} >= ${t.activatedAt}))`,
     ),
+    check(
+      "offline_grant_device_activations_rollback_check",
+      sql`((${t.rollbackPreparationId} is null and ${t.observePolicyId} is null and ${t.rolledBackByPlatformUserId} is null and ${t.rolledBackAt} is null) or (${t.rollbackPreparationId} is not null and ${t.observePolicyId} is not null and ${t.rolledBackByPlatformUserId} is not null and ${t.rolledBackAt} is not null and ${t.revokedAt} = ${t.rolledBackAt} and ${t.rolledBackAt} >= ${t.activatedAt} and ${t.observePolicyId} <> ${t.rolloutPolicyId} and ${t.observePolicyId} <> ${t.basePolicyId}))`,
+    ),
+  ],
+);
+
+/** Exact activation reservations and immutable facts captured by rollback prepare. */
+export const offlineGrantRollbackMembers = pgTable(
+  "offline_grant_rollback_members",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    preparationId: uuid("preparation_id").notNull(),
+    activationId: uuid("activation_id").notNull(),
+    activationPreparationId: uuid("activation_preparation_id").notNull(),
+    tenantId: text("tenant_id").notNull(),
+    tenantName: text("tenant_name").notNull(),
+    subscriptionId: uuid("subscription_id").notNull(),
+    ownerKind: text("owner_kind").$type<"station" | "handheld" | "kiosk">().notNull(),
+    stationDeviceId: uuid("station_device_id"),
+    kioskId: uuid("kiosk_id"),
+    deviceName: text("device_name").notNull(),
+    credentialEpoch: integer("credential_epoch").notNull(),
+    assignmentId: uuid("assignment_id"),
+    configurationId: uuid("configuration_id").notNull(),
+    basePolicyId: uuid("base_policy_id").notNull(),
+    strictPolicyId: uuid("strict_policy_id").notNull(),
+    activatedAt: timestamp("activated_at", { withTimezone: true }).notNull(),
+    reservationState: text("reservation_state")
+      .$type<"prepared" | "released">()
+      .notNull()
+      .default("prepared"),
+  },
+  (t) => [
+    unique("offline_grant_rollback_members_preparation_activation_uq").on(
+      t.preparationId,
+      t.activationId,
+    ),
+    uniqueIndex("offline_grant_rollback_members_active_reservation_uq")
+      .on(t.activationId)
+      .where(sql`${t.reservationState} = 'prepared'`),
+    foreignKey({
+      name: "offline_grant_rollback_members_preparation_fk",
+      columns: [t.preparationId],
+      foreignColumns: [offlineGrantRollbackPreparations.id],
+    }),
+    foreignKey({
+      name: "offline_grant_rollback_members_activation_fk",
+      columns: [t.tenantId, t.activationId],
+      foreignColumns: [offlineGrantDeviceActivations.tenantId, offlineGrantDeviceActivations.id],
+    }),
+    foreignKey({
+      name: "offline_grant_rollback_members_activation_preparation_fk",
+      columns: [t.activationPreparationId],
+      foreignColumns: [offlineGrantActivationPreparations.id],
+    }),
+    foreignKey({
+      name: "offline_grant_rollback_members_subscription_fk",
+      columns: [t.tenantId, t.subscriptionId],
+      foreignColumns: [tenantSubscriptions.tenantId, tenantSubscriptions.id],
+    }),
+    foreignKey({
+      name: "offline_grant_rollback_members_station_fk",
+      columns: [t.tenantId, t.stationDeviceId, t.ownerKind],
+      foreignColumns: [stationDevices.tenantId, stationDevices.id, stationDevices.kind],
+    }),
+    foreignKey({
+      name: "offline_grant_rollback_members_kiosk_fk",
+      columns: [t.tenantId, t.kioskId],
+      foreignColumns: [kiosks.tenantId, kiosks.id],
+    }),
+    foreignKey({
+      name: "offline_grant_rollback_members_assignment_fk",
+      columns: [t.tenantId, t.assignmentId],
+      foreignColumns: [workingDeviceAssignments.tenantId, workingDeviceAssignments.id],
+    }),
+    foreignKey({
+      name: "offline_grant_rollback_members_base_policy_fk",
+      columns: [t.basePolicyId],
+      foreignColumns: [entitlementLifecyclePolicies.id],
+    }),
+    foreignKey({
+      name: "offline_grant_rollback_members_strict_policy_fk",
+      columns: [t.strictPolicyId],
+      foreignColumns: [entitlementLifecyclePolicies.id],
+    }),
+    check(
+      "offline_grant_rollback_members_owner_check",
+      sql`(${t.ownerKind} in ('station','handheld') and ${t.stationDeviceId} is not null and ${t.kioskId} is null and ${t.assignmentId} is not null) or (${t.ownerKind} = 'kiosk' and ${t.kioskId} is not null and ${t.stationDeviceId} is null and ${t.assignmentId} is null)`,
+    ),
+    check(
+      "offline_grant_rollback_members_snapshot_check",
+      sql`${t.credentialEpoch} > 0 and ${t.basePolicyId} <> ${t.strictPolicyId} and isfinite(${t.activatedAt}) and length(btrim(${t.tenantName})) between 1 and 300 and length(btrim(${t.deviceName})) between 1 and 300 and ${t.reservationState} in ('prepared','released')`,
+    ),
   ],
 );
 
@@ -270,3 +466,5 @@ export type NewOfflineGrantActivationPreparation =
   typeof offlineGrantActivationPreparations.$inferInsert;
 export type OfflineGrantActivationMember = typeof offlineGrantActivationMembers.$inferSelect;
 export type OfflineGrantDeviceActivation = typeof offlineGrantDeviceActivations.$inferSelect;
+export type OfflineGrantRollbackPreparation = typeof offlineGrantRollbackPreparations.$inferSelect;
+export type OfflineGrantRollbackMember = typeof offlineGrantRollbackMembers.$inferSelect;
