@@ -927,14 +927,14 @@ intent, or the real device's screen.
 
 All four Android and API gates ran on this branch.
 
-| Gate | Result |
-| --- | --- |
-| `testDebugUnitTest` (apps/handheld) | 976 passed, 0 failed, 0 skipped |
-| `lintDebug` | clean, 79 pre-existing warnings, 0 errors |
-| `assembleDebug` | debug APK built |
-| `@markiro/api test` | 4263 passed, 26 skipped |
-| `@markiro/api` typecheck / lint / build | clean |
-| `pnpm format:check` | clean |
+| Gate                                    | Result                                    |
+| --------------------------------------- | ----------------------------------------- |
+| `testDebugUnitTest` (apps/handheld)     | 976 passed, 0 failed, 0 skipped           |
+| `lintDebug`                             | clean, 79 pre-existing warnings, 0 errors |
+| `assembleDebug`                         | debug APK built                           |
+| `@markiro/api test`                     | 4263 passed, 26 skipped                   |
+| `@markiro/api` typecheck / lint / build | clean                                     |
+| `pnpm format:check`                     | clean                                     |
 
 Two deviations from the plan as written, both deliberate:
 
