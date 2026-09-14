@@ -1,3 +1,12 @@
+import type { PublicApiOwnerRequest } from "../public-api/public-api-request.service";
+import {
+  inventoryActor,
+  actorUserId as inventoryActorUserId,
+  actorKeyId,
+  actorAudit,
+  runInventoryOwner,
+  type InventoryActor,
+} from "./inventory-actor";
 import {
   BadRequestException,
   ConflictException,
@@ -143,91 +152,99 @@ export class InventoryLifecycleService {
 
   async start(
     tenantId: string,
-    actorUserId: string,
+    actorInput: string | InventoryActor,
     inventoryId: string,
+    publicRequest?: PublicApiOwnerRequest,
   ): Promise<StationInventoryManifest> {
-    const admissionFacts = await this.admission.capture(tenantId);
-    return this.db.transaction(async (tx) => {
-      const inventory = await this.lockInventory(tx, tenantId, inventoryId);
-      if (inventory.status !== "ready" && inventory.status !== "running") {
-        throw new ConflictException({ code: "INVENTORY_START_REQUIRES_READY" });
-      }
+    const actor = inventoryActor(actorInput, publicRequest);
+    const actorUserId = inventoryActorUserId(actor);
+    publicRequest?.assertBinding(tenantId, "inventory.start", { inventoryId });
+    const admissionFacts = publicRequest ? undefined : await this.admission.capture(tenantId);
+    return this.db.transaction(async (tx) =>
+      runInventoryOwner(tx, publicRequest, parseStationInventoryManifest, async () => {
+        const inventory = await this.lockInventory(tx, tenantId, inventoryId);
+        if (inventory.status !== "ready" && inventory.status !== "running") {
+          throw new ConflictException({ code: "INVENTORY_START_REQUIRES_READY" });
+        }
 
-      if (inventory.status === "running") {
+        if (inventory.status === "running") {
+          try {
+            const facts = await this.loadStoredManifestFacts(tx, tenantId, inventory);
+            return await resolveStoredStationInventoryManifest(tx, tenantId, facts);
+          } catch {
+            throw new ConflictException({ code: "INVENTORY_STORED_MANIFEST_INVALID" });
+          }
+        }
+
+        const facts = await this.loadStartFacts(tx, tenantId, inventory);
+        const generatedManifest = this.toManifest(facts);
+        let manifest: StationInventoryManifest;
         try {
-          const facts = await this.loadStoredManifestFacts(tx, tenantId, inventory);
-          return await resolveStoredStationInventoryManifest(tx, tenantId, facts);
+          manifest = parseStationInventoryManifest(generatedManifest);
         } catch {
           throw new ConflictException({ code: "INVENTORY_STORED_MANIFEST_INVALID" });
         }
-      }
-
-      const facts = await this.loadStartFacts(tx, tenantId, inventory);
-      const generatedManifest = this.toManifest(facts);
-      let manifest: StationInventoryManifest;
-      try {
-        manifest = parseStationInventoryManifest(generatedManifest);
-      } catch {
-        throw new ConflictException({ code: "INVENTORY_STORED_MANIFEST_INVALID" });
-      }
-      await this.admission.observe({
-        tenantId,
-        facts: admissionFacts,
-        actor: { domain: "cabinet", id: actorUserId },
-        operationId: "inventory.task.start.v1",
-        scopeDigest: admissionScopeDigest({
-          inventoryId: inventory.id,
-          snapshotId: facts.snapshot.id,
-          snapshotRevision: facts.snapshot.revision,
-          combinedDigest: facts.snapshot.combinedDigest,
-        }),
-        runtime: { enabled: true, observedAt: new Date() },
-        transaction: tx,
-      });
-      const startedAt = new Date();
-      await tx
-        .update(schema.inventories)
-        .set({
-          status: "running",
-          stationManifest: manifest,
-          startedByUserId: actorUserId,
-          startedAt,
-          updatedAt: startedAt,
-        })
-        .where(
-          and(
-            eq(schema.inventories.tenantId, tenantId),
-            eq(schema.inventories.id, inventory.id),
-            eq(schema.inventories.status, "ready"),
-          ),
-        );
-      await tx.insert(schema.tenantAuditEvents).values({
-        organizationId: tenantId,
-        actorUserId,
-        action: "inventory.started",
-        outcome: "success",
-        targetType: "inventory",
-        targetId: inventory.id,
-        after: {
-          tenantId,
+        if (!publicRequest)
+          await this.admission.observe({
+            tenantId,
+            facts: admissionFacts,
+            actor: { domain: "cabinet", id: actorUserId },
+            operationId: "inventory.task.start.v1",
+            scopeDigest: admissionScopeDigest({
+              inventoryId: inventory.id,
+              snapshotId: facts.snapshot.id,
+              snapshotRevision: facts.snapshot.revision,
+              combinedDigest: facts.snapshot.combinedDigest,
+            }),
+            runtime: { enabled: true, observedAt: new Date() },
+            transaction: tx,
+          });
+        const startedAt = new Date();
+        await tx
+          .update(schema.inventories)
+          .set({
+            status: "running",
+            stationManifest: manifest,
+            startedByUserId: actorUserId,
+            startedByPublicKeyId: actorKeyId(actor),
+            startedAt,
+            updatedAt: startedAt,
+          })
+          .where(
+            and(
+              eq(schema.inventories.tenantId, tenantId),
+              eq(schema.inventories.id, inventory.id),
+              eq(schema.inventories.status, "ready"),
+            ),
+          );
+        await tx.insert(schema.tenantAuditEvents).values({
+          organizationId: tenantId,
           actorUserId,
-          inventoryId: inventory.id,
-          snapshotId: facts.snapshot.id,
-          snapshotRevision: facts.snapshot.revision,
-          combinedDigest: facts.snapshot.combinedDigest,
-          counts: facts.snapshot.counts,
-          productId: facts.product.id,
-          productName: facts.product.name,
-          gtin14: facts.product.gtin14,
-          boxCapacity: facts.product.boxCapacity,
-          lineId: facts.line.id,
-          lineName: facts.line.name,
-          mode: inventory.mode,
-        },
-      });
+          action: "inventory.started",
+          outcome: "success",
+          targetType: "inventory",
+          targetId: inventory.id,
+          after: {
+            tenantId,
+            ...actorAudit(actor),
+            inventoryId: inventory.id,
+            snapshotId: facts.snapshot.id,
+            snapshotRevision: facts.snapshot.revision,
+            combinedDigest: facts.snapshot.combinedDigest,
+            counts: facts.snapshot.counts,
+            productId: facts.product.id,
+            productName: facts.product.name,
+            gtin14: facts.product.gtin14,
+            boxCapacity: facts.product.boxCapacity,
+            lineId: facts.line.id,
+            lineName: facts.line.name,
+            mode: inventory.mode,
+          },
+        });
 
-      return manifest;
-    });
+        return manifest;
+      }),
+    );
   }
 
   private async lockInventory(

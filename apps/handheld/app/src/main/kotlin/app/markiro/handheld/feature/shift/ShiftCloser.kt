@@ -1,5 +1,6 @@
 package app.markiro.handheld.feature.shift
 
+import app.markiro.handheld.core.grants.*
 import android.database.sqlite.SQLiteConstraintException
 import app.markiro.handheld.core.km.Verdict
 import app.markiro.handheld.core.storage.HandheldDatabase
@@ -88,6 +89,7 @@ class ShiftCloser(private val db: HandheldDatabase, private val clock: () -> Lon
             conflictCode = null,
             lastCheckedAt = null,
         )
+        db.grants.complete(TaskKind.SHIFT,shiftId,row.eventId,GrantEventType.SHIFT_CLOSE)
         try {
             db.shiftCloseDao().insert(row)
         } catch (_: SQLiteConstraintException) {

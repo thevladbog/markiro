@@ -1,5 +1,6 @@
 package app.markiro.handheld.core.scan
 
+import app.markiro.handheld.core.grants.*
 import android.database.sqlite.SQLiteConstraintException
 import app.markiro.handheld.core.km.Classification
 import app.markiro.handheld.core.km.ParsedKm
@@ -93,6 +94,7 @@ class ScanRecorder(private val db: HandheldDatabase, private val clock: () -> Lo
                     write(
                         shift.id, raw, verdict, scannedAt, operatorId,
                         if (accepted) c.km else null, if (accepted) c.hash else null, if (accepted) boxId else null,
+                        executionFingerprint = GrantTaskMatcher.fingerprint(shift),
                     )
                     ScanOutcome(verdict, c.km, c.hash, firstSeen, scannedAt, admission?.refusal)
                 }
@@ -109,11 +111,12 @@ class ScanRecorder(private val db: HandheldDatabase, private val clock: () -> Lo
         km: ParsedKm?,
         hash: String?,
         boxId: String?,
+        executionFingerprint: String? = null,
     ) {
         db.scanEventDao().insert(
             ScanEventEntity(shiftId = shiftId, raw = raw, verdict = verdict.wire, scannedAt = scannedAt, operatorId = operatorId, codeHash = hash),
         )
-        db.outboxDao().insert(
+        val outboxId = db.outboxDao().insert(
             OutboxEntity(
                 shiftId = shiftId,
                 raw = raw,
@@ -126,5 +129,6 @@ class ScanRecorder(private val db: HandheldDatabase, private val clock: () -> Lo
                 boxId = boxId,
             ),
         )
+        if(verdict == Verdict.OK) db.grants.complete(TaskKind.SHIFT,shiftId,"shift.scan:$outboxId",GrantEventType.SHIFT_SCAN,units=1,payload=raw,executionFingerprint=executionFingerprint)
     }
 }

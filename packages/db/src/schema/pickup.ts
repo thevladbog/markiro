@@ -143,6 +143,7 @@ export const kiosks = pgTable(
     name: text("name").notNull(),
     location: text("location"),
     deviceTokenHash: text("device_token_hash"),
+    credentialEpoch: integer("credential_epoch").notNull().default(1),
     dayLimitPerEmployee: integer("day_limit_per_employee").notNull().default(5),
     showPrices: boolean("show_prices").notNull().default(true),
     printEmployeeQrOnSlip: boolean("print_employee_qr_on_slip").notNull().default(false),
@@ -152,6 +153,7 @@ export const kiosks = pgTable(
   },
   (t) => [
     unique("kiosks_tenant_id_uq").on(t.tenantId, t.id),
+    check("kiosks_credential_epoch_check", sql`${t.credentialEpoch} > 0`),
     // device_token_hash is a deterministic sha256, unique when present.
     uniqueIndex("kiosks_device_token_uq")
       .on(t.deviceTokenHash)
@@ -175,6 +177,9 @@ export const kioskOrderAdmissions = pgTable(
     subscriptionId: uuid("subscription_id").notNull(),
     tokenHash: char("token_hash", { length: 64 }).notNull(),
     payloadDigest: char("payload_digest", { length: 64 }).notNull(),
+    /** Native grants only: legacy reservations deliberately have no frozen authority. */
+    frozenScope: jsonb("frozen_scope").$type<Record<string, unknown>>(),
+    credentialEpoch: integer("credential_epoch"),
     claimedAt: timestamp("claimed_at", { withTimezone: true }).notNull(),
     notAfter: timestamp("not_after", { withTimezone: true }).notNull(),
     issuedAt: timestamp("issued_at", { withTimezone: true }).notNull().defaultNow(),

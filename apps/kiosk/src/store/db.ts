@@ -8,7 +8,9 @@ const DB_NAME = "markiro-kiosk";
  * `countTakenToday` does with an entry from before the journal carried an
  * employee.
  */
-const DB_VERSION = 5;
+const DB_VERSION = 6;
+
+export const STORE_GRANTS = "offline-grants";
 
 export const STORE_CONFIG = "config";
 export const STORE_SNAPSHOT = "snapshot";
@@ -50,6 +52,7 @@ function open(): Promise<IDBDatabase> {
       // Singleton stores: one row under a fixed key. Keeping them as object
       // stores (rather than one blob) lets a snapshot replacement and a queue
       // write proceed without contending on the same record.
+      if (!db.objectStoreNames.contains(STORE_GRANTS)) db.createObjectStore(STORE_GRANTS);
       if (!db.objectStoreNames.contains(STORE_CONFIG)) db.createObjectStore(STORE_CONFIG);
       if (!db.objectStoreNames.contains(STORE_SNAPSHOT)) db.createObjectStore(STORE_SNAPSHOT);
       // `deviceSeq` is the queue's natural key, and IndexedDB iterates a key
@@ -117,7 +120,10 @@ export async function withTransaction(
       db.close();
       resolve();
     };
-    tx.onerror = () => fail(tx.error ?? new Error("IndexedDB transaction failed"));
+    tx.onerror = () =>
+      fail(
+        transactionAbortReasons.get(tx) ?? tx.error ?? new Error("IndexedDB transaction failed"),
+      );
     tx.onabort = () =>
       fail(
         transactionAbortReasons.get(tx) ?? tx.error ?? new Error("IndexedDB transaction aborted"),

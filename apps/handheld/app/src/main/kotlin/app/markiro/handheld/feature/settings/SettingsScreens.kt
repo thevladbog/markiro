@@ -1,5 +1,8 @@
 package app.markiro.handheld.feature.settings
 
+import app.markiro.handheld.core.grants.GrantEvidenceStatus
+import app.markiro.handheld.core.grants.GrantStatus
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -71,6 +74,9 @@ fun SettingsScreen(
     onTest: (SignalKind) -> Unit = {},
     onCheckUpdate: () -> Unit = {},
     onInstallUpdate: () -> Unit = {},
+    grantStatus: GrantStatus? = GrantStatus.OBSERVE,
+    evidenceStatus: GrantEvidenceStatus? = null,
+    onRefreshGrants: () -> Unit = {},
 ) {
     val c = MarkiroTheme.colors
     Column(Modifier.fillMaxSize().background(c.surfacePage).verticalScroll(rememberScrollState())) {
@@ -133,6 +139,20 @@ fun SettingsScreen(
             InfoRow(stringResource(R.string.settings_name), listOfNotNull(config?.deviceName, config?.lineName).joinToString(" · "))
             InfoRow(stringResource(R.string.settings_server), config?.serverUrl.orEmpty().removePrefix("https://"))
             InfoRow(stringResource(R.string.settings_version), state.version)
+            if (grantStatus != null) {
+                InfoRow(stringResource(R.string.offline_grant_status_title), stringResource(when (grantStatus) {
+                    GrantStatus.OBSERVE -> R.string.offline_grant_status_observe
+                    GrantStatus.STRICT -> R.string.offline_grant_status_strict
+                    GrantStatus.REFRESH_REQUIRED -> R.string.offline_grant_status_refresh
+                    GrantStatus.CLOCK_UNTRUSTED -> R.string.offline_grant_status_clock
+                }))
+                SettingRow(stringResource(R.string.offline_grant_refresh), stringResource(R.string.offline_grant_recovery_available), onRefreshGrants)
+            }
+            evidenceStatus?.let {
+                InfoRow(stringResource(R.string.offline_grant_evidence_title), stringResource(
+                    if (it == GrantEvidenceStatus.REVIEW_REQUIRED) R.string.offline_grant_evidence_review else R.string.offline_grant_evidence_observed,
+                ))
+            }
             // A row, not a banner: the terminal is offline most of a shift, so
             // this answers only when an operator asks.
             SettingRow(stringResource(R.string.settings_update), updateLabel(state), onCheckUpdate)

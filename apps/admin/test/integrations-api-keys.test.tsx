@@ -38,6 +38,9 @@ interface KeyFixture {
   name: string | null;
   createdAt: string;
   lastRequest?: string | null;
+  scopes?: Array<
+    "catalog.products.read" | "inventory.read" | "inventory.prepare" | "inventory.start"
+  >;
 }
 
 function toApiKeyDto(fixture: KeyFixture) {
@@ -47,6 +50,7 @@ function toApiKeyDto(fixture: KeyFixture) {
     kind: "public" as const,
     createdAt: fixture.createdAt,
     lastRequest: fixture.lastRequest ?? null,
+    scopes: fixture.scopes ?? [],
   };
 }
 
@@ -69,15 +73,23 @@ let listMode: "ok" | "pending" | "error" = "ok";
  * same way a real server would after another admin/tab revoked it first.
  */
 let revokeMode: "ok" | "already-gone" = "ok";
+let issueMode: "ok" | "error" = "ok";
+let updateMode: "ok" | "error" = "ok";
 
 /** Every `DELETE /integrations/public_api/keys/:id` call, as the key id. */
 const revokeSpy = vi.fn();
+const issueSpy = vi.fn();
+const updateSpy = vi.fn();
 
 beforeEach(() => {
   keysFixture = [];
   listMode = "ok";
   revokeMode = "ok";
+  issueMode = "ok";
+  updateMode = "ok";
   revokeSpy.mockClear();
+  issueSpy.mockClear();
+  updateSpy.mockClear();
 });
 
 /** `stubKeys([...])` -- overrides the keys-list fixture for one test. */
@@ -114,8 +126,29 @@ function renderPanel(access: AccessDocument = ADMIN_ACCESS) {
     }
 
     if (method === "POST" && path === "/integrations/public_api/keys") {
-      const body = JSON.parse((init?.body as string | undefined) ?? "{}") as { name: string };
-      return jsonResponse(200, { id: "new-key", key: `mk_${body.name.toLowerCase()}_secret` });
+      const body = JSON.parse((init?.body as string | undefined) ?? "{}") as {
+        name: string;
+        scopes: string[];
+      };
+      issueSpy(body);
+      if (issueMode === "error") return jsonResponse(409, { message: "Scope issue failed" });
+      return jsonResponse(200, {
+        id: "new-key",
+        key: `mk_${body.name.toLowerCase()}_secret`,
+        scopes: body.scopes,
+      });
+    }
+
+    const updateMatch = /^\/integrations\/public_api\/keys\/([^/]+)$/.exec(path);
+    if (method === "PATCH" && updateMatch) {
+      const body = JSON.parse((init?.body as string | undefined) ?? "{}") as {
+        scopes: string[];
+      };
+      updateSpy(updateMatch[1], body);
+      if (updateMode === "error") return jsonResponse(409, { message: "Scope edit failed" });
+      const target = keysFixture.find((key) => key.id === updateMatch[1]);
+      if (target) target.scopes = body.scopes as NonNullable<KeyFixture["scopes"]>;
+      return jsonResponse(200, { id: updateMatch[1], scopes: body.scopes });
     }
 
     const revokeMatch = /^\/integrations\/public_api\/keys\/([^/]+)$/.exec(path);
@@ -158,6 +191,88 @@ describe("ApiKeysPanel", () => {
     await userEvent.click(screen.getByRole("button", { name: /выпустить/i }));
     expect(await screen.findByText(/mk_/)).toBeDefined();
     expect(screen.getByText(/больше он показан не будет/i)).toBeDefined();
+  });
+
+  it("выпускает ключ с явно выбранным полным набором прав", async () => {
+    renderPanel();
+    await userEvent.type(await screen.findByLabelText(/название/i), "ERP");
+    await userEvent.click(screen.getByRole("checkbox", { name: "Чтение каталога товаров" }));
+    await userEvent.click(screen.getByRole("checkbox", { name: "Подготовка инвентаризаций" }));
+    await userEvent.click(screen.getByRole("button", { name: /выпустить/i }));
+
+    await waitFor(() =>
+      expect(issueSpy).toHaveBeenCalledWith({
+        name: "ERP",
+        scopes: ["catalog.products.read", "inventory.prepare"],
+      }),
+    );
+    expect(await screen.findByText(/mk_erp_secret/i)).toBeDefined();
+  });
+
+  it("скрывает прежний секрет и сохраняет новый черновик после ошибки повторного выпуска", async () => {
+    renderPanel();
+    const name = await screen.findByLabelText(/название/i);
+    const prepare = screen.getByRole("checkbox", { name: "Подготовка инвентаризаций" });
+    await userEvent.type(name, "Key A");
+    await userEvent.click(screen.getByRole("button", { name: /выпустить/i }));
+    expect(await screen.findByText(/mk_key a_secret/i)).toBeDefined();
+
+    issueMode = "error";
+    await userEvent.type(name, "Key B");
+    await userEvent.click(prepare);
+    await userEvent.click(screen.getByRole("button", { name: /выпустить/i }));
+
+    await waitFor(() => expect(issueSpy).toHaveBeenCalledTimes(2));
+    expect((name as HTMLInputElement).value).toBe("Key B");
+    expect(prepare.getAttribute("aria-checked")).toBe("true");
+    expect(screen.queryByText(/mk_key a_secret/i)).toBeNull();
+    expect(screen.queryByText(/больше он показан не будет/i)).toBeNull();
+  });
+
+  it("показывает права каждого ключа и объясняет старый ключ без прав выполнения", async () => {
+    stubKeys([
+      {
+        id: "scoped",
+        name: "ERP",
+        createdAt: iso(-1),
+        scopes: ["catalog.products.read", "inventory.prepare"],
+      },
+      { id: "legacy", name: "Legacy", createdAt: iso(-1), scopes: [] },
+    ]);
+    renderPanel();
+
+    const scopedRow = await screen.findByRole("row", { name: /ERP/ });
+    expect(scopedRow.textContent).toContain("Чтение каталога товаров");
+    expect(scopedRow.textContent).toContain("Подготовка инвентаризаций");
+    const legacyRow = screen.getByRole("row", { name: /Legacy/ });
+    expect(legacyRow.textContent).toMatch(/старого формата нет прав выполнения/i);
+  });
+
+  it("редактирует полный набор прав и сохраняет черновик после ошибки", async () => {
+    stubKeys([
+      {
+        id: "k1",
+        name: "ERP",
+        createdAt: iso(-1),
+        scopes: ["catalog.products.read"],
+      },
+    ]);
+    updateMode = "error";
+    renderPanel();
+    await userEvent.click(await screen.findByRole("button", { name: /изменить права/i }));
+    const dialog = await screen.findByRole("dialog", { name: /права ключа/i });
+    const catalog = within(dialog).getByRole("checkbox", { name: "Чтение каталога товаров" });
+    const prepare = within(dialog).getByRole("checkbox", { name: "Подготовка инвентаризаций" });
+    await userEvent.click(catalog);
+    await userEvent.click(prepare);
+    await userEvent.click(within(dialog).getByRole("button", { name: /сохранить права/i }));
+
+    await waitFor(() =>
+      expect(updateSpy).toHaveBeenCalledWith("k1", { scopes: ["inventory.prepare"] }),
+    );
+    expect(screen.getByRole("dialog", { name: /права ключа/i })).toBeDefined();
+    expect(catalog.getAttribute("aria-checked")).toBe("false");
+    expect(prepare.getAttribute("aria-checked")).toBe("true");
   });
 
   it("отзыв требует подтверждения — ключ живой и его отзыв необратим", async () => {

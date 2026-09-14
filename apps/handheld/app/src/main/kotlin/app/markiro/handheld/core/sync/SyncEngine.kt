@@ -1,5 +1,7 @@
 package app.markiro.handheld.core.sync
 
+import app.markiro.handheld.core.grants.GrantEvidenceTransport
+
 import app.markiro.handheld.core.storage.applyValidationReceipt
 import app.markiro.handheld.core.network.ValidationOccurrenceIdentity
 import app.markiro.handheld.core.network.ValidationOccurrenceReceipt
@@ -156,7 +158,7 @@ class SyncEngine(
     private suspend fun drainOnceOwned(): Step {
         val cfg = config.get() ?: return Step.EMPTY
         val pendingCeiling = meta.get(MetaStore.SYNC_PENDING_CEILING)?.toLongOrNull()
-        val rows = if (pendingCeiling != null) db.outboxDao().headThrough(pendingCeiling, BATCH_SIZE) else db.outboxDao().head(BATCH_SIZE)
+        var rows = if (pendingCeiling != null) db.outboxDao().headThrough(pendingCeiling, BATCH_SIZE) else db.outboxDao().head(BATCH_SIZE)
         // A batch in flight re-reads the EXACT box set it already chose. `unacked`
         // orders by (closedAt, boxId) and nothing can close earlier than a box that
         // already closed, so the first N rows are stable and a retry stays
@@ -167,7 +169,7 @@ class SyncEngine(
         // already fixed is the exact way a closure gets answered `alreadyApplied`
         // and lost. Those boxes ride the next batch.
         val boxLimit = if (pendingCeiling != null) meta.get(MetaStore.SYNC_PENDING_BOX_COUNT)?.toIntOrNull() ?: 0 else MAX_BOX_CLOSURES
-        val boxRows = if (boxLimit == 0) emptyList() else db.boxDao().unacked(boxLimit)
+        var boxRows = if (boxLimit == 0) emptyList() else db.boxDao().unacked(boxLimit)
         // Product-label events follow the same pinning rule for the same reason:
         // a batch whose id is already fixed must carry the set it chose and no
         // more, or an event added since gets answered `alreadyApplied` and lost.
@@ -176,7 +178,7 @@ class SyncEngine(
         } else {
             MAX_PRODUCT_LABEL_EVENTS
         }
-        val labelRows = if (labelLimit == 0) emptyList() else db.productLabelEventDao().unacked(labelLimit)
+        var labelRows = if (labelLimit == 0) emptyList() else db.productLabelEventDao().unacked(labelLimit)
         // Pallets (06d) follow the identical pinning rule, for the identical
         // reason: a batch whose id is already fixed must carry the pallet set
         // it chose and no more, or a pallet closing since gets answered
@@ -188,7 +190,30 @@ class SyncEngine(
         } else {
             MAX_PALLET_CLOSURES
         }
-        val palletRows = if (palletLimit == 0) emptyList() else db.palletDao().unacked(palletLimit)
+        var palletRows = if (palletLimit == 0) emptyList() else db.palletDao().unacked(palletLimit)
+        val evidence = GrantEvidenceTransport(db)
+        // ACK retains the initial event for the live job. Recovery attempts inherit its
+        // protocol, not current grant availability; retention removes the job and events together.
+        val labelNegotiation = mutableMapOf<String, Boolean>()
+        for (row in labelRows) {
+            if (row.jobId !in labelNegotiation) {
+                val initial = db.productLabelEventDao().bySequence(row.jobId).firstOrNull { it.sequence == 1 && isInitialLabelPreparation(it) }
+                labelNegotiation[row.jobId] = initial?.let { evidence.negotiated(it.eventId) } ?: false
+            }
+        }
+        val negotiatedBatch = if (pendingCeiling != null) meta.get(GrantEvidenceTransport.SYNC_PROTOCOL) == "true" else {
+            // Split only new batches. A legacy durable pin is never retroactively regrouped.
+            val first = rows.firstOrNull { it.verdict == "ok" }?.let { "shift.scan:${it.id}" }
+                ?: boxRows.firstOrNull()?.let { "shift.box.close:${it.boxId}" }
+                ?: palletRows.firstOrNull()?.let { "shift.pallet.close:${it.palletId}" }
+            first?.let { evidence.negotiated(it) } ?: labelRows.firstOrNull()?.let { labelNegotiation[it.jobId] } ?: false
+        }
+        if (pendingCeiling == null) {
+            rows = rows.takeWhile { it.verdict != "ok" || evidence.negotiated("shift.scan:${it.id}") == negotiatedBatch }
+            boxRows = boxRows.takeWhile { evidence.negotiated("shift.box.close:${it.boxId}") == negotiatedBatch }
+            palletRows = palletRows.takeWhile { evidence.negotiated("shift.pallet.close:${it.palletId}") == negotiatedBatch }
+            labelRows = labelRows.takeWhile { labelNegotiation[it.jobId] == negotiatedBatch }
+        }
         val palletIds = palletRows.map { it.palletId }
         // Pallet corrections pin like everything else...
         val palletExceptionLimit = if (pendingCeiling != null) {
@@ -275,6 +300,7 @@ class SyncEngine(
             meta.put(MetaStore.SYNC_PENDING_EXCEPTION_COUNT, exceptionRows.size.toString())
             meta.put(MetaStore.SYNC_PENDING_PALLET_EXCEPTION_COUNT, palletExceptionRows.size.toString())
             meta.put(MetaStore.SYNC_PENDING_BATCH_ID, id)
+            meta.put(GrantEvidenceTransport.SYNC_PROTOCOL, negotiatedBatch.toString())
             }
             id
         }
@@ -290,9 +316,17 @@ class SyncEngine(
                 palletExceptionRows.map { json.parseToJsonElement(it.payloadJson) },
             ),
         )
-        val result = transport.post("/station/scans", body) as? TransportResult.Ok ?: return Step.FAILED
+        val links = buildMap {
+            rows.forEachIndexed { i, row -> if (row.verdict == "ok") put("/items/$i#shift.scan.v1", "shift.scan:${row.id}") }
+            boxRows.forEachIndexed { i, row -> put("/boxes/$i#shift.box.close.v1", "shift.box.close:${row.boxId}") }
+            palletRows.forEachIndexed { i, row -> put("/pallets/$i#shift.pallet.close.v1", "shift.pallet.close:${row.palletId}") }
+            labelRows.forEachIndexed { i, row -> if (isInitialLabelPreparation(row)) put("/productLabelEvents/$i#shift.label.prepare.v1", row.eventId) }
+        }
+        val request = evidence.prepare("scans", batchId, "/station/scans", body, links, negotiatedBatch)
+        val result = transport.post(request.path, request.body) as? TransportResult.Ok ?: return Step.FAILED
         if (result.code !in 200..299) return Step.FAILED
-        val parsed = parseBatchResponse(result.body) ?: return Step.FAILED
+        val native = evidence.nativeResult(request, result.body) ?: return Step.FAILED
+        val parsed = parseBatchResponse(native) ?: return Step.FAILED
         // A fresh batch is applied whole (`applied == items.length`) or replayed (`alreadyApplied`); anything else is not this endpoint.
         if (!parsed.alreadyApplied && parsed.applied != rows.size) return Step.FAILED
         val at = clock()
@@ -342,6 +376,7 @@ class SyncEngine(
                 db.palletExceptionDao().markAcked(palletExceptionRows.map { it.id }, Iso.format(at))
                 db.palletExceptionDao().purgeAcked()
             }
+            db.metaDao().remove(GrantEvidenceTransport.SYNC_PROTOCOL)
             db.metaDao().remove(MetaStore.SYNC_PENDING_BATCH_ID)
             db.metaDao().remove(MetaStore.SYNC_PENDING_CEILING)
             db.metaDao().remove(MetaStore.SYNC_PENDING_BOX_COUNT)
@@ -363,6 +398,7 @@ class SyncEngine(
     private suspend fun clearPending() = db.recovery.commit { clearPendingOwned() }
 
     private suspend fun clearPendingOwned() {
+        meta.remove(GrantEvidenceTransport.SYNC_PROTOCOL)
         meta.remove(MetaStore.SYNC_PENDING_BATCH_ID)
         meta.remove(MetaStore.SYNC_PENDING_CEILING)
         meta.remove(MetaStore.SYNC_PENDING_BOX_COUNT)
@@ -479,6 +515,14 @@ class SyncEngine(
      * 200 with a differently shaped body is exactly the case the rest of this
      * parser is already shaped against.
      */
+    private fun isInitialLabelPreparation(row: app.markiro.handheld.core.storage.ProductLabelEventEntity): Boolean {
+        if (row.kind != "prepared") return false
+        val payload = runCatching { json.parseToJsonElement(row.payloadJson).jsonObject }.getOrNull() ?: return false
+        val attempt = payload["attemptNo"] as? kotlinx.serialization.json.JsonPrimitive ?: return false
+        return !attempt.isString && attempt.intOrNull == 1 &&
+            (payload["reason"] == null || payload["reason"] == kotlinx.serialization.json.JsonNull)
+    }
+
     private fun parseReceipt(obj: kotlinx.serialization.json.JsonObject): ProductLabelReceipt? {
         val receipt = obj["productLabelReceipt"] as? kotlinx.serialization.json.JsonObject ?: return null
         val accepted = (receipt["acceptedEventIds"] as? kotlinx.serialization.json.JsonArray).orEmpty()
@@ -500,9 +544,12 @@ class SyncEngine(
     private suspend fun drainClosesOwned(): Boolean {
         for (row in db.shiftCloseDao().pending()) {
             val body = json.encodeToString(ShiftCloseRequest.serializer(), row.toRequest())
-            val result = transport.post("/station/shift-closures", body) as? TransportResult.Ok ?: return false
+            val evidence = GrantEvidenceTransport(db)
+            val request = evidence.prepare("shift-close", row.eventId, "/station/shift-closures", body, mapOf("/#shift.close.v1" to row.eventId), evidence.negotiated(row.eventId))
+            val result = transport.post(request.path, request.body) as? TransportResult.Ok ?: return false
             if (result.code !in 200..299) return false
-            val response = runCatching { json.decodeFromString(ShiftCloseResponse.serializer(), result.body) }.getOrNull() ?: return false
+            val native = evidence.nativeResult(request, result.body) ?: return false
+            val response = runCatching { json.decodeFromString(ShiftCloseResponse.serializer(), native) }.getOrNull() ?: return false
             when (response.outcome) {
                 // The row stays as the idempotency marker: a second close of the same shift returns it instead of a new event.
                 "accepted", "already_resolved" -> db.recovery.commit { db.shiftCloseDao().markAccepted(row.eventId, Iso.format(clock())) }

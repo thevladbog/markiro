@@ -325,6 +325,7 @@ interface RenderWorkOverrides extends RenderWorkScreenOverrides {
   onPrintRecoveryChange?: (blocked: boolean) => void;
   productShelfLifeDays?: number | null;
   productionDate?: string | null;
+  offlineGrantNotice?: string | null;
 }
 
 // A label spec whose only element resolves to ASCII-only text (the box's
@@ -420,6 +421,7 @@ function renderWork(overrides: RenderWorkOverrides = {}) {
     onPrintRecoveryChange,
     productShelfLifeDays,
     productionDate,
+    offlineGrantNotice,
   } = overrides;
 
   // Seeded regardless of `issuerPrefix`: the "no sscc block" test needs a
@@ -457,6 +459,7 @@ function renderWork(overrides: RenderWorkOverrides = {}) {
       operatorId={operatorId}
       expectedGtin14={expectedGtin14}
       productName={productName}
+      {...(offlineGrantNotice !== undefined ? { offlineGrantNotice } : {})}
       counterpartyName={counterpartyName}
       source={source}
       sound={sound}
@@ -1180,6 +1183,12 @@ describe("WorkScreen", () => {
 });
 
 describe("WorkScreen box progress, closing and printing", () => {
+  it("shows an observation notice without presenting production as blocked", () => {
+    renderWorkTracked({ offlineGrantNotice: "Work continues in observation mode" });
+    expect(screen.getByText("Work continues in observation mode")).toBeDefined();
+    expect(screen.getByRole("alert")).toBeDefined();
+  });
+
   afterEach(() => {
     vi.useRealTimers();
   });

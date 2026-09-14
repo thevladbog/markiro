@@ -269,6 +269,8 @@ describe.skipIf(!ready)("station pairing e2e", () => {
 
   it("recovery rotates an active same-ID credential at full quota and rejects the old key", async () => {
     const oldKey = await pairCurrentDevice();
+    const priorEpoch = (await recoveryState()).devices[0]?.credentialEpoch;
+    expect(priorEpoch).toBe(2);
     await manageCurrentTenant(1);
     const code = await issueRecoveryCode();
     const result = await recoveryPair(
@@ -294,6 +296,7 @@ describe.skipIf(!ready)("station pairing e2e", () => {
     const state = await recoveryState();
     expect(state.keys).toHaveLength(1);
     expect(state.devices).toHaveLength(1);
+    expect(state.devices[0]?.credentialEpoch).toBe(3);
     expect(auditSpy).toHaveBeenLastCalledWith({
       tenantId,
       actorType: "unauthenticated_device",

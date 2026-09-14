@@ -1,5 +1,6 @@
 package app.markiro.handheld.core.storage
 
+import app.markiro.handheld.core.grants.GrantDenied
 import androidx.room.Dao
 import androidx.room.Entity
 import androidx.room.Insert
@@ -163,11 +164,27 @@ class DeviceRecovery(private val db: HandheldDatabase, private val credential: C
         val token = checkNotNull(generationContext.get())
         val lease = currentCoroutineContext()[CommitLease]
         if (lease?.recovery === this) {
-            if (lease.transaction) block() else withContext(CommitLease(this, true)) { db.withTransaction { block() } }
+            if (lease.transaction) block() else withContext(CommitLease(this, true)) { grantAwareTransaction(block) }
         } else commits.withLock {
             if (!valid(token)) throw RecoveryBlocked()
-            withContext(CommitLease(this, true)) { db.withTransaction { block() } }
+            withContext(CommitLease(this, true)) { grantAwareTransaction(block) }
         }
+    }
+
+    private suspend fun <T> grantAwareTransaction(block: suspend () -> T): T = try {
+        db.withTransaction { block() }
+    } catch (denied: GrantDenied) {
+        val captured = generationContext.get()
+        if (captured != null && valid(captured)) {
+            try {
+                db.withTransaction {
+                    if (valid(captured)) db.grants.recordDenied(denied)
+                }
+            } catch (diagnosticFailure: Exception) {
+                denied.addSuppressed(diagnosticFailure)
+            }
+        }
+        throw denied
     }
 
     /** Serialize local preparation with commits/printing without holding a Room transaction. */

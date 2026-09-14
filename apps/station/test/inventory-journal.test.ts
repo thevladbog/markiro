@@ -18,6 +18,7 @@ import {
 } from "../src/lib/inventory-date.js";
 import { applyMigrations, type SqlExecutor } from "../src/lib/mirror.js";
 import { makeExec } from "./support/sqlite-exec.js";
+import { createCredentialGeneration } from "../src/lib/credential-recovery.js";
 
 const INVENTORY_ID = "11111111-1111-4111-8111-111111111111";
 const SNAPSHOT_ID = "22222222-2222-4222-8222-222222222222";
@@ -104,6 +105,16 @@ async function setup() {
   return { db, exec };
 }
 
+function seedPendingLeave(db: DatabaseSync): void {
+  db.prepare(
+    `INSERT INTO offline_grant_inventory_leave_intents
+       (intent_key,inventory_id,snapshot_id,device_id,operator_id,event_id,
+        credential_ownership,pointer_value,payload_json,created_at)
+     VALUES ('leave-1',?,?,?,?,?,'owner','{}','{"pendingEventCount":0,"openBoxCount":0}',
+             '2026-08-25T10:01:00.000Z')`,
+  ).run(INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID, OPERATOR_ID, "leave-event");
+}
+
 function round1Db() {
   const commitStateMigration = STATION_MIGRATIONS.findIndex((statement) =>
     statement.includes("ADD COLUMN commit_state"),
@@ -173,6 +184,114 @@ function suspendOnce(base: SqlExecutor, pattern: RegExp) {
 }
 
 describe("inventory journal", () => {
+  it("blocks a new scan while leave is pending but preserves exact committed replay", async () => {
+    const { db, exec } = await setup();
+    const code = seedCode(db, "PENDING-LEAVE");
+    const committed = input(code.km.raw, "event-before-leave");
+    await recordInventoryScan(exec, committed);
+    seedPendingLeave(db);
+
+    await expect(recordInventoryScan(exec, committed)).resolves.toMatchObject({
+      outcome: "recorded",
+      verdict: "expected",
+    });
+    await expect(
+      recordInventoryScan(exec, input(code.km.raw, "event-after-leave")),
+    ).rejects.toThrow("inventory leave is pending");
+  });
+  it("atomically commits a grant charge with the real inventory reservation and outbox", async () => {
+    const { db, exec: base } = await setup();
+    const exec: SqlExecutor = {
+      ...base,
+      async atomic(statements) {
+        db.exec("BEGIN IMMEDIATE");
+        try {
+          const changes = statements.map((statement) =>
+            Number(
+              db.prepare(statement.sql).run(...([...(statement.values ?? [])] as never[])).changes,
+            ),
+          );
+          db.exec("COMMIT");
+          return changes;
+        } catch (error) {
+          db.exec("ROLLBACK");
+          throw error;
+        }
+      },
+    };
+    db.prepare(
+      `UPDATE inventory_task_mirror SET active_combined_digest='combined',active_content_digest='content',active_manifest_json='{}' WHERE inventory_id=?`,
+    ).run(INVENTORY_ID);
+    db.prepare(
+      "INSERT INTO operators_mirror(operator_id,name,role,pin_hash,active) VALUES(?,?,?,?,1)",
+    ).run(OPERATOR_ID, "Operator", "operator", "hash");
+    db.exec(`INSERT INTO offline_grant_install_state(id,tenant_id,device_id,owner_kind,credential_epoch,request_sequence,mode) VALUES(1,'tenant','${DEVICE_ID}','station',2,1,'strict');
+      INSERT INTO offline_grant_clock(id,server_ms,monotonic_ms,boot_id,high_water_ms,wall_high_water_ms) VALUES(1,100,10,'boot',100,200);`);
+    const grant = {
+      version: 1,
+      kindOfGrant: "task",
+      issuer: "https://issuer.invalid",
+      grantId: "inventory-grant",
+      tenantId: "tenant",
+      deviceId: DEVICE_ID,
+      kind: "station",
+      credentialEpoch: 2,
+      entitlementRevision: "entitlement",
+      policyRevision: "policy",
+      issuedAt: 50,
+      notBefore: 50,
+      taskKind: "inventory",
+      taskId: INVENTORY_ID,
+      snapshotDigest: "digest",
+      completeNotAfter: 1000,
+      eventTypes: ["inventory.scan.v1"],
+      budget: [
+        { id: "inventory.scan.v1:events", unit: "event", maximum: 1 },
+        { id: "inventory.scan.v1:units", unit: "unit", maximum: 1 },
+      ],
+    };
+    const scope = {
+      manifest: {},
+      snapshotId: SNAPSHOT_ID,
+      combinedDigest: "combined",
+      contentDigest: "content",
+    };
+    db.prepare(
+      "INSERT INTO offline_grant_grants(grant_id,kid,compact,grant_json,credential_epoch,installed_sequence) VALUES(?,?,?,?,?,1)",
+    ).run("inventory-grant", "kid", "compact", JSON.stringify(grant), 2);
+    db.prepare(
+      "INSERT INTO offline_grant_snapshots(task_kind,task_id,snapshot_digest,canonical,scope_json,installed_sequence) VALUES('inventory',?,?,?, ?,1)",
+    ).run(INVENTORY_ID, "digest", "canonical", JSON.stringify(scope));
+    const seeded = seedCode(db, "GRANT-ITEM");
+    const outcome = await recordInventoryScan(
+      exec,
+      input(seeded.km.raw, "grant-event"),
+      createCredentialGeneration("secret"),
+      async () => ({ bootId: "boot", monotonicMs: 11, wallMs: 201 }),
+    );
+    expect(expectRecorded(outcome).claimedCount).toBe(1);
+    expect(
+      db
+        .prepare(
+          "SELECT commit_state FROM inventory_scan_events_mirror WHERE event_id='grant-event'",
+        )
+        .get(),
+    ).toEqual({ commit_state: "committed" });
+    expect(db.prepare("SELECT event_id FROM inventory_outbox").get()).toEqual({
+      event_id: "grant-event",
+    });
+    expect(
+      db
+        .prepare(
+          "SELECT budget_line_id,consumed FROM offline_grant_consumption ORDER BY budget_line_id",
+        )
+        .all(),
+    ).toEqual([
+      { budget_line_id: "inventory.scan.v1:events", consumed: 1 },
+      { budget_line_id: "inventory.scan.v1:units", consumed: 1 },
+    ]);
+  });
+
   it("repairs a round-1 committed orphan before it can be presented as accepted", async () => {
     const db = round1Db();
     const code = seedCode(db, "ROUND1-ORPHAN");

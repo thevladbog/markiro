@@ -11,10 +11,6 @@ import type { SerialPort } from "../src/scanner/web-serial.js";
 import { SETTINGS_HOLD_MS } from "../src/screens/Idle.js";
 import { replaceSnapshot } from "../src/store/cache.js";
 import { loadCachedBranding } from "../src/store/branding.js";
-// The namespace as well as the names, so one write can be made to fail under
-// the shell without stubbing the whole store — the shape `sync.test.ts` already
-// uses for `appendJournal`.
-import * as configStore from "../src/store/config.js";
 import {
   readConfig,
   readScannerSettings,
@@ -638,6 +634,68 @@ async function takeOneBottle(): Promise<void> {
 }
 
 describe("KioskShell", () => {
+  it("restores a durable frozen pickup only after the same employee authenticates and waits for explicit confirmation", async () => {
+    await pair(undefined, { nextDeviceSeq: 6 });
+    const { boxRegistryCredentialOwnerOf } = await import("../src/store/installation-binding.js");
+    const { draftKey } = await import("../src/grants/drafts.js");
+    const { withStore, STORE_GRANTS } = await import("../src/store/db.js");
+    const owner = boxRegistryCredentialOwnerOf(await readConfig());
+    if (!owner) throw Error("owner");
+    const body = {
+      deviceSeq: 5,
+      badgeDigest,
+      reason: "buy" as const,
+      writeoffReasonId: null,
+      items: [{ rawKm: KM }],
+      createdAt: NOW.toISOString(),
+    };
+    await withStore(STORE_GRANTS, "readwrite", (store) =>
+      store.put(
+        {
+          recordType: "pickup-draft",
+          owner,
+          employeeId: EMPLOYEE.id,
+          badgeDigest,
+          body,
+          nonce: "fixture",
+          status: "pending",
+          taskReady: true,
+          cart: {
+            reason: "buy",
+            writeoffReasonId: null,
+            notice: null,
+            lines: [
+              {
+                kind: "km",
+                rawKm: KM,
+                kmKey: `${GTIN_MILK}:KYC9X7MQ`,
+                gtin14: GTIN_MILK,
+                serial: "KYC9X7MQ",
+                productId: BOX_PRODUCT_ID,
+                name: MILK,
+                unitPrice: null,
+                bottleCount: 1,
+              },
+            ],
+          },
+        },
+        draftKey(owner, 5),
+      ),
+    );
+    render(<App />);
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+    expect(server.orders).toHaveLength(0);
+    scan(BADGE);
+    await settle(() => expect(screen.getByRole("button", { name: CONFIRM_ONE })).toBeDefined());
+    expect(server.orders).toHaveLength(0);
+    expect(await listQueue()).toEqual([]);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: CONFIRM_ONE }));
+    });
+    await settle(() => expect(server.orders).toHaveLength(1));
+    expect(server.orders[0]?.deviceSeq).toBe(5);
+    expect((await readConfig())?.nextDeviceSeq).toBe(6);
+  });
   it("shows the same employee an unviewed server result after restart and acknowledges it on Done", async () => {
     await pair();
     const config = await readConfig();
@@ -1556,7 +1614,8 @@ describe("KioskShell", () => {
    *
    * A skipped sequence, by contrast, costs nothing at all: the server needs the
    * numbers to be monotonic, not dense. That asymmetry is the entire reason the
-   * counter is written before the order, and it is what this test pins.
+   * counter and order now commit atomically, and this test pins rollback when
+   * the actual IndexedDB counter write fails.
    */
   it("keeps the exact cart visible and retryable when the counter write fails", async () => {
     await seedBoxRegistry();
@@ -1565,9 +1624,24 @@ describe("KioskShell", () => {
 
     // The first worker submits into a config store that refuses exactly one
     // write; every later write is the real one again.
-    const refused = vi
-      .spyOn(configStore, "writeConfig")
-      .mockRejectedValueOnce(new Error("the config store refused the write"));
+    const originalPut = IDBObjectStore.prototype.put;
+    const refused = vi.fn(() => {
+      throw new Error("the config store refused the write");
+    });
+    vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(function (
+      this: IDBObjectStore,
+      ...args: Parameters<IDBObjectStore["put"]>
+    ) {
+      const value = args[0] as Partial<KioskConfig>;
+      if (
+        this.name === "config" &&
+        args[1] === "current" &&
+        value.nextDeviceSeq === 6 &&
+        refused.mock.calls.length === 0
+      )
+        refused();
+      return originalPut.apply(this, args);
+    });
     scan(BADGE);
     await settle(() => expect(screen.getByText(CART_TITLE)).toBeDefined());
     scan(SSCC);
@@ -1579,6 +1653,8 @@ describe("KioskShell", () => {
     });
     await settle(() => expect(refused).toHaveBeenCalled());
     await act(async () => {});
+    expect(await listQueue()).toEqual([]);
+    expect((await readConfig())?.nextDeviceSeq).toBe(5);
     // Nothing was promised: no number, no confirmation, still their own cart —
     // including the exact line they can retry without rescanning.
     expect(screen.getByText(CART_TITLE)).toBeDefined();

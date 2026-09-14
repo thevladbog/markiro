@@ -41,6 +41,12 @@ import { InventoryDocumentsService } from "./inventory-documents.service";
     InventoryDocumentFormatsService,
     InventoryDocumentsService,
   ],
-  exports: [InventoriesService, InventoryResultSourceService],
+  exports: [
+    StationInventorySyncService,
+    InventoriesService,
+    InventoryResultSourceService,
+    InventoryLifecycleService,
+    InventoryReconciliationService,
+  ],
 })
 export class InventoriesModule {}

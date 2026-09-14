@@ -6,6 +6,7 @@
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
+import type { PublicApiScope } from "@markiro/platform-contracts";
 
 import { apiFetch, ApiRequestError } from "../../api/client.js";
 
@@ -506,6 +507,7 @@ export interface ApiKeySummaryDto {
   kind: "public";
   createdAt: string;
   lastRequest: string | null;
+  scopes: PublicApiScope[];
 }
 
 /**
@@ -517,6 +519,7 @@ export interface ApiKeySummaryDto {
 export interface ApiKeyIssuedDto {
   id: string;
   key: string;
+  scopes: PublicApiScope[];
 }
 
 interface ApiKeysListResponse {
@@ -551,18 +554,38 @@ export function useApiKeys(): UseQueryResult<ApiKeySummaryDto[]> {
  * does with the returned value. Invalidates the list on success so the new
  * key (sans secret) shows up in the table without a manual refetch.
  */
-export function useIssueApiKey(): { issue: (name: string) => Promise<ApiKeyIssuedDto> } {
+export function useIssueApiKey(): {
+  issue: (name: string, scopes: PublicApiScope[]) => Promise<ApiKeyIssuedDto>;
+} {
   const queryClient = useQueryClient();
   return {
-    issue: async (name: string) => {
+    issue: async (name: string, scopes: PublicApiScope[]) => {
       const data = await apiFetch<ApiKeyIssuedDto>("/integrations/public_api/keys", {
         method: "POST",
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({ name, scopes }),
       });
       void queryClient.invalidateQueries({ queryKey: API_KEYS_QUERY_KEY });
       return data;
     },
   };
+}
+
+export function useUpdateApiKeyScopes(): UseMutationResult<
+  { id: string; scopes: PublicApiScope[] },
+  Error,
+  { id: string; scopes: PublicApiScope[] }
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, scopes }) =>
+      apiFetch<{ id: string; scopes: PublicApiScope[] }>(`/integrations/public_api/keys/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ scopes }),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: API_KEYS_QUERY_KEY });
+    },
+  });
 }
 
 /**

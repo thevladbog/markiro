@@ -1,3 +1,17 @@
+import {
+  inventoryImportObjectKey,
+  legacyCabinetInventoryImportObjectKey,
+} from "./inventory-import-object-key";
+import type { PublicApiOwnerRequest } from "../public-api/public-api-request.service";
+import {
+  inventoryActor,
+  actorUserId as inventoryActorUserId,
+  actorKeyId,
+  actorAudit,
+  runInventoryOwner,
+  snapshotReceiptSchema,
+  type InventoryActor,
+} from "./inventory-actor";
 import { createHash, randomUUID } from "node:crypto";
 
 import {
@@ -97,231 +111,251 @@ export class InventorySnapshotService {
 
   async fix(
     tenantId: string,
-    actorUserId: string,
+    actorInput: string | InventoryActor,
     inventoryId: string,
     input: FixInventorySnapshotDto,
+    publicRequest?: PublicApiOwnerRequest,
   ): Promise<InventorySnapshotDto> {
+    const actor = inventoryActor(actorInput, publicRequest);
+    const actorUserId = inventoryActorUserId(actor);
+    publicRequest?.assertBinding(tenantId, "inventory.snapshot", {
+      inventoryId,
+      imports: input.imports,
+    });
     try {
-      return await this.db.transaction(async (tx) => {
-        const [inventory] = await tx
-          .select({
-            id: schema.inventories.id,
-            status: schema.inventories.status,
-            gtin14: schema.inventories.gtin14Snapshot,
-            productId: schema.inventories.productId,
-            lineId: schema.inventories.lineId,
-            productionDateFrom: schema.inventories.productionDateFrom,
-            productionDateTo: schema.inventories.productionDateTo,
-            activeSnapshotId: schema.inventories.activeSnapshotId,
-          })
-          .from(schema.inventories)
-          .where(
-            and(eq(schema.inventories.tenantId, tenantId), eq(schema.inventories.id, inventoryId)),
-          )
-          .for("update");
-        if (!inventory) throw new NotFoundException();
-
-        if (inventory.activeSnapshotId !== null) {
-          return this.existingSnapshot(
-            tx,
-            tenantId,
-            inventoryId,
-            inventory.activeSnapshotId,
-            input.imports,
-          );
-        }
-        if (inventory.status !== "draft" && inventory.status !== "preparing") {
-          throw new ConflictException({ code: "INVENTORY_SNAPSHOT_ALREADY_FIXED" });
-        }
-
-        const [product] = await tx
-          .select({
-            name: schema.products.name,
-            boxCapacity: schema.products.boxCapacity,
-          })
-          .from(schema.products)
-          .where(
-            and(
-              eq(schema.products.tenantId, tenantId),
-              eq(schema.products.id, inventory.productId),
-            ),
-          )
-          .for("share");
-        const [line] = await tx
-          .select({ name: schema.lines.name })
-          .from(schema.lines)
-          .where(and(eq(schema.lines.tenantId, tenantId), eq(schema.lines.id, inventory.lineId)))
-          .for("share");
-        if (!product || !line) {
-          throw new ConflictException({ code: "INVENTORY_SNAPSHOT_CATALOG_INVALID" });
-        }
-
-        const selectedImports = await this.selectedImports(
+      return await this.db.transaction(async (tx) =>
+        runInventoryOwner(
           tx,
-          tenantId,
-          inventoryId,
-          input.imports,
-        );
-        const combinedDigest = inventorySnapshotCombinedDigest(
-          selectedImports.map((row) => ({
-            status: row.declaredStatus,
-            importId: row.id,
-            sha256: row.sha256,
-            byteSize: row.byteSize,
-            containerKind: row.containerKind,
-          })),
-        );
-        const counts = this.emptyCounts();
-        const parentSsccs = new Set<string>();
-        const seenCodeHashes = new Set<string>();
-        const codeRows: NewSnapshotCode[] = [];
-        const snapshotId = randomUUID();
+          publicRequest,
+          (value) => snapshotReceiptSchema.parse(value),
+          async () => {
+            const [inventory] = await tx
+              .select({
+                id: schema.inventories.id,
+                status: schema.inventories.status,
+                gtin14: schema.inventories.gtin14Snapshot,
+                productId: schema.inventories.productId,
+                lineId: schema.inventories.lineId,
+                productionDateFrom: schema.inventories.productionDateFrom,
+                productionDateTo: schema.inventories.productionDateTo,
+                activeSnapshotId: schema.inventories.activeSnapshotId,
+              })
+              .from(schema.inventories)
+              .where(
+                and(
+                  eq(schema.inventories.tenantId, tenantId),
+                  eq(schema.inventories.id, inventoryId),
+                ),
+              )
+              .for("update");
+            if (!inventory) throw new NotFoundException();
 
-        for (const status of INVENTORY_CHZ_STATUSES) {
-          const evidence = selectedImports.find((row) => row.declaredStatus === status);
-          if (evidence === undefined) {
-            throw new UnprocessableEntityException({
-              code: "INVENTORY_SNAPSHOT_IMPORT_INVALID",
-            });
-          }
-          const parsed = await this.readAndParseEvidence(
-            tenantId,
-            inventoryId,
-            inventory.gtin14,
-            evidence,
-          );
-          counts[STATUS_COUNT_KEY[status]] = parsed.rows.length;
+            if (inventory.activeSnapshotId !== null) {
+              return this.existingSnapshot(
+                tx,
+                tenantId,
+                inventoryId,
+                inventory.activeSnapshotId,
+                input.imports,
+              );
+            }
+            if (inventory.status !== "draft" && inventory.status !== "preparing") {
+              throw new ConflictException({ code: "INVENTORY_SNAPSHOT_ALREADY_FIXED" });
+            }
 
-          for (const row of parsed.rows) {
-            if (seenCodeHashes.has(row.codeHash)) {
-              throw new UnprocessableEntityException({
-                code: "INVENTORY_SNAPSHOT_DUPLICATE_CODE",
-              });
+            const [product] = await tx
+              .select({
+                name: schema.products.name,
+                boxCapacity: schema.products.boxCapacity,
+              })
+              .from(schema.products)
+              .where(
+                and(
+                  eq(schema.products.tenantId, tenantId),
+                  eq(schema.products.id, inventory.productId),
+                ),
+              )
+              .for("share");
+            const [line] = await tx
+              .select({ name: schema.lines.name })
+              .from(schema.lines)
+              .where(
+                and(eq(schema.lines.tenantId, tenantId), eq(schema.lines.id, inventory.lineId)),
+              )
+              .for("share");
+            if (!product || !line) {
+              throw new ConflictException({ code: "INVENTORY_SNAPSHOT_CATALOG_INVALID" });
             }
-            seenCodeHashes.add(row.codeHash);
-            const classification = classifyInventorySnapshotRow(
-              {
-                gtin14: row.gtin14,
-                status: row.sourceStatus,
-                state: row.sourceState,
-                sourceProductionDate: row.sourceProductionDate,
-              },
-              {
-                productionDateFrom: inventory.productionDateFrom,
-                productionDateTo: inventory.productionDateTo,
-              },
-            );
-            if (classification.kind === "invalid_missing_production_date") {
-              throw new UnprocessableEntityException({
-                code: "INVENTORY_SNAPSHOT_PRODUCTION_DATE_REQUIRED",
-              });
-            }
-            if (classification.protected) counts.protected += 1;
-            if (classification.expected) counts.expected += 1;
-            if (row.parentSscc === null) counts.loose += 1;
-            else parentSsccs.add(row.parentSscc);
-            codeRows.push({
+
+            const selectedImports = await this.selectedImports(
+              tx,
               tenantId,
-              snapshotId,
-              canonicalRaw: row.canonicalKm,
-              codeHash: row.codeHash,
-              gtin14: row.gtin14,
-              serial: row.serial,
-              sourceStatus: row.sourceStatus,
-              sourceState: row.sourceState,
-              sourceProductionDate: row.sourceProductionDate,
-              parentSscc: row.parentSscc,
-              expected: classification.expected,
-              protected: classification.protected,
+              inventoryId,
+              input.imports,
+            );
+            const combinedDigest = inventorySnapshotCombinedDigest(
+              selectedImports.map((row) => ({
+                status: row.declaredStatus,
+                importId: row.id,
+                sha256: row.sha256,
+                byteSize: row.byteSize,
+                containerKind: row.containerKind,
+              })),
+            );
+            const counts = this.emptyCounts();
+            const parentSsccs = new Set<string>();
+            const seenCodeHashes = new Set<string>();
+            const codeRows: NewSnapshotCode[] = [];
+            const snapshotId = publicRequest?.effectId ?? randomUUID();
+
+            for (const status of INVENTORY_CHZ_STATUSES) {
+              const evidence = selectedImports.find((row) => row.declaredStatus === status);
+              if (evidence === undefined) {
+                throw new UnprocessableEntityException({
+                  code: "INVENTORY_SNAPSHOT_IMPORT_INVALID",
+                });
+              }
+              const parsed = await this.readAndParseEvidence(
+                tenantId,
+                inventoryId,
+                inventory.gtin14,
+                evidence,
+              );
+              counts[STATUS_COUNT_KEY[status]] = parsed.rows.length;
+
+              for (const row of parsed.rows) {
+                if (seenCodeHashes.has(row.codeHash)) {
+                  throw new UnprocessableEntityException({
+                    code: "INVENTORY_SNAPSHOT_DUPLICATE_CODE",
+                  });
+                }
+                seenCodeHashes.add(row.codeHash);
+                const classification = classifyInventorySnapshotRow(
+                  {
+                    gtin14: row.gtin14,
+                    status: row.sourceStatus,
+                    state: row.sourceState,
+                    sourceProductionDate: row.sourceProductionDate,
+                  },
+                  {
+                    productionDateFrom: inventory.productionDateFrom,
+                    productionDateTo: inventory.productionDateTo,
+                  },
+                );
+                if (classification.kind === "invalid_missing_production_date") {
+                  throw new UnprocessableEntityException({
+                    code: "INVENTORY_SNAPSHOT_PRODUCTION_DATE_REQUIRED",
+                  });
+                }
+                if (classification.protected) counts.protected += 1;
+                if (classification.expected) counts.expected += 1;
+                if (row.parentSscc === null) counts.loose += 1;
+                else parentSsccs.add(row.parentSscc);
+                codeRows.push({
+                  tenantId,
+                  snapshotId,
+                  canonicalRaw: row.canonicalKm,
+                  codeHash: row.codeHash,
+                  gtin14: row.gtin14,
+                  serial: row.serial,
+                  sourceStatus: row.sourceStatus,
+                  sourceState: row.sourceState,
+                  sourceProductionDate: row.sourceProductionDate,
+                  parentSscc: row.parentSscc,
+                  expected: classification.expected,
+                  protected: classification.protected,
+                });
+              }
+            }
+            counts.packages = parentSsccs.size;
+
+            const fixedAt = new Date();
+            await tx.insert(schema.inventorySnapshots).values({
+              id: snapshotId,
+              tenantId,
+              inventoryId,
+              revision: 1,
+              combinedDigest,
+              productName: product.name,
+              lineName: line.name,
+              boxCapacity: product.boxCapacity,
+              emittedCount: counts.emitted,
+              introducedCount: counts.introduced,
+              appliedCount: counts.applied,
+              retiredCount: counts.retired,
+              writtenOffCount: counts.writtenOff,
+              disaggregationCount: counts.disaggregation,
+              protectedCount: counts.protected,
+              expectedCount: counts.expected,
+              packageCount: counts.packages,
+              looseCount: counts.loose,
+              fixedByUserId: actorUserId,
+              fixedByPublicKeyId: actorKeyId(actor),
+              fixedAt,
             });
-          }
-        }
-        counts.packages = parentSsccs.size;
+            await tx.insert(schema.inventorySnapshotInputs).values(
+              INVENTORY_CHZ_STATUSES.map((status) => ({
+                tenantId,
+                snapshotId,
+                inventoryId,
+                status,
+                importId: input.imports[status],
+                importParseOutcome: "succeeded" as const,
+              })),
+            );
+            for (let offset = 0; offset < codeRows.length; offset += SNAPSHOT_CODE_INSERT_CHUNK) {
+              await tx
+                .insert(schema.inventorySnapshotCodes)
+                .values(codeRows.slice(offset, offset + SNAPSHOT_CODE_INSERT_CHUNK));
+            }
+            const [published] = await tx
+              .update(schema.inventories)
+              .set({ status: "ready", activeSnapshotId: snapshotId, updatedAt: fixedAt })
+              .where(
+                and(
+                  eq(schema.inventories.tenantId, tenantId),
+                  eq(schema.inventories.id, inventoryId),
+                  eq(schema.inventories.status, inventory.status),
+                  isNull(schema.inventories.activeSnapshotId),
+                ),
+              )
+              .returning({ id: schema.inventories.id });
+            if (!published) {
+              throw new ConflictException({ code: "INVENTORY_SNAPSHOT_ALREADY_FIXED" });
+            }
+            await tx.insert(schema.tenantAuditEvents).values({
+              organizationId: tenantId,
+              actorUserId,
+              action: "inventory.snapshot.fixed",
+              outcome: "success",
+              targetType: "inventory",
+              targetId: inventoryId,
+              after: {
+                tenantId,
+                ...actorAudit(actor),
+                inventoryId,
+                snapshotId,
+                combinedDigest,
+                inputs: input.imports,
+                counts,
+              },
+            });
 
-        const fixedAt = new Date();
-        await tx.insert(schema.inventorySnapshots).values({
-          id: snapshotId,
-          tenantId,
-          inventoryId,
-          revision: 1,
-          combinedDigest,
-          productName: product.name,
-          lineName: line.name,
-          boxCapacity: product.boxCapacity,
-          emittedCount: counts.emitted,
-          introducedCount: counts.introduced,
-          appliedCount: counts.applied,
-          retiredCount: counts.retired,
-          writtenOffCount: counts.writtenOff,
-          disaggregationCount: counts.disaggregation,
-          protectedCount: counts.protected,
-          expectedCount: counts.expected,
-          packageCount: counts.packages,
-          looseCount: counts.loose,
-          fixedByUserId: actorUserId,
-          fixedAt,
-        });
-        await tx.insert(schema.inventorySnapshotInputs).values(
-          INVENTORY_CHZ_STATUSES.map((status) => ({
-            tenantId,
-            snapshotId,
-            inventoryId,
-            status,
-            importId: input.imports[status],
-            importParseOutcome: "succeeded" as const,
-          })),
-        );
-        for (let offset = 0; offset < codeRows.length; offset += SNAPSHOT_CODE_INSERT_CHUNK) {
-          await tx
-            .insert(schema.inventorySnapshotCodes)
-            .values(codeRows.slice(offset, offset + SNAPSHOT_CODE_INSERT_CHUNK));
-        }
-        const [published] = await tx
-          .update(schema.inventories)
-          .set({ status: "ready", activeSnapshotId: snapshotId, updatedAt: fixedAt })
-          .where(
-            and(
-              eq(schema.inventories.tenantId, tenantId),
-              eq(schema.inventories.id, inventoryId),
-              eq(schema.inventories.status, inventory.status),
-              isNull(schema.inventories.activeSnapshotId),
-            ),
-          )
-          .returning({ id: schema.inventories.id });
-        if (!published) {
-          throw new ConflictException({ code: "INVENTORY_SNAPSHOT_ALREADY_FIXED" });
-        }
-        await tx.insert(schema.tenantAuditEvents).values({
-          organizationId: tenantId,
-          actorUserId,
-          action: "inventory.snapshot.fixed",
-          outcome: "success",
-          targetType: "inventory",
-          targetId: inventoryId,
-          after: {
-            tenantId,
-            actorUserId,
-            inventoryId,
-            snapshotId,
-            combinedDigest,
-            inputs: input.imports,
-            counts,
+            return {
+              id: snapshotId,
+              inventoryId,
+              revision: 1,
+              combinedDigest,
+              fixedAt: fixedAt.toISOString(),
+              inputs: this.orderedInputs(input.imports),
+              counts,
+            };
           },
-        });
-
-        return {
-          id: snapshotId,
-          inventoryId,
-          revision: 1,
-          combinedDigest,
-          fixedAt: fixedAt.toISOString(),
-          inputs: this.orderedInputs(input.imports),
-          counts,
-        };
-      });
+        ),
+      );
     } catch (cause) {
       const error = this.normalizeError(cause);
-      await this.writeFailureAudit(tenantId, actorUserId, inventoryId, input.imports, error);
+      await this.writeFailureAudit(tenantId, actor, inventoryId, input.imports, error);
       throw error;
     }
   }
@@ -370,8 +404,24 @@ export class InventorySnapshotService {
     gtin14: string,
     evidence: InventoryImport,
   ) {
-    const expectedKey = `tenants/${tenantId}/inventories/${inventoryId}/imports/${evidence.declaredStatus}/${evidence.sha256}.${evidence.containerKind}`;
-    if (evidence.objectKey !== expectedKey || evidence.includedGtin14 !== gtin14) {
+    const provenance = {
+      tenantId,
+      inventoryId,
+      status: evidence.declaredStatus,
+      sha256: evidence.sha256,
+      containerKind: evidence.containerKind,
+      importId: evidence.id,
+      publicActor: evidence.createdByPublicKeyId !== null,
+    };
+    const expectedKey = inventoryImportObjectKey(provenance);
+    const legacyKey =
+      evidence.createdByPublicKeyId === null
+        ? legacyCabinetInventoryImportObjectKey(provenance)
+        : null;
+    if (
+      (evidence.objectKey !== expectedKey && evidence.objectKey !== legacyKey) ||
+      evidence.includedGtin14 !== gtin14
+    ) {
       throw new UnprocessableEntityException({ code: "INVENTORY_SNAPSHOT_EVIDENCE_MISMATCH" });
     }
     let stored: Awaited<ReturnType<ObjectStorageService["get"]>>;
@@ -534,11 +584,12 @@ export class InventorySnapshotService {
 
   private async writeFailureAudit(
     tenantId: string,
-    actorUserId: string,
+    actor: InventoryActor,
     inventoryId: string,
     inputs: InventorySnapshotInputSelectionDto,
     error: unknown,
   ): Promise<void> {
+    const actorUserId = inventoryActorUserId(actor);
     const errorCode = this.auditErrorCode(error);
     try {
       await this.db.insert(schema.tenantAuditEvents).values({
@@ -550,7 +601,7 @@ export class InventorySnapshotService {
         targetId: inventoryId,
         after: {
           tenantId,
-          actorUserId,
+          ...actorAudit(actor),
           inventoryId,
           inputs: this.orderedInputs(inputs),
           errorCode,

@@ -1,5 +1,6 @@
 package app.markiro.handheld.core.box
 
+import app.markiro.handheld.core.grants.*
 import app.markiro.handheld.core.storage.BoxEntity
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.util.Iso
@@ -170,6 +171,8 @@ class CloseBox(
                         throw AlreadyClosed()
                     }
 
+                    db.grants.complete(TaskKind.SHIFT,shiftId,"shift.box.close:${box.boxId}",GrantEventType.SHIFT_BOX_CLOSE,containers=1,
+                    executionFingerprint=db.shiftDao().get(shiftId)?.copy(ssccIssuerPrefix=issuerPrefix)?.let(GrantTaskMatcher::fingerprint))
                     BoxOutcome(
                         CloseResult.Closed(
                             box = box.copy(

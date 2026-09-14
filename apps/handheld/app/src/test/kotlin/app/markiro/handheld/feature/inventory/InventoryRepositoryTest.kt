@@ -13,6 +13,7 @@ import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.InventoryFixtures
 import app.markiro.handheld.core.storage.InventoryOutboxEntity
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.async
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
@@ -85,7 +86,88 @@ class InventoryRepositoryTest {
         assertNull(db.deviceConfigDao().get()?.activeInventoryId)
         assertEquals(5L, db.inventoryTaskDao().get("i1")?.leftAt)
         server.shutdown()
-        assertEquals(LeaveResult.Offline, repo().leave("i1"))
+        assertEquals(LeaveResult.Left, repo().leave("i1"))
+    }
+
+    @Test
+    fun interruptedNegotiatedLeaveKeepsOneChargeAndOriginalIntentThroughRetry() = runTest {
+        db.inventoryTaskDao().upsert(InventoryFixtures.task("i1"))
+        repo().activate("i1")
+        db.grants.beginRefresh()
+        db.grantDao().state(checkNotNull(db.grantDao().state()).copy(epoch = 3))
+        server.enqueue(MockResponse().setResponseCode(503))
+        assertEquals(LeaveResult.Failed, repo().leave("i1"))
+        val first = server.takeRequest()
+        assertEquals("/station/grants/v1/evidence/inventories/i1/leave", first.path)
+        val original = first.body.readUtf8()
+        assertEquals(1, db.grantDao().evidence().size)
+        val evidence = db.grantDao().evidence().single()
+        assertTrue(evidence.costs.contains("inventory.close.v1:events"))
+        val recorder = app.markiro.handheld.core.inventory.InventoryRecorder(db)
+        assertEquals("leave_pending", (recorder.record("i1", "raw", "op-1") as app.markiro.handheld.core.inventory.RecordOutcome.Recorded).invalidReason)
+        assertEquals("i1", db.deviceConfigDao().get()?.activeInventoryId)
+        val batch = kotlinx.serialization.json.Json.parseToJsonElement(original).let { it as kotlinx.serialization.json.JsonObject }.getValue("batchId").toString()
+        server.enqueue(MockResponse().setBody("""{"protocol":"offline-grants-v1","batchId":$batch,"outcome":"duplicate","reason":"missing_grant","receiptId":"22222222-2222-4222-8222-222222222222","reconciliation":{"status":"applied","statusCode":201,"result":{"outcome":"left"}}}"""))
+        assertEquals(LeaveResult.Left, repo().leave("i1"))
+        assertEquals(original, server.takeRequest().body.readUtf8())
+        assertEquals(1, db.grantDao().evidence().size)
+        assertNull(db.deviceConfigDao().get()?.activeInventoryId)
+        assertEquals(LeaveResult.Left, repo().leave("i1"))
+        assertEquals(2, server.requestCount)
+    }
+
+    @Test
+    fun quarantineKeepsCloseIntentAndBlocksOnlyNewScansForThatTask() = runTest {
+        db.inventoryTaskDao().upsert(InventoryFixtures.task("i1"))
+        db.inventoryTaskDao().upsert(InventoryFixtures.task("i2"))
+        repo().activate("i1")
+        db.grants.beginRefresh()
+        db.grantDao().state(checkNotNull(db.grantDao().state()).copy(epoch = 3))
+        server.enqueue(MockResponse().setResponseCode(503))
+        assertEquals(LeaveResult.Failed, repo().leave("i1"))
+        val original = server.takeRequest().body.readUtf8()
+        val envelope = kotlinx.serialization.json.Json.parseToJsonElement(original) as kotlinx.serialization.json.JsonObject
+        val batch = envelope.getValue("batchId")
+        server.enqueue(MockResponse().setBody("""{"protocol":"offline-grants-v1","batchId":$batch,"outcome":"quarantined","reason":"late_no_proof","receiptId":"22222222-2222-4222-8222-222222222222","reconciliation":{"status":"not_applied","statusCode":null,"result":null}}"""))
+        assertEquals(LeaveResult.Quarantined, repo().leave("i1"))
+        assertEquals(original, server.takeRequest().body.readUtf8())
+        assertNull(db.inventoryTaskDao().get("i1")?.leftAt)
+        assertEquals(1, db.grantDao().evidence().size)
+        assertTrue(app.markiro.handheld.core.inventory.InventoryLeaveJournal(db).pending("i1"))
+        assertTrue(!app.markiro.handheld.core.inventory.InventoryLeaveJournal(db).pending("i2"))
+        assertTrue(runCatching { repo().activate("i1") }.isFailure)
+        repo().activate("i2")
+        assertEquals("i2", db.deviceConfigDao().get()?.activeInventoryId)
+    }
+
+    @Test
+    fun strictDenialRollsBackIntentAndQueuePreflightRunsInsideOwnerTransaction() = runTest {
+        db.inventoryTaskDao().upsert(InventoryFixtures.task("i1"))
+        repo().activate("i1")
+        db.grants.beginRefresh()
+        db.grantDao().state(checkNotNull(db.grantDao().state()).copy(epoch = 3, mode = "strict"))
+        assertTrue(runCatching { repo().leave("i1") }.exceptionOrNull() is app.markiro.handheld.core.grants.GrantDenied)
+        assertTrue(!app.markiro.handheld.core.inventory.InventoryLeaveJournal(db).pending("i1"))
+        assertNull(db.inventoryTaskDao().get("i1")?.leftAt)
+        assertEquals(0, server.requestCount)
+        db.inventoryOutboxDao().insert(InventoryOutboxEntity(inventoryId = "i1", snapshotId = "snap", eventId = "e1", deviceSequence = 1, payloadJson = "{}", createdAt = "t"))
+        assertEquals(LeaveResult.Pending(1), repo().leave("i1"))
+        assertEquals(0, server.requestCount)
+    }
+
+    @Test
+    fun scanRacingAnInFlightLeaveCannotAddWorkAfterTheAtomicCloseIntent() = runTest {
+        db.inventoryTaskDao().upsert(InventoryFixtures.task("i1"))
+        repo().activate("i1")
+        server.enqueue(MockResponse().setHeadersDelay(1, java.util.concurrent.TimeUnit.SECONDS).setResponseCode(503))
+        val leaving = async(kotlinx.coroutines.Dispatchers.Default) { repo().leave("i1") }
+        assertTrue(server.takeRequest(2, java.util.concurrent.TimeUnit.SECONDS) != null)
+        val scanned = app.markiro.handheld.core.inventory.InventoryRecorder(db).record("i1", "raw", "op-1") as app.markiro.handheld.core.inventory.RecordOutcome.Recorded
+        assertEquals("leave_pending", scanned.invalidReason)
+        assertNull(scanned.eventId)
+        assertEquals(0, db.inventoryOutboxDao().count("i1"))
+        assertEquals(LeaveResult.Failed, leaving.await())
+        assertEquals(1, db.grantDao().evidence().size)
     }
 
     @Test

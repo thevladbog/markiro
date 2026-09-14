@@ -9,6 +9,7 @@ import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { productLabelValueDigest } from "@markiro/domain";
 
 import { applyMigrations, type SqlExecutor } from "../src/lib/mirror.js";
 import {
@@ -16,6 +17,7 @@ import {
   createInventorySyncEngine,
   leaveInventoryTask,
 } from "../src/lib/inventory-sync.js";
+import { prepareInventoryOutboxBatch } from "../src/lib/inventory-outbox.js";
 import {
   createCredentialGeneration,
   credentialGenerationOwnership,
@@ -170,6 +172,416 @@ async function rotatingProgressSetup(hooks: Parameters<typeof makeRotatingExec>[
 }
 
 describe("inventory sync engine", () => {
+  it.each([
+    { order: "legacy-first", negotiatedEventId: "66666666-6666-4666-8666-666666666666" },
+    { order: "negotiated-first", negotiatedEventId: EVENT_ID },
+  ])("routes each contiguous provenance prefix for $order", async ({ negotiatedEventId }) => {
+    const { db, exec: baseExec } = await setup();
+    const exec: SqlExecutor = {
+      ...baseExec,
+      async atomic(statements) {
+        db.exec("BEGIN IMMEDIATE");
+        try {
+          const changes = statements.map((statement) =>
+            Number(
+              db.prepare(statement.sql).run(...([...(statement.values ?? [])] as never[])).changes,
+            ),
+          );
+          db.exec("COMMIT");
+          return changes;
+        } catch (error) {
+          db.exec("ROLLBACK");
+          throw error;
+        }
+      },
+    };
+    const secondId = "66666666-6666-4666-8666-666666666666";
+    const second = {
+      eventId: secondId,
+      deviceSequence: 2,
+      operatorId: OPERATOR_ID,
+      scannedAt: "2026-08-25T10:00:02.000Z",
+      kind: "item",
+      normalizedIdentity: `item:${"b".repeat(64)}`,
+      codeHash: "b".repeat(64),
+      canonicalRaw: "010460000000001521SECOND",
+      activeProductionDate: "2026-08-20",
+      localVerdict: "expected",
+    };
+    db.prepare(
+      `INSERT INTO inventory_scan_events_mirror
+         (inventory_id,snapshot_id,event_id,device_id,device_sequence,operator_id,scanned_at,
+          kind,normalized_identity,code_hash,raw_payload,active_production_date,local_verdict,
+          commit_state,legacy_audit_version)
+       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'committed',1)`,
+    ).run(
+      INVENTORY_ID,
+      SNAPSHOT_ID,
+      second.eventId,
+      DEVICE_ID,
+      second.deviceSequence,
+      OPERATOR_ID,
+      second.scannedAt,
+      second.kind,
+      second.normalizedIdentity,
+      second.codeHash,
+      second.canonicalRaw,
+      second.activeProductionDate,
+      second.localVerdict,
+    );
+    db.prepare(
+      `INSERT INTO inventory_outbox
+         (inventory_id,snapshot_id,event_id,device_sequence,payload_json,created_at)
+       VALUES(?,?,?,?,?,?)`,
+    ).run(INVENTORY_ID, SNAPSHOT_ID, secondId, 2, JSON.stringify(second), second.scannedAt);
+    const executionScope = {
+      manifest: { mode: "scan" },
+      snapshotId: SNAPSHOT_ID,
+      combinedDigest: "combined",
+      contentDigest: "content",
+    };
+    db.prepare(
+      "UPDATE inventory_task_mirror SET active_combined_digest='combined',active_content_digest='content',active_manifest_json=? WHERE inventory_id=?",
+    ).run(JSON.stringify(executionScope.manifest), INVENTORY_ID);
+    db.prepare(
+      "INSERT INTO operators_mirror(operator_id,name,role,pin_hash,active) VALUES(?,'Operator','operator','hash',1)",
+    ).run(OPERATOR_ID);
+    db.prepare(
+      `INSERT INTO offline_grant_install_state
+         (id,tenant_id,device_id,owner_kind,credential_epoch,request_sequence,mode)
+       VALUES(1,'tenant',?,'station',1,1,'observe')`,
+    ).run(DEVICE_ID);
+    db.exec(
+      `INSERT INTO offline_grant_grants(grant_id,kid,compact,grant_json,credential_epoch,installed_sequence)
+       VALUES('77777777-7777-4777-8777-777777777777','kid','original.compact.bytes','{}',1,1)`,
+    );
+    db.prepare("INSERT INTO offline_grant_event_commands(event_id,payload_json) VALUES(?,?)").run(
+      negotiatedEventId,
+      JSON.stringify({
+        owner: { tenantId: "tenant", deviceId: DEVICE_ID, kind: "station", credentialEpoch: 1 },
+        operatorId: OPERATOR_ID,
+        mode: "observe",
+        grantId: "77777777-7777-4777-8777-777777777777",
+        taskKind: "inventory",
+        executionScope,
+        taskId: INVENTORY_ID,
+        snapshotDigest: "snapshot-digest",
+        eventDigest: `${negotiatedEventId}-digest`,
+        preDecision: { allow: false, reason: "wrong_task" },
+        cost: {},
+        clockHighWater: 0,
+        wallHighWater: 0,
+        resultJson: "{}",
+      }),
+    );
+    db.prepare("DELETE FROM station_meta WHERE key='active_inventory_floor_task_v1'").run();
+    const generation = createCredentialGeneration(`mixed-${negotiatedEventId}`);
+    const ownership = await credentialGenerationOwnership(generation);
+    if (!ownership) throw new Error("expected ownership");
+    await initializeDeviceRecovery(exec, {
+      machineId: "local",
+      deviceId: DEVICE_ID,
+      tenantId: "tenant",
+      apiKey: `mixed-${negotiatedEventId}`,
+      serverUrl: "https://api.example",
+    });
+    const paths: string[] = [];
+    const post = vi.fn(async (path: string, body?: unknown) => {
+      paths.push(path);
+      const evidence = path.includes("/grants/v1/evidence/");
+      const request = (evidence ? (body as { payload: unknown }).payload : body) as {
+        batchId: string;
+        payloadDigest: string;
+        sequenceCeiling: number;
+        events: Array<{ eventId: string; codeHash: string; scannedAt: string }>;
+      };
+      const native = {
+        inventoryId: INVENTORY_ID,
+        snapshotId: SNAPSHOT_ID,
+        snapshotRevision: 1,
+        batchId: request.batchId,
+        payloadDigest: request.payloadDigest,
+        sequenceCeiling: request.sequenceCeiling,
+        resultRevision: request.sequenceCeiling,
+        outcomes: request.events.map((event) =>
+          appliedOutcome(event.eventId, event.codeHash, event.scannedAt),
+        ),
+      };
+      return evidence
+        ? {
+            protocol: "offline-grants-v1",
+            batchId: request.batchId,
+            outcome: "accepted",
+            reason: null,
+            receiptId: randomUUID(),
+            reconciliation: { status: "applied", statusCode: 200, result: native },
+          }
+        : native;
+    });
+    const states: Array<{ lastError: string | null }> = [];
+    const engine = createInventorySyncEngine({
+      exec,
+      client: { post },
+      inventoryId: INVENTORY_ID,
+      snapshotId: SNAPSHOT_ID,
+      credentialGeneration: generation,
+      onState: (state) => states.push(state),
+      retry: false,
+    });
+    engine.nudge();
+    await engine.idle();
+    engine.stop();
+
+    const legacyPath = `/station/inventories/${INVENTORY_ID}/event-batches`;
+    const evidencePath = `/station/grants/v1/evidence/inventories/${INVENTORY_ID}/event-batches`;
+    expect(states.at(-1)?.lastError).toBeNull();
+    expect(paths).toEqual(
+      negotiatedEventId === EVENT_ID ? [evidencePath, legacyPath] : [legacyPath, evidencePath],
+    );
+    expect(db.prepare("SELECT COUNT(*) count FROM inventory_outbox").get()).toEqual({ count: 0 });
+  });
+
+  it("durably charges and pins negotiated leave before HTTP, then ACKs only native left", async () => {
+    const { db, exec: baseExec } = await setup();
+    const exec: SqlExecutor = {
+      ...baseExec,
+      async atomic(statements) {
+        db.exec("BEGIN IMMEDIATE");
+        try {
+          const changes = statements.map((statement) =>
+            Number(
+              db.prepare(statement.sql).run(...([...(statement.values ?? [])] as never[])).changes,
+            ),
+          );
+          db.exec("COMMIT");
+          return changes;
+        } catch (error) {
+          db.exec("ROLLBACK");
+          throw error;
+        }
+      },
+    };
+    db.prepare("DELETE FROM inventory_outbox").run();
+    db.prepare(
+      `UPDATE inventory_task_mirror
+          SET active_combined_digest='combined',active_content_digest='content',
+              active_manifest_json='{"mode":"scan"}'
+        WHERE inventory_id=?`,
+    ).run(INVENTORY_ID);
+    db.prepare(
+      "INSERT INTO operators_mirror(operator_id,name,role,pin_hash,active) VALUES(?, 'Operator','operator','hash',1)",
+    ).run(OPERATOR_ID);
+    db.exec(
+      `INSERT INTO offline_grant_install_state
+         (id,tenant_id,device_id,owner_kind,credential_epoch,request_sequence,mode)
+       VALUES(1,'tenant','${DEVICE_ID}','station',1,1,'observe')`,
+    );
+    const generation = createCredentialGeneration("inventory-leave-key");
+    const ownership = await credentialGenerationOwnership(generation);
+    if (!ownership) throw new Error("expected ownership");
+    db.prepare("DELETE FROM station_meta WHERE key='active_inventory_floor_task_v1'").run();
+    await initializeDeviceRecovery(exec, {
+      machineId: "local",
+      deviceId: DEVICE_ID,
+      tenantId: "tenant",
+      apiKey: "inventory-leave-key",
+      serverUrl: "https://api.example",
+    });
+    expect(db.prepare("SELECT phase,active_hash FROM station_device_recovery").get()).toEqual({
+      phase: "active",
+      active_hash: ownership,
+    });
+    const activationId = "99999999-9999-4999-8999-999999999999";
+    const pointerValue = JSON.stringify({
+      inventoryId: INVENTORY_ID,
+      snapshotId: SNAPSHOT_ID,
+      credentialOwnership: ownership,
+      activationId,
+    });
+    db.prepare(
+      "INSERT OR REPLACE INTO station_meta(key,value) VALUES('active_inventory_floor_task_v1',?)",
+    ).run(pointerValue);
+    const bodies: unknown[] = [];
+    const post = vi.fn(async (path: string, body?: unknown) => {
+      expect(path).toBe(`/station/grants/v1/evidence/inventories/${INVENTORY_ID}/leave`);
+      bodies.push(structuredClone(body));
+      if (bodies.length === 1) throw new Error("offline");
+      return {
+        protocol: "offline-grants-v1",
+        batchId: activationId,
+        outcome: "accepted",
+        reason: null,
+        receiptId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        reconciliation: {
+          status: "applied",
+          statusCode: 200,
+          result: { outcome: "left" },
+        },
+      };
+    });
+    const sync = {
+      nudge: () => undefined,
+      idle: async () => undefined,
+      stop: () => undefined,
+      resume: () => undefined,
+    };
+    const deps = {
+      exec,
+      client: { post },
+      inventoryId: INVENTORY_ID,
+      snapshotId: SNAPSHOT_ID,
+      deviceId: DEVICE_ID,
+      pointerValue,
+      credentialGeneration: generation,
+      closeScanner: async () => undefined,
+      scanQueueIdle: async () => undefined,
+      sync,
+    };
+
+    await expect(leaveInventoryTask(deps)).rejects.toThrow("offline");
+    expect(
+      db.prepare("SELECT event_id,left_at FROM offline_grant_inventory_leave_intents").get(),
+    ).toEqual({ event_id: `${activationId}#inventory.close.v1`, left_at: null });
+    expect(
+      db
+        .prepare(
+          "SELECT COUNT(*) count FROM station_meta WHERE key='active_inventory_floor_task_v1'",
+        )
+        .get(),
+    ).toEqual({ count: 1 });
+
+    await leaveInventoryTask(deps);
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1]).toEqual(bodies[0]);
+    expect(bodies[0]).toMatchObject({
+      protocol: "offline-grants-v1",
+      batchId: activationId,
+      grants: [],
+      eventGrants: {},
+      payload: { pendingEventCount: 0, openBoxCount: 0 },
+    });
+    expect(
+      db
+        .prepare(
+          "SELECT left_at IS NOT NULL AS is_left,receipt_json FROM offline_grant_inventory_leave_intents",
+        )
+        .get(),
+    ).toEqual({ is_left: 1, receipt_json: '{"outcome":"left"}' });
+    expect(
+      db
+        .prepare(
+          "SELECT COUNT(*) count FROM station_meta WHERE key='active_inventory_floor_task_v1'",
+        )
+        .get(),
+    ).toEqual({ count: 0 });
+  });
+
+  it("sends a pinned negotiated batch through evidence and ACKs only its applied native result", async () => {
+    const { db, exec: baseExec } = await setup();
+    const exec: SqlExecutor = {
+      ...baseExec,
+      async atomic(statements) {
+        db.exec("BEGIN IMMEDIATE");
+        try {
+          const changes = statements.map((statement) =>
+            Number(
+              db.prepare(statement.sql).run(...([...(statement.values ?? [])] as never[])).changes,
+            ),
+          );
+          db.exec("COMMIT");
+          return changes;
+        } catch (error) {
+          db.exec("ROLLBACK");
+          throw error;
+        }
+      },
+    };
+    const generation = createCredentialGeneration("inventory-evidence-key");
+    const ownership = await credentialGenerationOwnership(generation);
+    if (!ownership) throw new Error("expected ownership");
+    await exec.run("UPDATE inventory_task_mirror SET credential_ownership=?", [ownership]);
+    await exec.run(
+      "UPDATE station_meta SET value=json_set(value,'$.credentialOwnership',?) WHERE key='active_inventory_floor_task_v1'",
+      [ownership],
+    );
+    await initializeDeviceRecovery(exec, {
+      machineId: "local",
+      deviceId: DEVICE_ID,
+      tenantId: "tenant",
+      apiKey: "inventory-evidence-key",
+      serverUrl: "https://api.example",
+    });
+    const prepared = await prepareInventoryOutboxBatch(exec, {
+      inventoryId: INVENTORY_ID,
+      snapshotId: SNAPSHOT_ID,
+      createBatchId: () => "inventory-evidence-batch",
+    });
+    if (!prepared) throw new Error("expected batch");
+    const pinKey = `inventory_sync_batch_v1:${INVENTORY_ID}:${SNAPSHOT_ID}`;
+    const pin = db.prepare("SELECT value FROM station_meta WHERE key=?").get(pinKey) as {
+      value: string;
+    };
+    db.prepare("UPDATE station_meta SET value=? WHERE key=?").run(pin.value, pinKey);
+    const evidenceMetadata = { pinValue: pin.value, negotiated: true, evidenceLinks: [] };
+    db.prepare("UPDATE station_meta SET value=? WHERE key=?").run(
+      JSON.stringify({
+        metadata: evidenceMetadata,
+        digest: productLabelValueDigest(evidenceMetadata),
+      }),
+      `inventory_sync_evidence_v1:${prepared.request.batchId}`,
+    );
+    const preparedEvent = prepared.request.events[0];
+    if (!preparedEvent || preparedEvent.kind !== "item") throw new Error("expected item event");
+    if (!preparedEvent.codeHash) throw new Error("expected item code hash");
+    const native = {
+      inventoryId: INVENTORY_ID,
+      snapshotId: SNAPSHOT_ID,
+      snapshotRevision: 1,
+      batchId: prepared.request.batchId,
+      payloadDigest: prepared.request.payloadDigest,
+      sequenceCeiling: prepared.request.sequenceCeiling,
+      resultRevision: 1,
+      outcomes: [
+        appliedOutcome(preparedEvent.eventId, preparedEvent.codeHash, preparedEvent.scannedAt),
+      ],
+    };
+    const post = vi.fn(async (path: string, body?: unknown) => {
+      expect(path).toBe(`/station/grants/v1/evidence/inventories/${INVENTORY_ID}/event-batches`);
+      const envelope = body as { protocol: string; batchId: string; payload: unknown };
+      expect(envelope).toMatchObject({
+        protocol: "offline-grants-v1",
+        batchId: prepared.request.batchId,
+        payload: prepared.request,
+      });
+      return {
+        protocol: "offline-grants-v1",
+        batchId: prepared.request.batchId,
+        outcome: "accepted",
+        reason: null,
+        receiptId: "77777777-7777-4777-8777-777777777777",
+        reconciliation: { status: "applied", statusCode: 200, result: native },
+      };
+    });
+    const states: Array<{ lastError: string | null }> = [];
+    const engine = createInventorySyncEngine({
+      exec,
+      client: { post },
+      inventoryId: INVENTORY_ID,
+      snapshotId: SNAPSHOT_ID,
+      credentialGeneration: generation,
+      onState: (state) => states.push(state),
+      retry: false,
+    });
+
+    engine.nudge();
+    await engine.idle();
+    engine.stop();
+
+    expect(post).toHaveBeenCalledOnce();
+    expect(states.at(-1)?.lastError).toBeNull();
+    expect(db.prepare("SELECT COUNT(*) count FROM inventory_outbox").get()).toEqual({ count: 0 });
+  });
+
   it("restores the exact old inventory batch after verified key rotation and denies foreign keys", async () => {
     const { db, exec } = await setup();
     const generation = createCredentialGeneration("inventory-key-a");

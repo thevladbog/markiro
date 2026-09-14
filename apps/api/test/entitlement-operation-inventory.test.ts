@@ -1,3 +1,5 @@
+import { nativeGrantOperationIds } from "@markiro/platform-contracts";
+import { PUBLIC_API_OPERATIONS } from "../src/modules/public-api/public-api-admission.service";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import ts from "typescript";
@@ -119,9 +121,21 @@ describe("actual entitlement operation adapters", () => {
     },
   );
   it("covers every registry P1A adapter, while keeping classified recovery and P1B/C deferred", () => {
-    expect([...new Set(inventory.map(([operation]) => operation))].sort()).toEqual(
+    expect(
+      [
+        ...new Set([
+          ...inventory.map(([operation]) => operation),
+          ...Object.values(PUBLIC_API_OPERATIONS).map((entry) => entry.entitlementOperation),
+          ...(nativeGrantOperationIds("station", "shift.start.v1") ?? []),
+          ...(nativeGrantOperationIds("station", "inventory.start.v1") ?? []),
+          ...(nativeGrantOperationIds("kiosk", "pickup.start.v1") ?? []),
+        ]),
+      ].sort(),
+    ).toEqual(
       Object.entries(ENTITLEMENT_OPERATIONS)
-        .filter(([, entry]) => ["p1a_adapter", "p1b_adapter"].includes(entry.coverage))
+        .filter(([, entry]) =>
+          ["p1a_adapter", "p1b_adapter", "p1c_adapter"].includes(entry.coverage),
+        )
         .map(([id]) => id)
         .sort(),
     );

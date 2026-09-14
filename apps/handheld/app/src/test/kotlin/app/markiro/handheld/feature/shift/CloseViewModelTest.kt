@@ -116,4 +116,18 @@ class CloseViewModelTest {
         vm.confirm()
         assertEquals(CloseOutcome.CONFLICT, (vm.step.first { it is CloseStep.Summary } as CloseStep.Summary).outcome)
     }
+
+    @Test fun grantDenialReturnsFromDrainingToConfirmationWithoutClosingOrUploading() = runTest {
+        db.shiftDao().upsert(ShiftEntityFixtures.bundled("s1").copy(plannedQty=null))
+        db.grants.beginRefresh()
+        db.grantDao().state(checkNotNull(db.grantDao().state()).copy(mode="strict"))
+        val vm=vm()
+        vm.step.first { it is CloseStep.Confirm }
+        vm.confirm()
+        vm.grantDenial.isVisible.first { it }
+        assertTrue(vm.step.value is CloseStep.Confirm)
+        assertEquals(null,db.shiftCloseDao().forShift("s1"))
+        assertEquals("active",db.shiftDao().get("s1")?.status)
+        assertEquals(0,server.requestCount)
+    }
 }

@@ -1,5 +1,7 @@
 mod commands;
 mod config;
+mod grant_clock;
+mod grant_transaction;
 mod power;
 mod printer;
 mod scanner;
@@ -52,6 +54,8 @@ pub fn run() {
             commands::clear_credential,
             commands::enter_lockdown,
             commands::exit_lockdown,
+            grant_clock::grant_clock_sample,
+            grant_transaction::grant_atomic_execute,
             power::set_system_awake,
             scanner::list_serial_ports,
             scanner::configure_scanners,

@@ -971,8 +971,9 @@ body,
   display: grid;
   width: min(620px, 56vw);
   min-width: 0;
-  height: 64px;
-  overflow: hidden;
+  min-height: 64px;
+  max-height: min(144px, 18vh);
+  overflow: auto;
   align-items: center;
 }
 

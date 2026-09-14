@@ -128,4 +128,37 @@ class ScanRecorderTest {
         assertEquals(1, db.codeDao().countForShift("s1"))
         assertEquals(20, db.outboxDao().countNow())
     }
+
+    @Test fun observeScanKeepsLegacyBehaviorWithUnusableUnrelatedPrintTemplate() = runTest {
+        assertEquals(Verdict.OK,recorder().record(shift.copy(duplicateTemplate="invalid legacy template"),"010460068200001321legacy", "op").verdict)
+    }
+
+    @Test fun staleShiftArgumentCannotCommitAgainstCurrentDifferentGrant() = runTest {
+        db.shiftDao().upsert(shift.copy(productGtin14="04600000000015"))
+        app.markiro.handheld.core.grants.installStrictShiftAuthority(db,"s1")
+        val denied=runCatching { recorder().record(shift,"010460068200001321stale", "op-1") }.exceptionOrNull()
+        org.junit.Assert.assertTrue(denied is app.markiro.handheld.core.grants.GrantDenied)
+        assertEquals("WRONG_TASK",db.grantDao().evidence().single().reason)
+        assertEquals(0,db.codeDao().countForShift("s1"))
+        assertEquals(0,db.outboxDao().head(10).size)
+        assertEquals(0,db.scanEventDao().observeRecent("s1",10).first().size)
+    }
+
+    @Test fun currentShiftArgumentStillCommitsUnderStrictAuthority() = runTest {
+        db.shiftDao().upsert(shift)
+        app.markiro.handheld.core.grants.installStrictShiftAuthority(db,"s1")
+        assertEquals(Verdict.OK,recorder().record(shift,"010460068200001321current", "op-1").verdict)
+    }
+
+    @Test fun strictDenialRollsBackAcceptedCodeJournalAndOutboxTogether() = runTest {
+        db.grants.beginRefresh()
+        db.grantDao().state(checkNotNull(db.grantDao().state()).copy(mode="strict"))
+        val denied=runCatching { recorder().record(shift,"010460068200001321grant-denied", "op-1") }.exceptionOrNull()
+        org.junit.Assert.assertTrue(denied is app.markiro.handheld.core.grants.GrantDenied)
+        assertEquals(0,db.codeDao().countForShift("s1"))
+        assertEquals(0,db.outboxDao().head(10).size)
+        assertEquals(0,db.scanEventDao().observeRecent("s1",10).first().size)
+        assertEquals("MISSING_GRANT",db.grantDao().evidence().single().reason)
+        assertEquals(Verdict.INVALID,recorder().record(shift,"garbage","op-1").verdict)
+    }
 }

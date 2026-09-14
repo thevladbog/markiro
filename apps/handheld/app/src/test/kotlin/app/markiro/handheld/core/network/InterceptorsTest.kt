@@ -65,6 +65,18 @@ class InterceptorsTest {
     }
 
     @Test
+    fun grantNegotiationAndEvidenceKeepValidationCapabilities() {
+        for (path in listOf("/station/grants/v1/configuration", "/station/grants/v1/keyset", "/station/grants/v1/device", "/station/grants/v1/tasks", "/station/grants/v1/evidence/scans", "/station/grants/v1/evidence/product-label-events")) {
+            server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
+            client.newCall(Request.Builder().url(server.url(path)).build()).execute().close()
+            val request=server.takeRequest()
+            assertEquals(path,request.path)
+            assertEquals(HANDHELD_CAPABILITIES,request.getHeader("x-station-capabilities"))
+            assertEquals("mk_live_abc",request.getHeader("x-api-key"))
+        }
+    }
+
+    @Test
     fun omitsTheKeyHeaderWhenUnpaired() {
         server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
         OkHttpClient().newCall(Request.Builder().url(server.url("/station/pair")).build()).execute().close()

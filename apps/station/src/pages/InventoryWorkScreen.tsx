@@ -7,7 +7,7 @@ import {
 import type { PrinterProfile } from "../lib/printer-routing.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, FullScreenDialog } from "@markiro/ui";
+import { Alert, Button, FullScreenDialog } from "@markiro/ui";
 import { parseScannedSscc, type StationInventoryBundleManifest } from "@markiro/domain";
 
 import {
@@ -71,6 +71,7 @@ export interface InventoryWorkScreenProps {
   source: ScanSource;
   client?: Pick<StationClient, "get" | "post">;
   credentialGeneration?: CredentialGeneration;
+  offlineGrantNotice?: string | null;
   floorTaskPointerValue?: string;
   onLeft?: () => void;
   onScanQueueRegister?: (queue: ScanQueue) => () => void;
@@ -206,6 +207,7 @@ function CheckInventoryWorkScreen({
   source,
   client,
   credentialGeneration,
+  offlineGrantNotice,
   floorTaskPointerValue,
   onLeft,
   onScanQueueRegister,
@@ -381,17 +383,22 @@ function CheckInventoryWorkScreen({
         process: async (raw) => {
           const bypass = bypassRef.current === raw;
           if (bypass) bypassRef.current = null;
-          const outcome = await recordInventoryScan(exec, {
-            inventoryId: inventory.inventoryId,
-            snapshotId: inventory.snapshotId,
-            deviceId,
-            operatorId,
-            taskGtin14: inventory.gtin14,
-            raw,
-            eventId: createEventId(),
-            scannedAt: now(),
-            ...(bypass ? { acceptSourceDateMismatch: true } : {}),
-          });
+          const outcome = await recordInventoryScan(
+            exec,
+            {
+              inventoryId: inventory.inventoryId,
+              snapshotId: inventory.snapshotId,
+              deviceId,
+              operatorId,
+              taskGtin14: inventory.gtin14,
+              raw,
+              eventId: createEventId(),
+              scannedAt: now(),
+              ...(credentialGeneration ? { credentialGeneration } : {}),
+              ...(bypass ? { acceptSourceDateMismatch: true } : {}),
+            },
+            credentialGeneration,
+          );
           return outcome.outcome === "recorded" ? outcome : { ...outcome, raw };
         },
         onOutcome: (outcome) => {
@@ -429,6 +436,7 @@ function CheckInventoryWorkScreen({
       }),
     [
       createEventId,
+      credentialGeneration,
       deviceId,
       exec,
       inventory.gtin14,
@@ -587,6 +595,7 @@ function CheckInventoryWorkScreen({
         </div>
       }
     >
+      {offlineGrantNotice ? <Alert tone="info">{offlineGrantNotice}</Alert> : null}
       <div className="inventory-work-screen" data-testid="inventory-simple-work">
         <section className="inventory-active-date">
           <div>
@@ -817,6 +826,7 @@ function RepackInventoryWorkScreen({
   source,
   client,
   credentialGeneration,
+  offlineGrantNotice,
   floorTaskPointerValue,
   onLeft,
   onScanQueueRegister,
@@ -1441,6 +1451,7 @@ function RepackInventoryWorkScreen({
           operatorId,
           eventId: createEventId(),
           changedAt: now(),
+          ...(credentialGeneration ? { credentialGeneration } : {}),
         };
         if (kind === "remove") {
           await removeLastInventoryRepackItem(exec, input);
@@ -1593,6 +1604,7 @@ function RepackInventoryWorkScreen({
           eventId: createEventId(),
           changedAt: now(),
           productionDate: dateDraft,
+          ...(credentialGeneration ? { credentialGeneration } : {}),
         });
         // Redundant for the date itself: the `inventory_repack_apply_journal_v1`
         // trigger already moves inventory_terminal_state.active_production_date
@@ -1657,6 +1669,7 @@ function RepackInventoryWorkScreen({
           eventId: createEventId(),
           changedAt: now(),
           productionDate: held.codeDate,
+          ...(credentialGeneration ? { credentialGeneration } : {}),
         });
         await setInventoryProductionDate(exec, {
           inventoryId: inventory.inventoryId,
@@ -1751,6 +1764,7 @@ function RepackInventoryWorkScreen({
         </div>
       }
     >
+      {offlineGrantNotice ? <Alert tone="info">{offlineGrantNotice}</Alert> : null}
       <div className="repack-work-screen" data-testid="inventory-repack-work">
         <div className="repack-toolbar">
           <div>

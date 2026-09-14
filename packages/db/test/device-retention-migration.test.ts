@@ -25,7 +25,7 @@ describe.skipIf(!databaseUrl)("working device retention forward migration", () =
   let created = false;
   let temporaryRoot = "";
   let history: unknown;
-  const readHistory = async () =>
+  const readHistory = async (beforeEpochMigration = false) =>
     Promise.all(
       [
         "station_devices",
@@ -33,7 +33,14 @@ describe.skipIf(!databaseUrl)("working device retention forward migration", () =
         "working_device_events",
         "products",
         "shifts",
-      ].map(async (table) => (await pool.query(`SELECT * FROM ${table} ORDER BY id`)).rows),
+      ].map(
+        async (table) =>
+          (
+            await pool.query(
+              `SELECT *${beforeEpochMigration && table === "station_devices" ? ", 1 AS credential_epoch" : ""} FROM ${table} ORDER BY id`,
+            )
+          ).rows,
+      ),
     );
   beforeAll(async () => {
     await maintenance.query(`CREATE DATABASE "${name}"`);
@@ -73,7 +80,7 @@ describe.skipIf(!databaseUrl)("working device retention forward migration", () =
     // The later reprocessing migration adds a default-off policy field. Every
     // pre-existing historical field must still match byte-for-byte, and the new
     // field must stay false for this legacy validation shift.
-    history = (await readHistory()).map((rows, index) =>
+    history = (await readHistory(true)).map((rows, index) =>
       index === 4
         ? rows.map((row: Record<string, unknown>) => ({
             ...row,

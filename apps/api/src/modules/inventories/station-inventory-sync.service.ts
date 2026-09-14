@@ -1,3 +1,7 @@
+import {
+  withEvidenceTransaction,
+  type EvidenceTransactionHook,
+} from "../device-grants/evidence-transaction";
 import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { and, asc, desc, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
 
@@ -190,8 +194,9 @@ export class StationInventorySyncService {
     deviceId: string,
     inventoryId: string,
     input: StationInventoryEventBatchDto,
+    evidence?: EvidenceTransactionHook<StationInventoryEventBatchResponseDto>,
   ): Promise<StationInventoryEventBatchResponseDto> {
-    return this.ingestBatch(tenantId, deviceId, inventoryId, input, null);
+    return this.ingestBatch(tenantId, deviceId, inventoryId, input, null, evidence);
   }
 
   replayAuthorizedLateEvent(
@@ -214,392 +219,483 @@ export class StationInventorySyncService {
     inventoryId: string,
     input: StationInventoryEventBatchDto,
     replayRequest: { lateEventId: string; actorUserId: string } | null,
+    evidence?: EvidenceTransactionHook<StationInventoryEventBatchResponseDto>,
   ): Promise<StationInventoryEventBatchResponseDto> {
-    return this.db.transaction(async (tx) => {
-      let replayAuthorization: { lateEventId: string; actorUserId: string } | null = null;
-      const [inventory] = await tx
-        .select({
-          id: schema.inventories.id,
-          status: schema.inventories.status,
-          activeSnapshotId: schema.inventories.activeSnapshotId,
-          resultRevision: schema.inventories.resultRevision,
-          gtin14: schema.inventories.gtin14Snapshot,
-          productionDateFrom: schema.inventories.productionDateFrom,
-          productionDateTo: schema.inventories.productionDateTo,
-          mode: schema.inventories.mode,
-          stationManifest: schema.inventories.stationManifest,
-        })
-        .from(schema.inventories)
-        .where(
-          and(eq(schema.inventories.tenantId, tenantId), eq(schema.inventories.id, inventoryId)),
-        )
-        .for("update");
-      if (!inventory) throw new NotFoundException();
-
-      const [participant] = await tx
-        .select({
-          operatorId: schema.inventoryDeviceParticipants.operatorId,
-          leftAt: schema.inventoryDeviceParticipants.leftAt,
-        })
-        .from(schema.inventoryDeviceParticipants)
-        .where(
-          and(
-            eq(schema.inventoryDeviceParticipants.tenantId, tenantId),
-            eq(schema.inventoryDeviceParticipants.inventoryId, inventoryId),
-            eq(schema.inventoryDeviceParticipants.deviceId, deviceId),
-          ),
-        )
-        .for("update");
-      if (!participant) throw new NotFoundException();
-
-      const [sameBatch] = await tx
-        .select({
-          payloadDigest: schema.inventoryScanBatches.payloadDigest,
-          outcome: schema.inventoryScanBatches.outcome,
-          result: schema.inventoryScanBatches.result,
-        })
-        .from(schema.inventoryScanBatches)
-        .where(
-          and(
-            eq(schema.inventoryScanBatches.tenantId, tenantId),
-            eq(schema.inventoryScanBatches.inventoryId, inventoryId),
-            eq(schema.inventoryScanBatches.deviceId, deviceId),
-            eq(schema.inventoryScanBatches.batchId, input.batchId),
-          ),
-        );
-      if (sameBatch) {
-        if (sameBatch.payloadDigest !== input.payloadDigest) {
-          throw new ConflictException({ code: "INVENTORY_BATCH_DIGEST_CONFLICT" });
-        }
-        if (
-          sameBatch.outcome === "quarantined" &&
-          inventory.status === "running" &&
-          replayRequest !== null
-        ) {
-          const [lateEvent] = await tx
-            .select({
-              id: schema.inventoryLateEvents.id,
-              replayAuthorizedByUserId: schema.inventoryLateEvents.replayAuthorizedByUserId,
-            })
-            .from(schema.inventoryLateEvents)
-            .where(
-              and(
-                eq(schema.inventoryLateEvents.tenantId, tenantId),
-                eq(schema.inventoryLateEvents.inventoryId, inventoryId),
-                eq(schema.inventoryLateEvents.deviceId, deviceId),
-                eq(schema.inventoryLateEvents.batchId, input.batchId),
-                eq(schema.inventoryLateEvents.payloadDigest, input.payloadDigest),
-                eq(schema.inventoryLateEvents.resolution, "pending"),
-                eq(schema.inventoryLateEvents.id, replayRequest.lateEventId),
-              ),
-            )
-            .for("update");
-          if (lateEvent?.replayAuthorizedByUserId) {
-            replayAuthorization = {
-              lateEventId: lateEvent.id,
-              actorUserId: replayRequest.actorUserId,
-            };
-            await tx
-              .delete(schema.inventoryScanBatches)
-              .where(
-                and(
-                  eq(schema.inventoryScanBatches.tenantId, tenantId),
-                  eq(schema.inventoryScanBatches.inventoryId, inventoryId),
-                  eq(schema.inventoryScanBatches.deviceId, deviceId),
-                  eq(schema.inventoryScanBatches.batchId, input.batchId),
-                  eq(schema.inventoryScanBatches.outcome, "quarantined"),
-                ),
-              );
-          }
-        }
-        if (replayAuthorization === null) {
-          return this.normalizeStoredResponse(
-            tx,
-            tenantId,
-            deviceId,
-            inventoryId,
-            input,
-            sameBatch.result,
-            inventory.resultRevision,
-          );
-        }
-      }
-      const [sameDigest] = await tx
-        .select({
-          batchId: schema.inventoryScanBatches.batchId,
-          outcome: schema.inventoryScanBatches.outcome,
-          result: schema.inventoryScanBatches.result,
-        })
-        .from(schema.inventoryScanBatches)
-        .where(
-          and(
-            eq(schema.inventoryScanBatches.tenantId, tenantId),
-            eq(schema.inventoryScanBatches.inventoryId, inventoryId),
-            eq(schema.inventoryScanBatches.deviceId, deviceId),
-            eq(schema.inventoryScanBatches.payloadDigest, input.payloadDigest),
-          ),
-        );
-      if (sameDigest) {
-        const prior = await this.normalizeStoredResponse(
-          tx,
-          tenantId,
-          deviceId,
-          inventoryId,
-          { ...input, batchId: sameDigest.batchId },
-          sameDigest.result,
-          inventory.resultRevision,
-        );
-        const replay = {
-          ...prior,
-          batchId: input.batchId,
-          outcomes: prior.outcomes.map((outcome) =>
-            outcome.status === "rejected" || outcome.status === "quarantined"
-              ? outcome
-              : {
-                  ...outcome,
-                  status: "replay" as const,
-                  reasonCode: "BATCH_REPLAY" as const,
-                },
-          ),
-        };
-        await tx.insert(schema.inventoryScanBatches).values({
-          tenantId,
-          inventoryId,
-          deviceId,
-          batchId: input.batchId,
-          payloadDigest: input.payloadDigest,
-          sequenceCeiling: BigInt(input.sequenceCeiling),
-          outcome: sameDigest.outcome,
-          result: replay,
-        });
-        return replay;
-      }
-
-      if (inventory.activeSnapshotId !== input.snapshotId || input.snapshotRevision !== 1) {
-        throw new ConflictException({ code: "INVENTORY_SNAPSHOT_MISMATCH" });
-      }
-      if (
-        replayAuthorization === null &&
-        input.events.some((event) => event.operatorId !== participant.operatorId)
-      ) {
-        throw new ConflictException({ code: "INVENTORY_PARTICIPANT_OPERATOR_MISMATCH" });
-      }
-      const syncOperatorId =
-        replayAuthorization === null ? participant.operatorId : input.events[0]?.operatorId;
-      if (syncOperatorId === undefined) {
-        throw new Error("Validated inventory event batch has no operator identity");
-      }
-
-      const repackFacts = repackInventoryFacts(inventory.mode, inventory.stationManifest);
-      const targets = new Map<string, ClaimTarget[]>();
-      const rejectedEvents = new Set<string>();
-      const rejectionErrors = new Map<string, ConflictException>();
-      let expandedClaimCount = 0;
-      for (const event of input.events) {
-        let expanded: ClaimTarget[];
-        try {
-          expanded = await this.validateAndExpand(
-            tx,
-            tenantId,
-            inventoryId,
-            input.snapshotId,
-            inventory.gtin14,
-            inventory.productionDateFrom,
-            inventory.productionDateTo,
-            repackFacts,
-            event,
-          );
-        } catch (error) {
-          if (!(error instanceof ConflictException)) throw error;
-          rejectedEvents.add(event.eventId);
-          rejectionErrors.set(event.eventId, error);
-          targets.set(event.eventId, []);
-          continue;
-        }
-        if (expanded.length > INVENTORY_EVENT_CLAIM_OUTCOME_SIZE) {
-          throw new ConflictException({ code: "INVENTORY_EVENT_CLAIM_LIMIT_EXCEEDED" });
-        }
-        if (expandedClaimCount + expanded.length > INVENTORY_EVENT_BATCH_CLAIM_OUTCOME_SIZE) {
-          throw new ConflictException({ code: "INVENTORY_BATCH_CLAIM_LIMIT_EXCEEDED" });
-        }
-        expandedClaimCount += expanded.length;
-        targets.set(event.eventId, expanded);
-      }
-
-      if (inventory.status !== "running") {
-        const invalidLateEvent = input.events.find((event) => rejectionErrors.has(event.eventId));
-        if (invalidLateEvent) {
-          const rejection = rejectionErrors.get(invalidLateEvent.eventId);
-          if (rejection && conflictCode(rejection) !== "INVENTORY_EVENT_MODE_MISMATCH") {
-            throw rejection;
-          }
-        }
-        if (inventory.status !== "closed" && inventory.status !== "completed") {
-          throw new ConflictException({ code: "INVENTORY_NOT_ACCEPTING_EVENTS" });
-        }
-        const response = this.response(
-          inventoryId,
-          input,
-          inventory.resultRevision,
-          input.events.map((event) => ({
-            eventId: event.eventId,
-            status: "quarantined" as const,
-            reasonCode:
-              inventory.status === "completed" ? "INVENTORY_COMPLETED" : "INVENTORY_CLOSED",
-            claimedCount: 0,
-            conflictCount: 0,
-            claims: [],
-          })),
-        );
-        await tx.insert(schema.inventoryScanBatches).values({
-          tenantId,
-          inventoryId,
-          deviceId,
-          batchId: input.batchId,
-          payloadDigest: input.payloadDigest,
-          sequenceCeiling: BigInt(input.sequenceCeiling),
-          outcome: "quarantined",
-          result: response,
-        });
-        await tx.insert(schema.inventoryLateEvents).values({
-          tenantId,
-          inventoryId,
-          deviceId,
-          batchId: input.batchId,
-          payload: input,
-          payloadDigest: input.payloadDigest,
-          closedRevision: inventory.resultRevision,
-          reason: inventory.status === "completed" ? "INVENTORY_COMPLETED" : "INVENTORY_CLOSED",
-        });
-        await tx.insert(schema.tenantAuditEvents).values({
-          organizationId: tenantId,
-          actorUserId: null,
-          action: "inventory.station.events_quarantined",
-          outcome: "success",
-          targetType: "inventory",
-          targetId: inventoryId,
-          after: {
-            tenantId,
-            inventoryId,
-            deviceId,
-            operatorId: participant.operatorId,
-            snapshotId: input.snapshotId,
-            snapshotRevision: 1,
-            batchId: input.batchId,
-            payloadDigest: input.payloadDigest,
-            sequenceCeiling: input.sequenceCeiling,
-            eventCount: input.events.length,
-            closedRevision: inventory.resultRevision,
-            reason: inventory.status === "completed" ? "INVENTORY_COMPLETED" : "INVENTORY_CLOSED",
-          },
-        });
-        await tx
-          .update(schema.inventoryDeviceParticipants)
-          .set({
-            heartbeatAt: new Date(),
-            pendingEventCount: input.pendingEventCount,
-            openBoxCount: input.openBoxCount,
+    return this.db.transaction(async (tx) =>
+      withEvidenceTransaction(tx, evidence, async () => {
+        let replayAuthorization: { lateEventId: string; actorUserId: string } | null = null;
+        const [inventory] = await tx
+          .select({
+            id: schema.inventories.id,
+            status: schema.inventories.status,
+            activeSnapshotId: schema.inventories.activeSnapshotId,
+            resultRevision: schema.inventories.resultRevision,
+            gtin14: schema.inventories.gtin14Snapshot,
+            productionDateFrom: schema.inventories.productionDateFrom,
+            productionDateTo: schema.inventories.productionDateTo,
+            mode: schema.inventories.mode,
+            stationManifest: schema.inventories.stationManifest,
           })
+          .from(schema.inventories)
+          .where(
+            and(eq(schema.inventories.tenantId, tenantId), eq(schema.inventories.id, inventoryId)),
+          )
+          .for("update");
+        if (!inventory) throw new NotFoundException();
+
+        const [participant] = await tx
+          .select({
+            operatorId: schema.inventoryDeviceParticipants.operatorId,
+            leftAt: schema.inventoryDeviceParticipants.leftAt,
+          })
+          .from(schema.inventoryDeviceParticipants)
           .where(
             and(
               eq(schema.inventoryDeviceParticipants.tenantId, tenantId),
               eq(schema.inventoryDeviceParticipants.inventoryId, inventoryId),
               eq(schema.inventoryDeviceParticipants.deviceId, deviceId),
             ),
-          );
-        return response;
-      }
-      if (participant.leftAt !== null && replayAuthorization === null) {
-        throw new ConflictException({ code: "INVENTORY_PARTICIPANT_LEFT" });
-      }
+          )
+          .for("update");
+        if (!participant) throw new NotFoundException();
 
-      const [acceptedHighWater] = await tx
-        .select({ sequenceCeiling: schema.inventoryScanBatches.sequenceCeiling })
-        .from(schema.inventoryScanBatches)
-        .where(
-          and(
-            eq(schema.inventoryScanBatches.tenantId, tenantId),
-            eq(schema.inventoryScanBatches.inventoryId, inventoryId),
-            eq(schema.inventoryScanBatches.deviceId, deviceId),
-            inArray(schema.inventoryScanBatches.outcome, ["applied", "rejected"]),
-          ),
-        )
-        .orderBy(desc(schema.inventoryScanBatches.sequenceCeiling))
-        .limit(1);
-      if (
-        replayAuthorization === null &&
-        acceptedHighWater &&
-        BigInt(input.events[0]?.deviceSequence ?? 0) <= acceptedHighWater.sequenceCeiling
-      ) {
-        throw new ConflictException({ code: "INVENTORY_EVENT_SEQUENCE_BELOW_HIGH_WATER" });
-      }
-
-      const eventIds = input.events.map((event) => event.eventId);
-      const sequences = input.events.map((event) => BigInt(event.deviceSequence));
-      const existingEvents = await tx
-        .select({ eventId: schema.inventoryScanEvents.eventId })
-        .from(schema.inventoryScanEvents)
-        .where(
-          or(
-            inArray(schema.inventoryScanEvents.eventId, eventIds),
+        const [sameBatch] = await tx
+          .select({
+            payloadDigest: schema.inventoryScanBatches.payloadDigest,
+            outcome: schema.inventoryScanBatches.outcome,
+            result: schema.inventoryScanBatches.result,
+          })
+          .from(schema.inventoryScanBatches)
+          .where(
             and(
-              eq(schema.inventoryScanEvents.tenantId, tenantId),
-              eq(schema.inventoryScanEvents.inventoryId, inventoryId),
-              eq(schema.inventoryScanEvents.deviceId, deviceId),
-              inArray(schema.inventoryScanEvents.deviceSequence, sequences),
+              eq(schema.inventoryScanBatches.tenantId, tenantId),
+              eq(schema.inventoryScanBatches.inventoryId, inventoryId),
+              eq(schema.inventoryScanBatches.deviceId, deviceId),
+              eq(schema.inventoryScanBatches.batchId, input.batchId),
             ),
-          ),
-        );
-      if (existingEvents.length > 0) {
-        throw new ConflictException({ code: "INVENTORY_EVENT_ID_OR_SEQUENCE_REUSED" });
-      }
+          );
+        if (sameBatch) {
+          if (sameBatch.payloadDigest !== input.payloadDigest) {
+            throw new ConflictException({ code: "INVENTORY_BATCH_DIGEST_CONFLICT" });
+          }
+          if (
+            sameBatch.outcome === "quarantined" &&
+            inventory.status === "running" &&
+            replayRequest !== null
+          ) {
+            const [lateEvent] = await tx
+              .select({
+                id: schema.inventoryLateEvents.id,
+                replayAuthorizedByUserId: schema.inventoryLateEvents.replayAuthorizedByUserId,
+              })
+              .from(schema.inventoryLateEvents)
+              .where(
+                and(
+                  eq(schema.inventoryLateEvents.tenantId, tenantId),
+                  eq(schema.inventoryLateEvents.inventoryId, inventoryId),
+                  eq(schema.inventoryLateEvents.deviceId, deviceId),
+                  eq(schema.inventoryLateEvents.batchId, input.batchId),
+                  eq(schema.inventoryLateEvents.payloadDigest, input.payloadDigest),
+                  eq(schema.inventoryLateEvents.resolution, "pending"),
+                  eq(schema.inventoryLateEvents.id, replayRequest.lateEventId),
+                ),
+              )
+              .for("update");
+            if (lateEvent?.replayAuthorizedByUserId) {
+              replayAuthorization = {
+                lateEventId: lateEvent.id,
+                actorUserId: replayRequest.actorUserId,
+              };
+              await tx
+                .delete(schema.inventoryScanBatches)
+                .where(
+                  and(
+                    eq(schema.inventoryScanBatches.tenantId, tenantId),
+                    eq(schema.inventoryScanBatches.inventoryId, inventoryId),
+                    eq(schema.inventoryScanBatches.deviceId, deviceId),
+                    eq(schema.inventoryScanBatches.batchId, input.batchId),
+                    eq(schema.inventoryScanBatches.outcome, "quarantined"),
+                  ),
+                );
+            }
+          }
+          if (replayAuthorization === null) {
+            return this.normalizeStoredResponse(
+              tx,
+              tenantId,
+              deviceId,
+              inventoryId,
+              input,
+              sameBatch.result,
+              inventory.resultRevision,
+            );
+          }
+        }
+        const [sameDigest] = await tx
+          .select({
+            batchId: schema.inventoryScanBatches.batchId,
+            outcome: schema.inventoryScanBatches.outcome,
+            result: schema.inventoryScanBatches.result,
+          })
+          .from(schema.inventoryScanBatches)
+          .where(
+            and(
+              eq(schema.inventoryScanBatches.tenantId, tenantId),
+              eq(schema.inventoryScanBatches.inventoryId, inventoryId),
+              eq(schema.inventoryScanBatches.deviceId, deviceId),
+              eq(schema.inventoryScanBatches.payloadDigest, input.payloadDigest),
+            ),
+          );
+        if (sameDigest) {
+          const prior = await this.normalizeStoredResponse(
+            tx,
+            tenantId,
+            deviceId,
+            inventoryId,
+            { ...input, batchId: sameDigest.batchId },
+            sameDigest.result,
+            inventory.resultRevision,
+          );
+          const replay = {
+            ...prior,
+            batchId: input.batchId,
+            outcomes: prior.outcomes.map((outcome) =>
+              outcome.status === "rejected" || outcome.status === "quarantined"
+                ? outcome
+                : {
+                    ...outcome,
+                    status: "replay" as const,
+                    reasonCode: "BATCH_REPLAY" as const,
+                  },
+            ),
+          };
+          await tx.insert(schema.inventoryScanBatches).values({
+            tenantId,
+            inventoryId,
+            deviceId,
+            batchId: input.batchId,
+            payloadDigest: input.payloadDigest,
+            sequenceCeiling: BigInt(input.sequenceCeiling),
+            outcome: sameDigest.outcome,
+            result: replay,
+          });
+          return replay;
+        }
 
-      await tx.insert(schema.inventoryScanBatches).values({
-        tenantId,
-        inventoryId,
-        deviceId,
-        batchId: input.batchId,
-        payloadDigest: input.payloadDigest,
-        sequenceCeiling: BigInt(input.sequenceCeiling),
-        outcome: rejectedEvents.size === input.events.length ? "rejected" : "applied",
-        result: {},
-      });
-      await tx.insert(schema.inventoryScanEvents).values(
-        input.events.map((event) => ({
-          eventId: event.eventId,
+        if (inventory.activeSnapshotId !== input.snapshotId || input.snapshotRevision !== 1) {
+          throw new ConflictException({ code: "INVENTORY_SNAPSHOT_MISMATCH" });
+        }
+        if (
+          replayAuthorization === null &&
+          input.events.some((event) => event.operatorId !== participant.operatorId)
+        ) {
+          throw new ConflictException({ code: "INVENTORY_PARTICIPANT_OPERATOR_MISMATCH" });
+        }
+        const syncOperatorId =
+          replayAuthorization === null ? participant.operatorId : input.events[0]?.operatorId;
+        if (syncOperatorId === undefined) {
+          throw new Error("Validated inventory event batch has no operator identity");
+        }
+
+        const repackFacts = repackInventoryFacts(inventory.mode, inventory.stationManifest);
+        const targets = new Map<string, ClaimTarget[]>();
+        const rejectedEvents = new Set<string>();
+        const rejectionErrors = new Map<string, ConflictException>();
+        let expandedClaimCount = 0;
+        for (const event of input.events) {
+          let expanded: ClaimTarget[];
+          try {
+            expanded = await this.validateAndExpand(
+              tx,
+              tenantId,
+              inventoryId,
+              input.snapshotId,
+              inventory.gtin14,
+              inventory.productionDateFrom,
+              inventory.productionDateTo,
+              repackFacts,
+              event,
+            );
+          } catch (error) {
+            if (!(error instanceof ConflictException)) throw error;
+            rejectedEvents.add(event.eventId);
+            rejectionErrors.set(event.eventId, error);
+            targets.set(event.eventId, []);
+            continue;
+          }
+          if (expanded.length > INVENTORY_EVENT_CLAIM_OUTCOME_SIZE) {
+            throw new ConflictException({ code: "INVENTORY_EVENT_CLAIM_LIMIT_EXCEEDED" });
+          }
+          if (expandedClaimCount + expanded.length > INVENTORY_EVENT_BATCH_CLAIM_OUTCOME_SIZE) {
+            throw new ConflictException({ code: "INVENTORY_BATCH_CLAIM_LIMIT_EXCEEDED" });
+          }
+          expandedClaimCount += expanded.length;
+          targets.set(event.eventId, expanded);
+        }
+
+        if (inventory.status !== "running") {
+          const invalidLateEvent = input.events.find((event) => rejectionErrors.has(event.eventId));
+          if (invalidLateEvent) {
+            const rejection = rejectionErrors.get(invalidLateEvent.eventId);
+            if (rejection && conflictCode(rejection) !== "INVENTORY_EVENT_MODE_MISMATCH") {
+              throw rejection;
+            }
+          }
+          if (inventory.status !== "closed" && inventory.status !== "completed") {
+            throw new ConflictException({ code: "INVENTORY_NOT_ACCEPTING_EVENTS" });
+          }
+          const response = this.response(
+            inventoryId,
+            input,
+            inventory.resultRevision,
+            input.events.map((event) => ({
+              eventId: event.eventId,
+              status: "quarantined" as const,
+              reasonCode:
+                inventory.status === "completed" ? "INVENTORY_COMPLETED" : "INVENTORY_CLOSED",
+              claimedCount: 0,
+              conflictCount: 0,
+              claims: [],
+            })),
+          );
+          await tx.insert(schema.inventoryScanBatches).values({
+            tenantId,
+            inventoryId,
+            deviceId,
+            batchId: input.batchId,
+            payloadDigest: input.payloadDigest,
+            sequenceCeiling: BigInt(input.sequenceCeiling),
+            outcome: "quarantined",
+            result: response,
+          });
+          await tx.insert(schema.inventoryLateEvents).values({
+            tenantId,
+            inventoryId,
+            deviceId,
+            batchId: input.batchId,
+            payload: input,
+            payloadDigest: input.payloadDigest,
+            closedRevision: inventory.resultRevision,
+            reason: inventory.status === "completed" ? "INVENTORY_COMPLETED" : "INVENTORY_CLOSED",
+          });
+          await tx.insert(schema.tenantAuditEvents).values({
+            organizationId: tenantId,
+            actorUserId: null,
+            action: "inventory.station.events_quarantined",
+            outcome: "success",
+            targetType: "inventory",
+            targetId: inventoryId,
+            after: {
+              tenantId,
+              inventoryId,
+              deviceId,
+              operatorId: participant.operatorId,
+              snapshotId: input.snapshotId,
+              snapshotRevision: 1,
+              batchId: input.batchId,
+              payloadDigest: input.payloadDigest,
+              sequenceCeiling: input.sequenceCeiling,
+              eventCount: input.events.length,
+              closedRevision: inventory.resultRevision,
+              reason: inventory.status === "completed" ? "INVENTORY_COMPLETED" : "INVENTORY_CLOSED",
+            },
+          });
+          await tx
+            .update(schema.inventoryDeviceParticipants)
+            .set({
+              heartbeatAt: new Date(),
+              pendingEventCount: input.pendingEventCount,
+              openBoxCount: input.openBoxCount,
+            })
+            .where(
+              and(
+                eq(schema.inventoryDeviceParticipants.tenantId, tenantId),
+                eq(schema.inventoryDeviceParticipants.inventoryId, inventoryId),
+                eq(schema.inventoryDeviceParticipants.deviceId, deviceId),
+              ),
+            );
+          return response;
+        }
+        if (participant.leftAt !== null && replayAuthorization === null) {
+          throw new ConflictException({ code: "INVENTORY_PARTICIPANT_LEFT" });
+        }
+
+        const [acceptedHighWater] = await tx
+          .select({ sequenceCeiling: schema.inventoryScanBatches.sequenceCeiling })
+          .from(schema.inventoryScanBatches)
+          .where(
+            and(
+              eq(schema.inventoryScanBatches.tenantId, tenantId),
+              eq(schema.inventoryScanBatches.inventoryId, inventoryId),
+              eq(schema.inventoryScanBatches.deviceId, deviceId),
+              inArray(schema.inventoryScanBatches.outcome, ["applied", "rejected"]),
+            ),
+          )
+          .orderBy(desc(schema.inventoryScanBatches.sequenceCeiling))
+          .limit(1);
+        if (
+          replayAuthorization === null &&
+          acceptedHighWater &&
+          BigInt(input.events[0]?.deviceSequence ?? 0) <= acceptedHighWater.sequenceCeiling
+        ) {
+          throw new ConflictException({ code: "INVENTORY_EVENT_SEQUENCE_BELOW_HIGH_WATER" });
+        }
+
+        const eventIds = input.events.map((event) => event.eventId);
+        const sequences = input.events.map((event) => BigInt(event.deviceSequence));
+        const existingEvents = await tx
+          .select({ eventId: schema.inventoryScanEvents.eventId })
+          .from(schema.inventoryScanEvents)
+          .where(
+            or(
+              inArray(schema.inventoryScanEvents.eventId, eventIds),
+              and(
+                eq(schema.inventoryScanEvents.tenantId, tenantId),
+                eq(schema.inventoryScanEvents.inventoryId, inventoryId),
+                eq(schema.inventoryScanEvents.deviceId, deviceId),
+                inArray(schema.inventoryScanEvents.deviceSequence, sequences),
+              ),
+            ),
+          );
+        if (existingEvents.length > 0) {
+          throw new ConflictException({ code: "INVENTORY_EVENT_ID_OR_SEQUENCE_REUSED" });
+        }
+
+        await tx.insert(schema.inventoryScanBatches).values({
           tenantId,
           inventoryId,
-          batchId: input.batchId,
           deviceId,
-          deviceSequence: BigInt(event.deviceSequence),
-          operatorId: event.operatorId,
-          scannedAt: new Date(event.scannedAt),
-          kind: event.kind,
-          normalizedIdentity: event.normalizedIdentity,
-          codeHash: event.codeHash,
-          rawPayload: event.canonicalRaw,
-          activeProductionDate: event.activeProductionDate,
-          snapshotRevision: input.snapshotRevision,
-          localVerdict: event.localVerdict,
-          authoritativeVerdict: rejectedEvents.has(event.eventId) ? "rejected" : "pending",
-        })),
-      );
-
-      const changed = new Map<string, ClaimTarget & { winner: InventoryClaimWinner }>();
-      const displacedEvents = new Set<string>();
-      for (const event of input.events) {
-        const eventTargets = targets.get(event.eventId) ?? [];
-        for (const target of eventTargets) {
-          const candidate: InventoryClaimWinner = {
-            codeHash: target.codeHash,
+          batchId: input.batchId,
+          payloadDigest: input.payloadDigest,
+          sequenceCeiling: BigInt(input.sequenceCeiling),
+          outcome: rejectedEvents.size === input.events.length ? "rejected" : "applied",
+          result: {},
+        });
+        await tx.insert(schema.inventoryScanEvents).values(
+          input.events.map((event) => ({
             eventId: event.eventId,
+            tenantId,
+            inventoryId,
+            batchId: input.batchId,
             deviceId,
-            scannedAt: event.scannedAt,
-          };
-          const [current] = await tx
+            deviceSequence: BigInt(event.deviceSequence),
+            operatorId: event.operatorId,
+            scannedAt: new Date(event.scannedAt),
+            kind: event.kind,
+            normalizedIdentity: event.normalizedIdentity,
+            codeHash: event.codeHash,
+            rawPayload: event.canonicalRaw,
+            activeProductionDate: event.activeProductionDate,
+            snapshotRevision: input.snapshotRevision,
+            localVerdict: event.localVerdict,
+            authoritativeVerdict: rejectedEvents.has(event.eventId) ? "rejected" : "pending",
+          })),
+        );
+
+        const changed = new Map<string, ClaimTarget & { winner: InventoryClaimWinner }>();
+        const displacedEvents = new Set<string>();
+        for (const event of input.events) {
+          const eventTargets = targets.get(event.eventId) ?? [];
+          for (const target of eventTargets) {
+            const candidate: InventoryClaimWinner = {
+              codeHash: target.codeHash,
+              eventId: event.eventId,
+              deviceId,
+              scannedAt: event.scannedAt,
+            };
+            const [current] = await tx
+              .select({
+                id: schema.inventoryCodeResults.id,
+                observedProductionDate: schema.inventoryCodeResults.observedProductionDate,
+                codeHash: schema.inventoryCodeResults.codeHash,
+                eventId: schema.inventoryCodeResults.firstAcceptedEventId,
+                deviceId: schema.inventoryCodeResults.winningDeviceId,
+                scannedAt: schema.inventoryCodeResults.winningScannedAt,
+              })
+              .from(schema.inventoryCodeResults)
+              .where(
+                and(
+                  eq(schema.inventoryCodeResults.tenantId, tenantId),
+                  eq(schema.inventoryCodeResults.inventoryId, inventoryId),
+                  eq(schema.inventoryCodeResults.codeHash, target.codeHash),
+                ),
+              )
+              .for("update");
+            if (!current) {
+              await tx.insert(schema.inventoryCodeResults).values({
+                tenantId,
+                inventoryId,
+                codeHash: target.codeHash,
+                snapshotId: target.snapshotId,
+                firstAcceptedEventId: event.eventId,
+                winningDeviceId: deviceId,
+                winningScannedAt: new Date(event.scannedAt),
+                observedProductionDate: event.activeProductionDate,
+                classification: target.classification,
+                originClassification: target.classification,
+              });
+              changed.set(target.codeHash, { ...target, winner: candidate });
+            } else {
+              const currentWinner = asWinner(current);
+              if (winnerPrecedes(candidate, currentWinner)) {
+                displacedEvents.add(current.eventId);
+                // Release the old active-date FK before changing the winner's date.
+                // The inventory transaction rolls this history change back if the
+                // incoming repack mutation is rejected later.
+                if (
+                  inventory.mode === "repack" &&
+                  current.observedProductionDate !== event.activeProductionDate
+                ) {
+                  await this.retireDisplacedRepackItems(tx, tenantId, inventoryId, current.id);
+                }
+                await tx
+                  .update(schema.inventoryCodeResults)
+                  .set({
+                    firstAcceptedEventId: event.eventId,
+                    winningDeviceId: deviceId,
+                    winningScannedAt: new Date(event.scannedAt),
+                    observedProductionDate: event.activeProductionDate,
+                    classification: target.classification,
+                    originClassification: target.classification,
+                    updatedAt: new Date(),
+                  })
+                  .where(
+                    and(
+                      eq(schema.inventoryCodeResults.tenantId, tenantId),
+                      eq(schema.inventoryCodeResults.inventoryId, inventoryId),
+                      eq(schema.inventoryCodeResults.codeHash, target.codeHash),
+                    ),
+                  );
+                await tx
+                  .update(schema.inventoryEventClaimOutcomes)
+                  .set({
+                    status: "duplicate",
+                    winningEventId: event.eventId,
+                    winningDeviceId: deviceId,
+                    winningScannedAt: new Date(event.scannedAt),
+                    updatedAt: new Date(),
+                  })
+                  .where(
+                    and(
+                      eq(schema.inventoryEventClaimOutcomes.tenantId, tenantId),
+                      eq(schema.inventoryEventClaimOutcomes.inventoryId, inventoryId),
+                      eq(schema.inventoryEventClaimOutcomes.sourceEventId, current.eventId),
+                      eq(schema.inventoryEventClaimOutcomes.codeHash, target.codeHash),
+                    ),
+                  );
+                changed.set(target.codeHash, { ...target, winner: candidate });
+              }
+            }
+          }
+        }
+
+        const allTargetHashes = [
+          ...new Set([...targets.values()].flat().map((target) => target.codeHash)),
+        ];
+        const finalWinners = new Map<string, InventoryClaimWinner>();
+        if (allTargetHashes.length > 0) {
+          const rows = await tx
             .select({
-              id: schema.inventoryCodeResults.id,
-              observedProductionDate: schema.inventoryCodeResults.observedProductionDate,
               codeHash: schema.inventoryCodeResults.codeHash,
               eventId: schema.inventoryCodeResults.firstAcceptedEventId,
               deviceId: schema.inventoryCodeResults.winningDeviceId,
@@ -610,304 +706,219 @@ export class StationInventorySyncService {
               and(
                 eq(schema.inventoryCodeResults.tenantId, tenantId),
                 eq(schema.inventoryCodeResults.inventoryId, inventoryId),
-                eq(schema.inventoryCodeResults.codeHash, target.codeHash),
+                inArray(schema.inventoryCodeResults.codeHash, allTargetHashes),
               ),
-            )
-            .for("update");
-          if (!current) {
-            await tx.insert(schema.inventoryCodeResults).values({
-              tenantId,
-              inventoryId,
-              codeHash: target.codeHash,
-              snapshotId: target.snapshotId,
-              firstAcceptedEventId: event.eventId,
-              winningDeviceId: deviceId,
-              winningScannedAt: new Date(event.scannedAt),
-              observedProductionDate: event.activeProductionDate,
-              classification: target.classification,
-              originClassification: target.classification,
-            });
-            changed.set(target.codeHash, { ...target, winner: candidate });
-          } else {
-            const currentWinner = asWinner(current);
-            if (winnerPrecedes(candidate, currentWinner)) {
-              displacedEvents.add(current.eventId);
-              // Release the old active-date FK before changing the winner's date.
-              // The inventory transaction rolls this history change back if the
-              // incoming repack mutation is rejected later.
-              if (
-                inventory.mode === "repack" &&
-                current.observedProductionDate !== event.activeProductionDate
-              ) {
-                await this.retireDisplacedRepackItems(tx, tenantId, inventoryId, current.id);
-              }
-              await tx
-                .update(schema.inventoryCodeResults)
-                .set({
-                  firstAcceptedEventId: event.eventId,
-                  winningDeviceId: deviceId,
-                  winningScannedAt: new Date(event.scannedAt),
-                  observedProductionDate: event.activeProductionDate,
-                  classification: target.classification,
-                  originClassification: target.classification,
-                  updatedAt: new Date(),
-                })
-                .where(
-                  and(
-                    eq(schema.inventoryCodeResults.tenantId, tenantId),
-                    eq(schema.inventoryCodeResults.inventoryId, inventoryId),
-                    eq(schema.inventoryCodeResults.codeHash, target.codeHash),
-                  ),
-                );
-              await tx
-                .update(schema.inventoryEventClaimOutcomes)
-                .set({
-                  status: "duplicate",
-                  winningEventId: event.eventId,
-                  winningDeviceId: deviceId,
-                  winningScannedAt: new Date(event.scannedAt),
-                  updatedAt: new Date(),
-                })
-                .where(
-                  and(
-                    eq(schema.inventoryEventClaimOutcomes.tenantId, tenantId),
-                    eq(schema.inventoryEventClaimOutcomes.inventoryId, inventoryId),
-                    eq(schema.inventoryEventClaimOutcomes.sourceEventId, current.eventId),
-                    eq(schema.inventoryEventClaimOutcomes.codeHash, target.codeHash),
-                  ),
-                );
-              changed.set(target.codeHash, { ...target, winner: candidate });
-            }
-          }
+            );
+          for (const row of rows) finalWinners.set(row.codeHash, asWinner(row));
         }
-      }
 
-      const allTargetHashes = [
-        ...new Set([...targets.values()].flat().map((target) => target.codeHash)),
-      ];
-      const finalWinners = new Map<string, InventoryClaimWinner>();
-      if (allTargetHashes.length > 0) {
-        const rows = await tx
-          .select({
-            codeHash: schema.inventoryCodeResults.codeHash,
-            eventId: schema.inventoryCodeResults.firstAcceptedEventId,
-            deviceId: schema.inventoryCodeResults.winningDeviceId,
-            scannedAt: schema.inventoryCodeResults.winningScannedAt,
-          })
-          .from(schema.inventoryCodeResults)
-          .where(
-            and(
-              eq(schema.inventoryCodeResults.tenantId, tenantId),
-              eq(schema.inventoryCodeResults.inventoryId, inventoryId),
-              inArray(schema.inventoryCodeResults.codeHash, allTargetHashes),
-            ),
-          );
-        for (const row of rows) finalWinners.set(row.codeHash, asWinner(row));
-      }
-
-      const outcomes: InventoryEventBatchResponse["outcomes"] = [];
-      for (const event of input.events) {
-        if (rejectedEvents.has(event.eventId)) {
+        const outcomes: InventoryEventBatchResponse["outcomes"] = [];
+        for (const event of input.events) {
+          if (rejectedEvents.has(event.eventId)) {
+            outcomes.push({
+              eventId: event.eventId,
+              status: "rejected",
+              reasonCode: "INVENTORY_EVENT_REJECTED",
+              claimedCount: 0,
+              conflictCount: 0,
+              claims: [],
+            });
+            continue;
+          }
+          const eventTargets = targets.get(event.eventId) ?? [];
+          const claims = eventTargets.map((target) => {
+            const winner = finalWinners.get(target.codeHash);
+            if (!winner) throw new Error("inventory claim winner missing");
+            return {
+              codeHash: target.codeHash,
+              status:
+                winner.eventId === event.eventId ? ("claimed" as const) : ("duplicate" as const),
+              winner,
+            };
+          });
+          const applied = claims.filter((claim) => claim.status === "claimed").length;
+          const lost = claims.length - applied;
+          const status =
+            applied > 0 || event.kind === "old_box" || event.kind === "repack_action"
+              ? "applied"
+              : "duplicate";
+          if (claims.length > 0) {
+            await tx.insert(schema.inventoryEventClaimOutcomes).values(
+              claims.map((claim) => ({
+                tenantId,
+                inventoryId,
+                sourceEventId: event.eventId,
+                codeHash: claim.codeHash,
+                status: claim.status,
+                winningEventId: claim.winner.eventId,
+                winningDeviceId: claim.winner.deviceId,
+                winningScannedAt: new Date(claim.winner.scannedAt),
+              })),
+            );
+          }
+          await tx
+            .update(schema.inventoryScanEvents)
+            .set({
+              authoritativeVerdict: status,
+              firstWinningEventId: null,
+            })
+            .where(eq(schema.inventoryScanEvents.eventId, event.eventId));
           outcomes.push({
             eventId: event.eventId,
-            status: "rejected",
-            reasonCode: "INVENTORY_EVENT_REJECTED",
-            claimedCount: 0,
-            conflictCount: 0,
-            claims: [],
+            status,
+            reasonCode: status === "applied" ? "CLAIM_APPLIED" : "CLAIM_LOST",
+            claimedCount: applied,
+            conflictCount: lost,
+            claims,
           });
-          continue;
         }
-        const eventTargets = targets.get(event.eventId) ?? [];
-        const claims = eventTargets.map((target) => {
-          const winner = finalWinners.get(target.codeHash);
-          if (!winner) throw new Error("inventory claim winner missing");
-          return {
-            codeHash: target.codeHash,
-            status:
-              winner.eventId === event.eventId ? ("claimed" as const) : ("duplicate" as const),
-            winner,
-          };
-        });
-        const applied = claims.filter((claim) => claim.status === "claimed").length;
-        const lost = claims.length - applied;
-        const status =
-          applied > 0 || event.kind === "old_box" || event.kind === "repack_action"
-            ? "applied"
-            : "duplicate";
-        if (claims.length > 0) {
-          await tx.insert(schema.inventoryEventClaimOutcomes).values(
-            claims.map((claim) => ({
+
+        for (const [index, event] of input.events.entries()) {
+          if (!event.repack || rejectedEvents.has(event.eventId)) continue;
+          await this.applyRepackMutation(
+            tx,
+            tenantId,
+            deviceId,
+            inventoryId,
+            input.snapshotId,
+            repackFacts,
+            event,
+            outcomes[index]!,
+          );
+        }
+
+        for (const displacedEventId of displacedEvents) {
+          const evidence = await tx
+            .select({ status: schema.inventoryEventClaimOutcomes.status })
+            .from(schema.inventoryEventClaimOutcomes)
+            .where(
+              and(
+                eq(schema.inventoryEventClaimOutcomes.tenantId, tenantId),
+                eq(schema.inventoryEventClaimOutcomes.inventoryId, inventoryId),
+                eq(schema.inventoryEventClaimOutcomes.sourceEventId, displacedEventId),
+              ),
+            );
+          await tx
+            .update(schema.inventoryScanEvents)
+            .set({
+              authoritativeVerdict: evidence.some((claim) => claim.status === "claimed")
+                ? "applied"
+                : "duplicate",
+              firstWinningEventId: null,
+            })
+            .where(
+              and(
+                eq(schema.inventoryScanEvents.tenantId, tenantId),
+                eq(schema.inventoryScanEvents.inventoryId, inventoryId),
+                eq(schema.inventoryScanEvents.eventId, displacedEventId),
+              ),
+            );
+        }
+
+        const nextRevision =
+          changed.size > 0 ? inventory.resultRevision + 1 : inventory.resultRevision;
+        if (changed.size > 0) {
+          await tx
+            .update(schema.inventories)
+            .set({ resultRevision: nextRevision, updatedAt: new Date() })
+            .where(
+              and(
+                eq(schema.inventories.tenantId, tenantId),
+                eq(schema.inventories.id, inventoryId),
+              ),
+            );
+          await tx.insert(schema.inventoryProgressChanges).values(
+            [...changed.values()].map((change) => ({
               tenantId,
               inventoryId,
-              sourceEventId: event.eventId,
-              codeHash: claim.codeHash,
-              status: claim.status,
-              winningEventId: claim.winner.eventId,
-              winningDeviceId: claim.winner.deviceId,
-              winningScannedAt: new Date(claim.winner.scannedAt),
+              snapshotId: input.snapshotId,
+              resultRevision: nextRevision,
+              kind: "claim" as const,
+              codeHash: change.codeHash,
+              classification: change.classification,
+              observedProductionDate:
+                input.events.find((event) => event.eventId === change.winner.eventId)
+                  ?.activeProductionDate ?? null,
+              winningEventId: change.winner.eventId,
+              winningDeviceId: change.winner.deviceId,
+              winningScannedAt: new Date(change.winner.scannedAt),
             })),
           );
         }
+        if (replayAuthorization === null) {
+          await tx
+            .update(schema.inventoryDeviceParticipants)
+            .set({
+              heartbeatAt: new Date(),
+              pendingEventCount: input.pendingEventCount,
+              openBoxCount: input.openBoxCount,
+            })
+            .where(
+              and(
+                eq(schema.inventoryDeviceParticipants.tenantId, tenantId),
+                eq(schema.inventoryDeviceParticipants.inventoryId, inventoryId),
+                eq(schema.inventoryDeviceParticipants.deviceId, deviceId),
+              ),
+            );
+        }
+        const response = this.response(inventoryId, input, nextRevision, outcomes);
         await tx
-          .update(schema.inventoryScanEvents)
-          .set({
-            authoritativeVerdict: status,
-            firstWinningEventId: null,
-          })
-          .where(eq(schema.inventoryScanEvents.eventId, event.eventId));
-        outcomes.push({
-          eventId: event.eventId,
-          status,
-          reasonCode: status === "applied" ? "CLAIM_APPLIED" : "CLAIM_LOST",
-          claimedCount: applied,
-          conflictCount: lost,
-          claims,
-        });
-      }
-
-      for (const [index, event] of input.events.entries()) {
-        if (!event.repack || rejectedEvents.has(event.eventId)) continue;
-        await this.applyRepackMutation(
-          tx,
-          tenantId,
-          deviceId,
-          inventoryId,
-          input.snapshotId,
-          repackFacts,
-          event,
-          outcomes[index]!,
-        );
-      }
-
-      for (const displacedEventId of displacedEvents) {
-        const evidence = await tx
-          .select({ status: schema.inventoryEventClaimOutcomes.status })
-          .from(schema.inventoryEventClaimOutcomes)
+          .update(schema.inventoryScanBatches)
+          .set({ result: response })
           .where(
             and(
-              eq(schema.inventoryEventClaimOutcomes.tenantId, tenantId),
-              eq(schema.inventoryEventClaimOutcomes.inventoryId, inventoryId),
-              eq(schema.inventoryEventClaimOutcomes.sourceEventId, displacedEventId),
+              eq(schema.inventoryScanBatches.tenantId, tenantId),
+              eq(schema.inventoryScanBatches.inventoryId, inventoryId),
+              eq(schema.inventoryScanBatches.deviceId, deviceId),
+              eq(schema.inventoryScanBatches.batchId, input.batchId),
             ),
           );
-        await tx
-          .update(schema.inventoryScanEvents)
-          .set({
-            authoritativeVerdict: evidence.some((claim) => claim.status === "claimed")
-              ? "applied"
-              : "duplicate",
-            firstWinningEventId: null,
-          })
-          .where(
-            and(
-              eq(schema.inventoryScanEvents.tenantId, tenantId),
-              eq(schema.inventoryScanEvents.inventoryId, inventoryId),
-              eq(schema.inventoryScanEvents.eventId, displacedEventId),
-            ),
-          );
-      }
-
-      const nextRevision =
-        changed.size > 0 ? inventory.resultRevision + 1 : inventory.resultRevision;
-      if (changed.size > 0) {
-        await tx
-          .update(schema.inventories)
-          .set({ resultRevision: nextRevision, updatedAt: new Date() })
-          .where(
-            and(eq(schema.inventories.tenantId, tenantId), eq(schema.inventories.id, inventoryId)),
-          );
-        await tx.insert(schema.inventoryProgressChanges).values(
-          [...changed.values()].map((change) => ({
+        await tx.insert(schema.tenantAuditEvents).values({
+          organizationId: tenantId,
+          actorUserId: replayRequest?.actorUserId ?? null,
+          action: "inventory.station.events_synced",
+          outcome: "success",
+          targetType: "inventory",
+          targetId: inventoryId,
+          after: {
             tenantId,
             inventoryId,
+            deviceId,
+            operatorId: syncOperatorId,
             snapshotId: input.snapshotId,
+            snapshotRevision: 1,
+            batchId: input.batchId,
+            payloadDigest: input.payloadDigest,
+            sequenceCeiling: input.sequenceCeiling,
+            eventCount: input.events.length,
+            rejectedEventCount: rejectedEvents.size,
+            rejectedEventIds: [...rejectedEvents],
             resultRevision: nextRevision,
-            kind: "claim" as const,
-            codeHash: change.codeHash,
-            classification: change.classification,
-            observedProductionDate:
-              input.events.find((event) => event.eventId === change.winner.eventId)
-                ?.activeProductionDate ?? null,
-            winningEventId: change.winner.eventId,
-            winningDeviceId: change.winner.deviceId,
-            winningScannedAt: new Date(change.winner.scannedAt),
-          })),
-        );
-      }
-      if (replayAuthorization === null) {
-        await tx
-          .update(schema.inventoryDeviceParticipants)
-          .set({
-            heartbeatAt: new Date(),
             pendingEventCount: input.pendingEventCount,
             openBoxCount: input.openBoxCount,
-          })
-          .where(
-            and(
-              eq(schema.inventoryDeviceParticipants.tenantId, tenantId),
-              eq(schema.inventoryDeviceParticipants.inventoryId, inventoryId),
-              eq(schema.inventoryDeviceParticipants.deviceId, deviceId),
-            ),
-          );
-      }
-      const response = this.response(inventoryId, input, nextRevision, outcomes);
-      await tx
-        .update(schema.inventoryScanBatches)
-        .set({ result: response })
-        .where(
-          and(
-            eq(schema.inventoryScanBatches.tenantId, tenantId),
-            eq(schema.inventoryScanBatches.inventoryId, inventoryId),
-            eq(schema.inventoryScanBatches.deviceId, deviceId),
-            eq(schema.inventoryScanBatches.batchId, input.batchId),
-          ),
-        );
-      await tx.insert(schema.tenantAuditEvents).values({
-        organizationId: tenantId,
-        actorUserId: replayRequest?.actorUserId ?? null,
-        action: "inventory.station.events_synced",
-        outcome: "success",
-        targetType: "inventory",
-        targetId: inventoryId,
-        after: {
-          tenantId,
-          inventoryId,
-          deviceId,
-          operatorId: syncOperatorId,
-          snapshotId: input.snapshotId,
-          snapshotRevision: 1,
-          batchId: input.batchId,
-          payloadDigest: input.payloadDigest,
-          sequenceCeiling: input.sequenceCeiling,
-          eventCount: input.events.length,
-          rejectedEventCount: rejectedEvents.size,
-          rejectedEventIds: [...rejectedEvents],
-          resultRevision: nextRevision,
-          pendingEventCount: input.pendingEventCount,
-          openBoxCount: input.openBoxCount,
-          replayedLateEventId: replayAuthorization?.lateEventId ?? null,
-        },
-      });
-      if (replayAuthorization) {
-        await tx
-          .update(schema.inventoryLateEvents)
-          .set({
-            resolution: "replayed",
-            resolvedAt: new Date(),
-            resolvedByUserId: replayAuthorization.actorUserId,
-          })
-          .where(
-            and(
-              eq(schema.inventoryLateEvents.tenantId, tenantId),
-              eq(schema.inventoryLateEvents.inventoryId, inventoryId),
-              eq(schema.inventoryLateEvents.id, replayAuthorization.lateEventId),
-              eq(schema.inventoryLateEvents.resolution, "pending"),
-            ),
-          );
-      }
-      return response;
-    });
+            replayedLateEventId: replayAuthorization?.lateEventId ?? null,
+          },
+        });
+        if (replayAuthorization) {
+          await tx
+            .update(schema.inventoryLateEvents)
+            .set({
+              resolution: "replayed",
+              resolvedAt: new Date(),
+              resolvedByUserId: replayAuthorization.actorUserId,
+            })
+            .where(
+              and(
+                eq(schema.inventoryLateEvents.tenantId, tenantId),
+                eq(schema.inventoryLateEvents.inventoryId, inventoryId),
+                eq(schema.inventoryLateEvents.id, replayAuthorization.lateEventId),
+                eq(schema.inventoryLateEvents.resolution, "pending"),
+              ),
+            );
+        }
+        return response;
+      }),
+    );
   }
 
   async progress(
@@ -1067,87 +1078,90 @@ export class StationInventorySyncService {
     deviceId: string,
     inventoryId: string,
     input: LeaveStationInventoryDto,
+    evidence?: EvidenceTransactionHook<LeaveStationInventoryResponseDto>,
   ): Promise<LeaveStationInventoryResponseDto> {
-    return this.db.transaction(async (tx) => {
-      const [inventory] = await tx
-        .select({ id: schema.inventories.id })
-        .from(schema.inventories)
-        .where(
-          and(eq(schema.inventories.tenantId, tenantId), eq(schema.inventories.id, inventoryId)),
-        )
-        .for("update");
-      if (!inventory) throw new NotFoundException();
-      const [participant] = await tx
-        .select({
-          operatorId: schema.inventoryDeviceParticipants.operatorId,
-          pendingEventCount: schema.inventoryDeviceParticipants.pendingEventCount,
-          openBoxCount: schema.inventoryDeviceParticipants.openBoxCount,
-          leftAt: schema.inventoryDeviceParticipants.leftAt,
-        })
-        .from(schema.inventoryDeviceParticipants)
-        .where(
-          and(
-            eq(schema.inventoryDeviceParticipants.tenantId, tenantId),
-            eq(schema.inventoryDeviceParticipants.inventoryId, inventoryId),
-            eq(schema.inventoryDeviceParticipants.deviceId, deviceId),
-          ),
-        )
-        .for("update");
-      if (!participant) throw new NotFoundException();
-      if (
-        input.pendingEventCount !== 0 ||
-        participant.pendingEventCount !== 0 ||
-        input.openBoxCount !== participant.openBoxCount
-      ) {
-        throw new ConflictException({ code: "INVENTORY_LEAVE_PENDING_WORK" });
-      }
-      const [ownedOpen] = await tx
-        .select({ count: sql<number>`count(*)::int` })
-        .from(schema.inventoryRepackBoxes)
-        .where(
-          and(
-            eq(schema.inventoryRepackBoxes.tenantId, tenantId),
-            eq(schema.inventoryRepackBoxes.inventoryId, inventoryId),
-            eq(schema.inventoryRepackBoxes.ownerDeviceId, deviceId),
-            eq(schema.inventoryRepackBoxes.state, "open"),
-          ),
-        );
-      if ((ownedOpen?.count ?? 0) !== input.openBoxCount) {
-        throw new ConflictException({ code: "INVENTORY_LEAVE_PENDING_WORK" });
-      }
-      if (participant.leftAt === null) {
-        await tx
-          .update(schema.inventoryDeviceParticipants)
-          .set({
-            leftAt: sql`GREATEST(now(), ${schema.inventoryDeviceParticipants.joinedAt})`,
-            heartbeatAt: sql`GREATEST(now(), ${schema.inventoryDeviceParticipants.joinedAt})`,
+    return this.db.transaction(async (tx) =>
+      withEvidenceTransaction(tx, evidence, async () => {
+        const [inventory] = await tx
+          .select({ id: schema.inventories.id })
+          .from(schema.inventories)
+          .where(
+            and(eq(schema.inventories.tenantId, tenantId), eq(schema.inventories.id, inventoryId)),
+          )
+          .for("update");
+        if (!inventory) throw new NotFoundException();
+        const [participant] = await tx
+          .select({
+            operatorId: schema.inventoryDeviceParticipants.operatorId,
+            pendingEventCount: schema.inventoryDeviceParticipants.pendingEventCount,
+            openBoxCount: schema.inventoryDeviceParticipants.openBoxCount,
+            leftAt: schema.inventoryDeviceParticipants.leftAt,
           })
+          .from(schema.inventoryDeviceParticipants)
           .where(
             and(
               eq(schema.inventoryDeviceParticipants.tenantId, tenantId),
               eq(schema.inventoryDeviceParticipants.inventoryId, inventoryId),
               eq(schema.inventoryDeviceParticipants.deviceId, deviceId),
             ),
+          )
+          .for("update");
+        if (!participant) throw new NotFoundException();
+        if (
+          input.pendingEventCount !== 0 ||
+          participant.pendingEventCount !== 0 ||
+          input.openBoxCount !== participant.openBoxCount
+        ) {
+          throw new ConflictException({ code: "INVENTORY_LEAVE_PENDING_WORK" });
+        }
+        const [ownedOpen] = await tx
+          .select({ count: sql<number>`count(*)::int` })
+          .from(schema.inventoryRepackBoxes)
+          .where(
+            and(
+              eq(schema.inventoryRepackBoxes.tenantId, tenantId),
+              eq(schema.inventoryRepackBoxes.inventoryId, inventoryId),
+              eq(schema.inventoryRepackBoxes.ownerDeviceId, deviceId),
+              eq(schema.inventoryRepackBoxes.state, "open"),
+            ),
           );
-        await tx.insert(schema.tenantAuditEvents).values({
-          organizationId: tenantId,
-          actorUserId: null,
-          action: "inventory.station.left",
-          outcome: "success",
-          targetType: "inventory",
-          targetId: inventoryId,
-          after: {
-            tenantId,
-            inventoryId,
-            deviceId,
-            operatorId: participant.operatorId,
-            pendingEventCount: 0,
-            openBoxCount: input.openBoxCount,
-          },
-        });
-      }
-      return { outcome: "left" };
-    });
+        if ((ownedOpen?.count ?? 0) !== input.openBoxCount) {
+          throw new ConflictException({ code: "INVENTORY_LEAVE_PENDING_WORK" });
+        }
+        if (participant.leftAt === null) {
+          await tx
+            .update(schema.inventoryDeviceParticipants)
+            .set({
+              leftAt: sql`GREATEST(now(), ${schema.inventoryDeviceParticipants.joinedAt})`,
+              heartbeatAt: sql`GREATEST(now(), ${schema.inventoryDeviceParticipants.joinedAt})`,
+            })
+            .where(
+              and(
+                eq(schema.inventoryDeviceParticipants.tenantId, tenantId),
+                eq(schema.inventoryDeviceParticipants.inventoryId, inventoryId),
+                eq(schema.inventoryDeviceParticipants.deviceId, deviceId),
+              ),
+            );
+          await tx.insert(schema.tenantAuditEvents).values({
+            organizationId: tenantId,
+            actorUserId: null,
+            action: "inventory.station.left",
+            outcome: "success",
+            targetType: "inventory",
+            targetId: inventoryId,
+            after: {
+              tenantId,
+              inventoryId,
+              deviceId,
+              operatorId: participant.operatorId,
+              pendingEventCount: 0,
+              openBoxCount: input.openBoxCount,
+            },
+          });
+        }
+        return { outcome: "left" };
+      }),
+    );
   }
 
   private async activeParticipant(tenantId: string, deviceId: string, inventoryId: string) {

@@ -1,3 +1,4 @@
+import { PublicApiGuard, PUBLIC_API_SCOPE } from "../src/modules/public-api/public-api.guard";
 import type { Type } from "@nestjs/common";
 import { RequestMethod } from "@nestjs/common";
 import { GUARDS_METADATA, METHOD_METADATA, PATH_METADATA } from "@nestjs/common/constants";
@@ -22,6 +23,22 @@ type RegisteredRoute = {
   handlerName: string;
   method: RequestMethod;
   path: string;
+};
+
+const PUBLIC_ROUTES: Record<string, string> = {
+  "GET /public/v1/products (PublicProductsController.list)": "catalog.products.read",
+  "GET /public/v1/products/:id (PublicProductsController.get)": "catalog.products.read",
+  "GET /public/v1/inventories (PublicInventoriesController.list)": "inventory.read",
+  "GET /public/v1/inventories/:id (PublicInventoriesController.get)": "inventory.read",
+  "GET /public/v1/inventories/:id/progress (PublicInventoriesController.progress)":
+    "inventory.read",
+  "GET /public/v1/inventories/:id/results (PublicInventoriesController.results)": "inventory.read",
+  "POST /public/v1/inventories (PublicInventoriesController.create)": "inventory.prepare",
+  "POST /public/v1/inventories/:id/imports/:status (PublicInventoriesController.importEvidence)":
+    "inventory.prepare",
+  "POST /public/v1/inventories/:id/snapshots (PublicInventoriesController.snapshot)":
+    "inventory.prepare",
+  "POST /public/v1/inventories/:id/start (PublicInventoriesController.start)": "inventory.start",
 };
 
 const UNSAFE_METHODS = new Set([
@@ -229,6 +246,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
     routes: [
       "DELETE /employees/:id/badges/:badgeId (EmployeesController.revokeBadge)",
       "DELETE /integrations/public_api/keys/:id (ApiKeysController.revoke)",
+      "PATCH /integrations/public_api/keys/:id (ApiKeysController.updateScopes)",
       "DELETE /kiosks/:id (KiosksController.archiveKiosk)",
       "DELETE /operators/:employeeId (OperatorsController.revokeAccess)",
       "DELETE /station-devices/:id (StationDevicesController.revoke)",
@@ -400,6 +418,8 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
   {
     contract: customerContract(KIOSK_GUARDS, { mode: "read_only_allowed", reason: "read" }),
     routes: [
+      "GET /kiosk/grants/v1/keyset (KioskGrantsController.keyset)",
+      "POST /kiosk/grants/v1/configuration (KioskGrantsController.configuration)",
       "GET /kiosk/bootstrap (KioskController.bootstrap)",
       "GET /kiosk/branding/logo/:revision (KioskController.logo)",
       "GET /kiosk/box-registry (KioskController.boxRegistry)",
@@ -412,7 +432,10 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
   },
   {
     contract: customerContract(KIOSK_GUARDS, { mode: "recovery", kind: "kiosk" }),
-    routes: ["POST /kiosk/orders (KioskController.createOrder)"],
+    routes: [
+      "POST /kiosk/orders (KioskController.createOrder)",
+      "POST /kiosk/grants/v1/evidence/orders (KioskGrantsController.evidenceOrder)",
+    ],
   },
   {
     contract: customerContract(STATION_GUARDS, { mode: "recovery", kind: "station" }),
@@ -429,12 +452,33 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "POST /station/validation-occurrences/status (StationScansController.occurrenceStatus)",
       "POST /station/codes/releases (StationScansController.codeReleases)",
       "POST /station/scans (StationScansController.ingest)",
+      "POST /station/grants/v1/evidence/scans (DeviceGrantsController.evidenceScans)",
+      "POST /station/grants/v1/evidence/shift-closures (DeviceGrantsController.evidenceShiftClose)",
+      "POST /station/grants/v1/evidence/inventories/:id/event-batches (DeviceGrantsController.evidenceInventoryEvents)",
+      "POST /station/grants/v1/evidence/inventories/:id/leave (DeviceGrantsController.evidenceInventoryLeave)",
     ],
   },
   {
     contract: customerContract(STATION_GUARDS, { mode: "read_only_allowed", reason: "read" }),
     routes: [
+      "GET /station/grants/v1/keyset (DeviceGrantsController.keyset)",
+      "POST /station/grants/v1/configuration (DeviceGrantsController.configuration)",
       "GET /station/products/:id/image/:checksum (StationProductImagesController.readProductImage)",
+    ],
+  },
+  {
+    contract: customerContract(STATION_GUARDS, { mode: "write" }),
+    routes: [
+      "POST /station/grants/v1/device (DeviceGrantsController.device)",
+      "POST /station/grants/v1/tasks (DeviceGrantsController.tasks)",
+    ],
+  },
+  {
+    contract: customerContract(KIOSK_GUARDS, { mode: "write" }),
+    routes: [
+      "POST /kiosk/grants/v1/device (KioskGrantsController.device)",
+      "POST /kiosk/grants/v1/tasks (KioskGrantsController.tasks)",
+      "POST /kiosk/grants/v1/reservations (KioskGrantsController.reservations)",
     ],
   },
 ] as const;
@@ -855,6 +899,17 @@ describe("registered subscription route inventory", () => {
     expect(actual).toEqual(CUSTOMER_ROUTE_CONTRACTS);
   });
 
+  it("pins the complete separate public scope surface", () => {
+    const actual = Object.fromEntries(
+      routes
+        .filter(
+          (route) => route.path.startsWith("/public/v1") || route.path.startsWith("public/v1"),
+        )
+        .map((route) => [routeKey(route), Reflect.getMetadata(PUBLIC_API_SCOPE, route.handler)]),
+    );
+    expect(actual).toEqual(PUBLIC_ROUTES);
+  });
+
   it("classifies every customer route and pins its exact trust-chain guard order", () => {
     const reflector = new Reflector();
     const inspected = routes.filter((route) => {
@@ -863,6 +918,7 @@ describe("registered subscription route inventory", () => {
         ...((Reflect.getMetadata(GUARDS_METADATA, route.handler) ?? []) as Type[]),
       ];
       return (
+        guards.includes(PublicApiGuard) ||
         guards.includes(SubscriptionAccessGuard) ||
         UNSAFE_METHODS.has(route.method) ||
         (route.controller.name === "ExchangeController" && route.handlerName === "get")
@@ -875,6 +931,17 @@ describe("registered subscription route inventory", () => {
       const classGuards = (Reflect.getMetadata(GUARDS_METADATA, route.controller) ?? []) as Type[];
       const methodGuards = (Reflect.getMetadata(GUARDS_METADATA, route.handler) ?? []) as Type[];
       const guards = [...classGuards, ...methodGuards];
+      if (guards.includes(PublicApiGuard)) {
+        expect(guards.map((guard) => guard.name)).toEqual(["PublicApiGuard"]);
+        expect(
+          PUBLIC_ROUTES[routeKey(route)],
+          `unmapped public route ${routeKey(route)}`,
+        ).toBeDefined();
+        expect(Reflect.getMetadata(PUBLIC_API_SCOPE, route.handler)).toBe(
+          PUBLIC_ROUTES[routeKey(route)],
+        );
+        continue;
+      }
       const subscriptionIndex = guards.indexOf(SubscriptionAccessGuard);
       const policy = reflector.getAllAndOverride<SubscriptionAccessPolicy>(
         ROUTE_SUBSCRIPTION_ACCESS_POLICY,
@@ -905,11 +972,13 @@ describe("registered subscription route inventory", () => {
           (route.controller.name === "StationShiftCloseController" &&
             route.handlerName === "close");
         const expected =
-          route.controller.name === "KioskController"
+          route.controller.name === "KioskController" ||
+          route.controller.name === "KioskGrantsController"
             ? ["KioskDeviceGuard", "SubscriptionAccessGuard"]
             : route.controller.name === "StationScansController" ||
                 route.controller.name === "StationInventoriesController" ||
-                route.controller.name === "StationProductImagesController"
+                route.controller.name === "StationProductImagesController" ||
+                route.controller.name === "DeviceGrantsController"
               ? ["TenantGuard", "StationOnlyGuard", "SubscriptionAccessGuard"]
               : stationOnlyCabinetRoute
                 ? [

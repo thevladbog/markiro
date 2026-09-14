@@ -265,6 +265,7 @@ private fun LastZone(last: InventoryLastScan?, modifier: Modifier) {
             InventoryVerdict.KNOWN_INELIGIBLE -> last.sourceStatus?.let { stringResource(R.string.inventory_ineligible_text, stringResource(statusLabel(it))) }
             InventoryVerdict.UNKNOWN -> stringResource(R.string.inventory_unknown_text)
             InventoryVerdict.INVALID -> when (last.invalidReason) {
+                "leave_pending" -> stringResource(R.string.inventory_leave_pending_scan)
                 "wrong_gtin" -> stringResource(R.string.inventory_invalid_wrong_gtin)
                 "unsupported" -> stringResource(R.string.inventory_invalid_unsupported)
                 else -> null

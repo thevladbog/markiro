@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { DeviceKind, GrantCapability } from "@markiro/domain";
 import {
   platformTenantIdSchema,
   platformTimestampSchema,
@@ -26,6 +27,7 @@ export interface EntitlementOperationDefinition {
     | "cabinet"
     | "exchange_session"
     | "station_device"
+    | "kiosk_device"
     | "cabinet_or_station_device"
     | "api_key_scope";
   readonly releaseEligibility:
@@ -34,10 +36,40 @@ export interface EntitlementOperationDefinition {
     | "existing_operation_policy";
   readonly implementationStage: "p1a" | "p1b" | "p1c";
   readonly version: 1;
-  readonly coverage: "p1a_adapter" | "p1b_adapter" | "classified" | "deferred";
+  readonly coverage: "p1a_adapter" | "p1b_adapter" | "p1c_adapter" | "classified" | "deferred";
 }
-export const ENTITLEMENT_REGISTRY_VERSION = "p1b.v1" as const;
+export const ENTITLEMENT_REGISTRY_VERSION = "p1c.native.v1" as const;
 export const ENTITLEMENT_OPERATIONS = {
+  "native.shift.start.v1": {
+    authorization: "station_device",
+    releaseEligibility: "existing_operation_policy",
+    features: [],
+    class: "new_work",
+    capability: null,
+    implementationStage: "p1c",
+    version: 1,
+    coverage: "p1c_adapter",
+  },
+  "native.inventory.start.v1": {
+    authorization: "station_device",
+    releaseEligibility: "existing_operation_policy",
+    features: ["inventory"],
+    class: "new_work",
+    capability: null,
+    implementationStage: "p1c",
+    version: 1,
+    coverage: "p1c_adapter",
+  },
+  "native.pickup.start.v1": {
+    authorization: "kiosk_device",
+    releaseEligibility: "existing_operation_policy",
+    features: [],
+    class: "new_work",
+    capability: null,
+    implementationStage: "p1c",
+    version: 1,
+    coverage: "p1c_adapter",
+  },
   "nk.lookup.v1": {
     authorization: "cabinet",
     releaseEligibility: "national_catalog_operation_policy",
@@ -208,6 +240,66 @@ export const ENTITLEMENT_OPERATIONS = {
     version: 1,
     coverage: "p1b_adapter",
   },
+  "public.catalog.read.v1": {
+    authorization: "api_key_scope",
+    releaseEligibility: "existing_operation_policy",
+    features: ["publicApi"],
+    class: "new_work",
+    capability: null,
+    implementationStage: "p1b",
+    version: 1,
+    coverage: "p1b_adapter",
+  },
+  "public.inventory.read.v1": {
+    authorization: "api_key_scope",
+    releaseEligibility: "existing_operation_policy",
+    features: ["publicApi", "inventory"],
+    class: "new_work",
+    capability: null,
+    implementationStage: "p1b",
+    version: 1,
+    coverage: "p1b_adapter",
+  },
+  "public.inventory.create.v1": {
+    authorization: "api_key_scope",
+    releaseEligibility: "existing_operation_policy",
+    features: ["publicApi", "inventory"],
+    class: "new_work",
+    capability: null,
+    implementationStage: "p1b",
+    version: 1,
+    coverage: "p1b_adapter",
+  },
+  "public.inventory.import.v1": {
+    authorization: "api_key_scope",
+    releaseEligibility: "existing_operation_policy",
+    features: ["publicApi", "inventory"],
+    class: "new_work",
+    capability: null,
+    implementationStage: "p1b",
+    version: 1,
+    coverage: "p1b_adapter",
+  },
+  "public.inventory.snapshot.v1": {
+    authorization: "api_key_scope",
+    releaseEligibility: "existing_operation_policy",
+    features: ["publicApi", "inventory"],
+    class: "new_work",
+    capability: null,
+    implementationStage: "p1b",
+    version: 1,
+    coverage: "p1b_adapter",
+  },
+  "public.inventory.start.v1": {
+    authorization: "api_key_scope",
+    releaseEligibility: "existing_operation_policy",
+    features: ["publicApi", "inventory"],
+    class: "new_work",
+    capability: null,
+    implementationStage: "p1b",
+    version: 1,
+    coverage: "p1b_adapter",
+  },
   "publicApi.request.v1": {
     authorization: "api_key_scope",
     releaseEligibility: "existing_operation_policy",
@@ -220,6 +312,17 @@ export const ENTITLEMENT_OPERATIONS = {
   },
 } as const satisfies Record<string, EntitlementOperationDefinition>;
 export type EntitlementOperationId = keyof typeof ENTITLEMENT_OPERATIONS;
+/** Classification only; the native owner must independently authorize the actual operation. */
+export function nativeGrantOperationIds(
+  kind: DeviceKind,
+  capability: GrantCapability,
+): EntitlementOperationId[] | null {
+  if (kind === "kiosk") return capability === "pickup.start.v1" ? ["native.pickup.start.v1"] : null;
+  if (capability === "pickup.start.v1") return null;
+  const operation =
+    capability === "shift.start.v1" ? "native.shift.start.v1" : "native.inventory.start.v1";
+  return kind === "handheld" ? [operation, "handheld.work.start.v1"] : [operation];
+}
 export const entitlementOperationIdSchema = z.enum(
   Object.keys(ENTITLEMENT_OPERATIONS) as EntitlementOperationId[],
 );

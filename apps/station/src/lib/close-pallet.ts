@@ -2,6 +2,15 @@ import { buildSscc, DomainError } from "@markiro/domain";
 import { closePallet, currentPallet } from "./pallets.js";
 import { burnSerial } from "./sscc-pool.js";
 import type { CloseBoxDeps } from "./close-box.js";
+import type { CredentialGeneration } from "./credential-recovery.js";
+import { acquireCredentialCommitLease } from "./credential-recovery.js";
+import {
+  StationGrantAdmission,
+  stationOperatorIsCurrentlyActive,
+} from "./offline-grants/admission.js";
+import { sampleGrantClock, type GrantClockSample } from "./offline-grants/clock.js";
+import { readShiftExecutionProjection } from "./offline-grants/semantic.js";
+import { OfflineGrantDeniedError } from "./journal.js";
 
 /**
  * Extension digit for pallet serial ranges. Boxes take 0 -- see
@@ -48,7 +57,7 @@ export type ClosePalletResult =
  * serial, and the serial is burned only once the pool actually yields one.
  * A pallet abandoned at shift end therefore costs nothing either.
  */
-export async function closeCurrentPallet(
+async function closeCurrentPalletLegacy(
   deps: CloseBoxDeps,
   shiftId: string,
   operatorId: string | null,
@@ -94,4 +103,123 @@ export async function closeCurrentPallet(
     return { status: "already-closed" };
   }
   return { status: "closed", palletId: pallet.palletId, sscc, boxCount: pallet.boxCount, closedAt };
+}
+
+/** Legacy entry point cannot bypass an installed grant owner. */
+export async function closeCurrentPallet(
+  deps: CloseBoxDeps,
+  shiftId: string,
+  operatorId: string | null,
+): Promise<ClosePalletResult> {
+  const [active] = await deps.exec.all<{ active: number }>(
+    "SELECT 1 active FROM offline_grant_install_state WHERE id=1",
+  );
+  if (active?.active === 1) throw new OfflineGrantDeniedError("grant_aware_owner_required");
+  return closeCurrentPalletLegacy(deps, shiftId, operatorId);
+}
+
+/** Grant-aware pallet owner: allowance, serial CAS and pending-print close are one command. */
+export async function closeCurrentPalletWithOfflineGrant(
+  deps: CloseBoxDeps,
+  shiftId: string,
+  operatorId: string | null,
+  generation: CredentialGeneration,
+  clock: () => Promise<GrantClockSample> = sampleGrantClock,
+): Promise<ClosePalletResult> {
+  const lease = acquireCredentialCommitLease(generation);
+  if (!lease) throw new OfflineGrantDeniedError("stale_credential");
+  try {
+    const [state] = await deps.exec.all<{
+      tenant_id: string;
+      device_id: string;
+      owner_kind: "station";
+      credential_epoch: number;
+    }>(
+      "SELECT tenant_id,device_id,owner_kind,credential_epoch FROM offline_grant_install_state WHERE id=1",
+    );
+    if (!state) return closeCurrentPalletLegacy(deps, shiftId, operatorId);
+    if (!operatorId) throw new OfflineGrantDeniedError("operator_unauthorized");
+    if (!(await stationOperatorIsCurrentlyActive(deps.exec, operatorId)))
+      throw new OfflineGrantDeniedError("operator_unauthorized");
+    const pallet = await currentPallet(deps.exec, shiftId, deps.terminalId);
+    if (!pallet || pallet.boxCount === 0) return { status: "empty" };
+    const [pool] = await deps.exec.all<{ rowid: number; serial: number }>(
+      "SELECT rowid,next_serial serial FROM sscc_pool WHERE issuer_prefix=? AND extension_digit=? AND next_serial<=to_serial ORDER BY from_serial LIMIT 1",
+      [deps.issuerPrefix, PALLET_EXTENSION_DIGIT],
+    );
+    if (!pool) return { status: "no-serials" };
+    let sscc: string;
+    try {
+      sscc = buildSscc(PALLET_EXTENSION_DIGIT, deps.issuerPrefix, pool.serial);
+    } catch (error) {
+      if (error instanceof DomainError && error.code === "SSCC_RANGE")
+        return { status: "invalid-serial" };
+      throw error;
+    }
+    const [binding] = await deps.exec.all<{ snapshot_digest: string }>(
+      "SELECT json_extract(grant_json,'$.snapshotDigest') snapshot_digest FROM offline_grant_grants WHERE json_extract(grant_json,'$.kindOfGrant')='task' AND json_extract(grant_json,'$.taskKind')='shift' AND json_extract(grant_json,'$.taskId')=? ORDER BY installed_sequence DESC LIMIT 1",
+      [shiftId],
+    );
+    const eventId = crypto.randomUUID();
+    const closedAt = new Date(deps.now ? deps.now() : Date.now()).toISOString();
+    const result: ClosePalletResult = {
+      status: "closed",
+      palletId: pallet.palletId,
+      sscc,
+      boxCount: pallet.boxCount,
+      closedAt,
+    };
+    const committed = await new StationGrantAdmission(deps.exec, clock).commitCompletion({
+      operatorId,
+      intent: {
+        owner: {
+          tenantId: state.tenant_id,
+          deviceId: state.device_id,
+          kind: state.owner_kind,
+          credentialEpoch: state.credential_epoch,
+        },
+        capability: "shift.start.v1",
+        taskId: shiftId,
+        snapshotDigest: binding?.snapshot_digest ?? "missing",
+        eventId,
+        eventType: "shift.pallet.close.v1",
+        cost: {},
+      },
+      execution: await readShiftExecutionProjection(deps.exec, shiftId),
+      event: {
+        eventId,
+        shiftId,
+        palletId: pallet.palletId,
+        sscc,
+        boxCount: pallet.boxCount,
+        closedAt,
+        operatorId,
+        terminalId: deps.terminalId,
+      },
+      facts: { containers: 1 },
+      result,
+      wrapCommand(command) {
+        return {
+          sql: "INSERT INTO offline_grant_pallet_close_commands(event_id,payload_json) VALUES(?,?)",
+          values: [
+            eventId,
+            JSON.stringify({
+              grantCommand: JSON.parse(String(command.values[1])) as unknown,
+              poolRowId: pool.rowid,
+              serial: pool.serial,
+              palletId: pallet.palletId,
+              sscc,
+              closedAt,
+              operatorId,
+            }),
+          ],
+        };
+      },
+    });
+    if (!committed.decision.allow)
+      throw new OfflineGrantDeniedError(committed.decision.reason ?? "denied");
+    return committed.result as ClosePalletResult;
+  } finally {
+    lease.release();
+  }
 }

@@ -1,3 +1,5 @@
+import { freezeGrantTask } from "../src/modules/device-grants/frozen-task";
+import { seedGrantPolicy } from "./support/grant-policy-fixture";
 import { randomUUID } from "node:crypto";
 import express from "express";
 import { Test } from "@nestjs/testing";
@@ -1770,6 +1772,58 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       } finally {
         warnSpy.mockRestore();
       }
+    });
+
+    it("retains frozen grant identity after accepted first-box progress", async () => {
+      await db
+        .update(schema.shifts)
+        .set({ mode: "aggregation" })
+        .where(eq(schema.shifts.id, shiftId));
+      await db.insert(schema.shiftDeviceParticipants).values({ tenantId, shiftId, deviceId });
+      const [device] = await db
+        .select()
+        .from(schema.stationDevices)
+        .where(eq(schema.stationDevices.id, deviceId));
+      if (!device) throw new Error("Device fixture missing");
+      const owner = {
+        tenantId,
+        deviceId,
+        kind: "station" as const,
+        credentialEpoch: device.credentialEpoch,
+      };
+      const policy = await seedGrantPolicy(db, {
+        shift: {
+          "shift.scan.v1": { maxEvents: 3, maxUnits: 3 },
+          "shift.box.close.v1": { maxEvents: 2, maxContainers: 2 },
+          "shift.close.v1": { maxEvents: 1 },
+        },
+      });
+      const reference = { taskKind: "shift" as const, taskId: shiftId };
+      const before = await db.transaction((tx) => freezeGrantTask(tx, owner, reference, policy));
+      expect(before.status).toBe("ready");
+      const [unstarted] = await db
+        .select()
+        .from(schema.shifts)
+        .where(eq(schema.shifts.id, shiftId));
+      expect(unstarted?.firstBoxClosureAt).toBeNull();
+      await postBatchWithBoxes(
+        [],
+        [
+          {
+            boxId: "frozen-first",
+            shiftId,
+            terminalId: "t1",
+            sscc: SSCC,
+            closedAt: ISO,
+            operatorId: null,
+          },
+        ],
+      );
+      const [progress] = await db.select().from(schema.shifts).where(eq(schema.shifts.id, shiftId));
+      expect(progress?.firstBoxClosureAt).toBeInstanceOf(Date);
+      expect(await db.transaction((tx) => freezeGrantTask(tx, owner, reference, policy))).toEqual(
+        before,
+      );
     });
 
     it("freezes productionDate after an accepted zero-item closure, tenant-scoped and idempotent", async () => {

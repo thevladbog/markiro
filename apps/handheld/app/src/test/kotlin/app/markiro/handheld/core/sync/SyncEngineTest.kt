@@ -103,6 +103,110 @@ class SyncEngineTest {
         MockResponse().setResponseCode(201).setBody("""{"applied":$applied,"alreadyApplied":false,"conflicts":$conflicts}""")
 
     @Test
+    fun negotiatedObserveSplitsFromLegacyAndRetainsExactEnvelopeAfterRestart() = runTest {
+        outbox("legacy")
+        db.grants.beginRefresh()
+        db.grantDao().state(checkNotNull(db.grantDao().state()).copy(epoch = 3))
+        val id = outbox("new\u001dbarcode")
+        val occurrence=app.markiro.handheld.core.storage.ValidationOccurrenceEntity("s1","a".repeat(64),"2026-09-10T10:00:00.000Z","new\u001dbarcode","04600682000013","new\u001dbarcode","op-1","dev-1","old","OLD-001","reprocessed")
+        db.validationDao().insert(occurrence)
+        db.grants.complete(app.markiro.handheld.core.grants.TaskKind.SHIFT, "s1", "shift.scan:$id", app.markiro.handheld.core.grants.GrantEventType.SHIFT_SCAN, units = 1)
+        server.enqueue(ok(1))
+        server.enqueue(MockResponse().setResponseCode(500))
+        assertFalse(engine().drainAll())
+        assertEquals("/station/scans", checkNotNull(server.takeRequest(2, java.util.concurrent.TimeUnit.SECONDS)).path)
+        assertEquals(occurrence,db.validationDao().get("s1","a".repeat(64)))
+        val first = checkNotNull(server.takeRequest(2, java.util.concurrent.TimeUnit.SECONDS))
+        assertEquals("/station/grants/v1/evidence/scans", first.path)
+        val original = first.body.readUtf8()
+        val envelope = Json.parseToJsonElement(original).jsonObject
+        val batch = envelope.getValue("batchId").jsonPrimitive.content
+        assertEquals(1, envelope.getValue("payload").jsonObject.getValue("items").jsonArray.size)
+        assertTrue(envelope.getValue("grants").jsonArray.isEmpty())
+        server.enqueue(MockResponse().setBody("""{"protocol":"offline-grants-v1","batchId":"$batch","outcome":"duplicate","reason":"missing_grant","receiptId":"22222222-2222-4222-8222-222222222222","reconciliation":{"status":"applied","statusCode":201,"result":{"applied":1,"alreadyApplied":false,"conflicts":[],"validationOccurrences":[{"shiftId":"s1","codeHash":"${"a".repeat(64)}","scannedAt":"2026-09-10T10:00:00.000Z","outcome":"reprocessed"}]}}}"""))
+        assertTrue(engine().drainAll())
+        assertEquals(original, checkNotNull(server.takeRequest(2, java.util.concurrent.TimeUnit.SECONDS)).body.readUtf8())
+        assertEquals(0, db.outboxDao().countNow())
+        assertEquals("missing_grant", db.metaDao().get(MetaStore.SYNC_LAST_DENIED))
+        assertEquals("reprocessed",db.validationDao().get("s1","a".repeat(64))?.outcome)
+        assertEquals(occurrence.raw,db.validationDao().get("s1","a".repeat(64))?.raw)
+    }
+
+    @Test fun acknowledgedInitialLabelKeepsReprintOnEvidenceWithoutASecondCharge() = runTest {
+        db.shiftDao().upsert(app.markiro.handheld.feature.shift.ShiftEntityFixtures.bundled("s1"))
+        app.markiro.handheld.core.grants.installStrictShiftAuthority(db,"s1")
+        val scan=outbox("saved\u001dbarcode")
+        db.grants.complete(app.markiro.handheld.core.grants.TaskKind.SHIFT,"s1","shift.scan:$scan",app.markiro.handheld.core.grants.GrantEventType.SHIFT_SCAN,units=1)
+        fun event(id:String,sequence:Int,kind:String,attempt:Int,reason:String)=app.markiro.handheld.core.storage.ProductLabelEventEntity(id,"saved-job",sequence,kind,"""{"eventId":"$id","jobId":"saved-job","kind":"$kind","attemptNo":$attempt,"reason":$reason,"raw":"saved\u001dbarcode"}""","2026-09-10T10:00:00.000Z",null,null)
+        db.productLabelEventDao().insert(event("initial",1,"prepared",1,"null"))
+        db.grants.complete(app.markiro.handheld.core.grants.TaskKind.SHIFT,"s1","initial",app.markiro.handheld.core.grants.GrantEventType.SHIFT_LABEL_PREPARE,units=1)
+        server.enqueue(MockResponse().setResponseCode(503))
+        assertFalse(engine().drainAll())
+        val initial=server.takeRequest(); assertEquals("/station/grants/v1/evidence/scans",initial.path)
+        val first=Json.parseToJsonElement(initial.body.readUtf8()).jsonObject
+        assertEquals(setOf("/items/0#shift.scan.v1","/productLabelEvents/0#shift.label.prepare.v1"),first.getValue("eventGrants").jsonObject.keys)
+        fun receipt(batch: String, ids: String, applied: Int)=MockResponse().setBody("""{"protocol":"offline-grants-v1","batchId":$batch,"outcome":"accepted","reason":null,"receiptId":"22222222-2222-4222-8222-222222222222","reconciliation":{"status":"applied","statusCode":201,"result":{"applied":$applied,"alreadyApplied":false,"conflicts":[],"productLabelReceipt":{"acceptedEventIds":$ids,"quarantined":[]}}}}""")
+        server.enqueue(receipt(first.getValue("batchId").toString(),"[\"initial\"]",1))
+        assertTrue(engine().drainAll()); server.takeRequest()
+        assertNotNull(db.productLabelEventDao().bySequence("saved-job").single().ackedAt)
+        val before=db.grantDao().evidence(); val owner=before.first().ownerKey
+        val counters=db.grantDao().counters(owner,"shift","s1","snapshot")
+        db.grantDao().state(checkNotNull(db.grantDao().state()).copy(retiredKids="[\"test\"]",epoch=8))
+        for ((sequence,kind) in listOf(2 to "prepared",3 to "sent")) {
+            val id="recovery-$sequence"
+            db.productLabelEventDao().insert(event(id,sequence,kind,2,"\"unreadable\""))
+            server.enqueue(MockResponse().setResponseCode(503))
+            assertFalse(engine().drainAll())
+            val request=server.takeRequest(); assertEquals("/station/grants/v1/evidence/scans",request.path)
+            val original=request.body.readUtf8(); val envelope=Json.parseToJsonElement(original).jsonObject
+            assertTrue(envelope.getValue("eventGrants").jsonObject.isEmpty())
+            assertTrue(envelope.getValue("grants").jsonArray.isEmpty())
+            assertEquals(listOf(id),db.productLabelEventDao().unacked(10).map { it.eventId })
+            server.enqueue(receipt(envelope.getValue("batchId").toString(),"[\"$id\"]",0))
+            assertTrue(engine().drainAll())
+            assertEquals(original,server.takeRequest().body.readUtf8())
+            assertTrue(db.productLabelEventDao().unacked(10).isEmpty())
+        }
+        assertEquals(before,db.grantDao().evidence())
+        assertEquals(counters,db.grantDao().counters(owner,"shift","s1","snapshot"))
+    }
+
+    @Test
+    fun negotiatedClosureUnwrapsNativeConflictWithoutMarkingItAccepted() = runTest {
+        db.shiftCloseDao().insert(ShiftCloseEntity("saved-close", "s1", "op-1", 10, 8, 1, "material_shortage", "2026-09-10T12:00:00.000Z", "pending", null, null))
+        db.grants.beginRefresh()
+        db.grantDao().state(checkNotNull(db.grantDao().state()).copy(epoch = 3))
+        db.grants.complete(app.markiro.handheld.core.grants.TaskKind.SHIFT, "s1", "saved-close", app.markiro.handheld.core.grants.GrantEventType.SHIFT_CLOSE)
+        server.enqueue(MockResponse().setBody("""{"protocol":"offline-grants-v1","batchId":"saved-close","outcome":"duplicate","reason":"missing_grant","receiptId":"22222222-2222-4222-8222-222222222222","reconciliation":{"status":"rejected","statusCode":201,"result":{"outcome":"conflict","conflictCode":"multiple_devices"}}}"""))
+        assertTrue(engine().drainAll())
+        assertEquals("/station/grants/v1/evidence/shift-closures", server.takeRequest().path)
+        assertEquals("conflict", db.shiftCloseDao().forShift("s1")?.state)
+    }
+
+    @Test
+    fun negotiatedReceiptRejectsStringStatusWithoutAcknowledgingQueue() = runTest {
+        db.grants.beginRefresh()
+        db.grantDao().state(checkNotNull(db.grantDao().state()).copy(epoch = 3))
+        val id = outbox("exact\u001dbarcode")
+        db.grants.complete(app.markiro.handheld.core.grants.TaskKind.SHIFT, "s1", "shift.scan:$id", app.markiro.handheld.core.grants.GrantEventType.SHIFT_SCAN, units = 1)
+        server.enqueue(MockResponse().setResponseCode(503))
+        assertFalse(engine().drainAll())
+        val original = server.takeRequest().body.readUtf8()
+        val batch = Json.parseToJsonElement(original).jsonObject.getValue("batchId")
+        val malformed = """{"protocol":"offline-grants-v1","batchId":$batch,"outcome":"accepted","reason":null,"receiptId":"22222222-2222-4222-8222-222222222222","reconciliation":{"status":"applied","statusCode":"201","result":{"applied":1,"alreadyApplied":false,"conflicts":[]}}}"""
+        server.enqueue(MockResponse().setBody(malformed))
+        assertFalse(engine().drainAll())
+        assertEquals(original, server.takeRequest().body.readUtf8())
+        assertEquals(1, db.outboxDao().countNow())
+        assertNull(db.metaDao().get(MetaStore.SYNC_LAST_SUCCESS_AT))
+        // The malformed receipt must not poison the immutable receipt slot.
+        server.enqueue(MockResponse().setBody(malformed.replace("\"statusCode\":\"201\"", "\"statusCode\":201")))
+        assertTrue(engine().drainAll())
+        assertEquals(original, server.takeRequest().body.readUtf8())
+        assertEquals(0, db.outboxDao().countNow())
+    }
+
+    @Test
     fun postsAContiguousPrefixAndAcksIt() = runTest {
         outbox("a")
         outbox("b", "invalid")

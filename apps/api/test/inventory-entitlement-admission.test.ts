@@ -259,7 +259,7 @@ describe.skipIf(!process.env.DATABASE_URL)("inventory entitlement admission owne
       "inventory.file.create.v1",
       "inventory.task.start.v1",
     ]);
-    expect(rows.every((row) => row.registryVersion === "p1b.v1")).toBe(true);
+    expect(rows.every((row) => row.registryVersion === "p1c.native.v1")).toBe(true);
     expect(rows.at(-1)).toMatchObject({
       resourceScope: {
         digest: admissionScopeDigest({

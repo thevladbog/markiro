@@ -1,3 +1,5 @@
+import { freezeGrantTask } from "../src/modules/device-grants/frozen-task";
+import { seedGrantPolicy } from "./support/grant-policy-fixture";
 import { randomUUID } from "node:crypto";
 
 import type { INestApplication } from "@nestjs/common";
@@ -295,6 +297,61 @@ describe.skipIf(!ready)("station inventory bundle e2e", () => {
     });
     await createManagedSubscription(db, { tenantId, planVersionId, startsAt, endsAt });
   }
+
+  it("freezes the selected inventory snapshot without mutable product hydration", async () => {
+    const fixture = await seedBundle(request.agent(app!.getHttpServer()));
+    await join(fixture);
+    const [device] = await db
+      .select()
+      .from(schema.stationDevices)
+      .where(eq(schema.stationDevices.id, fixture.deviceId));
+    if (!device) throw new Error("fixture");
+    const owner = {
+      tenantId: fixture.tenantId,
+      deviceId: fixture.deviceId,
+      kind: "station" as const,
+      credentialEpoch: device.credentialEpoch,
+    };
+    const policy = await seedGrantPolicy(db, {
+      inventoryCheck: {
+        "inventory.scan.v1": { maxEvents: 5, maxUnits: 4 },
+        "inventory.close.v1": { maxEvents: 1 },
+      },
+    });
+    const reference = { taskKind: "inventory" as const, taskId: fixture.inventoryId };
+    const frozen = await db.transaction((tx) => freezeGrantTask(tx, owner, reference, policy));
+    expect(frozen).toMatchObject({
+      status: "ready",
+      task: {
+        eventTypes: ["inventory.scan.v1", "inventory.close.v1"],
+        budget: [
+          { id: "inventory.scan.v1:events", maximum: 5 },
+          { id: "inventory.scan.v1:units", maximum: 4 },
+          { id: "inventory.close.v1:events", maximum: 1 },
+        ],
+      },
+    });
+    await db
+      .update(schema.products)
+      .set({ name: "Changed master data" })
+      .where(eq(schema.products.id, fixture.productId));
+    expect(await db.transaction((tx) => freezeGrantTask(tx, owner, reference, policy))).toEqual(
+      frozen,
+    );
+    await db
+      .update(schema.inventorySnapshotCodes)
+      .set({ canonicalRaw: "changed" })
+      .where(
+        and(
+          eq(schema.inventorySnapshotCodes.snapshotId, fixture.snapshotId),
+          eq(schema.inventorySnapshotCodes.codeHash, "a".repeat(64)),
+        ),
+      );
+    expect(await db.transaction((tx) => freezeGrantTask(tx, owner, reference, policy))).toEqual({
+      status: "denied",
+      reason: "task_not_frozen",
+    });
+  });
 
   it("publishes the immutable manifest and bounded snapshot-pinned code pages in code-hash order", async () => {
     const agent = request.agent(app!.getHttpServer());

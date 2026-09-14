@@ -1,3 +1,15 @@
+import { inventoryImportObjectKey } from "./inventory-import-object-key";
+import type { PublicApiOwnerRequest } from "../public-api/public-api-request.service";
+import {
+  inventoryActor,
+  actorUserId as inventoryActorUserId,
+  actorKeyId,
+  actorAudit,
+  runInventoryOwner,
+  inventoryReceiptSchema,
+  importReceiptSchema,
+  type InventoryActor,
+} from "./inventory-actor";
 import { createHash, randomUUID } from "node:crypto";
 
 import {
@@ -151,8 +163,12 @@ export class InventoriesService {
     return { items: rows.map((row) => this.toInventoryDto(row)) };
   }
 
-  async get(tenantId: string, id: string): Promise<InventoryDto> {
-    const [row] = await this.db
+  async get(
+    tenantId: string,
+    id: string,
+    executor: Db | InventoryTx = this.db,
+  ): Promise<InventoryDto> {
+    const [row] = await executor
       .select(INVENTORY_SELECTION)
       .from(schema.inventories)
       .innerJoin(
@@ -339,30 +355,39 @@ export class InventoriesService {
 
   async create(
     tenantId: string,
-    actorUserId: string,
+    actorInput: string | InventoryActor,
     input: CreateInventoryDto,
+    publicRequest?: PublicApiOwnerRequest,
   ): Promise<InventoryDto> {
+    const actor = inventoryActor(actorInput, publicRequest);
+    const actorUserId = inventoryActorUserId(actor);
+    publicRequest?.assertBinding(tenantId, "inventory.create", input);
     this.assertDateRange(input.productionDateFrom, input.productionDateTo);
-    const inventoryId = randomUUID();
-    const admissionFacts = await this.admission.capture(tenantId);
+    const inventoryId = publicRequest?.effectId ?? randomUUID();
+    const admissionFacts = publicRequest ? undefined : await this.admission.capture(tenantId);
 
-    await this.db.transaction(async (tx) => {
-      const [tenant] = await tx
-        .select({ id: schema.organization.id })
-        .from(schema.organization)
-        .where(eq(schema.organization.id, tenantId))
-        .for("update");
-      if (!tenant) throw new NotFoundException();
+    return this.db.transaction(async (tx) =>
+      runInventoryOwner(
+        tx,
+        publicRequest,
+        (value) => inventoryReceiptSchema.parse(value),
+        async () => {
+          const [tenant] = await tx
+            .select({ id: schema.organization.id })
+            .from(schema.organization)
+            .where(eq(schema.organization.id, tenantId))
+            .for("update");
+          if (!tenant) throw new NotFoundException();
 
-      const resolved = await this.resolveParameters(tx, tenantId, {
-        ...input,
-        boxLabelTemplateId: input.boxLabelTemplateId ?? null,
-      });
-      // The sequence continues across all historical formats. Existing document
-      // numbers remain immutable, but still count towards the tenant's next value.
-      const [sequence] = await tx
-        .select({
-          last: sql<number>`coalesce(max(case
+          const resolved = await this.resolveParameters(tx, tenantId, {
+            ...input,
+            boxLabelTemplateId: input.boxLabelTemplateId ?? null,
+          });
+          // The sequence continues across all historical formats. Existing document
+          // numbers remain immutable, but still count towards the tenant's next value.
+          const [sequence] = await tx
+            .select({
+              last: sql<number>`coalesce(max(case
             when ${schema.inventories.number} ~ '^INVENTORY-[0-9]{2}-[0-9]+$'
             then split_part(${schema.inventories.number}, '-', 3)::integer
             when ${schema.inventories.number} ~ '^IVN-[0-9]{2}-[0-9]+$'
@@ -371,67 +396,70 @@ export class InventoriesService {
             then substring(${schema.inventories.number} from 5)::integer
             else null
           end), 0)::integer`,
-        })
-        .from(schema.inventories)
-        .where(eq(schema.inventories.tenantId, tenantId));
-      const next = Number(sequence?.last ?? 0) + 1;
-      const number = formatInventoryNumber(next, new Date());
+            })
+            .from(schema.inventories)
+            .where(eq(schema.inventories.tenantId, tenantId));
+          const next = Number(sequence?.last ?? 0) + 1;
+          const number = formatInventoryNumber(next, new Date());
 
-      await this.admission.observe({
-        tenantId,
-        facts: admissionFacts,
-        actor: { domain: "cabinet", id: actorUserId },
-        operationId: "inventory.task.create.v1",
-        scopeDigest: admissionScopeDigest({
-          inventoryId,
-          productId: resolved.productId,
-          lineId: resolved.lineId,
-          mode: resolved.mode,
-          productionDateFrom: resolved.productionDateFrom,
-          productionDateTo: resolved.productionDateTo,
-          boxLabelTemplateId: resolved.boxLabelTemplateId,
-        }),
-        runtime: { enabled: true, observedAt: new Date() },
-        transaction: tx,
-      });
+          if (!publicRequest)
+            await this.admission.observe({
+              tenantId,
+              facts: admissionFacts,
+              actor: { domain: "cabinet", id: actorUserId },
+              operationId: "inventory.task.create.v1",
+              scopeDigest: admissionScopeDigest({
+                inventoryId,
+                productId: resolved.productId,
+                lineId: resolved.lineId,
+                mode: resolved.mode,
+                productionDateFrom: resolved.productionDateFrom,
+                productionDateTo: resolved.productionDateTo,
+                boxLabelTemplateId: resolved.boxLabelTemplateId,
+              }),
+              runtime: { enabled: true, observedAt: new Date() },
+              transaction: tx,
+            });
 
-      await tx.insert(schema.inventories).values({
-        id: inventoryId,
-        tenantId,
-        number,
-        productId: resolved.productId,
-        gtin14Snapshot: resolved.gtin14,
-        lineId: resolved.lineId,
-        mode: resolved.mode,
-        productionDateFrom: resolved.productionDateFrom,
-        productionDateTo: resolved.productionDateTo,
-        boxLabelTemplateId: resolved.boxLabelTemplateId,
-        createdByUserId: actorUserId,
-      });
-      await tx.insert(schema.tenantAuditEvents).values({
-        organizationId: tenantId,
-        actorUserId,
-        action: "inventory.created",
-        outcome: "success",
-        targetType: "inventory",
-        targetId: inventoryId,
-        after: {
-          tenantId,
-          actorUserId,
-          inventoryId,
-          number,
-          productId: resolved.productId,
-          gtin14: resolved.gtin14,
-          lineId: resolved.lineId,
-          mode: resolved.mode,
-          productionDateFrom: resolved.productionDateFrom,
-          productionDateTo: resolved.productionDateTo,
-          boxLabelTemplateId: resolved.boxLabelTemplateId,
+          await tx.insert(schema.inventories).values({
+            id: inventoryId,
+            tenantId,
+            number,
+            productId: resolved.productId,
+            gtin14Snapshot: resolved.gtin14,
+            lineId: resolved.lineId,
+            mode: resolved.mode,
+            productionDateFrom: resolved.productionDateFrom,
+            productionDateTo: resolved.productionDateTo,
+            boxLabelTemplateId: resolved.boxLabelTemplateId,
+            createdByUserId: actorUserId,
+            createdByPublicKeyId: actorKeyId(actor),
+          });
+          await tx.insert(schema.tenantAuditEvents).values({
+            organizationId: tenantId,
+            actorUserId,
+            action: "inventory.created",
+            outcome: "success",
+            targetType: "inventory",
+            targetId: inventoryId,
+            after: {
+              tenantId,
+              ...actorAudit(actor),
+              inventoryId,
+              number,
+              productId: resolved.productId,
+              gtin14: resolved.gtin14,
+              lineId: resolved.lineId,
+              mode: resolved.mode,
+              productionDateFrom: resolved.productionDateFrom,
+              productionDateTo: resolved.productionDateTo,
+              boxLabelTemplateId: resolved.boxLabelTemplateId,
+            },
+          });
+          return this.get(tenantId, inventoryId, tx);
         },
-      });
-    });
-
-    return this.get(tenantId, inventoryId);
+      ),
+    );
   }
 
   async update(
@@ -527,14 +555,28 @@ export class InventoriesService {
 
   async importEvidence(
     tenantId: string,
-    actorUserId: string,
+    actorInput: string | InventoryActor,
     inventoryId: string,
     declaredStatus: InventoryChzStatus,
     file: InventoryImportFile,
     chzAttempt?: ChzImportAttempt,
+    publicRequest?: PublicApiOwnerRequest,
   ): Promise<InventoryImportDto> {
+    const actor = inventoryActor(actorInput, publicRequest);
+    const actorUserId = inventoryActorUserId(actor);
     const sha256 = createHash("sha256").update(file.bytes).digest("hex");
-    const importId = randomUUID();
+    publicRequest?.assertBinding(tenantId, "inventory.import", {
+      inventoryId,
+      declaredStatus,
+      originalName: file.originalName,
+      mimeType: file.mimeType,
+      sha256,
+    });
+    if (publicRequest) {
+      const replay = await publicRequest.replay((value) => importReceiptSchema.parse(value));
+      if (replay) return replay;
+    }
+    const importId = publicRequest?.effectId ?? randomUUID();
     const publication: { current: PublishedAttempt | null } = { current: null };
 
     try {
@@ -558,7 +600,7 @@ export class InventoriesService {
         declaredStatus,
         sha256,
       );
-      if (preflightExisting) {
+      if (preflightExisting && !publicRequest) {
         return this.importDtoWithStoredDiagnostic(this.db, preflightExisting);
       }
       const containerKind = this.containerKind(file.originalName);
@@ -576,13 +618,16 @@ export class InventoriesService {
         throw new UnprocessableEntityException({ code: "INVENTORY_PRODUCT_INACTIVE" });
       }
 
-      const objectKey = this.importObjectKey(
+      const objectKey = inventoryImportObjectKey({
         tenantId,
         inventoryId,
-        declaredStatus,
+        status: declaredStatus,
         sha256,
         containerKind,
-      );
+        importId,
+        publicActor: publicRequest !== undefined,
+      });
+      if (publicRequest) await publicRequest.stageObject(objectKey);
       publication.current = { tenantId, inventoryId, importId, objectKey };
       const verified = await this.storage.putVerified(objectKey, file.bytes, file.mimeType, sha256);
 
@@ -613,177 +658,200 @@ export class InventoriesService {
         parsedStatus = error.parsedStatus ?? null;
         includedGtin14 = error.includedGtin14 ?? null;
       }
-      const admissionFacts = await this.admission.capture(tenantId);
+      const admissionFacts = publicRequest ? undefined : await this.admission.capture(tenantId);
 
-      return await this.db.transaction(async (tx) => {
-        const [inventory] = await tx
-          .select({
-            id: schema.inventories.id,
-            productId: schema.inventories.productId,
-            status: schema.inventories.status,
-          })
-          .from(schema.inventories)
-          .where(
-            and(eq(schema.inventories.tenantId, tenantId), eq(schema.inventories.id, inventoryId)),
-          )
-          .for("update");
-        if (!inventory) throw new NotFoundException();
-        this.assertMutable(inventory.status);
-
-        const existing = await this.findImportRow(
+      return await this.db.transaction(async (tx) =>
+        runInventoryOwner(
           tx,
-          tenantId,
-          inventoryId,
-          declaredStatus,
-          sha256,
-        );
-        if (existing) return this.importDtoWithStoredDiagnostic(tx, existing);
+          publicRequest,
+          (value) => importReceiptSchema.parse(value),
+          async () => {
+            const [inventory] = await tx
+              .select({
+                id: schema.inventories.id,
+                productId: schema.inventories.productId,
+                status: schema.inventories.status,
+              })
+              .from(schema.inventories)
+              .where(
+                and(
+                  eq(schema.inventories.tenantId, tenantId),
+                  eq(schema.inventories.id, inventoryId),
+                ),
+              )
+              .for("update");
+            if (!inventory) throw new NotFoundException();
+            this.assertMutable(inventory.status);
 
-        // Lock order: inventory -> exact CHZ run -> product. Storage already finished;
-        // a losing worker may read a saved receipt above, but cannot publish new evidence.
-        if (chzAttempt) {
-          const [owned] = await tx
-            .select({ id: schema.chzExportRuns.id })
-            .from(schema.chzExportRuns)
-            .where(
-              and(
-                eq(schema.chzExportRuns.tenantId, tenantId),
-                eq(schema.chzExportRuns.inventoryId, inventoryId),
-                eq(schema.chzExportRuns.id, chzAttempt.runId),
-                eq(schema.chzExportRuns.status, declaredStatus),
-                eq(schema.chzExportRuns.state, "ready"),
-                eq(schema.chzExportRuns.attempts, chzAttempt.attempts),
-                chzAttempt.claimedAt
-                  ? eq(schema.chzExportRuns.claimedAt, chzAttempt.claimedAt)
-                  : isNull(schema.chzExportRuns.claimedAt),
-                chzAttempt.dispenserTaskId
-                  ? eq(schema.chzExportRuns.dispenserTaskId, chzAttempt.dispenserTaskId)
-                  : isNull(schema.chzExportRuns.dispenserTaskId),
-                chzAttempt.resultId
-                  ? eq(schema.chzExportRuns.resultId, chzAttempt.resultId)
-                  : isNull(schema.chzExportRuns.resultId),
-              ),
-            )
-            .for("update");
-          if (!owned) throw new ConflictException("CHZ_IMPORT_ATTEMPT_STALE");
-        }
-
-        const [product] = await tx
-          .select({ gtin14: schema.products.gtin14, status: schema.products.status })
-          .from(schema.products)
-          .where(
-            and(
-              eq(schema.products.tenantId, tenantId),
-              eq(schema.products.id, inventory.productId),
-            ),
-          )
-          .for("share");
-        if (!product || product.status !== "active") {
-          throw new UnprocessableEntityException({ code: "INVENTORY_PRODUCT_INACTIVE" });
-        }
-        if (product.gtin14 !== preflightProduct.gtin14) {
-          throw new ConflictException({ code: "INVENTORY_PRODUCT_GTIN_CHANGED" });
-        }
-
-        await this.admission.observe({
-          tenantId,
-          facts: admissionFacts,
-          actor: { domain: "cabinet", id: actorUserId },
-          operationId: "inventory.file.create.v1",
-          scopeDigest: admissionScopeDigest({
-            inventoryId,
-            declaredStatus,
-            sha256,
-            parseOutcome: result,
-            parsedStatus,
-            includedGtin14,
-          }),
-          runtime: { enabled: true, observedAt: new Date() },
-          transaction: tx,
-        });
-
-        await tx.insert(schema.inventoryImports).values({
-          id: importId,
-          tenantId,
-          inventoryId,
-          declaredStatus,
-          fileName: this.boundedFileName(file.originalName),
-          containerKind,
-          byteSize: verified.byteSize,
-          sha256: verified.sha256,
-          objectKey,
-          parsedStatus,
-          includedGtin14,
-          parseOutcome: result,
-          rowCount,
-          errorCount: result === "failed" ? 1 : 0,
-          duplicateCount,
-          errorCode,
-          createdByUserId: actorUserId,
-        });
-        if (inventory.status === "draft") {
-          await tx
-            .update(schema.inventories)
-            .set({ status: "preparing", updatedAt: new Date() })
-            .where(
-              and(
-                eq(schema.inventories.tenantId, tenantId),
-                eq(schema.inventories.id, inventoryId),
-                eq(schema.inventories.status, "draft"),
-              ),
+            const existing = await this.findImportRow(
+              tx,
+              tenantId,
+              inventoryId,
+              declaredStatus,
+              sha256,
             );
-        }
-        await tx.insert(schema.tenantAuditEvents).values({
-          organizationId: tenantId,
-          actorUserId,
-          action: "inventory.import.processed",
-          outcome: result === "succeeded" ? "success" : "failure",
-          targetType: "inventory_import",
-          targetId: importId,
-          after: {
-            tenantId,
-            actorUserId,
-            inventoryId,
-            importId,
-            result,
-            declaredStatus,
-            parsedStatus,
-            includedGtin14,
-            rowCount,
-            errorCount: result === "failed" ? 1 : 0,
-            duplicateCount,
-            sha256,
-            ...(errorCode === null ? {} : { errorCode }),
-            ...(errorRowNumber === undefined ? {} : { errorRowNumber }),
-          },
-        });
+            if (existing) return this.importDtoWithStoredDiagnostic(tx, existing);
 
-        return this.toImportDto(
-          {
-            id: importId,
-            tenantId,
-            inventoryId,
-            declaredStatus,
-            fileName: this.boundedFileName(file.originalName),
-            containerKind,
-            byteSize: verified.byteSize,
-            sha256,
-            objectKey,
-            parsedStatus,
-            includedGtin14,
-            parseOutcome: result,
-            rowCount,
-            errorCount: result === "failed" ? 1 : 0,
-            duplicateCount,
-            errorCode,
-            createdByUserId: actorUserId,
-            createdAt: new Date(),
-            parsedAt: new Date(),
+            // Lock order: inventory -> exact CHZ run -> product. Storage already finished;
+            // a losing worker may read a saved receipt above, but cannot publish new evidence.
+            if (chzAttempt) {
+              const [owned] = await tx
+                .select({ id: schema.chzExportRuns.id })
+                .from(schema.chzExportRuns)
+                .where(
+                  and(
+                    eq(schema.chzExportRuns.tenantId, tenantId),
+                    eq(schema.chzExportRuns.inventoryId, inventoryId),
+                    eq(schema.chzExportRuns.id, chzAttempt.runId),
+                    eq(schema.chzExportRuns.status, declaredStatus),
+                    eq(schema.chzExportRuns.state, "ready"),
+                    eq(schema.chzExportRuns.attempts, chzAttempt.attempts),
+                    chzAttempt.claimedAt
+                      ? eq(schema.chzExportRuns.claimedAt, chzAttempt.claimedAt)
+                      : isNull(schema.chzExportRuns.claimedAt),
+                    chzAttempt.dispenserTaskId
+                      ? eq(schema.chzExportRuns.dispenserTaskId, chzAttempt.dispenserTaskId)
+                      : isNull(schema.chzExportRuns.dispenserTaskId),
+                    chzAttempt.resultId
+                      ? eq(schema.chzExportRuns.resultId, chzAttempt.resultId)
+                      : isNull(schema.chzExportRuns.resultId),
+                  ),
+                )
+                .for("update");
+              if (!owned) throw new ConflictException("CHZ_IMPORT_ATTEMPT_STALE");
+            }
+
+            const [product] = await tx
+              .select({ gtin14: schema.products.gtin14, status: schema.products.status })
+              .from(schema.products)
+              .where(
+                and(
+                  eq(schema.products.tenantId, tenantId),
+                  eq(schema.products.id, inventory.productId),
+                ),
+              )
+              .for("share");
+            if (!product || product.status !== "active") {
+              throw new UnprocessableEntityException({ code: "INVENTORY_PRODUCT_INACTIVE" });
+            }
+            if (product.gtin14 !== preflightProduct.gtin14) {
+              throw new ConflictException({ code: "INVENTORY_PRODUCT_GTIN_CHANGED" });
+            }
+
+            if (!publicRequest)
+              await this.admission.observe({
+                tenantId,
+                facts: admissionFacts,
+                actor: { domain: "cabinet", id: actorUserId },
+                operationId: "inventory.file.create.v1",
+                scopeDigest: admissionScopeDigest({
+                  inventoryId,
+                  declaredStatus,
+                  sha256,
+                  parseOutcome: result,
+                  parsedStatus,
+                  includedGtin14,
+                }),
+                runtime: { enabled: true, observedAt: new Date() },
+                transaction: tx,
+              });
+
+            await tx.insert(schema.inventoryImports).values({
+              id: importId,
+              tenantId,
+              inventoryId,
+              declaredStatus,
+              fileName: this.boundedFileName(file.originalName),
+              containerKind,
+              byteSize: verified.byteSize,
+              sha256: verified.sha256,
+              objectKey,
+              parsedStatus,
+              includedGtin14,
+              parseOutcome: result,
+              rowCount,
+              errorCount: result === "failed" ? 1 : 0,
+              duplicateCount,
+              errorCode,
+              createdByUserId: actorUserId,
+              createdByPublicKeyId: actorKeyId(actor),
+            });
+            if (inventory.status === "draft") {
+              await tx
+                .update(schema.inventories)
+                .set({ status: "preparing", updatedAt: new Date() })
+                .where(
+                  and(
+                    eq(schema.inventories.tenantId, tenantId),
+                    eq(schema.inventories.id, inventoryId),
+                    eq(schema.inventories.status, "draft"),
+                  ),
+                );
+            }
+            await tx.insert(schema.tenantAuditEvents).values({
+              organizationId: tenantId,
+              actorUserId,
+              action: "inventory.import.processed",
+              outcome: result === "succeeded" ? "success" : "failure",
+              targetType: "inventory_import",
+              targetId: importId,
+              after: {
+                tenantId,
+                ...actorAudit(actor),
+                inventoryId,
+                importId,
+                result,
+                declaredStatus,
+                parsedStatus,
+                includedGtin14,
+                rowCount,
+                errorCount: result === "failed" ? 1 : 0,
+                duplicateCount,
+                sha256,
+                ...(errorCode === null ? {} : { errorCode }),
+                ...(errorRowNumber === undefined ? {} : { errorRowNumber }),
+              },
+            });
+
+            return this.toImportDto(
+              {
+                id: importId,
+                tenantId,
+                inventoryId,
+                declaredStatus,
+                fileName: this.boundedFileName(file.originalName),
+                containerKind,
+                byteSize: verified.byteSize,
+                sha256,
+                objectKey,
+                parsedStatus,
+                includedGtin14,
+                parseOutcome: result,
+                rowCount,
+                errorCount: result === "failed" ? 1 : 0,
+                duplicateCount,
+                errorCode,
+                createdByUserId: actorUserId,
+                createdByPublicKeyId: actorKeyId(actor),
+                createdAt: new Date(),
+                parsedAt: new Date(),
+              },
+              errorRowNumber,
+            );
           },
-          errorRowNumber,
-        );
-      });
+        ),
+      );
     } catch (error) {
+      if (publicRequest) {
+        // The durable staged receipt owns cleanup; an exception cannot prove rollback.
+        try {
+          const replay = await publicRequest.replay((value) => importReceiptSchema.parse(value));
+          if (replay) return replay;
+        } catch {
+          /* preserve the original business/infrastructure error */
+        }
+        throw error;
+      }
       const published = publication.current;
       if (published === null) throw error;
       let committed: InventoryImportDto | null;
@@ -809,11 +877,12 @@ export class InventoriesService {
 
   fixSnapshot(
     tenantId: string,
-    actorUserId: string,
+    actorUserId: string | InventoryActor,
     inventoryId: string,
     input: FixInventorySnapshotDto,
+    publicRequest?: PublicApiOwnerRequest,
   ): Promise<InventorySnapshotDto> {
-    return this.snapshots.fix(tenantId, actorUserId, inventoryId, input);
+    return this.snapshots.fix(tenantId, actorUserId, inventoryId, input, publicRequest);
   }
 
   private async resolveParameters(
@@ -917,16 +986,6 @@ export class InventoriesService {
   private boundedFileName(filename: string): string {
     const bounded = filename.slice(0, 512);
     return bounded.length > 0 ? bounded : "inventory-upload";
-  }
-
-  private importObjectKey(
-    tenantId: string,
-    inventoryId: string,
-    status: InventoryChzStatus,
-    sha256: string,
-    containerKind: ChzContainerKind,
-  ): string {
-    return `tenants/${tenantId}/inventories/${inventoryId}/imports/${status}/${sha256}.${containerKind}`;
   }
 
   private findImportRow(

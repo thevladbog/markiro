@@ -281,8 +281,10 @@ describe("inventory preparation schema", () => {
     expect(cancellation).toContain("\"status\" = 'cancelled'");
     expect(cancellation).toContain('"cancelled_by_user_id" is not null');
     expect(cancellation).toContain('"cancelled_at" is not null');
-    expect(checkExpression("inventories", "inventories_started_fields_check")).toContain(
-      '("started_by_user_id" is null and "started_at" is null)',
+    const started = checkExpression("inventories", "inventories_started_fields_check");
+    expect(started.replaceAll(/\s+/g, " ")).toBe(
+      '(num_nonnulls("started_by_user_id","started_by_public_key_id") = 0 and "started_at" is null) ' +
+        'or (num_nonnulls("started_by_user_id","started_by_public_key_id") = 1 and "started_at" is not null)',
     );
     expect(checkExpression("inventories", "inventories_closed_fields_check")).toContain(
       '("closed_by_user_id" is null and "closed_at" is null)',

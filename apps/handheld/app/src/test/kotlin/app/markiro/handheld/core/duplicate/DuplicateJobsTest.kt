@@ -146,6 +146,50 @@ class DuplicateJobsTest {
     }
 
     /** The bytes are rendered once and stored; nothing ever re-renders them. */
+    @Test fun stalePreRenderShiftCannotPrepareBytesAgainstCurrentGrant() = runTest {
+        val stale=shift()
+        db.shiftDao().upsert(stale.copy(productPrintName="Current product"))
+        app.markiro.handheld.core.grants.installStrictShiftAuthority(db,"s1")
+        val denied=runCatching { accept(shift=stale) }.exceptionOrNull()
+        assertTrue(denied is app.markiro.handheld.core.grants.GrantDenied)
+        assertEquals("WRONG_TASK",db.grantDao().evidence().single().reason)
+        assertNull(db.productLabelJobDao().openJob("s1"))
+    }
+
+    @Test fun currentPreRenderShiftPreparesUnderStrictAuthority() = runTest {
+        app.markiro.handheld.core.grants.installStrictShiftAuthority(db,"s1")
+        assertTrue(accept() is DuplicateOutcome.Prepared)
+    }
+
+    @Test fun strictPreparationPinsPurposePrinterAndChargesExactlyOnce() = runTest {
+        app.markiro.handheld.core.grants.installStrictShiftAuthority(db,"s1")
+        val prepared=accept() as DuplicateOutcome.Prepared
+        val job=checkNotNull(db.productLabelJobDao().get(prepared.jobId))
+        val evidence=db.grantDao().evidence().single()
+        assertEquals(db.printerDao().assigned("duplicate"), db.printerDao().destination("duplicate",job.jobId,job.attemptId)?.printer)
+        assertEquals(listOf("prepared"),db.productLabelEventDao().bySequence(job.jobId).map { it.kind })
+        val counters=db.grantDao().counters(evidence.ownerKey,"shift","s1","snapshot")
+        assertEquals(mapOf("shift.label.prepare.v1:events" to 1L,"shift.label.prepare.v1:units" to 1L),counters.associate { it.budgetId to it.consumed })
+        assertTrue(accept() is DuplicateOutcome.Refused)
+        assertEquals(counters,db.grantDao().counters(evidence.ownerKey,"shift","s1","snapshot"))
+        assertEquals(listOf(evidence),db.grantDao().evidence())
+    }
+
+    @Test fun destinationFailureRollsBackStrictChargeAndPreparedJobTogether() = runTest {
+        app.markiro.handheld.core.grants.installStrictShiftAuthority(db,"s1")
+        db.openHelper.writableDatabase.execSQL("CREATE TRIGGER reject_destination BEFORE INSERT ON print_destinations BEGIN SELECT RAISE(ABORT, 'test destination failure'); END")
+        val failure=runCatching { accept() }.exceptionOrNull()
+        assertNotNull(failure)
+        assertNull(db.productLabelJobDao().openJob("s1"))
+        assertTrue(db.productLabelEventDao().unacked(10).isEmpty())
+        assertTrue(db.grantDao().evidence().isEmpty())
+        db.openHelper.readableDatabase.query("SELECT count(*) FROM grant_counters").use { assertTrue(it.moveToFirst()); assertEquals(0,it.getInt(0)) }
+        db.openHelper.readableDatabase.query("SELECT count(*) FROM print_destinations").use { assertTrue(it.moveToFirst()); assertEquals(0,it.getInt(0)) }
+        db.openHelper.writableDatabase.execSQL("DROP TRIGGER reject_destination")
+        assertTrue(accept() is DuplicateOutcome.Prepared)
+        assertEquals(1,db.grantDao().evidence().size)
+    }
+
     @Test
     fun acceptingAUnitStoresTheBytesAndAPreparedEvent() = runTest {
         val outcome = accept()
@@ -348,7 +392,11 @@ class DuplicateJobsTest {
 
     @Test
     fun unknownDeliveryRequiresExplicitCompatibleReplacementAndKeepsTheExactBytes() = runTest {
+        app.markiro.handheld.core.grants.installStrictShiftAuthority(db,"s1")
         val jobId = (accept() as DuplicateOutcome.Prepared).jobId
+        val evidence=db.grantDao().evidence()
+        val counters=db.grantDao().counters(evidence.single().ownerKey,"shift","s1","snapshot")
+        db.grantDao().state(checkNotNull(db.grantDao().state()).copy(epoch=8,retiredKids="[\"test\"]"))
         transport.outcome = SendOutcome.Unknown("link lost")
         jobs().send(jobId)
         val before = checkNotNull(db.productLabelJobDao().get(jobId))
@@ -366,6 +414,8 @@ class DuplicateJobsTest {
         val after = checkNotNull(db.productLabelJobDao().get(jobId))
         assertEquals(before.bytesDigest, after.bytesDigest)
         assertEquals(before.bytesBase64, after.bytesBase64)
+        assertEquals(evidence,db.grantDao().evidence())
+        assertEquals(counters,db.grantDao().counters(evidence.single().ownerKey,"shift","s1","snapshot"))
         assertEquals(before.attemptNo + 1, after.attemptNo)
     }
 

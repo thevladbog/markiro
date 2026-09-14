@@ -25,7 +25,7 @@ describe("credential mutation audit", () => {
     const audit = auditDouble();
     const controller = new ApiKeysController(service as never, audit as never);
 
-    const result = await controller.create(req, { name: "Warehouse" });
+    const result = await controller.create(req, { name: "Warehouse", scopes: [] });
 
     expect(result).toEqual({ id: "key_1", key: "mk_plaintext" });
     expect(audit.credentialMutation).toHaveBeenCalledWith({
@@ -59,7 +59,9 @@ describe("credential mutation audit", () => {
     const audit = auditDouble();
     const controller = new ApiKeysController(service as never, audit as never);
 
-    await expect(controller.create(req, { name: "Warehouse" })).rejects.toThrow("create failed");
+    await expect(controller.create(req, { name: "Warehouse", scopes: [] })).rejects.toThrow(
+      "create failed",
+    );
     expect(audit.credentialMutation).not.toHaveBeenCalled();
   });
 

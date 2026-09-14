@@ -43,9 +43,10 @@ object SyncModule {
 
     @Provides
     @Singleton
-    fun connectivityNudger(@ApplicationContext context: Context, engine: SyncEngine, inventory: InventorySyncEngine): ConnectivityNudger =
+    fun connectivityNudger(@ApplicationContext context: Context, engine: SyncEngine, inventory: InventorySyncEngine, grants: app.markiro.handheld.core.grants.GrantRefresher): ConnectivityNudger =
         ConnectivityNudger(context) {
             engine.nudge()
             inventory.nudge()
+            grants.nudge()
         }
 }

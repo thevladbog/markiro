@@ -1,5 +1,8 @@
 {
-  "app": { "title": "Markiro — Kiosk", "booting": "Starting the kiosk…" },
+  "app": {
+    "title": "Markiro — Kiosk",
+    "booting": "Starting the kiosk…"
+  },
   "layout": {
     "tooSmallTitle": "This device screen is too small",
     "tooSmallBody": "The touch kiosk needs at least a 480 × 800 or 800 × 480 screen.",
@@ -244,5 +247,12 @@
     "gateSubmit": "Sign in",
     "gateError": "Could not sign in. Check the personnel number and the PIN.",
     "gateRecovery": "Can't sign in? Unbind this kiosk in the admin panel and pair it again with a new code — until it is paired, scanner setup opens without a sign-in."
+  },
+  "grantBlocked": {
+    "title": "New pickup unavailable",
+    "body": "Connect the kiosk to refresh its work authorization. Previously queued orders remain saved and will continue syncing.",
+    "close": "Close",
+    "clock": "The kiosk cannot trust its clock. Connect to the server to restore the time anchor.",
+    "observe": "Offline authorization monitoring: synchronization is needed. Current pickup work remains available."
   }
 }

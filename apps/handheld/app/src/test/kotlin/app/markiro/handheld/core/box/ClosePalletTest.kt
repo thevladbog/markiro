@@ -93,6 +93,40 @@ class ClosePalletTest {
         return closeBox.close("s1", PREFIX, "op1") as CloseResult.Closed
     }
 
+    @Test fun staleIssuerCannotCloseBoxOrConsumeItsSerial() = runTest {
+        givenShift(); seedBoxPool()
+        val box=boxes.currentBox("s1"); scanInto(box.boxId,"stale-box")
+        db.shiftDao().upsert(checkNotNull(db.shiftDao().get("s1")).copy(ssccIssuerPrefix="123456789"))
+        app.markiro.handheld.core.grants.installStrictShiftAuthority(db,"s1")
+        val denied=runCatching { closeBox.close("s1",PREFIX,"op") }.exceptionOrNull()
+        assertTrue(denied is app.markiro.handheld.core.grants.GrantDenied)
+        assertEquals("WRONG_TASK",db.grantDao().evidence().single().reason)
+        assertNull(db.boxDao().get(box.boxId)!!.closedAt)
+        assertEquals(200L,pool.remaining(PREFIX,SsccPool.BOX_EXTENSION_DIGIT))
+    }
+
+    @Test fun staleIssuerCannotClosePalletOrConsumeItsSerial() = runTest {
+        givenShift(palletBoxCapacity=100); seedBoxPool(); seedPalletPool()
+        val closed=fillAndCloseBox("stale-pallet")
+        val palletId=checkNotNull(closed.box.palletId)
+        db.shiftDao().upsert(checkNotNull(db.shiftDao().get("s1")).copy(ssccIssuerPrefix="123456789"))
+        app.markiro.handheld.core.grants.installStrictShiftAuthority(db,"s1")
+        val denied=runCatching { closePallet.close("s1",PREFIX,"op") }.exceptionOrNull()
+        assertTrue(denied is app.markiro.handheld.core.grants.GrantDenied)
+        assertEquals("WRONG_TASK",db.grantDao().evidence().last().reason)
+        assertNull(db.palletDao().get(palletId)!!.closedAt)
+        assertEquals(200L,pool.remaining(PREFIX,SsccPool.PALLET_EXTENSION_DIGIT))
+    }
+
+    @Test fun currentIssuerClosesBoxAndPalletUnderStrictAuthority() = runTest {
+        givenShift(palletBoxCapacity=100); seedBoxPool(); seedPalletPool()
+        app.markiro.handheld.core.grants.installStrictShiftAuthority(db,"s1")
+        fillAndCloseBox("current")
+        assertTrue(closePallet.close("s1",PREFIX,"op") is ClosePalletResult.Closed)
+        assertEquals(199L,pool.remaining(PREFIX,SsccPool.BOX_EXTENSION_DIGIT))
+        assertEquals(199L,pool.remaining(PREFIX,SsccPool.PALLET_EXTENSION_DIGIT))
+    }
+
     // -- ClosePallet's own behaviour, mirroring CloseBoxTest -----------------
 
     @Test

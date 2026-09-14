@@ -18,7 +18,7 @@ class DeviceRecoveryMigrationTest {
     private val context: Context = ApplicationProvider.getApplicationContext()
     private fun database(name: String) = Room.databaseBuilder(context, HandheldDatabase::class.java, name)
         .allowMainThreadQueries()
-        .addMigrations(MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13).build()
+        .addMigrations(MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14).build()
 
     /**
      * Turns the file Room just built at the CURRENT version back into a real v7
@@ -82,6 +82,7 @@ class DeviceRecoveryMigrationTest {
                     old.metaDao().put(MetaEntity("inventory_pending_batch:i1", "{\"batch\":\"saved\\u001dbytes\"}"))
                     old.outboxDao().insert(OutboxEntity(shiftId = "s1", raw = "exact\u001dscan", verdict = "invalid", scannedAt = "2026-09-11T00:00:00Z", operatorId = "op", codeHash = null, gtin14 = null, serial = null))
                     old.openHelper.writableDatabase.let(::rewindToVersionSeven)
+                    listOf("grant_state","grant_tokens","grant_counters","grant_evidence","grant_task_bindings","grant_task_provenance").forEach { old.openHelper.writableDatabase.execSQL("DROP TABLE $it") }
                     old.openHelper.writableDatabase.version = 7
                 }
                 database(name).useDb { upgraded ->
@@ -91,7 +92,7 @@ class DeviceRecoveryMigrationTest {
                     assertEquals("exact\u001dscan", upgraded.outboxDao().head(5).single().raw)
                     assertEquals(1L, upgraded.outboxDao().head(5).single().id)
                     assertEquals("{\"batch\":\"saved\\u001dbytes\"}", upgraded.metaDao().get("inventory_pending_batch:i1"))
-                    assertEquals(13, upgraded.openHelper.readableDatabase.version)
+                    assertEquals(14, upgraded.openHelper.readableDatabase.version)
                 }
                 database(name).useDb { restarted ->
                     val recovery = DeviceRecovery(restarted, credentials)

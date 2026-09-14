@@ -70,7 +70,7 @@ describe.skipIf(!process.env.DATABASE_URL)("prepared entitlement sources", () =>
     const before = await resolver.resolveSnapshot(managed.tenantId);
     const preview = await service.preview(principal, managed.tenantId, request);
     expect(entitlementRegistryFingerprint()).toBe(
-      "p1b.v1:500451301e6d55759b5e9086b1bd58e51461cbb6889cda162d14722a8292ccf6",
+      "p1c.native.v1:24fdf1069000812bcb9028064edfc8b24745e13c4511cb3d876a32228b69cded",
     );
     expect(preview.after.current).toEqual(preview.before.current);
     expect(preview.after.candidate.features.chzIntegration).toBe(true);

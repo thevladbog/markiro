@@ -12,6 +12,13 @@ import {
 } from "@markiro/domain";
 
 import type { SqlExecutor } from "./mirror.js";
+import { acquireCredentialCommitLease, type CredentialGeneration } from "./credential-recovery.js";
+import {
+  StationGrantAdmission,
+  stationOperatorIsCurrentlyActive,
+} from "./offline-grants/admission.js";
+import { sampleGrantClock, type GrantClockSample } from "./offline-grants/clock.js";
+import { readInventoryExecutionProjection } from "./offline-grants/semantic.js";
 import { setInventoryProductionDate } from "./inventory-date.js";
 
 export type InventoryLocalVerdict =
@@ -1394,15 +1401,38 @@ async function guardSourceProductionDate(
 async function recordInventoryScanInternal(
   exec: SqlExecutor,
   input: RecordInventoryScanInput,
+  generation?: CredentialGeneration,
+  clock: () => Promise<GrantClockSample> = sampleGrantClock,
 ): Promise<RecordInventoryScanOutcome> {
   if (!input.eventId) throw new Error("inventory event id is required");
+  const [grantState] = await exec.all<{
+    tenant_id: string;
+    device_id: string;
+    owner_kind: "station";
+    credential_epoch: number;
+  }>(
+    "SELECT tenant_id,device_id,owner_kind,credential_epoch FROM offline_grant_install_state WHERE id=1",
+  );
+  if (grantState && !generation) throw new Error("offline grant-aware inventory owner required");
+  if (grantState) {
+    if (!(await stationOperatorIsCurrentlyActive(exec, input.operatorId)))
+      throw new Error("offline grant operator unauthorized");
+  }
+  let event = await existingEvent(exec, input.inventoryId, input.snapshotId, input.eventId);
+  if (!event) {
+    const pendingLeave = await exec.all<{ pending: number }>(
+      `SELECT 1 pending FROM offline_grant_inventory_leave_intents
+        WHERE inventory_id=? AND snapshot_id=? AND device_id=? AND left_at IS NULL LIMIT 1`,
+      [input.inventoryId, input.snapshotId, input.deviceId],
+    );
+    if (pendingLeave[0]) throw new Error("inventory leave is pending");
+  }
   const facts = await loadClassifierFacts(exec, input);
   let classification = classifyFromFacts(input, facts);
   if (classification.kind === "invalid") {
     return { outcome: "recorded", ...resultFrom(classification, "invalid", 0, null) };
   }
 
-  let event = await existingEvent(exec, input.inventoryId, input.snapshotId, input.eventId);
   if (event) {
     ensureExactReservation(event, input, classification);
     const state = commitState(event.commit_state);
@@ -1504,20 +1534,83 @@ async function recordInventoryScanInternal(
   }
 
   const payloadJson = eventPayload(event, verdict);
-  await exec.run(
-    `INSERT INTO inventory_outbox
-       (inventory_id, snapshot_id, event_id, device_sequence, payload_json, created_at)
-     VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT(inventory_id, snapshot_id, event_id) DO NOTHING`,
-    [
-      input.inventoryId,
-      input.snapshotId,
-      input.eventId,
-      event.device_sequence,
-      payloadJson,
-      input.scannedAt,
-    ],
-  );
+  const result = {
+    outcome: "recorded" as const,
+    ...resultFrom(classification, verdict, summary.total, firstWinning),
+  };
+  if (grantState) {
+    const [binding] = await exec.all<{ snapshot_digest: string }>(
+      `SELECT json_extract(grant_json,'$.snapshotDigest') snapshot_digest
+         FROM offline_grant_grants
+        WHERE json_extract(grant_json,'$.kindOfGrant')='task'
+          AND json_extract(grant_json,'$.taskKind')='inventory'
+          AND json_extract(grant_json,'$.taskId')=?
+        ORDER BY installed_sequence DESC LIMIT 1`,
+      [input.inventoryId],
+    );
+    const committed = await new StationGrantAdmission(exec, clock).commitCompletion({
+      operatorId: input.operatorId,
+      intent: {
+        owner: {
+          tenantId: grantState.tenant_id,
+          deviceId: grantState.device_id,
+          kind: grantState.owner_kind,
+          credentialEpoch: grantState.credential_epoch,
+        },
+        capability: "inventory.start.v1",
+        taskId: input.inventoryId,
+        snapshotDigest: binding?.snapshot_digest ?? "missing",
+        eventId: input.eventId,
+        eventType: "inventory.scan.v1",
+        cost: {},
+      },
+      execution: await readInventoryExecutionProjection(exec, input.inventoryId),
+      event: { input, payloadJson, verdict },
+      facts: { units: summary.total },
+      result,
+      ownerStatements: [
+        {
+          sql: `INSERT INTO inventory_outbox(inventory_id,snapshot_id,event_id,device_sequence,payload_json,created_at)
+                SELECT ?,?,?,?,?,? WHERE json_extract((SELECT decision_json FROM offline_grant_decisions WHERE event_id=?),'$.allow')=1
+                ON CONFLICT(inventory_id,snapshot_id,event_id) DO NOTHING`,
+          values: [
+            input.inventoryId,
+            input.snapshotId,
+            input.eventId,
+            event.device_sequence,
+            payloadJson,
+            input.scannedAt,
+            input.eventId,
+          ],
+        },
+        {
+          sql: `DELETE FROM inventory_code_results_mirror WHERE inventory_id=? AND snapshot_id=? AND first_accepted_event_id=? AND json_extract((SELECT decision_json FROM offline_grant_decisions WHERE event_id=?),'$.allow')<>1`,
+          values: [input.inventoryId, input.snapshotId, input.eventId, input.eventId],
+        },
+        {
+          sql: `UPDATE inventory_scan_events_mirror SET commit_state=CASE WHEN json_extract((SELECT decision_json FROM offline_grant_decisions WHERE event_id=?),'$.allow')=1 THEN 'committed' ELSE 'failed' END,legacy_audit_version=1 WHERE inventory_id=? AND snapshot_id=? AND event_id=? AND commit_state='pending'`,
+          values: [input.eventId, input.inventoryId, input.snapshotId, input.eventId],
+        },
+      ],
+    });
+    if (!committed.decision.allow)
+      throw new Error(`offline grant denied: ${committed.decision.reason}`);
+  } else {
+    await exec.run(
+      `INSERT INTO inventory_outbox
+         (inventory_id, snapshot_id, event_id, device_sequence, payload_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(inventory_id, snapshot_id, event_id) DO NOTHING`,
+      [
+        input.inventoryId,
+        input.snapshotId,
+        input.eventId,
+        event.device_sequence,
+        payloadJson,
+        input.scannedAt,
+      ],
+    );
+  }
   const queued = await outboxRow(exec, input.inventoryId, input.snapshotId, input.eventId);
   if (
     !queued ||
@@ -1526,11 +1619,9 @@ async function recordInventoryScanInternal(
   ) {
     throw new Error("inventory outbox reservation mismatch");
   }
-  await finalizePendingEvent(exec, input.inventoryId, input.snapshotId, input.eventId);
-  return {
-    outcome: "recorded",
-    ...resultFrom(classification, verdict, summary.total, firstWinning),
-  };
+  if (!grantState)
+    await finalizePendingEvent(exec, input.inventoryId, input.snapshotId, input.eventId);
+  return result;
 }
 
 /**
@@ -1542,8 +1633,18 @@ async function recordInventoryScanInternal(
 export function recordInventoryScan(
   exec: SqlExecutor,
   input: RecordInventoryScanInput,
+  generation?: CredentialGeneration,
+  clock: () => Promise<GrantClockSample> = sampleGrantClock,
 ): Promise<RecordInventoryScanOutcome> {
-  return serializeJournal(() => recordInventoryScanInternal(exec, input));
+  return serializeJournal(async () => {
+    const lease = generation ? acquireCredentialCommitLease(generation) : null;
+    if (generation && !lease) throw new Error("offline grant stale credential");
+    try {
+      return await recordInventoryScanInternal(exec, input, generation, clock);
+    } finally {
+      lease?.release();
+    }
+  });
 }
 
 export async function readInventoryProgress(

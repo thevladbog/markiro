@@ -79,13 +79,25 @@ import { resolveLegacyStationIdentity } from "./lib/legacy-identity.js";
 import { createLockdownLifecycle } from "./lib/lockdown.js";
 import { readProductLabelRecoveryShift } from "./lib/product-labels/recovery.js";
 import { findUnresolvedBoxPrint } from "./lib/boxes.js";
+import { stationServerOrigin } from "./lib/device-recovery.js";
+import { StationGrantAdmission } from "./lib/offline-grants/admission.js";
+import { sampleGrantClock } from "./lib/offline-grants/clock.js";
+import {
+  refreshStationGrantConfiguration,
+  refreshStationTaskAuthority,
+} from "./lib/offline-grants/transport.js";
+import {
+  readInventoryExecutionProjection,
+  readShiftExecutionProjection,
+} from "./lib/offline-grants/semantic.js";
 import { ConfigTransitionCoordinator } from "./lib/config-transition.js";
 import {
   resetCredentialForPairing as resetCredentialConfig,
   type RunConfigTransition,
 } from "./lib/credential-reset.js";
 import { useSyncEngine } from "./lib/use-sync-engine.js";
-import { closeShiftOffline } from "./lib/shift-close.js";
+import { closeShiftOffline, closeShiftOfflineWithGrant } from "./lib/shift-close.js";
+import { OfflineGrantDeniedError } from "./lib/journal.js";
 import {
   productionFloorTask,
   readPersistedInventoryFloorTask,
@@ -242,6 +254,7 @@ export function App() {
   const activeShiftIdRef = useRef<string | null>(null);
   const shiftEntryLeaseRef = useRef<ShiftEntryLease | null>(null);
   const [shiftEntryPending, setShiftEntryPending] = useState(false);
+  const [offlineGrantNotice, setOfflineGrantNotice] = useState<string | null>(null);
   const updateOperationBlocked = useCallback(() => shiftEntryLeaseRef.current !== null, []);
   const activeShiftGuard = useCallback(() => activeShiftIdRef.current !== null, []);
   const shiftEntryGenerationRef = useRef(0);
@@ -1409,6 +1422,7 @@ export function App() {
   // runtime guard beside the render boundary so future routing changes cannot
   // accidentally expose a floor screen with missing operator context.
   if (!operator) return withWindowChrome(null);
+  if (!config) return withWindowChrome(null);
 
   // stage === "floor" here, which requires `isEnrolled(config)` (apiKey +
   // serverUrl truthy) — the same condition the `client` memo above builds
@@ -1461,14 +1475,94 @@ export function App() {
       }}
     />
   );
+  const floorConfig = config;
 
   // Shared by ShiftSelection's `onSelected` and NewShift's `onStarted`, after
   // each page's updater-cancellation barrier has settled. Recovery classification
   // runs first; only its confirmed no-recovery branch starts the ordinary
   // allocating bundle mirror through the ref above.
-  function handleShiftEntered(entered: ProductionShiftTask, lease?: ShiftEntryLease): void {
+  async function handleShiftEntered(
+    entered: ProductionShiftTask,
+    lease?: ShiftEntryLease,
+  ): Promise<void> {
     if (!lease || shiftEntryLeaseRef.current !== lease || !lease.isCurrent()) return;
     if (floorGeneration && !credentialGenerationIsCurrent(floorGeneration)) return;
+    if (floorGeneration && floorConfig.tenantId && floorConfig.deviceId && floorConfig.serverUrl) {
+      // The task snapshot is compared against a fresh authenticated bundle before it can
+      // authorize entry. If the network is down, the already-installed durable grant is
+      // assessed below; a malformed or stale response cannot replace it.
+      await refreshStationGrantConfiguration({
+        exec: tauriExecutor,
+        client: activeClient,
+        configuredOrigin: stationServerOrigin(floorConfig.serverUrl),
+        generation: floorGeneration,
+        expectedDevice: {
+          tenantId: floorConfig.tenantId,
+          deviceId: floorConfig.deviceId,
+          kind: "station",
+        },
+      }).catch(() => undefined);
+      const authority = await refreshStationTaskAuthority({
+        exec: tauriExecutor,
+        client: activeClient,
+        configuredOrigin: stationServerOrigin(floorConfig.serverUrl),
+        generation: floorGeneration,
+        expectedDevice: {
+          tenantId: floorConfig.tenantId,
+          deviceId: floorConfig.deviceId,
+          kind: "station",
+        },
+        task: { taskKind: "shift", taskId: entered.id },
+      }).catch(() => null);
+      const [grantState] = await tauriExecutor.all<{
+        tenant_id: string;
+        device_id: string;
+        owner_kind: "station";
+        credential_epoch: number;
+      }>(
+        "SELECT tenant_id,device_id,owner_kind,credential_epoch FROM offline_grant_install_state WHERE id=1",
+      );
+      if (grantState) {
+        const admission = new StationGrantAdmission(tauriExecutor, sampleGrantClock);
+        const execution = await readShiftExecutionProjection(tauriExecutor, entered.id);
+        const owner = {
+          tenantId: grantState.tenant_id,
+          deviceId: grantState.device_id,
+          kind: grantState.owner_kind,
+          credentialEpoch: grantState.credential_epoch,
+        };
+        if (!authority?.resuming) {
+          const decision = await admission.commitNewWork(
+            {
+              intent: {
+                owner,
+                capability: "shift.start.v1",
+                taskId: entered.id,
+                snapshotDigest: "start",
+                eventId: crypto.randomUUID(),
+                eventType: "shift.scan.v1",
+                cost: {},
+              },
+              execution,
+            },
+            floorGeneration,
+          );
+          setOfflineGrantNotice(
+            decision.allow && decision.reason ? t("shifts.offlineGrantObserve") : null,
+          );
+          if (!decision.allow) throw new OfflineGrantDeniedError(decision.reason ?? "denied");
+        }
+        const taskDecision = await admission.assessTaskWork({
+          owner,
+          capability: "shift.start.v1",
+          eventType: "shift.scan.v1",
+          execution,
+        });
+        if (!taskDecision.allow) throw new OfflineGrantDeniedError(taskDecision.reason ?? "denied");
+      }
+    }
+    if (!lease.isCurrent() || (floorGeneration && !credentialGenerationIsCurrent(floorGeneration)))
+      return;
     setNewShiftDraft(null);
     shiftEntryGenerationRef.current += 1;
     activeShiftIdRef.current = entered.id;
@@ -1480,9 +1574,88 @@ export function App() {
     setBoxTemplateRecovery(null);
   }
 
-  function handleInventoryEntered(entered: InventoryFloorTask, lease?: ShiftEntryLease): void {
+  async function handleInventoryEntered(
+    entered: InventoryFloorTask,
+    lease?: ShiftEntryLease,
+  ): Promise<void> {
     if (!lease || shiftEntryLeaseRef.current !== lease || !lease.isCurrent()) return;
     if (floorGeneration && !credentialGenerationIsCurrent(floorGeneration)) return;
+    if (floorGeneration && floorConfig.tenantId && floorConfig.deviceId && floorConfig.serverUrl) {
+      await refreshStationGrantConfiguration({
+        exec: tauriExecutor,
+        client: activeClient,
+        configuredOrigin: stationServerOrigin(floorConfig.serverUrl),
+        generation: floorGeneration,
+        expectedDevice: {
+          tenantId: floorConfig.tenantId,
+          deviceId: floorConfig.deviceId,
+          kind: "station",
+        },
+      }).catch(() => undefined);
+      const authority = await refreshStationTaskAuthority({
+        exec: tauriExecutor,
+        client: activeClient,
+        configuredOrigin: stationServerOrigin(floorConfig.serverUrl),
+        generation: floorGeneration,
+        expectedDevice: {
+          tenantId: floorConfig.tenantId,
+          deviceId: floorConfig.deviceId,
+          kind: "station",
+        },
+        task: { taskKind: "inventory", taskId: entered.inventory.inventoryId },
+      }).catch(() => null);
+      const [grantState] = await tauriExecutor.all<{
+        tenant_id: string;
+        device_id: string;
+        owner_kind: "station";
+        credential_epoch: number;
+      }>(
+        "SELECT tenant_id,device_id,owner_kind,credential_epoch FROM offline_grant_install_state WHERE id=1",
+      );
+      if (grantState) {
+        const admission = new StationGrantAdmission(tauriExecutor, sampleGrantClock);
+        const execution = await readInventoryExecutionProjection(
+          tauriExecutor,
+          entered.inventory.inventoryId,
+        );
+        const owner = {
+          tenantId: grantState.tenant_id,
+          deviceId: grantState.device_id,
+          kind: grantState.owner_kind,
+          credentialEpoch: grantState.credential_epoch,
+        };
+        if (!authority?.resuming) {
+          const decision = await admission.commitNewWork(
+            {
+              intent: {
+                owner,
+                capability: "inventory.start.v1",
+                taskId: entered.inventory.inventoryId,
+                snapshotDigest: "start",
+                eventId: crypto.randomUUID(),
+                eventType: "inventory.scan.v1",
+                cost: {},
+              },
+              execution,
+            },
+            floorGeneration,
+          );
+          setOfflineGrantNotice(
+            decision.allow && decision.reason ? t("inventory.offlineGrantObserve") : null,
+          );
+          if (!decision.allow) throw new OfflineGrantDeniedError(decision.reason ?? "denied");
+        }
+        const taskDecision = await admission.assessTaskWork({
+          owner,
+          capability: "inventory.start.v1",
+          eventType: "inventory.scan.v1",
+          execution,
+        });
+        if (!taskDecision.allow) throw new OfflineGrantDeniedError(taskDecision.reason ?? "denied");
+      }
+    }
+    if (!lease.isCurrent() || (floorGeneration && !credentialGenerationIsCurrent(floorGeneration)))
+      return;
     activeShiftIdRef.current = entered.inventory.inventoryId;
     setActiveFloorTask(entered);
   }
@@ -1708,6 +1881,8 @@ export function App() {
           ) : shiftContext && shift ? (
             <WorkScreen
               exec={tauriExecutor}
+              offlineGrantNotice={offlineGrantNotice}
+              {...(floorGeneration ? { credentialGeneration: floorGeneration } : {})}
               {...(floorGeneration && config.deviceId
                 ? {
                     productLabelEnvironment: {
@@ -1753,7 +1928,7 @@ export function App() {
               }}
               onCloseShift={async (reasonCode) => {
                 if (!config?.deviceId) throw new Error("Идентификатор станции недоступен");
-                const summary = await closeShiftOffline(tauriExecutor, {
+                const closeInput = {
                   shiftId: shift.id,
                   deviceId: config.deviceId,
                   operatorId: operator.operatorId,
@@ -1764,7 +1939,10 @@ export function App() {
                       }
                     : {}),
                   ...(reasonCode === undefined ? {} : { reasonCode }),
-                });
+                };
+                const summary = floorGeneration
+                  ? await closeShiftOfflineWithGrant(tauriExecutor, closeInput, floorGeneration)
+                  : await closeShiftOffline(tauriExecutor, closeInput);
                 nudgeSync();
                 return summary;
               }}
@@ -1797,6 +1975,7 @@ export function App() {
         ) : config.deviceId && activeClient ? (
           <InventoryWorkScreen
             exec={tauriExecutor}
+            offlineGrantNotice={offlineGrantNotice}
             inventory={activeFloorTask.inventory}
             deviceId={config.deviceId}
             operatorId={operator.operatorId}
@@ -1850,9 +2029,9 @@ export function App() {
                 const pending = labelRecovery.shift;
                 if (!pending) return;
                 void acquireShiftEntry()
-                  .then((lease) => {
+                  .then(async (lease) => {
                     try {
-                      handleShiftEntered(pending, lease);
+                      await handleShiftEntered(pending, lease);
                     } finally {
                       lease.release();
                     }
@@ -1881,6 +2060,7 @@ export function App() {
           }
           {...(floorGeneration ? { credentialGeneration: floorGeneration } : {})}
           onFloorWorkRegister={registerFloorWorkBarrier}
+          offlineGrantNotice={offlineGrantNotice}
           onNew={() => {
             setNewShiftDraft(null);
             setFloorView("new");

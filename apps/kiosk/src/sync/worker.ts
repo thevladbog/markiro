@@ -1,3 +1,5 @@
+import { reconcileEvidenceOrder } from "../grants/evidence.js";
+import { refreshGrants, negotiateReservationEvidence } from "../grants/sync.js";
 import { isDeviceRevoked, isUnreachable, KioskApiError, type KioskClient } from "../api/client.js";
 import { isValidSscc } from "@markiro/domain";
 import type {
@@ -734,6 +736,7 @@ async function drainOnce(client: KioskClient, now: () => Date): Promise<void> {
        * beneath the journal write — the two are indistinguishable by the error
        * alone (neither carries a status) and mean opposite things here. */
       let answered = false;
+      let evidenceAttempt = false;
       try {
         let submittedOrder = order;
         if (order.admissionState === "pending_attestation") {
@@ -746,10 +749,10 @@ async function drainOnce(client: KioskClient, now: () => Date): Promise<void> {
             ) {
               continue;
             }
-            const admission = await client.attestOrder({
-              ...admissionRequest(order.body),
-              admissionNonce,
-            });
+            const admissionBody = { ...admissionRequest(order.body), admissionNonce };
+            const admission =
+              (await negotiateReservationEvidence(client, admissionBody)) ??
+              (await client.attestOrder(admissionBody));
             const submitBody = admissionRequest(order.body);
             delete submitBody.admissionNonce;
             attestedBody = {
@@ -766,6 +769,15 @@ async function drainOnce(client: KioskClient, now: () => Date): Promise<void> {
           if (!(await attestQueuedOrder(order.deviceSeq, attestedBody))) continue;
           submittedOrder = { ...order, body: attestedBody };
           delete submittedOrder.admissionState;
+        }
+        evidenceAttempt = Boolean(
+          submittedOrder.grantEvidence?.taskGrantId ||
+          submittedOrder.evidenceEnvelope ||
+          submittedOrder.evidenceProtocol === "offline-grants-v1",
+        );
+        if (await reconcileEvidenceOrder(client, submittedOrder, now)) {
+          delivered = true;
+          continue;
         }
         const result = await client.submitOrder(submittedOrder.body);
         answered = true;
@@ -821,6 +833,10 @@ async function drainOnce(client: KioskClient, now: () => Date): Promise<void> {
           ...(boxConflicts.length > 0 ? { boxConflicts } : {}),
         });
       } catch (err) {
+        if (evidenceAttempt) {
+          unreachable = isUnreachable(err);
+          return;
+        }
         // A verdict the order can never come back from is not a stall: park it
         // and carry on, so one poisoned record cannot hold a day's pickups.
         // A timeout is deliberately NOT one of these — `KioskTimeoutError`
@@ -1023,6 +1039,7 @@ export async function refreshSnapshot(
     new Promise((resolve) => setTimeout(resolve, milliseconds)),
   registryMaxPages = BOX_REGISTRY_MAX_PAGES,
 ): Promise<void> {
+  await refreshGrants(client);
   const bootstrap = await client.bootstrap();
   assertMeasurableGeneratedAt(bootstrap);
   const fetchedAt = now();

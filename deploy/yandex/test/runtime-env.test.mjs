@@ -399,8 +399,12 @@ test("uses every and only the production environment example keys", async () => 
     "NATIONAL_CATALOG_GTIN_IMPORT_ENABLED",
     "NATIONAL_CATALOG_IMAGE_IMPORT_ENABLED",
     "NATIONAL_CATALOG_IMAGE_ALLOWED_HOSTS",
+    "OFFLINE_GRANT_ORIGIN",
+    "OFFLINE_GRANT_KID",
+    "OFFLINE_GRANT_PRIVATE_KEY_PEM",
+    "OFFLINE_GRANT_KEYSET_JSON",
   ]);
-  assert.equal(inventory.length, 48);
+  assert.equal(inventory.length, 52);
   assert.deepEqual(
     runtimeInventoryKeyNames(
       inventory,

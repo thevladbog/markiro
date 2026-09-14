@@ -1,3 +1,5 @@
+import { grantEvidenceReceiptSchema } from "@markiro/platform-contracts";
+import { seedGrantPolicy } from "./support/grant-policy-fixture";
 import { randomUUID } from "node:crypto";
 import express from "express";
 import { Test } from "@nestjs/testing";
@@ -673,5 +675,104 @@ describe.skipIf(!ready)("station product label events", () => {
     expect((await send(batch([bad.prepared], [bad.item]))).body.productLabelReceipt).toEqual(
       receipt([], [{ eventId: bad.prepared.eventId, code: "subscription_read_only" }]),
     );
+  });
+
+  it("reconciles saved-label reprint recovery in strict mode without a new productive grant or charge", async () => {
+    const f = await fixture();
+    await send(batch([f.prepared, f.sending, f.sent, f.verified], [f.item]));
+    const policy = await seedGrantPolicy(db, {
+      shift: {
+        "shift.scan.v1": { maxEvents: 0, maxUnits: 0 },
+        "shift.label.prepare.v1": { maxEvents: 0, maxUnits: 0 },
+      },
+    });
+    const [device] = await db
+      .select()
+      .from(schema.stationDevices)
+      .where(eq(schema.stationDevices.id, station.deviceId));
+    if (!device) throw new Error("Missing test device");
+    await db.insert(schema.deviceGrantConfigurations).values({
+      tenantId,
+      stationDeviceId: station.deviceId,
+      ownerKind: "station",
+      credentialEpoch: device.credentialEpoch,
+      mode: "strict",
+      policyId: policy.id,
+      policyRevision: policy.revision,
+      decisionReference: "TEST-ONLY-RECOVERY",
+    });
+    const attemptId = randomUUID();
+    const next: ProductLabelEvent[] = [
+      { ...f.prepared, sequence: 5, attemptNo: 2, reason: "damaged" as const },
+      { ...f.sending, sequence: 6 },
+      { ...f.sent, sequence: 7 },
+      { ...f.verified, sequence: 8 },
+    ].map((event) => ({ ...event, eventId: randomUUID(), attemptId }));
+    const payload = batch(next);
+    const envelope = {
+      protocol: "offline-grants-v1",
+      batchId: randomUUID(),
+      payloadDigest: productLabelValueDigest(payload),
+      grants: [],
+      eventGrants: {},
+      payload,
+    };
+    const deliver = (body: object) =>
+      request(app.getHttpServer())
+        .post("/station/grants/v1/evidence/scans")
+        .set("x-api-key", station.apiKey)
+        .set("x-station-capabilities", PRODUCT_LABEL_PROTOCOL)
+        .send(body)
+        .expect(200);
+    const accepted = grantEvidenceReceiptSchema.parse((await deliver(envelope)).body);
+    expect(accepted).toMatchObject({
+      outcome: "accepted",
+      reason: null,
+      reconciliation: { status: "applied", result: { productLabelReceipt: receipt(next) } },
+    });
+    expect((await deliver(envelope)).body).toEqual({ ...accepted, outcome: "duplicate" });
+    expect((await deliver({ ...envelope, batchId: randomUUID() })).body).toMatchObject({
+      outcome: "accepted",
+      reason: null,
+      reconciliation: {
+        status: "applied",
+        result: { alreadyApplied: true, productLabelReceipt: receipt(next) },
+      },
+    });
+    const events = await db
+      .select()
+      .from(schema.productLabelEvents)
+      .where(
+        and(
+          eq(schema.productLabelEvents.tenantId, tenantId),
+          eq(schema.productLabelEvents.jobId, f.prepared.jobId),
+        ),
+      )
+      .orderBy(schema.productLabelEvents.sequence);
+    expect(events).toHaveLength(8);
+    expect(events[0]?.event).toEqual(f.prepared);
+    expect(events[4]?.event).toEqual(next[0]);
+    expect(
+      await db
+        .select()
+        .from(schema.deviceGrantConsumption)
+        .where(
+          and(
+            eq(schema.deviceGrantConsumption.tenantId, tenantId),
+            eq(schema.deviceGrantConsumption.taskId, f.shiftId),
+          ),
+        ),
+    ).toHaveLength(0);
+    expect(
+      await db
+        .select()
+        .from(schema.deviceGrantEffects)
+        .where(
+          and(
+            eq(schema.deviceGrantEffects.tenantId, tenantId),
+            eq(schema.deviceGrantEffects.taskId, f.shiftId),
+          ),
+        ),
+    ).toHaveLength(0);
   });
 });

@@ -7,6 +7,7 @@ import { inventorySnapshotContentDigest, inventorySnapshotPageDigest } from "@ma
 import i18n from "../src/i18n/index.js";
 import type { StationClient } from "../src/lib/api-client.js";
 import { createCredentialGeneration } from "../src/lib/credential-recovery.js";
+import { OfflineGrantDeniedError } from "../src/lib/journal.js";
 import { readPersistedInventoryFloorTask, type InventoryFloorTask } from "../src/lib/floor-task.js";
 import { applyMigrations, type SqlExecutor } from "../src/lib/mirror.js";
 import type { InventoryBundleManifest, InventoryBundlePage } from "../src/lib/inventory-mirror.js";
@@ -259,6 +260,39 @@ afterEach(() => {
 });
 
 describe("TaskSelection inventory entry", () => {
+  it.each([
+    [
+      "missing_grant",
+      "Offline permission for new warehouse work is unavailable. Refresh the task while connected or open equipment setup for recovery.",
+    ],
+    [
+      "clock_untrusted",
+      "Offline time cannot be trusted after a restart or clock rollback. Connect and refresh before starting new warehouse work.",
+    ],
+  ])("shows the actionable strict denial for %s", async (reason, expected) => {
+    const exec = executor();
+    await applyMigrations(exec);
+    const scan = scanner();
+    const { api } = client();
+
+    render(
+      <TaskSelection
+        client={api}
+        exec={exec}
+        source={scan.source}
+        operatorId="66666666-6666-4666-8666-666666666666"
+        currentLineName="Розлив №2"
+        onShiftSelected={() => {}}
+        onInventorySelected={() => Promise.reject(new OfflineGrantDeniedError(reason))}
+        onNew={() => {}}
+      />,
+    );
+
+    openWarehouseCategoryIfPresent();
+    fireEvent.click(await screen.findByRole("button", { name: "Continue INV-00047" }));
+    expect(await screen.findByText(expected)).toBeDefined();
+  });
+
   it("reopens warehouse intake after a production open fails", async () => {
     const exec = executor();
     await applyMigrations(exec);

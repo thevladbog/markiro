@@ -1,8 +1,19 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Alert, Button, Card, EmptyState, Input, Modal, Spinner, Table } from "@markiro/ui";
+import {
+  Alert,
+  Button,
+  Card,
+  Checkbox,
+  EmptyState,
+  Input,
+  Modal,
+  Spinner,
+  Table,
+} from "@markiro/ui";
 import type { TableColumn } from "@markiro/ui";
+import { PUBLIC_API_SCOPES, type PublicApiScope } from "@markiro/platform-contracts";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
 
@@ -13,9 +24,17 @@ import {
   useApiKeys,
   useIssueApiKey,
   useRevokeApiKey,
+  useUpdateApiKeyScopes,
   type ApiKeyIssuedDto,
   type ApiKeySummaryDto,
 } from "./api.js";
+
+const SCOPE_I18N_KEY: Record<PublicApiScope, string> = {
+  "catalog.products.read": "scopeCatalogProductsRead",
+  "inventory.read": "scopeInventoryRead",
+  "inventory.prepare": "scopeInventoryPrepare",
+  "inventory.start": "scopeInventoryStart",
+};
 
 /**
  * The `public_api` channel's own panel -- Task 15. This channel has no
@@ -54,12 +73,16 @@ function AuthorizedApiKeysPanel() {
   const keys = useMemo(() => data ?? [], [data]);
 
   const [name, setName] = useState("");
+  const [issueScopes, setIssueScopes] = useState<PublicApiScope[]>([]);
   const [issuing, setIssuing] = useState(false);
   const [issued, setIssued] = useState<ApiKeyIssuedDto | null>(null);
   const [revokeTarget, setRevokeTarget] = useState<ApiKeySummaryDto | null>(null);
+  const [editTarget, setEditTarget] = useState<ApiKeySummaryDto | null>(null);
+  const [editScopes, setEditScopes] = useState<PublicApiScope[]>([]);
 
   const { issue } = useIssueApiKey();
   const revokeKey = useRevokeApiKey();
+  const updateScopes = useUpdateApiKeyScopes();
 
   const dateFormatter = useMemo(
     () => new Intl.DateTimeFormat(i18n.language, { dateStyle: "short", timeStyle: "short" }),
@@ -69,11 +92,13 @@ function AuthorizedApiKeysPanel() {
   const handleIssue = async () => {
     const trimmed = name.trim();
     if (!trimmed) return;
+    setIssued(null);
     setIssuing(true);
     try {
-      const data = await issue(trimmed);
+      const data = await issue(trimmed, issueScopes);
       setIssued(data);
       setName("");
+      setIssueScopes([]);
       toast("ok", t("pages.integrations.channel.apiKeys.issueSuccess"));
     } catch (error) {
       toast(
@@ -84,6 +109,22 @@ function AuthorizedApiKeysPanel() {
       );
     } finally {
       setIssuing(false);
+    }
+  };
+
+  const handleScopeUpdate = async () => {
+    if (!editTarget) return;
+    try {
+      await updateScopes.mutateAsync({ id: editTarget.id, scopes: editScopes });
+      toast("ok", t("pages.integrations.channel.apiKeys.scopeEditSuccess"));
+      setEditTarget(null);
+    } catch (error) {
+      toast(
+        "error",
+        error instanceof ApiRequestError
+          ? error.message
+          : t("pages.integrations.channel.apiKeys.scopeEditError"),
+      );
     }
   };
 
@@ -126,6 +167,24 @@ function AuthorizedApiKeysPanel() {
         render: (row) => row.name ?? "—",
       },
       {
+        key: "scopes",
+        title: t("pages.integrations.channel.apiKeys.table.scopes"),
+        render: (row) =>
+          row.scopes.length ? (
+            <ul style={{ margin: 0, paddingInlineStart: 18 }}>
+              {row.scopes.map((scope) => (
+                <li key={scope}>
+                  {t(`pages.integrations.channel.apiKeys.${SCOPE_I18N_KEY[scope]}`)}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <span style={{ whiteSpace: "normal", color: "var(--warn-fg)" }}>
+              {t("pages.integrations.channel.apiKeys.legacyUnscoped")}
+            </span>
+          ),
+      },
+      {
         key: "createdAt",
         title: t("pages.integrations.channel.apiKeys.table.createdAt"),
         render: (row) => dateFormatter.format(new Date(row.createdAt)),
@@ -143,14 +202,27 @@ function AuthorizedApiKeysPanel() {
         title: t("pages.integrations.channel.apiKeys.table.actions"),
         align: "right",
         render: (row) => (
-          <Button
-            type="button"
-            size="compact"
-            variant="destructive"
-            onClick={() => setRevokeTarget(row)}
-          >
-            {t("pages.integrations.channel.apiKeys.revokeAction")}
-          </Button>
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
+            <Button
+              type="button"
+              size="compact"
+              variant="secondary"
+              onClick={() => {
+                setEditTarget(row);
+                setEditScopes([...row.scopes]);
+              }}
+            >
+              {t("pages.integrations.channel.apiKeys.scopeEditAction")}
+            </Button>
+            <Button
+              type="button"
+              size="compact"
+              variant="destructive"
+              onClick={() => setRevokeTarget(row)}
+            >
+              {t("pages.integrations.channel.apiKeys.revokeAction")}
+            </Button>
+          </div>
         ),
       },
     ],
@@ -160,20 +232,23 @@ function AuthorizedApiKeysPanel() {
   return (
     <Card title={t("pages.integrations.channel.apiKeys.title")}>
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
-          <Input
-            label={t("pages.integrations.channel.apiKeys.nameLabel")}
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-          />
-          <Button
-            type="button"
-            loading={issuing}
-            disabled={!name.trim()}
-            onClick={() => void handleIssue()}
-          >
-            {t("pages.integrations.channel.apiKeys.issueAction")}
-          </Button>
+        <div style={{ display: "grid", gap: 12 }}>
+          <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
+            <Input
+              label={t("pages.integrations.channel.apiKeys.nameLabel")}
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+            />
+            <Button
+              type="button"
+              loading={issuing}
+              disabled={!name.trim()}
+              onClick={() => void handleIssue()}
+            >
+              {t("pages.integrations.channel.apiKeys.issueAction")}
+            </Button>
+          </div>
+          <ScopeSelector scopes={issueScopes} onChange={setIssueScopes} />
         </div>
 
         {issued && (
@@ -232,6 +307,55 @@ function AuthorizedApiKeysPanel() {
           </p>
         )}
       </Modal>
+      <Modal
+        open={editTarget !== null}
+        onClose={() => setEditTarget(null)}
+        closeLabel={t("common.close")}
+        title={t("pages.integrations.channel.apiKeys.scopeEditTitle")}
+        footer={
+          <>
+            <Button type="button" variant="secondary" onClick={() => setEditTarget(null)}>
+              {t("pages.integrations.channel.apiKeys.cancel")}
+            </Button>
+            <Button
+              type="button"
+              loading={updateScopes.isPending}
+              onClick={() => void handleScopeUpdate()}
+            >
+              {t("pages.integrations.channel.apiKeys.scopeEditSave")}
+            </Button>
+          </>
+        }
+      >
+        <ScopeSelector scopes={editScopes} onChange={setEditScopes} />
+      </Modal>
     </Card>
+  );
+}
+
+function ScopeSelector({
+  scopes,
+  onChange,
+}: {
+  scopes: PublicApiScope[];
+  onChange: (scopes: PublicApiScope[]) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <fieldset style={{ border: 0, padding: 0, margin: 0, display: "grid", gap: 8 }}>
+      <legend style={{ marginBottom: 8 }}>
+        {t("pages.integrations.channel.apiKeys.scopesLabel")}
+      </legend>
+      {PUBLIC_API_SCOPES.map((scope) => (
+        <Checkbox
+          key={scope}
+          label={t(`pages.integrations.channel.apiKeys.${SCOPE_I18N_KEY[scope]}`)}
+          checked={scopes.includes(scope)}
+          onCheckedChange={(checked) =>
+            onChange(checked ? [...scopes, scope] : scopes.filter((item) => item !== scope))
+          }
+        />
+      ))}
+    </fieldset>
   );
 }

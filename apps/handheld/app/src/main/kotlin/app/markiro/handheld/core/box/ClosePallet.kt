@@ -1,5 +1,6 @@
 package app.markiro.handheld.core.box
 
+import app.markiro.handheld.core.grants.*
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.PalletEntity
 import app.markiro.handheld.core.storage.PalletPrint
@@ -125,6 +126,8 @@ class ClosePallet(
                 if (db.palletDao().close(pallet.palletId, sscc, closedAt, operatorId) == 0) {
                     throw AlreadyClosed()
                 }
+                db.grants.complete(TaskKind.SHIFT,shiftId,"shift.pallet.close:${pallet.palletId}",GrantEventType.SHIFT_PALLET_CLOSE,containers=1,
+                    executionFingerprint=db.shiftDao().get(shiftId)?.copy(ssccIssuerPrefix=issuerPrefix)?.let(GrantTaskMatcher::fingerprint))
                 ClosePalletResult.Closed(
                     pallet = pallet.copy(
                         sscc = sscc,

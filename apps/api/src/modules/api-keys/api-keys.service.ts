@@ -1,6 +1,9 @@
-import { Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { Inject, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { schema, type Auth, type Db } from "@markiro/db";
 import { and, desc, eq } from "drizzle-orm";
+import { publicApiScopesSchema, type PublicApiScope } from "@markiro/platform-contracts";
+import { parsePublicApiMetadata } from "../public-api/public-api.types";
+import { EntitlementsService } from "../../subscriptions/entitlements.service";
 import { AUTH, DB } from "../../auth/auth.module";
 import { JournalService } from "../integrations/journal.service";
 
@@ -13,6 +16,7 @@ export interface ApiKeySummaryDto {
   id: string;
   name: string | null;
   kind: "public";
+  scopes: PublicApiScope[];
   createdAt: string;
   lastRequest: string | null;
 }
@@ -21,6 +25,7 @@ export interface ApiKeySummaryDto {
 export interface ApiKeyIssuedDto {
   id: string;
   key: string;
+  scopes: PublicApiScope[];
 }
 
 @Injectable()
@@ -29,6 +34,7 @@ export class ApiKeysService {
     @Inject(DB) private readonly db: Db,
     @Inject(AUTH) private readonly auth: Auth,
     private readonly journal: JournalService,
+    private readonly entitlements: EntitlementsService,
   ) {}
 
   /**
@@ -61,6 +67,7 @@ export class ApiKeysService {
         id: row.id,
         name: row.name,
         kind: "public",
+        scopes: parsePublicApiMetadata(row.metadata)?.scopes ?? [],
         createdAt: row.createdAt.toISOString(),
         lastRequest: row.lastRequest?.toISOString() ?? null,
       }));
@@ -81,103 +88,220 @@ export class ApiKeysService {
    * on its session branch, which `AuthorizationGuard` on this controller
    * requires before resolving cabinet permissions.
    */
-  async create(tenantId: string, userId: string, name: string): Promise<ApiKeyIssuedDto> {
+  async create(
+    tenantId: string,
+    userId: string,
+    name: string,
+    scopes: PublicApiScope[] = [],
+  ): Promise<ApiKeyIssuedDto> {
     const created = await this.auth.api.createApiKey({
       body: {
         configId: PUBLIC_API_CONFIG_ID,
         organizationId: tenantId,
         userId,
         name,
-        metadata: { kind: PUBLIC_KEY_KIND },
+        metadata: { kind: PUBLIC_KEY_KIND, scopes: publicApiScopesSchema.parse(scopes) },
       },
     });
 
-    await this.journal.append({
-      tenantId,
-      channelType: "public_api",
-      sessionId: null,
-      direction: "local",
-      outcome: "ok",
-      grain: "session",
-      message: `Выпущен ключ публичного API «${name}»`,
-    });
-
-    return { id: created.id, key: created.key };
-  }
-
-  /**
-   * Revokes (deletes) a public api-key. This deletes the `apikey` row
-   * directly rather than calling Better Auth's own `deleteApiKey` endpoint:
-   * that endpoint requires an actual session-middleware context (`use:
-   * [sessionMiddleware]` on `POST /api-key/delete` in `@better-auth/api-key`),
-   * which this service call has no ready way to forward. Deleting the row
-   * directly mirrors `StationDevicesService.revoke`, which does the same for
-   * the same reason -- tenant ownership and kind are checked here instead,
-   * the same way `list` above scopes rows.
-   *
-   * Revocation is meant to be irreversible (Task 15 enforces this in the
-   * UI), but the server still needs a predictable answer to a REPEATED
-   * revoke of the same id: once deleted, the row is gone, so a second call
-   * finds nothing to revoke and gets exactly the same 404 as any other
-   * unknown id -- there is no separate "already revoked" response. That
-   * keeps this endpoint's contract identical to
-   * `StationDevicesService.revoke`'s (a delete is either "found and gone
-   * now" or "not found"), rather than inventing a second way to say "this
-   * key isn't live" alongside the 404 that already covers it.
-   *
-   * The SELECT above and the DELETE below are two separate statements, not
-   * one transaction, so two concurrent revokes of the same id can both pass
-   * the SELECT before either commits its DELETE. That's harmless for the
-   * row itself (only one DELETE actually removes it), but it must not
-   * double-write the journal. `.returning()` on the DELETE is the gate:
-   * Postgres still serializes the two DELETEs against each other, so only
-   * the one that actually removes the row gets it back; the other matches
-   * zero rows (the row is already gone by the time it runs) and returns
-   * nothing. Journal only on an actual delete, so a race writes "ключ
-   * отозван" exactly once per key, no matter how many concurrent requests
-   * raced for it.
-   */
-  async revoke(tenantId: string, id: string): Promise<void> {
-    const [row] = await this.db
-      .select()
-      .from(schema.apikey)
-      .where(
-        and(
-          eq(schema.apikey.id, id),
-          eq(schema.apikey.referenceId, tenantId),
-          eq(schema.apikey.configId, PUBLIC_API_CONFIG_ID),
-        ),
-      );
-    if (!row || parseMetadata(row.metadata).kind !== PUBLIC_KEY_KIND) {
-      throw new NotFoundException("Unknown public API key");
+    try {
+      await this.db.transaction(async (tx) => {
+        const [owned] = await tx
+          .select({ id: schema.apikey.id })
+          .from(schema.apikey)
+          .where(
+            and(
+              eq(schema.apikey.id, created.id),
+              eq(schema.apikey.referenceId, tenantId),
+              eq(schema.apikey.configId, PUBLIC_API_CONFIG_ID),
+            ),
+          )
+          .for("update");
+        if (!owned) throw new NotFoundException("Issued public key no longer exists");
+        await tx.insert(schema.tenantAuditEvents).values({
+          organizationId: tenantId,
+          actorUserId: userId,
+          action: "public_api_key.created",
+          outcome: "success",
+          targetType: "public_api_key",
+          targetId: created.id,
+          after: { keyId: created.id, scopes },
+        });
+        await this.journal.append(
+          {
+            tenantId,
+            channelType: "public_api",
+            sessionId: null,
+            direction: "local",
+            outcome: "ok",
+            grain: "session",
+            message: `Выпущен ключ публичного API «${name}»`,
+            details: {
+              action: "public_api_key.created",
+              keyId: created.id,
+              issuerUserId: userId,
+              scopes,
+            },
+          },
+          tx,
+        );
+      });
+    } catch (error) {
+      // Better Auth minted on its own boundary. Reconcile an ambiguous COMMIT
+      // before deciding whether this still-unrevealed credential needs retiring.
+      let recorded: boolean;
+      try {
+        recorded = await this.db.transaction(async (tx) => {
+          // An unlocked absence read can precede the original COMMIT. Wait for
+          // its exact key-row lock before reading the audit or retiring the key.
+          await tx
+            .select({ id: schema.apikey.id })
+            .from(schema.apikey)
+            .where(
+              and(
+                eq(schema.apikey.id, created.id),
+                eq(schema.apikey.referenceId, tenantId),
+                eq(schema.apikey.configId, PUBLIC_API_CONFIG_ID),
+              ),
+            )
+            .for("update");
+          const [audit] = await tx
+            .select({ id: schema.tenantAuditEvents.id })
+            .from(schema.tenantAuditEvents)
+            .where(
+              and(
+                eq(schema.tenantAuditEvents.organizationId, tenantId),
+                eq(schema.tenantAuditEvents.actorUserId, userId),
+                eq(schema.tenantAuditEvents.targetType, "public_api_key"),
+                eq(schema.tenantAuditEvents.targetId, created.id),
+                eq(schema.tenantAuditEvents.action, "public_api_key.created"),
+                eq(schema.tenantAuditEvents.outcome, "success"),
+              ),
+            );
+          if (audit) return true;
+          await tx
+            .delete(schema.apikey)
+            .where(
+              and(
+                eq(schema.apikey.id, created.id),
+                eq(schema.apikey.referenceId, tenantId),
+                eq(schema.apikey.configId, PUBLIC_API_CONFIG_ID),
+              ),
+            );
+          return false;
+        });
+      } catch {
+        throw new ServiceUnavailableException(
+          "Public API key issuance uncertain; inspect existing keys before retrying",
+        );
+      }
+      if (!recorded) throw error;
     }
 
-    const [deleted] = await this.db
-      .delete(schema.apikey)
-      .where(eq(schema.apikey.id, id))
-      .returning();
-    if (!deleted) return;
+    return { id: created.id, key: created.key, scopes };
+  }
 
-    await this.journal.append({
-      tenantId,
-      channelType: "public_api",
-      sessionId: null,
-      direction: "local",
-      outcome: "ok",
-      grain: "session",
-      message: `Ключ публичного API «${row.name ?? row.id}» отозван`,
+  /** Scope edits and revoke acquire the same key-row lock as owner revalidation. */
+  async updateScopes(
+    tenantId: string,
+    userId: string,
+    id: string,
+    scopes: PublicApiScope[],
+  ): Promise<{ id: string; scopes: PublicApiScope[] }> {
+    const afterScopes = publicApiScopesSchema.parse(scopes);
+    return this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .select()
+        .from(schema.apikey)
+        .where(
+          and(
+            eq(schema.apikey.id, id),
+            eq(schema.apikey.referenceId, tenantId),
+            eq(schema.apikey.configId, PUBLIC_API_CONFIG_ID),
+          ),
+        )
+        .for("update");
+      const metadata = parsePublicApiMetadata(row?.metadata ?? null);
+      if (!row || !metadata) throw new NotFoundException("Unknown public API key");
+      const beforeScopes = metadata.scopes;
+      if (afterScopes.some((scope) => !beforeScopes.includes(scope))) {
+        await this.entitlements.assertFeatureAccess(tenantId, "publicApi", tx);
+      }
+      await tx
+        .update(schema.apikey)
+        .set({
+          metadata: JSON.stringify({ kind: PUBLIC_KEY_KIND, scopes: afterScopes }),
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.apikey.id, id));
+      await tx.insert(schema.tenantAuditEvents).values({
+        organizationId: tenantId,
+        actorUserId: userId,
+        action: "public_api_key.scopes.update",
+        outcome: "success",
+        targetType: "public_api_key",
+        targetId: id,
+        before: { scopes: beforeScopes },
+        after: { scopes: afterScopes },
+      });
+      await this.journal.append(
+        {
+          tenantId,
+          channelType: "public_api",
+          sessionId: null,
+          direction: "local",
+          outcome: "ok",
+          grain: "session",
+          message: "Изменены права ключа публичного API",
+          details: {
+            action: "public_api_key.scopes.update",
+            tenantId,
+            userId,
+            keyId: id,
+            outcome: "succeeded",
+            beforeScopes,
+            afterScopes,
+          },
+        },
+        tx,
+      );
+      return { id, scopes: afterScopes };
+    });
+  }
+
+  async revoke(tenantId: string, id: string): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .select()
+        .from(schema.apikey)
+        .where(
+          and(
+            eq(schema.apikey.id, id),
+            eq(schema.apikey.referenceId, tenantId),
+            eq(schema.apikey.configId, PUBLIC_API_CONFIG_ID),
+          ),
+        )
+        .for("update");
+      // A malformed scope payload must still be revocable by its tenant owner.
+      if (!row || parseMetadata(row.metadata).kind !== PUBLIC_KEY_KIND)
+        throw new NotFoundException("Unknown public API key");
+      await tx.delete(schema.apikey).where(eq(schema.apikey.id, id));
+      await this.journal.append(
+        {
+          tenantId,
+          channelType: "public_api",
+          sessionId: null,
+          direction: "local",
+          outcome: "ok",
+          grain: "session",
+          message: `Ключ публичного API «${row.name ?? row.id}» отозван`,
+        },
+        tx,
+      );
     });
   }
 }
 
-/**
- * `apikey.metadata` (`packages/db/src/schema/auth.ts`) is a raw `text`
- * column -- the plugin serializes/parses it internally when going through
- * its own adapter, but a direct `db.select()` like `list`/`revoke` above
- * gets the raw JSON string back, never an object. Never trust it
- * structurally: it's read here, not written by this code path other than
- * via `auth.api.createApiKey`.
- */
 function parseMetadata(raw: string | null): { kind?: string } {
   if (!raw) return {};
   try {

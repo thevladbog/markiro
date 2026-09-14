@@ -1,3 +1,4 @@
+import { configureGrantSigning } from "./modules/device-grants/grant-keyset";
 import { z } from "zod";
 
 /**
@@ -140,6 +141,10 @@ const EnvSchema = z
     DATABASE_URL: z.string().min(1),
     BETTER_AUTH_SECRET: z.string().min(16),
     BETTER_AUTH_URL: z.url(),
+    OFFLINE_GRANT_ORIGIN: z.string().optional(),
+    OFFLINE_GRANT_KID: z.string().optional(),
+    OFFLINE_GRANT_PRIVATE_KEY_PEM: z.string().optional(),
+    OFFLINE_GRANT_KEYSET_JSON: z.string().optional(),
     PLATFORM_AUTH_SECRET: z.string().min(32),
     PLATFORM_AUTH_URL: canonicalHttpUrlSchema,
     // The default is returned as written, not canonicalized: zod's `.default()`
@@ -260,6 +265,15 @@ const EnvSchema = z
     NATIONAL_CATALOG_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1).default(15_000),
   })
   .superRefine((env, ctx) => {
+    try {
+      configureGrantSigning(env);
+    } catch {
+      ctx.addIssue({
+        code: "custom",
+        path: ["OFFLINE_GRANT_KEYSET_JSON"],
+        message: "Invalid offline grant signing configuration",
+      });
+    }
     if (env.PLATFORM_AUTH_SECRET === env.BETTER_AUTH_SECRET) {
       ctx.addIssue({
         code: "custom",

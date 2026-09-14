@@ -327,7 +327,7 @@ describe.skipIf(!process.env.DATABASE_URL)("shadow admission", () => {
     expect(row).toMatchObject({
       tenantId: input.tenantId,
       operationId: input.operationId,
-      registryVersion: "p1b.v1",
+      registryVersion: "p1c.native.v1",
       revision: 11n,
       usageRevision: 12n,
       actorType: "cabinet",

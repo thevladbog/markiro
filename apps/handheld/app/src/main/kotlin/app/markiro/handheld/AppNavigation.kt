@@ -1,5 +1,7 @@
 package app.markiro.handheld
 
+import app.markiro.handheld.core.grants.GrantStatusViewModel
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
@@ -230,6 +232,7 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
             }
             composable(Routes.SHIFTS) {
                 val vm: ShiftListViewModel = hiltViewModel()
+                vm.grantDenial.Dialog()
                 val state by vm.state.collectAsStateWithLifecycle()
                 LaunchedEffect(Unit) {
                     vm.events.collect { event ->
@@ -254,6 +257,7 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
             }
             composable(Routes.WORK) { entry ->
                 val vm: WorkViewModel = hiltViewModel()
+                vm.grantDenial.Dialog()
                 // The view model outlives this composable: its back-stack entry
                 // keeps it alive while the exception routes are on top. The
                 // scanner is one app-wide flow, so it has to be told when the
@@ -432,6 +436,7 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
             }
             composable(Routes.CLOSE) {
                 val vm: CloseViewModel = hiltViewModel()
+                vm.grantDenial.Dialog()
                 val step by vm.step.collectAsStateWithLifecycle()
                 CloseScreen(
                     step,
@@ -451,6 +456,7 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
             }
             composable(Routes.INVENTORY) {
                 val vm: InventoryListViewModel = hiltViewModel()
+                vm.grantDenial.Dialog()
                 val state by vm.state.collectAsStateWithLifecycle()
                 LaunchedEffect(Unit) {
                     vm.events.collect { event ->
@@ -475,6 +481,7 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
             }
             composable(Routes.INVENTORY_WORK) { entry ->
                 val vm: InventoryWorkViewModel = hiltViewModel()
+                vm.grantDenial.Dialog()
                 val state by vm.state.collectAsStateWithLifecycle()
                 val id = entry.arguments?.getString("inventoryId").orEmpty()
                 InventoryWorkScreen(
@@ -500,6 +507,9 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
             }
             composable(Routes.SETTINGS) {
                 val vm: SettingsViewModel = hiltViewModel()
+                val grants: GrantStatusViewModel = hiltViewModel()
+                val grantStatus by grants.status.collectAsStateWithLifecycle()
+                val evidenceStatus by grants.evidenceStatus.collectAsStateWithLifecycle()
                 // The system installer is an activity and the operator confirms it.
                 val activity = LocalContext.current
                 LaunchedEffect(vm) { vm.launchInstall.collect { activity.startActivity(it) } }
@@ -519,6 +529,9 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                     onTest = vm::testSignal,
                     onCheckUpdate = vm::checkForUpdate,
                     onInstallUpdate = vm::installUpdate,
+                    grantStatus = grantStatus,
+                    evidenceStatus = evidenceStatus,
+                    onRefreshGrants = grants::refresh,
                 )
             }
             navigation(startDestination = Routes.PRINTER, route = Routes.PRINTER_GRAPH) {

@@ -1,5 +1,6 @@
 package app.markiro.handheld.core.inventory
 
+import app.markiro.handheld.core.grants.*
 import app.markiro.handheld.core.km.KmCodec
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.InventoryEventEntity
@@ -89,6 +90,9 @@ class InventoryRecorder(private val db: HandheldDatabase, private val clock: () 
         check(task.state == "active") { "inventory $inventoryId is not active" }
         val scannedAt = Iso.format(clock())
         db.inventoryEventDao().get(eventId)?.let { return replay(it) }
+        if (InventoryLeaveJournal(db).pending(inventoryId)) {
+            return RecordOutcome.Recorded(InventoryVerdict.INVALID, "invalid", null, 0, 0, null, null, scannedAt, null, "leave_pending")
+        }
         val ctx = context(task, raw)
         val classification = InventoryClassifier.classify(raw, ctx)
         if (classification is InventoryClassification.Invalid) {
@@ -142,6 +146,7 @@ class InventoryRecorder(private val db: HandheldDatabase, private val clock: () 
                 localVerdict = verdict.wire, claimedCount = claimedOrigins.size, winnerEventId = winner?.eventId, winnerDeviceId = winner?.deviceId,
                 winnerScannedAt = winner?.scannedAt, serverStatus = null,
             )
+            db.grants.complete(TaskKind.INVENTORY,inventoryId,eventId,GrantEventType.INVENTORY_SCAN,units=claimedOrigins.size.toLong(),payload=raw)
             db.inventoryEventDao().insert(event)
             db.inventoryOutboxDao().insert(
                 InventoryOutboxEntity(

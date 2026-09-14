@@ -1,4 +1,5 @@
 import Database from "@tauri-apps/plugin-sql";
+import { invoke } from "@tauri-apps/api/core";
 import type { SqlExecutor } from "./mirror.js";
 
 let dbPromise: Promise<Database> | null = null;
@@ -20,5 +21,14 @@ export const tauriExecutor: SqlExecutor = {
   },
   async all<T>(sql: string, params: unknown[] = []): Promise<T[]> {
     return (await db()).select<T[]>(sql, params);
+  },
+  async atomic(statements) {
+    return invoke<number[]>("grant_atomic_execute", {
+      statements: statements.map(({ sql, values = [], expectedChanges }) => ({
+        sql,
+        values,
+        ...(expectedChanges === undefined ? {} : { expectedChanges }),
+      })),
+    });
   },
 };

@@ -13,6 +13,10 @@ import {
 export interface SqlExecutor {
   run(sql: string, params?: unknown[]): Promise<void>;
   all<T>(sql: string, params?: unknown[]): Promise<T[]>;
+  /** One held native connection. Required when admission and productive facts must commit together. */
+  atomic?(
+    statements: readonly { sql: string; values?: readonly unknown[]; expectedChanges?: number }[],
+  ): Promise<readonly number[]>;
 }
 
 /** Station-side mirror of the server ShiftBundleDto (Task 7). */
@@ -29,6 +33,12 @@ export interface StationBundle {
     lineName: string | null;
     counterpartyId: string | null;
     counterpartyName: string | null;
+    /** Required by offline-grant execution binding; absent only from a legacy bundle. */
+    ssccIssuerCounterpartyId?: string | null;
+    boxLabelTemplateId?: string | null;
+    palletLabelTemplateId?: string | null;
+    createdFrom?: "admin" | "station";
+    stationCloseAccess?: { kind: "admin_only" } | { kind: "single_device"; ownerDeviceId: string };
     /** Rolling compatibility: current servers send null; older bundles may still carry an id. */
     labelTemplateId: string | null;
     /** Rolling compatibility: current servers send null; older bundles may still carry a name. */
@@ -316,7 +326,77 @@ async function upsertBundleBody(
   preserveIssuerPrefix: boolean,
 ): Promise<void> {
   const s = bundle.shift;
+  const p = bundle.product;
   const printContext = productLabelContextForBundle(bundle);
+  const executionTemplates = [
+    bundle.labelTemplate,
+    bundle.boxLabelTemplate,
+    bundle.palletLabelTemplate ?? null,
+    s.validationPrint?.mode === "duplicate_dm"
+      ? {
+          id: s.validationPrint.snapshot.id,
+          name: s.validationPrint.snapshot.name,
+          spec: s.validationPrint.snapshot.spec,
+        }
+      : null,
+  ]
+    .filter(
+      (template): template is { id: string; name: string; spec: unknown } => template !== null,
+    )
+    .sort((left, right) => left.id.localeCompare(right.id))
+    .filter((template, index, all) => index === 0 || all[index - 1]?.id !== template.id)
+    .map(({ id, spec }) => ({ id, spec }));
+  const executionScope =
+    s.number == null ||
+    s.validationPrint === undefined ||
+    bundle.palletLabelTemplate === undefined ||
+    s.ssccIssuerCounterpartyId === undefined ||
+    s.boxLabelTemplateId === undefined ||
+    s.palletLabelTemplateId === undefined ||
+    s.createdFrom === undefined
+      ? null
+      : {
+          shift: {
+            id: s.id,
+            productId: s.productId,
+            mode: s.mode,
+            lineId: s.lineId,
+            counterpartyId: s.counterpartyId,
+            counterpartyName: s.counterpartyName,
+            labelTemplateId: s.labelTemplateId,
+            boxLabelTemplateId: s.boxLabelTemplateId,
+            palletLabelTemplateId: s.palletLabelTemplateId,
+            validationPrintMode: s.validationPrint.mode,
+            allowPreviouslyAcceptedCodes:
+              s.validationPrint.mode === "duplicate_dm"
+                ? (s.validationPrint.allowPreviouslyAcceptedCodes ?? false)
+                : false,
+            validationPrintVerification: s.validationPrint.verification,
+            validationPrintTemplateId: s.validationPrint.templateId,
+            validationPrintSnapshot: s.validationPrint.snapshot,
+            validationPrintPolicyRevision: s.validationPrint.policyRevision,
+            boxCapacity: s.boxCapacity,
+            palletsEnabled: s.palletsEnabled,
+            palletBoxCapacity: s.palletsEnabled ? s.palletBoxCapacity : null,
+            stationClosePolicy: s.stationCloseAccess?.kind ?? "single_device",
+            stationCloseOwnerDeviceId:
+              s.stationCloseAccess?.kind === "single_device"
+                ? s.stationCloseAccess.ownerDeviceId
+                : null,
+            plannedDate: s.plannedDate,
+            productionDate: s.productionDate ?? null,
+            number: s.number,
+          },
+          product: {
+            id: p.id,
+            gtin14: p.gtin14,
+            name: p.name,
+            printName: p.printName ?? null,
+            egaisCode: p.egaisCode ?? null,
+            shelfLifeDays: p.shelfLifeDays ?? null,
+          },
+          templates: executionTemplates,
+        };
   // A pre-upgrade server omits `number` entirely; that absence must not
   // erase a number an upgraded server already mirrored (server rollback
   // mid-fleet). An explicit `null` from the server still applies.
@@ -338,8 +418,8 @@ async function upsertBundleBody(
        label_template_id, label_template_name, label_template_spec,
        planned_qty, planned_date, production_date, box_capacity, pallet_box_capacity, pallets_enabled,
        opened_at, issuer_prefix, box_label_template_spec, pallet_label_template_spec,
-       number, validation_print_context
-     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+       number, validation_print_context, execution_scope_json
+     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
      ON CONFLICT(id) DO UPDATE SET
        status=CASE
          WHEN shift_mirror.status='closed' OR EXISTS (
@@ -349,6 +429,7 @@ async function upsertBundleBody(
        END,
        mode=excluded.mode, product_id=excluded.product_id,
        validation_print_context=excluded.validation_print_context,
+       execution_scope_json=excluded.execution_scope_json,
        product_name=excluded.product_name,
        line_id=excluded.line_id, line_name=excluded.line_name,
        counterparty_id=excluded.counterparty_id, counterparty_name=excluded.counterparty_name,
@@ -399,10 +480,10 @@ async function upsertBundleBody(
       // decided by `numberUpdate` above.
       s.number ?? null,
       printContext === null ? null : JSON.stringify(printContext),
+      executionScope === null ? null : JSON.stringify(executionScope),
     ],
   );
 
-  const p = bundle.product;
   const imageColumns =
     p.image === undefined
       ? ""

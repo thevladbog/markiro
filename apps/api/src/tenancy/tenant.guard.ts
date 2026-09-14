@@ -50,6 +50,8 @@ export interface RequestWithTenant extends Request {
   deviceLineId?: string | null;
   /** `station` or `handheld` (brief 10); only on the api-key path. */
   deviceKind?: "station" | "handheld";
+  /** Current native key identity, set only after the station authentication lookup. */
+  deviceApiKeyId?: string;
 }
 
 /**
@@ -135,6 +137,7 @@ export class TenantGuard implements CanActivate {
       req.deviceId = device.id;
       req.deviceLineId = device.lineId;
       req.deviceKind = device.kind === "handheld" ? "handheld" : "station";
+      req.deviceApiKeyId = key.id;
       await this.db
         .update(schema.stationDevices)
         .set({ lastSeenAt: new Date() })

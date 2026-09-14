@@ -14,6 +14,18 @@ import {
   prepareInventoryOutboxBatch,
 } from "./inventory-outbox.js";
 import type { SqlExecutor } from "./mirror.js";
+import {
+  StationGrantAdmission,
+  stationOperatorIsCurrentlyActive,
+} from "./offline-grants/admission.js";
+import { sampleGrantClock } from "./offline-grants/clock.js";
+import {
+  readStationEvidencePin,
+  readStationSavedEvidence,
+  sendStationEvidence,
+  stationEvidenceCommitExecutor,
+} from "./offline-grants/evidence-store.js";
+import { readInventoryExecutionProjection } from "./offline-grants/semantic.js";
 
 export interface InventorySyncState {
   pending: number;
@@ -264,16 +276,42 @@ export function createInventorySyncEngine(deps: InventorySyncEngineDeps): Invent
           lastError = null;
           break;
         }
-        const value = await deps.client.post(
-          `/station/inventories/${deps.inventoryId}/event-batches`,
-          batch.request,
-        );
+        const evidenceKey = `inventory-event-batch:${deps.inventoryId}:${deps.snapshotId}:${batch.request.batchId}`;
+        const value = batch.negotiated
+          ? await sendStationEvidence({
+              exec: deps.exec,
+              client: deps.client,
+              generation,
+              key: evidenceKey,
+              path: `/station/grants/v1/evidence/inventories/${deps.inventoryId}/event-batches`,
+              batchId: batch.request.batchId,
+              payload: batch.request,
+              links: batch.evidenceLinks ?? [],
+              checkpoint: { pinValue: batch.pinValue },
+            })
+          : await deps.client.post(
+              `/station/inventories/${deps.inventoryId}/event-batches`,
+              batch.request,
+            );
         if (stopped || paused || generation.sealed) break;
         if (!(await deviceRecoveryAllowsWork(deps.exec, generation))) break;
         const commitLease = acquireCredentialCommitLease(generation);
         if (!commitLease) break;
         try {
-          await acknowledgeInventoryOutboxBatch(deps.exec, batch, value);
+          const evidencePin = batch.negotiated
+            ? await readStationEvidencePin(deps.exec, generation, evidenceKey)
+            : null;
+          await acknowledgeInventoryOutboxBatch(
+            evidencePin
+              ? await stationEvidenceCommitExecutor(
+                  deps.exec,
+                  generation,
+                  evidencePin.credentialOwnership,
+                )
+              : deps.exec,
+            batch,
+            value,
+          );
         } finally {
           commitLease.release();
         }
@@ -422,6 +460,8 @@ export async function leaveInventoryTask(deps: LeaveInventoryTaskDeps): Promise<
   ) {
     throw new Error("inventory floor task ownership changed");
   }
+  const activationId = pointer.activationId;
+  const originalCredentialOwnership = pointer.credentialOwnership;
   const owned = await deps.exec.all<{ value: string }>(
     "SELECT value FROM station_meta WHERE key = ? AND value = ?",
     ["active_inventory_floor_task_v1", deps.pointerValue],
@@ -453,10 +493,116 @@ export async function leaveInventoryTask(deps: LeaveInventoryTaskDeps): Promise<
     if (pending !== 0) {
       throw new Error("inventory task still has pending work");
     }
-    const response = await deps.client.post(`/station/inventories/${deps.inventoryId}/leave`, {
+    const leavePayload = {
       pendingEventCount: 0,
       openBoxCount,
-    });
+    };
+    const [grantState] = await deps.exec.all<{
+      tenant_id: string;
+      device_id: string;
+      owner_kind: "station";
+      credential_epoch: number;
+    }>(
+      "SELECT tenant_id,device_id,owner_kind,credential_epoch FROM offline_grant_install_state WHERE id=1",
+    );
+    let response: unknown;
+    let intentKey: string | null = null;
+    if (grantState) {
+      const [terminal] = await deps.exec.all<{ operator_id: string | null }>(
+        `SELECT operator_id FROM inventory_terminal_state
+          WHERE inventory_id=? AND snapshot_id=? AND device_id=?`,
+        [deps.inventoryId, deps.snapshotId, deps.deviceId],
+      );
+      if (
+        !terminal?.operator_id ||
+        !(await stationOperatorIsCurrentlyActive(deps.exec, terminal.operator_id))
+      ) {
+        throw new Error("offline grant operator unauthorized");
+      }
+      const [binding] = await deps.exec.all<{ snapshot_digest: string }>(
+        `SELECT json_extract(grant_json,'$.snapshotDigest') snapshot_digest
+           FROM offline_grant_grants
+          WHERE json_extract(grant_json,'$.kindOfGrant')='task'
+            AND json_extract(grant_json,'$.taskKind')='inventory'
+            AND json_extract(grant_json,'$.taskId')=?
+          ORDER BY installed_sequence DESC LIMIT 1`,
+        [deps.inventoryId],
+      );
+      const currentCredentialOwnership = await credentialGenerationOwnership(
+        deps.credentialGeneration,
+      );
+      if (!currentCredentialOwnership) throw new Error("inventory floor task credential retired");
+      intentKey = `inventory-leave:${activationId}`;
+      const eventId = `${activationId}#inventory.close.v1`;
+      const committed = await new StationGrantAdmission(
+        deps.exec,
+        sampleGrantClock,
+      ).commitCompletion({
+        operatorId: terminal.operator_id,
+        intent: {
+          owner: {
+            tenantId: grantState.tenant_id,
+            deviceId: grantState.device_id,
+            kind: grantState.owner_kind,
+            credentialEpoch: grantState.credential_epoch,
+          },
+          capability: "inventory.start.v1",
+          taskId: deps.inventoryId,
+          snapshotDigest: binding?.snapshot_digest ?? "missing",
+          eventId,
+          eventType: "inventory.close.v1",
+          cost: {},
+        },
+        execution: await readInventoryExecutionProjection(deps.exec, deps.inventoryId),
+        event: { eventType: "inventory.close.v1", leavePayload },
+        facts: {},
+        result: { intentKey },
+        ownerStatements: [
+          {
+            sql: "INSERT INTO offline_grant_inventory_leave_commands(command_id,payload_json) VALUES(?,?)",
+            values: [
+              intentKey,
+              JSON.stringify({
+                intentKey,
+                inventoryId: deps.inventoryId,
+                snapshotId: deps.snapshotId,
+                deviceId: deps.deviceId,
+                operatorId: terminal.operator_id,
+                eventId,
+                credentialOwnership: originalCredentialOwnership,
+                currentCredentialOwnership,
+                pointerValue: deps.pointerValue,
+                leavePayload,
+                createdAt: new Date().toISOString(),
+              }),
+            ],
+          },
+        ],
+      });
+      if (!committed.decision.allow) {
+        throw new Error(`offline grant denied: ${committed.decision.reason ?? "denied"}`);
+      }
+      const saved = await readStationSavedEvidence(deps.exec, [
+        { eventId, pointer: "/#inventory.close.v1" },
+      ]);
+      if (!saved.negotiated) throw new Error("inventory leave evidence is missing");
+      response = await sendStationEvidence({
+        exec: deps.exec,
+        client: deps.client,
+        generation: deps.credentialGeneration,
+        key: intentKey,
+        path: `/station/grants/v1/evidence/inventories/${deps.inventoryId}/leave`,
+        batchId: activationId,
+        payload: leavePayload,
+        links: saved.links,
+        checkpoint: { pointerValue: deps.pointerValue },
+      });
+    } else {
+      response = await deps.client.post(
+        `/station/inventories/${deps.inventoryId}/leave`,
+        leavePayload,
+      );
+    }
     if (
       typeof response !== "object" ||
       response === null ||
@@ -474,11 +620,33 @@ export async function leaveInventoryTask(deps: LeaveInventoryTaskDeps): Promise<
         ["active_inventory_floor_task_v1", deps.pointerValue],
       );
       if (current.length !== 1) throw new Error("inventory floor task ownership changed");
-      await deps.exec.run(
-        `DELETE FROM station_meta WHERE key = 'active_inventory_floor_task_v1'
-          AND value = ?`,
-        [deps.pointerValue],
-      );
+      if (intentKey) {
+        const currentCredentialOwnership = await credentialGenerationOwnership(
+          deps.credentialGeneration,
+        );
+        if (!currentCredentialOwnership) {
+          throw new Error("inventory floor task credential retired");
+        }
+        await deps.exec.run(
+          "INSERT INTO offline_grant_inventory_leave_ack_commands(command_id,payload_json) VALUES(?,?) ON CONFLICT(command_id) DO NOTHING",
+          [
+            intentKey,
+            JSON.stringify({
+              intentKey,
+              pointerValue: deps.pointerValue,
+              credentialOwnership: originalCredentialOwnership,
+              currentCredentialOwnership,
+              receipt: response,
+            }),
+          ],
+        );
+      } else {
+        await deps.exec.run(
+          `DELETE FROM station_meta WHERE key = 'active_inventory_floor_task_v1'
+            AND value = ?`,
+          [deps.pointerValue],
+        );
+      }
       const remaining = await deps.exec.all<{ value: string }>(
         "SELECT value FROM station_meta WHERE key = 'active_inventory_floor_task_v1'",
       );

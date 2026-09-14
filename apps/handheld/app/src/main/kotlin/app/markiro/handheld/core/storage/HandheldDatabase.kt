@@ -1,5 +1,6 @@
 package app.markiro.handheld.core.storage
 
+import app.markiro.handheld.core.grants.*
 import androidx.room.Database
 import androidx.room.RoomDatabase
 import app.markiro.handheld.core.print.PrinterAssignmentEntity
@@ -9,6 +10,7 @@ import app.markiro.handheld.core.print.PrinterEntity
 
 @Database(
     entities = [
+        GrantStateEntity::class, GrantTokenEntity::class, GrantCounterEntity::class, GrantEvidenceEntity::class, GrantTaskBindingEntity::class, GrantTaskProvenanceEntity::class,
         DeviceConfigEntity::class,
         DeviceRecoveryEntity::class,
         OperatorEntity::class,
@@ -39,10 +41,12 @@ import app.markiro.handheld.core.print.PrinterEntity
         PalletEntity::class,
         PalletExceptionEntity::class,
     ],
-    version = 13,
+    version = 14,
     exportSchema = false,
 )
 abstract class HandheldDatabase : RoomDatabase() {
+    val grants: GrantRepository by lazy { GrantRepository(this) }
+    abstract fun grantDao(): GrantDao
     private var coordinator: DeviceRecovery? = null
     val recovery: DeviceRecovery get() = checkNotNull(coordinator) { "Device recovery must initialize before work" }
     internal fun attachRecovery(value: DeviceRecovery) {

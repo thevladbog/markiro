@@ -378,7 +378,8 @@ export async function readSealedWorkSummary(
        (SELECT COUNT(*) FROM boxes_mirror
          WHERE closed_at IS NOT NULL AND acked_at IS NULL) AS boxes,
        (SELECT COUNT(*) FROM box_exceptions_mirror) AS exceptions,
-       (SELECT COUNT(*) FROM shift_close_outbox) AS closes,
+       (SELECT COUNT(*) FROM shift_close_outbox)+
+       (SELECT COUNT(*) FROM offline_grant_inventory_leave_intents WHERE left_at IS NULL) AS closes,
        (SELECT COUNT(*) FROM conflicts_mirror)+(SELECT COUNT(*) FROM inventory_conflicts_mirror) AS conflicts,
        (SELECT COUNT(*) FROM product_label_receipts WHERE outcome='quarantined') AS quarantined_labels,
        (SELECT COUNT(*) FROM product_label_jobs WHERE json_extract(projection_json,'$.attemptState') IN ('sending','delivery_unknown'))+

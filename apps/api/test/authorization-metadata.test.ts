@@ -287,7 +287,12 @@ const ADMINISTRATIVE_CONTROLLERS: readonly [
   [ProductExternalLinkController, { unlink: integrationsWritePolicy }],
   [
     ApiKeysController,
-    { list: credentialsPolicy, create: credentialsPolicy, revoke: credentialsPolicy },
+    {
+      list: credentialsPolicy,
+      create: credentialsPolicy,
+      updateScopes: credentialsPolicy,
+      revoke: credentialsPolicy,
+    },
   ],
   [
     StationDevicesController,

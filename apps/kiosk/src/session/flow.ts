@@ -63,6 +63,7 @@ export type KioskFlowAction =
   | { type: "paired" }
   | { type: "unpaired" }
   | { type: "sessionStarted"; session: ActiveKioskSession }
+  | { type: "draftRecovered"; session: ActiveKioskSession }
   | { type: "outcomeRecovered"; session: ActiveKioskSession; outcome: StoredKioskOutcome }
   | { type: "cartChanged"; cart: CartState }
   | { type: "legacySubmit"; cart: CartState }
@@ -204,6 +205,10 @@ export function kioskFlowReducer(state: KioskFlowState, action: KioskFlowAction)
   switch (action.type) {
     case "paired":
       return state.screen === "pairing" ? { screen: "login" } : state;
+    case "draftRecovered":
+      return state.screen === "login"
+        ? { screen: "confirmation", session: action.session, submitting: false }
+        : state;
     case "sessionStarted":
       return state.screen === "login" ? { screen: "cart", session: action.session } : state;
     case "outcomeRecovered":

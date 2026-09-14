@@ -337,3 +337,9 @@ export type {
 } from "./shift-exports.js";
 
 export * from "./validation-reprocessing.js";
+export * from "./offline-grants/types.js";
+export * from "./offline-grants/contracts.js";
+export * from "./offline-grants/jws.js";
+export * from "./offline-grants/clock.js";
+export * from "./offline-grants/decision.js";
+export * from "./offline-grants/budgets.js";

@@ -602,6 +602,10 @@ jobs:
           distribution: temurin
           java-version: "17"
       - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6
+      - name: Verify shared offline grant fixtures
+        run: |
+          cmp ../../packages/platform-contracts/fixtures/offline-grants-v1.json app/src/test/resources/offline-grants-v1.json
+          cmp ../../packages/platform-contracts/fixtures/offline-grant-budgets-v1.json app/src/test/resources/offline-grant-budgets-v1.json
       - name: Unit tests, lint, debug build
         run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
 

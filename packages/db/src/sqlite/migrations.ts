@@ -3983,6 +3983,663 @@ export const STATION_MIGRATIONS: string[] = [
        DELETE FROM printer_destinations WHERE scope=json_array(OLD.inventory_id,OLD.snapshot_id,OLD.owner_device_id)
          AND purpose='box' AND job_id=OLD.box_id;
      END;`,
+  `ALTER TABLE shift_mirror ADD COLUMN execution_scope_json TEXT
+   CHECK (execution_scope_json IS NULL OR (json_valid(execution_scope_json) AND json_type(execution_scope_json)='object'));`,
+  `CREATE TABLE IF NOT EXISTS offline_grant_install_state (
+     id INTEGER PRIMARY KEY CHECK(id=1), tenant_id TEXT NOT NULL, device_id TEXT NOT NULL,
+     owner_kind TEXT NOT NULL, credential_epoch INTEGER NOT NULL, request_sequence INTEGER NOT NULL,
+     mode TEXT NOT NULL CHECK(mode IN ('observe','strict')),
+     CHECK(credential_epoch>0 AND request_sequence>=0));`,
+  `CREATE TABLE IF NOT EXISTS offline_grant_configuration (
+     id INTEGER PRIMARY KEY CHECK(id=1), tenant_id TEXT NOT NULL, device_id TEXT NOT NULL,
+     owner_kind TEXT NOT NULL, credential_epoch INTEGER NOT NULL, request_sequence INTEGER NOT NULL,
+     mode TEXT NOT NULL CHECK(mode IN ('observe','strict')), policy_revision TEXT,
+     CHECK(credential_epoch>0 AND request_sequence>=0));`,
+  `CREATE TABLE IF NOT EXISTS offline_grant_keysets (
+     origin TEXT PRIMARY KEY, revision TEXT NOT NULL, keyset_json TEXT NOT NULL CHECK(json_valid(keyset_json)));`,
+  `CREATE TABLE IF NOT EXISTS offline_grant_retired_kids (
+     origin TEXT NOT NULL, kid TEXT NOT NULL, retired_sequence INTEGER NOT NULL,
+     PRIMARY KEY(origin,kid));`,
+  `CREATE TABLE IF NOT EXISTS offline_grant_grants (
+     grant_id TEXT PRIMARY KEY, kid TEXT NOT NULL, compact TEXT NOT NULL UNIQUE, grant_json TEXT NOT NULL CHECK(json_valid(grant_json)),
+     credential_epoch INTEGER NOT NULL, installed_sequence INTEGER NOT NULL);`,
+  `CREATE TABLE IF NOT EXISTS offline_grant_snapshots (
+     task_kind TEXT NOT NULL, task_id TEXT NOT NULL, snapshot_digest TEXT NOT NULL,
+     canonical TEXT NOT NULL, scope_json TEXT NOT NULL CHECK(json_valid(scope_json)),
+     installed_sequence INTEGER NOT NULL,
+     PRIMARY KEY(task_kind,task_id,snapshot_digest));`,
+  `CREATE TABLE IF NOT EXISTS offline_grant_clock (
+     id INTEGER PRIMARY KEY CHECK(id=1), server_ms INTEGER NOT NULL, monotonic_ms INTEGER NOT NULL,
+     boot_id TEXT NOT NULL, high_water_ms INTEGER NOT NULL, wall_high_water_ms INTEGER NOT NULL,
+     CHECK(server_ms>=0 AND monotonic_ms>=0 AND high_water_ms>=server_ms AND wall_high_water_ms>=0));`,
+  `CREATE TABLE IF NOT EXISTS offline_grant_consumption (
+     tenant_id TEXT NOT NULL, device_id TEXT NOT NULL, credential_epoch INTEGER NOT NULL,
+     task_kind TEXT NOT NULL, task_id TEXT NOT NULL, snapshot_digest TEXT NOT NULL,
+     budget_line_id TEXT NOT NULL, consumed INTEGER NOT NULL CHECK(consumed>=0),
+     PRIMARY KEY(tenant_id,device_id,task_kind,task_id,snapshot_digest,budget_line_id));`,
+  `CREATE TABLE IF NOT EXISTS offline_grant_decisions (
+     event_id TEXT PRIMARY KEY, event_digest TEXT NOT NULL,
+     decision_json TEXT NOT NULL CHECK(json_valid(decision_json)),
+     result_json TEXT NOT NULL CHECK(json_valid(result_json)),
+     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);`,
+  `CREATE TABLE IF NOT EXISTS offline_grant_install_commands (
+     request_sequence INTEGER PRIMARY KEY, payload_json TEXT NOT NULL CHECK(json_valid(payload_json)));`,
+  `CREATE TABLE IF NOT EXISTS offline_grant_keyset_commands (
+     request_sequence INTEGER PRIMARY KEY, payload_json TEXT NOT NULL CHECK(json_valid(payload_json)));`,
+  `CREATE TRIGGER IF NOT EXISTS offline_grant_keyset_apply AFTER INSERT ON offline_grant_keyset_commands BEGIN
+     SELECT CASE WHEN NEW.request_sequence < COALESCE((SELECT MAX(request_sequence) FROM offline_grant_keyset_commands),NEW.request_sequence)
+       THEN RAISE(ABORT,'OFFLINE_GRANT_STALE_KEYSET') END;
+     INSERT INTO offline_grant_keysets(origin,revision,keyset_json)
+       VALUES(json_extract(NEW.payload_json,'$.origin'),json_extract(NEW.payload_json,'$.revision'),json_extract(NEW.payload_json,'$.json'))
+       ON CONFLICT(origin) DO UPDATE SET revision=excluded.revision,keyset_json=excluded.keyset_json;
+     INSERT OR IGNORE INTO offline_grant_retired_kids(origin,kid,retired_sequence)
+       SELECT json_extract(NEW.payload_json,'$.origin'),value,NEW.request_sequence FROM json_each(NEW.payload_json,'$.retiredKids');
+     DELETE FROM offline_grant_grants
+      WHERE kid IN (SELECT kid FROM offline_grant_retired_kids WHERE origin=json_extract(NEW.payload_json,'$.origin'));
+   END;`,
+  `CREATE TABLE IF NOT EXISTS offline_grant_configuration_commands (
+     request_sequence INTEGER PRIMARY KEY, payload_json TEXT NOT NULL CHECK(json_valid(payload_json)));`,
+  `CREATE TRIGGER IF NOT EXISTS offline_grant_configuration_apply AFTER INSERT ON offline_grant_configuration_commands BEGIN
+     SELECT CASE WHEN NEW.request_sequence < COALESCE((SELECT MAX(request_sequence) FROM offline_grant_configuration_commands),NEW.request_sequence)
+       THEN RAISE(ABORT,'OFFLINE_GRANT_STALE_CONFIGURATION') END;
+     SELECT CASE WHEN json_extract(NEW.payload_json,'$.owner.credentialEpoch') < COALESCE((SELECT credential_epoch FROM offline_grant_configuration WHERE id=1),0)
+       THEN RAISE(ABORT,'OFFLINE_GRANT_STALE_EPOCH') END;
+     INSERT INTO offline_grant_configuration(id,tenant_id,device_id,owner_kind,credential_epoch,request_sequence,mode,policy_revision)
+       VALUES(1,json_extract(NEW.payload_json,'$.owner.tenantId'),json_extract(NEW.payload_json,'$.owner.deviceId'),json_extract(NEW.payload_json,'$.owner.kind'),json_extract(NEW.payload_json,'$.owner.credentialEpoch'),NEW.request_sequence,CASE WHEN json_extract(NEW.payload_json,'$.policyRevision') IS NULL THEN COALESCE((SELECT mode FROM offline_grant_install_state WHERE id=1),'observe') ELSE json_extract(NEW.payload_json,'$.mode') END,json_extract(NEW.payload_json,'$.policyRevision'))
+       ON CONFLICT(id) DO UPDATE SET tenant_id=excluded.tenant_id,device_id=excluded.device_id,owner_kind=excluded.owner_kind,credential_epoch=excluded.credential_epoch,request_sequence=excluded.request_sequence,mode=CASE WHEN excluded.policy_revision IS NULL THEN offline_grant_configuration.mode ELSE excluded.mode END,policy_revision=excluded.policy_revision;
+     INSERT INTO offline_grant_install_state(id,tenant_id,device_id,owner_kind,credential_epoch,request_sequence,mode)
+       VALUES(1,json_extract(NEW.payload_json,'$.owner.tenantId'),json_extract(NEW.payload_json,'$.owner.deviceId'),json_extract(NEW.payload_json,'$.owner.kind'),json_extract(NEW.payload_json,'$.owner.credentialEpoch'),NEW.request_sequence,(SELECT mode FROM offline_grant_configuration WHERE id=1))
+       ON CONFLICT(id) DO UPDATE SET credential_epoch=excluded.credential_epoch,request_sequence=MAX(offline_grant_install_state.request_sequence,excluded.request_sequence),mode=excluded.mode
+       WHERE offline_grant_install_state.tenant_id=excluded.tenant_id AND offline_grant_install_state.device_id=excluded.device_id AND offline_grant_install_state.owner_kind=excluded.owner_kind AND offline_grant_install_state.credential_epoch<=excluded.credential_epoch;
+     INSERT INTO offline_grant_clock(id,server_ms,monotonic_ms,boot_id,high_water_ms,wall_high_water_ms)
+       SELECT 1,json_extract(NEW.payload_json,'$.serverTime'),json_extract(NEW.payload_json,'$.clock.monotonicMs'),json_extract(NEW.payload_json,'$.clock.bootId'),json_extract(NEW.payload_json,'$.serverTime'),json_extract(NEW.payload_json,'$.clock.wallMs')
+        WHERE json_type(NEW.payload_json,'$.clock')='object' AND EXISTS(SELECT 1 FROM offline_grant_install_state state WHERE state.id=1 AND state.tenant_id=json_extract(NEW.payload_json,'$.owner.tenantId') AND state.device_id=json_extract(NEW.payload_json,'$.owner.deviceId') AND state.owner_kind=json_extract(NEW.payload_json,'$.owner.kind'))
+       ON CONFLICT(id) DO UPDATE SET server_ms=excluded.server_ms,monotonic_ms=excluded.monotonic_ms,boot_id=excluded.boot_id,high_water_ms=MAX(offline_grant_clock.high_water_ms,excluded.high_water_ms),wall_high_water_ms=excluded.wall_high_water_ms;
+     INSERT INTO offline_grant_keysets(origin,revision,keyset_json)
+       SELECT json_extract(NEW.payload_json,'$.keyset.origin'),json_extract(NEW.payload_json,'$.keyset.revision'),json_extract(NEW.payload_json,'$.keyset.json') WHERE json_type(NEW.payload_json,'$.keyset')='object'
+       ON CONFLICT(origin) DO UPDATE SET revision=excluded.revision,keyset_json=excluded.keyset_json;
+     INSERT OR IGNORE INTO offline_grant_retired_kids(origin,kid,retired_sequence)
+       SELECT json_extract(NEW.payload_json,'$.keyset.origin'),value,NEW.request_sequence FROM json_each(NEW.payload_json,'$.keyset.retiredKids');
+     DELETE FROM offline_grant_grants WHERE kid IN (SELECT kid FROM offline_grant_retired_kids WHERE origin=json_extract(NEW.payload_json,'$.keyset.origin'));
+   END;`,
+  `CREATE TRIGGER IF NOT EXISTS offline_grant_install_apply AFTER INSERT ON offline_grant_install_commands BEGIN
+     SELECT CASE WHEN NEW.request_sequence <= COALESCE((SELECT request_sequence FROM offline_grant_install_state WHERE id=1),-1)
+       THEN RAISE(ABORT,'OFFLINE_GRANT_STALE_INSTALL') END;
+     SELECT CASE WHEN json_extract(NEW.payload_json,'$.owner.credentialEpoch') < COALESCE((SELECT credential_epoch FROM offline_grant_install_state WHERE id=1),0)
+       THEN RAISE(ABORT,'OFFLINE_GRANT_STALE_EPOCH') END;
+     INSERT INTO offline_grant_install_state(id,tenant_id,device_id,owner_kind,credential_epoch,request_sequence,mode)
+       VALUES(1,json_extract(NEW.payload_json,'$.owner.tenantId'),json_extract(NEW.payload_json,'$.owner.deviceId'),json_extract(NEW.payload_json,'$.owner.kind'),json_extract(NEW.payload_json,'$.owner.credentialEpoch'),NEW.request_sequence,COALESCE((SELECT mode FROM offline_grant_configuration config WHERE config.id=1 AND config.tenant_id=json_extract(NEW.payload_json,'$.owner.tenantId') AND config.device_id=json_extract(NEW.payload_json,'$.owner.deviceId') AND config.owner_kind=json_extract(NEW.payload_json,'$.owner.kind') AND config.credential_epoch=json_extract(NEW.payload_json,'$.owner.credentialEpoch')),json_extract(NEW.payload_json,'$.mode')))
+       ON CONFLICT(id) DO UPDATE SET tenant_id=excluded.tenant_id,device_id=excluded.device_id,owner_kind=excluded.owner_kind,credential_epoch=excluded.credential_epoch,request_sequence=excluded.request_sequence,mode=excluded.mode;
+     INSERT INTO offline_grant_keysets(origin,revision,keyset_json)
+       VALUES(json_extract(NEW.payload_json,'$.keyset.origin'),json_extract(NEW.payload_json,'$.keyset.revision'),json_extract(NEW.payload_json,'$.keyset.json'))
+       ON CONFLICT(origin) DO UPDATE SET revision=excluded.revision,keyset_json=excluded.keyset_json;
+     INSERT OR IGNORE INTO offline_grant_retired_kids(origin,kid,retired_sequence)
+       SELECT json_extract(NEW.payload_json,'$.keyset.origin'),value,NEW.request_sequence FROM json_each(NEW.payload_json,'$.keyset.retiredKids');
+     SELECT CASE WHEN EXISTS (
+       SELECT 1 FROM json_each(NEW.payload_json,'$.grants') incoming
+       JOIN offline_grant_grants saved ON saved.grant_id=json_extract(incoming.value,'$.grantId')
+       WHERE saved.compact<>json_extract(incoming.value,'$.compact')
+     ) THEN RAISE(ABORT,'OFFLINE_GRANT_ID_COLLISION') END;
+     SELECT CASE WHEN EXISTS (
+       SELECT 1 FROM json_each(NEW.payload_json,'$.snapshots') incoming
+       JOIN offline_grant_snapshots saved
+         ON saved.task_kind=json_extract(incoming.value,'$.taskKind')
+        AND saved.task_id=json_extract(incoming.value,'$.taskId')
+        AND saved.snapshot_digest=json_extract(incoming.value,'$.snapshotDigest')
+       WHERE saved.canonical<>json_extract(incoming.value,'$.canonical')
+     ) THEN RAISE(ABORT,'OFFLINE_GRANT_SNAPSHOT_COLLISION') END;
+     DELETE FROM offline_grant_grants
+      WHERE kid IN (SELECT kid FROM offline_grant_retired_kids WHERE origin=json_extract(NEW.payload_json,'$.keyset.origin'));
+     INSERT INTO offline_grant_grants(grant_id,kid,compact,grant_json,credential_epoch,installed_sequence)
+       SELECT json_extract(value,'$.grantId'),json_extract(value,'$.kid'),json_extract(value,'$.compact'),json_extract(value,'$.json'),json_extract(value,'$.credentialEpoch'),NEW.request_sequence FROM json_each(NEW.payload_json,'$.grants')
+        WHERE NOT EXISTS (SELECT 1 FROM offline_grant_retired_kids retired WHERE retired.origin=json_extract(NEW.payload_json,'$.keyset.origin') AND retired.kid=json_extract(value,'$.kid'))
+       ON CONFLICT(grant_id) DO NOTHING;
+     INSERT INTO offline_grant_snapshots(task_kind,task_id,snapshot_digest,canonical,scope_json,installed_sequence)
+       SELECT json_extract(value,'$.taskKind'),json_extract(value,'$.taskId'),json_extract(value,'$.snapshotDigest'),json_extract(value,'$.canonical'),json_extract(value,'$.scopeJson'),NEW.request_sequence FROM json_each(NEW.payload_json,'$.snapshots') WHERE 1
+       ON CONFLICT(task_kind,task_id,snapshot_digest) DO NOTHING;
+     INSERT INTO offline_grant_clock(id,server_ms,monotonic_ms,boot_id,high_water_ms,wall_high_water_ms)
+       VALUES(1,json_extract(NEW.payload_json,'$.clock.serverMs'),json_extract(NEW.payload_json,'$.clock.monotonicMs'),json_extract(NEW.payload_json,'$.clock.bootId'),json_extract(NEW.payload_json,'$.clock.serverMs'),json_extract(NEW.payload_json,'$.clock.wallMs'))
+       ON CONFLICT(id) DO UPDATE SET server_ms=excluded.server_ms,monotonic_ms=excluded.monotonic_ms,boot_id=excluded.boot_id,high_water_ms=MAX(offline_grant_clock.high_water_ms,excluded.high_water_ms),wall_high_water_ms=excluded.wall_high_water_ms;
+   END;`,
+  `CREATE TABLE IF NOT EXISTS offline_grant_task_admissions (
+     tenant_id TEXT NOT NULL, device_id TEXT NOT NULL, owner_kind TEXT NOT NULL,
+     credential_epoch INTEGER NOT NULL, task_kind TEXT NOT NULL, task_id TEXT NOT NULL,
+     snapshot_digest TEXT NOT NULL, admitted_at INTEGER NOT NULL,
+     PRIMARY KEY(tenant_id,device_id,owner_kind,credential_epoch,task_kind,task_id,snapshot_digest));`,
+  `CREATE TABLE IF NOT EXISTS offline_grant_task_admission_commands (
+     admission_id TEXT PRIMARY KEY, payload_json TEXT NOT NULL CHECK(json_valid(payload_json)));`,
+  `CREATE TRIGGER IF NOT EXISTS offline_grant_task_admission_apply AFTER INSERT ON offline_grant_task_admission_commands BEGIN
+     SELECT CASE WHEN NOT EXISTS (
+       SELECT 1 FROM offline_grant_install_state state
+       JOIN offline_grant_configuration config ON config.id=state.id
+       WHERE state.id=1
+         AND state.tenant_id=json_extract(NEW.payload_json,'$.owner.tenantId')
+         AND state.device_id=json_extract(NEW.payload_json,'$.owner.deviceId')
+         AND state.owner_kind=json_extract(NEW.payload_json,'$.owner.kind')
+         AND state.credential_epoch=json_extract(NEW.payload_json,'$.owner.credentialEpoch')
+         AND state.mode=json_extract(NEW.payload_json,'$.mode')
+         AND state.mode='strict'
+         AND config.tenant_id=state.tenant_id AND config.device_id=state.device_id
+         AND config.owner_kind=state.owner_kind AND config.credential_epoch=state.credential_epoch
+         AND config.mode=state.mode
+     ) THEN RAISE(ABORT,'OFFLINE_GRANT_STALE_OWNER') END;
+     SELECT CASE WHEN NOT EXISTS (
+       SELECT 1 FROM offline_grant_grants grant
+       JOIN offline_grant_snapshots snapshot
+         ON snapshot.task_kind=json_extract(grant.grant_json,'$.taskKind')
+        AND snapshot.task_id=json_extract(grant.grant_json,'$.taskId')
+        AND snapshot.snapshot_digest=json_extract(grant.grant_json,'$.snapshotDigest')
+       WHERE json_extract(grant.grant_json,'$.kindOfGrant')='task'
+         AND json_extract(grant.grant_json,'$.taskKind')=json_extract(NEW.payload_json,'$.taskKind')
+         AND json_extract(grant.grant_json,'$.taskId')=json_extract(NEW.payload_json,'$.taskId')
+         AND json_extract(grant.grant_json,'$.snapshotDigest')=json_extract(NEW.payload_json,'$.snapshotDigest')
+         AND json_extract(grant.grant_json,'$.tenantId')=json_extract(NEW.payload_json,'$.owner.tenantId')
+         AND json_extract(grant.grant_json,'$.deviceId')=json_extract(NEW.payload_json,'$.owner.deviceId')
+         AND json_extract(grant.grant_json,'$.kind')=json_extract(NEW.payload_json,'$.owner.kind')
+         AND json_extract(grant.grant_json,'$.credentialEpoch')=json_extract(NEW.payload_json,'$.owner.credentialEpoch')
+         AND json_extract(NEW.payload_json,'$.capability')=json_extract(NEW.payload_json,'$.taskKind') || '.start.v1'
+         AND json_extract(grant.grant_json,'$.notBefore')<=json_extract(NEW.payload_json,'$.admittedAt')
+         AND json_extract(grant.grant_json,'$.completeNotAfter')>json_extract(NEW.payload_json,'$.admittedAt')
+         AND EXISTS (SELECT 1 FROM json_each(grant.grant_json,'$.eventTypes') event_type
+                      WHERE event_type.value=json_extract(NEW.payload_json,'$.eventType'))
+         AND snapshot.scope_json=json_extract(NEW.payload_json,'$.signedScopeJson')
+     ) THEN RAISE(ABORT,'OFFLINE_GRANT_STALE_TASK') END;
+     SELECT CASE WHEN (
+       json_extract(NEW.payload_json,'$.taskKind')='shift' AND NOT EXISTS (
+         SELECT 1 FROM shift_mirror shift
+          WHERE shift.id=json_extract(NEW.payload_json,'$.taskId') AND shift.status='active'
+            AND json(shift.execution_scope_json)=json(json_extract(NEW.payload_json,'$.executionScope'))
+       )
+     ) OR (
+       json_extract(NEW.payload_json,'$.taskKind')='inventory' AND NOT EXISTS (
+         SELECT 1 FROM inventory_task_mirror inventory
+          WHERE inventory.inventory_id=json_extract(NEW.payload_json,'$.taskId')
+            AND inventory.active_snapshot_id=json_extract(NEW.payload_json,'$.executionScope.snapshotId')
+            AND inventory.active_combined_digest=json_extract(NEW.payload_json,'$.executionScope.combinedDigest')
+            AND inventory.active_content_digest=json_extract(NEW.payload_json,'$.executionScope.contentDigest')
+            AND json(inventory.active_manifest_json)=json(json_extract(NEW.payload_json,'$.executionScope.manifest'))
+       )
+     ) THEN RAISE(ABORT,'OFFLINE_GRANT_EXECUTION_CHANGED') END;
+     SELECT CASE WHEN json_extract(NEW.payload_json,'$.mode')='strict' AND NOT EXISTS (
+       SELECT 1 FROM offline_grant_clock clock
+       WHERE clock.id=1
+         AND clock.server_ms=json_extract(NEW.payload_json,'$.clock.serverMs')
+         AND clock.monotonic_ms=json_extract(NEW.payload_json,'$.clock.monotonicMs')
+         AND clock.boot_id=json_extract(NEW.payload_json,'$.clock.bootId')
+         AND clock.high_water_ms=json_extract(NEW.payload_json,'$.clock.highWaterMs')
+         AND clock.wall_high_water_ms=json_extract(NEW.payload_json,'$.clock.wallHighWaterMs')
+         AND json_extract(NEW.payload_json,'$.sample.bootId')=clock.boot_id
+         AND json_extract(NEW.payload_json,'$.sample.monotonicMs')>=clock.monotonic_ms
+         AND json_extract(NEW.payload_json,'$.sample.wallMs')>=clock.wall_high_water_ms
+         AND json_extract(NEW.payload_json,'$.admittedAt')=clock.server_ms+json_extract(NEW.payload_json,'$.sample.monotonicMs')-clock.monotonic_ms
+         AND json_extract(NEW.payload_json,'$.admittedAt')>=clock.high_water_ms
+     ) THEN RAISE(ABORT,'OFFLINE_GRANT_CLOCK_CHANGED') END;
+     SELECT CASE WHEN json_extract(NEW.payload_json,'$.mode')='strict' AND NOT EXISTS (
+       SELECT 1 FROM offline_grant_grants grant
+       WHERE json_extract(grant.grant_json,'$.kindOfGrant')='device'
+         AND json_extract(grant.grant_json,'$.tenantId')=json_extract(NEW.payload_json,'$.owner.tenantId')
+         AND json_extract(grant.grant_json,'$.deviceId')=json_extract(NEW.payload_json,'$.owner.deviceId')
+         AND json_extract(grant.grant_json,'$.kind')=json_extract(NEW.payload_json,'$.owner.kind')
+         AND json_extract(grant.grant_json,'$.credentialEpoch')=json_extract(NEW.payload_json,'$.owner.credentialEpoch')
+         AND json_extract(grant.grant_json,'$.notBefore')<=json_extract(NEW.payload_json,'$.admittedAt')
+         AND json_extract(grant.grant_json,'$.startNotAfter')>json_extract(NEW.payload_json,'$.admittedAt')
+         AND EXISTS (SELECT 1 FROM json_each(grant.grant_json,'$.capabilities') capability
+                      WHERE capability.value=json_extract(NEW.payload_json,'$.capability'))
+     ) THEN RAISE(ABORT,'OFFLINE_GRANT_NEW_WORK_DENIED') END;
+     INSERT OR IGNORE INTO offline_grant_task_admissions
+       (tenant_id,device_id,owner_kind,credential_epoch,task_kind,task_id,snapshot_digest,admitted_at)
+       VALUES(json_extract(NEW.payload_json,'$.owner.tenantId'),json_extract(NEW.payload_json,'$.owner.deviceId'),
+              json_extract(NEW.payload_json,'$.owner.kind'),json_extract(NEW.payload_json,'$.owner.credentialEpoch'),
+              json_extract(NEW.payload_json,'$.taskKind'),json_extract(NEW.payload_json,'$.taskId'),
+              json_extract(NEW.payload_json,'$.snapshotDigest'),json_extract(NEW.payload_json,'$.admittedAt'));
+     UPDATE offline_grant_clock SET
+       high_water_ms=MAX(high_water_ms,json_extract(NEW.payload_json,'$.admittedAt')),
+       wall_high_water_ms=MAX(wall_high_water_ms,json_extract(NEW.payload_json,'$.sample.wallMs'))
+      WHERE id=1;
+   END;`,
+  `CREATE TABLE IF NOT EXISTS offline_grant_event_commands (
+     event_id TEXT PRIMARY KEY, payload_json TEXT NOT NULL CHECK(json_valid(payload_json)));`,
+  `CREATE TRIGGER IF NOT EXISTS offline_grant_event_apply AFTER INSERT ON offline_grant_event_commands BEGIN
+     SELECT CASE WHEN NOT EXISTS (
+       SELECT 1 FROM offline_grant_install_state state
+       WHERE state.id=1
+         AND state.tenant_id=json_extract(NEW.payload_json,'$.owner.tenantId')
+         AND state.device_id=json_extract(NEW.payload_json,'$.owner.deviceId')
+         AND state.owner_kind=json_extract(NEW.payload_json,'$.owner.kind')
+         AND state.credential_epoch=json_extract(NEW.payload_json,'$.owner.credentialEpoch')
+         AND state.mode=json_extract(NEW.payload_json,'$.mode')
+     ) THEN RAISE(ABORT,'OFFLINE_GRANT_STALE_OWNER') END;
+     SELECT CASE WHEN NOT EXISTS (
+       SELECT 1 FROM operators_mirror operator
+        WHERE operator.operator_id=json_extract(NEW.payload_json,'$.operatorId') AND operator.active=1
+          AND COALESCE((SELECT value FROM station_meta WHERE key='operators_slot'),'a')<>'b'
+          AND COALESCE((SELECT value FROM station_meta WHERE key='operators_blocked'),'0')<>'1'
+       UNION ALL
+       SELECT 1 FROM operators_mirror_b operator
+        WHERE operator.operator_id=json_extract(NEW.payload_json,'$.operatorId') AND operator.active=1
+          AND COALESCE((SELECT value FROM station_meta WHERE key='operators_slot'),'a')='b'
+          AND COALESCE((SELECT value FROM station_meta WHERE key='operators_blocked'),'0')<>'1'
+     ) THEN RAISE(ABORT,'OFFLINE_GRANT_OPERATOR_UNAUTHORIZED') END;
+     SELECT CASE WHEN (
+       json_extract(NEW.payload_json,'$.taskKind')='shift' AND NOT EXISTS (
+         SELECT 1 FROM shift_mirror shift
+          WHERE shift.id=json_extract(NEW.payload_json,'$.taskId') AND shift.status='active'
+            AND json(shift.execution_scope_json)=json(json_extract(NEW.payload_json,'$.executionScope'))
+       )
+     ) OR (
+       json_extract(NEW.payload_json,'$.taskKind')='inventory' AND NOT EXISTS (
+         SELECT 1 FROM inventory_task_mirror inventory
+          WHERE inventory.inventory_id=json_extract(NEW.payload_json,'$.taskId')
+            AND inventory.active_snapshot_id=json_extract(NEW.payload_json,'$.executionScope.snapshotId')
+            AND inventory.active_combined_digest=json_extract(NEW.payload_json,'$.executionScope.combinedDigest')
+            AND inventory.active_content_digest=json_extract(NEW.payload_json,'$.executionScope.contentDigest')
+            AND json(inventory.active_manifest_json)=json(json_extract(NEW.payload_json,'$.executionScope.manifest'))
+       )
+     ) THEN RAISE(ABORT,'OFFLINE_GRANT_EXECUTION_CHANGED') END;
+     SELECT CASE WHEN EXISTS (SELECT 1 FROM offline_grant_decisions WHERE event_id=NEW.event_id)
+       THEN RAISE(ABORT,'OFFLINE_GRANT_EVENT_REPLAY') END;
+     INSERT INTO offline_grant_decisions(event_id,event_digest,decision_json,result_json)
+     VALUES(
+       NEW.event_id,
+       json_extract(NEW.payload_json,'$.eventDigest'),
+       json_object(
+         'allow', CASE
+           WHEN json_extract(NEW.payload_json,'$.mode')='observe' THEN json('true')
+           WHEN json_extract(NEW.payload_json,'$.preDecision.allow')=1
+            AND NOT EXISTS (
+              SELECT 1 FROM json_each(NEW.payload_json,'$.cost') cost
+              WHERE cost.type!='integer' OR cost.value<0 OR NOT EXISTS (
+                SELECT 1 FROM json_each((SELECT grant_json FROM offline_grant_grants WHERE grant_id=json_extract(NEW.payload_json,'$.grantId')),'$.budget') budget
+                WHERE json_extract(budget.value,'$.id')=cost.key
+                  AND cost.value <= json_extract(budget.value,'$.maximum') - COALESCE((
+                    SELECT consumed FROM offline_grant_consumption consumed
+                    WHERE consumed.tenant_id=json_extract(NEW.payload_json,'$.owner.tenantId')
+                      AND consumed.device_id=json_extract(NEW.payload_json,'$.owner.deviceId')
+                      AND consumed.task_kind=json_extract(NEW.payload_json,'$.taskKind')
+                      AND consumed.task_id=json_extract(NEW.payload_json,'$.taskId')
+                      AND consumed.snapshot_digest=json_extract(NEW.payload_json,'$.snapshotDigest')
+                      AND consumed.budget_line_id=cost.key
+                  ),0)
+              )
+            ) THEN json('true') ELSE json('false') END,
+         'reason', CASE
+           WHEN json_extract(NEW.payload_json,'$.preDecision.allow')!=1 THEN json_extract(NEW.payload_json,'$.preDecision.reason')
+           WHEN EXISTS (
+             SELECT 1 FROM json_each(NEW.payload_json,'$.cost') cost
+             WHERE cost.type!='integer' OR cost.value<0 OR NOT EXISTS (
+               SELECT 1 FROM json_each((SELECT grant_json FROM offline_grant_grants WHERE grant_id=json_extract(NEW.payload_json,'$.grantId')),'$.budget') budget
+               WHERE json_extract(budget.value,'$.id')=cost.key
+                 AND cost.value <= json_extract(budget.value,'$.maximum') - COALESCE((
+                   SELECT consumed FROM offline_grant_consumption consumed
+                   WHERE consumed.tenant_id=json_extract(NEW.payload_json,'$.owner.tenantId')
+                     AND consumed.device_id=json_extract(NEW.payload_json,'$.owner.deviceId')
+                     AND consumed.task_kind=json_extract(NEW.payload_json,'$.taskKind')
+                     AND consumed.task_id=json_extract(NEW.payload_json,'$.taskId')
+                     AND consumed.snapshot_digest=json_extract(NEW.payload_json,'$.snapshotDigest')
+                     AND consumed.budget_line_id=cost.key
+                 ),0)
+             )
+           ) THEN 'budget_exhausted' ELSE NULL END,
+         'mode', json_extract(NEW.payload_json,'$.mode')
+       ),
+       json_extract(NEW.payload_json,'$.resultJson')
+     );
+     INSERT INTO offline_grant_consumption
+       (tenant_id,device_id,credential_epoch,task_kind,task_id,snapshot_digest,budget_line_id,consumed)
+     SELECT json_extract(NEW.payload_json,'$.owner.tenantId'),json_extract(NEW.payload_json,'$.owner.deviceId'),
+       json_extract(NEW.payload_json,'$.owner.credentialEpoch'),json_extract(NEW.payload_json,'$.taskKind'),
+       json_extract(NEW.payload_json,'$.taskId'),json_extract(NEW.payload_json,'$.snapshotDigest'),cost.key,cost.value
+     FROM json_each(NEW.payload_json,'$.cost') cost
+     WHERE json_extract((SELECT decision_json FROM offline_grant_decisions WHERE event_id=NEW.event_id),'$.reason') IS NULL
+       AND json_extract(NEW.payload_json,'$.preDecision.allow')=1
+     ON CONFLICT(tenant_id,device_id,task_kind,task_id,snapshot_digest,budget_line_id)
+       DO UPDATE SET consumed=offline_grant_consumption.consumed+excluded.consumed,
+                     credential_epoch=excluded.credential_epoch;
+     UPDATE offline_grant_clock SET
+       high_water_ms=MAX(high_water_ms,json_extract(NEW.payload_json,'$.clockHighWater')),
+       wall_high_water_ms=MAX(wall_high_water_ms,json_extract(NEW.payload_json,'$.wallHighWater'))
+     WHERE id=1 AND json_extract(NEW.payload_json,'$.preDecision.allow')=1
+       AND json_extract((SELECT decision_json FROM offline_grant_decisions WHERE event_id=NEW.event_id),'$.reason') IS NULL;
+   END;`,
+  `CREATE TABLE IF NOT EXISTS offline_grant_scan_commands (
+     event_id TEXT PRIMARY KEY, payload_json TEXT NOT NULL CHECK(json_valid(payload_json)),
+     stored_code INTEGER NOT NULL DEFAULT 0 CHECK(stored_code IN (0,1)));`,
+  `CREATE TRIGGER IF NOT EXISTS offline_grant_scan_apply AFTER INSERT ON offline_grant_scan_commands BEGIN
+     INSERT OR IGNORE INTO codes_mirror(code_hash,shift_id,gtin14,serial,scanned_at,box_id)
+       SELECT json_extract(NEW.payload_json,'$.code.codeHash'),json_extract(NEW.payload_json,'$.event.shiftId'),
+              json_extract(NEW.payload_json,'$.code.gtin14'),json_extract(NEW.payload_json,'$.code.serial'),
+              json_extract(NEW.payload_json,'$.event.scannedAt'),json_extract(NEW.payload_json,'$.code.boxId')
+        WHERE json_type(NEW.payload_json,'$.code')='object';
+     UPDATE offline_grant_scan_commands SET stored_code=changes() WHERE event_id=NEW.event_id;
+     INSERT INTO offline_grant_event_commands(event_id,payload_json)
+       SELECT NEW.event_id,
+              CASE WHEN (SELECT stored_code FROM offline_grant_scan_commands WHERE event_id=NEW.event_id)=1
+                THEN json_set(json_extract(NEW.payload_json,'$.grantCommand'),
+                  '$.cost."shift.scan.v1:units"',1)
+                ELSE json_set(json_extract(NEW.payload_json,'$.grantCommand'),
+                  '$.cost',json('{}'),'$.preDecision',json('{"allow":true}')) END;
+     UPDATE offline_grant_decisions
+        SET result_json=json_object(
+          'storedCode',json((SELECT CASE WHEN stored_code=1 THEN 'true' ELSE 'false' END FROM offline_grant_scan_commands WHERE event_id=NEW.event_id)),
+          'alreadyPresent',json((SELECT CASE WHEN stored_code=0 AND json_type(NEW.payload_json,'$.code')='object' THEN 'true' ELSE 'false' END FROM offline_grant_scan_commands WHERE event_id=NEW.event_id)))
+      WHERE event_id=NEW.event_id;
+     INSERT INTO scan_events_mirror(shift_id,terminal_id,raw,verdict,scanned_at,operator_id)
+       SELECT json_extract(NEW.payload_json,'$.event.shiftId'),json_extract(NEW.payload_json,'$.event.terminalId'),
+              json_extract(NEW.payload_json,'$.event.raw'),
+              CASE WHEN json_extract((SELECT result_json FROM offline_grant_decisions WHERE event_id=NEW.event_id),'$.alreadyPresent')=1 THEN 'duplicate' ELSE json_extract(NEW.payload_json,'$.event.verdict') END,
+              json_extract(NEW.payload_json,'$.event.scannedAt'),json_extract(NEW.payload_json,'$.event.operatorId')
+        WHERE json_extract((SELECT decision_json FROM offline_grant_decisions WHERE event_id=NEW.event_id),'$.allow')=1;
+     INSERT INTO outbox(shift_id,terminal_id,raw,verdict,scanned_at,code_hash,gtin14,serial,box_id,operator_id)
+       SELECT json_extract(NEW.payload_json,'$.event.shiftId'),json_extract(NEW.payload_json,'$.event.terminalId'),
+              json_extract(NEW.payload_json,'$.event.raw'),
+              CASE WHEN json_extract((SELECT result_json FROM offline_grant_decisions WHERE event_id=NEW.event_id),'$.alreadyPresent')=1 THEN 'duplicate' ELSE json_extract(NEW.payload_json,'$.event.verdict') END,
+              json_extract(NEW.payload_json,'$.event.scannedAt'),
+              CASE WHEN (SELECT stored_code FROM offline_grant_scan_commands WHERE event_id=NEW.event_id)=1 THEN json_extract(NEW.payload_json,'$.code.codeHash') END,
+              CASE WHEN (SELECT stored_code FROM offline_grant_scan_commands WHERE event_id=NEW.event_id)=1 THEN json_extract(NEW.payload_json,'$.code.gtin14') END,
+              CASE WHEN (SELECT stored_code FROM offline_grant_scan_commands WHERE event_id=NEW.event_id)=1 THEN json_extract(NEW.payload_json,'$.code.serial') END,
+              CASE WHEN (SELECT stored_code FROM offline_grant_scan_commands WHERE event_id=NEW.event_id)=1 THEN json_extract(NEW.payload_json,'$.code.boxId') END,
+              json_extract(NEW.payload_json,'$.event.operatorId')
+        WHERE json_extract((SELECT decision_json FROM offline_grant_decisions WHERE event_id=NEW.event_id),'$.allow')=1;
+     DELETE FROM codes_mirror
+      WHERE code_hash=json_extract(NEW.payload_json,'$.code.codeHash')
+        AND (SELECT stored_code FROM offline_grant_scan_commands WHERE event_id=NEW.event_id)=1
+        AND json_extract((SELECT decision_json FROM offline_grant_decisions WHERE event_id=NEW.event_id),'$.allow')<>1;
+   END;`,
+  `CREATE TABLE IF NOT EXISTS offline_grant_box_close_commands (
+     event_id TEXT PRIMARY KEY, payload_json TEXT NOT NULL CHECK(json_valid(payload_json)));`,
+  `CREATE TRIGGER IF NOT EXISTS offline_grant_box_close_apply AFTER INSERT ON offline_grant_box_close_commands BEGIN
+     INSERT INTO offline_grant_event_commands(event_id,payload_json)
+       VALUES(NEW.event_id,json_extract(NEW.payload_json,'$.grantCommand'));
+     INSERT INTO pallets_mirror(pallet_id,shift_id,terminal_id,opened_at)
+       SELECT json_extract(NEW.payload_json,'$.pallet.palletId'),json_extract(NEW.payload_json,'$.shiftId'),
+              json_extract(NEW.payload_json,'$.pallet.terminalId'),json_extract(NEW.payload_json,'$.closedAt')
+        WHERE json_type(NEW.payload_json,'$.pallet')='object'
+          AND json_extract((SELECT decision_json FROM offline_grant_decisions WHERE event_id=NEW.event_id),'$.allow')=1;
+     UPDATE sscc_pool SET next_serial=next_serial+1
+      WHERE rowid=json_extract(NEW.payload_json,'$.poolRowId')
+        AND next_serial=json_extract(NEW.payload_json,'$.serial')
+        AND next_serial<=to_serial
+        AND json_extract((SELECT decision_json FROM offline_grant_decisions WHERE event_id=NEW.event_id),'$.allow')=1;
+     UPDATE boxes_mirror
+        SET sscc=json_extract(NEW.payload_json,'$.sscc'),closed_at=json_extract(NEW.payload_json,'$.closedAt'),
+            closed_by=json_extract(NEW.payload_json,'$.operatorId'),pallet_id=json_extract(NEW.payload_json,'$.palletId'),
+            print_state='pending',print_error_code=NULL
+      WHERE box_id=json_extract(NEW.payload_json,'$.boxId') AND closed_at IS NULL
+        AND changes()=1
+        AND json_extract((SELECT decision_json FROM offline_grant_decisions WHERE event_id=NEW.event_id),'$.allow')=1;
+     SELECT CASE WHEN json_extract((SELECT decision_json FROM offline_grant_decisions WHERE event_id=NEW.event_id),'$.allow')=1
+       AND NOT EXISTS(SELECT 1 FROM boxes_mirror WHERE box_id=json_extract(NEW.payload_json,'$.boxId')
+         AND sscc=json_extract(NEW.payload_json,'$.sscc') AND closed_at=json_extract(NEW.payload_json,'$.closedAt'))
+       THEN RAISE(ABORT,'OFFLINE_GRANT_BOX_CLOSE_CONFLICT') END;
+   END;`,
+  `CREATE TABLE IF NOT EXISTS offline_grant_pallet_close_commands (
+     event_id TEXT PRIMARY KEY, payload_json TEXT NOT NULL CHECK(json_valid(payload_json)));`,
+  `CREATE TRIGGER IF NOT EXISTS offline_grant_pallet_close_apply AFTER INSERT ON offline_grant_pallet_close_commands BEGIN
+     INSERT INTO offline_grant_event_commands(event_id,payload_json)
+       VALUES(NEW.event_id,json_extract(NEW.payload_json,'$.grantCommand'));
+     UPDATE sscc_pool SET next_serial=next_serial+1
+      WHERE rowid=json_extract(NEW.payload_json,'$.poolRowId')
+        AND next_serial=json_extract(NEW.payload_json,'$.serial')
+        AND next_serial<=to_serial
+        AND json_extract((SELECT decision_json FROM offline_grant_decisions WHERE event_id=NEW.event_id),'$.allow')=1;
+     UPDATE pallets_mirror
+        SET sscc=json_extract(NEW.payload_json,'$.sscc'),closed_at=json_extract(NEW.payload_json,'$.closedAt'),
+            closed_by=json_extract(NEW.payload_json,'$.operatorId'),print_state='pending',print_error_code=NULL
+      WHERE pallet_id=json_extract(NEW.payload_json,'$.palletId') AND closed_at IS NULL
+        AND changes()=1
+        AND json_extract((SELECT decision_json FROM offline_grant_decisions WHERE event_id=NEW.event_id),'$.allow')=1;
+     SELECT CASE WHEN json_extract((SELECT decision_json FROM offline_grant_decisions WHERE event_id=NEW.event_id),'$.allow')=1
+       AND NOT EXISTS(SELECT 1 FROM pallets_mirror WHERE pallet_id=json_extract(NEW.payload_json,'$.palletId')
+         AND sscc=json_extract(NEW.payload_json,'$.sscc') AND closed_at=json_extract(NEW.payload_json,'$.closedAt'))
+       THEN RAISE(ABORT,'OFFLINE_GRANT_PALLET_CLOSE_CONFLICT') END;
+   END;`,
+  `CREATE TRIGGER IF NOT EXISTS offline_grant_seal_eligibility
+   AFTER UPDATE OF phase ON station_device_recovery
+   WHEN NEW.phase IN ('sealing','sealed','owner_unresolved')
+   BEGIN
+     DELETE FROM offline_grant_install_state;
+     DELETE FROM offline_grant_clock;
+   END;`,
+  // Evidence is never queried for authorization. Retired signing keys can remove
+  // installable grants without destroying bytes already used by durable work.
+  `CREATE TABLE IF NOT EXISTS offline_grant_event_evidence (
+     event_id TEXT PRIMARY KEY,
+     grant_id TEXT,
+     compact TEXT,
+     outbox_id INTEGER UNIQUE,
+     scan_pending INTEGER NOT NULL DEFAULT 0 CHECK(scan_pending IN (0,1)),
+     CHECK ((grant_id IS NULL) = (compact IS NULL)));`,
+  `INSERT OR IGNORE INTO offline_grant_event_evidence(event_id,grant_id,compact)
+     SELECT command.event_id,grant_row.grant_id,grant_row.compact
+       FROM offline_grant_event_commands command
+       LEFT JOIN offline_grant_grants grant_row ON grant_row.grant_id=json_extract(command.payload_json,'$.grantId');`,
+  `CREATE TRIGGER IF NOT EXISTS offline_grant_event_evidence_capture
+   BEFORE INSERT ON offline_grant_event_commands BEGIN
+     INSERT INTO offline_grant_event_evidence(event_id,grant_id,compact,scan_pending)
+       SELECT NEW.event_id,grant_row.grant_id,grant_row.compact,
+         EXISTS(SELECT 1 FROM offline_grant_scan_commands WHERE event_id=NEW.event_id)
+           OR COALESCE(json_extract(json_extract(NEW.payload_json,'$.resultJson'),'$.scanOutbox'),0)=1
+       FROM (SELECT 1) seed
+       LEFT JOIN offline_grant_grants grant_row ON grant_row.grant_id=json_extract(NEW.payload_json,'$.grantId');
+   END;`,
+  `CREATE TRIGGER IF NOT EXISTS offline_grant_scan_evidence_denied
+   AFTER INSERT ON offline_grant_decisions WHEN json_extract(NEW.decision_json,'$.allow')<>1
+   BEGIN UPDATE offline_grant_event_evidence SET scan_pending=0 WHERE event_id=NEW.event_id AND scan_pending=1; END;`,
+  `CREATE TRIGGER IF NOT EXISTS offline_grant_scan_evidence_pair_denied
+   AFTER UPDATE ON offline_grant_decisions WHEN json_extract(NEW.decision_json,'$.allow')<>1
+   BEGIN UPDATE offline_grant_event_evidence SET scan_pending=0 WHERE event_id=NEW.event_id AND scan_pending=1; END;`,
+  `CREATE TRIGGER IF NOT EXISTS offline_grant_event_evidence_immutable
+   BEFORE UPDATE ON offline_grant_event_evidence
+   WHEN NEW.event_id IS NOT OLD.event_id OR NEW.grant_id IS NOT OLD.grant_id
+     OR NEW.compact IS NOT OLD.compact OR OLD.outbox_id IS NOT NULL OR OLD.scan_pending<>1 OR NEW.scan_pending<>0
+   BEGIN SELECT RAISE(ABORT,'OFFLINE_GRANT_EVIDENCE_IMMUTABLE'); END;`,
+  `CREATE TRIGGER IF NOT EXISTS offline_grant_event_evidence_no_delete
+   BEFORE DELETE ON offline_grant_event_evidence
+   BEGIN SELECT RAISE(ABORT,'OFFLINE_GRANT_EVIDENCE_IMMUTABLE'); END;`,
+  `CREATE TRIGGER IF NOT EXISTS offline_grant_scan_evidence_outbox
+   AFTER INSERT ON outbox BEGIN
+     SELECT CASE WHEN (SELECT COUNT(*) FROM offline_grant_event_evidence WHERE scan_pending=1)>1
+       THEN RAISE(ABORT,'OFFLINE_GRANT_SCAN_ASSOCIATION_CONFLICT') END;
+     UPDATE offline_grant_event_evidence SET outbox_id=NEW.id,scan_pending=0
+       WHERE scan_pending=1 AND outbox_id IS NULL
+         AND EXISTS (SELECT 1 FROM offline_grant_decisions decision
+           WHERE decision.event_id=offline_grant_event_evidence.event_id
+             AND json_extract(decision.decision_json,'$.allow')=1);
+   END;`,
+  `CREATE TABLE IF NOT EXISTS offline_grant_inventory_leave_intents (
+     intent_key TEXT PRIMARY KEY,
+     inventory_id TEXT NOT NULL,
+     snapshot_id TEXT NOT NULL,
+     device_id TEXT NOT NULL,
+     operator_id TEXT NOT NULL,
+     event_id TEXT NOT NULL UNIQUE,
+     credential_ownership TEXT NOT NULL,
+     pointer_value TEXT NOT NULL CHECK(json_valid(pointer_value)),
+     payload_json TEXT NOT NULL CHECK(json_valid(payload_json)),
+     created_at TEXT NOT NULL,
+     left_at TEXT,
+     receipt_json TEXT CHECK(receipt_json IS NULL OR json_valid(receipt_json)),
+     CHECK((left_at IS NULL) = (receipt_json IS NULL))
+   );`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS offline_grant_inventory_leave_pending_task
+     ON offline_grant_inventory_leave_intents(inventory_id,snapshot_id)
+     WHERE left_at IS NULL;`,
+  `CREATE TABLE IF NOT EXISTS offline_grant_inventory_leave_commands (
+     command_id TEXT PRIMARY KEY,
+     payload_json TEXT NOT NULL CHECK(json_valid(payload_json))
+   );`,
+  `CREATE TRIGGER IF NOT EXISTS offline_grant_inventory_leave_apply
+   AFTER INSERT ON offline_grant_inventory_leave_commands BEGIN
+     SELECT CASE WHEN EXISTS (SELECT 1 FROM station_device_recovery)
+       AND NOT EXISTS (
+         SELECT 1 FROM station_device_recovery recovery JOIN station_device_owners owners ON owners.owner_json=recovery.owner_json
+         WHERE recovery.phase='active' AND recovery.active_hash=json_extract(NEW.payload_json,'$.currentCredentialOwnership')
+           AND owners.credential_hash=json_extract(NEW.payload_json,'$.credentialOwnership')
+       ) THEN RAISE(ABORT,'OFFLINE_GRANT_INVENTORY_LEAVE_OWNER_CHANGED') END;
+
+     SELECT CASE WHEN (SELECT COUNT(*) FROM json_each(NEW.payload_json))<>11
+       OR json_type(NEW.payload_json,'$.intentKey')<>'text'
+       OR json_type(NEW.payload_json,'$.inventoryId')<>'text'
+       OR json_type(NEW.payload_json,'$.snapshotId')<>'text'
+       OR json_type(NEW.payload_json,'$.deviceId')<>'text'
+       OR json_type(NEW.payload_json,'$.operatorId')<>'text'
+       OR json_type(NEW.payload_json,'$.eventId')<>'text'
+       OR json_type(NEW.payload_json,'$.credentialOwnership')<>'text'
+       OR json_type(NEW.payload_json,'$.currentCredentialOwnership')<>'text'
+       OR json_type(NEW.payload_json,'$.pointerValue')<>'text'
+       OR json_type(NEW.payload_json,'$.leavePayload')<>'object'
+       OR json_type(NEW.payload_json,'$.createdAt')<>'text'
+       THEN RAISE(ABORT,'OFFLINE_GRANT_INVENTORY_LEAVE_INVALID') END;
+     SELECT CASE WHEN json_extract(NEW.payload_json,'$.pointerValue') IS NOT
+       (SELECT value FROM station_meta WHERE key='active_inventory_floor_task_v1')
+       OR NOT json_valid(json_extract(NEW.payload_json,'$.pointerValue'))
+       OR (SELECT COUNT(*) FROM json_each(json_extract(NEW.payload_json,'$.pointerValue')))<>4
+       OR json_extract(json_extract(NEW.payload_json,'$.pointerValue'),'$.inventoryId') IS NOT json_extract(NEW.payload_json,'$.inventoryId')
+       OR json_extract(json_extract(NEW.payload_json,'$.pointerValue'),'$.snapshotId') IS NOT json_extract(NEW.payload_json,'$.snapshotId')
+       OR json_extract(json_extract(NEW.payload_json,'$.pointerValue'),'$.credentialOwnership') IS NOT json_extract(NEW.payload_json,'$.credentialOwnership')
+       OR json_type(json_extract(NEW.payload_json,'$.pointerValue'),'$.activationId')<>'text'
+       THEN RAISE(ABORT,'OFFLINE_GRANT_INVENTORY_LEAVE_OWNER_CHANGED') END;
+     SELECT CASE WHEN (SELECT COUNT(*) FROM json_each(NEW.payload_json,'$.leavePayload'))<>2
+       OR json_extract(NEW.payload_json,'$.leavePayload.pendingEventCount') IS NOT 0
+       OR json_type(NEW.payload_json,'$.leavePayload.openBoxCount')<>'integer'
+       OR json_extract(NEW.payload_json,'$.leavePayload.openBoxCount')<0
+       THEN RAISE(ABORT,'OFFLINE_GRANT_INVENTORY_LEAVE_INVALID') END;
+     SELECT CASE WHEN NOT EXISTS (
+       SELECT 1 FROM inventory_task_mirror task
+       JOIN inventory_terminal_state terminal
+         ON terminal.inventory_id=task.inventory_id AND terminal.snapshot_id=task.active_snapshot_id
+       WHERE task.inventory_id=json_extract(NEW.payload_json,'$.inventoryId')
+         AND task.active_snapshot_id=json_extract(NEW.payload_json,'$.snapshotId')
+         AND task.active_snapshot_revision=1
+         AND terminal.device_id=json_extract(NEW.payload_json,'$.deviceId')
+         AND terminal.operator_id=json_extract(NEW.payload_json,'$.operatorId')
+     ) OR EXISTS (
+       SELECT 1 FROM inventory_outbox queued
+       WHERE queued.inventory_id=json_extract(NEW.payload_json,'$.inventoryId')
+         AND queued.snapshot_id=json_extract(NEW.payload_json,'$.snapshotId')
+     ) OR NOT EXISTS (
+       SELECT 1 FROM offline_grant_decisions decision
+       WHERE decision.event_id=json_extract(NEW.payload_json,'$.eventId')
+         AND json_extract(decision.decision_json,'$.allow')=1
+     ) THEN RAISE(ABORT,'OFFLINE_GRANT_INVENTORY_LEAVE_NOT_READY') END;
+     SELECT CASE WHEN EXISTS (
+       SELECT 1 FROM offline_grant_inventory_leave_intents intent
+       WHERE intent.inventory_id=json_extract(NEW.payload_json,'$.inventoryId')
+         AND intent.snapshot_id=json_extract(NEW.payload_json,'$.snapshotId')
+         AND intent.left_at IS NULL
+         AND (intent.intent_key IS NOT json_extract(NEW.payload_json,'$.intentKey')
+           OR intent.event_id IS NOT json_extract(NEW.payload_json,'$.eventId')
+           OR intent.pointer_value IS NOT json_extract(NEW.payload_json,'$.pointerValue')
+           OR intent.payload_json IS NOT json(json_extract(NEW.payload_json,'$.leavePayload')))
+     ) THEN RAISE(ABORT,'OFFLINE_GRANT_INVENTORY_LEAVE_CONFLICT') END;
+     SELECT CASE WHEN json_extract(NEW.payload_json,'$.leavePayload.openBoxCount') IS NOT (
+       SELECT COUNT(*) FROM inventory_repack_boxes_mirror box
+       WHERE box.inventory_id=json_extract(NEW.payload_json,'$.inventoryId')
+         AND box.snapshot_id=json_extract(NEW.payload_json,'$.snapshotId')
+         AND box.owner_device_id=json_extract(NEW.payload_json,'$.deviceId') AND box.state='open'
+     ) THEN RAISE(ABORT,'OFFLINE_GRANT_INVENTORY_LEAVE_NOT_READY') END;
+     INSERT INTO offline_grant_inventory_leave_intents
+       (intent_key,inventory_id,snapshot_id,device_id,operator_id,event_id,credential_ownership,pointer_value,payload_json,created_at)
+     VALUES(json_extract(NEW.payload_json,'$.intentKey'),json_extract(NEW.payload_json,'$.inventoryId'),
+       json_extract(NEW.payload_json,'$.snapshotId'),json_extract(NEW.payload_json,'$.deviceId'),
+       json_extract(NEW.payload_json,'$.operatorId'),json_extract(NEW.payload_json,'$.eventId'),
+       json_extract(NEW.payload_json,'$.credentialOwnership'),json_extract(NEW.payload_json,'$.pointerValue'),
+       json(json_extract(NEW.payload_json,'$.leavePayload')),json_extract(NEW.payload_json,'$.createdAt'))
+     ON CONFLICT(intent_key) DO NOTHING;
+     SELECT CASE WHEN NOT EXISTS (
+       SELECT 1 FROM offline_grant_inventory_leave_intents intent
+       WHERE intent.intent_key=json_extract(NEW.payload_json,'$.intentKey')
+         AND intent.inventory_id=json_extract(NEW.payload_json,'$.inventoryId')
+         AND intent.snapshot_id=json_extract(NEW.payload_json,'$.snapshotId')
+         AND intent.device_id=json_extract(NEW.payload_json,'$.deviceId')
+         AND intent.operator_id=json_extract(NEW.payload_json,'$.operatorId')
+         AND intent.event_id=json_extract(NEW.payload_json,'$.eventId')
+         AND intent.credential_ownership=json_extract(NEW.payload_json,'$.credentialOwnership')
+         AND intent.pointer_value=json_extract(NEW.payload_json,'$.pointerValue')
+         AND intent.payload_json=json(json_extract(NEW.payload_json,'$.leavePayload'))
+         AND intent.left_at IS NULL
+     ) THEN RAISE(ABORT,'OFFLINE_GRANT_INVENTORY_LEAVE_CONFLICT') END;
+   END;`,
+  `CREATE TRIGGER IF NOT EXISTS offline_grant_inventory_leave_event_fence
+   BEFORE INSERT ON offline_grant_event_commands
+   WHEN json_extract(NEW.payload_json,'$.taskKind')='inventory'
+     AND EXISTS (
+       SELECT 1 FROM offline_grant_inventory_leave_intents intent
+       WHERE intent.inventory_id=json_extract(NEW.payload_json,'$.taskId')
+         AND intent.snapshot_id=json_extract(NEW.payload_json,'$.executionScope.snapshotId')
+         AND intent.device_id=json_extract(NEW.payload_json,'$.owner.deviceId')
+         AND intent.left_at IS NULL
+     )
+   BEGIN SELECT RAISE(ABORT,'OFFLINE_GRANT_INVENTORY_LEAVE_PENDING'); END;`,
+  `CREATE TABLE IF NOT EXISTS offline_grant_inventory_leave_ack_commands (
+     command_id TEXT PRIMARY KEY,
+     payload_json TEXT NOT NULL CHECK(json_valid(payload_json))
+   );`,
+  `CREATE TRIGGER IF NOT EXISTS offline_grant_inventory_leave_ack_apply
+   AFTER INSERT ON offline_grant_inventory_leave_ack_commands BEGIN
+     SELECT CASE WHEN EXISTS (SELECT 1 FROM station_device_recovery)
+       AND NOT EXISTS (
+         SELECT 1 FROM station_device_recovery recovery JOIN station_device_owners owners ON owners.owner_json=recovery.owner_json
+         WHERE recovery.phase='active' AND recovery.active_hash=json_extract(NEW.payload_json,'$.currentCredentialOwnership')
+           AND owners.credential_hash=json_extract(NEW.payload_json,'$.credentialOwnership')
+       ) THEN RAISE(ABORT,'OFFLINE_GRANT_INVENTORY_LEAVE_OWNER_CHANGED') END;
+
+     SELECT CASE WHEN (SELECT COUNT(*) FROM json_each(NEW.payload_json))<>5
+       OR json_type(NEW.payload_json,'$.intentKey')<>'text'
+       OR json_type(NEW.payload_json,'$.pointerValue')<>'text'
+       OR json_type(NEW.payload_json,'$.credentialOwnership')<>'text'
+       OR json_type(NEW.payload_json,'$.currentCredentialOwnership')<>'text'
+       OR json_type(NEW.payload_json,'$.receipt')<>'object'
+       OR (SELECT COUNT(*) FROM json_each(NEW.payload_json,'$.receipt'))<>1
+       OR json_extract(NEW.payload_json,'$.receipt.outcome') IS NOT 'left'
+       THEN RAISE(ABORT,'OFFLINE_GRANT_INVENTORY_LEAVE_ACK_INVALID') END;
+     SELECT CASE WHEN NOT EXISTS (
+       SELECT 1 FROM offline_grant_inventory_leave_intents intent
+       WHERE intent.intent_key=json_extract(NEW.payload_json,'$.intentKey')
+         AND intent.pointer_value=json_extract(NEW.payload_json,'$.pointerValue')
+         AND intent.credential_ownership=json_extract(NEW.payload_json,'$.credentialOwnership')
+         AND (intent.left_at IS NULL OR intent.receipt_json=json(json_extract(NEW.payload_json,'$.receipt')))
+     ) THEN RAISE(ABORT,'OFFLINE_GRANT_INVENTORY_LEAVE_ACK_CHANGED') END;
+     SELECT CASE WHEN EXISTS (
+       SELECT 1 FROM offline_grant_inventory_leave_intents intent
+       WHERE intent.intent_key=json_extract(NEW.payload_json,'$.intentKey') AND intent.left_at IS NULL
+     ) AND json_extract(NEW.payload_json,'$.pointerValue') IS NOT
+       (SELECT value FROM station_meta WHERE key='active_inventory_floor_task_v1')
+       THEN RAISE(ABORT,'OFFLINE_GRANT_INVENTORY_LEAVE_OWNER_CHANGED') END;
+     UPDATE offline_grant_inventory_leave_intents
+       SET left_at=CURRENT_TIMESTAMP,receipt_json=json(json_extract(NEW.payload_json,'$.receipt'))
+       WHERE intent_key=json_extract(NEW.payload_json,'$.intentKey') AND left_at IS NULL;
+     DELETE FROM station_meta
+       WHERE key='active_inventory_floor_task_v1'
+         AND value=json_extract(NEW.payload_json,'$.pointerValue')
+         AND EXISTS (SELECT 1 FROM offline_grant_inventory_leave_intents intent
+           WHERE intent.intent_key=json_extract(NEW.payload_json,'$.intentKey') AND intent.left_at IS NOT NULL);
+     SELECT CASE WHEN NOT EXISTS (
+       SELECT 1 FROM offline_grant_inventory_leave_intents intent
+       WHERE intent.intent_key=json_extract(NEW.payload_json,'$.intentKey')
+         AND intent.receipt_json=json(json_extract(NEW.payload_json,'$.receipt'))
+         AND intent.left_at IS NOT NULL
+     ) OR EXISTS (
+       SELECT 1 FROM station_meta WHERE key='active_inventory_floor_task_v1'
+         AND value=json_extract(NEW.payload_json,'$.pointerValue')
+     ) THEN RAISE(ABORT,'OFFLINE_GRANT_INVENTORY_LEAVE_ACK_FAILED') END;
+   END;`,
+  `CREATE TABLE IF NOT EXISTS offline_grant_evidence_commit_guards (
+     id INTEGER PRIMARY KEY CHECK(id=1),current_owner TEXT NOT NULL,original_owner TEXT NOT NULL);`,
+  `CREATE TRIGGER IF NOT EXISTS offline_grant_evidence_commit_guard
+   BEFORE INSERT ON offline_grant_evidence_commit_guards BEGIN
+     SELECT CASE WHEN (
+       NOT EXISTS (SELECT 1 FROM station_device_recovery) AND NEW.current_owner<>NEW.original_owner
+     ) OR (
+       EXISTS (SELECT 1 FROM station_device_recovery) AND NOT EXISTS (
+         SELECT 1 FROM station_device_recovery recovery JOIN station_device_owners owner ON owner.owner_json=recovery.owner_json
+         WHERE recovery.phase='active' AND recovery.active_hash=NEW.current_owner AND owner.credential_hash=NEW.original_owner
+       )
+     ) THEN RAISE(ABORT,'OFFLINE_GRANT_EVIDENCE_OWNER_CHANGED') END;
+   END;`,
+  `CREATE TRIGGER IF NOT EXISTS offline_grant_evidence_commit_guard_clear
+   AFTER INSERT ON offline_grant_evidence_commit_guards
+   BEGIN DELETE FROM offline_grant_evidence_commit_guards WHERE id=NEW.id; END;`,
 ];
 
 export interface StationMigrationEntry {

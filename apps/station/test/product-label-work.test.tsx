@@ -10,6 +10,8 @@ import {
   createCredentialGeneration,
   sealCredentialGeneration,
 } from "../src/lib/credential-recovery.js";
+import { assertPreparedLabelMatchesExecution } from "../src/lib/product-labels/acceptance.js";
+import type { ShiftExecutionProjection } from "../src/lib/offline-grants/semantic.js";
 const resources: Awaited<ReturnType<typeof openProductLabelWork>>[] = [];
 async function setup(
   verification: "none" | "required" = "required",
@@ -111,6 +113,60 @@ describe("product label floor controller", () => {
       await sending;
     }
   });
+  it("rejects an older prepared label after signed product execution changes", async () => {
+    const { h } = await setup();
+    const execution: ShiftExecutionProjection = {
+      taskKind: "shift",
+      taskId: h.input.shiftId,
+      scope: {
+        shift: {
+          id: h.input.shiftId,
+          productId: "product",
+          mode: "validation",
+          lineId: null,
+          counterpartyId: null,
+          counterpartyName: null,
+          labelTemplateId: null,
+          boxLabelTemplateId: null,
+          palletLabelTemplateId: null,
+          validationPrintMode: h.input.policy.mode,
+          allowPreviouslyAcceptedCodes: false,
+          validationPrintVerification: h.input.policy.verification,
+          validationPrintTemplateId: h.input.policy.templateId,
+          validationPrintSnapshot: h.input.policy.snapshot,
+          validationPrintPolicyRevision: h.input.policy.policyRevision,
+          boxCapacity: null,
+          palletsEnabled: false,
+          palletBoxCapacity: null,
+          stationClosePolicy: null,
+          stationCloseOwnerDeviceId: null,
+          plannedDate: "2026-09-08",
+          productionDate: "2026-09-08",
+          number: h.input.fields["shift.no"],
+        },
+        product: {
+          id: "product",
+          gtin14: h.input.gtin14,
+          name: h.input.fields["product.name"],
+          printName: null,
+          egaisCode: null,
+          shelfLifeDays: 30,
+        },
+        templates: [],
+      },
+    };
+    expect(() => assertPreparedLabelMatchesExecution(h.input, execution)).not.toThrow();
+    expect(() =>
+      assertPreparedLabelMatchesExecution(h.input, {
+        ...execution,
+        scope: {
+          ...execution.scope,
+          product: { ...execution.scope.product, gtin14: "04600000000018" },
+        },
+      }),
+    ).toThrow(/prepared label execution changed/);
+  });
+
   it("serializes a skip with scanning and unlocks only after the durable commit", async () => {
     const { h, work, generation } = await setup();
     await work.resumePrepared();

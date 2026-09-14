@@ -17,6 +17,8 @@ import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : AppCompatActivity() {
+    @Inject lateinit var grants: app.markiro.handheld.core.grants.GrantRefresher
+
     @Inject lateinit var scanRouter: ScanRouter
 
     @Inject lateinit var session: SessionHolder
@@ -35,6 +37,7 @@ class MainActivity : AppCompatActivity() {
         AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags(preferences.language))
         setContent { MarkiroApp(shell, session, refresher, preferences) }
         shell.onUserInteraction()
+        grants.start()
     }
 
     override fun onUserInteraction() {

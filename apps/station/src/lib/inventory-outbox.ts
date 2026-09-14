@@ -4,11 +4,15 @@ import {
   inventoryEventSchema,
   parseInventoryEventBatch,
   parseInventoryEventBatchResponse,
+  productLabelValueDigest,
   type InventoryEventBatch,
   type InventoryEventBatchResponse,
+  type InventoryEvent,
 } from "@markiro/domain";
 
 import type { SqlExecutor } from "./mirror.js";
+import { readStationSavedEvidence } from "./offline-grants/evidence-store.js";
+import type { SavedStationEvidenceLink } from "./offline-grants/evidence.js";
 
 interface OutboxRow {
   id: number;
@@ -23,11 +27,33 @@ export interface PreparedInventoryOutboxBatch {
   readonly deviceId: string;
   readonly pinValue: string;
   readonly request: InventoryEventBatch;
+  /** Absent only on a legacy pin written before negotiated evidence existed. */
+  readonly negotiated?: boolean;
+  readonly evidenceLinks?: readonly SavedStationEvidenceLink[];
   readonly outboxRows: ReadonlyArray<{
     readonly id: number;
     readonly eventId: string;
     readonly payloadJson: string;
   }>;
+}
+
+function parseEvidenceLinks(value: unknown): readonly SavedStationEvidenceLink[] {
+  if (!Array.isArray(value)) throw new Error("inventory outbox pin is invalid");
+  return value.map((item) => {
+    if (typeof item !== "object" || item === null || Array.isArray(item)) {
+      throw new Error("inventory outbox pin is invalid");
+    }
+    const row = item as Record<string, unknown>;
+    if (
+      Object.keys(row).length !== 3 ||
+      typeof row.pointer !== "string" ||
+      typeof row.grantId !== "string" ||
+      typeof row.compact !== "string"
+    ) {
+      throw new Error("inventory outbox pin is invalid");
+    }
+    return { pointer: row.pointer, grantId: row.grantId, compact: row.compact };
+  });
 }
 
 export interface PrepareInventoryOutboxBatchInput {
@@ -38,6 +64,7 @@ export interface PrepareInventoryOutboxBatchInput {
 
 const pinKey = (inventoryId: string, snapshotId: string) =>
   `inventory_sync_batch_v1:${inventoryId}:${snapshotId}`;
+const evidencePinKey = (batchId: string) => `inventory_sync_evidence_v1:${batchId}`;
 
 function parseJson(value: string, message: string): unknown {
   try {
@@ -83,11 +110,21 @@ function parsePinned(
     }
     return { id: row.id, eventId: row.eventId, payloadJson: row.payloadJson };
   });
+  const negotiated = record.negotiated;
+  if (negotiated !== undefined && typeof negotiated !== "boolean") {
+    throw new Error("inventory outbox pin is invalid");
+  }
+  if (negotiated === undefined) {
+    return { ...expected, pinValue: value, request, outboxRows };
+  }
+  const evidenceLinks = parseEvidenceLinks(record.evidenceLinks);
   return {
     ...expected,
     pinValue: value,
     request,
     outboxRows,
+    negotiated,
+    evidenceLinks,
   };
 }
 
@@ -107,7 +144,40 @@ async function readPin(
   );
   const deviceId = terminals[0]?.device_id;
   if (!deviceId) throw new Error("inventory outbox pin is invalid");
-  return parsePinned(rows[0].value, { inventoryId, snapshotId, deviceId });
+  const pinned = parsePinned(rows[0].value, { inventoryId, snapshotId, deviceId });
+  const evidenceRows = await exec.all<{ value: string }>(
+    "SELECT value FROM station_meta WHERE key = ?",
+    [evidencePinKey(pinned.request.batchId)],
+  );
+  if (!evidenceRows[0]) return pinned;
+  const evidence = parseJson(evidenceRows[0].value, "inventory evidence pin is invalid");
+  if (typeof evidence !== "object" || evidence === null || Array.isArray(evidence)) {
+    throw new Error("inventory evidence pin is invalid");
+  }
+  const envelope = evidence as Record<string, unknown>;
+  if (
+    Object.keys(envelope).length !== 2 ||
+    typeof envelope.digest !== "string" ||
+    typeof envelope.metadata !== "object" ||
+    envelope.metadata === null ||
+    Array.isArray(envelope.metadata) ||
+    productLabelValueDigest(envelope.metadata) !== envelope.digest
+  ) {
+    throw new Error("inventory evidence pin is invalid");
+  }
+  const record = envelope.metadata as Record<string, unknown>;
+  if (
+    Object.keys(record).length !== 3 ||
+    record.pinValue !== rows[0].value ||
+    typeof record.negotiated !== "boolean"
+  ) {
+    throw new Error("inventory evidence pin is invalid");
+  }
+  return {
+    ...pinned,
+    negotiated: record.negotiated,
+    evidenceLinks: parseEvidenceLinks(record.evidenceLinks),
+  };
 }
 
 async function verifyPinnedRows(
@@ -135,6 +205,20 @@ async function verifyPinnedRows(
   }
 }
 
+function evidenceEvents(event: InventoryEvent, index: number) {
+  return [
+    { eventId: event.eventId, pointer: `/events/${index}#inventory.scan.v1` },
+    {
+      eventId: `${event.eventId}#inventory.repack.v1`,
+      pointer: `/events/${index}#inventory.repack.v1`,
+    },
+    {
+      eventId: `${event.eventId}#inventory.box.close.v1`,
+      pointer: `/events/${index}#inventory.box.close.v1`,
+    },
+  ];
+}
+
 export async function prepareInventoryOutboxBatch(
   exec: SqlExecutor,
   input: PrepareInventoryOutboxBatchInput,
@@ -144,13 +228,13 @@ export async function prepareInventoryOutboxBatch(
     await verifyPinnedRows(exec, pinned);
     return pinned;
   }
-  const rows = await exec.all<OutboxRow>(
+  const candidates = await exec.all<OutboxRow>(
     `SELECT id, event_id, device_sequence, payload_json FROM inventory_outbox
       WHERE inventory_id = ? AND snapshot_id = ?
       ORDER BY device_sequence, id LIMIT ?`,
     [input.inventoryId, input.snapshotId, INVENTORY_EVENT_BATCH_SIZE],
   );
-  if (rows.length === 0) return null;
+  if (candidates.length === 0) return null;
   const taskRows = await exec.all<{ active_snapshot_revision: number | null }>(
     `SELECT active_snapshot_revision FROM inventory_task_mirror
       WHERE inventory_id = ? AND active_snapshot_id = ?`,
@@ -166,7 +250,10 @@ export async function prepareInventoryOutboxBatch(
   );
   const terminal = terminalRows[0];
   if (!terminal?.operator_id) throw new Error("inventory terminal identity is missing");
-  const events = rows.map((row) => {
+  const rows: OutboxRow[] = [];
+  const events: InventoryEvent[] = [];
+  let selectedNegotiated: boolean | null = null;
+  for (const row of candidates) {
     const parsed = inventoryEventSchema.safeParse(
       parseJson(row.payload_json, "inventory outbox payload is invalid"),
     );
@@ -178,8 +265,12 @@ export async function prepareInventoryOutboxBatch(
     ) {
       throw new Error("inventory outbox payload changed");
     }
-    return parsed.data;
-  });
+    const evidence = await readStationSavedEvidence(exec, evidenceEvents(parsed.data, 0));
+    selectedNegotiated ??= evidence.negotiated;
+    if (evidence.negotiated !== selectedNegotiated) break;
+    rows.push(row);
+    events.push(parsed.data);
+  }
   const last = rows.at(-1);
   if (!last) return null;
   const pendingRows = await exec.all<{ count: number }>(
@@ -216,10 +307,26 @@ export async function prepareInventoryOutboxBatch(
       payloadJson: row.payload_json,
     })),
   };
+  const pinValue = JSON.stringify(batch);
+  const { negotiated, links: evidenceLinks } = await readStationSavedEvidence(
+    exec,
+    events.flatMap(evidenceEvents),
+  );
   await exec.run(
     `INSERT INTO station_meta (key, value) VALUES (?, ?)
      ON CONFLICT(key) DO NOTHING`,
-    [pinKey(input.inventoryId, input.snapshotId), JSON.stringify(batch)],
+    [
+      evidencePinKey(request.batchId),
+      JSON.stringify({
+        metadata: { pinValue, negotiated, evidenceLinks },
+        digest: productLabelValueDigest({ pinValue, negotiated, evidenceLinks }),
+      }),
+    ],
+  );
+  await exec.run(
+    `INSERT INTO station_meta (key, value) VALUES (?, ?)
+     ON CONFLICT(key) DO NOTHING`,
+    [pinKey(input.inventoryId, input.snapshotId), pinValue],
   );
   const stored = await readPin(exec, input.inventoryId, input.snapshotId);
   if (!stored) throw new Error("inventory outbox pin was not persisted");

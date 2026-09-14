@@ -25,12 +25,14 @@ class ValidationMigrationTest {
 
     @Test fun realV12UpgradePreservesValidationFactsAndMigratesOnlyPrinterRouting() = upgradeFrom(12)
 
+    @Test fun realV13UpgradePreservesValidationAndPrinterDestinationsWhenAddingGrants() = upgradeFrom(13)
+
     private fun upgradeFrom(version: Int) = runTest {
         val context=ApplicationProvider.getApplicationContext<Context>(); val name="validation-${UUID.randomUUID()}.db"
-        fun open()=Room.databaseBuilder(context,HandheldDatabase::class.java,name).allowMainThreadQueries().addMigrations(MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13).build()
+        fun open()=Room.databaseBuilder(context,HandheldDatabase::class.java,name).allowMainThreadQueries().addMigrations(MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14).build()
         val raw="010460068200001321legacy\u001d93CRYPTO"; val km=KmCodec.canonicalize(raw); val hash=KmCodec.hash(km)
         val savedTemplate="""{ "dpi":203, "caption":"Кега", "elements":[{"literal":"^FNC1"}] }"""
-        val shift=ShiftEntityFixtures.bundled("s1").copy(validationPrintMode="duplicate_dm", allowPreviouslyAcceptedCodes=version == 12, duplicateTemplate=savedTemplate, duplicateTemplateDigest="a".repeat(64), duplicatePolicyRevision="legacy-revision", duplicateVerification="required")
+        val shift=ShiftEntityFixtures.bundled("s1").copy(validationPrintMode="duplicate_dm", allowPreviouslyAcceptedCodes=version >= 12, duplicateTemplate=savedTemplate, duplicateTemplateDigest="a".repeat(64), duplicatePolicyRevision="legacy-revision", duplicateVerification="required")
         val at="2026-09-12T08:00:00Z"
         val bytes=byteArrayOf(0,1,29,94,70,68,-1)
         val savedJob=ProductLabelJobEntity(jobId="legacy-job",shiftId="s1",codeHash=hash,canonicalRaw=raw,acceptedAt=at,operatorId="op",policyRevision="legacy-revision",templateDigest="a".repeat(64),payloadDigest="b".repeat(64),bytesBase64=java.util.Base64.getEncoder().encodeToString(bytes),bytesDigest="c".repeat(64),language="zpl",dpi=203,latestSequence=1,attemptId="legacy-attempt",attemptNo=1,attemptState="prepared",verification="required",verificationOutcome="pending",status="prepared",lastFailure=null)
@@ -50,7 +52,7 @@ class ValidationMigrationTest {
             old.printerDao().upsert(printer)
             old.printerDao().upsert(otherPrinter)
             old.boxDao().insert(unknownBox)
-            if (version == 12) {
+            if (version >= 12) {
                 old.validationDao().insert(savedOccurrence)
                 old.validationDao().stage(listOf(history))
                 old.validationDao().publish(publication)
@@ -60,9 +62,15 @@ class ValidationMigrationTest {
             old.scanEventDao().insert(ScanEventEntity(shiftId="s1",raw=raw,verdict="ok",scannedAt=at,operatorId="op",codeHash=hash))
             old.scanEventDao().insert(ScanEventEntity(shiftId="s1",raw="older",verdict="ok",scannedAt="2026-09-01T00:00:00Z",operatorId="op",codeHash=hash))
             val queueId=old.outboxDao().insert(OutboxEntity(shiftId="s1",raw=raw,verdict="ok",scannedAt=at,operatorId="op",codeHash=hash,gtin14=km.gtin14,serial=km.serial))
+            if (version == 13) old.printerDao().saveDestination(app.markiro.handheld.core.print.PrintDestinationEntity("duplicate",savedJob.jobId,savedJob.attemptId,otherPrinter))
             val sqlite=old.openHelper.writableDatabase
-            sqlite.execSQL("DROP TABLE printer_assignments")
-            sqlite.execSQL("DROP TABLE print_destinations")
+            listOf("grant_state", "grant_tokens", "grant_counters", "grant_evidence", "grant_task_bindings", "grant_task_provenance").forEach { sqlite.execSQL("DROP TABLE $it") }
+            if (version < 13) {
+                sqlite.execSQL("DROP TABLE printer_assignments")
+                sqlite.execSQL("DROP TABLE print_destinations")
+            } else {
+                app.markiro.handheld.core.print.PrintPurpose.entries.forEach { old.printerDao().assign(app.markiro.handheld.core.print.PrinterAssignmentEntity(it.wire, printer.id)) }
+            }
             if (version < 12) {
                 val create=sqlite.query("SELECT sql FROM sqlite_master WHERE name='shift_mirror'").use { it.moveToFirst(); it.getString(0) }
                 val legacyCreate=create.replace(Regex("`allowPreviouslyAcceptedCodes` INTEGER NOT NULL DEFAULT 0,\\s*"),"")
@@ -82,14 +90,16 @@ class ValidationMigrationTest {
             for(restart in 0..1) {
                 val db=open(); db.initializeRecoveryForTest()
                 try {
-                    assertEquals(13, db.openHelper.readableDatabase.version)
-                    assertEquals(version == 12, db.shiftDao().get("s1")!!.allowPreviouslyAcceptedCodes)
+                    assertEquals(14, db.openHelper.readableDatabase.version)
+                    assertNull(db.grantDao().state())
+                    assertTrue(db.grantDao().evidence().isEmpty())
+                    assertEquals(version >= 12, db.shiftDao().get("s1")!!.allowPreviouslyAcceptedCodes)
                     assertEquals(shift,db.shiftDao().get("s1"))
                     assertEquals(printer,db.printerDao().get(printer.id))
                     assertEquals(otherPrinter,db.printerDao().get(otherPrinter.id))
                     PrintPurpose.entries.forEach { assertEquals(printer,db.printerDao().assigned(it)) }
                     assertEquals(unknownBox,db.boxDao().get(unknownBox.boxId))
-                    assertNull(db.printerDao().destination("duplicate",savedJob.jobId,savedJob.attemptId))
+                    assertEquals(if (version == 13) otherPrinter else null, db.printerDao().destination("duplicate",savedJob.jobId,savedJob.attemptId)?.printer)
                     assertEquals(savedJob,db.productLabelJobDao().get(savedJob.jobId))
                     assertEquals(if (version >= 11) listOf(palletAudit) else emptyList<PalletExceptionEntity>(), db.palletExceptionDao().queued())
                     assertArrayEquals(bytes,java.util.Base64.getDecoder().decode(db.productLabelJobDao().get(savedJob.jobId)!!.bytesBase64))
@@ -97,7 +107,7 @@ class ValidationMigrationTest {
                     assertEquals(savedTemplate,db.shiftDao().get("s1")!!.duplicateTemplate)
                     val occurrence=db.validationDao().get("s1",hash)!!
                     assertEquals(at,occurrence.scannedAt); assertEquals(raw,occurrence.raw)
-                    if (version == 12) {
+                    if (version >= 12) {
                         assertEquals(savedOccurrence,occurrence)
                         assertEquals(publication,db.validationDao().publication("s1"))
                         assertEquals(listOf(history),db.validationDao().history("s1",hash))

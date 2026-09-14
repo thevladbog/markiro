@@ -4,6 +4,14 @@ import {
   type ShiftCloseReasonCode,
 } from "@markiro/domain";
 import type { SqlExecutor } from "./mirror.js";
+import type { CredentialGeneration } from "./credential-recovery.js";
+import { acquireCredentialCommitLease } from "./credential-recovery.js";
+import {
+  StationGrantAdmission,
+  stationOperatorIsCurrentlyActive,
+} from "./offline-grants/admission.js";
+import { sampleGrantClock, type GrantClockSample } from "./offline-grants/clock.js";
+import { readShiftExecutionProjection } from "./offline-grants/semantic.js";
 
 export interface OfflineShiftCloseSummary {
   eventId: string;
@@ -79,7 +87,7 @@ async function removeEmptyOpenBoxes(exec: SqlExecutor, shiftId: string): Promise
   );
 }
 
-export async function closeShiftOffline(
+async function closeShiftOfflineLegacy(
   exec: SqlExecutor,
   input: {
     shiftId: string;
@@ -203,6 +211,163 @@ export async function closeShiftOffline(
     reasonCode: reason,
     closedAt,
   };
+}
+
+export async function closeShiftOffline(
+  exec: SqlExecutor,
+  input: Parameters<typeof closeShiftOfflineLegacy>[1],
+  now: () => Date = () => new Date(),
+): Promise<OfflineShiftCloseSummary> {
+  const [active] = await exec.all<{ active: number }>(
+    "SELECT 1 active FROM offline_grant_install_state WHERE id=1",
+  );
+  if (active?.active === 1) throw new Error("offline grant-aware shift close owner required");
+  return closeShiftOfflineLegacy(exec, input, now);
+}
+
+/** Current close owner: closure snapshot, task charge and mirror transition commit together. */
+export async function closeShiftOfflineWithGrant(
+  exec: SqlExecutor,
+  input: Parameters<typeof closeShiftOfflineLegacy>[1],
+  generation: CredentialGeneration,
+  now: () => Date = () => new Date(),
+  clock: () => Promise<GrantClockSample> = sampleGrantClock,
+): Promise<OfflineShiftCloseSummary> {
+  const lease = acquireCredentialCommitLease(generation);
+  if (!lease) throw new Error("offline grant stale credential");
+  try {
+    const [state] = await exec.all<{
+      tenant_id: string;
+      device_id: string;
+      owner_kind: "station";
+      credential_epoch: number;
+    }>(
+      "SELECT tenant_id,device_id,owner_kind,credential_epoch FROM offline_grant_install_state WHERE id=1",
+    );
+    if (!state) return closeShiftOfflineLegacy(exec, input, now);
+    if (!input.operatorId) throw new Error("offline grant operator unauthorized");
+    if (!(await stationOperatorIsCurrentlyActive(exec, input.operatorId)))
+      throw new Error("offline grant operator unauthorized");
+    const stored = await loadStoredClose(exec, input.shiftId);
+    if (stored) return presentStoredClose(stored);
+    const [shift] = await exec.all<{
+      id: string;
+      product_id: string;
+      product_name: string | null;
+      planned_qty: number | null;
+      status: string;
+    }>("SELECT id,product_id,product_name,planned_qty,status FROM shift_mirror WHERE id=?", [
+      input.shiftId,
+    ]);
+    if (!shift || shift.status === "closed") throw new Error("Shift is not available offline");
+    const [printPolicy] = await exec.all<{ enabled: number }>(
+      "SELECT json_extract(validation_print_context,'$.policy.mode')='duplicate_dm' AS enabled FROM shift_mirror WHERE id=?",
+      [input.shiftId],
+    );
+    if (printPolicy?.enabled === 1) {
+      if (!input.credentialOwnership) throw new Error("PRODUCT_LABEL_CREDENTIAL_REQUIRED");
+      const [foreign] = await exec.all<{ job_id: string }>(
+        "SELECT job_id FROM product_label_jobs WHERE shift_id=? AND credential_ownership<>? LIMIT 1",
+        [input.shiftId, input.credentialOwnership],
+      );
+      if (foreign) throw new Error("PRODUCT_LABEL_CREDENTIAL_MISMATCH");
+      const [pending] = await exec.all<{ job_id: string }>(
+        "SELECT job_id FROM product_label_jobs WHERE shift_id=? AND status<>'completed' LIMIT 1",
+        [input.shiftId],
+      );
+      if (pending) throw new Error("PRODUCT_LABEL_UNRESOLVED");
+    }
+    const [{ actualQty = 0 } = {}] = await exec.all<{ actualQty: number }>(
+      "SELECT COUNT(*) actualQty FROM codes_mirror WHERE shift_id=?",
+      [input.shiftId],
+    );
+    const [{ closedBoxCount = 0 } = {}] = await exec.all<{ closedBoxCount: number }>(
+      "SELECT COUNT(*) closedBoxCount FROM boxes_mirror WHERE shift_id=? AND closed_at IS NOT NULL",
+      [input.shiftId],
+    );
+    const [{ openBoxCount = 0 } = {}] = await exec.all<{ openBoxCount: number }>(
+      `SELECT COUNT(*) openBoxCount FROM boxes_mirror b WHERE b.shift_id=? AND b.closed_at IS NULL AND EXISTS(SELECT 1 FROM codes_mirror c WHERE c.box_id=b.box_id)`,
+      [input.shiftId],
+    );
+    if (openBoxCount > 0) throw new Error("Close the open box before closing the shift");
+    const reason = input.reasonCode ?? null;
+    if (
+      shiftCloseReasonRequired(shift.planned_qty, actualQty) &&
+      (!reason || !isShiftCloseReasonCode(reason))
+    )
+      throw new Error("A close reason is required");
+    if (reason !== null && !isShiftCloseReasonCode(reason)) throw new Error("Unknown close reason");
+    const [binding] = await exec.all<{ snapshot_digest: string }>(
+      `SELECT json_extract(grant_json,'$.snapshotDigest') snapshot_digest FROM offline_grant_grants WHERE json_extract(grant_json,'$.kindOfGrant')='task' AND json_extract(grant_json,'$.taskKind')='shift' AND json_extract(grant_json,'$.taskId')=? ORDER BY installed_sequence DESC LIMIT 1`,
+      [input.shiftId],
+    );
+    const closedAt = now().toISOString(),
+      eventId = crypto.randomUUID();
+    const result: OfflineShiftCloseSummary = {
+      eventId,
+      shiftId: input.shiftId,
+      productId: shift.product_id,
+      productName: shift.product_name ?? "",
+      plannedQtySnapshot: shift.planned_qty,
+      actualQty,
+      closedBoxCount,
+      reasonCode: reason,
+      closedAt,
+    };
+    const committed = await new StationGrantAdmission(exec, clock).commitCompletion({
+      operatorId: input.operatorId,
+      intent: {
+        owner: {
+          tenantId: state.tenant_id,
+          deviceId: state.device_id,
+          kind: state.owner_kind,
+          credentialEpoch: state.credential_epoch,
+        },
+        capability: "shift.start.v1",
+        taskId: input.shiftId,
+        snapshotDigest: binding?.snapshot_digest ?? "missing",
+        eventId,
+        eventType: "shift.close.v1",
+        cost: {},
+      },
+      execution: await readShiftExecutionProjection(exec, input.shiftId),
+      event: result,
+      facts: {},
+      result,
+      ownerStatements: [
+        {
+          sql: `DELETE FROM boxes_mirror WHERE shift_id=? AND closed_at IS NULL AND NOT EXISTS(SELECT 1 FROM codes_mirror c WHERE c.box_id=boxes_mirror.box_id)`,
+          values: [input.shiftId],
+        },
+        {
+          sql: `INSERT INTO shift_close_outbox(event_id,shift_id,device_id,operator_id,product_id,product_name,planned_qty_snapshot,actual_qty,closed_box_count,reason_code,closed_at) SELECT ?,?,?,?,?,?,?,?,?,?,? WHERE json_extract((SELECT decision_json FROM offline_grant_decisions WHERE event_id=?),'$.allow')=1`,
+          values: [
+            eventId,
+            input.shiftId,
+            input.deviceId,
+            input.operatorId,
+            shift.product_id,
+            shift.product_name ?? "",
+            shift.planned_qty,
+            actualQty,
+            closedBoxCount,
+            reason,
+            closedAt,
+            eventId,
+          ],
+        },
+        {
+          sql: `UPDATE shift_mirror SET status='closed' WHERE id=? AND json_extract((SELECT decision_json FROM offline_grant_decisions WHERE event_id=?),'$.allow')=1`,
+          values: [input.shiftId, eventId],
+        },
+      ],
+    });
+    if (!committed.decision.allow)
+      throw new Error(`offline grant denied: ${committed.decision.reason}`);
+    return committed.result as OfflineShiftCloseSummary;
+  } finally {
+    lease.release();
+  }
 }
 
 export interface PendingShiftClose {

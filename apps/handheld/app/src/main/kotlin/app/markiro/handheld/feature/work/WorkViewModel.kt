@@ -240,6 +240,8 @@ class WorkViewModel(
     )
 
     val shiftId: String = checkNotNull(handle["shiftId"])
+    val grantDenial = app.markiro.handheld.core.grants.GrantDenialUi()
+
     private val generation = db.recovery.token()
     private val last = MutableStateFlow<LastScan?>(null)
     private val teamState = MutableStateFlow<TeamState?>(null)
@@ -349,16 +351,16 @@ class WorkViewModel(
         // An aggregation shift shows its box from the moment it opens. Waiting for
         // the first scan means the operator meets the validation layout and the
         // grid appears from nowhere.
-        viewModelScope.launch { db.recovery.work(generation) { showCurrentBox() } }
+        viewModelScope.launch(grantDenial.handler) { db.recovery.work(generation) { showCurrentBox() } }
         // Same reasoning for the pallet strip beneath it (06d): a shift with
         // pallets enabled shows «0 / N коробов» from entry rather than only
         // after the first box closes into one.
-        viewModelScope.launch { db.recovery.work(generation) { showCurrentPallet() } }
+        viewModelScope.launch(grantDenial.handler) { db.recovery.work(generation) { showCurrentPallet() } }
         // A send the app died inside is unknown, never resumed. Emitting the
         // event is an obligation: the domain accepts only `sent` or
         // `delivery_unknown` out of `sending`, so a job left there across a
         // restart would be frozen -- no reprint, no verification, nothing.
-        viewModelScope.launch { db.recovery.work(generation) {
+        viewModelScope.launch(grantDenial.handler) { db.recovery.work(generation) {
             duplicates.demoteInterrupted()
             refreshDuplicate()
             restoreDuplicateStep()
@@ -367,7 +369,7 @@ class WorkViewModel(
         // that throws, a template that will not render -- must not take the
         // collector down with it: the app would keep looking alive while silently
         // recording nothing, which is the worst thing a scanner can do.
-        viewModelScope.launch { db.recovery.work(generation) {
+        viewModelScope.launch(grantDenial.handler) { db.recovery.work(generation) {
             scans.events.collect { event ->
                 // The scanner is one app-wide flow and this view model outlives
                 // its screen: a back-stack entry keeps it alive while another
@@ -377,6 +379,9 @@ class WorkViewModel(
                 if (!scanning.value) return@collect
                 try {
                     onScan(event.raw)
+                } catch (_: app.markiro.handheld.core.grants.GrantDenied) {
+                    grantDenial.show()
+                    signals.play(SignalKind.ERROR)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -384,14 +389,14 @@ class WorkViewModel(
                 }
             }
         } }
-        viewModelScope.launch { db.recovery.work(generation) {
+        viewModelScope.launch(grantDenial.handler) { db.recovery.work(generation) {
             teamTicks.collect { teamState.value = team.refresh(shiftId) ?: teamState.value }
         } }
         // Under the same generation guard as every other launch here. This one
         // writes nothing and holds no credential, so the guard buys no safety --
         // but an unguarded launch among four guarded ones reads as an oversight,
         // and after a recovery the prompt is meaningless anyway.
-        viewModelScope.launch { db.recovery.work(generation) {
+        viewModelScope.launch(grantDenial.handler) { db.recovery.work(generation) {
             state.collect { ui ->
                 val plan = ui.plan ?: return@collect
                 if (plan <= 0) return@collect
@@ -492,7 +497,7 @@ class WorkViewModel(
         // of the box that first one just opened. `CloseBox` serialises them
         // anyway; this stops the pointless second attempt from being started.
         if (!closing.compareAndSet(false, true)) return
-        viewModelScope.launch { db.recovery.work(generation) {
+        viewModelScope.launch(grantDenial.handler) { db.recovery.work(generation) {
             try {
                 val shift = db.shiftDao().get(shiftId) ?: return@work
                 closeAndPrint(shift)
@@ -579,7 +584,7 @@ class WorkViewModel(
         // opened. `ClosePallet` serialises them anyway; this stops the
         // pointless second attempt from being started.
         if (!closingPallet.compareAndSet(false, true)) return
-        viewModelScope.launch { db.recovery.work(generation) {
+        viewModelScope.launch(grantDenial.handler) { db.recovery.work(generation) {
             try {
                 val shift = db.shiftDao().get(shiftId) ?: return@work
                 when (
@@ -625,7 +630,7 @@ class WorkViewModel(
     fun retryPalletPrint(replacementPrinterId: String? = null) {
         val closed = _palletCloseStep.value.closedPallet() ?: return
         if (!retryingPallet.compareAndSet(false, true)) return
-        viewModelScope.launch { db.recovery.work(generation) {
+        viewModelScope.launch(grantDenial.handler) { db.recovery.work(generation) {
             try {
                 val row = db.palletDao().get(closed.palletId)
                 if (row?.printState == app.markiro.handheld.core.storage.PalletPrint.UNKNOWN) {
@@ -645,7 +650,7 @@ class WorkViewModel(
         val closed = _palletCloseStep.value.closedPallet()
         _palletCloseStep.value = PalletCloseStep.Idle
         if (closed != null) {
-            viewModelScope.launch { db.recovery.work(generation) { palletPrinter.resolveUnknownAsPrinted(closed.palletId) } }
+            viewModelScope.launch(grantDenial.handler) { db.recovery.work(generation) { palletPrinter.resolveUnknownAsPrinted(closed.palletId) } }
         }
     }
 
@@ -653,7 +658,7 @@ class WorkViewModel(
     fun deferPalletLabel() {
         val closed = _palletCloseStep.value.closedPallet()
         _palletCloseStep.value = PalletCloseStep.Idle
-        if (closed != null) viewModelScope.launch { db.recovery.work(generation) { palletPrinter.defer(closed.palletId) } }
+        if (closed != null) viewModelScope.launch(grantDenial.handler) { db.recovery.work(generation) { palletPrinter.defer(closed.palletId) } }
     }
 
     fun dismissPalletClose() {
@@ -679,7 +684,7 @@ class WorkViewModel(
         // Two taps would both read the same `unknown` state before the first
         // print updated it, and each would write its own reprint fact.
         if (!retrying.compareAndSet(false, true)) return
-        viewModelScope.launch { db.recovery.work(generation) {
+        viewModelScope.launch(grantDenial.handler) { db.recovery.work(generation) {
             try {
                 auditIfOutcomeUnknown(closed.boxId)
                 _closeStep.value = BoxCloseStep.Printing(closed)
@@ -724,14 +729,14 @@ class WorkViewModel(
     fun confirmPrinted() {
         val closed = _closeStep.value.closedBox()
         _closeStep.value = BoxCloseStep.Idle
-        if (closed != null) viewModelScope.launch { db.recovery.work(generation) { boxPrinter.resolveUnknownAsPrinted(closed.boxId) } }
+        if (closed != null) viewModelScope.launch(grantDenial.handler) { db.recovery.work(generation) { boxPrinter.resolveUnknownAsPrinted(closed.boxId) } }
     }
 
     /** Set aside for later, so a dead printer does not stop the line. */
     fun deferLabel() {
         val closed = _closeStep.value.closedBox()
         _closeStep.value = BoxCloseStep.Idle
-        if (closed != null) viewModelScope.launch { db.recovery.work(generation) { boxPrinter.defer(closed.boxId) } }
+        if (closed != null) viewModelScope.launch(grantDenial.handler) { db.recovery.work(generation) { boxPrinter.defer(closed.boxId) } }
     }
 
     fun dismissClose() {
@@ -828,7 +833,7 @@ class WorkViewModel(
                 val confirmed = DuplicateStep.Verified(jobId)
                 _duplicateStep.value = confirmed
                 signals.play(SignalKind.OK)
-                viewModelScope.launch {
+                viewModelScope.launch(grantDenial.handler) {
                     delay(650)
                     if (_duplicateStep.value == confirmed) _duplicateStep.value = DuplicateStep.Idle
                 }
@@ -891,7 +896,7 @@ class WorkViewModel(
     /** An explicit second send, chosen by a person who has looked at the printer. */
     fun retryDuplicate() {
         val jobId = _duplicateStep.value.jobId() ?: return
-        viewModelScope.launch { db.recovery.work(generation) {
+        viewModelScope.launch(grantDenial.handler) { db.recovery.work(generation) {
             _duplicateStep.value = DuplicateStep.Sending(jobId)
             when (val sent = duplicates.send(jobId, resumeLegacy = true)) {
                 DuplicateSend.Sent -> _duplicateStep.value = DuplicateStep.Idle
@@ -905,7 +910,7 @@ class WorkViewModel(
 
     fun reprintDuplicate(reason: String, replacementPrinterId: String? = null) {
         val jobId = _duplicateStep.value.jobId() ?: return
-        viewModelScope.launch { db.recovery.work(generation) {
+        viewModelScope.launch(grantDenial.handler) { db.recovery.work(generation) {
             when (val outcome = duplicates.reprint(jobId, reason, replacementPrinterId)) {
                 is DuplicateOutcome.Refused -> _duplicateStep.value = DuplicateStep.Failed(jobId, outcome.reason)
                 is DuplicateOutcome.Prepared -> {
@@ -925,13 +930,13 @@ class WorkViewModel(
     /** Closes the screen without settling anything; the job stays outstanding. */
     fun dismissDuplicate() {
         _duplicateStep.value = DuplicateStep.Idle
-        viewModelScope.launch { db.recovery.work(generation) { refreshDuplicate() } }
+        viewModelScope.launch(grantDenial.handler) { db.recovery.work(generation) { refreshDuplicate() } }
     }
 
     fun skipDuplicateVerification() {
         val step = _duplicateStep.value as? DuplicateStep.Awaiting ?: return
         val actor = session.state.value.operator?.operatorId ?: return
-        viewModelScope.launch { db.recovery.work(generation) {
+        viewModelScope.launch(grantDenial.handler) { db.recovery.work(generation) {
             scanActionMutex.withLock {
                 if (db.shiftDao().get(shiftId)?.status == "closed") return@withLock
                 if (duplicates.skipVerification(step.jobId, actor)) {
@@ -944,6 +949,6 @@ class WorkViewModel(
     }
 
     fun leave() {
-        viewModelScope.launch { db.recovery.work(generation) { repository?.leave(shiftId) } }
+        viewModelScope.launch(grantDenial.handler) { db.recovery.work(generation) { repository?.leave(shiftId) } }
     }
 }

@@ -72,6 +72,20 @@ describe("fixed station viewport source contract", () => {
     );
   });
 
+  it("lets a strict grant denial wrap and scroll within the task header", () => {
+    expect(stationSource("station.css")).toMatch(
+      /\.shift-selection__message\s*\{[^}]*min-height:\s*64px;[^}]*max-height:\s*min\(144px, 18vh\);[^}]*overflow:\s*auto;/s,
+    );
+  });
+
+  it("requests device authority before task authority only for new durable work", () => {
+    const app = stationSource("App.tsx");
+    expect(app.match(/await refreshStationTaskAuthority\(\{/g)).toHaveLength(2);
+    expect(app).toContain('task: { taskKind: "shift", taskId: entered.id }');
+    expect(app).toContain('task: { taskKind: "inventory", taskId: entered.inventory.inventoryId }');
+    expect(app.match(/if \(!authority\?\.resuming\)/g)).toHaveLength(2);
+  });
+
   it("keeps the alert badge compact so two-word badges do not read as double-spaced", () => {
     expect(stationSource("station.css")).toMatch(
       /#root \.mk-alert \.mk-badge\s*\{[^}]*font-size:\s*14px !important;[^}]*line-height:\s*20px !important;/s,

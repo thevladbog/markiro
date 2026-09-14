@@ -4,6 +4,47 @@ const FAILURE_MESSAGE = "Station CORS verification failed";
 const WINDOWS_STATION_ORIGIN = "http://tauri.localhost";
 
 export const STATION_PREFLIGHTS = Object.freeze([
+  {
+    path: "/station/grants/v1/keyset",
+    method: "GET",
+    headers: "content-type,x-api-key,x-station-capabilities",
+  },
+  {
+    path: "/station/grants/v1/configuration",
+    method: "POST",
+    headers: "content-type,x-api-key,x-station-capabilities",
+  },
+  {
+    path: "/station/grants/v1/device",
+    method: "POST",
+    headers: "content-type,x-api-key,x-station-capabilities",
+  },
+  {
+    path: "/station/grants/v1/tasks",
+    method: "POST",
+    headers: "content-type,x-api-key,x-station-capabilities",
+  },
+  {
+    path: "/station/grants/v1/evidence/scans",
+    method: "POST",
+    headers: "content-type,x-api-key,x-station-capabilities",
+  },
+  {
+    path: "/station/grants/v1/evidence/shift-closures",
+    method: "POST",
+    headers: "content-type,x-api-key,x-station-capabilities",
+  },
+  {
+    path: "/station/grants/v1/evidence/inventories/cors-probe/event-batches",
+    method: "POST",
+    headers: "content-type,x-api-key,x-station-capabilities",
+  },
+  {
+    path: "/station/grants/v1/evidence/inventories/cors-probe/leave",
+    method: "POST",
+    headers: "content-type,x-api-key,x-station-capabilities",
+  },
+
   { path: "/station/pair", method: "POST", headers: "content-type,x-station-capabilities" },
   {
     path: "/station/identity",

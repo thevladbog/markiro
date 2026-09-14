@@ -13,7 +13,7 @@ import {
 import type { EffectiveEntitlements, EntitlementsExecutor } from "./entitlements.types";
 import { SubscriptionEntitlementsInvalidException } from "./subscription-errors";
 
-export function entitlementDigest(value: unknown): string {
+export function entitlementCanonical(value: unknown): string {
   function canonical(item: unknown): string {
     if (Array.isArray(item)) return `[${item.map(canonical).join(",")}]`;
     if (item !== null && typeof item === "object")
@@ -25,7 +25,10 @@ export function entitlementDigest(value: unknown): string {
     if (result === undefined) throw new SubscriptionEntitlementsInvalidException();
     return result;
   }
-  return createHash("sha256").update(canonical(value)).digest("hex");
+  return canonical(value);
+}
+export function entitlementDigest(value: unknown): string {
+  return createHash("sha256").update(entitlementCanonical(value)).digest("hex");
 }
 export const entitlementRegistryFingerprint = () =>
   `${ENTITLEMENT_REGISTRY_VERSION}:${entitlementDigest(ENTITLEMENT_OPERATIONS)}`;

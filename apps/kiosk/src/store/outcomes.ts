@@ -154,35 +154,40 @@ function isStored(value: unknown): value is Required<StoredKioskOutcome> {
 }
 
 export async function putOutcome(outcome: StoredKioskOutcome): Promise<void> {
+  await withTransaction([STORE_OUTCOMES], "readwrite", (tx) =>
+    putOutcomeInTransaction(tx, outcome),
+  );
+}
+/** Shared exact outcome representation for an atomic evidence acknowledgement. */
+export function putOutcomeInTransaction(tx: IDBTransaction, outcome: StoredKioskOutcome): void {
   const owner = normalizedOwner(outcome.owner);
   const stored = { ...outcome, owner, id: idOf(owner, outcome.deviceSeq) };
   if (!isStored(stored)) throw new Error("invalid outcome");
-  await withTransaction([STORE_OUTCOMES], "readwrite", (tx) => {
-    const store = tx.objectStore(STORE_OUTCOMES);
-    const existingRequest = store.get(stored.id);
-    existingRequest.onsuccess = () => {
-      const existing = isStored(existingRequest.result) ? existingRequest.result : null;
-      const replacement = existing
-        ? { ...stored, at: existing.at, viewedAt: existing.viewedAt }
-        : stored;
-      const putRequest = store.put(replacement);
-      putRequest.onsuccess = () => {
-        const allRequest = store.getAll();
-        allRequest.onsuccess = () => {
-          const owned = (allRequest.result as unknown[])
-            .filter(isStored)
-            .filter(
-              (row) =>
-                row.owner.serverUrl === owner.serverUrl &&
-                row.owner.kioskId === owner.kioskId &&
-                row.owner.credentialGeneration === owner.credentialGeneration,
-            )
-            .sort((left, right) => right.at.localeCompare(left.at));
-          for (const expired of owned.slice(MAX_OUTCOMES_PER_OWNER)) store.delete(expired.id);
-        };
+
+  const store = tx.objectStore(STORE_OUTCOMES);
+  const existingRequest = store.get(stored.id);
+  existingRequest.onsuccess = () => {
+    const existing = isStored(existingRequest.result) ? existingRequest.result : null;
+    const replacement = existing
+      ? { ...stored, at: existing.at, viewedAt: existing.viewedAt }
+      : stored;
+    const putRequest = store.put(replacement);
+    putRequest.onsuccess = () => {
+      const allRequest = store.getAll();
+      allRequest.onsuccess = () => {
+        const owned = (allRequest.result as unknown[])
+          .filter(isStored)
+          .filter(
+            (row) =>
+              row.owner.serverUrl === owner.serverUrl &&
+              row.owner.kioskId === owner.kioskId &&
+              row.owner.credentialGeneration === owner.credentialGeneration,
+          )
+          .sort((left, right) => right.at.localeCompare(left.at));
+        for (const expired of owned.slice(MAX_OUTCOMES_PER_OWNER)) store.delete(expired.id);
       };
     };
-  });
+  };
 }
 
 export async function findOldestUnviewedOutcome(
