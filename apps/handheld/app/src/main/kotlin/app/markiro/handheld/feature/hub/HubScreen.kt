@@ -22,6 +22,7 @@ import androidx.compose.material.icons.outlined.Factory
 import androidx.compose.material.icons.outlined.Inventory2
 import androidx.compose.material.icons.outlined.Print
 import androidx.compose.material.icons.outlined.QrCodeScanner
+import androidx.compose.material.icons.outlined.RemoveShoppingCart
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.Wifi
@@ -124,6 +125,21 @@ fun HubScreen(state: HubUi, onTile: (HubTile) -> Unit, onSignOut: () -> Unit, on
                             { onTile(HubTile.INVENTORY) },
                             modifier,
                             statusTone = if (state.continueInventoryNumber != null) Tone.Ok else Tone.Neutral,
+                        )
+                    },
+                    { modifier ->
+                        Tile(
+                            Icons.Outlined.RemoveShoppingCart,
+                            stringResource(R.string.hub_tile_writeoff),
+                            when {
+                                state.canWriteoff == false -> stringResource(R.string.hub_writeoff_no_permission)
+                                state.writeoffPending > 0 ->
+                                    pluralStringResource(R.plurals.hub_writeoff_pending, state.writeoffPending, state.writeoffPending)
+                                else -> ""
+                            },
+                            { onTile(HubTile.WRITEOFF) },
+                            modifier,
+                            statusTone = if (state.canWriteoff == false || state.writeoffPending > 0) Tone.Warn else Tone.Neutral,
                         )
                     },
                     { modifier ->

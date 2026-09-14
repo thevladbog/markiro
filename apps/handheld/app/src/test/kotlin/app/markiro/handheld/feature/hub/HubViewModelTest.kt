@@ -154,12 +154,39 @@ class HubViewModelTest {
             db, MetaStore(db), db.deviceConfigDao(), SyncTransport(OkHttpClient()) { "http://127.0.0.1:1/" },
             NetworkModule.strictJson(), engineScope,
         )
+        val writeoffEngine = app.markiro.handheld.core.writeoff.WriteoffSyncEngine(
+            db, MetaStore(db), SyncTransport(OkHttpClient()) { "http://127.0.0.1:1/" },
+            NetworkModule.strictJson(), engineScope,
+        )
         return main.track(
             HubViewModel(recovery = db.recovery,
                 api, db.deviceConfigDao(), session, reachability, engine, db.shiftDao(), inventoryEngine, db.inventoryTaskDao(), db.printerDao(),
-                BoxRepository(db), db.codeDao(), team, scannerLabel = { "встроенный" }, now = { clock }, tick = tick,
+                BoxRepository(db), db.codeDao(), team, writeoffEngine, db.writeoffPermissionDao(),
+                scannerLabel = { "встроенный" }, now = { clock }, tick = tick,
             ),
         )
+    }
+
+    private fun pendingWriteoff(id: String, seq: Long) = app.markiro.handheld.core.storage.WriteoffOutboxEntity(
+        documentId = id, deviceSeq = seq, operatorId = "op-1", reasonId = "r-1", reasonName = "Бой", unitCount = 1,
+        boxCount = 0, requestJson = "{}", createdAt = "2026-09-14T10:00:00.000Z", state = "pending", orderNo = null,
+        acceptedCount = null, conflictsJson = null, lastAttemptAt = null,
+    )
+
+    /** The hub is the one place an operator sees that a write-off is still owed. */
+    @Test
+    fun hubSumsWriteoffQueueAndReadsPermission() = runTest {
+        db.writeoffPermissionDao().replaceAll(listOf(app.markiro.handheld.core.storage.WriteoffPermissionEntity("op-1", true)))
+        db.writeoffOutboxDao().insert(pendingWriteoff("d-1", 1))
+        val ui = vm(api()).state.first { it.writeoffPending == 1 }
+        assertEquals(1, ui.queue)
+        assertEquals(true, ui.canWriteoff)
+    }
+
+    /** An operator the mirror has never heard of is unknown, not refused. */
+    @Test
+    fun anUnmirroredOperatorLeavesThePermissionUnknown() = runTest {
+        assertNull(vm(api()).state.first { it.operatorName.isNotEmpty() }.canWriteoff)
     }
 
     @Test

@@ -640,7 +640,7 @@ git commit -m "feat(handheld): write-off sync engine — pinned, byte-identical,
   `Routes.WRITEOFF = "writeoff"`, `Routes.WRITEOFF_HISTORY = "writeoff/history"`.
 - Consumes: `WriteoffSyncEngine.state`, `WriteoffPermissionDao.get(operatorId)`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 In `HubViewModelTest`, following its harness (the VM constructor gains
 `writeoffSync: WriteoffSyncEngine` and `permissions: WriteoffPermissionDao`):
@@ -656,7 +656,7 @@ In `HubViewModelTest`, following its harness (the VM constructor gains
 }
 ```
 
-- [ ] **Step 2: Implement**
+- [x] **Step 2: Implement**
 
 `HubViewModel.state` already `combine`s ten flows into a `values` array; append
 `writeoffSync.state` and `permissions.observe(operatorId)`, and:
@@ -696,7 +696,7 @@ Strings (`ru` / `en`): `hub_tile_writeoff` «Списание» / "Write-off";
 `hub_writeoff_no_permission` «нет прав» / "no permission";
 `plurals hub_writeoff_pending` «%d не отправлен(о/ы)» / "%d not sent".
 
-- [ ] **Step 3: Run and commit**
+- [x] **Step 3: Run and commit**
 
 ```bash
 ./gradlew --no-daemon testDebugUnitTest --tests '*HubViewModelTest*' -q

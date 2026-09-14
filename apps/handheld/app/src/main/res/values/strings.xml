@@ -70,6 +70,8 @@
     <string name="hub_sign_out">Выйти</string>
     <string name="hub_tile_shift">Смена</string>
     <string name="hub_tile_inventory">Инвентаризация</string>
+    <string name="hub_tile_writeoff">Списание</string>
+    <string name="hub_writeoff_no_permission">нет прав</string>
     <string name="hub_tile_settings">Настройки</string>
     <string name="hub_printer_not_set">принтер не настроен</string>
     <string name="hub_no_shifts">смен нет</string>
@@ -80,6 +82,12 @@
         <item quantity="few">%d доступны</item>
         <item quantity="many">%d доступны</item>
         <item quantity="other">%d доступны</item>
+    </plurals>
+    <plurals name="hub_writeoff_pending">
+        <item quantity="one">%d не отправлен</item>
+        <item quantity="few">%d не отправлены</item>
+        <item quantity="many">%d не отправлены</item>
+        <item quantity="other">%d не отправлены</item>
     </plurals>
     <plurals name="hub_inventory_tasks">
         <item quantity="one">%d задание</item>

@@ -122,6 +122,8 @@ object Routes {
     const val EXCEPTIONS = "exceptions/{shiftId}"
     const val DISASSEMBLE = "exceptions/{shiftId}/disassemble"
     const val REPRINT = "exceptions/{shiftId}/reprint"
+    const val WRITEOFF = "writeoff"
+    const val WRITEOFF_HISTORY = "writeoff/history"
     const val INVENTORY = "inventory"
     const val INVENTORY_WORK = "inventory/{inventoryId}"
     const val INVENTORY_LEAVE = "inventory/{inventoryId}/leave"
@@ -222,6 +224,7 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                         when (tile) {
                             HubTile.SHIFT -> nav.navigate(Routes.SHIFTS)
                             HubTile.INVENTORY -> state.activeInventoryId?.let { nav.navigate(Routes.inventoryWork(it)) } ?: nav.navigate(Routes.INVENTORY)
+                            HubTile.WRITEOFF -> nav.navigate(Routes.WRITEOFF)
                             HubTile.SETTINGS -> nav.navigate(Routes.SETTINGS)
                         }
                     },

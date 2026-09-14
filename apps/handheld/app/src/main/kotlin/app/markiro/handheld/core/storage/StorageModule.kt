@@ -72,6 +72,21 @@ object StorageModule {
     fun shiftCloseDao(db: HandheldDatabase): ShiftCloseDao = db.shiftCloseDao()
 
     @Provides
+    fun writeoffOutboxDao(db: HandheldDatabase): WriteoffOutboxDao = db.writeoffOutboxDao()
+
+    @Provides
+    fun writeoffReasonDao(db: HandheldDatabase): WriteoffReasonDao = db.writeoffReasonDao()
+
+    @Provides
+    fun writeoffProductDao(db: HandheldDatabase): WriteoffProductDao = db.writeoffProductDao()
+
+    @Provides
+    fun writeoffPermissionDao(db: HandheldDatabase): WriteoffPermissionDao = db.writeoffPermissionDao()
+
+    @Provides
+    fun writeoffBoxDao(db: HandheldDatabase): WriteoffBoxDao = db.writeoffBoxDao()
+
+    @Provides
     @Singleton
     fun metaStore(db: HandheldDatabase): MetaStore = MetaStore(db)
 
