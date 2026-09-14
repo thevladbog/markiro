@@ -37,6 +37,21 @@ class MetaStore(private val db: HandheldDatabase) {
         const val SYNC_LAST_DENIED = "sync_last_denied"
         const val INVENTORY_LAST_SUCCESS_AT = "inventory_sync_last_success_at"
 
+        /**
+         * The next write-off `deviceSeq`. Minted inside the same transaction that
+         * inserts the outbox row, so a document either has its number or was
+         * never filed — never a number without a row, never a row without one.
+         */
+        const val WRITEOFF_NEXT_DEVICE_SEQ = "writeoff_next_device_seq"
+        const val WRITEOFF_LAST_SUCCESS_AT = "writeoff_sync_last_success_at"
+        /** When the bootstrap last landed; the «данные на 10:42» stamp. */
+        const val WRITEOFF_BOOTSTRAP_AT = "writeoff_bootstrap_at"
+        /** The box-registry revision this device has fully applied; the next refresh asks for a delta from here. */
+        const val WRITEOFF_REGISTRY_UNTIL = "writeoff_registry_until"
+
+        /** The in-flight document, so a retry re-sends exactly that row and nothing else. */
+        fun writeoffPin(documentId: String) = "writeoff_pending:$documentId"
+
         /** The pinned inventory batch of one task: re-sent byte for byte until acknowledged. */
         fun inventoryPin(inventoryId: String) = "inventory_pending_batch:$inventoryId"
     }

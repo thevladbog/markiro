@@ -31,7 +31,8 @@ export interface StationWriteoffBootstrapDto {
   /** Server time, feeding the device's «данные на 10:42» stamp. */
   generatedAt: string;
   reasons: { id: string; name: string; sortOrder: number }[];
-  products: { gtin14: string; name: string }[];
+  /** `id` is what the box registry names a product by; `gtin14` is what a unit scan resolves through. */
+  products: { id: string; gtin14: string; name: string }[];
   operators: { employeeId: string; canWriteoff: boolean }[];
 }
 
@@ -79,8 +80,12 @@ export const stationWriteoffBootstrapOpenApiSchema: SchemaObject = {
       type: "array",
       items: {
         type: "object",
-        required: ["gtin14", "name"],
-        properties: { gtin14: { type: "string" }, name: { type: "string" } },
+        required: ["id", "gtin14", "name"],
+        properties: {
+          id: { type: "string", format: "uuid" },
+          gtin14: { type: "string" },
+          name: { type: "string" },
+        },
       },
     },
     operators: {

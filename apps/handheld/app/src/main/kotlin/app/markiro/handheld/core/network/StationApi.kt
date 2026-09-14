@@ -70,4 +70,22 @@ interface StationApi {
 
     @GET("lines")
     suspend fun lines(): LineListResponse
+
+    /** Reasons, the tenant catalog and per-operator permission for the offline write-off mode. */
+    @GET("station/writeoff-bootstrap")
+    suspend fun writeoffBootstrap(): WriteoffBootstrapDto
+
+    /**
+     * Incremental box registry. `until` is null on the first page of a walk and
+     * echoed from the first page afterwards; the server rejects it on page one.
+     * `POST /station/writeoffs` is not here: it goes through [SyncTransport] as
+     * frozen bytes so a retry is byte-identical.
+     */
+    @GET("station/box-registry")
+    suspend fun boxRegistry(
+        @Query("since") since: String?,
+        @Query("until") until: String?,
+        @Query("cursor") cursor: String?,
+        @Query("limit") limit: Int,
+    ): BoxRegistryPageDto
 }

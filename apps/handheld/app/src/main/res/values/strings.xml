@@ -70,6 +70,8 @@
     <string name="hub_sign_out">Выйти</string>
     <string name="hub_tile_shift">Смена</string>
     <string name="hub_tile_inventory">Инвентаризация</string>
+    <string name="hub_tile_writeoff">Списание</string>
+    <string name="hub_writeoff_no_permission">нет прав</string>
     <string name="hub_tile_settings">Настройки</string>
     <string name="hub_printer_not_set">принтер не настроен</string>
     <string name="hub_no_shifts">смен нет</string>
@@ -80,6 +82,12 @@
         <item quantity="few">%d доступны</item>
         <item quantity="many">%d доступны</item>
         <item quantity="other">%d доступны</item>
+    </plurals>
+    <plurals name="hub_writeoff_pending">
+        <item quantity="one">%d не отправлен</item>
+        <item quantity="few">%d не отправлены</item>
+        <item quantity="many">%d не отправлены</item>
+        <item quantity="other">%d не отправлены</item>
     </plurals>
     <plurals name="hub_inventory_tasks">
         <item quantity="one">%d задание</item>
@@ -533,7 +541,7 @@
     <string name="recovery_unresolved_text">Данные сохранены и закрыты для отправки. Обратитесь к администратору для проверки прежнего подключения.</string>
     <string name="recovery_connect">Подключить прежнее устройство</string>
     <string name="recovery_code_hint">Введите код, выданный администратором для этой же записи устройства.</string>
-    <string name="recovery_summary">Ожидают отправки: сканы %1$d · инвентаризация %2$d · этикетки %3$d · короба %4$d · паллеты %5$d · исключения %6$d · закрытия %7$d\nКонфликты: %8$d · Неизвестный результат печати: %9$d</string>
+    <string name="recovery_summary">Ожидают отправки: сканы %1$d · инвентаризация %2$d · этикетки %3$d · короба %4$d · паллеты %5$d · исключения %6$d · закрытия %7$d · списания %8$d\nКонфликты: %9$d · Неизвестный результат печати: %10$d</string>
     <string name="recovery_summary_unknown">Количество сохранённых записей пока недоступно.</string>
     <string name="recovery_mismatch">Код относится к другой организации или устройству. Данные сохранены. Нужен код прежней записи устройства.</string>
     <string name="recovery_update_required">Сервер не поддерживает безопасное восстановление. Требуется обновление сервера. Данные сохранены.</string>
@@ -596,4 +604,66 @@
     <string name="validation_previous_disallowed">Коды предыдущих смен запрещены</string>
     <string name="validation_other_active">Код занят в другой активной смене</string>
     <string name="validation_closure_unknown">Закрытие исходной смены не подтверждено</string>
+    <!-- Списание (write-off mode) -->
+    <string name="writeoff_title">Списание</string>
+    <string name="writeoff_empty_title">Отсканируйте код или короб</string>
+    <string name="writeoff_empty_text">Причину укажете перед подтверждением.</string>
+    <string name="writeoff_counters">Всего %1$s · %2$s</string>
+    <string name="writeoff_next">Далее</string>
+    <string name="writeoff_remove_line">Убрать из списка</string>
+    <string name="writeoff_unnamed_product">Без названия</string>
+    <string name="writeoff_line_code">код …%1$s</string>
+    <string name="writeoff_line_box">короб …%1$s</string>
+    <string name="writeoff_verdict_accepted">Принят …%1$s</string>
+    <string name="writeoff_verdict_duplicate">Дубль …%1$s — уже в списке</string>
+    <string name="writeoff_verdict_unknown_product">Нет в каталоге</string>
+    <string name="writeoff_verdict_unknown_box">Короб не найден</string>
+    <string name="writeoff_verdict_not_a_code">Не код маркировки и не короб</string>
+    <string name="writeoff_reason_title">Причина списания</string>
+    <string name="writeoff_reason_confirm">Подтвердить</string>
+    <string name="writeoff_confirm_title">Подтверждение</string>
+    <string name="writeoff_summary_reason">Причина</string>
+    <string name="writeoff_summary_units">Единиц</string>
+    <string name="writeoff_summary_boxes">Коробов</string>
+    <string name="writeoff_summary_operator">Оператор</string>
+    <string name="writeoff_irreversible">Отменить с ТСД нельзя — только в кабинете.</string>
+    <string name="writeoff_no_price_note">Стоимость при списании не указывается.</string>
+    <string name="writeoff_do">Списать %1$s</string>
+    <string name="writeoff_result_queued">В очереди</string>
+    <string name="writeoff_result_queued_text">Отправим при связи. Документ уже сохранён на устройстве.</string>
+    <string name="writeoff_result_done">Списано</string>
+    <string name="writeoff_result_partial">Списано %1$d из %2$d</string>
+    <string name="writeoff_result_rejected">Сервер отклонил</string>
+    <string name="writeoff_result_rejected_text">Документ не принят. Причину смотрите в истории.</string>
+    <string name="writeoff_result_act">Акт %1$s</string>
+    <string name="writeoff_another">Списать ещё</string>
+    <string name="writeoff_to_hub">В хаб</string>
+    <string name="writeoff_discard_title">Очистить список?</string>
+    <string name="writeoff_discard_text">Собранные позиции будут потеряны.</string>
+    <string name="writeoff_discard_confirm">Очистить</string>
+    <string name="writeoff_blocked_permission_title">Нет прав на списание</string>
+    <string name="writeoff_blocked_permission_text">Обратитесь к администратору: право выдаётся в кабинете.</string>
+    <string name="writeoff_blocked_reasons_title">Причины не заданы</string>
+    <string name="writeoff_blocked_reasons_text">Добавьте причины списания в кабинете.</string>
+    <string name="writeoff_blocked_sync_title">Нужна первая синхронизация</string>
+    <string name="writeoff_blocked_sync_text">Подключитесь к сети: без каталога списывать вслепую нельзя.</string>
+    <string name="writeoff_history_title">История списаний</string>
+    <string name="writeoff_history_empty_title">Пока пусто</string>
+    <string name="writeoff_history_empty_text">Здесь появятся документы, отправленные с этого ТСД.</string>
+    <string name="writeoff_history_queued">В очереди</string>
+    <string name="writeoff_history_sent">Отправлено</string>
+    <string name="writeoff_history_partial">%1$d отклонено</string>
+    <string name="writeoff_history_refused">Отклонён</string>
+    <plurals name="writeoff_units">
+        <item quantity="one">%d шт</item>
+        <item quantity="few">%d шт</item>
+        <item quantity="many">%d шт</item>
+        <item quantity="other">%d шт</item>
+    </plurals>
+    <plurals name="writeoff_boxes">
+        <item quantity="one">коробов %d</item>
+        <item quantity="few">коробов %d</item>
+        <item quantity="many">коробов %d</item>
+        <item quantity="other">коробов %d</item>
+    </plurals>
 </resources>

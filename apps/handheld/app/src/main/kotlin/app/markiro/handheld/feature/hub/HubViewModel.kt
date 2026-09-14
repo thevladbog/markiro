@@ -68,12 +68,16 @@ data class HubUi(
     /** Closed boxes on this device whose label is still owed, across every shift. */
     val unprintedLabels: Int = 0,
     val activeShift: HubActiveShift? = null,
+    /** Write-off documents this device still owes the server; also counted in [queue]. */
+    val writeoffPending: Int = 0,
+    /** Null until the mirror has run at least once: unknown is not the same as refused. */
+    val canWriteoff: Boolean? = null,
 )
 
 /** Same accepted-unit total as the work screen; a missing summary is explicitly local. */
 data class HubActiveShift(val shift: ShiftEntity, val acceptedUnits: Int, val summaryAt: Long? = null)
 
-enum class HubTile { SHIFT, INVENTORY, SETTINGS }
+enum class HubTile { SHIFT, INVENTORY, WRITEOFF, SETTINGS }
 
 /** Reachable = an HTTP response within the last two minutes (the station's online threshold). */
 private const val REACHABLE_WINDOW_MS = 2 * 60 * 1000L
@@ -96,6 +100,8 @@ class HubViewModel(
     boxes: BoxRepository,
     codes: CodeDao,
     team: TeamRefresher,
+    writeoffSync: app.markiro.handheld.core.writeoff.WriteoffSyncEngine,
+    permissions: app.markiro.handheld.core.storage.WriteoffPermissionDao,
     private val scannerLabel: () -> String,
     private val now: () -> Long = System::currentTimeMillis,
     /** Refreshes the online indicator and the joined shift summary; tests pass controlled ticks. */
@@ -122,6 +128,8 @@ class HubViewModel(
         boxes: BoxRepository,
         codes: CodeDao,
         team: TeamRefresher,
+        writeoffSync: app.markiro.handheld.core.writeoff.WriteoffSyncEngine,
+        permissions: app.markiro.handheld.core.storage.WriteoffPermissionDao,
         scan: ScanPreferences,
     ) : this(
         recovery,
@@ -137,6 +145,8 @@ class HubViewModel(
         boxes,
         codes,
         team,
+        writeoffSync,
+        permissions,
         scannerLabel = {
             when (scan.sourceKind) {
                 ScanSourceKind.BUILTIN_INTENT -> VendorProfiles.byId(scan.profileId).label.substringBefore(" ·")
@@ -174,9 +184,15 @@ class HubViewModel(
     private val activeInventory: Flow<InventoryTaskEntity?> =
         config.observe().flatMapLatest { cfg -> cfg?.activeInventoryId?.let { inventories.observe(it) } ?: flowOf(null) }
 
+    /** The signed-in operator's right to write off, as the last mirror refresh left it. */
+    private val writeoffPermission: Flow<Boolean?> = session.state
+        .map { it.operator?.operatorId }
+        .distinctUntilChanged()
+        .flatMapLatest { id -> if (id == null) flowOf(null) else permissions.observe(id).map { it?.canWriteoff } }
+
     val state: StateFlow<HubUi> = combine(
         config.observe(), session.state, reachability.lastSuccessAt, tick, sync.state, activeShift, inventorySync.state, activeInventory,
-        printers.observeRouting(), boxes.observeUnprintedCount(),
+        printers.observeRouting(), boxes.observeUnprintedCount(), writeoffSync.state, writeoffPermission,
     ) { values ->
         val cfg = values[0] as DeviceConfigEntity?
         val ses = values[1] as SessionState
@@ -186,6 +202,7 @@ class HubViewModel(
         val inventoryState = values[6] as InventorySyncState
         val inventory = (values[7] as InventoryTaskEntity?)?.takeIf { it.state == "active" }
         val printer = values[8] as PrinterRouting
+        val writeoffState = values[10] as app.markiro.handheld.core.writeoff.WriteoffSyncState
         HubUi(
             printerConfigured = printer.missing.isEmpty() && printer.attention.isEmpty(),
             missingPrinterPurposes = printer.missing,
@@ -199,8 +216,10 @@ class HubViewModel(
             countsAt = cfg?.countsAt,
             reachable = lastOk != null && now() - lastOk <= REACHABLE_WINDOW_MS,
             scannerLabel = scannerLabel(),
-            queue = syncState.pending + inventoryState.pending,
-            stuck = syncState.stuck || inventoryState.stuck,
+            queue = syncState.pending + inventoryState.pending + writeoffState.pending,
+            stuck = syncState.stuck || inventoryState.stuck || writeoffState.stuck,
+            writeoffPending = writeoffState.pending,
+            canWriteoff = values[11] as Boolean?,
             activeShiftId = current?.shift?.id,
             continueShiftNumber = current?.shift?.number,
             activeShift = current,

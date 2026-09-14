@@ -334,10 +334,28 @@ class DeviceRecoveryTest {
     @Test fun summaryUsesEveryActualQueueTable() = runTest {
         active()
         assertEquals(
-            setOf("scans", "inventory", "labels", "boxes", "pallets", "exceptions", "closes", "conflicts", "unknownPrints"),
+            setOf("scans", "inventory", "labels", "boxes", "pallets", "exceptions", "closes", "conflicts", "unknownPrints", "writeoffs"),
             recovery.summary().keys,
         )
     }
+
+    /**
+     * A queued write-off is unsent production work the operator line must account
+     * for, exactly like a pending shift close; a settled one is history and must
+     * not be counted as owed.
+     */
+    @Test fun summaryCountsOnlyPendingWriteoffs() = runTest {
+        active()
+        db.writeoffOutboxDao().insert(writeoff("d-1", 1, state = "pending"))
+        db.writeoffOutboxDao().insert(writeoff("d-2", 2, state = "sent"))
+        assertEquals(1L, recovery.summary()["writeoffs"])
+    }
+
+    private fun writeoff(id: String, seq: Long, state: String) = WriteoffOutboxEntity(
+        documentId = id, deviceSeq = seq, operatorId = "op-1", reasonId = "r-1", reasonName = "Бой",
+        unitCount = 1, boxCount = 0, requestJson = "{}", createdAt = "2026-09-14T10:00:00Z",
+        state = state, orderNo = null, acceptedCount = null, conflictsJson = null, lastAttemptAt = null,
+    )
 
     /**
      * A closed pallet the server has not acknowledged is a physically labelled
