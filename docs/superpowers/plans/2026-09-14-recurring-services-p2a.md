@@ -215,7 +215,7 @@ git commit -m "feat: define recurring service contracts"
 - Produces: `servicePeriods`, `serviceUsageEntries`, `serviceExcessApprovals` and their `$inferSelect` types.
 - Consumes: `orderedServices`, `invoiceLines`, `billingPayments`, `catalogItemVersions`, `organization` and `platformUsers` composite identities.
 
-- [ ] **Step 1: Write failing schema tests for tenant keys, append-only rows and bounds**
+- [x] **Step 1: Write failing schema tests for tenant keys, append-only rows and bounds**
 
 ```ts
 expect(schema.servicePeriods).toBeDefined();
@@ -231,13 +231,13 @@ expect(readMigration("0158_validate_recurring_services.sql")).toContain(
 );
 ```
 
-- [ ] **Step 2: Run the focused DB tests and confirm missing-schema failure**
+- [x] **Step 2: Run the focused DB tests and confirm missing-schema failure**
 
 Run: `corepack pnpm@11.22.0 --filter @markiro/db exec vitest run test/recurring-services-schema.test.ts test/recurring-services-migration.test.ts`
 
 Expected: FAIL because the tables and migrations do not exist.
 
-- [ ] **Step 3: Define the Drizzle tables with explicit constraints**
+- [x] **Step 3: Define the Drizzle tables with explicit constraints**
 
 Use a focused schema module. The table columns must encode these exact durable facts:
 
@@ -276,13 +276,13 @@ export type ServiceUsageEntryRow = typeof serviceUsageEntries.$inferSelect;
 export type ServiceExcessApprovalRow = typeof serviceExcessApprovals.$inferSelect;
 ```
 
-- [ ] **Step 4: Generate migration metadata and review the SQL**
+- [x] **Step 4: Generate migration metadata and review the SQL**
 
 Run: `corepack pnpm@11.22.0 --filter @markiro/db db:generate`
 
 Rename the generated migration to `0157_recurring_services.sql`, then add the catalog billing constraint replacement, finite-time checks, JSON-object checks, request hash checks and the GIST exclusion constraint. Put only populated-table foreign keys/checks behind `NOT VALID`; new-table constraints are valid at creation.
 
-- [ ] **Step 5: Add the deferred validation migration**
+- [x] **Step 5: Add the deferred validation migration**
 
 ```sql
 BEGIN;
@@ -293,13 +293,13 @@ COMMIT;
 
 Run `corepack pnpm@11.22.0 --filter @markiro/db db:generate -- --custom --name validate_recurring_services` after the schema migration exists, replace only that custom migration's empty SQL body with the transaction above and retain the generated snapshot and journal entry.
 
-- [ ] **Step 6: Run DB package verification**
+- [x] **Step 6: Run DB package verification**
 
 Run: `corepack pnpm@11.22.0 --filter @markiro/db test && corepack pnpm@11.22.0 --filter @markiro/db typecheck && corepack pnpm@11.22.0 --filter @markiro/db lint && corepack pnpm@11.22.0 --filter @markiro/db build`
 
 Expected: PASS. Database-backed cases may skip only when `DATABASE_URL` is absent; record that separately.
 
-- [ ] **Step 7: Commit the persistence layer**
+- [x] **Step 7: Commit the persistence layer**
 
 ```bash
 git add packages/db

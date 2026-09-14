@@ -1100,6 +1100,20 @@
       "when": 1789401956838,
       "tag": "0156_validate_offline_grant_rollback",
       "breakpoints": true
+    },
+    {
+      "idx": 157,
+      "version": "7",
+      "when": 1789415316089,
+      "tag": "0157_recurring_services",
+      "breakpoints": true
+    },
+    {
+      "idx": 158,
+      "version": "7",
+      "when": 1789415341287,
+      "tag": "0158_validate_recurring_services",
+      "breakpoints": true
     }
   ]
 }
