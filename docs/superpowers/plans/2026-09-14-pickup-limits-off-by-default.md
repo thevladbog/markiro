@@ -45,7 +45,7 @@ changing a field nothing reads is noise.
 | File                                                                   | Change                                                     |
 | ---------------------------------------------------------------------- | ---------------------------------------------------------- |
 | `packages/db/src/schema/pickup.ts`                                     | `limitsEnabled` default `false`                            |
-| `packages/db/migrations/0151_pickup_limits_off_by_default.sql`         | Column default + backfill                                  |
+| `packages/db/migrations/0154_pickup_limits_off_by_default.sql`         | Column default + backfill                                  |
 | `packages/db/migrations/meta/_journal.json`                            | Journal entry                                              |
 | `apps/api/src/auth/auth.setup.ts`                                      | New organisation inserts `false`                           |
 | `apps/api/src/modules/platform-tenants/tenant-provisioning.service.ts` | Provisioning inserts `false`                               |
@@ -58,7 +58,7 @@ changing a field nothing reads is noise.
 **Files:**
 
 - Modify: `packages/db/src/schema/pickup.ts`
-- Create: `packages/db/migrations/0151_pickup_limits_off_by_default.sql`
+- Create: `packages/db/migrations/0154_pickup_limits_off_by_default.sql`
 - Modify: `packages/db/migrations/meta/_journal.json`
 - Modify: `apps/api/src/auth/auth.setup.ts`
 - Modify: `apps/api/src/modules/platform-tenants/tenant-provisioning.service.ts`
@@ -132,7 +132,13 @@ Expected: FAIL on the first case with `over_limit` conflicts.
 
 - [ ] **Step 4: Write the migration**
 
-`packages/db/migrations/0151_pickup_limits_off_by_default.sql`:
+The number moved twice while this was in review: `main` landed
+`0151_offline_grant_readiness` first, then `0152_offline_grant_activation` and
+`0153_validate_offline_grant_activation`. Take the next free index at the moment
+you write it rather than the one below — the point is that it sorts after
+everything already in the journal.
+
+`packages/db/migrations/0154_pickup_limits_off_by_default.sql`:
 
 ```sql
 -- The daily pickup allowance becomes opt-in. The cabinet switch
@@ -142,7 +148,7 @@ ALTER TABLE "pickup_tenant_policies" ALTER COLUMN "limits_enabled" SET DEFAULT f
 UPDATE "pickup_tenant_policies" SET "limits_enabled" = false, "updated_at" = now() WHERE "limits_enabled" = true;
 ```
 
-Append journal entry `idx: 151`, tag `0151_pickup_limits_off_by_default`.
+Append journal entry `idx: 154`, tag `0154_pickup_limits_off_by_default`.
 
 - [ ] **Step 5: Follow the two insert sites**
 
