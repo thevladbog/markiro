@@ -10,6 +10,14 @@ const IAM_TOKEN_URL =
   "http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token";
 const LOCKBOX_PAYLOAD_URL = "https://payload.lockbox.api.cloud.yandex.net/lockbox/v1/secrets";
 export const REQUEST_TIMEOUT_MS = 2_000;
+const OPTIONAL_ENVIRONMENT_KEY_GROUPS = [
+  [
+    "OFFLINE_GRANT_ORIGIN",
+    "OFFLINE_GRANT_KID",
+    "OFFLINE_GRANT_PRIVATE_KEY_PEM",
+    "OFFLINE_GRANT_KEYSET_JSON",
+  ],
+];
 
 const defaultFilesystem = {
   chmod,
@@ -55,6 +63,10 @@ export function runtimeInventoryKeyNames(keys, entries) {
     expected.add(key);
   }
   if (expected.size === 0) throw invalidInventory();
+  for (const group of OPTIONAL_ENVIRONMENT_KEY_GROUPS) {
+    const expectedCount = group.filter((key) => expected.has(key)).length;
+    if (expectedCount !== 0 && expectedCount !== group.length) throw invalidInventory();
+  }
 
   const received = new Set();
   for (const entry of entries) {
@@ -69,9 +81,16 @@ export function runtimeInventoryKeyNames(keys, entries) {
       throw invalidInventory();
     received.add(entry.key);
   }
-  if (received.size !== expected.size) throw invalidInventory();
+  const missing = new Set([...expected].filter((key) => !received.has(key)));
+  for (const group of OPTIONAL_ENVIRONMENT_KEY_GROUPS) {
+    if (!group.every((key) => expected.has(key))) continue;
+    const receivedCount = group.filter((key) => received.has(key)).length;
+    if (receivedCount !== 0 && receivedCount !== group.length) throw invalidInventory();
+    if (receivedCount === 0) for (const key of group) missing.delete(key);
+  }
+  if (missing.size !== 0) throw invalidInventory();
 
-  return Object.freeze([...expected].sort());
+  return Object.freeze([...received].sort());
 }
 
 export function renderRuntimeEnvironment(keys, entries) {

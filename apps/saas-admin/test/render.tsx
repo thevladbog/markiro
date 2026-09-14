@@ -17,7 +17,7 @@ import {
   type AuthClientLike,
   type PlatformSessionData,
 } from "../src/auth/client.js";
-import type { CatalogVersionDto } from "../src/pages/catalog/api.js";
+import type { CatalogVersionDto, OfflineGrantPolicyDto } from "../src/pages/catalog/api.js";
 
 export interface MutableAuthState {
   session: PlatformSessionData | null;
@@ -317,6 +317,7 @@ export function installCatalogApi({
   lifecyclePolicies = [
     { id: "91111111-1111-4111-8111-111111111111", policyKey: "test-fixture-policy", version: 1 },
   ],
+  offlinePolicies = [],
   taxPolicy = {
     kind: "vat",
     regime: "other",
@@ -336,6 +337,7 @@ export function installCatalogApi({
   stalePublishPrice?: string;
   stalePublishPeriod?: "month" | "year";
   lifecyclePolicies?: { id: string; policyKey: string; version: number }[];
+  offlinePolicies?: OfflineGrantPolicyDto[];
   taxPolicy?: SellerTaxPolicy | null;
 } = {}) {
   let catalog: CatalogVersionDto[] = items.map((item) => structuredClone(item));
@@ -344,12 +346,54 @@ export function installCatalogApi({
   const createCalls: CatalogCreateCall[] = [];
   let createSequence = 0;
   let reviewRevision = "2026-09-10T10:00:00.000Z";
+  const offlinePolicyCalls: Array<{ path: string; body: unknown }> = [];
 
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
       const url = String(input);
       if (url.endsWith("/api/platform/me")) return jsonResponse(200, me);
+      if (
+        url.endsWith("/api/platform/catalog/lifecycle-policies") &&
+        (!init.method || init.method === "GET")
+      )
+        return jsonResponse(200, { items: offlinePolicies });
+      if (url.endsWith("/api/platform/catalog/lifecycle-policies") && init.method === "POST") {
+        const body = JSON.parse(String(init.body));
+        offlinePolicyCalls.push({ path: url, body });
+        const created: OfflineGrantPolicyDto = {
+          id: "a1111111-1111-4111-8111-111111111111",
+          ...body,
+          status: "draft",
+          payloadHash: "a".repeat(64),
+          decisionReference: null,
+          approvedAt: null,
+          approvedByPlatformUserId: null,
+          createdByPlatformUserId: me.userId,
+          createdAt: "2026-09-14T00:00:00.000Z",
+        };
+        offlinePolicies = [created, ...offlinePolicies];
+        return jsonResponse(201, created);
+      }
+      const approvePolicy = url.match(
+        /\/api\/platform\/catalog\/lifecycle-policies\/([^/]+)\/approve$/,
+      );
+      if (approvePolicy && init.method === "POST") {
+        const body = JSON.parse(String(init.body));
+        offlinePolicyCalls.push({ path: url, body });
+        const current = offlinePolicies.find((policy) => policy.id === approvePolicy[1])!;
+        const approved: OfflineGrantPolicyDto = {
+          ...current,
+          status: "approved",
+          decisionReference: body.decisionReference,
+          approvedAt: "2026-09-14T00:01:00.000Z",
+          approvedByPlatformUserId: me.userId,
+        };
+        offlinePolicies = offlinePolicies.map((policy) =>
+          policy.id === approved.id ? approved : policy,
+        );
+        return jsonResponse(200, approved);
+      }
       if (url.endsWith("/api/platform/catalog/items") && (!init.method || init.method === "GET")) {
         if (catalogStatus !== 200) {
           return jsonResponse(catalogStatus, { code: "catalog_unavailable" });
@@ -497,6 +541,7 @@ export function installCatalogApi({
     defaultDemoId: () => demoId,
     patchCalls: () => structuredClone(patchCalls),
     createCalls: () => structuredClone(createCalls),
+    offlinePolicyCalls: () => structuredClone(offlinePolicyCalls),
   };
 }
 

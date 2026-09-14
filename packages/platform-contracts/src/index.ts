@@ -27,6 +27,19 @@ export {
 } from "./platform-reports.js";
 export type { PlatformReport, PlatformReportInput } from "./platform-reports.js";
 export {
+  approveOfflineGrantPolicySchema,
+  createOfflineGrantPolicySchema,
+  offlineGrantPolicyRecordSchema,
+  offlineGrantPolicySchema,
+  platformOfflineGrantPolicyContracts,
+} from "./offline-grant-policies.js";
+export type {
+  ApproveOfflineGrantPolicy,
+  CreateOfflineGrantPolicy,
+  OfflineGrantPolicy,
+  OfflineGrantPolicyRecord,
+} from "./offline-grant-policies.js";
+export {
   offerRegistryItemSchema,
   offerPreviewSchema,
   offerRegistryQuerySchema,

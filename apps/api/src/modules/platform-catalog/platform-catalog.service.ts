@@ -30,6 +30,11 @@ import {
   type DefaultDemoPlanResponse,
   type PlanEntitlements,
   type SetDefaultDemoPlan,
+  platformOfflineGrantPolicyContracts,
+  offlineGrantPolicySchema,
+  type ApproveOfflineGrantPolicy,
+  type CreateOfflineGrantPolicy,
+  type OfflineGrantPolicyRecord,
 } from "@markiro/platform-contracts";
 import { commercialTaxDefaults, isCommercialTaxAllowed } from "@markiro/domain";
 import { lockSellerPolicy, readSellerPolicy } from "../billing-profiles/billing-profiles.service";
@@ -56,6 +61,134 @@ export class PlatformCatalogService {
     @Inject(DB) private readonly db: Db,
     private readonly audit: PlatformAuditService,
   ) {}
+
+  async listOfflineGrantPolicies(
+    _principal: PlatformPrincipal,
+  ): Promise<{ items: OfflineGrantPolicyRecord[] }> {
+    const rows = await this.db
+      .select()
+      .from(schema.entitlementLifecyclePolicies)
+      .orderBy(
+        schema.entitlementLifecyclePolicies.policyKey,
+        desc(schema.entitlementLifecyclePolicies.version),
+      );
+    return platformOfflineGrantPolicyContracts.list.response.parse({
+      items: rows.flatMap((row) => {
+        const offlineGrant = row.payload.offlineGrant;
+        const parsed =
+          platformOfflineGrantPolicyContracts.list.response.shape.items.element.safeParse({
+            ...row,
+            offlineGrant,
+          });
+        return parsed.success ? [parsed.data] : [];
+      }),
+    });
+  }
+
+  async createOfflineGrantPolicy(
+    principal: PlatformPrincipal,
+    input: CreateOfflineGrantPolicy,
+  ): Promise<OfflineGrantPolicyRecord> {
+    const payload = { offlineGrant: input.offlineGrant };
+    try {
+      return await this.db.transaction(async (tx) => {
+        const [created] = await tx
+          .insert(schema.entitlementLifecyclePolicies)
+          .values({
+            policyKey: input.policyKey,
+            version: input.version,
+            payload,
+            payloadHash: entitlementDigest(payload),
+            createdByPlatformUserId: principal.userId,
+          })
+          .returning();
+        if (!created) throw new ConflictException({ code: "catalog_conflict" });
+        await this.audit.record(tx, {
+          actorPlatformUserId: principal.userId,
+          actorRole: principal.role,
+          action: "catalog.lifecycle_policy.created",
+          outcome: "success",
+          tenantId: null,
+          targetType: "entitlement_lifecycle_policy",
+          targetId: created.id,
+          reason: null,
+          before: null,
+          after: {
+            policyKey: created.policyKey,
+            version: created.version,
+            payloadHash: created.payloadHash,
+          },
+          requestId: null,
+        });
+        return platformOfflineGrantPolicyContracts.create.response.parse({
+          ...created,
+          offlineGrant: input.offlineGrant,
+        });
+      });
+    } catch (error) {
+      catalogDatabaseError(error);
+    }
+  }
+
+  async approveOfflineGrantPolicy(
+    principal: PlatformPrincipal,
+    id: string,
+    input: ApproveOfflineGrantPolicy,
+  ): Promise<OfflineGrantPolicyRecord> {
+    try {
+      return await this.db.transaction(async (tx) => {
+        const [current] = await tx
+          .select()
+          .from(schema.entitlementLifecyclePolicies)
+          .where(eq(schema.entitlementLifecyclePolicies.id, id))
+          .for("update");
+        if (!current) throw new NotFoundException({ code: "lifecycle_policy_not_found" });
+        const offlineGrant = offlineGrantPolicySchema.safeParse(current.payload.offlineGrant);
+        if (!offlineGrant.success || current.payloadHash !== entitlementDigest(current.payload)) {
+          throw new BadRequestException({ code: "lifecycle_policy_invalid" });
+        }
+        if (current.status === "approved") {
+          if (current.decisionReference !== input.decisionReference) {
+            throw new ConflictException({ code: "lifecycle_policy_already_approved" });
+          }
+          return platformOfflineGrantPolicyContracts.approve.response.parse({
+            ...current,
+            offlineGrant: offlineGrant.data,
+          });
+        }
+        const [approved] = await tx
+          .update(schema.entitlementLifecyclePolicies)
+          .set({
+            status: "approved",
+            decisionReference: input.decisionReference,
+            approvedAt: sql`now()`,
+            approvedByPlatformUserId: principal.userId,
+          })
+          .where(eq(schema.entitlementLifecyclePolicies.id, id))
+          .returning();
+        if (!approved) throw new ConflictException({ code: "catalog_conflict" });
+        await this.audit.record(tx, {
+          actorPlatformUserId: principal.userId,
+          actorRole: principal.role,
+          action: "catalog.lifecycle_policy.approved",
+          outcome: "success",
+          tenantId: null,
+          targetType: "entitlement_lifecycle_policy",
+          targetId: approved.id,
+          reason: input.decisionReference,
+          before: { status: "draft" },
+          after: { status: "approved", payloadHash: approved.payloadHash },
+          requestId: null,
+        });
+        return platformOfflineGrantPolicyContracts.approve.response.parse({
+          ...approved,
+          offlineGrant: offlineGrant.data,
+        });
+      });
+    } catch (error) {
+      catalogDatabaseError(error);
+    }
+  }
 
   async list(principal: PlatformPrincipal): Promise<CatalogVersionListResponse> {
     const rows = await this.db

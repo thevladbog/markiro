@@ -3,9 +3,51 @@ import {
   listCatalogVersions,
   createCatalogVersion,
   catalogVersionToCreateInput,
+  createOfflineGrantPolicy,
+  approveOfflineGrantPolicy,
 } from "../src/pages/catalog/api.js";
 import { DRAFT_PLAN, jsonResponse } from "./render.js";
 afterEach(() => vi.unstubAllGlobals());
+it("creates and approves an observe-ready offline grant policy through the platform API", async () => {
+  const id = "11111111-1111-4111-8111-111111111199";
+  const offlineGrant = {
+    version: 1 as const,
+    maxOfflineMs: 28_800_000,
+    maxCompletionMs: 86_400_000,
+    taskBounds: {},
+  };
+  const calls: Array<[string, RequestInit]> = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+      calls.push([String(input), init]);
+      const approved = String(input).endsWith("/approve");
+      return jsonResponse(approved ? 200 : 201, {
+        id,
+        policyKey: "factory-standard",
+        version: 1,
+        status: approved ? "approved" : "draft",
+        offlineGrant,
+        payloadHash: "a".repeat(64),
+        decisionReference: approved ? "P1D-1" : null,
+        approvedAt: approved ? "2026-09-14T00:00:00.000Z" : null,
+        approvedByPlatformUserId: approved ? "platform-admin" : null,
+        createdByPlatformUserId: "platform-admin",
+        createdAt: "2026-09-14T00:00:00.000Z",
+      });
+    }),
+  );
+  await createOfflineGrantPolicy({ policyKey: "factory-standard", version: 1, offlineGrant });
+  await approveOfflineGrantPolicy(id, { decisionReference: "P1D-1" });
+  expect(calls.map(([url]) => url)).toEqual([
+    expect.stringContaining("/catalog/lifecycle-policies"),
+    expect.stringContaining(`/catalog/lifecycle-policies/${id}/approve`),
+  ]);
+  expect(calls.map(([, init]) => JSON.parse(String(init.body)))).toEqual([
+    { policyKey: "factory-standard", version: 1, offlineGrant },
+    { decisionReference: "P1D-1" },
+  ]);
+});
 it("reads explicit V3 modules and policy without widening saved V2 documents", async () => {
   const plan = {
     ...DRAFT_PLAN,
