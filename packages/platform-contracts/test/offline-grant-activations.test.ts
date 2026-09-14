@@ -150,6 +150,22 @@ describe("offline grant activation contracts", () => {
     ).toBe(false);
   });
 
+  it("represents working-device assignments without inventing one for kiosks", () => {
+    const member = preparation.members[0];
+    expect(
+      grantActivationPreparationSchema.safeParse({
+        ...preparation,
+        members: [{ ...member, deviceKind: "kiosk", assignmentId: null }],
+      }).success,
+    ).toBe(true);
+    expect(
+      grantActivationPreparationSchema.safeParse({
+        ...preparation,
+        members: [{ ...member, deviceKind: "station", assignmentId: null }],
+      }).success,
+    ).toBe(false);
+  });
+
   it("accepts only state-consistent confirmed and stale responses", () => {
     const rolloutPolicy = {
       id: "018f7bd1-4420-4b13-9f77-89f3a5374711",

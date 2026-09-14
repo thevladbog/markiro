@@ -7,11 +7,18 @@ const read = (path) => readFile(new URL(path, root), "utf8");
 
 test("production API image includes readiness persistence before readers", async () => {
   await access(new URL("packages/db/migrations/0151_offline_grant_readiness.sql", root));
+  const activationMigration = await read(
+    "packages/db/migrations/0152_offline_grant_activation.sql",
+  );
   const dockerfile = await read("deploy/production/api.Dockerfile");
 
   assert.match(
     dockerfile,
     /COPY --from=build --chown=node:node \/workspace\/packages\/db\/migrations \/app\/node_modules\/@markiro\/db\/migrations/,
+  );
+  assert.doesNotMatch(
+    activationMigration,
+    /INSERT\s+INTO\s+"?(?:offline_grant_activation|entitlement_lifecycle_policies)/i,
   );
 });
 

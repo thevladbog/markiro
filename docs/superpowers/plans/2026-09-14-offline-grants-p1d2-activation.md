@@ -190,7 +190,7 @@ git commit -m "feat: define offline grant activation contracts"
 - Produces: `offlineGrantActivationPreparations`, `offlineGrantActivationMembers`, `offlineGrantDeviceActivations` and their Drizzle row types.
 - Task 3 owns state creation; Task 4 owns confirmed transitions and runtime reads.
 
-- [ ] **Step 1: Write the failing schema and migration assertions**
+- [x] **Step 1: Write the failing schema and migration assertions**
 
 Assert exports, table names, request uniqueness, exact 30-minute finite interval support, distinct confirmation actor constraint, member owner constraint, composite tenant/subscription foreign key, base/rollout policy foreign keys, one active activation per concrete device and JSON object/hash checks.
 
@@ -204,7 +204,7 @@ expect(sqlText).toContain("offline_grant_device_activations_station_active_uq");
 expect(sqlText).toContain("offline_grant_device_activations_kiosk_active_uq");
 ```
 
-- [ ] **Step 2: Run the focused DB tests and verify RED**
+- [x] **Step 2: Run the focused DB tests and verify RED**
 
 ```bash
 corepack pnpm --filter @markiro/db exec vitest run \
@@ -213,7 +213,7 @@ corepack pnpm --filter @markiro/db exec vitest run \
 
 Expected: missing schema exports and migration.
 
-- [ ] **Step 3: Define focused tables**
+- [x] **Step 3: Define focused tables**
 
 Use a dedicated schema module. The preparation owns prepare/confirm/cancel request identity and saved response envelopes:
 
@@ -264,7 +264,7 @@ an indexed runtime lookup. Add nullable `activationId` to
 `device_grant_configurations`, referencing the activation table, so configuration
 history records rollout provenance without changing the native response.
 
-- [ ] **Step 4: Generate and review migration 0152**
+- [x] **Step 4: Generate and review migration 0152**
 
 Run:
 
@@ -274,15 +274,15 @@ corepack pnpm --filter @markiro/db db:generate
 
 Rename only the newly generated migration to `0152_offline_grant_activation.sql` if Drizzle generated a descriptive suffix. Preserve generated metadata alignment. Review SQL for tenant foreign keys, partial unique indexes, finite timestamps, request hashes, JSON bounds and actor state constraints. Do not edit migration 0151.
 
-- [ ] **Step 5: Add a legacy-to-current migration test**
+- [x] **Step 5: Add a legacy-to-current migration test**
 
 Create a temporary database, migrate through 0151, insert representative policy, subscription, Station/Handheld/kiosk device and readiness rows, then apply 0152. Assert all legacy rows are byte-equivalent and all three new tables are empty. Apply the complete migration set again and assert no duplicate objects or activation rows.
 
-- [ ] **Step 6: Update the production migration contract**
+- [x] **Step 6: Update the production migration contract**
 
 Extend the existing offline-grant production contract to require 0152 before API startup and assert that the migration contains no `INSERT` into activation or lifecycle policy tables.
 
-- [ ] **Step 7: Build and run DB gates**
+- [x] **Step 7: Build and run DB gates**
 
 ```bash
 corepack pnpm --filter @markiro/db build
@@ -293,7 +293,7 @@ corepack pnpm --filter @markiro/db lint
 
 Expected: all pass; database-backed test reports its real PostgreSQL execution rather than a skip.
 
-- [ ] **Step 8: Commit Task 2**
+- [x] **Step 8: Commit Task 2**
 
 ```bash
 git add packages/db/src/schema/device-grant-activations.ts packages/db/src/schema.ts \

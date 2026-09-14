@@ -11,7 +11,11 @@ import { platformRoleSchema } from "./platform-auth.js";
 
 const protocolSchema = z.literal("offline-grants-activation-v1");
 const digestSchema = z.string().regex(/^[0-9a-f]{64}$/);
-const opaqueCursorSchema = z.string().min(1).max(4_096).regex(/^[A-Za-z0-9_-]+$/);
+const opaqueCursorSchema = z
+  .string()
+  .min(1)
+  .max(4_096)
+  .regex(/^[A-Za-z0-9_-]+$/);
 const uniqueDeviceIdsSchema = z
   .array(platformUuidSchema)
   .min(1)
@@ -51,14 +55,23 @@ export const grantActivationMemberSchema = z
     deviceKind: z.enum(["station", "handheld", "kiosk"]),
     deviceName: z.string().trim().min(1).max(300),
     credentialEpoch: z.number().int().nonnegative().max(2_147_483_647),
-    assignmentId: platformUuidSchema,
+    assignmentId: platformUuidSchema.nullable(),
     configurationId: platformUuidSchema,
     clientReportId: platformUuidSchema,
     verifiedGrantId: platformUuidSchema,
     keysetRevision: z.string().trim().min(1).max(512),
     entitlementRevision: z.string().regex(/^(0|[1-9][0-9]*)$/),
   })
-  .strict();
+  .strict()
+  .superRefine((value, context) => {
+    if ((value.deviceKind === "kiosk") !== (value.assignmentId === null)) {
+      context.addIssue({
+        code: "custom",
+        path: ["assignmentId"],
+        message: "Only working devices have an assignment",
+      });
+    }
+  });
 
 export const grantActivationPreparationSchema = z
   .object({
@@ -87,9 +100,7 @@ export const grantActivationPreparationSchema = z
     const confirmed =
       value.confirmedBy !== null && value.confirmedAt !== null && value.rolloutPolicy !== null;
     const cancelled =
-      value.cancelledBy !== null &&
-      value.cancelledAt !== null &&
-      value.cancellationReason !== null;
+      value.cancelledBy !== null && value.cancelledAt !== null && value.cancellationReason !== null;
     if ((value.state === "confirmed") !== confirmed) {
       context.addIssue({ code: "custom", path: ["state"], message: "Invalid confirmed state" });
     }
@@ -190,9 +201,7 @@ export const platformGrantActivationContracts = {
 
 export type GrantActivationState = z.output<typeof grantActivationStateSchema>;
 export type GrantActivationMember = z.output<typeof grantActivationMemberSchema>;
-export type PlatformGrantActivationPreparation = z.output<
-  typeof grantActivationPreparationSchema
->;
+export type PlatformGrantActivationPreparation = z.output<typeof grantActivationPreparationSchema>;
 export type PlatformGrantActivationPrepareRequest = z.output<
   typeof grantActivationPrepareRequestSchema
 >;

@@ -18,6 +18,69 @@ describe("offline grant provenance schema", () => {
     expect(schema).toHaveProperty("deviceGrantConfigurations");
   });
 
+  it("models prepared cohorts and exact device activation ownership", () => {
+    expect(schema).toHaveProperty("offlineGrantActivationPreparations");
+    expect(schema).toHaveProperty("offlineGrantActivationMembers");
+    expect(schema).toHaveProperty("offlineGrantDeviceActivations");
+
+    const preparations = getTableConfig(schema.offlineGrantActivationPreparations);
+    expect(preparations.name).toBe("offline_grant_activation_preparations");
+    expect(preparations.checks.map((constraint) => constraint.name)).toEqual(
+      expect.arrayContaining([
+        "offline_grant_activation_state_check",
+        "offline_grant_activation_interval_check",
+        "offline_grant_activation_confirm_actor_check",
+        "offline_grant_activation_payload_check",
+      ]),
+    );
+    expect(preparations.foreignKeys.map((key) => key.getName())).toEqual(
+      expect.arrayContaining([
+        "offline_grant_activation_base_policy_fk",
+        "offline_grant_activation_rollout_policy_fk",
+        "offline_grant_activation_prepared_by_fk",
+        "offline_grant_activation_confirmed_by_fk",
+        "offline_grant_activation_cancelled_by_fk",
+      ]),
+    );
+
+    const members = getTableConfig(schema.offlineGrantActivationMembers);
+    expect(members.name).toBe("offline_grant_activation_members");
+    expect(members.checks.map((constraint) => constraint.name)).toEqual(
+      expect.arrayContaining([
+        "offline_grant_activation_members_owner_check",
+        "offline_grant_activation_members_snapshot_check",
+      ]),
+    );
+    expect(members.foreignKeys.map((key) => key.getName())).toEqual(
+      expect.arrayContaining([
+        "offline_grant_activation_members_subscription_fk",
+        "offline_grant_activation_members_station_fk",
+        "offline_grant_activation_members_kiosk_fk",
+      ]),
+    );
+    expect(members.indexes.map((index) => index.config.name)).toEqual(
+      expect.arrayContaining([
+        "offline_grant_activation_members_station_prepared_uq",
+        "offline_grant_activation_members_kiosk_prepared_uq",
+      ]),
+    );
+
+    const activations = getTableConfig(schema.offlineGrantDeviceActivations);
+    expect(activations.name).toBe("offline_grant_device_activations");
+    expect(activations.indexes.map((index) => index.config.name)).toEqual(
+      expect.arrayContaining([
+        "offline_grant_device_activations_station_active_uq",
+        "offline_grant_device_activations_kiosk_active_uq",
+      ]),
+    );
+
+    const configurations = getTableConfig(schema.deviceGrantConfigurations);
+    expect(configurations.columns.some((column) => column.name === "activation_id")).toBe(true);
+    expect(configurations.foreignKeys.map((key) => key.getName())).toContain(
+      "device_grant_configurations_activation_fk",
+    );
+  });
+
   it("models append-only client readiness with tenant-scoped matched facts", () => {
     expect(schema).toHaveProperty("deviceGrantClientReadinessReports");
     const config = getTableConfig(schema.deviceGrantClientReadinessReports);
