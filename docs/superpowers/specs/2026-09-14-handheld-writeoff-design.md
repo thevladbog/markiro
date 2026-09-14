@@ -2,7 +2,10 @@
 
 **Date:** 2026-09-14
 
-**Status:** Approved in brainstorming 2026-09-14. Not yet implemented.
+**Status:** Approved in brainstorming 2026-09-14. The database and API half is
+implemented on `claude/handheld-writeoff`
+([plan 1](../plans/2026-09-14-handheld-writeoff-1-db-api.md)); the cabinet and
+the handheld app are not.
 
 **Scope:** A write-off contour on the handheld terminal, producing the same
 document the pickup kiosk already produces for `reason='writeoff'`. Units and
@@ -52,26 +55,43 @@ Today `kiosk_id` is `NOT NULL` with a composite FK to `kiosks`, and idempotency
 is `unique (tenant_id, kiosk_id, device_seq)`
 (`packages/db/src/schema/pickup.ts`). A handheld does not fit.
 
-New migration:
+**As built (migrations 0149 and 0150).** The repository had already solved this
+exact shape for the `device_grant_*` tables, so the implementation copies that
+precedent rather than inventing a second convention — this supersedes the
+`num_nonnulls` sketch this spec originally carried:
 
 1. `kiosk_id` becomes nullable.
-2. New `station_device_id uuid`, composite FK
-   `(tenant_id, station_device_id) → station_devices (tenant_id, id)`.
-   A handheld is already a `station_devices` row with `kind='handheld'`
-   (`packages/db/src/schema/platform.ts`, `station_devices_kind_check`).
-3. `CHECK (num_nonnulls(kiosk_id, station_device_id) = 1)` — a document always
-   names exactly one source device.
-4. Drop `pickup_orders_kiosk_device_seq_uq`; replace with two partial unique
+2. New `source_kind text NOT NULL DEFAULT 'kiosk'` discriminator and
+   `station_device_id uuid`.
+3. `CHECK` that `source_kind='kiosk'` implies a kiosk id and a null device, and
+   `source_kind='handheld'` the reverse — a document always names exactly one
+   source device.
+4. Composite FK `(tenant_id, station_device_id, source_kind) → station_devices
+(tenant_id, id, kind)`. Including `source_kind` is the point: a row claiming
+   `handheld` cannot reference a device of kind `station`. This is what
+   `station_devices_tenant_id_kind_uq` (migration 0146) exists to make
+   referenceable.
+5. Drop `pickup_orders_kiosk_device_seq_uq`; replace with two partial unique
    indexes:
    - `(tenant_id, kiosk_id, device_seq) WHERE kiosk_id IS NOT NULL AND device_seq IS NOT NULL`
    - `(tenant_id, station_device_id, device_seq) WHERE station_device_id IS NOT NULL AND device_seq IS NOT NULL`
 
    The `device_seq IS NOT NULL` half preserves today's exemption for
-   admin-created rows, which the current constraint gets from `MATCH SIMPLE`
-   NULL semantics.
+   admin-created rows, which the old constraint got from `MATCH SIMPLE` NULL
+   semantics.
 
-Existing rows are unaffected: every one of them has a `kiosk_id` and a NULL
-`station_device_id`, which satisfies the new `CHECK`.
+Existing rows are unaffected: every one of them has a `kiosk_id` and takes
+`source_kind='kiosk'` from the default with a NULL `station_device_id`, which
+satisfies the check. No backfill.
+
+**`pickup_scan_rejections` needs the same treatment**, discovered during
+implementation and not anticipated here originally. Early rejections — unknown
+badge, write-off forbidden, archived reason — live in that table, whose
+`kiosk_id` was also `NOT NULL` with its own `(tenant, kiosk, device_seq)`
+unique. Migration 0150 mirrors 0149 onto it. The reason those rows exist — an
+offline document syncing hours late against state that has since changed,
+leaving the scanned codes with no trace — applies to a queued handheld write-off
+word for word, so the handheld gets the same audit rather than a thinner path.
 
 `pickup_order_items`, `pickup_order_boxes` and `pickup_order_reasons` are
 untouched. Reusing the reason dictionary unchanged is the point of choosing one
@@ -96,9 +116,17 @@ type PickupDocumentSource =
   { kind: "kiosk"; kioskId: string } | { kind: "handheld"; stationDeviceId: string };
 ```
 
-The refactor is mechanical but wide, and it is the main cost of keeping one
-document. Branch on `kind` only where behaviour genuinely differs: the
-idempotency lookup, the admission-token path (kiosk only), and the product
+The refactor is wide, and it is the main cost of keeping one document. It is
+also **not** purely mechanical, which this spec originally assumed: the
+concurrency control that serializes a device sequence was a row lock on the
+`kiosks` table, and it is what stops an order and a rejection both winning one
+`deviceSeq`. A handheld has no kiosk row to lock, so the lock now takes the row
+that OWNS the sequence — `kiosks` for a kiosk, `station_devices` for a handheld —
+keeping the guarantee per-device instead of letting it become accidentally
+global.
+
+Branch on `kind` only where behaviour genuinely differs: the idempotency lookup,
+the owner lock, the admission-token path (kiosk only), and the product
 allowlist.
 
 ### Product resolution
