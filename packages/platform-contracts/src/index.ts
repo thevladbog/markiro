@@ -349,6 +349,7 @@ export type {
   BillingActCancelDto,
   BillingActCreateDto,
   BillingActDocument,
+  BillingActServiceUsageSnapshot,
   BillingActIssueDto,
   BillingActIssueInput,
   CommercialDocument,

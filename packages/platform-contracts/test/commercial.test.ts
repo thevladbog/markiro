@@ -1580,12 +1580,24 @@ describe("platform commercial contracts", () => {
     const act = platformCommercialContracts.billingActs.create.body.parse({
       tenantId: TENANT_ID,
       requestId,
+      orderedServiceId: "85111111-1111-4111-8111-111111111119",
+      serviceUsageEntryIds: ["86111111-1111-4111-8111-111111111119"],
       number: " ACT-2026-001 ",
       periodStart: "2026-08-01",
       periodEnd: "2026-08-31",
       idempotencyKey,
     });
     expect(act.number).toBe("ACT-2026-001");
+    expect(act.serviceUsageEntryIds).toEqual(["86111111-1111-4111-8111-111111111119"]);
+    expect(
+      platformCommercialContracts.billingActs.create.body.safeParse({
+        ...act,
+        serviceUsageEntryIds: [
+          "86111111-1111-4111-8111-111111111119",
+          "86111111-1111-4111-8111-111111111119",
+        ],
+      }).success,
+    ).toBe(false);
     expect(
       platformCommercialContracts.billingActs.create.body.safeParse({
         ...act,

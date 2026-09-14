@@ -12,6 +12,7 @@ import {
   validateBillingActPdf,
 } from "../src/modules/billing-acts/billing-acts.service";
 import { PlatformBillingRequestsService } from "../src/modules/platform-billing-requests/platform-billing-requests.service";
+import { readServicePeriodDetail } from "../src/modules/service-periods/service-period-read-model";
 import type { ObjectStorageService } from "../src/modules/storage/object-storage.service";
 import {
   platformCapabilitiesForRole,
@@ -175,6 +176,75 @@ describe.skipIf(!databaseUrl)("billing acts on isolated Postgres", () => {
         number: `ACT-${randomUUID()}`,
       }),
     ).rejects.toMatchObject({ response: { code: "billing_source_tenant_mismatch" }, status: 409 });
+  });
+
+  it("snapshots recurring work once and releases only its act link on cancellation", async () => {
+    const fixture = await insertRecurringServiceUsage(connection.db, tenantA, actorId);
+    const [periodBefore] = await connection.db
+      .select()
+      .from(schema.servicePeriods)
+      .where(eq(schema.servicePeriods.id, fixture.periodId));
+    const createInput = {
+      tenantId: tenantA,
+      invoiceId: fixture.invoiceId,
+      orderedServiceId: fixture.orderedServiceId,
+      serviceUsageEntryIds: fixture.entryIds,
+      number: `ACT-SERVICE-${randomUUID()}`,
+      periodStart: "2026-08-01",
+      periodEnd: "2026-08-31",
+      idempotencyKey: randomUUID(),
+    };
+
+    const first = await acts.create(actor, createInput);
+    expect(first.serviceUsageSnapshot).toEqual([
+      expect.objectContaining({
+        entryId: fixture.entryIds[0],
+        servicePeriodId: fixture.periodId,
+        sequence: 1,
+        workReference: "SUP-42",
+        description: "Настройка интеграции",
+        actualMinutes: 45,
+        allowanceMinutes: 45,
+      }),
+      expect.objectContaining({
+        entryId: fixture.entryIds[1],
+        sequence: 2,
+        classification: "product_defect",
+        allowanceMinutes: 0,
+      }),
+    ]);
+    expect(JSON.stringify(first.serviceUsageSnapshot)).not.toContain("Не должно попасть в акт");
+    expect(
+      (await readServicePeriodDetail(connection.db, fixture.periodId)).entries.map(
+        (entry) => entry.billingActId,
+      ),
+    ).toEqual([first.id, first.id]);
+    await expect(
+      acts.create(actor, {
+        ...createInput,
+        number: `ACT-SERVICE-${randomUUID()}`,
+        idempotencyKey: randomUUID(),
+      }),
+    ).rejects.toMatchObject({ response: { code: "service_usage_already_acted" }, status: 409 });
+
+    await acts.cancel(actor, first.id, { idempotencyKey: randomUUID() });
+    expect(
+      (await readServicePeriodDetail(connection.db, fixture.periodId)).entries.map(
+        (entry) => entry.billingActId,
+      ),
+    ).toEqual([null, null]);
+    const replacement = await acts.create(actor, {
+      ...createInput,
+      number: `ACT-SERVICE-${randomUUID()}`,
+      idempotencyKey: randomUUID(),
+    });
+    expect(replacement.serviceUsageSnapshot).toEqual(first.serviceUsageSnapshot);
+
+    const [periodAfter] = await connection.db
+      .select()
+      .from(schema.servicePeriods)
+      .where(eq(schema.servicePeriods.id, fixture.periodId));
+    expect(periodAfter).toEqual(periodBefore);
   });
 
   it("serializes a globally unique act number across tenants", async () => {
@@ -987,6 +1057,176 @@ async function insertOrderedService(
     })
     .returning();
   return service!.id;
+}
+
+async function insertRecurringServiceUsage(db: Db, tenantId: string, actorId: string) {
+  const catalogItemId = randomUUID();
+  const catalogVersionId = randomUUID();
+  const invoiceId = randomUUID();
+  const invoiceLineId = randomUUID();
+  const paymentId = randomUUID();
+  const orderedServiceId = randomUUID();
+  const periodId = randomUUID();
+  const postedAt = new Date("2026-08-15T10:00:00.000Z");
+  await db.insert(schema.catalogItems).values({
+    id: catalogItemId,
+    code: `act-support-${catalogItemId}`,
+    nameRu: "Сопровождение",
+    nameEn: "Support",
+    kind: "service",
+  });
+  await db.insert(schema.catalogItemVersions).values({
+    id: catalogVersionId,
+    catalogItemId,
+    kind: "service",
+    version: 1,
+    status: "published",
+    documentNameRu: "Абонентское сопровождение",
+    documentNameEn: "Monthly support",
+    subject: "service",
+    sellerPolicyRevision: 1,
+    nameRu: "Сопровождение",
+    nameEn: "Support",
+    unit: "month",
+    billingMode: "recurring",
+    billingPeriod: "month",
+    serviceTerms: {
+      cadence: "month",
+      includedMinutes: 180,
+      carryover: "none",
+      excessPolicy: "external_approval",
+      scopeRu: "Консультации",
+      scopeEn: "Consulting",
+      operatingHoursRu: null,
+      operatingHoursEn: null,
+      schedulingTermsRu: null,
+      schedulingTermsEn: null,
+    },
+    unitPrice: "30000.00",
+    vatIncluded: false,
+    publishedAt: postedAt,
+    publishedByPlatformUserId: actorId,
+  });
+  await db.insert(schema.invoices).values({
+    id: invoiceId,
+    tenantId,
+    number: `INV-SERVICE-${randomUUID()}`,
+    status: "paid",
+    issueDate: postedAt,
+    paidAt: postedAt,
+    sellerSnapshot: { legalName: "ООО Маркиро" },
+    buyerSnapshot: { legalName: "ООО Фабрика" },
+    subtotal: "30000.00",
+    vatTotal: "0.00",
+    total: "30000.00",
+    applicationMode: "manual",
+    createdByPlatformUserId: actorId,
+    issuedByPlatformUserId: actorId,
+    issuedAt: postedAt,
+  });
+  await db.insert(schema.invoiceLines).values({
+    id: invoiceLineId,
+    tenantId,
+    invoiceId,
+    position: 1,
+    kind: "service",
+    catalogVersionId,
+    catalogKind: "service",
+    nameRu: "Абонентское сопровождение",
+    nameEn: "Monthly support",
+    quantity: 1,
+    unit: "month",
+    agreedUnitPrice: "30000.00",
+    vatIncluded: false,
+    lineSubtotal: "30000.00",
+    lineVat: "0.00",
+    lineTotal: "30000.00",
+  });
+  await db.insert(schema.billingPayments).values({
+    id: paymentId,
+    tenantId,
+    invoiceId,
+    source: "manual",
+    paidAt: postedAt,
+    amount: "30000.00",
+    bankReference: `PAY-${paymentId}`,
+    platformUserId: actorId,
+    idempotencyKey: `payment:${paymentId}`,
+  });
+  await db.insert(schema.orderedServices).values({
+    id: orderedServiceId,
+    tenantId,
+    invoiceId,
+    invoiceLineId,
+    billingPaymentId: paymentId,
+    catalogVersionId,
+    catalogKind: "service",
+    nameRu: "Абонентское сопровождение",
+    nameEn: "Monthly support",
+    quantity: 1,
+    unit: "month",
+    status: "ordered",
+    orderedAt: postedAt,
+  });
+  await db.insert(schema.servicePeriods).values({
+    id: periodId,
+    tenantId,
+    orderedServiceId,
+    catalogItemId,
+    catalogVersionId,
+    invoiceId,
+    invoiceLineId,
+    paymentId,
+    startsAt: new Date("2026-08-01T00:00:00.000+03:00"),
+    endsAt: new Date("2026-09-01T00:00:00.000+03:00"),
+    billingTimezone: "Europe/Moscow",
+    renewalAnchor: { day: 1 },
+    commercialSnapshot: { nameRu: "Абонентское сопровождение" },
+    allowanceSnapshot: { includedMinutes: 180 },
+    includedMinutes: 180,
+  });
+  const entryIds = [randomUUID(), randomUUID()];
+  await db.insert(schema.serviceUsageEntries).values([
+    {
+      id: entryIds[0],
+      tenantId,
+      servicePeriodId: periodId,
+      kind: "usage",
+      classification: "customer_service",
+      originalEntryId: null,
+      workReference: "SUP-42",
+      description: "Настройка интеграции",
+      internalNote: "Не должно попасть в акт",
+      actualMinutesDelta: 45,
+      allowanceMinutesDelta: 45,
+      performedAt: new Date("2026-08-14T09:00:00.000Z"),
+      actorPlatformUserId: actorId,
+      requestId: randomUUID(),
+      requestHash: "0".repeat(64),
+      response: {},
+      postedAt,
+    },
+    {
+      id: entryIds[1],
+      tenantId,
+      servicePeriodId: periodId,
+      kind: "usage",
+      classification: "product_defect",
+      originalEntryId: null,
+      workReference: "DEF-7",
+      description: "Исправление дефекта",
+      internalNote: null,
+      actualMinutesDelta: 20,
+      allowanceMinutesDelta: 0,
+      performedAt: new Date("2026-08-15T09:00:00.000Z"),
+      actorPlatformUserId: actorId,
+      requestId: randomUUID(),
+      requestHash: "1".repeat(64),
+      response: {},
+      postedAt,
+    },
+  ]);
+  return { invoiceId, orderedServiceId, periodId, entryIds };
 }
 
 function quoteIdentifier(identifier: string): string {

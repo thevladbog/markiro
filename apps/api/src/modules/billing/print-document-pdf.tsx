@@ -11,6 +11,7 @@ import {
   renderToBuffer,
 } from "@react-pdf/renderer";
 import { renderCode128Svg, renderQrSvg } from "@markiro/domain";
+import type { BillingActServiceUsageSnapshot } from "@markiro/platform-contracts";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import sanitizeHtml from "sanitize-html";
@@ -455,6 +456,43 @@ function Closing({ model, signed }: { model: PrintDocumentModel; signed: boolean
   );
 }
 
+function ServiceUsageTable({ entries }: { entries: BillingActServiceUsageSnapshot[] }) {
+  if (!entries.length) return null;
+  return (
+    <>
+      <View style={styles.itemsHeading}>
+        <Text style={styles.sectionLabel}>ВЫПОЛНЕННЫЕ РАБОТЫ</Text>
+        <Text style={[styles.mono, styles.muted]}>{entries.length} записей</Text>
+      </View>
+      <View style={styles.table}>
+        {entries.map((entry) => (
+          <View style={styles.row} key={entry.entryId} wrap={false}>
+            <View style={[styles.cell, styles.number]}>
+              <Text>{entry.sequence}</Text>
+            </View>
+            <View style={[styles.cell, styles.position]}>
+              <Text style={styles.positionName}>{entry.workReference}</Text>
+              <Text style={styles.positionDescription}>{entry.description}</Text>
+              <Text style={styles.positionDescription}>
+                {entry.kind === "correction" ? "Корректировка" : "Работа"} ·{" "}
+                {entry.classification === "product_defect"
+                  ? "не списывается из пакета"
+                  : "работа из пакета"}
+              </Text>
+            </View>
+            <View style={[styles.cell, styles.quantity]}>
+              <Text>{entry.actualMinutes} мин</Text>
+            </View>
+            <View style={[styles.cell, styles.quantity]}>
+              <Text>{entry.allowanceMinutes} мин</Text>
+            </View>
+          </View>
+        ))}
+      </View>
+    </>
+  );
+}
+
 export async function renderPrintPdf(
   model: PrintDocumentModel,
   options: PrintRenderOptions = {},
@@ -511,6 +549,7 @@ export async function renderPrintPdf(
             <Text style={[styles.mono, styles.muted]}>{model.lines.length} поз.</Text>
           </View>
           <LinesTable lines={model.lines} />
+          <ServiceUsageTable entries={model.serviceUsage ?? []} />
           <Closing model={model} signed={printVariant === "signed"} />
         </View>
         <Footer model={model} barcode={barcode} />

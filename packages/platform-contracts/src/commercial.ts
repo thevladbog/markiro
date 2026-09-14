@@ -956,6 +956,11 @@ export const billingActCreateSchema = z
     number: trimmedTextSchema(200),
     periodStart: billingCivilDateSchema,
     periodEnd: billingCivilDateSchema,
+    serviceUsageEntryIds: z
+      .array(platformUuidSchema)
+      .max(200)
+      .refine((ids) => new Set(ids).size === ids.length, "Service usage entries must be unique")
+      .optional(),
     idempotencyKey: platformUuidSchema,
   })
   .strict()
@@ -967,6 +972,22 @@ export const billingActIssueSchema = billingActIdempotencySchema
   .extend({ printVariant: printDocumentVariantSchema.default("clean") })
   .strict();
 export const billingActCancelSchema = billingActIdempotencySchema;
+export const billingActServiceUsageSnapshotSchema = z
+  .object({
+    entryId: platformUuidSchema,
+    servicePeriodId: platformUuidSchema,
+    sequence: positiveIntegerSchema,
+    kind: z.enum(["usage", "correction"]),
+    classification: z.enum(["customer_service", "product_defect"]),
+    originalEntryId: platformUuidSchema.nullable(),
+    workReference: z.string().trim().min(1).max(300),
+    description: z.string().trim().min(1).max(4_000),
+    performedAt: responseTimestampSchema,
+    postedAt: responseTimestampSchema,
+    actualMinutes: z.number().int().min(-POSTGRES_INTEGER_MAX).max(POSTGRES_INTEGER_MAX),
+    allowanceMinutes: z.number().int().min(-POSTGRES_INTEGER_MAX).max(POSTGRES_INTEGER_MAX),
+  })
+  .strict();
 export const billingActDocumentSchema = z.discriminatedUnion("state", [
   z
     .object({
@@ -1032,6 +1053,7 @@ export const billingActSchema = z
     cancelledAt: nullableResponseTimestampSchema,
     createdAt: responseTimestampSchema,
     updatedAt: responseTimestampSchema,
+    serviceUsageSnapshot: z.array(billingActServiceUsageSnapshotSchema).max(200).default([]),
     document: billingActDocumentSchema.nullable(),
   })
   .strict()
@@ -2027,6 +2049,7 @@ export type PlatformBillingRequest = z.output<typeof platformBillingRequestSchem
 export type PlatformBillingRequestEvent = z.output<typeof platformBillingRequestEventSchema>;
 export type PlatformBillingRequestLink = z.output<typeof platformBillingRequestLinkResponseSchema>;
 export type BillingActCreateDto = z.output<typeof billingActCreateSchema>;
+export type BillingActServiceUsageSnapshot = z.output<typeof billingActServiceUsageSnapshotSchema>;
 export type BillingActIssueInput = z.input<typeof billingActIssueSchema>;
 export type BillingActIssueDto = z.output<typeof billingActIssueSchema>;
 export type BillingActCancelDto = z.output<typeof billingActCancelSchema>;

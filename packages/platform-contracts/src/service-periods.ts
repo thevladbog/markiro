@@ -92,6 +92,7 @@ export const serviceUsageEntrySchema = z
 
 export const platformServiceUsageEntrySchema = serviceUsageEntrySchema
   .safeExtend({
+    billingActId: platformUuidSchema.nullable(),
     internalNote: z.string().trim().max(4_000).nullable(),
     actorPlatformUserId: z.string().trim().min(1).max(128),
     requestId: platformUuidSchema,

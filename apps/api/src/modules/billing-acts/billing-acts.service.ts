@@ -6,7 +6,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import {
   platformCommercialContracts,
@@ -15,6 +15,7 @@ import {
   type BillingActCancelDto,
   type BillingActCreateDto,
   type BillingActIssueInput,
+  type BillingActServiceUsageSnapshot,
   type CommercialDocumentDownloadSource,
   type PrintDocumentVariant,
 } from "@markiro/platform-contracts";
@@ -156,6 +157,7 @@ export class BillingActsService {
         number: input.number.trim(),
         periodStart: input.periodStart,
         periodEnd: input.periodEnd,
+        serviceUsageEntryIds: (input.serviceUsageEntryIds ?? []).map(canonicalBillingUuid),
       };
       const mutation = await beginPlatformBillingMutation(tx, {
         tenantId: input.tenantId,
@@ -188,6 +190,12 @@ export class BillingActsService {
         .limit(1);
       if (numberCollision) throw new ConflictException({ code: "billing_act_number_exists" });
       await validateActSources(tx, input.tenantId, payload);
+      const serviceUsageSnapshot = await prepareServiceUsageSnapshot(
+        tx,
+        input.tenantId,
+        payload.orderedServiceId,
+        payload.serviceUsageEntryIds,
+      );
       let act: typeof schema.billingActs.$inferSelect | undefined;
       try {
         [act] = await tx
@@ -210,6 +218,25 @@ export class BillingActsService {
         throw error;
       }
       if (!act) throw new Error("billing act insert failed");
+      if (serviceUsageSnapshot.length) {
+        try {
+          await tx.insert(schema.billingActServiceUsage).values(
+            serviceUsageSnapshot.map((snapshot) => ({
+              tenantId: act.tenantId,
+              actId: act.id,
+              servicePeriodId: snapshot.servicePeriodId,
+              serviceUsageEntryId: snapshot.entryId,
+              sequence: snapshot.sequence,
+              snapshot,
+            })),
+          );
+        } catch (error) {
+          if (postgresUniqueConstraint(error) === "billing_act_service_usage_active_entry_uq") {
+            throw new ConflictException({ code: "service_usage_already_acted" });
+          }
+          throw error;
+        }
+      }
       if (act.requestId) {
         const [request] = await tx
           .select({
@@ -434,9 +461,13 @@ export class BillingActsService {
         ),
       )
       .orderBy(schema.invoiceLines.position);
-    const buffer = await renderPrintPdf(toBillingActPrintModel(act, { ...invoice, lines }), {
-      printVariant: input.printVariant ?? "clean",
-    });
+    const serviceUsage = await this.readServiceUsageSnapshot(this.db, act.tenantId, act.id);
+    const buffer = await renderPrintPdf(
+      toBillingActPrintModel(act, { ...invoice, lines }, serviceUsage),
+      {
+        printVariant: input.printVariant ?? "clean",
+      },
+    );
     return this.issue(actor, canonicalActId, input, {
       originalname: `${act.number}.pdf`,
       mimetype: "application/pdf",
@@ -510,6 +541,16 @@ export class BillingActsService {
         )
         .returning();
       if (!cancelled) throw new ConflictException({ code: "billing_act_cancel_conflict" });
+      await tx
+        .update(schema.billingActServiceUsage)
+        .set({ releasedAt: now })
+        .where(
+          and(
+            eq(schema.billingActServiceUsage.tenantId, act.tenantId),
+            eq(schema.billingActServiceUsage.actId, act.id),
+            isNull(schema.billingActServiceUsage.releasedAt),
+          ),
+        );
       const result = await this.actWithDocument(tx, cancelled);
       await this.audit.record(tx, {
         actorPlatformUserId: actor.userId,
@@ -821,7 +862,17 @@ export class BillingActsService {
         .for("update")
         .limit(1);
       if (!service) throw new ConflictException({ code: "billing_act_service_invalid" });
-      if (service.status !== "completed") {
+      const [serviceUsage] = await tx
+        .select({ id: schema.billingActServiceUsage.id })
+        .from(schema.billingActServiceUsage)
+        .where(
+          and(
+            eq(schema.billingActServiceUsage.tenantId, act.tenantId),
+            eq(schema.billingActServiceUsage.actId, act.id),
+          ),
+        )
+        .limit(1);
+      if (service.status !== "completed" && !serviceUsage) {
         throw new ConflictException({ code: "billing_act_service_not_completed" });
       }
       return;
@@ -923,6 +974,7 @@ export class BillingActsService {
           .orderBy(desc(schema.billingActDocuments.revision))
           .limit(1)
       )[0];
+    const serviceUsageSnapshot = await this.readServiceUsageSnapshot(db, act.tenantId, act.id);
     return {
       id: act.id,
       tenantId: act.tenantId,
@@ -940,8 +992,27 @@ export class BillingActsService {
       cancelledAt: act.cancelledAt?.toISOString() ?? null,
       createdAt: act.createdAt.toISOString(),
       updatedAt: act.updatedAt.toISOString(),
+      serviceUsageSnapshot,
       document: document ? actDocumentSource(document) : null,
     };
+  }
+
+  private async readServiceUsageSnapshot(
+    db: ActReadExecutor,
+    tenantId: string,
+    actId: string,
+  ): Promise<BillingActServiceUsageSnapshot[]> {
+    const rows = await db
+      .select({ snapshot: schema.billingActServiceUsage.snapshot })
+      .from(schema.billingActServiceUsage)
+      .where(
+        and(
+          eq(schema.billingActServiceUsage.tenantId, tenantId),
+          eq(schema.billingActServiceUsage.actId, actId),
+        ),
+      )
+      .orderBy(schema.billingActServiceUsage.sequence);
+    return rows.map((row) => row.snapshot);
   }
 }
 
@@ -960,6 +1031,87 @@ export function validateBillingActPdf(file: BillingActPdfUpload): void {
   ) {
     throw new BadRequestException({ code: "billing_act_pdf_invalid" });
   }
+}
+
+async function prepareServiceUsageSnapshot(
+  tx: ActReadExecutor,
+  tenantId: string,
+  orderedServiceId: string | null,
+  entryIds: string[],
+): Promise<BillingActServiceUsageSnapshot[]> {
+  if (!entryIds.length) return [];
+  if (!orderedServiceId) {
+    throw new ConflictException({ code: "billing_act_service_required" });
+  }
+  const rows = await tx
+    .select({
+      id: schema.serviceUsageEntries.id,
+      servicePeriodId: schema.serviceUsageEntries.servicePeriodId,
+      kind: schema.serviceUsageEntries.kind,
+      classification: schema.serviceUsageEntries.classification,
+      originalEntryId: schema.serviceUsageEntries.originalEntryId,
+      workReference: schema.serviceUsageEntries.workReference,
+      description: schema.serviceUsageEntries.description,
+      performedAt: schema.serviceUsageEntries.performedAt,
+      postedAt: schema.serviceUsageEntries.postedAt,
+      actualMinutesDelta: schema.serviceUsageEntries.actualMinutesDelta,
+      allowanceMinutesDelta: schema.serviceUsageEntries.allowanceMinutesDelta,
+      orderedServiceId: schema.servicePeriods.orderedServiceId,
+    })
+    .from(schema.serviceUsageEntries)
+    .innerJoin(
+      schema.servicePeriods,
+      and(
+        eq(schema.servicePeriods.tenantId, schema.serviceUsageEntries.tenantId),
+        eq(schema.servicePeriods.id, schema.serviceUsageEntries.servicePeriodId),
+      ),
+    )
+    .where(
+      and(
+        eq(schema.serviceUsageEntries.tenantId, tenantId),
+        inArray(schema.serviceUsageEntries.id, entryIds),
+      ),
+    )
+    .for("update");
+  if (rows.length !== entryIds.length) {
+    throw new ConflictException({ code: "service_usage_invalid" });
+  }
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  const periodIds = new Set(rows.map((row) => row.servicePeriodId));
+  if (periodIds.size !== 1 || rows.some((row) => row.orderedServiceId !== orderedServiceId)) {
+    throw new ConflictException({ code: "service_usage_source_mismatch" });
+  }
+  const [claimed] = await tx
+    .select({ id: schema.billingActServiceUsage.id })
+    .from(schema.billingActServiceUsage)
+    .where(
+      and(
+        eq(schema.billingActServiceUsage.tenantId, tenantId),
+        inArray(schema.billingActServiceUsage.serviceUsageEntryId, entryIds),
+        isNull(schema.billingActServiceUsage.releasedAt),
+      ),
+    )
+    .limit(1)
+    .for("update");
+  if (claimed) throw new ConflictException({ code: "service_usage_already_acted" });
+  return entryIds.map((entryId, index) => {
+    const row = byId.get(entryId);
+    if (!row) throw new ConflictException({ code: "service_usage_invalid" });
+    return {
+      entryId: row.id,
+      servicePeriodId: row.servicePeriodId,
+      sequence: index + 1,
+      kind: row.kind,
+      classification: row.classification,
+      originalEntryId: row.originalEntryId,
+      workReference: row.workReference,
+      description: row.description,
+      performedAt: row.performedAt.toISOString(),
+      postedAt: row.postedAt.toISOString(),
+      actualMinutes: row.actualMinutesDelta,
+      allowanceMinutes: row.allowanceMinutesDelta,
+    };
+  });
 }
 
 async function validateActSources(

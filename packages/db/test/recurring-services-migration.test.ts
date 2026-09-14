@@ -43,6 +43,15 @@ describe("recurring service migrations", () => {
     );
     expect(validation).toContain('VALIDATE CONSTRAINT "invoice_lines_commercial_terms_check"');
   });
+
+  it("links each service usage entry to at most one active act", () => {
+    const migration = readMigration("0161_service_usage_acts.sql");
+    expect(migration).toContain('CREATE TABLE "billing_act_service_usage"');
+    expect(migration).toContain(
+      'CREATE UNIQUE INDEX "billing_act_service_usage_active_entry_uq" ON "billing_act_service_usage" USING btree ("tenant_id","service_usage_entry_id") WHERE "billing_act_service_usage"."released_at" is null',
+    );
+    expect(migration).toContain('CONSTRAINT "billing_act_service_usage_tenant_entry_fk"');
+  });
 });
 
 describe.skipIf(!databaseUrl)("recurring service forward migration", () => {

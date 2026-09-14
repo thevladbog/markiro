@@ -20,6 +20,7 @@ import { organization, user } from "./auth.js";
 import { billingPayments, invoices } from "./billing.js";
 import { platformUsers } from "./platform-auth.js";
 import { commercialOffers, orderedServices, subscriptionEvents } from "./saas.js";
+import { servicePeriods, serviceUsageEntries } from "./service-periods.js";
 
 export const BILLING_REQUEST_TYPES = [
   "renewal",
@@ -472,6 +473,72 @@ export const billingActDocuments = pgTable(
       "billing_act_documents_ready_shape_check",
       sql`(${table.state} = 'ready' and ${table.readyAt} is not null)
         or (${table.state} <> 'ready' and ${table.readyAt} is null)`,
+    ),
+  ],
+);
+
+export interface BillingActServiceUsageSnapshot {
+  entryId: string;
+  servicePeriodId: string;
+  sequence: number;
+  kind: "usage" | "correction";
+  classification: "customer_service" | "product_defect";
+  originalEntryId: string | null;
+  workReference: string;
+  description: string;
+  performedAt: string;
+  postedAt: string;
+  actualMinutes: number;
+  allowanceMinutes: number;
+}
+
+export const billingActServiceUsage = pgTable(
+  "billing_act_service_usage",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: text("tenant_id").notNull(),
+    actId: uuid("act_id").notNull(),
+    servicePeriodId: uuid("service_period_id").notNull(),
+    serviceUsageEntryId: uuid("service_usage_entry_id").notNull(),
+    sequence: integer("sequence").notNull(),
+    snapshot: jsonb("snapshot").$type<BillingActServiceUsageSnapshot>().notNull(),
+    releasedAt: timestamp("released_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("billing_act_service_usage_tenant_id_uq").on(table.tenantId, table.id),
+    unique("billing_act_service_usage_act_sequence_uq").on(
+      table.tenantId,
+      table.actId,
+      table.sequence,
+    ),
+    unique("billing_act_service_usage_act_entry_uq").on(
+      table.tenantId,
+      table.actId,
+      table.serviceUsageEntryId,
+    ),
+    uniqueIndex("billing_act_service_usage_active_entry_uq")
+      .on(table.tenantId, table.serviceUsageEntryId)
+      .where(sql`${table.releasedAt} is null`),
+    foreignKey({
+      name: "billing_act_service_usage_tenant_act_fk",
+      columns: [table.tenantId, table.actId],
+      foreignColumns: [billingActs.tenantId, billingActs.id],
+    }),
+    foreignKey({
+      name: "billing_act_service_usage_tenant_period_fk",
+      columns: [table.tenantId, table.servicePeriodId],
+      foreignColumns: [servicePeriods.tenantId, servicePeriods.id],
+    }),
+    foreignKey({
+      name: "billing_act_service_usage_tenant_entry_fk",
+      columns: [table.tenantId, table.serviceUsageEntryId],
+      foreignColumns: [serviceUsageEntries.tenantId, serviceUsageEntries.id],
+    }),
+    check("billing_act_service_usage_sequence_check", sql`${table.sequence} > 0`),
+    check(
+      "billing_act_service_usage_snapshot_check",
+      sql`jsonb_typeof(${table.snapshot}) = 'object' and octet_length(${table.snapshot}::text) <= 65536`,
     ),
   ],
 );

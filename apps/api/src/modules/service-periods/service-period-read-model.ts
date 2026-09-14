@@ -1,5 +1,5 @@
 import { BadRequestException, NotFoundException } from "@nestjs/common";
-import { and, desc, eq, gt, inArray, lt, lte, or, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, lt, lte, or, sql, type SQL } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import type { ServicePeriodListQuery } from "./dto";
 
@@ -170,8 +170,19 @@ async function readServicePeriodDetailFor(
   const [balance, entries, approvals] = await Promise.all([
     readServiceBalance(db, row.period),
     db
-      .select()
+      .select({
+        entry: schema.serviceUsageEntries,
+        billingActId: schema.billingActServiceUsage.actId,
+      })
       .from(schema.serviceUsageEntries)
+      .leftJoin(
+        schema.billingActServiceUsage,
+        and(
+          eq(schema.billingActServiceUsage.tenantId, schema.serviceUsageEntries.tenantId),
+          eq(schema.billingActServiceUsage.serviceUsageEntryId, schema.serviceUsageEntries.id),
+          isNull(schema.billingActServiceUsage.releasedAt),
+        ),
+      )
       .where(
         and(
           eq(schema.serviceUsageEntries.tenantId, row.period.tenantId),
@@ -195,7 +206,7 @@ async function readServicePeriodDetailFor(
     invoiceId: row.period.invoiceId,
     invoiceLineId: row.period.invoiceLineId,
     paymentId: row.period.paymentId,
-    entries: entries.map((entry) => ({
+    entries: entries.map(({ entry, billingActId }) => ({
       id: entry.id,
       kind: entry.kind,
       classification: entry.classification,
@@ -207,6 +218,7 @@ async function readServicePeriodDetailFor(
       postedAt: entry.postedAt.toISOString(),
       actualMinutesDelta: entry.actualMinutesDelta,
       allowanceMinutesDelta: entry.allowanceMinutesDelta,
+      billingActId,
       actorPlatformUserId: entry.actorPlatformUserId,
       requestId: entry.requestId,
     })),

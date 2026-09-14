@@ -43,6 +43,22 @@ describe("generated billing act document", () => {
           },
         ],
       },
+      [
+        {
+          entryId: "35f756bd-1145-4f87-a198-c7d40db33724",
+          servicePeriodId: "3e9f04ed-265a-4af0-b950-daaf77171d18",
+          sequence: 1,
+          kind: "usage",
+          classification: "customer_service",
+          originalEntryId: null,
+          workReference: "SUP-42",
+          description: "Настройка интеграции",
+          performedAt: "2026-07-14T09:00:00.000Z",
+          postedAt: "2026-07-14T10:00:00.000Z",
+          actualMinutes: 45,
+          allowanceMinutes: 45,
+        },
+      ],
     );
 
     expect(model).toMatchObject({
@@ -54,6 +70,14 @@ describe("generated billing act document", () => {
       seller: { legalName: "ООО Маркиро", taxId: "9700000000" },
       buyer: { legalName: "ООО Фабрика", taxId: "7700000000" },
       lines: [{ name: "Настройка интеграции", lineTotal: "15000.00" }],
+      serviceUsage: [
+        {
+          workReference: "SUP-42",
+          description: "Настройка интеграции",
+          actualMinutes: 45,
+          allowanceMinutes: 45,
+        },
+      ],
       total: "15000.00",
     });
     expect(documentKindLabel(model)).toBe("АКТ ОКАЗАННЫХ УСЛУГ");

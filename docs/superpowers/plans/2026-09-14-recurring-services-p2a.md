@@ -961,9 +961,9 @@ git commit -m "feat: show recurring service usage to tenants"
 **Files:**
 
 - Modify: `packages/platform-contracts/src/commercial.ts`
-- Modify: `packages/db/src/schema/billing.ts`
-- Create: `packages/db/migrations/0159_service_usage_acts.sql`
-- Create: `packages/db/migrations/meta/0159_snapshot.json`
+- Modify: `packages/db/src/schema/tenant-billing.ts`
+- Create: `packages/db/migrations/0161_service_usage_acts.sql`
+- Create: `packages/db/migrations/meta/0161_snapshot.json`
 - Modify: `packages/db/migrations/meta/_journal.json`
 - Modify: `apps/api/src/modules/billing-acts/billing-acts.service.ts`
 - Modify: `apps/api/src/modules/billing-acts/dto.ts`
@@ -979,7 +979,7 @@ git commit -m "feat: show recurring service usage to tenants"
 - Produces: immutable act-to-usage snapshots and uniqueness among non-void acts.
 - Consumes: Task 6 customer-service usage entries and existing billing act issue/void lifecycle.
 
-- [ ] **Step 1: Write failing act selection and duplicate-use tests**
+- [x] **Step 1: Write failing act selection and duplicate-use tests**
 
 ```ts
 const act = await createAct({
@@ -1002,31 +1002,31 @@ await expect(
 });
 ```
 
-- [ ] **Step 2: Run act tests and confirm the request schema rejects usage IDs**
+- [x] **Step 2: Run act tests and confirm the request schema rejects usage IDs**
 
 Run: `corepack pnpm@11.22.0 --filter @markiro/api exec vitest run test/billing-acts.service.test.ts test/billing-act-print-document.test.ts`
 
 Expected: FAIL because acts only link the ordered service.
 
-- [ ] **Step 3: Add immutable act usage rows and issuance validation**
+- [x] **Step 3: Add immutable act usage rows and issuance validation**
 
 Store one row per selected usage entry with tenant, act, period, entry ID, sequence, customer-visible snapshot JSON and nullable `released_at`. Validate all entries belong to the same tenant, period and ordered service. Create a partial unique index on `service_usage_entry_id` where `released_at is null`. In the same transaction that voids an act, set `released_at` on its link rows; never update the usage ledger or the stored act snapshot.
 
-- [ ] **Step 4: Render and expose snapshotted work**
+- [x] **Step 4: Render and expose snapshotted work**
 
 List work reference, description, performance date, actual minutes, allowance minutes and defect/correction label from the act snapshot. Reissue uses the stored snapshot even if later service corrections exist. Voiding or reissuing never changes service-period balance.
 
-- [ ] **Step 5: Update the SaaS act picker**
+- [x] **Step 5: Update the SaaS act picker**
 
 Load eligible unacted customer-service entries after an ordered service is selected. Keep selection within one period, show total actual and allowance minutes and preserve dirty state. Hide internal notes from print preview.
 
-- [ ] **Step 6: Run API and SaaS act regression suites**
+- [x] **Step 6: Run API and SaaS act regression suites**
 
 Run: `corepack pnpm@11.22.0 --filter @markiro/api exec vitest run test/billing-acts.service.test.ts test/billing-act-print-document.test.ts && corepack pnpm@11.22.0 --filter @markiro/saas-admin exec vitest run test/billing-acts-workflow.test.tsx`
 
 Expected: PASS, including duplicate prevention and void/reissue invariants.
 
-- [ ] **Step 7: Commit act linkage**
+- [x] **Step 7: Commit act linkage**
 
 ```bash
 git add packages/platform-contracts packages/db apps/api/src/modules/billing-acts apps/api/test/billing-acts.service.test.ts apps/api/test/billing-act-print-document.test.ts apps/saas-admin/src/pages/billing-acts apps/saas-admin/test/billing-acts-workflow.test.tsx

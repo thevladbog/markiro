@@ -1,4 +1,5 @@
 import type { CommercialLineTermsV4 } from "@markiro/platform-contracts";
+import type { BillingActServiceUsageSnapshot } from "@markiro/platform-contracts";
 import { commercialTermDescription, readStoredCommercialTerms } from "./commercial-line-terms";
 
 export type PrintDocumentKind = "invoice" | "offer" | "act";
@@ -45,6 +46,7 @@ export interface PrintDocumentModel {
   seller: BillingProfileSnapshot;
   buyer: BillingProfileSnapshot;
   lines: PrintLine[];
+  serviceUsage?: BillingActServiceUsageSnapshot[];
   subtotal: string;
   vatTotal: string;
   total: string;
@@ -150,6 +152,7 @@ export function toInvoicePrintModel(invoice: InvoiceLike): PrintDocumentModel {
       vatIncluded: line.vatIncluded,
       lineTotal: line.lineTotal,
     })),
+    serviceUsage: [],
     subtotal: invoice.subtotal,
     vatTotal: invoice.vatTotal,
     total: invoice.total,
@@ -165,6 +168,7 @@ export function toBillingActPrintModel(
     periodEnd: string;
   },
   invoice: InvoiceLike,
+  serviceUsage: BillingActServiceUsageSnapshot[] = [],
 ): PrintDocumentModel {
   const invoiceModel = toInvoicePrintModel(invoice);
   return {
@@ -177,6 +181,7 @@ export function toBillingActPrintModel(
     dueOrExpiresAt: null,
     periodStart: act.periodStart,
     periodEnd: act.periodEnd,
+    serviceUsage,
   };
 }
 
@@ -227,6 +232,7 @@ export function toOfferPrintModel(snapshot: {
         lineTotal: text(item.lineTotal, "0.00"),
       };
     }),
+    serviceUsage: [],
     subtotal: snapshot.subtotal,
     vatTotal: snapshot.vatTotal,
     total: snapshot.total,

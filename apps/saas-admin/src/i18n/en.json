@@ -707,6 +707,8 @@
       "invoiceLoadError": "Could not load the source invoice contents.",
       "linesTitle": "Act contents",
       "linesDescription": "Items and amounts are carried over from the source invoice.",
+      "serviceUsageTitle": "Completed work",
+      "serviceUsageDescription": "Frozen work entries from the selected support package.",
       "documentTitle": "Print form",
       "documentDescription": "The immutable PDF of the issued act.",
       "documentUnavailable": "The print form has not been generated yet.",
@@ -766,6 +768,25 @@
     "preview": {
       "title": "Act contents",
       "total": "Total"
+    },
+    "serviceUsage": {
+      "title": "Support work",
+      "hint": "One act can include work from one paid period",
+      "period": "Package and period",
+      "placeholder": "Choose a support package",
+      "searchPlaceholder": "Search packages",
+      "emptyPeriods": "No paid support periods",
+      "loading": "Loading periods…",
+      "loadingEntries": "Loading completed work",
+      "loadError": "Could not load completed work",
+      "emptyEntries": "All work in this period is already included in active acts, or no work has been recorded yet.",
+      "entryMinutes": "Actual {{actual}} min · package {{allowance}} min",
+      "selectedSummary": "Selected: {{count}} · actual {{actual}} min · package {{allowance}} min",
+      "work": "Work",
+      "performedAt": "Performed",
+      "actual": "Actual",
+      "allowance": "Package",
+      "minutesShort": "min"
     },
     "period": {
       "title": "Service period",
