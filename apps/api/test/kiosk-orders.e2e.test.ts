@@ -13,6 +13,7 @@ import { hashDeviceToken } from "../src/pickup/device-token";
 import { PickupOrdersService } from "../src/modules/pickup-orders/pickup-orders.service";
 import { schema, type Db } from "@markiro/db";
 import { listenOnLoopback } from "./support/listen-loopback";
+import { kioskSource } from "../src/modules/pickup-orders/document-source";
 
 /**
  * GTIN test vectors (check-digit VALID — computed with node + gs1CheckDigit,
@@ -824,7 +825,7 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
     await holderOwnsLock;
 
     const start = Date.now();
-    const result = await pickupOrdersService.createFromKiosk(tenantId, kioskId, {
+    const result = await pickupOrdersService.createForDevice(tenantId, kioskSource(kioskId), {
       deviceSeq: 40,
       badgeCode: BADGE,
       reason: "buy",

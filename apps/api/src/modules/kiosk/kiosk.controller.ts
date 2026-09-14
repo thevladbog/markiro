@@ -61,6 +61,7 @@ import {
   type KioskBoxRegistryPage,
 } from "./box-registry.dto";
 import { BoxRegistryService } from "./box-registry.service";
+import { kioskSource } from "../pickup-orders/document-source";
 
 const KIOSK_RECOVERY_CAPABILITY = "subscription-recovery-v1";
 
@@ -474,7 +475,11 @@ export class KioskController {
     @Body(new ZodValidationPipe(createOrderSchema)) body: CreateOrderDto,
   ): Promise<CreateOrderResultDto> {
     try {
-      return await this.pickupOrdersService.createFromKiosk(req.tenantId!, req.kioskId!, body);
+      return await this.pickupOrdersService.createForDevice(
+        req.tenantId!,
+        kioskSource(req.kioskId!),
+        body,
+      );
     } catch (error) {
       if (
         error instanceof SubscriptionReadOnlyException &&
