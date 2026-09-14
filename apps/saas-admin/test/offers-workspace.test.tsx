@@ -274,7 +274,7 @@ describe("offers workspace", () => {
     const workspaceFetch = vi
       .mocked(fetch)
       .mock.calls.find(([path]) => String(path).endsWith("/workspace"));
-    expect(new Headers(workspaceFetch?.[1]?.headers).get("X-Markiro-Commercial-Version")).toBe("3");
+    expect(new Headers(workspaceFetch?.[1]?.headers).get("X-Markiro-Commercial-Version")).toBe("4");
   });
   it("locks competing actions until the exact ambiguous payment attempt succeeds", async () => {
     const data = workspace();
@@ -786,7 +786,7 @@ it("edits saved values without hydrating the current catalog and keeps input on 
   });
   expect(saved?.body).not.toHaveProperty("tenantId");
   const patch = vi.mocked(fetch).mock.calls.find(([, init]) => init?.method === "PATCH");
-  expect(new Headers(patch?.[1]?.headers).get("X-Markiro-Commercial-Version")).toBe("3");
+  expect(new Headers(patch?.[1]?.headers).get("X-Markiro-Commercial-Version")).toBe("4");
 });
 
 it("retries an uncertain save with exactly the same payload and returns to the saved offer", async () => {

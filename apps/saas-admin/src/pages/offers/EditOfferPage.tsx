@@ -2,8 +2,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, Button, Spinner } from "@markiro/ui";
 import {
   platformUuidSchema,
-  type OfferDraftUpdate,
-  type OfferWorkspaceV2,
+  type OfferDraftUpdateV4 as OfferDraftUpdate,
+  type OfferWorkspaceV4,
 } from "@markiro/platform-contracts";
 import { useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -49,7 +49,7 @@ export function EditOfferPage() {
   return <OfferDraftEditor key={offerId} workspace={workspace.data} />;
 }
 
-function OfferDraftEditor({ workspace }: { workspace: OfferWorkspaceV2 }) {
+function OfferDraftEditor({ workspace }: { workspace: OfferWorkspaceV4 }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const client = useQueryClient();

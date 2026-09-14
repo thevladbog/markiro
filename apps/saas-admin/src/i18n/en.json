@@ -1270,6 +1270,29 @@
       "invoice": "Invoice",
       "offer": "Offer"
     },
+    "monthlyService": {
+      "title": "Service format",
+      "type": "Service type",
+      "oneTime": "One-time service",
+      "recurring": "Monthly package",
+      "period": "Package period",
+      "month": "Month",
+      "yearUnavailable": "Year — not available yet",
+      "includedMinutes": "Included minutes",
+      "scopeRu": "Service scope (RU)",
+      "scopeEn": "Service scope",
+      "operatingHoursRu": "Operating hours (RU)",
+      "operatingHoursEn": "Operating hours",
+      "schedulingTermsRu": "Scheduling terms (RU)",
+      "schedulingTermsEn": "Scheduling terms",
+      "noCarryover": "Minutes do not carry over to the next month",
+      "externalApproval": "Additional work requires external approval",
+      "annualUnavailable": "Annual packages will be available after separate calendar rules are approved.",
+      "minutesPreview": "{{count}} minutes included",
+      "policy": "Unused minutes",
+      "excess": "Work beyond the package",
+      "validation": "Enter 1 to 100000 minutes, the Russian scope, and the English scope when an English document name is present."
+    },
     "title": "Catalog",
     "description": "Plan, add-on, and service versions used in commercial documents.",
     "actionsLabel": "Catalog actions",
@@ -1544,7 +1567,9 @@
       "effectRequired": "Add at least one effect",
       "effectDuplicate": "Each effect type can be added only once",
       "quota": "Enter a positive whole quantity.",
-      "p1Mapping": "Explicitly choose values for the four new modules before saving."
+      "p1Mapping": "Explicitly choose values for the four new modules before saving.",
+      "serviceMinutes": "Enter a whole number from 1 to 100000",
+      "serviceScopeEn": "Enter an English service scope for the English document name"
     },
     "form": {
       "identity": "Version parameters",

@@ -1,8 +1,8 @@
 import type {
-  CatalogVersionV3 as CatalogVersion,
-  CommercialLineTerms,
-  CreateInvoiceV2 as SharedCreateInvoiceInput,
-  CreateOfferV2 as SharedCreateOfferInput,
+  CatalogVersionV4 as CatalogVersion,
+  CommercialLineTermsV4 as CommercialLineTerms,
+  CreateInvoiceV4 as SharedCreateInvoiceInput,
+  CreateOfferV4 as SharedCreateOfferInput,
 } from "@markiro/platform-contracts";
 
 export type DocumentKind = "invoice" | "offer";

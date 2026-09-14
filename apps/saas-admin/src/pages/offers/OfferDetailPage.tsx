@@ -3,7 +3,7 @@ import { Alert, Button, SectionHeader, Spinner, StatusChip, Table } from "@marki
 import {
   platformUuidSchema,
   type OfferPreview as Preview,
-  type OfferWorkspaceV2 as OfferWorkspace,
+  type OfferWorkspaceV4 as OfferWorkspace,
 } from "@markiro/platform-contracts";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";

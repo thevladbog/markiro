@@ -190,5 +190,5 @@ function safeReleaseSha(value: string | null): string | null {
   return value;
 }
 
-/** Current catalog selections use V3; saved commercial documents retain their V2 schemas. */
-export const CURRENT_COMMERCIAL_VERSION = "3";
+/** Current catalog selections use V4; saved commercial documents retain their versioned schemas. */
+export const CURRENT_COMMERCIAL_VERSION = "4";

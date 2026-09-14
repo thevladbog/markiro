@@ -1,5 +1,5 @@
 import { Alert } from "@markiro/ui";
-import type { OfferWorkspaceV2 } from "@markiro/platform-contracts";
+import type { OfferWorkspaceV4 } from "@markiro/platform-contracts";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 import { commercialIssuanceError } from "../documents/commercialError.js";
@@ -8,7 +8,7 @@ export function OfferReadiness({
   workspace,
   canWrite,
 }: {
-  workspace: OfferWorkspaceV2;
+  workspace: OfferWorkspaceV4;
   canWrite: boolean;
 }) {
   const { t, i18n } = useTranslation();

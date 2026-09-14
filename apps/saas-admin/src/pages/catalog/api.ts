@@ -1,12 +1,12 @@
 import {
   platformCatalogV2Contracts,
   type CatalogVersionCreateV2,
-  catalogVersionV3Schema,
-  platformCatalogV3Contracts,
+  catalogVersionV4Schema,
+  platformCatalogV4Contracts,
   type AddonEffectV3 as AddonEffect,
-  type CatalogVersionV3 as CatalogVersion,
-  type CatalogVersionCreateV3 as CatalogVersionCreate,
-  type CatalogVersionPatchV3 as SharedCatalogVersionPatch,
+  type CatalogVersionV4 as CatalogVersion,
+  type CatalogVersionCreateV4 as CatalogVersionCreate,
+  type CatalogVersionPatchV4 as SharedCatalogVersionPatch,
   type CommercialReviewIdentityV3 as CommercialReviewIdentity,
   COMMERCIAL_VERSION_HEADER,
   type PlanEntitlementsV3 as PlanEntitlements,
@@ -52,7 +52,7 @@ export function approveOfflineGrantPolicy(id: string, input: ApproveOfflineGrant
 export function listCatalogVersions() {
   return platformApiFetch("/catalog/items", {
     headers: { [COMMERCIAL_VERSION_HEADER]: CURRENT_COMMERCIAL_VERSION },
-    responseSchema: platformCatalogV3Contracts.list.response,
+    responseSchema: platformCatalogV4Contracts.list.response,
   });
 }
 
@@ -104,18 +104,21 @@ export function catalogVersionToCreateInput(
         plan: legacyPlan,
       });
     }
-    return platformCatalogV3Contracts.createVersion.body.parse({
+    return platformCatalogV4Contracts.createVersion.body.parse({
       ...common,
       plan: { ...item.plan },
     });
   }
   if (item.kind === "addon") {
-    return platformCatalogV3Contracts.createVersion.body.parse({
+    return platformCatalogV4Contracts.createVersion.body.parse({
       ...common,
       addon: { effects: item.addon.effects.map((effect) => ({ ...effect })) },
     });
   }
-  return platformCatalogV3Contracts.createVersion.body.parse({ ...common, service: {} });
+  return platformCatalogV4Contracts.createVersion.body.parse({
+    ...common,
+    service: { ...item.service },
+  });
 }
 
 export async function createCatalogVersion(
@@ -132,7 +135,7 @@ export async function createCatalogVersion(
       body: JSON.stringify(legacy),
       responseSchema: platformCatalogV2Contracts.createVersion.response,
     });
-    return catalogVersionV3Schema.parse({
+    return catalogVersionV4Schema.parse({
       ...result,
       lifecyclePolicyId: null,
       ...(result.kind === "plan"
@@ -148,10 +151,10 @@ export async function createCatalogVersion(
         : {}),
     });
   }
-  const validated = platformCatalogV3Contracts.createVersion.body.parse(input);
+  const validated = platformCatalogV4Contracts.createVersion.body.parse(input);
   return platformApiFetch(`/catalog/items/${itemCode}/versions`, {
     headers: { [COMMERCIAL_VERSION_HEADER]: CURRENT_COMMERCIAL_VERSION },
-    responseSchema: platformCatalogV3Contracts.createVersion.response,
+    responseSchema: platformCatalogV4Contracts.createVersion.response,
     method: "POST",
     body: JSON.stringify(validated),
   });
@@ -160,7 +163,7 @@ export async function createCatalogVersion(
 export function getDefaultDemoPlan() {
   return platformApiFetch("/settings/demo-plan", {
     headers: { [COMMERCIAL_VERSION_HEADER]: CURRENT_COMMERCIAL_VERSION },
-    responseSchema: platformCatalogV3Contracts.getDefaultDemo.response,
+    responseSchema: platformCatalogV4Contracts.getDefaultDemo.response,
   });
 }
 
@@ -169,10 +172,10 @@ export function updateCatalogVersion(
   versionId: string,
   patch: CatalogVersionPatch,
 ) {
-  const validated = platformCatalogV3Contracts.updateVersion.body.parse(patch);
+  const validated = platformCatalogV4Contracts.updateVersion.body.parse(patch);
   return platformApiFetch(`/catalog/items/${itemCode}/versions/${versionId}`, {
     headers: { [COMMERCIAL_VERSION_HEADER]: CURRENT_COMMERCIAL_VERSION },
-    responseSchema: platformCatalogV3Contracts.updateVersion.response,
+    responseSchema: platformCatalogV4Contracts.updateVersion.response,
     method: "PATCH",
     body: JSON.stringify(validated),
   });
@@ -185,7 +188,7 @@ export function publishCatalogVersion(
 ) {
   return platformApiFetch(`/catalog/items/${itemCode}/versions/${versionId}/publish`, {
     headers: { [COMMERCIAL_VERSION_HEADER]: CURRENT_COMMERCIAL_VERSION },
-    responseSchema: platformCatalogV3Contracts.publishVersion.response,
+    responseSchema: platformCatalogV4Contracts.publishVersion.response,
     method: "POST",
     body: JSON.stringify(identity),
   });
@@ -194,7 +197,7 @@ export function publishCatalogVersion(
 export function retireCatalogVersion(itemCode: string, versionId: string) {
   return platformApiFetch(`/catalog/items/${itemCode}/versions/${versionId}/retire`, {
     headers: { [COMMERCIAL_VERSION_HEADER]: CURRENT_COMMERCIAL_VERSION },
-    responseSchema: platformCatalogV3Contracts.retireVersion.response,
+    responseSchema: platformCatalogV4Contracts.retireVersion.response,
     method: "POST",
     body: "{}",
   });
@@ -203,17 +206,17 @@ export function retireCatalogVersion(itemCode: string, versionId: string) {
 export function archiveCatalogItem(itemCode: string) {
   return platformApiFetch(`/catalog/items/${itemCode}/archive`, {
     headers: { [COMMERCIAL_VERSION_HEADER]: CURRENT_COMMERCIAL_VERSION },
-    responseSchema: platformCatalogV3Contracts.archiveItem.response,
+    responseSchema: platformCatalogV4Contracts.archiveItem.response,
     method: "POST",
     body: "{}",
   });
 }
 
 export function setDefaultDemoPlan(catalogVersionId: string) {
-  const validated = platformCatalogV3Contracts.setDefaultDemo.body.parse({ catalogVersionId });
+  const validated = platformCatalogV4Contracts.setDefaultDemo.body.parse({ catalogVersionId });
   return platformApiFetch("/settings/demo-plan", {
     headers: { [COMMERCIAL_VERSION_HEADER]: CURRENT_COMMERCIAL_VERSION },
-    responseSchema: platformCatalogV3Contracts.setDefaultDemo.response,
+    responseSchema: platformCatalogV4Contracts.setDefaultDemo.response,
     method: "PATCH",
     body: JSON.stringify(validated),
   });
@@ -222,7 +225,7 @@ export function setDefaultDemoPlan(catalogVersionId: string) {
 export function getCatalogEditorContext() {
   return platformApiFetch("/catalog/editor-context", {
     headers: { [COMMERCIAL_VERSION_HEADER]: CURRENT_COMMERCIAL_VERSION },
-    responseSchema: platformCatalogV3Contracts.editorContext.response,
+    responseSchema: platformCatalogV4Contracts.editorContext.response,
   });
 }
 export function reviewCatalogVersion(itemCode: string, versionId: string) {
@@ -230,13 +233,13 @@ export function reviewCatalogVersion(itemCode: string, versionId: string) {
     method: "POST",
     body: "{}",
     headers: { [COMMERCIAL_VERSION_HEADER]: CURRENT_COMMERCIAL_VERSION },
-    responseSchema: platformCatalogV3Contracts.reviewVersion.response,
+    responseSchema: platformCatalogV4Contracts.reviewVersion.response,
   });
 }
 
 export function getCatalogVersion(itemCode: string, versionId: string) {
   return platformApiFetch(`/catalog/items/${itemCode}/versions/${versionId}`, {
     headers: { [COMMERCIAL_VERSION_HEADER]: CURRENT_COMMERCIAL_VERSION },
-    responseSchema: platformCatalogV3Contracts.getVersion.response,
+    responseSchema: platformCatalogV4Contracts.getVersion.response,
   });
 }

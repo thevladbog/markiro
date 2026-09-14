@@ -23,6 +23,11 @@ import { CatalogQuotaField } from "./CatalogQuotaField.js";
 import { CatalogUnitField } from "./CatalogUnitField.js";
 import { CatalogVatField } from "./CatalogVatField.js";
 import { useCatalogDrawerClose } from "./CatalogDrawer.js";
+import {
+  EMPTY_MONTHLY_SERVICE_TERMS,
+  MonthlyServiceTermsFields,
+  type MonthlyServiceTermsDraft,
+} from "./MonthlyServiceTermsFields.js";
 
 export function CatalogCreatePanel({
   kind,
@@ -59,6 +64,10 @@ export function CatalogCreatePanel({
   const [descriptionRu, setDescriptionRu] = useState("");
   const [descriptionEn, setDescriptionEn] = useState("");
   const [unit, setUnit] = useState(kind === "service" ? "project" : "month");
+  const [billingMode, setBillingMode] = useState<"one_time" | "recurring">("one_time");
+  const [serviceTerms, setServiceTerms] = useState<MonthlyServiceTermsDraft>(
+    EMPTY_MONTHLY_SERVICE_TERMS,
+  );
   const [price, setPrice] = useState("0.00");
   const [vatRateBps, setVatRateBps] = useState<number | null>(null);
   const [addonEffects, setAddonEffects] = useState<EditableAddonEffect[]>(() => [newAddonEffect()]);
@@ -100,6 +109,8 @@ export function CatalogCreatePanel({
         publicApiEnabled ||
         palletsEnabled ||
         lifecyclePolicyId ||
+        billingMode !== "one_time" ||
+        Object.values(serviceTerms).some(Boolean) ||
         Object.values(p1Features).some((value) => value !== null),
       ),
     );
@@ -128,6 +139,8 @@ export function CatalogCreatePanel({
     palletsEnabled,
     p1Features,
     lifecyclePolicyId,
+    billingMode,
+    serviceTerms,
     onDirtyChange,
   ]);
 
@@ -177,7 +190,27 @@ export function CatalogCreatePanel({
                 billingPeriod: unit === "year" ? "year" : "month",
                 addon: { effects: toAddonEffects(addonEffects) },
               }
-            : { ...base, subject, billingMode: "one_time", billingPeriod: null, service: {} };
+            : billingMode === "recurring"
+              ? {
+                  ...base,
+                  unit: "month",
+                  subject,
+                  billingMode: "recurring",
+                  billingPeriod: "month",
+                  service: {
+                    cadence: "month",
+                    includedMinutes: Number(serviceTerms.includedMinutes),
+                    carryover: "none",
+                    excessPolicy: "external_approval",
+                    scopeRu: serviceTerms.scopeRu.trim(),
+                    scopeEn: serviceTerms.scopeEn.trim() || null,
+                    operatingHoursRu: serviceTerms.operatingHoursRu.trim() || null,
+                    operatingHoursEn: serviceTerms.operatingHoursEn.trim() || null,
+                    schedulingTermsRu: serviceTerms.schedulingTermsRu.trim() || null,
+                    schedulingTermsEn: serviceTerms.schedulingTermsEn.trim() || null,
+                  },
+                }
+              : { ...base, subject, billingMode: "one_time", billingPeriod: null, service: {} };
       return createCatalogVersion(code.trim(), input);
     },
     onSuccess: (created) => {
@@ -232,6 +265,17 @@ export function CatalogCreatePanel({
           }
           if (kind === "plan" && Object.values(p1Features).some((value) => value === null)) {
             setError(t("entitlements.mappingRequired"));
+            return;
+          }
+          if (
+            kind === "service" &&
+            billingMode === "recurring" &&
+            (!/^[1-9]\d*$/.test(serviceTerms.includedMinutes) ||
+              Number(serviceTerms.includedMinutes) > 100_000 ||
+              !serviceTerms.scopeRu.trim() ||
+              (documentNameEn.trim() && !serviceTerms.scopeEn.trim()))
+          ) {
+            setError(t("catalog.monthlyService.validation"));
             return;
           }
           try {
@@ -308,7 +352,12 @@ export function CatalogCreatePanel({
                 readOnly
               />
             )}
-            <CatalogUnitField kind={kind} value={unit} onChange={setUnit} />
+            <CatalogUnitField
+              kind={kind}
+              value={unit}
+              onChange={setUnit}
+              disabled={kind === "service" && billingMode === "recurring"}
+            />
             <Input
               label={t("catalog.form.unitPrice")}
               value={price}
@@ -337,6 +386,18 @@ export function CatalogCreatePanel({
             ) : null}
           </div>
         </fieldset>
+        {kind === "service" ? (
+          <MonthlyServiceTermsFields
+            billingMode={billingMode}
+            onBillingModeChange={(mode) => {
+              setBillingMode(mode);
+              setUnit(mode === "recurring" ? "month" : "project");
+            }}
+            value={serviceTerms}
+            onChange={setServiceTerms}
+            disabled={create.isPending}
+          />
+        ) : null}
         {kind === "plan" ? (
           <fieldset>
             <legend>{t("catalog.form.planLimits")}</legend>
@@ -416,6 +477,18 @@ export function CatalogCreatePanel({
                         : value}
                 </li>
               ))}
+            </ul>
+          ) : null}
+          {kind === "service" && billingMode === "recurring" ? (
+            <ul>
+              <li>
+                {t("catalog.monthlyService.minutesPreview", {
+                  count: serviceTerms.includedMinutes || 0,
+                })}
+              </li>
+              <li>{serviceTerms.scopeRu || "—"}</li>
+              <li>{t("catalog.monthlyService.noCarryover")}</li>
+              <li>{t("catalog.monthlyService.externalApproval")}</li>
             </ul>
           ) : null}
         </fieldset>

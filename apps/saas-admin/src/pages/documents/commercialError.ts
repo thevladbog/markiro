@@ -1,5 +1,5 @@
 import { isCommercialPlanSequenceValid } from "@markiro/platform-contracts";
-import type { CommercialLineTerms, SellerTaxPolicy } from "@markiro/platform-contracts";
+import type { CommercialLineTermsV4, SellerTaxPolicy } from "@markiro/platform-contracts";
 import { ApiRequestError } from "../../api/client.js";
 const codes = new Set([
   "commercial_plan_sequence_invalid",
@@ -27,7 +27,7 @@ export function commercialIssuanceError(
   lines: readonly {
     kind: string;
     quantity: number;
-    commercialTerms: CommercialLineTerms | null;
+    commercialTerms: CommercialLineTermsV4 | null;
     vatRate: string | null;
     vatIncluded: boolean;
   }[],

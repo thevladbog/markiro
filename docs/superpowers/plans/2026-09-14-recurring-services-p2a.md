@@ -778,7 +778,7 @@ git commit -m "feat: expose tenant recurring service ledger"
 - Produces: a V4 monthly-package editor and exact customer-term preview.
 - Consumes: Task 1 V4 schemas and Task 3 catalog endpoints.
 
-- [ ] **Step 1: Write failing editor behavior tests**
+- [x] **Step 1: Write failing editor behavior tests**
 
 ```tsx
 await user.selectOptions(screen.getByLabelText("Тип услуги"), "recurring");
@@ -793,27 +793,27 @@ expect(
 
 Assert annual selection is disabled with explanatory copy, dirty navigation is blocked, RU/EN fields retain values between modes and a one-time service request remains V3-compatible.
 
-- [ ] **Step 2: Run catalog UI tests and confirm missing monthly controls**
+- [x] **Step 2: Run catalog UI tests and confirm missing monthly controls**
 
 Run: `corepack pnpm@11.22.0 --filter @markiro/saas-admin exec vitest run test/recurring-service-catalog.test.tsx test/catalog.test.tsx test/catalog-v3-client.test.ts`
 
 Expected: FAIL because the service editor always submits `one_time` and the client uses version 3.
 
-- [ ] **Step 3: Add V4 requests and focused service fields**
+- [x] **Step 3: Add V4 requests and focused service fields**
 
 Set `CURRENT_COMMERCIAL_VERSION = "4"`. Render `MonthlyServiceTermsFields` only for `kind === "service" && billingMode === "recurring"`; keep fixed policies as read-only explanatory text and submit exact literal values. Validate English scope when the English document name is present.
 
-- [ ] **Step 4: Add accessible preview and localization**
+- [x] **Step 4: Add accessible preview and localization**
 
 Use existing UI inputs, field errors, drawer dirty state and focus behavior. Add complete RU and EN keys for cadence, included minutes, scope, hours, scheduling, no carryover, external approval and annual-unavailable explanation. The preview must show the same values sent to the API.
 
-- [ ] **Step 5: Run SaaS catalog package gates**
+- [x] **Step 5: Run SaaS catalog package gates**
 
 Run: `corepack pnpm@11.22.0 --filter @markiro/saas-admin exec vitest run test/recurring-service-catalog.test.tsx test/catalog.test.tsx test/catalog-v3-client.test.ts && corepack pnpm@11.22.0 --filter @markiro/saas-admin typecheck && corepack pnpm@11.22.0 --filter @markiro/saas-admin lint`
 
 Expected: PASS with no one-time service regression.
 
-- [ ] **Step 6: Commit the catalog interface**
+- [x] **Step 6: Commit the catalog interface**
 
 ```bash
 git add apps/saas-admin/src/api/client.ts apps/saas-admin/src/pages/catalog apps/saas-admin/src/i18n apps/saas-admin/test

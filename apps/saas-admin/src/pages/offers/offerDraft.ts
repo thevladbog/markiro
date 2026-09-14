@@ -1,8 +1,8 @@
-import type { OfferDetailV2 } from "@markiro/platform-contracts";
+import type { OfferDetailV4 } from "@markiro/platform-contracts";
 import type { DocumentDraft } from "../documents/documentDraft.js";
 
 /** Editing starts from saved values; the current catalog never hydrates an existing sale. */
-export function offerToDocumentDraft(offer: OfferDetailV2): DocumentDraft {
+export function offerToDocumentDraft(offer: OfferDetailV4): DocumentDraft {
   return {
     tenantId: offer.tenantId,
     applicationMode: "automatic",
