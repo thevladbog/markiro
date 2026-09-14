@@ -21,6 +21,7 @@ import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard"
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
   BOX_REGISTRY_REVISION_PATTERN,
+  boxRegistryPageOpenApiSchema,
   boxRegistryQuerySchema,
   type BoxRegistryQueryDto,
   type KioskBoxRegistryPage,
@@ -110,6 +111,16 @@ export class StationWriteoffsController {
     required: false,
     schema: { type: "string", maxLength: 1024 },
     description: "Opaque versioned cursor bound to since and until revisions.",
+  })
+  @ApiQuery({
+    name: "limit",
+    required: false,
+    schema: { type: "integer", minimum: 1, maximum: 500, default: 250 },
+    description: "Maximum candidate boxes considered before the member-key budget.",
+  })
+  @ApiOkResponse({
+    description: "A stable committed box-registry revision page.",
+    schema: boxRegistryPageOpenApiSchema,
   })
   @ApiHttpErrors(401, 403, 429)
   boxRegistry(
