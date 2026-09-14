@@ -74,7 +74,7 @@ export function BillingSubscriptionPage() {
       ) : null}
 
       {query.data.services.length ? (
-        <Card title={t("pages.billing.subscription.services")} titleAs="h2">
+        <Card title={t("pages.billing.subscription.oneTimeServices")} titleAs="h2">
           <ul className="mk-billing-item-list">
             {query.data.services.map((service) => (
               <li key={service.id}>

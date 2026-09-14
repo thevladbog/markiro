@@ -85,11 +85,151 @@
 .mk-billing-offer-detail,
 .mk-billing-requests,
 .mk-billing-request-create,
-.mk-billing-request-detail {
+.mk-billing-request-detail,
+.mk-billing-service-periods,
+.mk-billing-service-period-detail {
   display: flex;
   min-width: 0;
   flex-direction: column;
   gap: var(--sp-4);
+}
+
+.mk-billing-service-period-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  gap: var(--sp-4);
+}
+
+.mk-billing-service-period-card {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface-card);
+}
+
+.mk-billing-service-period-card__header,
+.mk-billing-service-entry__header {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.mk-billing-service-period-card__header h3,
+.mk-billing-service-period-card__header p,
+.mk-billing-service-ledger p,
+.mk-billing-service-corrections p {
+  margin: 0;
+}
+
+.mk-billing-service-period-card__header h3 {
+  color: var(--fg-1);
+  font: var(--text-h3);
+}
+
+.mk-billing-service-period-card__header p,
+.mk-billing-service-period-card__approved,
+.mk-billing-service-entry__dates {
+  color: var(--fg-3);
+  font: var(--text-body-sm);
+}
+
+.mk-billing-service-period-card__approved {
+  margin: 0;
+}
+
+.mk-billing-service-period-card > .mk-billing-action-link {
+  align-self: flex-start;
+  margin-top: auto;
+}
+
+.mk-billing-service-balance {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--sp-2);
+  margin: 0;
+}
+
+.mk-billing-service-balance div {
+  min-width: 0;
+}
+
+.mk-billing-service-balance dt,
+.mk-billing-service-balance dd {
+  margin: 0;
+}
+
+.mk-billing-service-balance dt {
+  color: var(--fg-3);
+  font: var(--text-caption);
+}
+
+.mk-billing-service-balance dd {
+  margin-top: var(--sp-1);
+  color: var(--fg-1);
+  font: 600 14px/1.3 var(--font-ui);
+  font-variant-numeric: tabular-nums;
+}
+
+.mk-billing-service-detail-summary {
+  display: grid;
+  gap: var(--sp-3);
+}
+
+.mk-billing-service-detail-summary .mk-billing-service-balance {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.mk-billing-service-detail-summary > .mk-chip {
+  justify-self: start;
+}
+
+.mk-billing-service-ledger,
+.mk-billing-service-corrections {
+  display: grid;
+  gap: var(--sp-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mk-billing-service-ledger > li {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-3) 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.mk-billing-service-ledger > li:last-child {
+  border-bottom: 0;
+}
+
+.mk-billing-service-entry__minutes,
+.mk-billing-service-entry__dates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-4);
+}
+
+.mk-billing-service-entry__minutes {
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+}
+
+.mk-billing-service-corrections {
+  margin-top: var(--sp-1);
+  padding-left: var(--sp-4);
+  border-left: 2px solid var(--line-strong);
+}
+
+.mk-billing-service-corrections li {
+  display: grid;
+  gap: var(--sp-1);
 }
 
 .mk-billing-request-filters {
@@ -581,6 +721,16 @@
   .mk-billing-attachment-list li {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .mk-billing-service-period-card__header,
+  .mk-billing-service-entry__header {
+    flex-direction: column;
+  }
+
+  .mk-billing-service-balance,
+  .mk-billing-service-detail-summary .mk-billing-service-balance {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .mk-billing-invoices__desktop {

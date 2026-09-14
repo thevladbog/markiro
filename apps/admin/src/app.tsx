@@ -79,6 +79,8 @@ import { TeamPage } from "./pages/team/TeamPage.js";
 import { BillingLayout } from "./pages/billing/BillingLayout.js";
 import { BillingOverviewPage } from "./pages/billing/BillingOverviewPage.js";
 import { BillingSubscriptionPage } from "./pages/billing/BillingSubscriptionPage.js";
+import { ServicePeriodDetailPage } from "./pages/billing/ServicePeriodDetailPage.js";
+import { ServicePeriodsPage } from "./pages/billing/ServicePeriodsPage.js";
 import { InvoiceDetailPage, InvoicesPage } from "./pages/billing/InvoicesPage.js";
 import { DocumentsPage } from "./pages/billing/DocumentsPage.js";
 import { OfferDetailPage } from "./pages/billing/OfferDetailPage.js";
@@ -508,6 +510,8 @@ function appRouteElements() {
         >
           <Route index element={<BillingOverviewPage />} />
           <Route path="subscription" element={<BillingSubscriptionPage />} />
+          <Route path="services" element={<ServicePeriodsPage />} />
+          <Route path="services/:periodId" element={<ServicePeriodDetailPage />} />
           <Route path="invoices" element={<InvoicesPage />} />
           <Route path="invoices/:id" element={<InvoiceDetailPage />} />
           <Route path="documents" element={<DocumentsPage />} />

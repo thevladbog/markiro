@@ -1039,6 +1039,7 @@
         "label": "Billing sections",
         "overview": "Overview",
         "subscription": "Subscription and limits",
+        "services": "Service packages",
         "invoices": "Invoices and payments",
         "documents": "Documents",
         "requests": "Requests"
@@ -1078,6 +1079,7 @@
         "limits": "Limits",
         "addons": "Add-ons",
         "services": "Services",
+        "oneTimeServices": "One-time services",
         "quantity_one": "{{count}} unit",
         "quantity_few": "{{count}} units",
         "quantity_many": "{{count}} units",
@@ -1090,6 +1092,50 @@
         "periods": {
           "month": "Monthly",
           "year": "Yearly"
+        }
+      },
+      "servicePeriods": {
+        "heading": "Service packages",
+        "description": "Paid support periods, performed work, and remaining included time.",
+        "loading": "Loading service packages",
+        "loadError": "Could not load service packages.",
+        "emptyTitle": "No service packages yet",
+        "emptyHint": "A paid package will appear here after payment is confirmed.",
+        "open": "Open history",
+        "minutes": "{{count}} min",
+        "minuteDelta": "{{value}} min",
+        "state": {
+          "upcoming": "Upcoming",
+          "active": "Active",
+          "expired": "Completed",
+          "exhausted": "Package exhausted"
+        },
+        "balance": {
+          "includedLabel": "Included",
+          "consumedLabel": "Used",
+          "remainingLabel": "Remaining",
+          "approvedLabel": "Approved additionally",
+          "included": "{{count}} min included",
+          "consumed": "{{count}} min used",
+          "remaining": "{{count}} min remaining",
+          "approved": "{{count}} min approved additionally"
+        },
+        "classification": {
+          "customer_service": "Package work",
+          "product_defect": "Not deducted from package"
+        },
+        "detail": {
+          "back": "Back to service packages",
+          "loadError": "Could not load the service period.",
+          "balanceTitle": "Period balance",
+          "history": "Work history",
+          "empty": "No work has been recorded for this period.",
+          "performed": "Performed: {{date}}",
+          "posted": "Posted: {{date}}",
+          "actual": "Actual time",
+          "allowance": "Deducted from package",
+          "corrections": "Work corrections",
+          "correction": "Correction"
         }
       },
       "invoices": {

@@ -1,4 +1,6 @@
-import { useQuery, type QueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, type QueryClient } from "@tanstack/react-query";
+
+import { tenantServicePeriodContracts } from "@markiro/platform-contracts";
 
 import { ApiRequestError, apiFetch } from "../../api/client.js";
 
@@ -119,7 +121,67 @@ export const tenantBillingKeys = {
   requests: () => [...tenantBillingKeys.all, "requests"] as const,
   request: (id: string) => [...tenantBillingKeys.requests(), id] as const,
   offers: () => [...tenantBillingKeys.all, "offers"] as const,
+  servicePeriods: () => [...tenantBillingKeys.all, "service-periods"] as const,
+  servicePeriod: (id: string) => [...tenantBillingKeys.servicePeriods(), id] as const,
 };
+
+export type TenantServicePeriodList = ReturnType<
+  (typeof tenantServicePeriodContracts.list.response)["parse"]
+>;
+export type TenantServicePeriodDetail = ReturnType<
+  (typeof tenantServicePeriodContracts.detail.response)["parse"]
+>;
+export type TenantServicePeriodState = TenantServicePeriodList["items"][number]["state"];
+
+export interface TenantServicePeriodFilters {
+  state?: TenantServicePeriodState;
+  from?: string;
+  to?: string;
+  limit?: number;
+}
+
+export async function fetchServicePeriods(
+  filters: TenantServicePeriodFilters = {},
+  cursor?: string,
+): Promise<TenantServicePeriodList> {
+  const query = tenantServicePeriodContracts.list.query.parse({
+    ...filters,
+    ...(cursor ? { cursor } : {}),
+  });
+  return tenantServicePeriodContracts.list.response.parse(
+    await apiFetch<unknown>(
+      `/billing/service-periods${queryString({
+        state: query.state,
+        from: query.from,
+        to: query.to,
+        cursor: query.cursor,
+        limit: String(query.limit),
+      })}`,
+    ),
+  );
+}
+
+export function useServicePeriods(filters: TenantServicePeriodFilters = {}) {
+  return useInfiniteQuery({
+    queryKey: [...tenantBillingKeys.servicePeriods(), filters] as const,
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) => fetchServicePeriods(filters, pageParam),
+    getNextPageParam: (page) => page.nextCursor ?? undefined,
+  });
+}
+
+export function useServicePeriod(id: string) {
+  return useQuery({
+    queryKey: tenantBillingKeys.servicePeriod(id),
+    queryFn: async () => {
+      const params = tenantServicePeriodContracts.detail.params.parse({ id });
+      return tenantServicePeriodContracts.detail.response.parse(
+        await apiFetch<unknown>(`/billing/service-periods/${params.id}`),
+      );
+    },
+    enabled: Boolean(id),
+  });
+}
 
 export type BillingRequestType =
   "renewal" | "capacity_change" | "additional_service" | "documents" | "other";

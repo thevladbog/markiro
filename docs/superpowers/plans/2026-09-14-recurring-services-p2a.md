@@ -916,7 +916,7 @@ git commit -m "feat: add recurring service workspace"
 - Produces: tenant-owned service cards and a customer-safe ledger detail route.
 - Consumes: Task 7 tenant endpoints and existing `BILLING_READ` route boundary.
 
-- [ ] **Step 1: Write failing tenant card and detail tests**
+- [x] **Step 1: Write failing tenant card and detail tests**
 
 ```tsx
 expect(await screen.findByText("Сервисное сопровождение")).toBeVisible();
@@ -929,27 +929,27 @@ expect(screen.queryByText("Диагностика завершена")).toBeNull
 
 Add active, upcoming, expired, exhausted, corrected and external-approval fixtures. Assert no purchase or automatic-upgrade CTA appears for an exhausted package.
 
-- [ ] **Step 2: Run tenant UI tests and confirm missing service period views**
+- [x] **Step 2: Run tenant UI tests and confirm missing service period views**
 
 Run: `corepack pnpm@11.22.0 --filter @markiro/admin exec vitest run test/service-periods.test.tsx test/subscription-page.test.tsx test/billing-routing.test.tsx`
 
 Expected: FAIL because the routes and API helpers are absent.
 
-- [ ] **Step 3: Add list/detail routes and customer-safe rendering**
+- [x] **Step 3: Add list/detail routes and customer-safe rendering**
 
 Add `/billing/services` and `/billing/services/:periodId` under `BillingLayout`. Separate service periods visually and semantically from software subscription entitlements. Render performance date and posting date distinctly; display corrections beneath their original entry and label defect work without relying on color.
 
-- [ ] **Step 4: Add responsive and translated states**
+- [x] **Step 4: Add responsive and translated states**
 
 Cover loading, retry, empty, exhausted and history states in RU and EN. At narrow width, keep service name, period and balance before secondary commercial metadata. Preserve visible focus and table semantics or use a labelled definition list where rows collapse.
 
-- [ ] **Step 5: Run tenant cabinet gates**
+- [x] **Step 5: Run tenant cabinet gates**
 
 Run: `corepack pnpm@11.22.0 --filter @markiro/admin exec vitest run test/service-periods.test.tsx test/subscription-page.test.tsx test/billing-routing.test.tsx && corepack pnpm@11.22.0 --filter @markiro/admin typecheck && corepack pnpm@11.22.0 --filter @markiro/admin lint && corepack pnpm@11.22.0 --filter @markiro/admin build`
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit the tenant ledger interface**
+- [x] **Step 6: Commit the tenant ledger interface**
 
 ```bash
 git add apps/admin
