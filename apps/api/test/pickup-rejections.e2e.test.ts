@@ -440,10 +440,11 @@ describe.skipIf(!ready)("pickup scan rejections e2e", () => {
 
     expect(res.body.openCount).toBeGreaterThan(0);
     const row = res.body.items.find(
-      (r: { deviceSeq: number; kioskId: string }) => r.deviceSeq === 10 && r.kioskId === kioskId,
+      (r: { deviceSeq: number; device: { id: string } }) =>
+        r.deviceSeq === 10 && r.device.id === kioskId,
     );
     expect(row.kind).toBe("items_refused");
-    expect(row.kioskName).toBe("Киоск-1");
+    expect(row.device).toEqual({ kind: "kiosk", id: kioskId, name: "Киоск-1", place: null });
     expect(row.employeeName).toBe("Иван Иванов");
     expect(row.orderNo).toBeNull();
     expect(row.codes).toHaveLength(2);
@@ -500,9 +501,33 @@ describe.skipIf(!ready)("pickup scan rejections e2e", () => {
     expect(ackedOnly.body.items.some((r: { id: string }) => r.id === target.id)).toBe(true);
   });
 
-  it("filters by kiosk", async () => {
-    const res = await agent.get(`/pickup-rejections?kioskId=${kioskId}`).expect(200);
-    expect(res.body.items.every((r: { kioskId: string }) => r.kioskId === kioskId)).toBe(true);
+  it("filters by device", async () => {
+    const res = await agent.get(`/pickup-rejections?deviceId=${kioskId}`).expect(200);
+    expect(res.body.items.every((r: { device: { id: string } }) => r.device.id === kioskId)).toBe(
+      true,
+    );
+  });
+
+  it("names a handheld as the source device of its rejection", async () => {
+    const handheldId = randomUUID();
+    await db
+      .insert(schema.stationDevices)
+      .values({ id: handheldId, tenantId, name: "ТСД-1", kind: "handheld" });
+    await db.insert(schema.pickupScanRejections).values({
+      tenantId,
+      sourceKind: "handheld",
+      stationDeviceId: handheldId,
+      employeeId,
+      badgeCode: null,
+      orderId: null,
+      deviceSeq: 910,
+      codes: [{ rawKm: "raw-hh", reason: "duplicate" }],
+      scannedAt: new Date(),
+    });
+
+    const res = await agent.get(`/pickup-rejections?deviceId=${handheldId}`).expect(200);
+    const row = res.body.items.find((r: { deviceSeq: number }) => r.deviceSeq === 910);
+    expect(row.device).toEqual({ kind: "handheld", id: handheldId, name: "ТСД-1", place: null });
   });
 
   it("400s acknowledging a malformed id instead of reaching Postgres", async () => {
