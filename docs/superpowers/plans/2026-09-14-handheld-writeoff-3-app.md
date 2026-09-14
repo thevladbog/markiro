@@ -764,7 +764,7 @@ data class WriteoffUi(
 heartbeat drains it; if it dies before the commit, nothing was minted. This is
 the whole offline guarantee, and it is one transaction.
 
-- [ ] **Step 1: Write the failing ViewModel tests**
+- [x] **Step 1: Write the failing ViewModel tests**
 
 With a `FakeWriteoffGateway` and a `ScanRouterAdapter(flow)`:
 
@@ -811,7 +811,7 @@ field names above are the ones `InventoryListViewModel` consumes, but verify.
 
 Each is short: emit into the scan flow, assert on `vm.state.first { … }`.
 
-- [ ] **Step 2: Implement the ViewModel**
+- [x] **Step 2: Implement the ViewModel**
 
 Scan handling:
 
@@ -832,7 +832,7 @@ its `contentKeys`) → `Duplicate`; else `gateway.productName(km.gtin14)` null �
 `gateway.file(...)`, then `step = RESULT`, and observes the document so the
 result screen flips from «В очереди» to the act number when the engine settles it.
 
-- [ ] **Step 3: Screens**
+- [x] **Step 3: Screens**
 
 `WriteoffScreens.kt`, one composable per mockup frame, built from
 `ScreenColumn`, `StatusStrip`, `AppBar`, `PrimaryButton`, `DestructiveButton`,
@@ -853,14 +853,14 @@ No `SignalOverlay` in this mode — the spec says why. Hardware Back from LIST
 with lines asks «Очистить список?» before leaving; from REASON/CONFIRM it steps
 back, not out.
 
-- [ ] **Step 4: Navigation and strings**
+- [x] **Step 4: Navigation and strings**
 
 `AppNavigation`: `composable(Routes.WRITEOFF)` hosting one `WriteoffViewModel`
 across the four steps (the step is state, not a route — Back is handled in the
 VM), and `composable(Routes.WRITEOFF_HISTORY)`. All copy in both `strings.xml`
 files under a `writeoff_` prefix; take the Russian from the mockups verbatim.
 
-- [ ] **Step 5: Run and commit**
+- [x] **Step 5: Run and commit**
 
 ```bash
 ./gradlew --no-daemon testDebugUnitTest --tests '*WriteoffViewModelTest*' -q
@@ -872,7 +872,7 @@ git commit -m "feat(handheld): the Списание mode — list, reason, confi
 
 ### Task 7: The gate
 
-- [ ] **Step 1: Full Android gates**
+- [x] **Step 1: Full Android gates**
 
 ```bash
 cd apps/handheld && ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
@@ -880,7 +880,7 @@ cd apps/handheld && ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDe
 
 Expected: all three green. Record the counts.
 
-- [ ] **Step 2: The one API change**
+- [x] **Step 2: The one API change**
 
 ```bash
 set -a; source .env; set +a
@@ -888,7 +888,7 @@ pnpm --filter @markiro/api test && pnpm --filter @markiro/api typecheck && pnpm 
 pnpm format:check
 ```
 
-- [ ] **Step 3: Emulator smoke, honestly scoped**
+- [x] **Step 3: Emulator smoke, honestly scoped**
 
 If an emulator is available, install the debug APK and drive the mode with the
 README's debug broadcast:
@@ -904,7 +904,7 @@ from «В очереди» to the act number. **State in the report whether this
 A green Robolectric run proves the state machine, not the scanner, the vendor
 intent, or the real device's screen.
 
-- [ ] **Step 4: Commit anything the gates changed**, then hand off to
+- [x] **Step 4: Commit anything the gates changed**, then hand off to
       `finishing-a-development-branch`.
 
 ## Done when

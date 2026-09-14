@@ -2,6 +2,7 @@ package app.markiro.handheld
 
 import app.markiro.handheld.core.grants.GrantStatusViewModel
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
@@ -232,6 +233,32 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                     onSignOut = vm::signOut,
                     onLabelQueue = { nav.navigate(Routes.LABEL_QUEUE) },
                 )
+            }
+            // One ViewModel across all four steps: the step is state, so hardware
+            // Back moves inside the mode instead of dropping a half-built list.
+            composable(Routes.WRITEOFF) {
+                val vm: app.markiro.handheld.feature.writeoff.WriteoffViewModel = hiltViewModel()
+                val state by vm.state.collectAsStateWithLifecycle()
+                val leave = { nav.popBackStack(Routes.HUB, inclusive = false); Unit }
+                BackHandler(enabled = true) { if (!vm.back()) leave() }
+                app.markiro.handheld.feature.writeoff.WriteoffRoute(
+                    state,
+                    onBack = leave,
+                    onHistory = { nav.navigate(Routes.WRITEOFF_HISTORY) },
+                    onRemove = vm::remove,
+                    onNext = vm::next,
+                    onSelectReason = vm::selectReason,
+                    onToConfirm = vm::toConfirm,
+                    onConfirm = vm::confirm,
+                    onStepBack = { vm.back() },
+                    onAnother = vm::startAnother,
+                    onDismissDiscard = vm::dismissDiscard,
+                )
+            }
+            composable(Routes.WRITEOFF_HISTORY) {
+                val vm: app.markiro.handheld.feature.writeoff.WriteoffHistoryViewModel = hiltViewModel()
+                val rows by vm.rows.collectAsStateWithLifecycle()
+                app.markiro.handheld.feature.writeoff.WriteoffHistoryScreen(rows) { nav.popBackStack() }
             }
             composable(Routes.SHIFTS) {
                 val vm: ShiftListViewModel = hiltViewModel()
