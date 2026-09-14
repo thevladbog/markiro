@@ -20,6 +20,7 @@ import { getDefaultDemoPlan, listCatalogVersions, type CatalogVersionDto } from 
 import { CatalogVersionPanel } from "./CatalogVersionPanel.js";
 import { CatalogCreatePanel } from "./CatalogCreatePanel.js";
 import { CatalogDrawer } from "./CatalogDrawer.js";
+import { OfflineGrantPoliciesPanel } from "./OfflineGrantPoliciesPanel.js";
 
 type CatalogKind = CatalogVersionDto["kind"];
 
@@ -38,6 +39,7 @@ export function CatalogPage() {
   const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [policiesOpen, setPoliciesOpen] = useState(false);
   const [drawerDirty, setDrawerDirty] = useState(false);
   const pageGuard = useNavigationGuard(drawerDirty, false);
   const catalog = useQuery({
@@ -143,19 +145,35 @@ export function CatalogPage() {
         description={t("catalog.description")}
         actionsLabel={t("catalog.actionsLabel")}
         actions={
-          principal.capabilities.includes("catalog.write") ? (
+          <>
             <Button
+              variant="secondary"
               onClick={() =>
                 pageGuard.requestProtectedAction(() => {
                   setSelectedId(null);
+                  setCreating(false);
                   setDrawerDirty(false);
-                  setCreating(true);
+                  setPoliciesOpen(true);
                 })
               }
             >
-              {t("catalog.create")}
+              {t("catalog.offlinePolicies.open")}
             </Button>
-          ) : null
+            {principal.capabilities.includes("catalog.write") ? (
+              <Button
+                onClick={() =>
+                  pageGuard.requestProtectedAction(() => {
+                    setSelectedId(null);
+                    setPoliciesOpen(false);
+                    setDrawerDirty(false);
+                    setCreating(true);
+                  })
+                }
+              >
+                {t("catalog.create")}
+              </Button>
+            ) : null}
+          </>
         }
       />
       <section className="commerce-ledger catalog-frame" aria-labelledby="catalog-ledger-title">
@@ -250,6 +268,23 @@ export function CatalogPage() {
             kind={activeKind}
             onClose={() => setCreating(false)}
             onCreated={(created) => setSelectedId(created.id)}
+            onDirtyChange={setDrawerDirty}
+          />
+        </CatalogDrawer>
+      ) : null}
+      {policiesOpen ? (
+        <CatalogDrawer
+          title={t("catalog.offlinePolicies.title")}
+          dirty={drawerDirty}
+          busy={false}
+          closeLabel={t("catalog.offlinePolicies.close")}
+          onClose={() => {
+            setPoliciesOpen(false);
+            setDrawerDirty(false);
+          }}
+        >
+          <OfflineGrantPoliciesPanel
+            canWrite={principal.capabilities.includes("catalog.write")}
             onDirtyChange={setDrawerDirty}
           />
         </CatalogDrawer>

@@ -16,6 +16,7 @@ import {
 } from "../runtime-env.mjs";
 
 const INVENTORY = `# runtime inventory\nDATABASE_URL=\nSMTP_PASSWORD=\nS3_ENDPOINT=\n`;
+const OPTIONAL_OFFLINE_GRANT_INVENTORY = `${INVENTORY}OFFLINE_GRANT_ORIGIN=\nOFFLINE_GRANT_KID=\nOFFLINE_GRANT_PRIVATE_KEY_PEM=\nOFFLINE_GRANT_KEYSET_JSON=\n`;
 const VALUES = {
   DATABASE_URL: "postgres://markiro:password@db.example.test/markiro",
   SMTP_PASSWORD: "mail-password",
@@ -177,6 +178,31 @@ test("runtime inventory returns only sorted exact key names", () => {
 
   assert.deepEqual(result, ["DATABASE_URL", "S3_ENDPOINT", "SMTP_PASSWORD"]);
   assert.doesNotMatch(JSON.stringify(result), /password|storage\.example|postgres:/u);
+});
+
+test("allows the disabled offline grant configuration group to be entirely absent", () => {
+  const keys = environmentKeysFromExample(OPTIONAL_OFFLINE_GRANT_INVENTORY);
+  const entries = Object.entries(VALUES).map(([key, textValue]) => ({ key, textValue }));
+
+  assert.deepEqual(runtimeInventoryKeyNames(keys, entries), [
+    "DATABASE_URL",
+    "S3_ENDPOINT",
+    "SMTP_PASSWORD",
+  ]);
+  assert.doesNotMatch(renderRuntimeEnvironment(keys, entries), /OFFLINE_GRANT_/u);
+});
+
+test("rejects a partially configured offline grant group", () => {
+  const keys = environmentKeysFromExample(OPTIONAL_OFFLINE_GRANT_INVENTORY);
+  const entries = [
+    ...Object.entries(VALUES).map(([key, textValue]) => ({ key, textValue })),
+    { key: "OFFLINE_GRANT_ORIGIN", textValue: "https://api.example.test" },
+  ];
+
+  assert.throws(
+    () => runtimeInventoryKeyNames(keys, entries),
+    (error) => error.message === INVENTORY_FAILURE,
+  );
 });
 
 test("runtime inventory rejects missing, extra, duplicate, malformed, and valueless entries uniformly", () => {

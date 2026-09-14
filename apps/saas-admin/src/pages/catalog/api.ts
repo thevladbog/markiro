@@ -10,6 +10,9 @@ import {
   type CommercialReviewIdentityV3 as CommercialReviewIdentity,
   COMMERCIAL_VERSION_HEADER,
   type PlanEntitlementsV3 as PlanEntitlements,
+  platformOfflineGrantPolicyContracts,
+  type ApproveOfflineGrantPolicy,
+  type CreateOfflineGrantPolicy,
 } from "@markiro/platform-contracts";
 
 import { platformApiFetch, CURRENT_COMMERCIAL_VERSION } from "../../api/client.js";
@@ -18,6 +21,33 @@ export type CatalogVersionDto = CatalogVersion;
 export type CatalogVersionPatch = SharedCatalogVersionPatch;
 export type CatalogCreateInput = CatalogVersionCreate;
 export type { AddonEffect, PlanEntitlements };
+export type OfflineGrantPolicyDto = Awaited<
+  ReturnType<typeof listOfflineGrantPolicies>
+>["items"][number];
+
+export function listOfflineGrantPolicies() {
+  return platformApiFetch("/catalog/lifecycle-policies", {
+    responseSchema: platformOfflineGrantPolicyContracts.list.response,
+  });
+}
+
+export function createOfflineGrantPolicy(input: CreateOfflineGrantPolicy) {
+  const body = platformOfflineGrantPolicyContracts.create.body.parse(input);
+  return platformApiFetch("/catalog/lifecycle-policies", {
+    method: "POST",
+    body: JSON.stringify(body),
+    responseSchema: platformOfflineGrantPolicyContracts.create.response,
+  });
+}
+
+export function approveOfflineGrantPolicy(id: string, input: ApproveOfflineGrantPolicy) {
+  const body = platformOfflineGrantPolicyContracts.approve.body.parse(input);
+  return platformApiFetch(`/catalog/lifecycle-policies/${id}/approve`, {
+    method: "POST",
+    body: JSON.stringify(body),
+    responseSchema: platformOfflineGrantPolicyContracts.approve.response,
+  });
+}
 
 export function listCatalogVersions() {
   return platformApiFetch("/catalog/items", {

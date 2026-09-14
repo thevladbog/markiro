@@ -27,6 +27,7 @@ import {
   platformDeviceLicensingContracts,
   platformDeviceReplacementContracts,
   platformDeviceRetentionContracts,
+  platformOfflineGrantPolicyContracts,
 } from "@markiro/platform-contracts";
 import type { ZodType } from "zod";
 
@@ -59,6 +60,26 @@ const route = (
 ): PlatformRouteContract => ({ method, path, status, response, ...options });
 
 export const CURRENT_SAAS_ROUTES = [
+  route(
+    "get",
+    "/platform/catalog/lifecycle-policies",
+    "200",
+    platformOfflineGrantPolicyContracts.list.response,
+  ),
+  route(
+    "post",
+    "/platform/catalog/lifecycle-policies",
+    "201",
+    platformOfflineGrantPolicyContracts.create.response,
+    { body: platformOfflineGrantPolicyContracts.create.body },
+  ),
+  route(
+    "post",
+    "/platform/catalog/lifecycle-policies/{id}/approve",
+    "200",
+    platformOfflineGrantPolicyContracts.approve.response,
+    { body: platformOfflineGrantPolicyContracts.approve.body },
+  ),
   route(
     "get",
     "/platform/tenants/{tenantId}/device-licensing/retention",

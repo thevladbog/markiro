@@ -4,6 +4,10 @@ import {
   platformCatalogContracts,
   platformCatalogV2Contracts,
   platformCatalogV3Contracts,
+  platformOfflineGrantPolicyContracts,
+  platformUuidSchema,
+  type ApproveOfflineGrantPolicy,
+  type CreateOfflineGrantPolicy,
 } from "@markiro/platform-contracts";
 import {
   commercialVersion,
@@ -31,6 +35,55 @@ import { PlatformCatalogService } from "./platform-catalog.service";
 @Controller("platform/catalog")
 export class PlatformCatalogController {
   constructor(private readonly catalog: PlatformCatalogService) {}
+
+  @Get("lifecycle-policies")
+  @ApiOperation({ summary: "List offline grant lifecycle policies" })
+  @PlatformApiProtectedOk({ response: platformOfflineGrantPolicyContracts.list.response })
+  @RequirePlatformCapabilities("catalog.read")
+  async listLifecyclePolicies(@Req() request: RequestWithPlatformPrincipal) {
+    return parsePlatformResponse(
+      platformOfflineGrantPolicyContracts.list.response,
+      await this.catalog.listOfflineGrantPolicies(request.platformPrincipal!),
+    );
+  }
+
+  @Post("lifecycle-policies")
+  @ApiOperation({ summary: "Create an offline grant lifecycle policy draft" })
+  @PlatformApiProtectedCreated({
+    body: platformOfflineGrantPolicyContracts.create.body,
+    response: platformOfflineGrantPolicyContracts.create.response,
+  })
+  @RequirePlatformCapabilities("catalog.write")
+  async createLifecyclePolicy(
+    @Req() request: RequestWithPlatformPrincipal,
+    @Body(new ZodValidationPipe(platformOfflineGrantPolicyContracts.create.body))
+    body: CreateOfflineGrantPolicy,
+  ) {
+    return parsePlatformResponse(
+      platformOfflineGrantPolicyContracts.create.response,
+      await this.catalog.createOfflineGrantPolicy(request.platformPrincipal!, body),
+    );
+  }
+
+  @Post("lifecycle-policies/:id/approve")
+  @HttpCode(200)
+  @ApiOperation({ summary: "Approve an offline grant lifecycle policy" })
+  @PlatformApiProtectedOk({
+    body: platformOfflineGrantPolicyContracts.approve.body,
+    response: platformOfflineGrantPolicyContracts.approve.response,
+  })
+  @RequirePlatformCapabilities("catalog.write")
+  async approveLifecyclePolicy(
+    @Req() request: RequestWithPlatformPrincipal,
+    @Param("id", new ZodValidationPipe(platformUuidSchema)) id: string,
+    @Body(new ZodValidationPipe(platformOfflineGrantPolicyContracts.approve.body))
+    body: ApproveOfflineGrantPolicy,
+  ) {
+    return parsePlatformResponse(
+      platformOfflineGrantPolicyContracts.approve.response,
+      await this.catalog.approveOfflineGrantPolicy(request.platformPrincipal!, id, body),
+    );
+  }
 
   @Get("editor-context")
   @ApiOperation({ summary: "Get commercial catalog editor context" })

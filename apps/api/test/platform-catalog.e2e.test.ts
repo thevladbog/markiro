@@ -146,6 +146,64 @@ describe.skipIf(!ready)("platform catalog", () => {
   let adminId = "";
   let barriersInstalled = false;
 
+  it("creates and approves a finite offline grant policy without enabling strict rollout", async () => {
+    const policyKey = `offline-observe-${randomUUID()}`;
+    const body = {
+      policyKey,
+      version: 1,
+      offlineGrant: {
+        version: 1,
+        maxOfflineMs: 8 * 60 * 60 * 1_000,
+        maxCompletionMs: 24 * 60 * 60 * 1_000,
+        taskBounds: {
+          inventoryCheck: {
+            "inventory.scan.v1": { maxEvents: 5_000, maxUnits: 5_000 },
+            "inventory.close.v1": { maxEvents: 1 },
+          },
+        },
+      },
+    };
+    await support.post("/platform/catalog/lifecycle-policies").send(body).expect(403);
+    const created = await admin.post("/platform/catalog/lifecycle-policies").send(body).expect(201);
+    expect(created.body).toMatchObject({
+      policyKey,
+      version: 1,
+      status: "draft",
+      decisionReference: null,
+      offlineGrant: body.offlineGrant,
+    });
+    expect(created.body.offlineGrant).not.toHaveProperty("rollout");
+
+    const decisionReference = `P1D-${randomUUID()}`;
+    const approved = await admin
+      .post(`/platform/catalog/lifecycle-policies/${created.body.id}/approve`)
+      .send({ decisionReference })
+      .expect(200);
+    expect(approved.body).toMatchObject({
+      id: created.body.id,
+      status: "approved",
+      decisionReference,
+      approvedByPlatformUserId: adminId,
+    });
+    await admin
+      .post(`/platform/catalog/lifecycle-policies/${created.body.id}/approve`)
+      .send({ decisionReference })
+      .expect(200);
+    const listed = await support.get("/platform/catalog/lifecycle-policies").expect(200);
+    expect(listed.body.items).toContainEqual(approved.body);
+
+    const events = await setup.db
+      .select()
+      .from(schema.platformAuditEvents)
+      .where(eq(schema.platformAuditEvents.targetId, created.body.id));
+    expect(events).toHaveLength(2);
+    expect(events.map((event) => event.action).sort()).toEqual([
+      "catalog.lifecycle_policy.approved",
+      "catalog.lifecycle_policy.created",
+    ]);
+    expect(events.every((event) => event.actorPlatformUserId === adminId)).toBe(true);
+  });
+
   async function createPlatformAgent(role: PlatformRole) {
     const password = randomBytes(24).toString("base64url");
     const signedUp = await request(app!.getHttpServer())

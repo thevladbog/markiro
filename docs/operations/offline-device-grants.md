@@ -49,6 +49,25 @@ introduce a product-default fallback.
 
 ## Approved rollout and recovery configuration
 
+Platform operators manage offline grant policy versions in SaaS Admin under
+**Catalog → Offline policies**. Creating a version stores a draft with a verified
+payload hash. Approval is a separate `catalog.write` action that requires a
+decision reference and records the exact actor, policy identity and hash in the
+platform audit log. An approved version is immutable; changed durations, bounds
+or rollout require a new version. The matching platform API is:
+
+| Method and route                                        | Capability      | Purpose                       |
+| ------------------------------------------------------- | --------------- | ----------------------------- |
+| `GET /platform/catalog/lifecycle-policies`              | `catalog.read`  | List offline grant policies   |
+| `POST /platform/catalog/lifecycle-policies`             | `catalog.write` | Create a validated draft      |
+| `POST /platform/catalog/lifecycle-policies/:id/approve` | `catalog.write` | Approve the immutable version |
+
+The SaaS Admin form deliberately does not select a strict cohort. It accepts
+finite offline and completion windows plus explicit task-bound JSON, and creates
+an observe-ready policy without `rollout`. Attach only an approved policy to a
+new catalog version. Existing published catalog versions are immutable; assigning
+the new policy requires the normal new-version review and publication flow.
+
 The existing approved lifecycle policy may include optional `offlineGrant.rollout`:
 `{protocol:"offline-grants-v1",mode:"observe"|"strict",deviceIds:[<UUID>],decisionReference:<approved decision>}`.
 The existing policy approval and payload hash cover this exact choice. Omission
@@ -180,11 +199,11 @@ All four variables absent or blank leave normal API startup available:
 Any partial or inconsistent configuration fails startup validation. No private
 key or production offline policy is seeded by this change.
 
-The Yandex runtime inventory requires every key in `.env.production.example` to
-exist in Lockbox. Before deploying this version, add all four entries to the
-runtime secret; keep their values empty until signing is configured as a complete
-set. Missing entries fail inventory validation even though empty values preserve
-normal API startup.
+The Yandex runtime inventory treats these four keys as one optional group because
+Lockbox does not retain entries with empty values. Keep all four absent while
+signing is disabled. Enabling signing requires all four non-empty entries in the
+same Lockbox version; a partial group fails inventory validation before the
+runtime environment is replaced.
 
 `OFFLINE_GRANT_ORIGIN` is the server-configured canonical HTTP(S) origin, never a
 body override. The private key must be EC P-256 and match the active `kid` and

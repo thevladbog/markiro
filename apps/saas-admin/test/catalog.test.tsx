@@ -59,6 +59,84 @@ async function submitMinimalCatalogCreate(user: ReturnType<typeof userEvent.setu
 }
 
 describe("commercial catalog", () => {
+  it("labels the offline policy drawer and protects an unfinished draft", async () => {
+    installCatalogApi({ me: PLATFORM_ADMIN_ME, offlinePolicies: [] });
+    renderSaasApp();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Офлайн-политики" }));
+    await user.type(screen.getByLabelText("Код политики"), "unfinished-policy");
+
+    await user.click(screen.getByRole("button", { name: "Закрыть панель офлайн-политик" }));
+
+    expect(await screen.findByRole("alertdialog")).toBeDefined();
+    expect(screen.getByDisplayValue("unfinished-policy")).toBeDefined();
+  });
+
+  it("protects an unfinished offline policy approval", async () => {
+    installCatalogApi({
+      me: PLATFORM_ADMIN_ME,
+      offlinePolicies: [
+        {
+          id: "a1111111-1111-4111-8111-111111111111",
+          policyKey: "factory-standard",
+          version: 1,
+          status: "draft",
+          offlineGrant: {
+            version: 1,
+            maxOfflineMs: 28_800_000,
+            maxCompletionMs: 86_400_000,
+            taskBounds: {},
+          },
+          payloadHash: "a".repeat(64),
+          decisionReference: null,
+          approvedAt: null,
+          approvedByPlatformUserId: null,
+          createdByPlatformUserId: PLATFORM_ADMIN_ME.userId,
+          createdAt: "2026-09-14T00:00:00.000Z",
+        },
+      ],
+    });
+    renderSaasApp();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Офлайн-политики" }));
+    await user.click(await screen.findByText("factory-standard"));
+    await user.type(screen.getByLabelText("Основание решения"), "unfinished-approval");
+
+    await user.click(screen.getByRole("button", { name: "Закрыть панель офлайн-политик" }));
+
+    expect(await screen.findByRole("alertdialog")).toBeDefined();
+    expect(screen.getByDisplayValue("unfinished-approval")).toBeDefined();
+  });
+
+  it("creates and approves an observe-ready offline policy without a strict device cohort", async () => {
+    const api = installCatalogApi({ me: PLATFORM_ADMIN_ME, offlinePolicies: [] });
+    renderSaasApp();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Офлайн-политики" }));
+    expect(await screen.findByText(/все клиенты остаются в режиме наблюдения/)).toBeDefined();
+    await user.type(screen.getByLabelText("Код политики"), "factory-standard");
+    await user.type(screen.getByLabelText("Срок запуска офлайн, часы"), "8");
+    await user.type(screen.getByLabelText("Срок завершения задания, часы"), "24");
+    await user.click(screen.getByRole("button", { name: "Создать черновик" }));
+    expect(await screen.findByText("Черновик политики создан.")).toBeDefined();
+    await user.type(screen.getByLabelText("Основание решения"), "P1D-2026-09-14");
+    await user.click(screen.getByRole("button", { name: "Утвердить политику" }));
+    expect(await screen.findByText("Политика утверждена и доступна в каталоге.")).toBeDefined();
+    expect(api.offlinePolicyCalls().map((call) => call.body)).toEqual([
+      {
+        policyKey: "factory-standard",
+        version: 1,
+        offlineGrant: {
+          version: 1,
+          maxOfflineMs: 28_800_000,
+          maxCompletionMs: 86_400_000,
+          taskBounds: {},
+        },
+      },
+      { decisionReference: "P1D-2026-09-14" },
+    ]);
+  });
+
   it.each([
     { item: DRAFT_PLAN, tab: "Тарифы" },
     { item: ADDON, tab: "Дополнения" },
