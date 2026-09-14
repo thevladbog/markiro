@@ -1126,6 +1126,7 @@
     "overview": "Overview",
     "tenants": "Tenants",
     "catalog": "Catalog",
+    "servicePeriods": "Services",
     "offers": "Offers",
     "invoices": "Invoices",
     "acts": "Acts",
@@ -1139,6 +1140,64 @@
     "language": "Interface language",
     "sessionConfirmed": "2FA · session secured",
     "agreements": "Agreements"
+  },
+  "servicePeriods": {
+    "eyebrow": "Service packages",
+    "title": "Service periods",
+    "description": "Paid periods, performed work, and remaining included minutes.",
+    "detailTitle": "Service period",
+    "close": "Close service period",
+    "loading": "Loading service periods",
+    "loadError": "Could not load service periods.",
+    "empty": "No service periods yet",
+    "emptyLedger": "No work has been recorded",
+    "open": "Open",
+    "retry": "Retry original request",
+    "uncertain": "The result is unconfirmed. Retry sends the same unchanged request.",
+    "validation": "Check required fields and minute values.",
+    "stateFilter": "Period state",
+    "allStates": "All states",
+    "period": "Period",
+    "included": "Included minutes",
+    "approved": "Externally approved",
+    "consumed": "Consumed",
+    "remaining": "Remaining",
+    "revision": "Revision",
+    "ledger": "Work ledger",
+    "columns": {
+      "name": "Service",
+      "period": "Period",
+      "balance": "Used / available",
+      "state": "State",
+      "actions": "Actions"
+    },
+    "state": { "upcoming": "Upcoming", "active": "Active", "expired": "Expired" },
+    "classification": {
+      "customer_service": "Package work",
+      "product_defect": "Not deducted from package"
+    },
+    "usage": {
+      "title": "Post work",
+      "classification": "Classification",
+      "minutes": "Actual minutes",
+      "reference": "Work reference",
+      "description": "Work description",
+      "submit": "Post work"
+    },
+    "correction": {
+      "title": "Correction",
+      "actual": "Actual-minute change",
+      "allowance": "Allowance change",
+      "open": "Correct",
+      "submit": "Save correction"
+    },
+    "approval": {
+      "title": "External approval",
+      "minutes": "Approved minutes",
+      "reference": "Reference",
+      "reason": "Reason",
+      "submit": "Add approval"
+    }
   },
   "overview": {
     "title": "Operational overview",

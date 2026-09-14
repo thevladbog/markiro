@@ -843,7 +843,7 @@ git commit -m "feat: edit monthly service packages in catalog"
 - Produces: capability-gated `/service-periods` workspace with recoverable mutations.
 - Consumes: Task 6 platform routes and existing `platformApiFetch` error envelope.
 
-- [ ] **Step 1: Write failing role, balance and retry tests**
+- [x] **Step 1: Write failing role, balance and retry tests**
 
 ```tsx
 expect(renderForRole("support").getByRole("link", { name: "Услуги" })).toBeVisible();
@@ -858,17 +858,17 @@ expect(renderForRole("accountant").queryByRole("button", { name: "Списать
 
 Simulate a lost response after `platformApiFetch` starts. Assert the form retains the exact body and request ID, blocks edits, retries the same request and clears dirty state only after a definitive response. Assert local Zod validation never creates an uncertain attempt.
 
-- [ ] **Step 2: Run workspace tests and confirm missing route/components**
+- [x] **Step 2: Run workspace tests and confirm missing route/components**
 
 Run: `corepack pnpm@11.22.0 --filter @markiro/saas-admin exec vitest run test/service-periods.test.tsx test/service-period-api.test.ts`
 
 Expected: FAIL because the service workspace is absent.
 
-- [ ] **Step 3: Implement cursor pagination and derived balance UI**
+- [x] **Step 3: Implement cursor pagination and derived balance UI**
 
 Use `useInfiniteQuery` with each page's `nextCursor`, flatten pages and preserve the complete query key including filters. Show paid source, interval, included, externally approved, consumed, remaining, revision and chronological ledger. Use status text in addition to color.
 
-- [ ] **Step 4: Implement mutation forms and recovery state**
+- [x] **Step 4: Implement mutation forms and recovery state**
 
 ```ts
 type ServiceAttempt<T> =
@@ -878,17 +878,17 @@ type ServiceAttempt<T> =
 
 Create an attempt only immediately before `platformApiFetch`. On an uncertain response, preserve immutable input and disable editing/closing until retry. Clear cached identity only for a valid domain envelope or valid authorization envelope with its expected status; malformed responses remain recoverable.
 
-- [ ] **Step 5: Verify keyboard and localization behavior**
+- [x] **Step 5: Verify keyboard and localization behavior**
 
 Test labels, error summaries, focus after opening/closing, dirty navigation guard, RU/EN copy and narrow-layout DOM order. Do not make an automated DOM assertion stand in for a browser screenshot.
 
-- [ ] **Step 6: Run the SaaS workspace gates**
+- [x] **Step 6: Run the SaaS workspace gates**
 
 Run: `corepack pnpm@11.22.0 --filter @markiro/saas-admin test && corepack pnpm@11.22.0 --filter @markiro/saas-admin typecheck && corepack pnpm@11.22.0 --filter @markiro/saas-admin lint && corepack pnpm@11.22.0 --filter @markiro/saas-admin build`
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit the service workspace**
+- [x] **Step 7: Commit the service workspace**
 
 ```bash
 git add apps/saas-admin
