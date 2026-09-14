@@ -20,6 +20,7 @@ import { organization } from "./auth.js";
 import { stationDevices } from "./platform.js";
 import { kiosks } from "./pickup.js";
 import { entitlementLifecyclePolicies } from "./entitlements.js";
+import { offlineGrantDeviceActivations } from "./device-grant-activations.js";
 
 const ownerColumns = () => ({
   tenantId: text("tenant_id")
@@ -174,11 +175,17 @@ export const deviceGrantConfigurations = pgTable(
     policyId: uuid("policy_id").references(() => entitlementLifecyclePolicies.id),
     policyRevision: text("policy_revision"),
     decisionReference: text("decision_reference"),
+    activationId: uuid("activation_id"),
     issuedAt: timestamp("issued_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     ...ownerConstraints("device_grant_configurations", t),
     unique("device_grant_configurations_tenant_id_uq").on(t.tenantId, t.id),
+    foreignKey({
+      name: "device_grant_configurations_activation_fk",
+      columns: [t.tenantId, t.activationId],
+      foreignColumns: [offlineGrantDeviceActivations.tenantId, offlineGrantDeviceActivations.id],
+    }),
     index("device_grant_config_station_latest_idx")
       .on(t.tenantId, t.ownerKind, t.stationDeviceId, t.sequence)
       .where(sql`${t.stationDeviceId} is not null`),

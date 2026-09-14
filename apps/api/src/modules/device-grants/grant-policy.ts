@@ -1,6 +1,6 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { schema } from "@markiro/db";
-import type { GrantEventType } from "@markiro/domain";
+import type { GrantEventType, GrantOwner } from "@markiro/domain";
 import { offlineGrantPolicySchema, type OfflineGrantPolicy } from "@markiro/platform-contracts";
 import { z } from "zod";
 import type { SubscriptionTransaction } from "../../subscriptions/entitlements.types";
@@ -76,6 +76,75 @@ export async function loadApprovedGrantPolicy(
     )
     .for("share", { of: schema.entitlementLifecyclePolicies });
   return parseApprovedGrantPolicy(row?.policy);
+}
+
+export interface EffectiveGrantPolicy {
+  policy: ApprovedGrantPolicy | null;
+  activationId: string | null;
+  basePolicyId: string | null;
+}
+
+export async function loadEffectiveGrantPolicy(
+  tx: SubscriptionTransaction,
+  owner: GrantOwner,
+  subscriptionId: string,
+): Promise<EffectiveGrantPolicy> {
+  const base = await loadApprovedGrantPolicy(tx, owner.tenantId, subscriptionId);
+  if (!base) return { policy: null, activationId: null, basePolicyId: null };
+  const activation = schema.offlineGrantDeviceActivations;
+  const [row] = await tx
+    .select({ activation, rollout: schema.entitlementLifecyclePolicies })
+    .from(activation)
+    .innerJoin(
+      schema.offlineGrantActivationPreparations,
+      eq(schema.offlineGrantActivationPreparations.id, activation.preparationId),
+    )
+    .innerJoin(
+      schema.entitlementLifecyclePolicies,
+      eq(schema.entitlementLifecyclePolicies.id, activation.rolloutPolicyId),
+    )
+    .where(
+      and(
+        eq(activation.tenantId, owner.tenantId),
+        eq(activation.subscriptionId, subscriptionId),
+        eq(activation.ownerKind, owner.kind),
+        eq(activation.credentialEpoch, owner.credentialEpoch),
+        eq(activation.basePolicyId, base.id),
+        eq(schema.offlineGrantActivationPreparations.state, "confirmed"),
+        eq(schema.offlineGrantActivationPreparations.basePolicyId, activation.basePolicyId),
+        eq(schema.offlineGrantActivationPreparations.rolloutPolicyId, activation.rolloutPolicyId),
+        owner.kind === "kiosk"
+          ? eq(activation.kioskId, owner.deviceId)
+          : eq(activation.stationDeviceId, owner.deviceId),
+        isNull(activation.revokedAt),
+      ),
+    )
+    .limit(1);
+  if (!row) return { policy: base, activationId: null, basePolicyId: base.id };
+  const rollout = parseApprovedGrantPolicy(row.rollout);
+  const effective = effectiveGrantPolicyOverlay(base, rollout, owner.deviceId);
+  return {
+    policy: effective,
+    activationId: effective === rollout ? row.activation.id : null,
+    basePolicyId: base.id,
+  };
+}
+
+export function effectiveGrantPolicyOverlay(
+  base: ApprovedGrantPolicy,
+  rollout: ApprovedGrantPolicy | null,
+  deviceId: string,
+): ApprovedGrantPolicy {
+  if (
+    !rollout ||
+    rollout.rollout?.mode !== "strict" ||
+    !rollout.rollout.deviceIds.includes(deviceId) ||
+    rollout.maxOfflineMs !== base.maxOfflineMs ||
+    rollout.maxCompletionMs !== base.maxCompletionMs ||
+    entitlementDigest(rollout.taskBounds) !== entitlementDigest(base.taskBounds)
+  )
+    return base;
+  return rollout;
 }
 export function computeGrantDeadlines(input: {
   now: number;

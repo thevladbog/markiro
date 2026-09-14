@@ -121,19 +121,9 @@ export class PlatformGrantReadinessService {
         const found = new Set(facts.map((fact) => fact.deviceId));
         if (input.deviceIds.some((deviceId) => !found.has(deviceId)))
           throw invalidPreview("GRANT_READINESS_DEVICE_NOT_FOUND");
-        const rows = facts.map((fact) => toRow(fact, targetPolicy, asOf));
+        const rows = facts.map((fact) => toGrantReadinessRow(fact, targetPolicy, asOf));
         const aggregates = aggregate(rows);
-        const canonicalFacts = rows.map((row) => ({
-          tenantId: row.tenantId,
-          deviceId: row.deviceId,
-          deviceKind: row.deviceKind,
-          credentialEpoch: row.credentialEpoch,
-          assignmentId: row.assignmentId,
-          configurationId: row.configuration?.id ?? null,
-          clientReportId: row.clientReport?.id ?? null,
-          keysetRevision: row.signing.keysetRevision,
-          eligibility: row.eligibility,
-        }));
+        const canonicalFacts = canonicalGrantReadinessFacts(rows);
         const previewDigest = entitlementDigest({
           protocol: "offline-grants-readiness-preview-v1",
           policyId: targetPolicy.id,
@@ -203,7 +193,7 @@ async function loadTargetPolicy(
   return policy ? { id: policy.id, revision: policy.revision, approved: true } : null;
 }
 
-function toRow(
+export function toGrantReadinessRow(
   facts: GrantReadinessFacts,
   targetPolicy: GrantReadinessTargetPolicy,
   asOf: Date,
@@ -261,6 +251,20 @@ function toRow(
     },
     eligibility,
   };
+}
+
+export function canonicalGrantReadinessFacts(rows: readonly PlatformGrantReadinessRow[]) {
+  return rows.map((row) => ({
+    tenantId: row.tenantId,
+    deviceId: row.deviceId,
+    deviceKind: row.deviceKind,
+    credentialEpoch: row.credentialEpoch,
+    assignmentId: row.assignmentId,
+    configurationId: row.configuration?.id ?? null,
+    clientReportId: row.clientReport?.id ?? null,
+    keysetRevision: row.signing.keysetRevision,
+    eligibility: row.eligibility,
+  }));
 }
 
 function aggregate(rows: readonly PlatformGrantReadinessRow[]) {
@@ -333,7 +337,7 @@ async function readFilteredRows(
     rows.push(
       ...facts
         .filter((fact) => !query.policyId || fact.currentPolicy?.id === query.policyId)
-        .map((fact) => toRow(fact, fact.currentPolicy ?? missingTargetPolicy(), asOf))
+        .map((fact) => toGrantReadinessRow(fact, fact.currentPolicy ?? missingTargetPolicy(), asOf))
         .filter((row) => !query.readiness || row.eligibility.status === query.readiness),
     );
     if (facts.length < batchLimit) break;
@@ -360,7 +364,7 @@ async function readAggregates(
     const batch = aggregate(
       facts
         .filter((fact) => !query.policyId || fact.currentPolicy?.id === query.policyId)
-        .map((fact) => toRow(fact, fact.currentPolicy ?? missingTargetPolicy(), asOf))
+        .map((fact) => toGrantReadinessRow(fact, fact.currentPolicy ?? missingTargetPolicy(), asOf))
         .filter((row) => !query.readiness || row.eligibility.status === query.readiness),
     );
     result.total += batch.total;

@@ -31,6 +31,7 @@ export default defineConfig({
     "./src/schema/inventory.ts",
     "./src/schema/public-api.ts",
     "./src/schema/device-grants.ts",
+    "./src/schema/device-grant-activations.ts",
     "./src/schema/chz.ts",
     "./src/schema/product-regulatory.ts",
     "./src/schema/national-catalog-import.ts",

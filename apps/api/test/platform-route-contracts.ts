@@ -29,6 +29,7 @@ import {
   platformDeviceRetentionContracts,
   platformOfflineGrantPolicyContracts,
   platformGrantReadinessContracts,
+  platformGrantActivationContracts,
 } from "@markiro/platform-contracts";
 import type { ZodType } from "zod";
 
@@ -61,6 +62,40 @@ const route = (
 ): PlatformRouteContract => ({ method, path, status, response, ...options });
 
 export const CURRENT_SAAS_ROUTES = [
+  route(
+    "get",
+    "/platform/offline-grants/activations",
+    "200",
+    platformGrantActivationContracts.list.response,
+    { query: platformGrantActivationContracts.list.query },
+  ),
+  route(
+    "post",
+    "/platform/offline-grants/activations",
+    "200",
+    platformGrantActivationContracts.prepare.response,
+    { body: platformGrantActivationContracts.prepare.body },
+  ),
+  route(
+    "get",
+    "/platform/offline-grants/activations/{id}",
+    "200",
+    platformGrantActivationContracts.detail.response,
+  ),
+  route(
+    "post",
+    "/platform/offline-grants/activations/{id}/confirm",
+    "200",
+    platformGrantActivationContracts.confirm.response,
+    { body: platformGrantActivationContracts.confirm.body },
+  ),
+  route(
+    "post",
+    "/platform/offline-grants/activations/{id}/cancel",
+    "200",
+    platformGrantActivationContracts.cancel.response,
+    { body: platformGrantActivationContracts.cancel.body },
+  ),
   route(
     "get",
     "/platform/offline-grants/readiness",

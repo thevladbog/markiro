@@ -30,3 +30,4 @@ export * from "./schema/validation-reprocessing.js";
 
 export * from "./schema/public-api.js";
 export * from "./schema/device-grants.js";
+export * from "./schema/device-grant-activations.js";

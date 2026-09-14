@@ -27,7 +27,11 @@ import {
   entitlementDigest,
 } from "../../subscriptions/entitlement-snapshot-reader";
 import { lockCurrentGrantOwner, type GrantCredentialIdentity } from "./credential-epoch";
-import { computeGrantDeadlines, loadApprovedGrantPolicy } from "./grant-policy";
+import {
+  computeGrantDeadlines,
+  loadApprovedGrantPolicy,
+  loadEffectiveGrantPolicy,
+} from "./grant-policy";
 import { freezeGrantTask, type FrozenGrantTask } from "./frozen-task";
 import { allowedNativeCapabilities, grantPoolDenial, lockGrantFacts } from "./grant-admission";
 import {
@@ -78,12 +82,18 @@ export class GrantIssuerService {
         tx,
         new Date(this.clock()),
       );
-      const policy = current.subscription
-        ? await loadApprovedGrantPolicy(tx, owner.tenantId, current.subscription.id)
-        : null;
+      const effective = current.subscription
+        ? await loadEffectiveGrantPolicy(tx, owner, current.subscription.id)
+        : { policy: null, activationId: null, basePolicyId: null };
       if (!(await lockCurrentGrantOwner(tx, identity, this.clock())))
         throw new UnauthorizedException();
-      const configuration = await resolveGrantRollout(tx, owner, policy, this.signing !== null);
+      const configuration = await resolveGrantRollout(
+        tx,
+        owner,
+        effective.policy,
+        this.signing !== null,
+        effective.activationId,
+      );
       if (!(await lockCurrentGrantOwner(tx, identity, this.clock())))
         throw new UnauthorizedException();
       return {
@@ -172,11 +182,13 @@ export class GrantIssuerService {
       at = new Date(now);
     const facts = await this.entitlements.resolveSnapshotInTransaction(owner.tenantId, tx, at);
     const subscription = facts.snapshot.current.subscription;
-    const policy = subscription
-      ? await loadApprovedGrantPolicy(tx, owner.tenantId, subscription.id)
-      : null;
+    const effective = subscription
+      ? await loadEffectiveGrantPolicy(tx, owner, subscription.id)
+      : { policy: null, activationId: null, basePolicyId: null };
+    const policy = effective.policy;
     const auditContext = {
       revision: `${facts.snapshot.revision}:${facts.snapshot.usageRevision}`,
+      activationId: effective.activationId,
       policyRevision: policy?.revision ?? null,
     };
     const denial = (reason: DenialReason) => ({ status: "denied" as const, reason, auditContext });
@@ -202,6 +214,7 @@ export class GrantIssuerService {
       snapshot: facts.snapshot,
       auditContext,
       revision: `${facts.snapshot.revision}:${facts.snapshot.usageRevision}`,
+      activationId: effective.activationId,
     };
   }
   private async issue(
@@ -287,7 +300,13 @@ export class GrantIssuerService {
             saved.policyRevision,
             true,
           );
-          const rollout = await resolveGrantRollout(tx, owner, final.policy, this.signing !== null);
+          const rollout = await resolveGrantRollout(
+            tx,
+            owner,
+            final.policy,
+            this.signing !== null,
+            final.activationId,
+          );
           if (!(await lockCurrentGrantOwner(tx, identity, this.clock())))
             throw new UnauthorizedException();
           if (this.clock() >= final.deadlines.startNotAfter)
@@ -385,7 +404,13 @@ export class GrantIssuerService {
           payload.entitlementRevision,
           payload.policyRevision,
         );
-        const rollout = await resolveGrantRollout(tx, owner, final.policy, this.signing !== null);
+        const rollout = await resolveGrantRollout(
+          tx,
+          owner,
+          final.policy,
+          this.signing !== null,
+          final.activationId,
+        );
         if (!(await lockCurrentGrantOwner(tx, identity, this.clock())))
           throw new UnauthorizedException();
         if (this.clock() >= final.deadlines.startNotAfter)

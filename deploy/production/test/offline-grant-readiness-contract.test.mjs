@@ -7,11 +7,19 @@ const read = (path) => readFile(new URL(path, root), "utf8");
 
 test("production API image includes readiness persistence before readers", async () => {
   await access(new URL("packages/db/migrations/0151_offline_grant_readiness.sql", root));
+  const activationMigration = await read(
+    "packages/db/migrations/0152_offline_grant_activation.sql",
+  );
+  await access(new URL("packages/db/migrations/0153_validate_offline_grant_activation.sql", root));
   const dockerfile = await read("deploy/production/api.Dockerfile");
 
   assert.match(
     dockerfile,
     /COPY --from=build --chown=node:node \/workspace\/packages\/db\/migrations \/app\/node_modules\/@markiro\/db\/migrations/,
+  );
+  assert.doesNotMatch(
+    activationMigration,
+    /INSERT\s+INTO\s+"?(?:offline_grant_activation|entitlement_lifecycle_policies)/i,
   );
 });
 
@@ -49,6 +57,20 @@ test("production sources expose read and preview without a readiness activation 
     source,
     /@(?:Post|Patch|Put)\("readiness\/(?:confirm|activate|cohort|policy)/,
   );
+});
+
+test("production sources expose activation only through the guarded platform module", async () => {
+  const [controller, platformModule, alwaysLoadedModule] = await Promise.all([
+    read("apps/api/src/modules/device-grants/platform-grant-activation.controller.ts"),
+    read("apps/api/src/modules/device-grants/platform-grant-readiness.module.ts"),
+    read("apps/api/src/modules/device-grants/device-grants.module.ts"),
+  ]);
+
+  assert.match(controller, /@Controller\("platform\/offline-grants\/activations"\)/);
+  assert.match(controller, /"offlineGrants\.activate"/);
+  assert.match(controller, /@Post\(":id\/confirm"\)/);
+  assert.match(platformModule, /PlatformGrantActivationController/);
+  assert.doesNotMatch(alwaysLoadedModule, /PlatformGrantActivationController/);
 });
 
 test("API startup validates offline grant signing as one configuration", async () => {

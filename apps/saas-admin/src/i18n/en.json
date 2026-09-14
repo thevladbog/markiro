@@ -1314,6 +1314,34 @@
         "readiness": "Pilot readiness"
       }
     },
+    "offlineActivation": {
+      "title": "Strict-mode pilot activation",
+      "compatibility": "Tariffs and current work stay unchanged. Only the exact prepared devices switch to strict mode after their next authenticated configuration refresh.",
+      "decisionReference": "Decision reference",
+      "prepare": "Prepare pilot",
+      "confirm": "Confirm strict",
+      "cancel": "Cancel preparation",
+      "cancelReason": "Cancellation reason",
+      "loadError": "Could not load pilot preparations.",
+      "preparedAt": "Prepared {{preparedAt}}; expires {{expiresAt}}.",
+      "secondOperator": "Confirmation must be completed by another platform administrator.",
+      "notice": {
+        "uncertain": "The outcome could not be confirmed. Retry sends the unchanged request.",
+        "stale": "Server facts changed. Keep this record for review and create a new readiness preview if needed."
+      },
+      "columns": {
+        "cohort": "Exact cohort and policy",
+        "state": "State",
+        "actors": "Operators"
+      },
+      "state": {
+        "prepared": "Prepared",
+        "confirmed": "Confirmed",
+        "cancelled": "Cancelled",
+        "expired": "Expired",
+        "needs_review": "Needs review"
+      }
+    },
     "offlineReadiness": {
       "previewOnly": "Readiness is calculated from current server facts and the latest client reports. Preview does not activate strict mode or issue grants.",
       "tenant": "Tenant ID",
