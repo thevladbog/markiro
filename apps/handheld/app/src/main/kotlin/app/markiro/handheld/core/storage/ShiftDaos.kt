@@ -171,6 +171,10 @@ interface MetaDao {
     @Query("SELECT value FROM meta WHERE `key` = :key")
     suspend fun get(key: String): String?
 
+    /** Same row as [get], watched: a stamp the UI shows must move when the mirror refreshes. */
+    @Query("SELECT value FROM meta WHERE `key` = :key")
+    fun observe(key: String): Flow<String?>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun put(row: MetaEntity)
 

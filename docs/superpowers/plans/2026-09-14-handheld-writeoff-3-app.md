@@ -194,7 +194,7 @@ at)`, `touch(documentId, at)`, `pruneSettledBeyond(keep)`;
   fixture; the differing names are deliberate, not drift.
 - Consumes: nothing new.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `DeviceRecoveryTest.summaryUsesEveryActualQueueTable` pins the exact key set of
 `summary()`. Add `"writeoffs"`:
@@ -218,7 +218,7 @@ sent one is not:
 with a small local `writeoff(id, seq, state)` builder returning a
 `WriteoffOutboxEntity` with `requestJson = "{}"`.
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 ```bash
 cd apps/handheld && ./gradlew --no-daemon testDebugUnitTest --tests '*DeviceRecoveryTest*' -q
@@ -226,7 +226,7 @@ cd apps/handheld && ./gradlew --no-daemon testDebugUnitTest --tests '*DeviceReco
 
 Expected: compile failure — `writeoffOutboxDao` does not exist.
 
-- [ ] **Step 3: Entities, DAOs, database**
+- [x] **Step 3: Entities, DAOs, database**
 
 Create the entities as in _The data model_. In `WriteoffDaos.kt`:
 
@@ -270,7 +270,7 @@ plus the single read each screen needs. `WriteoffBoxDao` also needs `upsert`,
 In `HandheldDatabase.kt` add the five entity classes to `entities`, five
 abstract getters, and bump `HANDHELD_DATABASE_VERSION` to `16`.
 
-- [ ] **Step 4: The migration**
+- [x] **Step 4: The migration**
 
 In `Migrations.kt`, after `MIGRATION_14_15`:
 
@@ -291,7 +291,7 @@ Room validates the migrated schema against the entities at open, so a column
 mismatch fails loudly in the Robolectric tests rather than in the field. Register
 it in `StorageModule.addMigrations(...)` after `MIGRATION_14_15`.
 
-- [ ] **Step 5: MetaStore keys and the recovery count**
+- [x] **Step 5: MetaStore keys and the recovery count**
 
 Add to `MetaStore.Companion`:
 
@@ -307,7 +307,7 @@ fun writeoffPin(documentId: String) = "writeoff_pending:$documentId"
 In `DeviceRecovery.summary()` add
 `"writeoffs" to count("writeoff_outbox", "state = 'pending'")`.
 
-- [ ] **Step 6: Run the tests**
+- [x] **Step 6: Run the tests**
 
 ```bash
 ./gradlew --no-daemon testDebugUnitTest --tests '*DeviceRecoveryTest*' -q
@@ -315,7 +315,7 @@ In `DeviceRecovery.summary()` add
 
 Expected: PASS, both the key-set test and the new count test.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/handheld/app/src/main/kotlin/app/markiro/handheld/core/storage apps/handheld/app/src/test/kotlin/app/markiro/handheld/core/storage/DeviceRecoveryTest.kt
@@ -387,7 +387,7 @@ suspend fun boxRegistry(@Query("since") since: String?, @Query("until") until: S
 through `SyncTransport` so the bytes are exactly the pinned `requestJson`.
 Retrofit would re-serialise and could reorder or reformat.
 
-- [ ] **Step 1: Add `id` to the server bootstrap products**
+- [x] **Step 1: Add `id` to the server bootstrap products**
 
 In `apps/api/src/modules/station-writeoffs/dto.ts`, `products` becomes
 `{ id: string; gtin14: string; name: string }[]`; in the service select
@@ -401,14 +401,14 @@ pnpm --filter @markiro/api exec vitest run test/station-writeoffs.e2e.test.ts te
 
 Expected: PASS.
 
-- [ ] **Step 2: Write a DTO parse test**
+- [x] **Step 2: Write a DTO parse test**
 
 `test/.../core/network/WriteoffDtosTest.kt`: decode a real bootstrap body and a
 registry page with one `upsert` and one `remove` through the app's `@Strict`
 `Json`, asserting `remove` leaves `boxId` null. This is the parity check that a
 server field rename breaks the app in a test rather than in the field.
 
-- [ ] **Step 3: Add the routes and fix the fakes**
+- [x] **Step 3: Add the routes and fix the fakes**
 
 Adding two methods to `StationApi` fails compilation of every
 `object : StationApi` in the tests. Enumerate them:
@@ -426,7 +426,7 @@ override suspend fun boxRegistry(since: String?, until: String?, cursor: String?
 
 This is mechanical and the compiler lists every site.
 
-- [ ] **Step 4: Run and commit**
+- [x] **Step 4: Run and commit**
 
 ```bash
 ./gradlew --no-daemon testDebugUnitTest -q
@@ -460,7 +460,7 @@ git commit -m "feat(handheld): write-off DTOs and routes; bootstrap products car
   other engine.
 - Consumes: Task 1 tables and keys, Task 2 routes.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 With `MockWebServer`, following `InventorySyncEngineTest`'s harness:
 
@@ -496,18 +496,18 @@ With `MockWebServer`, following `InventorySyncEngineTest`'s harness:
 }
 ```
 
-- [ ] **Step 2: Run, expect compile failure, implement**
+- [x] **Step 2: Run, expect compile failure, implement**
 
 The registry walk must pass `until` unchanged on cursor pages — the server
 rejects a changed one — and must not persist `WRITEOFF_REGISTRY_UNTIL` until the
 final page, or a crash mid-walk would skip the tail on the next run.
 
-- [ ] **Step 3: Hilt**
+- [x] **Step 3: Hilt**
 
 `core/writeoff/WriteoffModule.kt` provides `WriteoffMirror` as a singleton from
 `StationApi`, `HandheldDatabase`, `MetaStore`.
 
-- [ ] **Step 4: Run and commit**
+- [x] **Step 4: Run and commit**
 
 ```bash
 ./gradlew --no-daemon testDebugUnitTest --tests '*WriteoffMirrorTest*' -q
