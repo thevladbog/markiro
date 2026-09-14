@@ -57,7 +57,7 @@ class PairingScreenTest {
         var reconnect = false
         compose.setContent {
             MarkiroTheme { PairingScreen(PairingUi.Recovery("saved-device", mapOf("scans" to 12L, "inventory" to 4L,
-                "labels" to 3L, "boxes" to 2L, "pallets" to 5L, "exceptions" to 1L, "closes" to 1L,
+                "labels" to 3L, "boxes" to 2L, "pallets" to 5L, "exceptions" to 1L, "closes" to 1L, "writeoffs" to 3L,
                 "conflicts" to 2L, "unknownPrints" to 1L), false),
                 PairingCallbacks(onRetry = { reconnect = true })) }
         }
@@ -67,6 +67,10 @@ class PairingScreenTest {
         // server has not acknowledged is its own physically labelled fact, and
         // the operator deciding whether to reconnect is owed it.
         compose.onNodeWithText("паллеты 5", substring = true).assertExists()
+        // A queued write-off is unsent production work. Counting it in the summary
+        // map but leaving it out of this line is how an operator wipes a document
+        // the server has never seen while the screen says nothing is owed.
+        compose.onNodeWithText("списания 3", substring = true).assertExists()
         compose.onNodeWithText("Подключить прежнее устройство").performScrollTo().performClick()
         assertEquals(true, reconnect)
     }
