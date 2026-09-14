@@ -215,7 +215,7 @@ describe("rejections page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Показать коды" }));
 
     expect(screen.getByText(/0104600682000020215X/)).toBeDefined();
-    expect(screen.getByText(/товар недоступен на киоске/)).toBeDefined();
+    expect(screen.getByText(/товар недоступен на этом устройстве/)).toBeDefined();
 
     // The expanded panel's title carries the row's own identity (kiosk +
     // employee), so it stays tied to its scan even with several rows expanded.
@@ -320,6 +320,15 @@ describe("rejections page", () => {
     renderWith(<RejectionsPage />);
 
     await waitFor(() => expect(screen.getByText("Иван Иванов")).toBeDefined());
+
+    // `/devices` caps pageSize at 50 (listDevicesQuerySchema); a bigger page is
+    // a 400 from the validation pipe, which would leave this picker empty.
+    const deviceCall = fetchMock.mock.calls.find(([url]) => String(url).includes("/devices"));
+    const requestedPageSize = Number(
+      new URLSearchParams(String(deviceCall?.[0]).split("?")[1]).get("pageSize"),
+    );
+    expect(requestedPageSize).toBeLessThanOrEqual(50);
+
     await user.click(screen.getByRole("combobox", { name: "Устройство" }));
     expect(await screen.findByRole("option", { name: "ТСД-1 · ТСД" })).toBeDefined();
     await user.click(await screen.findByRole("option", { name: "Киоск-2 · Киоск" }));

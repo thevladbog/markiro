@@ -20,7 +20,7 @@ import { CABINET_CAPABILITY } from "@markiro/domain";
 import { useCan } from "../../access/context.js";
 import { formatCreatedAt } from "../../lib/datetime.js";
 import { toast } from "../../lib/toast.js";
-import { useDevices } from "../devices/api.js";
+import { useAllDevices } from "../devices/api.js";
 import {
   useAcknowledgeRejection,
   usePickupRejections,
@@ -47,7 +47,7 @@ export function RejectionsPage() {
 
   // Kiosks AND handhelds both file rejections, so the filter must offer both;
   // listing only kiosks would make a handheld's rejections unreachable.
-  const { data: devices } = useDevices({ page: 1, pageSize: 200 });
+  const { data: devices } = useAllDevices();
 
   const { data, isPending, isError } = usePickupRejections({
     state: stateFilter,
@@ -59,7 +59,7 @@ export function RejectionsPage() {
 
   const deviceOptions: SelectOption[] = [
     { value: "all", label: t("pages.pickup.rejections.filters.deviceAll") },
-    ...(devices?.items ?? [])
+    ...(devices ?? [])
       .filter((device) => device.type === "kiosk" || device.type === "handheld")
       .map((device) => ({
         value: device.id,

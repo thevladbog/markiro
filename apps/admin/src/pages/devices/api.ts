@@ -91,6 +91,29 @@ export function useDevices(params: DevicesParams): UseQueryResult<DevicesRespons
     queryFn: () => apiFetch<DevicesResponse>(listPath(params)),
   });
 }
+/**
+ * Every device, for pickers that must offer all of them rather than a page.
+ * `/devices` caps `pageSize` at 50 (`listDevicesQuerySchema`), so asking for a
+ * bigger page is a 400 from the validation pipe, not a bigger page — this walks
+ * the pages instead.
+ */
+export function useAllDevices(): UseQueryResult<DeviceDto[]> {
+  return useQuery({
+    queryKey: [...DEVICES_QUERY_KEY, "all"] as const,
+    queryFn: async () => {
+      const pageSize = 50;
+      const first = await apiFetch<DevicesResponse>(listPath({ page: 1, pageSize }));
+      const items = [...first.items];
+      const pages = Math.ceil(first.total / pageSize);
+      for (let page = 2; page <= pages; page += 1) {
+        const next = await apiFetch<DevicesResponse>(listPath({ page, pageSize }));
+        items.push(...next.items);
+      }
+      return items;
+    },
+  });
+}
+
 export function useDeviceLicensing(enabled: boolean): UseQueryResult<WorkingDevicePool> {
   return useQuery({
     queryKey: DEVICE_LICENSING_QUERY_KEY,

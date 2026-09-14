@@ -2890,7 +2890,7 @@
           "not_km": "not a marking code",
           "incomplete": "code read incompletely",
           "unknown_product": "product not in catalog",
-          "not_allowed": "product not available at this kiosk",
+          "not_allowed": "product not available for this device",
           "duplicate": "duplicate — code already in another order",
           "over_limit": "daily limit exceeded",
           "unknown_badge": "badge not recognised",
