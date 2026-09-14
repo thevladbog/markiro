@@ -7,7 +7,11 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { loadEnv } from "../src/env";
 import { ObjectStorageService } from "../src/modules/storage/object-storage.service";
-import { tenantOfferDetailSchema } from "../src/modules/tenant-billing/dto";
+import {
+  tenantOfferDetailSchema,
+  tenantServicePeriodDetailSchema,
+  tenantServicePeriodListSchema,
+} from "../src/modules/tenant-billing/dto";
 import { TenantBillingReadService } from "../src/modules/tenant-billing/tenant-billing-read.service";
 import { EntitlementsService } from "../src/subscriptions/entitlements.service";
 import {
@@ -90,6 +94,8 @@ describe.skipIf(!ready)("tenant billing read service isolated Postgres integrati
   let actorId: string;
   let cabinetUserId: string;
   let service: TenantBillingReadService;
+  let tenantServicePeriodAId: string;
+  let tenantServicePeriodBId: string;
 
   const overdueInvoiceIds: string[] = [];
   const expectedDocuments: ExpectedDocument[] = [];
@@ -193,6 +199,190 @@ describe.skipIf(!ready)("tenant billing read service isolated Postgres integrati
     tenantA = await createOrganization(db);
     tenantB = await createOrganization(db);
     attentionTenant = await createOrganization(db);
+
+    const serviceCatalogItemId = randomUUID();
+    const serviceCatalogVersionId = randomUUID();
+    await db.insert(schema.catalogItems).values({
+      id: serviceCatalogItemId,
+      code: `tenant-read-service-${serviceCatalogItemId}`,
+      nameRu: "Абонентское сопровождение",
+      nameEn: "Monthly support",
+      kind: "service",
+    });
+    await db.insert(schema.catalogItemVersions).values({
+      id: serviceCatalogVersionId,
+      catalogItemId: serviceCatalogItemId,
+      kind: "service",
+      version: 1,
+      status: "published",
+      documentNameRu: "Абонентское сопровождение",
+      documentNameEn: "Monthly support",
+      subject: "service",
+      sellerPolicyRevision: 1,
+      nameRu: "Абонентское сопровождение",
+      nameEn: "Monthly support",
+      unit: "month",
+      billingMode: "recurring",
+      billingPeriod: "month",
+      serviceTerms: {
+        cadence: "month",
+        includedMinutes: 180,
+        carryover: "none",
+        excessPolicy: "external_approval",
+        scopeRu: "Консультации",
+        scopeEn: "Consulting",
+        operatingHoursRu: null,
+        operatingHoursEn: null,
+        schedulingTermsRu: null,
+        schedulingTermsEn: null,
+      },
+      unitPrice: "30000.00",
+      vatIncluded: false,
+      publishedAt: fixedNow,
+      publishedByPlatformUserId: actorId,
+    });
+
+    const seedServicePeriod = async (tenantId: string, suffix: string) => {
+      const invoiceId = randomUUID();
+      const invoiceLineId = randomUUID();
+      const paymentId = randomUUID();
+      const orderedServiceId = randomUUID();
+      const periodId = randomUUID();
+      await db.insert(schema.invoices).values({
+        id: invoiceId,
+        tenantId,
+        number: `READ-SERVICE-${suffix}-${invoiceId}`,
+        status: "paid",
+        issueDate: daysFromNow(-10),
+        paidAt: daysFromNow(-10),
+        sellerSnapshot: { name: "Markiro" },
+        buyerSnapshot: { name: suffix },
+        subtotal: "30000.00",
+        vatTotal: "0.00",
+        total: "30000.00",
+        createdByPlatformUserId: actorId,
+        issuedByPlatformUserId: actorId,
+        issuedAt: daysFromNow(-10),
+      });
+      await db.insert(schema.invoiceLines).values({
+        id: invoiceLineId,
+        tenantId,
+        invoiceId,
+        position: 1,
+        kind: "service",
+        catalogVersionId: serviceCatalogVersionId,
+        catalogKind: "service",
+        nameRu: "Абонентское сопровождение",
+        nameEn: "Monthly support",
+        quantity: 1,
+        unit: "month",
+        agreedUnitPrice: "30000.00",
+        vatIncluded: false,
+        lineSubtotal: "30000.00",
+        lineVat: "0.00",
+        lineTotal: "30000.00",
+        commercialTerms: {
+          version: 2,
+          subject: "service",
+          documentNameRu: "Абонентское сопровождение",
+          documentNameEn: "Monthly support",
+          sellerPolicyRevision: 1,
+          billingPeriod: "month",
+          billingTimezone: "Europe/Moscow",
+          activationRule: "after_current",
+          serviceTerms: {
+            cadence: "month",
+            includedMinutes: 180,
+            carryover: "none",
+            excessPolicy: "external_approval",
+            scopeRu: "Консультации",
+            scopeEn: "Consulting",
+            operatingHoursRu: null,
+            operatingHoursEn: null,
+            schedulingTermsRu: null,
+            schedulingTermsEn: null,
+          },
+        },
+      });
+      await db.insert(schema.billingPayments).values({
+        id: paymentId,
+        tenantId,
+        invoiceId,
+        source: "manual",
+        paidAt: daysFromNow(-10),
+        amount: "30000.00",
+        bankReference: `READ-SERVICE-${paymentId}`,
+        platformUserId: actorId,
+        idempotencyKey: `tenant-read-service:${paymentId}`,
+      });
+      await db.insert(schema.orderedServices).values({
+        id: orderedServiceId,
+        tenantId,
+        invoiceId,
+        invoiceLineId,
+        billingPaymentId: paymentId,
+        catalogVersionId: serviceCatalogVersionId,
+        catalogKind: "service",
+        nameRu: "Абонентское сопровождение",
+        nameEn: "Monthly support",
+        quantity: 1,
+        unit: "month",
+        status: "in_progress",
+        orderedAt: daysFromNow(-10),
+      });
+      await db.insert(schema.servicePeriods).values({
+        id: periodId,
+        tenantId,
+        orderedServiceId,
+        catalogItemId: serviceCatalogItemId,
+        catalogVersionId: serviceCatalogVersionId,
+        invoiceId,
+        invoiceLineId,
+        paymentId,
+        startsAt: daysFromNow(-5),
+        endsAt: daysFromNow(25),
+        billingTimezone: "Europe/Moscow",
+        renewalAnchor: { day: 22 },
+        commercialSnapshot: { version: 2 },
+        allowanceSnapshot: { includedMinutes: 180 },
+        includedMinutes: 180,
+        revision: suffix === "A" ? 3 : 1,
+      });
+      return periodId;
+    };
+    tenantServicePeriodAId = await seedServicePeriod(tenantA, "A");
+    tenantServicePeriodBId = await seedServicePeriod(tenantB, "B");
+    await db.insert(schema.serviceUsageEntries).values({
+      tenantId: tenantA,
+      servicePeriodId: tenantServicePeriodAId,
+      kind: "usage",
+      classification: "customer_service",
+      workReference: "SUP-42",
+      description: "Настройка интеграции",
+      internalNote: "Внутренняя диагностика",
+      actualMinutesDelta: 45,
+      allowanceMinutesDelta: 45,
+      performedAt: daysFromNow(-2),
+      actorPlatformUserId: actorId,
+      requestId: randomUUID(),
+      requestHash: "a".repeat(64),
+      response: { revision: 2 },
+      postedAt: daysFromNow(-2),
+    });
+    await db.insert(schema.serviceExcessApprovals).values({
+      tenantId: tenantA,
+      servicePeriodId: tenantServicePeriodAId,
+      kind: "approval",
+      minuteDelta: 30,
+      externalReference: "APPROVAL-42",
+      approvedAt: daysFromNow(-1),
+      reason: "Approved outside Markiro",
+      actorPlatformUserId: actorId,
+      requestId: randomUUID(),
+      requestHash: "b".repeat(64),
+      response: { revision: 3 },
+      postedAt: daysFromNow(-1),
+    });
 
     const overdueInvoices = Array.from({ length: 105 }, (_, index) => {
       const id = randomUUID();
@@ -1270,5 +1460,44 @@ describe.skipIf(!ready)("tenant billing read service isolated Postgres integrati
       actionable: true,
       latestDecision: null,
     });
+  });
+
+  it("lists only the tenant service periods and exposes the customer balance", async () => {
+    const list = tenantServicePeriodListSchema.parse(
+      await service.listServicePeriods(tenantA, { limit: 50 }),
+    );
+    expect(list.items.map((period) => period.id)).toContain(tenantServicePeriodAId);
+    expect(list.items.map((period) => period.id)).not.toContain(tenantServicePeriodBId);
+    expect(list.items.find((period) => period.id === tenantServicePeriodAId)?.balance).toEqual({
+      included: 180,
+      externallyApproved: 30,
+      consumed: 45,
+      remaining: 165,
+    });
+  });
+
+  it("projects own-tenant service usage without internal or financial fields", async () => {
+    const detail = tenantServicePeriodDetailSchema.parse(
+      await service.servicePeriod(tenantA, tenantServicePeriodAId),
+    );
+    expect(detail.entries[0]).toMatchObject({
+      workReference: "SUP-42",
+      actualMinutesDelta: 45,
+      allowanceMinutesDelta: 45,
+      classification: "customer_service",
+    });
+    expect(detail.entries[0]).not.toHaveProperty("internalNote");
+    expect(detail.entries[0]).not.toHaveProperty("actorPlatformUserId");
+    expect(detail.entries[0]).not.toHaveProperty("requestId");
+    expect(detail).not.toHaveProperty("approvals");
+    expect(detail).not.toHaveProperty("invoiceId");
+    expect(detail).not.toHaveProperty("paymentId");
+  });
+
+  it("returns a field-free 404 for a cross-tenant service period", async () => {
+    await expect(service.servicePeriod(tenantA, tenantServicePeriodBId)).rejects.toHaveProperty(
+      "response",
+      { code: "SERVICE_PERIOD_NOT_FOUND" },
+    );
   });
 });

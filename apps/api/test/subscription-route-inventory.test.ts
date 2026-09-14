@@ -141,6 +141,8 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "GET /billing/overview (TenantBillingController.overview)",
       "GET /billing/attention (TenantBillingController.attention)",
       "GET /billing/subscription (TenantBillingController.subscription)",
+      "GET /billing/service-periods (TenantBillingController.listServicePeriods)",
+      "GET /billing/service-periods/:id (TenantBillingController.servicePeriod)",
       "GET /billing/invoices (TenantBillingController.listInvoices)",
       "GET /billing/invoices/:id (TenantBillingController.invoiceDetail)",
       "GET /billing/invoices/:id/documents/:documentId/download (TenantBillingController.downloadInvoiceDocument)",
@@ -521,6 +523,18 @@ const profile: RouteExemption = {
 };
 
 const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
+  "PlatformServicePeriodsController.postUsage": platform(
+    "cross-tenant service usage requires the dedicated platform services write capability",
+  ),
+  "PlatformServicePeriodsController.correctUsage": platform(
+    "cross-tenant service corrections require the dedicated platform services write capability",
+  ),
+  "PlatformServicePeriodsController.addApproval": platform(
+    "external allowance approval requires the dedicated platform billing write capability",
+  ),
+  "PlatformServicePeriodsController.withdrawApproval": platform(
+    "external allowance withdrawal requires the dedicated platform billing write capability",
+  ),
   "PlatformGrantRollbackController.prepare": platform(
     "offline grant rollback requires the dedicated platform activation capability",
   ),

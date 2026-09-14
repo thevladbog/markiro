@@ -102,7 +102,50 @@ export function servicePeriodState(
   return period.endsAt <= at ? "expired" : "active";
 }
 
-export async function readServicePeriodDetail(db: Executor, id: string) {
+export async function readServicePeriodDetail(db: Executor, id: string, at = new Date()) {
+  return readServicePeriodDetailFor(db, id, undefined, at);
+}
+
+export async function readTenantServicePeriodDetail(
+  db: Executor,
+  tenantId: string,
+  id: string,
+  at = new Date(),
+) {
+  const detail = await readServicePeriodDetailFor(db, id, tenantId, at);
+  return {
+    id: detail.id,
+    orderedServiceId: detail.orderedServiceId,
+    catalogItemId: detail.catalogItemId,
+    catalogVersionId: detail.catalogVersionId,
+    nameRu: detail.nameRu,
+    nameEn: detail.nameEn,
+    startsAt: detail.startsAt,
+    endsAt: detail.endsAt,
+    state: detail.state,
+    revision: detail.revision,
+    balance: detail.balance,
+    entries: detail.entries.map((entry) => ({
+      id: entry.id,
+      kind: entry.kind,
+      classification: entry.classification,
+      originalEntryId: entry.originalEntryId,
+      workReference: entry.workReference,
+      description: entry.description,
+      performedAt: entry.performedAt,
+      postedAt: entry.postedAt,
+      actualMinutesDelta: entry.actualMinutesDelta,
+      allowanceMinutesDelta: entry.allowanceMinutesDelta,
+    })),
+  };
+}
+
+async function readServicePeriodDetailFor(
+  db: Executor,
+  id: string,
+  tenantId: string | undefined,
+  at: Date,
+) {
   const [row] = await db
     .select({
       period: schema.servicePeriods,
@@ -117,7 +160,11 @@ export async function readServicePeriodDetail(db: Executor, id: string) {
         eq(schema.orderedServices.id, schema.servicePeriods.orderedServiceId),
       ),
     )
-    .where(eq(schema.servicePeriods.id, id))
+    .where(
+      tenantId
+        ? and(eq(schema.servicePeriods.id, id), eq(schema.servicePeriods.tenantId, tenantId))
+        : eq(schema.servicePeriods.id, id),
+    )
     .limit(1);
   if (!row) throw new NotFoundException({ code: "SERVICE_PERIOD_NOT_FOUND" });
   const [balance, entries, approvals] = await Promise.all([
@@ -144,7 +191,7 @@ export async function readServicePeriodDetail(db: Executor, id: string) {
       .orderBy(schema.serviceExcessApprovals.postedAt, schema.serviceExcessApprovals.id),
   ]);
   return {
-    ...summary(row.period, row.nameRu, row.nameEn, balance),
+    ...summary(row.period, row.nameRu, row.nameEn, balance, at),
     invoiceId: row.period.invoiceId,
     invoiceLineId: row.period.invoiceLineId,
     paymentId: row.period.paymentId,
@@ -179,8 +226,11 @@ export async function readServicePeriodDetail(db: Executor, id: string) {
   };
 }
 
-export async function listServicePeriods(db: Executor, query: ServicePeriodListQuery) {
-  const now = new Date();
+export async function listServicePeriods(
+  db: Executor,
+  query: ServicePeriodListQuery,
+  now = new Date(),
+) {
   const cursor = query.cursor ? decodeCursor(query.cursor) : null;
   const predicates: SQL[] = [];
   if (query.tenantId) predicates.push(eq(schema.servicePeriods.tenantId, query.tenantId));
@@ -230,7 +280,7 @@ export async function listServicePeriods(db: Executor, query: ServicePeriodListQ
   const items = page.map((row) => {
     const balance = balances.get(row.period.id);
     if (!balance) throw new Error("service period balance missing");
-    return summary(row.period, row.nameRu, row.nameEn, balance);
+    return summary(row.period, row.nameRu, row.nameEn, balance, now);
   });
   const last = page.at(-1)?.period;
   return {
@@ -239,7 +289,26 @@ export async function listServicePeriods(db: Executor, query: ServicePeriodListQ
   };
 }
 
-function summary(period: Period, nameRu: string, nameEn: string, balance: ServiceBalance) {
+export async function listTenantServicePeriods(
+  db: Executor,
+  tenantId: string,
+  query: Omit<ServicePeriodListQuery, "tenantId">,
+  at = new Date(),
+) {
+  const result = await listServicePeriods(db, { ...query, tenantId }, at);
+  return {
+    ...result,
+    items: result.items.map(({ tenantId: _tenantId, ...item }) => item),
+  };
+}
+
+function summary(
+  period: Period,
+  nameRu: string,
+  nameEn: string,
+  balance: ServiceBalance,
+  at = new Date(),
+) {
   return {
     id: period.id,
     tenantId: period.tenantId,
@@ -250,7 +319,7 @@ function summary(period: Period, nameRu: string, nameEn: string, balance: Servic
     nameEn,
     startsAt: period.startsAt.toISOString(),
     endsAt: period.endsAt.toISOString(),
-    state: servicePeriodState(period),
+    state: servicePeriodState(period, at),
     revision: period.revision,
     balance,
   };

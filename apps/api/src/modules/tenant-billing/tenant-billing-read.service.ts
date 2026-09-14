@@ -5,6 +5,10 @@ import { tenantBillingActObjectKey } from "@markiro/platform-contracts";
 import { DB } from "../../auth/auth.module";
 import { EntitlementsService } from "../../subscriptions/entitlements.service";
 import { ObjectStorageService } from "../storage/object-storage.service";
+import {
+  listTenantServicePeriods,
+  readTenantServicePeriodDetail,
+} from "../service-periods/service-period-read-model";
 import type {
   ListDocumentsQueryDto,
   ListInvoicesQueryDto,
@@ -15,6 +19,9 @@ import type {
   TenantInvoiceDto,
   TenantOfferDetailDto,
   TenantSubscriptionBillingDto,
+  TenantServicePeriodDetailDto,
+  TenantServicePeriodListDto,
+  TenantServicePeriodListQueryDto,
 } from "./dto";
 import {
   BILLING_DUE_SOON_DAYS,
@@ -133,6 +140,17 @@ export class TenantBillingReadService {
 
   subscription(tenantId: string): Promise<TenantSubscriptionBillingDto> {
     return this.subscriptionBilling(tenantId, this.now());
+  }
+
+  listServicePeriods(
+    tenantId: string,
+    query: TenantServicePeriodListQueryDto,
+  ): Promise<TenantServicePeriodListDto> {
+    return listTenantServicePeriods(this.db, tenantId, query, this.now());
+  }
+
+  servicePeriod(tenantId: string, id: string): Promise<TenantServicePeriodDetailDto> {
+    return readTenantServicePeriodDetail(this.db, tenantId, id, this.now());
   }
 
   async listInvoices(

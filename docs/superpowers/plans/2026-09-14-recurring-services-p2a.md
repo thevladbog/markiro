@@ -701,7 +701,7 @@ git commit -m "feat: add platform recurring service ledger"
 - Produces: `GET /billing/service-periods` and `GET /billing/service-periods/:id`.
 - Consumes: Task 6 read model and existing `BILLING_READ`, tenant, subscription-read-only guards.
 
-- [ ] **Step 1: Write failing own-tenant projection tests**
+- [x] **Step 1: Write failing own-tenant projection tests**
 
 ```ts
 const detail = await readServicePeriod(tenantA, periodA.id);
@@ -717,17 +717,17 @@ expect(detail).not.toHaveProperty("approvals");
 
 Request `periodA.id` under tenant B and assert 404 with no tenant A names, balance or timestamps. Verify restricted-subscription read-only access still permits these GET routes.
 
-- [ ] **Step 2: Run tenant billing tests and confirm missing routes**
+- [x] **Step 2: Run tenant billing tests and confirm missing routes**
 
 Run: `corepack pnpm@11.22.0 --filter @markiro/api exec vitest run test/tenant-billing-read.service.test.ts test/tenant-billing-read.integration.test.ts test/tenant-billing-read.authorization.test.ts`
 
 Expected: FAIL with route or service method missing.
 
-- [ ] **Step 3: Add cursor-bound tenant queries and customer projection**
+- [x] **Step 3: Add cursor-bound tenant queries and customer projection**
 
 The list accepts `state`, period boundary, cursor and limit; tenant ID always comes from `RequestWithTenant`. Reuse aggregate calculations but map entries through an explicit customer projection that includes performance/posting dates, work reference, description, actual and allowance minutes, classification and corrections only.
 
-- [ ] **Step 4: Register guarded routes**
+- [x] **Step 4: Register guarded routes**
 
 ```ts
 @Get("service-periods")
@@ -744,13 +744,13 @@ servicePeriod(@Req() req: RequestWithTenant, @Param(pipe) params: { id: string }
 }
 ```
 
-- [ ] **Step 5: Run tenant read and route inventory suites**
+- [x] **Step 5: Run tenant read and route inventory suites**
 
 Run: `corepack pnpm@11.22.0 --filter @markiro/api exec vitest run test/tenant-billing-read.service.test.ts test/tenant-billing-read.integration.test.ts test/tenant-billing-read.authorization.test.ts test/subscription-route-inventory.test.ts`
 
 Expected: PASS with tenant isolation and internal-field absence.
 
-- [ ] **Step 6: Commit tenant ledger reads**
+- [x] **Step 6: Commit tenant ledger reads**
 
 ```bash
 git add apps/api/src/modules/tenant-billing apps/api/test/tenant-billing-read.service.test.ts apps/api/test/tenant-billing-read.integration.test.ts apps/api/test/tenant-billing-read.authorization.test.ts

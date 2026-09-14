@@ -50,6 +50,8 @@ describe("tenant billing authorization guard seam", () => {
     const routes = [
       "overview",
       "subscription",
+      "listServicePeriods",
+      "servicePeriod",
       "listInvoices",
       "invoiceDetail",
       "listDocuments",
