@@ -506,6 +506,9 @@ const profile: RouteExemption = {
 };
 
 const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
+  "PlatformGrantReadinessController.preview": platform(
+    "cross-tenant rollout preview requires tenant read plus catalog read and write capabilities",
+  ),
   "PlatformDeviceRetentionController.preview": platform(
     "retention requires fresh tenant and billing platform write capabilities",
   ),

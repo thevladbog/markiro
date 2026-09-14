@@ -11,19 +11,33 @@ import { KioskGrantsController } from "./kiosk-grants.controller";
 import { GrantIssuerService } from "./grant-issuer.service";
 import { configureGrantSigning, GRANT_SIGNING_CONFIGURATION } from "./grant-keyset";
 import { GrantClientReadinessService } from "./grant-client-readiness.service";
+import { PlatformGrantReadinessController } from "./platform-grant-readiness.controller";
+import { PlatformGrantReadinessService } from "./platform-grant-readiness.service";
+import { PlatformAuditModule } from "../../platform-auth/platform-audit.module";
 @Module({})
 export class DeviceGrantsModule {
   static forRoot(env: Env): DynamicModule {
     return {
       module: DeviceGrantsModule,
-      imports: [PickupOrdersModule, StationScansModule, StationShiftCloseModule, InventoriesModule],
-      controllers: [DeviceGrantsController, KioskGrantsController],
+      imports: [
+        PlatformAuditModule,
+        PickupOrdersModule,
+        StationScansModule,
+        StationShiftCloseModule,
+        InventoriesModule,
+      ],
+      controllers: [
+        DeviceGrantsController,
+        KioskGrantsController,
+        PlatformGrantReadinessController,
+      ],
       providers: [
         { provide: GRANT_SIGNING_CONFIGURATION, useValue: configureGrantSigning(env) },
         GrantIssuerService,
         GrantEvidenceService,
         GrantEvidenceNativeService,
         GrantClientReadinessService,
+        PlatformGrantReadinessService,
       ],
       exports: [GrantIssuerService],
     };
