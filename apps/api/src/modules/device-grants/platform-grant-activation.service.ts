@@ -44,6 +44,8 @@ import { GRANT_CLOCK } from "./grant-issuer.service";
 import { GRANT_SIGNING_CONFIGURATION, type GrantSigningConfiguration } from "./grant-keyset";
 
 const PREPARATION_TTL_MS = 30 * 60 * 1_000;
+const CONFIRM_REQUEST_CONSTRAINT = "offline_grant_activation_confirm_request_uq";
+const CANCEL_REQUEST_CONSTRAINT = "offline_grant_activation_cancel_request_uq";
 const previewAuditSchema = z
   .object({
     policyRevision: z.string().min(1),
@@ -291,7 +293,7 @@ export class PlatformGrantActivationService {
   ): Promise<PlatformGrantActivationReceipt> {
     const input = platformGrantActivationContracts.confirm.body.parse(request);
     const requestHash = entitlementDigest(input);
-    return this.db.transaction(
+    const transaction = this.db.transaction(
       async (tx) => {
         const [preparation] = await tx
           .select()
@@ -472,6 +474,12 @@ export class PlatformGrantActivationService {
       },
       { isolationLevel: "read committed" },
     );
+    return transaction.catch((error: unknown) => {
+      if (uniqueViolationConstraint(error) === CONFIRM_REQUEST_CONSTRAINT) {
+        throw new ConflictException({ code: "GRANT_ACTIVATION_REQUEST_CONFLICT" });
+      }
+      throw error;
+    });
   }
 
   async cancel(
@@ -481,7 +489,7 @@ export class PlatformGrantActivationService {
   ): Promise<PlatformGrantActivationPreparation> {
     const input = platformGrantActivationContracts.cancel.body.parse(request);
     const requestHash = entitlementDigest(input);
-    return this.db.transaction(async (tx) => {
+    const transaction = this.db.transaction(async (tx) => {
       const [preparation] = await tx
         .select()
         .from(schema.offlineGrantActivationPreparations)
@@ -541,6 +549,12 @@ export class PlatformGrantActivationService {
         requestId: input.requestId,
       });
       return response;
+    });
+    return transaction.catch((error: unknown) => {
+      if (uniqueViolationConstraint(error) === CANCEL_REQUEST_CONSTRAINT) {
+        throw new ConflictException({ code: "GRANT_ACTIVATION_REQUEST_CONFLICT" });
+      }
+      throw error;
     });
   }
 
@@ -801,4 +815,18 @@ function isUniqueViolation(error: unknown): boolean {
   if (typeof error !== "object" || error === null) return false;
   if ("code" in error && (error as { code?: unknown }).code === "23505") return true;
   return "cause" in error && isUniqueViolation((error as { cause?: unknown }).cause);
+}
+
+function uniqueViolationConstraint(error: unknown): string | null {
+  let current = error;
+  const visited = new Set<object>();
+  while (current && typeof current === "object" && !visited.has(current)) {
+    visited.add(current);
+    const record = current as Record<string, unknown>;
+    if (record.code === "23505" && typeof record.constraint === "string") {
+      return record.constraint;
+    }
+    current = record.cause;
+  }
+  return null;
 }

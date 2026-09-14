@@ -11,6 +11,10 @@ import { copyMigrationsThroughIndex } from "./support/legacy-migrations.js";
 
 const migrationsFolder = fileURLToPath(new URL("../migrations", import.meta.url));
 const migrationPath = join(migrationsFolder, "0152_offline_grant_activation.sql");
+const validationMigrationPath = join(
+  migrationsFolder,
+  "0153_validate_offline_grant_activation.sql",
+);
 
 describe("offline grant activation migration", () => {
   it("installs constrained, empty activation persistence", async () => {
@@ -24,8 +28,16 @@ describe("offline grant activation migration", () => {
     expect(sql).toContain("prepared_by_platform_user_id");
     expect(sql).toContain("offline_grant_device_activations_station_active_uq");
     expect(sql).toContain("offline_grant_device_activations_kiosk_active_uq");
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "device_grant_configurations_activation_fk"[\s\S]*NOT VALID/,
+    );
     expect(sql).not.toMatch(
       /INSERT\s+INTO\s+"?(?:offline_grant_activation|entitlement_lifecycle_policies)/i,
+    );
+
+    const validationSql = await readFile(validationMigrationPath, "utf8");
+    expect(validationSql).toContain(
+      'VALIDATE CONSTRAINT "device_grant_configurations_activation_fk"',
     );
   });
 });
@@ -125,6 +137,15 @@ describe.skipIf(!process.env.DATABASE_URL)("offline grant activation forward mig
         { count: 0 },
       ]);
     }
+    expect(
+      (
+        await pool.query(
+          `SELECT convalidated
+             FROM pg_constraint
+            WHERE conname = 'device_grant_configurations_activation_fk'`,
+        )
+      ).rows,
+    ).toEqual([{ convalidated: true }]);
   });
 
   it("keeps the migration set idempotent", async () => {

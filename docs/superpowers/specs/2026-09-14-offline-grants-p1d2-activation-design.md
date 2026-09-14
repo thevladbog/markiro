@@ -97,7 +97,7 @@ The platform API adds:
 | ------ | -------------------------------------------------- | ------------------------------------------- |
 | `GET`  | `/platform/offline-grants/activations`             | List preparations and confirmed activations |
 | `GET`  | `/platform/offline-grants/activations/:id`         | Read one exact preparation or receipt       |
-| `POST` | `/platform/offline-grants/activations/prepare`     | Prepare from a P1D.1 preview                |
+| `POST` | `/platform/offline-grants/activations`             | Prepare from a P1D.1 preview                |
 | `POST` | `/platform/offline-grants/activations/:id/confirm` | Confirm with a second operator              |
 | `POST` | `/platform/offline-grants/activations/:id/cancel`  | Cancel an unconfirmed preparation           |
 

@@ -61,6 +61,7 @@ describe.skipIf(!databaseUrl)("offline grant activation preparation", () => {
   let tenantId = "";
   let preparedId = "";
   let preparedDigest = "";
+  let expiredPreparedId = "";
   let created = false;
 
   beforeAll(async () => {
@@ -146,7 +147,7 @@ describe.skipIf(!databaseUrl)("offline grant activation preparation", () => {
       planVersionId: versionId,
       status: "active",
       startsAt: new Date(now.getTime() - 60_000),
-      endsAt: new Date(now.getTime() + 60_000),
+      endsAt: new Date(now.getTime() + 2 * 60 * 60 * 1_000),
       source: "manual",
     });
     await db.insert(schema.apikey).values({
@@ -280,23 +281,11 @@ describe.skipIf(!databaseUrl)("offline grant activation preparation", () => {
     ).rejects.toMatchObject({ status: 409 });
   });
 
-  it("cancels another preparation idempotently and releases its reservation", async () => {
-    const request = {
-      protocol: "offline-grants-activation-v1" as const,
-      reason: "Pilot deferred",
-      requestId: randomUUID(),
-    };
-    const cancelled = await activation.cancel(preparedId, principal, request);
-    expect(cancelled).toMatchObject({
-      id: preparedId,
-      state: "cancelled",
-      cancellationReason: "Pilot deferred",
-      cancelledBy: { userId: principal.userId },
-    });
-    expect(await activation.cancel(preparedId, principal, request)).toEqual(cancelled);
-    expect(await activation.detail(preparedId)).toEqual(cancelled);
-
-    const replacementPreview = await readiness.preview(principal, {
+  it("releases an expired preparation before preparing the same device again", async () => {
+    const firstPreparationId = preparedId;
+    expiredPreparedId = firstPreparationId;
+    now.setTime(new Date("2026-09-14T12:30:00.001Z").getTime());
+    const preview = await readiness.preview(principal, {
       requestId: randomUUID(),
       policyId,
       mode: "strict",
@@ -304,15 +293,39 @@ describe.skipIf(!databaseUrl)("offline grant activation preparation", () => {
     });
     const replacement = await activation.prepare(principal, {
       protocol: "offline-grants-activation-v1",
-      previewRequestId: replacementPreview.requestId,
-      previewDigest: replacementPreview.previewDigest,
+      previewRequestId: preview.requestId,
+      previewDigest: preview.previewDigest,
       policyId,
       deviceIds: [deviceId],
-      decisionReference: "CAB-2026-0914",
+      decisionReference: "CAB-2026-0914-expired-retry",
       requestId: randomUUID(),
     });
+
+    expect(replacement).toMatchObject({
+      state: "prepared",
+      members: [{ deviceId }],
+      expiresAt: "2026-09-14T13:00:00.001Z",
+    });
+    expect(replacement.id).not.toBe(firstPreparationId);
     preparedId = replacement.id;
     preparedDigest = replacement.preparationDigest;
+  });
+
+  it("cancels a preparation idempotently and releases its reservation", async () => {
+    const request = {
+      protocol: "offline-grants-activation-v1" as const,
+      reason: "Pilot deferred",
+      requestId: randomUUID(),
+    };
+    const cancelled = await activation.cancel(expiredPreparedId, principal, request);
+    expect(cancelled).toMatchObject({
+      id: expiredPreparedId,
+      state: "cancelled",
+      cancellationReason: "Pilot deferred",
+      cancelledBy: { userId: principal.userId },
+    });
+    expect(await activation.cancel(expiredPreparedId, principal, request)).toEqual(cancelled);
+    expect(await activation.detail(expiredPreparedId)).toEqual(cancelled);
   });
 
   it("requires a second operator and confirms the exact overlay without commercial mutation", async () => {
@@ -342,7 +355,11 @@ describe.skipIf(!databaseUrl)("offline grant activation preparation", () => {
           createdByPlatformUserId: principal.userId,
           approvedByPlatformUserId: confirmer.userId,
           offlineGrant: {
-            rollout: { mode: "strict", deviceIds: [deviceId], decisionReference: "CAB-2026-0914" },
+            rollout: {
+              mode: "strict",
+              deviceIds: [deviceId],
+              decisionReference: "CAB-2026-0914-expired-retry",
+            },
           },
         },
       },

@@ -6,14 +6,22 @@ import { I18nextProvider } from "react-i18next";
 
 import i18n from "../src/i18n/index.js";
 import { OfflineGrantActivationPanel } from "../src/pages/catalog/OfflineGrantActivationPanel.js";
+import { activationKeys } from "../src/pages/catalog/offline-grant-activation-state.js";
 import { confirmRequestId, preparedActivation } from "./offline-grant-activation-fixtures.js";
 import { readinessPreview } from "./offline-grant-readiness-fixtures.js";
 import { jsonResponse } from "./render.js";
 
-function setup(currentUserId = "user-1") {
+function setup(
+  currentUserId = "user-1",
+  options: {
+    onDirtyChange?: (dirty: boolean) => void;
+    seed?: (client: QueryClient) => void;
+  } = {},
+) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
+  options.seed?.(client);
   return render(
     <I18nextProvider i18n={i18n}>
       <QueryClientProvider client={client}>
@@ -22,6 +30,7 @@ function setup(currentUserId = "user-1") {
             preview={readinessPreview}
             canActivate
             currentUserId={currentUserId}
+            {...(options.onDirtyChange ? { onDirtyChange: options.onDirtyChange } : {})}
           />
         </ThemeProvider>
       </QueryClientProvider>
@@ -96,3 +105,60 @@ it("prepares the exact preview cohort without commercial inputs", async () => {
     deviceIds: readinessPreview.items.map((item) => item.deviceId),
   });
 });
+
+it("loads and renders every activation page", async () => {
+  const older = {
+    ...preparedActivation,
+    id: "00000000-0000-4000-8000-000000000099",
+    decisionReference: "Older prepared cohort",
+  };
+  vi.mocked(fetch).mockImplementation(async (input) => {
+    const url = new URL(String(input), "https://example.invalid");
+    if (url.searchParams.get("cursor") === "older-page") {
+      return jsonResponse(200, { items: [older], nextCursor: null });
+    }
+    return jsonResponse(200, {
+      items: [],
+      nextCursor: "older-page",
+    });
+  });
+
+  setup("user-2");
+
+  expect(await screen.findByText("Older prepared cohort")).not.toBeNull();
+  expect(
+    vi.mocked(fetch).mock.calls.some(([input]) => String(input).includes("cursor=older-page")),
+  ).toBe(true);
+});
+
+it.each(["confirm", "cancel"] as const)(
+  "keeps the drawer dirty for an uncertain %s attempt",
+  async (operation) => {
+    const onDirtyChange = vi.fn();
+    setup("user-2", {
+      onDirtyChange,
+      seed: (client) => {
+        const key =
+          operation === "confirm"
+            ? activationKeys.confirm(preparedActivation.id)
+            : activationKeys.cancel(preparedActivation.id);
+        const request =
+          operation === "confirm"
+            ? {
+                protocol: "offline-grants-activation-v1" as const,
+                preparationDigest: preparedActivation.preparationDigest,
+                requestId: confirmRequestId,
+              }
+            : {
+                protocol: "offline-grants-activation-v1" as const,
+                reason: "Retry cancellation",
+                requestId: confirmRequestId,
+              };
+        client.setQueryData(key, { request, response: null, notice: "uncertain" });
+      },
+    });
+
+    await screen.findByText(preparedActivation.decisionReference);
+    await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(true));
+  },
+);

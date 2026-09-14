@@ -10,6 +10,7 @@ test("production API image includes readiness persistence before readers", async
   const activationMigration = await read(
     "packages/db/migrations/0152_offline_grant_activation.sql",
   );
+  await access(new URL("packages/db/migrations/0153_validate_offline_grant_activation.sql", root));
   const dockerfile = await read("deploy/production/api.Dockerfile");
 
   assert.match(

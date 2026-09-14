@@ -6,7 +6,7 @@ import type {
   PlatformGrantReadinessPreviewResponse,
 } from "@markiro/platform-contracts";
 import { Alert, Button, Input, StatusChip, Table, type TableColumn } from "@markiro/ui";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -39,21 +39,35 @@ export function OfflineGrantActivationPanel({
 }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
-  const list = useQuery({
+  const list = useInfiniteQuery({
     queryKey: activationKeys.list,
-    queryFn: () => listOfflineGrantActivations(),
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam }) => listOfflineGrantActivations(pageParam ? { cursor: pageParam } : {}),
+    getNextPageParam: (lastPage) => lastPage.nextCursor,
   });
   const [decisionReference, setDecisionReference] = useState("");
   const [cancellation, setCancellation] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState<"uncertain" | "stale" | null>(null);
+  const items = list.data?.pages.flatMap((page) => page.items) ?? [];
   const prepareAttempt = queryClient.getQueryData<PrepareAttempt>(activationKeys.prepare);
+  const mutationUncertain = items.some(
+    (item) =>
+      queryClient.getQueryData<ConfirmAttempt>(activationKeys.confirm(item.id))?.notice ===
+        "uncertain" ||
+      queryClient.getQueryData<CancelAttempt>(activationKeys.cancel(item.id))?.notice ===
+        "uncertain",
+  );
   const dirty =
     decisionReference.length > 0 ||
     Object.values(cancellation).some(Boolean) ||
-    prepareAttempt?.notice === "uncertain";
+    prepareAttempt?.notice === "uncertain" ||
+    mutationUncertain;
 
   useEffect(() => onDirtyChange?.(dirty), [dirty, onDirtyChange]);
   useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
+  useEffect(() => {
+    if (list.hasNextPage && !list.isFetchingNextPage) void list.fetchNextPage();
+  }, [list.fetchNextPage, list.hasNextPage, list.isFetchingNextPage]);
 
   const refresh = async () => {
     await queryClient.invalidateQueries({ queryKey: activationKeys.list });
@@ -184,8 +198,6 @@ export function OfflineGrantActivationPanel({
         `${item.preparedBy.userId}${item.confirmedBy ? ` → ${item.confirmedBy.userId}` : ""}`,
     },
   ];
-  const items = list.data?.items ?? [];
-
   return (
     <section aria-labelledby="offline-grant-activation-heading" className="catalog-form">
       <h3 id="offline-grant-activation-heading">{t("catalog.offlineActivation.title")}</h3>

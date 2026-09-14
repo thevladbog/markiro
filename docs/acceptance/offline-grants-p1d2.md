@@ -13,16 +13,22 @@ device or establish physical acceptance.
 | Immutable 30-minute preparation                             | PostgreSQL constraints, snapshot digest, exact members and idempotent prepare integration test                                                                    | PASS   |
 | Two-person confirmation                                     | Preparer self-confirm is denied; a second current platform administrator confirms                                                                                 | PASS   |
 | Fresh authority check                                       | Confirmation reloads policy, subscription, owner, credential epoch, assignment, configuration, report, grant, keyset and entitlement revision under ordered locks | PASS   |
-| No commercial mutation                                      | Integration test compares subscription plan identity and preparation compares policy/subscription/configuration row counts                                        | PASS   |
+| Subscription plan identity and prepare-time row counts      | Integration test compares subscription plan identity and preparation compares policy/subscription/configuration row counts                                        | PASS   |
 | Exact runtime scope                                         | Active binding overlays strict for the selected device; missing, revoked or invalid binding resolves the base policy                                              | PASS   |
 | Existing client compatibility                               | Station, Handheld and kiosk request/response contracts are unchanged; mode changes on the existing authenticated configuration refresh                            | PASS   |
 | Recovery                                                    | Stable mutation request IDs, needs-review state, cancellation and retained frozen work/evidence paths                                                             | PASS   |
-| Additive deployment                                         | Migration 0152 creates activation state and nullable configuration provenance without seeding policies or customer data                                           | PASS   |
+| Additive deployment                                         | Migration 0152 creates activation state and a `NOT VALID` configuration FK; migration 0153 validates the FK after the first migration commits                     | PASS   |
 
 ## Verification record
 
 The following checks were run against current source in an isolated worktree and,
 where applicable, a fresh PostgreSQL 16 database:
+
+- Current review-fix head: activation API regressions passed 9 tests, including
+  expiry reuse and exact unique-constraint mapping; DB migration/schema checks
+  passed 7 tests on fresh PostgreSQL 16; SaaS activation DOM checks passed 6
+  tests. API, DB and SaaS Admin typecheck, lint and build passed. The focused
+  production source contract passed 5 tests.
 
 - Platform contracts: 328 passed; test, typecheck, lint and build passed.
 - DB activation migration and schema tests: 7 passed against a fresh PostgreSQL
@@ -51,3 +57,8 @@ where applicable, a fresh PostgreSQL 16 database:
 | Industrial Handheld vendor scanner               | NOT RUN |
 | Installed kiosk device and reconnect recovery    | NOT RUN |
 | Customer pilot throughput and acceptance         | NOT RUN |
+
+The exact broad Turbo workspace command, the complete Android
+`testDebugUnitTest lintDebug assembleDebug` gate and the Station Cargo host gate
+were not run. The narrower package and recovery checks listed above are the only
+evidence recorded for those surfaces.

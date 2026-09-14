@@ -904,6 +904,9 @@ corepack pnpm turbo run build --filter='@markiro/api^...' \
 
 Expected: all selected builds pass.
 
+Recorded outcome: `NOT RUN` as one Turbo graph command. The affected shared
+packages and consumers were built through their package gates instead.
+
 - [ ] **Step 2: Run the broad workspace gate serially**
 
 Load only the isolated test environment and run:
@@ -913,6 +916,9 @@ corepack pnpm turbo lint typecheck test build --concurrency=1 --force
 ```
 
 Expected: all applicable tasks pass. Record database and external-service skips separately; do not count them as proof.
+
+Recorded outcome: `NOT RUN`. Package gates and focused cross-surface checks were
+run separately and are listed in the acceptance record.
 
 - [ ] **Step 3: Run Android and Station host gates**
 
@@ -925,7 +931,11 @@ cargo test --manifest-path apps/station/src-tauri/Cargo.toml
 
 Expected: all pass. These commands do not prove vendor scanner, Windows installation, printer or factory behavior.
 
-- [ ] **Step 4: Run production and formatting gates**
+Recorded outcome: `NOT RUN` in full. The focused Handheld `GrantTransportTest`,
+Station recovery test and Station package build passed; Android lint/assemble
+and the Station Cargo host suite remain unrun.
+
+- [x] **Step 4: Run production and formatting gates**
 
 ```bash
 corepack pnpm test:production-bundle:contract
@@ -935,7 +945,10 @@ git diff --check
 
 Expected: all pass.
 
-- [ ] **Step 5: Update Graphify and inspect the final diff**
+Recorded outcome: production bundle contracts, repository Prettier and diff
+whitespace checks passed.
+
+- [x] **Step 5: Update Graphify and inspect the final diff**
 
 ```bash
 graphify update .
@@ -947,17 +960,21 @@ git diff --check origin/main...HEAD
 
 Confirm the range contains only the P1D.2 spec, plan, implementation, tests and operational evidence. If `origin/main` advanced, merge it without rewriting applied migrations; resolve the new migration number and metadata from the current journal.
 
-- [ ] **Step 6: Complete the acceptance record**
+Recorded outcome: the branch range and three-dot diff were inspected against
+current `origin/main`; the repository had no local Graphify graph to update.
+
+- [x] **Step 6: Complete the acceptance record**
 
 Record exact successful task/test counts, database execution, browser checks, Android/Cargo results and CI ownership. Keep production deployment, physical devices, printers, scanners and customer pilot marked `NOT RUN` until separately exercised.
 
-- [ ] **Step 7: Commit verification-only documentation changes**
+- [x] **Step 7: Commit verification-only documentation changes**
 
 ```bash
 git add docs/acceptance/offline-grants-p1d2.md
 git commit -m "docs: record offline grant activation acceptance"
 ```
 
-- [ ] **Step 8: Stop before external publication**
+- [x] **Step 8: Publish the review branch only under existing authorization**
 
-Report the final branch, commits, checks and unrun gates. Push and create or update a PR only when already authorized by the user. Production activation, deployment and cohort selection require separate explicit authorization and are not implied by implementation completion.
+Recorded outcome: the authorized review branch and PR were published. Production
+activation, deployment and cohort selection remain separate and were not run.

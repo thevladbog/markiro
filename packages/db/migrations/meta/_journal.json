@@ -1072,6 +1072,13 @@
       "when": 1789391850003,
       "tag": "0152_offline_grant_activation",
       "breakpoints": true
+    },
+    {
+      "idx": 153,
+      "version": "7",
+      "when": 1789391850004,
+      "tag": "0153_validate_offline_grant_activation",
+      "breakpoints": true
     }
   ]
 }
