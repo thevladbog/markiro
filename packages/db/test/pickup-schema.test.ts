@@ -321,7 +321,62 @@ describe.skipIf(!url)("pickup schema constraints", () => {
     ).resolves.toBeDefined();
   });
 
+  type RejectionInsert = typeof schema.pickupScanRejections.$inferInsert;
+  const rejectionRow = (
+    over: Partial<RejectionInsert> & { deviceSeq: number },
+  ): RejectionInsert => ({
+    tenantId: org.id,
+    employeeId: empId,
+    codes: [],
+    scannedAt: new Date(),
+    ...over,
+  });
+
+  it("rejects a scan rejection naming two source devices", async () => {
+    await expect(
+      db.insert(schema.pickupScanRejections).values(
+        rejectionRow({
+          deviceSeq: 900,
+          sourceKind: "kiosk",
+          kioskId,
+          stationDeviceId: handheldId,
+        }),
+      ),
+    ).rejects.toMatchObject({
+      cause: { code: "23514", constraint: "pickup_scan_rejections_source_check" },
+    });
+  });
+
+  it("rejects a handheld scan rejection pointing at a station-kind device", async () => {
+    await expect(
+      db.insert(schema.pickupScanRejections).values(
+        rejectionRow({
+          deviceSeq: 901,
+          sourceKind: "handheld",
+          stationDeviceId: stationKindDeviceId,
+        }),
+      ),
+    ).rejects.toMatchObject({
+      cause: { code: "23503", constraint: "pickup_scan_rejections_tenant_station_device_fk" },
+    });
+  });
+
+  it("keeps scan-rejection idempotency per device kind", async () => {
+    const row = rejectionRow({
+      deviceSeq: 902,
+      sourceKind: "handheld",
+      stationDeviceId: handheldId,
+    });
+    await db.insert(schema.pickupScanRejections).values(row);
+    await expect(db.insert(schema.pickupScanRejections).values(row)).rejects.toMatchObject({
+      cause: { code: "23505", constraint: "pickup_scan_rejections_handheld_device_seq_uq" },
+    });
+  });
+
   afterAll(async () => {
+    await db
+      .delete(schema.pickupScanRejections)
+      .where(eq(schema.pickupScanRejections.tenantId, org.id));
     await db
       .delete(schema.employeePickupPolicies)
       .where(inArray(schema.employeePickupPolicies.employeeId, [empId, foreignEmpId]));

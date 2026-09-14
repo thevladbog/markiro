@@ -20,12 +20,12 @@ station-authenticated routes let the device submit and bootstrap.
 
 This is plan 1 of 4. The others are written separately, each shippable on its own:
 
-| # | Scope | Depends on |
-| --- | --- | --- |
-| 0 | Limits off by default tenant-wide (defaults flipped, existing tenants switched off, cabinet toggle retained) | none |
-| **1** | **Database + API (this plan)** | none |
-| 2 | Cabinet: device descriptor on the orders list/detail, source filter | 1 |
-| 3 | Handheld: write-off mode, `writeoff_outbox`, screens | 1 |
+| #     | Scope                                                                                                        | Depends on |
+| ----- | ------------------------------------------------------------------------------------------------------------ | ---------- |
+| 0     | Limits off by default tenant-wide (defaults flipped, existing tenants switched off, cabinet toggle retained) | none       |
+| **1** | **Database + API (this plan)**                                                                               | none       |
+| 2     | Cabinet: device descriptor on the orders list/detail, source filter                                          | 1          |
+| 3     | Handheld: write-off mode, `writeoff_outbox`, screens                                                         | 1          |
 
 Plan 0 is independent of this one. The write-off limit carve-out in Task 4 below
 is specified and implemented regardless of plan 0, so that re-enabling the
@@ -62,29 +62,29 @@ Every task's requirements implicitly include this section.
 
 **Created**
 
-| File | Responsibility |
-| --- | --- |
-| `packages/db/migrations/0149_pickup_order_device_source.sql` | Migration: owner columns, check, FK, two partial unique indexes |
-| `apps/api/src/modules/pickup-orders/document-source.ts` | `PickupDocumentSource` type and its narrow helpers |
-| `apps/api/src/modules/station-writeoffs/station-writeoffs.controller.ts` | `POST /station/writeoffs`, `GET /station/writeoff-bootstrap` |
-| `apps/api/src/modules/station-writeoffs/station-writeoffs.service.ts` | Operator permission check, bootstrap assembly |
-| `apps/api/src/modules/station-writeoffs/dto.ts` | Zod request schema + OpenAPI response schemas |
-| `apps/api/src/modules/station-writeoffs/station-writeoffs.module.ts` | Nest module wiring |
-| `apps/api/test/station-writeoffs.e2e.test.ts` | Endpoint e2e: idempotency, permission, tenancy, partial acceptance |
-| `apps/api/test/pickup-writeoff-limit.test.ts` | Write-off does not spend or count allowance |
+| File                                                                     | Responsibility                                                     |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------ |
+| `packages/db/migrations/0149_pickup_order_device_source.sql`             | Migration: owner columns, check, FK, two partial unique indexes    |
+| `apps/api/src/modules/pickup-orders/document-source.ts`                  | `PickupDocumentSource` type and its narrow helpers                 |
+| `apps/api/src/modules/station-writeoffs/station-writeoffs.controller.ts` | `POST /station/writeoffs`, `GET /station/writeoff-bootstrap`       |
+| `apps/api/src/modules/station-writeoffs/station-writeoffs.service.ts`    | Operator permission check, bootstrap assembly                      |
+| `apps/api/src/modules/station-writeoffs/dto.ts`                          | Zod request schema + OpenAPI response schemas                      |
+| `apps/api/src/modules/station-writeoffs/station-writeoffs.module.ts`     | Nest module wiring                                                 |
+| `apps/api/test/station-writeoffs.e2e.test.ts`                            | Endpoint e2e: idempotency, permission, tenancy, partial acceptance |
+| `apps/api/test/pickup-writeoff-limit.test.ts`                            | Write-off does not spend or count allowance                        |
 
 **Modified**
 
-| File | Change |
-| --- | --- |
-| `packages/db/src/schema/pickup.ts` | `pickupOrders` owner columns, check, FK, indexes |
-| `packages/db/test/pickup-schema.test.ts` | Constraint coverage |
+| File                                                          | Change                                                                |
+| ------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `packages/db/src/schema/pickup.ts`                            | `pickupOrders` owner columns, check, FK, indexes                      |
+| `packages/db/test/pickup-schema.test.ts`                      | Constraint coverage                                                   |
 | `apps/api/src/modules/pickup-orders/pickup-orders.service.ts` | `PickupDocumentSource` threading, allowlist resolver, limit carve-out |
-| `apps/api/src/modules/pickup-orders/dto.ts` | Station write-off content shape reuse |
-| `apps/api/src/modules/kiosk/kiosk.controller.ts` | Pass a `kiosk` source |
-| `apps/api/src/modules/kiosk/pairing.service.ts` | `pickupOrders.kioskId` reads |
-| `apps/api/src/modules/kiosk/box-registry.service.ts` | Reused unchanged by the station route |
-| `apps/api/src/app.module.ts` | Register `StationWriteoffsModule` |
+| `apps/api/src/modules/pickup-orders/dto.ts`                   | Station write-off content shape reuse                                 |
+| `apps/api/src/modules/kiosk/kiosk.controller.ts`              | Pass a `kiosk` source                                                 |
+| `apps/api/src/modules/kiosk/pairing.service.ts`               | `pickupOrders.kioskId` reads                                          |
+| `apps/api/src/modules/kiosk/box-registry.service.ts`          | Reused unchanged by the station route                                 |
+| `apps/api/src/app.module.ts`                                  | Register `StationWriteoffsModule`                                     |
 
 ---
 
@@ -96,15 +96,17 @@ expressed. The repository already solved this exact shape for device grants —
 copy it rather than inventing a second convention.
 
 **Files:**
+
 - Modify: `packages/db/src/schema/pickup.ts` (the `pickupOrders` table)
 - Create: `packages/db/migrations/0149_pickup_order_device_source.sql`
 - Modify: `packages/db/migrations/meta/_journal.json`
 - Test: `packages/db/test/pickup-schema.test.ts`
 
 **Interfaces:**
+
 - Consumes: `stationDevices` from `./platform.js`; it already carries
   `station_devices_tenant_id_kind_uq UNIQUE (tenant_id, id, kind)` from
-  migration 0146, which is what lets the FK below pin the device *kind*.
+  migration 0146, which is what lets the FK below pin the device _kind_.
 - Produces: `pickupOrders.sourceKind`, `pickupOrders.stationDeviceId`, and a now
   nullable `pickupOrders.kioskId`, consumed by every later task.
 
@@ -299,20 +301,67 @@ git commit -m "feat(db): let a pickup order name a handheld instead of a kiosk"
 
 ---
 
-### Task 2: `PickupDocumentSource` replaces the bare `kioskId`
+### Task 1b: `pickup_scan_rejections` learns the same owner shape
 
-`PickupOrdersService` threads `kioskId: string` through roughly seventy call
-sites. This task is a pure refactor: no behaviour changes and every existing
-test must stay green. Doing it on its own is what makes the next three tasks
-reviewable.
+**Added 2026-09-14 during execution.** Task 2 was written as a mechanical
+refactor; it is not. Two things found in the code contradict that framing:
+
+1. `createFromKiosk`'s concurrency control is a row lock on the **kiosks table**
+   (`select … from kiosks … for update`, `pickup-orders.service.ts`
+   `persistSerializedEarlyRejection`). It is what stops an order and a rejection
+   both winning one `deviceSeq`. A handheld has no kiosk row to lock.
+2. Early rejections (unknown badge, write-off forbidden, archived reason) land
+   in `pickup_scan_rejections`, whose `kiosk_id` is also `NOT NULL` with its own
+   `(tenant, kiosk, device_seq)` unique.
+
+Decision: mirror the kiosk exactly rather than give the handheld a thinner path.
+The audit argument that produced those rejection rows — an offline order syncing
+hours late against state that has since changed, leaving the scanned codes with
+no trace — applies to a queued handheld write-off word for word.
 
 **Files:**
+
+- Modify: `packages/db/src/schema/pickup.ts` (`pickupScanRejections`)
+- Create: `packages/db/migrations/0150_scan_rejection_device_source.sql`
+- Modify: `packages/db/migrations/meta/_journal.json`
+- Test: `packages/db/test/pickup-schema.test.ts`
+
+**Interfaces:**
+
+- Produces: `pickupScanRejections.sourceKind` / `.stationDeviceId`, a nullable
+  `.kioskId`, and one partial unique index per device kind. `device_seq` is
+  already `NOT NULL` here, so the predicates only need the owner half.
+
+- [ ] **Step 1: Extend the schema test** — same five shapes as Task 1, against
+      `schema.pickupScanRejections`, asserting through
+      `rejects.toMatchObject({ cause: { code, constraint } })`.
+- [ ] **Step 2: Run it and watch it fail** on the `kiosk_id` NOT NULL violation.
+- [ ] **Step 3: Mirror Task 1's schema change** onto `pickupScanRejections`,
+      including the `sourceKind`-carrying station FK.
+- [ ] **Step 4: Write `0150_scan_rejection_device_source.sql`** as a copy of 0149
+      retargeted at `pickup_scan_rejections`, and append journal entry `idx: 150`.
+- [ ] **Step 5: Migrate, run `packages/db` test, typecheck, lint, build.**
+- [ ] **Step 6: Commit.**
+
+---
+
+### Task 2: `PickupDocumentSource` replaces the bare `kioskId`
+
+**Revised 2026-09-14:** this is _not_ a pure refactor, for the reasons in Task 1b.
+Alongside threading the type, the kiosk-row lock becomes a source-aware lock —
+`kiosks` for a kiosk, `station_devices` for a handheld — and the early-rejection
+helpers take a source instead of a kiosk id. Every existing kiosk test must still
+pass untouched; that remains the acceptance bar.
+
+**Files:**
+
 - Create: `apps/api/src/modules/pickup-orders/document-source.ts`
 - Modify: `apps/api/src/modules/pickup-orders/pickup-orders.service.ts`
 - Modify: `apps/api/src/modules/kiosk/kiosk.controller.ts`
 - Test: `apps/api/test/kiosk-orders.e2e.test.ts` (existing; must stay green)
 
 **Interfaces:**
+
 - Produces:
   - `type PickupDocumentSource = { kind: "kiosk"; kioskId: string } | { kind: "handheld"; stationDeviceId: string }`
   - `kioskSource(kioskId: string): PickupDocumentSource`
@@ -372,8 +421,7 @@ Create `apps/api/src/modules/pickup-orders/document-source.ts`:
  * than an assumption baked into a parameter name.
  */
 export type PickupDocumentSource =
-  | { kind: "kiosk"; kioskId: string }
-  | { kind: "handheld"; stationDeviceId: string };
+  { kind: "kiosk"; kioskId: string } | { kind: "handheld"; stationDeviceId: string };
 
 export function kioskSource(kioskId: string): PickupDocumentSource {
   return { kind: "kiosk", kioskId };
@@ -477,10 +525,12 @@ handheld writes off whatever it finds on the floor, so its allowlist is the
 tenant catalog and `not_allowed` becomes unreachable.
 
 **Files:**
+
 - Modify: `apps/api/src/modules/pickup-orders/pickup-orders.service.ts`
 - Test: `apps/api/test/pickup-orders.e2e.test.ts`
 
 **Interfaces:**
+
 - Consumes: `PickupDocumentSource` from Task 2.
 - Produces: `private async allowlistFor(tenantId: string, source: PickupDocumentSource): Promise<Map<string, { productId: string; unitPrice: string | null }>>` — same map shape `kioskAllowlist` already returns, so `resolveItems` is otherwise untouched.
 
@@ -577,14 +627,16 @@ git commit -m "feat(api): resolve the pickup allowlist from the document source"
 
 `applyOrderLineLimit` runs before `reason` is considered, so a kiosk write-off
 spends the employee's allowance today. Both halves must change together:
-skipping enforcement while still *counting* history would let yesterday's
+skipping enforcement while still _counting_ history would let yesterday's
 write-offs eat today's allowance.
 
 **Files:**
+
 - Modify: `apps/api/src/modules/pickup-orders/pickup-orders.service.ts`
 - Test: `apps/api/test/pickup-writeoff-limit.test.ts` (create)
 
 **Interfaces:**
+
 - Consumes: `createForDevice` from Task 2.
 - Produces: no new exports. Behaviour: when `dto.reason === "writeoff"`,
   `applyOrderLineLimit` is not called and the order is excluded from
@@ -658,18 +710,16 @@ At the `applyOrderLineLimit` call site, make the limit conditional. The
 block:
 
 ```ts
-          const isWriteoff = dto.reason === "writeoff";
-          const existingCount = isWriteoff
-            ? 0
-            : await this.countTakenToday(tx, tenantId, employeeId, when);
-          const limited = applyOrderLineLimit({
-            existingCount,
-            dayLimit: policy.dayLimit,
-            limited: policy.limited && !isWriteoff,
-            loose: uniqueLoose,
-            boxes: boxDedup.accepted,
-            looseConflict: (item) => ({ rawKm: item.rawKm, reason: "over_limit" }),
-          });
+const isWriteoff = dto.reason === "writeoff";
+const existingCount = isWriteoff ? 0 : await this.countTakenToday(tx, tenantId, employeeId, when);
+const limited = applyOrderLineLimit({
+  existingCount,
+  dayLimit: policy.dayLimit,
+  limited: policy.limited && !isWriteoff,
+  loose: uniqueLoose,
+  boxes: boxDedup.accepted,
+  looseConflict: (item) => ({ rawKm: item.rawKm, reason: "over_limit" }),
+});
 ```
 
 - [ ] **Step 4: Stop counting write-offs as spent allowance**
@@ -708,6 +758,7 @@ git commit -m "fix(api): a write-off no longer spends an employee's daily allowa
 ### Task 5: `POST /station/writeoffs`
 
 **Files:**
+
 - Create: `apps/api/src/modules/station-writeoffs/dto.ts`
 - Create: `apps/api/src/modules/station-writeoffs/station-writeoffs.service.ts`
 - Create: `apps/api/src/modules/station-writeoffs/station-writeoffs.controller.ts`
@@ -716,6 +767,7 @@ git commit -m "fix(api): a write-off no longer spends an employee's daily allowa
 - Test: `apps/api/test/station-writeoffs.e2e.test.ts`
 
 **Interfaces:**
+
 - Consumes: `createForDevice`, `handheldSource`, the allowlist resolver, the
   limit carve-out.
 - Produces:
@@ -809,12 +861,24 @@ it("refuses a reason belonging to another tenant", async () => {
 it("reports partial acceptance without failing the request", async () => {
   await post(
     "/station/writeoffs",
-    { deviceSeq: 5, operatorId: employeeId, writeoffReasonId: reasonId, items: [{ rawKm: km5 }], createdAt: new Date().toISOString() },
+    {
+      deviceSeq: 5,
+      operatorId: employeeId,
+      writeoffReasonId: reasonId,
+      items: [{ rawKm: km5 }],
+      createdAt: new Date().toISOString(),
+    },
     handheldToken,
   );
   const res = await post(
     "/station/writeoffs",
-    { deviceSeq: 6, operatorId: employeeId, writeoffReasonId: reasonId, items: [{ rawKm: km5 }, { rawKm: km6 }], createdAt: new Date().toISOString() },
+    {
+      deviceSeq: 6,
+      operatorId: employeeId,
+      writeoffReasonId: reasonId,
+      items: [{ rawKm: km5 }, { rawKm: km6 }],
+      createdAt: new Date().toISOString(),
+    },
     handheldToken,
   );
   expect(res.status).toBe(201);
@@ -823,7 +887,17 @@ it("reports partial acceptance without failing the request", async () => {
 });
 
 it("rejects a kiosk token on the station route", async () => {
-  const res = await post("/station/writeoffs", { deviceSeq: 7, operatorId: employeeId, writeoffReasonId: reasonId, items: [{ rawKm: km7 }], createdAt: new Date().toISOString() }, kioskToken);
+  const res = await post(
+    "/station/writeoffs",
+    {
+      deviceSeq: 7,
+      operatorId: employeeId,
+      writeoffReasonId: reasonId,
+      items: [{ rawKm: km7 }],
+      createdAt: new Date().toISOString(),
+    },
+    kioskToken,
+  );
   expect(res.status).toBe(403);
 });
 ```
@@ -963,7 +1037,7 @@ by the existing reason validation in `createForDevice`, which already answers 42
 `createOrderSchema` refines with `hasExactlyOneBadgeIdentity`, so `CreateOrderDto`
 cannot express "the signed-in operator". Do not relax that refine — it guards the
 kiosk against persisting a plaintext badge beside its digest. Instead widen the
-*service* input, which was never the wire DTO:
+_service_ input, which was never the wire DTO:
 
 ```ts
 /** How a document names the person it belongs to. */
@@ -971,10 +1045,9 @@ export type PickupActor =
   | { kind: "badge"; badgeDigest?: string; badgeCode?: string }
   | { kind: "operator"; operatorId: string };
 
-export type CreatePickupDocumentInput = Omit<
-  CreateOrderDto,
-  "badgeDigest" | "badgeCode"
-> & { actor: PickupActor };
+export type CreatePickupDocumentInput = Omit<CreateOrderDto, "badgeDigest" | "badgeCode"> & {
+  actor: PickupActor;
+};
 ```
 
 In `createForDevice`, replace step 2 of its algorithm (badge → active employee)
@@ -1032,7 +1105,11 @@ import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard"
 import { ZodValidationPipe } from "../../zod.pipe";
 import { createOrderResultOpenApiSchema } from "../pickup-orders/dto";
 import type { CreateOrderResultDto } from "../pickup-orders/dto";
-import { stationWriteoffOpenApiSchema, stationWriteoffSchema, type StationWriteoffDto } from "./dto";
+import {
+  stationWriteoffOpenApiSchema,
+  stationWriteoffSchema,
+  type StationWriteoffDto,
+} from "./dto";
 import { StationWriteoffsService } from "./station-writeoffs.service";
 
 @ApiTags("station-writeoffs")
@@ -1100,12 +1177,14 @@ Everything the device needs to run the mode offline: the reason dictionary, the
 tenant catalogue as GTIN → name, and which operators may write off.
 
 **Files:**
+
 - Modify: `apps/api/src/modules/station-writeoffs/dto.ts`
 - Modify: `apps/api/src/modules/station-writeoffs/station-writeoffs.service.ts`
 - Modify: `apps/api/src/modules/station-writeoffs/station-writeoffs.controller.ts`
 - Test: `apps/api/test/station-writeoffs.e2e.test.ts`
 
 **Interfaces:**
+
 - Produces:
 
 ```ts
@@ -1220,10 +1299,12 @@ already mirrors. `BoxRegistryService` is already revision-bounded and
 cursor-paged; only the route and its guard are new.
 
 **Files:**
+
 - Modify: `apps/api/src/modules/station-writeoffs/station-writeoffs.controller.ts`
 - Test: `apps/api/test/station-writeoffs.e2e.test.ts`
 
 **Interfaces:**
+
 - Consumes: `BoxRegistryService`, `boxRegistryQuerySchema`,
   `KioskBoxRegistryPage` from `apps/api/src/modules/kiosk/box-registry.*`.
 - Produces: `GET /station/box-registry` with the same query contract and page

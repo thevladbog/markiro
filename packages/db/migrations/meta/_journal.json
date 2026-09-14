@@ -1051,6 +1051,13 @@
       "when": 1789371130078,
       "tag": "0149_pickup_order_device_source",
       "breakpoints": true
+    },
+    {
+      "idx": 150,
+      "version": "7",
+      "when": 1789371810111,
+      "tag": "0150_scan_rejection_device_source",
+      "breakpoints": true
     }
   ]
 }

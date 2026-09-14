@@ -559,7 +559,10 @@ export const pickupScanRejections = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     tenantId: tenantId(),
-    kioskId: uuid("kiosk_id").notNull(),
+    /** Mirrors `pickup_orders`: a rejection belongs to whichever device produced it. */
+    sourceKind: text("source_kind").$type<"kiosk" | "handheld">().notNull().default("kiosk"),
+    kioskId: uuid("kiosk_id"),
+    stationDeviceId: uuid("station_device_id"),
     // NULL <=> the badge was not recognised at sync time. Mutually exclusive
     // with `badgeCode` -- see the check constraint below.
     employeeId: uuid("employee_id"),
@@ -608,11 +611,27 @@ export const pickupScanRejections = pgTable(
     // The SAME idempotency key `pickup_orders` uses. A replayed sync (lost
     // response, or a kiosk retrying a 401 forever) must record once, not
     // once per attempt -- the writers pair this with onConflictDoNothing().
-    unique("pickup_scan_rejections_kiosk_device_seq_uq").on(t.tenantId, t.kioskId, t.deviceSeq),
+    // `device_seq` is NOT NULL here, so unlike `pickup_orders` the predicates
+    // only need the owner half.
+    uniqueIndex("pickup_scan_rejections_kiosk_device_seq_uq")
+      .on(t.tenantId, t.kioskId, t.deviceSeq)
+      .where(sql`kiosk_id is not null`),
+    uniqueIndex("pickup_scan_rejections_handheld_device_seq_uq")
+      .on(t.tenantId, t.stationDeviceId, t.deviceSeq)
+      .where(sql`station_device_id is not null`),
+    check(
+      "pickup_scan_rejections_source_check",
+      sql`(${t.sourceKind}='kiosk' and ${t.kioskId} is not null and ${t.stationDeviceId} is null) or (${t.sourceKind}='handheld' and ${t.stationDeviceId} is not null and ${t.kioskId} is null)`,
+    ),
     foreignKey({
       name: "pickup_scan_rejections_tenant_kiosk_fk",
       columns: [t.tenantId, t.kioskId],
       foreignColumns: [kiosks.tenantId, kiosks.id],
+    }),
+    foreignKey({
+      name: "pickup_scan_rejections_tenant_station_device_fk",
+      columns: [t.tenantId, t.stationDeviceId, t.sourceKind],
+      foreignColumns: [stationDevices.tenantId, stationDevices.id, stationDevices.kind],
     }),
     // Nullable columns are exempt under MATCH SIMPLE, so an unrecognised-badge
     // row (employeeId NULL) and a no-order row (orderId NULL) both pass --
