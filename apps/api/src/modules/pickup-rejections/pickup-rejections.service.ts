@@ -120,7 +120,7 @@ export class PickupRejectionsService {
     return rows.map((row) => ({
       id: row.id,
       kind: row.employeeId === null ? ("unknown_badge" as const) : ("items_refused" as const),
-      kioskId: row.kioskId,
+      kioskId: row.kioskId ?? null,
       kioskName: row.kioskName ?? "",
       employeeName: row.employeeName,
       badgeCode: row.badgeCode,

@@ -1,3 +1,4 @@
+import type { SchemaObject } from "@nestjs/swagger";
 import { BadRequestException } from "@nestjs/common";
 import { z } from "zod";
 
@@ -134,3 +135,59 @@ export interface KioskBoxRegistryPage {
   items: KioskBoxRegistryChange[];
   nextCursor?: string;
 }
+
+/**
+ * The 200 body of a box-registry page, shared by the kiosk and handheld routes.
+ * Extracted from the kiosk controller's inline copy when the station route was
+ * added: two inline copies of a 49-line schema drift, and the whole point of
+ * serving one service to both devices is that they cannot.
+ */
+export const boxRegistryPageOpenApiSchema: SchemaObject = {
+  type: "object",
+  required: ["until", "items"],
+  properties: {
+    until: { type: "string", pattern: BOX_REGISTRY_REVISION_PATTERN },
+    nextCursor: { type: "string" },
+    items: {
+      type: "array",
+      items: {
+        oneOf: [
+          {
+            type: "object",
+            required: [
+              "kind",
+              "boxId",
+              "sscc",
+              "productId",
+              "bottleCount",
+              "contentKeys",
+              "updatedAt",
+            ],
+            properties: {
+              kind: { type: "string", enum: ["upsert"] },
+              boxId: { type: "string", format: "uuid" },
+              sscc: { type: "string", pattern: "^[0-9]{18}$" },
+              productId: { type: "string", format: "uuid" },
+              bottleCount: { type: "integer", minimum: 1, maximum: 500 },
+              contentKeys: {
+                type: "array",
+                maxItems: 500,
+                items: { type: "string" },
+              },
+              updatedAt: { type: "string", format: "date-time" },
+            },
+          },
+          {
+            type: "object",
+            required: ["kind", "sscc", "updatedAt"],
+            properties: {
+              kind: { type: "string", enum: ["remove"] },
+              sscc: { type: "string", pattern: "^[0-9]{18}$" },
+              updatedAt: { type: "string", format: "date-time" },
+            },
+          },
+        ],
+      },
+    },
+  },
+};

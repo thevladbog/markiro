@@ -413,6 +413,21 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
     routes: [
       "POST /shifts/:id/enter (ShiftsController.enterShift)",
       "POST /station/shift-closures (StationShiftCloseController.close)",
+      "POST /station/writeoffs (StationWriteoffsController.create)",
+    ],
+  },
+  {
+    // The handheld's write-off reference data. Reading the reason dictionary or
+    // the box registry is not filing work, so both stay available while a
+    // subscription is read-only -- the device must still be able to show an
+    // operator what it already knows.
+    contract: customerContract(CABINET_STATION_GUARDS, {
+      mode: "read_only_allowed",
+      reason: "read",
+    }),
+    routes: [
+      "GET /station/writeoff-bootstrap (StationWriteoffsController.bootstrap)",
+      "GET /station/box-registry (StationWriteoffsController.boxRegistry)",
     ],
   },
   {
@@ -981,7 +996,8 @@ describe("registered subscription route inventory", () => {
           (route.controller.name === "ShiftsController" &&
             ["enterShift", "getCodeHistory"].includes(route.handlerName)) ||
           (route.controller.name === "StationShiftCloseController" &&
-            route.handlerName === "close");
+            route.handlerName === "close") ||
+          route.controller.name === "StationWriteoffsController";
         const expected =
           route.controller.name === "KioskController" ||
           route.controller.name === "KioskGrantsController"

@@ -56,11 +56,13 @@ import { ObjectStorageService } from "../storage/object-storage.service";
 import { sendPrivateImage } from "../storage/private-image-response";
 import {
   BOX_REGISTRY_REVISION_PATTERN,
+  boxRegistryPageOpenApiSchema,
   boxRegistryQuerySchema,
   type BoxRegistryQueryDto,
   type KioskBoxRegistryPage,
 } from "./box-registry.dto";
 import { BoxRegistryService } from "./box-registry.service";
+import { kioskSource } from "../pickup-orders/document-source";
 
 const KIOSK_RECOVERY_CAPABILITY = "subscription-recovery-v1";
 
@@ -167,55 +169,7 @@ export class KioskController {
   })
   @ApiOkResponse({
     description: "A stable committed box-registry revision page.",
-    schema: {
-      type: "object",
-      required: ["until", "items"],
-      properties: {
-        until: { type: "string", pattern: BOX_REGISTRY_REVISION_PATTERN },
-        nextCursor: { type: "string" },
-        items: {
-          type: "array",
-          items: {
-            oneOf: [
-              {
-                type: "object",
-                required: [
-                  "kind",
-                  "boxId",
-                  "sscc",
-                  "productId",
-                  "bottleCount",
-                  "contentKeys",
-                  "updatedAt",
-                ],
-                properties: {
-                  kind: { type: "string", enum: ["upsert"] },
-                  boxId: { type: "string", format: "uuid" },
-                  sscc: { type: "string", pattern: "^[0-9]{18}$" },
-                  productId: { type: "string", format: "uuid" },
-                  bottleCount: { type: "integer", minimum: 1, maximum: 500 },
-                  contentKeys: {
-                    type: "array",
-                    maxItems: 500,
-                    items: { type: "string" },
-                  },
-                  updatedAt: { type: "string", format: "date-time" },
-                },
-              },
-              {
-                type: "object",
-                required: ["kind", "sscc", "updatedAt"],
-                properties: {
-                  kind: { type: "string", enum: ["remove"] },
-                  sscc: { type: "string", pattern: "^[0-9]{18}$" },
-                  updatedAt: { type: "string", format: "date-time" },
-                },
-              },
-            ],
-          },
-        },
-      },
-    },
+    schema: boxRegistryPageOpenApiSchema,
   })
   @ApiBadRequestResponse({ description: "Malformed bounds, cursor, or page size." })
   @ApiConflictResponse({
@@ -474,7 +428,11 @@ export class KioskController {
     @Body(new ZodValidationPipe(createOrderSchema)) body: CreateOrderDto,
   ): Promise<CreateOrderResultDto> {
     try {
-      return await this.pickupOrdersService.createFromKiosk(req.tenantId!, req.kioskId!, body);
+      return await this.pickupOrdersService.createForDevice(
+        req.tenantId!,
+        kioskSource(req.kioskId!),
+        body,
+      );
     } catch (error) {
       if (
         error instanceof SubscriptionReadOnlyException &&

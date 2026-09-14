@@ -6,7 +6,7 @@ const root = new URL("../../../", import.meta.url);
 const read = (path) => readFile(new URL(path, root), "utf8");
 
 test("production API image includes readiness persistence before readers", async () => {
-  await access(new URL("packages/db/migrations/0149_offline_grant_readiness.sql", root));
+  await access(new URL("packages/db/migrations/0151_offline_grant_readiness.sql", root));
   const dockerfile = await read("deploy/production/api.Dockerfile");
 
   assert.match(

@@ -18,7 +18,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { organization } from "./auth.js";
-import { boxes, products } from "./platform.js";
+import { boxes, products, stationDevices } from "./platform.js";
 import { tenantSubscriptions } from "./saas.js";
 
 export const employeeStatus = pgEnum("employee_status", ["active", "archived"]);
@@ -260,7 +260,16 @@ export const pickupOrders = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     tenantId: tenantId(),
     orderNo: text("order_no").notNull(),
-    kioskId: uuid("kiosk_id").notNull(),
+    /**
+     * Which device produced this document. `pickup_orders` began as a kiosk
+     * table; a handheld files the same document for `reason='writeoff'`, so the
+     * owner became data. Shape copied from `device-grants.ts` rather than
+     * invented: one discriminator beside two nullable references, with a check
+     * that exactly one is set.
+     */
+    sourceKind: text("source_kind").$type<"kiosk" | "handheld">().notNull().default("kiosk"),
+    kioskId: uuid("kiosk_id"),
+    stationDeviceId: uuid("station_device_id"),
     employeeId: uuid("employee_id").notNull(),
     reason: pickupReason("reason").notNull(),
     writeoffReasonId: uuid("writeoff_reason_id"),
@@ -306,13 +315,32 @@ export const pickupOrders = pgTable(
     index("pickup_orders_export_queue_idx")
       .on(t.tenantId, t.createdAt)
       .where(sql`status = 'pending' and exported_at is null`),
-    // Idempotent sync: a (kiosk, deviceSeq) pair maps to one order. NULL
-    // deviceSeq rows (admin-created, if ever) are exempt (MATCH SIMPLE).
-    unique("pickup_orders_kiosk_device_seq_uq").on(t.tenantId, t.kioskId, t.deviceSeq),
+    // Idempotent sync: a (device, deviceSeq) pair maps to one order, per device
+    // kind. The `device_seq is not null` half preserves the exemption for
+    // admin-created rows that the old UNIQUE constraint got for free from
+    // MATCH SIMPLE NULL semantics.
+    uniqueIndex("pickup_orders_kiosk_device_seq_uq")
+      .on(t.tenantId, t.kioskId, t.deviceSeq)
+      .where(sql`kiosk_id is not null and device_seq is not null`),
+    uniqueIndex("pickup_orders_handheld_device_seq_uq")
+      .on(t.tenantId, t.stationDeviceId, t.deviceSeq)
+      .where(sql`station_device_id is not null and device_seq is not null`),
+    check(
+      "pickup_orders_source_check",
+      sql`(${t.sourceKind}='kiosk' and ${t.kioskId} is not null and ${t.stationDeviceId} is null) or (${t.sourceKind}='handheld' and ${t.stationDeviceId} is not null and ${t.kioskId} is null)`,
+    ),
     foreignKey({
       name: "pickup_orders_tenant_kiosk_fk",
       columns: [t.tenantId, t.kioskId],
       foreignColumns: [kiosks.tenantId, kiosks.id],
+    }),
+    // `sourceKind` participates so a row claiming `handheld` cannot point at a
+    // device of kind `station`. This is what `station_devices_tenant_id_kind_uq`
+    // (migration 0146) exists to make referenceable.
+    foreignKey({
+      name: "pickup_orders_tenant_station_device_fk",
+      columns: [t.tenantId, t.stationDeviceId, t.sourceKind],
+      foreignColumns: [stationDevices.tenantId, stationDevices.id, stationDevices.kind],
     }),
     foreignKey({
       name: "pickup_orders_tenant_employee_fk",
@@ -531,7 +559,10 @@ export const pickupScanRejections = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     tenantId: tenantId(),
-    kioskId: uuid("kiosk_id").notNull(),
+    /** Mirrors `pickup_orders`: a rejection belongs to whichever device produced it. */
+    sourceKind: text("source_kind").$type<"kiosk" | "handheld">().notNull().default("kiosk"),
+    kioskId: uuid("kiosk_id"),
+    stationDeviceId: uuid("station_device_id"),
     // NULL <=> the badge was not recognised at sync time. Mutually exclusive
     // with `badgeCode` -- see the check constraint below.
     employeeId: uuid("employee_id"),
@@ -580,11 +611,27 @@ export const pickupScanRejections = pgTable(
     // The SAME idempotency key `pickup_orders` uses. A replayed sync (lost
     // response, or a kiosk retrying a 401 forever) must record once, not
     // once per attempt -- the writers pair this with onConflictDoNothing().
-    unique("pickup_scan_rejections_kiosk_device_seq_uq").on(t.tenantId, t.kioskId, t.deviceSeq),
+    // `device_seq` is NOT NULL here, so unlike `pickup_orders` the predicates
+    // only need the owner half.
+    uniqueIndex("pickup_scan_rejections_kiosk_device_seq_uq")
+      .on(t.tenantId, t.kioskId, t.deviceSeq)
+      .where(sql`kiosk_id is not null`),
+    uniqueIndex("pickup_scan_rejections_handheld_device_seq_uq")
+      .on(t.tenantId, t.stationDeviceId, t.deviceSeq)
+      .where(sql`station_device_id is not null`),
+    check(
+      "pickup_scan_rejections_source_check",
+      sql`(${t.sourceKind}='kiosk' and ${t.kioskId} is not null and ${t.stationDeviceId} is null) or (${t.sourceKind}='handheld' and ${t.stationDeviceId} is not null and ${t.kioskId} is null)`,
+    ),
     foreignKey({
       name: "pickup_scan_rejections_tenant_kiosk_fk",
       columns: [t.tenantId, t.kioskId],
       foreignColumns: [kiosks.tenantId, kiosks.id],
+    }),
+    foreignKey({
+      name: "pickup_scan_rejections_tenant_station_device_fk",
+      columns: [t.tenantId, t.stationDeviceId, t.sourceKind],
+      foreignColumns: [stationDevices.tenantId, stationDevices.id, stationDevices.kind],
     }),
     // Nullable columns are exempt under MATCH SIMPLE, so an unrecognised-badge
     // row (employeeId NULL) and a no-order row (orderId NULL) both pass --

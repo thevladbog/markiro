@@ -116,8 +116,8 @@ git commit -m "feat: define offline grant readiness contracts"
 **Files:**
 
 - Modify: `packages/db/src/schema/device-grants.ts`
-- Create: `packages/db/migrations/0149_offline_grant_readiness.sql`
-- Create: `packages/db/migrations/meta/0149_snapshot.json`
+- Create: `packages/db/migrations/0151_offline_grant_readiness.sql`
+- Create: `packages/db/migrations/meta/0151_snapshot.json`
 - Modify: `packages/db/migrations/meta/_journal.json`
 - Modify: `packages/db/test/device-grants-schema.test.ts`
 - Create: `packages/db/test/device-grant-readiness-migration.test.ts`
@@ -174,7 +174,7 @@ Add tenant-composite references for the matched configuration and verified grant
 
 - [ ] **Step 5: Generate and review migration metadata**
 
-Run `corepack pnpm --filter @markiro/db db:generate`, rename the generated SQL/tag to `0149_offline_grant_readiness`, and inspect SQL for exact FKs, checks, indexes, trigger, and absence of destructive changes. Do not hand-edit the snapshot JSON.
+Run `corepack pnpm --filter @markiro/db db:generate`, rename the generated SQL/tag to `0151_offline_grant_readiness`, and inspect SQL for exact FKs, checks, indexes, trigger, and absence of destructive changes. Do not hand-edit the snapshot JSON.
 
 - [ ] **Step 6: Run DB gates**
 
@@ -193,7 +193,7 @@ Expected: all pass; database-backed tests must report a real test database rathe
 - [ ] **Step 7: Commit persistence**
 
 ```bash
-git add packages/db/src/schema/device-grants.ts packages/db/migrations/0149_offline_grant_readiness.sql packages/db/migrations/meta/0149_snapshot.json packages/db/migrations/meta/_journal.json packages/db/test/device-grants-schema.test.ts packages/db/test/device-grant-readiness-migration.test.ts
+git add packages/db/src/schema/device-grants.ts packages/db/migrations/0151_offline_grant_readiness.sql packages/db/migrations/meta/0151_snapshot.json packages/db/migrations/meta/_journal.json packages/db/test/device-grants-schema.test.ts packages/db/test/device-grant-readiness-migration.test.ts
 git commit -m "feat: retain offline grant client readiness"
 ```
 

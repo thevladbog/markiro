@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runRuntimeMigrations } from "../src/runtime-migrate.js";
 
 const migrationsFolder = join(__dirname, "../migrations");
-const migrationPath = join(migrationsFolder, "0149_offline_grant_readiness.sql");
+const migrationPath = join(migrationsFolder, "0151_offline_grant_readiness.sql");
 
 it("installs immutable readiness storage with owner-scoped request identities", async () => {
   const sql = await readFile(migrationPath, "utf8");

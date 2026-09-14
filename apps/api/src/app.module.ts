@@ -61,6 +61,7 @@ import type { PlatformAuth } from "@markiro/db";
 import { SubscriptionsModule } from "./subscriptions/subscriptions.module";
 import { ShiftExportsModule } from "./modules/shift-exports/shift-exports.module";
 import { StationShiftCloseModule } from "./modules/station-shift-close/station-shift-close.module";
+import { StationWriteoffsModule } from "./modules/station-writeoffs/station-writeoffs.module";
 import { DemoRequestsModule } from "./modules/demo-requests/demo-requests.module";
 import { PlatformHttpModule } from "./platform-http/platform-http.module";
 import { HealthModule } from "./health/health.module";
@@ -136,6 +137,7 @@ export class AppModule {
         ChzCodeStatusesModule.forRoot(env),
         ShiftExportsModule,
         StationShiftCloseModule,
+        StationWriteoffsModule,
         LabelTemplatesModule,
         StationDevicesModule,
         DevicesModule,

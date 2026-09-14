@@ -1,5 +1,5 @@
 {
-  "id": "bd01a5ae-4b16-4903-9969-23c456ad701c",
+  "id": "484b0eab-6d0c-4c50-8b44-fcfda1920fa2",
   "prevId": "ab0448e3-a2e2-4c39-9cda-85cf5170e0a9",
   "version": "7",
   "dialect": "postgresql",
@@ -7205,11 +7205,24 @@
           "primaryKey": false,
           "notNull": true
         },
+        "source_kind": {
+          "name": "source_kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'kiosk'"
+        },
         "kiosk_id": {
           "name": "kiosk_id",
           "type": "uuid",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
+        },
+        "station_device_id": {
+          "name": "station_device_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
         },
         "employee_id": {
           "name": "employee_id",
@@ -7322,6 +7335,62 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "pickup_orders_kiosk_device_seq_uq": {
+          "name": "pickup_orders_kiosk_device_seq_uq",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "kiosk_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "device_seq",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "kiosk_id is not null and device_seq is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "pickup_orders_handheld_device_seq_uq": {
+          "name": "pickup_orders_handheld_device_seq_uq",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "station_device_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "device_seq",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "station_device_id is not null and device_seq is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -7349,6 +7418,23 @@
           "columnsTo": [
             "tenant_id",
             "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "pickup_orders_tenant_station_device_fk": {
+          "name": "pickup_orders_tenant_station_device_fk",
+          "tableFrom": "pickup_orders",
+          "tableTo": "station_devices",
+          "columnsFrom": [
+            "tenant_id",
+            "station_device_id",
+            "source_kind"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id",
+            "kind"
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
@@ -7401,19 +7487,15 @@
             "tenant_id",
             "order_no"
           ]
-        },
-        "pickup_orders_kiosk_device_seq_uq": {
-          "name": "pickup_orders_kiosk_device_seq_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "kiosk_id",
-            "device_seq"
-          ]
         }
       },
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "pickup_orders_source_check": {
+          "name": "pickup_orders_source_check",
+          "value": "(\"pickup_orders\".\"source_kind\"='kiosk' and \"pickup_orders\".\"kiosk_id\" is not null and \"pickup_orders\".\"station_device_id\" is null) or (\"pickup_orders\".\"source_kind\"='handheld' and \"pickup_orders\".\"station_device_id\" is not null and \"pickup_orders\".\"kiosk_id\" is null)"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.pickup_scan_rejections": {
@@ -7433,11 +7515,24 @@
           "primaryKey": false,
           "notNull": true
         },
+        "source_kind": {
+          "name": "source_kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'kiosk'"
+        },
         "kiosk_id": {
           "name": "kiosk_id",
           "type": "uuid",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
+        },
+        "station_device_id": {
+          "name": "station_device_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
         },
         "employee_id": {
           "name": "employee_id",
@@ -7496,6 +7591,62 @@
         }
       },
       "indexes": {
+        "pickup_scan_rejections_kiosk_device_seq_uq": {
+          "name": "pickup_scan_rejections_kiosk_device_seq_uq",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "kiosk_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "device_seq",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "kiosk_id is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "pickup_scan_rejections_handheld_device_seq_uq": {
+          "name": "pickup_scan_rejections_handheld_device_seq_uq",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "station_device_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "device_seq",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "station_device_id is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "pickup_scan_rejections_open_idx": {
           "name": "pickup_scan_rejections_open_idx",
           "columns": [
@@ -7548,6 +7699,23 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
+        "pickup_scan_rejections_tenant_station_device_fk": {
+          "name": "pickup_scan_rejections_tenant_station_device_fk",
+          "tableFrom": "pickup_scan_rejections",
+          "tableTo": "station_devices",
+          "columnsFrom": [
+            "tenant_id",
+            "station_device_id",
+            "source_kind"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id",
+            "kind"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
         "pickup_scan_rejections_tenant_employee_fk": {
           "name": "pickup_scan_rejections_tenant_employee_fk",
           "tableFrom": "pickup_scan_rejections",
@@ -7588,19 +7756,14 @@
             "tenant_id",
             "id"
           ]
-        },
-        "pickup_scan_rejections_kiosk_device_seq_uq": {
-          "name": "pickup_scan_rejections_kiosk_device_seq_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "kiosk_id",
-            "device_seq"
-          ]
         }
       },
       "policies": {},
       "checkConstraints": {
+        "pickup_scan_rejections_source_check": {
+          "name": "pickup_scan_rejections_source_check",
+          "value": "(\"pickup_scan_rejections\".\"source_kind\"='kiosk' and \"pickup_scan_rejections\".\"kiosk_id\" is not null and \"pickup_scan_rejections\".\"station_device_id\" is null) or (\"pickup_scan_rejections\".\"source_kind\"='handheld' and \"pickup_scan_rejections\".\"station_device_id\" is not null and \"pickup_scan_rejections\".\"kiosk_id\" is null)"
+        },
         "pickup_scan_rejections_badge_xor_employee": {
           "name": "pickup_scan_rejections_badge_xor_employee",
           "value": "(employee_id is null) = (badge_code is not null)"

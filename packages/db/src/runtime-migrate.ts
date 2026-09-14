@@ -72,7 +72,7 @@ export async function runRuntimeMigrations(
           options.migrationsFolder,
           offerVariantIndex,
           packaged.indexOf("0136_validate_working_device_events"),
-          packaged.indexOf("0149_offline_grant_readiness"),
+          packaged.indexOf("0151_offline_grant_readiness"),
         );
       }
     } catch (error) {

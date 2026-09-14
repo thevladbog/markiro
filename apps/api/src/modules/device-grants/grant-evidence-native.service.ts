@@ -27,6 +27,7 @@ import {
 } from "../station-shift-close/dto";
 import { GrantEvidenceService, type EvidenceFact } from "./grant-evidence.service";
 import type { GrantCredentialIdentity } from "./credential-epoch";
+import { kioskSource } from "../pickup-orders/document-source";
 
 function parse<T>(schema: z.ZodType<T>, value: unknown): T {
   const parsed = schema.safeParse(value);
@@ -404,7 +405,8 @@ export class GrantEvidenceNativeService {
       "orders",
       envelope,
       raw,
-      (hook) => this.pickup.createFromKiosk(identity.tenantId, identity.deviceId, input, hook),
+      (hook) =>
+        this.pickup.createForDevice(identity.tenantId, kioskSource(identity.deviceId), input, hook),
       async (tx) => {
         // The native owner consumes the admission before this callback. Recover
         // its frozen identity through this owner's persisted issuance, including

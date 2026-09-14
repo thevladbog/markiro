@@ -127,7 +127,7 @@ P1D.1 has no confirm, activation or cohort-policy mutation route.
 ### Deployment order for P1D.1
 
 1. Back up the production PostgreSQL database and record the restore point.
-2. Apply migration `0149_offline_grant_readiness` before starting any API binary
+2. Apply migration `0151_offline_grant_readiness` before starting any API binary
    that accepts readiness reports or reads the platform readiness inventory.
 3. Deploy the API while every device remains in `observe`.
 4. Deploy Station, Handheld and kiosk client versions with durable readiness
