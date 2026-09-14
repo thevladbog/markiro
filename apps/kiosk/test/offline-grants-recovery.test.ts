@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { writeConfig } from "../src/store/config.js";
 import { enqueueOrder, listQueue } from "../src/store/queue.js";
-import { withStore, STORE_GRANTS } from "../src/store/db.js";
+import { withStore, STORE_GRANTS, STORE_GRANT_READINESS } from "../src/store/db.js";
 import { boxRegistryCredentialOwnerOf } from "../src/store/installation-binding.js";
 import { emptyState, stateKey } from "../src/grants/store.js";
 import { createKioskClient } from "../src/api/client.js";
@@ -61,4 +61,26 @@ it("uploads an already accepted order after strict grants disappear and preserve
     "https://fixture.invalid/kiosk/order-admissions",
     "https://fixture.invalid/kiosk/orders",
   ]);
+});
+
+it("cancels a pending readiness intent when the kiosk credential owner changes", async () => {
+  const paired = await writeConfig({
+    serverUrl: "https://fixture.invalid",
+    kioskId: "00000000-0000-4000-8000-000000000001",
+    token: "first-token",
+    kioskName: "Fixture",
+    place: null,
+    nextDeviceSeq: 1,
+  });
+  const owner = boxRegistryCredentialOwnerOf(paired);
+  if (!owner) throw Error("owner");
+  await withStore(STORE_GRANT_READINESS, "readwrite", (store) =>
+    store.put({
+      requestId: "11111111-1111-4111-8111-111111111111",
+      owner,
+      body: { requestId: "11111111-1111-4111-8111-111111111111" },
+    }),
+  );
+  await writeConfig({ ...paired, token: null });
+  expect(await withStore(STORE_GRANT_READINESS, "readonly", (store) => store.getAll())).toEqual([]);
 });
