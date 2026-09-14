@@ -25,10 +25,10 @@ The following checks passed locally on the final worktree:
 - the complete migration chain, including 0155 and 0156, applied to a fresh isolated
   PostgreSQL 17 database; all three additive activation foreign keys were validated;
 - seven changed API suites covering route capabilities, OpenAPI inventory, digest
-  stability, policy overlays and the database-backed activation-to-rollback flow: 48 tests
+  stability, policy overlays and the database-backed activation-to-rollback flow: 49 tests
   passed with no skips;
 - `corepack pnpm@11.22.0 --filter @markiro/api typecheck`, `lint` and `build`;
-- `corepack pnpm@11.22.0 --filter @markiro/saas-admin test`: 47 files and 485 tests
+- `corepack pnpm@11.22.0 --filter @markiro/saas-admin test`: 47 files and 487 tests
   passed, together with package typecheck, lint and build;
 - database and platform-contract package typecheck, lint and build;
 - `corepack pnpm@11.22.0 test:production-bundle:contract`: 564 tests passed;

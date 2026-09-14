@@ -1,6 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { GrantRollbackMember } from "@markiro/platform-contracts";
-import { grantRollbackDigest } from "../src/modules/device-grants/grant-rollback-digest";
+import {
+  canonicalRollbackMembers,
+  grantRollbackDigest,
+} from "../src/modules/device-grants/grant-rollback-digest";
 
 const member = (activationId: string, deviceId: string): GrantRollbackMember => ({
   activationId,
@@ -20,6 +23,24 @@ const member = (activationId: string, deviceId: string): GrantRollbackMember => 
 });
 
 describe("grant rollback digest", () => {
+  it("orders activation IDs without locale-dependent comparison", () => {
+    const high = member(
+      "ffffffff-ffff-4fff-8fff-ffffffffffff",
+      "018f7bd1-4420-4b13-9f77-89f3a5374817",
+    );
+    const low = member(
+      "00000000-0000-4000-8000-000000000000",
+      "018f7bd1-4420-4b13-9f77-89f3a5374807",
+    );
+    const localeCompare = vi.spyOn(String.prototype, "localeCompare");
+
+    expect(canonicalRollbackMembers([high, low]).map((item) => item.activationId)).toEqual([
+      low.activationId,
+      high.activationId,
+    ]);
+    expect(localeCompare).not.toHaveBeenCalled();
+  });
+
   it("is stable across selected activation order and changes on authority drift", () => {
     const a = member(
       "018f7bd1-4420-4b13-9f77-89f3a5374803",

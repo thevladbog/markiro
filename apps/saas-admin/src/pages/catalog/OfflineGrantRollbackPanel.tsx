@@ -1,8 +1,9 @@
-import type {
-  PlatformGrantRollbackCancelRequest,
-  PlatformGrantRollbackConfirmRequest,
-  PlatformGrantRollbackPreparation,
-  PlatformGrantRollbackPrepareRequest,
+import {
+  platformGrantRollbackContracts,
+  type PlatformGrantRollbackCancelRequest,
+  type PlatformGrantRollbackConfirmRequest,
+  type PlatformGrantRollbackPreparation,
+  type PlatformGrantRollbackPrepareRequest,
 } from "@markiro/platform-contracts";
 import { Alert, Button, Input } from "@markiro/ui";
 import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -21,6 +22,14 @@ import { rollbackKeys, type GrantRollbackAttempt } from "./offline-grant-rollbac
 type PrepareAttempt = GrantRollbackAttempt<PlatformGrantRollbackPrepareRequest>;
 type ConfirmAttempt = GrantRollbackAttempt<PlatformGrantRollbackConfirmRequest>;
 type CancelAttempt = GrantRollbackAttempt<PlatformGrantRollbackCancelRequest>;
+
+export function toggleRollbackActivationSelection(
+  selected: readonly string[],
+  activationId: string,
+): string[] {
+  if (selected.includes(activationId)) return selected.filter((id) => id !== activationId);
+  return selected.length >= 200 ? [...selected] : [...selected, activationId];
+}
 
 export function OfflineGrantRollbackPanel({
   canActivate,
@@ -82,7 +91,7 @@ export function OfflineGrantRollbackPanel({
   const prepare = useMutation({
     mutationFn: async () => {
       const cached = queryClient.getQueryData<PrepareAttempt>(rollbackKeys.prepare);
-      const request =
+      const request = platformGrantRollbackContracts.prepare.body.parse(
         cached?.notice === "uncertain"
           ? cached.request
           : {
@@ -90,7 +99,8 @@ export function OfflineGrantRollbackPanel({
               activationIds: selected,
               decisionReference: decisionReference.trim(),
               requestId: crypto.randomUUID(),
-            };
+            },
+      );
       queryClient.setQueryData<PrepareAttempt>(rollbackKeys.prepare, { request, notice: null });
       return prepareOfflineGrantRollback(request);
     },
@@ -104,7 +114,11 @@ export function OfflineGrantRollbackPanel({
     onError: (error) => {
       const kind = activationErrorKind(error);
       const current = queryClient.getQueryData<PrepareAttempt>(rollbackKeys.prepare);
-      if (current) queryClient.setQueryData(rollbackKeys.prepare, { ...current, notice: kind });
+      if (!current) {
+        setNotice(null);
+        return;
+      }
+      queryClient.setQueryData(rollbackKeys.prepare, { ...current, notice: kind });
       setNotice(kind === "authorization" ? "stale" : kind);
     },
   });
@@ -185,11 +199,10 @@ export function OfflineGrantRollbackPanel({
               <input
                 type="checkbox"
                 checked={selected.includes(item.activationId)}
+                disabled={selected.length >= 200 && !selected.includes(item.activationId)}
                 onChange={() =>
                   setSelected((value) =>
-                    value.includes(item.activationId)
-                      ? value.filter((id) => id !== item.activationId)
-                      : [...value, item.activationId],
+                    toggleRollbackActivationSelection(value, item.activationId),
                   )
                 }
               />{" "}

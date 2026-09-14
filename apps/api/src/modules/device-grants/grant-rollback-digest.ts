@@ -13,7 +13,9 @@ export interface GrantRollbackDigestSnapshot {
 export function canonicalRollbackMembers(
   members: readonly GrantRollbackMember[],
 ): GrantRollbackMember[] {
-  return [...members].sort((left, right) => left.activationId.localeCompare(right.activationId));
+  return [...members].sort((left, right) =>
+    left.activationId < right.activationId ? -1 : left.activationId > right.activationId ? 1 : 0,
+  );
 }
 
 export function grantRollbackDigest(snapshot: GrantRollbackDigestSnapshot): string {

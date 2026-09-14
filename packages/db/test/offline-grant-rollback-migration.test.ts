@@ -11,7 +11,9 @@ describe("offline grant rollback migration", () => {
     expect(sql).toContain('CREATE TABLE "offline_grant_rollback_members"');
     expect(sql).toContain("offline_grant_rollback_confirm_actor_check");
     expect(sql).toContain("offline_grant_rollback_members_active_reservation_uq");
-    expect(sql).toContain("offline_grant_device_activations_rollback_check");
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "offline_grant_device_activations_rollback_check" CHECK[\s\S]*NOT VALID/,
+    );
     expect(sql).toMatch(
       /ADD CONSTRAINT "offline_grant_device_activations_rollback_preparation_fk"[\s\S]*NOT VALID/,
     );
@@ -38,5 +40,6 @@ describe("offline grant rollback migration", () => {
     expect(sql).toContain(
       'VALIDATE CONSTRAINT "offline_grant_device_activations_rolled_back_by_fk"',
     );
+    expect(sql).toContain('VALIDATE CONSTRAINT "offline_grant_device_activations_rollback_check"');
   });
 });
