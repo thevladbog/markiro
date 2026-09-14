@@ -275,12 +275,18 @@ export function CatalogPage() {
       {policiesOpen ? (
         <CatalogDrawer
           title={t("catalog.offlinePolicies.title")}
-          dirty={false}
+          dirty={drawerDirty}
           busy={false}
-          closeLabel={t("catalog.closePanel")}
-          onClose={() => setPoliciesOpen(false)}
+          closeLabel={t("catalog.offlinePolicies.close")}
+          onClose={() => {
+            setPoliciesOpen(false);
+            setDrawerDirty(false);
+          }}
         >
-          <OfflineGrantPoliciesPanel canWrite={principal.capabilities.includes("catalog.write")} />
+          <OfflineGrantPoliciesPanel
+            canWrite={principal.capabilities.includes("catalog.write")}
+            onDirtyChange={setDrawerDirty}
+          />
         </CatalogDrawer>
       ) : null}
     </section>

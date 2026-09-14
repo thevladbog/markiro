@@ -1,7 +1,7 @@
 import { offlineGrantPolicySchema } from "@markiro/platform-contracts";
 import { Alert, Button, Input, StatusChip, Table, Textarea, type TableColumn } from "@markiro/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ApiRequestError } from "../../api/client.js";
 import {
@@ -14,7 +14,13 @@ import {
 const POLICY_QUERY_KEY = ["platform", "catalog", "lifecycle-policies"] as const;
 const EMPTY_BOUNDS = "{}";
 
-export function OfflineGrantPoliciesPanel({ canWrite }: { canWrite: boolean }) {
+export function OfflineGrantPoliciesPanel({
+  canWrite,
+  onDirtyChange,
+}: {
+  canWrite: boolean;
+  onDirtyChange?: (dirty: boolean) => void;
+}) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const policies = useQuery({ queryKey: POLICY_QUERY_KEY, queryFn: listOfflineGrantPolicies });
@@ -26,6 +32,27 @@ export function OfflineGrantPoliciesPanel({ canWrite }: { canWrite: boolean }) {
   const [selectedDraft, setSelectedDraft] = useState<string | null>(null);
   const [decisionReference, setDecisionReference] = useState("");
   const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
+
+  useEffect(() => {
+    onDirtyChange?.(
+      Boolean(
+        policyKey ||
+        version !== "1" ||
+        maxOfflineHours ||
+        maxCompletionHours ||
+        taskBounds !== EMPTY_BOUNDS ||
+        decisionReference,
+      ),
+    );
+  }, [
+    decisionReference,
+    maxCompletionHours,
+    maxOfflineHours,
+    onDirtyChange,
+    policyKey,
+    taskBounds,
+    version,
+  ]);
 
   const replace = (policy: OfflineGrantPolicyDto) => {
     queryClient.setQueryData<{ items: OfflineGrantPolicyDto[] }>(POLICY_QUERY_KEY, (current) => {
@@ -55,6 +82,11 @@ export function OfflineGrantPoliciesPanel({ canWrite }: { canWrite: boolean }) {
     },
     onSuccess: (policy) => {
       replace(policy);
+      setPolicyKey("");
+      setVersion("1");
+      setMaxOfflineHours("");
+      setMaxCompletionHours("");
+      setTaskBounds(EMPTY_BOUNDS);
       setSelectedDraft(policy.id);
       setMessage({ tone: "ok", text: t("catalog.offlinePolicies.created") });
     },

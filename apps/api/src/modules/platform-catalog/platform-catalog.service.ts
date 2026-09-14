@@ -34,6 +34,7 @@ import {
   offlineGrantPolicySchema,
   type ApproveOfflineGrantPolicy,
   type CreateOfflineGrantPolicy,
+  type OfflineGrantPolicy,
   type OfflineGrantPolicyRecord,
 } from "@markiro/platform-contracts";
 import { commercialTaxDefaults, isCommercialTaxAllowed } from "@markiro/domain";
@@ -51,6 +52,7 @@ type CatalogVersionListResponse = { items: CatalogVersion[] };
 type CatalogItemRow = typeof schema.catalogItems.$inferSelect;
 type CatalogVersionRow = typeof schema.catalogItemVersions.$inferSelect;
 type CatalogItemKind = CatalogItemRow["kind"];
+type LifecyclePolicyRow = typeof schema.entitlementLifecyclePolicies.$inferSelect;
 type CatalogTransaction = Parameters<Db["transaction"]>[0] extends (arg: infer T) => unknown
   ? T
   : never;
@@ -75,12 +77,19 @@ export class PlatformCatalogService {
     return platformOfflineGrantPolicyContracts.list.response.parse({
       items: rows.flatMap((row) => {
         const offlineGrant = row.payload.offlineGrant;
+        if (offlineGrant === undefined) return [];
+        const policy = offlineGrantPolicySchema.safeParse(offlineGrant);
+        if (!policy.success) {
+          throw new BadRequestException({ code: "lifecycle_policy_invalid" });
+        }
         const parsed =
-          platformOfflineGrantPolicyContracts.list.response.shape.items.element.safeParse({
-            ...row,
-            offlineGrant,
-          });
-        return parsed.success ? [parsed.data] : [];
+          platformOfflineGrantPolicyContracts.list.response.shape.items.element.safeParse(
+            offlineGrantPolicyRecord(row, policy.data),
+          );
+        if (!parsed.success) {
+          throw new BadRequestException({ code: "lifecycle_policy_invalid" });
+        }
+        return [parsed.data];
       }),
     });
   }
@@ -120,10 +129,9 @@ export class PlatformCatalogService {
           },
           requestId: null,
         });
-        return platformOfflineGrantPolicyContracts.create.response.parse({
-          ...created,
-          offlineGrant: input.offlineGrant,
-        });
+        return platformOfflineGrantPolicyContracts.create.response.parse(
+          offlineGrantPolicyRecord(created, input.offlineGrant),
+        );
       });
     } catch (error) {
       catalogDatabaseError(error);
@@ -151,10 +159,9 @@ export class PlatformCatalogService {
           if (current.decisionReference !== input.decisionReference) {
             throw new ConflictException({ code: "lifecycle_policy_already_approved" });
           }
-          return platformOfflineGrantPolicyContracts.approve.response.parse({
-            ...current,
-            offlineGrant: offlineGrant.data,
-          });
+          return platformOfflineGrantPolicyContracts.approve.response.parse(
+            offlineGrantPolicyRecord(current, offlineGrant.data),
+          );
         }
         const [approved] = await tx
           .update(schema.entitlementLifecyclePolicies)
@@ -180,10 +187,9 @@ export class PlatformCatalogService {
           after: { status: "approved", payloadHash: approved.payloadHash },
           requestId: null,
         });
-        return platformOfflineGrantPolicyContracts.approve.response.parse({
-          ...approved,
-          offlineGrant: offlineGrant.data,
-        });
+        return platformOfflineGrantPolicyContracts.approve.response.parse(
+          offlineGrantPolicyRecord(approved, offlineGrant.data),
+        );
       });
     } catch (error) {
       catalogDatabaseError(error);
@@ -1063,6 +1069,25 @@ function toAddonEffect(effect: typeof schema.addonEntitlements.$inferSelect): Ad
     return { key: effect.entitlementKey, quotaIncrement: effect.quotaIncrement };
   }
   return { key: effect.entitlementKey, featureEnabled: true };
+}
+
+function offlineGrantPolicyRecord(
+  row: LifecyclePolicyRow,
+  offlineGrant: OfflineGrantPolicy,
+): OfflineGrantPolicyRecord {
+  return {
+    id: row.id,
+    policyKey: row.policyKey,
+    version: row.version,
+    status: row.status,
+    offlineGrant,
+    payloadHash: row.payloadHash,
+    decisionReference: row.decisionReference,
+    approvedAt: row.approvedAt?.toISOString() ?? null,
+    approvedByPlatformUserId: row.approvedByPlatformUserId,
+    createdByPlatformUserId: row.createdByPlatformUserId,
+    createdAt: row.createdAt.toISOString(),
+  };
 }
 
 function catalogDatabaseError(error: unknown): never {

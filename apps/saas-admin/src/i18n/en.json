@@ -1276,6 +1276,7 @@
     "offlinePolicies": {
       "open": "Offline policies",
       "title": "Offline operation policies",
+      "close": "Close offline policy panel",
       "loading": "Loading policies",
       "loadError": "Could not load offline operation policies.",
       "empty": "No policies yet",
