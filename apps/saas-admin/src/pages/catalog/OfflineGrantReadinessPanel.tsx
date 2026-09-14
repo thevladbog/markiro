@@ -70,6 +70,7 @@ export function OfflineGrantReadinessPanel({
     () => onDirtyChange?.(selected.length > 0 || intent !== null || preview !== null),
     [intent, onDirtyChange, preview, selected.length],
   );
+  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
   useEffect(() => {
     setCursor(undefined);
     setCursorHistory([]);

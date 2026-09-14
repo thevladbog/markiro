@@ -6,6 +6,7 @@ import { I18nextProvider } from "react-i18next";
 
 import i18n from "../src/i18n/index.js";
 import { OfflineGrantReadinessPanel } from "../src/pages/catalog/OfflineGrantReadinessPanel.js";
+import { OfflineGrantPoliciesPanel } from "../src/pages/catalog/OfflineGrantPoliciesPanel.js";
 import {
   approvedPolicy,
   readinessList,
@@ -85,6 +86,48 @@ it("reports unsaved preview state until it is explicitly cleared", async () => {
   fireEvent.click(await screen.findByRole("button", { name: "Clear preview" }));
 
   await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false));
+});
+
+it("clears the drawer dirty state only when the readiness panel unmounts", async () => {
+  const onDirtyChange = vi.fn();
+  const view = setup(onDirtyChange);
+  fireEvent.click(await screen.findByRole("checkbox", { name: "Select Line station" }));
+  await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(true));
+  onDirtyChange.mockClear();
+
+  view.rerender(
+    <I18nextProvider i18n={i18n}>
+      <QueryClientProvider client={new QueryClient()}>
+        <ThemeProvider defaultTheme="light">
+          <div>gone</div>
+        </ThemeProvider>
+      </QueryClientProvider>
+    </I18nextProvider>,
+  );
+  expect(onDirtyChange).toHaveBeenCalledTimes(1);
+  expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+});
+
+it("connects each offline grant tab to its own tab panel", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => jsonResponse(200, { items: [approvedPolicy] })),
+  );
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <I18nextProvider i18n={i18n}>
+      <QueryClientProvider client={client}>
+        <ThemeProvider defaultTheme="light">
+          <OfflineGrantPoliciesPanel canWrite onDirtyChange={vi.fn()} />
+        </ThemeProvider>
+      </QueryClientProvider>
+    </I18nextProvider>,
+  );
+  const policiesTab = await screen.findByRole("tab", { name: "Policies" });
+  expect(policiesTab.getAttribute("aria-controls")).toBe("offline-grant-policies-panel");
+  expect(screen.getByRole("tabpanel").id).toBe("offline-grant-policies-panel");
+  fireEvent.click(screen.getByRole("tab", { name: "Pilot readiness" }));
+  expect(screen.getByRole("tabpanel").id).toBe("offline-grant-readiness-panel");
 });
 
 it("retries an uncertain preview with the original request identity", async () => {

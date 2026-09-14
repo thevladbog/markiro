@@ -89,7 +89,10 @@ import {
   reportStationGrantReadiness,
   refreshStationTaskAuthority,
 } from "./lib/offline-grants/transport.js";
-import { hasStationReadinessDeviceGrant } from "./lib/offline-grants/store.js";
+import {
+  hasStationReadinessDeviceGrant,
+  prepareStationGrantReadiness,
+} from "./lib/offline-grants/store.js";
 import {
   readInventoryExecutionProjection,
   readShiftExecutionProjection,
@@ -996,6 +999,16 @@ export function App() {
     const refreshReadiness = async () => {
       const version = await getVersion().catch(() => null);
       if (!version || !active || !credentialGenerationIsCurrent(credentialGeneration)) return;
+      const readinessInput = {
+        exec: tauriExecutor,
+        client: authenticatedClient,
+        configuredOrigin,
+        generation: credentialGeneration,
+        expectedDevice,
+        clientBuild: `station:${version}`,
+      } as const;
+      const pending = await prepareStationGrantReadiness(readinessInput);
+      if (pending) await reportStationGrantReadiness({ ...readinessInput, intent: pending });
       await refreshStationGrantConfiguration({
         exec: tauriExecutor,
         client: authenticatedClient,
@@ -1021,12 +1034,7 @@ export function App() {
       }
       if (!active || !credentialGenerationIsCurrent(credentialGeneration)) return;
       await reportStationGrantReadiness({
-        exec: tauriExecutor,
-        client: authenticatedClient,
-        configuredOrigin,
-        generation: credentialGeneration,
-        expectedDevice,
-        clientBuild: `station:${version}`,
+        ...readinessInput,
       });
     };
     const run = () => void refreshReadiness().catch(() => undefined);

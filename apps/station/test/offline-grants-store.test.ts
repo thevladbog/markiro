@@ -362,6 +362,59 @@ describe("signed Station grant installation", () => {
     ).toEqual({ attempts: 2, acknowledged: 1 });
   });
 
+  it("drains a lost readiness intent before refreshing configuration on the next run", async () => {
+    const { exec, generation } = await installedReadinessFixture();
+    const bodies: Array<{ requestId: string; installed: { policyRevision: string | null } }> = [];
+    let loseFirstResponse = true;
+    const client: Pick<StationClient, "get" | "post"> = {
+      async get<T>() {
+        return keyset as T;
+      },
+      async post<T>(path: string, body?: unknown) {
+        if (path !== "/station/grants/v1/readiness") throw new Error(`unexpected ${path}`);
+        const readiness = body as (typeof bodies)[number];
+        bodies.push(readiness);
+        if (loseFirstResponse) {
+          loseFirstResponse = false;
+          throw new Error("response lost");
+        }
+        return {
+          protocol: "offline-grants-v1",
+          requestId: readiness.requestId,
+          receivedAt: "2026-09-14T12:00:00.000Z",
+          accepted: true,
+          matchesCurrentConfiguration: true,
+          verifiedGrantMatched: true,
+        } as T;
+      },
+    };
+    const input = {
+      exec,
+      client,
+      configuredOrigin: origin,
+      generation,
+      expectedDevice: { tenantId: owner.tenantId, deviceId: owner.deviceId, kind: owner.kind },
+      clientBuild: "station:0.1.0",
+    } as const;
+    let configurationRefreshes = 0;
+    const run = async () => {
+      const pending = await prepareStationGrantReadiness(input);
+      if (pending) await reportStationGrantReadiness({ ...input, intent: pending });
+      configurationRefreshes += 1;
+      await exec.run("UPDATE offline_grant_keysets SET revision='fixture-r2'");
+      await reportStationGrantReadiness(input);
+    };
+
+    await expect(run()).rejects.toThrow("response lost");
+    expect(configurationRefreshes).toBe(0);
+    await expect(run()).resolves.toBeUndefined();
+    expect(configurationRefreshes).toBe(1);
+    expect(bodies).toHaveLength(3);
+    expect(bodies[1]).toEqual(bodies[0]);
+    expect(bodies[2]).toMatchObject({ installed: { keysetRevision: "fixture-r2" } });
+    expect(bodies[2]?.requestId).not.toBe(bodies[0]?.requestId);
+  });
+
   it("does not create or send readiness after the credential generation is sealed", async () => {
     const { db, exec, generation } = await installedReadinessFixture();
     await sealCredentialGeneration(generation);

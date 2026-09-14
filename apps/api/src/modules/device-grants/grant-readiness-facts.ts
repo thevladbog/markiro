@@ -75,6 +75,17 @@ export interface GrantReadinessFactFilters {
   deviceIds?: readonly string[];
 }
 
+export interface GrantReadinessFactCursor {
+  tenantId: string;
+  deviceKind: DeviceKind;
+  deviceId: string;
+}
+
+export interface GrantReadinessFactPage {
+  after?: GrantReadinessFactCursor;
+  limit: number;
+}
+
 export interface GrantReadinessSigningFacts {
   configured: boolean;
   keysetRevision: string | null;
@@ -153,6 +164,7 @@ export async function readGrantReadinessFacts(
   asOf: Date,
   filters: GrantReadinessFactFilters,
   signing: GrantReadinessSigningFacts,
+  page?: GrantReadinessFactPage,
 ): Promise<GrantReadinessFacts[]> {
   const rows: RawGrantReadinessRow[] = [];
   if (filters.deviceKind !== "kiosk") {
@@ -260,6 +272,9 @@ export async function readGrantReadinessFacts(
        and evidence.owner_kind = station_devices.kind
        and evidence.station_device_id = station_devices.id
       where ${deviceFilterSql("station_devices", filters)}
+        and ${pageBoundarySql("station_devices", page)}
+      order by station_devices.tenant_id, station_devices.kind, station_devices.id
+      ${limitSql(page)}
     `);
     rows.push(...result.rows);
   }
@@ -349,10 +364,14 @@ export async function readGrantReadinessFacts(
       ) evidence
         on evidence.tenant_id = kiosks.tenant_id and evidence.kiosk_id = kiosks.id
       where ${deviceFilterSql("kiosks", filters)}
+        and ${pageBoundarySql("kiosks", page)}
+      order by kiosks.tenant_id, kiosks.id
+      ${limitSql(page)}
     `);
     rows.push(...result.rows);
   }
-  return rows.map((row) => mapRawFacts(row, signing)).sort(compareFacts);
+  const facts = rows.map((row) => mapRawFacts(row, signing)).sort(compareFacts);
+  return page ? facts.slice(0, page.limit) : facts;
 }
 
 interface RawGrantReadinessRow extends Record<string, unknown> {
@@ -447,6 +466,27 @@ function deviceFilterSql(
       );
   }
   return sql.join(conditions, sql` and `);
+}
+
+function pageBoundarySql(
+  deviceTable: "station_devices" | "kiosks",
+  page: GrantReadinessFactPage | undefined,
+): SQL {
+  const after = page?.after;
+  if (!after) return sql`true`;
+  const tenant = sql.raw(`${deviceTable}.tenant_id`);
+  const id = sql.raw(`${deviceTable}.id`);
+  const kind = deviceTable === "station_devices" ? sql`station_devices.kind` : sql`'kiosk'::text`;
+  return sql`(
+    ${tenant} > ${after.tenantId}
+    or (${tenant} = ${after.tenantId} and ${kind} > ${after.deviceKind})
+    or (${tenant} = ${after.tenantId} and ${kind} = ${after.deviceKind}
+      and ${id} > ${after.deviceId}::uuid)
+  )`;
+}
+
+function limitSql(page: GrantReadinessFactPage | undefined): SQL {
+  return page ? sql`limit ${page.limit}` : sql``;
 }
 
 function mapRawFacts(

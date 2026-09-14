@@ -68,6 +68,12 @@ describe("offline grant client readiness contracts", () => {
     expect(
       grantClientReadinessRequestSchema.safeParse({ ...request, storageRevision: 0 }).success,
     ).toBe(false);
+    expect(
+      grantClientReadinessRequestSchema.safeParse({
+        ...request,
+        storageRevision: 2_147_483_648,
+      }).success,
+    ).toBe(false);
   });
 
   it("strictly validates the acknowledgement", () => {

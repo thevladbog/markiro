@@ -387,6 +387,49 @@ it("reopens and retries the exact durable kiosk readiness request before acknowl
   const { STORE_GRANT_READINESS, withStore } = await import("../src/store/db.js");
   expect(await withStore(STORE_GRANT_READINESS, "readonly", (store) => store.getAll())).toEqual([]);
 });
+
+it("atomically replaces readiness when the installed state changes for the same owner", async () => {
+  const owner = (await import("../src/store/installation-binding.js")).boxRegistryCredentialOwnerOf(
+    await writeConfig(config),
+  );
+  if (!owner) throw Error("owner");
+  const firstLease = await beginGrantRequest();
+  if (!firstLease) throw Error("lease");
+  await installGrantConfiguration(firstLease, {
+    protocol: "offline-grants-v1",
+    owner: { tenantId: "tenant", deviceId, kind: "kiosk", credentialEpoch: 7 },
+    serverTime: 1000,
+    mode: "observe",
+    policyRevision: "approved-v1",
+    keyset,
+  });
+  await installGrantResponse(firstLease, issued());
+  const first = await prepareKioskGrantReadiness(owner);
+  if (!first) throw Error("first readiness");
+
+  const secondLease = await beginGrantRequest();
+  if (!secondLease) throw Error("lease");
+  await installGrantConfiguration(secondLease, {
+    protocol: "offline-grants-v1",
+    owner: { tenantId: "tenant", deviceId, kind: "kiosk", credentialEpoch: 7 },
+    serverTime: 2000,
+    mode: "observe",
+    policyRevision: "approved-v2",
+    keyset: { ...keyset, revision: "opaque-next" },
+  });
+  const second = await prepareKioskGrantReadiness(owner);
+  expect(second?.requestId).not.toBe(first.requestId);
+  expect(second?.body.installed).toMatchObject({
+    policyRevision: "approved-v2",
+    keysetRevision: "opaque-next",
+  });
+  const { STORE_GRANT_READINESS, withStore } = await import("../src/store/db.js");
+  const saved = await withStore<unknown[]>(STORE_GRANT_READINESS, "readonly", (store) =>
+    store.getAll(),
+  );
+  expect(saved).toHaveLength(1);
+  expect(saved?.[0]).toMatchObject({ requestId: second?.requestId });
+});
 it("keeps approved configuration mode when a later envelope disagrees", async () => {
   const { installGrantConfiguration } = await import("../src/grants/transport.js");
   const lease = await beginGrantRequest();

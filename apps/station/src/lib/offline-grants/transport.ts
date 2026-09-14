@@ -22,6 +22,7 @@ import {
   installStationGrant,
   markStationGrantReadinessAttempt,
   prepareStationGrantReadiness,
+  type StationGrantReadinessIntent,
 } from "./store.js";
 import {
   assertExecutionScopeMatches,
@@ -320,8 +321,9 @@ export async function reportStationGrantReadiness(input: {
   generation: CredentialGeneration;
   expectedDevice: Pick<GrantOwner, "tenantId" | "deviceId" | "kind">;
   clientBuild: string;
+  intent?: StationGrantReadinessIntent;
 }): Promise<boolean> {
-  const intent = await prepareStationGrantReadiness(input);
+  const intent = input.intent ?? (await prepareStationGrantReadiness(input));
   if (!intent) return false;
   if (!(await markStationGrantReadinessAttempt(input.exec, intent, input.generation))) return false;
   if (!credentialGenerationIsCurrent(input.generation)) return false;

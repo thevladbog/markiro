@@ -152,7 +152,8 @@ internal class GrantTransport(private val db: HandheldDatabase, private val api:
 
     suspend fun flushReadinessIfAvailable(): Boolean = try {
         flushReadiness()
-    } catch (_: java.io.IOException) { false }
+    } catch (error: kotlinx.coroutines.CancellationException) { throw error }
+      catch (_: java.io.IOException) { false }
       catch (_: retrofit2.HttpException) { false }
       catch (_: IllegalArgumentException) { false }
       catch (_: IllegalStateException) { false }

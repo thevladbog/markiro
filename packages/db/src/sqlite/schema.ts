@@ -1410,6 +1410,7 @@ export const offlineGrantReadinessOutbox = sqliteTable(
     cancelledAt: text("cancelled_at"),
   },
   (t) => [
+    check("offline_grant_readiness_body_json", sql`json_valid(${t.bodyJson})`),
     check("offline_grant_readiness_attempts", sql`${t.attempts} >= 0`),
     check(
       "offline_grant_readiness_terminal",

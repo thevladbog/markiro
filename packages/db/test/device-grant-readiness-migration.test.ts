@@ -1,10 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { drizzle } from "drizzle-orm/node-postgres";
-import { migrate } from "drizzle-orm/node-postgres/migrator";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { runRuntimeMigrations } from "../src/runtime-migrate.js";
 
 const migrationsFolder = join(__dirname, "../migrations");
 const migrationPath = join(migrationsFolder, "0149_offline_grant_readiness.sql");
@@ -40,7 +39,11 @@ describe.skipIf(!process.env.DATABASE_URL)("offline grant readiness forward migr
   beforeAll(async () => {
     await admin.query(`CREATE DATABASE "${name}"`);
     created = true;
-    await migrate(drizzle(pool), { migrationsFolder });
+    await runRuntimeMigrations({
+      databaseUrl: databaseUrl.toString(),
+      migrationsFolder,
+      log: () => {},
+    });
     await pool.query(
       "INSERT INTO organization(id,name,slug,created_at) VALUES ('readiness-a','A','readiness-a',now()),('readiness-b','B','readiness-b',now())",
     );
@@ -142,7 +145,11 @@ describe.skipIf(!process.env.DATABASE_URL)("offline grant readiness forward migr
     const before = await pool.query(
       "SELECT indexname FROM pg_indexes WHERE tablename='device_grant_client_readiness_reports' ORDER BY indexname",
     );
-    await migrate(drizzle(pool), { migrationsFolder });
+    await runRuntimeMigrations({
+      databaseUrl: databaseUrl.toString(),
+      migrationsFolder,
+      log: () => {},
+    });
     const after = await pool.query(
       "SELECT indexname FROM pg_indexes WHERE tablename='device_grant_client_readiness_reports' ORDER BY indexname",
     );

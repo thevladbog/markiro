@@ -160,21 +160,31 @@ export function OfflineGrantPoliciesPanel({
     <div className="catalog-form">
       <DataTabs
         items={[
-          { id: "policies", label: t("catalog.offlinePolicies.tabs.policies") },
-          { id: "readiness", label: t("catalog.offlinePolicies.tabs.readiness") },
+          {
+            id: "policies",
+            label: t("catalog.offlinePolicies.tabs.policies"),
+            panelId: "offline-grant-policies-panel",
+          },
+          {
+            id: "readiness",
+            label: t("catalog.offlinePolicies.tabs.readiness"),
+            panelId: "offline-grant-readiness-panel",
+          },
         ]}
         activeId={activeTab}
         onChange={setActiveTab}
         label={t("catalog.offlinePolicies.tabs.label")}
       />
       {activeTab === "readiness" ? (
-        <OfflineGrantReadinessPanel
-          policies={policies.data.items}
-          canPreview={canWrite}
-          onDirtyChange={setReadinessDirty}
-        />
+        <div id="offline-grant-readiness-panel" role="tabpanel">
+          <OfflineGrantReadinessPanel
+            policies={policies.data.items}
+            canPreview={canWrite}
+            onDirtyChange={setReadinessDirty}
+          />
+        </div>
       ) : (
-        <>
+        <div id="offline-grant-policies-panel" role="tabpanel">
           <Alert tone="info">{t("catalog.offlinePolicies.observeOnly")}</Alert>
           <Table
             columns={columns}
@@ -260,7 +270,7 @@ export function OfflineGrantPoliciesPanel({
             </>
           ) : null}
           {message ? <Alert tone={message.tone}>{message.text}</Alert> : null}
-        </>
+        </div>
       )}
     </div>
   );

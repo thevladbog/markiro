@@ -21,6 +21,7 @@ import type { SubscriptionTransaction } from "../../subscriptions/entitlements.t
 import {
   classifyGrantReadiness,
   readGrantReadinessFacts,
+  type GrantReadinessFactCursor,
   type GrantReadinessFacts,
   type GrantReadinessSigningFacts,
   type GrantReadinessTargetPolicy,
@@ -73,30 +74,28 @@ export class PlatformGrantReadinessService {
     const asOf = cursor ? new Date(cursor.asOf) : this.now();
     const result = await this.db.transaction(
       async (tx) => {
-        const facts = await readGrantReadinessFacts(
+        const filters = {
+          ...(query.tenantId ? { tenantId: query.tenantId } : {}),
+          ...(query.deviceKind ? { deviceKind: query.deviceKind } : {}),
+        };
+        const page = await readFilteredRows(
           tx,
           asOf,
-          {
-            ...(query.tenantId ? { tenantId: query.tenantId } : {}),
-            ...(query.deviceKind ? { deviceKind: query.deviceKind } : {}),
-          },
+          filters,
           this.signingFacts,
+          query,
+          cursor ? factCursor(cursor.last) : undefined,
+          query.limit + 1,
         );
-        const rows = facts
-          .filter((fact) => !query.policyId || fact.currentPolicy?.id === query.policyId)
-          .map((fact) => toRow(fact, fact.currentPolicy ?? missingTargetPolicy(), asOf))
-          .filter((row) => !query.readiness || row.eligibility.status === query.readiness);
-        const aggregates = aggregate(rows);
-        const afterCursor = cursor
-          ? rows.filter((row) => compareRowToCursor(row, cursor) > 0)
-          : rows;
-        const page = afterCursor.slice(0, query.limit);
-        const hasMore = afterCursor.length > query.limit;
+        const aggregates = await readAggregates(tx, asOf, filters, this.signingFacts, query);
+        const hasMore = page.length > query.limit;
+        const items = page.slice(0, query.limit);
         return {
           asOf: asOf.toISOString(),
-          items: page,
+          items,
           aggregates,
-          nextCursor: hasMore && page.length > 0 ? encodeCursor(asOf, binding, page.at(-1)!) : null,
+          nextCursor:
+            hasMore && items.length > 0 ? encodeCursor(asOf, binding, items.at(-1)!) : null,
         };
       },
       { isolationLevel: "repeatable read", accessMode: "read only" },
@@ -306,16 +305,82 @@ function encodeCursor(asOf: Date, binding: Binding, row: PlatformGrantReadinessR
   ).toString("base64url");
 }
 
-function compareRowToCursor(row: PlatformGrantReadinessRow, cursor: Cursor): number {
-  return (
-    row.tenantId.localeCompare(cursor.last[0]) ||
-    row.deviceKind.localeCompare(cursor.last[1]) ||
-    row.deviceId.localeCompare(cursor.last[2])
-  );
-}
-
 function missingTargetPolicy(): GrantReadinessTargetPolicy {
   return { id: "00000000-0000-0000-0000-000000000000", revision: "missing", approved: false };
+}
+
+type ReadinessTx = SubscriptionTransaction;
+
+async function readFilteredRows(
+  tx: ReadinessTx,
+  asOf: Date,
+  filters: Parameters<typeof readGrantReadinessFacts>[2],
+  signing: GrantReadinessSigningFacts,
+  query: PlatformGrantReadinessListQuery,
+  after: GrantReadinessFactCursor | undefined,
+  limit: number,
+): Promise<PlatformGrantReadinessRow[]> {
+  const rows: PlatformGrantReadinessRow[] = [];
+  let boundary = after;
+  while (rows.length < limit) {
+    const batchLimit = limit - rows.length;
+    const facts = await readGrantReadinessFacts(tx, asOf, filters, signing, {
+      ...(boundary ? { after: boundary } : {}),
+      limit: batchLimit,
+    });
+    if (facts.length === 0) break;
+    boundary = factCursorFromFacts(facts.at(-1)!);
+    rows.push(
+      ...facts
+        .filter((fact) => !query.policyId || fact.currentPolicy?.id === query.policyId)
+        .map((fact) => toRow(fact, fact.currentPolicy ?? missingTargetPolicy(), asOf))
+        .filter((row) => !query.readiness || row.eligibility.status === query.readiness),
+    );
+    if (facts.length < batchLimit) break;
+  }
+  return rows.slice(0, limit);
+}
+
+async function readAggregates(
+  tx: ReadinessTx,
+  asOf: Date,
+  filters: Parameters<typeof readGrantReadinessFacts>[2],
+  signing: GrantReadinessSigningFacts,
+  query: PlatformGrantReadinessListQuery,
+) {
+  const result = { total: 0, eligible: 0, blocked: 0, reasons: {} } as ReturnType<typeof aggregate>;
+  let boundary: GrantReadinessFactCursor | undefined;
+  for (;;) {
+    const facts = await readGrantReadinessFacts(tx, asOf, filters, signing, {
+      ...(boundary ? { after: boundary } : {}),
+      limit: 500,
+    });
+    if (facts.length === 0) break;
+    boundary = factCursorFromFacts(facts.at(-1)!);
+    const batch = aggregate(
+      facts
+        .filter((fact) => !query.policyId || fact.currentPolicy?.id === query.policyId)
+        .map((fact) => toRow(fact, fact.currentPolicy ?? missingTargetPolicy(), asOf))
+        .filter((row) => !query.readiness || row.eligibility.status === query.readiness),
+    );
+    result.total += batch.total;
+    result.eligible += batch.eligible;
+    result.blocked += batch.blocked;
+    for (const [reason, count] of Object.entries(batch.reasons) as Array<
+      [GrantReadinessReason, number]
+    >)
+      result.reasons[reason] = (result.reasons[reason] ?? 0) + count;
+    if (facts.length < 500) break;
+  }
+  return result;
+}
+
+function factCursor(last: Cursor["last"]): GrantReadinessFactCursor {
+  return { tenantId: last[0], deviceKind: last[1], deviceId: last[2] };
+}
+
+function factCursorFromFacts(fact: GrantReadinessFacts): GrantReadinessFactCursor {
+  return { tenantId: fact.tenantId, deviceKind: fact.deviceKind, deviceId: fact.deviceId };
 }
 
 function invalidPreview(code: string) {

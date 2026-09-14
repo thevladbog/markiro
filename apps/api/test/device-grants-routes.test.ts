@@ -63,6 +63,13 @@ describe.skipIf(!ready)("native grant route boundaries", () => {
   afterAll(async () => {
     await app?.close();
   });
+  it("does not register platform readiness routes without platform authentication", async () => {
+    await request(app.getHttpServer()).get("/platform/offline-grants/readiness").expect(404);
+    await request(app.getHttpServer())
+      .post("/platform/offline-grants/readiness/preview")
+      .send({})
+      .expect(404);
+  });
   async function fixture(policyConfigured = true) {
     const agent = request.agent(app.getHttpServer()),
       tenantId = await signUpAndActivate(agent);

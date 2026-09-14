@@ -73,7 +73,7 @@ export const grantClientReadinessRequestSchema = grantNegotiationSchema
   .extend({
     capability: z.literal("offline-grants-readiness-v1"),
     clientBuild: z.string().min(1).max(100),
-    storageRevision: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+    storageRevision: z.number().int().positive().max(2_147_483_647),
     installed: z
       .object({
         mode: z.enum(["observe", "strict"]),

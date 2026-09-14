@@ -1,5 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { getTableName } from "drizzle-orm";
+import { getTableConfig as getSqliteTableConfig } from "drizzle-orm/sqlite-core";
 import { describe, expect, it } from "vitest";
 import { assessClock } from "@markiro/domain";
 import { STATION_MIGRATIONS } from "../src/sqlite/migrations.js";
@@ -43,6 +44,11 @@ function database(): DatabaseSync {
 }
 
 describe("offline grant SQLite ledger", () => {
+  it("declares readiness body JSON validity in the Drizzle schema", () => {
+    expect(
+      getSqliteTableConfig(offlineGrantReadinessOutbox).checks.map((item) => item.name),
+    ).toContain("offline_grant_readiness_body_json");
+  });
   it("exports every authoritative offline grant table from the Drizzle schema", () => {
     expect(
       [

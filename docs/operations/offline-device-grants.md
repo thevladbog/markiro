@@ -118,8 +118,8 @@ Client build and storage revision are diagnostics. Accepted offline evidence is
 shown separately because it records protocol use but is neither required for a
 new client nor proof of physical acceptance.
 
-Preview accepts up to 200 unique eligible device IDs and returns a single `asOf`,
-the exact rows, reason aggregates and a digest. A new successful preview gets a
+Preview accepts up to 200 unique device IDs and returns an eligible or blocked
+result for every ID, a single `asOf`, the exact rows, reason aggregates and a digest. A new successful preview gets a
 new request ID, time and digest; retry after an uncertain HTTP outcome reuses the
 unchanged request. The digest is input for the future P1D.2 prepare/confirm flow.
 P1D.1 has no confirm, activation or cohort-policy mutation route.

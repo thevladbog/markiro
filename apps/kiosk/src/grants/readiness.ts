@@ -55,10 +55,6 @@ async function intents(): Promise<KioskGrantReadinessIntent[]> {
 export async function prepareKioskGrantReadiness(
   owner: BoxRegistryCredentialOwner,
 ): Promise<KioskGrantReadinessIntent | null> {
-  const existing = (await intents()).find((row) =>
-    sameBoxRegistryCredentialOwner(row.owner, owner),
-  );
-  if (existing) return existing;
   const state = await readGrantState();
   const device = state?.device;
   if (
@@ -83,6 +79,10 @@ export async function prepareKioskGrantReadiness(
       verifiedGrantId: device.grant.grantId,
     },
   });
+  const existing = (await intents()).find((row) =>
+    sameBoxRegistryCredentialOwner(row.owner, owner),
+  );
+  if (existing && sameInstalledState(existing.body.installed, body.installed)) return existing;
   const intent = { requestId, owner, body } satisfies KioskGrantReadinessIntent;
   let stored = false;
   await withTransaction([STORE_CONFIG, STORE_GRANT_READINESS], "readwrite", (tx) => {
@@ -90,11 +90,24 @@ export async function prepareKioskGrantReadiness(
     configRequest.onsuccess = () => {
       const current = boxRegistryCredentialOwnerOf(configRequest.result);
       if (!sameBoxRegistryCredentialOwner(current, owner)) return;
+      if (existing) tx.objectStore(STORE_GRANT_READINESS).delete(existing.requestId);
       tx.objectStore(STORE_GRANT_READINESS).add(intent);
       stored = true;
     };
   });
   return stored ? intent : null;
+}
+
+function sameInstalledState(
+  left: GrantClientReadinessRequest["installed"],
+  right: GrantClientReadinessRequest["installed"],
+): boolean {
+  return (
+    left.mode === right.mode &&
+    left.policyRevision === right.policyRevision &&
+    left.keysetRevision === right.keysetRevision &&
+    left.verifiedGrantId === right.verifiedGrantId
+  );
 }
 
 async function acknowledge(intent: KioskGrantReadinessIntent): Promise<boolean> {

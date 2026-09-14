@@ -12,6 +12,7 @@ import okhttp3.OkHttpClient
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.mockwebserver.*
 import okhttp3.mockwebserver.SocketPolicy.DISCONNECT_AFTER_REQUEST
+import okhttp3.mockwebserver.SocketPolicy.NO_RESPONSE
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -145,6 +146,22 @@ class GrantTransportTest {
             val retry=checkNotNull(server.takeRequest(5,TimeUnit.SECONDS))
             assertEquals(firstBody,retry.body.readUtf8())
             assertTrue(db.grantDao().pendingReadiness(owner.grantOwnerKey(),1).isEmpty())
+        } finally { db.close(); server.shutdown() }
+    }
+
+    @Test fun readinessCancellationStopsTheRefreshCoroutine() = runTest {
+        val server=MockWebServer(); server.start(); val db=database(server.url("/").toString().trimEnd('/'))
+        try {
+            val owner=db.recovery.token().owner; val transport=GrantTransport(db,api(server))
+            server.enqueue(response(configuration(envelope(owner))))
+            server.enqueue(response(envelope(owner)))
+            assertTrue(transport.refreshIfAvailable())
+            server.takeRequest(5,TimeUnit.SECONDS); server.takeRequest(5,TimeUnit.SECONDS)
+            server.enqueue(MockResponse().setSocketPolicy(NO_RESPONSE))
+            val failure = runCatching {
+                withTimeout(100) { transport.flushReadinessIfAvailable() }
+            }.exceptionOrNull()
+            assertTrue(failure is TimeoutCancellationException)
         } finally { db.close(); server.shutdown() }
     }
 
