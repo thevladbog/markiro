@@ -643,6 +643,8 @@ export type {
 export * from "./entitlements.js";
 export * from "./catalog-v3.js";
 export * from "./tenants-v3.js";
+export * from "./catalog-v4.js";
+export * from "./service-periods.js";
 
 export {
   stationRecoveryIdentitySchema,

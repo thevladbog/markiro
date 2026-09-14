@@ -14,6 +14,22 @@ export const commercialDocumentNameSchema = z.string().trim().min(1).max(300);
 export const sellerPolicyRevisionSchema = z.number().int().positive().max(2_147_483_647);
 const vatRateBpsSchema = z.number().int().min(0).max(10_000);
 
+const nullableServiceTextSchema = z.string().trim().min(1).max(1_000).nullable();
+export const monthlyServiceTermsSchema = z
+  .object({
+    cadence: z.literal("month"),
+    includedMinutes: z.number().int().min(1).max(100_000),
+    carryover: z.literal("none"),
+    excessPolicy: z.literal("external_approval"),
+    scopeRu: z.string().trim().min(1).max(4_000),
+    scopeEn: z.string().trim().min(1).max(4_000).nullable(),
+    operatingHoursRu: nullableServiceTextSchema,
+    operatingHoursEn: nullableServiceTextSchema,
+    schedulingTermsRu: nullableServiceTextSchema,
+    schedulingTermsEn: nullableServiceTextSchema,
+  })
+  .strict();
+
 export const sellerTaxPolicySchema = z
   .discriminatedUnion("kind", [
     z.object({ kind: z.literal("without_vat"), regime: z.enum(["npd", "other"]) }).strict(),
@@ -93,6 +109,25 @@ export const commercialLineTermsSchema = z
       ctx.addIssue({ code: "custom", message: "Subject and commercial period must agree" });
   });
 
+const recurringServiceLineTermsSchema = z
+  .object({
+    version: z.literal(2),
+    subject: z.enum(["service", "development_work"]),
+    documentNameRu: commercialDocumentNameSchema,
+    documentNameEn: commercialDocumentNameSchema.nullable(),
+    sellerPolicyRevision: sellerPolicyRevisionSchema,
+    billingPeriod: z.literal("month"),
+    billingTimezone: z.literal("Europe/Moscow"),
+    activationRule: z.literal("after_current"),
+    serviceTerms: monthlyServiceTermsSchema,
+  })
+  .strict();
+
+export const commercialLineTermsV4Schema = z.union([
+  commercialLineTermsSchema,
+  recurringServiceLineTermsSchema,
+]);
+
 export const catalogCommercialMetadataShape = {
   documentNameRu: commercialDocumentNameSchema.nullable(),
   documentNameEn: commercialDocumentNameSchema.nullable(),
@@ -123,6 +158,8 @@ export function validateCommercialLineKind(
     });
 }
 export type CommercialLineTerms = z.output<typeof commercialLineTermsSchema>;
+export type CommercialLineTermsV4 = z.output<typeof commercialLineTermsV4Schema>;
+export type MonthlyServiceTerms = z.output<typeof monthlyServiceTermsSchema>;
 export type { CommercialPeriod, SellerTaxPolicy } from "@markiro/domain";
 
 /** Document order is sale intent; response schemas deliberately do not enforce this new-sale rule. */

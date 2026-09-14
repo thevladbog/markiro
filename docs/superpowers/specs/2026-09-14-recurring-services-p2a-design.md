@@ -163,10 +163,12 @@ Add `service_usage_entries` with:
 
 A usage entry has a positive actual-minute delta and a nonnegative
 allowance-minute delta. `product_defect` requires a zero allowance-minute delta.
-A correction references one earlier entry in the same tenant and period,
-inherits its classification, has at least one nonzero signed delta and does not
-edit or delete the original. Corrections cannot make cumulative actual time or
-allowance consumption negative.
+A correction references one earlier entry in the same tenant and period, records
+the resulting classification, has at least one nonzero signed delta and does not
+edit or delete the original. Its classification may differ from the original so
+charged work can be reclassified as a product defect by returning its allowance
+minutes. Corrections cannot make cumulative actual time or allowance consumption
+negative.
 
 Work may be entered after a period ends, but its `performed_at` must be inside
 that period. Late entry never consumes a later period's allowance.

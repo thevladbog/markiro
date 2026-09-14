@@ -9,13 +9,21 @@ interface CatalogPatchCommercialFields {
   readonly billingPeriod?: "month" | "year" | null | undefined;
 }
 
+function isRecurringServicePayload(value: object | undefined): boolean {
+  return value !== undefined && "cadence" in value && value.cadence === "month";
+}
+
 // Internal shared invariant; each negotiated schema retains its own strict field definitions.
 export function validateCatalogPatchCommercialTerms(
   value: CatalogPatchCommercialFields,
   ctx: z.RefinementCtx,
 ): void {
+  const recurringService = isRecurringServicePayload(value.service);
   const recurring =
-    value.plan !== undefined || value.addon !== undefined || value.subject === "software_license";
+    value.plan !== undefined ||
+    value.addon !== undefined ||
+    value.subject === "software_license" ||
+    recurringService;
   const service =
     value.service !== undefined ||
     value.subject === "service" ||
@@ -23,8 +31,13 @@ export function validateCatalogPatchCommercialTerms(
   if (
     (recurring && (value.billingMode === "one_time" || value.billingPeriod === null)) ||
     (service &&
+      !recurringService &&
       (value.billingMode === "recurring" ||
         (value.billingPeriod !== undefined && value.billingPeriod !== null))) ||
+    (recurringService &&
+      (value.billingMode === "one_time" ||
+        value.billingPeriod === null ||
+        value.billingPeriod === "year")) ||
     (value.billingMode === "one_time" && value.billingPeriod != null) ||
     (value.billingMode === "recurring" && value.billingPeriod === null)
   )

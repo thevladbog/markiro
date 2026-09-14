@@ -76,7 +76,7 @@
 - Produces: `monthlyServiceTermsSchema`, `commercialLineTermsV4Schema`, `servicePeriodRevisionSchema`, `platformServicePeriodContracts`, `tenantServicePeriodContracts`, `ServicePeriodDetail`, `ServiceUsagePostInput` and the two new platform capabilities.
 - Consumes: existing primitive schemas, V1–V3 catalog schemas and `platformCapabilitiesForRole` ordering.
 
-- [ ] **Step 1: Write failing V4 catalog and line-term tests**
+- [x] **Step 1: Write failing V4 catalog and line-term tests**
 
 ```ts
 const recurring = catalogVersionCreateV4Schema.parse({
@@ -106,7 +106,7 @@ expect(() => catalogVersionCreateSchema.parse(recurring)).toThrow();
 expect(() => catalogVersionCreateV4Schema.parse({ ...recurring, billingPeriod: "year" })).toThrow();
 ```
 
-- [ ] **Step 2: Write failing ledger-contract and role tests**
+- [x] **Step 2: Write failing ledger-contract and role tests**
 
 ```ts
 expect(platformCapabilitiesForRole.support).toEqual(
@@ -130,13 +130,13 @@ expect(
 ).toMatchObject({ actualMinutes: 45, allowanceMinutes: 45 });
 ```
 
-- [ ] **Step 3: Run the contract tests and confirm they fail on missing exports**
+- [x] **Step 3: Run the contract tests and confirm they fail on missing exports**
 
 Run: `corepack pnpm@11.22.0 --filter @markiro/platform-contracts exec vitest run test/catalog-v4.test.ts test/service-periods.test.ts test/commercial-terms.test.ts test/platform-auth.test.ts`
 
 Expected: FAIL because V4 and service-period schemas do not exist.
 
-- [ ] **Step 4: Implement strict monthly-service and ledger schemas**
+- [x] **Step 4: Implement strict monthly-service and ledger schemas**
 
 ```ts
 export const monthlyServiceTermsSchema = z
@@ -178,17 +178,17 @@ export type ServicePeriodDetail = z.output<typeof platformServicePeriodDetailSch
 export type ServiceUsagePostInput = z.output<typeof serviceUsagePostSchema>;
 ```
 
-- [ ] **Step 5: Add V4 catalog unions and exact role capability ordering**
+- [x] **Step 5: Add V4 catalog unions and exact role capability ordering**
 
 Keep `catalogVersionCreateSchema` and existing response schemas unchanged. Export new `catalogVersionCreateV4Schema`, `catalogVersionPatchV4Schema` and `catalogVersionV4Schema` unions that add the monthly service branch. Insert `services.read` and `services.write` in `platformCapabilitySchema`; use the same order in every role array so `platformPrincipalSchema` remains exact.
 
-- [ ] **Step 6: Run all affected contract tests**
+- [x] **Step 6: Run all affected contract tests**
 
 Run: `corepack pnpm@11.22.0 --filter @markiro/platform-contracts test`
 
 Expected: PASS, including explicit rejection of annual services, carryover, auto-overage, quantity outside one and unknown fields.
 
-- [ ] **Step 7: Commit the contract boundary**
+- [x] **Step 7: Commit the contract boundary**
 
 ```bash
 git add packages/platform-contracts
@@ -648,7 +648,7 @@ const [updated] = await tx
   .returning();
 ```
 
-For corrections and withdrawals, lock the referenced row after the period and reject a cross-period reference. Store canonical request hash and exact response. Map only the matching `(tenant_id, request_id)` unique violation to request conflict; rethrow all other database errors.
+For corrections and withdrawals, lock the referenced row after the period and reject a cross-period reference. A correction records its resulting classification; changing `customer_service` to `product_defect` uses a negative allowance delta that returns the original charge. Store canonical request hash and exact response. Map only the matching `(tenant_id, request_id)` unique violation to request conflict; rethrow all other database errors.
 
 - [ ] **Step 5: Add exact audit facts and bounded pagination**
 
