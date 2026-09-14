@@ -1,7 +1,7 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { categorySchemaDefinitionSchema } from "@markiro/domain";
 import { schema, type Db } from "@markiro/db";
-import { and, eq, inArray, isNotNull, ne } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, ne } from "drizzle-orm";
 
 import { DB } from "../../auth/auth.module";
 import type { PlatformPrincipal } from "../../platform-auth/platform-access-policy";
@@ -26,6 +26,9 @@ export interface NationalCatalogSchemaObservation {
 }
 
 export interface NationalCatalogSchemaRepository {
+  list(): Promise<{
+    versions: NationalCatalogSchemaListItem[];
+  }>;
   observe(observation: NationalCatalogSchemaObservation): Promise<{ inserted: boolean }>;
   activate(
     schemaVersionId: string,
@@ -57,6 +60,31 @@ export interface NationalCatalogSchemaRepository {
   ): Promise<{ schemaVersionId: string; mappingCount: number; reviewedAt: string }>;
 }
 
+export interface NationalCatalogSchemaListItem {
+  id: string;
+  categoryId: string;
+  categoryName: string;
+  status: "observed" | "validated" | "active" | "retired";
+  fetchedAt: string;
+  activatedAt: string | null;
+  blockedReasons: Array<{
+    code:
+      | "duplicate_attribute_id"
+      | "unsupported_dependency"
+      | "unsupported_requirement_type"
+      | "unsupported_unique_multiplicity"
+      | "unsupported_value_type"
+      | "invalid_preset_contract";
+    attributeId: string;
+  }>;
+  mappings: Array<{
+    chzProductGroupCode: number;
+    chzProductGroupName: string;
+    state: "exact" | "ambiguous" | "unmapped";
+    reviewedAt: string | null;
+  }>;
+}
+
 export interface NationalCatalogReviewedAttributeMapping {
   sourceAttributeId: string;
   targetField: "name" | "print_name" | "shelf_life_days";
@@ -68,6 +96,65 @@ export const NATIONAL_CATALOG_SCHEMA_REPOSITORY = Symbol("NATIONAL_CATALOG_SCHEM
 
 export class DrizzleNationalCatalogSchemaRepository implements NationalCatalogSchemaRepository {
   constructor(private readonly db: Db) {}
+
+  async list() {
+    const [versions, mappings] = await Promise.all([
+      this.db
+        .select({
+          id: schema.nationalCatalogSchemaVersions.id,
+          categoryId: schema.nationalCatalogSchemaVersions.categoryId,
+          categoryName: schema.nationalCatalogSchemaVersions.categoryName,
+          status: schema.nationalCatalogSchemaVersions.status,
+          fetchedAt: schema.nationalCatalogSchemaVersions.fetchedAt,
+          activatedAt: schema.nationalCatalogSchemaVersions.activatedAt,
+          definition: schema.nationalCatalogSchemaVersions.definition,
+        })
+        .from(schema.nationalCatalogSchemaVersions)
+        .orderBy(desc(schema.nationalCatalogSchemaVersions.fetchedAt)),
+      this.db
+        .select({
+          schemaVersionId: schema.nationalCatalogCategoryGroupMappings.schemaVersionId,
+          chzProductGroupCode: schema.nationalCatalogCategoryGroupMappings.chzProductGroupCode,
+          chzProductGroupName: schema.chzProductGroups.name,
+          state: schema.nationalCatalogCategoryGroupMappings.state,
+          reviewedAt: schema.nationalCatalogCategoryGroupMappings.reviewedAt,
+        })
+        .from(schema.nationalCatalogCategoryGroupMappings)
+        .innerJoin(
+          schema.chzProductGroups,
+          eq(
+            schema.chzProductGroups.code,
+            schema.nationalCatalogCategoryGroupMappings.chzProductGroupCode,
+          ),
+        ),
+    ]);
+    const mappingsByVersion = new Map<string, NationalCatalogSchemaListItem["mappings"]>();
+    for (const mapping of mappings) {
+      if (!mapping.schemaVersionId) continue;
+      const item = {
+        chzProductGroupCode: mapping.chzProductGroupCode,
+        chzProductGroupName: mapping.chzProductGroupName,
+        state: mapping.state,
+        reviewedAt: mapping.reviewedAt?.toISOString() ?? null,
+      };
+      mappingsByVersion.set(mapping.schemaVersionId, [
+        ...(mappingsByVersion.get(mapping.schemaVersionId) ?? []),
+        item,
+      ]);
+    }
+    return {
+      versions: versions.map((version) => ({
+        id: version.id,
+        categoryId: version.categoryId,
+        categoryName: version.categoryName,
+        status: version.status,
+        fetchedAt: version.fetchedAt.toISOString(),
+        activatedAt: version.activatedAt?.toISOString() ?? null,
+        blockedReasons: blockedReasonsFromDefinition(version.definition),
+        mappings: mappingsByVersion.get(version.id) ?? [],
+      })),
+    };
+  }
 
   async observe(observation: NationalCatalogSchemaObservation) {
     return this.db.transaction(async (tx) => {
@@ -390,6 +477,15 @@ export class NationalCatalogSchemaService {
     private readonly now: () => Date = () => new Date(),
   ) {}
 
+  async list() {
+    const result = await this.repository.list();
+    return {
+      configured: Boolean(this.baseUrl && this.sourceTenantId),
+      sourceTenantId: this.sourceTenantId ?? null,
+      versions: result.versions,
+    };
+  }
+
   async refresh(sourceTenantId: string, principal?: PlatformPrincipal) {
     if (!this.baseUrl || !this.sourceTenantId) {
       throw new ConflictException({ code: "NATIONAL_CATALOG_UNCONFIGURED" });
@@ -478,6 +574,45 @@ export class NationalCatalogSchemaService {
   ) {
     return this.repository.reviewAttributeMappings(schemaVersionId, mappings, principal);
   }
+}
+
+function blockedReasonsFromDefinition(
+  definition: unknown,
+): NationalCatalogSchemaListItem["blockedReasons"] {
+  if (!isUnknownRecord(definition)) return [];
+  const reasons = definition["blockedReasons"];
+  if (!isUnknownArray(reasons)) return [];
+  const result: NationalCatalogSchemaListItem["blockedReasons"] = [];
+  for (const reason of reasons) {
+    if (!isUnknownRecord(reason)) continue;
+    const code = reason["code"];
+    const attributeId = reason["attributeId"];
+    if (!isBlockedReasonCode(code) || typeof attributeId !== "string" || attributeId.length === 0)
+      continue;
+    result.push({ code, attributeId });
+  }
+  return result;
+}
+
+function isUnknownRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isUnknownArray(value: unknown): value is unknown[] {
+  return Array.isArray(value);
+}
+
+function isBlockedReasonCode(
+  value: unknown,
+): value is NationalCatalogSchemaListItem["blockedReasons"][number]["code"] {
+  return (
+    value === "duplicate_attribute_id" ||
+    value === "unsupported_dependency" ||
+    value === "unsupported_requirement_type" ||
+    value === "unsupported_unique_multiplicity" ||
+    value === "unsupported_value_type" ||
+    value === "invalid_preset_contract"
+  );
 }
 
 export const nationalCatalogSchemaRepositoryProvider = {

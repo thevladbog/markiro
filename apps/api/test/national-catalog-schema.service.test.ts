@@ -40,6 +40,7 @@ function subject(
   options: { attributesStatus?: "ok" | "invalid_response"; inserted?: boolean } = {},
 ) {
   const repository: NationalCatalogSchemaRepository = {
+    list: vi.fn(async () => ({ versions: [] })),
     observe: vi.fn(async () => ({ inserted: options.inserted ?? true })),
     activate: vi.fn(),
     reviewGroupMapping: vi.fn(),
@@ -86,6 +87,15 @@ function subject(
 }
 
 describe("NationalCatalogSchemaService", () => {
+  it("reports the configured source tenant with the stored operator view", async () => {
+    const test = subject();
+    await expect(test.service.list()).resolves.toEqual({
+      configured: true,
+      sourceTenantId: "source-tenant",
+      versions: [],
+    });
+  });
+
   it("discovers attributes per active category and persists an observed v2 schema", async () => {
     const test = subject();
     await expect(test.service.refresh("source-tenant")).resolves.toEqual({

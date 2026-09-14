@@ -1132,6 +1132,7 @@
     "payments": "Payments",
     "billingRequests": "Requests",
     "monitoring": "Monitoring",
+    "nationalCatalog": "National Catalog",
     "team": "Team",
     "audit": "Audit",
     "reports": "Reports",
@@ -1213,6 +1214,40 @@
   "monitoring": {
     "title": "Monitoring",
     "description": "Current readiness of core services and integrations."
+  },
+  "nationalCatalog": {
+    "title": "National Catalog",
+    "description": "Discover, review, and activate Chestny ZNAK categories.",
+    "refresh": "Refresh categories",
+    "loading": "Loading categories",
+    "loadFailed": "Could not load category state.",
+    "actionFailed": "The operation failed. Check the integration and try again.",
+    "unconfigured": "The National Catalog integration is not configured.",
+    "empty": "No categories have been discovered yet.",
+    "review": "Confirm mapping",
+    "activate": "Activate category",
+    "reviewed": "Mapping confirmed.",
+    "activated": "Category activated.",
+    "refreshResult": "Loaded: {{categories}}; new: {{observed}}; unchanged: {{unchanged}}; blocked: {{blocked}}; failed: {{failed}}.",
+    "status": {
+      "observed": "Observed",
+      "validated": "Validated",
+      "active": "Active",
+      "retired": "Retired"
+    },
+    "mapping": {
+      "exact": "Mapping confirmed",
+      "ambiguous": "Needs review",
+      "unmapped": "Unmapped"
+    },
+    "blockReason": {
+      "duplicate_attribute_id": "Duplicate attribute",
+      "unsupported_dependency": "Unsupported dependency",
+      "unsupported_requirement_type": "Unsupported requirement type",
+      "unsupported_unique_multiplicity": "Unsupported unique multiplicity",
+      "unsupported_value_type": "Unsupported value type",
+      "invalid_preset_contract": "Invalid preset contract"
+    }
   },
   "navigationGuard": {
     "title": "Unsaved changes",

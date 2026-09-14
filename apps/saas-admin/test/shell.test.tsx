@@ -34,6 +34,9 @@ describe("SaaS-admin operational shell", () => {
     expect(screen.getByRole("link", { name: "Мониторинг" }).getAttribute("href")).toBe(
       "/monitoring",
     );
+    expect(screen.getByRole("link", { name: "Национальный каталог" }).getAttribute("href")).toBe(
+      "/national-catalog",
+    );
     expect(screen.getByRole("link", { name: "Наша организация" }).getAttribute("href")).toBe(
       "/settings/organization",
     );
@@ -50,6 +53,7 @@ describe("SaaS-admin operational shell", () => {
     expect(await screen.findByRole("heading", { name: "Операционный обзор" })).toBeDefined();
     expect(screen.getByRole("link", { name: "Мониторинг" })).toBeDefined();
     expect(screen.getByRole("link", { name: "Каталог" })).toBeDefined();
+    expect(screen.getByRole("link", { name: "Национальный каталог" })).toBeDefined();
     expect(screen.queryByRole("link", { name: "Предложения" })).toBeNull();
     expect(screen.queryByRole("link", { name: "Счета" })).toBeNull();
     expect(screen.queryByRole("link", { name: "Акты" })).toBeNull();
