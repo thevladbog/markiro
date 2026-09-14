@@ -125,16 +125,10 @@ function blockReason(
 ): NationalCatalogSchemaBlockCode | null {
   if (attribute.multiplicityType === "unique") return "unsupported_unique_multiplicity";
   if (requirementLevel(attribute.type) === null) return "unsupported_requirement_type";
-  // The provider moves large or searchable value sets behind `preset_url`.
-  // Their absence from the inline `attr_preset` array is therefore a valid
-  // remote-preset contract, not an empty closed enum. Keep the field as a
-  // plain typed value until Markiro has a dedicated remote suggestion control.
-  if (
-    attribute.presetOnly &&
-    attribute.preset.length === 0 &&
-    (attribute.presetUrl === null || attribute.presetUrl.trim().length === 0)
-  )
-    return "invalid_preset_contract";
+  // The provider may omit an inline preset for large remote dictionaries and
+  // for system fields whose values are resolved only in card context. Keep an
+  // empty preset field as a plain typed value rather than inventing choices or
+  // blocking the whole category schema.
   if (normalizedValueType(attribute) === null) return "unsupported_value_type";
   return null;
 }
@@ -177,6 +171,11 @@ function appendConditionalRequirements(
         // That target is intentionally absent from the editable definition,
         // so it must not invalidate the usable trigger and sibling fields.
         if (targetSource?.type === "b") continue;
+        // Some category responses retain a dependency on a provider field that
+        // is absent from the same attribute response. There is no editable
+        // target or enforceable rule to project, so preserve the trigger and
+        // usable siblings while keeping the raw dependency in the observation.
+        if (targetId !== null && !target && !targetSource) continue;
         const level = requirementLevel(candidate.type);
         if (!target || !level || (!candidate.firstLayer && !candidate.secondLayer) || !operator) {
           invalid = true;

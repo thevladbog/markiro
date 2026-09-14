@@ -185,6 +185,35 @@ describe("normalizeNationalCatalogSchema", () => {
     });
   });
 
+  it("keeps provider preset fields editable when the provider omits both values and a URL", () => {
+    const result = normalizeNationalCatalogSchema(
+      { id: 30398, name: "Сидр", parentId: null, level: 1, active: true, gismtCodes: [7], raw: {} },
+      [
+        attribute({
+          id: 3959,
+          name: "Системный признак",
+          presetOnly: true,
+          preset: [],
+          presetUrl: null,
+        }),
+      ],
+    );
+
+    expect(result).toMatchObject({
+      status: "valid",
+      definition: {
+        attributes: [
+          expect.objectContaining({
+            id: "3959",
+            valueType: "string",
+            presetMode: "none",
+            presets: [],
+          }),
+        ],
+      },
+    });
+  });
+
   it("ignores dependencies whose provider-blocked targets are not editable", () => {
     const result = normalizeNationalCatalogSchema(
       { id: 1, name: "Категория", parentId: null, level: 1, active: true, gismtCodes: [], raw: {} },
@@ -208,6 +237,32 @@ describe("normalizeNationalCatalogSchema", () => {
       status: "valid",
       definition: {
         attributes: [expect.objectContaining({ id: "10" })],
+      },
+    });
+  });
+
+  it("ignores dependencies whose target is omitted from the provider schema", () => {
+    const result = normalizeNationalCatalogSchema(
+      { id: 30398, name: "Сидр", parentId: null, level: 1, active: true, gismtCodes: [7], raw: {} },
+      [
+        attribute({
+          id: 22999,
+          name: "Условие",
+          preset: ["ДА", "НЕТ"],
+          dependentAttributes: [
+            {
+              value: "ДА",
+              attributes: [{ id: 23000, firstLayer: false, secondLayer: true, type: "m" }],
+            },
+          ],
+        }),
+      ],
+    );
+
+    expect(result).toMatchObject({
+      status: "valid",
+      definition: {
+        attributes: [expect.objectContaining({ id: "22999" })],
       },
     });
   });
