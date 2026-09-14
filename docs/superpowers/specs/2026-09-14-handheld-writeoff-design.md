@@ -9,8 +9,11 @@ document the pickup kiosk already produces for `reason='writeoff'`. Units and
 whole boxes, no prices, one reason per document chosen after scanning.
 
 **Supersedes:** the "write-offs on the handheld" line in the *Out of v1* section
-of [design brief 10](../../design-briefs/10-tsd-handheld.md). That brief must be
-updated when this ships.
+of [design brief 10](../../design-briefs/10-tsd-handheld.md), updated alongside
+this spec.
+
+**Mockups:** drawn 2026-09-14 as the `12-writeoff/` row (10 frames) plus
+`03-hub/writeoff` in `docs/design-briefs/markiro-tsd.pen`.
 
 ## Outcome
 
@@ -301,8 +304,6 @@ Four branches, each independently green:
 
 ## Open questions
 
-- Design brief 10 lists write-offs under *Out of v1*; it needs updating once
-  this ships.
 - Whether the mode should eventually allow «Отменить последний документ» within
   some short window, or stay cabinet-only for corrections as specified here.
 

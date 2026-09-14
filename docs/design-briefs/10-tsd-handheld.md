@@ -329,10 +329,10 @@ states; no hover. Names are the intended Pencil component names.
 | `hh/PrintStatus`                        | printing / printed / failed with reason and actions                                                                              |
 | `hh/ScanButton`                         | phone variant only                                                                                                               |
 
-## Pencil file structure (as drawn, 2026-09-10)
+## Pencil file structure (as drawn, 2026-09-14)
 
 `markiro-tsd.pen` holds 28 reusable `hh/*` components on the top row
-(`y = 0`) and 94 screen frames in rows below. Every screen is a top-level
+(`y = 0`) and 115 screen frames in rows below. Every screen is a top-level
 360×640 frame with `clip: true`, named `NN-area/screen-state`; light-theme
 copies carry `theme: {mode: "light"}` on the frame, phone copies are
 412×915.
@@ -341,7 +341,7 @@ copies carry `theme: {mode: "light"}` on the frame, phone copies are
 | --------- | ----------------------------------------------- | -----: | ------------------------------------------------------------------------------------------------------------------------------- |
 | 0         | `hh/`                                           |     28 | Tokens as variables (dark/light axis `mode`) and the components listed above                                                    |
 | 700       | `02-`                                           |     10 | Pairing (enter, binding, 3 errors, success), sign-in (badge/login, PIN, name search, lock)                                      |
-| 1500      | `03-hub/`                                       |      4 | Active shift, idle, offline, active inventory                                                                                   |
+| 1500      | `03-hub/`                                       |      5 | Active shift, idle, offline, active inventory, write-off (five tiles: four modes 2×2, Настройки full-width below)               |
 | 2300      | `04-shift/`, `04-work/validation`, `04-signal/` |     11 | Shift list, other-line confirm, ad-hoc shift ×3, validation, 5 signal overlays (4 types, error ×2)                              |
 | 3100      | `04-work/`, `04-exceptions/`                    |     10 | Aggregation, box close ×4 (printing, printed, failed, unknown), exceptions list, disassemble, replace, reprint, label queue     |
 | 3900      | `04-work/`                                      |      8 | Offline, sync conflicts, scanner unavailable, teammates, more-sheet, close confirm/draining/summary                             |
@@ -350,6 +350,8 @@ copies carry `theme: {mode: "light"}` on the frame, phone copies are
 | 6300      | `08-light/`, `09-phone/`                        |     11 | Light theme ×7, phone ×4 (with `hh/ScanButton`)                                                                                 |
 | 7100      | `10-reverse/`                                   |     12 | Reverse aggregation: shift step 2 toggle, await box, box open/filling, partial-close sheet, box closed, await pallet, 5 signals |
 | 7900      | `07-settings/`                                  |      7 | Scanner sources with Bluetooth, scanner pairing ×2, add printer, Bluetooth printer pairing, test print, printer error           |
+| 8900      | `11-rustore/`                                   |     10 | Store listing assets: 6 screenshots, 512 icon, 2 listing previews, copy sheet — not app screens                                 |
+| 12000     | `12-writeoff/`                                  |     10 | Write-off: empty scan, list, reason grid, confirm, result ×3 (act, queued, partial), history, no-permission, no-reasons         |
 
 Component ids worth knowing when editing instances: `hh/Key` (`s2WFw`),
 `hh/Keypad` (`ZgiDi`), `hh/ScanResult` (`ydVm0`), `hh/SignalOverlay`
@@ -373,7 +375,11 @@ before the next.
   handled by «Отменить последний скан», and in a closed one by
   «Расформировать короб». Neither the station nor the handheld offers a
   replace action, and no shipped UI promises one.
-- Receiving, shipping, movements and write-offs on the handheld.
+- Receiving, shipping and warehouse movements on the handheld. **Write-off is
+  no longer in this list:** it was specified and drawn on 2026-09-14 as the
+  `12-writeoff/` row above, reusing the kiosk's `pickup_orders` document with
+  `reason='writeoff'`. See
+  [the write-off design spec](../superpowers/specs/2026-09-14-handheld-writeoff-design.md).
 - Pallet building outside a shift; disposal; box-sell display.
 - Actions from the code-check card (reprint, disassemble).
 - Corrections during inventory on the device.
