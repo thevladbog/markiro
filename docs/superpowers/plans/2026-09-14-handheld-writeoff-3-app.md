@@ -777,7 +777,7 @@ private fun vm() = WriteoffViewModel(gateway, session, ScanRouterAdapter(scans),
 
 @Test fun unitScanAddsALineAndNamesTheProduct() = runTest {
     val vm = vm()
-    scans.emit(ScanEvent(raw = km("A"), at = clock, source = ScanSource.DEBUG))
+    scans.emit(ScanEvent(raw = km("A"), symbology = null, source = "debug", at = clock))
     val ui = vm.state.first { it.unitCount == 1 }
     assertEquals(Verdict.Accepted(tail = km("A").takeLast(6)), ui.lastVerdict)
     assertEquals("Вода 0,5 л", (ui.lines.single() as WriteoffLine.Unit).name)

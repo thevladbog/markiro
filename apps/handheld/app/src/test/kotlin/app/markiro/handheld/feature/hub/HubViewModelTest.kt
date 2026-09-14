@@ -141,6 +141,8 @@ class HubViewModelTest {
         override suspend fun inventoryManifest(id: String): InventoryManifestDto = throw UnsupportedOperationException()
         override suspend fun inventoryCodes(id: String, cursor: String?, limit: Int): InventoryBundlePageDto = throw UnsupportedOperationException()
         override suspend fun leaveInventory(id: String, body: LeaveInventoryRequest): LeaveInventoryResponse = throw UnsupportedOperationException()
+        override suspend fun writeoffBootstrap(): app.markiro.handheld.core.network.WriteoffBootstrapDto = error("Unused")
+        override suspend fun boxRegistry(since: String?, until: String?, cursor: String?, limit: Int): app.markiro.handheld.core.network.BoxRegistryPageDto = error("Unused")
     }
 
     private fun vm(api: StationApi, team: TeamRefresher = TeamRefresher { null }, tick: Flow<Unit> = flowOf(Unit)): HubViewModel {
