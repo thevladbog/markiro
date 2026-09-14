@@ -338,7 +338,10 @@ class DeviceRecovery(private val db: HandheldDatabase, private val credential: C
             "exceptions" to count("box_exceptions", "ackedAt IS NULL"), "closes" to count("shift_close_outbox", "state = 'pending'"),
             "conflicts" to count("conflicts_mirror"), "unknownPrints" to count("boxes", "printState IN ('printing','unknown')") +
                 count("pallets", "printState IN ('printing','unknown')") +
-                count("product_label_jobs", "attemptState IN ('sending','delivery_unknown')"))
+                count("product_label_jobs", "attemptState IN ('sending','delivery_unknown')"),
+            // A queued write-off is unsent production work like a pending shift
+            // close; a settled one is history and is not owed.
+            "writeoffs" to count("writeoff_outbox", "state = 'pending'"))
     }
     private fun count(table: String, where: String = "1") = db.openHelper.readableDatabase.query("SELECT COUNT(*) FROM `$table` WHERE $where").use { it.moveToFirst(); it.getLong(0) }
     /** Only locally authored identity anchors constrain ownership. Server conflict winners may

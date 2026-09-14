@@ -40,6 +40,11 @@ import app.markiro.handheld.core.print.PrinterEntity
         BoxExceptionEntity::class,
         PalletEntity::class,
         PalletExceptionEntity::class,
+        WriteoffOutboxEntity::class,
+        WriteoffReasonEntity::class,
+        WriteoffProductEntity::class,
+        WriteoffPermissionEntity::class,
+        WriteoffBoxEntity::class,
     ],
     version = HANDHELD_DATABASE_VERSION,
     exportSchema = false,
@@ -79,6 +84,12 @@ abstract class HandheldDatabase : RoomDatabase() {
     abstract fun conflictDao(): ConflictDao
     abstract fun shiftCloseDao(): ShiftCloseDao
     abstract fun metaDao(): MetaDao
+
+    abstract fun writeoffOutboxDao(): WriteoffOutboxDao
+    abstract fun writeoffReasonDao(): WriteoffReasonDao
+    abstract fun writeoffProductDao(): WriteoffProductDao
+    abstract fun writeoffPermissionDao(): WriteoffPermissionDao
+    abstract fun writeoffBoxDao(): WriteoffBoxDao
 }
 
-const val HANDHELD_DATABASE_VERSION = 15
+const val HANDHELD_DATABASE_VERSION = 16

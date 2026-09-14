@@ -320,6 +320,9 @@ describe.skipIf(!ready)("station writeoffs e2e", () => {
     expect(reasonIds).not.toContain(foreignReasonId);
 
     const gtins = res.body.products.map((p: { gtin14: string }) => p.gtin14);
+    // The box registry names a product by id, not by GTIN, so the handheld's
+    // mirror needs both to name a scanned box.
+    for (const p of res.body.products as { id?: unknown }[]) expect(typeof p.id).toBe("string");
     expect(gtins).toEqual(expect.arrayContaining([GTIN, GTIN_UNLISTED]));
 
     expect(res.body.operators).toContainEqual({ employeeId: operatorId, canWriteoff: true });
