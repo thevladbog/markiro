@@ -1,5 +1,5 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, count, desc, eq, gte, isNotNull, isNull, lte, type SQL } from "drizzle-orm";
+import { and, count, desc, eq, gte, isNotNull, isNull, lte, or, type SQL } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
 import type {
@@ -34,7 +34,16 @@ export class PickupRejectionsService {
     query: ListPickupRejectionsQueryDto,
   ): Promise<ListPickupRejectionsResponseDto> {
     const conditions: SQL[] = [eq(schema.pickupScanRejections.tenantId, tenantId)];
-    if (query.kioskId) conditions.push(eq(schema.pickupScanRejections.kioskId, query.kioskId));
+    // A device id is a UUID from one table or the other, so matching either
+    // column is unambiguous and spares the caller having to say which kind it
+    // is holding.
+    if (query.deviceId) {
+      const byDevice = or(
+        eq(schema.pickupScanRejections.kioskId, query.deviceId),
+        eq(schema.pickupScanRejections.stationDeviceId, query.deviceId),
+      );
+      if (byDevice) conditions.push(byDevice);
+    }
     if (query.from)
       conditions.push(
         gte(schema.pickupScanRejections.syncedAt, new Date(`${query.from}T00:00:00.000Z`)),
@@ -94,8 +103,12 @@ export class PickupRejectionsService {
     const rows = await this.db
       .select({
         id: schema.pickupScanRejections.id,
+        sourceKind: schema.pickupScanRejections.sourceKind,
         kioskId: schema.pickupScanRejections.kioskId,
         kioskName: schema.kiosks.name,
+        kioskPlace: schema.kiosks.location,
+        stationDeviceId: schema.pickupScanRejections.stationDeviceId,
+        stationDeviceName: schema.stationDevices.name,
         employeeId: schema.pickupScanRejections.employeeId,
         employeeName: schema.employees.fullName,
         badgeCode: schema.pickupScanRejections.badgeCode,
@@ -109,6 +122,13 @@ export class PickupRejectionsService {
       })
       .from(schema.pickupScanRejections)
       .leftJoin(schema.kiosks, eq(schema.kiosks.id, schema.pickupScanRejections.kioskId))
+      .leftJoin(
+        schema.stationDevices,
+        and(
+          eq(schema.stationDevices.tenantId, schema.pickupScanRejections.tenantId),
+          eq(schema.stationDevices.id, schema.pickupScanRejections.stationDeviceId),
+        ),
+      )
       .leftJoin(schema.employees, eq(schema.employees.id, schema.pickupScanRejections.employeeId))
       .leftJoin(
         schema.pickupOrders,
@@ -120,8 +140,20 @@ export class PickupRejectionsService {
     return rows.map((row) => ({
       id: row.id,
       kind: row.employeeId === null ? ("unknown_badge" as const) : ("items_refused" as const),
-      kioskId: row.kioskId ?? null,
-      kioskName: row.kioskName ?? "",
+      device:
+        row.sourceKind === "handheld"
+          ? {
+              kind: "handheld" as const,
+              id: row.stationDeviceId ?? "",
+              name: row.stationDeviceName ?? "",
+              place: null,
+            }
+          : {
+              kind: "kiosk" as const,
+              id: row.kioskId ?? "",
+              name: row.kioskName ?? "",
+              place: row.kioskPlace,
+            },
       employeeName: row.employeeName,
       badgeCode: row.badgeCode,
       orderId: row.orderId,

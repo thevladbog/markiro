@@ -4,6 +4,7 @@
  * ~250 lines covering the orders endpoints) so each file stays readable.
  * Same `apiFetch` wrapper and filtered-list query-key pattern as `./api.ts`.
  */
+import type { PickupDeviceDto } from "./api.js";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 
@@ -40,8 +41,7 @@ export type ScanRejectionCode =
 export interface PickupScanRejectionRowDto {
   id: string;
   kind: "items_refused" | "unknown_badge";
-  kioskId: string;
-  kioskName: string;
+  device: PickupDeviceDto;
   employeeName: string | null;
   badgeCode: string | null;
   orderId: string | null;
@@ -56,7 +56,7 @@ export interface PickupScanRejectionRowDto {
 export type RejectionState = "open" | "acknowledged" | "all";
 
 export interface ListRejectionsParams {
-  kioskId?: string;
+  deviceId?: string;
   from?: string;
   to?: string;
   state?: RejectionState;
@@ -76,7 +76,7 @@ function rejectionsQueryKey(params: ListRejectionsParams) {
 
 function buildListPath(params: ListRejectionsParams): string {
   const query = new URLSearchParams();
-  if (params.kioskId) query.set("kioskId", params.kioskId);
+  if (params.deviceId) query.set("deviceId", params.deviceId);
   if (params.from) query.set("from", params.from);
   if (params.to) query.set("to", params.to);
   if (params.state) query.set("state", params.state);
@@ -109,10 +109,12 @@ export function usePickupRejections(
  * kiosks they came from. `openCount` is the server's global figure, so the
  * banner never disagrees with itself as filters change on the page.
  */
-export function useOpenRejectionSummary(): { openCount: number; kioskNames: string[] } {
+export function useOpenRejectionSummary(): { openCount: number; deviceNames: string[] } {
   const { data } = usePickupRejections({ state: "open" });
-  const kioskNames = [...new Set((data?.items ?? []).map((row) => row.kioskName))].filter(Boolean);
-  return { openCount: data?.openCount ?? 0, kioskNames };
+  const deviceNames = [...new Set((data?.items ?? []).map((row) => row.device.name))].filter(
+    Boolean,
+  );
+  return { openCount: data?.openCount ?? 0, deviceNames };
 }
 
 /** `POST /pickup-rejections/:id/acknowledge`. Invalidates every rejections query variant. */
