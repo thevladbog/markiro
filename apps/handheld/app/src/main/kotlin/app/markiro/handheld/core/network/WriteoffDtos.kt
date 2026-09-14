@@ -46,6 +46,19 @@ data class WriteoffResultDto(
     val acceptedBoxes: List<WriteoffAcceptedBoxDto> = emptyList(),
 )
 
+/**
+ * What the device keeps about a settled document, in `writeoff_outbox.conflictsJson`.
+ * Accepted boxes are not stored: every box the request listed was either accepted
+ * or named in `boxConflicts`, so the count follows from the row's own `boxCount`.
+ */
+@Serializable
+data class WriteoffSettlementDto(
+    val conflicts: List<WriteoffConflictDto> = emptyList(),
+    val boxConflicts: List<WriteoffBoxConflictDto> = emptyList(),
+    /** Present only on a refusal: what the server objected to. */
+    val error: String? = null,
+)
+
 @Serializable
 data class WriteoffReasonDto(val id: String, val name: String, val sortOrder: Int)
 

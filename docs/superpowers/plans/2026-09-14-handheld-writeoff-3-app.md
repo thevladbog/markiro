@@ -553,7 +553,7 @@ conflictsJson)`. A replay for an already-filed `deviceSeq` returns the same
    `FAILED`, back off. The row stays `pending`.
 6. After any settle: `pruneSettledBeyond(20)`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```kotlin
 @Test fun sendsPendingDocumentAndMarksSent() = runTest {
@@ -600,7 +600,7 @@ conflictsJson)`. A replay for an already-filed `deviceSeq` returns the same
 }
 ```
 
-- [ ] **Step 2: Run, expect compile failure, implement the engine**
+- [x] **Step 2: Run, expect compile failure, implement the engine**
 
 Port `InventorySyncEngine`'s skeleton: `nudges` channel, `drainMutex`,
 `started`, `state` from `observePendingCount()` + `lastSuccess` + `now`,
@@ -608,14 +608,14 @@ Port `InventorySyncEngine`'s skeleton: `nudges` channel, `drainMutex`,
 drain and `db.recovery.commit {}` around each write. Drop the batch/pin-digest
 machinery — a document is already one request, and `requestJson` is the pin.
 
-- [ ] **Step 3: Wire it**
+- [x] **Step 3: Wire it**
 
 `WriteoffModule` provides the engine with a `SyncTransport(client) { serverUrl.current() }`
 exactly as `SyncModule.syncEngine` does. In `SyncModule.connectivityNudger` add
 `writeoff.nudge()`. In `HandheldApp.onCreate` add `writeoffSync.start()` beside
 `inventorySync.start()`.
 
-- [ ] **Step 4: Run and commit**
+- [x] **Step 4: Run and commit**
 
 ```bash
 ./gradlew --no-daemon testDebugUnitTest --tests '*WriteoffSyncEngineTest*' -q

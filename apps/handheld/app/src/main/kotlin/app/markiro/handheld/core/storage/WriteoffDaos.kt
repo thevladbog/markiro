@@ -16,6 +16,10 @@ interface WriteoffOutboxDao {
     @Query("SELECT * FROM writeoff_outbox WHERE state = 'pending' ORDER BY deviceSeq")
     suspend fun pending(): List<WriteoffOutboxEntity>
 
+    /** The engine sends one document at a time and never needs the other bodies in memory. */
+    @Query("SELECT * FROM writeoff_outbox WHERE state = 'pending' ORDER BY deviceSeq LIMIT 1")
+    suspend fun oldestPending(): WriteoffOutboxEntity?
+
     @Query("SELECT COUNT(*) FROM writeoff_outbox WHERE state = 'pending'")
     fun observePendingCount(): Flow<Int>
 

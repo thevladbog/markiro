@@ -19,6 +19,8 @@ class HandheldApp : Application() {
 
     @Inject lateinit var inventorySync: InventorySyncEngine
 
+    @Inject lateinit var writeoffSync: app.markiro.handheld.core.writeoff.WriteoffSyncEngine
+
     @Inject lateinit var connectivity: ConnectivityNudger
 
     @Inject lateinit var recovery: app.markiro.handheld.core.storage.DeviceRecovery
@@ -42,6 +44,7 @@ class HandheldApp : Application() {
             }
             syncEngine.start()
             inventorySync.start()
+            writeoffSync.start()
             connectivity.register()
         }
     }
