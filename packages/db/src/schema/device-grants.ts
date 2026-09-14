@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   bigserial,
   bigint,
+  boolean,
   index,
   check,
   foreignKey,
@@ -11,6 +12,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
   type PgColumn,
 } from "drizzle-orm/pg-core";
@@ -176,6 +178,7 @@ export const deviceGrantConfigurations = pgTable(
   },
   (t) => [
     ...ownerConstraints("device_grant_configurations", t),
+    unique("device_grant_configurations_tenant_id_uq").on(t.tenantId, t.id),
     index("device_grant_config_station_latest_idx")
       .on(t.tenantId, t.ownerKind, t.stationDeviceId, t.sequence)
       .where(sql`${t.stationDeviceId} is not null`),
@@ -185,6 +188,58 @@ export const deviceGrantConfigurations = pgTable(
     check(
       "device_grant_configurations_mode_check",
       sql`${t.mode} in ('observe','strict') and (${t.mode} <> 'strict' or ${t.policyId} is not null) and ((${t.policyId} is null and ${t.policyRevision} is null and ${t.decisionReference} is null) or (${t.policyId} is not null and length(btrim(${t.policyRevision})) > 0 and length(btrim(${t.decisionReference})) > 0)) is true and isfinite(${t.issuedAt})`,
+    ),
+  ],
+);
+
+/** Native durable-store acknowledgements are retained as immutable diagnostic facts. */
+export const deviceGrantClientReadinessReports = pgTable(
+  "device_grant_client_readiness_reports",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    sequence: bigserial("sequence", { mode: "bigint" }).notNull().unique(),
+    ...ownerColumns(),
+    requestId: uuid("request_id").notNull(),
+    payloadDigest: text("payload_digest").notNull(),
+    clientBuild: text("client_build").notNull(),
+    storageRevision: integer("storage_revision").notNull(),
+    reportedMode: text("reported_mode").$type<"observe" | "strict">().notNull(),
+    reportedPolicyRevision: text("reported_policy_revision"),
+    reportedKeysetRevision: text("reported_keyset_revision"),
+    reportedGrantId: uuid("reported_grant_id"),
+    configurationId: uuid("configuration_id"),
+    verifiedGrantId: uuid("verified_grant_id"),
+    matchesCurrentConfiguration: boolean("matches_current_configuration").notNull(),
+    verifiedGrantMatched: boolean("verified_grant_matched").notNull(),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    ...ownerConstraints("device_grant_client_readiness", t),
+    foreignKey({
+      name: "device_grant_client_readiness_configuration_fk",
+      columns: [t.tenantId, t.configurationId],
+      foreignColumns: [deviceGrantConfigurations.tenantId, deviceGrantConfigurations.id],
+    }),
+    foreignKey({
+      name: "device_grant_client_readiness_verified_grant_fk",
+      columns: [t.tenantId, t.verifiedGrantId],
+      foreignColumns: [deviceGrantIssuances.tenantId, deviceGrantIssuances.grantId],
+    }),
+    uniqueIndex("device_grant_client_readiness_station_request_uq")
+      .on(t.tenantId, t.ownerKind, t.stationDeviceId, t.credentialEpoch, t.requestId)
+      .where(sql`${t.stationDeviceId} is not null`),
+    uniqueIndex("device_grant_client_readiness_kiosk_request_uq")
+      .on(t.tenantId, t.ownerKind, t.kioskId, t.credentialEpoch, t.requestId)
+      .where(sql`${t.kioskId} is not null`),
+    index("device_grant_client_readiness_station_latest_idx")
+      .on(t.tenantId, t.ownerKind, t.stationDeviceId, t.credentialEpoch, t.sequence)
+      .where(sql`${t.stationDeviceId} is not null`),
+    index("device_grant_client_readiness_kiosk_latest_idx")
+      .on(t.tenantId, t.ownerKind, t.kioskId, t.credentialEpoch, t.sequence)
+      .where(sql`${t.kioskId} is not null`),
+    check(
+      "device_grant_client_readiness_shape_check",
+      sql`${t.payloadDigest} ~ '^[0-9a-f]{64}$' and length(${t.clientBuild}) between 1 and 100 and ${t.storageRevision} > 0 and ${t.reportedMode} in ('observe','strict') and (${t.reportedPolicyRevision} is null or length(btrim(${t.reportedPolicyRevision})) between 1 and 256) and (${t.reportedKeysetRevision} is null or length(btrim(${t.reportedKeysetRevision})) between 1 and 256) and (not ${t.matchesCurrentConfiguration} or ${t.configurationId} is not null) and (${t.verifiedGrantMatched}=(${t.verifiedGrantId} is not null)) and (not ${t.verifiedGrantMatched} or (${t.reportedGrantId} is not null and ${t.reportedGrantId}=${t.verifiedGrantId})) and isfinite(${t.receivedAt})`,
     ),
   ],
 );
