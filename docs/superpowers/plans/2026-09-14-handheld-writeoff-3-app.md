@@ -923,6 +923,45 @@ intent, or the real device's screen.
 - `testDebugUnitTest lintDebug assembleDebug` is green; both string files are
   complete.
 
+## Outcome
+
+All four Android and API gates ran on this branch.
+
+| Gate | Result |
+| --- | --- |
+| `testDebugUnitTest` (apps/handheld) | 976 passed, 0 failed, 0 skipped |
+| `lintDebug` | clean, 79 pre-existing warnings, 0 errors |
+| `assembleDebug` | debug APK built |
+| `@markiro/api test` | 4263 passed, 26 skipped |
+| `@markiro/api` typecheck / lint / build | clean |
+| `pnpm format:check` | clean |
+
+Two deviations from the plan as written, both deliberate:
+
+- A `401` is not terminal for a queued document. The plan grouped it with
+  `403`, but `401` says the device is not authenticated, which is about the
+  device rather than this document; discarding confirmed production work over a
+  credential problem would be data loss. It backs off and retries. `403` stays
+  terminal, because the server has decided about this operator.
+- The mode's gate is evaluated in the same coroutine that then collects scans,
+  rather than beside it. A mode that refuses an operator has to refuse them
+  before they scan, and two independent launches left a window where it did not.
+
+The emulator pass was partial and is worth recording as such. The debug APK was
+installed on a headless emulator and cold-started twice: once over stale data,
+which rendered the recovery state, and once clean, which reached the pairing
+screen. No crash, no Hilt or resource error. That found one real defect — the
+recovery summary omitted queued write-offs — fixed in its own commit. The
+write-off mode itself was **not** driven on a device: reaching it needs a paired
+handheld against a seeded tenant, which this environment did not have. The scan
+path, the vendor intent and the screens' real rendering remain unverified on
+hardware.
+
+One unrelated test, `WorkViewModelTest > aScanArrivingUnderTheCloseScreenIsIgnored`,
+failed once in four full-suite runs and passed three consecutive isolated
+re-runs. It is untouched by this branch; the added tables plausibly perturb
+timing enough to unmask a pre-existing race. Recorded rather than retried away.
+
 ## Not in this plan
 
 Printing an act from the device; Chestny ZNAK reporting; cancelling a filed
