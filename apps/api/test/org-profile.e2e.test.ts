@@ -103,10 +103,16 @@ describe.skipIf(!ready)("org profile e2e", () => {
       .expect(200);
 
     const orgId = org.body.id as string;
+    // This suite asserts the switch is ON. Limits are off by default now and the
+    // policy row already exists, so `onConflictDoNothing` would silently leave
+    // it off.
     await setup.db
       .insert(schema.pickupTenantPolicies)
       .values({ tenantId: orgId, limitsEnabled: true })
-      .onConflictDoNothing();
+      .onConflictDoUpdate({
+        target: schema.pickupTenantPolicies.tenantId,
+        set: { limitsEnabled: true },
+      });
     return orgId;
   }
 

@@ -112,7 +112,7 @@ export class TenantProvisioningService {
       });
       await tx
         .insert(schema.pickupTenantPolicies)
-        .values({ tenantId: tenant.id, limitsEnabled: true, updatedAt: operationAt });
+        .values({ tenantId: tenant.id, limitsEnabled: false, updatedAt: operationAt });
 
       // Stock box-label templates (specs 2026-08-20 and 2026-09-10). All
       // families come from the single `buildDefaultLabelTemplates()` list, so

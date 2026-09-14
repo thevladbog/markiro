@@ -25,7 +25,7 @@ export function setupAuth(env: Env): DbConnection & { auth: Auth } {
       ? async (organizationId: string) => {
           await db
             .insert(schema.pickupTenantPolicies)
-            .values({ tenantId: organizationId, limitsEnabled: true });
+            .values({ tenantId: organizationId, limitsEnabled: false });
         }
       : undefined;
   const auth = buildAuth(db, {

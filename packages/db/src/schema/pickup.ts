@@ -54,7 +54,14 @@ export const pickupTenantPolicies = pgTable("pickup_tenant_policies", {
   tenantId: text("tenant_id")
     .primaryKey()
     .references(() => organization.id),
-  limitsEnabled: boolean("limits_enabled").notNull().default(true),
+  /**
+   * The daily pickup allowance is OPT-IN: a tenant that never expressed a
+   * preference is not charged one. The per-employee `limit_mode` default stays
+   * `limited` on purpose — it describes how an employee would be treated if a
+   * tenant turns this switch back on, and flipping it too would make
+   * re-enabling mean nothing for anyone added since.
+   */
+  limitsEnabled: boolean("limits_enabled").notNull().default(false),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

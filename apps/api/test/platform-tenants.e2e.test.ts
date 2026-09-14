@@ -386,7 +386,7 @@ describe.skipIf(!ready)("platform tenant management", () => {
     throw new Error(`Timed out waiting for ${applicationName} to block on the database lock`);
   }
 
-  it("provisions the tenant pickup policy with limits enabled", async () => {
+  it("provisions the tenant pickup policy with limits off, the opt-in default", async () => {
     const created = await admin
       .post("/platform/tenants")
       .send({
@@ -401,7 +401,7 @@ describe.skipIf(!ready)("platform tenant management", () => {
       .select({ limitsEnabled: schema.pickupTenantPolicies.limitsEnabled })
       .from(schema.pickupTenantPolicies)
       .where(eq(schema.pickupTenantPolicies.tenantId, createdTenantId));
-    expect(policy).toEqual({ limitsEnabled: true });
+    expect(policy).toEqual({ limitsEnabled: false });
   });
 
   it("seeds both duplicate name variants, all box presets and the box default", async () => {
