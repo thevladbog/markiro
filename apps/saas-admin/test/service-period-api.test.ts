@@ -64,9 +64,7 @@ describe("service period platform client", () => {
   it("rejects local invalid mutations before transport", async () => {
     const fetch = vi.fn();
     vi.stubGlobal("fetch", fetch);
-    expect(() =>
-      postServiceUsage("11111111-1111-4111-8111-111111111111", {} as never),
-    ).toThrow();
+    expect(() => postServiceUsage("11111111-1111-4111-8111-111111111111", {} as never)).toThrow();
     expect(fetch).not.toHaveBeenCalled();
   });
 

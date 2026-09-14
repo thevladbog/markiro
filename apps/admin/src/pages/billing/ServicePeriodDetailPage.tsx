@@ -103,7 +103,9 @@ export function ServicePeriodDetailPage() {
           <dl className="mk-billing-service-balance">
             <div>
               <dt>{t("pages.billing.servicePeriods.balance.includedLabel")}</dt>
-              <dd>{t("pages.billing.servicePeriods.minutes", { count: period.balance.included })}</dd>
+              <dd>
+                {t("pages.billing.servicePeriods.minutes", { count: period.balance.included })}
+              </dd>
             </div>
             <div>
               <dt>{t("pages.billing.servicePeriods.balance.approvedLabel")}</dt>
@@ -115,11 +117,15 @@ export function ServicePeriodDetailPage() {
             </div>
             <div>
               <dt>{t("pages.billing.servicePeriods.balance.consumedLabel")}</dt>
-              <dd>{t("pages.billing.servicePeriods.minutes", { count: period.balance.consumed })}</dd>
+              <dd>
+                {t("pages.billing.servicePeriods.minutes", { count: period.balance.consumed })}
+              </dd>
             </div>
             <div>
               <dt>{t("pages.billing.servicePeriods.balance.remainingLabel")}</dt>
-              <dd>{t("pages.billing.servicePeriods.minutes", { count: period.balance.remaining })}</dd>
+              <dd>
+                {t("pages.billing.servicePeriods.minutes", { count: period.balance.remaining })}
+              </dd>
             </div>
           </dl>
         </div>
@@ -137,21 +143,19 @@ export function ServicePeriodDetailPage() {
                   <strong>{entry.workReference}</strong>
                   <StatusChip
                     status={entry.classification === "product_defect" ? "warn" : "neutral"}
-                    label={t(
-                      `pages.billing.servicePeriods.classification.${entry.classification}`,
-                    )}
+                    label={t(`pages.billing.servicePeriods.classification.${entry.classification}`)}
                   />
                 </div>
                 <p>{entry.description}</p>
                 <div className="mk-billing-service-entry__minutes">
                   <span>
-                    {t("pages.billing.servicePeriods.detail.actual")}: {" "}
+                    {t("pages.billing.servicePeriods.detail.actual")}:{" "}
                     {t("pages.billing.servicePeriods.minutes", {
                       count: entry.actualMinutesDelta,
                     })}
                   </span>
                   <span>
-                    {t("pages.billing.servicePeriods.detail.allowance")}: {" "}
+                    {t("pages.billing.servicePeriods.detail.allowance")}:{" "}
                     {t("pages.billing.servicePeriods.minutes", {
                       count: entry.allowanceMinutesDelta,
                     })}

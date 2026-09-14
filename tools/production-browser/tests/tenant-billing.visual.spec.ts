@@ -120,6 +120,67 @@ const offer = {
   ],
   documents: [],
 };
+const activeServicePeriod = {
+  id: "40000000-0000-4000-8000-000000000001",
+  orderedServiceId: "40000000-0000-4000-8000-000000000002",
+  catalogItemId: "40000000-0000-4000-8000-000000000003",
+  catalogVersionId: "40000000-0000-4000-8000-000000000004",
+  nameRu: "Абонентское сопровождение",
+  nameEn: "Monthly support",
+  startsAt: "2026-08-01T00:00:00.000Z",
+  endsAt: "2026-09-01T00:00:00.000Z",
+  state: "active",
+  revision: 5,
+  balance: { included: 180, externallyApproved: 30, consumed: 75, remaining: 135 },
+} as const;
+const exhaustedServicePeriod = {
+  ...activeServicePeriod,
+  id: "40000000-0000-4000-8000-000000000011",
+  orderedServiceId: "40000000-0000-4000-8000-000000000012",
+  catalogItemId: "40000000-0000-4000-8000-000000000013",
+  catalogVersionId: "40000000-0000-4000-8000-000000000014",
+  nameRu: "Операционная поддержка",
+  nameEn: "Operations support",
+  balance: { included: 60, externallyApproved: 30, consumed: 90, remaining: 0 },
+} as const;
+const serviceEntries = [
+  {
+    id: "41000000-0000-4000-8000-000000000001",
+    kind: "usage",
+    classification: "customer_service",
+    originalEntryId: null,
+    workReference: "SUP-42",
+    description: "Настройка интеграции",
+    performedAt: "2026-08-12T08:00:00.000Z",
+    postedAt: "2026-08-12T10:00:00.000Z",
+    actualMinutesDelta: 60,
+    allowanceMinutesDelta: 60,
+  },
+  {
+    id: "41000000-0000-4000-8000-000000000002",
+    kind: "correction",
+    classification: "customer_service",
+    originalEntryId: "41000000-0000-4000-8000-000000000001",
+    workReference: "SUP-42",
+    description: "Уточнение фактического времени",
+    performedAt: "2026-08-12T08:00:00.000Z",
+    postedAt: "2026-08-13T10:00:00.000Z",
+    actualMinutesDelta: -5,
+    allowanceMinutesDelta: -5,
+  },
+  {
+    id: "41000000-0000-4000-8000-000000000003",
+    kind: "usage",
+    classification: "product_defect",
+    originalEntryId: null,
+    workReference: "BUG-7",
+    description: "Исправление дефекта Маркиро",
+    performedAt: "2026-08-14T08:00:00.000Z",
+    postedAt: "2026-08-14T09:00:00.000Z",
+    actualMinutesDelta: 20,
+    allowanceMinutesDelta: 0,
+  },
+] as const;
 
 function json(route: Route, body: unknown, status = 200) {
   return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
@@ -157,6 +218,15 @@ async function installStrictApi(page: Page, scenario = "ready") {
     if (path === "/api/billing/invoices") {
       return json(route, scenario === "empty" ? { items: [] } : invoices);
     }
+    if (path === "/api/billing/service-periods") {
+      return json(route, {
+        items: [activeServicePeriod, exhaustedServicePeriod],
+        nextCursor: null,
+      });
+    }
+    if (path === `/api/billing/service-periods/${activeServicePeriod.id}`) {
+      return json(route, { ...activeServicePeriod, entries: serviceEntries });
+    }
     if (path === `/api/billing/offers/${offer.id}`) return json(route, offer);
     unexpected.push(`${route.request().method()} ${path}${url.search}`);
     await route.abort("failed");
@@ -192,12 +262,12 @@ for (const viewport of [
     await expect(page.getByRole("heading", { level: 2, name: "Лимиты" })).toBeVisible();
     await expect(page.getByText("Приближение к лимиту")).toBeVisible();
     await expect(page.getByText("Использовано: 3 из 4")).toBeVisible();
-    await expect(page.getByRole("navigation", { name: "Основная навигация" })).toBeVisible();
     await expect(page.getByRole("navigation", { name: "Разделы биллинга" })).toBeVisible();
     const profileLink = page.getByRole("link", { name: "Открыть профиль Елена Ким" });
     await expect(profileLink).toHaveCount(1);
     await expect(profileLink).toBeVisible();
     if (viewport.width >= 768) {
+      await expect(page.getByRole("navigation", { name: "Основная навигация" })).toBeVisible();
       const sidebarBox = await page
         .getByRole("navigation", { name: "Основная навигация" })
         .boundingBox();
@@ -215,13 +285,14 @@ for (const viewport of [
       fullPage: true,
     });
     if (viewport.width <= 360) {
+      await page.getByRole("button", { name: "Открыть мобильную навигацию" }).click();
       await page
-        .getByRole("navigation", { name: "Основная навигация" })
+        .getByRole("navigation", { name: "Мобильная навигация" })
         .getByRole("link", { name: /Биллинг/ })
         .scrollIntoViewIfNeeded();
       await expect(
         page
-          .getByRole("navigation", { name: "Основная навигация" })
+          .getByRole("navigation", { name: "Мобильная навигация" })
           .getByRole("link", { name: /Биллинг/ }),
       ).toBeVisible();
       await page.getByRole("main").evaluate((element) => {
@@ -274,6 +345,59 @@ test("uses the table on desktop and invoice cards on narrow screens", async ({ p
   await assertNoPageOverflow(page);
   expect(unexpected).toEqual([]);
 });
+
+for (const viewport of [
+  { width: 1280, height: 800 },
+  { width: 390, height: 844 },
+]) {
+  for (const locale of ["ru", "en"] as const) {
+    test(`renders recurring service ledger at ${viewport.width} in ${locale}`, async ({
+      page,
+    }, testInfo) => {
+      const ru = locale === "ru";
+      const unexpected = await installStrictApi(page);
+      await page.setViewportSize(viewport);
+      await page.goto(`/test/browser/tenant-billing.html?route=/billing/services&locale=${locale}`);
+      await expect(
+        page.getByRole("heading", {
+          level: 2,
+          name: ru ? "Сервисные пакеты" : "Service packages",
+        }),
+      ).toBeVisible();
+      const activeCard = page.getByRole("article", {
+        name: ru ? activeServicePeriod.nameRu : activeServicePeriod.nameEn,
+      });
+      await expect(activeCard).toContainText(ru ? "135 мин" : "135 min");
+      await expect(
+        page.getByRole("article", {
+          name: ru ? exhaustedServicePeriod.nameRu : exhaustedServicePeriod.nameEn,
+        }),
+      ).toContainText(ru ? "Пакет исчерпан" : "Package exhausted");
+      await activeCard.getByRole("link").click();
+      await expect(
+        page.getByRole("heading", {
+          level: 2,
+          name: ru ? activeServicePeriod.nameRu : activeServicePeriod.nameEn,
+        }),
+      ).toBeVisible();
+      await expect(
+        page.getByText(ru ? "Не списывается из пакета" : "Not deducted from package"),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("list", {
+          name: ru ? "Корректировки работы" : "Work corrections",
+        }),
+      ).toContainText(ru ? "Уточнение фактического времени" : "Уточнение фактического времени");
+      await expect(page.getByText(ru ? "30 мин" : "30 min", { exact: true })).toBeVisible();
+      await assertNoPageOverflow(page);
+      expect(unexpected).toEqual([]);
+      await page.screenshot({
+        path: testInfo.outputPath(`services-${locale}-${viewport.width}.png`),
+        fullPage: true,
+      });
+    });
+  }
+}
 
 test("renders error, empty, unmanaged, and forbidden states through real routes", async ({
   page,

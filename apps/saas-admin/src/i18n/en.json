@@ -1185,6 +1185,7 @@
     "remaining": "Remaining",
     "revision": "Revision",
     "ledger": "Work ledger",
+    "internalNote": "Internal note: {{note}}",
     "columns": {
       "name": "Service",
       "period": "Period",

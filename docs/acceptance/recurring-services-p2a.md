@@ -1,0 +1,71 @@
+# Recurring services P2A acceptance ledger
+
+**Scope:** monthly paid service packages, immutable periods, append-only allowance
+ledger, external excess approval, tenant visibility and billing-act snapshots.
+
+Statuses are limited to `PASS`, `FAIL`, `NOT RUN` and `BLOCKED`. `PASS` below
+describes local repository evidence only unless a row explicitly names another
+environment.
+
+## Functional acceptance
+
+| Criterion                                                                        | Status | Evidence                                                                                                                                                                                                                                                                       |
+| -------------------------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| AC-43: one paid monthly line creates one period with its frozen allowance        | PASS   | `apps/api/test/service-period-activation.integration.test.ts` — `creates one immutable period and replays its exact application result`                                                                                                                                        |
+| AC-44: payment and request replay do not duplicate periods or ledger rows        | PASS   | `apps/api/test/service-period-activation.integration.test.ts` — `creates one immutable period and replays its exact application result`; `apps/api/test/service-periods.integration.test.ts` — `posts usage, preserves defect allowance, corrects usage, and replays exactly`  |
+| AC-45: posting 45 of 180 leaves 135 with work and actor facts                    | PASS   | `apps/api/test/service-periods.integration.test.ts` — `posts usage, preserves defect allowance, corrects usage, and replays exactly`                                                                                                                                           |
+| AC-46: corrections preserve originals and product defects consume zero allowance | PASS   | `apps/api/test/service-periods.integration.test.ts` — `reclassifies customer work as a defect and returns its allowance`                                                                                                                                                       |
+| AC-47: concurrent overspend is blocked until bounded external approval           | PASS   | `apps/api/test/service-periods.integration.test.ts` — `serializes competing allowance consumption`; `adds external capacity and prevents an unsafe withdrawal`                                                                                                                 |
+| AC-48: unpaid next periods provide no allowance and annual services are rejected | PASS   | `apps/api/test/service-period-activation.integration.test.ts` — `serializes advance renewals into consecutive non-overlapping periods`; `packages/db/test/recurring-services-migration.test.ts` — `accepts a monthly service policy and rejects unsupported recurring periods` |
+
+## Contract, isolation and recovery evidence
+
+| Area                                                  | Status | Evidence                                                                                                                                                                                                                                                                                                     |
+| ----------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| V1-V3 compatibility and opaque historical snapshots   | PASS   | `apps/api/test/commercial-version.test.ts` — `preserves opaque historical snapshots and audit metadata literally`, `never changes zero to unlimited and projects only introduced metadata`, `requires exactly explicit supported version`, and `uses V4 response schema without projecting recurring fields` |
+| V4 monthly catalog and commercial line terms          | PASS   | `packages/platform-contracts/test/catalog-v4.test.ts` and `packages/platform-contracts/test/commercial-v4.test.ts`; `apps/api/test/commercial-v4.integration.test.ts` — `returns recurring service terms only to a V4 client`                                                                                |
+| Tenant isolation and customer-safe projection         | PASS   | `apps/api/test/service-periods.integration.test.ts` — cross-period rejection; `apps/admin/test/service-periods.test.tsx` — customer ledger hides platform-only metadata                                                                                                                                      |
+| Platform route and role capabilities                  | PASS   | `apps/api/test/service-periods.authorization.test.ts` — `lets support write usage but keeps excess approval behind billing.write`, route policies and conditional platform-auth module registration                                                                                                          |
+| Exact request replay and uncertain-result UI recovery | PASS   | API integration replay tests plus `apps/saas-admin/test/service-periods.test.tsx` — `retries the exact usage request after a lost response and locks edits`                                                                                                                                                  |
+| Stable pagination and late posting                    | PASS   | `apps/api/test/service-periods.integration.test.ts` — `paginates periods with stable distinct cursors and complete balances`; performed and posted timestamps are asserted independently in API and UI fixtures                                                                                              |
+| Immutable offer and invoice service policy snapshots  | PASS   | `apps/api/test/recurring-service-documents.test.ts` — frozen monthly policy, stored-policy print rebuild and stale-policy rejection                                                                                                                                                                          |
+| Billing-act work snapshot and active-act uniqueness   | PASS   | `apps/api/test/billing-acts.service.test.ts` — `snapshots recurring work once and releases only its act link on cancellation`; `apps/api/test/billing-act-print-document.test.ts` — deterministic frozen act model and bytes                                                                                 |
+| Forward migration and deferred validation             | PASS   | `packages/db/test/recurring-services-migration.test.ts` — additive constraints, 0158/0160 deferred validation, overlap exclusion and active-act uniqueness on an isolated PostgreSQL database                                                                                                                |
+| Existing commercial application behavior              | PASS   | `apps/api/test/billing-application-flow.test.ts` and existing commercial-version suites                                                                                                                                                                                                                      |
+
+## UI and browser evidence
+
+| Surface                                                                                   | Status | Evidence                                                                                                                                                                                          |
+| ----------------------------------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| SaaS monthly catalog creation and dirty-state protection                                  | PASS   | `apps/saas-admin/test/recurring-service-catalog.test.tsx`                                                                                                                                         |
+| SaaS period roles, mutation recovery, localization and internal notes                     | PASS   | `apps/saas-admin/test/service-periods.test.tsx`: 5 tests                                                                                                                                          |
+| Tenant active, upcoming, expired and exhausted views with customer-safe corrected history | PASS   | `apps/admin/test/service-periods.test.tsx`                                                                                                                                                        |
+| Tenant billing browser at desktop/mobile in RU/EN                                         | PASS   | `corepack pnpm run test:tenant-billing` in `tools/production-browser`: 12 Playwright tests passed at 1440, 1280, 390, 360 and 320 widths                                                          |
+| SaaS catalog and service workspace at 1280×800 and 390×844 in RU/EN                       | PASS   | `corepack pnpm run test:service-periods` in `tools/production-browser`: 4 Playwright tests passed with active/exhausted balances, correction, product defect, external approval and internal note |
+
+## Verification gates
+
+| Gate                                                          | Status  | Evidence or reason                                                                                                             |
+| ------------------------------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Platform contracts package tests                              | PASS    | 36 files and 340 tests passed; the compile gate below also covered package lint, typecheck and build                            |
+| DB package tests with isolated PostgreSQL                     | PASS    | All migrations applied to a fresh temporary database; 107 files and 568 tests passed                                           |
+| Focused recurring-service API tests with isolated PostgreSQL  | PASS    | All migrations applied to a fresh temporary database; 11 files and 74 tests passed                                             |
+| Complete API package test command                             | FAIL    | 273 files passed, 8 skipped and 103 failed to start; 9 tests failed because the local environment lacks required platform-auth variables and parallel suites shared one database. The focused isolated P2A run above passed |
+| SaaS Admin package tests                                      | PASS    | 50 files and 499 tests passed; service workspace component suite has 5 passing tests                                            |
+| Tenant Admin package tests                                    | PASS    | 113 files and 1,415 tests passed                                                                                               |
+| Broad Turbo lint/typecheck/build gate                         | PASS    | 39 of 39 tasks passed with `--concurrency=1 --force`                                                                           |
+| Broad Turbo test gate                                         | FAIL    | The combined broad run stopped in API tests after 21 of 28 tasks; missing database/auth environment and sandbox-denied loopback listeners prevented a repository-wide result                 |
+| Repository format check and `git diff --check`                | PASS    | Prettier matched every tracked file; current working diff has no whitespace errors                                              |
+| Complete three-dot branch diff and CI ownership audit         | BLOCKED | `origin/main` advanced beyond this branch; rebase/merge and the final post-integration audit remain                              |
+
+## External gates
+
+| Gate                                                              | Status  | Reason                                                                    |
+| ----------------------------------------------------------------- | ------- | ------------------------------------------------------------------------- |
+| Production database backup and migrations 0157-0161               | NOT RUN | No deployment was requested or performed                                  |
+| Production API and UI deployment                                  | NOT RUN | No release workflow was dispatched                                        |
+| First real monthly service publication                            | NOT RUN | Requires an explicit reviewed commercial publication                      |
+| Real payment activation and accounting reconciliation             | NOT RUN | Synthetic isolated database evidence only                                 |
+| Real operator and tenant browser acceptance                       | NOT RUN | Local browser fixtures do not authenticate against production             |
+| Customer acceptance and production telemetry                      | NOT RUN | Requires a customer rollout and observation window                        |
+| Station, Handheld, kiosk, scanner, printer and Windows acceptance | NOT RUN | Recurring services add no device workflow; no hardware gate was exercised |

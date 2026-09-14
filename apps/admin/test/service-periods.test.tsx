@@ -194,12 +194,18 @@ describe("tenant service periods", () => {
   });
 
   it("renders recoverable error and empty states", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => response({ items: [], nextCursor: null })));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => response({ items: [], nextCursor: null })),
+    );
     const empty = renderRoute("/billing/services");
     expect(await screen.findByText("Сервисных пакетов пока нет")).toBeDefined();
     empty.unmount();
 
-    vi.stubGlobal("fetch", vi.fn(async () => response({ code: "temporarily_unavailable" }, 503)));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => response({ code: "temporarily_unavailable" }, 503)),
+    );
     renderRoute("/billing/services");
     expect((await screen.findByRole("alert")).textContent).toContain(
       "Не удалось загрузить сервисные пакеты.",

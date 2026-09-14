@@ -1185,6 +1185,7 @@
     "remaining": "Осталось",
     "revision": "Ревизия",
     "ledger": "История работ",
+    "internalNote": "Внутренняя заметка: {{note}}",
     "columns": {
       "name": "Услуга",
       "period": "Период",

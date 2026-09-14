@@ -1052,15 +1052,15 @@ git commit -m "feat: snapshot recurring service work in acts"
 - Produces: deploy order, recovery procedure, evidence ledger and final verification record.
 - Consumes: all previous tasks.
 
-- [ ] **Step 1: Write the acceptance ledger before broad verification**
+- [x] **Step 1: Write the acceptance ledger before broad verification**
 
 Record AC-43 through AC-48 with exact test file and test name, plus separate rows for V1–V3 compatibility, tenant isolation, role capability, request replay, concurrent overspend, late posting, document snapshots, act uniqueness and migration validation. Use `PASS`, `FAIL`, `NOT RUN` or `BLOCKED`; never infer production, hardware or customer acceptance from local tests.
 
-- [ ] **Step 2: Document rollout and rollback boundaries**
+- [x] **Step 2: Document rollout and rollback boundaries**
 
-Specify this order: deploy migrations 0157–0159, validate constraints, deploy V4-capable API, deploy SaaS Admin and tenant Admin, verify reads, then explicitly publish the first recurring service. State that rollback to an older writer is prohibited after first V4 publication or period creation, while no seed or deployment command creates production commercial data.
+Specify this order: deploy migrations 0157–0161, including deferred validations in 0158 and 0160, deploy V4-capable API, deploy SaaS Admin and tenant Admin, verify reads, then explicitly publish the first recurring service. State that rollback to an older writer is prohibited after first V4 publication or period creation, while no seed or deployment command creates production commercial data.
 
-- [ ] **Step 3: Add browser harness states**
+- [x] **Step 3: Add browser harness states**
 
 Extend the tenant billing visual suite for the customer ledger. Add a SaaS Admin service-period config modeled on `offers.playwright.config.ts`, using port 43186 and `service-periods-tests`. Render Russian and English monthly catalog and service workspace at 1280×800 and 390×844. Include active balance, exhausted balance, product-defect row, external approval and correction.
 
@@ -1090,6 +1090,8 @@ corepack pnpm@11.22.0 --filter @markiro/admin test
 
 Expected: all executed tests pass. Record database-backed skips caused by missing `DATABASE_URL` as unverified infrastructure coverage.
 
+Verification record: platform contracts (36 files, 340 tests), DB on a fresh migrated PostgreSQL database (107 files, 568 tests), SaaS Admin (50 files, 499 tests), Tenant Admin (113 files, 1,415 tests), and the focused recurring-service API set on a fresh migrated PostgreSQL database (11 files, 74 tests) passed. The complete API package command did not pass because required platform-auth variables were unavailable and parallel suites shared the database; the acceptance ledger records the exact boundary.
+
 - [ ] **Step 5: Run the broad repository gate**
 
 ```bash
@@ -1099,6 +1101,8 @@ git diff --check
 ```
 
 Expected: PASS. If an unrelated pre-existing failure appears, capture its exact command and output in the acceptance ledger and keep the P2A evidence separate.
+
+Verification record: the separate Turbo lint/typecheck/build run passed all 39 tasks. The combined test gate stopped in API tests because the local run lacked required database/auth configuration and the sandbox denied loopback listeners. Prettier and `git diff --check` passed. The acceptance ledger keeps these results separate.
 
 - [ ] **Step 6: Inspect the complete branch diff and CI ownership**
 

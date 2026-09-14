@@ -32,9 +32,12 @@ describe.skipIf(!databaseUrl)("payment payer-account matching", () => {
     capabilities: platformCapabilitiesForRole("accountant"),
     twoFactorReady: true,
   };
+  const application = {
+    observeCommitted: () => undefined,
+  } as unknown as BillingApplicationService;
   const service = new BillingPaymentsService(
     connection.db,
-    {} as BillingApplicationService,
+    application,
     new PlatformAuditService(),
   );
   const activeAccountNumber = "40702810900000000001";

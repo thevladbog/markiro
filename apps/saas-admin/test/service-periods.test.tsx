@@ -29,7 +29,10 @@ beforeEach(async () => {
   await i18n.changeLanguage("ru");
 });
 
-function install(principal: typeof SUPPORT_ME | typeof ACCOUNTANT_ME) {
+function install(
+  principal: typeof SUPPORT_ME | typeof ACCOUNTANT_ME,
+  entries: Array<Record<string, unknown>> = [],
+) {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL) => {
@@ -43,7 +46,7 @@ function install(principal: typeof SUPPORT_ME | typeof ACCOUNTANT_ME) {
           invoiceId: "55555555-5555-4555-8555-555555555555",
           invoiceLineId: "66666666-6666-4666-8666-666666666666",
           paymentId: "77777777-7777-4777-8777-777777777777",
-          entries: [],
+          entries,
           approvals: [],
         });
       return jsonResponse(404, { code: "not_found" });
@@ -70,6 +73,31 @@ describe("service period workspace", () => {
     screen.getByRole("button", { name: "Открыть" }).click();
     expect(await screen.findByRole("button", { name: "Добавить согласование" })).toBeDefined();
     expect(screen.queryByRole("button", { name: "Списать работу" })).toBeNull();
+  });
+
+  it("shows internal work notes to platform operators", async () => {
+    install(SUPPORT_ME, [
+      {
+        id: "88888888-8888-4888-8888-888888888888",
+        kind: "usage",
+        classification: "customer_service",
+        originalEntryId: null,
+        workReference: "SUP-42",
+        description: "Настройка интеграции",
+        performedAt: "2026-09-10T08:00:00.000Z",
+        postedAt: "2026-09-10T10:00:00.000Z",
+        actualMinutesDelta: 45,
+        allowanceMinutesDelta: 45,
+        billingActId: null,
+        internalNote: "Проверить журнал обмена",
+        actorPlatformUserId: "fixture-support",
+        requestId: "99999999-9999-4999-8999-999999999999",
+      },
+    ]);
+    renderSaasApp({ initialEntry: "/service-periods" });
+    await screen.findByText("Сервисное сопровождение");
+    screen.getByRole("button", { name: "Открыть" }).click();
+    expect(await screen.findByText("Внутренняя заметка: Проверить журнал обмена")).toBeDefined();
   });
 
   it("localizes the workspace and restores focus after closing the service drawer", async () => {

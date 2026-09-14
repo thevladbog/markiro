@@ -95,6 +95,12 @@ export function ServicePeriodDrawer({
                   <br />
                   {entry.description} · {new Date(entry.performedAt).toLocaleString()} /{" "}
                   {new Date(entry.postedAt).toLocaleString()}
+                  {entry.internalNote ? (
+                    <>
+                      <br />
+                      <span>{t("servicePeriods.internalNote", { note: entry.internalNote })}</span>
+                    </>
+                  ) : null}
                   {canWriteUsage && entry.kind === "usage" ? (
                     <Button variant="secondary" onClick={() => setCorrectionId(entry.id)}>
                       {t("servicePeriods.correction.open")}

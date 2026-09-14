@@ -158,11 +158,11 @@ describe.skipIf(!databaseUrl)("P1 additive migrations and transactional revision
     expect(
       (
         await pool.query(
-          "SELECT to_jsonb(t)-'lifecycle_policy_id' AS value,lifecycle_policy_id FROM catalog_item_versions t WHERE id=$1",
-          [planId],
+          "SELECT to_jsonb(t)-$2::text[] AS value,lifecycle_policy_id,service_terms FROM catalog_item_versions t WHERE id=$1",
+          [planId, ["lifecycle_policy_id", "service_terms"]],
         )
       ).rows[0],
-    ).toEqual({ value: legacyVersion, lifecycle_policy_id: null });
+    ).toEqual({ value: legacyVersion, lifecycle_policy_id: null, service_terms: null });
     expect(
       (await pool.query("SELECT count(*)::int AS count FROM entitlement_lifecycle_policies"))
         .rows[0]?.count,

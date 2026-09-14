@@ -135,6 +135,7 @@ describe.skipIf(!databaseUrl)("commercial terms additive migration", () => {
         "subject",
         "seller_policy_revision",
         "lifecycle_policy_id",
+        "service_terms",
       ],
       plan_entitlements: [
         "chz_integration_enabled",
