@@ -19,13 +19,22 @@ import { apiFetch, ApiRequestError } from "../../api/client.js";
 
 export type PickupOrderStatus = "pending" | "punched" | "writtenoff" | "cancelled";
 export type PickupOrderReason = "buy" | "writeoff";
+export type PickupDeviceKind = "kiosk" | "handheld";
+
+/** Mirrors the API's `PickupDeviceDto`: which device produced the document. */
+export interface PickupDeviceDto {
+  kind: PickupDeviceKind;
+  id: string;
+  name: string;
+  place: string | null;
+}
 
 /** Mirrors `apps/api/src/modules/pickup-orders/dto.ts`'s `PickupOrderRowDto`. */
 export interface PickupOrderRowDto {
   id: string;
   orderNo: string;
   employeeName: string;
-  kioskName: string;
+  device: PickupDeviceDto;
   reason: PickupOrderReason;
   writeoffReasonName: string | null;
   itemCount: number;
@@ -88,6 +97,7 @@ export interface PickupOrderDetailDto extends PickupOrderRowDto {
 export interface ListPickupOrdersParams {
   status?: PickupOrderStatus;
   reason?: PickupOrderReason;
+  source?: PickupDeviceKind;
   from?: string;
   to?: string;
 }
@@ -121,6 +131,7 @@ function buildListPath(params: ListPickupOrdersParams): string {
   const query = new URLSearchParams();
   if (params.status) query.set("status", params.status);
   if (params.reason) query.set("reason", params.reason);
+  if (params.source) query.set("source", params.source);
   if (params.from) query.set("from", params.from);
   if (params.to) query.set("to", params.to);
   const qs = query.toString();

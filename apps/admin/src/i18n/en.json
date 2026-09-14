@@ -2794,6 +2794,12 @@
           "all": "All reasons",
           "buy": "Purchase",
           "writeoff": "Write-off"
+        },
+        "sourceLabel": "Source",
+        "source": {
+          "all": "All",
+          "kiosk": "Kiosks",
+          "handheld": "Handhelds"
         }
       },
       "status": {
@@ -2809,7 +2815,6 @@
       "table": {
         "orderNo": "Order no.",
         "employeeName": "Employee",
-        "kioskName": "Kiosk",
         "createdAt": "When",
         "reason": "Reason",
         "itemCount": "Codes",
@@ -2817,7 +2822,8 @@
         "status": "Status",
         "actions": "Actions",
         "openAction": "Open",
-        "openOrder": "Open order {{orderNo}}"
+        "openOrder": "Open order {{orderNo}}",
+        "device": "Device"
       },
       "bulkExport": {
         "toggleAction": "Bulk export",
@@ -2828,7 +2834,6 @@
       "detail": {
         "backAction": "← Orders",
         "employeeLabel": "Employee",
-        "kioskLabel": "Kiosk",
         "reasonLabel": "Reason",
         "createdAtLabel": "Created",
         "totalLabel": "Total",
@@ -2875,7 +2880,8 @@
           "confirmAction": "Cancel order"
         },
         "codeUnavailable": "Code unavailable",
-        "loadError": "Could not load the order. Refresh the page or sign in again."
+        "loadError": "Could not load the order. Refresh the page or sign in again.",
+        "deviceLabel": "Device"
       },
       "conflicts": {
         "title": "Rejected at sync: {{count}}",
@@ -2901,15 +2907,12 @@
       "rejections": {
         "title": "Rejected scans",
         "bannerTitle": "Rejected scans: {{count}}",
-        "bannerKiosks": "Kiosks: {{kiosks}}",
         "bannerMore": "and {{count}} more",
         "bannerAction": "Review",
         "backAction": "← Orders",
         "emptyTitle": "No rejected scans",
         "emptyHint": "Scans whose codes the server refused will appear here — for example, a product missing from the catalogue or a badge already revoked.",
         "filters": {
-          "kioskLabel": "Kiosk",
-          "kioskAll": "All kiosks",
           "stateLabel": "State",
           "fromLabel": "From",
           "toLabel": "To",
@@ -2917,17 +2920,19 @@
             "all": "All",
             "open": "Open",
             "acknowledged": "Handled"
-          }
+          },
+          "deviceAll": "All devices",
+          "deviceLabel": "Device"
         },
         "table": {
           "syncedAt": "Synced",
           "scannedAt": "Scanned",
-          "kioskName": "Kiosk",
           "employeeName": "Employee",
           "codeCount": "Codes",
           "order": "Order",
           "state": "State",
-          "actions": "Actions"
+          "actions": "Actions",
+          "device": "Device"
         },
         "unknownBadge": "Badge not recognised",
         "badgeCodeLabel": "Badge: {{code}}",
@@ -2944,7 +2949,8 @@
         "toasts": {
           "acknowledged": "Marked as handled",
           "acknowledgeError": "Could not mark it. Refresh the page."
-        }
+        },
+        "bannerDevices": "Devices: {{devices}}"
       },
       "toasts": {
         "resolveSuccess": "Order resolved",
@@ -2953,6 +2959,10 @@
         "cancelError": "Could not cancel the order",
         "exportSuccess": "Codes exported",
         "exportError": "Could not export the codes"
+      },
+      "deviceKind": {
+        "kiosk": "Kiosk",
+        "handheld": "Handheld"
       }
     },
     "disaggregation": {

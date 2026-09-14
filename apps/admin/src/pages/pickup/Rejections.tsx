@@ -20,7 +20,7 @@ import { CABINET_CAPABILITY } from "@markiro/domain";
 import { useCan } from "../../access/context.js";
 import { formatCreatedAt } from "../../lib/datetime.js";
 import { toast } from "../../lib/toast.js";
-import { useKiosks } from "../kiosks/api.js";
+import { useDevices } from "../devices/api.js";
 import {
   useAcknowledgeRejection,
   usePickupRejections,
@@ -39,25 +39,32 @@ export function RejectionsPage() {
   const { t, i18n } = useTranslation();
   const canWrite = useCan(CABINET_CAPABILITY.OPERATIONS_WRITE);
 
-  const [kioskId, setKioskId] = useState("all");
+  const [deviceId, setDeviceId] = useState("all");
   const [stateFilter, setStateFilter] = useState<RejectionState>("all");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
-  const { data: kiosks } = useKiosks();
+  // Kiosks AND handhelds both file rejections, so the filter must offer both;
+  // listing only kiosks would make a handheld's rejections unreachable.
+  const { data: devices } = useDevices({ page: 1, pageSize: 200 });
 
   const { data, isPending, isError } = usePickupRejections({
     state: stateFilter,
-    ...(kioskId !== "all" ? { kioskId } : {}),
+    ...(deviceId !== "all" ? { deviceId } : {}),
     ...(fromDate ? { from: fromDate } : {}),
     ...(toDate ? { to: toDate } : {}),
   });
   const items = data?.items ?? [];
 
-  const kioskOptions: SelectOption[] = [
-    { value: "all", label: t("pages.pickup.rejections.filters.kioskAll") },
-    ...(kiosks ?? []).map((kiosk) => ({ value: kiosk.id, label: kiosk.name })),
+  const deviceOptions: SelectOption[] = [
+    { value: "all", label: t("pages.pickup.rejections.filters.deviceAll") },
+    ...(devices?.items ?? [])
+      .filter((device) => device.type === "kiosk" || device.type === "handheld")
+      .map((device) => ({
+        value: device.id,
+        label: `${device.name} · ${t(`pages.pickup.deviceKind.${device.type}`)}`,
+      })),
   ];
 
   const stateOptions: SelectOption<RejectionState>[] = [
@@ -88,7 +95,11 @@ export function RejectionsPage() {
       mono: true,
       render: (row) => formatCreatedAt(row.scannedAt, i18n.language),
     },
-    { key: "kioskName", title: t("pages.pickup.rejections.table.kioskName") },
+    {
+      key: "device",
+      title: t("pages.pickup.rejections.table.device"),
+      render: (row) => `${row.device.name} · ${t(`pages.pickup.deviceKind.${row.device.kind}`)}`,
+    },
     {
       key: "employeeName",
       title: t("pages.pickup.rejections.table.employeeName"),
@@ -169,10 +180,10 @@ export function RejectionsPage() {
       <div style={{ display: "flex", gap: 12, alignItems: "flex-end" }}>
         <div style={{ width: 200 }}>
           <Select
-            label={t("pages.pickup.rejections.filters.kioskLabel")}
-            options={kioskOptions}
-            value={kioskId}
-            onValueChange={setKioskId}
+            label={t("pages.pickup.rejections.filters.deviceLabel")}
+            options={deviceOptions}
+            value={deviceId}
+            onValueChange={setDeviceId}
           />
         </div>
         <div style={{ width: 200 }}>
@@ -235,7 +246,7 @@ export function RejectionsPage() {
               <Alert
                 key={row.id}
                 tone="warn"
-                title={`${row.kioskName} · ${row.employeeName ?? row.badgeCode} · ${t("pages.pickup.conflicts.title", { count: row.codes.length })}`}
+                title={`${row.device.name} · ${row.employeeName ?? row.badgeCode} · ${t("pages.pickup.conflicts.title", { count: row.codes.length })}`}
               >
                 <ul style={{ margin: 0, paddingInlineStart: "var(--sp-5)" }}>
                   {row.codes.map((code, index) => (

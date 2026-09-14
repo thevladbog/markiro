@@ -50,8 +50,7 @@ function jsonResponse(status: number, body: unknown): Response {
 const REJECTION = {
   id: "r-1",
   kind: "items_refused",
-  kioskId: "k-1",
-  kioskName: "Киоск-1",
+  device: { kind: "kiosk", id: "k-1", name: "Киоск-1", place: null },
   employeeName: "Иван Иванов",
   badgeCode: null,
   orderId: null,
@@ -94,15 +93,6 @@ function renderWith(ui: React.ReactElement, access: AccessDocument = OPERATIONS_
       </MemoryRouter>
     </QueryClientProvider>,
   );
-}
-
-async function chooseOption(
-  user: ReturnType<typeof userEvent.setup>,
-  label: string,
-  option: string,
-) {
-  await user.click(screen.getByRole("combobox", { name: label }));
-  await user.click(await screen.findByRole("option", { name: option }));
 }
 
 describe("rejections banner on the свод", () => {
@@ -311,15 +301,17 @@ describe("rejections page", () => {
     await waitFor(() => expect(screen.getByText("Отклонённых сканов нет")).toBeDefined());
   });
 
-  it("filters by kiosk", async () => {
+  it("filters by device, offering handhelds alongside kiosks", async () => {
     const user = userEvent.setup();
-    const KIOSKS = [
-      { id: "k-1", name: "Киоск-1" },
-      { id: "k-2", name: "Киоск-2" },
+    // The picker reads /devices, not /kiosks: a handheld files rejections too,
+    // and a kiosk-only list would make its rows unreachable.
+    const DEVICES = [
+      { id: "k-2", type: "kiosk", name: "Киоск-2", place: { id: null, name: null } },
+      { id: "d-1", type: "handheld", name: "ТСД-1", place: { id: null, name: null } },
     ];
     const fetchMock = vi.fn(async (input: string) => {
-      if (String(input).includes("/kiosks")) {
-        return jsonResponse(200, { items: KIOSKS });
+      if (String(input).includes("/devices")) {
+        return jsonResponse(200, { items: DEVICES, page: 1, pageSize: 200, total: 2 });
       }
       return jsonResponse(200, { items: [REJECTION], openCount: 1 });
     });
@@ -328,13 +320,15 @@ describe("rejections page", () => {
     renderWith(<RejectionsPage />);
 
     await waitFor(() => expect(screen.getByText("Иван Иванов")).toBeDefined());
-    await chooseOption(user, "Киоск", "Киоск-2");
+    await user.click(screen.getByRole("combobox", { name: "Устройство" }));
+    expect(await screen.findByRole("option", { name: "ТСД-1 · ТСД" })).toBeDefined();
+    await user.click(await screen.findByRole("option", { name: "Киоск-2 · Киоск" }));
 
     await waitFor(() =>
       expect(
         fetchMock.mock.calls.some(
           ([url]) =>
-            String(url).includes("/pickup-rejections") && String(url).includes("kioskId=k-2"),
+            String(url).includes("/pickup-rejections") && String(url).includes("deviceId=k-2"),
         ),
       ).toBe(true),
     );

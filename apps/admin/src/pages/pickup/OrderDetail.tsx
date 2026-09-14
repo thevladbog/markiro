@@ -367,7 +367,10 @@ export function OrderDetailPage() {
           }}
         >
           <DetailField label={t("pages.pickup.detail.employeeLabel")} value={order.employeeName} />
-          <DetailField label={t("pages.pickup.detail.kioskLabel")} value={order.kioskName} />
+          <DetailField
+            label={t("pages.pickup.detail.deviceLabel")}
+            value={`${order.device.name} · ${t(`pages.pickup.deviceKind.${order.device.kind}`)}`}
+          />
           <DetailField label={t("pages.pickup.detail.reasonLabel")} value={reasonText} />
           <DetailField
             label={t("pages.pickup.detail.createdAtLabel")}

@@ -23,7 +23,7 @@ const ORDER = {
   id: "o1",
   orderNo: "PO-0001",
   employeeName: "Иванов Иван",
-  kioskName: "Касса самовывоза 1",
+  device: { kind: "kiosk", id: "k-1", name: "Касса самовывоза 1", place: null },
   reason: "buy",
   writeoffReasonName: null,
   itemCount: 3,

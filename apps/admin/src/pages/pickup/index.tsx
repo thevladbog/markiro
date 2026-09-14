@@ -26,6 +26,7 @@ import { toast } from "../../lib/toast.js";
 import {
   useExportCodes,
   usePickupOrders,
+  type PickupDeviceKind,
   type PickupOrderReason,
   type PickupOrderRowDto,
   type PickupOrderStatus,
@@ -35,6 +36,7 @@ import { PickupViewNav } from "./PickupViewNav.js";
 
 type StatusFilter = "all" | PickupOrderStatus;
 type ReasonFilter = "all" | PickupOrderReason;
+type SourceFilter = "all" | PickupDeviceKind;
 
 const STATUS_TO_CHIP: Record<PickupOrderStatus, StatusChipStatus> = {
   pending: "warn",
@@ -48,6 +50,8 @@ interface PickupPageContentProps {
   onStatusFilterChange: (value: StatusFilter) => void;
   reasonFilter: ReasonFilter;
   onReasonFilterChange: (value: ReasonFilter) => void;
+  sourceFilter: SourceFilter;
+  onSourceFilterChange: (value: SourceFilter) => void;
   fromDate: string;
   onFromDateChange: (value: string) => void;
   toDate: string;
@@ -55,7 +59,7 @@ interface PickupPageContentProps {
   items: PickupOrderRowDto[];
   isPending: boolean;
   isError: boolean;
-  rejections: { openCount: number; kioskNames: string[] };
+  rejections: { openCount: number; deviceNames: string[] };
 }
 
 interface PickupWriteControls {
@@ -120,6 +124,8 @@ function PickupPageContent({
   onStatusFilterChange,
   reasonFilter,
   onReasonFilterChange,
+  sourceFilter,
+  onSourceFilterChange,
   fromDate,
   onFromDateChange,
   toDate,
@@ -132,8 +138,8 @@ function PickupPageContent({
 }: PickupPageContentProps & { write?: PickupWriteControls }) {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
-  const shownKiosks = rejections.kioskNames.slice(0, 3);
-  const hiddenKioskCount = rejections.kioskNames.length - shownKiosks.length;
+  const shownDevices = rejections.deviceNames.slice(0, 3);
+  const hiddenDeviceCount = rejections.deviceNames.length - shownDevices.length;
 
   const statusOptions: SelectOption<StatusFilter>[] = [
     { value: "all", label: t("pages.pickup.filters.status.all") },
@@ -141,6 +147,12 @@ function PickupPageContent({
     { value: "punched", label: t("pages.pickup.filters.status.punched") },
     { value: "writtenoff", label: t("pages.pickup.filters.status.writtenoff") },
     { value: "cancelled", label: t("pages.pickup.filters.status.cancelled") },
+  ];
+
+  const sourceOptions: SelectOption<SourceFilter>[] = [
+    { value: "all", label: t("pages.pickup.filters.source.all") },
+    { value: "kiosk", label: t("pages.pickup.filters.source.kiosk") },
+    { value: "handheld", label: t("pages.pickup.filters.source.handheld") },
   ];
 
   const reasonOptions: SelectOption<ReasonFilter>[] = [
@@ -161,7 +173,16 @@ function PickupPageContent({
       ),
     },
     { key: "employeeName", title: t("pages.pickup.table.employeeName") },
-    { key: "kioskName", title: t("pages.pickup.table.kioskName") },
+    {
+      key: "device",
+      title: t("pages.pickup.table.device"),
+      render: (row) => (
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          {row.device.name}
+          <Badge>{t(`pages.pickup.deviceKind.${row.device.kind}`)}</Badge>
+        </span>
+      ),
+    },
     {
       key: "createdAt",
       title: t("pages.pickup.table.createdAt"),
@@ -278,10 +299,10 @@ function PickupPageContent({
             </Link>
           }
         >
-          {shownKiosks.length > 0 &&
-            t("pages.pickup.rejections.bannerKiosks", { kiosks: shownKiosks.join(", ") })}
-          {hiddenKioskCount > 0 &&
-            ` ${t("pages.pickup.rejections.bannerMore", { count: hiddenKioskCount })}`}
+          {shownDevices.length > 0 &&
+            t("pages.pickup.rejections.bannerDevices", { devices: shownDevices.join(", ") })}
+          {hiddenDeviceCount > 0 &&
+            ` ${t("pages.pickup.rejections.bannerMore", { count: hiddenDeviceCount })}`}
         </Alert>
       )}
 
@@ -300,6 +321,14 @@ function PickupPageContent({
             options={reasonOptions}
             value={reasonFilter}
             onValueChange={onReasonFilterChange}
+          />
+        </div>
+        <div style={{ width: 200 }}>
+          <Select
+            label={t("pages.pickup.filters.sourceLabel")}
+            options={sourceOptions}
+            value={sourceFilter}
+            onValueChange={onSourceFilterChange}
           />
         </div>
         <div style={{ width: 180 }}>
@@ -381,12 +410,14 @@ export function PickupPage() {
 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [reasonFilter, setReasonFilter] = useState<ReasonFilter>("all");
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
 
   const { data, isPending, isError } = usePickupOrders({
     ...(statusFilter !== "all" ? { status: statusFilter } : {}),
     ...(reasonFilter !== "all" ? { reason: reasonFilter } : {}),
+    ...(sourceFilter !== "all" ? { source: sourceFilter } : {}),
     ...(fromDate ? { from: fromDate } : {}),
     ...(toDate ? { to: toDate } : {}),
   });
@@ -396,6 +427,8 @@ export function PickupPage() {
     onStatusFilterChange: setStatusFilter,
     reasonFilter,
     onReasonFilterChange: setReasonFilter,
+    sourceFilter,
+    onSourceFilterChange: setSourceFilter,
     fromDate,
     onFromDateChange: setFromDate,
     toDate,
