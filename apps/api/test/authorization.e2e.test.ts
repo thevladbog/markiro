@@ -129,7 +129,7 @@ describe.skipIf(!ready)("cabinet authorization e2e", () => {
     await agent.get("/access/me").expect(403);
   });
 
-  it("seeds the default pickup policy for a test-provisioned tenant", async () => {
+  it("seeds the default pickup policy with limits off for a test-provisioned tenant", async () => {
     const agent = request.agent(app!.getHttpServer());
     const organizationId = await signUpWithInactiveOrg(agent);
 
@@ -138,7 +138,7 @@ describe.skipIf(!ready)("cabinet authorization e2e", () => {
       .from(schema.pickupTenantPolicies)
       .where(eq(schema.pickupTenantPolicies.tenantId, organizationId));
 
-    expect(policy).toEqual({ limitsEnabled: true });
+    expect(policy).toEqual({ limitsEnabled: false });
   });
 
   it("gives an owner every cabinet capability", async () => {

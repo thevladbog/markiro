@@ -74,10 +74,16 @@ describe.skipIf(!ready)("kiosk bootstrap: what an employee took at OTHER kiosks 
 
     const agent = request.agent(app!.getHttpServer());
     tenantId = await signUpAndActivate(agent);
+    // Limits are off by default now, and the policy row already exists (the org
+    // creation hook writes it), so `onConflictDoNothing` would leave this suite
+    // running without the limits it exists to exercise. Upsert instead.
     await db
       .insert(schema.pickupTenantPolicies)
       .values({ tenantId, limitsEnabled: true })
-      .onConflictDoNothing();
+      .onConflictDoUpdate({
+        target: schema.pickupTenantPolicies.tenantId,
+        set: { limitsEnabled: true },
+      });
 
     productId = randomUUID();
     await db

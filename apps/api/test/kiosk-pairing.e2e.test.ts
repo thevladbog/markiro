@@ -488,7 +488,7 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
           startsAt: null,
           endsAt: null,
         },
-        pickupPolicy: { limitsEnabled: true },
+        pickupPolicy: { limitsEnabled: false },
         branding: {
           organizationName: "Test Plant",
           logoUrl: null,
