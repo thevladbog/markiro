@@ -22,6 +22,9 @@ import {
   grantIssueResultSchema,
   grantKeysetResultSchema,
   grantConfigurationSchema,
+  grantClientReadinessRequestSchema,
+  grantClientReadinessResponseSchema,
+  type GrantClientReadinessRequest,
   type DeviceGrantRequest,
   type TaskGrantRequest,
 } from "@markiro/platform-contracts";
@@ -37,6 +40,7 @@ import { ApiHttpErrors, ApiStationAuth, ApiZodBody, zodApiSchema } from "../../l
 import { ZodValidationPipe } from "../../zod.pipe";
 import { GrantIssuerService } from "./grant-issuer.service";
 import type { GrantCredentialIdentity } from "./credential-epoch";
+import { GrantClientReadinessService } from "./grant-client-readiness.service";
 function identity(req: RequestWithTenant): GrantCredentialIdentity {
   if (
     req.authKind !== "station" ||
@@ -61,6 +65,7 @@ export class DeviceGrantsController {
   constructor(
     private readonly issuer: GrantIssuerService,
     private readonly evidence: GrantEvidenceNativeService,
+    private readonly readinessService: GrantClientReadinessService,
   ) {}
   @ApiOperation({ summary: "Issue a signed offline device grant" })
   @Post("device")
@@ -104,6 +109,20 @@ export class DeviceGrantsController {
     @Body(new ZodValidationPipe(deviceGrantRequestSchema)) _body: DeviceGrantRequest,
   ) {
     return this.issuer.configuration(identity(req));
+  }
+  @ApiOperation({ summary: "Report a durable offline grant installation" })
+  @Post("readiness")
+  @HttpCode(200)
+  @AllowSubscriptionReadOnly("read")
+  @ApiZodBody(grantClientReadinessRequestSchema)
+  @ApiOkResponse({ schema: zodApiSchema(grantClientReadinessResponseSchema) })
+  @ApiHttpErrors(400, 401, 403, 409, 429)
+  readiness(
+    @Req() req: RequestWithTenant,
+    @Body(new ZodValidationPipe(grantClientReadinessRequestSchema))
+    body: GrantClientReadinessRequest,
+  ) {
+    return this.readinessService.report(identity(req), body);
   }
   @ApiOperation({ summary: "Read the authenticated offline grant verifier keyset" })
   @Get("keyset")

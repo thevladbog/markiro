@@ -1,4 +1,7 @@
-import type { GrantEvidenceEnvelope } from "@markiro/platform-contracts";
+import type {
+  GrantClientReadinessRequest,
+  GrantEvidenceEnvelope,
+} from "@markiro/platform-contracts";
 import type {
   CreateOrderAdmissionDto,
   CreateOrderAdmissionResultDto,
@@ -316,6 +319,7 @@ export interface KioskClient {
     capability: "offline-grants-v1";
     requestId: string;
   }): Promise<unknown>;
+  grantReadiness?(request: GrantClientReadinessRequest): Promise<unknown>;
   issueDeviceGrant?(request: {
     protocol: "offline-grants-v1";
     capability: "offline-grants-v1";
@@ -384,6 +388,8 @@ export function createKioskClient(cfg: {
       request<unknown>("POST", "/kiosk/grants/v1/evidence/orders", SUBMIT_TIMEOUT_MS, envelope),
     grantConfiguration: (body) =>
       request<unknown>("POST", "/kiosk/grants/v1/configuration", BOOTSTRAP_TIMEOUT_MS, body),
+    grantReadiness: (body) =>
+      request<unknown>("POST", "/kiosk/grants/v1/readiness", BOOTSTRAP_TIMEOUT_MS, body),
     grantKeyset: () => request<unknown>("GET", "/kiosk/grants/v1/keyset", BOOTSTRAP_TIMEOUT_MS),
     issueDeviceGrant: (body) =>
       request<unknown>("POST", "/kiosk/grants/v1/device", BOOTSTRAP_TIMEOUT_MS, body),

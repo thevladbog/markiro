@@ -68,6 +68,32 @@ export const grantNegotiationSchema = z
     requestId: z.string().uuid(),
   })
   .strict();
+export const grantClientReadinessRequestSchema = grantNegotiationSchema
+  .omit({ capability: true })
+  .extend({
+    capability: z.literal("offline-grants-readiness-v1"),
+    clientBuild: z.string().min(1).max(100),
+    storageRevision: z.number().int().positive().max(2_147_483_647),
+    installed: z
+      .object({
+        mode: z.enum(["observe", "strict"]),
+        policyRevision: z.string().min(1).max(256).nullable(),
+        keysetRevision: z.string().min(1).max(256).nullable(),
+        verifiedGrantId: z.string().uuid().nullable(),
+      })
+      .strict(),
+  })
+  .strict();
+export const grantClientReadinessResponseSchema = z
+  .object({
+    protocol: z.literal("offline-grants-v1"),
+    requestId: z.string().uuid(),
+    receivedAt: z.string().datetime({ offset: true }),
+    accepted: z.literal(true),
+    matchesCurrentConfiguration: z.boolean(),
+    verifiedGrantMatched: z.boolean(),
+  })
+  .strict();
 export const deviceGrantRequestSchema = grantNegotiationSchema;
 export const taskGrantRequestSchema = grantNegotiationSchema
   .extend({
@@ -111,6 +137,8 @@ export const grantKeysetSchema = z
 export type DeviceGrantRequest = z.infer<typeof deviceGrantRequestSchema>;
 export type TaskGrantRequest = z.infer<typeof taskGrantRequestSchema>;
 export type GrantKeyset = z.infer<typeof grantKeysetSchema>;
+export type GrantClientReadinessRequest = z.infer<typeof grantClientReadinessRequestSchema>;
+export type GrantClientReadinessResponse = z.infer<typeof grantClientReadinessResponseSchema>;
 
 export const kioskGrantReservationRequestSchema = grantNegotiationSchema
   .extend({

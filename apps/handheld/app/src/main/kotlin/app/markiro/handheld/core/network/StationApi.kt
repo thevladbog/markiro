@@ -20,6 +20,9 @@ interface StationApi {
     @POST("station/grants/v1/tasks")
     suspend fun taskGrant(@Body body: kotlinx.serialization.json.JsonObject): kotlinx.serialization.json.JsonObject
 
+    @POST("station/grants/v1/readiness")
+    suspend fun grantReadiness(@Body body: kotlinx.serialization.json.JsonObject): kotlinx.serialization.json.JsonObject
+
     @GET("station/identity")
     suspend fun identity(): IdentityResponse
 

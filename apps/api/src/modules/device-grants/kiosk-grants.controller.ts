@@ -22,11 +22,14 @@ import {
   grantIssueResultSchema,
   grantKeysetResultSchema,
   grantConfigurationSchema,
+  grantClientReadinessRequestSchema,
+  grantClientReadinessResponseSchema,
   kioskGrantReservationRequestSchema,
   kioskGrantReservationResultSchema,
   type DeviceGrantRequest,
   type TaskGrantRequest,
   type KioskGrantReservationRequest,
+  type GrantClientReadinessRequest,
 } from "@markiro/platform-contracts";
 import { KioskDeviceGuard, type RequestWithKiosk } from "../../tenancy/kiosk-device.guard";
 import { hashDeviceToken } from "../../pickup/device-token";
@@ -43,6 +46,7 @@ import { createOrderAdmissionSchema } from "../pickup-orders/dto";
 import { GrantIssuerService } from "./grant-issuer.service";
 import { freezeGrantTask } from "./frozen-task";
 import type { GrantCredentialIdentity } from "./credential-epoch";
+import { GrantClientReadinessService } from "./grant-client-readiness.service";
 function identity(req: RequestWithKiosk): GrantCredentialIdentity {
   const token = req.headers["x-kiosk-token"];
   if (!req.tenantId || !req.kioskId || typeof token !== "string") throw new UnauthorizedException();
@@ -62,6 +66,7 @@ export class KioskGrantsController {
     private readonly issuer: GrantIssuerService,
     private readonly pickup: PickupOrdersService,
     private readonly evidence: GrantEvidenceNativeService,
+    private readonly readinessService: GrantClientReadinessService,
   ) {}
   @ApiOperation({ summary: "Issue a signed offline device grant" })
   @Post("device")
@@ -105,6 +110,20 @@ export class KioskGrantsController {
     @Body(new ZodValidationPipe(deviceGrantRequestSchema)) _body: DeviceGrantRequest,
   ) {
     return this.issuer.configuration(identity(req));
+  }
+  @ApiOperation({ summary: "Report a durable offline grant installation" })
+  @Post("readiness")
+  @HttpCode(200)
+  @AllowSubscriptionReadOnly("read")
+  @ApiZodBody(grantClientReadinessRequestSchema)
+  @ApiOkResponse({ schema: zodApiSchema(grantClientReadinessResponseSchema) })
+  @ApiHttpErrors(400, 401, 403, 409, 429)
+  readiness(
+    @Req() req: RequestWithKiosk,
+    @Body(new ZodValidationPipe(grantClientReadinessRequestSchema))
+    body: GrantClientReadinessRequest,
+  ) {
+    return this.readinessService.report(identity(req), body);
   }
   @ApiOperation({ summary: "Read the authenticated offline grant verifier keyset" })
   @Get("keyset")

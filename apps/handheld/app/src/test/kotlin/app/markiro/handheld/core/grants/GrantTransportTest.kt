@@ -11,6 +11,8 @@ import kotlinx.serialization.json.*
 import okhttp3.OkHttpClient
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.mockwebserver.*
+import okhttp3.mockwebserver.SocketPolicy.DISCONNECT_AFTER_REQUEST
+import okhttp3.mockwebserver.SocketPolicy.NO_RESPONSE
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -42,7 +44,7 @@ class GrantTransportTest {
     private fun compact(owner: DeviceOwner, epoch: Long, time: Long, task: Pair<String,String>? = null): String {
         val header = b64("""{"typ":"markiro-offline-grant+jws","alg":"ES256","kid":"test"}""".toByteArray())
         val payload = b64(buildJsonObject {
-            put("version",1); put("kindOfGrant",if(task == null) "device" else "task"); put("issuer",owner.serverOrigin); put("grantId","device-$time"); put("tenantId",owner.tenantId); put("deviceId",owner.deviceId); put("kind","handheld"); put("credentialEpoch",epoch)
+            put("version",1); put("kindOfGrant",if(task == null) "device" else "task"); put("issuer",owner.serverOrigin); put("grantId","11111111-1111-4111-8111-${time.toString().padStart(12,'0')}"); put("tenantId",owner.tenantId); put("deviceId",owner.deviceId); put("kind","handheld"); put("credentialEpoch",epoch)
             put("entitlementRevision","e"); put("policyRevision","p-$time"); put("issuedAt",time); put("notBefore",time); if(task == null) {
                 put("startNotAfter",time+10000); put("capabilities",JsonArray(listOf(JsonPrimitive("shift.start.v1"),JsonPrimitive("inventory.start.v1"))))
             } else {
@@ -76,7 +78,7 @@ class GrantTransportTest {
         return db
     }
     private fun api(server: MockWebServer): StationApi = Retrofit.Builder().baseUrl(server.url("/"))
-        .client(OkHttpClient()).addConverterFactory(Json.asConverterFactory("application/json".toMediaType())).build().create(StationApi::class.java)
+        .client(OkHttpClient.Builder().retryOnConnectionFailure(false).build()).addConverterFactory(Json.asConverterFactory("application/json".toMediaType())).build().create(StationApi::class.java)
     private fun response(body: JsonObject): MockResponse {
         val result = if (body.containsKey("grants")) buildJsonObject { put("status", "issued"); put("envelope", body) } else body
         return MockResponse().setHeader("Content-Type","application/json").setBody(result.toString())
@@ -103,6 +105,64 @@ class GrantTransportTest {
         put("protocol","offline-grants-v1"); put("owner",envelope.getValue("owner")); put("serverTime",envelope.getValue("serverTime")); put("mode",envelope.getValue("mode"))
         put("policyRevision",policy?.let(::JsonPrimitive) ?: JsonNull)
         put("keyset",if(withKeys) keyset(activeOrigin,retired) else JsonNull)
+    }
+
+    @Test fun lostReadinessResponseRetriesTheExactDurableBodyAfterGrantCommit() = runTest {
+        val server=MockWebServer(); server.start(); val db=database(server.url("/").toString().trimEnd('/'))
+        try {
+            val owner=db.recovery.token().owner; val transport=GrantTransport(db,api(server))
+            server.enqueue(response(configuration(envelope(owner))))
+            server.enqueue(response(envelope(owner)))
+            assertTrue(transport.refreshIfAvailable())
+            val configurationRequest=checkNotNull(server.takeRequest(5,TimeUnit.SECONDS))
+            val issuanceRequest=checkNotNull(server.takeRequest(5,TimeUnit.SECONDS))
+            server.enqueue(MockResponse().setSocketPolicy(DISCONNECT_AFTER_REQUEST))
+            assertFalse(transport.flushReadinessIfAvailable())
+            val first=checkNotNull(server.takeRequest(5,TimeUnit.SECONDS))
+            assertEquals("/station/grants/v1/configuration",configurationRequest.path)
+            assertEquals("/station/grants/v1/device",issuanceRequest.path)
+            assertEquals("/station/grants/v1/readiness",first.path)
+            val firstBody=first.body.readUtf8()
+            val body=Json.parseToJsonElement(firstBody).jsonObject
+            assertEquals("offline-grants-readiness-v1",body["capability"]?.jsonPrimitive?.content)
+            assertEquals("handheld:0.1.0",body["clientBuild"]?.jsonPrimitive?.content)
+            assertEquals(15,body["storageRevision"]?.jsonPrimitive?.int)
+            assertEquals("strict",body["installed"]?.jsonObject?.get("mode")?.jsonPrimitive?.content)
+            assertEquals("approved",body["installed"]?.jsonObject?.get("policyRevision")?.jsonPrimitive?.content)
+            assertEquals("opaque-revision",body["installed"]?.jsonObject?.get("keysetRevision")?.jsonPrimitive?.content)
+            val requestId=body.getValue("requestId").jsonPrimitive.content
+            assertEquals(requestId,db.grantDao().pendingReadiness(owner.grantOwnerKey(),1).single().requestId)
+            server.enqueue(response(buildJsonObject {
+                put("protocol","offline-grants-v1"); put("requestId","22222222-2222-4222-8222-222222222222"); put("receivedAt","2026-09-14T12:00:00.000Z")
+                put("accepted",true); put("matchesCurrentConfiguration",true); put("verifiedGrantMatched",true)
+            }))
+            assertTrue(runCatching { transport.flushReadiness() }.exceptionOrNull() is IllegalArgumentException)
+            assertEquals(requestId,db.grantDao().pendingReadiness(owner.grantOwnerKey(),1).single().requestId)
+            server.enqueue(response(buildJsonObject {
+                put("protocol","offline-grants-v1"); put("requestId",requestId); put("receivedAt","2026-09-14T12:00:00.000Z")
+                put("accepted",true); put("matchesCurrentConfiguration",true); put("verifiedGrantMatched",true)
+            }))
+            assertTrue(transport.flushReadiness())
+            val retry=checkNotNull(server.takeRequest(5,TimeUnit.SECONDS))
+            assertEquals(firstBody,retry.body.readUtf8())
+            assertTrue(db.grantDao().pendingReadiness(owner.grantOwnerKey(),1).isEmpty())
+        } finally { db.close(); server.shutdown() }
+    }
+
+    @Test fun readinessCancellationStopsTheRefreshCoroutine() = runTest {
+        val server=MockWebServer(); server.start(); val db=database(server.url("/").toString().trimEnd('/'))
+        try {
+            val owner=db.recovery.token().owner; val transport=GrantTransport(db,api(server))
+            server.enqueue(response(configuration(envelope(owner))))
+            server.enqueue(response(envelope(owner)))
+            assertTrue(transport.refreshIfAvailable())
+            server.takeRequest(5,TimeUnit.SECONDS); server.takeRequest(5,TimeUnit.SECONDS)
+            server.enqueue(MockResponse().setSocketPolicy(NO_RESPONSE))
+            val failure = runCatching {
+                withTimeout(100) { transport.flushReadinessIfAvailable() }
+            }.exceptionOrNull()
+            assertTrue(failure is TimeoutCancellationException)
+        } finally { db.close(); server.shutdown() }
     }
 
     @Test fun authenticatedConfigurationPersistsOnDenialAndOnlyApprovedPolicyCanRollbackStrict() = runTest {
@@ -403,6 +463,7 @@ class GrantTransportTest {
             assertEquals("strict",db.grantDao().state()?.mode)
             assertEquals(7L,db.grantDao().state()?.epoch)
             assertNull(db.grantDao().token(grantSlot(owner.grantOwnerKey(),"device","")))
+            assertTrue(db.grantDao().pendingReadiness(owner.grantOwnerKey(),1).isEmpty())
         } finally { db.close(); server.shutdown() }
     }
 }

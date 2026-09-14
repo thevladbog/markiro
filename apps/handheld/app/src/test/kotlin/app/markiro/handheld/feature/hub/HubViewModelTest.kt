@@ -116,6 +116,7 @@ class HubViewModelTest {
         override suspend fun grantKeyset(): kotlinx.serialization.json.JsonObject = throw java.io.IOException("unconfigured")
         override suspend fun deviceGrant(body: kotlinx.serialization.json.JsonObject): kotlinx.serialization.json.JsonObject = throw java.io.IOException("unconfigured")
         override suspend fun taskGrant(body: kotlinx.serialization.json.JsonObject): kotlinx.serialization.json.JsonObject = throw java.io.IOException("unconfigured")
+        override suspend fun grantReadiness(body: kotlinx.serialization.json.JsonObject): kotlinx.serialization.json.JsonObject = throw java.io.IOException("unconfigured")
         override suspend fun codeHistory(id: String, cursor: String?, snapshot: String?, limit: Int): app.markiro.handheld.core.network.ValidationHistoryPage = error("not used")
         override suspend fun identity(): IdentityResponse = throw UnsupportedOperationException()
         override suspend fun operators() = RosterResponse(emptyList())

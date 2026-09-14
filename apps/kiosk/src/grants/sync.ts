@@ -10,6 +10,7 @@ import {
 } from "./transport.js";
 import { persistGrantReservation, readGrantReservation } from "./reservations.js";
 import { kioskGrantReservationResultSchema } from "@markiro/platform-contracts";
+import { flushKioskGrantReadiness, prepareKioskGrantReadiness } from "./readiness.js";
 const negotiation = () => ({
   protocol: "offline-grants-v1" as const,
   capability: "offline-grants-v1" as const,
@@ -18,13 +19,29 @@ const negotiation = () => ({
 /** Optional deployment: recovery and the existing bootstrap never depend on grant availability. */
 export async function refreshGrants(client: KioskClient): Promise<void> {
   if (!client.grantKeyset || !client.issueDeviceGrant || !client.registryOwner) return;
+  try {
+    await flushKioskGrantReadiness(client);
+  } catch {
+    console.warn("kiosk: grant readiness unavailable");
+  }
   const lease = await beginGrantRequest();
   if (!lease || !sameBoxRegistryCredentialOwner(lease.owner, client.registryOwner)) return;
   try {
     if (client.grantConfiguration) {
       await installGrantConfiguration(lease, await client.grantConfiguration(negotiation()));
     } else if (!(await installGrantKeyset(lease, await client.grantKeyset()))) return;
-    await installGrantResponse(lease, await client.issueDeviceGrant(negotiation()));
+    const installed = await installGrantResponse(
+      lease,
+      await client.issueDeviceGrant(negotiation()),
+    );
+    if (installed) {
+      await prepareKioskGrantReadiness(lease.owner);
+      try {
+        await flushKioskGrantReadiness(client);
+      } catch {
+        console.warn("kiosk: grant readiness unavailable");
+      }
+    }
   } catch (error) {
     if (isDeviceRevoked(error)) throw error;
     console.warn("kiosk: grant refresh unavailable");

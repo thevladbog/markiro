@@ -41,9 +41,9 @@ class PrinterRoutingMigrationTest {
         }
         old.close()
         val upgraded = Room.databaseBuilder(context, HandheldDatabase::class.java, name)
-            .addMigrations(MIGRATION_12_13, MIGRATION_13_14).allowMainThreadQueries().build()
+            .addMigrations(MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15).allowMainThreadQueries().build()
         try {
-            assertEquals(14, upgraded.openHelper.readableDatabase.version)
+            assertEquals(HANDHELD_DATABASE_VERSION, upgraded.openHelper.readableDatabase.version)
             PrintPurpose.entries.forEach { assertEquals("b", upgraded.printerDao().assigned(it)?.id) }
             assertEquals(listOf("a", "b"), upgraded.printerDao().all().map { it.id })
             assertEquals("unknown", upgraded.boxDao().get("box")?.printState)

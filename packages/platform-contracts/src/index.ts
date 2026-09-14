@@ -33,6 +33,24 @@ export {
   offlineGrantPolicySchema,
   platformOfflineGrantPolicyContracts,
 } from "./offline-grant-policies.js";
+export {
+  grantReadinessReasonSchema,
+  platformGrantReadinessAggregatesSchema,
+  platformGrantReadinessContracts,
+  platformGrantReadinessListQuerySchema,
+  platformGrantReadinessListResponseSchema,
+  platformGrantReadinessPreviewRequestSchema,
+  platformGrantReadinessPreviewResponseSchema,
+  platformGrantReadinessRowSchema,
+} from "./offline-grant-readiness.js";
+export type {
+  GrantReadinessReason,
+  PlatformGrantReadinessListQuery,
+  PlatformGrantReadinessListResponse,
+  PlatformGrantReadinessPreviewRequest,
+  PlatformGrantReadinessPreviewResponse,
+  PlatformGrantReadinessRow,
+} from "./offline-grant-readiness.js";
 export type {
   ApproveOfflineGrantPolicy,
   CreateOfflineGrantPolicy,

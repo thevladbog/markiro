@@ -4,9 +4,11 @@ import { writeConfig } from "../src/store/config.js";
 import { readGrantState } from "../src/grants/store.js";
 import {
   beginGrantRequest,
+  installGrantConfiguration,
   installGrantKeyset,
   installGrantResponse,
 } from "../src/grants/transport.js";
+import { flushKioskGrantReadiness, prepareKioskGrantReadiness } from "../src/grants/readiness.js";
 const origin = "https://fixture.invalid",
   deviceId = "00000000-0000-4000-8000-000000000001";
 const pair = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
@@ -35,7 +37,7 @@ function issued(tenantId = "tenant", epoch = 7) {
     ...owner,
     version: 1,
     issuer: origin,
-    grantId: "test-grant",
+    grantId: "11111111-1111-4111-8111-111111111111",
     entitlementRevision: "e1",
     policyRevision: "p1",
     issuedAt: 1000,
@@ -277,7 +279,7 @@ it("ages the full delayed request, distrusts reload/wall rollback, then recovers
     if (!recovered?.clock) throw Error("clock");
     expect(recovered.clock.wallHighWaterMs).toBe(9000);
     expect(trustedNow(recovered.clock, clockSample())).toBe(7000);
-    expect(recovered.device?.grant.grantId).toBe("test-grant");
+    expect(recovered.device?.grant.grantId).toBe("11111111-1111-4111-8111-111111111111");
   } finally {
     monoSpy.mockRestore();
     wallSpy.mockRestore();
@@ -296,16 +298,26 @@ it("uses the configured API base path while trusting only its canonical origin",
       capability: "offline-grants-v1",
       requestId: expect.any(String),
     });
-    const body = String(url).endsWith("/configuration")
+    const requestBody = JSON.parse(String(init?.body)) as { requestId: string };
+    const body = String(url).endsWith("/readiness")
       ? {
           protocol: "offline-grants-v1",
-          owner: response.envelope.owner,
-          serverTime: 1000,
-          mode: "strict",
-          policyRevision: "approved",
-          keyset,
+          requestId: requestBody.requestId,
+          receivedAt: "2026-09-14T12:00:00.000Z",
+          accepted: true,
+          matchesCurrentConfiguration: true,
+          verifiedGrantMatched: true,
         }
-      : response;
+      : String(url).endsWith("/configuration")
+        ? {
+            protocol: "offline-grants-v1",
+            owner: response.envelope.owner,
+            serverTime: 1000,
+            mode: "strict",
+            policyRevision: "approved",
+            keyset,
+          }
+        : response;
     return new Response(JSON.stringify(body), {
       status: 200,
       headers: { "Content-Type": "application/json" },
@@ -316,8 +328,107 @@ it("uses the configured API base path while trusting only its canonical origin",
   expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
     origin + "/api/kiosk/grants/v1/configuration",
     origin + "/api/kiosk/grants/v1/device",
+    origin + "/api/kiosk/grants/v1/readiness",
   ]);
-  expect((await readGrantState())?.device?.grant.grantId).toBe("test-grant");
+  expect((await readGrantState())?.device?.grant.grantId).toBe(
+    "11111111-1111-4111-8111-111111111111",
+  );
+});
+
+it("reopens and retries the exact durable kiosk readiness request before acknowledging it", async () => {
+  const owner = (await import("../src/store/installation-binding.js")).boxRegistryCredentialOwnerOf(
+    await writeConfig(config),
+  );
+  if (!owner) throw Error("owner");
+  const lease = await beginGrantRequest();
+  if (!lease) throw Error("lease");
+  await installGrantConfiguration(lease, {
+    protocol: "offline-grants-v1",
+    owner: { tenantId: "tenant", deviceId, kind: "kiosk", credentialEpoch: 7 },
+    serverTime: 1000,
+    mode: "observe",
+    policyRevision: "approved-v1",
+    keyset,
+  });
+  await installGrantResponse(lease, issued());
+  const intent = await prepareKioskGrantReadiness(owner);
+  expect(intent?.body).toMatchObject({
+    protocol: "offline-grants-v1",
+    capability: "offline-grants-readiness-v1",
+    clientBuild: "kiosk:0.1.0",
+    storageRevision: 7,
+    installed: {
+      mode: "observe",
+      policyRevision: "approved-v1",
+      keysetRevision: "opaque-z",
+      verifiedGrantId: "11111111-1111-4111-8111-111111111111",
+    },
+  });
+  const sent: unknown[] = [];
+  const client = {
+    registryOwner: owner,
+    grantReadiness: vi.fn(async (body: unknown) => {
+      sent.push(body);
+      if (sent.length === 1) throw new TypeError("response lost");
+      const requestId = (body as { requestId: string }).requestId;
+      return {
+        protocol: "offline-grants-v1",
+        requestId,
+        receivedAt: "2026-09-14T12:00:00.000Z",
+        accepted: true,
+        matchesCurrentConfiguration: true,
+        verifiedGrantMatched: true,
+      };
+    }),
+  };
+  await expect(flushKioskGrantReadiness(client)).rejects.toThrow("response lost");
+  await expect(flushKioskGrantReadiness(client)).resolves.toBe(true);
+  expect(sent[1]).toEqual(sent[0]);
+  const { STORE_GRANT_READINESS, withStore } = await import("../src/store/db.js");
+  expect(await withStore(STORE_GRANT_READINESS, "readonly", (store) => store.getAll())).toEqual([]);
+});
+
+it("atomically replaces readiness when the installed state changes for the same owner", async () => {
+  const owner = (await import("../src/store/installation-binding.js")).boxRegistryCredentialOwnerOf(
+    await writeConfig(config),
+  );
+  if (!owner) throw Error("owner");
+  const firstLease = await beginGrantRequest();
+  if (!firstLease) throw Error("lease");
+  await installGrantConfiguration(firstLease, {
+    protocol: "offline-grants-v1",
+    owner: { tenantId: "tenant", deviceId, kind: "kiosk", credentialEpoch: 7 },
+    serverTime: 1000,
+    mode: "observe",
+    policyRevision: "approved-v1",
+    keyset,
+  });
+  await installGrantResponse(firstLease, issued());
+  const first = await prepareKioskGrantReadiness(owner);
+  if (!first) throw Error("first readiness");
+
+  const secondLease = await beginGrantRequest();
+  if (!secondLease) throw Error("lease");
+  await installGrantConfiguration(secondLease, {
+    protocol: "offline-grants-v1",
+    owner: { tenantId: "tenant", deviceId, kind: "kiosk", credentialEpoch: 7 },
+    serverTime: 2000,
+    mode: "observe",
+    policyRevision: "approved-v2",
+    keyset: { ...keyset, revision: "opaque-next" },
+  });
+  const second = await prepareKioskGrantReadiness(owner);
+  expect(second?.requestId).not.toBe(first.requestId);
+  expect(second?.body.installed).toMatchObject({
+    policyRevision: "approved-v2",
+    keysetRevision: "opaque-next",
+  });
+  const { STORE_GRANT_READINESS, withStore } = await import("../src/store/db.js");
+  const saved = await withStore<unknown[]>(STORE_GRANT_READINESS, "readonly", (store) =>
+    store.getAll(),
+  );
+  expect(saved).toHaveLength(1);
+  expect(saved?.[0]).toMatchObject({ requestId: second?.requestId });
 });
 it("keeps approved configuration mode when a later envelope disagrees", async () => {
   const { installGrantConfiguration } = await import("../src/grants/transport.js");

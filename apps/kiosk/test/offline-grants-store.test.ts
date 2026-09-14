@@ -38,4 +38,5 @@ it("upgrades a real version-five queue without changing its old payload or inven
   });
   expect(await withStore("queue", "readonly", (s) => s.get(41))).toEqual(legacy);
   expect(await withStore("offline-grants", "readonly", (s) => s.getAll())).toEqual([]);
+  expect(await withStore("offline-grant-readiness", "readonly", (s) => s.getAll())).toEqual([]);
 });

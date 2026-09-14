@@ -28,6 +28,9 @@ describe("offline grant credential recovery", () => {
       VALUES('grant','kid','a.b.c','{}',2,1);
       INSERT INTO offline_grant_decisions(event_id,event_digest,decision_json,result_json)
       VALUES('event','digest','{"allow":true}','{"stored":true}');
+      INSERT INTO offline_grant_readiness_outbox
+        (request_id,state_key,body_json,credential_ownership,attempts)
+      VALUES('11111111-1111-4111-8111-111111111111','state','{}','credential',1);
       UPDATE station_device_recovery SET phase='sealing' WHERE id=1;
     `);
     expect(db.prepare("SELECT count(*) AS count FROM offline_grant_install_state").get()).toEqual({
@@ -42,5 +45,10 @@ describe("offline grant credential recovery", () => {
     expect(db.prepare("SELECT count(*) AS count FROM offline_grant_decisions").get()).toEqual({
       count: 1,
     });
+    expect(
+      db
+        .prepare("SELECT cancelled_at IS NOT NULL AS cancelled FROM offline_grant_readiness_outbox")
+        .get(),
+    ).toEqual({ cancelled: 1 });
   });
 });

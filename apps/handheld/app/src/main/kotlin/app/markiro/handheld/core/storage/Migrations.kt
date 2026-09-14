@@ -315,3 +315,11 @@ val MIGRATION_13_14 = object : Migration(13, 14) {
         db.execSQL("CREATE TABLE IF NOT EXISTS grant_task_provenance (taskKind TEXT NOT NULL, taskId TEXT NOT NULL, ownerKey TEXT NOT NULL, generation INTEGER NOT NULL, original TEXT NOT NULL, PRIMARY KEY(taskKind,taskId))")
     }
 }
+
+/** Add a durable retry identity for authenticated offline-grant readiness reports. */
+val MIGRATION_14_15 = object : Migration(14, 15) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS grant_readiness_outbox (requestId TEXT NOT NULL PRIMARY KEY, ownerKey TEXT NOT NULL, generation INTEGER NOT NULL, bodyJson TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_grant_readiness_outbox_ownerKey_generation ON grant_readiness_outbox (ownerKey, generation)")
+    }
+}

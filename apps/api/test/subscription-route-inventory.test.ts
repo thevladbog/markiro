@@ -435,6 +435,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
     routes: [
       "GET /kiosk/grants/v1/keyset (KioskGrantsController.keyset)",
       "POST /kiosk/grants/v1/configuration (KioskGrantsController.configuration)",
+      "POST /kiosk/grants/v1/readiness (KioskGrantsController.readiness)",
       "GET /kiosk/bootstrap (KioskController.bootstrap)",
       "GET /kiosk/branding/logo/:revision (KioskController.logo)",
       "GET /kiosk/box-registry (KioskController.boxRegistry)",
@@ -478,6 +479,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
     routes: [
       "GET /station/grants/v1/keyset (DeviceGrantsController.keyset)",
       "POST /station/grants/v1/configuration (DeviceGrantsController.configuration)",
+      "POST /station/grants/v1/readiness (DeviceGrantsController.readiness)",
       "GET /station/products/:id/image/:checksum (StationProductImagesController.readProductImage)",
     ],
   },
@@ -519,6 +521,9 @@ const profile: RouteExemption = {
 };
 
 const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
+  "PlatformGrantReadinessController.preview": platform(
+    "cross-tenant rollout preview requires tenant read plus catalog read and write capabilities",
+  ),
   "PlatformDeviceRetentionController.preview": platform(
     "retention requires fresh tenant and billing platform write capabilities",
   ),

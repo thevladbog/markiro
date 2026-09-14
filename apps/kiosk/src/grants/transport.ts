@@ -278,6 +278,7 @@ export async function installGrantConfiguration(
         configurationReceived: true,
         epoch: config.owner.credentialEpoch,
         mode: config.policyRevision !== null ? config.mode : state.mode,
+        policyRevision: config.policyRevision,
         clockTrusted: !clockRejected,
         serverHighWaterMs: Math.max(
           state.serverHighWaterMs ?? 0,

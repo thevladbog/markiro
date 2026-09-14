@@ -19,6 +19,7 @@ export interface GrantState {
   tenantId: string | null;
   epoch: number;
   mode: "observe" | "strict";
+  policyRevision?: string | null;
   requestedSequence: number;
   installedSequence: number;
   keysetRevision: string;
@@ -92,6 +93,7 @@ export function emptyState(owner: BoxRegistryCredentialOwner): GrantState {
     tenantId: null,
     epoch: 0,
     mode: "observe",
+    policyRevision: null,
     requestedSequence: 0,
     installedSequence: 0,
     keysetRevision: "",

@@ -1307,6 +1307,80 @@
       "status": {
         "draft": "Draft",
         "approved": "Approved"
+      },
+      "tabs": {
+        "label": "Offline grant workspace",
+        "policies": "Policies",
+        "readiness": "Pilot readiness"
+      }
+    },
+    "offlineReadiness": {
+      "previewOnly": "Readiness is calculated from current server facts and the latest client reports. Preview does not activate strict mode or issue grants.",
+      "tenant": "Tenant ID",
+      "kindLabel": "Device type",
+      "statusLabel": "Readiness",
+      "policy": "Approved policy",
+      "loading": "Loading device readiness",
+      "loadError": "Could not load device readiness.",
+      "empty": "No devices match these filters",
+      "next": "Next page",
+      "previous": "Previous page",
+      "preview": "Preview pilot cohort",
+      "reset": "Clear preview",
+      "forbidden": "Your role can inspect readiness but cannot create a pilot preview.",
+      "previewError": "The preview outcome could not be confirmed. Retry sends the unchanged request.",
+      "previewResult": "Preview at {{asOf}}: {{eligible}} eligible, {{blocked}} blocked. Digest {{digest}}.",
+      "previewDetails": "Pilot cohort preview",
+      "selectDevice": "Select {{name}}",
+      "reportedAt": "Report received {{value}}",
+      "evidenceCount": "{{count}} accepted events",
+      "assigned": "Working assignment present",
+      "unassigned": "No working assignment",
+      "lastSeenAt": "Last authenticated {{value}}",
+      "neverSeen": "No authenticated connection",
+      "configurationMatch": "Configuration: {{value}}",
+      "keysetMatch": "Keyset: {{value}}",
+      "grantMatch": "Verified grant: {{value}}",
+      "yes": "match",
+      "no": "missing or mismatch",
+      "columns": {
+        "select": "Select",
+        "device": "Device",
+        "status": "Readiness",
+        "client": "Client report",
+        "serverFacts": "Server facts",
+        "protocolProof": "Protocol proof",
+        "evidence": "Evidence",
+        "reasons": "Blocking reasons"
+      },
+      "kind": {
+        "all": "All device types",
+        "station": "Station",
+        "handheld": "Handheld",
+        "kiosk": "Kiosk"
+      },
+      "status": {
+        "all": "All readiness states",
+        "eligible": "Eligible",
+        "blocked": "Blocked"
+      },
+      "reasons": {
+        "credential_inactive": "Device credential is inactive",
+        "device_revoked": "Device has been revoked",
+        "working_assignment_missing": "No working-device assignment",
+        "subscription_missing": "Subscription entitlement is missing",
+        "target_policy_not_current": "Selected policy is not current",
+        "target_policy_not_approved": "Selected policy is not approved",
+        "signing_not_configured": "Grant signing is not configured",
+        "configuration_missing": "Device configuration is missing",
+        "client_report_missing": "Client readiness report is missing",
+        "client_report_stale": "Client readiness report is stale",
+        "credential_epoch_mismatch": "Credential epoch does not match",
+        "configuration_mismatch": "Client configuration does not match",
+        "keyset_mismatch": "Client keyset does not match",
+        "verified_grant_missing": "Client has no verified grant",
+        "verified_grant_mismatch": "Verified grant does not match",
+        "grant_key_retired": "Grant signing key has been retired"
       }
     },
     "registryTitle": "Catalog versions",

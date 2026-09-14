@@ -20,6 +20,7 @@ import {
 import { useTranslation } from "react-i18next";
 import type { OperatorMirrorRecord } from "@markiro/db/station-sqlite";
 import { Alert, Button, Card, FullScreenDialog } from "@markiro/ui";
+import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import {
   clearCredential,
@@ -83,9 +84,15 @@ import { stationServerOrigin } from "./lib/device-recovery.js";
 import { StationGrantAdmission } from "./lib/offline-grants/admission.js";
 import { sampleGrantClock } from "./lib/offline-grants/clock.js";
 import {
+  refreshStationOfflineGrant,
   refreshStationGrantConfiguration,
+  reportStationGrantReadiness,
   refreshStationTaskAuthority,
 } from "./lib/offline-grants/transport.js";
+import {
+  hasStationReadinessDeviceGrant,
+  prepareStationGrantReadiness,
+} from "./lib/offline-grants/store.js";
 import {
   readInventoryExecutionProjection,
   readShiftExecutionProjection,
@@ -979,6 +986,73 @@ export function App() {
     const timer = window.setInterval(heartbeat, 60_000);
     return () => window.clearInterval(timer);
   }, [authenticatedClient]);
+
+  useEffect(() => {
+    const tenantId = config?.tenantId;
+    const deviceId = config?.deviceId;
+    const serverUrl = config?.serverUrl;
+    if (!authenticatedClient || !credentialGeneration || !tenantId || !deviceId || !serverUrl)
+      return;
+    let active = true;
+    const configuredOrigin = stationServerOrigin(serverUrl);
+    const expectedDevice = { tenantId, deviceId, kind: "station" as const };
+    const refreshReadiness = async () => {
+      const version = await getVersion().catch(() => null);
+      if (!version || !active || !credentialGenerationIsCurrent(credentialGeneration)) return;
+      const readinessInput = {
+        exec: tauriExecutor,
+        client: authenticatedClient,
+        configuredOrigin,
+        generation: credentialGeneration,
+        expectedDevice,
+        clientBuild: `station:${version}`,
+      } as const;
+      const pending = await prepareStationGrantReadiness(readinessInput);
+      if (pending) await reportStationGrantReadiness({ ...readinessInput, intent: pending });
+      await refreshStationGrantConfiguration({
+        exec: tauriExecutor,
+        client: authenticatedClient,
+        configuredOrigin,
+        generation: credentialGeneration,
+        expectedDevice,
+      });
+      if (
+        !(await hasStationReadinessDeviceGrant({
+          exec: tauriExecutor,
+          configuredOrigin,
+          expectedDevice,
+        }))
+      ) {
+        const issued = await refreshStationOfflineGrant({
+          exec: tauriExecutor,
+          client: authenticatedClient,
+          configuredOrigin,
+          generation: credentialGeneration,
+          expectedDevice,
+        });
+        if (issued.status === "denied") return;
+      }
+      if (!active || !credentialGenerationIsCurrent(credentialGeneration)) return;
+      await reportStationGrantReadiness({
+        ...readinessInput,
+      });
+    };
+    const run = () => void refreshReadiness().catch(() => undefined);
+    run();
+    window.addEventListener("online", run);
+    const timer = window.setInterval(run, 6 * 60 * 60 * 1_000);
+    return () => {
+      active = false;
+      window.removeEventListener("online", run);
+      window.clearInterval(timer);
+    };
+  }, [
+    authenticatedClient,
+    config?.deviceId,
+    config?.serverUrl,
+    config?.tenantId,
+    credentialGeneration,
+  ]);
 
   // The hook is mounted unconditionally to preserve hook order, but it only
   // starts discovery after migrations have completed and readConfig has

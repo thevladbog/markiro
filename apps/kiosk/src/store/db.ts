@@ -8,9 +8,10 @@ const DB_NAME = "markiro-kiosk";
  * `countTakenToday` does with an entry from before the journal carried an
  * employee.
  */
-const DB_VERSION = 6;
+export const KIOSK_DB_VERSION = 7;
 
 export const STORE_GRANTS = "offline-grants";
+export const STORE_GRANT_READINESS = "offline-grant-readiness";
 
 export const STORE_CONFIG = "config";
 export const STORE_SNAPSHOT = "snapshot";
@@ -46,13 +47,15 @@ export function abortTransaction(tx: IDBTransaction, reason: Error): void {
 // and are therefore the only two places responsible for closing it.
 function open(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    const request = indexedDB.open(DB_NAME, KIOSK_DB_VERSION);
     request.onupgradeneeded = () => {
       const db = request.result;
       // Singleton stores: one row under a fixed key. Keeping them as object
       // stores (rather than one blob) lets a snapshot replacement and a queue
       // write proceed without contending on the same record.
       if (!db.objectStoreNames.contains(STORE_GRANTS)) db.createObjectStore(STORE_GRANTS);
+      if (!db.objectStoreNames.contains(STORE_GRANT_READINESS))
+        db.createObjectStore(STORE_GRANT_READINESS, { keyPath: "requestId" });
       if (!db.objectStoreNames.contains(STORE_CONFIG)) db.createObjectStore(STORE_CONFIG);
       if (!db.objectStoreNames.contains(STORE_SNAPSHOT)) db.createObjectStore(STORE_SNAPSHOT);
       // `deviceSeq` is the queue's natural key, and IndexedDB iterates a key

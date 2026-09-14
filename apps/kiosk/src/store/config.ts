@@ -3,6 +3,7 @@ import {
   STORE_BOX_REGISTRY_META,
   STORE_BOX_REGISTRY_STAGING,
   STORE_CONFIG,
+  STORE_GRANT_READINESS,
   withStore,
   withTransaction,
 } from "./db.js";
@@ -77,7 +78,13 @@ export async function writeConfig(cfg: KioskConfig): Promise<KioskConfig> {
   const freshCredentialGeneration = crypto.randomUUID();
   let stored: KioskConfig | null = null;
   await withTransaction(
-    [STORE_CONFIG, STORE_BOX_REGISTRY_ACTIVE, STORE_BOX_REGISTRY_STAGING, STORE_BOX_REGISTRY_META],
+    [
+      STORE_CONFIG,
+      STORE_BOX_REGISTRY_ACTIVE,
+      STORE_BOX_REGISTRY_STAGING,
+      STORE_BOX_REGISTRY_META,
+      STORE_GRANT_READINESS,
+    ],
     "readwrite",
     (tx) => {
       const config = tx.objectStore(STORE_CONFIG);
@@ -112,6 +119,7 @@ export async function writeConfig(cfg: KioskConfig): Promise<KioskConfig> {
           tx.objectStore(STORE_BOX_REGISTRY_ACTIVE).clear();
           tx.objectStore(STORE_BOX_REGISTRY_STAGING).clear();
           meta.clear();
+          tx.objectStore(STORE_GRANT_READINESS).clear();
         }
         config.put(stored, KEY);
       };

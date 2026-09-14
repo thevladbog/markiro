@@ -1,4 +1,5 @@
 import { DeviceGrantsModule } from "./modules/device-grants/device-grants.module";
+import { PlatformGrantReadinessModule } from "./modules/device-grants/platform-grant-readiness.module";
 import { PublicApiModule } from "./modules/public-api/public-api.module";
 import { PlatformEntitlementsModule } from "./subscriptions/platform-entitlements.module";
 import { Module, type DynamicModule } from "@nestjs/common";
@@ -101,6 +102,7 @@ export class AppModule {
         ...(setup.platformAuth
           ? [
               PlatformAuthModule.forRoot(setup.platformAuth, env.SAAS_ADMIN_ORIGIN),
+              PlatformGrantReadinessModule.forRoot(env),
               PlatformCatalogModule,
               PlatformEntitlementsModule,
               PlatformTenantsModule.forRoot(env.ADMIN_ORIGIN),

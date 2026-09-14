@@ -72,6 +72,7 @@ export async function runRuntimeMigrations(
           options.migrationsFolder,
           offerVariantIndex,
           packaged.indexOf("0136_validate_working_device_events"),
+          packaged.indexOf("0151_offline_grant_readiness"),
         );
       }
     } catch (error) {
@@ -130,6 +131,7 @@ async function migrateWithOnlineOfferVariants(
   migrationsFolder: string,
   index: number,
   validationIndex: number,
+  readinessIndex: number,
 ): Promise<void> {
   const { readMigrationFiles } = await import("drizzle-orm/migrator");
   const { PgDialect } = await import("drizzle-orm/pg-core");
@@ -176,6 +178,7 @@ async function migrateWithOnlineOfferVariants(
       await client.query("SELECT set_config('lock_timeout', $1, false)", [previousTimeout]);
     }
   }
+  let nextIndex = index + 1;
   if (validationIndex > index) {
     // Drizzle otherwise wraps every pending migration in one transaction. Release
     // 0135's ADD CONSTRAINT lock before 0136 scans the existing event journal.
@@ -186,10 +189,82 @@ async function migrateWithOnlineOfferVariants(
     await dialect.migrate(migrations.slice(validationIndex, validationIndex + 1), session, {
       migrationsFolder,
     });
-    await dialect.migrate(migrations.slice(validationIndex + 1), session, { migrationsFolder });
-  } else {
-    await dialect.migrate(migrations.slice(index + 1), session, { migrationsFolder });
+    nextIndex = validationIndex + 1;
   }
+  if (readinessIndex >= nextIndex) {
+    await dialect.migrate(migrations.slice(nextIndex, readinessIndex), session, {
+      migrationsFolder,
+    });
+    const readinessMigration = migrations[readinessIndex];
+    if (!readinessMigration) throw new Error("Missing online grant readiness migration");
+    await migrateWithOnlineGrantReadiness(client, readinessMigration);
+    nextIndex = readinessIndex + 1;
+  }
+  await dialect.migrate(migrations.slice(nextIndex), session, { migrationsFolder });
+}
+
+async function migrateWithOnlineGrantReadiness(
+  client: pg.PoolClient,
+  migration: { hash: string; folderMillis: number; sql: string[] },
+): Promise<void> {
+  if (migration.hash !== "47982438ec4ab03549e5d149bde5f5b45024f8571d497ab037950d522d497152") {
+    throw new Error("Online grant readiness migration hash mismatch");
+  }
+  const latest = await client.query<{ created_at: string }>(
+    "SELECT created_at FROM drizzle.__drizzle_migrations ORDER BY created_at DESC LIMIT 1",
+  );
+  if (Number(latest.rows[0]?.created_at ?? 0) >= migration.folderMillis) return;
+  if (migration.sql.length !== 13) throw new Error("Unexpected online grant readiness migration");
+  const constraint = await client.query(
+    `SELECT 1 FROM pg_constraint
+      WHERE conrelid = 'public.device_grant_configurations'::regclass
+        AND conname = 'device_grant_configurations_tenant_id_uq' AND contype = 'u'`,
+  );
+  if (constraint.rowCount !== 0) throw new Error("Unjournaled grant configuration uniqueness");
+  await prepareOnlineGrantReadiness(client);
+  const timeout = await client.query<{ lock_timeout: string }>("SHOW lock_timeout");
+  const previousTimeout = timeout.rows[0]?.lock_timeout;
+  if (!previousTimeout) throw new Error("Missing migration lock timeout");
+  await client.query("SELECT set_config('lock_timeout', '5s', false)");
+  try {
+    await client.query("BEGIN");
+    try {
+      await client.query(migration.sql[0]!);
+      await client.query(migration.sql[2]!);
+      for (const statement of migration.sql.slice(3)) await client.query(statement);
+      await client.query(
+        "INSERT INTO drizzle.__drizzle_migrations (hash, created_at) VALUES ($1, $2)",
+        [migration.hash, migration.folderMillis],
+      );
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    }
+  } finally {
+    await client.query("SELECT set_config('lock_timeout', $1, false)", [previousTimeout]);
+  }
+}
+
+async function prepareOnlineGrantReadiness(client: pg.PoolClient): Promise<void> {
+  const existing = await client.query<{ indisvalid: boolean; definition: string }>(
+    `SELECT indisvalid, pg_get_indexdef(indexrelid) AS definition FROM pg_index
+      WHERE indexrelid = to_regclass('public.device_grant_configurations_tenant_id_uq_idx')`,
+  );
+  const prepared = existing.rows[0];
+  if (
+    prepared &&
+    prepared.definition !==
+      "CREATE UNIQUE INDEX device_grant_configurations_tenant_id_uq_idx ON public.device_grant_configurations USING btree (tenant_id, id)"
+  )
+    throw new Error("Unexpected prepared grant configuration index");
+  if (prepared && !prepared.indisvalid)
+    await client.query(
+      "DROP INDEX CONCURRENTLY public.device_grant_configurations_tenant_id_uq_idx",
+    );
+  if (!prepared?.indisvalid)
+    await client.query(`CREATE UNIQUE INDEX CONCURRENTLY device_grant_configurations_tenant_id_uq_idx
+      ON public.device_grant_configurations (tenant_id, id)`);
 }
 
 async function prepareOnlineOfferVariants(client: pg.PoolClient): Promise<void> {
