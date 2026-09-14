@@ -29,6 +29,8 @@ function setup(onDirtyChange = vi.fn()) {
             <OfflineGrantReadinessPanel
               policies={[approvedPolicy]}
               canPreview
+              canActivate
+              currentUserId="user-1"
               onDirtyChange={onDirtyChange}
             />
           </ThemeProvider>
@@ -43,9 +45,13 @@ beforeEach(async () => {
   vi.stubGlobal("crypto", { randomUUID: () => requestId });
   vi.stubGlobal(
     "fetch",
-    vi.fn<typeof fetch>(async (_input, init) =>
-      jsonResponse(200, init?.method === "POST" ? readinessPreview : readinessList),
-    ),
+    vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (url.includes("/offline-grants/activations")) {
+        return jsonResponse(200, { items: [], nextCursor: null });
+      }
+      return jsonResponse(200, init?.method === "POST" ? readinessPreview : readinessList);
+    }),
   );
 });
 
@@ -65,7 +71,10 @@ it("selects only eligible devices and creates a preview without activation", asy
 
   await screen.findByText(/1 eligible, 0 blocked/);
   const fetchMock = vi.mocked(fetch);
-  expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+  const previewCall = fetchMock.mock.calls.find(
+    ([input, init]) => String(input).endsWith("/readiness/preview") && init?.method === "POST",
+  );
+  expect(JSON.parse(String(previewCall?.[1]?.body))).toEqual({
     policyId: approvedPolicy.id,
     mode: "strict",
     deviceIds: [readyDeviceId],
@@ -118,7 +127,12 @@ it("connects each offline grant tab to its own tab panel", async () => {
     <I18nextProvider i18n={i18n}>
       <QueryClientProvider client={client}>
         <ThemeProvider defaultTheme="light">
-          <OfflineGrantPoliciesPanel canWrite onDirtyChange={vi.fn()} />
+          <OfflineGrantPoliciesPanel
+            canWrite
+            canActivate
+            currentUserId="user-1"
+            onDirtyChange={vi.fn()}
+          />
         </ThemeProvider>
       </QueryClientProvider>
     </I18nextProvider>,
@@ -132,19 +146,33 @@ it("connects each offline grant tab to its own tab panel", async () => {
 
 it("retries an uncertain preview with the original request identity", async () => {
   const fetchMock = vi.mocked(fetch);
-  fetchMock.mockImplementationOnce(async () => jsonResponse(200, readinessList));
-  fetchMock.mockImplementationOnce(async () => jsonResponse(502, { code: "UPSTREAM_FAILURE" }));
-  fetchMock.mockImplementationOnce(async () => jsonResponse(200, readinessPreview));
+  let previewCalls = 0;
+  fetchMock.mockImplementation(async (input, init) => {
+    const url = String(input);
+    if (url.includes("/offline-grants/activations")) {
+      return jsonResponse(200, { items: [], nextCursor: null });
+    }
+    if (init?.method !== "POST") return jsonResponse(200, readinessList);
+    previewCalls += 1;
+    return previewCalls === 1
+      ? jsonResponse(502, { code: "UPSTREAM_FAILURE" })
+      : jsonResponse(200, readinessPreview);
+  });
   setup();
 
   fireEvent.click(await screen.findByRole("checkbox", { name: "Select Line station" }));
   fireEvent.click(screen.getByRole("button", { name: "Preview pilot cohort" }));
   await screen.findByText(/outcome could not be confirmed/i);
-  const firstBody = String(fetchMock.mock.calls[1]?.[1]?.body);
+  const firstBody = String(
+    fetchMock.mock.calls.find(([, init]) => init?.method === "POST")?.[1]?.body,
+  );
 
   fireEvent.click(screen.getByRole("button", { name: "Preview pilot cohort" }));
   await screen.findByText(/1 eligible, 0 blocked/);
-  expect(String(fetchMock.mock.calls[2]?.[1]?.body)).toBe(firstBody);
+  const postBodies = fetchMock.mock.calls
+    .filter(([, init]) => init?.method === "POST")
+    .map(([, init]) => String(init?.body));
+  expect(postBodies).toEqual([firstBody, firstBody]);
 });
 
 it("replaces a successful preview with a fresh snapshot and request identity", async () => {
@@ -155,6 +183,9 @@ it("replaces a successful preview with a fresh snapshot and request identity", a
   vi.stubGlobal("crypto", { randomUUID });
   const fetchMock = vi.mocked(fetch);
   fetchMock.mockImplementation(async (_input, init) => {
+    if (String(_input).includes("/offline-grants/activations")) {
+      return jsonResponse(200, { items: [], nextCursor: null });
+    }
     if (init?.method !== "POST") return jsonResponse(200, readinessList);
     const body = JSON.parse(String(init.body)) as { requestId: string };
     return jsonResponse(200, {
@@ -172,7 +203,10 @@ it("replaces a successful preview with a fresh snapshot and request identity", a
   fireEvent.click(screen.getByRole("button", { name: "Preview pilot cohort" }));
 
   await screen.findByText(new RegExp(secondDigest));
-  expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toMatchObject({
+  const postBodies = fetchMock.mock.calls
+    .filter(([, init]) => init?.method === "POST")
+    .map(([, init]) => JSON.parse(String(init?.body)) as { requestId: string });
+  expect(postBodies.at(-1)).toMatchObject({
     requestId: secondRequestId,
   });
 });

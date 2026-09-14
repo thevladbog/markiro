@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { entitlementDigest } from "../src/subscriptions/entitlement-snapshot-reader";
 import {
   computeGrantDeadlines,
+  effectiveGrantPolicyOverlay,
   parseApprovedGrantPolicy,
   grantRolloutMode,
 } from "../src/modules/device-grants/grant-policy";
@@ -163,5 +164,35 @@ describe("explicit server-owned rollout", () => {
         }),
       ).toBeNull();
     }
+  });
+
+  it("accepts only an exact device overlay that preserves base limits", () => {
+    const base = parseApprovedGrantPolicy(row())!;
+    const rolloutPayload = {
+      offlineGrant: {
+        ...payload.offlineGrant,
+        rollout: {
+          protocol: "offline-grants-v1" as const,
+          mode: "strict" as const,
+          deviceIds: [deviceId],
+          decisionReference: "approved-pilot",
+        },
+      },
+    };
+    const rollout = parseApprovedGrantPolicy({
+      ...row(),
+      id: "policy-2",
+      version: 4,
+      payload: rolloutPayload,
+      payloadHash: entitlementDigest(rolloutPayload),
+    })!;
+    expect(effectiveGrantPolicyOverlay(base, rollout, deviceId)).toBe(rollout);
+    expect(effectiveGrantPolicyOverlay(base, rollout, "another-device")).toBe(base);
+    expect(effectiveGrantPolicyOverlay(base, { ...rollout, maxOfflineMs: 101 }, deviceId)).toBe(
+      base,
+    );
+    expect(
+      effectiveGrantPolicyOverlay(base, { ...rollout, taskBounds: { pickup: {} } }, deviceId),
+    ).toBe(base);
   });
 });

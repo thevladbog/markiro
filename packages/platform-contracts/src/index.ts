@@ -57,6 +57,7 @@ export type {
   GrantActivationState,
   PlatformGrantActivationCancelRequest,
   PlatformGrantActivationConfirmRequest,
+  PlatformGrantActivationListQuery,
   PlatformGrantActivationPreparation,
   PlatformGrantActivationPrepareRequest,
   PlatformGrantActivationReceipt,

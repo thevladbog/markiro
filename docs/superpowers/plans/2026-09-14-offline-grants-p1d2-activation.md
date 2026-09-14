@@ -323,7 +323,7 @@ git commit -m "feat: persist prepared offline grant activations"
 - Produces: `readGrantActivationFacts(tx, input, asOf)`, `grantActivationPreparationDigest(snapshot)`, and `PlatformGrantActivationService.prepare(principal, body)`.
 - Task 4 extends the same service with confirm/cancel/list/detail.
 
-- [ ] **Step 1: Write failing prepare tests against PostgreSQL**
+- [x] **Step 1: Write failing prepare tests against PostgreSQL**
 
 Cover exact successful preparation, no writes to policies/configurations/subscriptions, replay returning byte-equivalent response, changed body under one request ID, missing preview audit, mismatched preview digest, missing device, blocked device, stale client report, policy mismatch, multi-tenant device ownership and concurrent overlapping preparations.
 
@@ -337,7 +337,7 @@ expect(await configurationRows()).toEqual(beforeConfigurations);
 expect(await service.prepare(preparer, request)).toEqual(result);
 ```
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 ```bash
 corepack pnpm --filter @markiro/db build
@@ -348,7 +348,7 @@ corepack pnpm --filter @markiro/api exec vitest run \
 
 Expected: missing activation service and fact reader.
 
-- [ ] **Step 3: Extract one canonical readiness snapshot builder**
+- [x] **Step 3: Extract one canonical readiness snapshot builder**
 
 Move the P1D.1 preview canonical row mapping into an exported deterministic helper used by both preview and activation preparation:
 
@@ -370,7 +370,7 @@ export function canonicalGrantReadinessFacts(rows: readonly PlatformGrantReadine
 
 Keep preview digest compatibility exact. Add a regression assertion using a fixed fixture digest before and after extraction.
 
-- [ ] **Step 4: Implement bounded activation fact loading**
+- [x] **Step 4: Implement bounded activation fact loading**
 
 `readGrantActivationFacts` must load all requested IDs in bounded SQL, reject missing IDs, resolve each current subscription/base policy, and return sorted facts. It must not execute one tenant-wide query per device. Include the entitlement revision and concrete owner identity needed by confirm.
 
@@ -383,13 +383,13 @@ export interface GrantActivationFacts {
 }
 ```
 
-- [ ] **Step 5: Implement prepare with idempotency first**
+- [x] **Step 5: Implement prepare with idempotency first**
 
 Before reading mutable facts, look up `prepareRequestId`. If found, compare `entitlementDigest(body)` with `prepareRequestHash`; replay the parsed saved response on equality and return `409 GRANT_ACTIVATION_REQUEST_CONFLICT` otherwise.
 
 For a new request, verify the P1D.1 preview audit's action, target policy, request ID and digest. Re-read facts at one clock value, require all eligible, compute the preparation digest, and insert preparation plus members in one transaction. Set `expiresAt = preparedAt + 30 * 60 * 1000` with an overflow-safe clock check.
 
-- [ ] **Step 6: Enforce overlap without false serialization**
+- [x] **Step 6: Enforce overlap without false serialization**
 
 Use the member table's partial device unique indexes while
 `reservationState = 'prepared'` as the final concurrency authority. Translate
@@ -398,11 +398,11 @@ sanitized conflicting preparation IDs obtained by a tenant-scoped follow-up
 query. Confirmation and cancellation change every member reservation to
 `released` in their own atomic transaction. Do not take fleet-wide locks.
 
-- [ ] **Step 7: Record exact prepare audit**
+- [x] **Step 7: Record exact prepare audit**
 
 Record `offline_grant.activation.prepared` atomically with actor, role, request ID, base policy, preview digest, preparation digest, tenant/device counts and expiry. Exclude JWS, credentials and full readiness payloads.
 
-- [ ] **Step 8: Run focused and API package gates**
+- [x] **Step 8: Run focused and API package gates**
 
 ```bash
 corepack pnpm --filter @markiro/api exec vitest run \
@@ -415,7 +415,7 @@ corepack pnpm --filter @markiro/api build
 
 Expected: all pass.
 
-- [ ] **Step 9: Commit Task 3**
+- [x] **Step 9: Commit Task 3**
 
 ```bash
 git add apps/api/src/modules/device-grants/grant-activation-digest.ts \
@@ -446,7 +446,7 @@ git commit -m "feat: prepare strict offline grant cohorts"
 - Produces: `PlatformGrantActivationService.confirm`, `.cancel`, `.list`, `.detail`, and `loadEffectiveGrantPolicy(tx, owner, subscriptionId)`.
 - `resolveGrantRollout` receives an effective policy with activation provenance rather than trusting caller-supplied mode.
 
-- [ ] **Step 1: Add failing confirmation and cancellation tests**
+- [x] **Step 1: Add failing confirmation and cancellation tests**
 
 Test successful dual-control confirm, self-confirm denial, expired/cancelled/stale preparations, exact replay, changed request, concurrent confirms, next-version allocation, rollback of partial writes, cancellation replay and cancellation racing confirmation.
 
@@ -461,9 +461,9 @@ expect(receipt.rolloutPolicy.offlineGrant.rollout?.deviceIds).toEqual([...device
 expect(await readSubscriptionPlanVersions()).toEqual(beforePlanVersions);
 ```
 
-- [ ] **Step 2: Add failing runtime resolution tests**
+- [x] **Step 2: Add failing runtime resolution tests**
 
-Cover selected Station, selected Handheld, selected kiosk, unselected device, wrong tenant, wrong subscription, changed base policy, invalid rollout hash, device omitted from rollout payload, absent signing configuration, repeated refresh and last-delivered-strict downgrade protection.
+Cover selected Station, selected Handheld, selected kiosk, unselected device, wrong tenant, wrong subscription, changed base policy, invalid rollout hash, device omitted from rollout payload, absent signing configuration, repeated refresh and safe fallback to the base policy when an activation is absent or invalid.
 
 ```ts
 expect(await resolveFor(selectedOwner)).toMatchObject({ mode: "strict" });
@@ -471,7 +471,7 @@ expect(await resolveFor(unselectedOwner)).toMatchObject({ mode: "observe" });
 expect(await resolveFor(foreignTenantOwner)).toMatchObject({ mode: "observe" });
 ```
 
-- [ ] **Step 3: Run focused tests and verify RED**
+- [x] **Step 3: Run focused tests and verify RED**
 
 ```bash
 corepack pnpm --filter @markiro/api exec vitest run \
@@ -481,17 +481,17 @@ corepack pnpm --filter @markiro/api exec vitest run \
 
 Expected: confirm/cancel and overlay resolution cases fail.
 
-- [ ] **Step 4: Implement confirmation under ordered locks**
+- [x] **Step 4: Implement confirmation under ordered locks**
 
 Lock preparation, base policy, affected subscription rows, device authority rows and activation rows in the repository's established order. Re-read facts and recompute the digest. Return a typed stale response and move the preparation to `needs_review` only when the fresh facts differ; infrastructure exceptions leave it `prepared`.
 
 Acquire `pg_advisory_xact_lock(hashtextextended(policyKey, 0))`, read the maximum existing version, and insert `version + 1`. Set `createdByPlatformUserId` to the preparer, `approvedByPlatformUserId` to the confirmer and both approval fields in the same transaction.
 
-- [ ] **Step 5: Create exact activation bindings atomically**
+- [x] **Step 5: Create exact activation bindings atomically**
 
 Insert one activation for each saved member. Require the member's current tenant, subscription, device, assignment and base policy to match. Save the rollout policy ID and preparation ID. Update the preparation to confirmed only after every insert succeeds.
 
-- [ ] **Step 6: Implement explicit policy overlay loading**
+- [x] **Step 6: Implement explicit policy overlay loading**
 
 Keep `loadApprovedGrantPolicy` as the base subscription reader. Add:
 
@@ -511,7 +511,7 @@ export async function loadEffectiveGrantPolicy(
 
 Load at most one exact active binding through composite tenant/device and subscription predicates. Parse and hash-check both policies. Require equal durations and task bounds, exact base-policy identity and membership in the rollout. Any invalid overlay returns the base policy with no activation; it never broadens strict authority.
 
-- [ ] **Step 7: Persist activation provenance in configuration**
+- [x] **Step 7: Persist activation provenance in configuration**
 
 Use the nullable `activationId` column added by Task 2. Include it in transition
 equality and persisted configuration. Do not change the native response schema.
@@ -527,15 +527,15 @@ const configuration = await resolveGrantRollout(
 );
 ```
 
-- [ ] **Step 8: Implement cancel, list and detail**
+- [x] **Step 8: Implement cancel, list and detail**
 
 Cancel only `prepared` or `needs_review`, preserve exact response replay and release overlap ownership through the state predicate. List uses cursor pagination and bounded rows. Detail returns the complete sanitized member snapshot only after platform authorization.
 
-- [ ] **Step 9: Record atomic confirmation/cancellation audits**
+- [x] **Step 9: Record atomic confirmation/cancellation audits**
 
 Use actions `offline_grant.activation.confirmed` and `offline_grant.activation.cancelled`. Assert exact preparing and confirming actors, request IDs, base/rollout hashes, activation digest, cohort counts and state transitions.
 
-- [ ] **Step 10: Run focused and API package gates**
+- [x] **Step 10: Run focused and API package gates**
 
 ```bash
 corepack pnpm --filter @markiro/db build
@@ -551,7 +551,7 @@ corepack pnpm --filter @markiro/api build
 
 Expected: all pass; database-backed cases do not skip.
 
-- [ ] **Step 11: Commit Task 4**
+- [x] **Step 11: Commit Task 4**
 
 ```bash
 git add apps/api/src/modules/device-grants/platform-grant-activation.service.ts \
@@ -581,7 +581,7 @@ git commit -m "feat: confirm offline grant pilot activation"
 - Consumes: `platformGrantActivationContracts` and `PlatformGrantActivationService`.
 - Produces: five guarded `/platform/offline-grants/activations` routes registered only when `setup.platformAuth` loads `PlatformGrantReadinessModule`.
 
-- [ ] **Step 1: Write failing metadata and route tests**
+- [x] **Step 1: Write failing metadata and route tests**
 
 Assert read routes require `tenants.read` and `catalog.read`; mutation routes additionally require `catalog.write` and `offlineGrants.activate`. Start the application without platform auth and assert all five routes return 404.
 
@@ -594,7 +594,7 @@ expect(
 });
 ```
 
-- [ ] **Step 2: Run route tests and verify RED**
+- [x] **Step 2: Run route tests and verify RED**
 
 ```bash
 corepack pnpm --filter @markiro/api exec vitest run \
@@ -603,7 +603,7 @@ corepack pnpm --filter @markiro/api exec vitest run \
 
 Expected: controller and route inventory entries are absent.
 
-- [ ] **Step 3: Add the controller using established platform helpers**
+- [x] **Step 3: Add the controller using established platform helpers**
 
 Use `PlatformApiProtectedOk`, `ZodValidationPipe`, `parsePlatformResponse` and `RequestWithPlatformPrincipal`. Never access `request.platformPrincipal` without the platform-auth-only module boundary.
 
@@ -637,15 +637,15 @@ export class PlatformGrantActivationController {
 
 Use the same pattern for list, detail, prepare and cancel, with UUID parameter parsing.
 
-- [ ] **Step 4: Register service and controller only in the platform module**
+- [x] **Step 4: Register service and controller only in the platform module**
 
 Add both to `PlatformGrantReadinessModule.forRoot(env)`. Do not add them to `DeviceGrantsModule` or any always-loaded module.
 
-- [ ] **Step 5: Extend OpenAPI and subscription route inventories**
+- [x] **Step 5: Extend OpenAPI and subscription route inventories**
 
 Add exact methods, paths, bodies and responses to `CURRENT_SAAS_ROUTES`; add controller/service providers to the isolated OpenAPI test. Classify every activation route as platform-only and absent from subscription policy enforcement.
 
-- [ ] **Step 6: Run route, OpenAPI and API gates**
+- [x] **Step 6: Run route, OpenAPI and API gates**
 
 ```bash
 corepack pnpm --filter @markiro/api exec vitest run \
@@ -660,7 +660,7 @@ corepack pnpm --filter @markiro/api build
 
 Expected: all pass.
 
-- [ ] **Step 7: Commit Task 5**
+- [x] **Step 7: Commit Task 5**
 
 ```bash
 git add apps/api/src/modules/device-grants/platform-grant-activation.controller.ts \
@@ -693,7 +693,7 @@ git commit -m "feat: expose guarded offline grant activation routes"
 - Consumes: Task 1 contracts and the existing readiness preview response.
 - Produces: API methods `listOfflineGrantActivations`, `getOfflineGrantActivation`, `prepareOfflineGrantActivation`, `confirmOfflineGrantActivation`, `cancelOfflineGrantActivation`; persisted uncertain-request intent helpers; activation panel callbacks.
 
-- [ ] **Step 1: Write failing API serialization tests**
+- [x] **Step 1: Write failing API serialization tests**
 
 Record method, URL and parsed JSON body for every API helper. Assert value-based equality, UUID preservation, strict response parsing and typed 409/401/403 envelopes.
 
@@ -705,7 +705,7 @@ expect(JSON.parse(recorded.body)).toEqual({
 });
 ```
 
-- [ ] **Step 2: Write failing workflow tests**
+- [x] **Step 2: Write failing workflow tests**
 
 Cover eligible preview → prepare, same operator disabled, second operator confirm, expiry, stale result, cancellation, uncertain prepare/confirm retry with original request ID, successful retry clearing old notice, dirty close protection and RU/EN accessible labels.
 
@@ -716,7 +716,7 @@ expect(
 ).toBeVisible();
 ```
 
-- [ ] **Step 3: Run focused SaaS tests and verify RED**
+- [x] **Step 3: Run focused SaaS tests and verify RED**
 
 ```bash
 corepack pnpm --filter @markiro/platform-contracts build
@@ -729,7 +729,7 @@ corepack pnpm --filter @markiro/saas-admin exec vitest run \
 
 Expected: missing helpers, panel and actions.
 
-- [ ] **Step 4: Implement strict API helpers and stable attempts**
+- [x] **Step 4: Implement strict API helpers and stable attempts**
 
 Parse outgoing bodies before sending and responses after receiving. Store an attempt per operation using this shape:
 
@@ -743,19 +743,19 @@ export interface GrantActivationAttempt<TRequest, TResponse> {
 
 An uncertain attempt blocks edits that would change the body and retries the same identity. Successful retry clears both attempt and old notice after server state has been loaded.
 
-- [ ] **Step 5: Add Prepare pilot to the preview**
+- [x] **Step 5: Add Prepare pilot to the preview**
 
 Show the action only when `aggregates.blocked === 0`, `canActivate` is true and a preview exists. Pass exact `preview.requestId`, `preview.previewDigest`, `preview.policyId` and `preview.items.map(item => item.deviceId)`; never rebuild selection from the current paginated table.
 
-- [ ] **Step 6: Implement confirmation workspace**
+- [x] **Step 6: Implement confirmation workspace**
 
 Render policy, exact cohort grouped by tenant/kind, timestamps, expiry, actors, decision reference and current state. Disable confirm for the preparing actor and show the translated reason. On stale response, keep the preparation visible and link back to create a new readiness preview.
 
-- [ ] **Step 7: Preserve accessibility and dirty state**
+- [x] **Step 7: Preserve accessibility and dirty state**
 
 Use existing `Alert`, `Button`, `Input`, `StatusChip`, `Table` and drawer patterns. Provide semantic headings, labelled controls, visible focus and non-color status. Report dirty state for decision reference, active uncertain attempts and unconfirmed cancellation input; clear it with a cleanup-only unmount effect.
 
-- [ ] **Step 8: Add exact RU/EN copy**
+- [x] **Step 8: Add exact RU/EN copy**
 
 Use these primary labels:
 
@@ -766,7 +766,7 @@ EN: Prepare pilot / Confirm strict / Cancel preparation
 
 Explain that tariffs and current work are unchanged, that only exact devices switch on configuration refresh, and that confirmation requires another platform administrator.
 
-- [ ] **Step 9: Run focused and package gates**
+- [x] **Step 9: Run focused and package gates**
 
 ```bash
 corepack pnpm --filter @markiro/saas-admin exec vitest run \
@@ -781,7 +781,7 @@ corepack pnpm --filter @markiro/saas-admin build
 
 Expected: all pass. Record that DOM tests are not visual browser confirmation.
 
-- [ ] **Step 10: Commit Task 6**
+- [x] **Step 10: Commit Task 6**
 
 ```bash
 git add apps/saas-admin/src/pages/catalog/offline-grant-activation-api.ts \
@@ -815,7 +815,7 @@ git commit -m "feat: add offline grant pilot confirmation workspace"
 - Consumes: the complete API/runtime/UI implementation.
 - Produces: cross-surface regression evidence and an operational deployment/rollback record.
 
-- [ ] **Step 1: Write the cross-surface compatibility regression**
+- [x] **Step 1: Write the cross-surface compatibility regression**
 
 Create two eligible devices on one base policy and one legacy client without readiness. Confirm strict for exactly one eligible device. Assert:
 
@@ -829,7 +829,7 @@ expect(afterCatalogVersion).toEqual(beforeCatalogVersion);
 
 Then restrict the subscription and prove new strict work is denied while an existing frozen task and retained evidence can still reconcile.
 
-- [ ] **Step 2: Run the workflow regression and verify RED or missing coverage**
+- [x] **Step 2: Run the workflow regression and verify RED or missing coverage**
 
 ```bash
 corepack pnpm --filter @markiro/api exec vitest run \
@@ -839,23 +839,23 @@ corepack pnpm --filter @markiro/api exec vitest run \
 
 Expected before the assertions are implemented: failure at exact activation mode or missing compatibility fixture.
 
-- [ ] **Step 3: Add native no-contract-change regressions**
+- [x] **Step 3: Add native no-contract-change regressions**
 
 Use existing saved configuration fixtures to prove Station, kiosk and Handheld parse the same response shapes before and after server activation work. Add no new native DTO fields. Verify pending readiness/evidence intents survive restart and keep original request identities.
 
-- [ ] **Step 4: Update operational documentation**
+- [x] **Step 4: Update operational documentation**
 
 Document migration 0152, platform routes, two-operator flow, 30-minute preparation expiry, exact device overlay, configuration-refresh activation, stale recovery, explicit rollback boundary and proof categories. Correct the remaining readiness deployment reference that says migration 0149 to migration 0151.
 
-- [ ] **Step 5: Add an acceptance ledger**
+- [x] **Step 5: Add an acceptance ledger**
 
 Map each P1D.2 completion criterion to contract, DB, API, SaaS and native tests. Mark production cohort selection, deployed configuration delivery, physical Windows/station hardware, vendor Handheld scanner, kiosk device and customer acceptance as `NOT RUN`.
 
-- [ ] **Step 6: Verify CI ownership**
+- [x] **Step 6: Verify CI ownership**
 
 Run the affected classifier against representative paths. Ensure contract/schema changes schedule platform contracts, DB, API, SaaS Admin, Station, kiosk and Handheld. Modify `tools/ci/affected.mjs` only if an affected surface would otherwise skip.
 
-- [ ] **Step 7: Run focused cross-surface gates**
+- [x] **Step 7: Run focused cross-surface gates**
 
 ```bash
 corepack pnpm turbo run build --filter='@markiro/station^...'
@@ -869,7 +869,7 @@ corepack pnpm test:production-bundle:contract
 
 Expected: all pass; report Android or production dependencies explicitly if unavailable.
 
-- [ ] **Step 8: Commit Task 7**
+- [x] **Step 8: Commit Task 7**
 
 ```bash
 git add apps/api/test/public-api-offline-grants-workflow.test.ts \

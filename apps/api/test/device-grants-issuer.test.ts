@@ -172,7 +172,8 @@ describe.skipIf(!process.env.DATABASE_URL)("authenticated grant issuance", () =>
     const history = await db
       .select()
       .from(schema.deviceGrantConfigurations)
-      .where(eq(schema.deviceGrantConfigurations.tenantId, f.tenantId));
+      .where(eq(schema.deviceGrantConfigurations.tenantId, f.tenantId))
+      .orderBy(schema.deviceGrantConfigurations.sequence);
     expect(history.map((row) => row.mode)).toEqual(["strict", "observe"]);
     expect(
       await db

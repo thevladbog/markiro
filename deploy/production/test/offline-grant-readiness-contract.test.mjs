@@ -58,6 +58,20 @@ test("production sources expose read and preview without a readiness activation 
   );
 });
 
+test("production sources expose activation only through the guarded platform module", async () => {
+  const [controller, platformModule, alwaysLoadedModule] = await Promise.all([
+    read("apps/api/src/modules/device-grants/platform-grant-activation.controller.ts"),
+    read("apps/api/src/modules/device-grants/platform-grant-readiness.module.ts"),
+    read("apps/api/src/modules/device-grants/device-grants.module.ts"),
+  ]);
+
+  assert.match(controller, /@Controller\("platform\/offline-grants\/activations"\)/);
+  assert.match(controller, /"offlineGrants\.activate"/);
+  assert.match(controller, /@Post\(":id\/confirm"\)/);
+  assert.match(platformModule, /PlatformGrantActivationController/);
+  assert.doesNotMatch(alwaysLoadedModule, /PlatformGrantActivationController/);
+});
+
 test("API startup validates offline grant signing as one configuration", async () => {
   const source = await read("apps/api/src/env.ts");
 

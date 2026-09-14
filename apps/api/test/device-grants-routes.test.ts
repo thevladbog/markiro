@@ -69,6 +69,23 @@ describe.skipIf(!ready)("native grant route boundaries", () => {
       .post("/platform/offline-grants/readiness/preview")
       .send({})
       .expect(404);
+    await request(app.getHttpServer()).get("/platform/offline-grants/activations").expect(404);
+    await request(app.getHttpServer())
+      .post("/platform/offline-grants/activations")
+      .send({})
+      .expect(404);
+    const id = randomUUID();
+    await request(app.getHttpServer())
+      .get(`/platform/offline-grants/activations/${id}`)
+      .expect(404);
+    await request(app.getHttpServer())
+      .post(`/platform/offline-grants/activations/${id}/confirm`)
+      .send({})
+      .expect(404);
+    await request(app.getHttpServer())
+      .post(`/platform/offline-grants/activations/${id}/cancel`)
+      .send({})
+      .expect(404);
   });
   async function fixture(policyConfigured = true) {
     const agent = request.agent(app.getHttpServer()),

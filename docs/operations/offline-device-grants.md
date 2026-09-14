@@ -87,11 +87,12 @@ replacing a newer configuration. Clock installation accounts conservatively for
 elapsed time since the request began; network delay cannot extend signed deadlines.
 
 Mode transitions are retained in `device_grant_configurations` under the device
-row lock. A missing or invalid policy cannot silently undo a previously delivered
-strict mode. An approved replacement policy selecting observation is the rollback
-authority. Credential recovery preserves this mode history. Fresh unconfigured
-clients remain in observation; they acquire no signed authority from absent data.
-The transition records do not enable a production cohort on their own.
+row lock. A valid device activation is required for strict mode on every refresh.
+If that activation is absent, revoked or invalid, the server resolves the base
+policy and modern clients return to observation on their next authenticated
+configuration refresh. Credential recovery preserves configuration history.
+Fresh unconfigured clients remain in observation; they acquire no signed authority
+from absent data.
 
 ## Rollout readiness and pilot preview
 
@@ -121,8 +122,53 @@ new client nor proof of physical acceptance.
 Preview accepts up to 200 unique device IDs and returns an eligible or blocked
 result for every ID, a single `asOf`, the exact rows, reason aggregates and a digest. A new successful preview gets a
 new request ID, time and digest; retry after an uncertain HTTP outcome reuses the
-unchanged request. The digest is input for the future P1D.2 prepare/confirm flow.
-P1D.1 has no confirm, activation or cohort-policy mutation route.
+unchanged request. The digest is input for the P1D.2 prepare/confirm flow.
+
+## Exact pilot activation
+
+P1D.2 adds a recoverable workspace below the readiness preview. Preparation
+captures the exact preview rows and server-owned readiness facts for 30 minutes;
+it does not change policy, configuration, subscription, price, terms, offer or
+invoice data. Confirmation must be completed by a different current platform
+administrator and rechecks every fact under ordered database locks.
+
+| Method and route                                        | Capabilities                                                              | Purpose                        |
+| ------------------------------------------------------- | ------------------------------------------------------------------------- | ------------------------------ |
+| `GET /platform/offline-grants/activations`              | `tenants.read`, `catalog.read`                                            | List activation preparations   |
+| `GET /platform/offline-grants/activations/:id`          | `tenants.read`, `catalog.read`                                            | Read one exact preparation     |
+| `POST /platform/offline-grants/activations`             | `tenants.read`, `catalog.read`, `catalog.write`, `offlineGrants.activate` | Prepare an exact cohort        |
+| `POST /platform/offline-grants/activations/:id/confirm` | `tenants.read`, `catalog.read`, `catalog.write`, `offlineGrants.activate` | Confirm with a second operator |
+| `POST /platform/offline-grants/activations/:id/cancel`  | `tenants.read`, `catalog.read`, `catalog.write`, `offlineGrants.activate` | Release an unconfirmed cohort  |
+
+Only `platform_admin` has `offlineGrants.activate`. Every mutation uses a stable
+UUID request identity. Retry after an uncertain result keeps the original body
+and request ID. A stale confirmation becomes `needs_review`; create a fresh
+readiness preview before preparing another cohort. Cancelling a prepared or
+needs-review record releases its device reservations.
+
+Confirmation creates one approved rollout-policy revision plus exact active device
+bindings in the same transaction. The rollout copies the base duration and task
+bounds unchanged. Devices outside the bindings continue to resolve the base policy.
+Selected devices switch only when they next authenticate and refresh configuration;
+already frozen tasks, saved print bytes, evidence and queued recovery work remain
+available.
+
+### Deployment order for P1D.2
+
+1. Record a PostgreSQL restore point and deploy migration
+   `0152_offline_grant_activation` before any API binary reads activation tables.
+2. Deploy the API and SaaS Admin while all devices still resolve the base policy.
+3. Confirm that P1D.1 readiness reports are current and all preview rows are eligible.
+4. Prepare the exact cohort, record the decision reference and have another platform
+   administrator confirm within 30 minutes.
+5. Refresh configuration on only the selected devices and verify the returned
+   activation provenance before starting new strict work.
+
+Confirmed rollback is a separate P1D.3 operation and is deliberately absent from
+the preparation-cancel route. Do not activate a production cohort until that
+approved rollback path and its operator evidence are available. Preserve
+migrations, preparations, configuration history, grants, native stores and
+evidence for audit and recovery.
 
 ### Deployment order for P1D.1
 
@@ -244,7 +290,7 @@ Unconfirmed entitlement-source previews must be prepared again after the update;
 confirmed receipts still replay their original result under current authorization.
 Existing customers and old native DTOs retain their current flows.
 
-Migration **0149 must complete before deploying any binary that accepts client
+Migration **0151 must complete before deploying any binary that accepts client
 readiness reports or reads rollout readiness**. An older client remains compatible
 and continues productive observation, but it is classified with
 `client_report_missing` until upgraded and cannot enter a strict preview.

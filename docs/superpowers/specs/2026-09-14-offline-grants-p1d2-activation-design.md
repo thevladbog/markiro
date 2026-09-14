@@ -222,10 +222,10 @@ activation whose:
 - activation has not been cancelled or superseded.
 
 If every check passes, the rollout policy supplies the grant policy revision and
-`strict` mode. Otherwise the server retains the last safely delivered strict
-configuration according to the existing downgrade protection, or returns
-`observe` for a client that has never entered strict. Invalid activation data
-cannot silently downgrade or broaden authority.
+`strict` mode. If the active binding is absent, revoked or invalid, the current
+base policy applies and the next authenticated refresh returns `observe`.
+Already signed task authority and recovery evidence keep their existing paths;
+invalid activation data cannot retain or broaden device authority.
 
 Configuration issuance records the activation ID as provenance. Device and task
 grant issuance, local admission, evidence upload and recovery continue to use the
@@ -360,7 +360,7 @@ API tests cover:
 - atomic policy, activation, state and audit commit;
 - unchanged catalog version, subscription and commercial snapshots;
 - configuration resolution for selected and unselected devices;
-- retained recovery after strict activation.
+- retained frozen-task and evidence recovery after strict activation.
 
 SaaS Admin tests cover second-operator UX, expiry, stale recovery, uncertain
 requests, exact request reuse, dirty-state protection and both locales.

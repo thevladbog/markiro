@@ -200,6 +200,9 @@ export const platformGrantActivationContracts = {
 } as const;
 
 export type GrantActivationState = z.output<typeof grantActivationStateSchema>;
+export type PlatformGrantActivationListQuery = z.input<
+  typeof platformGrantActivationContracts.list.query
+>;
 export type GrantActivationMember = z.output<typeof grantActivationMemberSchema>;
 export type PlatformGrantActivationPreparation = z.output<typeof grantActivationPreparationSchema>;
 export type PlatformGrantActivationPrepareRequest = z.output<

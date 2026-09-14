@@ -285,6 +285,8 @@ export function CatalogPage() {
         >
           <OfflineGrantPoliciesPanel
             canWrite={principal.capabilities.includes("catalog.write")}
+            canActivate={principal.capabilities.includes("offlineGrants.activate")}
+            currentUserId={principal.userId}
             onDirtyChange={setDrawerDirty}
           />
         </CatalogDrawer>

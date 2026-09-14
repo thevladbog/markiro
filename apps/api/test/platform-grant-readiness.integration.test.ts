@@ -46,6 +46,8 @@ function eligibleFacts(): GrantReadinessFacts {
     assignmentId: randomUUID(),
     lastSeenAt: new Date(asOf.getTime() - 1_000),
     subscriptionActive: true,
+    subscriptionId: randomUUID(),
+    entitlementRevision: "1",
     currentPolicy: targetPolicy,
     signingConfigured: true,
     currentKeysetRevision: "keyset-7",
