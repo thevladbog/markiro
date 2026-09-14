@@ -66,6 +66,7 @@ import {
   type CreateOrderAdmissionDto,
   type CreateOrderAdmissionResultDto,
   type CreateOrderDto,
+  type CreatePickupDocumentInput,
   type CreateOrderResultDto,
   type AcceptedBox,
   type BoxConflict,
@@ -234,7 +235,7 @@ export class PickupOrdersService {
   async createForDevice(
     tenantId: string,
     source: PickupDocumentSource,
-    dto: CreateOrderDto,
+    dto: CreatePickupDocumentInput,
     evidence?: EvidenceTransactionHook<CreateOrderResultDto>,
   ): Promise<CreateOrderResultDto> {
     const processing = kioskOrderProcessingLines(dto);
@@ -339,7 +340,10 @@ export class PickupOrdersService {
       // leave no trace at all. Codes only: an item-less badge heartbeat
       // lost nothing and must not add noise here.
       const hasLines = processing.items.length + processing.boxes.length > 0;
-      const badgeCode = hasLines ? await this.auditBadgeValue(tenantId, dto) : null;
+      // Only the badge path has a badge worth recording; an operator the roster
+      // no longer knows leaves the codes with no badge attached.
+      const badgeCode =
+        hasLines && dto.operatorId === undefined ? await this.auditBadgeValue(tenantId, dto) : null;
       const row = {
         tenantId,
         source,
@@ -1723,8 +1727,12 @@ export class PickupOrdersService {
    */
   private async resolveActiveEmployee(
     tenantId: string,
-    dto: CreateOrderDto,
+    dto: CreatePickupDocumentInput,
   ): Promise<ActiveEmployee | undefined> {
+    // A handheld names its signed-in operator directly; only a kiosk presents a
+    // badge. The tenant predicate inside is what makes another tenant's
+    // employee unreachable, so a device cannot assert its way across tenants.
+    if (dto.operatorId !== undefined) return this.resolveActiveOperator(tenantId, dto.operatorId);
     const presented = this.presentedBadge(dto);
     const match =
       "digest" in presented
@@ -1779,6 +1787,58 @@ export class PickupOrdersService {
         limited: badge.limitsEnabled && badge.limitMode === "limited",
         dayLimit: badge.dayLimit,
         canWriteoff: badge.canWriteoff,
+      },
+    };
+  }
+
+  /**
+   * The handheld's counterpart to the badge lookup: same policy joins, same
+   * "must be active" rule, keyed by the operator the signed-in device asserts.
+   */
+  private async resolveActiveOperator(
+    tenantId: string,
+    operatorId: string,
+  ): Promise<ActiveEmployee | undefined> {
+    const [row] = await this.db
+      .select({
+        employeeId: schema.employees.id,
+        limitMode: schema.employeePickupPolicies.limitMode,
+        dayLimit: schema.employeePickupPolicies.dayLimit,
+        canWriteoff: schema.employeePickupPolicies.canWriteoff,
+        limitsEnabled: schema.pickupTenantPolicies.limitsEnabled,
+      })
+      .from(schema.employees)
+      .leftJoin(
+        schema.employeePickupPolicies,
+        and(
+          eq(schema.employeePickupPolicies.tenantId, schema.employees.tenantId),
+          eq(schema.employeePickupPolicies.employeeId, schema.employees.id),
+        ),
+      )
+      .leftJoin(
+        schema.pickupTenantPolicies,
+        eq(schema.pickupTenantPolicies.tenantId, schema.employees.tenantId),
+      )
+      .where(
+        and(
+          eq(schema.employees.tenantId, tenantId),
+          eq(schema.employees.id, operatorId),
+          eq(schema.employees.status, "active"),
+        ),
+      );
+    if (!row) return undefined;
+    if (row.limitMode === null || row.dayLimit === null || row.canWriteoff === null) {
+      throw new InternalServerErrorException("Employee pickup policy is not configured");
+    }
+    if (row.limitsEnabled === null) {
+      throw new InternalServerErrorException("Tenant pickup policy is not configured");
+    }
+    return {
+      id: row.employeeId,
+      pickupPolicy: {
+        limited: row.limitsEnabled && row.limitMode === "limited",
+        dayLimit: row.dayLimit,
+        canWriteoff: row.canWriteoff,
       },
     };
   }
