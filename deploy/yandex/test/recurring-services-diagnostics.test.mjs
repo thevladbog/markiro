@@ -74,6 +74,11 @@ test("hosted recurring-services diagnostic runs a read-only probe in the active 
     "--input-type=module",
     "-",
   ]);
+  assert.match(
+    commands[1].options.input,
+    /\/app\/node_modules\/\.pnpm\/node_modules\/pg\/esm\/index[.]mjs/,
+  );
+  assert.doesNotMatch(commands[1].options.input, /import pg from ["']pg["']/);
   assert.match(commands[1].options.input, /SELECT EXISTS/);
   assert.doesNotMatch(commands[1].options.input, /\b(?:INSERT|UPDATE|DELETE|ALTER|CREATE|DROP)\b/i);
 });
