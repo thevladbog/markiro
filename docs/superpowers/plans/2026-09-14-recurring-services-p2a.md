@@ -1090,7 +1090,7 @@ corepack pnpm@11.22.0 --filter @markiro/admin test
 
 Expected: all executed tests pass. Record database-backed skips caused by missing `DATABASE_URL` as unverified infrastructure coverage.
 
-Verification record: platform contracts (36 files, 340 tests), DB on a fresh migrated PostgreSQL database (107 files, 568 tests), SaaS Admin (50 files, 499 tests), Tenant Admin (113 files, 1,415 tests), and the focused recurring-service API set on a fresh migrated PostgreSQL database (11 files, 74 tests) passed. The complete API package command did not pass because required platform-auth variables were unavailable and parallel suites shared the database; the acceptance ledger records the exact boundary.
+Verification record: platform contracts (36 files, 340 tests), DB on a fresh migrated PostgreSQL database (107 files, 568 tests), SaaS Admin (50 files, 499 tests), Tenant Admin (113 files, 1,415 tests), and the post-merge focused recurring-service API set on a fresh migrated PostgreSQL database (12 files, 79 tests) passed. The complete API package command did not pass because required platform-auth variables were unavailable and parallel suites shared the database; the acceptance ledger records the exact boundary.
 
 - [ ] **Step 5: Run the broad repository gate**
 
@@ -1104,13 +1104,15 @@ Expected: PASS. If an unrelated pre-existing failure appears, capture its exact 
 
 Verification record: the separate Turbo lint/typecheck/build run passed all 39 tasks. The combined test gate stopped in API tests because the local run lacked required database/auth configuration and the sandbox denied loopback listeners. Prettier and `git diff --check` passed. The acceptance ledger keeps these results separate.
 
-- [ ] **Step 6: Inspect the complete branch diff and CI ownership**
+- [x] **Step 6: Inspect the complete branch diff and CI ownership**
 
 Run: `git fetch origin main && git diff --check origin/main...HEAD && git diff --stat origin/main...HEAD && git diff origin/main...HEAD -- tools/ci/affected.mjs .github/workflows/ci.yml`
 
 Confirm contract, DB, API, SaaS Admin and Admin paths activate their required jobs. Modify `tools/ci/affected.mjs` only if the actual classification omits one of those surfaces.
 
-- [ ] **Step 7: Commit verification artifacts**
+Verification record: merged current `origin/main`, resolved the combined OpenAPI schema inventory at 219 entries, and passed its 5 tests. The final path classification selects all required jobs, the 19 classifier tests pass, and `.github/workflows/ci.yml` explicitly runs both recurring-service browser suites.
+
+- [x] **Step 7: Commit verification artifacts**
 
 ```bash
 git add docs/operations/recurring-services.md docs/acceptance/recurring-services-p2a.md apps/admin/test/browser/tenant-billing-harness.tsx tools/production-browser/tests/tenant-billing.visual.spec.ts tools/production-browser/service-periods.playwright.config.ts tools/production-browser/service-periods-tests tools/production-browser/package.json tools/ci/affected.mjs
