@@ -241,6 +241,36 @@ describe("normalizeNationalCatalogSchema", () => {
     });
   });
 
+  it("ignores a conditional provider block without discarding the trigger or target", () => {
+    const result = normalizeNationalCatalogSchema(
+      { id: 30398, name: "Сидр", parentId: null, level: 1, active: true, gismtCodes: [7], raw: {} },
+      [
+        attribute({
+          id: 22999,
+          name: "Характеристика упаковки",
+          preset: ["Кег", "Потребительская упаковка"],
+          dependentAttributes: [
+            {
+              value: "Кег",
+              attributes: [{ id: 23000, firstLayer: true, secondLayer: true, type: "b" }],
+            },
+          ],
+        }),
+        attribute({ id: 23000, name: "Потребительская упаковка", type: "o" }),
+      ],
+    );
+
+    expect(result).toMatchObject({
+      status: "valid",
+      definition: {
+        attributes: [
+          expect.objectContaining({ id: "22999" }),
+          expect.objectContaining({ id: "23000" }),
+        ],
+      },
+    });
+  });
+
   it("ignores dependencies whose target is omitted from the provider schema", () => {
     const result = normalizeNationalCatalogSchema(
       { id: 30398, name: "Сидр", parentId: null, level: 1, active: true, gismtCodes: [7], raw: {} },

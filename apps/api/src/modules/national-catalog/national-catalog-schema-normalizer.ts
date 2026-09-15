@@ -164,6 +164,10 @@ function appendConditionalRequirements(
         continue;
       }
       for (const candidate of dependency.attributes) {
+        // `b` inside a dependency means that this target is blocked only for
+        // the selected trigger value. Markiro cannot fill a blocked value, so
+        // there is no requirement rule to project for that branch.
+        if (candidate.type === "b") continue;
         const targetId = candidate.id === null ? null : String(candidate.id);
         const target = targetId === null ? undefined : targets.get(targetId);
         const targetSource = targetId === null ? undefined : sources.get(targetId);
