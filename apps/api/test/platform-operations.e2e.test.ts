@@ -58,6 +58,7 @@ describe("platform operations routes", () => {
     monitoring: vi.fn(async () => health),
   };
   const nationalCatalogSchemas = {
+    list: vi.fn(async () => ({ configured: false, sourceTenantId: null, versions: [] })),
     refresh: vi.fn(),
     activate: vi.fn(),
     reviewGroupMapping: vi.fn(),
@@ -101,6 +102,19 @@ describe("platform operations routes", () => {
       .expect(200)
       .expect(health);
     expect(service.overview).toHaveBeenCalledWith("platform_admin");
+  });
+
+  it("serves the National Catalog operator view from a read-protected route", async () => {
+    await request(app.getHttpServer())
+      .get("/api/platform/operations/national-catalog/schemas")
+      .expect(200)
+      .expect({ configured: false, sourceTenantId: null, versions: [] });
+
+    const policy = Reflect.getMetadata(
+      PLATFORM_ACCESS_POLICY,
+      PlatformOperationsController.prototype.listNationalCatalogSchemas,
+    ) as PlatformCapabilityPolicy;
+    expect(policy).toEqual({ mode: "capabilities", capabilities: ["catalog.read"] });
   });
 
   it("fails closed when the platform principal is absent", async () => {

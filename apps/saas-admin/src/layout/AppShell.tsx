@@ -79,6 +79,9 @@ function AppShellContent() {
         ...(hasCapability("diagnostics.read")
           ? [item("monitoring", t("shell.monitoring"), "/monitoring", "11")]
           : []),
+        ...(hasCapability("catalog.read")
+          ? [item("national-catalog", t("shell.nationalCatalog"), "/national-catalog", "10A")]
+          : []),
         ...(hasCapability("platformTeam.write")
           ? [item("team", t("shell.team"), "/team", "12")]
           : []),

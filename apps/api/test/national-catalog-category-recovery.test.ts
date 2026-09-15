@@ -146,4 +146,40 @@ describe.skipIf(!databaseUrl)("reviewed categories on isolated Postgres", () => 
       ]),
     );
   });
+
+  it("lists category status, blocking reasons, and product-group review state", async () => {
+    const categoryId = "245615018";
+    const scopeKey = `national-catalog:category:${categoryId}`;
+    const blockedReasons = [{ code: "unsupported_value_type", attributeId: "44" }] as const;
+    await repository.observe({
+      scopeKey,
+      categoryId,
+      categoryName: "Сидр",
+      gismtCodes: [7],
+      selectors: { catId: Number(categoryId) },
+      sourceVersion: "v3",
+      etag: null,
+      contentHash: "d".repeat(64),
+      definition: { observationVersion: 1, categoryId, scopeKey, blockedReasons },
+      status: "observed",
+      fetchedAt: new Date("2026-09-14T10:00:00.000Z"),
+    });
+
+    const result = await repository.list();
+    expect(result.versions.find((version) => version.categoryId === categoryId)).toEqual(
+      expect.objectContaining({
+        categoryName: "Сидр",
+        status: "observed",
+        fetchedAt: "2026-09-14T10:00:00.000Z",
+        blockedReasons,
+        mappings: expect.arrayContaining([
+          expect.objectContaining({
+            chzProductGroupCode: 7,
+            state: "ambiguous",
+            reviewedAt: null,
+          }),
+        ]),
+      }),
+    );
+  });
 });

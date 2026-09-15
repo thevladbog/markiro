@@ -16,6 +16,50 @@ export const nationalCatalogSchemaRefreshResponseSchema = z
   })
   .strict();
 
+const nationalCatalogSchemaBlockReasonSchema = z
+  .object({
+    code: z.enum([
+      "duplicate_attribute_id",
+      "unsupported_dependency",
+      "unsupported_requirement_type",
+      "unsupported_unique_multiplicity",
+      "unsupported_value_type",
+      "invalid_preset_contract",
+    ]),
+    attributeId: z.string().min(1),
+  })
+  .strict();
+
+export const nationalCatalogSchemaListResponseSchema = z
+  .object({
+    configured: z.boolean(),
+    sourceTenantId: platformTenantIdSchema.nullable(),
+    versions: z.array(
+      z
+        .object({
+          id: platformUuidSchema,
+          categoryId: z.string().min(1),
+          categoryName: z.string().min(1),
+          status: z.enum(["observed", "validated", "active", "retired"]),
+          fetchedAt: z.iso.datetime({ offset: true }),
+          activatedAt: z.iso.datetime({ offset: true }).nullable(),
+          blockedReasons: z.array(nationalCatalogSchemaBlockReasonSchema),
+          mappings: z.array(
+            z
+              .object({
+                chzProductGroupCode: z.number().int().positive(),
+                chzProductGroupName: z.string().min(1),
+                state: z.enum(["exact", "ambiguous", "unmapped"]),
+                reviewedAt: z.iso.datetime({ offset: true }).nullable(),
+              })
+              .strict(),
+          ),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+
 export const nationalCatalogSchemaVersionParamsSchema = z
   .object({ id: platformUuidSchema })
   .strict();
@@ -100,6 +144,9 @@ export const nationalCatalogAttributeMappingReviewResponseSchema = z
   .strict();
 
 export const platformNationalCatalogContracts = {
+  listSchemas: {
+    response: nationalCatalogSchemaListResponseSchema,
+  },
   refresh: {
     body: nationalCatalogSchemaRefreshBodySchema,
     response: nationalCatalogSchemaRefreshResponseSchema,

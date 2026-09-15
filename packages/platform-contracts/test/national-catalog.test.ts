@@ -3,6 +3,35 @@ import { describe, expect, it } from "vitest";
 import { platformNationalCatalogContracts } from "../src/national-catalog.js";
 
 describe("platform National Catalog contracts", () => {
+  it("accepts the operator view of discovered schemas and their group reviews", () => {
+    expect(
+      platformNationalCatalogContracts.listSchemas.response.safeParse({
+        configured: true,
+        sourceTenantId: "tenant-1",
+        versions: [
+          {
+            id: "00000000-0000-4000-8000-000000000001",
+            categoryId: "245615018",
+            categoryName: "Сидр",
+            status: "observed",
+            fetchedAt: "2026-09-14T10:00:00.000Z",
+            activatedAt: null,
+            blockedReasons: [],
+            mappings: [
+              {
+                chzProductGroupCode: 7,
+                chzProductGroupName:
+                  "Пиво, напитки, изготавливаемые на основе пива, слабоалкогольные напитки",
+                state: "ambiguous",
+                reviewedAt: null,
+              },
+            ],
+          },
+        ],
+      }).success,
+    ).toBe(true);
+  });
+
   it("keeps refresh and activation payloads strict", () => {
     expect(
       platformNationalCatalogContracts.refresh.body.safeParse({ sourceTenantId: "tenant-a" })

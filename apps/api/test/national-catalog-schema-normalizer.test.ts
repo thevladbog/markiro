@@ -156,6 +156,62 @@ describe("normalizeNationalCatalogSchema", () => {
     });
   });
 
+  it("keeps provider-backed preset fields editable without inventing local choices", () => {
+    const result = normalizeNationalCatalogSchema(
+      { id: 1, name: "Категория", parentId: null, level: 1, active: true, gismtCodes: [], raw: {} },
+      [
+        attribute({
+          id: 2630,
+          name: "Страна производства",
+          presetOnly: true,
+          preset: [],
+          presetUrl: "/v3/dictionary/isocountry",
+        }),
+      ],
+    );
+
+    expect(result).toMatchObject({
+      status: "valid",
+      definition: {
+        attributes: [
+          expect.objectContaining({
+            id: "2630",
+            valueType: "string",
+            presetMode: "none",
+            presets: [],
+          }),
+        ],
+      },
+    });
+  });
+
+  it("ignores dependencies whose provider-blocked targets are not editable", () => {
+    const result = normalizeNationalCatalogSchema(
+      { id: 1, name: "Категория", parentId: null, level: 1, active: true, gismtCodes: [], raw: {} },
+      [
+        attribute({
+          id: 10,
+          name: "Условие",
+          preset: ["ДА", "НЕТ"],
+          dependentAttributes: [
+            {
+              value: "ДА",
+              attributes: [{ id: 20, firstLayer: false, secondLayer: true, type: "m" }],
+            },
+          ],
+        }),
+        attribute({ id: 20, name: "Недоступное поле", type: "b" }),
+      ],
+    );
+
+    expect(result).toMatchObject({
+      status: "valid",
+      definition: {
+        attributes: [expect.objectContaining({ id: "10" })],
+      },
+    });
+  });
+
   it("normalizes a resolvable provider dependency into a conditional requirement", () => {
     const result = normalizeNationalCatalogSchema(
       { id: 1, name: "Категория", parentId: null, level: 1, active: true, gismtCodes: [], raw: {} },

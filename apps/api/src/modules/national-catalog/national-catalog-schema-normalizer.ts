@@ -125,7 +125,16 @@ function blockReason(
 ): NationalCatalogSchemaBlockCode | null {
   if (attribute.multiplicityType === "unique") return "unsupported_unique_multiplicity";
   if (requirementLevel(attribute.type) === null) return "unsupported_requirement_type";
-  if (attribute.presetOnly && attribute.preset.length === 0) return "invalid_preset_contract";
+  // The provider moves large or searchable value sets behind `preset_url`.
+  // Their absence from the inline `attr_preset` array is therefore a valid
+  // remote-preset contract, not an empty closed enum. Keep the field as a
+  // plain typed value until Markiro has a dedicated remote suggestion control.
+  if (
+    attribute.presetOnly &&
+    attribute.preset.length === 0 &&
+    (attribute.presetUrl === null || attribute.presetUrl.trim().length === 0)
+  )
+    return "invalid_preset_contract";
   if (normalizedValueType(attribute) === null) return "unsupported_value_type";
   return null;
 }
@@ -163,6 +172,11 @@ function appendConditionalRequirements(
       for (const candidate of dependency.attributes) {
         const targetId = candidate.id === null ? null : String(candidate.id);
         const target = targetId === null ? undefined : targets.get(targetId);
+        const targetSource = targetId === null ? undefined : sources.get(targetId);
+        // A dependency may point at a contextually blocked provider field.
+        // That target is intentionally absent from the editable definition,
+        // so it must not invalidate the usable trigger and sibling fields.
+        if (targetSource?.type === "b") continue;
         const level = requirementLevel(candidate.type);
         if (!target || !level || (!candidate.firstLayer && !candidate.secondLayer) || !operator) {
           invalid = true;

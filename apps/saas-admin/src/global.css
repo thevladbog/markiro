@@ -635,6 +635,62 @@ textarea {
   background: var(--mk-surface-paper);
 }
 
+.national-catalog-page {
+  display: grid;
+  gap: var(--sp-5);
+}
+
+.national-catalog-grid {
+  display: grid;
+  gap: var(--sp-4);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr));
+}
+
+.national-catalog-card {
+  background: var(--mk-surface-paper);
+  border: 1px solid var(--mk-border-operational);
+  border-radius: var(--mk-radius-operational);
+  display: grid;
+  gap: var(--sp-4);
+  padding: var(--sp-5);
+}
+
+.national-catalog-card > header,
+.national-catalog-mapping {
+  align-items: flex-start;
+  display: flex;
+  gap: var(--sp-3);
+  justify-content: space-between;
+}
+
+.national-catalog-card h2,
+.national-catalog-card p {
+  margin: 0;
+}
+
+.national-catalog-card__id,
+.national-catalog-mapping span {
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+}
+
+.national-catalog-card__reasons {
+  color: var(--err-fg);
+  margin: 0;
+  padding-inline-start: var(--sp-5);
+}
+
+.national-catalog-mapping {
+  border-block-start: 1px solid var(--mk-border-operational);
+  padding-block-start: var(--sp-3);
+}
+
+.national-catalog-mapping > div {
+  display: grid;
+  gap: var(--sp-1);
+}
+
 .overview-panel__header {
   min-height: 76px;
   display: flex;
