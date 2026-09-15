@@ -10,6 +10,7 @@ import "./billing.css";
 const BILLING_TABS = [
   { to: "/billing", key: "pages.billing.tabs.overview", end: true },
   { to: "/billing/subscription", key: "pages.billing.tabs.subscription", end: false },
+  { to: "/billing/services", key: "pages.billing.tabs.services", end: false },
   { to: "/billing/invoices", key: "pages.billing.tabs.invoices", end: false },
   { to: "/billing/documents", key: "pages.billing.tabs.documents", end: false },
   { to: "/billing/requests", key: "pages.billing.tabs.requests", end: false },

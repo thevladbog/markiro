@@ -20,6 +20,7 @@ interface PlatformOpenApiOptions {
   response: ZodType;
   commercialV2?: { response: ZodType; body?: ZodType };
   commercialV3?: { response: ZodType; body?: ZodType };
+  commercialV4?: { response: ZodType; body?: ZodType };
   body?: ZodType;
   query?: ZodType;
   errors?: ReadonlyArray<{ status: number; schema: ZodType }>;
@@ -71,6 +72,9 @@ function platformOperation(
               platformOpenApiSchema(options.response),
               platformOpenApiSchema(options.commercialV2.response),
               platformOpenApiSchema((options.commercialV3 ?? options.commercialV2).response),
+              ...(options.commercialV4
+                ? [platformOpenApiSchema(options.commercialV4.response)]
+                : []),
             ],
           }
         : platformOpenApiSchema(options.response),
@@ -85,16 +89,22 @@ function platformOperation(
       ApiHeader({
         name: COMMERCIAL_VERSION_HEADER,
         required: false,
-        schema: { type: "string", enum: ["2", "3"] },
+        schema: { type: "string", enum: ["2", "3", "4"] },
         description:
-          "Opt into commercial V2 or V3. Omission selects the legacy representation; unsupported legacy values return client_update_required.",
+          "Opt into commercial V2, V3 or V4. Omission selects the legacy representation; unsupported legacy values return client_update_required.",
       }),
     );
-  if (options.body || options.commercialV2?.body || options.commercialV3?.body) {
+  if (
+    options.body ||
+    options.commercialV2?.body ||
+    options.commercialV3?.body ||
+    options.commercialV4?.body
+  ) {
     const bodies = [
       options.body,
       options.commercialV2?.body,
       (options.commercialV3 ?? options.commercialV2)?.body,
+      options.commercialV4?.body,
     ].filter((body): body is ZodType => body !== undefined);
     decorators.push(
       ApiBody({

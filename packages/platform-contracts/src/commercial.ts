@@ -1,5 +1,6 @@
 import {
   commercialLineTermsSchema,
+  commercialLineTermsV4Schema,
   isCommercialPlanSequenceValid,
   sellerTaxPolicySchema,
   validateCommercialLineKind,
@@ -955,6 +956,11 @@ export const billingActCreateSchema = z
     number: trimmedTextSchema(200),
     periodStart: billingCivilDateSchema,
     periodEnd: billingCivilDateSchema,
+    serviceUsageEntryIds: z
+      .array(platformUuidSchema)
+      .max(200)
+      .refine((ids) => new Set(ids).size === ids.length, "Service usage entries must be unique")
+      .optional(),
     idempotencyKey: platformUuidSchema,
   })
   .strict()
@@ -966,6 +972,22 @@ export const billingActIssueSchema = billingActIdempotencySchema
   .extend({ printVariant: printDocumentVariantSchema.default("clean") })
   .strict();
 export const billingActCancelSchema = billingActIdempotencySchema;
+export const billingActServiceUsageSnapshotSchema = z
+  .object({
+    entryId: platformUuidSchema,
+    servicePeriodId: platformUuidSchema,
+    sequence: positiveIntegerSchema,
+    kind: z.enum(["usage", "correction"]),
+    classification: z.enum(["customer_service", "product_defect"]),
+    originalEntryId: platformUuidSchema.nullable(),
+    workReference: z.string().trim().min(1).max(300),
+    description: z.string().trim().min(1).max(4_000),
+    performedAt: responseTimestampSchema,
+    postedAt: responseTimestampSchema,
+    actualMinutes: z.number().int().min(-POSTGRES_INTEGER_MAX).max(POSTGRES_INTEGER_MAX),
+    allowanceMinutes: z.number().int().min(-POSTGRES_INTEGER_MAX).max(POSTGRES_INTEGER_MAX),
+  })
+  .strict();
 export const billingActDocumentSchema = z.discriminatedUnion("state", [
   z
     .object({
@@ -1031,6 +1053,7 @@ export const billingActSchema = z
     cancelledAt: nullableResponseTimestampSchema,
     createdAt: responseTimestampSchema,
     updatedAt: responseTimestampSchema,
+    serviceUsageSnapshot: z.array(billingActServiceUsageSnapshotSchema).max(200).default([]),
     document: billingActDocumentSchema.nullable(),
   })
   .strict()
@@ -2026,6 +2049,7 @@ export type PlatformBillingRequest = z.output<typeof platformBillingRequestSchem
 export type PlatformBillingRequestEvent = z.output<typeof platformBillingRequestEventSchema>;
 export type PlatformBillingRequestLink = z.output<typeof platformBillingRequestLinkResponseSchema>;
 export type BillingActCreateDto = z.output<typeof billingActCreateSchema>;
+export type BillingActServiceUsageSnapshot = z.output<typeof billingActServiceUsageSnapshotSchema>;
 export type BillingActIssueInput = z.input<typeof billingActIssueSchema>;
 export type BillingActIssueDto = z.output<typeof billingActIssueSchema>;
 export type BillingActCancelDto = z.output<typeof billingActCancelSchema>;
@@ -2202,3 +2226,104 @@ export const platformCommercialV2Contracts = {
     create: { body: invoiceCreateV2Schema, response: draftInvoiceCreateResponseSchema },
   },
 } as const;
+
+export const offerCreateLineV4Schema = offerCreateLineSchema
+  .extend({ commercialTerms: commercialLineTermsV4Schema.nullable().optional() })
+  .superRefine(validateCommercialLineKind);
+export const invoiceCreateLineV4Schema = invoiceCreateLineSchema
+  .extend({ commercialTerms: commercialLineTermsV4Schema.nullable().optional() })
+  .superRefine(validateCommercialLineKind);
+export const offerCreateV4Schema = offerCreateSchema.extend({
+  lines: z.array(offerCreateLineV4Schema).min(1).max(100).refine(isCommercialPlanSequenceValid, {
+    message: "A sale supports one plan or two ordered plans: on_application then after_current",
+  }),
+});
+export const invoiceCreateV4Schema = z.union(
+  invoiceCreateSchema.options.map((option) =>
+    option.extend({
+      lines: z
+        .array(invoiceCreateLineV4Schema)
+        .min(1)
+        .max(100)
+        .refine(isCommercialPlanSequenceValid, {
+          message:
+            "A sale supports one plan or two ordered plans: on_application then after_current",
+        }),
+    }),
+  ),
+);
+export const offerLineV4Schema = z
+  .union(
+    offerLineSchema.options.map((option) =>
+      option.extend({ commercialTerms: commercialLineTermsV4Schema.nullable() }),
+    ),
+  )
+  .superRefine(validateCommercialLineKind);
+export const invoiceLineV4Schema = z
+  .union(
+    invoiceLineSchema.options.map((option) =>
+      option.extend({ commercialTerms: commercialLineTermsV4Schema.nullable() }),
+    ),
+  )
+  .superRefine(validateCommercialLineKind);
+export const offerDetailV4Schema = z.union(
+  offerDetailSchema.options.map((option) => option.extend({ lines: z.array(offerLineV4Schema) })),
+);
+export const invoiceDetailV4Schema = z.union(
+  invoiceDetailSchema.options.map((option) =>
+    option.extend({ lines: z.array(invoiceLineV4Schema) }),
+  ),
+);
+export const offerServiceLineV4Schema = offerServiceLineSchema
+  .safeExtend({ commercialTerms: commercialLineTermsV4Schema.nullable() })
+  .superRefine(validateCommercialLineKind);
+export const offerServiceDetailV4Schema = offerServiceDetailSchema.extend({
+  lines: z.array(offerServiceLineV4Schema),
+});
+export const invoiceServiceLineV4Schema = invoiceServiceLineSchema
+  .safeExtend({ commercialTerms: commercialLineTermsV4Schema.nullable() })
+  .superRefine(validateCommercialLineKind);
+export const invoiceServiceDetailV4Schema = invoiceServiceDetailSchema.extend({
+  lines: z.array(invoiceServiceLineV4Schema),
+});
+export const platformBillingRequestOfferCreateV4Schema = offerCreateV4Schema
+  .omit({ tenantId: true })
+  .extend({ idempotencyKey: platformUuidSchema })
+  .strict();
+export const platformCommercialV4Contracts = {
+  ...platformCommercialV2Contracts,
+  billingRequests: {
+    ...platformCommercialV2Contracts.billingRequests,
+    createOffer: {
+      ...platformCommercialV2Contracts.billingRequests.createOffer,
+      body: platformBillingRequestOfferCreateV4Schema,
+    },
+  },
+  offers: {
+    ...platformCommercialV2Contracts.offers,
+    detail: { params: offerIdSchema, response: offerDetailV4Schema },
+    create: {
+      body: offerCreateV4Schema,
+      response: draftOfferDetailSchema.extend({ lines: z.array(offerLineV4Schema) }),
+    },
+    revise: { params: offerIdSchema, body: offerReviseSchema, response: offerDetailV4Schema },
+    publish: {
+      params: offerIdSchema,
+      body: platformCommercialV2Contracts.offers.publish.body,
+      response: publishedOfferWithDocumentsSchema.extend({ lines: z.array(offerLineV4Schema) }),
+    },
+    cancel: {
+      params: offerIdSchema,
+      response: cancelledOfferDetailSchema.extend({ lines: z.array(offerLineV4Schema) }),
+    },
+  },
+  invoices: {
+    ...platformCommercialV2Contracts.invoices,
+    detail: { params: invoiceIdSchema, response: invoiceDetailV4Schema },
+    create: { body: invoiceCreateV4Schema, response: draftInvoiceCreateResponseSchema },
+  },
+} as const;
+export type CreateOfferV4 = z.output<typeof offerCreateV4Schema>;
+export type CreateInvoiceV4 = z.output<typeof invoiceCreateV4Schema>;
+export type OfferDetailV4 = z.output<typeof offerDetailV4Schema>;
+export type InvoiceDetailV4 = z.output<typeof invoiceDetailV4Schema>;

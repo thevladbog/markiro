@@ -9,7 +9,9 @@ import {
 import { and, desc, eq, or, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import {
-  platformCatalogV3Contracts as platformCatalogContracts,
+  platformCatalogV4Contracts as platformCatalogContracts,
+  catalogVersionCreateV4Schema,
+  catalogVersionPatchV4Schema,
   catalogVersionCreateV3Schema,
   catalogVersionPatchV3Schema,
   catalogVersionPatchV2Schema,
@@ -24,9 +26,9 @@ import {
   type CatalogPublicationReview,
   type AddonEffectV3 as AddonEffect,
   type ArchiveCatalogItemResponse,
-  type CatalogVersionV3 as CatalogVersion,
-  type CatalogVersionCreateV3 as CatalogVersionCreate,
-  type CatalogVersionPatchV3 as CatalogVersionPatch,
+  type CatalogVersionV4 as CatalogVersion,
+  type CatalogVersionCreateV4 as CatalogVersionCreate,
+  type CatalogVersionPatchV4 as CatalogVersionPatch,
   type DefaultDemoPlanResponse,
   type PlanEntitlements,
   type SetDefaultDemoPlan,
@@ -36,6 +38,7 @@ import {
   type CreateOfflineGrantPolicy,
   type OfflineGrantPolicy,
   type OfflineGrantPolicyRecord,
+  monthlyServiceTermsSchema,
 } from "@markiro/platform-contracts";
 import { commercialTaxDefaults, isCommercialTaxAllowed } from "@markiro/domain";
 import { lockSellerPolicy, readSellerPolicy } from "../billing-profiles/billing-profiles.service";
@@ -250,9 +253,11 @@ export class PlatformCatalogService {
     const versionNumber = normalizeVersion(clientVersion);
     projectCommercialResponse(versionNumber, input);
     input =
-      versionNumber === 3
-        ? catalogVersionCreateV3Schema.parse(input)
-        : catalogVersionCreateV2Schema.parse(input);
+      versionNumber === 4
+        ? catalogVersionCreateV4Schema.parse(input)
+        : versionNumber === 3
+          ? catalogVersionCreateV3Schema.parse(input)
+          : catalogVersionCreateV2Schema.parse(input);
     const kind = kindForInput(input);
     try {
       return await this.db.transaction(async (tx) => {
@@ -299,6 +304,10 @@ export class PlatformCatalogService {
             unit: input.billingMode === "recurring" ? input.billingPeriod : input.unit,
             billingMode: input.billingMode,
             billingPeriod: input.billingPeriod ?? null,
+            serviceTerms:
+              kind === "service" && input.billingMode === "recurring" && "service" in input
+                ? input.service
+                : null,
             unitPrice: input.unitPrice,
             vatRate: toVatRate(input.vatRateBps),
             vatIncluded: input.vatIncluded,
@@ -323,9 +332,11 @@ export class PlatformCatalogService {
     const versionNumber = normalizeVersion(clientVersion);
     projectCommercialResponse(versionNumber, input);
     input =
-      versionNumber === 3
-        ? catalogVersionPatchV3Schema.parse(input)
-        : catalogVersionPatchV2Schema.parse(input);
+      versionNumber === 4
+        ? catalogVersionPatchV4Schema.parse(input)
+        : versionNumber === 3
+          ? catalogVersionPatchV3Schema.parse(input)
+          : catalogVersionPatchV2Schema.parse(input);
     try {
       return await this.db.transaction(async (tx) => {
         await this.lockVersion(tx, versionId);
@@ -358,7 +369,7 @@ export class PlatformCatalogService {
         );
         // A V3 edit of a legacy draft preserves unknown mapping until explicit plan values are supplied.
         const parsed =
-          versionNumber === 3 &&
+          versionNumber >= 3 &&
           currentDto.kind === "plan" &&
           input.plan === undefined &&
           [
@@ -371,9 +382,11 @@ export class PlatformCatalogService {
                 .extend({ plan: planEntitlementsReadV3Schema })
                 .strict()
                 .safeParse(candidate)
-            : (versionNumber === 3
-                ? catalogVersionCreateV3Schema
-                : catalogVersionCreateV2Schema
+            : (versionNumber === 4
+                ? catalogVersionCreateV4Schema
+                : versionNumber === 3
+                  ? catalogVersionCreateV3Schema
+                  : catalogVersionCreateV2Schema
               ).safeParse(candidate);
         if (!parsed.success) throw new BadRequestException({ code: "catalog_version_invalid" });
         const changes: Record<string, unknown> = {
@@ -395,7 +408,13 @@ export class PlatformCatalogService {
           "unitPrice",
           "vatIncluded",
         ]);
-        if (found.item.kind !== "service") changes.unit = parsed.data.billingPeriod;
+        if (parsed.data.billingMode === "recurring") changes.unit = parsed.data.billingPeriod;
+        if (found.item.kind === "service") {
+          changes.serviceTerms =
+            parsed.data.billingMode === "recurring" && "service" in parsed.data
+              ? parsed.data.service
+              : null;
+        }
         if (input.vatRateBps !== undefined) changes.vatRate = toVatRate(input.vatRateBps);
         const [version] = await tx
           .update(schema.catalogItemVersions)
@@ -444,7 +463,7 @@ export class PlatformCatalogService {
           identity.catalogVersionId !== review.identity.catalogVersionId ||
           identity.draftUpdatedAt !== review.identity.draftUpdatedAt ||
           identity.sellerPolicyRevision !== review.identity.sellerPolicyRevision ||
-          (clientVersion === 3 &&
+          (clientVersion >= 3 &&
             (!("lifecyclePolicyId" in identity) ||
               !("lifecyclePolicyId" in review.identity) ||
               identity.lifecyclePolicyId !== review.identity.lifecyclePolicyId ||
@@ -666,7 +685,7 @@ export class PlatformCatalogService {
 
   async editorContext(principal: PlatformPrincipal, clientVersion: CommercialVersion = 2) {
     const policies =
-      clientVersion === 3
+      clientVersion >= 3
         ? await this.db
             .select()
             .from(schema.entitlementLifecyclePolicies)
@@ -678,7 +697,7 @@ export class PlatformCatalogService {
       taxPolicy: seller.taxPolicy,
       taxDefaults: seller.taxPolicy ? commercialTaxDefaults(seller.taxPolicy) : null,
       canWrite: principal.capabilities.includes("catalog.write"),
-      ...(clientVersion === 3
+      ...(clientVersion >= 3
         ? {
             lifecyclePolicies: policies
               .filter((policy) => policy.payloadHash === entitlementDigest(policy.payload))
@@ -735,9 +754,16 @@ export class PlatformCatalogService {
       errors.push({ code: "seller_tax_policy_violation", path: "vatRateBps" });
     // Strict DTO validation also rejects unknown effects and inconsistent stored kind/period.
     const dto = await this.toDto(item, version, true, tx);
+    if (
+      dto.kind === "service" &&
+      dto.billingMode === "recurring" &&
+      version.documentNameEn?.trim() &&
+      !dto.service.scopeEn
+    )
+      errors.push({ code: "service_scope_en_required", path: "service.scopeEn" });
     let lifecyclePolicyVersion: number | null = null;
     let lifecyclePolicyHash: string | null = null;
-    if (clientVersion === 3) {
+    if (clientVersion >= 3) {
       if (
         dto.kind === "plan" &&
         [
@@ -773,7 +799,7 @@ export class PlatformCatalogService {
         catalogVersionId: version.id,
         draftUpdatedAt: version.updatedAt.toISOString(),
         sellerPolicyRevision: seller.revision,
-        ...(clientVersion === 3
+        ...(clientVersion >= 3
           ? {
               lifecyclePolicyId: version.lifecyclePolicyId,
               lifecyclePolicyVersion,
@@ -992,11 +1018,13 @@ export class PlatformCatalogService {
         addon: { effects: effects.map(toAddonEffect) },
       });
     }
+    const service =
+      version.serviceTerms === null ? {} : monthlyServiceTermsSchema.parse(version.serviceTerms);
     return platformCatalogContracts.getVersion.response.parse({
       ...common,
       ...financial,
       kind: "service",
-      service: {},
+      service,
     });
   }
 }

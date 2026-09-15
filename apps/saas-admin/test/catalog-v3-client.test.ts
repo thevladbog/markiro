@@ -48,7 +48,7 @@ it("creates and approves an observe-ready offline grant policy through the platf
     { decisionReference: "P1D-1" },
   ]);
 });
-it("reads explicit V3 modules and policy without widening saved V2 documents", async () => {
+it("reads the current V4 catalog without widening saved V2 documents", async () => {
   const plan = {
     ...DRAFT_PLAN,
     lifecyclePolicyId: null,
@@ -65,7 +65,7 @@ it("reads explicit V3 modules and policy without widening saved V2 documents", a
   expect((await listCatalogVersions()).items[0]).toEqual(plan);
   expect(fetch.mock.calls[0]).toBeDefined();
   const init = (fetch.mock.calls as unknown as Array<[string, RequestInit]>)[0]?.[1];
-  expect(init?.headers).toMatchObject({ "X-Markiro-Commercial-Version": "3" });
+  expect(init?.headers).toMatchObject({ "X-Markiro-Commercial-Version": "4" });
 });
 it("clones fully legacy unknown mapping through frozen V2 and preserves nulls in the V3 response view", async () => {
   const legacy = {
@@ -123,7 +123,7 @@ it("does not silently clone partial or policy-bound unknown mapping using legacy
   expect(() => catalogVersionToCreateInput(legacy)).toThrow();
 });
 
-it("negotiates V3 for new invoice and offer selections without adding entitlement fields to saved line shapes", async () => {
+it("negotiates V4 for new invoice and offer selections without adding entitlement fields to saved line shapes", async () => {
   const { createInvoice } = await import("../src/pages/billing/api.js");
   const { createOffer } = await import("../src/pages/offers/api.js");
   const { createLineFromCatalog, toInvoiceCreateInput, toOfferCreateInput } =
@@ -154,7 +154,7 @@ it("negotiates V3 for new invoice and offer selections without adding entitlemen
   });
   expect(calls).toHaveLength(2);
   for (const call of calls) {
-    expect(new Headers(call.headers).get("X-Markiro-Commercial-Version")).toBe("3");
+    expect(new Headers(call.headers).get("X-Markiro-Commercial-Version")).toBe("4");
     const body = JSON.parse(String(call.body));
     expect(body.lines[0].catalogVersionId).toBe(version.id);
     expect(body.lines[0]).not.toHaveProperty("plan");

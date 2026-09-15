@@ -177,13 +177,58 @@ export function BillingActDetailPage() {
         </section>
       ) : null}
 
+      {act.serviceUsageSnapshot.length ? (
+        <section className="invoice-panel" aria-labelledby="billing-act-service-usage-title">
+          <header>
+            <div>
+              <span className="invoice-kicker">03 / SERVICE WORK</span>
+              <h2 id="billing-act-service-usage-title">
+                {t("billingActs.detail.serviceUsageTitle")}
+              </h2>
+              <p>{t("billingActs.detail.serviceUsageDescription")}</p>
+            </div>
+          </header>
+          <div className="invoice-table-scroll" tabIndex={0}>
+            <table className="invoice-lines-table">
+              <thead>
+                <tr>
+                  <th>{t("billing.position")}</th>
+                  <th>{t("billingActs.serviceUsage.work")}</th>
+                  <th>{t("billingActs.serviceUsage.performedAt")}</th>
+                  <th>{t("billingActs.serviceUsage.actual")}</th>
+                  <th>{t("billingActs.serviceUsage.allowance")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {act.serviceUsageSnapshot.map((entry) => (
+                  <tr key={entry.entryId}>
+                    <td className="mono">{String(entry.sequence).padStart(2, "0")}</td>
+                    <td>
+                      <strong>{entry.workReference}</strong>
+                      <small>{entry.description}</small>
+                    </td>
+                    <td>{formatDate(entry.performedAt, i18n.language)}</td>
+                    <td className="mono">
+                      {entry.actualMinutes} {t("billingActs.serviceUsage.minutesShort")}
+                    </td>
+                    <td className="mono">
+                      {entry.allowanceMinutes} {t("billingActs.serviceUsage.minutesShort")}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
+
       <section
         className="invoice-panel invoice-documents"
         aria-labelledby="billing-act-document-title"
       >
         <header>
           <div>
-            <span className="invoice-kicker">03 / DOCUMENT</span>
+            <span className="invoice-kicker">04 / DOCUMENT</span>
             <h2 id="billing-act-document-title">{t("billingActs.detail.documentTitle")}</h2>
             <p>{t("billingActs.detail.documentDescription")}</p>
           </div>

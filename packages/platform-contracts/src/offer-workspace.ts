@@ -11,6 +11,7 @@ import {
   normalizedBillingAddressSchema,
   offerDetailSchema,
   offerDetailV2Schema,
+  offerDetailV4Schema,
   offerSchema,
   offerStatusSchema,
   paidOfferSchema,
@@ -233,3 +234,12 @@ export const platformOfferWorkspaceV2Contracts = {
   workspace: { ...platformOfferWorkspaceContracts.workspace, response: offerWorkspaceV2Schema },
 } as const;
 export type OfferWorkspaceV2 = z.output<typeof offerWorkspaceV2Schema>;
+
+export const offerWorkspaceV4Schema = offerWorkspaceV2Schema
+  .extend({ offer: offerDetailV4Schema })
+  .strict();
+export const platformOfferWorkspaceV4Contracts = {
+  ...platformOfferWorkspaceV2Contracts,
+  workspace: { ...platformOfferWorkspaceV2Contracts.workspace, response: offerWorkspaceV4Schema },
+} as const;
+export type OfferWorkspaceV4 = z.output<typeof offerWorkspaceV4Schema>;

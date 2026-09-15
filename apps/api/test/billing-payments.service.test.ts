@@ -137,6 +137,7 @@ function makeHarness({
       status: "applied" as const,
       results: [],
     })),
+    observeCommitted: vi.fn(),
   });
   const audit = testDouble<PlatformAuditService>()({ record: vi.fn(async () => undefined) });
   const service = new BillingPaymentsService(db, application, audit);
@@ -322,6 +323,7 @@ describe("BillingPaymentsService confirmed payment reconciliation", () => {
         status: "applied" as const,
         results: [],
       })),
+      observeCommitted: vi.fn(),
     });
     const audit = testDouble<PlatformAuditService>()({ record: vi.fn(async () => undefined) });
     const service = new BillingPaymentsService(db, application, audit);

@@ -1039,6 +1039,7 @@
         "label": "Разделы биллинга",
         "overview": "Обзор",
         "subscription": "Подписка и лимиты",
+        "services": "Сервисные пакеты",
         "invoices": "Счета и оплаты",
         "documents": "Документы",
         "requests": "Заявки"
@@ -1078,6 +1079,7 @@
         "limits": "Лимиты",
         "addons": "Дополнения",
         "services": "Услуги",
+        "oneTimeServices": "Разовые услуги",
         "quantity_one": "{{count}} единица",
         "quantity_few": "{{count}} единицы",
         "quantity_many": "{{count}} единиц",
@@ -1090,6 +1092,50 @@
         "periods": {
           "month": "Ежемесячно",
           "year": "Ежегодно"
+        }
+      },
+      "servicePeriods": {
+        "heading": "Сервисные пакеты",
+        "description": "Оплаченные периоды сопровождения, выполненные работы и остаток включённого времени.",
+        "loading": "Загрузка сервисных пакетов",
+        "loadError": "Не удалось загрузить сервисные пакеты.",
+        "emptyTitle": "Сервисных пакетов пока нет",
+        "emptyHint": "Оплаченный пакет появится здесь после подтверждения платежа.",
+        "open": "Открыть историю",
+        "minutes": "{{count}} мин",
+        "minuteDelta": "{{value}} мин",
+        "state": {
+          "upcoming": "Предстоящий",
+          "active": "Активный",
+          "expired": "Завершён",
+          "exhausted": "Пакет исчерпан"
+        },
+        "balance": {
+          "includedLabel": "Включено",
+          "consumedLabel": "Использовано",
+          "remainingLabel": "Осталось",
+          "approvedLabel": "Согласовано дополнительно",
+          "included": "{{count}} мин включено",
+          "consumed": "{{count}} мин использовано",
+          "remaining": "{{count}} мин осталось",
+          "approved": "{{count}} мин согласовано дополнительно"
+        },
+        "classification": {
+          "customer_service": "Работа из пакета",
+          "product_defect": "Не списывается из пакета"
+        },
+        "detail": {
+          "back": "К сервисным пакетам",
+          "loadError": "Не удалось загрузить сервисный период.",
+          "balanceTitle": "Баланс периода",
+          "history": "История работ",
+          "empty": "Работы в этом периоде ещё не проводились.",
+          "performed": "Выполнено: {{date}}",
+          "posted": "Проведено: {{date}}",
+          "actual": "Фактическое время",
+          "allowance": "Списано из пакета",
+          "corrections": "Корректировки работы",
+          "correction": "Корректировка"
         }
       },
       "invoices": {

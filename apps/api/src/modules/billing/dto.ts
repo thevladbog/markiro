@@ -2,6 +2,7 @@ import {
   platformCommercialContracts,
   type ApplyInvoiceDto,
   type CreateInvoiceV2,
+  type CreateInvoiceV4,
   type PrintDocumentVariant,
 } from "@markiro/platform-contracts";
 
@@ -14,7 +15,7 @@ export const invoicePrintGenerationSchema = platformCommercialContracts.invoices
 
 export type InvoicePrintGenerationDto = { printVariant: PrintDocumentVariant };
 export type { ApplyInvoiceDto };
-export type CreateInvoiceDto = CreateInvoiceV2;
+export type CreateInvoiceDto = CreateInvoiceV2 | CreateInvoiceV4;
 
 // Hand-written wire schemas for TenantBillingController responses: the tenant
 // billing service returns interface-less projections of drizzle rows, so there

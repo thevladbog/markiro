@@ -8,6 +8,9 @@ const INVOICE_ID = "91111111-1111-4111-8111-111111111111";
 const REQUEST_ID = "11111111-1111-4111-8111-111111111121";
 const ACT_ID = "51111111-1111-4111-8111-111111111121";
 const USER_ID = "61111111-1111-4111-8111-111111111121";
+const SERVICE_PERIOD_ID = "71111111-1111-4111-8111-111111111131";
+const ORDERED_SERVICE_ID = "81111111-1111-4111-8111-111111111131";
+const USAGE_ENTRY_ID = "91111111-1111-4111-8111-111111111131";
 const NOW = "2026-08-21T10:00:00.000Z";
 
 const invoice = {
@@ -131,8 +134,30 @@ describe("generated billing acts", () => {
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
         if (url.endsWith("/api/platform/me")) return jsonResponse(200, ACCOUNTANT_ME);
+        if (url.includes("/api/platform/service-periods?")) {
+          return jsonResponse(200, { items: [], nextCursor: null });
+        }
         if (url.endsWith(`/api/platform/billing/acts/${ACT_ID}`)) {
-          return jsonResponse(200, { ...act("issued"), requestId: null });
+          return jsonResponse(200, {
+            ...act("issued"),
+            requestId: null,
+            serviceUsageSnapshot: [
+              {
+                entryId: USAGE_ENTRY_ID,
+                servicePeriodId: SERVICE_PERIOD_ID,
+                sequence: 1,
+                kind: "usage",
+                classification: "customer_service",
+                originalEntryId: null,
+                workReference: "SUP-42",
+                description: "Консультация по интеграции",
+                performedAt: "2026-07-14T09:00:00.000Z",
+                postedAt: "2026-07-14T10:00:00.000Z",
+                actualMinutes: 45,
+                allowanceMinutes: 45,
+              },
+            ],
+          });
         }
         if (url.endsWith(`/api/platform/invoices/${INVOICE_ID}`)) {
           return jsonResponse(200, invoiceDetail);
@@ -160,8 +185,30 @@ describe("generated billing acts", () => {
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
         if (url.endsWith("/api/platform/me")) return jsonResponse(200, ACCOUNTANT_ME);
+        if (url.includes("/api/platform/service-periods?")) {
+          return jsonResponse(200, { items: [], nextCursor: null });
+        }
         if (url.endsWith(`/api/platform/billing/acts/${ACT_ID}`)) {
-          return jsonResponse(200, { ...act("issued"), requestId: null });
+          return jsonResponse(200, {
+            ...act("issued"),
+            requestId: null,
+            serviceUsageSnapshot: [
+              {
+                entryId: USAGE_ENTRY_ID,
+                servicePeriodId: SERVICE_PERIOD_ID,
+                sequence: 1,
+                kind: "usage",
+                classification: "customer_service",
+                originalEntryId: null,
+                workReference: "SUP-42",
+                description: "Консультация по интеграции",
+                performedAt: "2026-07-14T09:00:00.000Z",
+                postedAt: "2026-07-14T10:00:00.000Z",
+                actualMinutes: 45,
+                allowanceMinutes: 45,
+              },
+            ],
+          });
         }
         if (url.endsWith(`/api/platform/invoices/${INVOICE_ID}`)) {
           return jsonResponse(200, invoiceDetail);
@@ -177,6 +224,9 @@ describe("generated billing acts", () => {
     expect(screen.getByText("1 услуга")).toBeDefined();
     expect(screen.getAllByText("15 000,00 ₽")).toHaveLength(2);
     expect(screen.getByRole("heading", { name: "Печатная форма" })).toBeDefined();
+    expect(screen.getByRole("heading", { name: "Выполненные работы" })).toBeDefined();
+    expect(screen.getByText("SUP-42")).toBeDefined();
+    expect(screen.getByText("Консультация по интеграции")).toBeDefined();
     expect(screen.getByText("Чистый бланк")).toBeDefined();
     expect(screen.getByRole("button", { name: "Скачать PDF" })).toBeDefined();
   });
@@ -195,6 +245,9 @@ describe("generated billing acts", () => {
         const url = String(input);
         requestedUrls.push(url);
         if (url.endsWith("/api/platform/me")) return jsonResponse(200, ACCOUNTANT_ME);
+        if (url.includes("/api/platform/service-periods?")) {
+          return jsonResponse(200, { items: [], nextCursor: null });
+        }
         if (url.endsWith(`/api/platform/billing/acts/${ACT_ID}`)) {
           return jsonResponse(200, { ...act("issued"), requestId: null });
         }
@@ -231,6 +284,9 @@ describe("generated billing acts", () => {
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
         if (url.endsWith("/api/platform/me")) return jsonResponse(200, ACCOUNTANT_ME);
+        if (url.includes("/api/platform/service-periods?")) {
+          return jsonResponse(200, { items: [], nextCursor: null });
+        }
         if (url.endsWith("/api/platform/billing/acts")) {
           return jsonResponse(200, { items: [act("issued")] });
         }
@@ -266,6 +322,9 @@ describe("generated billing acts", () => {
         requests.push(init ? { url, init } : { url });
         const method = init?.method ?? "GET";
         if (url.endsWith("/api/platform/me")) return jsonResponse(200, ACCOUNTANT_ME);
+        if (url.includes("/api/platform/service-periods?")) {
+          return jsonResponse(200, { items: [], nextCursor: null });
+        }
         if (url.endsWith("/api/platform/invoices") && method === "GET") {
           return jsonResponse(200, { items: [invoice] });
         }
@@ -327,6 +386,104 @@ describe("generated billing acts", () => {
     );
   });
 
+  it("includes selected unacted recurring work and its frozen request identity", async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    const period = {
+      id: SERVICE_PERIOD_ID,
+      tenantId: TENANT_ID,
+      orderedServiceId: ORDERED_SERVICE_ID,
+      catalogItemId: "a1111111-1111-4111-8111-111111111131",
+      catalogVersionId: "b1111111-1111-4111-8111-111111111131",
+      nameRu: "Абонентское сопровождение",
+      nameEn: "Monthly support",
+      startsAt: "2026-07-01T00:00:00.000Z",
+      endsAt: "2026-08-01T00:00:00.000Z",
+      state: "expired",
+      revision: 2,
+      balance: { included: 180, externallyApproved: 0, consumed: 45, remaining: 135 },
+    } as const;
+    const entry = {
+      id: USAGE_ENTRY_ID,
+      kind: "usage",
+      classification: "customer_service",
+      originalEntryId: null,
+      workReference: "SUP-42",
+      description: "Настройка интеграции",
+      performedAt: "2026-07-14T09:00:00.000Z",
+      postedAt: "2026-07-14T10:00:00.000Z",
+      actualMinutesDelta: 45,
+      allowanceMinutesDelta: 45,
+      billingActId: null,
+      internalNote: "Не показывать в акте",
+      actorPlatformUserId: USER_ID,
+      requestId: "c1111111-1111-4111-8111-111111111131",
+    } as const;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        requests.push(init ? { url, init } : { url });
+        const method = init?.method ?? "GET";
+        if (url.endsWith("/api/platform/me")) return jsonResponse(200, ACCOUNTANT_ME);
+        if (url.endsWith("/api/platform/invoices") && method === "GET") {
+          return jsonResponse(200, { items: [invoice] });
+        }
+        if (url.endsWith(`/api/platform/invoices/${INVOICE_ID}`) && method === "GET") {
+          return jsonResponse(200, invoiceDetail);
+        }
+        if (url.includes("/api/platform/service-periods?") && method === "GET") {
+          return jsonResponse(200, { items: [period], nextCursor: null });
+        }
+        if (url.endsWith(`/api/platform/service-periods/${SERVICE_PERIOD_ID}`)) {
+          return jsonResponse(200, {
+            ...period,
+            invoiceId: INVOICE_ID,
+            invoiceLineId: invoiceDetail.lines[0].id,
+            paymentId: "d1111111-1111-4111-8111-111111111131",
+            entries: [entry],
+            approvals: [],
+          });
+        }
+        if (url.endsWith("/api/platform/billing/acts") && method === "POST") {
+          return jsonResponse(201, {
+            ...act("draft"),
+            orderedServiceId: ORDERED_SERVICE_ID,
+          });
+        }
+        if (url.endsWith(`/api/platform/billing/acts/${ACT_ID}/issue`) && method === "POST") {
+          return jsonResponse(201, {
+            ...act("issued"),
+            orderedServiceId: ORDERED_SERVICE_ID,
+          });
+        }
+        throw new Error(`Unexpected request: ${method} ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+
+    renderSaasApp({ initialEntry: "/billing-acts/new" });
+    await user.click(await screen.findByRole("combobox", { name: "Счёт-основание" }));
+    await user.click(screen.getByRole("option", { name: /MRK-INV-000021/ }));
+    await user.click(await screen.findByRole("combobox", { name: "Пакет и период" }));
+    await user.click(screen.getByRole("option", { name: /Абонентское сопровождение/ }));
+    await user.click(
+      await screen.findByRole("checkbox", {
+        name: "SUP-42 · Настройка интеграции",
+      }),
+    );
+    expect(await screen.findByText(/Выбрано: 1 · фактически 45 мин/)).toBeDefined();
+    expect(screen.queryByText("Не показывать в акте")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Выпустить акт" }));
+
+    const create = requests.find(
+      ({ url, init }) => url.endsWith("/api/platform/billing/acts") && init?.method === "POST",
+    );
+    expect(JSON.parse(String(create?.init?.body))).toMatchObject({
+      orderedServiceId: ORDERED_SERVICE_ID,
+      serviceUsageEntryIds: [USAGE_ENTRY_ID],
+    });
+  });
+
   it("allows choosing the signed form without duplicating the server seller check", async () => {
     const invoiceWithAnotherSellerSnapshot = {
       ...invoiceDetail,
@@ -341,6 +498,9 @@ describe("generated billing acts", () => {
         const url = String(input);
         const method = init?.method ?? "GET";
         if (url.endsWith("/api/platform/me")) return jsonResponse(200, ACCOUNTANT_ME);
+        if (url.includes("/api/platform/service-periods?")) {
+          return jsonResponse(200, { items: [], nextCursor: null });
+        }
         if (url.endsWith("/api/platform/invoices") && method === "GET") {
           return jsonResponse(200, { items: [invoice] });
         }
@@ -376,6 +536,9 @@ describe("generated billing acts", () => {
         const url = String(input);
         const method = init?.method ?? "GET";
         if (url.endsWith("/api/platform/me")) return jsonResponse(200, ACCOUNTANT_ME);
+        if (url.includes("/api/platform/service-periods?")) {
+          return jsonResponse(200, { items: [], nextCursor: null });
+        }
         if (url.endsWith("/api/platform/invoices") && method === "GET") {
           return jsonResponse(200, { items: [legacyInvoice] });
         }
@@ -419,6 +582,9 @@ describe("generated billing acts", () => {
         const url = String(input);
         const method = init?.method ?? "GET";
         if (url.endsWith("/api/platform/me")) return jsonResponse(200, ACCOUNTANT_ME);
+        if (url.includes("/api/platform/service-periods?")) {
+          return jsonResponse(200, { items: [], nextCursor: null });
+        }
         if (url.endsWith("/api/platform/invoices") && method === "GET") {
           return jsonResponse(200, { items: [invoice] });
         }

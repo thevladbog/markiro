@@ -4,6 +4,7 @@ import { BillingService } from "./billing.service";
 import { BillingDocumentsService } from "./billing-documents.service";
 import { BillingApplicationService } from "./billing-application.service";
 import { SubscriptionLifecycleService } from "../../subscriptions/subscription-lifecycle.service";
+import { ServicePeriodObservability } from "../service-periods/service-period-observability";
 
 @Module({
   controllers: [BillingController],
@@ -11,6 +12,7 @@ import { SubscriptionLifecycleService } from "../../subscriptions/subscription-l
     BillingService,
     BillingDocumentsService,
     BillingApplicationService,
+    ServicePeriodObservability,
     SubscriptionLifecycleService,
   ],
   exports: [BillingApplicationService],

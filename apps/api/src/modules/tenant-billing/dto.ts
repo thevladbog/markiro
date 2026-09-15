@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { schema } from "@markiro/db";
+import { tenantServicePeriodContracts } from "@markiro/platform-contracts";
 
 const billingUuidSchema = z.string().uuid();
 const billingMoneySchema = z.string().regex(/^\d{1,12}\.\d{2}$/, "Expected a decimal amount");
@@ -302,6 +303,11 @@ export const tenantBillingOverviewSchema = tenantSubscriptionBillingSchema.exten
 
 export const privateDownloadSchema = z.strictObject({ url: z.string().url() });
 
+export const tenantServicePeriodListQuerySchema = tenantServicePeriodContracts.list.query;
+export const tenantServicePeriodListSchema = tenantServicePeriodContracts.list.response;
+export const tenantServicePeriodParamsSchema = tenantServicePeriodContracts.detail.params;
+export const tenantServicePeriodDetailSchema = tenantServicePeriodContracts.detail.response;
+
 export const tenantBillingRequestSourceSchema = z.strictObject({
   id: billingUuidSchema,
   number: z.string(),
@@ -408,6 +414,9 @@ export type OfferChangeRequestDto = z.infer<typeof offerChangeRequestSchema>;
 
 export type ListInvoicesQueryDto = z.infer<typeof listInvoicesQuerySchema>;
 export type ListDocumentsQueryDto = z.infer<typeof listDocumentsQuerySchema>;
+export type TenantServicePeriodListQueryDto = z.output<typeof tenantServicePeriodListQuerySchema>;
+export type TenantServicePeriodListDto = z.output<typeof tenantServicePeriodListSchema>;
+export type TenantServicePeriodDetailDto = z.output<typeof tenantServicePeriodDetailSchema>;
 export type TenantInvoiceDto = z.infer<typeof tenantInvoiceSchema>;
 export type TenantInvoiceDetailDto = z.infer<typeof tenantInvoiceDetailSchema>;
 export type TenantOfferDetailDto = z.infer<typeof tenantOfferDetailSchema>;

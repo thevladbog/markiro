@@ -55,16 +55,19 @@ function AppShellContent() {
         ...(hasCapability("catalog.read")
           ? [item("catalog", t("shell.catalog"), "/catalog", "03")]
           : []),
+        ...(hasCapability("services.read")
+          ? [item("service-periods", t("shell.servicePeriods"), "/service-periods", "04")]
+          : []),
         ...(hasCapability("agreements.read")
-          ? [item("agreements", t("shell.agreements"), "/agreements", "04")]
+          ? [item("agreements", t("shell.agreements"), "/agreements", "05")]
           : []),
         ...(hasCapability("billing.read")
           ? [
-              item("offers", t("shell.offers"), "/offers", "05"),
-              item("invoices", t("shell.invoices"), "/invoices", "06"),
-              item("acts", t("shell.acts"), "/billing-acts", "07"),
-              item("payments", t("shell.payments"), "/payments", "08"),
-              item("billing-requests", t("shell.billingRequests"), "/billing-requests", "09"),
+              item("offers", t("shell.offers"), "/offers", "06"),
+              item("invoices", t("shell.invoices"), "/invoices", "07"),
+              item("acts", t("shell.acts"), "/billing-acts", "08"),
+              item("payments", t("shell.payments"), "/payments", "09"),
+              item("billing-requests", t("shell.billingRequests"), "/billing-requests", "10"),
             ]
           : []),
       ],
@@ -74,17 +77,17 @@ function AppShellContent() {
       label: t("shell.groups.platform"),
       items: [
         ...(hasCapability("diagnostics.read")
-          ? [item("monitoring", t("shell.monitoring"), "/monitoring", "10")]
+          ? [item("monitoring", t("shell.monitoring"), "/monitoring", "11")]
           : []),
         ...(hasCapability("catalog.read")
           ? [item("national-catalog", t("shell.nationalCatalog"), "/national-catalog", "10A")]
           : []),
         ...(hasCapability("platformTeam.write")
-          ? [item("team", t("shell.team"), "/team", "11")]
+          ? [item("team", t("shell.team"), "/team", "12")]
           : []),
-        ...(hasCapability("audit.read") ? [item("audit", t("shell.audit"), "/audit", "12")] : []),
+        ...(hasCapability("audit.read") ? [item("audit", t("shell.audit"), "/audit", "13")] : []),
         ...(hasCapability("reports.read")
-          ? [item("reports", t("shell.reports"), "/reports", "13")]
+          ? [item("reports", t("shell.reports"), "/reports", "14")]
           : []),
       ],
     },
@@ -93,7 +96,7 @@ function AppShellContent() {
           {
             id: "settings",
             label: t("shell.groups.settings"),
-            items: [item("organization", t("shell.organization"), "/settings/organization", "14")],
+            items: [item("organization", t("shell.organization"), "/settings/organization", "15")],
           },
         ]
       : []),

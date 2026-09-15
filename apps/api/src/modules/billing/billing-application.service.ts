@@ -16,6 +16,11 @@ import type { PlatformPrincipal } from "../../platform-auth/platform-access-poli
 import { PlatformAuditService } from "../../platform-auth/platform-audit.service";
 import { SubscriptionLifecycleService } from "../../subscriptions/subscription-lifecycle.service";
 import type { ApplyInvoiceDto } from "./dto";
+import {
+  activatePaidServicePeriod,
+  recurringServiceTerms,
+} from "../service-periods/service-period-activation";
+import { ServicePeriodObservability } from "../service-periods/service-period-observability";
 
 type BillingTransaction = Parameters<Db["transaction"]>[0] extends (arg: infer T) => unknown
   ? T
@@ -32,6 +37,7 @@ export class BillingApplicationService {
     @Inject(DB) private readonly db: Db,
     private readonly lifecycle: SubscriptionLifecycleService,
     private readonly audit: PlatformAuditService,
+    private readonly servicePeriodObservability: ServicePeriodObservability = new ServicePeriodObservability(),
   ) {}
 
   async apply(
@@ -39,7 +45,7 @@ export class BillingApplicationService {
     invoiceId: string,
     input: ApplyInvoiceDto,
   ): Promise<InvoiceApplicationResult> {
-    return this.db.transaction(async (tx) => {
+    const result = await this.db.transaction(async (tx) => {
       const invoice = await this.requirePaidInvoice(tx, invoiceId);
       const [completion] = await tx
         .select({ billingPaymentId: schema.invoicePaymentCompletions.billingPaymentId })
@@ -98,6 +104,12 @@ export class BillingApplicationService {
         input.reason,
       );
     });
+    this.observeCommitted(result);
+    return result;
+  }
+
+  observeCommitted(result: InvoiceApplicationResult | undefined): void {
+    this.servicePeriodObservability.recordCommitted(result);
   }
 
   async applyAutomaticInTransaction(
@@ -374,6 +386,15 @@ export class BillingApplicationService {
       });
     }
     if (line.kind === "service") {
+      if (recurringServiceTerms(line)) {
+        return activatePaidServicePeriod(tx, {
+          tenantId: invoice.tenantId,
+          invoiceId: invoice.id,
+          line,
+          payment,
+          operationAt,
+        });
+      }
       const [ordered] = await tx
         .insert(schema.orderedServices)
         .values({

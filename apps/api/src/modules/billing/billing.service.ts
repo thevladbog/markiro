@@ -14,6 +14,7 @@ import { schema, type Db } from "@markiro/db";
 import {
   platformCommercialContracts,
   platformCommercialV2Contracts,
+  platformCommercialV4Contracts,
   type InvoiceCreateServiceResultSource,
   type InvoiceDeleteResult,
   type InvoiceListServiceRecordSource,
@@ -74,14 +75,17 @@ export class BillingService {
     input: CreateInvoiceDto,
     commercialVersion: CommercialVersion = 2,
   ): Promise<InvoiceCreateServiceResultSource> {
-    const normalizedInput = platformCommercialV2Contracts.invoices.create.body.parse(input);
+    const normalizedInput =
+      commercialVersion === 4
+        ? platformCommercialV4Contracts.invoices.create.body.parse(input)
+        : platformCommercialV2Contracts.invoices.create.body.parse(input);
     return this.db.transaction(async (tx) => {
       const canonicalSourceRequestId =
-        "sourceRequestId" in normalizedInput
+        "sourceRequestId" in normalizedInput && typeof normalizedInput.sourceRequestId === "string"
           ? canonicalBillingUuid(normalizedInput.sourceRequestId)
           : null;
       const canonicalSourceOfferId =
-        "sourceOfferId" in normalizedInput
+        "sourceOfferId" in normalizedInput && typeof normalizedInput.sourceOfferId === "string"
           ? canonicalBillingUuid(normalizedInput.sourceOfferId)
           : null;
       const mutation = normalizedInput.idempotencyKey

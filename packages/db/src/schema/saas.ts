@@ -138,6 +138,7 @@ export const catalogItemVersions = pgTable(
     unit: text("unit").notNull(),
     billingMode: catalogBillingMode("billing_mode").notNull(),
     billingPeriod: catalogBillingPeriod("billing_period"),
+    serviceTerms: jsonb("service_terms"),
     unitPrice: numeric("unit_price", { precision: 14, scale: 2 }).notNull(),
     vatRate: numeric("vat_rate", { precision: 5, scale: 2 }),
     vatIncluded: boolean("vat_included").notNull(),
@@ -165,9 +166,11 @@ export const catalogItemVersions = pgTable(
     check(
       "catalog_item_versions_kind_billing_check",
       sql`(
-        ${table.kind} = 'service' and ${table.billingMode} = 'one_time' and ${table.billingPeriod} is null
+        ${table.kind} = 'service' and ${table.billingMode} = 'one_time' and ${table.billingPeriod} is null and ${table.serviceTerms} is null
       ) or (
-        ${table.kind} in ('plan', 'addon') and ${table.billingMode} = 'recurring' and ${table.billingPeriod} is not null
+        ${table.kind} = 'service' and ${table.billingMode} = 'recurring' and ${table.billingPeriod} = 'month' and jsonb_typeof(${table.serviceTerms}) = 'object'
+      ) or (
+        ${table.kind} in ('plan', 'addon') and ${table.billingMode} = 'recurring' and ${table.billingPeriod} is not null and ${table.serviceTerms} is null
       )`,
     ),
     check(

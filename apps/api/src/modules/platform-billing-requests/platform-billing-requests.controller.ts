@@ -3,6 +3,7 @@ import { ApiOperation, ApiTags } from "@nestjs/swagger";
 import {
   platformCommercialContracts,
   platformCommercialV2Contracts,
+  platformCommercialV4Contracts,
 } from "@markiro/platform-contracts";
 import { RequirePlatformCapabilities } from "../../platform-auth/platform-access-policy";
 import type { RequestWithPlatformPrincipal } from "../../platform-auth/platform-auth.guard";
@@ -90,6 +91,7 @@ export class PlatformBillingRequestsController {
     body: platformCommercialContracts.billingRequests.createOffer.body,
     response: platformCommercialContracts.billingRequests.createOffer.response,
     commercialV2: platformCommercialV2Contracts.billingRequests.createOffer,
+    commercialV4: platformCommercialV4Contracts.billingRequests.createOffer,
   })
   @RequirePlatformCapabilities("billing.write")
   async createOffer(
@@ -103,10 +105,13 @@ export class PlatformBillingRequestsController {
         req.platformPrincipal!,
         id,
         commercialBody(
-          commercialVersion(req) >= 2
-            ? platformCommercialV2Contracts.billingRequests.createOffer.body
-            : platformCommercialContracts.billingRequests.createOffer.body,
+          commercialVersion(req) === 4
+            ? platformCommercialV4Contracts.billingRequests.createOffer.body
+            : commercialVersion(req) >= 2
+              ? platformCommercialV2Contracts.billingRequests.createOffer.body
+              : platformCommercialContracts.billingRequests.createOffer.body,
           body,
+          commercialVersion(req),
         ),
         commercialVersion(req),
       ),

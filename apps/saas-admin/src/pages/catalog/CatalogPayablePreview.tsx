@@ -1,16 +1,19 @@
 import { useTranslation } from "react-i18next";
 import { calculateDocumentTotals, normalizeMoneyInput } from "../documents/documentDraft.js";
 import { formatVat } from "./CatalogVatField.js";
+import type { MonthlyServiceTerms } from "@markiro/platform-contracts";
 
 /** One catalog unit, with both established document rounding conventions made explicit. */
 export function CatalogPayablePreview({
   price,
   vatRateBps,
   vatIncluded,
+  serviceTerms,
 }: {
   price: string;
   vatRateBps: number | null;
   vatIncluded: boolean;
+  serviceTerms?: MonthlyServiceTerms | null;
 }) {
   const { t } = useTranslation();
   const normalized = normalizeMoneyInput(price);
@@ -43,6 +46,28 @@ export function CatalogPayablePreview({
       ) : (
         <p>{amounts(invoice)}</p>
       )}
+      {serviceTerms ? (
+        <dl>
+          <div>
+            <dt>{t("catalog.monthlyService.includedMinutes")}</dt>
+            <dd>
+              {t("catalog.monthlyService.minutesPreview", { count: serviceTerms.includedMinutes })}
+            </dd>
+          </div>
+          <div>
+            <dt>{t("catalog.monthlyService.scopeRu")}</dt>
+            <dd>{serviceTerms.scopeRu}</dd>
+          </div>
+          <div>
+            <dt>{t("catalog.monthlyService.policy")}</dt>
+            <dd>{t("catalog.monthlyService.noCarryover")}</dd>
+          </div>
+          <div>
+            <dt>{t("catalog.monthlyService.excess")}</dt>
+            <dd>{t("catalog.monthlyService.externalApproval")}</dd>
+          </div>
+        </dl>
+      ) : null}
     </div>
   );
 }

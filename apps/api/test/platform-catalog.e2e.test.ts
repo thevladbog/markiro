@@ -7,6 +7,7 @@ import {
   entitlementSourceListSchema,
   entitlementSnapshotV1Schema,
   catalogVersionV3Schema,
+  catalogVersionV4Schema,
 } from "@markiro/platform-contracts";
 import { createHmac, randomBytes, randomUUID } from "node:crypto";
 import express from "express";
@@ -598,6 +599,96 @@ describe.skipIf(!ready)("platform catalog", () => {
     });
   });
 
+  it("stores, updates and publishes monthly services through V4 only", async () => {
+    const path = `/platform/catalog/items/monthly-service-${randomUUID()}/versions`;
+    const service = {
+      cadence: "month" as const,
+      includedMinutes: 120,
+      carryover: "none" as const,
+      excessPolicy: "external_approval" as const,
+      scopeRu: "Техническая поддержка пользователей",
+      scopeEn: "Technical user support",
+      operatingHoursRu: null,
+      operatingHoursEn: null,
+      schedulingTermsRu: null,
+      schedulingTermsEn: null,
+    };
+    const input = {
+      documentNameRu: "Техническая поддержка",
+      documentNameEn: "Technical support",
+      subject: "service" as const,
+      sellerPolicyRevision: 1,
+      lifecyclePolicyId: null,
+      nameRu: "Поддержка",
+      nameEn: "Support",
+      descriptionRu: null,
+      descriptionEn: null,
+      unit: "month",
+      billingMode: "recurring" as const,
+      billingPeriod: "month" as const,
+      unitPrice: "2000.00",
+      vatRateBps: 2000,
+      vatIncluded: true,
+      service,
+    };
+    const created = await admin
+      .post(path)
+      .set("X-Markiro-Commercial-Version", "4")
+      .send(input)
+      .expect(201);
+    const value = catalogVersionV4Schema.parse(created.body);
+    expect(value).toMatchObject({ billingMode: "recurring", billingPeriod: "month", service });
+
+    const [stored] = await setup.db
+      .select({ serviceTerms: schema.catalogItemVersions.serviceTerms })
+      .from(schema.catalogItemVersions)
+      .where(eq(schema.catalogItemVersions.id, value.id));
+    expect(stored?.serviceTerms).toEqual(service);
+
+    for (const version of [undefined, "2", "3"]) {
+      const read = admin.get(`${path}/${value.id}`);
+      if (version) read.set("X-Markiro-Commercial-Version", version);
+      const response = await read.expect(409);
+      expect(response.body.code).toBe("client_update_required");
+    }
+
+    await setup.db
+      .update(schema.catalogItemVersions)
+      .set({ serviceTerms: { cadence: "month" } })
+      .where(eq(schema.catalogItemVersions.id, value.id));
+    await admin.get(`${path}/${value.id}`).set("X-Markiro-Commercial-Version", "4").expect(500);
+    await setup.db
+      .update(schema.catalogItemVersions)
+      .set({ serviceTerms: service })
+      .where(eq(schema.catalogItemVersions.id, value.id));
+
+    const updatedService = { ...service, includedMinutes: 180 };
+    await admin
+      .patch(`${path}/${value.id}`)
+      .set("X-Markiro-Commercial-Version", "4")
+      .send({ service: updatedService })
+      .expect(200)
+      .expect(({ body }) => expect(body.service).toEqual(updatedService));
+    const review = await admin
+      .post(`${path}/${value.id}/review`)
+      .set("X-Markiro-Commercial-Version", "4")
+      .send({})
+      .expect(200);
+    expect(review.body.errors).toEqual([]);
+    await admin
+      .post(`${path}/${value.id}/publish`)
+      .set("X-Markiro-Commercial-Version", "4")
+      .send(review.body.identity)
+      .expect(200)
+      .expect(({ body }) => {
+        expect(catalogVersionV4Schema.parse(body)).toMatchObject({
+          id: value.id,
+          status: "published",
+          service: updatedService,
+        });
+      });
+  });
+
   it("pins each entitlement route to its exact platform capabilities", () => {
     for (const method of ["get", "list", "impact"] as const)
       expect(
@@ -699,7 +790,7 @@ describe.skipIf(!ready)("platform catalog", () => {
     ).toEqual([]);
     await support.post(`${versionPath}/review`).send({}).expect(403);
     await request(app!.getHttpServer()).get("/platform/catalog/editor-context").expect(401);
-    await admin.get(versionPath).set("X-Markiro-Commercial-Version", "4").expect(400);
+    await admin.get(versionPath).set("X-Markiro-Commercial-Version", "5").expect(400);
     const preflight = await request(app!.getHttpServer())
       .options(path)
       .set("Origin", env.SAAS_ADMIN_ORIGIN)

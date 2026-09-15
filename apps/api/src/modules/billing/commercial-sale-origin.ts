@@ -3,7 +3,11 @@ import { ConflictException, NotFoundException } from "@nestjs/common";
 import { and, eq, ne, or, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { calculateOfferAmounts } from "../platform-offers/offer-totals";
-import { commercialLineTermsSchema, type CreateInvoiceV2 } from "@markiro/platform-contracts";
+import {
+  commercialLineTermsV4Schema,
+  type CreateInvoiceV2,
+  type CreateInvoiceV4,
+} from "@markiro/platform-contracts";
 import {
   acquireBillingWorkflowLocks,
   type BillingWorkflowResource,
@@ -70,8 +74,8 @@ export async function lockInvoiceCommercialOrigin(tx: Tx, invoiceId: string): Pr
 
 export function sourceOfferInvoiceLines(
   source: readonly (typeof schema.commercialOfferLines.$inferSelect)[],
-  requested: CreateInvoiceV2["lines"],
-): CreateInvoiceV2["lines"] {
+  requested: CreateInvoiceV2["lines"] | CreateInvoiceV4["lines"],
+) {
   assertCommercialPlanSequence(source, true);
   const copied = source.map((line) => ({
     kind: line.kind === "service" && !line.catalogVersionId ? ("custom" as const) : line.kind,
@@ -92,7 +96,7 @@ export function sourceOfferInvoiceLines(
           ? ("after_current" as const)
           : ("immediate" as const)
         : line.kind === "addon"
-          ? commercialLineTermsSchema.safeParse(line.commercialTerms).data?.activationRule ===
+          ? commercialLineTermsV4Schema.safeParse(line.commercialTerms).data?.activationRule ===
             "after_current"
             ? ("after_current" as const)
             : ("immediate" as const)
@@ -106,8 +110,8 @@ export function sourceOfferInvoiceLines(
       return Object.entries(candidate).some(([key, value]) => {
         if (value === undefined) return false;
         if (key === "commercialTerms") {
-          const current = commercialLineTermsSchema.safeParse(value);
-          const frozen = commercialLineTermsSchema.safeParse(source[index]?.commercialTerms);
+          const current = commercialLineTermsV4Schema.safeParse(value);
+          const frozen = commercialLineTermsV4Schema.safeParse(source[index]?.commercialTerms);
           return (
             !current.success ||
             !frozen.success ||
@@ -165,8 +169,8 @@ export async function validateInvoiceSaleOrigin(
     )
     .orderBy(schema.invoiceLines.position);
   if (
-    source.some((line) => !commercialLineTermsSchema.safeParse(line.commercialTerms).success) ||
-    lines.some((line) => !commercialLineTermsSchema.safeParse(line.commercialTerms).success)
+    source.some((line) => !commercialLineTermsV4Schema.safeParse(line.commercialTerms).success) ||
+    lines.some((line) => !commercialLineTermsV4Schema.safeParse(line.commercialTerms).success)
   )
     throw new ConflictException({ code: "commercial_source_review_required" });
   const amounts = await sourceOfferAmounts(tx, invoice.tenantId, invoice.sourceOfferId, source);
@@ -201,7 +205,7 @@ export async function validateInvoiceSaleOrigin(
       vatRateBps: line.vatRate === null ? null : Math.round(Number(line.vatRate) * 100),
       vatIncluded: line.vatIncluded,
       activationPolicy: line.activationPolicy,
-      commercialTerms: commercialLineTermsSchema.parse(line.commercialTerms),
+      commercialTerms: commercialLineTermsV4Schema.parse(line.commercialTerms),
     })),
   );
 }
@@ -213,7 +217,7 @@ export async function sourceOfferAmounts(
   offerId: string,
   lines: readonly (typeof schema.commercialOfferLines.$inferSelect)[],
 ) {
-  if (lines.some((line) => !commercialLineTermsSchema.safeParse(line.commercialTerms).success))
+  if (lines.some((line) => !commercialLineTermsV4Schema.safeParse(line.commercialTerms).success))
     throw new ConflictException({ code: "commercial_source_review_required" });
   const amounts = calculateOfferAmounts(
     lines.map((line) => ({

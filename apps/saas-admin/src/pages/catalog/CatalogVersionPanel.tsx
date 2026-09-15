@@ -51,6 +51,10 @@ import {
   type EditableAddonEffect,
 } from "./AddonEffectsEditor.js";
 import { useCatalogDrawerClose } from "./CatalogDrawer.js";
+import {
+  MonthlyServiceTermsFields,
+  type MonthlyServiceTermsDraft,
+} from "./MonthlyServiceTermsFields.js";
 
 interface CatalogFormValues {
   kind: CatalogVersionDto["kind"];
@@ -58,6 +62,7 @@ interface CatalogFormValues {
   documentNameRu: string;
   documentNameEn: string;
   subject: "software_license" | "service" | "development_work";
+  billingMode: "one_time" | "recurring";
   nameRu: string;
   nameEn: string;
   descriptionRu: string;
@@ -80,6 +85,13 @@ interface CatalogFormValues {
   handheld: boolean | null;
   lifecyclePolicyId: string | null;
   addonEffects: EditableAddonEffect[];
+  includedMinutes: string;
+  scopeRu: string;
+  scopeEn: string;
+  operatingHoursRu: string;
+  operatingHoursEn: string;
+  schedulingTermsRu: string;
+  schedulingTermsEn: string;
 }
 
 const EFFECT_KEYS = [
@@ -132,6 +144,7 @@ const catalogFormSchema = z
     documentNameRu: z.string().max(300),
     documentNameEn: z.string().max(300),
     subject: z.enum(["software_license", "service", "development_work"]),
+    billingMode: z.enum(["one_time", "recurring"]),
     nameRu: z.string().trim().min(1, "required").max(300, "nameTooLong"),
     nameEn: z.string().trim().min(1, "required").max(300, "nameTooLong"),
     descriptionRu: z.string().max(2000, "descriptionTooLong"),
@@ -162,6 +175,13 @@ const catalogFormSchema = z
         }),
       )
       .max(11),
+    includedMinutes: z.string(),
+    scopeRu: z.string().max(4000),
+    scopeEn: z.string().max(4000),
+    operatingHoursRu: z.string().max(1000),
+    operatingHoursEn: z.string().max(1000),
+    schedulingTermsRu: z.string().max(1000),
+    schedulingTermsEn: z.string().max(1000),
   })
   .superRefine((values, context) => {
     if (values.financialVisible && !MONEY_PATTERN.test(values.unitPrice)) {
@@ -217,6 +237,17 @@ const catalogFormSchema = z
         }
       });
     }
+    if (values.kind === "service" && values.billingMode === "recurring") {
+      if (
+        !isSafePositiveInteger(values.includedMinutes) ||
+        Number(values.includedMinutes) > 100_000
+      )
+        context.addIssue({ code: "custom", path: ["includedMinutes"], message: "serviceMinutes" });
+      if (!values.scopeRu.trim())
+        context.addIssue({ code: "custom", path: ["scopeRu"], message: "required" });
+      if (values.documentNameEn.trim() && !values.scopeEn.trim())
+        context.addIssue({ code: "custom", path: ["scopeEn"], message: "serviceScopeEn" });
+    }
   });
 
 function fieldError(error: FieldError | undefined, t: (key: string) => string): string | undefined {
@@ -235,12 +266,15 @@ function numericOrNull(value: string): number | null {
 
 function formDefaults(item: CatalogVersionDto): CatalogFormValues {
   const savedAddonEffects = item.addon ? fromAddonEffects(item.addon.effects) : [];
+  const recurringTerms =
+    item.kind === "service" && item.billingMode === "recurring" ? item.service : null;
   return {
     kind: item.kind,
     financialVisible: item.unitPrice !== undefined,
     documentNameRu: item.documentNameRu ?? "",
     documentNameEn: item.documentNameEn ?? "",
     subject: item.subject ?? (item.kind === "service" ? "service" : "software_license"),
+    billingMode: item.billingMode,
     nameRu: item.nameRu,
     nameEn: item.nameEn,
     descriptionRu: item.descriptionRu ?? "",
@@ -266,6 +300,13 @@ function formDefaults(item: CatalogVersionDto): CatalogFormValues {
       savedAddonEffects.length > 0
         ? savedAddonEffects
         : [{ rowId: crypto.randomUUID(), key: "stations", value: "1" }],
+    includedMinutes: String(recurringTerms?.includedMinutes ?? ""),
+    scopeRu: recurringTerms?.scopeRu ?? "",
+    scopeEn: recurringTerms?.scopeEn ?? "",
+    operatingHoursRu: recurringTerms?.operatingHoursRu ?? "",
+    operatingHoursEn: recurringTerms?.operatingHoursEn ?? "",
+    schedulingTermsRu: recurringTerms?.schedulingTermsRu ?? "",
+    schedulingTermsEn: recurringTerms?.schedulingTermsEn ?? "",
   };
 }
 
@@ -275,7 +316,14 @@ function patchForKind(item: CatalogVersionDto, values: CatalogFormValues): Catal
     documentNameRu: values.documentNameRu.trim() || null,
     documentNameEn: values.documentNameEn.trim() || null,
     subject: values.subject,
-    billingPeriod: item.kind === "service" ? null : values.unit === "year" ? "year" : "month",
+    billingPeriod:
+      item.kind === "service"
+        ? values.billingMode === "recurring"
+          ? "month"
+          : null
+        : values.unit === "year"
+          ? "year"
+          : "month",
     nameRu: values.nameRu,
     nameEn: values.nameEn,
     descriptionRu: values.descriptionRu.trim() || null,
@@ -325,7 +373,26 @@ function patchForKind(item: CatalogVersionDto, values: CatalogFormValues): Catal
     );
     return { ...common, addon: { effects } };
   }
-  return { ...common, service: {} };
+  return values.billingMode === "recurring"
+    ? {
+        ...common,
+        billingMode: "recurring",
+        billingPeriod: "month",
+        unit: "month",
+        service: {
+          cadence: "month",
+          includedMinutes: Number(values.includedMinutes),
+          carryover: "none",
+          excessPolicy: "external_approval",
+          scopeRu: values.scopeRu.trim(),
+          scopeEn: values.scopeEn.trim() || null,
+          operatingHoursRu: values.operatingHoursRu.trim() || null,
+          operatingHoursEn: values.operatingHoursEn.trim() || null,
+          schedulingTermsRu: values.schedulingTermsRu.trim() || null,
+          schedulingTermsEn: values.schedulingTermsEn.trim() || null,
+        },
+      }
+    : { ...common, billingMode: "one_time", billingPeriod: null, service: {} };
 }
 
 function quotaSummary(
@@ -561,6 +628,11 @@ export function CatalogVersionPanel({
     !addonErrorEntries && addonFormErrors && "root" in addonFormErrors && addonFormErrors.root
       ? fieldError(addonFormErrors.root, t)
       : undefined;
+  const monthlyErrors: Partial<Record<keyof MonthlyServiceTermsDraft, string>> = {};
+  for (const key of ["includedMinutes", "scopeRu", "scopeEn"] as const) {
+    const message = fieldError(form.formState.errors[key], t);
+    if (message) monthlyErrors[key] = message;
+  }
   useEffect(() => {
     onDirtyChange?.(form.formState.isDirty);
   }, [form.formState.isDirty, onDirtyChange]);
@@ -681,6 +753,7 @@ export function CatalogVersionPanel({
                     onChange={(value) =>
                       form.setValue("unit", value, { shouldDirty: true, shouldValidate: true })
                     }
+                    disabled={item.kind === "service" && form.watch("billingMode") === "recurring"}
                     {...(() => {
                       const error = fieldError(form.formState.errors.unit, t);
                       return error ? { error } : {};
@@ -844,7 +917,32 @@ export function CatalogVersionPanel({
                 />
               ) : null}
               {item.kind === "service" ? (
-                <Alert tone="info">{t("catalog.form.serviceNotice")}</Alert>
+                <MonthlyServiceTermsFields
+                  billingMode={form.watch("billingMode")}
+                  onBillingModeChange={(mode) => {
+                    form.setValue("billingMode", mode, { shouldDirty: true, shouldValidate: true });
+                    form.setValue("unit", mode === "recurring" ? "month" : "project", {
+                      shouldDirty: true,
+                    });
+                  }}
+                  value={{
+                    includedMinutes: form.watch("includedMinutes"),
+                    scopeRu: form.watch("scopeRu"),
+                    scopeEn: form.watch("scopeEn"),
+                    operatingHoursRu: form.watch("operatingHoursRu"),
+                    operatingHoursEn: form.watch("operatingHoursEn"),
+                    schedulingTermsRu: form.watch("schedulingTermsRu"),
+                    schedulingTermsEn: form.watch("schedulingTermsEn"),
+                  }}
+                  onChange={(next: MonthlyServiceTermsDraft) => {
+                    for (const [key, value] of Object.entries(next) as Array<
+                      [keyof MonthlyServiceTermsDraft, string]
+                    >)
+                      form.setValue(key, value, { shouldDirty: true, shouldValidate: true });
+                  }}
+                  errors={monthlyErrors}
+                  disabled={save.isPending || prepareReview.isPending || publish.isPending}
+                />
               ) : null}
               <div className="form-actions">
                 <Button
@@ -957,6 +1055,24 @@ export function CatalogVersionPanel({
               price={canEdit ? watched.unitPrice : item.unitPrice}
               vatRateBps={canEdit ? watched.vatRateBps : (item.vatRateBps ?? null)}
               vatIncluded={canEdit ? watched.vatIncluded : (item.vatIncluded ?? false)}
+              serviceTerms={
+                item.kind === "service" && item.billingMode === "recurring"
+                  ? canEdit
+                    ? {
+                        cadence: "month",
+                        includedMinutes: Number(watched.includedMinutes),
+                        carryover: "none",
+                        excessPolicy: "external_approval",
+                        scopeRu: watched.scopeRu || "—",
+                        scopeEn: watched.scopeEn || null,
+                        operatingHoursRu: watched.operatingHoursRu || null,
+                        operatingHoursEn: watched.operatingHoursEn || null,
+                        schedulingTermsRu: watched.schedulingTermsRu || null,
+                        schedulingTermsEn: watched.schedulingTermsEn || null,
+                      }
+                    : item.service
+                  : null
+              }
             />
           ) : null}
           <ol>

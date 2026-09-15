@@ -4,6 +4,7 @@ import {
   platformCatalogContracts,
   platformCatalogV2Contracts,
   platformCatalogV3Contracts,
+  platformCatalogV4Contracts,
   platformTenantV3Contracts,
   entitlementSourceListSchema,
   entitlementImpactSchema,
@@ -14,11 +15,14 @@ import {
   platformTenantV2Contracts,
   platformCommercialContracts,
   platformOfferDraftContracts,
+  platformOfferDraftV4Contracts,
   platformCommercialV2Contracts,
+  platformCommercialV4Contracts,
   platformOperationsContracts,
   platformAgreementContracts,
   platformOfferWorkspaceContracts,
   platformOfferWorkspaceV2Contracts,
+  platformOfferWorkspaceV4Contracts,
   platformNationalCatalogContracts,
   platformTeamContracts,
   platformTenantContracts,
@@ -31,6 +35,7 @@ import {
   platformGrantReadinessContracts,
   platformGrantActivationContracts,
   platformGrantRollbackContracts,
+  platformServicePeriodContracts,
 } from "@markiro/platform-contracts";
 import type { ZodType } from "zod";
 
@@ -44,6 +49,7 @@ export interface PlatformRouteContract {
   response: ZodType;
   commercialV2?: { response: ZodType; body?: ZodType };
   commercialV3?: { response: ZodType; body?: ZodType };
+  commercialV4?: { response: ZodType; body?: ZodType };
   body?: ZodType;
   query?: ZodType;
   errors?: ReadonlyArray<{ status: string; schema: ZodType }>;
@@ -58,11 +64,55 @@ const route = (
   response: ZodType,
   options: Pick<
     PlatformRouteContract,
-    "body" | "query" | "errors" | "multipart" | "public" | "commercialV2" | "commercialV3"
+    | "body"
+    | "query"
+    | "errors"
+    | "multipart"
+    | "public"
+    | "commercialV2"
+    | "commercialV3"
+    | "commercialV4"
   > = {},
 ): PlatformRouteContract => ({ method, path, status, response, ...options });
 
 export const CURRENT_SAAS_ROUTES = [
+  route("get", "/platform/service-periods", "200", platformServicePeriodContracts.list.response, {
+    query: platformServicePeriodContracts.list.query,
+  }),
+  route(
+    "get",
+    "/platform/service-periods/{id}",
+    "200",
+    platformServicePeriodContracts.detail.response,
+  ),
+  route(
+    "post",
+    "/platform/service-periods/{id}/usage",
+    "200",
+    platformServicePeriodContracts.postUsage.response,
+    { body: platformServicePeriodContracts.postUsage.body },
+  ),
+  route(
+    "post",
+    "/platform/service-periods/{id}/usage/{entryId}/corrections",
+    "200",
+    platformServicePeriodContracts.correctUsage.response,
+    { body: platformServicePeriodContracts.correctUsage.body },
+  ),
+  route(
+    "post",
+    "/platform/service-periods/{id}/approvals",
+    "200",
+    platformServicePeriodContracts.addApproval.response,
+    { body: platformServicePeriodContracts.addApproval.body },
+  ),
+  route(
+    "post",
+    "/platform/service-periods/{id}/approvals/{approvalId}/withdrawals",
+    "200",
+    platformServicePeriodContracts.withdrawApproval.response,
+    { body: platformServicePeriodContracts.withdrawApproval.body },
+  ),
   route(
     "get",
     "/platform/offline-grants/rollbacks/candidates",
@@ -382,6 +432,7 @@ export const CURRENT_SAAS_ROUTES = [
     {
       commercialV2: platformCatalogV2Contracts.editorContext,
       commercialV3: platformCatalogV3Contracts.editorContext,
+      commercialV4: platformCatalogV4Contracts.editorContext,
     },
   ),
   route(
@@ -392,11 +443,13 @@ export const CURRENT_SAAS_ROUTES = [
     {
       commercialV2: platformCatalogV2Contracts.reviewVersion,
       commercialV3: platformCatalogV3Contracts.reviewVersion,
+      commercialV4: platformCatalogV4Contracts.reviewVersion,
     },
   ),
   route("get", "/platform/catalog/items", "200", platformCatalogContracts.list.response, {
     commercialV2: platformCatalogV2Contracts.list,
     commercialV3: platformCatalogV3Contracts.list,
+    commercialV4: platformCatalogV4Contracts.list,
   }),
   route(
     "get",
@@ -406,6 +459,7 @@ export const CURRENT_SAAS_ROUTES = [
     {
       commercialV2: platformCatalogV2Contracts.listVersions,
       commercialV3: platformCatalogV3Contracts.listVersions,
+      commercialV4: platformCatalogV4Contracts.listVersions,
     },
   ),
   route(
@@ -416,6 +470,7 @@ export const CURRENT_SAAS_ROUTES = [
     {
       commercialV2: platformCatalogV2Contracts.getVersion,
       commercialV3: platformCatalogV3Contracts.getVersion,
+      commercialV4: platformCatalogV4Contracts.getVersion,
     },
   ),
   route(
@@ -426,6 +481,7 @@ export const CURRENT_SAAS_ROUTES = [
     {
       commercialV2: platformCatalogV2Contracts.createVersion,
       commercialV3: platformCatalogV3Contracts.createVersion,
+      commercialV4: platformCatalogV4Contracts.createVersion,
       body: platformCatalogContracts.createVersion.body,
     },
   ),
@@ -437,6 +493,7 @@ export const CURRENT_SAAS_ROUTES = [
     {
       commercialV2: platformCatalogV2Contracts.updateVersion,
       commercialV3: platformCatalogV3Contracts.updateVersion,
+      commercialV4: platformCatalogV4Contracts.updateVersion,
       body: platformCatalogContracts.updateVersion.body,
     },
   ),
@@ -448,6 +505,7 @@ export const CURRENT_SAAS_ROUTES = [
     {
       commercialV2: platformCatalogV2Contracts.publishVersion,
       commercialV3: platformCatalogV3Contracts.publishVersion,
+      commercialV4: platformCatalogV4Contracts.publishVersion,
     },
   ),
   route(
@@ -458,6 +516,7 @@ export const CURRENT_SAAS_ROUTES = [
     {
       commercialV2: platformCatalogV2Contracts.retireVersion,
       commercialV3: platformCatalogV3Contracts.retireVersion,
+      commercialV4: platformCatalogV4Contracts.retireVersion,
     },
   ),
   route(
@@ -481,6 +540,7 @@ export const CURRENT_SAAS_ROUTES = [
       body: platformCatalogContracts.setDefaultDemo.body,
       commercialV2: platformCatalogV2Contracts.setDefaultDemo,
       commercialV3: platformCatalogV3Contracts.setDefaultDemo,
+      commercialV4: platformCatalogV4Contracts.setDefaultDemo,
     },
   ),
   route("get", "/platform/agreements", "200", platformAgreementContracts.list.response, {
@@ -557,10 +617,14 @@ export const CURRENT_SAAS_ROUTES = [
     "/platform/offers/{id}/workspace",
     "200",
     platformOfferWorkspaceContracts.workspace.response,
-    { commercialV2: platformOfferWorkspaceV2Contracts.workspace },
+    {
+      commercialV2: platformOfferWorkspaceV2Contracts.workspace,
+      commercialV4: platformOfferWorkspaceV4Contracts.workspace,
+    },
   ),
   route("get", "/platform/offers/{id}", "200", platformCommercialContracts.offers.detail.response, {
     commercialV2: platformCommercialV2Contracts.offers.detail,
+    commercialV4: platformCommercialV4Contracts.offers.detail,
   }),
   route(
     "get",
@@ -575,11 +639,14 @@ export const CURRENT_SAAS_ROUTES = [
     platformOfferDraftContracts.update.response,
     {
       body: platformOfferDraftContracts.update.body,
+      commercialV2: platformOfferDraftContracts.update,
+      commercialV4: platformOfferDraftV4Contracts.update,
     },
   ),
   route("post", "/platform/offers", "201", platformCommercialContracts.offers.create.response, {
     body: platformCommercialContracts.offers.create.body,
     commercialV2: platformCommercialV2Contracts.offers.create,
+    commercialV4: platformCommercialV4Contracts.offers.create,
   }),
   route(
     "post",
@@ -589,6 +656,7 @@ export const CURRENT_SAAS_ROUTES = [
     {
       body: platformCommercialContracts.offers.revise.body,
       commercialV2: platformCommercialV2Contracts.offers.revise,
+      commercialV4: platformCommercialV4Contracts.offers.revise,
     },
   ),
   route(
@@ -599,6 +667,7 @@ export const CURRENT_SAAS_ROUTES = [
     {
       body: platformCommercialContracts.offers.publish.body,
       commercialV2: platformCommercialV2Contracts.offers.publish,
+      commercialV4: platformCommercialV4Contracts.offers.publish,
     },
   ),
   route(
@@ -625,7 +694,10 @@ export const CURRENT_SAAS_ROUTES = [
     "/platform/offers/{id}/cancel",
     "200",
     platformCommercialContracts.offers.cancel.response,
-    { commercialV2: platformCommercialV2Contracts.offers.cancel },
+    {
+      commercialV2: platformCommercialV2Contracts.offers.cancel,
+      commercialV4: platformCommercialV4Contracts.offers.cancel,
+    },
   ),
   route(
     "post",
@@ -640,11 +712,15 @@ export const CURRENT_SAAS_ROUTES = [
     "/platform/invoices/{id}",
     "200",
     platformCommercialContracts.invoices.detail.response,
-    { commercialV2: platformCommercialV2Contracts.invoices.detail },
+    {
+      commercialV2: platformCommercialV2Contracts.invoices.detail,
+      commercialV4: platformCommercialV4Contracts.invoices.detail,
+    },
   ),
   route("post", "/platform/invoices", "201", platformCommercialContracts.invoices.create.response, {
     body: platformCommercialContracts.invoices.create.body,
     commercialV2: platformCommercialV2Contracts.invoices.create,
+    commercialV4: platformCommercialV4Contracts.invoices.create,
   }),
   route(
     "post",
@@ -732,6 +808,7 @@ export const CURRENT_SAAS_ROUTES = [
     {
       body: platformCommercialContracts.billingRequests.createOffer.body,
       commercialV2: platformCommercialV2Contracts.billingRequests.createOffer,
+      commercialV4: platformCommercialV4Contracts.billingRequests.createOffer,
     },
   ),
   route(

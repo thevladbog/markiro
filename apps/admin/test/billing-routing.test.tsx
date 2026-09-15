@@ -191,6 +191,25 @@ function renderRoute(
       }
       if (url.endsWith("/api/billing/overview")) return response(BILLING_OVERVIEW);
       if (url.endsWith("/api/billing/subscription")) return response(BILLING_OVERVIEW);
+      if (url.includes("/api/billing/service-periods?"))
+        return response({
+          items: [
+            {
+              id: "11111111-1111-4111-8111-111111111111",
+              orderedServiceId: "22222222-2222-4222-8222-222222222222",
+              catalogItemId: "33333333-3333-4333-8333-333333333333",
+              catalogVersionId: "44444444-4444-4444-8444-444444444444",
+              nameRu: "Сервисное сопровождение",
+              nameEn: "Service support",
+              startsAt: "2026-09-01T00:00:00.000Z",
+              endsAt: "2026-10-01T00:00:00.000Z",
+              state: "active",
+              revision: 1,
+              balance: { included: 180, externallyApproved: 0, consumed: 45, remaining: 135 },
+            },
+          ],
+          nextCursor: null,
+        });
       if (url.includes("/api/pickup-orders")) return response({ items: [] });
       if (url.endsWith("/api/billing/invoices/invoice_1/documents/document_1/download")) {
         return response({ url: "https://example.test/invoice-184.pdf" });
@@ -354,6 +373,16 @@ it("allows a billing reader to view invoices but not create a request", async ()
   expect(await screen.findByTestId("forbidden-page")).toBeDefined();
 });
 
+it("keeps tenant service periods behind the existing billing read boundary", async () => {
+  renderRoute("/billing/services", BILLING_READ_ONLY_ACCESS);
+
+  expect(await screen.findByText("Сервисное сопровождение")).toBeDefined();
+  expect(screen.getByRole("link", { name: "Сервисные пакеты" }).getAttribute("aria-current")).toBe(
+    "page",
+  );
+  expect(screen.queryByRole("link", { name: "Создать заявку" })).toBeNull();
+});
+
 it.each([
   ["owner", OWNER_ACCESS, true],
   ["manager", MANAGER_ACCESS, false],
@@ -376,5 +405,6 @@ it("keeps the billing tabs in their labelled narrow-screen navigation rail", asy
 
   const tabs = await screen.findByRole("navigation", { name: "Разделы биллинга" });
   expect(tabs.classList.contains("mk-billing-tabs")).toBe(true);
-  expect(within(tabs).getAllByRole("link")).toHaveLength(5);
+  expect(within(tabs).getAllByRole("link")).toHaveLength(6);
+  expect(within(tabs).getByRole("link", { name: "Сервисные пакеты" })).toBeDefined();
 });

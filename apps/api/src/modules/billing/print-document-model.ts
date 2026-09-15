@@ -1,4 +1,5 @@
-import type { CommercialLineTerms } from "@markiro/platform-contracts";
+import type { CommercialLineTermsV4 } from "@markiro/platform-contracts";
+import type { BillingActServiceUsageSnapshot } from "@markiro/platform-contracts";
 import { commercialTermDescription, readStoredCommercialTerms } from "./commercial-line-terms";
 
 export type PrintDocumentKind = "invoice" | "offer" | "act";
@@ -20,7 +21,7 @@ export interface BillingProfileSnapshot {
 }
 
 export interface PrintLine {
-  commercialTerms?: CommercialLineTerms | null;
+  commercialTerms?: CommercialLineTermsV4 | null;
   position: number;
   name: string;
   description?: string | null;
@@ -45,6 +46,7 @@ export interface PrintDocumentModel {
   seller: BillingProfileSnapshot;
   buyer: BillingProfileSnapshot;
   lines: PrintLine[];
+  serviceUsage?: BillingActServiceUsageSnapshot[];
   subtotal: string;
   vatTotal: string;
   total: string;
@@ -119,6 +121,7 @@ const party = (profileValue: unknown, accountValue: unknown): BillingProfileSnap
 
 function commercialPrintUnit(value: unknown, legacyUnit: string): string {
   const terms = readStoredCommercialTerms(value);
+  if (terms?.version === 2) return "мес.";
   if (terms?.subject !== "software_license") return legacyUnit;
   return terms.billingPeriod === "year" ? "год" : "мес.";
 }
@@ -149,6 +152,7 @@ export function toInvoicePrintModel(invoice: InvoiceLike): PrintDocumentModel {
       vatIncluded: line.vatIncluded,
       lineTotal: line.lineTotal,
     })),
+    serviceUsage: [],
     subtotal: invoice.subtotal,
     vatTotal: invoice.vatTotal,
     total: invoice.total,
@@ -164,6 +168,7 @@ export function toBillingActPrintModel(
     periodEnd: string;
   },
   invoice: InvoiceLike,
+  serviceUsage: BillingActServiceUsageSnapshot[] = [],
 ): PrintDocumentModel {
   const invoiceModel = toInvoicePrintModel(invoice);
   return {
@@ -176,6 +181,7 @@ export function toBillingActPrintModel(
     dueOrExpiresAt: null,
     periodStart: act.periodStart,
     periodEnd: act.periodEnd,
+    serviceUsage,
   };
 }
 
@@ -226,6 +232,7 @@ export function toOfferPrintModel(snapshot: {
         lineTotal: text(item.lineTotal, "0.00"),
       };
     }),
+    serviceUsage: [],
     subtotal: snapshot.subtotal,
     vatTotal: snapshot.vatTotal,
     total: snapshot.total,

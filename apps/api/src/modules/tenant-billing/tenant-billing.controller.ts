@@ -55,9 +55,14 @@ import {
   tenantOfferDecisionSchema,
   tenantOfferDetailSchema,
   tenantSubscriptionBillingSchema,
+  tenantServicePeriodDetailSchema,
+  tenantServicePeriodListQuerySchema,
+  tenantServicePeriodListSchema,
+  tenantServicePeriodParamsSchema,
   type CreateBillingRequestDto,
   type ListDocumentsQueryDto,
   type ListInvoicesQueryDto,
+  type TenantServicePeriodListQueryDto,
   type OfferAcceptDto,
   type OfferChangeRequestDto,
   type RequestReplyDto,
@@ -97,6 +102,31 @@ export class TenantBillingController {
   @ApiHttpErrors(401, 403, 409)
   subscription(@Req() req: RequestWithTenant) {
     return this.billing.subscription(req.tenantId!);
+  }
+
+  @Get("service-periods")
+  @ApiOperation({ summary: "List tenant recurring service periods" })
+  @ApiZodQuery(tenantServicePeriodListQuerySchema)
+  @ApiZodResponse({ status: 200, schema: tenantServicePeriodListSchema })
+  @ApiHttpErrors(400, 401, 403, 409)
+  listServicePeriods(
+    @Req() req: RequestWithTenant,
+    @Query(new ZodValidationPipe(tenantServicePeriodListQuerySchema))
+    query: TenantServicePeriodListQueryDto,
+  ) {
+    return this.billing.listServicePeriods(req.tenantId!, query);
+  }
+
+  @Get("service-periods/:id")
+  @ApiOperation({ summary: "Read a tenant recurring service period" })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiZodResponse({ status: 200, schema: tenantServicePeriodDetailSchema })
+  @ApiHttpErrors(400, 401, 403, 404, 409)
+  servicePeriod(
+    @Req() req: RequestWithTenant,
+    @Param(new ZodValidationPipe(tenantServicePeriodParamsSchema)) params: { id: string },
+  ) {
+    return this.billing.servicePeriod(req.tenantId!, params.id);
   }
 
   @Get("attention")

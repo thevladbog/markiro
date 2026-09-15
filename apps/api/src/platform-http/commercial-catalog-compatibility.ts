@@ -11,14 +11,20 @@ export async function assertCatalogCommercialCompatibility(
   versionId: string,
   clientVersion: CommercialVersion,
 ): Promise<void> {
-  if (clientVersion === 3) return;
+  if (clientVersion === 4) return;
   const [version] = await tx
     .select()
     .from(schema.catalogItemVersions)
     .where(eq(schema.catalogItemVersions.id, versionId))
     .for("share");
   if (!version) return;
-  projectCommercialResponse(clientVersion, { lifecyclePolicyId: version.lifecyclePolicyId });
+  projectCommercialResponse(clientVersion, {
+    kind: version.kind,
+    billingMode: version.billingMode,
+    serviceTerms: version.serviceTerms,
+    lifecyclePolicyId: version.lifecyclePolicyId,
+  });
+  if (clientVersion === 3) return;
   if (version.kind === "plan") {
     const [plan] = await tx
       .select()

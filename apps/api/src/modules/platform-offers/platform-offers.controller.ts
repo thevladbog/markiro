@@ -15,10 +15,12 @@ import { ApiOperation, ApiTags } from "@nestjs/swagger";
 import {
   platformCommercialContracts,
   platformOfferDraftContracts,
-  type OfferDraftUpdate,
+  platformOfferDraftV4Contracts,
   platformCommercialV2Contracts,
+  platformCommercialV4Contracts,
   platformOfferWorkspaceContracts,
   platformOfferWorkspaceV2Contracts,
+  platformOfferWorkspaceV4Contracts,
   type OfferRegistryQuery,
   type PrintDocumentVariant,
 } from "@markiro/platform-contracts";
@@ -95,6 +97,7 @@ export class PlatformOffersController {
   @PlatformApiProtectedOk({
     response: platformOfferWorkspaceContracts.workspace.response,
     commercialV2: platformOfferWorkspaceV2Contracts.workspace,
+    commercialV4: platformOfferWorkspaceV4Contracts.workspace,
   })
   @RequirePlatformCapabilities("billing.read")
   async workspace(
@@ -107,6 +110,8 @@ export class PlatformOffersController {
       platformOfferWorkspaceContracts.workspace.response,
       platformOfferWorkspaceV2Contracts.workspace.response,
       await this.workspaceService.workspace(req.platformPrincipal!, id),
+      undefined,
+      platformOfferWorkspaceV4Contracts.workspace.response,
     );
   }
 
@@ -130,6 +135,7 @@ export class PlatformOffersController {
   @PlatformApiProtectedOk({
     response: platformCommercialContracts.offers.detail.response,
     commercialV2: platformCommercialV2Contracts.offers.detail,
+    commercialV4: platformCommercialV4Contracts.offers.detail,
   })
   @RequirePlatformCapabilities("billing.read")
   async detail(
@@ -141,21 +147,42 @@ export class PlatformOffersController {
       platformCommercialContracts.offers.detail.response,
       platformCommercialV2Contracts.offers.detail.response,
       await this.offers.detail(req.platformPrincipal!, id),
+      undefined,
+      platformCommercialV4Contracts.offers.detail.response,
     );
   }
 
   @Patch(":id/draft")
   @ApiOperation({ summary: "Update a saved commercial offer draft" })
-  @PlatformApiProtectedOk(platformOfferDraftContracts.update)
+  @PlatformApiProtectedOk({
+    ...platformOfferDraftContracts.update,
+    commercialV2: platformOfferDraftContracts.update,
+    commercialV4: platformOfferDraftV4Contracts.update,
+  })
   @RequirePlatformCapabilities("billing.write")
   async updateDraft(
     @Req() req: RequestWithPlatformPrincipal,
     @Param("id", new ZodValidationPipe(offerIdSchema)) id: string,
-    @Body(new ZodValidationPipe(platformOfferDraftContracts.update.body)) body: OfferDraftUpdate,
+    @Body() body: unknown,
   ) {
+    const version = commercialVersion(req);
+    const result = await this.offers.updateDraft(
+      req.platformPrincipal!,
+      id,
+      commercialBody(
+        version === 4
+          ? platformOfferDraftV4Contracts.update.body
+          : platformOfferDraftContracts.update.body,
+        body,
+        version,
+      ),
+      version,
+    );
     return parsePlatformResponse(
-      platformOfferDraftContracts.update.response,
-      await this.offers.updateDraft(req.platformPrincipal!, id, body, commercialVersion(req)),
+      version === 4
+        ? platformOfferDraftV4Contracts.update.response
+        : platformOfferDraftContracts.update.response,
+      result,
     );
   }
 
@@ -165,6 +192,7 @@ export class PlatformOffersController {
     body: platformCommercialContracts.offers.create.body,
     response: platformCommercialContracts.offers.create.response,
     commercialV2: platformCommercialV2Contracts.offers.create,
+    commercialV4: platformCommercialV4Contracts.offers.create,
   })
   @RequirePlatformCapabilities("billing.write")
   async create(@Req() req: RequestWithPlatformPrincipal, @Body() body: unknown) {
@@ -175,13 +203,18 @@ export class PlatformOffersController {
       await this.offers.create(
         req.platformPrincipal!,
         commercialBody(
-          commercialVersion(req) >= 2
-            ? platformCommercialV2Contracts.offers.create.body
-            : platformCommercialContracts.offers.create.body,
+          commercialVersion(req) === 4
+            ? platformCommercialV4Contracts.offers.create.body
+            : commercialVersion(req) >= 2
+              ? platformCommercialV2Contracts.offers.create.body
+              : platformCommercialContracts.offers.create.body,
           body,
+          commercialVersion(req),
         ),
         commercialVersion(req),
       ),
+      undefined,
+      platformCommercialV4Contracts.offers.create.response,
     );
   }
 
@@ -196,6 +229,7 @@ export class PlatformOffersController {
     body: platformCommercialContracts.offers.publish.body,
     response: platformCommercialContracts.offers.publish.response,
     commercialV2: platformCommercialV2Contracts.offers.publish,
+    commercialV4: platformCommercialV4Contracts.offers.publish,
   })
   @RequirePlatformCapabilities("billing.write")
   async publish(
@@ -220,6 +254,8 @@ export class PlatformOffersController {
         ...offer,
         documents,
       },
+      undefined,
+      platformCommercialV4Contracts.offers.publish.response,
     );
   }
 
@@ -229,6 +265,7 @@ export class PlatformOffersController {
     body: platformCommercialContracts.offers.revise.body,
     response: platformCommercialContracts.offers.revise.response,
     commercialV2: platformCommercialV2Contracts.offers.revise,
+    commercialV4: platformCommercialV4Contracts.offers.revise,
   })
   @RequirePlatformCapabilities("billing.write")
   async revise(
@@ -241,6 +278,8 @@ export class PlatformOffersController {
       platformCommercialContracts.offers.revise.response,
       platformCommercialV2Contracts.offers.revise.response,
       await this.offers.revise(req.platformPrincipal!, id, body, commercialVersion(req)),
+      undefined,
+      platformCommercialV4Contracts.offers.revise.response,
     );
   }
 
@@ -308,6 +347,7 @@ export class PlatformOffersController {
   @PlatformApiProtectedOk({
     response: platformCommercialContracts.offers.cancel.response,
     commercialV2: platformCommercialV2Contracts.offers.cancel,
+    commercialV4: platformCommercialV4Contracts.offers.cancel,
   })
   @RequirePlatformCapabilities("billing.write")
   async cancel(
@@ -319,6 +359,8 @@ export class PlatformOffersController {
       platformCommercialContracts.offers.cancel.response,
       platformCommercialV2Contracts.offers.cancel.response,
       await this.offers.cancel(req.platformPrincipal!, id),
+      undefined,
+      platformCommercialV4Contracts.offers.cancel.response,
     );
   }
 

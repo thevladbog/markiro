@@ -67,16 +67,28 @@ export function createLineFromCatalog(version: CatalogVersionDto, id: string): D
     version: version.version,
     commercialTerms:
       version.documentNameRu && version.subject && version.sellerPolicyRevision
-        ? {
-            version: 1,
-            subject: version.subject,
-            documentNameRu: version.documentNameRu,
-            documentNameEn: version.documentNameEn,
-            sellerPolicyRevision: version.sellerPolicyRevision,
-            billingPeriod: version.billingPeriod,
-            billingTimezone: version.kind === "service" ? null : "Europe/Moscow",
-            activationRule: version.kind === "service" ? null : "on_application",
-          }
+        ? version.kind === "service" && version.billingMode === "recurring"
+          ? {
+              version: 2,
+              subject: version.subject,
+              documentNameRu: version.documentNameRu,
+              documentNameEn: version.documentNameEn,
+              sellerPolicyRevision: version.sellerPolicyRevision,
+              billingPeriod: "month",
+              billingTimezone: "Europe/Moscow",
+              activationRule: "after_current",
+              serviceTerms: version.service,
+            }
+          : {
+              version: 1,
+              subject: version.subject,
+              documentNameRu: version.documentNameRu,
+              documentNameEn: version.documentNameEn,
+              sellerPolicyRevision: version.sellerPolicyRevision,
+              billingPeriod: version.billingPeriod,
+              billingTimezone: version.kind === "service" ? null : "Europe/Moscow",
+              activationRule: version.kind === "service" ? null : "on_application",
+            }
         : null,
     nameRu: version.documentNameRu ?? version.nameRu,
     nameEn: version.documentNameEn ?? version.nameEn,
@@ -152,13 +164,14 @@ export function documentDraftReducer(
           : {
               ...line,
               activationPolicy: action.policy,
-              commercialTerms: line.commercialTerms
-                ? {
-                    ...line.commercialTerms,
-                    activationRule:
-                      action.policy === "after_current" ? "after_current" : "on_application",
-                  }
-                : null,
+              commercialTerms:
+                line.commercialTerms?.version === 1
+                  ? {
+                      ...line.commercialTerms,
+                      activationRule:
+                        action.policy === "after_current" ? "after_current" : "on_application",
+                    }
+                  : null,
             },
       );
     case "line.moved": {

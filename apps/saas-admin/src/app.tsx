@@ -31,6 +31,11 @@ const TwoFactor = lazy(() =>
 const CatalogPage = lazy(() =>
   import("./pages/catalog/CatalogPage.js").then((module) => ({ default: module.CatalogPage })),
 );
+const ServicePeriodsPage = lazy(() =>
+  import("./pages/service-periods/ServicePeriodsPage.js").then((module) => ({
+    default: module.ServicePeriodsPage,
+  })),
+);
 const OverviewPage = lazy(() =>
   import("./pages/overview/OverviewPage.js").then((module) => ({ default: module.OverviewPage })),
 );
@@ -177,6 +182,7 @@ export const appRoutes = createRoutesFromElements(
       <Route element={<AppShell />}>
         <Route index element={<OverviewPage />} />
         <Route path="/catalog" element={<CatalogPage />} />
+        <Route path="/service-periods" element={<ServicePeriodsPage />} />
         <Route path="/agreements" element={<AgreementsPage />} />
         <Route path="/agreements/new" element={<CreateAgreementPage />} />
         <Route path="/agreements/:id" element={<AgreementDetailPage />} />

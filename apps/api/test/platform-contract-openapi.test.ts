@@ -1,4 +1,6 @@
 import { PlatformDeviceRetentionController } from "../src/modules/device-licensing/platform-device-retention.controller";
+import { PlatformServicePeriodsController } from "../src/modules/service-periods/platform-service-periods.controller";
+import { ServicePeriodsService } from "../src/modules/service-periods/service-periods.service";
 import { DeviceRetentionService } from "../src/modules/device-licensing/device-retention.service";
 import { PlatformGrantReadinessController } from "../src/modules/device-grants/platform-grant-readiness.controller";
 import { PlatformGrantReadinessService } from "../src/modules/device-grants/platform-grant-readiness.service";
@@ -160,6 +162,7 @@ async function createPlatformDocument(): Promise<{
     PlatformGrantReadinessService,
     PlatformGrantActivationService,
     PlatformGrantRollbackService,
+    ServicePeriodsService,
     DB,
   ].map((provide) => ({ provide, useValue: {} }));
   const moduleRef = await Test.createTestingModule({
@@ -185,6 +188,7 @@ async function createPlatformDocument(): Promise<{
       PlatformDeviceLicensingController,
       PlatformDeviceReplacementController,
       PlatformDeviceRetentionController,
+      PlatformServicePeriodsController,
       PlatformGrantReadinessController,
       PlatformGrantActivationController,
       PlatformGrantRollbackController,
@@ -212,7 +216,7 @@ async function createPlatformDocument(): Promise<{
 
 describe("current SaaS platform OpenAPI contracts", () => {
   it("converts all current shared schemas to OpenAPI 3.0-compatible wire schemas", () => {
-    expect(CURRENT_SHARED_SCHEMAS).toHaveLength(208);
+    expect(CURRENT_SHARED_SCHEMAS).toHaveLength(219);
     for (const schema of CURRENT_SHARED_SCHEMAS) {
       expectOpenApi30Compatible(jsonSchema(schema));
     }
@@ -252,6 +256,7 @@ describe("current SaaS platform OpenAPI contracts", () => {
                   jsonSchema(contract.response),
                   jsonSchema(contract.commercialV2.response),
                   jsonSchema((contract.commercialV3 ?? contract.commercialV2).response),
+                  ...(contract.commercialV4 ? [jsonSchema(contract.commercialV4.response)] : []),
                 ],
               }
             : jsonSchema(contract.response),
@@ -264,7 +269,12 @@ describe("current SaaS platform OpenAPI contracts", () => {
           );
         expectOpenApi30Compatible(successSchema);
 
-        if (contract.body || contract.commercialV2?.body || contract.commercialV3?.body) {
+        if (
+          contract.body ||
+          contract.commercialV2?.body ||
+          contract.commercialV3?.body ||
+          contract.commercialV4?.body
+        ) {
           if (contract.multipart) {
             expect(inlineJsonSchema(documented.requestBody)).toBeUndefined();
             const multipartSchema = inlineContentSchema(
@@ -287,6 +297,7 @@ describe("current SaaS platform OpenAPI contracts", () => {
               contract.body,
               contract.commercialV2?.body,
               (contract.commercialV3 ?? contract.commercialV2)?.body,
+              contract.commercialV4?.body,
             ].filter((body): body is ZodType => body !== undefined);
             expect(bodySchema).toEqual(
               bodies.length === 1 ? jsonSchema(bodies[0]!) : { anyOf: bodies.map(jsonSchema) },
@@ -359,9 +370,9 @@ describe("current SaaS platform OpenAPI contracts", () => {
         }>;
       };
 
-      expect(body.anyOf).toHaveLength(3);
+      expect(body.anyOf).toHaveLength(4);
       const alternatives = body.anyOf?.flatMap((representation) => representation.anyOf ?? []);
-      expect(alternatives).toHaveLength(12);
+      expect(alternatives).toHaveLength(16);
       const direct = alternatives?.filter(
         (candidate) =>
           !("sourceOfferId" in (candidate.properties ?? {})) &&
@@ -376,9 +387,10 @@ describe("current SaaS platform OpenAPI contracts", () => {
         expect.objectContaining({ additionalProperties: false }),
         expect.objectContaining({ additionalProperties: false }),
         expect.objectContaining({ additionalProperties: false }),
+        expect.objectContaining({ additionalProperties: false }),
       ]);
       expect(direct?.[0]?.required ?? []).not.toContain("idempotencyKey");
-      expect(linked).toHaveLength(9);
+      expect(linked).toHaveLength(12);
       for (const candidate of linked ?? []) {
         const sourceProperties = Object.keys(candidate.properties ?? {}).filter((property) =>
           property.startsWith("source"),

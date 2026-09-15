@@ -37,7 +37,7 @@ import { getTenant } from "../src/pages/tenants/api.js";
 import { getOperatorBillingProfile } from "../src/pages/settings/api.js";
 import { PUBLISHED_PLAN, TENANT_ID, jsonResponse } from "./render.js";
 afterEach(() => vi.unstubAllGlobals());
-it("negotiates V3 for current selections while seller settings retain V2", async () => {
+it("negotiates V4 for current selections while seller settings retain V2", async () => {
   const calls: RequestInit[] = [];
   vi.stubGlobal(
     "fetch",
@@ -67,6 +67,6 @@ it("negotiates V3 for current selections while seller settings retain V2", async
   await publishCatalogVersion(PUBLISHED_PLAN.catalogItemCode, PUBLISHED_PLAN.id, identity);
   expect(
     calls.map((call) => new Headers(call.headers).get("X-Markiro-Commercial-Version")),
-  ).toEqual(["3", "3", "2", "3"]);
+  ).toEqual(["4", "4", "2", "4"]);
   expect(JSON.parse(String(calls.at(-1)?.body))).toEqual(identity);
 });

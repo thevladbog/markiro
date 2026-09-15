@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useSearchParams } from "react-router";
@@ -24,6 +24,7 @@ import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import { useNavigationGuard } from "../../layout/NavigationGuard.js";
 import { getInvoice, listInvoices } from "../billing/api.js";
 import { invoiceStatusTone } from "../billing/invoice-status.js";
+import { getServicePeriod, listServicePeriods } from "../service-periods/api.js";
 import { createBillingAct, getBillingAct, issueBillingAct } from "./api.js";
 
 type Progress = "idle" | "creating" | "generating" | "draft" | "issued";
@@ -47,6 +48,8 @@ function BillingActForm({ writable }: { writable: boolean }) {
   const contextTenantId = search.get("tenantId");
   const contextRequestId = search.get("requestId");
   const [invoiceId, setInvoiceId] = useState(search.get("invoiceId") ?? "");
+  const [servicePeriodId, setServicePeriodId] = useState("");
+  const [serviceUsageEntryIds, setServiceUsageEntryIds] = useState<string[]>([]);
   const [periodStart, setPeriodStart] = useState("");
   const [periodEnd, setPeriodEnd] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -84,6 +87,40 @@ function BillingActForm({ writable }: { writable: boolean }) {
     queryFn: () => getInvoice(invoiceId),
     enabled: Boolean(invoiceId) && writable,
   });
+  const servicePeriods = useInfiniteQuery({
+    queryKey: ["platform", "service-periods", "act-picker", selectedInvoice?.tenantId],
+    queryFn: ({ pageParam }) =>
+      listServicePeriods({
+        tenantId: selectedInvoice!.tenantId,
+        limit: 100,
+        ...(pageParam ? { cursor: pageParam } : {}),
+      }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    enabled: Boolean(selectedInvoice) && writable,
+  });
+  const servicePeriodItems = servicePeriods.data?.pages.flatMap((page) => page.items) ?? [];
+  const servicePeriodOptions: ComboboxOption[] = servicePeriodItems.map((period) => ({
+    value: period.id,
+    label: i18n.language.startsWith("ru") ? period.nameRu : period.nameEn,
+    description: `${formatDateTime(period.startsAt, i18n.language)} — ${formatDateTime(period.endsAt, i18n.language)}`,
+    keywords: [period.nameRu, period.nameEn],
+  }));
+
+  useEffect(() => {
+    if (servicePeriods.hasNextPage && !servicePeriods.isFetchingNextPage) {
+      void servicePeriods.fetchNextPage();
+    }
+  }, [servicePeriods.fetchNextPage, servicePeriods.hasNextPage, servicePeriods.isFetchingNextPage]);
+  const servicePeriod = useQuery({
+    queryKey: ["platform", "service-periods", servicePeriodId],
+    queryFn: () => getServicePeriod(servicePeriodId),
+    enabled: Boolean(servicePeriodId) && writable,
+  });
+  const eligibleUsage = (servicePeriod.data?.entries ?? []).filter(
+    (entry) => entry.billingActId === null,
+  );
+  const selectedUsage = eligibleUsage.filter((entry) => serviceUsageEntryIds.includes(entry.id));
 
   useEffect(() => {
     if (!selectedInvoice?.issueDate || periodStart || periodEnd) return;
@@ -214,6 +251,12 @@ function BillingActForm({ writable }: { writable: boolean }) {
       tenantId: selectedInvoice.tenantId,
       ...(sourceRequestId ? { requestId: sourceRequestId } : {}),
       invoiceId: selectedInvoice.id,
+      ...(servicePeriod.data
+        ? {
+            orderedServiceId: servicePeriod.data.orderedServiceId,
+            serviceUsageEntryIds,
+          }
+        : {}),
       number: actNumberFromInvoice(selectedInvoice.number),
       periodStart,
       periodEnd,
@@ -289,6 +332,8 @@ function BillingActForm({ writable }: { writable: boolean }) {
             {...(invoiceId ? { value: invoiceId } : {})}
             onValueChange={(value) => {
               setInvoiceId(value);
+              setServicePeriodId("");
+              setServiceUsageEntryIds([]);
               setWithSignatureSeal(false);
               resetAttempt();
             }}
@@ -354,10 +399,86 @@ function BillingActForm({ writable }: { writable: boolean }) {
           </section>
         ) : null}
 
+        {detail.data && servicePeriodOptions.length ? (
+          <section className="billing-act-source" aria-labelledby="billing-act-usage-title">
+            <div className="billing-act-source__heading">
+              <div>
+                <span className="commerce-ledger__eyebrow">03 / SERVICE WORK</span>
+                <h2 id="billing-act-usage-title">{t("billingActs.serviceUsage.title")}</h2>
+              </div>
+              <span>{t("billingActs.serviceUsage.hint")}</span>
+            </div>
+            <Combobox
+              label={t("billingActs.serviceUsage.period")}
+              options={servicePeriodOptions}
+              {...(servicePeriodId ? { value: servicePeriodId } : {})}
+              onValueChange={(value) => {
+                setServicePeriodId(value);
+                setServiceUsageEntryIds([]);
+                resetAttempt();
+              }}
+              placeholder={t("billingActs.serviceUsage.placeholder")}
+              searchPlaceholder={t("billingActs.serviceUsage.searchPlaceholder")}
+              emptyText={t("billingActs.serviceUsage.emptyPeriods")}
+              loadingText={t("billingActs.serviceUsage.loading")}
+              loading={servicePeriods.isPending}
+              disabled={frozen}
+            />
+            {servicePeriod.isPending ? (
+              <Spinner label={t("billingActs.serviceUsage.loadingEntries")} />
+            ) : null}
+            {servicePeriod.error ? (
+              <Alert tone="error">{t("billingActs.serviceUsage.loadError")}</Alert>
+            ) : null}
+            {servicePeriod.data && eligibleUsage.length === 0 ? (
+              <p>{t("billingActs.serviceUsage.emptyEntries")}</p>
+            ) : null}
+            {eligibleUsage.length ? (
+              <div className="billing-act-preview__lines">
+                {eligibleUsage.map((entry) => (
+                  <Checkbox
+                    key={entry.id}
+                    label={`${entry.workReference} · ${entry.description}`}
+                    checked={serviceUsageEntryIds.includes(entry.id)}
+                    onCheckedChange={(checked) => {
+                      setServiceUsageEntryIds((current) =>
+                        checked
+                          ? [...current, entry.id]
+                          : current.filter((entryId) => entryId !== entry.id),
+                      );
+                      resetAttempt();
+                    }}
+                    disabled={frozen}
+                    hint={t("billingActs.serviceUsage.entryMinutes", {
+                      actual: entry.actualMinutesDelta,
+                      allowance: entry.allowanceMinutesDelta,
+                    })}
+                  />
+                ))}
+              </div>
+            ) : null}
+            {selectedUsage.length ? (
+              <p role="status">
+                {t("billingActs.serviceUsage.selectedSummary", {
+                  count: selectedUsage.length,
+                  actual: selectedUsage.reduce(
+                    (total, entry) => total + entry.actualMinutesDelta,
+                    0,
+                  ),
+                  allowance: selectedUsage.reduce(
+                    (total, entry) => total + entry.allowanceMinutesDelta,
+                    0,
+                  ),
+                })}
+              </p>
+            ) : null}
+          </section>
+        ) : null}
+
         <section className="billing-act-period" aria-labelledby="billing-act-period-title">
           <div className="billing-act-source__heading">
             <div>
-              <span className="commerce-ledger__eyebrow">03 / PERIOD</span>
+              <span className="commerce-ledger__eyebrow">04 / PERIOD</span>
               <h2 id="billing-act-period-title">{t("billingActs.period.title")}</h2>
             </div>
             <span>{t("billingActs.period.hint")}</span>
@@ -452,6 +573,10 @@ function formatMoney(value: string, locale: string): string {
     currency: "RUB",
     minimumFractionDigits: 2,
   }).format(Number(value));
+}
+
+function formatDateTime(value: string, locale: string): string {
+  return new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(new Date(value));
 }
 
 function previousCalendarMonth(timestamp: string): { start: string; end: string } {

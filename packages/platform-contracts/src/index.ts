@@ -111,8 +111,10 @@ export {
   offerWorkspaceRequestSchema,
   offerWorkspaceSchema,
   offerWorkspaceV2Schema,
+  offerWorkspaceV4Schema,
   offerWorkspacePartyV2Schema,
   platformOfferWorkspaceV2Contracts,
+  platformOfferWorkspaceV4Contracts,
   platformOfferWorkspaceContracts,
 } from "./offer-workspace.js";
 export type {
@@ -121,6 +123,7 @@ export type {
   OfferRegistryQuery,
   OfferWorkspace,
   OfferWorkspaceV2,
+  OfferWorkspaceV4,
 } from "./offer-workspace.js";
 export {
   parseTenantBillingActObjectKey,
@@ -346,6 +349,7 @@ export type {
   BillingActCancelDto,
   BillingActCreateDto,
   BillingActDocument,
+  BillingActServiceUsageSnapshot,
   BillingActIssueDto,
   BillingActIssueInput,
   CommercialDocument,
@@ -575,6 +579,18 @@ export {
   offerServiceDetailV2Schema,
   invoiceServiceLineV2Schema,
   invoiceServiceDetailV2Schema,
+  offerCreateLineV4Schema,
+  invoiceCreateLineV4Schema,
+  offerCreateV4Schema,
+  invoiceCreateV4Schema,
+  offerLineV4Schema,
+  invoiceLineV4Schema,
+  offerDetailV4Schema,
+  invoiceDetailV4Schema,
+  offerServiceLineV4Schema,
+  offerServiceDetailV4Schema,
+  invoiceServiceLineV4Schema,
+  invoiceServiceDetailV4Schema,
 } from "./commercial.js";
 export type {
   OperatorBillingProfileV2,
@@ -585,6 +601,10 @@ export type {
   InvoiceLineV2,
   OfferDetailV2,
   InvoiceDetailV2,
+  CreateOfferV4,
+  CreateInvoiceV4,
+  OfferDetailV4,
+  InvoiceDetailV4,
 } from "./commercial.js";
 export {
   legacyAssignableCatalogVersionSchema,
@@ -606,6 +626,8 @@ export type {
 export {
   platformCommercialV2Contracts,
   platformBillingRequestOfferCreateV2Schema,
+  platformCommercialV4Contracts,
+  platformBillingRequestOfferCreateV4Schema,
 } from "./commercial.js";
 export { platformTenantV2Contracts } from "./tenants.js";
 
@@ -643,6 +665,8 @@ export type {
 export * from "./entitlements.js";
 export * from "./catalog-v3.js";
 export * from "./tenants-v3.js";
+export * from "./catalog-v4.js";
+export * from "./service-periods.js";
 
 export {
   stationRecoveryIdentitySchema,
