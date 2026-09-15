@@ -788,6 +788,12 @@ test("production diagnostics workflow is protected, serialized, read only and cl
       type: "boolean",
       default: false,
     },
+    recurring_services: {
+      description: "Run the read-only recurring-services migration diagnostic",
+      required: true,
+      type: "boolean",
+      default: false,
+    },
   });
   assert.deepEqual(Object.keys(workflow.jobs), ["diagnose"]);
   assert.deepEqual(workflow.concurrency, {
@@ -817,10 +823,15 @@ test("production diagnostics workflow is protected, serialized, read only and cl
     "${{ secrets.YC_APP_DEPLOY_SSH_PRIVATE_KEY }}",
   );
   assert.equal(diagnose.env.RUN_NATIONAL_CATALOG_DIAGNOSTIC, "${{ inputs.national_catalog }}");
+  assert.equal(diagnose.env.RUN_RECURRING_SERVICES_DIAGNOSTIC, "${{ inputs.recurring_services }}");
   assert.match(diagnose.run, /runtime-diagnostics[.]mjs run/);
   assert.match(
     diagnose.run,
     /\[\[ "\$RUN_NATIONAL_CATALOG_DIAGNOSTIC" == "true" \]\][\s\S]*national-catalog-diagnostics[.]mjs run/,
+  );
+  assert.match(
+    diagnose.run,
+    /\[\[ "\$RUN_RECURRING_SERVICES_DIAGNOSTIC" == "true" \]\][\s\S]*recurring-services-diagnostics[.]mjs run/,
   );
   assert.match(diagnose.run, /chmod 600/);
 
