@@ -19,7 +19,7 @@ const SCHEMA_STATES = Object.freeze(["ready", "partial", "missing"]);
 const CONSTRAINT_STATES = Object.freeze(["validated", "unvalidated", "missing"]);
 
 const DATABASE_PROBE = String.raw`
-import pg from "pg";
+import pg from "/app/node_modules/.pnpm/node_modules/pg/esm/index.mjs";
 
 const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL,
