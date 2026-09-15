@@ -8,6 +8,11 @@ on:
         required: true
         type: boolean
         default: false
+      recurring_services:
+        description: Run the read-only recurring-services migration diagnostic
+        required: true
+        type: boolean
+        default: false
 
 permissions: {}
 
@@ -35,6 +40,7 @@ jobs:
         env:
           YC_APP_DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.YC_APP_DEPLOY_SSH_PRIVATE_KEY }}
           RUN_NATIONAL_CATALOG_DIAGNOSTIC: ${{ inputs.national_catalog }}
+          RUN_RECURRING_SERVICES_DIAGNOSTIC: ${{ inputs.recurring_services }}
         run: |
           set -euo pipefail
           umask 077
@@ -47,6 +53,9 @@ jobs:
           node deploy/yandex/runtime-diagnostics.mjs run
           if [[ "$RUN_NATIONAL_CATALOG_DIAGNOSTIC" == "true" ]]; then
             node deploy/yandex/national-catalog-diagnostics.mjs run
+          fi
+          if [[ "$RUN_RECURRING_SERVICES_DIAGNOSTIC" == "true" ]]; then
+            node deploy/yandex/recurring-services-diagnostics.mjs run
           fi
 
       - name: Remove local diagnostic credentials
