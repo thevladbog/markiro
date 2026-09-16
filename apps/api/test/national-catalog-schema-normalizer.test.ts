@@ -335,4 +335,64 @@ describe("normalizeNationalCatalogSchema", () => {
       },
     });
   });
+
+  it("uses the target requirement type when a layered dependency omits attr_type", () => {
+    const result = normalizeNationalCatalogSchema(
+      { id: 30398, name: "Сидр", parentId: null, level: 1, active: true, gismtCodes: [7], raw: {} },
+      [
+        attribute({
+          id: 22999,
+          name: "Характеристика упаковки",
+          preset: ["КЕГ", "УПАКОВКА СПЕЦИАЛИЗИРОВАННАЯ", "ПОТРЕБИТЕЛЬСКАЯ УПАКОВКА"],
+          dependentAttributes: [
+            {
+              value: "КЕГ",
+              attributes: [{ id: 23052, firstLayer: false, secondLayer: true, type: null }],
+            },
+            {
+              value: "УПАКОВКА СПЕЦИАЛИЗИРОВАННАЯ",
+              attributes: [{ id: 23052, firstLayer: false, secondLayer: true, type: null }],
+            },
+          ],
+        }),
+        attribute({
+          id: 23052,
+          name: "Тип упаковки",
+          presetOnly: false,
+          preset: [],
+          firstLayer: false,
+          secondLayer: false,
+          type: "m",
+        }),
+      ],
+    );
+
+    expect(result).toMatchObject({
+      status: "valid",
+      definition: {
+        attributes: [
+          expect.objectContaining({ id: "22999" }),
+          expect.objectContaining({
+            id: "23052",
+            requirementRules: expect.arrayContaining([
+              {
+                layer: "circulation",
+                level: "mandatory",
+                when: { attributeId: "22999", operator: "equals", value: "КЕГ" },
+              },
+              {
+                layer: "circulation",
+                level: "mandatory",
+                when: {
+                  attributeId: "22999",
+                  operator: "equals",
+                  value: "УПАКОВКА СПЕЦИАЛИЗИРОВАННАЯ",
+                },
+              },
+            ]),
+          }),
+        ],
+      },
+    });
+  });
 });

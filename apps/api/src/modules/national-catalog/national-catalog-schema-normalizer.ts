@@ -180,7 +180,10 @@ function appendConditionalRequirements(
         // target or enforceable rule to project, so preserve the trigger and
         // usable siblings while keeping the raw dependency in the observation.
         if (targetId !== null && !target && !targetSource) continue;
-        const level = requirementLevel(candidate.type);
+        // The provider omits `attr_type` from some layered dependency rules.
+        // The referenced attribute still carries the requirement type that
+        // applies when the dependency activates it.
+        const level = requirementLevel(candidate.type ?? targetSource?.type ?? null);
         if (!target || !level || (!candidate.firstLayer && !candidate.secondLayer) || !operator) {
           invalid = true;
           continue;
