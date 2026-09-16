@@ -6,6 +6,7 @@ const nonnegativeCountSchema = z.number().int().nonnegative();
 const positiveEpochSchema = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 const boundedTextSchema = z.string().trim().min(1).max(1_000);
 const digestSchema = z.string().regex(/^[0-9a-f]{64}$/);
+const oneTimePairingCodeSchema = z.string().regex(/^\d{8}$/);
 const deviceReplacementNameSchema = z.string().trim().min(1).max(200);
 const deviceReplacementKindSchema = z.enum(["station", "handheld"]);
 export const deviceReplacementPreparationStateSchema = z.enum([
@@ -392,6 +393,21 @@ const deviceReplacementEligibilityReasonSchema = z.enum([
   "report_stale",
 ]);
 
+const deviceReplacementReadinessChannelSchema = z.enum([
+  "scans",
+  "inventories",
+  "shiftClosures",
+  "productLabels",
+  "boxes",
+  "exceptions",
+  "conflicts",
+  "unknownPrints",
+]);
+const deviceReplacementReadinessMeasurementSchema = z.union([
+  nonnegativeCountSchema,
+  z.literal("unsupported"),
+]);
+
 export const deviceReplacementReadinessEligibilitySchema = z.discriminatedUnion("status", [
   z.object({ status: z.literal("eligible"), reasons: z.tuple([]) }).strict(),
   z
@@ -421,12 +437,12 @@ const deviceReplacementInstalledGrantSchema = z
 
 const deviceReplacementPendingSchema = z
   .object({
-    scans: nonnegativeCountSchema,
-    inventories: nonnegativeCountSchema,
-    shiftClosures: nonnegativeCountSchema,
-    productLabels: nonnegativeCountSchema,
-    boxes: nonnegativeCountSchema,
-    exceptions: nonnegativeCountSchema,
+    scans: deviceReplacementReadinessMeasurementSchema,
+    inventories: deviceReplacementReadinessMeasurementSchema,
+    shiftClosures: deviceReplacementReadinessMeasurementSchema,
+    productLabels: deviceReplacementReadinessMeasurementSchema,
+    boxes: deviceReplacementReadinessMeasurementSchema,
+    exceptions: deviceReplacementReadinessMeasurementSchema,
   })
   .strict();
 
@@ -439,8 +455,8 @@ export const deviceReplacementReadinessRequestSchema = z
     clientBuild: z.string().trim().min(1).max(100),
     storageRevision: positiveEpochSchema,
     pending: deviceReplacementPendingSchema,
-    conflicts: nonnegativeCountSchema,
-    unknownPrints: nonnegativeCountSchema,
+    conflicts: deviceReplacementReadinessMeasurementSchema,
+    unknownPrints: deviceReplacementReadinessMeasurementSchema,
     activeTasks: z
       .array(deviceReplacementActiveTaskSchema)
       .max(1_000)
@@ -465,9 +481,33 @@ export const deviceReplacementReadinessResponseSchema = z
     requestId: platformUuidSchema,
     intentId: platformUuidSchema,
     receivedAt: platformTimestampSchema,
+    unsupportedChannels: z
+      .array(deviceReplacementReadinessChannelSchema)
+      .max(deviceReplacementReadinessChannelSchema.options.length)
+      .refine(
+        (channels) => new Set(channels).size === channels.length,
+        "Unsupported channels must be unique",
+      ),
     eligibility: deviceReplacementReadinessEligibilitySchema,
   })
-  .strict();
+  .strict()
+  .superRefine((response, context) => {
+    if (response.unsupportedChannels.length === 0) return;
+    if (response.eligibility.status === "eligible") {
+      context.addIssue({
+        code: "custom",
+        path: ["eligibility"],
+        message: "Unsupported required channels block readiness",
+      });
+      return;
+    }
+    if (!response.eligibility.reasons.includes("client_upgrade_required"))
+      context.addIssue({
+        code: "custom",
+        path: ["eligibility", "reasons"],
+        message: "Unsupported required channels require a client upgrade reason",
+      });
+  });
 
 export const deviceReplacementExecutionPreviewSchema = z.discriminatedUnion("mode", [
   z
@@ -504,7 +544,14 @@ export const deviceReplacementExecutionPreviewResponseSchema =
 export const deviceReplacementExecuteResponseSchema = deviceReplacementReceiptSchema;
 export const deviceReplacementEmergencyPreviewResponseSchema =
   deviceReplacementExecutionPreviewSchema;
-export const deviceReplacementRecoveryCodeResponseSchema = deviceReplacementReceiptSchema;
+export const deviceReplacementRecoveryCodeResponseSchema = z
+  .object({
+    requestId: platformUuidSchema,
+    preparation: deviceReplacementPreparationSchema,
+    code: oneTimePairingCodeSchema,
+    expiresAt: platformTimestampSchema,
+  })
+  .strict();
 export const deviceReplacementRecoveryCloseResponseSchema = deviceReplacementReceiptSchema;
 
 export type DeviceReplacementTarget = z.output<typeof deviceReplacementTargetSchema>;
@@ -530,6 +577,9 @@ export type DeviceReplacementEmergencyPreviewRequest = z.output<
 >;
 export type DeviceReplacementRecoveryCodeRequest = z.output<
   typeof deviceReplacementRecoveryCodeRequestSchema
+>;
+export type DeviceReplacementRecoveryCodeResponse = z.output<
+  typeof deviceReplacementRecoveryCodeResponseSchema
 >;
 export type DeviceReplacementRecoveryCloseRequest = z.output<
   typeof deviceReplacementRecoveryCloseRequestSchema

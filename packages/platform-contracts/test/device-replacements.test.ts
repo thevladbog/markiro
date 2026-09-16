@@ -170,6 +170,35 @@ describe("device replacement contracts", () => {
       }).success,
     ).toBe(false);
     expect(contracts.deviceReplacementRecoveryCodeRequestSchema.parse(base)).toEqual(base);
+    const recoveryCode = {
+      requestId,
+      preparation: {
+        id: preparationId,
+        sourceDeviceId,
+        revision: 1,
+        state: "prepared",
+        preparedAt: createdAt,
+        cancelledAt: null,
+        observation,
+      },
+      code: "12345678",
+      expiresAt,
+    } as const;
+    expect(contracts.deviceReplacementRecoveryCodeResponseSchema.parse(recoveryCode)).toEqual(
+      recoveryCode,
+    );
+    expect(
+      contracts.deviceReplacementRecoveryCodeResponseSchema.safeParse({
+        ...recoveryCode,
+        code: "recovery-secret",
+      }).success,
+    ).toBe(false);
+    expect(
+      contracts.deviceReplacementRecoveryCodeResponseSchema.safeParse({
+        ...recoveryCode,
+        plaintext: "must-not-persist",
+      }).success,
+    ).toBe(false);
     expect(
       contracts.deviceReplacementRecoveryCloseRequestSchema.safeParse({ requestId }).success,
     ).toBe(false);
@@ -204,6 +233,13 @@ describe("device replacement contracts", () => {
       journal: { digest: "a".repeat(64), highestSequence: 42 },
     };
     expect(contracts.deviceReplacementReadinessRequestSchema.parse(report)).toEqual(report);
+    const unsupported = {
+      ...report,
+      pending: { ...report.pending, scans: "unsupported" },
+    } as const;
+    expect(contracts.deviceReplacementReadinessRequestSchema.parse(unsupported)).toEqual(
+      unsupported,
+    );
     for (const invalid of [
       { ...report, extra: true },
       { ...report, receivedAt: createdAt },
@@ -230,6 +266,7 @@ describe("device replacement contracts", () => {
       requestId,
       intentId: previewId,
       receivedAt: createdAt,
+      unsupportedChannels: [],
       eligibility: { status: "eligible", reasons: [] },
     } as const;
     expect(contracts.deviceReplacementReadinessResponseSchema.parse(response)).toEqual(response);
@@ -237,6 +274,19 @@ describe("device replacement contracts", () => {
       contracts.deviceReplacementReadinessResponseSchema.safeParse({
         ...response,
         eligibility: { status: "eligible", reasons: ["pending_scans"] },
+      }).success,
+    ).toBe(false);
+    expect(
+      contracts.deviceReplacementReadinessResponseSchema.parse({
+        ...response,
+        unsupportedChannels: ["scans"],
+        eligibility: { status: "blocked", reasons: ["client_upgrade_required"] },
+      }),
+    ).toMatchObject({ eligibility: { status: "blocked", reasons: ["client_upgrade_required"] } });
+    expect(
+      contracts.deviceReplacementReadinessResponseSchema.safeParse({
+        ...response,
+        unsupportedChannels: ["scans"],
       }).success,
     ).toBe(false);
   });
