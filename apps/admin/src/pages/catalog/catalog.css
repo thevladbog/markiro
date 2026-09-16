@@ -346,13 +346,15 @@ fieldset.mk-nc-comparison-row,
   border: 0;
 }
 
+.mk-product-form-tabs {
+  margin-bottom: var(--sp-4);
+}
+
 .mk-product-regulatory {
   display: flex;
   flex-direction: column;
   gap: 24px;
-  margin-top: 24px;
-  border-top: 1px solid var(--line);
-  padding-top: 24px;
+  margin-top: 0;
 }
 
 .mk-regulatory form,
@@ -361,6 +363,31 @@ fieldset.mk-nc-comparison-row,
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.mk-regulatory-attributes-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-4);
+  align-items: start;
+}
+
+.mk-regulatory-attribute {
+  min-width: 0;
+}
+
+.mk-regulatory-attribute--wide {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 700px) {
+  .mk-regulatory-attributes-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mk-regulatory-attribute--wide {
+    grid-column: auto;
+  }
 }
 
 .mk-regulatory-meta {
