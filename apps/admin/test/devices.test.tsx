@@ -123,16 +123,32 @@ it("presents device capacity and the registry as one equipment workspace", async
       type: "station",
       name: "Packing station",
       place: { id: "line-1", name: "Line 1" },
-      status: "online",
+      status: "offline",
       lastSeenAt: "2026-09-16T10:00:00.000Z",
       paired: true,
     },
+    {
+      id: "44444444-4444-4444-8444-444444444444",
+      type: "handheld",
+      name: "Warehouse handheld",
+      place: { id: null, name: "Warehouse" },
+      status: "revoked",
+      lastSeenAt: "2026-09-15T10:00:00.000Z",
+      paired: false,
+    },
   ]);
 
-  expect(await screen.findByRole("region", { name: "Состояние оборудования" })).toBeDefined();
-  expect(screen.getByText("Найдено устройств")).toBeDefined();
-  expect(screen.getByText("На странице требуют внимания")).toBeDefined();
-  expect(screen.getByText("Использование слотов")).toBeDefined();
+  const overview = await screen.findByRole("region", { name: "Состояние оборудования" });
+  const expectMetric = (label: string, value: string) => {
+    const term = within(overview).getByText(label);
+    expect(term.nextElementSibling?.textContent).toBe(value);
+  };
+  await waitFor(() => {
+    expectMetric("Найдено устройств", "2");
+    expectMetric("Использование слотов", "0 / 2");
+    expectMetric("На странице", "2");
+    expectMetric("На странице требуют внимания", "2");
+  });
   expect(screen.getByRole("region", { name: "Реестр оборудования" })).toBeDefined();
   expect(screen.getByRole("group", { name: "Фильтры оборудования" })).toBeDefined();
 });

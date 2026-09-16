@@ -92,6 +92,8 @@ describe("tenant subscription detail", () => {
     await user.click(screen.getByRole("tab", { name: /Оборудование/ }));
 
     expect(await screen.findByRole("heading", { name: "Контур оборудования" })).toBeDefined();
+    expect(screen.getByText("ОПЕРАЦИИ / ОБОРУДОВАНИЕ")).toBeDefined();
+    expect(screen.getByText("РЕЕСТР УСТРОЙСТВ")).toBeDefined();
     expect(screen.getByText("Линия розлива")).toBeDefined();
     expect(screen.getByText("ТСД склада")).toBeDefined();
     expect(screen.queryByRole("heading", { name: "Текущий тариф" })).toBeNull();

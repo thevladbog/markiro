@@ -1866,7 +1866,7 @@
         "legal": "Юридические данные"
       },
       "equipment": {
-        "eyebrow": "OPERATIONS / EQUIPMENT",
+        "eyebrow": "ОПЕРАЦИИ / ОБОРУДОВАНИЕ",
         "title": "Контур оборудования",
         "description": "Рабочие устройства, лицензионные места и подготовленные изменения в одном операционном представлении."
       },
@@ -1909,7 +1909,7 @@
         "count": "{{usage}} из {{limit}}",
         "unlimited": "{{usage}} · без лимита",
         "empty": "Рабочие устройства ещё не зарегистрированы.",
-        "registryEyebrow": "DEVICE REGISTER",
+        "registryEyebrow": "РЕЕСТР УСТРОЙСТВ",
         "registryTitle": "Реестр рабочих устройств",
         "registryCount_one": "{{count}} устройство",
         "registryCount_few": "{{count}} устройства",
