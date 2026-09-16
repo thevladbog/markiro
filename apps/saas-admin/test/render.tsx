@@ -835,6 +835,45 @@ export function installTenantApi({
   dadataStatus = "unconfigured",
   dadataResponseStatus = 200,
   renewHandler,
+  devicePool = {
+    tenantId: TENANT_ID,
+    usage: 2,
+    limit: 3,
+    canCancelReservations: true,
+    integrity: "ready",
+    devices: [
+      {
+        deviceId: "16111111-1111-4111-8111-111111111111",
+        name: "Линия розлива",
+        kind: "station",
+        assignmentId: "17111111-1111-4111-8111-111111111111",
+        revision: 1,
+        state: "assigned",
+        releaseReason: null,
+        slotOccupied: true,
+        canCancel: false,
+        blockedReason: "already_paired",
+        connectionStatus: "online",
+        pairedAt: "2026-08-10T08:00:00.000Z",
+        lastSeenAt: "2026-08-12T08:00:00.000Z",
+      },
+      {
+        deviceId: "18111111-1111-4111-8111-111111111111",
+        name: "ТСД склада",
+        kind: "handheld",
+        assignmentId: "19111111-1111-4111-8111-111111111111",
+        revision: 1,
+        state: "reserved",
+        releaseReason: null,
+        slotOccupied: true,
+        canCancel: true,
+        blockedReason: null,
+        connectionStatus: "awaiting_pairing",
+        pairedAt: null,
+        lastSeenAt: null,
+      },
+    ],
+  },
 }: {
   me?: PlatformPrincipal;
   items?: Array<Record<string, unknown>>;
@@ -851,6 +890,7 @@ export function installTenantApi({
   dadataStatus?: "ready" | "unconfigured" | "unavailable" | "no_results";
   dadataResponseStatus?: number;
   renewHandler?: () => Promise<Response>;
+  devicePool?: unknown;
 } = {}) {
   const mutationCalls: TenantMutationCall[] = [];
   let detailRequestCount = 0;
@@ -864,6 +904,23 @@ export function installTenantApi({
           snapshot: ENTITLEMENT_SNAPSHOT,
           detailsVisible: false,
           sourceDetails: [],
+        });
+      if (url.endsWith(`/api/platform/tenants/${TENANT_ID}/device-licensing`) && method === "GET")
+        return jsonResponse(200, devicePool);
+      if (
+        url.endsWith(`/api/platform/tenants/${TENANT_ID}/device-licensing/replacements`) &&
+        method === "GET"
+      )
+        return jsonResponse(200, { canPrepare: true, items: [] });
+      if (
+        url.endsWith(`/api/platform/tenants/${TENANT_ID}/device-licensing/retention`) &&
+        method === "GET"
+      )
+        return jsonResponse(200, {
+          canSelect: false,
+          observation: null,
+          selections: [],
+          currentShadow: { awaitingSelection: false, affectedDeviceIds: [], enforced: false },
         });
       if (url.endsWith("/api/platform/me")) return jsonResponse(200, me);
       if (url.includes("/api/platform/tenants?") && method === "GET") {

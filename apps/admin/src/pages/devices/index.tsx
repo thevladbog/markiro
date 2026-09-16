@@ -108,6 +108,10 @@ export function DevicesPage() {
     pageSize: PAGE_SIZE,
   });
   const licensing = useDeviceLicensing(canManageCredentials);
+  const pageItems = result.data?.items ?? [];
+  const attentionCount = pageItems.filter(
+    (device) => device.status === "offline" || device.status === "revoked",
+  ).length;
 
   const setFilters = useCallback(
     (next: { type?: DeviceType | null; status?: DeviceStatus | null; page?: number }) => {
@@ -188,7 +192,7 @@ export function DevicesPage() {
   );
 
   return (
-    <div style={{ padding: "28px 32px", display: "flex", flexDirection: "column", gap: 20 }}>
+    <div className="devices-page">
       <PageHeader
         title={t("pages.devices.title")}
         actions={
@@ -207,53 +211,119 @@ export function DevicesPage() {
           </>
         }
       />
-      <DeviceLicensingPanel enabled={canManageCredentials} />
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-        <Select
-          label={t("pages.devices.typeLabel")}
-          value={type ?? ""}
-          onValueChange={(value) => setFilters({ type: parseType(value) ?? null, page: 1 })}
-          options={[
-            { value: "", label: t("pages.devices.allTypes") },
-            ...deviceTypes.map((item) => ({ value: item, label: t(`pages.devices.type.${item}`) })),
-          ]}
-        />
-        <Select
-          label={t("pages.devices.statusLabel")}
-          value={status ?? ""}
-          onValueChange={(value) => setFilters({ status: parseStatus(value) ?? null, page: 1 })}
-          options={[
-            { value: "", label: t("pages.devices.allStatuses") },
-            ...deviceStatuses.map((item) => ({
-              value: item,
-              label: t(`pages.devices.status.${item}`),
-            })),
-          ]}
-        />
-      </div>
-      {result.isPending ? (
-        <Spinner label={t("common.loading")} />
-      ) : result.isError ? (
-        <Alert tone="error">{t("common.loadError")}</Alert>
-      ) : result.data ? (
-        <>
-          {result.data.items.length ? (
-            <Table columns={columns} rows={result.data.items} />
-          ) : (
-            <EmptyState title={t("pages.devices.emptyTitle")} hint={t("pages.devices.emptyHint")} />
-          )}
-          {result.data.total > 0 ? (
-            <DevicePager
-              page={result.data.page}
-              pageSize={result.data.pageSize}
-              total={result.data.total}
-              onPage={(nextPage) => setFilters({ page: nextPage })}
-              label={t("pages.devices.pager.label")}
-              previousLabel={t("pages.devices.pager.previous")}
-              nextLabel={t("pages.devices.pager.next")}
+      <p className="devices-page__description">{t("pages.devices.description")}</p>
+      <section className="devices-overview" aria-label={t("pages.devices.overview.label")}>
+        <div className="devices-overview__lead">
+          <span>{t("pages.devices.overview.eyebrow")}</span>
+          <strong>{t("pages.devices.overview.title")}</strong>
+        </div>
+        <dl>
+          <div>
+            <dt>{t("pages.devices.overview.total")}</dt>
+            <dd>{result.data?.total ?? "—"}</dd>
+          </div>
+          <div>
+            <dt>{t("pages.devices.overview.slots")}</dt>
+            <dd>
+              {licensing.data
+                ? licensing.data.limit === null
+                  ? `${licensing.data.usage} / ∞`
+                  : `${licensing.data.usage} / ${licensing.data.limit}`
+                : "—"}
+            </dd>
+          </div>
+          <div>
+            <dt>{t("pages.devices.overview.page")}</dt>
+            <dd>{pageItems.length}</dd>
+          </div>
+          <div data-tone={attentionCount > 0 ? "attention" : "calm"}>
+            <dt>{t("pages.devices.overview.attention")}</dt>
+            <dd>{result.data ? attentionCount : "—"}</dd>
+          </div>
+        </dl>
+      </section>
+      <section className="devices-registry" aria-label={t("pages.devices.registry.label")}>
+        <header className="devices-registry__toolbar">
+          <div>
+            <span>{t("pages.devices.registry.eyebrow")}</span>
+            <h2>{t("pages.devices.registry.title")}</h2>
+          </div>
+          <div
+            className="devices-filters"
+            role="group"
+            aria-label={t("pages.devices.filtersLabel")}
+          >
+            <Select
+              label={t("pages.devices.typeLabel")}
+              value={type ?? ""}
+              onValueChange={(value) => setFilters({ type: parseType(value) ?? null, page: 1 })}
+              options={[
+                { value: "", label: t("pages.devices.allTypes") },
+                ...deviceTypes.map((item) => ({
+                  value: item,
+                  label: t(`pages.devices.type.${item}`),
+                })),
+              ]}
             />
+            <Select
+              label={t("pages.devices.statusLabel")}
+              value={status ?? ""}
+              onValueChange={(value) => setFilters({ status: parseStatus(value) ?? null, page: 1 })}
+              options={[
+                { value: "", label: t("pages.devices.allStatuses") },
+                ...deviceStatuses.map((item) => ({
+                  value: item,
+                  label: t(`pages.devices.status.${item}`),
+                })),
+              ]}
+            />
+          </div>
+        </header>
+        <div className="devices-registry__body">
+          {result.isPending ? (
+            <Spinner label={t("common.loading")} />
+          ) : result.isError ? (
+            <Alert tone="error">{t("common.loadError")}</Alert>
+          ) : result.data ? (
+            <>
+              {result.data.items.length ? (
+                <Table
+                  className="devices-table"
+                  columns={columns}
+                  rows={result.data.items}
+                  scrollLabel={t("pages.devices.registry.tableLabel")}
+                />
+              ) : (
+                <EmptyState
+                  title={t("pages.devices.emptyTitle")}
+                  hint={t("pages.devices.emptyHint")}
+                />
+              )}
+              {result.data.total > 0 ? (
+                <DevicePager
+                  page={result.data.page}
+                  pageSize={result.data.pageSize}
+                  total={result.data.total}
+                  onPage={(nextPage) => setFilters({ page: nextPage })}
+                  label={t("pages.devices.pager.label")}
+                  previousLabel={t("pages.devices.pager.previous")}
+                  nextLabel={t("pages.devices.pager.next")}
+                />
+              ) : null}
+            </>
           ) : null}
-        </>
+        </div>
+      </section>
+      {canManageCredentials ? (
+        <details className="devices-service-workflows">
+          <summary>
+            <span>{t("pages.devices.workflows.title")}</span>
+            <small>{t("pages.devices.workflows.description")}</small>
+          </summary>
+          <div className="devices-service-workflows__body">
+            <DeviceLicensingPanel enabled />
+          </div>
+        </details>
       ) : null}
       {drawer ? (
         <DeviceDrawer

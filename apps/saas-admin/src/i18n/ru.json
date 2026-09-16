@@ -1862,7 +1862,13 @@
       "tabs": {
         "label": "Разделы тенанта",
         "overview": "Обзор и подписка",
+        "equipment": "Оборудование",
         "legal": "Юридические данные"
+      },
+      "equipment": {
+        "eyebrow": "OPERATIONS / EQUIPMENT",
+        "title": "Контур оборудования",
+        "description": "Рабочие устройства, лицензионные места и подготовленные изменения в одном операционном представлении."
       },
       "slug": "Slug",
       "createdAt": "Создан",
@@ -1899,8 +1905,39 @@
       "usageTitle": "Использование и лимиты",
       "deviceLicensing": {
         "title": "Рабочие устройства: Station и ТСД",
+        "summaryLabel": "Состояние рабочих устройств",
         "count": "{{usage}} из {{limit}}",
         "unlimited": "{{usage}} · без лимита",
+        "empty": "Рабочие устройства ещё не зарегистрированы.",
+        "registryEyebrow": "DEVICE REGISTER",
+        "registryTitle": "Реестр рабочих устройств",
+        "registryCount_one": "{{count}} устройство",
+        "registryCount_few": "{{count}} устройства",
+        "registryCount_many": "{{count}} устройств",
+        "registryCount_other": "{{count}} устройства",
+        "metrics": {
+          "occupied": "Занято мест",
+          "available": "Свободно",
+          "attention": "Требуют внимания"
+        },
+        "columns": {
+          "device": "Устройство",
+          "connection": "Подключение",
+          "slot": "Лицензионное место",
+          "actions": "Действия"
+        },
+        "connection": {
+          "awaiting_pairing": "Ожидает привязки",
+          "online": "В сети",
+          "offline": "Не в сети",
+          "revoked": "Доступ отозван"
+        },
+        "workflows": {
+          "replacement": "Замена устройства",
+          "replacementHint": "Подготовить замену без немедленного отключения текущего устройства",
+          "retention": "Уменьшение лимита",
+          "retentionHint": "Выбрать устройства, которые сохранят доступ после изменения тарифа"
+        },
         "loadError": "Не удалось загрузить учёт рабочих устройств.",
         "cancel": "Отменить резерв",
         "confirmTitle": "Отменить этот резерв?",

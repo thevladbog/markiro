@@ -104,7 +104,11 @@ export function DeviceLicensingPanel({ enabled }: { enabled: boolean }) {
   const pool = query.data;
   return (
     <>
-      <Card title={t("pages.devices.licensing.title")} titleAs="h2">
+      <Card
+        className="devices-licensing-card"
+        title={t("pages.devices.licensing.title")}
+        titleAs="h2"
+      >
         <p>
           {pool.limit === null
             ? t("pages.devices.licensing.unlimited", { usage: pool.usage })
@@ -115,17 +119,8 @@ export function DeviceLicensingPanel({ enabled }: { enabled: boolean }) {
           <Alert tone="error">{t("pages.devices.licensing.permissionError")}</Alert>
         ) : null}
         {pool.devices.map((device) => (
-          <div
-            key={device.deviceId}
-            style={{
-              display: "flex",
-              gap: "var(--sp-3)",
-              alignItems: "center",
-              justifyContent: "space-between",
-              flexWrap: "wrap",
-            }}
-          >
-            <span>{device.name}</span>
+          <div key={device.deviceId} className="devices-licensing-row">
+            <span className="devices-licensing-row__name">{device.name}</span>
             <StatusChip
               status={
                 device.state === "released"

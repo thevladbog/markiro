@@ -116,6 +116,26 @@ afterEach(async () => {
   vi.unstubAllGlobals();
   await i18n.changeLanguage("ru");
 });
+it("presents device capacity and the registry as one equipment workspace", async () => {
+  renderPage([
+    {
+      id: "33333333-3333-4333-8333-333333333333",
+      type: "station",
+      name: "Packing station",
+      place: { id: "line-1", name: "Line 1" },
+      status: "online",
+      lastSeenAt: "2026-09-16T10:00:00.000Z",
+      paired: true,
+    },
+  ]);
+
+  expect(await screen.findByRole("region", { name: "Состояние оборудования" })).toBeDefined();
+  expect(screen.getByText("Найдено устройств")).toBeDefined();
+  expect(screen.getByText("На странице требуют внимания")).toBeDefined();
+  expect(screen.getByText("Использование слотов")).toBeDefined();
+  expect(screen.getByRole("region", { name: "Реестр оборудования" })).toBeDefined();
+  expect(screen.getByRole("group", { name: "Фильтры оборудования" })).toBeDefined();
+});
 it("keeps kiosk settings reachable as a button-styled action in the unified device row", async () => {
   renderPage();
   await screen.findByText("Entrance kiosk");

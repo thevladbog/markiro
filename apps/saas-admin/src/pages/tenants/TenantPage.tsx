@@ -18,6 +18,7 @@ import { PanelState } from "../../components/PanelState.js";
 import { getTenant, renewOwnerActivation, tenantIdSchema } from "./api.js";
 import { tenantErrorMessageKey } from "./errorMessages.js";
 import { SubscriptionPanel } from "./SubscriptionPanel.js";
+import { TenantEquipmentPanel } from "./TenantEquipmentPanel.js";
 import { TenantLegalPanel } from "./TenantLegalPanel.js";
 import { useUnsavedChanges } from "./useUnsavedChanges.js";
 
@@ -116,7 +117,13 @@ export function TenantPage() {
   const renewSending = detail.ownerActivation?.status === "sending";
   const canDirectAssign = principal.role === "platform_admin";
   const financialVisible = principal.role !== "support";
-  const activeTab = searchParams.get("tab") === "legal" && financialVisible ? "legal" : "overview";
+  const requestedTab = searchParams.get("tab");
+  const activeTab =
+    requestedTab === "equipment"
+      ? "equipment"
+      : requestedTab === "legal" && financialVisible
+        ? "legal"
+        : "overview";
   const language = i18n.resolvedLanguage?.startsWith("en") ? "en" : "ru";
   const createdNotice =
     (location.state as { tenantCreated?: unknown } | null)?.tenantCreated === true;
@@ -166,18 +173,24 @@ export function TenantPage() {
             count: "01",
             panelId: "tenant-overview-panel",
           },
+          {
+            id: "equipment",
+            label: t("tenants.detail.tabs.equipment"),
+            count: "02",
+            panelId: "tenant-equipment-panel",
+          },
           ...(financialVisible
             ? [
                 {
                   id: "legal",
                   label: t("tenants.detail.tabs.legal"),
-                  count: "02",
+                  count: "03",
                   panelId: "tenant-legal-panel",
                 },
               ]
             : []),
         ]}
-        onChange={(id) => setSearchParams(id === "legal" ? { tab: "legal" } : {})}
+        onChange={(id) => setSearchParams(id === "overview" ? {} : { tab: id })}
       />
 
       {activeTab === "overview" ? (
@@ -246,6 +259,16 @@ export function TenantPage() {
             capabilities={principal.capabilities}
             financialVisible={financialVisible}
             accountant={principal.role === "accountant"}
+          />
+        </div>
+      ) : activeTab === "equipment" ? (
+        <div id="tenant-equipment-panel" role="tabpanel" className="tenant-tab-panel">
+          <TenantEquipmentPanel
+            tenantId={detail.tenant.id}
+            canWrite={
+              principal.capabilities.includes("tenants.write") &&
+              principal.capabilities.includes("billing.write")
+            }
           />
         </div>
       ) : (
