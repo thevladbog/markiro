@@ -1,6 +1,6 @@
 import type { DeviceReplacementWorkBlockers } from "./device-replacement-readiness-work";
 import { schema } from "@markiro/db";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, max } from "drizzle-orm";
 import { deviceReplacementPreparationSchema } from "@markiro/platform-contracts";
 import type { SubscriptionTransaction } from "../../subscriptions/entitlements.types";
 
@@ -8,6 +8,26 @@ export const REPLACEMENT_REPORT_TTL_MS = 60_000;
 export const REPLACEMENT_INTENT_TTL_MS = 5 * 60_000;
 export type ReplacementPreparation =
   typeof schema.workingDeviceReplacementPreparations.$inferSelect;
+/** Rejected/out-of-order reports are still durable observations and cannot lower this fence. */
+export async function replacementStorageRevisionHighWater(
+  tx: SubscriptionTransaction,
+  intent: { tenantId: string; deviceId: string; id: string; credentialEpoch: number },
+) {
+  const reports = schema.workingDeviceReplacementReadinessReports;
+  const [row] = await tx
+    .select({ revision: max(reports.storageRevision) })
+    .from(reports)
+    .where(
+      and(
+        eq(reports.tenantId, intent.tenantId),
+        eq(reports.deviceId, intent.deviceId),
+        eq(reports.intentId, intent.id),
+        eq(reports.credentialEpoch, intent.credentialEpoch),
+      ),
+    );
+  return row?.revision ?? 0;
+}
+
 export async function replacementPreparationProjection(
   tx: SubscriptionTransaction,
   row: ReplacementPreparation,
@@ -38,8 +58,10 @@ export async function replacementPreparationProjection(
         .orderBy(desc(schema.workingDeviceReplacementReadinessReports.reportSequence))
         .limit(1)
     : [];
+  const storageHighWater = intent ? await replacementStorageRevisionHighWater(tx, intent) : 0;
   const stale =
     !report ||
+    report.storageRevision < storageHighWater ||
     Date.now() - report.receivedAt.getTime() >= REPLACEMENT_REPORT_TTL_MS ||
     !intent ||
     Date.now() >= intent.expiresAt.getTime();

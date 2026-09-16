@@ -39,7 +39,7 @@ describe.skipIf(!process.env.DATABASE_URL)("replacement drain readiness", () => 
     if (created) await maintenance.pool.query(`DROP DATABASE "${name}"`);
     await maintenance.pool.end();
   });
-  async function fixture(kind: "station" | "handheld" = "station") {
+  async function fixture(kind: "station" | "handheld" = "station", credentialEpoch = 1) {
     const tenantId = await createOrganization(db);
     const id = randomUUID();
     await db.insert(schema.user).values({ id, name: "Owner", email: `${id}@example.invalid` });
@@ -61,7 +61,7 @@ describe.skipIf(!process.env.DATABASE_URL)("replacement drain readiness", () => 
     });
     const [device] = await db
       .insert(schema.stationDevices)
-      .values({ tenantId, name: "Source", kind, apiKeyId, pairedAt: new Date() })
+      .values({ tenantId, name: "Source", kind, apiKeyId, pairedAt: new Date(), credentialEpoch })
       .returning();
     if (!device) throw new Error("fixture");
     await db.transaction((tx) => transitionWorkingAssignment(tx, device));
@@ -605,4 +605,322 @@ describe.skipIf(!process.env.DATABASE_URL)("replacement drain readiness", () => 
       readiness: { eligibility: { status: "blocked", reasons: ["report_stale"] } },
     });
   });
+  it("keeps the storage revision high-water mark across stale reports and exact retries", async () => {
+    const f = await fixture();
+    const d = await drain(f);
+    const original = { ...d.body, storageRevision: 2 };
+    const originalResponse = await readiness.report(f.identity, original);
+    for (const reportSequence of [1, 2]) {
+      const body = { ...d.body, requestId: randomUUID(), reportSequence, storageRevision: 1 };
+      const response = await readiness.report(f.identity, body);
+      expect(response.eligibility).toEqual({ status: "blocked", reasons: ["report_stale"] });
+      expect(await readiness.report(f.identity, body)).toEqual(response);
+      expect((await service.list(f.tenantId, f.actor)).items[0]?.preparation.state).toBe(
+        "draining",
+      );
+    }
+    expect(await readiness.report(f.identity, original)).toEqual(originalResponse);
+    const caughtUp = await readiness.report(f.identity, {
+      ...d.body,
+      requestId: randomUUID(),
+      reportSequence: 3,
+      storageRevision: 2,
+    });
+    expect(caughtUp.eligibility).toEqual({ status: "eligible", reasons: [] });
+    expect((await readiness.currentIntent(f.identity))?.intentId).toBe(d.intent.intentId);
+    expect((await service.list(f.tenantId, f.actor)).items[0]?.preparation.state).toBe("ready");
+    const rows = await db
+      .select()
+      .from(schema.workingDeviceReplacementReadinessReports)
+      .where(eq(schema.workingDeviceReplacementReadinessReports.intentId, d.intent.intentId));
+    expect(rows).toHaveLength(4);
+  });
+
+  it("preserves a higher storage revision observed in an out-of-order report", async () => {
+    const f = await fixture();
+    const d = await drain(f);
+    await readiness.report(f.identity, { ...d.body, reportSequence: 2, storageRevision: 2 });
+    expect(
+      (
+        await readiness.report(f.identity, {
+          ...d.body,
+          requestId: randomUUID(),
+          reportSequence: 1,
+          storageRevision: 4,
+        })
+      ).eligibility,
+    ).toEqual({ status: "blocked", reasons: ["report_stale"] });
+    expect((await service.list(f.tenantId, f.actor)).items[0]?.preparation.state).toBe("draining");
+    expect(
+      (
+        await readiness.report(f.identity, {
+          ...d.body,
+          requestId: randomUUID(),
+          reportSequence: 3,
+          storageRevision: 3,
+        })
+      ).eligibility,
+    ).toEqual({ status: "blocked", reasons: ["report_stale"] });
+    expect(
+      (
+        await readiness.report(f.identity, {
+          ...d.body,
+          requestId: randomUUID(),
+          reportSequence: 4,
+          storageRevision: 4,
+        })
+      ).eligibility,
+    ).toEqual({ status: "eligible", reasons: [] });
+  });
+
+  async function nativeReceipt(
+    f: Awaited<ReturnType<typeof fixture>>,
+    terminal?: {
+      outcome: "accepted" | "duplicate" | "quarantined";
+      status: "applied" | "rejected" | "not_applied";
+    },
+    deviceId = f.device.id,
+  ) {
+    const id = randomUUID();
+    const batchId = randomUUID();
+    const finalResponse = terminal
+      ? {
+          protocol: "offline-grants-v1",
+          receiptId: id,
+          batchId,
+          outcome: terminal.outcome,
+          reason: null,
+          reconciliation: { status: terminal.status, statusCode: 200, result: null },
+        }
+      : null;
+    await db.insert(schema.deviceGrantIngestReceipts).values({
+      id,
+      tenantId: f.tenantId,
+      ownerKind: f.identity.kind,
+      stationDeviceId: deviceId,
+      credentialEpoch: f.device.credentialEpoch,
+      identity: randomUUID().replaceAll("-", "").repeat(2),
+      operation: "scans",
+      batchId,
+      payloadDigest: "a".repeat(64),
+      envelopeDigest: "b".repeat(64),
+      transportDigest: "c".repeat(64),
+      retainedPayload: { retained: true },
+      mode: "observe",
+      receivedAt: new Date(),
+      finalResponse,
+      finalizedAt: terminal ? new Date() : null,
+    });
+    return { id, batchId };
+  }
+  it.each(["before drain", "after ready"])(
+    "blocks native pending evidence %s and progresses on the same intent after reconciliation",
+    async (when) => {
+      const f = await fixture();
+      const pending = when === "before drain" ? await nativeReceipt(f) : null;
+      const d = await drain(f);
+      if (!pending) {
+        expect((await readiness.report(f.identity, d.body)).eligibility.status).toBe("eligible");
+      }
+      const receipt = pending ?? (await nativeReceipt(f));
+      if (!pending)
+        expect((await service.list(f.tenantId, f.actor)).items[0]?.preparation).toMatchObject({
+          state: "draining",
+          readiness: { eligibility: { status: "blocked", reasons: ["pending_exceptions"] } },
+        });
+      expect(
+        (
+          await readiness.report(f.identity, {
+            ...d.body,
+            requestId: randomUUID(),
+            reportSequence: 1,
+          })
+        ).eligibility,
+      ).toEqual({ status: "blocked", reasons: ["pending_exceptions"] });
+      await db
+        .update(schema.deviceGrantIngestReceipts)
+        .set({
+          finalizedAt: new Date(),
+          finalResponse: {
+            protocol: "offline-grants-v1",
+            receiptId: receipt.id,
+            batchId: receipt.batchId,
+            outcome: "accepted",
+            reason: null,
+            reconciliation: { status: "applied", statusCode: 200, result: null },
+          },
+        })
+        .where(eq(schema.deviceGrantIngestReceipts.id, receipt.id));
+      expect(
+        (
+          await readiness.report(f.identity, {
+            ...d.body,
+            requestId: randomUUID(),
+            reportSequence: 2,
+          })
+        ).eligibility,
+      ).toEqual({ status: "eligible", reasons: [] });
+      expect((await service.list(f.tenantId, f.actor)).items[0]?.preparation.state).toBe("ready");
+      expect((await readiness.currentIntent(f.identity))?.intentId).toBe(d.intent.intentId);
+    },
+  );
+  it.each([
+    { outcome: "accepted" as const, status: "applied" as const, blocked: false },
+    { outcome: "accepted" as const, status: "rejected" as const, blocked: false },
+    { outcome: "duplicate" as const, status: "applied" as const, blocked: false },
+    { outcome: "accepted" as const, status: "not_applied" as const, blocked: true },
+    { outcome: "quarantined" as const, status: "not_applied" as const, blocked: true },
+  ])(
+    "treats native $outcome/$status with explicit resolved semantics",
+    async ({ outcome, status, blocked }) => {
+      const f = await fixture();
+      await nativeReceipt(f, { outcome, status });
+      const d = await drain(f);
+      expect((await readiness.report(f.identity, d.body)).eligibility).toEqual(
+        blocked
+          ? { status: "blocked", reasons: ["pending_exceptions"] }
+          : { status: "eligible", reasons: [] },
+      );
+      expect((await service.list(f.tenantId, f.actor)).items[0]?.preparation.state).toBe(
+        blocked ? "draining" : "ready",
+      );
+    },
+  );
+  it("scopes native evidence to its tenant/device and retains old-epoch quarantine blockers", async () => {
+    const f = await fixture("station", 2);
+    const other = await fixture();
+    const [peer] = await db
+      .insert(schema.stationDevices)
+      .values({ tenantId: f.tenantId, name: "Peer", kind: "station" })
+      .returning();
+    if (!peer) throw new Error("peer missing");
+    await db.transaction((tx) => transitionWorkingAssignment(tx, peer));
+    await nativeReceipt(other);
+    await nativeReceipt(f, undefined, peer.id);
+    const d = await drain(f);
+    expect((await readiness.report(f.identity, d.body)).eligibility.status).toBe("eligible");
+    const [evidence] = await db
+      .insert(schema.deviceGrantEvidence)
+      .values({
+        tenantId: f.tenantId,
+        ownerKind: "station",
+        stationDeviceId: f.device.id,
+        credentialEpoch: f.device.credentialEpoch - 1,
+        evidenceIdentity: randomUUID(),
+        payloadDigest: "a".repeat(64),
+        payload: {},
+        disposition: "quarantined",
+        reason: "grant_missing_or_unrecognized",
+      })
+      .returning();
+    if (!evidence) throw new Error("evidence missing");
+    expect((await service.list(f.tenantId, f.actor)).items[0]?.preparation.state).toBe("draining");
+    expect(
+      (
+        await readiness.report(f.identity, {
+          ...d.body,
+          requestId: randomUUID(),
+          reportSequence: 1,
+        })
+      ).eligibility,
+    ).toEqual({ status: "blocked", reasons: ["pending_exceptions"] });
+  });
+  it.each(["discarded", "replayed"] as const)(
+    "blocks inventory quarantine behind a terminal receipt until it is %s",
+    async (resolution) => {
+      const f = await fixture();
+      const inventoryId = randomUUID();
+      const snapshotId = randomUUID();
+      const productId = randomUUID();
+      const lineId = randomUUID();
+      await db
+        .insert(schema.products)
+        .values({ id: productId, tenantId: f.tenantId, name: "Product", gtin14: "04680089900024" });
+      await db.insert(schema.lines).values({ id: lineId, tenantId: f.tenantId, name: "Line" });
+      await db.insert(schema.inventories).values({
+        id: inventoryId,
+        tenantId: f.tenantId,
+        number: "INV-1",
+        productId,
+        lineId,
+        gtin14Snapshot: "04680089900024",
+        mode: "check",
+        productionDateFrom: "2026-09-16",
+        productionDateTo: "2026-09-16",
+        createdByUserId: f.actor.id,
+      });
+      await db.insert(schema.inventorySnapshots).values({
+        id: snapshotId,
+        tenantId: f.tenantId,
+        inventoryId,
+        combinedDigest: "a".repeat(64),
+        productName: "Product",
+        lineName: "Line",
+        fixedByUserId: f.actor.id,
+        emittedCount: 0,
+        introducedCount: 0,
+        appliedCount: 0,
+        retiredCount: 0,
+        writtenOffCount: 0,
+        disaggregationCount: 0,
+        protectedCount: 0,
+        expectedCount: 0,
+        packageCount: 0,
+        looseCount: 0,
+      });
+      await db
+        .update(schema.inventories)
+        .set({
+          status: "closed",
+          activeSnapshotId: snapshotId,
+          stationManifest: {},
+          closedByUserId: f.actor.id,
+          closedAt: new Date(),
+        })
+        .where(eq(schema.inventories.id, inventoryId));
+      const receipt = await nativeReceipt(f, { outcome: "accepted", status: "rejected" });
+      const d = await drain(f);
+      expect((await readiness.report(f.identity, d.body)).eligibility.status).toBe("eligible");
+      const [late] = await db
+        .insert(schema.inventoryLateEvents)
+        .values({
+          tenantId: f.tenantId,
+          inventoryId,
+          deviceId: f.device.id,
+          batchId: receipt.batchId,
+          payload: {},
+          payloadDigest: "a".repeat(64),
+          closedRevision: 0,
+          reason: "INVENTORY_CLOSED",
+        })
+        .returning();
+      if (!late) throw new Error("late evidence missing");
+      expect((await service.list(f.tenantId, f.actor)).items[0]?.preparation.state).toBe(
+        "draining",
+      );
+      expect(
+        (
+          await readiness.report(f.identity, {
+            ...d.body,
+            requestId: randomUUID(),
+            reportSequence: 1,
+          })
+        ).eligibility,
+      ).toEqual({ status: "blocked", reasons: ["pending_exceptions"] });
+      await db
+        .update(schema.inventoryLateEvents)
+        .set({ resolution, resolvedAt: new Date(), resolvedByUserId: f.actor.id })
+        .where(eq(schema.inventoryLateEvents.id, late.id));
+      expect(
+        (
+          await readiness.report(f.identity, {
+            ...d.body,
+            requestId: randomUUID(),
+            reportSequence: 2,
+          })
+        ).eligibility,
+      ).toEqual({ status: "eligible", reasons: [] });
+      expect((await service.list(f.tenantId, f.actor)).items[0]?.preparation.state).toBe("ready");
+    },
+  );
 });

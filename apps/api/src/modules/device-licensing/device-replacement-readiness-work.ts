@@ -37,6 +37,10 @@ export function deviceReplacementServerWorkBlockers(
         reasons.push("unknown_prints");
     }
   }
-  if (work.quarantine.some((q) => q.deviceId === deviceId)) reasons.push("pending_exceptions");
+  if (
+    work.quarantine.some((q) => q.deviceId === deviceId) ||
+    work.nativeEvidence.some((row) => row.deviceId === deviceId)
+  )
+    reasons.push("pending_exceptions");
   return [...new Set(reasons)];
 }

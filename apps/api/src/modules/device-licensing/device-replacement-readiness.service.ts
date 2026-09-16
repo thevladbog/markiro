@@ -37,6 +37,7 @@ import { readDeviceReplacementFacts, replacementDigest } from "./device-replacem
 import { deviceReplacementServerWorkBlockers } from "./device-replacement-readiness-work";
 import {
   replacementPreparationProjection,
+  replacementStorageRevisionHighWater,
   REPLACEMENT_INTENT_TTL_MS,
 } from "./device-replacement-readiness-projection";
 
@@ -333,14 +334,14 @@ export class DeviceReplacementReadinessService {
           ),
         );
       if (usedSequence) throw conflict();
+      const storageHighWater = await replacementStorageRevisionHighWater(tx, intent);
       const reasons: Reasons = [];
       const stale =
         intent.state !== "active" ||
         now >= intent.expiresAt ||
         !["draining", "ready"].includes(row.state) ||
-        (previous !== undefined &&
-          (body.reportSequence < previous.reportSequence ||
-            body.storageRevision < previous.storageRevision));
+        body.storageRevision < storageHighWater ||
+        (previous !== undefined && body.reportSequence < previous.reportSequence);
       if (stale) reasons.push("report_stale");
       const facts = await this.facts(tx, owner.tenantId, owner.deviceId, row.observation);
       if (
