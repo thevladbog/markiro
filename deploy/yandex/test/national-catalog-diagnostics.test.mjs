@@ -147,6 +147,56 @@ test("hosted National Catalog diagnostic discovers the active API with shell-saf
   assert.equal(commands[1].options, undefined);
 });
 
+test("hosted National Catalog diagnostic reads bounded sanitized category dependencies", async () => {
+  const commands = [];
+  const categoryDependency = [
+    {
+      categoryId: "30398",
+      fetchedAt: "2026-09-16T10:00:00.000Z",
+      attribute: {
+        attrId: 22999,
+        attrType: "o",
+        fieldType: "text",
+        multiplicity: false,
+        presetOnly: true,
+        presetCount: 2,
+        hasPresetUrl: true,
+        dependentAttributes: [],
+      },
+    },
+  ];
+  const result = await runHostedNationalCatalogDiagnostics(
+    {
+      ...HOSTED_ENVIRONMENT,
+      NATIONAL_CATALOG_DIAGNOSTIC_CATEGORY_IDS: "30398,30391,30398",
+    },
+    dependencies(
+      [
+        "a1b2c3d4e5f6\n",
+        `MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS ${JSON.stringify(EVIDENCE)}\n`,
+        JSON.stringify(categoryDependency),
+      ],
+      commands,
+    ),
+  );
+
+  assert.deepEqual(result, { ...EVIDENCE, categoryDependency });
+  assert.equal(commands.length, 3);
+  assert.deepEqual(commands[2].args.slice(-9), [
+    "markiro-deploy@203.0.113.42",
+    "sudo",
+    "/usr/local/bin/docker",
+    "exec",
+    "-i",
+    "a1b2c3d4e5f6",
+    "node",
+    "--input-type=module",
+    "-",
+  ]);
+  assert.match(commands[2].options.input, /\[\["30398","30391"\]\]/);
+  assert.doesNotMatch(commands[2].options.input, /token|gtin|product/i);
+});
+
 test("hosted National Catalog diagnostic rejects missing or ambiguous containers and widened evidence", async () => {
   for (const outputs of [
     [""],

@@ -8,6 +8,11 @@ on:
         required: true
         type: boolean
         default: false
+      national_catalog_category_ids:
+        description: Optional comma-separated category IDs for sanitized dependency metadata
+        required: false
+        type: string
+        default: ""
       recurring_services:
         description: Run the read-only recurring-services migration diagnostic
         required: true
@@ -40,6 +45,7 @@ jobs:
         env:
           YC_APP_DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.YC_APP_DEPLOY_SSH_PRIVATE_KEY }}
           RUN_NATIONAL_CATALOG_DIAGNOSTIC: ${{ inputs.national_catalog }}
+          NATIONAL_CATALOG_DIAGNOSTIC_CATEGORY_IDS: ${{ inputs.national_catalog_category_ids }}
           RUN_RECURRING_SERVICES_DIAGNOSTIC: ${{ inputs.recurring_services }}
         run: |
           set -euo pipefail
