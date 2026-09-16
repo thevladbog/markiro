@@ -526,6 +526,69 @@ test("production plan guard classifies every safe production action exactly", as
   reject(protectedUpdate);
 });
 
+test("production plan guard permits only adding btree_gist to the application database", async () => {
+  const safe = await readFixture("safe");
+  const databaseAddress = "module.postgres.yandex_mdb_postgresql_database.application";
+  const exactAddition = copy(safe);
+  const database = resource(exactAddition, databaseAddress);
+  database.change = {
+    actions: ["update"],
+    before: {
+      cluster_id: "production-cluster-id",
+      extension: [],
+      name: "markiro",
+      owner: "markiro",
+    },
+    after: {
+      cluster_id: "production-cluster-id",
+      extension: [{ name: "btree_gist", version: "" }],
+      name: "markiro",
+      owner: "markiro",
+    },
+    after_unknown: {},
+  };
+  assert.doesNotThrow(() => guardProductionPlan(exactAddition));
+  for (const providerNormalizedVersion of [null, undefined]) {
+    const normalized = copy(exactAddition);
+    const extension = resource(normalized, databaseAddress).change.after.extension[0];
+    if (providerNormalizedVersion === undefined) delete extension.version;
+    else extension.version = providerNormalizedVersion;
+    assert.doesNotThrow(() => guardProductionPlan(normalized));
+  }
+
+  const rejectedMutations = [
+    (change) => {
+      change.after.extension[0].name = "pg_trgm";
+    },
+    (change) => {
+      change.before.extension = [{ name: "btree_gist", version: "" }];
+      change.after.extension = [];
+    },
+    (change) => {
+      change.after.owner = "another-owner";
+    },
+    (change) => {
+      change.after.extension.push({ name: "pg_trgm", version: "" });
+    },
+    (change) => {
+      change.after.extension[0].version = "1.0";
+    },
+    (change) => {
+      change.after.extension[0].version = null;
+      change.after_unknown = { extension: [{ version: true }] };
+    },
+    (change) => {
+      change.actions = ["delete", "create"];
+    },
+  ];
+
+  for (const mutate of rejectedMutations) {
+    const changed = copy(exactAddition);
+    mutate(resource(changed, databaseAddress).change);
+    reject(changed);
+  }
+});
+
 test("guard CLI reports only a fixed rejection scope without plan values", async () => {
   const safe = await readFixture("safe");
   const protectedUpdate = copy(safe);
