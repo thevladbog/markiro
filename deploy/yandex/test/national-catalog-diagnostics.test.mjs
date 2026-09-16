@@ -211,6 +211,52 @@ test("hosted National Catalog diagnostic reads bounded sanitized category depend
   assert.doesNotMatch(commands[2].options.input, /token|gtin|product/i);
 });
 
+test("hosted National Catalog diagnostic reads bounded sanitized product category metadata", async () => {
+  const commands = [];
+  const productCategory = [
+    {
+      gtin14: "04680089900024",
+      createdAt: "2026-09-16T18:48:45.158Z",
+      parsedCategories: [],
+      rawKeys: ["good_id", "categories", "good_category"],
+      rawCategoryFields: {
+        categories: [],
+        good_category: { cat_id: 30398, cat_name: "Сидр" },
+      },
+    },
+  ];
+  const result = await runHostedNationalCatalogDiagnostics(
+    {
+      ...HOSTED_ENVIRONMENT,
+      NATIONAL_CATALOG_DIAGNOSTIC_GTINS: "04680089900024,04680089900017,04680089900024",
+    },
+    dependencies(
+      [
+        "a1b2c3d4e5f6\n",
+        `MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS ${JSON.stringify(EVIDENCE)}\n`,
+        JSON.stringify(productCategory),
+      ],
+      commands,
+    ),
+  );
+
+  assert.deepEqual(result, { ...EVIDENCE, productCategory });
+  assert.equal(commands.length, 3);
+  assert.deepEqual(commands[2].args.slice(-9), [
+    "markiro-deploy@203.0.113.42",
+    "sudo",
+    "/usr/local/bin/docker",
+    "exec",
+    "-i",
+    "a1b2c3d4e5f6",
+    "node",
+    "--input-type=module",
+    "-",
+  ]);
+  assert.match(commands[2].options.input, /\[\["04680089900024","04680089900017"\]\]/);
+  assert.doesNotMatch(commands[2].options.input, /active_token|decrypt|credential/i);
+});
+
 test("hosted National Catalog diagnostic rejects missing or ambiguous containers and widened evidence", async () => {
   for (const outputs of [
     [""],
