@@ -2,6 +2,7 @@ import { renderHook, waitFor } from "@testing-library/react";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { STATION_MIGRATIONS } from "@markiro/db/station-sqlite";
+import { persistTargetReplacementFence } from "../src/lib/replacement-target.js";
 import { useDeviceReplacement } from "../src/lib/use-device-replacement.js";
 import {
   prepareReplacementReadiness,
@@ -78,6 +79,36 @@ async function fixture(response: unknown) {
   return { db, input, post, get };
 }
 describe("replacement polling lifecycle", () => {
+  it("loads the target waiting screen before a delayed network response and retains it after remount", async () => {
+    const f = await fixture({ version: 1, state: "none" });
+    await f.input.exec.run("DELETE FROM device_replacement_drain");
+    await persistTargetReplacementFence(f.input.exec, {
+      ...f.input.expectedDevice,
+      deviceName: "Target",
+      organizationName: "Factory",
+      apiKey: "test-device",
+      serverUrl: "https://example.invalid",
+      operators: [],
+      replacement: {
+        version: 1,
+        executionId: intent.preparationId,
+        credentialEpoch: 2,
+        newWorkAllowedAt: 5000,
+        serverTime: 1000,
+      },
+    });
+    f.get.mockImplementation(() => new Promise(() => {}));
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const view = renderHook(() => useDeviceReplacement(f.input));
+      expect(view.result.current.loaded).toBe(false);
+      await waitFor(() => expect(view.result.current.loaded).toBe(true));
+      expect(view.result.current.drain).toMatchObject({
+        targetWaitingUntil: 5000,
+        resumeTasks: [],
+      });
+      view.unmount();
+    }
+  });
   it.each([null, { version: 1, state: "none" }])(
     "does not reopen a retained drain on an absent or delayed empty projection: %j",
     async (response) => {

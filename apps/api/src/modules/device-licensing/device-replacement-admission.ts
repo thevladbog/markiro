@@ -22,6 +22,12 @@ export async function assertDeviceReplacementNewWorkAllowed(
     )
     .for("update");
   if (!device) throw new NotFoundException("Station device not found");
+  const waiting = await replacementTargetWaiting(tx, tenantId, deviceId);
+  if (waiting)
+    throw new ConflictException({
+      code: "device_replacement_waiting",
+      newWorkAllowedAt: waiting.newWorkAllowedAt.toISOString(),
+    });
   const [replacement] = await tx
     .select({ id: schema.workingDeviceReplacementPreparations.id })
     .from(schema.workingDeviceReplacementPreparations)
@@ -74,4 +80,83 @@ export async function assertDeviceReplacementNewWorkAllowed(
     if (participant) return;
   }
   throw new ConflictException({ code: "device_replacement_draining" });
+}
+
+/** Target authority is withheld independently of pairing and subscription mode. */
+export async function replacementTargetWaiting(
+  tx: SubscriptionTransaction,
+  tenantId: string,
+  deviceId: string,
+  now: Date = new Date(),
+) {
+  const [execution] = await tx
+    .select()
+    .from(schema.workingDeviceReplacementExecutions)
+    .where(
+      and(
+        eq(schema.workingDeviceReplacementExecutions.tenantId, tenantId),
+        eq(schema.workingDeviceReplacementExecutions.targetDeviceId, deviceId),
+      ),
+    );
+  if (
+    !execution ||
+    (execution.credentialRevokedAt &&
+      execution.state === "completed" &&
+      execution.newWorkAllowedAt <= now)
+  )
+    return null;
+  return execution;
+}
+
+/** Called under the device/quota locks before issuing or claiming a normal code. */
+export async function assertReplacementSourcePairingAllowed(
+  tx: SubscriptionTransaction,
+  tenantId: string,
+  deviceId: string,
+) {
+  const [row] = await tx
+    .select({ id: schema.workingDeviceReplacementPreparations.id })
+    .from(schema.workingDeviceReplacementPreparations)
+    .where(
+      and(
+        eq(schema.workingDeviceReplacementPreparations.tenantId, tenantId),
+        eq(schema.workingDeviceReplacementPreparations.deviceId, deviceId),
+        inArray(schema.workingDeviceReplacementPreparations.state, [
+          "draining",
+          "ready",
+          "executing",
+          "completed",
+        ]),
+      ),
+    );
+  if (row) throw new ConflictException({ code: "device_replacement_source_frozen" });
+}
+
+/** Sent even after the boundary so a durable native wait can obtain an explicit release. */
+export async function replacementTargetFence(
+  tx: SubscriptionTransaction,
+  tenantId: string,
+  deviceId: string,
+  credentialEpoch: number,
+  now: Date = new Date(),
+) {
+  const [execution] = await tx
+    .select()
+    .from(schema.workingDeviceReplacementExecutions)
+    .where(
+      and(
+        eq(schema.workingDeviceReplacementExecutions.tenantId, tenantId),
+        eq(schema.workingDeviceReplacementExecutions.targetDeviceId, deviceId),
+      ),
+    );
+  if (!execution) return undefined;
+  if (execution.state !== "completed" || !execution.credentialRevokedAt)
+    throw new ConflictException({ code: "device_replacement_waiting" });
+  return {
+    version: 1 as const,
+    executionId: execution.id,
+    credentialEpoch,
+    newWorkAllowedAt: execution.newWorkAllowedAt.getTime(),
+    serverTime: now.getTime(),
+  };
 }

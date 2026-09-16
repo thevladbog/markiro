@@ -2165,8 +2165,20 @@ export function App() {
         <p role="status">{t("app.booting")}</p>
       ) : replacement.drain ? (
         <Card style={{ padding: 32 }}>
-          <h1>{t("replacement.title")}</h1>
-          <p>{t("replacement.hint")}</p>
+          <h1>
+            {t(
+              replacement.drain.targetWaitingUntil
+                ? "replacement.waitingTitle"
+                : "replacement.title",
+            )}
+          </h1>
+          <p>
+            {replacement.drain.targetWaitingUntil
+              ? t("replacement.waitingHint", {
+                  time: new Date(replacement.drain.targetWaitingUntil).toLocaleString(),
+                })
+              : t("replacement.hint")}
+          </p>
           {replacement.drain.reportFailed && <p role="status">{t("replacement.retrying")}</p>}
           <dl aria-label={t("replacement.counters")}>
             {Object.entries({

@@ -74,6 +74,7 @@ data class HubUi(
     val canWriteoff: Boolean? = null,
     val replacementBlocked: Boolean = false,
     val replacementClosed: Boolean = false,
+    val replacementTargetWaiting: Boolean = false,
     val replacementCounters: kotlinx.serialization.json.JsonObject? = null,
 )
 
@@ -199,7 +200,7 @@ class HubViewModel(
     val state: StateFlow<HubUi> = combine(
         config.observe(), session.state, reachability.lastSuccessAt, tick, sync.state, activeShift, inventorySync.state, activeInventory,
         printers.observeRouting(), boxes.observeUnprintedCount(), writeoffSync.state, writeoffPermission,
-        replacement?.state ?: flowOf(null), replacement?.counters ?: flowOf(null),
+        replacement?.state ?: flowOf(null), replacement?.counters ?: flowOf(null), replacement?.targetWaiting ?: flowOf(false),
     ) { values ->
         val cfg = values[0] as DeviceConfigEntity?
         val ses = values[1] as SessionState
@@ -227,7 +228,8 @@ class HubViewModel(
             stuck = syncState.stuck || inventoryState.stuck || writeoffState.stuck,
             writeoffPending = writeoffState.pending,
             canWriteoff = values[11] as Boolean?,
-            replacementBlocked = (values[12] as app.markiro.handheld.core.storage.ReplacementDrainEntity?)?.blocked == true,
+            replacementTargetWaiting = values[14] as Boolean,
+            replacementBlocked = (values[14] as Boolean) || (values[12] as app.markiro.handheld.core.storage.ReplacementDrainEntity?)?.blocked == true,
             replacementClosed = (values[12] as app.markiro.handheld.core.storage.ReplacementDrainEntity?)?.state == "closed",
             replacementCounters = (values[13] as app.markiro.handheld.core.replacement.JsonSnapshot?)?.value,
             activeShiftId = current?.shift?.id,

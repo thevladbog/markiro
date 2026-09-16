@@ -1,3 +1,4 @@
+import { targetReplacementWaiting } from "./replacement-target.js";
 import {
   deviceReplacementCurrentIntentResponseSchema,
   deviceReplacementIntentClosureSchema,
@@ -310,6 +311,7 @@ export function replacementCancellationAcknowledged(
 
 /** Drain is independent of observe/strict grant rollout and survives delayed configuration. */
 export async function replacementBlocksNewWork(exec: SqlExecutor): Promise<boolean> {
+  if (await targetReplacementWaiting(exec)) return true;
   const row = await readReplacementDrain(exec);
   return row !== null && !replacementCancellationAcknowledged(row);
 }
@@ -319,6 +321,7 @@ export async function replacementCanEnterTask(
   taskId: string,
   kind: "shift" | "inventory",
 ): Promise<boolean> {
+  if (await targetReplacementWaiting(exec)) return false;
   const row = await readReplacementDrain(exec);
   if (!row || replacementCancellationAcknowledged(row)) return true;
   const tasks = JSON.parse(row.resume_tasks_json) as Array<{ taskId: string; kind: string }>;

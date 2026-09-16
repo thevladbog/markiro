@@ -211,9 +211,12 @@ const deviceReplacementRecoveryStateSchema = z.enum([
 
 const deviceReplacementExecutionProjectionSchema = z
   .object({
+    id: platformUuidSchema,
+    revision: positiveRevisionSchema,
+    step: z.enum(["revoke_pending", "credential_revoked", "transferred"]),
     mode: z.enum(["normal", "emergency"]),
-    targetDeviceId: platformUuidSchema,
-    executedAt: platformTimestampSchema,
+    targetDeviceId: platformUuidSchema.nullable(),
+    executedAt: platformTimestampSchema.nullable(),
     newWorkAllowedAt: platformTimestampSchema,
     recoveryState: deviceReplacementRecoveryStateSchema,
   })
@@ -287,7 +290,13 @@ export const deviceReplacementPreparationSchema = z
         message: "Cancellation cannot precede preparation",
       });
     }
-    if (preparation.state === "completed" && !preparation.execution) {
+    if (
+      preparation.state === "completed" &&
+      (!preparation.execution ||
+        preparation.execution.step !== "transferred" ||
+        !preparation.execution.targetDeviceId ||
+        !preparation.execution.executedAt)
+    ) {
       context.addIssue({
         code: "custom",
         path: ["execution"],
@@ -304,7 +313,13 @@ export const deviceReplacementPreparationSchema = z
         message: "An active drain requires a readiness projection",
       });
     }
-    if (preparation.state === "executing" && !preparation.execution) {
+    if (
+      preparation.state === "executing" &&
+      (!preparation.execution ||
+        preparation.execution.step === "transferred" ||
+        preparation.execution.targetDeviceId !== null ||
+        preparation.execution.executedAt !== null)
+    ) {
       context.addIssue({
         code: "custom",
         path: ["execution"],
@@ -592,6 +607,34 @@ export type DeviceReplacementReadinessResponse = z.output<
 >;
 
 export const cabinetDeviceReplacementContracts = {
+  executionPreview: {
+    method: "POST",
+    path: "/device-licensing/replacements/:preparationId/execution/preview",
+    status: 200,
+    body: deviceReplacementExecutionPreviewRequestSchema,
+    response: deviceReplacementExecutionPreviewSchema,
+  },
+  execute: {
+    method: "POST",
+    path: "/device-licensing/replacements/:preparationId/execute",
+    status: 200,
+    body: deviceReplacementExecuteRequestSchema,
+    response: deviceReplacementReceiptSchema,
+  },
+  emergencyPreview: {
+    method: "POST",
+    path: "/device-licensing/replacements/:preparationId/emergency/preview",
+    status: 200,
+    body: deviceReplacementEmergencyPreviewRequestSchema,
+    response: deviceReplacementExecutionPreviewSchema,
+  },
+  emergencyExecute: {
+    method: "POST",
+    path: "/device-licensing/replacements/:preparationId/emergency/execute",
+    status: 200,
+    body: deviceReplacementExecuteRequestSchema,
+    response: deviceReplacementReceiptSchema,
+  },
   drain: {
     method: "POST",
     path: "/device-licensing/replacements/:preparationId/drain",
@@ -628,6 +671,34 @@ export const cabinetDeviceReplacementContracts = {
 } as const;
 
 export const platformDeviceReplacementContracts = {
+  executionPreview: {
+    method: "POST",
+    path: "/platform/tenants/:tenantId/device-licensing/replacements/:preparationId/execution/preview",
+    status: 200,
+    body: deviceReplacementExecutionPreviewRequestSchema,
+    response: deviceReplacementExecutionPreviewSchema,
+  },
+  execute: {
+    method: "POST",
+    path: "/platform/tenants/:tenantId/device-licensing/replacements/:preparationId/execute",
+    status: 200,
+    body: deviceReplacementExecuteRequestSchema,
+    response: deviceReplacementReceiptSchema,
+  },
+  emergencyPreview: {
+    method: "POST",
+    path: "/platform/tenants/:tenantId/device-licensing/replacements/:preparationId/emergency/preview",
+    status: 200,
+    body: deviceReplacementEmergencyPreviewRequestSchema,
+    response: deviceReplacementExecutionPreviewSchema,
+  },
+  emergencyExecute: {
+    method: "POST",
+    path: "/platform/tenants/:tenantId/device-licensing/replacements/:preparationId/emergency/execute",
+    status: 200,
+    body: deviceReplacementExecuteRequestSchema,
+    response: deviceReplacementReceiptSchema,
+  },
   drain: {
     method: "POST",
     path: "/platform/tenants/:tenantId/device-licensing/replacements/:preparationId/drain",
@@ -757,3 +828,15 @@ export const stationDeviceReplacementContracts = {
     response: deviceReplacementReadinessResponseSchema,
   },
 } as const;
+
+/** Versioned security fence, observed at server time, bound to the paired credential epoch. */
+export const deviceReplacementTargetFenceSchema = z
+  .object({
+    version: z.literal(1),
+    executionId: platformUuidSchema,
+    credentialEpoch: positiveEpochSchema,
+    newWorkAllowedAt: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    serverTime: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  })
+  .strict();
+export type DeviceReplacementTargetFence = z.output<typeof deviceReplacementTargetFenceSchema>;

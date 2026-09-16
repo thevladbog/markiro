@@ -1,3 +1,4 @@
+import { applyTargetReplacementConfiguration } from "../replacement-target.js";
 import {
   grantIssueResultSchema,
   grantConfigurationSchema,
@@ -312,6 +313,12 @@ export async function refreshStationGrantConfiguration(input: {
   } finally {
     lease.release();
   }
+  await applyTargetReplacementConfiguration(
+    input.exec,
+    input.generation,
+    configuration.owner,
+    configuration.replacement,
+  );
   return configuration;
 }
 

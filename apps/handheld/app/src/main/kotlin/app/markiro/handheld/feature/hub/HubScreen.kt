@@ -102,7 +102,7 @@ fun HubScreen(state: HubUi, onTile: (HubTile) -> Unit, onSignOut: () -> Unit, on
                     IconAction(Icons.AutoMirrored.Outlined.Logout, stringResource(R.string.hub_sign_out), onSignOut)
                 }
                 if (state.replacementBlocked) {
-                    Banner(stringResource(if (state.replacementClosed) R.string.replacement_closed else R.string.replacement_drain), Tone.Warn, Icons.Outlined.Sync)
+                    Banner(stringResource(if (state.replacementTargetWaiting) R.string.replacement_waiting else if (state.replacementClosed) R.string.replacement_closed else R.string.replacement_drain), Tone.Warn, Icons.Outlined.Sync)
                     state.replacementCounters?.let { counts ->
                         val pending = counts.getValue("pending").jsonObject
                         for ((key,label) in listOf("scans" to R.string.replacement_scans, "inventories" to R.string.replacement_inventories,
@@ -138,9 +138,9 @@ fun HubScreen(state: HubUi, onTile: (HubTile) -> Unit, onSignOut: () -> Unit, on
                             Icons.Outlined.Inventory2,
                             stringResource(R.string.hub_tile_inventory),
                             state.continueInventoryNumber?.let { stringResource(R.string.hub_inventory_continue, it) } ?: (inventoriesLabel(state.inventories) + stamp),
-                            { if (!state.replacementBlocked || state.activeInventoryId != null) onTile(HubTile.INVENTORY) },
+                            { if (!state.replacementTargetWaiting && (!state.replacementBlocked || state.activeInventoryId != null)) onTile(HubTile.INVENTORY) },
                             modifier,
-                            enabled = !state.replacementBlocked || state.activeInventoryId != null,
+                            enabled = !state.replacementTargetWaiting && (!state.replacementBlocked || state.activeInventoryId != null),
                             statusTone = if (state.continueInventoryNumber != null) Tone.Ok else Tone.Neutral,
                         )
                     },

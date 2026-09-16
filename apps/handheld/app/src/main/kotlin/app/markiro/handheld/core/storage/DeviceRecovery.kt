@@ -119,7 +119,7 @@ class DeviceRecovery(private val db: HandheldDatabase, private val credential: C
             // completely empty, blocked states may retry under the same validated owner;
             // ACTIVE or any retained operational/roster data still requires saved config.
             return row.phase in setOf(RecoveryPhase.RESTORING.name, RecoveryPhase.SEALING.name, RecoveryPhase.SEALED.name) &&
-                !hasRetainedData() && db.operatorDao().all().isEmpty()
+                !hasRetainedData(allowTargetFence = true) && db.operatorDao().all().isEmpty()
         }
         return ownerOf(config.serverUrl, config.tenantId, config.deviceId, config.kind) == owner && legacyOwnerConsistent(owner)
     }
@@ -293,6 +293,7 @@ class DeviceRecovery(private val db: HandheldDatabase, private val credential: C
         val publication = credential.staged()?.let { runCatching { json.decodeFromString(Publication.serializer(), it) }.getOrNull() }
         if (publication == null) { seal(row); return }
         check(publication.id == row.pendingId && publication.owner == row.owner() && publication.generation == row.generation)
+        app.markiro.handheld.core.replacement.ReplacementTarget(db).persistPublication(publication.owner, publication.generation, publication.response.replacement)
         credential.write(publication.response.credential.apiKey)
         val device = publication.response.device
         db.withTransaction {
@@ -378,9 +379,9 @@ class DeviceRecovery(private val db: HandheldDatabase, private val credential: C
         true
     }
 
-    private fun hasRetainedData(): Boolean = db.openHelper.readableDatabase.query(
+    private fun hasRetainedData(allowTargetFence: Boolean = false): Boolean = db.openHelper.readableDatabase.query(
         "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('device_config','device_recovery','operators','room_master_table','android_metadata')",
-    ).use { tables -> var found = false; while (tables.moveToNext()) if (count(tables.getString(0)) > 0) found = true; found }
+    ).use { tables -> var found = false; while (tables.moveToNext()) if (if (allowTargetFence && tables.getString(0)=="meta") db.openHelper.readableDatabase.query("SELECT 1 FROM meta WHERE key<>'device_replacement_target_v1' LIMIT 1").use { it.moveToFirst() } else count(tables.getString(0)) > 0) found = true; found }
 
     private class CommitLease(val recovery: DeviceRecovery, val transaction: Boolean) : AbstractCoroutineContextElement(Key) {
         companion object Key : CoroutineContext.Key<CommitLease>

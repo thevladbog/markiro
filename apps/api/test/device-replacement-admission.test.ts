@@ -1,3 +1,4 @@
+import { schema } from "@markiro/db";
 import type { EntitlementSnapshotV1 } from "@markiro/platform-contracts";
 import type { SubscriptionTransaction } from "../src/subscriptions/entitlements.types";
 import { describe, expect, it } from "vitest";
@@ -27,13 +28,16 @@ function facts(replacementState: string, sourceState: "assigned" | "released" = 
   };
   const pool = [{ device: source, assignment }];
   return {
-    select(selection: Record<string, unknown>) {
+    select(selection: Record<string, unknown> = {}) {
       const rows = "device" in selection ? pool : [{ state: replacementState }];
       const query = {
         where: async () => rows,
         leftJoin: () => ({ where: async () => rows }),
       };
-      return { from: () => query };
+      return {
+        from: (table: unknown) =>
+          table === schema.workingDeviceReplacementExecutions ? { where: async () => [] } : query,
+      };
     },
   } as unknown as SubscriptionTransaction;
 }

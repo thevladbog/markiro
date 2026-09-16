@@ -1,3 +1,4 @@
+import type { DeviceReplacementTargetFence } from "@markiro/platform-contracts";
 import { z } from "zod";
 import type { SchemaObject } from "@nestjs/swagger";
 import type { OperatorMirrorRecord } from "@markiro/db";
@@ -10,6 +11,7 @@ export const pairStationSchema = z.object({
 export type PairStationDto = z.infer<typeof pairStationSchema>;
 
 export type StationPairErrorCode =
+  | "PAIR_UPDATE_REQUIRED"
   | "PAIR_INVALID"
   | "PAIR_EXPIRED"
   | "PAIR_LOCKED"
@@ -25,6 +27,7 @@ export const stationPairErrorOpenApiSchema: SchemaObject = {
     code: {
       type: "string",
       enum: [
+        "PAIR_UPDATE_REQUIRED",
         "PAIR_INVALID",
         "PAIR_EXPIRED",
         "PAIR_LOCKED",
@@ -42,6 +45,7 @@ export interface IssueStationPairingCodeResultDto {
 }
 
 export interface PairStationResultDto {
+  replacement?: DeviceReplacementTargetFence;
   device: {
     id: string;
     name: string;

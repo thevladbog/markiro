@@ -1,3 +1,8 @@
+import { persistTargetReplacementFence } from "./replacement-target.js";
+import {
+  deviceReplacementTargetFenceSchema,
+  type DeviceReplacementTargetFence,
+} from "@markiro/platform-contracts";
 import {
   stationRecoveryResponseSchema,
   type StationRecoveryIdentity,
@@ -39,6 +44,7 @@ export interface StationProvisioning {
   serverUrl: string;
   operators: OperatorMirrorRecord[];
   subscription?: StationSubscriptionAccess;
+  replacement?: DeviceReplacementTargetFence;
 }
 
 interface StationSubscriptionAccess {
@@ -132,6 +138,7 @@ export async function redeemStationRecovery(
       credential: parsed.data.credential,
       operators: parsed.data.operators,
       ...(parsed.data.subscription ? { subscription: parsed.data.subscription } : {}),
+      ...(parsed.data.replacement ? { replacement: parsed.data.replacement } : {}),
     });
     if (!provisioning) return { ok: false, error: "invalid_response" };
     const actual = stationOwner({ machineId: "", ...provisioning });
@@ -167,6 +174,7 @@ export async function persistStationProvisioning(
     throw new Error("Invalid operator roster");
   }
   const publish = async (config: StationConfig) => {
+    await persistTargetReplacementFence(exec, provisioning);
     await replaceOperatorsMirror(exec, provisioning.operators);
     onRosterPublished?.();
     await writeConfig(config);
@@ -214,10 +222,21 @@ async function readJson(response: Response): Promise<unknown> {
  * write. A partial response must never leave the station half-paired.
  */
 function decodeProvisioning(value: unknown): StationProvisioning | null {
-  if (!isExactRecordWithOptional(value, ["device", "credential", "operators"], ["subscription"])) {
+  if (
+    !isExactRecordWithOptional(
+      value,
+      ["device", "credential", "operators"],
+      ["subscription", "replacement"],
+    )
+  ) {
     return null;
   }
-  const { device, credential, operators, subscription } = value;
+  const { device, credential, operators, subscription, replacement } = value;
+  const fence =
+    replacement === undefined
+      ? undefined
+      : deviceReplacementTargetFenceSchema.safeParse(replacement);
+  if (fence && !fence.success) return null;
   if (!isExactRecord(device, ["id", "name", "tenantId", "organizationName", "line"])) return null;
   if (!isExactRecord(credential, ["apiKey", "serverUrl"])) return null;
   if (
@@ -259,6 +278,7 @@ function decodeProvisioning(value: unknown): StationProvisioning | null {
     serverUrl: credential.serverUrl,
     operators,
     ...(subscription !== undefined ? { subscription } : {}),
+    ...(fence?.success ? { replacement: fence.data } : {}),
   };
 }
 

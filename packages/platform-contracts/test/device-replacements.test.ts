@@ -303,6 +303,9 @@ describe("device replacement contracts", () => {
         cancelledAt: null,
         observation,
         execution: {
+          id: previewId,
+          revision: 3,
+          step: "transferred",
           mode: "emergency",
           targetDeviceId: previewId,
           executedAt: expiresAt,
@@ -486,6 +489,34 @@ describe("device replacement contracts", () => {
 
   it("publishes separate cabinet and platform replacement routes with 200 mutations", () => {
     expect(contracts.cabinetDeviceReplacementContracts).toEqual({
+      executionPreview: {
+        method: "POST",
+        path: "/device-licensing/replacements/:preparationId/execution/preview",
+        status: 200,
+        body: contracts.deviceReplacementExecutionPreviewRequestSchema,
+        response: contracts.deviceReplacementExecutionPreviewSchema,
+      },
+      execute: {
+        method: "POST",
+        path: "/device-licensing/replacements/:preparationId/execute",
+        status: 200,
+        body: contracts.deviceReplacementExecuteRequestSchema,
+        response: contracts.deviceReplacementReceiptSchema,
+      },
+      emergencyPreview: {
+        method: "POST",
+        path: "/device-licensing/replacements/:preparationId/emergency/preview",
+        status: 200,
+        body: contracts.deviceReplacementEmergencyPreviewRequestSchema,
+        response: contracts.deviceReplacementExecutionPreviewSchema,
+      },
+      emergencyExecute: {
+        method: "POST",
+        path: "/device-licensing/replacements/:preparationId/emergency/execute",
+        status: 200,
+        body: contracts.deviceReplacementExecuteRequestSchema,
+        response: contracts.deviceReplacementReceiptSchema,
+      },
       drain: {
         method: "POST",
         path: "/device-licensing/replacements/:preparationId/drain",
@@ -521,6 +552,34 @@ describe("device replacement contracts", () => {
       },
     });
     expect(contracts.platformDeviceReplacementContracts).toEqual({
+      executionPreview: {
+        method: "POST",
+        path: "/platform/tenants/:tenantId/device-licensing/replacements/:preparationId/execution/preview",
+        status: 200,
+        body: contracts.deviceReplacementExecutionPreviewRequestSchema,
+        response: contracts.deviceReplacementExecutionPreviewSchema,
+      },
+      execute: {
+        method: "POST",
+        path: "/platform/tenants/:tenantId/device-licensing/replacements/:preparationId/execute",
+        status: 200,
+        body: contracts.deviceReplacementExecuteRequestSchema,
+        response: contracts.deviceReplacementReceiptSchema,
+      },
+      emergencyPreview: {
+        method: "POST",
+        path: "/platform/tenants/:tenantId/device-licensing/replacements/:preparationId/emergency/preview",
+        status: 200,
+        body: contracts.deviceReplacementEmergencyPreviewRequestSchema,
+        response: contracts.deviceReplacementExecutionPreviewSchema,
+      },
+      emergencyExecute: {
+        method: "POST",
+        path: "/platform/tenants/:tenantId/device-licensing/replacements/:preparationId/emergency/execute",
+        status: 200,
+        body: contracts.deviceReplacementExecuteRequestSchema,
+        response: contracts.deviceReplacementReceiptSchema,
+      },
       drain: {
         method: "POST",
         path: "/platform/tenants/:tenantId/device-licensing/replacements/:preparationId/drain",

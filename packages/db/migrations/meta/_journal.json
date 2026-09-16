@@ -1156,6 +1156,13 @@
       "when": 1789588790910,
       "tag": "0164_device_replacement_closure_ack",
       "breakpoints": true
+    },
+    {
+      "idx": 165,
+      "version": "7",
+      "when": 1789595301443,
+      "tag": "0165_device_replacement_execution_preview",
+      "breakpoints": true
     }
   ]
 }

@@ -1,3 +1,4 @@
+import { readTargetReplacementFence } from "./replacement-target.js";
 import { useEffect, useRef, useState } from "react";
 import {
   deviceReplacementIntentProjectionSchema,
@@ -19,6 +20,7 @@ import type { SqlExecutor } from "./mirror.js";
 export type ReplacementMeasurements = Awaited<ReturnType<typeof readReplacementMeasurements>>;
 export interface ReplacementDrainView {
   intentId: string;
+  targetWaitingUntil?: number;
   measurements: ReplacementMeasurements | null;
   resumeTasks: DeviceReplacementReadinessRequest["activeTasks"];
   reportFailed: boolean;
@@ -46,6 +48,8 @@ export function useDeviceReplacement(input: {
       running = false;
     const current = () => active && (!generation || credentialGenerationIsCurrent(generation));
     const publish = async (reportFailed: boolean) => {
+      const target = await readTargetReplacementFence(exec);
+      const waiting = target && target.fence.serverTime < target.fence.newWorkAllowedAt;
       const saved = await readReplacementDrain(exec);
       const row = replacementCancellationAcknowledged(saved) ? null : saved;
       const measurements = row ? await readReplacementMeasurements(exec) : null;
@@ -53,16 +57,24 @@ export function useDeviceReplacement(input: {
         setState({
           generation,
           loaded: true,
-          drain: row
+          drain: waiting
             ? {
-                intentId: row.intent_id,
-                measurements,
-                resumeTasks: JSON.parse(
-                  row.resume_tasks_json,
-                ) as DeviceReplacementReadinessRequest["activeTasks"],
+                intentId: target.fence.executionId,
+                targetWaitingUntil: target.fence.newWorkAllowedAt,
+                measurements: null,
+                resumeTasks: [],
                 reportFailed,
               }
-            : null,
+            : row
+              ? {
+                  intentId: row.intent_id,
+                  measurements,
+                  resumeTasks: JSON.parse(
+                    row.resume_tasks_json,
+                  ) as DeviceReplacementReadinessRequest["activeTasks"],
+                  reportFailed,
+                }
+              : null,
         });
     };
     const run = async () => {

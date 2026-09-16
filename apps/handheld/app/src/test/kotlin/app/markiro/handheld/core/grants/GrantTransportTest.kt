@@ -84,6 +84,23 @@ class GrantTransportTest {
         return MockResponse().setHeader("Content-Type","application/json").setBody(result.toString())
     }
 
+    @Test fun waitingTargetPersistsStrictPolicyEvenWhenIssuanceIsDenied() = runTest {
+        val server = MockWebServer(); server.start()
+        val db = database(server.url("/").toString().trimEnd('/'))
+        try {
+            val token = db.recovery.token()
+            val fence = app.markiro.handheld.core.network.ReplacementTargetFence(1, java.util.UUID.randomUUID().toString(), 7, 2000, 500)
+            app.markiro.handheld.core.replacement.ReplacementTarget(db).persistPublication(token.owner, token.generation, fence)
+            val wireFence = Json.encodeToJsonElement(app.markiro.handheld.core.network.ReplacementTargetFence.serializer(), fence.copy(serverTime = 1000))
+            val config = configuration(envelope(token.owner))
+            server.enqueue(response(JsonObject(config + ("replacement" to wireFence))))
+            server.enqueue(response(buildJsonObject { put("status", "denied"); put("reason", "not_entitled") }))
+            assertFalse(GrantTransport(db, api(server)).refreshIfAvailable())
+            assertTrue(app.markiro.handheld.core.replacement.ReplacementReadiness(db).blocked())
+            assertEquals("strict", db.grantDao().state()!!.mode)
+        } finally { db.close(); server.shutdown() }
+    }
+
     @Test fun retirementPersistsWhenIssuanceIsDeniedOrMalformed() = runTest {
         for (failure in listOf(response(buildJsonObject { put("status","denied"); put("reason","subscription_restricted") }), MockResponse().setResponseCode(403), response(buildJsonObject { put("status","issued"); put("envelope",buildJsonObject {}) }))) {
             val server=MockWebServer(); server.start(); val db=database(server.url("/").toString().trimEnd('/'))

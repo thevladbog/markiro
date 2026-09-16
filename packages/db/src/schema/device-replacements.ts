@@ -436,3 +436,49 @@ export const workingDeviceReplacementClosureAcknowledgements = pgTable(
     ),
   ],
 );
+
+/** Immutable, actor-bound approval snapshot; a preview never starts a cutover. */
+export const workingDeviceReplacementExecutionPreviews = pgTable(
+  "working_device_replacement_execution_previews",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: text("tenant_id").notNull(),
+    deviceId: uuid("device_id").notNull(),
+    preparationId: uuid("preparation_id").notNull(),
+    actorDomain: text("actor_domain").$type<WorkingDeviceReplacementActorDomain>().notNull(),
+    actorId: text("actor_id").notNull(),
+    requestId: uuid("request_id").notNull(),
+    requestHash: text("request_hash").notNull(),
+    expectedRevision: integer("expected_revision").notNull(),
+    mode: text("mode").$type<"normal" | "emergency">().notNull(),
+    emergencyReason: text("emergency_reason"),
+    factsFingerprint: text("facts_fingerprint").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    newWorkAllowedAt: timestamp("new_work_allowed_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    unique("replacement_execution_previews_request_uq").on(t.tenantId, t.actorDomain, t.requestId),
+    foreignKey({
+      name: "replacement_execution_previews_preparation_fk",
+      columns: [t.tenantId, t.deviceId, t.preparationId],
+      foreignColumns: [
+        workingDeviceReplacementPreparations.tenantId,
+        workingDeviceReplacementPreparations.deviceId,
+        workingDeviceReplacementPreparations.id,
+      ],
+    }),
+    check(
+      "replacement_execution_previews_identity_check",
+      sql`${t.actorDomain} in ('cabinet','platform') and length(btrim(${t.actorId})) between 1 and 256 and ${t.expectedRevision} > 0 and ${t.requestHash} ~ '^[0-9a-f]{64}$' and ${t.factsFingerprint} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      "replacement_execution_previews_mode_check",
+      sql`((${t.mode} = 'normal' and ${t.emergencyReason} is null) or (${t.mode} = 'emergency' and ${t.emergencyReason} is not null and length(btrim(${t.emergencyReason})) between 1 and 1000)) is true`,
+    ),
+    check(
+      "replacement_execution_previews_interval_check",
+      sql`isfinite(${t.createdAt}) and isfinite(${t.expiresAt}) and isfinite(${t.newWorkAllowedAt}) and ${t.expiresAt} > ${t.createdAt} and ${t.expiresAt} <= ${t.createdAt} + interval '5 minutes'`,
+    ),
+  ],
+);

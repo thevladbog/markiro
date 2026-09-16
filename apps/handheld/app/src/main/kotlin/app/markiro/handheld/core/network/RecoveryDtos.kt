@@ -25,7 +25,7 @@ data class RecoveryOperator(val operatorId: String, val name: String, val login:
 data class RecoverySubscription(val access: String, val status: String, val startsAt: String?, val endsAt: String?)
 @Serializable
 data class RecoveryResponse(val version: Int, val device: RecoveryDevice, val credential: CredentialDto,
-    val operators: List<RecoveryOperator>, val subscription: RecoverySubscription? = null) {
+    val operators: List<RecoveryOperator>, val subscription: RecoverySubscription? = null, val replacement: ReplacementTargetFence? = null) {
     fun validate(): RecoveryResponse {
         require(version == 1 && device.kind in setOf("station", "handheld") && device.tenantId.isNotEmpty())
         require(UUID_PATTERN.matches(device.id) && (device.line == null || UUID_PATTERN.matches(device.line.id)))
@@ -36,10 +36,11 @@ data class RecoveryResponse(val version: Int, val device: RecoveryDevice, val cr
             it.startsAt?.let(java.time.Instant::parse)
             it.endsAt?.let(java.time.Instant::parse)
         }
+        replacement?.validate()
         return this
     }
     fun pairing() = PairResponse(DeviceDto(device.id, device.name, device.kind, device.tenantId, device.organizationName, device.line),
-        credential, operators.map { OperatorDto(it.operatorId, it.name, it.login, it.role, it.pinHash, it.badgeHash, it.active) })
+        credential, operators.map { OperatorDto(it.operatorId, it.name, it.login, it.role, it.pinHash, it.badgeHash, it.active) }, replacement)
     companion object {
         val UUID_PATTERN = Regex("([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)")
         val json = Json { ignoreUnknownKeys = false; explicitNulls = true; encodeDefaults = true }

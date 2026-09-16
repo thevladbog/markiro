@@ -1,3 +1,4 @@
+import { DeviceReplacementExecutionService } from "./device-replacement-execution.service";
 import { DeviceReplacementReadinessService } from "./device-replacement-readiness.service";
 import {
   Body,
@@ -18,6 +19,9 @@ import {
   type DeviceReplacementConfirm,
   type DeviceReplacementCancel,
   type DeviceReplacementDrainRequest,
+  type DeviceReplacementExecutionPreviewRequest,
+  type DeviceReplacementExecuteRequest,
+  type DeviceReplacementEmergencyPreviewRequest,
 } from "@markiro/platform-contracts";
 import { RequirePlatformCapabilities } from "../../platform-auth/platform-access-policy";
 import type { RequestWithPlatformPrincipal } from "../../platform-auth/platform-auth.guard";
@@ -34,7 +38,80 @@ export class PlatformDeviceReplacementController {
   constructor(
     private readonly replacements: DeviceReplacementService,
     private readonly readiness: DeviceReplacementReadinessService,
+    private readonly execution: DeviceReplacementExecutionService,
   ) {}
+  @Post("replacements/:preparationId/execution/preview")
+  @HttpCode(200)
+  @ApiOperation({ summary: "previewExecution working device replacement" })
+  @ApiParam({ name: "preparationId", format: "uuid" })
+  @RequirePlatformCapabilities("tenants.write", "billing.write")
+  @PlatformApiProtectedOk({
+    response: platformDeviceReplacementContracts.executionPreview.response,
+    body: platformDeviceReplacementContracts.executionPreview.body,
+  })
+  executionPreview(
+    @Req() request: RequestWithPlatformPrincipal,
+    @Param("tenantId", new ZodValidationPipe(platformTenantIdSchema)) tenantId: string,
+    @Param("preparationId", new ZodValidationPipe(platformUuidSchema)) preparationId: string,
+    @Body(new ZodValidationPipe(platformDeviceReplacementContracts.executionPreview.body))
+    body: DeviceReplacementExecutionPreviewRequest,
+  ) {
+    return this.execution.previewExecution(tenantId, preparationId, body, actor(request));
+  }
+  @Post("replacements/:preparationId/execute")
+  @HttpCode(200)
+  @ApiOperation({ summary: "executeNormal working device replacement" })
+  @ApiParam({ name: "preparationId", format: "uuid" })
+  @RequirePlatformCapabilities("tenants.write", "billing.write")
+  @PlatformApiProtectedOk({
+    response: platformDeviceReplacementContracts.execute.response,
+    body: platformDeviceReplacementContracts.execute.body,
+  })
+  execute(
+    @Req() request: RequestWithPlatformPrincipal,
+    @Param("tenantId", new ZodValidationPipe(platformTenantIdSchema)) tenantId: string,
+    @Param("preparationId", new ZodValidationPipe(platformUuidSchema)) preparationId: string,
+    @Body(new ZodValidationPipe(platformDeviceReplacementContracts.execute.body))
+    body: DeviceReplacementExecuteRequest,
+  ) {
+    return this.execution.executeNormal(tenantId, preparationId, body, actor(request));
+  }
+  @Post("replacements/:preparationId/emergency/preview")
+  @HttpCode(200)
+  @ApiOperation({ summary: "previewEmergency working device replacement" })
+  @ApiParam({ name: "preparationId", format: "uuid" })
+  @RequirePlatformCapabilities("tenants.write", "billing.write")
+  @PlatformApiProtectedOk({
+    response: platformDeviceReplacementContracts.emergencyPreview.response,
+    body: platformDeviceReplacementContracts.emergencyPreview.body,
+  })
+  emergencyPreview(
+    @Req() request: RequestWithPlatformPrincipal,
+    @Param("tenantId", new ZodValidationPipe(platformTenantIdSchema)) tenantId: string,
+    @Param("preparationId", new ZodValidationPipe(platformUuidSchema)) preparationId: string,
+    @Body(new ZodValidationPipe(platformDeviceReplacementContracts.emergencyPreview.body))
+    body: DeviceReplacementEmergencyPreviewRequest,
+  ) {
+    return this.execution.previewEmergency(tenantId, preparationId, body, actor(request));
+  }
+  @Post("replacements/:preparationId/emergency/execute")
+  @HttpCode(200)
+  @ApiOperation({ summary: "executeEmergency working device replacement" })
+  @ApiParam({ name: "preparationId", format: "uuid" })
+  @RequirePlatformCapabilities("tenants.write", "billing.write")
+  @PlatformApiProtectedOk({
+    response: platformDeviceReplacementContracts.emergencyExecute.response,
+    body: platformDeviceReplacementContracts.emergencyExecute.body,
+  })
+  emergencyExecute(
+    @Req() request: RequestWithPlatformPrincipal,
+    @Param("tenantId", new ZodValidationPipe(platformTenantIdSchema)) tenantId: string,
+    @Param("preparationId", new ZodValidationPipe(platformUuidSchema)) preparationId: string,
+    @Body(new ZodValidationPipe(platformDeviceReplacementContracts.emergencyExecute.body))
+    body: DeviceReplacementExecuteRequest,
+  ) {
+    return this.execution.executeEmergency(tenantId, preparationId, body, actor(request));
+  }
   @Post("replacements/:preparationId/drain")
   @HttpCode(200)
   @ApiOperation({ summary: "Request source device drain readiness" })

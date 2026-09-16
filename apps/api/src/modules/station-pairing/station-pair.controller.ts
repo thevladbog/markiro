@@ -160,6 +160,7 @@ export class StationPairController {
       expectedRecoveryIdentity: body.expected,
       includeSubscription: hasCapability(capabilities, "subscription-state-v1"),
       handheldClient: hasCapability(capabilities, "handheld-v1"),
+      replacementBoundary: hasCapability(capabilities, "replacement-boundary-v1"),
     });
     return { version: 1, ...paired };
   }
@@ -188,6 +189,7 @@ export class StationPairController {
     return this.pairing.redeem(body.code, ip, {
       includeSubscription: hasCapability(capabilities, "subscription-state-v1"),
       handheldClient: hasCapability(capabilities, "handheld-v1"),
+      replacementBoundary: hasCapability(capabilities, "replacement-boundary-v1"),
     });
   }
 }

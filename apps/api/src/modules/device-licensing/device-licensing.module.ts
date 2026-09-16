@@ -1,3 +1,5 @@
+import { DeviceReplacementExecutionService } from "./device-replacement-execution.service";
+import { DeviceReplacementExecutionRepairService } from "./device-replacement-execution-repair.service";
 import { DeviceReplacementReadinessController } from "./device-replacement-readiness.controller";
 import { DeviceReplacementReadinessService } from "./device-replacement-readiness.service";
 import { DeviceRetentionService } from "./device-retention.service";
@@ -25,6 +27,8 @@ import { PlatformDeviceLicensingController } from "./platform-device-licensing.c
     PlatformDeviceLicensingController,
   ],
   providers: [
+    DeviceReplacementExecutionService,
+    DeviceReplacementExecutionRepairService,
     DeviceReplacementReadinessService,
     DeviceRetentionService,
     DeviceReplacementService,

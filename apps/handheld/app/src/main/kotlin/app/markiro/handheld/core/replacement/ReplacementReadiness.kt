@@ -11,8 +11,9 @@ import java.util.UUID
 
 /** All state transitions share the credential-generation and Room business commit boundary. */
 class ReplacementReadiness(private val db: HandheldDatabase) {
-    suspend fun blocked(): Boolean = db.replacementDao().get()?.blocked == true
+    suspend fun blocked(): Boolean = ReplacementTarget(db).blocked() || db.replacementDao().get()?.blocked == true
     suspend fun requireAdmission(kind: String? = null, taskId: String? = null) {
+        if (ReplacementTarget(db).blocked()) throw ReplacementDenied()
         val row = db.replacementDao().get() ?: return
         if (!row.blocked) return
         val token = db.recovery.token()

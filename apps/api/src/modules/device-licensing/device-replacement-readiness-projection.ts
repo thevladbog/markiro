@@ -1,7 +1,10 @@
 import type { DeviceReplacementWorkBlockers } from "./device-replacement-readiness-work";
 import { schema } from "@markiro/db";
 import { and, desc, eq, max } from "drizzle-orm";
-import { deviceReplacementPreparationSchema } from "@markiro/platform-contracts";
+import {
+  deviceReplacementPreparationSchema,
+  deviceReplacementReceiptSchema,
+} from "@markiro/platform-contracts";
 import type { SubscriptionTransaction } from "../../subscriptions/entitlements.types";
 
 export const REPLACEMENT_REPORT_TTL_MS = 60_000;
@@ -34,6 +37,30 @@ export async function replacementPreparationProjection(
   currentFingerprint?: string | null,
   currentWorkBlockers: DeviceReplacementWorkBlockers = [],
 ) {
+  const [execution] = await tx
+    .select()
+    .from(schema.workingDeviceReplacementExecutions)
+    .where(
+      and(
+        eq(schema.workingDeviceReplacementExecutions.tenantId, row.tenantId),
+        eq(schema.workingDeviceReplacementExecutions.preparationId, row.id),
+      ),
+    );
+  if (row.state === "completed" && execution?.response) {
+    const saved = deviceReplacementReceiptSchema.parse(execution.response).preparation;
+    return deviceReplacementPreparationSchema.parse({
+      ...saved,
+      execution: {
+        ...saved.execution,
+        revision: execution.revision,
+        recoveryState: execution.recoveryState,
+      },
+      recovery: {
+        state: execution.recoveryState,
+        closedAt: execution.recoveryClosedAt?.toISOString() ?? null,
+      },
+    });
+  }
   const [intent] = await tx
     .select()
     .from(schema.workingDeviceReplacementReadinessIntents)
@@ -110,6 +137,24 @@ export async function replacementPreparationProjection(
     preparedAt: row.preparedAt.toISOString(),
     cancelledAt: row.cancelledAt?.toISOString() ?? null,
     observation: row.observation,
+    ...(execution
+      ? {
+          execution: {
+            id: execution.id,
+            revision: execution.revision,
+            step: execution.step,
+            mode: execution.mode,
+            targetDeviceId: execution.targetDeviceId,
+            executedAt: execution.executedAt?.toISOString() ?? null,
+            newWorkAllowedAt: execution.newWorkAllowedAt.toISOString(),
+            recoveryState: execution.recoveryState,
+          },
+          recovery: {
+            state: execution.recoveryState,
+            closedAt: execution.recoveryClosedAt?.toISOString() ?? null,
+          },
+        }
+      : {}),
     ...(intent
       ? {
           readiness: {

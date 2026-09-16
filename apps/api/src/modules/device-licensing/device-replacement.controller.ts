@@ -1,3 +1,4 @@
+import { DeviceReplacementExecutionService } from "./device-replacement-execution.service";
 import { DeviceReplacementReadinessService } from "./device-replacement-readiness.service";
 import { Body, Controller, Get, HttpCode, Param, Post, Req, UseGuards } from "@nestjs/common";
 import { ApiOperation, ApiParam, ApiTags } from "@nestjs/swagger";
@@ -9,6 +10,9 @@ import {
   type DeviceReplacementConfirm,
   type DeviceReplacementCancel,
   type DeviceReplacementDrainRequest,
+  type DeviceReplacementExecutionPreviewRequest,
+  type DeviceReplacementExecuteRequest,
+  type DeviceReplacementEmergencyPreviewRequest,
 } from "@markiro/platform-contracts";
 import { RequirePermissions } from "../../authorization/access-policy";
 import { AuthorizationGuard } from "../../authorization/authorization.guard";
@@ -37,7 +41,85 @@ export class DeviceReplacementController {
   constructor(
     private readonly replacements: DeviceReplacementService,
     private readonly readiness: DeviceReplacementReadinessService,
+    private readonly execution: DeviceReplacementExecutionService,
   ) {}
+  @Post("replacements/:preparationId/execution/preview")
+  @HttpCode(200)
+  @ApiOperation({ summary: "previewExecution working device replacement" })
+  @ApiParam({ name: "preparationId", format: "uuid" })
+  @AllowSubscriptionLicensing("replacement_execute")
+  @ApiZodBody(cabinetDeviceReplacementContracts.executionPreview.body)
+  @ApiZodValidationError()
+  @ApiZodResponse({
+    status: 200,
+    schema: cabinetDeviceReplacementContracts.executionPreview.response,
+  })
+  @ApiHttpErrors(401, 403, 404, 409)
+  executionPreview(
+    @Req() request: RequestWithTenant,
+    @Param("preparationId", new ZodValidationPipe(platformUuidSchema)) preparationId: string,
+    @Body(new ZodValidationPipe(cabinetDeviceReplacementContracts.executionPreview.body))
+    body: DeviceReplacementExecutionPreviewRequest,
+  ) {
+    return this.execution.previewExecution(request.tenantId!, preparationId, body, actor(request));
+  }
+  @Post("replacements/:preparationId/execute")
+  @HttpCode(200)
+  @ApiOperation({ summary: "executeNormal working device replacement" })
+  @ApiParam({ name: "preparationId", format: "uuid" })
+  @AllowSubscriptionLicensing("replacement_execute")
+  @ApiZodBody(cabinetDeviceReplacementContracts.execute.body)
+  @ApiZodValidationError()
+  @ApiZodResponse({ status: 200, schema: cabinetDeviceReplacementContracts.execute.response })
+  @ApiHttpErrors(401, 403, 404, 409)
+  execute(
+    @Req() request: RequestWithTenant,
+    @Param("preparationId", new ZodValidationPipe(platformUuidSchema)) preparationId: string,
+    @Body(new ZodValidationPipe(cabinetDeviceReplacementContracts.execute.body))
+    body: DeviceReplacementExecuteRequest,
+  ) {
+    return this.execution.executeNormal(request.tenantId!, preparationId, body, actor(request));
+  }
+  @Post("replacements/:preparationId/emergency/preview")
+  @HttpCode(200)
+  @ApiOperation({ summary: "previewEmergency working device replacement" })
+  @ApiParam({ name: "preparationId", format: "uuid" })
+  @AllowSubscriptionLicensing("replacement_execute")
+  @ApiZodBody(cabinetDeviceReplacementContracts.emergencyPreview.body)
+  @ApiZodValidationError()
+  @ApiZodResponse({
+    status: 200,
+    schema: cabinetDeviceReplacementContracts.emergencyPreview.response,
+  })
+  @ApiHttpErrors(401, 403, 404, 409)
+  emergencyPreview(
+    @Req() request: RequestWithTenant,
+    @Param("preparationId", new ZodValidationPipe(platformUuidSchema)) preparationId: string,
+    @Body(new ZodValidationPipe(cabinetDeviceReplacementContracts.emergencyPreview.body))
+    body: DeviceReplacementEmergencyPreviewRequest,
+  ) {
+    return this.execution.previewEmergency(request.tenantId!, preparationId, body, actor(request));
+  }
+  @Post("replacements/:preparationId/emergency/execute")
+  @HttpCode(200)
+  @ApiOperation({ summary: "executeEmergency working device replacement" })
+  @ApiParam({ name: "preparationId", format: "uuid" })
+  @AllowSubscriptionLicensing("replacement_execute")
+  @ApiZodBody(cabinetDeviceReplacementContracts.emergencyExecute.body)
+  @ApiZodValidationError()
+  @ApiZodResponse({
+    status: 200,
+    schema: cabinetDeviceReplacementContracts.emergencyExecute.response,
+  })
+  @ApiHttpErrors(401, 403, 404, 409)
+  emergencyExecute(
+    @Req() request: RequestWithTenant,
+    @Param("preparationId", new ZodValidationPipe(platformUuidSchema)) preparationId: string,
+    @Body(new ZodValidationPipe(cabinetDeviceReplacementContracts.emergencyExecute.body))
+    body: DeviceReplacementExecuteRequest,
+  ) {
+    return this.execution.executeEmergency(request.tenantId!, preparationId, body, actor(request));
+  }
   @Post("replacements/:preparationId/drain")
   @HttpCode(200)
   @ApiOperation({ summary: "Request source device drain readiness" })

@@ -38,7 +38,7 @@ internal class GrantTransport(private val db: HandheldDatabase, private val api:
       catch (_: java.security.GeneralSecurityException) { false }
 
     suspend fun refresh(kind: TaskKind? = null, taskId: String? = null) = db.recovery.work {
-        if (kind == null && app.markiro.handheld.core.replacement.ReplacementReadiness(db).blocked()) return@work
+        if (kind == null && db.replacementDao().get()?.blocked == true) return@work
         val ticket = db.grants.beginRefresh()
         val requestClock = db.grants.sample()
         val negotiation = buildJsonObject {
@@ -47,7 +47,8 @@ internal class GrantTransport(private val db: HandheldDatabase, private val api:
             put("requestId", UUID.randomUUID().toString())
         }
         val configuration = api.grantConfiguration(negotiation)
-        require(configuration.keys == setOf("protocol", "owner", "serverTime", "mode", "policyRevision", "keyset"))
+        require(configuration.keys - "replacement" == setOf("protocol", "owner", "serverTime", "mode", "policyRevision", "keyset"))
+        val replacement = configuration["replacement"]?.let { Json { ignoreUnknownKeys=false }.decodeFromJsonElement(app.markiro.handheld.core.network.ReplacementTargetFence.serializer(),it).validate() }
         require(configuration.string("protocol") == "offline-grants-v1")
         val epoch = verifyOwner(ticket, configuration.getValue("owner").jsonObject)
         val configuredMode = configuration.string("mode").also { require(it in setOf("observe", "strict")) }
@@ -75,11 +76,13 @@ internal class GrantTransport(private val db: HandheldDatabase, private val api:
                     retiredKids=JsonArray(retired.sorted().map(::JsonPrimitive)).toString(), keysetJson=saved.toString())
             } else state
             // A missing policy is not an approved rollback of an existing strict policy.
-            val mode = if (policy == null || app.markiro.handheld.core.replacement.ReplacementReadiness(db).blocked()) state.mode else configuredMode
+            val mode = if (policy == null || db.replacementDao().get()?.blocked == true) state.mode else configuredMode
             db.grantDao().state(anchor(withKeys, ticket, requestClock, serverTime).copy(epoch=epoch, mode=mode))
             true
         }
         if (!current) return@work
+        replacement?.let { require(it.credentialEpoch==epoch && it.serverTime==serverTime) }
+        app.markiro.handheld.core.replacement.ReplacementTarget(db).applyConfiguration(ticket.token,replacement)
         checkNotNull(security) { "Offline grant signing is not configured" }
         val body = buildJsonObject {
             negotiation.forEach { (key,value) -> put(key,value) }

@@ -89,6 +89,7 @@ describe("working device replacement schema", () => {
 
 describe("working device replacement execution schema", () => {
   it.each([
+    "workingDeviceReplacementExecutionPreviews",
     "workingDeviceReplacementReadinessIntents",
     "workingDeviceReplacementReadinessReports",
     "workingDeviceReplacementExecutions",
@@ -119,6 +120,37 @@ it("pins closure acknowledgements to the exact tenant, source, intent and epoch"
     getTableConfig(table).uniqueConstraints.some(
       (constraint) =>
         constraint.columns.map((column) => column.name).join(",") === "tenant_id,request_id",
+    ),
+  ).toBe(true);
+});
+
+it("binds immutable execution previews to the exact tenant, source and preparation", () => {
+  const table = schema.workingDeviceReplacementExecutionPreviews;
+  expect(
+    getTableConfig(table).foreignKeys.some(
+      (key) =>
+        key
+          .reference()
+          .columns.map((column) => column.name)
+          .join(",") === "tenant_id,device_id,preparation_id",
+    ),
+  ).toBe(true);
+  for (const column of [
+    table.actorDomain,
+    table.actorId,
+    table.requestId,
+    table.requestHash,
+    table.expectedRevision,
+    table.factsFingerprint,
+    table.expiresAt,
+    table.newWorkAllowedAt,
+  ])
+    expect(column.notNull).toBe(true);
+  expect(
+    getTableConfig(table).uniqueConstraints.some(
+      (constraint) =>
+        constraint.columns.map((column) => column.name).join(",") ===
+        "tenant_id,actor_domain,request_id",
     ),
   ).toBe(true);
 });

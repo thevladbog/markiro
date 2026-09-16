@@ -84,6 +84,17 @@ export class StationDevicesService {
           )
           .for("update");
         if (!current) throw new NotFoundException();
+        const [execution] = await tx
+          .select({ id: schema.workingDeviceReplacementExecutions.id })
+          .from(schema.workingDeviceReplacementExecutions)
+          .where(
+            and(
+              eq(schema.workingDeviceReplacementExecutions.tenantId, tenantId),
+              eq(schema.workingDeviceReplacementExecutions.deviceId, id),
+              eq(schema.workingDeviceReplacementExecutions.state, "executing"),
+            ),
+          );
+        if (execution) throw new ConflictException({ code: "device_replacement_source_frozen" });
         assertReservationOpen(await workingAssignment(tx, tenantId, id));
         const lineName = await this.lineName(
           tenantId,
@@ -148,6 +159,19 @@ export class StationDevicesService {
           // key deletion. Acquiring a second pooled connection while holding the
           // quota lock could starve the pool behind concurrent waiting revokes.
           if (locked.apiKeyId !== null && !deletedKeys.has(locked.apiKeyId)) return locked.apiKeyId;
+          // Execution owns the durable source transition once its intent commits.
+          // Security revocation above is still immediate; repair completes its journal.
+          const [execution] = await tx
+            .select({ id: schema.workingDeviceReplacementExecutions.id })
+            .from(schema.workingDeviceReplacementExecutions)
+            .where(
+              and(
+                eq(schema.workingDeviceReplacementExecutions.tenantId, tenantId),
+                eq(schema.workingDeviceReplacementExecutions.deviceId, id),
+                eq(schema.workingDeviceReplacementExecutions.state, "executing"),
+              ),
+            );
+          if (execution) return null;
           assertReservationOpen(await workingAssignment(tx, tenantId, id));
           if (locked.revokedAt !== null) return null;
           const revokedAt = new Date();

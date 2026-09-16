@@ -52,6 +52,8 @@ export async function workingAssignment(
 }
 
 export function assertReservationOpen(assignment: WorkingAssignment | undefined) {
+  if (assignment?.releaseReason === "replacement_transferred")
+    throw new ConflictException({ code: "device_replacement_source_frozen" });
   if (assignment?.releaseReason === "reservation_cancelled") {
     throw new ConflictException({ code: "device_reservation_cancelled" });
   }
@@ -63,6 +65,7 @@ export async function transitionWorkingAssignment(
   device: Pick<WorkingDevice, "id" | "tenantId" | "pairedAt" | "apiKeyId" | "revokedAt">,
   actor: WorkingDeviceActor = SYSTEM_DEVICE_ACTOR,
   action?: "observed" | "reserved" | "assigned" | "released",
+  releaseReason: "security_revoked" | "replacement_transferred" = "security_revoked",
 ) {
   const previous = await workingAssignment(tx, device.tenantId, device.id);
   assertReservationOpen(previous);
@@ -82,7 +85,7 @@ export async function transitionWorkingAssignment(
     observedAt: previous?.observedAt ?? now,
     updatedAt: now,
     releasedAt: state === "released" ? device.revokedAt : null,
-    releaseReason: state === "released" ? ("security_revoked" as const) : null,
+    releaseReason: state === "released" ? releaseReason : null,
     provenance: previous?.provenance ?? ("runtime" as const),
     lastEventId: randomUUID(),
   } satisfies typeof schema.workingDeviceAssignments.$inferInsert;

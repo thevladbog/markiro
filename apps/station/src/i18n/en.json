@@ -937,6 +937,8 @@
       "exceptions": "Exceptions",
       "conflicts": "Conflicts",
       "unknownPrints": "Unknown print results"
-    }
+    },
+    "waitingTitle": "Waiting to start work",
+    "waitingHint": "The old device may work offline until {{time}}. Stay connected: work will unlock when the server confirms the safe handover."
   }
 }

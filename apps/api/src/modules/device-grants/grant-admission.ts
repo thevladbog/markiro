@@ -1,3 +1,4 @@
+import { replacementTargetWaiting } from "../device-licensing/device-replacement-admission";
 import { and, asc, desc, eq, lte, sql } from "drizzle-orm";
 import { schema } from "@markiro/db";
 import {
@@ -119,6 +120,7 @@ export async function grantPoolDenial(
       return "not_entitled";
     return null;
   }
+  if (await replacementTargetWaiting(tx, owner.tenantId, owner.deviceId, at)) return "not_entitled";
   const pool = await tx
     .select({ device: schema.stationDevices, assignment: schema.workingDeviceAssignments })
     .from(schema.stationDevices)

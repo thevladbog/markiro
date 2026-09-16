@@ -126,9 +126,11 @@ describe("StationDevicesService lifecycle", () => {
       select: () => ({
         from: (table: unknown) => ({
           where: () =>
-            table === schema.lines
-              ? Promise.resolve([{ id: "line-2", name: "New line" }])
-              : { for: forUpdate },
+            table === schema.workingDeviceReplacementExecutions
+              ? Promise.resolve([])
+              : table === schema.lines
+                ? Promise.resolve([{ id: "line-2", name: "New line" }])
+                : { for: forUpdate },
         }),
       }),
       update: () => ({ set: updateSet }),
@@ -175,7 +177,12 @@ describe("StationDevicesService lifecycle", () => {
     };
     const tx = {
       select: () => ({
-        from: () => ({ where: () => ({ for: () => Promise.resolve([lockedDevice]) }) }),
+        from: (table: unknown) => ({
+          where: () =>
+            table === schema.workingDeviceReplacementExecutions
+              ? Promise.resolve([])
+              : { for: () => Promise.resolve([lockedDevice]) },
+        }),
       }),
       update: (table: unknown) => {
         updateCalls.push(table);
@@ -243,7 +250,12 @@ describe("StationDevicesService lifecycle", () => {
     };
     const tx = {
       select: () => ({
-        from: () => ({ where: () => ({ for: () => Promise.resolve([lockedDevice]) }) }),
+        from: (table: unknown) => ({
+          where: () =>
+            table === schema.workingDeviceReplacementExecutions
+              ? Promise.resolve([])
+              : { for: () => Promise.resolve([lockedDevice]) },
+        }),
       }),
       update: (table: unknown) => {
         updateCalls.push(table);
@@ -340,7 +352,14 @@ describe("StationDevicesService lifecycle", () => {
     };
     const forUpdate = vi.fn().mockResolvedValue([paired.device]);
     const tx = {
-      select: () => ({ from: () => ({ where: () => ({ for: forUpdate }) }) }),
+      select: () => ({
+        from: (table: unknown) => ({
+          where: () =>
+            table === schema.workingDeviceReplacementExecutions
+              ? Promise.resolve([])
+              : { for: forUpdate },
+        }),
+      }),
     };
     const db = {
       transaction: (callback: (transaction: typeof tx) => Promise<unknown>) => callback(tx),

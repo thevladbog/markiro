@@ -308,6 +308,11 @@ const ADMINISTRATIVE_CONTROLLERS: readonly [
   [
     DeviceReplacementController,
     {
+      executionPreview: credentialsPolicy,
+      execute: credentialsPolicy,
+      emergencyPreview: credentialsPolicy,
+      emergencyExecute: credentialsPolicy,
+
       drain: credentialsPolicy,
       list: credentialsPolicy,
       preview: credentialsPolicy,

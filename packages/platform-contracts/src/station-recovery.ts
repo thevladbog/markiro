@@ -1,3 +1,4 @@
+import { deviceReplacementTargetFenceSchema } from "./device-replacements.js";
 import { z } from "zod";
 
 /** Durable data owner: opaque existing tenant ID plus device UUID and kind. */
@@ -21,6 +22,7 @@ export const stationRecoveryRequestSchema = z
 export const stationRecoveryResponseSchema = z
   .object({
     version: z.literal(1),
+    replacement: deviceReplacementTargetFenceSchema.optional(),
     device: z
       .object({
         id: z.uuid(),

@@ -70,6 +70,18 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
   {
     contract: customerContract(CABINET_GUARDS, {
       mode: "licensing",
+      operation: "replacement_execute",
+    }),
+    routes: [
+      "POST /device-licensing/replacements/:preparationId/execution/preview (DeviceReplacementController.executionPreview)",
+      "POST /device-licensing/replacements/:preparationId/execute (DeviceReplacementController.execute)",
+      "POST /device-licensing/replacements/:preparationId/emergency/preview (DeviceReplacementController.emergencyPreview)",
+      "POST /device-licensing/replacements/:preparationId/emergency/execute (DeviceReplacementController.emergencyExecute)",
+    ],
+  },
+  {
+    contract: customerContract(CABINET_GUARDS, {
+      mode: "licensing",
       operation: "replacement_drain",
     }),
     routes: [
@@ -579,6 +591,18 @@ const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
   ),
   "PlatformDeviceRetentionController.confirm": platform(
     "retention requires fresh tenant and billing platform write capabilities",
+  ),
+  "PlatformDeviceReplacementController.executionPreview": platform(
+    "execution requires fresh tenant and billing write capabilities",
+  ),
+  "PlatformDeviceReplacementController.execute": platform(
+    "execution requires fresh tenant and billing write capabilities",
+  ),
+  "PlatformDeviceReplacementController.emergencyPreview": platform(
+    "execution requires fresh tenant and billing write capabilities",
+  ),
+  "PlatformDeviceReplacementController.emergencyExecute": platform(
+    "execution requires fresh tenant and billing write capabilities",
   ),
   "PlatformDeviceReplacementController.drain": platform(
     "drain requires tenant and billing write capabilities",

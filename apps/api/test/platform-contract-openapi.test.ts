@@ -1,3 +1,4 @@
+import { DeviceReplacementExecutionService } from "../src/modules/device-licensing/device-replacement-execution.service";
 import { DeviceReplacementReadinessService } from "../src/modules/device-licensing/device-replacement-readiness.service";
 import { PlatformDeviceRetentionController } from "../src/modules/device-licensing/platform-device-retention.controller";
 import { PlatformServicePeriodsController } from "../src/modules/service-periods/platform-service-periods.controller";
@@ -160,6 +161,7 @@ async function createPlatformDocument(): Promise<{
     DeviceLicensingService,
     DeviceReplacementService,
     DeviceReplacementReadinessService,
+    DeviceReplacementExecutionService,
     DeviceRetentionService,
     PlatformGrantReadinessService,
     PlatformGrantActivationService,
@@ -218,7 +220,7 @@ async function createPlatformDocument(): Promise<{
 
 describe("current SaaS platform OpenAPI contracts", () => {
   it("converts all current shared schemas to OpenAPI 3.0-compatible wire schemas", () => {
-    expect(CURRENT_SHARED_SCHEMAS).toHaveLength(221);
+    expect(CURRENT_SHARED_SCHEMAS).toHaveLength(229);
     for (const schema of CURRENT_SHARED_SCHEMAS) {
       expectOpenApi30Compatible(jsonSchema(schema));
     }
