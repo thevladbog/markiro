@@ -61,6 +61,7 @@ const safeProductionActionScopes = new Map([
   ],
 ]);
 const appComputeAddress = "module.compute.yandex_compute_instance.app";
+const applicationDatabaseAddress = "module.postgres.yandex_mdb_postgresql_database.application";
 const appComputeFieldScopes = new Map([
   ["allow_stopping_for_update", "allow-stopping"],
   ["boot_disk", "boot-disk"],
@@ -547,6 +548,63 @@ function isConfirmedExternalDataIngressRemoval(plan, resource, resourceActions) 
     ipv4CidrScope(unmatchedValue.v4Cidrs[0]) === "other" &&
     unmatchedValue.v6Cidrs.length === 0
   );
+}
+
+function isBtreeGistExtensionAddition(resource, resourceActions) {
+  if (
+    resource.address !== applicationDatabaseAddress ||
+    resource.type !== "yandex_mdb_postgresql_database" ||
+    resourceActions.length !== 1 ||
+    resourceActions[0] !== "update" ||
+    containsUnknown(resource.change?.after_unknown)
+  )
+    return false;
+
+  const beforeValue = resource.change?.before;
+  const afterValue = resource.change?.after;
+  const fields = changedKeys(beforeValue, afterValue);
+  if (
+    !fields ||
+    fields.length !== 1 ||
+    fields[0] !== "extension" ||
+    !Array.isArray(beforeValue.extension) ||
+    !Array.isArray(afterValue.extension) ||
+    afterValue.extension.length !== beforeValue.extension.length + 1
+  )
+    return false;
+
+  const validExtension = (extension) =>
+    object(extension) &&
+    (hasExactKeys(extension, ["name"]) || hasExactKeys(extension, ["name", "version"])) &&
+    typeof extension.name === "string" &&
+    extension.name.length > 0 &&
+    (extension.version === undefined ||
+      extension.version === null ||
+      typeof extension.version === "string");
+  if (
+    beforeValue.extension.some((extension) => !validExtension(extension)) ||
+    afterValue.extension.some((extension) => !validExtension(extension))
+  )
+    return false;
+
+  const beforeNames = beforeValue.extension.map((extension) => extension.name);
+  const afterNames = afterValue.extension.map((extension) => extension.name);
+  if (
+    new Set(beforeNames).size !== beforeNames.length ||
+    new Set(afterNames).size !== afterNames.length ||
+    beforeNames.includes("btree_gist")
+  )
+    return false;
+
+  const added = afterValue.extension.find((extension) => extension.name === "btree_gist");
+  if (!added || ![undefined, null, ""].includes(added.version)) return false;
+
+  const retainedBefore = beforeValue.extension.map(stableValueSignature).sort();
+  const retainedAfter = afterValue.extension
+    .filter((extension) => extension.name !== "btree_gist")
+    .map(stableValueSignature)
+    .sort();
+  return isDeepStrictEqual(retainedBefore, retainedAfter);
 }
 
 function appComputeActionScope(resource) {
@@ -1285,9 +1343,12 @@ export function guardProductionPlan(plan) {
     if (safeProductionResources.has(resource.address)) {
       const allowed = directVmDnsAddresses.has(resource.address)
         ? ["no-op", "create", "update", "delete"]
-        : resource.address.includes(".data.")
-          ? ["no-op", "read"]
-          : ["no-op"];
+        : resource.address === applicationDatabaseAddress &&
+            isBtreeGistExtensionAddition(resource, resourceActions)
+          ? ["update"]
+          : resource.address.includes(".data.")
+            ? ["no-op", "read"]
+            : ["no-op"];
       if (!onlyAllowedAction(resourceActions, allowed)) {
         if (!isConfirmedExternalDataIngressRemoval(plan, resource, resourceActions)) {
           const scope =
