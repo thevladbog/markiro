@@ -20,6 +20,8 @@ it("publishes strict native replacement routes with station credentials and null
     const doc = SwaggerModule.createDocument(app, new DocumentBuilder().build());
     expect(Object.keys(doc.paths).sort()).toEqual([
       "/station/device-replacement-intent",
+      "/station/device-replacement-intent/v1",
+      "/station/device-replacement-intent/v1/acknowledge",
       "/station/device-replacement-readiness",
     ]);
     expect(doc.paths["/station/device-replacement-intent"]?.get?.responses["200"]).toMatchObject({

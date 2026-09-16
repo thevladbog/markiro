@@ -395,3 +395,44 @@ export const workingDeviceReplacementExecutions = pgTable(
     ),
   ],
 );
+
+/** Append-only source acknowledgement; frozen drain intents are never rewritten. */
+export const workingDeviceReplacementClosureAcknowledgements = pgTable(
+  "working_device_replacement_closure_acknowledgements",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: text("tenant_id").notNull(),
+    deviceId: uuid("device_id").notNull(),
+    preparationId: uuid("preparation_id").notNull(),
+    intentId: uuid("intent_id").notNull(),
+    credentialEpoch: bigint("credential_epoch", { mode: "number" }).notNull(),
+    requestId: uuid("request_id").notNull(),
+    requestHash: text("request_hash").notNull(),
+    response: jsonb("response").$type<Record<string, unknown>>().notNull(),
+    acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique("working_device_replacement_closure_ack_request_uq").on(t.tenantId, t.requestId),
+    index("working_device_replacement_closure_ack_intent_idx").on(
+      t.tenantId,
+      t.deviceId,
+      t.intentId,
+      t.credentialEpoch,
+    ),
+    foreignKey({
+      name: "working_device_replacement_closure_ack_intent_fk",
+      columns: [t.tenantId, t.deviceId, t.preparationId, t.intentId, t.credentialEpoch],
+      foreignColumns: [
+        workingDeviceReplacementReadinessIntents.tenantId,
+        workingDeviceReplacementReadinessIntents.deviceId,
+        workingDeviceReplacementReadinessIntents.preparationId,
+        workingDeviceReplacementReadinessIntents.id,
+        workingDeviceReplacementReadinessIntents.credentialEpoch,
+      ],
+    }),
+    check(
+      "working_device_replacement_closure_ack_bounds",
+      sql`${t.credentialEpoch} between 1 and 9007199254740991 and ${t.requestHash} ~ '^[0-9a-f]{64}$' and jsonb_typeof(${t.response})='object' and octet_length(${t.response}::text)<=8192 and isfinite(${t.acknowledgedAt})`,
+    ),
+  ],
+);

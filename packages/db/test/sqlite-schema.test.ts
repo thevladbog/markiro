@@ -6,6 +6,7 @@ import {
   SUPERSEDED_INVENTORY_LEGACY_AUDIT_MIGRATION_IDS,
 } from "../src/sqlite/migrations.js";
 import {
+  deviceReplacementDrain,
   inventoryCodeResultsMirror,
   inventoryConflictsMirror,
   inventoryEventClaimOutcomesMirror,
@@ -2756,5 +2757,40 @@ describe("validation reprocessing SQLite persistence", () => {
     } finally {
       db.close();
     }
+  });
+});
+
+describe("device replacement drain SQLite", () => {
+  it("upgrades in place, preserves old work and enforces singleton JSON/request parity", () => {
+    const db = new DatabaseSync(":memory:");
+    const start = STATION_MIGRATIONS.findIndex((sql) =>
+      sql.includes("CREATE TABLE IF NOT EXISTS device_replacement_drain"),
+    );
+    expect(start).toBeGreaterThan(0);
+    applyStatements(db, STATION_MIGRATIONS.slice(0, start));
+    db.exec("INSERT INTO station_meta(key,value) VALUES('retained','original')");
+    applyStatements(db, STATION_MIGRATIONS.slice(start));
+    applyStatements(db, STATION_MIGRATIONS.slice(start));
+    expect(db.prepare("SELECT value FROM station_meta WHERE key='retained'").get()).toEqual({
+      value: "original",
+    });
+    const insert = db.prepare(
+      "INSERT INTO device_replacement_drain(id,intent_id,intent_json,tenant_id,device_id,credential_epoch,credential_ownership) VALUES(?,?,?,?,?,?,?)",
+    );
+    expect(() => insert.run(2, "intent", "{}", "tenant", "device", 1, "a".repeat(64))).toThrow();
+    expect(() =>
+      insert.run(1, "intent", "invalid", "tenant", "device", 1, "a".repeat(64)),
+    ).toThrow();
+    insert.run(1, "intent", "{}", "tenant", "device", 1, "a".repeat(64));
+    expect(() => db.exec("UPDATE device_replacement_drain SET request_id='request'")).toThrow();
+    expect(() => db.exec("UPDATE device_replacement_drain SET response_json='invalid'")).toThrow();
+    const names = db
+      .prepare("PRAGMA table_info(device_replacement_drain)")
+      .all()
+      .map((column) => column.name);
+    expect(names).toContain(deviceReplacementDrain.resumeTasksJson.name);
+    expect(names).toContain(deviceReplacementDrain.credentialOwnership.name);
+    expect(names).toContain(deviceReplacementDrain.acknowledgedAt.name);
+    db.close();
   });
 });

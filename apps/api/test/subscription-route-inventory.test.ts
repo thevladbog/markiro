@@ -80,6 +80,8 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
     contract: customerContract(STATION_GUARDS, { mode: "recovery", kind: "replacement_readiness" }),
     routes: [
       "GET /station/device-replacement-intent (DeviceReplacementReadinessController.currentIntent)",
+      "GET /station/device-replacement-intent/v1 (DeviceReplacementReadinessController.currentIntentV1)",
+      "POST /station/device-replacement-intent/v1/acknowledge (DeviceReplacementReadinessController.acknowledgeClosure)",
       "POST /station/device-replacement-readiness (DeviceReplacementReadinessController.report)",
     ],
   },

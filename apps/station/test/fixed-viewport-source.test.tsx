@@ -83,7 +83,11 @@ describe("fixed station viewport source contract", () => {
     expect(app.match(/await refreshStationTaskAuthority\(\{/g)).toHaveLength(2);
     expect(app).toContain('task: { taskKind: "shift", taskId: entered.id }');
     expect(app).toContain('task: { taskKind: "inventory", taskId: entered.inventory.inventoryId }');
-    expect(app.match(/if \(!authority\?\.resuming\)/g)).toHaveLength(2);
+    expect(
+      app.match(
+        /if \(!authority\?\.resuming && !\(await replacementBlocksNewWork\(tauriExecutor\)\)\)/g,
+      ),
+    ).toHaveLength(2);
   });
 
   it("keeps the alert badge compact so two-word badges do not read as double-spaced", () => {

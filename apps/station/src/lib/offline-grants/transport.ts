@@ -74,6 +74,7 @@ async function nextInstallSequence(exec: SqlExecutor): Promise<number> {
        SELECT request_sequence FROM offline_grant_install_commands
        UNION ALL SELECT request_sequence FROM offline_grant_keyset_commands
        UNION ALL SELECT request_sequence FROM offline_grant_configuration_commands
+       UNION ALL SELECT grant_install_floor FROM device_replacement_drain
      )`,
   );
   const next = (row?.request_sequence ?? -1) + 1;

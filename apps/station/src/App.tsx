@@ -1,3 +1,5 @@
+import { useDeviceReplacement } from "./lib/use-device-replacement.js";
+import { replacementBlocksNewWork, replacementCanEnterTask } from "./lib/device-replacement.js";
 import { configuredPrinterOutput, configuredPrinterRouting } from "./lib/printer-routing.js";
 import { RecoveryWorkSummary } from "./ui/RecoveryWorkSummary.js";
 import {
@@ -903,6 +905,28 @@ export function App() {
     verifiedClient,
   ]);
   const authenticatedClient = credentialRecovery ? null : credentialBoundClient;
+  const [replacementAuthorityEpoch, setReplacementAuthorityEpoch] = useState(0);
+  const replacement = useDeviceReplacement({
+    exec: tauriExecutor,
+    client: authenticatedClient,
+    generation: credentialGeneration,
+    expectedDevice:
+      config?.tenantId && config.deviceId
+        ? { tenantId: config.tenantId, deviceId: config.deviceId }
+        : null,
+    clientBuild: async () => `station:${await getVersion().catch(() => "unknown")}`,
+    activeTask:
+      activeFloorTask?.kind === "production"
+        ? { taskId: activeFloorTask.shift.id, kind: "shift" }
+        : activeFloorTask?.kind === "inventory"
+          ? { taskId: activeFloorTask.inventory.inventoryId, kind: "inventory" }
+          : null,
+    onCancelled: () => setReplacementAuthorityEpoch((epoch) => epoch + 1),
+    onDrain: () => {
+      shiftEntryLeaseRef.current?.release();
+      setFloorView("select");
+    },
+  });
   const [labelRecoveryEpoch, setLabelRecoveryEpoch] = useState(0);
   const labelRecoveryKey = useMemo(
     () => ({
@@ -1052,6 +1076,7 @@ export function App() {
     config?.serverUrl,
     config?.tenantId,
     credentialGeneration,
+    replacementAuthorityEpoch,
   ]);
 
   // The hook is mounted unconditionally to preserve hook order, but it only
@@ -1561,6 +1586,8 @@ export function App() {
   ): Promise<void> {
     if (!lease || shiftEntryLeaseRef.current !== lease || !lease.isCurrent()) return;
     if (floorGeneration && !credentialGenerationIsCurrent(floorGeneration)) return;
+    if (!(await replacementCanEnterTask(tauriExecutor, entered.id, "shift")))
+      throw new Error(t("replacement.title"));
     if (floorGeneration && floorConfig.tenantId && floorConfig.deviceId && floorConfig.serverUrl) {
       // The task snapshot is compared against a fresh authenticated bundle before it can
       // authorize entry. If the network is down, the already-installed durable grant is
@@ -1605,7 +1632,7 @@ export function App() {
           kind: grantState.owner_kind,
           credentialEpoch: grantState.credential_epoch,
         };
-        if (!authority?.resuming) {
+        if (!authority?.resuming && !(await replacementBlocksNewWork(tauriExecutor))) {
           const decision = await admission.commitNewWork(
             {
               intent: {
@@ -1637,6 +1664,10 @@ export function App() {
     }
     if (!lease.isCurrent() || (floorGeneration && !credentialGenerationIsCurrent(floorGeneration)))
       return;
+    if (!(await replacementCanEnterTask(tauriExecutor, entered.id, "shift")))
+      throw new Error(t("replacement.title"));
+    if (!lease.isCurrent() || (floorGeneration && !credentialGenerationIsCurrent(floorGeneration)))
+      return;
     setNewShiftDraft(null);
     shiftEntryGenerationRef.current += 1;
     activeShiftIdRef.current = entered.id;
@@ -1654,6 +1685,8 @@ export function App() {
   ): Promise<void> {
     if (!lease || shiftEntryLeaseRef.current !== lease || !lease.isCurrent()) return;
     if (floorGeneration && !credentialGenerationIsCurrent(floorGeneration)) return;
+    if (!(await replacementCanEnterTask(tauriExecutor, entered.inventory.inventoryId, "inventory")))
+      throw new Error(t("replacement.title"));
     if (floorGeneration && floorConfig.tenantId && floorConfig.deviceId && floorConfig.serverUrl) {
       await refreshStationGrantConfiguration({
         exec: tauriExecutor,
@@ -1698,7 +1731,7 @@ export function App() {
           kind: grantState.owner_kind,
           credentialEpoch: grantState.credential_epoch,
         };
-        if (!authority?.resuming) {
+        if (!authority?.resuming && !(await replacementBlocksNewWork(tauriExecutor))) {
           const decision = await admission.commitNewWork(
             {
               intent: {
@@ -1728,6 +1761,10 @@ export function App() {
         if (!taskDecision.allow) throw new OfflineGrantDeniedError(taskDecision.reason ?? "denied");
       }
     }
+    if (!lease.isCurrent() || (floorGeneration && !credentialGenerationIsCurrent(floorGeneration)))
+      return;
+    if (!(await replacementCanEnterTask(tauriExecutor, entered.inventory.inventoryId, "inventory")))
+      throw new Error(t("replacement.title"));
     if (!lease.isCurrent() || (floorGeneration && !credentialGenerationIsCurrent(floorGeneration)))
       return;
     activeShiftIdRef.current = entered.inventory.inventoryId;
@@ -1868,6 +1905,11 @@ export function App() {
       footer={legacyNotice}
       statusBarCollapsible={shift !== null}
     >
+      {replacement.drain && activeFloorTask && (
+        <p role="status">
+          {t("replacement.title")} — {t("replacement.hint")}
+        </p>
+      )}
       {operatorSwitchState !== "idle" ? (
         <main className="station-centered-screen" data-testid="operator-switch-settling">
           <Card style={{ width: "min(720px, calc(100vw - 64px))", padding: 32 }}>
@@ -2119,6 +2161,61 @@ export function App() {
         >
           <p>{t("productLabels.resumeHint")}</p>
         </FullScreenDialog>
+      ) : !replacement.loaded ? (
+        <p role="status">{t("app.booting")}</p>
+      ) : replacement.drain ? (
+        <Card style={{ padding: 32 }}>
+          <h1>{t("replacement.title")}</h1>
+          <p>{t("replacement.hint")}</p>
+          {replacement.drain.reportFailed && <p role="status">{t("replacement.retrying")}</p>}
+          <dl aria-label={t("replacement.counters")}>
+            {Object.entries({
+              ...replacement.drain.measurements?.pending,
+              conflicts: replacement.drain.measurements?.conflicts,
+              unknownPrints: replacement.drain.measurements?.unknownPrints,
+            }).map(([channel, count]) => (
+              <div key={channel}>
+                <dt>{t(`replacement.channels.${channel}`)}</dt>
+                <dd>{typeof count === "number" ? count : t("replacement.unsupported")}</dd>
+              </div>
+            ))}
+          </dl>
+          {replacement.drain.resumeTasks
+            .filter(
+              (task) =>
+                task.kind === "shift" &&
+                replacement.drain?.measurements?.activeTasks.some(
+                  (active) => active.kind === task.kind && active.taskId === task.taskId,
+                ),
+            )
+            .map((task) => (
+              <Button
+                key={task.taskId}
+                onClick={() => {
+                  void acquireShiftEntry()
+                    .then(async (lease) => {
+                      try {
+                        const saved = await readShiftMirror(tauriExecutor, task.taskId);
+                        if (!saved || saved.status !== "active")
+                          throw new Error("replacement task no longer active");
+                        await handleShiftEntered(
+                          { id: task.taskId, status: saved.status, mode: saved.mode },
+                          lease,
+                        );
+                      } finally {
+                        lease.release();
+                      }
+                    })
+                    .catch(() => setOfflineGrantNotice(t("replacement.resumeFailed")));
+                }}
+              >
+                {t("replacement.resume", { id: task.taskId })}
+              </Button>
+            ))}
+          {offlineGrantNotice && <p role="alert">{offlineGrantNotice}</p>}
+          <Button onClick={() => setShowConflicts(true)}>{t("replacement.conflicts")}</Button>
+          <Button onClick={() => setShowSetup(true)}>{t("replacement.setup")}</Button>
+        </Card>
       ) : floorView === "select" ? (
         <TaskSelection
           client={activeClient}

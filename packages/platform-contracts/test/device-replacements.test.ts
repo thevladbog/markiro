@@ -585,3 +585,33 @@ it("shares a strict nullable device drain intent with both native clients", () =
     "/station/device-replacement-intent",
   );
 });
+
+it("requires versioned matching closure metadata before resuming a drained device", () => {
+  const tombstone = {
+    version: 1,
+    state: "cancelled",
+    intentId: "11111111-1111-4111-8111-111111111111",
+    preparationId: "22222222-2222-4222-8222-222222222222",
+    credentialEpoch: 1,
+    preparationRevision: 3,
+    closedAt: "2026-09-16T12:00:00Z",
+  };
+  expect(contracts.deviceReplacementIntentProjectionSchema.parse(tombstone)).toEqual({
+    ...tombstone,
+    closedAt: "2026-09-16T12:00:00.000Z",
+  });
+  expect(contracts.deviceReplacementIntentProjectionSchema.safeParse(null).success).toBe(false);
+  expect(
+    contracts.deviceReplacementClosureAcknowledgementRequestSchema.safeParse({
+      requestId: "33333333-3333-4333-8333-333333333333",
+      tombstone,
+    }).success,
+  ).toBe(true);
+  expect(
+    contracts.deviceReplacementIntentProjectionSchema.safeParse({
+      ...tombstone,
+      state: "cancelled",
+      resume: true,
+    }).success,
+  ).toBe(false);
+});

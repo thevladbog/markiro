@@ -92,6 +92,7 @@ describe("working device replacement execution schema", () => {
     "workingDeviceReplacementReadinessIntents",
     "workingDeviceReplacementReadinessReports",
     "workingDeviceReplacementExecutions",
+    "workingDeviceReplacementClosureAcknowledgements",
   ])("exports %s for durable restart recovery", (name) => {
     expect(schema).toHaveProperty(name);
   });
@@ -99,4 +100,25 @@ describe("working device replacement execution schema", () => {
   it("defaults legacy pairing codes to normal purpose", () => {
     expect(schema.stationPairingCodes).toHaveProperty("purpose");
   });
+});
+
+it("pins closure acknowledgements to the exact tenant, source, intent and epoch", () => {
+  const table = schema.workingDeviceReplacementClosureAcknowledgements;
+  expect(
+    getTableConfig(table).foreignKeys.some(
+      (key) =>
+        key
+          .reference()
+          .columns.map((column) => column.name)
+          .join(",") === "tenant_id,device_id,preparation_id,intent_id,credential_epoch",
+    ),
+  ).toBe(true);
+  expect(table.requestHash.notNull).toBe(true);
+  expect(table.response.notNull).toBe(true);
+  expect(
+    getTableConfig(table).uniqueConstraints.some(
+      (constraint) =>
+        constraint.columns.map((column) => column.name).join(",") === "tenant_id,request_id",
+    ),
+  ).toBe(true);
 });

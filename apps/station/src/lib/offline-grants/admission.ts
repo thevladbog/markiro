@@ -10,6 +10,7 @@ import {
   type LocalDecision,
   type TaskGrant,
 } from "@markiro/domain";
+import { replacementBlocksNewWork } from "../device-replacement.js";
 import type { SqlExecutor } from "../mirror.js";
 import { acquireCredentialCommitLease, type CredentialGeneration } from "../credential-recovery.js";
 import type { GrantClockSample } from "./clock.js";
@@ -154,6 +155,8 @@ export class StationGrantAdmission {
   }
 
   async assessNewWork(intent: GrantIntent): Promise<StationAdmissionDecision> {
+    if (await replacementBlocksNewWork(this.exec))
+      return { allow: false, reason: "missing_grant", mode: "strict" };
     const context = await this.context(),
       { devices } = await this.grants();
     const decision = assessNewWork(
@@ -171,6 +174,8 @@ export class StationGrantAdmission {
     input: { intent: GrantIntent; execution: ExecutionProjection },
     generation: CredentialGeneration,
   ): Promise<StationAdmissionDecision> {
+    if (await replacementBlocksNewWork(this.exec))
+      return { allow: false, reason: "missing_grant", mode: "strict" };
     const context = await this.context();
     const { devices, tasks } = await this.grants();
     const assessed = assessNewWork(

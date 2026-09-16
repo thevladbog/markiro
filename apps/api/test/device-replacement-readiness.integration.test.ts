@@ -923,4 +923,111 @@ describe.skipIf(!process.env.DATABASE_URL)("replacement drain readiness", () => 
       expect((await service.list(f.tenantId, f.actor)).items[0]?.preparation.state).toBe("ready");
     },
   );
+  it("keeps an explicit cancellation tombstone until its source durably acknowledges it", async () => {
+    const f = await fixture();
+    const d = await drain(f);
+    const cancelled = await service.cancel(
+      f.tenantId,
+      f.prepared.preparation.id,
+      { requestId: randomUUID(), expectedRevision: d.receipt.preparation.revision },
+      f.actor,
+    );
+    const tombstone = await readiness.currentIntentProjection(f.identity, d.intent.intentId);
+    expect(tombstone).toMatchObject({
+      version: 1,
+      state: "cancelled",
+      intentId: d.intent.intentId,
+      preparationId: f.prepared.preparation.id,
+      preparationRevision: cancelled.preparation.revision,
+    });
+    if (tombstone.state !== "cancelled") throw new Error("missing tombstone");
+    const request = { requestId: randomUUID(), tombstone };
+    const ack = await readiness.acknowledgeClosure(f.identity, request);
+    const [auditRow] = await db
+      .select()
+      .from(schema.tenantAuditEvents)
+      .where(eq(schema.tenantAuditEvents.requestId, request.requestId));
+    expect(auditRow).toMatchObject({
+      organizationId: f.tenantId,
+      actorUserId: null,
+      action: "device.replacement.closure.acknowledged",
+      outcome: "success",
+      targetType: "device_replacement_readiness_intent",
+      targetId: d.intent.intentId,
+      requestId: request.requestId,
+      after: {
+        actorDomain: "station_device",
+        actorId: f.device.id,
+        deviceKind: "station",
+        credentialEpoch: 1,
+        preparationId: f.prepared.preparation.id,
+        preparationRevision: tombstone.preparationRevision,
+        state: "cancelled",
+        closedAt: tombstone.closedAt,
+      },
+    });
+    expect(await readiness.acknowledgeClosure(f.identity, request)).toEqual(ack);
+    const ackRows = await db
+      .select()
+      .from(schema.workingDeviceReplacementClosureAcknowledgements)
+      .where(
+        eq(schema.workingDeviceReplacementClosureAcknowledgements.requestId, request.requestId),
+      );
+    expect(ackRows).toHaveLength(1);
+    await expect(
+      db
+        .update(schema.workingDeviceReplacementClosureAcknowledgements)
+        .set({ requestHash: "f".repeat(64) })
+        .where(
+          eq(schema.workingDeviceReplacementClosureAcknowledgements.requestId, request.requestId),
+        ),
+    ).rejects.toThrow();
+    await expect(
+      readiness.report(f.identity, { ...d.body, requestId: request.requestId }),
+    ).rejects.toMatchObject({ status: 409 });
+
+    expect(await readiness.currentIntentProjection(f.identity, d.intent.intentId)).toEqual({
+      version: 1,
+      state: "none",
+    });
+    await expect(
+      readiness.acknowledgeClosure(f.identity, {
+        ...request,
+        tombstone: { ...tombstone, preparationRevision: tombstone.preparationRevision + 1 },
+      }),
+    ).rejects.toMatchObject({ status: 409 });
+    const other = await fixture();
+    await expect(
+      readiness.acknowledgeClosure(other.identity, { ...request, requestId: randomUUID() }),
+    ).rejects.toMatchObject({ status: 404 });
+  });
+
+  it("delivers cancellation to an older saved intent that was superseded while the source was offline", async () => {
+    const f = await fixture();
+    const first = await drain(f);
+    const newer = await readiness.requestDrain(
+      f.tenantId,
+      f.prepared.preparation.id,
+      { requestId: randomUUID(), expectedRevision: first.receipt.preparation.revision },
+      f.actor,
+    );
+    await service.cancel(
+      f.tenantId,
+      f.prepared.preparation.id,
+      { requestId: randomUUID(), expectedRevision: newer.preparation.revision },
+      f.actor,
+    );
+    expect(
+      await readiness.currentIntentProjection(f.identity, first.intent.intentId),
+    ).toMatchObject({
+      state: "cancelled",
+      intentId: first.intent.intentId,
+      preparationRevision: newer.preparation.revision + 1,
+    });
+    const other = await fixture();
+    expect(await readiness.currentIntentProjection(other.identity, first.intent.intentId)).toEqual({
+      version: 1,
+      state: "none",
+    });
+  });
 });

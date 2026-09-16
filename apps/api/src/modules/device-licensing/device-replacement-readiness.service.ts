@@ -7,9 +7,14 @@ import {
   UnauthorizedException,
 } from "@nestjs/common";
 import { schema, type Db } from "@markiro/db";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, or } from "drizzle-orm";
 import {
   deviceReplacementCurrentIntentResponseSchema,
+  deviceReplacementIntentProjectionSchema,
+  deviceReplacementClosureAcknowledgementRequestSchema,
+  deviceReplacementClosureAcknowledgementResponseSchema,
+  type DeviceReplacementIntentClosure,
+  type DeviceReplacementClosureAcknowledgementRequest,
   deviceReplacementDrainRequestSchema,
   deviceReplacementObservationSchema,
   deviceReplacementReadinessRequestSchema,
@@ -260,6 +265,193 @@ export class DeviceReplacementReadinessService {
       );
     });
   }
+
+  private async closureProjection(
+    tx: SubscriptionTransaction,
+    intent: typeof intents.$inferSelect,
+  ): Promise<DeviceReplacementIntentClosure | null> {
+    const [preparation] = await tx
+      .select()
+      .from(preparations)
+      .where(
+        and(eq(preparations.tenantId, intent.tenantId), eq(preparations.id, intent.preparationId)),
+      );
+    if (!preparation || !["cancelled", "completed"].includes(preparation.state)) return null;
+    const closedAt = preparation.state === "cancelled" ? preparation.cancelledAt : intent.closedAt;
+    if (!closedAt) return null;
+    return {
+      version: 1,
+      state: preparation.state === "cancelled" ? "cancelled" : "closed",
+      intentId: intent.id,
+      preparationId: intent.preparationId,
+      credentialEpoch: intent.credentialEpoch,
+      preparationRevision: preparation.revision,
+      closedAt: closedAt.toISOString(),
+    };
+  }
+
+  async currentIntentProjection(identity: GrantCredentialIdentity, knownIntentId?: string) {
+    if (knownIntentId && !platformUuidSchema.safeParse(knownIntentId).success)
+      throw new BadRequestException();
+    return this.transaction(identity.tenantId, async (tx) => {
+      const owner = await lockCurrentGrantOwner(tx, identity, Date.now());
+      if (!owner || owner.kind === "kiosk") throw new UnauthorizedException();
+      const owned = await tx
+        .select()
+        .from(intents)
+        .where(
+          and(
+            eq(intents.tenantId, owner.tenantId),
+            eq(intents.deviceId, owner.deviceId),
+            eq(intents.credentialEpoch, owner.credentialEpoch),
+            knownIntentId
+              ? or(eq(intents.id, knownIntentId), eq(intents.state, "active"))
+              : eq(intents.state, "active"),
+          ),
+        )
+        .orderBy(desc(intents.requestedAt));
+      const acknowledgements = schema.workingDeviceReplacementClosureAcknowledgements;
+      const acked = await tx
+        .select({ intentId: acknowledgements.intentId })
+        .from(acknowledgements)
+        .where(
+          and(
+            eq(acknowledgements.tenantId, owner.tenantId),
+            eq(acknowledgements.deviceId, owner.deviceId),
+            eq(acknowledgements.credentialEpoch, owner.credentialEpoch),
+            eq(acknowledgements.intentId, knownIntentId ?? "00000000-0000-0000-0000-000000000000"),
+          ),
+        );
+      const acknowledged = new Set(acked.map((row) => row.intentId));
+      const known = knownIntentId ? owned.find((row) => row.id === knownIntentId) : undefined;
+      // A known superseded intent can still receive the cancellation of its
+      // preparation. Client offline time must not strand an older local fence.
+      const candidate = known;
+      if (candidate && !acknowledged.has(candidate.id)) {
+        const closure = await this.closureProjection(tx, candidate);
+        if (closure) return deviceReplacementIntentProjectionSchema.parse(closure);
+      }
+      const active = owned.find((row) => row.state === "active");
+      return deviceReplacementIntentProjectionSchema.parse(
+        active
+          ? {
+              version: 1,
+              state: "active",
+              intent: {
+                intentId: active.id,
+                preparationId: active.preparationId,
+                credentialEpoch: active.credentialEpoch,
+                preparationRevision: active.preparationRevision,
+                requestedAt: active.requestedAt.toISOString(),
+                expiresAt: active.expiresAt.toISOString(),
+              },
+            }
+          : { version: 1, state: "none" },
+      );
+    });
+  }
+
+  async acknowledgeClosure(
+    identity: GrantCredentialIdentity,
+    input: DeviceReplacementClosureAcknowledgementRequest,
+  ) {
+    const parsed = deviceReplacementClosureAcknowledgementRequestSchema.safeParse(input);
+    if (!parsed.success) throw new BadRequestException();
+    const body = parsed.data,
+      hash = replacementDigest(body);
+    return this.transaction(identity.tenantId, async (tx) => {
+      const owner = await lockCurrentGrantOwner(tx, identity, Date.now());
+      if (
+        !owner ||
+        owner.kind === "kiosk" ||
+        owner.credentialEpoch !== body.tombstone.credentialEpoch
+      )
+        throw new UnauthorizedException();
+      const acknowledgements = schema.workingDeviceReplacementClosureAcknowledgements;
+      const [prior] = await tx
+        .select()
+        .from(acknowledgements)
+        .where(
+          and(
+            eq(acknowledgements.tenantId, owner.tenantId),
+            eq(acknowledgements.requestId, body.requestId),
+          ),
+        );
+      if (prior) {
+        if (
+          prior.deviceId !== owner.deviceId ||
+          prior.credentialEpoch !== owner.credentialEpoch ||
+          prior.requestHash !== hash
+        )
+          throw conflict();
+        return deviceReplacementClosureAcknowledgementResponseSchema.parse(prior.response);
+      }
+      const [usedReport] = await tx
+        .select({ id: reports.id })
+        .from(reports)
+        .where(and(eq(reports.tenantId, owner.tenantId), eq(reports.requestId, body.requestId)));
+      const [usedCommand] = await tx
+        .select({ id: schema.workingDeviceEvents.id })
+        .from(schema.workingDeviceEvents)
+        .where(
+          and(
+            eq(schema.workingDeviceEvents.tenantId, owner.tenantId),
+            eq(schema.workingDeviceEvents.requestId, body.requestId),
+          ),
+        );
+      if (usedReport || usedCommand) throw conflict();
+      const [intent] = await tx
+        .select()
+        .from(intents)
+        .where(
+          and(
+            eq(intents.tenantId, owner.tenantId),
+            eq(intents.deviceId, owner.deviceId),
+            eq(intents.id, body.tombstone.intentId),
+          ),
+        );
+      if (!intent) throw new NotFoundException();
+      if (intent.credentialEpoch !== owner.credentialEpoch) throw new UnauthorizedException();
+      const expected = await this.closureProjection(tx, intent);
+      if (!expected || replacementDigest(expected) !== replacementDigest(body.tombstone))
+        throw conflict();
+      const response = deviceReplacementClosureAcknowledgementResponseSchema.parse({
+        ...body,
+        acknowledgedAt: new Date().toISOString(),
+      });
+      await tx.insert(acknowledgements).values({
+        tenantId: owner.tenantId,
+        deviceId: owner.deviceId,
+        preparationId: intent.preparationId,
+        intentId: intent.id,
+        credentialEpoch: owner.credentialEpoch,
+        requestId: body.requestId,
+        requestHash: hash,
+        response,
+      });
+      await tx.insert(schema.tenantAuditEvents).values({
+        organizationId: owner.tenantId,
+        actorUserId: null,
+        action: "device.replacement.closure.acknowledged",
+        outcome: "success",
+        targetType: "device_replacement_readiness_intent",
+        targetId: intent.id,
+        requestId: body.requestId,
+        after: {
+          actorDomain: "station_device",
+          actorId: owner.deviceId,
+          deviceKind: owner.kind,
+          credentialEpoch: owner.credentialEpoch,
+          preparationId: intent.preparationId,
+          preparationRevision: expected.preparationRevision,
+          state: expected.state,
+          closedAt: expected.closedAt,
+        },
+      });
+      return response;
+    });
+  }
+
   async report(
     identity: GrantCredentialIdentity,
     input: DeviceReplacementReadinessRequest,
@@ -297,6 +489,16 @@ export class DeviceReplacementReadinessService {
           ),
         );
       if (usedCommand) throw conflict();
+      const [usedClosureAck] = await tx
+        .select({ id: schema.workingDeviceReplacementClosureAcknowledgements.id })
+        .from(schema.workingDeviceReplacementClosureAcknowledgements)
+        .where(
+          and(
+            eq(schema.workingDeviceReplacementClosureAcknowledgements.tenantId, owner.tenantId),
+            eq(schema.workingDeviceReplacementClosureAcknowledgements.requestId, body.requestId),
+          ),
+        );
+      if (usedClosureAck) throw conflict();
       const [intent] = await tx
         .select()
         .from(intents)

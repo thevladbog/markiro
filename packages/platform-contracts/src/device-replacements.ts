@@ -682,7 +682,68 @@ export const deviceReplacementCurrentIntentResponseSchema = z
 export type DeviceReplacementCurrentIntentResponse = z.output<
   typeof deviceReplacementCurrentIntentResponseSchema
 >;
+
+/** Only an explicit newer closure for the saved intent can release a native drain. */
+export const deviceReplacementIntentClosureSchema = z
+  .object({
+    version: z.literal(1),
+    state: z.enum(["cancelled", "closed"]),
+    intentId: platformUuidSchema,
+    preparationId: platformUuidSchema,
+    credentialEpoch: positiveEpochSchema,
+    preparationRevision: positiveRevisionSchema,
+    closedAt: platformTimestampSchema,
+  })
+  .strict();
+export type DeviceReplacementIntentClosure = z.output<typeof deviceReplacementIntentClosureSchema>;
+export const deviceReplacementIntentProjectionSchema = z.union([
+  z.object({ version: z.literal(1), state: z.literal("none") }).strict(),
+  z
+    .object({
+      version: z.literal(1),
+      state: z.literal("active"),
+      intent: deviceReplacementCurrentIntentResponseSchema.unwrap(),
+    })
+    .strict(),
+  deviceReplacementIntentClosureSchema,
+]);
+export type DeviceReplacementIntentProjection = z.output<
+  typeof deviceReplacementIntentProjectionSchema
+>;
+export const deviceReplacementIntentProjectionQuerySchema = z
+  .object({ knownIntentId: platformUuidSchema.optional() })
+  .strict();
+export const deviceReplacementClosureAcknowledgementRequestSchema = z
+  .object({ requestId: platformUuidSchema, tombstone: deviceReplacementIntentClosureSchema })
+  .strict();
+export type DeviceReplacementClosureAcknowledgementRequest = z.output<
+  typeof deviceReplacementClosureAcknowledgementRequestSchema
+>;
+export const deviceReplacementClosureAcknowledgementResponseSchema = z
+  .object({
+    requestId: platformUuidSchema,
+    tombstone: deviceReplacementIntentClosureSchema,
+    acknowledgedAt: platformTimestampSchema,
+  })
+  .strict();
+export type DeviceReplacementClosureAcknowledgementResponse = z.output<
+  typeof deviceReplacementClosureAcknowledgementResponseSchema
+>;
+
 export const stationDeviceReplacementContracts = {
+  currentIntentV1: {
+    method: "GET",
+    path: "/station/device-replacement-intent/v1",
+    query: deviceReplacementIntentProjectionQuerySchema,
+    response: deviceReplacementIntentProjectionSchema,
+  },
+  acknowledgeClosure: {
+    method: "POST",
+    path: "/station/device-replacement-intent/v1/acknowledge",
+    status: 200,
+    body: deviceReplacementClosureAcknowledgementRequestSchema,
+    response: deviceReplacementClosureAcknowledgementResponseSchema,
+  },
   currentIntent: {
     method: "GET",
     path: "/station/device-replacement-intent",

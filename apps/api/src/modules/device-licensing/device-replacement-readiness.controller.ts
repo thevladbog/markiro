@@ -5,6 +5,7 @@ import {
   HttpCode,
   Post,
   Req,
+  Query,
   UnauthorizedException,
   UseGuards,
 } from "@nestjs/common";
@@ -12,8 +13,15 @@ import { ApiOperation, ApiTags } from "@nestjs/swagger";
 import {
   stationDeviceReplacementContracts,
   type DeviceReplacementReadinessRequest,
+  type DeviceReplacementClosureAcknowledgementRequest,
 } from "@markiro/platform-contracts";
-import { ApiHttpErrors, ApiStationAuth, ApiZodBody, ApiZodResponse } from "../../lib/openapi";
+import {
+  ApiHttpErrors,
+  ApiStationAuth,
+  ApiZodBody,
+  ApiZodResponse,
+  ApiZodQuery,
+} from "../../lib/openapi";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { StationOnlyGuard } from "../../tenancy/station-only.guard";
 import { AllowSubscriptionRecovery } from "../../subscriptions/subscription-access-policy";
@@ -49,6 +57,41 @@ export class DeviceReplacementReadinessController {
   @ApiHttpErrors(401, 403, 429)
   currentIntent(@Req() req: RequestWithTenant) {
     return this.readiness.currentIntent(identity(req));
+  }
+
+  @Get("device-replacement-intent/v1")
+  @ApiOperation({ summary: "Read a versioned drain or explicit source closure tombstone" })
+  @ApiZodResponse({
+    status: 200,
+    schema: stationDeviceReplacementContracts.currentIntentV1.response,
+  })
+  @ApiZodQuery(stationDeviceReplacementContracts.currentIntentV1.query)
+  @ApiHttpErrors(400, 401, 403, 429)
+  currentIntentV1(
+    @Req() req: RequestWithTenant,
+    @Query(new ZodValidationPipe(stationDeviceReplacementContracts.currentIntentV1.query))
+    query: { knownIntentId?: string },
+  ) {
+    return this.readiness.currentIntentProjection(identity(req), query.knownIntentId);
+  }
+  @Post("device-replacement-intent/v1/acknowledge")
+  @AllowSubscriptionRecovery("replacement_readiness")
+  @HttpCode(200)
+  @ApiOperation({
+    summary: "Acknowledge an exact replacement closure from the authenticated source",
+  })
+  @ApiZodBody(stationDeviceReplacementContracts.acknowledgeClosure.body)
+  @ApiZodResponse({
+    status: 200,
+    schema: stationDeviceReplacementContracts.acknowledgeClosure.response,
+  })
+  @ApiHttpErrors(400, 401, 403, 404, 409, 429)
+  acknowledgeClosure(
+    @Req() req: RequestWithTenant,
+    @Body(new ZodValidationPipe(stationDeviceReplacementContracts.acknowledgeClosure.body))
+    body: DeviceReplacementClosureAcknowledgementRequest,
+  ) {
+    return this.readiness.acknowledgeClosure(identity(req), body);
   }
   @Post("device-replacement-readiness")
   @AllowSubscriptionRecovery("replacement_readiness")

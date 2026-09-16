@@ -1,3 +1,4 @@
+import { replacementBlocksNewWork } from "../device-replacement.js";
 import {
   offlineGrantSchema,
   verifyGrant,
@@ -129,6 +130,7 @@ export async function persistStationGrantInstall(
     clock: { serverMs: number; monotonicMs: number; bootId: string; wallMs: number };
   },
 ): Promise<boolean> {
+  const draining = await replacementBlocksNewWork(exec);
   const payload = {
     owner: install.envelope.owner,
     mode: input.authenticatedMode,
@@ -138,13 +140,15 @@ export async function persistStationGrantInstall(
       json: JSON.stringify(keyset),
       retiredKids: keyset.retiredKids,
     },
-    grants: install.grants.map(({ compact, kid, grant }) => ({
-      grantId: grant.grantId,
-      kid,
-      compact,
-      json: JSON.stringify(grant),
-      credentialEpoch: grant.credentialEpoch,
-    })),
+    grants: install.grants
+      .filter(({ grant }) => !draining || grant.kindOfGrant !== "device")
+      .map(({ compact, kid, grant }) => ({
+        grantId: grant.grantId,
+        kid,
+        compact,
+        json: JSON.stringify(grant),
+        credentialEpoch: grant.credentialEpoch,
+      })),
     snapshots: install.snapshots.map((s) => ({ ...s, scopeJson: JSON.stringify(s.scope) })),
     clock: input.clock,
   };
@@ -156,7 +160,7 @@ export async function persistStationGrantInstall(
     return true;
   } catch (error) {
     if (
-      /OFFLINE_GRANT_STALE_INSTALL|OFFLINE_GRANT_STALE_EPOCH|UNIQUE constraint failed: offline_grant_install_commands/.test(
+      /REPLACEMENT_DRAIN|OFFLINE_GRANT_STALE_INSTALL|OFFLINE_GRANT_STALE_EPOCH|UNIQUE constraint failed: offline_grant_install_commands/.test(
         String(error),
       )
     )

@@ -4660,6 +4660,68 @@ export const STATION_MIGRATIONS: string[] = [
      UPDATE offline_grant_readiness_outbox SET cancelled_at=CURRENT_TIMESTAMP
       WHERE acknowledged_at IS NULL AND cancelled_at IS NULL;
    END;`,
+  // One durable source drain and exact readiness request. The INSERT and its
+  // retirement trigger are one statement even through the pooled Tauri driver.
+  `CREATE TABLE IF NOT EXISTS device_replacement_drain (
+     id INTEGER PRIMARY KEY CHECK(id=1),
+     intent_id TEXT NOT NULL,
+     state TEXT NOT NULL DEFAULT 'draining' CHECK(state IN ('draining','cancelled','closed')),
+     closure_json TEXT CHECK(closure_json IS NULL OR json_valid(closure_json)),
+     closure_acknowledged_at TEXT,
+     grant_install_floor INTEGER NOT NULL DEFAULT 0 CHECK(grant_install_floor>=0),
+     intent_json TEXT NOT NULL CHECK(json_valid(intent_json)),
+     resume_tasks_json TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(resume_tasks_json)),
+     tenant_id TEXT NOT NULL,
+     device_id TEXT NOT NULL,
+     credential_epoch INTEGER NOT NULL CHECK(credential_epoch>0),
+     credential_ownership TEXT NOT NULL CHECK(length(credential_ownership)=64),
+     report_sequence INTEGER NOT NULL DEFAULT -1 CHECK(report_sequence>=-1),
+     storage_revision INTEGER NOT NULL DEFAULT 1 CHECK(storage_revision>0),
+     request_id TEXT,
+     body_json TEXT CHECK(body_json IS NULL OR json_valid(body_json)),
+     acknowledged_at TEXT,
+     response_json TEXT CHECK(response_json IS NULL OR json_valid(response_json)),
+     CHECK((request_id IS NULL)=(body_json IS NULL))
+   );`,
+  `CREATE TRIGGER IF NOT EXISTS device_replacement_drain_replace_guard
+   BEFORE UPDATE OF intent_id ON device_replacement_drain
+   WHEN NEW.intent_id<>OLD.intent_id AND OLD.acknowledged_at IS NULL AND OLD.state='draining'
+   BEGIN SELECT RAISE(ABORT,'REPLACEMENT_PENDING_REPORT'); END;`,
+  `CREATE TRIGGER IF NOT EXISTS device_replacement_drain_closure_ack_guard
+   BEFORE UPDATE OF intent_id ON device_replacement_drain
+   WHEN NEW.intent_id<>OLD.intent_id AND OLD.closure_json IS NOT NULL AND OLD.closure_acknowledged_at IS NULL
+   BEGIN SELECT RAISE(ABORT,'REPLACEMENT_PENDING_CLOSURE_ACK'); END;`,
+  `CREATE TRIGGER IF NOT EXISTS device_replacement_drain_retire
+   AFTER INSERT ON device_replacement_drain BEGIN
+     DELETE FROM offline_grant_grants WHERE json_extract(grant_json,'$.kindOfGrant')='device';
+   END;`,
+  `CREATE TRIGGER IF NOT EXISTS device_replacement_drain_retire_again
+   AFTER UPDATE OF state ON device_replacement_drain
+   WHEN NEW.state='draining' AND OLD.state<>'draining' BEGIN
+     DELETE FROM offline_grant_grants WHERE json_extract(grant_json,'$.kindOfGrant')='device';
+   END;`,
+  `CREATE TRIGGER IF NOT EXISTS device_replacement_grant_insert_fence
+   BEFORE INSERT ON offline_grant_grants
+   WHEN json_extract(NEW.grant_json,'$.kindOfGrant')='device'
+     AND EXISTS(SELECT 1 FROM device_replacement_drain WHERE state<>'cancelled' OR NEW.installed_sequence<=grant_install_floor)
+   BEGIN SELECT RAISE(ABORT,'REPLACEMENT_DRAIN'); END;`,
+  `CREATE TRIGGER IF NOT EXISTS device_replacement_grant_update_fence
+   BEFORE UPDATE ON offline_grant_grants
+   WHEN json_extract(NEW.grant_json,'$.kindOfGrant')='device'
+     AND EXISTS(SELECT 1 FROM device_replacement_drain WHERE state<>'cancelled' OR NEW.installed_sequence<=grant_install_floor)
+   BEGIN SELECT RAISE(ABORT,'REPLACEMENT_DRAIN'); END;`,
+  `CREATE TRIGGER IF NOT EXISTS device_replacement_admission_fence
+   BEFORE INSERT ON offline_grant_task_admission_commands
+   WHEN EXISTS(SELECT 1 FROM device_replacement_drain WHERE state<>'cancelled')
+   BEGIN SELECT RAISE(ABORT,'REPLACEMENT_DRAIN'); END;`,
+  `CREATE TRIGGER IF NOT EXISTS device_replacement_late_install_fence
+   BEFORE INSERT ON offline_grant_install_commands
+   WHEN EXISTS(SELECT 1 FROM device_replacement_drain WHERE NEW.request_sequence<=grant_install_floor)
+   BEGIN SELECT RAISE(ABORT,'OFFLINE_GRANT_STALE_INSTALL'); END;`,
+  `CREATE TRIGGER IF NOT EXISTS device_replacement_late_configuration_fence
+   BEFORE INSERT ON offline_grant_configuration_commands
+   WHEN EXISTS(SELECT 1 FROM device_replacement_drain WHERE NEW.request_sequence<=grant_install_floor)
+   BEGIN SELECT RAISE(ABORT,'OFFLINE_GRANT_STALE_INSTALL'); END;`,
 ];
 
 export interface StationMigrationEntry {
