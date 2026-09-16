@@ -161,6 +161,11 @@ test("PostgreSQL and application database remain private, encrypted, backed up a
   assert.match(cluster, /assign_public_ip\s*=\s*false/);
   assert.match(cluster, /prevent_destroy\s*=\s*true/);
   assert.match(database, /prevent_destroy\s*=\s*true/);
+  assert.match(
+    database,
+    /extension\s*\{[\s\S]*name\s*=\s*"btree_gist"[\s\S]*\}/,
+    "Managed PostgreSQL must provision btree_gist before application migrations run",
+  );
 });
 
 test("media and temporarily retained audit data are private, versioned, encrypted and protected", async () => {
