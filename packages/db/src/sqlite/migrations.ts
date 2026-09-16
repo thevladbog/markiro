@@ -4722,6 +4722,24 @@ export const STATION_MIGRATIONS: string[] = [
    BEFORE INSERT ON offline_grant_configuration_commands
    WHEN EXISTS(SELECT 1 FROM device_replacement_drain WHERE NEW.request_sequence<=grant_install_floor)
    BEGIN SELECT RAISE(ABORT,'OFFLINE_GRANT_STALE_INSTALL'); END;`,
+  // Pending cancellation ACKs retain every new-work fence on upgraded devices.
+  `CREATE TRIGGER IF NOT EXISTS device_replacement_grant_insert_ack_fence
+   BEFORE INSERT ON offline_grant_grants
+   WHEN json_extract(NEW.grant_json,'$.kindOfGrant')='device'
+     AND EXISTS(SELECT 1 FROM device_replacement_drain WHERE state<>'cancelled' OR closure_acknowledged_at IS NULL OR NEW.installed_sequence<=grant_install_floor)
+   BEGIN SELECT RAISE(ABORT,'REPLACEMENT_DRAIN'); END;`,
+  `CREATE TRIGGER IF NOT EXISTS device_replacement_grant_update_ack_fence
+   BEFORE UPDATE ON offline_grant_grants
+   WHEN json_extract(NEW.grant_json,'$.kindOfGrant')='device'
+     AND EXISTS(SELECT 1 FROM device_replacement_drain WHERE state<>'cancelled' OR closure_acknowledged_at IS NULL OR NEW.installed_sequence<=grant_install_floor)
+   BEGIN SELECT RAISE(ABORT,'REPLACEMENT_DRAIN'); END;`,
+  `CREATE TRIGGER IF NOT EXISTS device_replacement_admission_ack_fence
+   BEFORE INSERT ON offline_grant_task_admission_commands
+   WHEN EXISTS(SELECT 1 FROM device_replacement_drain WHERE state<>'cancelled' OR closure_acknowledged_at IS NULL)
+   BEGIN SELECT RAISE(ABORT,'REPLACEMENT_DRAIN'); END;`,
+  `DELETE FROM offline_grant_grants
+   WHERE json_extract(grant_json,'$.kindOfGrant')='device'
+     AND EXISTS(SELECT 1 FROM device_replacement_drain WHERE state<>'cancelled' OR closure_acknowledged_at IS NULL);`,
 ];
 
 export interface StationMigrationEntry {

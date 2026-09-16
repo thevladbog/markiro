@@ -1,6 +1,7 @@
 import {
   prepareReplacementReadiness,
   applyReplacementClosure,
+  acknowledgeReplacementClosure,
 } from "../src/lib/device-replacement.js";
 import { StationGrantAdmission } from "../src/lib/offline-grants/admission.js";
 import { DatabaseSync } from "node:sqlite";
@@ -375,6 +376,47 @@ describe("signed Station grant installation", () => {
         generation,
         expectedDevice: owner,
         requestSequence: floor,
+        clock: { serverMs: envelope.serverTime, monotonicMs: 10, bootId: "boot", wallMs: 20 },
+      }),
+    ).toBe(false);
+    await refreshStationOfflineGrant({
+      exec,
+      client: issuerClient(keyset, { status: "issued", envelope }),
+      configuredOrigin: origin,
+      generation,
+      expectedDevice: owner,
+      sampleClock: async () => ({ bootId: "boot", monotonicMs: 10, wallMs: 20 }),
+    });
+    expect(
+      db
+        .prepare(
+          "SELECT count(*) count FROM offline_grant_grants WHERE json_extract(grant_json,'$.kindOfGrant')='device'",
+        )
+        .get(),
+    ).toEqual({ count: 0 });
+    const [pending] = await exec.all<{ sequence: number }>(
+      "SELECT MAX(request_sequence)+1 sequence FROM offline_grant_install_commands",
+    );
+    if (!pending) throw new Error("missing pending sequence");
+    await acknowledgeReplacementClosure({
+      exec,
+      generation,
+      client: {
+        post: async (_path, body) => ({
+          ...(body as object),
+          acknowledgedAt: "2026-09-16T10:03:00Z",
+        }),
+      },
+    });
+    expect(
+      await installStationGrant({
+        exec,
+        envelope,
+        keyset,
+        configuredOrigin: origin,
+        generation,
+        expectedDevice: owner,
+        requestSequence: pending.sequence,
         clock: { serverMs: envelope.serverTime, monotonicMs: 10, bootId: "boot", wallMs: 20 },
       }),
     ).toBe(false);

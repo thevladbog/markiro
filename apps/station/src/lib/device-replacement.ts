@@ -81,7 +81,7 @@ export async function prepareReplacementReadiness(input: {
         UNION SELECT json_extract(value,'$.inventoryId'),'inventory' FROM station_meta WHERE key='active_inventory_floor_task_v1'
         UNION SELECT json_extract(?, '$.taskId'),json_extract(?, '$.kind') WHERE ? IS NOT NULL
       ))) ON CONFLICT(id) DO UPDATE SET
-      resume_tasks_json=CASE WHEN device_replacement_drain.state='cancelled'
+      resume_tasks_json=CASE WHEN device_replacement_drain.state='cancelled' AND device_replacement_drain.closure_acknowledged_at IS NOT NULL
         THEN excluded.resume_tasks_json ELSE device_replacement_drain.resume_tasks_json END,
       state='draining',closure_json=NULL,closure_acknowledged_at=NULL,
       intent_id=excluded.intent_id,intent_json=excluded.intent_json,tenant_id=excluded.tenant_id,
@@ -301,10 +301,17 @@ export async function reportReplacementReadiness(
   return response;
 }
 
+/** Cancellation releases drain only after its exact acknowledgement is durable. */
+export function replacementCancellationAcknowledged(
+  row: Pick<DrainRow, "state" | "closure_acknowledged_at"> | null,
+): boolean {
+  return row?.state === "cancelled" && row.closure_acknowledged_at !== null;
+}
+
 /** Drain is independent of observe/strict grant rollout and survives delayed configuration. */
 export async function replacementBlocksNewWork(exec: SqlExecutor): Promise<boolean> {
   const row = await readReplacementDrain(exec);
-  return row !== null && row.state !== "cancelled";
+  return row !== null && !replacementCancellationAcknowledged(row);
 }
 
 export async function replacementCanEnterTask(
@@ -313,12 +320,12 @@ export async function replacementCanEnterTask(
   kind: "shift" | "inventory",
 ): Promise<boolean> {
   const row = await readReplacementDrain(exec);
-  if (!row || row.state === "cancelled") return true;
+  if (!row || replacementCancellationAcknowledged(row)) return true;
   const tasks = JSON.parse(row.resume_tasks_json) as Array<{ taskId: string; kind: string }>;
   return tasks.some((task) => task.taskId === taskId && task.kind === kind);
 }
 
-/** A versioned, exact closure is the only operation that releases a saved drain. */
+/** Persist an exact closure while retaining drain until its acknowledgement is durable. */
 export async function applyReplacementClosure(input: {
   exec: SqlExecutor;
   generation: CredentialGeneration;
@@ -403,11 +410,26 @@ export async function acknowledgeReplacementClosure(input: {
   if (!lease) throw new Error("replacement stale credential");
   try {
     await input.exec.run(
-      "UPDATE device_replacement_drain SET closure_acknowledged_at=? WHERE id=1 AND intent_id=? AND credential_ownership=? AND closure_json=? AND closure_acknowledged_at IS NULL",
+      `UPDATE device_replacement_drain SET closure_acknowledged_at=?,
+      grant_install_floor=COALESCE((SELECT MAX(sequence) FROM (
+        SELECT request_sequence sequence FROM offline_grant_install_commands
+        UNION ALL SELECT request_sequence FROM offline_grant_configuration_commands
+        UNION ALL SELECT request_sequence FROM offline_grant_keyset_commands
+        UNION ALL SELECT grant_install_floor FROM device_replacement_drain
+      )),0)+1
+      WHERE id=1 AND intent_id=? AND credential_ownership=? AND closure_json=? AND closure_acknowledged_at IS NULL`,
       [response.acknowledgedAt, body.tombstone.intentId, owner, JSON.stringify(body)],
     );
+    const saved = await readReplacementDrain(input.exec);
+    if (
+      saved?.intent_id !== body.tombstone.intentId ||
+      saved.credential_ownership !== owner ||
+      saved.closure_json !== JSON.stringify(body) ||
+      saved.closure_acknowledged_at !== response.acknowledgedAt
+    )
+      throw new Error("replacement closure acknowledgement not persisted");
+    return replacementCancellationAcknowledged(saved);
   } finally {
     lease.release();
   }
-  return body.tombstone.state === "cancelled";
 }

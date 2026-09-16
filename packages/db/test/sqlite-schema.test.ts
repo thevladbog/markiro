@@ -2761,6 +2761,52 @@ describe("validation reprocessing SQLite persistence", () => {
 });
 
 describe("device replacement drain SQLite", () => {
+  it("upgrades pending cancellation fences and retires prematurely installed device authority", () => {
+    const db = new DatabaseSync(":memory:");
+    const repair = STATION_MIGRATIONS.findIndex((sql) =>
+      sql.includes("CREATE TRIGGER IF NOT EXISTS device_replacement_grant_insert_ack_fence"),
+    );
+    expect(repair).toBeGreaterThan(0);
+    applyStatements(db, STATION_MIGRATIONS.slice(0, repair));
+    db.prepare(
+      "INSERT INTO device_replacement_drain(id,intent_id,intent_json,tenant_id,device_id,credential_epoch,credential_ownership,state) VALUES(1,'intent','{}','tenant','device',1,?,'cancelled')",
+    ).run("a".repeat(64));
+    db.exec(
+      `INSERT INTO offline_grant_grants VALUES('device','key','signed','{"kindOfGrant":"device"}',1,1000); INSERT INTO offline_grant_grants VALUES('task','key','signed-task','{"kindOfGrant":"task"}',1,1000)`,
+    );
+    applyStatements(db, STATION_MIGRATIONS.slice(repair));
+    applyStatements(db, STATION_MIGRATIONS.slice(repair));
+    expect(db.prepare("SELECT grant_id FROM offline_grant_grants").all()).toEqual([
+      { grant_id: "task" },
+    ]);
+    expect(
+      db.prepare("SELECT state,closure_acknowledged_at FROM device_replacement_drain").get(),
+    ).toEqual({ state: "cancelled", closure_acknowledged_at: null });
+    expect(() =>
+      db.exec(
+        `UPDATE offline_grant_grants SET grant_json='{"kindOfGrant":"device"}' WHERE grant_id='task'`,
+      ),
+    ).toThrow("REPLACEMENT_DRAIN");
+    expect(() =>
+      db.exec(
+        `INSERT INTO offline_grant_grants VALUES('late','key','signed','{"kindOfGrant":"device"}',1,1001)`,
+      ),
+    ).toThrow("REPLACEMENT_DRAIN");
+    expect(() =>
+      db.exec(
+        `INSERT INTO offline_grant_task_admission_commands(admission_id,payload_json) VALUES('late','{}')`,
+      ),
+    ).toThrow("REPLACEMENT_DRAIN");
+    db.exec("UPDATE device_replacement_drain SET closure_acknowledged_at='2026-09-16T10:03:00Z'");
+    db.exec(
+      `INSERT INTO offline_grant_grants VALUES('fresh','key','signed','{"kindOfGrant":"device"}',1,1002)`,
+    );
+    applyStatements(db, STATION_MIGRATIONS.slice(repair));
+    expect(db.prepare("SELECT COUNT(*) count FROM offline_grant_grants").get()).toEqual({
+      count: 2,
+    });
+    db.close();
+  });
   it("upgrades in place, preserves old work and enforces singleton JSON/request parity", () => {
     const db = new DatabaseSync(":memory:");
     const start = STATION_MIGRATIONS.findIndex((sql) =>

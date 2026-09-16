@@ -310,6 +310,167 @@ describe("replacement durable drain", () => {
       { grant_id: "device" },
     ]);
   });
+  it("keeps cancellation fenced across restart, failed ACK delivery, invalid responses and a failed durable commit", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "station-cancellation-"));
+    const path = join(directory, "station.sqlite");
+    const first = setup(path);
+    let reopened: DatabaseSync | null = null;
+    try {
+      await prepareReplacementReadiness({ ...first, intent });
+      await applyReplacementClosure({
+        ...first,
+        tombstone: {
+          version: 1,
+          state: "cancelled",
+          intentId: intent.intentId,
+          preparationId: intent.preparationId,
+          credentialEpoch: 1,
+          preparationRevision: 3,
+          closedAt: "2026-09-16T10:02:00Z",
+        },
+      });
+      const saved = (await readReplacementDrain(first.exec))?.closure_json;
+      first.db.close();
+      const restored = setup(path);
+      reopened = restored.db;
+      const assertFenced = async () => {
+        expect((await readReplacementDrain(restored.exec))?.closure_acknowledged_at).toBeNull();
+        expect(await replacementBlocksNewWork(restored.exec)).toBe(true);
+        expect(await replacementCanEnterTask(restored.exec, "new-task", "shift")).toBe(false);
+        const admission = new StationGrantAdmission(restored.exec, async () => ({
+          bootId: "boot",
+          monotonicMs: 1,
+          wallMs: 1,
+        }));
+        const work = {
+          owner: { tenantId: "t", deviceId: "d", kind: "station" as const, credentialEpoch: 1 },
+          capability: "inventory.start.v1" as const,
+          taskId: "new-task",
+          snapshotDigest: "start",
+          eventId: "start",
+          eventType: "inventory.scan.v1" as const,
+          cost: {},
+        };
+        expect((await admission.assessNewWork(work)).allow).toBe(false);
+        expect(
+          (
+            await admission.commitNewWork(
+              {
+                intent: work,
+                execution: {
+                  taskKind: "inventory",
+                  taskId: "new-task",
+                  scope: {
+                    manifest: {},
+                    snapshotId: "snapshot",
+                    combinedDigest: "a".repeat(64),
+                    contentDigest: "b".repeat(64),
+                  },
+                },
+              },
+              restored.generation,
+            )
+          ).allow,
+        ).toBe(false);
+        expect(() =>
+          restored.db.exec(
+            `INSERT INTO offline_grant_grants VALUES('late','key','signed','{"kindOfGrant":"device"}',1,1000)`,
+          ),
+        ).toThrow("REPLACEMENT_DRAIN");
+        expect(() =>
+          restored.db.exec(
+            `INSERT INTO offline_grant_task_admission_commands(admission_id,payload_json) VALUES('new-admission','{}')`,
+          ),
+        ).toThrow("REPLACEMENT_DRAIN");
+      };
+      await assertFenced();
+      for (const reason of ["not delivered", "response lost"]) {
+        await expect(
+          acknowledgeReplacementClosure({
+            ...restored,
+            client: {
+              post: async () => {
+                throw new Error(reason);
+              },
+            },
+          }),
+        ).rejects.toThrow(reason);
+        await assertFenced();
+      }
+      for (const mismatch of ["request", "tombstone"]) {
+        await expect(
+          acknowledgeReplacementClosure({
+            ...restored,
+            client: {
+              post: async (_path, body) => ({
+                ...(body as object),
+                ...(mismatch === "request"
+                  ? { requestId: "77777777-7777-4777-8777-777777777777" }
+                  : {
+                      tombstone: {
+                        ...JSON.parse(saved ?? "{}").tombstone,
+                        preparationRevision: 99,
+                      },
+                    }),
+                acknowledgedAt: "2026-09-16T10:03:00Z",
+              }),
+            },
+          }),
+        ).rejects.toThrow("response mismatch");
+        await assertFenced();
+      }
+      const noCommit: SqlExecutor = {
+        all: restored.exec.all.bind(restored.exec),
+        run: async () => undefined,
+      };
+      await expect(
+        acknowledgeReplacementClosure({
+          ...restored,
+          exec: noCommit,
+          client: {
+            post: async (_path, body) => ({
+              ...(body as object),
+              acknowledgedAt: "2026-09-16T10:03:00Z",
+            }),
+          },
+        }),
+      ).rejects.toThrow("acknowledgement not persisted");
+      await assertFenced();
+      await expect(
+        acknowledgeReplacementClosure({
+          ...restored,
+          generation: createCredentialGeneration("different-device"),
+          client: {
+            post: async () => {
+              throw new Error("must not send");
+            },
+          },
+        }),
+      ).rejects.toThrow("credential mismatch");
+      await assertFenced();
+      restored.db.exec(
+        `CREATE TRIGGER interrupt_closure_ack BEFORE UPDATE OF closure_acknowledged_at ON device_replacement_drain BEGIN SELECT RAISE(ABORT,'disk failure'); END`,
+      );
+      const post = vi.fn(async (_path: string, body: unknown) => ({
+        ...(body as object),
+        acknowledgedAt: "2026-09-16T10:03:00Z",
+      }));
+      await expect(
+        acknowledgeReplacementClosure({ ...restored, client: { post } }),
+      ).rejects.toThrow("disk failure");
+      await assertFenced();
+      restored.db.exec("DROP TRIGGER interrupt_closure_ack");
+      expect(await acknowledgeReplacementClosure({ ...restored, client: { post } })).toBe(true);
+      expect(JSON.stringify(post.mock.calls[0]?.[1])).toBe(saved);
+      expect(post.mock.calls[1]?.[1]).toEqual(post.mock.calls[0]?.[1]);
+      expect(await replacementBlocksNewWork(restored.exec)).toBe(false);
+      expect(await replacementCanEnterTask(restored.exec, "new-task", "shift")).toBe(true);
+    } finally {
+      if (first.db.isOpen) first.db.close();
+      reopened?.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
   it("keeps a completed source closed to new work after its terminal acknowledgement", async () => {
     const s = setup();
     await prepareReplacementReadiness({ ...s, intent });
@@ -370,7 +531,7 @@ describe("replacement durable drain", () => {
       }),
     ).rejects.toThrow("mismatch");
     await applyReplacementClosure({ ...s, tombstone });
-    expect(await replacementBlocksNewWork(s.exec)).toBe(false);
+    expect(await replacementBlocksNewWork(s.exec)).toBe(true);
     const post = vi
       .fn()
       .mockRejectedValueOnce(new Error("response lost"))

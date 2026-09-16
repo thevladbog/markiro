@@ -10,6 +10,7 @@ import {
   applyReplacementClosure,
   acknowledgeReplacementClosure,
   readReplacementDrain,
+  replacementCancellationAcknowledged,
   readReplacementMeasurements,
   reportReplacementReadiness,
 } from "./device-replacement.js";
@@ -46,7 +47,7 @@ export function useDeviceReplacement(input: {
     const current = () => active && (!generation || credentialGenerationIsCurrent(generation));
     const publish = async (reportFailed: boolean) => {
       const saved = await readReplacementDrain(exec);
-      const row = saved?.state === "cancelled" ? null : saved;
+      const row = replacementCancellationAcknowledged(saved) ? null : saved;
       const measurements = row ? await readReplacementMeasurements(exec) : null;
       if (current())
         setState({

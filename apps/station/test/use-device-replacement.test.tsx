@@ -6,6 +6,7 @@ import { useDeviceReplacement } from "../src/lib/use-device-replacement.js";
 import {
   prepareReplacementReadiness,
   drainReplacementReadiness,
+  applyReplacementClosure,
   readReplacementDrain,
 } from "../src/lib/device-replacement.js";
 import { createCredentialGeneration } from "../src/lib/credential-recovery.js";
@@ -104,6 +105,38 @@ describe("replacement polling lifecycle", () => {
       rendered.unmount();
     },
   );
+  it("keeps the drain visible through repeated ACK failures and remount until the exact retry is saved", async () => {
+    const tombstone = {
+      version: 1 as const,
+      state: "cancelled" as const,
+      intentId: intent.intentId,
+      preparationId: intent.preparationId,
+      credentialEpoch: 1,
+      preparationRevision: 3,
+      closedAt: "2026-09-16T10:02:00Z",
+    };
+    const f = await fixture(tombstone);
+    await applyReplacementClosure({ ...f.input, tombstone });
+    f.post
+      .mockRejectedValueOnce(new Error("not delivered"))
+      .mockRejectedValueOnce(new Error("response lost"));
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      const rendered = renderHook(() => useDeviceReplacement(f.input));
+      await waitFor(() => expect(f.post).toHaveBeenCalledTimes(attempt));
+      await waitFor(() => expect(rendered.result.current.drain?.reportFailed).toBe(true));
+      expect(rendered.result.current.drain?.intentId).toBe(intent.intentId);
+      expect(f.input.onCancelled).not.toHaveBeenCalled();
+      expect((await readReplacementDrain(f.input.exec))?.closure_acknowledged_at).toBeNull();
+      rendered.unmount();
+    }
+    const restored = renderHook(() => useDeviceReplacement(f.input));
+    await waitFor(() => expect(f.input.onCancelled).toHaveBeenCalledOnce());
+    await waitFor(() => expect(restored.result.current.drain).toBeNull());
+    expect(f.post.mock.calls[0]?.[1]).toEqual(f.post.mock.calls[1]?.[1]);
+    expect(f.post.mock.calls[0]?.[1]).toEqual(f.post.mock.calls[2]?.[1]);
+    expect((await readReplacementDrain(f.input.exec))?.closure_acknowledged_at).not.toBeNull();
+    restored.unmount();
+  });
   it.each([false, true])(
     "acknowledges cancellation despite a rejected pending report: %s",
     async (rejectPendingReport) => {
