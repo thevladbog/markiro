@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, lte } from "drizzle-orm";
+import { and, asc, desc, eq, lte, sql } from "drizzle-orm";
 import { schema } from "@markiro/db";
 import {
   deviceRetentionSelectionSchema,
@@ -70,6 +70,36 @@ export function allowedNativeCapabilities(
     ),
   );
 }
+
+const replacementNewWorkBlockingStates = new Set(["draining", "ready", "executing"]);
+
+/** A saved plan preserves current authority; only an active replacement transition blocks it. */
+export function replacementBlocksNewWorkAdmission(state: unknown) {
+  return typeof state === "string" && replacementNewWorkBlockingStates.has(state);
+}
+
+/**
+ * Task 2 extends the durable preparation state. Query only active transitions now,
+ * so legacy prepared/cancelled rows remain non-blocking without inventing a drain.
+ */
+async function activeReplacementAdmissionProjection(
+  tx: SubscriptionTransaction,
+  tenantId: string,
+  deviceId: string,
+) {
+  const [replacement] = await tx
+    .select({ state: schema.workingDeviceReplacementPreparations.state })
+    .from(schema.workingDeviceReplacementPreparations)
+    .where(
+      and(
+        eq(schema.workingDeviceReplacementPreparations.tenantId, tenantId),
+        eq(schema.workingDeviceReplacementPreparations.deviceId, deviceId),
+        sql`${schema.workingDeviceReplacementPreparations.state} in ('draining', 'ready', 'executing')`,
+      ),
+    );
+  return replacement;
+}
+
 export async function grantPoolDenial(
   tx: SubscriptionTransaction,
   owner: GrantOwner,
@@ -104,17 +134,12 @@ export async function grantPoolDenial(
   if (!row || !row.assignment || !assignmentConsistent(row.device, row.assignment))
     return "facts_unknown";
   if (row.assignment.state !== "assigned") return "not_entitled";
-  const [replacement] = await tx
-    .select({ id: schema.workingDeviceReplacementPreparations.id })
-    .from(schema.workingDeviceReplacementPreparations)
-    .where(
-      and(
-        eq(schema.workingDeviceReplacementPreparations.tenantId, owner.tenantId),
-        eq(schema.workingDeviceReplacementPreparations.deviceId, owner.deviceId),
-        eq(schema.workingDeviceReplacementPreparations.state, "prepared"),
-      ),
-    );
-  if (replacement) return "not_entitled";
+  const replacement = await activeReplacementAdmissionProjection(
+    tx,
+    owner.tenantId,
+    owner.deviceId,
+  );
+  if (replacementBlocksNewWorkAdmission(replacement?.state)) return "not_entitled";
   const occupied = pool.filter((row) => assignmentOccupied(row.device, row.assignment));
   if (occupied.some((row) => !assignmentConsistent(row.device, row.assignment)))
     return "facts_unknown";

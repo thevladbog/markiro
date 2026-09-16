@@ -686,7 +686,7 @@ describe.skipIf(!process.env.DATABASE_URL)("authenticated grant issuance", () =>
       reason: "not_entitled",
     });
   });
-  it("denies prepared replacement while retaining the currently valid credential", async () => {
+  it("keeps a prepared replacement eligible while retaining the current credential", async () => {
     const f = await fixture(),
       id = randomUUID();
     await db.insert(schema.user).values({ id, name: "Owner", email: `${id}@example.invalid` });
@@ -715,24 +715,21 @@ describe.skipIf(!process.env.DATABASE_URL)("authenticated grant issuance", () =>
       { requestId: prepared.requestId, previewId: prepared.id },
       actor,
     );
-    expect(await issuer.issueDevice(f, randomUUID())).toEqual({
-      status: "denied",
-      reason: "not_entitled",
-    });
+    expect(await issuer.issueDevice(f, randomUUID())).toMatchObject({ status: "issued" });
     expect(
       await db.select().from(schema.apikey).where(eq(schema.apikey.id, f.apiKeyId)),
     ).toHaveLength(1);
-    const [denial] = await db
+    const [issuance] = await db
       .select()
       .from(schema.tenantAuditEvents)
       .where(eq(schema.tenantAuditEvents.organizationId, f.tenantId));
-    expect(denial?.after).toMatchObject({
+    expect(issuance?.after).toMatchObject({
       actorDomain: "station_device",
       actorId: f.deviceId,
       deviceKind: "station",
       credentialEpoch: 1,
       operation: "device",
-      reason: "not_entitled",
+      reason: null,
       entitlementRevision: expect.any(String),
       policyRevision: expect.any(String),
     });

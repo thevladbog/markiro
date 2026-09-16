@@ -120,6 +120,177 @@ describe("device replacement contracts", () => {
     }
   });
 
+  it("defines strict drain, execution and recovery commands without client authority", () => {
+    const base = { requestId, expectedRevision: 2 };
+    expect(contracts.deviceReplacementDrainRequestSchema.parse(base)).toEqual(base);
+    expect(contracts.deviceReplacementExecutionPreviewRequestSchema.parse(base)).toEqual(base);
+    expect(
+      contracts.deviceReplacementExecuteRequestSchema.parse({
+        ...base,
+        previewId,
+        mode: "normal",
+      }),
+    ).toEqual({ ...base, previewId, mode: "normal" });
+    expect(
+      contracts.deviceReplacementExecuteRequestSchema.parse({
+        ...base,
+        previewId,
+        mode: "emergency",
+      }),
+    ).toEqual({ ...base, previewId, mode: "emergency" });
+
+    for (const invalid of [
+      { ...base, requestedAt: createdAt },
+      { ...base, force: true },
+      { ...base, expectedRevision: 0 },
+      { ...base, expectedRevision: -1 },
+      { ...base, expectedRevision: 1.5 },
+    ]) {
+      expect(contracts.deviceReplacementDrainRequestSchema.safeParse(invalid).success).toBe(false);
+    }
+    for (const invalid of [
+      { ...base, previewId, mode: "normal", executeAt: createdAt },
+      { ...base, previewId, mode: "unsupported" },
+    ]) {
+      expect(contracts.deviceReplacementExecuteRequestSchema.safeParse(invalid).success).toBe(
+        false,
+      );
+    }
+
+    expect(
+      contracts.deviceReplacementEmergencyPreviewRequestSchema.parse({
+        ...base,
+        reason: "  Source device is unavailable  ",
+      }),
+    ).toEqual({ ...base, reason: "Source device is unavailable" });
+    expect(
+      contracts.deviceReplacementEmergencyPreviewRequestSchema.safeParse({
+        ...base,
+        reason: " ",
+      }).success,
+    ).toBe(false);
+    expect(contracts.deviceReplacementRecoveryCodeRequestSchema.parse(base)).toEqual(base);
+    expect(
+      contracts.deviceReplacementRecoveryCloseRequestSchema.safeParse({ requestId }).success,
+    ).toBe(false);
+    expect(
+      contracts.deviceReplacementRecoveryCloseRequestSchema.parse({
+        ...base,
+        reason: "  Evidence unavailable  ",
+      }),
+    ).toEqual({ ...base, reason: "Evidence unavailable" });
+  });
+
+  it("accepts only a strict, de-duplicated readiness report and publishes server eligibility", () => {
+    const report = {
+      requestId,
+      intentId: previewId,
+      credentialEpoch: 4,
+      reportSequence: 7,
+      clientBuild: "station-2.0.0",
+      storageRevision: 1,
+      pending: {
+        scans: 0,
+        inventories: 0,
+        shiftClosures: 0,
+        productLabels: 0,
+        boxes: 0,
+        exceptions: 0,
+      },
+      conflicts: 0,
+      unknownPrints: 0,
+      activeTasks: [],
+      installedGrants: [],
+      journal: { digest: "a".repeat(64), highestSequence: 42 },
+    };
+    expect(contracts.deviceReplacementReadinessRequestSchema.parse(report)).toEqual(report);
+    for (const invalid of [
+      { ...report, extra: true },
+      { ...report, receivedAt: createdAt },
+      { ...report, clientTimestamp: createdAt },
+      { ...report, credentialEpoch: 0 },
+      { ...report, reportSequence: -1 },
+      { ...report, conflicts: -1 },
+      { ...report, pending: { ...report.pending, boxes: -1 } },
+      {
+        ...report,
+        activeTasks: [
+          { taskId: sourceDeviceId, kind: "shift" },
+          { taskId: sourceDeviceId, kind: "shift" },
+        ],
+      },
+      { ...report, journal: { ...report.journal, highestSequence: -1 } },
+    ]) {
+      expect(contracts.deviceReplacementReadinessRequestSchema.safeParse(invalid).success).toBe(
+        false,
+      );
+    }
+
+    const response = {
+      requestId,
+      intentId: previewId,
+      receivedAt: createdAt,
+      eligibility: { status: "eligible", reasons: [] },
+    } as const;
+    expect(contracts.deviceReplacementReadinessResponseSchema.parse(response)).toEqual(response);
+    expect(
+      contracts.deviceReplacementReadinessResponseSchema.safeParse({
+        ...response,
+        eligibility: { status: "eligible", reasons: ["pending_scans"] },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("requires an immutable completed execution receipt", () => {
+    const completed = {
+      requestId,
+      preparation: {
+        id: preparationId,
+        sourceDeviceId,
+        revision: 4,
+        state: "completed",
+        preparedAt: createdAt,
+        cancelledAt: null,
+        observation,
+        execution: {
+          mode: "emergency",
+          targetDeviceId: previewId,
+          executedAt: expiresAt,
+          newWorkAllowedAt: expiresAt,
+          recoveryState: "required",
+        },
+        readiness: null,
+        recovery: { state: "required", closedAt: null },
+      },
+    } as const;
+    expect(contracts.deviceReplacementReceiptSchema.parse(completed)).toEqual(completed);
+    for (const invalid of [
+      {
+        ...completed,
+        preparation: {
+          ...completed.preparation,
+          execution: { ...completed.preparation.execution, targetDeviceId: undefined },
+        },
+      },
+      {
+        ...completed,
+        preparation: {
+          ...completed.preparation,
+          execution: { ...completed.preparation.execution, mode: "invalid" },
+        },
+      },
+      {
+        ...completed,
+        preparation: {
+          ...completed.preparation,
+          execution: { ...completed.preparation.execution, newWorkAllowedAt: null },
+        },
+      },
+    ]) {
+      expect(contracts.deviceReplacementReceiptSchema.safeParse(invalid).success).toBe(false);
+    }
+  });
+
   it("requires an unavailable execution with every invariant reason and unknown local data", () => {
     expect(contracts.deviceReplacementObservationSchema.parse(observation)).toEqual(observation);
 

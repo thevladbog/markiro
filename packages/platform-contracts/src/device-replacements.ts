@@ -3,8 +3,19 @@ import { platformTimestampSchema, platformUuidSchema } from "./primitives.js";
 
 const positiveRevisionSchema = z.number().int().positive();
 const nonnegativeCountSchema = z.number().int().nonnegative();
+const positiveEpochSchema = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+const boundedTextSchema = z.string().trim().min(1).max(1_000);
+const digestSchema = z.string().regex(/^[0-9a-f]{64}$/);
 const deviceReplacementNameSchema = z.string().trim().min(1).max(200);
 const deviceReplacementKindSchema = z.enum(["station", "handheld"]);
+export const deviceReplacementPreparationStateSchema = z.enum([
+  "prepared",
+  "draining",
+  "ready",
+  "executing",
+  "completed",
+  "cancelled",
+]);
 
 export const deviceReplacementTargetSchema = z
   .object({
@@ -82,18 +93,30 @@ const unavailableReasonSchema = z.enum([
 
 const replacementExecutionSchema = z
   .object({
-    available: z.literal(false),
+    available: z.boolean(),
     reasons: z
       .array(unavailableReasonSchema)
-      .min(fixedUnavailableReasons.length)
       .max(unavailableReasonSchema.options.length)
-      .refine((reasons) => new Set(reasons).size === reasons.length, "Reasons must be unique")
-      .refine(
-        (reasons) => fixedUnavailableReasons.every((reason) => reasons.includes(reason)),
-        "Every replacement must state the fixed unavailable reasons",
-      ),
+      .refine((reasons) => new Set(reasons).size === reasons.length, "Reasons must be unique"),
   })
-  .strict();
+  .strict()
+  .superRefine((execution, context) => {
+    if (execution.available && execution.reasons.length !== 0)
+      context.addIssue({
+        code: "custom",
+        path: ["reasons"],
+        message: "An available replacement cannot have unavailable reasons",
+      });
+    if (
+      !execution.available &&
+      !fixedUnavailableReasons.every((reason) => execution.reasons.includes(reason))
+    )
+      context.addIssue({
+        code: "custom",
+        path: ["reasons"],
+        message: "Every unavailable replacement must state the fixed unavailable reasons",
+      });
+  });
 
 export const deviceReplacementObservationSchema = z
   .object({
@@ -160,15 +183,75 @@ export const deviceReplacementPreviewSchema = z
     }
   });
 
+const deviceReplacementReadinessProjectionSchema = z
+  .object({
+    intentId: platformUuidSchema,
+    credentialEpoch: positiveEpochSchema,
+    receivedAt: platformTimestampSchema.nullable(),
+    eligibility: z.discriminatedUnion("status", [
+      z.object({ status: z.literal("eligible"), reasons: z.tuple([]) }).strict(),
+      z
+        .object({
+          status: z.literal("blocked"),
+          reasons: z.array(z.string().trim().min(1).max(128)).min(1).max(32),
+        })
+        .strict(),
+    ]),
+  })
+  .strict();
+
+const deviceReplacementRecoveryStateSchema = z.enum([
+  "not_required",
+  "required",
+  "draining",
+  "completed",
+  "evidence_unavailable",
+]);
+
+const deviceReplacementExecutionProjectionSchema = z
+  .object({
+    mode: z.enum(["normal", "emergency"]),
+    targetDeviceId: platformUuidSchema,
+    executedAt: platformTimestampSchema,
+    newWorkAllowedAt: platformTimestampSchema,
+    recoveryState: deviceReplacementRecoveryStateSchema,
+  })
+  .strict();
+
+const deviceReplacementRecoveryProjectionSchema = z
+  .object({
+    state: deviceReplacementRecoveryStateSchema,
+    closedAt: platformTimestampSchema.nullable(),
+  })
+  .strict()
+  .superRefine((recovery, context) => {
+    if (recovery.state === "completed" || recovery.state === "evidence_unavailable") {
+      if (recovery.closedAt === null)
+        context.addIssue({
+          code: "custom",
+          path: ["closedAt"],
+          message: "A closed recovery state requires a close timestamp",
+        });
+    } else if (recovery.closedAt !== null)
+      context.addIssue({
+        code: "custom",
+        path: ["closedAt"],
+        message: "An open recovery state cannot have a close timestamp",
+      });
+  });
+
 export const deviceReplacementPreparationSchema = z
   .object({
     id: platformUuidSchema,
     sourceDeviceId: platformUuidSchema,
     revision: positiveRevisionSchema,
-    state: z.enum(["prepared", "cancelled"]),
+    state: deviceReplacementPreparationStateSchema,
     preparedAt: platformTimestampSchema,
     cancelledAt: platformTimestampSchema.nullable(),
     observation: deviceReplacementObservationSchema,
+    execution: deviceReplacementExecutionProjectionSchema.nullable().optional(),
+    readiness: deviceReplacementReadinessProjectionSchema.nullable().optional(),
+    recovery: deviceReplacementRecoveryProjectionSchema.nullable().optional(),
   })
   .strict()
   .superRefine((preparation, context) => {
@@ -179,11 +262,11 @@ export const deviceReplacementPreparationSchema = z
         message: "Preparation source must match its observation",
       });
     }
-    if (preparation.state === "prepared" && preparation.cancelledAt !== null) {
+    if (preparation.state !== "cancelled" && preparation.cancelledAt !== null) {
       context.addIssue({
         code: "custom",
         path: ["cancelledAt"],
-        message: "A prepared replacement cannot have a cancellation timestamp",
+        message: "Only a cancelled replacement can have a cancellation timestamp",
       });
     }
     if (preparation.state === "cancelled" && preparation.cancelledAt === null) {
@@ -201,6 +284,30 @@ export const deviceReplacementPreparationSchema = z
         code: "custom",
         path: ["cancelledAt"],
         message: "Cancellation cannot precede preparation",
+      });
+    }
+    if (preparation.state === "completed" && !preparation.execution) {
+      context.addIssue({
+        code: "custom",
+        path: ["execution"],
+        message: "A completed replacement requires an execution projection",
+      });
+    }
+    if (
+      (preparation.state === "draining" || preparation.state === "ready") &&
+      !preparation.readiness
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["readiness"],
+        message: "An active drain requires a readiness projection",
+      });
+    }
+    if (preparation.state === "executing" && !preparation.execution) {
+      context.addIssue({
+        code: "custom",
+        path: ["execution"],
+        message: "An executing replacement requires an execution projection",
       });
     }
   });
@@ -226,6 +333,180 @@ export const deviceReplacementListSchema = z
   })
   .strict();
 
+const deviceReplacementRevisionRequestShape = {
+  requestId: platformUuidSchema,
+  expectedRevision: positiveRevisionSchema,
+} as const;
+
+export const deviceReplacementDrainRequestSchema = z
+  .object(deviceReplacementRevisionRequestShape)
+  .strict();
+
+export const deviceReplacementExecutionPreviewRequestSchema = z
+  .object(deviceReplacementRevisionRequestShape)
+  .strict();
+
+export const deviceReplacementExecuteRequestSchema = z.discriminatedUnion("mode", [
+  z
+    .object({
+      ...deviceReplacementRevisionRequestShape,
+      previewId: platformUuidSchema,
+      mode: z.literal("normal"),
+    })
+    .strict(),
+  z
+    .object({
+      ...deviceReplacementRevisionRequestShape,
+      previewId: platformUuidSchema,
+      mode: z.literal("emergency"),
+    })
+    .strict(),
+]);
+
+export const deviceReplacementEmergencyPreviewRequestSchema = z
+  .object({ ...deviceReplacementRevisionRequestShape, reason: boundedTextSchema })
+  .strict();
+
+export const deviceReplacementRecoveryCodeRequestSchema = z
+  .object(deviceReplacementRevisionRequestShape)
+  .strict();
+
+export const deviceReplacementRecoveryCloseRequestSchema = z
+  .object({ ...deviceReplacementRevisionRequestShape, reason: boundedTextSchema })
+  .strict();
+
+const deviceReplacementEligibilityReasonSchema = z.enum([
+  "pending_scans",
+  "pending_inventories",
+  "pending_shift_closures",
+  "pending_product_labels",
+  "pending_boxes",
+  "pending_exceptions",
+  "conflicts",
+  "unknown_prints",
+  "active_tasks",
+  "installed_grants",
+  "client_upgrade_required",
+  "credential_epoch_mismatch",
+  "facts_changed",
+  "report_stale",
+]);
+
+export const deviceReplacementReadinessEligibilitySchema = z.discriminatedUnion("status", [
+  z.object({ status: z.literal("eligible"), reasons: z.tuple([]) }).strict(),
+  z
+    .object({
+      status: z.literal("blocked"),
+      reasons: z
+        .array(deviceReplacementEligibilityReasonSchema)
+        .min(1)
+        .max(deviceReplacementEligibilityReasonSchema.options.length)
+        .refine((reasons) => new Set(reasons).size === reasons.length, "Reasons must be unique"),
+    })
+    .strict(),
+]);
+
+const deviceReplacementActiveTaskSchema = z
+  .object({
+    taskId: platformUuidSchema,
+    kind: z.enum(["shift", "inventory"]),
+  })
+  .strict();
+
+const deviceReplacementInstalledGrantSchema = z
+  .object({
+    grantId: platformUuidSchema,
+  })
+  .strict();
+
+const deviceReplacementPendingSchema = z
+  .object({
+    scans: nonnegativeCountSchema,
+    inventories: nonnegativeCountSchema,
+    shiftClosures: nonnegativeCountSchema,
+    productLabels: nonnegativeCountSchema,
+    boxes: nonnegativeCountSchema,
+    exceptions: nonnegativeCountSchema,
+  })
+  .strict();
+
+export const deviceReplacementReadinessRequestSchema = z
+  .object({
+    requestId: platformUuidSchema,
+    intentId: platformUuidSchema,
+    credentialEpoch: positiveEpochSchema,
+    reportSequence: nonnegativeCountSchema,
+    clientBuild: z.string().trim().min(1).max(100),
+    storageRevision: positiveEpochSchema,
+    pending: deviceReplacementPendingSchema,
+    conflicts: nonnegativeCountSchema,
+    unknownPrints: nonnegativeCountSchema,
+    activeTasks: z
+      .array(deviceReplacementActiveTaskSchema)
+      .max(1_000)
+      .refine(
+        (tasks) =>
+          new Set(tasks.map((task) => `${task.kind}:${task.taskId}`)).size === tasks.length,
+        "Active tasks must be unique",
+      ),
+    installedGrants: z
+      .array(deviceReplacementInstalledGrantSchema)
+      .max(1_000)
+      .refine(
+        (grants) => new Set(grants.map((grant) => grant.grantId)).size === grants.length,
+        "Installed grants must be unique",
+      ),
+    journal: z.object({ digest: digestSchema, highestSequence: nonnegativeCountSchema }).strict(),
+  })
+  .strict();
+
+export const deviceReplacementReadinessResponseSchema = z
+  .object({
+    requestId: platformUuidSchema,
+    intentId: platformUuidSchema,
+    receivedAt: platformTimestampSchema,
+    eligibility: deviceReplacementReadinessEligibilitySchema,
+  })
+  .strict();
+
+export const deviceReplacementExecutionPreviewSchema = z.discriminatedUnion("mode", [
+  z
+    .object({
+      id: platformUuidSchema,
+      requestId: platformUuidSchema,
+      preparationId: platformUuidSchema,
+      expectedRevision: positiveRevisionSchema,
+      mode: z.literal("normal"),
+      asOf: platformTimestampSchema,
+      expiresAt: platformTimestampSchema,
+      digest: digestSchema,
+      newWorkAllowedAt: platformTimestampSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: platformUuidSchema,
+      requestId: platformUuidSchema,
+      preparationId: platformUuidSchema,
+      expectedRevision: positiveRevisionSchema,
+      mode: z.literal("emergency"),
+      asOf: platformTimestampSchema,
+      expiresAt: platformTimestampSchema,
+      digest: digestSchema,
+      newWorkAllowedAt: platformTimestampSchema,
+    })
+    .strict(),
+]);
+
+export const deviceReplacementDrainResponseSchema = deviceReplacementReceiptSchema;
+export const deviceReplacementExecutionPreviewResponseSchema =
+  deviceReplacementExecutionPreviewSchema;
+export const deviceReplacementExecuteResponseSchema = deviceReplacementReceiptSchema;
+export const deviceReplacementEmergencyPreviewResponseSchema =
+  deviceReplacementExecutionPreviewSchema;
+export const deviceReplacementRecoveryCodeResponseSchema = deviceReplacementReceiptSchema;
+export const deviceReplacementRecoveryCloseResponseSchema = deviceReplacementReceiptSchema;
+
 export type DeviceReplacementTarget = z.output<typeof deviceReplacementTargetSchema>;
 export type DeviceReplacementPreviewRequest = z.output<
   typeof deviceReplacementPreviewRequestSchema
@@ -237,6 +518,28 @@ export type DeviceReplacementPreview = z.output<typeof deviceReplacementPreviewS
 export type DeviceReplacementPreparation = z.output<typeof deviceReplacementPreparationSchema>;
 export type DeviceReplacementReceipt = z.output<typeof deviceReplacementReceiptSchema>;
 export type DeviceReplacementList = z.output<typeof deviceReplacementListSchema>;
+export type DeviceReplacementDrainRequest = z.output<typeof deviceReplacementDrainRequestSchema>;
+export type DeviceReplacementExecutionPreviewRequest = z.output<
+  typeof deviceReplacementExecutionPreviewRequestSchema
+>;
+export type DeviceReplacementExecuteRequest = z.output<
+  typeof deviceReplacementExecuteRequestSchema
+>;
+export type DeviceReplacementEmergencyPreviewRequest = z.output<
+  typeof deviceReplacementEmergencyPreviewRequestSchema
+>;
+export type DeviceReplacementRecoveryCodeRequest = z.output<
+  typeof deviceReplacementRecoveryCodeRequestSchema
+>;
+export type DeviceReplacementRecoveryCloseRequest = z.output<
+  typeof deviceReplacementRecoveryCloseRequestSchema
+>;
+export type DeviceReplacementReadinessRequest = z.output<
+  typeof deviceReplacementReadinessRequestSchema
+>;
+export type DeviceReplacementReadinessResponse = z.output<
+  typeof deviceReplacementReadinessResponseSchema
+>;
 
 export const cabinetDeviceReplacementContracts = {
   list: {
