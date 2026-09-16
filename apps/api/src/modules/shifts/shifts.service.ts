@@ -1,3 +1,4 @@
+import { assertDeviceReplacementNewWorkAllowed } from "../device-licensing/device-replacement-admission";
 import { loadValidationReprocessingDetails } from "./validation-reprocessing-details";
 import type { ValidationReprocessingDetailsQuery } from "@markiro/domain";
 import { loadValidationCodeHistory } from "./validation-code-history";
@@ -854,6 +855,8 @@ export class ShiftsService {
     const facts = palletsEnabled ? await this.admission.capture(tenantId) : undefined;
     try {
       const [row] = await this.db.transaction(async (tx) => {
+        if (actor.domain === "station_device")
+          await assertDeviceReplacementNewWorkAllowed(tx, tenantId, actor.id);
         const validationPrint = await snapshotValidationPrintPolicy(
           tx,
           tenantId,
@@ -1453,6 +1456,7 @@ export class ShiftsService {
   ): Promise<ShiftDto> {
     const facts = await this.admission.capture(tenantId);
     await this.db.transaction(async (tx) => {
+      await assertDeviceReplacementNewWorkAllowed(tx, tenantId, deviceId, { kind: "shift", id });
       const [device] = await tx
         .select({ id: schema.stationDevices.id })
         .from(schema.stationDevices)

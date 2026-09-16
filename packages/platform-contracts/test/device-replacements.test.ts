@@ -486,6 +486,13 @@ describe("device replacement contracts", () => {
 
   it("publishes separate cabinet and platform replacement routes with 200 mutations", () => {
     expect(contracts.cabinetDeviceReplacementContracts).toEqual({
+      drain: {
+        method: "POST",
+        path: "/device-licensing/replacements/:preparationId/drain",
+        status: 200,
+        body: contracts.deviceReplacementDrainRequestSchema,
+        response: contracts.deviceReplacementDrainResponseSchema,
+      },
       list: {
         method: "GET",
         path: "/device-licensing/replacements",
@@ -514,6 +521,13 @@ describe("device replacement contracts", () => {
       },
     });
     expect(contracts.platformDeviceReplacementContracts).toEqual({
+      drain: {
+        method: "POST",
+        path: "/platform/tenants/:tenantId/device-licensing/replacements/:preparationId/drain",
+        status: 200,
+        body: contracts.deviceReplacementDrainRequestSchema,
+        response: contracts.deviceReplacementDrainResponseSchema,
+      },
       list: {
         method: "GET",
         path: "/platform/tenants/:tenantId/device-licensing/replacements",
@@ -542,4 +556,32 @@ describe("device replacement contracts", () => {
       },
     });
   });
+});
+
+it("shares a strict nullable device drain intent with both native clients", () => {
+  const intent = {
+    intentId: previewId,
+    preparationId,
+    credentialEpoch: 1,
+    preparationRevision: 2,
+    requestedAt: createdAt,
+    expiresAt,
+  };
+  expect(contracts.deviceReplacementCurrentIntentResponseSchema.parse(null)).toBeNull();
+  expect(contracts.deviceReplacementCurrentIntentResponseSchema.parse(intent)).toEqual(intent);
+  expect(
+    contracts.deviceReplacementCurrentIntentResponseSchema.safeParse({
+      ...intent,
+      tenantId: "client-claimed",
+    }).success,
+  ).toBe(false);
+  expect(
+    contracts.deviceReplacementCurrentIntentResponseSchema.safeParse({
+      ...intent,
+      expiresAt: createdAt,
+    }).success,
+  ).toBe(false);
+  expect(contracts.stationDeviceReplacementContracts.currentIntent.path).toBe(
+    "/station/device-replacement-intent",
+  );
 });

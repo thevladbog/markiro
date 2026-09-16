@@ -1,3 +1,5 @@
+import { DeviceReplacementReadinessController } from "./device-replacement-readiness.controller";
+import { DeviceReplacementReadinessService } from "./device-replacement-readiness.service";
 import { DeviceRetentionService } from "./device-retention.service";
 import { DeviceRetentionController } from "./device-retention.controller";
 import { PlatformDeviceRetentionController } from "./platform-device-retention.controller";
@@ -17,10 +19,16 @@ import { PlatformDeviceLicensingController } from "./platform-device-licensing.c
     DeviceRetentionController,
     PlatformDeviceRetentionController,
     DeviceReplacementController,
+    DeviceReplacementReadinessController,
     PlatformDeviceReplacementController,
     DeviceLicensingController,
     PlatformDeviceLicensingController,
   ],
-  providers: [DeviceRetentionService, DeviceReplacementService, DeviceLicensingService],
+  providers: [
+    DeviceReplacementReadinessService,
+    DeviceRetentionService,
+    DeviceReplacementService,
+    DeviceLicensingService,
+  ],
 })
 export class DeviceLicensingModule {}

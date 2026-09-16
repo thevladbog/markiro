@@ -68,6 +68,22 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
   routes: readonly string[];
 }[] = [
   {
+    contract: customerContract(CABINET_GUARDS, {
+      mode: "licensing",
+      operation: "replacement_drain",
+    }),
+    routes: [
+      "POST /device-licensing/replacements/:preparationId/drain (DeviceReplacementController.drain)",
+    ],
+  },
+  {
+    contract: customerContract(STATION_GUARDS, { mode: "recovery", kind: "replacement_readiness" }),
+    routes: [
+      "GET /station/device-replacement-intent (DeviceReplacementReadinessController.currentIntent)",
+      "POST /station/device-replacement-readiness (DeviceReplacementReadinessController.report)",
+    ],
+  },
+  {
     contract: customerContract(CABINET_GUARDS, { mode: "read_only_allowed", reason: "read" }),
     routes: [
       "GET /access/entitlements (AccessController.entitlementSnapshot)",
@@ -562,6 +578,9 @@ const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
   "PlatformDeviceRetentionController.confirm": platform(
     "retention requires fresh tenant and billing platform write capabilities",
   ),
+  "PlatformDeviceReplacementController.drain": platform(
+    "drain requires tenant and billing write capabilities",
+  ),
   "PlatformDeviceReplacementController.preview": platform(
     "replacement preparation requires fresh tenant and billing platform write capabilities",
   ),
@@ -1037,7 +1056,8 @@ describe("registered subscription route inventory", () => {
             : route.controller.name === "StationScansController" ||
                 route.controller.name === "StationInventoriesController" ||
                 route.controller.name === "StationProductImagesController" ||
-                route.controller.name === "DeviceGrantsController"
+                route.controller.name === "DeviceGrantsController" ||
+                route.controller.name === "DeviceReplacementReadinessController"
               ? ["TenantGuard", "StationOnlyGuard", "SubscriptionAccessGuard"]
               : stationOnlyCabinetRoute
                 ? [

@@ -33,6 +33,11 @@ class PolicyController {
   @AllowSubscriptionLicensing("replacement_cancel")
   replacementCancel(): void {}
 
+  @AllowSubscriptionRecovery("replacement_readiness")
+  replacementReadiness(): void {}
+  @AllowSubscriptionLicensing("replacement_drain")
+  replacementDrain(): void {}
+
   @AllowSubscriptionLicensing("inspect")
   licensingInspect(): void {}
 }
@@ -193,20 +198,20 @@ describe("SubscriptionAccessGuard", () => {
       ),
     ).resolves.toBe(true);
   });
-  it.each(["replacementPreview", "replacementConfirm", "replacementCancel"] as const)(
-    "permits explicit %s in read-only and unmanaged all modes",
-    async (method) => {
-      for (const access of ["read_only", "unmanaged"] as const) {
-        service.resolve.mockResolvedValueOnce(entitlements(access));
-        await expect(
-          guard("all").canActivate(
-            contextFor(
-              { method: "POST", tenantId: "tenant_1" },
-              PolicyController.prototype[method],
-            ),
-          ),
-        ).resolves.toBe(true);
-      }
-    },
-  );
+  it.each([
+    "replacementPreview",
+    "replacementConfirm",
+    "replacementCancel",
+    "replacementDrain",
+    "replacementReadiness",
+  ] as const)("permits explicit %s in read-only and unmanaged all modes", async (method) => {
+    for (const access of ["read_only", "unmanaged"] as const) {
+      service.resolve.mockResolvedValueOnce(entitlements(access));
+      await expect(
+        guard("all").canActivate(
+          contextFor({ method: "POST", tenantId: "tenant_1" }, PolicyController.prototype[method]),
+        ),
+      ).resolves.toBe(true);
+    }
+  });
 });

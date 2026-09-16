@@ -1,3 +1,4 @@
+import { DeviceReplacementReadinessService } from "./device-replacement-readiness.service";
 import {
   Body,
   Controller,
@@ -16,6 +17,7 @@ import {
   type DeviceReplacementPreviewRequest,
   type DeviceReplacementConfirm,
   type DeviceReplacementCancel,
+  type DeviceReplacementDrainRequest,
 } from "@markiro/platform-contracts";
 import { RequirePlatformCapabilities } from "../../platform-auth/platform-access-policy";
 import type { RequestWithPlatformPrincipal } from "../../platform-auth/platform-auth.guard";
@@ -29,7 +31,28 @@ function actor(request: RequestWithPlatformPrincipal) {
 @ApiTags("platform-device-licensing")
 @Controller("platform/tenants/:tenantId/device-licensing")
 export class PlatformDeviceReplacementController {
-  constructor(private readonly replacements: DeviceReplacementService) {}
+  constructor(
+    private readonly replacements: DeviceReplacementService,
+    private readonly readiness: DeviceReplacementReadinessService,
+  ) {}
+  @Post("replacements/:preparationId/drain")
+  @HttpCode(200)
+  @ApiOperation({ summary: "Request source device drain readiness" })
+  @ApiParam({ name: "preparationId", format: "uuid" })
+  @RequirePlatformCapabilities("tenants.write", "billing.write")
+  @PlatformApiProtectedOk({
+    response: platformDeviceReplacementContracts.drain.response,
+    body: platformDeviceReplacementContracts.drain.body,
+  })
+  drain(
+    @Req() request: RequestWithPlatformPrincipal,
+    @Param("tenantId", new ZodValidationPipe(platformTenantIdSchema)) tenantId: string,
+    @Param("preparationId", new ZodValidationPipe(platformUuidSchema)) preparationId: string,
+    @Body(new ZodValidationPipe(platformDeviceReplacementContracts.drain.body))
+    body: DeviceReplacementDrainRequest,
+  ) {
+    return this.readiness.requestDrain(tenantId, preparationId, body, actor(request));
+  }
   @Get("replacements")
   @ApiOperation({ summary: "List device replacement preparation" })
   @RequirePlatformCapabilities("tenants.read")

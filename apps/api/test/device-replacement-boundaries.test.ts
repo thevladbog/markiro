@@ -13,7 +13,7 @@ import { ROUTE_SUBSCRIPTION_ACCESS_POLICY } from "../src/subscriptions/subscript
 
 const reflector = new Reflector();
 describe("replacement HTTP trust boundaries", () => {
-  it.each(["list", "preview", "confirm", "cancel"] as const)(
+  it.each(["list", "preview", "confirm", "cancel", "drain"] as const)(
     "declares exact cabinet and platform authority for %s",
     (method) => {
       expect(Reflect.getMetadata(GUARDS_METADATA, DeviceReplacementController)).toEqual([
@@ -49,13 +49,13 @@ describe("replacement HTTP trust boundaries", () => {
   );
   it("derives cabinet actor exclusively from trusted request context", async () => {
     const service = { list: vi.fn().mockResolvedValue({ canPrepare: true, items: [] }) };
-    const controller = new DeviceReplacementController(service as never);
+    const controller = new DeviceReplacementController(service as never, {} as never);
     await controller.list({ tenantId: "tenant", userId: "cabinet-user" } as never);
     expect(service.list).toHaveBeenCalledWith("tenant", { domain: "cabinet", id: "cabinet-user" });
   });
   it("refuses a platform controller call with only cabinet or device identity", async () => {
     const service = { list: vi.fn() };
-    const controller = new PlatformDeviceReplacementController(service as never);
+    const controller = new PlatformDeviceReplacementController(service as never, {} as never);
     await expect(
       controller.list(
         { tenantId: "tenant", userId: "cabinet-user", stationDeviceId: "device" } as never,

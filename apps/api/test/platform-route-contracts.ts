@@ -250,6 +250,13 @@ export const CURRENT_SAAS_ROUTES = [
   ),
   route(
     "post",
+    "/platform/tenants/{tenantId}/device-licensing/replacements/{preparationId}/drain",
+    "200",
+    platformDeviceReplacementContracts.drain.response,
+    { body: platformDeviceReplacementContracts.drain.body },
+  ),
+  route(
+    "post",
     "/platform/tenants/{tenantId}/device-licensing/{deviceId}/replacements/preview",
     "200",
     platformDeviceReplacementContracts.preview.response,

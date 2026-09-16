@@ -1,3 +1,4 @@
+import { DeviceReplacementReadinessController } from "../src/modules/device-licensing/device-replacement-readiness.controller";
 import { DeviceRetentionController } from "../src/modules/device-licensing/device-retention.controller";
 import { DeviceReplacementController } from "../src/modules/device-licensing/device-replacement.controller";
 import type { Type } from "@nestjs/common";
@@ -307,6 +308,7 @@ const ADMINISTRATIVE_CONTROLLERS: readonly [
   [
     DeviceReplacementController,
     {
+      drain: credentialsPolicy,
       list: credentialsPolicy,
       preview: credentialsPolicy,
       confirm: credentialsPolicy,
@@ -338,6 +340,7 @@ const ADMINISTRATIVE_CONTROLLERS: readonly [
 ];
 
 const STATION_ONLY_CONTROLLERS: readonly [ControllerClass, readonly string[]][] = [
+  [DeviceReplacementReadinessController, ["currentIntent", "report"]],
   [StationOperatorsController, ["listRoster"]],
   [StationScansController, ["codeReleases", "conflictStatus", "ingest", "occurrenceStatus"]],
   [

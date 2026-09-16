@@ -1,3 +1,4 @@
+import { DeviceReplacementReadinessService } from "./device-replacement-readiness.service";
 import { Body, Controller, Get, HttpCode, Param, Post, Req, UseGuards } from "@nestjs/common";
 import { ApiOperation, ApiParam, ApiTags } from "@nestjs/swagger";
 import { CABINET_CAPABILITY } from "@markiro/domain";
@@ -7,6 +8,7 @@ import {
   type DeviceReplacementPreviewRequest,
   type DeviceReplacementConfirm,
   type DeviceReplacementCancel,
+  type DeviceReplacementDrainRequest,
 } from "@markiro/platform-contracts";
 import { RequirePermissions } from "../../authorization/access-policy";
 import { AuthorizationGuard } from "../../authorization/authorization.guard";
@@ -32,7 +34,27 @@ function actor(request: RequestWithTenant) {
 @RequirePermissions(CABINET_CAPABILITY.CREDENTIALS_MANAGE)
 @AllowSubscriptionLicensing("inspect")
 export class DeviceReplacementController {
-  constructor(private readonly replacements: DeviceReplacementService) {}
+  constructor(
+    private readonly replacements: DeviceReplacementService,
+    private readonly readiness: DeviceReplacementReadinessService,
+  ) {}
+  @Post("replacements/:preparationId/drain")
+  @HttpCode(200)
+  @ApiOperation({ summary: "Request source device drain readiness" })
+  @ApiParam({ name: "preparationId", format: "uuid" })
+  @AllowSubscriptionLicensing("replacement_drain")
+  @ApiZodBody(cabinetDeviceReplacementContracts.drain.body)
+  @ApiZodValidationError()
+  @ApiZodResponse({ status: 200, schema: cabinetDeviceReplacementContracts.drain.response })
+  @ApiHttpErrors(401, 403, 404, 409)
+  drain(
+    @Req() request: RequestWithTenant,
+    @Param("preparationId", new ZodValidationPipe(platformUuidSchema)) preparationId: string,
+    @Body(new ZodValidationPipe(cabinetDeviceReplacementContracts.drain.body))
+    body: DeviceReplacementDrainRequest,
+  ) {
+    return this.readiness.requestDrain(request.tenantId!, preparationId, body, actor(request));
+  }
   @Get("replacements")
   @ApiOperation({ summary: "List device replacement preparation" })
   @ApiZodResponse({ status: 200, schema: cabinetDeviceReplacementContracts.list.response })

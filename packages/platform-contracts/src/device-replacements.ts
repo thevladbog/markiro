@@ -592,6 +592,13 @@ export type DeviceReplacementReadinessResponse = z.output<
 >;
 
 export const cabinetDeviceReplacementContracts = {
+  drain: {
+    method: "POST",
+    path: "/device-licensing/replacements/:preparationId/drain",
+    status: 200,
+    body: deviceReplacementDrainRequestSchema,
+    response: deviceReplacementDrainResponseSchema,
+  },
   list: {
     method: "GET",
     path: "/device-licensing/replacements",
@@ -621,6 +628,13 @@ export const cabinetDeviceReplacementContracts = {
 } as const;
 
 export const platformDeviceReplacementContracts = {
+  drain: {
+    method: "POST",
+    path: "/platform/tenants/:tenantId/device-licensing/replacements/:preparationId/drain",
+    status: 200,
+    body: deviceReplacementDrainRequestSchema,
+    response: deviceReplacementDrainResponseSchema,
+  },
   list: {
     method: "GET",
     path: "/platform/tenants/:tenantId/device-licensing/replacements",
@@ -646,5 +660,39 @@ export const platformDeviceReplacementContracts = {
     status: 200,
     body: deviceReplacementCancelSchema,
     response: deviceReplacementReceiptSchema,
+  },
+} as const;
+
+/** Null means this authenticated source has no current drain; response is always HTTP 200. */
+export const deviceReplacementCurrentIntentResponseSchema = z
+  .object({
+    intentId: platformUuidSchema,
+    preparationId: platformUuidSchema,
+    credentialEpoch: positiveEpochSchema,
+    preparationRevision: positiveRevisionSchema,
+    requestedAt: platformTimestampSchema,
+    expiresAt: platformTimestampSchema,
+  })
+  .strict()
+  .refine(
+    (intent) => Date.parse(intent.expiresAt) > Date.parse(intent.requestedAt),
+    "Intent expiry must follow its request",
+  )
+  .nullable();
+export type DeviceReplacementCurrentIntentResponse = z.output<
+  typeof deviceReplacementCurrentIntentResponseSchema
+>;
+export const stationDeviceReplacementContracts = {
+  currentIntent: {
+    method: "GET",
+    path: "/station/device-replacement-intent",
+    response: deviceReplacementCurrentIntentResponseSchema,
+  },
+  report: {
+    method: "POST",
+    path: "/station/device-replacement-readiness",
+    status: 200,
+    body: deviceReplacementReadinessRequestSchema,
+    response: deviceReplacementReadinessResponseSchema,
   },
 } as const;
