@@ -9,6 +9,7 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { copyMigrationsThroughIndex } from "./support/legacy-migrations.js";
+import { runRuntimeMigrations } from "../src/runtime-migrate.js";
 
 const databaseUrl = process.env.DATABASE_URL;
 const migrationsFolder = fileURLToPath(new URL("../migrations", import.meta.url));
@@ -56,20 +57,48 @@ describe("recurring service migrations", () => {
 
 describe.skipIf(!databaseUrl)("recurring service forward migration", () => {
   const databaseName = `markiro_recurring_services_${randomUUID().replaceAll("-", "_")}`;
-  const scratchUrl = new URL(databaseUrl ?? "postgres://invalid");
-  scratchUrl.pathname = `/${databaseName}`;
-  scratchUrl.search = "";
+  const roleName = `markiro_recurring_role_${randomUUID().replaceAll("-", "_")}`;
+  const rolePassword = randomUUID();
+  const adminScratchUrl = new URL(databaseUrl ?? "postgres://invalid");
+  adminScratchUrl.pathname = `/${databaseName}`;
+  adminScratchUrl.search = "";
+  const scratchUrl = new URL(adminScratchUrl);
+  scratchUrl.username = roleName;
+  scratchUrl.password = rolePassword;
   const maintenancePool = new pg.Pool({ connectionString: databaseUrl });
   const pool = new pg.Pool({ connectionString: scratchUrl.toString() });
   const itemId = randomUUID();
   const versionId = randomUUID();
+  const offerId = randomUUID();
+  const offerLineId = randomUUID();
+  const invoiceId = randomUUID();
+  const invoiceLineId = randomUUID();
+  const commercialTerms = {
+    version: 1,
+    subject: "service",
+    documentNameRu: "Услуга",
+    documentNameEn: null,
+    sellerPolicyRevision: 1,
+    billingPeriod: null,
+    billingTimezone: null,
+    activationRule: null,
+  };
   let created = false;
+  let roleCreated = false;
   let temporaryRoot = "";
   let historicalRow: unknown;
 
   beforeAll(async () => {
-    await maintenancePool.query(`CREATE DATABASE "${databaseName}"`);
+    await maintenancePool.query(`CREATE ROLE "${roleName}" LOGIN PASSWORD '${rolePassword}'`);
+    roleCreated = true;
+    await maintenancePool.query(`CREATE DATABASE "${databaseName}" OWNER "${roleName}"`);
     created = true;
+    const extensionPool = new pg.Pool({ connectionString: adminScratchUrl.toString() });
+    try {
+      await extensionPool.query('CREATE EXTENSION "btree_gist"');
+    } finally {
+      await extensionPool.end();
+    }
     temporaryRoot = await mkdtemp(join(tmpdir(), "markiro-recurring-services-"));
     const legacyMigrations = join(temporaryRoot, "legacy");
     await copyMigrationsThroughIndex({
@@ -79,6 +108,12 @@ describe.skipIf(!databaseUrl)("recurring service forward migration", () => {
     });
     await migrate(drizzle(pool), { migrationsFolder: legacyMigrations });
     await pool.query(
+      "INSERT INTO organization (id,name,slug,created_at) VALUES ('recurring-tenant','Tenant','recurring-tenant',now())",
+    );
+    await pool.query(
+      "INSERT INTO platform_users (id,name,email,role,status) VALUES ('recurring-admin','Admin','recurring-admin@example.invalid','platform_admin','active')",
+    );
+    await pool.query(
       "INSERT INTO catalog_items (id,code,kind,name_ru,name_en) VALUES ($1,'legacy-service','service','Разовая услуга','One-time service')",
       [itemId],
     );
@@ -86,17 +121,38 @@ describe.skipIf(!databaseUrl)("recurring service forward migration", () => {
       "INSERT INTO catalog_item_versions (id,catalog_item_id,kind,version,name_ru,name_en,unit,billing_mode,billing_period,unit_price,vat_included) VALUES ($1,$2,'service',1,'Разовая услуга','One-time service','service','one_time',null,'1000',false)",
       [versionId, itemId],
     );
+    await pool.query(
+      "INSERT INTO commercial_offers (id,tenant_id,family_id,revision,total,created_by_platform_user_id) VALUES ($1,'recurring-tenant',$1,1,'1000','recurring-admin')",
+      [offerId],
+    );
+    await pool.query(
+      "INSERT INTO commercial_offer_lines (id,tenant_id,offer_id,position,kind,catalog_version_id,name_ru,name_en,quantity,unit,agreed_unit_price,vat_included,line_total,commercial_terms) VALUES ($1,'recurring-tenant',$2,1,'service',$3,'Услуга','Service',1,'service','1000',false,'1000',$4)",
+      [offerLineId, offerId, versionId, commercialTerms],
+    );
+    await pool.query(
+      "INSERT INTO invoices (id,tenant_id,number,status,issue_date,seller_snapshot,buyer_snapshot,total,created_by_platform_user_id) VALUES ($1,'recurring-tenant','RECURRING-LEGACY-1','issued',now(),'{}','{}','1000','recurring-admin')",
+      [invoiceId],
+    );
+    await pool.query(
+      "INSERT INTO invoice_lines (id,tenant_id,invoice_id,position,kind,catalog_version_id,catalog_kind,name_ru,name_en,quantity,unit,agreed_unit_price,vat_included,line_subtotal,line_vat,line_total,commercial_terms) VALUES ($1,'recurring-tenant',$2,1,'service',$3,'service','Услуга','Service',1,'service','1000',false,'1000','0','1000',$4)",
+      [invoiceLineId, invoiceId, versionId, commercialTerms],
+    );
     historicalRow = (
       await pool.query("SELECT to_jsonb(v) AS row FROM catalog_item_versions v WHERE id=$1", [
         versionId,
       ])
     ).rows[0]?.row;
-    await migrate(drizzle(pool), { migrationsFolder });
+    await runRuntimeMigrations({
+      databaseUrl: scratchUrl.toString(),
+      migrationsFolder,
+      log: () => {},
+    });
   }, 120_000);
 
   afterAll(async () => {
     await pool.end();
     if (created) await maintenancePool.query(`DROP DATABASE "${databaseName}"`);
+    if (roleCreated) await maintenancePool.query(`DROP ROLE "${roleName}"`);
     await maintenancePool.end();
     if (temporaryRoot) await rm(temporaryRoot, { recursive: true, force: true });
   });
@@ -111,6 +167,14 @@ describe.skipIf(!databaseUrl)("recurring service forward migration", () => {
     for (const table of ["service_periods", "service_usage_entries", "service_excess_approvals"]) {
       expect((await pool.query(`SELECT * FROM ${table}`)).rows).toEqual([]);
     }
+    expect(
+      (
+        await pool.query(
+          "SELECT commercial_terms FROM commercial_offer_lines WHERE id=$1 UNION ALL SELECT commercial_terms FROM invoice_lines WHERE id=$2",
+          [offerLineId, invoiceLineId],
+        )
+      ).rows,
+    ).toEqual([{ commercial_terms: commercialTerms }, { commercial_terms: commercialTerms }]);
   });
 
   it("accepts a monthly service policy and rejects unsupported recurring periods", async () => {

@@ -57,6 +57,10 @@ resource "yandex_mdb_postgresql_database" "application" {
   name       = var.database_name
   owner      = var.database_name
 
+  extension {
+    name = "btree_gist"
+  }
+
   lifecycle {
     prevent_destroy = true
   }
