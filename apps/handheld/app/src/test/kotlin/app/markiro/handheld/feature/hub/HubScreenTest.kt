@@ -30,6 +30,28 @@ class HubScreenTest {
     val compose = createComposeRule()
 
     @Test
+    fun replacementBlocksNewTilesButKeepsRecoveryAndSettings() {
+        var selected: HubTile? = null
+        var recoveryOpened = false
+        compose.setContent {
+            MarkiroTheme {
+                HubScreen(HubUi(replacementBlocked = true, unprintedLabels = 1),
+                    onTile = { selected = it }, onSignOut = {}, onLabelQueue = { recoveryOpened = true })
+            }
+        }
+        compose.onNodeWithText("Смена").performScrollTo().performClick()
+        assertNull(selected)
+        compose.onNodeWithText("Инвентаризация").performScrollTo().performClick()
+        assertNull(selected)
+        compose.onNodeWithText("Списание").performScrollTo().performClick()
+        assertNull(selected)
+        compose.onNodeWithText("Настройки").performScrollTo().performClick()
+        assertEquals(HubTile.SETTINGS, selected)
+        compose.onNodeWithText("1 этикетка не напечатана").performClick()
+        assertTrue(recoveryOpened)
+    }
+
+    @Test
     fun joinedShiftHasADedicatedContinueCard() {
         var resumed: String? = null
         var selected: HubTile? = null

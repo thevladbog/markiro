@@ -350,3 +350,10 @@ val MIGRATION_15_16 = object : Migration(15, 16) {
         )
     }
 }
+
+/** Replacement state is additive; all business journals, grant task authority and saved bytes survive. */
+val MIGRATION_16_17 = object : Migration(16, 17) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS replacement_drain (id INTEGER NOT NULL PRIMARY KEY, ownerKey TEXT NOT NULL, generation INTEGER NOT NULL, intentJson TEXT NOT NULL, state TEXT NOT NULL, resumeTasksJson TEXT NOT NULL, reportSequence INTEGER NOT NULL, reportJson TEXT, closureJson TEXT, acknowledgedAt TEXT)")
+    }
+}

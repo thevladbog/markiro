@@ -126,4 +126,18 @@ class InventoryBundleMirrorTest {
         assertEquals(MirrorResult.Repack, mirror().mirror(manifest(mode = "repack")) { _, _ -> })
         assertEquals(0, server.requestCount)
     }
+    @Test fun replacementDrainRejectsChangedSnapshotBeforeDestroyingRecoveryRows() = runTest {
+        server.enqueue(MockResponse().setBody(pageJson(null, items, null)))
+        assertEquals(MirrorResult.Active,mirror(200).mirror(manifest()) { _,_ -> })
+        val local=app.markiro.handheld.core.replacement.ReplacementReadiness(db)
+        val intent=kotlinx.serialization.json.Json.parseToJsonElement("""{"version":1,"state":"active","intent":{"intentId":"11111111-1111-4111-8111-111111111111","preparationId":"22222222-2222-4222-8222-222222222222","credentialEpoch":7,"preparationRevision":2,"requestedAt":"2026-09-16T00:00:00Z","expiresAt":"2026-09-17T00:00:00Z"}}""") as kotlinx.serialization.json.JsonObject
+        local.apply(db.recovery.token(),intent)
+        db.inventoryOutboxDao().insert(app.markiro.handheld.core.storage.InventoryOutboxEntity(inventoryId="i1",snapshotId=snapshotId,eventId="pending",deviceSequence=1,payloadJson="exact saved bytes",createdAt="now"))
+        server.enqueue(MockResponse().setResponseCode(503))
+        assertTrue(runCatching { mirror().mirror(manifest().copy(snapshotId="33333333-3333-4333-8333-333333333333")) { _,_ -> } }.isFailure)
+        assertEquals(snapshotId,db.inventoryTaskDao().get("i1")?.snapshotId)
+        assertEquals("exact saved bytes",db.inventoryOutboxDao().head("i1",10).single().payloadJson)
+        assertEquals(3,db.inventorySnapshotCodeDao().count(snapshotId))
+    }
+
 }

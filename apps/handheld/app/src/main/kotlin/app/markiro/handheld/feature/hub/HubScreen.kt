@@ -36,6 +36,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.serialization.json.*
 import app.markiro.handheld.R
 import app.markiro.handheld.core.design.Banner
 import app.markiro.handheld.core.design.IconAction
@@ -100,6 +101,20 @@ fun HubScreen(state: HubUi, onTile: (HubTile) -> Unit, onSignOut: () -> Unit, on
                     }
                     IconAction(Icons.AutoMirrored.Outlined.Logout, stringResource(R.string.hub_sign_out), onSignOut)
                 }
+                if (state.replacementBlocked) {
+                    Banner(stringResource(if (state.replacementClosed) R.string.replacement_closed else R.string.replacement_drain), Tone.Warn, Icons.Outlined.Sync)
+                    state.replacementCounters?.let { counts ->
+                        val pending = counts.getValue("pending").jsonObject
+                        for ((key,label) in listOf("scans" to R.string.replacement_scans, "inventories" to R.string.replacement_inventories,
+                            "shiftClosures" to R.string.replacement_closures, "productLabels" to R.string.replacement_labels,
+                            "boxes" to R.string.replacement_boxes, "exceptions" to R.string.replacement_exceptions,
+                            "conflicts" to R.string.replacement_conflicts, "unknownPrints" to R.string.replacement_prints)) {
+                            val value = (pending[key] ?: counts.getValue(key)).jsonPrimitive.content
+                            Text(stringResource(label, if (value == "unsupported") stringResource(R.string.common_no_data) else value), style=t.caption, color=c.fg2)
+                        }
+                        Text(stringResource(R.string.replacement_tasks, counts.getValue("activeTasks").jsonArray.size), style=t.caption, color=c.fg2)
+                    }
+                }
                 state.activeShift?.let { active ->
                     ActiveShiftCard(active, onContinue = { onContinueShift(active.shift.id) })
                 }
@@ -112,8 +127,9 @@ fun HubScreen(state: HubUi, onTile: (HubTile) -> Unit, onSignOut: () -> Unit, on
                             Icons.Outlined.Factory,
                             stringResource(R.string.hub_tile_shift),
                             shiftsLabel(state.shifts) + stamp,
-                            { onTile(HubTile.SHIFT) },
+                            { if (!state.replacementBlocked) onTile(HubTile.SHIFT) },
                             modifier,
+                            enabled = !state.replacementBlocked,
                             statusTone = Tone.Neutral,
                         )
                     },
@@ -122,8 +138,9 @@ fun HubScreen(state: HubUi, onTile: (HubTile) -> Unit, onSignOut: () -> Unit, on
                             Icons.Outlined.Inventory2,
                             stringResource(R.string.hub_tile_inventory),
                             state.continueInventoryNumber?.let { stringResource(R.string.hub_inventory_continue, it) } ?: (inventoriesLabel(state.inventories) + stamp),
-                            { onTile(HubTile.INVENTORY) },
+                            { if (!state.replacementBlocked || state.activeInventoryId != null) onTile(HubTile.INVENTORY) },
                             modifier,
+                            enabled = !state.replacementBlocked || state.activeInventoryId != null,
                             statusTone = if (state.continueInventoryNumber != null) Tone.Ok else Tone.Neutral,
                         )
                     },
@@ -137,8 +154,9 @@ fun HubScreen(state: HubUi, onTile: (HubTile) -> Unit, onSignOut: () -> Unit, on
                                     pluralStringResource(R.plurals.hub_writeoff_pending, state.writeoffPending, state.writeoffPending)
                                 else -> ""
                             },
-                            { onTile(HubTile.WRITEOFF) },
+                            { if (!state.replacementBlocked) onTile(HubTile.WRITEOFF) },
                             modifier,
+                            enabled = !state.replacementBlocked,
                             statusTone = if (state.canWriteoff == false || state.writeoffPending > 0) Tone.Warn else Tone.Neutral,
                         )
                     },

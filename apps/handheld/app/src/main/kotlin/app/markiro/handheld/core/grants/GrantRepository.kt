@@ -41,6 +41,7 @@ class GrantRepository(private val db: HandheldDatabase) {
 
     private suspend fun admit(kind: TaskKind, taskId: String, eventId: String, event: GrantEventType?, costs: Map<String, Long>, payload: String = eventId, executionFingerprint: String? = null) = db.recovery.commit {
         require(kind != TaskKind.PICKUP && (event == null || event in setOf(GrantEventType.SHIFT_SCAN,GrantEventType.SHIFT_BOX_CLOSE,GrantEventType.SHIFT_PALLET_CLOSE,GrantEventType.SHIFT_LABEL_PREPARE,GrantEventType.SHIFT_CLOSE,GrantEventType.INVENTORY_SCAN,GrantEventType.INVENTORY_CLOSE))) { "Unsupported Handheld productive event" }
+        if (event == null) app.markiro.handheld.core.replacement.ReplacementReadiness(db).requireAdmission(kind.wire, taskId)
         val token = db.recovery.token()
         val ownerKey = token.owner.grantOwnerKey()
         val dao = db.grantDao()

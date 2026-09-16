@@ -172,7 +172,14 @@ class DeviceRecovery(private val db: HandheldDatabase, private val credential: C
     }
 
     private suspend fun <T> grantAwareTransaction(block: suspend () -> T): T = try {
-        db.withTransaction { block() }
+        db.withTransaction {
+            val result = block()
+            val revisionKey = app.markiro.handheld.core.replacement.ReplacementReadiness.REVISION
+            val revision = db.metaDao().get(revisionKey)?.toLongOrNull() ?: 0
+            check(revision < 9_007_199_254_740_991)
+            db.metaDao().put(MetaEntity(revisionKey, (revision + 1).toString()))
+            result
+        }
     } catch (denied: GrantDenied) {
         val captured = generationContext.get()
         if (captured != null && valid(captured)) {

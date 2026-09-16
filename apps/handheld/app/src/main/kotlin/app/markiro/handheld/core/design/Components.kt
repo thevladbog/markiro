@@ -230,13 +230,13 @@ fun PinDots(total: Int, filled: Int) {
 }
 
 @Composable
-fun Tile(icon: ImageVector, label: String, status: String, onClick: () -> Unit, modifier: Modifier = Modifier, statusTone: Tone = Tone.Neutral) {
+fun Tile(icon: ImageVector, label: String, status: String, onClick: () -> Unit, modifier: Modifier = Modifier, statusTone: Tone = Tone.Neutral, enabled: Boolean = true) {
     val c = MarkiroTheme.colors
     val shape = RoundedCornerShape(MarkiroSizes.radius)
     Column(
         // Minimum height from the brief; a two-line status (offline timestamp) grows the tile instead of clipping.
         modifier = modifier.heightIn(min = 116.dp).clip(shape).background(c.surfaceCard).border(1.dp, c.line, shape)
-            .clickable(onClick = onClick).padding(14.dp),
+            .clickable(enabled = enabled, onClick = onClick).padding(14.dp),
         verticalArrangement = Arrangement.Bottom,
     ) {
         Icon(icon, contentDescription = null, tint = c.fg1, modifier = Modifier.size(28.dp))

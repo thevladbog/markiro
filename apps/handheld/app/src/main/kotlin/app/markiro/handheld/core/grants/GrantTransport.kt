@@ -28,7 +28,8 @@ internal class GrantTransport(private val db: HandheldDatabase, private val api:
     suspend fun refreshIfAvailable(kind: TaskKind? = null, taskId: String? = null): Boolean = try {
         refresh(kind,taskId)
         true
-    } catch (_: java.io.IOException) { false }
+    } catch (error: kotlinx.coroutines.CancellationException) { throw error }
+      catch (_: java.io.IOException) { false }
       catch (_: retrofit2.HttpException) { false }
       catch (_: IllegalArgumentException) { false }
       catch (_: IllegalStateException) { false }
@@ -37,6 +38,7 @@ internal class GrantTransport(private val db: HandheldDatabase, private val api:
       catch (_: java.security.GeneralSecurityException) { false }
 
     suspend fun refresh(kind: TaskKind? = null, taskId: String? = null) = db.recovery.work {
+        if (kind == null && app.markiro.handheld.core.replacement.ReplacementReadiness(db).blocked()) return@work
         val ticket = db.grants.beginRefresh()
         val requestClock = db.grants.sample()
         val negotiation = buildJsonObject {
@@ -73,7 +75,7 @@ internal class GrantTransport(private val db: HandheldDatabase, private val api:
                     retiredKids=JsonArray(retired.sorted().map(::JsonPrimitive)).toString(), keysetJson=saved.toString())
             } else state
             // A missing policy is not an approved rollback of an existing strict policy.
-            val mode = if (policy == null) state.mode else configuredMode
+            val mode = if (policy == null || app.markiro.handheld.core.replacement.ReplacementReadiness(db).blocked()) state.mode else configuredMode
             db.grantDao().state(anchor(withKeys, ticket, requestClock, serverTime).copy(epoch=epoch, mode=mode))
             true
         }
@@ -126,7 +128,7 @@ internal class GrantTransport(private val db: HandheldDatabase, private val api:
                 }
                 db.grantDao().binding(binding)
             }
-            verified.tokens.forEach { db.grantDao().token(it) }
+            verified.tokens.filter { it.taskKind != "device" || !app.markiro.handheld.core.replacement.ReplacementReadiness(db).blocked() }.forEach { db.grantDao().token(it) }
             if (kind == null) {
                 val deviceGrantId = checkNotNull(verified.deviceGrantId)
                 val requestId = UUID.randomUUID().toString()
@@ -192,7 +194,7 @@ internal class GrantTransport(private val db: HandheldDatabase, private val api:
         require(body.string("capability") == "offline-grants-readiness-v1")
         require(body.string("requestId") == row.requestId && UUID.fromString(row.requestId).toString() == row.requestId)
         require(body.string("clientBuild").isNotEmpty())
-        require(body.number("storageRevision") == HANDHELD_DATABASE_VERSION.toLong())
+        require(body.number("storageRevision") in 1..HANDHELD_DATABASE_VERSION.toLong())
         val installed = body.getValue("installed").jsonObject
         require(installed.keys == setOf("mode", "policyRevision", "keysetRevision", "verifiedGrantId"))
         require(installed.string("mode") in setOf("observe", "strict"))

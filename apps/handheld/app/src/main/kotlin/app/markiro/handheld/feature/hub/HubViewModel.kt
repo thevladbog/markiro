@@ -72,6 +72,9 @@ data class HubUi(
     val writeoffPending: Int = 0,
     /** Null until the mirror has run at least once: unknown is not the same as refused. */
     val canWriteoff: Boolean? = null,
+    val replacementBlocked: Boolean = false,
+    val replacementClosed: Boolean = false,
+    val replacementCounters: kotlinx.serialization.json.JsonObject? = null,
 )
 
 /** Same accepted-unit total as the work screen; a missing summary is explicitly local. */
@@ -103,6 +106,7 @@ class HubViewModel(
     writeoffSync: app.markiro.handheld.core.writeoff.WriteoffSyncEngine,
     permissions: app.markiro.handheld.core.storage.WriteoffPermissionDao,
     private val scannerLabel: () -> String,
+    private val replacement: app.markiro.handheld.core.replacement.ReplacementCoordinator? = null,
     private val now: () -> Long = System::currentTimeMillis,
     /** Refreshes the online indicator and the joined shift summary; tests pass controlled ticks. */
     tick: Flow<Unit> = flow {
@@ -131,6 +135,7 @@ class HubViewModel(
         writeoffSync: app.markiro.handheld.core.writeoff.WriteoffSyncEngine,
         permissions: app.markiro.handheld.core.storage.WriteoffPermissionDao,
         scan: ScanPreferences,
+        replacement: app.markiro.handheld.core.replacement.ReplacementCoordinator,
     ) : this(
         recovery,
         api,
@@ -147,6 +152,7 @@ class HubViewModel(
         team,
         writeoffSync,
         permissions,
+        replacement = replacement,
         scannerLabel = {
             when (scan.sourceKind) {
                 ScanSourceKind.BUILTIN_INTENT -> VendorProfiles.byId(scan.profileId).label.substringBefore(" ·")
@@ -193,6 +199,7 @@ class HubViewModel(
     val state: StateFlow<HubUi> = combine(
         config.observe(), session.state, reachability.lastSuccessAt, tick, sync.state, activeShift, inventorySync.state, activeInventory,
         printers.observeRouting(), boxes.observeUnprintedCount(), writeoffSync.state, writeoffPermission,
+        replacement?.state ?: flowOf(null), replacement?.counters ?: flowOf(null),
     ) { values ->
         val cfg = values[0] as DeviceConfigEntity?
         val ses = values[1] as SessionState
@@ -220,13 +227,16 @@ class HubViewModel(
             stuck = syncState.stuck || inventoryState.stuck || writeoffState.stuck,
             writeoffPending = writeoffState.pending,
             canWriteoff = values[11] as Boolean?,
+            replacementBlocked = (values[12] as app.markiro.handheld.core.storage.ReplacementDrainEntity?)?.blocked == true,
+            replacementClosed = (values[12] as app.markiro.handheld.core.storage.ReplacementDrainEntity?)?.state == "closed",
+            replacementCounters = (values[13] as app.markiro.handheld.core.replacement.JsonSnapshot?)?.value,
             activeShiftId = current?.shift?.id,
             continueShiftNumber = current?.shift?.number,
             activeShift = current,
             activeInventoryId = inventory?.inventoryId,
             continueInventoryNumber = inventory?.inventoryNumber,
         )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HubUi())
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HubUi(replacementBlocked = replacement != null))
 
     /** Fetches live counts; on any failure the cached counts and their timestamp stay untouched. */
     fun refresh() {
@@ -236,7 +246,7 @@ class HubViewModel(
                 val shifts = api.shifts().items.count { it.status in OPEN_SHIFT_STATUSES }
                 val tasks = api.inventoryTasks().items.size
                 shifts to tasks
-            }.getOrNull() ?: return@work
+            }.getOrElse { if (it is kotlinx.coroutines.CancellationException) throw it else return@work }
             recovery.commit { config.upsert(current.copy(shiftsCount = counts.first, inventoryCount = counts.second, countsAt = now())) }
         }
         }
