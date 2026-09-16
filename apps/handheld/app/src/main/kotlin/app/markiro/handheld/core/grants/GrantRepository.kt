@@ -10,7 +10,7 @@ internal fun DeviceOwner.grantOwnerKey(): String = JsonArray(listOf(serverOrigin
 internal fun grantDigest(value: String): String = MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
 internal fun grantSlot(owner: String, kind: String, task: String) = JsonArray(listOf(owner, kind, task).map(::JsonPrimitive)).toString()
 
-class GrantDenied internal constructor(val decision: GrantEvidenceEntity, internal val clockState: GrantStateEntity?) : IllegalStateException("Offline grant: ${decision.reason}")
+class GrantDenied internal constructor(val decision: GrantEvidenceEntity, internal val clockState: GrantStateEntity?) : WorkAdmissionDenied("Offline grant: ${decision.reason}")
 internal data class GrantRefreshTicket(val token: GenerationToken, val sequence: Long)
 
 /** Every admission is nested in the business owner's recovery commit; no network or signature work here. */

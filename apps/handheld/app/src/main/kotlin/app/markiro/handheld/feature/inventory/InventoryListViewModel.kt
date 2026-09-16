@@ -71,7 +71,7 @@ class InventoryListViewModel @Inject constructor(
 
     private fun launchOwned(block: suspend CoroutineScope.() -> Unit) = viewModelScope.launch {
         try { recovery.work(generation) { block() } }
-        catch (_: app.markiro.handheld.core.grants.GrantDenied) { dialog.value=null; grantDenial.show() }
+        catch (denied: app.markiro.handheld.core.grants.WorkAdmissionDenied) { dialog.value=null; grantDenial.show(denied) }
     }
 
     private val now: () -> Long = System::currentTimeMillis
@@ -127,7 +127,7 @@ class InventoryListViewModel @Inject constructor(
     init {
         launchOwned { scans.events.collect { event ->
             try { onScan(event.raw) }
-            catch (_: app.markiro.handheld.core.grants.GrantDenied) { dialog.value=null; grantDenial.show() }
+            catch (denied: app.markiro.handheld.core.grants.WorkAdmissionDenied) { dialog.value=null; grantDenial.show(denied) }
         } }
         refresh()
     }
@@ -241,7 +241,10 @@ class InventoryListViewModel @Inject constructor(
         dialog.value = InventoryDialog.Downloading(task.inventoryNumber, 0, manifest.codeCount)
         val result = runCatching {
             repository.download(manifest) { staged, total -> dialog.value = InventoryDialog.Downloading(task.inventoryNumber, staged, total) }
-        }.getOrElse { return fail(InventoryError.DOWNLOAD_FAILED, retry = task) }
+        }.getOrElse {
+            if (it is kotlinx.coroutines.CancellationException || it is app.markiro.handheld.core.grants.WorkAdmissionDenied) throw it
+            return fail(InventoryError.DOWNLOAD_FAILED, retry = task)
+        }
         when (result) {
             MirrorResult.Active -> {
                 repository.activate(task.inventoryId)

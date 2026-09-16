@@ -19,9 +19,7 @@ class ReplacementReadiness(private val db: HandheldDatabase) {
         val admitted = Json.parseToJsonElement(row.resumeTasksJson).jsonArray.any {
             it.jsonObject.text("kind") == kind && it.jsonObject.text("taskId") == taskId
         }
-        check(row.ownerKey == token.owner.grantOwnerKey() && row.generation == token.generation && row.state != "closed" && admitted) {
-            "Device replacement: new work is blocked"
-        }
+        if (row.ownerKey != token.owner.grantOwnerKey() || row.generation != token.generation || row.state == "closed" || !admitted) throw ReplacementDenied()
     }
     private suspend fun owned(token: GenerationToken, allowSettledGeneration: Boolean = false): ReplacementDrainEntity? {
         check(db.recovery.valid(token))
@@ -122,7 +120,7 @@ class ReplacementReadiness(private val db: HandheldDatabase) {
     suspend fun snapshot(): JsonObject = try { db.withTransaction {
         buildJsonObject {
             put("pending",buildJsonObject {
-                put("scans",count("outbox"))
+                put("scans",count("outbox") + db.validationDao().pendingCountNow())
                 put("inventories",count("inventory_outbox"))
                 put("shiftClosures",count("shift_close_outbox","state <> 'accepted'"))
                 put("productLabels",count("product_label_events","ackedAt IS NULL") + count("product_label_jobs","status <> 'completed'"))

@@ -657,4 +657,6 @@
     <string name="replacement_conflicts">Conflicts: %1$s</string>
     <string name="replacement_prints">Unknown print outcomes: %1$s</string>
     <string name="replacement_tasks">Active tasks: %1$d</string>
+    <string name="replacement_denied_title">New work unavailable</string>
+    <string name="replacement_denied_body">This device is being replaced. New tasks and write-offs are unavailable. Finish existing work or contact an administrator.</string>
 </resources>

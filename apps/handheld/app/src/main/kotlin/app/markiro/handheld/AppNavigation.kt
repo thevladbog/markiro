@@ -238,6 +238,7 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
             // Back moves inside the mode instead of dropping a half-built list.
             composable(Routes.WRITEOFF) {
                 val vm: app.markiro.handheld.feature.writeoff.WriteoffViewModel = hiltViewModel()
+                vm.grantDenial.Dialog()
                 val state by vm.state.collectAsStateWithLifecycle()
                 val leave = { nav.popBackStack(Routes.HUB, inclusive = false); Unit }
                 BackHandler(enabled = true) { if (!vm.back()) leave() }

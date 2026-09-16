@@ -72,6 +72,7 @@ class WriteoffViewModel(
     private val recovery: DeviceRecovery,
     private val signals: SignalPort,
 ) : ViewModel() {
+    val grantDenial = app.markiro.handheld.core.grants.GrantDenialUi()
     @Inject
     constructor(
         gateway: WriteoffGateway,
@@ -198,7 +199,16 @@ class WriteoffViewModel(
         val id = operatorId ?: return
         if (ui.lines.isEmpty() || ui.step == WriteoffStep.RESULT) return
         viewModelScope.launch {
-            val documentId = runCatching { gateway.file(id, reason, ui.lines) }.getOrNull() ?: return@launch
+            val documentId = try {
+                gateway.file(id, reason, ui.lines)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (denied: app.markiro.handheld.core.grants.WorkAdmissionDenied) {
+                grantDenial.show(denied)
+                return@launch
+            } catch (_: Exception) {
+                return@launch
+            }
             _state.update { it.copy(step = WriteoffStep.RESULT, filedDocumentId = documentId) }
             gateway.observeDocument(documentId).collectLatest { row -> _state.update { it.copy(filed = row) } }
         }

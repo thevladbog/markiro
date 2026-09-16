@@ -677,4 +677,6 @@
     <string name="replacement_conflicts">Конфликты: %1$s</string>
     <string name="replacement_prints">Неизвестный результат печати: %1$s</string>
     <string name="replacement_tasks">Активные задания: %1$d</string>
+    <string name="replacement_denied_title">Новая работа недоступна</string>
+    <string name="replacement_denied_body">ТСД находится в режиме замены. Новые задания и списания недоступны. Завершите текущую работу или обратитесь к администратору.</string>
 </resources>

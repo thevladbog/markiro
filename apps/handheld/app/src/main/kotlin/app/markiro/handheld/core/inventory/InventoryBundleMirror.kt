@@ -94,9 +94,9 @@ class InventoryBundleMirror(
         val replacement = app.markiro.handheld.core.replacement.ReplacementReadiness(db)
         replacement.requireAdmission("inventory", manifest.inventoryId)
         if (replacement.blocked()) {
-            val saved = checkNotNull(db.inventoryTaskDao().get(manifest.inventoryId))
-            check(saved.snapshotId == manifest.snapshotId && saved.contentDigest == manifest.contentDigest && saved.combinedDigest == manifest.combinedDigest) {
-                "Device replacement: inventory snapshot is frozen"
+            val saved = db.inventoryTaskDao().get(manifest.inventoryId)
+            if (saved == null || saved.snapshotId != manifest.snapshotId || saved.contentDigest != manifest.contentDigest || saved.combinedDigest != manifest.combinedDigest) {
+                throw app.markiro.handheld.core.replacement.ReplacementDenied()
             }
         }
     }
