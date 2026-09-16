@@ -1862,7 +1862,13 @@
       "tabs": {
         "label": "Tenant sections",
         "overview": "Overview and subscription",
+        "equipment": "Equipment",
         "legal": "Legal details"
+      },
+      "equipment": {
+        "eyebrow": "OPERATIONS / EQUIPMENT",
+        "title": "Equipment operations",
+        "description": "Working devices, licensed slots, and prepared changes in one operational view."
       },
       "slug": "Slug",
       "createdAt": "Created",
@@ -1899,8 +1905,37 @@
       "usageTitle": "Usage and limits",
       "deviceLicensing": {
         "title": "Working devices: Station and handheld",
+        "summaryLabel": "Working-device status",
         "count": "{{usage}} of {{limit}}",
         "unlimited": "{{usage}} · unlimited",
+        "empty": "No working devices have been registered yet.",
+        "registryEyebrow": "DEVICE REGISTER",
+        "registryTitle": "Working-device register",
+        "registryCount_one": "{{count}} device",
+        "registryCount_other": "{{count}} devices",
+        "metrics": {
+          "occupied": "Slots occupied",
+          "available": "Available",
+          "attention": "Need attention"
+        },
+        "columns": {
+          "device": "Device",
+          "connection": "Connection",
+          "slot": "Working-device slot",
+          "actions": "Actions"
+        },
+        "connection": {
+          "awaiting_pairing": "Awaiting pairing",
+          "online": "Online",
+          "offline": "Offline",
+          "revoked": "Access revoked"
+        },
+        "workflows": {
+          "replacement": "Replace device",
+          "replacementHint": "Prepare a replacement without immediately disabling the current device",
+          "retention": "Reduce device limit",
+          "retentionHint": "Choose which devices keep access after the plan changes"
+        },
         "loadError": "Could not load working device licensing.",
         "cancel": "Cancel reservation",
         "confirmTitle": "Cancel this reservation?",

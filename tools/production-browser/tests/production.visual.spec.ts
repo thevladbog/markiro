@@ -919,6 +919,43 @@ async function installApi(page: Page, scenario: Scenario, fx: Fixtures) {
 
     if (scenario === "devices" || scenario === "deviceDrawer") {
       if (path === "/api/devices") return json(route, fx.DEVICES_RESPONSE);
+      if (path === "/api/device-licensing") {
+        return json(route, {
+          tenantId: "11111111-1111-4111-8111-111111111111",
+          usage: 1,
+          limit: 3,
+          canCancelReservations: true,
+          integrity: "ready",
+          devices: [
+            {
+              deviceId: fx.STATION_DEVICE.id,
+              name: fx.STATION_DEVICE.name,
+              kind: "station",
+              assignmentId: "22222222-2222-4222-8222-222222222222",
+              revision: 1,
+              state: "assigned",
+              releaseReason: null,
+              slotOccupied: true,
+              canCancel: false,
+              blockedReason: "already_paired",
+              connectionStatus: "online",
+              pairedAt: "2026-08-20T08:00:00.000Z",
+              lastSeenAt: "2026-08-20T10:00:00.000Z",
+            },
+          ],
+        });
+      }
+      if (path === "/api/device-licensing/replacements") {
+        return json(route, { canPrepare: false, items: [] });
+      }
+      if (path === "/api/device-licensing/retention") {
+        return json(route, {
+          canSelect: false,
+          observation: null,
+          selections: [],
+          currentShadow: { awaitingSelection: false, affectedDeviceIds: [], enforced: false },
+        });
+      }
       // The add-device drawer offers the line select, so it loads the lines.
       if (path === "/api/lines") {
         return json(route, { items: [fx.LINE, fx.SECOND_LINE, fx.THIRD_LINE] });
@@ -1095,9 +1132,34 @@ for (const locale of LOCALES) {
     await openHarness(page, locale, "/devices");
     await expect(page.getByText(fx.STATION_DEVICE.name)).toBeVisible();
     await expect(
-      page.getByRole("columnheader", { name: t("pages.devices.table.place") }),
+      page.getByRole("columnheader", { name: t("pages.devices.table.place"), exact: true }),
     ).toBeVisible();
     await screenshotFullMain(page, shot("device-list"));
+    expect(unexpected).toEqual([]);
+  });
+
+  test(`device workspace remains usable on a narrow screen (${locale})`, async ({ page }, info) => {
+    const fx = fixtures(locale);
+    const unexpected = await installApi(page, "deviceDrawer", fx);
+    await openHarness(page, locale, "/devices");
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(
+      page.getByRole("region", { name: t("pages.devices.overview.label") }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("region", { name: t("pages.devices.registry.label") }),
+    ).toBeVisible();
+    await expect(page.getByText(t("pages.devices.workflows.title"))).toBeVisible();
+    const dimensions = await page.evaluate(() => ({
+      width: document.documentElement.scrollWidth,
+      viewport: window.innerWidth,
+    }));
+    expect(dimensions.width).toBeLessThanOrEqual(dimensions.viewport);
+    await settle(page);
+    await page.screenshot({
+      path: info.outputPath(`device-workspace-${locale}-390.png`),
+      fullPage: true,
+    });
     expect(unexpected).toEqual([]);
   });
 

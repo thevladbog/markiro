@@ -99,6 +99,11 @@ it("shows unlimited shared usage and never sends security revoke when cancelling
     </I18nextProvider>,
   );
   expect(await screen.findByText(/без лимита/i)).toBeDefined();
+  expect(
+    screen
+      .getAllByRole("region", { name: "Реестр рабочих устройств" })
+      .some((region) => region.classList.contains("mk-table__scroll") && region.tabIndex === 0),
+  ).toBe(true);
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", { name: "Отменить резерв" }));
   expect(
@@ -142,7 +147,7 @@ it("keeps cancellation unavailable without both platform write capabilities", as
       </QueryClientProvider>
     </I18nextProvider>,
   );
-  await screen.findByRole("heading", { name: "Рабочие устройства: Station и ТСД" });
+  await screen.findByRole("region", { name: "Состояние рабочих устройств" });
   expect(screen.queryByRole("button", { name: "Отменить резерв" })).toBeNull();
 });
 
@@ -454,7 +459,7 @@ it("binds retention inspection to the route tenant when pool response names anot
       </QueryClientProvider>
     </I18nextProvider>,
   );
-  await screen.findByText("ТСД резерв · ТСД");
+  await screen.findByText("ТСД резерв");
   const { waitFor } = await import("@testing-library/react");
   await waitFor(() =>
     expect(urls.filter((url) => url.endsWith("/retention"))).toEqual([

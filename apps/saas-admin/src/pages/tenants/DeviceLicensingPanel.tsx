@@ -3,7 +3,7 @@ import { DeviceReplacementPanel } from "./DeviceReplacementPanel.js";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Alert, Button, Card, ConfirmDialog, StatusChip } from "@markiro/ui";
+import { Alert, Button, ConfirmDialog, StatusChip, Table, type TableColumn } from "@markiro/ui";
 import type { WorkingDevicePool } from "@markiro/platform-contracts";
 import { ApiRequestError } from "../../api/client.js";
 import { useAuthClient } from "../../auth/client.js";
@@ -109,49 +109,127 @@ export function DeviceLicensingPanel({
   if (!query.data)
     return <Alert tone="error">{t("tenants.detail.deviceLicensing.loadError")}</Alert>;
   const pool = query.data;
+  const available = pool.limit === null ? null : Math.max(0, pool.limit - pool.usage);
+  const needsAttention = pool.devices.filter(
+    (device) =>
+      device.state === "inconsistent" ||
+      device.connectionStatus === "offline" ||
+      device.connectionStatus === "revoked",
+  ).length;
+  const columns: TableColumn<WorkingDevicePool["devices"][number]>[] = [
+    {
+      key: "device",
+      title: t("tenants.detail.deviceLicensing.columns.device"),
+      render: (device) => (
+        <span className="equipment-device-name">
+          <strong>{device.name}</strong>
+          <small>{t(`tenants.detail.deviceLicensing.kind.${device.kind}`)}</small>
+        </span>
+      ),
+    },
+    {
+      key: "connection",
+      title: t("tenants.detail.deviceLicensing.columns.connection"),
+      render: (device) => (
+        <StatusChip
+          status={
+            device.connectionStatus === "online"
+              ? "ok"
+              : device.connectionStatus === "revoked"
+                ? "error"
+                : device.connectionStatus === "offline"
+                  ? "neutral"
+                  : "info"
+          }
+          label={t(`tenants.detail.deviceLicensing.connection.${device.connectionStatus}`)}
+        />
+      ),
+    },
+    {
+      key: "slot",
+      title: t("tenants.detail.deviceLicensing.columns.slot"),
+      render: (device) => (
+        <StatusChip
+          status={
+            device.state === "released"
+              ? "neutral"
+              : device.state === "inconsistent"
+                ? "error"
+                : "info"
+          }
+          label={t(`tenants.detail.deviceLicensing.state.${device.state}`)}
+        />
+      ),
+    },
+    {
+      key: "actions",
+      title: t("tenants.detail.deviceLicensing.columns.actions"),
+      align: "right",
+      render: (device) =>
+        canWrite && pool.canCancelReservations && device.canCancel ? (
+          <Button size="compact" variant="secondary" onClick={() => setSelected(device)}>
+            {t("tenants.detail.deviceLicensing.cancel")}
+          </Button>
+        ) : (
+          <span className="equipment-no-action">—</span>
+        ),
+    },
+  ];
   return (
-    <>
-      <Card title={t("tenants.detail.deviceLicensing.title")} titleAs="h2">
-        <p>
-          {pool.limit === null
-            ? t("tenants.detail.deviceLicensing.unlimited", { usage: pool.usage })
-            : t("tenants.detail.deviceLicensing.count", { usage: pool.usage, limit: pool.limit })}
-        </p>
+    <div className="tenant-equipment-content">
+      <section
+        className="equipment-summary"
+        aria-label={t("tenants.detail.deviceLicensing.summaryLabel")}
+      >
+        <div className="equipment-summary__lead">
+          <span>{t("tenants.detail.deviceLicensing.title")}</span>
+          <strong>
+            {pool.limit === null
+              ? t("tenants.detail.deviceLicensing.unlimited", { usage: pool.usage })
+              : t("tenants.detail.deviceLicensing.count", { usage: pool.usage, limit: pool.limit })}
+          </strong>
+        </div>
+        <dl className="equipment-summary__metrics">
+          <div>
+            <dt>{t("tenants.detail.deviceLicensing.metrics.occupied")}</dt>
+            <dd>{pool.usage}</dd>
+          </div>
+          <div>
+            <dt>{t("tenants.detail.deviceLicensing.metrics.available")}</dt>
+            <dd>{available ?? "∞"}</dd>
+          </div>
+          <div data-tone={needsAttention > 0 ? "attention" : "calm"}>
+            <dt>{t("tenants.detail.deviceLicensing.metrics.attention")}</dt>
+            <dd>{needsAttention}</dd>
+          </div>
+        </dl>
+      </section>
+      <section className="equipment-registry" aria-labelledby="equipment-registry-title">
+        <header>
+          <div>
+            <p>{t("tenants.detail.deviceLicensing.registryEyebrow")}</p>
+            <h3 id="equipment-registry-title">
+              {t("tenants.detail.deviceLicensing.registryTitle")}
+            </h3>
+          </div>
+          <span>
+            {t("tenants.detail.deviceLicensing.registryCount", { count: pool.devices.length })}
+          </span>
+        </header>
         {stale ? <Alert tone="warn">{t("tenants.detail.deviceLicensing.stale")}</Alert> : null}
         {permissionError ? (
           <Alert tone="error">{t("tenants.detail.deviceLicensing.permissionError")}</Alert>
         ) : null}
-        {pool.devices.map((device) => (
-          <div
-            key={device.deviceId}
-            style={{
-              display: "flex",
-              gap: "var(--sp-3)",
-              alignItems: "center",
-              justifyContent: "space-between",
-              flexWrap: "wrap",
-            }}
-          >
-            <span>
-              {device.name} · {t(`tenants.detail.deviceLicensing.kind.${device.kind}`)}
-            </span>
-            <StatusChip
-              status={
-                device.state === "released"
-                  ? "neutral"
-                  : device.state === "inconsistent"
-                    ? "error"
-                    : "info"
-              }
-              label={t(`tenants.detail.deviceLicensing.state.${device.state}`)}
-            />
-            {canWrite && pool.canCancelReservations && device.canCancel ? (
-              <Button size="compact" variant="secondary" onClick={() => setSelected(device)}>
-                {t("tenants.detail.deviceLicensing.cancel")}
-              </Button>
-            ) : null}
-          </div>
-        ))}
+        {pool.devices.length > 0 ? (
+          <Table
+            columns={columns}
+            rows={pool.devices}
+            getRowKey={(device) => device.deviceId}
+            scrollLabel={t("tenants.detail.deviceLicensing.registryTitle")}
+          />
+        ) : (
+          <p className="equipment-registry__empty">{t("tenants.detail.deviceLicensing.empty")}</p>
+        )}
         <ConfirmDialog
           open={selected !== null}
           title={t("tenants.detail.deviceLicensing.confirmTitle")}
@@ -165,9 +243,23 @@ export function DeviceLicensingPanel({
         {mutation.isError && !stale && !permissionError ? (
           <Alert tone="error">{t("tenants.detail.deviceLicensing.retry")}</Alert>
         ) : null}
-      </Card>
-      <DeviceReplacementPanel pool={pool} canWrite={canWrite} />
-      <DeviceRetentionPanel tenantId={tenantId} canWrite={canWrite} />
-    </>
+      </section>
+      <div className="equipment-workflows">
+        <details>
+          <summary>
+            <span>{t("tenants.detail.deviceLicensing.workflows.replacement")}</span>
+            <small>{t("tenants.detail.deviceLicensing.workflows.replacementHint")}</small>
+          </summary>
+          <DeviceReplacementPanel pool={pool} canWrite={canWrite} />
+        </details>
+        <details>
+          <summary>
+            <span>{t("tenants.detail.deviceLicensing.workflows.retention")}</span>
+            <small>{t("tenants.detail.deviceLicensing.workflows.retentionHint")}</small>
+          </summary>
+          <DeviceRetentionPanel tenantId={tenantId} canWrite={canWrite} />
+        </details>
+      </div>
+    </div>
   );
 }

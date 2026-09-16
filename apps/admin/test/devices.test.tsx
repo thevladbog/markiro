@@ -116,6 +116,42 @@ afterEach(async () => {
   vi.unstubAllGlobals();
   await i18n.changeLanguage("ru");
 });
+it("presents device capacity and the registry as one equipment workspace", async () => {
+  renderPage([
+    {
+      id: "33333333-3333-4333-8333-333333333333",
+      type: "station",
+      name: "Packing station",
+      place: { id: "line-1", name: "Line 1" },
+      status: "offline",
+      lastSeenAt: "2026-09-16T10:00:00.000Z",
+      paired: true,
+    },
+    {
+      id: "44444444-4444-4444-8444-444444444444",
+      type: "handheld",
+      name: "Warehouse handheld",
+      place: { id: null, name: "Warehouse" },
+      status: "revoked",
+      lastSeenAt: "2026-09-15T10:00:00.000Z",
+      paired: false,
+    },
+  ]);
+
+  const overview = await screen.findByRole("region", { name: "Состояние оборудования" });
+  const expectMetric = (label: string, value: string) => {
+    const term = within(overview).getByText(label);
+    expect(term.nextElementSibling?.textContent).toBe(value);
+  };
+  await waitFor(() => {
+    expectMetric("Найдено устройств", "2");
+    expectMetric("Использование слотов", "0 / 2");
+    expectMetric("На странице", "2");
+    expectMetric("На странице требуют внимания", "2");
+  });
+  expect(screen.getByRole("region", { name: "Реестр оборудования" })).toBeDefined();
+  expect(screen.getByRole("group", { name: "Фильтры оборудования" })).toBeDefined();
+});
 it("keeps kiosk settings reachable as a button-styled action in the unified device row", async () => {
   renderPage();
   await screen.findByText("Entrance kiosk");

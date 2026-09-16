@@ -60,13 +60,17 @@ describe("tenant subscription detail", () => {
     ).toBe("true");
     screen.getByRole("tab", { name: /Обзор и подписка/ }).focus();
     await user.keyboard("{ArrowRight}");
+    expect(screen.getByRole("tab", { name: /Оборудование/ }).getAttribute("aria-selected")).toBe(
+      "true",
+    );
+    await user.keyboard("{ArrowRight}");
     expect(
       screen.getByRole("tab", { name: /Юридические данные/ }).getAttribute("aria-selected"),
     ).toBe("true");
     await user.keyboard("{ArrowLeft}");
-    expect(
-      screen.getByRole("tab", { name: /Обзор и подписка/ }).getAttribute("aria-selected"),
-    ).toBe("true");
+    expect(screen.getByRole("tab", { name: /Оборудование/ }).getAttribute("aria-selected")).toBe(
+      "true",
+    );
     await user.click(screen.getByRole("tab", { name: /Юридические данные/ }));
 
     expect(await screen.findByText("Юридические данные тенанта")).toBeDefined();
@@ -74,6 +78,25 @@ describe("tenant subscription detail", () => {
       screen.getByText(/не блокируют работу тенанта и производственные операции/i),
     ).toBeDefined();
     expect(screen.queryByText("Текущий и запланированный тарифы")).toBeNull();
+  });
+
+  it("keeps equipment out of the subscription stream and opens it as an operational tab", async () => {
+    installTenantApi();
+    renderSaasApp({ initialEntry: `/tenants/${TENANT_ID}` });
+    const user = userEvent.setup();
+
+    expect(await screen.findByRole("heading", { name: "Первый завод" })).toBeDefined();
+    expect(screen.getByRole("heading", { name: "Текущий тариф" })).toBeDefined();
+    expect(screen.queryByRole("heading", { name: "Контур оборудования" })).toBeNull();
+
+    await user.click(screen.getByRole("tab", { name: /Оборудование/ }));
+
+    expect(await screen.findByRole("heading", { name: "Контур оборудования" })).toBeDefined();
+    expect(screen.getByText("ОПЕРАЦИИ / ОБОРУДОВАНИЕ")).toBeDefined();
+    expect(screen.getByText("РЕЕСТР УСТРОЙСТВ")).toBeDefined();
+    expect(screen.getByText("Линия розлива")).toBeDefined();
+    expect(screen.getByText("ТСД склада")).toBeDefined();
+    expect(screen.queryByRole("heading", { name: "Текущий тариф" })).toBeNull();
   });
 
   it("keeps tenant legal data usable when optional DaData health is unavailable", async () => {

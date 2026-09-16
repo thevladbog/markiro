@@ -3322,6 +3322,7 @@
     },
     "devices": {
       "title": "Devices",
+      "description": "Station, handheld, and kiosk status, connectivity, and licensed slots.",
       "add": "Add device",
       "downloadStation": "Download Station for Windows",
       "downloadStationHint": "Install Station on the production PC, then pair it with the organization using the code shown after the device is created.",
@@ -3339,6 +3340,26 @@
       "locationLabel": "Location",
       "allTypes": "All types",
       "allStatuses": "All statuses",
+      "filtersLabel": "Equipment filters",
+      "overview": {
+        "label": "Equipment status",
+        "eyebrow": "EQUIPMENT / LIVE",
+        "title": "Working fleet",
+        "total": "Devices found",
+        "slots": "Slot usage",
+        "page": "On this page",
+        "attention": "Need attention on this page"
+      },
+      "registry": {
+        "label": "Equipment register",
+        "eyebrow": "DEVICE REGISTER",
+        "title": "Organization equipment",
+        "tableLabel": "Equipment table"
+      },
+      "workflows": {
+        "title": "Device licensing and replacement",
+        "description": "Reservations, freeing slots, and preparing replacements"
+      },
       "emptyTitle": "No devices yet",
       "emptyHint": "Add a station or kiosk to get started.",
       "licensing": {
