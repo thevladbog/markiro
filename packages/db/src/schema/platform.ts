@@ -681,6 +681,7 @@ export const stationPairingCodes = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     tenantId: tenantId(),
     stationDeviceId: uuid("station_device_id").notNull(),
+    purpose: text("purpose").$type<"normal" | "replacement_recovery">().notNull().default("normal"),
     codeHash: text("code_hash").notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     usedAt: timestamp("used_at", { withTimezone: true }),
@@ -689,6 +690,10 @@ export const stationPairingCodes = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
+    check(
+      "station_pairing_codes_purpose_check",
+      sql`${t.purpose} in ('normal','replacement_recovery')`,
+    ),
     unique("station_pairing_codes_tenant_id_uq").on(t.tenantId, t.id),
     index("station_pairing_codes_hash_idx").on(t.codeHash),
     foreignKey({

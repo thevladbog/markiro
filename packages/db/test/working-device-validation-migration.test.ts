@@ -151,8 +151,10 @@ describe.skipIf(!databaseUrl)("working-device constraint validation upgrade", ()
     ).rows;
     const additions = evidence.filter((row) => row.statement.includes("ADD CONSTRAINT"));
     const validations = evidence.filter((row) => row.statement.includes("VALIDATE CONSTRAINT"));
-    expect(additions).toHaveLength(2);
-    expect(validations).toHaveLength(2);
+    // 0135 adds the two preparation checks; 0162 replaces both and adds the
+    // execution receipt check. Both validation migrations must release locks.
+    expect(additions).toHaveLength(5);
+    expect(validations).toHaveLength(5);
     for (const validation of validations) {
       expect(validation.blocks_writes).toBe(false);
       expect(

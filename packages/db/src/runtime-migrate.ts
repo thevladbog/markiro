@@ -73,6 +73,7 @@ export async function runRuntimeMigrations(
           offerVariantIndex,
           packaged.indexOf("0136_validate_working_device_events"),
           packaged.indexOf("0151_offline_grant_readiness"),
+          packaged.indexOf("0163_validate_device_replacement_execution"),
         );
       }
     } catch (error) {
@@ -132,6 +133,7 @@ async function migrateWithOnlineOfferVariants(
   index: number,
   validationIndex: number,
   readinessIndex: number,
+  replacementValidationIndex: number,
 ): Promise<void> {
   const { readMigrationFiles } = await import("drizzle-orm/migrator");
   const { PgDialect } = await import("drizzle-orm/pg-core");
@@ -199,6 +201,14 @@ async function migrateWithOnlineOfferVariants(
     if (!readinessMigration) throw new Error("Missing online grant readiness migration");
     await migrateWithOnlineGrantReadiness(client, readinessMigration);
     nextIndex = readinessIndex + 1;
+  }
+  if (replacementValidationIndex >= nextIndex) {
+    // Release 0162's ADD CONSTRAINT locks before scanning existing tables in 0163.
+    // The session advisory lock still serializes the complete migration run.
+    await dialect.migrate(migrations.slice(nextIndex, replacementValidationIndex), session, {
+      migrationsFolder,
+    });
+    nextIndex = replacementValidationIndex;
   }
   await dialect.migrate(migrations.slice(nextIndex), session, { migrationsFolder });
 }

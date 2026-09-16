@@ -86,3 +86,17 @@ describe("working device replacement schema", () => {
     }
   });
 });
+
+describe("working device replacement execution schema", () => {
+  it.each([
+    "workingDeviceReplacementReadinessIntents",
+    "workingDeviceReplacementReadinessReports",
+    "workingDeviceReplacementExecutions",
+  ])("exports %s for durable restart recovery", (name) => {
+    expect(schema).toHaveProperty(name);
+  });
+
+  it("defaults legacy pairing codes to normal purpose", () => {
+    expect(schema.stationPairingCodes).toHaveProperty("purpose");
+  });
+});
