@@ -66,6 +66,49 @@ const VIOLATION_CODES = Object.freeze([
   "cache_contract_degraded",
   "usage_headers_missing",
 ]);
+function categoryDependencyDiagnosticSource(categoryIds) {
+  return `
+const { createDb } = await import("@markiro/db");
+const { pool } = createDb(process.env.DATABASE_URL, { max: 1 });
+try {
+  const { rows } = await pool.query(
+    "select distinct on (category_id) category_id, fetched_at, definition from national_catalog_schema_versions where category_id = any($1::text[]) order by category_id, fetched_at desc",
+    [${JSON.stringify(categoryIds)}],
+  );
+  const result = rows.map((row) => {
+    const attributes = Array.isArray(row.definition?.source?.attributes)
+      ? row.definition.source.attributes
+      : [];
+    const attribute = attributes.find((candidate) => candidate?.attr_id === 22999) ?? null;
+    return {
+      categoryId: row.category_id,
+      fetchedAt: row.fetched_at,
+      attribute: attribute === null ? null : {
+        attrId: attribute.attr_id,
+        attrType: attribute.attr_type ?? null,
+        fieldType: attribute.attr_field_type ?? null,
+        multiplicity: attribute.attr_multiplicity ?? null,
+        presetOnly: attribute.attr_preset_only ?? null,
+        presetCount: Array.isArray(attribute.attr_preset) ? attribute.attr_preset.length : null,
+        hasPresetUrl: typeof attribute.preset_url === "string" && attribute.preset_url.length > 0,
+        dependentAttributes: attribute.dependent_attributes ?? null,
+      },
+    };
+  });
+  process.stdout.write(JSON.stringify(result));
+} finally {
+  await pool.end();
+}
+`;
+}
+
+function diagnosticCategoryIds(value) {
+  if (!value) return [];
+  const ids = [...new Set(value.split(",").map((id) => id.trim()))];
+  if (ids.length === 0 || ids.length > 20 || ids.some((id) => !/^[1-9][0-9]{0,8}$/.test(id)))
+    throw new Error("National Catalog diagnostic category IDs are invalid");
+  return ids;
+}
 const FAILURE_STAGES = Object.freeze([
   "configuration",
   "credential-validation",
@@ -349,6 +392,29 @@ export async function runHostedNationalCatalogDiagnostics(
     );
     if (execution.exitCode !== (result.passed ? 0 : 1))
       throw new NationalCatalogDiagnosticStageError("api-cli-exit-mismatch", invalidResponse());
+    const categoryIds = diagnosticCategoryIds(environment.NATIONAL_CATALOG_DIAGNOSTIC_CATEGORY_IDS);
+    if (categoryIds.length > 0) {
+      const dependencyExecution = await atFailureStage("api-cli-transport", () =>
+        system.runDiagnostic(
+          "ssh",
+          [
+            ...sshBase,
+            "sudo",
+            "/usr/local/bin/docker",
+            "exec",
+            "-i",
+            containerId,
+            "node",
+            "--input-type=module",
+            "-",
+          ],
+          { input: categoryDependencyDiagnosticSource(categoryIds) },
+        ),
+      );
+      if (dependencyExecution.exitCode !== 0 || dependencyExecution.stdout.length === 0)
+        throw new NationalCatalogDiagnosticStageError("api-cli-exit", invalidResponse());
+      result.categoryDependency = JSON.parse(dependencyExecution.stdout);
+    }
   } catch (error) {
     failure = error;
   }

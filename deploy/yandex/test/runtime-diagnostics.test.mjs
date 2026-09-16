@@ -788,6 +788,12 @@ test("production diagnostics workflow is protected, serialized, read only and cl
       type: "boolean",
       default: false,
     },
+    national_catalog_category_ids: {
+      description: "Optional comma-separated category IDs for sanitized dependency metadata",
+      required: false,
+      type: "string",
+      default: "",
+    },
     recurring_services: {
       description: "Run the read-only recurring-services migration diagnostic",
       required: true,
@@ -823,6 +829,10 @@ test("production diagnostics workflow is protected, serialized, read only and cl
     "${{ secrets.YC_APP_DEPLOY_SSH_PRIVATE_KEY }}",
   );
   assert.equal(diagnose.env.RUN_NATIONAL_CATALOG_DIAGNOSTIC, "${{ inputs.national_catalog }}");
+  assert.equal(
+    diagnose.env.NATIONAL_CATALOG_DIAGNOSTIC_CATEGORY_IDS,
+    "${{ inputs.national_catalog_category_ids }}",
+  );
   assert.equal(diagnose.env.RUN_RECURRING_SERVICES_DIAGNOSTIC, "${{ inputs.recurring_services }}");
   assert.match(diagnose.run, /runtime-diagnostics[.]mjs run/);
   assert.match(
