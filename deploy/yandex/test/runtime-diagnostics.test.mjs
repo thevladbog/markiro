@@ -794,6 +794,13 @@ test("production diagnostics workflow is protected, serialized, read only and cl
       type: "string",
       default: "",
     },
+    national_catalog_gtins: {
+      description:
+        "Optional comma-separated GTIN-14 values for sanitized product category metadata",
+      required: false,
+      type: "string",
+      default: "",
+    },
     recurring_services: {
       description: "Run the read-only recurring-services migration diagnostic",
       required: true,
@@ -832,6 +839,10 @@ test("production diagnostics workflow is protected, serialized, read only and cl
   assert.equal(
     diagnose.env.NATIONAL_CATALOG_DIAGNOSTIC_CATEGORY_IDS,
     "${{ inputs.national_catalog_category_ids }}",
+  );
+  assert.equal(
+    diagnose.env.NATIONAL_CATALOG_DIAGNOSTIC_GTINS,
+    "${{ inputs.national_catalog_gtins }}",
   );
   assert.equal(diagnose.env.RUN_RECURRING_SERVICES_DIAGNOSTIC, "${{ inputs.recurring_services }}");
   assert.match(diagnose.run, /runtime-diagnostics[.]mjs run/);
