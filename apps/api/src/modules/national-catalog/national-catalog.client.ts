@@ -1013,9 +1013,17 @@ function parseOptionalDependentAttributes(
   for (const row of rows) {
     const record = asRecord(row);
     if (!record) return null;
-    if (!Object.hasOwn(record, "value") && !Object.hasOwn(record, "atters")) return null;
+    const hasAttrs = Object.hasOwn(record, "attrs");
+    const hasLegacyAtters = Object.hasOwn(record, "atters");
+    if (
+      (!Object.hasOwn(record, "value") && !hasAttrs && !hasLegacyAtters) ||
+      (hasAttrs && hasLegacyAtters)
+    )
+      return null;
     const dependencyValue = optionalNullableString(record.value);
-    const attributes = parseOptionalDependentAttributeRules(record.atters);
+    const attributes = parseOptionalDependentAttributeRules(
+      hasAttrs ? record.attrs : record.atters,
+    );
     if (dependencyValue === undefined || attributes === null) return null;
     dependencies.push({ value: dependencyValue, attributes });
   }

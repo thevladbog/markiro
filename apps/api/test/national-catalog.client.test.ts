@@ -804,6 +804,55 @@ describe("NationalCatalogClient", () => {
     });
   });
 
+  it("normalizes dependency rules from the provider attrs key", async () => {
+    const payload = {
+      apiversion: 3,
+      result: [
+        {
+          ...attributePayload.result[0],
+          attr_id: 22999,
+          attr_name: "Характеристика упаковки",
+          dependent_attributes: [
+            {
+              value: "КЕГ",
+              attrs: [
+                {
+                  attr_id: 23052,
+                  attr_type: "m",
+                  attr_preset: [],
+                  first_layer: false,
+                  second_layer: true,
+                  attr_value_type: [],
+                },
+              ],
+            },
+          ],
+          attr_preset: ["КЕГ", "УПАКОВКА СПЕЦИАЛИЗИРОВАННАЯ"],
+        },
+      ],
+    };
+    const client = new NationalCatalogClient(
+      dependencies(async () => new Response(JSON.stringify(payload), { status: 200 })),
+    );
+
+    await expect(client.getAttributes(auth)).resolves.toMatchObject({
+      status: "ok",
+      value: {
+        attributes: [
+          expect.objectContaining({
+            id: 22999,
+            dependentAttributes: [
+              {
+                value: "КЕГ",
+                attributes: [{ id: 23052, firstLayer: false, secondLayer: true, type: "m" }],
+              },
+            ],
+          }),
+        ],
+      },
+    });
+  });
+
   it("rejects an empty dependent attribute object", async () => {
     const client = new NationalCatalogClient(
       dependencies(
