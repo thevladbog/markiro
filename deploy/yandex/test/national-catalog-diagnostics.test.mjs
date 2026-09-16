@@ -163,6 +163,20 @@ test("hosted National Catalog diagnostic reads bounded sanitized category depend
         hasPresetUrl: true,
         dependentAttributes: [],
       },
+      referencedAttributes: [
+        {
+          attrId: 23052,
+          attrType: "m",
+          fieldType: "text",
+          multiplicity: false,
+          multiplicityType: null,
+          firstLayer: false,
+          secondLayer: false,
+          presetOnly: false,
+          presetCount: 0,
+          hasPresetUrl: false,
+        },
+      ],
     },
   ];
   const result = await runHostedNationalCatalogDiagnostics(

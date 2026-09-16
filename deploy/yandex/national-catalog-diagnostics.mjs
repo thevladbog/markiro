@@ -80,6 +80,12 @@ try {
       ? row.definition.source.attributes
       : [];
     const attribute = attributes.find((candidate) => candidate?.attr_id === 22999) ?? null;
+    const referencedIds = new Set(
+      (Array.isArray(attribute?.dependent_attributes) ? attribute.dependent_attributes : [])
+        .flatMap((dependency) => Array.isArray(dependency?.atters) ? dependency.atters : [])
+        .map((candidate) => candidate?.attr_id)
+        .filter((id) => Number.isSafeInteger(id) && id > 0),
+    );
     return {
       categoryId: row.category_id,
       fetchedAt: row.fetched_at,
@@ -93,6 +99,20 @@ try {
         hasPresetUrl: typeof attribute.preset_url === "string" && attribute.preset_url.length > 0,
         dependentAttributes: attribute.dependent_attributes ?? null,
       },
+      referencedAttributes: attributes
+        .filter((candidate) => referencedIds.has(candidate?.attr_id))
+        .map((candidate) => ({
+          attrId: candidate.attr_id,
+          attrType: candidate.attr_type ?? null,
+          fieldType: candidate.attr_field_type ?? null,
+          multiplicity: candidate.attr_multiplicity ?? null,
+          multiplicityType: candidate.attr_multiplicity_type ?? null,
+          firstLayer: candidate.first_layer ?? null,
+          secondLayer: candidate.second_layer ?? null,
+          presetOnly: candidate.attr_preset_only ?? null,
+          presetCount: Array.isArray(candidate.attr_preset) ? candidate.attr_preset.length : null,
+          hasPresetUrl: typeof candidate.preset_url === "string" && candidate.preset_url.length > 0,
+        })),
     };
   });
   process.stdout.write(JSON.stringify(result));
