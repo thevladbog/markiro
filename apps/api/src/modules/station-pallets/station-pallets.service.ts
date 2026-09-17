@@ -104,20 +104,28 @@ export class StationPalletsService {
     deviceId: string,
   ): Promise<Pick<StationPalletBootstrapDto, "palletSscc" | "palletSsccRevokedFrom">> {
     const none = { palletSscc: null, palletSsccRevokedFrom: [] as number[] };
-    return this.db.transaction(async (tx) => {
-      const access = await this.entitlements.resolveRecovery(tenantId, tx, new Date());
-      if (access.access === "read_only") return none;
-      let issuerPrefix: string;
-      try {
-        issuerPrefix = await this.sscc.resolveOrganisationIssuerPrefix(tenantId, tx);
-      } catch (error) {
-        if (!(error instanceof BadRequestException)) throw error;
-        this.logger.warn(
-          `Tenant ${tenantId} pallet bootstrap has no serial block -- ${error.message}`,
-        );
-        return none;
-      }
-      try {
+    // The exhaustion catch sits OUTSIDE the transaction on purpose.
+    // `SsccService.allocate` throws `SsccCapacityExhaustedException` from
+    // inside its own statement precisely so the increment it just performed
+    // is rolled back and the counter is never parked over capacity. Catching
+    // it in the transaction callback would swallow that signal, commit, and
+    // leave the counter permanently advanced past the prefix's ceiling.
+    // The read-only and missing-GLN returns stay inside: they allocate
+    // nothing, so committing them changes no counter.
+    try {
+      return await this.db.transaction(async (tx) => {
+        const access = await this.entitlements.resolveRecovery(tenantId, tx, new Date());
+        if (access.access === "read_only") return none;
+        let issuerPrefix: string;
+        try {
+          issuerPrefix = await this.sscc.resolveOrganisationIssuerPrefix(tenantId, tx);
+        } catch (error) {
+          if (!(error instanceof BadRequestException)) throw error;
+          this.logger.warn(
+            `Tenant ${tenantId} pallet bootstrap has no serial block -- ${error.message}`,
+          );
+          return none;
+        }
         const palletSscc = await this.sscc.allocateForBundle(
           tenantId,
           issuerPrefix,
@@ -134,13 +142,13 @@ export class StationPalletsService {
           tx,
         );
         return { palletSscc, palletSsccRevokedFrom };
-      } catch (error) {
-        if (!(error instanceof SsccCapacityExhaustedException)) throw error;
-        this.logger.warn(
-          `Tenant ${tenantId} pallet bootstrap has no serial block -- ${error.message}`,
-        );
-        return none;
-      }
-    });
+      });
+    } catch (error) {
+      if (!(error instanceof SsccCapacityExhaustedException)) throw error;
+      this.logger.warn(
+        `Tenant ${tenantId} pallet bootstrap has no serial block -- ${error.message}`,
+      );
+      return none;
+    }
   }
 }

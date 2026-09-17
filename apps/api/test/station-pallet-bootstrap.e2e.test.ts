@@ -5,6 +5,8 @@ import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { schema, type Db } from "@markiro/db";
+import { and, eq } from "drizzle-orm";
+import { ssccSerialCapacity } from "@markiro/domain";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
@@ -205,6 +207,49 @@ describe.skipIf(!ready)("station pallet bootstrap e2e", () => {
     expect(res.body.palletSsccRevokedFrom).toEqual([]);
     expect(res.body.products).toEqual([]);
     expect(res.body.operators).toEqual([]);
+  });
+
+  /**
+   * `SsccService.allocate` throws `SsccCapacityExhaustedException` from inside
+   * its own statement so the increment it just performed is ROLLED BACK. The
+   * bootstrap must therefore let that exception escape its transaction; a
+   * catch inside the callback would commit the over-capacity counter and burn
+   * the tenant's remaining serials for good.
+   */
+  it("leaves the counter untouched when the pallet block is exhausted", async () => {
+    const exhaustedAgent = request.agent(app!.getHttpServer());
+    const exhaustedTenantId = await signUpAndActivate(exhaustedAgent);
+    const exhaustedDevice = await createTestStationDevice(app!, exhaustedAgent, "ТСД-3", {
+      kind: "handheld",
+    });
+    await exhaustedAgent.put("/org/profile").send({ gln: ORG_GLN }).expect(200);
+
+    const capacity = ssccSerialCapacity(ORG_ISSUER_PREFIX);
+    await db.insert(schema.ssccCounters).values({
+      tenantId: exhaustedTenantId,
+      issuerPrefix: ORG_ISSUER_PREFIX,
+      extensionDigit: 1,
+      nextSerial: capacity,
+    });
+
+    const res = await request(app!.getHttpServer())
+      .get("/station/pallet-bootstrap")
+      .set("x-api-key", exhaustedDevice.apiKey)
+      .expect(200);
+    expect(res.body.palletSscc).toBeNull();
+    expect(res.body.palletSsccRevokedFrom).toEqual([]);
+
+    const [counter] = await db
+      .select({ nextSerial: schema.ssccCounters.nextSerial })
+      .from(schema.ssccCounters)
+      .where(
+        and(
+          eq(schema.ssccCounters.tenantId, exhaustedTenantId),
+          eq(schema.ssccCounters.issuerPrefix, ORG_ISSUER_PREFIX),
+          eq(schema.ssccCounters.extensionDigit, 1),
+        ),
+      );
+    expect(Number(counter?.nextSerial)).toBe(capacity);
   });
 
   it("refuses a cabinet session", async () => {
