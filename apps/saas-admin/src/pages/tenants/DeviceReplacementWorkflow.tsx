@@ -155,16 +155,21 @@ export function DeviceReplacementWorkflow({
   const report = p.readiness?.report;
   const recovery = p.recovery?.state ?? p.execution?.recoveryState;
   const openRecovery = recovery === "required" || recovery === "draining";
+  const recoveryReadiness = p.state === "completed" && recovery === "draining";
   const beforeExecution = ["prepared", "draining", "ready"].includes(p.state);
   const renew =
     p.state === "draining" &&
     p.readiness?.eligibility.reasons.some((reason) =>
       ["report_stale", "facts_changed", "credential_epoch_mismatch"].includes(reason),
     );
-  const reasonCopy = (reason: string) =>
-    t(`deviceReplacement.workflow.blocker.${reason}`, {
-      defaultValue: t("deviceReplacement.workflow.unknownBlocker", { reason }),
-    });
+  const reasonCopy = (reason: string) => {
+    const recoveryKey = `deviceReplacement.workflow.recoveryBlocker.${reason}`;
+    return recoveryReadiness && i18n.exists(recoveryKey)
+      ? t(recoveryKey)
+      : t(`deviceReplacement.workflow.blocker.${reason}`, {
+          defaultValue: t("deviceReplacement.workflow.unknownBlocker", { reason }),
+        });
+  };
   const dialogTitle =
     dialog?.kind === "close" ? "close" : dialog?.kind === "emergency" ? "emergency" : "normal";
   const dialogConfirm =
@@ -207,6 +212,11 @@ export function DeviceReplacementWorkflow({
   };
   return (
     <div style={grid}>
+      {p.readiness && p.state === "completed" ? (
+        <p style={{ margin: 0 }}>
+          {t(`deviceReplacement.workflow.${recoveryReadiness ? "recoveryReport" : "savedReport"}`)}
+        </p>
+      ) : null}
       <dl
         style={{
           display: "grid",
@@ -259,10 +269,13 @@ export function DeviceReplacementWorkflow({
       {p.readiness && !report ? (
         <Alert tone="warn">{t("deviceReplacement.workflow.noMeasurements")}</Alert>
       ) : null}
-      {p.readiness?.eligibility.status === "blocked" && beforeExecution ? (
+      {p.readiness?.eligibility.status === "blocked" && (beforeExecution || recoveryReadiness) ? (
         <Alert tone="warn">
+          {recoveryReadiness ? (
+            <p style={{ margin: 0 }}>{t("deviceReplacement.workflow.recoveryBlockers")}</p>
+          ) : null}
           <ul style={{ margin: 0, paddingInlineStart: "var(--sp-5)" }}>
-            {p.readiness.eligibility.reasons.map((reason) => (
+            {[...new Set(p.readiness.eligibility.reasons)].map((reason) => (
               <li key={reason}>{reasonCopy(reason)}</li>
             ))}
           </ul>

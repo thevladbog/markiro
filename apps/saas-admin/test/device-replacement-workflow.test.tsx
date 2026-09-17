@@ -8,6 +8,8 @@ import i18n from "../src/i18n/index.js";
 import { DeviceReplacementPanel } from "../src/pages/tenants/DeviceReplacementPanel.js";
 import {
   pool,
+  blockedRecoveryPreparation,
+  factualObservation,
   PROJECT,
   SECOND,
   workflowPreparation,
@@ -346,4 +348,63 @@ it("locks workflow mutations while cancellation is uncertain across remount", as
   await screen.findByText(/Result is unknown/);
   expect(screen.queryByRole("button", { name: "Request drain" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Emergency replacement" })).toBeNull();
+});
+
+it.each(["en", "ru"])(
+  "shows current recovery blockers even with all local counters zero in %s",
+  async (locale) => {
+    await i18n.changeLanguage(locale);
+    current = blockedRecoveryPreparation();
+    setup();
+    await screen.findByText(
+      locale === "ru"
+        ? "Блокировки восстановления на сервере"
+        : "Recovery blockers reported by the server",
+    );
+    const exceptions = screen.getByText(locale === "ru" ? "Исключения" : "Exceptions");
+    expect(exceptions.closest("div")?.querySelector("dd")?.textContent).toBe("0");
+    expect(
+      screen.getByText(
+        locale === "ru"
+          ? /Разберите и отправьте исключения/
+          : /Resolve and send pending exceptions/,
+      ),
+    ).toBeDefined();
+    expect(
+      screen.getByText(
+        locale === "ru"
+          ? /Завершите активную локальную и серверную работу/
+          : /Finish active local and server work/,
+      ),
+    ).toBeDefined();
+    expect(
+      screen.getByText(
+        locale === "ru" ? /Отправьте новый отчёт восстановления/ : /Send a fresh recovery report/,
+      ),
+    ).toBeDefined();
+    expect(screen.queryByText(/request drain again|снова запросите завершение/)).toBeNull();
+  },
+);
+it.each(["required", "completed", "evidence_unavailable"] as const)(
+  "keeps old report blockers historical when recovery is %s",
+  async (recovery) => {
+    current = blockedRecoveryPreparation(recovery);
+    setup();
+    await screen.findByText(/Saved source measurements/);
+    expect(screen.queryByText(/Recovery blockers reported by the server/)).toBeNull();
+    expect(screen.queryByText(/Resolve and send pending exceptions/)).toBeNull();
+  },
+);
+it("preserves unsupported recovery measurements and their client remediation", async () => {
+  current = workflowPreparation("completed", "draining");
+  setup();
+  await screen.findByText("Unsupported by client");
+  expect(screen.getByText(/Update the source client/)).toBeDefined();
+});
+it("labels saved execution prerequisites as historical", async () => {
+  current = { ...workflowPreparation("prepared"), observation: factualObservation };
+  setup();
+  await screen.findByText(/Execution prerequisites at preparation/);
+  expect(screen.getAllByText(/Handheld access is currently unavailable/)).toHaveLength(1);
+  expect(screen.queryByText("Execution prerequisites in this preview")).toBeNull();
 });

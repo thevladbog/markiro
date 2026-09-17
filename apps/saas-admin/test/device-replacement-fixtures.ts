@@ -196,3 +196,34 @@ export function executionPreview(requestId: string, mode: "normal" | "emergency"
     newWorkAllowedAt: BOUNDARY,
   };
 }
+
+export const factualObservation: DeviceReplacementObservation = {
+  ...observation,
+  execution: {
+    available: false,
+    reasons: [
+      ...observation.execution.reasons,
+      "handheld_unavailable",
+      "capacity_unavailable",
+      "lifecycle_policy_not_ready",
+    ],
+  },
+};
+export function blockedRecoveryPreparation(
+  recovery: "required" | "draining" | "completed" | "evidence_unavailable" = "draining",
+): DeviceReplacementPreparation {
+  const readiness = workflowPreparation("ready").readiness;
+  if (!readiness) throw new Error("Missing readiness fixture");
+  return {
+    ...workflowPreparation("completed", recovery),
+    readiness: {
+      ...readiness,
+      credentialEpoch: 5,
+      receivedAt: "2026-09-17T12:20:00.000Z",
+      eligibility: {
+        status: "blocked",
+        reasons: ["pending_exceptions", "active_tasks", "report_stale"],
+      },
+    },
+  };
+}

@@ -377,6 +377,14 @@ function Observation({
   showLocalUnknown?: boolean;
 }) {
   const { t } = useTranslation();
+  const reasons = o.execution.reasons.filter(
+    (reason) =>
+      ![
+        "transfer_not_available",
+        "local_data_unknown",
+        "source_authority_transition_required",
+      ].includes(reason),
+  );
   return (
     <div style={{ display: "grid", gap: "var(--sp-2)" }}>
       <p style={{ margin: 0 }}>
@@ -406,6 +414,20 @@ function Observation({
         {t("deviceReplacement.delta", { delta: o.expectedTransferSlotDelta })}
       </p>
       <p style={{ margin: 0 }}>{t("deviceReplacement.serverWork", o.knownServerWork)}</p>
+      {reasons.length ? (
+        <Alert tone="warn">
+          <p style={{ margin: 0 }}>
+            {t(
+              `deviceReplacement.${historical ? "observationBlockersSaved" : "observationBlockers"}`,
+            )}
+          </p>
+          <ul style={{ margin: 0, paddingInlineStart: "var(--sp-5)" }}>
+            {reasons.map((reason) => (
+              <li key={reason}>{t(`deviceReplacement.unavailable.${reason}`)}</li>
+            ))}
+          </ul>
+        </Alert>
+      ) : null}
       {showLocalUnknown ? <Alert tone="warn">{t("deviceReplacement.localUnknown")}</Alert> : null}
     </div>
   );

@@ -2389,9 +2389,9 @@
       "transfer_not_available": "Replacement cannot be completed yet.",
       "local_data_unknown": "Local queues require separate verification.",
       "source_authority_transition_required": "Moving access from the source device is not available yet.",
-      "handheld_unavailable": "Handheld access is currently unavailable.",
-      "capacity_unavailable": "Capacity for the eventual replacement is currently unavailable.",
-      "lifecycle_policy_not_ready": "The lifecycle policy is not ready for execution."
+      "handheld_unavailable": "Handheld access is currently unavailable. Enable Handheld in tenant services or choose a Station target, then preview again.",
+      "capacity_unavailable": "Capacity for the eventual replacement is currently unavailable. Review occupied slots and plan capacity, then preview again.",
+      "lifecycle_policy_not_ready": "The lifecycle policy is not ready for execution. Ask a platform administrator to configure the device lifecycle policy, then preview again."
     },
     "slotsSaved": "Slots at preparation: {{usage}} of {{limit}}.",
     "slotsSavedUnlimited": "Slots at preparation: {{usage}}, unlimited capacity.",
@@ -2492,9 +2492,20 @@
         "normal": "Transfer the working slot to the target and revoke the source credential. The source data stays on its original device.",
         "emergency": "Use emergency replacement when the source cannot finish drain. The old credential will be revoked. The target can be paired immediately but cannot start work before the server boundary.",
         "close": "Record that the source evidence cannot be recovered. This does not create missing evidence or confirm that local data was synchronized."
+      },
+      "recoveryReport": "Current source recovery report. Server blockers can remain even when local counters are zero.",
+      "savedReport": "Saved source measurements; these do not describe current recovery readiness.",
+      "recoveryBlockers": "Recovery blockers reported by the server",
+      "recoveryBlocker": {
+        "report_stale": "The recovery report is stale or missing. Send a fresh recovery report from the original device, then refresh.",
+        "facts_changed": "Recovery facts changed. Send a fresh recovery report from the original device, then refresh.",
+        "credential_epoch_mismatch": "The recovery credential changed. Issue a new recovery code for the original device and send a fresh report.",
+        "installed_grants": "Reconcile retained production grants on the source and send a fresh recovery report."
       }
     },
-    "cancelDrainBody": "Cancel this drain? After the source receives the cancellation, the source can resume new work under its current access rules. No slot is transferred."
+    "cancelDrainBody": "Cancel this drain? After the source receives the cancellation, the source can resume new work under its current access rules. No slot is transferred.",
+    "observationBlockers": "Execution prerequisites in this preview",
+    "observationBlockersSaved": "Execution prerequisites at preparation (historical)"
   },
   "deviceRetention": {
     "title": "Devices to retain after a reduction",
