@@ -78,6 +78,13 @@ const route = (
 export const CURRENT_SAAS_ROUTES = [
   route(
     "post",
+    "/platform/tenants/{tenantId}/device-licensing/replacements/{preparationId}/target/code",
+    "200",
+    platformDeviceReplacementContracts.targetCode.response,
+    { body: platformDeviceReplacementContracts.targetCode.body },
+  ),
+  route(
+    "post",
     "/platform/tenants/{tenantId}/device-licensing/replacements/{preparationId}/recovery/code",
     "200",
     platformDeviceReplacementContracts.recoveryCode.response,

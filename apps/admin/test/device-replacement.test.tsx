@@ -367,8 +367,8 @@ it("formats the saved observation date in the selected Russian locale", async ()
     `Наблюдение сохранено ${new Date(preparation.preparedAt).toLocaleString("ru")}; это исторические факты.`,
   );
   expect(screen.getByText(/сохранённые задания печати: 3/)).toBeDefined();
-  expect(screen.getByText("Замену пока нельзя завершить")).toBeDefined();
-  expect(screen.getByText("Перенос доступа с исходного устройства ещё недоступен")).toBeDefined();
+  expect(screen.getByRole("button", { name: "Запросить завершение работы" })).toBeDefined();
+  expect(screen.queryByText("Перенос доступа с исходного устройства ещё недоступен")).toBeNull();
 });
 
 it("invalidates an ordinary source preview across A to B to A while retaining intent", async () => {

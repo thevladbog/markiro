@@ -189,6 +189,16 @@ const deviceReplacementReadinessProjectionSchema = z
     intentId: platformUuidSchema,
     credentialEpoch: positiveEpochSchema,
     receivedAt: platformTimestampSchema.nullable(),
+    report: z
+      .lazy(() =>
+        deviceReplacementReadinessRequestSchema.omit({
+          requestId: true,
+          intentId: true,
+          credentialEpoch: true,
+        }),
+      )
+      .nullable()
+      .optional(),
     eligibility: z.discriminatedUnion("status", [
       z.object({ status: z.literal("eligible"), reasons: z.tuple([]) }).strict(),
       z
@@ -685,6 +695,13 @@ export const cabinetDeviceReplacementContracts = {
 } as const;
 
 export const platformDeviceReplacementContracts = {
+  targetCode: {
+    method: "POST",
+    path: "/platform/tenants/:tenantId/device-licensing/replacements/:preparationId/target/code",
+    status: 200,
+    body: deviceReplacementRecoveryCodeRequestSchema,
+    response: deviceReplacementRecoveryCodeResponseSchema,
+  },
   recoveryCode: {
     method: "POST",
     path: "/platform/tenants/:tenantId/device-licensing/replacements/:preparationId/recovery/code",

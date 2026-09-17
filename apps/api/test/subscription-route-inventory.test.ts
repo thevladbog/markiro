@@ -606,6 +606,9 @@ const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
   "PlatformDeviceRetentionController.confirm": platform(
     "retention requires fresh tenant and billing platform write capabilities",
   ),
+  "PlatformDeviceReplacementController.targetCode": platform(
+    "replacement target code requires tenant and billing write capabilities",
+  ),
   "PlatformDeviceReplacementController.recoveryCode": platform(
     "recovery requires current platform tenant and billing write capabilities",
   ),

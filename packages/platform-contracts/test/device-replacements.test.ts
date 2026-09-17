@@ -566,6 +566,13 @@ describe("device replacement contracts", () => {
       },
     });
     expect(contracts.platformDeviceReplacementContracts).toEqual({
+      targetCode: {
+        method: "POST",
+        path: "/platform/tenants/:tenantId/device-licensing/replacements/:preparationId/target/code",
+        status: 200,
+        body: contracts.deviceReplacementRecoveryCodeRequestSchema,
+        response: contracts.deviceReplacementRecoveryCodeResponseSchema,
+      },
       recoveryCode: {
         method: "POST",
         path: "/platform/tenants/:tenantId/device-licensing/replacements/:preparationId/recovery/code",
@@ -701,4 +708,55 @@ it("requires versioned matching closure metadata before resuming a drained devic
       resume: true,
     }).success,
   ).toBe(false);
+});
+
+it("projects measured report metadata strictly without fabricating unsupported zero", () => {
+  const report = {
+    reportSequence: 2,
+    clientBuild: "station-2.1",
+    storageRevision: 8,
+    pending: {
+      scans: 3,
+      inventories: 0,
+      shiftClosures: 0,
+      productLabels: 0,
+      boxes: 0,
+      exceptions: "unsupported",
+    },
+    conflicts: 0,
+    unknownPrints: 0,
+    activeTasks: [],
+    installedGrants: [],
+    journal: { digest: "a".repeat(64), highestSequence: 9 },
+  };
+  const row = {
+    id: preparationId,
+    sourceDeviceId,
+    revision: 2,
+    state: "draining",
+    preparedAt: createdAt,
+    cancelledAt: null,
+    observation,
+    readiness: {
+      intentId: requestId,
+      credentialEpoch: 1,
+      receivedAt: createdAt,
+      eligibility: { status: "blocked", reasons: ["pending_scans", "client_upgrade_required"] },
+      report,
+    },
+  };
+  expect(contracts.deviceReplacementPreparationSchema.parse(row).readiness).toMatchObject({
+    report,
+  });
+  for (const patch of [{ secret: "never" }, { pending: { ...report.pending, scans: -1 } }])
+    expect(
+      contracts.deviceReplacementPreparationSchema.safeParse({
+        ...row,
+        readiness: { ...row.readiness, report: { ...report, ...patch } },
+      }).success,
+    ).toBe(false);
+});
+
+it("publishes platform target pairing with strict one-time secret response", () => {
+  expect(contracts.platformDeviceReplacementContracts).toHaveProperty("targetCode");
 });

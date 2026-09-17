@@ -1,3 +1,4 @@
+import { DeviceReplacementTargetPairingService } from "../src/modules/device-licensing/device-replacement-target-pairing.service";
 import { DeviceReplacementRecoveryService } from "../src/modules/device-licensing/device-replacement-recovery.service";
 import { expect, it } from "vitest";
 import { Test } from "@nestjs/testing";
@@ -19,6 +20,7 @@ it("publishes strict normal/emergency preview and execution routes in both trust
       DeviceReplacementReadinessService,
       DeviceReplacementExecutionService,
       DeviceReplacementRecoveryService,
+      DeviceReplacementTargetPairingService,
     ].map((provide) => ({ provide, useValue: {} })),
   });
   for (const guard of [TenantGuard, AuthorizationGuard, SubscriptionAccessGuard])

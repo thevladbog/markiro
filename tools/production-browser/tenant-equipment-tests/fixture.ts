@@ -1,3 +1,4 @@
+import type { DeviceReplacementPreparation } from "../../../packages/platform-contracts/src/index.js";
 import { test as base, expect } from "@playwright/test";
 import type { Route } from "@playwright/test";
 import {
@@ -81,7 +82,7 @@ const devicePool = platformDeviceLicensingContracts.inspect.response.parse({
 });
 
 function makeFixture() {
-  return { unhandled: [] as string[] };
+  return { unhandled: [] as string[], replacement: null as DeviceReplacementPreparation | null };
 }
 
 export const test = base.extend<{ fixture: ReturnType<typeof makeFixture> }>({
@@ -130,7 +131,12 @@ export const test = base.extend<{ fixture: ReturnType<typeof makeFixture> }>({
         url.pathname === `/api/platform/tenants/${TENANT_ID}/device-licensing/replacements` &&
         method === "GET"
       ) {
-        json = { canPrepare: true, items: [] };
+        json = {
+          canPrepare: true,
+          items: fixture.replacement
+            ? [{ preparation: fixture.replacement, needsReview: false }]
+            : [],
+        };
       } else if (
         url.pathname === `/api/platform/tenants/${TENANT_ID}/device-licensing/retention` &&
         method === "GET"

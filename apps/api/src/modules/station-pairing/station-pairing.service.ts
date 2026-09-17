@@ -1,3 +1,4 @@
+import { redeemReplacementTarget } from "./replacement-target-pairing";
 import { redeemReplacementRecovery } from "./replacement-recovery-pairing";
 import {
   replacementTargetFence,
@@ -351,6 +352,34 @@ export class StationPairingService {
     // Build before the conditional claim. If an operator mirror cannot be
     // prepared, the code stays live and no candidate key exists to clean up.
     const operators = await this.operators.buildRoster(candidate.tenantId);
+    const targetPairing = await redeemReplacementTarget({
+      db: this.db,
+      entitlements: this.entitlements,
+      candidate,
+      station,
+    });
+    if (targetPairing)
+      return {
+        device: {
+          id: station.id,
+          name: station.name,
+          kind: station.kind as StationDeviceKind,
+          tenantId: station.tenantId,
+          organizationName: station.organizationName,
+          line:
+            station.lineId !== null && station.lineName !== null
+              ? { id: station.lineId, name: station.lineName }
+              : null,
+        },
+        credential: { apiKey: targetPairing.key.key, serverUrl: loadEnv().BETTER_AUTH_URL },
+        ...(options.replacementBoundary && targetPairing.replacement
+          ? { replacement: targetPairing.replacement }
+          : {}),
+        operators,
+        ...(options.includeSubscription
+          ? { subscription: await this.entitlements.accessSnapshot(candidate.tenantId) }
+          : {}),
+      };
     const key = await this.auth.api.createApiKey({
       body: {
         configId: "station",

@@ -328,6 +328,7 @@ jobs:
           pnpm turbo run build --filter='@markiro/admin' --filter='@markiro/saas-admin'
           pnpm --dir tools/production-browser --ignore-workspace test:tenant-billing
           pnpm --dir tools/production-browser --ignore-workspace test:tenant-equipment
+          pnpm --dir tools/production-browser --ignore-workspace exec playwright test --config device-replacement.playwright.config.ts
           pnpm --dir tools/production-browser --ignore-workspace test:service-periods
       - name: Preserve offers browser failure evidence
         if: failure()

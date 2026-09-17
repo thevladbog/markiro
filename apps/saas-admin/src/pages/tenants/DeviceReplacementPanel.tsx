@@ -1,3 +1,4 @@
+import { DeviceReplacementWorkflow } from "./DeviceReplacementWorkflow.js";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -22,6 +23,7 @@ import {
   useReplacementPending,
   type PrepareAttempt,
   type CancelAttempt,
+  type WorkflowAttempt,
 } from "./replacement-state.js";
 
 export function DeviceReplacementPanel({
@@ -39,7 +41,7 @@ export function DeviceReplacementPanel({
   });
   const [sourceId, setSourceId] = useReplacementCache(replacementKeys.selection(pool.tenantId), "");
   const pending = useReplacementPending(pool.tenantId);
-  const writable = canWrite && list.data?.canPrepare === true;
+  const writable = canWrite && !list.isError && list.data?.canPrepare === true;
   const changeSource = (nextSourceId: string) => {
     const key = replacementKeys.prepare(pool.tenantId, sourceId);
     const previous = qc.getQueryData<PrepareAttempt>(key);
@@ -58,13 +60,24 @@ export function DeviceReplacementPanel({
   );
   return (
     <Card title={t("deviceReplacement.title")} titleAs="h2">
-      <p>{t("deviceReplacement.intro")}</p>
+      <p style={{ margin: 0 }}>{t("deviceReplacement.intro")}</p>
       {list.isPending ? (
         <p role="status">{t("deviceReplacement.loading")}</p>
       ) : list.isError ? (
-        <Alert tone="error">{t("deviceReplacement.loadError")}</Alert>
+        <Alert tone="error">
+          {t("deviceReplacement.loadError")}{" "}
+          <Button
+            variant="secondary"
+            disabled={list.isFetching}
+            onClick={() => void list.refetch()}
+          >
+            {t("deviceReplacement.workflow.refresh")}
+          </Button>
+        </Alert>
       ) : null}
-      {list.data && !writable ? <p>{t("deviceReplacement.readonly")}</p> : null}
+      {list.data && !writable ? (
+        <p style={{ margin: 0 }}>{t("deviceReplacement.readonly")}</p>
+      ) : null}
       {writable ? (
         <>
           <fieldset disabled={pending} style={{ border: 0, padding: 0, margin: 0 }}>
@@ -214,7 +227,7 @@ function PreparationEditor({
       {attempt.preview ? (
         <>
           <Observation observation={attempt.preview.observation} />
-          <p>
+          <p style={{ margin: 0 }}>
             {t("deviceReplacement.expires", {
               at: new Date(attempt.preview.expiresAt).toLocaleString(
                 i18n.resolvedLanguage ?? i18n.language,
@@ -254,12 +267,16 @@ function SavedPreparation({
   const qc = useQueryClient();
   const key = replacementKeys.cancel(tenantId, preparation.sourceDeviceId, preparation.id);
   const [attempt, setAttempt] = useReplacementCache<CancelAttempt | null>(key, null);
+  const [workflowAttempt] = useReplacementCache<WorkflowAttempt | null>(
+    replacementKeys.workflow(tenantId, preparation.id),
+    null,
+  );
   const [open, setOpen] = useState(false);
   const busy = useReplacementPending(tenantId);
   const refresh = useRefresh(tenantId);
   const cancel = async () => {
     const current = qc.getQueryData<CancelAttempt>(key);
-    if (!canWrite || busy || current?.pending) return;
+    if (!canWrite || busy || current?.pending || workflowAttempt) return;
     const next: CancelAttempt = {
       request: current?.request ?? {
         requestId: crypto.randomUUID(),
@@ -291,31 +308,53 @@ function SavedPreparation({
       aria-label={t("deviceReplacement.project")}
       style={{ display: "grid", gap: "var(--sp-3)", marginBlock: "var(--sp-4)" }}
     >
-      <StatusChip status="neutral" label={t(`deviceReplacement.state.${preparation.state}`)} />
+      <StatusChip
+        status="neutral"
+        style={{ justifySelf: "start" }}
+        label={t(`deviceReplacement.state.${preparation.state}`)}
+      />
       {needsReview && preparation.state === "prepared" ? (
         <Alert tone="warn">{t("deviceReplacement.needsReview")}</Alert>
       ) : null}
-      <p>
+      <p style={{ margin: 0 }}>
         {t("deviceReplacement.observed", {
           at: new Date(preparation.preparedAt).toLocaleString(
             i18n.resolvedLanguage ?? i18n.language,
           ),
         })}
       </p>
-      <Observation observation={preparation.observation} historical />
+      <Observation
+        observation={preparation.observation}
+        historical
+        showLocalUnknown={!preparation.readiness}
+      />
+      <DeviceReplacementWorkflow
+        tenantId={tenantId}
+        preparation={preparation}
+        canWrite={canWrite && !attempt}
+        refresh={refresh}
+      />
       {notice ? <Alert tone="error">{t(`deviceReplacement.${notice}`)}</Alert> : null}
       {attempt?.notice && !(open && canWrite) ? (
         <Alert tone="error">{t(`deviceReplacement.${attempt.notice}`)}</Alert>
       ) : null}
-      {canWrite && (preparation.state === "prepared" || attempt) ? (
-        <Button variant="secondary" disabled={busy} onClick={() => setOpen(true)}>
+      {canWrite && (["prepared", "draining", "ready"].includes(preparation.state) || attempt) ? (
+        <Button
+          variant="secondary"
+          disabled={busy || Boolean(workflowAttempt)}
+          onClick={() => setOpen(true)}
+        >
           {t("deviceReplacement.cancel")}
         </Button>
       ) : null}
       <ConfirmDialog
         open={open && canWrite}
         title={t("deviceReplacement.cancel")}
-        description={t("deviceReplacement.cancelBody")}
+        description={t(
+          preparation.state === "prepared"
+            ? "deviceReplacement.cancelBody"
+            : "deviceReplacement.cancelDrainBody",
+        )}
         error={attempt?.notice ? t(`deviceReplacement.${attempt.notice}`) : undefined}
         confirmLabel={t("deviceReplacement.cancelConfirm")}
         cancelLabel={t("deviceReplacement.back")}
@@ -331,14 +370,16 @@ function SavedPreparation({
 function Observation({
   observation: o,
   historical = false,
+  showLocalUnknown = true,
 }: {
   observation: DeviceReplacementObservation;
   historical?: boolean;
+  showLocalUnknown?: boolean;
 }) {
   const { t } = useTranslation();
   return (
     <div style={{ display: "grid", gap: "var(--sp-2)" }}>
-      <p>
+      <p style={{ margin: 0 }}>
         {t("deviceReplacement.transition", {
           oldName: o.source.name,
           oldKind: t(`deviceReplacement.kind.${o.source.kind}`),
@@ -346,7 +387,7 @@ function Observation({
           newKind: t(`deviceReplacement.kind.${o.target.kind}`),
         })}
       </p>
-      <p>
+      <p style={{ margin: 0 }}>
         {t(
           historical
             ? o.limit === null
@@ -361,14 +402,11 @@ function Observation({
           },
         )}
       </p>
-      <p>{t("deviceReplacement.delta", { delta: o.expectedTransferSlotDelta })}</p>
-      <p>{t("deviceReplacement.serverWork", o.knownServerWork)}</p>
-      <Alert tone="warn">{t("deviceReplacement.localUnknown")}</Alert>
-      <ul>
-        {o.execution.reasons.map((reason) => (
-          <li key={reason}>{t(`deviceReplacement.unavailable.${reason}`)}</li>
-        ))}
-      </ul>
+      <p style={{ margin: 0 }}>
+        {t("deviceReplacement.delta", { delta: o.expectedTransferSlotDelta })}
+      </p>
+      <p style={{ margin: 0 }}>{t("deviceReplacement.serverWork", o.knownServerWork)}</p>
+      {showLocalUnknown ? <Alert tone="warn">{t("deviceReplacement.localUnknown")}</Alert> : null}
     </div>
   );
 }

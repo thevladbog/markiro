@@ -1,3 +1,4 @@
+import { DeviceReplacementTargetPairingService } from "./device-replacement-target-pairing.service";
 import { DeviceReplacementRecoveryService } from "./device-replacement-recovery.service";
 import { DeviceReplacementExecutionService } from "./device-replacement-execution.service";
 import { DeviceReplacementReadinessService } from "./device-replacement-readiness.service";
@@ -44,7 +45,27 @@ export class PlatformDeviceReplacementController {
     private readonly readiness: DeviceReplacementReadinessService,
     private readonly execution: DeviceReplacementExecutionService,
     private readonly recovery: DeviceReplacementRecoveryService,
+    private readonly targetPairing: DeviceReplacementTargetPairingService,
   ) {}
+  @Post("replacements/:preparationId/target/code")
+  @Header("Cache-Control", "no-store")
+  @HttpCode(200)
+  @ApiOperation({ summary: "issueReplacementTargetCode" })
+  @ApiParam({ name: "preparationId", format: "uuid" })
+  @RequirePlatformCapabilities("tenants.write", "billing.write")
+  @PlatformApiProtectedOk({
+    response: platformDeviceReplacementContracts.targetCode.response,
+    body: platformDeviceReplacementContracts.targetCode.body,
+  })
+  targetCode(
+    @Req() request: RequestWithPlatformPrincipal,
+    @Param("tenantId", new ZodValidationPipe(platformTenantIdSchema)) tenantId: string,
+    @Param("preparationId", new ZodValidationPipe(platformUuidSchema)) preparationId: string,
+    @Body(new ZodValidationPipe(platformDeviceReplacementContracts.targetCode.body))
+    body: DeviceReplacementRecoveryCodeRequest,
+  ) {
+    return this.targetPairing.issueCode(tenantId, preparationId, body, actor(request));
+  }
   @Post("replacements/:preparationId/recovery/code")
   @Header("Cache-Control", "no-store")
   @HttpCode(200)

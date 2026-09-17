@@ -4,6 +4,7 @@ import { and, desc, eq, max } from "drizzle-orm";
 import {
   deviceReplacementPreparationSchema,
   deviceReplacementReceiptSchema,
+  deviceReplacementReadinessRequestSchema,
 } from "@markiro/platform-contracts";
 import type { SubscriptionTransaction } from "../../subscriptions/entitlements.types";
 
@@ -46,21 +47,6 @@ export async function replacementPreparationProjection(
         eq(schema.workingDeviceReplacementExecutions.preparationId, row.id),
       ),
     );
-  if (row.state === "completed" && execution?.response) {
-    const saved = deviceReplacementReceiptSchema.parse(execution.response).preparation;
-    return deviceReplacementPreparationSchema.parse({
-      ...saved,
-      execution: {
-        ...saved.execution,
-        revision: execution.revision,
-        recoveryState: execution.recoveryState,
-      },
-      recovery: {
-        state: execution.recoveryState,
-        closedAt: execution.recoveryClosedAt?.toISOString() ?? null,
-      },
-    });
-  }
   const [intent] = await tx
     .select()
     .from(schema.workingDeviceReplacementReadinessIntents)
@@ -85,6 +71,44 @@ export async function replacementPreparationProjection(
         .orderBy(desc(schema.workingDeviceReplacementReadinessReports.reportSequence))
         .limit(1)
     : [];
+  const measured = report ? deviceReplacementReadinessRequestSchema.parse(report.payload) : null;
+  const readiness = intent
+    ? {
+        intentId: intent.id,
+        credentialEpoch: intent.credentialEpoch,
+        receivedAt: report?.receivedAt.toISOString() ?? null,
+        eligibility: report?.eligibility ?? { status: "blocked", reasons: ["report_stale"] },
+        report: measured
+          ? {
+              reportSequence: measured.reportSequence,
+              clientBuild: measured.clientBuild,
+              storageRevision: measured.storageRevision,
+              pending: measured.pending,
+              conflicts: measured.conflicts,
+              unknownPrints: measured.unknownPrints,
+              activeTasks: measured.activeTasks,
+              installedGrants: measured.installedGrants,
+              journal: measured.journal,
+            }
+          : null,
+      }
+    : null;
+  if (row.state === "completed" && execution?.response) {
+    const saved = deviceReplacementReceiptSchema.parse(execution.response).preparation;
+    return deviceReplacementPreparationSchema.parse({
+      ...saved,
+      ...(readiness ? { readiness } : {}),
+      execution: {
+        ...saved.execution,
+        revision: execution.revision,
+        recoveryState: execution.recoveryState,
+      },
+      recovery: {
+        state: execution.recoveryState,
+        closedAt: execution.recoveryClosedAt?.toISOString() ?? null,
+      },
+    });
+  }
   const storageHighWater = intent ? await replacementStorageRevisionHighWater(tx, intent) : 0;
   const stale =
     !report ||
@@ -158,9 +182,7 @@ export async function replacementPreparationProjection(
     ...(intent
       ? {
           readiness: {
-            intentId: intent.id,
-            credentialEpoch: intent.credentialEpoch,
-            receivedAt: report?.receivedAt.toISOString() ?? null,
+            ...readiness,
             eligibility,
           },
         }

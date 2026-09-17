@@ -1,3 +1,4 @@
+import { DeviceReplacementTargetPairingService } from "./device-replacement-target-pairing.service";
 import { DeviceReplacementRecoveryService } from "./device-replacement-recovery.service";
 import { ReplacementRecoveryReadinessController } from "./replacement-recovery-readiness.controller";
 import { DeviceReplacementExecutionService } from "./device-replacement-execution.service";
@@ -30,6 +31,7 @@ import { PlatformDeviceLicensingController } from "./platform-device-licensing.c
     PlatformDeviceLicensingController,
   ],
   providers: [
+    DeviceReplacementTargetPairingService,
     DeviceReplacementRecoveryService,
     DeviceReplacementExecutionService,
     DeviceReplacementExecutionRepairService,

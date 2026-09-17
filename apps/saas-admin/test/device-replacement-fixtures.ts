@@ -85,3 +85,114 @@ export function response(body: unknown, status = 200) {
     headers: { "Content-Type": "application/json" },
   });
 }
+
+export const EXECUTION = "55555555-5555-4555-8555-555555555555";
+export const BOUNDARY = "2026-09-18T12:30:00.000Z";
+export const measuredReport = {
+  reportSequence: 7,
+  clientBuild: "station-2.1",
+  storageRevision: 19,
+  pending: {
+    scans: 3,
+    inventories: 2,
+    shiftClosures: 1,
+    productLabels: 4,
+    boxes: 5,
+    exceptions: "unsupported" as const,
+  },
+  conflicts: 6,
+  unknownPrints: 8,
+  activeTasks: [{ taskId: SOURCE, kind: "shift" as const }],
+  installedGrants: [{ grantId: SECOND }],
+  journal: { digest: "a".repeat(64), highestSequence: 23 },
+};
+export function workflowPreparation(
+  state: DeviceReplacementPreparation["state"] = "draining",
+  recoveryState: NonNullable<
+    DeviceReplacementPreparation["execution"]
+  >["recoveryState"] = "not_required",
+): DeviceReplacementPreparation {
+  return {
+    ...preparation,
+    state,
+    revision: 3,
+    ...(state !== "prepared" && state !== "cancelled"
+      ? {
+          readiness: {
+            intentId: PREVIEW,
+            credentialEpoch: 4,
+            receivedAt: "2026-09-17T12:00:00.000Z",
+            eligibility:
+              state === "ready"
+                ? { status: "eligible" as const, reasons: [] as [] }
+                : {
+                    status: "blocked" as const,
+                    reasons: [
+                      "pending_scans",
+                      "pending_inventories",
+                      "pending_shift_closures",
+                      "pending_product_labels",
+                      "pending_boxes",
+                      "client_upgrade_required",
+                      "conflicts",
+                      "unknown_prints",
+                      "active_tasks",
+                      "installed_grants",
+                    ],
+                  },
+            report:
+              state === "ready"
+                ? {
+                    ...measuredReport,
+                    pending: {
+                      scans: 0,
+                      inventories: 0,
+                      shiftClosures: 0,
+                      productLabels: 0,
+                      boxes: 0,
+                      exceptions: 0,
+                    },
+                    conflicts: 0,
+                    unknownPrints: 0,
+                    activeTasks: [],
+                    installedGrants: [],
+                  }
+                : measuredReport,
+          },
+        }
+      : {}),
+    ...(state === "executing" || state === "completed"
+      ? {
+          execution: {
+            id: EXECUTION,
+            revision: 9,
+            step: state === "completed" ? ("transferred" as const) : ("revoke_pending" as const),
+            mode: recoveryState === "not_required" ? ("normal" as const) : ("emergency" as const),
+            targetDeviceId: state === "completed" ? SECOND : null,
+            executedAt: state === "completed" ? "2026-09-17T12:15:00.000Z" : null,
+            newWorkAllowedAt: BOUNDARY,
+            recoveryState,
+          },
+          recovery: {
+            state: recoveryState,
+            closedAt: ["completed", "evidence_unavailable"].includes(recoveryState)
+              ? "2026-09-17T13:00:00.000Z"
+              : null,
+          },
+        }
+      : {}),
+  };
+}
+export function executionPreview(requestId: string, mode: "normal" | "emergency" = "normal") {
+  return {
+    id: PREVIEW,
+    requestId,
+    preparationId: PROJECT,
+    expectedRevision: 3,
+    mode,
+    asOf: "2026-09-17T12:00:00.000Z",
+    expiresAt: "2026-09-17T12:05:00.000Z",
+    digest: "b".repeat(64),
+    newWorkAllowedAt: BOUNDARY,
+  };
+}

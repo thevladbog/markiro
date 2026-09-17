@@ -119,6 +119,30 @@ describe.skipIf(!process.env.DATABASE_URL)("replacement drain readiness", () => 
     };
     return { request, receipt, intent, body };
   }
+  it("projects exact stored channel measurements for cabinet and platform list consumers", async () => {
+    const f = await fixture();
+    const d = await drain(f);
+    const body = {
+      ...d.body,
+      pending: { ...d.body.pending, scans: 7, exceptions: "unsupported" as const },
+      storageRevision: 19,
+      journal: { ...d.body.journal, highestSequence: 23 },
+    };
+    await readiness.report(f.identity, body);
+    const list = await service.list(f.tenantId, f.actor);
+    expect(list.items[0]?.preparation.readiness).toMatchObject({
+      report: {
+        pending: body.pending,
+        conflicts: 0,
+        unknownPrints: 0,
+        activeTasks: [],
+        installedGrants: [],
+        storageRevision: 19,
+        journal: body.journal,
+      },
+    });
+    expect(JSON.stringify(list)).not.toContain('"requestId"');
+  });
   it("creates one durable drain receipt with exact actor audit and preserves prepared admission", async () => {
     const f = await fixture();
     expect(await readiness.currentIntent(f.identity)).toBeNull();

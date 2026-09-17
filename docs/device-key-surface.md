@@ -252,6 +252,31 @@ Public inventory preparation calls the existing create/import/snapshot/start own
 
 See [Public API operations](operations/public-api.md) for scopes, retries, projection and deployment rules. All new cabinet/CHZ/public imports use attempt-owned storage keys. Before exposing public routes, drain old cabinet/CHZ cleanup writers that still share historical content-addressed keys; new readers retain exact historical cabinet-path compatibility. This work does not activate strict offline grant enforcement.
 
+## Platform replacement target pairing
+
+The platform can issue a normal target code through
+`POST /platform/tenants/:tenantId/device-licensing/replacements/:preparationId/target/code`.
+It reloads `tenants.write` and `billing.write`, requires a completed execution and
+its current revision, and locks the reserved target. Cabinet uses the existing
+`POST /station-devices/:id/pairing-code` route.
+
+Issuance uses the existing normal-code hash, expiry and one-time claim policy.
+An immutable working-device observation binds its code ID to the tenant,
+preparation, execution, target kind and credential epoch. Only that platform
+binding enables transactional normal-key provisioning without a cabinet member.
+The code claim, hashed key insertion, target publication and assignment transition
+commit together; a failed publication leaves no orphan key or consumed code.
+Ordinary cabinet pairing retains its existing provisioning path.
+
+The target remains subject to the execution's server boundary. A waiting target
+requires `replacement-boundary-v1`; pairing itself does not permit early work.
+A lost code response requires a fresh issuance with the latest execution revision;
+the prior live code is retired. No plaintext code is stored in a receipt or audit.
+
+Replacement list responses expose the latest stored readiness measurements,
+including `unsupported`, report receipt time and storage/journal revisions.
+These observations do not override server eligibility or execution/recovery state.
+
 ## Emergency replacement evidence credentials
 
 `POST /device-licensing/replacements/:preparationId/recovery/code` (and the platform
