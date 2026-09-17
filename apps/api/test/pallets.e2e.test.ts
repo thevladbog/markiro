@@ -2,10 +2,13 @@ import { randomUUID } from "node:crypto";
 import express from "express";
 import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
+import { eq } from "drizzle-orm";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { schema } from "@markiro/db";
 import { buildSscc, canonicalizeKm, kmHash } from "@markiro/domain";
 import { AppModule } from "../src/app.module";
+import { DB } from "../src/auth/auth.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import type { ScanItemDto } from "../src/modules/station-scans/dto";
@@ -41,6 +44,7 @@ describe.skipIf(!ready)("pallets e2e", () => {
   let stationKey: string;
   let stationDeviceId: string;
   let shiftId: string;
+  let tenantId: string;
   let operatorId: string;
   let palletSscc: string;
   /** A second serial from the SAME allocated block, for the clock-skew pallet. */
@@ -108,7 +112,7 @@ describe.skipIf(!ready)("pallets e2e", () => {
     await listenOnLoopback(app);
 
     agent = request.agent(app!.getHttpServer());
-    const tenantId = await signUpAndActivate(agent);
+    tenantId = await signUpAndActivate(agent);
     const station = await createTestStationDevice(app!, agent, "Pallet line");
     stationKey = station.apiKey;
     stationDeviceId = station.deviceId;
@@ -523,5 +527,30 @@ describe.skipIf(!ready)("pallets e2e", () => {
   it("returns an empty list for a kind this tenant has none of", async () => {
     const res = await agent.get("/pallets").query({ kind: "warehouse" }).expect(200);
     expect(res.body.items).toEqual([]);
+  });
+
+  /**
+   * Review finding: the admin client (`apps/admin/src/pages/shifts/pallets-api.ts`)
+   * reads only `items` and ignores `nextCursor` -- a shift-scoped request
+   * that silently defaulted `limit` to 100 would drop rows past that page
+   * with no signal. `shiftId` + no `limit` must therefore return the WHOLE
+   * shift, unpaged.
+   */
+  it("returns the whole shift unpaged when shiftId is given and limit is omitted", async () => {
+    const db = app!.get(DB);
+    const rows = await db
+      .select({ id: schema.pallets.id })
+      .from(schema.pallets)
+      .where(eq(schema.pallets.shiftId, shiftId));
+
+    const res = await agent.get(`/pallets?shiftId=${shiftId}`).expect(200);
+    expect(res.body.nextCursor).toBeUndefined();
+    expect(res.body.items).toHaveLength(rows.length);
+  });
+
+  it("still pages a shift-scoped request when limit is given explicitly", async () => {
+    const res = await agent.get("/pallets").query({ shiftId, limit: 1 }).expect(200);
+    expect(res.body.items).toHaveLength(1);
+    expect(res.body.nextCursor).toBeDefined();
   });
 });

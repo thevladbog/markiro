@@ -40,8 +40,18 @@ export class PalletsService {
    * org-wide (a warehouse pallet has no shift at all and would otherwise be
    * unreachable), so a caller that names no shift gets every pallet of its
    * own tenant rather than a 400.
+   *
+   * `limit` defaults to 100 for the org-wide list. With `shiftId` given and
+   * `limit` omitted, the whole shift is returned unpaged (no `LIMIT`, no
+   * `nextCursor`) -- the cabinet's shift-scoped consumer
+   * (`apps/admin/src/pages/shifts/pallets-api.ts`) reads only `items` and
+   * predates `nextCursor`, so defaulting `limit` there would silently drop
+   * rows past the default page. An explicit `cursor` is still honoured in
+   * that case.
    */
   async listPallets(tenantId: string, query: ListPalletsQueryDto): Promise<ListPalletsResponseDto> {
+    const limit = query.limit ?? (query.shiftId === undefined ? 100 : undefined);
+
     if (query.shiftId !== undefined) {
       const [shift] = await this.db
         .select({ id: schema.shifts.id })
@@ -158,7 +168,7 @@ export class PalletsService {
      * Ordered by `closed_at DESC NULLS FIRST`, matching BoxesService: a
      * still-open pallet sorts to the top.
      */
-    const rows: PalletRow[] = await this.db
+    const orderedQuery = this.db
       .select({
         id: schema.pallets.id,
         sscc: schema.pallets.sscc,
@@ -239,13 +249,16 @@ export class PalletsService {
         schema.stationDevices.id,
         schema.lines.id,
       )
-      .orderBy(sql`${schema.pallets.closedAt} desc nulls first`, schema.pallets.id)
-      // One row beyond the page, so "is there a next page" is answered without
-      // a second count query -- and never advertises an empty next page.
-      .limit(query.limit + 1);
+      .orderBy(sql`${schema.pallets.closedAt} desc nulls first`, schema.pallets.id);
 
-    const page = rows.slice(0, query.limit);
-    const last = rows.length > query.limit ? page[page.length - 1] : undefined;
+    // One row beyond the page, so "is there a next page" is answered without
+    // a second count query -- and never advertises an empty next page. When
+    // `limit` is undefined (shift-scoped, no limit given), the whole shift
+    // is fetched unpaged and there is no next page to detect.
+    const rows: PalletRow[] = limit === undefined ? await orderedQuery : await orderedQuery.limit(limit + 1);
+
+    const page = limit === undefined ? rows : rows.slice(0, limit);
+    const last = limit !== undefined && rows.length > limit ? page[page.length - 1] : undefined;
     const items = page.map((row) => this.toDto(row));
     return last === undefined
       ? { items }

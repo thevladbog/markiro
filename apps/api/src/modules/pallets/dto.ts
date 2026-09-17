@@ -16,6 +16,14 @@ import type { SchemaObject } from "@nestjs/swagger";
  * `closed_at DESC NULLS FIRST, id ASC` order: an org-wide list spans every
  * shift of a tenant's whole history, which OFFSET paging walks from the top
  * on every page.
+ *
+ * `limit` defaults to 100 for the org-wide list (no `shiftId`). With
+ * `shiftId` given and `limit` omitted, the list is the WHOLE shift -- no
+ * `LIMIT`, no `nextCursor` -- because the cabinet's shift-scoped consumer
+ * (`apps/admin/src/pages/shifts/pallets-api.ts`) reads only `items` and
+ * predates `nextCursor`; defaulting `limit` there would silently drop rows
+ * past the default page. `cursor` is still honoured when the caller passes
+ * one alongside `shiftId` with no `limit`.
  */
 export const listPalletsQuerySchema = z
   .object({
@@ -25,7 +33,15 @@ export const listPalletsQuerySchema = z
     deviceId: z.string().uuid().optional(),
     closedFrom: z.string().datetime().optional(),
     closedTo: z.string().datetime().optional(),
-    limit: z.coerce.number().int().min(1).max(500).default(100),
+    limit: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(500)
+      .optional()
+      .describe(
+        "Defaults to 100 for the org-wide list; omitted together with shiftId returns the whole shift.",
+      ),
     cursor: z.string().min(1).max(256).optional(),
   })
   .strict();
