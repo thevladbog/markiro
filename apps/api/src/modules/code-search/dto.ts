@@ -775,6 +775,7 @@ export const palletCardOpenApiSchema: SchemaObject = {
               "not_found",
               "not_closed",
               "disassembled",
+              "pallet_closed",
               "product_mismatch",
             ],
           },
