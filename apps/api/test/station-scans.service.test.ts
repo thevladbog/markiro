@@ -43,6 +43,16 @@ const entitlementsServiceStub = {
   resolveRecovery: async () => ({ access: "managed" }),
 } as unknown as EntitlementsService;
 
+// These fixtures are ordinary devices, with no incoming replacement fence.
+function noReplacementSelect() {
+  return {
+    from: (table: unknown) => {
+      expect(table).toBe(schema.workingDeviceReplacementExecutions);
+      return { where: () => Promise.resolve([]) };
+    },
+  };
+}
+
 describe("StationScansService box registry versioning", () => {
   it("advances a closed box with the monotonic registry cursor expression in the batch transaction", async () => {
     const boxUpdates: Array<Record<string, unknown>> = [];
@@ -51,6 +61,7 @@ describe("StationScansService box registry versioning", () => {
     const shiftId = "11111111-1111-1111-1111-111111111111";
     const terminalId = "22222222-2222-2222-2222-222222222222";
     const dbStub = {
+      select: noReplacementSelect,
       transaction: async (run: (tx: unknown) => Promise<unknown>) => {
         const tx = {
           insert: (table: unknown) => {
@@ -235,6 +246,7 @@ describe("StationScansService box registry versioning", () => {
       }),
     };
     const dbStub = {
+      select: noReplacementSelect,
       transaction: (run: (writer: typeof tx) => Promise<unknown>) => run(tx),
     } as unknown as Db;
     const ssccService = {
@@ -344,8 +356,13 @@ describe("StationScansService.applyBatch month cap (Finding 2)", () => {
       // The shift-ownership guard (Finding 2) now runs before the month cap
       // -- answer it as "owned" so this test isolates the cap itself.
       select: () => ({
-        from: () => ({
-          where: () => Promise.resolve([{ id: "11111111-1111-1111-1111-111111111111" }]),
+        from: (table: unknown) => ({
+          where: () =>
+            Promise.resolve(
+              table === schema.workingDeviceReplacementExecutions
+                ? []
+                : [{ id: "11111111-1111-1111-1111-111111111111" }],
+            ),
         }),
       }),
       transaction: () => {
@@ -388,8 +405,13 @@ describe("StationScansService.applyBatch month cap (Finding 2)", () => {
       // (all these items share `item()`'s fixed shiftId) so this test still
       // isolates what it actually cares about: the month cap itself.
       select: () => ({
-        from: () => ({
-          where: () => Promise.resolve([{ id: "11111111-1111-1111-1111-111111111111" }]),
+        from: (table: unknown) => ({
+          where: () =>
+            Promise.resolve(
+              table === schema.workingDeviceReplacementExecutions
+                ? []
+                : [{ id: "11111111-1111-1111-1111-111111111111" }],
+            ),
         }),
       }),
       transaction: async () => {
@@ -423,7 +445,7 @@ describe("StationScansService.applyBatch month cap (Finding 2)", () => {
 
 /**
  * Unit-level coverage for the rest of Finding 2. The pure timestamp window is
- * rejected before database work; unknown shifts are filtered out of the
+ * rejected before business database work (after the replacement-fence lookup); unknown shifts are filtered out of the
  * partition preflight and then rejected only after the authoritative
  * tenant-scoped shift load is locked inside the write transaction.
  */
@@ -431,9 +453,7 @@ describe("StationScansService.applyBatch shift-ownership guard ordering (Finding
   it("rejects a batch with a scannedAt outside the acceptable window before ever querying shifts, calling ensurePartitions, or opening a transaction", async () => {
     ensurePartitionsMock.mockClear();
     const dbStub = {
-      select: () => {
-        throw new Error("must not query shifts for a batch outside the timestamp window");
-      },
+      select: noReplacementSelect,
       transaction: () => {
         throw new Error("must not open a transaction for a batch outside the timestamp window");
       },

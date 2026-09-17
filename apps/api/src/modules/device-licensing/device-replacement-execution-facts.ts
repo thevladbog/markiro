@@ -1,6 +1,6 @@
 import { ConflictException } from "@nestjs/common";
 import { schema } from "@markiro/db";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, gt, or } from "drizzle-orm";
 import {
   deviceReplacementObservationSchema,
   deviceReplacementReadinessRequestSchema,
@@ -110,6 +110,7 @@ export async function readReplacementExecutionFacts(
   const grants = await tx
     .select({
       grantId: schema.deviceGrantIssuances.grantId,
+      credentialEpoch: schema.deviceGrantIssuances.credentialEpoch,
       policyRevision: schema.deviceGrantIssuances.policyRevision,
       kind: schema.deviceGrantIssuances.kindOfGrant,
       issuedAt: schema.deviceGrantIssuances.issuedAt,
@@ -122,10 +123,36 @@ export async function readReplacementExecutionFacts(
         eq(schema.deviceGrantIssuances.tenantId, tenantId),
         eq(schema.deviceGrantIssuances.stationDeviceId, deviceId),
         eq(schema.deviceGrantIssuances.ownerKind, device.kind),
-        eq(schema.deviceGrantIssuances.credentialEpoch, device.credentialEpoch),
+        // Rotating/revoking a cloud key does not retire signed authority on a
+        // disconnected device. Keep every live horizon of the durable source.
+        or(
+          eq(schema.deviceGrantIssuances.credentialEpoch, device.credentialEpoch),
+          gt(schema.deviceGrantIssuances.startNotAfter, now),
+          gt(schema.deviceGrantIssuances.completeNotAfter, now),
+        ),
       ),
     )
     .orderBy(asc(schema.deviceGrantIssuances.grantId));
+  const currentGrants = grants.filter((g) => g.credentialEpoch === device.credentialEpoch);
+  const [inheritedExecution] = await tx
+    .select({
+      id: schema.workingDeviceReplacementExecutions.id,
+      state: schema.workingDeviceReplacementExecutions.state,
+      credentialRevokedAt: schema.workingDeviceReplacementExecutions.credentialRevokedAt,
+      newWorkAllowedAt: schema.workingDeviceReplacementExecutions.newWorkAllowedAt,
+    })
+    .from(schema.workingDeviceReplacementExecutions)
+    .where(
+      and(
+        eq(schema.workingDeviceReplacementExecutions.tenantId, tenantId),
+        eq(schema.workingDeviceReplacementExecutions.targetDeviceId, deviceId),
+      ),
+    );
+  if (
+    inheritedExecution &&
+    (inheritedExecution.state !== "completed" || !inheritedExecution.credentialRevokedAt)
+  )
+    executionConflict("offline_boundary_unknown");
   const payload = report ? deviceReplacementReadinessRequestSchema.parse(report.payload) : null;
   const storageHighWater = intent ? await replacementStorageRevisionHighWater(tx, intent) : 0;
   const blockers = deviceReplacementServerWorkBlockers(facts.work, deviceId);
@@ -162,7 +189,7 @@ export async function readReplacementExecutionFacts(
       }).some((v) => v !== 0) ||
       payload.activeTasks.length ||
       payload.installedGrants.some(({ grantId }) => {
-        const grant = grants.find((g) => g.grantId === grantId);
+        const grant = currentGrants.find((g) => g.grantId === grantId);
         return (
           !grant || (grant.kind === "device" && (!grant.startNotAfter || grant.startNotAfter > now))
         );
@@ -170,23 +197,25 @@ export async function readReplacementExecutionFacts(
     )
       executionConflict("not_ready");
   }
-  let boundary = now.getTime();
+  // Readiness proves the current installation is drained, not that previous
+  // credentials or a predecessor's offline authority have ceased to exist.
+  let boundary = Math.max(
+    now.getTime(),
+    inheritedExecution?.newWorkAllowedAt.getTime() ?? 0,
+    ...grants.map(
+      (g) => (g.kind === "device" ? g.startNotAfter : g.completeNotAfter)?.getTime() ?? 0,
+    ),
+  );
   let policyRevision: string | null = null;
   let fallback = false;
   if (mode === "emergency") {
     policyRevision = grants[0]?.policyRevision ?? null;
     const unknownIssuance =
-      grants.length === 0 ||
+      currentGrants.length === 0 ||
       payload?.installedGrants.some(
-        (g) => !grants.some((issued) => issued.grantId === g.grantId),
+        (g) => !currentGrants.some((issued) => issued.grantId === g.grantId),
       ) ||
       grants.some((g) => !(g.kind === "device" ? g.startNotAfter : g.completeNotAfter));
-    boundary = Math.max(
-      0,
-      ...grants.map(
-        (g) => (g.kind === "device" ? g.startNotAfter : g.completeNotAfter)?.getTime() ?? 0,
-      ),
-    );
     if (unknownIssuance) {
       const current = await entitlements.resolveSnapshotInTransaction(tenantId, tx, now);
       const subscription = current.snapshot.current.subscription;
@@ -219,6 +248,7 @@ export async function readReplacementExecutionFacts(
   const serverFacts = {
     sourceAssignment: { id: assignment.id, revision: assignment.revision, state: assignment.state },
     sourceWork,
+    inheritedExecution: inheritedExecution ?? null,
     grants,
     reportId: report?.id ?? null,
     storageHighWater,

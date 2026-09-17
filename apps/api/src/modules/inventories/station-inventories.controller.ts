@@ -147,11 +147,15 @@ export class StationInventoriesController {
   }
 
   @Get("inventories/:id/bundle/manifest")
-  @ApiOperation({ summary: "Get the inventory bundle manifest" })
+  @ApiOperation({
+    summary: "Get the inventory bundle manifest",
+    description:
+      "A repack manifest can allocate serial ranges and is denied with device_replacement_waiting before the target's newWorkAllowedAt. Check manifests remain reference-only.",
+  })
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
   @ApiOkResponse({ schema: stationInventoryBundleManifestOpenApiSchema })
   @ApiZodValidationError()
-  @ApiHttpErrors(401, 403)
+  @ApiHttpErrors(401, 403, 409)
   manifest(
     @Req() req: RequestWithTenant,
     @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
@@ -193,12 +197,16 @@ export class StationInventoriesController {
   @Post("inventories/:id/event-batches")
   @HttpCode(200)
   @AllowSubscriptionRecovery("station")
-  @ApiOperation({ summary: "Submit an inventory scan event batch" })
+  @ApiOperation({
+    summary: "Submit an inventory scan event batch",
+    description:
+      "Waiting replacement targets retain bounded batches without business effects and return 409 with code device_replacement_waiting, outcome quarantined, receiptId and newWorkAllowedAt. Exact retries replay the receipt. Old draining-source sync remains available.",
+  })
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
   @ApiBody({ schema: stationInventoryEventBatchOpenApiSchema })
   @ApiOkResponse({ schema: stationInventoryEventBatchResponseOpenApiSchema })
   @ApiZodValidationError()
-  @ApiHttpErrors(401, 403)
+  @ApiHttpErrors(401, 403, 409, 413)
   eventBatch(
     @Req() req: RequestWithTenant,
     @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,

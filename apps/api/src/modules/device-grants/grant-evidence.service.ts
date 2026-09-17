@@ -1,3 +1,4 @@
+import { replacementTargetWaiting } from "../device-licensing/device-replacement-admission";
 import { createHash } from "node:crypto";
 import {
   BadRequestException,
@@ -87,6 +88,7 @@ export class GrantEvidenceService {
       throw new BadRequestException({ code: "EVIDENCE_PAYLOAD_DIGEST_MISMATCH" });
     const requestIdentity = evidenceIdentity(identity, operation, envelope.batchId);
     const envelopeDigest = productLabelValueDigest(envelope);
+    let initialQuarantine: GrantEvidenceReceipt | undefined;
     const receipt = await this.db.transaction(async (tx) => {
       const owner = await lockCurrentGrantOwner(tx, identity, this.now());
       if (!owner) throw new UnauthorizedException();
@@ -141,13 +143,38 @@ export class GrantEvidenceService {
         })
         .returning();
       if (!created) throw new Error("Evidence receipt insert returned no row");
+      if (
+        owner.kind !== "kiosk" &&
+        (await replacementTargetWaiting(tx, owner.tenantId, owner.deviceId, new Date(this.now())))
+      ) {
+        // Pin the boundary classification in the retention commit itself.
+        // A process lost here must not resume these records as production once
+        // the deadline passes, even when no native transaction ever started.
+        initialQuarantine = this.response(
+          created,
+          "quarantined",
+          "device_replacement_waiting",
+          "not_applied",
+          null,
+          null,
+        );
+        await this.finalize(tx, owner, created, initialQuarantine, 0, envelope);
+      }
       return created;
     });
+    if (initialQuarantine) return initialQuarantine;
     if (receipt.finalResponse) return this.duplicate(receipt.finalResponse);
     let final: GrantEvidenceReceipt | undefined;
     const hook: EvidenceTransactionHook<T> = {
       before: async (tx) => {
-        await this.lockReceipt(tx, identity, receipt.id);
+        const owner = await this.lockReceipt(tx, identity, receipt.id);
+        // Waiting is an operational fence even when rollout is still observe.
+        // The native transaction rolls back; catch below finalizes retained evidence.
+        if (
+          owner.kind !== "kiosk" &&
+          (await replacementTargetWaiting(tx, owner.tenantId, owner.deviceId, new Date(this.now())))
+        )
+          throw new Quarantine("device_replacement_waiting");
       },
       after: async (tx, result) => {
         const owner = await lockCurrentGrantOwner(tx, identity, this.now());

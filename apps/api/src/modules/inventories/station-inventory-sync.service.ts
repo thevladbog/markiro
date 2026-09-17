@@ -1,3 +1,4 @@
+import { quarantineReplacementSubmission } from "../device-licensing/device-replacement-evidence";
 import {
   withEvidenceTransaction,
   type EvidenceTransactionHook,
@@ -213,7 +214,7 @@ export class StationInventorySyncService {
     });
   }
 
-  private ingestBatch(
+  private async ingestBatch(
     tenantId: string,
     deviceId: string,
     inventoryId: string,
@@ -221,6 +222,29 @@ export class StationInventorySyncService {
     replayRequest: { lateEventId: string; actorUserId: string } | null,
     evidence?: EvidenceTransactionHook<StationInventoryEventBatchResponseDto>,
   ): Promise<StationInventoryEventBatchResponseDto> {
+    if (!evidence)
+      await quarantineReplacementSubmission(
+        this.db,
+        tenantId,
+        deviceId,
+        `inventories/${inventoryId}/event-batches`,
+        input.batchId,
+        input,
+        async (tx) => {
+          const [existing] = await tx
+            .select({ payloadDigest: schema.inventoryScanBatches.payloadDigest })
+            .from(schema.inventoryScanBatches)
+            .where(
+              and(
+                eq(schema.inventoryScanBatches.tenantId, tenantId),
+                eq(schema.inventoryScanBatches.inventoryId, inventoryId),
+                eq(schema.inventoryScanBatches.deviceId, deviceId),
+                eq(schema.inventoryScanBatches.batchId, input.batchId),
+              ),
+            );
+          return existing?.payloadDigest === input.payloadDigest;
+        },
+      );
     return this.db.transaction(async (tx) =>
       withEvidenceTransaction(tx, evidence, async () => {
         let replayAuthorization: { lateEventId: string; actorUserId: string } | null = null;

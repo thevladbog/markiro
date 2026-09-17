@@ -1,7 +1,9 @@
+import { quarantineReplacementSubmission } from "../device-licensing/device-replacement-evidence";
 import {
   withEvidenceTransaction,
   type EvidenceTransactionHook,
 } from "../device-grants/evidence-transaction";
+import { assertDeviceReplacementNewWorkAllowed } from "../device-licensing/device-replacement-admission";
 import type { SubscriptionTransaction } from "../../subscriptions/entitlements.types";
 import {
   BadRequestException,
@@ -258,6 +260,19 @@ export class PickupOrdersService {
       await this.consumeKioskAdmission(this.db, tenantId, source, dto.deviceSeq);
       return { ...existing, status: "pending" };
     }
+    const quarantineReplacementEvidence = async () => {
+      if (source.kind !== "handheld" || evidence) return;
+      await quarantineReplacementSubmission(
+        this.db,
+        tenantId,
+        source.stationDeviceId,
+        "writeoffs",
+        String(dto.deviceSeq),
+        dto,
+        async (tx) => Boolean(await this.findOrderOutcome(tenantId, source, dto.deviceSeq, tx)),
+      );
+    };
+    await quarantineReplacementEvidence();
     if (processing.vNext) {
       const rejection = await this.findRejectionOutcome(tenantId, source, dto.deviceSeq);
       if (rejection) this.throwPersistedKioskRejection(rejection);
@@ -441,7 +456,20 @@ export class PickupOrdersService {
       processing.boxes,
       processing.vNext,
       evidence,
-    );
+    ).catch(async (error: unknown) => {
+      // Drain may have begun after the initial retention check. Admission's
+      // device lock wins that race; persist this request after its rollback.
+      const response = error instanceof ConflictException ? error.getResponse() : null;
+      if (
+        response &&
+        typeof response === "object" &&
+        "code" in response &&
+        (response.code === "device_replacement_draining" ||
+          response.code === "device_replacement_waiting")
+      )
+        await quarantineReplacementEvidence();
+      throw error;
+    });
 
     if (order.writeoffForbidden) {
       throw new UnprocessableEntityException({
@@ -2380,6 +2408,11 @@ export class PickupOrdersService {
               await this.consumeKioskAdmission(tx, tenantId, source, deviceSeq);
               return serializedWinner;
             }
+
+            // Historical delivery/replay stays recoverable. Only a fresh
+            // handheld document acquires new productive scope under this lock.
+            if (source.kind === "handheld")
+              await assertDeviceReplacementNewWorkAllowed(tx, tenantId, source.stationDeviceId);
 
             const policy = await this.resolveLivePickupPolicy(tx, tenantId, employeeId);
             if (reason === "writeoff" && !policy.canWriteoff) {

@@ -1,3 +1,4 @@
+import { quarantineReplacementSubmission } from "../device-licensing/device-replacement-evidence";
 import {
   withEvidenceTransaction,
   type EvidenceTransactionHook,
@@ -39,6 +40,30 @@ export class StationShiftCloseService {
       closedAt: input.closedAt.toISOString(),
     };
     const payloadDigest = createHash("sha256").update(JSON.stringify(normalized)).digest("hex");
+    if (!evidence)
+      await quarantineReplacementSubmission(
+        this.db,
+        tenantId,
+        deviceId,
+        "shift-closures",
+        input.eventId,
+        normalized,
+        async (tx) => {
+          const [existing] = await tx
+            .select({
+              digest: schema.stationShiftCloseEvents.payloadDigest,
+              deviceId: schema.stationShiftCloseEvents.deviceId,
+            })
+            .from(schema.stationShiftCloseEvents)
+            .where(
+              and(
+                eq(schema.stationShiftCloseEvents.tenantId, tenantId),
+                eq(schema.stationShiftCloseEvents.eventId, input.eventId),
+              ),
+            );
+          return existing?.deviceId === deviceId && existing.digest === payloadDigest;
+        },
+      );
 
     const result = await this.db.transaction(async (tx) =>
       withEvidenceTransaction(tx, evidence, async () => {

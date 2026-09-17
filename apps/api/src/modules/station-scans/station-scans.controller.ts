@@ -120,7 +120,7 @@ export class StationScansController {
   @ApiOperation({
     summary: "Record a station scan batch",
     description:
-      "Idempotent by `batchId`: a resend of an already-applied batch acknowledges without reapplying. Nonempty productLabelEvents receive an explicit productLabelReceipt with stable event IDs. `denied` is returned only when the x-station-capabilities header includes station-recovery-v1.",
+      "Before a replacement target’s newWorkAllowedAt, nonempty legacy batches are retained without business effects and return 409 with code device_replacement_waiting, outcome quarantined, receiptId and newWorkAllowedAt; exact retries replay that receipt. Old draining-source sync remains available. Idempotent by `batchId`: a resend of an already-applied batch acknowledges without reapplying. Nonempty productLabelEvents receive an explicit productLabelReceipt with stable event IDs. `denied` is returned only when the x-station-capabilities header includes station-recovery-v1.",
   })
   @ApiZodBody(syncBatchSchema)
   @ApiCreatedResponse({ schema: syncBatchResponseOpenApiSchema })

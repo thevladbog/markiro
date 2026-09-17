@@ -1,3 +1,4 @@
+import { quarantineReplacementSubmission } from "../device-licensing/device-replacement-evidence";
 import {
   withEvidenceTransaction,
   type EvidenceTransactionHook,
@@ -262,6 +263,44 @@ export class StationScansService {
       })),
     };
     const digest = payloadDigest(body);
+    if (
+      !evidence &&
+      [
+        body.items,
+        body.boxes,
+        body.exceptions,
+        body.productLabelEvents,
+        body.pallets,
+        body.palletExceptions,
+      ].some((records) => records.length > 0)
+    ) {
+      await quarantineReplacementSubmission(
+        this.db,
+        tenantId,
+        authenticatedTerminalId,
+        "scans",
+        body.batchId,
+        body,
+        async (tx) => {
+          const [existing] = await tx
+            .select({
+              terminalId: schema.syncBatches.terminalId,
+              payloadDigest: schema.syncBatches.payloadDigest,
+            })
+            .from(schema.syncBatches)
+            .where(
+              and(
+                eq(schema.syncBatches.tenantId, tenantId),
+                eq(schema.syncBatches.batchId, body.batchId),
+              ),
+            );
+          return (
+            existing?.terminalId === authenticatedTerminalId && existing.payloadDigest === digest
+          );
+        },
+      );
+    }
+
     // Ensure the months this batch actually needs have partitions BEFORE
     // opening the transaction below. Only the scheduled job (JobsModule)
     // proactively maintains current+next month; a device offline across a

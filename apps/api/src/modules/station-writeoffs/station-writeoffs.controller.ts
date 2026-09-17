@@ -55,13 +55,13 @@ export class StationWriteoffsController {
   @ApiOperation({
     summary: "File a write-off from a handheld",
     description:
-      "Idempotent on (device, deviceSeq): a replayed sync returns the original document instead of filing a second act. `reason` is fixed to `writeoff` server-side, and the operator the body asserts is re-checked against `can_writeoff`.",
+      "Idempotent on (device, deviceSeq): a replayed sync returns the original document instead of filing a second act. Before the target's server-authoritative newWorkAllowedAt, a fresh document is durably quarantined and returns 409 with code device_replacement_waiting, outcome quarantined, receiptId and newWorkAllowedAt. Retries replay that receipt, including after the boundary. Previously uncommitted source v1 documents are also durably quarantined while draining, with code device_replacement_draining and reason unproven_pre_drain_scope; a claimed createdAt does not establish prior authority. `reason` is fixed to `writeoff` server-side, and the operator the body asserts is re-checked against `can_writeoff`.",
   })
   @ApiStationAuth()
   @ApiBody({ schema: stationWriteoffOpenApiSchema })
   @ApiCreatedResponse({ schema: stationWriteoffResultOpenApiSchema })
   @ApiZodValidationError()
-  @ApiHttpErrors(401, 403, 422, 429)
+  @ApiHttpErrors(401, 403, 409, 413, 422, 429)
   create(
     @Req() req: RequestWithTenant,
     @Body(new ZodValidationPipe(stationWriteoffSchema)) body: StationWriteoffDto,

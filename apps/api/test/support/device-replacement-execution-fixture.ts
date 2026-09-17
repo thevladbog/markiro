@@ -74,6 +74,7 @@ type ExecutionFixtures = {
     kind?: "station" | "handheld",
     credentialEpoch?: number,
     configured?: boolean,
+    taskBounds?: Parameters<typeof seedGrantPolicy>[1],
   ) => Promise<Fixture>;
   drain: (fixture: Fixture) => Promise<Drain>;
   ready: () => Promise<Ready>;
@@ -93,9 +94,10 @@ function executionFixtures(db: Db): ExecutionFixtures {
     kind: "station" | "handheld" = "station",
     credentialEpoch = 1,
     configured = false,
+    taskBounds: Parameters<typeof seedGrantPolicy>[1] = {},
   ): Promise<Fixture> {
     const tenantId = await createOrganization(db);
-    const policy = configured ? await seedGrantPolicy(db, {}) : null;
+    const policy = configured ? await seedGrantPolicy(db, taskBounds) : null;
     if (policy) {
       const planVersionId = await createPublishedPlan(db, {
         maxLines: 5,

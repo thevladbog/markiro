@@ -9,6 +9,7 @@ import { and, asc, eq, gt, isNull } from "drizzle-orm";
 
 import { schema, type Db } from "@markiro/db";
 import { inventorySnapshotPageDigest } from "@markiro/domain";
+import { assertDeviceReplacementNewWorkAllowed } from "../device-licensing/device-replacement-admission";
 
 import { DB } from "../../auth/auth.module";
 import { EntitlementsService } from "../../subscriptions/entitlements.service";
@@ -94,6 +95,13 @@ export class StationInventoryBundleService {
     if (manifest.mode === "check") {
       return { ...manifest, sscc: null, ssccRevokedFrom: [], ssccRevokedBlocks: [] };
     }
+
+    // A repack manifest can allocate another serial range even for an existing
+    // participant. Reference-only check manifests do not acquire authority.
+    await assertDeviceReplacementNewWorkAllowed(tx, tenantId, deviceId, {
+      kind: "inventory",
+      id: inventoryId,
+    });
 
     if (manifest.boxLabelTemplate === null) {
       throw new ConflictException({ code: "INVENTORY_BUNDLE_INVALID" });

@@ -260,6 +260,9 @@ export class DeviceReplacementExecutionService {
       const serverFacts = { ...facts.serverFacts, actorRole: authority.role };
       if (Buffer.byteLength(JSON.stringify(serverFacts)) > 240_000)
         executionConflict("facts_too_large");
+      const newWorkAllowedAt = new Date(
+        Math.max(preview.newWorkAllowedAt.getTime(), facts.boundary.getTime()),
+      );
       await tx.insert(executions).values({
         tenantId,
         deviceId: row.deviceId,
@@ -276,8 +279,8 @@ export class DeviceReplacementExecutionService {
           facts.report?.credentialEpoch === facts.device.credentialEpoch ? facts.report.id : null,
         emergencyReason: preview.emergencyReason,
         serverFacts,
-        offlineAuthorityUntil: preview.newWorkAllowedAt,
-        newWorkAllowedAt: preview.newWorkAllowedAt,
+        offlineAuthorityUntil: newWorkAllowedAt,
+        newWorkAllowedAt,
         startedAt: now,
         recoveryState: mode === "normal" ? "not_required" : "required",
       });

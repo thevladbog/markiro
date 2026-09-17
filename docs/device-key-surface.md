@@ -108,6 +108,61 @@ that legacy queue can be adopted.
 | `pickup-rejections`                                                                                                        | the admin's audit surface for refused scans; exposes **raw marking and badge codes**, which is exactly what shipping only hashes to devices is meant to prevent                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `integrations`                                                                                                             | configuring exchange channels, reading their journal, issuing/rotating a channel's machine credentials (`POST /integrations/:type/credentials`, whose one-time secret response must never reach a device), and resolving the unmatched-nomenclature queue (`GET /integrations/:type/candidates`, `POST .../candidates/:id/link`, `.../hide`, `.../unhide` — Task 10), and minting/listing/revoking `public_api` keys (`GET`/`POST /integrations/public_api/keys`, `DELETE /integrations/public_api/keys/:id` — Task 11, served by the separate `api-keys` module; the POST response's one-time secret must never reach a device either) is a back-office concern; the station never calls this module or the `api-keys` module |
 
+## Replacement waiting and productive admission
+
+A replacement target may pair immediately with a client supporting
+`replacement-boundary-v1`. Its credential can read reference data and deliver
+recovery evidence while the server-owned `newWorkAllowedAt` fence remains active.
+Every productive decision below runs inside the mutation transaction while holding
+the durable device lock. Device grants apply the same saved boundary under their
+ordered grant locks, independently of observe/strict rollout mode.
+
+| Device route or operation                                                                                                                    | Transaction owner and replacement behavior                                                                                                                                                                                                                                                                    |
+| -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /shifts`                                                                                                                               | `ShiftsService.createShift`: denies new validation, duplicate-label/reprocessing, aggregation and pallet scope while waiting or draining.                                                                                                                                                                     |
+| `POST /shifts/:id/open`, `POST /shifts/:id/enter`                                                                                            | `ShiftsService.enterShift`: denies target entry before the boundary; an already participating draining source may resume its current task.                                                                                                                                                                    |
+| `GET /shifts/:id/bundle` for aggregation                                                                                                     | `ShiftsService.bundleSscc`: box and pallet serial allocation checks the shared admission fence before taking the shift lock. Validation reference bundles allocate no serials.                                                                                                                                |
+| `POST /station/inventories/:id/join`                                                                                                         | `StationInventoryAccessService.join`: fences new participation; existing source participants retain recovery.                                                                                                                                                                                                 |
+| `GET /station/inventories/:id/bundle/manifest` for repack                                                                                    | `StationInventoryBundleService.prepareJoinManifest`: fences serial allocation, including renewed ranges for an existing participant. Check manifests are reference-only.                                                                                                                                      |
+| `POST /station/writeoffs`                                                                                                                    | `PickupOrdersService.insertOrderWithRetry`: fences a fresh handheld document after the serialized idempotency lookup. An already committed device sequence returns its saved document. A waiting target’s fresh submission and an unproven draining-source document are durably quarantined before admission. |
+| `POST /station/grants/v1/device`, `POST /station/grants/v1/tasks`                                                                            | `GrantIssuerService`/`grantPoolDenial`: no device/task issuance before the target boundary; grant configuration reports the persisted replacement fence.                                                                                                                                                      |
+| `POST /station/scans`, shift closure, inventory event batches/leave, native grant evidence                                                   | Old draining-source recovery continues. A waiting target has no legitimate prior production: its scan/label/box/pallet/inventory/closure submissions are quarantined without business effects. Native evidence is quarantined even in observe mode.                                                           |
+| Templates, catalog/GTIN lookup, lines, operator roster, task lists, reference bundles, conflict/code reconciliation, readiness/configuration | Reference or recovery only; no productive scope is created. Cabinet label/box/pallet management routes remain inaccessible to device credentials.                                                                                                                                                             |
+
+Legacy target submissions return HTTP 409 with `code: device_replacement_waiting`,
+`outcome: quarantined`, `receiptId`, and the saved `newWorkAllowedAt`. The bounded
+`device_grant_evidence` record retains the normalized manufacturing payload and
+an exact audit fact before that response is sent. Retrying the same device,
+operation and batch/sequence replays the receipt; altered payloads return
+`device_replacement_evidence_conflict`. Native envelopes use the existing bounded
+`device_grant_ingest_receipts` owner and return HTTP 200 with a quarantined receipt,
+the same explicit reason and `reconciliation.status: not_applied`.
+
+A draining source's previously uncommitted v1 write-off has no verifiable
+pre-drain scope. It is retained with HTTP 409 `code: device_replacement_draining`,
+`reason: unproven_pre_drain_scope`, `outcome: quarantined`, and `receiptId`; the
+client's `createdAt` never proves authority. The final write transaction rechecks
+the source lock, so drain beginning during an in-flight request also retains the
+rejected submission after rollback. An exact already committed sequence keeps
+its saved business outcome. This does not restrict established source task sync.
+
+Quarantine classification commits with initial retention, so a lost response or
+process restart cannot later turn the same submission into accepted production.
+After the boundary, new submissions use ordinary ingestion; quarantined
+submissions remain held for review and continue to block clean replacement
+readiness. Reference reads, empty sync probes, and old draining-source sync remain
+available. Exact already-committed legacy production replays retain their saved
+outcome.
+
+The cutover boundary includes all unexpired device and task issuances belonging to
+the durable source, including earlier credential epochs. Security revoke and key
+rotation do not invalidate signed authority retained by a disconnected client.
+When that source is itself a replacement target, its inherited saved boundary is
+included in both normal and emergency preview facts and the next durable receipt.
+The boundary is never earlier than server time, a recorded authority horizon, or
+an applicable conservative policy fallback. Chaining replacements cannot shorten
+the wait.
+
 ## Rule for new routes
 
 This document, and the two sections above, are about `TenantGuard`-guarded

@@ -1756,6 +1756,12 @@ export class ShiftsService {
     Pick<ShiftBundleDto, "sscc" | "ssccRevokedFrom" | "palletSscc" | "palletSsccRevokedFrom">
   > {
     return this.db.transaction(async (tx) => {
+      // This GET can allocate fresh box/pallet authority. Keep the device
+      // fence ahead of the shift lock, while preserving source task recovery.
+      await assertDeviceReplacementNewWorkAllowed(tx, tenantId, deviceId, {
+        kind: "shift",
+        id: shiftId,
+      });
       const [shift] = await tx
         .select({
           status: schema.shifts.status,
