@@ -36,6 +36,10 @@ function candidate(overrides: Partial<BoxRegistryCandidate> = {}): BoxRegistryCa
     closedAt: CLOSED,
     closureReceivedAt: CLOSED,
     disassembledAt: null,
+    palletId: null,
+    palletSscc: null,
+    palletDisassembledAt: null,
+    productionDate: null,
     registryVersion: 7n,
     updatedAt: UPDATED,
     ...overrides,
@@ -64,6 +68,16 @@ function member(
     totalMembershipCount: 1,
     ...overrides,
   };
+}
+
+/** Extension digit 1 marks a pallet SSCC; the registry passes it through raw. */
+const PALLET_SSCC = "134600682000000017";
+
+function soleMember(box: BoxRegistryCandidate): BoxRegistryMemberFact {
+  return member(box.id, "pallet-member", {
+    registryShiftId: box.shiftId,
+    registryTerminalId: box.terminalId,
+  });
 }
 
 describe("box registry cursor", () => {
@@ -170,10 +184,47 @@ describe("box registry eligibility", () => {
       bottleCount: 12,
       contentKeys: [...facts.map((fact) => kmKey(canonicalizeKm(fact.canonicalRaw!)))].sort(),
       updatedAt: UPDATED.toISOString(),
+      palletId: null,
+      palletSscc: null,
+      palletActive: false,
+      closedAt: CLOSED.toISOString(),
+      productionDate: null,
     });
     expect(JSON.stringify(change)).not.toContain("canonicalRaw");
     expect(JSON.stringify(change)).not.toContain("secret");
     expect(JSON.stringify(change)).not.toContain("crypto-tail");
+  });
+
+  it("carries pallet membership and production date on an upsert", () => {
+    const palletId = randomUUID();
+    const onPallet = candidate({
+      palletId,
+      palletSscc: PALLET_SSCC,
+      palletDisassembledAt: null,
+      productionDate: "2026-09-10",
+    });
+    expect(evaluateBoxRegistryCandidate(onPallet, [soleMember(onPallet)], false)).toMatchObject({
+      kind: "upsert",
+      palletId,
+      palletSscc: PALLET_SSCC,
+      palletActive: true,
+      closedAt: CLOSED.toISOString(),
+      productionDate: "2026-09-10",
+    });
+
+    // The pallet was taken apart: the box still carries `pallet_id` as the
+    // record that it stood there, but a handheld must stop refusing it.
+    const retired = candidate({
+      palletId,
+      palletSscc: PALLET_SSCC,
+      palletDisassembledAt: UPDATED,
+      productionDate: "2026-09-10",
+    });
+    expect(evaluateBoxRegistryCandidate(retired, [soleMember(retired)], false)).toMatchObject({
+      palletId,
+      palletSscc: PALLET_SSCC,
+      palletActive: false,
+    });
   });
 
   it.each([

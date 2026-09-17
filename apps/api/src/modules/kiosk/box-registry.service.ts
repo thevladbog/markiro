@@ -31,6 +31,11 @@ export interface BoxRegistryCandidate {
   closedAt: Date | null;
   closureReceivedAt: Date | null;
   disassembledAt: Date | null;
+  palletId: string | null;
+  palletSscc: string | null;
+  palletDisassembledAt: Date | null;
+  /** `coalesce(shifts.production_date, shifts.planned_date)`, civil date. */
+  productionDate: string | null;
   registryVersion: bigint;
   updatedAt: Date;
 }
@@ -288,6 +293,14 @@ export function evaluateBoxRegistryCandidate(
     bottleCount: activeFacts.length,
     contentKeys: keys,
     updatedAt: candidate.updatedAt.toISOString(),
+    palletId: candidate.palletId,
+    palletSscc: candidate.palletSscc,
+    // A disassembled pallet keeps `boxes.pallet_id` as the record that this
+    // box stood there, so membership alone cannot tell a handheld whether the
+    // box is still spoken for. `palletActive` is that answer.
+    palletActive: candidate.palletId !== null && candidate.palletDisassembledAt === null,
+    closedAt: candidate.closedAt.toISOString(),
+    productionDate: candidate.productionDate,
   };
 }
 
@@ -370,6 +383,12 @@ export class BoxRegistryService {
         closedAt: schema.boxes.closedAt,
         closureReceivedAt: schema.boxes.closureReceivedAt,
         disassembledAt: schema.boxes.disassembledAt,
+        palletId: schema.boxes.palletId,
+        palletSscc: schema.pallets.sscc,
+        palletDisassembledAt: schema.pallets.disassembledAt,
+        productionDate: sql<
+          string | null
+        >`coalesce(${schema.shifts.productionDate}, ${schema.shifts.plannedDate})::text`,
         registryVersion: schema.boxes.registryVersion,
         updatedAt: schema.boxes.updatedAt,
       })
@@ -386,6 +405,13 @@ export class BoxRegistryService {
         and(
           eq(schema.products.tenantId, schema.shifts.tenantId),
           eq(schema.products.id, schema.shifts.productId),
+        ),
+      )
+      .leftJoin(
+        schema.pallets,
+        and(
+          eq(schema.pallets.tenantId, schema.boxes.tenantId),
+          eq(schema.pallets.id, schema.boxes.palletId),
         ),
       )
       .where(

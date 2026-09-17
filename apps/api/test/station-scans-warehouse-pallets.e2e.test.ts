@@ -377,12 +377,12 @@ describe.skipIf(!ready)("station scans warehouse pallets e2e", () => {
         },
       ],
     });
-    // TODO(Task 5): assert the `GET /station/box-registry` delta carries
-    // `palletSscc`/`palletActive` for these boxes -- the registry gains those
-    // fields there. What the closure must do TODAY is advance every member
-    // box's registry version, since a warehouse pallet's serial only exists
-    // once it closes; that is asserted directly here because these fixtures'
-    // boxes are not yet registry candidates.
+    // The `GET /station/box-registry` delta's `palletSscc`/`palletActive`
+    // fields are asserted in `box-registry-pallets.e2e.test.ts`: this suite's
+    // shifts run in `validation` mode, which claims no `code_registry`
+    // ownership, so none of its boxes is a registry candidate. What the
+    // closure must do HERE is advance every member box's registry version,
+    // since a warehouse pallet's serial only exists once it closes.
     const after = await boxRegistryVersions();
     expect(after.get(B1_SSCC)).toBeGreaterThan(before.get(B1_SSCC)!);
     expect(after.get(B3_SSCC)).toBeGreaterThan(before.get(B3_SSCC)!);
@@ -553,10 +553,7 @@ describe.skipIf(!ready)("station scans warehouse pallets e2e", () => {
 
     // Seeded while the tenant may still write; the subscription lapses below.
     await postLapsed({
-      items: [
-        item(GTIN_C, lapsedShiftId, "l1-1", "l1"),
-        item(GTIN_C, lapsedShiftId, "l2-2", "l2"),
-      ],
+      items: [item(GTIN_C, lapsedShiftId, "l1-1", "l1"), item(GTIN_C, lapsedShiftId, "l2-2", "l2")],
     });
     await postLapsed({
       boxes: [

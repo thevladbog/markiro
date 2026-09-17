@@ -127,6 +127,15 @@ export type KioskBoxRegistryChange =
       bottleCount: number;
       contentKeys: string[];
       updatedAt: string;
+      /** The pallet this box stands on, or last stood on. */
+      palletId: string | null;
+      /** Raw 18 digits, not AI-00 formatted: this feed is device-facing. */
+      palletSscc: string | null;
+      /** False once that pallet is disassembled, so the box is free again. */
+      palletActive: boolean;
+      closedAt: string;
+      /** `YYYY-MM-DD` civil day, null when the shift declares neither. */
+      productionDate: string | null;
     }
   | { kind: "remove"; sscc: string; updatedAt: string };
 
@@ -162,6 +171,11 @@ export const boxRegistryPageOpenApiSchema: SchemaObject = {
               "bottleCount",
               "contentKeys",
               "updatedAt",
+              "palletId",
+              "palletSscc",
+              "palletActive",
+              "closedAt",
+              "productionDate",
             ],
             properties: {
               kind: { type: "string", enum: ["upsert"] },
@@ -175,6 +189,11 @@ export const boxRegistryPageOpenApiSchema: SchemaObject = {
                 items: { type: "string" },
               },
               updatedAt: { type: "string", format: "date-time" },
+              palletId: { type: "string", format: "uuid", nullable: true },
+              palletSscc: { type: "string", pattern: "^[0-9]{18}$", nullable: true },
+              palletActive: { type: "boolean" },
+              closedAt: { type: "string", format: "date-time" },
+              productionDate: { type: "string", format: "date", nullable: true },
             },
           },
           {

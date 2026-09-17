@@ -61,7 +61,20 @@ describe("kiosk box registry OpenAPI contract", () => {
       if (!items) throw new Error("missing items schema");
       const union = (items.items as { oneOf?: Array<{ required?: string[] }> }).oneOf;
       expect(union?.map((variant) => [...(variant.required ?? [])].sort())).toEqual([
-        ["bottleCount", "boxId", "contentKeys", "kind", "productId", "sscc", "updatedAt"].sort(),
+        [
+          "bottleCount",
+          "boxId",
+          "closedAt",
+          "contentKeys",
+          "kind",
+          "palletActive",
+          "palletId",
+          "palletSscc",
+          "productId",
+          "productionDate",
+          "sscc",
+          "updatedAt",
+        ].sort(),
         ["kind", "sscc", "updatedAt"].sort(),
       ]);
     } finally {
