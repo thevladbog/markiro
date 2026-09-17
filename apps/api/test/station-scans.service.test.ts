@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { BadRequestException } from "@nestjs/common";
 import { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
@@ -17,7 +18,7 @@ vi.mock("@markiro/db", async (importOriginal) => {
 
 import { StationScansService } from "../src/modules/station-scans/station-scans.service";
 import type { SsccService } from "../src/modules/sscc/sscc.service";
-import type { SyncBatchDto } from "../src/modules/station-scans/dto";
+import { syncBatchSchema, type SyncBatchDto } from "../src/modules/station-scans/dto";
 import type { EntitlementsService } from "../src/subscriptions/entitlements.service";
 
 function item(scannedAt: string): SyncBatchDto["items"][number] {
@@ -512,5 +513,78 @@ describe("StationScansService.applyBatch shift-ownership guard ordering (Finding
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(openedTransaction).toBe(true);
     expect(ensurePartitionsMock).toHaveBeenCalledWith(dbStub, []);
+  });
+});
+
+describe("StationScansService sync batch payload digest", () => {
+  // The exact serializer the service pins its digests with: sorted keys, no
+  // whitespace. Duplicated deliberately -- this suite exists to pin the
+  // BYTES a digest is taken over, so importing the production helper would
+  // make the assertion move with the code it is supposed to hold still.
+  const stableJson = (value: unknown): string => {
+    if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
+    if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
+      .join(",")}}`;
+  };
+  const sha256 = (value: unknown): string =>
+    createHash("sha256").update(stableJson(value)).digest("hex");
+
+  it("hashes a legacy wire payload exactly as it did before warehouse pallet memberships existed", async () => {
+    const captured: Record<string, unknown>[] = [];
+    const tx = {
+      insert: (table: unknown) => ({
+        values: (values: Record<string, unknown>) => {
+          if (table === schema.syncBatches) captured.push(values);
+          return {
+            onConflictDoNothing: () => ({
+              returning: () => Promise.resolve([{ batchId: "legacy-digest-1" }]),
+            }),
+            onConflictDoUpdate: () => ({
+              returning: () => Promise.resolve([{ currentVersion: 1n }]),
+            }),
+          };
+        },
+      }),
+      select: () => ({
+        from: () => ({
+          where: () => ({
+            for: () => Promise.resolve([]),
+            orderBy: () => ({ for: () => Promise.resolve([]) }),
+          }),
+        }),
+      }),
+      execute: () => Promise.resolve(),
+      update: () => ({
+        set: () => ({ where: () => Promise.resolve({ rowCount: 0 }) }),
+      }),
+    };
+    const service = new StationScansService(
+      { transaction: (run: (executor: typeof tx) => unknown) => run(tx) } as never,
+      ssccServiceStub,
+      entitlementsServiceStub,
+    );
+
+    // The wire payload a pre-warehouse-pallet device sends, parsed through
+    // the real schema so every zod default that a newer release added --
+    // `palletMemberships: []` among them -- is present exactly as it is at
+    // the HTTP boundary.
+    const wire = { batchId: "legacy-digest-1", items: [], boxes: [], exceptions: [] };
+    const body = syncBatchSchema.parse(wire);
+    expect(body.palletMemberships).toEqual([]);
+
+    await service.applyBatch("tenant-1", body, "station-1");
+
+    // The pinned digest: the canonical object as the pre-feature release
+    // built it. An empty `palletMemberships` that leaked into the hash would
+    // move this, and the device would get `station_batch_mismatch` (409) for
+    // the batch it is retrying, forever.
+    expect(captured).toHaveLength(1);
+    expect(captured[0]?.payloadDigest).toBe(
+      sha256({ batchId: "legacy-digest-1", items: [], boxes: [], exceptions: [] }),
+    );
   });
 });
