@@ -5,7 +5,8 @@ import type {
   ShiftExportSource,
 } from "@markiro/domain";
 import { schema, type Db } from "@markiro/db";
-import { and, eq, sql } from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { DB } from "../../auth/auth.module";
 
 export type ShiftExportSourceErrorCode =
@@ -14,6 +15,8 @@ export type ShiftExportSourceErrorCode =
   | "SHIFT_DATE_MISSING"
   | "BOX_COVERAGE_INCOMPLETE"
   | "SHIFT_HAS_NO_PALLETS"
+  | "PALLET_NOT_CLOSED"
+  | "PALLET_DISASSEMBLED"
   | "ORG_INN_MISSING";
 
 export class ShiftExportSourceError extends Error {
@@ -43,7 +46,20 @@ export interface ShiftExportSnapshot {
   source: ShiftExportSource;
 }
 
+/** One closed, non-disassembled pallet and the box SSCCs it carries. */
+export interface PalletExportSnapshot {
+  sourceSnapshotStartedAt: Date;
+  productName: string;
+  /** Civil date the pallet closed (UTC), YYYY-MM-DD. */
+  closedDate: string;
+  organizationInn: string | null;
+  pallet: { sscc: string; boxSsccs: readonly string[] };
+}
+
 type ShiftExportSourceFormat = Pick<ShiftExportFormatDescriptor, "boxMode" | "extension">;
+
+/** The product of a PRODUCTION pallet, reached through its shift. */
+const shiftProducts = alias(schema.products, "shift_products");
 
 interface AuthoritativeCodeRow {
   tenantId: string;
@@ -100,6 +116,92 @@ export class ShiftExportSourceService {
         isolationLevel: "repeatable read",
         accessMode: "read only",
       },
+    );
+  }
+
+  /**
+   * A per-pallet aggregation source. Both pallet kinds resolve here: a
+   * warehouse pallet carries its own `product_id` and no shift, a production
+   * pallet reaches its product through its shift, and both name their member
+   * boxes through `boxes.pallet_id`.
+   */
+  loadPallet(tenantId: string, palletId: string): Promise<PalletExportSnapshot> {
+    return this.db.transaction(
+      async (tx) => {
+        const [pallet] = await tx
+          .select({
+            sscc: schema.pallets.sscc,
+            closedAt: schema.pallets.closedAt,
+            disassembledAt: schema.pallets.disassembledAt,
+            productName: sql<
+              string | null
+            >`coalesce(${schema.products.name}, ${shiftProducts.name})`,
+          })
+          .from(schema.pallets)
+          .leftJoin(
+            schema.products,
+            and(
+              eq(schema.products.tenantId, schema.pallets.tenantId),
+              eq(schema.products.id, schema.pallets.productId),
+            ),
+          )
+          .leftJoin(
+            schema.shifts,
+            and(
+              eq(schema.shifts.tenantId, schema.pallets.tenantId),
+              eq(schema.shifts.id, schema.pallets.shiftId),
+            ),
+          )
+          .leftJoin(
+            shiftProducts,
+            and(
+              eq(shiftProducts.tenantId, schema.shifts.tenantId),
+              eq(shiftProducts.id, schema.shifts.productId),
+            ),
+          )
+          .where(and(eq(schema.pallets.tenantId, tenantId), eq(schema.pallets.id, palletId)))
+          .limit(1);
+        // A pallet that vanished, never closed or has no SSCC to name itself
+        // with is the same terminal answer for this export: there is no
+        // aggregate to submit.
+        if (!pallet || pallet.sscc === null || pallet.closedAt === null) {
+          throw new ShiftExportSourceError("PALLET_NOT_CLOSED");
+        }
+        if (pallet.disassembledAt !== null) {
+          throw new ShiftExportSourceError("PALLET_DISASSEMBLED");
+        }
+
+        const boxes = await tx
+          .select({ sscc: schema.boxes.sscc })
+          .from(schema.boxes)
+          .where(
+            and(
+              eq(schema.boxes.tenantId, tenantId),
+              eq(schema.boxes.palletId, palletId),
+              isNotNull(schema.boxes.closedAt),
+              isNull(schema.boxes.disassembledAt),
+            ),
+          )
+          .orderBy(asc(schema.boxes.closedAt), asc(schema.boxes.id));
+
+        const [profile] = await tx
+          .select({ inn: schema.orgProfiles.inn })
+          .from(schema.orgProfiles)
+          .where(eq(schema.orgProfiles.tenantId, tenantId))
+          .limit(1);
+
+        return {
+          sourceSnapshotStartedAt: new Date(),
+          productName: pallet.productName ?? "Продукция",
+          closedDate: pallet.closedAt.toISOString().slice(0, 10),
+          organizationInn: profile?.inn?.trim() || null,
+          pallet: {
+            sscc: pallet.sscc,
+            boxSsccs: boxes.flatMap((box) => (box.sscc === null ? [] : [box.sscc])),
+          },
+        };
+      },
+      { isolationLevel: "repeatable read", accessMode: "read only" },
     );
   }
 

@@ -160,6 +160,8 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "POST /billing/offers/:id/change-request (TenantBillingController.requestOfferChanges)",
       "GET /shift-exports/:exportId/artifacts/:artifactId/download (ShiftExportsController.download)",
       "GET /shift-exports/formats (ShiftExportsController.formats)",
+      "GET /pallet-exports/formats (ShiftExportsController.palletFormats)",
+      "GET /pallets/:palletId/exports (ShiftExportsController.listPalletExports)",
       "GET /shifts (ShiftsController.listShifts)",
       "GET /shifts/planning-config (ShiftsController.getPlanningConfig)",
       "GET /shifts/box-label-templates (ShiftsController.listBoxLabelTemplates)",
@@ -266,6 +268,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "POST /pickup-orders/export (PickupOrdersController.export)",
       "POST /shift-exports/:exportId/retry (ShiftExportsController.retry)",
       "POST /shifts/:shiftId/exports (ShiftExportsController.create)",
+      "POST /pallets/:palletId/exports (ShiftExportsController.createPalletExport)",
     ],
   },
   {

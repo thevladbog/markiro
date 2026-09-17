@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 import { Inject, Injectable } from "@nestjs/common";
 import {
+  getPalletExportFormat,
   getShiftExportFormat,
+  renderPalletAggregationExport,
   renderShiftExport,
   ShiftExportDomainError,
   type ShiftExportPart,
@@ -18,6 +20,8 @@ export const SHIFT_EXPORT_SAFE_ERROR_CODES = [
   "SHIFT_DATE_MISSING",
   "BOX_COVERAGE_INCOMPLETE",
   "SHIFT_HAS_NO_PALLETS",
+  "PALLET_NOT_CLOSED",
+  "PALLET_DISASSEMBLED",
   "ORG_INN_MISSING",
   "FORMAT_NOT_FOUND",
   "INVALID_LINE_LIMIT",
@@ -46,6 +50,12 @@ interface AttemptContext {
   retryLimit: number;
 }
 
+interface RenderedExport {
+  parts: readonly ShiftExportPart[];
+  extension: string;
+  openPalletSuppressedBoxCount: number;
+}
+
 interface UploadedArtifact {
   part: ShiftExportPart;
   objectKey: string;
@@ -71,43 +81,20 @@ export class ShiftExportRunnerService {
     let publicationAttempted = false;
 
     try {
-      const shiftId = claimed.shiftId;
-      // A pallet export cannot exist yet -- nothing inserts pallet_id on shift_exports --
-      // so a claimed row with a null shift_id is unreachable today. Narrow explicitly so
-      // this stays a loud failure rather than a silent `string | null` -> `string` cast
-      // once a later task starts inserting pallet exports.
-      if (shiftId === null) throw new Error("Shift export row has no shift");
-      const format = getShiftExportFormat(claimed.formatId, claimed.formatVersion);
-      const snapshot = await this.source.load(claimed.tenantId, shiftId, format);
-
-      const snapshotUpdates = await this.db
-        .update(schema.shiftExports)
-        .set({
-          productNameSnapshot: snapshot.productName,
-          shiftDateSnapshot: snapshot.shiftDate,
-          sourceSnapshotStartedAt: snapshot.sourceSnapshotStartedAt,
-          updatedAt: new Date(),
-        })
-        .where(and(this.ownedProcessingAttempt(claimed)))
-        .returning({ id: schema.shiftExports.id });
-      if (snapshotUpdates.length === 0) throw new ShiftExportClaimLostError();
-
-      const parts = renderShiftExport({
-        formatId: format.id,
-        formatVersion: format.version,
-        productName: snapshot.productName,
-        shiftDate: snapshot.shiftDate,
-        maxLines: claimed.maxLines,
-        source: snapshot.source,
-        organizationInn: snapshot.organizationInn,
-      });
+      // `shift_exports_target_shape` guarantees exactly one of the two is set,
+      // so the pallet branch is what narrows `shiftId` for the shift branch.
+      const rendered =
+        claimed.palletId === null
+          ? await this.renderForShift(claimed)
+          : await this.renderForPallet(claimed, claimed.palletId);
+      const { parts, extension, openPalletSuppressedBoxCount } = rendered;
 
       infrastructureErrorCode = "STORAGE_FAILED";
       for (const part of parts) {
         await this.refreshLease(claimed);
         const body = Buffer.from(part.bytes);
         const sha256 = createHash("sha256").update(body).digest("hex");
-        const objectKey = this.objectKey(claimed, part, format.extension);
+        const objectKey = this.objectKey(claimed, part, extension);
         attemptedObjectKeys.push(objectKey);
         const stored = await this.storage.putVerified(objectKey, body, part.mimeType, sha256);
         uploaded.push({ part, objectKey, byteSize: stored.byteSize, sha256 });
@@ -115,7 +102,7 @@ export class ShiftExportRunnerService {
 
       infrastructureErrorCode = "GENERATION_FAILED";
       publicationAttempted = true;
-      await this.publishReady(claimed, uploaded, snapshot.openPalletSuppressedBoxCount);
+      await this.publishReady(claimed, uploaded, openPalletSuppressedBoxCount);
     } catch (error) {
       if (publicationAttempted) {
         try {
@@ -143,6 +130,94 @@ export class ShiftExportRunnerService {
       }
       throw error;
     }
+  }
+
+  /**
+   * The shift path: the whole shift's codes, in the requested format, split
+   * into as many parts as `maxLines` requires.
+   */
+  private async renderForShift(claimed: ShiftExportRow): Promise<RenderedExport> {
+    const shiftId = claimed.shiftId;
+    // `shift_exports_target_shape` makes this unreachable for a row whose
+    // `pallet_id` is null; kept loud rather than cast away.
+    if (shiftId === null) throw new Error("Shift export row has no shift");
+    const format = getShiftExportFormat(claimed.formatId, claimed.formatVersion);
+    const snapshot = await this.source.load(claimed.tenantId, shiftId, format);
+    await this.recordSnapshot(
+      claimed,
+      snapshot.productName,
+      snapshot.shiftDate,
+      snapshot.sourceSnapshotStartedAt,
+    );
+
+    return {
+      parts: renderShiftExport({
+        formatId: format.id,
+        formatVersion: format.version,
+        productName: snapshot.productName,
+        shiftDate: snapshot.shiftDate,
+        maxLines: claimed.maxLines,
+        source: snapshot.source,
+        organizationInn: snapshot.organizationInn,
+      }),
+      extension: format.extension,
+      openPalletSuppressedBoxCount: snapshot.openPalletSuppressedBoxCount,
+    };
+  }
+
+  /**
+   * The pallet path: ONE document naming this pallet's box SSCCs. There is no
+   * shift to suppress boxes for, so `openPalletSuppressedBoxCount` is 0, and
+   * the shift-date snapshot column records the pallet's own closing date.
+   */
+  private async renderForPallet(
+    claimed: ShiftExportRow,
+    palletId: string,
+  ): Promise<RenderedExport> {
+    // Validated first, so a row whose format was corrupted or retired fails as
+    // FORMAT_NOT_FOUND rather than rendering under a literal it never asked for.
+    const format = getPalletExportFormat(claimed.formatId, claimed.formatVersion);
+    const snapshot = await this.source.loadPallet(claimed.tenantId, palletId);
+    await this.recordSnapshot(
+      claimed,
+      snapshot.productName,
+      snapshot.closedDate,
+      snapshot.sourceSnapshotStartedAt,
+    );
+
+    return {
+      parts: [
+        renderPalletAggregationExport({
+          formatId: format.id,
+          formatVersion: format.version,
+          organizationInn: snapshot.organizationInn,
+          productName: snapshot.productName,
+          closedDate: snapshot.closedDate,
+          pallet: snapshot.pallet,
+        }),
+      ],
+      extension: format.extension,
+      openPalletSuppressedBoxCount: 0,
+    };
+  }
+
+  private async recordSnapshot(
+    claimed: ShiftExportRow,
+    productName: string,
+    dateSnapshot: string,
+    sourceSnapshotStartedAt: Date,
+  ): Promise<void> {
+    const updates = await this.db
+      .update(schema.shiftExports)
+      .set({
+        productNameSnapshot: productName,
+        shiftDateSnapshot: dateSnapshot,
+        sourceSnapshotStartedAt,
+        updatedAt: new Date(),
+      })
+      .where(and(this.ownedProcessingAttempt(claimed)))
+      .returning({ id: schema.shiftExports.id });
+    if (updates.length === 0) throw new ShiftExportClaimLostError();
   }
 
   private async claim(exportId: string): Promise<ShiftExportRow | undefined> {
@@ -283,7 +358,10 @@ export class ShiftExportRunnerService {
     await tx.insert(schema.tenantAuditEvents).values({
       organizationId: claimed.tenantId,
       actorUserId: claimed.createdByUserId,
-      action,
+      // A per-pallet export is audited as `pallet_export.*`; `targetType`
+      // stays `shift_export`, the table both kinds live in.
+      action:
+        claimed.palletId === null ? action : action.replace(/^shift_export\./, "pallet_export."),
       outcome,
       targetType: "shift_export",
       targetId: claimed.id,
@@ -291,6 +369,7 @@ export class ShiftExportRunnerService {
         tenantId: claimed.tenantId,
         actorUserId: claimed.createdByUserId,
         shiftId: claimed.shiftId,
+        palletId: claimed.palletId,
         exportId: claimed.id,
         formatId: claimed.formatId,
         formatVersion: claimed.formatVersion,
