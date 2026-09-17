@@ -388,6 +388,36 @@ export function ShiftForm({
       }
     }
 
+    // An aggregation shift needs an SSCC source to start at all (the server
+    // refuses `open` without one): refuse here, with the reason and where to
+    // fix it, rather than letting the operator find out on the handheld. The
+    // organisation's side comes from `planning-config`'s `orgGlnConfigured`
+    // (the profile itself is protected from managers); an unknown answer
+    // (`undefined`, planning not loaded) defers to the server's own refusal.
+    if (values.mode === "aggregation") {
+      const issuerId = values.ssccIssuerCounterpartyId?.trim();
+      const issuer = issuerId ? counterparties.find((c) => c.id === issuerId) : undefined;
+      // Planning may still be resolving for a freshly chosen product; settle
+      // it rather than deciding on a stale or absent answer.
+      let config = planning.data;
+      if (!issuerId && !config && hasProduct) config = (await planning.refetch()).data;
+      const problem = issuer
+        ? issuer.gln
+          ? null
+          : "SSCC_ISSUER_GLN_MISSING"
+        : !issuerId && config?.orgGlnConfigured === false
+          ? "ORG_GLN_MISSING"
+          : null;
+      if (problem) {
+        setError("ssccIssuerCounterpartyId", {
+          type: "manual",
+          message: `pages.shifts.form.errors.${problem}`,
+        });
+        return;
+      }
+    }
+    clearErrors("ssccIssuerCounterpartyId");
+
     // The default may still be resolving (or have failed) for a freshly chosen
     // product; wait for or retry it rather than snapshotting a stale or empty
     // answer.
@@ -731,8 +761,10 @@ export function ShiftForm({
                 value={ssccIssuerCounterpartyId ?? ""}
                 disabled={activeEdit}
                 hint={t("pages.shifts.form.ssccIssuerHint")}
+                {...errorProp(translateFieldError(t, errors.ssccIssuerCounterpartyId?.message))}
                 onValueChange={(value) => {
                   ssccIssuerTouchedRef.current = true;
+                  clearErrors("ssccIssuerCounterpartyId");
                   setValue("ssccIssuerCounterpartyId", value, {
                     shouldDirty: true,
                     shouldValidate: true,

@@ -18,10 +18,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.Factory
 import androidx.compose.material.icons.outlined.Refresh
-import androidx.compose.material.icons.outlined.Report
-import androidx.compose.material.icons.outlined.Sync
-import androidx.compose.material.icons.outlined.SystemUpdate
-import androidx.compose.material.icons.outlined.WifiOff
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -43,7 +39,6 @@ import app.markiro.handheld.core.design.MarkiroSizes
 import app.markiro.handheld.core.design.MarkiroTextButton
 import app.markiro.handheld.core.design.MarkiroTheme
 import app.markiro.handheld.core.design.PrimaryButton
-import app.markiro.handheld.core.design.StateAction
 import app.markiro.handheld.core.design.Tone
 import app.markiro.handheld.core.network.ShiftDto
 import app.markiro.handheld.core.storage.ShiftEntity
@@ -117,81 +112,9 @@ fun ShiftListScreen(state: ShiftListUi, cb: ShiftListCallbacks) {
     val c = MarkiroTheme.colors
     val t = MarkiroTheme.type
     Column(Modifier.fillMaxSize().background(c.surfacePage)) {
-        when (val d = state.dialog) {
-            is ShiftDialog.ConfirmOther -> {
-                AppBar(stringResource(R.string.shifts_title), cb.onDismiss)
-                FullScreenState(
-                    Icons.Outlined.Factory,
-                    stringResource(R.string.shifts_join_other_title),
-                    stringResource(R.string.shifts_join_other_text, d.shift.number, d.lineName, state.ownLineName.orEmpty()),
-                    primary = StateAction(stringResource(R.string.shifts_enter), cb.onConfirmOther),
-                    secondary = StateAction(stringResource(R.string.common_cancel), cb.onDismiss),
-                )
-                return
-            }
-            ShiftDialog.Entering -> {
-                AppBar(stringResource(R.string.shifts_title))
-                FullScreenState(Icons.Outlined.Sync, stringResource(R.string.shifts_entering), "", tone = Tone.Info)
-                return
-            }
-            ShiftDialog.UpdateRequired -> {
-                AppBar(stringResource(R.string.shifts_title), cb.onDismiss)
-                FullScreenState(
-                    Icons.Outlined.SystemUpdate,
-                    stringResource(R.string.shifts_update_required_title),
-                    stringResource(R.string.shifts_update_required_text),
-                    primary = StateAction(stringResource(R.string.common_got_it), cb.onDismiss),
-                    tone = Tone.Warn,
-                    primaryIsAccent = false,
-                )
-                return
-            }
-            ShiftDialog.Closed -> {
-                AppBar(stringResource(R.string.shifts_title), cb.onDismiss)
-                FullScreenState(
-                    Icons.Outlined.Factory,
-                    stringResource(R.string.shifts_closed_title),
-                    stringResource(R.string.shifts_closed_text),
-                    primary = StateAction(stringResource(R.string.common_got_it), cb.onDismiss),
-                    primaryIsAccent = false,
-                )
-                return
-            }
-            is ShiftDialog.Refused -> {
-                AppBar(stringResource(R.string.shifts_title), cb.onDismiss)
-                FullScreenState(
-                    Icons.Outlined.Report,
-                    stringResource(R.string.shifts_refused_title),
-                    stringResource(
-                        R.string.shifts_refused_text,
-                        stringResource(
-                            when (d.step) {
-                                EnterStep.ENTER -> R.string.shifts_refused_step_enter
-                                EnterStep.BUNDLE -> R.string.shifts_refused_step_bundle
-                            },
-                        ),
-                        d.status,
-                        d.code ?: stringResource(R.string.shifts_refused_no_code),
-                    ),
-                    primary = StateAction(stringResource(R.string.common_got_it), cb.onDismiss),
-                    tone = Tone.Err,
-                    primaryIsAccent = false,
-                )
-                return
-            }
-            ShiftDialog.Unavailable -> {
-                AppBar(stringResource(R.string.shifts_title), cb.onDismiss)
-                FullScreenState(
-                    Icons.Outlined.WifiOff,
-                    stringResource(R.string.common_server_unavailable),
-                    stringResource(R.string.shifts_needs_network),
-                    primary = StateAction(stringResource(R.string.common_retry), cb.onRefresh),
-                    secondary = StateAction(stringResource(R.string.common_cancel), cb.onDismiss),
-                    tone = Tone.Err,
-                )
-                return
-            }
-            null -> Unit
+        state.dialog?.let { dialog ->
+            ShiftDialogScreen(dialog, state.ownLineName, onDismiss = cb.onDismiss, onRetry = cb.onRefresh, onConfirmOther = cb.onConfirmOther)
+            return
         }
         // Two ways to ask again, because the list is the one screen where a
         // stale answer stops the work: the gesture for whoever knows it, and a

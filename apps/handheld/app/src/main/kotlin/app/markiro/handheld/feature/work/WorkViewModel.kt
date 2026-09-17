@@ -24,6 +24,7 @@ import app.markiro.handheld.core.duplicate.DuplicateSend
 import app.markiro.handheld.core.duplicate.JobStatus
 import app.markiro.handheld.core.duplicate.Verification
 import app.markiro.handheld.core.km.Verdict
+import app.markiro.handheld.core.km.feedTail
 import app.markiro.handheld.core.network.ReachabilityTracker
 import app.markiro.handheld.core.scan.ScanEvents
 import app.markiro.handheld.core.scan.ScanOutcome
@@ -49,7 +50,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -60,6 +64,15 @@ import javax.inject.Inject
 /** Seam for the signaller so tests can record kinds. */
 fun interface SignalPort {
     fun play(kind: SignalKind)
+}
+
+/** Why a scan was refused before it was judged at all. */
+enum class ScanBlock {
+    /** Another unit's duplicate label is unresolved; see `routeDuplicateScan`. */
+    DUPLICATE_JOB,
+
+    /** The open box is at capacity and its close was refused; see `handleScan`. */
+    BOX_FULL,
 }
 
 data class LastScan(
@@ -74,9 +87,11 @@ data class LastScan(
      * good code whose only problem was that another unit's label was still
      * unresolved -- a lie, and one that sends them looking at the wrong thing.
      */
-    val blocked: Boolean = false,
+    val blockedBy: ScanBlock? = null,
     val refusal: app.markiro.handheld.core.scan.ValidationRefusal? = null,
-)
+) {
+    val blocked: Boolean get() = blockedBy != null
+}
 
 /** The open box, as the fill grid needs it. Null outside an aggregation shift. */
 data class BoxUi(val ordinal: Int, val filled: Int, val capacity: Int)
@@ -173,6 +188,14 @@ data class WorkUi(
     /** Set while «Закрыть паллету досрочно» is asking to be confirmed. */
     val palletConfirm: PalletConfirm? = null,
     val validation: ValidationUi? = null,
+    /** The scanner chip's text, the same one the hub shows; empty falls back to a generic label. */
+    val scannerLabel: String = "",
+    /**
+     * Why the open box, sitting at capacity, could not be closed -- held here
+     * so the reason stays on the work screen after the full-screen refusal is
+     * dismissed, and until a close succeeds. Null while nothing is refused.
+     */
+    val boxRefusal: CloseResult? = null,
 )
 
 data class ValidationUi(val pending: Int = 0, val conflicts: Int = 0, val fetchedAt: String? = null)
@@ -213,6 +236,7 @@ class WorkViewModel(
             delay(TEAM_REFRESH_MS)
         }
     },
+    private val scannerLabel: () -> String = { "" },
 ) : ViewModel() {
     @Inject
     constructor(
@@ -234,9 +258,11 @@ class WorkViewModel(
         closePallet: ClosePallet,
         palletPrinter: PalletPrinter,
         exceptions: ExceptionEngine,
+        scannerLabel: app.markiro.handheld.core.scan.ScannerLabel,
     ) : this(
         handle, db, recorder, scans, { signaller.play(it) }, sync, session, reachability, team, repository,
         boxes, closer, boxPrinter, duplicates, pallets, closePallet, palletPrinter, exceptions,
+        scannerLabel = { scannerLabel() },
     )
 
     val shiftId: String = checkNotNull(handle["shiftId"])
@@ -245,8 +271,36 @@ class WorkViewModel(
     private val generation = db.recovery.token()
     private val last = MutableStateFlow<LastScan?>(null)
     private val teamState = MutableStateFlow<TeamState?>(null)
-    private val boxUi = MutableStateFlow<BoxUi?>(null)
     private val palletUi = MutableStateFlow<PalletUi?>(null)
+    private val boxRefusal = MutableStateFlow<CloseResult?>(null)
+
+    /**
+     * The open box, or the one the next scan will open, as the fill grid needs
+     * it. Null outside an aggregation shift.
+     *
+     * Derived from the rows rather than recomputed at chosen moments: the
+     * header read «Короб 1 · 21 / 20» after an undo on the exceptions screen
+     * until the next scan, because the box was refreshed only on scan and on
+     * entry. Whatever screen changes the rows -- undo, clear, disassemble, a
+     * close -- this follows.
+     *
+     * Deliberately does not CREATE a row: opening the screen is not packing,
+     * and a box row created per visit would give the shift a trail of empty
+     * boxes and make the drawn number jump.
+     */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private val boxUi: Flow<BoxUi?> = combine(db.shiftDao().observe(shiftId), db.boxDao().observeOpen(shiftId)) { shift, open ->
+        Pair(shift?.takeIf { it.mode == "aggregation" }?.let { it.boxCapacity ?: 0 }, open)
+    }.distinctUntilChanged().flatMapLatest { (capacity, open) ->
+        when {
+            capacity == null -> flowOf(null)
+            open == null -> flow { emit(BoxUi(boxes.closedCount(shiftId) + 1, 0, capacity)) }
+            else -> flow {
+                val ordinal = boxes.ordinal(open)
+                emitAll(boxes.observeItemCount(open.boxId).map { BoxUi(ordinal, it, capacity) })
+            }
+        }
+    }
     private val palletConfirmState = MutableStateFlow<PalletConfirm?>(null)
 
     private val closing = AtomicBoolean(false)
@@ -318,6 +372,7 @@ class WorkViewModel(
         palletUi,
         palletConfirmState,
         validationUi,
+        boxRefusal,
     ) { values ->
         val shift = values[0] as ShiftEntity?
         val c = values[2] as Counters
@@ -344,14 +399,15 @@ class WorkViewModel(
             pallet = values[11] as PalletUi?,
             palletConfirm = values[12] as PalletConfirm?,
             validation = if (shift?.validationPrintMode == "duplicate_dm") values[13] as ValidationUi else null,
+            scannerLabel = scannerLabel(),
+            boxRefusal = values[14] as CloseResult?,
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, WorkUi(null, null, 0, null, 0, 0, 0, emptyList(), SyncState(), false, null))
 
     init {
-        // An aggregation shift shows its box from the moment it opens. Waiting for
-        // the first scan means the operator meets the validation layout and the
-        // grid appears from nowhere.
-        viewModelScope.launch(grantDenial.handler) { db.recovery.work(generation) { showCurrentBox() } }
+        // The pallet strip (06d) is shown from entry rather than only after the
+        // first box closes into one, for the same reason the box grid is
+        // (`boxUi`): an operator should not meet the validation layout first.
         // Same reasoning for the pallet strip beneath it (06d): a shift with
         // pallets enabled shows «0 / N коробов» from entry rather than only
         // after the first box closes into one.
@@ -428,13 +484,30 @@ class WorkViewModel(
         // is deliberately not dropped -- an operator whose unit vanished with no
         // sound and no count has no way to know it needs scanning again.
         val aggregating = shift.mode == "aggregation"
-        val box = if (aggregating) boxes.currentBox(shiftId) else null
+        val capacity = shift.boxCapacity ?: 0
+        var box = if (aggregating) boxes.currentBox(shiftId) else null
+        // A box already at capacity is one whose close was refused -- no
+        // issuer, a dry pool -- with the unit that filled it still inside. Found
+        // on the emulator: the next unit was written in regardless, and the box
+        // went to 21 / 20, 22 / 20, without limit. The close is tried again
+        // first, because the reason may be gone (a block arrived with the
+        // network): then this unit is the first of the NEXT box. Still refused,
+        // the unit is refused with it: nothing is recorded, the box stays at
+        // capacity, and the reason stays on screen (`boxRefusal`) rather than
+        // taking the screen over again for every scan the operator already
+        // knows will not fit.
+        if (box != null && capacity > 0 && boxes.itemCount(box.boxId) >= capacity) {
+            if (!closeAndPrint(shift, showRefusal = false)) {
+                last.value = LastScan(Verdict.OK, BLOCKED_TAIL, null, Iso.format(System.currentTimeMillis()), blockedBy = ScanBlock.BOX_FULL)
+                signals.play(SignalKind.ERROR)
+                return
+            }
+            box = boxes.currentBox(shiftId)
+        }
         val outcome = recorder.record(shift, raw, session.state.value.operator?.operatorId, box?.boxId)
         last.value = outcome.toLastScan(raw)
         sync.nudge()
 
-        val capacity = shift.boxCapacity ?: 0
-        if (box != null) refreshBox(box.boxId, capacity)
         if (box != null && outcome.verdict == Verdict.OK && capacity > 0 && boxes.itemCount(box.boxId) >= capacity) {
             // The box's own signal is decided inside `closeAndPrint`, once the close
             // result is known -- see the comment there for why it cannot be played
@@ -447,30 +520,6 @@ class WorkViewModel(
         // already holds would put a second sticker on one physical item.
         if (shift.validationPrintMode == "duplicate_dm" && outcome.verdict == Verdict.OK) {
             printDuplicate(shift, raw, outcome.scannedAt)
-        }
-    }
-
-    private suspend fun refreshBox(boxId: String, capacity: Int) {
-        val row = boxes.get(boxId) ?: return
-        boxUi.value = BoxUi(boxes.ordinal(row), boxes.itemCount(boxId), capacity)
-    }
-
-    /**
-     * The open box, or the one the next scan will open.
-     *
-     * Deliberately does not CREATE a row: opening the screen is not packing, and a
-     * box row created per visit would give the shift a trail of empty boxes and
-     * make the drawn number jump.
-     */
-    private suspend fun showCurrentBox() {
-        val shift = db.shiftDao().get(shiftId) ?: return
-        if (shift.mode != "aggregation") return
-        val capacity = shift.boxCapacity ?: 0
-        val open = db.boxDao().open(shiftId)
-        boxUi.value = if (open != null) {
-            BoxUi(boxes.ordinal(open), boxes.itemCount(open.boxId), capacity)
-        } else {
-            BoxUi(boxes.closedCount(shiftId) + 1, 0, capacity)
         }
     }
 
@@ -512,9 +561,17 @@ class WorkViewModel(
      * own signal. True from the scan that filled it (`onScan`); false from a
      * manual «Закрыть короб досрочно» (`closeEarly`), which -- pre-existing,
      * unrelated to this fix -- plays no signal of its own either way.
+     * @param showRefusal Whether a refusal takes the full screen. False for the
+     * retry a scan makes against a box already known to be stuck, whose reason
+     * is already on the work screen.
+     * @return Whether a box closed.
      */
-    private suspend fun closeAndPrint(shift: ShiftEntity, signalBoxDone: Boolean = false) {
-        when (val result = closer.close(shiftId, shift.ssccIssuerPrefix, session.state.value.operator?.operatorId)) {
+    private suspend fun closeAndPrint(shift: ShiftEntity, signalBoxDone: Boolean = false, showRefusal: Boolean = true): Boolean {
+        val result = closer.close(shiftId, shift.ssccIssuerPrefix, session.state.value.operator?.operatorId)
+        // `Empty` is not a stuck box: nothing was refused that a next scan
+        // could not change, so it neither sets nor clears the standing reason.
+        if (result != CloseResult.Empty) boxRefusal.value = result.takeUnless { it is CloseResult.Closed }
+        when (result) {
             is CloseResult.Closed -> {
                 val closed = ClosedBoxUi(
                     boxId = result.box.boxId,
@@ -533,7 +590,6 @@ class WorkViewModel(
                 val palletAlsoClosed = result.pallet is ClosePalletResult.Closed
                 if (signalBoxDone && !palletAlsoClosed) signals.play(SignalKind.BOX_DONE)
                 _closeStep.value = BoxCloseStep.Printing(closed)
-                showCurrentBox()
                 // The box's own membership join already happened inside `closer.close`
                 // (06d); this only refreshes the strip's numbers to match.
                 showCurrentPallet()
@@ -555,8 +611,12 @@ class WorkViewModel(
                     null -> Unit
                     else -> _palletCloseStep.value = PalletCloseStep.Refused(palletResult)
                 }
+                return true
             }
-            else -> _closeStep.value = BoxCloseStep.Refused(result)
+            else -> {
+                if (showRefusal) _closeStep.value = BoxCloseStep.Refused(result)
+                return false
+            }
         }
     }
 
@@ -798,7 +858,7 @@ class WorkViewModel(
 
     /** A scan that was not judged at all: its own words, and the error signal. */
     private fun refuse() {
-        last.value = LastScan(Verdict.OK, BLOCKED_TAIL, null, Iso.format(System.currentTimeMillis()), blocked = true)
+        last.value = LastScan(Verdict.OK, BLOCKED_TAIL, null, Iso.format(System.currentTimeMillis()), blockedBy = ScanBlock.DUPLICATE_JOB)
         signals.play(SignalKind.ERROR)
     }
 

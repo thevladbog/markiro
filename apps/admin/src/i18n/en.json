@@ -2420,7 +2420,9 @@
           "productRequired": "Select a product",
           "qtyInvalid": "Enter a positive whole number",
           "capacityInvalid": "Enter a positive whole number",
-          "boxLabelTemplateRequired": "Select a box label template for aggregation"
+          "boxLabelTemplateRequired": "Select a box label template for aggregation",
+          "ORG_GLN_MISSING": "The organization has no GLN — the boxes of an aggregation shift will not get SSCCs. Set the GLN under Settings → Organization profile.",
+          "SSCC_ISSUER_GLN_MISSING": "The selected issuer has no GLN — boxes will not get SSCCs. Set the counterparty's GLN under Counterparties."
         }
       },
       "closeModal": {

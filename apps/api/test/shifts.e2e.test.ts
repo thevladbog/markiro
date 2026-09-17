@@ -196,13 +196,29 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       defaultSource: "organization",
       validationPrintProtocol: null,
       validationReprocessingProtocol: null,
+      // The manager cannot read the profile, but can learn that planning an
+      // aggregation shift on the organisation's numbers would be refused.
+      orgGlnConfigured: false,
     });
     expect(Object.keys(response.body)).toEqual([
       "defaultBoxLabelTemplateId",
       "defaultSource",
       "validationPrintProtocol",
       "validationReprocessingProtocol",
+      "orgGlnConfigured",
     ]);
+  });
+
+  it("GET /shifts/planning-config reports the organisation GLN as configured once it is set", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+    expect((await agent.get("/shifts/planning-config").expect(200)).body.orgGlnConfigured).toBe(
+      false,
+    );
+    await agent.put("/org/profile").send({ gln: "4601112222005" }).expect(200);
+    expect((await agent.get("/shifts/planning-config").expect(200)).body.orgGlnConfigured).toBe(
+      true,
+    );
   });
 
   // ---------------------------------------------------------------------
@@ -1023,6 +1039,10 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
   it("POST /shifts snapshots the organisation default box template when omitted", async () => {
     const agent = request.agent(app!.getHttpServer());
     const orgId = await signUpAndActivate(agent);
+    // Starting an aggregation shift needs an SSCC source (see
+    // `SsccService.assertIssuerConfiguredForActivation`); the GLN itself is
+    // not under test here.
+    await agent.put("/org/profile").send({ gln: "4601112222005" }).expect(200);
     const defaultTemplateId = await setDefaultBoxLabelTemplate(agent, orgId, "Original Default");
     const replacementTemplateId = await seedLabelTemplate(orgId, "Replacement Default");
     const productId = await seedProduct(orgId, {
@@ -1265,6 +1285,10 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
   it("PATCH /shifts/:id updates safe metadata on an active shift and rejects operational changes", async () => {
     const agent = request.agent(app!.getHttpServer());
     const orgId = await signUpAndActivate(agent);
+    // Starting an aggregation shift needs an SSCC source (see
+    // `SsccService.assertIssuerConfiguredForActivation`); the GLN itself is
+    // not under test here.
+    await agent.put("/org/profile").send({ gln: "4601112222005" }).expect(200);
     const productId = await seedProduct(orgId, {
       status: "active",
       chzProductGroupCode: 8,
@@ -1951,6 +1975,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       validationReprocessingProtocol: null,
       defaultBoxLabelTemplateId: beerDefault,
       defaultSource: "category",
+      orgGlnConfigured: false,
     });
     const milkConfig = await agent.get(`/shifts/planning-config?productId=${milk}`).expect(200);
     expect(milkConfig.body).toEqual({
@@ -1958,6 +1983,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       validationReprocessingProtocol: null,
       defaultBoxLabelTemplateId: orgDefault,
       defaultSource: "organization",
+      orgGlnConfigured: false,
     });
     const orgConfig = await agent.get("/shifts/planning-config").expect(200);
     expect(orgConfig.body).toEqual({
@@ -1965,6 +1991,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       validationReprocessingProtocol: null,
       defaultBoxLabelTemplateId: orgDefault,
       defaultSource: "organization",
+      orgGlnConfigured: false,
     });
     await agent.get(`/shifts/planning-config?productId=${randomUUID()}`).expect(404);
 

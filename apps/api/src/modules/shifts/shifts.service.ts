@@ -52,7 +52,22 @@ import {
   PALLET_EXTENSION_DIGIT,
   SsccCapacityExhaustedException,
   SsccService,
+  ssccIssuerProblemOf,
 } from "../sscc/sscc.service";
+
+type BundleAllocation = Pick<
+  ShiftBundleDto,
+  "sscc" | "ssccIssuerProblem" | "ssccRevokedFrom" | "palletSscc" | "palletSsccRevokedFrom"
+>;
+
+/** A bundle with no serial block and no issuer to blame for it. */
+const NO_ALLOCATION: BundleAllocation = {
+  sscc: null,
+  ssccIssuerProblem: null,
+  ssccRevokedFrom: [],
+  palletSscc: null,
+  palletSsccRevokedFrom: [],
+};
 import type {
   BoxTemplateResolution,
   CloseShiftDto,
@@ -291,6 +306,10 @@ export class ShiftsService {
   async getPlanningConfig(tenantId: string, productId?: string): Promise<ShiftPlanningConfigDto> {
     const chzProductGroupCode = await this.productGroupCodeForPicker(tenantId, productId);
     const resolved = await resolveDefaultBoxLabelTemplate(this.db, tenantId, chzProductGroupCode);
+    const [profile] = await this.db
+      .select({ gln: schema.orgProfiles.gln })
+      .from(schema.orgProfiles)
+      .where(eq(schema.orgProfiles.tenantId, tenantId));
     return {
       defaultBoxLabelTemplateId: resolved.templateId,
       defaultSource: resolved.source,
@@ -298,6 +317,7 @@ export class ShiftsService {
       validationReprocessingProtocol: this.duplicateEnabled
         ? VALIDATION_REPROCESSING_PROTOCOL
         : null,
+      orgGlnConfigured: Boolean(profile?.gln),
     };
   }
 
@@ -1407,6 +1427,15 @@ export class ShiftsService {
       if (!current) throw new NotFoundException();
       if (current.status !== "planned")
         throw new ConflictException("Shift can only be opened while planned");
+      // An aggregation shift that could never number a box must not start;
+      // see `SsccService.assertIssuerConfiguredForActivation`.
+      if (current.mode === "aggregation") {
+        await this.sscc.assertIssuerConfiguredForActivation(
+          tenantId,
+          current.ssccIssuerCounterpartyId,
+          tx,
+        );
+      }
       if (current.palletsEnabled) await this.entitlements.assertFeatureAccess(tenantId, "pallets");
       // A shift planned before this slice can hold palletsEnabled with a
       // null capacity; opening it must fail loudly rather than hand a
@@ -1476,6 +1505,15 @@ export class ShiftsService {
       assertProductLabelCapability(previous, capabilities);
       if (shift.status === "closed") throw new ConflictException("Closed shifts cannot be entered");
       if (shift.status === "planned") {
+        // Same guard as openShift: a device entering a planned shift is what
+        // starts it, and it must not start without an SSCC source.
+        if (shift.mode === "aggregation") {
+          await this.sscc.assertIssuerConfiguredForActivation(
+            tenantId,
+            shift.ssccIssuerCounterpartyId,
+            tx,
+          );
+        }
         if (shift.palletsEnabled) await this.entitlements.assertFeatureAccess(tenantId, "pallets");
         // Same guard as openShift, for the device-entry path into an active shift.
         assertPalletConfiguration({
@@ -1564,7 +1602,7 @@ export class ShiftsService {
     const allocation =
       referenceBundle.shift.mode === "aggregation" && deviceId
         ? await this.bundleSscc(tenantId, referenceBundle.shift.id, deviceId)
-        : { sscc: null, ssccRevokedFrom: [], palletSscc: null, palletSsccRevokedFrom: [] };
+        : NO_ALLOCATION;
     return { ...referenceBundle, ...allocation };
   }
 
@@ -1685,6 +1723,7 @@ export class ShiftsService {
       counterpartyGln,
       operators,
       sscc: null,
+      ssccIssuerProblem: null,
       ssccRevokedFrom: [],
       palletSscc: null,
       palletSsccRevokedFrom: [],
@@ -1748,9 +1787,7 @@ export class ShiftsService {
     tenantId: string,
     shiftId: string,
     deviceId: string,
-  ): Promise<
-    Pick<ShiftBundleDto, "sscc" | "ssccRevokedFrom" | "palletSscc" | "palletSsccRevokedFrom">
-  > {
+  ): Promise<BundleAllocation> {
     return this.db.transaction(async (tx) => {
       const [shift] = await tx
         .select({
@@ -1763,14 +1800,14 @@ export class ShiftsService {
         .where(and(eq(schema.shifts.tenantId, tenantId), eq(schema.shifts.id, shiftId)))
         .for("update");
       if (!shift || shift.status !== "active" || shift.mode !== "aggregation") {
-        return { sscc: null, ssccRevokedFrom: [], palletSscc: null, palletSsccRevokedFrom: [] };
+        return NO_ALLOCATION;
       }
 
       const access = await this.entitlements.resolveRecovery(tenantId, tx, new Date());
       if (access.access === "read_only") {
         const endsAt = access.subscription?.endsAt;
         if (!endsAt || !shift.openedAt || shift.openedAt >= endsAt) {
-          return { sscc: null, ssccRevokedFrom: [], palletSscc: null, palletSsccRevokedFrom: [] };
+          return NO_ALLOCATION;
         }
       }
 
@@ -1779,16 +1816,16 @@ export class ShiftsService {
         issuerPrefix = await this.sscc.resolveIssuerPrefix(tenantId, shiftId, tx);
       } catch (error) {
         if (!(error instanceof BadRequestException)) throw error;
-        // The station never sees this (the bundle just comes back with
-        // sscc: null, silently, by the design note above), so the server log
-        // is the ONLY place this is ever visible -- it must carry enough to
-        // act on: which tenant, which shift, and resolveIssuerPrefix's own
-        // reason (no org GLN, or no GLN on the shift's named sscc issuer
-        // counterparty).
+        // The bundle still comes back with `sscc: null` (the design note
+        // above), but the device is no longer left to guess why: the two
+        // issuer refusals travel as `ssccIssuerProblem`, so the handheld can
+        // warn from entry -- «В организации не задан GLN» / «У
+        // контрагента-эмитента нет GLN» -- instead of on the twentieth scan.
+        // The log line stays for the office, with tenant, shift and reason.
         this.logger.warn(
           `Shift ${shiftId} (tenant ${tenantId}) bundle has no box serial block -- ${error.message}`,
         );
-        return { sscc: null, ssccRevokedFrom: [], palletSscc: null, palletSsccRevokedFrom: [] };
+        return { ...NO_ALLOCATION, ssccIssuerProblem: ssccIssuerProblemOf(error) };
       }
       try {
         const sscc = await this.sscc.allocateForBundle(
@@ -1844,13 +1881,19 @@ export class ShiftsService {
           }
         }
 
-        return { sscc, ssccRevokedFrom, palletSscc, palletSsccRevokedFrom };
+        return {
+          sscc,
+          ssccIssuerProblem: null,
+          ssccRevokedFrom,
+          palletSscc,
+          palletSsccRevokedFrom,
+        };
       } catch (error) {
         if (!(error instanceof SsccCapacityExhaustedException)) throw error;
         this.logger.warn(
           `Shift ${shiftId} (tenant ${tenantId}) bundle has no box serial block -- ${error.message}`,
         );
-        return { sscc: null, ssccRevokedFrom: [], palletSscc: null, palletSsccRevokedFrom: [] };
+        return NO_ALLOCATION;
       }
     });
   }

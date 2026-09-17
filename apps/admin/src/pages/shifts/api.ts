@@ -118,6 +118,8 @@ export interface ShiftPlanningConfigDto {
   defaultBoxLabelTemplateId: string | null;
   /** Which default answered: the product's category, the organisation, or none. */
   defaultSource: "category" | "organization" | null;
+  /** Whether the organisation profile has a GLN; an aggregation shift on its numbers cannot start without one. */
+  orgGlnConfigured: boolean;
 }
 
 export interface ShiftParticipantDto {

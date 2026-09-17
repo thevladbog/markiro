@@ -94,11 +94,13 @@ fun ExceptionsScreen(state: ExceptionsUi, cb: ExceptionsCallbacks) {
             return
         }
         is ExceptionsStep.Done -> {
+            // A result, not a question: «Отмена» under «Скан отменён» read as
+            // «отменить отмену». The same closing word as every other result screen.
             FullScreenState(
                 icon = Icons.Outlined.CheckCircle,
                 title = stringResource(step.message),
                 text = "",
-                primary = StateAction(stringResource(R.string.common_cancel), cb.onDismiss),
+                primary = StateAction(stringResource(R.string.common_got_it), cb.onDismiss),
                 tone = Tone.Ok,
             )
             return
@@ -108,7 +110,7 @@ fun ExceptionsScreen(state: ExceptionsUi, cb: ExceptionsCallbacks) {
                 icon = Icons.Outlined.Warning,
                 title = stringResource(step.message),
                 text = "",
-                primary = StateAction(stringResource(R.string.common_cancel), cb.onDismiss),
+                primary = StateAction(stringResource(R.string.common_got_it), cb.onDismiss),
                 tone = Tone.Warn,
             )
             return

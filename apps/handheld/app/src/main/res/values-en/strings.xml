@@ -395,6 +395,8 @@
     <!-- Aggregation: boxes -->
     <string name="work_box_header">Box %1$d · %2$d / %3$d</string>
     <string name="work_close_box_early">Close the box early (%1$d)</string>
+    <string name="work_close_box_full">Close the box (%1$d)</string>
+    <string name="work_box_full">BOX FULL</string>
     <!-- Aggregation: pallets (06d) -->
     <string name="pallet_strip">%1$d / %2$d boxes</string>
     <string name="work_close_pallet_early">Close the pallet early</string>
@@ -421,6 +423,10 @@
     <string name="box_refused_no_serials_hint">The box stayed open. Connect to the network and the device will be granted a new block.</string>
     <string name="box_refused_empty">The box is empty</string>
     <string name="box_refused_no_issuer">This shift has no SSCC issuer</string>
+    <string name="sscc_warning_org_gln">The organisation has no GLN — boxes will not get SSCCs. Set the GLN in the cabinet: Settings → Organisation profile, then re-enter the shift.</string>
+    <string name="sscc_warning_issuer_gln">The SSCC issuer counterparty has no GLN — boxes will not get SSCCs. Set the GLN in the cabinet: Counterparties, then re-enter the shift.</string>
+    <string name="sscc_warning_no_block">The shift has no SSCC number block — boxes cannot close. Re-enter the shift while the server is reachable.</string>
+    <string name="box_refused_no_issuer_hint">The box stayed open. Set the GLN in the cabinet and re-enter the shift.</string>
     <string name="box_refused_invalid_serial">The number does not fit the prefix</string>
     <string name="box_refused_invalid_serial_hint">The box stayed open. Try closing it again.</string>
     <string name="box_refused_dismiss">Got it</string>

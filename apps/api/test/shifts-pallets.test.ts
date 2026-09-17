@@ -163,6 +163,10 @@ describe.skipIf(!ready)("shift pallet configuration (task 8)", () => {
   }> {
     const agent = request.agent(app!.getHttpServer());
     const tenantId = await signUpAndActivate(agent);
+    // Starting an aggregation shift needs an SSCC source (see
+    // `SsccService.assertIssuerConfiguredForActivation`); the GLN itself is
+    // not under test here.
+    await agent.put("/org/profile").send({ gln: "4601112222005" }).expect(200);
     const boxTemplateId = await setDefaultBoxLabelTemplate(agent, tenantId);
     const { id: productId } = await seedProductRow(tenantId);
     return { agent, tenantId, boxTemplateId, productId };

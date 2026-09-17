@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import app.markiro.handheld.R
 import app.markiro.handheld.core.exceptions.ExceptionEngine
 import app.markiro.handheld.core.exceptions.UndoResult
+import app.markiro.handheld.core.km.serialTail
 import app.markiro.handheld.core.storage.CodeEntity
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.util.Iso
@@ -110,8 +111,10 @@ class ExceptionsViewModel @Inject constructor(
         }
     }
 
+    // The same serial tail the work screen's journal shows, so the operator can
+    // match «Последний скан: …» to a journal row. A hash tail named nothing.
     private fun targetOf(last: CodeEntity) = UndoTarget(
-        codeTail = last.codeHash.takeLast(6).uppercase(),
+        codeTail = serialTail(last.serial),
         scannedAt = Iso.parse(last.scannedAt)?.let { TimeText.hhmmss(it) } ?: last.scannedAt,
         codeHash = last.codeHash,
     )

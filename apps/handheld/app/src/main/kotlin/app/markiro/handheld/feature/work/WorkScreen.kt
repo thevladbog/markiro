@@ -48,7 +48,7 @@ import app.markiro.handheld.core.design.Banner
 import app.markiro.handheld.core.design.FullScreenState
 import app.markiro.handheld.core.design.IconAction
 import app.markiro.handheld.core.design.StateAction
-import app.markiro.handheld.core.km.KmCodec
+import app.markiro.handheld.core.km.feedTail
 import app.markiro.handheld.core.design.MarkiroChip
 import app.markiro.handheld.core.design.MarkiroSizes
 import app.markiro.handheld.core.design.MarkiroTextButton
@@ -61,6 +61,9 @@ import app.markiro.handheld.core.design.tone
 import app.markiro.handheld.core.km.Verdict
 import app.markiro.handheld.core.util.Iso
 import app.markiro.handheld.core.util.TimeText
+import app.markiro.handheld.core.box.CloseResult
+import app.markiro.handheld.feature.shift.label
+import app.markiro.handheld.feature.shift.ssccWarning
 import java.text.NumberFormat
 
 data class WorkCallbacks(
@@ -93,7 +96,7 @@ fun WorkScreen(state: WorkUi, cb: WorkCallbacks) {
                 },
                 StatusItem(Icons.Outlined.Sync, stringResource(R.string.hub_queue, state.sync.pending), if (state.sync.stuck) Tone.Err else Tone.Neutral),
                 StatusItem(Icons.Outlined.Print, stringResource(R.string.hub_printer)),
-                StatusItem(Icons.Outlined.QrCodeScanner, stringResource(R.string.hub_scanner)),
+                StatusItem(Icons.Outlined.QrCodeScanner, state.scannerLabel.ifEmpty { stringResource(R.string.hub_scanner) }),
             ),
         )
         if (state.sync.stuck) {
@@ -105,6 +108,22 @@ fun WorkScreen(state: WorkUi, cb: WorkCallbacks) {
                 stringResource(R.string.hub_offline_banner)
             }
             Banner(text, Tone.Warn, Icons.Outlined.WifiOff)
+        }
+        // A full box whose close was refused: the reason stays here, in words,
+        // until a close succeeds. The full-screen refusal is dismissed once; a
+        // banner is what the operator reads on the next scan that will not fit.
+        val refusal = state.boxRefusal
+        val warning = state.shift?.ssccWarning()
+        if (refusal != null && refusal != CloseResult.NoIssuer) {
+            Banner(boxRefusalText(refusal), Tone.Err, Icons.Outlined.ErrorOutline)
+        }
+        // The missing-issuer case is one banner, not two: the warning names the
+        // reason and where to fix it from entry, and turns red once a box is
+        // actually stuck on it.
+        if (warning != null) {
+            Banner(stringResource(warning.label()), if (refusal == CloseResult.NoIssuer) Tone.Err else Tone.Warn, Icons.Outlined.ErrorOutline)
+        } else if (refusal == CloseResult.NoIssuer) {
+            Banner(boxRefusalText(refusal), Tone.Err, Icons.Outlined.ErrorOutline)
         }
         Row(Modifier.fillMaxWidth().padding(horizontal = MarkiroSizes.sp4, vertical = MarkiroSizes.sp2), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -137,8 +156,11 @@ fun WorkScreen(state: WorkUi, cb: WorkCallbacks) {
                         },
                     )
                     if (state.box != null) {
+                        // «Досрочно» only while the box is not full: on a full one it
+                        // misleads, and on an over-full one it means nothing.
+                        val early = state.box.capacity <= 0 || state.box.filled < state.box.capacity
                         DropdownMenuItem(
-                            text = { Text(stringResource(R.string.work_close_box_early, state.box.filled)) },
+                            text = { Text(stringResource(if (early) R.string.work_close_box_early else R.string.work_close_box_full, state.box.filled)) },
                             onClick = {
                                 menu = false
                                 cb.onCloseBoxEarly()
@@ -372,7 +394,10 @@ private fun LastScanZone(last: LastScan?, duplicate: DuplicateUi?, modifier: Mod
 private fun LastScanStrip(last: LastScan?) {
     val c = MarkiroTheme.colors
     val t = MarkiroTheme.type
-    val colors = last?.verdict?.verdictTone()?.let { c.tone(it) }
+    // A refusal is its own tone, as in `LastScanZone`: a refused scan carries
+    // `Verdict.OK` because it was never judged, and painting it green would
+    // tell the operator the unit went in.
+    val colors = last?.let { c.tone(if (it.blocked) Tone.Warn else it.verdict.verdictTone()) }
     Row(
         Modifier.fillMaxWidth().padding(horizontal = MarkiroSizes.sp4).clip(RoundedCornerShape(MarkiroSizes.radius))
             .background(colors?.bg ?: c.surfaceCard).padding(horizontal = MarkiroSizes.sp3, vertical = MarkiroSizes.sp2),
@@ -382,10 +407,31 @@ private fun LastScanStrip(last: LastScan?) {
         if (last == null || colors == null) {
             Text(stringResource(R.string.work_waiting), style = t.caption, color = c.fg3)
         } else {
-            Text(stringResource(last.verdict.label()), style = t.strong.copy(fontSize = 16.sp), color = colors.fg)
+            val label = when (last.blockedBy) {
+                ScanBlock.BOX_FULL -> R.string.work_box_full
+                ScanBlock.DUPLICATE_JOB -> R.string.duplicate_blocked
+                null -> last.verdict.label()
+            }
+            Text(stringResource(label), style = t.strong.copy(fontSize = 16.sp), color = colors.fg)
             Text(last.tail, style = t.code.copy(fontSize = 16.sp), color = c.fg1)
         }
     }
+}
+
+/**
+ * Why the open box cannot close, in words, with the next step where there is
+ * one. Shares its strings with the full-screen refusal so the two never say
+ * different things about the same box.
+ */
+@Composable
+internal fun boxRefusalText(reason: CloseResult): String {
+    val (title, hint) = when (reason) {
+        CloseResult.NoSerials -> R.string.box_refused_no_serials to R.string.box_refused_no_serials_hint
+        CloseResult.InvalidSerial -> R.string.box_refused_invalid_serial to R.string.box_refused_invalid_serial_hint
+        CloseResult.NoIssuer -> R.string.box_refused_no_issuer to R.string.box_refused_no_issuer_hint
+        else -> R.string.box_refused_empty to null
+    }
+    return stringResource(title) + (hint?.let { " · " + stringResource(it) } ?: "")
 }
 
 /**
@@ -407,13 +453,6 @@ fun PlanReachedScreen(total: Int, plan: Int, onClose: () -> Unit, onContinue: ()
             tone = Tone.Ok,
         )
     }
-}
-
-/** Display only: preserve the full raw code in storage, printing and verification. */
-internal fun feedTail(raw: String): String {
-    val serial = runCatching { KmCodec.canonicalize(raw).serial }.getOrNull()
-        ?: raw.substringBefore(KmCodec.GS).trim()
-    return if (serial.length > 8) "…" + serial.takeLast(8) else serial
 }
 
 @Composable

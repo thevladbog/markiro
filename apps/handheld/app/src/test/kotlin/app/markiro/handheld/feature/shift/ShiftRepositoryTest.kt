@@ -249,6 +249,33 @@ class ShiftRepositoryTest {
         assertEquals("s1", db.deviceConfigDao().get()?.activeShiftId)
     }
 
+    /**
+     * Found on the emulator: the server answered `sscc: null` and wrote only a
+     * WARN to its own log, so the operator learned about the missing GLN on
+     * the twentieth scan. The bundle now names the reason, and the device
+     * keeps it to warn from entry -- and drops it once a block arrives.
+     */
+    @Test
+    fun enteringAnAggregationShiftWithoutAnIssuerKeepsTheServersReason() = runTest {
+        val degraded = aggregationBundleJson
+            .replace(""""sscc":{"issuerPrefix":"468008990","extensionDigit":0,"fromSerial":101,"toSerial":1000,"consumedThroughSerial":100},""", """"sscc":null,"ssccIssuerProblem":"org_gln_missing",""")
+        server.enqueue(MockResponse().setBody(aggregationShiftJson))
+        server.enqueue(MockResponse().setBody(degraded))
+        assertEquals(EnterResult.Ok, repo().enter("s1"))
+        val stuck = db.shiftDao().get("s1")!!
+        assertNull(stuck.ssccIssuerPrefix)
+        assertEquals("org_gln_missing", stuck.ssccIssuerProblem)
+        assertEquals(SsccWarning.ORG_GLN_MISSING, stuck.ssccWarning())
+
+        server.enqueue(MockResponse().setBody(aggregationShiftJson))
+        server.enqueue(MockResponse().setBody(aggregationBundleJson))
+        assertEquals(EnterResult.Ok, repo().enter("s1"))
+        val fixed = db.shiftDao().get("s1")!!
+        assertEquals("468008990", fixed.ssccIssuerPrefix)
+        assertNull(fixed.ssccIssuerProblem)
+        assertNull(fixed.ssccWarning())
+    }
+
     @Test
     fun enteringAnAggregationShiftStoresItsBlockAndTemplate() = runTest {
         server.enqueue(MockResponse().setBody(aggregationShiftJson))

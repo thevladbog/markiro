@@ -110,7 +110,11 @@ class HubViewModelTest {
     private fun dto(id: String, number: String, status: String) =
         ShiftDto(id, number, status, mode = "validation", validationPrint = ValidationPrintDto("none"), productId = "p1", palletsEnabled = false)
 
-    private fun api(fail: Boolean = false) = object : StationApi {
+    private fun api(
+        fail: Boolean = false,
+        enter: suspend (String) -> ShiftDto = { throw UnsupportedOperationException() },
+        bundle: suspend (String) -> ShiftBundleDto = { throw UnsupportedOperationException() },
+    ) = object : StationApi {
         override suspend fun grantInventoryLeave(id: String, body: kotlinx.serialization.json.JsonObject): kotlinx.serialization.json.JsonObject = error("Unused")
         override suspend fun grantConfiguration(body: kotlinx.serialization.json.JsonObject): kotlinx.serialization.json.JsonObject = error("Unused")
         override suspend fun grantKeyset(): kotlinx.serialization.json.JsonObject = throw java.io.IOException("unconfigured")
@@ -132,8 +136,8 @@ class HubViewModelTest {
                 listOf(InventoryTaskDto("i1", "INV-0007", "Вода 0,5 л", null, "check", "line-2", "Линия 2", "2026-08-01", "2026-08-31")),
             )
         }
-        override suspend fun enter(id: String): ShiftDto = throw UnsupportedOperationException()
-        override suspend fun bundle(id: String): ShiftBundleDto = throw UnsupportedOperationException()
+        override suspend fun enter(id: String): ShiftDto = enter(id)
+        override suspend fun bundle(id: String): ShiftBundleDto = bundle(id)
         override suspend fun summary(id: String): ShiftSummaryDto = throw UnsupportedOperationException()
         override suspend fun lines(): LineListResponse = throw UnsupportedOperationException()
         override suspend fun resolveInventoryBarcode(body: ResolveTaskRequest): ResolveTaskResponse = throw UnsupportedOperationException()
@@ -145,7 +149,12 @@ class HubViewModelTest {
         override suspend fun boxRegistry(since: String?, until: String?, cursor: String?, limit: Int): app.markiro.handheld.core.network.BoxRegistryPageDto = error("Unused")
     }
 
-    private fun vm(api: StationApi, team: TeamRefresher = TeamRefresher { null }, tick: Flow<Unit> = flowOf(Unit)): HubViewModel {
+    private fun vm(
+        api: StationApi,
+        team: TeamRefresher = TeamRefresher { null },
+        tick: Flow<Unit> = flowOf(Unit),
+        repository: app.markiro.handheld.feature.shift.ShiftRepository? = null,
+    ): HubViewModel {
         val engine = SyncEngine(
             db, MetaStore(db), db.deviceConfigDao(), SyncTransport(OkHttpClient()) { "http://127.0.0.1:1/" },
             NetworkModule.strictJson(), engineScope,
@@ -162,9 +171,62 @@ class HubViewModelTest {
             HubViewModel(recovery = db.recovery,
                 api, db.deviceConfigDao(), session, reachability, engine, db.shiftDao(), inventoryEngine, db.inventoryTaskDao(), db.printerDao(),
                 BoxRepository(db), db.codeDao(), team, writeoffEngine, db.writeoffPermissionDao(),
-                scannerLabel = { "встроенный" }, now = { clock }, tick = tick,
+                scannerLabel = { "встроенный" }, now = { clock }, tick = tick, shiftRepository = repository,
             ),
         )
+    }
+
+    private fun repository(api: StationApi) =
+        app.markiro.handheld.feature.shift.ShiftRepository(api, db, NetworkModule.json(), app.markiro.handheld.core.box.SsccPool(db)) { clock }
+
+    /**
+     * Found on the emulator: the card led straight to the work screen without
+     * `enter`, so a GLN, a serial block or a template changed in the cabinet
+     * after entry never reached the device until the operator left the shift
+     * and came back through the list. «Продолжить» is the list's own path now.
+     */
+    @Test
+    fun continueReEntersTheShiftAndRefreshesItsBundle() = runTest {
+        db.shiftDao().upsert(ShiftEntityFixtures.bundled("s1").copy(mode = "aggregation", boxCapacity = 20))
+        db.deviceConfigDao().upsert(paired.copy(activeShiftId = "s1"))
+        var entered = 0
+        val api = api(
+            enter = { entered++; dto("s1", "SEP26-001", "active").copy(mode = "aggregation", boxCapacity = 20) },
+            bundle = {
+                ShiftBundleDto(
+                    shift = dto("s1", "SEP26-001", "active").copy(mode = "aggregation", boxCapacity = 20),
+                    product = app.markiro.handheld.core.network.BundleProductDto("p1", "04600682000013", "Вода 0,5"),
+                    sscc = app.markiro.handheld.core.network.BundleSsccDto("468008990", 0, 1, 100, null),
+                )
+            },
+        )
+        val model = vm(api, repository = repository(api))
+        model.state.first { it.activeShiftId == "s1" }
+        model.continueShift()
+        assertEquals(HubEvent.Entered("s1"), model.events.first())
+        assertEquals(1, entered)
+        assertEquals("468008990", db.shiftDao().get("s1")?.ssccIssuerPrefix)
+        assertNull(model.state.first { it.dialog == null }.dialog)
+    }
+
+    @Test
+    fun aRefusedContinueShowsTheSameDialogAsTheList() = runTest {
+        db.shiftDao().upsert(ShiftEntityFixtures.bundled("s1"))
+        db.deviceConfigDao().upsert(paired.copy(activeShiftId = "s1"))
+        val api = api(enter = {
+            throw retrofit2.HttpException(
+                retrofit2.Response.error<ShiftDto>(409, okhttp3.ResponseBody.create(null, """{"statusCode":409,"message":"Closed"}""")),
+            )
+        })
+        val model = vm(api, repository = repository(api))
+        model.state.first { it.activeShiftId == "s1" }
+        model.continueShift()
+        assertEquals(
+            app.markiro.handheld.feature.shift.ShiftDialog.Closed,
+            model.state.first { it.dialog != null && it.dialog != app.markiro.handheld.feature.shift.ShiftDialog.Entering }.dialog,
+        )
+        model.dismissDialog()
+        assertNull(model.state.first { it.dialog == null }.dialog)
     }
 
     private fun pendingWriteoff(id: String, seq: Long) = app.markiro.handheld.core.storage.WriteoffOutboxEntity(

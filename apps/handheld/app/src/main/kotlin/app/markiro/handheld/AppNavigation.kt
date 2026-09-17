@@ -214,10 +214,18 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
             }
             composable(Routes.HUB) {
                 val vm: HubViewModel = hiltViewModel()
+                vm.grantDenial.Dialog()
                 val state by vm.state.collectAsStateWithLifecycle()
                 LaunchedEffect(Unit) {
                     refresher.refresh()
                     vm.refresh()
+                }
+                LaunchedEffect(Unit) {
+                    vm.events.collect { event ->
+                        when (event) {
+                            is app.markiro.handheld.feature.hub.HubEvent.Entered -> nav.navigate(Routes.work(event.shiftId))
+                        }
+                    }
                 }
                 HubScreen(
                     state,
@@ -229,9 +237,13 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                             HubTile.SETTINGS -> nav.navigate(Routes.SETTINGS)
                         }
                     },
-                    onContinueShift = { nav.navigate(Routes.work(it)) },
+                    // The list's own path (`enter`, then the bundle), not a jump to
+                    // the work screen: a cabinet change after entry reaches the
+                    // device on «Продолжить» too.
+                    onContinueShift = { vm.continueShift() },
                     onSignOut = vm::signOut,
                     onLabelQueue = { nav.navigate(Routes.LABEL_QUEUE) },
+                    onDismissDialog = vm::dismissDialog,
                 )
             }
             // One ViewModel across all four steps: the step is state, so hardware

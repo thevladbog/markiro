@@ -94,6 +94,13 @@ export interface StationBundle {
   counterpartyGln: string | null;
   operators: OperatorMirrorRecord[];
   /**
+   * Why `sscc` is null when the shift's issuer has no GLN (`org_gln_missing`
+   * / `issuer_gln_missing`); null otherwise. Optional for rolling
+   * compatibility, like `palletLabelTemplate`; the station does not act on
+   * it yet -- the handheld does.
+   */
+  ssccIssuerProblem?: "org_gln_missing" | "issuer_gln_missing" | null;
+  /**
    * The box serial block this device may print from -- aggregation shifts
    * only, and only when this device fetched the bundle over its own
    * api-key (see ShiftBundleDto.sscc in shifts/dto.ts on the server).

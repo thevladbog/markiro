@@ -89,6 +89,20 @@ class ExceptionsScreenTest {
         compose.onNode(hasText("12", substring = true)).assertIsDisplayed()
     }
 
+    /**
+     * The result step borrowed the shared «Отмена» label, so «Скан отменён»
+     * closed with a button that read as «отменить отмену».
+     */
+    @Test
+    fun aResultStepClosesWithGotItNotCancel() {
+        var dismissed = false
+        render(ui(step = ExceptionsStep.Done(R.string.exceptions_undone)), ExceptionsCallbacks(onDismiss = { dismissed = true }))
+        compose.onNodeWithText("Скан отменён").assertIsDisplayed()
+        compose.onNodeWithText("Отмена").assertDoesNotExist()
+        compose.onNodeWithText("Понятно").assertIsDisplayed().performClick()
+        assertEquals(true, dismissed)
+    }
+
     @Test
     fun aRefusalIsShownInWords() {
         render(ui(step = ExceptionsStep.Refused(R.string.exceptions_undo_stale)))
