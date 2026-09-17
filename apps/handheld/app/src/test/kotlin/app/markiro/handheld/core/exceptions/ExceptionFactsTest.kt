@@ -118,6 +118,14 @@ class ExceptionFactsTest {
         assertEquals(JsonNull, json["terminalId"])
     }
 
+    /** A warehouse pallet's correction names no shift: the key is still spelled out as a null. */
+    @Test
+    fun aWarehousePalletFactSpellsOutItsNullShift() {
+        val json = palletReprint.copy(shiftId = null).toWireJson()
+        assertEquals(palletKeys, json.keys.toList())
+        assertTrue(json.toString().contains("\"shiftId\":null"))
+    }
+
     /** `reason` is `z.string().min(1)` for both pallet kinds -- never null, never empty. */
     @Test
     fun aPalletFactAlwaysCarriesANonEmptyReason() {

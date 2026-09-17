@@ -467,13 +467,14 @@ class SyncEngine(
 
     private fun PalletEntity.toClosure(deviceId: String) = PalletClosureDto(
         palletId = palletId,
-        // The closure DTO still names a shift; only a production pallet reaches
-        // this channel today, and Task 3 widens the contract for the warehouse one.
-        shiftId = checkNotNull(shiftId) { "production pallet without a shift" },
+        // Null for a warehouse pallet: that pallet belongs to no shift.
+        shiftId = shiftId,
         terminalId = deviceId,
         sscc = checkNotNull(sscc) { "pallet $palletId is queued without an SSCC" },
         closedAt = checkNotNull(closedAt) { "pallet $palletId is queued while still open" },
         operatorId = operatorId,
+        kind = kind,
+        productId = productId,
     )
 
     private class BatchResponse(

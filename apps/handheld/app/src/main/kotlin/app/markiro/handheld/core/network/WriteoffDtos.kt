@@ -87,6 +87,11 @@ data class BoxRegistryItemDto(
     val productId: String? = null,
     val bottleCount: Int? = null,
     val contentKeys: List<String>? = null,
+    val palletId: String? = null,
+    val palletSscc: String? = null,
+    val palletActive: Boolean? = null,
+    val closedAt: String? = null,
+    val productionDate: String? = null,
 )
 
 @Serializable

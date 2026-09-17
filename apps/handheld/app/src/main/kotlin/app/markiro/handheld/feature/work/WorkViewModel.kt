@@ -694,7 +694,7 @@ class WorkViewModel(
             try {
                 val row = db.palletDao().get(closed.palletId)
                 if (row?.printState == app.markiro.handheld.core.storage.PalletPrint.UNKNOWN) {
-                    exceptions.reprintPallet(checkNotNull(row.shiftId) { "production pallet without a shift" }, row.palletId, ReprintReason.PRINT_OUTCOME_UNKNOWN,
+                    exceptions.reprintPallet(row.shiftId, row.palletId, ReprintReason.PRINT_OUTCOME_UNKNOWN,
                         session.state.value.operator?.operatorId, db.deviceConfigDao().get()?.deviceId)
                 }
                 _palletCloseStep.value = PalletCloseStep.Printing(closed)

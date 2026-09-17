@@ -163,7 +163,7 @@ class ExceptionEngine(
      * pallets off the same physical event and keep different ledgers.
      */
     suspend fun reprintPallet(
-        shiftId: String,
+        shiftId: String?,
         palletId: String,
         reason: ReprintReason,
         operatorId: String?,
@@ -171,7 +171,7 @@ class ExceptionEngine(
     ) = db.recovery.work { reprintPalletOwned(shiftId, palletId, reason, operatorId, terminalId) }
 
     private suspend fun reprintPalletOwned(
-        shiftId: String,
+        shiftId: String?,
         palletId: String,
         reason: ReprintReason,
         operatorId: String?,

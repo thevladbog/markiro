@@ -134,7 +134,8 @@ enum class PalletExceptionKind(val wire: String) {
 data class PalletExceptionFact(
     val kind: PalletExceptionKind,
     val palletId: String,
-    val shiftId: String,
+    /** Null for a warehouse pallet's correction: that pallet belongs to no shift. */
+    val shiftId: String?,
     /** Informational on the wire: the server always uses the authenticated device. */
     val terminalId: String?,
     val operatorId: String?,
