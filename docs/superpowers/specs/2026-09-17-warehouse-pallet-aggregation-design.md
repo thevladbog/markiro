@@ -97,12 +97,17 @@ record. A membership history table was considered and left out.
 ### 1.3 `pallet_exceptions`
 
 `shift_id` → nullable (today NOT NULL). The index
-`pallet_exceptions_tenant_shift_recorded_idx` stays; a partial index on
-`(tenant_id, pallet_id, recorded_at)` is added for the card.
+`pallet_exceptions_tenant_shift_recorded_idx` stays; the card reads through
+the existing `pallet_exceptions_tenant_pallet_idx` (`tenant_id, pallet_id,
+recorded_at`) — no new index is needed.
 
 ### 1.4 `pallet_membership_rejections`
 
-New, append-only:
+New, append-only. Migration 0163 also scopes
+`shift_exports_total_code_count_positive` to shift rows (`total_code_count
+is null or ... > 0 or pallet_id is not null`) and relaxes the artifact
+check to `shift_export_artifacts_code_count_nonnegative` (`code_count >=
+0`), because a pallet export legitimately reports zero unit codes:
 
 | Column                                | Notes                                                              |
 | ------------------------------------- | ------------------------------------------------------------------ |
@@ -179,7 +184,10 @@ queue forever.
 **`pallets[]`** (closures) gains `kind: 'production' | 'warehouse'`
 (default `production`), `productId: uuid | null` and allows `shiftId: null`
 when `kind = 'warehouse'`. Validation: `warehouse ⇒ shiftId null ∧ productId
-set`; `production ⇒ shiftId set`.
+set`; `production ⇒ shiftId set`. For a warehouse pallet, `pallets.terminal_id`
+must equal `device_id::text` (DB CHECK `pallets_warehouse_terminal_check`);
+the pre-pass writes both from the authenticated device, never from the wire
+`terminalId`.
 
 **Per-record response** — the batch response gains
 
@@ -267,12 +275,14 @@ known limitation of this slice, surfaced on the device as «unknown box».
   `productId`, `closedFrom`, `closedTo`, `deviceId`; cursor pagination when
   `shiftId` is absent. Each row gains `kind`, `productId`, `productName`,
   `deviceName`, `rejectedMembershipCount`.
-- `GET /pallets/:id`: the card — pallet fields, boxes with `shiftId`,
-  `shiftNumber`, `productionDate`, `unitCount`, exceptions, rejections.
+- The card is served by the existing `GET /code-search/pallets/:id` (no new
+  route): pallet fields, boxes with `shiftId`, `shiftNumber`,
+  `productionDate`, `unitCount`, exceptions, rejections.
 - `POST /pallets/:id/exports` with `format: 'pallet_xml_gismt_aggregation'`,
   run by the existing durable report-job runner, file in object storage,
-  audit `pallet.export.created` with actor, tenant, pallet id, format, result.
-  Available for any closed, non-disassembled pallet of either kind.
+  audit `pallet_export.created` on submission and `pallet_export.completed`
+  / `pallet_export.failed` on outcome, with actor, tenant, pallet id, format,
+  result. Available for any closed, non-disassembled pallet of either kind.
 - `PUT /employees/:id` accepts `canBuildPallets`.
 - `PUT /org/profile` pallet defaults already exist; the admin picker ships
   here (06d's open debt).
