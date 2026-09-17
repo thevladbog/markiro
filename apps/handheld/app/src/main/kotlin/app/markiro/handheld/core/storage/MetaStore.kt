@@ -46,8 +46,22 @@ class MetaStore(private val db: HandheldDatabase) {
         const val WRITEOFF_LAST_SUCCESS_AT = "writeoff_sync_last_success_at"
         /** When the bootstrap last landed; the «данные на 10:42» stamp. */
         const val WRITEOFF_BOOTSTRAP_AT = "writeoff_bootstrap_at"
-        /** The box-registry revision this device has fully applied; the next refresh asks for a delta from here. */
-        const val WRITEOFF_REGISTRY_UNTIL = "writeoff_registry_until"
+        /**
+         * The box-registry revision this device has fully applied; the next
+         * refresh asks for a delta from here. The stored key keeps its
+         * write-off name so an installed device keeps its cursor across the
+         * rename of the table it feeds.
+         */
+        const val BOX_REGISTRY_UNTIL = "writeoff_registry_until"
+
+        /** Memberships' own pin, for the identical reason every other channel here has one. */
+        const val SYNC_PENDING_MEMBERSHIP_COUNT = "sync_pending_membership_count"
+
+        /** When the pallet bootstrap last landed; the «данные на 10:42» stamp. */
+        const val PALLET_BOOTSTRAP_AT = "pallet_bootstrap_at"
+
+        /** The SSCC issuer prefix the pallet bootstrap carried, for locally minted pallet SSCCs. */
+        const val PALLET_BOOTSTRAP_ISSUER_PREFIX = "pallet_bootstrap_issuer_prefix"
 
         /** The in-flight document, so a retry re-sends exactly that row and nothing else. */
         fun writeoffPin(documentId: String) = "writeoff_pending:$documentId"

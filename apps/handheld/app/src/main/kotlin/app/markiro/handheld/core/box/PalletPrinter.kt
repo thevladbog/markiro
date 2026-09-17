@@ -52,7 +52,10 @@ class PalletPrinter(
         if (pallet.printState == PalletPrint.UNKNOWN && !allowUnknown) return PrintOutcome.Unknown(pallet.printReason ?: "interrupted")
         val closedAt = pallet.closedAt ?: return fail(palletId, PrintReason.PALLET_OPEN)
         val sscc = pallet.sscc ?: return fail(palletId, PrintReason.PALLET_OPEN)
-        val shift = db.shiftDao().get(pallet.shiftId) ?: return fail(palletId, PrintReason.SHIFT_MISSING)
+        // A warehouse pallet has no shift and no shift-bound template; it gets
+        // its own label path, so here a missing shift reads as "not printable".
+        val shiftId = pallet.shiftId ?: return fail(palletId, PrintReason.SHIFT_MISSING)
+        val shift = db.shiftDao().get(shiftId) ?: return fail(palletId, PrintReason.SHIFT_MISSING)
         val templateJson = shift.palletLabelTemplateSpec ?: return fail(palletId, PrintReason.TEMPLATE_MISSING)
         val destinations = PrintDestinations(db)
         if (reprint && pallet.printState == PalletPrint.PRINTED && !replaced) {

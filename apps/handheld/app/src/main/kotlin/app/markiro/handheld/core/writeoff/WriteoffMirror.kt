@@ -4,7 +4,7 @@ import app.markiro.handheld.core.network.BoxRegistryItemDto
 import app.markiro.handheld.core.network.StationApi
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.MetaStore
-import app.markiro.handheld.core.storage.WriteoffBoxEntity
+import app.markiro.handheld.core.storage.BoxRegistryEntity
 import app.markiro.handheld.core.storage.WriteoffPermissionEntity
 import app.markiro.handheld.core.storage.WriteoffProductEntity
 import app.markiro.handheld.core.storage.WriteoffReasonEntity
@@ -24,7 +24,7 @@ sealed interface MirrorOutcome {
 }
 
 /** The box contents the registry listed, as `01…21…` keys. */
-fun WriteoffBoxEntity.contentKeys(): List<String> =
+fun BoxRegistryEntity.contentKeys(): List<String> =
     runCatching { Json.decodeFromString(KEYS, contentKeysJson) }.getOrDefault(emptyList())
 
 private val KEYS = ListSerializer(String.serializer())
@@ -38,7 +38,7 @@ private val KEYS = ListSerializer(String.serializer())
  * not linger. The box registry is a delta instead: it is unbounded, so the device
  * keeps the revision it has fully applied and asks for changes since then.
  *
- * `WRITEOFF_REGISTRY_UNTIL` is stored only after the final page. A crash mid-walk
+ * `BOX_REGISTRY_UNTIL` is stored only after the final page. A crash mid-walk
  * therefore re-reads pages the device already has (upserts are idempotent) rather
  * than skipping the tail forever.
  */
@@ -73,15 +73,15 @@ class WriteoffMirror(
     }
 
     private sealed interface Change {
-        data class Put(val row: WriteoffBoxEntity) : Change
+        data class Put(val row: BoxRegistryEntity) : Change
         data class Drop(val sscc: String) : Change
     }
 
     private suspend fun walkRegistry(): MirrorOutcome {
-        val since = meta.get(MetaStore.WRITEOFF_REGISTRY_UNTIL)
+        val since = meta.get(MetaStore.BOX_REGISTRY_UNTIL)
         // Without a revision the device knows nothing: the answer is the whole
         // registry, so anything it still holds was removed while it was away.
-        if (since == null) db.recovery.commit { db.writeoffBoxDao().clear() }
+        if (since == null) db.recovery.commit { db.boxRegistryDao().clear() }
         var cursor: String? = null
         var until: String? = null
         while (true) {
@@ -92,14 +92,14 @@ class WriteoffMirror(
             db.recovery.commit {
                 // Applied in the server's order: within one page the last word on an SSCC wins.
                 for (c in changes) when (c) {
-                    is Change.Put -> db.writeoffBoxDao().upsert(c.row)
-                    is Change.Drop -> db.writeoffBoxDao().remove(c.sscc)
+                    is Change.Put -> db.boxRegistryDao().upsert(c.row)
+                    is Change.Drop -> db.boxRegistryDao().remove(c.sscc)
                 }
             }
             cursor = page.nextCursor ?: break
         }
         val applied = until ?: return MirrorOutcome.Failed("registry window")
-        db.recovery.commit { meta.put(MetaStore.WRITEOFF_REGISTRY_UNTIL, applied) }
+        db.recovery.commit { meta.put(MetaStore.BOX_REGISTRY_UNTIL, applied) }
         return MirrorOutcome.Ok
     }
 
@@ -114,7 +114,7 @@ class WriteoffMirror(
                 null
             } else {
                 Change.Put(
-                    WriteoffBoxEntity(
+                    BoxRegistryEntity(
                         sscc = item.sscc, boxId = boxId, productId = productId, bottleCount = bottleCount,
                         contentKeysJson = Json.encodeToString(KEYS, contentKeys), updatedAt = item.updatedAt,
                     ),

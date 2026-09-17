@@ -134,7 +134,7 @@ class LabelQueueViewModel @Inject constructor(
         val pallet = pallets.get(palletId) ?: return
         if (pallet.printState != PalletPrint.UNKNOWN) return
         exceptions.reprintPallet(
-            shiftId = pallet.shiftId,
+            shiftId = checkNotNull(pallet.shiftId) { "production pallet without a shift" },
             palletId = palletId,
             reason = ReprintReason.PRINT_OUTCOME_UNKNOWN,
             operatorId = session.state.value.operator?.operatorId,

@@ -116,6 +116,29 @@ interface PalletDao {
     @Query("UPDATE pallets SET ackedAt = :at WHERE palletId IN (:palletIds)")
     suspend fun markAcked(palletIds: List<String>, at: String)
 
+    @Query("SELECT * FROM pallets WHERE kind = 'warehouse' AND deviceId = :deviceId AND closedAt IS NULL LIMIT 1")
+    suspend fun openWarehouse(deviceId: String): PalletEntity?
+
+    @Query("SELECT * FROM pallets WHERE kind = 'warehouse' AND deviceId = :deviceId AND closedAt IS NULL LIMIT 1")
+    fun observeOpenWarehouse(deviceId: String): Flow<PalletEntity?>
+
+    /** Recent warehouse pallets of this device, newest first, for the mode's list. */
+    @Query(
+        "SELECT * FROM pallets WHERE kind = 'warehouse' AND deviceId = :deviceId " +
+            "ORDER BY closedAt IS NOT NULL, closedAt DESC, openedAt DESC LIMIT :limit",
+    )
+    fun observeWarehouse(deviceId: String, limit: Int): Flow<List<PalletEntity>>
+
+    @Query("SELECT * FROM pallets WHERE sscc = :sscc LIMIT 1")
+    suspend fun bySscc(sscc: String): PalletEntity?
+
+    /** Guarded so a second retirement is a no-op the caller can name. */
+    @Query("UPDATE pallets SET disassembledAt = :at WHERE palletId = :palletId AND closedAt IS NOT NULL AND disassembledAt IS NULL")
+    suspend fun markDisassembled(palletId: String, at: String): Int
+
+    @Query("SELECT COUNT(*) FROM pallets WHERE closedAt IS NOT NULL AND disassembledAt IS NULL AND (:shiftId IS NULL OR shiftId = :shiftId)")
+    fun observeClosedCount(shiftId: String?): Flow<Int>
+
     @Query("DELETE FROM pallets")
     suspend fun clear()
 }

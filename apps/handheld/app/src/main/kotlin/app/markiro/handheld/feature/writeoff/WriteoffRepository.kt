@@ -6,7 +6,7 @@ import app.markiro.handheld.core.network.WriteoffItemDto
 import app.markiro.handheld.core.network.WriteoffRequestDto
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.MetaStore
-import app.markiro.handheld.core.storage.WriteoffBoxEntity
+import app.markiro.handheld.core.storage.BoxRegistryEntity
 import app.markiro.handheld.core.storage.WriteoffOutboxEntity
 import app.markiro.handheld.core.storage.WriteoffReasonEntity
 import app.markiro.handheld.core.util.Iso
@@ -42,7 +42,7 @@ interface WriteoffGateway {
     /** By id: how the box registry names one. */
     suspend fun productNameById(productId: String): String?
 
-    suspend fun box(sscc: String): WriteoffBoxEntity?
+    suspend fun box(sscc: String): BoxRegistryEntity?
 
     /** Null when the mirror has never covered this operator: unknown, not refused. */
     suspend fun canWriteoff(operatorId: String): Boolean?
@@ -85,7 +85,7 @@ class WriteoffRepository(
 
     override suspend fun productNameById(productId: String): String? = db.writeoffProductDao().byId(productId)?.name
 
-    override suspend fun box(sscc: String): WriteoffBoxEntity? = db.writeoffBoxDao().bySscc(sscc)
+    override suspend fun box(sscc: String): BoxRegistryEntity? = db.boxRegistryDao().bySscc(sscc)
 
     override suspend fun canWriteoff(operatorId: String): Boolean? =
         db.writeoffPermissionDao().get(operatorId)?.canWriteoff
@@ -135,4 +135,4 @@ class WriteoffRepository(
 }
 
 /** The unit keys a box contributes, so a loose unit already inside it reads as a duplicate. */
-fun WriteoffBoxEntity.keys(): List<String> = contentKeys()
+fun BoxRegistryEntity.keys(): List<String> = contentKeys()
