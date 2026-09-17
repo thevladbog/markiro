@@ -394,7 +394,10 @@ export function ShiftForm({
     // organisation's side comes from `planning-config`'s `orgGlnConfigured`
     // (the profile itself is protected from managers); an unknown answer
     // (`undefined`, planning not loaded) defers to the server's own refusal.
-    if (values.mode === "aggregation") {
+    // An ACTIVE shift is already started and its issuer is frozen (the select
+    // is disabled), so editing its metadata must not be held up by a GLN that
+    // went missing after the start.
+    if (values.mode === "aggregation" && !activeEdit) {
       const issuerId = values.ssccIssuerCounterpartyId?.trim();
       const issuer = issuerId ? counterparties.find((c) => c.id === issuerId) : undefined;
       // Planning may still be resolving for a freshly chosen product; settle

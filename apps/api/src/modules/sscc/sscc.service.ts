@@ -377,9 +377,15 @@ export class SsccService {
     tenantId: string,
     issuerCounterpartyId: string | null,
     executor: Pick<Db, "select"> = this.db,
+    options: { lock?: boolean } = {},
   ): Promise<string> {
+    // `lock` takes the issuer row FOR UPDATE inside the caller's transaction,
+    // so a concurrent profile/counterparty update that clears the GLN waits
+    // for the activation to commit (or the activation sees the cleared
+    // value) rather than the two interleaving. Only activation asks for it:
+    // bundle fetches and settings reads must not serialise on the profile row.
     if (issuerCounterpartyId) {
-      const [cp] = await executor
+      const counterparty = executor
         .select({ gln: schema.counterparties.gln })
         .from(schema.counterparties)
         .where(
@@ -388,6 +394,7 @@ export class SsccService {
             eq(schema.counterparties.id, issuerCounterpartyId),
           ),
         );
+      const [cp] = options.lock ? await counterparty.for("update") : await counterparty;
       if (!cp?.gln) {
         throw new BadRequestException({
           code: SSCC_ISSUER_GLN_MISSING,
@@ -397,10 +404,11 @@ export class SsccService {
       return deriveIssuerPrefix(cp.gln, "sscc issuer counterparty");
     }
 
-    const [profile] = await executor
+    const profileQuery = executor
       .select({ gln: schema.orgProfiles.gln })
       .from(schema.orgProfiles)
       .where(eq(schema.orgProfiles.tenantId, tenantId));
+    const [profile] = options.lock ? await profileQuery.for("update") : await profileQuery;
     if (!profile?.gln) {
       throw new BadRequestException({
         code: ORG_GLN_MISSING,
@@ -426,7 +434,7 @@ export class SsccService {
     executor: Pick<Db, "select"> = this.db,
   ): Promise<void> {
     try {
-      await this.resolveIssuerPrefixFor(tenantId, issuerCounterpartyId, executor);
+      await this.resolveIssuerPrefixFor(tenantId, issuerCounterpartyId, executor, { lock: true });
     } catch (error) {
       if (!(error instanceof BadRequestException)) throw error;
       throw new UnprocessableEntityException(error.getResponse());
