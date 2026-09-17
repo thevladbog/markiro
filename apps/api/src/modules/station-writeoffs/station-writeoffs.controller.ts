@@ -13,7 +13,7 @@ import { AllowStationOrPermissions } from "../../authorization/access-policy";
 import { AuthorizationGuard } from "../../authorization/authorization.guard";
 import {
   AllowSubscriptionReadOnly,
-  RequireSubscriptionWrite,
+  AllowSubscriptionRecovery,
 } from "../../subscriptions/subscription-access-policy";
 import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access.guard";
 import { StationOnlyGuard } from "../../tenancy/station-only.guard";
@@ -51,11 +51,11 @@ export class StationWriteoffsController {
   @Post("station/writeoffs")
   @UseGuards(StationOnlyGuard)
   @AllowStationOrPermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
-  @RequireSubscriptionWrite()
+  @AllowSubscriptionRecovery("station")
   @ApiOperation({
     summary: "File a write-off from a handheld",
     description:
-      "Idempotent on (device, deviceSeq): a replayed sync returns the original document instead of filing a second act. Before the target's server-authoritative newWorkAllowedAt, a fresh document is durably quarantined and returns 409 with code device_replacement_waiting, outcome quarantined, receiptId and newWorkAllowedAt. Retries replay that receipt, including after the boundary. Previously uncommitted source v1 documents are also durably quarantined while draining, with code device_replacement_draining and reason unproven_pre_drain_scope; a claimed createdAt does not establish prior authority. `reason` is fixed to `writeoff` server-side, and the operator the body asserts is re-checked against `can_writeoff`.",
+      "Recovery/replay reaches the service even when the subscription is read-only; a fresh business write still requires current write access inside its transaction. Idempotent on (device, deviceSeq): a replayed sync returns the original document instead of filing a second act. Before the target's server-authoritative newWorkAllowedAt, a fresh document is durably quarantined and returns 409 with code device_replacement_waiting, outcome quarantined, receiptId and newWorkAllowedAt. Retries replay that receipt, including after the boundary. Previously uncommitted source v1 documents are also durably quarantined while draining, with code device_replacement_draining and reason unproven_pre_drain_scope; a claimed createdAt does not establish prior authority. `reason` is fixed to `writeoff` server-side, and the operator the body asserts is re-checked against `can_writeoff`.",
   })
   @ApiStationAuth()
   @ApiBody({ schema: stationWriteoffOpenApiSchema })

@@ -600,7 +600,8 @@ export async function leaveInventoryTask(deps: LeaveInventoryTaskDeps): Promise<
     } else {
       response = await deps.client.post(
         `/station/inventories/${deps.inventoryId}/leave`,
-        leavePayload,
+        // Activation is durable before floor entry and survives restart/retry.
+        { ...leavePayload, requestId: activationId },
       );
     }
     if (

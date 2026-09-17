@@ -1071,4 +1071,409 @@ describe.skipIf(!ready)("replacement productive route matrix", () => {
         .where(eq(schema.pickupOrders.stationDeviceId, f.targetId)),
     ).toHaveLength(0);
   });
+  it("retains legacy inventory leave while a replacement target waits", async () => {
+    const f = await waitingTarget("station");
+    const body = { pendingEventCount: 0, openBoxCount: 0 };
+    const response = await f.post(`/station/inventories/${f.inventoryId}/leave`, body);
+    expect.soft(response.status).toBe(409);
+    expect.soft(response.body).toMatchObject({
+      code: "device_replacement_waiting",
+      outcome: "quarantined",
+      receiptId: expect.any(String),
+    });
+    expect
+      .soft(
+        await db
+          .select()
+          .from(schema.deviceGrantEvidence)
+          .where(eq(schema.deviceGrantEvidence.stationDeviceId, f.targetId)),
+      )
+      .toHaveLength(1);
+  });
+  it("retains a waiting target write-off after subscription expiry", async () => {
+    const f = await waitingTarget("handheld");
+    await db
+      .update(schema.tenantSubscriptions)
+      .set({ endsAt: new Date(Date.now() - 1) })
+      .where(eq(schema.tenantSubscriptions.tenantId, f.tenantId));
+    expect((await entitlements.resolve(f.tenantId, undefined, new Date())).access).toBe(
+      "read_only",
+    );
+    const body = {
+      deviceSeq: 51,
+      operatorId: f.operatorId,
+      writeoffReasonId: f.reasonId,
+      items: [{ rawKm: `01${GTIN}21EXPIRY123456789012${String.fromCharCode(29)}93Abcd` }],
+      boxes: [],
+      createdAt: new Date().toISOString(),
+    };
+    const response = await f.post("/station/writeoffs", body);
+    expect.soft(response.status).toBe(409);
+    expect.soft(response.body).toMatchObject({
+      code: "device_replacement_waiting",
+      outcome: "quarantined",
+      receiptId: expect.any(String),
+    });
+    expect
+      .soft(
+        await db
+          .select()
+          .from(schema.deviceGrantEvidence)
+          .where(eq(schema.deviceGrantEvidence.stationDeviceId, f.targetId)),
+      )
+      .toHaveLength(1);
+    expect((await f.post("/station/writeoffs", body).expect(409)).body).toEqual(response.body);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(f.boundary + 1);
+    expect((await f.post("/station/writeoffs", body).expect(409)).body).toEqual(response.body);
+    const denied = await f.post("/station/writeoffs", { ...body, deviceSeq: 52 }).expect(403);
+    expect(denied.body.code).toBe("subscription_read_only");
+    expect(
+      await db
+        .select()
+        .from(schema.pickupOrders)
+        .where(eq(schema.pickupOrders.stationDeviceId, f.targetId)),
+    ).toHaveLength(0);
+  });
+  it("replays and quarantines source write-offs after subscription expiry", async () => {
+    const f = await waitingTarget("handheld");
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(f.boundary + 1);
+    const body = {
+      deviceSeq: 61,
+      operatorId: f.operatorId,
+      writeoffReasonId: f.reasonId,
+      items: [{ rawKm: `01${GTIN}21EXPIRED-SOURCE1234${String.fromCharCode(29)}93Abcd` }],
+      boxes: [],
+      createdAt: new Date().toISOString(),
+    };
+    const committed = await f.post("/station/writeoffs", body).expect(201);
+    const preview = await preparationService.preview(
+      f.tenantId,
+      f.targetId,
+      {
+        requestId: randomUUID(),
+        target: { name: "Expired source target", kind: "handheld" },
+        reason: "Drain source",
+      },
+      f.actor,
+    );
+    const prepared = await preparationService.confirm(
+      f.tenantId,
+      f.targetId,
+      { requestId: preview.requestId, previewId: preview.id },
+      f.actor,
+    );
+    await readiness.requestDrain(
+      f.tenantId,
+      prepared.preparation.id,
+      { requestId: randomUUID(), expectedRevision: 1 },
+      f.actor,
+    );
+    await db
+      .update(schema.tenantSubscriptions)
+      .set({ endsAt: new Date(Date.now() - 1) })
+      .where(eq(schema.tenantSubscriptions.tenantId, f.tenantId));
+    expect((await f.post("/station/writeoffs", body).expect(201)).body).toEqual(committed.body);
+    const fresh = { ...body, deviceSeq: 62 };
+    const held = await f.post("/station/writeoffs", fresh).expect(409);
+    expect(held.body).toMatchObject({
+      code: "device_replacement_draining",
+      reason: "unproven_pre_drain_scope",
+      outcome: "quarantined",
+    });
+    expect((await f.post("/station/writeoffs", fresh).expect(409)).body).toEqual(held.body);
+    expect(
+      await db
+        .select()
+        .from(schema.pickupOrders)
+        .where(eq(schema.pickupOrders.stationDeviceId, f.targetId)),
+    ).toHaveLength(1);
+  });
+
+  it("checks current subscription in the fresh write transaction after a concurrent expiry", async () => {
+    const f = await waitingTarget("handheld");
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(f.boundary + 1);
+    const body = {
+      deviceSeq: 71,
+      operatorId: f.operatorId,
+      writeoffReasonId: f.reasonId,
+      items: [{ rawKm: `01${GTIN}21EXPIRY-RACE1234567${String.fromCharCode(29)}93Abcd` }],
+      boxes: [],
+      createdAt: new Date().toISOString(),
+    };
+    const holder = await connection.pool.connect();
+    await holder.query("BEGIN");
+    await holder.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
+      `box-registry:${f.tenantId}`,
+    ]);
+    const pending = f.post("/station/writeoffs", body).then((response) => response);
+    try {
+      let blocked = false;
+      for (let i = 0; i < 200 && !blocked; i++) {
+        const r = await connection.pool.query(
+          "SELECT pid FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND wait_event='advisory'",
+        );
+        blocked = r.rowCount === 1;
+        if (!blocked) await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      expect(blocked).toBe(true);
+      await db
+        .update(schema.tenantSubscriptions)
+        .set({ endsAt: new Date(Date.now() - 1) })
+        .where(eq(schema.tenantSubscriptions.tenantId, f.tenantId));
+    } finally {
+      await holder.query("COMMIT");
+      holder.release();
+    }
+    const response = await pending;
+    expect(response.status).toBe(403);
+    expect(response.body.code).toBe("subscription_read_only");
+    expect(
+      await db
+        .select()
+        .from(schema.pickupOrders)
+        .where(eq(schema.pickupOrders.stationDeviceId, f.targetId)),
+    ).toHaveLength(0);
+  });
+  it.each([false, true])(
+    "retains and replays legacy leave through commit loss and boundary passage (requestId=%s)",
+    async (identified) => {
+      const f = await waitingTarget("station");
+      const body = {
+        ...(identified ? { requestId: randomUUID() } : {}),
+        pendingEventCount: 0,
+        openBoxCount: 0,
+      };
+      const operation = `inventories/${f.inventoryId}/leave`;
+      const original = db.transaction.bind(db);
+      const lost = vi.spyOn(db, "transaction").mockImplementationOnce(async (...args) => {
+        await original(...args);
+        throw new Error("leave receipt commit response lost");
+      });
+      await expect(
+        quarantineReplacementSubmission(
+          db,
+          f.tenantId,
+          f.targetId,
+          operation,
+          body.requestId ? `request:${body.requestId}` : "legacy",
+          body,
+        ),
+      ).rejects.toThrow("leave receipt commit response lost");
+      lost.mockRestore();
+      const response = await f
+        .post(`/station/inventories/${f.inventoryId}/leave`, body)
+        .expect(409);
+      expect(response.body).toMatchObject({
+        code: "device_replacement_waiting",
+        outcome: "quarantined",
+        receiptId: expect.any(String),
+      });
+      expect(
+        (await f.post(`/station/inventories/${f.inventoryId}/leave`, body).expect(409)).body,
+      ).toEqual(response.body);
+      expect(
+        (
+          await f
+            .post(`/station/inventories/${f.inventoryId}/leave`, { ...body, openBoxCount: 1 })
+            .expect(409)
+        ).body.code,
+      ).toBe("device_replacement_evidence_conflict");
+      expect(
+        await db
+          .select()
+          .from(schema.inventoryDeviceParticipants)
+          .where(eq(schema.inventoryDeviceParticipants.deviceId, f.targetId)),
+      ).toHaveLength(0);
+      const [retained] = await db
+        .select()
+        .from(schema.deviceGrantEvidence)
+        .where(eq(schema.deviceGrantEvidence.stationDeviceId, f.targetId));
+      expect(retained).toMatchObject({
+        id: response.body.receiptId,
+        reason: "device_replacement_waiting",
+        payload: { request: body, operation },
+      });
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(f.boundary + 1);
+      expect(
+        (await f.post(`/station/inventories/${f.inventoryId}/leave`, body).expect(409)).body,
+      ).toEqual(response.body);
+      await f
+        .post(`/station/inventories/${f.inventoryId}/join`, { operatorId: f.operatorId })
+        .expect(200);
+      const newLeave = { requestId: randomUUID(), pendingEventCount: 0, openBoxCount: 0 };
+      expect(
+        (await f.post(`/station/inventories/${f.inventoryId}/leave`, newLeave).expect(200)).body,
+      ).toEqual({ outcome: "left" });
+      expect(
+        (await f.post(`/station/inventories/${f.inventoryId}/leave`, newLeave).expect(200)).body,
+      ).toEqual({ outcome: "left" });
+      expect(
+        (await f.post(`/station/inventories/${f.inventoryId}/leave`, body).expect(409)).body,
+      ).toEqual(response.body);
+    },
+  );
+
+  it("preserves an established draining source inventory leave under read-only access", async () => {
+    const f = await waitingTarget("station");
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(f.boundary + 1);
+    await f
+      .post(`/station/inventories/${f.inventoryId}/join`, { operatorId: f.operatorId })
+      .expect(200);
+    const preview = await preparationService.preview(
+      f.tenantId,
+      f.targetId,
+      {
+        requestId: randomUUID(),
+        target: { name: "Source replacement", kind: "station" },
+        reason: "Drain",
+      },
+      f.actor,
+    );
+    const prepared = await preparationService.confirm(
+      f.tenantId,
+      f.targetId,
+      { requestId: preview.requestId, previewId: preview.id },
+      f.actor,
+    );
+    await readiness.requestDrain(
+      f.tenantId,
+      prepared.preparation.id,
+      { requestId: randomUUID(), expectedRevision: 1 },
+      f.actor,
+    );
+    await db
+      .update(schema.tenantSubscriptions)
+      .set({ endsAt: new Date(Date.now() - 1) })
+      .where(eq(schema.tenantSubscriptions.tenantId, f.tenantId));
+    const body = { pendingEventCount: 0, openBoxCount: 0 };
+    expect(
+      (await f.post(`/station/inventories/${f.inventoryId}/leave`, body).expect(200)).body,
+    ).toEqual({ outcome: "left" });
+    expect(
+      (await f.post(`/station/inventories/${f.inventoryId}/leave`, body).expect(200)).body,
+    ).toEqual({ outcome: "left" });
+    expect(
+      await db
+        .select()
+        .from(schema.deviceGrantEvidence)
+        .where(eq(schema.deviceGrantEvidence.stationDeviceId, f.targetId)),
+    ).toHaveLength(0);
+  });
+
+  it("retains and replays waiting-target shift closure under read-only access", async () => {
+    const f = await waitingTarget("station");
+    await db
+      .update(schema.tenantSubscriptions)
+      .set({ endsAt: new Date(Date.now() - 1) })
+      .where(eq(schema.tenantSubscriptions.tenantId, f.tenantId));
+    const body = {
+      eventId: randomUUID(),
+      shiftId: f.active.id,
+      operatorId: f.operatorId,
+      plannedQtySnapshot: null,
+      actualQty: 0,
+      closedBoxCount: 0,
+      closedAt: new Date().toISOString(),
+    };
+    const response = await f.post("/station/shift-closures", body).expect(409);
+    expect(response.body).toMatchObject({
+      code: "device_replacement_waiting",
+      outcome: "quarantined",
+      receiptId: expect.any(String),
+    });
+    expect((await f.post("/station/shift-closures", body).expect(409)).body).toEqual(response.body);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(f.boundary + 1);
+    expect((await f.post("/station/shift-closures", body).expect(409)).body).toEqual(response.body);
+    const [shift] = await db.select().from(schema.shifts).where(eq(schema.shifts.id, f.active.id));
+    expect(shift?.status).toBe("active");
+    expect(
+      await db
+        .select()
+        .from(schema.stationShiftCloseEvents)
+        .where(eq(schema.stationShiftCloseEvents.deviceId, f.targetId)),
+    ).toHaveLength(0);
+    const rows = await db
+      .select()
+      .from(schema.deviceGrantEvidence)
+      .where(eq(schema.deviceGrantEvidence.stationDeviceId, f.targetId));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      id: response.body.receiptId,
+      reason: "device_replacement_waiting",
+    });
+  });
+
+  it("closes and replays an established draining source shift under read-only access", async () => {
+    const f = await waitingTarget("station");
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(f.boundary + 1);
+    await f.post(`/shifts/${f.active.id}/enter`, { operatorId: f.operatorId }).expect(200);
+    const preview = await preparationService.preview(
+      f.tenantId,
+      f.targetId,
+      {
+        requestId: randomUUID(),
+        target: { name: "Close source replacement", kind: "station" },
+        reason: "Drain",
+      },
+      f.actor,
+    );
+    const prepared = await preparationService.confirm(
+      f.tenantId,
+      f.targetId,
+      {
+        requestId: preview.requestId,
+        previewId: preview.id,
+      },
+      f.actor,
+    );
+    await readiness.requestDrain(
+      f.tenantId,
+      prepared.preparation.id,
+      {
+        requestId: randomUUID(),
+        expectedRevision: 1,
+      },
+      f.actor,
+    );
+    await db
+      .update(schema.tenantSubscriptions)
+      .set({ endsAt: new Date(Date.now() - 1) })
+      .where(eq(schema.tenantSubscriptions.tenantId, f.tenantId));
+    const body = {
+      eventId: randomUUID(),
+      shiftId: f.active.id,
+      operatorId: f.operatorId,
+      plannedQtySnapshot: null,
+      actualQty: 0,
+      closedBoxCount: 0,
+      closedAt: new Date().toISOString(),
+    };
+    expect((await f.post("/station/shift-closures", body).expect(200)).body).toEqual({
+      outcome: "accepted",
+    });
+    expect((await f.post("/station/shift-closures", body).expect(200)).body).toEqual({
+      outcome: "already_resolved",
+    });
+    const [shift] = await db.select().from(schema.shifts).where(eq(schema.shifts.id, f.active.id));
+    expect(shift?.status).toBe("closed");
+    expect(
+      await db
+        .select()
+        .from(schema.stationShiftCloseEvents)
+        .where(eq(schema.stationShiftCloseEvents.deviceId, f.targetId)),
+    ).toHaveLength(1);
+    expect(
+      await db
+        .select()
+        .from(schema.deviceGrantEvidence)
+        .where(eq(schema.deviceGrantEvidence.stationDeviceId, f.targetId)),
+    ).toHaveLength(0);
+  });
 });

@@ -936,6 +936,7 @@ describe("inventory sync engine", () => {
       sync: engine,
     });
     expect(post).toHaveBeenCalledWith(`/station/inventories/${INVENTORY_ID}/leave`, {
+      requestId: "rejected-event-activation",
       pendingEventCount: 0,
       openBoxCount: 0,
     });
@@ -2098,6 +2099,7 @@ describe("inventory progress and leave", () => {
     await leaveInventoryTask(deps);
     expect(order).toEqual(["scanner", "queue", "outbox", "scanner", "queue", "outbox"]);
     expect(post).toHaveBeenCalledWith(`/station/inventories/${INVENTORY_ID}/leave`, {
+      requestId: "leave-activation",
       pendingEventCount: 0,
       openBoxCount: 1,
     });

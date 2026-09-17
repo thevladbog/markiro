@@ -2411,8 +2411,10 @@ export class PickupOrdersService {
 
             // Historical delivery/replay stays recoverable. Only a fresh
             // handheld document acquires new productive scope under this lock.
-            if (source.kind === "handheld")
+            if (source.kind === "handheld") {
               await assertDeviceReplacementNewWorkAllowed(tx, tenantId, source.stationDeviceId);
+              await this.entitlements.assertWriteAccess(tenantId, tx, new Date());
+            }
 
             const policy = await this.resolveLivePickupPolicy(tx, tenantId, employeeId);
             if (reason === "writeoff" && !policy.canWriteoff) {

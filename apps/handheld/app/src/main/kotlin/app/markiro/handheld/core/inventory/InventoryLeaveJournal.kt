@@ -15,7 +15,9 @@ internal class InventoryLeaveJournal(private val db: HandheldDatabase) {
 
     suspend fun activate(id: String) {
         check(!pending(id)) { "Inventory completion is awaiting reconciliation" }
-        db.metaDao().remove(key(id))
+        val key = key(id)
+        db.metaDao().remove(key)
+        db.metaDao().remove(key + ":legacy_payload")
     }
 
     /** Caller holds the business recovery commit, including the final empty-queue check. */
@@ -26,8 +28,15 @@ internal class InventoryLeaveJournal(private val db: HandheldDatabase) {
             check(task.state == "active" && task.leftAt == null)
             db.grants.complete(TaskKind.INVENTORY, id, it, GrantEventType.INVENTORY_CLOSE, payload = payload)
             db.metaDao().put(MetaEntity(key, it))
+            // Freeze the new legacy body in the same recovery commit as its
+            // completion identity. Existing pending rows lack this key and
+            // retain their original body across an application upgrade.
+            val identified = JsonObject(Json.parseToJsonElement(payload).jsonObject + ("requestId" to JsonPrimitive(it))).toString()
+            db.metaDao().put(MetaEntity(key + ":legacy_payload", identified))
         }
         val evidence = GrantEvidenceTransport(db)
-        return evidence.prepare("inventory-leave:$id", eventId, "/station/inventories/$id/leave", payload, mapOf("/#inventory.close.v1" to eventId), evidence.negotiated(eventId))
+        val negotiated = evidence.negotiated(eventId)
+        val requestPayload = if (negotiated) payload else db.metaDao().get(key + ":legacy_payload") ?: payload
+        return evidence.prepare("inventory-leave:$id", eventId, "/station/inventories/$id/leave", requestPayload, mapOf("/#inventory.close.v1" to eventId), negotiated)
     }
 }

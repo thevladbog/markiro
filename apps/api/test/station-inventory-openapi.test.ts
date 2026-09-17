@@ -233,7 +233,12 @@ describe.skipIf(!ready)("station inventory OpenAPI contract", () => {
     expect(progress.properties?.nextCursor?.pattern).toBe(cursorPattern);
 
     const leave = requestSchema(document, "/station/inventories/{id}/leave");
-    exactClosedObject(leave, ["pendingEventCount", "openBoxCount"]);
+    exactClosedObject(
+      leave,
+      ["pendingEventCount", "openBoxCount", "requestId"],
+      ["pendingEventCount", "openBoxCount"],
+    );
+    expect(leave.properties?.requestId?.format).toBe("uuid");
     expect(leave.properties?.pendingEventCount?.enum).toEqual([0]);
     expect(leave.properties?.openBoxCount?.minimum).toBe(0);
     expect(leave.properties?.openBoxCount?.enum).toBeUndefined();

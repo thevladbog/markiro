@@ -56,6 +56,7 @@ export const stationInventoryTaskListQuerySchema = z.object({
 export type StationInventoryTaskListQueryDto = z.infer<typeof stationInventoryTaskListQuerySchema>;
 
 export const leaveStationInventorySchema = z.strictObject({
+  requestId: z.string().uuid().optional(),
   pendingEventCount: z.literal(0),
   openBoxCount: z.number().int().nonnegative().safe(),
 });
@@ -427,6 +428,12 @@ export const leaveStationInventoryOpenApiSchema: SchemaObject = {
   additionalProperties: false,
   required: ["pendingEventCount", "openBoxCount"],
   properties: {
+    requestId: {
+      type: "string",
+      format: "uuid",
+      description:
+        "Durable identity of this leave intent, preserved across retries. Omitted only by legacy clients.",
+    },
     pendingEventCount: { type: "integer", enum: [0] },
     openBoxCount: { type: "integer", minimum: 0 },
   },

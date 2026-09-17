@@ -1097,13 +1097,22 @@ export class StationInventorySyncService {
     );
   }
 
-  leave(
+  async leave(
     tenantId: string,
     deviceId: string,
     inventoryId: string,
     input: LeaveStationInventoryDto,
     evidence?: EvidenceTransactionHook<LeaveStationInventoryResponseDto>,
   ): Promise<LeaveStationInventoryResponseDto> {
+    if (!evidence)
+      await quarantineReplacementSubmission(
+        this.db,
+        tenantId,
+        deviceId,
+        `inventories/${inventoryId}/leave`,
+        input.requestId ? `request:${input.requestId}` : "legacy",
+        input,
+      );
     return this.db.transaction(async (tx) =>
       withEvidenceTransaction(tx, evidence, async () => {
         const [inventory] = await tx

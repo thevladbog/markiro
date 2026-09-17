@@ -249,12 +249,16 @@ export class StationInventoriesController {
   @Post("inventories/:id/leave")
   @HttpCode(200)
   @AllowSubscriptionRecovery("station")
-  @ApiOperation({ summary: "Leave an inventory" })
+  @ApiOperation({
+    summary: "Leave an inventory",
+    description:
+      "A waiting target retains the request before participant validation and returns its saved quarantine receipt even after the boundary. Retries must keep requestId and body unchanged; omitted requestId uses one fixed legacy identity. A new leave requires a new requestId or native batchId. Existing source recovery remains available under read-only subscriptions.",
+  })
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
   @ApiBody({ schema: leaveStationInventoryOpenApiSchema })
   @ApiOkResponse({ schema: leaveStationInventoryResponseOpenApiSchema })
   @ApiZodValidationError()
-  @ApiHttpErrors(401, 403)
+  @ApiHttpErrors(401, 403, 409, 413)
   leave(
     @Req() req: RequestWithTenant,
     @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,

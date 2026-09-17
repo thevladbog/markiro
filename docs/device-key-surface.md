@@ -163,6 +163,25 @@ The boundary is never earlier than server time, a recorded authority horizon, or
 an applicable conservative policy fallback. Chaining replacements cannot shorten
 the wait.
 
+Legacy inventory leave accepts an optional UUID `requestId`. Current Station
+uses its persisted activation identity; Handheld freezes its completion event
+identity and legacy request body in the local recovery commit before sending.
+Both survive retry and database reopen. Native leave retains its envelope
+`batchId`. An older body without `requestId` uses a fixed legacy identity for the
+device and inventory: a retained request always replays its quarantine receipt,
+even after the boundary or later participation. A later legitimate leave requires
+a distinct explicit request identity. Changed content under a retained identity
+is a conflict. Previously queued unidentified Handheld bodies remain unchanged
+through upgrade and retry.
+
+Write-off replay/quarantine and shift closure use the subscription recovery
+policy, including when a subscription is read-only or expired. A genuinely new
+handheld write-off still checks current subscription write access inside its
+serialized business transaction, after committed-sequence replay and replacement
+admission. Inventory leave is retained before participant lookup, so a waiting
+target without any participation cannot lose its submission to a 404. Established
+source leave and closure remain recoverable under restricted subscription access.
+
 ## Rule for new routes
 
 This document, and the two sections above, are about `TenantGuard`-guarded

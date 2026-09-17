@@ -442,8 +442,11 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
   },
   {
     contract: customerContract(CABINET_STATION_GUARDS, { mode: "write" }),
+    routes: ["POST /shifts/:id/enter (ShiftsController.enterShift)"],
+  },
+  {
+    contract: customerContract(CABINET_STATION_GUARDS, { mode: "recovery", kind: "station" }),
     routes: [
-      "POST /shifts/:id/enter (ShiftsController.enterShift)",
       "POST /station/shift-closures (StationShiftCloseController.close)",
       "POST /station/writeoffs (StationWriteoffsController.create)",
     ],

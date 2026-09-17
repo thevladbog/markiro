@@ -1,5 +1,7 @@
 package app.markiro.handheld.feature.inventory
 
+import app.markiro.handheld.core.grants.*
+import app.markiro.handheld.core.storage.MetaEntity
 import app.markiro.handheld.core.storage.initializeRecoveryForTest
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -82,7 +84,9 @@ class InventoryRepositoryTest {
         db.inventoryOutboxDao().deleteIds(db.inventoryOutboxDao().head("i1", 1).map { it.id })
         server.enqueue(MockResponse().setBody("""{"outcome":"left"}"""))
         assertEquals(LeaveResult.Left, repo().leave("i1"))
-        assertEquals("""{"pendingEventCount":0,"openBoxCount":0}""", server.takeRequest().body.readUtf8())
+        val leave = NetworkModule.json().parseToJsonElement(server.takeRequest().body.readUtf8()) as kotlinx.serialization.json.JsonObject
+        assertEquals(setOf("pendingEventCount", "openBoxCount", "requestId"), leave.keys)
+        java.util.UUID.fromString((leave.getValue("requestId") as kotlinx.serialization.json.JsonPrimitive).content)
         assertNull(db.deviceConfigDao().get()?.activeInventoryId)
         assertEquals(5L, db.inventoryTaskDao().get("i1")?.leftAt)
         server.shutdown()
@@ -178,4 +182,54 @@ class InventoryRepositoryTest {
         server.enqueue(MockResponse().setResponseCode(404).setBody("{}"))
         assertNull(repo().resolveBarcode("markiro:inventory:v1:nope"))
     }
+    @Test
+    fun legacyLeaveIdentitySurvivesDatabaseReopenAndNextActivationGetsANewIdentity() = runTest {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val name = "inventory-leave-${java.util.UUID.randomUUID()}"
+        val config = checkNotNull(db.deviceConfigDao().get())
+        db.close()
+        db = Room.databaseBuilder(context, HandheldDatabase::class.java, name).allowMainThreadQueries().build()
+        try {
+            db.deviceConfigDao().upsert(config)
+            db.initializeRecoveryForTest()
+            db.inventoryTaskDao().upsert(InventoryFixtures.task("i1"))
+            repo().activate("i1")
+            server.enqueue(MockResponse().setResponseCode(503))
+            assertEquals(LeaveResult.Failed, repo().leave("i1"))
+            val first = server.takeRequest()
+            assertEquals("/station/inventories/i1/leave", first.path)
+            val original = first.body.readUtf8()
+            val requestId = checkNotNull(NetworkModule.json().parseToJsonElement(original).let { it as kotlinx.serialization.json.JsonObject }["requestId"])
+            java.util.UUID.fromString((requestId as kotlinx.serialization.json.JsonPrimitive).content)
+            db.close()
+            db = Room.databaseBuilder(context, HandheldDatabase::class.java, name).allowMainThreadQueries().build()
+            db.initializeRecoveryForTest()
+            server.enqueue(MockResponse().setBody("""{"outcome":"left"}"""))
+            assertEquals(LeaveResult.Left, repo().leave("i1"))
+            assertEquals(original, server.takeRequest().body.readUtf8())
+            repo().activate("i1")
+            server.enqueue(MockResponse().setBody("""{"outcome":"left"}"""))
+            assertEquals(LeaveResult.Left, repo().leave("i1"))
+            val next = NetworkModule.json().parseToJsonElement(server.takeRequest().body.readUtf8()) as kotlinx.serialization.json.JsonObject
+            assertTrue(requestId != next["requestId"])
+        } finally { db.close(); context.deleteDatabase(name) }
+    }
+
+    @Test
+    fun previouslyQueuedLegacyLeaveKeepsItsOriginalUnidentifiedBody() = runTest {
+        db.inventoryTaskDao().upsert(InventoryFixtures.task("i1"))
+        repo().activate("i1")
+        val payload = """{"pendingEventCount":0,"openBoxCount":0}"""
+        val eventId = java.util.UUID.randomUUID().toString()
+        db.recovery.commit {
+            val key = "inventory_leave:" + grantDigest(grantSlot(db.recovery.token().owner.grantOwnerKey(), "inventory", "i1"))
+            db.grants.complete(TaskKind.INVENTORY, "i1", eventId, GrantEventType.INVENTORY_CLOSE, payload = payload)
+            db.metaDao().put(MetaEntity(key, eventId))
+            GrantEvidenceTransport(db).prepare("inventory-leave:i1", eventId, "/station/inventories/i1/leave", payload, mapOf("/#inventory.close.v1" to eventId), false)
+        }
+        server.enqueue(MockResponse().setBody("""{"outcome":"left"}"""))
+        assertEquals(LeaveResult.Left, repo().leave("i1"))
+        assertEquals(payload, server.takeRequest().body.readUtf8())
+    }
+
 }
