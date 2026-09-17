@@ -73,6 +73,8 @@ export const employeePickupPolicies = pgTable(
     limitMode: pickupLimitMode("limit_mode").notNull().default("limited"),
     dayLimit: integer("day_limit").notNull().default(5),
     canWriteoff: boolean("can_writeoff").notNull().default(false),
+    /** May build warehouse pallets on a handheld (spec §1.5). */
+    canBuildPallets: boolean("can_build_pallets").notNull().default(false),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

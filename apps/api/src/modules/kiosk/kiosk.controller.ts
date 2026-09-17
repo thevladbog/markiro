@@ -56,8 +56,8 @@ import { ObjectStorageService } from "../storage/object-storage.service";
 import { sendPrivateImage } from "../storage/private-image-response";
 import {
   BOX_REGISTRY_REVISION_PATTERN,
-  boxRegistryPageOpenApiSchema,
   boxRegistryQuerySchema,
+  kioskBoxRegistryPageOpenApiSchema,
   type BoxRegistryQueryDto,
   type KioskBoxRegistryPage,
 } from "./box-registry.dto";
@@ -169,7 +169,7 @@ export class KioskController {
   })
   @ApiOkResponse({
     description: "A stable committed box-registry revision page.",
-    schema: boxRegistryPageOpenApiSchema,
+    schema: kioskBoxRegistryPageOpenApiSchema,
   })
   @ApiBadRequestResponse({ description: "Malformed bounds, cursor, or page size." })
   @ApiConflictResponse({
@@ -185,7 +185,7 @@ export class KioskController {
     @Req() req: RequestWithKiosk,
     @Query(new ZodValidationPipe(boxRegistryQuerySchema)) query: BoxRegistryQueryDto,
   ): Promise<KioskBoxRegistryPage> {
-    return this.boxRegistryService.list(req.tenantId!, query);
+    return this.boxRegistryService.list(req.tenantId!, query, { view: "kiosk" });
   }
 
   @Get("branding/logo/:revision")

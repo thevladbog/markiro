@@ -2,10 +2,13 @@ import { randomUUID } from "node:crypto";
 import express from "express";
 import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
+import { eq } from "drizzle-orm";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { schema } from "@markiro/db";
 import { buildSscc, canonicalizeKm, kmHash } from "@markiro/domain";
 import { AppModule } from "../src/app.module";
+import { DB } from "../src/auth/auth.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import type { ScanItemDto } from "../src/modules/station-scans/dto";
@@ -41,6 +44,7 @@ describe.skipIf(!ready)("pallets e2e", () => {
   let stationKey: string;
   let stationDeviceId: string;
   let shiftId: string;
+  let tenantId: string;
   let operatorId: string;
   let palletSscc: string;
   /** A second serial from the SAME allocated block, for the clock-skew pallet. */
@@ -108,7 +112,7 @@ describe.skipIf(!ready)("pallets e2e", () => {
     await listenOnLoopback(app);
 
     agent = request.agent(app!.getHttpServer());
-    const tenantId = await signUpAndActivate(agent);
+    tenantId = await signUpAndActivate(agent);
     const station = await createTestStationDevice(app!, agent, "Pallet line");
     stationKey = station.apiKey;
     stationDeviceId = station.deviceId;
@@ -475,9 +479,82 @@ describe.skipIf(!ready)("pallets e2e", () => {
     await other.post(`/shifts/${otherShiftId}/open`).expect(200);
 
     await agent.get(`/pallets?shiftId=${otherShiftId}`).expect(404);
+    // The other direction of the same boundary: an org-wide list is scoped to
+    // the caller's own tenant, so a tenant with no pallets of its own sees
+    // none of this one's.
+    const theirs = await other.get("/pallets").expect(200);
+    expect(theirs.body.items).toEqual([]);
   });
 
-  it("rejects a request without a shift", async () => {
-    await agent.get("/pallets").expect(400);
+  /**
+   * Task 8: `shiftId` became optional, so a bare `GET /pallets` is the
+   * org-wide list rather than a 400. Both of this shift's pallets are in it.
+   */
+  it("lists every pallet of the tenant when no shift is given", async () => {
+    const res = await agent.get("/pallets").expect(200);
+    const ssccs = (res.body.items as { sscc: string | null }[]).map((row) => row.sscc);
+    expect(ssccs).toContain(`00${palletSscc}`);
+    expect(ssccs).toContain(`00${skewPalletSscc}`);
+  });
+
+  it("lists pallets org-wide with kind filter and cursor paging", async () => {
+    const page = await agent.get("/pallets").query({ kind: "production", limit: 1 }).expect(200);
+    expect(page.body.items).toHaveLength(1);
+    expect(page.body.items[0]).toMatchObject({
+      kind: "production",
+      rejectedMembershipCount: 0,
+      productName: "Cola",
+    });
+    // This suite has built exactly two production pallets by now (`palletSscc`
+    // and `skewPalletSscc`, both asserted in the org-wide list above), so a
+    // limit of 1 must hand back a cursor -- no `if` guard, which would let the
+    // paging assertion silently vanish.
+    expect(page.body.nextCursor).toBeDefined();
+    const next = await agent
+      .get("/pallets")
+      .query({ kind: "production", limit: 1, cursor: page.body.nextCursor })
+      .expect(200);
+    expect(next.body.items).toHaveLength(1);
+    expect(next.body.items[0]?.id).not.toBe(page.body.items[0].id);
+  });
+
+  it("still 404s a shift outside the tenant and rejects a malformed cursor", async () => {
+    await agent.get("/pallets").query({ shiftId: randomUUID() }).expect(404);
+    await agent.get("/pallets").query({ cursor: "not-a-cursor" }).expect(400);
+  });
+
+  /**
+   * A warehouse pallet has no shift at all, so a `kind` filter must not be
+   * answered through the shift join: filtering this tenant's production
+   * pallets down to `warehouse` leaves nothing, not everything.
+   */
+  it("returns an empty list for a kind this tenant has none of", async () => {
+    const res = await agent.get("/pallets").query({ kind: "warehouse" }).expect(200);
+    expect(res.body.items).toEqual([]);
+  });
+
+  /**
+   * Review finding: the admin client (`apps/admin/src/pages/shifts/pallets-api.ts`)
+   * reads only `items` and ignores `nextCursor` -- a shift-scoped request
+   * that silently defaulted `limit` to 100 would drop rows past that page
+   * with no signal. `shiftId` + no `limit` must therefore return the WHOLE
+   * shift, unpaged.
+   */
+  it("returns the whole shift unpaged when shiftId is given and limit is omitted", async () => {
+    const db = app!.get(DB);
+    const rows = await db
+      .select({ id: schema.pallets.id })
+      .from(schema.pallets)
+      .where(eq(schema.pallets.shiftId, shiftId));
+
+    const res = await agent.get(`/pallets?shiftId=${shiftId}`).expect(200);
+    expect(res.body.nextCursor).toBeUndefined();
+    expect(res.body.items).toHaveLength(rows.length);
+  });
+
+  it("still pages a shift-scoped request when limit is given explicitly", async () => {
+    const res = await agent.get("/pallets").query({ shiftId, limit: 1 }).expect(200);
+    expect(res.body.items).toHaveLength(1);
+    expect(res.body.nextCursor).toBeDefined();
   });
 });

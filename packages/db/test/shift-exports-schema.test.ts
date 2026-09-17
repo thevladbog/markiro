@@ -137,7 +137,7 @@ describe("shift export persistence schema", () => {
       expect.arrayContaining([
         "shift_export_artifacts_part_number_positive",
         "shift_export_artifacts_physical_line_count_positive",
-        "shift_export_artifacts_code_count_positive",
+        "shift_export_artifacts_code_count_nonnegative",
         "shift_export_artifacts_box_count_nonnegative",
         "shift_export_artifacts_byte_size_positive",
         "shift_export_artifacts_sha256_check",

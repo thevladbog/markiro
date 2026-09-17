@@ -216,6 +216,16 @@ export interface PalletCardBoxDto {
   /** 20-значный код с GS1 AI "00"; null, пока короб не закрыт. */
   sscc: string | null;
   /**
+   * The shift this box CLOSED in -- its own origin, not the pallet's. On a
+   * warehouse pallet (which has no shift of its own) the member boxes come
+   * from arbitrary shifts, and that is exactly what a manager needs to see.
+   */
+  shiftId: string;
+  /** Saved human-readable number of that shift, e.g. `AUG26-003/S`. */
+  shiftNumber: string | null;
+  /** That shift's effective production day (`coalesce(production, planned)`). */
+  productionDate: string | null;
+  /**
    * Live items only (`displaced_at IS NULL AND removed_at IS NULL`), the same
    * count `BoxDto.itemCount` reports for this box in the box list.
    */
@@ -244,7 +254,13 @@ export interface PalletCardDto {
   id: string;
   sscc: string | null;
   status: "open" | "closed" | "disassembled";
-  shiftId: string;
+  /**
+   * `warehouse` is built on a handheld from closed boxes of arbitrary
+   * shifts; `production` is stacked on a line within one shift.
+   */
+  kind: "production" | "warehouse";
+  /** Null for a warehouse pallet, which is not tied to any shift. */
+  shiftId: string | null;
   /** Saved human-readable shift number, e.g. `AUG26-003/S`. */
   shiftNumber: string | null;
   productId: string | null;
@@ -266,6 +282,25 @@ export interface PalletCardDto {
     operatorId: string | null;
     disaggregationDocumentId: string | null;
     disaggregationDocNo: string | null;
+  }[];
+  /**
+   * Memberships the server REFUSED for this pallet (spec §1.4,
+   * `pallet_membership_rejections`): the only record of a box an operator
+   * tried to put on this stack and could not. Always empty for a production
+   * pallet, whose boxes join it through their own closure.
+   *
+   * `winningPalletSscc` is the pallet that already holds the box, for the
+   * `already_on_pallet` reason -- null while that rival pallet is still open
+   * and has no serial of its own yet.
+   */
+  rejections: {
+    /** 20-значный код с GS1 AI "00", как и любой SSCC в кабинете. */
+    boxSscc: string;
+    boxId: string | null;
+    reason: string;
+    winningPalletSscc: string | null;
+    addedAt: Date;
+    recordedAt: Date;
   }[];
 }
 
@@ -614,10 +649,25 @@ export const boxCardOpenApiSchema: SchemaObject = {
 const palletCardBoxOpenApiSchema: SchemaObject = {
   type: "object",
   additionalProperties: false,
-  required: ["id", "sscc", "itemCount", "closedAt", "disassembledAt"],
+  required: [
+    "id",
+    "sscc",
+    "shiftId",
+    "shiftNumber",
+    "productionDate",
+    "itemCount",
+    "closedAt",
+    "disassembledAt",
+  ],
   properties: {
     id: uuidSchema,
     sscc: { ...ssccSchema, nullable: true },
+    shiftId: {
+      ...uuidSchema,
+      description: "The shift this box closed in -- its own origin, not the pallet's.",
+    },
+    shiftNumber: { type: "string", nullable: true },
+    productionDate: productionDateSchema,
     itemCount: {
       type: "integer",
       minimum: 0,
@@ -641,6 +691,7 @@ export const palletCardOpenApiSchema: SchemaObject = {
     "id",
     "sscc",
     "status",
+    "kind",
     "shiftId",
     "shiftNumber",
     "productId",
@@ -653,12 +704,18 @@ export const palletCardOpenApiSchema: SchemaObject = {
     "disassembledAt",
     "boxes",
     "exceptions",
+    "rejections",
   ],
   properties: {
     id: uuidSchema,
     sscc: { ...ssccSchema, nullable: true },
     status: { type: "string", enum: ["open", "closed", "disassembled"] },
-    shiftId: uuidSchema,
+    kind: {
+      type: "string",
+      enum: ["production", "warehouse"],
+      description: "A warehouse pallet belongs to no shift and carries its own product.",
+    },
+    shiftId: { ...uuidSchema, nullable: true },
     shiftNumber: { type: "string", nullable: true },
     productId: { ...uuidSchema, nullable: true },
     productName: { type: "string", nullable: true },
@@ -697,6 +754,39 @@ export const palletCardOpenApiSchema: SchemaObject = {
           operatorId: { ...uuidSchema, nullable: true },
           disaggregationDocumentId: { ...uuidSchema, nullable: true },
           disaggregationDocNo: { type: "string", nullable: true },
+        },
+      },
+    },
+    rejections: {
+      type: "array",
+      description:
+        "Memberships the server refused for this pallet (warehouse pallets only). Oldest first.",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["boxSscc", "boxId", "reason", "winningPalletSscc", "addedAt", "recordedAt"],
+        properties: {
+          boxSscc: ssccSchema,
+          boxId: { ...uuidSchema, nullable: true },
+          reason: {
+            type: "string",
+            enum: [
+              "already_on_pallet",
+              "not_found",
+              "not_closed",
+              "disassembled",
+              "pallet_closed",
+              "product_mismatch",
+            ],
+          },
+          winningPalletSscc: {
+            ...ssccSchema,
+            nullable: true,
+            description:
+              "The pallet that already holds the box (already_on_pallet); null while it is still open.",
+          },
+          addedAt: dateTimeSchema,
+          recordedAt: dateTimeSchema,
         },
       },
     },

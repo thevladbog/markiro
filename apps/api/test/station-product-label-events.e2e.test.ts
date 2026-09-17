@@ -420,10 +420,11 @@ describe.skipIf(!ready)("station product label events", () => {
     // just the first one: `legacy` models the body as it existed when the
     // stored digest was computed, and an empty new channel that leaked into it
     // would make this test pass while real pre-feature devices 409.
-    const { productLabelEvents, pallets, palletExceptions, ...legacy } = parsed;
+    const { productLabelEvents, pallets, palletExceptions, palletMemberships, ...legacy } = parsed;
     expect(productLabelEvents).toEqual([]);
     expect(pallets).toEqual([]);
     expect(palletExceptions).toEqual([]);
+    expect(palletMemberships).toEqual([]);
     const bound = {
       ...legacy,
       items: legacy.items.map((item) => ({ ...item, terminalId: station.deviceId })),

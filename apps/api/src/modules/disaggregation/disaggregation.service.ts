@@ -404,6 +404,21 @@ export class DisaggregationService {
             disaggregationDocumentId: documentId,
           })),
         );
+
+        // Member boxes keep `pallet_id`, but every handheld's registry
+        // mirror must learn the pallet is retired, or it keeps refusing
+        // these boxes as «already on a pallet» (spec §2.3).
+        const memberBoxes = await tx
+          .select({ id: schema.boxes.id })
+          .from(schema.boxes)
+          .where(
+            and(eq(schema.boxes.tenantId, tenantId), inArray(schema.boxes.palletId, palletIds)),
+          );
+        await advanceBoxRegistryVersion(
+          tx,
+          tenantId,
+          memberBoxes.map((box) => box.id),
+        );
       }
 
       await tx

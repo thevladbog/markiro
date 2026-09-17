@@ -118,17 +118,42 @@ export function resolveBoxRegistryWindow(
   };
 }
 
-export type KioskBoxRegistryChange =
-  | {
-      kind: "upsert";
-      boxId: string;
-      sscc: string;
-      productId: string;
-      bottleCount: number;
-      contentKeys: string[];
-      updatedAt: string;
-    }
-  | { kind: "remove"; sscc: string; updatedAt: string };
+/**
+ * The kiosk feed's upsert item. Deployed kiosk PWAs parse this with a strict
+ * key allowlist (`apps/kiosk/src/store/box-registry.ts`) and throw on any
+ * unknown key, so these seven fields are frozen: never widen this shape.
+ */
+export interface KioskBoxRegistryUpsert {
+  kind: "upsert";
+  boxId: string;
+  sscc: string;
+  productId: string;
+  bottleCount: number;
+  contentKeys: string[];
+  updatedAt: string;
+}
+
+/** The station/handheld feed adds pallet placement; its JSON ignores unknown keys. */
+export interface StationBoxRegistryUpsert extends KioskBoxRegistryUpsert {
+  /** The pallet this box stands on, or last stood on. */
+  palletId: string | null;
+  /** Raw 18 digits, not AI-00 formatted: this feed is device-facing. */
+  palletSscc: string | null;
+  /** False once that pallet is disassembled, so the box is free again. */
+  palletActive: boolean;
+  closedAt: string;
+  /** `YYYY-MM-DD` civil day, null when the shift declares neither. */
+  productionDate: string | null;
+}
+
+export interface BoxRegistryRemoval {
+  kind: "remove";
+  sscc: string;
+  updatedAt: string;
+}
+
+export type KioskBoxRegistryChange = KioskBoxRegistryUpsert | BoxRegistryRemoval;
+export type StationBoxRegistryChange = StationBoxRegistryUpsert | BoxRegistryRemoval;
 
 export interface KioskBoxRegistryPage {
   until: string;
@@ -136,58 +161,111 @@ export interface KioskBoxRegistryPage {
   nextCursor?: string;
 }
 
+export interface StationBoxRegistryPage {
+  until: string;
+  items: StationBoxRegistryChange[];
+  nextCursor?: string;
+}
+
+/** Narrows a station change to the frozen kiosk shape, dropping pallet fields. */
+export function toKioskChange(change: StationBoxRegistryChange): KioskBoxRegistryChange {
+  if (change.kind === "remove") return change;
+  return {
+    kind: "upsert",
+    boxId: change.boxId,
+    sscc: change.sscc,
+    productId: change.productId,
+    bottleCount: change.bottleCount,
+    contentKeys: change.contentKeys,
+    updatedAt: change.updatedAt,
+  };
+}
+
+export function toKioskPage(page: StationBoxRegistryPage): KioskBoxRegistryPage {
+  return {
+    until: page.until,
+    items: page.items.map(toKioskChange),
+    ...(page.nextCursor === undefined ? {} : { nextCursor: page.nextCursor }),
+  };
+}
+
+export type BoxRegistryView = "kiosk" | "station";
+
 /**
- * The 200 body of a box-registry page, shared by the kiosk and handheld routes.
- * Extracted from the kiosk controller's inline copy when the station route was
- * added: two inline copies of a 49-line schema drift, and the whole point of
- * serving one service to both devices is that they cannot.
+ * The 200 body of a box-registry page. Both routes share this builder so the
+ * kiosk and station documents cannot drift in everything but the pallet block;
+ * `view` decides whether that block is documented at all.
  */
-export const boxRegistryPageOpenApiSchema: SchemaObject = {
-  type: "object",
-  required: ["until", "items"],
-  properties: {
-    until: { type: "string", pattern: BOX_REGISTRY_REVISION_PATTERN },
-    nextCursor: { type: "string" },
-    items: {
-      type: "array",
+function boxRegistryPageOpenApiSchemaFor(view: BoxRegistryView): SchemaObject {
+  const palletRequired =
+    view === "station"
+      ? ["palletId", "palletSscc", "palletActive", "closedAt", "productionDate"]
+      : [];
+  const palletProperties: Record<string, SchemaObject> =
+    view === "station"
+      ? {
+          palletId: { type: "string", format: "uuid", nullable: true },
+          palletSscc: { type: "string", pattern: "^[0-9]{18}$", nullable: true },
+          palletActive: { type: "boolean" },
+          closedAt: { type: "string", format: "date-time" },
+          productionDate: { type: "string", format: "date", nullable: true },
+        }
+      : {};
+  return {
+    type: "object",
+    required: ["until", "items"],
+    properties: {
+      until: { type: "string", pattern: BOX_REGISTRY_REVISION_PATTERN },
+      nextCursor: { type: "string" },
       items: {
-        oneOf: [
-          {
-            type: "object",
-            required: [
-              "kind",
-              "boxId",
-              "sscc",
-              "productId",
-              "bottleCount",
-              "contentKeys",
-              "updatedAt",
-            ],
-            properties: {
-              kind: { type: "string", enum: ["upsert"] },
-              boxId: { type: "string", format: "uuid" },
-              sscc: { type: "string", pattern: "^[0-9]{18}$" },
-              productId: { type: "string", format: "uuid" },
-              bottleCount: { type: "integer", minimum: 1, maximum: 500 },
-              contentKeys: {
-                type: "array",
-                maxItems: 500,
-                items: { type: "string" },
+        type: "array",
+        items: {
+          oneOf: [
+            {
+              type: "object",
+              required: [
+                "kind",
+                "boxId",
+                "sscc",
+                "productId",
+                "bottleCount",
+                "contentKeys",
+                "updatedAt",
+                ...palletRequired,
+              ],
+              properties: {
+                kind: { type: "string", enum: ["upsert"] },
+                boxId: { type: "string", format: "uuid" },
+                sscc: { type: "string", pattern: "^[0-9]{18}$" },
+                productId: { type: "string", format: "uuid" },
+                bottleCount: { type: "integer", minimum: 1, maximum: 500 },
+                contentKeys: {
+                  type: "array",
+                  maxItems: 500,
+                  items: { type: "string" },
+                },
+                updatedAt: { type: "string", format: "date-time" },
+                ...palletProperties,
               },
-              updatedAt: { type: "string", format: "date-time" },
             },
-          },
-          {
-            type: "object",
-            required: ["kind", "sscc", "updatedAt"],
-            properties: {
-              kind: { type: "string", enum: ["remove"] },
-              sscc: { type: "string", pattern: "^[0-9]{18}$" },
-              updatedAt: { type: "string", format: "date-time" },
+            {
+              type: "object",
+              required: ["kind", "sscc", "updatedAt"],
+              properties: {
+                kind: { type: "string", enum: ["remove"] },
+                sscc: { type: "string", pattern: "^[0-9]{18}$" },
+                updatedAt: { type: "string", format: "date-time" },
+              },
             },
-          },
-        ],
+          ],
+        },
       },
     },
-  },
-};
+  };
+}
+
+export const kioskBoxRegistryPageOpenApiSchema: SchemaObject =
+  boxRegistryPageOpenApiSchemaFor("kiosk");
+
+export const stationBoxRegistryPageOpenApiSchema: SchemaObject =
+  boxRegistryPageOpenApiSchemaFor("station");

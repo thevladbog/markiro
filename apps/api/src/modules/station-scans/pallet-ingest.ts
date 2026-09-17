@@ -1,7 +1,9 @@
 import { ConflictException, type Logger } from "@nestjs/common";
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { formatSsccWithAi } from "@markiro/domain";
 import { schema, type Db } from "@markiro/db";
 import { PALLET_EXTENSION_DIGIT } from "../sscc/sscc.service";
+import type { PalletMembershipDto, PalletMembershipOutcomeDto } from "./dto";
 
 /**
  * The ingest transaction handle. Loosely derived from `Db["transaction"]`'s own
@@ -15,7 +17,11 @@ type Transaction = Parameters<Parameters<Db["transaction"]>[0]>[0];
 /** One pallet closing on the device. `palletId` is the DEVICE-local id. */
 export interface PalletClosureDto {
   palletId: string;
-  shiftId: string;
+  /** Null for a warehouse pallet, which belongs to no shift. */
+  shiftId: string | null;
+  kind: "production" | "warehouse";
+  /** The product every member box must carry; set only for a warehouse pallet. */
+  productId: string | null;
   /** Informational wire field; the caller always substitutes the authenticated device id. */
   terminalId: string | null;
   sscc: string;
@@ -29,7 +35,8 @@ export interface PalletClosureDto {
 export interface PalletExceptionDto {
   kind: "disassemble" | "reprint";
   palletId: string;
-  shiftId: string;
+  /** Null for a warehouse pallet exception. */
+  shiftId: string | null;
   /** Informational wire field; the caller always substitutes the authenticated device id. */
   terminalId: string | null;
   operatorId: string | null;
@@ -53,25 +60,37 @@ export interface PalletExceptionDto {
 export type PalletKey = string;
 
 export function palletKey(
-  shiftId: string,
+  shiftId: string | null,
   terminalId: string | null,
   devicePalletId: string,
 ): PalletKey {
-  return `${shiftId}|${terminalId ?? ""}|${devicePalletId}`;
+  // A warehouse pallet has no shift, and its identity is (tenant, device,
+  // devicePalletId). A shift id is a uuid, so the literal below can never
+  // collide with one, and the key stays injective across both kinds.
+  return `${shiftId ?? "warehouse"}|${terminalId ?? ""}|${devicePalletId}`;
 }
 
 export interface PalletRef {
-  shiftId: string;
+  /** Null for a warehouse pallet. */
+  shiftId: string | null;
   terminalId: string | null;
   devicePalletId: string;
+  kind: "production" | "warehouse";
+  /** Required for a warehouse ref; ignored for production. */
+  productId: string | null;
+  /** The authenticated device; required for a warehouse ref. */
+  deviceId: string | null;
 }
 
 /**
  * Creates every pallet the batch names and returns their server ids.
  *
- * A pre-pass, run before the box-closure loop, so a box's membership and its
- * closure are ONE statement: the closure UPDATE reads this map rather than
- * doing its own round trip per box.
+ * Called twice per batch. First as a pre-pass before the box-closure loop, so
+ * a box's membership and its closure are ONE statement: the closure UPDATE
+ * reads this map rather than doing its own round trip per box. Then again for
+ * the warehouse pallets only MEMBERSHIPS name, which cannot be resolved until
+ * that loop has written `boxes.sscc` -- the caller merges the second map into
+ * the first.
  *
  * Sorted by the full key -- the same 40P01 reasoning the item upsert and the
  * box-closure loop already use: two overlapping batches touching the same
@@ -90,36 +109,100 @@ export async function upsertPallets(
 ): Promise<Map<PalletKey, string>> {
   const unique = new Map<PalletKey, PalletRef>();
   for (const ref of refs) {
-    unique.set(palletKey(ref.shiftId, ref.terminalId, ref.devicePalletId), ref);
+    const key = palletKey(ref.shiftId, ref.terminalId, ref.devicePalletId);
+    const seen = unique.get(key);
+    // First ref wins, with ONE upgrade: a warehouse ref whose box could not be
+    // resolved to a product carries `productId: null` and cannot seed a row,
+    // so a later ref that DOES know the product replaces it. Never the other
+    // way round -- one membership naming a box of a different product must not
+    // be able to redefine a pallet another membership already seeded, or the
+    // homogeneity check would test the wrong product. Production refs sharing
+    // a key are identical in every field, so this is a no-op for them.
+    if (seen !== undefined && !(seen.productId === null && ref.productId !== null)) continue;
+    unique.set(key, ref);
   }
   if (unique.size === 0) return new Map();
 
   const ordered = [...unique.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
 
-  await tx
-    .insert(schema.pallets)
-    .values(
-      ordered.map(([, ref]) => ({
-        tenantId,
-        shiftId: ref.shiftId,
-        terminalId: ref.terminalId,
-        devicePalletId: ref.devicePalletId,
-      })),
-    )
-    .onConflictDoNothing({
-      target: [
-        schema.pallets.tenantId,
-        schema.pallets.shiftId,
-        schema.pallets.terminalId,
-        schema.pallets.devicePalletId,
-      ],
-    });
+  // Two inserts, because the two kinds have two DIFFERENT arbiters:
+  // production pallets dedupe on `pallets_device_pallet_uq`
+  // (tenant, shift, terminal, devicePalletId), warehouse pallets on the
+  // partial `pallets_warehouse_device_pallet_uq` (tenant, device,
+  // devicePalletId) WHERE kind = 'warehouse'. A partial unique index can only
+  // be inferred as an arbiter when the statement repeats its predicate, which
+  // is what the `where` below emits.
+  const production = ordered.filter(([, ref]) => ref.kind === "production");
+  // A warehouse ref with no product cannot be created: `pallets_kind_shape`
+  // requires one. It is skipped rather than rejected -- its membership reports
+  // `not_found` once the lookup below misses, and a closure always carries a
+  // product.
+  const warehouse = ordered.filter(
+    ([, ref]) => ref.kind === "warehouse" && ref.productId !== null && ref.deviceId !== null,
+  );
+
+  if (production.length > 0) {
+    await tx
+      .insert(schema.pallets)
+      .values(
+        production.map(([, ref]) => ({
+          tenantId,
+          kind: "production" as const,
+          shiftId: ref.shiftId,
+          terminalId: ref.terminalId,
+          devicePalletId: ref.devicePalletId,
+        })),
+      )
+      .onConflictDoNothing({
+        target: [
+          schema.pallets.tenantId,
+          schema.pallets.shiftId,
+          schema.pallets.terminalId,
+          schema.pallets.devicePalletId,
+        ],
+      });
+  }
+
+  if (warehouse.length > 0) {
+    await tx
+      .insert(schema.pallets)
+      .values(
+        warehouse.map(([, ref]) => ({
+          tenantId,
+          kind: "warehouse" as const,
+          shiftId: null,
+          // `pallets_warehouse_terminal_check` requires terminal_id =
+          // device_id::text, and the caller passes the authenticated device id
+          // as both.
+          terminalId: ref.terminalId,
+          devicePalletId: ref.devicePalletId,
+          productId: ref.productId,
+          deviceId: ref.deviceId,
+        })),
+      )
+      .onConflictDoNothing({
+        target: [schema.pallets.tenantId, schema.pallets.deviceId, schema.pallets.devicePalletId],
+        where: sql`${schema.pallets.kind} = 'warehouse'`,
+      });
+  }
 
   // A fresh SELECT rather than the insert's `.returning()`, for the same
   // reason the box upsert re-reads: a pallet already opened by an earlier
   // batch -- the ordinary case for every box after a pallet's first -- is
   // exactly the row ON CONFLICT DO NOTHING leaves untouched, and
   // `.returning()` never reports it.
+  const shiftIds = [
+    ...new Set(ordered.flatMap(([, ref]) => (ref.shiftId === null ? [] : [ref.shiftId]))),
+  ];
+  // A warehouse pallet's `shift_id` is NULL, so an `inArray` alone would never
+  // see it; a batch that names both kinds has to reach both.
+  const hasWarehouseRef = ordered.some(([, ref]) => ref.shiftId === null);
+  const shiftPredicate =
+    shiftIds.length === 0
+      ? isNull(schema.pallets.shiftId)
+      : hasWarehouseRef
+        ? or(inArray(schema.pallets.shiftId, shiftIds), isNull(schema.pallets.shiftId))
+        : inArray(schema.pallets.shiftId, shiftIds);
   const rows = await tx
     .select({
       id: schema.pallets.id,
@@ -131,7 +214,7 @@ export async function upsertPallets(
     .where(
       and(
         eq(schema.pallets.tenantId, tenantId),
-        inArray(schema.pallets.shiftId, [...new Set(ordered.map(([, ref]) => ref.shiftId))]),
+        shiftPredicate,
         inArray(schema.pallets.devicePalletId, [
           ...new Set(ordered.map(([, ref]) => ref.devicePalletId)),
         ]),
@@ -145,6 +228,12 @@ export async function upsertPallets(
   // batch's own shift/pallet ids) and this loop keeps only the exact triples.
   const byKey = new Map<PalletKey, string>();
   for (const row of rows) {
+    // A warehouse row has a null `shiftId` and a `terminalId` equal to its own
+    // device id, so `palletKey` renders it as `warehouse|<deviceId>|<id>` --
+    // exactly what a membership or a warehouse closure computes. Another
+    // device's warehouse pallet sharing the device-local id keys differently
+    // and is therefore ignored here, which is the whole point of carrying the
+    // terminal in the key.
     byKey.set(palletKey(row.shiftId, row.terminalId, row.devicePalletId), row.id);
   }
   return byKey;
@@ -183,7 +272,14 @@ export async function applyPalletClosures(
   byKey: Map<PalletKey, string>,
   recordConsumedSerial: (sscc: string) => Promise<void>,
   logger: Pick<Logger, "warn">,
-): Promise<void> {
+): Promise<string[]> {
+  // Member box ids of every warehouse pallet this batch actually closed. A
+  // warehouse pallet's serial is printed on a label the handheld only produces
+  // at closure, so closing one changes what the box registry must advertise
+  // for each box standing on it (spec §2.3); the caller bumps their registry
+  // version. A production pallet's members were already bumped when their own
+  // closures wrote `boxes.pallet_id`.
+  const memberBoxIds: string[] = [];
   // Sorted by the full identity key for the same 40P01 reason the box loop
   // sorts, and for the same totality reason `upsertPallets` does.
   const ordered = [...closures].sort((a, b) => {
@@ -204,7 +300,7 @@ export async function applyPalletClosures(
     if (closure.sscc[0] !== String(PALLET_EXTENSION_DIGIT)) {
       logger.warn(
         `Pallet closure for palletId ${closure.palletId} (tenant ${tenantId}, shift ` +
-          `${closure.shiftId}, terminal ${closure.terminalId ?? "null"}) carries sscc ` +
+          `${closure.shiftId ?? "null"}, terminal ${closure.terminalId ?? "null"}) carries sscc ` +
           `${closure.sscc}, whose extension digit is not the pallet space's ` +
           `${PALLET_EXTENSION_DIGIT}; the serial will be recorded against the block that ` +
           `range belongs to, not the pallet block`,
@@ -322,11 +418,19 @@ export async function applyPalletClosures(
       if (matched === 0) {
         logger.warn(
           `Pallet closure for palletId ${closure.palletId} (tenant ${tenantId}, shift ` +
-            `${closure.shiftId}, terminal ${closure.terminalId ?? "null"}, sscc ` +
+            `${closure.shiftId ?? "null"}, terminal ${closure.terminalId ?? "null"}, sscc ` +
             `${closure.sscc}) matched no open pallet row -- the pallet was already closed by ` +
             `an earlier delivery, or this device-local pallet id was reused after its first ` +
             `pallet closed; skipping as a no-op, but the serial is still recorded as consumed`,
         );
+      }
+
+      if (matched === 1 && closure.kind === "warehouse") {
+        const members = await tx
+          .select({ id: schema.boxes.id })
+          .from(schema.boxes)
+          .where(and(eq(schema.boxes.tenantId, tenantId), eq(schema.boxes.palletId, id)));
+        memberBoxIds.push(...members.map((box) => box.id));
       }
     }
 
@@ -337,6 +441,7 @@ export async function applyPalletClosures(
     // start and reprints numbers already standing on pallets.
     await recordConsumedSerial(closure.sscc);
   }
+  return memberBoxIds;
 }
 
 /**
@@ -348,7 +453,11 @@ export async function applyPalletExceptions(
   tenantId: string,
   exceptions: readonly PalletExceptionDto[],
   byKey: Map<PalletKey, string>,
-): Promise<void> {
+): Promise<string[]> {
+  // Boxes that stood on a pallet this batch took apart. They keep `pallet_id`
+  // (see the disassemble branch below), but a handheld's registry must learn
+  // that the pallet they name is retired, so the caller bumps their version.
+  const disassembledBoxIds: string[] = [];
   const ordered = [...exceptions].sort((a, b) => {
     const left = palletKey(a.shiftId, a.terminalId, a.palletId);
     const right = palletKey(b.shiftId, b.terminalId, b.palletId);
@@ -384,6 +493,230 @@ export async function applyPalletExceptions(
           updatedAt: sql`now()`,
         })
         .where(and(eq(schema.pallets.tenantId, tenantId), eq(schema.pallets.id, id)));
+
+      const members = await tx
+        .select({ id: schema.boxes.id })
+        .from(schema.boxes)
+        .where(and(eq(schema.boxes.tenantId, tenantId), eq(schema.boxes.palletId, id)));
+      disassembledBoxIds.push(...members.map((box) => box.id));
     }
   }
+  return disassembledBoxIds;
+}
+
+/**
+ * The refusals `pallet_membership_rejections.reason` accepts. A narrower set
+ * than `PalletMembershipStatus`: an accepted membership is the `boxes` row
+ * itself, a replay is not a refusal at all, and `subscription_read_only` never
+ * reaches this module (the ingest quarantines those records before applying
+ * anything). Keep in step with
+ * `pallet_membership_rejections_reason_check`, which 23514s the whole batch
+ * on anything else.
+ */
+type PalletMembershipRejectionReason =
+  | "already_on_pallet"
+  | "not_found"
+  | "not_closed"
+  | "disassembled"
+  | "pallet_closed"
+  | "product_mismatch";
+
+/**
+ * Applies this batch's warehouse memberships (spec §2.3) one statement each,
+ * sorted by (palletId, boxSscc) for the usual 40P01 reason. The UPDATE is the
+ * whole rule: the box closed and not disassembled, the TARGET pallet still
+ * open and not disassembled, same product as the pallet, and the box
+ * either on no pallet or on a pallet that has since been disassembled --
+ * `boxes.pallet_id` may only ever be overwritten in that last case. Zero rows
+ * matched -> one diagnostic SELECT classifies the refusal and a
+ * `pallet_membership_rejections` row remembers it, because a handheld that
+ * reboots after the answer has nothing else to rebuild its conflict view
+ * from.
+ *
+ * Outcomes are returned in the CALLER's order, not the sorted one: the
+ * response contract is one entry per submitted record, same order.
+ */
+export async function applyPalletMemberships(
+  tx: Transaction,
+  tenantId: string,
+  memberships: readonly PalletMembershipDto[],
+  byKey: Map<PalletKey, string>,
+  deviceId: string,
+): Promise<{ outcomes: PalletMembershipOutcomeDto[]; changedBoxIds: string[] }> {
+  const ordered = [...memberships]
+    .map((membership, index) => ({ membership, index }))
+    .sort((a, b) => {
+      const left = `${a.membership.palletId}|${a.membership.boxSscc}`;
+      const right = `${b.membership.palletId}|${b.membership.boxSscc}`;
+      return left < right ? -1 : left > right ? 1 : 0;
+    });
+  const outcomes: PalletMembershipOutcomeDto[] = new Array<PalletMembershipOutcomeDto>(
+    memberships.length,
+  );
+  const changedBoxIds: string[] = [];
+
+  for (const { membership, index } of ordered) {
+    const palletId = byKey.get(palletKey(null, deviceId, membership.palletId));
+    if (palletId === undefined) {
+      // No pallet row could be created, which for a warehouse pallet means no
+      // membership in this batch resolved its box to a product (see
+      // `upsertPallets`). The box is unknown to this tenant; there is no row
+      // to record the refusal against either.
+      outcomes[index] = {
+        palletId: membership.palletId,
+        boxSscc: membership.boxSscc,
+        status: "not_found",
+      };
+      continue;
+    }
+
+    const updated = await tx.execute<{ id: string }>(sql`
+      UPDATE boxes b
+         SET pallet_id = ${palletId}, updated_at = now()
+        FROM shifts s, pallets tp
+       WHERE b.tenant_id = ${tenantId} AND b.sscc = ${membership.boxSscc}
+         AND s.tenant_id = b.tenant_id AND s.id = b.shift_id
+         AND tp.tenant_id = b.tenant_id AND tp.id = ${palletId}
+         AND tp.product_id = s.product_id
+         AND tp.closed_at IS NULL AND tp.disassembled_at IS NULL
+         AND b.closed_at IS NOT NULL AND b.disassembled_at IS NULL
+         AND (b.pallet_id IS NULL
+              OR EXISTS (SELECT 1 FROM pallets old
+                          WHERE old.tenant_id = b.tenant_id AND old.id = b.pallet_id
+                            AND old.id <> ${palletId} AND old.disassembled_at IS NOT NULL))
+      RETURNING b.id
+    `);
+    const accepted = updated.rows[0];
+    if (accepted) {
+      changedBoxIds.push(accepted.id);
+      outcomes[index] = {
+        palletId: membership.palletId,
+        boxSscc: membership.boxSscc,
+        status: "accepted",
+      };
+      continue;
+    }
+
+    const diagnostic = await tx.execute<{
+      id: string;
+      closed_at: Date | null;
+      disassembled_at: Date | null;
+      pallet_id: string | null;
+      old_sscc: string | null;
+      old_disassembled_at: Date | null;
+      target_closed_at: Date | null;
+      target_disassembled_at: Date | null;
+      same_product: boolean;
+    }>(sql`
+      SELECT b.id, b.closed_at, b.disassembled_at, b.pallet_id,
+             old.sscc AS old_sscc, old.disassembled_at AS old_disassembled_at,
+             tp.closed_at AS target_closed_at, tp.disassembled_at AS target_disassembled_at,
+             (s.product_id = tp.product_id) AS same_product
+        FROM boxes b
+        JOIN shifts s ON s.tenant_id = b.tenant_id AND s.id = b.shift_id
+        JOIN pallets tp ON tp.tenant_id = b.tenant_id AND tp.id = ${palletId}
+        LEFT JOIN pallets old ON old.tenant_id = b.tenant_id AND old.id = b.pallet_id
+       WHERE b.tenant_id = ${tenantId} AND b.sscc = ${membership.boxSscc}
+    `);
+    const row = diagnostic.rows[0];
+
+    // Ordered by what the operator can act on, not by the UPDATE's own clause
+    // order: a replay is the commonest answer and must never be reported as a
+    // conflict, and "someone else's pallet already holds it" is the only
+    // refusal that names another pallet.
+    let status: PalletMembershipRejectionReason | "replayed";
+    let winningPalletId: string | null = null;
+    let winningPalletSscc: string | undefined;
+    if (!row) status = "not_found";
+    else if (row.pallet_id === palletId) status = "replayed";
+    else if (row.closed_at === null) status = "not_closed";
+    else if (row.disassembled_at !== null) status = "disassembled";
+    else if (row.pallet_id !== null && row.old_disassembled_at === null) {
+      status = "already_on_pallet";
+      winningPalletId = row.pallet_id;
+      // Null until that pallet closes: the serial is printed at closure, so an
+      // open rival pallet has no number to show the operator yet.
+      if (row.old_sscc !== null) winningPalletSscc = formatSsccWithAi(row.old_sscc);
+    } else if (row.target_closed_at !== null || row.target_disassembled_at !== null) {
+      // The TARGET pallet is already closed (its SSCC label is printed and its
+      // contents are what the export claims) or disassembled. Nothing may be
+      // added to it any more.
+      status = "pallet_closed";
+    } else if (!row.same_product) {
+      // The last rule the UPDATE carried, read from the diagnostic rather
+      // than inferred: the box's shift makes a different product than the one
+      // the warehouse pallet was seeded with.
+      status = "product_mismatch";
+    } else {
+      // Every clause of the UPDATE is now accounted for, so a zero-row match
+      // with none of them refused is a rule this classifier does not know
+      // about. Better a loud 500 on a batch the station will retry than a
+      // refusal reported under a status the operator cannot act on.
+      throw new Error("unclassified membership refusal");
+    }
+
+    outcomes[index] = {
+      palletId: membership.palletId,
+      boxSscc: membership.boxSscc,
+      status,
+      ...(winningPalletSscc !== undefined ? { winningPalletSscc } : {}),
+    };
+
+    if (status !== "replayed") {
+      // Unique per (tenant, pallet, sscc), so a redelivered batch re-reports
+      // the same refusal without duplicating the row.
+      await tx
+        .insert(schema.palletMembershipRejections)
+        .values({
+          tenantId,
+          palletId,
+          boxSscc: membership.boxSscc,
+          boxId: row?.id ?? null,
+          reason: status,
+          winningPalletId,
+          addedAt: new Date(membership.addedAt),
+        })
+        .onConflictDoNothing();
+    }
+  }
+
+  return { outcomes, changedBoxIds };
+}
+
+/**
+ * Expands the outcomes of the memberships this batch actually APPLIED back
+ * over every membership the device SUBMITTED, in the caller's order.
+ *
+ * A read-only subscription denies every membership in the batch, quarantines
+ * it and filters it out of the body, so `applied` is a subsequence of `all`
+ * with the denied indexes removed. The handheld matches this list to its own
+ * outbox positionally, so a record it refused must keep its original index and
+ * report that refusal there.
+ *
+ * A cursor that runs past `applied` (or stops short of its end) means the two
+ * lists disagree about which records were applied -- every later outcome would
+ * then be attributed to the wrong membership, which is worse than a failed
+ * batch the station retries. Reported as an error rather than papered over.
+ */
+export function assembleMembershipOutcomes(
+  all: readonly PalletMembershipDto[],
+  deniedIndexes: ReadonlySet<number>,
+  applied: readonly PalletMembershipOutcomeDto[],
+): PalletMembershipOutcomeDto[] {
+  let cursor = 0;
+  const outcomes = all.map((membership, index) => {
+    if (deniedIndexes.has(index)) {
+      return {
+        palletId: membership.palletId,
+        boxSscc: membership.boxSscc,
+        status: "subscription_read_only" as const,
+      };
+    }
+    const outcome = applied[cursor];
+    cursor += 1;
+    if (outcome === undefined) throw new Error("membership outcome cursor desynchronised");
+    return outcome;
+  });
+  if (cursor !== applied.length) throw new Error("membership outcome cursor desynchronised");
+  return outcomes;
 }

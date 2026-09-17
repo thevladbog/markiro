@@ -418,6 +418,14 @@ export class SsccService {
     return deriveIssuerPrefix(profile.gln, "organisation profile");
   }
 
+  /** The organisation's own prefix — what every warehouse pallet carries (spec «Decisions»). */
+  async resolveOrganisationIssuerPrefix(
+    tenantId: string,
+    executor: Pick<Db, "select"> = this.db,
+  ): Promise<string> {
+    return this.resolveIssuerPrefixFor(tenantId, null, executor);
+  }
+
   /**
    * Refuses to START an aggregation shift that could never number a box.
    *

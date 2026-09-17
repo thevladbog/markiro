@@ -26,6 +26,10 @@ export const employeePickupPolicySchema = z.object({
   limitMode: z.enum(["limited", "unlimited"]),
   dayLimit: z.number().int().min(1),
   canWriteoff: z.boolean(),
+  // Optional, not defaulted: the admin pickup form predates this flag and
+  // still posts only the three limit fields, so a default here would revoke
+  // `canBuildPallets` on every unrelated policy edit.
+  canBuildPallets: z.boolean().optional(),
 });
 export type UpdateEmployeePickupPolicyDto = z.infer<typeof employeePickupPolicySchema>;
 
@@ -70,6 +74,7 @@ export interface EmployeePickupPolicyDto {
   limitMode: "limited" | "unlimited";
   dayLimit: number;
   canWriteoff: boolean;
+  canBuildPallets: boolean;
 }
 export interface BulkEmployeePickupPolicyItemDto extends EmployeePickupPolicyDto {
   employeeId: string;
@@ -122,11 +127,12 @@ const badgeOpenApiSchema: SchemaObject = {
 const employeePickupPolicyOpenApiSchema: SchemaObject = {
   type: "object",
   additionalProperties: false,
-  required: ["limitMode", "dayLimit", "canWriteoff"],
+  required: ["limitMode", "dayLimit", "canWriteoff", "canBuildPallets"],
   properties: {
     limitMode: { type: "string", enum: ["limited", "unlimited"] },
     dayLimit: { type: "integer", minimum: 1 },
     canWriteoff: { type: "boolean" },
+    canBuildPallets: { type: "boolean" },
   },
 };
 
@@ -189,7 +195,7 @@ export const bulkEmployeePickupPolicyResponseOpenApiSchema: SchemaObject = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["employeeId", "limitMode", "dayLimit", "canWriteoff"],
+        required: ["employeeId", "limitMode", "dayLimit", "canWriteoff", "canBuildPallets"],
         properties: {
           employeeId: uuidSchema,
           ...employeePickupPolicyOpenApiSchema.properties,

@@ -1,5 +1,6 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { and, desc, eq, gte, inArray, isNotNull, isNull, like, or, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { schema, type Db } from "@markiro/db";
 import { formatShiftNumber, formatSsccWithAi } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
@@ -896,6 +897,7 @@ export class CodeSearchService {
       .select({
         id: schema.pallets.id,
         sscc: schema.pallets.sscc,
+        kind: schema.pallets.kind,
         shiftId: schema.pallets.shiftId,
         shiftNumberMonthKey: schema.shifts.numberMonthKey,
         shiftNumberSeq: schema.shifts.numberSeq,
@@ -917,20 +919,24 @@ export class CodeSearchService {
           eq(schema.shifts.id, schema.pallets.shiftId),
         ),
       )
+      // A warehouse pallet carries its own `product_id` (it has no shift to
+      // reach one through), a production one the shift's -- the same
+      // coalesce `PalletsService.listPallets` uses.
       .leftJoin(
         schema.products,
         and(
-          eq(schema.products.tenantId, schema.shifts.tenantId),
-          eq(schema.products.id, schema.shifts.productId),
+          eq(schema.products.tenantId, schema.pallets.tenantId),
+          sql`${schema.products.id} = coalesce(${schema.pallets.productId}, ${schema.shifts.productId})`,
         ),
       )
       // `pallets.terminalId` is the device's own text id, so the station
-      // lookup casts exactly as PalletsService.listPallets does.
+      // lookup casts exactly as PalletsService.listPallets does -- including
+      // its coalesce over a warehouse pallet's `device_id`.
       .leftJoin(
         schema.stationDevices,
         and(
           eq(schema.stationDevices.tenantId, schema.pallets.tenantId),
-          sql`${schema.stationDevices.id}::text = ${schema.pallets.terminalId}`,
+          sql`${schema.stationDevices.id}::text = coalesce(${schema.pallets.deviceId}::text, ${schema.pallets.terminalId})`,
         ),
       )
       .leftJoin(
@@ -962,12 +968,29 @@ export class CodeSearchService {
         sscc: schema.boxes.sscc,
         closedAt: schema.boxes.closedAt,
         disassembledAt: schema.boxes.disassembledAt,
+        // Each box's OWN origin shift. On a warehouse pallet these differ
+        // from box to box, and the pallet itself has no shift to fall back
+        // on -- so this is the only place the stack's provenance is visible.
+        shiftId: schema.boxes.shiftId,
+        shiftNumberMonthKey: schema.shifts.numberMonthKey,
+        shiftNumberSeq: schema.shifts.numberSeq,
+        shiftCreatedFrom: schema.shifts.createdFrom,
+        productionDate: sql<
+          string | null
+        >`coalesce(${schema.shifts.productionDate}, ${schema.shifts.plannedDate})::text`,
         itemCount:
           sql<number>`count(${schema.boxItems.codeHash}) filter (where ${schema.boxItems.displacedAt} is null and ${schema.boxItems.removedAt} is null)`.mapWith(
             Number,
           ),
       })
       .from(schema.boxes)
+      .innerJoin(
+        schema.shifts,
+        and(
+          eq(schema.shifts.tenantId, schema.boxes.tenantId),
+          eq(schema.shifts.id, schema.boxes.shiftId),
+        ),
+      )
       .leftJoin(
         schema.boxItems,
         and(
@@ -976,7 +999,7 @@ export class CodeSearchService {
         ),
       )
       .where(and(eq(schema.boxes.tenantId, tenantId), eq(schema.boxes.palletId, palletId)))
-      .groupBy(schema.boxes.id)
+      .groupBy(schema.boxes.id, schema.shifts.id)
       .orderBy(sql`${schema.boxes.closedAt} desc nulls first`, schema.boxes.id);
 
     const exceptionRows = await this.db
@@ -1004,6 +1027,40 @@ export class CodeSearchService {
       )
       .orderBy(schema.palletExceptions.recordedAt);
 
+    /**
+     * The refusals this pallet collected (spec §1.4). A fourth statement for
+     * the same reason the three above are separate: this is another
+     * independent one-to-many. The self-join to `pallets` resolves the
+     * WINNING pallet's serial for an `already_on_pallet` refusal -- null
+     * while that rival pallet is still open, exactly as the station's own
+     * batch answer reports it.
+     */
+    const winningPallet = alias(schema.pallets, "winning_pallet");
+    const rejectionRows = await this.db
+      .select({
+        boxSscc: schema.palletMembershipRejections.boxSscc,
+        boxId: schema.palletMembershipRejections.boxId,
+        reason: schema.palletMembershipRejections.reason,
+        winningPalletSscc: winningPallet.sscc,
+        addedAt: schema.palletMembershipRejections.addedAt,
+        recordedAt: schema.palletMembershipRejections.recordedAt,
+      })
+      .from(schema.palletMembershipRejections)
+      .leftJoin(
+        winningPallet,
+        and(
+          eq(winningPallet.tenantId, schema.palletMembershipRejections.tenantId),
+          eq(winningPallet.id, schema.palletMembershipRejections.winningPalletId),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.palletMembershipRejections.tenantId, tenantId),
+          eq(schema.palletMembershipRejections.palletId, palletId),
+        ),
+      )
+      .orderBy(schema.palletMembershipRejections.recordedAt);
+
     const status: PalletCardDto["status"] = pallet.disassembledAt
       ? "disassembled"
       : pallet.closedAt
@@ -1014,6 +1071,7 @@ export class CodeSearchService {
       id: pallet.id,
       sscc: pallet.sscc === null ? null : formatSsccWithAi(pallet.sscc),
       status,
+      kind: pallet.kind,
       shiftId: pallet.shiftId,
       shiftNumber:
         pallet.shiftNumberMonthKey !== null &&
@@ -1036,11 +1094,34 @@ export class CodeSearchService {
       boxes: boxRows.map((row) => ({
         id: row.id,
         sscc: row.sscc === null ? null : formatSsccWithAi(row.sscc),
+        shiftId: row.shiftId,
+        shiftNumber:
+          row.shiftNumberMonthKey !== null &&
+          row.shiftNumberSeq !== null &&
+          row.shiftCreatedFrom !== null
+            ? formatShiftNumber({
+                monthKey: row.shiftNumberMonthKey,
+                seq: row.shiftNumberSeq,
+                createdFrom: row.shiftCreatedFrom,
+              })
+            : null,
+        productionDate: row.productionDate,
         itemCount: row.itemCount,
         closedAt: row.closedAt,
         disassembledAt: row.disassembledAt,
       })),
       exceptions: exceptionRows,
+      rejections: rejectionRows.map((row) => ({
+        // AI-00-prefixed like every other SSCC the cabinet shows; the table
+        // stores the bare 18 digits the handheld scanned.
+        boxSscc: formatSsccWithAi(row.boxSscc),
+        boxId: row.boxId,
+        reason: row.reason,
+        winningPalletSscc:
+          row.winningPalletSscc === null ? null : formatSsccWithAi(row.winningPalletSscc),
+        addedAt: row.addedAt,
+        recordedAt: row.recordedAt,
+      })),
     };
   }
 

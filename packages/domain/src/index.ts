@@ -173,6 +173,7 @@ export type { ParsedPhc } from "./crypto/phc.js";
 export {
   MAX_BOX_CLOSURES_PER_SYNC_BATCH,
   MAX_PALLET_CLOSURES_PER_SYNC_BATCH,
+  MAX_PALLET_MEMBERSHIPS_PER_SYNC_BATCH,
   MAX_SYNC_BATCH_ID_CHARS,
 } from "./sync/limits.js";
 export {
@@ -337,6 +338,16 @@ export type {
   ShiftExportPart,
   ShiftExportSource,
 } from "./shift-exports.js";
+export {
+  getPalletExportFormat,
+  PALLET_EXPORT_FORMATS,
+  renderPalletAggregationExport,
+} from "./pallet-exports.js";
+export type {
+  PalletExportFormatDescriptor,
+  PalletExportFormatId,
+  RenderPalletAggregationExportInput,
+} from "./pallet-exports.js";
 
 export * from "./validation-reprocessing.js";
 export * from "./offline-grants/types.js";

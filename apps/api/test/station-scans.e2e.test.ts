@@ -1535,7 +1535,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       expect(tenantAfter).toBeGreaterThan(tenantBefore);
       const delta = await app!
         .get(BoxRegistryService)
-        .list(tenantId, { since: tenantBefore.toString(), limit: 250 });
+        .list(tenantId, { since: tenantBefore.toString(), limit: 250 }, { view: "station" });
       expect(delta.items).toContainEqual(expect.objectContaining({ kind: "remove", sscc: SSCC }));
 
       await postBatchAs("t2", [losing]);

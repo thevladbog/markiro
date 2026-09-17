@@ -61,7 +61,7 @@ function expectExactFields(schema: JsonSchema, fields: readonly string[]): void 
 }
 
 describe("shift exports OpenAPI contract", () => {
-  it("documents all five cabinet operations without exposing private object keys", async () => {
+  it("documents all eight cabinet operations without exposing private object keys", async () => {
     const moduleRef = await Test.createTestingModule({
       controllers: [ShiftExportsController],
       providers: [{ provide: ShiftExportsService, useValue: {} }],
@@ -95,6 +95,14 @@ describe("shift exports OpenAPI contract", () => {
       expect(
         operation(document, "/shift-exports/{exportId}/artifacts/{artifactId}/download", "get")
           .responses["200"],
+      ).toBeDefined();
+
+      expect(operation(document, "/pallet-exports/formats", "get").responses["200"]).toBeDefined();
+      expect(
+        operation(document, "/pallets/{palletId}/exports", "post").responses["201"],
+      ).toBeDefined();
+      expect(
+        operation(document, "/pallets/{palletId}/exports", "get").responses["200"],
       ).toBeDefined();
 
       const create = requestSchema(document, "/shifts/{shiftId}/exports");
@@ -138,9 +146,33 @@ describe("shift exports OpenAPI contract", () => {
         "shift_xml_gismt_pallet_boxes",
       ]);
 
+      const createPallet = requestSchema(document, "/pallets/{palletId}/exports");
+      expectExactFields(createPallet, ["formatId", "formatVersion", "idempotencyKey"]);
+      expect(property(createPallet, "formatId").enum).toEqual(["pallet_xml_gismt_aggregation"]);
+      expect(property(createPallet, "formatVersion")).toMatchObject({
+        type: "integer",
+        minimum: 1,
+      });
+      expect(property(createPallet, "idempotencyKey")).toMatchObject({
+        type: "string",
+        format: "uuid",
+      });
+
+      const palletDescriptor = responseSchema(
+        document,
+        "/pallet-exports/formats",
+        "get",
+        "200",
+      ).items!;
+      expectExactFields(palletDescriptor, ["id", "version", "label", "extension", "mimeType"]);
+      expect(property(palletDescriptor, "id").enum).toEqual(["pallet_xml_gismt_aggregation"]);
+      expect(property(palletDescriptor, "version").enum).toEqual([1]);
+      expect(property(palletDescriptor, "extension").enum).toEqual(["xml"]);
+
       const exportFields = [
         "id",
         "shiftId",
+        "palletId",
         "formatId",
         "formatVersion",
         "maxLines",
@@ -162,6 +194,25 @@ describe("shift exports OpenAPI contract", () => {
       const created = responseSchema(document, "/shifts/{shiftId}/exports", "post", "201");
       expectExactFields(created, exportFields);
       expect(property(created, "status").enum).toEqual(["queued", "processing", "ready", "failed"]);
+      expect(property(created, "shiftId")).toMatchObject({ type: "string", nullable: true });
+      expect(property(created, "palletId")).toMatchObject({ type: "string", nullable: true });
+      // One export resource for both targets, so its formatId enumerates every
+      // format either route can create.
+      expect(property(created, "formatId").enum).toEqual([
+        "shift_txt_flat",
+        "shift_txt_boxes",
+        "shift_csv_flat",
+        "shift_csv_boxes",
+        "shift_xml_gismt_aggregation",
+        "shift_txt_pallets",
+        "shift_csv_pallets",
+        "shift_xml_gismt_aggregation_pallets",
+        "shift_txt_pallet_boxes",
+        "shift_xml_gismt_pallet_boxes",
+        "pallet_xml_gismt_aggregation",
+      ]);
+      // 0, not 1: a per-pallet aggregation names box SSCCs and no unit codes.
+      expect(property(created, "totalCodeCount")).toMatchObject({ minimum: 0, nullable: true });
       const artifact = property(created, "artifacts").items!;
       expectExactFields(artifact, [
         "id",
@@ -175,9 +226,16 @@ describe("shift exports OpenAPI contract", () => {
         "sha256",
       ]);
 
+      expect(property(artifact, "codeCount")).toMatchObject({ type: "integer", minimum: 0 });
+
       const history = responseSchema(document, "/shifts/{shiftId}/exports", "get", "200");
       expect(history.type).toBe("array");
       expectExactFields(history.items!, exportFields);
+      const palletCreated = responseSchema(document, "/pallets/{palletId}/exports", "post", "201");
+      expectExactFields(palletCreated, exportFields);
+      const palletHistory = responseSchema(document, "/pallets/{palletId}/exports", "get", "200");
+      expect(palletHistory.type).toBe("array");
+      expectExactFields(palletHistory.items!, exportFields);
       expectExactFields(
         responseSchema(document, "/shift-exports/{exportId}/retry", "post", "200"),
         exportFields,

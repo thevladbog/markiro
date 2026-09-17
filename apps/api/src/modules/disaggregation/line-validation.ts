@@ -138,6 +138,14 @@ export interface PalletCandidate {
  * so there is no purchase path that could lock one. `codeCount` sums the
  * active items of every member box (`boxes.pallet_id = pallets.id`), the
  * same live predicate `validateBoxCandidates` uses per box.
+ *
+ * The `shifts` join is a LEFT join, not an inner one: a WAREHOUSE pallet has
+ * `shift_id IS NULL` by construction (it is built from closed boxes of
+ * arbitrary shifts), and an inner join silently dropped it from the result
+ * map entirely -- the cabinet's Disaggregation document then reported a
+ * perfectly valid warehouse pallet as `not_found`. Its product comes from
+ * its own `product_id` column instead, and `shift_open` -- the one status
+ * that reads the shift -- cannot apply to a pallet that has no shift.
  */
 export async function validatePalletCandidates(
   db: Pick<Db, "select">,
@@ -154,15 +162,18 @@ export async function validatePalletCandidates(
       closedAt: schema.pallets.closedAt,
       closureReceivedAt: schema.pallets.closureReceivedAt,
       disassembledAt: schema.pallets.disassembledAt,
+      shiftId: schema.pallets.shiftId,
       shiftStatus: schema.shifts.status,
-      productId: schema.shifts.productId,
+      productId: sql<
+        string | null
+      >`coalesce(${schema.pallets.productId}, ${schema.shifts.productId})`,
       codeCount:
         sql<number>`count(${schema.boxItems.codeHash}) filter (where ${schema.boxItems.displacedAt} is null and ${schema.boxItems.removedAt} is null)`.mapWith(
           Number,
         ),
     })
     .from(schema.pallets)
-    .innerJoin(
+    .leftJoin(
       schema.shifts,
       and(
         eq(schema.shifts.tenantId, schema.pallets.tenantId),
@@ -184,13 +195,14 @@ export async function validatePalletCandidates(
       ),
     )
     .where(and(eq(schema.pallets.tenantId, tenantId), inArray(schema.pallets.sscc, ssccs)))
-    .groupBy(schema.pallets.id, schema.shifts.status, schema.shifts.productId);
+    .groupBy(schema.pallets.id, schema.shifts.id);
 
   for (const row of rows) {
     if (row.sscc === null) continue;
     let status: PalletCandidate["status"];
     if (row.closedAt === null || row.closureReceivedAt === null) status = "not_closed";
-    else if (row.shiftStatus !== "closed") status = "shift_open";
+    // Only a pallet that HAS a shift can be blocked by it still being open.
+    else if (row.shiftId !== null && row.shiftStatus !== "closed") status = "shift_open";
     else if (row.disassembledAt !== null) status = "already_disassembled";
     else status = "ok";
     result.set(row.sscc, {
