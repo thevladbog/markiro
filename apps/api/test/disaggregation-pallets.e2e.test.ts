@@ -469,6 +469,16 @@ describe.skipIf(!ready)("disaggregation pallets e2e", () => {
     expect(boxAfter.registryVersion).toBeGreaterThan(versionBefore);
     expect(boxAfter.disassembledAt).toBeNull();
 
+    // The printed act reaches the product through the LINE's own snapshot, so
+    // a pallet with no shift must still name its product and its member box.
+    const report = await agent
+      .get(`/disaggregation/${doc.id}/report`)
+      .query({ variant: "full" })
+      .expect(200)
+      .expect("Content-Type", /text\/html/);
+    expect(report.text).toContain("Cola");
+    expect(report.text.match(/<tr class="rep-code-row">/g)?.length).toBe(1);
+
     const [audit] = await db
       .select()
       .from(schema.tenantAuditEvents)
