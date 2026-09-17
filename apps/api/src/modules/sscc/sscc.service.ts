@@ -351,6 +351,14 @@ export class SsccService {
       return deriveIssuerPrefix(cp.gln, "sscc issuer counterparty");
     }
 
+    return this.resolveOrganisationIssuerPrefix(tenantId, executor);
+  }
+
+  /** The organisation's own prefix — what every warehouse pallet carries (spec «Decisions»). */
+  async resolveOrganisationIssuerPrefix(
+    tenantId: string,
+    executor: Pick<Db, "select"> = this.db,
+  ): Promise<string> {
     const [profile] = await executor
       .select({ gln: schema.orgProfiles.gln })
       .from(schema.orgProfiles)
