@@ -110,6 +110,31 @@ describe.skipIf(!databaseUrl)("pallet export code-counts migration", () => {
     ).rejects.toMatchObject({ constraint: "shift_exports_total_code_count_positive" });
   });
 
+  it("rejects a non-zero-code pallet export", async () => {
+    // The relaxation is target-aware, not a blanket "anything goes once
+    // pallet_id is set": a per-pallet aggregation export names box SSCCs only,
+    // so a positive unit-code total there is a bug, not a looser case.
+    await expect(
+      pool.query(
+        `INSERT INTO shift_exports
+           (tenant_id, shift_id, pallet_id, format_id, format_version, created_by_user_id, idempotency_key, total_code_count)
+         VALUES ($1, NULL, $2, 'pallet_xml_gismt_aggregation', 1, $3, $4, 5)`,
+        [tenantId, palletId, userId, randomUUID()],
+      ),
+    ).rejects.toMatchObject({ constraint: "shift_exports_total_code_count_positive" });
+  });
+
+  it("still accepts a SHIFT export carrying codes", async () => {
+    await expect(
+      pool.query(
+        `INSERT INTO shift_exports
+           (tenant_id, shift_id, pallet_id, format_id, format_version, created_by_user_id, idempotency_key, total_code_count)
+         VALUES ($1, $2, NULL, 'shift_txt_flat', 1, $3, $4, 1)`,
+        [tenantId, shiftId, userId, randomUUID()],
+      ),
+    ).resolves.toMatchObject({ rowCount: 1 });
+  });
+
   it("accepts a zero-code artifact and rejects a negative one", async () => {
     const [exportRow] = (
       await pool.query<{ id: string }>(

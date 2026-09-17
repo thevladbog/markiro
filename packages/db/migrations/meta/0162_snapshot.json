@@ -2609,7 +2609,7 @@
         },
         "pallets_warehouse_terminal_check": {
           "name": "pallets_warehouse_terminal_check",
-          "value": "\"pallets\".\"kind\" <> 'warehouse' OR \"pallets\".\"terminal_id\" = \"pallets\".\"device_id\"::text"
+          "value": "\"pallets\".\"kind\" <> 'warehouse' OR (\"pallets\".\"terminal_id\" IS NOT NULL AND \"pallets\".\"terminal_id\" = \"pallets\".\"device_id\"::text)"
         }
       },
       "isRLSEnabled": false

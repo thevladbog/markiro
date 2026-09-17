@@ -86,7 +86,7 @@ export const shiftExports = pgTable(
     // this table, and that guarantee stays asserted here.
     check(
       "shift_exports_total_code_count_positive",
-      sql`${table.totalCodeCount} is null or ${table.totalCodeCount} > 0 or ${table.palletId} is not null`,
+      sql`${table.totalCodeCount} is null or (${table.palletId} is null and ${table.totalCodeCount} > 0) or (${table.palletId} is not null and ${table.totalCodeCount} = 0)`,
     ),
     check(
       "shift_exports_total_box_count_nonnegative",

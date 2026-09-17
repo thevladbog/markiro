@@ -142,6 +142,17 @@ describe.skipIf(!databaseUrl)("warehouse pallets migration", () => {
       ),
     ).rejects.toMatchObject({ constraint: "pallets_warehouse_terminal_check" });
 
+    // A NULL terminal_id must be refused too. `NULL = device_id::text`
+    // evaluates to NULL and a CHECK that evaluates to NULL PASSES, so the
+    // constraint has to spell the NOT NULL half out.
+    await expect(
+      pool.query(
+        `INSERT INTO pallets (tenant_id,kind,shift_id,terminal_id,device_pallet_id,product_id,device_id)
+         VALUES ($1,'warehouse',NULL,NULL,'w1-null-terminal',$2,$3)`,
+        [tenantId, productId, deviceId],
+      ),
+    ).rejects.toMatchObject({ constraint: "pallets_warehouse_terminal_check" });
+
     // A second device building a warehouse pallet with the SAME
     // device_pallet_id, each terminal_id equal to its own device id, must
     // succeed: warehouse identity is scoped per device, not global.

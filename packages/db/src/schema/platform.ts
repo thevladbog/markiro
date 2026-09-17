@@ -1155,9 +1155,12 @@ export const pallets = pgTable(
     // strings for the same device would each get their own row under that
     // NULLS-NOT-DISTINCT constraint, silently bypassing
     // `pallets_warehouse_device_pallet_uq`'s per-device uniqueness intent.
+    // The NOT NULL half is not redundant: `NULL = deviceId::text` is NULL, and
+    // a CHECK that evaluates to NULL passes, so without it a warehouse pallet
+    // could be stored with no `terminal_id` at all.
     check(
       "pallets_warehouse_terminal_check",
-      sql`${t.kind} <> 'warehouse' OR ${t.terminalId} = ${t.deviceId}::text`,
+      sql`${t.kind} <> 'warehouse' OR (${t.terminalId} IS NOT NULL AND ${t.terminalId} = ${t.deviceId}::text)`,
     ),
     foreignKey({
       name: "pallets_tenant_shift_fk",

@@ -2609,7 +2609,7 @@
         },
         "pallets_warehouse_terminal_check": {
           "name": "pallets_warehouse_terminal_check",
-          "value": "\"pallets\".\"kind\" <> 'warehouse' OR \"pallets\".\"terminal_id\" = \"pallets\".\"device_id\"::text"
+          "value": "\"pallets\".\"kind\" <> 'warehouse' OR (\"pallets\".\"terminal_id\" IS NOT NULL AND \"pallets\".\"terminal_id\" = \"pallets\".\"device_id\"::text)"
         }
       },
       "isRLSEnabled": false
@@ -20845,7 +20845,7 @@
         },
         "shift_exports_total_code_count_positive": {
           "name": "shift_exports_total_code_count_positive",
-          "value": "\"shift_exports\".\"total_code_count\" is null or \"shift_exports\".\"total_code_count\" > 0 or \"shift_exports\".\"pallet_id\" is not null"
+          "value": "\"shift_exports\".\"total_code_count\" is null or (\"shift_exports\".\"pallet_id\" is null and \"shift_exports\".\"total_code_count\" > 0) or (\"shift_exports\".\"pallet_id\" is not null and \"shift_exports\".\"total_code_count\" = 0)"
         },
         "shift_exports_total_box_count_nonnegative": {
           "name": "shift_exports_total_box_count_nonnegative",
