@@ -580,6 +580,34 @@ describe.skipIf(!ready)("station scans warehouse pallets e2e", () => {
     expect(await rejections(w7.id)).toEqual([]);
   });
 
+  /**
+   * By now this tenant holds both OPEN and CLOSED warehouse pallets, which is
+   * the case the keyset cursor has to get right: the list sorts
+   * `closed_at DESC NULLS FIRST`, so a page that ends inside the still-open
+   * block must continue with the rest of that block AND everything closed.
+   * Walked one row at a time, the pages must reconstruct the single-page list
+   * exactly -- no row seen twice, none skipped.
+   */
+  it("pages the whole list one row at a time without losing or repeating a pallet", async () => {
+    const whole = await agent.get("/pallets").expect(200);
+    const expected = (whole.body.items as { id: string }[]).map((pallet) => pallet.id);
+    expect(expected.length).toBeGreaterThan(2);
+
+    const walked: string[] = [];
+    let cursor: string | undefined;
+    for (let page = 0; page <= expected.length; page += 1) {
+      const res = await agent
+        .get("/pallets")
+        .query({ limit: 1, ...(cursor === undefined ? {} : { cursor }) })
+        .expect(200);
+      walked.push(...(res.body.items as { id: string }[]).map((pallet) => pallet.id));
+      cursor = res.body.nextCursor as string | undefined;
+      if (cursor === undefined) break;
+    }
+    expect(cursor).toBeUndefined();
+    expect(walked).toEqual(expected);
+  });
+
   it("denies, quarantines and reports every membership of a read-only tenant", async () => {
     const db = app!.get<Db>(DB);
     const lapsed = request.agent(app!.getHttpServer());
