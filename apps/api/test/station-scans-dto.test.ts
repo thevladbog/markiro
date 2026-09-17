@@ -264,7 +264,11 @@ describe("warehouse pallet records", () => {
 
   it("accepts palletMemberships and defaults them to empty", () => {
     expect(syncBatchSchema.parse({ batchId: "b", items: [] }).palletMemberships).toEqual([]);
-    const parsed = syncBatchSchema.parse({ batchId: "b", items: [], palletMemberships: [membership] });
+    const parsed = syncBatchSchema.parse({
+      batchId: "b",
+      items: [],
+      palletMemberships: [membership],
+    });
     expect(parsed.palletMemberships).toEqual([membership]);
   });
 
@@ -273,12 +277,18 @@ describe("warehouse pallet records", () => {
       ...membership,
       boxSscc: `0034600682${String(i).padStart(7, "0")}1`,
     }));
-    expect(() => syncBatchSchema.parse({ batchId: "b", items: [], palletMemberships: tooMany })).toThrow();
+    expect(() =>
+      syncBatchSchema.parse({ batchId: "b", items: [], palletMemberships: tooMany }),
+    ).toThrow();
   });
 
   it("rejects a membership naming one box twice for one pallet", () => {
     expect(() =>
-      syncBatchSchema.parse({ batchId: "b", items: [], palletMemberships: [membership, membership] }),
+      syncBatchSchema.parse({
+        batchId: "b",
+        items: [],
+        palletMemberships: [membership, membership],
+      }),
     ).toThrow(/at most once/);
   });
 
@@ -309,7 +319,9 @@ describe("warehouse pallet records", () => {
       closedAt: "2026-09-17T08:00:00.000Z",
       operatorId: null,
     };
-    expect(syncBatchSchema.parse({ batchId: "b", items: [], pallets: [closure] }).pallets[0]).toMatchObject({
+    expect(
+      syncBatchSchema.parse({ batchId: "b", items: [], pallets: [closure] }).pallets[0],
+    ).toMatchObject({
       kind: "warehouse",
       shiftId: null,
     });
@@ -321,7 +333,11 @@ describe("warehouse pallet records", () => {
       }),
     ).toThrow(/shiftId/);
     expect(() =>
-      syncBatchSchema.parse({ batchId: "b", items: [], pallets: [{ ...closure, productId: null }] }),
+      syncBatchSchema.parse({
+        batchId: "b",
+        items: [],
+        pallets: [{ ...closure, productId: null }],
+      }),
     ).toThrow(/productId/);
   });
 });

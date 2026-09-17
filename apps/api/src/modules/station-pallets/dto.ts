@@ -24,14 +24,29 @@ export interface StationPalletBootstrapDto {
 
 export const stationPalletBootstrapOpenApiSchema: SchemaObject = {
   type: "object",
-  required: ["generatedAt", "products", "operators", "palletSscc", "palletSsccRevokedFrom", "palletLabelTemplates"],
+  required: [
+    "generatedAt",
+    "products",
+    "operators",
+    "palletSscc",
+    "palletSsccRevokedFrom",
+    "palletLabelTemplates",
+  ],
   properties: {
     generatedAt: { type: "string", format: "date-time" },
     products: {
       type: "array",
       items: {
         type: "object",
-        required: ["id", "gtin14", "name", "printName", "shelfLifeDays", "palletBoxCapacity", "chzProductGroupCode"],
+        required: [
+          "id",
+          "gtin14",
+          "name",
+          "printName",
+          "shelfLifeDays",
+          "palletBoxCapacity",
+          "chzProductGroupCode",
+        ],
         properties: {
           id: { type: "string", format: "uuid" },
           gtin14: { type: "string" },
@@ -48,13 +63,22 @@ export const stationPalletBootstrapOpenApiSchema: SchemaObject = {
       items: {
         type: "object",
         required: ["employeeId", "canBuildPallets"],
-        properties: { employeeId: { type: "string", format: "uuid" }, canBuildPallets: { type: "boolean" } },
+        properties: {
+          employeeId: { type: "string", format: "uuid" },
+          canBuildPallets: { type: "boolean" },
+        },
       },
     },
     palletSscc: {
       type: "object",
       nullable: true,
-      required: ["issuerPrefix", "extensionDigit", "fromSerial", "toSerial", "consumedThroughSerial"],
+      required: [
+        "issuerPrefix",
+        "extensionDigit",
+        "fromSerial",
+        "toSerial",
+        "consumedThroughSerial",
+      ],
       properties: {
         issuerPrefix: { type: "string" },
         extensionDigit: { type: "integer", enum: [1] },

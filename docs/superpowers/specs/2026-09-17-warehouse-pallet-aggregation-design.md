@@ -36,17 +36,17 @@ document, and exports one pallet as a GIS MT aggregation of box SSCCs.
 
 ## Decisions
 
-| Question                                    | Decision                                                                          |
-| ------------------------------------------- | --------------------------------------------------------------------------------- |
-| Where the boxes come from                   | Anywhere in the tenant: other shifts, other terminals, disassembled pallets       |
-| Box already on a live pallet                | Refused with the pallet's SSCC; move requires disassembling the old pallet first |
-| Homogeneity                                 | One product (GTIN) per pallet; the first box fixes it. Shifts and dates may mix   |
-| Offline                                     | Fully offline: local registry mirror decides, server re-validates at sync         |
-| Devices in this slice                       | Handheld only; station later                                                      |
-| Server model                                | Same `pallets` table with `kind = 'warehouse'` (approach A below)                 |
-| Cabinet                                     | Org-wide list, card, disassembly via existing document, per-pallet GIS MT export  |
-| Pallet issuer prefix                        | Always the organisation's own GLN                                                 |
-| Membership history                          | Not kept beyond `boxes.pallet_id`; the disassembly exception/document is the log  |
+| Question                     | Decision                                                                         |
+| ---------------------------- | -------------------------------------------------------------------------------- |
+| Where the boxes come from    | Anywhere in the tenant: other shifts, other terminals, disassembled pallets      |
+| Box already on a live pallet | Refused with the pallet's SSCC; move requires disassembling the old pallet first |
+| Homogeneity                  | One product (GTIN) per pallet; the first box fixes it. Shifts and dates may mix  |
+| Offline                      | Fully offline: local registry mirror decides, server re-validates at sync        |
+| Devices in this slice        | Handheld only; station later                                                     |
+| Server model                 | Same `pallets` table with `kind = 'warehouse'` (approach A below)                |
+| Cabinet                      | Org-wide list, card, disassembly via existing document, per-pallet GIS MT export |
+| Pallet issuer prefix         | Always the organisation's own GLN                                                |
+| Membership history           | Not kept beyond `boxes.pallet_id`; the disassembly exception/document is the log |
 
 ### Why one table with a `kind`, not a second pallet model
 
@@ -70,15 +70,15 @@ One migration in `packages/db/migrations/`.
 
 ### 1.1 `pallets`
 
-| Change                                     | Notes                                                                                  |
-| ------------------------------------------ | -------------------------------------------------------------------------------------- |
-| `shift_id` → nullable                      | composite FK kept                                                                      |
-| `kind text not null default 'production'`  | CHECK `kind in ('production','warehouse')`                                             |
-| `product_id uuid null`                     | composite FK `(tenant_id, product_id)` → `products`                                     |
-| `device_id uuid null`                      | composite FK `(tenant_id, device_id)` → `station_devices`                               |
-| CHECK `pallets_kind_shape`                 | `production ⇒ shift_id not null`; `warehouse ⇒ shift_id is null and product_id is not null and device_id is not null` |
-| `pallets_warehouse_device_pallet_uq`       | unique `(tenant_id, device_id, device_pallet_id) WHERE kind = 'warehouse'`             |
-| index `pallets_tenant_kind_closed_idx`     | `(tenant_id, kind, closed_at)` for the org-wide list                                    |
+| Change                                    | Notes                                                                                                                 |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `shift_id` → nullable                     | composite FK kept                                                                                                     |
+| `kind text not null default 'production'` | CHECK `kind in ('production','warehouse')`                                                                            |
+| `product_id uuid null`                    | composite FK `(tenant_id, product_id)` → `products`                                                                   |
+| `device_id uuid null`                     | composite FK `(tenant_id, device_id)` → `station_devices`                                                             |
+| CHECK `pallets_kind_shape`                | `production ⇒ shift_id not null`; `warehouse ⇒ shift_id is null and product_id is not null and device_id is not null` |
+| `pallets_warehouse_device_pallet_uq`      | unique `(tenant_id, device_id, device_pallet_id) WHERE kind = 'warehouse'`                                            |
+| index `pallets_tenant_kind_closed_idx`    | `(tenant_id, kind, closed_at)` for the org-wide list                                                                  |
 
 `pallets_device_pallet_uq` stays for production pallets; with `shift_id` null
 it cannot fire for warehouse rows, which is why the partial unique above
@@ -109,16 +109,16 @@ is null or ... > 0 or pallet_id is not null`) and relaxes the artifact
 check to `shift_export_artifacts_code_count_nonnegative` (`code_count >=
 0`), because a pallet export legitimately reports zero unit codes:
 
-| Column                                | Notes                                                              |
-| ------------------------------------- | ------------------------------------------------------------------ |
-| `id`, `tenant_id`                     |                                                                    |
-| `pallet_id uuid not null`             | composite FK → `pallets`                                           |
-| `box_sscc char(18) not null`          | the scanned value, whether or not a box exists for it              |
-| `box_id uuid null`                    | composite FK → `boxes` when resolved                               |
-| `reason text not null`                | CHECK in the status list of §2.2 minus `accepted`/`replayed`       |
-| `winning_pallet_id uuid null`         | for `already_on_pallet`                                            |
-| `added_at`, `recorded_at`             | device clock / server `now()`                                      |
-| unique `(tenant_id, pallet_id, box_sscc)` | a replayed batch does not duplicate the rejection              |
+| Column                                    | Notes                                                        |
+| ----------------------------------------- | ------------------------------------------------------------ |
+| `id`, `tenant_id`                         |                                                              |
+| `pallet_id uuid not null`                 | composite FK → `pallets`                                     |
+| `box_sscc char(18) not null`              | the scanned value, whether or not a box exists for it        |
+| `box_id uuid null`                        | composite FK → `boxes` when resolved                         |
+| `reason text not null`                    | CHECK in the status list of §2.2 minus `accepted`/`replayed` |
+| `winning_pallet_id uuid null`             | for `already_on_pallet`                                      |
+| `added_at`, `recorded_at`                 | device clock / server `now()`                                |
+| unique `(tenant_id, pallet_id, box_sscc)` | a replayed batch does not duplicate the rejection            |
 
 The server must remember a refusal: a handheld that reboots after receiving
 the batch response has nothing else to rebuild its conflict view from, and
@@ -169,9 +169,9 @@ Three backward-compatible changes.
 
 ```ts
 {
-  palletId: string;      // device-local, max 64
-  boxSscc: string;       // 18 digits
-  addedAt: string;       // device clock
+  palletId: string; // device-local, max 64
+  boxSscc: string; // 18 digits
+  addedAt: string; // device clock
   operatorId: string | null;
 }
 ```
@@ -238,6 +238,7 @@ exceptions.
   this order: `not_found` → `not_closed` → `disassembled` →
   `already_on_pallet` (with the winner's SSCC) → `product_mismatch`, and
   writes `pallet_membership_rejections` (`ON CONFLICT DO NOTHING`).
+
 - Accepted box ids are collected and passed to `advanceBoxRegistryVersion`
   once at the end of the transaction.
 - **Closures** for `kind = 'warehouse'` resolve the pallet by
@@ -256,8 +257,8 @@ Each `upsert` item gains:
 
 ```ts
 palletId: string | null;
-palletSscc: string | null;     // null while the pallet is open
-palletActive: boolean;         // pallet exists and disassembled_at is null
+palletSscc: string | null; // null while the pallet is open
+palletActive: boolean; // pallet exists and disassembled_at is null
 closedAt: string;
 productionDate: string | null; // shift's effective civil date, YYYY-MM-DD
 ```
@@ -306,8 +307,8 @@ of the same codes. `unpalletizedBoxes` is empty by construction.
 - `PalletEntity` gains `kind`, `productId`, `deviceId`; `shiftId` becomes
   nullable. The DAO's `open(shiftId)` is joined by `openWarehouse()`.
 - `pallet_memberships`: `(palletId, sscc) PK, addedAt, operatorId, status
-  (pending | sent | accepted | rejected), reason?, winningPalletSscc?,
-  ackedAt?`. Pure facts after `sent`; `status` is the only column updated.
+(pending | sent | accepted | rejected), reason?, winningPalletSscc?,
+ackedAt?`. Pure facts after `sent`; `status` is the only column updated.
 - `writeoff_boxes` is renamed `box_registry` (the table is already the
   tenant-wide registry mirror, the name was an accident of the first
   consumer) and gains the five registry fields of §2.4 plus
@@ -341,8 +342,8 @@ Hub tile «Паллеты» beside «Списание»; route `Routes.PALLETS` 
   5. `productId ≠ pallet.productId` → «Другой товар: {name}»;
   6. accept: insert `pallet_memberships(pending)`, set `localPalletId`,
      short vibration, count advances.
-  An SSCC with extension digit 1, or one found in the local `pallets` table,
-  is «Это паллета, не короб».
+     An SSCC with extension digit 1, or one found in the local `pallets` table,
+     is «Это паллета, не короб».
 - **Opening.** The first accepted scan creates the `PalletEntity` with
   `kind = warehouse`, `productId` from the box, `deviceId` from the device
   record. No serial is burned and no server row exists until then.
@@ -384,7 +385,7 @@ Hub tile «Паллеты» beside «Списание»; route `Routes.PALLETS` 
   signature beside boxes, pallets and label events (§4.2 of 06d explains why
   a record that joins a batch after its id was computed is lost).
 - On response, each membership is set `accepted`/`rejected(reason,
-  winningPalletSscc)`; `replayed` counts as accepted.
+winningPalletSscc)`; `replayed` counts as accepted.
 - The registry mirror (`WriteoffMirror`, renamed `BoxRegistryMirror`)
   refreshes on entering the screen and after every accepted batch; applying
   an upsert clears `localPalletId` when the server's `palletId` matches the
@@ -433,7 +434,7 @@ RU and EN together, as always.
 - **Membership before closure** is the normal order; a membership naming a
   pallet the server has not seen creates the warehouse row in the pre-pass.
 - **Replay** is `replayed` per membership, no-op per closure, `ON CONFLICT
-  DO NOTHING` per rejection.
+DO NOTHING` per rejection.
 - **Empty extension-1 pool** — pallet stays open over capacity, boxes keep
   joining, closes after the next bootstrap. 06d's rule, unchanged.
 - **Archived or missing product** — the box is still accepted by GTIN from

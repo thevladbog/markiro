@@ -4,7 +4,11 @@ import { schema, type Db } from "@markiro/db";
 import type { LabelTemplateSpec } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
 import { EntitlementsService } from "../../subscriptions/entitlements.service";
-import { PALLET_EXTENSION_DIGIT, SsccCapacityExhaustedException, SsccService } from "../sscc/sscc.service";
+import {
+  PALLET_EXTENSION_DIGIT,
+  SsccCapacityExhaustedException,
+  SsccService,
+} from "../sscc/sscc.service";
 import type { StationPalletBootstrapDto } from "./dto";
 
 /** Same size the shift bundle uses; see `PALLET_BLOCK_SIZE` in shifts.service.ts. */
@@ -73,7 +77,8 @@ export class StationPalletsService {
         .from(schema.labelTemplates)
         .where(eq(schema.labelTemplates.tenantId, tenantId));
       for (const row of rows) {
-        if (row.enabled && templateIds.includes(row.id)) specs.set(row.id, row.spec as LabelTemplateSpec);
+        if (row.enabled && templateIds.includes(row.id))
+          specs.set(row.id, row.spec as LabelTemplateSpec);
       }
     }
 
@@ -107,7 +112,9 @@ export class StationPalletsService {
         issuerPrefix = await this.sscc.resolveOrganisationIssuerPrefix(tenantId, tx);
       } catch (error) {
         if (!(error instanceof BadRequestException)) throw error;
-        this.logger.warn(`Tenant ${tenantId} pallet bootstrap has no serial block -- ${error.message}`);
+        this.logger.warn(
+          `Tenant ${tenantId} pallet bootstrap has no serial block -- ${error.message}`,
+        );
         return none;
       }
       try {
@@ -129,7 +136,9 @@ export class StationPalletsService {
         return { palletSscc, palletSsccRevokedFrom };
       } catch (error) {
         if (!(error instanceof SsccCapacityExhaustedException)) throw error;
-        this.logger.warn(`Tenant ${tenantId} pallet bootstrap has no serial block -- ${error.message}`);
+        this.logger.warn(
+          `Tenant ${tenantId} pallet bootstrap has no serial block -- ${error.message}`,
+        );
         return none;
       }
     });

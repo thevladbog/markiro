@@ -180,7 +180,10 @@ describe.skipIf(!ready)("station pallet bootstrap e2e", () => {
     expect(res.body.palletSsccRevokedFrom).toEqual([]);
 
     expect(res.body.palletLabelTemplates.organisation).not.toBeNull();
-    expect(res.body.palletLabelTemplates.organisation).toMatchObject({ widthMm: 100, heightMm: 150 });
+    expect(res.body.palletLabelTemplates.organisation).toMatchObject({
+      widthMm: 100,
+      heightMm: 150,
+    });
     expect(res.body.palletLabelTemplates.byCategory).toEqual([
       {
         chzProductGroupCode: 8,

@@ -28,32 +28,33 @@
 
 ## File map
 
-| Path | Responsibility |
-| --- | --- |
-| `packages/domain/src/sync/limits.ts` | `MAX_PALLET_MEMBERSHIPS_PER_SYNC_BATCH` |
-| `packages/domain/src/sync/limits-fixtures.ts`, `apps/handheld/app/src/test/resources/sync-limits-fixtures.json` | shared limit fixture |
-| `packages/domain/src/pallet-exports.ts` (new) | `PALLET_EXPORT_FORMATS`, `renderPalletAggregationExport` |
-| `packages/db/src/schema/platform.ts` | `pallets` columns/constraints, `pallet_exceptions.shift_id` nullable, `pallet_membership_rejections`, quarantine CHECK |
-| `packages/db/src/schema/pickup.ts` | `employee_pickup_policies.can_build_pallets` |
-| `packages/db/src/schema/shift-exports.ts` | `shift_exports.shift_id` nullable, `pallet_id` |
-| `packages/db/migrations/0162_warehouse_pallets.sql` (generated) | the migration |
-| `apps/api/src/modules/station-scans/dto.ts` | `palletMembershipSchema`, pallet closure `kind`/`productId`, response `memberships`, denied `shiftId` nullable |
-| `apps/api/src/modules/station-scans/pallet-ingest.ts` | warehouse refs in `upsertPallets`, `applyPalletMemberships`, warehouse closures |
-| `apps/api/src/modules/station-scans/station-scans.service.ts` | wiring, read-only denial, registry bumps, response |
-| `apps/api/src/modules/disaggregation/disaggregation.service.ts` | registry bump on pallet disassembly |
-| `apps/api/src/modules/kiosk/box-registry.service.ts`, `box-registry.dto.ts` | registry pallet fields |
-| `apps/api/src/modules/sscc/sscc.service.ts` | `resolveOrganisationIssuerPrefix` |
-| `apps/api/src/modules/station-pallets/` (new) | `GET /station/pallet-bootstrap` |
-| `apps/api/src/modules/employees/dto.ts`, `employees.service.ts` | `canBuildPallets` |
-| `apps/api/src/modules/pallets/dto.ts`, `pallets.service.ts`, `pallets.controller.ts` | org-wide list, filters, cursor, `kind`, `rejectedMembershipCount` |
-| `apps/api/src/modules/code-search/dto.ts`, `code-search.service.ts` | pallet card `kind`, warehouse product, box origin shifts, rejections |
-| `apps/api/src/modules/shift-exports/*` | pallet export create/list/run |
+| Path                                                                                                            | Responsibility                                                                                                         |
+| --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `packages/domain/src/sync/limits.ts`                                                                            | `MAX_PALLET_MEMBERSHIPS_PER_SYNC_BATCH`                                                                                |
+| `packages/domain/src/sync/limits-fixtures.ts`, `apps/handheld/app/src/test/resources/sync-limits-fixtures.json` | shared limit fixture                                                                                                   |
+| `packages/domain/src/pallet-exports.ts` (new)                                                                   | `PALLET_EXPORT_FORMATS`, `renderPalletAggregationExport`                                                               |
+| `packages/db/src/schema/platform.ts`                                                                            | `pallets` columns/constraints, `pallet_exceptions.shift_id` nullable, `pallet_membership_rejections`, quarantine CHECK |
+| `packages/db/src/schema/pickup.ts`                                                                              | `employee_pickup_policies.can_build_pallets`                                                                           |
+| `packages/db/src/schema/shift-exports.ts`                                                                       | `shift_exports.shift_id` nullable, `pallet_id`                                                                         |
+| `packages/db/migrations/0162_warehouse_pallets.sql` (generated)                                                 | the migration                                                                                                          |
+| `apps/api/src/modules/station-scans/dto.ts`                                                                     | `palletMembershipSchema`, pallet closure `kind`/`productId`, response `memberships`, denied `shiftId` nullable         |
+| `apps/api/src/modules/station-scans/pallet-ingest.ts`                                                           | warehouse refs in `upsertPallets`, `applyPalletMemberships`, warehouse closures                                        |
+| `apps/api/src/modules/station-scans/station-scans.service.ts`                                                   | wiring, read-only denial, registry bumps, response                                                                     |
+| `apps/api/src/modules/disaggregation/disaggregation.service.ts`                                                 | registry bump on pallet disassembly                                                                                    |
+| `apps/api/src/modules/kiosk/box-registry.service.ts`, `box-registry.dto.ts`                                     | registry pallet fields                                                                                                 |
+| `apps/api/src/modules/sscc/sscc.service.ts`                                                                     | `resolveOrganisationIssuerPrefix`                                                                                      |
+| `apps/api/src/modules/station-pallets/` (new)                                                                   | `GET /station/pallet-bootstrap`                                                                                        |
+| `apps/api/src/modules/employees/dto.ts`, `employees.service.ts`                                                 | `canBuildPallets`                                                                                                      |
+| `apps/api/src/modules/pallets/dto.ts`, `pallets.service.ts`, `pallets.controller.ts`                            | org-wide list, filters, cursor, `kind`, `rejectedMembershipCount`                                                      |
+| `apps/api/src/modules/code-search/dto.ts`, `code-search.service.ts`                                             | pallet card `kind`, warehouse product, box origin shifts, rejections                                                   |
+| `apps/api/src/modules/shift-exports/*`                                                                          | pallet export create/list/run                                                                                          |
 
 ---
 
 ### Task 1: Shared membership batch limit
 
 **Files:**
+
 - Modify: `packages/domain/src/sync/limits.ts`
 - Modify: `packages/domain/src/sync/limits-fixtures.ts`
 - Modify: `packages/domain/src/index.ts:173-177`
@@ -61,6 +62,7 @@
 - Test: `packages/domain/test/sync-limits-fixtures.test.ts` (existing; must pass after regeneration)
 
 **Interfaces:**
+
 - Produces: `MAX_PALLET_MEMBERSHIPS_PER_SYNC_BATCH = 100` exported from `@markiro/domain`; fixture key `maxPalletMembershipsPerSyncBatch`.
 
 - [ ] **Step 1: Add the constant**
@@ -157,6 +159,7 @@ git commit -m "feat(domain): shared pallet membership batch limit"
 ### Task 2: Schema and migration
 
 **Files:**
+
 - Modify: `packages/db/src/schema/platform.ts` (`pallets` ~1060-1129, `palletExceptions` ~1131-1196, `stationSyncQuarantine` CHECK ~654-657)
 - Modify: `packages/db/src/schema/pickup.ts:68-87`
 - Modify: `packages/db/src/schema/shift-exports.ts:24-92`
@@ -164,6 +167,7 @@ git commit -m "feat(domain): shared pallet membership batch limit"
 - Test: `packages/db/test/warehouse-pallets-migration.test.ts`
 
 **Interfaces:**
+
 - Produces: `schema.pallets.kind` (`"production" | "warehouse"`), `schema.pallets.productId`, `schema.pallets.deviceId`, nullable `schema.pallets.shiftId`; `schema.palletMembershipRejections`; `schema.employeePickupPolicies.canBuildPallets`; `schema.shiftExports.palletId`, nullable `schema.shiftExports.shiftId`; quarantine kind `pallet_membership`.
 
 - [ ] **Step 1: Write the failing migration test**
@@ -216,10 +220,9 @@ describe.skipIf(!databaseUrl)("warehouse pallets migration", () => {
     });
     await migrate(drizzle(pool), { migrationsFolder: legacyMigrations });
 
-    await pool.query(
-      "INSERT INTO organization (id,name,slug,created_at) VALUES ($1,$1,$1,now())",
-      [tenantId],
-    );
+    await pool.query("INSERT INTO organization (id,name,slug,created_at) VALUES ($1,$1,$1,now())", [
+      tenantId,
+    ]);
     await pool.query("INSERT INTO org_profiles (tenant_id) VALUES ($1)", [tenantId]);
     await pool.query(
       `INSERT INTO products (id,tenant_id,gtin14,name,box_capacity,pallet_box_capacity,status)
@@ -435,14 +438,20 @@ export const palletMembershipRejections = pgTable(
     boxSscc: char("box_sscc", { length: 18 }).notNull(),
     boxId: uuid("box_id"),
     reason: text("reason")
-      .$type<"already_on_pallet" | "not_found" | "not_closed" | "disassembled" | "product_mismatch">()
+      .$type<
+        "already_on_pallet" | "not_found" | "not_closed" | "disassembled" | "product_mismatch"
+      >()
       .notNull(),
     winningPalletId: uuid("winning_pallet_id"),
     addedAt: timestamp("added_at", { withTimezone: true }).notNull(),
     recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    unique("pallet_membership_rejections_tenant_pallet_sscc_uq").on(t.tenantId, t.palletId, t.boxSscc),
+    unique("pallet_membership_rejections_tenant_pallet_sscc_uq").on(
+      t.tenantId,
+      t.palletId,
+      t.boxSscc,
+    ),
     check(
       "pallet_membership_rejections_reason_check",
       sql`${t.reason} IN ('already_on_pallet', 'not_found', 'not_closed', 'disassembled', 'product_mismatch')`,
@@ -526,10 +535,12 @@ git commit -m "feat(db): warehouse pallets, membership rejections, pallet export
 ### Task 3: Sync batch DTO
 
 **Files:**
+
 - Modify: `apps/api/src/modules/station-scans/dto.ts:103-250, 366-392, 434-500`
 - Test: `apps/api/test/station-scans-dto.test.ts`
 
 **Interfaces:**
+
 - Produces: `palletMembershipSchema`, `PalletMembershipDto`, `syncBatchSchema.palletMemberships`, pallet closure fields `kind`, `productId`, nullable `shiftId`; `PalletMembershipOutcomeDto`, `SyncBatchResponseDto.memberships`; `DeniedStationRecordDto.recordKind` gains `"pallet_membership"` and `shiftId: string | null`.
 
 - [ ] **Step 1: Write the failing DTO tests**
@@ -547,7 +558,11 @@ describe("warehouse pallet records", () => {
 
   it("accepts palletMemberships and defaults them to empty", () => {
     expect(syncBatchSchema.parse({ batchId: "b", items: [] }).palletMemberships).toEqual([]);
-    const parsed = syncBatchSchema.parse({ batchId: "b", items: [], palletMemberships: [membership] });
+    const parsed = syncBatchSchema.parse({
+      batchId: "b",
+      items: [],
+      palletMemberships: [membership],
+    });
     expect(parsed.palletMemberships).toEqual([membership]);
   });
 
@@ -556,12 +571,18 @@ describe("warehouse pallet records", () => {
       ...membership,
       boxSscc: `0034600682${String(i).padStart(7, "0")}1`,
     }));
-    expect(() => syncBatchSchema.parse({ batchId: "b", items: [], palletMemberships: tooMany })).toThrow();
+    expect(() =>
+      syncBatchSchema.parse({ batchId: "b", items: [], palletMemberships: tooMany }),
+    ).toThrow();
   });
 
   it("rejects a membership naming one box twice for one pallet", () => {
     expect(() =>
-      syncBatchSchema.parse({ batchId: "b", items: [], palletMemberships: [membership, membership] }),
+      syncBatchSchema.parse({
+        batchId: "b",
+        items: [],
+        palletMemberships: [membership, membership],
+      }),
     ).toThrow(/at most once/);
   });
 
@@ -592,7 +613,9 @@ describe("warehouse pallet records", () => {
       closedAt: "2026-09-17T08:00:00.000Z",
       operatorId: null,
     };
-    expect(syncBatchSchema.parse({ batchId: "b", items: [], pallets: [closure] }).pallets[0]).toMatchObject({
+    expect(
+      syncBatchSchema.parse({ batchId: "b", items: [], pallets: [closure] }).pallets[0],
+    ).toMatchObject({
       kind: "warehouse",
       shiftId: null,
     });
@@ -604,7 +627,11 @@ describe("warehouse pallet records", () => {
       }),
     ).toThrow(/shiftId/);
     expect(() =>
-      syncBatchSchema.parse({ batchId: "b", items: [], pallets: [{ ...closure, productId: null }] }),
+      syncBatchSchema.parse({
+        batchId: "b",
+        items: [],
+        pallets: [{ ...closure, productId: null }],
+      }),
     ).toThrow(/productId/);
   });
 });
@@ -644,14 +671,26 @@ const palletClosureSchema = z
       });
     }
     if (closure.kind === "production" && closure.shiftId === null) {
-      ctx.addIssue({ code: "custom", path: ["shiftId"], message: "a production pallet needs a shiftId" });
+      ctx.addIssue({
+        code: "custom",
+        path: ["shiftId"],
+        message: "a production pallet needs a shiftId",
+      });
     }
     if (closure.kind === "warehouse") {
       if (closure.shiftId !== null) {
-        ctx.addIssue({ code: "custom", path: ["shiftId"], message: "a warehouse pallet has no shiftId" });
+        ctx.addIssue({
+          code: "custom",
+          path: ["shiftId"],
+          message: "a warehouse pallet has no shiftId",
+        });
       }
       if (closure.productId === null) {
-        ctx.addIssue({ code: "custom", path: ["productId"], message: "a warehouse pallet needs a productId" });
+        ctx.addIssue({
+          code: "custom",
+          path: ["productId"],
+          message: "a warehouse pallet needs a productId",
+        });
       }
     }
   });
@@ -771,11 +810,13 @@ git commit -m "feat(api): pallet membership and warehouse closure DTOs"
 ### Task 4: Ingest — memberships and warehouse closures
 
 **Files:**
+
 - Modify: `apps/api/src/modules/station-scans/pallet-ingest.ts`
 - Modify: `apps/api/src/modules/station-scans/station-scans.service.ts` (~230-262 substitution, ~372-392 replay, ~404-432 shift lock, ~448-545 read-only, ~1312-1341 pre-pass, ~1573-1615 closures/exceptions, ~1627-1640 touched shifts, ~1666-1674 result, ~1709-1716 quarantine payloads)
 - Test: `apps/api/test/station-scans-warehouse-pallets.e2e.test.ts`
 
 **Interfaces:**
+
 - Consumes: DTOs from Task 3; `advanceBoxRegistryVersion`; `SsccService.recordConsumedSerial`.
 - Produces: `PalletRef` gains `kind`, `productId`, `deviceId`; `palletKey(shiftId | null, terminalId, devicePalletId)` where `null` shift renders as `"warehouse"`; `applyPalletMemberships(tx, tenantId, memberships, byKey, deviceId, readOnly): Promise<{ outcomes: PalletMembershipOutcomeDto[]; changedBoxIds: string[] }>`; `applyPalletClosures` returns `string[]` of member box ids of closed warehouse pallets.
 
@@ -784,129 +825,159 @@ git commit -m "feat(api): pallet membership and warehouse closure DTOs"
 Create `apps/api/test/station-scans-warehouse-pallets.e2e.test.ts`. The harness is the one `pallets.e2e.test.ts` uses (copy its imports, `item()`, `postBatch()`, `beforeAll` app boot, product/shift/employee creation and box seeding). Then:
 
 ```ts
-  // Two production boxes closed in a shift (b1, b2) and one more (b3) in a
-  // SECOND shift of the same product, so the warehouse pallet mixes shifts.
-  // A fourth box (b4) belongs to a different product; a fifth (b5) is open.
+// Two production boxes closed in a shift (b1, b2) and one more (b3) in a
+// SECOND shift of the same product, so the warehouse pallet mixes shifts.
+// A fourth box (b4) belongs to a different product; a fifth (b5) is open.
 
-  let device2Key: string;
-  let device2Id: string;
+let device2Key: string;
+let device2Id: string;
 
-  // In beforeAll after the box batches:
-  //   device2 = await createTestStationDevice(app!, agent, "TSD-2");
-  //   const block = await app!.get(SsccService).allocate(tenantId, ISSUER_PREFIX, PALLET_EXTENSION_DIGIT, stationDeviceId, 5);
-  //   warehouseSscc = buildSscc(PALLET_EXTENSION_DIGIT, ISSUER_PREFIX, block.fromSerial);
+// In beforeAll after the box batches:
+//   device2 = await createTestStationDevice(app!, agent, "TSD-2");
+//   const block = await app!.get(SsccService).allocate(tenantId, ISSUER_PREFIX, PALLET_EXTENSION_DIGIT, stationDeviceId, 5);
+//   warehouseSscc = buildSscc(PALLET_EXTENSION_DIGIT, ISSUER_PREFIX, block.fromSerial);
 
-  const membership = (palletId: string, boxSscc: string) => ({
-    palletId,
-    boxSscc,
-    addedAt: "2026-09-17T09:00:00.000Z",
-    operatorId,
+const membership = (palletId: string, boxSscc: string) => ({
+  palletId,
+  boxSscc,
+  addedAt: "2026-09-17T09:00:00.000Z",
+  operatorId,
+});
+
+it("attaches closed boxes from two shifts to a warehouse pallet and reports each outcome", async () => {
+  const res = await postBatch({
+    palletMemberships: [
+      membership("w1", B1_SSCC),
+      membership("w1", B3_SSCC),
+      membership("w1", B4_SSCC), // other product
+      membership("w1", B5_SSCC), // still open
+      membership("w1", "003460068299999990"), // unknown
+    ],
   });
-
-  it("attaches closed boxes from two shifts to a warehouse pallet and reports each outcome", async () => {
-    const res = await postBatch({
-      palletMemberships: [
-        membership("w1", B1_SSCC),
-        membership("w1", B3_SSCC),
-        membership("w1", B4_SSCC), // other product
-        membership("w1", B5_SSCC), // still open
-        membership("w1", "003460068299999990"), // unknown
-      ],
-    });
-    expect(res.body.memberships).toEqual([
-      { palletId: "w1", boxSscc: B1_SSCC, status: "accepted" },
-      { palletId: "w1", boxSscc: B3_SSCC, status: "accepted" },
-      { palletId: "w1", boxSscc: B4_SSCC, status: "product_mismatch" },
-      { palletId: "w1", boxSscc: B5_SSCC, status: "not_closed" },
-      { palletId: "w1", boxSscc: "003460068299999990", status: "not_found" },
-    ]);
-    const list = await agent.get("/pallets").query({ kind: "warehouse" }).expect(200);
-    expect(list.body.items).toHaveLength(1);
-    expect(list.body.items[0]).toMatchObject({ kind: "warehouse", boxCount: 2, rejectedMembershipCount: 3 });
+  expect(res.body.memberships).toEqual([
+    { palletId: "w1", boxSscc: B1_SSCC, status: "accepted" },
+    { palletId: "w1", boxSscc: B3_SSCC, status: "accepted" },
+    { palletId: "w1", boxSscc: B4_SSCC, status: "product_mismatch" },
+    { palletId: "w1", boxSscc: B5_SSCC, status: "not_closed" },
+    { palletId: "w1", boxSscc: "003460068299999990", status: "not_found" },
+  ]);
+  const list = await agent.get("/pallets").query({ kind: "warehouse" }).expect(200);
+  expect(list.body.items).toHaveLength(1);
+  expect(list.body.items[0]).toMatchObject({
+    kind: "warehouse",
+    boxCount: 2,
+    rejectedMembershipCount: 3,
   });
+});
 
-  it("replays a membership as a no-op and refuses the box for another device's pallet", async () => {
-    const replay = await postBatch({ palletMemberships: [membership("w1", B1_SSCC)] });
-    expect(replay.body.memberships).toEqual([{ palletId: "w1", boxSscc: B1_SSCC, status: "replayed" }]);
+it("replays a membership as a no-op and refuses the box for another device's pallet", async () => {
+  const replay = await postBatch({ palletMemberships: [membership("w1", B1_SSCC)] });
+  expect(replay.body.memberships).toEqual([
+    { palletId: "w1", boxSscc: B1_SSCC, status: "replayed" },
+  ]);
 
-    const rival = await request(app!.getHttpServer())
-      .post("/station/scans")
-      .set("x-api-key", device2Key)
-      .send({ batchId: `rival-${randomUUID()}`, items: [], palletMemberships: [membership("w1", B1_SSCC)] })
-      .expect(201);
-    expect(rival.body.memberships).toEqual([
-      { palletId: "w1", boxSscc: B1_SSCC, status: "already_on_pallet" },
-    ]);
-    // Device 2's open pallet has no SSCC yet, so no winningPalletSscc either way;
-    // after device 1 closes below, a repeat carries it.
+  const rival = await request(app!.getHttpServer())
+    .post("/station/scans")
+    .set("x-api-key", device2Key)
+    .send({
+      batchId: `rival-${randomUUID()}`,
+      items: [],
+      palletMemberships: [membership("w1", B1_SSCC)],
+    })
+    .expect(201);
+  expect(rival.body.memberships).toEqual([
+    { palletId: "w1", boxSscc: B1_SSCC, status: "already_on_pallet" },
+  ]);
+  // Device 2's open pallet has no SSCC yet, so no winningPalletSscc either way;
+  // after device 1 closes below, a repeat carries it.
+});
+
+it("closes the warehouse pallet with an extension-1 serial and bumps its boxes' registry version", async () => {
+  const before = await request(app!.getHttpServer())
+    .get("/station/box-registry")
+    .set("x-api-key", stationKey)
+    .expect(200);
+  await postBatch({
+    pallets: [
+      {
+        palletId: "w1",
+        kind: "warehouse",
+        shiftId: null,
+        productId,
+        terminalId: null,
+        sscc: warehouseSscc,
+        closedAt: "2026-09-17T09:30:00.000Z",
+        operatorId,
+        printVerifiedAt: null,
+        printSkippedAt: null,
+      },
+    ],
   });
+  const after = await request(app!.getHttpServer())
+    .get("/station/box-registry")
+    .query({ since: before.body.until })
+    .set("x-api-key", stationKey)
+    .expect(200);
+  const b1 = after.body.items.find((i: { sscc?: string }) => i.sscc === B1_SSCC);
+  expect(b1).toMatchObject({ kind: "upsert", palletSscc: warehouseSscc, palletActive: true });
 
-  it("closes the warehouse pallet with an extension-1 serial and bumps its boxes' registry version", async () => {
-    const before = await request(app!.getHttpServer())
-      .get("/station/box-registry")
-      .set("x-api-key", stationKey)
-      .expect(200);
-    await postBatch({
-      pallets: [
-        {
-          palletId: "w1",
-          kind: "warehouse",
-          shiftId: null,
-          productId,
-          terminalId: null,
-          sscc: warehouseSscc,
-          closedAt: "2026-09-17T09:30:00.000Z",
-          operatorId,
-          printVerifiedAt: null,
-          printSkippedAt: null,
-        },
-      ],
-    });
-    const after = await request(app!.getHttpServer())
-      .get("/station/box-registry")
-      .query({ since: before.body.until })
-      .set("x-api-key", stationKey)
-      .expect(200);
-    const b1 = after.body.items.find((i: { sscc?: string }) => i.sscc === B1_SSCC);
-    expect(b1).toMatchObject({ kind: "upsert", palletSscc: warehouseSscc, palletActive: true });
-
-    const rival = await request(app!.getHttpServer())
-      .post("/station/scans")
-      .set("x-api-key", device2Key)
-      .send({ batchId: `rival2-${randomUUID()}`, items: [], palletMemberships: [membership("w9", B1_SSCC)] })
-      .expect(201);
-    expect(rival.body.memberships[0]).toEqual({
-      palletId: "w9",
-      boxSscc: B1_SSCC,
-      status: "already_on_pallet",
-      winningPalletSscc: `00${warehouseSscc}`,
-    });
+  const rival = await request(app!.getHttpServer())
+    .post("/station/scans")
+    .set("x-api-key", device2Key)
+    .send({
+      batchId: `rival2-${randomUUID()}`,
+      items: [],
+      palletMemberships: [membership("w9", B1_SSCC)],
+    })
+    .expect(201);
+  expect(rival.body.memberships[0]).toEqual({
+    palletId: "w9",
+    boxSscc: B1_SSCC,
+    status: "already_on_pallet",
+    winningPalletSscc: `00${warehouseSscc}`,
   });
+});
 
-  it("re-attaches a box once its old pallet is disassembled", async () => {
-    await postBatch({
-      palletExceptions: [
-        { kind: "disassemble", palletId: "w1", shiftId: null, terminalId: null, operatorId, reason: "перекладка", occurredAt: "2026-09-17T10:00:00.000Z" },
-      ],
-    });
-    const res = await postBatch({ palletMemberships: [membership("w2", B1_SSCC)] });
-    expect(res.body.memberships).toEqual([{ palletId: "w2", boxSscc: B1_SSCC, status: "accepted" }]);
+it("re-attaches a box once its old pallet is disassembled", async () => {
+  await postBatch({
+    palletExceptions: [
+      {
+        kind: "disassemble",
+        palletId: "w1",
+        shiftId: null,
+        terminalId: null,
+        operatorId,
+        reason: "перекладка",
+        occurredAt: "2026-09-17T10:00:00.000Z",
+      },
+    ],
   });
+  const res = await postBatch({ palletMemberships: [membership("w2", B1_SSCC)] });
+  expect(res.body.memberships).toEqual([{ palletId: "w2", boxSscc: B1_SSCC, status: "accepted" }]);
+});
 
-  it("does not let another tenant's device see or touch these pallets", async () => {
-    const other = request.agent(app!.getHttpServer());
-    await signUpAndActivate(other);
-    const otherDevice = await createTestStationDevice(app!, other, "Other");
-    const res = await request(app!.getHttpServer())
-      .post("/station/scans")
-      .set("x-api-key", otherDevice.apiKey)
-      .send({ batchId: `other-${randomUUID()}`, items: [], palletMemberships: [membership("w1", B1_SSCC)] })
-      .expect(201);
-    expect(res.body.memberships).toEqual([{ palletId: "w1", boxSscc: B1_SSCC, status: "not_found" }]);
-    await other.get("/pallets").query({ kind: "warehouse" }).expect(200).expect((r) => {
+it("does not let another tenant's device see or touch these pallets", async () => {
+  const other = request.agent(app!.getHttpServer());
+  await signUpAndActivate(other);
+  const otherDevice = await createTestStationDevice(app!, other, "Other");
+  const res = await request(app!.getHttpServer())
+    .post("/station/scans")
+    .set("x-api-key", otherDevice.apiKey)
+    .send({
+      batchId: `other-${randomUUID()}`,
+      items: [],
+      palletMemberships: [membership("w1", B1_SSCC)],
+    })
+    .expect(201);
+  expect(res.body.memberships).toEqual([{ palletId: "w1", boxSscc: B1_SSCC, status: "not_found" }]);
+  await other
+    .get("/pallets")
+    .query({ kind: "warehouse" })
+    .expect(200)
+    .expect((r) => {
       expect(r.body.items).toEqual([]);
     });
-  });
+});
 ```
 
 The `pallet exceptions` DTO's `shiftId` must also become nullable in Task 3's `palletExceptionSchema` (`z.string().uuid().toLowerCase().nullable()`); include that edit in this task if it was missed. The `GET /pallets?kind=` assertions rely on Task 8; until then, replace those two `agent.get("/pallets")` blocks with direct `schema.pallets` selects through `app.get(DB)` and restore them in Task 8.
@@ -945,50 +1016,50 @@ export interface PalletRef {
 In `upsertPallets`, insert warehouse and production refs separately (two conflict targets), skipping a warehouse ref whose `productId` is null (its membership reports `not_found` later, and a closure always carries a product):
 
 ```ts
-  const production = ordered.filter(([, ref]) => ref.kind === "production");
-  const warehouse = ordered.filter(
-    ([, ref]) => ref.kind === "warehouse" && ref.productId !== null && ref.deviceId !== null,
-  );
-  if (production.length > 0) {
-    await tx
-      .insert(schema.pallets)
-      .values(
-        production.map(([, ref]) => ({
-          tenantId,
-          kind: "production" as const,
-          shiftId: ref.shiftId,
-          terminalId: ref.terminalId,
-          devicePalletId: ref.devicePalletId,
-        })),
-      )
-      .onConflictDoNothing({
-        target: [
-          schema.pallets.tenantId,
-          schema.pallets.shiftId,
-          schema.pallets.terminalId,
-          schema.pallets.devicePalletId,
-        ],
-      });
-  }
-  if (warehouse.length > 0) {
-    await tx
-      .insert(schema.pallets)
-      .values(
-        warehouse.map(([, ref]) => ({
-          tenantId,
-          kind: "warehouse" as const,
-          shiftId: null,
-          terminalId: ref.terminalId,
-          devicePalletId: ref.devicePalletId,
-          productId: ref.productId,
-          deviceId: ref.deviceId,
-        })),
-      )
-      .onConflictDoNothing({
-        target: [schema.pallets.tenantId, schema.pallets.deviceId, schema.pallets.devicePalletId],
-        where: sql`${schema.pallets.kind} = 'warehouse'`,
-      });
-  }
+const production = ordered.filter(([, ref]) => ref.kind === "production");
+const warehouse = ordered.filter(
+  ([, ref]) => ref.kind === "warehouse" && ref.productId !== null && ref.deviceId !== null,
+);
+if (production.length > 0) {
+  await tx
+    .insert(schema.pallets)
+    .values(
+      production.map(([, ref]) => ({
+        tenantId,
+        kind: "production" as const,
+        shiftId: ref.shiftId,
+        terminalId: ref.terminalId,
+        devicePalletId: ref.devicePalletId,
+      })),
+    )
+    .onConflictDoNothing({
+      target: [
+        schema.pallets.tenantId,
+        schema.pallets.shiftId,
+        schema.pallets.terminalId,
+        schema.pallets.devicePalletId,
+      ],
+    });
+}
+if (warehouse.length > 0) {
+  await tx
+    .insert(schema.pallets)
+    .values(
+      warehouse.map(([, ref]) => ({
+        tenantId,
+        kind: "warehouse" as const,
+        shiftId: null,
+        terminalId: ref.terminalId,
+        devicePalletId: ref.devicePalletId,
+        productId: ref.productId,
+        deviceId: ref.deviceId,
+      })),
+    )
+    .onConflictDoNothing({
+      target: [schema.pallets.tenantId, schema.pallets.deviceId, schema.pallets.devicePalletId],
+      where: sql`${schema.pallets.kind} = 'warehouse'`,
+    });
+}
 ```
 
 Extend the read-back SELECT to also return `kind` and `deviceId`, drop the `inArray(shiftId, …)` filter when any ref has a null shift (use `or(inArray(shiftId, shiftIds), isNull(shiftId))`), and build the map with `palletKey(row.shiftId, row.terminalId, row.devicePalletId)` — a warehouse row's `shiftId` is null, so its key is the `"warehouse|…"` form the callers compute.
@@ -1122,13 +1193,13 @@ export async function applyPalletMemberships(
 In `PalletClosureDto` and `PalletExceptionDto` make `shiftId: string | null` and add to the closure `kind: "production" | "warehouse"; productId: string | null;`. In `applyPalletClosures` compute `const id = byKey.get(palletKey(closure.shiftId, closure.terminalId, closure.palletId));` (unchanged call, now null-aware) and change the return type to `Promise<string[]>`: after a matched (`matched === 1`) closure of a warehouse pallet, collect its member box ids:
 
 ```ts
-      if (matched === 1 && closure.kind === "warehouse") {
-        const members = await tx
-          .select({ id: schema.boxes.id })
-          .from(schema.boxes)
-          .where(and(eq(schema.boxes.tenantId, tenantId), eq(schema.boxes.palletId, id)));
-        memberBoxIds.push(...members.map((b) => b.id));
-      }
+if (matched === 1 && closure.kind === "warehouse") {
+  const members = await tx
+    .select({ id: schema.boxes.id })
+    .from(schema.boxes)
+    .where(and(eq(schema.boxes.tenantId, tenantId), eq(schema.boxes.palletId, id)));
+  memberBoxIds.push(...members.map((b) => b.id));
+}
 ```
 
 and `return memberBoxIds;`. In `applyPalletExceptions` change the return type to `Promise<string[]>` and, in the `disassemble` branch, select the member box ids the same way and return them (the caller bumps their registry version — spec §2.3 last bullet). Insert `shiftId: ex.shiftId` unchanged (now nullable).
@@ -1160,45 +1231,47 @@ In `station-scans.service.ts`:
             })),
 ```
 
-and mirror the pallet-exception flatMap with the same null-shift handling (`occurredAt < endsAt`). In the filtered-body construction add `palletMemberships: body.palletMemberships.filter((_m, index) => !deniedKeys.has(\`pallet_membership:${index}\`)),` and keep the original list in a `const deniedMemberships = body.palletMemberships` snapshot before filtering so the response can report them.
-5. Pre-pass (around 1312-1341): every existing ref gets `kind: "production", productId: null, deviceId: null`; closures use `kind: closure.kind, productId: closure.productId, deviceId: closure.kind === "warehouse" ? authenticatedTerminalId : null`; exceptions with `shiftId === null` get `kind: "warehouse", productId: null, deviceId: authenticatedTerminalId` (an exception never creates a warehouse row: `upsertPallets` skips a null product, and a missing pallet is a no-op there). Add membership refs: resolve each distinct `boxSscc` to its shift product in one query before the pre-pass —
+and mirror the pallet-exception flatMap with the same null-shift handling (`occurredAt < endsAt`). In the filtered-body construction add `palletMemberships: body.palletMemberships.filter((_m, index) => !deniedKeys.has(\`pallet_membership:${index}\`)),`and keep the original list in a`const deniedMemberships = body.palletMemberships`snapshot before filtering so the response can report them.
+5. Pre-pass (around 1312-1341): every existing ref gets`kind: "production", productId: null, deviceId: null`; closures use `kind: closure.kind, productId: closure.productId, deviceId: closure.kind === "warehouse" ? authenticatedTerminalId : null`; exceptions with `shiftId === null`get`kind: "warehouse", productId: null, deviceId: authenticatedTerminalId`(an exception never creates a warehouse row:`upsertPallets`skips a null product, and a missing pallet is a no-op there). Add membership refs: resolve each distinct`boxSscc` to its shift product in one query before the pre-pass —
 
 ```ts
-        const membershipProducts = new Map<string, string>();
-        if (body.palletMemberships.length > 0) {
-          const rows = await tx
-            .select({ sscc: schema.boxes.sscc, productId: schema.shifts.productId })
-            .from(schema.boxes)
-            .innerJoin(
-              schema.shifts,
-              and(eq(schema.shifts.tenantId, schema.boxes.tenantId), eq(schema.shifts.id, schema.boxes.shiftId)),
-            )
-            .where(
-              and(
-                eq(schema.boxes.tenantId, tenantId),
-                inArray(schema.boxes.sscc, [...new Set(body.palletMemberships.map((m) => m.boxSscc))]),
-              ),
-            );
-          for (const row of rows) if (row.sscc !== null) membershipProducts.set(row.sscc, row.productId);
-        }
+const membershipProducts = new Map<string, string>();
+if (body.palletMemberships.length > 0) {
+  const rows = await tx
+    .select({ sscc: schema.boxes.sscc, productId: schema.shifts.productId })
+    .from(schema.boxes)
+    .innerJoin(
+      schema.shifts,
+      and(
+        eq(schema.shifts.tenantId, schema.boxes.tenantId),
+        eq(schema.shifts.id, schema.boxes.shiftId),
+      ),
+    )
+    .where(
+      and(
+        eq(schema.boxes.tenantId, tenantId),
+        inArray(schema.boxes.sscc, [...new Set(body.palletMemberships.map((m) => m.boxSscc))]),
+      ),
+    );
+  for (const row of rows) if (row.sscc !== null) membershipProducts.set(row.sscc, row.productId);
+}
 ```
 
-and push, per membership, `{ shiftId: null, terminalId: authenticatedTerminalId, devicePalletId: m.palletId, kind: "warehouse", productId: membershipProducts.get(m.boxSscc) ?? null, deviceId: authenticatedTerminalId }`. The first membership of a pallet whose box IS known seeds the pallet's product; a batch where every membership's box is unknown creates no row and reports `not_found` for each.
-6. After the box-closure loop and before pallet closures:
+and push, per membership, `{ shiftId: null, terminalId: authenticatedTerminalId, devicePalletId: m.palletId, kind: "warehouse", productId: membershipProducts.get(m.boxSscc) ?? null, deviceId: authenticatedTerminalId }`. The first membership of a pallet whose box IS known seeds the pallet's product; a batch where every membership's box is unknown creates no row and reports `not_found` for each. 6. After the box-closure loop and before pallet closures:
 
 ```ts
-        let membershipOutcomes: PalletMembershipOutcomeDto[] = [];
-        if (body.palletMemberships.length > 0) {
-          const applied = await applyPalletMemberships(
-            tx,
-            tenantId,
-            body.palletMemberships,
-            palletsByKey,
-            authenticatedTerminalId,
-          );
-          membershipOutcomes = applied.outcomes;
-          await this.advanceBoxRegistryVersions(tx, tenantId, applied.changedBoxIds);
-        }
+let membershipOutcomes: PalletMembershipOutcomeDto[] = [];
+if (body.palletMemberships.length > 0) {
+  const applied = await applyPalletMemberships(
+    tx,
+    tenantId,
+    body.palletMemberships,
+    palletsByKey,
+    authenticatedTerminalId,
+  );
+  membershipOutcomes = applied.outcomes;
+  await this.advanceBoxRegistryVersions(tx, tenantId, applied.changedBoxIds);
+}
 ```
 
 7. Pallet closures: `const closedWarehouseMembers = await applyPalletClosures(...)` then `await this.advanceBoxRegistryVersions(tx, tenantId, closedWarehouseMembers);`. Pallet exceptions: `const disassembledMembers = await applyPalletExceptions(...)` then bump those too.
@@ -1225,12 +1298,14 @@ git commit -m "feat(api): ingest warehouse pallet memberships and closures"
 ### Task 5: Box registry pallet fields and disassembly bumps
 
 **Files:**
+
 - Modify: `apps/api/src/modules/kiosk/box-registry.dto.ts:121-135, 150-185`
 - Modify: `apps/api/src/modules/kiosk/box-registry.service.ts:24-37, 280-292, 362-400`
 - Modify: `apps/api/src/modules/disaggregation/disaggregation.service.ts:374-404`
 - Test: `apps/api/test/kiosk-box-registry.test.ts`, `apps/api/test/kiosk-box-registry-openapi.test.ts`, `apps/api/test/station-scans-warehouse-pallets.e2e.test.ts`
 
 **Interfaces:**
+
 - Produces: registry `upsert` items carry `palletId: string | null`, `palletSscc: string | null`, `palletActive: boolean`, `closedAt: string`, `productionDate: string | null`.
 
 - [ ] **Step 1: Write the failing unit test**
@@ -1238,27 +1313,32 @@ git commit -m "feat(api): ingest warehouse pallet memberships and closures"
 In `apps/api/test/kiosk-box-registry.test.ts` add to the `candidate()` builder defaults `palletId: null, palletSscc: null, palletDisassembledAt: null, productionDate: null` and a test:
 
 ```ts
-  it("carries pallet membership and production date on an upsert", () => {
-    const palletId = randomUUID();
-    const change = evaluateBoxRegistryCandidate(
-      candidate({ palletId, palletSscc: "134600682000000017", palletDisassembledAt: null, productionDate: "2026-09-10" }),
-      [member()],
-      false,
-    );
-    expect(change).toMatchObject({
-      kind: "upsert",
+it("carries pallet membership and production date on an upsert", () => {
+  const palletId = randomUUID();
+  const change = evaluateBoxRegistryCandidate(
+    candidate({
       palletId,
       palletSscc: "134600682000000017",
-      palletActive: true,
+      palletDisassembledAt: null,
       productionDate: "2026-09-10",
-    });
-    const retired = evaluateBoxRegistryCandidate(
-      candidate({ palletId, palletSscc: "134600682000000017", palletDisassembledAt: new Date() }),
-      [member()],
-      false,
-    );
-    expect(retired).toMatchObject({ palletActive: false });
+    }),
+    [member()],
+    false,
+  );
+  expect(change).toMatchObject({
+    kind: "upsert",
+    palletId,
+    palletSscc: "134600682000000017",
+    palletActive: true,
+    productionDate: "2026-09-10",
   });
+  const retired = evaluateBoxRegistryCandidate(
+    candidate({ palletId, palletSscc: "134600682000000017", palletDisassembledAt: new Date() }),
+    [member()],
+    false,
+  );
+  expect(retired).toMatchObject({ palletActive: false });
+});
 ```
 
 (`member()` is the file's existing helper; pass it whatever arguments the existing tests pass for a valid member.)
@@ -1273,11 +1353,11 @@ Expected: FAIL — `palletActive` undefined.
 `box-registry.service.ts` `BoxRegistryCandidate` gains:
 
 ```ts
-  palletId: string | null;
-  palletSscc: string | null;
-  palletDisassembledAt: Date | null;
-  /** `coalesce(shifts.production_date, shifts.planned_date)`, civil date. */
-  productionDate: string | null;
+palletId: string | null;
+palletSscc: string | null;
+palletDisassembledAt: Date | null;
+/** `coalesce(shifts.production_date, shifts.planned_date)`, civil date. */
+productionDate: string | null;
 ```
 
 `evaluateBoxRegistryCandidate`'s upsert return gains:
@@ -1299,18 +1379,18 @@ The `list()` query adds a `leftJoin(schema.pallets, and(eq(schema.pallets.tenant
 In `disaggregation.service.ts` inside `if (palletIds.length > 0)`, after the `palletExceptions` insert:
 
 ```ts
-        // Member boxes keep `pallet_id`, but every handheld's registry
-        // mirror must learn the pallet is retired, or it keeps refusing
-        // these boxes as «already on a pallet» (spec §2.3).
-        const memberBoxes = await tx
-          .select({ id: schema.boxes.id })
-          .from(schema.boxes)
-          .where(and(eq(schema.boxes.tenantId, tenantId), inArray(schema.boxes.palletId, palletIds)));
-        await advanceBoxRegistryVersion(
-          tx,
-          tenantId,
-          memberBoxes.map((box) => box.id),
-        );
+// Member boxes keep `pallet_id`, but every handheld's registry
+// mirror must learn the pallet is retired, or it keeps refusing
+// these boxes as «already on a pallet» (spec §2.3).
+const memberBoxes = await tx
+  .select({ id: schema.boxes.id })
+  .from(schema.boxes)
+  .where(and(eq(schema.boxes.tenantId, tenantId), inArray(schema.boxes.palletId, palletIds)));
+await advanceBoxRegistryVersion(
+  tx,
+  tenantId,
+  memberBoxes.map((box) => box.id),
+);
 ```
 
 - [ ] **Step 5: Extend the e2e**
@@ -1334,12 +1414,14 @@ git commit -m "feat(api): box registry carries pallet membership"
 ### Task 6: `GET /station/pallet-bootstrap`
 
 **Files:**
+
 - Modify: `apps/api/src/modules/sscc/sscc.service.ts:329-362`
 - Create: `apps/api/src/modules/station-pallets/dto.ts`, `station-pallets.service.ts`, `station-pallets.controller.ts`, `station-pallets.module.ts`
 - Modify: `apps/api/src/app.module.ts` (register the module beside `StationWriteoffsModule`)
 - Test: `apps/api/test/station-pallet-bootstrap.e2e.test.ts`
 
 **Interfaces:**
+
 - Produces: `SsccService.resolveOrganisationIssuerPrefix(tenantId, executor?)`; `StationPalletBootstrapDto` as in spec §2.1 with `byCategory` keyed by `chzProductGroupCode: number`.
 
 - [ ] **Step 1: Write the failing e2e test**
@@ -1367,8 +1449,12 @@ describe.skipIf(!ready)("station pallet bootstrap", () => {
   });
 
   it("hands the same block back on a second call", async () => {
-    const first = await request(app!.getHttpServer()).get("/station/pallet-bootstrap").set("x-api-key", apiKey);
-    const second = await request(app!.getHttpServer()).get("/station/pallet-bootstrap").set("x-api-key", apiKey);
+    const first = await request(app!.getHttpServer())
+      .get("/station/pallet-bootstrap")
+      .set("x-api-key", apiKey);
+    const second = await request(app!.getHttpServer())
+      .get("/station/pallet-bootstrap")
+      .set("x-api-key", apiKey);
     expect(second.body.palletSscc.fromSerial).toBe(first.body.palletSscc.fromSerial);
   });
 
@@ -1442,14 +1528,29 @@ export interface StationPalletBootstrapDto {
 
 export const stationPalletBootstrapOpenApiSchema: SchemaObject = {
   type: "object",
-  required: ["generatedAt", "products", "operators", "palletSscc", "palletSsccRevokedFrom", "palletLabelTemplates"],
+  required: [
+    "generatedAt",
+    "products",
+    "operators",
+    "palletSscc",
+    "palletSsccRevokedFrom",
+    "palletLabelTemplates",
+  ],
   properties: {
     generatedAt: { type: "string", format: "date-time" },
     products: {
       type: "array",
       items: {
         type: "object",
-        required: ["id", "gtin14", "name", "printName", "shelfLifeDays", "palletBoxCapacity", "chzProductGroupCode"],
+        required: [
+          "id",
+          "gtin14",
+          "name",
+          "printName",
+          "shelfLifeDays",
+          "palletBoxCapacity",
+          "chzProductGroupCode",
+        ],
         properties: {
           id: { type: "string", format: "uuid" },
           gtin14: { type: "string" },
@@ -1466,13 +1567,22 @@ export const stationPalletBootstrapOpenApiSchema: SchemaObject = {
       items: {
         type: "object",
         required: ["employeeId", "canBuildPallets"],
-        properties: { employeeId: { type: "string", format: "uuid" }, canBuildPallets: { type: "boolean" } },
+        properties: {
+          employeeId: { type: "string", format: "uuid" },
+          canBuildPallets: { type: "boolean" },
+        },
       },
     },
     palletSscc: {
       type: "object",
       nullable: true,
-      required: ["issuerPrefix", "extensionDigit", "fromSerial", "toSerial", "consumedThroughSerial"],
+      required: [
+        "issuerPrefix",
+        "extensionDigit",
+        "fromSerial",
+        "toSerial",
+        "consumedThroughSerial",
+      ],
       properties: {
         issuerPrefix: { type: "string" },
         extensionDigit: { type: "integer", enum: [1] },
@@ -1515,7 +1625,11 @@ import { schema, type Db } from "@markiro/db";
 import type { LabelTemplateSpec } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
 import { EntitlementsService } from "../../subscriptions/entitlements.service";
-import { PALLET_EXTENSION_DIGIT, SsccCapacityExhaustedException, SsccService } from "../sscc/sscc.service";
+import {
+  PALLET_EXTENSION_DIGIT,
+  SsccCapacityExhaustedException,
+  SsccService,
+} from "../sscc/sscc.service";
 import type { StationPalletBootstrapDto } from "./dto";
 
 /** Same size the shift bundle uses; see `PALLET_BLOCK_SIZE` in shifts.service.ts. */
@@ -1567,15 +1681,25 @@ export class StationPalletsService {
     ]);
 
     const templateIds = [
-      ...new Set([profile?.templateId ?? null, ...categoryDefaults.map((d) => d.templateId)].filter((id): id is string => id !== null)),
+      ...new Set(
+        [profile?.templateId ?? null, ...categoryDefaults.map((d) => d.templateId)].filter(
+          (id): id is string => id !== null,
+        ),
+      ),
     ];
     const specs = new Map<string, LabelTemplateSpec>();
     if (templateIds.length > 0) {
       const rows = await this.db
-        .select({ id: schema.labelTemplates.id, spec: schema.labelTemplates.spec, enabled: schema.labelTemplates.enabled })
+        .select({
+          id: schema.labelTemplates.id,
+          spec: schema.labelTemplates.spec,
+          enabled: schema.labelTemplates.enabled,
+        })
         .from(schema.labelTemplates)
         .where(eq(schema.labelTemplates.tenantId, tenantId));
-      for (const row of rows) if (row.enabled && templateIds.includes(row.id)) specs.set(row.id, row.spec as LabelTemplateSpec);
+      for (const row of rows)
+        if (row.enabled && templateIds.includes(row.id))
+          specs.set(row.id, row.spec as LabelTemplateSpec);
     }
 
     const block = await this.palletBlock(tenantId, deviceId);
@@ -1608,16 +1732,33 @@ export class StationPalletsService {
         issuerPrefix = await this.sscc.resolveOrganisationIssuerPrefix(tenantId, tx);
       } catch (error) {
         if (!(error instanceof BadRequestException)) throw error;
-        this.logger.warn(`Tenant ${tenantId} pallet bootstrap has no serial block -- ${error.message}`);
+        this.logger.warn(
+          `Tenant ${tenantId} pallet bootstrap has no serial block -- ${error.message}`,
+        );
         return none;
       }
       try {
-        const palletSscc = await this.sscc.allocateForBundle(tenantId, issuerPrefix, PALLET_EXTENSION_DIGIT, deviceId, PALLET_BLOCK_SIZE, tx);
-        const palletSsccRevokedFrom = await this.sscc.revokedFromSerials(tenantId, issuerPrefix, PALLET_EXTENSION_DIGIT, deviceId, tx);
+        const palletSscc = await this.sscc.allocateForBundle(
+          tenantId,
+          issuerPrefix,
+          PALLET_EXTENSION_DIGIT,
+          deviceId,
+          PALLET_BLOCK_SIZE,
+          tx,
+        );
+        const palletSsccRevokedFrom = await this.sscc.revokedFromSerials(
+          tenantId,
+          issuerPrefix,
+          PALLET_EXTENSION_DIGIT,
+          deviceId,
+          tx,
+        );
         return { palletSscc, palletSsccRevokedFrom };
       } catch (error) {
         if (!(error instanceof SsccCapacityExhaustedException)) throw error;
-        this.logger.warn(`Tenant ${tenantId} pallet bootstrap has no serial block -- ${error.message}`);
+        this.logger.warn(
+          `Tenant ${tenantId} pallet bootstrap has no serial block -- ${error.message}`,
+        );
         return none;
       }
     });
@@ -1689,11 +1830,13 @@ git commit -m "feat(api): station pallet bootstrap endpoint"
 ### Task 7: Employee permission `canBuildPallets`
 
 **Files:**
+
 - Modify: `apps/api/src/modules/employees/dto.ts:25-30, 69-73, 122-131`
 - Modify: `apps/api/src/modules/employees/employees.service.ts:194, 215-231, 391-399`
 - Test: `apps/api/test/employees.e2e.test.ts`
 
 **Interfaces:**
+
 - Produces: `employeePickupPolicySchema.canBuildPallets: boolean (default false)`; `EmployeePickupPolicyDto.canBuildPallets`.
 
 - [ ] **Step 1: Write the failing test**
@@ -1701,37 +1844,42 @@ git commit -m "feat(api): station pallet bootstrap endpoint"
 Add to `employees.e2e.test.ts` (using its existing agent/employee setup):
 
 ```ts
-  it("stores canBuildPallets on the pickup policy and audits the change", async () => {
-    const res = await agent
-      .patch(`/employees/${employeeId}/pickup-policy`)
-      .send({ limitMode: "limited", dayLimit: 5, canWriteoff: false, canBuildPallets: true })
-      .expect(200);
-    expect(res.body.pickupPolicy).toMatchObject({ canBuildPallets: true });
-    const got = await agent.get(`/employees/${employeeId}`).expect(200);
-    expect(got.body.pickupPolicy.canBuildPallets).toBe(true);
-    const [audit] = await db
-      .select()
-      .from(schema.tenantAuditEvents)
-      .where(and(eq(schema.tenantAuditEvents.organizationId, tenantId), eq(schema.tenantAuditEvents.action, "employee.pickup_policy.updated")))
-      .orderBy(desc(schema.tenantAuditEvents.createdAt))
-      .limit(1);
-    expect(audit).toMatchObject({
-      actorUserId: userId,
-      outcome: "success",
-      targetType: "employee",
-      targetId: employeeId,
-      before: { canBuildPallets: false },
-      after: { canBuildPallets: true },
-    });
+it("stores canBuildPallets on the pickup policy and audits the change", async () => {
+  const res = await agent
+    .patch(`/employees/${employeeId}/pickup-policy`)
+    .send({ limitMode: "limited", dayLimit: 5, canWriteoff: false, canBuildPallets: true })
+    .expect(200);
+  expect(res.body.pickupPolicy).toMatchObject({ canBuildPallets: true });
+  const got = await agent.get(`/employees/${employeeId}`).expect(200);
+  expect(got.body.pickupPolicy.canBuildPallets).toBe(true);
+  const [audit] = await db
+    .select()
+    .from(schema.tenantAuditEvents)
+    .where(
+      and(
+        eq(schema.tenantAuditEvents.organizationId, tenantId),
+        eq(schema.tenantAuditEvents.action, "employee.pickup_policy.updated"),
+      ),
+    )
+    .orderBy(desc(schema.tenantAuditEvents.createdAt))
+    .limit(1);
+  expect(audit).toMatchObject({
+    actorUserId: userId,
+    outcome: "success",
+    targetType: "employee",
+    targetId: employeeId,
+    before: { canBuildPallets: false },
+    after: { canBuildPallets: true },
   });
+});
 
-  it("defaults canBuildPallets to false when the client omits it", async () => {
-    const res = await agent
-      .patch(`/employees/${employeeId}/pickup-policy`)
-      .send({ limitMode: "limited", dayLimit: 5, canWriteoff: false })
-      .expect(200);
-    expect(res.body.pickupPolicy.canBuildPallets).toBe(false);
-  });
+it("defaults canBuildPallets to false when the client omits it", async () => {
+  const res = await agent
+    .patch(`/employees/${employeeId}/pickup-policy`)
+    .send({ limitMode: "limited", dayLimit: 5, canWriteoff: false })
+    .expect(200);
+  expect(res.body.pickupPolicy.canBuildPallets).toBe(false);
+});
 ```
 
 (`db`, `tenantId`, `userId` — reuse however the file already obtains them; if it has no `db`, get it with `app.get(DB)` as `station-writeoffs.e2e.test.ts` does.)
@@ -1762,11 +1910,13 @@ git commit -m "feat(api): employee canBuildPallets permission"
 ### Task 8: Cabinet pallet list and card
 
 **Files:**
+
 - Modify: `apps/api/src/modules/pallets/dto.ts`, `pallets.service.ts`, `pallets.controller.ts`
 - Modify: `apps/api/src/modules/code-search/dto.ts:214-290, 637-700`, `code-search.service.ts:894-1050`
 - Test: `apps/api/test/pallets.e2e.test.ts`, `apps/api/test/station-scans-warehouse-pallets.e2e.test.ts` (restore the two `GET /pallets` assertions from Task 4), `apps/api/test/code-search-pallets.e2e.test.ts`
 
 **Interfaces:**
+
 - Produces: `GET /pallets` query `{ shiftId?, kind?, productId?, deviceId?, closedFrom?, closedTo?, limit?, cursor? }`, response `{ items, nextCursor? }`; `PalletDto` gains `kind`, `productId`, `productName`, `deviceName`, `rejectedMembershipCount`; `PalletCardDto` gains `kind`, `rejections[]`, `shiftId: string | null`, and each box gains `shiftId`, `shiftNumber`, `productionDate`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -1774,35 +1924,51 @@ git commit -m "feat(api): employee canBuildPallets permission"
 In `pallets.e2e.test.ts` add:
 
 ```ts
-  it("lists pallets org-wide with kind filter and cursor paging", async () => {
-    const page = await agent.get("/pallets").query({ kind: "production", limit: 1 }).expect(200);
-    expect(page.body.items).toHaveLength(1);
-    expect(page.body.items[0]).toMatchObject({ kind: "production", rejectedMembershipCount: 0, productName: "Cola" });
-    if (page.body.nextCursor) {
-      const next = await agent.get("/pallets").query({ kind: "production", limit: 1, cursor: page.body.nextCursor }).expect(200);
-      expect(next.body.items[0]?.id).not.toBe(page.body.items[0].id);
-    }
+it("lists pallets org-wide with kind filter and cursor paging", async () => {
+  const page = await agent.get("/pallets").query({ kind: "production", limit: 1 }).expect(200);
+  expect(page.body.items).toHaveLength(1);
+  expect(page.body.items[0]).toMatchObject({
+    kind: "production",
+    rejectedMembershipCount: 0,
+    productName: "Cola",
   });
+  if (page.body.nextCursor) {
+    const next = await agent
+      .get("/pallets")
+      .query({ kind: "production", limit: 1, cursor: page.body.nextCursor })
+      .expect(200);
+    expect(next.body.items[0]?.id).not.toBe(page.body.items[0].id);
+  }
+});
 
-  it("still 404s a shift outside the tenant and rejects a malformed cursor", async () => {
-    await agent.get("/pallets").query({ shiftId: randomUUID() }).expect(404);
-    await agent.get("/pallets").query({ cursor: "not-a-cursor" }).expect(400);
-  });
+it("still 404s a shift outside the tenant and rejects a malformed cursor", async () => {
+  await agent.get("/pallets").query({ shiftId: randomUUID() }).expect(404);
+  await agent.get("/pallets").query({ cursor: "not-a-cursor" }).expect(400);
+});
 ```
 
 In the warehouse e2e (Task 4) restore the `GET /pallets?kind=warehouse` assertions and add:
 
 ```ts
-  it("shows the warehouse pallet card with box origin shifts and rejections", async () => {
-    const list = await agent.get("/pallets").query({ kind: "warehouse" }).expect(200);
-    const w1 = list.body.items.find((p: { boxCount: number }) => p.boxCount >= 1);
-    const card = await agent.get(`/code-search/pallets/${w1.id}`).expect(200);
-    expect(card.body).toMatchObject({ kind: "warehouse", shiftId: null, shiftNumber: null, productName: "Cola" });
-    expect(card.body.boxes.map((b: { shiftId: string }) => b.shiftId).sort()).toEqual([shiftId, secondShiftId].sort());
-    expect(card.body.rejections).toEqual(
-      expect.arrayContaining([expect.objectContaining({ boxSscc: `00${B4_SSCC}`, reason: "product_mismatch" })]),
-    );
+it("shows the warehouse pallet card with box origin shifts and rejections", async () => {
+  const list = await agent.get("/pallets").query({ kind: "warehouse" }).expect(200);
+  const w1 = list.body.items.find((p: { boxCount: number }) => p.boxCount >= 1);
+  const card = await agent.get(`/code-search/pallets/${w1.id}`).expect(200);
+  expect(card.body).toMatchObject({
+    kind: "warehouse",
+    shiftId: null,
+    shiftNumber: null,
+    productName: "Cola",
   });
+  expect(card.body.boxes.map((b: { shiftId: string }) => b.shiftId).sort()).toEqual(
+    [shiftId, secondShiftId].sort(),
+  );
+  expect(card.body.rejections).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ boxSscc: `00${B4_SSCC}`, reason: "product_mismatch" }),
+    ]),
+  );
+});
 ```
 
 - [ ] **Step 2: Run to see them fail**
@@ -1840,7 +2006,10 @@ export function encodePalletListCursor(cursor: PalletListCursor): string {
 export function decodePalletListCursor(raw: string): PalletListCursor {
   try {
     const parsed = JSON.parse(Buffer.from(raw, "base64url").toString("utf8")) as unknown;
-    const cursor = z.object({ closedAt: z.string().datetime().nullable(), id: z.string().uuid() }).strict().parse(parsed);
+    const cursor = z
+      .object({ closedAt: z.string().datetime().nullable(), id: z.string().uuid() })
+      .strict()
+      .parse(parsed);
     if (encodePalletListCursor(cursor) !== raw) throw new Error("non-canonical");
     return cursor;
   } catch {
@@ -1853,11 +2022,11 @@ export function decodePalletListCursor(raw: string): PalletListCursor {
 
 - [ ] **Step 4: List service**
 
-In `listPallets`: keep the shift 404 only when `query.shiftId` is given. Product comes from `coalesce(pallets.product_id, shifts.product_id)` — add `leftJoin(schema.shifts, …)` on `pallets.shiftId` and `leftJoin(schema.products, and(eq(products.tenantId, pallets.tenantId), eq(products.id, sql\`coalesce(${schema.pallets.productId}, ${schema.shifts.productId})\`)))`; `deviceName` from a `leftJoin(schema.stationDevices …)` on `coalesce(pallets.device_id::text, pallets.terminal_id)` (replace the existing `stationDevices.id::text = pallets.terminal_id` join condition with `sql\`${schema.stationDevices.id}::text = coalesce(${schema.pallets.deviceId}::text, ${schema.pallets.terminalId})\``). `rejectedMembershipCount` is a correlated scalar: `sql<number>\`(select count(*) from pallet_membership_rejections r where r.tenant_id = ${schema.pallets.tenantId} and r.pallet_id = ${schema.pallets.id})\`.mapWith(Number)`. Filters: `kind`, `productId` (against the coalesced product), `deviceId`, `closedFrom/closedTo` on `closedAt`. Ordering stays `closed_at desc nulls first, id asc`; keyset: when a cursor is present, add `or(and(isNull(closedAt), cursor.closedAt === null ? gt(id, cursor.id) : sql\`false\`), cursor.closedAt === null ? isNotNull(closedAt) : or(lt(closedAt, cursor.closedAt), and(eq(closedAt, cursor.closedAt), gt(id, cursor.id))))` — nulls come first, so after a null-cursor page the non-null rows all follow. Select `limit + 1`; if more, set `nextCursor` from the last returned row. Add `groupBy` columns for `shifts.id`, `products.id`.
+In `listPallets`: keep the shift 404 only when `query.shiftId` is given. Product comes from `coalesce(pallets.product_id, shifts.product_id)` — add `leftJoin(schema.shifts, …)` on `pallets.shiftId` and `leftJoin(schema.products, and(eq(products.tenantId, pallets.tenantId), eq(products.id, sql\`coalesce(${schema.pallets.productId}, ${schema.shifts.productId})\`)))`; `deviceName`from a`leftJoin(schema.stationDevices …)`on`coalesce(pallets.device_id::text, pallets.terminal_id)`(replace the existing`stationDevices.id::text = pallets.terminal_id`join condition with`sql\`${schema.stationDevices.id}::text = coalesce(${schema.pallets.deviceId}::text, ${schema.pallets.terminalId})\``). `rejectedMembershipCount` is a correlated scalar: `sql<number>\`(select count(*) from pallet_membership_rejections r where r.tenant_id = ${schema.pallets.tenantId} and r.pallet_id = ${schema.pallets.id})\`.mapWith(Number)`. Filters: `kind`, `productId`(against the coalesced product),`deviceId`, `closedFrom/closedTo`on`closedAt`. Ordering stays `closed_at desc nulls first, id asc`; keyset: when a cursor is present, add `or(and(isNull(closedAt), cursor.closedAt === null ? gt(id, cursor.id) : sql\`false\`), cursor.closedAt === null ? isNotNull(closedAt) : or(lt(closedAt, cursor.closedAt), and(eq(closedAt, cursor.closedAt), gt(id, cursor.id))))`— nulls come first, so after a null-cursor page the non-null rows all follow. Select`limit + 1`; if more, set `nextCursor`from the last returned row. Add`groupBy`columns for`shifts.id`, `products.id`.
 
 - [ ] **Step 5: Card**
 
-`code-search/dto.ts` `PalletCardDto`: `shiftId: string | null`, add `kind: "production" | "warehouse"`, `rejections: { boxSscc: string; boxId: string | null; reason: string; winningPalletSscc: string | null; addedAt: Date; recordedAt: Date }[]`; `PalletCardBoxDto` gains `shiftId: string; shiftNumber: string | null; productionDate: string | null`. Update `palletCardOpenApiSchema` (properties and `required`; `shiftId` nullable). In `getPalletCard` select `kind: schema.pallets.kind`, join products on the coalesced product id (as in Step 4), join the device on the coalesced device id; in the box query join `shifts` and select `shiftId`, `numberMonthKey/Seq/createdFrom` (format with `formatShiftNumber`, already imported) and `productionDate: sql<string | null>\`coalesce(${schema.shifts.productionDate}, ${schema.shifts.plannedDate})::text\``; add a fourth query over `palletMembershipRejections` left-joined to `pallets` (winner) for `winningPalletSscc` (format with `formatSsccWithAi`), ordered by `recordedAt`; `boxSscc` is returned AI-00-prefixed like every cabinet SSCC.
+`code-search/dto.ts` `PalletCardDto`: `shiftId: string | null`, add `kind: "production" | "warehouse"`, `rejections: { boxSscc: string; boxId: string | null; reason: string; winningPalletSscc: string | null; addedAt: Date; recordedAt: Date }[]`; `PalletCardBoxDto` gains `shiftId: string; shiftNumber: string | null; productionDate: string | null`. Update `palletCardOpenApiSchema` (properties and `required`; `shiftId` nullable). In `getPalletCard` select `kind: schema.pallets.kind`, join products on the coalesced product id (as in Step 4), join the device on the coalesced device id; in the box query join `shifts` and select `shiftId`, `numberMonthKey/Seq/createdFrom` (format with `formatShiftNumber`, already imported) and `productionDate: sql<string | null>\`coalesce(${schema.shifts.productionDate}, ${schema.shifts.plannedDate})::text\``; add a fourth query over `palletMembershipRejections`left-joined to`pallets`(winner) for`winningPalletSscc`(format with`formatSsccWithAi`), ordered by `recordedAt`; `boxSscc` is returned AI-00-prefixed like every cabinet SSCC.
 
 - [ ] **Step 6: Run**
 
@@ -1876,12 +2045,14 @@ git commit -m "feat(api): org-wide pallet list and warehouse pallet card"
 ### Task 9: Per-pallet GIS MT aggregation export
 
 **Files:**
+
 - Create: `packages/domain/src/pallet-exports.ts`; export from `packages/domain/src/index.ts`
 - Test: `packages/domain/test/pallet-exports.test.ts`
 - Modify: `apps/api/src/modules/shift-exports/dto.ts`, `shift-exports.service.ts`, `shift-export-source.service.ts`, `shift-export-runner.service.ts`, `shift-exports.controller.ts`
 - Test: `apps/api/test/pallet-exports.e2e.test.ts`, `apps/api/test/shift-export-runner.test.ts`, `apps/api/test/shift-exports-openapi.test.ts`
 
 **Interfaces:**
+
 - Produces (domain): `PALLET_EXPORT_FORMATS: readonly [{ id: "pallet_xml_gismt_aggregation"; version: 1; label: "[XML][ГИСМТ] Агрегация паллеты"; extension: "xml"; mimeType: "application/xml; charset=utf-8" }]`; `renderPalletAggregationExport(input: { formatId: "pallet_xml_gismt_aggregation"; formatVersion: number; organizationInn: string | null; productName: string; closedDate: string; pallet: { sscc: string; boxSsccs: readonly string[] } }): ShiftExportPart`.
 - Produces (API): `POST /pallets/:palletId/exports` body `{ formatId, formatVersion, idempotencyKey }` → `ShiftExportDto` with `shiftId: null, palletId`; `GET /pallets/:palletId/exports`; `GET /pallet-exports/formats`. Retry and download reuse the existing `shift-exports/:exportId/*` routes.
 
@@ -1891,9 +2062,16 @@ git commit -m "feat(api): org-wide pallet list and warehouse pallet card"
 
 ```ts
 import { describe, expect, it } from "vitest";
-import { PALLET_EXPORT_FORMATS, renderPalletAggregationExport, ShiftExportDomainError } from "../src/index.js";
+import {
+  PALLET_EXPORT_FORMATS,
+  renderPalletAggregationExport,
+  ShiftExportDomainError,
+} from "../src/index.js";
 
-const pallet = { sscc: "134600682000000017", boxSsccs: ["034600682000000018", "034600682000000025"] };
+const pallet = {
+  sscc: "134600682000000017",
+  boxSsccs: ["034600682000000018", "034600682000000025"],
+};
 
 describe("pallet aggregation export", () => {
   it("advertises one xml format", () => {
@@ -1914,15 +2092,32 @@ describe("pallet aggregation export", () => {
     expect(xml).toContain("<sscc>00034600682000000018</sscc>");
     expect(xml).not.toContain("<cis>");
     expect((xml.match(/<pack_content>/g) ?? []).length).toBe(1);
-    expect(part).toMatchObject({ partNumber: 1, codeCount: 0, boxCount: 2, mimeType: "application/xml; charset=utf-8" });
+    expect(part).toMatchObject({
+      partNumber: 1,
+      codeCount: 0,
+      boxCount: 2,
+      mimeType: "application/xml; charset=utf-8",
+    });
     expect(part.filename).toBe("Cola_2026-09-17_паллета_00134600682000000017_2_коробов.xml");
   });
 
   it("refuses an empty pallet, a missing INN and an unknown format", () => {
-    const base = { formatId: "pallet_xml_gismt_aggregation" as const, formatVersion: 1, organizationInn: "7701234567", productName: "Cola", closedDate: "2026-09-17" };
-    expect(() => renderPalletAggregationExport({ ...base, pallet: { sscc: pallet.sscc, boxSsccs: [] } })).toThrow(ShiftExportDomainError);
-    expect(() => renderPalletAggregationExport({ ...base, organizationInn: "", pallet })).toThrow(/ORG_INN_MISSING/);
-    expect(() => renderPalletAggregationExport({ ...base, formatVersion: 2, pallet })).toThrow(/FORMAT_NOT_FOUND/);
+    const base = {
+      formatId: "pallet_xml_gismt_aggregation" as const,
+      formatVersion: 1,
+      organizationInn: "7701234567",
+      productName: "Cola",
+      closedDate: "2026-09-17",
+    };
+    expect(() =>
+      renderPalletAggregationExport({ ...base, pallet: { sscc: pallet.sscc, boxSsccs: [] } }),
+    ).toThrow(ShiftExportDomainError);
+    expect(() => renderPalletAggregationExport({ ...base, organizationInn: "", pallet })).toThrow(
+      /ORG_INN_MISSING/,
+    );
+    expect(() => renderPalletAggregationExport({ ...base, formatVersion: 2, pallet })).toThrow(
+      /FORMAT_NOT_FOUND/,
+    );
   });
 });
 ```
@@ -1970,8 +2165,13 @@ export const PALLET_EXPORT_FORMATS = Object.freeze([
   } as const),
 ] as const satisfies readonly PalletExportFormatDescriptor[]);
 
-export function getPalletExportFormat(formatId: string, formatVersion: number): PalletExportFormatDescriptor {
-  const descriptor = PALLET_EXPORT_FORMATS.find((f) => f.id === formatId && f.version === formatVersion);
+export function getPalletExportFormat(
+  formatId: string,
+  formatVersion: number,
+): PalletExportFormatDescriptor {
+  const descriptor = PALLET_EXPORT_FORMATS.find(
+    (f) => f.id === formatId && f.version === formatVersion,
+  );
   if (!descriptor) throw new ShiftExportDomainError("FORMAT_NOT_FOUND");
   return descriptor;
 }
@@ -1986,7 +2186,9 @@ export interface RenderPalletAggregationExportInput {
   pallet: { sscc: string; boxSsccs: readonly string[] };
 }
 
-export function renderPalletAggregationExport(input: RenderPalletAggregationExportInput): ShiftExportPart {
+export function renderPalletAggregationExport(
+  input: RenderPalletAggregationExportInput,
+): ShiftExportPart {
   const descriptor = getPalletExportFormat(input.formatId, input.formatVersion);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.closedDate)) throw new Error("Invalid closed date");
   if (input.pallet.boxSsccs.length === 0) throw new ShiftExportDomainError("EMPTY_SOURCE");
@@ -2002,7 +2204,9 @@ export function renderPalletAggregationExport(input: RenderPalletAggregationExpo
     });
   } catch (error) {
     if (error instanceof GismtAggregationError) {
-      throw new ShiftExportDomainError(error.code === "INVALID_SSCC" ? "INVALID_BOX_SSCC" : error.code);
+      throw new ShiftExportDomainError(
+        error.code === "INVALID_SSCC" ? "INVALID_BOX_SSCC" : error.code,
+      );
     }
     throw error;
   }
@@ -2046,29 +2250,73 @@ Expected: PASS.
 `apps/api/test/pallet-exports.e2e.test.ts` — boot like `shift-exports-pallets.e2e.test.ts` (it already builds a closed pallet through `/station/scans` and runs the export job inline; copy its runner invocation), then:
 
 ```ts
-  it("queues, runs and audits a per-pallet export", async () => {
-    await agent.put("/org/profile").send({ inn: "7701234567" }).expect(200); // if the profile route needs more fields, copy the body shift-exports.e2e uses
-    const created = await agent
-      .post(`/pallets/${palletId}/exports`)
-      .send({ formatId: "pallet_xml_gismt_aggregation", formatVersion: 1, idempotencyKey: randomUUID() })
-      .expect(201);
-    expect(created.body).toMatchObject({ shiftId: null, palletId, formatId: "pallet_xml_gismt_aggregation", status: "queued" });
-    await runner.run(created.body.id, { retryCount: 0, retryLimit: 3 });
-    const list = await agent.get(`/pallets/${palletId}/exports`).expect(200);
-    expect(list.body[0]).toMatchObject({ status: "ready", totalBoxCount: 2, totalCodeCount: 0 });
-    const xml = await downloadArtifact(list.body[0].artifacts[0]); // helper from shift-exports.e2e
-    expect(xml).not.toContain("<cis>");
-    expect(xml).toContain(`<pack_code>${palletSsccWithAi}</pack_code>`);
-    const audits = await db.select().from(schema.tenantAuditEvents).where(and(eq(schema.tenantAuditEvents.organizationId, tenantId), eq(schema.tenantAuditEvents.targetId, created.body.id)));
-    expect(audits.map((a) => a.action).sort()).toEqual(["pallet_export.completed", "pallet_export.created"]);
-    expect(audits.find((a) => a.action === "pallet_export.created")).toMatchObject({ actorUserId: userId, outcome: "success", targetType: "shift_export", after: expect.objectContaining({ palletId, formatId: "pallet_xml_gismt_aggregation" }) });
+it("queues, runs and audits a per-pallet export", async () => {
+  await agent.put("/org/profile").send({ inn: "7701234567" }).expect(200); // if the profile route needs more fields, copy the body shift-exports.e2e uses
+  const created = await agent
+    .post(`/pallets/${palletId}/exports`)
+    .send({
+      formatId: "pallet_xml_gismt_aggregation",
+      formatVersion: 1,
+      idempotencyKey: randomUUID(),
+    })
+    .expect(201);
+  expect(created.body).toMatchObject({
+    shiftId: null,
+    palletId,
+    formatId: "pallet_xml_gismt_aggregation",
+    status: "queued",
   });
+  await runner.run(created.body.id, { retryCount: 0, retryLimit: 3 });
+  const list = await agent.get(`/pallets/${palletId}/exports`).expect(200);
+  expect(list.body[0]).toMatchObject({ status: "ready", totalBoxCount: 2, totalCodeCount: 0 });
+  const xml = await downloadArtifact(list.body[0].artifacts[0]); // helper from shift-exports.e2e
+  expect(xml).not.toContain("<cis>");
+  expect(xml).toContain(`<pack_code>${palletSsccWithAi}</pack_code>`);
+  const audits = await db
+    .select()
+    .from(schema.tenantAuditEvents)
+    .where(
+      and(
+        eq(schema.tenantAuditEvents.organizationId, tenantId),
+        eq(schema.tenantAuditEvents.targetId, created.body.id),
+      ),
+    );
+  expect(audits.map((a) => a.action).sort()).toEqual([
+    "pallet_export.completed",
+    "pallet_export.created",
+  ]);
+  expect(audits.find((a) => a.action === "pallet_export.created")).toMatchObject({
+    actorUserId: userId,
+    outcome: "success",
+    targetType: "shift_export",
+    after: expect.objectContaining({ palletId, formatId: "pallet_xml_gismt_aggregation" }),
+  });
+});
 
-  it("refuses an open or disassembled pallet and a pallet of another tenant", async () => {
-    await agent.post(`/pallets/${openPalletId}/exports`).send({ formatId: "pallet_xml_gismt_aggregation", formatVersion: 1, idempotencyKey: randomUUID() }).expect(409);
-    await otherAgent.post(`/pallets/${palletId}/exports`).send({ formatId: "pallet_xml_gismt_aggregation", formatVersion: 1, idempotencyKey: randomUUID() }).expect(404);
-    await agent.get(`/pallet-exports/formats`).expect(200).expect((r) => expect(r.body.map((f: { id: string }) => f.id)).toEqual(["pallet_xml_gismt_aggregation"]));
-  });
+it("refuses an open or disassembled pallet and a pallet of another tenant", async () => {
+  await agent
+    .post(`/pallets/${openPalletId}/exports`)
+    .send({
+      formatId: "pallet_xml_gismt_aggregation",
+      formatVersion: 1,
+      idempotencyKey: randomUUID(),
+    })
+    .expect(409);
+  await otherAgent
+    .post(`/pallets/${palletId}/exports`)
+    .send({
+      formatId: "pallet_xml_gismt_aggregation",
+      formatVersion: 1,
+      idempotencyKey: randomUUID(),
+    })
+    .expect(404);
+  await agent
+    .get(`/pallet-exports/formats`)
+    .expect(200)
+    .expect((r) =>
+      expect(r.body.map((f: { id: string }) => f.id)).toEqual(["pallet_xml_gismt_aggregation"]),
+    );
+});
 ```
 
 - [ ] **Step 6: Run to see it fail**
@@ -2183,19 +2431,21 @@ with `const shiftProducts = alias(schema.products, "shift_products")` (`alias` f
 `shift-export-runner.service.ts` `run`: branch after `claim`:
 
 ```ts
-      if (claimed.palletId !== null) {
-        const snapshot = await this.source.loadPallet(claimed.tenantId, claimed.palletId);
-        // snapshot columns: productNameSnapshot + shiftDateSnapshot (closed date) — same UPDATE as the shift path
-        const part = renderPalletAggregationExport({
-          formatId: "pallet_xml_gismt_aggregation",
-          formatVersion: claimed.formatVersion,
-          organizationInn: snapshot.organizationInn,
-          productName: snapshot.productName,
-          closedDate: snapshot.closedDate,
-          pallet: snapshot.pallet,
-        });
-        parts = [part];
-      } else { /* existing shift path */ }
+if (claimed.palletId !== null) {
+  const snapshot = await this.source.loadPallet(claimed.tenantId, claimed.palletId);
+  // snapshot columns: productNameSnapshot + shiftDateSnapshot (closed date) — same UPDATE as the shift path
+  const part = renderPalletAggregationExport({
+    formatId: "pallet_xml_gismt_aggregation",
+    formatVersion: claimed.formatVersion,
+    organizationInn: snapshot.organizationInn,
+    productName: snapshot.productName,
+    closedDate: snapshot.closedDate,
+    pallet: snapshot.pallet,
+  });
+  parts = [part];
+} else {
+  /* existing shift path */
+}
 ```
 
 Restructure so `parts` feeds the existing upload/publish loop unchanged (`openPalletSuppressedBoxCount` is `0` for a pallet export). The `formatId` literal is safe because `createPalletExportSchema` only admits that id; guard with `getPalletExportFormat(claimed.formatId, claimed.formatVersion)` first so a corrupted row fails as `FORMAT_NOT_FOUND`.
@@ -2221,6 +2471,7 @@ git commit -m "feat: per-pallet GIS MT aggregation export"
 ### Task 10: Full gates and spec sync
 
 **Files:**
+
 - Modify: `docs/superpowers/specs/2026-09-17-warehouse-pallet-aggregation-design.md` (§2.5 audit action name → `pallet_export.created`; §2.5 card → served by `GET /code-search/pallets/:id`; §1.3 drop the redundant index sentence — `pallet_exceptions_tenant_pallet_idx` already exists)
 
 - [ ] **Step 1: Update the three spec lines above**

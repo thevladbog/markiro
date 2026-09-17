@@ -255,7 +255,8 @@ export class PalletsService {
     // a second count query -- and never advertises an empty next page. When
     // `limit` is undefined (shift-scoped, no limit given), the whole shift
     // is fetched unpaged and there is no next page to detect.
-    const rows: PalletRow[] = limit === undefined ? await orderedQuery : await orderedQuery.limit(limit + 1);
+    const rows: PalletRow[] =
+      limit === undefined ? await orderedQuery : await orderedQuery.limit(limit + 1);
 
     const page = limit === undefined ? rows : rows.slice(0, limit);
     const last = limit !== undefined && rows.length > limit ? page[page.length - 1] : undefined;
