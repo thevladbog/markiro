@@ -346,6 +346,11 @@ export class GrantEvidenceNativeService {
         }
         for (const [index, pallet] of input.pallets.entries()) {
           if (denied("pallet", index)) continue;
+          // A warehouse pallet belongs to no shift, so it cannot close an
+          // offline shift grant's task and has no `shift.pallet.close.v1`
+          // fact to contribute. Skipped rather than shoehorned: every field
+          // below (`taskId`, `matchesScope`) is the shift's.
+          if (pallet.shiftId === null) continue;
           const [closed] = await tx
             .select()
             .from(schema.pallets)

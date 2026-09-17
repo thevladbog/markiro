@@ -157,14 +157,26 @@ const palletClosureSchema = z
       });
     }
     if (closure.kind === "production" && closure.shiftId === null) {
-      ctx.addIssue({ code: "custom", path: ["shiftId"], message: "a production pallet needs a shiftId" });
+      ctx.addIssue({
+        code: "custom",
+        path: ["shiftId"],
+        message: "a production pallet needs a shiftId",
+      });
     }
     if (closure.kind === "warehouse") {
       if (closure.shiftId !== null) {
-        ctx.addIssue({ code: "custom", path: ["shiftId"], message: "a warehouse pallet has no shiftId" });
+        ctx.addIssue({
+          code: "custom",
+          path: ["shiftId"],
+          message: "a warehouse pallet has no shiftId",
+        });
       }
       if (closure.productId === null) {
-        ctx.addIssue({ code: "custom", path: ["productId"], message: "a warehouse pallet needs a productId" });
+        ctx.addIssue({
+          code: "custom",
+          path: ["productId"],
+          message: "a warehouse pallet needs a productId",
+        });
       }
     }
   });
@@ -266,8 +278,8 @@ export const syncBatchSchema = z.object({
     // it matters.
     .refine(
       (pallets) =>
-        new Set(pallets.map((pallet) => `${pallet.shiftId ?? "warehouse"}|${pallet.palletId}`)).size ===
-        pallets.length,
+        new Set(pallets.map((pallet) => `${pallet.shiftId ?? "warehouse"}|${pallet.palletId}`))
+          .size === pallets.length,
       "Pallet closures must name each pallet at most once in a batch",
     )
     .default([]),
@@ -584,7 +596,8 @@ export const syncBatchResponseOpenApiSchema: SchemaObject = {
     memberships: {
       type: "array",
       items: palletMembershipOutcomeOpenApiSchema,
-      description: "Present when the batch carried palletMemberships; one entry per record, same order.",
+      description:
+        "Present when the batch carried palletMemberships; one entry per record, same order.",
     },
   },
 };
