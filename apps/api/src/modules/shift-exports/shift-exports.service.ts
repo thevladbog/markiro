@@ -17,6 +17,7 @@ import {
 import { DB } from "../../auth/auth.module";
 import { PgBossService } from "../../jobs/jobs.module";
 import { ObjectStorageService } from "../storage/object-storage.service";
+import { shiftExportAuditAction } from "./audit-action";
 import type {
   CreatePalletExportDto,
   CreateShiftExportDto,
@@ -483,15 +484,6 @@ export class ShiftExportsService {
       },
     });
   }
-}
-
-/**
- * Both kinds of export live in `shift_exports`, but the audit trail names the
- * thing the operator acted on: a per-pallet export is a `pallet_export.*`
- * event, never a `shift_export.*` one.
- */
-function shiftExportAuditAction(row: Pick<ShiftExportRow, "palletId">, action: string): string {
-  return row.palletId === null ? action : action.replace(/^shift_export\./, "pallet_export.");
 }
 
 function creatorName(row: ListedShiftExportRow): string | null {

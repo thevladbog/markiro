@@ -327,6 +327,46 @@ describe("ShiftExportRunnerService", () => {
     ]);
   });
 
+  it("finishes a disassembled pallet's claimed row as a safe pallet_export.failed refusal", async () => {
+    const fake = fakeDb(
+      baseRow({
+        shiftId: null,
+        palletId: "33333333-3333-4333-8333-333333333333",
+        formatId: "pallet_xml_gismt_aggregation",
+        formatVersion: 1,
+        maxLines: null,
+      }),
+    );
+    const loader = palletSource();
+    vi.mocked(loader.loadPallet).mockRejectedValue(
+      new ShiftExportSourceError("PALLET_DISASSEMBLED"),
+    );
+    const objects = storage();
+
+    await expect(
+      new ShiftExportRunnerService(fake.db, loader, objects).run(EXPORT_ID, {
+        retryCount: 0,
+        retryLimit: 5,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(fake.state.row).toMatchObject({ status: "failed", errorCode: "PALLET_DISASSEMBLED" });
+    expect(objects.putVerified).not.toHaveBeenCalled();
+    expect(fake.state.audits).toEqual([
+      expect.objectContaining({
+        action: "pallet_export.failed",
+        targetType: "shift_export",
+        targetId: EXPORT_ID,
+        outcome: "failure",
+        after: expect.objectContaining({
+          shiftId: null,
+          palletId: "33333333-3333-4333-8333-333333333333",
+          errorCode: "PALLET_DISASSEMBLED",
+        }),
+      }),
+    ]);
+  });
+
   it("claims a queued tenant row and atomically publishes verified rendered parts", async () => {
     const fake = fakeDb();
     const loader = source();

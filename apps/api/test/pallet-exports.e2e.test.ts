@@ -460,6 +460,44 @@ describe.skipIf(!ready)("pallet exports e2e", () => {
     });
   });
 
+  it("collapses only the same actor/idempotency key and creates a job for each distinct key", async () => {
+    enqueueShiftExport.mockClear();
+    const key = randomUUID();
+    const first = await agent
+      .post(`/pallets/${productionPalletId}/exports`)
+      .send({ formatId: "pallet_xml_gismt_aggregation", formatVersion: 1, idempotencyKey: key })
+      .expect(201);
+    const repeated = await agent
+      .post(`/pallets/${productionPalletId}/exports`)
+      .send({ formatId: "pallet_xml_gismt_aggregation", formatVersion: 1, idempotencyKey: key })
+      .expect(201);
+    expect(repeated.body.id).toBe(first.body.id);
+    expect(enqueueShiftExport).toHaveBeenCalledTimes(1);
+
+    const rows = await db
+      .select()
+      .from(schema.shiftExports)
+      .where(
+        and(
+          eq(schema.shiftExports.tenantId, tenantId),
+          eq(schema.shiftExports.idempotencyKey, key),
+        ),
+      );
+    expect(rows).toHaveLength(1);
+  });
+
+  it("refuses the same idempotency key reused for a different pallet", async () => {
+    const key = randomUUID();
+    await agent
+      .post(`/pallets/${productionPalletId}/exports`)
+      .send({ formatId: "pallet_xml_gismt_aggregation", formatVersion: 1, idempotencyKey: key })
+      .expect(201);
+    await agent
+      .post(`/pallets/${warehousePalletId}/exports`)
+      .send({ formatId: "pallet_xml_gismt_aggregation", formatVersion: 1, idempotencyKey: key })
+      .expect(409);
+  });
+
   it("refuses an open, a disassembled and another tenant's pallet, and advertises one format", async () => {
     await agent.post(`/pallets/${openPalletId}/exports`).send(createBody()).expect(409);
     await agent.post(`/pallets/${disassembledPalletId}/exports`).send(createBody()).expect(409);

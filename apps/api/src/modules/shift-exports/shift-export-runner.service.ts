@@ -12,6 +12,7 @@ import { schema, type Db } from "@markiro/db";
 import { and, eq, lte, or, sql } from "drizzle-orm";
 import { DB } from "../../auth/auth.module";
 import { ObjectStorageService } from "../storage/object-storage.service";
+import { shiftExportAuditAction } from "./audit-action";
 import { ShiftExportSourceError, ShiftExportSourceService } from "./shift-export-source.service";
 
 export const SHIFT_EXPORT_SAFE_ERROR_CODES = [
@@ -358,10 +359,7 @@ export class ShiftExportRunnerService {
     await tx.insert(schema.tenantAuditEvents).values({
       organizationId: claimed.tenantId,
       actorUserId: claimed.createdByUserId,
-      // A per-pallet export is audited as `pallet_export.*`; `targetType`
-      // stays `shift_export`, the table both kinds live in.
-      action:
-        claimed.palletId === null ? action : action.replace(/^shift_export\./, "pallet_export."),
+      action: shiftExportAuditAction(claimed, action),
       outcome,
       targetType: "shift_export",
       targetId: claimed.id,
