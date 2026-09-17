@@ -294,6 +294,25 @@ class HubViewModelTest {
         assertNull(vm.state.first { it.activeShiftId == null }.continueShiftNumber)
     }
 
+    /**
+     * «Выйти из смены» on the work screen only stamped `leftAt`, and the card
+     * read `activeShiftId` alone -- so the operator came back to the hub and
+     * found the shift still pinned with «Продолжить», contrary to the README
+     * («Leaving or locally closing the shift removes the card»).
+     */
+    @Test
+    fun leavingTheShiftRemovesTheCard() = runTest {
+        db.shiftDao().upsert(ShiftEntityFixtures.bundled("s1"))
+        db.deviceConfigDao().upsert(paired.copy(activeShiftId = "s1"))
+        val repository = repository(api())
+        val model = vm(api(), repository = repository)
+        assertEquals("SEP26-001", model.state.first { it.activeShift != null }.continueShiftNumber)
+        repository.leave("s1")
+        val ui = model.state.first { it.activeShiftId == null }
+        assertNull(ui.activeShift)
+        assertNull(ui.continueShiftNumber)
+    }
+
     @Test
     fun activeCardUsesTheJoinedShiftsMetadataAndObservesLocalAcceptedUnits() = runTest {
         val shift = ShiftEntityFixtures.bundled("s1").copy(productPrintName = "Вода 0,5 л", plannedQty = 3000, mode = "aggregation")
