@@ -132,46 +132,52 @@ export function CategoryAttributesForm({
           void saveAttributes();
         }}
       >
-        {[...visible]
-          .sort((a, b) => layer(a) - layer(b))
-          .map((attribute) => {
-            const row = accepted.get(attribute.id);
-            return (
-              <div className="mk-regulatory-attribute" key={attribute.id}>
-                <p className="mk-regulatory-meta">
-                  {t(
-                    p +
-                      ["requiredOrdering", "requiredCirculation", "recommended", "optional"][
-                        layer(attribute)
-                      ],
+        <div className="mk-regulatory-attributes-grid">
+          {[...visible]
+            .sort((a, b) => layer(a) - layer(b))
+            .map((attribute) => {
+              const row = accepted.get(attribute.id);
+              const wide = ["string", "string_list", "enum_list"].includes(attribute.valueType);
+              return (
+                <div
+                  className={`mk-regulatory-attribute${wide ? " mk-regulatory-attribute--wide" : ""}`}
+                  key={attribute.id}
+                >
+                  <p className="mk-regulatory-meta">
+                    {t(
+                      p +
+                        ["requiredOrdering", "requiredCirculation", "recommended", "optional"][
+                          layer(attribute)
+                        ],
+                    )}
+                    {row && (
+                      <>
+                        {" "}
+                        · {t(p + "sources." + row.source)}: {valueText(row.value, t)}
+                      </>
+                    )}
+                  </p>
+                  {canWrite ? (
+                    <AttributeControl
+                      definition={attribute}
+                      value={values[attribute.id] ?? null}
+                      disabled={disabled || busy}
+                      onChange={(value) => {
+                        setDraft((old) => ({ ...old, [attribute.id]: value }));
+                        setSaved(false);
+                      }}
+                      {...(errors.includes(attribute.id) ? { error: t(p + "invalidValue") } : {})}
+                    />
+                  ) : (
+                    <dl>
+                      <dt>{attribute.label}</dt>
+                      <dd>{valueText(values[attribute.id], t)}</dd>
+                    </dl>
                   )}
-                  {row && (
-                    <>
-                      {" "}
-                      · {t(p + "sources." + row.source)}: {valueText(row.value, t)}
-                    </>
-                  )}
-                </p>
-                {canWrite ? (
-                  <AttributeControl
-                    definition={attribute}
-                    value={values[attribute.id] ?? null}
-                    disabled={disabled || busy}
-                    onChange={(value) => {
-                      setDraft((old) => ({ ...old, [attribute.id]: value }));
-                      setSaved(false);
-                    }}
-                    {...(errors.includes(attribute.id) ? { error: t(p + "invalidValue") } : {})}
-                  />
-                ) : (
-                  <dl>
-                    <dt>{attribute.label}</dt>
-                    <dd>{valueText(values[attribute.id], t)}</dd>
-                  </dl>
-                )}
-              </div>
-            );
-          })}
+                </div>
+              );
+            })}
+        </div>
         {visible.length === 0 && <p>{t(p + "noFields")}</p>}
         {failure && <Alert tone="error">{t(p + failure)}</Alert>}
         {saved && <p role="status">{t(p + "saved")}</p>}

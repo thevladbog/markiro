@@ -1603,6 +1603,11 @@
         "noCounterparty": "Не выбран",
         "submitCreate": "Создать",
         "submitUpdate": "Сохранить",
+        "tabs": {
+          "label": "Разделы карточки товара",
+          "basic": "Основное",
+          "chz": "Честный знак"
+        },
         "sections": {
           "basic": "Основное",
           "aggregation": "Агрегация и цена",

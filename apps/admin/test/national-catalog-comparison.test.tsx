@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { afterEach, expect, it, vi } from "vitest";
@@ -34,7 +34,46 @@ it.each([
   const field = screen.getByRole("group", { name: "Код продукции в ЕГАИС" });
   expect(within(field).getByText(message)).toBeDefined();
   expect(within(field).getByText("0300005753630000036")).toBeDefined();
+  expect(
+    within(field)
+      .getByRole("radio", { name: /Сейчас в Markiro/ })
+      .getAttribute("aria-checked"),
+  ).toBe("false");
   expect(screen.queryByText("Поле пока недоступно. Проверьте категорию и значение.")).toBeNull();
+});
+
+it("rebuilds the comparison immediately after a category is selected", async () => {
+  const { props, preview } = review();
+  preview.categoryOptions = [{ optionId: id(40), label: "Сидр", selected: false }];
+  render(<ImportReview {...props} />, { wrapper: MemoryRouter });
+
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("combobox", { name: "Начальная категория" }));
+  await user.click(screen.getByRole("option", { name: "Сидр" }));
+
+  expect(props.onPrepare).toHaveBeenCalledWith(
+    expect.objectContaining({ categoryChoices: { [preview.itemId]: id(40) } }),
+  );
+});
+
+it("refreshes one stale schema-blocked comparison automatically", async () => {
+  const { props, preview } = review();
+  preview.fields.push({
+    id: id(42),
+    label: "Характеристика упаковки",
+    before: null,
+    after: "БУТЫЛКА",
+    applicable: false,
+    reason: "compatible_schema_required",
+    source: "national_catalog",
+    selectedByDefault: false,
+    requiresEntryIds: [],
+  });
+  const view = render(<ImportReview {...props} />, { wrapper: MemoryRouter });
+
+  await waitFor(() => expect(props.onPrepare).toHaveBeenCalledTimes(1));
+  view.rerender(<ImportReview {...props} data={structuredClone(props.data)} />);
+  expect(props.onPrepare).toHaveBeenCalledTimes(1);
 });
 
 function review(existing = true) {

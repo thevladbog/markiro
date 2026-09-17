@@ -1603,6 +1603,11 @@
         "noCounterparty": "None selected",
         "submitCreate": "Create",
         "submitUpdate": "Save",
+        "tabs": {
+          "label": "Product card sections",
+          "basic": "Basic",
+          "chz": "Chestny ZNAK"
+        },
         "sections": {
           "basic": "Basic",
           "aggregation": "Aggregation and price",

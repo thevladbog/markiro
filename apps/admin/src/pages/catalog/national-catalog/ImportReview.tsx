@@ -4,7 +4,7 @@ import type {
   ImportPreview,
 } from "@markiro/platform-contracts";
 import { Alert, Button, Checkbox, DataTabs, Input, Select, RadioCard, Spinner } from "@markiro/ui";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { productImageUrl, type ProductDto } from "../api.js";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
@@ -108,26 +108,29 @@ export function ImportReview({
       ),
     ),
   }));
-  const effectiveDrafts: ReviewDrafts = {
-    manualNames: {
-      ...Object.fromEntries(
-        data.items.flatMap((p) =>
-          p.fields
-            .filter((f) => f.source === "manual" && f.after !== null)
-            .map((f) => [p.itemId, f.after ?? ""]),
+  const effectiveDrafts: ReviewDrafts = useMemo(
+    () => ({
+      manualNames: {
+        ...Object.fromEntries(
+          data.items.flatMap((p) =>
+            p.fields
+              .filter((f) => f.source === "manual" && f.after !== null)
+              .map((f) => [p.itemId, f.after ?? ""]),
+          ),
         ),
-      ),
-      ...drafts.manualNames,
-    },
-    categoryChoices: {
-      ...Object.fromEntries(
-        data.items.flatMap((p) =>
-          p.categoryOptions.filter((o) => o.selected).map((o) => [p.itemId, o.optionId]),
+        ...drafts.manualNames,
+      },
+      categoryChoices: {
+        ...Object.fromEntries(
+          data.items.flatMap((p) =>
+            p.categoryOptions.filter((o) => o.selected).map((o) => [p.itemId, o.optionId]),
+          ),
         ),
-      ),
-      ...drafts.categoryChoices,
-    },
-  };
+        ...drafts.categoryChoices,
+      },
+    }),
+    [data.items, drafts],
+  );
   const [dirtyPreparationId, setDirtyPreparationId] = useState<string | null>(null);
   const dirty = dirtyPreparationId === data.preparation.id;
   const choiceFor = (p: ImportPreview) => currentChoice(p, choices[p.itemId]?.choice);
@@ -181,6 +184,15 @@ export function ImportReview({
     ready &&
     applicable.length > 0 &&
     validChoices.length === applicable.length;
+  const schemaBlocked = data.items.some((preview) =>
+    preview.fields.some((field) => field.reason === "compatible_schema_required"),
+  );
+  const automaticRefreshAttempted = useRef(false);
+  useEffect(() => {
+    if (automaticRefreshAttempted.current || !canWrite || busy || !ready || !schemaBlocked) return;
+    automaticRefreshAttempted.current = true;
+    onPrepare(effectiveDrafts);
+  }, [busy, canWrite, effectiveDrafts, onPrepare, ready, schemaBlocked]);
   const totals = {
     created: validChoices.filter((p) => !p.productId).length,
     attached: validChoices.filter((p) => p.linkAction === "attach").length,
@@ -404,7 +416,7 @@ export function ImportReview({
                           label={`${title} — ${tr("currentColumn")}`}
                           title={title}
                           caption={tr("currentColumn")}
-                          checked={!accepted}
+                          checked={!accepted && field.applicable}
                           disabled={!canWrite || busy || !preview.canApply || !field.applicable}
                           onSelect={() =>
                             update(preview, (c) => toggleField(preview, c, field.id, false))

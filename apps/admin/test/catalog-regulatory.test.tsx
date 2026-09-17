@@ -153,6 +153,23 @@ it.each([23, 33, 35])(
     expect(screen.queryByLabelText("Код АП ЕГАИС")).toBeNull();
   },
 );
+
+it("lays out category attributes in an aligned grid and lets list fields span it", async () => {
+  const customProfile = profileSchema.parse(profile(23));
+  const sweet = customProfile.values.find((row) => row.attributeId === "sweet");
+  if (sweet) sweet.value = { type: "boolean", value: true };
+  mount({ customProfile });
+  await screen.findByLabelText("Объём");
+  const grid = document.querySelector(".mk-regulatory-attributes-grid");
+  expect(grid).not.toBeNull();
+  expect(grid?.querySelectorAll(".mk-regulatory-attribute")).toHaveLength(3);
+  expect(
+    screen
+      .getByRole("group", { name: "Наименования подсластителей" })
+      .closest(".mk-regulatory-attribute")
+      ?.classList.contains("mk-regulatory-attribute--wide"),
+  ).toBe(true);
+});
 it("preserves hidden stored attributes and sends only changed visible fields with the captured revision", async () => {
   const { user, writes } = mount();
   const quantity = await screen.findByLabelText("Объём");

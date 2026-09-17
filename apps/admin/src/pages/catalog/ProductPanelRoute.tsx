@@ -193,6 +193,7 @@ function EditProductPanel() {
   const [error, setError] = useState<string | null>(null);
   const [gtinError, setGtinError] = useState<string | null>(null);
   const [baseDirty, setBaseDirty] = useState(false);
+  const [regulatoryBlocked, setRegulatoryBlocked] = useState(false);
   const [regulatoryDirty, setRegulatoryDirty] = useState(false);
   const [regulatoryBusy, setRegulatoryBusy] = useState(false);
   const [profileBound, setProfileBound] = useState(true);
@@ -283,7 +284,7 @@ function EditProductPanel() {
               key={product.id}
               product={product}
               disabled={
-                baseDirty ||
+                regulatoryBlocked ||
                 mutation.isPending ||
                 imageMutation.isPending ||
                 deleteImageMutation.isPending
@@ -316,6 +317,7 @@ function EditProductPanel() {
         }}
         submissionError={error}
         onDirtyChange={setBaseDirty}
+        onRegulatoryBlockChange={setRegulatoryBlocked}
         onClose={guard.requestClose}
         onSubmit={async (input: CreateProductInput, image, detach) => {
           setError(null);
