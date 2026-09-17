@@ -11,11 +11,14 @@ import app.markiro.handheld.core.storage.MetaStore
 import app.markiro.handheld.core.storage.initializeRecoveryForTest
 import app.markiro.handheld.core.writeoff.MirrorOutcome
 import app.markiro.handheld.core.writeoff.contentKeys
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
+import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.RecordedRequest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -205,5 +208,57 @@ class BoxRegistryMirrorTest {
         assertNull(db.boxRegistryDao().bySscc("046000000000000025")?.localPalletId)
         // Gone from the registry entirely; nothing to re-claim.
         assertNull(db.boxRegistryDao().bySscc("046000000000000032"))
+    }
+
+    /**
+     * A failed second page must surface as the mapped transport outcome even
+     * when the `finally`-style reclaim of a carried claim also fails because
+     * the lease went bad in between (a fresh `RecoveryBlocked`). Before the
+     * fix, an unconditional reclaim commit in a `finally` block replaced the
+     * propagating HTTP failure with the reclaim's own `RecoveryBlocked`
+     * (a `CancellationException`), which none of `walk()`'s catch clauses
+     * handle, so it escaped `mirror.walk()` entirely instead of returning
+     * `Failed("http")`.
+     */
+    @Test
+    fun aReclaimFailureAfterAFailedPageDoesNotMaskTheTransportOutcome() = runTest {
+        db.boxRegistryDao().upsert(box("046000000000000018", bottles = 6, localPalletId = "w-local"))
+        server.dispatcher = object : Dispatcher() {
+            var seen = 0
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                seen++
+                if (seen == 1) {
+                    return MockResponse().setBody(
+                        """{"until":"9","items":[${upsert("046000000000000018", 6)}],"nextCursor":"c1"}""",
+                    )
+                }
+                // The lease is invalidated between the first page landing and the
+                // second page's failure, so the reclaim commit in the failure path
+                // hits a `RecoveryBlocked` of its own.
+                runBlocking { db.recovery.reject(db.recovery.token()) }
+                return MockResponse().setResponseCode(500)
+            }
+        }
+        val outcome = mirror.walk()
+        assertEquals(MirrorOutcome.Failed("http"), outcome)
+        assertNull(meta.get(MetaStore.BOX_REGISTRY_UNTIL))
+    }
+
+    /**
+     * On a clean success, the carried claim is re-applied inside the same
+     * final commit that stores `until`, not through a separate reclaim step.
+     */
+    @Test
+    fun aSuccessfulReWalkReappliesTheClaimAlongsideUntil() = runTest {
+        db.boxRegistryDao().upsert(box("046000000000000018", bottles = 6, localPalletId = "w-local"))
+        server.enqueue(
+            MockResponse().setBody(
+                """{"until":"9","items":[${upsert("046000000000000018", 6)}],"nextCursor":"c1"}""",
+            ),
+        )
+        server.enqueue(MockResponse().setBody("""{"until":"9","items":[]}"""))
+        assertEquals(MirrorOutcome.Ok, mirror.walk())
+        assertEquals("9", meta.get(MetaStore.BOX_REGISTRY_UNTIL))
+        assertEquals("w-local", db.boxRegistryDao().bySscc("046000000000000018")?.localPalletId)
     }
 }

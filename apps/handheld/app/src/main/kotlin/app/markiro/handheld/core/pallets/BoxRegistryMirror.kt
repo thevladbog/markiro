@@ -7,6 +7,7 @@ import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.MetaStore
 import app.markiro.handheld.core.writeoff.KEYS
 import app.markiro.handheld.core.writeoff.MirrorOutcome
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import java.io.IOException
@@ -61,39 +62,67 @@ class BoxRegistryMirror(
             emptyList()
         }
         if (since == null) db.recovery.commit { db.boxRegistryDao().clear() }
+
+        // Every exit from the walk below -- success, an early `Failed`, or a
+        // thrown transport/shape exception -- must not leave a carried claim
+        // stranded: the clear() above already ran, and the row that survives
+        // it (if any) is the only place left to put the claim back. On success
+        // the claim is re-applied inside the SAME final commit as `until`
+        // (below); this reclaim only runs for every other exit, and it must
+        // never mask whatever outcome or exception the walk itself produced.
+        var primary: Throwable? = null
+        val outcome = try {
+            walkPages(since, claims)
+        } catch (t: Throwable) {
+            primary = t
+            null
+        }
+        if (outcome == MirrorOutcome.Ok) return outcome
+        val reclaimFailure = if (claims.isNotEmpty()) runCatching { reclaim(claims) }.exceptionOrNull() else null
+        if (primary != null) {
+            if (reclaimFailure != null) primary.addSuppressed(reclaimFailure)
+            throw primary
+        }
+        if (reclaimFailure != null) {
+            // A blocked/rotated lease is a cancellation, not a reportable outcome:
+            // never swallow it into a `Failed`.
+            if (reclaimFailure is CancellationException) throw reclaimFailure
+            return MirrorOutcome.Failed("registry reclaim")
+        }
+        return checkNotNull(outcome)
+    }
+
+    private suspend fun walkPages(since: String?, claims: List<Pair<String, String>>): MirrorOutcome {
         var cursor: String? = null
         var until: String? = null
-        try {
-            while (true) {
-                val page = api.boxRegistry(since = since, until = until, cursor = cursor, limit = PAGE_SIZE)
-                if (until == null) until = page.until else if (page.until != until) return MirrorOutcome.Failed("registry window")
-                val changes = ArrayList<Change>(page.items.size)
-                for (item in page.items) changes += change(item) ?: return MirrorOutcome.Failed("registry shape")
-                db.recovery.commit {
-                    // Applied in the server's order: within one page the last word on an SSCC wins.
-                    for (c in changes) when (c) {
-                        is Change.Put -> db.boxRegistryDao().upsert(c.row)
-                        is Change.Drop -> db.boxRegistryDao().remove(c.sscc)
-                    }
-                }
-                cursor = page.nextCursor ?: break
-            }
-            val applied = until ?: return MirrorOutcome.Failed("registry window")
-            db.recovery.commit { meta.put(MetaStore.BOX_REGISTRY_UNTIL, applied) }
-            return MirrorOutcome.Ok
-        } finally {
-            // Every exit from the walk above -- success, an early `Failed`, or a
-            // thrown transport/shape exception -- must not leave a carried claim
-            // stranded: the clear() above already ran, and the row that survives
-            // it (if any) is the only place left to put the claim back.
-            if (claims.isNotEmpty()) {
-                db.recovery.commit {
-                    for ((sscc, localPalletId) in claims) {
-                        val row = db.boxRegistryDao().bySscc(sscc) ?: continue
-                        if (row.palletId == null) db.boxRegistryDao().claim(sscc, localPalletId)
-                    }
+        while (true) {
+            val page = api.boxRegistry(since = since, until = until, cursor = cursor, limit = PAGE_SIZE)
+            if (until == null) until = page.until else if (page.until != until) return MirrorOutcome.Failed("registry window")
+            val changes = ArrayList<Change>(page.items.size)
+            for (item in page.items) changes += change(item) ?: return MirrorOutcome.Failed("registry shape")
+            db.recovery.commit {
+                // Applied in the server's order: within one page the last word on an SSCC wins.
+                for (c in changes) when (c) {
+                    is Change.Put -> db.boxRegistryDao().upsert(c.row)
+                    is Change.Drop -> db.boxRegistryDao().remove(c.sscc)
                 }
             }
+            cursor = page.nextCursor ?: break
+        }
+        val applied = until ?: return MirrorOutcome.Failed("registry window")
+        db.recovery.commit {
+            meta.put(MetaStore.BOX_REGISTRY_UNTIL, applied)
+            reclaimInto(claims)
+        }
+        return MirrorOutcome.Ok
+    }
+
+    private suspend fun reclaim(claims: List<Pair<String, String>>) = db.recovery.commit { reclaimInto(claims) }
+
+    private suspend fun reclaimInto(claims: List<Pair<String, String>>) {
+        for ((sscc, localPalletId) in claims) {
+            val row = db.boxRegistryDao().bySscc(sscc) ?: continue
+            if (row.palletId == null) db.boxRegistryDao().claim(sscc, localPalletId)
         }
     }
 
