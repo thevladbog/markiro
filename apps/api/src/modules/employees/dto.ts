@@ -26,7 +26,10 @@ export const employeePickupPolicySchema = z.object({
   limitMode: z.enum(["limited", "unlimited"]),
   dayLimit: z.number().int().min(1),
   canWriteoff: z.boolean(),
-  canBuildPallets: z.boolean().default(false),
+  // Optional, not defaulted: the admin pickup form predates this flag and
+  // still posts only the three limit fields, so a default here would revoke
+  // `canBuildPallets` on every unrelated policy edit.
+  canBuildPallets: z.boolean().optional(),
 });
 export type UpdateEmployeePickupPolicyDto = z.infer<typeof employeePickupPolicySchema>;
 

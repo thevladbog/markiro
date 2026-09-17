@@ -191,7 +191,11 @@ export class EmployeesService {
         throw new InternalServerErrorException("Employee pickup policy is not configured");
       }
       const before = this.toPickupPolicyDto(policy);
-      const after: EmployeePickupPolicyDto = dto;
+      // An omitted `canBuildPallets` means «leave it alone», not «revoke it».
+      const after: EmployeePickupPolicyDto = {
+        ...dto,
+        canBuildPallets: dto.canBuildPallets ?? before.canBuildPallets,
+      };
       await tx
         .update(schema.employeePickupPolicies)
         .set({ ...after, updatedAt: new Date() })

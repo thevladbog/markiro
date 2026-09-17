@@ -358,17 +358,46 @@ describe.skipIf(!ready)("employees e2e", () => {
     });
   });
 
-  it("defaults canBuildPallets to false when the client omits it", async () => {
+  // The admin pickup form still posts only the three limit fields, so a
+  // full-replace body without `canBuildPallets` must not revoke the grant.
+  it("preserves canBuildPallets when the client omits it", async () => {
     const owner = request.agent(app!.getHttpServer());
-    await signUpAndActivate(owner);
+    const tenantId = await signUpAndActivate(owner);
     const created = await owner.post("/employees").send({ fullName: "Без права" }).expect(201);
     const employeeId = created.body.id as string;
 
+    await owner
+      .patch(`/employees/${employeeId}/pickup-policy`)
+      .send({ limitMode: "limited", dayLimit: 5, canWriteoff: false, canBuildPallets: true })
+      .expect(200);
     const res = await owner
       .patch(`/employees/${employeeId}/pickup-policy`)
-      .send({ limitMode: "limited", dayLimit: 5, canWriteoff: false })
+      .send({ limitMode: "limited", dayLimit: 7, canWriteoff: false })
       .expect(200);
-    expect(res.body.pickupPolicy.canBuildPallets).toBe(false);
+    expect(res.body.pickupPolicy).toMatchObject({ dayLimit: 7, canBuildPallets: true });
+    const got = await owner.get("/employees").expect(200);
+    expect(
+      got.body.items.find((item: { id: string }) => item.id === employeeId).pickupPolicy
+        .canBuildPallets,
+    ).toBe(true);
+    const [audit] = await setup.db
+      .select()
+      .from(schema.tenantAuditEvents)
+      .where(
+        and(
+          eq(schema.tenantAuditEvents.organizationId, tenantId),
+          eq(schema.tenantAuditEvents.action, "employee.pickup_policy.updated"),
+          eq(schema.tenantAuditEvents.targetId, employeeId),
+        ),
+      )
+      .orderBy(desc(schema.tenantAuditEvents.createdAt))
+      .limit(1);
+    expect(audit).toMatchObject({
+      outcome: "success",
+      before: { dayLimit: 5, canBuildPallets: true },
+      after: { dayLimit: 7, canBuildPallets: true },
+    });
+    expect(await employeePolicy(employeeId)).toMatchObject({ canBuildPallets: true });
   });
 
   it("reports a missing active employee pickup policy as a configuration error", async () => {
