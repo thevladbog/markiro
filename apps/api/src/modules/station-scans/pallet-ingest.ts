@@ -85,9 +85,12 @@ export interface PalletRef {
 /**
  * Creates every pallet the batch names and returns their server ids.
  *
- * A pre-pass, run before the box-closure loop, so a box's membership and its
- * closure are ONE statement: the closure UPDATE reads this map rather than
- * doing its own round trip per box.
+ * Called twice per batch. First as a pre-pass before the box-closure loop, so
+ * a box's membership and its closure are ONE statement: the closure UPDATE
+ * reads this map rather than doing its own round trip per box. Then again for
+ * the warehouse pallets only MEMBERSHIPS name, which cannot be resolved until
+ * that loop has written `boxes.sscc` -- the caller merges the second map into
+ * the first.
  *
  * Sorted by the full key -- the same 40P01 reasoning the item upsert and the
  * box-closure loop already use: two overlapping batches touching the same
@@ -624,7 +627,18 @@ export async function applyPalletMemberships(
       // Null until that pallet closes: the serial is printed at closure, so an
       // open rival pallet has no number to show the operator yet.
       if (row.old_sscc !== null) winningPalletSscc = formatSsccWithAi(row.old_sscc);
-    } else status = "product_mismatch";
+    } else if (!row.same_product) {
+      // The last rule the UPDATE carried, read from the diagnostic rather
+      // than inferred: the box's shift makes a different product than the one
+      // the warehouse pallet was seeded with.
+      status = "product_mismatch";
+    } else {
+      // Every clause of the UPDATE is now accounted for, so a zero-row match
+      // with none of them refused is a rule this classifier does not know
+      // about. Better a loud 500 on a batch the station will retry than a
+      // refusal reported under a status the operator cannot act on.
+      throw new Error("unclassified membership refusal");
+    }
 
     outcomes[index] = {
       palletId: membership.palletId,
@@ -652,4 +666,42 @@ export async function applyPalletMemberships(
   }
 
   return { outcomes, changedBoxIds };
+}
+
+/**
+ * Expands the outcomes of the memberships this batch actually APPLIED back
+ * over every membership the device SUBMITTED, in the caller's order.
+ *
+ * A read-only subscription denies every membership in the batch, quarantines
+ * it and filters it out of the body, so `applied` is a subsequence of `all`
+ * with the denied indexes removed. The handheld matches this list to its own
+ * outbox positionally, so a record it refused must keep its original index and
+ * report that refusal there.
+ *
+ * A cursor that runs past `applied` (or stops short of its end) means the two
+ * lists disagree about which records were applied -- every later outcome would
+ * then be attributed to the wrong membership, which is worse than a failed
+ * batch the station retries. Reported as an error rather than papered over.
+ */
+export function assembleMembershipOutcomes(
+  all: readonly PalletMembershipDto[],
+  deniedIndexes: ReadonlySet<number>,
+  applied: readonly PalletMembershipOutcomeDto[],
+): PalletMembershipOutcomeDto[] {
+  let cursor = 0;
+  const outcomes = all.map((membership, index) => {
+    if (deniedIndexes.has(index)) {
+      return {
+        palletId: membership.palletId,
+        boxSscc: membership.boxSscc,
+        status: "subscription_read_only" as const,
+      };
+    }
+    const outcome = applied[cursor];
+    cursor += 1;
+    if (outcome === undefined) throw new Error("membership outcome cursor desynchronised");
+    return outcome;
+  });
+  if (cursor !== applied.length) throw new Error("membership outcome cursor desynchronised");
+  return outcomes;
 }

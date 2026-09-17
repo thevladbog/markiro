@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import express from "express";
 import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildSscc, canonicalizeKm, kmHash } from "@markiro/domain";
@@ -14,6 +14,7 @@ import { loadEnv } from "../src/env";
 import type { ScanItemDto } from "../src/modules/station-scans/dto";
 import { PALLET_EXTENSION_DIGIT, SsccService } from "../src/modules/sscc/sscc.service";
 import { createTestStationDevice, signUpAndActivate } from "./support/auth";
+import { createManagedSubscription, createPublishedPlan } from "./support/subscription-fixtures";
 import { listenOnLoopback } from "./support/listen-loopback";
 
 const ready = Boolean(
@@ -51,6 +52,8 @@ describe.skipIf(!ready)("station scans warehouse pallets e2e", () => {
 
   const GTIN_A = "04006381333931";
   const GTIN_B = "04006381333900";
+  /** A third product, for the read-only tenant's own fixtures. */
+  const GTIN_C = "04600682000013";
   // Nine digits, so `ssccSerialCapacity` leaves a seven-digit serial -- same
   // fixture shape as pallets.e2e.test.ts.
   const ISSUER_PREFIX = "034600682";
@@ -65,7 +68,12 @@ describe.skipIf(!ready)("station scans warehouse pallets e2e", () => {
   const B4_SSCC = "003460682000000104";
   /** b5: never closed -- see the seeding note in `beforeAll`. */
   const B5_SSCC = "003460682000000105";
+  /** b6: its items are seeded below, but it closes in the SAME batch that attaches it. */
+  const B6_SSCC = "003460682000000106";
   const UNKNOWN_SSCC = "003460068299999990";
+  /** l1, l2: boxes of the READ-ONLY tenant below, closed before its plan lapses. */
+  const L1_SSCC = "003460682000000201";
+  const L2_SSCC = "003460682000000202";
 
   function item(gtin: string, shiftId: string, label: string, boxId: string): ScanItemDto {
     const raw = `01${gtin}21S-${label}`;
@@ -239,6 +247,7 @@ describe.skipIf(!ready)("station scans warehouse pallets e2e", () => {
         item(GTIN_A, shift1Id, "b1-2", "b1"),
         item(GTIN_A, shift1Id, "b2-11", "b2"),
         item(GTIN_A, shift1Id, "b5-21", "b5"),
+        item(GTIN_A, shift1Id, "b6-31", "b6"),
       ],
     });
     await postBatch({ items: [item(GTIN_A, shift2Id, "b3-31", "b3")] });
@@ -454,5 +463,224 @@ describe.skipIf(!ready)("station scans warehouse pallets e2e", () => {
       .from(schema.pallets)
       .where(eq(schema.pallets.tenantId, otherTenantId));
     expect(theirs).toEqual([]);
+  });
+  it("closes a box and attaches it to a new warehouse pallet in the same batch", async () => {
+    // `boxes.sscc` is written by the box-closure loop, and a membership names
+    // its box by that SSCC, so the two must be resolved in the right order
+    // WITHIN one batch: a handheld closes the box it has just filled and scans
+    // it onto a pallet without waiting for a round trip in between.
+    const res = await postBatch({
+      boxes: [
+        {
+          boxId: "b6",
+          shiftId: shift1Id,
+          terminalId: "t1",
+          sscc: B6_SSCC,
+          closedAt: "2026-09-17T10:30:00.000Z",
+          operatorId,
+          devicePalletId: null,
+        },
+      ],
+      palletMemberships: [membership("w6", B6_SSCC)],
+    });
+    expect(res.body.memberships).toEqual([
+      { palletId: "w6", boxSscc: B6_SSCC, status: "accepted" },
+    ]);
+
+    // The pallet was created by this very batch, seeded with the product of
+    // the shift the box closed in.
+    const w6 = await warehousePallet("w6", stationDeviceId);
+    expect(w6).toMatchObject({ kind: "warehouse", productId, deviceId: stationDeviceId });
+    expect(await memberBoxSsccs(w6.id)).toEqual([B6_SSCC]);
+    expect(await rejections(w6.id)).toEqual([]);
+  });
+
+  it("replays an identical membership batch under the same batchId verbatim", async () => {
+    const batchId = `warehouse-replay-${randomUUID()}`;
+    const body = { batchId, items: [], palletMemberships: [membership("w7", B2_SSCC)] };
+    const first = await postBatch(body);
+    expect(first.body.alreadyApplied).toBe(false);
+    expect(first.body.memberships).toEqual([
+      { palletId: "w7", boxSscc: B2_SSCC, status: "accepted" },
+    ]);
+
+    // The device's drain redelivers a batch it never saw acknowledged. The
+    // answer must be the stored one, byte for byte: the handheld rebuilds its
+    // conflict view from it, and a second pass over the rules would report
+    // `replayed` instead of `accepted`.
+    const again = await postBatch(body);
+    expect(again.body.alreadyApplied).toBe(true);
+    expect(again.body.memberships).toEqual(first.body.memberships);
+
+    const w7 = await warehousePallet("w7", stationDeviceId);
+    expect(await memberBoxSsccs(w7.id)).toEqual([B2_SSCC]);
+    expect(await rejections(w7.id)).toEqual([]);
+  });
+
+  it("denies, quarantines and reports every membership of a read-only tenant", async () => {
+    const db = app!.get<Db>(DB);
+    const lapsed = request.agent(app!.getHttpServer());
+    const lapsedTenantId = await signUpAndActivate(lapsed);
+    const lapsedDevice = await createTestStationDevice(app!, lapsed, "TSD-lapsed", {
+      kind: "handheld",
+    });
+    const lapsedProduct = await lapsed
+      .post("/products")
+      .send({
+        name: "Sprite",
+        gtin: GTIN_C,
+        chzProductGroupCode: 8,
+        boxCapacity: 10,
+        palletBoxCapacity: 5,
+      })
+      .expect(201);
+    const lapsedProductId = (lapsedProduct.body as { id: string }).id;
+    const lapsedShift = await lapsed
+      .post("/shifts")
+      .send({ productId: lapsedProductId, mode: "validation" })
+      .expect(201);
+    const lapsedShiftId = (lapsedShift.body as { id: string }).id;
+    await lapsed.post(`/shifts/${lapsedShiftId}/open`).expect(200);
+
+    const postLapsed = (payload: Record<string, unknown>) =>
+      request(app!.getHttpServer())
+        .post("/station/scans")
+        .set("x-api-key", lapsedDevice.apiKey)
+        // `denied` is returned only to a client that negotiated recovery.
+        .set("x-station-capabilities", "station-recovery-v1")
+        .send({ batchId: `lapsed-${randomUUID()}`, items: [], ...payload })
+        .expect(201);
+
+    // Seeded while the tenant may still write; the subscription lapses below.
+    await postLapsed({
+      items: [
+        item(GTIN_C, lapsedShiftId, "l1-1", "l1"),
+        item(GTIN_C, lapsedShiftId, "l2-2", "l2"),
+      ],
+    });
+    await postLapsed({
+      boxes: [
+        {
+          boxId: "l1",
+          shiftId: lapsedShiftId,
+          terminalId: "t1",
+          sscc: L1_SSCC,
+          closedAt: BOX_CLOSED_AT,
+          operatorId: null,
+          devicePalletId: null,
+        },
+        {
+          boxId: "l2",
+          shiftId: lapsedShiftId,
+          terminalId: "t1",
+          sscc: L2_SSCC,
+          closedAt: BOX_CLOSED_AT,
+          operatorId: null,
+          devicePalletId: null,
+        },
+      ],
+    });
+
+    const endsAt = new Date(Date.now() - 60_000);
+    const planVersionId = await createPublishedPlan(db, {
+      maxLines: null,
+      maxStations: null,
+      maxKiosks: null,
+      maxCabinetUsers: null,
+      palletsEnabled: true,
+    });
+    await createManagedSubscription(db, {
+      tenantId: lapsedTenantId,
+      planVersionId,
+      startsAt: new Date(endsAt.getTime() - 86_400_000),
+      endsAt,
+    });
+
+    const batchId = `lapsed-readonly-${randomUUID()}`;
+    const denied = await postLapsed({
+      batchId,
+      // A warehouse pallet has no shift to date it by, so its own closure
+      // instant is judged against `endsAt` -- and this one is now.
+      pallets: [
+        {
+          palletId: "lw1",
+          kind: "warehouse",
+          shiftId: null,
+          productId: lapsedProductId,
+          terminalId: null,
+          sscc: "103460682000000101",
+          closedAt: new Date().toISOString(),
+          operatorId: null,
+          printVerifiedAt: null,
+          printSkippedAt: null,
+        },
+      ],
+      palletMemberships: [membership("lw1", L1_SSCC), membership("lw1", L2_SSCC)],
+    });
+
+    expect(denied.body.denied).toEqual([
+      { recordKind: "pallet", recordIndex: 0, shiftId: null, code: "subscription_read_only" },
+      {
+        recordKind: "pallet_membership",
+        recordIndex: 0,
+        shiftId: null,
+        code: "subscription_read_only",
+      },
+      {
+        recordKind: "pallet_membership",
+        recordIndex: 1,
+        shiftId: null,
+        code: "subscription_read_only",
+      },
+    ]);
+    // Every SUBMITTED membership keeps its position and reports the refusal.
+    expect(denied.body.memberships).toEqual([
+      { palletId: "lw1", boxSscc: L1_SSCC, status: "subscription_read_only" },
+      { palletId: "lw1", boxSscc: L2_SSCC, status: "subscription_read_only" },
+    ]);
+
+    // Durable: the record survives in quarantine, not only in the answer.
+    const quarantined = await db.execute<{
+      record_kind: string;
+      record_index: number;
+      reason: string;
+      payload: { palletId?: string; boxSscc?: string };
+    }>(sql`
+      select record_kind, record_index, reason, payload
+      from station_sync_quarantine
+      where tenant_id = ${lapsedTenantId} and batch_id = ${batchId}
+        and record_kind = 'pallet_membership'
+      order by record_index
+    `);
+    expect(quarantined.rows).toEqual([
+      {
+        record_kind: "pallet_membership",
+        record_index: 0,
+        reason: "subscription_read_only",
+        payload: expect.objectContaining({ palletId: "lw1", boxSscc: L1_SSCC }),
+      },
+      {
+        record_kind: "pallet_membership",
+        record_index: 1,
+        reason: "subscription_read_only",
+        payload: expect.objectContaining({ palletId: "lw1", boxSscc: L2_SSCC }),
+      },
+    ]);
+
+    // Nothing was applied: no pallet row, and both boxes stand on no pallet.
+    const lapsedPallets = await db
+      .select({ id: schema.pallets.id })
+      .from(schema.pallets)
+      .where(eq(schema.pallets.tenantId, lapsedTenantId));
+    expect(lapsedPallets).toEqual([]);
+    const lapsedBoxes = await db
+      .select({ sscc: schema.boxes.sscc, palletId: schema.boxes.palletId })
+      .from(schema.boxes)
+      .where(eq(schema.boxes.tenantId, lapsedTenantId))
+      .orderBy(schema.boxes.sscc);
+    expect(lapsedBoxes).toEqual([
+      { sscc: L1_SSCC, palletId: null },
+      { sscc: L2_SSCC, palletId: null },
+    ]);
   });
 });

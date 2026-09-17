@@ -25,6 +25,7 @@ import {
   applyPalletClosures,
   applyPalletExceptions,
   applyPalletMemberships,
+  assembleMembershipOutcomes,
   palletKey,
   upsertPallets,
   type PalletRef,
@@ -1372,36 +1373,11 @@ export class StationScansService {
         // statement. Unconditional: a batch can carry pallet facts and no boxes
         // at all, exactly as it can carry box closures and no items.
         //
-        // A warehouse pallet's product is not on the wire for a membership --
-        // the handheld only knows the box's SSCC -- so every distinct SSCC in
-        // the batch is resolved to its shift's product in ONE query, before the
-        // refs are built. The first membership whose box IS known seeds the
-        // pallet's product; a batch whose every membership names an unknown box
-        // creates no pallet row at all and reports `not_found` for each.
-        const membershipProducts = new Map<string, string>();
-        if (body.palletMemberships.length > 0) {
-          const rows = await tx
-            .select({ sscc: schema.boxes.sscc, productId: schema.shifts.productId })
-            .from(schema.boxes)
-            .innerJoin(
-              schema.shifts,
-              and(
-                eq(schema.shifts.tenantId, schema.boxes.tenantId),
-                eq(schema.shifts.id, schema.boxes.shiftId),
-              ),
-            )
-            .where(
-              and(
-                eq(schema.boxes.tenantId, tenantId),
-                inArray(schema.boxes.sscc, [
-                  ...new Set(body.palletMemberships.map((membership) => membership.boxSscc)),
-                ]),
-              ),
-            );
-          for (const row of rows) {
-            if (row.sscc !== null) membershipProducts.set(row.sscc, row.productId);
-          }
-        }
+        // Memberships are NOT resolved here: a membership names its box by
+        // SSCC, and `boxes.sscc` is only written by the box-closure loop
+        // below, so a batch that closes a box and attaches it in one go would
+        // find no product and seed no pallet. Their refs get a second
+        // `upsertPallets` pass after that loop instead.
         const palletRefs: PalletRef[] = [
           ...body.boxes.flatMap((closure) =>
             closure.devicePalletId === null
@@ -1438,14 +1414,6 @@ export class StationScansService {
             // no-op in `applyPalletExceptions`.
             productId: null,
             deviceId: exception.shiftId === null ? authenticatedTerminalId : null,
-          })),
-          ...body.palletMemberships.map((membership) => ({
-            shiftId: null,
-            terminalId: authenticatedTerminalId,
-            devicePalletId: membership.palletId,
-            kind: "warehouse" as const,
-            productId: membershipProducts.get(membership.boxSscc) ?? null,
-            deviceId: authenticatedTerminalId,
           })),
         ];
         const palletsByKey = await upsertPallets(tx, tenantId, palletRefs);
@@ -1684,6 +1652,55 @@ export class StationScansService {
         // already owns everything this batch put on it.
         let membershipOutcomes: PalletMembershipOutcomeDto[] = [];
         if (body.palletMemberships.length > 0) {
+          // A warehouse pallet's product is not on the wire for a membership --
+          // the handheld only knows the box's SSCC -- so every distinct SSCC in
+          // the batch is resolved to its shift's product in ONE query. It runs
+          // HERE, after the box closures above, because `boxes.sscc` is written
+          // by that loop: a batch that closes a box and puts it on a new pallet
+          // in the same delivery must still find the product that seeds the
+          // pallet.
+          const membershipProducts = new Map<string, string>();
+          const productRows = await tx
+            .select({ sscc: schema.boxes.sscc, productId: schema.shifts.productId })
+            .from(schema.boxes)
+            .innerJoin(
+              schema.shifts,
+              and(
+                eq(schema.shifts.tenantId, schema.boxes.tenantId),
+                eq(schema.shifts.id, schema.boxes.shiftId),
+              ),
+            )
+            .where(
+              and(
+                eq(schema.boxes.tenantId, tenantId),
+                inArray(schema.boxes.sscc, [
+                  ...new Set(body.palletMemberships.map((membership) => membership.boxSscc)),
+                ]),
+              ),
+            );
+          for (const row of productRows) {
+            if (row.sscc !== null) membershipProducts.set(row.sscc, row.productId);
+          }
+          // Product seeding follows WIRE order (`upsertPallets` keeps the first
+          // ref that knows a product) while the INSERTs it issues run sorted by
+          // key, so a first-ever batch mixing two products on one pallet seeds
+          // the wire-first product and the rest report `product_mismatch`.
+          const membershipPallets = await upsertPallets(
+            tx,
+            tenantId,
+            body.palletMemberships.map((membership) => ({
+              shiftId: null,
+              terminalId: authenticatedTerminalId,
+              devicePalletId: membership.palletId,
+              kind: "warehouse" as const,
+              productId: membershipProducts.get(membership.boxSscc) ?? null,
+              deviceId: authenticatedTerminalId,
+            })),
+          );
+          // Merged rather than replacing: a warehouse pallet can also be named
+          // by a closure or an exception in this same batch, and those keys
+          // were resolved by the pre-pass.
+          for (const [key, id] of membershipPallets) palletsByKey.set(key, id);
           const applied = await applyPalletMemberships(
             tx,
             tenantId,
@@ -1808,30 +1825,15 @@ export class StationScansService {
         // records this batch refused to apply at all (read-only subscription)
         // keep their original position and report that refusal, and the rest
         // take their outcome from the filtered list in order.
-        const deniedMembershipIndexes = new Set(
-          denied
-            .filter((record) => record.recordKind === "pallet_membership")
-            .map((record) => record.recordIndex),
+        const memberships = assembleMembershipOutcomes(
+          submittedMemberships,
+          new Set(
+            denied
+              .filter((record) => record.recordKind === "pallet_membership")
+              .map((record) => record.recordIndex),
+          ),
+          membershipOutcomes,
         );
-        let membershipCursor = 0;
-        const memberships = submittedMemberships.map((membership, index) => {
-          if (deniedMembershipIndexes.has(index)) {
-            return {
-              palletId: membership.palletId,
-              boxSscc: membership.boxSscc,
-              status: "subscription_read_only" as const,
-            };
-          }
-          const outcome = membershipOutcomes[membershipCursor];
-          membershipCursor += 1;
-          return (
-            outcome ?? {
-              palletId: membership.palletId,
-              boxSscc: membership.boxSscc,
-              status: "not_found" as const,
-            }
-          );
-        });
 
         const result: SyncBatchResponseDto = {
           applied: body.items.length,
