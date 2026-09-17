@@ -514,12 +514,18 @@ export async function applyPalletExceptions(
  * on anything else.
  */
 type PalletMembershipRejectionReason =
-  "already_on_pallet" | "not_found" | "not_closed" | "disassembled" | "product_mismatch";
+  | "already_on_pallet"
+  | "not_found"
+  | "not_closed"
+  | "disassembled"
+  | "pallet_closed"
+  | "product_mismatch";
 
 /**
  * Applies this batch's warehouse memberships (spec §2.3) one statement each,
  * sorted by (palletId, boxSscc) for the usual 40P01 reason. The UPDATE is the
- * whole rule: closed, not disassembled, same product as the pallet, and
+ * whole rule: the box closed and not disassembled, the TARGET pallet still
+ * open and not disassembled, same product as the pallet, and the box
  * either on no pallet or on a pallet that has since been disassembled --
  * `boxes.pallet_id` may only ever be overwritten in that last case. Zero rows
  * matched -> one diagnostic SELECT classifies the refusal and a
@@ -572,6 +578,7 @@ export async function applyPalletMemberships(
          AND s.tenant_id = b.tenant_id AND s.id = b.shift_id
          AND tp.tenant_id = b.tenant_id AND tp.id = ${palletId}
          AND tp.product_id = s.product_id
+         AND tp.closed_at IS NULL AND tp.disassembled_at IS NULL
          AND b.closed_at IS NOT NULL AND b.disassembled_at IS NULL
          AND (b.pallet_id IS NULL
               OR EXISTS (SELECT 1 FROM pallets old
@@ -597,10 +604,13 @@ export async function applyPalletMemberships(
       pallet_id: string | null;
       old_sscc: string | null;
       old_disassembled_at: Date | null;
+      target_closed_at: Date | null;
+      target_disassembled_at: Date | null;
       same_product: boolean;
     }>(sql`
       SELECT b.id, b.closed_at, b.disassembled_at, b.pallet_id,
              old.sscc AS old_sscc, old.disassembled_at AS old_disassembled_at,
+             tp.closed_at AS target_closed_at, tp.disassembled_at AS target_disassembled_at,
              (s.product_id = tp.product_id) AS same_product
         FROM boxes b
         JOIN shifts s ON s.tenant_id = b.tenant_id AND s.id = b.shift_id
@@ -627,6 +637,11 @@ export async function applyPalletMemberships(
       // Null until that pallet closes: the serial is printed at closure, so an
       // open rival pallet has no number to show the operator yet.
       if (row.old_sscc !== null) winningPalletSscc = formatSsccWithAi(row.old_sscc);
+    } else if (row.target_closed_at !== null || row.target_disassembled_at !== null) {
+      // The TARGET pallet is already closed (its SSCC label is printed and its
+      // contents are what the export claims) or disassembled. Nothing may be
+      // added to it any more.
+      status = "pallet_closed";
     } else if (!row.same_product) {
       // The last rule the UPDATE carried, read from the diagnostic rather
       // than inferred: the box's shift makes a different product than the one

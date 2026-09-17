@@ -196,7 +196,7 @@ memberships: {
   palletId: string;
   boxSscc: string;
   status: 'accepted' | 'replayed' | 'already_on_pallet' | 'not_found'
-        | 'not_closed' | 'disassembled' | 'product_mismatch'
+        | 'not_closed' | 'disassembled' | 'pallet_closed' | 'product_mismatch'
         | 'subscription_read_only';
   winningPalletSscc?: string;   // for already_on_pallet
 }[];
@@ -228,6 +228,7 @@ exceptions.
    WHERE b.tenant_id = :tenant AND b.sscc = :sscc
      AND s.id = b.shift_id AND p.id = s.product_id
      AND tp.id = :pallet AND tp.product_id = p.id
+     AND tp.closed_at IS NULL AND tp.disassembled_at IS NULL
      AND b.closed_at IS NOT NULL AND b.disassembled_at IS NULL
      AND (b.pallet_id IS NULL
           OR b.pallet_id = :pallet
@@ -236,8 +237,9 @@ exceptions.
   ```
 
   One matched row means `accepted`, or `replayed` when `pallet_id` already equalled the target. `matched = 0` triggers a diagnostic SELECT that classifies the refusal in
-  this order: `not_found` → `not_closed` → `disassembled` →
-  `already_on_pallet` (with the winner's SSCC) → `product_mismatch`, and
+  this order: `not_found` → `replayed` → `not_closed` → `disassembled` →
+  `already_on_pallet` (with the winner's SSCC) → `pallet_closed` (the TARGET
+  pallet is itself closed or disassembled) → `product_mismatch`, and
   writes `pallet_membership_rejections` (`ON CONFLICT DO NOTHING`).
 
 - Accepted box ids are collected and passed to `advanceBoxRegistryVersion`

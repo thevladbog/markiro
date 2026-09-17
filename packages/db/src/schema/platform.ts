@@ -1255,7 +1255,12 @@ export const palletMembershipRejections = pgTable(
     boxId: uuid("box_id"),
     reason: text("reason")
       .$type<
-        "already_on_pallet" | "not_found" | "not_closed" | "disassembled" | "product_mismatch"
+        | "already_on_pallet"
+        | "not_found"
+        | "not_closed"
+        | "disassembled"
+        | "pallet_closed"
+        | "product_mismatch"
       >()
       .notNull(),
     winningPalletId: uuid("winning_pallet_id"),
@@ -1270,7 +1275,7 @@ export const palletMembershipRejections = pgTable(
     ),
     check(
       "pallet_membership_rejections_reason_check",
-      sql`${t.reason} IN ('already_on_pallet', 'not_found', 'not_closed', 'disassembled', 'product_mismatch')`,
+      sql`${t.reason} IN ('already_on_pallet', 'not_found', 'not_closed', 'disassembled', 'pallet_closed', 'product_mismatch')`,
     ),
     foreignKey({
       name: "pallet_membership_rejections_tenant_pallet_fk",

@@ -189,6 +189,15 @@ describe.skipIf(!databaseUrl)("warehouse pallets migration", () => {
         [tenantId, palletId],
       ),
     ).rejects.toMatchObject({ constraint: "pallet_membership_rejections_reason_check" });
+    // `pallet_closed` (the target pallet is already closed or disassembled) is
+    // part of the accepted set.
+    await expect(
+      pool.query(
+        `INSERT INTO pallet_membership_rejections (tenant_id,pallet_id,box_sscc,reason,added_at)
+         VALUES ($1,$2,'003460068200000031','pallet_closed',now())`,
+        [tenantId, palletId],
+      ),
+    ).resolves.toMatchObject({ rowCount: 1 });
   });
 
   it("enforces shift_exports_target_shape: exactly one of shift_id / pallet_id", async () => {

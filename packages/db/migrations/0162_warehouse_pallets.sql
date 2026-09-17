@@ -9,7 +9,7 @@ CREATE TABLE "pallet_membership_rejections" (
 	"added_at" timestamp with time zone NOT NULL,
 	"recorded_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "pallet_membership_rejections_tenant_pallet_sscc_uq" UNIQUE("tenant_id","pallet_id","box_sscc"),
-	CONSTRAINT "pallet_membership_rejections_reason_check" CHECK ("pallet_membership_rejections"."reason" IN ('already_on_pallet', 'not_found', 'not_closed', 'disassembled', 'product_mismatch'))
+	CONSTRAINT "pallet_membership_rejections_reason_check" CHECK ("pallet_membership_rejections"."reason" IN ('already_on_pallet', 'not_found', 'not_closed', 'disassembled', 'pallet_closed', 'product_mismatch'))
 );
 --> statement-breakpoint
 ALTER TABLE "station_sync_quarantine" DROP CONSTRAINT "station_sync_quarantine_record_kind_check";--> statement-breakpoint

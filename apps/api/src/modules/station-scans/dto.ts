@@ -445,6 +445,7 @@ export type PalletMembershipStatus =
   | "not_found"
   | "not_closed"
   | "disassembled"
+  | "pallet_closed"
   | "product_mismatch"
   | "subscription_read_only";
 
@@ -563,6 +564,7 @@ const palletMembershipOutcomeOpenApiSchema: SchemaObject = {
         "not_found",
         "not_closed",
         "disassembled",
+        "pallet_closed",
         "product_mismatch",
         "subscription_read_only",
       ],

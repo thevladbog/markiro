@@ -74,6 +74,7 @@ describe.skipIf(!ready)("station scans warehouse pallets e2e", () => {
   const B6_SSCC = "003460682000000106";
   /** b7: closed, then taken apart from the station before anyone palletises it. */
   const B7_SSCC = "003460682000000107";
+  const B8_SSCC = "003460682000000108";
   const UNKNOWN_SSCC = "003460068299999990";
   /** l1, l2: boxes of the READ-ONLY tenant below, closed before its plan lapses. */
   const L1_SSCC = "003460682000000201";
@@ -625,6 +626,47 @@ describe.skipIf(!ready)("station scans warehouse pallets e2e", () => {
     const w8 = await warehousePallet("w8", stationDeviceId);
     expect(await memberBoxSsccs(w8.id)).toEqual([]);
     expect(await rejections(w8.id)).toEqual([{ boxSscc: B7_SSCC, reason: "disassembled" }]);
+  });
+
+  it("refuses a membership whose target warehouse pallet is already closed", async () => {
+    // `w1` closed with its extension-1 serial above and was then disassembled.
+    // Either state alone bars a new box: a closed pallet's printed SSCC label
+    // and its export already claim an exact set of boxes.
+    await postBatch({ items: [item(GTIN_A, shift1Id, "b8-81", "b8")] });
+    await postBatch({
+      boxes: [
+        {
+          boxId: "b8",
+          shiftId: shift1Id,
+          terminalId: "t1",
+          sscc: B8_SSCC,
+          closedAt: "2026-09-17T12:00:00.000Z",
+          operatorId,
+          devicePalletId: null,
+        },
+      ],
+    });
+
+    const res = await postBatch({ palletMemberships: [membership("w1", B8_SSCC)] });
+    expect(res.body.memberships).toEqual([
+      { palletId: "w1", boxSscc: B8_SSCC, status: "pallet_closed" },
+    ]);
+
+    const w1 = await warehousePallet("w1", stationDeviceId);
+    expect(w1.closedAt).not.toBeNull();
+    expect(await rejections(w1.id)).toContainEqual({
+      boxSscc: B8_SSCC,
+      reason: "pallet_closed",
+    });
+    // The closed pallet's membership is untouched and the box still stands on
+    // no pallet at all.
+    expect(await memberBoxSsccs(w1.id)).toEqual([B3_SSCC]);
+    const db = app!.get<Db>(DB);
+    const [box] = await db
+      .select({ palletId: schema.boxes.palletId })
+      .from(schema.boxes)
+      .where(and(eq(schema.boxes.tenantId, tenantId), eq(schema.boxes.sscc, B8_SSCC)));
+    expect(box?.palletId).toBeNull();
   });
 
   /**

@@ -2299,7 +2299,7 @@
       "checkConstraints": {
         "pallet_membership_rejections_reason_check": {
           "name": "pallet_membership_rejections_reason_check",
-          "value": "\"pallet_membership_rejections\".\"reason\" IN ('already_on_pallet', 'not_found', 'not_closed', 'disassembled', 'product_mismatch')"
+          "value": "\"pallet_membership_rejections\".\"reason\" IN ('already_on_pallet', 'not_found', 'not_closed', 'disassembled', 'pallet_closed', 'product_mismatch')"
         }
       },
       "isRLSEnabled": false
