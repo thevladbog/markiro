@@ -128,6 +128,41 @@ describe.skipIf(!databaseUrl)("warehouse pallets migration", () => {
     expect(production.rows[0]?.def).toContain("NULLS NOT DISTINCT");
   });
 
+  it("ties a warehouse pallet's terminal_id to its own device_id", async () => {
+    // Same (tenant, device, device_pallet_id) as the existing 'w1' row, but a
+    // terminal_id that is NOT this device's own id: pallets_device_pallet_uq
+    // (unconditional, keyed on terminal_id/shift_id) would not catch this on
+    // its own, so pallets_warehouse_terminal_check must reject it first.
+    const otherTerminalId = randomUUID();
+    await expect(
+      pool.query(
+        `INSERT INTO pallets (tenant_id,kind,shift_id,terminal_id,device_pallet_id,product_id,device_id)
+         VALUES ($1,'warehouse',NULL,$2,'w1-other-terminal',$3,$4)`,
+        [tenantId, otherTerminalId, productId, deviceId],
+      ),
+    ).rejects.toMatchObject({ constraint: "pallets_warehouse_terminal_check" });
+
+    // A second device building a warehouse pallet with the SAME
+    // device_pallet_id, each terminal_id equal to its own device id, must
+    // succeed: warehouse identity is scoped per device, not global.
+    const otherDeviceId = randomUUID();
+    await pool.query(
+      `INSERT INTO station_devices (id,tenant_id,name,kind) VALUES ($1,$2,'TSD-2','handheld')`,
+      [otherDeviceId, tenantId],
+    );
+    await pool.query(
+      `INSERT INTO pallets (tenant_id,kind,shift_id,terminal_id,device_pallet_id,product_id,device_id)
+       VALUES ($1,'warehouse',NULL,$2,'w1',$3,$4)`,
+      [tenantId, otherDeviceId, productId, otherDeviceId],
+    );
+    const { rows } = await pool.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM pallets
+        WHERE tenant_id = $1 AND kind = 'warehouse' AND device_pallet_id = 'w1' AND device_id = $2`,
+      [tenantId, otherDeviceId],
+    );
+    expect(rows[0]?.count).toBe("1");
+  });
+
   it("creates pallet_membership_rejections with a per-pallet unique sscc", async () => {
     const { rows } = await pool.query<{ id: string }>(
       "SELECT id FROM pallets WHERE tenant_id = $1 AND kind = 'warehouse'",
@@ -154,6 +189,32 @@ describe.skipIf(!databaseUrl)("warehouse pallets migration", () => {
         [tenantId, palletId],
       ),
     ).rejects.toMatchObject({ constraint: "pallet_membership_rejections_reason_check" });
+  });
+
+  it("enforces shift_exports_target_shape: exactly one of shift_id / pallet_id", async () => {
+    const userId = randomUUID();
+    await pool.query(
+      `INSERT INTO "user" (id, name, email) VALUES ($1, 'Warehouse pallets export user', $2)`,
+      [userId, `${randomUUID()}@example.invalid`],
+    );
+
+    await expect(
+      pool.query(
+        `INSERT INTO shift_exports
+           (tenant_id, shift_id, pallet_id, format_id, format_version, created_by_user_id, idempotency_key)
+         VALUES ($1, NULL, NULL, 'shift_txt_flat', 1, $2, $3)`,
+        [tenantId, userId, randomUUID()],
+      ),
+    ).rejects.toMatchObject({ constraint: "shift_exports_target_shape" });
+
+    await expect(
+      pool.query(
+        `INSERT INTO shift_exports
+           (tenant_id, shift_id, pallet_id, format_id, format_version, created_by_user_id, idempotency_key)
+         VALUES ($1, $2, $3, 'shift_txt_flat', 1, $4, $5)`,
+        [tenantId, shiftId, productionPalletId, userId, randomUUID()],
+      ),
+    ).rejects.toMatchObject({ constraint: "shift_exports_target_shape" });
   });
 
   it("lets pallet_exceptions carry no shift and adds the quarantine kind", async () => {

@@ -1149,6 +1149,16 @@ export const pallets = pgTable(
       "pallets_kind_shape",
       sql`(${t.kind} = 'production' AND ${t.shiftId} IS NOT NULL) OR (${t.kind} = 'warehouse' AND ${t.shiftId} IS NULL AND ${t.productId} IS NOT NULL AND ${t.deviceId} IS NOT NULL)`,
     ),
+    // `pallets_device_pallet_uq` only dedupes a warehouse pallet correctly if
+    // its `terminalId` equals its own `deviceId` (both stay text so the
+    // comparison casts the uuid side); otherwise two different terminal
+    // strings for the same device would each get their own row under that
+    // NULLS-NOT-DISTINCT constraint, silently bypassing
+    // `pallets_warehouse_device_pallet_uq`'s per-device uniqueness intent.
+    check(
+      "pallets_warehouse_terminal_check",
+      sql`${t.kind} <> 'warehouse' OR ${t.terminalId} = ${t.deviceId}::text`,
+    ),
     foreignKey({
       name: "pallets_tenant_shift_fk",
       columns: [t.tenantId, t.shiftId],

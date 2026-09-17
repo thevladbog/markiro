@@ -32,5 +32,6 @@ CREATE UNIQUE INDEX "pallets_warehouse_device_pallet_uq" ON "pallets" USING btre
 CREATE INDEX "pallets_tenant_kind_closed_idx" ON "pallets" USING btree ("tenant_id","kind","closed_at");--> statement-breakpoint
 ALTER TABLE "pallets" ADD CONSTRAINT "pallets_kind_check" CHECK ("pallets"."kind" IN ('production', 'warehouse'));--> statement-breakpoint
 ALTER TABLE "pallets" ADD CONSTRAINT "pallets_kind_shape" CHECK (("pallets"."kind" = 'production' AND "pallets"."shift_id" IS NOT NULL) OR ("pallets"."kind" = 'warehouse' AND "pallets"."shift_id" IS NULL AND "pallets"."product_id" IS NOT NULL AND "pallets"."device_id" IS NOT NULL));--> statement-breakpoint
+ALTER TABLE "pallets" ADD CONSTRAINT "pallets_warehouse_terminal_check" CHECK ("pallets"."kind" <> 'warehouse' OR "pallets"."terminal_id" = "pallets"."device_id"::text);--> statement-breakpoint
 ALTER TABLE "station_sync_quarantine" ADD CONSTRAINT "station_sync_quarantine_record_kind_check" CHECK ("station_sync_quarantine"."record_kind" IN ('item', 'box', 'exception', 'product_label_event', 'pallet', 'pallet_exception', 'pallet_membership'));--> statement-breakpoint
 ALTER TABLE "shift_exports" ADD CONSTRAINT "shift_exports_target_shape" CHECK (("shift_exports"."shift_id" IS NOT NULL AND "shift_exports"."pallet_id" IS NULL) OR ("shift_exports"."shift_id" IS NULL AND "shift_exports"."pallet_id" IS NOT NULL));

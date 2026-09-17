@@ -1,5 +1,5 @@
 {
-  "id": "d01446cf-4d66-487e-99cc-31573f816713",
+  "id": "07f80627-a3bf-43f9-82cb-d2dcbb9e04ff",
   "prevId": "b81747cf-3743-4489-bbf0-52427320f177",
   "version": "7",
   "dialect": "postgresql",
@@ -2606,6 +2606,10 @@
         "pallets_kind_shape": {
           "name": "pallets_kind_shape",
           "value": "(\"pallets\".\"kind\" = 'production' AND \"pallets\".\"shift_id\" IS NOT NULL) OR (\"pallets\".\"kind\" = 'warehouse' AND \"pallets\".\"shift_id\" IS NULL AND \"pallets\".\"product_id\" IS NOT NULL AND \"pallets\".\"device_id\" IS NOT NULL)"
+        },
+        "pallets_warehouse_terminal_check": {
+          "name": "pallets_warehouse_terminal_check",
+          "value": "\"pallets\".\"kind\" <> 'warehouse' OR \"pallets\".\"terminal_id\" = \"pallets\".\"device_id\"::text"
         }
       },
       "isRLSEnabled": false
