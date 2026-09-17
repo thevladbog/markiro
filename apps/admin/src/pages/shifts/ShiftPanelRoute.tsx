@@ -52,6 +52,15 @@ export function ShiftPanelRoute({ mode }: { mode: "create" | "edit" | "details" 
   return <EditShiftPanel />;
 }
 
+/** The refusal codes the shift form can say in words; anything else keeps the server's message. */
+const NAMED_SHIFT_REFUSALS = new Set(["ORG_GLN_MISSING", "SSCC_ISSUER_GLN_MISSING"]);
+
+function shiftSubmissionMessage(cause: ApiRequestError, t: (key: string) => string): string {
+  return cause.code && NAMED_SHIFT_REFUSALS.has(cause.code)
+    ? t(`pages.shifts.form.errors.${cause.code}`)
+    : cause.message;
+}
+
 function usePanelContext() {
   const context = useOutletContext<ShiftsPanelContext>();
   const location = useLocation();
@@ -175,7 +184,7 @@ function CreateShiftPanel() {
           } catch (cause) {
             setError(
               cause instanceof ApiRequestError
-                ? cause.message
+                ? shiftSubmissionMessage(cause, t)
                 : t("pages.shifts.toasts.createError"),
             );
           }
@@ -286,7 +295,9 @@ function EditShiftPanel() {
     } catch (cause) {
       setCriticalInput(null);
       setError(
-        cause instanceof ApiRequestError ? cause.message : t("pages.shifts.toasts.updateError"),
+        cause instanceof ApiRequestError
+          ? shiftSubmissionMessage(cause, t)
+          : t("pages.shifts.toasts.updateError"),
       );
     }
   };

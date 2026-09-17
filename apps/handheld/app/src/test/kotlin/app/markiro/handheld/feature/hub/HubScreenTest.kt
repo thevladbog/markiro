@@ -50,6 +50,23 @@ class HubScreenTest {
         assertEquals(HubTile.SHIFT, selected)
     }
 
+    /** «Продолжить» goes through the same entry as the list, so it can be refused the same way. */
+    @Test
+    fun anEntryRefusalOnTheHubIsShownInWords() {
+        var dismissed = false
+        compose.setContent {
+            MarkiroTheme {
+                HubScreen(
+                    HubUi(activeShiftId = "s1", dialog = app.markiro.handheld.feature.shift.ShiftDialog.Closed),
+                    onTile = {}, onSignOut = {}, onDismissDialog = { dismissed = true },
+                )
+            }
+        }
+        compose.onNodeWithText("Смена уже закрыта").assertIsDisplayed()
+        compose.onNodeWithText("Понятно").performClick()
+        assertEquals(true, dismissed)
+    }
+
     @Test
     fun narrowHandheldShowsTheFullInventoryTitleOnOneLine() {
         compose.setContent {

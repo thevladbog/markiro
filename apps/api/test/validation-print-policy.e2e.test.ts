@@ -94,6 +94,7 @@ describe.skipIf(!ready)("validation print policy lifecycle", () => {
       defaultSource: null,
       validationPrintProtocol: PRODUCT_LABEL_PROTOCOL,
       validationReprocessingProtocol: "validation-reprocessing-v1",
+      orgGlnConfigured: false,
     });
     await request(app.getHttpServer()).get("/shifts/planning-config").expect(401);
   });

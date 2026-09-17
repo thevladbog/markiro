@@ -456,6 +456,7 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
       expect(res.body.sscc.issuerPrefix).toBe(orgGln.slice(0, 9));
       expect(res.body.sscc.extensionDigit).toBe(0);
       expect(res.body.sscc.toSerial).toBeGreaterThan(res.body.sscc.fromSerial);
+      expect(res.body.ssccIssuerProblem).toBeNull();
     });
 
     it("carries the counterparty's numbers when the shift names an issuer", async () => {
@@ -786,7 +787,118 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
     });
   });
 
+  describe("activating an aggregation shift requires an SSCC source", () => {
+    let agent: ReturnType<typeof request.agent>;
+    let orgId: string;
+    let productId: string;
+
+    beforeAll(async () => {
+      agent = request.agent(app!.getHttpServer());
+      orgId = await signUpAndActivate(agent);
+      await setDefaultBoxLabelTemplate(agent, orgId);
+      productId = await seedProduct(orgId, {
+        status: "active",
+        chzProductGroupCode: 8,
+        boxCapacity: 12,
+        palletBoxCapacity: 48,
+      });
+    });
+
+    async function planAggregation(body: Record<string, unknown> = {}): Promise<string> {
+      const shift = await agent
+        .post("/shifts")
+        .send({ productId, mode: "aggregation", ...body })
+        .expect(201);
+      return (shift.body as { id: string }).id;
+    }
+
+    // Found on the handheld: the cabinet let an aggregation shift start with
+    // no GLN anywhere, the bundle came back `sscc: null` with only a server
+    // WARN, and the operator learned about it from a refused close twenty
+    // scans in. Planning stays allowed (the GLN can be filled in later);
+    // starting does not.
+    it("refuses to open a shift whose organisation has no GLN, by name", async () => {
+      const shiftId = await planAggregation();
+      const res = await agent.post(`/shifts/${shiftId}/open`).expect(422);
+      expect(res.body.code).toBe("ORG_GLN_MISSING");
+      const [row] = await db
+        .select({ status: schema.shifts.status })
+        .from(schema.shifts)
+        .where(eq(schema.shifts.id, shiftId));
+      expect(row?.status).toBe("planned");
+    });
+
+    it("refuses to open a shift whose named issuer counterparty has no GLN, by name", async () => {
+      await agent.put("/org/profile").send({ gln: "4601112222005" }).expect(200);
+      // `counterparties.gln` is NOT NULL and the route validates 13 digits, so
+      // an issuer without a usable GLN is a direct-DB row with an empty one --
+      // the same `!cp.gln` branch `resolveIssuerPrefix` takes.
+      const counterpartyId = randomUUID();
+      await db
+        .insert(schema.counterparties)
+        .values({ id: counterpartyId, tenantId: orgId, name: "No-GLN Issuer", gln: "" });
+      const shiftId = await planAggregation({ ssccIssuerCounterpartyId: counterpartyId });
+      const res = await agent.post(`/shifts/${shiftId}/open`).expect(422);
+      expect(res.body.code).toBe("SSCC_ISSUER_GLN_MISSING");
+      await agent.put("/org/profile").send({ gln: null }).expect(200);
+    });
+
+    it("refuses a device entering a planned shift the same way, and a validation shift is unaffected", async () => {
+      const device = await createTestStationDevice(app!, agent, "No-GLN entry terminal");
+      const shiftId = await planAggregation();
+      const entered = await request(app!.getHttpServer())
+        .post(`/shifts/${shiftId}/enter`)
+        .set("x-api-key", device.apiKey)
+        .expect(422);
+      expect(entered.body.code).toBe("ORG_GLN_MISSING");
+
+      const validation = await agent
+        .post("/shifts")
+        .send({ productId, mode: "validation" })
+        .expect(201);
+      await agent.post(`/shifts/${(validation.body as { id: string }).id}/open`).expect(200);
+    });
+
+    it("opens once the organisation has a GLN", async () => {
+      const shiftId = await planAggregation();
+      await agent.put("/org/profile").send({ gln: "4601112222005" }).expect(200);
+      await agent.post(`/shifts/${shiftId}/open`).expect(200);
+      await agent.put("/org/profile").send({ gln: null }).expect(200);
+    });
+  });
+
   describe("bundle degrades gracefully when numbers are unavailable (Task 7 finding 1)", () => {
+    it("names the missing GLN in the bundle of an active shift whose organisation lost it", async () => {
+      const agent = request.agent(app!.getHttpServer());
+      const orgId = await signUpAndActivate(agent);
+      await agent.put("/org/profile").send({ gln: "4601112222005" }).expect(200);
+      await setDefaultBoxLabelTemplate(agent, orgId);
+      const productId = await seedProduct(orgId, {
+        status: "active",
+        chzProductGroupCode: 8,
+        boxCapacity: 12,
+        palletBoxCapacity: 48,
+      });
+      const shift = await agent
+        .post("/shifts")
+        .send({ productId, mode: "aggregation" })
+        .expect(201);
+      const shiftId = (shift.body as { id: string }).id;
+      await agent.post(`/shifts/${shiftId}/open`).expect(200);
+      // The GLN goes away AFTER the shift started: the one way an active
+      // aggregation shift can still reach a device without an issuer.
+      await agent.put("/org/profile").send({ gln: null }).expect(200);
+
+      const device = await createTestStationDevice(app!, agent, "Lost-GLN terminal");
+      const res = await request(app!.getHttpServer())
+        .get(`/shifts/${shiftId}/bundle`)
+        .set("x-api-key", device.apiKey)
+        .expect(200);
+      expect(res.body.sscc).toBeNull();
+      expect(res.body.ssccIssuerProblem).toBe("org_gln_missing");
+      expect(res.body.product).toMatchObject({ id: productId });
+    });
+
     it("still returns product/template/roster with sscc: null when the tenant has no org GLN", async () => {
       const agent = request.agent(app!.getHttpServer());
       const orgId = await signUpAndActivate(agent);
@@ -832,6 +944,9 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
       expect(res.body.labelTemplate).toBeNull();
       expect(res.body.operators).toHaveLength(1);
       expect(res.body.sscc).toBeNull();
+      // A planned shift carries no block for a reason that is not the
+      // issuer, so the issuer is not blamed for it.
+      expect(res.body.ssccIssuerProblem).toBeNull();
     });
   });
 

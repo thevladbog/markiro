@@ -15,7 +15,7 @@ import java.util.UUID
 class GrantMigrationTest {
     @Test fun realVersionThirteenUpgradePreservesQueuedBytesAndHasNoImplicitStrictConfig() = runTest {
         val context=ApplicationProvider.getApplicationContext<Context>(); val name="grant-upgrade-${UUID.randomUUID()}.db"
-        fun database()=Room.databaseBuilder(context,HandheldDatabase::class.java,name).allowMainThreadQueries().addMigrations(MIGRATION_13_14,MIGRATION_14_15, MIGRATION_15_16).build()
+        fun database()=Room.databaseBuilder(context,HandheldDatabase::class.java,name).allowMainThreadQueries().addMigrations(MIGRATION_13_14,MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17).build()
         try {
             val old=database()
             val raw="exact\u001dqueued-code"
@@ -26,7 +26,7 @@ class GrantMigrationTest {
             sql.version=13; old.close()
             val upgraded=database()
             try {
-                assertEquals(16,upgraded.openHelper.readableDatabase.version)
+                assertEquals(app.markiro.handheld.core.storage.HANDHELD_DATABASE_VERSION,upgraded.openHelper.readableDatabase.version)
                 assertEquals(raw,upgraded.outboxDao().head(1).single().raw)
                 assertNull(upgraded.grantDao().state())
                 assertTrue(upgraded.grantDao().evidence().isEmpty())
@@ -37,7 +37,7 @@ class GrantMigrationTest {
 
     @Test fun versionFourteenUpgradeKeepsReadinessIntentAcrossReopen() = runTest {
         val context=ApplicationProvider.getApplicationContext<Context>(); val name="grant-readiness-${UUID.randomUUID()}.db"
-        fun database()=Room.databaseBuilder(context,HandheldDatabase::class.java,name).allowMainThreadQueries().addMigrations(MIGRATION_14_15, MIGRATION_15_16).build()
+        fun database()=Room.databaseBuilder(context,HandheldDatabase::class.java,name).allowMainThreadQueries().addMigrations(MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17).build()
         try {
             database().let { current -> try {
                 current.openHelper.writableDatabase.execSQL("DROP TABLE grant_readiness_outbox")

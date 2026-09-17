@@ -350,3 +350,22 @@ val MIGRATION_15_16 = object : Migration(15, 16) {
         )
     }
 }
+
+/**
+ * The bundle's own reason for a missing SSCC block, so the device can warn
+ * from entry. Nullable, so existing rows need nothing.
+ *
+ * Guarded the way the table migrations above use `IF NOT EXISTS`: the upgrade
+ * suites build a current-schema database, drop only the tables a later
+ * migration creates and re-run from an older version, and SQLite has no
+ * `ADD COLUMN IF NOT EXISTS`.
+ */
+val MIGRATION_16_17 = object : Migration(16, 17) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        val present = db.query("PRAGMA table_info(`shift_mirror`)").use { cursor ->
+            val name = cursor.getColumnIndexOrThrow("name")
+            generateSequence { if (cursor.moveToNext()) cursor.getString(name) else null }.any { it == "ssccIssuerProblem" }
+        }
+        if (!present) db.execSQL("ALTER TABLE shift_mirror ADD COLUMN ssccIssuerProblem TEXT")
+    }
+}

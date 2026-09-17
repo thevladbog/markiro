@@ -49,9 +49,27 @@ import app.markiro.handheld.core.design.Tone
 import app.markiro.handheld.core.util.TimeText
 
 @Composable
-fun HubScreen(state: HubUi, onTile: (HubTile) -> Unit, onSignOut: () -> Unit, onLabelQueue: () -> Unit = {}, onContinueShift: (String) -> Unit = { onTile(HubTile.SHIFT) }) {
+fun HubScreen(
+    state: HubUi,
+    onTile: (HubTile) -> Unit,
+    onSignOut: () -> Unit,
+    onLabelQueue: () -> Unit = {},
+    onContinueShift: (String) -> Unit = { onTile(HubTile.SHIFT) },
+    onDismissDialog: () -> Unit = {},
+) {
     val c = MarkiroTheme.colors
     val t = MarkiroTheme.type
+    // «Продолжить» goes through the list's own entry and can be refused the
+    // same way; while it is, the entry's state takes the screen as it does there.
+    state.dialog?.let { dialog ->
+        Column(Modifier.fillMaxSize().background(c.surfacePage)) {
+            app.markiro.handheld.feature.shift.ShiftDialogScreen(
+                dialog, state.lineName, onDismiss = onDismissDialog,
+                onRetry = { state.activeShiftId?.let(onContinueShift) ?: onDismissDialog() },
+            )
+        }
+        return
+    }
     Column(Modifier.fillMaxSize().background(c.surfacePage)) {
         StatusStrip(
             listOf(

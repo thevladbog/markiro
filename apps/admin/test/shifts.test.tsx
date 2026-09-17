@@ -317,6 +317,7 @@ const PRODUCT_BEER: ProductDto = {
 const SHIFT_PLANNING_CONFIG = {
   defaultBoxLabelTemplateId: DEFAULT_BOX_LABEL_TEMPLATE.id,
   defaultSource: "organization" as const,
+  orgGlnConfigured: true,
 };
 
 // Task 6: two distinct counterparties -- the buyer the goods are for, and a
@@ -1970,6 +1971,87 @@ describe("ShiftsPage", () => {
       },
       { timeout: 3000 },
     );
+  });
+
+  /**
+   * Found on the handheld: the cabinet let an aggregation shift be planned and
+   * started with no GLN anywhere, and the operator learned about it from a
+   * refused box close twenty scans in. The form now refuses with the reason
+   * and where to fix it, before anything is sent.
+   */
+  it("refuses to plan an aggregation shift while the organisation has no GLN", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path === "/api/shifts" && init?.method === "POST") {
+        throw new Error("nothing must be sent without an SSCC source");
+      }
+      // The profile itself is protected from managers; the flag rides on
+      // planning-config, which every planner may read.
+      if (path.startsWith("/api/shifts/planning-config")) {
+        return jsonResponse(200, { ...SHIFT_PLANNING_CONFIG, orgGlnConfigured: false });
+      }
+      if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
+      if (path.startsWith("/api/products")) return jsonResponse(200, { items: [PRODUCT_A] });
+      if (path === "/api/counterparties") return jsonResponse(200, { items: [] });
+      if (path === "/api/label-templates") {
+        return jsonResponse(200, { items: [DEFAULT_BOX_LABEL_TEMPLATE] });
+      }
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("Смены не запланированы");
+    fireEvent.click(screen.getAllByRole("button", { name: "Запланировать смену" })[0]!);
+    await screen.findByText("Новая смена");
+
+    await user.click(screen.getByLabelText("Агрегация"));
+    await chooseOption(user, "Продукт", PRODUCT_A.name);
+    fireEvent.click(screen.getByRole("button", { name: "Запланировать" }));
+
+    await screen.findByText("В организации не задан GLN", { exact: false });
+    expect(
+      fetchMock.mock.calls.some((call) => call[0] === "/api/shifts" && call[1]?.method === "POST"),
+    ).toBe(false);
+  });
+
+  it("says the server's missing-GLN refusal in words, not as a code", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path === "/api/shifts" && init?.method === "POST") {
+        return jsonResponse(422, {
+          statusCode: 422,
+          code: "SSCC_ISSUER_GLN_MISSING",
+          message: "sscc issuer counterparty has no GLN",
+        });
+      }
+      if (path.startsWith("/api/shifts/planning-config")) {
+        return jsonResponse(200, SHIFT_PLANNING_CONFIG);
+      }
+      if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
+      if (path.startsWith("/api/products")) return jsonResponse(200, { items: [PRODUCT_A] });
+      if (path === "/api/counterparties") return jsonResponse(200, { items: [COUNTERPARTY] });
+      if (path === "/api/label-templates") {
+        return jsonResponse(200, { items: [DEFAULT_BOX_LABEL_TEMPLATE] });
+      }
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("Смены не запланированы");
+    fireEvent.click(screen.getAllByRole("button", { name: "Запланировать смену" })[0]!);
+    await screen.findByText("Новая смена");
+
+    await user.click(screen.getByLabelText("Агрегация"));
+    await chooseOption(user, "Продукт", PRODUCT_A.name);
+    await chooseOption(user, "Эмитент группового кода", COUNTERPARTY.name);
+    fireEvent.click(screen.getByRole("button", { name: "Запланировать" }));
+
+    await screen.findByText("У выбранного эмитента нет GLN", { exact: false });
+    expect(screen.queryByText("SSCC_ISSUER_GLN_MISSING", { exact: false })).toBeNull();
   });
 
   it("sends POST with palletsEnabled:true and prefilled palletBoxCapacity when pallets checkbox is toggled", async () => {
