@@ -12,7 +12,6 @@ CREATE TABLE "pallet_membership_rejections" (
 	CONSTRAINT "pallet_membership_rejections_reason_check" CHECK ("pallet_membership_rejections"."reason" IN ('already_on_pallet', 'not_found', 'not_closed', 'disassembled', 'product_mismatch'))
 );
 --> statement-breakpoint
-ALTER TABLE "pallets" DROP CONSTRAINT "pallets_device_pallet_uq";--> statement-breakpoint
 ALTER TABLE "station_sync_quarantine" DROP CONSTRAINT "station_sync_quarantine_record_kind_check";--> statement-breakpoint
 ALTER TABLE "pallet_exceptions" ALTER COLUMN "shift_id" DROP NOT NULL;--> statement-breakpoint
 ALTER TABLE "pallets" ALTER COLUMN "shift_id" DROP NOT NULL;--> statement-breakpoint
@@ -29,14 +28,6 @@ ALTER TABLE "pallet_membership_rejections" ADD CONSTRAINT "pallet_membership_rej
 ALTER TABLE "pallets" ADD CONSTRAINT "pallets_tenant_product_fk" FOREIGN KEY ("tenant_id","product_id") REFERENCES "public"."products"("tenant_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "pallets" ADD CONSTRAINT "pallets_tenant_device_fk" FOREIGN KEY ("tenant_id","device_id") REFERENCES "public"."station_devices"("tenant_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "shift_exports" ADD CONSTRAINT "shift_exports_tenant_pallet_fk" FOREIGN KEY ("tenant_id","pallet_id") REFERENCES "public"."pallets"("tenant_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
--- `NULLS NOT DISTINCT` is hand-added: drizzle-kit's index builder cannot
--- express it together with a partial `WHERE` (see the comment on
--- `pallets_device_pallet_uq` in packages/db/src/schema/platform.ts). This
--- replaces the original NULLS-NOT-DISTINCT `UNIQUE` table constraint from
--- migration 0137 with an equivalent partial index scoped to production
--- pallets, so a warehouse pallet's null `shift_id` cannot collide with this
--- constraint instead of `pallets_warehouse_device_pallet_uq`.
-CREATE UNIQUE INDEX "pallets_device_pallet_uq" ON "pallets" USING btree ("tenant_id","shift_id","terminal_id","device_pallet_id") NULLS NOT DISTINCT WHERE "pallets"."kind" = 'production';--> statement-breakpoint
 CREATE UNIQUE INDEX "pallets_warehouse_device_pallet_uq" ON "pallets" USING btree ("tenant_id","device_id","device_pallet_id") WHERE "pallets"."kind" = 'warehouse';--> statement-breakpoint
 CREATE INDEX "pallets_tenant_kind_closed_idx" ON "pallets" USING btree ("tenant_id","kind","closed_at");--> statement-breakpoint
 ALTER TABLE "pallets" ADD CONSTRAINT "pallets_kind_check" CHECK ("pallets"."kind" IN ('production', 'warehouse'));--> statement-breakpoint

@@ -114,7 +114,18 @@ describe.skipIf(!databaseUrl)("warehouse pallets migration", () => {
          VALUES ($1,'warehouse',NULL,$2,'w1',$3,$4)`,
         [tenantId, deviceId, productId, deviceId],
       ),
-    ).rejects.toMatchObject({ constraint: "pallets_warehouse_device_pallet_uq" });
+    ).rejects.toMatchObject({
+      constraint: expect.stringMatching(/^pallets_(warehouse_)?device_pallet_uq$/),
+    });
+    // The production constraint is unconditional (0162 kept it that way, not
+    // scoped to `kind = 'production'`): the already-shipped production-pallet
+    // upsert in `pallet-ingest.ts` targets it by column list as its ON
+    // CONFLICT arbiter, which only works for a non-partial index/constraint.
+    const production = await pool.query<{ def: string }>(
+      `SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint
+        WHERE conname = 'pallets_device_pallet_uq'`,
+    );
+    expect(production.rows[0]?.def).toContain("NULLS NOT DISTINCT");
   });
 
   it("creates pallet_membership_rejections with a per-pallet unique sscc", async () => {

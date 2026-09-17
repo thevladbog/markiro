@@ -1,5 +1,5 @@
 {
-  "id": "bc10c22d-f3d6-466d-b5c3-ded7b9bbf1bb",
+  "id": "d01446cf-4d66-487e-99cc-31573f816713",
   "prevId": "b81747cf-3743-4489-bbf0-52427320f177",
   "version": "7",
   "dialect": "postgresql",
@@ -2416,40 +2416,6 @@
         }
       },
       "indexes": {
-        "pallets_device_pallet_uq": {
-          "name": "pallets_device_pallet_uq",
-          "columns": [
-            {
-              "expression": "tenant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "shift_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "terminal_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "device_pallet_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"pallets\".\"kind\" = 'production'",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "pallets_warehouse_device_pallet_uq": {
           "name": "pallets_warehouse_device_pallet_uq",
           "columns": [
@@ -2618,6 +2584,16 @@
           "columns": [
             "tenant_id",
             "sscc"
+          ]
+        },
+        "pallets_device_pallet_uq": {
+          "name": "pallets_device_pallet_uq",
+          "nullsNotDistinct": true,
+          "columns": [
+            "tenant_id",
+            "shift_id",
+            "terminal_id",
+            "device_pallet_id"
           ]
         }
       },

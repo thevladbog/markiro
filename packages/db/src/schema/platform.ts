@@ -1115,22 +1115,30 @@ export const pallets = pgTable(
     // `ON CONFLICT (tenant_id, shift_id, terminal_id, device_pallet_id)`
     // would then never fire for a null-terminal device — every batch would
     // insert a NEW pallet row instead of resolving to the one already open.
+    // Unlike `boxes`, this table is CREATED by the migration that carries the
+    // constraint, so it is written correctly in the CREATE TABLE rather than
+    // hand-patched afterwards.
     //
-    // Scoped to `kind = 'production'` (0162): a warehouse pallet always has
-    // `shift_id IS NULL`, so an unconditional NULLS-NOT-DISTINCT tuple would
-    // treat every warehouse pallet on the same device with the same
-    // `device_pallet_id` as colliding with THIS constraint instead of
-    // `pallets_warehouse_device_pallet_uq`. Drizzle's index builder cannot
-    // express `NULLS NOT DISTINCT` together with a partial `WHERE` (only the
-    // table-level `unique()` builder has `.nullsNotDistinct()`, and it has no
-    // `.where()`), so the migration hand-adds `NULLS NOT DISTINCT` to the
-    // generated `CREATE UNIQUE INDEX` — the same "beyond the DSL" pattern
-    // `pallet_exceptions_tenant_disaggregation_document_fk` already uses.
-    // `db:generate` does not model that clause, so it will not thrash it on a
-    // future diff as long as this index's columns/predicate stay unchanged.
-    uniqueIndex("pallets_device_pallet_uq")
+    // Kept unconditional (not scoped to `kind = 'production'`) because the
+    // production-pallet upsert in `pallet-ingest.ts` targets this exact
+    // arbiter with `onConflictDoNothing({ target: [tenantId, shiftId,
+    // terminalId, devicePalletId] })`; a partial index cannot be inferred as
+    // an arbiter, so scoping it would break that already-shipped upsert
+    // (Postgres 42P10). A warehouse pallet always has `shiftId = NULL` and
+    // `terminalId = deviceId`, so this constraint already makes
+    // `(tenantId, NULL, deviceId, devicePalletId)` unique across warehouse
+    // pallets under NULLS NOT DISTINCT — no scoping is needed for
+    // correctness; `pallets_warehouse_device_pallet_uq` below exists only so
+    // a duplicate warehouse pallet reports its own constraint name.
+    // `db:generate` does not model `NULLS NOT DISTINCT` on a plain
+    // `unique()` differently than any other unique constraint, so this
+    // needs no hand-patching.
+    unique("pallets_device_pallet_uq")
       .on(t.tenantId, t.shiftId, t.terminalId, t.devicePalletId)
-      .where(sql`${t.kind} = 'production'`),
+      .nullsNotDistinct(),
+    // Scoped to `kind = 'warehouse'`: identity for a warehouse pallet is
+    // `(tenant, device, device_pallet_id)`, independent of `pallets_device_pallet_uq`
+    // above. Task 4's warehouse upsert targets this index as its arbiter.
     uniqueIndex("pallets_warehouse_device_pallet_uq")
       .on(t.tenantId, t.deviceId, t.devicePalletId)
       .where(sql`${t.kind} = 'warehouse'`),
