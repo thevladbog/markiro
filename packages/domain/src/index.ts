@@ -324,6 +324,8 @@ export {
   sanitizeShiftExportFilenameSegment,
   SHIFT_EXPORT_FORMATS,
   ShiftExportDomainError,
+  shiftExportFormatRequiresPallets,
+  shiftExportSourceModeFor,
 } from "./shift-exports.js";
 export type {
   RenderShiftExportInput,

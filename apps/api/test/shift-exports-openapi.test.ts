@@ -108,6 +108,8 @@ describe("shift exports OpenAPI contract", () => {
         "shift_txt_pallets",
         "shift_csv_pallets",
         "shift_xml_gismt_aggregation_pallets",
+        "shift_txt_pallet_boxes",
+        "shift_xml_gismt_pallet_boxes",
       ]);
       expect(property(create, "formatVersion")).toMatchObject({ type: "integer", minimum: 1 });
       expect(property(create, "maxLines")).toMatchObject({
@@ -132,6 +134,8 @@ describe("shift exports OpenAPI contract", () => {
         "shift_txt_pallets",
         "shift_csv_pallets",
         "shift_xml_gismt_aggregation_pallets",
+        "shift_txt_pallet_boxes",
+        "shift_xml_gismt_pallet_boxes",
       ]);
 
       const exportFields = [
