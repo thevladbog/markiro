@@ -1372,7 +1372,7 @@ productionDate: string | null;
 
 The `list()` query adds a `leftJoin(schema.pallets, and(eq(schema.pallets.tenantId, schema.boxes.tenantId), eq(schema.pallets.id, schema.boxes.palletId)))` and selects `palletId: schema.boxes.palletId, palletSscc: schema.pallets.sscc, palletDisassembledAt: schema.pallets.disassembledAt, productionDate: sql<string | null>\`coalesce(${schema.shifts.productionDate}, ${schema.shifts.plannedDate})::text\``.
 
-`box-registry.dto.ts` `KioskBoxRegistryChange` upsert variant gains the five fields; `boxRegistryPageOpenApiSchema`'s upsert variant adds them to `required` and `properties` (`palletId` uuid nullable, `palletSscc` `^[0-9]{18}$` nullable, `palletActive` boolean, `closedAt` date-time, `productionDate` date nullable). Update `kiosk-box-registry-openapi.test.ts`'s expected `required` list for the upsert variant accordingly.
+**Corrected after the final branch review:** the kiosk PWA parser (`apps/kiosk/src/store/box-registry.ts`) has a strict seven-key allowlist, so `KioskBoxRegistryChange` and the kiosk route's OpenAPI schema must stay exactly as on `main`. Add the five fields only to a `StationBoxRegistryUpsert` served by `GET /station/box-registry` (`BoxRegistryService.list(..., { view: "station" })`), with its own OpenAPI schema (`palletId` uuid nullable, `palletSscc` `^[0-9]{18}$` nullable, `palletActive` boolean, `closedAt` date-time, `productionDate` date nullable); the kiosk view strips them through a pure mapper. `kiosk-box-registry-openapi.test.ts` expects seven keys for the kiosk route and twelve for the station route, and the kiosk e2e pins the exact key set.
 
 - [ ] **Step 4: Bump the registry on cabinet pallet disassembly**
 
