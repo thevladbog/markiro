@@ -1163,6 +1163,20 @@
       "when": 1789595301443,
       "tag": "0165_device_replacement_execution_preview",
       "breakpoints": true
+    },
+    {
+      "idx": 166,
+      "version": "7",
+      "when": 1789622574933,
+      "tag": "0166_device_replacement_capabilities",
+      "breakpoints": true
+    },
+    {
+      "idx": 167,
+      "version": "7",
+      "when": 1789624900021,
+      "tag": "0167_device_replacement_repair_schedule",
+      "breakpoints": true
     }
   ]
 }

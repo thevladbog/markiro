@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Test } from "@nestjs/testing";
 import { SwaggerModule, DocumentBuilder } from "@nestjs/swagger";
 import { DeviceReplacementReadinessController } from "../src/modules/device-licensing/device-replacement-readiness.controller";
@@ -27,6 +27,20 @@ it("publishes strict native replacement routes with station credentials and null
     expect(doc.paths["/station/device-replacement-intent"]?.get?.responses["200"]).toMatchObject({
       content: { "application/json": { schema: { nullable: true, additionalProperties: false } } },
     });
+    for (const path of [
+      "/station/device-replacement-intent",
+      "/station/device-replacement-intent/v1",
+    ])
+      expect(doc.paths[path]?.get?.parameters).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            name: "x-station-capabilities",
+            in: "header",
+            required: false,
+            description: expect.stringContaining("replacement-readiness-v1"),
+          }),
+        ]),
+      );
     for (const item of Object.values(doc.paths))
       expect((item.get ?? item.post)?.security).toEqual([{ stationApiKey: [] }]);
     expect(doc.paths["/station/device-replacement-readiness"]?.post?.requestBody).toMatchObject({
@@ -64,4 +78,25 @@ describe("native replacement identity", () => {
         } as never),
       ).toThrow();
   });
+});
+
+it("passes explicit or missing capability headers to the authenticated v1 observation", () => {
+  const currentIntentProjection = vi.fn();
+  const controller = new DeviceReplacementReadinessController({ currentIntentProjection } as never);
+  const req = {
+    authKind: "station",
+    tenantId: "tenant",
+    deviceId: "device",
+    deviceKind: "handheld",
+    deviceApiKeyId: "key",
+  };
+  for (const header of [undefined, "handheld-v1,replacement-readiness-v1"])
+    controller.currentIntentV1(req as never, {}, header);
+  expect(currentIntentProjection.mock.calls).toEqual(
+    [undefined, "handheld-v1,replacement-readiness-v1"].map((header) => [
+      { tenantId: "tenant", deviceId: "device", kind: "handheld", apiKeyId: "key" },
+      undefined,
+      header,
+    ]),
+  );
 });

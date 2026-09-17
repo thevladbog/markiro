@@ -1,6 +1,8 @@
 import { sql } from "drizzle-orm";
 import {
   bigint,
+  boolean,
+  primaryKey,
   check,
   index,
   foreignKey,
@@ -313,6 +315,9 @@ export const workingDeviceReplacementExecutions = pgTable(
     offlineAuthorityUntil: timestamp("offline_authority_until", { withTimezone: true }).notNull(),
     newWorkAllowedAt: timestamp("new_work_allowed_at", { withTimezone: true }).notNull(),
     startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    repairAttempts: integer("repair_attempts").notNull().default(0),
+    lastRepairAt: timestamp("last_repair_at", { withTimezone: true }),
+    nextRepairAt: timestamp("next_repair_at", { withTimezone: true }),
     credentialRevokedAt: timestamp("credential_revoked_at", { withTimezone: true }),
     executedAt: timestamp("executed_at", { withTimezone: true }),
     response: jsonb("response").$type<Record<string, unknown>>(),
@@ -333,6 +338,13 @@ export const workingDeviceReplacementExecutions = pgTable(
     ),
     unique("working_device_replacement_executions_target_uq").on(t.tenantId, t.targetDeviceId),
     index("working_device_replacement_executions_repair_idx").on(t.state, t.startedAt),
+    index("replacement_executions_due_repair_idx")
+      .on(sql`coalesce(${t.nextRepairAt}, ${t.startedAt})`, t.startedAt, t.id)
+      .where(sql`${t.state} = 'executing'`),
+    check(
+      "replacement_executions_repair_check",
+      sql`((${t.repairAttempts} = 0 and ${t.lastRepairAt} is null and ${t.nextRepairAt} is null) or (${t.repairAttempts} > 0 and ${t.lastRepairAt} is not null and ${t.nextRepairAt} is not null and isfinite(${t.lastRepairAt}) and isfinite(${t.nextRepairAt}) and ${t.lastRepairAt} >= ${t.startedAt} and ${t.nextRepairAt} >= ${t.lastRepairAt})) is true`,
+    ),
     foreignKey({
       name: "working_device_replacement_executions_source_fk",
       columns: [t.tenantId, t.deviceId],
@@ -479,6 +491,32 @@ export const workingDeviceReplacementExecutionPreviews = pgTable(
     check(
       "replacement_execution_previews_interval_check",
       sql`isfinite(${t.createdAt}) and isfinite(${t.expiresAt}) and isfinite(${t.newWorkAllowedAt}) and ${t.expiresAt} > ${t.createdAt} and ${t.expiresAt} <= ${t.createdAt} + interval '5 minutes'`,
+    ),
+  ],
+);
+
+/** Latest authenticated v1 capability observation for one installation epoch. */
+export const workingDeviceReplacementCapabilities = pgTable(
+  "working_device_replacement_capabilities",
+  {
+    tenantId: text("tenant_id").notNull(),
+    deviceId: uuid("device_id").notNull(),
+    credentialEpoch: integer("credential_epoch").notNull(),
+    supported: boolean("supported").notNull(),
+    observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.deviceId, t.credentialEpoch] }),
+    foreignKey({
+      name: "replacement_capabilities_tenant_device_fk",
+      columns: [t.tenantId, t.deviceId],
+      foreignColumns: [stationDevices.tenantId, stationDevices.id],
+    }),
+    check("replacement_capabilities_epoch_check", sql`${t.credentialEpoch} > 0`),
+    check(
+      "replacement_capabilities_interval_check",
+      sql`isfinite(${t.observedAt}) and isfinite(${t.expiresAt}) and ${t.expiresAt} > ${t.observedAt} and ${t.expiresAt} <= ${t.observedAt} + interval '5 minutes'`,
     ),
   ],
 );

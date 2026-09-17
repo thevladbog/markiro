@@ -1,3 +1,4 @@
+import { replacementDrainEligibility } from "./device-replacement-capability";
 import type { DeviceReplacementWorkBlockers } from "./device-replacement-readiness-work";
 import { schema } from "@markiro/db";
 import { and, desc, eq, max } from "drizzle-orm";
@@ -138,21 +139,27 @@ export async function replacementPreparationProjection(
     (intent.factsFingerprint !== currentFingerprint ||
       (configuration?.id ?? null) !== intent.grantConfigurationId ||
       (configuration?.sequence ?? null) !== intent.grantConfigurationSequence);
-  const eligibility = changed
-    ? { status: "blocked", reasons: ["facts_changed"] }
-    : stale
-      ? { status: "blocked", reasons: ["report_stale"] }
-      : currentWorkBlockers.length
-        ? {
-            status: "blocked",
-            reasons: [
-              ...new Set([
-                ...(report.eligibility.status === "blocked" ? report.eligibility.reasons : []),
-                ...currentWorkBlockers,
-              ]),
-            ],
-          }
-        : report.eligibility;
+  const drainEligibility = ["prepared", "draining", "ready"].includes(row.state)
+    ? await replacementDrainEligibility(tx, row.tenantId, row.deviceId)
+    : undefined;
+  const eligibility =
+    drainEligibility?.status === "blocked"
+      ? drainEligibility
+      : changed
+        ? { status: "blocked", reasons: ["facts_changed"] }
+        : stale
+          ? { status: "blocked", reasons: ["report_stale"] }
+          : currentWorkBlockers.length
+            ? {
+                status: "blocked",
+                reasons: [
+                  ...new Set([
+                    ...(report.eligibility.status === "blocked" ? report.eligibility.reasons : []),
+                    ...currentWorkBlockers,
+                  ]),
+                ],
+              }
+            : report.eligibility;
   return deviceReplacementPreparationSchema.parse({
     id: row.id,
     sourceDeviceId: row.deviceId,
@@ -161,6 +168,7 @@ export async function replacementPreparationProjection(
     preparedAt: row.preparedAt.toISOString(),
     cancelledAt: row.cancelledAt?.toISOString() ?? null,
     observation: row.observation,
+    ...(drainEligibility ? { drainEligibility } : {}),
     ...(execution
       ? {
           execution: {

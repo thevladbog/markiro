@@ -155,6 +155,7 @@ function executionFixtures(db: Db): ExecutionFixtures {
     };
   }
   async function drain(f: Fixture): Promise<Drain> {
+    await readiness.currentIntentProjection(f.identity, undefined, "replacement-readiness-v1");
     const request = { requestId: randomUUID(), expectedRevision: 1 };
     const receipt = await readiness.requestDrain(
       f.tenantId,
@@ -162,7 +163,7 @@ function executionFixtures(db: Db): ExecutionFixtures {
       request,
       f.actor,
     );
-    const intent = await readiness.currentIntent(f.identity);
+    const intent = await readiness.currentIntent(f.identity, "replacement-readiness-v1");
     if (!intent) throw new Error("intent missing");
     const body: DeviceReplacementReadinessRequest = {
       requestId: randomUUID(),

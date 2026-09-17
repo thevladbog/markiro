@@ -1,4 +1,9 @@
 import {
+  observeReplacementCapability,
+  replacementDrainEligibility,
+  supportsReplacementReadiness,
+} from "./device-replacement-capability";
+import {
   BadRequestException,
   ConflictException,
   Inject,
@@ -149,6 +154,8 @@ export class DeviceReplacementReadinessService {
       if (facts.device.revokedAt || !facts.device.apiKeyId)
         throw new ConflictException({ code: "device_replacement_source_ineligible" });
       const now = new Date();
+      if ((await replacementDrainEligibility(tx, tenantId, row.deviceId, now)).status === "blocked")
+        throw new ConflictException({ code: "client_upgrade_required" });
       const before = await replacementPreparationProjection(tx, row);
       await tx
         .update(intents)
@@ -235,10 +242,11 @@ export class DeviceReplacementReadinessService {
       return receipt;
     });
   }
-  async currentIntent(identity: GrantCredentialIdentity) {
+  async currentIntent(identity: GrantCredentialIdentity, capabilities?: string) {
     return this.transaction(identity.tenantId, async (tx) => {
       const owner = await lockCurrentGrantOwner(tx, identity, Date.now());
       if (!owner || owner.kind === "kiosk") throw new UnauthorizedException();
+      if (!supportsReplacementReadiness(capabilities)) return null;
       const [intent] = await tx
         .select()
         .from(intents)
@@ -290,12 +298,18 @@ export class DeviceReplacementReadinessService {
     };
   }
 
-  async currentIntentProjection(identity: GrantCredentialIdentity, knownIntentId?: string) {
+  async currentIntentProjection(
+    identity: GrantCredentialIdentity,
+    knownIntentId?: string,
+    capabilities?: string,
+  ) {
     if (knownIntentId && !platformUuidSchema.safeParse(knownIntentId).success)
       throw new BadRequestException();
     return this.transaction(identity.tenantId, async (tx) => {
       const owner = await lockCurrentGrantOwner(tx, identity, Date.now());
       if (!owner || owner.kind === "kiosk") throw new UnauthorizedException();
+      if (!(await observeReplacementCapability(tx, owner, capabilities, new Date())))
+        return deviceReplacementIntentProjectionSchema.parse({ version: 1, state: "none" });
       const owned = await tx
         .select()
         .from(intents)

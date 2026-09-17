@@ -222,7 +222,9 @@ current kiosk lifecycle/quota and applicable Handheld/inventory/pallet features.
 A reached retention choice is ongoing membership authority, not an equality check
 against mutable preview work counters. An intervening capacity restoration retires
 an old choice; a later reduction needs its own selection. Ambiguous historical
-terms cannot revive a choice. Prepared replacement denies new authority. A deleted Station key is rechecked
+terms cannot revive a choice. A prepared replacement preserves current authority; active drain, execution and
+transferred-source state deny new authority. A waiting replacement target retains
+its server-derived admission fence until `newWorkAllowedAt`. A deleted Station key is rechecked
 even before its separate durable revoke transaction updates the epoch. Issuance
 and its exact actor/revision audit commit atomically. Epoch changes invalidate
 current native authentication; immutable old grants and source history remain.

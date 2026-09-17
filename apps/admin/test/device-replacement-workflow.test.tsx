@@ -412,3 +412,21 @@ it("labels saved execution prerequisites as historical", async () => {
   expect(screen.getAllByText(/Handheld access is currently unavailable/)).toHaveLength(1);
   expect(screen.queryByText("Execution prerequisites in this preview")).toBeNull();
 });
+
+it("shows client upgrade before drain while preserving emergency replacement", async () => {
+  current = {
+    ...workflowPreparation("prepared"),
+    drainEligibility: { status: "blocked", reasons: ["client_upgrade_required"] },
+  };
+  setup();
+  const drain = await screen.findByRole("button", { name: "Request drain" });
+  expect(drain.hasAttribute("disabled")).toBe(true);
+  expect(
+    screen.getByText("Update the source client to measure every required channel."),
+  ).toBeTruthy();
+  expect(
+    screen.getByRole("button", { name: "Emergency replacement" }).hasAttribute("disabled"),
+  ).toBe(false);
+  await userEvent.click(drain);
+  expect(bodies).toHaveLength(0);
+});

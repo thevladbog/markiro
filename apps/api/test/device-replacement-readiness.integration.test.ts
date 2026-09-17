@@ -65,6 +65,11 @@ describe.skipIf(!process.env.DATABASE_URL)("replacement drain readiness", () => 
       .returning();
     if (!device) throw new Error("fixture");
     await db.transaction((tx) => transitionWorkingAssignment(tx, device));
+    await readiness.currentIntentProjection(
+      { tenantId, deviceId: device.id, kind, apiKeyId },
+      undefined,
+      "replacement-readiness-v1",
+    );
     const actor = { domain: "cabinet" as const, id };
     const preview = await service.preview(
       tenantId,
@@ -94,7 +99,7 @@ describe.skipIf(!process.env.DATABASE_URL)("replacement drain readiness", () => 
       request,
       f.actor,
     );
-    const intent = await readiness.currentIntent(f.identity);
+    const intent = await readiness.currentIntent(f.identity, "replacement-readiness-v1");
     if (!intent) throw new Error("intent missing");
     const body: DeviceReplacementReadinessRequest = {
       requestId: randomUUID(),
@@ -145,7 +150,7 @@ describe.skipIf(!process.env.DATABASE_URL)("replacement drain readiness", () => 
   });
   it("creates one durable drain receipt with exact actor audit and preserves prepared admission", async () => {
     const f = await fixture();
-    expect(await readiness.currentIntent(f.identity)).toBeNull();
+    expect(await readiness.currentIntent(f.identity, "replacement-readiness-v1")).toBeNull();
     const d = await drain(f);
     expect(d.receipt.preparation).toMatchObject({ state: "draining", revision: 2 });
     expect(
@@ -250,18 +255,24 @@ describe.skipIf(!process.env.DATABASE_URL)("replacement drain readiness", () => 
       .returning();
     if (!peer) throw new Error("peer fixture missing");
     const peerIdentity = { ...f.identity, deviceId: peer.id, apiKeyId: peerKeyId };
-    expect(await readiness.currentIntent(peerIdentity)).toBeNull();
+    expect(await readiness.currentIntent(peerIdentity, "replacement-readiness-v1")).toBeNull();
     await expect(readiness.report(peerIdentity, d.body)).rejects.toMatchObject({ status: 404 });
-    expect(await readiness.currentIntent(other.identity)).toBeNull();
+    expect(await readiness.currentIntent(other.identity, "replacement-readiness-v1")).toBeNull();
     await expect(readiness.report(other.identity, d.body)).rejects.toMatchObject({ status: 404 });
     await expect(
-      readiness.currentIntent({ ...f.identity, tenantId: other.tenantId }),
+      readiness.currentIntent(
+        { ...f.identity, tenantId: other.tenantId },
+        "replacement-readiness-v1",
+      ),
     ).rejects.toMatchObject({ status: 401 });
     await expect(
-      readiness.currentIntent({ ...f.identity, apiKeyId: other.identity.apiKeyId }),
+      readiness.currentIntent(
+        { ...f.identity, apiKeyId: other.identity.apiKeyId },
+        "replacement-readiness-v1",
+      ),
     ).rejects.toMatchObject({ status: 401 });
     await expect(
-      readiness.currentIntent({ ...f.identity, kind: "handheld" }),
+      readiness.currentIntent({ ...f.identity, kind: "handheld" }, "replacement-readiness-v1"),
     ).rejects.toMatchObject({ status: 401 });
     await expect(
       readiness.report(f.identity, { ...d.body, credentialEpoch: d.body.credentialEpoch + 1 }),
@@ -330,7 +341,7 @@ describe.skipIf(!process.env.DATABASE_URL)("replacement drain readiness", () => 
       { requestId: randomUUID(), expectedRevision: 3 },
       f.actor,
     );
-    expect(await readiness.currentIntent(f.identity)).toBeNull();
+    expect(await readiness.currentIntent(f.identity, "replacement-readiness-v1")).toBeNull();
     await db.transaction((tx) =>
       assertDeviceReplacementNewWorkAllowed(tx, f.tenantId, f.device.id),
     );
@@ -460,6 +471,7 @@ describe.skipIf(!process.env.DATABASE_URL)("replacement drain readiness", () => 
       reportSequence: 1,
     });
     expect(stale.eligibility).toMatchObject({ status: "blocked", reasons: ["report_stale"] });
+    await readiness.currentIntentProjection(f.identity, undefined, "replacement-readiness-v1");
     const refreshed = await readiness.requestDrain(
       f.tenantId,
       f.prepared.preparation.id,
@@ -571,7 +583,9 @@ describe.skipIf(!process.env.DATABASE_URL)("replacement drain readiness", () => 
         })
       ).eligibility,
     ).toEqual({ status: "eligible", reasons: [] });
-    expect((await readiness.currentIntent(f.identity))?.intentId).toBe(d.intent.intentId);
+    expect((await readiness.currentIntent(f.identity, "replacement-readiness-v1"))?.intentId).toBe(
+      d.intent.intentId,
+    );
     expect((await service.list(f.tenantId, f.actor)).items[0]?.preparation.state).toBe("ready");
     // New server evidence must invalidate ready even when the authority is unchanged.
     await db
@@ -651,7 +665,9 @@ describe.skipIf(!process.env.DATABASE_URL)("replacement drain readiness", () => 
       storageRevision: 2,
     });
     expect(caughtUp.eligibility).toEqual({ status: "eligible", reasons: [] });
-    expect((await readiness.currentIntent(f.identity))?.intentId).toBe(d.intent.intentId);
+    expect((await readiness.currentIntent(f.identity, "replacement-readiness-v1"))?.intentId).toBe(
+      d.intent.intentId,
+    );
     expect((await service.list(f.tenantId, f.actor)).items[0]?.preparation.state).toBe("ready");
     const rows = await db
       .select()
@@ -785,7 +801,9 @@ describe.skipIf(!process.env.DATABASE_URL)("replacement drain readiness", () => 
         ).eligibility,
       ).toEqual({ status: "eligible", reasons: [] });
       expect((await service.list(f.tenantId, f.actor)).items[0]?.preparation.state).toBe("ready");
-      expect((await readiness.currentIntent(f.identity))?.intentId).toBe(d.intent.intentId);
+      expect(
+        (await readiness.currentIntent(f.identity, "replacement-readiness-v1"))?.intentId,
+      ).toBe(d.intent.intentId);
     },
   );
   it.each([
@@ -956,7 +974,11 @@ describe.skipIf(!process.env.DATABASE_URL)("replacement drain readiness", () => 
       { requestId: randomUUID(), expectedRevision: d.receipt.preparation.revision },
       f.actor,
     );
-    const tombstone = await readiness.currentIntentProjection(f.identity, d.intent.intentId);
+    const tombstone = await readiness.currentIntentProjection(
+      f.identity,
+      d.intent.intentId,
+      "replacement-readiness-v1",
+    );
     expect(tombstone).toMatchObject({
       version: 1,
       state: "cancelled",
@@ -1010,7 +1032,13 @@ describe.skipIf(!process.env.DATABASE_URL)("replacement drain readiness", () => 
       readiness.report(f.identity, { ...d.body, requestId: request.requestId }),
     ).rejects.toMatchObject({ status: 409 });
 
-    expect(await readiness.currentIntentProjection(f.identity, d.intent.intentId)).toEqual({
+    expect(
+      await readiness.currentIntentProjection(
+        f.identity,
+        d.intent.intentId,
+        "replacement-readiness-v1",
+      ),
+    ).toEqual({
       version: 1,
       state: "none",
     });
@@ -1042,14 +1070,24 @@ describe.skipIf(!process.env.DATABASE_URL)("replacement drain readiness", () => 
       f.actor,
     );
     expect(
-      await readiness.currentIntentProjection(f.identity, first.intent.intentId),
+      await readiness.currentIntentProjection(
+        f.identity,
+        first.intent.intentId,
+        "replacement-readiness-v1",
+      ),
     ).toMatchObject({
       state: "cancelled",
       intentId: first.intent.intentId,
       preparationRevision: newer.preparation.revision + 1,
     });
     const other = await fixture();
-    expect(await readiness.currentIntentProjection(other.identity, first.intent.intentId)).toEqual({
+    expect(
+      await readiness.currentIntentProjection(
+        other.identity,
+        first.intent.intentId,
+        "replacement-readiness-v1",
+      ),
+    ).toEqual({
       version: 1,
       state: "none",
     });

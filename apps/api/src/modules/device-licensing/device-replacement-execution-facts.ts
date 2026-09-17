@@ -1,3 +1,4 @@
+import { replacementDrainEligibility } from "./device-replacement-capability";
 import { ConflictException } from "@nestjs/common";
 import { schema } from "@markiro/db";
 import { and, asc, desc, eq, gt, or } from "drizzle-orm";
@@ -157,6 +158,8 @@ export async function readReplacementExecutionFacts(
   const storageHighWater = intent ? await replacementStorageRevisionHighWater(tx, intent) : 0;
   const blockers = deviceReplacementServerWorkBlockers(facts.work, deviceId);
   if (mode === "normal") {
+    if ((await replacementDrainEligibility(tx, tenantId, deviceId, now)).status === "blocked")
+      throw new ConflictException({ code: "client_upgrade_required" });
     if (
       row.state !== "ready" ||
       device.revokedAt ||

@@ -268,6 +268,9 @@ export function DeviceReplacementWorkflow({
       {p.readiness && !report ? (
         <Alert tone="warn">{t("deviceReplacement.workflow.noMeasurements")}</Alert>
       ) : null}
+      {beforeExecution && p.drainEligibility?.status === "blocked" && !p.readiness ? (
+        <Alert tone="warn">{reasonCopy("client_upgrade_required")}</Alert>
+      ) : null}
       {p.readiness?.eligibility.status === "blocked" && (beforeExecution || recoveryReadiness) ? (
         <Alert tone="warn">
           {recoveryReadiness ? (
@@ -343,7 +346,7 @@ export function DeviceReplacementWorkflow({
           <>
             {p.state === "prepared" || renew ? (
               <Button
-                disabled={locked}
+                disabled={locked || p.drainEligibility?.status === "blocked"}
                 onClick={() => void perform({ kind: "drain", request: revisionRequest() })}
               >
                 {t("deviceReplacement.workflow.drain")}
@@ -351,7 +354,7 @@ export function DeviceReplacementWorkflow({
             ) : null}
             {p.state === "ready" && !dialog?.preview ? (
               <Button
-                disabled={locked}
+                disabled={locked || p.drainEligibility?.status === "blocked"}
                 onClick={() => void perform({ kind: "normalPreview", request: revisionRequest() })}
               >
                 {t("deviceReplacement.workflow.preview")}

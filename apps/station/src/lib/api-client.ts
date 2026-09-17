@@ -71,7 +71,7 @@ export interface StationClientOptions {
  * another turn.
  */
 export const REQUEST_TIMEOUT_MS = 30_000;
-export const STATION_CAPABILITIES = `subscription-state-v1,station-recovery-v1,replacement-boundary-v1,replacement-evidence-recovery-v1,${PRODUCT_LABEL_PROTOCOL},${VALIDATION_REPROCESSING_PROTOCOL}`;
+export const STATION_CAPABILITIES = `subscription-state-v1,station-recovery-v1,replacement-boundary-v1,replacement-readiness-v1,replacement-evidence-recovery-v1,${PRODUCT_LABEL_PROTOCOL},${VALIDATION_REPROCESSING_PROTOCOL}`;
 
 /**
  * Sends the one unauthenticated request an unpaired station is allowed to

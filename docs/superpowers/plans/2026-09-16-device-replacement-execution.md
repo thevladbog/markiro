@@ -40,7 +40,7 @@
 - Produces `deviceReplacementDrainRequestSchema`, `deviceReplacementExecutionPreviewRequestSchema`, `deviceReplacementExecuteRequestSchema`, `deviceReplacementEmergencyPreviewRequestSchema`, `deviceReplacementRecoveryCodeRequestSchema`, `deviceReplacementRecoveryCloseRequestSchema`, `deviceReplacementReadinessRequestSchema` and their response schemas.
 - Extends preparation state with `draining | ready | executing | completed` and adds `execution`, `readiness` and `recovery` projections.
 
-- [ ] **Step 1: Write the failing contract tests**
+- [x] **Step 1: Write the failing contract tests**
 
   Add strict-schema cases that reject unknown fields, duplicate active tasks, negative counters, mismatched source/intent IDs, client timestamps used as authority, emergency execution without a trimmed reason and recovery close without an expected revision. Assert a completed receipt includes stable `targetDeviceId`, `mode`, `newWorkAllowedAt` and `recoveryState`.
 
@@ -71,11 +71,11 @@
   ).toBe(false);
   ```
 
-- [ ] **Step 2: Add the admission regression before changing implementation**
+- [x] **Step 2: Add the admission regression before changing implementation**
 
   Prove a merely `prepared` project does not make `grantPoolDenial` return `not_entitled`; prove `draining` and a released source do. This test must fail against the current query that blocks every prepared row.
 
-- [ ] **Step 3: Run RED**
+- [x] **Step 3: Run RED**
 
   Run:
 
@@ -86,11 +86,11 @@
 
   Expected: schemas/fields are absent and prepared admission is denied incorrectly.
 
-- [ ] **Step 4: Implement contracts and correct the prepared-only denial**
+- [x] **Step 4: Implement contracts and correct the prepared-only denial**
 
   Use discriminated unions for readiness eligibility and execution mode. Keep response objects `.strict()`. Change `grantPoolDenial` to consult an active drain/execution projection, not the existence of a saved preparation.
 
-- [ ] **Step 5: Run GREEN and package gates**
+- [x] **Step 5: Run GREEN and package gates**
 
   ```bash
   corepack pnpm --filter @markiro/platform-contracts test
@@ -100,7 +100,7 @@
   corepack pnpm --filter @markiro/api exec vitest run test/device-replacement-admission.test.ts
   ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
   ```bash
   git add packages/platform-contracts apps/api/src/modules/device-grants/grant-admission.ts apps/api/test/device-replacement-admission.test.ts
@@ -125,7 +125,7 @@
 - Produces `workingDeviceReplacementReadinessIntents`, `workingDeviceReplacementReadinessReports` and `workingDeviceReplacementExecutions`.
 - Adds release reason `replacement_transferred`, pairing purpose `normal | replacement_recovery`, and the working-device event actions listed in the spec.
 
-- [ ] **Step 1: Write migration/schema RED tests**
+- [x] **Step 1: Write migration/schema RED tests**
 
   Assert tenant/source/preparation composite foreign keys, one active intent per preparation, one execution/target per preparation, unique tenant/request identities, positive epochs/sequences, bounded JSON objects and correlated execution/recovery fields. Seed legacy prepared/cancelled rows before migration and byte-compare them after migration.
 
@@ -137,7 +137,7 @@
   });
   ```
 
-- [ ] **Step 2: Generate and inspect forward migrations**
+- [x] **Step 2: Generate and inspect forward migrations**
 
   ```bash
   corepack pnpm --filter @markiro/db db:generate
@@ -145,11 +145,11 @@
 
   Review SQL for tenant keys, indexes used by `(tenant_id, device_id, received_at)`, finite timestamps, JSON validity and no table rewrite. Add large-table checks as `NOT VALID`; validate them in the following migration transaction.
 
-- [ ] **Step 3: Implement schema types and runtime ordering**
+- [x] **Step 3: Implement schema types and runtime ordering**
 
   Keep reports append-only. Store normalized counters as bounded JSON plus indexed identity columns; never store pairing plaintext or API keys. Ensure the runtime migrator includes both migration files in order.
 
-- [ ] **Step 4: Run DB tests and gates**
+- [x] **Step 4: Run DB tests and gates**
 
   ```bash
   corepack pnpm --filter @markiro/db exec vitest run test/device-replacements-schema.test.ts test/device-replacement-execution-migration.test.ts
@@ -161,7 +161,7 @@
 
   Report a database-backed skip explicitly if `DATABASE_URL` is absent.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
   ```bash
   git add packages/db
@@ -186,23 +186,23 @@
 - Produces `requestDrain(tenantId, preparationId, request, actor)`, `currentIntent(identity)` and `report(identity, body)`.
 - `report` is idempotent by tenant/device/epoch/request ID and returns the server eligibility projection.
 
-- [ ] **Step 1: Write RED integration and trust-boundary tests**
+- [x] **Step 1: Write RED integration and trust-boundary tests**
 
   Cover: prepared project creates one intent; another tenant/device cannot read it; changed retry conflicts; credential epoch mismatch is unauthorized; stale report remains stored but ineligible; a fresh all-zero report becomes ready; pending/unsupported/active-task/grant cases remain draining; later blocked report regresses ready to draining.
 
-- [ ] **Step 2: Implement drain with existing lock order**
+- [x] **Step 2: Implement drain with existing lock order**
 
   Acquire quantitative quota locks, timeline, station rows, licensing facts and entitlement revision in the same order as `lockGrantFacts`. Persist intent, increment preparation revision, write exact event/audit and return its receipt atomically.
 
-- [ ] **Step 3: Implement device routes and server evaluation**
+- [x] **Step 3: Implement device routes and server evaluation**
 
   Authenticate through station identity for both `station` and `handheld`. Derive tenant/device/credential epoch from the principal. Compare installed grants with issuance/configuration facts from the server; do not trust the client `notAfter` as the authority.
 
-- [ ] **Step 4: Update policies and inventories**
+- [x] **Step 4: Update policies and inventories**
 
   Add explicit licensing operations for drain/execute/recovery. Classify device readiness report as bounded recovery-capable device traffic, not general write access. Update subscription route inventory, platform route contracts and OpenAPI snapshots.
 
-- [ ] **Step 5: Run focused and API gates**
+- [x] **Step 5: Run focused and API gates**
 
   ```bash
   corepack pnpm --filter @markiro/api exec vitest run test/device-replacement-readiness.integration.test.ts test/subscription-route-inventory.test.ts test/platform-contract-openapi.test.ts
@@ -212,7 +212,7 @@
   corepack pnpm --filter @markiro/api build
   ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
   ```bash
   git add apps/api
@@ -237,23 +237,23 @@
 - Produces `prepareReplacementReadiness`, `drainReplacementReadiness` and `reportReplacementReadiness` using one durable SQLite intent/outbox row.
 - Normalizes Station queues into the shared readiness request without exporting raw journal data.
 
-- [ ] **Step 1: Write SQLite and restart RED tests**
+- [x] **Step 1: Write SQLite and restart RED tests**
 
   Seed scan, inventory, close, label, box, exception, conflict and unknown-print rows. Assert exact normalized counts. Simulate response loss and remount; the same request ID/body must be retried. Assert a new intent replaces only a fully acknowledged old intent.
 
-- [ ] **Step 2: Add authoritative SQLite DDL and parity schema**
+- [x] **Step 2: Add authoritative SQLite DDL and parity schema**
 
   Add a single current intent/outbox table with JSON validity, owner/credential hash, request ID and acknowledgement fields. Use a single-statement command/trigger where local grant retirement and intent persistence must be atomic.
 
-- [ ] **Step 3: Integrate drain into admission and UI**
+- [x] **Step 3: Integrate drain into admission and UI**
 
   Once the authenticated server returns an intent, persist it before sealing new-work grants. Block task entry locally, keep sync/close/recovery engines running, and show a persistent drain screen with live blocking counters. Restart must return to drain before floor entry.
 
-- [ ] **Step 4: Test grant and credential races**
+- [x] **Step 4: Test grant and credential races**
 
   Prove a delayed configuration response cannot reinstall new-work authority after drain; a replaced credential cannot acknowledge the old intent; report cancellation rethrows `AbortError`/cancellation instead of converting it to readiness failure.
 
-- [ ] **Step 5: Run Station gates**
+- [x] **Step 5: Run Station gates**
 
   ```bash
   corepack pnpm turbo run build --filter='@markiro/station^...'
@@ -264,7 +264,7 @@
   corepack pnpm --filter @markiro/station build
   ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
   ```bash
   git add packages/db/src/sqlite apps/station
@@ -287,19 +287,19 @@
 - Mirrors the Station contract and persists one intent/outbox per owner/credential generation.
 - Uses structured coroutine cancellation and the existing `DeviceRecovery` commit boundary.
 
-- [ ] **Step 1: Write RED Room/transport tests**
+- [x] **Step 1: Write RED Room/transport tests**
 
   Cover every normalized queue, active task, unknown print, restart, lost response, changed owner and epoch. Verify `CancellationException` is rethrown and identical pending intent retries preserve request identity.
 
-- [ ] **Step 2: Add Room migration and storage revision**
+- [x] **Step 2: Add Room migration and storage revision**
 
   Add the entity/DAO, bump the database version, test upgrade from every supported fixture version and keep existing recovery rows byte-equivalent.
 
-- [ ] **Step 3: Implement coordinator and admission UI**
+- [x] **Step 3: Implement coordinator and admission UI**
 
   Poll intent only while authenticated, persist before disabling new-work grants, allow existing sync workers to drain, and expose exact counters. The hub must not navigate into new work while drain is active.
 
-- [ ] **Step 4: Run Android checks**
+- [x] **Step 4: Run Android checks**
 
   ```bash
   cd apps/handheld
@@ -308,7 +308,7 @@
 
   Record that emulator/unit checks do not prove vendor scanner or physical TSD behavior.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
   ```bash
   git add apps/handheld
@@ -333,27 +333,27 @@
 - Produces `previewExecution`, `executeNormal`, `previewEmergency`, `executeEmergency` and `repairExecution`.
 - Returns a stable receipt; pairing code issuance remains a separate action on `targetDeviceId`.
 
-- [ ] **Step 1: Write RED happy-path and invariant tests**
+- [x] **Step 1: Write RED happy-path and invariant tests**
 
   Assert ready normal execution releases source with `replacement_transferred`, creates exactly one target/reserved assignment, preserves usage, creates no pairing plaintext, revokes source credential first and writes exact events/audit. Assert prepared/draining/stale projects cannot execute normally.
 
-- [ ] **Step 2: Write RED emergency-boundary tests**
+- [x] **Step 2: Write RED emergency-boundary tests**
 
   Create active device/task grants and assert `newWorkAllowedAt` equals the maximum authoritative boundary. When exact issuance is unavailable, assert the configured policy maximum is used. Verify paired target admission and grant issuance remain denied before the boundary and allowed after it.
 
-- [ ] **Step 3: Write failure-window tests**
+- [x] **Step 3: Write failure-window tests**
 
   Place barriers before/after credential revoke and before/after transfer commit. Simulate process death and ambiguous commit. `repairExecution` must converge on one target/assignment/receipt; it must never reactivate the old full credential or allocate another slot.
 
-- [ ] **Step 4: Implement the execution state machine**
+- [x] **Step 4: Implement the execution state machine**
 
   Persist `executing` before invoking auth credential deletion. Recheck the deletion result, then enter the ordered quota/timeline transaction. Create target with the existing Station/handheld kind validation and transition helpers. Increment decision revisions and preserve source rows.
 
-- [ ] **Step 5: Integrate admission and pairing**
+- [x] **Step 5: Integrate admission and pairing**
 
   Pairing before `newWorkAllowedAt` may publish the target credential but server and local grant admission expose waiting state. Normal pairing code issuance works on the new reserved target. Existing devices without a replacement remain unchanged.
 
-- [ ] **Step 6: Run concurrency and API gates**
+- [x] **Step 6: Run concurrency and API gates**
 
   ```bash
   corepack pnpm --filter @markiro/api exec vitest run test/device-replacement-execution.integration.test.ts test/device-replacement-execution-repair.test.ts test/station-pairing.test.ts
@@ -363,7 +363,7 @@
   corepack pnpm --filter @markiro/api build
   ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
   ```bash
   git add apps/api
@@ -389,23 +389,23 @@
 - Produces `issueReplacementRecoveryCode` and `closeReplacementRecovery`.
 - Recovery principal carries `purpose = replacement_evidence_recovery` and `executionId`; route access is an explicit allowlist.
 
-- [ ] **Step 1: Write deny-by-default RED tests**
+- [x] **Step 1: Write deny-by-default RED tests**
 
   Redeem a recovery code and attempt every station route class. Only identity/config needed for recovery, existing evidence upload/ack and replacement readiness may succeed. Task creation, pairing-code issuance, catalog mutation and offline grant issuance must return authorization denial.
 
-- [ ] **Step 2: Implement purpose-bound pairing**
+- [x] **Step 2: Implement purpose-bound pairing**
 
   Hash and expire the code through the existing mechanism. Require exact old owner identity supplied by sealed Station/handheld recovery state. Put purpose/execution binding in credential metadata; leave the source device revoked and assignment released.
 
-- [ ] **Step 3: Complete or close recovery**
+- [x] **Step 3: Complete or close recovery**
 
   A fresh zero report transitions `required → completed` and revokes the recovery credential. Administrative `evidence_unavailable` close requires reason, revision and audit and never fabricates a zero report.
 
-- [ ] **Step 4: Run focused cross-client checks**
+- [x] **Step 4: Run focused cross-client checks**
 
   Run API recovery integration, Station device-recovery and Android DeviceRecovery/RecoveryWire tests. Exercise wrong tenant, target device, reused code, expired code, changed generation and lost acknowledgement.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
   ```bash
   git add apps/api apps/station apps/handheld packages/db packages/platform-contracts
@@ -427,19 +427,19 @@
 - Consumes strict list/readiness/preview/execute/recovery receipts.
 - Preserves uncertain request identity in TanStack Query cache and never assumes a lost pairing-code response can be replayed.
 
-- [ ] **Step 1: Write RED UI tests for the full state matrix**
+- [x] **Step 1: Write RED UI tests for the full state matrix**
 
   Cover prepared, draining with each blocker, ready, executing, normal complete, emergency waiting boundary, recovery required/completed/unavailable, read-only platform user and authorization loss. Assert values as well as labels.
 
-- [ ] **Step 2: Write RED retry tests**
+- [x] **Step 2: Write RED retry tests**
 
   Lost drain/execute/emergency/recovery responses retain exact request IDs and locked intent. Domain stale/conflict clears only the invalid preview and refreshes facts. Pairing-code loss shows “issue a new code” and does not claim the old secret.
 
-- [ ] **Step 3: Implement workflow UI**
+- [x] **Step 3: Implement workflow UI**
 
   Replace the unconditional unavailable-reasons list with factual readiness rows and state-specific actions. Use shared `@markiro/ui` components/tokens, semantic fieldsets/dialogs, keyboard focus and non-color status copy. Emergency dialog requires reason and checkbox.
 
-- [ ] **Step 4: Run both web-app gates**
+- [x] **Step 4: Run both web-app gates**
 
   ```bash
   corepack pnpm --filter @markiro/admin exec vitest run test/device-replacement-api.test.ts test/device-replacement.test.tsx
@@ -454,11 +454,11 @@
   corepack pnpm --filter @markiro/saas-admin build
   ```
 
-- [ ] **Step 5: Browser-check RU/EN desktop and narrow widths**
+- [x] **Step 5: Browser-check RU/EN desktop and narrow widths**
 
   Exercise normal ready and emergency/recovery fixtures in both authenticated apps. Store only repository-approved snapshots; automated DOM tests remain separate from visual confirmation.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
   ```bash
   git add apps/admin apps/saas-admin
@@ -479,11 +479,11 @@
 
 - Documents rollout order, minimum client versions, repair commands/observability, emergency consequences and physical acceptance limits.
 
-- [ ] **Step 1: Add compatibility and deployment tests**
+- [x] **Step 1: Add compatibility and deployment tests**
 
   Verify old clients receive no unsupported drain intent, old preparation rows parse, inactive tenants are unchanged, migrations precede code reading new tables and API/web image mapping includes all changed services.
 
-- [ ] **Step 2: Run focused dependency-ordered gates**
+- [x] **Step 2: Run focused dependency-ordered gates**
 
   ```bash
   corepack pnpm --filter @markiro/platform-contracts build
@@ -497,7 +497,7 @@
 
   Record DB-backed skips, test counts and any infrastructure not exercised.
 
-- [ ] **Step 3: Run Android and Station final gates once after integration**
+- [x] **Step 3: Run Android and Station final gates once after integration**
 
   ```bash
   corepack pnpm --filter @markiro/station test
@@ -507,15 +507,17 @@
   cd apps/handheld && ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
   ```
 
-- [ ] **Step 4: Perform local browser acceptance**
+- [x] **Step 4: Perform local browser acceptance**
 
   Validate both admin surfaces and device drain screens. Do not claim Windows, scanner, printer or physical TSD acceptance without those devices.
 
-- [ ] **Step 5: Review the complete PR range**
+  Cabinet/SaaS fixture browser matrices passed. No dedicated native drain/recovery browser harness exists; Station DOM/SQLite and Android host tests are recorded separately, with native screen/hardware acceptance still NOT RUN.
+
+- [x] **Step 5: Review the complete PR range**
 
   Fetch `origin/main`, inspect `git log origin/main..HEAD` and `git diff --stat origin/main...HEAD`, run `git diff --check`, and confirm the branch contains no unrelated files, environment values, secrets or generated caches.
 
-- [ ] **Step 6: Commit documentation and evidence**
+- [x] **Step 6: Commit documentation and evidence**
 
   ```bash
   git add docs deploy/production
@@ -525,3 +527,19 @@
 - [ ] **Step 7: Push and open one PR only after explicit user authorization**
 
   PR description must distinguish automated, browser, production and physical checks and must not claim deployment before the protected workflows complete.
+
+## Execution evidence reconciliation — 2026-09-17
+
+Tasks 1–8 are implemented and independently reviewed through
+`f95af0efc6909a50a34058a3a4c41f8dd5162f41`. The checked steps record completed task
+work, not production or hardware acceptance. Review fixes are separate scoped
+commits after the initial task commits; the final branch range includes both.
+The local SDD reports retain each RED/GREEN run, later correction and gate limit;
+the reconciled ledger preserves the prior append history separately.
+
+Task 9 additionally closes two discovered protocol gaps: startup/periodic repair
+must actually call the durable repair owner with a persisted fair retry schedule, and old-client ordinary drain must
+require recent authenticated capability evidence before changing admission.
+These fixes use focused regression tests and the final integrated gates recorded
+in [the acceptance record](../../acceptance/device-replacement-execution.md).
+Task 9 Step 7 remains unauthorized: no push, PR, merge or deployment is included.

@@ -154,3 +154,36 @@ it("binds immutable execution previews to the exact tenant, source and preparati
     ),
   ).toBe(true);
 });
+
+describe("replacement client capability evidence", () => {
+  it("binds bounded server observations to tenant, device and credential epoch", () => {
+    const table = schema.workingDeviceReplacementCapabilities;
+    expect(getTableName(table)).toBe("working_device_replacement_capabilities");
+    expect(Object.keys(table)).toEqual(
+      expect.arrayContaining([
+        "tenantId",
+        "deviceId",
+        "credentialEpoch",
+        "supported",
+        "observedAt",
+        "expiresAt",
+      ]),
+    );
+    const config = getTableConfig(table);
+    expect(config.primaryKeys[0]?.columns.map((column) => column.name)).toEqual([
+      "tenant_id",
+      "device_id",
+      "credential_epoch",
+    ]);
+    expect(config.foreignKeys[0]?.reference().columns.map((column) => column.name)).toEqual([
+      "tenant_id",
+      "device_id",
+    ]);
+    expect(config.checks.map((check) => check.name)).toEqual(
+      expect.arrayContaining([
+        "replacement_capabilities_epoch_check",
+        "replacement_capabilities_interval_check",
+      ]),
+    );
+  });
+});

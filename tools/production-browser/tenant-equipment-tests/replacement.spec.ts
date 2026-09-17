@@ -5,18 +5,29 @@ import {
 import { expect, TENANT_ID, test } from "./fixture.js";
 for (const width of [1440, 390])
   for (const locale of ["ru", "en"] as const)
-    for (const mode of ["ready", "recovery", "recovery-blocked", "preview-blocked"] as const) {
+    for (const mode of [
+      "ready",
+      "recovery",
+      "recovery-blocked",
+      "preview-blocked",
+      "client-unsupported",
+    ] as const) {
       test(`replacement ${mode} ${locale} ${width}`, async ({ page, fixture }, info) => {
         fixture.replacementPreviewBlocked = mode === "preview-blocked";
         fixture.replacement =
           mode === "preview-blocked"
             ? null
-            : mode === "recovery-blocked"
-              ? blockedRecoveryPreparation()
-              : workflowPreparation(
-                  mode === "ready" ? "ready" : "completed",
-                  mode === "ready" ? "not_required" : "required",
-                );
+            : mode === "client-unsupported"
+              ? {
+                  ...workflowPreparation("prepared"),
+                  drainEligibility: { status: "blocked", reasons: ["client_upgrade_required"] },
+                }
+              : mode === "recovery-blocked"
+                ? blockedRecoveryPreparation()
+                : workflowPreparation(
+                    mode === "ready" ? "ready" : "completed",
+                    mode === "ready" ? "not_required" : "required",
+                  );
         await page.setViewportSize({ width, height: 1000 });
         await page.goto(`/tenants/${TENANT_ID}?tab=equipment`);
         await page.getByRole("button", { name: locale.toUpperCase(), exact: true }).click();
@@ -86,17 +97,42 @@ for (const width of [1440, 390])
           await expect(
             panel.getByRole("button", {
               name:
-                mode === "ready"
+                mode === "client-unsupported"
                   ? ru
-                    ? "Рассчитать исполнение"
-                    : "Preview execution"
-                  : ru
-                    ? "Выпустить код восстановления"
-                    : "Issue source recovery code",
+                    ? "Запросить завершение работы"
+                    : "Request drain"
+                  : mode === "ready"
+                    ? ru
+                      ? "Рассчитать исполнение"
+                      : "Preview execution"
+                    : ru
+                      ? "Выпустить код восстановления"
+                      : "Issue source recovery code",
             }),
           ).toBeVisible();
-          if (mode !== "ready")
+          if (mode === "recovery" || mode === "recovery-blocked")
             await expect(panel.locator('time[datetime="2026-09-18T12:30:00.000Z"]')).toBeVisible();
+          if (mode === "client-unsupported") {
+            await expect(
+              panel.getByRole("button", {
+                name: ru ? "Запросить завершение работы" : "Request drain",
+                exact: true,
+              }),
+            ).toBeDisabled();
+            await expect(
+              panel.getByRole("button", {
+                name: ru ? "Аварийная замена" : "Emergency replacement",
+                exact: true,
+              }),
+            ).toBeEnabled();
+            await expect(
+              panel.getByText(
+                ru
+                  ? "Обновите клиент старого устройства для проверки всех обязательных каналов."
+                  : "Update the source client to measure every required channel.",
+              ),
+            ).toBeVisible();
+          }
           if (mode === "recovery-blocked") {
             await expect(
               panel.getByText(

@@ -760,3 +760,56 @@ it("projects measured report metadata strictly without fabricating unsupported z
 it("publishes platform target pairing with strict one-time secret response", () => {
   expect(contracts.platformDeviceReplacementContracts).toHaveProperty("targetCode");
 });
+
+it.each(["prepared", "cancelled"] as const)(
+  "keeps legacy %s preparation bytes parseable without execution or readiness",
+  (state) => {
+    const legacy = {
+      id: preparationId,
+      sourceDeviceId,
+      revision: state === "prepared" ? 1 : 2,
+      state,
+      preparedAt: createdAt,
+      cancelledAt: state === "cancelled" ? expiresAt : null,
+      observation,
+    };
+    expect(JSON.stringify(contracts.deviceReplacementPreparationSchema.parse(legacy))).toBe(
+      JSON.stringify(legacy),
+    );
+    expect(contracts.deviceReplacementPreparationSchema.parse(legacy)).not.toHaveProperty(
+      "execution",
+    );
+    expect(contracts.deviceReplacementPreparationSchema.parse(legacy)).not.toHaveProperty(
+      "readiness",
+    );
+  },
+);
+
+it("strictly projects capability eligibility before any drain intent exists", () => {
+  const preparation = {
+    id: preparationId,
+    sourceDeviceId,
+    revision: 1,
+    state: "prepared",
+    preparedAt: createdAt,
+    cancelledAt: null,
+    observation,
+  };
+  for (const drainEligibility of [
+    { status: "eligible", reasons: [] },
+    { status: "blocked", reasons: ["client_upgrade_required"] },
+  ])
+    expect(
+      contracts.deviceReplacementPreparationSchema.parse({ ...preparation, drainEligibility }),
+    ).toMatchObject({ drainEligibility });
+  for (const drainEligibility of [
+    { status: "blocked", reasons: [] },
+    { status: "eligible", reasons: ["client_upgrade_required"] },
+    { status: "blocked", reasons: ["unknown"] },
+    { status: "eligible", reasons: [], credentialEpoch: 1 },
+  ])
+    expect(
+      contracts.deviceReplacementPreparationSchema.safeParse({ ...preparation, drainEligibility })
+        .success,
+    ).toBe(false);
+});

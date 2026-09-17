@@ -10,7 +10,13 @@ import {
 } from "../../../apps/admin/test/device-replacement-fixtures.js";
 for (const width of [1440, 390])
   for (const locale of ["ru", "en"] as const)
-    for (const mode of ["ready", "recovery", "recovery-blocked", "preview-blocked"] as const) {
+    for (const mode of [
+      "ready",
+      "recovery",
+      "recovery-blocked",
+      "preview-blocked",
+      "client-unsupported",
+    ] as const) {
       test(`replacement cabinet ${mode} ${locale} ${width}`, async ({ page }, info) => {
         const unexpected: string[] = [];
         await page.route(/^http:\/\/127\.0\.0\.1:\d+\/api\//, async (route) => {
@@ -30,12 +36,20 @@ for (const width of [1440, 390])
                   : [
                       {
                         preparation:
-                          mode === "recovery-blocked"
-                            ? blockedRecoveryPreparation()
-                            : workflowPreparation(
-                                mode === "ready" ? "ready" : "completed",
-                                mode === "ready" ? "not_required" : "required",
-                              ),
+                          mode === "client-unsupported"
+                            ? {
+                                ...workflowPreparation("prepared"),
+                                drainEligibility: {
+                                  status: "blocked",
+                                  reasons: ["client_upgrade_required"],
+                                },
+                              }
+                            : mode === "recovery-blocked"
+                              ? blockedRecoveryPreparation()
+                              : workflowPreparation(
+                                  mode === "ready" ? "ready" : "completed",
+                                  mode === "ready" ? "not_required" : "required",
+                                ),
                         needsReview: false,
                       },
                     ],
@@ -130,17 +144,42 @@ for (const width of [1440, 390])
           await expect(
             panel.getByRole("button", {
               name:
-                mode === "ready"
+                mode === "client-unsupported"
                   ? ru
-                    ? "Рассчитать исполнение"
-                    : "Preview execution"
-                  : ru
-                    ? "Выпустить код восстановления"
-                    : "Issue source recovery code",
+                    ? "Запросить завершение работы"
+                    : "Request drain"
+                  : mode === "ready"
+                    ? ru
+                      ? "Рассчитать исполнение"
+                      : "Preview execution"
+                    : ru
+                      ? "Выпустить код восстановления"
+                      : "Issue source recovery code",
             }),
           ).toBeVisible();
-          if (mode !== "ready")
+          if (mode === "recovery" || mode === "recovery-blocked")
             await expect(panel.locator('time[datetime="2026-09-18T12:30:00.000Z"]')).toBeVisible();
+          if (mode === "client-unsupported") {
+            await expect(
+              panel.getByRole("button", {
+                name: ru ? "Запросить завершение работы" : "Request drain",
+                exact: true,
+              }),
+            ).toBeDisabled();
+            await expect(
+              panel.getByRole("button", {
+                name: ru ? "Аварийная замена" : "Emergency replacement",
+                exact: true,
+              }),
+            ).toBeEnabled();
+            await expect(
+              panel.getByText(
+                ru
+                  ? "Обновите клиент старого устройства для проверки всех обязательных каналов."
+                  : "Update the source client to measure every required channel.",
+              ),
+            ).toBeVisible();
+          }
           if (mode === "recovery-blocked") {
             await expect(
               panel.getByText(

@@ -339,6 +339,33 @@ export class DeviceReplacementExecutionService {
     });
     return this.repairExecution(tenantId, preparationId);
   }
+  /** Preserve the execution lock order while rescheduling one observed failed pass. */
+  async deferRepair(row: Pick<Execution, "id" | "tenantId" | "repairAttempts" | "lastRepairAt">) {
+    return this.transaction(row.tenantId, async (tx) => {
+      const now = new Date();
+      const delay = Math.min(3_600_000, 30_000 * 2 ** Math.min(row.repairAttempts, 7));
+      // Only one replica advances this failure; a completed receipt stays immutable.
+      await tx
+        .update(executions)
+        .set({
+          repairAttempts: Math.min(2_147_483_647, row.repairAttempts + 1),
+          lastRepairAt: now,
+          nextRepairAt: new Date(now.getTime() + delay),
+          revision: sql`${executions.revision} + 1`,
+        })
+        .where(
+          and(
+            eq(executions.tenantId, row.tenantId),
+            eq(executions.id, row.id),
+            eq(executions.state, "executing"),
+            eq(executions.repairAttempts, row.repairAttempts),
+            row.lastRepairAt
+              ? eq(executions.lastRepairAt, row.lastRepairAt)
+              : isNull(executions.lastRepairAt),
+          ),
+        );
+    });
+  }
   /** Continue only the durable, already-authorized cutover; never allocate a new intent. */
   async repairExecution(tenantId: string, preparationId: string) {
     validateId(preparationId);

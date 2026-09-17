@@ -745,6 +745,11 @@ describe.skipIf(!ready)("replacement productive route matrix", () => {
       { domain: "cabinet", id: f.actor.id },
     );
     await shifts.openShift(f.tenantId, shift.id, { domain: "cabinet", id: f.actor.id });
+    await readiness.currentIntentProjection(
+      { ...f.identity, apiKeyId: key.id },
+      undefined,
+      "replacement-readiness-v1",
+    );
     await readiness.requestDrain(
       f.tenantId,
       f.prepared.preparation.id,
@@ -893,6 +898,10 @@ describe.skipIf(!ready)("replacement productive route matrix", () => {
       { requestId: p.requestId, previewId: p.id },
       f.actor,
     );
+    await f
+      .get("/station/device-replacement-intent/v1")
+      .set("x-station-capabilities", "replacement-readiness-v1")
+      .expect(200);
     await readiness.requestDrain(
       f.tenantId,
       prepared.preparation.id,
@@ -991,6 +1000,10 @@ describe.skipIf(!ready)("replacement productive route matrix", () => {
     };
     // Pause the real HTTP request at its transaction lock, after the initial
     // quarantine preflight has released its device lock but before insertion.
+    await f
+      .get("/station/device-replacement-intent/v1")
+      .set("x-station-capabilities", "replacement-readiness-v1")
+      .expect(200);
     const holder = await connection.pool.connect();
     await holder.query("BEGIN");
     await holder.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
@@ -1164,6 +1177,10 @@ describe.skipIf(!ready)("replacement productive route matrix", () => {
       { requestId: preview.requestId, previewId: preview.id },
       f.actor,
     );
+    await f
+      .get("/station/device-replacement-intent/v1")
+      .set("x-station-capabilities", "replacement-readiness-v1")
+      .expect(200);
     await readiness.requestDrain(
       f.tenantId,
       prepared.preparation.id,
@@ -1340,6 +1357,10 @@ describe.skipIf(!ready)("replacement productive route matrix", () => {
       { requestId: preview.requestId, previewId: preview.id },
       f.actor,
     );
+    await f
+      .get("/station/device-replacement-intent/v1")
+      .set("x-station-capabilities", "replacement-readiness-v1")
+      .expect(200);
     await readiness.requestDrain(
       f.tenantId,
       prepared.preparation.id,
@@ -1433,6 +1454,10 @@ describe.skipIf(!ready)("replacement productive route matrix", () => {
       },
       f.actor,
     );
+    await f
+      .get("/station/device-replacement-intent/v1")
+      .set("x-station-capabilities", "replacement-readiness-v1")
+      .expect(200);
     await readiness.requestDrain(
       f.tenantId,
       prepared.preparation.id,

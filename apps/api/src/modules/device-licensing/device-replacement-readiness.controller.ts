@@ -1,5 +1,6 @@
 import {
   Body,
+  Headers,
   Controller,
   Get,
   HttpCode,
@@ -9,7 +10,7 @@ import {
   UnauthorizedException,
   UseGuards,
 } from "@nestjs/common";
-import { ApiOperation, ApiTags } from "@nestjs/swagger";
+import { ApiHeader, ApiOperation, ApiTags } from "@nestjs/swagger";
 import {
   stationDeviceReplacementContracts,
   type DeviceReplacementReadinessRequest,
@@ -55,8 +56,17 @@ export class DeviceReplacementReadinessController {
   @ApiOperation({ summary: "Read the authenticated device replacement drain intent" })
   @ApiZodResponse({ status: 200, schema: stationDeviceReplacementContracts.currentIntent.response })
   @ApiHttpErrors(401, 403, 429)
-  currentIntent(@Req() req: RequestWithTenant) {
-    return this.readiness.currentIntent(identity(req));
+  @ApiHeader({
+    name: "x-station-capabilities",
+    required: false,
+    description:
+      "Includes replacement-readiness-v1 to receive a supported drain intent; otherwise returns null.",
+  })
+  currentIntent(
+    @Req() req: RequestWithTenant,
+    @Headers("x-station-capabilities") capabilities?: string,
+  ) {
+    return this.readiness.currentIntent(identity(req), capabilities);
   }
 
   @Get("device-replacement-intent/v1")
@@ -67,12 +77,19 @@ export class DeviceReplacementReadinessController {
   })
   @ApiZodQuery(stationDeviceReplacementContracts.currentIntentV1.query)
   @ApiHttpErrors(400, 401, 403, 429)
+  @ApiHeader({
+    name: "x-station-capabilities",
+    required: false,
+    description:
+      "Explicit replacement-readiness-v1 records capability evidence for this authenticated tenant/device/current credential epoch for five minutes. Missing capability replaces previous support and returns none.",
+  })
   currentIntentV1(
     @Req() req: RequestWithTenant,
     @Query(new ZodValidationPipe(stationDeviceReplacementContracts.currentIntentV1.query))
     query: { knownIntentId?: string },
+    @Headers("x-station-capabilities") capabilities?: string,
   ) {
-    return this.readiness.currentIntentProjection(identity(req), query.knownIntentId);
+    return this.readiness.currentIntentProjection(identity(req), query.knownIntentId, capabilities);
   }
   @Post("device-replacement-intent/v1/acknowledge")
   @AllowSubscriptionRecovery("replacement_readiness")

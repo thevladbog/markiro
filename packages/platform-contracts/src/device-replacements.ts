@@ -265,6 +265,17 @@ export const deviceReplacementPreparationSchema = z
     observation: deviceReplacementObservationSchema,
     execution: deviceReplacementExecutionProjectionSchema.nullable().optional(),
     readiness: deviceReplacementReadinessProjectionSchema.nullable().optional(),
+    drainEligibility: z
+      .discriminatedUnion("status", [
+        z.object({ status: z.literal("eligible"), reasons: z.tuple([]) }).strict(),
+        z
+          .object({
+            status: z.literal("blocked"),
+            reasons: z.tuple([z.literal("client_upgrade_required")]),
+          })
+          .strict(),
+      ])
+      .optional(),
     recovery: deviceReplacementRecoveryProjectionSchema.nullable().optional(),
   })
   .strict()
