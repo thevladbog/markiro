@@ -195,7 +195,7 @@ export const bulkEmployeePickupPolicyResponseOpenApiSchema: SchemaObject = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["employeeId", "limitMode", "dayLimit", "canWriteoff"],
+        required: ["employeeId", "limitMode", "dayLimit", "canWriteoff", "canBuildPallets"],
         properties: {
           employeeId: uuidSchema,
           ...employeePickupPolicyOpenApiSchema.properties,
