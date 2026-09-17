@@ -34,7 +34,7 @@ export interface ShiftExportArtifactDto {
 
 export interface ShiftExportDto {
   id: string;
-  shiftId: string;
+  shiftId: string | null;
   formatId: ShiftExportFormatId;
   formatVersion: number;
   maxLines: number | null;
@@ -151,7 +151,7 @@ export const shiftExportOpenApiSchema = {
   ],
   properties: {
     id: { type: "string", format: "uuid" },
-    shiftId: { type: "string", format: "uuid" },
+    shiftId: { type: "string", format: "uuid", nullable: true },
     formatId: shiftExportFormatOpenApiSchema.properties.id,
     formatVersion: { type: "integer", minimum: 1 },
     maxLines: { type: "integer", nullable: true, minimum: 2, maximum: 1_000_000 },

@@ -244,7 +244,8 @@ export interface PalletCardDto {
   id: string;
   sscc: string | null;
   status: "open" | "closed" | "disassembled";
-  shiftId: string;
+  /** Null for a warehouse pallet, which is not tied to any shift. */
+  shiftId: string | null;
   /** Saved human-readable shift number, e.g. `AUG26-003/S`. */
   shiftNumber: string | null;
   productId: string | null;
@@ -658,7 +659,7 @@ export const palletCardOpenApiSchema: SchemaObject = {
     id: uuidSchema,
     sscc: { ...ssccSchema, nullable: true },
     status: { type: "string", enum: ["open", "closed", "disassembled"] },
-    shiftId: uuidSchema,
+    shiftId: { ...uuidSchema, nullable: true },
     shiftNumber: { type: "string", nullable: true },
     productId: { ...uuidSchema, nullable: true },
     productName: { type: "string", nullable: true },

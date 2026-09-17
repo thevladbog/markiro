@@ -145,6 +145,11 @@ export async function upsertPallets(
   // batch's own shift/pallet ids) and this loop keeps only the exact triples.
   const byKey = new Map<PalletKey, string>();
   for (const row of rows) {
+    // `inArray(schema.pallets.shiftId, ...)` above only ever matches the
+    // batch's own non-null shift ids, so a null `shiftId` here is
+    // unreachable -- this is a production-pallet lookup; warehouse pallets
+    // (nullable shiftId) are upserted through a different path.
+    if (row.shiftId === null) continue;
     byKey.set(palletKey(row.shiftId, row.terminalId, row.devicePalletId), row.id);
   }
   return byKey;

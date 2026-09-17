@@ -71,8 +71,14 @@ export class ShiftExportRunnerService {
     let publicationAttempted = false;
 
     try {
+      const shiftId = claimed.shiftId;
+      // A pallet export cannot exist yet -- nothing inserts pallet_id on shift_exports --
+      // so a claimed row with a null shift_id is unreachable today. Narrow explicitly so
+      // this stays a loud failure rather than a silent `string | null` -> `string` cast
+      // once a later task starts inserting pallet exports.
+      if (shiftId === null) throw new Error("Shift export row has no shift");
       const format = getShiftExportFormat(claimed.formatId, claimed.formatVersion);
-      const snapshot = await this.source.load(claimed.tenantId, claimed.shiftId, format);
+      const snapshot = await this.source.load(claimed.tenantId, shiftId, format);
 
       const snapshotUpdates = await this.db
         .update(schema.shiftExports)

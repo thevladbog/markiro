@@ -361,7 +361,7 @@ export class ShiftExportSourceService {
     shiftId: string,
     eligibleBoxes: readonly EligibleBox[],
   ): Promise<{ source: ShiftExportSource; openPalletSuppressedBoxCount: number }> {
-    const palletRows: PalletRow[] = await tx
+    const rawPalletRows = await tx
       .select({
         tenantId: schema.pallets.tenantId,
         shiftId: schema.pallets.shiftId,
@@ -371,6 +371,14 @@ export class ShiftExportSourceService {
       })
       .from(schema.pallets)
       .where(and(eq(schema.pallets.tenantId, tenantId), eq(schema.pallets.shiftId, shiftId)));
+    // `eq(schema.pallets.shiftId, shiftId)` above only matches rows whose
+    // (non-null) shiftId equals the caller's own `shiftId` param, so a null
+    // here is unreachable -- this source only ever renders production
+    // pallets for one shift's export.
+    const palletRows: PalletRow[] = rawPalletRows.map((row) => {
+      if (row.shiftId === null) throw new Error("Pallet row for a shift export has no shift");
+      return { ...row, shiftId: row.shiftId };
+    });
     const tenantPalletRows = palletRows.filter(
       (row) => row.tenantId === tenantId && row.shiftId === shiftId,
     );
