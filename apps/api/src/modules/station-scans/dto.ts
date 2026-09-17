@@ -10,6 +10,7 @@ import {
   MAX_BOX_CLOSURES_PER_SYNC_BATCH,
   MAX_KM_UTF8_BYTES,
   MAX_PALLET_CLOSURES_PER_SYNC_BATCH,
+  MAX_PALLET_MEMBERSHIPS_PER_SYNC_BATCH,
   MAX_PRODUCT_LABEL_EVENTS,
   MAX_SYNC_BATCH_ID_CHARS,
   productLabelEventSchema,
@@ -135,13 +136,17 @@ const boxClosureSchema = z
 const palletClosureSchema = z
   .object({
     palletId: z.string().min(1).max(64),
-    shiftId: z.string().uuid().toLowerCase(),
+    // Null only for a warehouse pallet; a production pallet keeps its shift.
+    shiftId: z.string().uuid().toLowerCase().nullable(),
     terminalId: z.string().nullable(),
     sscc: z.string().regex(/^\d{18}$/),
     closedAt: z.string().datetime(),
     operatorId: z.string().uuid().toLowerCase().nullable(),
     printVerifiedAt: z.string().datetime().nullable().default(null),
     printSkippedAt: z.string().datetime().nullable().default(null),
+    // Defaulted for every device that predates warehouse pallets.
+    kind: z.enum(["production", "warehouse"]).default("production"),
+    productId: z.string().uuid().toLowerCase().nullable().default(null),
   })
   .superRefine((closure, ctx) => {
     if (closure.printVerifiedAt !== null && closure.printSkippedAt !== null) {
@@ -151,7 +156,31 @@ const palletClosureSchema = z
         message: "print verification outcomes are mutually exclusive",
       });
     }
+    if (closure.kind === "production" && closure.shiftId === null) {
+      ctx.addIssue({ code: "custom", path: ["shiftId"], message: "a production pallet needs a shiftId" });
+    }
+    if (closure.kind === "warehouse") {
+      if (closure.shiftId !== null) {
+        ctx.addIssue({ code: "custom", path: ["shiftId"], message: "a warehouse pallet has no shiftId" });
+      }
+      if (closure.productId === null) {
+        ctx.addIssue({ code: "custom", path: ["productId"], message: "a warehouse pallet needs a productId" });
+      }
+    }
   });
+
+/**
+ * One closed box scanned onto a warehouse pallet (spec §2.2). No terminal
+ * and no shift: the pallet is the authenticated device's, and the box is
+ * looked up by its SSCC across the whole tenant.
+ */
+export const palletMembershipSchema = z.object({
+  palletId: z.string().min(1).max(64),
+  boxSscc: z.string().regex(/^\d{18}$/),
+  addedAt: z.string().datetime(),
+  operatorId: z.string().uuid().toLowerCase().nullable(),
+});
+export type PalletMembershipDto = z.infer<typeof palletMembershipSchema>;
 
 /**
  * An operator exception against a closed pallet. Only two kinds exist:
@@ -160,7 +189,8 @@ const palletClosureSchema = z
 const palletExceptionSchema = z.object({
   kind: z.enum(["disassemble", "reprint"]),
   palletId: z.string().min(1).max(64),
-  shiftId: z.string().uuid().toLowerCase(),
+  // Null for a warehouse pallet exception: a warehouse pallet has no shift.
+  shiftId: z.string().uuid().toLowerCase().nullable(),
   terminalId: z.string().nullable(),
   operatorId: z.string().uuid().toLowerCase().nullable(),
   // Both kinds require one, exactly as box disassemble and reprint do.
@@ -236,7 +266,7 @@ export const syncBatchSchema = z.object({
     // it matters.
     .refine(
       (pallets) =>
-        new Set(pallets.map((pallet) => `${pallet.shiftId}|${pallet.palletId}`)).size ===
+        new Set(pallets.map((pallet) => `${pallet.shiftId ?? "warehouse"}|${pallet.palletId}`)).size ===
         pallets.length,
       "Pallet closures must name each pallet at most once in a batch",
     )
@@ -246,6 +276,18 @@ export const syncBatchSchema = z.object({
   palletExceptions: z
     .array(palletExceptionSchema)
     .max(MAX_PALLET_CLOSURES_PER_SYNC_BATCH)
+    .default([]),
+  // Closed boxes scanned onto warehouse pallets by this batch. Independent
+  // of `pallets`/`boxes`: a warehouse pallet is closed separately from the
+  // box membership records that name what sits on it.
+  palletMemberships: z
+    .array(palletMembershipSchema)
+    .max(MAX_PALLET_MEMBERSHIPS_PER_SYNC_BATCH)
+    .refine(
+      (memberships) =>
+        new Set(memberships.map((m) => `${m.palletId}|${m.boxSscc}`)).size === memberships.length,
+      "Pallet memberships must name each (pallet, box) at most once in a batch",
+    )
     .default([]),
   // Operator exceptions carried by this batch (undo/clear/disassemble/
   // reprint) -- see box-exceptions.ts. Independent of `items`/`boxes` for
@@ -370,10 +412,36 @@ export interface DeniedStationRecordDto {
    * also written to the quarantine table, and a kind missing from that CHECK
    * raises 23514 and 500s the whole batch instead.
    */
-  recordKind: "item" | "box" | "exception" | "product_label_event" | "pallet" | "pallet_exception";
+  recordKind:
+    | "item"
+    | "box"
+    | "exception"
+    | "product_label_event"
+    | "pallet"
+    | "pallet_exception"
+    | "pallet_membership";
   recordIndex: number;
-  shiftId: string;
+  /** Null for a warehouse record, which belongs to no shift. */
+  shiftId: string | null;
   code: ProductLabelRejectionCode | "legacy_unbound_replay";
+}
+
+export type PalletMembershipStatus =
+  | "accepted"
+  | "replayed"
+  | "already_on_pallet"
+  | "not_found"
+  | "not_closed"
+  | "disassembled"
+  | "product_mismatch"
+  | "subscription_read_only";
+
+export interface PalletMembershipOutcomeDto {
+  palletId: string;
+  boxSscc: string;
+  status: PalletMembershipStatus;
+  /** AI-00-prefixed SSCC of the pallet that already holds the box; only with `already_on_pallet`. */
+  winningPalletSscc?: string;
 }
 
 export interface SyncBatchResponseDto {
@@ -389,6 +457,8 @@ export interface SyncBatchResponseDto {
   /** Present only when the client negotiated station-recovery-v1. */
   denied?: DeniedStationRecordDto[];
   productLabelReceipt?: ProductLabelReceipt;
+  /** Present when the batch carried `palletMemberships`; one entry per record, same order. */
+  memberships?: PalletMembershipOutcomeDto[];
 }
 
 const codeHashOpenApiSchema = { type: "string", pattern: "^[0-9a-f]{64}$" } as const;
@@ -438,10 +508,18 @@ const deniedStationRecordOpenApiSchema: SchemaObject = {
   properties: {
     recordKind: {
       type: "string",
-      enum: ["item", "box", "exception", "product_label_event", "pallet", "pallet_exception"],
+      enum: [
+        "item",
+        "box",
+        "exception",
+        "product_label_event",
+        "pallet",
+        "pallet_exception",
+        "pallet_membership",
+      ],
     },
     recordIndex: { type: "integer", minimum: 0 },
-    shiftId: { type: "string", format: "uuid" },
+    shiftId: { type: "string", format: "uuid", nullable: true },
     code: {
       type: "string",
       enum: [
@@ -454,6 +532,30 @@ const deniedStationRecordOpenApiSchema: SchemaObject = {
         "sequence_gap",
       ],
     },
+  },
+};
+
+const palletMembershipOutcomeOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["palletId", "boxSscc", "status"],
+  properties: {
+    palletId: { type: "string" },
+    boxSscc: { type: "string", pattern: "^[0-9]{18}$" },
+    status: {
+      type: "string",
+      enum: [
+        "accepted",
+        "replayed",
+        "already_on_pallet",
+        "not_found",
+        "not_closed",
+        "disassembled",
+        "product_mismatch",
+        "subscription_read_only",
+      ],
+    },
+    winningPalletSscc: { type: "string", pattern: "^00[0-9]{18}$" },
   },
 };
 
@@ -478,6 +580,11 @@ export const syncBatchResponseOpenApiSchema: SchemaObject = {
       type: "array",
       items: deniedStationRecordOpenApiSchema,
       description: "Present only when the client negotiated station-recovery-v1.",
+    },
+    memberships: {
+      type: "array",
+      items: palletMembershipOutcomeOpenApiSchema,
+      description: "Present when the batch carried palletMemberships; one entry per record, same order.",
     },
   },
 };

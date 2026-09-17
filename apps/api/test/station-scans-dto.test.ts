@@ -1,4 +1,9 @@
-import { canonicalizeKm, kmHash, MAX_PALLET_CLOSURES_PER_SYNC_BATCH } from "@markiro/domain";
+import {
+  canonicalizeKm,
+  kmHash,
+  MAX_PALLET_CLOSURES_PER_SYNC_BATCH,
+  MAX_PALLET_MEMBERSHIPS_PER_SYNC_BATCH,
+} from "@markiro/domain";
 import { describe, expect, it } from "vitest";
 import { syncBatchSchema, syncBatchResponseOpenApiSchema } from "../src/modules/station-scans/dto";
 import { zodApiSchema } from "../src/lib/openapi";
@@ -246,5 +251,77 @@ describe("syncBatchSchema marking-code contract", () => {
         boxes: [closure({ sscc: "12345678901234567X" })],
       }).success,
     ).toBe(false);
+  });
+});
+
+describe("warehouse pallet records", () => {
+  const membership = {
+    palletId: "w1",
+    boxSscc: "003460068200000017",
+    addedAt: "2026-09-17T08:00:00.000Z",
+    operatorId: null,
+  };
+
+  it("accepts palletMemberships and defaults them to empty", () => {
+    expect(syncBatchSchema.parse({ batchId: "b", items: [] }).palletMemberships).toEqual([]);
+    const parsed = syncBatchSchema.parse({ batchId: "b", items: [], palletMemberships: [membership] });
+    expect(parsed.palletMemberships).toEqual([membership]);
+  });
+
+  it("caps palletMemberships at the shared limit", () => {
+    const tooMany = Array.from({ length: MAX_PALLET_MEMBERSHIPS_PER_SYNC_BATCH + 1 }, (_, i) => ({
+      ...membership,
+      boxSscc: `0034600682${String(i).padStart(7, "0")}1`,
+    }));
+    expect(() => syncBatchSchema.parse({ batchId: "b", items: [], palletMemberships: tooMany })).toThrow();
+  });
+
+  it("rejects a membership naming one box twice for one pallet", () => {
+    expect(() =>
+      syncBatchSchema.parse({ batchId: "b", items: [], palletMemberships: [membership, membership] }),
+    ).toThrow(/at most once/);
+  });
+
+  it("defaults a pallet closure to kind production and requires a shift there", () => {
+    const closure = {
+      palletId: "p1",
+      shiftId: "5f1a5cf0-4f8a-4e7a-9b48-3d3f7a0c1d11",
+      terminalId: null,
+      sscc: "134600682000000017",
+      closedAt: "2026-09-17T08:00:00.000Z",
+      operatorId: null,
+    };
+    const parsed = syncBatchSchema.parse({ batchId: "b", items: [], pallets: [closure] });
+    expect(parsed.pallets[0]).toMatchObject({ kind: "production", productId: null });
+    expect(() =>
+      syncBatchSchema.parse({ batchId: "b", items: [], pallets: [{ ...closure, shiftId: null }] }),
+    ).toThrow(/shiftId/);
+  });
+
+  it("accepts a warehouse closure with no shift and a product, and rejects one with a shift", () => {
+    const closure = {
+      palletId: "w1",
+      kind: "warehouse",
+      shiftId: null,
+      productId: "5f1a5cf0-4f8a-4e7a-9b48-3d3f7a0c1d11",
+      terminalId: null,
+      sscc: "134600682000000017",
+      closedAt: "2026-09-17T08:00:00.000Z",
+      operatorId: null,
+    };
+    expect(syncBatchSchema.parse({ batchId: "b", items: [], pallets: [closure] }).pallets[0]).toMatchObject({
+      kind: "warehouse",
+      shiftId: null,
+    });
+    expect(() =>
+      syncBatchSchema.parse({
+        batchId: "b",
+        items: [],
+        pallets: [{ ...closure, shiftId: "5f1a5cf0-4f8a-4e7a-9b48-3d3f7a0c1d11" }],
+      }),
+    ).toThrow(/shiftId/);
+    expect(() =>
+      syncBatchSchema.parse({ batchId: "b", items: [], pallets: [{ ...closure, productId: null }] }),
+    ).toThrow(/productId/);
   });
 });
