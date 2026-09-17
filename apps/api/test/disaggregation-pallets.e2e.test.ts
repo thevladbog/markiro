@@ -368,6 +368,127 @@ describe.skipIf(!ready)("disaggregation pallets e2e", () => {
     expect(ex!.reason).toBe(applied.reasonName);
   });
 
+  /**
+   * A WAREHOUSE pallet (spec §4: «a warehouse pallet line validates like a
+   * production one»). It has no shift at all, so the validator may not reach
+   * its product through one -- and `shift_open`, which every production
+   * pallet is judged by, cannot apply to it.
+   */
+  it("disassembles a warehouse pallet built from boxes of a closed shift", async () => {
+    const shiftId = await openShift();
+    const base = Date.parse("2026-09-11T07:00:00.000Z");
+    await postBatch({
+      items: Array.from({ length: 6 }, (_, i) =>
+        scanItem(shiftId, "t1", new Date(base + i * 1000).toISOString(), "wb1"),
+      ),
+    });
+    const boxSscc = nextSscc();
+    await postBatch({
+      boxes: [
+        {
+          boxId: "wb1",
+          shiftId,
+          terminalId: "t1",
+          sscc: boxSscc,
+          closedAt: "2026-09-11T07:30:00.000Z",
+          operatorId,
+          devicePalletId: null,
+        },
+      ],
+    });
+    const palletSscc = nextSscc();
+    await postBatch({
+      palletMemberships: [
+        {
+          palletId: "wp1",
+          boxSscc,
+          addedAt: "2026-09-11T07:45:00.000Z",
+          operatorId,
+        },
+      ],
+    });
+    await postBatch({
+      pallets: [
+        {
+          palletId: "wp1",
+          kind: "warehouse",
+          shiftId: null,
+          productId,
+          terminalId: null,
+          sscc: palletSscc,
+          closedAt: "2026-09-11T08:00:00.000Z",
+          operatorId,
+          printVerifiedAt: null,
+          printSkippedAt: null,
+        },
+      ],
+    });
+    await agent.post(`/shifts/${shiftId}/close`).send({ reason: "done shift" }).expect(200);
+
+    const pallet = await findPalletBySscc(palletSscc);
+    expect(pallet.kind).toBe("warehouse");
+    expect(pallet.shiftId).toBeNull();
+    const box = await findBoxBySscc(boxSscc);
+    const versionBefore = box.registryVersion;
+
+    const doc = await createDocument({ lines: [ai00(palletSscc)] });
+    expect(doc.lines[0]).toMatchObject({
+      status: "ok",
+      boxId: null,
+      palletId: pallet.id,
+      // The product comes from the pallet's OWN column, not through a shift.
+      productId,
+      codeCount: 6,
+    });
+
+    const applied = await applyDocument(doc);
+    expect(applied.status).toBe("applied");
+
+    const after = await findPalletBySscc(palletSscc);
+    expect(after.disassembledAt).not.toBeNull();
+
+    const [ex] = await db
+      .select()
+      .from(schema.palletExceptions)
+      .where(
+        and(
+          eq(schema.palletExceptions.tenantId, tenantId),
+          eq(schema.palletExceptions.palletId, pallet.id),
+        ),
+      );
+    expect(ex).toMatchObject({
+      kind: "disassemble",
+      palletId: pallet.id,
+      shiftId: null,
+      disaggregationDocumentId: applied.id,
+      operatorId: null,
+    });
+
+    // Every handheld's registry mirror must learn the pallet is retired.
+    const boxAfter = await findBoxBySscc(boxSscc);
+    expect(boxAfter.registryVersion).toBeGreaterThan(versionBefore);
+    expect(boxAfter.disassembledAt).toBeNull();
+
+    const [audit] = await db
+      .select()
+      .from(schema.tenantAuditEvents)
+      .where(
+        and(
+          eq(schema.tenantAuditEvents.organizationId, tenantId),
+          eq(schema.tenantAuditEvents.action, "disaggregation.document.applied"),
+          eq(schema.tenantAuditEvents.targetId, applied.id),
+        ),
+      );
+    expect(audit).toMatchObject({
+      organizationId: tenantId,
+      action: "disaggregation.document.applied",
+      outcome: "success",
+      targetType: "disaggregation_document",
+      targetId: applied.id,
+      after: { boxIds: [], palletIds: [pallet.id] },
+    });
+  });
+
   it("takes a pallet and one of its boxes as two independent lines", async () => {
     const { palletSscc, box1Sscc } = await createClosedPallet();
     const doc = await createDocument({ lines: [ai00(palletSscc), ai00(box1Sscc)] });
