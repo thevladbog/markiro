@@ -138,13 +138,13 @@ Boolean, default false, beside `can_writeoff`.
 ```ts
 {
   generatedAt: string;
-  products: { id; gtin14; name; printName; shelfLifeDays; palletBoxCapacity: number | null; categoryId: string | null }[];
+  products: { id; gtin14; name; printName; shelfLifeDays; palletBoxCapacity: number | null; chzProductGroupCode: number | null }[];
   operators: { employeeId; canBuildPallets: boolean }[];
   palletSscc: { issuerPrefix; extensionDigit: 1; fromSerial; toSerial; consumedThroughSerial } | null;
   palletSsccRevokedFrom: number[];
   palletLabelTemplates: {
     organisation: LabelTemplateSpec | null;
-    byCategory: { categoryId: string; template: LabelTemplateSpec }[];
+    byCategory: { chzProductGroupCode: number; template: LabelTemplateSpec }[];
   };
 }
 ```
@@ -196,7 +196,8 @@ memberships: {
   palletId: string;
   boxSscc: string;
   status: 'accepted' | 'replayed' | 'already_on_pallet' | 'not_found'
-        | 'not_closed' | 'disassembled' | 'product_mismatch';
+        | 'not_closed' | 'disassembled' | 'product_mismatch'
+        | 'subscription_read_only';
   winningPalletSscc?: string;   // for already_on_pallet
 }[];
 ```
@@ -444,6 +445,18 @@ DO NOTHING` per rejection.
   absent from bootstrap refuses the scan with «Товар неизвестен».
 - **Clocks** — `addedAt` is device time and is never used to order events
   across devices; `recorded_at` and `closure_received_at` are server time.
+- **Kiosk feed** — the kiosk's PWA parser rejects an upsert carrying any key
+  outside its seven-field allowlist, so only `GET /station/box-registry`
+  carries the pallet block (§2.4).
+
+### Follow-ups
+
+- Admin `PalletCard.tsx` links to `/shifts/${shiftId}` unconditionally; a
+  warehouse pallet has no shift, so the link must guard a null `shiftId`
+  (plan 3).
+- Offline grant evidence (`grant-evidence-native.service.ts`) skips warehouse
+  closures. Whether a warehouse closure belongs in the evidence chain is a
+  product decision that is still pending.
 
 ## 6. Verification
 
