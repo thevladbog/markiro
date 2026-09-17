@@ -23,6 +23,7 @@ import app.markiro.handheld.core.box.SsccPool
 import app.markiro.handheld.core.network.NetworkModule
 import app.markiro.handheld.core.network.StationApi
 import app.markiro.handheld.core.storage.BoxEntity
+import app.markiro.handheld.core.storage.OutboxEntity
 import app.markiro.handheld.core.storage.DeviceConfigEntity
 import app.markiro.handheld.core.storage.HandheldDatabase
 import kotlinx.coroutines.flow.first
@@ -237,6 +238,48 @@ class ShiftRepositoryTest {
         assertEquals(EnterResult.Refused(EnterStep.BUNDLE, 404, null), repo().enter("s1"))
         assertNull(db.deviceConfigDao().get()?.activeShiftId)
         assertNull(db.shiftDao().get("s1"))
+    }
+
+    /**
+     * Leaving is a local mark: the pointer that pins the shift on the hub and
+     * in the list goes, but nothing the device still owes the server does --
+     * queued scans, closed-but-unprinted boxes and the mirror row with its
+     * bundle all stay for the sync engines and a later re-entry.
+     */
+    @Test
+    fun leavingClearsTheActivePointerButKeepsQueuedWork() = runTest {
+        server.shutdown()
+        db.shiftDao().upsert(ShiftEntityFixtures.bundled("s1"))
+        assertEquals(EnterResult.Ok, repo().enter("s1"))
+        db.outboxDao().insert(
+            OutboxEntity(shiftId = "s1", raw = "raw", verdict = "accepted", scannedAt = "2026-09-10T10:00:00Z", operatorId = "op-1", codeHash = "h", gtin14 = "04600682000013", serial = "one"),
+        )
+        db.boxDao().insert(
+            BoxEntity(boxId = "b1", shiftId = "s1", sscc = "146800899000000019", openedAt = "2026-09-10T09:00:00Z", closedAt = "2026-09-10T10:00:00Z", operatorId = "op-1", printState = BoxPrint.PENDING, printReason = null, ackedAt = null),
+        )
+
+        repo().leave("s1")
+
+        assertNull(db.deviceConfigDao().get()?.activeShiftId)
+        val left = checkNotNull(db.shiftDao().get("s1"))
+        assertEquals(clock, left.leftAt)
+        assertNotNull(left.enteredAt)
+        assertNotNull(left.bundleFetchedAt)
+        assertEquals(1, db.outboxDao().countNow())
+        assertEquals(1, db.boxDao().observeUnprintedCount().first())
+    }
+
+    @Test
+    fun leavingAnotherShiftLeavesTheActivePointerAlone() = runTest {
+        server.shutdown()
+        db.shiftDao().upsertAll(listOf(ShiftEntityFixtures.bundled("s1"), ShiftEntityFixtures.bundled("s2")))
+        assertEquals(EnterResult.Ok, repo().enter("s1"))
+
+        repo().leave("s2")
+
+        assertEquals("s1", db.deviceConfigDao().get()?.activeShiftId)
+        assertEquals(clock, db.shiftDao().get("s2")?.leftAt)
+        assertNull(db.shiftDao().get("s1")?.leftAt)
     }
 
     @Test
