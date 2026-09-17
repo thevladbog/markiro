@@ -15,12 +15,14 @@
 import {
   MAX_BOX_CLOSURES_PER_SYNC_BATCH,
   MAX_PALLET_CLOSURES_PER_SYNC_BATCH,
+  MAX_PALLET_MEMBERSHIPS_PER_SYNC_BATCH,
   MAX_SYNC_BATCH_ID_CHARS,
 } from "./limits.js";
 
 export interface SyncLimitsFixtures {
   maxBoxClosuresPerSyncBatch: number;
   maxPalletClosuresPerSyncBatch: number;
+  maxPalletMembershipsPerSyncBatch: number;
   maxSyncBatchIdChars: number;
 }
 
@@ -28,6 +30,7 @@ export function buildSyncLimitsFixtures(): SyncLimitsFixtures {
   return {
     maxBoxClosuresPerSyncBatch: MAX_BOX_CLOSURES_PER_SYNC_BATCH,
     maxPalletClosuresPerSyncBatch: MAX_PALLET_CLOSURES_PER_SYNC_BATCH,
+    maxPalletMembershipsPerSyncBatch: MAX_PALLET_MEMBERSHIPS_PER_SYNC_BATCH,
     maxSyncBatchIdChars: MAX_SYNC_BATCH_ID_CHARS,
   };
 }
