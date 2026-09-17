@@ -63,29 +63,38 @@ class BoxRegistryMirror(
         if (since == null) db.recovery.commit { db.boxRegistryDao().clear() }
         var cursor: String? = null
         var until: String? = null
-        while (true) {
-            val page = api.boxRegistry(since = since, until = until, cursor = cursor, limit = PAGE_SIZE)
-            if (until == null) until = page.until else if (page.until != until) return MirrorOutcome.Failed("registry window")
-            val changes = ArrayList<Change>(page.items.size)
-            for (item in page.items) changes += change(item) ?: return MirrorOutcome.Failed("registry shape")
-            db.recovery.commit {
-                // Applied in the server's order: within one page the last word on an SSCC wins.
-                for (c in changes) when (c) {
-                    is Change.Put -> db.boxRegistryDao().upsert(c.row)
-                    is Change.Drop -> db.boxRegistryDao().remove(c.sscc)
+        try {
+            while (true) {
+                val page = api.boxRegistry(since = since, until = until, cursor = cursor, limit = PAGE_SIZE)
+                if (until == null) until = page.until else if (page.until != until) return MirrorOutcome.Failed("registry window")
+                val changes = ArrayList<Change>(page.items.size)
+                for (item in page.items) changes += change(item) ?: return MirrorOutcome.Failed("registry shape")
+                db.recovery.commit {
+                    // Applied in the server's order: within one page the last word on an SSCC wins.
+                    for (c in changes) when (c) {
+                        is Change.Put -> db.boxRegistryDao().upsert(c.row)
+                        is Change.Drop -> db.boxRegistryDao().remove(c.sscc)
+                    }
+                }
+                cursor = page.nextCursor ?: break
+            }
+            val applied = until ?: return MirrorOutcome.Failed("registry window")
+            db.recovery.commit { meta.put(MetaStore.BOX_REGISTRY_UNTIL, applied) }
+            return MirrorOutcome.Ok
+        } finally {
+            // Every exit from the walk above -- success, an early `Failed`, or a
+            // thrown transport/shape exception -- must not leave a carried claim
+            // stranded: the clear() above already ran, and the row that survives
+            // it (if any) is the only place left to put the claim back.
+            if (claims.isNotEmpty()) {
+                db.recovery.commit {
+                    for ((sscc, localPalletId) in claims) {
+                        val row = db.boxRegistryDao().bySscc(sscc) ?: continue
+                        if (row.palletId == null) db.boxRegistryDao().claim(sscc, localPalletId)
+                    }
                 }
             }
-            cursor = page.nextCursor ?: break
         }
-        val applied = until ?: return MirrorOutcome.Failed("registry window")
-        db.recovery.commit {
-            for ((sscc, localPalletId) in claims) {
-                val row = db.boxRegistryDao().bySscc(sscc) ?: continue
-                if (row.palletId == null) db.boxRegistryDao().claim(sscc, localPalletId)
-            }
-            meta.put(MetaStore.BOX_REGISTRY_UNTIL, applied)
-        }
-        return MirrorOutcome.Ok
     }
 
     private suspend fun change(item: BoxRegistryItemDto): Change? = when (item.kind) {

@@ -61,13 +61,17 @@ class PalletBootstrapMirror(
                         PalletLabelTemplateEntity(PalletLabelTemplateEntity.category(it.chzProductGroupCode), it.template.toString())
                     },
             )
+        }
+        // Applied BEFORE the prefix/stamp are remembered: a failed `addRange` must
+        // not leave behind a remembered prefix for a block the pool never got.
+        blocks.apply(bootstrap.palletSscc, bootstrap.palletSsccRevokedFrom)
+        db.recovery.commit {
             // A null block means "no numbers today" (no GLN, read-only, exhausted): the pool keeps what it has
             // and the prefix is forgotten so a close reports NoIssuer rather than burning from a stale one.
             if (bootstrap.palletSscc != null) meta.put(MetaStore.PALLET_BOOTSTRAP_ISSUER_PREFIX, bootstrap.palletSscc.issuerPrefix)
             else meta.remove(MetaStore.PALLET_BOOTSTRAP_ISSUER_PREFIX)
             meta.put(MetaStore.PALLET_BOOTSTRAP_AT, clock().toString())
         }
-        blocks.apply(bootstrap.palletSscc, bootstrap.palletSsccRevokedFrom)
         return registry.walk()
     }
 }

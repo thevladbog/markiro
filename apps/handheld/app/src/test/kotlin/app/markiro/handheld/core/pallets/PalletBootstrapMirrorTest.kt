@@ -4,11 +4,14 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.markiro.handheld.core.box.SsccPool
+import app.markiro.handheld.core.network.BundleSsccDto
 import app.markiro.handheld.core.network.NetworkModule
 import app.markiro.handheld.core.network.StationApi
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.MetaStore
 import app.markiro.handheld.core.storage.PalletLabelTemplateEntity
+import app.markiro.handheld.core.storage.PalletPermissionEntity
+import app.markiro.handheld.core.storage.PalletProductEntity
 import app.markiro.handheld.core.storage.initializeRecoveryForTest
 import app.markiro.handheld.core.writeoff.MirrorOutcome
 import kotlinx.coroutines.flow.first
@@ -63,6 +66,11 @@ class PalletBootstrapMirrorTest {
 
     @Test
     fun aRefreshFillsCachesSeedsTheExtensionOnePoolAndWalksTheRegistry() = runTest {
+        // Stale rows from a previous bootstrap must not survive: the caches are
+        // replaced wholesale, not merged.
+        db.palletProductDao().insertAll(listOf(PalletProductEntity("p-stale", "00000000000000", "Stale", null, null, null, null)))
+        db.palletPermissionDao().insertAll(listOf(PalletPermissionEntity("op-stale", true)))
+        db.palletLabelTemplateDao().insertAll(listOf(PalletLabelTemplateEntity("category:99", "{}")))
         server.enqueue(MockResponse().setBody(bootstrapJson))
         server.enqueue(
             MockResponse().setBody(
@@ -76,6 +84,9 @@ class PalletBootstrapMirrorTest {
         assertTrue(db.palletPermissionDao().get("op-1")!!.canBuildPallets)
         assertNotNull(db.palletLabelTemplateDao().get(PalletLabelTemplateEntity.ORG))
         assertNotNull(db.palletLabelTemplateDao().get(PalletLabelTemplateEntity.category(8)))
+        assertNull(db.palletProductDao().byId("p-stale"))
+        assertNull(db.palletPermissionDao().get("op-stale"))
+        assertNull(db.palletLabelTemplateDao().get("category:99"))
         assertEquals("046006820", mirror.issuerPrefix())
         assertEquals(200L, SsccPool(db).remaining("046006820", SsccPool.PALLET_EXTENSION_DIGIT))
         assertEquals("2026-09-10", db.boxRegistryDao().bySscc("034600682000000018")?.productionDate)
@@ -88,6 +99,9 @@ class PalletBootstrapMirrorTest {
 
     @Test
     fun aNullBlockLeavesThePoolAloneAndStillFillsTheCaches() = runTest {
+        // A pool already holding this device's extension-1 block: a null block on
+        // refresh must leave it exactly as it was, not zero it out.
+        SsccBlockApplier(SsccPool(db)).apply(BundleSsccDto("046006820", 1, 0, 199, null), emptyList())
         meta.put(MetaStore.PALLET_BOOTSTRAP_ISSUER_PREFIX, "046006820")
         server.enqueue(
             MockResponse().setBody(
@@ -99,7 +113,7 @@ class PalletBootstrapMirrorTest {
         )
         server.enqueue(MockResponse().setBody("""{"until":"1","items":[]}"""))
         assertEquals(MirrorOutcome.Ok, mirror.refresh())
-        assertEquals(0L, SsccPool(db).remaining("046006820", SsccPool.PALLET_EXTENSION_DIGIT))
+        assertEquals(200L, SsccPool(db).remaining("046006820", SsccPool.PALLET_EXTENSION_DIGIT))
         assertNull(mirror.issuerPrefix())
         assertEquals(1, db.palletProductDao().count())
     }
@@ -110,6 +124,19 @@ class PalletBootstrapMirrorTest {
         assertEquals(MirrorOutcome.Offline, mirror.refresh())
         assertEquals(0, db.palletProductDao().count())
         assertNull(meta.get(MetaStore.PALLET_BOOTSTRAP_AT))
+    }
+
+    @Test
+    fun aFailedRegistryWalkFailsTheRefreshButLeavesTheCachesFilled() = runTest {
+        server.enqueue(MockResponse().setBody(bootstrapJson))
+        server.enqueue(MockResponse().setResponseCode(500))
+        assertEquals(MirrorOutcome.Failed("http"), mirror.refresh())
+        assertEquals(12, db.palletProductDao().byId("p-1")?.palletBoxCapacity)
+        assertTrue(db.palletPermissionDao().get("op-1")!!.canBuildPallets)
+        assertNotNull(db.palletLabelTemplateDao().get(PalletLabelTemplateEntity.ORG))
+        assertEquals("046006820", mirror.issuerPrefix())
+        assertEquals(200L, SsccPool(db).remaining("046006820", SsccPool.PALLET_EXTENSION_DIGIT))
+        assertEquals(STAMP, meta.get(MetaStore.PALLET_BOOTSTRAP_AT)?.toLong())
     }
 
     private companion object {

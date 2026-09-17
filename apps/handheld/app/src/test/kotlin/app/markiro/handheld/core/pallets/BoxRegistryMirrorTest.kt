@@ -166,6 +166,23 @@ class BoxRegistryMirrorTest {
     }
 
     /**
+     * A full re-walk that fails partway (after the clear, mid-page) must still
+     * not strand a carried claim: the `finally` re-applies it to whatever row
+     * survived the pages that did land, and the failed walk must not advance
+     * `until`.
+     */
+    @Test
+    fun aFailedFullReWalkStillReclaimsTheRowTheFirstPageReturned() = runTest {
+        db.boxRegistryDao().upsert(box("046000000000000018", bottles = 6, localPalletId = "w-local"))
+        server.enqueue(MockResponse().setBody("""{"until":"9","items":[${upsert("046000000000000018", 6)}],"nextCursor":"c1"}"""))
+        server.enqueue(MockResponse().setResponseCode(500))
+        val outcome = mirror.walk()
+        assertEquals(MirrorOutcome.Failed("http"), outcome)
+        assertNull(meta.get(MetaStore.BOX_REGISTRY_UNTIL))
+        assertEquals("w-local", db.boxRegistryDao().bySscc("046000000000000018")?.localPalletId)
+    }
+
+    /**
      * A full re-walk clears the table first, so an open pallet built on this
      * device would silently lose its boxes. The claims are re-applied to every
      * SSCC the snapshot still reports as unassigned.
