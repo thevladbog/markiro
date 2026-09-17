@@ -8,6 +8,11 @@ import { OrgProfileService } from "../src/modules/org-profile/org-profile.servic
 import { KioskDeviceGuard } from "../src/tenancy/kiosk-device.guard";
 import { SubscriptionAccessGuard } from "../src/subscriptions/subscription-access.guard";
 import { ObjectStorageService } from "../src/modules/storage/object-storage.service";
+import { StationWriteoffsController } from "../src/modules/station-writeoffs/station-writeoffs.controller";
+import { StationWriteoffsService } from "../src/modules/station-writeoffs/station-writeoffs.service";
+import { AuthorizationGuard } from "../src/authorization/authorization.guard";
+import { StationOnlyGuard } from "../src/tenancy/station-only.guard";
+import { TenantGuard } from "../src/tenancy/tenant.guard";
 
 describe("kiosk box registry OpenAPI contract", () => {
   it("documents revision paging, exact change union, and error statuses", async () => {
@@ -57,6 +62,52 @@ describe("kiosk box registry OpenAPI contract", () => {
           items: { type: "array" },
         },
       });
+      const items = (schema?.properties as Record<string, Record<string, unknown>>).items;
+      if (!items) throw new Error("missing items schema");
+      const union = (items.items as { oneOf?: Array<{ required?: string[] }> }).oneOf;
+      // The deployed kiosk PWA rejects an upsert carrying any key outside this
+      // allowlist (`apps/kiosk/src/store/box-registry.ts`), so this route's
+      // documented union must stay at exactly these seven keys.
+      expect(union?.map((variant) => [...(variant.required ?? [])].sort())).toEqual([
+        ["bottleCount", "boxId", "contentKeys", "kind", "productId", "sscc", "updatedAt"].sort(),
+        ["kind", "sscc", "updatedAt"].sort(),
+      ]);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("documents the station route's own twelve-key upsert with the pallet block", async () => {
+    const ref = await Test.createTestingModule({
+      controllers: [StationWriteoffsController],
+      providers: [
+        { provide: StationWriteoffsService, useValue: {} },
+        { provide: BoxRegistryService, useValue: {} },
+      ],
+    })
+      .overrideGuard(TenantGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(AuthorizationGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(SubscriptionAccessGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(StationOnlyGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
+    const app = ref.createNestApplication();
+    await app.init();
+    try {
+      const document = SwaggerModule.createDocument(
+        app,
+        new DocumentBuilder().setTitle("station registry contract").setVersion("test").build(),
+      );
+      const operation = document.paths["/station/box-registry"]?.get;
+      expect(operation).toBeDefined();
+      const ok = operation?.responses["200"];
+      if (!ok || "$ref" in ok) throw new Error("missing inline 200 response");
+      const content = ok.content as
+        Record<string, { schema?: Record<string, unknown> }> | undefined;
+      const schema = content?.["application/json"]?.schema;
       const items = (schema?.properties as Record<string, Record<string, unknown>>).items;
       if (!items) throw new Error("missing items schema");
       const union = (items.items as { oneOf?: Array<{ required?: string[] }> }).oneOf;

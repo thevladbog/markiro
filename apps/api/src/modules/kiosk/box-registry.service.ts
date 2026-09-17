@@ -6,10 +6,13 @@ import { DB } from "../../auth/auth.module";
 import {
   encodeBoxRegistryCursor,
   resolveBoxRegistryWindow,
+  toKioskPage,
   type BoxRegistryQueryDto,
-  type KioskBoxRegistryChange,
+  type BoxRegistryView,
   type KioskBoxRegistryPage,
   type ResolvedBoxRegistryWindow,
+  type StationBoxRegistryChange,
+  type StationBoxRegistryPage,
 } from "./box-registry.dto";
 
 export const MAX_BOX_REGISTRY_MEMBERS = 500;
@@ -208,7 +211,7 @@ export async function resolveBoxRegistryFacts(
 function ineligibleChange(
   candidate: BoxRegistryCandidate,
   delta: boolean,
-): KioskBoxRegistryChange | null {
+): StationBoxRegistryChange | null {
   if (!delta || candidate.sscc === null || !isValidSscc(candidate.sscc)) return null;
   return {
     kind: "remove",
@@ -221,7 +224,7 @@ export function evaluateBoxRegistryCandidate(
   candidate: BoxRegistryCandidate,
   facts: readonly BoxRegistryMemberFact[],
   delta: boolean,
-): KioskBoxRegistryChange | null {
+): StationBoxRegistryChange | null {
   if (
     candidate.sscc === null ||
     !isValidSscc(candidate.sscc) ||
@@ -318,13 +321,13 @@ export function shapeBoxRegistryPage(
   factsByBox: ReadonlyMap<string, readonly BoxRegistryMemberFact[]>,
   window: ResolvedBoxRegistryWindow,
   hasMoreCandidates: boolean,
-): KioskBoxRegistryPage {
+): StationBoxRegistryPage {
   const delta = window.since !== null;
   const items = candidates
     .map((candidate) =>
       evaluateBoxRegistryCandidate(candidate, factsByBox.get(candidate.id) ?? [], delta),
     )
-    .filter((change): change is KioskBoxRegistryChange => change !== null);
+    .filter((change): change is StationBoxRegistryChange => change !== null);
   const last = candidates.at(-1);
   const nextCursor =
     hasMoreCandidates && last
@@ -351,7 +354,26 @@ export class BoxRegistryService {
     return (versionRow?.currentVersion ?? 0n).toString();
   }
 
-  async list(tenantId: string, query: BoxRegistryQueryDto): Promise<KioskBoxRegistryPage> {
+  /**
+   * `view` decides the item shape, not the query: deployed kiosk bundles reject
+   * an item carrying any key outside their seven-field allowlist, so the kiosk
+   * view strips the pallet block the station/handheld view needs.
+   */
+  async list(
+    tenantId: string,
+    query: BoxRegistryQueryDto,
+    options: { view: "station" },
+  ): Promise<StationBoxRegistryPage>;
+  async list(
+    tenantId: string,
+    query: BoxRegistryQueryDto,
+    options: { view: "kiosk" },
+  ): Promise<KioskBoxRegistryPage>;
+  async list(
+    tenantId: string,
+    query: BoxRegistryQueryDto,
+    options: { view: BoxRegistryView },
+  ): Promise<StationBoxRegistryPage | KioskBoxRegistryPage> {
     const initialVersion = await this.currentVersion(tenantId);
     const window = resolveBoxRegistryWindow(query, initialVersion);
     assertBoxRegistrySnapshotCurrent(initialVersion, window.until);
@@ -437,6 +459,7 @@ export class BoxRegistryService {
     // page so a commit during candidate/fact resolution forces a restart
     // instead of returning facts from two tenant registry revisions.
     assertBoxRegistrySnapshotCurrent(await this.currentVersion(tenantId), window.until);
-    return shapeBoxRegistryPage(prefix.candidates, facts, window, prefix.hasMoreCandidates);
+    const page = shapeBoxRegistryPage(prefix.candidates, facts, window, prefix.hasMoreCandidates);
+    return options.view === "station" ? page : toKioskPage(page);
   }
 }

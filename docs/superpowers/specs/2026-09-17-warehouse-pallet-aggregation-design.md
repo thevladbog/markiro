@@ -251,9 +251,9 @@ exceptions.
   gains one line: `advanceBoxRegistryVersion` for the member boxes. Without
   it every handheld keeps refusing those boxes as «on a pallet».
 
-### 2.4 Box registry — `GET /station/box-registry` and `/kiosk/box-registry`
+### 2.4 Box registry — `GET /station/box-registry`
 
-Each `upsert` item gains:
+Each `upsert` item on the station route gains:
 
 ```ts
 palletId: string | null;
@@ -263,10 +263,12 @@ closedAt: string;
 productionDate: string | null; // shift's effective civil date, YYYY-MM-DD
 ```
 
-The query joins `pallets` on `boxes.pallet_id`. Kiosk and write-off readers
-ignore the new fields. Eligibility rules are **not** changed: a box the
-registry already omits (incomplete membership, over
-`MAX_BOX_REGISTRY_MEMBERS`, a code not matching the product GTIN) stays
+The query joins `pallets` on `boxes.pallet_id`. The kiosk feed is unchanged
+(its PWA parser has a strict field allowlist, so a widened item would wedge the
+refresh of every deployed bundle); only `GET /station/box-registry` carries the
+pallet fields, and the handheld's JSON ignores unknown keys. Eligibility rules
+are **not** changed: a box the registry already omits (incomplete membership,
+over `MAX_BOX_REGISTRY_MEMBERS`, a code not matching the product GTIN) stays
 omitted and therefore cannot be palletised from the handheld. This is a
 known limitation of this slice, surfaced on the device as «unknown box».
 

@@ -5,6 +5,8 @@ import {
   decodeBoxRegistryCursor,
   encodeBoxRegistryCursor,
   resolveBoxRegistryWindow,
+  toKioskChange,
+  toKioskPage,
 } from "../src/modules/kiosk/box-registry.dto";
 import {
   assertBoxRegistrySnapshotCurrent,
@@ -225,6 +227,32 @@ describe("box registry eligibility", () => {
       palletSscc: PALLET_SSCC,
       palletActive: false,
     });
+  });
+
+  it("strips the pallet block when the kiosk view maps a station change", () => {
+    const palletId = randomUUID();
+    const onPallet = candidate({
+      palletId,
+      palletSscc: PALLET_SSCC,
+      palletDisassembledAt: null,
+      productionDate: "2026-09-10",
+    });
+    const change = evaluateBoxRegistryCandidate(onPallet, [soleMember(onPallet)], false);
+    if (change === null) throw new Error("expected an eligible upsert");
+    const page = toKioskPage({ until: "7", items: [change], nextCursor: "cursor-token" });
+    // The deployed kiosk PWA throws on any key outside this allowlist; see
+    // `apps/kiosk/src/store/box-registry.ts`.
+    expect(Object.keys(page.items[0] ?? {}).sort()).toEqual(
+      ["kind", "boxId", "sscc", "productId", "bottleCount", "contentKeys", "updatedAt"].sort(),
+    );
+    expect(page).toMatchObject({ until: "7", nextCursor: "cursor-token" });
+    expect(toKioskChange({ kind: "remove", sscc: SSCC, updatedAt: UPDATED.toISOString() })).toEqual(
+      {
+        kind: "remove",
+        sscc: SSCC,
+        updatedAt: UPDATED.toISOString(),
+      },
+    );
   });
 
   it.each([

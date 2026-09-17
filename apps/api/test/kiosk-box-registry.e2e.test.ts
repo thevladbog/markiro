@@ -274,6 +274,33 @@ describe.skipIf(!ready)("kiosk box registry e2e", () => {
     expect(JSON.stringify(response.body)).not.toContain(buildSscc(3, "4600682", 999));
   });
 
+  // Copied verbatim from the deployed kiosk PWA's parser allowlist in
+  // `apps/kiosk/src/store/box-registry.ts`: an item carrying any other key
+  // throws there and wedges the refresh of every already-installed bundle.
+  const KIOSK_UPSERT_KEYS = [
+    "kind",
+    "boxId",
+    "sscc",
+    "productId",
+    "bottleCount",
+    "contentKeys",
+    "updatedAt",
+  ];
+
+  it("emits exactly the seven keys the deployed kiosk parser allows", async () => {
+    const response = await request(app!.getHttpServer())
+      .get("/kiosk/box-registry?limit=500")
+      .set("x-kiosk-token", token)
+      .expect(200);
+    const upserts = (response.body.items as Array<Record<string, unknown>>).filter(
+      (item) => item.kind === "upsert",
+    );
+    expect(upserts.length).toBeGreaterThan(0);
+    for (const item of upserts) {
+      expect(Object.keys(item).sort()).toEqual([...KIOSK_UPSERT_KEYS].sort());
+    }
+  });
+
   it("pages tied registry revisions with immutable bounds", async () => {
     const first = await request(app!.getHttpServer())
       .get("/kiosk/box-registry?limit=2")
