@@ -505,13 +505,17 @@ describe.skipIf(!ready)("pallets e2e", () => {
       rejectedMembershipCount: 0,
       productName: "Cola",
     });
-    if (page.body.nextCursor) {
-      const next = await agent
-        .get("/pallets")
-        .query({ kind: "production", limit: 1, cursor: page.body.nextCursor })
-        .expect(200);
-      expect(next.body.items[0]?.id).not.toBe(page.body.items[0].id);
-    }
+    // This suite has built exactly two production pallets by now (`palletSscc`
+    // and `skewPalletSscc`, both asserted in the org-wide list above), so a
+    // limit of 1 must hand back a cursor -- no `if` guard, which would let the
+    // paging assertion silently vanish.
+    expect(page.body.nextCursor).toBeDefined();
+    const next = await agent
+      .get("/pallets")
+      .query({ kind: "production", limit: 1, cursor: page.body.nextCursor })
+      .expect(200);
+    expect(next.body.items).toHaveLength(1);
+    expect(next.body.items[0]?.id).not.toBe(page.body.items[0].id);
   });
 
   it("still 404s a shift outside the tenant and rejects a malformed cursor", async () => {
