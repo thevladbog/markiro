@@ -475,9 +475,53 @@ describe.skipIf(!ready)("pallets e2e", () => {
     await other.post(`/shifts/${otherShiftId}/open`).expect(200);
 
     await agent.get(`/pallets?shiftId=${otherShiftId}`).expect(404);
+    // The other direction of the same boundary: an org-wide list is scoped to
+    // the caller's own tenant, so a tenant with no pallets of its own sees
+    // none of this one's.
+    const theirs = await other.get("/pallets").expect(200);
+    expect(theirs.body.items).toEqual([]);
   });
 
-  it("rejects a request without a shift", async () => {
-    await agent.get("/pallets").expect(400);
+  /**
+   * Task 8: `shiftId` became optional, so a bare `GET /pallets` is the
+   * org-wide list rather than a 400. Both of this shift's pallets are in it.
+   */
+  it("lists every pallet of the tenant when no shift is given", async () => {
+    const res = await agent.get("/pallets").expect(200);
+    const ssccs = (res.body.items as { sscc: string | null }[]).map((row) => row.sscc);
+    expect(ssccs).toContain(`00${palletSscc}`);
+    expect(ssccs).toContain(`00${skewPalletSscc}`);
+  });
+
+  it("lists pallets org-wide with kind filter and cursor paging", async () => {
+    const page = await agent.get("/pallets").query({ kind: "production", limit: 1 }).expect(200);
+    expect(page.body.items).toHaveLength(1);
+    expect(page.body.items[0]).toMatchObject({
+      kind: "production",
+      rejectedMembershipCount: 0,
+      productName: "Cola",
+    });
+    if (page.body.nextCursor) {
+      const next = await agent
+        .get("/pallets")
+        .query({ kind: "production", limit: 1, cursor: page.body.nextCursor })
+        .expect(200);
+      expect(next.body.items[0]?.id).not.toBe(page.body.items[0].id);
+    }
+  });
+
+  it("still 404s a shift outside the tenant and rejects a malformed cursor", async () => {
+    await agent.get("/pallets").query({ shiftId: randomUUID() }).expect(404);
+    await agent.get("/pallets").query({ cursor: "not-a-cursor" }).expect(400);
+  });
+
+  /**
+   * A warehouse pallet has no shift at all, so a `kind` filter must not be
+   * answered through the shift join: filtering this tenant's production
+   * pallets down to `warehouse` leaves nothing, not everything.
+   */
+  it("returns an empty list for a kind this tenant has none of", async () => {
+    const res = await agent.get("/pallets").query({ kind: "warehouse" }).expect(200);
+    expect(res.body.items).toEqual([]);
   });
 });

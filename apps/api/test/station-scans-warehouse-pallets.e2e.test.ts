@@ -59,6 +59,8 @@ describe.skipIf(!ready)("station scans warehouse pallets e2e", () => {
   const ISSUER_PREFIX = "034600682";
   const ITEM_BASE = Date.parse("2026-09-17T07:00:00.000Z");
   const BOX_CLOSED_AT = "2026-09-17T08:00:00.000Z";
+  /** Only shift 2 is dated, so the card's per-box production day is provable. */
+  const SHIFT2_PLANNED_DATE = "2026-09-16";
 
   /** b1, b2: closed in shift 1. b3: closed in a SECOND shift of the same product. */
   const B1_SSCC = "003460682000000101";
@@ -220,17 +222,24 @@ describe.skipIf(!ready)("station scans warehouse pallets e2e", () => {
       .expect(201);
     const otherProductId = (otherProduct.body as { id: string }).id;
 
-    const openShift = async (forProduct: string) => {
+    const openShift = async (forProduct: string, plannedDate?: string) => {
       const shift = await agent
         .post("/shifts")
-        .send({ productId: forProduct, mode: "validation" })
+        .send({
+          productId: forProduct,
+          mode: "validation",
+          ...(plannedDate === undefined ? {} : { plannedDate }),
+        })
         .expect(201);
       const id = (shift.body as { id: string }).id;
       await agent.post(`/shifts/${id}/open`).expect(200);
       return id;
     };
     shift1Id = await openShift(productId);
-    shift2Id = await openShift(productId);
+    // Dated on purpose: the pallet card reports each member box's OWN
+    // production day, and only a shift that has one proves it is read per box
+    // rather than taken from the (non-existent) pallet shift.
+    shift2Id = await openShift(productId, SHIFT2_PLANNED_DATE);
     otherShiftId = await openShift(otherProductId);
 
     const employee = await agent.post("/employees").send({ fullName: "Operator One" }).expect(201);
@@ -311,9 +320,17 @@ describe.skipIf(!ready)("station scans warehouse pallets e2e", () => {
       { palletId: "w1", boxSscc: UNKNOWN_SSCC, status: "not_found" },
     ]);
 
-    // TODO(Task 8): restore GET /pallets assertions
-    // (`agent.get("/pallets").query({ kind: "warehouse" })` with
-    // `{ kind: "warehouse", boxCount: 2, rejectedMembershipCount: 3 }`).
+    // The cabinet sees the same pallet through its own org-wide list.
+    const listed = await agent.get("/pallets").query({ kind: "warehouse" }).expect(200);
+    expect(listed.body.items).toHaveLength(1);
+    expect(listed.body.items[0]).toMatchObject({
+      kind: "warehouse",
+      boxCount: 2,
+      rejectedMembershipCount: 3,
+      productName: "Cola",
+      sscc: null,
+    });
+
     const pallets = await warehousePallets();
     expect(pallets).toHaveLength(1);
     expect(pallets[0]).toMatchObject({
@@ -330,6 +347,48 @@ describe.skipIf(!ready)("station scans warehouse pallets e2e", () => {
       { boxSscc: B4_SSCC, reason: "product_mismatch" },
       { boxSscc: B5_SSCC, reason: "not_closed" },
     ]);
+  });
+
+  /**
+   * Runs straight after the attach above, while w1 still holds BOTH boxes:
+   * the later tests disassemble it and move B1 onto w2, which is exactly the
+   * cross-shift membership this card has to show.
+   */
+  it("shows the warehouse pallet card with box origin shifts and rejections", async () => {
+    const list = await agent.get("/pallets").query({ kind: "warehouse" }).expect(200);
+    const w1 = (list.body.items as { id: string; boxCount: number }[]).find(
+      (pallet) => pallet.boxCount >= 1,
+    );
+    expect(w1).toBeDefined();
+    const card = await agent.get(`/code-search/pallets/${w1!.id}`).expect(200);
+    expect(card.body).toMatchObject({
+      kind: "warehouse",
+      shiftId: null,
+      shiftNumber: null,
+      productName: "Cola",
+      status: "open",
+    });
+    expect((card.body.boxes as { shiftId: string }[]).map((box) => box.shiftId).sort()).toEqual(
+      [shift1Id, shift2Id].sort(),
+    );
+    // Each member box still dates from the shift it closed in: only shift 2
+    // has a planned date, and only its own box reports one.
+    const byShift = new Map(
+      (card.body.boxes as { shiftId: string; productionDate: string | null }[]).map((box) => [
+        box.shiftId,
+        box.productionDate,
+      ]),
+    );
+    expect(byShift.get(shift2Id)).toBe(SHIFT2_PLANNED_DATE);
+    expect(byShift.get(shift1Id)).toBeNull();
+    expect(card.body.rejections).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ boxSscc: `00${B4_SSCC}`, reason: "product_mismatch" }),
+        expect.objectContaining({ boxSscc: `00${UNKNOWN_SSCC}`, reason: "not_found", boxId: null }),
+        expect.objectContaining({ boxSscc: `00${B5_SSCC}`, reason: "not_closed" }),
+      ]),
+    );
+    expect(card.body.rejections).toHaveLength(3);
   });
 
   it("replays a membership as a no-op and refuses the box for another device's pallet", async () => {
@@ -455,8 +514,12 @@ describe.skipIf(!ready)("station scans warehouse pallets e2e", () => {
       { palletId: "w1", boxSscc: B1_SSCC, status: "not_found" },
     ]);
 
-    // TODO(Task 8): restore the `other.get("/pallets").query({ kind:
-    // "warehouse" })` empty-list assertion.
+    const theirList = await other.get("/pallets").query({ kind: "warehouse" }).expect(200);
+    expect(theirList.body.items).toEqual([]);
+    // Nor through the card: another tenant's pallet id is a plain 404.
+    const w1 = await warehousePallet("w1", stationDeviceId);
+    await other.get(`/code-search/pallets/${w1.id}`).expect(404);
+
     const db = app!.get<Db>(DB);
     const theirs = await db
       .select({ id: schema.pallets.id })

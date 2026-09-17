@@ -1,16 +1,68 @@
+import { BadRequestException } from "@nestjs/common";
 import { z } from "zod";
 
 import type { SchemaObject } from "@nestjs/swagger";
 
 /**
- * GET /pallets query schema. Mirrors `listBoxesQuerySchema` (boxes/dto.ts): a
- * pallet list only ever makes sense scoped to one shift, so `shiftId` is
- * required.
+ * GET /pallets query schema. `shiftId` used to be REQUIRED, because every
+ * pallet belonged to exactly one shift. A warehouse pallet belongs to none
+ * (`pallets.shift_id IS NULL`, see its own schema comment), so it is
+ * unreachable through any per-shift list at all: the list became org-wide
+ * with `shiftId` as one filter among several. The 404 on an unknown shift is
+ * kept for exactly the case that still has one -- see
+ * `PalletsService.listPallets`.
+ *
+ * `limit` + `cursor` are a keyset page over the list's own
+ * `closed_at DESC NULLS FIRST, id ASC` order: an org-wide list spans every
+ * shift of a tenant's whole history, which OFFSET paging walks from the top
+ * on every page.
  */
-export const listPalletsQuerySchema = z.object({
-  shiftId: z.string().uuid(),
-});
+export const listPalletsQuerySchema = z
+  .object({
+    shiftId: z.string().uuid().optional(),
+    kind: z.enum(["production", "warehouse"]).optional(),
+    productId: z.string().uuid().optional(),
+    deviceId: z.string().uuid().optional(),
+    closedFrom: z.string().datetime().optional(),
+    closedTo: z.string().datetime().optional(),
+    limit: z.coerce.number().int().min(1).max(500).default(100),
+    cursor: z.string().min(1).max(256).optional(),
+  })
+  .strict();
 export type ListPalletsQueryDto = z.infer<typeof listPalletsQuerySchema>;
+
+/** The last row of the previous page, in the list's own sort order. */
+export interface PalletListCursor {
+  closedAt: string | null;
+  id: string;
+}
+
+export function encodePalletListCursor(cursor: PalletListCursor): string {
+  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+
+/**
+ * A cursor is server-issued, so anything that does not decode back to the
+ * exact bytes this server would have produced is a client error rather than
+ * something to interpret. The canonical re-encode check keeps a hand-edited
+ * or padded value from silently paging from somewhere else.
+ */
+export function decodePalletListCursor(raw: string): PalletListCursor {
+  try {
+    const parsed: unknown = JSON.parse(Buffer.from(raw, "base64url").toString("utf8"));
+    const cursor = z
+      .object({ closedAt: z.string().datetime().nullable(), id: z.string().uuid() })
+      .strict()
+      .parse(parsed);
+    if (encodePalletListCursor(cursor) !== raw) throw new Error("non-canonical");
+    return cursor;
+  } catch {
+    throw new BadRequestException({
+      code: "invalid_cursor",
+      message: "Invalid pallet list cursor",
+    });
+  }
+}
 
 /**
  * Mirrors one `pallets` row plus a live aggregate over its member `boxes`
@@ -47,6 +99,23 @@ export interface PalletDto {
   id: string;
   /** 20-значный код с GS1 AI "00"; в БД хранится голый 18-значный SSCC. */
   sscc: string | null;
+  /** `warehouse` is built on a handheld from closed boxes of arbitrary shifts. */
+  kind: "production" | "warehouse";
+  /**
+   * `coalesce(pallets.product_id, shifts.product_id)`: a warehouse pallet
+   * carries its own product (its homogeneity rule), a production one reaches
+   * it through its shift, exactly as a box does.
+   */
+  productId: string | null;
+  productName: string | null;
+  /** Name of the station/handheld that reported this pallet, when resolvable. */
+  deviceName: string | null;
+  /**
+   * How many memberships the server refused for this pallet
+   * (`pallet_membership_rejections`, spec §1.4). Always 0 for a production
+   * pallet, whose boxes join it through their own closure.
+   */
+  rejectedMembershipCount: number;
   terminalId: string | null;
   /** Assigned production line of the station that reported this pallet. */
   lineName: string | null;
@@ -58,9 +127,10 @@ export interface PalletDto {
   disassembledAt: Date | null;
 }
 
-/** GET /pallets response. */
+/** GET /pallets response. `nextCursor` is absent on the last page. */
 export interface ListPalletsResponseDto {
   items: PalletDto[];
+  nextCursor?: string;
 }
 
 const uuidSchema = { type: "string", format: "uuid" } as const;
@@ -76,6 +146,11 @@ export const palletOpenApiSchema: SchemaObject = {
   required: [
     "id",
     "sscc",
+    "kind",
+    "productId",
+    "productName",
+    "deviceName",
+    "rejectedMembershipCount",
     "terminalId",
     "lineName",
     "operatorId",
@@ -88,6 +163,19 @@ export const palletOpenApiSchema: SchemaObject = {
   properties: {
     id: uuidSchema,
     sscc: { ...aiSsccSchema, nullable: true },
+    kind: {
+      type: "string",
+      enum: ["production", "warehouse"],
+      description: "A warehouse pallet belongs to no shift and carries its own product.",
+    },
+    productId: { ...uuidSchema, nullable: true },
+    productName: { type: "string", nullable: true },
+    deviceName: { type: "string", nullable: true },
+    rejectedMembershipCount: {
+      type: "integer",
+      minimum: 0,
+      description: "Memberships the server refused for this pallet (pallet_membership_rejections).",
+    },
     terminalId: { type: "string", nullable: true },
     lineName: {
       type: "string",
@@ -110,5 +198,11 @@ export const palletOpenApiSchema: SchemaObject = {
 export const listPalletsOpenApiSchema: SchemaObject = {
   type: "object",
   required: ["items"],
-  properties: { items: { type: "array", items: palletOpenApiSchema } },
+  properties: {
+    items: { type: "array", items: palletOpenApiSchema },
+    nextCursor: {
+      type: "string",
+      description: "Pass back as `cursor` for the next page; absent on the last one.",
+    },
+  },
 };
