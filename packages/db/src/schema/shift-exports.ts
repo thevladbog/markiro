@@ -80,9 +80,13 @@ export const shiftExports = pgTable(
       "shift_exports_max_lines_range",
       sql`${table.maxLines} is null or ${table.maxLines} between 2 and 1000000`,
     ),
+    // A per-pallet export names box SSCCs only -- no unit codes at all -- so
+    // its total is legitimately 0. A SHIFT export still has to carry codes:
+    // an empty shift document fails as EMPTY_SOURCE long before it reaches
+    // this table, and that guarantee stays asserted here.
     check(
       "shift_exports_total_code_count_positive",
-      sql`${table.totalCodeCount} is null or ${table.totalCodeCount} > 0`,
+      sql`${table.totalCodeCount} is null or ${table.totalCodeCount} > 0 or ${table.palletId} is not null`,
     ),
     check(
       "shift_exports_total_box_count_nonnegative",
@@ -138,7 +142,12 @@ export const shiftExportArtifacts = pgTable(
       "shift_export_artifacts_physical_line_count_positive",
       sql`${table.physicalLineCount} > 0`,
     ),
-    check("shift_export_artifacts_code_count_positive", sql`${table.codeCount} > 0`),
+    // >= 0, not > 0: a per-pallet aggregation artifact lists the pallet's box
+    // SSCCs and no `<cis>` at all, so it carries zero unit codes. The export
+    // row's own `shift_exports_total_code_count_positive` keeps the "a shift
+    // export is never empty" invariant, which cannot be expressed here
+    // because this table does not know its export's target.
+    check("shift_export_artifacts_code_count_nonnegative", sql`${table.codeCount} >= 0`),
     check("shift_export_artifacts_box_count_nonnegative", sql`${table.boxCount} >= 0`),
     check("shift_export_artifacts_byte_size_positive", sql`${table.byteSize} > 0`),
     check("shift_export_artifacts_sha256_check", sql`${table.sha256} ~ '^[0-9a-f]{64}$'`),
