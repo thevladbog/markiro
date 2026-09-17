@@ -533,35 +533,46 @@ describe("StationScansService sync batch payload digest", () => {
   const sha256 = (value: unknown): string =>
     createHash("sha256").update(stableJson(value)).digest("hex");
 
-  it("hashes a legacy wire payload exactly as it did before warehouse pallet memberships existed", async () => {
-    const captured: Record<string, unknown>[] = [];
-    const tx = {
-      insert: (table: unknown) => ({
-        values: (values: Record<string, unknown>) => {
-          if (table === schema.syncBatches) captured.push(values);
-          return {
-            onConflictDoNothing: () => ({
-              returning: () => Promise.resolve([{ batchId: "legacy-digest-1" }]),
-            }),
-            onConflictDoUpdate: () => ({
-              returning: () => Promise.resolve([{ currentVersion: 1n }]),
-            }),
-          };
-        },
-      }),
-      select: () => ({
-        from: () => ({
-          where: () => ({
-            for: () => Promise.resolve([]),
-            orderBy: () => ({ for: () => Promise.resolve([]) }),
+  const legacyDigestTx = (
+    captured: Record<string, unknown>[],
+    batchId: string,
+    shiftRows: Record<string, unknown>[] = [],
+  ) => ({
+    insert: (table: unknown) => ({
+      values: (values: Record<string, unknown>) => {
+        if (table === schema.syncBatches) captured.push(values);
+        return {
+          onConflictDoNothing: () => ({
+            returning: () => Promise.resolve([{ batchId }]),
           }),
+          onConflictDoUpdate: () => ({
+            returning: () => Promise.resolve([{ currentVersion: 1n }]),
+          }),
+        };
+      },
+    }),
+    select: () => ({
+      from: () => ({
+        // `where(...)` is awaited directly on some paths and refined with
+        // `.for("update")` / `.orderBy(...)` on others, so the stub answers
+        // both: an empty row set everywhere except the locked shift lookup.
+        where: () => ({
+          for: () => Promise.resolve([]),
+          orderBy: () => ({ for: () => Promise.resolve(shiftRows) }),
+          then: (resolve: (rows: Record<string, unknown>[]) => unknown) =>
+            Promise.resolve([]).then(resolve),
         }),
       }),
-      execute: () => Promise.resolve(),
-      update: () => ({
-        set: () => ({ where: () => Promise.resolve({ rowCount: 0 }) }),
-      }),
-    };
+    }),
+    execute: () => Promise.resolve(),
+    update: () => ({
+      set: () => ({ where: () => Promise.resolve({ rowCount: 0 }) }),
+    }),
+  });
+
+  it("hashes a legacy wire payload exactly as it did before warehouse pallet memberships existed", async () => {
+    const captured: Record<string, unknown>[] = [];
+    const tx = legacyDigestTx(captured, "legacy-digest-1");
     const service = new StationScansService(
       { transaction: (run: (executor: typeof tx) => unknown) => run(tx) } as never,
       ssccServiceStub,
@@ -585,6 +596,75 @@ describe("StationScansService sync batch payload digest", () => {
     expect(captured).toHaveLength(1);
     expect(captured[0]?.payloadDigest).toBe(
       sha256({ batchId: "legacy-digest-1", items: [], boxes: [], exceptions: [] }),
+    );
+  });
+
+  it("hashes a legacy production pallet closure and exception without the warehouse keys", async () => {
+    const captured: Record<string, unknown>[] = [];
+    const shiftId = "11111111-1111-4111-8111-111111111111";
+    const tx = legacyDigestTx(captured, "legacy-digest-2", [
+      {
+        id: shiftId,
+        openedAt: new Date("2026-09-01T06:00:00.000Z"),
+        allowPreviouslyAcceptedCodes: false,
+      },
+    ]);
+    const service = new StationScansService(
+      { transaction: (run: (executor: typeof tx) => unknown) => run(tx) } as never,
+      ssccServiceStub,
+      entitlementsServiceStub,
+    );
+
+    // A pre-warehouse-pallet device's production closure and disassembly: it
+    // names neither `kind` nor `productId`, which zod now defaults onto the
+    // parsed object.
+    const operatorId = "22222222-2222-4222-8222-222222222222";
+    const closure = {
+      palletId: "device-pallet-1",
+      shiftId,
+      terminalId: "wire-terminal",
+      // Extension digit 1: the pallet SSCC space, so the closure path logs no
+      // warning about a serial recorded against another block.
+      sscc: "100468200000000018",
+      closedAt: "2026-09-01T10:00:00.000Z",
+      operatorId,
+      printVerifiedAt: "2026-09-01T10:00:05.000Z",
+      printSkippedAt: null,
+    };
+    const exception = {
+      kind: "disassemble" as const,
+      palletId: "device-pallet-0",
+      shiftId,
+      terminalId: "wire-terminal",
+      operatorId,
+      reason: "перепечатка",
+      occurredAt: "2026-09-01T10:01:00.000Z",
+    };
+    const body = syncBatchSchema.parse({
+      batchId: "legacy-digest-2",
+      items: [],
+      boxes: [],
+      exceptions: [],
+      pallets: [closure],
+      palletExceptions: [exception],
+    });
+    expect(body.pallets[0]).toMatchObject({ kind: "production", productId: null });
+
+    await service.applyBatch("tenant-1", body, "station-1");
+
+    // The canonical object the pre-warehouse release built: the closure
+    // without `kind`/`productId`, no `palletMemberships` key at all, and the
+    // authenticated terminal substituted into both pallet channels.
+    expect(captured).toHaveLength(1);
+    expect(captured[0]?.payloadDigest).toBe(
+      sha256({
+        batchId: "legacy-digest-2",
+        items: [],
+        boxes: [],
+        exceptions: [],
+        pallets: [{ ...closure, terminalId: "station-1" }],
+        palletExceptions: [{ ...exception, terminalId: "station-1" }],
+      }),
     );
   });
 });

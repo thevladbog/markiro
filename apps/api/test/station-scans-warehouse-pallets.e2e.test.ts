@@ -72,6 +72,8 @@ describe.skipIf(!ready)("station scans warehouse pallets e2e", () => {
   const B5_SSCC = "003460682000000105";
   /** b6: its items are seeded below, but it closes in the SAME batch that attaches it. */
   const B6_SSCC = "003460682000000106";
+  /** b7: closed, then taken apart from the station before anyone palletises it. */
+  const B7_SSCC = "003460682000000107";
   const UNKNOWN_SSCC = "003460068299999990";
   /** l1, l2: boxes of the READ-ONLY tenant below, closed before its plan lapses. */
   const L1_SSCC = "003460682000000201";
@@ -578,6 +580,51 @@ describe.skipIf(!ready)("station scans warehouse pallets e2e", () => {
     const w7 = await warehousePallet("w7", stationDeviceId);
     expect(await memberBoxSsccs(w7.id)).toEqual([B2_SSCC]);
     expect(await rejections(w7.id)).toEqual([]);
+  });
+
+  it("refuses a box that was disassembled after it closed", async () => {
+    // The box is built, closed and taken apart entirely through the station
+    // path, so the refusal is reached the way a real handheld reaches it: the
+    // box exists, carries an SSCC and matches the pallet's product, and only
+    // `boxes.disassembled_at` stands between it and the pallet.
+    await postBatch({ items: [item(GTIN_A, shift1Id, "b7-71", "b7")] });
+    await postBatch({
+      boxes: [
+        {
+          boxId: "b7",
+          shiftId: shift1Id,
+          terminalId: "t1",
+          sscc: B7_SSCC,
+          closedAt: "2026-09-17T11:00:00.000Z",
+          operatorId,
+          devicePalletId: null,
+        },
+      ],
+    });
+    await postBatch({
+      exceptions: [
+        {
+          kind: "disassemble",
+          boxId: "b7",
+          codeHash: null,
+          targetScannedAt: null,
+          shiftId: shift1Id,
+          terminalId: "t1",
+          operatorId: null,
+          reason: "короб вскрыт на складе",
+          occurredAt: "2026-09-17T11:30:00.000Z",
+        },
+      ],
+    });
+
+    const res = await postBatch({ palletMemberships: [membership("w8", B7_SSCC)] });
+    expect(res.body.memberships).toEqual([
+      { palletId: "w8", boxSscc: B7_SSCC, status: "disassembled" },
+    ]);
+
+    const w8 = await warehousePallet("w8", stationDeviceId);
+    expect(await memberBoxSsccs(w8.id)).toEqual([]);
+    expect(await rejections(w8.id)).toEqual([{ boxSscc: B7_SSCC, reason: "disassembled" }]);
   });
 
   /**
