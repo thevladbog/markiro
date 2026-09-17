@@ -92,4 +92,4 @@ abstract class HandheldDatabase : RoomDatabase() {
     abstract fun writeoffBoxDao(): WriteoffBoxDao
 }
 
-const val HANDHELD_DATABASE_VERSION = 16
+const val HANDHELD_DATABASE_VERSION = 17

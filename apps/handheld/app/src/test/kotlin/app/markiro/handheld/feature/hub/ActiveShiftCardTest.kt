@@ -67,6 +67,20 @@ class ActiveShiftCardTest {
         compose.onNode(progress, useUnmergedTree = true).assertDoesNotExist()
     }
 
+    /** The operator used to learn about a missing GLN on the twentieth scan; the card says it from entry. */
+    @Test
+    fun anAggregationShiftWithoutAnSsccSourceWarnsOnTheCard() {
+        show(HubActiveShift(shift.copy(mode = "aggregation", ssccIssuerPrefix = null, ssccIssuerProblem = "org_gln_missing"), 0))
+        compose.onNodeWithText("В организации не задан GLN", substring = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun aValidationShiftHasNoSsccWarning() {
+        show(HubActiveShift(shift.copy(mode = "validation", ssccIssuerPrefix = null), 0))
+        compose.onNodeWithText("GLN", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("SSCC", substring = true).assertDoesNotExist()
+    }
+
     @Test
     fun aZeroPlanHasNoProgressBar() {
         show(HubActiveShift(shift.copy(plannedQty = 0), 0))

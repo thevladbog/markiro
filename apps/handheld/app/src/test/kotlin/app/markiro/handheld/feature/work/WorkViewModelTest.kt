@@ -342,6 +342,84 @@ class WorkViewModelTest {
         assertEquals(0, db.boxDao().unacked(10).size)
     }
 
+    /**
+     * Found on the emulator: the twentieth unit was written into the box
+     * BEFORE the close was attempted, and a refused close rolled nothing back
+     * and blocked nothing -- the box went to 21 / 20, 22 / 20, without limit.
+     */
+    @Test
+    fun aFullBoxWhoseCloseWasRefusedAcceptsNoMoreUnits() = runTest {
+        aggregating(capacity = 2)
+        db.shiftDao().upsert(checkNotNull(db.shiftDao().get("s1")).copy(ssccIssuerPrefix = null))
+        val vm = vm()
+        advanceUntilIdle()
+        scan("a")
+        vm.state.first { it.box?.filled == 1 }
+        scan("b")
+        val refused = vm.closeStep.first { it is BoxCloseStep.Refused } as BoxCloseStep.Refused
+        assertEquals(CloseResult.NoIssuer, refused.reason)
+        vm.dismissClose()
+        played.clear()
+
+        scan("c")
+        val s = vm.state.first { it.last?.blockedBy == ScanBlock.BOX_FULL }
+        // The unit was refused, not recorded: the box stays at capacity.
+        assertEquals(2, db.codeDao().countForShift("s1"))
+        assertEquals(2, s.box?.filled)
+        // And the reason stays on the work screen, not only in the dismissed state.
+        assertEquals(CloseResult.NoIssuer, s.boxRefusal)
+        assertEquals(listOf(SignalKind.ERROR), played)
+        // No second full-screen refusal for a scan the operator already knows will not fit.
+        assertEquals(BoxCloseStep.Idle, vm.closeStep.value)
+    }
+
+    /** Once the reason is gone, the next unit closes the full box and starts the next one. */
+    @Test
+    fun aRefusedCloseIsRetriedByTheNextScanWhichThenJoinsTheNewBox() = runTest {
+        db.shiftDao().upsert(
+            ShiftEntityFixtures.bundled("s1").copy(mode = "aggregation", boxCapacity = 2, ssccIssuerPrefix = "468008990"),
+        )
+        val vm = vm()
+        advanceUntilIdle()
+        scan("a")
+        vm.state.first { it.box?.filled == 1 }
+        scan("b")
+        vm.closeStep.first { it is BoxCloseStep.Refused }
+        vm.dismissClose()
+        assertEquals(CloseResult.NoSerials, vm.state.first { it.boxRefusal != null }.boxRefusal)
+
+        SsccPool(db).addRange(ServerRange("468008990", 0, 1, 100, null))
+        scan("c")
+        vm.closeStep.first { it is BoxCloseStep.Failed || it is BoxCloseStep.Printed }
+        val next = vm.state.first { it.box?.ordinal == 2 && it.box?.filled == 1 }
+        assertNull(next.boxRefusal)
+        assertEquals(3, db.codeDao().countForShift("s1"))
+        assertEquals(1, db.boxDao().unacked(10).size)
+    }
+
+    /**
+     * The header read «Короб 1 · 21 / 20» after an undo on the exceptions
+     * screen until the next scan: the box was recomputed only on scan and on
+     * entry. It follows the rows now, whatever screen changed them.
+     */
+    @Test
+    fun theBoxHeaderFollowsAnUndoMadeOnAnotherScreen() = runTest {
+        aggregating(capacity = 20)
+        val vm = vm()
+        advanceUntilIdle()
+        scan("a")
+        vm.state.first { it.box?.filled == 1 }
+        scan("b")
+        vm.state.first { it.box?.filled == 2 }
+        val box = checkNotNull(db.boxDao().open("s1"))
+        val last = checkNotNull(db.codeDao().lastIn(box.boxId))
+        ExceptionEngine(db).undoLastScan("s1", box.boxId, last.codeHash, "op-1", "dev-1")
+        // Awaited, not advanced: Room emits on its own executor, and the flow
+        // is what carries the undo here -- no scan, no re-entry.
+        assertEquals(1, vm.state.first { it.box?.filled == 1 }.box?.filled)
+        assertEquals(1, db.boxDao().itemCount(box.boxId))
+    }
+
     @Test
     fun closingEarlyNumbersWhatIsActuallyInTheBox() = runTest {
         aggregating(capacity = 20)

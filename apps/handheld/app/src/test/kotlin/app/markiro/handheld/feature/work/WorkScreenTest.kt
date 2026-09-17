@@ -9,6 +9,7 @@ import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.markiro.handheld.core.design.MarkiroTheme
 import app.markiro.handheld.core.km.Verdict
+import app.markiro.handheld.core.km.feedTail
 import app.markiro.handheld.core.network.ParticipantDto
 import app.markiro.handheld.core.storage.ScanEventEntity
 import app.markiro.handheld.core.sync.SyncState
@@ -100,6 +101,69 @@ class WorkScreenTest {
         compose.onNodeWithText("+1").assertIsDisplayed()
         compose.onNodeWithText("+1").performClick()
         compose.onNodeWithText("Петров Иван").assertIsDisplayed()
+    }
+
+    /** «Досрочно» on a box that is full misleads; on an over-full one it is nonsense. */
+    @Test
+    fun theCloseBoxActionDropsTheWordEarlyOnceTheBoxIsFull() {
+        var closed = 0
+        compose.setContent {
+            MarkiroTheme {
+                WorkScreen(ui.copy(box = BoxUi(ordinal = 1, filled = 20, capacity = 20)), WorkCallbacks(onCloseBoxEarly = { closed++ }))
+            }
+        }
+        compose.onNodeWithContentDescription("Ещё").performClick()
+        compose.onNodeWithText("Закрыть короб (20)").assertIsDisplayed().performClick()
+        assertEquals(1, closed)
+    }
+
+    @Test
+    fun theCloseBoxActionSaysEarlyWhileTheBoxIsNotFull() {
+        compose.setContent {
+            MarkiroTheme { WorkScreen(ui.copy(box = BoxUi(ordinal = 1, filled = 5, capacity = 20)), WorkCallbacks()) }
+        }
+        compose.onNodeWithContentDescription("Ещё").performClick()
+        compose.onNodeWithText("Закрыть короб досрочно (5)").assertIsDisplayed()
+    }
+
+    /** The hub names the scanner profile; the work screen said a bare «Сканер» for the same state. */
+    @Test
+    fun theScannerChipNamesTheProfileAsTheHubDoes() {
+        compose.setContent { MarkiroTheme { WorkScreen(ui.copy(scannerLabel = "Urovo"), WorkCallbacks()) } }
+        compose.onNodeWithText("Urovo").assertIsDisplayed()
+        compose.onNodeWithText("Сканер").assertDoesNotExist()
+    }
+
+    @Test
+    fun anAggregationShiftWithoutAnSsccSourceWarnsOnTheWorkScreen() {
+        val shift = ShiftEntityFixtures.bundled("s1").copy(mode = "aggregation", boxCapacity = 20, ssccIssuerPrefix = null, ssccIssuerProblem = "issuer_gln_missing")
+        compose.setContent {
+            MarkiroTheme { WorkScreen(ui.copy(shift = shift, box = BoxUi(1, 0, 20)), WorkCallbacks()) }
+        }
+        compose.onNodeWithText("У контрагента-эмитента нет GLN", substring = true).assertIsDisplayed()
+    }
+
+    /**
+     * A full box whose close was refused keeps its reason on screen, not only
+     * in the full-screen state the operator dismissed. The strip names what
+     * happened to the refused unit itself.
+     */
+    @Test
+    fun aRefusedCloseKeepsItsReasonOnTheWorkScreen() {
+        compose.setContent {
+            MarkiroTheme {
+                WorkScreen(
+                    ui.copy(
+                        box = BoxUi(ordinal = 1, filled = 20, capacity = 20),
+                        boxRefusal = app.markiro.handheld.core.box.CloseResult.NoSerials,
+                        last = LastScan(Verdict.OK, "—", null, "2026-09-10T08:00:00.000Z", blockedBy = ScanBlock.BOX_FULL),
+                    ),
+                    WorkCallbacks(),
+                )
+            }
+        }
+        compose.onNodeWithText("Закончились номера SSCC", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("КОРОБ ПОЛОН").assertIsDisplayed()
     }
 
     /**

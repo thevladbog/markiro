@@ -135,7 +135,9 @@ describe("shifts OpenAPI contract", () => {
         "defaultBoxLabelTemplateId",
         "defaultSource",
         "validationPrintProtocol",
+        "orgGlnConfigured",
       ]);
+      expect(property(planning, "orgGlnConfigured")).toMatchObject({ type: "boolean" });
       expect(property(planning, "validationPrintProtocol")).toMatchObject({
         enum: ["validation-dm-duplicate-v1"],
         nullable: true,
@@ -286,6 +288,7 @@ describe("shifts OpenAPI contract", () => {
           "counterpartyGln",
           "operators",
           "sscc",
+          "ssccIssuerProblem",
           "ssccRevokedFrom",
           "palletSscc",
           "palletSsccRevokedFrom",
@@ -299,6 +302,7 @@ describe("shifts OpenAPI contract", () => {
           "counterpartyGln",
           "operators",
           "sscc",
+          "ssccIssuerProblem",
           "ssccRevokedFrom",
           "palletSscc",
           "palletSsccRevokedFrom",

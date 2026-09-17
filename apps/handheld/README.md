@@ -30,8 +30,15 @@ Requires JDK 17 and the Android SDK (platform 35); point `local.properties` at i
 ## Active shift on the hub
 
 The joined, locally cached shift appears above the mode tiles with its product,
-line, mode and progress. **Continue** resumes that shift; the **Shift** tile opens
+line, mode and progress. **Continue** re-enters that shift the same way the list
+does (`enter`, then a fresh bundle), so a GLN, serial block or template changed in
+the cabinet after entry reaches the device; offline it falls back to the cached
+bundle, and a refused entry shows the list's own states. The **Shift** tile opens
 all available shifts. Leaving or locally closing the shift removes the card.
+
+An aggregation shift whose bundle carried no SSCC block warns on this card and on
+the work screen from entry — «В организации не задан GLN» or «У контрагента-эмитента
+нет GLN», with where in the cabinet to fix it — rather than on the twentieth scan.
 
 The card uses the work screen's accepted-unit counter: the larger of the server's
 `acceptedUnits` and this handheld's accepted code count. A server snapshot carries
@@ -279,8 +286,12 @@ it was generated in, because one case exercises the local-date path.
 ### Aggregation walk-through against the local API
 
 1. In the cabinet the shift needs four things a validation shift does not: mode
-   «агрегация», a box capacity, a box label template, and a counterparty with a GLN as
-   the SSCC issuer. Without the issuer the device can close no box at all, and says so.
+   «агрегация», a box capacity, a box label template, and a GLN on the organisation
+   profile or on a counterparty named as the SSCC issuer. The server refuses to start an
+   aggregation shift without one (422 `ORG_GLN_MISSING` / `SSCC_ISSUER_GLN_MISSING`), and
+   a shift that lost its GLN after starting warns on the card and the work screen. A full
+   box whose close is refused accepts no further units: the strip says «КОРОБ ПОЛОН» and
+   the reason stays in a banner until a close succeeds.
 2. Enter the shift and send `boxCapacity` scans. The grid fills; the last unit closes the
    box, prints, and the screen clears itself after about a second.
 3. What the stand-in printer captured should carry the bare 18-digit SSCC — the `(00)`

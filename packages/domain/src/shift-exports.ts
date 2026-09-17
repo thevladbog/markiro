@@ -19,9 +19,28 @@ export type ShiftExportFormatId =
   | "shift_xml_gismt_aggregation"
   | "shift_txt_pallets"
   | "shift_csv_pallets"
-  | "shift_xml_gismt_aggregation_pallets";
+  | "shift_xml_gismt_aggregation_pallets"
+  | "shift_txt_pallet_boxes"
+  | "shift_xml_gismt_pallet_boxes";
 
-export type ShiftExportBoxMode = "flat" | "boxes" | "pallets";
+/**
+ * How a format groups the shift's codes. `pallet_boxes` consumes the SAME
+ * `pallets` source as `pallets` but writes only the pallet → box layer (no
+ * KM codes, no loose boxes); see `shiftExportSourceModeFor`.
+ */
+export type ShiftExportBoxMode = "flat" | "boxes" | "pallets" | "pallet_boxes";
+
+/** The `ShiftExportSource.mode` a format's `boxMode` renders from. */
+export function shiftExportSourceModeFor(boxMode: ShiftExportBoxMode): ShiftExportSource["mode"] {
+  return boxMode === "pallet_boxes" ? "pallets" : boxMode;
+}
+
+/** True for every format that needs closed pallets in the shift -- the UI offers these only when the shift has pallets switched on. */
+export function shiftExportFormatRequiresPallets(
+  format: Pick<ShiftExportFormatDescriptor, "boxMode">,
+): boolean {
+  return shiftExportSourceModeFor(format.boxMode) === "pallets";
+}
 
 export interface ShiftExportFormatDescriptor {
   id: ShiftExportFormatId;
@@ -154,6 +173,22 @@ export const SHIFT_EXPORT_FORMATS = Object.freeze([
     mimeType: "application/xml; charset=utf-8",
     boxMode: "pallets",
   } as const),
+  Object.freeze({
+    id: "shift_txt_pallet_boxes",
+    version: 1,
+    label: "[TXT][Паллеты → короба] Отчет смены",
+    extension: "txt",
+    mimeType: "text/plain; charset=utf-8",
+    boxMode: "pallet_boxes",
+  } as const),
+  Object.freeze({
+    id: "shift_xml_gismt_pallet_boxes",
+    version: 1,
+    label: "[XML][ГИСМТ] Агрегация паллет без кодов",
+    extension: "xml",
+    mimeType: "application/xml; charset=utf-8",
+    boxMode: "pallet_boxes",
+  } as const),
 ] as const satisfies readonly ShiftExportFormatDescriptor[]);
 
 /**
@@ -226,7 +261,7 @@ export function getShiftExportFormat(id: string, version: number): ShiftExportFo
 export function renderShiftExport(input: RenderShiftExportInput): ShiftExportPart[] {
   const descriptor = getShiftExportFormat(input.formatId, input.formatVersion);
 
-  if (input.source.mode !== descriptor.boxMode) {
+  if (input.source.mode !== shiftExportSourceModeFor(descriptor.boxMode)) {
     throw new ShiftExportDomainError("FORMAT_SOURCE_MISMATCH");
   }
 
@@ -257,10 +292,16 @@ export function renderShiftExport(input: RenderShiftExportInput): ShiftExportPar
     const partNumber = index + 1;
     const xmlRendered =
       descriptor.extension === "xml" ? renderXmlPart(organizationInn, part.blocks) : null;
+    // The XML renderer counts what it WRITES (`<cis>`, box pack_content); a
+    // `pallet_boxes` document writes neither, so its counters come from the
+    // blocks, which know what each pallet covers.
+    const countFromBlocks = descriptor.boxMode === "pallet_boxes";
     const codeCount =
-      xmlRendered?.codeCount ?? part.blocks.reduce((total, block) => total + block.codeCount, 0);
+      (countFromBlocks ? undefined : xmlRendered?.codeCount) ??
+      part.blocks.reduce((total, block) => total + block.codeCount, 0);
     const boxCount =
-      xmlRendered?.boxCount ?? part.blocks.reduce((total, block) => total + block.boxCount, 0);
+      (countFromBlocks ? undefined : xmlRendered?.boxCount) ??
+      part.blocks.reduce((total, block) => total + block.boxCount, 0);
     const body = xmlRendered?.bytes ?? encodePart(descriptor, part.blocks);
 
     return {
@@ -350,6 +391,14 @@ function createBlocks(
     });
   }
 
+  if (descriptor.boxMode === "pallet_boxes") {
+    // Only the pallet → box layer: one atomic block per pallet naming its
+    // boxes' SSCCs, no KM codes. A loose box has no pallet to report under
+    // and is deliberately not written (the codes it holds were already
+    // exported by a box-level format).
+    return source.pallets.map((pallet) => buildPalletBoxesBlock(descriptor, pallet));
+  }
+
   // Pallets first (in the caller's order -- the API orders them by
   // `closed_at`), loose boxes after. Each pallet group is ONE atomic block
   // (see `buildPalletGroupBlock`); each loose box keeps the same per-box
@@ -358,6 +407,42 @@ function createBlocks(
     ...source.pallets.map((pallet) => buildPalletGroupBlock(descriptor, pallet)),
     ...source.looseBoxes.map((box) => palletModeBoxBlock(descriptor, box, "")),
   ];
+}
+
+/**
+ * A `pallet_boxes` block: the pallet's SSCC followed by its member boxes'
+ * SSCCs, nothing else. `codeCount`/`boxCount` still describe what the
+ * pallet COVERS (so part filenames and the artifact counters keep their
+ * meaning), even though no code is written.
+ */
+function buildPalletBoxesBlock(
+  descriptor: ShiftExportFormatDescriptor,
+  pallet: ShiftExportPalletGroup,
+): ShiftExportBlock {
+  const codeCount = pallet.boxes.reduce((total, box) => total + box.codes.length, 0);
+  const boxCount = pallet.boxes.length;
+
+  if (descriptor.extension === "xml") {
+    const xmlPallet: GismtAggregationPallet = {
+      sscc: pallet.sscc,
+      boxSsccs: pallet.boxes.map((box) => box.sscc),
+    };
+    return {
+      xmlBoxes: [],
+      xmlPallet,
+      isPalletGroup: true,
+      physicalLineCount: gismtAggregationPalletLineCount(xmlPallet),
+      codeCount,
+      boxCount,
+    };
+  }
+
+  const lines = [
+    formatBoxSscc(pallet.sscc),
+    ...pallet.boxes.map((box) => formatBoxSscc(box.sscc)),
+    "",
+  ];
+  return { lines, isPalletGroup: true, physicalLineCount: lines.length, codeCount, boxCount };
 }
 
 /**
@@ -530,10 +615,7 @@ function createFilename(input: {
   partNumber: number;
   hasMultipleParts: boolean;
 }): string {
-  const boxCountSegment =
-    input.descriptor.boxMode === "boxes" || input.descriptor.boxMode === "pallets"
-      ? `_${input.boxCount}box`
-      : "";
+  const boxCountSegment = input.descriptor.boxMode === "flat" ? "" : `_${input.boxCount}box`;
   const partSegment = input.hasMultipleParts ? `_часть_${input.partNumber}` : "";
 
   return `${input.productName}_${input.codeCount}pcs${boxCountSegment}_${input.shiftDate}${partSegment}.${input.descriptor.extension}`;

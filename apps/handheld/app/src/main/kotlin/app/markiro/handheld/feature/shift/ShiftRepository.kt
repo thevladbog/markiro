@@ -86,6 +86,7 @@ fun ShiftDto.toEntity(existing: ShiftEntity?, now: Long) = ShiftEntity(
     shelfLifeDays = existing?.shelfLifeDays,
     egaisCode = existing?.egaisCode,
     ssccIssuerPrefix = existing?.ssccIssuerPrefix,
+    ssccIssuerProblem = existing?.ssccIssuerProblem,
     duplicateVerification = existing?.duplicateVerification,
     duplicateTemplate = existing?.duplicateTemplate,
     duplicateTemplateDigest = existing?.duplicateTemplateDigest,
@@ -169,6 +170,7 @@ class ShiftRepository(
                     shelfLifeDays = bundle.product.shelfLifeDays,
                     egaisCode = bundle.product.egaisCode,
                     ssccIssuerPrefix = bundle.sscc?.issuerPrefix,
+                    ssccIssuerProblem = bundle.ssccIssuerProblem,
                     duplicateVerification = bundle.shift.validationPrint.verification,
                     duplicateTemplate = bundle.shift.validationPrint.snapshot?.spec?.toString(),
                     duplicateTemplateDigest = bundle.shift.validationPrint.snapshot?.digest,
@@ -283,7 +285,16 @@ class ShiftRepository(
 
     suspend fun leave(shiftId: String) = db.recovery.commit { leaveOwned(shiftId) }
 
-    private suspend fun leaveOwned(shiftId: String) = db.shiftDao().setLeftAt(shiftId, clock())
+    /**
+     * A local mark only. The hub card and the list's «Продолжить» follow
+     * `activeShiftId`, so it goes with the shift (as `ShiftCloser` and the
+     * inventory leave already do); the mirror row, its bundle, queued scans and
+     * unprinted boxes stay for the sync engines and a later re-entry.
+     */
+    private suspend fun leaveOwned(shiftId: String) {
+        db.shiftDao().setLeftAt(shiftId, clock())
+        db.deviceConfigDao().get()?.let { if (it.activeShiftId == shiftId) db.deviceConfigDao().upsert(it.copy(activeShiftId = null)) }
+    }
 
     private fun errorCode(e: HttpException): String? =
         runCatching { json.decodeFromString(ErrorBody.serializer(), e.response()?.errorBody()?.string().orEmpty()).code }.getOrNull()

@@ -116,6 +116,8 @@ describe("shift exports OpenAPI contract", () => {
         "shift_txt_pallets",
         "shift_csv_pallets",
         "shift_xml_gismt_aggregation_pallets",
+        "shift_txt_pallet_boxes",
+        "shift_xml_gismt_pallet_boxes",
       ]);
       expect(property(create, "formatVersion")).toMatchObject({ type: "integer", minimum: 1 });
       expect(property(create, "maxLines")).toMatchObject({
@@ -140,6 +142,8 @@ describe("shift exports OpenAPI contract", () => {
         "shift_txt_pallets",
         "shift_csv_pallets",
         "shift_xml_gismt_aggregation_pallets",
+        "shift_txt_pallet_boxes",
+        "shift_xml_gismt_pallet_boxes",
       ]);
 
       const createPallet = requestSchema(document, "/pallets/{palletId}/exports");
@@ -203,6 +207,8 @@ describe("shift exports OpenAPI contract", () => {
         "shift_txt_pallets",
         "shift_csv_pallets",
         "shift_xml_gismt_aggregation_pallets",
+        "shift_txt_pallet_boxes",
+        "shift_xml_gismt_pallet_boxes",
         "pallet_xml_gismt_aggregation",
       ]);
       // 0, not 1: a per-pallet aggregation names box SSCCs and no unit codes.

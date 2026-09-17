@@ -32,7 +32,11 @@ import androidx.compose.ui.unit.sp
 import app.markiro.handheld.R
 import app.markiro.handheld.core.design.MarkiroSizes
 import app.markiro.handheld.core.design.MarkiroTheme
+import app.markiro.handheld.core.design.Tone
+import app.markiro.handheld.core.design.tone
 import app.markiro.handheld.core.util.TimeText
+import app.markiro.handheld.feature.shift.label
+import app.markiro.handheld.feature.shift.ssccWarning
 import java.text.NumberFormat
 
 @Composable
@@ -58,6 +62,10 @@ internal fun ActiveShiftCard(active: HubActiveShift, onContinue: () -> Unit) {
             Text(stringResource(R.string.hub_active_shift), style = t.label, color = c.accent)
             Text(title, style = t.strong, color = c.fg1)
             Text(listOfNotNull(shift.lineName?.takeIf { it.isNotBlank() }, mode).joinToString(" · "), style = t.body.copy(fontSize = 14.sp), color = c.fg2)
+            // Said here, at entry, rather than by a refused close twenty scans in.
+            shift.ssccWarning()?.let { warning ->
+                Text(stringResource(warning.label()), style = t.body.copy(fontSize = 14.sp), color = c.tone(Tone.Warn).fg)
+            }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2), verticalAlignment = Alignment.Bottom) {
                 Text(count, modifier = Modifier.weight(1f), style = t.code.copy(fontWeight = FontWeight.SemiBold), color = c.fg1)
                 if (plan != null) Text("${numbers.format(accepted.toLong() * 100 / plan)} %", style = t.caption.copy(fontSize = 14.sp), color = c.fg3)

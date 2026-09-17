@@ -184,6 +184,10 @@ describe.skipIf(!ready)("box registry pallet membership e2e", () => {
       })
       .expect(201);
     shiftId = (shift.body as { id: string }).id;
+    // The organisation's own GLN, sharing ISSUER_PREFIX with the SSCCs below:
+    // activating an aggregation shift refuses with ORG_GLN_MISSING when no GLN
+    // can number its boxes.
+    await agent.put("/org/profile").send({ gln: "0346006820014" }).expect(200);
     await agent.post(`/shifts/${shiftId}/open`).expect(200);
 
     const employee = await agent.post("/employees").send({ fullName: "Operator One" }).expect(201);

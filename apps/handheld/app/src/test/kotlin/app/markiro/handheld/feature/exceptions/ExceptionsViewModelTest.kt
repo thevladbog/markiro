@@ -9,6 +9,7 @@ import app.markiro.handheld.MainDispatcherRule
 import app.markiro.handheld.R
 import app.markiro.handheld.core.auth.OperatorRecord
 import app.markiro.handheld.core.exceptions.ExceptionEngine
+import app.markiro.handheld.core.km.serialTail
 import app.markiro.handheld.core.storage.BoxEntity
 import app.markiro.handheld.core.storage.CodeEntity
 import app.markiro.handheld.core.storage.DeviceConfigEntity
@@ -68,20 +69,27 @@ class ExceptionsViewModelTest {
         ),
     )
 
-    private suspend fun scan(hash: String, at: String) =
-        db.codeDao().insert(CodeEntity(hash, "s1", "04600000000015", hash.take(6), at, "box-1"))
+    private suspend fun scan(hash: String, at: String, serial: String = hash.take(6)) =
+        db.codeDao().insert(CodeEntity(hash, "s1", "04600000000015", serial, at, "box-1"))
 
     private fun vm() = main.track(
         ExceptionsViewModel(db, ExceptionEngine(db), session, SavedStateHandle(mapOf("shiftId" to "s1"))),
     )
 
-    /** The list names the undo target, because that is what the operator confirms against. */
+    /**
+     * The list names the undo target, because that is what the operator
+     * confirms against -- by the SAME serial tail the work screen's journal
+     * shows. Found on the emulator: this screen showed six characters of the
+     * hash («81FF42») while the journal two taps away showed «…LHnBNvDM» for
+     * the same unit, and nobody could match the two.
+     */
     @Test
-    fun theListNamesTheLastScan() = runTest {
+    fun theListNamesTheLastScanByItsSerialTail() = runTest {
         openBox()
-        scan(a, "2026-09-11T07:59:00.000Z")
+        scan(a, "2026-09-11T07:59:00.000Z", serial = "ABCDEF1234")
         val ui = vm().state.first { it.undoTarget != null }
-        assertEquals(a.takeLast(6).uppercase(), ui.undoTarget!!.codeTail)
+        assertEquals(serialTail("ABCDEF1234"), ui.undoTarget!!.codeTail)
+        assertEquals("…CDEF1234", ui.undoTarget!!.codeTail)
         assertTrue(ui.canUndo)
     }
 

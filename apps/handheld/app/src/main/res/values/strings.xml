@@ -409,6 +409,8 @@
     <!-- Aggregation: boxes -->
     <string name="work_box_header">Короб %1$d · %2$d / %3$d</string>
     <string name="work_close_box_early">Закрыть короб досрочно (%1$d)</string>
+    <string name="work_close_box_full">Закрыть короб (%1$d)</string>
+    <string name="work_box_full">КОРОБ ПОЛОН</string>
     <!-- Aggregation: pallets (06d) -->
     <string name="pallet_strip">%1$d / %2$d коробов</string>
     <string name="work_close_pallet_early">Закрыть паллету досрочно</string>
@@ -437,6 +439,10 @@
     <string name="box_refused_no_serials_hint">Короб остался открытым. Подключитесь к сети — устройство получит новый блок номеров.</string>
     <string name="box_refused_empty">В коробе ничего нет</string>
     <string name="box_refused_no_issuer">У смены не задан эмитент SSCC</string>
+    <string name="sscc_warning_org_gln">В организации не задан GLN — коробам не будут присвоены SSCC. Укажите GLN в кабинете: Настройки → Профиль организации, затем войдите в смену заново.</string>
+    <string name="sscc_warning_issuer_gln">У контрагента-эмитента нет GLN — коробам не будут присвоены SSCC. Укажите GLN в кабинете: Контрагенты, затем войдите в смену заново.</string>
+    <string name="sscc_warning_no_block">У смены нет блока номеров SSCC — короба не закроются. Войдите в смену заново при связи с сервером.</string>
+    <string name="box_refused_no_issuer_hint">Короб остался открытым. Укажите GLN в кабинете и войдите в смену заново.</string>
     <string name="box_refused_invalid_serial">Номер не подошёл под префикс</string>
     <string name="box_refused_invalid_serial_hint">Короб остался открытым. Попробуйте закрыть ещё раз.</string>
     <string name="box_refused_dismiss">Понятно</string>

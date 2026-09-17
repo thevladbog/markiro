@@ -73,6 +73,14 @@ data class ShiftBundleDto(
      */
     val palletLabelTemplate: BundleLabelTemplateDto? = null,
     val sscc: BundleSsccDto? = null,
+    /**
+     * Why [sscc] is null when the shift's issuer cannot be resolved at all:
+     * `org_gln_missing` or `issuer_gln_missing`. Null when a block was cut or
+     * when it is missing for another reason (a planned shift, a read-only
+     * subscription, an exhausted prefix). The device warns from entry rather
+     * than letting the operator find out on the twentieth scan.
+     */
+    val ssccIssuerProblem: String? = null,
     /** `fromSerial` of every block an admin has revoked since it was granted. */
     val ssccRevokedFrom: List<Long> = emptyList(),
     /**

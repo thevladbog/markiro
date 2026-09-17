@@ -356,6 +356,22 @@ const FORMATS = [
     mimeType: "application/xml; charset=utf-8",
     boxMode: "pallets",
   },
+  {
+    id: "shift_txt_pallet_boxes",
+    version: 1,
+    label: "[TXT][Паллеты → короба] Отчет смены",
+    extension: "txt",
+    mimeType: "text/plain; charset=utf-8",
+    boxMode: "pallet_boxes",
+  },
+  {
+    id: "shift_xml_gismt_pallet_boxes",
+    version: 1,
+    label: "[XML][ГИСМТ] Агрегация паллет без кодов",
+    extension: "xml",
+    mimeType: "application/xml; charset=utf-8",
+    boxMode: "pallet_boxes",
+  },
 ] as const;
 
 function failedExport(errorCode: string) {
@@ -407,6 +423,8 @@ describe("pallet export formats", () => {
     expect(await screen.findByLabelText("[TXT][Паллеты] Отчет смены")).toBeDefined();
     expect(screen.getByLabelText("[CSV][Паллеты] Отчет смены")).toBeDefined();
     expect(screen.getByLabelText("[XML][ГИСМТ] Паллетная агрегация")).toBeDefined();
+    expect(screen.getByLabelText("[TXT][Паллеты → короба] Отчет смены")).toBeDefined();
+    expect(screen.getByLabelText("[XML][ГИСМТ] Агрегация паллет без кодов")).toBeDefined();
   });
 
   it("hides every pallet format for a shift that never used pallets", async () => {

@@ -12,6 +12,7 @@ const FLAT = { boxMode: "flat", extension: "txt" } as const;
 const BOXES = { boxMode: "boxes", extension: "txt" } as const;
 const XML_BOXES = { boxMode: "boxes", extension: "xml" } as const;
 const PALLETS = { boxMode: "pallets", extension: "txt" } as const;
+const XML_PALLET_BOXES = { boxMode: "pallet_boxes", extension: "xml" } as const;
 const HASH_A = "a".repeat(64);
 const HASH_B = "b".repeat(64);
 const HASH_C = "c".repeat(64);
@@ -769,6 +770,54 @@ describe("ShiftExportSourceService", () => {
 
       await expectSourceError(
         new ShiftExportSourceService(fake.db).load("tenant-1", "shift-1", PALLETS),
+        "SHIFT_HAS_NO_PALLETS",
+      );
+    });
+
+    it("loads the pallet → boxes formats from the same pallets source, INN included for XML", async () => {
+      const fake = fakeDb({
+        shifts: [closedShift()],
+        orgProfiles: [{ tenantId: "tenant-1", inn: "9705119097" }],
+        registry: [
+          registryRow(HASH_A, "2026-08-13T10:00:00.000Z"),
+          registryRow(HASH_B, "2026-08-13T10:00:01.000Z"),
+        ],
+        codeHistory: [
+          codeRow(HASH_A, "2026-08-13T10:00:00.000Z", "code-a"),
+          codeRow(HASH_B, "2026-08-13T10:00:01.000Z", "code-b"),
+        ],
+        memberships: [
+          membership("box-1", "100000000000000001", HASH_A, { palletId: "pallet-1" }),
+          membership("box-loose", "300000000000000003", HASH_B),
+        ],
+        pallets: [palletRow("pallet-1", "500000000000000005", new Date())],
+      });
+
+      await expect(
+        new ShiftExportSourceService(fake.db).load("tenant-1", "shift-1", XML_PALLET_BOXES),
+      ).resolves.toMatchObject({
+        organizationInn: "9705119097",
+        source: {
+          mode: "pallets",
+          pallets: [
+            {
+              sscc: "500000000000000005",
+              boxes: [{ sscc: "100000000000000001", codes: ["code-a"] }],
+            },
+          ],
+          looseBoxes: [{ sscc: "300000000000000003", codes: ["code-b"] }],
+        },
+      });
+
+      const loose = fakeDb({
+        shifts: [closedShift()],
+        orgProfiles: [{ tenantId: "tenant-1", inn: "9705119097" }],
+        registry: [registryRow(HASH_A, "2026-08-13T10:00:00.000Z")],
+        codeHistory: [codeRow(HASH_A, "2026-08-13T10:00:00.000Z", "code-a")],
+        memberships: [membership("box-1", "100000000000000001", HASH_A)],
+      });
+      await expectSourceError(
+        new ShiftExportSourceService(loose.db).load("tenant-1", "shift-1", XML_PALLET_BOXES),
         "SHIFT_HAS_NO_PALLETS",
       );
     });

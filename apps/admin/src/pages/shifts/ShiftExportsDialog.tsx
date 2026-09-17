@@ -13,7 +13,7 @@ import {
 } from "@markiro/ui";
 import type { StatusChipStatus } from "@markiro/ui";
 
-import type { ShiftExportFormatId } from "@markiro/domain";
+import { shiftExportFormatRequiresPallets, type ShiftExportFormatId } from "@markiro/domain";
 
 import { ApiRequestError } from "../../api/client.js";
 import type { ShiftDto } from "./api.js";
@@ -325,12 +325,14 @@ export function ShiftExportsContent({
    * that never stacked pallets does not fail fast: it is accepted, queued,
    * and only then fails asynchronously with `SHIFT_HAS_NO_PALLETS`, leaving a
    * red row in the history for something that could never have worked. So the
-   * three `boxMode: "pallets"` formats are offered only for a shift that
+   * pallet-gated formats (`shiftExportFormatRequiresPallets`) are offered only for a shift that
    * switched pallets on.
    */
   const offeredFormats = useMemo(
     () =>
-      (formats.data ?? []).filter((format) => shift.palletsEnabled || format.boxMode !== "pallets"),
+      (formats.data ?? []).filter(
+        (format) => shift.palletsEnabled || !shiftExportFormatRequiresPallets(format),
+      ),
     [formats.data, shift.palletsEnabled],
   );
 
