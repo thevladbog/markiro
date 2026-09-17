@@ -26,6 +26,7 @@ export const employeePickupPolicySchema = z.object({
   limitMode: z.enum(["limited", "unlimited"]),
   dayLimit: z.number().int().min(1),
   canWriteoff: z.boolean(),
+  canBuildPallets: z.boolean().default(false),
 });
 export type UpdateEmployeePickupPolicyDto = z.infer<typeof employeePickupPolicySchema>;
 
@@ -70,6 +71,7 @@ export interface EmployeePickupPolicyDto {
   limitMode: "limited" | "unlimited";
   dayLimit: number;
   canWriteoff: boolean;
+  canBuildPallets: boolean;
 }
 export interface BulkEmployeePickupPolicyItemDto extends EmployeePickupPolicyDto {
   employeeId: string;
@@ -122,11 +124,12 @@ const badgeOpenApiSchema: SchemaObject = {
 const employeePickupPolicyOpenApiSchema: SchemaObject = {
   type: "object",
   additionalProperties: false,
-  required: ["limitMode", "dayLimit", "canWriteoff"],
+  required: ["limitMode", "dayLimit", "canWriteoff", "canBuildPallets"],
   properties: {
     limitMode: { type: "string", enum: ["limited", "unlimited"] },
     dayLimit: { type: "integer", minimum: 1 },
     canWriteoff: { type: "boolean" },
+    canBuildPallets: { type: "boolean" },
   },
 };
 

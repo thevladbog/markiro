@@ -215,6 +215,7 @@ export class EmployeesService {
       limitMode: dto.limitMode,
       dayLimit: dto.dayLimit,
       canWriteoff: before.canWriteoff,
+      canBuildPallets: before.canBuildPallets,
     }));
   }
 
@@ -227,6 +228,7 @@ export class EmployeesService {
       limitMode: before.limitMode,
       dayLimit: before.dayLimit,
       canWriteoff: dto.canWriteoff,
+      canBuildPallets: before.canBuildPallets,
     }));
   }
 
@@ -395,6 +397,7 @@ export class EmployeesService {
       limitMode: policy.limitMode,
       dayLimit: policy.dayLimit,
       canWriteoff: policy.canWriteoff,
+      canBuildPallets: policy.canBuildPallets,
     };
   }
 

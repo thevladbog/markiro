@@ -4,7 +4,6 @@ import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { and, eq } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
@@ -121,16 +120,10 @@ describe.skipIf(!ready)("station pallet bootstrap e2e", () => {
       employeeId,
       canBuildPallets: false,
     });
-    // TODO(Task 7): set via PATCH /employees/:id/pickup-policy
-    await db
-      .update(schema.employeePickupPolicies)
-      .set({ canBuildPallets: true })
-      .where(
-        and(
-          eq(schema.employeePickupPolicies.tenantId, tenantId),
-          eq(schema.employeePickupPolicies.employeeId, employeeId),
-        ),
-      );
+    await cabinetAgent
+      .patch(`/employees/${employeeId}/pickup-policy`)
+      .send({ limitMode: "limited", dayLimit: 5, canWriteoff: false, canBuildPallets: true })
+      .expect(200);
 
     const orgTemplateId = await createPalletTemplate(cabinetAgent, "Organisation pallet default");
     const categoryTemplateId = await createPalletTemplate(cabinetAgent, "Category 8 pallet", {
