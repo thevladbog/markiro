@@ -433,6 +433,18 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
     ],
   },
   {
+    // The handheld's pallet reference data. Reading pallet capacities, the
+    // operator's pallet permission and the device's SSCC block is not
+    // aggregation work, so it stays available while a subscription is
+    // read-only -- the service withholds the SSCC block in that state instead
+    // of refusing the whole bootstrap.
+    contract: customerContract(CABINET_STATION_GUARDS, {
+      mode: "read_only_allowed",
+      reason: "read",
+    }),
+    routes: ["GET /station/pallet-bootstrap (StationPalletsController.bootstrap)"],
+  },
+  {
     contract: customerContract(KIOSK_GUARDS, { mode: "read_only_allowed", reason: "read" }),
     routes: [
       "GET /kiosk/grants/v1/keyset (KioskGrantsController.keyset)",
@@ -1029,7 +1041,8 @@ describe("registered subscription route inventory", () => {
             ["enterShift", "getCodeHistory"].includes(route.handlerName)) ||
           (route.controller.name === "StationShiftCloseController" &&
             route.handlerName === "close") ||
-          route.controller.name === "StationWriteoffsController";
+          route.controller.name === "StationWriteoffsController" ||
+          route.controller.name === "StationPalletsController";
         const expected =
           route.controller.name === "KioskController" ||
           route.controller.name === "KioskGrantsController"
