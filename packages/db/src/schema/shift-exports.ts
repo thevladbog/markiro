@@ -14,7 +14,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { organization, user } from "./auth.js";
-import { shifts } from "./platform.js";
+import { pallets, shifts } from "./platform.js";
 
 export const SHIFT_EXPORT_STATUSES = ["queued", "processing", "ready", "failed"] as const;
 export type ShiftExportStatus = (typeof SHIFT_EXPORT_STATUSES)[number];
@@ -28,7 +28,9 @@ export const shiftExports = pgTable(
     tenantId: text("tenant_id")
       .notNull()
       .references(() => organization.id),
-    shiftId: uuid("shift_id").notNull(),
+    /** Null for a per-pallet export; exactly one of shift_id / pallet_id is set. */
+    shiftId: uuid("shift_id"),
+    palletId: uuid("pallet_id"),
     formatId: text("format_id").notNull(),
     formatVersion: integer("format_version").notNull(),
     maxLines: integer("max_lines"),
@@ -60,6 +62,11 @@ export const shiftExports = pgTable(
       columns: [table.tenantId, table.shiftId],
       foreignColumns: [shifts.tenantId, shifts.id],
     }),
+    foreignKey({
+      name: "shift_exports_tenant_pallet_fk",
+      columns: [table.tenantId, table.palletId],
+      foreignColumns: [pallets.tenantId, pallets.id],
+    }),
     index("shift_exports_tenant_shift_created_idx").on(
       table.tenantId,
       table.shiftId,
@@ -82,6 +89,10 @@ export const shiftExports = pgTable(
       sql`${table.totalBoxCount} is null or ${table.totalBoxCount} >= 0`,
     ),
     check("shift_exports_attempt_count_nonnegative", sql`${table.attemptCount} >= 0`),
+    check(
+      "shift_exports_target_shape",
+      sql`(${table.shiftId} IS NOT NULL AND ${table.palletId} IS NULL) OR (${table.shiftId} IS NULL AND ${table.palletId} IS NOT NULL)`,
+    ),
     check(
       "shift_exports_status_consistency",
       sql`(${table.status} = 'ready' and ${table.completedAt} is not null and ${table.errorCode} is null)

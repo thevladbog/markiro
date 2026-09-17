@@ -1,0 +1,176 @@
+import { randomUUID } from "node:crypto";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { migrate } from "drizzle-orm/node-postgres/migrator";
+import pg from "pg";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { copyMigrationsThroughIndex } from "./support/legacy-migrations.js";
+
+const databaseUrl = process.env.DATABASE_URL;
+const migrationsFolder = fileURLToPath(new URL("../migrations", import.meta.url));
+
+/** The last migration before warehouse pallets. */
+const LAST_LEGACY_INDEX = 161;
+
+describe.skipIf(!databaseUrl)("warehouse pallets migration", () => {
+  const databaseName = `markiro_warehouse_pallets_${randomUUID().replaceAll("-", "_")}`;
+  const scratchUrl = new URL(databaseUrl ?? "postgres://invalid");
+  scratchUrl.pathname = `/${databaseName}`;
+  scratchUrl.search = "";
+  const maintenancePool = new pg.Pool({ connectionString: databaseUrl });
+  const pool = new pg.Pool({ connectionString: scratchUrl.toString() });
+  let temporaryRoot = "";
+  let created = false;
+
+  const tenantId = "wh-pallets-tenant";
+  const productId = randomUUID();
+  const shiftId = randomUUID();
+  const deviceId = randomUUID();
+  const productionPalletId = randomUUID();
+
+  beforeAll(async () => {
+    await maintenancePool.query(`CREATE DATABASE "${databaseName}"`);
+    created = true;
+    temporaryRoot = await mkdtemp(join(tmpdir(), "markiro-wh-pallets-migration-"));
+    const legacyMigrations = join(temporaryRoot, "migrations");
+    await copyMigrationsThroughIndex({
+      sourceFolder: migrationsFolder,
+      targetFolder: legacyMigrations,
+      lastIncludedIndex: LAST_LEGACY_INDEX,
+    });
+    await migrate(drizzle(pool), { migrationsFolder: legacyMigrations });
+
+    await pool.query("INSERT INTO organization (id,name,slug,created_at) VALUES ($1,$1,$1,now())", [
+      tenantId,
+    ]);
+    await pool.query("INSERT INTO org_profiles (tenant_id) VALUES ($1)", [tenantId]);
+    await pool.query(
+      `INSERT INTO products (id,tenant_id,gtin14,name,box_capacity,pallet_box_capacity,status)
+       VALUES ($1,$2,'04600682000013','Cola',20,12,'active')`,
+      [productId, tenantId],
+    );
+    await pool.query(
+      `INSERT INTO shifts (id,tenant_id,product_id,mode,box_capacity,pallet_box_capacity,pallets_enabled,number_month_key,number_seq)
+       VALUES ($1,$2,$3,'aggregation',20,12,true,'SEP26',1)`,
+      [shiftId, tenantId, productId],
+    );
+    await pool.query(
+      `INSERT INTO station_devices (id,tenant_id,name,kind) VALUES ($1,$2,'TSD-1','handheld')`,
+      [deviceId, tenantId],
+    );
+    // A pre-migration production pallet: must survive as kind='production'.
+    await pool.query(
+      `INSERT INTO pallets (id,tenant_id,shift_id,terminal_id,device_pallet_id) VALUES ($1,$2,$3,$4,'p1')`,
+      [productionPalletId, tenantId, shiftId, deviceId],
+    );
+
+    await migrate(drizzle(pool), { migrationsFolder });
+  }, 180_000);
+
+  afterAll(async () => {
+    await pool.end();
+    if (created) await maintenancePool.query(`DROP DATABASE "${databaseName}"`);
+    await maintenancePool.end();
+    if (temporaryRoot) await rm(temporaryRoot, { recursive: true, force: true });
+  });
+
+  it("keeps existing pallets as production pallets", async () => {
+    const { rows } = await pool.query<{ kind: string; product_id: string | null }>(
+      "SELECT kind, product_id FROM pallets WHERE id = $1",
+      [productionPalletId],
+    );
+    expect(rows[0]).toEqual({ kind: "production", product_id: null });
+  });
+
+  it("accepts a warehouse pallet with no shift and refuses one without product or device", async () => {
+    await pool.query(
+      `INSERT INTO pallets (tenant_id,kind,shift_id,terminal_id,device_pallet_id,product_id,device_id)
+       VALUES ($1,'warehouse',NULL,$2,'w1',$3,$4)`,
+      [tenantId, deviceId, productId, deviceId],
+    );
+    await expect(
+      pool.query(
+        `INSERT INTO pallets (tenant_id,kind,shift_id,terminal_id,device_pallet_id,product_id,device_id)
+         VALUES ($1,'warehouse',NULL,$2,'w2',NULL,$3)`,
+        [tenantId, deviceId, deviceId],
+      ),
+    ).rejects.toMatchObject({ constraint: "pallets_kind_shape" });
+    await expect(
+      pool.query(
+        `INSERT INTO pallets (tenant_id,kind,shift_id,terminal_id,device_pallet_id)
+         VALUES ($1,'production',NULL,$2,'p9')`,
+        [tenantId, deviceId],
+      ),
+    ).rejects.toMatchObject({ constraint: "pallets_kind_shape" });
+  });
+
+  it("makes (tenant, device, device_pallet_id) unique for warehouse pallets only", async () => {
+    await expect(
+      pool.query(
+        `INSERT INTO pallets (tenant_id,kind,shift_id,terminal_id,device_pallet_id,product_id,device_id)
+         VALUES ($1,'warehouse',NULL,$2,'w1',$3,$4)`,
+        [tenantId, deviceId, productId, deviceId],
+      ),
+    ).rejects.toMatchObject({ constraint: "pallets_warehouse_device_pallet_uq" });
+  });
+
+  it("creates pallet_membership_rejections with a per-pallet unique sscc", async () => {
+    const { rows } = await pool.query<{ id: string }>(
+      "SELECT id FROM pallets WHERE tenant_id = $1 AND kind = 'warehouse'",
+      [tenantId],
+    );
+    const palletId = rows[0]?.id;
+    expect(palletId).toBeDefined();
+    await pool.query(
+      `INSERT INTO pallet_membership_rejections (tenant_id,pallet_id,box_sscc,reason,added_at)
+       VALUES ($1,$2,'003460068200000017','not_found',now())`,
+      [tenantId, palletId],
+    );
+    await expect(
+      pool.query(
+        `INSERT INTO pallet_membership_rejections (tenant_id,pallet_id,box_sscc,reason,added_at)
+         VALUES ($1,$2,'003460068200000017','not_found',now())`,
+        [tenantId, palletId],
+      ),
+    ).rejects.toMatchObject({ constraint: "pallet_membership_rejections_tenant_pallet_sscc_uq" });
+    await expect(
+      pool.query(
+        `INSERT INTO pallet_membership_rejections (tenant_id,pallet_id,box_sscc,reason,added_at)
+         VALUES ($1,$2,'003460068200000024','accepted',now())`,
+        [tenantId, palletId],
+      ),
+    ).rejects.toMatchObject({ constraint: "pallet_membership_rejections_reason_check" });
+  });
+
+  it("lets pallet_exceptions carry no shift and adds the quarantine kind", async () => {
+    const { rows } = await pool.query<{ is_nullable: string }>(
+      `SELECT is_nullable FROM information_schema.columns
+        WHERE table_name = 'pallet_exceptions' AND column_name = 'shift_id'`,
+    );
+    expect(rows[0]?.is_nullable).toBe("YES");
+    const check = await pool.query<{ def: string }>(
+      `SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint
+        WHERE conname = 'station_sync_quarantine_record_kind_check'`,
+    );
+    expect(check.rows[0]?.def).toContain("'pallet_membership'");
+  });
+
+  it("adds can_build_pallets and the pallet export columns", async () => {
+    const policy = await pool.query<{ column_default: string }>(
+      `SELECT column_default FROM information_schema.columns
+        WHERE table_name = 'employee_pickup_policies' AND column_name = 'can_build_pallets'`,
+    );
+    expect(policy.rows[0]?.column_default).toBe("false");
+    const exportCols = await pool.query<{ column_name: string; is_nullable: string }>(
+      `SELECT column_name, is_nullable FROM information_schema.columns
+        WHERE table_name = 'shift_exports' AND column_name IN ('shift_id','pallet_id') ORDER BY column_name`,
+    );
+    expect(exportCols.rows).toEqual([
+      { column_name: "pallet_id", is_nullable: "YES" },
+      { column_name: "shift_id", is_nullable: "YES" },
+    ]);
+  });
+});

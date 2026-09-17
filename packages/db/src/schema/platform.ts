@@ -653,7 +653,7 @@ export const stationSyncQuarantine = pgTable(
     // unrecognised kinds rather than throwing.
     check(
       "station_sync_quarantine_record_kind_check",
-      sql`${t.recordKind} IN ('item', 'box', 'exception', 'product_label_event', 'pallet', 'pallet_exception')`,
+      sql`${t.recordKind} IN ('item', 'box', 'exception', 'product_label_event', 'pallet', 'pallet_exception', 'pallet_membership')`,
     ),
     check("station_sync_quarantine_record_index_check", sql`${t.recordIndex} >= 0`),
     check("station_sync_quarantine_reason_check", sql`char_length(${t.reason}) BETWEEN 1 AND 64`),
@@ -1062,7 +1062,25 @@ export const pallets = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     tenantId: tenantId(),
-    shiftId: uuid("shift_id").notNull(),
+    /**
+     * Null for a warehouse pallet (kind = 'warehouse'), which is built from
+     * boxes of arbitrary shifts and belongs to none; not null for a
+     * production pallet. `pallets_kind_shape` enforces the pairing.
+     */
+    shiftId: uuid("shift_id"),
+    kind: text("kind").$type<"production" | "warehouse">().notNull().default("production"),
+    /**
+     * Written only for a warehouse pallet: the product every member box must
+     * carry (spec «Homogeneity»). A production pallet's product is reached
+     * through its shift, exactly as a box's is.
+     */
+    productId: uuid("product_id"),
+    /**
+     * The authenticated station device that built a warehouse pallet. Part
+     * of its identity (`pallets_warehouse_device_pallet_uq`) because the
+     * device-local `device_pallet_id` is not unique across devices.
+     */
+    deviceId: uuid("device_id"),
     terminalId: text("terminal_id"),
     devicePalletId: text("device_pallet_id").notNull(),
     sscc: char("sscc", { length: 18 }),
@@ -1097,17 +1115,46 @@ export const pallets = pgTable(
     // `ON CONFLICT (tenant_id, shift_id, terminal_id, device_pallet_id)`
     // would then never fire for a null-terminal device — every batch would
     // insert a NEW pallet row instead of resolving to the one already open.
-    // Unlike `boxes`, this table is CREATED by the migration that carries the
-    // constraint, so it is written correctly in the CREATE TABLE rather than
-    // hand-patched afterwards.
-    unique("pallets_device_pallet_uq")
+    //
+    // Scoped to `kind = 'production'` (0162): a warehouse pallet always has
+    // `shift_id IS NULL`, so an unconditional NULLS-NOT-DISTINCT tuple would
+    // treat every warehouse pallet on the same device with the same
+    // `device_pallet_id` as colliding with THIS constraint instead of
+    // `pallets_warehouse_device_pallet_uq`. Drizzle's index builder cannot
+    // express `NULLS NOT DISTINCT` together with a partial `WHERE` (only the
+    // table-level `unique()` builder has `.nullsNotDistinct()`, and it has no
+    // `.where()`), so the migration hand-adds `NULLS NOT DISTINCT` to the
+    // generated `CREATE UNIQUE INDEX` — the same "beyond the DSL" pattern
+    // `pallet_exceptions_tenant_disaggregation_document_fk` already uses.
+    // `db:generate` does not model that clause, so it will not thrash it on a
+    // future diff as long as this index's columns/predicate stay unchanged.
+    uniqueIndex("pallets_device_pallet_uq")
       .on(t.tenantId, t.shiftId, t.terminalId, t.devicePalletId)
-      .nullsNotDistinct(),
+      .where(sql`${t.kind} = 'production'`),
+    uniqueIndex("pallets_warehouse_device_pallet_uq")
+      .on(t.tenantId, t.deviceId, t.devicePalletId)
+      .where(sql`${t.kind} = 'warehouse'`),
     index("pallets_tenant_shift_idx").on(t.tenantId, t.shiftId),
+    index("pallets_tenant_kind_closed_idx").on(t.tenantId, t.kind, t.closedAt),
+    check("pallets_kind_check", sql`${t.kind} IN ('production', 'warehouse')`),
+    check(
+      "pallets_kind_shape",
+      sql`(${t.kind} = 'production' AND ${t.shiftId} IS NOT NULL) OR (${t.kind} = 'warehouse' AND ${t.shiftId} IS NULL AND ${t.productId} IS NOT NULL AND ${t.deviceId} IS NOT NULL)`,
+    ),
     foreignKey({
       name: "pallets_tenant_shift_fk",
       columns: [t.tenantId, t.shiftId],
       foreignColumns: [shifts.tenantId, shifts.id],
+    }),
+    foreignKey({
+      name: "pallets_tenant_product_fk",
+      columns: [t.tenantId, t.productId],
+      foreignColumns: [products.tenantId, products.id],
+    }),
+    foreignKey({
+      name: "pallets_tenant_device_fk",
+      columns: [t.tenantId, t.deviceId],
+      foreignColumns: [stationDevices.tenantId, stationDevices.id],
     }),
     // Nullable — MATCH SIMPLE skips the check when a pallet closes before an
     // operator is attributed, exactly as for boxes.
@@ -1135,7 +1182,7 @@ export const palletExceptions = pgTable(
     tenantId: tenantId(),
     kind: text("kind").$type<"disassemble" | "reprint">().notNull(),
     palletId: uuid("pallet_id").notNull(),
-    shiftId: uuid("shift_id").notNull(),
+    shiftId: uuid("shift_id"),
     terminalId: text("terminal_id"),
     operatorId: uuid("operator_id"),
     reason: text("reason").notNull(),
@@ -1170,6 +1217,57 @@ export const palletExceptions = pgTable(
       name: "pallet_exceptions_tenant_operator_fk",
       columns: [t.tenantId, t.operatorId],
       foreignColumns: [employees.tenantId, employees.id],
+    }),
+  ],
+);
+
+/**
+ * A membership the server refused (spec §1.4). Append-only: a handheld that
+ * reboots after the batch answer has nothing else to rebuild its conflict
+ * view from, and the cabinet card counts these. Unique per (pallet, sscc)
+ * so a replayed batch cannot duplicate a refusal.
+ */
+export const palletMembershipRejections = pgTable(
+  "pallet_membership_rejections",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    palletId: uuid("pallet_id").notNull(),
+    boxSscc: char("box_sscc", { length: 18 }).notNull(),
+    boxId: uuid("box_id"),
+    reason: text("reason")
+      .$type<
+        "already_on_pallet" | "not_found" | "not_closed" | "disassembled" | "product_mismatch"
+      >()
+      .notNull(),
+    winningPalletId: uuid("winning_pallet_id"),
+    addedAt: timestamp("added_at", { withTimezone: true }).notNull(),
+    recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique("pallet_membership_rejections_tenant_pallet_sscc_uq").on(
+      t.tenantId,
+      t.palletId,
+      t.boxSscc,
+    ),
+    check(
+      "pallet_membership_rejections_reason_check",
+      sql`${t.reason} IN ('already_on_pallet', 'not_found', 'not_closed', 'disassembled', 'product_mismatch')`,
+    ),
+    foreignKey({
+      name: "pallet_membership_rejections_tenant_pallet_fk",
+      columns: [t.tenantId, t.palletId],
+      foreignColumns: [pallets.tenantId, pallets.id],
+    }),
+    foreignKey({
+      name: "pallet_membership_rejections_tenant_box_fk",
+      columns: [t.tenantId, t.boxId],
+      foreignColumns: [boxes.tenantId, boxes.id],
+    }),
+    foreignKey({
+      name: "pallet_membership_rejections_tenant_winning_pallet_fk",
+      columns: [t.tenantId, t.winningPalletId],
+      foreignColumns: [pallets.tenantId, pallets.id],
     }),
   ],
 );

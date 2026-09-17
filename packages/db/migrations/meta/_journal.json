@@ -1135,6 +1135,13 @@
       "when": 1789425212153,
       "tag": "0161_service_usage_acts",
       "breakpoints": true
+    },
+    {
+      "idx": 162,
+      "version": "7",
+      "when": 1789650746642,
+      "tag": "0162_warehouse_pallets",
+      "breakpoints": true
     }
   ]
 }

@@ -123,9 +123,14 @@ describe.skipIf(!databaseUrl)("pallets migration", () => {
     // NULLS NOT DISTINCT is load-bearing: without it the ingest's ON CONFLICT
     // arbiter never fires for a device that has no notion of a terminal, and
     // every batch inserts another pallet row.
+    //
+    // `pallets_device_pallet_uq` moved from a table CONSTRAINT to a partial
+    // unique INDEX in migration 0162 (scoped to `kind = 'production'`, so a
+    // warehouse pallet's null shift_id cannot collide with it instead of
+    // `pallets_warehouse_device_pallet_uq`) — so it no longer has a
+    // `pg_constraint` row; read its definition from `pg_indexes` instead.
     const { rows } = await pool.query(
-      `SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint
-        WHERE conname='pallets_device_pallet_uq'`,
+      `SELECT indexdef AS def FROM pg_indexes WHERE indexname='pallets_device_pallet_uq'`,
     );
     expect(String(rows[0]?.def)).toContain("NULLS NOT DISTINCT");
   });
