@@ -12,7 +12,7 @@ import javax.inject.Singleton
 class ReplacementCoordinator @Inject constructor(private val db: HandheldDatabase, private val api: StationApi, private val recovery: DeviceRecovery) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var observing: Job? = null
-    val targetWaiting: Flow<Boolean> = ReplacementTarget(db).waiting
+    val targetWaiting: Flow<Boolean> = combine(ReplacementTarget(db).waiting,db.metaDao().observe(ReplacementEvidenceRecoveryState.KEY)) {waiting,evidence->waiting || evidence!=null}
     val state: Flow<ReplacementDrainEntity?> = db.replacementDao().observe()
     val counters: Flow<JsonSnapshot> = flow {
         while (currentCoroutineContext().isActive) {

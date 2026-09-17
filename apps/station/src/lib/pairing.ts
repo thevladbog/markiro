@@ -1,3 +1,8 @@
+import { persistReplacementEvidenceRecovery } from "./replacement-evidence-recovery.js";
+import {
+  replacementEvidenceRecoverySchema,
+  type ReplacementEvidenceRecovery,
+} from "@markiro/platform-contracts";
 import { persistTargetReplacementFence } from "./replacement-target.js";
 import {
   deviceReplacementTargetFenceSchema,
@@ -45,6 +50,7 @@ export interface StationProvisioning {
   operators: OperatorMirrorRecord[];
   subscription?: StationSubscriptionAccess;
   replacement?: DeviceReplacementTargetFence;
+  recovery?: ReplacementEvidenceRecovery;
 }
 
 interface StationSubscriptionAccess {
@@ -139,6 +145,7 @@ export async function redeemStationRecovery(
       operators: parsed.data.operators,
       ...(parsed.data.subscription ? { subscription: parsed.data.subscription } : {}),
       ...(parsed.data.replacement ? { replacement: parsed.data.replacement } : {}),
+      ...(parsed.data.recovery ? { recovery: parsed.data.recovery } : {}),
     });
     if (!provisioning) return { ok: false, error: "invalid_response" };
     const actual = stationOwner({ machineId: "", ...provisioning });
@@ -174,7 +181,8 @@ export async function persistStationProvisioning(
     throw new Error("Invalid operator roster");
   }
   const publish = async (config: StationConfig) => {
-    await persistTargetReplacementFence(exec, provisioning);
+    await persistReplacementEvidenceRecovery(exec, provisioning);
+    if (!provisioning.recovery) await persistTargetReplacementFence(exec, provisioning);
     await replaceOperatorsMirror(exec, provisioning.operators);
     onRosterPublished?.();
     await writeConfig(config);
@@ -226,12 +234,15 @@ function decodeProvisioning(value: unknown): StationProvisioning | null {
     !isExactRecordWithOptional(
       value,
       ["device", "credential", "operators"],
-      ["subscription", "replacement"],
+      ["subscription", "replacement", "recovery"],
     )
   ) {
     return null;
   }
-  const { device, credential, operators, subscription, replacement } = value;
+  const { device, credential, operators, subscription, replacement, recovery } = value;
+  const evidence =
+    recovery === undefined ? undefined : replacementEvidenceRecoverySchema.safeParse(recovery);
+  if (evidence && !evidence.success) return null;
   const fence =
     replacement === undefined
       ? undefined
@@ -279,6 +290,7 @@ function decodeProvisioning(value: unknown): StationProvisioning | null {
     operators,
     ...(subscription !== undefined ? { subscription } : {}),
     ...(fence?.success ? { replacement: fence.data } : {}),
+    ...(evidence?.success ? { recovery: evidence.data } : {}),
   };
 }
 

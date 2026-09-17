@@ -1,4 +1,7 @@
-import type { DeviceReplacementTargetFence } from "@markiro/platform-contracts";
+import type {
+  DeviceReplacementTargetFence,
+  ReplacementEvidenceRecovery,
+} from "@markiro/platform-contracts";
 import { z } from "zod";
 import type { SchemaObject } from "@nestjs/swagger";
 import type { OperatorMirrorRecord } from "@markiro/db";
@@ -46,6 +49,7 @@ export interface IssueStationPairingCodeResultDto {
 
 export interface PairStationResultDto {
   replacement?: DeviceReplacementTargetFence;
+  recovery?: ReplacementEvidenceRecovery;
   device: {
     id: string;
     name: string;

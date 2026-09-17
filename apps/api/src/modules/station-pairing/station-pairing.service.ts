@@ -1,3 +1,4 @@
+import { redeemReplacementRecovery } from "./replacement-recovery-pairing";
 import {
   replacementTargetFence,
   replacementTargetWaiting,
@@ -48,6 +49,7 @@ export interface RedeemOptions {
   includeSubscription?: boolean;
   handheldClient?: boolean;
   replacementBoundary?: boolean;
+  replacementEvidenceRecovery?: boolean;
   expectedRecoveryIdentity?: StationRecoveryIdentity;
 }
 
@@ -95,6 +97,7 @@ export class StationPairingService {
     tenantId: string,
     deviceId: string,
     includeSubscription = false,
+    recoveryExecutionId?: string,
   ): Promise<StationIdentityResultDto> {
     const serverNow = new Date();
     const [station] = await this.db
@@ -120,7 +123,7 @@ export class StationPairingService {
         and(
           eq(schema.stationDevices.tenantId, tenantId),
           eq(schema.stationDevices.id, deviceId),
-          isNull(schema.stationDevices.revokedAt),
+          recoveryExecutionId ? undefined : isNull(schema.stationDevices.revokedAt),
         ),
       );
     if (!station) throw new UnauthorizedException();
@@ -234,6 +237,7 @@ export class StationPairingService {
     const codeHash = hashPairingCode(code, loadEnv().PAIRING_CODE_PEPPER);
     const rows = await this.db
       .select({
+        purpose: schema.stationPairingCodes.purpose,
         id: schema.stationPairingCodes.id,
         tenantId: schema.stationPairingCodes.tenantId,
         stationDeviceId: schema.stationPairingCodes.stationDeviceId,
@@ -323,6 +327,17 @@ export class StationPairingService {
     // still applies.
     if ((station.kind === "handheld") !== (options.handheldClient ?? false)) {
       throw new StationPairingException("PAIR_KIND_MISMATCH");
+    }
+
+    if (candidate.purpose === "replacement_recovery") {
+      if (!options.expectedRecoveryIdentity || !options.replacementEvidenceRecovery)
+        throw new StationPairingException("PAIR_UPDATE_REQUIRED");
+      return redeemReplacementRecovery({
+        db: this.db,
+        entitlements: this.entitlements,
+        candidate,
+        station,
+      });
     }
 
     await this.entitlements.assertWriteAccess(candidate.tenantId, this.db, new Date());

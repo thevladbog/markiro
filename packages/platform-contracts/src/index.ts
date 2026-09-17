@@ -669,11 +669,13 @@ export * from "./catalog-v4.js";
 export * from "./service-periods.js";
 
 export {
+  replacementEvidenceRecoverySchema,
   stationRecoveryIdentitySchema,
   stationRecoveryRequestSchema,
   stationRecoveryResponseSchema,
 } from "./station-recovery.js";
 export type {
+  ReplacementEvidenceRecovery,
   StationRecoveryIdentity,
   StationRecoveryRequest,
   StationRecoveryResponse,

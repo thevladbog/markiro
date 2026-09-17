@@ -1,3 +1,4 @@
+import { readReplacementEvidenceRecovery } from "./replacement-evidence-recovery.js";
 import { targetReplacementWaiting } from "./replacement-target.js";
 import {
   deviceReplacementCurrentIntentResponseSchema,
@@ -311,6 +312,7 @@ export function replacementCancellationAcknowledged(
 
 /** Drain is independent of observe/strict grant rollout and survives delayed configuration. */
 export async function replacementBlocksNewWork(exec: SqlExecutor): Promise<boolean> {
+  if (await readReplacementEvidenceRecovery(exec)) return true;
   if (await targetReplacementWaiting(exec)) return true;
   const row = await readReplacementDrain(exec);
   return row !== null && !replacementCancellationAcknowledged(row);
@@ -321,6 +323,7 @@ export async function replacementCanEnterTask(
   taskId: string,
   kind: "shift" | "inventory",
 ): Promise<boolean> {
+  if (await readReplacementEvidenceRecovery(exec)) return false;
   if (await targetReplacementWaiting(exec)) return false;
   const row = await readReplacementDrain(exec);
   if (!row || replacementCancellationAcknowledged(row)) return true;

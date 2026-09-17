@@ -1,3 +1,9 @@
+import {
+  reportReplacementEvidenceRecovery,
+  readReplacementEvidenceRecovery,
+} from "../src/lib/replacement-evidence-recovery.js";
+import { persistStationProvisioning } from "../src/lib/pairing.js";
+import { replacementBlocksNewWork } from "../src/lib/device-replacement.js";
 // @vitest-environment node
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { openProductLabelWork } from "./support/product-label-work.js";
@@ -510,3 +516,91 @@ it.each([false, true])(
     ).toEqual(before);
   },
 );
+
+it("publishes evidence-only recovery durably before the credential and preserves old pending drain bytes", async () => {
+  const view = await initializeDeviceRecovery(work.exec, config);
+  if (!view.owner) throw new Error("owner");
+  await sealDeviceRecovery(work.exec, config, generation);
+  const p = {
+    ...provisioning(),
+    recovery: {
+      version: 1 as const,
+      purpose: "replacement_evidence_recovery" as const,
+      executionId: crypto.randomUUID(),
+      intentId: crypto.randomUUID(),
+      credentialEpoch: 3,
+      requestedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 3600000).toISOString(),
+    },
+  };
+  await persistStationProvisioning(p, {
+    machineId: "local",
+    expectedOwner: view.owner,
+    exec: work.exec,
+    writeConfig: async (next) => {
+      expect(await replacementBlocksNewWork(work.exec)).toBe(true);
+      config = next;
+    },
+  });
+  work.restart();
+  await initializeDeviceRecovery(work.exec, config);
+  expect(await replacementBlocksNewWork(work.exec)).toBe(true);
+  expect(await work.exec.all("SELECT * FROM product_label_outbox")).toHaveLength(1);
+});
+
+it("retries the exact recovery report after response loss and file reopen without adopting old-generation acknowledgement", async () => {
+  const view = await initializeDeviceRecovery(work.exec, config);
+  if (!view.owner) throw new Error("owner");
+  await sealDeviceRecovery(work.exec, config, generation);
+  const p = {
+    ...provisioning(),
+    recovery: {
+      version: 1 as const,
+      purpose: "replacement_evidence_recovery" as const,
+      executionId: crypto.randomUUID(),
+      intentId: crypto.randomUUID(),
+      credentialEpoch: 3,
+      requestedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 3600000).toISOString(),
+    },
+  };
+  await persistStationProvisioning(p, {
+    machineId: "local",
+    expectedOwner: view.owner,
+    exec: work.exec,
+    writeConfig: async (next) => {
+      config = next;
+    },
+  });
+  const fresh = createCredentialGeneration(p.apiKey),
+    calls: unknown[] = [];
+  const client = {
+    post: vi.fn(async (_path: string, body: unknown) => {
+      calls.push(body);
+      throw new Error("lost response");
+    }),
+  };
+  await expect(
+    reportReplacementEvidenceRecovery({
+      exec: work.exec,
+      generation: fresh,
+      client,
+      clientBuild: "test",
+    }),
+  ).rejects.toThrow("lost response");
+  const saved = await readReplacementEvidenceRecovery(work.exec);
+  work.restart();
+  await expect(
+    reportReplacementEvidenceRecovery({
+      exec: work.exec,
+      generation: fresh,
+      client,
+      clientBuild: "test",
+    }),
+  ).rejects.toThrow("lost response");
+  expect(calls).toEqual([saved?.body, saved?.body]);
+  await expect(
+    reportReplacementEvidenceRecovery({ exec: work.exec, generation, client, clientBuild: "test" }),
+  ).rejects.toThrow("credential changed");
+  expect(client.post).toHaveBeenCalledTimes(2);
+});

@@ -8,7 +8,7 @@ import kotlinx.serialization.Serializable
  * validation policy prints a duplicate at all -- without it the server answers
  * `409 STATION_UPDATE_REQUIRED`.
  */
-const val HANDHELD_CAPABILITIES = "handheld-v1,subscription-state-v1,station-recovery-v1,replacement-boundary-v1,validation-dm-duplicate-v1,validation-reprocessing-v1"
+const val HANDHELD_CAPABILITIES = "handheld-v1,subscription-state-v1,station-recovery-v1,replacement-boundary-v1,replacement-evidence-recovery-v1,validation-dm-duplicate-v1,validation-reprocessing-v1"
 const val REVOKED_CODE = "STATION_CREDENTIAL_REVOKED"
 const val UPDATE_REQUIRED_CODE = "STATION_UPDATE_REQUIRED"
 
@@ -43,7 +43,7 @@ data class OperatorDto(
 )
 
 @Serializable
-data class PairResponse(val device: DeviceDto, val credential: CredentialDto, val operators: List<OperatorDto>, val replacement: ReplacementTargetFence? = null)
+data class PairResponse(val device: DeviceDto, val credential: CredentialDto, val operators: List<OperatorDto>, val replacement: ReplacementTargetFence? = null, val recovery: ReplacementEvidenceRecovery? = null)
 
 @Serializable
 data class ReplacementTargetFence(

@@ -1,3 +1,4 @@
+import { DeviceReplacementRecoveryService } from "./device-replacement-recovery.service";
 import { DeviceReplacementExecutionService } from "./device-replacement-execution.service";
 import { DeviceReplacementReadinessService } from "./device-replacement-readiness.service";
 import {
@@ -5,6 +6,7 @@ import {
   Controller,
   Get,
   HttpCode,
+  Header,
   Param,
   Post,
   Req,
@@ -15,6 +17,8 @@ import {
   platformDeviceReplacementContracts,
   platformTenantIdSchema,
   platformUuidSchema,
+  type DeviceReplacementRecoveryCodeRequest,
+  type DeviceReplacementRecoveryCloseRequest,
   type DeviceReplacementPreviewRequest,
   type DeviceReplacementConfirm,
   type DeviceReplacementCancel,
@@ -39,7 +43,50 @@ export class PlatformDeviceReplacementController {
     private readonly replacements: DeviceReplacementService,
     private readonly readiness: DeviceReplacementReadinessService,
     private readonly execution: DeviceReplacementExecutionService,
+    private readonly recovery: DeviceReplacementRecoveryService,
   ) {}
+  @Post("replacements/:preparationId/recovery/code")
+  @Header("Cache-Control", "no-store")
+  @HttpCode(200)
+  @ApiOperation({ summary: "issueReplacementRecoveryCode" })
+  @ApiParam({ name: "preparationId", format: "uuid" })
+  @RequirePlatformCapabilities("tenants.write", "billing.write")
+  @PlatformApiProtectedOk({
+    response: platformDeviceReplacementContracts.recoveryCode.response,
+    body: platformDeviceReplacementContracts.recoveryCode.body,
+  })
+  recoveryCode(
+    @Req() request: RequestWithPlatformPrincipal,
+    @Param("tenantId", new ZodValidationPipe(platformTenantIdSchema)) tenantId: string,
+    @Param("preparationId", new ZodValidationPipe(platformUuidSchema)) preparationId: string,
+    @Body(new ZodValidationPipe(platformDeviceReplacementContracts.recoveryCode.body))
+    body: DeviceReplacementRecoveryCodeRequest,
+  ) {
+    return this.recovery.issueReplacementRecoveryCode(
+      tenantId,
+      preparationId,
+      body,
+      actor(request),
+    );
+  }
+  @Post("replacements/:preparationId/recovery/close")
+  @HttpCode(200)
+  @ApiOperation({ summary: "closeReplacementRecovery" })
+  @ApiParam({ name: "preparationId", format: "uuid" })
+  @RequirePlatformCapabilities("tenants.write", "billing.write")
+  @PlatformApiProtectedOk({
+    response: platformDeviceReplacementContracts.recoveryClose.response,
+    body: platformDeviceReplacementContracts.recoveryClose.body,
+  })
+  recoveryClose(
+    @Req() request: RequestWithPlatformPrincipal,
+    @Param("tenantId", new ZodValidationPipe(platformTenantIdSchema)) tenantId: string,
+    @Param("preparationId", new ZodValidationPipe(platformUuidSchema)) preparationId: string,
+    @Body(new ZodValidationPipe(platformDeviceReplacementContracts.recoveryClose.body))
+    body: DeviceReplacementRecoveryCloseRequest,
+  ) {
+    return this.recovery.closeReplacementRecovery(tenantId, preparationId, body, actor(request));
+  }
   @Post("replacements/:preparationId/execution/preview")
   @HttpCode(200)
   @ApiOperation({ summary: "previewExecution working device replacement" })

@@ -1,3 +1,4 @@
+import { AllowReplacementEvidenceRecovery } from "../src/modules/device-licensing/replacement-recovery-policy";
 import { type ExecutionContext, ForbiddenException } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -23,6 +24,14 @@ class PolicyController {
   @AllowSubscriptionRecovery("station")
   recovery(): void {}
 
+  @AllowReplacementEvidenceRecovery()
+  @AllowSubscriptionRecovery("station")
+  evidenceRecovery(): void {}
+
+  @AllowReplacementEvidenceRecovery()
+  @RequireSubscriptionWrite()
+  mislabeledWrite(): void {}
+
   @AllowSubscriptionLicensing("cancel_reservation")
   licensing(): void {}
 
@@ -45,6 +54,8 @@ class PolicyController {
 interface FakeRequest {
   method: string;
   tenantId?: string;
+  authKind?: "station" | "session";
+  replacementRecoveryExecutionId?: string;
 }
 
 function contextFor(request: FakeRequest, handler: () => void): ExecutionContext {
@@ -102,6 +113,31 @@ describe("SubscriptionAccessGuard", () => {
       mode,
     );
   }
+
+  it("allows unmanaged evidence only with an authenticated recovery principal and explicit handler policy", async () => {
+    service.resolve.mockResolvedValue(entitlements("unmanaged"));
+    const request = {
+      method: "POST",
+      tenantId: "tenant_1",
+      authKind: "station" as const,
+      replacementRecoveryExecutionId: "execution",
+    };
+    await expect(
+      guard("all").canActivate(contextFor(request, PolicyController.prototype.evidenceRecovery)),
+    ).resolves.toBe(true);
+    for (const [principal, handler] of [
+      [
+        { method: "POST", tenantId: "tenant_1", authKind: "station" as const },
+        PolicyController.prototype.evidenceRecovery,
+      ],
+      [{ ...request, authKind: "session" as const }, PolicyController.prototype.evidenceRecovery],
+      [request, recoveryHandler],
+      [request, PolicyController.prototype.mislabeledWrite],
+    ] as const)
+      await expect(guard("all").canActivate(contextFor(principal, handler))).rejects.toMatchObject({
+        status: 409,
+      });
+  });
 
   it("fails closed when a covered mutation has no explicit policy", async () => {
     const error = await guard()

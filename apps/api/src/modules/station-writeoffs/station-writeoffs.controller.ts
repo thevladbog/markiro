@@ -1,3 +1,4 @@
+import { AllowReplacementEvidenceRecovery } from "../device-licensing/replacement-recovery-policy";
 import { Body, Controller, Get, Post, Query, Req, UseGuards } from "@nestjs/common";
 import {
   ApiBody,
@@ -49,6 +50,7 @@ export class StationWriteoffsController {
   ) {}
 
   @Post("station/writeoffs")
+  @AllowReplacementEvidenceRecovery()
   @UseGuards(StationOnlyGuard)
   @AllowStationOrPermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   @AllowSubscriptionRecovery("station")

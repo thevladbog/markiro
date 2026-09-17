@@ -1,3 +1,4 @@
+import { AllowReplacementEvidenceRecovery } from "../device-licensing/replacement-recovery-policy";
 import { Body, Controller, Get, HttpCode, Param, Post, Req, UseGuards } from "@nestjs/common";
 import {
   ApiBody,
@@ -44,6 +45,7 @@ export class StationShiftCloseController {
   constructor(private readonly service: StationShiftCloseService) {}
 
   @Post("station/shift-closures")
+  @AllowReplacementEvidenceRecovery()
   @HttpCode(200)
   @UseGuards(StationOnlyGuard)
   @AllowStationOrPermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)

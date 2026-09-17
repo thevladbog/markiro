@@ -1,3 +1,4 @@
+import { AllowReplacementEvidenceRecovery } from "../device-licensing/replacement-recovery-policy";
 import {
   validationOccurrenceStatusQuerySchema,
   validationOccurrenceStatusSchema,
@@ -56,6 +57,7 @@ export class StationScansController {
   constructor(private readonly service: StationScansService) {}
 
   @Post("validation-occurrences/status")
+  @AllowReplacementEvidenceRecovery()
   @HttpCode(200)
   @AllowSubscriptionRecovery("station")
   @ApiOperation({ summary: "Reconcile own validation occurrences, including later displacement" })
@@ -72,6 +74,7 @@ export class StationScansController {
   }
 
   @Post("conflicts/status")
+  @AllowReplacementEvidenceRecovery()
   @HttpCode(200)
   @AllowSubscriptionRecovery("station")
   @ApiOperation({
@@ -94,6 +97,7 @@ export class StationScansController {
   }
 
   @Post("codes/releases")
+  @AllowReplacementEvidenceRecovery()
   @HttpCode(200)
   @AllowSubscriptionRecovery("station")
   @ApiOperation({
@@ -116,6 +120,7 @@ export class StationScansController {
   }
 
   @Post("scans")
+  @AllowReplacementEvidenceRecovery()
   @AllowSubscriptionRecovery("station")
   @ApiOperation({
     summary: "Record a station scan batch",

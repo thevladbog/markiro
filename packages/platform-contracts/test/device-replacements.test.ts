@@ -489,6 +489,20 @@ describe("device replacement contracts", () => {
 
   it("publishes separate cabinet and platform replacement routes with 200 mutations", () => {
     expect(contracts.cabinetDeviceReplacementContracts).toEqual({
+      recoveryCode: {
+        method: "POST",
+        path: "/device-licensing/replacements/:preparationId/recovery/code",
+        status: 200,
+        body: contracts.deviceReplacementRecoveryCodeRequestSchema,
+        response: contracts.deviceReplacementRecoveryCodeResponseSchema,
+      },
+      recoveryClose: {
+        method: "POST",
+        path: "/device-licensing/replacements/:preparationId/recovery/close",
+        status: 200,
+        body: contracts.deviceReplacementRecoveryCloseRequestSchema,
+        response: contracts.deviceReplacementRecoveryCloseResponseSchema,
+      },
       executionPreview: {
         method: "POST",
         path: "/device-licensing/replacements/:preparationId/execution/preview",
@@ -552,6 +566,20 @@ describe("device replacement contracts", () => {
       },
     });
     expect(contracts.platformDeviceReplacementContracts).toEqual({
+      recoveryCode: {
+        method: "POST",
+        path: "/platform/tenants/:tenantId/device-licensing/replacements/:preparationId/recovery/code",
+        status: 200,
+        body: contracts.deviceReplacementRecoveryCodeRequestSchema,
+        response: contracts.deviceReplacementRecoveryCodeResponseSchema,
+      },
+      recoveryClose: {
+        method: "POST",
+        path: "/platform/tenants/:tenantId/device-licensing/replacements/:preparationId/recovery/close",
+        status: 200,
+        body: contracts.deviceReplacementRecoveryCloseRequestSchema,
+        response: contracts.deviceReplacementRecoveryCloseResponseSchema,
+      },
       executionPreview: {
         method: "POST",
         path: "/platform/tenants/:tenantId/device-licensing/replacements/:preparationId/execution/preview",

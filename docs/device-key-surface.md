@@ -251,3 +251,49 @@ stale.
 Public inventory preparation calls the existing create/import/snapshot/start owners with a durable API-key actor. It does not impersonate a cabinet user or return the native manifest/operator credentials. Reading public progress and results requires current `publicApi` and `inventory` rights; native recovery remains independent of those public rights. The combined entitlement registry is `p1c.native.v1`, with separate `public.*.v1` bindings.
 
 See [Public API operations](operations/public-api.md) for scopes, retries, projection and deployment rules. All new cabinet/CHZ/public imports use attempt-owned storage keys. Before exposing public routes, drain old cabinet/CHZ cleanup writers that still share historical content-addressed keys; new readers retain exact historical cabinet-path compatibility. This work does not activate strict offline grant enforcement.
+
+## Emergency replacement evidence credentials
+
+`POST /device-licensing/replacements/:preparationId/recovery/code` (and the platform
+counterpart) requires current credential-management authority and the **execution**
+revision. The completed preparation is immutable. Codes use the existing hash,
+expiry, one-time claim and limiter. The immutable issuance event binds the code ID
+to the execution and source credential epoch; plaintext is returned once and never
+stored in events or receipts. A lost issuance response requires a new request with
+the current execution revision.
+
+The recovery pairing route requires `replacement-evidence-recovery-v1` and the
+sealed local tenant/device/kind identity. Ordinary pairing cannot redeem this code.
+The source remains revoked and its assignment remains released. Key metadata binds
+`replacement_evidence_recovery`, execution and source; every request rechecks the
+live key, execution recovery state, current epoch and released assignment. The key
+is hashed and inserted in the same transaction as code redemption, with a 24-hour
+expiry. This purpose-specific issuer also supports platform operators who have no
+cabinet membership; it does not create a tenant member or ordinary production key.
+
+Recovery access requires `AllowReplacementEvidenceRecovery` on the **handler**.
+The exact permitted handlers are identity; legacy scans (including product-label,
+box/pallet and exception channels); validation/conflict/release acknowledgements;
+legacy shift closures; committed handheld write-off replay or unproven source
+evidence retention; inventory event batches/progress/leave; native evidence
+scans/shift closures/inventory batches/leave; grant verification keyset; and the
+separate `/station/replacement-recovery/readiness` report. Other routes deny by
+default, including allocating bundles, task selection/start/join, all grant
+issuance/configuration, catalog mutation and credential issuance. Existing tenant,
+device-kind, task participation and quarantine checks still apply to uploads. An
+authenticated recovery principal on an explicitly allowed recovery/read handler
+may deliver evidence for expired or unmanaged tenants, including enforcement `all`;
+ordinary station credentials retain the existing subscription rules.
+
+Recovery reports use a new source/epoch-bound intent and the existing append-only
+report store. Original drain reports, cancellation/completion tombstones and ACKs
+are preserved and cannot be rebound to the new key. Fresh zero measurements plus
+current server-work checks complete recovery and revoke the key atomically. Lost
+report responses preserve the native pending body; a subsequent revoked response
+seals the client. Administrative unavailable closure requires a reason, request ID,
+execution revision and an exact audit fact; it does not invent a zero report.
+
+Both native clients persist the recovery purpose before publishing credentials,
+retain journals, pinned requests, saved label bytes and grant evidence, block
+productive work and grant installation, and retry the exact recovery report after
+restart. Recovery completion does not reopen production on the transferred source.

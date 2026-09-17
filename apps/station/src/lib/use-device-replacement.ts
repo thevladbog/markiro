@@ -1,3 +1,7 @@
+import {
+  readReplacementEvidenceRecovery,
+  reportReplacementEvidenceRecovery,
+} from "./replacement-evidence-recovery.js";
 import { readTargetReplacementFence } from "./replacement-target.js";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -48,6 +52,7 @@ export function useDeviceReplacement(input: {
       running = false;
     const current = () => active && (!generation || credentialGenerationIsCurrent(generation));
     const publish = async (reportFailed: boolean) => {
+      const evidence = await readReplacementEvidenceRecovery(exec);
       const target = await readTargetReplacementFence(exec);
       const waiting = target && target.fence.serverTime < target.fence.newWorkAllowedAt;
       const saved = await readReplacementDrain(exec);
@@ -57,24 +62,31 @@ export function useDeviceReplacement(input: {
         setState({
           generation,
           loaded: true,
-          drain: waiting
+          drain: evidence
             ? {
-                intentId: target.fence.executionId,
-                targetWaitingUntil: target.fence.newWorkAllowedAt,
-                measurements: null,
+                intentId: evidence.recovery.executionId,
+                measurements: await readReplacementMeasurements(exec),
                 resumeTasks: [],
                 reportFailed,
               }
-            : row
+            : waiting
               ? {
-                  intentId: row.intent_id,
-                  measurements,
-                  resumeTasks: JSON.parse(
-                    row.resume_tasks_json,
-                  ) as DeviceReplacementReadinessRequest["activeTasks"],
+                  intentId: target.fence.executionId,
+                  targetWaitingUntil: target.fence.newWorkAllowedAt,
+                  measurements: null,
+                  resumeTasks: [],
                   reportFailed,
                 }
-              : null,
+              : row
+                ? {
+                    intentId: row.intent_id,
+                    measurements,
+                    resumeTasks: JSON.parse(
+                      row.resume_tasks_json,
+                    ) as DeviceReplacementReadinessRequest["activeTasks"],
+                    reportFailed,
+                  }
+                : null,
         });
     };
     const run = async () => {
@@ -86,6 +98,11 @@ export function useDeviceReplacement(input: {
         if (!generation || !client || !latest.current.expectedDevice || !current()) return;
         const clientBuild = await latest.current.clientBuild();
         const reportInput = { exec, generation, client, clientBuild };
+        if (await readReplacementEvidenceRecovery(exec)) {
+          await reportReplacementEvidenceRecovery(reportInput);
+          await publish(false);
+          return;
+        }
         const saved = await readReplacementDrain(exec);
         if (saved?.closure_json && !saved.closure_acknowledged_at) {
           if (await acknowledgeReplacementClosure(reportInput)) latest.current.onCancelled();

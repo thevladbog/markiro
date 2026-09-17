@@ -1,3 +1,4 @@
+import { readReplacementEvidenceRecovery } from "../replacement-evidence-recovery.js";
 import { replacementBlocksNewWork } from "../device-replacement.js";
 import {
   offlineGrantSchema,
@@ -130,6 +131,7 @@ export async function persistStationGrantInstall(
     clock: { serverMs: number; monotonicMs: number; bootId: string; wallMs: number };
   },
 ): Promise<boolean> {
+  if (await readReplacementEvidenceRecovery(exec)) return false;
   const draining = await replacementBlocksNewWork(exec);
   const payload = {
     owner: install.envelope.owner,

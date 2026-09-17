@@ -607,6 +607,20 @@ export type DeviceReplacementReadinessResponse = z.output<
 >;
 
 export const cabinetDeviceReplacementContracts = {
+  recoveryCode: {
+    method: "POST",
+    path: "/device-licensing/replacements/:preparationId/recovery/code",
+    status: 200,
+    body: deviceReplacementRecoveryCodeRequestSchema,
+    response: deviceReplacementRecoveryCodeResponseSchema,
+  },
+  recoveryClose: {
+    method: "POST",
+    path: "/device-licensing/replacements/:preparationId/recovery/close",
+    status: 200,
+    body: deviceReplacementRecoveryCloseRequestSchema,
+    response: deviceReplacementRecoveryCloseResponseSchema,
+  },
   executionPreview: {
     method: "POST",
     path: "/device-licensing/replacements/:preparationId/execution/preview",
@@ -671,6 +685,20 @@ export const cabinetDeviceReplacementContracts = {
 } as const;
 
 export const platformDeviceReplacementContracts = {
+  recoveryCode: {
+    method: "POST",
+    path: "/platform/tenants/:tenantId/device-licensing/replacements/:preparationId/recovery/code",
+    status: 200,
+    body: deviceReplacementRecoveryCodeRequestSchema,
+    response: deviceReplacementRecoveryCodeResponseSchema,
+  },
+  recoveryClose: {
+    method: "POST",
+    path: "/platform/tenants/:tenantId/device-licensing/replacements/:preparationId/recovery/close",
+    status: 200,
+    body: deviceReplacementRecoveryCloseRequestSchema,
+    response: deviceReplacementRecoveryCloseResponseSchema,
+  },
   executionPreview: {
     method: "POST",
     path: "/platform/tenants/:tenantId/device-licensing/replacements/:preparationId/execution/preview",

@@ -1,3 +1,4 @@
+import { ReplacementRecoveryReadinessController } from "../src/modules/device-licensing/replacement-recovery-readiness.controller";
 import { DeviceReplacementReadinessController } from "../src/modules/device-licensing/device-replacement-readiness.controller";
 import { DeviceRetentionController } from "../src/modules/device-licensing/device-retention.controller";
 import { DeviceReplacementController } from "../src/modules/device-licensing/device-replacement.controller";
@@ -308,6 +309,8 @@ const ADMINISTRATIVE_CONTROLLERS: readonly [
   [
     DeviceReplacementController,
     {
+      recoveryCode: credentialsPolicy,
+      recoveryClose: credentialsPolicy,
       executionPreview: credentialsPolicy,
       execute: credentialsPolicy,
       emergencyPreview: credentialsPolicy,
@@ -345,6 +348,7 @@ const ADMINISTRATIVE_CONTROLLERS: readonly [
 ];
 
 const STATION_ONLY_CONTROLLERS: readonly [ControllerClass, readonly string[]][] = [
+  [ReplacementRecoveryReadinessController, ["report"]],
   [
     DeviceReplacementReadinessController,
     ["currentIntent", "currentIntentV1", "acknowledgeClosure", "report"],

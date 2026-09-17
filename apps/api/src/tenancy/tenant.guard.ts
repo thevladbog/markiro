@@ -1,4 +1,9 @@
 import {
+  REPLACEMENT_RECOVERY_POLICY,
+  recoveryKeyMetadata,
+  currentReplacementRecovery,
+} from "../modules/device-licensing/replacement-recovery-policy";
+import {
   ForbiddenException,
   Inject,
   Injectable,
@@ -52,6 +57,7 @@ export interface RequestWithTenant extends Request {
   deviceKind?: "station" | "handheld";
   /** Current native key identity, set only after the station authentication lookup. */
   deviceApiKeyId?: string;
+  replacementRecoveryExecutionId?: string;
 }
 
 /**
@@ -92,6 +98,7 @@ export class TenantGuard implements CanActivate {
     if (typeof apiKey === "string" && apiKey.length > 0) {
       const [key] = await this.db
         .select({
+          metadata: schema.apikey.metadata,
           id: schema.apikey.id,
           referenceId: schema.apikey.referenceId,
           enabled: schema.apikey.enabled,
@@ -115,20 +122,27 @@ export class TenantGuard implements CanActivate {
       // a 1:1 mapping, so this lookup is the one reliable way to learn
       // which physical device is calling. Tenant-scoped in the statement
       // itself, matching every other query in this codebase.
+      const recovery = recoveryKeyMetadata(key.metadata);
+      if (recovery && Reflect.getMetadata(REPLACEMENT_RECOVERY_POLICY, ctx.getHandler()) !== true)
+        throw new ForbiddenException({ code: "replacement_recovery_route_denied" });
       const [device] = await this.db
-        .select({
-          id: schema.stationDevices.id,
-          lineId: schema.stationDevices.lineId,
-          kind: schema.stationDevices.kind,
-        })
+        .select()
         .from(schema.stationDevices)
         .where(
           and(
             eq(schema.stationDevices.tenantId, req.tenantId),
             eq(schema.stationDevices.apiKeyId, key.id),
-            isNull(schema.stationDevices.revokedAt),
+            recovery ? undefined : isNull(schema.stationDevices.revokedAt),
           ),
         );
+      if (recovery) {
+        if (
+          !device ||
+          !(await this.db.transaction((tx) => currentReplacementRecovery(tx, device, recovery)))
+        )
+          throw stationCredentialRevoked();
+        req.replacementRecoveryExecutionId = recovery.executionId;
+      }
       // A live Better Auth key is not a station principal by itself. The
       // durable row is the authoritative device identity: reject an
       // unlinked/orphaned key so a failed pairing compensation cannot turn

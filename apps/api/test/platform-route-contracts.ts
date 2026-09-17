@@ -76,6 +76,20 @@ const route = (
 ): PlatformRouteContract => ({ method, path, status, response, ...options });
 
 export const CURRENT_SAAS_ROUTES = [
+  route(
+    "post",
+    "/platform/tenants/{tenantId}/device-licensing/replacements/{preparationId}/recovery/code",
+    "200",
+    platformDeviceReplacementContracts.recoveryCode.response,
+    { body: platformDeviceReplacementContracts.recoveryCode.body },
+  ),
+  route(
+    "post",
+    "/platform/tenants/{tenantId}/device-licensing/replacements/{preparationId}/recovery/close",
+    "200",
+    platformDeviceReplacementContracts.recoveryClose.response,
+    { body: platformDeviceReplacementContracts.recoveryClose.body },
+  ),
   route("get", "/platform/service-periods", "200", platformServicePeriodContracts.list.response, {
     query: platformServicePeriodContracts.list.query,
   }),

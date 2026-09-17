@@ -102,6 +102,7 @@ export async function quarantineReplacementSubmission(
                   "draining",
                   "ready",
                   "executing",
+                  "completed",
                 ]),
               ),
             )

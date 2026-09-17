@@ -70,6 +70,16 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
   {
     contract: customerContract(CABINET_GUARDS, {
       mode: "licensing",
+      operation: "replacement_recovery",
+    }),
+    routes: [
+      "POST /device-licensing/replacements/:preparationId/recovery/code (DeviceReplacementController.recoveryCode)",
+      "POST /device-licensing/replacements/:preparationId/recovery/close (DeviceReplacementController.recoveryClose)",
+    ],
+  },
+  {
+    contract: customerContract(CABINET_GUARDS, {
+      mode: "licensing",
       operation: "replacement_execute",
     }),
     routes: [
@@ -95,6 +105,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "GET /station/device-replacement-intent/v1 (DeviceReplacementReadinessController.currentIntentV1)",
       "POST /station/device-replacement-intent/v1/acknowledge (DeviceReplacementReadinessController.acknowledgeClosure)",
       "POST /station/device-replacement-readiness (DeviceReplacementReadinessController.report)",
+      "POST /station/replacement-recovery/readiness (ReplacementRecoveryReadinessController.report)",
     ],
   },
   {
@@ -595,6 +606,12 @@ const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
   "PlatformDeviceRetentionController.confirm": platform(
     "retention requires fresh tenant and billing platform write capabilities",
   ),
+  "PlatformDeviceReplacementController.recoveryCode": platform(
+    "recovery requires current platform tenant and billing write capabilities",
+  ),
+  "PlatformDeviceReplacementController.recoveryClose": platform(
+    "recovery requires current platform tenant and billing write capabilities",
+  ),
   "PlatformDeviceReplacementController.executionPreview": platform(
     "execution requires fresh tenant and billing write capabilities",
   ),
@@ -1086,7 +1103,8 @@ describe("registered subscription route inventory", () => {
                 route.controller.name === "StationInventoriesController" ||
                 route.controller.name === "StationProductImagesController" ||
                 route.controller.name === "DeviceGrantsController" ||
-                route.controller.name === "DeviceReplacementReadinessController"
+                route.controller.name === "DeviceReplacementReadinessController" ||
+                route.controller.name === "ReplacementRecoveryReadinessController"
               ? ["TenantGuard", "StationOnlyGuard", "SubscriptionAccessGuard"]
               : stationOnlyCabinetRoute
                 ? [

@@ -57,6 +57,7 @@ class GrantRepository(private val db: HandheldDatabase) {
             require(prior.payloadDigest == identity) { "Grant event identity conflict" }
             return@commit
         }
+        if (app.markiro.handheld.core.replacement.ReplacementEvidenceRecoveryState(db).blocked()) throw app.markiro.handheld.core.replacement.ReplacementDenied()
         val row = dao.token(grantSlot(ownerKey, if (event == null) "device" else kind.wire, if (event == null) "" else taskId))
         val retired = state?.let { Json.parseToJsonElement(it.retiredKids).jsonArray.map { x -> x.jsonPrimitive.content }.toSet() } ?: emptySet()
         val grant = row?.takeIf { it.ownerKey == ownerKey && it.generation == token.generation && it.epoch == state?.epoch && it.kid !in retired }?.let { runCatching { decoder.parseStored(it.compact) }.getOrNull() }

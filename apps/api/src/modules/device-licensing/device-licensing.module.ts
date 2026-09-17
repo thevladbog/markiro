@@ -1,3 +1,5 @@
+import { DeviceReplacementRecoveryService } from "./device-replacement-recovery.service";
+import { ReplacementRecoveryReadinessController } from "./replacement-recovery-readiness.controller";
 import { DeviceReplacementExecutionService } from "./device-replacement-execution.service";
 import { DeviceReplacementExecutionRepairService } from "./device-replacement-execution-repair.service";
 import { DeviceReplacementReadinessController } from "./device-replacement-readiness.controller";
@@ -18,6 +20,7 @@ import { PlatformDeviceLicensingController } from "./platform-device-licensing.c
 @Module({
   imports: [PlatformAuditModule],
   controllers: [
+    ReplacementRecoveryReadinessController,
     DeviceRetentionController,
     PlatformDeviceRetentionController,
     DeviceReplacementController,
@@ -27,6 +30,7 @@ import { PlatformDeviceLicensingController } from "./platform-device-licensing.c
     PlatformDeviceLicensingController,
   ],
   providers: [
+    DeviceReplacementRecoveryService,
     DeviceReplacementExecutionService,
     DeviceReplacementExecutionRepairService,
     DeviceReplacementReadinessService,

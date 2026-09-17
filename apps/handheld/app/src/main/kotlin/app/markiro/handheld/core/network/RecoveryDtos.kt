@@ -24,8 +24,25 @@ data class RecoveryOperator(val operatorId: String, val name: String, val login:
 @Serializable
 data class RecoverySubscription(val access: String, val status: String, val startsAt: String?, val endsAt: String?)
 @Serializable
+data class ReplacementEvidenceRecovery(
+    val version: Int,
+    val purpose: String,
+    val executionId: String,
+    val intentId: String,
+    val credentialEpoch: Long,
+    val requestedAt: String,
+    val expiresAt: String,
+) {
+    fun validate() {
+        require(version == 1 && purpose == "replacement_evidence_recovery")
+        require(RecoveryResponse.UUID_PATTERN.matches(executionId) && RecoveryResponse.UUID_PATTERN.matches(intentId))
+        require(credentialEpoch in 1..9_007_199_254_740_991)
+        require(java.time.Instant.parse(expiresAt) > java.time.Instant.parse(requestedAt))
+    }
+}
+@Serializable
 data class RecoveryResponse(val version: Int, val device: RecoveryDevice, val credential: CredentialDto,
-    val operators: List<RecoveryOperator>, val subscription: RecoverySubscription? = null, val replacement: ReplacementTargetFence? = null) {
+    val operators: List<RecoveryOperator>, val subscription: RecoverySubscription? = null, val replacement: ReplacementTargetFence? = null, val recovery: ReplacementEvidenceRecovery? = null) {
     fun validate(): RecoveryResponse {
         require(version == 1 && device.kind in setOf("station", "handheld") && device.tenantId.isNotEmpty())
         require(UUID_PATTERN.matches(device.id) && (device.line == null || UUID_PATTERN.matches(device.line.id)))
@@ -37,16 +54,18 @@ data class RecoveryResponse(val version: Int, val device: RecoveryDevice, val cr
             it.endsAt?.let(java.time.Instant::parse)
         }
         replacement?.validate()
+        recovery?.validate()
         return this
     }
     fun pairing() = PairResponse(DeviceDto(device.id, device.name, device.kind, device.tenantId, device.organizationName, device.line),
-        credential, operators.map { OperatorDto(it.operatorId, it.name, it.login, it.role, it.pinHash, it.badgeHash, it.active) }, replacement)
+        credential, operators.map { OperatorDto(it.operatorId, it.name, it.login, it.role, it.pinHash, it.badgeHash, it.active) }, replacement, recovery)
     companion object {
         val UUID_PATTERN = Regex("([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)")
         val json = Json { ignoreUnknownKeys = false; explicitNulls = true; encodeDefaults = true }
         fun decode(text: String): RecoveryResponse {
             val payload = json.parseToJsonElement(text)
             require(payload.jsonObject["subscription"] != JsonNull)
+            require(payload.jsonObject["recovery"] != JsonNull)
             return json.decodeFromJsonElement(serializer(), payload).validate()
         }
     }

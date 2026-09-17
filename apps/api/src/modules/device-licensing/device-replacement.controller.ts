@@ -1,11 +1,24 @@
+import { DeviceReplacementRecoveryService } from "./device-replacement-recovery.service";
 import { DeviceReplacementExecutionService } from "./device-replacement-execution.service";
 import { DeviceReplacementReadinessService } from "./device-replacement-readiness.service";
-import { Body, Controller, Get, HttpCode, Param, Post, Req, UseGuards } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  Header,
+  HttpCode,
+  Param,
+  Post,
+  Req,
+  UseGuards,
+} from "@nestjs/common";
 import { ApiOperation, ApiParam, ApiTags } from "@nestjs/swagger";
 import { CABINET_CAPABILITY } from "@markiro/domain";
 import {
   cabinetDeviceReplacementContracts,
   platformUuidSchema,
+  type DeviceReplacementRecoveryCodeRequest,
+  type DeviceReplacementRecoveryCloseRequest,
   type DeviceReplacementPreviewRequest,
   type DeviceReplacementConfirm,
   type DeviceReplacementCancel,
@@ -42,7 +55,51 @@ export class DeviceReplacementController {
     private readonly replacements: DeviceReplacementService,
     private readonly readiness: DeviceReplacementReadinessService,
     private readonly execution: DeviceReplacementExecutionService,
+    private readonly recovery: DeviceReplacementRecoveryService,
   ) {}
+  @Post("replacements/:preparationId/recovery/code")
+  @Header("Cache-Control", "no-store")
+  @HttpCode(200)
+  @ApiOperation({ summary: "issueReplacementRecoveryCode" })
+  @ApiParam({ name: "preparationId", format: "uuid" })
+  @AllowSubscriptionLicensing("replacement_recovery")
+  @ApiZodBody(cabinetDeviceReplacementContracts.recoveryCode.body)
+  @ApiZodResponse({ status: 200, schema: cabinetDeviceReplacementContracts.recoveryCode.response })
+  @ApiHttpErrors(400, 401, 403, 404, 409)
+  recoveryCode(
+    @Req() request: RequestWithTenant,
+    @Param("preparationId", new ZodValidationPipe(platformUuidSchema)) preparationId: string,
+    @Body(new ZodValidationPipe(cabinetDeviceReplacementContracts.recoveryCode.body))
+    body: DeviceReplacementRecoveryCodeRequest,
+  ) {
+    return this.recovery.issueReplacementRecoveryCode(
+      request.tenantId!,
+      preparationId,
+      body,
+      actor(request),
+    );
+  }
+  @Post("replacements/:preparationId/recovery/close")
+  @HttpCode(200)
+  @ApiOperation({ summary: "closeReplacementRecovery" })
+  @ApiParam({ name: "preparationId", format: "uuid" })
+  @AllowSubscriptionLicensing("replacement_recovery")
+  @ApiZodBody(cabinetDeviceReplacementContracts.recoveryClose.body)
+  @ApiZodResponse({ status: 200, schema: cabinetDeviceReplacementContracts.recoveryClose.response })
+  @ApiHttpErrors(400, 401, 403, 404, 409)
+  recoveryClose(
+    @Req() request: RequestWithTenant,
+    @Param("preparationId", new ZodValidationPipe(platformUuidSchema)) preparationId: string,
+    @Body(new ZodValidationPipe(cabinetDeviceReplacementContracts.recoveryClose.body))
+    body: DeviceReplacementRecoveryCloseRequest,
+  ) {
+    return this.recovery.closeReplacementRecovery(
+      request.tenantId!,
+      preparationId,
+      body,
+      actor(request),
+    );
+  }
   @Post("replacements/:preparationId/execution/preview")
   @HttpCode(200)
   @ApiOperation({ summary: "previewExecution working device replacement" })

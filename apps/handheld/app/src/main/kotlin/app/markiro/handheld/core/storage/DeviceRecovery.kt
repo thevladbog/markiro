@@ -293,7 +293,8 @@ class DeviceRecovery(private val db: HandheldDatabase, private val credential: C
         val publication = credential.staged()?.let { runCatching { json.decodeFromString(Publication.serializer(), it) }.getOrNull() }
         if (publication == null) { seal(row); return }
         check(publication.id == row.pendingId && publication.owner == row.owner() && publication.generation == row.generation)
-        app.markiro.handheld.core.replacement.ReplacementTarget(db).persistPublication(publication.owner, publication.generation, publication.response.replacement)
+        app.markiro.handheld.core.replacement.ReplacementEvidenceRecoveryState(db).persistPublication(publication.owner,publication.generation,publication.response.recovery)
+        if(publication.response.recovery==null) app.markiro.handheld.core.replacement.ReplacementTarget(db).persistPublication(publication.owner, publication.generation, publication.response.replacement)
         credential.write(publication.response.credential.apiKey)
         val device = publication.response.device
         db.withTransaction {

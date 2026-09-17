@@ -1,3 +1,4 @@
+import { AllowReplacementEvidenceRecovery } from "../device-licensing/replacement-recovery-policy";
 import { GrantEvidenceNativeService } from "./grant-evidence-native.service";
 import {
   Body,
@@ -126,6 +127,7 @@ export class DeviceGrantsController {
   }
   @ApiOperation({ summary: "Read the authenticated offline grant verifier keyset" })
   @Get("keyset")
+  @AllowReplacementEvidenceRecovery()
   @AllowSubscriptionReadOnly("read")
   @ApiOkResponse({ schema: zodApiSchema(grantKeysetResultSchema) })
   @ApiHttpErrors(401, 403, 429)
@@ -133,6 +135,7 @@ export class DeviceGrantsController {
     return this.issuer.keyset(identity(req));
   }
   @Post("evidence/scans")
+  @AllowReplacementEvidenceRecovery()
   @HttpCode(200)
   @AllowSubscriptionRecovery("station")
   @ApiOperation({
@@ -151,6 +154,7 @@ export class DeviceGrantsController {
     return this.evidence.scanBatch(identity(req), body, req.rawBody, capabilities);
   }
   @Post("evidence/shift-closures")
+  @AllowReplacementEvidenceRecovery()
   @HttpCode(200)
   @AllowSubscriptionRecovery("station")
   @ApiOperation({
@@ -168,6 +172,7 @@ export class DeviceGrantsController {
     return this.evidence.shiftClose(identity(req), body, req.rawBody);
   }
   @Post("evidence/inventories/:id/event-batches")
+  @AllowReplacementEvidenceRecovery()
   @HttpCode(200)
   @AllowSubscriptionRecovery("station")
   @ApiOperation({
@@ -186,6 +191,7 @@ export class DeviceGrantsController {
     return this.evidence.inventoryEvents(identity(req), id, body, req.rawBody);
   }
   @Post("evidence/inventories/:id/leave")
+  @AllowReplacementEvidenceRecovery()
   @HttpCode(200)
   @AllowSubscriptionRecovery("station")
   @ApiOperation({

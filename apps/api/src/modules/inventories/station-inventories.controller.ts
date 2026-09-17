@@ -1,3 +1,4 @@
+import { AllowReplacementEvidenceRecovery } from "../device-licensing/replacement-recovery-policy";
 import {
   Body,
   Controller,
@@ -195,6 +196,7 @@ export class StationInventoriesController {
   }
 
   @Post("inventories/:id/event-batches")
+  @AllowReplacementEvidenceRecovery()
   @HttpCode(200)
   @AllowSubscriptionRecovery("station")
   @ApiOperation({
@@ -218,6 +220,7 @@ export class StationInventoriesController {
   }
 
   @Get("inventories/:id/progress")
+  @AllowReplacementEvidenceRecovery()
   @ApiOperation({
     summary: "Get incremental inventory progress",
     description: "Cursor-based feed of progress updates for station polling.",
@@ -247,6 +250,7 @@ export class StationInventoriesController {
   }
 
   @Post("inventories/:id/leave")
+  @AllowReplacementEvidenceRecovery()
   @HttpCode(200)
   @AllowSubscriptionRecovery("station")
   @ApiOperation({

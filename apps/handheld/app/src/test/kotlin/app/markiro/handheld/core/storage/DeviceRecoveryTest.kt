@@ -6,6 +6,9 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.markiro.handheld.core.network.CredentialDto
 import app.markiro.handheld.core.network.DeviceDto
 import app.markiro.handheld.core.network.PairResponse
+import app.markiro.handheld.core.network.StationApi
+import app.markiro.handheld.core.replacement.ReplacementEvidenceRecoveryState
+import kotlinx.serialization.json.*
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
@@ -44,6 +47,63 @@ class DeviceRecoveryTest {
         recovery.initialize()
     }
     private suspend fun sealed() { active(); recovery.reject(recovery.token()) }
+
+    @Test fun evidenceRecoveryPersistsBeforePublishingAndBlocksOfflineProduction() = runTest {
+        sealed()
+        val binding = app.markiro.handheld.core.network.ReplacementEvidenceRecovery(1,"replacement_evidence_recovery",java.util.UUID.randomUUID().toString(),java.util.UUID.randomUUID().toString(),3,"2026-09-17T00:00:00Z","2026-09-18T00:00:00Z")
+        db.metaDao().put(MetaEntity("pinned-batch", "exact-old-body"))
+        recovery.restore(response().copy(recovery=binding), config.serverUrl)
+        assertTrue(app.markiro.handheld.core.replacement.ReplacementReadiness(db).blocked())
+        assertEquals("exact-old-body",db.metaDao().get("pinned-batch"))
+        assertTrue(db.metaDao().get("replacement_evidence_recovery_v1")!!.contains(binding.executionId))
+        val grants = app.markiro.handheld.core.grants.GrantRepository(db)
+        assertTrue(runCatching { grants.start(app.markiro.handheld.core.grants.TaskKind.SHIFT, "saved-shift", "new-work") }.exceptionOrNull() is app.markiro.handheld.core.replacement.ReplacementDenied)
+        assertTrue(runCatching { grants.complete(app.markiro.handheld.core.grants.TaskKind.SHIFT, "saved-shift", "new-scan", app.markiro.handheld.core.grants.GrantEventType.SHIFT_SCAN, units = 1) }.exceptionOrNull() is app.markiro.handheld.core.replacement.ReplacementDenied)
+    }
+
+    @Test fun evidenceReadinessPinsLostResponseAcrossReinitializationAndRejectsOldGeneration() = runTest {
+        sealed()
+        val binding = app.markiro.handheld.core.network.ReplacementEvidenceRecovery(
+            1, "replacement_evidence_recovery", java.util.UUID.randomUUID().toString(),
+            java.util.UUID.randomUUID().toString(), 3, "2026-09-17T00:00:00Z", "2026-09-18T00:00:00Z",
+        )
+        recovery.restore(response().copy(recovery = binding), config.serverUrl)
+        val token = recovery.token()
+        val calls = mutableListOf<JsonObject>()
+        var loseResponse = true
+        val api = java.lang.reflect.Proxy.newProxyInstance(
+            StationApi::class.java.classLoader, arrayOf(StationApi::class.java),
+        ) { _, method, arguments ->
+            check(method.name == "replacementRecoveryReadiness") { method.name }
+            val body = arguments[0] as JsonObject
+            calls += body
+            if (loseResponse) throw java.io.IOException("response lost")
+            buildJsonObject {
+                put("requestId", body.getValue("requestId"))
+                put("intentId", body.getValue("intentId"))
+                put("receivedAt", "2026-09-17T01:00:00Z")
+                put("unsupportedChannels", JsonArray(emptyList()))
+                put("eligibility", buildJsonObject {
+                    put("status", "blocked")
+                    put("reasons", JsonArray(emptyList()))
+                })
+            }
+        } as StationApi
+        assertTrue(runCatching { ReplacementEvidenceRecoveryState(db).report(token, api) }.isFailure)
+        val pinned = db.metaDao().get(ReplacementEvidenceRecoveryState.KEY)
+        recovery.initialize()
+        loseResponse = false
+        ReplacementEvidenceRecoveryState(db).report(token, api)
+        assertEquals(calls[0], calls[1])
+        assertNotEquals(pinned, db.metaDao().get(ReplacementEvidenceRecoveryState.KEY))
+        recovery.reject(token)
+        recovery.restore(response("next-recovery-key").copy(recovery = binding.copy(credentialEpoch = 4)), config.serverUrl)
+        val next = db.metaDao().get(ReplacementEvidenceRecoveryState.KEY)
+        assertTrue(runCatching { ReplacementEvidenceRecoveryState(db).report(token, api) }.exceptionOrNull() is RecoveryBlocked)
+        assertEquals(2, calls.size)
+        assertEquals(next, db.metaDao().get(ReplacementEvidenceRecoveryState.KEY))
+        assertTrue(ReplacementEvidenceRecoveryState(db).blocked())
+    }
 
     @Test fun sameOwnerRestoreRetainsTaskReferencesAndRejectsLateOld401() = runTest {
         active()

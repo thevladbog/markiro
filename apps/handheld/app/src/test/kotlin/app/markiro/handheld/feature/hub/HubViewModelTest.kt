@@ -117,6 +117,7 @@ class HubViewModelTest {
         override suspend fun deviceGrant(body: kotlinx.serialization.json.JsonObject): kotlinx.serialization.json.JsonObject = throw java.io.IOException("unconfigured")
         override suspend fun taskGrant(body: kotlinx.serialization.json.JsonObject): kotlinx.serialization.json.JsonObject = throw java.io.IOException("unconfigured")
         override suspend fun replacementIntent(knownIntentId: String?): kotlinx.serialization.json.JsonObject? = throw java.io.IOException("unconfigured")
+        override suspend fun replacementRecoveryReadiness(body: kotlinx.serialization.json.JsonObject): kotlinx.serialization.json.JsonObject = error("Not expected")
         override suspend fun replacementReadiness(body: kotlinx.serialization.json.JsonObject): kotlinx.serialization.json.JsonObject = throw java.io.IOException("unconfigured")
         override suspend fun replacementAcknowledge(body: kotlinx.serialization.json.JsonObject): kotlinx.serialization.json.JsonObject = throw java.io.IOException("unconfigured")
         override suspend fun grantReadiness(body: kotlinx.serialization.json.JsonObject): kotlinx.serialization.json.JsonObject = throw java.io.IOException("unconfigured")

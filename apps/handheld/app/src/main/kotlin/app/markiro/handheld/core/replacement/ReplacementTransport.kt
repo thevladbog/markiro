@@ -17,6 +17,8 @@ internal suspend fun replacementIfAvailable(block: suspend () -> Unit): Boolean 
 class ReplacementTransport(private val db: HandheldDatabase, private val api: StationApi) {
     suspend fun refresh() = db.recovery.work {
         val token = db.recovery.token()
+        val evidence=ReplacementEvidenceRecoveryState(db)
+        if(evidence.blocked()) { evidence.report(token,api); return@work }
         val local = ReplacementReadiness(db)
         val row = db.replacementDao().get()
         require(row == null || row.ownerKey == token.owner.grantOwnerKey() && (row.generation == token.generation || !row.blocked)) {

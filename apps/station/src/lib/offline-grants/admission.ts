@@ -1,3 +1,4 @@
+import { readReplacementEvidenceRecovery } from "../replacement-evidence-recovery.js";
 import {
   assessClock,
   assessCompletion,
@@ -263,6 +264,8 @@ export class StationGrantAdmission {
     eventType: GrantIntent["eventType"];
     execution: ExecutionProjection;
   }): Promise<StationAdmissionDecision> {
+    if (await readReplacementEvidenceRecovery(this.exec))
+      return { allow: false, reason: "missing_grant", mode: "strict" };
     const context = await this.context();
     const { tasks } = await this.grants();
     const selected = tasks.find(
@@ -356,6 +359,12 @@ export class StationGrantAdmission {
         replay: true,
       };
     }
+    if (await readReplacementEvidenceRecovery(this.exec))
+      return {
+        decision: { allow: false, reason: "missing_grant", mode: "strict" },
+        result: null,
+        replay: false,
+      };
     const context = await this.context(),
       { tasks } = await this.grants();
     const selected = tasks.find(
@@ -469,6 +478,12 @@ export class StationGrantAdmission {
     second: StationAdmissionDecision;
     result: unknown;
   }> {
+    if (await readReplacementEvidenceRecovery(this.exec))
+      return {
+        first: { allow: false, reason: "missing_grant", mode: "strict" },
+        second: { allow: false, reason: "missing_grant", mode: "strict" },
+        result: null,
+      };
     if (!this.exec.atomic) throw new Error("offline grant productive transaction unavailable");
     const build = async (part: typeof input.first) => {
       const eventDigest = await sha256(part.event);

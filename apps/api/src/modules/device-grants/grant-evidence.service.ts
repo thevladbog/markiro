@@ -90,7 +90,7 @@ export class GrantEvidenceService {
     const envelopeDigest = productLabelValueDigest(envelope);
     let initialQuarantine: GrantEvidenceReceipt | undefined;
     const receipt = await this.db.transaction(async (tx) => {
-      const owner = await lockCurrentGrantOwner(tx, identity, this.now());
+      const owner = await lockCurrentGrantOwner(tx, identity, this.now(), true);
       if (!owner) throw new UnauthorizedException();
       const [existing] = await tx
         .select()
@@ -177,13 +177,13 @@ export class GrantEvidenceService {
           throw new Quarantine("device_replacement_waiting");
       },
       after: async (tx, result) => {
-        const owner = await lockCurrentGrantOwner(tx, identity, this.now());
+        const owner = await lockCurrentGrantOwner(tx, identity, this.now(), true);
         if (!owner) throw new UnauthorizedException();
         const actualFacts = await facts(tx, result);
         const reason = await this.charge(tx, owner, receipt, envelope, actualFacts);
         if (reason && receipt.mode === "strict") throw new Quarantine(reason);
         final = this.response(receipt, "accepted", reason, reconciliation(result), 200, result);
-        if (!(await lockCurrentGrantOwner(tx, identity, this.now())))
+        if (!(await lockCurrentGrantOwner(tx, identity, this.now(), true)))
           throw new UnauthorizedException();
         await this.finalize(tx, owner, receipt, final, actualFacts.length, envelope);
       },
@@ -239,7 +239,7 @@ export class GrantEvidenceService {
     identity: GrantCredentialIdentity,
     id: string,
   ): Promise<GrantOwner> {
-    const owner = await lockCurrentGrantOwner(tx, identity, this.now());
+    const owner = await lockCurrentGrantOwner(tx, identity, this.now(), true);
     if (!owner) throw new UnauthorizedException();
     const [row] = await tx
       .select()

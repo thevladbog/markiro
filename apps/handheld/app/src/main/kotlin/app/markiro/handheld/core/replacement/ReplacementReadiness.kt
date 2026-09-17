@@ -11,8 +11,9 @@ import java.util.UUID
 
 /** All state transitions share the credential-generation and Room business commit boundary. */
 class ReplacementReadiness(private val db: HandheldDatabase) {
-    suspend fun blocked(): Boolean = ReplacementTarget(db).blocked() || db.replacementDao().get()?.blocked == true
+    suspend fun blocked(): Boolean = ReplacementEvidenceRecoveryState(db).blocked() || ReplacementTarget(db).blocked() || db.replacementDao().get()?.blocked == true
     suspend fun requireAdmission(kind: String? = null, taskId: String? = null) {
+        if(ReplacementEvidenceRecoveryState(db).blocked()) throw ReplacementDenied()
         if (ReplacementTarget(db).blocked()) throw ReplacementDenied()
         val row = db.replacementDao().get() ?: return
         if (!row.blocked) return
@@ -174,7 +175,7 @@ class ReplacementReadiness(private val db: HandheldDatabase) {
             db.openHelper.readableDatabase.query(sql).use { rows -> while(rows.moveToNext()) add(buildJsonObject { put("kind",kind); put("taskId",rows.getString(0)) }) }
         }
     }.sortedBy { it.toString() })
-    private fun highestSequence(): Long = try { db.openHelper.readableDatabase.query(
+    internal fun highestSequence(): Long = try { db.openHelper.readableDatabase.query(
         "SELECT COALESCE(MAX(sequence),0) FROM (SELECT seq AS sequence FROM sqlite_sequence " +
             "UNION ALL SELECT deviceSequence FROM inventory_events UNION ALL SELECT nextDeviceSequence-1 FROM inventory_terminal_state " +
             "UNION ALL SELECT sequence FROM product_label_events UNION ALL SELECT deviceSeq FROM writeoff_outbox)",

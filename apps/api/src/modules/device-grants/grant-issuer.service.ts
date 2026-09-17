@@ -66,7 +66,7 @@ export class GrantIssuerService {
   }
   async keyset(identity: GrantCredentialIdentity) {
     return this.db.transaction(async (tx) => {
-      if (!(await lockCurrentGrantOwner(tx, identity, this.clock())))
+      if (!(await lockCurrentGrantOwner(tx, identity, this.clock(), true)))
         throw new UnauthorizedException();
       return (
         this.signing?.keyset ?? {

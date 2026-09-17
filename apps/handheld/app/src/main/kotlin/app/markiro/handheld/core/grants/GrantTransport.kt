@@ -100,6 +100,7 @@ internal class GrantTransport(private val db: HandheldDatabase, private val api:
         val envelope = result.getValue("envelope").jsonObject
         val verified = verifyEnvelope(ticket, security, envelope)
         db.recovery.commit(ticket.token) {
+            if(app.markiro.handheld.core.replacement.ReplacementEvidenceRecoveryState(db).blocked()) return@commit
             val state = checkNotNull(db.grantDao().state())
             // A later-started refresh wins even when it has not returned yet.
             if(state.requestedSequence != ticket.sequence || state.installedSequence >= ticket.sequence) return@commit

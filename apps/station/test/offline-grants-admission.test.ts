@@ -123,6 +123,79 @@ describe("Station offline admission", () => {
     ).run("inventory", "inventory", "digest", "canonical", JSON.stringify(execution.scope), 1);
   }
 
+  it.each(["observe", "strict"] as const)(
+    "retains grants but refuses every productive admission during %s evidence recovery",
+    async (mode) => {
+      const state = fixture(mode);
+      seedNewWorkAuthority(state.db);
+      state.db.prepare("UPDATE offline_grant_configuration SET mode=?").run(mode);
+      state.db.prepare("INSERT INTO station_meta(key,value) VALUES(?,?)").run(
+        "replacement_evidence_recovery_v1",
+        JSON.stringify({
+          tenantId: "tenant",
+          deviceId: "device",
+          serverOrigin: "https://factory.invalid",
+          credentialOwnership: "hash",
+          recovery: {
+            version: 1,
+            purpose: "replacement_evidence_recovery",
+            executionId: crypto.randomUUID(),
+            intentId: crypto.randomUUID(),
+            credentialEpoch: 4,
+            requestedAt: "2026-09-17T00:00:00Z",
+            expiresAt: "2026-09-18T00:00:00Z",
+          },
+          sequence: -1,
+          body: null,
+          completed: false,
+        }),
+      );
+      const denied = { allow: false, reason: "missing_grant", mode: "strict" };
+      await expect(state.admission.assessNewWork(intent)).resolves.toEqual(denied);
+      await expect(
+        state.admission.commitNewWork(
+          { intent, execution },
+          createCredentialGeneration("recovery"),
+        ),
+      ).resolves.toEqual(denied);
+      await expect(
+        state.admission.assessTaskWork({
+          owner,
+          capability: intent.capability,
+          eventType: intent.eventType,
+          execution,
+        }),
+      ).resolves.toEqual(denied);
+      const completion = {
+        operatorId: "operator",
+        intent,
+        execution,
+        event: { id: "event" },
+        facts: {},
+        result: { accepted: true },
+      };
+      await expect(state.admission.commitCompletion(completion)).resolves.toEqual({
+        decision: denied,
+        result: null,
+        replay: false,
+      });
+      await expect(
+        state.admission.commitCompletionPair({
+          first: completion,
+          second: { ...completion, intent: { ...intent, eventId: "second" } },
+          ownerStatements: [],
+        }),
+      ).resolves.toEqual({ first: denied, second: denied, result: null });
+      expect(state.db.prepare("SELECT count(*) count FROM offline_grant_grants").get()).toEqual({
+        count: 2,
+      });
+      expect(state.db.prepare("SELECT count(*) count FROM offline_grant_decisions").get()).toEqual({
+        count: 0,
+      });
+      state.db.close();
+    },
+  );
+
   it("durably records successful new-work admission and never marks a retired credential", async () => {
     const first = fixture("strict");
     seedNewWorkAuthority(first.db);

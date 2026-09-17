@@ -49,7 +49,12 @@ describe("replacement HTTP trust boundaries", () => {
   );
   it("derives cabinet actor exclusively from trusted request context", async () => {
     const service = { list: vi.fn().mockResolvedValue({ canPrepare: true, items: [] }) };
-    const controller = new DeviceReplacementController(service as never, {} as never, {} as never);
+    const controller = new DeviceReplacementController(
+      service as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
     await controller.list({ tenantId: "tenant", userId: "cabinet-user" } as never);
     expect(service.list).toHaveBeenCalledWith("tenant", { domain: "cabinet", id: "cabinet-user" });
   });
@@ -57,6 +62,7 @@ describe("replacement HTTP trust boundaries", () => {
     const service = { list: vi.fn() };
     const controller = new PlatformDeviceReplacementController(
       service as never,
+      {} as never,
       {} as never,
       {} as never,
     );

@@ -18,11 +18,28 @@ export const stationRecoveryRequestSchema = z
   })
   .strict();
 
+export const replacementEvidenceRecoverySchema = z
+  .object({
+    version: z.literal(1),
+    purpose: z.literal("replacement_evidence_recovery"),
+    executionId: z.uuid(),
+    intentId: z.uuid(),
+    credentialEpoch: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+    requestedAt: z.iso.datetime(),
+    expiresAt: z.iso.datetime(),
+  })
+  .strict()
+  .refine((value) => Date.parse(value.expiresAt) > Date.parse(value.requestedAt), {
+    message: "Recovery expiry must follow issuance",
+  });
+export type ReplacementEvidenceRecovery = z.infer<typeof replacementEvidenceRecoverySchema>;
+
 /** Existing pairing field meanings, with an explicit recovery protocol version. */
 export const stationRecoveryResponseSchema = z
   .object({
     version: z.literal(1),
     replacement: deviceReplacementTargetFenceSchema.optional(),
+    recovery: replacementEvidenceRecoverySchema.optional(),
     device: z
       .object({
         id: z.uuid(),

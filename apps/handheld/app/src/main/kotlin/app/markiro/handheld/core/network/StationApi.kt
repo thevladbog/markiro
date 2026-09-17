@@ -11,6 +11,9 @@ interface StationApi {
     @GET("station/device-replacement-intent/v1")
     suspend fun replacementIntent(@Query("knownIntentId") knownIntentId: String? = null): kotlinx.serialization.json.JsonObject?
 
+    @POST("station/replacement-recovery/readiness")
+    suspend fun replacementRecoveryReadiness(@Body body: kotlinx.serialization.json.JsonObject): kotlinx.serialization.json.JsonObject
+
     @POST("station/device-replacement-readiness")
     suspend fun replacementReadiness(@Body body: kotlinx.serialization.json.JsonObject): kotlinx.serialization.json.JsonObject
 
