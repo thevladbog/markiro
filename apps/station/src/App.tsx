@@ -80,7 +80,12 @@ import { loadSoundSettings, type SoundSettings } from "./lib/signal-sound.js";
 import { tauriExecutor } from "./lib/sqlite.js";
 import { resolveLegacyStationIdentity } from "./lib/legacy-identity.js";
 import { createLockdownLifecycle } from "./lib/lockdown.js";
-import { readProductLabelRecoveryShift } from "./lib/product-labels/recovery.js";
+import { SavedProductLabelRecovery } from "./pages/SavedProductLabelRecovery.js";
+import { readReplacementEvidenceRecovery } from "./lib/replacement-evidence-recovery.js";
+import {
+  readProductLabelRecoveryShift,
+  requireReplacementLabelRecovery,
+} from "./lib/product-labels/recovery.js";
 import { findUnresolvedBoxPrint } from "./lib/boxes.js";
 import { stationServerOrigin } from "./lib/device-recovery.js";
 import { StationGrantAdmission } from "./lib/offline-grants/admission.js";
@@ -927,6 +932,12 @@ export function App() {
       setFloorView("select");
     },
   });
+  const [savedLabelEntry, setSavedLabelEntry] = useState<{
+    generation: CredentialGeneration;
+    operatorId: string;
+    shiftId: string;
+    jobId: string;
+  } | null>(null);
   const [labelRecoveryEpoch, setLabelRecoveryEpoch] = useState(0);
   const labelRecoveryKey = useMemo(
     () => ({
@@ -939,7 +950,7 @@ export function App() {
   );
   const [labelRecovery, setLabelRecovery] = useState<{
     key: object;
-    shift: ProductionShiftTask | null;
+    shift: (ProductionShiftTask & { jobId: string }) | null;
     error: boolean;
   } | null>(null);
   useEffect(() => {
@@ -1960,6 +1971,29 @@ export function App() {
         <main className="station-centered-screen" data-testid="floor-route-loading">
           <p role="status">{t("inventory.loadingLocalTask")}</p>
         </main>
+      ) : savedLabelEntry &&
+        savedLabelEntry.generation === floorGeneration &&
+        savedLabelEntry.operatorId === operator.operatorId &&
+        config.deviceId ? (
+        <SavedProductLabelRecovery
+          exec={tauriExecutor}
+          shiftId={savedLabelEntry.shiftId}
+          jobId={savedLabelEntry.jobId}
+          operatorId={operator.operatorId}
+          source={scanSource}
+          environment={{
+            generation: savedLabelEntry.generation,
+            deviceId: config.deviceId,
+            operatorName: operator.name,
+            hardwareConfig,
+            print: (target, bytes) => tauriHardware.print(target, bytes),
+          }}
+          register={registerFloorWorkBarrier}
+          onClose={() => {
+            setSavedLabelEntry(null);
+            setLabelRecoveryEpoch((epoch) => epoch + 1);
+          }}
+        />
       ) : activeFloorTask ? (
         activeFloorTask.kind === "production" ? (
           boxTemplateRecovery ? (
@@ -2147,7 +2181,27 @@ export function App() {
                 void acquireShiftEntry()
                   .then(async (lease) => {
                     try {
-                      await handleShiftEntered(pending, lease);
+                      if (await readReplacementEvidenceRecovery(tauriExecutor)) {
+                        if (!floorGeneration) throw new Error("Credential missing");
+                        const owner = await credentialGenerationOwnership(floorGeneration);
+                        if (!owner) throw new Error("Credential missing");
+                        await requireReplacementLabelRecovery(
+                          tauriExecutor,
+                          owner,
+                          pending.id,
+                          pending.jobId,
+                        );
+                        if (!lease.isCurrent() || !credentialGenerationIsCurrent(floorGeneration))
+                          return;
+                        setSavedLabelEntry({
+                          generation: floorGeneration,
+                          operatorId: operator.operatorId,
+                          shiftId: pending.id,
+                          jobId: pending.jobId,
+                        });
+                      } else {
+                        await handleShiftEntered(pending, lease);
+                      }
                     } finally {
                       lease.release();
                     }

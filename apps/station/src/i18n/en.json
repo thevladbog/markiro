@@ -855,6 +855,7 @@
     "unknownHint": "The print result is unknown. Scan the label if it printed, or select a reason to print it again.",
     "preparedHint": "The job is saved. It will not be sent again automatically.",
     "failedHint": "Check the printer connection, language and resolution, then reprint.",
+    "recoveryHint": "Finish the saved label. New units cannot be accepted during device recovery.",
     "closedHint": "This shift is closed. Finish this label; new units cannot be accepted.",
     "mismatch": "Code does not match",
     "invalid": "Could not read a full Data Matrix",

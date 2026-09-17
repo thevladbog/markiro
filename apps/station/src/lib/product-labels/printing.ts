@@ -232,6 +232,8 @@ export async function prepareProductLabelReprint(
 ): Promise<string> {
   const reason = z.enum(["not_printed", "damaged", "lost"]).parse(input.reason);
   const job = await requireProductLabelJob(exec, input.credentialOwnership, input.jobId);
+  if (input.recovery && job.projection.status === "completed")
+    throw new Error("PRODUCT_LABEL_RECOVERY_UNAVAILABLE");
   if (job.shiftId !== input.shiftId)
     throw new DomainError("PRODUCT_LABEL_SHIFT_MISMATCH", "Reprint belongs to a different shift");
   if (job.projection.attemptState === "prepared" || job.projection.attemptState === "sending")
