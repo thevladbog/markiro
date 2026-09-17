@@ -2,7 +2,8 @@
 
 **Date:** 2026-09-17
 
-**Status:** Approved in brainstorming 2026-09-17. Not implemented.
+**Status:** Approved 2026-09-17; server side implemented in PR #595 (plan 1 of
+3); handheld and cabinet UI pending.
 
 **Scope:** Building a pallet out of boxes that were already closed earlier —
 in other shifts, by other terminals, or on pallets since disassembled — by
@@ -66,7 +67,8 @@ Three shapes were considered.
 
 ## 1. Database
 
-One migration in `packages/db/migrations/`.
+Two migrations in `packages/db/migrations/`: `0162_warehouse_pallets` and
+`0163_pallet_export_code_counts`.
 
 ### 1.1 `pallets`
 
