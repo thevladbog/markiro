@@ -51,6 +51,10 @@ interface BoxRegistryDao {
     @Query("SELECT COUNT(*) FROM box_registry")
     suspend fun count(): Int
 
+    /** Rows this device has claimed for an open local pallet; a full re-walk must not lose them. */
+    @Query("SELECT * FROM box_registry WHERE localPalletId IS NOT NULL")
+    suspend fun claimed(): List<BoxRegistryEntity>
+
     @Query("UPDATE box_registry SET localPalletId = :localPalletId WHERE sscc = :sscc")
     suspend fun claim(sscc: String, localPalletId: String)
 
