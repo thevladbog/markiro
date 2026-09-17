@@ -660,6 +660,14 @@ class SyncEngine(
          */
         const val MAX_PALLET_CLOSURES = 20
 
+        /**
+         * The server's own `MAX_PALLET_MEMBERSHIPS_PER_SYNC_BATCH`
+         * (`packages/domain/src/sync/limits.ts`): one closed box scanned onto a
+         * warehouse pallet per record. Hand-copied for the reason
+         * `MAX_BOX_CLOSURES` above gives; pinned by `SyncLimitsFixturesTest`.
+         */
+        const val MAX_PALLET_MEMBERSHIPS = 100
+
         /** The server's own `MAX_PRODUCT_LABEL_EVENTS`. */
         const val MAX_PRODUCT_LABEL_EVENTS = 100
 
