@@ -25,7 +25,11 @@ import { parsePhc } from "@markiro/domain";
 import type { OperatorMirrorRecord } from "@markiro/db/station-sqlite";
 import { postUnauthenticatedStationRequest } from "./api-client.js";
 import type { StationConfig } from "./config.js";
-import { replaceOperatorsMirror, type SqlExecutor } from "./mirror.js";
+import {
+  replaceOperatorsMirror,
+  restoreSealedOperatorsMirror,
+  type SqlExecutor,
+} from "./mirror.js";
 
 export type PairingError =
   | "invalid"
@@ -180,11 +184,26 @@ export async function persistStationProvisioning(
   if (!provisioning.operators.every(isOperator)) {
     throw new Error("Invalid operator roster");
   }
+  if (provisioning.recovery && !expectedOwner) throw new Error("Recovery identity required");
   const publish = async (config: StationConfig) => {
     await persistReplacementEvidenceRecovery(exec, provisioning);
     if (!provisioning.recovery) await persistTargetReplacementFence(exec, provisioning);
-    await replaceOperatorsMirror(exec, provisioning.operators);
-    onRosterPublished?.();
+    if (provisioning.recovery && expectedOwner) {
+      await restoreSealedOperatorsMirror(
+        exec,
+        JSON.stringify({
+          serverOrigin: expectedOwner.serverOrigin,
+          tenantId: expectedOwner.tenantId,
+          deviceId: expectedOwner.deviceId,
+          kind: expectedOwner.kind,
+        }),
+      );
+      onRosterPublished?.();
+    } else {
+      await replaceOperatorsMirror(exec, provisioning.operators);
+      onRosterPublished?.();
+      await exec.run("DELETE FROM station_meta WHERE key=?", ["sealed_operator_roster_v1"]);
+    }
     await writeConfig(config);
   };
   if (expectedOwner) {

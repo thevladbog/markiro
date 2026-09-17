@@ -294,9 +294,12 @@ export class StationScansService {
                 eq(schema.syncBatches.batchId, body.batchId),
               ),
             );
-          return (
-            existing?.terminalId === authenticatedTerminalId && existing.payloadDigest === digest
-          );
+          if (
+            existing &&
+            (existing.terminalId !== authenticatedTerminalId || existing.payloadDigest !== digest)
+          )
+            throw new ConflictException({ code: "station_batch_mismatch" });
+          return Boolean(existing);
         },
       );
     }

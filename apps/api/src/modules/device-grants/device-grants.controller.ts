@@ -141,7 +141,7 @@ export class DeviceGrantsController {
   @ApiOperation({
     summary: "Retain negotiated offline evidence and return durable reconciliation",
     description:
-      "Before a replacement target’s newWorkAllowedAt, evidence is durably quarantined with reason device_replacement_waiting and reconciliation.status not_applied, including observe mode. Retries preserve the classification after the boundary. Old draining-source evidence remains recoverable.",
+      "Before a replacement target’s newWorkAllowedAt, evidence is durably quarantined with reason device_replacement_waiting and reconciliation.status not_applied, including observe mode. Retries preserve the classification after the boundary. Old draining-source evidence remains recoverable. After emergency source transfer, first delivery is quarantined as unproven_pre_replacement_evidence even in observe mode; only exact pre-cutover server receipts can resume reconciliation.",
   })
   @ApiZodBody(grantEvidenceEnvelopeSchema)
   @ApiOkResponse({ schema: zodApiSchema(grantEvidenceReceiptSchema) })
@@ -160,7 +160,7 @@ export class DeviceGrantsController {
   @ApiOperation({
     summary: "Retain negotiated offline evidence and return durable reconciliation",
     description:
-      "Before a replacement target’s newWorkAllowedAt, evidence is durably quarantined with reason device_replacement_waiting and reconciliation.status not_applied, including observe mode. Retries preserve the classification after the boundary. Old draining-source evidence remains recoverable.",
+      "Before a replacement target’s newWorkAllowedAt, evidence is durably quarantined with reason device_replacement_waiting and reconciliation.status not_applied, including observe mode. Retries preserve the classification after the boundary. Old draining-source evidence remains recoverable. After emergency source transfer, first delivery is quarantined as unproven_pre_replacement_evidence even in observe mode; only exact pre-cutover server receipts can resume reconciliation.",
   })
   @ApiZodBody(grantEvidenceEnvelopeSchema)
   @ApiOkResponse({ schema: zodApiSchema(grantEvidenceReceiptSchema) })
@@ -178,7 +178,7 @@ export class DeviceGrantsController {
   @ApiOperation({
     summary: "Retain negotiated offline evidence and return durable reconciliation",
     description:
-      "Before a replacement target’s newWorkAllowedAt, evidence is durably quarantined with reason device_replacement_waiting and reconciliation.status not_applied, including observe mode. Retries preserve the classification after the boundary. Old draining-source evidence remains recoverable.",
+      "Before a replacement target’s newWorkAllowedAt, evidence is durably quarantined with reason device_replacement_waiting and reconciliation.status not_applied, including observe mode. Retries preserve the classification after the boundary. Old draining-source evidence remains recoverable. After emergency source transfer, first delivery is quarantined as unproven_pre_replacement_evidence even in observe mode; only exact pre-cutover server receipts can resume reconciliation.",
   })
   @ApiZodBody(grantEvidenceEnvelopeSchema)
   @ApiOkResponse({ schema: zodApiSchema(grantEvidenceReceiptSchema) })
@@ -197,7 +197,7 @@ export class DeviceGrantsController {
   @ApiOperation({
     summary: "Retain negotiated offline evidence and return durable reconciliation",
     description:
-      "Before a replacement target’s newWorkAllowedAt, evidence is durably quarantined with reason device_replacement_waiting and reconciliation.status not_applied, including observe mode. Retries preserve the classification after the boundary. Old draining-source evidence remains recoverable.",
+      "Before a replacement target’s newWorkAllowedAt, evidence is durably quarantined with reason device_replacement_waiting and reconciliation.status not_applied, including observe mode. Retries preserve the classification after the boundary. Old draining-source evidence remains recoverable. After emergency source transfer, first delivery is quarantined as unproven_pre_replacement_evidence even in observe mode; only exact pre-cutover server receipts can resume reconciliation.",
   })
   @ApiZodBody(grantEvidenceEnvelopeSchema)
   @ApiOkResponse({ schema: zodApiSchema(grantEvidenceReceiptSchema) })

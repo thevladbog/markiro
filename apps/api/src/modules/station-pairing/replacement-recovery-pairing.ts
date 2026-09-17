@@ -206,6 +206,7 @@ export async function redeemReplacementRecovery(input: {
     return {
       version: 1 as const,
       purpose: "replacement_evidence_recovery" as const,
+      operatorRoster: "preserve_sealed" as const,
       executionId,
       intentId: intent.id,
       credentialEpoch: paired.credentialEpoch,

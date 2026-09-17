@@ -526,6 +526,7 @@ it("publishes evidence-only recovery durably before the credential and preserves
     recovery: {
       version: 1 as const,
       purpose: "replacement_evidence_recovery" as const,
+      operatorRoster: "preserve_sealed" as const,
       executionId: crypto.randomUUID(),
       intentId: crypto.randomUUID(),
       credentialEpoch: 3,
@@ -557,6 +558,7 @@ it("retries the exact recovery report after response loss and file reopen withou
     recovery: {
       version: 1 as const,
       purpose: "replacement_evidence_recovery" as const,
+      operatorRoster: "preserve_sealed" as const,
       executionId: crypto.randomUUID(),
       intentId: crypto.randomUUID(),
       credentialEpoch: 3,
@@ -603,4 +605,69 @@ it("retries the exact recovery report after response loss and file reopen withou
     reportReplacementEvidenceRecovery({ exec: work.exec, generation, client, clientBuild: "test" }),
   ).rejects.toThrow("credential changed");
   expect(client.post).toHaveBeenCalledTimes(2);
+});
+
+it("preserves the sealed owner's sign-in roster and unresolved printing across recovery publication and SQLite reopen", async () => {
+  const { replaceOperatorsMirror, readOperatorRosterSnapshot } =
+    await import("../src/lib/mirror.js");
+  const { hashSecret } = await import("../src/lib/crypto.js");
+  const { verifyOperatorPin } = await import("../src/lib/auth.js");
+  await replaceOperatorsMirror(work.exec, [
+    {
+      operatorId: work.input.operatorId,
+      name: "Operator",
+      login: "001",
+      role: "operator",
+      pinHash: await hashSecret("4821"),
+      badgeHash: null,
+      active: true,
+    },
+  ]);
+  const before = await readOperatorRosterSnapshot(work.exec);
+  const view = await initializeDeviceRecovery(work.exec, config);
+  if (!view.owner) throw new Error("owner");
+  await sealDeviceRecovery(work.exec, config, generation);
+  const { clearRejectedCredentialState } = await import("../src/lib/credential-recovery.js");
+  await clearRejectedCredentialState({
+    exec: work.exec,
+    clearCredential: async () => {},
+    credentialGeneration: generation,
+    preserveRecoveryContext: true,
+  });
+  work.restart();
+  await persistStationProvisioning(
+    {
+      ...provisioning(),
+      recovery: {
+        version: 1,
+        purpose: "replacement_evidence_recovery",
+        operatorRoster: "preserve_sealed" as const,
+        executionId: crypto.randomUUID(),
+        intentId: crypto.randomUUID(),
+        credentialEpoch: 3,
+        requestedAt: "2026-09-17T00:00:00Z",
+        expiresAt: "2026-09-18T00:00:00Z",
+      },
+    },
+    {
+      machineId: "local",
+      expectedOwner: view.owner,
+      exec: work.exec,
+      writeConfig: async (next) => {
+        config = next;
+      },
+    },
+  );
+  work.restart();
+  expect((await initializeDeviceRecovery(work.exec, config)).phase).toBe("active");
+  expect(await readOperatorRosterSnapshot(work.exec)).toEqual(before);
+  expect(await verifyOperatorPin(work.exec, "001", "0000")).toBeNull();
+  expect(await verifyOperatorPin(work.exec, "001", "4821")).toMatchObject({
+    operatorId: work.input.operatorId,
+  });
+  expect(
+    await work.exec.all("SELECT * FROM product_label_jobs WHERE status <> 'completed'"),
+  ).toHaveLength(1);
+  expect(await work.exec.all("SELECT * FROM product_label_outbox")).toHaveLength(1);
+  expect(await replacementBlocksNewWork(work.exec)).toBe(true);
 });

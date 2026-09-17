@@ -12,6 +12,7 @@ import kotlinx.serialization.json.*
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.*
@@ -40,7 +41,8 @@ class DeviceRecoveryTest {
         db = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), HandheldDatabase::class.java).allowMainThreadQueries().build()
         recovery = DeviceRecovery(db, credential)
     }
-    @After fun close() = db.close()
+    @get:org.junit.Rule val main = app.markiro.handheld.MainDispatcherRule()
+    @After fun close() { main.cancelAndJoinModels(); db.close() }
     private suspend fun active() {
         db.deviceConfigDao().upsert(config)
         secrets.write("old-key")
@@ -48,9 +50,63 @@ class DeviceRecoveryTest {
     }
     private suspend fun sealed() { active(); recovery.reject(recovery.token()) }
 
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    @Test fun sealedRosterSurvivesRoomReopenAndRecoveryLoginWithUnresolvedPrinting() = runTest {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val filename = "recovery-roster-${java.util.UUID.randomUUID()}.db"
+        fun reopen() {
+            db.close()
+            db = Room.databaseBuilder(context, HandheldDatabase::class.java, filename).allowMainThreadQueries().build()
+            recovery = DeviceRecovery(db, credential)
+        }
+        try {
+            reopen()
+            active()
+            val pin = "pbkdf2\$sha256\$100000\$AAECAwQFBgcICQoLDA0ODw==\$hp5sg1DFvrCsw5n7qsO2DSIEM4lrJqZHc00NjxWG4fo="
+            val roster = listOf(OperatorEntity("op-1", "Operator", "001", "operator", pin, null, true))
+            db.operatorDao().insertAll(roster)
+            db.boxDao().insert(BoxEntity("box-pending", "saved-shift", "004680089900000014", "2026-09-17T00:00:00Z", "2026-09-17T00:01:00Z", "op-1", "unknown", "lost response", null))
+            db.metaDao().put(MetaEntity("pinned-batch", "exact-old-body"))
+            recovery.reject(recovery.token())
+            assertTrue(db.operatorDao().all().isEmpty())
+            reopen()
+            recovery.initialize()
+            val binding = app.markiro.handheld.core.network.ReplacementEvidenceRecovery(1, "replacement_evidence_recovery", java.util.UUID.randomUUID().toString(), java.util.UUID.randomUUID().toString(), 3, "2026-09-17T00:00:00Z", "2026-09-18T00:00:00Z", "preserve_sealed")
+            db.openHelper.writableDatabase.execSQL("CREATE TRIGGER fail_recovery_roster BEFORE INSERT ON device_config BEGIN SELECT RAISE(ABORT, 'publication interrupted'); END")
+            assertTrue(runCatching { recovery.restore(response().copy(recovery = binding), config.serverUrl) }.isFailure)
+            assertEquals(RecoveryPhase.RESTORING, recovery.current().phase)
+            assertTrue(db.operatorDao().all().isEmpty())
+            reopen()
+            db.openHelper.writableDatabase.execSQL("DROP TRIGGER fail_recovery_roster")
+            recovery.initialize()
+            assertEquals(roster, db.operatorDao().all())
+            val session = app.markiro.handheld.feature.signin.SessionHolder()
+            val auth = app.markiro.handheld.core.auth.OperatorAuth(RosterStore(db.operatorDao(), recovery), main.dispatcher) { secret, phc -> secret == "4821" && phc == pin }
+            val vm = main.track(app.markiro.handheld.feature.signin.SignInViewModel(recovery, auth, session, kotlinx.coroutines.flow.emptyFlow()))
+            vm.onDigit('1')
+            vm.onConfirm()
+            advanceUntilIdle()
+            kotlinx.coroutines.withTimeout(5_000) { vm.state.first { it is app.markiro.handheld.feature.signin.SignInUi.Pin && it.operatorName == "Operator" } }
+            "4821".forEach(vm::onDigit)
+            vm.onConfirm()
+            advanceUntilIdle()
+            kotlinx.coroutines.withTimeout(5_000) { session.state.first { it.operator != null } }
+            assertEquals("op-1", session.state.value.operator?.operatorId)
+            assertEquals("unknown", db.boxDao().get("box-pending")?.printState)
+            assertEquals(1L, recovery.summary()["unknownPrints"])
+            assertEquals("exact-old-body", db.metaDao().get("pinned-batch"))
+            assertTrue(app.markiro.handheld.core.replacement.ReplacementReadiness(db).blocked())
+            assertTrue(runCatching { db.grants.start(app.markiro.handheld.core.grants.TaskKind.SHIFT, "saved-shift", "new-work") }.exceptionOrNull() is app.markiro.handheld.core.replacement.ReplacementDenied)
+        } finally {
+            main.cancelAndJoinModels()
+            db.close()
+            context.deleteDatabase(filename)
+        }
+    }
+
     @Test fun evidenceRecoveryPersistsBeforePublishingAndBlocksOfflineProduction() = runTest {
         sealed()
-        val binding = app.markiro.handheld.core.network.ReplacementEvidenceRecovery(1,"replacement_evidence_recovery",java.util.UUID.randomUUID().toString(),java.util.UUID.randomUUID().toString(),3,"2026-09-17T00:00:00Z","2026-09-18T00:00:00Z")
+        val binding = app.markiro.handheld.core.network.ReplacementEvidenceRecovery(1,"replacement_evidence_recovery",java.util.UUID.randomUUID().toString(),java.util.UUID.randomUUID().toString(),3,"2026-09-17T00:00:00Z","2026-09-18T00:00:00Z", "preserve_sealed")
         db.metaDao().put(MetaEntity("pinned-batch", "exact-old-body"))
         recovery.restore(response().copy(recovery=binding), config.serverUrl)
         assertTrue(app.markiro.handheld.core.replacement.ReplacementReadiness(db).blocked())
@@ -65,7 +121,7 @@ class DeviceRecoveryTest {
         sealed()
         val binding = app.markiro.handheld.core.network.ReplacementEvidenceRecovery(
             1, "replacement_evidence_recovery", java.util.UUID.randomUUID().toString(),
-            java.util.UUID.randomUUID().toString(), 3, "2026-09-17T00:00:00Z", "2026-09-18T00:00:00Z",
+            java.util.UUID.randomUUID().toString(), 3, "2026-09-17T00:00:00Z", "2026-09-18T00:00:00Z", "preserve_sealed",
         )
         recovery.restore(response().copy(recovery = binding), config.serverUrl)
         val token = recovery.token()

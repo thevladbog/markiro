@@ -145,6 +145,102 @@ describe("OperatorLogin", () => {
     expect(screen.getByRole("button", { name: "1" })).toBeDefined();
   });
 
+  it("signs in from the sealed owner roster after recovery pairing and SQLite reopen while unresolved work stays fenced", async () => {
+    const { openProductLabelWork } = await import("./support/product-label-work.js");
+    const { createCredentialGeneration, credentialGenerationOwnership } =
+      await import("../src/lib/credential-recovery.js");
+    const { initializeDeviceRecovery, sealDeviceRecovery } =
+      await import("../src/lib/device-recovery.js");
+    const { persistStationProvisioning } = await import("../src/lib/pairing.js");
+    const { replacementBlocksNewWork } = await import("../src/lib/device-replacement.js");
+    const generation = createCredentialGeneration("old-key");
+    const work = await openProductLabelWork(
+      "required",
+      (await credentialGenerationOwnership(generation)) ?? undefined,
+      true,
+      true,
+    );
+    let config = {
+      machineId: "local",
+      tenantId: "tenant",
+      deviceId: work.input.deviceId,
+      serverUrl: "https://api.example.test",
+      apiKey: "old-key",
+    };
+    let unmount: (() => void) | undefined;
+    try {
+      await replaceOperatorsMirror(work.exec, [
+        {
+          operatorId: work.input.operatorId,
+          name: "Recovery Operator",
+          login: "001",
+          role: "operator",
+          pinHash: await hashSecret("4821"),
+          badgeHash: null,
+          active: true,
+        },
+      ]);
+      const view = await initializeDeviceRecovery(work.exec, config);
+      if (!view.owner) throw new Error("Missing owner");
+      await sealDeviceRecovery(work.exec, config, generation);
+      const { clearRejectedCredentialState } = await import("../src/lib/credential-recovery.js");
+      await clearRejectedCredentialState({
+        exec: work.exec,
+        clearCredential: async () => {},
+        credentialGeneration: generation,
+        preserveRecoveryContext: true,
+      });
+      work.restart();
+      await persistStationProvisioning(
+        {
+          ...config,
+          apiKey: "recovery-key",
+          deviceName: "Station",
+          organizationName: "Org",
+          operators: [],
+          recovery: {
+            version: 1,
+            purpose: "replacement_evidence_recovery",
+            operatorRoster: "preserve_sealed",
+            executionId: globalThis.crypto.randomUUID(),
+            intentId: globalThis.crypto.randomUUID(),
+            credentialEpoch: 3,
+            requestedAt: "2026-09-17T00:00:00Z",
+            expiresAt: "2026-09-18T00:00:00Z",
+          },
+        },
+        {
+          machineId: "local",
+          expectedOwner: view.owner,
+          exec: work.exec,
+          writeConfig: async (next) => {
+            config = { ...config, ...next };
+          },
+        },
+      );
+      work.restart();
+      expect((await initializeDeviceRecovery(work.exec, config)).phase).toBe("active");
+      const onAuthed = vi.fn();
+      ({ unmount } = render(
+        <OperatorLogin online={false} exec={work.exec} source={silentSource} onAuthed={onAuthed} />,
+      ));
+      openNumericFallback();
+      fireEvent.click(screen.getByRole("button", { name: "1" }));
+      fireEvent.click(screen.getByRole("button", { name: "Next" }));
+      for (const digit of "4821") fireEvent.click(screen.getByRole("button", { name: digit }));
+      fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+      await waitFor(() => expect(onAuthed).toHaveBeenCalledTimes(1));
+      expect(onAuthed.mock.calls[0]?.[0]).toMatchObject({ operatorId: work.input.operatorId });
+      expect(
+        await work.exec.all("SELECT * FROM product_label_jobs WHERE status <> 'completed'"),
+      ).toHaveLength(1);
+      expect(await replacementBlocksNewWork(work.exec)).toBe(true);
+    } finally {
+      unmount?.();
+      work.close();
+    }
+  });
+
   it("pads a one-digit login only to the 3-digit storage minimum", async () => {
     const exec = makeExec();
     await applyMigrations(exec);

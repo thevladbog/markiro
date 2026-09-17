@@ -6,6 +6,11 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.cash.turbine.test
 import app.markiro.handheld.core.auth.OperatorRecord
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.JsonNull
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -76,7 +81,30 @@ class StorageTest {
         }
         val saved = capture()
         DeviceWipe(db.recovery).reject(db.recovery.token())
-        assertEquals(saved, capture())
+        val snapshot = checkNotNull(db.metaDao().get("sealed_operator_roster_v1"))
+        assertEquals(buildJsonObject {
+            put("owner", buildJsonObject {
+                put("serverOrigin", "https://admin.markiro.app")
+                put("tenantId", "t-1")
+                put("deviceId", "dev-1")
+                put("kind", "handheld")
+            })
+            put("operators", buildJsonArray {
+                add(buildJsonObject {
+                    put("operatorId", "op-1")
+                    put("name", "Анна")
+                    put("login", "4127")
+                    put("role", "operator")
+                    put("pinHash", "pbkdf2\$sha256\$100000\$x\$y")
+                    put("badgeHash", JsonNull)
+                    put("active", true)
+                })
+            })
+        }, Json.parseToJsonElement(snapshot))
+        // Every prior row is exact; the only addition is the independently
+        // checked owner-bound verifier snapshot, unavailable for sealed login.
+        val expected = saved + ("meta" to (saved.getValue("meta") + listOf(listOf("sealed_operator_roster_v1", snapshot))))
+        assertEquals(expected, capture())
         assertEquals(sampleConfig(), db.deviceConfigDao().get())
         assertEquals(emptyList<OperatorEntity>(), db.operatorDao().all())
         assertNull(credential.read())

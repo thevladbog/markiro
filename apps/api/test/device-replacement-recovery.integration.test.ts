@@ -1,3 +1,9 @@
+import {
+  canonicalizeKm,
+  kmHash,
+  productLabelValueDigest,
+  inventoryEventBatchDigest,
+} from "@markiro/domain";
 import { platformCapabilitiesForRole } from "@markiro/platform-contracts";
 import { createPublishedAddon } from "./support/subscription-fixtures";
 import { Test } from "@nestjs/testing";
@@ -8,10 +14,11 @@ import { AppModule } from "../src/app.module";
 import { setupAuth } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { listenOnLoopback } from "./support/listen-loopback";
-import { randomUUID } from "node:crypto";
-import { describe, expect, it, beforeAll, afterAll, beforeEach } from "vitest";
+import { randomUUID, createHash } from "node:crypto";
+import { describe, expect, it, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { schema } from "@markiro/db";
+import { StationScansService } from "../src/modules/station-scans/station-scans.service";
 import { DeviceReplacementRecoveryService } from "../src/modules/device-licensing/device-replacement-recovery.service";
 import { replacementExecutionHarness } from "./support/device-replacement-execution-fixture";
 
@@ -42,8 +49,11 @@ describe.skipIf(!process.env.DATABASE_URL)("replacement evidence recovery", () =
     await listenOnLoopback(app);
   });
   const recovery = new DeviceReplacementRecoveryService(h.db, h.entitlements, h.audit);
-  async function emergency(kind: "station" | "handheld" = "station") {
-    const f = await h.fixture(kind, 1, true);
+  async function emergency(
+    kind: "station" | "handheld" = "station",
+    existing?: Awaited<ReturnType<typeof h.fixture>>,
+  ) {
+    const f = existing ?? (await h.fixture(kind, 1, true));
     if (kind === "handheld") {
       const [subscription] = await h.db
         .select()
@@ -577,4 +587,419 @@ describe.skipIf(!process.env.DATABASE_URL)("replacement evidence recovery", () =
       targetId: f.prepared.preparation.id,
     });
   });
+
+  it.each(["station", "handheld"] as const)(
+    "%s quarantines every fresh evidence channel after cutover, including native observe, with stable retries",
+    async (kind) => {
+      const source = await emergency(kind);
+      const issued = await recovery.issueReplacementRecoveryCode(
+        source.tenantId,
+        source.prepared.preparation.id,
+        { requestId: randomUUID(), expectedRevision: source.done.preparation.execution!.revision },
+        source.actor,
+      );
+      const paired = await request(app.getHttpServer())
+        .post("/station/pair/recovery")
+        .set(
+          "x-station-capabilities",
+          `replacement-evidence-recovery-v1${kind === "handheld" ? ",handheld-v1" : ""}`,
+        )
+        .send({
+          version: 1,
+          code: issued.code,
+          expected: { tenantId: source.tenantId, deviceId: source.device.id, kind },
+        })
+        .expect(201);
+      const f = {
+        ...source,
+        post: (path: string, body: object) =>
+          request(app.getHttpServer())
+            .post(path)
+            .set("x-api-key", paired.body.credential.apiKey)
+            .send(body),
+      };
+      const shiftId = randomUUID(),
+        productId = randomUUID(),
+        operatorId = randomUUID(),
+        inventoryId = randomUUID(),
+        reasonId = randomUUID();
+      await h.db
+        .insert(schema.employees)
+        .values({ id: operatorId, tenantId: f.tenantId, fullName: "Operator" });
+      await h.db.insert(schema.products).values({
+        id: productId,
+        tenantId: f.tenantId,
+        name: "Post-cutover product",
+        gtin14: "04600682000013",
+      });
+      await h.db.insert(schema.shifts).values({
+        id: shiftId,
+        tenantId: f.tenantId,
+        productId,
+        mode: "validation",
+        status: "active",
+        numberMonthKey: "SEP26",
+        numberSeq: 1,
+        openedAt: new Date(),
+      });
+      await request(app.getHttpServer())
+        .get("/station/operators")
+        .set("x-api-key", paired.body.credential.apiKey)
+        .expect(403);
+      const occurredAt = new Date().toISOString();
+      const raw = `01${"04600682000013"}21FORGED123456789012${String.fromCharCode(29)}93Abcd`;
+      const km = canonicalizeKm(raw),
+        codeHash = kmHash(km);
+      const item = {
+        shiftId: shiftId,
+        terminalId: null,
+        raw,
+        verdict: "ok",
+        scannedAt: occurredAt,
+        code: { codeHash, gtin14: km.gtin14, serial: km.serial },
+        boxId: null,
+        operatorId: operatorId,
+      };
+      const label = {
+        eventId: randomUUID(),
+        jobId: randomUUID(),
+        attemptId: randomUUID(),
+        sequence: 1,
+        shiftId: shiftId,
+        codeHash,
+        acceptedAt: occurredAt,
+        policyRevision: randomUUID(),
+        templateDigest: "b".repeat(64),
+        payloadDigest: "c".repeat(64),
+        operatorId: operatorId,
+        occurredAt,
+        kind: "prepared",
+        attemptNo: 1,
+        reason: null,
+        language: "zpl",
+        dpi: 203,
+        bytesDigest: "d".repeat(64),
+      };
+      const scans = [
+        { batchId: randomUUID(), items: [item] },
+        { batchId: randomUUID(), items: [], productLabelEvents: [label] },
+        {
+          batchId: randomUUID(),
+          items: [],
+          boxes: [
+            {
+              boxId: randomUUID(),
+              shiftId: shiftId,
+              terminalId: null,
+              sscc: "046011122200000019",
+              closedAt: occurredAt,
+              operatorId: operatorId,
+            },
+          ],
+        },
+        {
+          batchId: randomUUID(),
+          items: [],
+          pallets: [
+            {
+              palletId: randomUUID(),
+              shiftId: shiftId,
+              terminalId: null,
+              sscc: "146011122200000016",
+              closedAt: occurredAt,
+              operatorId: operatorId,
+            },
+          ],
+        },
+      ];
+      const inventoryPayload = {
+        snapshotId: randomUUID(),
+        snapshotRevision: 1 as const,
+        sequenceCeiling: 1,
+        pendingEventCount: 0,
+        openBoxCount: 0,
+        events: [
+          {
+            eventId: randomUUID(),
+            deviceSequence: 1,
+            operatorId: operatorId,
+            scannedAt: occurredAt,
+            kind: "item" as const,
+            normalizedIdentity: `km:${codeHash}`,
+            codeHash,
+            canonicalRaw: km.raw,
+            activeProductionDate: "2026-08-01",
+            localVerdict: "unknown" as const,
+          },
+        ],
+      };
+      const inventory = {
+        ...inventoryPayload,
+        batchId: randomUUID(),
+        payloadDigest: inventoryEventBatchDigest(inventoryPayload),
+      };
+      const close = {
+        eventId: randomUUID(),
+        shiftId: shiftId,
+        operatorId: operatorId,
+        plannedQtySnapshot: null,
+        actualQty: 0,
+        closedBoxCount: 0,
+        closedAt: occurredAt,
+      };
+      const legacy = [
+        {
+          path: `/station/inventories/${inventoryId}/leave`,
+          payload: { requestId: randomUUID(), pendingEventCount: 0, openBoxCount: 0 },
+        },
+        ...scans.map((payload) => ({ path: "/station/scans", payload })),
+        { path: `/station/inventories/${inventoryId}/event-batches`, payload: inventory },
+        { path: "/station/shift-closures", payload: close },
+        ...(kind === "handheld"
+          ? [
+              {
+                path: "/station/writeoffs",
+                payload: {
+                  deviceSeq: 7,
+                  operatorId: operatorId,
+                  writeoffReasonId: reasonId,
+                  items: [{ rawKm: raw }],
+                  boxes: [],
+                  createdAt: occurredAt,
+                },
+              },
+            ]
+          : []),
+      ];
+      const legacyReceipts: { route: (typeof legacy)[number]; body: object }[] = [];
+      for (const route of legacy) {
+        const response = await f.post(route.path, route.payload);
+        expect.soft(response.status, route.path).toBe(409);
+        expect.soft(response.body, route.path).toMatchObject({
+          code:
+            route.path === "/station/writeoffs"
+              ? "device_replacement_draining"
+              : "device_replacement_recovery",
+          outcome: "quarantined",
+          receiptId: expect.any(String),
+        });
+        legacyReceipts.push({ route, body: response.body });
+        expect((await f.post(route.path, route.payload)).body).toEqual(response.body);
+      }
+      const native = [
+        ...scans.map((payload) => ({ path: "/station/grants/v1/evidence/scans", payload })),
+        {
+          path: `/station/grants/v1/evidence/inventories/${inventoryId}/event-batches`,
+          payload: inventory,
+        },
+        { path: "/station/grants/v1/evidence/shift-closures", payload: close },
+        {
+          path: `/station/grants/v1/evidence/inventories/${inventoryId}/leave`,
+          payload: { pendingEventCount: 0, openBoxCount: 0 },
+        },
+      ];
+      for (const route of native) {
+        const envelope = {
+          protocol: "offline-grants-v1",
+          batchId: randomUUID(),
+          payloadDigest: productLabelValueDigest(route.payload),
+          grants: [],
+          eventGrants: {},
+          payload: route.payload,
+        };
+        const response = await f.post(route.path, envelope);
+        expect.soft(response.status, route.path).toBe(200);
+        expect.soft(response.body, route.path).toMatchObject({
+          outcome: "quarantined",
+          reason: "unproven_pre_replacement_evidence",
+          reconciliation: { status: "not_applied" },
+        });
+        const replay = await f.post(route.path, envelope);
+        expect.soft(replay.body).toMatchObject({ ...response.body, outcome: "duplicate" });
+      }
+      expect(
+        await h.db
+          .select()
+          .from(schema.scanEvents)
+          .where(eq(schema.scanEvents.terminalId, f.device.id)),
+      ).toHaveLength(0);
+      expect(
+        await h.db
+          .select()
+          .from(schema.productLabelJobs)
+          .where(eq(schema.productLabelJobs.deviceId, f.device.id)),
+      ).toHaveLength(0);
+      expect(
+        await h.db.select().from(schema.boxes).where(eq(schema.boxes.terminalId, f.device.id)),
+      ).toHaveLength(0);
+      expect(
+        await h.db.select().from(schema.pallets).where(eq(schema.pallets.terminalId, f.device.id)),
+      ).toHaveLength(0);
+      expect(
+        await h.db
+          .select()
+          .from(schema.inventoryScanEvents)
+          .where(eq(schema.inventoryScanEvents.deviceId, f.device.id)),
+      ).toHaveLength(0);
+      expect(
+        await h.db
+          .select()
+          .from(schema.pickupOrders)
+          .where(eq(schema.pickupOrders.stationDeviceId, f.device.id)),
+      ).toHaveLength(0);
+
+      expect(
+        await h.db.select().from(schema.codes).where(eq(schema.codes.shiftId, shiftId)),
+      ).toEqual([]);
+      expect(
+        await h.db
+          .select()
+          .from(schema.stationShiftCloseEvents)
+          .where(eq(schema.stationShiftCloseEvents.deviceId, f.device.id)),
+      ).toEqual([]);
+      const [shift] = await h.db.select().from(schema.shifts).where(eq(schema.shifts.id, shiftId));
+      expect(shift?.status).toBe("active");
+      expect(
+        await h.db
+          .select()
+          .from(schema.deviceGrantEvidence)
+          .where(eq(schema.deviceGrantEvidence.stationDeviceId, f.device.id)),
+      ).toHaveLength(legacy.length);
+      const receipts = await h.db
+        .select()
+        .from(schema.deviceGrantIngestReceipts)
+        .where(eq(schema.deviceGrantIngestReceipts.stationDeviceId, f.device.id));
+      expect(receipts).toHaveLength(native.length);
+      expect(
+        receipts.every(
+          (row) => row.mode === "observe" && row.finalResponse?.outcome === "quarantined",
+        ),
+      ).toBe(true);
+    },
+  );
+
+  it.each(["legacy", "native_final", "native_pending"] as const)(
+    "replays exact pre-cutover %s evidence and refuses changed bytes",
+    async (transport) => {
+      const f = await h.fixture("station", 1, true);
+      const originalKey = randomUUID();
+      await h.db
+        .update(schema.apikey)
+        .set({
+          key: createHash("sha256").update(originalKey).digest("base64url"),
+          metadata: JSON.stringify({ kind: "station" }),
+        })
+        .where(eq(schema.apikey.id, f.identity.apiKeyId));
+      const productId = randomUUID(),
+        shiftId = randomUUID();
+      await h.db.insert(schema.products).values({
+        id: productId,
+        tenantId: f.tenantId,
+        name: "Old product",
+        gtin14: "04600682000013",
+      });
+      await h.db.insert(schema.shifts).values({
+        id: shiftId,
+        tenantId: f.tenantId,
+        productId,
+        mode: "validation",
+        status: "active",
+        numberMonthKey: "SEP26",
+        numberSeq: 1,
+        openedAt: new Date(),
+      });
+      const raw = `010460068200001321SAVED123456789012${String.fromCharCode(29)}93Abcd`;
+      const km = canonicalizeKm(raw);
+      const payload = {
+        batchId: randomUUID(),
+        items: [
+          {
+            shiftId,
+            terminalId: f.device.id,
+            raw,
+            verdict: "ok",
+            scannedAt: new Date().toISOString(),
+            code: { codeHash: kmHash(km), gtin14: km.gtin14, serial: km.serial },
+            boxId: null,
+            operatorId: null,
+          },
+        ],
+      };
+      const body =
+        transport === "legacy"
+          ? payload
+          : {
+              protocol: "offline-grants-v1",
+              batchId: randomUUID(),
+              payloadDigest: productLabelValueDigest(payload),
+              payload,
+              grants: [],
+              eventGrants: {},
+            };
+      const path = transport === "legacy" ? "/station/scans" : "/station/grants/v1/evidence/scans";
+      const send = (key: string, input: object = body) =>
+        request(app.getHttpServer()).post(path).set("x-api-key", key).send(input);
+      if (transport === "native_pending")
+        vi.spyOn(app.get(StationScansService), "applyBatch").mockRejectedValueOnce(
+          new Error("pre-cutover receipt retained; native execution interrupted"),
+        );
+      const original = await send(originalKey).expect(
+        transport === "native_pending" ? 500 : transport === "legacy" ? 201 : 200,
+      );
+      if (transport === "legacy") expect(original.body.applied).toBe(1);
+      if (transport === "native_final")
+        expect(original.body).toMatchObject({
+          outcome: "accepted",
+          reconciliation: { status: "applied", result: { applied: 1 } },
+        });
+      if (transport === "native_pending")
+        expect(
+          await h.db.select().from(schema.codes).where(eq(schema.codes.shiftId, shiftId)),
+        ).toEqual([]);
+      const replaced = await emergency("station", f);
+      const issued = await recovery.issueReplacementRecoveryCode(
+        f.tenantId,
+        f.prepared.preparation.id,
+        {
+          requestId: randomUUID(),
+          expectedRevision: replaced.done.preparation.execution!.revision,
+        },
+        f.actor,
+      );
+      const paired = await request(app.getHttpServer())
+        .post("/station/pair/recovery")
+        .set("x-station-capabilities", "replacement-evidence-recovery-v1")
+        .send({
+          version: 1,
+          code: issued.code,
+          expected: { tenantId: f.tenantId, deviceId: f.device.id, kind: "station" },
+        })
+        .expect(201);
+      const recovered = await send(paired.body.credential.apiKey).expect(
+        transport === "legacy" ? 201 : 200,
+      );
+      if (transport === "legacy")
+        expect(recovered.body).toMatchObject({ applied: 0, alreadyApplied: true });
+      else
+        expect(recovered.body).toMatchObject({
+          outcome: transport === "native_pending" ? "accepted" : "duplicate",
+          reconciliation: { status: "applied", result: { applied: 1 } },
+        });
+      await send(
+        paired.body.credential.apiKey,
+        transport === "legacy"
+          ? {
+              ...payload,
+              items: [
+                { ...payload.items[0], scannedAt: new Date(Date.now() + 1000).toISOString() },
+              ],
+            }
+          : { ...body, grants: ["changed"] },
+      ).expect(409);
+      await send(paired.body.credential.apiKey).expect(transport === "legacy" ? 201 : 200);
+      expect(
+        await h.db.select().from(schema.codes).where(eq(schema.codes.shiftId, shiftId)),
+      ).toHaveLength(1);
+    },
+  );
 });

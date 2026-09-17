@@ -403,7 +403,8 @@
         "intentId": "00000000-0000-4000-8000-000000000003",
         "credentialEpoch": 3,
         "requestedAt": "2026-09-17T00:00:00Z",
-        "expiresAt": "2026-09-18T00:00:00Z"
+        "expiresAt": "2026-09-18T00:00:00Z",
+        "operatorRoster": "preserve_sealed"
       }
     }
   },
@@ -442,7 +443,8 @@
         "intentId": "00000000-0000-4000-8000-000000000003",
         "credentialEpoch": 3,
         "requestedAt": "2026-09-17T00:00:00Z",
-        "expiresAt": "2026-09-18T00:00:00Z"
+        "expiresAt": "2026-09-18T00:00:00Z",
+        "operatorRoster": "preserve_sealed"
       }
     }
   },
@@ -512,7 +514,127 @@
         "intentId": "00000000-0000-4000-8000-000000000003",
         "credentialEpoch": 3,
         "requestedAt": "2026-09-17T00:00:00Z",
-        "expiresAt": "2026-09-17T00:00:00Z"
+        "expiresAt": "2026-09-17T00:00:00Z",
+        "operatorRoster": "preserve_sealed"
+      }
+    }
+  },
+  {
+    "name": "unknown recovery roster policy",
+    "valid": false,
+    "response": {
+      "version": 1,
+      "device": {
+        "id": "00000000-0000-4000-8000-000000000001",
+        "name": "Synthetic handheld",
+        "kind": "handheld",
+        "tenantId": "tenant-existing",
+        "organizationName": "Factory",
+        "line": null
+      },
+      "credential": {
+        "apiKey": "synthetic-fixture-key",
+        "serverUrl": "https://api.example.test"
+      },
+      "operators": [
+        {
+          "operatorId": "op1",
+          "name": "Operator",
+          "login": "401",
+          "role": "operator",
+          "pinHash": "synthetic-verifier",
+          "badgeHash": null,
+          "active": true
+        }
+      ],
+      "recovery": {
+        "version": 1,
+        "purpose": "replacement_evidence_recovery",
+        "executionId": "00000000-0000-4000-8000-000000000002",
+        "intentId": "00000000-0000-4000-8000-000000000003",
+        "credentialEpoch": 3,
+        "requestedAt": "2026-09-17T00:00:00Z",
+        "expiresAt": "2026-09-18T00:00:00Z",
+        "operatorRoster": "replace"
+      }
+    }
+  },
+  {
+    "name": "null recovery roster policy",
+    "valid": false,
+    "response": {
+      "version": 1,
+      "device": {
+        "id": "00000000-0000-4000-8000-000000000001",
+        "name": "Synthetic handheld",
+        "kind": "handheld",
+        "tenantId": "tenant-existing",
+        "organizationName": "Factory",
+        "line": null
+      },
+      "credential": {
+        "apiKey": "synthetic-fixture-key",
+        "serverUrl": "https://api.example.test"
+      },
+      "operators": [
+        {
+          "operatorId": "op1",
+          "name": "Operator",
+          "login": "401",
+          "role": "operator",
+          "pinHash": "synthetic-verifier",
+          "badgeHash": null,
+          "active": true
+        }
+      ],
+      "recovery": {
+        "version": 1,
+        "purpose": "replacement_evidence_recovery",
+        "executionId": "00000000-0000-4000-8000-000000000002",
+        "intentId": "00000000-0000-4000-8000-000000000003",
+        "credentialEpoch": 3,
+        "requestedAt": "2026-09-17T00:00:00Z",
+        "expiresAt": "2026-09-18T00:00:00Z",
+        "operatorRoster": null
+      }
+    }
+  },
+  {
+    "name": "missing recovery roster policy",
+    "valid": false,
+    "response": {
+      "version": 1,
+      "device": {
+        "id": "00000000-0000-4000-8000-000000000001",
+        "name": "Synthetic handheld",
+        "kind": "handheld",
+        "tenantId": "tenant-existing",
+        "organizationName": "Factory",
+        "line": null
+      },
+      "credential": {
+        "apiKey": "synthetic-fixture-key",
+        "serverUrl": "https://api.example.test"
+      },
+      "operators": [
+        {
+          "operatorId": "op1",
+          "name": "Operator",
+          "login": "401",
+          "role": "operator",
+          "pinHash": "synthetic-verifier",
+          "badgeHash": null,
+          "active": true
+        }
+      ],
+      "recovery": {
+        "version": 1,
+        "purpose": "replacement_evidence_recovery",
+        "executionId": "00000000-0000-4000-8000-000000000002",
+        "intentId": "00000000-0000-4000-8000-000000000003",
+        "credentialEpoch": 3,
+        "requestedAt": "2026-09-17T00:00:00Z",
+        "expiresAt": "2026-09-18T00:00:00Z"
       }
     }
   }

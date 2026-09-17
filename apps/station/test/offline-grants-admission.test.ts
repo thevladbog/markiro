@@ -139,6 +139,7 @@ describe("Station offline admission", () => {
           recovery: {
             version: 1,
             purpose: "replacement_evidence_recovery",
+            operatorRoster: "preserve_sealed" as const,
             executionId: crypto.randomUUID(),
             intentId: crypto.randomUUID(),
             credentialEpoch: 4,

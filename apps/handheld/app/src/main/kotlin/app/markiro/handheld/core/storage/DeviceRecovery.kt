@@ -55,6 +55,10 @@ interface DeviceRecoveryDao {
 }
 
 @Serializable
+private data class SealedOperatorRoster(val owner: DeviceOwner, val operators: List<app.markiro.handheld.core.network.OperatorDto>)
+private const val SEALED_OPERATOR_ROSTER = "sealed_operator_roster_v1"
+
+@Serializable
 private data class Publication(val id: String, val owner: DeviceOwner, val generation: Long, val response: PairResponse)
 
 /** One coordinator per database. Nothing can admit work until initialize has resolved its owner. */
@@ -242,7 +246,21 @@ class DeviceRecovery(private val db: HandheldDatabase, private val credential: C
         val intent = row.copy(phase = if (unresolved) RecoveryPhase.OWNER_UNRESOLVED.name else RecoveryPhase.SEALING.name, pendingId = null)
         mutable.value = intent.state()
         db.deviceRecoveryDao().put(intent)
-        db.operatorDao().clear()
+        db.withTransaction {
+            val owner = intent.owner()
+            val existing = db.metaDao().get(SEALED_OPERATOR_ROSTER)
+            if (unresolved || owner == null || db.deviceConfigDao().get() == null) {
+                db.metaDao().remove(SEALED_OPERATOR_ROSTER)
+            } else if (existing == null) {
+                // Atomic with clearing the live roster; a second seal/restart
+                // must never overwrite the retained verifiers with an empty roster.
+                val operators = db.operatorDao().all().map {
+                    app.markiro.handheld.core.network.OperatorDto(it.operatorId, it.name, it.login, it.role, it.pinHash, it.badgeHash, it.active)
+                }
+                db.metaDao().put(MetaEntity(SEALED_OPERATOR_ROSTER, json.encodeToString(SealedOperatorRoster.serializer(), SealedOperatorRoster(owner, operators))))
+            }
+            db.operatorDao().clear()
+        }
         credential.clear()
         val sealed = intent.copy(phase = if (unresolved) RecoveryPhase.OWNER_UNRESOLVED.name else RecoveryPhase.SEALED.name)
         db.deviceRecoveryDao().put(sealed)
@@ -255,6 +273,7 @@ class DeviceRecovery(private val db: HandheldDatabase, private val credential: C
             seal(row.copy(phase = RecoveryPhase.OWNER_UNRESOLVED.name))
             throw RecoveryMismatch()
         }
+        if (response.recovery != null && (row.owner() == null || db.deviceConfigDao().get() == null)) throw RecoveryMismatch()
         val owner = ownerOf(serverUrl, response.device.tenantId, response.device.id, response.device.kind) ?: throw RecoveryMismatch()
         if (row.phase == RecoveryPhase.OWNER_UNRESOLVED.name || row.owner()?.let { it != owner } == true) throw RecoveryMismatch()
         if (row.phase == RecoveryPhase.ACTIVE.name && row.owner() == owner && credential.read() == response.credential.apiKey) {
@@ -293,6 +312,18 @@ class DeviceRecovery(private val db: HandheldDatabase, private val credential: C
         val publication = credential.staged()?.let { runCatching { json.decodeFromString(Publication.serializer(), it) }.getOrNull() }
         if (publication == null) { seal(row); return }
         check(publication.id == row.pendingId && publication.owner == row.owner() && publication.generation == row.generation)
+        val recovery = publication.response.recovery
+        recovery?.validate()
+        val sealedRoster = if (recovery != null) {
+            val saved = db.metaDao().get(SEALED_OPERATOR_ROSTER)?.let {
+                json.decodeFromString(SealedOperatorRoster.serializer(), it)
+            }
+            if (saved == null || saved.owner != publication.owner) {
+                seal(row.copy(phase = RecoveryPhase.OWNER_UNRESOLVED.name))
+                throw RecoveryMismatch()
+            }
+            saved
+        } else null
         app.markiro.handheld.core.replacement.ReplacementEvidenceRecoveryState(db).persistPublication(publication.owner,publication.generation,publication.response.recovery)
         if(publication.response.recovery==null) app.markiro.handheld.core.replacement.ReplacementTarget(db).persistPublication(publication.owner, publication.generation, publication.response.replacement)
         credential.write(publication.response.credential.apiKey)
@@ -301,15 +332,16 @@ class DeviceRecovery(private val db: HandheldDatabase, private val credential: C
             val old = db.deviceConfigDao().get()
             // Retain task references and original snapshots; pairing only refreshes display metadata.
             val config = old?.copy(deviceName = device.name, organizationName = device.organizationName,
-                lineId = device.line?.id, lineName = device.line?.name, rosterFetchedAt = System.currentTimeMillis()) ?: DeviceConfigEntity(
+                lineId = device.line?.id, lineName = device.line?.name, rosterFetchedAt = if (recovery != null) old.rosterFetchedAt else System.currentTimeMillis()) ?: DeviceConfigEntity(
                 deviceId = device.id, deviceName = device.name, tenantId = device.tenantId,
                 organizationName = device.organizationName, lineId = device.line?.id, lineName = device.line?.name,
                 kind = device.kind, serverUrl = publication.owner.serverOrigin, pairedAt = System.currentTimeMillis(),
             )
-            db.operatorDao().replaceAll(publication.response.operators.map {
+            db.operatorDao().replaceAll((sealedRoster?.operators ?: publication.response.operators).map {
                 OperatorEntity(it.operatorId, it.name, it.login, it.role, it.pinHash, it.badgeHash, it.active)
             })
             db.deviceConfigDao().upsert(config)
+            if (recovery == null) db.metaDao().remove(SEALED_OPERATOR_ROSTER)
             // BOTH kinds of label, exactly as startup demotes both
             // (`HandheldApp.demoteInterruptedPrints`): re-pairing is the other
             // way a process that died mid-print resumes. «Напечатать все»

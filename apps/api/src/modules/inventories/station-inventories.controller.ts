@@ -202,7 +202,7 @@ export class StationInventoriesController {
   @ApiOperation({
     summary: "Submit an inventory scan event batch",
     description:
-      "Waiting replacement targets retain bounded batches without business effects and return 409 with code device_replacement_waiting, outcome quarantined, receiptId and newWorkAllowedAt. Exact retries replay the receipt. Old draining-source sync remains available.",
+      "Waiting replacement targets retain bounded batches without business effects and return 409 with code device_replacement_waiting, outcome quarantined, receiptId and newWorkAllowedAt. Exact retries replay the receipt. Old draining-source sync remains available. After emergency source transfer, unproven first-delivery payloads are retained without effects as device_replacement_recovery / unproven_pre_replacement_evidence; exact committed receipts replay.",
   })
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
   @ApiBody({ schema: stationInventoryEventBatchOpenApiSchema })
@@ -256,7 +256,7 @@ export class StationInventoriesController {
   @ApiOperation({
     summary: "Leave an inventory",
     description:
-      "A waiting target retains the request before participant validation and returns its saved quarantine receipt even after the boundary. Retries must keep requestId and body unchanged; omitted requestId uses one fixed legacy identity. A new leave requires a new requestId or native batchId. Existing source recovery remains available under read-only subscriptions.",
+      "A waiting target retains the request before participant validation and returns its saved quarantine receipt even after the boundary. Retries must keep requestId and body unchanged; omitted requestId uses one fixed legacy identity. A new leave requires a new requestId or native batchId. Existing source recovery remains available under read-only subscriptions. A transferred source retains an unproven leave as device_replacement_recovery without changing participant state.",
   })
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
   @ApiBody({ schema: leaveStationInventoryOpenApiSchema })

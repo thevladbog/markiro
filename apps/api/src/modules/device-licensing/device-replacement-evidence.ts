@@ -2,11 +2,33 @@ import { randomUUID } from "node:crypto";
 import { ConflictException, NotFoundException, PayloadTooLargeException } from "@nestjs/common";
 import { schema, type Db } from "@markiro/db";
 import { productLabelValueDigest } from "@markiro/domain";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { SubscriptionTransaction } from "../../subscriptions/entitlements.types";
 import { sanitizeEvidencePayload } from "../device-grants/evidence-core";
 import { replacementTargetWaiting } from "./device-replacement-admission";
+
+/** The source fence is immutable after transfer, including after recovery is closed.
+ * Caller holds the device lock. Server retention before startedAt proves the exact
+ * submitted bytes existed before cutover; client timestamps/grants alone do not. */
+export async function replacementSourceEvidenceBoundary(
+  tx: SubscriptionTransaction,
+  tenantId: string,
+  deviceId: string,
+) {
+  const [execution] = await tx
+    .select()
+    .from(schema.workingDeviceReplacementExecutions)
+    .where(
+      and(
+        eq(schema.workingDeviceReplacementExecutions.tenantId, tenantId),
+        eq(schema.workingDeviceReplacementExecutions.deviceId, deviceId),
+        eq(schema.workingDeviceReplacementExecutions.mode, "emergency"),
+        eq(schema.workingDeviceReplacementExecutions.state, "completed"),
+      ),
+    );
+  return execution;
+}
 
 const receiptSchema = z.discriminatedUnion("code", [
   z
@@ -15,6 +37,14 @@ const receiptSchema = z.discriminatedUnion("code", [
       outcome: z.literal("quarantined"),
       receiptId: z.string().uuid(),
       newWorkAllowedAt: z.string().datetime(),
+    })
+    .strict(),
+  z
+    .object({
+      code: z.literal("device_replacement_recovery"),
+      reason: z.literal("unproven_pre_replacement_evidence"),
+      outcome: z.literal("quarantined"),
+      receiptId: z.string().uuid(),
     })
     .strict(),
   z
@@ -46,16 +76,19 @@ export async function quarantineReplacementSubmission(
   payload: object,
   alreadyApplied?: (tx: SubscriptionTransaction) => Promise<boolean>,
 ): Promise<void> {
-  const [target] = await db
+  const [replacement] = await db
     .select({ id: schema.workingDeviceReplacementExecutions.id })
     .from(schema.workingDeviceReplacementExecutions)
     .where(
       and(
         eq(schema.workingDeviceReplacementExecutions.tenantId, tenantId),
-        eq(schema.workingDeviceReplacementExecutions.targetDeviceId, deviceId),
+        or(
+          eq(schema.workingDeviceReplacementExecutions.targetDeviceId, deviceId),
+          eq(schema.workingDeviceReplacementExecutions.deviceId, deviceId),
+        ),
       ),
     );
-  if (!target && operation !== "writeoffs") return;
+  if (!replacement && operation !== "writeoffs") return;
   const identity = productLabelValueDigest([
     "replacement-legacy-v1",
     tenantId,
@@ -88,6 +121,7 @@ export async function quarantineReplacementSubmission(
         throw new ConflictException({ code: "device_replacement_evidence_conflict" });
       return receiptSchema.parse(previous.payload.receipt);
     }
+    const recovery = await replacementSourceEvidenceBoundary(tx, tenantId, deviceId);
     const waiting = await replacementTargetWaiting(tx, tenantId, deviceId);
     const [source] =
       operation === "writeoffs"
@@ -107,26 +141,36 @@ export async function quarantineReplacementSubmission(
               ),
             )
         : [];
-    if ((!waiting && !source) || (await alreadyApplied?.(tx))) return null;
+    if ((!waiting && !source && !recovery) || (await alreadyApplied?.(tx))) return null;
     const id = randomUUID();
     const response = receiptSchema.parse(
-      waiting
+      recovery && !source
         ? {
-            code: "device_replacement_waiting",
+            code: "device_replacement_recovery",
+            reason: "unproven_pre_replacement_evidence",
             outcome: "quarantined",
             receiptId: id,
-            newWorkAllowedAt: waiting.newWorkAllowedAt.toISOString(),
           }
-        : {
-            code: "device_replacement_draining",
-            reason: "unproven_pre_drain_scope",
-            outcome: "quarantined",
-            receiptId: id,
-          },
+        : waiting
+          ? {
+              code: "device_replacement_waiting",
+              outcome: "quarantined",
+              receiptId: id,
+              newWorkAllowedAt: waiting.newWorkAllowedAt.toISOString(),
+            }
+          : {
+              code: "device_replacement_draining",
+              reason: "unproven_pre_drain_scope",
+              outcome: "quarantined",
+              receiptId: id,
+            },
     );
-    const scope = waiting ? { executionId: waiting.id } : { preparationId: source?.id };
-    const reason =
-      response.code === "device_replacement_draining" ? response.reason : response.code;
+    const scope = recovery
+      ? { executionId: recovery.id }
+      : waiting
+        ? { executionId: waiting.id }
+        : { preparationId: source?.id };
+    const reason = "reason" in response ? response.reason : response.code;
     const retained = {
       operation,
       submissionId,

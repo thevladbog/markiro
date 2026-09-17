@@ -285,6 +285,23 @@ authenticated recovery principal on an explicitly allowed recovery/read handler
 may deliver evidence for expired or unmanaged tenants, including enforcement `all`;
 ordinary station credentials retain the existing subscription rules.
 
+After emergency transfer, every mutating evidence handler also checks the immutable
+source execution. Legacy payloads can replay only an exact committed receipt owned
+by the source; altered bytes cannot poison that receipt. First-delivery scan,
+label, box/pallet, exception, inventory and closure payloads are durably quarantined
+(HTTP 409, `device_replacement_recovery`, `unproven_pre_replacement_evidence`).
+Write-offs retain their existing `device_replacement_draining` receipt semantics.
+Native evidence first retained after cutover is quarantined independently of
+observe/strict mode (HTTP 200, `not_applied`, the same recovery reason). Only an
+exact immutable server receipt predating execution `startedAt` may resume native
+business reconciliation; client timestamps and signed task grants alone do not
+prove that a new submission existed before cutover. Exact finalized receipts
+replay without effects. Every quarantine remains stable on retry.
+
+Identity, validation/conflict status, code-release pages, inventory progress and
+keyset handlers only read; the separately bound readiness report writes recovery
+measurements and audit, never production facts. `/station/operators` stays denied.
+
 Recovery reports use a new source/epoch-bound intent and the existing append-only
 report store. Original drain reports, cancellation/completion tombstones and ACKs
 are preserved and cannot be rebound to the new key. Fresh zero measurements plus
@@ -292,6 +309,14 @@ current server-work checks complete recovery and revoke the key atomically. Lost
 report responses preserve the native pending body; a subsequent revoked response
 seals the client. Administrative unavailable closure requires a reason, request ID,
 execution revision and an exact audit fact; it does not invent a zero report.
+
+Recovery binding version 1 explicitly declares `operatorRoster: preserve_sealed`.
+The response's empty `operators` array does not replace the sealed roster. Both
+clients persist an owner-bound snapshot of the existing offline verifiers before
+clearing live authentication during sealing. Matching recovery publication restores
+that snapshot; restart or interrupted publication cannot replace it with an empty
+roster. Ordinary pairing still publishes the authoritative response roster. An
+unknown or mismatched owner never inherits retained operator authentication.
 
 Both native clients persist the recovery purpose before publishing credentials,
 retain journals, pinned requests, saved label bytes and grant evidence, block

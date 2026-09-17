@@ -22,6 +22,8 @@ export const replacementEvidenceRecoverySchema = z
   .object({
     version: z.literal(1),
     purpose: z.literal("replacement_evidence_recovery"),
+    // Recovery v1 never replaces the locally sealed owner's offline roster.
+    operatorRoster: z.literal("preserve_sealed"),
     executionId: z.uuid(),
     intentId: z.uuid(),
     credentialEpoch: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),

@@ -175,7 +175,7 @@ export async function initializeDeviceRecovery(
         [hash],
       );
     } else {
-      await purgeOperatorsMirror(exec);
+      await purgeOperatorsMirror(exec, saved.owner_json ?? undefined);
       await exec.run(
         "UPDATE station_device_recovery SET phase='sealed',candidate_hash=NULL WHERE id=1 AND phase='restoring'",
       );
@@ -186,7 +186,7 @@ export async function initializeDeviceRecovery(
       saved.owner_json !== null &&
       (!matches || hash !== saved.active_hash))
   ) {
-    await purgeOperatorsMirror(exec);
+    await purgeOperatorsMirror(exec, saved.owner_json ?? undefined);
     await exec.run("UPDATE station_device_recovery SET phase='sealed' WHERE id=1");
   }
   if (saved.owner_json === null && !config.apiKey) {
@@ -233,7 +233,7 @@ export async function sealDeviceRecovery(
     [hash],
   );
   await settle;
-  await purgeOperatorsMirror(exec);
+  await purgeOperatorsMirror(exec, saved.owner_json ?? undefined);
   await exec.run(
     "UPDATE station_device_recovery SET phase='sealed' WHERE id=1 AND active_hash=? AND phase='sealing'",
     [hash],

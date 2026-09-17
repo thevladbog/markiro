@@ -597,6 +597,7 @@ describe("credential rejection recovery", () => {
     expect(await exec.all("SELECT * FROM inventory_task_mirror")).toEqual([]);
     expect(await exec.all("SELECT * FROM inventory_snapshot_codes_mirror")).toEqual([]);
     expect(deletes).toEqual([
+      { sql: "DELETE FROM station_meta WHERE key=?", params: ["sealed_operator_roster_v1"] },
       { sql: "DELETE FROM operators_mirror", params: [] },
       { sql: "DELETE FROM operators_mirror_b", params: [] },
       { sql: "DELETE FROM station_meta WHERE key = ?", params: ["operators_slot"] },

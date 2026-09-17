@@ -242,7 +242,9 @@ export class StationInventorySyncService {
                 eq(schema.inventoryScanBatches.batchId, input.batchId),
               ),
             );
-          return existing?.payloadDigest === input.payloadDigest;
+          if (existing && existing.payloadDigest !== input.payloadDigest)
+            throw new ConflictException({ code: "INVENTORY_BATCH_DIGEST_CONFLICT" });
+          return Boolean(existing);
         },
       );
     return this.db.transaction(async (tx) =>

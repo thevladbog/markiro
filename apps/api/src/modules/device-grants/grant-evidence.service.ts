@@ -1,3 +1,4 @@
+import { replacementSourceEvidenceBoundary } from "../device-licensing/device-replacement-evidence";
 import { replacementTargetWaiting } from "../device-licensing/device-replacement-admission";
 import { createHash } from "node:crypto";
 import {
@@ -143,17 +144,20 @@ export class GrantEvidenceService {
         })
         .returning();
       if (!created) throw new Error("Evidence receipt insert returned no row");
-      if (
+      const recovery =
         owner.kind !== "kiosk" &&
-        (await replacementTargetWaiting(tx, owner.tenantId, owner.deviceId, new Date(this.now())))
-      ) {
+        (await replacementSourceEvidenceBoundary(tx, owner.tenantId, owner.deviceId));
+      const waiting =
+        owner.kind !== "kiosk" &&
+        (await replacementTargetWaiting(tx, owner.tenantId, owner.deviceId, new Date(this.now())));
+      if (recovery || waiting) {
         // Pin the boundary classification in the retention commit itself.
         // A process lost here must not resume these records as production once
         // the deadline passes, even when no native transaction ever started.
         initialQuarantine = this.response(
           created,
           "quarantined",
-          "device_replacement_waiting",
+          recovery ? "unproven_pre_replacement_evidence" : "device_replacement_waiting",
           "not_applied",
           null,
           null,
@@ -168,6 +172,14 @@ export class GrantEvidenceService {
     const hook: EvidenceTransactionHook<T> = {
       before: async (tx) => {
         const owner = await this.lockReceipt(tx, identity, receipt.id);
+        const recovery =
+          owner.kind !== "kiosk" &&
+          (await replacementSourceEvidenceBoundary(tx, owner.tenantId, owner.deviceId));
+        // Only this exact payload's immutable, pre-cutover server receipt can
+        // resume business reconciliation. First delivery under recovery never
+        // establishes production authority, irrespective of observe mode.
+        if (recovery && receipt.receivedAt.getTime() >= recovery.startedAt.getTime())
+          throw new Quarantine("unproven_pre_replacement_evidence");
         // Waiting is an operational fence even when rollout is still observe.
         // The native transaction rolls back; catch below finalizes retained evidence.
         if (

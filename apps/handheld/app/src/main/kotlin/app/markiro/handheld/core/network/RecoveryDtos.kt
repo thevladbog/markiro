@@ -32,9 +32,10 @@ data class ReplacementEvidenceRecovery(
     val credentialEpoch: Long,
     val requestedAt: String,
     val expiresAt: String,
+    val operatorRoster: String,
 ) {
     fun validate() {
-        require(version == 1 && purpose == "replacement_evidence_recovery")
+        require(version == 1 && purpose == "replacement_evidence_recovery" && operatorRoster == "preserve_sealed")
         require(RecoveryResponse.UUID_PATTERN.matches(executionId) && RecoveryResponse.UUID_PATTERN.matches(intentId))
         require(credentialEpoch in 1..9_007_199_254_740_991)
         require(java.time.Instant.parse(expiresAt) > java.time.Instant.parse(requestedAt))

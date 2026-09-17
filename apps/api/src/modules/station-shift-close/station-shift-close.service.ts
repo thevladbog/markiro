@@ -61,7 +61,9 @@ export class StationShiftCloseService {
                 eq(schema.stationShiftCloseEvents.eventId, input.eventId),
               ),
             );
-          return existing?.deviceId === deviceId && existing.digest === payloadDigest;
+          if (existing && (existing.deviceId !== deviceId || existing.digest !== payloadDigest))
+            throw new ConflictException("Close event payload changed");
+          return Boolean(existing);
         },
       );
 

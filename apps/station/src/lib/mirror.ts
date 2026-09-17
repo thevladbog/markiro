@@ -1,3 +1,4 @@
+import { stationRecoveryResponseSchema } from "@markiro/platform-contracts";
 import type { ValidationPrintPolicy } from "@markiro/domain";
 import {
   parseMirroredProductLabelContext,
@@ -708,8 +709,44 @@ async function publishOperatorsMirror(
  * deletion failure, so neither slot can authenticate until a later complete
  * authoritative publish succeeds.
  */
-export function purgeOperatorsMirror(exec: SqlExecutor): Promise<void> {
+const SEALED_OPERATOR_ROSTER_KEY = "sealed_operator_roster_v1";
+
+export async function restoreSealedOperatorsMirror(
+  exec: SqlExecutor,
+  owner: string,
+): Promise<void> {
+  const [saved] = await exec.all<{ value: string }>("SELECT value FROM station_meta WHERE key=?", [
+    SEALED_OPERATOR_ROSTER_KEY,
+  ]);
+  if (!saved) throw new Error("Sealed operator roster missing");
+  const value: unknown = JSON.parse(saved.value);
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    !("owner" in value) ||
+    value.owner !== owner ||
+    !("operators" in value)
+  )
+    throw new Error("Sealed operator roster owner mismatch");
+  await replaceOperatorsMirror(
+    exec,
+    stationRecoveryResponseSchema.shape.operators.parse(value.operators),
+  );
+}
+
+export function purgeOperatorsMirror(exec: SqlExecutor, sealedOwner?: string): Promise<void> {
   const turn = refreshChain.then(async () => {
+    // Persist before purging, serialized with every roster publication. Repeated
+    // sealing after restart must keep the original snapshot, even with empty slots.
+    if (sealedOwner !== undefined) {
+      const operators = await readOperatorsMirror(exec);
+      await exec.run(
+        "INSERT INTO station_meta(key,value) VALUES (?,?) ON CONFLICT(key) DO NOTHING",
+        [SEALED_OPERATOR_ROSTER_KEY, JSON.stringify({ owner: sealedOwner, operators })],
+      );
+    } else {
+      await exec.run("DELETE FROM station_meta WHERE key=?", [SEALED_OPERATOR_ROSTER_KEY]);
+    }
     await exec.run(
       `INSERT INTO station_meta (key, value) VALUES (?,?)
        ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
