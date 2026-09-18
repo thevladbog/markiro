@@ -123,23 +123,6 @@ async function screenshotFullMain(page: Page, path: string): Promise<void> {
   await page.screenshot({ path, scale: "css", fullPage: true });
 }
 
-/**
- * The "complex" side panel caps at 720px (`components.css:598`), narrower
- * than the pallets table once a status badge carries the long "contents
- * changed after close" text -- live, that is a horizontal scrollbar on
- * `.mk-table__scroll`, but a printed frame has no scrollbar to drag, so an
- * un-widened capture cuts that badge off mid-word (Russian needs the extra
- * width; the shorter English string happens to already fit). Widen just the
- * panel for the shot -- rendering-only, same accommodation
- * `screenshotFullMain` makes for `<main>` overflow.
- */
-async function widenPalletsPanel(page: Page): Promise<void> {
-  await page.addStyleTag({
-    content: ".mk-side-panel--complex { --mk-panel-width: 900px !important; }",
-  });
-  await settle(page);
-}
-
 function json(route: Route, body: unknown) {
   return route.fulfill({
     status: 200,
@@ -1567,7 +1550,7 @@ for (const locale of LOCALES) {
     await expect(pallets).toBeVisible();
     await expect(page.getByText(t("pages.shifts.pallets.disassembled"))).toBeVisible();
     await expect(page.getByText(t("pages.shifts.pallets.contentsChangedAfterClose"))).toBeVisible();
-    await widenPalletsPanel(page);
+    await settle(page);
     await pallets.screenshot({ path: shot09("shift-pallets"), scale: "css" });
     expect(unexpected).toEqual([]);
   });
@@ -1587,10 +1570,6 @@ for (const locale of LOCALES) {
     await expect(
       page.getByRole("dialog", { name: t("pages.shifts.pallets.placards.title") }),
     ).toBeVisible();
-    // The pallets table sits dimmed behind this dialog; widen it too so the
-    // background is not showing a badge cut off mid-word (see
-    // `widenPalletsPanel`).
-    await widenPalletsPanel(page);
     await screenshotFullMain(page, shot09("pallet-placards"));
     expect(unexpected).toEqual([]);
   });
