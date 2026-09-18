@@ -9,8 +9,9 @@ import javax.inject.Singleton
  * printer and a line printer at once.
  */
 @Singleton
-class LabelRenderer @Inject constructor(private val rasterize: RasterizeText) {
-    suspend fun render(
+open class LabelRenderer @Inject constructor(private val rasterize: RasterizeText) {
+    /** Open so a test can watch the field map a caller composed; the body is the only implementation. */
+    open suspend fun render(
         spec: LabelSpec,
         data: Map<LabelField, String>,
         language: PrinterLanguage,

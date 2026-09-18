@@ -369,3 +369,119 @@ val MIGRATION_16_17 = object : Migration(16, 17) {
         if (!present) db.execSQL("ALTER TABLE shift_mirror ADD COLUMN ssccIssuerProblem TEXT")
     }
 }
+
+/** Column names of [table], or empty when it does not exist. */
+private fun SupportSQLiteDatabase.columnsOf(table: String): List<String> =
+    query("PRAGMA table_info(`$table`)").use { cursor ->
+        val name = cursor.getColumnIndexOrThrow("name")
+        generateSequence { if (cursor.moveToNext()) cursor.getString(name) else null }.toList()
+    }
+
+private fun SupportSQLiteDatabase.tableExists(table: String): Boolean =
+    query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", arrayOf<Any>(table)).use { it.moveToNext() }
+
+/** True when [table] declares [column] NOT NULL; false when it is nullable or absent. */
+private fun SupportSQLiteDatabase.isNotNull(table: String, column: String): Boolean =
+    query("PRAGMA table_info(`$table`)").use { cursor ->
+        val name = cursor.getColumnIndexOrThrow("name")
+        val notNull = cursor.getColumnIndexOrThrow("notnull")
+        generateSequence { if (cursor.moveToNext()) cursor.getString(name) to cursor.getInt(notNull) else null }
+            .any { it.first == column && it.second == 1 }
+    }
+
+/**
+ * Warehouse pallets (spec §3.1). SQLite cannot widen a NOT NULL column, so
+ * `pallets` and `pallet_exceptions` are rebuilt; `writeoff_boxes` becomes the
+ * shared `box_registry` with the station feed's pallet fields; three bootstrap
+ * caches and the membership table are new. Every DDL string matches the
+ * entities exactly -- Room validates at open.
+ *
+ * Every step is guarded the way `MIGRATION_16_17` guards its `ADD COLUMN`: the
+ * upgrade suites build a database at the CURRENT schema, drop only what a later
+ * migration creates and rewind `user_version`, so this migration can meet
+ * tables that are already in their v18 shape. `kind` on `pallets`, a NOT NULL
+ * `shiftId` on `pallet_exceptions` and the presence of `box_registry` are the
+ * three facts that say which side of the rebuild the file is on.
+ *
+ * `kind` deliberately carries NO SQL default: the entity declares none, Room
+ * compares defaults exactly, and the backfill supplies the literal instead.
+ */
+val MIGRATION_17_18 = object : Migration(17, 18) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        if ("kind" !in db.columnsOf("pallets")) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `pallets_new` (`palletId` TEXT NOT NULL, `shiftId` TEXT, `terminalId` TEXT, `sscc` TEXT, " +
+                    "`openedAt` TEXT NOT NULL, `closedAt` TEXT, `operatorId` TEXT, `printState` TEXT NOT NULL, `printReason` TEXT, " +
+                    "`ackedAt` TEXT, `kind` TEXT NOT NULL, `productId` TEXT, `deviceId` TEXT, `disassembledAt` TEXT, PRIMARY KEY(`palletId`))",
+            )
+            db.execSQL(
+                "INSERT INTO `pallets_new` (palletId, shiftId, terminalId, sscc, openedAt, closedAt, operatorId, printState, printReason, ackedAt, kind) " +
+                    "SELECT palletId, shiftId, terminalId, sscc, openedAt, closedAt, operatorId, printState, printReason, ackedAt, 'production' FROM `pallets`",
+            )
+            db.execSQL("DROP TABLE `pallets`")
+            db.execSQL("ALTER TABLE `pallets_new` RENAME TO `pallets`")
+        }
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_pallets_shiftId_closedAt` ON `pallets` (`shiftId`, `closedAt`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_pallets_deviceId_kind_closedAt` ON `pallets` (`deviceId`, `kind`, `closedAt`)")
+
+        if (db.isNotNull("pallet_exceptions", "shiftId")) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `pallet_exceptions_new` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `kind` TEXT NOT NULL, " +
+                    "`palletId` TEXT NOT NULL, `shiftId` TEXT, `terminalId` TEXT, `operatorId` TEXT, `reason` TEXT NOT NULL, " +
+                    "`occurredAt` TEXT NOT NULL, `payloadJson` TEXT NOT NULL, `ackedAt` TEXT)",
+            )
+            db.execSQL(
+                "INSERT INTO `pallet_exceptions_new` (id, kind, palletId, shiftId, terminalId, operatorId, reason, occurredAt, payloadJson, ackedAt) " +
+                    "SELECT id, kind, palletId, shiftId, terminalId, operatorId, reason, occurredAt, payloadJson, ackedAt FROM `pallet_exceptions`",
+            )
+            db.execSQL("DROP TABLE `pallet_exceptions`")
+            db.execSQL("ALTER TABLE `pallet_exceptions_new` RENAME TO `pallet_exceptions`")
+        }
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_pallet_exceptions_ackedAt` ON `pallet_exceptions` (`ackedAt`)")
+
+        // The rename is the real upgrade path; a rewound fixture already holds
+        // `box_registry` and only needs the table to exist, never a second one.
+        if (!db.tableExists("box_registry") && db.tableExists("writeoff_boxes")) {
+            db.execSQL("ALTER TABLE `writeoff_boxes` RENAME TO `box_registry`")
+        }
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `box_registry` (`sscc` TEXT NOT NULL, `boxId` TEXT NOT NULL, `productId` TEXT NOT NULL, " +
+                "`bottleCount` INTEGER NOT NULL, `contentKeysJson` TEXT NOT NULL, `updatedAt` TEXT NOT NULL, `palletId` TEXT, " +
+                "`palletSscc` TEXT, `palletActive` INTEGER NOT NULL DEFAULT 0, `closedAt` TEXT, `productionDate` TEXT, " +
+                "`localPalletId` TEXT, PRIMARY KEY(`sscc`))",
+        )
+        val registryColumns = db.columnsOf("box_registry")
+        for (column in listOf(
+            "palletId" to "TEXT",
+            "palletSscc" to "TEXT",
+            "palletActive" to "INTEGER NOT NULL DEFAULT 0",
+            "closedAt" to "TEXT",
+            "productionDate" to "TEXT",
+            "localPalletId" to "TEXT",
+        )) {
+            if (column.first !in registryColumns) db.execSQL("ALTER TABLE `box_registry` ADD COLUMN `${column.first}` ${column.second}")
+        }
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_box_registry_localPalletId` ON `box_registry` (`localPalletId`)")
+
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `pallet_memberships` (`palletId` TEXT NOT NULL, `sscc` TEXT NOT NULL, `addedAt` TEXT NOT NULL, " +
+                "`operatorId` TEXT, `status` TEXT NOT NULL, `reason` TEXT, `winningPalletSscc` TEXT, `ackedAt` TEXT, `acknowledgedAt` TEXT, " +
+                "`bottleCount` INTEGER, `productionDate` TEXT, PRIMARY KEY(`palletId`, `sscc`))",
+        )
+        // Guarded the same way the registry's columns are: a fixture rewound to
+        // v17 after this migration first shipped already holds the table in its
+        // earlier v18 shape, without the two snapshot columns.
+        val membershipColumns = db.columnsOf("pallet_memberships")
+        for (column in listOf("bottleCount" to "INTEGER", "productionDate" to "TEXT")) {
+            if (column.first !in membershipColumns) db.execSQL("ALTER TABLE `pallet_memberships` ADD COLUMN `${column.first}` ${column.second}")
+        }
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_pallet_memberships_status_addedAt` ON `pallet_memberships` (`status`, `addedAt`)")
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `pallet_products` (`id` TEXT NOT NULL, `gtin14` TEXT NOT NULL, `name` TEXT NOT NULL, `printName` TEXT, " +
+                "`shelfLifeDays` INTEGER, `palletBoxCapacity` INTEGER, `chzProductGroupCode` INTEGER, PRIMARY KEY(`id`))",
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_pallet_products_gtin14` ON `pallet_products` (`gtin14`)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS `pallet_permissions` (`employeeId` TEXT NOT NULL, `canBuildPallets` INTEGER NOT NULL, PRIMARY KEY(`employeeId`))")
+        db.execSQL("CREATE TABLE IF NOT EXISTS `pallet_label_templates` (`key` TEXT NOT NULL, `specJson` TEXT NOT NULL, PRIMARY KEY(`key`))")
+    }
+}

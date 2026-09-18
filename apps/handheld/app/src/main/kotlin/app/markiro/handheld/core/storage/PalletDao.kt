@@ -90,11 +90,14 @@ interface PalletDao {
     @Query("UPDATE pallets SET printState = :state, printReason = :reason WHERE palletId = :palletId")
     suspend fun setPrintState(palletId: String, state: String, reason: String?)
 
-    /** The deferred-label queue's pallet half: closed pallets whose label is not resolved, oldest first. */
-    @Query("SELECT * FROM pallets WHERE closedAt IS NOT NULL AND printState <> 'printed' ORDER BY closedAt, palletId")
+    /**
+     * The deferred-label queue's pallet half: closed pallets whose label is not resolved, oldest
+     * first. A disassembled pallet's label is retired with it; it must not linger on this queue.
+     */
+    @Query("SELECT * FROM pallets WHERE closedAt IS NOT NULL AND printState <> 'printed' AND disassembledAt IS NULL ORDER BY closedAt, palletId")
     fun observeUnprinted(): Flow<List<PalletEntity>>
 
-    @Query("SELECT COUNT(*) FROM pallets WHERE closedAt IS NOT NULL AND printState <> 'printed'")
+    @Query("SELECT COUNT(*) FROM pallets WHERE closedAt IS NOT NULL AND printState <> 'printed' AND disassembledAt IS NULL")
     fun observeUnprintedCount(): Flow<Int>
 
     /** Anything the app left mid-print is unknown, never resumed -- same reasoning as `BoxDao.demoteInterruptedPrints`. */
@@ -115,6 +118,22 @@ interface PalletDao {
 
     @Query("UPDATE pallets SET ackedAt = :at WHERE palletId IN (:palletIds)")
     suspend fun markAcked(palletIds: List<String>, at: String)
+
+    @Query("SELECT * FROM pallets WHERE kind = 'warehouse' AND deviceId = :deviceId AND closedAt IS NULL LIMIT 1")
+    suspend fun openWarehouse(deviceId: String): PalletEntity?
+
+    @Query("SELECT * FROM pallets WHERE kind = 'warehouse' AND deviceId = :deviceId AND closedAt IS NULL LIMIT 1")
+    fun observeOpenWarehouse(deviceId: String): Flow<PalletEntity?>
+
+    @Query("SELECT * FROM pallets WHERE sscc = :sscc LIMIT 1")
+    suspend fun bySscc(sscc: String): PalletEntity?
+
+    /** Guarded so a second retirement is a no-op the caller can name. */
+    @Query("UPDATE pallets SET disassembledAt = :at WHERE palletId = :palletId AND closedAt IS NOT NULL AND disassembledAt IS NULL")
+    suspend fun markDisassembled(palletId: String, at: String): Int
+
+    @Query("SELECT COUNT(*) FROM pallets WHERE closedAt IS NOT NULL AND disassembledAt IS NULL AND (:shiftId IS NULL OR shiftId = :shiftId)")
+    fun observeClosedCount(shiftId: String?): Flow<Int>
 
     @Query("DELETE FROM pallets")
     suspend fun clear()

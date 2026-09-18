@@ -7,6 +7,13 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.markiro.handheld.core.design.MarkiroTheme
 import app.markiro.handheld.feature.hub.HubScreen
+import app.markiro.handheld.feature.exceptions.PalletDisassembleCallbacks
+import app.markiro.handheld.feature.exceptions.PalletDisassembleScreen
+import app.markiro.handheld.feature.exceptions.PalletDisassembleStep
+import app.markiro.handheld.feature.pallets.PalletVerdict
+import app.markiro.handheld.feature.pallets.PalletsCallbacks
+import app.markiro.handheld.feature.pallets.PalletsRoute
+import app.markiro.handheld.feature.pallets.PalletsUi
 import app.markiro.handheld.feature.hub.HubUi
 import app.markiro.handheld.core.inventory.InventorySyncState
 import app.markiro.handheld.core.inventory.InventoryVerdict
@@ -93,6 +100,33 @@ class EnglishRenderTest {
                     HubUi("Test Plant", "Anna Ivanova", "Line 2", shifts = 2, inventories = 0, countsAt = 0L, reachable = false, scannerLabel = "Zebra"),
                     onTile = {},
                     onSignOut = {},
+                )
+            }
+        }
+        assertNoCyrillic()
+    }
+
+    @Test
+    fun palletDisassembleReasonRendersInEnglish() {
+        compose.setContent {
+            MarkiroTheme {
+                PalletDisassembleScreen(
+                    PalletDisassembleStep.Reason("p-1", "346006820000000014", 12),
+                    PalletDisassembleCallbacks(),
+                )
+            }
+        }
+        assertNoCyrillic()
+    }
+
+    /** The plural in the confirmation body is the one that is easy to leave Russian-only. */
+    @Test
+    fun palletDisassembleConfirmRendersInEnglish() {
+        compose.setContent {
+            MarkiroTheme {
+                PalletDisassembleScreen(
+                    PalletDisassembleStep.Confirm("p-1", "346006820000000014", 1),
+                    PalletDisassembleCallbacks(),
                 )
             }
         }
@@ -293,6 +327,90 @@ class EnglishRenderTest {
         compose.setContent {
             MarkiroTheme {
                 DuplicateScreen(DuplicateStep.Rejected("j1", mismatch = true), DuplicateCallbacks())
+            }
+        }
+        assertNoCyrillic()
+    }
+
+    @Test
+    fun palletsRendersInEnglish() {
+        val pallet = app.markiro.handheld.core.storage.PalletEntity(
+            palletId = "w1", shiftId = null, terminalId = "dev-1", sscc = null, openedAt = "t", closedAt = null,
+            operatorId = "op-1", printState = app.markiro.handheld.core.storage.PalletPrint.PENDING, printReason = null,
+            ackedAt = null, kind = app.markiro.handheld.core.storage.PalletKind.WAREHOUSE, productId = "p1", deviceId = "dev-1",
+        )
+        compose.setContent {
+            MarkiroTheme {
+                PalletsRoute(
+                    PalletsUi(
+                        pallet = pallet, productName = "Water 0.5 l", boxCount = 1, capacity = 12, stampAt = 0L,
+                        lastVerdict = PalletVerdict.UnknownBox,
+                        members = listOf(
+                            app.markiro.handheld.core.storage.PalletMembershipEntity(
+                                "w1", "034600682000000014", "t", null,
+                                app.markiro.handheld.core.storage.MembershipStatus.PENDING, null, null, null, null,
+                            ),
+                        ),
+                        rejections = listOf(
+                            app.markiro.handheld.core.storage.PalletMembershipEntity(
+                                "w1", "034600682000000021", "t", null,
+                                app.markiro.handheld.core.storage.MembershipStatus.REJECTED,
+                                "already_on_pallet", "134600682000000011", "t", null,
+                            ),
+                        ),
+                        // Closed and already labelled: its section also offers a
+                        // replacement label, which must not be the one Russian
+                        // string left on an English screen.
+                        rejectionPallets = mapOf("w1" to pallet.copy(sscc = "134600682000000011", closedAt = "t")),
+                    ),
+                    PalletsCallbacks(),
+                )
+            }
+        }
+        assertNoCyrillic()
+    }
+
+    /** A warehouse pallet has no shift, so its refusals must not name one. */
+    @Test
+    fun aPalletRefusedForWantOfAGlnRendersInEnglish() {
+        compose.setContent {
+            MarkiroTheme { PalletCloseScreen(PalletCloseStep.Refused(ClosePalletResult.NoIssuer), PalletCloseCallbacks()) }
+        }
+        assertNoCyrillic()
+    }
+
+    /** A close that threw rather than answered says so in English too. */
+    @Test
+    fun aPalletThatCouldNotBeClosedRendersInEnglish() {
+        compose.setContent {
+            MarkiroTheme { PalletCloseScreen(PalletCloseStep.Refused(ClosePalletResult.Unavailable), PalletCloseCallbacks()) }
+        }
+        assertNoCyrillic()
+    }
+
+    /** The capacity-less plural and the unnumbered-pallet rejection have their own EN forms. */
+    @Test
+    fun aPalletWithoutACapacityRendersInEnglish() {
+        val pallet = app.markiro.handheld.core.storage.PalletEntity(
+            palletId = "w1", shiftId = null, terminalId = "dev-1", sscc = null, openedAt = "t", closedAt = null,
+            operatorId = "op-1", printState = app.markiro.handheld.core.storage.PalletPrint.PENDING, printReason = null,
+            ackedAt = null, kind = app.markiro.handheld.core.storage.PalletKind.WAREHOUSE, productId = "p1", deviceId = "dev-1",
+        )
+        compose.setContent {
+            MarkiroTheme {
+                PalletsRoute(
+                    PalletsUi(
+                        pallet = pallet, productName = "Water 0.5 l", boxCount = 1, capacity = null,
+                        rejections = listOf(
+                            app.markiro.handheld.core.storage.PalletMembershipEntity(
+                                "w1", "034600682000000021", "t", null,
+                                app.markiro.handheld.core.storage.MembershipStatus.REJECTED,
+                                "already_on_pallet", null, "t", null,
+                            ),
+                        ),
+                    ),
+                    PalletsCallbacks(),
+                )
             }
         }
         assertNoCyrillic()

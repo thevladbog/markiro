@@ -9,7 +9,7 @@ import app.markiro.handheld.core.km.KmCodec
 import app.markiro.handheld.core.scan.ScanEvent
 import app.markiro.handheld.core.scan.ScanRouterAdapter
 import app.markiro.handheld.core.storage.HandheldDatabase
-import app.markiro.handheld.core.storage.WriteoffBoxEntity
+import app.markiro.handheld.core.storage.BoxRegistryEntity
 import app.markiro.handheld.core.storage.WriteoffOutboxEntity
 import app.markiro.handheld.core.storage.WriteoffReasonEntity
 import app.markiro.handheld.core.storage.initializeRecoveryForTest
@@ -63,7 +63,7 @@ class WriteoffViewModelTest {
     private class FakeGateway(
         val products: Map<String, String> = emptyMap(),
         val productsById: Map<String, String> = emptyMap(),
-        val boxes: Map<String, WriteoffBoxEntity> = emptyMap(),
+        val boxes: Map<String, BoxRegistryEntity> = emptyMap(),
         val permitted: Boolean? = true,
         val ready: Boolean = true,
         reasons: List<WriteoffReasonEntity> = listOf(REASON),
@@ -79,7 +79,7 @@ class WriteoffViewModelTest {
 
         override suspend fun productNameById(productId: String): String? = productsById[productId]
 
-        override suspend fun box(sscc: String): WriteoffBoxEntity? = boxes[sscc]
+        override suspend fun box(sscc: String): BoxRegistryEntity? = boxes[sscc]
 
         override suspend fun canWriteoff(operatorId: String): Boolean? = permitted
 
@@ -159,7 +159,7 @@ class WriteoffViewModelTest {
         val vm = vm(
             FakeGateway(
                 productsById = mapOf("p-1" to "Вода 0,5 л"),
-                boxes = mapOf(SSCC to WriteoffBoxEntity(SSCC, "b-1", "p-1", 12, "[]", "t")),
+                boxes = mapOf(SSCC to BoxRegistryEntity(SSCC, "b-1", "p-1", 12, "[]", "t")),
             ),
         )
         emit(SSCC)
@@ -183,7 +183,7 @@ class WriteoffViewModelTest {
             FakeGateway(
                 products = mapOf(GTIN to "Вода 0,5 л"),
                 productsById = mapOf("p-1" to "Вода 0,5 л"),
-                boxes = mapOf(SSCC to WriteoffBoxEntity(SSCC, "b-1", "p-1", 12, """["$key"]""", "t")),
+                boxes = mapOf(SSCC to BoxRegistryEntity(SSCC, "b-1", "p-1", 12, """["$key"]""", "t")),
             ),
         )
         emit(km("SERIAL01"))
@@ -274,7 +274,7 @@ class WriteoffViewModelTest {
             FakeGateway(
                 products = mapOf(GTIN to "Вода 0,5 л"),
                 productsById = mapOf("p-1" to "Вода 0,5 л"),
-                boxes = mapOf(SSCC to WriteoffBoxEntity(SSCC, "b-1", "p-1", 12, "[]", "t")),
+                boxes = mapOf(SSCC to BoxRegistryEntity(SSCC, "b-1", "p-1", 12, "[]", "t")),
             ),
         )
         emit(km("SERIAL01"))

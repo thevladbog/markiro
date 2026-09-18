@@ -62,7 +62,7 @@ interface PrinterDao {
 
     @Query("SELECT * FROM print_destinations WHERE attemptId = 'initial' AND " +
         "((purpose = 'box' AND jobId IN (SELECT boxId FROM boxes WHERE closedAt IS NOT NULL AND printState <> 'printed' AND disassembledAt IS NULL)) OR " +
-        "(purpose = 'pallet' AND jobId IN (SELECT palletId FROM pallets WHERE closedAt IS NOT NULL AND printState <> 'printed')))")
+        "(purpose = 'pallet' AND jobId IN (SELECT palletId FROM pallets WHERE closedAt IS NOT NULL AND printState <> 'printed' AND disassembledAt IS NULL)))")
     fun observeQueuedDestinations(): Flow<List<PrintDestinationEntity>>
 
     @Upsert

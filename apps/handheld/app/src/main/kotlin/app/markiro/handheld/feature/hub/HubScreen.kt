@@ -20,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.outlined.Factory
 import androidx.compose.material.icons.outlined.Inventory2
+import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.material.icons.outlined.Print
 import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material.icons.outlined.RemoveShoppingCart
@@ -116,7 +117,7 @@ fun HubScreen(
                             color = c.fg1,
                         )
                     }
-                    IconAction(Icons.AutoMirrored.Outlined.Logout, stringResource(R.string.hub_sign_out), onSignOut)
+                    IconAction(Icons.AutoMirrored.Outlined.Logout, stringResource(R.string.hub_sign_out), onClick = onSignOut)
                 }
                 state.activeShift?.let { active ->
                     ActiveShiftCard(active, onContinue = { onContinueShift(active.shift.id) })
@@ -158,6 +159,21 @@ fun HubScreen(
                             { onTile(HubTile.WRITEOFF) },
                             modifier,
                             statusTone = if (state.canWriteoff == false || state.writeoffPending > 0) Tone.Warn else Tone.Neutral,
+                        )
+                    },
+                    { modifier ->
+                        Tile(
+                            Icons.Outlined.Layers,
+                            stringResource(R.string.hub_tile_pallets),
+                            when {
+                                state.canBuildPallets == false -> stringResource(R.string.hub_pallets_no_permission)
+                                state.palletsPending > 0 ->
+                                    pluralStringResource(R.plurals.hub_pallets_pending, state.palletsPending, state.palletsPending)
+                                else -> ""
+                            },
+                            { onTile(HubTile.PALLETS) },
+                            modifier,
+                            statusTone = if (state.canBuildPallets == false || state.palletsPending > 0) Tone.Warn else Tone.Neutral,
                         )
                     },
                     { modifier ->

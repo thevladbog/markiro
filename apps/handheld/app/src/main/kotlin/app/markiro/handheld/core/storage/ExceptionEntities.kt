@@ -58,7 +58,8 @@ data class PalletExceptionEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val kind: String,
     val palletId: String,
-    val shiftId: String,
+    /** Null for a warehouse pallet's correction: that pallet belongs to no shift. */
+    val shiftId: String?,
     val terminalId: String?,
     val operatorId: String?,
     val reason: String,

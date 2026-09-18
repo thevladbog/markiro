@@ -46,5 +46,9 @@ class SyncLimitsFixturesTest {
             fixtures.getValue("maxPalletClosuresPerSyncBatch").jsonPrimitive.int,
             SyncEngine.MAX_PALLET_EXCEPTIONS,
         )
+        assertEquals(
+            fixtures.getValue("maxPalletMembershipsPerSyncBatch").jsonPrimitive.int,
+            SyncEngine.MAX_PALLET_MEMBERSHIPS,
+        )
     }
 }

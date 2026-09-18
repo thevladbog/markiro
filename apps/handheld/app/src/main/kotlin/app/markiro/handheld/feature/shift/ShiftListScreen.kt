@@ -120,7 +120,7 @@ fun ShiftListScreen(state: ShiftListUi, cb: ShiftListCallbacks) {
         // stale answer stops the work: the gesture for whoever knows it, and a
         // button for whoever is wearing gloves and does not.
         AppBar(stringResource(R.string.shifts_title), cb.onBack) {
-            IconAction(Icons.Outlined.Refresh, stringResource(R.string.common_refresh), cb.onRefresh)
+            IconAction(Icons.Outlined.Refresh, stringResource(R.string.common_refresh), onClick = cb.onRefresh)
         }
         if (!state.reachable && state.listFetchedAt != null) {
             Text(

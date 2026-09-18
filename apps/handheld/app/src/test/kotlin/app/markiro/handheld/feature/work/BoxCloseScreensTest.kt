@@ -95,6 +95,7 @@ class BoxCloseScreensTest {
             PrintReason.NO_PAPER, PrintReason.HEAD_OPEN, PrintReason.UNREACHABLE,
             PrintReason.PRINTER_UNCONFIGURED, PrintReason.TEMPLATE_MISSING, PrintReason.TEMPLATE_INVALID,
             PrintReason.RENDER_FAILED, PrintReason.TRANSPORT_FAILED, PrintReason.BOX_MISSING,
+            PrintReason.PRODUCT_MISSING,
         )
         // Nothing falls through to a raw wire string on a screen an operator reads.
         for (reason in reasons) assertTrue(reason, printReasonLabel(reason) != 0)

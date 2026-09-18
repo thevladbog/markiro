@@ -75,6 +75,10 @@ interface StationApi {
     @GET("station/writeoff-bootstrap")
     suspend fun writeoffBootstrap(): WriteoffBootstrapDto
 
+    /** Products, per-operator pallet permission, this device's extension-1 block and pallet label templates, no shift needed. */
+    @GET("station/pallet-bootstrap")
+    suspend fun palletBootstrap(): PalletBootstrapDto
+
     /**
      * Incremental box registry. `until` is null on the first page of a walk and
      * echoed from the first page afterwards; the server rejects it on page one.

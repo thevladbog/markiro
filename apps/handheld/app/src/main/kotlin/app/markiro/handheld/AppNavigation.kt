@@ -92,6 +92,10 @@ import app.markiro.handheld.feature.exceptions.DisassembleViewModel
 import app.markiro.handheld.feature.exceptions.ExceptionsCallbacks
 import app.markiro.handheld.feature.exceptions.ExceptionsScreen
 import app.markiro.handheld.feature.exceptions.ExceptionsViewModel
+import app.markiro.handheld.feature.exceptions.PalletDisassembleCallbacks
+import app.markiro.handheld.feature.exceptions.PalletDisassembleScreen
+import app.markiro.handheld.feature.exceptions.PalletDisassembleStep
+import app.markiro.handheld.feature.exceptions.PalletDisassembleViewModel
 import app.markiro.handheld.feature.exceptions.ReprintCallbacks
 import app.markiro.handheld.feature.exceptions.ReprintScreen
 import app.markiro.handheld.feature.exceptions.ReprintViewModel
@@ -122,8 +126,17 @@ object Routes {
     const val LABEL_QUEUE = "label-queue"
     const val EXCEPTIONS = "exceptions/{shiftId}"
     const val DISASSEMBLE = "exceptions/{shiftId}/disassemble"
+    const val PALLET_DISASSEMBLE = "exceptions/{shiftId}/pallet-disassemble"
     const val REPRINT = "exceptions/{shiftId}/reprint"
     const val WRITEOFF = "writeoff"
+    const val PALLETS = "pallets"
+
+    /**
+     * The shift-less entry from the «Паллеты» mode. A route of its own rather
+     * than a state of that screen, so the mode's own scan collector can be told
+     * to let go of the scanner while the pallet label is being scanned here.
+     */
+    const val PALLETS_DISASSEMBLE = "pallets/disassemble"
     const val WRITEOFF_HISTORY = "writeoff/history"
     const val INVENTORY = "inventory"
     const val INVENTORY_WORK = "inventory/{inventoryId}"
@@ -135,6 +148,7 @@ object Routes {
     fun conflicts(id: String) = "conflicts/$id"
     fun exceptions(id: String) = "exceptions/$id"
     fun disassemble(id: String) = "exceptions/$id/disassemble"
+    fun palletDisassemble(id: String) = "exceptions/$id/pallet-disassemble"
     fun reprintLabel(id: String) = "exceptions/$id/reprint"
 }
 
@@ -234,6 +248,7 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                             HubTile.SHIFT -> nav.navigate(Routes.SHIFTS)
                             HubTile.INVENTORY -> state.activeInventoryId?.let { nav.navigate(Routes.inventoryWork(it)) } ?: nav.navigate(Routes.INVENTORY)
                             HubTile.WRITEOFF -> nav.navigate(Routes.WRITEOFF)
+                            HubTile.PALLETS -> nav.navigate(Routes.PALLETS)
                             HubTile.SETTINGS -> nav.navigate(Routes.SETTINGS)
                         }
                     },
@@ -248,6 +263,69 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
             }
             // One ViewModel across all four steps: the step is state, so hardware
             // Back moves inside the mode instead of dropping a half-built list.
+            composable(Routes.PALLETS) {
+                val vm: app.markiro.handheld.feature.pallets.PalletsViewModel = hiltViewModel()
+                val state by vm.state.collectAsStateWithLifecycle()
+                val profiles by vm.printerProfiles.collectAsStateWithLifecycle()
+                var choosingPalletPrinter by remember { mutableStateOf(false) }
+                val leave = { nav.popBackStack(Routes.HUB, inclusive = false); Unit }
+                // The view model outlives this composable: its back-stack entry
+                // keeps it alive while the pallet-disassemble route is on top,
+                // and the scanner is one app-wide flow, so it has to be told
+                // when this mode stops owning scans.
+                DisposableEffect(Unit) {
+                    vm.setScanning(true)
+                    onDispose { vm.setScanning(false) }
+                }
+                // Back dismisses what is on top of the mode first -- the printer
+                // chooser, then a closed pallet's label, then the early-close
+                // question -- and only then leaves. Otherwise one press would drop
+                // an unresolved label, or leave the mode from behind the chooser.
+                // A print in flight is the one thing Back cannot dismiss: the close
+                // is still running and would put its own outcome straight back on
+                // the screen, so the press would look like a stuck button.
+                BackHandler(enabled = true) {
+                    when {
+                        choosingPalletPrinter -> choosingPalletPrinter = false
+                        state.closeStep is PalletCloseStep.Printing -> Unit
+                        state.closeStep != PalletCloseStep.Idle -> vm.dismissClose()
+                        state.confirmEarlyClose -> vm.cancelEarlyClose()
+                        else -> leave()
+                    }
+                }
+                app.markiro.handheld.feature.pallets.PalletsRoute(
+                    state,
+                    app.markiro.handheld.feature.pallets.PalletsCallbacks(
+                        onBack = leave,
+                        onRemove = vm::remove,
+                        onEarlyClose = vm::requestEarlyClose,
+                        onCancelEarlyClose = vm::cancelEarlyClose,
+                        onConfirmEarlyClose = vm::confirmEarlyClose,
+                        onAcknowledge = vm::acknowledge,
+                        onReprint = vm::reprint,
+                        onRefresh = vm::refresh,
+                        onDisassemble = { nav.navigate(Routes.PALLETS_DISASSEMBLE) },
+                        close = PalletCloseCallbacks(
+                            onRetry = { vm.retryPrint() },
+                            onOtherPrinter = { choosingPalletPrinter = true },
+                            onDefer = vm::deferLabel,
+                            onConfirmPrinted = vm::confirmPrinted,
+                            onDismiss = vm::dismissClose,
+                        ),
+                    ),
+                )
+                // A dead printer must not strand a closed pallet: the label is
+                // reprintable on any profile this device knows.
+                if (choosingPalletPrinter) {
+                    PrinterChoiceScreen(
+                        PrintPurpose.PALLET, profiles, null, { choosingPalletPrinter = false },
+                        allowUnassigned = false, onManage = { nav.navigate(Routes.PRINTER_GRAPH) },
+                    ) { id ->
+                        if (id != null) vm.retryPrint(id)
+                        choosingPalletPrinter = false
+                    }
+                }
+            }
             composable(Routes.WRITEOFF) {
                 val vm: app.markiro.handheld.feature.writeoff.WriteoffViewModel = hiltViewModel()
                 val state by vm.state.collectAsStateWithLifecycle()
@@ -425,6 +503,7 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                     ExceptionsCallbacks(
                         onBack = { nav.popBackStack() },
                         onDisassemble = { nav.navigate(Routes.disassemble(shiftId)) },
+                        onDisassemblePallet = { nav.navigate(Routes.palletDisassemble(shiftId)) },
                         onReprint = { nav.navigate(Routes.reprintLabel(shiftId)) },
                         onClear = vm::startClear,
                         onUndo = vm::startUndo,
@@ -447,6 +526,12 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                     ),
                 )
             }
+            // One screen, two routes: the shift-scoped one accepts only that
+            // shift's pallets, the shift-less one any closed pallet of this
+            // device. The view model reads `shiftId` from the route arguments,
+            // so the shift-less entry simply has none.
+            composable(Routes.PALLET_DISASSEMBLE) { PalletDisassembleRoute(nav) }
+            composable(Routes.PALLETS_DISASSEMBLE) { PalletDisassembleRoute(nav) }
             composable(Routes.REPRINT) {
                 val vm: ReprintViewModel = hiltViewModel()
                 val state by vm.state.collectAsStateWithLifecycle()
@@ -708,4 +793,35 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
 private fun printerViewModel(nav: NavHostController, entry: NavBackStackEntry): PrinterViewModel {
     val parent = remember(entry) { nav.getBackStackEntry(Routes.PRINTER_GRAPH) }
     return hiltViewModel(parent)
+}
+
+/**
+ * The pallet-disassemble screen, mounted on both of its routes.
+ *
+ * Identical wiring either way: the only difference between them is whether the
+ * route carries a `shiftId`, which the view model reads for itself.
+ */
+@Composable
+private fun PalletDisassembleRoute(nav: NavHostController) {
+    val vm: PalletDisassembleViewModel = hiltViewModel()
+    val step by vm.step.collectAsStateWithLifecycle()
+    // Reason and Confirm apply nothing yet, so hardware Back steps back to the
+    // scan rather than leaving the flow -- the same shape `cancel()` already
+    // gives the on-screen «Отмена». Any other step pops the route as usual.
+    BackHandler(enabled = true) {
+        when (step) {
+            is PalletDisassembleStep.Reason, is PalletDisassembleStep.Confirm -> vm.cancel()
+            else -> nav.popBackStack()
+        }
+    }
+    PalletDisassembleScreen(
+        step,
+        PalletDisassembleCallbacks(
+            onBack = { nav.popBackStack() },
+            onReason = vm::chooseReason,
+            onConfirm = vm::confirm,
+            onCancel = vm::cancel,
+            onDone = { nav.popBackStack() },
+        ),
+    )
 }

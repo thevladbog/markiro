@@ -57,17 +57,24 @@ data class BoxClosureDto(
  * reconciliation and this device does not perform it. Acknowledgement of a
  * pallet closure is unconditional for the identical reason box acknowledgement
  * is — see `SyncEngine`.
+ *
+ * `shiftId` is null for a warehouse pallet (room 18): that pallet belongs to
+ * no shift. `kind` distinguishes the two channels, and `productId` is the one
+ * product every member box of a warehouse pallet carries; both are defaulted
+ * for the production channel this device already used.
  */
 @Serializable
 data class PalletClosureDto(
     val palletId: String,
-    val shiftId: String,
+    val shiftId: String?,
     val terminalId: String?,
     val sscc: String,
     val closedAt: String,
     val operatorId: String?,
     val printVerifiedAt: String? = null,
     val printSkippedAt: String? = null,
+    val kind: String = "production",
+    val productId: String? = null,
 )
 
 @Serializable
@@ -97,6 +104,8 @@ data class SyncBatchRequest(
      * would fail validation for the whole batch.
      */
     val palletExceptions: List<JsonElement> = emptyList(),
+    /** Boxes joining a warehouse pallet (room 18) -- see `PalletMembershipDto`. */
+    val palletMemberships: List<PalletMembershipDto> = emptyList(),
 )
 
 @Serializable

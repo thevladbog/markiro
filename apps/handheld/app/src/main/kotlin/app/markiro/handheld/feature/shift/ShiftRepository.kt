@@ -1,15 +1,14 @@
 package app.markiro.handheld.feature.shift
 
 import app.markiro.handheld.core.grants.*
-import app.markiro.handheld.core.box.ServerRange
 import app.markiro.handheld.core.box.SsccPool
-import app.markiro.handheld.core.network.BundleSsccDto
 import app.markiro.handheld.core.network.ErrorBody
 import app.markiro.handheld.core.network.LineDto
 import app.markiro.handheld.core.network.ShiftBundleDto
 import app.markiro.handheld.core.network.ShiftDto
 import app.markiro.handheld.core.network.StationApi
 import app.markiro.handheld.core.network.UPDATE_REQUIRED_CODE
+import app.markiro.handheld.core.pallets.SsccBlockApplier
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.ShiftEntity
 import kotlinx.coroutines.flow.Flow
@@ -101,6 +100,7 @@ class ShiftRepository(
     private val db: HandheldDatabase,
     private val json: Json,
     private val pool: SsccPool,
+    private val blocks: SsccBlockApplier = SsccBlockApplier(pool),
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
     private val history = ValidationHistoryMirror(db, api, json)
@@ -231,45 +231,8 @@ class ShiftRepository(
      * this shift's, and it holds its own lock.
      */
     private suspend fun applySsccBlock(bundle: ShiftBundleDto) {
-        applyBlock(bundle.sscc, bundle.ssccRevokedFrom)
-        applyBlock(bundle.palletSscc, bundle.palletSsccRevokedFrom)
-    }
-
-    /**
-     * Revoked blocks are dropped BEFORE the new one is applied. Burning picks
-     * the lowest `fromSerial` with room, so a revoked range left in place keeps
-     * winning over the replacement an admin just cut, and the reseeded number
-     * never reaches a label.
-     *
-     * The bundle's OWN block is excluded from that list, belt and braces with
-     * the server's matching exclusion. Two blocks can share a `fromSerial` -- a
-     * revoked one and the replacement cut after an admin reseeded the counter
-     * back to a value already seeded before -- and deleting that row here is
-     * unrecoverable: the delete takes the local cursor with it, and `addRange`
-     * then rebuilds it from the server's `consumedThroughSerial`, still null
-     * while this device's printed labels sit unsent. Burning would hand out
-     * serials that are already on physical labels, which no later sync repairs.
-     *
-     * Scoped to the prefix AND digit the block itself names: `dropRanges` keys
-     * on all three, so crossing the streams would let a pallet revocation
-     * delete a box range that merely shares a `fromSerial`.
-     */
-    private suspend fun applyBlock(block: BundleSsccDto?, revokedFrom: List<Long>) {
-        if (block == null) return
-        pool.dropRanges(
-            block.issuerPrefix,
-            block.extensionDigit,
-            revokedFrom.filter { it != block.fromSerial },
-        )
-        pool.addRange(
-            ServerRange(
-                issuerPrefix = block.issuerPrefix,
-                extensionDigit = block.extensionDigit,
-                fromSerial = block.fromSerial,
-                toSerial = block.toSerial,
-                consumedThroughSerial = block.consumedThroughSerial,
-            ),
-        )
+        blocks.apply(bundle.sscc, bundle.ssccRevokedFrom)
+        blocks.apply(bundle.palletSscc, bundle.palletSsccRevokedFrom)
     }
 
     private suspend fun enterOffline(cached: ShiftEntity) = db.recovery.commit { enterOfflineOwned(cached) }

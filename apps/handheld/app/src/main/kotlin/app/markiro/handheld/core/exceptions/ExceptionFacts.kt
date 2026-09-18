@@ -110,11 +110,8 @@ fun ExceptionFact.toWireJson(): JsonObject {
 /** The two corrections the server accepts against a closed pallet. */
 enum class PalletExceptionKind(val wire: String) {
     /**
-     * Taking a pallet apart. No producer on this device yet -- the handheld's
-     * pallet-exceptions screen is a later task -- but the storage and sync
-     * channel below carry it, because the server's `palletExceptionSchema`
-     * accepts exactly these two and a channel that can only express one would
-     * have to be reopened to add the other.
+     * Taking a pallet apart, produced by `ExceptionEngine.disassemblePallet`
+     * for both pallet kinds.
      */
     DISASSEMBLE("disassemble"),
     REPRINT("reprint"),
@@ -134,7 +131,8 @@ enum class PalletExceptionKind(val wire: String) {
 data class PalletExceptionFact(
     val kind: PalletExceptionKind,
     val palletId: String,
-    val shiftId: String,
+    /** Null for a warehouse pallet's correction: that pallet belongs to no shift. */
+    val shiftId: String?,
     /** Informational on the wire: the server always uses the authenticated device. */
     val terminalId: String?,
     val operatorId: String?,
@@ -185,4 +183,12 @@ enum class ReprintReason(val audit: String) {
      * operator resolves an unknown outcome with «Напечатать ещё раз».
      */
     PRINT_OUTCOME_UNKNOWN("Результат печати неизвестен"),
+
+    /**
+     * Never offered in the reason list either: written when the server rejects
+     * a membership AFTER the pallet was closed and labelled, so the printed
+     * box count no longer matches the stack and the operator asks for a new
+     * label from the rejection notice.
+     */
+    PALLET_CONTENTS_CHANGED("Состав паллеты изменился"),
 }

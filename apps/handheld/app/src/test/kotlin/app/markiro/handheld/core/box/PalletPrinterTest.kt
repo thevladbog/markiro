@@ -5,7 +5,10 @@ import app.markiro.handheld.core.storage.initializeRecoveryForTest
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import app.markiro.handheld.core.label.LabelField
 import app.markiro.handheld.core.label.LabelRenderer
+import app.markiro.handheld.core.label.LabelSpec
+import app.markiro.handheld.core.label.PrinterLanguage
 import app.markiro.handheld.core.label.RasterResult
 import app.markiro.handheld.core.label.RasterizeText
 import app.markiro.handheld.core.print.NotReadyReason
@@ -16,8 +19,14 @@ import app.markiro.handheld.core.print.SendOutcome
 import app.markiro.handheld.core.storage.BoxEntity
 import app.markiro.handheld.core.storage.CodeEntity
 import app.markiro.handheld.core.storage.HandheldDatabase
+import app.markiro.handheld.core.storage.BoxRegistryEntity
+import app.markiro.handheld.core.storage.MembershipStatus
 import app.markiro.handheld.core.storage.PalletEntity
+import app.markiro.handheld.core.storage.PalletKind
+import app.markiro.handheld.core.storage.PalletLabelTemplateEntity
+import app.markiro.handheld.core.storage.PalletMembershipEntity
 import app.markiro.handheld.core.storage.PalletPrint
+import app.markiro.handheld.core.storage.PalletProductEntity
 import app.markiro.handheld.core.storage.ShiftEntity
 import kotlinx.coroutines.test.runTest
 import org.junit.After
@@ -56,6 +65,22 @@ class PalletPrinterTest {
         override suspend fun send(printer: PrinterEntity, document: ByteArray): SendOutcome {
             sent = document
             return outcome
+        }
+    }
+
+    /**
+     * Keeps the field map the printer composed.
+     *
+     * The rendered document is a raster by the time it reaches the transport,
+     * so «12» and «12 шт.» are indistinguishable there; the warehouse cases
+     * are about which numbers were composed, not how they were drawn.
+     */
+    private class CapturingRenderer : LabelRenderer(RasterizeText { _, _ -> RasterResult("AA", 1, 1, 8, 8) }) {
+        var lastFields: Map<LabelField, String>? = null
+
+        override suspend fun render(spec: LabelSpec, data: Map<LabelField, String>, language: PrinterLanguage, dpi: Int): ByteArray {
+            lastFields = data
+            return super.render(spec, data, language, dpi)
         }
     }
 
@@ -283,5 +308,99 @@ class PalletPrinterTest {
         val afterDefer = db.palletDao().get("pal-1")!!
         assertEquals(PalletPrint.UNKNOWN, afterDefer.printState)
         assertEquals("link lost", afterDefer.printReason)
+    }
+
+    // --- Warehouse pallets -------------------------------------------------
+    //
+    // A warehouse pallet has no shift: its product, its template and its two
+    // counts come from the bootstrap caches and the membership rows' own
+    // snapshot, so every fact a shift used to supply has a second source here.
+
+    private val renderer = CapturingRenderer()
+
+    private fun warehousePrinter(transport: FakeTransport) =
+        PalletPrinter(db, PalletRepository(db, palletLock), renderer, transport)
+
+    private suspend fun warehouseFixture(
+        templateKey: String = PalletLabelTemplateEntity.ORG,
+        dates: List<String?> = listOf("2026-09-10", "2026-09-10"),
+    ) {
+        db.palletProductDao().replaceAll(
+            listOf(PalletProductEntity("p-1", "04600682000013", "Cola", "Cola 0.5", 180, 12, 8)),
+        )
+        db.palletLabelTemplateDao().replaceAll(listOf(PalletLabelTemplateEntity(templateKey, template)))
+        db.printerDao().upsertAssigned(
+            PrinterEntity(
+                id = "p1", name = "Zebra", transport = "wifi", address = "127.0.0.1:9100",
+                language = "zpl", dpi = 203, selected = true, lastStatus = null, lastSeenAt = null,
+            ),
+        )
+        db.palletDao().insert(
+            PalletEntity(
+                palletId = "w1", shiftId = null, terminalId = "dev-1", sscc = "134600682000000017",
+                openedAt = "2026-09-18T08:00:00.000Z", closedAt = "2026-09-18T09:00:00.000Z",
+                operatorId = "op-1", printState = PalletPrint.PENDING, printReason = null, ackedAt = null,
+                kind = PalletKind.WAREHOUSE, productId = "p-1", deviceId = "dev-1",
+            ),
+        )
+        dates.forEachIndexed { i, date ->
+            val sscc = "03460068200000%03d".format(i)
+            db.boxRegistryDao().upsert(BoxRegistryEntity(sscc, "b$i", "p-1", 6, "[]", "t", productionDate = date))
+            db.palletMembershipDao().insert(
+                PalletMembershipEntity(
+                    palletId = "w1", sscc = sscc, addedAt = "t", operatorId = null,
+                    status = MembershipStatus.ACCEPTED, reason = null, winningPalletSscc = null,
+                    ackedAt = "t", acknowledgedAt = null, bottleCount = 6, productionDate = date,
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun aWarehousePalletRendersFromTheBootstrapCaches() = runTest {
+        warehouseFixture()
+        assertEquals(PrintOutcome.Printed, warehousePrinter(FakeTransport()).print("w1"))
+        val fields = renderer.lastFields!!
+        assertEquals("Cola", fields[LabelField.PRODUCT_NAME])
+        assertEquals("2", fields[LabelField.QTY_BOXES])
+        assertEquals("12", fields[LabelField.QTY])
+        assertEquals(formatLabelDate("2026-09-10"), fields[LabelField.DATE])
+        // No shift means no shift number; the field is blank rather than absent.
+        assertEquals("", fields[LabelField.SHIFT_NO])
+    }
+
+    @Test
+    fun mixedProductionDatesLeaveTheDatesBlank() = runTest {
+        warehouseFixture(dates = listOf("2026-09-10", "2026-09-11"))
+        assertEquals(PrintOutcome.Printed, warehousePrinter(FakeTransport()).print("w1"))
+        assertEquals("", renderer.lastFields!![LabelField.DATE])
+        assertEquals("", renderer.lastFields!![LabelField.EXPIRY])
+    }
+
+    @Test
+    fun theCategoryTemplateWinsOverTheOrganisationOne() = runTest {
+        warehouseFixture(templateKey = PalletLabelTemplateEntity.category(8))
+        assertEquals(PrintOutcome.Printed, warehousePrinter(FakeTransport()).print("w1"))
+    }
+
+    @Test
+    fun noTemplateRefusesWithTemplateMissing() = runTest {
+        warehouseFixture()
+        db.palletLabelTemplateDao().clear()
+        val transport = FakeTransport()
+        assertEquals(PrintOutcome.Failed(PrintReason.TEMPLATE_MISSING), warehousePrinter(transport).print("w1"))
+        assertNull(transport.sent)
+        assertEquals(PalletPrint.FAILED, db.palletDao().get("w1")?.printState)
+    }
+
+    @Test
+    fun aPalletWhoseProductLeftTheCacheRefusesByItsOwnName() = runTest {
+        warehouseFixture()
+        db.palletProductDao().clear()
+        val transport = FakeTransport()
+        assertEquals(PrintOutcome.Failed(PrintReason.PRODUCT_MISSING), warehousePrinter(transport).print("w1"))
+        assertNull(transport.sent)
+        assertEquals(PalletPrint.FAILED, db.palletDao().get("w1")?.printState)
+        assertEquals(PrintReason.PRODUCT_MISSING, db.palletDao().get("w1")?.printReason)
     }
 }

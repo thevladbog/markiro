@@ -122,7 +122,7 @@ private fun WriteoffListScreen(
     val t = MarkiroTheme.type
     Column(Modifier.fillMaxWidth().background(c.surfacePage)) {
         AppBar(stringResource(R.string.writeoff_title), onBack = onBack) {
-            IconAction(Icons.Outlined.History, stringResource(R.string.writeoff_history_title), onHistory)
+            IconAction(Icons.Outlined.History, stringResource(R.string.writeoff_history_title), onClick = onHistory)
         }
         state.stampAt?.let {
             Text(
@@ -202,7 +202,7 @@ private fun LineRow(line: WriteoffLine, onRemove: () -> Unit) {
         if (line is WriteoffLine.Box) {
             MarkiroChip(pluralStringResource(R.plurals.writeoff_units, line.count, line.count), Tone.Neutral)
         }
-        IconAction(Icons.Outlined.Close, stringResource(R.string.writeoff_remove_line), onRemove)
+        IconAction(Icons.Outlined.Close, stringResource(R.string.writeoff_remove_line), onClick = onRemove)
     }
 }
 
