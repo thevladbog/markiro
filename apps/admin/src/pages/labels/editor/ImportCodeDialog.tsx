@@ -1,11 +1,9 @@
-import { useEffect, useMemo, useState, type ChangeEvent } from "react";
+import { useEffect, useState, type ChangeEvent } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
-  LABEL_FIELDS,
   parseLabelCode,
   type LabelCodeLanguage,
-  type LabelField,
   type LabelImportResult,
   type LabelTemplatePurpose,
 } from "@markiro/domain";
@@ -13,6 +11,7 @@ import { Button, Checkbox, Modal, Select, Textarea } from "@markiro/ui";
 
 import { fitSpecElements } from "../geometry.js";
 import { labelPreviewData, labelRenderOptions } from "../preview-data.js";
+import { ImportFieldsPanel } from "./ImportFieldsPanel.js";
 
 export interface ImportCodeDialogProps {
   open: boolean;
@@ -28,22 +27,6 @@ interface Analysis {
   result: LabelImportResult;
   adjustedIds: string[];
 }
-
-const FIELD_COPY_KEYS: Record<LabelField, string> = {
-  "product.name": "product.name",
-  "product.printName": "product.printName",
-  "product.gtin": "product.gtin",
-  "product.egais": "product.egais",
-  "km.code": "km.code",
-  sscc: "sscc",
-  "shift.no": "shift.no",
-  date: "date",
-  expiry: "expiry",
-  qty: "qty",
-  "qty.boxes": "qty.boxes",
-  operator: "operator",
-  "counterparty.name": "counterparty.name",
-};
 
 export function ImportCodeDialog({
   open,
@@ -61,8 +44,6 @@ export function ImportCodeDialog({
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [acknowledgedUnsupported, setAcknowledgedUnsupported] = useState(false);
-  const [copiedField, setCopiedField] = useState<LabelField | null>(null);
-  const [copyError, setCopyError] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -72,8 +53,6 @@ export function ImportCodeDialog({
     setAnalysis(null);
     setError(null);
     setAcknowledgedUnsupported(false);
-    setCopiedField(null);
-    setCopyError(false);
   }, [initialDpi, initialLanguage, open]);
 
   const codeLabel = t("pages.labels.editor.import.codeLabel", {
@@ -82,16 +61,6 @@ export function ImportCodeDialog({
   const unsupportedCount = analysis?.result.warnings.length ?? 0;
   const canReplace =
     analysis !== null && (unsupportedCount === 0 || acknowledgedUnsupported) && error === null;
-
-  const fieldRows = useMemo(
-    () =>
-      LABEL_FIELDS.map((field) => ({
-        field,
-        placeholder: `{{${FIELD_COPY_KEYS[field]}}}`,
-        label: t(`pages.labels.editor.fields.${field}`),
-      })),
-    [t],
-  );
 
   function invalidate(): void {
     setAnalysis(null);
@@ -117,17 +86,6 @@ export function ImportCodeDialog({
       setAnalysis({ result: { ...parsed, spec: fitted.spec }, adjustedIds: fitted.adjustedIds });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
-    }
-  }
-
-  async function handleCopy(field: LabelField, placeholder: string): Promise<void> {
-    setCopyError(false);
-    try {
-      if (!navigator.clipboard) throw new Error("Clipboard unavailable");
-      await navigator.clipboard.writeText(placeholder);
-      setCopiedField(field);
-    } catch {
-      setCopyError(true);
     }
   }
 
@@ -247,32 +205,7 @@ export function ImportCodeDialog({
             </div>
           )}
         </div>
-        <aside
-          className="label-editor__import-fields"
-          aria-label={t("pages.labels.editor.import.fieldsTitle")}
-        >
-          <div className="label-editor__eyebrow">{t("pages.labels.editor.import.fieldsTitle")}</div>
-          <p>{t("pages.labels.editor.import.fieldsHint")}</p>
-          {fieldRows.map(({ field, label, placeholder }) => (
-            <div className="label-editor__import-field" key={field}>
-              <div>
-                <strong>{label}</strong>
-                <code>{placeholder}</code>
-              </div>
-              <Button
-                type="button"
-                variant="secondary"
-                size="compact"
-                aria-label={t("pages.labels.editor.import.copy", { placeholder })}
-                onClick={() => void handleCopy(field, placeholder)}
-              >
-                {t("pages.labels.editor.import.copyShort")}
-              </Button>
-            </div>
-          ))}
-          {copiedField && <div role="status">{t("pages.labels.editor.import.copied")}</div>}
-          {copyError && <div role="alert">{t("pages.labels.editor.import.copyError")}</div>}
-        </aside>
+        <ImportFieldsPanel syntax="placeholder" />
       </div>
     </Modal>
   );

@@ -2160,6 +2160,7 @@
           "elementTooLarge": "An element is larger than the label. Fix the code or label size.",
           "fieldsTitle": "Template fields",
           "fieldsHint": "Insert the complete placeholder into text or barcode content.",
+          "fieldsHintJson": "Use as the field value of a text element or the data value of a barcode.",
           "copy": "Copy {{placeholder}}",
           "copyShort": "Copy",
           "copied": "Placeholder copied",
