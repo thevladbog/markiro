@@ -2,7 +2,11 @@
 //!
 //! The TypeScript schemas are `.strict()`, so `deny_unknown_fields` here keeps
 //! both directions symmetric: a field the cloud adds without telling us fails
-//! loudly instead of being silently dropped. The shared JSON fixtures under
+//! loudly instead of being silently dropped. However, `SignerTask` flattens its
+//! tagged `kind` field, and serde does not allow `deny_unknown_fields` on a
+//! struct that uses `#[serde(flatten)]`, so the envelope cannot reject unknown
+//! siblings of `id`/`type`/`payload`. Payload structs still deny unknown fields,
+//! which is where it matters. The shared JSON fixtures under
 //! `packages/platform-contracts/fixtures/chz-signer/` are parsed by the tests
 //! on both sides — they are the contract.
 
@@ -101,6 +105,9 @@ pub enum TaskKind {
     SignDetached(SignDetachedPayload),
 }
 
+/// The task envelope with a discriminant and payload. The inner payload structs
+/// still reject unknown fields; the envelope cannot because `#[serde(flatten)]`
+/// is not compatible with `deny_unknown_fields` on the outer struct.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SignerTask {
     pub id: String,
@@ -318,7 +325,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unknown_fields_from_the_server() {
+    fn rejects_unknown_fields_in_the_payload() {
         // `#[serde(flatten)]` on `SignerTask::kind` is not compatible with
         // `deny_unknown_fields` on the outer struct (serde does not support
         // combining them), so an unknown field *sibling to* `id`/`type`/
@@ -330,6 +337,53 @@ mod tests {
                 "payload":{"trueApiBaseUrl":"https://example.test","extra":1}}"#,
         );
         assert!(err.is_err(), "unknown payload fields must not be silently ignored");
+    }
+
+    #[test]
+    fn accepts_unknown_fields_at_the_envelope_level() {
+        // This documents a known serde limitation: `#[serde(flatten)]` is
+        // incompatible with `deny_unknown_fields`, so we cannot reject unknown
+        // siblings of `id`/`type`/`payload`. Payload-level strictness remains.
+        let task: SignerTask = serde_json::from_str(
+            r#"{"id":"3f0e0f5e-8d1c-4d7a-9b1a-222222222222","type":"true_api_auth",
+                "payload":{"trueApiBaseUrl":"https://example.test"},"extra":1}"#,
+        )
+        .unwrap();
+        assert_eq!(task.id, "3f0e0f5e-8d1c-4d7a-9b1a-222222222222");
+        assert!(matches!(task.kind, TaskKind::TrueApiAuth(_)));
+    }
+
+    #[test]
+    fn sign_detached_and_task_complete_signature_redact_secrets_in_debug() {
+        let payload = SignDetachedPayload {
+            purpose: "oms_order".into(),
+            order_id: "order-123".into(),
+            data_base64: "dGVzdC1kYXRhLWJhc2U2NA==".into(), // "test-data-base64"
+        };
+        let sig = TaskCompleteSignature {
+            signature_base64: "dGVzdC1zaWduYXR1cmUtYmFzZTY0".into(), // "test-signature-base64"
+            cert_thumbprint: "AB120F0000000000000000000000000000000000".into(),
+        };
+        for (debug, secret_field, secret_value) in [
+            (format!("{payload:?}"), "data_base64", "dGVzdC1kYXRhLWJhc2U2NA=="),
+            (format!("{payload:#?}"), "data_base64", "dGVzdC1kYXRhLWJhc2U2NA=="),
+            (format!("{sig:?}"), "signature_base64", "dGVzdC1zaWduYXR1cmUtYmFzZTY0"),
+            (format!("{sig:#?}"), "signature_base64", "dGVzdC1zaWduYXR1cmUtYmFzZTY0"),
+        ] {
+            assert!(
+                !debug.contains(secret_value),
+                "{secret_field} secret must not appear in Debug output"
+            );
+            assert!(debug.contains("["), "Debug output must contain redaction marker");
+        }
+        assert_eq!(
+            serde_json::to_value(&payload).unwrap()["dataBase64"],
+            payload.data_base64
+        );
+        assert_eq!(
+            serde_json::to_value(&sig).unwrap()["signatureBase64"],
+            sig.signature_base64
+        );
     }
 
     #[test]
