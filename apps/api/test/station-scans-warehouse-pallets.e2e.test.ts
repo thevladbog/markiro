@@ -112,6 +112,13 @@ describe.skipIf(!ready)("station scans warehouse pallets e2e", () => {
     operatorId,
   });
 
+  const removal = (palletId: string, boxSscc: string) => ({
+    palletId,
+    boxSscc,
+    removedAt: "2026-09-17T09:05:00.000Z",
+    operatorId,
+  });
+
   async function warehousePallets() {
     const db = app!.get<Db>(DB);
     return db
@@ -421,6 +428,59 @@ describe.skipIf(!ready)("station scans warehouse pallets e2e", () => {
     expect(await memberBoxSsccs(rivalPallet.id)).toEqual([]);
   });
 
+  it("takes a box off the open pallet, refuses the same for a foreign device, and re-attaches in one batch", async () => {
+    const before = await boxRegistryVersions();
+    // Device 2 owns an EMPTY pallet also called "w1" (the refused membership
+    // above created it), so its removal resolves to that pallet and B3 -- which
+    // stands on device 1's "w1" -- is simply not on it. Device 1's pallet is
+    // never reachable from device 2, whatever the device-local id says.
+    const foreign = await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", device2Key)
+      .send({
+        batchId: `foreign-rm-${randomUUID()}`,
+        items: [],
+        palletMembershipRemovals: [removal("w1", B3_SSCC)],
+      })
+      .expect(201);
+    expect(foreign.body.membershipRemovals).toEqual([
+      { palletId: "w1", boxSscc: B3_SSCC, status: "replayed" },
+    ]);
+    const own = await warehousePallet("w1", stationDeviceId);
+    expect(await memberBoxSsccs(own.id)).toEqual([B1_SSCC, B3_SSCC]);
+
+    const res = await postBatch({
+      palletMembershipRemovals: [
+        removal("w1", B3_SSCC),
+        removal("w1", B2_SSCC),
+        removal("w1", UNKNOWN_SSCC),
+      ],
+    });
+    expect(res.body.membershipRemovals).toEqual([
+      { palletId: "w1", boxSscc: B3_SSCC, status: "removed" },
+      { palletId: "w1", boxSscc: B2_SSCC, status: "replayed" }, // never on it
+      { palletId: "w1", boxSscc: UNKNOWN_SSCC, status: "not_found" },
+    ]);
+    expect(await memberBoxSsccs(own.id)).toEqual([B1_SSCC]);
+    const after = await boxRegistryVersions();
+    expect(after.get(B3_SSCC)).toBeGreaterThan(before.get(B3_SSCC)!);
+    expect(after.get(B1_SSCC)).toEqual(before.get(B1_SSCC));
+
+    // Removal and re-scan in ONE batch: the removal applies first, so the
+    // membership is a fresh `accepted`, not a replay that then gets cleared.
+    const again = await postBatch({
+      palletMembershipRemovals: [removal("w1", B3_SSCC)],
+      palletMemberships: [membership("w1", B3_SSCC)],
+    });
+    expect(again.body.membershipRemovals).toEqual([
+      { palletId: "w1", boxSscc: B3_SSCC, status: "replayed" },
+    ]);
+    expect(again.body.memberships).toEqual([
+      { palletId: "w1", boxSscc: B3_SSCC, status: "accepted" },
+    ]);
+    expect(await memberBoxSsccs(own.id)).toEqual([B1_SSCC, B3_SSCC]);
+  });
+
   it("closes the warehouse pallet with an extension-1 serial and bumps its boxes' registry version", async () => {
     const before = await boxRegistryVersions();
     await postBatch({
@@ -669,6 +729,53 @@ describe.skipIf(!ready)("station scans warehouse pallets e2e", () => {
     expect(box?.palletId).toBeNull();
   });
 
+  it("refuses to take a box off a closed pallet, and deletes an emptied open draft with its rejections", async () => {
+    const closed = await postBatch({ palletMembershipRemovals: [removal("w1", B3_SSCC)] });
+    expect(closed.body.membershipRemovals).toEqual([
+      { palletId: "w1", boxSscc: B3_SSCC, status: "pallet_closed" },
+    ]);
+    // The box keeps its pointer at the closed pallet: only disassembly moves it.
+    expect(await memberBoxSsccs((await warehousePallet("w1", stationDeviceId)).id)).toContain(
+      B3_SSCC,
+    );
+
+    // A fresh draft "w3": one accepted box, one refused (unknown) so it owns a rejection row.
+    const opened = await postBatch({
+      palletMemberships: [membership("w3", B8_SSCC), membership("w3", UNKNOWN_SSCC)],
+    });
+    expect(opened.body.memberships.map((m: { status: string }) => m.status)).toEqual([
+      "accepted",
+      "not_found",
+    ]);
+    const draft = await warehousePallet("w3", stationDeviceId);
+    expect(draft.closedAt).toBeNull();
+    expect(await rejections(draft.id)).toHaveLength(1);
+
+    const emptied = await postBatch({ palletMembershipRemovals: [removal("w3", B8_SSCC)] });
+    expect(emptied.body.membershipRemovals).toEqual([
+      { palletId: "w3", boxSscc: B8_SSCC, status: "removed" },
+    ]);
+    const db = app!.get<Db>(DB);
+    const rows = await db
+      .select({ id: schema.pallets.id })
+      .from(schema.pallets)
+      .where(and(eq(schema.pallets.tenantId, tenantId), eq(schema.pallets.devicePalletId, "w3")));
+    expect(rows).toEqual([]);
+    const orphanRejections = await db
+      .select({ id: schema.palletMembershipRejections.id })
+      .from(schema.palletMembershipRejections)
+      .where(eq(schema.palletMembershipRejections.palletId, draft.id));
+    expect(orphanRejections).toEqual([]);
+    // The freed box can open a NEW draft under the same device-local id.
+    const reopened = await postBatch({ palletMemberships: [membership("w3", B8_SSCC)] });
+    expect(reopened.body.memberships).toEqual([
+      { palletId: "w3", boxSscc: B8_SSCC, status: "accepted" },
+    ]);
+    expect((await warehousePallet("w3", stationDeviceId)).id).not.toEqual(draft.id);
+    // Leave no draft behind for the later tests.
+    await postBatch({ palletMembershipRemovals: [removal("w3", B8_SSCC)] });
+  });
+
   /**
    * By now this tenant holds both OPEN and CLOSED warehouse pallets, which is
    * the case the keyset cursor has to get right: the list sorts
@@ -793,6 +900,7 @@ describe.skipIf(!ready)("station scans warehouse pallets e2e", () => {
         },
       ],
       palletMemberships: [membership("lw1", L1_SSCC), membership("lw1", L2_SSCC)],
+      palletMembershipRemovals: [removal("lw1", L1_SSCC)],
     });
 
     expect(denied.body.denied).toEqual([
@@ -809,11 +917,20 @@ describe.skipIf(!ready)("station scans warehouse pallets e2e", () => {
         shiftId: null,
         code: "subscription_read_only",
       },
+      {
+        recordKind: "pallet_membership_removal",
+        recordIndex: 0,
+        shiftId: null,
+        code: "subscription_read_only",
+      },
     ]);
     // Every SUBMITTED membership keeps its position and reports the refusal.
     expect(denied.body.memberships).toEqual([
       { palletId: "lw1", boxSscc: L1_SSCC, status: "subscription_read_only" },
       { palletId: "lw1", boxSscc: L2_SSCC, status: "subscription_read_only" },
+    ]);
+    expect(denied.body.membershipRemovals).toEqual([
+      { palletId: "lw1", boxSscc: L1_SSCC, status: "subscription_read_only" },
     ]);
 
     // Durable: the record survives in quarantine, not only in the answer.
@@ -841,6 +958,26 @@ describe.skipIf(!ready)("station scans warehouse pallets e2e", () => {
         record_index: 1,
         reason: "subscription_read_only",
         payload: expect.objectContaining({ palletId: "lw1", boxSscc: L2_SSCC }),
+      },
+    ]);
+    const quarantinedRemovals = await db.execute<{
+      record_kind: string;
+      record_index: number;
+      reason: string;
+      payload: { palletId?: string; boxSscc?: string };
+    }>(sql`
+      select record_kind, record_index, reason, payload
+      from station_sync_quarantine
+      where tenant_id = ${lapsedTenantId} and batch_id = ${batchId}
+        and record_kind = 'pallet_membership_removal'
+      order by record_index
+    `);
+    expect(quarantinedRemovals.rows).toEqual([
+      {
+        record_kind: "pallet_membership_removal",
+        record_index: 0,
+        reason: "subscription_read_only",
+        payload: expect.objectContaining({ palletId: "lw1", boxSscc: L1_SSCC }),
       },
     ]);
 

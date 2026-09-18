@@ -25,8 +25,10 @@ import {
   applyPalletClosures,
   applyPalletExceptions,
   applyPalletMemberships,
+  applyPalletMembershipRemovals,
   assembleMembershipOutcomes,
   palletKey,
+  pruneEmptyWarehouseDrafts,
   upsertPallets,
   type PalletRef,
 } from "./pallet-ingest";
@@ -38,6 +40,7 @@ import type {
   BatchConflictDto,
   DeniedStationRecordDto,
   PalletMembershipOutcomeDto,
+  PalletMembershipRemovalOutcomeDto,
   StationCodeReleasesDto,
   StationCodeReleasesResponseDto,
   StationConflictStatusResponseDto,
@@ -494,6 +497,7 @@ export class StationScansService {
         // response reports one outcome per SUBMITTED membership, including the
         // ones this batch refuses to apply.
         const submittedMemberships = body.palletMemberships;
+        const submittedRemovals = body.palletMembershipRemovals;
         let denied: DeniedStationRecordDto[] = [];
         const deniedProductLabelEventIds = new Set<string>();
         if (access.access === "read_only") {
@@ -1676,6 +1680,25 @@ export class StationScansService {
           }
         }
 
+        // Removals BEFORE memberships (spec 2026-09-18 §2): a box taken off and
+        // re-scanned before the next sync arrives as both records, and the
+        // membership must land on a box that is already free.
+        let removalOutcomes: PalletMembershipRemovalOutcomeDto[] = [];
+        let removalTouched: string[] = [];
+        if (body.palletMembershipRemovals.length > 0) {
+          const applied = await applyPalletMembershipRemovals(
+            tx,
+            tenantId,
+            body.palletMembershipRemovals,
+            authenticatedTerminalId,
+          );
+          removalOutcomes = applied.outcomes;
+          removalTouched = applied.touchedPalletIds;
+          // A cleared `boxes.pallet_id` is exactly what the box registry
+          // advertises, so every handheld has to learn the box is free again.
+          await this.advanceBoxRegistryVersions(tx, tenantId, applied.changedBoxIds);
+        }
+
         // Warehouse memberships, after the box closures above so a box closed
         // and attached in the SAME batch is already closed by the time the
         // membership UPDATE tests `closed_at IS NOT NULL`, and before the
@@ -1743,6 +1766,19 @@ export class StationScansService {
           // An accepted membership rewrites `boxes.pallet_id`, which the box
           // registry advertises, so every handheld has to learn about it.
           await this.advanceBoxRegistryVersions(tx, tenantId, applied.changedBoxIds);
+        }
+
+        // A draft this batch emptied and did not refill is deleted: it has no
+        // SSCC, no label and no export, and the device already forgot it.
+        if (removalTouched.length > 0) {
+          const pruned = await pruneEmptyWarehouseDrafts(tx, tenantId, removalTouched);
+          for (const id of pruned) {
+            // The key map is read by the closure and exception loops below; a
+            // deleted pallet must not be handed to either as a live id.
+            for (const [key, palletId] of palletsByKey) {
+              if (palletId === id) palletsByKey.delete(key);
+            }
+          }
         }
 
         // Pallet closures, after the box closures above so a pallet closing in
@@ -1865,6 +1901,16 @@ export class StationScansService {
           ),
           membershipOutcomes,
         );
+        // Same contract for the removals, assembled the same way.
+        const membershipRemovals: PalletMembershipRemovalOutcomeDto[] = assembleMembershipOutcomes(
+          submittedRemovals,
+          new Set(
+            denied
+              .filter((record) => record.recordKind === "pallet_membership_removal")
+              .map((record) => record.recordIndex),
+          ),
+          removalOutcomes,
+        );
 
         const result: SyncBatchResponseDto = {
           applied: body.items.length,
@@ -1874,6 +1920,7 @@ export class StationScansService {
           ...(productLabelReceipt ? { productLabelReceipt } : {}),
           ...(validationOccurrences.length > 0 ? { validationOccurrences } : {}),
           ...(memberships.length > 0 ? { memberships } : {}),
+          ...(membershipRemovals.length > 0 ? { membershipRemovals } : {}),
         };
         await tx
           .update(schema.syncBatches)

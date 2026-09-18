@@ -3,7 +3,12 @@ import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { formatSsccWithAi } from "@markiro/domain";
 import { schema, type Db } from "@markiro/db";
 import { PALLET_EXTENSION_DIGIT } from "../sscc/sscc.service";
-import type { PalletMembershipDto, PalletMembershipOutcomeDto } from "./dto";
+import type {
+  PalletMembershipDto,
+  PalletMembershipOutcomeDto,
+  PalletMembershipRemovalDto,
+  PalletMembershipRemovalOutcomeDto,
+} from "./dto";
 
 /**
  * The ingest transaction handle. Loosely derived from `Db["transaction"]`'s own
@@ -684,8 +689,154 @@ export async function applyPalletMemberships(
 }
 
 /**
+ * Takes boxes back off the device's own OPEN warehouse pallets (spec
+ * 2026-09-18-open-pallet-box-removal §2). The undo of `applyPalletMemberships`,
+ * and the second relaxation of 06d's «pallet_id is never cleared»: a draft
+ * pallet has no SSCC, no label and no export, so nothing refers to it.
+ *
+ * Runs BEFORE memberships so a removal and a re-scan of the same box in one
+ * batch land in that order. Never creates a pallet row: a removal naming a
+ * pallet the server has never seen is `not_found`, which is harmless.
+ *
+ * Sorted by (palletId, boxSscc) for the usual 40P01 reason, and reported in the
+ * CALLER's order, exactly like the membership path.
+ */
+export async function applyPalletMembershipRemovals(
+  tx: Transaction,
+  tenantId: string,
+  removals: readonly PalletMembershipRemovalDto[],
+  deviceId: string,
+): Promise<{
+  outcomes: PalletMembershipRemovalOutcomeDto[];
+  changedBoxIds: string[];
+  touchedPalletIds: string[];
+}> {
+  const ordered = [...removals]
+    .map((removal, index) => ({ removal, index }))
+    .sort((a, b) => {
+      const left = `${a.removal.palletId}|${a.removal.boxSscc}`;
+      const right = `${b.removal.palletId}|${b.removal.boxSscc}`;
+      return left < right ? -1 : left > right ? 1 : 0;
+    });
+  const outcomes = new Array<PalletMembershipRemovalOutcomeDto>(removals.length);
+  const changedBoxIds: string[] = [];
+  const touched = new Set<string>();
+  // One lookup per device-local pallet id, reused by every removal naming it.
+  // The empty id is the "this device has no such warehouse pallet" sentinel;
+  // a real id is a uuid, so the two can never be confused.
+  const palletByDeviceId = new Map<string, { id: string; open: boolean }>();
+
+  for (const { removal, index } of ordered) {
+    let pallet = palletByDeviceId.get(removal.palletId);
+    if (pallet === undefined) {
+      const [row] = await tx
+        .select({
+          id: schema.pallets.id,
+          closedAt: schema.pallets.closedAt,
+          disassembledAt: schema.pallets.disassembledAt,
+        })
+        .from(schema.pallets)
+        .where(
+          and(
+            eq(schema.pallets.tenantId, tenantId),
+            eq(schema.pallets.kind, "warehouse"),
+            eq(schema.pallets.deviceId, deviceId),
+            eq(schema.pallets.devicePalletId, removal.palletId),
+          ),
+        )
+        .limit(1);
+      pallet = row
+        ? { id: row.id, open: row.closedAt === null && row.disassembledAt === null }
+        : { id: "", open: false };
+      palletByDeviceId.set(removal.palletId, pallet);
+    }
+    const base = { palletId: removal.palletId, boxSscc: removal.boxSscc };
+    if (pallet.id === "") {
+      outcomes[index] = { ...base, status: "not_found" };
+      continue;
+    }
+    const updated = await tx.execute<{ id: string }>(sql`
+      UPDATE boxes b
+         SET pallet_id = NULL, updated_at = now()
+        FROM pallets tp
+       WHERE b.tenant_id = ${tenantId} AND b.sscc = ${removal.boxSscc}
+         AND tp.tenant_id = b.tenant_id AND tp.id = b.pallet_id AND tp.id = ${pallet.id}
+         AND tp.closed_at IS NULL AND tp.disassembled_at IS NULL
+      RETURNING b.id
+    `);
+    const removed = updated.rows[0];
+    if (removed) {
+      changedBoxIds.push(removed.id);
+      touched.add(pallet.id);
+      outcomes[index] = { ...base, status: "removed" };
+      continue;
+    }
+    const [box] = await tx
+      .select({ palletId: schema.boxes.palletId })
+      .from(schema.boxes)
+      .where(and(eq(schema.boxes.tenantId, tenantId), eq(schema.boxes.sscc, removal.boxSscc)))
+      .limit(1);
+    // Ordered by what the operator can act on: a box that is simply not on
+    // this pallet any more is the common replay; a closed pallet is the one
+    // answer that sends them to the disassemble flow instead.
+    if (!box) outcomes[index] = { ...base, status: "not_found" };
+    else if (box.palletId !== pallet.id) outcomes[index] = { ...base, status: "replayed" };
+    else if (!pallet.open) outcomes[index] = { ...base, status: "pallet_closed" };
+    else throw new Error("unclassified membership removal refusal");
+  }
+  return { outcomes, changedBoxIds, touchedPalletIds: [...touched] };
+}
+
+/**
+ * Deletes every named warehouse pallet that is still an open draft and holds
+ * no box any more, with its rejection rows (FK). Runs AFTER memberships, so a
+ * batch that empties a draft and refills it in the same delivery keeps it.
+ */
+export async function pruneEmptyWarehouseDrafts(
+  tx: Transaction,
+  tenantId: string,
+  palletIds: readonly string[],
+): Promise<string[]> {
+  const deleted: string[] = [];
+  for (const palletId of [...palletIds].sort()) {
+    const [empty] = await tx
+      .select({ id: schema.pallets.id })
+      .from(schema.pallets)
+      .where(
+        and(
+          eq(schema.pallets.tenantId, tenantId),
+          eq(schema.pallets.id, palletId),
+          eq(schema.pallets.kind, "warehouse"),
+          isNull(schema.pallets.closedAt),
+          isNull(schema.pallets.disassembledAt),
+          sql`NOT EXISTS (SELECT 1 FROM boxes b WHERE b.tenant_id = ${tenantId} AND b.pallet_id = ${palletId})`,
+        ),
+      )
+      .limit(1);
+    if (!empty) continue;
+    await tx
+      .delete(schema.palletMembershipRejections)
+      .where(
+        and(
+          eq(schema.palletMembershipRejections.tenantId, tenantId),
+          eq(schema.palletMembershipRejections.palletId, palletId),
+        ),
+      );
+    await tx
+      .delete(schema.pallets)
+      .where(and(eq(schema.pallets.tenantId, tenantId), eq(schema.pallets.id, palletId)));
+    deleted.push(palletId);
+  }
+  return deleted;
+}
+
+/**
  * Expands the outcomes of the memberships this batch actually APPLIED back
  * over every membership the device SUBMITTED, in the caller's order.
+ *
+ * Generic over the outcome type because memberships and their REMOVALS answer
+ * the same shape and are denied by the same rule; only the status vocabulary
+ * differs, and `subscription_read_only` belongs to both.
  *
  * A read-only subscription denies every membership in the batch, quarantines
  * it and filters it out of the body, so `applied` is a subsequence of `all`
@@ -698,11 +849,13 @@ export async function applyPalletMemberships(
  * then be attributed to the wrong membership, which is worse than a failed
  * batch the station retries. Reported as an error rather than papered over.
  */
-export function assembleMembershipOutcomes(
-  all: readonly PalletMembershipDto[],
+export function assembleMembershipOutcomes<
+  O extends { palletId: string; boxSscc: string; status: string },
+>(
+  all: readonly { palletId: string; boxSscc: string }[],
   deniedIndexes: ReadonlySet<number>,
-  applied: readonly PalletMembershipOutcomeDto[],
-): PalletMembershipOutcomeDto[] {
+  applied: readonly O[],
+): (O | { palletId: string; boxSscc: string; status: "subscription_read_only" })[] {
   let cursor = 0;
   const outcomes = all.map((membership, index) => {
     if (deniedIndexes.has(index)) {
