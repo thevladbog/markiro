@@ -154,3 +154,38 @@ i18n keys under `pages.codeSearch.palletCard.placard.*` (`action`, `title`,
 - Printing the placard from the station or the handheld.
 - A menu component in `@markiro/ui` — worth adding when a second action needs
   one; the modal is enough here.
+
+## 8. Stock label template «Паллета 58×40» (same PR)
+
+A second stock PALLET thermal label, the 58×40 twin of the box label, for
+tenants whose pallet printer is loaded with the same 58×40 stock as their box
+printer. Decided in chat 2026-09-18: «повторяем коробочную, просто делаем
+такого же размера под паллет», quantity row shows boxes.
+
+- **Layout** = the stock «Коробка 58×40 [Назв. для печати]» spec byte for byte
+  (three-line bold `product.printName`, «Дата производства» / «Годен до»,
+  «Код ЕГАИС», centred GS1-128 SSCC with HRI), with ONE substitution: the
+  quantity caption «Кол-во в упаковке:» becomes «Коробов:» and its field `qty`
+  becomes `qty.boxes` (prints «120 кор.»).
+- **Builder**: `buildBoxLabelSpec` in `packages/domain/src/labels/defaults.ts`
+  gains an optional trailing `quantity?: { field: "qty" | "qty.boxes"; caption: string }`
+  parameter defaulting to the current `qty` / `CAPTION_QTY`, so every existing
+  stock box template stays byte-identical (their bytes are inlined by migration
+  0123 and pinned by tests). `pallet-defaults.ts` exports
+  `PALLET_LABEL_58X40_TEMPLATE_NAME = "Паллета 58×40"` and
+  `buildPalletLabelTemplates()` returns `[100×150, 58×40]` — 100×150 stays
+  first, so the organisation default and the editor's starting spec are
+  unchanged.
+- **Seeding**: tenant provisioning already loops over
+  `buildPalletLabelTemplates()`; existing tenants get the row through migration
+  `0164_pallet_label_58x40.sql`, idempotent on `(tenant_id, name, purpose)`
+  exactly like 0137's insert, spec JSON inlined as 0137 does.
+- **Consumers**: none change. The station and handheld receive the template
+  through the existing pallet-template feeds; it is selected per shift or as
+  the organisation's pallet default.
+- **Tests**: domain — stock box specs unchanged with the new parameter
+  defaulted; the 58×40 pallet spec parses, binds `product.printName`, `date`,
+  `expiry`, `qty.boxes`, `sscc`, fits 58×40, is deterministic;
+  `pallet-defaults.test` «exactly one» → «exactly two, 100×150 first». db —
+  migration test: a tenant holding 100×150 gains exactly one 58×40; a re-run
+  adds nothing. api — provisioning e2e expects two pallet templates.
