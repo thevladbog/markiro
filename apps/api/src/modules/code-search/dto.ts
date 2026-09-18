@@ -9,6 +9,12 @@ export const boxReportQuerySchema = z.object({
 });
 export type BoxReportQueryDto = z.infer<typeof boxReportQuerySchema>;
 
+/** `GET /code-search/pallets/:id/placard`: the paper size, A4 unless asked for A5. */
+export const palletPlacardQuerySchema = boxReportQuerySchema.extend({
+  format: z.enum(["a4", "a5"]).default("a4"),
+});
+export type PalletPlacardQueryDto = z.infer<typeof palletPlacardQuerySchema>;
+
 /** `^YYYY-MM-DD$`; must be checked against the RAW query string, not the coerced `Date` -- see `date-range.ts`. */
 const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
 

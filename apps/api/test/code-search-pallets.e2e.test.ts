@@ -314,6 +314,71 @@ describe.skipIf(!ready)("code search pallet card e2e", () => {
     });
   });
 
+  describe("printed placard", () => {
+    it("renders the A4 placard by default and the A5 one on request", async () => {
+      const a4 = await agent
+        .get(`/code-search/pallets/${palletId}/placard`)
+        .expect(200)
+        .expect("Content-Type", /text\/html/);
+      expect(a4.text).toContain("@page { size: A4;");
+      expect(a4.text).toContain("ПАЛЛЕТА");
+      expect(a4.text).toContain(`(00)${palletSscc}`);
+      expect(a4.text).toContain("Cola");
+      expect(a4.text).toContain(VALID_GTIN14);
+      // Two live boxes, seven units, one production date.
+      expect(a4.text).toMatch(/pl-figure-value">2</);
+      expect(a4.text).toMatch(/pl-figure-value">7</);
+      const a5 = await agent
+        .get(`/code-search/pallets/${palletId}/placard`)
+        .query({ format: "a5" })
+        .expect(200);
+      expect(a5.text).toContain("@page { size: A5;");
+    });
+
+    it("refuses an open pallet with PALLET_NOT_CLOSED", async () => {
+      // A box that names a pallet the device never closed leaves an OPEN
+      // pallet row behind -- the ingest creates it on first mention.
+      await postBatch({
+        items: [item("c4-0", "b4", new Date(ITEM_BASE + 300_000).toISOString())],
+      });
+      await postBatch({
+        boxes: [
+          {
+            boxId: "b4",
+            shiftId,
+            terminalId: "t1",
+            sscc: "123460682000000204",
+            closedAt: BOX_CLOSED_AT,
+            operatorId,
+            devicePalletId: "p-open",
+          },
+        ],
+      });
+      const pallets = await agent.get(`/pallets?shiftId=${shiftId}`).expect(200);
+      const open = (pallets.body.items as { id: string; closedAt: string | null }[]).find(
+        (p) => p.closedAt === null,
+      );
+      expect(open).toBeDefined();
+      const res = await agent.get(`/code-search/pallets/${open!.id}/placard`).expect(409);
+      expect(res.body).toMatchObject({ code: "PALLET_NOT_CLOSED" });
+    });
+
+    it("validates the format, is denied to a station key and across tenants", async () => {
+      await agent
+        .get(`/code-search/pallets/${palletId}/placard`)
+        .query({ format: "a3" })
+        .expect(400);
+      await request(app!.getHttpServer())
+        .get(`/code-search/pallets/${palletId}/placard`)
+        .set("x-api-key", stationKey)
+        .expect(403);
+      const other = request.agent(app!.getHttpServer());
+      await signUpAndActivate(other);
+      await other.get(`/code-search/pallets/${palletId}/placard`).expect(404);
+      await agent.get(`/code-search/pallets/${randomUUID()}/placard`).expect(404);
+    });
+  });
+
   /** MUTATES the shared fixture -- from here on b2 is off the stack. */
   it("keeps a disassembled member box listed, flagged with its own timestamp", async () => {
     await postBatch({
