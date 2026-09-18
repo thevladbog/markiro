@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-18
 
-**Status:** Draft (branch claude/label-editor-json-import-7c4234)
+**Status:** Implemented (branch claude/label-editor-json-import-7c4234, 2026-09-18)
 
 **Scope:** Диалог «Импорт кода» в редакторе этикеток принимает третий формат — JSON
 модели шаблона, тот же, что принимает `POST /label-templates`. Рядом со «Скачать ZPL»
