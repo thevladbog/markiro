@@ -24,7 +24,7 @@ export const CABINET_SHIFT_PLANNING_CONTENT = {
             items: [
               "Заведите производственную линию и назначьте ей станции.",
               "Убедитесь, что продукт есть в каталоге и доступен для выбора.",
-              "Запланируйте смену: продукт, режим, объём, даты, линия и — для агрегации — шаблон этикетки и вместимости.",
+              "Запланируйте смену: продукт, режим, объём, даты, линия и — для агрегации — шаблон этикетки, вместимость короба и, если нужны паллеты, число коробов на паллете.",
               "Передайте станцию оператору: дальше он открывает смену сам.",
             ],
           },
@@ -153,7 +153,7 @@ export const CABINET_SHIFT_PLANNING_CONTENT = {
           },
           {
             kind: "paragraph",
-            text: "Выбор продукта подставляет значения из его карточки: контрагента в «Для контрагента (толлинг)», вместимость короба и число коробов на паллете. Отметку «Использовать паллеты» при этом кабинет не включает. Это не ошибка и не случайность — так кабинет экономит ввод. Подставленные значения можно изменить: важно то, что сохранено в смене, а не то, что записано в продукте.",
+            text: "Выбор продукта подставляет значения из его карточки: контрагента в «Для контрагента (толлинг)», вместимость короба и число коробов на паллете. Сама укладка на паллеты при этом не включается: её включают отдельно, в параметрах агрегации. Это не ошибка и не случайность — так кабинет экономит ввод. Подставленные значения можно изменить: важно то, что сохранено в смене, а не то, что записано в продукте.",
           },
           {
             kind: "unordered-list",
@@ -168,18 +168,6 @@ export const CABINET_SHIFT_PLANNING_CONTENT = {
             kind: "callout",
             tone: "info",
             text: "Две даты не дублируют друг друга. «Дата смены» — про планирование работы, «Дата производства (для отчётов)» — про то, что будет напечатано и сдано. Если производство идёт в ночь и формально относится к другому дню, укажите обе.",
-          },
-          {
-            kind: "step",
-            title: "Включите паллеты, если смена собирается на паллеты",
-            text: "Паллеты настраиваются в разделе «Агрегация», а он появляется только в режиме «Агрегация» (раздел 7). Отметка «Использовать паллеты» открывает два поля. «Коробов на паллете» считает короба, а не единицы продукции, и кабинет подписывает это прямо: «Сколько закрытых коробов встаёт на одну паллету.» «Шаблон этикетки паллеты» можно оставить на значении «По умолчанию организации» — подсказка объясняет порядок: «Пусто — берётся шаблон по умолчанию для категории товара, затем для организации.»",
-            image: { id: "shift-pallets", caption: "Раздел «Агрегация» с включёнными паллетами" },
-            expected: "Поля «Коробов на паллете» и «Шаблон этикетки паллеты» показаны.",
-          },
-          {
-            kind: "callout",
-            tone: "warning",
-            text: "Паллеты входят не во всякий тариф, и правило здесь несимметричное. Если функции в подписке нет, под отметкой стоит: «Паллеты не входят в текущий тариф. Чтобы включать их в сменах, добавьте функцию в подписку.» — и отметку не дадут поставить. Смена, запланированная с паллетами ещё при действовавшей функции, отметку сохраняет, но только на выключение: «Паллеты не входят в текущий тариф. Эта смена была запланирована с паллетами: их можно выключить, но включить обратно — нет.» Поэтому в такой смене не снимайте отметку, пока не убедились, что паллеты действительно не нужны: обратно вы их не вернёте.",
           },
         ],
       },
@@ -224,7 +212,7 @@ export const CABINET_SHIFT_PLANNING_CONTENT = {
           {
             kind: "step",
             title: "Заполните параметры агрегации",
-            text: "Выберите «Агрегация» — в форме появится одноимённый раздел. «Вместимость короба, шт» подставляется из продукта. Отметка «Использовать паллеты» добавляет поля «Коробов на паллете» и «Шаблон этикетки паллеты»: пока отметка снята, этих полей нет — они разобраны в разделе 5. В разделе «Шаблоны» выберите «Шаблон этикетки короба» — для агрегации он обязателен, и без него смена не сохранится.",
+            text: "Выберите «Агрегация» — в форме появится одноимённый раздел. «Вместимость короба, шт» подставляется из продукта. В разделе «Шаблоны» выберите «Шаблон этикетки короба» — для агрегации он обязателен, и без него смена не сохранится.",
             image: { id: "shift-aggregation", caption: "Разделы «Шаблоны» и «Агрегация»" },
             expected: "Раздел «Агрегация» показан, вместимость короба заполнена.",
           },
@@ -232,6 +220,18 @@ export const CABINET_SHIFT_PLANNING_CONTENT = {
             kind: "callout",
             tone: "info",
             text: "Раздела «Агрегация» нет, пока выбран режим «Валидация», — это не сбой отображения. Если вы не находите вместимости коробов, проверьте сначала режим.",
+          },
+          {
+            kind: "step",
+            title: "Включите паллеты, если смена собирается на паллеты",
+            text: "Отметка «Использовать паллеты» в разделе «Агрегация» открывает два поля; пока отметка снята, их нет. «Коробов на паллете» считает короба, а не единицы продукции, и кабинет подписывает это прямо: «Сколько закрытых коробов встаёт на одну паллету.» «Шаблон этикетки паллеты» можно оставить на значении «По умолчанию организации» — подсказка объясняет порядок: «Пусто — берётся шаблон по умолчанию для категории товара, затем для организации.»",
+            image: { id: "shift-pallets", caption: "Раздел «Агрегация» с включёнными паллетами" },
+            expected: "Поля «Коробов на паллете» и «Шаблон этикетки паллеты» показаны.",
+          },
+          {
+            kind: "callout",
+            tone: "warning",
+            text: "Паллеты входят не во всякий тариф, и правило здесь несимметричное. Если функции в подписке нет, под отметкой стоит: «Паллеты не входят в текущий тариф. Чтобы включать их в сменах, добавьте функцию в подписку.» — и отметку не дадут поставить. Смена, запланированная с паллетами ещё при действовавшей функции, отметку сохраняет, но только на выключение: «Паллеты не входят в текущий тариф. Эта смена была запланирована с паллетами: их можно выключить, но включить обратно — нет.» Поэтому в такой смене не снимайте отметку, пока не убедились, что паллеты действительно не нужны: обратно вы их не вернёте.",
           },
           {
             kind: "step",
@@ -326,7 +326,7 @@ export const CABINET_SHIFT_PLANNING_CONTENT = {
                   "Он либо черновик — подпись «черновик — недоступно», — либо помечен как не используемый: подпись «не используется». Доведите карточку продукта в каталоге до рабочего состояния или снимите отметку «Не использовать».",
               },
               {
-                term: "Не вижу вместимости коробов и паллет",
+                term: "Не вижу параметры коробов и паллет",
                 detail:
                   "Раздел «Агрегация» показывается только в режиме «Агрегация». Поле «Коробов на паллете» появляется после отметки «Использовать паллеты».",
               },
@@ -388,7 +388,7 @@ export const CABINET_SHIFT_PLANNING_CONTENT = {
             items: [
               "Create a production line and assign stations to it.",
               "Make sure the product exists in the catalog and can be selected.",
-              "Plan the shift: product, mode, quantity, dates, line and — for aggregation — the label template and the capacities.",
+              "Plan the shift: product, mode, quantity, dates, line and — for aggregation — the label template, the box capacity and, if pallets are used, the number of boxes per pallet.",
               "Hand the station over to the operator: opening the shift is their job.",
             ],
           },
@@ -520,7 +520,7 @@ export const CABINET_SHIFT_PLANNING_CONTENT = {
           },
           {
             kind: "paragraph",
-            text: "Choosing a product fills in values from its card: the counterparty in “For counterparty (tolling)”, the box capacity and the number of boxes per pallet. The “Use pallets” checkbox is not switched on by that. This is neither a bug nor an accident — it is how the cabinet saves you typing. The prefilled values can be changed: what counts is what is saved in the shift, not what is written on the product.",
+            text: "Choosing a product fills in values from its card: the counterparty in “For counterparty (tolling)”, the box capacity and the number of boxes per pallet. Stacking onto pallets is not switched on by that: it is turned on separately, among the aggregation parameters. This is neither a bug nor an accident — it is how the cabinet saves you typing. The prefilled values can be changed: what counts is what is saved in the shift, not what is written on the product.",
           },
           {
             kind: "unordered-list",
@@ -535,21 +535,6 @@ export const CABINET_SHIFT_PLANNING_CONTENT = {
             kind: "callout",
             tone: "info",
             text: "The two dates do not duplicate each other. “Shift date” is about planning the work; “Production date (for reports)” is about what gets printed and filed. If production runs overnight and formally belongs to another day, fill in both.",
-          },
-          {
-            kind: "step",
-            title: "Turn pallets on if the shift builds pallets",
-            text: "Pallets are set up in the “Aggregation” section, and that section only appears in “Aggregation” mode (section 7). The “Use pallets” checkbox opens two fields. “Boxes per pallet” counts boxes, not product units, and the cabinet says so plainly: “How many closed boxes make up one full pallet.” “Pallet label template” can be left on “Organization default” — the hint spells out the order: “Blank — the product category's default is used, then the organization's.”",
-            image: {
-              id: "shift-pallets",
-              caption: "The “Aggregation” section with pallets turned on",
-            },
-            expected: "The “Boxes per pallet” and “Pallet label template” fields are shown.",
-          },
-          {
-            kind: "callout",
-            tone: "warning",
-            text: "Not every plan carries pallets, and the rule here is asymmetric. If the subscription does not have the feature, the line under the checkbox reads: “Pallets are not part of the current plan. Add the feature to the subscription to switch them on in a shift.” — and the checkbox cannot be set. A shift planned with pallets while the feature was still in force keeps a usable checkbox, but only for switching them off: “Pallets are not part of the current plan. This shift was planned with pallets: you can switch them off, but not back on.” So do not clear the checkbox in such a shift until you are sure the pallets are really not needed: you will not get them back.",
           },
         ],
       },
@@ -594,7 +579,7 @@ export const CABINET_SHIFT_PLANNING_CONTENT = {
           {
             kind: "step",
             title: "Fill in the aggregation parameters",
-            text: "Choose “Aggregation” — a section with the same name appears in the form. “Box capacity, units” is filled in from the product. The “Use pallets” checkbox adds the “Boxes per pallet” and “Pallet label template” fields: while the checkbox is clear, those fields are not there — section 5 covers them. In the “Templates” section choose the “Box label template” — aggregation requires it, and the shift will not save without it.",
+            text: "Choose “Aggregation” — a section with the same name appears in the form. “Box capacity, units” is filled in from the product. In the “Templates” section choose the “Box label template” — aggregation requires it, and the shift will not save without it.",
             image: {
               id: "shift-aggregation",
               caption: "The “Templates” and “Aggregation” sections",
@@ -605,6 +590,21 @@ export const CABINET_SHIFT_PLANNING_CONTENT = {
             kind: "callout",
             tone: "info",
             text: "There is no “Aggregation” section while “Validation” is selected — that is not a display glitch. If you cannot find the box capacity, check the mode first.",
+          },
+          {
+            kind: "step",
+            title: "Turn pallets on if the shift builds pallets",
+            text: "The “Use pallets” checkbox in the “Aggregation” section opens two fields; while the checkbox is clear, they are not there. “Boxes per pallet” counts boxes, not product units, and the cabinet says so plainly: “How many closed boxes make up one full pallet.” “Pallet label template” can be left on “Organization default” — the hint spells out the order: “Blank — the product category's default is used, then the organization's.”",
+            image: {
+              id: "shift-pallets",
+              caption: "The “Aggregation” section with pallets turned on",
+            },
+            expected: "The “Boxes per pallet” and “Pallet label template” fields are shown.",
+          },
+          {
+            kind: "callout",
+            tone: "warning",
+            text: "Not every plan carries pallets, and the rule here is asymmetric. If the subscription does not have the feature, the line under the checkbox reads: “Pallets are not part of the current plan. Add the feature to the subscription to switch them on in a shift.” — and the checkbox cannot be set. A shift planned with pallets while the feature was still in force keeps a usable checkbox, but only for switching them off: “Pallets are not part of the current plan. This shift was planned with pallets: you can switch them off, but not back on.” So do not clear the checkbox in such a shift until you are sure the pallets are really not needed: you will not get them back.",
           },
           {
             kind: "step",
@@ -699,7 +699,7 @@ export const CABINET_SHIFT_PLANNING_CONTENT = {
                   "It is either a draft — the “draft — unavailable” label — or marked as not in use: the “not in use” label. Bring the product card in the catalog to a working state, or clear the “Do not use” checkbox.",
               },
               {
-                term: "I cannot find the box and pallet capacities",
+                term: "I cannot find the box and pallet fields",
                 detail:
                   "The “Aggregation” section is only shown in “Aggregation” mode. The “Boxes per pallet” field appears once the “Use pallets” checkbox is set.",
               },
