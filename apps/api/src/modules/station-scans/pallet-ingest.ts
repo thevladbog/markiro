@@ -799,7 +799,14 @@ export async function applyPalletMembershipRemovals(
       outcomes[index] = { ...base, status: "pallet_closed" };
       continue;
     }
-    throw new Error("unclassified membership removal refusal");
+    // Nothing left to classify: under READ COMMITTED the re-reads above can
+    // both come back stale relative to the UPDATE (the box moved, or the
+    // pallet's state changed, between them). Terminal `replayed` rather than a
+    // throw: a 500 here fails the whole batch, and the device would retry the
+    // identical batch forever with its removal queue -- and every other channel
+    // behind it -- wedged. The device deletes the row on any terminal answer,
+    // and the next removal or registry refresh corrects whatever this missed.
+    outcomes[index] = { ...base, status: "replayed" };
   }
   return { outcomes, changedBoxIds, touchedPalletIds: [...touched] };
 }
@@ -829,6 +836,13 @@ export async function pruneEmptyWarehouseDrafts(
           isNull(schema.pallets.closedAt),
           isNull(schema.pallets.disassembledAt),
           sql`NOT EXISTS (SELECT 1 FROM boxes b WHERE b.tenant_id = ${tenantId} AND b.pallet_id = ${palletId})`,
+          // `pallet_exceptions.pallet_id` is a composite FK with ON DELETE NO
+          // ACTION, so a draft that somehow carries one (a disassemble or
+          // reprint fact recorded against it) would make the DELETE below raise
+          // 23503, 500 the batch and wedge the device's removal queue on an
+          // endless retry. An orphan draft card in the cabinet beats a wedged
+          // terminal, so such a pallet is simply left standing.
+          sql`NOT EXISTS (SELECT 1 FROM pallet_exceptions e WHERE e.tenant_id = ${tenantId} AND e.pallet_id = ${palletId})`,
         ),
       )
       .limit(1);

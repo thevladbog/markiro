@@ -192,7 +192,8 @@ Response guard: a batch that carried removals is acknowledged only when
 terminal status the removal row is deleted; on `removed`/`replayed`/
 `not_found` the registry mirror row gets `clearPallet` again (the server's
 state is now exactly that); `pallet_closed` and `subscription_read_only`
-are logged and leave the mirror alone for the next refresh.
+are dropped after a comment (the engine has no logging idiom) and leave the
+mirror alone for the next refresh.
 
 `SyncEngine.MAX_PALLET_MEMBERSHIP_REMOVALS = 100`, pinned to
 `maxPalletMembershipsPerSyncBatch` by `SyncLimitsFixturesTest` the way
@@ -206,10 +207,18 @@ strings. The README's pallets section and `CHANGELOG.md` describe the change.
 ## 4. Errors and races
 
 - **Removal of a `sent` row whose batch is in flight.** The membership row is
-  deleted locally; the pinned batch still resends it byte-identically (its
-  DTO was built from the pinned set) and the outcome handler's `markAccepted`
-  finds no row, which is a no-op. The removal rides the next batch. Server
-  order across batches is membership then removal: correct.
+  deleted locally; the pinned batch resends the membership DTOs snapshotted at
+  pin time, so a local delete cannot change its bytes. That snapshot is
+  `SYNC_PENDING_MEMBERSHIP_SNAPSHOT`, written under the same commit as the
+  batch id and the `markSent` marks, and it — not a live `sent()` re-read — is
+  what a retry sends and what the response is matched against positionally.
+  Without it the identical `batchId` would go out with fewer memberships and
+  the server would answer `station_batch_mismatch` (409) forever, wedging every
+  channel on the terminal. The outcome handler's `markAccepted`/`markRejected`
+  then find no row, which is a no-op. The removal rides the next batch. Server
+  order across batches is membership then removal: correct. Removals need no
+  such snapshot: a removal row is never deleted until it is acknowledged, so
+  its `sent()` re-read is already stable.
 - **Removal queued, box re-scanned onto a new draft.** Locally the old draft
   is gone and a new one opens with a new device-local id. The batch carries
   `removal(old, box)` and `membership(new, box)`; removals apply first, the
