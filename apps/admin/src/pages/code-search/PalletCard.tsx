@@ -10,12 +10,23 @@
  * `BoxCard` uses, down to the status-chip mapping, so the two cards read as
  * two levels of one thing rather than two screens.
  */
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate, useParams } from "react-router";
 
 import { CABINET_CAPABILITY, formatSsccHri } from "@markiro/domain";
-import { Alert, Badge, Button, Card, PageHeader, Spinner, StatusChip, Table } from "@markiro/ui";
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  Modal,
+  PageHeader,
+  RadioGroup,
+  Spinner,
+  StatusChip,
+  Table,
+} from "@markiro/ui";
 import type { StatusChipStatus, TableColumn } from "@markiro/ui";
 
 import { useCan } from "../../access/context.js";
@@ -64,6 +75,8 @@ export function PalletCardPage() {
   const navigate = useNavigate();
   const canWrite = useCan(CABINET_CAPABILITY.OPERATIONS_WRITE);
   const createDocument = useCreateDocument();
+  const [placardOpen, setPlacardOpen] = useState(false);
+  const [placardFormat, setPlacardFormat] = useState<"a4" | "a5">("a4");
 
   const { data: pallet, isPending, isError } = usePalletCard(palletId);
 
@@ -90,6 +103,20 @@ export function PalletCardPage() {
   // the paste box. Only a closed, labelled pallet can be taken apart, and only
   // by someone allowed to write operations.
   const canDisassemble = canWrite && pallet.status === "closed" && pallet.sscc !== null;
+
+  // A placard is a scannable SSCC on paper: only a closed (or disassembled,
+  // for a historical reprint) pallet that has one gets the action -- the same
+  // rule the server enforces with 409 PALLET_NOT_CLOSED.
+  const canPlacard = pallet.sscc !== null && pallet.status !== "open";
+
+  const openPlacard = () => {
+    const query = new URLSearchParams({
+      format: placardFormat,
+      timeZone: new Intl.DateTimeFormat().resolvedOptions().timeZone,
+    });
+    window.open(`/api/code-search/pallets/${pallet.id}/placard?${query}`);
+    setPlacardOpen(false);
+  };
 
   const startDisassembly = () => {
     if (!pallet.sscc) return;
@@ -232,6 +259,11 @@ export function PalletCardPage() {
             >
               {t("pages.codeSearch.palletCard.printAction")}
             </Button>
+            {canPlacard ? (
+              <Button type="button" variant="secondary" onClick={() => setPlacardOpen(true)}>
+                {t("pages.codeSearch.palletCard.placard.action")}
+              </Button>
+            ) : null}
             <Badge tone={pallet.kind === "warehouse" ? "accent" : "neutral"}>
               {t(`pages.codeSearch.palletCard.kind.${pallet.kind}`)}
             </Badge>
@@ -358,6 +390,40 @@ export function PalletCardPage() {
           <PalletExportsSection pallet={pallet} />
         </Card>
       </section>
+
+      <Modal
+        open={placardOpen}
+        title={t("pages.codeSearch.palletCard.placard.title")}
+        closeLabel={t("common.close")}
+        onClose={() => setPlacardOpen(false)}
+        width={420}
+        footer={
+          <>
+            <Button type="button" variant="secondary" onClick={() => setPlacardOpen(false)}>
+              {t("common.cancel")}
+            </Button>
+            <Button type="button" onClick={openPlacard}>
+              {t("pages.codeSearch.palletCard.placard.open")}
+            </Button>
+          </>
+        }
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <RadioGroup
+            label={t("pages.codeSearch.palletCard.placard.formatLabel")}
+            name="pallet-placard-format"
+            value={placardFormat}
+            onValueChange={(value) => setPlacardFormat(value === "a5" ? "a5" : "a4")}
+            options={[
+              { value: "a4", label: t("pages.codeSearch.palletCard.placard.format.a4") },
+              { value: "a5", label: t("pages.codeSearch.palletCard.placard.format.a5") },
+            ]}
+          />
+          <span style={{ font: "var(--text-caption)", color: "var(--fg-3)" }}>
+            {t("pages.codeSearch.palletCard.placard.hint")}
+          </span>
+        </div>
+      </Modal>
     </div>
   );
 }

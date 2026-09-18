@@ -408,3 +408,42 @@ describe("pallet disassembly from the card", () => {
     expect(screen.queryByRole("button", { name: "Расформировать" })).toBeNull();
   });
 });
+
+describe("pallet placard from the card", () => {
+  it("opens the A4 placard by default and the A5 one when chosen", async () => {
+    const openMock = vi.fn();
+    vi.stubGlobal("open", openMock);
+    const { user } = renderCard(WAREHOUSE_CARD, READ_ONLY, (url) =>
+      url.includes("/exports") || url.includes("/formats") ? [] : { items: [] },
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Ярлык" }));
+    const dialog = within(await screen.findByRole("dialog", { name: "Ярлык паллеты" }));
+    expect(dialog.getByRole("radio", { name: "A4" }).getAttribute("aria-checked")).toBe("true");
+    await user.click(dialog.getByRole("button", { name: "Открыть" }));
+    expect(openMock).toHaveBeenCalledTimes(1);
+    expect(String(openMock.mock.calls[0]?.[0])).toMatch(
+      /^\/api\/code-search\/pallets\/pal-w1\/placard\?format=a4&timeZone=/,
+    );
+    expect(screen.queryByRole("dialog", { name: "Ярлык паллеты" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Ярлык" }));
+    const again = within(await screen.findByRole("dialog", { name: "Ярлык паллеты" }));
+    await user.click(again.getByRole("radio", { name: "A5" }));
+    await user.click(again.getByRole("button", { name: "Открыть" }));
+    expect(String(openMock.mock.calls[1]?.[0])).toContain("/placard?format=a5&timeZone=");
+  });
+
+  it("offers no placard for an open pallet or one without an SSCC", async () => {
+    const extra: FetchBody = (url) =>
+      url.includes("/exports") || url.includes("/formats") ? [] : { items: [] };
+    renderCard({ ...WAREHOUSE_CARD, status: "open", closedAt: null }, READ_ONLY, extra);
+    expect(await screen.findByRole("heading", { name: "(00)104600682000000019" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Ярлык" })).toBeNull();
+    cleanup();
+
+    renderCard({ ...WAREHOUSE_CARD, sscc: null }, READ_ONLY, extra);
+    expect(await screen.findByRole("heading", { name: "Без SSCC" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Ярлык" })).toBeNull();
+  });
+});

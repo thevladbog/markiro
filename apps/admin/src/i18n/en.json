@@ -2789,6 +2789,14 @@
         "printAction": "Print",
         "disassembleAction": "Take apart",
         "disassembleError": "Could not create the disaggregation document",
+        "placard": {
+          "action": "Placard",
+          "title": "Pallet placard",
+          "formatLabel": "Paper size",
+          "format": { "a4": "A4", "a5": "A5" },
+          "open": "Open",
+          "hint": "Opens in a new tab — print it on an office printer and attach it to the pallet."
+        },
         "status": {
           "open": "Open",
           "closed": "Closed",
