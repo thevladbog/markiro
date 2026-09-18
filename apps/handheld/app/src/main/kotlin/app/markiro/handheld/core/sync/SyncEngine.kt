@@ -129,12 +129,21 @@ class SyncEngine(
      * so a test can order itself against it; the drain does not wait on it,
      * because the retry path materialises the same pin itself if this has not
      * got there yet.
+     *
+     * Under [drainMutex]: `drainOnceOwned` reads the pin's meta keys one by
+     * one outside any transaction, and an abandon committed between two of
+     * those reads would hand it a stale `pendingCeiling` beside already
+     * cleared counts -- an under-scoped batch that the next pass would heal,
+     * but a mixed reading nonetheless. Serialising against the drain removes
+     * the window instead of relying on the healing.
      */
     internal val legacyPinMaterialised: Job = scope.launch {
-        try {
-            materialiseLegacyPin()
-        } catch (_: app.markiro.handheld.core.storage.RecoveryBlocked) {
-            // Sealed or superseded device data: nothing is owed and nothing is sent.
+        drainMutex.withLock {
+            try {
+                materialiseLegacyPin()
+            } catch (_: app.markiro.handheld.core.storage.RecoveryBlocked) {
+                // Sealed or superseded device data: nothing is owed and nothing is sent.
+            }
         }
     }
 
