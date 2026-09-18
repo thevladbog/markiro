@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::cloud::{CloudClient, PairError};
-use crate::contracts::{cap_cert_subject, SignerErrorCode, TaskComplete, TaskFail};
+use crate::contracts::{cap_cert_subject, SignerErrorCode, TaskComplete, TaskFail, TaskKind};
 use crate::journal::{redact, Journal, JournalEntry, JournalExportMetadata};
 use crate::signer::Signer;
 use crate::storage::{self, AgentConfig, SecretStore};
@@ -505,11 +505,23 @@ impl Runtime {
             }
         };
 
+        // Task 5 adds real dispatch for `oms_auth` and `sign_detached`; this
+        // build only knows how to execute `true_api_auth`.
+        let TaskKind::TrueApiAuth(payload) = &task.kind else {
+            self.note(
+                "This agent build does not yet handle this task type",
+                Some(task.task_type()),
+            );
+            self.set_phase(AgentPhase::Degraded);
+            on_change(self.status());
+            return;
+        };
+
         let outcome = obtain_token(
             &self.http,
-            &task.payload.true_api_base_url,
-            task.payload.inn.as_deref(),
-            task.payload.token_format,
+            &payload.true_api_base_url,
+            payload.inn.as_deref(),
+            payload.token_format,
             &thumbprint,
             self.signer.as_ref(),
         )
@@ -655,7 +667,7 @@ impl Runtime {
 mod tests {
     use super::*;
     use crate::contracts::{
-        SignerErrorCode, SignerTask, TaskType, TokenFormat, TrueApiAuthPayload,
+        SignerErrorCode, SignerTask, TaskKind, TokenFormat, TrueApiAuthPayload,
     };
     use crate::signer::CertificateSummary;
     use std::io::ErrorKind;
@@ -948,12 +960,11 @@ mod tests {
         let client = CloudClient::new(&server.uri(), "0.1.0").unwrap();
         let task = SignerTask {
             id: "t1".into(),
-            task_type: TaskType::TrueApiAuth,
-            payload: TrueApiAuthPayload {
+            kind: TaskKind::TrueApiAuth(TrueApiAuthPayload {
                 true_api_base_url: server.uri(),
                 inn: None,
                 token_format: TokenFormat::Jwt,
-            },
+            }),
         };
 
         runtime.execute(&client, "secret", &task, &|_| {}).await;
@@ -1017,12 +1028,11 @@ mod tests {
         let client = CloudClient::new(&server.uri(), "0.1.0").unwrap();
         let task = SignerTask {
             id: "t-network".into(),
-            task_type: TaskType::TrueApiAuth,
-            payload: TrueApiAuthPayload {
+            kind: TaskKind::TrueApiAuth(TrueApiAuthPayload {
                 true_api_base_url: server.uri(),
                 inn: None,
                 token_format: TokenFormat::Jwt,
-            },
+            }),
         };
 
         runtime.execute(&client, "secret", &task, &|_| {}).await;

@@ -169,7 +169,7 @@ impl CloudClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::contracts::{SignerErrorCode, TaskType};
+    use crate::contracts::SignerErrorCode;
     use wiremock::matchers::{body_json_string, header, method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -225,7 +225,7 @@ mod tests {
             .await;
         let client = CloudClient::new(&server.uri(), "0.1.0").unwrap();
         let task = client.poll("s3cret", 25_000).await.unwrap().unwrap();
-        assert_eq!(task.task_type, TaskType::TrueApiAuth);
+        assert_eq!(task.task_type(), "true_api_auth");
     }
 
     #[tokio::test]
