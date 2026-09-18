@@ -1,6 +1,6 @@
 # Pallet placard (A4 / A5) — design
 
-**Status:** Approved 2026-09-18 (owner: mock-ups reviewed in chat; header reduced to «ПАЛЛЕТА» only).
+**Status:** Implemented 2026-09-18 (this branch). Mock-ups reviewed in chat; header reduced to «ПАЛЛЕТА» only; after the rendered-page review the product name became the largest text on the page and sizes down with length (A4 30/24/20 pt, A5 20/16/14 pt, four lines), the GTIN never wraps, and an EAN-13 under the GTIN was tried and dropped at the owner's request.
 
 ## 1. Problem
 
@@ -19,14 +19,14 @@ from the pallet card.
 
 One page, portrait, in reading order:
 
-| Block           | Content                                                                                                                                                       |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Header          | Organisation logo (the uploaded organisation logo; the Markiro lockup when none, exactly as `contents-report.ts`'s `brandLogo`) and organisation name on the left; the word **ПАЛЛЕТА** on the right. Nothing else: no kind, no status, no timestamp. A rule under the header. |
-| Product         | Product name, large (A4 18 pt / A5 14 pt, up to three lines).                                                                                                 |
-| Key figures     | Three cells separated by vertical rules and framed by horizontal rules: **GTIN** (mono), **Коробов** (live member boxes), **Единиц** (live unit codes across those boxes). |
-| Date summary    | Table grouped by member boxes' production date: `Дата производства · Годен до · Коробов · Единиц`, ascending by date, plus an `Итого` row. Column dividers as in the mock-up. A5 drops the `Единиц` column and shortens the captions (`Произв.`, `Кор.`). |
-| Barcode         | GS1-128 (Code 128 with FNC1) of the SSCC, full content width; bars A4 ≈ 30 mm tall, A5 ≈ 22 mm. Under it the HRI `(00)…` in one unbroken line (mono, A4 15 pt / A5 11 pt, no grouping spaces). |
-| Footer          | A4: `ИНН …` left, `Сформировано в Маркиро` right. A5: `Маркиро` right only.                                                                                   |
+| Block        | Content                                                                                                                                                                                                                                                                        |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Header       | Organisation logo (the uploaded organisation logo; the Markiro lockup when none, exactly as `contents-report.ts`'s `brandLogo`) and organisation name on the left; the word **ПАЛЛЕТА** on the right. Nothing else: no kind, no status, no timestamp. A rule under the header. |
+| Product      | Product name, the largest text on the page: A4 30 pt up to 40 characters, 24 pt up to 80, 20 pt beyond (A5 20/16/14 pt), up to four lines.                                                                                                                                     |
+| Key figures  | Three cells separated by vertical rules and framed by horizontal rules: **GTIN** (mono), **Коробов** (live member boxes), **Единиц** (live unit codes across those boxes).                                                                                                     |
+| Date summary | Table grouped by member boxes' production date: `Дата производства · Годен до · Коробов · Единиц`, ascending by date, plus an `Итого` row. Column dividers as in the mock-up. A5 drops the `Единиц` column and shortens the captions (`Произв.`, `Кор.`).                      |
+| Barcode      | GS1-128 (Code 128 with FNC1) of the SSCC, full content width; bars A4 ≈ 30 mm tall, A5 ≈ 22 mm. Under it the HRI `(00)…` in one unbroken line (mono, A4 15 pt / A5 11 pt, no grouping spaces).                                                                                 |
+| Footer       | A4: `ИНН …` left, `Сформировано в Маркиро` right. A5: `Маркиро` right only.                                                                                                                                                                                                    |
 
 Counting rules are the ones the contents report already applies: a disassembled
 member box stays out of every count (`liveBoxes`), so the placard never claims
@@ -91,7 +91,7 @@ same change, since both loaders live side by side.)
 
   ```ts
   interface PalletPlacardData {
-    sscc: string | null;            // 20-char AI-00 machine form
+    sscc: string | null; // 20-char AI-00 machine form
     status: "open" | "closed" | "disassembled";
     productName: string | null;
     gtin14: string | null;
