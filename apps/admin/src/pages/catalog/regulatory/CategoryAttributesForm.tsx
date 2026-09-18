@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button } from "@markiro/ui";
 import {
@@ -17,6 +17,9 @@ import {
 import { attributeVisible, valueText } from "./value.js";
 import { AttributeControl } from "./AttributeControl.js";
 
+/** Design brief: required fields first, then recommended and optional ones. */
+const LAYER_KEYS = ["requiredOrdering", "requiredCirculation", "recommended", "optional"] as const;
+
 export function CategoryAttributesForm({
   profile,
   canWrite,
@@ -32,6 +35,7 @@ export function CategoryAttributesForm({
 }) {
   const { t } = useTranslation();
   const p = "pages.catalog.regulatory.";
+  const headingId = useId();
   const [baseline, setBaseline] = useState(profile);
   const [draft, setDraft] = useState<Record<string, ProductAttributeValue | null>>({});
   const [errors, setErrors] = useState<string[]>([]);
@@ -76,6 +80,10 @@ export function CategoryAttributesForm({
             activeRequirementRules(attribute, values, "circulation", "recommended").length
           ? 2
           : 3;
+  const groups = LAYER_KEYS.map((key, index) => ({
+    key,
+    attributes: visible.filter((attribute) => layer(attribute) === index),
+  })).filter((group) => group.attributes.length > 0);
   const stale = profile.binding?.revision !== binding.revision;
   const saveAttributes = async () => {
     if (disabled || !canWrite || mutation.isPending) return;
@@ -132,31 +140,20 @@ export function CategoryAttributesForm({
           void saveAttributes();
         }}
       >
-        <div className="mk-regulatory-attributes-grid">
-          {[...visible]
-            .sort((a, b) => layer(a) - layer(b))
-            .map((attribute) => {
+        {groups.map((group) => (
+          <section
+            className="mk-regulatory-group"
+            key={group.key}
+            aria-labelledby={`${headingId}-${group.key}`}
+          >
+            <h4 id={`${headingId}-${group.key}`}>{t(p + group.key)}</h4>
+            {group.attributes.map((attribute) => {
               const row = accepted.get(attribute.id);
-              const wide = ["string", "string_list", "enum_list"].includes(attribute.valueType);
+              const hint = row
+                ? `${t(p + "sources." + row.source)}: ${valueText(row.value, t, attribute)}`
+                : undefined;
               return (
-                <div
-                  className={`mk-regulatory-attribute${wide ? " mk-regulatory-attribute--wide" : ""}`}
-                  key={attribute.id}
-                >
-                  <p className="mk-regulatory-meta">
-                    {t(
-                      p +
-                        ["requiredOrdering", "requiredCirculation", "recommended", "optional"][
-                          layer(attribute)
-                        ],
-                    )}
-                    {row && (
-                      <>
-                        {" "}
-                        · {t(p + "sources." + row.source)}: {valueText(row.value, t)}
-                      </>
-                    )}
-                  </p>
+                <div className="mk-regulatory-attribute" key={attribute.id}>
                   {canWrite ? (
                     <AttributeControl
                       definition={attribute}
@@ -167,17 +164,20 @@ export function CategoryAttributesForm({
                         setSaved(false);
                       }}
                       {...(errors.includes(attribute.id) ? { error: t(p + "invalidValue") } : {})}
+                      {...(hint ? { hint } : {})}
                     />
                   ) : (
                     <dl>
                       <dt>{attribute.label}</dt>
-                      <dd>{valueText(values[attribute.id], t)}</dd>
+                      <dd>{valueText(values[attribute.id], t, attribute)}</dd>
+                      {hint && <dd className="mk-regulatory-hint">{hint}</dd>}
                     </dl>
                   )}
                 </div>
               );
             })}
-        </div>
+          </section>
+        ))}
         {visible.length === 0 && <p>{t(p + "noFields")}</p>}
         {failure && <Alert tone="error">{t(p + failure)}</Alert>}
         {saved && <p role="status">{t(p + "saved")}</p>}

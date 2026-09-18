@@ -184,15 +184,14 @@ export function ImportReview({
     ready &&
     applicable.length > 0 &&
     validChoices.length === applicable.length;
-  const schemaBlocked = data.items.some((preview) =>
-    preview.fields.some((field) => field.reason === "compatible_schema_required"),
-  );
-  const automaticRefreshAttempted = useRef(false);
-  useEffect(() => {
-    if (automaticRefreshAttempted.current || !canWrite || busy || !ready || !schemaBlocked) return;
-    automaticRefreshAttempted.current = true;
-    onPrepare(effectiveDrafts);
-  }, [busy, canWrite, effectiveDrafts, onPrepare, ready, schemaBlocked]);
+  /** One explanation per product for a blocked attribute set; the reason is the
+   * same for every category attribute, so it is not repeated under each field. */
+  const schemaNotice = (preview: ImportPreview) => {
+    const reasons = new Set(preview.fields.map((field) => field.reason));
+    if (reasons.has("schema_version_stale")) return "stale" as const;
+    if (!reasons.has("compatible_schema_required")) return null;
+    return preview.categoryOptions.length > 0 ? ("chooseCategory" as const) : ("missing" as const);
+  };
   const totals = {
     created: validChoices.filter((p) => !p.productId).length,
     attached: validChoices.filter((p) => p.linkAction === "attach").length,
@@ -293,6 +292,7 @@ export function ImportReview({
         const choice = choiceFor(preview);
         const product = products.find((item) => item.id === preview.productId);
         const currentPhoto = product ? productImageUrl(product) : null;
+        const notice = schemaNotice(preview);
         return (
           <div
             role="tabpanel"
@@ -375,6 +375,20 @@ export function ImportReview({
                     if (!invalidName) onPrepare(next);
                   }}
                 />
+              )}
+              {notice && (
+                <Alert
+                  tone={notice === "stale" ? "warn" : "info"}
+                  {...(notice === "stale" && preview.productId
+                    ? {
+                        action: (
+                          <Link to={`/catalog/${preview.productId}/edit`}>{tr("openProduct")}</Link>
+                        ),
+                      }
+                    : {})}
+                >
+                  {tr(`schemaBanner.${notice}`)}
+                </Alert>
               )}
               <div className="mk-nc-fields">
                 <div className="mk-nc-comparison-head" aria-hidden="true">

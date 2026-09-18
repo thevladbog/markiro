@@ -1,4 +1,5 @@
 import { Input, Select, Button } from "@markiro/ui";
+import { useId } from "react";
 import { useTranslation } from "react-i18next";
 import type { CategoryAttributeDefinition, ProductAttributeValue } from "@markiro/domain";
 import { valueText } from "./value.js";
@@ -8,16 +9,25 @@ export function AttributeControl({
   onChange,
   disabled,
   error,
+  hint,
 }: {
   definition: CategoryAttributeDefinition;
   value: ProductAttributeValue | null;
   onChange: (value: ProductAttributeValue | null) => void;
   disabled: boolean;
   error?: string;
+  /** Source of the accepted value, shown under the field like a form hint. */
+  hint?: string;
 }) {
   const { t } = useTranslation();
   const p = "pages.catalog.regulatory.";
-  const common = { label: d.label, disabled, ...(error ? { error } : {}) };
+  const hintId = useId();
+  const common = {
+    label: d.label,
+    disabled,
+    ...(error ? { error } : {}),
+    ...(hint ? { hint } : {}),
+  };
   const scalar = value && !Array.isArray(value.value) ? String(value.value) : "";
   switch (d.valueType) {
     case "boolean":
@@ -75,31 +85,43 @@ export function AttributeControl({
         </div>
       );
     case "decimal":
+      // The unit sits on the same row as the number, so the hint is rendered once
+      // below the pair and linked to the number input instead of stacking under it.
       return (
-        <div className="mk-regulatory-quantity">
-          <Input
-            {...common}
-            inputMode="decimal"
-            value={scalar}
-            onChange={(e) =>
-              onChange({
-                type: "decimal",
-                value: e.target.value,
-                unit: value?.type === "decimal" ? value.unit : null,
-              })
-            }
-          />
-          {d.unit && (
-            <Select
-              native
+        <div className="mk-regulatory-attribute-control">
+          <div className="mk-regulatory-quantity">
+            <Input
+              label={d.label}
               disabled={disabled}
-              label={t(p + "unit", { field: d.label })}
-              value={value?.type === "decimal" ? (value.unit ?? "") : ""}
-              options={[{ value: "", label: t(p + "notSet") }, ...d.unit.allowed]}
-              onValueChange={(unit) =>
-                onChange({ type: "decimal", value: scalar, unit: unit || null })
+              {...(error ? { error } : {})}
+              {...(hint && !error ? { "aria-describedby": hintId } : {})}
+              inputMode="decimal"
+              value={scalar}
+              onChange={(e) =>
+                onChange({
+                  type: "decimal",
+                  value: e.target.value,
+                  unit: value?.type === "decimal" ? value.unit : null,
+                })
               }
             />
+            {d.unit && (
+              <Select
+                native
+                disabled={disabled}
+                aria-label={t(p + "unit", { field: d.label })}
+                value={value?.type === "decimal" ? (value.unit ?? "") : ""}
+                options={[{ value: "", label: t(p + "notSet") }, ...d.unit.allowed]}
+                onValueChange={(unit) =>
+                  onChange({ type: "decimal", value: scalar, unit: unit || null })
+                }
+              />
+            )}
+          </div>
+          {hint && (
+            <p className="mk-regulatory-hint" id={hintId}>
+              {hint}
+            </p>
           )}
         </div>
       );
@@ -131,8 +153,17 @@ export function AttributeControl({
       const displayed = items.length ? items : [""];
       const update = (next: string[]) => onChange(next.length ? { type, value: next } : null);
       return (
-        <fieldset className="mk-regulatory-list" disabled={disabled}>
+        <fieldset
+          className="mk-regulatory-list"
+          disabled={disabled}
+          {...(hint ? { "aria-describedby": hintId } : {})}
+        >
           <legend>{d.label}</legend>
+          {hint && (
+            <p className="mk-regulatory-hint" id={hintId}>
+              {hint}
+            </p>
+          )}
           {error && <p role="alert">{error}</p>}
           {displayed.map((item, index) => (
             <div className="mk-regulatory-list-row" key={index}>

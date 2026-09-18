@@ -1787,6 +1787,11 @@
           "unchanged": "Current photo kept",
           "failed": "Failed"
         },
+        "schemaBanner": {
+          "stale": "The category schema has been updated. Open the product in the catalog, confirm the category change to the new version, then refresh the comparison.",
+          "chooseCategory": "Choose an initial category to import the Chestny ZNAK card attributes.",
+          "missing": "Chestny ZNAK card attributes cannot be imported: the card category has no active schema with a reviewed product-group mapping. Other fields remain available; contact Markiro support."
+        },
         "reasons": {
           "product_group_unavailable": "The ChZ categories do not identify a product group. Select it in the product form.",
           "product_group_ambiguous": "The ChZ categories indicate multiple or conflicting groups. Select the group in the product form.",
@@ -1796,6 +1801,7 @@
           "values_match": "Matches the National Catalog data.",
           "attribute_not_importable": "Import from Chestny ZNAK is not configured for this field. You can view the value in the source card and enter it in Markiro manually.",
           "compatible_schema_required": "Importing attributes requires a category with a configured Chestny ZNAK mapping.",
+          "schema_version_stale": "The category schema has been updated. Confirm the category change in the product card.",
           "barcode_mismatch": "The photo GTIN differs from this product. Select only after checking it.",
           "invalid_barcode": "This photo has an invalid GTIN and cannot be selected.",
           "manual_name_required": "Enter a product name and refresh the review.",
