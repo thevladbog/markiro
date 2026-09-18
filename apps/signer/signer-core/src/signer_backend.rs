@@ -38,6 +38,11 @@ pub fn backend_from_value(value: Option<&str>) -> SignerBackend {
     }
 }
 
+/// Shared by both Windows backends: the CMS produced for СУЗ must be
+/// detached, base64, single-line. Documented here so the two `#[cfg(windows)]`
+/// modules cannot drift in what they return.
+pub const DETACHED_SIGNATURE_IS_SINGLE_LINE_BASE64: bool = true;
+
 /// Strips the CR/LF line breaks that `CryptBinaryToString`-style base64
 /// encoders (which is what CAdESCOM's `SignCades` ultimately uses) insert
 /// every 64 characters, so every `Signer` implementation hands
