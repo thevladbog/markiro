@@ -17,7 +17,7 @@ function fixture(overrides: Partial<PalletPlacardData> = {}): PalletPlacardData 
     sscc: "00104600682000000019",
     status: "closed",
     productName: "Вода питьевая негазированная «Атолл» 0,5 л, ПЭТ",
-    gtin14: "04600682000019",
+    gtin14: "04600682000013",
     shelfLifeDays: 180,
     org: { name: "ООО «Атолл»", inn: "7701234567", logo: null },
     boxes: [box("2026-09-10"), box("2026-09-14"), box("2026-09-10")],
@@ -81,11 +81,27 @@ describe("pallet placard", () => {
     expect(html).toContain("ПАЛЛЕТА");
     expect(html).toContain("ООО «Атолл»");
     expect(html).toContain("Вода питьевая негазированная «Атолл» 0,5 л, ПЭТ");
-    expect(html).toContain("04600682000019");
+    expect(html).toContain("04600682000013");
     // No status word, no kind, no closing time in the header.
     expect(html).not.toContain("Закрыта");
     expect(html).not.toContain("складская");
     expect(html).not.toContain("ИНН не указан");
+  });
+
+  it("prints a retail EAN-13 under a unit-level GTIN only", () => {
+    // Indicator 0: the last 13 digits are the retail EAN-13.
+    expect(renderPalletPlacardHtml(fixture(), "a4")).toContain('class="pl-ean"');
+    // A case-level GTIN (indicator 1) is not an EAN-13; the digits still print.
+    const caseLevel = renderPalletPlacardHtml(fixture({ gtin14: "14600682000010" }), "a4");
+    expect(caseLevel).not.toContain('class="pl-ean"');
+    expect(caseLevel).toContain("14600682000010");
+    // A wrong check digit must degrade to text, never to a broken page.
+    const badCheck = renderPalletPlacardHtml(fixture({ gtin14: "04600682000019" }), "a4");
+    expect(badCheck).not.toContain('class="pl-ean"');
+    expect(badCheck).toContain("04600682000019");
+    expect(renderPalletPlacardHtml(fixture({ gtin14: null }), "a4")).not.toContain(
+      'class="pl-ean"',
+    );
   });
 
   it("prints the counts, the date summary and the total", () => {
