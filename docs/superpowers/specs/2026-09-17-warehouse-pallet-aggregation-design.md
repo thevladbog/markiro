@@ -3,8 +3,9 @@
 **Date:** 2026-09-17
 
 **Status:** Approved 2026-09-17; server side implemented in PR #595 (plan 1 of
-3); handheld implemented (plan 2, `docs/superpowers/plans/2026-09-18-warehouse-pallets-handheld.md`);
-cabinet UI pending.
+3); handheld implemented in PR #596 (plan 2,
+`docs/superpowers/plans/2026-09-18-warehouse-pallets-handheld.md`); cabinet UI
+implemented (plan 3, `docs/superpowers/plans/2026-09-18-warehouse-pallets-cabinet.md`).
 
 **Scope:** Building a pallet out of boxes that were already closed earlier —
 in other shifts, by other terminals, or on pallets since disassembled — by
