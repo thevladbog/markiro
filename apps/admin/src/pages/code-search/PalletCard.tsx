@@ -15,18 +15,7 @@ import { useTranslation } from "react-i18next";
 import { Link, useNavigate, useParams } from "react-router";
 
 import { CABINET_CAPABILITY, formatSsccHri } from "@markiro/domain";
-import {
-  Alert,
-  Badge,
-  Button,
-  Card,
-  Modal,
-  PageHeader,
-  RadioGroup,
-  Spinner,
-  StatusChip,
-  Table,
-} from "@markiro/ui";
+import { Alert, Badge, Button, Card, PageHeader, Spinner, StatusChip, Table } from "@markiro/ui";
 import type { StatusChipStatus, TableColumn } from "@markiro/ui";
 
 import { useCan } from "../../access/context.js";
@@ -36,6 +25,7 @@ import { toast } from "../../lib/toast.js";
 import { useCreateDocument } from "../disaggregation/api.js";
 import { lastRegistryHref } from "./registry-location.js";
 import { PalletExportsSection } from "./PalletExportsSection.js";
+import { PlacardFormatModal, placardQuery, type PlacardFormat } from "./PlacardFormatModal.js";
 import {
   usePalletCard,
   type PalletCardBoxDto,
@@ -77,7 +67,6 @@ export function PalletCardPage() {
   const canWrite = useCan(CABINET_CAPABILITY.OPERATIONS_WRITE);
   const createDocument = useCreateDocument();
   const [placardOpen, setPlacardOpen] = useState(false);
-  const [placardFormat, setPlacardFormat] = useState<"a4" | "a5">("a4");
 
   const { data: pallet, isPending, isError } = usePalletCard(palletId);
 
@@ -110,12 +99,8 @@ export function PalletCardPage() {
   // rule the server enforces with 409 PALLET_NOT_CLOSED.
   const canPlacard = pallet.sscc !== null && pallet.status !== "open";
 
-  const openPlacard = () => {
-    const query = new URLSearchParams({
-      format: placardFormat,
-      timeZone: new Intl.DateTimeFormat().resolvedOptions().timeZone,
-    });
-    window.open(`/api/code-search/pallets/${pallet.id}/placard?${query}`);
+  const openPlacard = (format: PlacardFormat) => {
+    window.open(`/api/code-search/pallets/${pallet.id}/placard?${placardQuery(format)}`);
     setPlacardOpen(false);
   };
 
@@ -392,39 +377,12 @@ export function PalletCardPage() {
         </Card>
       </section>
 
-      <Modal
+      <PlacardFormatModal
         open={placardOpen}
         title={t("pages.codeSearch.palletCard.placard.title")}
-        closeLabel={t("common.close")}
         onClose={() => setPlacardOpen(false)}
-        width={420}
-        footer={
-          <>
-            <Button type="button" variant="secondary" onClick={() => setPlacardOpen(false)}>
-              {t("common.cancel")}
-            </Button>
-            <Button type="button" onClick={openPlacard}>
-              {t("pages.codeSearch.palletCard.placard.open")}
-            </Button>
-          </>
-        }
-      >
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <RadioGroup
-            label={t("pages.codeSearch.palletCard.placard.formatLabel")}
-            name="pallet-placard-format"
-            value={placardFormat}
-            onValueChange={(value) => setPlacardFormat(value === "a5" ? "a5" : "a4")}
-            options={[
-              { value: "a4", label: t("pages.codeSearch.palletCard.placard.format.a4") },
-              { value: "a5", label: t("pages.codeSearch.palletCard.placard.format.a5") },
-            ]}
-          />
-          <span style={{ font: "var(--text-caption)", color: "var(--fg-3)" }}>
-            {t("pages.codeSearch.palletCard.placard.hint")}
-          </span>
-        </div>
-      </Modal>
+        onOpen={openPlacard}
+      />
     </div>
   );
 }

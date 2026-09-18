@@ -28,6 +28,11 @@ import {
   type ShiftDto,
   type ShiftParticipantDto,
 } from "./api.js";
+import {
+  PlacardFormatModal,
+  placardQuery,
+  type PlacardFormat,
+} from "../code-search/PlacardFormatModal.js";
 import { usePallets, type PalletDto } from "./pallets-api.js";
 import { ShiftExportsContent } from "./ShiftExportsDialog.js";
 import type { ShiftsPanelLocationState } from "./ShiftPanelRoute.js";
@@ -183,6 +188,18 @@ function ShiftOutput({ shift }: { shift: ShiftDto }) {
 function ShiftPallets({ shift }: { shift: ShiftDto }) {
   const { t, i18n } = useTranslation();
   const pallets = usePallets(shift.palletsEnabled ? shift.id : undefined);
+  const [placardsOpen, setPlacardsOpen] = useState(false);
+
+  // One placard page per closed, still-standing pallet with an SSCC -- the
+  // same set the server prints; with none of them the action is absent
+  // rather than opening a document the server would refuse (409).
+  const printablePallets = (pallets.data ?? []).filter(
+    (row) => row.closedAt !== null && row.disassembledAt === null && row.sscc !== null,
+  );
+  const openPlacards = (format: PlacardFormat) => {
+    window.open(`/api/code-search/shifts/${shift.id}/placards?${placardQuery(format)}`);
+    setPlacardsOpen(false);
+  };
 
   const columns: TableColumn<PalletDto>[] = [
     {
@@ -242,7 +259,27 @@ function ShiftPallets({ shift }: { shift: ShiftDto }) {
 
   return (
     <section className="mk-shift-details__section" aria-label={t("pages.shifts.pallets.title")}>
-      <h3>{t("pages.shifts.pallets.title")}</h3>
+      <div
+        style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}
+      >
+        <h3>{t("pages.shifts.pallets.title")}</h3>
+        {printablePallets.length > 0 ? (
+          <Button
+            type="button"
+            size="compact"
+            variant="secondary"
+            onClick={() => setPlacardsOpen(true)}
+          >
+            {t("pages.shifts.pallets.placards.action")}
+          </Button>
+        ) : null}
+      </div>
+      <PlacardFormatModal
+        open={placardsOpen}
+        title={t("pages.shifts.pallets.placards.title")}
+        onClose={() => setPlacardsOpen(false)}
+        onOpen={openPlacards}
+      />
       {pallets.isPending ? (
         <Spinner label={t("common.loading")} />
       ) : pallets.isError ? (

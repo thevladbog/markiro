@@ -2504,6 +2504,10 @@
         "title": "Pallets",
         "empty": "No pallets in this shift",
         "loadError": "Could not load this shift's pallets.",
+        "placards": {
+          "action": "Placards",
+          "title": "Placards for the shift's pallets"
+        },
         "contentsChangedAfterClose": "Contents changed after closing",
         "disassembled": "Taken apart",
         "noSscc": "No SSCC",

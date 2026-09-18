@@ -244,15 +244,18 @@ function dateTable(rows: PlacardDateRow[], format: PlacardFormat): string {
   return `<table class="pl-dates">${head}${body}${total}</table>`;
 }
 
-/** Pure: builds the print-ready placard document. */
-export function renderPalletPlacardHtml(data: PalletPlacardData, format: PlacardFormat): string {
+/**
+ * One placard page. The product-name size is set inline because it depends
+ * on THIS pallet's name length, and a shift document stacks pages for
+ * different products in one stylesheet.
+ */
+function renderPlacardPage(data: PalletPlacardData, format: PlacardFormat): string {
   const size = SIZES[format];
   const live = data.boxes.filter((box) => box.disassembledAt === null);
   const boxCount = live.length;
   const unitCount = live.reduce((n, box) => n + box.codeCount, 0);
   const rows = summarizeByProductionDate(data.boxes, data.shelfLifeDays, PLACARD_ROW_CAP[format]);
   const hri = data.sscc ? ssccHri(data.sscc) : null;
-  const title = data.sscc ?? "без SSCC";
   const orgName = dash(data.org?.name ?? null);
   const namePt = namePtFor(data.productName, size);
   const inn = data.org?.inn ? `ИНН ${escapeHtml(data.org.inn)}` : "";
@@ -268,25 +271,76 @@ export function renderPalletPlacardHtml(data: PalletPlacardData, format: Placard
       ? `<div class="pl-watermark" aria-hidden="true">РАСФОРМИРОВАНА</div>`
       : "";
 
+  return `<section class="pl-page" data-placard-sscc="${escapeHtml(data.sscc ?? "")}">
+  ${watermark}
+  <header class="pl-header">
+    <div class="pl-brand">${brandLogo(data.org)}<span class="pl-org">${orgName}</span></div>
+    <span class="pl-title">ПАЛЛЕТА</span>
+  </header>
+  <div class="pl-name" style="font-size: ${namePt}pt">${dash(data.productName)}</div>
+  <div class="pl-figures">
+    <div class="pl-figure pl-figure--gtin"><span class="pl-figure-label">GTIN</span><span class="pl-figure-value pl-figure-value--gtin mono">${dash(data.gtin14)}</span></div>
+    <div class="pl-figure"><span class="pl-figure-label">Коробов</span><span class="pl-figure-value">${boxCount}</span></div>
+    <div class="pl-figure"><span class="pl-figure-label">Единиц</span><span class="pl-figure-value">${unitCount}</span></div>
+  </div>
+  ${dateTable(rows, format)}
+  <div class="pl-code">${barcode}</div>
+  <footer class="pl-footer">${footer}</footer>
+</section>`;
+}
+
+/** Pure: builds the print-ready placard document for ONE pallet. */
+export function renderPalletPlacardHtml(data: PalletPlacardData, format: PlacardFormat): string {
+  return renderPlacardDocument({
+    title: `Ярлык паллеты ${data.sscc ?? "без SSCC"}`,
+    format,
+    pages: [renderPlacardPage(data, format)],
+  });
+}
+
+/**
+ * Pure: one document with a placard page per pallet, for printing a whole
+ * shift's stacks in one go (owner request 2026-09-18). The caller decides
+ * which pallets qualify and in what order; this only lays them out.
+ */
+export function renderShiftPlacardsHtml(
+  pallets: readonly PalletPlacardData[],
+  format: PlacardFormat,
+  shiftNumber: string | null,
+): string {
+  return renderPlacardDocument({
+    title: `Ярлыки паллет смены ${shiftNumber ?? ""}`.trim(),
+    format,
+    pages: pallets.map((pallet) => renderPlacardPage(pallet, format)),
+  });
+}
+
+function renderPlacardDocument(doc: {
+  title: string;
+  format: PlacardFormat;
+  pages: readonly string[];
+}): string {
+  const size = SIZES[doc.format];
   return `<!DOCTYPE html>
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<title>Ярлык паллеты ${escapeHtml(title)}</title>
+<title>${escapeHtml(doc.title)}</title>
 <style>
 @page { size: ${size.page}; margin: 0 }
 * { box-sizing: border-box; }
 html, body { margin: 0; }
 body { background: #E9E7E1; font-family: Arial, sans-serif; color: #17161A; }
 .mono { font-family: monospace; font-variant-numeric: tabular-nums; }
-.pl-page { position: relative; width: ${size.widthMm}mm; height: ${size.heightMm}mm; margin: 8mm auto; padding: ${size.marginMm}mm; background: #fff; display: flex; flex-direction: column; gap: 4mm; overflow: hidden; font-size: ${size.tablePt}pt; line-height: 1.3; }
+.pl-page { position: relative; width: ${size.widthMm}mm; height: ${size.heightMm}mm; margin: 8mm auto; padding: ${size.marginMm}mm; background: #fff; display: flex; flex-direction: column; gap: 4mm; overflow: hidden; font-size: ${size.tablePt}pt; line-height: 1.3; break-after: page; page-break-after: always; }
+.pl-page:last-child { break-after: auto; page-break-after: auto; }
 .pl-header { display: flex; justify-content: space-between; align-items: center; gap: 6mm; padding-bottom: 3mm; border-bottom: .4mm solid #17161A; }
 .pl-brand { display: flex; align-items: center; gap: 3mm; min-width: 0; }
 .brand-logo { display: block; max-width: 40mm; max-height: 12mm; width: auto; height: auto; object-fit: contain; }
 .brand-logo--markiro { width: 36mm; height: 8mm; }
 .pl-org { font-weight: 700; }
 .pl-title { font-size: ${size.figurePt}pt; font-weight: 700; letter-spacing: .08em; white-space: nowrap; }
-.pl-name { font-size: ${namePt}pt; font-weight: 700; line-height: 1.2; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: ${NAME_LINES}; line-clamp: ${NAME_LINES}; overflow: hidden; }
+.pl-name { font-weight: 700; line-height: 1.2; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: ${NAME_LINES}; line-clamp: ${NAME_LINES}; overflow: hidden; }
 .pl-figures { display: flex; border-top: .3mm solid #C9C6BD; border-bottom: .3mm solid #C9C6BD; }
 .pl-figure { flex: 1; padding: 2mm 3mm; border-left: .3mm solid #C9C6BD; min-width: 0; }
 .pl-figure:first-child { border-left: 0; padding-left: 0; }
@@ -311,22 +365,7 @@ body { background: #E9E7E1; font-family: Arial, sans-serif; color: #17161A; }
 </style>
 </head>
 <body>
-<section class="pl-page">
-  ${watermark}
-  <header class="pl-header">
-    <div class="pl-brand">${brandLogo(data.org)}<span class="pl-org">${orgName}</span></div>
-    <span class="pl-title">ПАЛЛЕТА</span>
-  </header>
-  <div class="pl-name">${dash(data.productName)}</div>
-  <div class="pl-figures">
-    <div class="pl-figure pl-figure--gtin"><span class="pl-figure-label">GTIN</span><span class="pl-figure-value pl-figure-value--gtin mono">${dash(data.gtin14)}</span></div>
-    <div class="pl-figure"><span class="pl-figure-label">Коробов</span><span class="pl-figure-value">${boxCount}</span></div>
-    <div class="pl-figure"><span class="pl-figure-label">Единиц</span><span class="pl-figure-value">${unitCount}</span></div>
-  </div>
-  ${dateTable(rows, format)}
-  <div class="pl-code">${barcode}</div>
-  <footer class="pl-footer">${footer}</footer>
-</section>
+${doc.pages.join("\n")}
 </body>
 </html>`;
 }

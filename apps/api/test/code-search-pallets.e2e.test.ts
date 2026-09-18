@@ -446,6 +446,40 @@ describe.skipIf(!ready)("code search pallet card e2e", () => {
     });
   });
 
+  describe("printed placards of a whole shift", () => {
+    it("prints one page per closed pallet of the shift, skipping the open one", async () => {
+      const res = await agent
+        .get(`/code-search/shifts/${shiftId}/placards`)
+        .query({ format: "a5" })
+        .expect(200)
+        .expect("Content-Type", /text\/html/);
+      expect(res.text).toContain("@page { size: A5;");
+      expect(res.text).toContain(`Ярлыки паллет смены ${shiftNumber}`);
+      // p1 is closed; p-open (see "refuses an open pallet") never closed and
+      // the warehouse pallet belongs to no shift -- exactly one page.
+      const pages = res.text.match(/data-placard-sscc="(\d{20})"/g) ?? [];
+      expect(pages).toEqual([`data-placard-sscc="00${palletSscc}"`]);
+      expect(res.text).toContain("Cola");
+    });
+
+    it("answers 409 for a shift with nothing to print, 404 across tenants and for an unknown shift", async () => {
+      const bare = await agent.post("/shifts").send({ productId, mode: "validation" }).expect(201);
+      const empty = await agent
+        .get(`/code-search/shifts/${(bare.body as { id: string }).id}/placards`)
+        .expect(409);
+      expect(empty.body).toMatchObject({ code: "SHIFT_HAS_NO_PALLETS" });
+
+      const other = request.agent(app!.getHttpServer());
+      await signUpAndActivate(other);
+      await other.get(`/code-search/shifts/${shiftId}/placards`).expect(404);
+      await agent.get(`/code-search/shifts/${randomUUID()}/placards`).expect(404);
+      await request(app!.getHttpServer())
+        .get(`/code-search/shifts/${shiftId}/placards`)
+        .set("x-api-key", stationKey)
+        .expect(403);
+    });
+  });
+
   /** MUTATES the shared fixture -- from here on b2 is off the stack. */
   it("keeps a disassembled member box listed, flagged with its own timestamp", async () => {
     await postBatch({

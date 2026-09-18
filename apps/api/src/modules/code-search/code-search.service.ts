@@ -1348,6 +1348,61 @@ export class CodeSearchService {
   }
 
   /**
+   * Every pallet of a shift that has a placard to print -- closed, not taken
+   * apart, with an SSCC -- in stacking order, each loaded exactly as its own
+   * placard would be (owner request 2026-09-18: print a shift's stacks in one
+   * go). 404 for a shift the tenant cannot see; a shift with nothing
+   * printable is a 409 so the cabinet can say so instead of opening an empty
+   * document.
+   */
+  async shiftPlacardsData(
+    tenantId: string,
+    shiftId: string,
+  ): Promise<{ shiftNumber: string | null; pallets: PalletPlacardData[] }> {
+    const [shift] = await this.db
+      .select({
+        numberMonthKey: schema.shifts.numberMonthKey,
+        numberSeq: schema.shifts.numberSeq,
+        createdFrom: schema.shifts.createdFrom,
+      })
+      .from(schema.shifts)
+      .where(and(eq(schema.shifts.tenantId, tenantId), eq(schema.shifts.id, shiftId)));
+    if (!shift) throw new NotFoundException();
+
+    const rows = await this.db
+      .select({ id: schema.pallets.id })
+      .from(schema.pallets)
+      .where(
+        and(
+          eq(schema.pallets.tenantId, tenantId),
+          eq(schema.pallets.shiftId, shiftId),
+          isNotNull(schema.pallets.closedAt),
+          isNull(schema.pallets.disassembledAt),
+          isNotNull(schema.pallets.sscc),
+        ),
+      )
+      // The order the stacks left the line, as the shift panel lists them.
+      .orderBy(schema.pallets.closedAt, schema.pallets.id);
+    if (rows.length === 0) {
+      throw new ConflictException({
+        code: "SHIFT_HAS_NO_PALLETS",
+        message: "Shift has no closed pallets to print",
+      });
+    }
+
+    const pallets: PalletPlacardData[] = [];
+    for (const row of rows) pallets.push(await this.palletPlacardData(tenantId, row.id));
+    return {
+      shiftNumber: formatShiftNumber({
+        monthKey: shift.numberMonthKey,
+        seq: shift.numberSeq,
+        createdFrom: shift.createdFrom,
+      }),
+      pallets,
+    };
+  }
+
+  /**
    * The printed placard's data (spec 2026-09-18): identity plus each member
    * box's production day and live unit count. Refuses a pallet that is open
    * or has no SSCC -- a placard without a scannable symbol is not a placard,
