@@ -21,6 +21,7 @@ import { ResetPasswordPage } from "./pages/auth/ResetPassword.js";
 import { SelectOrgPage } from "./pages/auth/SelectOrg.js";
 import { BoxesPage } from "./pages/boxes/index.js";
 import { SellBoxPage } from "./pages/boxes/SellBoxPage.js";
+import { PalletsPage } from "./pages/pallets/index.js";
 import {
   ImportPanel,
   NationalCatalogIdentityBoundary,
@@ -247,6 +248,14 @@ function appRouteElements() {
           element={
             <RequireCapability capability={C.OPERATIONS_READ}>
               <SellBoxPage />
+            </RequireCapability>
+          }
+        />
+        <Route
+          path="pallets"
+          element={
+            <RequireCapability capability={C.OPERATIONS_READ}>
+              <PalletsPage />
             </RequireCapability>
           }
         />

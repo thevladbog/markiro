@@ -2629,6 +2629,40 @@
         "status": "Статус"
       }
     },
+    "pallets": {
+      "title": "Паллеты",
+      "empty": "Паллет по этим условиям нет",
+      "noSscc": "Без SSCC",
+      "loadMore": "Показать ещё",
+      "disassembled": "Разобрана",
+      "contentsChangedAfterClose": "Состав изменился после закрытия",
+      "rejections": "Отказов: {{count}}",
+      "kind": { "production": "Производственная", "warehouse": "Складская" },
+      "filters": {
+        "kindLabel": "Вид паллеты",
+        "kindAll": "Все",
+        "kindProduction": "Производственные",
+        "kindWarehouse": "Складские",
+        "productLabel": "Товар",
+        "productAll": "Все товары",
+        "productSearchLabel": "Поиск товара",
+        "deviceLabel": "Устройство",
+        "deviceAll": "Все устройства",
+        "deviceSearchLabel": "Поиск устройства",
+        "fromLabel": "Закрыта с",
+        "toLabel": "Закрыта по"
+      },
+      "table": {
+        "sscc": "SSCC",
+        "kind": "Вид",
+        "product": "Товар",
+        "device": "Устройство",
+        "boxCount": "Коробов",
+        "unitCount": "Кодов",
+        "closedAt": "Закрыта",
+        "status": "Статус"
+      }
+    },
     "boxSell": {
       "title": "Продажа коробом",
       "ssccLabel": "SSCC короба",
@@ -2659,7 +2693,8 @@
       "tabs": {
         "label": "Разделы поиска кодов",
         "codes": "Коды",
-        "boxes": "Короба"
+        "boxes": "Короба",
+        "pallets": "Паллеты"
       },
       "searchPlaceholder": "Введите SSCC (можно часть номера) или код маркировки",
       "searchButton": "Найти",

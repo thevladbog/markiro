@@ -2629,6 +2629,40 @@
         "status": "Status"
       }
     },
+    "pallets": {
+      "title": "Pallets",
+      "empty": "No pallets match these filters",
+      "noSscc": "No SSCC",
+      "loadMore": "Show more",
+      "disassembled": "Taken apart",
+      "contentsChangedAfterClose": "Contents changed after closing",
+      "rejections": "Refused: {{count}}",
+      "kind": { "production": "Production", "warehouse": "Warehouse" },
+      "filters": {
+        "kindLabel": "Pallet kind",
+        "kindAll": "All",
+        "kindProduction": "Production",
+        "kindWarehouse": "Warehouse",
+        "productLabel": "Product",
+        "productAll": "All products",
+        "productSearchLabel": "Search product",
+        "deviceLabel": "Device",
+        "deviceAll": "All devices",
+        "deviceSearchLabel": "Search device",
+        "fromLabel": "Closed from",
+        "toLabel": "Closed to"
+      },
+      "table": {
+        "sscc": "SSCC",
+        "kind": "Kind",
+        "product": "Product",
+        "device": "Device",
+        "boxCount": "Boxes",
+        "unitCount": "Codes",
+        "closedAt": "Closed",
+        "status": "Status"
+      }
+    },
     "boxSell": {
       "title": "Sell box",
       "ssccLabel": "Box SSCC",
@@ -2659,7 +2693,8 @@
       "tabs": {
         "label": "Code search sections",
         "codes": "Codes",
-        "boxes": "Boxes"
+        "boxes": "Boxes",
+        "pallets": "Pallets"
       },
       "searchPlaceholder": "Enter an SSCC (a partial number works) or a marking code",
       "searchButton": "Search",
