@@ -889,7 +889,8 @@ In `packages/platform-contracts/src/chz-signer.ts` replace `chzSignerTaskSchema`
 export const chzOmsAuthPayloadSchema = z
   .object({
     trueApiBaseUrl: z.url(),
-    omsConnection: z.uuid(),
+    /** СУЗ-issued: hex-shaped only, so `z.guid()` — `z.uuid()` refuses СУЗ's own documented example. */
+    omsConnection: z.guid(),
     inn: innSchema.optional(),
   })
   .strict();
