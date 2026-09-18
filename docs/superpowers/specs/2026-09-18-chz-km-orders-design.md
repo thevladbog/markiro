@@ -253,8 +253,18 @@ counts and ranges, never codes. Responses carry `Cache-Control: no-store`.
 
 ### Admin UI
 
-- Navigation entry **«Коды маркировки»** (route `/km-orders`), visible with the same
-  access as the integration pages. List: product, GTIN, quantity, state (translated,
+Mockups (pen.dev, 2026-09-18/19, owner-reviewed): «01 Заказы кодов — список»,
+«02 Заказ кодов — карточка», «03 Диалоги», «04 Страница печати», «07 Боковое меню».
+
+- **Sidebar regrouping ships with this phase** (mockup variant B). `NAV_ITEMS` keeps
+  every route and only changes order and section keys: «Производство» = Обзор, Смены,
+  Линии, Конфликты; new section **«Маркировка»** = Заказы кодов, Поиск кодов,
+  Инвентаризации, Выбытие, Дезагрегация; «Справочники» = Каталог, Этикетки,
+  Контрагенты, Операторы и сотрудники; «Оборудование и обмен» and «Организация»
+  unchanged. The pickup badge moves with its item. The mobile navigation groups follow
+  automatically because they are derived from the same list.
+- Navigation entry **«Заказы кодов»** in «Маркировка» (route `/km-orders`), visible with
+  the same access as the integration pages. List: product, GTIN, quantity, state (translated,
   with the ЧЗ reason on hover for `rejected`), received, issued, available, code expiry
   date (`buffer_expires_at`), created by/at. Empty state explains the СУЗ settings
   prerequisites with a link to the channel page.
@@ -354,9 +364,19 @@ this page (there is no shift), and the stock template does not use them.
   station prints the next pool automatically on a dedicated code printer (a second
   printer with a different label width), and a manual «Напечатать N» button always
   remains. The reserve is replenished from the cloud while online and must last
-  several pools offline. Design mockups (admin list/card/dialogs, print page, station
-  strip and full-screen settings, handheld card, sidebar variants) were drawn in
-  pen.dev on the same day; the file is to be saved under `docs/design-briefs/`.
+  several pools offline. Mockups for that phase exist (pen.dev, to be saved under
+  `docs/design-briefs/`): the work-screen KM strip at 1600×1000, 1280×720 and the
+  narrowest supported 1024×768 with a pallet in the shift (targets ≥ 64 px per the
+  station acceptance matrix), the full-screen «Настройка автопечати» dialog, the
+  handheld work screen at 360×800 and its settings card, and a status pill
+  «КМ 22/30 · авто» in the top bar for small heights.
+- **Shift setup on one screen (station).** The owner wants the current multi-step
+  «Новая смена» flow (GTIN → product → mode → pallets → box template → pallet
+  template → production date → duplicate print with verification → reprocessing)
+  rebuilt in the style of the auto-print dialog: one screen of setting rows with big
+  controls and a «Что запустится» summary, required fields highlighted on start.
+  Mockup «08 Станция 1280×720 — настройка смены одним экраном». Separate task, not
+  part of the code-order phases, but the KM auto-print row must slot into it.
 - Multi-GTIN orders, `SELF_MADE` serial numbers, `paymentType = 1`, `REAPPLY`.
 - Registering the СУЗ installation by API once Markiro holds a partner
   `registrationKey`.
