@@ -302,6 +302,7 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                         onCancelEarlyClose = vm::cancelEarlyClose,
                         onConfirmEarlyClose = vm::confirmEarlyClose,
                         onAcknowledge = vm::acknowledge,
+                        onReprint = vm::reprint,
                         onRefresh = vm::refresh,
                         onDisassemble = { nav.navigate(Routes.PALLETS_DISASSEMBLE) },
                         close = PalletCloseCallbacks(

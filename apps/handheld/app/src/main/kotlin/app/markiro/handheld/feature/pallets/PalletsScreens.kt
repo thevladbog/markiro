@@ -45,6 +45,7 @@ import app.markiro.handheld.core.design.SecondaryButton
 import app.markiro.handheld.core.design.StateAction
 import app.markiro.handheld.core.design.Tone
 import app.markiro.handheld.core.storage.MembershipStatus
+import app.markiro.handheld.core.storage.PalletEntity
 import app.markiro.handheld.core.storage.PalletMembershipEntity
 import app.markiro.handheld.core.util.TimeText
 import app.markiro.handheld.feature.work.PalletCloseCallbacks
@@ -58,7 +59,8 @@ data class PalletsCallbacks(
     val onEarlyClose: () -> Unit = {},
     val onCancelEarlyClose: () -> Unit = {},
     val onConfirmEarlyClose: () -> Unit = {},
-    val onAcknowledge: () -> Unit = {},
+    val onAcknowledge: (String) -> Unit = {},
+    val onReprint: (String) -> Unit = {},
     val onRefresh: () -> Unit = {},
     val onDisassemble: () -> Unit = {},
     val close: PalletCloseCallbacks = PalletCloseCallbacks(),
@@ -140,7 +142,7 @@ private fun PalletsListScreen(state: PalletsUi, cb: PalletsCallbacks) {
                 modifier = Modifier.padding(horizontal = MarkiroSizes.sp4, vertical = MarkiroSizes.sp1),
             )
         }
-        if (state.rejections.isNotEmpty()) RejectionsBlock(state.rejections, cb.onAcknowledge)
+        if (state.rejections.isNotEmpty()) RejectionsBlock(state.rejections, state.rejectionPallets, cb)
         state.lastVerdict?.let { VerdictRow(it) }
         if (state.pallet == null) {
             FullScreenState(
@@ -197,13 +199,24 @@ private fun VerdictRow(verdict: PalletVerdict) {
 /**
  * What the server refused, and what to do about it.
  *
+ * Grouped by pallet, because a rejection is not tied to whatever is open now.
+ * A membership can still be pending when its pallet is closed and its label
+ * printed, and the label states the box count: if the server then refuses a
+ * box, the paper on that stack overstates it, and the only honest answer is a
+ * replacement label. So a closed pallet's section offers one, an open pallet's
+ * does not (nothing has been printed yet), and «Принято» clears one section at
+ * a time rather than every pallet's news at once.
+ *
  * A rejection is physical work: the box is on the pallet in the warehouse and
- * on some other pallet in the registry, so the banner names the count and each
- * row names its own box and reason. «Принято» only clears the notice — it does
- * not put the box back.
+ * on some other pallet in the registry, so each row names its own box and
+ * reason. «Принято» only clears the notice — it does not put the box back.
  */
 @Composable
-private fun RejectionsBlock(rejections: List<PalletMembershipEntity>, onAcknowledge: () -> Unit) {
+private fun RejectionsBlock(
+    rejections: List<PalletMembershipEntity>,
+    pallets: Map<String, PalletEntity>,
+    cb: PalletsCallbacks,
+) {
     val c = MarkiroTheme.colors
     val t = MarkiroTheme.type
     Banner(
@@ -213,17 +226,35 @@ private fun RejectionsBlock(rejections: List<PalletMembershipEntity>, onAcknowle
     )
     Column(
         Modifier.fillMaxWidth().padding(horizontal = MarkiroSizes.sp4, vertical = MarkiroSizes.sp2),
-        verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp1),
+        verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2),
     ) {
-        rejections.forEach { row ->
-            Text(
-                stringResource(R.string.pallets_member_box, row.sscc.takeLast(TAIL)) + " — " + rejectionText(row),
-                style = t.caption,
-                color = c.fg2,
-            )
+        // The query already orders by pallet, so grouping keeps that order and
+        // the sections do not reshuffle under the operator's hand.
+        rejections.groupBy { it.palletId }.forEach { (palletId, rows) ->
+            val pallet = pallets[palletId]
+            val closedSscc = pallet?.sscc?.takeIf { pallet.closedAt != null }
+            Column(verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp1)) {
+                Text(
+                    closedSscc?.let { stringResource(R.string.pallets_rejected_pallet, it.takeLast(TAIL)) }
+                        ?: stringResource(R.string.pallets_rejected_pallet_open),
+                    style = t.strong,
+                    color = c.fg1,
+                )
+                rows.forEach { row ->
+                    Text(
+                        stringResource(R.string.pallets_member_box, row.sscc.takeLast(TAIL)) + " — " + rejectionText(row),
+                        style = t.caption,
+                        color = c.fg2,
+                    )
+                }
+                Spacer(Modifier.height(MarkiroSizes.sp1))
+                SecondaryButton(stringResource(R.string.pallets_acknowledge), { cb.onAcknowledge(palletId) })
+                // Only a closed pallet carries a printed label to replace.
+                if (closedSscc != null) {
+                    SecondaryButton(stringResource(R.string.pallets_reprint), { cb.onReprint(palletId) })
+                }
+            }
         }
-        Spacer(Modifier.height(MarkiroSizes.sp1))
-        SecondaryButton(stringResource(R.string.pallets_acknowledge), onAcknowledge)
     }
 }
 

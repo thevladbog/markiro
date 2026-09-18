@@ -19,7 +19,10 @@ import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import javax.inject.Singleton
 
 /**
@@ -47,10 +50,24 @@ interface PalletsGateway {
 
     fun observeMembers(palletId: String): Flow<List<PalletMembershipEntity>>
 
-    /** Only the rejections the operator has not yet dismissed. */
-    fun observeRejections(palletId: String): Flow<List<PalletMembershipEntity>>
+    /**
+     * Every unacknowledged rejection on this DEVICE, not only on the pallet
+     * currently open.
+     *
+     * A membership can still be pending when its pallet is closed and its
+     * label printed, so the rejection that follows would otherwise arrive
+     * with nothing on screen to attach it to -- and the printed label would
+     * keep overstating the stack with no way to say so.
+     */
+    fun observeRejections(): Flow<List<PalletMembershipEntity>>
 
     suspend fun capacity(pallet: PalletEntity): Int?
+
+    /** The pallet a rejection belongs to: its number and whether it is already closed. */
+    suspend fun pallet(palletId: String): PalletEntity?
+
+    /** Boxes the pallet still claims, for the count a replacement label must state. */
+    suspend fun countOnPallet(palletId: String): Int
 
     suspend fun productName(productId: String): String?
 
@@ -62,7 +79,12 @@ interface PalletsGateway {
 
     suspend fun acknowledge(palletId: String)
 
-    suspend fun print(palletId: String, replacementPrinterId: String?, allowUnknown: Boolean): PrintOutcome
+    suspend fun print(
+        palletId: String,
+        replacementPrinterId: String?,
+        allowUnknown: Boolean,
+        reprint: Boolean = false,
+    ): PrintOutcome
 
     suspend fun resolveUnknownAsPrinted(palletId: String)
 
@@ -110,10 +132,17 @@ class PalletsRepository(
     override fun observeMembers(palletId: String): Flow<List<PalletMembershipEntity>> =
         db.palletMembershipDao().observeByPallet(palletId)
 
-    override fun observeRejections(palletId: String): Flow<List<PalletMembershipEntity>> =
-        db.palletMembershipDao().observeUnacknowledgedRejections(palletId)
+    @OptIn(ExperimentalCoroutinesApi::class)
+    override fun observeRejections(): Flow<List<PalletMembershipEntity>> =
+        db.deviceConfigDao().observe().flatMapLatest { config ->
+            config?.deviceId?.let { db.palletMembershipDao().observeUnacknowledgedRejectionsForDevice(it) } ?: flowOf(emptyList())
+        }
 
     override suspend fun capacity(pallet: PalletEntity): Int? = pallets.capacity(pallet)
+
+    override suspend fun pallet(palletId: String): PalletEntity? = db.palletDao().get(palletId)
+
+    override suspend fun countOnPallet(palletId: String): Int = db.palletMembershipDao().countOnPallet(palletId)
 
     override suspend fun productName(productId: String): String? = db.palletProductDao().byId(productId)?.name
 
@@ -125,8 +154,12 @@ class PalletsRepository(
 
     override suspend fun acknowledge(palletId: String) = pallets.acknowledgeRejections(palletId)
 
-    override suspend fun print(palletId: String, replacementPrinterId: String?, allowUnknown: Boolean): PrintOutcome =
-        printer.print(palletId, replacementPrinterId, allowUnknown)
+    override suspend fun print(
+        palletId: String,
+        replacementPrinterId: String?,
+        allowUnknown: Boolean,
+        reprint: Boolean,
+    ): PrintOutcome = printer.print(palletId, replacementPrinterId, allowUnknown, reprint)
 
     override suspend fun resolveUnknownAsPrinted(palletId: String) = printer.resolveUnknownAsPrinted(palletId)
 

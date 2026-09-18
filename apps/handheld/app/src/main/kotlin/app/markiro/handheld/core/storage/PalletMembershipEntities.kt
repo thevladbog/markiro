@@ -109,8 +109,29 @@ interface PalletMembershipDao {
     @Query("SELECT COUNT(*) FROM pallet_memberships WHERE palletId = :palletId AND status <> 'rejected'")
     fun observeCountOnPallet(palletId: String): Flow<Int>
 
-    @Query("SELECT * FROM pallet_memberships WHERE palletId = :palletId AND status = 'rejected' AND acknowledgedAt IS NULL ORDER BY addedAt")
-    fun observeUnacknowledgedRejections(palletId: String): Flow<List<PalletMembershipEntity>>
+    /**
+     * Every unacknowledged rejection this device owns, across ALL of its
+     * warehouse pallets rather than only the one currently open.
+     *
+     * A membership is still `pending`/`sent` when the operator closes the
+     * pallet and prints its label, and that label states the box count. A
+     * later batch can reject some of those rows: the stack in the warehouse is
+     * then smaller than the number printed on it, and the operator has to be
+     * told and offered a new label. Scoped per pallet, that news arrives only
+     * while that pallet is open -- which, by definition, it no longer is.
+     *
+     * Ordered by pallet so the screen can section the rows without sorting
+     * them again, and by `addedAt` within a pallet so the boxes read in the
+     * order they were put on it. Production pallets are excluded: they carry
+     * no memberships and belong to the shift screens.
+     */
+    @Query(
+        "SELECT m.* FROM pallet_memberships m JOIN pallets p ON p.palletId = m.palletId " +
+            "WHERE p.deviceId = :deviceId AND p.kind = 'warehouse' " +
+            "AND m.status = 'rejected' AND m.acknowledgedAt IS NULL " +
+            "ORDER BY m.palletId, m.addedAt",
+    )
+    fun observeUnacknowledgedRejectionsForDevice(deviceId: String): Flow<List<PalletMembershipEntity>>
 
     @Query("UPDATE pallet_memberships SET acknowledgedAt = :at WHERE palletId = :palletId AND status = 'rejected' AND acknowledgedAt IS NULL")
     suspend fun acknowledge(palletId: String, at: String)

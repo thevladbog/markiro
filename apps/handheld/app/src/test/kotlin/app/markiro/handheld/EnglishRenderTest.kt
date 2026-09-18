@@ -358,6 +358,10 @@ class EnglishRenderTest {
                                 "already_on_pallet", "134600682000000011", "t", null,
                             ),
                         ),
+                        // Closed and already labelled: its section also offers a
+                        // replacement label, which must not be the one Russian
+                        // string left on an English screen.
+                        rejectionPallets = mapOf("w1" to pallet.copy(sscc = "134600682000000011", closedAt = "t")),
                     ),
                     PalletsCallbacks(),
                 )

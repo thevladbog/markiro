@@ -13,8 +13,10 @@ import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.MembershipStatus
 import app.markiro.handheld.core.storage.MetaStore
 import app.markiro.handheld.core.storage.PalletKind
+import app.markiro.handheld.core.storage.PalletMembershipEntity
 import app.markiro.handheld.core.storage.PalletProductEntity
 import app.markiro.handheld.core.storage.initializeRecoveryForTest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -346,5 +348,51 @@ class WarehousePalletsTest {
         )
         assertEquals(6, db.palletMembershipDao().bottleSum(opened.pallet.palletId))
         assertEquals(1, db.palletMembershipDao().countOnPallet(opened.pallet.palletId))
+    }
+    /**
+     * The device-wide rejection feed, which is what lets a rejection that
+     * lands AFTER its pallet was closed and labelled still reach the operator.
+     * It is scoped to this device's own warehouse pallets: another terminal's
+     * conflict is not this one's work, and a production pallet belongs to the
+     * shift screens and carries no memberships of its own.
+     */
+    @Test
+    fun theDeviceWideRejectionFeedSeesOnlyThisDevicesWarehousePallets() = runTest {
+        product(capacity = 10)
+        registry("034600682000000018")
+        val mine = (pallets.attach("034600682000000018", null) as AttachResult.Attached).pallet
+        db.palletMembershipDao().markRejected(mine.palletId, "034600682000000018", "already_on_pallet", null, "t")
+        // Closing the pallet must not hide its rejection: that is precisely the
+        // case whose printed label now overstates the stack.
+        db.palletDao().close(mine.palletId, "134600682000000017", "t", null)
+
+        val foreign = mine.copy(palletId = "foreign", deviceId = "other-device", terminalId = "other-device", sscc = null, closedAt = null)
+        db.palletDao().insert(foreign)
+        db.palletMembershipDao().insert(
+            PalletMembershipEntity(
+                palletId = "foreign", sscc = "034600682000000025", addedAt = "t", operatorId = null,
+                status = MembershipStatus.REJECTED, reason = "not_found", winningPalletSscc = null,
+                ackedAt = "t", acknowledgedAt = null,
+            ),
+        )
+        val production = mine.copy(
+            palletId = "prod", kind = PalletKind.PRODUCTION, shiftId = "sh-1", sscc = null, closedAt = null,
+        )
+        db.palletDao().insert(production)
+        db.palletMembershipDao().insert(
+            PalletMembershipEntity(
+                palletId = "prod", sscc = "034600682000000032", addedAt = "t", operatorId = null,
+                status = MembershipStatus.REJECTED, reason = "not_found", winningPalletSscc = null,
+                ackedAt = "t", acknowledgedAt = null,
+            ),
+        )
+
+        val rows = db.palletMembershipDao().observeUnacknowledgedRejectionsForDevice(deviceId()).first()
+        assertEquals(listOf(mine.palletId), rows.map { it.palletId })
+        assertEquals(listOf("034600682000000018"), rows.map { it.sscc })
+
+        // «Принято» takes it off the feed, and only for the pallet named.
+        db.palletMembershipDao().acknowledge(mine.palletId, "t")
+        assertTrue(db.palletMembershipDao().observeUnacknowledgedRejectionsForDevice(deviceId()).first().isEmpty())
     }
 }

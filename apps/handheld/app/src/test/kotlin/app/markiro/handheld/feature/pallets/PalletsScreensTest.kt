@@ -1,7 +1,10 @@
 package app.markiro.handheld.feature.pallets
 
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -28,8 +31,13 @@ class PalletsScreensTest {
         kind = PalletKind.WAREHOUSE, productId = "p1", deviceId = "dev-1",
     )
 
+    private val closed = pallet.copy(palletId = "w0", sscc = "134600682000000011", closedAt = "t")
+
     private fun member(sscc: String, status: String) =
         PalletMembershipEntity("w1", sscc, "t", null, status, null, null, null, null)
+
+    private fun rejected(sscc: String, reason: String, winner: String?, palletId: String = "w1") =
+        PalletMembershipEntity(palletId, sscc, "t", null, MembershipStatus.REJECTED, reason, winner, "t", null)
 
     /** A refusal names the right the operator is missing and where it is granted. */
     @Test
@@ -104,27 +112,23 @@ class PalletsScreensTest {
 
     @Test
     fun aRejectionNamesTheBoxTheReasonAndOffersToAcknowledge() {
-        var acknowledged = false
+        var acknowledged: String? = null
         compose.setContent {
             MarkiroTheme {
                 PalletsRoute(
                     PalletsUi(
                         pallet = pallet, boxCount = 0,
-                        rejections = listOf(
-                            PalletMembershipEntity(
-                                "w1", "034600682000000014", "t", null, MembershipStatus.REJECTED,
-                                "already_on_pallet", "134600682000000011", "t", null,
-                            ),
-                        ),
+                        rejections = listOf(rejected("034600682000000014", "already_on_pallet", "134600682000000011")),
+                        rejectionPallets = mapOf("w1" to pallet),
                     ),
-                    PalletsCallbacks(onAcknowledge = { acknowledged = true }),
+                    PalletsCallbacks(onAcknowledge = { acknowledged = it }),
                 )
             }
         }
         compose.onNodeWithText("Снимите с паллеты 1 короб").assertIsDisplayed()
         compose.onNodeWithText("короб …000014 — На паллете …000011").assertIsDisplayed()
         compose.onNodeWithText("Принято").performClick()
-        assertEquals(true, acknowledged)
+        assertEquals("w1", acknowledged)
     }
 
     /**
@@ -138,18 +142,52 @@ class PalletsScreensTest {
                 PalletsRoute(
                     PalletsUi(
                         pallet = pallet, boxCount = 0,
-                        rejections = listOf(
-                            PalletMembershipEntity(
-                                "w1", "034600682000000014", "t", null, MembershipStatus.REJECTED,
-                                "already_on_pallet", null, "t", null,
-                            ),
-                        ),
+                        rejections = listOf(rejected("034600682000000014", "already_on_pallet", null)),
+                        rejectionPallets = mapOf("w1" to pallet),
                     ),
                     PalletsCallbacks(),
                 )
             }
         }
         compose.onNodeWithText("короб …000014 — На открытой паллете другого устройства").assertIsDisplayed()
+    }
+
+    /**
+     * Rejections are device-wide, so two pallets can be owed news at once — and
+     * only the CLOSED one has a label in the warehouse that now overstates its
+     * stack. The open one has printed nothing yet, so it is offered nothing to
+     * reprint.
+     */
+    @Test
+    fun eachPalletGetsItsOwnSectionAndOnlyTheClosedOneOffersANewLabel() {
+        var reprinted: String? = null
+        var acknowledged: String? = null
+        compose.setContent {
+            MarkiroTheme {
+                PalletsRoute(
+                    PalletsUi(
+                        pallet = pallet, boxCount = 0,
+                        rejections = listOf(
+                            rejected("034600682000000014", "not_found", null, palletId = "w0"),
+                            rejected("034600682000000021", "already_on_pallet", null),
+                        ),
+                        rejectionPallets = mapOf("w0" to closed, "w1" to pallet),
+                    ),
+                    PalletsCallbacks(onAcknowledge = { acknowledged = it }, onReprint = { reprinted = it }),
+                )
+            }
+        }
+        compose.onNodeWithText("Паллета …000011").assertIsDisplayed()
+        compose.onNodeWithText("Открытая паллета").assertIsDisplayed()
+        compose.onNodeWithText("короб …000014 — Сервер не знает этот короб").assertIsDisplayed()
+        compose.onNodeWithText("короб …000021 — На открытой паллете другого устройства").assertIsDisplayed()
+        // One button, and it belongs to the closed pallet's section.
+        compose.onAllNodesWithText("Перепечатать этикетку").assertCountEquals(1)
+        compose.onNodeWithText("Перепечатать этикетку").performClick()
+        assertEquals("w0", reprinted)
+        compose.onAllNodesWithText("Принято").assertCountEquals(2)
+        compose.onAllNodesWithText("Принято").onFirst().performClick()
+        assertEquals("w0", acknowledged)
     }
 
     @Test

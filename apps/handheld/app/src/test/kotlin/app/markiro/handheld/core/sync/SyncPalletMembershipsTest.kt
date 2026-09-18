@@ -157,7 +157,11 @@ class SyncPalletMembershipsTest {
         assertEquals(MembershipStatus.ACCEPTED, rows[0].status)
         assertEquals(MembershipStatus.REJECTED, rows[1].status)
         assertEquals("already_on_pallet", rows[1].reason)
-        assertEquals("00134600682000000099", rows[1].winningPalletSscc)
+        // Stored the way this device stores every SSCC: 18 raw digits, with the
+        // server's AI-(00) element-string prefix stripped. The screen's own
+        // `takeLast(6)` reads the same either way, but a comparison against a
+        // local `sscc` would silently never match.
+        assertEquals("134600682000000099", rows[1].winningPalletSscc)
         assertNull(meta().get(MetaStore.SYNC_PENDING_MEMBERSHIP_COUNT))
         assertEquals("w1", db.boxRegistryDao().bySscc("034600682000000018")?.localPalletId)
         assertNull(db.boxRegistryDao().bySscc("034600682000000025")?.localPalletId)

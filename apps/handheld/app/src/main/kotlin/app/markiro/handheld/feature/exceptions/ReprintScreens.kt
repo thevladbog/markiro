@@ -44,6 +44,8 @@ private fun labelOf(reason: ReprintReason): Int = when (reason) {
     ReprintReason.QUALITY_REQUEST -> R.string.reason_quality_request
     // Never offered: written by print recovery, which asks nothing.
     ReprintReason.PRINT_OUTCOME_UNKNOWN -> R.string.reason_printer_jam
+    // Never offered either: written by the pallet rejection notice.
+    ReprintReason.PALLET_CONTENTS_CHANGED -> R.string.reason_pallet_contents_changed
 }
 
 /** The four reasons an operator may choose. */

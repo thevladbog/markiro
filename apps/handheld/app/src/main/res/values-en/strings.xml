@@ -533,6 +533,7 @@
     <string name="reason_unreadable_label">Label unreadable</string>
     <string name="reason_printer_jam">Printer jam / nothing printed</string>
     <string name="reason_quality_request">Quality control request</string>
+    <string name="reason_pallet_contents_changed">Pallet contents changed</string>
     <string name="reprint_title">Reprint label</string>
     <string name="reprint_last">Latest · box %1$d</string>
     <string name="reprint_scan">Scan the box SSCC</string>
@@ -720,6 +721,9 @@
     <string name="pallets_reject_read_only">Subscription is read-only</string>
     <string name="pallets_reject_other">Refused by the server</string>
     <string name="pallets_acknowledge">Got it</string>
+    <string name="pallets_rejected_pallet">Pallet …%1$s</string>
+    <string name="pallets_rejected_pallet_open">Open pallet</string>
+    <string name="pallets_reprint">Reprint the label</string>
     <string name="pallet_refused_no_template">No pallet label template — set one in the cabinet</string>
     <string name="pallet_refused_no_issuer">The organisation has no GLN — the pallet cannot be numbered</string>
     <string name="pallet_refused_unavailable">Could not close the pallet — try again</string>

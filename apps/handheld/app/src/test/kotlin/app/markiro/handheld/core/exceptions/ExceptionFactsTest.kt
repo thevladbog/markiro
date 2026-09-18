@@ -146,7 +146,19 @@ class ExceptionFactsTest {
         )
         assertEquals(
             listOf("Этикетка повреждена", "Этикетка не читается", "Замятие принтера / нет печати", "Запрос контроля качества"),
-            ReprintReason.entries.filter { it != ReprintReason.PRINT_OUTCOME_UNKNOWN }.map { it.audit },
+            // The four an operator may CHOOSE. The two written by the app itself
+            // -- print recovery and the pallet rejection notice -- name events
+            // the station has no chooser for, so they carry their own wording.
+            ReprintReason.entries
+                .filter { it != ReprintReason.PRINT_OUTCOME_UNKNOWN && it != ReprintReason.PALLET_CONTENTS_CHANGED }
+                .map { it.audit },
         )
+    }
+
+    /** The self-written reasons still have to say something an auditor can read. */
+    @Test
+    fun theSelfWrittenReprintReasonsCarryTheirOwnWording() {
+        assertEquals("Результат печати неизвестен", ReprintReason.PRINT_OUTCOME_UNKNOWN.audit)
+        assertEquals("Состав паллеты изменился", ReprintReason.PALLET_CONTENTS_CHANGED.audit)
     }
 }

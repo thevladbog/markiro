@@ -91,8 +91,8 @@ class PalletsViewModelTest {
         var closeResult: ClosePalletResult = ClosePalletResult.Empty
         var printOutcome: PrintOutcome = PrintOutcome.Printed
 
-        /** Every print attempt in order: the pallet, the replacement printer, and the unknown-retry flag. */
-        val prints = mutableListOf<Triple<String, String?, Boolean>>()
+        /** Every print attempt in order: the pallet, the replacement printer, the unknown-retry flag, the reprint flag. */
+        val prints = mutableListOf<Print>()
 
         /** Held open, this keeps a print in flight so «Back» can be tested against it. */
         var printGate: CompletableDeferred<Unit>? = null
@@ -103,6 +103,8 @@ class PalletsViewModelTest {
         var closeCalls = 0
         var removed: Pair<String, String>? = null
         var acknowledged: String? = null
+        val reprintReasons = mutableListOf<ReprintReason>()
+        val pallets = mutableMapOf<String, PalletEntity>()
         var nudges = 0
         var refreshes = 0
         var resolved: String? = null
@@ -132,9 +134,13 @@ class PalletsViewModelTest {
 
         override fun observeMembers(palletId: String): Flow<List<PalletMembershipEntity>> = members
 
-        override fun observeRejections(palletId: String): Flow<List<PalletMembershipEntity>> = rejections
+        override fun observeRejections(): Flow<List<PalletMembershipEntity>> = rejections
 
         override suspend fun capacity(pallet: PalletEntity): Int? = 12
+
+        override suspend fun pallet(palletId: String): PalletEntity? = pallets[palletId]
+
+        override suspend fun countOnPallet(palletId: String): Int = 5
 
         override suspend fun productName(productId: String): String? = "Вода 0,5 л"
 
@@ -158,8 +164,13 @@ class PalletsViewModelTest {
             acknowledged = palletId
         }
 
-        override suspend fun print(palletId: String, replacementPrinterId: String?, allowUnknown: Boolean): PrintOutcome {
-            prints += Triple(palletId, replacementPrinterId, allowUnknown)
+        override suspend fun print(
+            palletId: String,
+            replacementPrinterId: String?,
+            allowUnknown: Boolean,
+            reprint: Boolean,
+        ): PrintOutcome {
+            prints += Print(palletId, replacementPrinterId, allowUnknown, reprint)
             printGate?.await()
             return printOutcome
         }
@@ -174,6 +185,7 @@ class PalletsViewModelTest {
 
         override suspend fun reprintPallet(palletId: String, reason: ReprintReason, operatorId: String?, deviceId: String?) {
             reprints++
+            reprintReasons += reason
         }
 
         override suspend fun deviceId(): String? = "dev-1"
@@ -187,9 +199,17 @@ class PalletsViewModelTest {
         PalletsViewModel(gateway, session, ScanRouterAdapter(scans), db.recovery) { signals += it },
     )
 
-    private fun rejection(sscc: String, reason: String, winner: String?) = PalletMembershipEntity(
-        palletId = "w1", sscc = sscc, addedAt = "t", operatorId = null, status = MembershipStatus.REJECTED,
+    /** One print attempt as the gateway saw it. */
+    private data class Print(val palletId: String, val printerId: String?, val allowUnknown: Boolean, val reprint: Boolean)
+
+    private fun rejection(sscc: String, reason: String, winner: String?, palletId: String = "w1") = PalletMembershipEntity(
+        palletId = palletId, sscc = sscc, addedAt = "t", operatorId = null, status = MembershipStatus.REJECTED,
         reason = reason, winningPalletSscc = winner, ackedAt = "t", acknowledgedAt = null,
+    )
+
+    /** A pallet this device already closed and labelled. */
+    private val closedPallet = openPallet.copy(
+        palletId = "w0", sscc = "134600682000000011", closedAt = "t", printState = PalletPrint.PRINTED,
     )
 
     @Test
@@ -250,7 +270,7 @@ class PalletsViewModelTest {
         // The automatic first label goes to the assigned printer and is NOT
         // allowed to resolve an unknown outcome on its own: only a person who
         // looked at the printer may say a label with an unknown fate was fine.
-        assertEquals(listOf(Triple("w1", null, false)), gateway.prints)
+        assertEquals(listOf(Print("w1", null, allowUnknown = false, reprint = false)), gateway.prints)
         // The pallet this verdict named is closed; its banner must not survive.
         assertNull(vm.state.value.lastVerdict)
     }
@@ -284,12 +304,78 @@ class PalletsViewModelTest {
         val vm = vm()
         advanceUntilIdle()
         assertEquals(1, vm.state.value.rejections.size)
-        vm.acknowledge()
+        vm.acknowledge("w1")
         advanceUntilIdle()
         assertEquals("w1", gateway.acknowledged)
     }
 
     /** A rejected row is not on the pallet, so it must not be counted as one of its boxes. */
+    /**
+     * The case that made the label lie: a membership is still pending when the
+     * operator closes the pallet and prints it, and the rejection lands after.
+     * Scoped to the open pallet, that news arrived only while that pallet was
+     * open -- which it no longer is -- so the paper on the stack kept claiming
+     * a box that is recorded somewhere else, with nothing on screen to say so.
+     */
+    @Test
+    fun aRejectionOnAClosedPalletIsShownWithNoPalletOpen() = runTest {
+        gateway.open.value = null
+        gateway.pallets["w0"] = closedPallet
+        gateway.rejections.value = listOf(rejection("034600682000000014", "already_on_pallet", null, palletId = "w0"))
+        val vm = vm()
+        advanceUntilIdle()
+        assertNull(vm.state.value.pallet)
+        assertEquals(1, vm.state.value.rejections.size)
+        assertEquals("w0", vm.state.value.rejections.single().palletId)
+        assertEquals(closedPallet, vm.state.value.rejectionPallets["w0"])
+        // «Принято» names the pallet now: the old open-pallet-only form had
+        // nothing to acknowledge here at all.
+        vm.acknowledge("w0")
+        advanceUntilIdle()
+        assertEquals("w0", gateway.acknowledged)
+    }
+
+    /**
+     * The replacement label. It is a real second label in the warehouse, so the
+     * reprint exception is queued BEFORE the print goes out, and it carries the
+     * reason that is actually true: the pallet's contents changed.
+     */
+    @Test
+    fun reprintingAClosedPalletQueuesTheFactAndDrivesThePrintStep() = runTest {
+        gateway.open.value = null
+        gateway.pallets["w0"] = closedPallet
+        gateway.rejections.value = listOf(rejection("034600682000000014", "already_on_pallet", null, palletId = "w0"))
+        gateway.printOutcome = PrintOutcome.Printed
+        val vm = vm()
+        advanceUntilIdle()
+        vm.reprint("w0")
+        advanceUntilIdle()
+        assertEquals(1, gateway.reprints)
+        assertEquals(listOf(ReprintReason.PALLET_CONTENTS_CHANGED), gateway.reprintReasons)
+        // `reprint = true` is what lets `PalletPrinter` print a pallet whose
+        // state is already `printed`; without it the second label never leaves.
+        assertEquals(listOf(Print("w0", null, allowUnknown = true, reprint = true)), gateway.prints)
+        val step = vm.state.value.closeStep
+        assertTrue(step is PalletCloseStep.Printed)
+        // The count on the replacement label is the pallet's CURRENT one.
+        assertEquals("134600682000000011", (step as PalletCloseStep.Printed).pallet.sscc)
+        assertEquals(5, step.pallet.boxCount)
+    }
+
+    /** Nothing is reprinted for a pallet that was never printed. */
+    @Test
+    fun anOpenPalletHasNoLabelToReprint() = runTest {
+        gateway.pallets["w1"] = openPallet
+        gateway.rejections.value = listOf(rejection("034600682000000014", "not_found", null))
+        val vm = vm()
+        advanceUntilIdle()
+        vm.reprint("w1")
+        advanceUntilIdle()
+        assertEquals(0, gateway.reprints)
+        assertTrue(gateway.prints.isEmpty())
+        assertEquals(PalletCloseStep.Idle, vm.state.value.closeStep)
+    }
+
     @Test
     fun rejectedRowsAreNotCountedAsMembers() = runTest {
         gateway.members.value = listOf(
@@ -349,7 +435,10 @@ class PalletsViewModelTest {
         assertTrue(vm.state.value.closeStep is PalletCloseStep.Printed)
         // The first attempt refused to resolve an unknown outcome; the operator's
         // own retry is the one that carries `allowUnknown`.
-        assertEquals(listOf(Triple("w1", null, false), Triple("w1", null, true)), gateway.prints)
+        assertEquals(
+            listOf(Print("w1", null, allowUnknown = false, reprint = false), Print("w1", null, allowUnknown = true, reprint = false)),
+            gateway.prints,
+        )
     }
 
     /**
@@ -371,7 +460,7 @@ class PalletsViewModelTest {
         gateway.printOutcome = PrintOutcome.Printed
         vm.retryPrint("printer-2")
         advanceUntilIdle()
-        assertEquals(Triple("w1", "printer-2", true), gateway.prints.last())
+        assertEquals(Print("w1", "printer-2", allowUnknown = true, reprint = false), gateway.prints.last())
         assertTrue(vm.state.value.closeStep is PalletCloseStep.Printed)
         // A failed print is not an unknown one, so no reprint exception is owed.
         assertEquals(0, gateway.reprints)

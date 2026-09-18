@@ -183,4 +183,12 @@ enum class ReprintReason(val audit: String) {
      * operator resolves an unknown outcome with «Напечатать ещё раз».
      */
     PRINT_OUTCOME_UNKNOWN("Результат печати неизвестен"),
+
+    /**
+     * Never offered in the reason list either: written when the server rejects
+     * a membership AFTER the pallet was closed and labelled, so the printed
+     * box count no longer matches the stack and the operator asks for a new
+     * label from the rejection notice.
+     */
+    PALLET_CONTENTS_CHANGED("Состав паллеты изменился"),
 }

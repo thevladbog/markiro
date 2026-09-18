@@ -28,7 +28,6 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -77,7 +76,13 @@ data class PalletsUi(
     val boxCount: Int = 0,
     val capacity: Int? = null,
     val members: List<PalletMembershipEntity> = emptyList(),
+    /**
+     * Unacknowledged rejections across every warehouse pallet of this DEVICE,
+     * closed ones included -- see [PalletsGateway.observeRejections].
+     */
     val rejections: List<PalletMembershipEntity> = emptyList(),
+    /** The pallet row behind each rejected membership: its number, and whether it is closed. */
+    val rejectionPallets: Map<String, PalletEntity> = emptyMap(),
     val lastVerdict: PalletVerdict? = null,
     val confirmEarlyClose: Boolean = false,
     val closeStep: PalletCloseStep = PalletCloseStep.Idle,
@@ -182,7 +187,7 @@ class PalletsViewModel(
                     _state.update {
                         it.copy(
                             pallet = null, productName = "", boxCount = 0, capacity = null,
-                            members = emptyList(), rejections = emptyList(), lastVerdict = null,
+                            members = emptyList(), lastVerdict = null,
                         )
                     }
                     return@collectLatest
@@ -190,14 +195,25 @@ class PalletsViewModel(
                 val name = runCatching { recovery.work { pallet.productId?.let { id -> gateway.productName(id) } } }.getOrNull().orEmpty()
                 val capacity = runCatching { recovery.work { gateway.capacity(pallet) } }.getOrNull()
                 _state.update { it.copy(pallet = pallet, productName = name, capacity = capacity) }
-                combine(gateway.observeMembers(pallet.palletId), gateway.observeRejections(pallet.palletId)) { m, r -> m to r }
-                    .collect { (members, rejections) ->
-                        // A rejected row is not on the pallet: the server refused it,
-                        // and counting it would print a label claiming a box that is
-                        // recorded somewhere else.
-                        val onPallet = members.filter { m -> m.status != MembershipStatus.REJECTED }
-                        _state.update { it.copy(members = onPallet, boxCount = onPallet.size, rejections = rejections) }
-                    }
+                gateway.observeMembers(pallet.palletId).collect { members ->
+                    // A rejected row is not on the pallet: the server refused it,
+                    // and counting it would print a label claiming a box that is
+                    // recorded somewhere else.
+                    val onPallet = members.filter { m -> m.status != MembershipStatus.REJECTED }
+                    _state.update { it.copy(members = onPallet, boxCount = onPallet.size) }
+                }
+            }
+        }
+        // Device-wide and independent of the open pallet: a membership rejected
+        // after its pallet was closed and labelled belongs to a pallet that is
+        // no longer on this screen, and it is exactly the case where the label
+        // already in the warehouse overstates the stack.
+        viewModelScope.launch {
+            gateway.observeRejections().collectLatest { rejections ->
+                val pallets = rejections.map { it.palletId }.distinct()
+                    .mapNotNull { id -> runCatching { recovery.work { gateway.pallet(id) } }.getOrNull() }
+                    .associateBy { it.palletId }
+                _state.update { it.copy(rejections = rejections, rejectionPallets = pallets) }
             }
         }
         viewModelScope.launch { runCatching { gateway.refresh() } }
@@ -300,9 +316,10 @@ class PalletsViewModel(
         closed: ClosedPalletUi,
         replacementPrinterId: String? = null,
         explicitRetry: Boolean = false,
+        reprint: Boolean = false,
     ): PalletCloseStep =
         when (val printed = runCatching {
-            recovery.work { gateway.print(closed.palletId, replacementPrinterId, allowUnknown = explicitRetry) }
+            recovery.work { gateway.print(closed.palletId, replacementPrinterId, allowUnknown = explicitRetry, reprint = reprint) }
         }.getOrElse { PrintOutcome.Unknown("interrupted") }) {
             PrintOutcome.Printed -> PalletCloseStep.Printed(closed)
             is PrintOutcome.Failed -> PalletCloseStep.Failed(closed, printed.reason)
@@ -358,12 +375,64 @@ class PalletsViewModel(
         if (it.closeStep is PalletCloseStep.Printing) it else it.copy(closeStep = PalletCloseStep.Idle)
     }
 
-    fun acknowledge() {
-        val pallet = _state.value.pallet ?: return
-        viewModelScope.launch { runCatching { recovery.work { gateway.acknowledge(pallet.palletId) } } }
+    /**
+     * «Принято» on ONE pallet's section. The notice is device-wide now, so
+     * clearing it has to name the pallet: dismissing a closed pallet's
+     * rejections must not silently swallow the open pallet's.
+     */
+    fun acknowledge(palletId: String) {
+        viewModelScope.launch { runCatching { recovery.work { gateway.acknowledge(palletId) } } }
+    }
+
+    /**
+     * A new label for a pallet that was already closed and printed when the
+     * server refused some of its boxes.
+     *
+     * The label states `qty.boxes`, so a rejection that lands afterwards makes
+     * the paper on the stack overstate it, and a goods-in clerk counts boxes
+     * against a number that is wrong. The reprint is recorded as an exception
+     * BEFORE the second label is sent, for the same reason the unknown-outcome
+     * retry is: a second label in the warehouse is a real duplicate, and it has
+     * to be explained even if the print then fails.
+     *
+     * Only a CLOSED pallet has a label to replace; an open one is not printed
+     * yet, so nothing is reprinted for it.
+     */
+    fun reprint(palletId: String) {
+        val pallet = _state.value.rejectionPallets[palletId] ?: return
+        val sscc = pallet.sscc?.takeIf { pallet.closedAt != null } ?: return
+        if (!retrying.compareAndSet(false, true)) return
+        viewModelScope.launch {
+            try {
+                val count = runCatching { recovery.work { gateway.countOnPallet(palletId) } }.getOrDefault(0)
+                val closed = ClosedPalletUi(palletId, sscc, count)
+                runCatching {
+                    recovery.work {
+                        gateway.reprintPallet(palletId, ReprintReason.PALLET_CONTENTS_CHANGED, operatorId, gateway.deviceId())
+                    }
+                }
+                _state.update { it.copy(closeStep = PalletCloseStep.Printing(closed)) }
+                val step = attemptPrint(closed, explicitRetry = true, reprint = true)
+                _state.update { it.copy(closeStep = step) }
+            } finally {
+                retrying.set(false)
+            }
+        }
     }
 
     fun refresh() {
+        // Device-wide and independent of the open pallet: a membership rejected
+        // after its pallet was closed and labelled belongs to a pallet that is
+        // no longer on this screen, and it is exactly the case where the label
+        // already in the warehouse overstates the stack.
+        viewModelScope.launch {
+            gateway.observeRejections().collectLatest { rejections ->
+                val pallets = rejections.map { it.palletId }.distinct()
+                    .mapNotNull { id -> runCatching { recovery.work { gateway.pallet(id) } }.getOrNull() }
+                    .associateBy { it.palletId }
+                _state.update { it.copy(rejections = rejections, rejectionPallets = pallets) }
+            }
+        }
         viewModelScope.launch { runCatching { gateway.refresh() } }
     }
 

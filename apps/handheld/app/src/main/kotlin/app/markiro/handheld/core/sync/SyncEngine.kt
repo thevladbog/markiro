@@ -614,11 +614,23 @@ class SyncEngine(
                 val palletId = o.stringOrNull("palletId") ?: return null
                 val boxSscc = o.stringOrNull("boxSscc") ?: return null
                 val status = o.stringOrNull("status") ?: return null
-                MembershipOutcome(palletId, boxSscc, status, o.stringOrNull("winningPalletSscc"))
+                MembershipOutcome(palletId, boxSscc, status, rawSscc(o.stringOrNull("winningPalletSscc")))
             }
         }
         return BatchResponse(applied, alreadyApplied, conflicts, denied, parseReceipt(obj), occurrences, memberships)
     }
+
+    /**
+     * The winning pallet's SSCC as this device stores one: 18 raw digits.
+     *
+     * The server may answer with the AI-(00) element string, 20 digits with the
+     * application identifier in front. Stored as-is, the screen's `takeLast(6)`
+     * still reads right by luck while any comparison against a local `sscc`
+     * silently never matches. Normalising here keeps one representation in the
+     * database; anything else is passed through untouched.
+     */
+    private fun rawSscc(value: String?): String? =
+        if (value != null && value.length == 20 && value.startsWith("00") && value.all { it.isDigit() }) value.substring(2) else value
 
     private fun kotlinx.serialization.json.JsonObject.stringOrNull(key: String): String? =
         (this[key] as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content

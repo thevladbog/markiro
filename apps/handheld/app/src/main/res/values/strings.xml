@@ -553,6 +553,7 @@
     <string name="reason_unreadable_label">Этикетка не читается</string>
     <string name="reason_printer_jam">Замятие принтера / нет печати</string>
     <string name="reason_quality_request">Запрос контроля качества</string>
+    <string name="reason_pallet_contents_changed">Состав паллеты изменился</string>
     <string name="reprint_title">Перепечатать этикетку</string>
     <string name="reprint_last">Последняя · короб %1$d</string>
     <string name="reprint_scan">Сканировать SSCC короба</string>
@@ -750,6 +751,9 @@
     <string name="pallets_reject_read_only">Подписка только для чтения</string>
     <string name="pallets_reject_other">Отклонено сервером</string>
     <string name="pallets_acknowledge">Принято</string>
+    <string name="pallets_rejected_pallet">Паллета …%1$s</string>
+    <string name="pallets_rejected_pallet_open">Открытая паллета</string>
+    <string name="pallets_reprint">Перепечатать этикетку</string>
     <string name="pallet_refused_no_template">Нет шаблона этикетки паллеты — задайте его в кабинете</string>
     <string name="pallet_refused_no_issuer">В организации не задан GLN — паллета не получит номер</string>
     <string name="pallet_refused_unavailable">Не удалось закрыть паллету — попробуйте ещё раз</string>
