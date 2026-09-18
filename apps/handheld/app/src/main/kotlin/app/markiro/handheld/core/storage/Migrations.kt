@@ -466,8 +466,15 @@ val MIGRATION_17_18 = object : Migration(17, 18) {
         db.execSQL(
             "CREATE TABLE IF NOT EXISTS `pallet_memberships` (`palletId` TEXT NOT NULL, `sscc` TEXT NOT NULL, `addedAt` TEXT NOT NULL, " +
                 "`operatorId` TEXT, `status` TEXT NOT NULL, `reason` TEXT, `winningPalletSscc` TEXT, `ackedAt` TEXT, `acknowledgedAt` TEXT, " +
-                "PRIMARY KEY(`palletId`, `sscc`))",
+                "`bottleCount` INTEGER, `productionDate` TEXT, PRIMARY KEY(`palletId`, `sscc`))",
         )
+        // Guarded the same way the registry's columns are: a fixture rewound to
+        // v17 after this migration first shipped already holds the table in its
+        // earlier v18 shape, without the two snapshot columns.
+        val membershipColumns = db.columnsOf("pallet_memberships")
+        for (column in listOf("bottleCount" to "INTEGER", "productionDate" to "TEXT")) {
+            if (column.first !in membershipColumns) db.execSQL("ALTER TABLE `pallet_memberships` ADD COLUMN `${column.first}` ${column.second}")
+        }
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_pallet_memberships_status_addedAt` ON `pallet_memberships` (`status`, `addedAt`)")
         db.execSQL(
             "CREATE TABLE IF NOT EXISTS `pallet_products` (`id` TEXT NOT NULL, `gtin14` TEXT NOT NULL, `name` TEXT NOT NULL, `printName` TEXT, " +

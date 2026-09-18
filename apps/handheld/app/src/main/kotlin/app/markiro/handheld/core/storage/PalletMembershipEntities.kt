@@ -33,6 +33,19 @@ data class PalletMembershipEntity(
     val winningPalletSscc: String?,
     val ackedAt: String?,
     val acknowledgedAt: String?,
+    /**
+     * The member box's unit count, SNAPSHOT at attach time rather than read
+     * back through `box_registry`.
+     *
+     * The registry is a server mirror: a delta `remove` or a full re-walk can
+     * drop the row of a box that is physically still on this pallet, and a
+     * pallet label whose `qty` silently dropped by a box's worth of units is a
+     * goods-in dispute nobody can reconstruct afterwards. Nullable so Room
+     * needs no default and rows written before this column existed still read.
+     */
+    val bottleCount: Int? = null,
+    /** The member box's civil `YYYY-MM-DD`, snapshot for the same reason. */
+    val productionDate: String? = null,
 )
 
 @Dao
@@ -77,6 +90,15 @@ interface PalletMembershipDao {
     @Query("DELETE FROM pallet_memberships WHERE palletId = :palletId AND sscc = :sscc AND status = 'pending'")
     suspend fun deletePending(palletId: String, sscc: String): Int
 
+    /**
+     * Clears a rejected row so the operator can re-scan the box onto this same
+     * pallet once the conflict is resolved. A rejected membership is not
+     * "already on this pallet" -- the server refused it -- and the primary key
+     * would otherwise abort the second insert forever.
+     */
+    @Query("DELETE FROM pallet_memberships WHERE palletId = :palletId AND sscc = :sscc AND status = 'rejected'")
+    suspend fun deleteRejected(palletId: String, sscc: String): Int
+
     @Query("SELECT COUNT(*) FROM pallet_memberships WHERE status IN ('pending', 'sent')")
     fun observePendingCount(): Flow<Int>
 
@@ -93,18 +115,15 @@ interface PalletMembershipDao {
     @Query("UPDATE pallet_memberships SET acknowledgedAt = :at WHERE palletId = :palletId AND status = 'rejected' AND acknowledgedAt IS NULL")
     suspend fun acknowledge(palletId: String, at: String)
 
-    /** Units on the pallet, from the registry: a warehouse pallet's boxes hold another device's codes. */
-    @Query(
-        "SELECT COALESCE(SUM(b.bottleCount), 0) FROM pallet_memberships m JOIN box_registry b ON b.sscc = m.sscc " +
-            "WHERE m.palletId = :palletId AND m.status <> 'rejected'",
-    )
+    /**
+     * Units on the pallet, from the membership rows' OWN snapshot rather than
+     * from `box_registry`: see [PalletMembershipEntity.bottleCount].
+     */
+    @Query("SELECT COALESCE(SUM(bottleCount), 0) FROM pallet_memberships WHERE palletId = :palletId AND status <> 'rejected'")
     suspend fun bottleSum(palletId: String): Int
 
-    /** Distinct civil production dates of the member boxes (null when the registry has none). */
-    @Query(
-        "SELECT DISTINCT b.productionDate FROM pallet_memberships m JOIN box_registry b ON b.sscc = m.sscc " +
-            "WHERE m.palletId = :palletId AND m.status <> 'rejected'",
-    )
+    /** Distinct civil production dates of the member boxes, snapshot at attach (null when unknown). */
+    @Query("SELECT DISTINCT productionDate FROM pallet_memberships WHERE palletId = :palletId AND status <> 'rejected'")
     suspend fun productionDates(palletId: String): List<String?>
 
     @Query("DELETE FROM pallet_memberships")

@@ -93,10 +93,15 @@ class WarehousePalletMigrationTest {
             )
             assertEquals("w1", db.palletDao().openWarehouse("dev-1")?.palletId)
             db.palletMembershipDao().insert(
-                PalletMembershipEntity("w1", "034600682000000018", "t", "op-1", MembershipStatus.PENDING, null, null, null, null),
+                PalletMembershipEntity(
+                    "w1", "034600682000000018", "t", "op-1", MembershipStatus.PENDING, null, null, null, null,
+                    bottleCount = 12, productionDate = "2026-09-10",
+                ),
             )
             assertEquals(1, db.palletMembershipDao().pending(10).size)
+            // The membership's OWN snapshot, not a join back into box_registry.
             assertEquals(12, db.palletMembershipDao().bottleSum("w1"))
+            assertEquals(listOf("2026-09-10"), db.palletMembershipDao().productionDates("w1"))
         } finally {
             db.close()
         }
