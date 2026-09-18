@@ -68,6 +68,11 @@ class MetaStore(private val db: HandheldDatabase) {
          * (409) forever -- wedging every channel on the device. The snapshot is
          * written under the same commit as the pin, so a local delete cannot
          * change the bytes a pinned batch resends.
+         *
+         * `SYNC_PENDING_MEMBERSHIP_COUNT` stays the authority on how many rows a
+         * pin holds and this key on which bytes they are; a pin left by a build
+         * that predates this key is materialised from `sent()` before its first
+         * retry, and abandoned if its rows are already gone.
          */
         const val SYNC_PENDING_MEMBERSHIP_SNAPSHOT = "sync_pending_membership_snapshot"
 

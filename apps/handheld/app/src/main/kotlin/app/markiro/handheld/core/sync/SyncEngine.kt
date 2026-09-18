@@ -31,6 +31,7 @@ import app.markiro.handheld.core.storage.PalletEntity
 import app.markiro.handheld.core.storage.ShiftCloseEntity
 import app.markiro.handheld.core.util.Iso
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -119,6 +120,23 @@ class SyncEngine(
             val since = last ?: startedAt
             SyncState(pending = owed, lastSuccessAt = last, stuck = owed > 0 && at - since > STUCK_AFTER_MS, conflicts = conflicts)
         }.stateIn(scope, SharingStarted.Eagerly, SyncState())
+
+    /**
+     * Materialisation of a pin written by a build that predates
+     * `MetaStore.SYNC_PENDING_MEMBERSHIP_SNAPSHOT`, run once as soon as the
+     * engine exists -- which on a device is app start, before an operator can
+     * reach «Убрать с паллеты» and delete a `sent` row the pin names. Joinable
+     * so a test can order itself against it; the drain does not wait on it,
+     * because the retry path materialises the same pin itself if this has not
+     * got there yet.
+     */
+    internal val legacyPinMaterialised: Job = scope.launch {
+        try {
+            materialiseLegacyPin()
+        } catch (_: app.markiro.handheld.core.storage.RecoveryBlocked) {
+            // Sealed or superseded device data: nothing is owed and nothing is sent.
+        }
+    }
 
     fun start() {
         if (!started.compareAndSet(false, true)) return
@@ -218,6 +236,17 @@ class SyncEngine(
             meta.get(MetaStore.SYNC_PENDING_MEMBERSHIP_COUNT)?.toIntOrNull() ?: 0
         } else {
             MAX_PALLET_MEMBERSHIPS
+        }
+        // A pin from a build that predates the snapshot gets its bytes now, if
+        // the construction-time pass has not already done it. `false` means the
+        // pin was damaged and has just been abandoned, so this drain restarts
+        // against clean meta rather than continuing with a ceiling and a batch
+        // id that no longer exist.
+        if (pendingCeiling != null && membershipLimit > 0 &&
+            meta.get(MetaStore.SYNC_PENDING_MEMBERSHIP_SNAPSHOT) == null &&
+            !materialiseLegacyPin()
+        ) {
+            return Step.SENT
         }
         // The DTOs a batch in flight actually pinned, read back verbatim.
         //
@@ -572,6 +601,49 @@ class SyncEngine(
         }
         lastSuccess.value = at
         return Step.SENT
+    }
+
+    /**
+     * Gives a pin written before `MetaStore.SYNC_PENDING_MEMBERSHIP_SNAPSHOT`
+     * existed the bytes it never stored, and answers whether that pin is still
+     * usable.
+     *
+     * Such a pin survives the update that introduces the snapshot, and the very
+     * next thing an operator can do offline is take one of its boxes off the
+     * pallet -- `WarehousePallets.remove` deletes the `sent` row the pin names.
+     * A retry would then fall back to the live `sent()` read, resend the
+     * identical `batchId` one membership short, and the server would answer
+     * `station_batch_mismatch` (409) on that batch forever, wedging every
+     * channel on the terminal. So the snapshot is taken while the rows are
+     * still all there: at engine construction, and again on the retry path for
+     * a pin that reached it first.
+     *
+     * When the rows have ALREADY vanished there is nothing left to reconstruct
+     * and no safe body to send, so the pin is abandoned instead: `sent` rows go
+     * back to `pending` and ride a new batch id, which the server tolerates
+     * because items and boxes are idempotent per record. A short body under the
+     * old id would not be tolerated at all.
+     */
+    private suspend fun materialiseLegacyPin(): Boolean = db.recovery.commit {
+        val count = meta.get(MetaStore.SYNC_PENDING_MEMBERSHIP_COUNT)?.toIntOrNull() ?: 0
+        val pinned = meta.get(MetaStore.SYNC_PENDING_BATCH_ID) != null &&
+            meta.get(MetaStore.SYNC_PENDING_CEILING)?.toLongOrNull() != null
+        if (!pinned || count <= 0 || meta.get(MetaStore.SYNC_PENDING_MEMBERSHIP_SNAPSHOT) != null) {
+            return@commit true
+        }
+        val rows = db.palletMembershipDao().sent(count)
+        if (rows.size != count) {
+            clearPendingOwned()
+            return@commit false
+        }
+        meta.put(
+            MetaStore.SYNC_PENDING_MEMBERSHIP_SNAPSHOT,
+            json.encodeToString(
+                ListSerializer(PalletMembershipDto.serializer()),
+                rows.map { PalletMembershipDto(it.palletId, it.sscc, it.addedAt, it.operatorId) },
+            ),
+        )
+        true
     }
 
     private suspend fun clearPending() = db.recovery.commit { clearPendingOwned() }

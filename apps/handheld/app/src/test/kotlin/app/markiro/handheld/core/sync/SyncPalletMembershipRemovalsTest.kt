@@ -306,4 +306,86 @@ class SyncPalletMembershipRemovalsTest {
         assertEquals(MembershipStatus.ACCEPTED, db.palletMembershipDao().byPallet("w1").single().status)
         assertNull(db.boxRegistryDao().bySscc("034600682000000018")?.palletId)
     }
+
+    /**
+     * A pin written by a build that predates `SYNC_PENDING_MEMBERSHIP_SNAPSHOT`
+     * carries the membership COUNT but none of the bytes. Such a pin survives
+     * the update that introduces the snapshot, and the very next thing an
+     * offline operator can do is take one of its boxes off the pallet -- which
+     * deletes the `sent` row the pin names. A retry rebuilt from a live `sent()`
+     * read would then resend the identical `batchId` one membership short, the
+     * server would answer `station_batch_mismatch` (409) and every channel on
+     * this terminal would wedge forever. The engine materialises such a pin's
+     * snapshot when it is constructed, BEFORE any removal can reach the row.
+     */
+    @Test
+    fun aPinFromBeforeTheSnapshotIsMaterialisedBeforeTheFirstRetry() = runTest {
+        warehousePallet("w1", closed = false)
+        membership("w1", "034600682000000018")
+        db.palletMembershipDao().markSent("w1", "034600682000000018")
+        // Exactly the keys the shipped build writes: a batch id, a ceiling and a
+        // membership count, and no snapshot.
+        meta().put(MetaStore.SYNC_PENDING_BATCH_ID, "legacy-batch")
+        meta().put(MetaStore.SYNC_PENDING_CEILING, "0")
+        meta().put(MetaStore.SYNC_PENDING_MEMBERSHIP_COUNT, "1")
+
+        val sync = engine()
+        sync.legacyPinMaterialised.join()
+        assertNotNull(meta().get(MetaStore.SYNC_PENDING_MEMBERSHIP_SNAPSHOT))
+
+        // Only now, still offline, does the operator take the box off the pallet.
+        db.palletMembershipDao().delete("w1", "034600682000000018")
+
+        server.enqueue(
+            MockResponse().setResponseCode(201).setBody(
+                """{"applied":0,"alreadyApplied":false,"conflicts":[],"memberships":[""" +
+                    """{"palletId":"w1","boxSscc":"034600682000000018","status":"accepted"}]}""",
+            ),
+        )
+        assertTrue(sync.drainAll())
+
+        val body = bodyOf(takeRequest())
+        assertEquals("legacy-batch", body.getValue("batchId").jsonPrimitive.content)
+        val sent = body.getValue("palletMemberships").jsonArray.map { it.jsonObject }
+        assertEquals(1, sent.size)
+        assertEquals("034600682000000018", sent.single().getValue("boxSscc").jsonPrimitive.content)
+        assertNull(meta().get(MetaStore.SYNC_PENDING_MEMBERSHIP_SNAPSHOT))
+        assertNull(meta().get(MetaStore.SYNC_PENDING_BATCH_ID))
+    }
+
+    /**
+     * The same pin, but its row is already gone by the time the engine exists --
+     * the removal landed under the old build, or the pin is otherwise damaged.
+     * There are no bytes left to reconstruct, and resending `legacy-batch` short
+     * is the wedge itself, so the pin is abandoned: its rows go back to
+     * `pending` and ride a NEW batch id, which the server's per-record
+     * idempotency tolerates.
+     */
+    @Test
+    fun aDamagedLegacyPinIsAbandonedRatherThanResentShort() = runTest {
+        warehousePallet("w1", closed = false)
+        // The pin claims one membership; none is `sent`.
+        meta().put(MetaStore.SYNC_PENDING_BATCH_ID, "legacy-batch")
+        meta().put(MetaStore.SYNC_PENDING_CEILING, "0")
+        meta().put(MetaStore.SYNC_PENDING_MEMBERSHIP_COUNT, "1")
+        // Work queued since, which the fresh batch carries.
+        membership("w1", "034600682000000025")
+
+        server.enqueue(
+            MockResponse().setResponseCode(201).setBody(
+                """{"applied":0,"alreadyApplied":false,"conflicts":[],"memberships":[""" +
+                    """{"palletId":"w1","boxSscc":"034600682000000025","status":"accepted"}]}""",
+            ),
+        )
+        assertTrue(engine().drainAll())
+
+        val body = bodyOf(takeRequest())
+        assertFalse(
+            "a damaged pin must not be resent short",
+            "legacy-batch" == body.getValue("batchId").jsonPrimitive.content,
+        )
+        assertEquals(1, body.getValue("palletMemberships").jsonArray.size)
+        assertNull(meta().get(MetaStore.SYNC_PENDING_BATCH_ID))
+        assertEquals(MembershipStatus.ACCEPTED, db.palletMembershipDao().byPallet("w1").single().status)
+    }
 }
