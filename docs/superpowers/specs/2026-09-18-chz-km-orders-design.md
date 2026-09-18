@@ -207,8 +207,8 @@ because `startAfter` creates a new job, and a `deadline_at` (48 h from creation)
 **before** any token check so a tenant without a token cannot hold an immortal chain.
 
 1. `created → signing`: build the order body (`productGroup`, `products[{gtin, quantity,
-   serialNumberType: OPERATOR, templateId, cisType: UNIT}]`, `attributes{releaseMethodType:
-   PRODUCTION, contactPerson?, productionOrderId: <our order id>}`), persist
+serialNumberType: OPERATOR, templateId, cisType: UNIT}]`, `attributes{releaseMethodType:
+PRODUCTION, contactPerson?, productionOrderId: <our order id>}`), persist
    `request_body`, insert a `sign_detached` task. If the tenant's slot is busy (unique
    index), re-schedule in 30 s.
 2. `signing → submitted`: when the task is `completed`, `POST /order` with the stored body
@@ -319,16 +319,16 @@ this page (there is no shift), and the stock template does not use them.
 
 ## Error handling summary
 
-| Situation | Behaviour |
-| --- | --- |
-| No СУЗ settings / agent / token | Preflight refuses with a specific code; the UI links to the channel page |
-| Signing slot busy | Runner waits 30 s and retries; state stays `created` |
-| Signer task failed or expired | Back to `created`, up to 5 attempts, then `failed` with the task error |
-| СУЗ rejects the request (4xx) | `failed` with the СУЗ message; retry allowed after fixing settings |
-| СУЗ rejects the order (buffer `REJECTED`) | `rejected` with `rejectionReason`; no retry, order again |
-| Transport error / 5xx | Same state, backoff, attempts counted, deadline enforced |
-| Block lost between response and commit | Reconciliation before the last block re-fetches it by `block_id` |
-| Deadline (48 h) passed | `failed` with `deadline`; unfetched codes are annulled by СУЗ at its own pace |
+| Situation                                 | Behaviour                                                                     |
+| ----------------------------------------- | ----------------------------------------------------------------------------- |
+| No СУЗ settings / agent / token           | Preflight refuses with a specific code; the UI links to the channel page      |
+| Signing slot busy                         | Runner waits 30 s and retries; state stays `created`                          |
+| Signer task failed or expired             | Back to `created`, up to 5 attempts, then `failed` with the task error        |
+| СУЗ rejects the request (4xx)             | `failed` with the СУЗ message; retry allowed after fixing settings            |
+| СУЗ rejects the order (buffer `REJECTED`) | `rejected` with `rejectionReason`; no retry, order again                      |
+| Transport error / 5xx                     | Same state, backoff, attempts counted, deadline enforced                      |
+| Block lost between response and commit    | Reconciliation before the last block re-fetches it by `block_id`              |
+| Deadline (48 h) passed                    | `failed` with `deadline`; unfetched codes are annulled by СУЗ at its own pace |
 
 ## Testing
 

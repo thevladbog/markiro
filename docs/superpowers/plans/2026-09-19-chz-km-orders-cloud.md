@@ -31,22 +31,26 @@
 ## File structure
 
 **Domain (`packages/domain`)**
+
 - `src/chz/km-orders.ts` — template-id map, order body builder, TXT/CSV serialisers, file name.
 - `src/labels/km-defaults.ts` — `KM_LABEL_TEMPLATE_NAME`, `buildKmLabelTemplates()`, `assertKmTemplate()`.
 - `src/product-labels/contracts.ts` — `LabelTemplatePurpose` gains `"product_km"`.
 - `src/index.ts` — exports.
 
 **DB (`packages/db`)**
+
 - `src/schema/chz.ts` — task types, `chzOmsTokens`, `chzKmOrderStateEnum`, `chzKmOrders`, `chzKmCodes`, `chzKmIssues`.
 - `src/schema/labels.ts` — purpose CHECK gains `product_km`.
 - `migrations/0165_chz_km_orders.sql` (+ journal/snapshot) — tables, enum, CHECK, stock KM template seed.
 - `test/chz-km-orders.test.ts` — schema + migration runtime test.
 
 **Contracts (`packages/platform-contracts`)**
+
 - `src/chz-signer.ts` — task union, `oms_auth` and `sign_detached` payloads, signature completion body.
 - `fixtures/chz-signer/task-oms-auth.json`, `task-sign-detached.json`, `task-complete-signature.json`.
 
 **API (`apps/api`)**
+
 - `src/modules/integrations/channel-registry.ts` — `omsId`, `omsConnection`, `omsContactPerson`.
 - `src/modules/signer-agents/chz-constants.ts` — `CHZ_OMS_BASE_URLS`, `CHZ_OMS_TOKEN_TTL_MS`, `buildChzOmsAuthPayload`.
 - `src/modules/signer-agents/chz-crypto.service.ts` — `encryptWithAad`/`decryptWithAad`.
@@ -65,6 +69,7 @@
 - `src/app.module.ts` — register `ChzKmOrdersModule`.
 
 **Admin (`apps/admin`)**
+
 - `src/layout/AppShell.tsx` — regrouped `NAV_ITEMS`.
 - `src/pages/km-orders/api.ts`, `schemas.ts`, `index.tsx`, `KmOrderPage.tsx`, `CreateKmOrderDialog.tsx`, `IssueKmCodesDialog.tsx`, `KmOrderPrintPage.tsx`, `km-orders.css`.
 - `src/app.tsx` — routes `/km-orders`, `/km-orders/:orderId`, `/km-orders/:orderId/issues/:issueId/print`.
@@ -77,11 +82,13 @@
 ### Task 1: Domain — СУЗ order body, template map and code-file serialisers
 
 **Files:**
+
 - Create: `packages/domain/src/chz/km-orders.ts`
 - Modify: `packages/domain/src/index.ts`
 - Test: `packages/domain/test/chz-km-orders.test.ts`
 
 **Interfaces:**
+
 - Produces: `CHZ_UNIT_TEMPLATE_ID_BY_GROUP: Readonly<Record<string, number>>`, `chzUnitTemplateIdFor(alias: string): number | null`, `buildChzKmOrderBody(input: ChzKmOrderBodyInput): string`, `serializeKmCodesTxt(codes: readonly string[]): Uint8Array`, `serializeKmCodesCsv(codes: readonly string[]): Uint8Array`, `kmOrderIssueFileName(gtin14: string, fromSeq: number, toSeq: number, format: "txt" | "csv"): string`, type `ChzKmOrderBodyInput`.
 
 - [ ] **Step 1: Write the failing test**
@@ -297,12 +304,14 @@ git commit -m "feat(domain): СУЗ order body, UNIT template map and KM code fi
 ### Task 2: Domain — `product_km` label purpose, validation and stock template
 
 **Files:**
+
 - Modify: `packages/domain/src/product-labels/contracts.ts:17`
 - Create: `packages/domain/src/labels/km-defaults.ts`
 - Modify: `packages/domain/src/index.ts`
 - Test: `packages/domain/test/km-label-template.test.ts`
 
 **Interfaces:**
+
 - Consumes: `assertDuplicateTemplate`, `labelTemplateSpecSchema`, `DomainError`, `DefaultLabelTemplate` (from `labels/defaults.ts`).
 - Produces: `LabelTemplatePurpose` union with `"product_km"`; `KM_LABEL_TEMPLATE_NAME = "Этикетка КМ 58×40"`; `buildKmLabelTemplates(): DefaultLabelTemplate[]`; `assertKmTemplate(spec: LabelTemplateSpec): void` throwing `DomainError("KM_LABEL_TEMPLATE_INVALID")`.
 
@@ -391,7 +400,15 @@ export function buildKmLabelTemplates(): DefaultLabelTemplate[] {
         dpi: 203,
         language: "zpl",
         elements: [
-          { kind: "barcode", id: "km", xMm: 2, yMm: 2, format: "datamatrix", data: "km.code", sizeMm: 24 },
+          {
+            kind: "barcode",
+            id: "km",
+            xMm: 2,
+            yMm: 2,
+            format: "datamatrix",
+            data: "km.code",
+            sizeMm: 24,
+          },
           {
             kind: "field",
             id: "name",
@@ -403,8 +420,24 @@ export function buildKmLabelTemplates(): DefaultLabelTemplate[] {
             maxWidthMm: 28,
             maxLines: 3,
           },
-          { kind: "text", id: "cap-gtin", xMm: 28, yMm: 19, text: "GTIN", fontSizePt: 5, maxWidthMm: 28 },
-          { kind: "field", id: "gtin", xMm: 28, yMm: 21.5, field: "product.gtin", fontSizePt: 7, maxWidthMm: 28 },
+          {
+            kind: "text",
+            id: "cap-gtin",
+            xMm: 28,
+            yMm: 19,
+            text: "GTIN",
+            fontSizePt: 5,
+            maxWidthMm: 28,
+          },
+          {
+            kind: "field",
+            id: "gtin",
+            xMm: 28,
+            yMm: 21.5,
+            field: "product.gtin",
+            fontSizePt: 7,
+            maxWidthMm: 28,
+          },
           {
             kind: "field",
             id: "serial",
@@ -443,7 +476,11 @@ If `labelTemplateSpecSchema` rejects any property name above (check `packages/do
 Add to `packages/domain/src/index.ts`:
 
 ```ts
-export { KM_LABEL_TEMPLATE_NAME, assertKmTemplate, buildKmLabelTemplates } from "./labels/km-defaults.js";
+export {
+  KM_LABEL_TEMPLATE_NAME,
+  assertKmTemplate,
+  buildKmLabelTemplates,
+} from "./labels/km-defaults.js";
 ```
 
 - [ ] **Step 4: Run tests, typecheck, build**
@@ -463,12 +500,14 @@ git commit -m "feat(domain): product_km label purpose with a stock 58×40 KM tem
 ### Task 3: DB schema and migration 0165
 
 **Files:**
+
 - Modify: `packages/db/src/schema/chz.ts`
 - Modify: `packages/db/src/schema/labels.ts:64-67`
 - Create: `packages/db/migrations/0165_chz_km_orders.sql` (+ `meta/_journal.json`, `meta/0165_snapshot.json` via drizzle-kit)
 - Test: `packages/db/test/chz-km-orders.test.ts`
 
 **Interfaces:**
+
 - Produces: `CHZ_SIGNER_TASK_TYPES = ["true_api_auth", "oms_auth", "sign_detached"]`, tables `chzOmsTokens`, `chzKmOrders`, `chzKmCodes`, `chzKmIssues`, enum `chzKmOrderStateEnum`, constants `CHZ_KM_ORDER_STATES`, `CHZ_KM_CODE_STATUSES`, `CHZ_KM_ISSUE_KINDS`, row types `ChzKmOrderRow`, `ChzKmCodeRow`, `ChzKmIssueRow`, `ChzOmsTokenRow`.
 
 - [ ] **Step 1: Write the failing schema test**
@@ -485,7 +524,13 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import * as schema from "../src/schema.js";
-import { CHZ_SIGNER_TASK_TYPES, chzKmCodes, chzKmIssues, chzKmOrders, chzOmsTokens } from "../src/schema/chz.js";
+import {
+  CHZ_SIGNER_TASK_TYPES,
+  chzKmCodes,
+  chzKmIssues,
+  chzKmOrders,
+  chzOmsTokens,
+} from "../src/schema/chz.js";
 import { copyMigrationsThroughIndex } from "./support/legacy-migrations.js";
 
 describe("chz km orders schema", () => {
@@ -494,13 +539,39 @@ describe("chz km orders schema", () => {
   });
   it("carries order, code and issue columns", () => {
     expect(Object.keys(chzKmOrders)).toEqual(
-      expect.arrayContaining(["tenantId", "productId", "gtin14", "quantity", "state", "requestBody", "omsOrderId", "fetchedCount", "issuedCount", "deadlineAt"]),
+      expect.arrayContaining([
+        "tenantId",
+        "productId",
+        "gtin14",
+        "quantity",
+        "state",
+        "requestBody",
+        "omsOrderId",
+        "fetchedCount",
+        "issuedCount",
+        "deadlineAt",
+      ]),
     );
     expect(Object.keys(chzKmCodes)).toEqual(
-      expect.arrayContaining(["tenantId", "orderId", "seq", "encryptedCode", "codeNonce", "codeTag", "codeHash", "blockId", "status", "issueId"]),
+      expect.arrayContaining([
+        "tenantId",
+        "orderId",
+        "seq",
+        "encryptedCode",
+        "codeNonce",
+        "codeTag",
+        "codeHash",
+        "blockId",
+        "status",
+        "issueId",
+      ]),
     );
-    expect(Object.keys(chzKmIssues)).toEqual(expect.arrayContaining(["kind", "format", "fromSeq", "toSeq", "count"]));
-    expect(Object.keys(chzOmsTokens)).toEqual(expect.arrayContaining(["sourceOmsConnection", "expiresAt"]));
+    expect(Object.keys(chzKmIssues)).toEqual(
+      expect.arrayContaining(["kind", "format", "fromSeq", "toSeq", "count"]),
+    );
+    expect(Object.keys(chzOmsTokens)).toEqual(
+      expect.arrayContaining(["sourceOmsConnection", "expiresAt"]),
+    );
   });
 });
 
@@ -526,12 +597,25 @@ describe.skipIf(!databaseUrl)("chz km orders migration", () => {
     created = true;
     temporaryRoot = await mkdtemp(join(tmpdir(), "markiro-chz-km-orders-"));
     const legacy = join(temporaryRoot, "migrations");
-    await copyMigrationsThroughIndex({ sourceFolder: migrationsFolder, targetFolder: legacy, lastIncludedIndex: 164 });
+    await copyMigrationsThroughIndex({
+      sourceFolder: migrationsFolder,
+      targetFolder: legacy,
+      lastIncludedIndex: 164,
+    });
     await migrate(drizzle(pool), { migrationsFolder: legacy });
-    await pool.query(`INSERT INTO organization (id, name, slug, created_at) VALUES ($1, 'KM tenant', $2, now())`, [tenantId, tenantId]);
+    await pool.query(
+      `INSERT INTO organization (id, name, slug, created_at) VALUES ($1, 'KM tenant', $2, now())`,
+      [tenantId, tenantId],
+    );
     await migrate(drizzle(pool), { migrationsFolder });
-    await pool.query(`INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at) VALUES ($1, 'U', $2, true, now(), now())`, [userId, `${userId}@example.com`]);
-    await pool.query(`INSERT INTO products (id, tenant_id, name, gtin14, chz_product_group_code) VALUES ($1, $2, 'Сидр', '04607034690014', 12)`, [productId, tenantId]);
+    await pool.query(
+      `INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at) VALUES ($1, 'U', $2, true, now(), now())`,
+      [userId, `${userId}@example.com`],
+    );
+    await pool.query(
+      `INSERT INTO products (id, tenant_id, name, gtin14, chz_product_group_code) VALUES ($1, $2, 'Сидр', '04607034690014', 12)`,
+      [productId, tenantId],
+    );
   }, 120_000);
 
   afterAll(async () => {
@@ -553,8 +637,15 @@ describe.skipIf(!databaseUrl)("chz km orders migration", () => {
     const [order] = await db
       .insert(chzKmOrders)
       .values({
-        tenantId, productId, gtin14: "04607034690014", productGroupAlias: "beer", productGroupCode: 12,
-        templateId: 18, quantity: 10, requestBody: "{}", createdByUserId: userId,
+        tenantId,
+        productId,
+        gtin14: "04607034690014",
+        productGroupAlias: "beer",
+        productGroupCode: 12,
+        templateId: 18,
+        quantity: 10,
+        requestBody: "{}",
+        createdByUserId: userId,
         deadlineAt: new Date(Date.now() + 48 * 3600_000),
       })
       .returning({ id: chzKmOrders.id, state: chzKmOrders.state });
@@ -567,9 +658,19 @@ describe.skipIf(!databaseUrl)("chz km orders migration", () => {
   it("refuses a completed order whose fetched count is short", async () => {
     await expect(
       db.insert(chzKmOrders).values({
-        tenantId, productId, gtin14: "04607034690014", productGroupAlias: "beer", productGroupCode: 12,
-        templateId: 18, quantity: 10, requestBody: "{}", createdByUserId: userId, state: "completed",
-        omsOrderId: randomUUID(), fetchedCount: 9, deadlineAt: new Date(),
+        tenantId,
+        productId,
+        gtin14: "04607034690014",
+        productGroupAlias: "beer",
+        productGroupCode: 12,
+        templateId: 18,
+        quantity: 10,
+        requestBody: "{}",
+        createdByUserId: userId,
+        state: "completed",
+        omsOrderId: randomUUID(),
+        fetchedCount: 9,
+        deadlineAt: new Date(),
       }),
     ).rejects.toThrow(/chz_km_orders_state_consistency_check/);
   });
@@ -598,7 +699,9 @@ export const CHZ_SIGNER_TASK_TYPES = ["true_api_auth", "oms_auth", "sign_detache
 export const chzOmsTokens = pgTable(
   "chz_oms_tokens",
   {
-    tenantId: text("tenant_id").primaryKey().references(() => organization.id),
+    tenantId: text("tenant_id")
+      .primaryKey()
+      .references(() => organization.id),
     encryptedToken: bytea("encrypted_token").notNull(),
     tokenNonce: bytea("token_nonce").notNull(),
     tokenTag: bytea("token_tag").notNull(),
@@ -840,11 +943,13 @@ git commit -m "feat(db): СУЗ tokens, KM orders, codes and issues; product_km 
 ### Task 4: Platform contracts — signer task union and fixtures
 
 **Files:**
+
 - Modify: `packages/platform-contracts/src/chz-signer.ts`
 - Create: `packages/platform-contracts/fixtures/chz-signer/task-oms-auth.json`, `task-sign-detached.json`, `task-complete-signature.json`
 - Test: `packages/platform-contracts/test/chz-signer.test.ts`
 
 **Interfaces:**
+
 - Produces: `chzOmsAuthPayloadSchema`, `chzSignDetachedPayloadSchema`, `chzSignerTaskSchema` (discriminated union on `type`), `chzSignerSignatureCompleteSchema`, `chzSignerTaskCompleteBodySchema = z.union([chzSignerTaskCompleteSchema, chzSignerSignatureCompleteSchema])`, types `ChzOmsAuthPayload`, `ChzSignDetachedPayload`, `ChzSignerSignatureComplete`, `ChzSignerTaskCompleteBody`.
 
 - [ ] **Step 1: Write the failing test**
@@ -871,7 +976,9 @@ describe("signer task union", () => {
     expect("signatureBase64" in done).toBe(true);
   });
   it("rejects an unknown task type", () => {
-    expect(() => chzSignerContracts.task.parse({ id: crypto.randomUUID(), type: "nope", payload: {} })).toThrow();
+    expect(() =>
+      chzSignerContracts.task.parse({ id: crypto.randomUUID(), type: "nope", payload: {} }),
+    ).toThrow();
   });
 });
 ```
@@ -900,19 +1007,41 @@ export const chzSignDetachedPayloadSchema = z
     purpose: z.literal("oms_order"),
     orderId: z.uuid(),
     /** Exact request body bytes, base64. Order bodies are well under 1 KB; the cap only bounds abuse. */
-    dataBase64: z.string().regex(/^[A-Za-z0-9+/]+={0,2}$/).min(4).max(256 * 1024),
+    dataBase64: z
+      .string()
+      .regex(/^[A-Za-z0-9+/]+={0,2}$/)
+      .min(4)
+      .max(256 * 1024),
   })
   .strict();
 
 export const chzSignerTaskSchema = z.discriminatedUnion("type", [
-  z.object({ id: z.uuid(), type: z.literal("true_api_auth"), payload: chzTrueApiAuthPayloadSchema }).strict(),
-  z.object({ id: z.uuid(), type: z.literal("oms_auth"), payload: chzOmsAuthPayloadSchema }).strict(),
-  z.object({ id: z.uuid(), type: z.literal("sign_detached"), payload: chzSignDetachedPayloadSchema }).strict(),
+  z
+    .object({
+      id: z.uuid(),
+      type: z.literal("true_api_auth"),
+      payload: chzTrueApiAuthPayloadSchema,
+    })
+    .strict(),
+  z
+    .object({ id: z.uuid(), type: z.literal("oms_auth"), payload: chzOmsAuthPayloadSchema })
+    .strict(),
+  z
+    .object({
+      id: z.uuid(),
+      type: z.literal("sign_detached"),
+      payload: chzSignDetachedPayloadSchema,
+    })
+    .strict(),
 ]);
 
 export const chzSignerSignatureCompleteSchema = z
   .object({
-    signatureBase64: z.string().regex(/^[A-Za-z0-9+/]+={0,2}$/).min(4).max(64 * 1024),
+    signatureBase64: z
+      .string()
+      .regex(/^[A-Za-z0-9+/]+={0,2}$/)
+      .min(4)
+      .max(64 * 1024),
     certThumbprint: z.string().trim().min(1).max(128),
   })
   .strict();
@@ -934,22 +1063,35 @@ Fixtures:
 
 ```json
 // task-oms-auth.json
-{ "id": "6d2a1b7e-4c1f-4b7e-9c3a-1a2b3c4d5e6f", "type": "oms_auth",
-  "payload": { "trueApiBaseUrl": "https://markirovka.sandbox.crptech.ru/api/v3/true-api",
-               "omsConnection": "11b1abc1-f1ee-11db-1a11-f11ac11111e1" } }
+{
+  "id": "6d2a1b7e-4c1f-4b7e-9c3a-1a2b3c4d5e6f",
+  "type": "oms_auth",
+  "payload": {
+    "trueApiBaseUrl": "https://markirovka.sandbox.crptech.ru/api/v3/true-api",
+    "omsConnection": "11b1abc1-f1ee-11db-1a11-f11ac11111e1"
+  }
+}
 ```
 
 ```json
 // task-sign-detached.json
-{ "id": "3f0e0f5e-8d1c-4d7a-9b1a-222222222222", "type": "sign_detached",
-  "payload": { "purpose": "oms_order", "orderId": "7f2c1a1e-0000-4000-8000-000000000001",
-               "dataBase64": "eyJwcm9kdWN0R3JvdXAiOiJiZWVyIn0=" } }
+{
+  "id": "3f0e0f5e-8d1c-4d7a-9b1a-222222222222",
+  "type": "sign_detached",
+  "payload": {
+    "purpose": "oms_order",
+    "orderId": "7f2c1a1e-0000-4000-8000-000000000001",
+    "dataBase64": "eyJwcm9kdWN0R3JvdXAiOiJiZWVyIn0="
+  }
+}
 ```
 
 ```json
 // task-complete-signature.json
-{ "signatureBase64": "MIIE5QYJKoZIhvcNAQcCoIIE1jCCBNICAQExDjAMBggqhQMHAQECAgUAMAsGCSqGSIb3DQEHAQ==",
-  "certThumbprint": "AB120F0000000000000000000000000000000000" }
+{
+  "signatureBase64": "MIIE5QYJKoZIhvcNAQcCoIIE1jCCBNICAQExDjAMBggqhQMHAQECAgUAMAsGCSqGSIb3DQEHAQ==",
+  "certThumbprint": "AB120F0000000000000000000000000000000000"
+}
 ```
 
 - [ ] **Step 4: Run tests and build**
@@ -969,6 +1111,7 @@ git commit -m "feat(contracts): oms_auth and sign_detached signer tasks with sha
 ### Task 5: API signer-agents — СУЗ settings, task claim/complete per type, `oms_auth` scheduling
 
 **Files:**
+
 - Modify: `apps/api/src/modules/integrations/channel-registry.ts:118-125`
 - Modify: `apps/api/src/modules/signer-agents/chz-constants.ts`
 - Modify: `apps/api/src/modules/signer-agents/chz-crypto.service.ts`
@@ -978,6 +1121,7 @@ git commit -m "feat(contracts): oms_auth and sign_detached signer tasks with sha
 - Test: `apps/api/test/chz-signer-task-payload.test.ts`, `apps/api/test/signer-agent-tasks.e2e.test.ts`, `apps/api/test/signer-scheduler.e2e.test.ts`, `apps/api/test/chz-crypto.test.ts`
 
 **Interfaces:**
+
 - Produces: `CHZ_OMS_BASE_URLS = { production: "https://suzgrid.crpt.ru/api/v3", sandbox: "https://suz.sandbox.crptech.ru/api/v3" }`, `CHZ_OMS_TOKEN_TTL_MS = 10 * 3600_000`, `buildChzOmsAuthPayload(settings): ChzOmsAuthPayload | null`, `ChzCryptoService.encryptWithAad(aad, value)` / `decryptWithAad(aad, payload)`, `chzSignerSettingsSchema` with `omsId?`, `omsConnection?`, `omsContactPerson?`, `SignerAgentsOverviewDto.omsToken: SignerTokenStatusDto`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -1020,98 +1164,120 @@ it("binds a ciphertext to its AAD", () => {
 Add to `apps/api/test/signer-agent-tasks.e2e.test.ts` (inside the describe, reusing `pairAgent`):
 
 ```ts
-  async function setOmsSettings(): Promise<void> {
-    await db
-      .insert(schema.integrationChannels)
-      .values({
-        tenantId,
-        type: "chestny_znak",
+async function setOmsSettings(): Promise<void> {
+  await db
+    .insert(schema.integrationChannels)
+    .values({
+      tenantId,
+      type: "chestny_znak",
+      settings: {
+        environment: "sandbox",
+        omsId: "cdf12109-10d3-11e6-8b6f-0050569977a1",
+        omsConnection: "11b1abc1-f1ee-11db-1a11-f11ac11111e1",
+      },
+    })
+    .onConflictDoUpdate({
+      target: [schema.integrationChannels.tenantId, schema.integrationChannels.type],
+      set: {
         settings: {
           environment: "sandbox",
           omsId: "cdf12109-10d3-11e6-8b6f-0050569977a1",
           omsConnection: "11b1abc1-f1ee-11db-1a11-f11ac11111e1",
         },
-      })
-      .onConflictDoUpdate({
-        target: [schema.integrationChannels.tenantId, schema.integrationChannels.type],
-        set: {
-          settings: {
-            environment: "sandbox",
-            omsId: "cdf12109-10d3-11e6-8b6f-0050569977a1",
-            omsConnection: "11b1abc1-f1ee-11db-1a11-f11ac11111e1",
-          },
-        },
-      });
-  }
+      },
+    });
+}
 
-  it("completes an oms_auth task into chz_oms_tokens", async () => {
-    const { agentId, secret } = await pairAgent();
-    await setOmsSettings();
-    const [row] = await db
-      .insert(schema.chzSignerTasks)
-      .values({
-        tenantId,
-        type: "oms_auth",
-        payload: {
-          trueApiBaseUrl: "https://markirovka.sandbox.crptech.ru/api/v3/true-api",
-          omsConnection: "11b1abc1-f1ee-11db-1a11-f11ac11111e1",
-        },
-      })
-      .returning({ id: schema.chzSignerTasks.id });
-    const next = await request(app!.getHttpServer())
-      .get("/signer-agent/tasks/next?wait=0")
-      .set("x-signer-token", secret)
-      .expect(200);
-    expect(next.body.task).toMatchObject({ id: row!.id, type: "oms_auth" });
-    const expiresAt = new Date(Date.now() + 10 * 3600_000).toISOString();
-    await request(app!.getHttpServer())
-      .post(`/signer-agent/tasks/${row!.id}/complete`)
-      .set("x-signer-token", secret)
-      .send({ token: "2f2222c2-cbc2-22ff-bc2c-2222222fbef2", expiresAt, certThumbprint: "AB12" })
-      .expect(204);
-    const [token] = await db.select().from(schema.chzOmsTokens).where(eq(schema.chzOmsTokens.tenantId, tenantId));
-    expect(token).toMatchObject({ agentId, sourceOmsConnection: "11b1abc1-f1ee-11db-1a11-f11ac11111e1" });
-    expect(Buffer.from(token!.encryptedToken).toString("utf8")).not.toContain("2f2222c2");
+it("completes an oms_auth task into chz_oms_tokens", async () => {
+  const { agentId, secret } = await pairAgent();
+  await setOmsSettings();
+  const [row] = await db
+    .insert(schema.chzSignerTasks)
+    .values({
+      tenantId,
+      type: "oms_auth",
+      payload: {
+        trueApiBaseUrl: "https://markirovka.sandbox.crptech.ru/api/v3/true-api",
+        omsConnection: "11b1abc1-f1ee-11db-1a11-f11ac11111e1",
+      },
+    })
+    .returning({ id: schema.chzSignerTasks.id });
+  const next = await request(app!.getHttpServer())
+    .get("/signer-agent/tasks/next?wait=0")
+    .set("x-signer-token", secret)
+    .expect(200);
+  expect(next.body.task).toMatchObject({ id: row!.id, type: "oms_auth" });
+  const expiresAt = new Date(Date.now() + 10 * 3600_000).toISOString();
+  await request(app!.getHttpServer())
+    .post(`/signer-agent/tasks/${row!.id}/complete`)
+    .set("x-signer-token", secret)
+    .send({ token: "2f2222c2-cbc2-22ff-bc2c-2222222fbef2", expiresAt, certThumbprint: "AB12" })
+    .expect(204);
+  const [token] = await db
+    .select()
+    .from(schema.chzOmsTokens)
+    .where(eq(schema.chzOmsTokens.tenantId, tenantId));
+  expect(token).toMatchObject({
+    agentId,
+    sourceOmsConnection: "11b1abc1-f1ee-11db-1a11-f11ac11111e1",
   });
+  expect(Buffer.from(token!.encryptedToken).toString("utf8")).not.toContain("2f2222c2");
+});
 
-  it("completes a sign_detached task by storing the signature on the task", async () => {
-    const { secret } = await pairAgent();
-    const [row] = await db
-      .insert(schema.chzSignerTasks)
-      .values({
-        tenantId,
-        type: "sign_detached",
-        payload: { purpose: "oms_order", orderId: randomUUID(), dataBase64: "eyJhIjoxfQ==" },
-      })
-      .returning({ id: schema.chzSignerTasks.id });
-    await request(app!.getHttpServer()).get("/signer-agent/tasks/next?wait=0").set("x-signer-token", secret).expect(200);
-    await request(app!.getHttpServer())
-      .post(`/signer-agent/tasks/${row!.id}/complete`)
-      .set("x-signer-token", secret)
-      .send({ signatureBase64: "MIIE5QYJKoZIhvcNAQcCoIIE1g==", certThumbprint: "AB12" })
-      .expect(204);
-    const [task] = await db.select().from(schema.chzSignerTasks).where(eq(schema.chzSignerTasks.id, row!.id));
-    expect(task).toMatchObject({ status: "completed", resultSummary: { signatureBase64: "MIIE5QYJKoZIhvcNAQcCoIIE1g==", certThumbprint: "AB12" } });
+it("completes a sign_detached task by storing the signature on the task", async () => {
+  const { secret } = await pairAgent();
+  const [row] = await db
+    .insert(schema.chzSignerTasks)
+    .values({
+      tenantId,
+      type: "sign_detached",
+      payload: { purpose: "oms_order", orderId: randomUUID(), dataBase64: "eyJhIjoxfQ==" },
+    })
+    .returning({ id: schema.chzSignerTasks.id });
+  await request(app!.getHttpServer())
+    .get("/signer-agent/tasks/next?wait=0")
+    .set("x-signer-token", secret)
+    .expect(200);
+  await request(app!.getHttpServer())
+    .post(`/signer-agent/tasks/${row!.id}/complete`)
+    .set("x-signer-token", secret)
+    .send({ signatureBase64: "MIIE5QYJKoZIhvcNAQcCoIIE1g==", certThumbprint: "AB12" })
+    .expect(204);
+  const [task] = await db
+    .select()
+    .from(schema.chzSignerTasks)
+    .where(eq(schema.chzSignerTasks.id, row!.id));
+  expect(task).toMatchObject({
+    status: "completed",
+    resultSummary: { signatureBase64: "MIIE5QYJKoZIhvcNAQcCoIIE1g==", certThumbprint: "AB12" },
   });
+});
 
-  it("refuses a token body for a sign_detached task", async () => {
-    const { secret } = await pairAgent();
-    const [row] = await db
-      .insert(schema.chzSignerTasks)
-      .values({ tenantId, type: "sign_detached", payload: { purpose: "oms_order", orderId: randomUUID(), dataBase64: "eyJhIjoxfQ==" } })
-      .returning({ id: schema.chzSignerTasks.id });
-    await request(app!.getHttpServer()).get("/signer-agent/tasks/next?wait=0").set("x-signer-token", secret).expect(200);
-    await request(app!.getHttpServer())
-      .post(`/signer-agent/tasks/${row!.id}/complete`)
-      .set("x-signer-token", secret)
-      .send({ token: "x", expiresAt: new Date().toISOString(), certThumbprint: "AB12" })
-      .expect(400);
-    await request(app!.getHttpServer())
-      .post(`/signer-agent/tasks/${row!.id}/fail`)
-      .set("x-signer-token", secret)
-      .send({ errorCode: "NETWORK", message: "cleanup" })
-      .expect(204);
-  });
+it("refuses a token body for a sign_detached task", async () => {
+  const { secret } = await pairAgent();
+  const [row] = await db
+    .insert(schema.chzSignerTasks)
+    .values({
+      tenantId,
+      type: "sign_detached",
+      payload: { purpose: "oms_order", orderId: randomUUID(), dataBase64: "eyJhIjoxfQ==" },
+    })
+    .returning({ id: schema.chzSignerTasks.id });
+  await request(app!.getHttpServer())
+    .get("/signer-agent/tasks/next?wait=0")
+    .set("x-signer-token", secret)
+    .expect(200);
+  await request(app!.getHttpServer())
+    .post(`/signer-agent/tasks/${row!.id}/complete`)
+    .set("x-signer-token", secret)
+    .send({ token: "x", expiresAt: new Date().toISOString(), certThumbprint: "AB12" })
+    .expect(400);
+  await request(app!.getHttpServer())
+    .post(`/signer-agent/tasks/${row!.id}/fail`)
+    .set("x-signer-token", secret)
+    .send({ errorCode: "NETWORK", message: "cleanup" })
+    .expect(204);
+});
 ```
 
 (`randomUUID` from `node:crypto`; add the import.) Add to `apps/api/test/signer-scheduler.e2e.test.ts` a case that, with an active agent and channel settings carrying `omsConnection` but no `chz_oms_tokens` row, `scheduler.run()` inserts exactly one `oms_auth` task, and with settings lacking `omsConnection` inserts none.
@@ -1129,7 +1295,10 @@ Expected: FAIL — `buildChzOmsAuthPayload`/`encryptWithAad` undefined; e2e comp
 export const chzSignerSettingsSchema = z
   .object({
     environment: z.enum(["production", "sandbox"]).default("production"),
-    mchdInn: z.string().regex(/^\d{10}(\d{2})?$/).optional(),
+    mchdInn: z
+      .string()
+      .regex(/^\d{10}(\d{2})?$/)
+      .optional(),
     /** СУЗ identifier from the tenant's СУЗ cabinet settings. */
     /**
      * `z.guid()`, not `z.uuid()`: СУЗ issues these and documents them only as
@@ -1145,7 +1314,11 @@ export const chzSignerSettingsSchema = z
   .strict()
   .superRefine((value, ctx) => {
     if ((value.omsId === undefined) !== (value.omsConnection === undefined)) {
-      ctx.addIssue({ code: "custom", message: "omsId and omsConnection must be set together", path: ["omsConnection"] });
+      ctx.addIssue({
+        code: "custom",
+        message: "omsId and omsConnection must be set together",
+        path: ["omsConnection"],
+      });
     }
   });
 ```
@@ -1210,10 +1383,12 @@ git commit -m "feat(api): СУЗ settings, oms_auth and sign_detached signer tas
 ### Task 6: СУЗ (OMS) client with injected fetch
 
 **Files:**
+
 - Create: `apps/api/src/modules/chz-km-orders/oms.types.ts`, `apps/api/src/modules/chz-km-orders/oms.client.ts`
 - Test: `apps/api/test/chz-oms-client.test.ts`
 
 **Interfaces:**
+
 - Produces: `OmsAuth { baseUrl: string; clientToken: string; omsId: string }`, `OmsResult<T>` (same four outcomes as `TrueApiResult`), `OmsBufferInfo { bufferStatus, availableCodes, leftInBuffer, totalCodes, totalPassed, expiredDate: number | null, rejectionReason: string | null }`, `OmsCodesBlock { codes: string[]; blockId: string }`, `OmsBlockSummary { blockId: string; quantity: number }`, `OmsClient` with `createOrder(auth, body: string, signatureBase64: string)`, `getBufferStatus(auth, orderId, gtin14)`, `getCodes(auth, orderId, gtin14, quantity)`, `listBlocks(auth, orderId, gtin14)`, `retryBlock(auth, blockId)`; `OmsClientDependencies` = `TrueApiClientDependencies` shape.
 
 - [ ] **Step 1: Write the failing test**
@@ -1223,19 +1398,38 @@ git commit -m "feat(api): СУЗ settings, oms_auth and sign_detached signer tas
 import { describe, expect, it } from "vitest";
 import { OmsClient, type OmsClientDependencies } from "../src/modules/chz-km-orders/oms.client";
 
-const auth = { baseUrl: "https://suz.sandbox.crptech.ru/api/v3", clientToken: "tok", omsId: "cdf12109-10d3-11e6-8b6f-0050569977a1" };
-const deps = (fetchImpl: OmsClientDependencies["fetch"]): OmsClientDependencies => ({ fetch: fetchImpl, scheduleAbort: () => () => {} });
+const auth = {
+  baseUrl: "https://suz.sandbox.crptech.ru/api/v3",
+  clientToken: "tok",
+  omsId: "cdf12109-10d3-11e6-8b6f-0050569977a1",
+};
+const deps = (fetchImpl: OmsClientDependencies["fetch"]): OmsClientDependencies => ({
+  fetch: fetchImpl,
+  scheduleAbort: () => () => {},
+});
 
 describe("OmsClient", () => {
   it("posts the body bytes verbatim with clientToken and X-Signature", async () => {
     const calls: { url: string; init: RequestInit }[] = [];
-    const client = new OmsClient(deps(async (url, init) => {
-      calls.push({ url: String(url), init: init as RequestInit });
-      return new Response(JSON.stringify({ omsId: auth.omsId, orderId: "b024ae09-ef7c-449e-b461-05d8eb116c79", expectedCompleteTimestamp: 5100 }), { status: 200 });
-    }));
+    const client = new OmsClient(
+      deps(async (url, init) => {
+        calls.push({ url: String(url), init: init as RequestInit });
+        return new Response(
+          JSON.stringify({
+            omsId: auth.omsId,
+            orderId: "b024ae09-ef7c-449e-b461-05d8eb116c79",
+            expectedCompleteTimestamp: 5100,
+          }),
+          { status: 200 },
+        );
+      }),
+    );
     const body = '{"productGroup":"beer"}';
     const result = await client.createOrder(auth, body, "c2ln");
-    expect(result).toEqual({ status: "ok", value: { orderId: "b024ae09-ef7c-449e-b461-05d8eb116c79", expectedCompleteMs: 5100 } });
+    expect(result).toEqual({
+      status: "ok",
+      value: { orderId: "b024ae09-ef7c-449e-b461-05d8eb116c79", expectedCompleteMs: 5100 },
+    });
     expect(calls[0]!.url).toBe(`${auth.baseUrl}/order?omsId=${auth.omsId}`);
     const headers = new Headers(calls[0]!.init.headers);
     expect(headers.get("clientToken")).toBe("tok");
@@ -1244,27 +1438,95 @@ describe("OmsClient", () => {
   });
 
   it("parses codes as JSON so the GS escape becomes the raw separator", async () => {
-    const client = new OmsClient(deps(async () => new Response('{"omsId":"x","codes":["010460165303004621=rxDV3M\\u001d93VXQI"],"blockId":"012cc7b0-c9e4-4511-8058-2de1f97a87b0"}', { status: 200 })));
-    const result = await client.getCodes(auth, "b024ae09-ef7c-449e-b461-05d8eb116c79", "04601653030046", 1);
-    expect(result).toEqual({ status: "ok", value: { codes: ["010460165303004621=rxDV3M\u001d93VXQI"], blockId: "012cc7b0-c9e4-4511-8058-2de1f97a87b0" } });
+    const client = new OmsClient(
+      deps(
+        async () =>
+          new Response(
+            '{"omsId":"x","codes":["010460165303004621=rxDV3M\\u001d93VXQI"],"blockId":"012cc7b0-c9e4-4511-8058-2de1f97a87b0"}',
+            { status: 200 },
+          ),
+      ),
+    );
+    const result = await client.getCodes(
+      auth,
+      "b024ae09-ef7c-449e-b461-05d8eb116c79",
+      "04601653030046",
+      1,
+    );
+    expect(result).toEqual({
+      status: "ok",
+      value: {
+        codes: ["010460165303004621=rxDV3M\u001d93VXQI"],
+        blockId: "012cc7b0-c9e4-4511-8058-2de1f97a87b0",
+      },
+    });
   });
 
   it("maps buffer status, including a rejected order's reason", async () => {
-    const client = new OmsClient(deps(async () => new Response(JSON.stringify([{ omsId: "x", orderId: "y", leftInBuffer: -1, totalCodes: -1, availableCodes: -1, unavailableCodes: -1, totalPassed: -1, gtin: "04606038003172", bufferStatus: "REJECTED", rejectionReason: "Order declined: 0106", templateId: 18 }]), { status: 200 })));
+    const client = new OmsClient(
+      deps(
+        async () =>
+          new Response(
+            JSON.stringify([
+              {
+                omsId: "x",
+                orderId: "y",
+                leftInBuffer: -1,
+                totalCodes: -1,
+                availableCodes: -1,
+                unavailableCodes: -1,
+                totalPassed: -1,
+                gtin: "04606038003172",
+                bufferStatus: "REJECTED",
+                rejectionReason: "Order declined: 0106",
+                templateId: 18,
+              },
+            ]),
+            { status: 200 },
+          ),
+      ),
+    );
     const result = await client.getBufferStatus(auth, "y", "04606038003172");
-    expect(result).toEqual({ status: "ok", value: { bufferStatus: "REJECTED", availableCodes: -1, leftInBuffer: -1, totalCodes: -1, totalPassed: -1, expiredDate: null, rejectionReason: "Order declined: 0106" } });
+    expect(result).toEqual({
+      status: "ok",
+      value: {
+        bufferStatus: "REJECTED",
+        availableCodes: -1,
+        leftInBuffer: -1,
+        totalCodes: -1,
+        totalPassed: -1,
+        expiredDate: null,
+        rejectionReason: "Order declined: 0106",
+      },
+    });
   });
 
   it("classifies 401 as unauthorized, 4xx as rejected with the message, 5xx and 429 as unavailable", async () => {
-    const mk = (status: number, body: string) => new OmsClient(deps(async () => new Response(body, { status })));
-    expect(await mk(401, "").getBufferStatus(auth, "y", "04606038003172")).toEqual({ status: "unauthorized" });
-    expect(await mk(400, '{"fieldErrors":[{"fieldName":"gtin","fieldError":"bad"}],"globalErrors":["nope"]}').getBufferStatus(auth, "y", "04606038003172")).toMatchObject({ status: "rejected", code: "400" });
-    expect(await mk(429, "").getBufferStatus(auth, "y", "04606038003172")).toEqual({ status: "unavailable" });
-    expect(await mk(503, "").getBufferStatus(auth, "y", "04606038003172")).toEqual({ status: "unavailable" });
+    const mk = (status: number, body: string) =>
+      new OmsClient(deps(async () => new Response(body, { status })));
+    expect(await mk(401, "").getBufferStatus(auth, "y", "04606038003172")).toEqual({
+      status: "unauthorized",
+    });
+    expect(
+      await mk(
+        400,
+        '{"fieldErrors":[{"fieldName":"gtin","fieldError":"bad"}],"globalErrors":["nope"]}',
+      ).getBufferStatus(auth, "y", "04606038003172"),
+    ).toMatchObject({ status: "rejected", code: "400" });
+    expect(await mk(429, "").getBufferStatus(auth, "y", "04606038003172")).toEqual({
+      status: "unavailable",
+    });
+    expect(await mk(503, "").getBufferStatus(auth, "y", "04606038003172")).toEqual({
+      status: "unavailable",
+    });
   });
 
   it("refuses more than 150000 codes per call before any request", async () => {
-    const client = new OmsClient(deps(async () => { throw new Error("must not be called"); }));
+    const client = new OmsClient(
+      deps(async () => {
+        throw new Error("must not be called");
+      }),
+    );
     await expect(client.getCodes(auth, "y", "04606038003172", 150_001)).rejects.toThrow(RangeError);
   });
 });
@@ -1281,13 +1543,20 @@ Expected: FAIL — module not found.
 // apps/api/src/modules/chz-km-orders/oms.types.ts
 import type { TrueApiClientDependencies } from "../chz-exports/true-api.types";
 export type OmsClientDependencies = TrueApiClientDependencies;
-export interface OmsAuth { baseUrl: string; clientToken: string; omsId: string }
+export interface OmsAuth {
+  baseUrl: string;
+  clientToken: string;
+  omsId: string;
+}
 export type OmsResult<T> =
   | { status: "ok"; value: T }
   | { status: "unauthorized" }
   | { status: "rejected"; code: string; message: string }
   | { status: "unavailable" };
-export interface OmsCreatedOrder { orderId: string; expectedCompleteMs: number }
+export interface OmsCreatedOrder {
+  orderId: string;
+  expectedCompleteMs: number;
+}
 export interface OmsBufferInfo {
   bufferStatus: string;
   availableCodes: number;
@@ -1297,15 +1566,29 @@ export interface OmsBufferInfo {
   expiredDate: number | null;
   rejectionReason: string | null;
 }
-export interface OmsCodesBlock { codes: string[]; blockId: string }
-export interface OmsBlockSummary { blockId: string; quantity: number }
+export interface OmsCodesBlock {
+  codes: string[];
+  blockId: string;
+}
+export interface OmsBlockSummary {
+  blockId: string;
+  quantity: number;
+}
 ```
 
 ```ts
 // apps/api/src/modules/chz-km-orders/oms.client.ts
 import { Injectable } from "@nestjs/common";
 import { productionTrueApiClientDependencies } from "../chz-exports/true-api.types";
-import type { OmsAuth, OmsBlockSummary, OmsBufferInfo, OmsClientDependencies, OmsCodesBlock, OmsCreatedOrder, OmsResult } from "./oms.types";
+import type {
+  OmsAuth,
+  OmsBlockSummary,
+  OmsBufferInfo,
+  OmsClientDependencies,
+  OmsCodesBlock,
+  OmsCreatedOrder,
+  OmsResult,
+} from "./oms.types";
 export type { OmsClientDependencies } from "./oms.types";
 
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -1316,11 +1599,20 @@ const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a
 
 @Injectable()
 export class OmsClient {
-  constructor(private readonly dependencies: OmsClientDependencies = productionTrueApiClientDependencies) {}
+  constructor(
+    private readonly dependencies: OmsClientDependencies = productionTrueApiClientDependencies,
+  ) {}
 
   /** `body` is sent byte-for-byte: it is what the detached signature covers. */
-  createOrder(auth: OmsAuth, body: string, signatureBase64: string): Promise<OmsResult<OmsCreatedOrder>> {
-    return this.request(auth, `/order?omsId=${encodeURIComponent(auth.omsId)}`, REQUEST_TIMEOUT_MS,
+  createOrder(
+    auth: OmsAuth,
+    body: string,
+    signatureBase64: string,
+  ): Promise<OmsResult<OmsCreatedOrder>> {
+    return this.request(
+      auth,
+      `/order?omsId=${encodeURIComponent(auth.omsId)}`,
+      REQUEST_TIMEOUT_MS,
       { method: "POST", body, headers: { "X-Signature": signatureBase64 } },
       async (response) => {
         const payload = (await response.json()) as Record<string, unknown>;
@@ -1328,47 +1620,83 @@ export class OmsClient {
         const expected = payload.expectedCompleteTimestamp;
         if (typeof orderId !== "string" || !UUID.test(orderId)) return null;
         return { orderId, expectedCompleteMs: typeof expected === "number" ? expected : 0 };
-      });
+      },
+    );
   }
 
-  getBufferStatus(auth: OmsAuth, orderId: string, gtin14: string): Promise<OmsResult<OmsBufferInfo>> {
+  getBufferStatus(
+    auth: OmsAuth,
+    orderId: string,
+    gtin14: string,
+  ): Promise<OmsResult<OmsBufferInfo>> {
     const query = new URLSearchParams({ omsId: auth.omsId, orderId, gtin: gtin14 });
-    return this.request(auth, `/order/status?${query}`, REQUEST_TIMEOUT_MS, {}, async (response) => {
-      const payload: unknown = await response.json();
-      const row = Array.isArray(payload) ? (payload[0] as Record<string, unknown> | undefined) : undefined;
-      if (!row || typeof row.bufferStatus !== "string") return null;
-      return {
-        bufferStatus: row.bufferStatus,
-        availableCodes: intOr(row.availableCodes, -1),
-        leftInBuffer: intOr(row.leftInBuffer, -1),
-        totalCodes: intOr(row.totalCodes, -1),
-        totalPassed: intOr(row.totalPassed, -1),
-        expiredDate: typeof row.expiredDate === "number" ? row.expiredDate : null,
-        rejectionReason: typeof row.rejectionReason === "string" && row.rejectionReason.length > 0 ? row.rejectionReason.slice(0, 500) : null,
-      };
-    });
+    return this.request(
+      auth,
+      `/order/status?${query}`,
+      REQUEST_TIMEOUT_MS,
+      {},
+      async (response) => {
+        const payload: unknown = await response.json();
+        const row = Array.isArray(payload)
+          ? (payload[0] as Record<string, unknown> | undefined)
+          : undefined;
+        if (!row || typeof row.bufferStatus !== "string") return null;
+        return {
+          bufferStatus: row.bufferStatus,
+          availableCodes: intOr(row.availableCodes, -1),
+          leftInBuffer: intOr(row.leftInBuffer, -1),
+          totalCodes: intOr(row.totalCodes, -1),
+          totalPassed: intOr(row.totalPassed, -1),
+          expiredDate: typeof row.expiredDate === "number" ? row.expiredDate : null,
+          rejectionReason:
+            typeof row.rejectionReason === "string" && row.rejectionReason.length > 0
+              ? row.rejectionReason.slice(0, 500)
+              : null,
+        };
+      },
+    );
   }
 
-  getCodes(auth: OmsAuth, orderId: string, gtin14: string, quantity: number): Promise<OmsResult<OmsCodesBlock>> {
+  getCodes(
+    auth: OmsAuth,
+    orderId: string,
+    gtin14: string,
+    quantity: number,
+  ): Promise<OmsResult<OmsCodesBlock>> {
     if (!Number.isInteger(quantity) || quantity < 1 || quantity > OMS_CODES_CALL_LIMIT) {
       throw new RangeError(`GET /codes accepts 1..${OMS_CODES_CALL_LIMIT} codes`);
     }
-    const query = new URLSearchParams({ omsId: auth.omsId, orderId, gtin: gtin14, quantity: String(quantity) });
+    const query = new URLSearchParams({
+      omsId: auth.omsId,
+      orderId,
+      gtin: gtin14,
+      quantity: String(quantity),
+    });
     return this.request(auth, `/codes?${query}`, CODES_TIMEOUT_MS, {}, parseCodesBlock);
   }
 
-  listBlocks(auth: OmsAuth, orderId: string, gtin14: string): Promise<OmsResult<OmsBlockSummary[]>> {
+  listBlocks(
+    auth: OmsAuth,
+    orderId: string,
+    gtin14: string,
+  ): Promise<OmsResult<OmsBlockSummary[]>> {
     const query = new URLSearchParams({ omsId: auth.omsId, orderId, gtin: gtin14 });
-    return this.request(auth, `/order/codes/blocks?${query}`, REQUEST_TIMEOUT_MS, {}, async (response) => {
-      const payload = (await response.json()) as Record<string, unknown>;
-      if (!Array.isArray(payload.blocks)) return null;
-      return payload.blocks.flatMap((block) => {
-        const record = block as Record<string, unknown>;
-        return typeof record.blockId === "string" && UUID.test(record.blockId)
-          ? [{ blockId: record.blockId, quantity: intOr(record.quantity, 0) }]
-          : [];
-      });
-    });
+    return this.request(
+      auth,
+      `/order/codes/blocks?${query}`,
+      REQUEST_TIMEOUT_MS,
+      {},
+      async (response) => {
+        const payload = (await response.json()) as Record<string, unknown>;
+        if (!Array.isArray(payload.blocks)) return null;
+        return payload.blocks.flatMap((block) => {
+          const record = block as Record<string, unknown>;
+          return typeof record.blockId === "string" && UUID.test(record.blockId)
+            ? [{ blockId: record.blockId, quantity: intOr(record.quantity, 0) }]
+            : [];
+        });
+      },
+    );
   }
 
   retryBlock(auth: OmsAuth, blockId: string): Promise<OmsResult<OmsCodesBlock>> {
@@ -1376,7 +1704,13 @@ export class OmsClient {
     return this.request(auth, `/order/codes/retry?${query}`, CODES_TIMEOUT_MS, {}, parseCodesBlock);
   }
 
-  private async request<T>(auth: OmsAuth, path: string, timeoutMs: number, init: RequestInit, parse: (response: Response) => Promise<T | null>): Promise<OmsResult<T>> {
+  private async request<T>(
+    auth: OmsAuth,
+    path: string,
+    timeoutMs: number,
+    init: RequestInit,
+    parse: (response: Response) => Promise<T | null>,
+  ): Promise<OmsResult<T>> {
     const controller = new AbortController();
     const cancelAbort = this.dependencies.scheduleAbort(controller, timeoutMs);
     try {
@@ -1384,11 +1718,19 @@ export class OmsClient {
       headers.set("Accept", "application/json");
       if (init.body) headers.set("Content-Type", "application/json");
       headers.set("clientToken", auth.clientToken);
-      const response = await this.dependencies.fetch(`${auth.baseUrl}${path}`, { ...init, headers, signal: controller.signal });
+      const response = await this.dependencies.fetch(`${auth.baseUrl}${path}`, {
+        ...init,
+        headers,
+        signal: controller.signal,
+      });
       if (response.status === 401) return { status: "unauthorized" };
       if (response.status === 429) return { status: "unavailable" };
       if (response.status >= 400 && response.status < 500) {
-        return { status: "rejected", code: String(response.status), message: await rejectionMessage(response) };
+        return {
+          status: "rejected",
+          code: String(response.status),
+          message: await rejectionMessage(response),
+        };
       }
       if (!response.ok) return { status: "unavailable" };
       const value = await parse(response);
@@ -1406,7 +1748,8 @@ async function parseCodesBlock(response: Response): Promise<OmsCodesBlock | null
   const codes = payload.codes;
   const blockId = payload.blockId;
   if (!Array.isArray(codes) || typeof blockId !== "string" || !UUID.test(blockId)) return null;
-  if (!codes.every((code) => typeof code === "string" && code.length > 0 && code.length <= 1024)) return null;
+  if (!codes.every((code) => typeof code === "string" && code.length > 0 && code.length <= 1024))
+    return null;
   return { codes: codes as string[], blockId };
 }
 
@@ -1415,11 +1758,13 @@ async function rejectionMessage(response: Response): Promise<string> {
   try {
     const payload = (await response.json()) as Record<string, unknown>;
     const parts: string[] = [];
-    if (Array.isArray(payload.globalErrors)) parts.push(...payload.globalErrors.filter((e): e is string => typeof e === "string"));
+    if (Array.isArray(payload.globalErrors))
+      parts.push(...payload.globalErrors.filter((e): e is string => typeof e === "string"));
     if (Array.isArray(payload.fieldErrors)) {
       for (const error of payload.fieldErrors) {
         const record = error as Record<string, unknown>;
-        if (typeof record.fieldError === "string") parts.push(`${String(record.fieldName ?? "")}: ${record.fieldError}`);
+        if (typeof record.fieldError === "string")
+          parts.push(`${String(record.fieldName ?? "")}: ${record.fieldError}`);
       }
     }
     const single = payload.error_message ?? payload.errorMessage ?? payload.message;
@@ -1452,10 +1797,12 @@ git commit -m "feat(api): СУЗ OMS client with injected fetch"
 ### Task 7: СУЗ token service
 
 **Files:**
+
 - Create: `apps/api/src/modules/chz-km-orders/chz-oms-token.service.ts`
 - Test: `apps/api/test/chz-oms-token.service.test.ts`
 
 **Interfaces:**
+
 - Consumes: `chzOmsTokens`, `ChzCryptoService`, `chzSignerSettingsSchema`, `CHZ_OMS_BASE_URLS`, `buildChzOmsAuthPayload`.
 - Produces: `ChzOmsTokenService.getActiveToken(tenantId): Promise<ChzOmsTokenResult>` where `ChzOmsTokenResult = {status:"ok"; auth: OmsAuth; obtainedAt: Date} | {status:"unconfigured"} | {status:"missing"} | {status:"expired"} | {status:"undecryptable"} | {status:"settings_missing"}`; `hasUsableToken(tenantId)`; `invalidateAndRequestRefresh(tenantId, obtainedAt)`; `requestRefresh(tenantId)`.
 
@@ -1466,7 +1813,11 @@ Copy the structure of `apps/api/test/chz-token.service.test.ts` (DB-backed, `des
 ```ts
 expect(await service.getActiveToken(tenantId)).toMatchObject({
   status: "ok",
-  auth: { baseUrl: "https://suz.sandbox.crptech.ru/api/v3", clientToken: "tok", omsId: "cdf12109-10d3-11e6-8b6f-0050569977a1" },
+  auth: {
+    baseUrl: "https://suz.sandbox.crptech.ru/api/v3",
+    clientToken: "tok",
+    omsId: "cdf12109-10d3-11e6-8b6f-0050569977a1",
+  },
 });
 ```
 
@@ -1498,12 +1849,14 @@ git commit -m "feat(api): decrypt-on-demand СУЗ token service"
 ### Task 8: Orders service, DTOs and controller (create, list, get, retry)
 
 **Files:**
+
 - Create: `apps/api/src/modules/chz-km-orders/dto.ts`, `chz-km-orders.service.ts`, `chz-km-orders.controller.ts`, `chz-km-orders.module.ts`
 - Modify: `apps/api/src/app.module.ts` (import `ChzKmOrdersModule.forRoot(env)`)
 - Modify: `apps/api/test/subscription-route-inventory.test.ts` (route keys)
 - Test: `apps/api/test/chz-km-orders.e2e.test.ts`, `apps/api/test/chz-km-orders-openapi.test.ts`
 
 **Interfaces:**
+
 - Produces: routes `GET /chz-km-orders`, `POST /chz-km-orders`, `GET /chz-km-orders/:id`, `POST /chz-km-orders/:id/retry`; `ChzKmOrderDto`, `ChzKmOrderListItemDto`, `CreateChzKmOrderDto {productId: uuid; quantity: int 1..150000; contactPerson?: string}`; preflight codes `CHZ_KM_ORDER_PREFLIGHT_CODES = ["OMS_SETTINGS_MISSING","AGENT_NOT_PAIRED","OMS_TOKEN_UNAVAILABLE","PRODUCT_NOT_FOUND","PRODUCT_ARCHIVED","PRODUCT_GTIN_MISSING","PRODUCT_GROUP_MISSING","PRODUCT_GROUP_UNSUPPORTED"]`; `ChzKmOrdersService.enqueue` uses `PgBossService.enqueueChzKmOrder` (Task 10; until then the service takes an injected `{ enqueueChzKmOrder }` interface named `ChzKmOrderQueue`).
 - `ChzKmOrderDto` fields: `id, productId, productName, gtin14, productGroupAlias, templateId, quantity, state, omsOrderId, bufferStatus, bufferExpiresAt, availableCodes, fetchedCount, issuedCount, availableForIssue (= fetchedCount − issuedCount), rejectionReason, errorCode, errorMessage, attempts, createdBy: {id, name}, createdAt, updatedAt, issues: ChzKmIssueDto[]` (list items omit `issues`). `ChzKmIssueDto: {id, kind, format, fromSeq, toSeq, count, createdBy, createdAt}`.
 
@@ -1515,17 +1868,56 @@ git commit -m "feat(api): decrypt-on-demand СУЗ token service"
 it("refuses an order until СУЗ settings, an agent and a token exist", async () => {
   const agent = request.agent(app!.getHttpServer());
   const tenantId = await signUpAndActivate(agent);
-  const productId = await seedProduct(tenantId, { gtin14: "04607034690014", chzProductGroupCode: 12 });
+  const productId = await seedProduct(tenantId, {
+    gtin14: "04607034690014",
+    chzProductGroupCode: 12,
+  });
   const res = await agent.post("/chz-km-orders").send({ productId, quantity: 10 }).expect(422);
-  expect(res.body).toMatchObject({ code: "CHZ_KM_ORDER_PREFLIGHT_FAILED", blockedBy: expect.arrayContaining(["OMS_SETTINGS_MISSING", "AGENT_NOT_PAIRED", "OMS_TOKEN_UNAVAILABLE"]) });
+  expect(res.body).toMatchObject({
+    code: "CHZ_KM_ORDER_PREFLIGHT_FAILED",
+    blockedBy: expect.arrayContaining([
+      "OMS_SETTINGS_MISSING",
+      "AGENT_NOT_PAIRED",
+      "OMS_TOKEN_UNAVAILABLE",
+    ]),
+  });
 });
 
 it("creates an order in state created with the exact request body and lists it", async () => {
   const { agent, tenantId, productId } = await readyTenant(); // settings + paired agent + encrypted oms token
-  const created = await agent.post("/chz-km-orders").send({ productId, quantity: 10, contactPerson: "Ковалёва М. А." }).expect(201);
-  expect(created.body).toMatchObject({ state: "created", quantity: 10, gtin14: "04607034690014", templateId: 18, fetchedCount: 0, issuedCount: 0 });
-  const [row] = await db.select().from(schema.chzKmOrders).where(eq(schema.chzKmOrders.id, created.body.id));
-  expect(JSON.parse(row!.requestBody)).toMatchObject({ productGroup: "beer", products: [{ gtin: "04607034690014", quantity: 10, templateId: 18, cisType: "UNIT", serialNumberType: "OPERATOR" }], attributes: { releaseMethodType: "PRODUCTION", contactPerson: "Ковалёва М. А.", productionOrderId: created.body.id } });
+  const created = await agent
+    .post("/chz-km-orders")
+    .send({ productId, quantity: 10, contactPerson: "Ковалёва М. А." })
+    .expect(201);
+  expect(created.body).toMatchObject({
+    state: "created",
+    quantity: 10,
+    gtin14: "04607034690014",
+    templateId: 18,
+    fetchedCount: 0,
+    issuedCount: 0,
+  });
+  const [row] = await db
+    .select()
+    .from(schema.chzKmOrders)
+    .where(eq(schema.chzKmOrders.id, created.body.id));
+  expect(JSON.parse(row!.requestBody)).toMatchObject({
+    productGroup: "beer",
+    products: [
+      {
+        gtin: "04607034690014",
+        quantity: 10,
+        templateId: 18,
+        cisType: "UNIT",
+        serialNumberType: "OPERATOR",
+      },
+    ],
+    attributes: {
+      releaseMethodType: "PRODUCTION",
+      contactPerson: "Ковалёва М. А.",
+      productionOrderId: created.body.id,
+    },
+  });
   const list = await agent.get("/chz-km-orders").expect(200);
   expect(list.body.orders.map((o: { id: string }) => o.id)).toContain(created.body.id);
 });
@@ -1564,7 +1956,16 @@ export const createChzKmOrderSchema = z.object({
   contactPerson: z.string().trim().min(1).max(128).optional(),
 });
 export const chzKmOrderIdSchema = z.uuid();
-export const CHZ_KM_ORDER_PREFLIGHT_CODES = ["OMS_SETTINGS_MISSING", "AGENT_NOT_PAIRED", "OMS_TOKEN_UNAVAILABLE", "PRODUCT_NOT_FOUND", "PRODUCT_ARCHIVED", "PRODUCT_GTIN_MISSING", "PRODUCT_GROUP_MISSING", "PRODUCT_GROUP_UNSUPPORTED"] as const;
+export const CHZ_KM_ORDER_PREFLIGHT_CODES = [
+  "OMS_SETTINGS_MISSING",
+  "AGENT_NOT_PAIRED",
+  "OMS_TOKEN_UNAVAILABLE",
+  "PRODUCT_NOT_FOUND",
+  "PRODUCT_ARCHIVED",
+  "PRODUCT_GTIN_MISSING",
+  "PRODUCT_GROUP_MISSING",
+  "PRODUCT_GROUP_UNSUPPORTED",
+] as const;
 export const CHZ_KM_ORDER_NOT_FAILED_CODE = "CHZ_KM_ORDER_NOT_FAILED" as const;
 ```
 
@@ -1581,43 +1982,98 @@ export class ChzKmOrdersService {
     @Inject(CHZ_KM_ORDER_QUEUE) private readonly queue: ChzKmOrderQueue,
   ) {}
 
-  async preflight(tenantId: string, productId: string): Promise<{ blockedBy: ChzKmOrderPreflightCode[]; product: OrderProduct | null }> {
+  async preflight(
+    tenantId: string,
+    productId: string,
+  ): Promise<{ blockedBy: ChzKmOrderPreflightCode[]; product: OrderProduct | null }> {
     const blocked: ChzKmOrderPreflightCode[] = [];
     const settings = await this.loadSettings(tenantId);
     if (!settings.omsId || !settings.omsConnection) blocked.push("OMS_SETTINGS_MISSING");
-    const [agent] = await this.db.select({ id: schema.chzSignerAgents.id }).from(schema.chzSignerAgents)
-      .where(and(eq(schema.chzSignerAgents.tenantId, tenantId), eq(schema.chzSignerAgents.status, "active"))).limit(1);
+    const [agent] = await this.db
+      .select({ id: schema.chzSignerAgents.id })
+      .from(schema.chzSignerAgents)
+      .where(
+        and(
+          eq(schema.chzSignerAgents.tenantId, tenantId),
+          eq(schema.chzSignerAgents.status, "active"),
+        ),
+      )
+      .limit(1);
     if (!agent) blocked.push("AGENT_NOT_PAIRED");
     if (!(await this.omsTokens.hasUsableToken(tenantId))) blocked.push("OMS_TOKEN_UNAVAILABLE");
     const [product] = await this.db
-      .select({ id: schema.products.id, name: schema.products.name, gtin14: schema.products.gtin14, archived: schema.products.archived, groupCode: schema.products.chzProductGroupCode, groupAlias: schema.chzProductGroups.alias })
+      .select({
+        id: schema.products.id,
+        name: schema.products.name,
+        gtin14: schema.products.gtin14,
+        archived: schema.products.archived,
+        groupCode: schema.products.chzProductGroupCode,
+        groupAlias: schema.chzProductGroups.alias,
+      })
       .from(schema.products)
-      .leftJoin(schema.chzProductGroups, eq(schema.chzProductGroups.code, schema.products.chzProductGroupCode))
+      .leftJoin(
+        schema.chzProductGroups,
+        eq(schema.chzProductGroups.code, schema.products.chzProductGroupCode),
+      )
       .where(and(eq(schema.products.tenantId, tenantId), eq(schema.products.id, productId)));
     if (!product) return { blockedBy: [...blocked, "PRODUCT_NOT_FOUND"], product: null };
     if (product.archived) blocked.push("PRODUCT_ARCHIVED");
     if (!product.gtin14) blocked.push("PRODUCT_GTIN_MISSING");
     let templateId: number | null = null;
-    if (product.groupCode === null || product.groupAlias === null) blocked.push("PRODUCT_GROUP_MISSING");
+    if (product.groupCode === null || product.groupAlias === null)
+      blocked.push("PRODUCT_GROUP_MISSING");
     else {
       templateId = chzUnitTemplateIdFor(product.groupAlias);
       if (templateId === null) blocked.push("PRODUCT_GROUP_UNSUPPORTED");
     }
-    return { blockedBy: blocked, product: templateId === null || !product.gtin14 || product.groupCode === null || product.groupAlias === null ? null : { id: product.id, name: product.name, gtin14: product.gtin14, groupCode: product.groupCode, groupAlias: product.groupAlias, templateId } };
+    return {
+      blockedBy: blocked,
+      product:
+        templateId === null ||
+        !product.gtin14 ||
+        product.groupCode === null ||
+        product.groupAlias === null
+          ? null
+          : {
+              id: product.id,
+              name: product.name,
+              gtin14: product.gtin14,
+              groupCode: product.groupCode,
+              groupAlias: product.groupAlias,
+              templateId,
+            },
+    };
   }
 
-  async create(tenantId: string, actorUserId: string, input: CreateChzKmOrderDto): Promise<ChzKmOrderDto> {
+  async create(
+    tenantId: string,
+    actorUserId: string,
+    input: CreateChzKmOrderDto,
+  ): Promise<ChzKmOrderDto> {
     const { blockedBy, product } = await this.preflight(tenantId, input.productId);
-    if (blockedBy.length > 0 || product === null) throw new UnprocessableEntityException({ code: "CHZ_KM_ORDER_PREFLIGHT_FAILED", blockedBy });
+    if (blockedBy.length > 0 || product === null)
+      throw new UnprocessableEntityException({ code: "CHZ_KM_ORDER_PREFLIGHT_FAILED", blockedBy });
     const settings = await this.loadSettings(tenantId);
     const id = randomUUID();
     const requestBody = buildChzKmOrderBody({
-      productGroupAlias: product.groupAlias, gtin14: product.gtin14, quantity: input.quantity, templateId: product.templateId,
-      contactPerson: input.contactPerson ?? settings.omsContactPerson, productionOrderId: id,
+      productGroupAlias: product.groupAlias,
+      gtin14: product.gtin14,
+      quantity: input.quantity,
+      templateId: product.templateId,
+      contactPerson: input.contactPerson ?? settings.omsContactPerson,
+      productionOrderId: id,
     });
     await this.db.insert(schema.chzKmOrders).values({
-      id, tenantId, productId: product.id, gtin14: product.gtin14, productGroupAlias: product.groupAlias, productGroupCode: product.groupCode,
-      templateId: product.templateId, quantity: input.quantity, requestBody, createdByUserId: actorUserId,
+      id,
+      tenantId,
+      productId: product.id,
+      gtin14: product.gtin14,
+      productGroupAlias: product.groupAlias,
+      productGroupCode: product.groupCode,
+      templateId: product.templateId,
+      quantity: input.quantity,
+      requestBody,
+      createdByUserId: actorUserId,
       deadlineAt: new Date(Date.now() + ORDER_DEADLINE_MS),
     });
     await this.queue.enqueueChzKmOrder(tenantId, id);
@@ -1627,7 +2083,9 @@ export class ChzKmOrdersService {
 }
 export const ORDER_DEADLINE_MS = 48 * 3600_000;
 export const CHZ_KM_ORDER_QUEUE = "CHZ_KM_ORDER_QUEUE";
-export interface ChzKmOrderQueue { enqueueChzKmOrder(tenantId: string, orderId: string): Promise<string | null> }
+export interface ChzKmOrderQueue {
+  enqueueChzKmOrder(tenantId: string, orderId: string): Promise<string | null>;
+}
 ```
 
 `get` joins `products.name` and `user.name` for `createdBy`, and selects the order's issues ordered by `createdAt desc`. `list` returns `{ orders: ChzKmOrderListItemDto[] }` ordered by `createdAt desc`, capped at 200.
@@ -1657,11 +2115,13 @@ git commit -m "feat(api): KM order create/list/get/retry with preflight and Open
 ### Task 9: Order runner state machine
 
 **Files:**
+
 - Create: `apps/api/src/modules/chz-km-orders/chz-km-order-runner.service.ts`
 - Modify: `apps/api/src/modules/chz-km-orders/chz-km-orders.module.ts` (provide + export the runner)
 - Test: `apps/api/test/chz-km-order-runner.service.test.ts`
 
 **Interfaces:**
+
 - Consumes: `OmsClient`, `ChzOmsTokenService`, `ChzCryptoService`, `JournalService`, `parseKm`/`kmHash` from `@markiro/domain`.
 - Produces: `ChzKmOrderRunnerService.run(tenantId, orderId, attempt: {retryCount, retryLimit}): Promise<{finished: boolean; retryAfterSeconds: number}>`, `abandonAfterJobRetriesExhausted(tenantId, orderId)`, constants `MAX_SIGN_ATTEMPTS = 5`, `CODES_BLOCK_SIZE = 10_000`, error codes `CHZ_KM_ORDER_SAFE_ERROR_CODES = ["CHZ_OMS_SETTINGS_MISSING","CHZ_OMS_TOKEN_UNAVAILABLE","CHZ_SIGNING_FAILED","CHZ_ORDER_REJECTED_BY_SUZ","CHZ_ORDER_TIMED_OUT","CHZ_CODES_UNPARSEABLE","CHZ_CODES_DUPLICATE","CHZ_JOB_RETRIES_EXHAUSTED"]`.
 
@@ -2021,10 +2481,12 @@ git commit -m "feat(api): KM order runner: sign, submit, poll buffer, fetch and 
 ### Task 10: pg-boss queue `run-chz-km-order`
 
 **Files:**
+
 - Modify: `apps/api/src/jobs/jobs.module.ts`
 - Test: `apps/api/test/chz-km-order-job.test.ts`, `apps/api/test/chz-export-queue-policy.integration.test.ts` (add the new queue's policy assertion)
 
 **Interfaces:**
+
 - Produces: `RUN_CHZ_KM_ORDER_QUEUE = "run-chz-km-order"`, `PgBossService.enqueueChzKmOrder(tenantId, orderId): Promise<string | null>` (singleton key `${tenantId}:${orderId}`, queue policy `stately`), `MAX_KM_ORDER_PASSES = 5760` (48 h at a 30-second floor), boot `reconcileUnfinishedChzKmOrders` (non-terminal orders, capped like exports).
 
 - [ ] **Step 1: Write the failing job test**
@@ -2057,31 +2519,55 @@ git commit -m "feat(api): run-chz-km-order queue with stately dedup and boot rec
 ### Task 11: Issuing codes — export file and print codes
 
 **Files:**
+
 - Modify: `apps/api/src/modules/chz-km-orders/dto.ts`, `chz-km-orders.service.ts`, `chz-km-orders.controller.ts`
 - Modify: `apps/api/test/subscription-route-inventory.test.ts`
 - Test: `apps/api/test/chz-km-orders.e2e.test.ts` (new cases), `apps/api/test/chz-km-orders-openapi.test.ts`
 
 **Interfaces:**
+
 - Produces: `POST /chz-km-orders/:id/issues` body `{ kind: "export", format: "txt" | "csv", count } | { kind: "print", count }` → `201 ChzKmIssueDto`; `GET /chz-km-orders/:id/issues/:issueId/file` → the file (`Content-Disposition: attachment; filename="km-<gtin>-<from>-<to>.<ext>"`, `Content-Type: text/plain; charset=utf-8` or `text/csv; charset=utf-8`, `Cache-Control: no-store`); `GET /chz-km-orders/:id/issues/:issueId/codes` → `{ codes: [{ seq, code }] }` with `Cache-Control: no-store`; error `409 { code: "CHZ_KM_ISSUE_TOO_MANY", available }` when `count` exceeds the pool; `409 { code: "CHZ_KM_ORDER_NOT_COMPLETED" }` when the order is not `completed`.
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `chz-km-orders.e2e.test.ts` (helper `seedCompletedOrder(tenantId, productId, codes: string[])` inserts a `completed` order with `fetchedCount = codes.length` and one `chz_km_codes` row per code encrypted with `crypto.encryptWithAad(\`${tenantId}/${orderId}/${seq}\`, code)` and `codeHash = kmHash(parseKm(code))`):
+Append to `chz-km-orders.e2e.test.ts` (helper `seedCompletedOrder(tenantId, productId, codes: string[])` inserts a `completed` order with `fetchedCount = codes.length` and one `chz_km_codes` row per code encrypted with `crypto.encryptWithAad(\`${tenantId}/${orderId}/${seq}\`, code)`and`codeHash = kmHash(parseKm(code))`):
 
 ```ts
 it("issues the lowest available codes contiguously and serves them as TXT", async () => {
   const { agent, tenantId, productId } = await readyTenant();
-  const codes = ["010460703469001421AAA0001\u001d93AAAA", "010460703469001421AAA0002\u001d93BBBB", "010460703469001421AAA0003\u001d93CCCC"];
+  const codes = [
+    "010460703469001421AAA0001\u001d93AAAA",
+    "010460703469001421AAA0002\u001d93BBBB",
+    "010460703469001421AAA0003\u001d93CCCC",
+  ];
   const orderId = await seedCompletedOrder(tenantId, productId, codes);
-  const issue = await agent.post(`/chz-km-orders/${orderId}/issues`).send({ kind: "export", format: "txt", count: 2 }).expect(201);
-  expect(issue.body).toMatchObject({ kind: "export", format: "txt", fromSeq: 1, toSeq: 2, count: 2 });
-  const file = await agent.get(`/chz-km-orders/${orderId}/issues/${issue.body.id}/file`).expect(200);
-  expect(file.headers["content-disposition"]).toBe('attachment; filename="km-04607034690014-1-2.txt"');
+  const issue = await agent
+    .post(`/chz-km-orders/${orderId}/issues`)
+    .send({ kind: "export", format: "txt", count: 2 })
+    .expect(201);
+  expect(issue.body).toMatchObject({
+    kind: "export",
+    format: "txt",
+    fromSeq: 1,
+    toSeq: 2,
+    count: 2,
+  });
+  const file = await agent
+    .get(`/chz-km-orders/${orderId}/issues/${issue.body.id}/file`)
+    .expect(200);
+  expect(file.headers["content-disposition"]).toBe(
+    'attachment; filename="km-04607034690014-1-2.txt"',
+  );
   expect(file.headers["cache-control"]).toBe("no-store");
   expect(file.text).toBe(`${codes[0]}\n${codes[1]}\n`);
-  const second = await agent.post(`/chz-km-orders/${orderId}/issues`).send({ kind: "print", count: 1 }).expect(201);
+  const second = await agent
+    .post(`/chz-km-orders/${orderId}/issues`)
+    .send({ kind: "print", count: 1 })
+    .expect(201);
   expect(second.body).toMatchObject({ fromSeq: 3, toSeq: 3 });
-  const list = await agent.get(`/chz-km-orders/${orderId}/issues/${second.body.id}/codes`).expect(200);
+  const list = await agent
+    .get(`/chz-km-orders/${orderId}/issues/${second.body.id}/codes`)
+    .expect(200);
   expect(list.body).toEqual({ codes: [{ seq: 3, code: codes[2] }] });
   const order = await agent.get(`/chz-km-orders/${orderId}`).expect(200);
   expect(order.body).toMatchObject({ issuedCount: 3, availableForIssue: 0 });
@@ -2089,8 +2575,13 @@ it("issues the lowest available codes contiguously and serves them as TXT", asyn
 
 it("refuses more codes than are available and issues from an uncompleted order", async () => {
   const { agent, tenantId, productId } = await readyTenant();
-  const orderId = await seedCompletedOrder(tenantId, productId, ["010460703469001421AAA0009\u001d93AAAA"]);
-  const res = await agent.post(`/chz-km-orders/${orderId}/issues`).send({ kind: "print", count: 2 }).expect(409);
+  const orderId = await seedCompletedOrder(tenantId, productId, [
+    "010460703469001421AAA0009\u001d93AAAA",
+  ]);
+  const res = await agent
+    .post(`/chz-km-orders/${orderId}/issues`)
+    .send({ kind: "print", count: 2 })
+    .expect(409);
   expect(res.body).toMatchObject({ code: "CHZ_KM_ISSUE_TOO_MANY", available: 1 });
 });
 
@@ -2098,16 +2589,29 @@ it("never hands two concurrent issues the same code", async () => {
   const { agent, tenantId, productId } = await readyTenant();
   const codes = Array.from({ length: 6 }, (_, i) => `010460703469001421AAA00${i}Z\u001d93AAAA`);
   const orderId = await seedCompletedOrder(tenantId, productId, codes);
-  const results = await Promise.all([1, 2, 3].map(() => agent.post(`/chz-km-orders/${orderId}/issues`).send({ kind: "print", count: 2 })));
+  const results = await Promise.all(
+    [1, 2, 3].map(() =>
+      agent.post(`/chz-km-orders/${orderId}/issues`).send({ kind: "print", count: 2 }),
+    ),
+  );
   expect(results.map((r) => r.status)).toEqual([201, 201, 201]);
   const ranges = results.map((r) => [r.body.fromSeq, r.body.toSeq]).sort((a, b) => a[0] - b[0]);
-  expect(ranges).toEqual([[1, 2], [3, 4], [5, 6]]);
+  expect(ranges).toEqual([
+    [1, 2],
+    [3, 4],
+    [5, 6],
+  ]);
 });
 
 it("keeps another tenant out of the file and codes endpoints", async () => {
   const { agent, tenantId, productId } = await readyTenant();
-  const orderId = await seedCompletedOrder(tenantId, productId, ["010460703469001421AAA0008\u001d93AAAA"]);
-  const issue = await agent.post(`/chz-km-orders/${orderId}/issues`).send({ kind: "export", format: "csv", count: 1 }).expect(201);
+  const orderId = await seedCompletedOrder(tenantId, productId, [
+    "010460703469001421AAA0008\u001d93AAAA",
+  ]);
+  const issue = await agent
+    .post(`/chz-km-orders/${orderId}/issues`)
+    .send({ kind: "export", format: "csv", count: 1 })
+    .expect(201);
   const other = request.agent(app!.getHttpServer());
   await signUpAndActivate(other);
   await other.get(`/chz-km-orders/${orderId}/issues/${issue.body.id}/file`).expect(404);
@@ -2126,7 +2630,13 @@ Expected: FAIL — 404 on `/issues`.
 
 ```ts
 export const issueChzKmCodesSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("export"), format: z.enum(["txt", "csv"]), count: z.number().int().min(1).max(150_000) }).strict(),
+  z
+    .object({
+      kind: z.literal("export"),
+      format: z.enum(["txt", "csv"]),
+      count: z.number().int().min(1).max(150_000),
+    })
+    .strict(),
   z.object({ kind: z.literal("print"), count: z.number().int().min(1).max(5_000) }).strict(),
 ]);
 export const CHZ_KM_ISSUE_TOO_MANY_CODE = "CHZ_KM_ISSUE_TOO_MANY" as const;
@@ -2163,7 +2673,7 @@ Service:
   }
 ```
 
-The row lock on the order serialises concurrent issues; the `marked.length` check is the backstop. `issueCodes(tenantId, orderId, issueId): Promise<{ seq: number; code: string }[]>` selects the issue (404 across tenants), then the codes `where issue_id = issueId order by seq`, decrypting each with `decryptWithAad(\`${tenantId}/${orderId}/${seq}\`, …)`. `issueFile` = `issueCodes` + `serializeKmCodesTxt`/`Csv` + `kmOrderIssueFileName(order.gtin14, fromSeq, toSeq, format)`; refuse (`409 CHZ_KM_ISSUE_NOT_EXPORT`) when the issue's `kind` is `print`.
+The row lock on the order serialises concurrent issues; the `marked.length` check is the backstop. `issueCodes(tenantId, orderId, issueId): Promise<{ seq: number; code: string }[]>` selects the issue (404 across tenants), then the codes `where issue_id = issueId order by seq`, decrypting each with `decryptWithAad(\`${tenantId}/${orderId}/${seq}\`, …)`. `issueFile`=`issueCodes`+`serializeKmCodesTxt`/`Csv`+`kmOrderIssueFileName(order.gtin14, fromSeq, toSeq, format)`; refuse (`409 CHZ_KM_ISSUE_NOT_EXPORT`) when the issue's `kind`is`print`.
 
 Controller: `POST :id/issues` (`OPERATIONS_WRITE`, `@RequireSubscriptionWrite()`, `@HttpCode(201)`), `GET :id/issues/:issueId/file` and `GET :id/issues/:issueId/codes` (`OPERATIONS_READ`; read access stays available under a restricted subscription because the codes are already paid for). The file handler uses `@Res({ passthrough: true })` to set `Content-Type`, `Content-Disposition`, `Cache-Control: no-store` and returns a `StreamableFile` of the bytes; the codes handler sets `Cache-Control: no-store` via `@Header`. After each successful issue and each file/codes read call `SecurityAuditService.credentialMutation` / `sensitiveRead` with `action: "chz_km_order.issue" | "chz_km_order.codes_read"`, `resourceId: issueId` (inject `SecurityAuditService` like `signer-agents.controller.ts` does).
 
@@ -2186,6 +2696,7 @@ git commit -m "feat(api): issue KM codes as TXT/CSV files or print batches, audi
 ### Task 12: Label templates API — `product_km` purpose and stock seeding
 
 **Files:**
+
 - Modify: `apps/api/src/modules/label-templates/dto.ts:60,196,231`, `label-templates.service.ts:287-296`
 - Modify: `apps/api/src/modules/platform-tenants/tenant-provisioning.service.ts:148-156`
 - Test: `apps/api/test/label-templates.e2e.test.ts`, `apps/api/test/label-templates-openapi.test.ts`, the tenant-provisioning test (find with `grep -rl "buildDuplicateLabelTemplates" apps/api/test`)
@@ -2235,6 +2746,7 @@ git commit -m "feat(api): product_km label purpose with validation and stock see
 ### Task 13: Admin — sidebar regrouping
 
 **Files:**
+
 - Modify: `apps/admin/src/layout/AppShell.tsx:17-120`
 - Modify: `apps/admin/src/i18n/ru.json`, `en.json` (`nav.kmOrders`, `shell.sections.marking`)
 - Test: `apps/admin/test/nav-items.test.ts` (create; check the admin test dir name with `ls apps/admin/test` and follow it)
@@ -2248,10 +2760,14 @@ import { NAV_ITEMS } from "../src/layout/AppShell.js";
 describe("sidebar navigation", () => {
   it("groups routes as in mockup variant B", () => {
     const bySection = new Map<string, string[]>();
-    for (const item of NAV_ITEMS) bySection.set(item.sectionKey, [...(bySection.get(item.sectionKey) ?? []), item.to]);
+    for (const item of NAV_ITEMS)
+      bySection.set(item.sectionKey, [...(bySection.get(item.sectionKey) ?? []), item.to]);
     expect([...bySection.entries()]).toEqual([
       ["shell.sections.production", ["/", "/shifts", "/lines", "/conflicts"]],
-      ["shell.sections.marking", ["/km-orders", "/codes", "/inventory", "/pickup", "/disaggregation"]],
+      [
+        "shell.sections.marking",
+        ["/km-orders", "/codes", "/inventory", "/pickup", "/disaggregation"],
+      ],
       ["shell.sections.reference", ["/catalog", "/labels", "/counterparties", "/employees"]],
       ["shell.sections.equipment", ["/devices", "/integrations"]],
       ["shell.sections.organization", ["/team", "/billing", "/settings"]],
@@ -2286,11 +2802,13 @@ git commit -m "feat(admin): regroup the sidebar with a «Маркировка» 
 ### Task 14: Admin — KM orders API client, list page and create dialog
 
 **Files:**
+
 - Create: `apps/admin/src/pages/km-orders/schemas.ts`, `api.ts`, `index.tsx`, `CreateKmOrderDialog.tsx`, `km-orders.css`
 - Modify: `apps/admin/src/app.tsx` (routes), `apps/admin/src/i18n/ru.json`, `en.json` (`pages.kmOrders.*`)
 - Test: `apps/admin/test/km-orders-api.test.ts`, `apps/admin/test/km-orders-page.test.tsx`
 
 **Interfaces:**
+
 - Produces: hooks `useKmOrders()`, `useKmOrder(id)`, `useCreateKmOrder()`, `useRetryKmOrder()`, `useIssueKmCodes()`, `kmIssueFileUrl(orderId, issueId)`, `useKmIssueCodes(orderId, issueId)`; Zod `kmOrderSchema` mirroring `ChzKmOrderDto`, `KM_ORDER_STATES`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -2323,6 +2841,7 @@ git commit -m "feat(admin): «Заказы кодов» list with KPI strip and 
 ### Task 15: Admin — order card and issue dialogs
 
 **Files:**
+
 - Create: `apps/admin/src/pages/km-orders/KmOrderPage.tsx`, `IssueKmCodesDialog.tsx`
 - Modify: `apps/admin/src/i18n/ru.json`, `en.json`
 - Test: `apps/admin/test/km-order-page.test.tsx`
@@ -2338,7 +2857,7 @@ Expected: FAIL — module missing.
 
 - [ ] **Step 3: Implement**
 
-`KmOrderPage.tsx` per mockup 02: breadcrumb, title (product name), meta line (state chip, GTIN, group, template id), actions «Выгрузить» / «Печать» (only when `state === "completed" && availableForIssue > 0 && canWrite`), counters (`MetricStrip` or `Card`s), progress bar, `Alert tone="warning"` with the expiry sentence, «Ход заказа» list from the state and timestamps, «Сведения о заказе» `DefinitionGrid` (СУЗ order id, group, template, serial by operator, release method, payment, contact, created by), issues table with repeat actions: «Скачать ещё раз» = `window.location.assign(kmIssueFileUrl(orderId, issueId))`; «Печать ещё раз» = `window.open(\`/km-orders/${orderId}/issues/${issueId}/print\`, "_blank")`. «Повторить» button on `failed` calling `useRetryKmOrder`. `IssueKmCodesDialog.tsx`: `mode: "export" | "print"`; count `Input` with quick picks (100, 500, 1 000, all), computed range preview `№ ${issued+1} – ${issued+count}`, TXT/CSV `RadioGroup` for export, template `Select` for print (from `useLabelTemplates({ enabled: "true" })` filtered to `purpose === "product_km"` and eligible for the product's group via `chzProductGroupCodes === null || includes(groupCode)`, stock name preselected), a printer note; on submit call `useIssueKmCodes`, then for export navigate to the file URL, for print `window.open(printUrl + "?template=" + templateId, "_blank")`; map `CHZ_KM_ISSUE_TOO_MANY` to an inline error with the `available` number.
+`KmOrderPage.tsx` per mockup 02: breadcrumb, title (product name), meta line (state chip, GTIN, group, template id), actions «Выгрузить» / «Печать» (only when `state === "completed" && availableForIssue > 0 && canWrite`), counters (`MetricStrip` or `Card`s), progress bar, `Alert tone="warning"` with the expiry sentence, «Ход заказа» list from the state and timestamps, «Сведения о заказе» `DefinitionGrid` (СУЗ order id, group, template, serial by operator, release method, payment, contact, created by), issues table with repeat actions: «Скачать ещё раз» = `window.location.assign(kmIssueFileUrl(orderId, issueId))`; «Печать ещё раз» = `window.open(\`/km-orders/${orderId}/issues/${issueId}/print\`, "_blank")`. «Повторить» button on `failed`calling`useRetryKmOrder`. `IssueKmCodesDialog.tsx`: `mode: "export" | "print"`; count `Input`with quick picks (100, 500, 1 000, all), computed range preview`№ ${issued+1} – ${issued+count}`, TXT/CSV `RadioGroup`for export, template`Select`for print (from`useLabelTemplates({ enabled: "true" })`filtered to`purpose === "product_km"`and eligible for the product's group via`chzProductGroupCodes === null || includes(groupCode)`, stock name preselected), a printer note; on submit call `useIssueKmCodes`, then for export navigate to the file URL, for print `window.open(printUrl + "?template=" + templateId, "_blank")`; map `CHZ_KM_ISSUE_TOO_MANY`to an inline error with the`available` number.
 
 - [ ] **Step 4: Run tests**
 
@@ -2357,11 +2876,13 @@ git commit -m "feat(admin): KM order card with issue history and export/print di
 ### Task 16: Admin — print page (one label per page)
 
 **Files:**
+
 - Create: `apps/admin/src/pages/km-orders/KmOrderPrintPage.tsx`, `apps/admin/src/pages/km-orders/print.css`
 - Modify: `apps/admin/src/app.tsx` (top-level route `/km-orders/:orderId/issues/:issueId/print` outside the shell but inside the auth guard: reuse the `ShellPage` guard chain without `AppShell` — add a `PrintShell` element that renders only `<Outlet/>` after the access gate, see `pages/Shell.tsx`)
 - Test: `apps/admin/test/km-order-print-page.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `draw(spec, ctx, scale, data, options)` from `apps/admin/src/pages/labels/renderer.ts`, `rasterizeText` from `apps/admin/src/labels/rasterizer.ts` (Cyrillic compositing exactly as `PreviewPane.tsx` does), `useKmIssueCodes`, `useLabelTemplate(templateId)`, `useKmOrder(orderId)`.
 
 - [ ] **Step 1: Write the failing test**
@@ -2389,16 +2910,28 @@ export function KmOrderPrintPage() {
   const scale = PRINT_DPI / 25.4; // px per mm
   const [ready, setReady] = useState(0);
   useEffect(() => {
-    if (spec && codes.data && ready === codes.data.codes.length && codes.data.codes.length > 0) window.print();
+    if (spec && codes.data && ready === codes.data.codes.length && codes.data.codes.length > 0)
+      window.print();
   }, [ready, spec, codes.data]);
   if (!spec || !codes.data || !order.data) return <Spinner />;
   return (
     <div className="mk-km-print">
       <style>{`@page { size: ${spec.widthMm}mm ${spec.heightMm}mm; margin: 0 }`}</style>
-      <header className="mk-km-print__screen-only">…выдача, диапазон, count, «Не печатается»…</header>
+      <header className="mk-km-print__screen-only">
+        …выдача, диапазон, count, «Не печатается»…
+      </header>
       {codes.data.codes.map(({ seq, code }) => (
-        <section key={seq} className="mk-km-print__page" style={{ width: `${spec.widthMm}mm`, height: `${spec.heightMm}mm` }}>
-          <LabelCanvas spec={spec} scale={scale} data={labelData(order.data, code)} onReady={() => setReady((n) => n + 1)} />
+        <section
+          key={seq}
+          className="mk-km-print__page"
+          style={{ width: `${spec.widthMm}mm`, height: `${spec.heightMm}mm` }}
+        >
+          <LabelCanvas
+            spec={spec}
+            scale={scale}
+            data={labelData(order.data, code)}
+            onReady={() => setReady((n) => n + 1)}
+          />
         </section>
       ))}
     </div>
@@ -2425,6 +2958,7 @@ git commit -m "feat(admin): KM print page, one label per page sized from the tem
 ### Task 17: Admin — editor purpose, СУЗ settings form, token status
 
 **Files:**
+
 - Modify: `apps/admin/src/pages/labels/preview-data.ts`, `apps/admin/src/pages/labels/editor/index.tsx`, `apps/admin/src/pages/labels/index.tsx`, `apps/admin/src/pages/labels/api.ts` (purpose union)
 - Modify: `apps/admin/src/pages/integrations/ChannelPage.tsx:70-380`, `SignerAgentsPanel.tsx`, `api.ts` (overview type gains `omsToken`)
 - Modify: `apps/admin/src/i18n/ru.json`, `en.json`
@@ -2460,6 +2994,7 @@ git commit -m "feat(admin): product_km in the label editor, СУЗ settings and 
 ### Task 18: Docs, runbook and final gates
 
 **Files:**
+
 - Modify: `docs/runbooks/signer-agent-manual-e2e.md` (sandbox section for СУЗ: register an installation with the public sandbox key `4344d884-7f21-456c-981e-cd68e92391e8` at `https://suz-integrator.sandbox.crptech.ru`, enter `omsId`/`omsConnection`, wait for the СУЗ token, order 2 codes, watch the state timeline, export TXT, print one label; record the real shapes of `simpleSignIn/{omsConnection}`, `order`, `order/status`, `codes`)
 - Modify: `docs/superpowers/specs/2026-09-18-chz-km-orders-design.md` (status line → «Implemented: part A», list the three deviations)
 - Modify: `README.md` Chestny ZNAK row (add «KM orders, encrypted code pool, office export/print»)

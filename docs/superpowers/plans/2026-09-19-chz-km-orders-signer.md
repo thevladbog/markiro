@@ -37,11 +37,14 @@
 ### Task 1: Task contract as an adjacently tagged enum
 
 **Files:**
+
 - Modify: `apps/signer/signer-core/src/contracts.rs:65-92`
 - Test: `apps/signer/signer-core/src/contracts.rs` (`mod tests`)
 
 **Interfaces:**
+
 - Produces:
+
   ```rust
   pub struct OmsAuthPayload { pub true_api_base_url: String, pub oms_connection: String, pub inn: Option<String> }
   pub struct SignDetachedPayload { pub purpose: String, pub order_id: String, pub data_base64: String }
@@ -50,6 +53,7 @@
   pub struct SignerTask { pub id: String, #[serde(flatten)] pub kind: TaskKind }
   pub struct TaskCompleteSignature { pub signature_base64: String, pub cert_thumbprint: String }
   ```
+
   `TaskType` is removed; `SignerTask::task_type()` returns `TaskType`-like `&'static str` (`"true_api_auth"` …) for journal text.
 
 - [ ] **Step 1: Write the failing tests**
@@ -107,7 +111,7 @@ Add to `mod tests` in `contracts.rs`:
     }
 ```
 
-(The existing test that asserts `task.task_type == TaskType::TrueApiAuth` is replaced by `still_parses_the_true_api_auth_fixture`; the existing "future sign_detached" fixture test that expects a deserialisation *error* is deleted — that future is now.)
+(The existing test that asserts `task.task_type == TaskType::TrueApiAuth` is replaced by `still_parses_the_true_api_auth_fixture`; the existing "future sign_detached" fixture test that expects a deserialisation _error_ is deleted — that future is now.)
 
 - [ ] **Step 2: Run tests to verify they fail**
 
@@ -213,11 +217,13 @@ git commit -m "feat(signer): task contract as an adjacently tagged enum with oms
 ### Task 2: `Signer::sign_detached` on the trait and the fakes
 
 **Files:**
+
 - Modify: `apps/signer/signer-core/src/signer.rs:21-29`
 - Modify: fake signers in `runtime.rs` (`NoSigner`, `PayloadSigner`) and `trueapi.rs` (`FakeSigner`, `FailingSigner`, `PayloadSigner`)
 - Test: `apps/signer/signer-core/src/signer.rs` (`mod tests`)
 
 **Interfaces:**
+
 - Produces: `fn sign_detached(&self, thumbprint: &str, payload: &[u8]) -> Result<String, SignerError>` on `Signer` (base64 of a detached CMS).
 
 - [ ] **Step 1: Write the failing test**
@@ -279,10 +285,12 @@ git commit -m "feat(signer): sign_detached on the Signer trait and test fakes"
 ### Task 3: Detached mode in the CryptoAPI and CAdESCOM backends
 
 **Files:**
+
 - Modify: `apps/signer/signer-core/src/signer_capi.rs:58-95, 236-300`
 - Modify: `apps/signer/signer-core/src/signer_cades.rs:20-60, 120-160`
 
 **Interfaces:**
+
 - Consumes: `CryptSignMessage(pSignPara, fDetachedSignature, …)` (second argument), CAdESCOM `SignedData.SignCades(Signer, CADES_BES, bDetached)` (the boolean already passed as `false`).
 - Produces: `CapiSigner::sign_detached`, `CadesSigner::sign_detached`.
 
@@ -336,10 +344,12 @@ git commit -m "feat(signer): detached CAdES-BES in the CryptoAPI and CAdESCOM ba
 ### Task 4: `obtain_oms_token` in the True API module
 
 **Files:**
+
 - Modify: `apps/signer/signer-core/src/trueapi.rs`
 - Test: `apps/signer/signer-core/src/trueapi.rs` (`mod tests`)
 
 **Interfaces:**
+
 - Produces: `pub async fn obtain_oms_token(http, base_url, oms_connection: &str, inn: Option<&str>, thumbprint, signer) -> Result<TrueApiToken, SignerError>`; the token's `expires_at` = now + 10 h via `format_rfc3339`.
 
 - [ ] **Step 1: Write the failing test**
@@ -462,11 +472,13 @@ git commit -m "feat(signer): obtain a СУЗ client token through simpleSignIn/{
 ### Task 5: Runtime dispatch per task kind and generic completion
 
 **Files:**
+
 - Modify: `apps/signer/signer-core/src/cloud.rs:115-131`
 - Modify: `apps/signer/signer-core/src/runtime.rs:453-580`
 - Test: `apps/signer/signer-core/src/runtime.rs` (`mod tests`)
 
 **Interfaces:**
+
 - Produces: `CloudClient::complete<B: Serialize + ?Sized>(&self, secret, task_id, body: &B)`; runtime `execute` handling `TaskKind::TrueApiAuth` (unchanged), `TaskKind::OmsAuth` (calls `obtain_oms_token`, reports `TaskComplete`), `TaskKind::SignDetached` (decodes base64, `signer.sign_detached`, reports `TaskCompleteSignature`); journal lines «СУЗ token delivered», «Detached signature delivered», «Signing failed».
 
 - [ ] **Step 1: Write the failing tests**
@@ -602,6 +614,7 @@ git commit -m "feat(signer): execute oms_auth and sign_detached tasks"
 ### Task 6: Runbook, version bump and release notes
 
 **Files:**
+
 - Modify: `docs/runbooks/signer-agent-manual-e2e.md`
 - Modify: `apps/signer/src-tauri/tauri.conf.json`, `apps/signer/src-tauri/Cargo.toml`, `apps/signer/package.json` (patch version bump, all three in step — check `docs/runbooks/signer-release.md` for the exact files the release tooling compares)
 - Modify: `tools/signer-release/` changelog if the release contracts require an entry (see `docs/runbooks/signer-release.md`)

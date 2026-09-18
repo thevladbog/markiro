@@ -40,14 +40,32 @@ export const chzSignDetachedPayloadSchema = z
     purpose: z.literal("oms_order"),
     orderId: z.uuid(),
     /** Exact request body bytes, base64. Order bodies are well under 1 KB; the cap only bounds abuse. */
-    dataBase64: z.string().regex(/^[A-Za-z0-9+/]+={0,2}$/).min(4).max(256 * 1024),
+    dataBase64: z
+      .string()
+      .regex(/^[A-Za-z0-9+/]+={0,2}$/)
+      .min(4)
+      .max(256 * 1024),
   })
   .strict();
 
 export const chzSignerTaskSchema = z.discriminatedUnion("type", [
-  z.object({ id: z.uuid(), type: z.literal("true_api_auth"), payload: chzTrueApiAuthPayloadSchema }).strict(),
-  z.object({ id: z.uuid(), type: z.literal("oms_auth"), payload: chzOmsAuthPayloadSchema }).strict(),
-  z.object({ id: z.uuid(), type: z.literal("sign_detached"), payload: chzSignDetachedPayloadSchema }).strict(),
+  z
+    .object({
+      id: z.uuid(),
+      type: z.literal("true_api_auth"),
+      payload: chzTrueApiAuthPayloadSchema,
+    })
+    .strict(),
+  z
+    .object({ id: z.uuid(), type: z.literal("oms_auth"), payload: chzOmsAuthPayloadSchema })
+    .strict(),
+  z
+    .object({
+      id: z.uuid(),
+      type: z.literal("sign_detached"),
+      payload: chzSignDetachedPayloadSchema,
+    })
+    .strict(),
 ]);
 
 export const chzSignerTaskCompleteSchema = z
@@ -69,7 +87,11 @@ export const chzSignerTaskCompleteSchema = z
 
 export const chzSignerSignatureCompleteSchema = z
   .object({
-    signatureBase64: z.string().regex(/^[A-Za-z0-9+/]+={0,2}$/).min(4).max(64 * 1024),
+    signatureBase64: z
+      .string()
+      .regex(/^[A-Za-z0-9+/]+={0,2}$/)
+      .min(4)
+      .max(64 * 1024),
     certThumbprint: z.string().trim().min(1).max(128),
   })
   .strict();

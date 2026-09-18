@@ -146,6 +146,8 @@ describe("signer task union", () => {
     expect("signatureBase64" in done).toBe(true);
   });
   it("rejects an unknown task type", () => {
-    expect(() => chzSignerContracts.task.parse({ id: crypto.randomUUID(), type: "nope", payload: {} })).toThrow();
+    expect(() =>
+      chzSignerContracts.task.parse({ id: crypto.randomUUID(), type: "nope", payload: {} }),
+    ).toThrow();
   });
 });
