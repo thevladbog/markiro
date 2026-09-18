@@ -40,6 +40,7 @@ import app.markiro.handheld.core.print.PrinterEntity
         BoxExceptionEntity::class,
         PalletEntity::class,
         PalletExceptionEntity::class,
+        PalletMembershipRemovalEntity::class,
         WriteoffOutboxEntity::class,
         WriteoffReasonEntity::class,
         WriteoffProductEntity::class,
@@ -67,6 +68,7 @@ abstract class HandheldDatabase : RoomDatabase() {
     abstract fun boxDao(): BoxDao
     abstract fun ssccPoolDao(): SsccPoolDao
     abstract fun palletDao(): PalletDao
+    abstract fun palletMembershipRemovalDao(): PalletMembershipRemovalDao
     abstract fun productLabelJobDao(): ProductLabelJobDao
     abstract fun productLabelEventDao(): ProductLabelEventDao
     abstract fun boxExceptionDao(): BoxExceptionDao
@@ -100,4 +102,4 @@ abstract class HandheldDatabase : RoomDatabase() {
     abstract fun palletLabelTemplateDao(): PalletLabelTemplateDao
 }
 
-const val HANDHELD_DATABASE_VERSION = 18
+const val HANDHELD_DATABASE_VERSION = 19

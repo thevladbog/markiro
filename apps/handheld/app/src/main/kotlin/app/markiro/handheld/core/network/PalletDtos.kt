@@ -51,3 +51,12 @@ data class PalletMembershipDto(
     val addedAt: String,
     val operatorId: String?,
 )
+
+/** A box taken back off the device's own open warehouse pallet; the undo of [PalletMembershipDto]. */
+@Serializable
+data class PalletMembershipRemovalDto(
+    val palletId: String,
+    val boxSscc: String,
+    val removedAt: String,
+    val operatorId: String?,
+)

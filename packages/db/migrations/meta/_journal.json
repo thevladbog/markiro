@@ -1156,6 +1156,13 @@
       "when": 1789732252340,
       "tag": "0164_pallet_label_58x40",
       "breakpoints": true
+    },
+    {
+      "idx": 165,
+      "version": "7",
+      "when": 1789758354825,
+      "tag": "0165_pallet_membership_removal_quarantine",
+      "breakpoints": true
     }
   ]
 }

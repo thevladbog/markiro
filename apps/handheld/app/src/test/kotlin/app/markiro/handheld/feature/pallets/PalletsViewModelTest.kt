@@ -106,6 +106,7 @@ class PalletsViewModelTest {
         var attachCalls = 0
         var closeCalls = 0
         var removed: Pair<String, String>? = null
+        var removedBy: String? = null
         var acknowledged: String? = null
         val reprintReasons = mutableListOf<ReprintReason>()
         val pallets = mutableMapOf<String, PalletEntity>()
@@ -156,8 +157,9 @@ class PalletsViewModelTest {
             return next
         }
 
-        override suspend fun remove(palletId: String, sscc: String): Boolean {
+        override suspend fun remove(palletId: String, sscc: String, operatorId: String?): Boolean {
             removed = palletId to sscc
+            removedBy = operatorId
             return true
         }
 
@@ -603,6 +605,9 @@ class PalletsViewModelTest {
         vm.remove("034600682000000014")
         advanceUntilIdle()
         assertEquals("w1" to "034600682000000014", gateway.removed)
+        // The removal record names the operator in session, not null: it is the
+        // only place the server learns who took the box off.
+        assertEquals("op-1", gateway.removedBy)
     }
 
     /** No scan is judged while a closed pallet's label is still on screen. */

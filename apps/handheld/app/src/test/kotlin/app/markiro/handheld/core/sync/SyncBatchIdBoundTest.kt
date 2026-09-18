@@ -17,6 +17,7 @@ import app.markiro.handheld.core.storage.PalletEntity
 import app.markiro.handheld.core.storage.PalletExceptionEntity
 import app.markiro.handheld.core.storage.PalletKind
 import app.markiro.handheld.core.storage.PalletMembershipEntity
+import app.markiro.handheld.core.storage.PalletMembershipRemovalEntity
 import app.markiro.handheld.core.storage.ProductLabelEventEntity
 import app.markiro.handheld.core.storage.ProductLabelJobEntity
 import kotlinx.coroutines.CoroutineScope
@@ -165,6 +166,14 @@ class SyncBatchIdBoundTest {
         PalletMembershipEntity(palletId, memberSscc(index), "2026-09-10T15:00:00.000Z", "op-1", MembershipStatus.PENDING, null, null, null, null),
     )
 
+    /** The removal channel (room 19), the seventh signature folded into the id. */
+    private suspend fun removal(palletId: String, index: Int) = db.palletMembershipRemovalDao().insert(
+        PalletMembershipRemovalEntity(
+            palletId = palletId, sscc = memberSscc(index), removedAt = "2026-09-10T16:00:00.000Z",
+            operatorId = "op-1", status = app.markiro.handheld.core.storage.RemovalStatus.PENDING,
+        ),
+    )
+
     private fun job(id: String) = ProductLabelJobEntity(
         jobId = id, shiftId = "s1", codeHash = "c".repeat(64), canonicalRaw = "raw",
         acceptedAt = "2026-09-10T08:00:00.000Z", operatorId = "op-1", policyRevision = "rev",
@@ -174,13 +183,21 @@ class SyncBatchIdBoundTest {
         verificationOutcome = "not_required", status = "prepared", lastFailure = null,
     )
 
-    private fun ok(applied: Int, acceptedEventIds: List<String> = emptyList(), membershipSsccs: List<String> = emptyList()) =
+    private fun ok(
+        applied: Int,
+        acceptedEventIds: List<String> = emptyList(),
+        membershipSsccs: List<String> = emptyList(),
+        removalSsccs: List<String> = emptyList(),
+    ) =
         MockResponse().setResponseCode(201).setBody(
             """{"applied":$applied,"alreadyApplied":false,"conflicts":[],""" +
                 """"productLabelReceipt":{"acceptedEventIds":${acceptedEventIds.joinToString(",", "[", "]") { "\"$it\"" }},""" +
                 """"quarantined":[]},""" +
                 """"memberships":${
                     membershipSsccs.joinToString(",", "[", "]") { """{"palletId":"wbulk","boxSscc":"$it","status":"accepted"}""" }
+                },""" +
+                """"membershipRemovals":${
+                    removalSsccs.joinToString(",", "[", "]") { """{"palletId":"wbulk","boxSscc":"$it","status":"removed"}""" }
                 }}""",
         )
 
@@ -204,12 +221,16 @@ class SyncBatchIdBoundTest {
         warehousePallet("wbulk")
         repeat(SyncEngine.MAX_PALLET_MEMBERSHIPS) { membership("wbulk", it) }
         val membershipSsccs = (0 until SyncEngine.MAX_PALLET_MEMBERSHIPS).map { memberSscc(it) }
+        // The removal channel (room 19), the seventh signature: without it this
+        // measures a worst case that is one whole signature short of the real one.
+        repeat(SyncEngine.MAX_PALLET_MEMBERSHIP_REMOVALS) { removal("wbulk", it) }
+        val removalSsccs = (0 until SyncEngine.MAX_PALLET_MEMBERSHIP_REMOVALS).map { memberSscc(it) }
 
         // The response acknowledges every event and every membership too, so
         // this stays a single round trip -- an unacknowledged record would
         // otherwise ride a second, unloaded batch straight after and defeat
         // the point of this test.
-        server.enqueue(ok(0, eventIds, membershipSsccs))
+        server.enqueue(ok(0, eventIds, membershipSsccs, removalSsccs))
         assertTrue(engine().drainAll())
         val body = bodyOf(server.takeRequest())
 
@@ -221,6 +242,10 @@ class SyncBatchIdBoundTest {
         assertEquals(SyncEngine.MAX_EXCEPTIONS, body.getValue("exceptions").jsonArray.size)
         assertEquals(SyncEngine.MAX_PALLET_EXCEPTIONS, body.getValue("palletExceptions").jsonArray.size)
         assertEquals(SyncEngine.MAX_PALLET_MEMBERSHIPS, body.getValue("palletMemberships").jsonArray.size)
+        assertEquals(
+            SyncEngine.MAX_PALLET_MEMBERSHIP_REMOVALS,
+            body.getValue("palletMembershipRemovals").jsonArray.size,
+        )
 
         val batchId = body.getValue("batchId").jsonPrimitive.content
         assertTrue(

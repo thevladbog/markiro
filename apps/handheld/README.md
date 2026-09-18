@@ -343,10 +343,21 @@ mode; a pool that runs dry leaves the pallet open with the reason shown, and a m
 label template reads «Нет шаблона этикетки паллеты — задайте его в кабинете». Printer
 selection reuses the shared `PrinterChoiceScreen`.
 
+Any box can be taken off the open pallet with «Убрать с паллеты», whatever its sync
+status. A pending row is simply deleted; a sent or accepted one is undone by a queued
+`pallet_membership_removals` record that rides the next batch ahead of any
+memberships, so the server clears `boxes.pallet_id` before a re-scan of the same box
+lands. Taking off the last box deletes the open pallet on the device and, once the
+removal is applied, on the server — no serial is burned and nothing is printed.
+Storage is Room 19 (the removal queue).
+
 When the server rejects a membership at sync (a race with another device), the screen
 shows a conflict banner listing the rejected SSCCs and reasons, sectioned by pallet, with
 «Принято» per section to acknowledge and dismiss it without discarding the rejection rows.
-The notice is device-wide rather than tied to the pallet currently open: a membership can
+When the last box is taken off an open pallet the pallet itself disappears, and any
+unacknowledged rejection notices for it go with it — the boxes those notices name were
+never on the pallet in the first place. The notice is device-wide rather than tied to
+the pallet currently open: a membership can
 still be pending when its pallet is closed and its label printed, and that label states
 the box count, so a rejection arriving afterwards leaves the paper on the stack
 overstating it. A closed pallet's section therefore also offers «Перепечатать этикетку»,
@@ -363,7 +374,7 @@ from a shift's own exceptions hub, and a shift-less one reached from the pallets
 screen's own app bar, for disassembling a warehouse pallet without opening any shift at
 all.
 
-Storage lives at Room database version 18. The migration renaming `writeoff_boxes` to
+Storage lives at Room database version 19. The migration renaming `writeoff_boxes` to
 `box_registry` and adding the pallet tables guards against a table that is already
 named `box_registry` (an idempotent upgrade path), and a device already sitting on the
 in-between schema needs its app data cleared rather than a second in-place migration.

@@ -57,6 +57,28 @@ class MetaStore(private val db: HandheldDatabase) {
         /** Memberships' own pin, for the identical reason every other channel here has one. */
         const val SYNC_PENDING_MEMBERSHIP_COUNT = "sync_pending_membership_count"
 
+        /**
+         * The membership DTOs a batch in flight actually pinned, as JSON.
+         *
+         * A count alone is not enough for THIS channel: `WarehousePallets.remove`
+         * deletes a membership row at any status, so a `sent` row can vanish
+         * while its batch is still in flight. Rebuilding the retry's body from a
+         * live `sent()` read would then resend the identical `batchId` with
+         * fewer memberships, and the server answers `station_batch_mismatch`
+         * (409) forever -- wedging every channel on the device. The snapshot is
+         * written under the same commit as the pin, so a local delete cannot
+         * change the bytes a pinned batch resends.
+         *
+         * `SYNC_PENDING_MEMBERSHIP_COUNT` stays the authority on how many rows a
+         * pin holds and this key on which bytes they are; a pin left by a build
+         * that predates this key is materialised from `sent()` before its first
+         * retry, and abandoned if its rows are already gone.
+         */
+        const val SYNC_PENDING_MEMBERSHIP_SNAPSHOT = "sync_pending_membership_snapshot"
+
+        /** Membership removals' own pin, kept separately for the same reason memberships have one. */
+        const val SYNC_PENDING_MEMBERSHIP_REMOVAL_COUNT = "sync_pending_membership_removal_count"
+
         /** When the pallet bootstrap last landed; the «данные на 10:42» stamp. */
         const val PALLET_BOOTSTRAP_AT = "pallet_bootstrap_at"
 

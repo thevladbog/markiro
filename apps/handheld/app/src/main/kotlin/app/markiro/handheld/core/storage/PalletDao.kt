@@ -135,6 +135,10 @@ interface PalletDao {
     @Query("SELECT COUNT(*) FROM pallets WHERE closedAt IS NOT NULL AND disassembledAt IS NULL AND (:shiftId IS NULL OR shiftId = :shiftId)")
     fun observeClosedCount(shiftId: String?): Flow<Int>
 
+    /** Prunes an emptied draft: only an open pallet can be deleted, never a closed/printed one. */
+    @Query("DELETE FROM pallets WHERE palletId = :palletId AND closedAt IS NULL")
+    suspend fun delete(palletId: String): Int
+
     @Query("DELETE FROM pallets")
     suspend fun clear()
 }
