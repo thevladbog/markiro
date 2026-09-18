@@ -1395,14 +1395,15 @@ export class CodeSearchService {
       .leftJoin(schema.orgProfiles, eq(schema.orgProfiles.tenantId, schema.organization.id))
       .where(eq(schema.organization.id, tenantId));
 
-    // Each box's OWN production day (its shift's), the same expression the
-    // card prints; the live count is the report's predicate, so the two forms
+    // Each box's OWN production day (its shift's) -- the DECLARED one only.
+    // Unlike the card, the placard never substitutes the planned date: a
+    // placard is glued next to the boxes' own labels, and a guessed date that
+    // disagrees with them is worse than «См. на продукции» (owner decision
+    // 2026-09-18). The live count is the report's predicate, so the two forms
     // never disagree about what stands on the stack.
     const boxRows = await this.db
       .select({
-        productionDate: sql<
-          string | null
-        >`coalesce(${schema.shifts.productionDate}, ${schema.shifts.plannedDate})::text`,
+        productionDate: sql<string | null>`${schema.shifts.productionDate}::text`,
         disassembledAt: schema.boxes.disassembledAt,
         codeCount: sql<number>`count(${schema.boxItems.codeHash})::int`,
       })

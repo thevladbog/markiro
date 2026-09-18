@@ -34,14 +34,17 @@ more than what stands on the stack.
 
 ### 2.1 Date summary semantics
 
-- A box's date is its shift's effective production day,
-  `coalesce(shifts.production_date, shifts.planned_date)` — the same expression
-  `getPalletCard` uses for `boxes[].productionDate`.
+- A box's date is its shift's DECLARED production day
+  (`shifts.production_date` only). Unlike the pallet card, the placard never
+  substitutes the planned date: it hangs next to the boxes' own labels, and a
+  guessed date that disagrees with them is worse than none (owner decision
+  2026-09-18).
 - «Годен до» is `shelfLifeExpiryDate(productionDate, product.shelfLifeDays)` from
   `@markiro/domain` (inclusive rule: production day counts as day one). With no
   shelf life on the product the cell prints `—`.
-- A box without a production date (shift with neither date) is grouped under
-  `—` as the last row; its expiry is `—`.
+- Boxes without a declared production date are grouped as the last row, and
+  both its date and «Годен до» cells print «См. на продукции» — the reader
+  checks the boxes' own labels.
 - On a production pallet every box shares one shift, so the table collapses to
   one row plus `Итого`; that is by design, not special-cased.
 - **Row cap.** A4 prints up to 12 date rows, A5 up to 6. Beyond that the table

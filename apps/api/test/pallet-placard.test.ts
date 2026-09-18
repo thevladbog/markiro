@@ -108,6 +108,14 @@ describe("pallet placard", () => {
     );
   });
 
+  it("sends the reader to the boxes' own labels when a box has no declared production date", () => {
+    const html = renderPalletPlacardHtml(fixture({ boxes: [box("2026-09-10"), box(null)] }), "a4");
+    // Both the date and the expiry cell of the undated group, never a dash
+    // that would read as «no shelf life».
+    expect(html.match(/См\. на продукции/g)?.length).toBe(2);
+    expect(html).toContain("10.09.2026");
+  });
+
   it("prints the counts, the date summary and the total", () => {
     const html = renderPalletPlacardHtml(fixture(), "a4");
     expect(html).toContain("10.09.2026");

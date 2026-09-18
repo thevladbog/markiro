@@ -14,7 +14,7 @@ import { brandLogo, escapeHtml, ssccBarcode, ssccHri, type ReportOrg } from "./c
 export type PlacardFormat = "a4" | "a5";
 
 export interface PalletPlacardBox {
-  /** The box's shift's effective production day (`YYYY-MM-DD`) or null. */
+  /** The box's shift's DECLARED production day (`YYYY-MM-DD`); null prints «См. на продукции». */
   productionDate: string | null;
   /** Live unit codes inside the box. */
   codeCount: number;
@@ -44,6 +44,13 @@ export interface PlacardDateRow {
   /** Set only on the folded tail row: how many distinct dates it stands for. */
   foldedDates?: number;
 }
+
+/**
+ * What a box with no DECLARED production date prints in the date and expiry
+ * cells (owner decision 2026-09-18): the reader checks the boxes' own labels
+ * instead of trusting a planned or guessed date on the placard.
+ */
+export const SEE_ON_PRODUCT = "См. на продукции";
 
 /** Date rows a page can hold before the tail is folded (spec §2.1). */
 export const PLACARD_ROW_CAP: Record<PlacardFormat, number> = { a4: 12, a5: 6 };
@@ -206,9 +213,17 @@ function dateTable(rows: PlacardDateRow[], format: PlacardFormat): string {
         row.foldedDates !== undefined
           ? `и ещё ${row.foldedDates} ${datesWord(row.foldedDates)}`
           : row.productionDate === null
-            ? "—"
+            ? SEE_ON_PRODUCT
             : civilDate(row.productionDate);
-      const expiry = row.expiryDate === null ? "—" : civilDate(row.expiryDate);
+      // No declared date means no computable expiry either: both cells send
+      // the reader to the boxes' own labels rather than printing a dash that
+      // reads as «no shelf life».
+      const expiry =
+        row.expiryDate !== null
+          ? civilDate(row.expiryDate)
+          : row.productionDate === null && row.foldedDates === undefined
+            ? SEE_ON_PRODUCT
+            : "—";
       const units = compact ? "" : `<td class="n">${row.unitCount}</td>`;
       return `<tr><td>${escapeHtml(label)}</td><td>${expiry}</td><td class="n">${row.boxCount}</td>${units}</tr>`;
     })
