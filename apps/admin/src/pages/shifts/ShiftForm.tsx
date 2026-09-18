@@ -461,6 +461,7 @@ export function ShiftForm({
           plannedDate: dirtyFields.plannedDate === true,
           productionDate: dirtyFields.productionDate === true,
           boxLabelTemplate: dirtyFields.boxLabelTemplateSelection === true,
+          palletLabelTemplate: dirtyFields.palletLabelTemplateId === true,
         },
         reprocessingSupported,
       ),
@@ -955,7 +956,9 @@ export function ShiftForm({
                     hint={t("pages.shifts.form.palletLabelTemplateHint")}
                     options={palletLabelTemplateOptions}
                     value={palletLabelTemplateId}
-                    disabled={activeEdit}
+                    // Editable on an active shift like the box template: the
+                    // device reads it at the next print, so nothing already
+                    // printed changes.
                     searchable
                     searchLabel={t("pages.shifts.form.boxLabelTemplateSearch")}
                     searchPlaceholder={t("pages.shifts.form.boxLabelTemplateSearch")}
@@ -1001,10 +1004,10 @@ export function ShiftForm({
  *   omitted, touched or not), because the user can see a concrete number in
  *   the input and expects that exact value to be saved. They're omitted only
  *   when hidden (`mode === "validation"`), where they're not applicable.
- * - Active-shift edits send `lineId`, `plannedQty`, `plannedDate`, and
- *   `productionDate` only when their final value differs from the form
- *   default. This prevents a stale edit panel from overwriting a concurrent
- *   correction.
+ * - Active-shift edits send `lineId`, `plannedQty`, `plannedDate`,
+ *   `productionDate`, `boxLabelTemplateId` and `palletLabelTemplateId` only
+ *   when their final value differs from the form default. This prevents a
+ *   stale edit panel from overwriting a concurrent correction.
  * - Every other field (`mode`, `lineId`, `plannedQty`, `plannedDate`,
  *   `palletsEnabled`) is always sent as shown, matching the simpler
  *   full-form-resend convention `ProductForm`/`CounterpartyForm` already use.
@@ -1028,12 +1031,14 @@ function toPayload(
     plannedDate: boolean;
     productionDate: boolean;
     boxLabelTemplate: boolean;
+    palletLabelTemplate: boolean;
   } = {
     lineId: true,
     plannedQty: true,
     plannedDate: true,
     productionDate: true,
     boxLabelTemplate: true,
+    palletLabelTemplate: true,
   },
   reprocessingSupported = false,
 ): CreateShiftInput | UpdateShiftInput {
@@ -1064,6 +1069,13 @@ function toPayload(
     }
     if (changed.boxLabelTemplate) {
       activePayload.boxLabelTemplateId = resolvedBoxLabelTemplateId;
+    }
+    // Only a concrete template is sent: the empty «organisation default»
+    // option is resolved by the server solely when pallets are switched on,
+    // which an active shift cannot do, and a null here would be refused
+    // (pallets on require a template). Choosing it mid-shift is a no-op.
+    if (changed.palletLabelTemplate && values.palletsEnabled && palletLabelTemplateId) {
+      activePayload.palletLabelTemplateId = palletLabelTemplateId;
     }
     return activePayload;
   }

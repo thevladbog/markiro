@@ -1102,12 +1102,19 @@ export class ShiftsService {
         }
 
         if (current.status === "active") {
+          // The pallet template joins the box template here: both are read
+          // by the device at the next print, so swapping either mid-shift is
+          // equally safe. It is only meaningful while the shift's pallets are
+          // ON -- for a pallets-off shift the field stays as forbidden as
+          // `palletsEnabled` itself, since the two cannot be switched on
+          // mid-shift.
           const allowedFields = new Set<keyof UpdateShiftDto>([
             "lineId",
             "plannedQty",
             "plannedDate",
             "productionDate",
             "boxLabelTemplateId",
+            ...(current.palletsEnabled ? (["palletLabelTemplateId"] as const) : []),
           ]);
           const forbiddenField = (Object.keys(data) as (keyof UpdateShiftDto)[]).find(
             (field) => !allowedFields.has(field),
@@ -1117,11 +1124,21 @@ export class ShiftsService {
               `Active shift field cannot be edited: ${String(forbiddenField)}`,
             );
           }
+          if (data.palletLabelTemplateId !== undefined) {
+            // Pallets on means a template is required, active or not
+            // (eligibility of a non-null value was already asserted above).
+            this.assertPalletTemplateRule(current.palletsEnabled, data.palletLabelTemplateId);
+          }
 
           const changes: Partial<
             Pick<
               ShiftRow,
-              "lineId" | "plannedQty" | "plannedDate" | "productionDate" | "boxLabelTemplateId"
+              | "lineId"
+              | "plannedQty"
+              | "plannedDate"
+              | "productionDate"
+              | "boxLabelTemplateId"
+              | "palletLabelTemplateId"
             >
           > = {};
           if (data.lineId !== undefined) changes.lineId = data.lineId;
@@ -1130,6 +1147,31 @@ export class ShiftsService {
           if (productionDateChange) changes.productionDate = productionDateChange.after;
           if (data.boxLabelTemplateId !== undefined) {
             changes.boxLabelTemplateId = data.boxLabelTemplateId;
+          }
+          if (
+            data.palletLabelTemplateId !== undefined &&
+            data.palletLabelTemplateId !== current.palletLabelTemplateId
+          ) {
+            changes.palletLabelTemplateId = data.palletLabelTemplateId;
+            // The same admission record a planned shift writes when its pallet
+            // configuration changes (see the planned branch below).
+            await this.admission.observe({
+              tenantId,
+              actor: { domain: "cabinet", id: actorUserId },
+              facts,
+              operationId: "pallets.shift.configure.v1",
+              transaction: tx,
+              runtime: { enabled: true, observedAt: new Date() },
+              scopeDigest: admissionScopeDigest({
+                action: "update",
+                shiftId: id,
+                mode: current.mode,
+                palletsEnabled: current.palletsEnabled,
+                boxCapacity: current.boxCapacity,
+                palletBoxCapacity: current.palletBoxCapacity,
+                palletLabelTemplateId: data.palletLabelTemplateId,
+              }),
+            });
           }
           if (Object.keys(changes).length === 0) return { kind: "updated", id };
 
