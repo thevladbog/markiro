@@ -172,6 +172,7 @@ class HubViewModelTest {
             HubViewModel(recovery = db.recovery,
                 api, db.deviceConfigDao(), session, reachability, engine, db.shiftDao(), inventoryEngine, db.inventoryTaskDao(), db.printerDao(),
                 BoxRepository(db), db.codeDao(), team, writeoffEngine, db.writeoffPermissionDao(),
+                db.palletPermissionDao(), db.palletMembershipDao(),
                 scannerLabel = { "встроенный" }, now = { clock }, tick = tick, shiftRepository = repository,
             ),
         )

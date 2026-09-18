@@ -124,6 +124,7 @@ object Routes {
     const val DISASSEMBLE = "exceptions/{shiftId}/disassemble"
     const val REPRINT = "exceptions/{shiftId}/reprint"
     const val WRITEOFF = "writeoff"
+    const val PALLETS = "pallets"
     const val WRITEOFF_HISTORY = "writeoff/history"
     const val INVENTORY = "inventory"
     const val INVENTORY_WORK = "inventory/{inventoryId}"
@@ -234,6 +235,7 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                             HubTile.SHIFT -> nav.navigate(Routes.SHIFTS)
                             HubTile.INVENTORY -> state.activeInventoryId?.let { nav.navigate(Routes.inventoryWork(it)) } ?: nav.navigate(Routes.INVENTORY)
                             HubTile.WRITEOFF -> nav.navigate(Routes.WRITEOFF)
+                            HubTile.PALLETS -> nav.navigate(Routes.PALLETS)
                             HubTile.SETTINGS -> nav.navigate(Routes.SETTINGS)
                         }
                     },
@@ -248,6 +250,53 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
             }
             // One ViewModel across all four steps: the step is state, so hardware
             // Back moves inside the mode instead of dropping a half-built list.
+            composable(Routes.PALLETS) {
+                val vm: app.markiro.handheld.feature.pallets.PalletsViewModel = hiltViewModel()
+                val state by vm.state.collectAsStateWithLifecycle()
+                val profiles by vm.printerProfiles.collectAsStateWithLifecycle()
+                var choosingPalletPrinter by remember { mutableStateOf(false) }
+                val leave = { nav.popBackStack(Routes.HUB, inclusive = false); Unit }
+                // Back dismisses what is on top of the mode first -- a closed
+                // pallet's label, then the early-close question -- and only then
+                // leaves. Otherwise one press would drop an unresolved label.
+                BackHandler(enabled = true) {
+                    when {
+                        state.closeStep != PalletCloseStep.Idle -> vm.dismissClose()
+                        state.confirmEarlyClose -> vm.cancelEarlyClose()
+                        else -> leave()
+                    }
+                }
+                app.markiro.handheld.feature.pallets.PalletsRoute(
+                    state,
+                    app.markiro.handheld.feature.pallets.PalletsCallbacks(
+                        onBack = leave,
+                        onRemove = vm::remove,
+                        onEarlyClose = vm::requestEarlyClose,
+                        onCancelEarlyClose = vm::cancelEarlyClose,
+                        onConfirmEarlyClose = vm::confirmEarlyClose,
+                        onAcknowledge = vm::acknowledge,
+                        onRefresh = vm::refresh,
+                        close = PalletCloseCallbacks(
+                            onRetry = { vm.retryPrint() },
+                            onOtherPrinter = { choosingPalletPrinter = true },
+                            onDefer = vm::deferLabel,
+                            onConfirmPrinted = vm::confirmPrinted,
+                            onDismiss = vm::dismissClose,
+                        ),
+                    ),
+                )
+                // A dead printer must not strand a closed pallet: the label is
+                // reprintable on any profile this device knows.
+                if (choosingPalletPrinter) {
+                    PrinterChoiceScreen(
+                        PrintPurpose.PALLET, profiles, null, { choosingPalletPrinter = false },
+                        allowUnassigned = false, onManage = { nav.navigate(Routes.PRINTER_GRAPH) },
+                    ) { id ->
+                        if (id != null) vm.retryPrint(id)
+                        choosingPalletPrinter = false
+                    }
+                }
+            }
             composable(Routes.WRITEOFF) {
                 val vm: app.markiro.handheld.feature.writeoff.WriteoffViewModel = hiltViewModel()
                 val state by vm.state.collectAsStateWithLifecycle()
