@@ -38,4 +38,22 @@ describe("ImportFieldsPanel", () => {
     expect(await screen.findByRole("alert")).toBeDefined();
     expect(screen.queryByRole("status")).toBeNull();
   });
+
+  it("clears a stale success status when a later copy in the same session fails", async () => {
+    const writeText = vi
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("denied"));
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    render(<ImportFieldsPanel syntax="json" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Копировать sscc" }));
+    expect(await screen.findByRole("status")).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Копировать date" }));
+    await waitFor(() => expect(screen.getByRole("alert")).toBeDefined());
+    // The earlier success message must not linger next to the new failure --
+    // it would misrepresent the LATEST copy attempt as having succeeded.
+    expect(screen.queryByRole("status")).toBeNull();
+  });
 });

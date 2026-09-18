@@ -335,10 +335,14 @@ function LabelEditorContent({
     editor.replaceSpec(nextSpec);
     setCustomSize(matchPresetKey(nextSpec.widthMm, nextSpec.heightMm) === null);
     clearSizeDrafts();
-    // A pasted `{ name, purpose, spec }` body names the template only while
-    // the name is still the untouched default of a new template (or blank);
-    // a typed or saved name is never overwritten by an import.
+    // A pasted `{ name, purpose, spec }` body names the template only in
+    // create/copy flows, and only while the name is still blank or the
+    // untouched default of a new template; a typed name is never
+    // overwritten, and editing an EXISTING template never adopts an
+    // imported name at all -- its saved name is not "no name chosen yet"
+    // even if the field happens to be blank mid-edit.
     if (
+      !editingExisting &&
       analysis.name !== undefined &&
       (name.trim() === "" || name === t("pages.labels.editor.defaultName"))
     ) {

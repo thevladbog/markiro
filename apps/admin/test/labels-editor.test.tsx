@@ -910,6 +910,47 @@ describe("Edit flow (load + PATCH)", () => {
     expect(body.name).toBe("Короб v2");
     expect(await screen.findByText("Шаблон сохранён")).toBeDefined();
   });
+
+  it("never adopts a pasted JSON name while editing an existing template, even if the field is blank", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "/api/label-templates/tpl-9" && (!init || init.method === undefined)) {
+        return jsonResponse(200, {
+          id: "tpl-9",
+          name: "Короб",
+          purpose: "box",
+          spec: {
+            widthMm: 58,
+            heightMm: 40,
+            dpi: 203 as const,
+            language: "zpl" as const,
+            elements: [],
+          },
+          enabled: true,
+          chzProductGroupCodes: null,
+          createdAt: "2026-07-01T00:00:00.000Z",
+          updatedAt: "2026-07-01T00:00:00.000Z",
+        });
+      }
+      throw new Error(`Unexpected fetch: ${init?.method ?? "GET"} ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderEditFlow("tpl-9");
+    const nameInput = (await screen.findByLabelText("Название")) as HTMLInputElement;
+    expect(nameInput.value).toBe("Короб");
+
+    // The user clears the name field mid-edit -- this must NOT be read as
+    // "no name chosen yet" the way it would be for a brand-new template: the
+    // template already has an established, saved name.
+    fireEvent.change(nameInput, { target: { value: "" } });
+    const dialog = await openJsonImport(
+      JSON.stringify({ name: "Паллета 58×40", purpose: "box", spec: JSON_SPEC }),
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Проверить код" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Заменить этикетку" }));
+
+    expect((screen.getByLabelText("Название") as HTMLInputElement).value).toBe("");
+  });
 });
 
 describe("decodeRasterToRgba (pure bit-unpacking, no canvas needed)", () => {

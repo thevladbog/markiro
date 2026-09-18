@@ -38,6 +38,7 @@ export function ImportFieldsPanel({ syntax }: ImportFieldsPanelProps) {
 
   async function handleCopy(field: LabelField, token: string): Promise<void> {
     setCopyError(false);
+    setCopiedField(null);
     try {
       if (!navigator.clipboard) throw new Error("Clipboard unavailable");
       await navigator.clipboard.writeText(token);
