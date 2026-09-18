@@ -67,13 +67,16 @@ export function PalletExportsSection({ pallet }: { pallet: PalletCardDto }) {
 
   return (
     <div className="mk-shift-exports">
+      {/* Both the create form and the history's download button report into
+          `error`; the history is shown for every pallet status, so the alert
+          lives outside the closed-only form. */}
+      {error ? <Alert tone="error">{error}</Alert> : null}
       {closed ? (
         <form
           id="pallet-export-form"
           className="mk-shift-exports__form"
           onSubmit={(event) => void submit(event)}
         >
-          {error ? <Alert tone="error">{error}</Alert> : null}
           {formats.isError ? (
             <Alert tone="error">{t("pages.shifts.exports.errors.infrastructure")}</Alert>
           ) : null}
