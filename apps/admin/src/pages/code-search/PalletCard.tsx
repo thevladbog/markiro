@@ -249,28 +249,26 @@ export function PalletCardPage() {
         </div>
       </Card>
 
-      <section role="region" aria-label={t("pages.codeSearch.palletCard.boxesTitle")}>
-        <Card title={t("pages.codeSearch.palletCard.boxesTitle")}>
-          <Table
-            columns={boxColumns}
-            rows={pallet.boxes}
-            getRowKey={(row) => row.id}
-            empty={t("pages.codeSearch.palletCard.boxesEmpty")}
-          />
-        </Card>
-      </section>
+      <Card title={t("pages.codeSearch.palletCard.boxesTitle")}>
+        <Table
+          columns={boxColumns}
+          rows={pallet.boxes}
+          getRowKey={(row) => row.id}
+          empty={t("pages.codeSearch.palletCard.boxesEmpty")}
+          scrollLabel={t("pages.codeSearch.palletCard.boxesTitle")}
+        />
+      </Card>
 
       {pallet.kind === "warehouse" ? (
-        <section role="region" aria-label={t("pages.codeSearch.palletCard.rejections.title")}>
-          <Card title={t("pages.codeSearch.palletCard.rejections.title")}>
-            <Table
-              columns={rejectionColumns}
-              rows={pallet.rejections}
-              getRowKey={(row) => `${row.boxSscc}:${row.recordedAt}`}
-              empty={t("pages.codeSearch.palletCard.rejections.empty")}
-            />
-          </Card>
-        </section>
+        <Card title={t("pages.codeSearch.palletCard.rejections.title")}>
+          <Table
+            columns={rejectionColumns}
+            rows={pallet.rejections}
+            getRowKey={(row) => `${row.boxSscc}:${row.recordedAt}`}
+            empty={t("pages.codeSearch.palletCard.rejections.empty")}
+            scrollLabel={t("pages.codeSearch.palletCard.rejections.title")}
+          />
+        </Card>
       ) : null}
 
       <Card title={t("pages.codeSearch.palletCard.exceptionsTitle")}>
