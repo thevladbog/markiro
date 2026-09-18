@@ -17,6 +17,7 @@ import { Alert, Badge, Button, Card, PageHeader, Spinner, StatusChip, Table } fr
 import type { StatusChipStatus, TableColumn } from "@markiro/ui";
 
 import { formatCreatedAt } from "../../lib/datetime.js";
+import { lastRegistryHref } from "./registry-location.js";
 import { useBoxCard, type BoxCardDto, type BoxCardItemDto } from "./api.js";
 
 // Box status has its own three-way meaning distinct from a code's ("open"
@@ -135,7 +136,7 @@ export function BoxCardPage() {
   return (
     <div style={{ padding: "28px 32px", display: "flex", flexDirection: "column", gap: 20 }}>
       <Link
-        to="/codes"
+        to={lastRegistryHref()}
         style={{ font: "var(--text-body)", color: "var(--fg-3)", textDecoration: "none" }}
       >
         {t("pages.codeSearch.backAction")}

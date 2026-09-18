@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router";
+import { Link, useSearchParams } from "react-router";
 
 import { formatSsccHri } from "@markiro/domain";
 import {
@@ -31,6 +31,20 @@ const ALL = "all";
 
 type KindFilter = PalletKind | typeof ALL;
 
+const CIVIL_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+function parseKind(raw: string | null): KindFilter {
+  return raw === "production" || raw === "warehouse" ? raw : ALL;
+}
+
+function parseId(raw: string | null): string {
+  return raw ? raw : ALL;
+}
+
+function parseCivilDate(raw: string | null): string | undefined {
+  return raw && CIVIL_DATE.test(raw) ? raw : undefined;
+}
+
 /**
  * The manager picks civil days in the browser's own zone; the server filters
  * on `closed_at` instants. A day starts at local midnight and ends at the last
@@ -55,11 +69,32 @@ function dayEndIso(civilDate: string): string {
 export function PalletsPage() {
   const { t, i18n } = useTranslation();
 
-  const [kind, setKind] = useState<KindFilter>(ALL);
-  const [productId, setProductId] = useState<string>(ALL);
-  const [deviceId, setDeviceId] = useState<string>(ALL);
-  const [from, setFrom] = useState<string | undefined>(undefined);
-  const [to, setTo] = useState<string | undefined>(undefined);
+  // Filters live in the URL query so the browser's Back (from a pallet card)
+  // and the tab switch (see `RegistryTabs`) restore them; see
+  // `../code-search/registry-location.ts`.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const kind = parseKind(searchParams.get("kind"));
+  const productId = parseId(searchParams.get("product"));
+  const deviceId = parseId(searchParams.get("device"));
+  const from = parseCivilDate(searchParams.get("from"));
+  const to = parseCivilDate(searchParams.get("to"));
+
+  const setFilter = useCallback(
+    (key: "kind" | "product" | "device" | "from" | "to", value: string | undefined) => {
+      setSearchParams((current) => {
+        const next = new URLSearchParams(current);
+        if (value === undefined || value === "" || value === ALL) next.delete(key);
+        else next.set(key, value);
+        return next;
+      });
+    },
+    [setSearchParams],
+  );
+  const setKind = useCallback((value: KindFilter) => setFilter("kind", value), [setFilter]);
+  const setProductId = useCallback((value: string) => setFilter("product", value), [setFilter]);
+  const setDeviceId = useCallback((value: string) => setFilter("device", value), [setFilter]);
+  const setFrom = useCallback((value: string | undefined) => setFilter("from", value), [setFilter]);
+  const setTo = useCallback((value: string | undefined) => setFilter("to", value), [setFilter]);
 
   const filters = useMemo<PalletListFilters>(
     () => ({

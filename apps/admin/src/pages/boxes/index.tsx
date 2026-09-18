@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 
 import { formatSsccHri } from "@markiro/domain";
 import { Alert, Badge, Button, EmptyState, PageHeader, Select, Spinner, Table } from "@markiro/ui";
@@ -20,6 +20,10 @@ import { useBoxes, type BoxDto } from "./api.js";
  * once `GET /shifts` resolves, rather than starting on an empty state a
  * manager would have to clear first.
  *
+ * The chosen shift lives in the URL (`?shift=`) so the browser's Back from a
+ * box card and the tab switch restore it; the auto-selected default is written
+ * with `replace` so it does not add a history entry of its own.
+ *
  * `contentsChangedAfterClose` (see `apps/api/src/modules/boxes/dto.ts`) is
  * the only way a manager learns a closed, taped-and-labelled box is short an
  * item -- it cannot be corrected, only noted -- so it renders as a warning
@@ -29,7 +33,9 @@ export function BoxesPage() {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
 
-  const [shiftFilter, setShiftFilter] = useState<string>("");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const shiftFilter = searchParams.get("shift") ?? "";
+  const setShiftFilter = (shiftId: string) => setSearchParams(shiftId ? { shift: shiftId } : {});
 
   const { data: shiftsData } = useShifts();
   const shifts = shiftsData ?? [];
@@ -39,9 +45,9 @@ export function BoxesPage() {
   // manager most likely wants to see boxes for on first load.
   useEffect(() => {
     if (shiftFilter === "" && shifts.length > 0) {
-      setShiftFilter(shifts[shifts.length - 1]!.id);
+      setSearchParams({ shift: shifts[shifts.length - 1]!.id }, { replace: true });
     }
-  }, [shiftFilter, shifts]);
+  }, [shiftFilter, shifts, setSearchParams]);
 
   const { data, isPending, isError } = useBoxes(shiftFilter || undefined);
   const { data: employeesData } = useEmployees();

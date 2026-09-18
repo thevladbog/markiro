@@ -16,6 +16,7 @@ import { Alert, Card, PageHeader, Spinner, StatusChip } from "@markiro/ui";
 import type { StatusChipStatus } from "@markiro/ui";
 
 import { formatCreatedAt, formatDate } from "../../lib/datetime.js";
+import { lastRegistryHref } from "./registry-location.js";
 import { useCodeCard, type CodeHistoryEvent, type CodeStatus } from "./api.js";
 
 // Mirrors `./index.tsx`'s `STATUS_TO_CHIP` -- see its doc comment for why
@@ -137,7 +138,7 @@ export function CodeCardPage() {
   return (
     <div style={{ padding: "28px 32px", display: "flex", flexDirection: "column", gap: 20 }}>
       <Link
-        to="/codes"
+        to={lastRegistryHref()}
         style={{ font: "var(--text-body)", color: "var(--fg-3)", textDecoration: "none" }}
       >
         {t("pages.codeSearch.backAction")}
