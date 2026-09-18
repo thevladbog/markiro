@@ -1,4 +1,4 @@
-import { renderEan13Svg, shelfLifeExpiryDate } from "@markiro/domain";
+import { shelfLifeExpiryDate } from "@markiro/domain";
 import { brandLogo, escapeHtml, ssccBarcode, ssccHri, type ReportOrg } from "./contents-report";
 
 /**
@@ -107,20 +107,18 @@ function stretchBarcodeSvg(markup: string): string {
 }
 
 /**
- * The retail EAN-13 under the GTIN (owner request 2026-09-18). Only a GTIN-14
- * with indicator digit `0` IS a retail unit code — its last 13 digits are the
- * EAN-13 with the same check digit. A `1`–`8` indicator names a case or
- * multipack (ITF-14 territory), so it gets no symbol; the digits still print.
- * A malformed GTIN must not kill the placard either: the symbol is simply
- * omitted, exactly as `ssccBarcode` degrades.
+ * The product name is the largest text on the page, but a long SKU name must
+ * still FIT: the size steps down with length so up to `NAME_LINES` lines hold
+ * it instead of the clamp cutting it off. Thresholds are character counts —
+ * the same estimate the label wrap uses — not measured glyphs, so a name
+ * near a threshold may end a line early rather than overflow; that is the
+ * safe side. Exported for tests.
  */
-export function ean13Svg(gtin14: string | null): string | null {
-  if (gtin14 === null || !/^0\d{13}$/.test(gtin14)) return null;
-  try {
-    return renderEan13Svg(gtin14.slice(1));
-  } catch {
-    return null;
-  }
+export function namePtFor(name: string | null, size: PageSize): number {
+  const length = name?.length ?? 0;
+  if (length <= 40) return size.namePt;
+  if (length <= 80) return size.nameMediumPt;
+  return size.nameLongPt;
 }
 
 /** `2026-09-10` → `10.09.2026`; anything else is printed as given. */
@@ -145,21 +143,27 @@ export function datesWord(n: number): string {
   return "дат";
 }
 
-interface PageSize {
+export interface PageSize {
   page: "A4" | "A5";
   widthMm: number;
   heightMm: number;
   marginMm: number;
+  /** Product name up to 40 characters. */
   namePt: number;
+  /** Product name of 41–80 characters. */
+  nameMediumPt: number;
+  /** Product name past 80 characters. */
+  nameLongPt: number;
   figurePt: number;
   tablePt: number;
   barsMm: number;
   hriPt: number;
-  /** Height of the EAN-13 under the GTIN, digits included. */
-  eanMm: number;
 }
 
-const SIZES: Record<PlacardFormat, PageSize> = {
+/** Lines the product name may take before the clamp cuts it. */
+const NAME_LINES = 4;
+
+export const SIZES: Record<PlacardFormat, PageSize> = {
   a4: {
     page: "A4",
     widthMm: 210,
@@ -168,11 +172,12 @@ const SIZES: Record<PlacardFormat, PageSize> = {
     // Read from a forklift, not a desk: the product name is the largest
     // text on the page (owner review 2026-09-18: «продукцию на А4 крупнее»).
     namePt: 30,
+    nameMediumPt: 24,
+    nameLongPt: 20,
     figurePt: 22,
     tablePt: 13,
     barsMm: 30,
     hriPt: 18,
-    eanMm: 14,
   },
   a5: {
     page: "A5",
@@ -180,11 +185,12 @@ const SIZES: Record<PlacardFormat, PageSize> = {
     heightMm: 210,
     marginMm: 10,
     namePt: 20,
+    nameMediumPt: 16,
+    nameLongPt: 14,
     figurePt: 16,
     tablePt: 11,
     barsMm: 22,
     hriPt: 13,
-    eanMm: 10,
   },
 };
 
@@ -224,7 +230,7 @@ export function renderPalletPlacardHtml(data: PalletPlacardData, format: Placard
   const hri = data.sscc ? ssccHri(data.sscc) : null;
   const title = data.sscc ?? "без SSCC";
   const orgName = dash(data.org?.name ?? null);
-  const ean = ean13Svg(data.gtin14);
+  const namePt = namePtFor(data.productName, size);
   const inn = data.org?.inn ? `ИНН ${escapeHtml(data.org.inn)}` : "";
   const footer =
     format === "a4"
@@ -256,7 +262,7 @@ body { background: #E9E7E1; font-family: Arial, sans-serif; color: #17161A; }
 .brand-logo--markiro { width: 36mm; height: 8mm; }
 .pl-org { font-weight: 700; }
 .pl-title { font-size: ${size.figurePt}pt; font-weight: 700; letter-spacing: .08em; white-space: nowrap; }
-.pl-name { font-size: ${size.namePt}pt; font-weight: 700; line-height: 1.2; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; }
+.pl-name { font-size: ${namePt}pt; font-weight: 700; line-height: 1.2; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: ${NAME_LINES}; line-clamp: ${NAME_LINES}; overflow: hidden; }
 .pl-figures { display: flex; border-top: .3mm solid #C9C6BD; border-bottom: .3mm solid #C9C6BD; }
 .pl-figure { flex: 1; padding: 2mm 3mm; border-left: .3mm solid #C9C6BD; min-width: 0; }
 .pl-figure:first-child { border-left: 0; padding-left: 0; }
@@ -264,8 +270,6 @@ body { background: #E9E7E1; font-family: Arial, sans-serif; color: #17161A; }
 .pl-figure-label { display: block; color: #6B6862; font-size: ${size.tablePt - 2}pt; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
 .pl-figure-value { display: block; font-size: ${size.figurePt}pt; font-weight: 700; overflow-wrap: anywhere; }
 .pl-figure-value--gtin { font-size: ${Math.round(size.figurePt * 0.72)}pt; white-space: nowrap; }
-.pl-ean { margin-top: 1.5mm; height: ${size.eanMm}mm; display: flex; justify-content: center; }
-.pl-ean svg { display: block; height: 100%; width: auto; max-width: 100%; }
 .pl-dates { width: 100%; border-collapse: collapse; }
 .pl-dates th { text-align: left; font-weight: 700; color: #6B6862; padding: 1mm 2mm; border-bottom: .3mm solid #C9C6BD; border-left: .25mm solid #EDEBE5; }
 .pl-dates td { padding: 1mm 2mm; border-bottom: .25mm solid #EDEBE5; border-left: .25mm solid #EDEBE5; }
@@ -291,7 +295,7 @@ body { background: #E9E7E1; font-family: Arial, sans-serif; color: #17161A; }
   </header>
   <div class="pl-name">${dash(data.productName)}</div>
   <div class="pl-figures">
-    <div class="pl-figure pl-figure--gtin"><span class="pl-figure-label">GTIN</span><span class="pl-figure-value pl-figure-value--gtin mono">${dash(data.gtin14)}</span>${ean ? `<div class="pl-ean">${ean}</div>` : ""}</div>
+    <div class="pl-figure pl-figure--gtin"><span class="pl-figure-label">GTIN</span><span class="pl-figure-value pl-figure-value--gtin mono">${dash(data.gtin14)}</span></div>
     <div class="pl-figure"><span class="pl-figure-label">Коробов</span><span class="pl-figure-value">${boxCount}</span></div>
     <div class="pl-figure"><span class="pl-figure-label">Единиц</span><span class="pl-figure-value">${unitCount}</span></div>
   </div>

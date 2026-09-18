@@ -162,7 +162,6 @@ export type { TsplBytesPacking, ZplHexPacking } from "./labels/raster.js";
 export {
   renderCode128Svg,
   renderDataMatrixSvg,
-  renderEan13Svg,
   renderLiteralDataMatrixSvg,
   renderQrSvg,
 } from "./barcodes/svg.js";

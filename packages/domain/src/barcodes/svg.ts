@@ -40,26 +40,6 @@ export function renderQrSvg(text: string): string {
   return bwipjs.toSVG({ bcid: "qrcode", text, scale: 3 });
 }
 
-/**
- * Renders a retail EAN-13 symbol. `digits` is the 13-digit code WITH its check
- * digit (bwip-js verifies it and throws on a mismatch), e.g. a GTIN-14 with
- * indicator `0` minus that leading zero. The human-readable digits are printed
- * under the bars by default, as every retail EAN-13 is.
- */
-export function renderEan13Svg(digits: string, options: { includeText?: boolean } = {}): string {
-  if (!/^\d{13}$/.test(digits)) {
-    throw new DomainError("EAN13_DIGITS_INVALID", "EAN-13 needs exactly 13 digits.");
-  }
-  return bwipjs.toSVG({
-    bcid: "ean13",
-    text: digits,
-    scale: 2,
-    height: 12,
-    includetext: options.includeText ?? true,
-    textxalign: "center",
-  });
-}
-
 export function renderCode128Svg(text: string, options: { includeText?: boolean } = {}): string {
   return bwipjs.toSVG({
     bcid: "code128",

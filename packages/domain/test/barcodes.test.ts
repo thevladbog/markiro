@@ -4,7 +4,6 @@ import { DomainError } from "../src/errors.js";
 import {
   renderCode128Svg,
   renderDataMatrixSvg,
-  renderEan13Svg,
   renderLiteralDataMatrixSvg,
   renderQrSvg,
 } from "../src/index.js";
@@ -104,25 +103,6 @@ describe("barcode SVG renderers", () => {
         }),
       );
       expect(() => renderLiteralDataMatrixSvg(text)).toThrow(DomainError);
-    }
-  });
-
-  it("renders a retail EAN-13 with its digits and refuses anything but 13 digits", () => {
-    // A valid GTIN-14 with indicator 0, minus the leading zero.
-    const svg = renderEan13Svg("4600682000013");
-    expect(svg.startsWith("<svg")).toBe(true);
-    // bwip-js draws the caption as paths, so the caption shows up as height.
-    const viewBoxHeight = (markup: string) =>
-      Number(/viewBox="0 0 \d+ (\d+)"/.exec(markup)?.[1] ?? Number.NaN);
-    expect(viewBoxHeight(svg)).toBeGreaterThan(
-      viewBoxHeight(renderEan13Svg("4600682000013", { includeText: false })),
-    );
-    // bwip-js verifies the check digit: the wrong one must not render.
-    expect(() => renderEan13Svg("4600682000019")).toThrow();
-    for (const bad of ["460068200001", "04600682000013", "46006820000A3"]) {
-      expect(() => renderEan13Svg(bad)).toThrow(
-        expect.objectContaining({ code: "EAN13_DIGITS_INVALID" }),
-      );
     }
   });
 
