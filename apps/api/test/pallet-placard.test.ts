@@ -1,0 +1,156 @@
+import { describe, expect, it } from "vitest";
+import {
+  PLACARD_ROW_CAP,
+  renderPalletPlacardHtml,
+  summarizeByProductionDate,
+  type PalletPlacardBox,
+  type PalletPlacardData,
+} from "../src/modules/code-search/pallet-placard";
+
+function box(productionDate: string | null, codeCount = 20, disassembledAt: Date | null = null) {
+  return { productionDate, codeCount, disassembledAt } satisfies PalletPlacardBox;
+}
+
+function fixture(overrides: Partial<PalletPlacardData> = {}): PalletPlacardData {
+  return {
+    sscc: "00104600682000000019",
+    status: "closed",
+    productName: "Вода питьевая негазированная «Атолл» 0,5 л, ПЭТ",
+    gtin14: "04600682000019",
+    shelfLifeDays: 180,
+    org: { name: "ООО «Атолл»", inn: "7701234567", logo: null },
+    boxes: [box("2026-09-10"), box("2026-09-14"), box("2026-09-10")],
+    ...overrides,
+  };
+}
+
+describe("summarizeByProductionDate", () => {
+  it("groups live boxes by production date, ascending, with inclusive expiry", () => {
+    const rows = summarizeByProductionDate(fixture().boxes, 180, 12);
+    expect(rows).toEqual([
+      { productionDate: "2026-09-10", expiryDate: "2027-03-08", boxCount: 2, unitCount: 40 },
+      { productionDate: "2026-09-14", expiryDate: "2027-03-12", boxCount: 1, unitCount: 20 },
+    ]);
+  });
+
+  it("prints no expiry without a shelf life and puts undated boxes last", () => {
+    const rows = summarizeByProductionDate([box(null), box("2026-09-10")], null, 12);
+    expect(rows).toEqual([
+      { productionDate: "2026-09-10", expiryDate: null, boxCount: 1, unitCount: 20 },
+      { productionDate: null, expiryDate: null, boxCount: 1, unitCount: 20 },
+    ]);
+  });
+
+  it("excludes a disassembled box from every count", () => {
+    const rows = summarizeByProductionDate(
+      [box("2026-09-10"), box("2026-09-10", 20, new Date("2026-09-15T00:00:00Z"))],
+      180,
+      12,
+    );
+    expect(rows.map((r) => [r.boxCount, r.unitCount])).toEqual([[1, 20]]);
+  });
+
+  it("folds the tail past the row cap into one row whose counts keep the total exact", () => {
+    const boxes = Array.from({ length: 9 }, (_, i) =>
+      box(`2026-09-${String(i + 1).padStart(2, "0")}`),
+    );
+    const rows = summarizeByProductionDate(boxes, null, 6);
+    expect(rows).toHaveLength(6);
+    expect(rows.slice(0, 5).map((r) => r.productionDate)).toEqual([
+      "2026-09-01",
+      "2026-09-02",
+      "2026-09-03",
+      "2026-09-04",
+      "2026-09-05",
+    ]);
+    expect(rows[5]).toEqual({
+      productionDate: null,
+      expiryDate: null,
+      boxCount: 4,
+      unitCount: 80,
+      foldedDates: 4,
+    });
+    expect(rows.reduce((n, r) => n + r.boxCount, 0)).toBe(9);
+  });
+});
+
+describe("pallet placard", () => {
+  it("prints the header with only the word ПАЛЛЕТА, the organisation and the product", () => {
+    const html = renderPalletPlacardHtml(fixture(), "a4");
+    expect(html).toContain("ПАЛЛЕТА");
+    expect(html).toContain("ООО «Атолл»");
+    expect(html).toContain("Вода питьевая негазированная «Атолл» 0,5 л, ПЭТ");
+    expect(html).toContain("04600682000019");
+    // No status word, no kind, no closing time in the header.
+    expect(html).not.toContain("Закрыта");
+    expect(html).not.toContain("складская");
+    expect(html).not.toContain("ИНН не указан");
+  });
+
+  it("prints the counts, the date summary and the total", () => {
+    const html = renderPalletPlacardHtml(fixture(), "a4");
+    expect(html).toContain("10.09.2026");
+    expect(html).toContain("08.03.2027");
+    expect(html).toContain("14.09.2026");
+    expect(html).toContain("Итого");
+    expect(html).toMatch(/pl-figure-value">3</);
+    expect(html).toMatch(/pl-figure-value">60</);
+  });
+
+  it("prints the SSCC symbol and its HRI once, in one unbroken line", () => {
+    const html = renderPalletPlacardHtml(fixture(), "a4");
+    expect(html).toContain("<svg");
+    expect(html.match(/\(00\)104600682000000019/g)?.length).toBe(1);
+  });
+
+  it("sizes the page per format and drops the units column on A5", () => {
+    const a4 = renderPalletPlacardHtml(fixture(), "a4");
+    const a5 = renderPalletPlacardHtml(fixture(), "a5");
+    expect(a4).toContain("@page { size: A4;");
+    expect(a5).toContain("@page { size: A5;");
+    expect(a4).toContain("<th>Единиц</th>");
+    expect(a5).not.toContain("<th>Единиц</th>");
+    expect(a5).toContain("Произв.");
+    expect(a4).toContain("ИНН 7701234567");
+    expect(a5).not.toContain("ИНН 7701234567");
+  });
+
+  it("folds a long date list on A5 and says how many dates were folded", () => {
+    const boxes = Array.from({ length: 9 }, (_, i) =>
+      box(`2026-09-${String(i + 1).padStart(2, "0")}`),
+    );
+    const html = renderPalletPlacardHtml(fixture({ boxes }), "a5");
+    expect(html).toContain("и ещё 4 дат");
+    expect(PLACARD_ROW_CAP.a5).toBe(6);
+  });
+
+  it("watermarks a disassembled pallet and nothing else", () => {
+    expect(renderPalletPlacardHtml(fixture(), "a4")).not.toContain("РАСФОРМИРОВАНА");
+    expect(renderPalletPlacardHtml(fixture({ status: "disassembled" }), "a4")).toContain(
+      "РАСФОРМИРОВАНА",
+    );
+  });
+
+  it("prints dashes for a missing GTIN, shelf life and organisation", () => {
+    const html = renderPalletPlacardHtml(
+      fixture({ gtin14: null, shelfLifeDays: null, org: null }),
+      "a4",
+    );
+    expect(html).toContain('pl-figure-value mono">—<');
+    expect(html).not.toContain("ИНН");
+    expect(html).toContain('data-brand-logo="markiro"');
+  });
+
+  it("escapes tenant-controlled text", () => {
+    const html = renderPalletPlacardHtml(
+      fixture({
+        productName: '<script>alert("x")</script>',
+        org: { name: "A & <b>", inn: null, logo: null },
+      }),
+      "a4",
+    );
+    expect(html).not.toContain("<script>");
+    expect(html).toContain("&lt;script&gt;");
+    expect(html).toContain("A &amp; &lt;b&gt;");
+  });
+});
