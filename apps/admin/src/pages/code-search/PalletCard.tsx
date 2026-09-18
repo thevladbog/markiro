@@ -34,6 +34,7 @@ import { ApiRequestError } from "../../api/client.js";
 import { formatCreatedAt, formatDate } from "../../lib/datetime.js";
 import { toast } from "../../lib/toast.js";
 import { useCreateDocument } from "../disaggregation/api.js";
+import { lastRegistryHref } from "./registry-location.js";
 import { PalletExportsSection } from "./PalletExportsSection.js";
 import {
   usePalletCard,
@@ -227,7 +228,7 @@ export function PalletCardPage() {
   return (
     <div style={{ padding: "28px 32px", display: "flex", flexDirection: "column", gap: 20 }}>
       <Link
-        to="/codes"
+        to={lastRegistryHref()}
         style={{ font: "var(--text-body)", color: "var(--fg-3)", textDecoration: "none" }}
       >
         {t("pages.codeSearch.backAction")}

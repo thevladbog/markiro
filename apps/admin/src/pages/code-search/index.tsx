@@ -1,6 +1,6 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useCallback, useMemo, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useNavigate } from "react-router";
+import { Link, useNavigate, useSearchParams } from "react-router";
 
 import { formatSsccHri } from "@markiro/domain";
 import {
@@ -46,6 +46,25 @@ const STATUS_TO_CHIP: Record<Exclude<StatusFilter, "all">, StatusChipStatus> = {
 
 type SearchErrorCode = "unrecognized" | "not_found" | "generic";
 
+const CIVIL_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Registry filters as they appear in the URL query (`?status=…&page=…`). */
+type RegistryFilterKey =
+  "from" | "to" | "productionFrom" | "productionTo" | "product" | "status" | "chz" | "page";
+
+function parseCivilDate(raw: string | null): string | undefined {
+  return raw && CIVIL_DATE.test(raw) ? raw : undefined;
+}
+
+function parseStatus(raw: string | null): StatusFilter {
+  return raw === "free" || raw === "aggregated" || raw === "written_off" ? raw : "all";
+}
+
+function parsePage(raw: string | null): number {
+  const page = Number(raw);
+  return Number.isInteger(page) && page > 1 ? page : 1;
+}
+
 /**
  * Admin code-search page (Task 11): an exact-lookup box up top (SSCC or KM,
  * classified server-side via `GET /code-search`) plus a filterable code
@@ -65,15 +84,46 @@ export function CodeSearchPage() {
   // manager picks the right one from this list instead of being navigated.
   const [boxMatches, setBoxMatches] = useState<ClassifyBoxMatchDto[] | null>(null);
 
-  const [from, setFrom] = useState<string | undefined>(undefined);
-  const [to, setTo] = useState<string | undefined>(undefined);
-  const [productionFrom, setProductionFrom] = useState<string | undefined>(undefined);
-  const [productionTo, setProductionTo] = useState<string | undefined>(undefined);
-  const [productId, setProductId] = useState<string>("all");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [page, setPage] = useState(1);
-  const [chzStatus, setChzStatus] = useState("");
+  // Registry filters and the page live in the URL query so the browser's
+  // Back (from a code/box card) and the tab switch restore them; see
+  // `./registry-location.ts`. The lookup box above is an action, not a
+  // filter, so its text stays local.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const from = parseCivilDate(searchParams.get("from"));
+  const to = parseCivilDate(searchParams.get("to"));
+  const productionFrom = parseCivilDate(searchParams.get("productionFrom"));
+  const productionTo = parseCivilDate(searchParams.get("productionTo"));
+  const productId = searchParams.get("product") || "all";
+  const statusFilter = parseStatus(searchParams.get("status"));
+  const page = parsePage(searchParams.get("page"));
+  const chzStatus = searchParams.get("chz") ?? "";
   const { data: chzStatuses = [], isError: chzStatusesError } = useChzStatuses();
+
+  // Every filter change also drops the page back to 1: the old page number
+  // was counted against a different result set.
+  const setFilter = useCallback(
+    (key: Exclude<RegistryFilterKey, "page">, value: string | undefined) => {
+      setSearchParams((current) => {
+        const next = new URLSearchParams(current);
+        if (value === undefined || value === "" || value === "all") next.delete(key);
+        else next.set(key, value);
+        next.delete("page");
+        return next;
+      });
+    },
+    [setSearchParams],
+  );
+  const setPage = useCallback(
+    (nextPage: number) => {
+      setSearchParams((current) => {
+        const next = new URLSearchParams(current);
+        if (nextPage > 1) next.set("page", String(nextPage));
+        else next.delete("page");
+        return next;
+      });
+    },
+    [setSearchParams],
+  );
 
   // "all": code search is a reporting surface — codes produced under a
   // now-archived product must stay findable by that product.
@@ -278,10 +328,7 @@ export function CodeSearchPage() {
             nextMonthLabel={t("common.datePicker.nextMonth")}
             locale={i18n.language}
             {...(from !== undefined ? { value: from } : {})}
-            onValueChange={(value) => {
-              setFrom(value);
-              setPage(1);
-            }}
+            onValueChange={(value) => setFilter("from", value)}
           />
         </div>
         <div style={{ width: 180 }}>
@@ -294,10 +341,7 @@ export function CodeSearchPage() {
             nextMonthLabel={t("common.datePicker.nextMonth")}
             locale={i18n.language}
             {...(to !== undefined ? { value: to } : {})}
-            onValueChange={(value) => {
-              setTo(value);
-              setPage(1);
-            }}
+            onValueChange={(value) => setFilter("to", value)}
           />
         </div>
         <div style={{ width: 180 }}>
@@ -310,10 +354,7 @@ export function CodeSearchPage() {
             nextMonthLabel={t("common.datePicker.nextMonth")}
             locale={i18n.language}
             {...(productionFrom !== undefined ? { value: productionFrom } : {})}
-            onValueChange={(value) => {
-              setProductionFrom(value);
-              setPage(1);
-            }}
+            onValueChange={(value) => setFilter("productionFrom", value)}
           />
         </div>
         <div style={{ width: 180 }}>
@@ -326,10 +367,7 @@ export function CodeSearchPage() {
             nextMonthLabel={t("common.datePicker.nextMonth")}
             locale={i18n.language}
             {...(productionTo !== undefined ? { value: productionTo } : {})}
-            onValueChange={(value) => {
-              setProductionTo(value);
-              setPage(1);
-            }}
+            onValueChange={(value) => setFilter("productionTo", value)}
           />
         </div>
         <div style={{ width: 260 }}>
@@ -337,10 +375,7 @@ export function CodeSearchPage() {
             label={t("pages.codeSearch.filters.productLabel")}
             options={productOptions}
             value={productId}
-            onValueChange={(value) => {
-              setProductId(value);
-              setPage(1);
-            }}
+            onValueChange={(value) => setFilter("product", value)}
             placeholder={t("pages.codeSearch.filters.product.all")}
             searchPlaceholder={t("pages.codeSearch.filters.productSearchPlaceholder")}
             emptyText={t("pages.codeSearch.filters.productEmpty")}
@@ -352,10 +387,7 @@ export function CodeSearchPage() {
             label={t("pages.codeSearch.filters.statusLabel")}
             options={statusOptions}
             value={statusFilter}
-            onValueChange={(value) => {
-              setStatusFilter(value);
-              setPage(1);
-            }}
+            onValueChange={(value) => setFilter("status", value)}
           />
         </div>
         <div style={{ width: 220 }}>
@@ -371,10 +403,7 @@ export function CodeSearchPage() {
               })),
             ]}
             value={chzStatus}
-            onValueChange={(value) => {
-              setChzStatus(value);
-              setPage(1);
-            }}
+            onValueChange={(value) => setFilter("chz", value)}
             {...(chzStatusesError ? { error: t("pages.codeSearch.filters.chzStatusError") } : {})}
           />
         </div>

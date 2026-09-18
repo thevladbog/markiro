@@ -3,13 +3,8 @@ import { useNavigate } from "react-router";
 
 import { DataTabs } from "@markiro/ui";
 
-type RegistryTab = "codes" | "boxes" | "pallets";
-
-const TAB_ROUTES: Record<RegistryTab, string> = {
-  codes: "/codes",
-  boxes: "/boxes",
-  pallets: "/pallets",
-};
+import { registryHref, type RegistryTab } from "./registry-location.js";
+import { useRememberRegistryLocation } from "./useRememberRegistryLocation.js";
 
 /**
  * Segmented switch between the three code-search registries. The pages stay
@@ -17,10 +12,16 @@ const TAB_ROUTES: Record<RegistryTab, string> = {
  * code/box/pallet cards' back actions keep working unchanged -- and only the
  * sidebar entry was collapsed into the single "Поиск кодов" item, so this
  * switch is the sole navigation between them.
+ *
+ * Each registry keeps its filters in the URL query, and mounting this switch
+ * records the page's current address (`useRememberRegistryLocation`), so a
+ * switch to another tab lands on that tab's last filters rather than a blank
+ * registry, and a card's «← Поиск кодов» returns to the tab it came from.
  */
 export function RegistryTabs({ active }: { active: RegistryTab }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  useRememberRegistryLocation(active);
 
   return (
     <DataTabs
@@ -31,7 +32,7 @@ export function RegistryTabs({ active }: { active: RegistryTab }) {
       ]}
       activeId={active}
       onChange={(id) => {
-        if (id !== active) void navigate(TAB_ROUTES[id]);
+        if (id !== active) void navigate(registryHref(id));
       }}
       label={t("pages.codeSearch.tabs.label")}
     />
