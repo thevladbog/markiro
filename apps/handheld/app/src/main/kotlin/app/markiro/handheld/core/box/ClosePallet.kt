@@ -34,6 +34,17 @@ sealed interface ClosePalletResult {
 
     /** The shift carries no SSCC issuer, so no pallet of it can ever be numbered. */
     data object NoIssuer : ClosePalletResult
+
+    /**
+     * The closing itself could not run — a revoked device lease, a database
+     * failure, anything that threw rather than answered.
+     *
+     * Never returned by [ClosePallet]: it is the caller's word for "we do not
+     * know", and it exists so a thrown failure is not reported to the operator
+     * as [Empty]. «Паллета пуста» would be a lie that sends them looking for
+     * boxes that are already on it.
+     */
+    data object Unavailable : ClosePalletResult
 }
 
 /**

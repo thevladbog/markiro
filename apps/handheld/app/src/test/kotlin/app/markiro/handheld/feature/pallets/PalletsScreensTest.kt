@@ -74,7 +74,7 @@ class PalletsScreensTest {
         assertEquals("034600682000000021", removed)
     }
 
-    /** No capacity is not «0 из 0»: the count still has to be honest. */
+    /** No capacity is not «0 из 0»: the count still has to be honest -- and declined. */
     @Test
     fun aProductWithoutACapacityStillCountsItsBoxes() {
         compose.setContent {
@@ -85,7 +85,21 @@ class PalletsScreensTest {
                 )
             }
         }
-        compose.onNodeWithText("3 коробов · ёмкость не задана").assertIsDisplayed()
+        compose.onNodeWithText("3 короба · ёмкость не задана").assertIsDisplayed()
+    }
+
+    /** «1 коробов» is the kind of line an operator stops trusting the screen over. */
+    @Test
+    fun aSingleBoxWithoutACapacityIsDeclinedProperly() {
+        compose.setContent {
+            MarkiroTheme {
+                PalletsRoute(
+                    PalletsUi(pallet = pallet, boxCount = 1, capacity = null, members = listOf(member("034600682000000014", MembershipStatus.PENDING))),
+                    PalletsCallbacks(),
+                )
+            }
+        }
+        compose.onNodeWithText("1 короб · ёмкость не задана").assertIsDisplayed()
     }
 
     @Test
@@ -111,6 +125,31 @@ class PalletsScreensTest {
         compose.onNodeWithText("короб …000014 — На паллете …000011").assertIsDisplayed()
         compose.onNodeWithText("Принято").performClick()
         assertEquals(true, acknowledged)
+    }
+
+    /**
+     * The winning pallet is still open somewhere else, so it has no number yet.
+     * «На паллете …» with an empty tail read like a bug rather than an answer.
+     */
+    @Test
+    fun aRejectionByAnUnnumberedPalletSaysSoInWords() {
+        compose.setContent {
+            MarkiroTheme {
+                PalletsRoute(
+                    PalletsUi(
+                        pallet = pallet, boxCount = 0,
+                        rejections = listOf(
+                            PalletMembershipEntity(
+                                "w1", "034600682000000014", "t", null, MembershipStatus.REJECTED,
+                                "already_on_pallet", null, "t", null,
+                            ),
+                        ),
+                    ),
+                    PalletsCallbacks(),
+                )
+            }
+        }
+        compose.onNodeWithText("короб …000014 — На открытой паллете другого устройства").assertIsDisplayed()
     }
 
     @Test

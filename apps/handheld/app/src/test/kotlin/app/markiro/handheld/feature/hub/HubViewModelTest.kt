@@ -253,6 +253,61 @@ class HubViewModelTest {
         assertNull(vm(api()).state.first { it.operatorName.isNotEmpty() }.canWriteoff)
     }
 
+    private fun membership(sscc: String) = app.markiro.handheld.core.storage.PalletMembershipEntity(
+        palletId = "w1", sscc = sscc, addedAt = "2026-09-17T10:00:00.000Z", operatorId = "op-1",
+        status = app.markiro.handheld.core.storage.MembershipStatus.PENDING, reason = null,
+        winningPalletSscc = null, ackedAt = null, acknowledgedAt = null,
+    )
+
+    private suspend fun queueMemberships(count: Int) = repeat(count) { index ->
+        db.palletMembershipDao().insert(membership("03460068200000001$index"))
+    }
+
+    /**
+     * `pallet_memberships` is one of the sync engine's OWN channels, so its
+     * rows are already in `SyncState.pending`. The hub added them a second time
+     * and three queued boxes read as six owed rows -- an operator waiting for a
+     * queue that never drains to what they can count on the pallet.
+     */
+    @Test
+    fun queuedMembershipsAreCountedOnceInTheQueue() = runTest {
+        queueMemberships(3)
+        val engine = SyncEngine(
+            db, MetaStore(db), db.deviceConfigDao(), SyncTransport(OkHttpClient()) { "http://127.0.0.1:1/" },
+            NetworkModule.strictJson(), engineScope,
+        )
+        val owed = engine.state.first { it.pending == 3 }.pending
+        val ui = vm(api()).state.first { it.palletsPending == 3 }
+        assertEquals(owed, ui.queue)
+        assertEquals(3, ui.palletsPending)
+    }
+
+    /** The tile's own count is unchanged by the queue fix: it still names the unsent boxes. */
+    @Test
+    fun theTileReadsThePermissionRowWhenItGrantsTheRight() = runTest {
+        db.palletPermissionDao().replaceAll(
+            listOf(app.markiro.handheld.core.storage.PalletPermissionEntity("op-1", true)),
+        )
+        queueMemberships(2)
+        val ui = vm(api()).state.first { it.canBuildPallets == true }
+        assertEquals(2, ui.palletsPending)
+        assertEquals(2, ui.queue)
+    }
+
+    @Test
+    fun aRefusedPermissionRowIsAHardNo() = runTest {
+        db.palletPermissionDao().replaceAll(
+            listOf(app.markiro.handheld.core.storage.PalletPermissionEntity("op-1", false)),
+        )
+        assertEquals(false, vm(api()).state.first { it.canBuildPallets != null }.canBuildPallets)
+    }
+
+    /** No row at all is «not mirrored yet», which is not the same answer as «нет прав». */
+    @Test
+    fun anOperatorWithoutAPalletPermissionRowStaysUnknown() = runTest {
+        assertNull(vm(api()).state.first { it.operatorName.isNotEmpty() }.canBuildPallets)
+    }
+
     @Test
     fun anActiveInventoryIsPinnedForContinuing() = runTest {
         db.inventoryTaskDao().upsert(InventoryFixtures.task("i1"))

@@ -14,6 +14,7 @@ import app.markiro.handheld.core.signal.SignalKind
 import app.markiro.handheld.core.signal.Signaller
 import app.markiro.handheld.core.storage.DeviceRecovery
 import app.markiro.handheld.core.storage.MembershipStatus
+import app.markiro.handheld.core.storage.RecoveryBlocked
 import app.markiro.handheld.core.storage.PalletEntity
 import app.markiro.handheld.core.storage.PalletMembershipEntity
 import app.markiro.handheld.feature.signin.SessionHolder
@@ -21,6 +22,7 @@ import app.markiro.handheld.feature.work.ClosedPalletUi
 import app.markiro.handheld.feature.work.PalletCloseStep
 import app.markiro.handheld.feature.work.SignalPort
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -150,8 +152,14 @@ class PalletsViewModel(
         viewModelScope.launch {
             gateway.observeOpen().collectLatest { pallet ->
                 if (pallet == null) {
+                    // The verdict belonged to the pallet that just went away;
+                    // «Принят …000014» over an empty screen names a box that is
+                    // no longer anywhere the operator can see.
                     _state.update {
-                        it.copy(pallet = null, productName = "", boxCount = 0, capacity = null, members = emptyList(), rejections = emptyList())
+                        it.copy(
+                            pallet = null, productName = "", boxCount = 0, capacity = null,
+                            members = emptyList(), rejections = emptyList(), lastVerdict = null,
+                        )
                     }
                     return@collectLatest
                 }
@@ -225,15 +233,34 @@ class PalletsViewModel(
      * A refusal is shown by name and leaves the pallet open: `ClosePallet`
      * burns nothing on `Empty`/`NoSerials`/`NoIssuer`, so the operator can fix
      * the cause and close again.
+     *
+     * A THROWN failure -- a revoked lease (`RecoveryBlocked`), a database error
+     * -- is `Unavailable`, not `Empty`. Reporting it as «в паллете нет коробов»
+     * would send the operator looking for boxes that are already on the pallet.
+     * Cancellation is not a failure and is rethrown so the scope still dies.
      */
     private suspend fun closeNow() {
         if (!closing.compareAndSet(false, true)) return
         try {
-            when (val result = runCatching { recovery.work { gateway.close(operatorId) } }.getOrElse { ClosePalletResult.Empty }) {
+            val outcome = try {
+                recovery.work { gateway.close(operatorId) }
+            } catch (_: RecoveryBlocked) {
+                // A revoked or sealed credential IS a CancellationException by
+                // type, so it has to be named before the real cancellation below
+                // or the operator would be left staring at an unchanged screen.
+                ClosePalletResult.Unavailable
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                ClosePalletResult.Unavailable
+            }
+            when (val result = outcome) {
                 is ClosePalletResult.Closed -> {
                     signals.play(SignalKind.BOX_DONE)
                     val closed = ClosedPalletUi(result.pallet.palletId, result.sscc, result.boxCount)
-                    _state.update { it.copy(closeStep = PalletCloseStep.Printing(closed)) }
+                    // The pallet this verdict spoke about is closed; its banner
+                    // must not survive onto the next one.
+                    _state.update { it.copy(lastVerdict = null, closeStep = PalletCloseStep.Printing(closed)) }
                     val step = attemptPrint(closed)
                     _state.update { it.copy(closeStep = step) }
                     gateway.nudgeSync()
@@ -297,7 +324,15 @@ class PalletsViewModel(
         if (closed != null) viewModelScope.launch { runCatching { recovery.work { gateway.defer(closed.palletId) } } }
     }
 
-    fun dismissClose() = _state.update { it.copy(closeStep = PalletCloseStep.Idle) }
+    /**
+     * A print in flight is not dismissable. The close coroutine is still
+     * running and writes its own outcome back into `closeStep`, so clearing it
+     * here only makes the label screen reappear a moment later -- and in the
+     * gap a scan would attach a box to a pallet that is already closed.
+     */
+    fun dismissClose() = _state.update {
+        if (it.closeStep is PalletCloseStep.Printing) it else it.copy(closeStep = PalletCloseStep.Idle)
+    }
 
     fun acknowledge() {
         val pallet = _state.value.pallet ?: return

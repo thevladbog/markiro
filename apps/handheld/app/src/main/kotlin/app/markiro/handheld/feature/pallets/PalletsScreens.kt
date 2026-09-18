@@ -145,7 +145,11 @@ private fun PalletsListScreen(state: PalletsUi, cb: PalletsCallbacks) {
             if (state.capacity != null) {
                 PalletStrip(state.boxCount, state.capacity)
             } else {
-                Text(stringResource(R.string.pallets_count_no_capacity, state.boxCount), style = t.strong, color = c.fg2)
+                Text(
+                    pluralStringResource(R.plurals.pallets_count_no_capacity, state.boxCount, state.boxCount),
+                    style = t.strong,
+                    color = c.fg2,
+                )
             }
             if (state.productName.isNotEmpty()) Text(state.productName, style = t.caption, color = c.fg3)
             // Newest first: the box just scanned is the one the operator checks.
@@ -211,8 +215,11 @@ private fun RejectionsBlock(rejections: List<PalletMembershipEntity>, onAcknowle
 
 @Composable
 private fun rejectionText(row: PalletMembershipEntity): String = when (row.reason) {
+    // No winning SSCC means the box is on a pallet somebody else has not closed
+    // yet, so there is no number to name -- «На паллете …» with an empty tail
+    // read like a bug. Say what is actually known instead.
     "already_on_pallet" -> row.winningPalletSscc?.let { stringResource(R.string.pallets_reject_already_on_pallet, it.takeLast(TAIL)) }
-        ?: stringResource(R.string.pallets_reject_already_on_pallet, "")
+        ?: stringResource(R.string.pallets_reject_already_on_open_pallet)
     "not_found" -> stringResource(R.string.pallets_reject_not_found)
     "not_closed" -> stringResource(R.string.pallets_reject_not_closed)
     "disassembled" -> stringResource(R.string.pallets_reject_disassembled)

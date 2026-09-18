@@ -24,6 +24,7 @@ import app.markiro.handheld.core.storage.initializeRecoveryForTest
 import app.markiro.handheld.core.writeoff.MirrorOutcome
 import app.markiro.handheld.feature.signin.SessionHolder
 import app.markiro.handheld.feature.work.PalletCloseStep
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -32,6 +33,7 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -88,6 +90,15 @@ class PalletsViewModelTest {
         var next: AttachResult = AttachResult.UnknownBox
         var closeResult: ClosePalletResult = ClosePalletResult.Empty
         var printOutcome: PrintOutcome = PrintOutcome.Printed
+
+        /** Every print attempt in order: the pallet, the replacement printer, and the unknown-retry flag. */
+        val prints = mutableListOf<Triple<String, String?, Boolean>>()
+
+        /** Held open, this keeps a print in flight so «Back» can be tested against it. */
+        var printGate: CompletableDeferred<Unit>? = null
+
+        /** Makes `close` throw rather than answer, the way a revoked lease does. */
+        var closeThrows: (() -> Throwable)? = null
         var attachCalls = 0
         var closeCalls = 0
         var removed: Pair<String, String>? = null
@@ -136,6 +147,7 @@ class PalletsViewModelTest {
 
         override suspend fun close(operatorId: String?): ClosePalletResult {
             closeCalls++
+            closeThrows?.let { throw it() }
             return closeResult
         }
 
@@ -143,8 +155,11 @@ class PalletsViewModelTest {
             acknowledged = palletId
         }
 
-        override suspend fun print(palletId: String, replacementPrinterId: String?, allowUnknown: Boolean): PrintOutcome =
-            printOutcome
+        override suspend fun print(palletId: String, replacementPrinterId: String?, allowUnknown: Boolean): PrintOutcome {
+            prints += Triple(palletId, replacementPrinterId, allowUnknown)
+            printGate?.await()
+            return printOutcome
+        }
 
         override suspend fun resolveUnknownAsPrinted(palletId: String) {
             resolved = palletId
@@ -229,6 +244,12 @@ class PalletsViewModelTest {
         assertTrue(vm.state.value.closeStep is PalletCloseStep.Printed)
         assertTrue(SignalKind.BOX_DONE in signals)
         assertEquals(1, gateway.nudges)
+        // The automatic first label goes to the assigned printer and is NOT
+        // allowed to resolve an unknown outcome on its own: only a person who
+        // looked at the printer may say a label with an unknown fate was fine.
+        assertEquals(listOf(Triple("w1", null, false)), gateway.prints)
+        // The pallet this verdict named is closed; its banner must not survive.
+        assertNull(vm.state.value.lastVerdict)
     }
 
     @Test
@@ -322,6 +343,90 @@ class PalletsViewModelTest {
         vm.retryPrint()
         advanceUntilIdle()
         assertEquals(1, gateway.reprints)
+        assertTrue(vm.state.value.closeStep is PalletCloseStep.Printed)
+        // The first attempt refused to resolve an unknown outcome; the operator's
+        // own retry is the one that carries `allowUnknown`.
+        assertEquals(listOf(Triple("w1", null, false), Triple("w1", null, true)), gateway.prints)
+    }
+
+    /**
+     * A dead printer must not strand a closed pallet: the profile the operator
+     * picked has to reach the gateway, or the retry goes to the same dead one.
+     */
+    @Test
+    fun aRetryOnAnotherPrinterCarriesThatProfile() = runTest {
+        gateway.closeResult = ClosePalletResult.Closed(
+            openPallet.copy(sscc = "134600682000000011", closedAt = "t"), "134600682000000011", 3, "t",
+        )
+        gateway.printOutcome = PrintOutcome.Failed(PrintReason.NO_PAPER)
+        val vm = vm()
+        advanceUntilIdle()
+        vm.requestEarlyClose()
+        vm.confirmEarlyClose()
+        advanceUntilIdle()
+        assertTrue(vm.state.value.closeStep is PalletCloseStep.Failed)
+        gateway.printOutcome = PrintOutcome.Printed
+        vm.retryPrint("printer-2")
+        advanceUntilIdle()
+        assertEquals(Triple("w1", "printer-2", true), gateway.prints.last())
+        assertTrue(vm.state.value.closeStep is PalletCloseStep.Printed)
+        // A failed print is not an unknown one, so no reprint exception is owed.
+        assertEquals(0, gateway.reprints)
+    }
+
+    /**
+     * A closing that THREW is not an empty pallet.
+     *
+     * `RecoveryBlocked` is a `CancellationException` by type, so the naive
+     * catch would either swallow it into «в паллете нет коробов» or let it kill
+     * the coroutine silently. Both send the operator looking for boxes that are
+     * already on the pallet.
+     */
+    @Test
+    fun aThrownCloseIsReportedAsUnavailableNotEmpty() = runTest {
+        gateway.closeThrows = { app.markiro.handheld.core.storage.RecoveryBlocked() }
+        val vm = vm()
+        advanceUntilIdle()
+        vm.requestEarlyClose()
+        vm.confirmEarlyClose()
+        advanceUntilIdle()
+        assertEquals(PalletCloseStep.Refused(ClosePalletResult.Unavailable), vm.state.value.closeStep)
+    }
+
+    /** The same for a plain failure, which is not a cancellation at all. */
+    @Test
+    fun aDatabaseFailureDuringCloseIsUnavailableToo() = runTest {
+        gateway.closeThrows = { IllegalStateException("disk") }
+        val vm = vm()
+        advanceUntilIdle()
+        vm.requestEarlyClose()
+        vm.confirmEarlyClose()
+        advanceUntilIdle()
+        assertEquals(PalletCloseStep.Refused(ClosePalletResult.Unavailable), vm.state.value.closeStep)
+    }
+
+    /**
+     * Back during a print in flight must not clear the screen: the close is
+     * still running and would put its own outcome straight back, and in the gap
+     * a scan would attach a box to a pallet that is already closed.
+     */
+    @Test
+    fun aPrintInFlightIsNotDismissable() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        gateway.printGate = gate
+        gateway.closeResult = ClosePalletResult.Closed(
+            openPallet.copy(sscc = "134600682000000011", closedAt = "t"), "134600682000000011", 3, "t",
+        )
+        val vm = vm()
+        advanceUntilIdle()
+        vm.requestEarlyClose()
+        vm.confirmEarlyClose()
+        advanceUntilIdle()
+        assertTrue(vm.state.value.closeStep is PalletCloseStep.Printing)
+        vm.dismissClose()
+        assertTrue(vm.state.value.closeStep is PalletCloseStep.Printing)
+        gate.complete(Unit)
+        advanceUntilIdle()
         assertTrue(vm.state.value.closeStep is PalletCloseStep.Printed)
     }
 

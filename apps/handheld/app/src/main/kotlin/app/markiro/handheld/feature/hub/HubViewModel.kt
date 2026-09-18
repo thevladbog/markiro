@@ -68,7 +68,7 @@ data class HubUi(
     val canWriteoff: Boolean? = null,
     /** Null until the pallet bootstrap has covered this operator; false is a real refusal. */
     val canBuildPallets: Boolean? = null,
-    /** Pallet memberships this device still owes the server; also counted in [queue]. */
+    /** Pallet memberships this device still owes the server; already part of [queue]'s own total. */
     val palletsPending: Int = 0,
     /** The entry «Продолжить» is going through, or how it was refused; the list's own states. */
     val dialog: app.markiro.handheld.feature.shift.ShiftDialog? = null,
@@ -246,8 +246,11 @@ class HubViewModel(
             countsAt = cfg?.countsAt,
             reachable = lastOk != null && now() - lastOk <= REACHABLE_WINDOW_MS,
             scannerLabel = scannerLabel(),
-            // A queued membership is unsent production work like any other row.
-            queue = syncState.pending + inventoryState.pending + writeoffState.pending + palletsPending,
+            // `pallet_memberships` is one of the sync engine's own channels, so
+            // `syncState.pending` ALREADY counts every unsent membership. Adding
+            // `palletsPending` here again showed the operator twice the work they
+            // owe; the tile keeps its own count for its own hint.
+            queue = syncState.pending + inventoryState.pending + writeoffState.pending,
             stuck = syncState.stuck || inventoryState.stuck || writeoffState.stuck,
             writeoffPending = writeoffState.pending,
             canWriteoff = canWriteoff,

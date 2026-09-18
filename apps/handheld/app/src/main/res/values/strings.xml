@@ -692,7 +692,12 @@
     <string name="pallets_refresh">Обновить реестр</string>
     <string name="pallets_empty_title">Отсканируйте короб</string>
     <string name="pallets_empty_text">Первый короб задаёт товар паллеты.</string>
-    <string name="pallets_count_no_capacity">%1$d коробов · ёмкость не задана</string>
+    <plurals name="pallets_count_no_capacity">
+        <item quantity="one">%d короб · ёмкость не задана</item>
+        <item quantity="few">%d короба · ёмкость не задана</item>
+        <item quantity="many">%d коробов · ёмкость не задана</item>
+        <item quantity="other">%d коробов · ёмкость не задана</item>
+    </plurals>
     <string name="pallets_member_box">короб …%1$s</string>
     <string name="pallets_status_pending">в очереди</string>
     <string name="pallets_status_sent">отправляется</string>
@@ -716,6 +721,7 @@
         <item quantity="other">Снимите с паллеты %d коробов</item>
     </plurals>
     <string name="pallets_reject_already_on_pallet">На паллете …%1$s</string>
+    <string name="pallets_reject_already_on_open_pallet">На открытой паллете другого устройства</string>
     <string name="pallets_reject_not_found">Сервер не знает этот короб</string>
     <string name="pallets_reject_not_closed">Короб не закрыт</string>
     <string name="pallets_reject_disassembled">Короб расформирован</string>
@@ -726,4 +732,5 @@
     <string name="pallets_acknowledge">Принято</string>
     <string name="pallet_refused_no_template">Нет шаблона этикетки паллеты — задайте его в кабинете</string>
     <string name="pallet_refused_no_issuer">В организации не задан GLN — паллета не получит номер</string>
+    <string name="pallet_refused_unavailable">Не удалось закрыть паллету — попробуйте ещё раз</string>
 </resources>

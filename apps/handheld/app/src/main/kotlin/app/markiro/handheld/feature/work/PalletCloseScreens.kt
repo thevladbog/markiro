@@ -150,6 +150,9 @@ private fun Refused(reason: ClosePalletResult, cb: PalletCloseCallbacks) {
         ClosePalletResult.InvalidSerial -> R.string.box_refused_invalid_serial to R.string.pallet_refused_invalid_serial_hint
         // A warehouse pallet has no shift, so the missing GLN is the organisation's.
         ClosePalletResult.NoIssuer -> R.string.pallet_refused_no_issuer to null
+        // The closing threw rather than answered: the pallet is untouched, but
+        // «нет коробов» would be a lie about why.
+        ClosePalletResult.Unavailable -> R.string.pallet_refused_unavailable to null
         else -> R.string.pallet_refused_empty to null
     }
     Text(stringResource(title), style = t.title, color = c.tone(Tone.Warn).fg, textAlign = TextAlign.Center)

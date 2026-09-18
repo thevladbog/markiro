@@ -670,7 +670,10 @@
     <string name="pallets_refresh">Refresh registry</string>
     <string name="pallets_empty_title">Scan a box</string>
     <string name="pallets_empty_text">The first box sets the pallet\'s product.</string>
-    <string name="pallets_count_no_capacity">%1$d boxes · no capacity set</string>
+    <plurals name="pallets_count_no_capacity">
+        <item quantity="one">%d box · no capacity set</item>
+        <item quantity="other">%d boxes · no capacity set</item>
+    </plurals>
     <string name="pallets_member_box">box …%1$s</string>
     <string name="pallets_status_pending">queued</string>
     <string name="pallets_status_sent">sending</string>
@@ -692,6 +695,7 @@
         <item quantity="other">Take %d boxes off the pallet</item>
     </plurals>
     <string name="pallets_reject_already_on_pallet">On pallet …%1$s</string>
+    <string name="pallets_reject_already_on_open_pallet">On another device\'s open pallet</string>
     <string name="pallets_reject_not_found">Unknown to the server</string>
     <string name="pallets_reject_not_closed">Box not closed</string>
     <string name="pallets_reject_disassembled">Box disassembled</string>
@@ -702,4 +706,5 @@
     <string name="pallets_acknowledge">Got it</string>
     <string name="pallet_refused_no_template">No pallet label template — set one in the cabinet</string>
     <string name="pallet_refused_no_issuer">The organisation has no GLN — the pallet cannot be numbered</string>
+    <string name="pallet_refused_unavailable">Could not close the pallet — try again</string>
 </resources>

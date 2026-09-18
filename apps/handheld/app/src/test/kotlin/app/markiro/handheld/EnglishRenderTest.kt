@@ -344,4 +344,41 @@ class EnglishRenderTest {
         }
         assertNoCyrillic()
     }
+
+    /** A close that threw rather than answered says so in English too. */
+    @Test
+    fun aPalletThatCouldNotBeClosedRendersInEnglish() {
+        compose.setContent {
+            MarkiroTheme { PalletCloseScreen(PalletCloseStep.Refused(ClosePalletResult.Unavailable), PalletCloseCallbacks()) }
+        }
+        assertNoCyrillic()
+    }
+
+    /** The capacity-less plural and the unnumbered-pallet rejection have their own EN forms. */
+    @Test
+    fun aPalletWithoutACapacityRendersInEnglish() {
+        val pallet = app.markiro.handheld.core.storage.PalletEntity(
+            palletId = "w1", shiftId = null, terminalId = "dev-1", sscc = null, openedAt = "t", closedAt = null,
+            operatorId = "op-1", printState = app.markiro.handheld.core.storage.PalletPrint.PENDING, printReason = null,
+            ackedAt = null, kind = app.markiro.handheld.core.storage.PalletKind.WAREHOUSE, productId = "p1", deviceId = "dev-1",
+        )
+        compose.setContent {
+            MarkiroTheme {
+                PalletsRoute(
+                    PalletsUi(
+                        pallet = pallet, productName = "Water 0.5 l", boxCount = 1, capacity = null,
+                        rejections = listOf(
+                            app.markiro.handheld.core.storage.PalletMembershipEntity(
+                                "w1", "034600682000000021", "t", null,
+                                app.markiro.handheld.core.storage.MembershipStatus.REJECTED,
+                                "already_on_pallet", null, "t", null,
+                            ),
+                        ),
+                    ),
+                    PalletsCallbacks(),
+                )
+            }
+        }
+        assertNoCyrillic()
+    }
 }

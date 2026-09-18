@@ -256,11 +256,17 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                 val profiles by vm.printerProfiles.collectAsStateWithLifecycle()
                 var choosingPalletPrinter by remember { mutableStateOf(false) }
                 val leave = { nav.popBackStack(Routes.HUB, inclusive = false); Unit }
-                // Back dismisses what is on top of the mode first -- a closed
-                // pallet's label, then the early-close question -- and only then
-                // leaves. Otherwise one press would drop an unresolved label.
+                // Back dismisses what is on top of the mode first -- the printer
+                // chooser, then a closed pallet's label, then the early-close
+                // question -- and only then leaves. Otherwise one press would drop
+                // an unresolved label, or leave the mode from behind the chooser.
+                // A print in flight is the one thing Back cannot dismiss: the close
+                // is still running and would put its own outcome straight back on
+                // the screen, so the press would look like a stuck button.
                 BackHandler(enabled = true) {
                     when {
+                        choosingPalletPrinter -> choosingPalletPrinter = false
+                        state.closeStep is PalletCloseStep.Printing -> Unit
                         state.closeStep != PalletCloseStep.Idle -> vm.dismissClose()
                         state.confirmEarlyClose -> vm.cancelEarlyClose()
                         else -> leave()
