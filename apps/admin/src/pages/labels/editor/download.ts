@@ -37,6 +37,29 @@
  * byte reaches either document unescaped.
  */
 
+import type { LabelTemplatePurpose, LabelTemplateSpec } from "@markiro/domain";
+
+export interface LabelTemplateJsonPayload {
+  name: string;
+  purpose: LabelTemplatePurpose;
+  spec: LabelTemplateSpec;
+}
+
+/**
+ * The downloadable JSON twin of a template: `{ name, purpose, spec }`,
+ * pretty-printed -- the exact body `POST /label-templates` accepts and the
+ * exact text the import dialog's JSON format takes back. Deliberately NOT
+ * routed through `latin1ToUint8Array` (see the module comment): unlike the
+ * ZPL/TSPL documents, JSON is text, and a Cyrillic template name or caption
+ * must reach the file as UTF-8, which is what `Blob` does with a string. Key
+ * order is fixed so a diff of two exports reads top-down: name, purpose,
+ * spec.
+ */
+export function buildJsonBlob(payload: LabelTemplateJsonPayload): Blob {
+  const ordered = { name: payload.name, purpose: payload.purpose, spec: payload.spec };
+  return new Blob([`${JSON.stringify(ordered, null, 2)}\n`], { type: "application/json" });
+}
+
 /**
  * Converts a Latin-1-semantics string (one JS string code UNIT = one byte,
  * values 0x00-0xFF -- exactly what `generateTspl`'s `BITMAP` payload and

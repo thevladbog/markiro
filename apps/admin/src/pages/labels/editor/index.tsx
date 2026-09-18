@@ -59,7 +59,13 @@ import { useCreateLabelTemplate, useLabelTemplate, useUpdateLabelTemplate } from
 import { labelPreviewData, labelRenderOptions } from "../preview-data.js";
 import { describeDefaultConflict } from "../scope.js";
 import "./editor.css";
-import { buildTsplBlob, buildZplBlob, downloadBlob, safeFileName } from "./download.js";
+import {
+  buildJsonBlob,
+  buildTsplBlob,
+  buildZplBlob,
+  downloadBlob,
+  safeFileName,
+} from "./download.js";
 import { ImportCodeDialog } from "./ImportCodeDialog.js";
 import type { ImportAnalysis } from "./import-analysis.js";
 import { PreviewPane } from "./PreviewPane.js";
@@ -431,11 +437,17 @@ function LabelEditorContent({
   }
 
   /**
-   * Both downloads are generated from the SAME spec on demand -- nothing on
+   * All three downloads are generated from the SAME spec on demand -- nothing on
    * the template picks one language over the other, so neither button is ever
    * disabled or hidden.
    */
-  async function handleDownload(format: "zpl" | "tspl"): Promise<void> {
+  async function handleDownload(format: "zpl" | "tspl" | "json"): Promise<void> {
+    // JSON is the model itself: nothing to generate, nothing that can fail,
+    // so it is offered even while a duplicate template is temporarily invalid.
+    if (format === "json") {
+      downloadBlob(buildJsonBlob({ name, purpose, spec }), `${safeFileName(name)}.json`);
+      return;
+    }
     if (duplicateInvalid) return;
     const sample = labelPreviewData(purpose);
     try {
@@ -701,6 +713,9 @@ function LabelEditorContent({
           </Button>
           <Button type="button" variant="secondary" onClick={() => void handleDownload("tspl")}>
             {t("pages.labels.editor.download", { format: "TSPL (TSC)" })}
+          </Button>
+          <Button type="button" variant="secondary" onClick={() => void handleDownload("json")}>
+            {t("pages.labels.editor.download", { format: "JSON" })}
           </Button>
           {/* The invalid-dimension message wins when it is set: it describes
               the most recent action (a rejected entry never reached the

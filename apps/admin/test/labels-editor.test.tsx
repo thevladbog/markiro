@@ -57,7 +57,12 @@ import {
   type RasterizeTextFn,
 } from "@markiro/domain";
 
-import { buildZplBlob, latin1ToUint8Array } from "../src/pages/labels/editor/download.js";
+import {
+  buildJsonBlob,
+  buildZplBlob,
+  latin1ToUint8Array,
+} from "../src/pages/labels/editor/download.js";
+import { analyzeImport } from "../src/pages/labels/editor/import-analysis.js";
 import { labelPreviewData } from "../src/pages/labels/preview-data.js";
 import { LabelEditorPage } from "../src/pages/labels/editor/index.js";
 import { decodeRasterToRgba, rasterDestXPx } from "../src/pages/labels/editor/raster-preview.js";
@@ -355,6 +360,7 @@ describe("Settings form", () => {
     ).toBeDefined();
     expect(screen.getByRole("button", { name: "Скачать ZPL" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Скачать TSPL (TSC)" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Скачать JSON" })).toBeDefined();
   });
 
   it("a size preset round-trips and re-fits imported elements inside the smaller label", async () => {
@@ -947,6 +953,49 @@ describe("Download (ZPL/TSPL byte safety)", () => {
     const bytes = new Uint8Array(await blob.arrayBuffer());
     expect(Array.from(bytes)).toContain(0xe9);
     expect(Array.from(bytes)).not.toContain(0xc3); // the UTF-8 lead byte "é" would become if re-encoded
+  });
+
+  it("buildJsonBlob pretty-prints UTF-8 JSON in name/purpose/spec order with a trailing newline", async () => {
+    const spec = parseLabelTemplate(JSON_SPEC);
+    const blob = buildJsonBlob({ spec, purpose: "box", name: "Короб 58×40" });
+    expect(blob.type).toBe("application/json");
+    const text = new TextDecoder().decode(await blob.arrayBuffer());
+    expect(text).toBe(`${JSON.stringify({ name: "Короб 58×40", purpose: "box", spec }, null, 2)}\n`);
+  });
+
+  it("Скачать JSON downloads { name, purpose, spec } of the current editor state, and the file imports back unchanged", async () => {
+    const blobs: Blob[] = [];
+    vi.spyOn(URL, "createObjectURL").mockImplementation((value) => {
+      if (!(value instanceof Blob)) throw new Error("Expected a downloadable label");
+      blobs.push(value);
+      return "blob:mock-url";
+    });
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
+    renderCreateFlow();
+    importZpl(IMPORT_ZPL);
+    fireEvent.change(screen.getByLabelText("Название"), { target: { value: "Короб 58×40" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Скачать JSON" }));
+
+    await waitFor(() => expect(blobs).toHaveLength(1));
+    const blob = blobs[0];
+    if (!blob) throw new Error("Missing downloaded JSON");
+    expect(blob.type).toBe("application/json");
+    const text = new TextDecoder().decode(await blob.arrayBuffer());
+    const payload = JSON.parse(text) as { name: string; purpose: string; spec: unknown };
+    expect(Object.keys(payload)).toEqual(["name", "purpose", "spec"]);
+    expect(payload.name).toBe("Короб 58×40");
+    expect(payload.purpose).toBe("box");
+    expect(() => parseLabelTemplate(payload.spec)).not.toThrow();
+    expect((payload.spec as { elements: unknown[] }).elements).toHaveLength(2);
+
+    // Round trip: the downloaded file is exactly what the JSON importer takes back.
+    const outcome = analyzeImport({ source: text, format: "json", dpi: 203, purpose: "box" });
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.analysis.result.spec).toEqual(payload.spec);
+    expect(outcome.analysis.result.warnings).toEqual([]);
+    expect(outcome.analysis.name).toBe("Короб 58×40");
   });
 
   it("Скачать ZPL produces a Blob whose text contains ^XA (and the raster fallback)", async () => {
