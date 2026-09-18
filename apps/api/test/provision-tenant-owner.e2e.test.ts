@@ -6,6 +6,7 @@ import { createDb, schema } from "@markiro/db";
 import {
   buildDuplicateLabelTemplate,
   buildPalletLabelTemplates,
+  PALLET_LABEL_58X40_TEMPLATE_NAME,
   PALLET_LABEL_TEMPLATE_NAME,
 } from "@markiro/domain";
 import { MailCryptoService } from "../src/modules/mail/mail-crypto.service";
@@ -334,13 +335,21 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
       .select({ id: schema.labelTemplates.id })
       .from(schema.labelTemplates)
       .where(eq(schema.labelTemplates.tenantId, result.tenantId));
-    // 16 box + 2 product_duplicate + 1 pallet (slice 06d).
-    expect(after).toHaveLength(19);
-    const pallets = templates.filter((t) => t.purpose === "pallet");
+    // 16 box + 2 product_duplicate + 2 pallet (06d + spec 2026-09-18 §8).
+    expect(after).toHaveLength(20);
+    // Selection order is not guaranteed without ORDER BY; sort by name so the
+    // comparison is deterministic regardless of physical row order.
+    const pallets = templates
+      .filter((t) => t.purpose === "pallet")
+      .sort((a, b) => a.name.localeCompare(b.name));
     expect(pallets).toEqual([
       expect.objectContaining({
         name: PALLET_LABEL_TEMPLATE_NAME,
         spec: buildPalletLabelTemplates()[0]!.spec,
+      }),
+      expect.objectContaining({
+        name: PALLET_LABEL_58X40_TEMPLATE_NAME,
+        spec: buildPalletLabelTemplates()[1]!.spec,
       }),
     ]);
     const duplicates = templates.filter((t) => t.purpose === "product_duplicate");

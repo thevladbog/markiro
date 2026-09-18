@@ -7,7 +7,11 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { buildPalletLabelTemplates, PALLET_LABEL_TEMPLATE_NAME } from "@markiro/domain";
+import {
+  buildPalletLabelTemplates,
+  PALLET_LABEL_58X40_TEMPLATE_NAME,
+  PALLET_LABEL_TEMPLATE_NAME,
+} from "@markiro/domain";
 import { copyMigrationsThroughIndex } from "./support/legacy-migrations.js";
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -204,18 +208,23 @@ describe.skipIf(!databaseUrl)("pallets migration", () => {
       "SELECT count(*)::int AS n FROM label_templates WHERE tenant_id=$1 AND purpose='pallet'",
       [tenantId],
     );
-    expect(rows[0]!.n).toBe(1);
+    expect(rows[0]!.n).toBe(2);
   });
 
-  it("seeds the stock pallet label for every existing tenant", async () => {
+  it("seeds both stock pallet labels for every existing tenant, without duplicates", async () => {
     for (const id of [tenantId, otherTenantId]) {
-      const { rows } = await pool.query(
-        "SELECT spec FROM label_templates WHERE tenant_id=$1 AND name=$2",
-        [id, PALLET_LABEL_TEMPLATE_NAME],
-      );
-      expect(rows).toHaveLength(1);
-      // The inlined migration JSON and the builder must not drift apart.
-      expect(rows[0]!.spec).toEqual(buildPalletLabelTemplates()[0]!.spec);
+      for (const [index, name] of [
+        PALLET_LABEL_TEMPLATE_NAME,
+        PALLET_LABEL_58X40_TEMPLATE_NAME,
+      ].entries()) {
+        const { rows } = await pool.query(
+          "SELECT spec FROM label_templates WHERE tenant_id=$1 AND name=$2 AND purpose='pallet'",
+          [id, name],
+        );
+        expect(rows, name).toHaveLength(1);
+        // The inlined migration JSON and the builder must not drift apart.
+        expect(rows[0]!.spec).toEqual(buildPalletLabelTemplates()[index]!.spec);
+      }
     }
   });
 
