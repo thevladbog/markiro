@@ -96,6 +96,11 @@ const SHIFT: ShiftDto = {
 const PALLET = {
   id: "pal-1",
   sscc: "00103460068200000004",
+  kind: "production",
+  productId: "p1",
+  productName: "Молоко 1л",
+  deviceName: "Станция 1",
+  rejectedMembershipCount: 0,
   terminalId: "t1",
   lineName: "Линия розлива № 1",
   operatorId: null,
