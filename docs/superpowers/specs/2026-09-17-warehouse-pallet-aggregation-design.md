@@ -336,7 +336,11 @@ ackedAt?`, plus a snapshot of `bottleCount` and `productionDate` taken at
 ### 3.2 Screen — «Сборка паллеты»
 
 Hub tile «Паллеты» beside «Списание»; route `Routes.PALLETS` with no
-`shiftId`; visible only to an operator with `canBuildPallets`.
+`shiftId`; shown to every operator — without `canBuildPallets` the tile says
+«нет прав» and the mode opens on a blocked screen (deviation from the original
+"visible only to an operator with `canBuildPallets`": a tile that disappears
+reads as a broken terminal, one that says why names the person who can grant
+the right).
 
 - **Scan gate.** The screen collects `ScanEvents.events` exclusively while
   resumed, exactly as the write-off screen does. Nothing scanned here reaches
