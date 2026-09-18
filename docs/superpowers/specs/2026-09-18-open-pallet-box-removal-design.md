@@ -87,8 +87,12 @@ carried any. `status`:
 | `subscription_read_only` | denied and quarantined, like a membership                                      |
 
 **Ingest order** inside the existing transaction: items → box closures →
-pallet pre-pass (memberships only) → **removals** → memberships → **prune
-emptied drafts** → pallet closures → box exceptions → pallet exceptions.
+**removals** → pallet pre-pass + memberships → **prune emptied drafts** →
+pallet closures → box exceptions → pallet exceptions. The membership pre-pass
+runs inside the memberships block, after the removals, so a removal naming a
+pallet that only a membership in the SAME batch creates answers `not_found`
+rather than `replayed` — both terminal on the device, which deletes the row
+either way.
 
 Removal statement, one per record, sorted by `(palletId, boxSscc)`; the pallet
 is resolved first by `(tenant_id, device_id, device_pallet_id) WHERE kind =
@@ -112,9 +116,15 @@ Removed box ids go to `advanceBoxRegistryVersion` with the memberships' ids.
 `removed`: delete its `pallet_membership_rejections`, then `DELETE FROM
 pallets WHERE id = :id AND kind = 'warehouse' AND closed_at IS NULL AND
 disassembled_at IS NULL AND NOT EXISTS (SELECT 1 FROM boxes WHERE pallet_id =
-:id)`. An open pallet has no exceptions and no exports, so no other row can
-reference it. The device's own rejection rows are its record of those
-refusals; the cabinet had a card for a pallet that no longer exists.
+:id)`. An open pallet has no exceptions and no exports, but one other row can still
+reference it: a RIVAL device's `already_on_pallet` rejection stores this draft
+as its `winning_pallet_id`, and that row hangs off the rival's own pallet. Both
+FKs are `ON DELETE NO ACTION`, so the prune first runs `UPDATE
+pallet_membership_rejections SET winning_pallet_id = NULL WHERE tenant_id =
+:tenant AND winning_pallet_id = :id` — the rival keeps its record of what it
+scanned, and the pointer is meaningless once the draft is gone. The device's
+own rejection rows are its record of those refusals; the cabinet had a card for
+a pallet that no longer exists.
 
 **Read-only subscription.** Removals are denied and quarantined exactly like
 memberships (`recordKind: "pallet_membership_removal"`, `shiftId: null`), and

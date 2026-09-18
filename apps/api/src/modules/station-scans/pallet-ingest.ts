@@ -723,18 +723,16 @@ export async function applyPalletMembershipRemovals(
   const touched = new Set<string>();
   // One lookup per device-local pallet id, reused by every removal naming it.
   // The empty id is the "this device has no such warehouse pallet" sentinel;
-  // a real id is a uuid, so the two can never be confused.
-  const palletByDeviceId = new Map<string, { id: string; open: boolean }>();
+  // a real id is a uuid, so the two can never be confused. Only the id is
+  // cached: whether the pallet is still open is re-read at the point it
+  // decides an outcome, because this batch is not the only writer.
+  const palletByDeviceId = new Map<string, { id: string }>();
 
   for (const { removal, index } of ordered) {
     let pallet = palletByDeviceId.get(removal.palletId);
     if (pallet === undefined) {
       const [row] = await tx
-        .select({
-          id: schema.pallets.id,
-          closedAt: schema.pallets.closedAt,
-          disassembledAt: schema.pallets.disassembledAt,
-        })
+        .select({ id: schema.pallets.id })
         .from(schema.pallets)
         .where(
           and(
@@ -745,9 +743,7 @@ export async function applyPalletMembershipRemovals(
           ),
         )
         .limit(1);
-      pallet = row
-        ? { id: row.id, open: row.closedAt === null && row.disassembledAt === null }
-        : { id: "", open: false };
+      pallet = row ? { id: row.id } : { id: "" };
       palletByDeviceId.set(removal.palletId, pallet);
     }
     const base = { palletId: removal.palletId, boxSscc: removal.boxSscc };
@@ -779,18 +775,41 @@ export async function applyPalletMembershipRemovals(
     // Ordered by what the operator can act on: a box that is simply not on
     // this pallet any more is the common replay; a closed pallet is the one
     // answer that sends them to the disassemble flow instead.
-    if (!box) outcomes[index] = { ...base, status: "not_found" };
-    else if (box.palletId !== pallet.id) outcomes[index] = { ...base, status: "replayed" };
-    else if (!pallet.open) outcomes[index] = { ...base, status: "pallet_closed" };
-    else throw new Error("unclassified membership removal refusal");
+    if (!box) {
+      outcomes[index] = { ...base, status: "not_found" };
+      continue;
+    }
+    if (box.palletId !== pallet.id) {
+      outcomes[index] = { ...base, status: "replayed" };
+      continue;
+    }
+    // The box IS on this pallet and the statement still refused it, so the
+    // pallet must have closed or been disassembled. Re-read that state instead
+    // of trusting the value cached before the UPDATE: a disassembly committed
+    // in between is a real race, and it has to classify rather than throw.
+    const [state] = await tx
+      .select({
+        closedAt: schema.pallets.closedAt,
+        disassembledAt: schema.pallets.disassembledAt,
+      })
+      .from(schema.pallets)
+      .where(and(eq(schema.pallets.tenantId, tenantId), eq(schema.pallets.id, pallet.id)))
+      .limit(1);
+    if (state !== undefined && (state.closedAt !== null || state.disassembledAt !== null)) {
+      outcomes[index] = { ...base, status: "pallet_closed" };
+      continue;
+    }
+    throw new Error("unclassified membership removal refusal");
   }
   return { outcomes, changedBoxIds, touchedPalletIds: [...touched] };
 }
 
 /**
  * Deletes every named warehouse pallet that is still an open draft and holds
- * no box any more, with its rejection rows (FK). Runs AFTER memberships, so a
- * batch that empties a draft and refills it in the same delivery keeps it.
+ * no box any more, with its own rejection rows and after clearing every
+ * `winning_pallet_id` that points at it from another pallet's rejection (both
+ * FKs are ON DELETE NO ACTION). Runs AFTER memberships, so a batch that
+ * empties a draft and refills it in the same delivery keeps it.
  */
 export async function pruneEmptyWarehouseDrafts(
   tx: Transaction,
@@ -814,6 +833,23 @@ export async function pruneEmptyWarehouseDrafts(
       )
       .limit(1);
     if (!empty) continue;
+    // ANOTHER device's refusal can point at this draft: `applyPalletMemberships`
+    // stores the box's CURRENT pallet as `winning_pallet_id` on an
+    // `already_on_pallet` rejection, and that row hangs off the RIVAL pallet,
+    // so the delete below never reaches it. Its FK is ON DELETE NO ACTION, so
+    // the pallet delete would raise 23503, 500 the batch, and wedge the
+    // handheld's removal queue on an endless retry. The rival's record of what
+    // it scanned is kept; only the pointer, meaningless once the draft is gone,
+    // is cleared.
+    await tx
+      .update(schema.palletMembershipRejections)
+      .set({ winningPalletId: null })
+      .where(
+        and(
+          eq(schema.palletMembershipRejections.tenantId, tenantId),
+          eq(schema.palletMembershipRejections.winningPalletId, palletId),
+        ),
+      );
     await tx
       .delete(schema.palletMembershipRejections)
       .where(

@@ -1770,6 +1770,13 @@ export class StationScansService {
 
         // A draft this batch emptied and did not refill is deleted: it has no
         // SSCC, no label and no export, and the device already forgot it.
+        //
+        // This runs BEFORE the pallet closures below, so a batch that both
+        // empties a draft and carries a closure for the same device-local
+        // pallet would have that closure skip on the now-missing key. The
+        // handheld never sends that combination -- removing the last box
+        // deletes the draft locally, and a deleted draft is never closed --
+        // and closing a pallet the operator just emptied has nothing to print.
         if (removalTouched.length > 0) {
           const pruned = await pruneEmptyWarehouseDrafts(tx, tenantId, removalTouched);
           for (const id of pruned) {

@@ -185,6 +185,24 @@ describe.skipIf(!ready)("station scans warehouse pallets e2e", () => {
       .orderBy(schema.palletMembershipRejections.boxSscc);
   }
 
+  /** The `winning_pallet_id` pointer of a pallet's own rejection rows. */
+  async function rejectionWinners(palletId: string) {
+    const db = app!.get<Db>(DB);
+    return db
+      .select({
+        boxSscc: schema.palletMembershipRejections.boxSscc,
+        winningPalletId: schema.palletMembershipRejections.winningPalletId,
+      })
+      .from(schema.palletMembershipRejections)
+      .where(
+        and(
+          eq(schema.palletMembershipRejections.tenantId, tenantId),
+          eq(schema.palletMembershipRejections.palletId, palletId),
+        ),
+      )
+      .orderBy(schema.palletMembershipRejections.boxSscc);
+  }
+
   beforeAll(async () => {
     const env = loadEnv();
     setup = setupAuth(env);
@@ -440,11 +458,14 @@ describe.skipIf(!ready)("station scans warehouse pallets e2e", () => {
       .send({
         batchId: `foreign-rm-${randomUUID()}`,
         items: [],
-        palletMembershipRemovals: [removal("w1", B3_SSCC)],
+        // "w-nobody" exists on NO device, so the lookup is scoped by device id
+        // alone: device 1's pallets are never a candidate for device 2.
+        palletMembershipRemovals: [removal("w1", B3_SSCC), removal("w-nobody", B3_SSCC)],
       })
       .expect(201);
     expect(foreign.body.membershipRemovals).toEqual([
       { palletId: "w1", boxSscc: B3_SSCC, status: "replayed" },
+      { palletId: "w-nobody", boxSscc: B3_SSCC, status: "not_found" },
     ]);
     const own = await warehousePallet("w1", stationDeviceId);
     expect(await memberBoxSsccs(own.id)).toEqual([B1_SSCC, B3_SSCC]);
@@ -751,6 +772,28 @@ describe.skipIf(!ready)("station scans warehouse pallets e2e", () => {
     expect(draft.closedAt).toBeNull();
     expect(await rejections(draft.id)).toHaveLength(1);
 
+    // A RIVAL device refuses the same box onto a pallet of its own. That
+    // refusal is stored on DEVICE 2's pallet but points at THIS draft through
+    // `winning_pallet_id`, so the prune below cannot reach it by `pallet_id`
+    // and would hit `pallet_membership_rejections_tenant_winning_pallet_fk`.
+    const rival = await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", device2Key)
+      .send({
+        batchId: `rival-draft-${randomUUID()}`,
+        items: [],
+        palletMemberships: [membership("w-rival", B8_SSCC)],
+      })
+      .expect(201);
+    // No `winningPalletSscc`: the winning pallet is still an open draft.
+    expect(rival.body.memberships).toEqual([
+      { palletId: "w-rival", boxSscc: B8_SSCC, status: "already_on_pallet" },
+    ]);
+    const rivalPallet = await warehousePallet("w-rival", device2Id);
+    expect(await rejectionWinners(rivalPallet.id)).toEqual([
+      { boxSscc: B8_SSCC, winningPalletId: draft.id },
+    ]);
+
     const emptied = await postBatch({ palletMembershipRemovals: [removal("w3", B8_SSCC)] });
     expect(emptied.body.membershipRemovals).toEqual([
       { palletId: "w3", boxSscc: B8_SSCC, status: "removed" },
@@ -766,14 +809,28 @@ describe.skipIf(!ready)("station scans warehouse pallets e2e", () => {
       .from(schema.palletMembershipRejections)
       .where(eq(schema.palletMembershipRejections.palletId, draft.id));
     expect(orphanRejections).toEqual([]);
+    // Device 2's refusal survives the prune -- it is that device's own record
+    // of what it scanned -- with its pointer at the vanished draft nulled.
+    expect(await rejectionWinners(rivalPallet.id)).toEqual([
+      { boxSscc: B8_SSCC, winningPalletId: null },
+    ]);
     // The freed box can open a NEW draft under the same device-local id.
     const reopened = await postBatch({ palletMemberships: [membership("w3", B8_SSCC)] });
     expect(reopened.body.memberships).toEqual([
       { palletId: "w3", boxSscc: B8_SSCC, status: "accepted" },
     ]);
     expect((await warehousePallet("w3", stationDeviceId)).id).not.toEqual(draft.id);
-    // Leave no draft behind for the later tests.
-    await postBatch({ palletMembershipRemovals: [removal("w3", B8_SSCC)] });
+    // Leave no draft behind for the later tests: the second draft empties and
+    // is pruned exactly like the first.
+    const cleaned = await postBatch({ palletMembershipRemovals: [removal("w3", B8_SSCC)] });
+    expect(cleaned.body.membershipRemovals).toEqual([
+      { palletId: "w3", boxSscc: B8_SSCC, status: "removed" },
+    ]);
+    const remaining = await db
+      .select({ id: schema.pallets.id })
+      .from(schema.pallets)
+      .where(and(eq(schema.pallets.tenantId, tenantId), eq(schema.pallets.devicePalletId, "w3")));
+    expect(remaining).toEqual([]);
   });
 
   /**
