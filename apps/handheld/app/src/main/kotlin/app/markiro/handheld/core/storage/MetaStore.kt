@@ -57,6 +57,9 @@ class MetaStore(private val db: HandheldDatabase) {
         /** Memberships' own pin, for the identical reason every other channel here has one. */
         const val SYNC_PENDING_MEMBERSHIP_COUNT = "sync_pending_membership_count"
 
+        /** Membership removals' own pin, kept separately for the same reason memberships have one. */
+        const val SYNC_PENDING_MEMBERSHIP_REMOVAL_COUNT = "sync_pending_membership_removal_count"
+
         /** When the pallet bootstrap last landed; the «данные на 10:42» stamp. */
         const val PALLET_BOOTSTRAP_AT = "pallet_bootstrap_at"
 
