@@ -2,32 +2,40 @@ import { useEffect, useState, type ChangeEvent } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
-  parseLabelCode,
   type LabelCodeLanguage,
-  type LabelImportResult,
+  type LabelImportFormat,
+  type LabelImportWarning,
   type LabelTemplatePurpose,
+  type PrinterDpi,
 } from "@markiro/domain";
 import { Button, Checkbox, Modal, Select, Textarea } from "@markiro/ui";
 
-import { fitSpecElements } from "../geometry.js";
-import { labelPreviewData, labelRenderOptions } from "../preview-data.js";
+import { analyzeImport, type ImportAnalysis, type ImportAnalysisError } from "./import-analysis.js";
 import { ImportFieldsPanel } from "./ImportFieldsPanel.js";
 
 export interface ImportCodeDialogProps {
   open: boolean;
   initialLanguage: LabelCodeLanguage;
-  initialDpi: 203 | 300;
+  initialDpi: PrinterDpi;
   currentDirty: boolean;
   purpose: LabelTemplatePurpose;
   onClose: () => void;
-  onReplace: (result: LabelImportResult) => void;
+  onReplace: (analysis: ImportAnalysis) => void;
 }
 
-interface Analysis {
-  result: LabelImportResult;
-  adjustedIds: string[];
-}
+const FORMAT_OPTIONS: Array<{ value: LabelImportFormat; label: string }> = [
+  { value: "zpl", label: "ZPL" },
+  { value: "tspl", label: "TSPL (TSC)" },
+  { value: "json", label: "JSON (Markiro)" },
+];
 
+/**
+ * The only way to put content on a label: paste ZPL/TSPL code or the label
+ * model's own JSON, check it, acknowledge what will be dropped, replace the
+ * spec. Parsing and fitting live in `analyzeImport`; this component owns the
+ * dialog state and maps outcomes to copy. Any edit to the source, format or
+ * DPI invalidates the analysis so a stale result can never be confirmed.
+ */
 export function ImportCodeDialog({
   open,
   initialLanguage,
@@ -38,60 +46,46 @@ export function ImportCodeDialog({
   onReplace,
 }: ImportCodeDialogProps) {
   const { t } = useTranslation();
-  const [language, setLanguage] = useState<LabelCodeLanguage>(initialLanguage);
-  const [dpi, setDpi] = useState<203 | 300>(initialDpi);
+  const [format, setFormat] = useState<LabelImportFormat>(initialLanguage);
+  const [dpi, setDpi] = useState<PrinterDpi>(initialDpi);
   const [source, setSource] = useState("");
-  const [analysis, setAnalysis] = useState<Analysis | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [acknowledgedUnsupported, setAcknowledgedUnsupported] = useState(false);
+  const [analysis, setAnalysis] = useState<ImportAnalysis | null>(null);
+  const [error, setError] = useState<ImportAnalysisError | null>(null);
+  const [acknowledged, setAcknowledged] = useState(false);
 
   useEffect(() => {
     if (!open) return;
-    setLanguage(initialLanguage);
+    setFormat(initialLanguage);
     setDpi(initialDpi);
     setSource("");
     setAnalysis(null);
     setError(null);
-    setAcknowledgedUnsupported(false);
+    setAcknowledged(false);
   }, [initialDpi, initialLanguage, open]);
 
-  const codeLabel = t("pages.labels.editor.import.codeLabel", {
-    format: language === "zpl" ? "ZPL" : "TSPL",
-  });
-  const unsupportedCount = analysis?.result.warnings.length ?? 0;
-  const canReplace =
-    analysis !== null && (unsupportedCount === 0 || acknowledgedUnsupported) && error === null;
+  const isJson = format === "json";
+  const codeLabel = isJson
+    ? t("pages.labels.editor.import.jsonLabel")
+    : t("pages.labels.editor.import.codeLabel", { format: format === "zpl" ? "ZPL" : "TSPL" });
+  const warnings = analysis?.result.warnings ?? [];
+  const canReplace = analysis !== null && (warnings.length === 0 || acknowledged) && error === null;
 
   function invalidate(): void {
     setAnalysis(null);
     setError(null);
-    setAcknowledgedUnsupported(false);
+    setAcknowledged(false);
   }
 
   function handleCheck(): void {
-    setAnalysis(null);
-    setError(null);
-    setAcknowledgedUnsupported(false);
-    try {
-      const parsed = parseLabelCode(source, { language, dpi });
-      const fitted = fitSpecElements(
-        parsed.spec,
-        labelPreviewData(purpose),
-        labelRenderOptions(purpose),
-      );
-      if (!fitted.ok) {
-        setError(t("pages.labels.editor.import.elementTooLarge"));
-        return;
-      }
-      setAnalysis({ result: { ...parsed, spec: fitted.spec }, adjustedIds: fitted.adjustedIds });
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    }
+    invalidate();
+    const outcome = analyzeImport({ source, format, dpi, purpose });
+    if (outcome.ok) setAnalysis(outcome.analysis);
+    else setError(outcome.error);
   }
 
   function handleReplace(): void {
     if (!analysis || !canReplace) return;
-    onReplace(analysis.result);
+    onReplace(analysis);
   }
 
   return (
@@ -121,28 +115,28 @@ export function ImportCodeDialog({
           <div className="label-editor__import-options">
             <Select
               aria-label={t("pages.labels.editor.import.formatLabel")}
-              options={[
-                { value: "zpl", label: "ZPL" },
-                { value: "tspl", label: "TSPL (TSC)" },
-              ]}
-              value={language}
+              options={FORMAT_OPTIONS}
+              value={format}
               onValueChange={(value) => {
-                setLanguage(value);
+                setFormat(value);
                 invalidate();
               }}
             />
-            <Select
-              aria-label={t("pages.labels.editor.import.dpiLabel")}
-              options={[
-                { value: "203", label: "203 DPI" },
-                { value: "300", label: "300 DPI" },
-              ]}
-              value={String(dpi)}
-              onValueChange={(value) => {
-                setDpi(value === "300" ? 300 : 203);
-                invalidate();
-              }}
-            />
+            {/* JSON carries its own `dpi`; the import DPI only rescales code. */}
+            {!isJson && (
+              <Select
+                aria-label={t("pages.labels.editor.import.dpiLabel")}
+                options={[
+                  { value: "203", label: "203 DPI" },
+                  { value: "300", label: "300 DPI" },
+                ]}
+                value={String(dpi)}
+                onValueChange={(value) => {
+                  setDpi(value === "300" ? 300 : 203);
+                  invalidate();
+                }}
+              />
+            )}
           </div>
           <label className="label-editor__import-code-label" htmlFor="label-editor-import-code">
             {codeLabel}
@@ -161,11 +155,7 @@ export function ImportCodeDialog({
           {currentDirty && (
             <p className="label-editor__import-note">{t("pages.labels.editor.import.dirtyNote")}</p>
           )}
-          {error && (
-            <div className="label-editor__import-error" role="alert">
-              {error}
-            </div>
-          )}
+          {error && <ImportErrorBlock error={error} />}
           {analysis && (
             <div className="label-editor__import-analysis" aria-live="polite">
               <strong>
@@ -175,25 +165,31 @@ export function ImportCodeDialog({
                   height: analysis.result.spec.heightMm.toFixed(1),
                 })}
               </strong>
-              {analysis.result.warnings.length > 0 && (
+              {warnings.length > 0 && (
                 <div className="label-editor__import-warnings">
                   <p>
-                    {t("pages.labels.editor.import.unsupportedTitle", {
-                      count: analysis.result.warnings.length,
-                    })}
+                    {t(
+                      isJson
+                        ? "pages.labels.editor.import.warningsTitle"
+                        : "pages.labels.editor.import.unsupportedTitle",
+                      { count: warnings.length },
+                    )}
                   </p>
-                  {analysis.result.warnings.map((warning) => (
-                    <div key={`${warning.line}-${warning.source}`}>
-                      <span>{warning.line}: </span>
-                      <code>{warning.source}</code>
-                    </div>
+                  {warnings.map((warning) => (
+                    <WarningRow
+                      key={`${warning.line ?? "json"}-${warning.source}`}
+                      warning={warning}
+                    />
                   ))}
                   <Checkbox
-                    label={t("pages.labels.editor.import.acknowledge", {
-                      count: analysis.result.warnings.length,
-                    })}
-                    checked={acknowledgedUnsupported}
-                    onCheckedChange={setAcknowledgedUnsupported}
+                    label={t(
+                      isJson
+                        ? "pages.labels.editor.import.acknowledgeWarnings"
+                        : "pages.labels.editor.import.acknowledge",
+                      { count: warnings.length },
+                    )}
+                    checked={acknowledged}
+                    onCheckedChange={setAcknowledged}
                   />
                 </div>
               )}
@@ -205,8 +201,60 @@ export function ImportCodeDialog({
             </div>
           )}
         </div>
-        <ImportFieldsPanel syntax="placeholder" />
+        <ImportFieldsPanel syntax={isJson ? "json" : "placeholder"} />
       </div>
     </Modal>
+  );
+}
+
+/** One warning line; the copy depends on what kind of thing is being dropped. */
+function WarningRow({ warning }: { warning: LabelImportWarning }) {
+  const { t } = useTranslation();
+  switch (warning.code) {
+    case "UNSUPPORTED_COMMAND":
+      return (
+        <div>
+          <span>{warning.line}: </span>
+          <code>{warning.source}</code>
+        </div>
+      );
+    case "UNKNOWN_PROPERTY":
+      return (
+        <div>
+          <code>{warning.source}</code> {t("pages.labels.editor.import.warningUnknownProperty")}
+        </div>
+      );
+    case "PURPOSE_MISMATCH":
+      return (
+        <div>
+          <code>{warning.source}</code> {t("pages.labels.editor.import.warningPurposeMismatch")}
+        </div>
+      );
+  }
+}
+
+/** A blocking error: one message, or the schema's full issue list with paths. */
+function ImportErrorBlock({ error }: { error: ImportAnalysisError }) {
+  const { t } = useTranslation();
+  if (error.kind === "issues") {
+    return (
+      <div className="label-editor__import-error" role="alert">
+        <p>{t("pages.labels.editor.import.issuesTitle", { count: error.issues.length })}</p>
+        <ul className="label-editor__import-issues">
+          {error.issues.map((issue, index) => (
+            <li key={`${index}-${issue.path}`}>
+              <code>{issue.path || "spec"}</code> {issue.message}
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+  return (
+    <div className="label-editor__import-error" role="alert">
+      {error.kind === "elementTooLarge"
+        ? t("pages.labels.editor.import.elementTooLarge")
+        : error.message}
+    </div>
   );
 }

@@ -218,6 +218,58 @@ const CYRILLIC_FIELD_ZPL = [
   "^XZ",
 ].join("\n");
 
+const JSON_NAME_FIELD = {
+  kind: "field",
+  id: "name",
+  xMm: 2,
+  yMm: 2,
+  field: "product.printName",
+  fontSizePt: 10,
+  bold: true,
+  maxWidthMm: 54,
+  maxLines: 3,
+};
+
+/** Four elements of the pallet 58×40 layout from the JSON-import task, as the API accepts it. */
+const JSON_SPEC = {
+  widthMm: 58,
+  heightMm: 40,
+  dpi: 203,
+  language: "zpl",
+  elements: [
+    JSON_NAME_FIELD,
+    { kind: "line", id: "sep1", xMm: 2, yMm: 18.2, x2Mm: 56, y2Mm: 18.2, thicknessMm: 0.3 },
+    {
+      kind: "text",
+      id: "cap-date",
+      xMm: 2,
+      yMm: 18.8,
+      text: "Дата производства:",
+      fontSizePt: 5,
+      maxWidthMm: 18,
+    },
+    {
+      kind: "field",
+      id: "val-date",
+      xMm: 2,
+      yMm: 21.6,
+      field: "date",
+      fontSizePt: 8,
+      bold: true,
+      maxWidthMm: 18,
+    },
+  ],
+};
+
+/** Opens the dialog, switches it to JSON and pastes `source`; returns the dialog. */
+async function openJsonImport(source: string): Promise<HTMLElement> {
+  fireEvent.click(screen.getByRole("button", { name: "Импорт кода" }));
+  const dialog = screen.getByRole("dialog", { name: "Импорт кода" });
+  await chooseOption(userEvent.setup(), "Формат кода", "JSON (Markiro)");
+  fireEvent.change(within(dialog).getByLabelText("JSON шаблона"), { target: { value: source } });
+  return dialog;
+}
+
 const PRODUCT_GROUPS = {
   items: [
     { code: 8, alias: "milk", name: "Молочная продукция" },
@@ -261,13 +313,13 @@ describe("Settings form", () => {
     renderCreateFlow();
 
     expect(
-      screen.getByText("Содержимое этикетки не задано — импортируйте код ZPL или TSPL."),
+      screen.getByText("Содержимое этикетки не задано — импортируйте код ZPL, TSPL или JSON."),
     ).toBeDefined();
 
     importZpl(IMPORT_ZPL);
 
     expect(
-      screen.queryByText("Содержимое этикетки не задано — импортируйте код ZPL или TSPL."),
+      screen.queryByText("Содержимое этикетки не задано — импортируйте код ZPL, TSPL или JSON."),
     ).toBeNull();
   });
 
@@ -689,6 +741,110 @@ describe("Import is the only content path", () => {
 
     expect((screen.getByLabelText("Ширина этикетки, мм") as HTMLInputElement).value).toBe("58.0");
     expect((screen.getByLabelText("Высота этикетки, мм") as HTMLInputElement).value).toBe("40.0");
+  });
+});
+
+describe("JSON import", () => {
+  it("offers JSON as a third format, hides the import DPI and switches the fields panel", async () => {
+    renderCreateFlow();
+    fireEvent.click(screen.getByRole("button", { name: "Импорт кода" }));
+    const dialog = screen.getByRole("dialog", { name: "Импорт кода" });
+    expect(within(dialog).getByRole("combobox", { name: "DPI импорта" })).toBeDefined();
+    expect(within(dialog).getByLabelText("Код ZPL")).toBeDefined();
+
+    await chooseOption(userEvent.setup(), "Формат кода", "JSON (Markiro)");
+
+    expect(within(dialog).queryByRole("combobox", { name: "DPI импорта" })).toBeNull();
+    expect(within(dialog).getByLabelText("JSON шаблона")).toBeDefined();
+    expect(within(dialog).getByText("product.printName")).toBeDefined();
+    expect(within(dialog).queryByText("{{product.printName}}")).toBeNull();
+  });
+
+  it("checks pasted JSON, replaces the spec, fills the default name and Save POSTs the same spec", async () => {
+    const fetchMock = stubCreateFetch("new-json");
+    renderCreateFlow();
+    const dialog = await openJsonImport(
+      JSON.stringify({ name: "Паллета 58×40", purpose: "box", spec: JSON_SPEC }),
+    );
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Проверить код" }));
+    expect(within(dialog).getByText("Распознано элементов: 4 · размер 58.0×40.0 мм")).toBeDefined();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Заменить этикетку" }));
+
+    expect(screen.queryByRole("dialog", { name: "Импорт кода" })).toBeNull();
+    expect((screen.getByLabelText("Название") as HTMLInputElement).value).toBe("Паллета 58×40");
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(postedSpec<typeof JSON_SPEC>(fetchMock)).toEqual(JSON_SPEC);
+  });
+
+  it("keeps a typed name and stays on the pasted JSON's dpi and language", async () => {
+    renderCreateFlow();
+    fireEvent.change(screen.getByLabelText("Название"), { target: { value: "Моё имя" } });
+    const dialog = await openJsonImport(
+      JSON.stringify({ name: "Паллета 58×40", spec: { ...JSON_SPEC, dpi: 300, language: "tspl" } }),
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Проверить код" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Заменить этикетку" }));
+
+    expect((screen.getByLabelText("Название") as HTMLInputElement).value).toBe("Моё имя");
+    expect(
+      screen.getByRole("combobox", { name: "Разрешение предпросмотра" }).textContent,
+    ).toContain("300");
+  });
+
+  it("lists every schema issue with its path and blocks replacement", async () => {
+    renderCreateFlow();
+    const dialog = await openJsonImport(
+      JSON.stringify({
+        ...JSON_SPEC,
+        elements: [{ kind: "text", id: "a", xMm: 1, yMm: 1, text: "x" }],
+      }),
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Проверить код" }));
+
+    const alert = within(dialog).getByRole("alert");
+    expect(within(alert).getByText(/^Ошибок в JSON: \d+$/)).toBeDefined();
+    expect(within(alert).getByText("elements.0.fontSizePt")).toBeDefined();
+    expect(
+      within(dialog).getByRole("button", { name: "Заменить этикетку" }).hasAttribute("disabled"),
+    ).toBe(true);
+  });
+
+  it("shows a JSON syntax error as one message", async () => {
+    renderCreateFlow();
+    const dialog = await openJsonImport("{");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Проверить код" }));
+    expect(within(dialog).getByRole("alert").textContent).toMatch(/^invalid JSON: /);
+  });
+
+  it("requires acknowledgement for unknown properties and a purpose mismatch, then drops them", async () => {
+    const fetchMock = stubCreateFetch("new-json-2");
+    renderCreateFlow();
+    const dialog = await openJsonImport(
+      JSON.stringify({
+        purpose: "pallet",
+        spec: { ...JSON_SPEC, elements: [{ ...JSON_NAME_FIELD, maxlines: 2 }] },
+      }),
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Проверить код" }));
+
+    expect(within(dialog).getByText("Предупреждения: 2")).toBeDefined();
+    expect(within(dialog).getByText("elements.0.maxlines")).toBeDefined();
+    expect(within(dialog).getByText('purpose: "pallet"')).toBeDefined();
+    const replace = within(dialog).getByRole("button", { name: "Заменить этикетку" });
+    expect(replace.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(
+      within(dialog).getByRole("checkbox", { name: /Продолжить с этими предупреждениями/ }),
+    );
+    expect(replace.hasAttribute("disabled")).toBe(false);
+    fireEvent.click(replace);
+
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const spec = postedSpec<{ elements: Array<Record<string, unknown>> }>(fetchMock);
+    expect(spec.elements[0]).not.toHaveProperty("maxlines");
+    expect(spec.elements[0]).toMatchObject({ maxLines: 3 });
   });
 });
 

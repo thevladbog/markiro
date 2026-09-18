@@ -42,7 +42,6 @@ import {
   generateTspl,
   generateZpl,
   labelTemplateUsesField,
-  type LabelImportResult,
   type LabelTemplateSpec,
   type RasterizeTextFn,
 } from "@markiro/domain";
@@ -62,6 +61,7 @@ import { describeDefaultConflict } from "../scope.js";
 import "./editor.css";
 import { buildTsplBlob, buildZplBlob, downloadBlob, safeFileName } from "./download.js";
 import { ImportCodeDialog } from "./ImportCodeDialog.js";
+import type { ImportAnalysis } from "./import-analysis.js";
 import { PreviewPane } from "./PreviewPane.js";
 import { useSpecState } from "./useSpecState.js";
 
@@ -323,10 +323,20 @@ function LabelEditorContent({
     markDirty();
   }
 
-  function handleImportReplace(result: LabelImportResult): void {
-    editor.replaceSpec(result.spec);
-    setCustomSize(matchPresetKey(result.spec.widthMm, result.spec.heightMm) === null);
+  function handleImportReplace(analysis: ImportAnalysis): void {
+    const nextSpec = analysis.result.spec;
+    editor.replaceSpec(nextSpec);
+    setCustomSize(matchPresetKey(nextSpec.widthMm, nextSpec.heightMm) === null);
     clearSizeDrafts();
+    // A pasted `{ name, purpose, spec }` body names the template only while
+    // the name is still the untouched default of a new template (or blank);
+    // a typed or saved name is never overwritten by an import.
+    if (
+      analysis.name !== undefined &&
+      (name.trim() === "" || name === t("pages.labels.editor.defaultName"))
+    ) {
+      setName(analysis.name);
+    }
     markDirty();
     setShowImportDialog(false);
   }
