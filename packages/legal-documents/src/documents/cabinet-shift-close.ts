@@ -83,6 +83,44 @@ export const CABINET_SHIFT_CLOSE_CONTENT = {
             tone: "info",
             text: "Если статистику не удалось загрузить, кабинет говорит об этом прямо в панели и предлагает «Повторить». Остальные данные смены и действия при этом остаются доступны — сбой статистики не мешает закрыть смену.",
           },
+          {
+            kind: "step",
+            title: "Проверьте паллеты смены",
+            text: "Раздел «Паллеты» показан только у смены, запланированной с паллетами: отметку «Использовать паллеты» ставят при планировании (MKR-INS-08), и у остальных смен раздела нет вовсе — это не сбой и не потеря данных. Таблица описывает каждую паллету пятью колонками: «SSCC», «Коробов», «Кодов», «Закрыта» и «Статус». Отдельной колонки с линией здесь нет — паллеты смены собраны на одной линии, и она записана ниже, в «Параметры смены». SSCC — ссылка на карточку паллеты с её коробами; пока SSCC не присвоен, на его месте стоит «Без SSCC». В «Статус» кабинет ставит два независимых признака — «Разобрана» и «Состав изменился после закрытия»; они могут стоять и вместе. Пока паллет в смене нет, вместо строк выводится «В этой смене нет паллет»; если список не удалось запросить — «Не удалось загрузить паллеты смены.» и кнопка «Повторить». Пустой список и неудачный запрос — разные ответы, и кабинет их не смешивает.",
+            image: { id: "shift-pallets", caption: "Раздел «Паллеты» в панели смены" },
+            expected:
+              "Видны все паллеты смены: SSCC, число коробов и кодов, время закрытия и признаки состояния.",
+          },
+          {
+            kind: "definition-list",
+            items: [
+              {
+                term: "Разобрана",
+                detail:
+                  "Паллету расформировали — её короба больше на ней не стоят; на снимке у такой паллеты нули в «Коробов» и «Кодов». Ярлык на неё не печатается, а отдельный отчёт по ней кабинет уже не сформирует (раздел 7).",
+              },
+              {
+                term: "Без SSCC",
+                detail:
+                  "SSCC присваивается паллете при закрытии, поэтому его отсутствие означает одно: закрытие ещё не дошло до кабинета — паллету на линии продолжают собирать либо её закрытие не синхронизировалось. В «Закрыта» у такой строки стоит прочерк, и ярлык для неё не печатается.",
+              },
+              {
+                term: "Состав изменился после закрытия",
+                detail:
+                  "После закрытия паллеты один из её коробов разобрали: паллета лишилась короба и исправить это уже не может. Сама паллета остаётся закрытой — ярлык на неё по-прежнему печатается, а в отчёты она идёт в нынешнем составе, без разобранного короба.",
+              },
+            ],
+          },
+          {
+            kind: "step",
+            title: "Напечатайте ярлыки паллет",
+            text: "Кнопка «Ярлыки» стоит справа от заголовка «Паллеты» и открывает окно «Ярлыки паллет смены». Выбор в нём один — «Формат листа»: «A4» или «A5». Кнопка «Открыть» отдаёт документ в новую вкладку, о чём окно и предупреждает: «Откроется в новой вкладке — распечатайте на обычном принтере и прикрепите на паллету.»; «Отмена» закрывает окно, ничего не напечатав. Страница печатается для каждой закрытой, неразобранной паллеты смены, у которой есть SSCC, — и ни для какой другой. Поэтому страниц может оказаться меньше, чем строк в таблице: разобранная паллета и паллета без SSCC в документ не попадают, а паллета с признаком «Состав изменился после закрытия» печатается наравне с остальными. На снимке из трёх строк печатаются две. Если печатать нечего, кнопки «Ярлыки» в разделе нет.",
+            image: {
+              id: "pallet-placards",
+              caption: "Окно «Ярлыки паллет смены»: выбор формата листа",
+            },
+            expected: "Документ с ярлыками открыт в новой вкладке и готов к печати.",
+          },
         ],
       },
       {
@@ -154,8 +192,38 @@ export const CABINET_SHIFT_CLOSE_CONTENT = {
           {
             kind: "step",
             title: "Откройте отчёты закрытой смены",
-            text: "Откройте закрытую смену кнопкой «Подробнее»: в панели появится раздел «Отчеты смены». У незакрытой смены на его месте стоит пояснение, что заказать и выгрузить отчёты можно только после закрытия. В блоке «Формат отчета» — форматы из утверждённого серверного каталога: «[TXT][Без коробов] Отчет смены», «[TXT][С коробами] Отчет смены», «[CSV][Без коробов] Отчет смены», «[CSV][С коробами] Отчет смены» и «[XML][ГИСМТ] Отчет об агрегации». Отметка «Разделить отчет на части» добавляет поле «Максимум строк в части» — допустимо целое число от 2 до 1 000 000; без разделения отчёт выходит одним файлом.",
+            text: "Откройте закрытую смену кнопкой «Подробнее»: в панели появится раздел «Отчеты смены». У незакрытой смены на его месте стоит пояснение, что заказать и выгрузить отчёты можно только после закрытия. В блоке «Формат отчета» — форматы из утверждённого серверного каталога: «[TXT][Без коробов] Отчет смены», «[TXT][С коробами] Отчет смены», «[CSV][Без коробов] Отчет смены», «[CSV][С коробами] Отчет смены» и «[XML][ГИСМТ] Отчет об агрегации». У смены, запланированной с паллетами, каталог длиннее: к этим пяти добавляются пять паллетных форматов, разобранных сразу ниже, — всего в списке десять строк, как на снимке. Смене без паллет кабинет паллетные форматы не предлагает вовсе: заказанный по ошибке, такой отчёт всё равно не сформировался бы, а в истории осталась бы красная строка. Отметка «Разделить отчет на части» добавляет поле «Максимум строк в части» — допустимо целое число от 2 до 1 000 000; без разделения отчёт выходит одним файлом.",
             image: { id: "exports-catalog", caption: "Выбор формата отчёта и разделение на части" },
+          },
+          {
+            kind: "definition-list",
+            items: [
+              {
+                term: "Паллеты с кодами в TXT",
+                detail:
+                  "«[TXT][Паллеты] Отчет смены» — SSCC паллеты, затем по каждому её коробу SSCC короба и коды внутри него. Короба, не вставшие на закрытую паллету, идут после всех паллет.",
+              },
+              {
+                term: "Паллеты с кодами в CSV",
+                detail:
+                  "«[CSV][Паллеты] Отчет смены» — то же содержимое таблицей из трёх колонок: SSCC паллеты, SSCC короба, код. У короба вне паллеты первая колонка пустая.",
+              },
+              {
+                term: "Паллетная агрегация в XML",
+                detail:
+                  "«[XML][ГИСМТ] Паллетная агрегация» — XML для ГИС МТ с обоими уровнями сразу: короба со своими кодами и паллеты, ссылающиеся на эти короба. Как и другому XML, ему нужен ИНН организации.",
+              },
+              {
+                term: "Паллеты и короба в TXT",
+                detail:
+                  "«[TXT][Паллеты → короба] Отчет смены» — только верхний уровень, без кодов маркировки: SSCC паллеты и SSCC её коробов. Короба вне паллет в этот отчёт не попадают.",
+              },
+              {
+                term: "Паллеты и короба в XML",
+                detail:
+                  "«[XML][ГИСМТ] Агрегация паллет без кодов» — тот же верхний уровень в XML для ГИС МТ: паллеты и вложенные в них короба, без кодов маркировки.",
+              },
+            ],
           },
           {
             kind: "step",
@@ -172,6 +240,35 @@ export const CABINET_SHIFT_CLOSE_CONTENT = {
             tone: "info",
             text: "Ссылка на скачивание действует несколько минут — если загрузка не началась, нажмите «Скачать» ещё раз. Формирование выполняется на сервере: панель можно закрыть и вернуться позже, запуск не пропадёт.",
           },
+          {
+            kind: "paragraph",
+            text: "У паллетных форматов есть свои отказы. Общий разбор неудавшихся запусков — в разделе 8; здесь собрано только то, что встречается на паллетах.",
+          },
+          {
+            kind: "definition-list",
+            items: [
+              {
+                term: "Закрытых паллет в смене нет",
+                detail:
+                  "«В смене нет закрытых паллет: коробы не ставились на паллеты либо ни одна паллета ещё не закрыта.» Кабинет не различает эти два случая: отчитываться нечем в обоих. Дождитесь закрытия хотя бы одной паллеты и повторите.",
+              },
+              {
+                term: "Паллета ещё не закрыта",
+                detail:
+                  "«Паллета ещё не закрыта — отчёт формируется только по закрытой паллете.» Так отвечает отчёт, заказанный по одной паллете с её карточки, если к моменту формирования паллета всё ещё открыта.",
+              },
+              {
+                term: "Паллета разобрана",
+                detail:
+                  "«Паллета разобрана — отчёт по ней больше не формируется.» Тоже про отчёт по одной паллете: её расформировали между заказом отчёта и его выполнением.",
+              },
+              {
+                term: "Паллета не помещается в часть",
+                detail:
+                  "«Паллета вместе со своими коробами не помещается в установленное ограничение строк.» Паллета не разрезается между частями вместе со своими коробами: поднимите «Максимум строк в части» выше объёма самой большой паллеты или отключите разделение.",
+              },
+            ],
+          },
         ],
       },
       {
@@ -181,7 +278,7 @@ export const CABINET_SHIFT_CLOSE_CONTENT = {
           {
             kind: "step",
             title: "Прочитайте причину у неудавшегося запуска",
-            text: "Запуск со статусом «Ошибка» показывает причину словами кабинета — на снимке это «Не все коды смены распределены по коробам.» — и кнопку «Повторить». «Повторить» есть у любого неудавшегося запуска: после устранения причины формирование можно перезапустить тем же составом, не выбирая формат заново.",
+            text: "Запуск со статусом «Ошибка» показывает причину словами кабинета — на снимке это «Не все коды смены распределены по коробам.» — и кнопку «Повторить». «Повторить» есть у любого неудавшегося запуска: после устранения причины формирование можно перезапустить тем же составом, не выбирая формат заново. Отказы, которые бывают только у паллетных форматов, разобраны в разделе 7.",
             image: { id: "exports-failed", caption: "Неудавшийся отчёт: причина и повтор" },
           },
           {
@@ -356,6 +453,44 @@ export const CABINET_SHIFT_CLOSE_CONTENT = {
             tone: "info",
             text: "If the statistics could not be loaded, the cabinet says so right inside the panel and offers “Retry”. The rest of the shift data and the actions stay available — a statistics failure does not stop you closing the shift.",
           },
+          {
+            kind: "step",
+            title: "Check the pallets of the shift",
+            text: "The “Pallets” section is shown only for a shift planned with pallets: the “Use pallets” checkbox is set while planning (MKR-INS-08), and other shifts have no such section at all — that is neither a fault nor lost data. The table describes every pallet in five columns: “SSCC”, “Boxes”, “Codes”, “Closed” and “Status”. There is no separate column for the line — the pallets of one shift are built on one line, and “Shift parameters” below already names it. The SSCC is a link to the pallet's card with its boxes; until an SSCC is assigned, “No SSCC” stands in its place. “Status” carries two independent marks — “Taken apart” and “Contents changed after closing” — and they can appear together. While the shift has no pallets, “No pallets in this shift” stands where the rows would be; if the list could not be requested, the section shows “Could not load this shift's pallets.” and a “Retry” button. An empty list and a failed request are different answers, and the cabinet does not blur them.",
+            image: { id: "shift-pallets", caption: "The “Pallets” section of the shift panel" },
+            expected:
+              "Every pallet of the shift is visible with its SSCC, its box and code counts, its closing time and its state marks.",
+          },
+          {
+            kind: "definition-list",
+            items: [
+              {
+                term: "Taken apart",
+                detail:
+                  "The pallet was dismantled — its boxes no longer stand on it; in the screenshot such a pallet shows zeros under “Boxes” and “Codes”. It gets no placard page, and the cabinet will no longer generate a report for that pallet alone (section 7).",
+              },
+              {
+                term: "No SSCC",
+                detail:
+                  "An SSCC is assigned to a pallet when it closes, so the absence of one means exactly this: the closing has not reached the cabinet yet — the pallet is still being built on the line, or its closing has not synchronized. Such a row carries a dash under “Closed”, and it gets no placard page.",
+              },
+              {
+                term: "Contents changed after closing",
+                detail:
+                  "One of the pallet's boxes was taken apart after the pallet closed: the pallet is a box short and can no longer correct that. The pallet itself stays closed — its placard is still printed, and it goes into reports in its present composition, without the dismantled box.",
+              },
+            ],
+          },
+          {
+            kind: "step",
+            title: "Print the pallet placards",
+            text: "The “Placards” button sits to the right of the “Pallets” heading and opens the “Placards for the shift's pallets” dialog. It asks one thing — “Paper size”: “A4” or “A5”. “Open” hands the document to a new tab, exactly as the dialog warns: “Opens in a new tab — print it on an office printer and attach it to the pallet.”; “Cancel” closes the dialog having printed nothing. One page is printed for every closed, not dismantled pallet of the shift that carries an SSCC — and for no other. So there can be fewer pages than rows in the table: a pallet that was taken apart and a pallet without an SSCC never reach the document, while a pallet marked “Contents changed after closing” is printed like any other. In the screenshot two of the three rows are printed. When there is nothing to print, the “Placards” button is not in the section at all.",
+            image: {
+              id: "pallet-placards",
+              caption: "The “Placards for the shift's pallets” dialog and its paper size",
+            },
+            expected: "The placard document is open in a new tab and ready to print.",
+          },
         ],
       },
       {
@@ -428,11 +563,41 @@ export const CABINET_SHIFT_CLOSE_CONTENT = {
           {
             kind: "step",
             title: "Open the reports of a closed shift",
-            text: "Open the closed shift with the “Details” button: the panel gains a “Shift reports” section. For a shift that is not closed yet, its place is taken by the note “Reports can be requested and downloaded after the shift is closed.” The “Report format” block lists the formats from the approved server catalog. The server delivers that catalog with Russian labels, and the cabinet shows them exactly as they arrive whatever the interface language: “[TXT][Без коробов] Отчет смены” (shift report, TXT, without boxes), “[TXT][С коробами] Отчет смены” (TXT, with boxes), “[CSV][Без коробов] Отчет смены” (CSV, without boxes), “[CSV][С коробами] Отчет смены” (CSV, with boxes) and “[XML][ГИСМТ] Отчет об агрегации” (the GIS MT aggregation XML). Ticking “Split report into parts” adds a “Maximum lines per part” field — a whole number from 2 to 1,000,000 is allowed; without splitting the report comes out as a single file.",
+            text: "Open the closed shift with the “Details” button: the panel gains a “Shift reports” section. For a shift that is not closed yet, its place is taken by the note “Reports can be requested and downloaded after the shift is closed.” The “Report format” block lists the formats from the approved server catalog. That catalog is maintained in Russian and the cabinet shows it as received, so every format label stays Russian on an English screen, as the screenshot shows: “[TXT][Без коробов] Отчет смены” (shift report, TXT, without boxes), “[TXT][С коробами] Отчет смены” (TXT, with boxes), “[CSV][Без коробов] Отчет смены” (CSV, without boxes), “[CSV][С коробами] Отчет смены” (CSV, with boxes) and “[XML][ГИСМТ] Отчет об агрегации” (the GIS MT aggregation XML). For a shift planned with pallets the catalog is longer: five pallet formats are added to them, described right below, so the list holds ten entries as in the screenshot. A shift without pallets is not offered the pallet formats at all: ordered by mistake, such a report could never have been generated anyway and would only leave a red row in the history. Ticking “Split report into parts” adds a “Maximum lines per part” field — a whole number from 2 to 1,000,000 is allowed; without splitting the report comes out as a single file.",
             image: {
               id: "exports-catalog",
               caption: "Choosing a report format and splitting it into parts",
             },
+          },
+          {
+            kind: "definition-list",
+            items: [
+              {
+                term: "Pallets with codes in TXT",
+                detail:
+                  "“[TXT][Паллеты] Отчет смены” — the pallet's SSCC, then for each of its boxes the box SSCC and the codes inside it. Boxes that reached no closed pallet follow after every pallet.",
+              },
+              {
+                term: "Pallets with codes in CSV",
+                detail:
+                  "“[CSV][Паллеты] Отчет смены” — the same content as a table of three columns: pallet SSCC, box SSCC, code. For a box on no pallet the first column is empty.",
+              },
+              {
+                term: "Pallet aggregation in XML",
+                detail:
+                  "“[XML][ГИСМТ] Паллетная агрегация” — XML for GIS MT with both levels at once: the boxes with their own codes and the pallets that reference those boxes. Like the other XML, it needs the organization INN.",
+              },
+              {
+                term: "Pallets and boxes in TXT",
+                detail:
+                  "“[TXT][Паллеты → короба] Отчет смены” — the upper level only, with no marking codes: the pallet's SSCC and the SSCCs of its boxes. Boxes on no pallet are not written into this report.",
+              },
+              {
+                term: "Pallets and boxes in XML",
+                detail:
+                  "“[XML][ГИСМТ] Агрегация паллет без кодов” — the same upper level as XML for GIS MT: the pallets and the boxes nested in them, without marking codes.",
+              },
+            ],
           },
           {
             kind: "step",
@@ -449,6 +614,35 @@ export const CABINET_SHIFT_CLOSE_CONTENT = {
             tone: "info",
             text: "A download link is valid for a few minutes — if the download does not start, press “Download” again. Generation runs on the server: you can close the panel and come back later, the run will not be lost.",
           },
+          {
+            kind: "paragraph",
+            text: "The pallet formats have refusals of their own. Failed runs in general are covered by section 8; gathered here is only what happens on pallets.",
+          },
+          {
+            kind: "definition-list",
+            items: [
+              {
+                term: "The shift has no closed pallet",
+                detail:
+                  "“The shift has no closed pallet: either no box was ever stacked on one, or no pallet has been closed yet.” The cabinet does not tell the two cases apart: in both there is nothing to report on. Wait until at least one pallet closes and try again.",
+              },
+              {
+                term: "The pallet is not closed yet",
+                detail:
+                  "“The pallet is not closed yet — an export needs a closed pallet.” This is the answer of a report ordered for a single pallet from its card, when that pallet is still open at the moment the run starts.",
+              },
+              {
+                term: "The pallet was taken apart",
+                detail:
+                  "“The pallet was taken apart — it can no longer be exported.” Also about a single-pallet report: the pallet was dismantled between the order and the run.",
+              },
+              {
+                term: "A pallet does not fit into a part",
+                detail:
+                  "“A pallet together with its boxes does not fit within the lines-per-part limit.” A pallet is never split across parts away from its boxes: raise “Maximum lines per part” above the size of the largest pallet, or turn splitting off.",
+              },
+            ],
+          },
         ],
       },
       {
@@ -458,7 +652,7 @@ export const CABINET_SHIFT_CLOSE_CONTENT = {
           {
             kind: "step",
             title: "Read the reason on the failed run",
-            text: "A run with the “Failed” status shows the reason in the cabinet's own words — in the screenshot that is “Not every shift code is assigned to a box.” — together with a “Retry” button. “Retry” is offered on every failed run: once the cause is gone, generation can be restarted with the same settings, without picking the format again.",
+            text: "A run with the “Failed” status shows the reason in the cabinet's own words — in the screenshot that is “Not every shift code is assigned to a box.” — together with a “Retry” button. “Retry” is offered on every failed run: once the cause is gone, generation can be restarted with the same settings, without picking the format again. The refusals that only the pallet formats produce are covered by section 7.",
             image: { id: "exports-failed", caption: "A failed report: the reason and the retry" },
           },
           {
