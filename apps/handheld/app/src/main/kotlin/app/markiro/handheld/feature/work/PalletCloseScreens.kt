@@ -19,6 +19,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import app.markiro.handheld.R
 import app.markiro.handheld.core.box.ClosePalletResult
+import app.markiro.handheld.core.box.PrintReason
 import app.markiro.handheld.core.design.MarkiroSizes
 import app.markiro.handheld.core.design.MarkiroTheme
 import app.markiro.handheld.core.design.PrimaryButton
@@ -34,6 +35,14 @@ data class PalletCloseCallbacks(
     val onConfirmPrinted: () -> Unit = {},
     val onDismiss: () -> Unit = {},
 )
+
+/**
+ * A pallet's label template is the catalogue's, not a shift's: the shared
+ * `printReasonLabel` would send the operator to a shift that a warehouse
+ * pallet does not have.
+ */
+internal fun palletPrintReasonLabel(reason: String): Int =
+    if (reason == PrintReason.TEMPLATE_MISSING) R.string.pallet_refused_no_template else printReasonLabel(reason)
 
 /** How long a clean print stays on screen before the pallet screen gives way to whatever is under it. */
 private const val PRINTED_DWELL_MS = 1_000L
@@ -80,7 +89,7 @@ fun PalletCloseScreen(step: PalletCloseStep, cb: PalletCloseCallbacks, destinati
             is PalletCloseStep.Failed -> {
                 Header(step.pallet)
                 Text(stringResource(R.string.box_close_failed), style = t.title, color = c.tone(Tone.Err).fg)
-                Text(stringResource(printReasonLabel(step.reason)), style = t.body, color = c.fg2)
+                Text(stringResource(palletPrintReasonLabel(step.reason)), style = t.body, color = c.fg2)
                 Spacer(Modifier.size(MarkiroSizes.sp4))
                 Actions {
                     PrimaryButton(stringResource(R.string.box_close_retry), cb.onRetry)
@@ -139,7 +148,8 @@ private fun Refused(reason: ClosePalletResult, cb: PalletCloseCallbacks) {
     val (title, hint) = when (reason) {
         ClosePalletResult.NoSerials -> R.string.box_refused_no_serials to R.string.pallet_refused_no_serials_hint
         ClosePalletResult.InvalidSerial -> R.string.box_refused_invalid_serial to R.string.pallet_refused_invalid_serial_hint
-        ClosePalletResult.NoIssuer -> R.string.box_refused_no_issuer to null
+        // A warehouse pallet has no shift, so the missing GLN is the organisation's.
+        ClosePalletResult.NoIssuer -> R.string.pallet_refused_no_issuer to null
         else -> R.string.pallet_refused_empty to null
     }
     Text(stringResource(title), style = t.title, color = c.tone(Tone.Warn).fg, textAlign = TextAlign.Center)

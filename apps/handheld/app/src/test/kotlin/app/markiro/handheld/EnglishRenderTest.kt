@@ -7,6 +7,10 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.markiro.handheld.core.design.MarkiroTheme
 import app.markiro.handheld.feature.hub.HubScreen
+import app.markiro.handheld.feature.pallets.PalletVerdict
+import app.markiro.handheld.feature.pallets.PalletsCallbacks
+import app.markiro.handheld.feature.pallets.PalletsRoute
+import app.markiro.handheld.feature.pallets.PalletsUi
 import app.markiro.handheld.feature.hub.HubUi
 import app.markiro.handheld.core.inventory.InventorySyncState
 import app.markiro.handheld.core.inventory.InventoryVerdict
@@ -294,6 +298,49 @@ class EnglishRenderTest {
             MarkiroTheme {
                 DuplicateScreen(DuplicateStep.Rejected("j1", mismatch = true), DuplicateCallbacks())
             }
+        }
+        assertNoCyrillic()
+    }
+
+    @Test
+    fun palletsRendersInEnglish() {
+        val pallet = app.markiro.handheld.core.storage.PalletEntity(
+            palletId = "w1", shiftId = null, terminalId = "dev-1", sscc = null, openedAt = "t", closedAt = null,
+            operatorId = "op-1", printState = app.markiro.handheld.core.storage.PalletPrint.PENDING, printReason = null,
+            ackedAt = null, kind = app.markiro.handheld.core.storage.PalletKind.WAREHOUSE, productId = "p1", deviceId = "dev-1",
+        )
+        compose.setContent {
+            MarkiroTheme {
+                PalletsRoute(
+                    PalletsUi(
+                        pallet = pallet, productName = "Water 0.5 l", boxCount = 1, capacity = 12, stampAt = 0L,
+                        lastVerdict = PalletVerdict.UnknownBox,
+                        members = listOf(
+                            app.markiro.handheld.core.storage.PalletMembershipEntity(
+                                "w1", "034600682000000014", "t", null,
+                                app.markiro.handheld.core.storage.MembershipStatus.PENDING, null, null, null, null,
+                            ),
+                        ),
+                        rejections = listOf(
+                            app.markiro.handheld.core.storage.PalletMembershipEntity(
+                                "w1", "034600682000000021", "t", null,
+                                app.markiro.handheld.core.storage.MembershipStatus.REJECTED,
+                                "already_on_pallet", "134600682000000011", "t", null,
+                            ),
+                        ),
+                    ),
+                    PalletsCallbacks(),
+                )
+            }
+        }
+        assertNoCyrillic()
+    }
+
+    /** A warehouse pallet has no shift, so its refusals must not name one. */
+    @Test
+    fun aPalletRefusedForWantOfAGlnRendersInEnglish() {
+        compose.setContent {
+            MarkiroTheme { PalletCloseScreen(PalletCloseStep.Refused(ClosePalletResult.NoIssuer), PalletCloseCallbacks()) }
         }
         assertNoCyrillic()
     }

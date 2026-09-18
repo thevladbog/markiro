@@ -673,4 +673,57 @@
         <item quantity="many">коробов %d</item>
         <item quantity="other">коробов %d</item>
     </plurals>
+
+    <!-- Warehouse pallets -->
+    <string name="pallets_title">Паллеты</string>
+    <string name="hub_tile_pallets">Паллеты</string>
+    <string name="hub_pallets_no_permission">нет прав</string>
+    <plurals name="hub_pallets_pending">
+        <item quantity="one">%d короб не отправлен</item>
+        <item quantity="few">%d короба не отправлены</item>
+        <item quantity="many">%d коробов не отправлено</item>
+        <item quantity="other">%d коробов не отправлено</item>
+    </plurals>
+    <string name="pallets_blocked_permission_title">Нет права собирать паллеты</string>
+    <string name="pallets_blocked_permission_text">Попросите менеджера включить «Сборка паллет на ТСД» в карточке сотрудника.</string>
+    <string name="pallets_blocked_sync_title">Справочник ещё не загружен</string>
+    <string name="pallets_blocked_sync_text">Подключитесь к сети и откройте раздел заново.</string>
+    <string name="pallets_to_hub">На главный экран</string>
+    <string name="pallets_refresh">Обновить реестр</string>
+    <string name="pallets_empty_title">Отсканируйте короб</string>
+    <string name="pallets_empty_text">Первый короб задаёт товар паллеты.</string>
+    <string name="pallets_count_no_capacity">%1$d коробов · ёмкость не задана</string>
+    <string name="pallets_member_box">короб …%1$s</string>
+    <string name="pallets_status_pending">в очереди</string>
+    <string name="pallets_status_sent">отправляется</string>
+    <string name="pallets_status_accepted">принят</string>
+    <string name="pallets_remove">Убрать с паллеты</string>
+    <string name="pallets_verdict_attached">Принят …%1$s</string>
+    <string name="pallets_verdict_already">Уже на этой паллете …%1$s</string>
+    <string name="pallets_verdict_on_pallet">Уже на паллете …%1$s</string>
+    <string name="pallets_verdict_on_open_pallet">Уже на открытой паллете другого устройства</string>
+    <string name="pallets_verdict_on_local">Уже на другой паллете этого ТСД</string>
+    <string name="pallets_verdict_other_product">Другой товар: %1$s</string>
+    <string name="pallets_verdict_unknown_box">Короб неизвестен. Обновите реестр</string>
+    <string name="pallets_verdict_unknown_product">Товар неизвестен</string>
+    <string name="pallets_verdict_is_pallet">Это паллета, не короб</string>
+    <string name="pallets_verdict_unit_code">Это код единицы, нужен SSCC короба</string>
+    <string name="pallets_verdict_not_a_code">Это не код</string>
+    <plurals name="pallets_rejected">
+        <item quantity="one">Снимите с паллеты %d короб</item>
+        <item quantity="few">Снимите с паллеты %d короба</item>
+        <item quantity="many">Снимите с паллеты %d коробов</item>
+        <item quantity="other">Снимите с паллеты %d коробов</item>
+    </plurals>
+    <string name="pallets_reject_already_on_pallet">На паллете …%1$s</string>
+    <string name="pallets_reject_not_found">Сервер не знает этот короб</string>
+    <string name="pallets_reject_not_closed">Короб не закрыт</string>
+    <string name="pallets_reject_disassembled">Короб расформирован</string>
+    <string name="pallets_reject_pallet_closed">Паллета уже закрыта на сервере</string>
+    <string name="pallets_reject_product_mismatch">Другой товар</string>
+    <string name="pallets_reject_read_only">Подписка только для чтения</string>
+    <string name="pallets_reject_other">Отклонено сервером</string>
+    <string name="pallets_acknowledge">Принято</string>
+    <string name="pallet_refused_no_template">Нет шаблона этикетки паллеты — задайте его в кабинете</string>
+    <string name="pallet_refused_no_issuer">В организации не задан GLN — паллета не получит номер</string>
 </resources>

@@ -653,4 +653,53 @@
         <item quantity="one">%d box</item>
         <item quantity="other">%d boxes</item>
     </plurals>
+
+    <!-- Warehouse pallets -->
+    <string name="pallets_title">Pallets</string>
+    <string name="hub_tile_pallets">Pallets</string>
+    <string name="hub_pallets_no_permission">no permission</string>
+    <plurals name="hub_pallets_pending">
+        <item quantity="one">%d box not sent</item>
+        <item quantity="other">%d boxes not sent</item>
+    </plurals>
+    <string name="pallets_blocked_permission_title">No permission to build pallets</string>
+    <string name="pallets_blocked_permission_text">Ask a manager to enable “Build pallets on handheld” for this employee.</string>
+    <string name="pallets_blocked_sync_title">Catalogue not loaded yet</string>
+    <string name="pallets_blocked_sync_text">Connect to the network and reopen this section.</string>
+    <string name="pallets_to_hub">To the hub</string>
+    <string name="pallets_refresh">Refresh registry</string>
+    <string name="pallets_empty_title">Scan a box</string>
+    <string name="pallets_empty_text">The first box sets the pallet\'s product.</string>
+    <string name="pallets_count_no_capacity">%1$d boxes · no capacity set</string>
+    <string name="pallets_member_box">box …%1$s</string>
+    <string name="pallets_status_pending">queued</string>
+    <string name="pallets_status_sent">sending</string>
+    <string name="pallets_status_accepted">accepted</string>
+    <string name="pallets_remove">Remove from pallet</string>
+    <string name="pallets_verdict_attached">Accepted …%1$s</string>
+    <string name="pallets_verdict_already">Already on this pallet …%1$s</string>
+    <string name="pallets_verdict_on_pallet">Already on pallet …%1$s</string>
+    <string name="pallets_verdict_on_open_pallet">Already on another device\'s open pallet</string>
+    <string name="pallets_verdict_on_local">Already on another pallet of this handheld</string>
+    <string name="pallets_verdict_other_product">Different product: %1$s</string>
+    <string name="pallets_verdict_unknown_box">Unknown box. Refresh the registry</string>
+    <string name="pallets_verdict_unknown_product">Unknown product</string>
+    <string name="pallets_verdict_is_pallet">That is a pallet, not a box</string>
+    <string name="pallets_verdict_unit_code">That is a unit code; scan the box SSCC</string>
+    <string name="pallets_verdict_not_a_code">Not a code</string>
+    <plurals name="pallets_rejected">
+        <item quantity="one">Take %d box off the pallet</item>
+        <item quantity="other">Take %d boxes off the pallet</item>
+    </plurals>
+    <string name="pallets_reject_already_on_pallet">On pallet …%1$s</string>
+    <string name="pallets_reject_not_found">Unknown to the server</string>
+    <string name="pallets_reject_not_closed">Box not closed</string>
+    <string name="pallets_reject_disassembled">Box disassembled</string>
+    <string name="pallets_reject_pallet_closed">Pallet already closed on the server</string>
+    <string name="pallets_reject_product_mismatch">Different product</string>
+    <string name="pallets_reject_read_only">Subscription is read-only</string>
+    <string name="pallets_reject_other">Refused by the server</string>
+    <string name="pallets_acknowledge">Got it</string>
+    <string name="pallet_refused_no_template">No pallet label template — set one in the cabinet</string>
+    <string name="pallet_refused_no_issuer">The organisation has no GLN — the pallet cannot be numbered</string>
 </resources>
