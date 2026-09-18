@@ -212,7 +212,17 @@ class SyncEngine(
         } else {
             MAX_PALLET_MEMBERSHIPS
         }
-        val membershipRows = when {
+        // This read is provisional for the fresh-batch case (`pendingCeiling
+        // == null`): it only decides, below, whether this drain has any work
+        // at all. The set that is actually signed into the batch id and
+        // marked `sent` is re-read atomically with that mark, inside the pin
+        // commit further down -- otherwise a `deletePending` racing this
+        // drain between this read and that mark could leave the batch naming
+        // a row that already vanished. For a retry (`pendingCeiling != null`)
+        // this IS the authoritative set: the `sent` rows a batch already
+        // pinned cannot change except through `revertSent` in a later pin
+        // cycle, so no re-read is needed.
+        var membershipRows = when {
             membershipLimit == 0 -> emptyList()
             pendingCeiling != null -> db.palletMembershipDao().sent(membershipLimit)
             else -> db.palletMembershipDao().pending(membershipLimit)
@@ -311,15 +321,29 @@ class SyncEngine(
             // over-long key the way the station's own does -- an over-long key
             // is a 400 on every retry forever, wedging every channel on the
             // device, because the drain never drops data.
+            val installId = db.recovery.commit { meta.installId() }
+            db.recovery.commit {
+            // Re-read fresh, atomically with `markSent` below, for a truly
+            // new batch. This is the set that is actually signed into the id
+            // and marked `sent` -- the earlier read above was only a peek to
+            // decide whether the drain was empty. Without this re-read, a
+            // `deletePending` racing this drain between the peek and the mark
+            // could leave the batch naming a row that already vanished: the
+            // id would carry its signature, the mark would silently no-op
+            // for it (its `WHERE status = 'pending'` no longer matches
+            // anything), and a retry would resend an id whose membership set
+            // was never actually pinned in full.
+            if (pendingCeiling == null) {
+                membershipRows = if (membershipLimit == 0) emptyList() else db.palletMembershipDao().pending(membershipLimit)
+            }
             val id = boundedBatchId(
-                "${cfg.deviceId}:${db.recovery.commit { meta.installId() }}:$maxId:" +
+                "${cfg.deviceId}:$installId:$maxId:" +
                     "${idSignature(boxIds)}:${idSignature(palletIds)}:" +
                     "${idSignature(labelRows.map { it.eventId })}:" +
                     "${idSignature(exceptionRows.map { it.id.toString() })}:" +
                     "${idSignature(palletExceptionRows.map { it.id.toString() })}:" +
                     idSignature(membershipRows.map { "${it.palletId}|${it.sscc}" }),
             )
-            db.recovery.commit {
             meta.put(MetaStore.SYNC_PENDING_CEILING, maxId.toString())
             meta.put(MetaStore.SYNC_PENDING_BOX_COUNT, boxIds.size.toString())
             meta.put(MetaStore.SYNC_PENDING_PALLET_COUNT, palletIds.size.toString())
@@ -334,8 +358,8 @@ class SyncEngine(
             // them leaves a batch in flight whose rows still read `pending` and
             // a later batch sends them a second time under a different id.
             for (m in membershipRows) db.palletMembershipDao().markSent(m.palletId, m.sscc)
-            }
             id
+            }
         }
         val body = json.encodeToString(
             SyncBatchRequest.serializer(),
