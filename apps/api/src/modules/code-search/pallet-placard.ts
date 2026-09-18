@@ -95,6 +95,17 @@ export function summarizeByProductionDate(
   ];
 }
 
+/**
+ * Stretches the SSCC symbol to the full content width (spec: "GS1-128 SSCC
+ * full content width") by forcing `preserveAspectRatio="none"` onto the
+ * `<svg>` markup from `ssccBarcode`. Uniform horizontal stretch keeps Code 128
+ * module ratios. Leaves the «Код не отображается» fallback span untouched.
+ */
+function stretchBarcodeSvg(markup: string): string {
+  if (!markup.startsWith("<svg")) return markup;
+  return markup.replace("<svg ", '<svg preserveAspectRatio="none" ');
+}
+
 /** `2026-09-10` → `10.09.2026`; anything else is printed as given. */
 function civilDate(value: string): string {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
@@ -105,8 +116,11 @@ function dash(value: string | null): string {
   return value === null || value === "" ? "—" : escapeHtml(value);
 }
 
-/** Russian plural of «дата» for the folded row: 1 дата, 2–4 даты, 5+ дат. */
-function datesWord(n: number): string {
+/**
+ * Russian plural of «дата» for the folded row: 1 дата, 2–4 даты, 5+ дат.
+ * Exported for tests.
+ */
+export function datesWord(n: number): string {
   const mod10 = n % 10;
   const mod100 = n % 100;
   if (mod10 === 1 && mod100 !== 11) return "дата";
@@ -155,7 +169,7 @@ function dateTable(rows: PlacardDateRow[], format: PlacardFormat): string {
   const compact = format === "a5";
   const head = compact
     ? '<tr><th>Произв.</th><th>Годен до</th><th class="n">Кор.</th></tr>'
-    : '<tr><th>Дата производства</th><th>Годен до</th><th class="n">Коробов</th><th>Единиц</th></tr>';
+    : '<tr><th>Дата производства</th><th>Годен до</th><th class="n">Коробов</th><th class="n">Единиц</th></tr>';
   const body = rows
     .map((row) => {
       const label =
@@ -186,14 +200,14 @@ export function renderPalletPlacardHtml(data: PalletPlacardData, format: Placard
   const rows = summarizeByProductionDate(data.boxes, data.shelfLifeDays, PLACARD_ROW_CAP[format]);
   const hri = data.sscc ? ssccHri(data.sscc) : null;
   const title = data.sscc ?? "без SSCC";
-  const orgName = data.org ? escapeHtml(data.org.name) : "—";
+  const orgName = dash(data.org?.name ?? null);
   const inn = data.org?.inn ? `ИНН ${escapeHtml(data.org.inn)}` : "";
   const footer =
     format === "a4"
       ? `<span>${inn}</span><span>Сформировано в Маркиро</span>`
       : `<span></span><span>Маркиро</span>`;
   const barcode = data.sscc
-    ? `<div class="pl-bars">${ssccBarcode(data.sscc)}</div><div class="pl-hri mono">${escapeHtml(hri ?? "")}</div>`
+    ? `<div class="pl-bars">${stretchBarcodeSvg(ssccBarcode(data.sscc))}</div><div class="pl-hri mono">${escapeHtml(hri ?? "")}</div>`
     : `<div class="pl-hri">Без SSCC</div>`;
   const watermark =
     data.status === "disassembled"
@@ -232,7 +246,7 @@ body { background: #E9E7E1; font-family: Arial, sans-serif; color: #17161A; }
 .pl-dates .total td { font-weight: 700; border-bottom: 0; }
 .pl-code { margin-top: auto; display: flex; flex-direction: column; align-items: center; gap: 2mm; }
 .pl-bars { height: ${size.barsMm}mm; width: 100%; display: flex; justify-content: center; }
-.pl-bars svg { display: block; height: 100%; width: auto; max-width: 100%; }
+.pl-bars svg { display: block; width: 100%; height: ${size.barsMm}mm; }
 .pl-hri { font-size: ${size.hriPt}pt; font-weight: 700; white-space: nowrap; letter-spacing: .04em; }
 .pl-footer { display: flex; justify-content: space-between; padding-top: 2mm; border-top: .25mm solid #E0DED7; color: #6B6862; font: ${size.tablePt - 2}pt/1.3 monospace; }
 .pl-watermark { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%) rotate(-30deg); font-size: ${size.figurePt * 2.5}pt; font-weight: 700; letter-spacing: .1em; color: rgba(23, 22, 26, .16); white-space: nowrap; pointer-events: none; }

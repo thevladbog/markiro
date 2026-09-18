@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   PLACARD_ROW_CAP,
+  datesWord,
   renderPalletPlacardHtml,
   summarizeByProductionDate,
   type PalletPlacardBox,
@@ -103,13 +104,19 @@ describe("pallet placard", () => {
     expect(html.match(/\(00\)104600682000000019/g)?.length).toBe(1);
   });
 
+  it("stretches the SSCC symbol to the full content width", () => {
+    const html = renderPalletPlacardHtml(fixture(), "a4");
+    expect(html).toContain('<svg preserveAspectRatio="none"');
+    expect(html).toContain(".pl-bars svg { display: block; width: 100%;");
+  });
+
   it("sizes the page per format and drops the units column on A5", () => {
     const a4 = renderPalletPlacardHtml(fixture(), "a4");
     const a5 = renderPalletPlacardHtml(fixture(), "a5");
     expect(a4).toContain("@page { size: A4;");
     expect(a5).toContain("@page { size: A5;");
-    expect(a4).toContain("<th>Единиц</th>");
-    expect(a5).not.toContain("<th>Единиц</th>");
+    expect(a4).toContain('<th class="n">Единиц</th>');
+    expect(a5).not.toContain('<th class="n">Единиц</th>');
     expect(a5).toContain("Произв.");
     expect(a4).toContain("ИНН 7701234567");
     expect(a5).not.toContain("ИНН 7701234567");
@@ -120,8 +127,16 @@ describe("pallet placard", () => {
       box(`2026-09-${String(i + 1).padStart(2, "0")}`),
     );
     const html = renderPalletPlacardHtml(fixture({ boxes }), "a5");
-    expect(html).toContain("и ещё 4 дат");
+    expect(html).toContain("и ещё 4 даты");
     expect(PLACARD_ROW_CAP.a5).toBe(6);
+  });
+
+  it("picks the correct Russian plural for «дата» by folded-date count", () => {
+    expect(datesWord(1)).toBe("дата");
+    expect(datesWord(4)).toBe("даты");
+    expect(datesWord(5)).toBe("дат");
+    expect(datesWord(11)).toBe("дат");
+    expect(datesWord(21)).toBe("дата");
   });
 
   it("watermarks a disassembled pallet and nothing else", () => {
