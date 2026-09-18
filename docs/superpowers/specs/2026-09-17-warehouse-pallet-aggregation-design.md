@@ -369,10 +369,19 @@ the right).
      (эта же ТСД)»;
   6. `palletActive` (here `palletSscc` is necessarily null, having failed
      check 3) → «Уже на открытой паллете другого устройства»;
-  7. `productId ≠ pallet.productId` → «Другой товар: {name}»;
-  8. accept: insert `pallet_memberships(pending)` with the snapshotted
+  7. product lookup by `box.productId` fails → «Товар неизвестен. Обновите
+     реестр»;
+  8. `productId ≠ pallet.productId` → «Другой товар: {name}»;
+  9. accept: insert `pallet_memberships(pending)` with the snapshotted
      `bottleCount`/`productionDate`, set `localPalletId`, short vibration,
      count advances.
+
+  Before any of the above, an unpaired device (no `deviceId`) or a storage
+  failure around the lookup itself returns `AttachResult.Unavailable` —
+  «Не удалось проверить короб — попробуйте ещё раз», not one of the named
+  diagnoses above: a thrown check is not evidence that the box is unknown or
+  that a product record is missing.
+
 - **Opening.** The first accepted scan creates the `PalletEntity` with
   `kind = warehouse`, `productId` from the box, `deviceId` from the device
   record. No serial is burned and no server row exists until then.

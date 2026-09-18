@@ -395,6 +395,7 @@ class WarehousePalletsTest {
         db.palletMembershipDao().acknowledge(mine.palletId, "t")
         assertTrue(db.palletMembershipDao().observeUnacknowledgedRejectionsForDevice(deviceId()).first().isEmpty())
     }
+
     /**
      * An unpaired device cannot answer the check at all -- there is no owner to
      * write a pallet against. «Короб неизвестен. Обновите реестр» would be a

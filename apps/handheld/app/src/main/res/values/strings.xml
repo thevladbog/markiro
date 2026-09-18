@@ -755,6 +755,7 @@
     <string name="pallets_acknowledge">Принято</string>
     <string name="pallets_rejected_pallet">Паллета …%1$s</string>
     <string name="pallets_rejected_pallet_open">Открытая паллета</string>
+    <string name="pallets_rejection_pallet_unknown">Паллета</string>
     <string name="pallets_reprint">Перепечатать этикетку</string>
     <string name="pallet_refused_no_template">Нет шаблона этикетки паллеты — задайте его в кабинете</string>
     <string name="pallet_refused_no_issuer">В организации не задан GLN — паллета не получит номер</string>

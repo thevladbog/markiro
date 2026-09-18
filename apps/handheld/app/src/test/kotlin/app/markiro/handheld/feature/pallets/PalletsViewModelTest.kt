@@ -29,6 +29,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.After
@@ -117,6 +118,7 @@ class PalletsViewModelTest {
         val closedPalletCount = MutableStateFlow(0)
         val members = MutableStateFlow<List<PalletMembershipEntity>>(emptyList())
         val rejections = MutableStateFlow<List<PalletMembershipEntity>>(emptyList())
+        var rejectionSubscriptions = 0
 
         override suspend fun canBuildPallets(operatorId: String): Boolean? = permission
 
@@ -137,7 +139,8 @@ class PalletsViewModelTest {
 
         override fun observeMembers(palletId: String): Flow<List<PalletMembershipEntity>> = members
 
-        override fun observeRejections(): Flow<List<PalletMembershipEntity>> = rejections
+        override fun observeRejections(): Flow<List<PalletMembershipEntity>> =
+            rejections.onStart { rejectionSubscriptions++ }
 
         override suspend fun capacity(pallet: PalletEntity): Int? = 12
 
@@ -364,6 +367,25 @@ class PalletsViewModelTest {
         // The count on the replacement label is the pallet's CURRENT one.
         assertEquals("134600682000000011", (step as PalletCloseStep.Printed).pallet.sscc)
         assertEquals(5, step.pallet.boxCount)
+    }
+
+    /**
+     * `refresh()` used to open a second permanent `observeRejections`
+     * collector on top of the one already running from `init`, one collector
+     * per pull-to-refresh and never closed. Only the mirror sync should
+     * repeat; the rejections subscription is set up once.
+     */
+    @Test
+    fun refreshDoesNotOpenASecondRejectionsCollector() = runTest {
+        val vm = vm()
+        advanceUntilIdle()
+        assertEquals(1, gateway.rejectionSubscriptions)
+        vm.refresh()
+        advanceUntilIdle()
+        vm.refresh()
+        advanceUntilIdle()
+        assertEquals(1, gateway.rejectionSubscriptions)
+        assertEquals(3, gateway.refreshes)
     }
 
     /** Nothing is reprinted for a pallet that was never printed. */

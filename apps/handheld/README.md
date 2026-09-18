@@ -350,7 +350,7 @@ The notice is device-wide rather than tied to the pallet currently open: a membe
 still be pending when its pallet is closed and its label printed, and that label states
 the box count, so a rejection arriving afterwards leaves the paper on the stack
 overstating it. A closed pallet's section therefore also offers «Перепечатать этикетку»,
-which records a `pallet_contents_changed` reprint exception before sending the
+which records a «Состав паллеты изменился» reprint exception before sending the
 replacement label. A new pallet can be started while a conflict is still unacknowledged;
 the line is never blocked. `pallet_closed` and `subscription_read_only` are both server
 rejection reasons surfaced this way — the first because this device's own target pallet

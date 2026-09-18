@@ -236,8 +236,14 @@ private fun RejectionsBlock(
             val closedSscc = pallet?.sscc?.takeIf { pallet.closedAt != null }
             Column(verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp1)) {
                 Text(
-                    closedSscc?.let { stringResource(R.string.pallets_rejected_pallet, it.takeLast(TAIL)) }
-                        ?: stringResource(R.string.pallets_rejected_pallet_open),
+                    when {
+                        closedSscc != null -> stringResource(R.string.pallets_rejected_pallet, closedSscc.takeLast(TAIL))
+                        // The pallet lookup itself failed (offline mirror miss,
+                        // deleted row, etc.) -- naming it "open" would claim
+                        // knowledge the section does not have.
+                        pallet == null -> stringResource(R.string.pallets_rejection_pallet_unknown)
+                        else -> stringResource(R.string.pallets_rejected_pallet_open)
+                    },
                     style = t.strong,
                     color = c.fg1,
                 )

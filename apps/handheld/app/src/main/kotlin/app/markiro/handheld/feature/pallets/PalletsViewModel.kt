@@ -423,7 +423,8 @@ class PalletsViewModel(
         if (!retrying.compareAndSet(false, true)) return
         viewModelScope.launch {
             try {
-                val count = runCatching { recovery.work { gateway.countOnPallet(palletId) } }.getOrDefault(0)
+                val count = runCatching { recovery.work { gateway.countOnPallet(palletId) } }.getOrNull()
+                    ?: return@launch
                 val closed = ClosedPalletUi(palletId, sscc, count)
                 runCatching {
                     recovery.work {
@@ -440,18 +441,6 @@ class PalletsViewModel(
     }
 
     fun refresh() {
-        // Device-wide and independent of the open pallet: a membership rejected
-        // after its pallet was closed and labelled belongs to a pallet that is
-        // no longer on this screen, and it is exactly the case where the label
-        // already in the warehouse overstates the stack.
-        viewModelScope.launch {
-            gateway.observeRejections().collectLatest { rejections ->
-                val pallets = rejections.map { it.palletId }.distinct()
-                    .mapNotNull { id -> runCatching { recovery.work { gateway.pallet(id) } }.getOrNull() }
-                    .associateBy { it.palletId }
-                _state.update { it.copy(rejections = rejections, rejectionPallets = pallets) }
-            }
-        }
         viewModelScope.launch { runCatching { gateway.refresh() } }
     }
 
