@@ -307,6 +307,10 @@ mod tests {
             assert_eq!(payload, b"challenge-data");
             Ok(self.signature.to_string())
         }
+        fn sign_detached(&self, _thumbprint: &str, payload: &[u8]) -> Result<String, SignerError> {
+            assert_eq!(payload, b"challenge-data");
+            Ok(self.signature.to_string())
+        }
     }
 
     struct FailingSigner;
@@ -315,6 +319,9 @@ mod tests {
             Ok(vec![])
         }
         fn sign_attached(&self, _t: &str, _p: &[u8]) -> Result<String, SignerError> {
+            Err(SignerError::PinRequired)
+        }
+        fn sign_detached(&self, _t: &str, _p: &[u8]) -> Result<String, SignerError> {
             Err(SignerError::PinRequired)
         }
     }
@@ -326,6 +333,9 @@ mod tests {
         }
         fn sign_attached(&self, _thumbprint: &str, payload: &[u8]) -> Result<String, SignerError> {
             Ok(format!("signed-{}", String::from_utf8_lossy(payload)))
+        }
+        fn sign_detached(&self, _t: &str, payload: &[u8]) -> Result<String, SignerError> {
+            Ok(format!("detached-{}", String::from_utf8_lossy(payload)))
         }
     }
 

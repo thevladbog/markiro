@@ -25,6 +25,10 @@ pub trait Signer: Send + Sync {
     /// Attached (enveloping) signature over `payload`, base64-encoded — the
     /// form True API's `simpleSignIn` expects for the challenge.
     fn sign_attached(&self, thumbprint: &str, payload: &[u8]) -> Result<String, SignerError>;
+
+    /// Detached (CMS without content) signature over `payload`, base64 — the
+    /// form СУЗ expects in `X-Signature`. The bytes are signed exactly as given.
+    fn sign_detached(&self, thumbprint: &str, payload: &[u8]) -> Result<String, SignerError>;
 }
 
 /// Pulls the INN out of a certificate subject.
@@ -147,5 +151,26 @@ mod tests {
     fn rejects_a_non_hex_thumbprint() {
         assert_eq!(thumbprint_bytes("ZZ120F"), None);
         assert_eq!(thumbprint_bytes("ИН1234"), None);
+    }
+
+    struct RecordingSigner(std::sync::Mutex<Vec<(bool, Vec<u8>)>>);
+    impl Signer for RecordingSigner {
+        fn list_certificates(&self) -> Result<Vec<CertificateSummary>, SignerError> { Ok(vec![]) }
+        fn sign_attached(&self, _t: &str, payload: &[u8]) -> Result<String, SignerError> {
+            self.0.lock().unwrap().push((false, payload.to_vec()));
+            Ok("attached".into())
+        }
+        fn sign_detached(&self, _t: &str, payload: &[u8]) -> Result<String, SignerError> {
+            self.0.lock().unwrap().push((true, payload.to_vec()));
+            Ok("detached".into())
+        }
+    }
+
+    #[test]
+    fn the_trait_distinguishes_detached_from_attached() {
+        let signer = RecordingSigner(std::sync::Mutex::new(vec![]));
+        assert_eq!(signer.sign_detached("AB", b"body").unwrap(), "detached");
+        assert_eq!(signer.sign_attached("AB", b"challenge").unwrap(), "attached");
+        assert_eq!(*signer.0.lock().unwrap(), vec![(true, b"body".to_vec()), (false, b"challenge".to_vec())]);
     }
 }

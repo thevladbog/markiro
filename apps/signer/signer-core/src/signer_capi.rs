@@ -91,6 +91,14 @@ impl Signer for CapiSigner {
         }
         result.map(|der| base64::engine::general_purpose::STANDARD.encode(der))
     }
+
+    fn sign_detached(&self, _thumbprint: &str, _payload: &[u8]) -> Result<String, SignerError> {
+        // Task 3 implements detached signing for CryptoAPI. For now,
+        // return an error so CI builds can verify this method exists.
+        Err(SignerError::Protocol(
+            "sign_detached is not yet implemented for CryptoAPI; see Task 3".into(),
+        ))
+    }
 }
 
 fn open_my_store() -> Result<HCERTSTORE, SignerError> {

@@ -52,6 +52,14 @@ impl Signer for CadesSigner {
         let signed_data = create_object("CAdESCOM.CadesSignedData")?;
         sign_via_cadescom(&store, &signer, &signed_data, thumbprint, payload)
     }
+
+    fn sign_detached(&self, _thumbprint: &str, _payload: &[u8]) -> Result<String, SignerError> {
+        // Task 3 implements detached signing for CAdESCOM. For now,
+        // return an error so CI builds can verify this method exists.
+        Err(SignerError::Protocol(
+            "sign_detached is not yet implemented for CAdESCOM; see Task 3".into(),
+        ))
+    }
 }
 
 fn create_object(prog_id: &str) -> Result<IDispatch, SignerError> {
