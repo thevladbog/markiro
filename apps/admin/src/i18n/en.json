@@ -2787,6 +2787,8 @@
       "palletCard": {
         "noSscc": "No SSCC",
         "printAction": "Print",
+        "disassembleAction": "Take apart",
+        "disassembleError": "Could not create the disaggregation document",
         "status": {
           "open": "Open",
           "closed": "Closed",

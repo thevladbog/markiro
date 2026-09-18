@@ -12,13 +12,17 @@
  */
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useParams } from "react-router";
+import { Link, useNavigate, useParams } from "react-router";
 
-import { formatSsccHri } from "@markiro/domain";
+import { CABINET_CAPABILITY, formatSsccHri } from "@markiro/domain";
 import { Alert, Badge, Button, Card, PageHeader, Spinner, StatusChip, Table } from "@markiro/ui";
 import type { StatusChipStatus, TableColumn } from "@markiro/ui";
 
+import { useCan } from "../../access/context.js";
+import { ApiRequestError } from "../../api/client.js";
 import { formatCreatedAt, formatDate } from "../../lib/datetime.js";
+import { toast } from "../../lib/toast.js";
+import { useCreateDocument } from "../disaggregation/api.js";
 import { PalletExportsSection } from "./PalletExportsSection.js";
 import {
   usePalletCard,
@@ -57,6 +61,9 @@ function DetailField({ label, value }: { label: string; value: ReactNode }) {
 export function PalletCardPage() {
   const { t, i18n } = useTranslation();
   const { palletId } = useParams();
+  const navigate = useNavigate();
+  const canWrite = useCan(CABINET_CAPABILITY.OPERATIONS_WRITE);
+  const createDocument = useCreateDocument();
 
   const { data: pallet, isPending, isError } = usePalletCard(palletId);
 
@@ -77,6 +84,29 @@ export function PalletCardPage() {
   }
 
   const title = pallet.sscc ? formatSsccHri(pallet.sscc) : t("pages.codeSearch.palletCard.noSscc");
+
+  // Taking a pallet apart in the cabinet IS a disaggregation document (spec
+  // §4): the card only opens a fresh draft with this pallet's SSCC already in
+  // the paste box. Only a closed, labelled pallet can be taken apart, and only
+  // by someone allowed to write operations.
+  const canDisassemble = canWrite && pallet.status === "closed" && pallet.sscc !== null;
+
+  const startDisassembly = () => {
+    if (!pallet.sscc) return;
+    const sscc = pallet.sscc;
+    createDocument.mutate(undefined, {
+      onSuccess: (doc) => {
+        void navigate(`/disaggregation/${doc.id}?${new URLSearchParams({ sscc }).toString()}`);
+      },
+      onError: (error) =>
+        toast(
+          "error",
+          error instanceof ApiRequestError
+            ? error.message
+            : t("pages.codeSearch.palletCard.disassembleError"),
+        ),
+    });
+  };
 
   const boxColumns: TableColumn<PalletCardBoxDto>[] = [
     {
@@ -180,6 +210,16 @@ export function PalletCardPage() {
         title={title}
         actions={
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {canDisassemble ? (
+              <Button
+                type="button"
+                variant="secondary"
+                loading={createDocument.isPending}
+                onClick={startDisassembly}
+              >
+                {t("pages.codeSearch.palletCard.disassembleAction")}
+              </Button>
+            ) : null}
             <Button
               type="button"
               variant="secondary"

@@ -2787,6 +2787,8 @@
       "palletCard": {
         "noSscc": "Без SSCC",
         "printAction": "Распечатать",
+        "disassembleAction": "Расформировать",
+        "disassembleError": "Не удалось создать документ разагрегации",
         "status": {
           "open": "Открыта",
           "closed": "Закрыта",

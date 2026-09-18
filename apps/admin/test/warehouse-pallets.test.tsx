@@ -365,3 +365,41 @@ describe("pallet exports section", () => {
     expect(section.queryByRole("button", { name: "Сформировать отчёт" })).toBeNull();
   });
 });
+
+describe("pallet disassembly from the card", () => {
+  it("creates a draft document and opens it prefilled with the pallet SSCC", async () => {
+    const { fetchMock, user } = renderCard(WAREHOUSE_CARD, READ_WRITE, (url, init) => {
+      if (url === "/api/disaggregation" && init?.method === "POST") {
+        return { id: "doc-9", docNo: "DA-9", status: "draft", lines: [] };
+      }
+      if (url === "/api/pallet-exports/formats") return [];
+      if (url === "/api/pallets/pal-w1/exports") return [];
+      return { items: [] };
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Расформировать" }));
+
+    expect((await screen.findByTestId("location")).textContent).toBe(
+      "/disaggregation/doc-9?sscc=00104600682000000019",
+    );
+    expect(
+      fetchMock.mock.calls.some(
+        (call) => String(call[0]) === "/api/disaggregation" && call[1]?.method === "POST",
+      ),
+    ).toBe(true);
+  });
+
+  it("hides the action from read-only users and for a pallet already taken apart", async () => {
+    renderCard(WAREHOUSE_CARD, READ_ONLY);
+    expect(await screen.findByRole("heading", { name: "(00)104600682000000019" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Расформировать" })).toBeNull();
+    cleanup();
+
+    renderCard(
+      { ...WAREHOUSE_CARD, status: "disassembled", disassembledAt: "2026-09-18T08:00:00.000Z" },
+      READ_WRITE,
+    );
+    expect(await screen.findByRole("heading", { name: "(00)104600682000000019" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Расформировать" })).toBeNull();
+  });
+});

@@ -866,12 +866,14 @@ function renderCodeSearchCards(entry: string, body: (url: string) => unknown) {
   );
   return render(
     <QueryClientProvider client={newQueryClient()}>
-      <MemoryRouter initialEntries={[entry]}>
-        <Routes>
-          <Route path="/codes/box/:boxId" element={<BoxCardPage />} />
-          <Route path="/codes/pallet/:palletId" element={<PalletCardPage />} />
-        </Routes>
-      </MemoryRouter>
+      <AccessProvider value={ACCESS}>
+        <MemoryRouter initialEntries={[entry]}>
+          <Routes>
+            <Route path="/codes/box/:boxId" element={<BoxCardPage />} />
+            <Route path="/codes/pallet/:palletId" element={<PalletCardPage />} />
+          </Routes>
+        </MemoryRouter>
+      </AccessProvider>
     </QueryClientProvider>,
   );
 }
@@ -953,11 +955,13 @@ describe("pallet card", () => {
     );
     render(
       <QueryClientProvider client={newQueryClient()}>
-        <MemoryRouter initialEntries={["/codes/pallet/pal-1"]}>
-          <Routes>
-            <Route path="/codes/pallet/:palletId" element={<PalletCardPage />} />
-          </Routes>
-        </MemoryRouter>
+        <AccessProvider value={ACCESS}>
+          <MemoryRouter initialEntries={["/codes/pallet/pal-1"]}>
+            <Routes>
+              <Route path="/codes/pallet/:palletId" element={<PalletCardPage />} />
+            </Routes>
+          </MemoryRouter>
+        </AccessProvider>
       </QueryClientProvider>,
     );
 
