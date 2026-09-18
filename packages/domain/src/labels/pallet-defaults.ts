@@ -1,5 +1,5 @@
 import type { DefaultLabelTemplate } from "./defaults.js";
-import { SSCC_BARCODE_MODULES, ssccModuleWidthMm } from "./defaults.js";
+import { buildPallet58x40LabelSpec, SSCC_BARCODE_MODULES, ssccModuleWidthMm } from "./defaults.js";
 import type { LabelTemplateSpec } from "./model.js";
 
 /**
@@ -19,6 +19,9 @@ import type { LabelTemplateSpec } from "./model.js";
 
 /** Seed identity. Renaming this re-seeds a second row rather than updating. */
 export const PALLET_LABEL_TEMPLATE_NAME = "Паллета 100×150";
+
+/** Seed identity of the small stock pallet label (spec 2026-09-18 §8). Renaming re-seeds. */
+export const PALLET_LABEL_58X40_TEMPLATE_NAME = "Паллета 58×40";
 
 const WIDTH_MM = 100;
 const HEIGHT_MM = 150;
@@ -240,10 +243,14 @@ function buildPalletLabelSpec(): LabelTemplateSpec {
 }
 
 /**
- * The stock pallet label a tenant is seeded with. One size for now: unlike
- * box labels, which have to fit whatever carton a line runs, a pallet label
- * goes on a pallet.
+ * The stock pallet labels a tenant is seeded with, in seed order: the large
+ * 100×150 FIRST (provisioning makes [0] the organisation default and the
+ * editor starts a new pallet template from it), then the 58×40 twin of the
+ * box label for plants whose pallet printer is loaded with box stock.
  */
 export function buildPalletLabelTemplates(): DefaultLabelTemplate[] {
-  return [{ name: PALLET_LABEL_TEMPLATE_NAME, spec: buildPalletLabelSpec() }];
+  return [
+    { name: PALLET_LABEL_TEMPLATE_NAME, spec: buildPalletLabelSpec() },
+    { name: PALLET_LABEL_58X40_TEMPLATE_NAME, spec: buildPallet58x40LabelSpec() },
+  ];
 }

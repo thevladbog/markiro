@@ -1,4 +1,4 @@
-import { Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { and, desc, eq, gte, inArray, isNotNull, isNull, like, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { schema, type Db } from "@markiro/db";
@@ -8,6 +8,7 @@ import { upperBoundCondition } from "../../lib/date-range";
 import { classifySearchInput } from "./input-classifier";
 import type { BoxReportData } from "./box-report";
 import type { PalletReportData } from "./pallet-report";
+import type { PalletPlacardData } from "./pallet-placard";
 import type {
   BoxCardDto,
   ClassifySearchResponseDto,
@@ -1267,11 +1268,13 @@ export class CodeSearchService {
           eq(schema.shifts.id, schema.pallets.shiftId),
         ),
       )
+      // A warehouse pallet carries its own `product_id`, a production one the
+      // shift's -- the same coalesce `getPalletCard` and `PalletsService` use.
       .leftJoin(
         schema.products,
         and(
-          eq(schema.products.tenantId, schema.shifts.tenantId),
-          eq(schema.products.id, schema.shifts.productId),
+          eq(schema.products.tenantId, schema.pallets.tenantId),
+          sql`${schema.products.id} = coalesce(${schema.pallets.productId}, ${schema.shifts.productId})`,
         ),
       )
       .where(and(eq(schema.pallets.tenantId, tenantId), eq(schema.pallets.id, palletId)));
@@ -1338,6 +1341,105 @@ export class CodeSearchService {
       disassembledAt: pallet.disassembledAt,
       boxes: boxRows.map((row) => ({
         sscc: row.sscc === null ? null : formatSsccWithAi(row.sscc),
+        codeCount: row.codeCount,
+        disassembledAt: row.disassembledAt,
+      })),
+    };
+  }
+
+  /**
+   * The printed placard's data (spec 2026-09-18): identity plus each member
+   * box's production day and live unit count. Refuses a pallet that is open
+   * or has no SSCC -- a placard without a scannable symbol is not a placard,
+   * and the card never offers one for such a pallet.
+   */
+  async palletPlacardData(tenantId: string, palletId: string): Promise<PalletPlacardData> {
+    const [pallet] = await this.db
+      .select({
+        sscc: schema.pallets.sscc,
+        closedAt: schema.pallets.closedAt,
+        disassembledAt: schema.pallets.disassembledAt,
+        productName: schema.products.name,
+        gtin14: schema.products.gtin14,
+        shelfLifeDays: schema.products.shelfLifeDays,
+      })
+      .from(schema.pallets)
+      .leftJoin(
+        schema.shifts,
+        and(
+          eq(schema.shifts.tenantId, schema.pallets.tenantId),
+          eq(schema.shifts.id, schema.pallets.shiftId),
+        ),
+      )
+      .leftJoin(
+        schema.products,
+        and(
+          eq(schema.products.tenantId, schema.pallets.tenantId),
+          sql`${schema.products.id} = coalesce(${schema.pallets.productId}, ${schema.shifts.productId})`,
+        ),
+      )
+      .where(and(eq(schema.pallets.tenantId, tenantId), eq(schema.pallets.id, palletId)));
+
+    if (!pallet) throw new NotFoundException();
+    if (pallet.closedAt === null || pallet.sscc === null) {
+      throw new ConflictException({ code: "PALLET_NOT_CLOSED", message: "Pallet must be closed" });
+    }
+
+    const [org] = await this.db
+      .select({
+        name: schema.organization.name,
+        inn: schema.orgProfiles.inn,
+        logo: schema.organization.logo,
+      })
+      .from(schema.organization)
+      .leftJoin(schema.orgProfiles, eq(schema.orgProfiles.tenantId, schema.organization.id))
+      .where(eq(schema.organization.id, tenantId));
+
+    // Each box's OWN production day (its shift's) -- the DECLARED one only.
+    // Unlike the card, the placard never substitutes the planned date: a
+    // placard is glued next to the boxes' own labels, and a guessed date that
+    // disagrees with them is worse than «См. на продукции» (owner decision
+    // 2026-09-18). The live count is the report's predicate, so the two forms
+    // never disagree about what stands on the stack.
+    const boxRows = await this.db
+      .select({
+        productionDate: sql<string | null>`${schema.shifts.productionDate}::text`,
+        disassembledAt: schema.boxes.disassembledAt,
+        codeCount: sql<number>`count(${schema.boxItems.codeHash})::int`,
+      })
+      .from(schema.boxes)
+      .innerJoin(
+        schema.shifts,
+        and(
+          eq(schema.shifts.tenantId, schema.boxes.tenantId),
+          eq(schema.shifts.id, schema.boxes.shiftId),
+        ),
+      )
+      .leftJoin(
+        schema.boxItems,
+        and(
+          eq(schema.boxItems.tenantId, schema.boxes.tenantId),
+          eq(schema.boxItems.boxId, schema.boxes.id),
+          isNull(schema.boxItems.displacedAt),
+          or(
+            isNull(schema.boxItems.removedAt),
+            eq(schema.boxItems.removedAt, schema.boxes.disassemblyReceivedAt),
+          ),
+        ),
+      )
+      .where(and(eq(schema.boxes.tenantId, tenantId), eq(schema.boxes.palletId, palletId)))
+      .groupBy(schema.boxes.id, schema.shifts.id)
+      .orderBy(schema.boxes.closedAt, schema.boxes.id);
+
+    return {
+      sscc: formatSsccWithAi(pallet.sscc),
+      status: pallet.disassembledAt ? "disassembled" : "closed",
+      productName: pallet.productName,
+      gtin14: pallet.gtin14,
+      shelfLifeDays: pallet.shelfLifeDays,
+      org: org ? { name: org.name, inn: org.inn, logo: org.logo } : null,
+      boxes: boxRows.map((row) => ({
+        productionDate: row.productionDate,
         codeCount: row.codeCount,
         disassembledAt: row.disassembledAt,
       })),

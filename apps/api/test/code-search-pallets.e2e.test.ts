@@ -2,9 +2,11 @@ import { randomUUID } from "node:crypto";
 import express from "express";
 import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
+import { and, eq } from "drizzle-orm";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildSscc, canonicalizeKm, kmHash } from "@markiro/domain";
+import { schema, type Db } from "@markiro/db";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
@@ -33,13 +35,16 @@ const ready = Boolean(
 describe.skipIf(!ready)("code search pallet card e2e", () => {
   let app: INestApplication | undefined;
   let setup: AuthSetup;
+  let db: Db;
 
   let agent: ReturnType<typeof request.agent>;
+  let tenantId: string;
   let stationKey: string;
   let stationDeviceId: string;
   let shiftId: string;
   let shiftNumber: string;
   let operatorId: string;
+  let productId: string;
   let palletSscc: string;
   /** Server ids, resolved from the box list once the fixture is built. */
   let palletId: string;
@@ -86,6 +91,7 @@ describe.skipIf(!ready)("code search pallet card e2e", () => {
   beforeAll(async () => {
     const env = loadEnv();
     setup = setupAuth(env);
+    db = setup.db;
 
     const ref = await Test.createTestingModule({
       imports: [AppModule.forRoot({ ...setup, databaseUrl: env.DATABASE_URL })],
@@ -99,7 +105,7 @@ describe.skipIf(!ready)("code search pallet card e2e", () => {
     await listenOnLoopback(app);
 
     agent = request.agent(app!.getHttpServer());
-    const tenantId = await signUpAndActivate(agent);
+    tenantId = await signUpAndActivate(agent);
     const station = await createTestStationDevice(app!, agent, "Pallet card line");
     stationKey = station.apiKey;
     stationDeviceId = station.deviceId;
@@ -122,7 +128,7 @@ describe.skipIf(!ready)("code search pallet card e2e", () => {
         palletBoxCapacity: 5,
       })
       .expect(201);
-    const productId = (product.body as { id: string }).id;
+    productId = (product.body as { id: string }).id;
 
     const shift = await agent.post("/shifts").send({ productId, mode: "validation" }).expect(201);
     shiftId = (shift.body as { id: string; number: string }).id;
@@ -311,6 +317,132 @@ describe.skipIf(!ready)("code search pallet card e2e", () => {
     it("404s for an unknown pallet and 400s for a malformed id", async () => {
       await agent.get(`/code-search/pallets/${randomUUID()}/report`).expect(404);
       await agent.get("/code-search/pallets/not-a-uuid/report").expect(400);
+    });
+  });
+
+  describe("printed placard", () => {
+    it("renders the A4 placard by default and the A5 one on request", async () => {
+      const a4 = await agent
+        .get(`/code-search/pallets/${palletId}/placard`)
+        .expect(200)
+        .expect("Content-Type", /text\/html/);
+      expect(a4.text).toContain("@page { size: A4;");
+      expect(a4.text).toContain("ПАЛЛЕТА");
+      expect(a4.text).toContain(`(00)${palletSscc}`);
+      expect(a4.text).toContain("Cola");
+      expect(a4.text).toContain(VALID_GTIN14);
+      // Two live boxes, seven units, one production date.
+      expect(a4.text).toMatch(/pl-figure-value">2</);
+      expect(a4.text).toMatch(/pl-figure-value">7</);
+      const a5 = await agent
+        .get(`/code-search/pallets/${palletId}/placard`)
+        .query({ format: "a5" })
+        .expect(200);
+      expect(a5.text).toContain("@page { size: A5;");
+    });
+
+    it("refuses an open pallet with PALLET_NOT_CLOSED", async () => {
+      // A box that names a pallet the device never closed leaves an OPEN
+      // pallet row behind -- the ingest creates it on first mention.
+      await postBatch({
+        items: [item("c4-0", "b4", new Date(ITEM_BASE + 300_000).toISOString())],
+      });
+      await postBatch({
+        boxes: [
+          {
+            boxId: "b4",
+            shiftId,
+            terminalId: "t1",
+            sscc: "123460682000000204",
+            closedAt: BOX_CLOSED_AT,
+            operatorId,
+            devicePalletId: "p-open",
+          },
+        ],
+      });
+      const pallets = await agent.get(`/pallets?shiftId=${shiftId}`).expect(200);
+      const open = (pallets.body.items as { id: string; closedAt: string | null }[]).find(
+        (p) => p.closedAt === null,
+      );
+      expect(open).toBeDefined();
+      const res = await agent.get(`/code-search/pallets/${open!.id}/placard`).expect(409);
+      expect(res.body).toMatchObject({ code: "PALLET_NOT_CLOSED" });
+    });
+
+    it("validates the format, is denied to a station key and across tenants", async () => {
+      await agent
+        .get(`/code-search/pallets/${palletId}/placard`)
+        .query({ format: "a3" })
+        .expect(400);
+      await request(app!.getHttpServer())
+        .get(`/code-search/pallets/${palletId}/placard`)
+        .set("x-api-key", stationKey)
+        .expect(403);
+      const other = request.agent(app!.getHttpServer());
+      await signUpAndActivate(other);
+      await other.get(`/code-search/pallets/${palletId}/placard`).expect(404);
+      await agent.get(`/code-search/pallets/${randomUUID()}/placard`).expect(404);
+    });
+  });
+
+  /**
+   * A WAREHOUSE pallet has `shift_id IS NULL` and its own `product_id`, so the
+   * report/placard product join must resolve it through
+   * `coalesce(pallets.product_id, shifts.product_id)` rather than only a
+   * shift join. Built independently of the shared fixture above (its own
+   * pallet, no member boxes needed) so it does not disturb the ordered
+   * mutation tests that follow.
+   */
+  describe("a warehouse pallet's product resolution", () => {
+    let warehousePalletId: string;
+
+    beforeAll(async () => {
+      const block = await app!
+        .get(SsccService)
+        .allocate(tenantId, ISSUER_PREFIX, PALLET_EXTENSION_DIGIT, stationDeviceId, 1);
+      const warehouseSscc = buildSscc(PALLET_EXTENSION_DIGIT, ISSUER_PREFIX, block.fromSerial);
+
+      await postBatch({
+        pallets: [
+          {
+            palletId: "wp1",
+            kind: "warehouse",
+            shiftId: null,
+            productId,
+            terminalId: null,
+            sscc: warehouseSscc,
+            closedAt: "2026-09-11T09:00:00.000Z",
+            operatorId,
+            printVerifiedAt: null,
+            printSkippedAt: null,
+          },
+        ],
+      });
+
+      const [pallet] = await db
+        .select({ id: schema.pallets.id })
+        .from(schema.pallets)
+        .where(and(eq(schema.pallets.tenantId, tenantId), eq(schema.pallets.sscc, warehouseSscc)));
+      if (!pallet) throw new Error("The warehouse pallet fixture was not persisted");
+      warehousePalletId = pallet.id;
+    });
+
+    it("names the product on the contents report", async () => {
+      const res = await agent
+        .get(`/code-search/pallets/${warehousePalletId}/report`)
+        .query({ timeZone: "Europe/Moscow" })
+        .expect(200)
+        .expect("Content-Type", /text\/html/);
+      expect(res.text).toContain("Cola");
+    });
+
+    it("names the product and its GTIN on the placard", async () => {
+      const res = await agent
+        .get(`/code-search/pallets/${warehousePalletId}/placard`)
+        .expect(200)
+        .expect("Content-Type", /text\/html/);
+      expect(res.text).toContain("Cola");
+      expect(res.text).toContain(VALID_GTIN14);
     });
   });
 

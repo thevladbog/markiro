@@ -308,12 +308,27 @@ type DateFields = "with-dates" | "without-dates";
  * prints them identically in both languages, in a position this layout has
  * actually reserved space for.
  */
+/**
+ * What the quantity row counts. The box families count units in the box
+ * (`qty`, «Кол-во в упаковке:»); the stock «Паллета 58×40» reuses this exact
+ * layout counting boxes on the pallet (`qty.boxes`, «Коробов:»). A parameter
+ * rather than a second builder so the pallet label cannot drift from the box
+ * one: same budget arithmetic, one substitution.
+ */
+export interface BoxLabelQuantity {
+  field: "qty" | "qty.boxes";
+  caption: string;
+}
+
+const UNIT_QUANTITY: BoxLabelQuantity = { field: "qty", caption: CAPTION_QTY };
+
 function buildBoxLabelSpec(
   widthMm: number,
   heightMm: number,
   dpi: 203 | 300,
   dates: DateFields,
   nameField: "product.name" | "product.printName" = "product.name",
+  quantity: BoxLabelQuantity = UNIT_QUANTITY,
 ): LabelTemplateSpec {
   const withDates = dates === "with-dates";
   const s = Math.min(widthMm / BASE_WIDTH_MM, heightMm / BASE_HEIGHT_MM);
@@ -352,7 +367,7 @@ function buildBoxLabelSpec(
           { text: CAPTION_EXPIRY, boxMm: colW },
         ]
       : []),
-    { text: CAPTION_QTY, boxMm: colW },
+    { text: quantity.caption, boxMm: colW },
     { text: CAPTION_EGAIS, boxMm: colW },
     // The SSCC digit line rides on the caption size (it did before this
     // change too) and its box is the full content width, so it never binds.
@@ -463,7 +478,7 @@ function buildBoxLabelSpec(
       id: "cap-qty",
       xMm: qtyCaptionX,
       yMm: capRowY,
-      text: CAPTION_QTY,
+      text: quantity.caption,
       fontSizePt: captionPt,
       maxWidthMm: colW,
     },
@@ -496,7 +511,7 @@ function buildBoxLabelSpec(
       id: "val-qty",
       xMm: qtyValueX,
       yMm: qtyValueY,
-      field: "qty",
+      field: quantity.field,
       fontSizePt: valuePt,
       bold: true,
       maxWidthMm: qtyValueW,
@@ -669,6 +684,18 @@ export function buildDefaultLabelTemplates(): DefaultLabelTemplate[] {
     ...buildDateFreeBoxLabelTemplates(),
     ...buildPrintNameBoxLabelTemplates(),
   ];
+}
+
+/**
+ * The stock «Паллета 58×40»: the print-name box 58×40 layout, quantity row
+ * counting BOXES. Lives here, not in `pallet-defaults.ts`, because it is
+ * built by the box budget above; `pallet-defaults.ts` only names it.
+ */
+export function buildPallet58x40LabelSpec(): LabelTemplateSpec {
+  return buildBoxLabelSpec(58, 40, STOCK_AUTHORING_DPI, "with-dates", "product.printName", {
+    field: "qty.boxes",
+    caption: "Коробов:",
+  });
 }
 
 /**
