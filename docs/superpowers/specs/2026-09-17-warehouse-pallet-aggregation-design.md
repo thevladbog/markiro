@@ -340,12 +340,15 @@ Hub tile «Паллеты» beside «Списание»; route `Routes.PALLETS` 
   `Sscc.parse` is not used here.
 - **Checks**, in order, against `box_registry`:
   1. no row → «Короб неизвестен. Обновите реестр» (with a refresh action);
-  2. `localPalletId` set to another open local pallet → «Уже на паллете
+  2. already in the current pallet → «Уже на этой паллете» — soft, no error
+     state, idempotent. Runs before checks 3-4: once this device's own
+     membership is accepted and the registry refreshes, the box's row already
+     reads `localPalletId`/`palletActive` as if it conflicted with itself, so
+     the idempotent check must win over the hard refusals below;
+  3. `localPalletId` set to another open local pallet → «Уже на паллете
      (эта же ТСД)»;
-  3. `palletActive` → «Уже на паллете …{last 6 of palletSscc}» (or «на
+  4. `palletActive` → «Уже на паллете …{last 6 of palletSscc}» (or «на
      открытой паллете другого устройства» when `palletSscc` is null);
-  4. already in the current pallet → «Уже на этой паллете» — soft, no error
-     state, idempotent;
   5. `productId ≠ pallet.productId` → «Другой товар: {name}»;
   6. accept: insert `pallet_memberships(pending)`, set `localPalletId`,
      short vibration, count advances.

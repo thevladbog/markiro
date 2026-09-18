@@ -77,7 +77,15 @@ class WarehousePallets(
     suspend fun capacity(pallet: PalletEntity): Int? =
         pallet.productId?.let { db.palletProductDao().byId(it)?.palletBoxCapacity }
 
-    /** The six checks of spec §3.2, in order; lease → lock → transaction, as `CloseBox` does. */
+    /**
+     * The six checks of spec §3.2, in order; lease → lock → transaction, as
+     * `CloseBox` does. "Already on this pallet" runs second, right after
+     * `UnknownBox`: once a membership is accepted and the registry refreshes,
+     * the box's own row reads `palletActive = true`, so checking that BEFORE
+     * "already on this pallet" would turn every duplicate re-scan of an
+     * accepted box into the hard `OnAnotherPallet` refusal instead of the
+     * soft, idempotent one this same pallet already holds it under.
+     */
     suspend fun attach(sscc: String, operatorId: String?): AttachResult = db.recovery.exclusive {
         lock.withLock { attachOwned(sscc, operatorId) }
     }
@@ -91,13 +99,18 @@ class WarehousePallets(
         if (sscc.firstOrNull() == '1' || db.palletDao().bySscc(sscc) != null) return AttachResult.ThatIsAPallet
         val box = db.boxRegistryDao().bySscc(sscc) ?: return AttachResult.UnknownBox
         val open = db.palletDao().openWarehouse(deviceId)
-        if (box.localPalletId != null && box.localPalletId != open?.palletId) return AttachResult.OnAnotherLocalPallet
-        if (box.palletActive) return AttachResult.OnAnotherPallet(box.palletSscc)
         // A REJECTED row is not membership: the server refused it, so the
         // operator must be able to resolve the conflict and re-scan the same
-        // box onto the same pallet. The stale row is cleared below.
+        // box onto the same pallet. The stale row is cleared below. This must
+        // run before `OnAnotherLocalPallet`/`OnAnotherPallet`: after the server
+        // accepts this box's membership and the registry refreshes, the box's
+        // own row already reads `palletActive = true` (or `localPalletId` set
+        // to this same open pallet), and a duplicate scan must stay the soft
+        // `AlreadyOnThisPallet` rather than read as a conflict with itself.
         val existing = open?.let { pallet -> db.palletMembershipDao().byPallet(pallet.palletId).firstOrNull { it.sscc == sscc } }
         if (existing != null && existing.status != MembershipStatus.REJECTED) return AttachResult.AlreadyOnThisPallet
+        if (box.localPalletId != null && box.localPalletId != open?.palletId) return AttachResult.OnAnotherLocalPallet
+        if (box.palletActive) return AttachResult.OnAnotherPallet(box.palletSscc)
         val product = db.palletProductDao().byId(box.productId) ?: return AttachResult.UnknownProduct
         if (open != null && open.productId != box.productId) return AttachResult.OtherProduct(product.name)
 
@@ -150,11 +163,19 @@ class WarehousePallets(
      * Takes a box back off the pallet. False when the row is no longer pending:
      * a `sent` row may already be on the server, and only the server can take
      * that one back.
+     *
+     * Takes [PalletLock] like [attach] and [close]: without it, a `remove`
+     * could interleave with a `close` that read `countOnPallet` for the same
+     * pallet, closing with a stale count or racing the membership delete.
      */
-    suspend fun remove(palletId: String, sscc: String): Boolean = db.recovery.commit {
-        val removed = db.palletMembershipDao().deletePending(palletId, sscc) > 0
-        if (removed) db.boxRegistryDao().release(sscc)
-        removed
+    suspend fun remove(palletId: String, sscc: String): Boolean = db.recovery.exclusive {
+        lock.withLock {
+            db.recovery.commit {
+                val removed = db.palletMembershipDao().deletePending(palletId, sscc) > 0
+                if (removed) db.boxRegistryDao().release(sscc)
+                removed
+            }
+        }
     }
 
     /** Early or at capacity; both are the same closure, and both leave the pallet open on refusal. */

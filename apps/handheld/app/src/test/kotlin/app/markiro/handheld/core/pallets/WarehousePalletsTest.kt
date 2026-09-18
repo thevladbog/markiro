@@ -67,11 +67,13 @@ class WarehousePalletsTest {
         palletActive: Boolean = false,
         palletSscc: String? = null,
         localPalletId: String? = null,
+        productionDate: String = "2026-09-10",
+        bottleCount: Int = 6,
     ) = db.boxRegistryDao().upsert(
         BoxRegistryEntity(
-            sscc = sscc, boxId = "b-$sscc", productId = productId, bottleCount = 6, contentKeysJson = "[]",
+            sscc = sscc, boxId = "b-$sscc", productId = productId, bottleCount = bottleCount, contentKeysJson = "[]",
             updatedAt = "t", palletId = if (palletActive) "srv" else null, palletSscc = palletSscc,
-            palletActive = palletActive, closedAt = "c", productionDate = "2026-09-10", localPalletId = localPalletId,
+            palletActive = palletActive, closedAt = "c", productionDate = productionDate, localPalletId = localPalletId,
         ),
     )
 
@@ -129,6 +131,40 @@ class WarehousePalletsTest {
     }
 
     @Test
+    fun onAnotherLocalPalletWinsWhenPalletActiveIsAlsoSet() = runTest {
+        // A registry row can carry BOTH a stale `localPalletId` (this device's
+        // own earlier claim, on a pallet that is not the currently open one)
+        // AND `palletActive = true` (the server already accepted it somewhere
+        // else). `OnAnotherLocalPallet` must win: it is this device's own
+        // conflict to resolve, not a report about a foreign pallet.
+        product()
+        registry("034600682000000018")
+        pallets.attach("034600682000000018", null)
+        registry(
+            "034600682000000025", localPalletId = "other-local",
+            palletActive = true, palletSscc = "134600682000000017",
+        )
+        assertEquals(AttachResult.OnAnotherLocalPallet, pallets.attach("034600682000000025", null))
+    }
+
+    @Test
+    fun alreadyOnThisPalletWinsOverOtherProduct() = runTest {
+        // An accepted membership on the open pallet whose registry product no
+        // longer matches the pallet's product (a bootstrap/product edit after
+        // the scan, say) must still read as the soft duplicate, not as a
+        // product conflict with itself.
+        product()
+        product("p-2", 5)
+        registry("034600682000000018")
+        val opened = pallets.attach("034600682000000018", "op-1") as AttachResult.Attached
+        db.palletMembershipDao().markAccepted(opened.pallet.palletId, "034600682000000018", "t")
+        db.boxRegistryDao().upsert(
+            db.boxRegistryDao().bySscc("034600682000000018")!!.copy(productId = "p-2"),
+        )
+        assertEquals(AttachResult.AlreadyOnThisPallet, pallets.attach("034600682000000018", "op-1"))
+    }
+
+    @Test
     fun aBoxWhoseProductIsNotMirroredYetIsRefusedByName() = runTest {
         registry("034600682000000018")
         assertEquals(AttachResult.UnknownProduct, pallets.attach("034600682000000018", null))
@@ -164,7 +200,7 @@ class WarehousePalletsTest {
     }
 
     @Test
-    fun capacityClosesThePalletAndBurnsAnExtensionOneSerial() = runTest {
+    fun atCapacityIsReportedAndAnExplicitCloseBurnsAnExtensionOneSerial() = runTest {
         product()
         pool.addRange(ServerRange(PREFIX, SsccPool.PALLET_EXTENSION_DIGIT, 0, 199, null))
         meta.put(MetaStore.PALLET_BOOTSTRAP_ISSUER_PREFIX, PREFIX)
@@ -231,5 +267,42 @@ class WarehousePalletsTest {
         registry("034600682000000018")
         val r = pallets.attach("034600682000000018", null) as AttachResult.Attached
         assertEquals(24, pallets.capacity(r.pallet))
+    }
+
+    @Test
+    fun productionDatesReflectsEveryDistinctMemberDate() = runTest {
+        product(capacity = 10)
+        registry("034600682000000018", productionDate = "2026-09-10")
+        registry("034600682000000025", productionDate = "2026-09-11")
+        val opened = pallets.attach("034600682000000018", null) as AttachResult.Attached
+        pallets.attach("034600682000000025", null)
+        assertEquals(
+            setOf("2026-09-10", "2026-09-11"),
+            db.palletMembershipDao().productionDates(opened.pallet.palletId).toSet(),
+        )
+    }
+
+    @Test
+    fun productionDatesIsOneValueWhenEveryMemberSharesIt() = runTest {
+        product(capacity = 10)
+        registry("034600682000000018", productionDate = "2026-09-10")
+        registry("034600682000000025", productionDate = "2026-09-10")
+        val opened = pallets.attach("034600682000000018", null) as AttachResult.Attached
+        pallets.attach("034600682000000025", null)
+        assertEquals(listOf("2026-09-10"), db.palletMembershipDao().productionDates(opened.pallet.palletId))
+    }
+
+    @Test
+    fun bottleSumAndCountOnPalletExcludeARejectedRow() = runTest {
+        product(capacity = 10)
+        registry("034600682000000018", bottleCount = 6)
+        registry("034600682000000025", bottleCount = 4)
+        val opened = pallets.attach("034600682000000018", null) as AttachResult.Attached
+        pallets.attach("034600682000000025", null)
+        db.palletMembershipDao().markRejected(
+            opened.pallet.palletId, "034600682000000025", "box_on_another_pallet", null, "t",
+        )
+        assertEquals(6, db.palletMembershipDao().bottleSum(opened.pallet.palletId))
+        assertEquals(1, db.palletMembershipDao().countOnPallet(opened.pallet.palletId))
     }
 }
