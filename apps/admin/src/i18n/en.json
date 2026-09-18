@@ -2159,7 +2159,7 @@
           "acknowledge": "Remove unsupported lines ({{count}})",
           "adjusted": "Fitted to label bounds: {{count}}",
           "elementTooLarge": "An element is larger than the label. Fix the code or label size.",
-          "issuesTitle": "JSON errors: {{count}}",
+          "issuesTitle": "Errors: {{count}}",
           "warningsTitle": "Warnings: {{count}}",
           "acknowledgeWarnings": "Continue despite these warnings ({{count}})",
           "warningUnknownProperty": "is not part of the label model and will be dropped",

@@ -13,8 +13,9 @@
  * (`apps/station/src/lib/print-label.ts` reads the station's
  * `hardware-config` printer language and deliberately ignores
  * `spec.language`). One template serves Zebra and TSC alike, so the settings
- * panel must not claim otherwise: both downloads are always offered, and
- * `spec.language` survives only as the import dialog's initial format.
+ * panel must not claim otherwise: all three downloads (ZPL, TSPL, JSON) are
+ * always offered, and `spec.language` survives only as the import dialog's
+ * initial format.
  *
  * WHY name IS NOT PART OF THE SPEC STATE: `name` isn't a `LabelTemplateSpec`
  * field at all (it lives on the template's DB row / `LabelTemplateDto`, see

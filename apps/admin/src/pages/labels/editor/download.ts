@@ -1,5 +1,5 @@
 /**
- * Plan 04 Task 10: label editor chrome -- client-side ZPL/TSPL file download.
+ * Plan 04 Task 10: label editor chrome -- client-side ZPL/TSPL/JSON file download.
  *
  * BYTE-SAFETY (the reason this tiny module exists at all): both
  * `@markiro/domain`'s `generateZpl` and `generateTspl` return a plain JS

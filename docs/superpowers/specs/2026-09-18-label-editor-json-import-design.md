@@ -175,6 +175,7 @@ export interface LabelImportWarning {
 
   ```ts
   export type ImportAnalysisError =
+    | { kind: "elementTooLarge" }
     | { kind: "message"; message: string }
     | { kind: "issues"; issues: Array<{ path: string; message: string }> };
 
@@ -252,8 +253,8 @@ spec: LabelTemplateSpec }): Blob` — `JSON.stringify(payload, null, 2) + "\n"`,
 
 Новые ключи в `pages.labels.editor.import`: `jsonLabel`, `warningsTitle`,
 `acknowledgeWarnings`, `warningUnknownProperty`, `warningPurposeMismatch`,
-`fieldsHintJson`. Кнопка: `pages.labels.editor.download` с `format: "JSON"` — ключ
-существующий.
+`fieldsHintJson`, `issuesTitle`. Кнопка: `pages.labels.editor.download` с
+`format: "JSON"` — ключ существующий.
 
 Подсказка пустого состояния (`pages.labels.editor.empty`): «Содержимое этикетки не
 задано — импортируйте код ZPL, TSPL или JSON.» и английский аналог.

@@ -116,6 +116,27 @@ describe("analyzeImport", () => {
     });
   });
 
+  it("turns a ZPL dimension overflow into an issue list, same as JSON", () => {
+    // 4000 dots at 203 dpi is 4000 * 25.4 / 203 ~= 500mm, over the schema's
+    // 300mm max for both widthMm and heightMm -- the realistic trigger is
+    // picking the wrong import DPI for a label authored at a higher one.
+    const outcome = analyzeImport({
+      source: ["^XA", "^PW4000", "^LL4000", "^XZ"].join("\n"),
+      format: "zpl",
+      dpi: 203,
+      purpose: "box",
+    });
+    expect(outcome).toEqual({
+      ok: false,
+      error: {
+        kind: "issues",
+        issues: expect.arrayContaining([
+          expect.objectContaining({ path: expect.stringMatching(/^(widthMm|heightMm)$/) }),
+        ]),
+      },
+    });
+  });
+
   it("turns a JSON syntax error and an oversized element into single messages", () => {
     const syntax = analyzeImport({ source: "{", format: "json", dpi: 203, purpose: "box" });
     expect(syntax).toEqual({

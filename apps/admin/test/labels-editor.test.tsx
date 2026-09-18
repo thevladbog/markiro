@@ -810,7 +810,7 @@ describe("JSON import", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Проверить код" }));
 
     const alert = within(dialog).getByRole("alert");
-    expect(within(alert).getByText(/^Ошибок в JSON: \d+$/)).toBeDefined();
+    expect(within(alert).getByText(/^Ошибок в коде: \d+$/)).toBeDefined();
     expect(within(alert).getByText("elements.0.fontSizePt")).toBeDefined();
     expect(
       within(dialog).getByRole("button", { name: "Заменить этикетку" }).hasAttribute("disabled"),

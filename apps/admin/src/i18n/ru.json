@@ -2159,7 +2159,7 @@
           "acknowledge": "Удалить неподдерживаемые строки ({{count}})",
           "adjusted": "Прижато к границам этикетки: {{count}}",
           "elementTooLarge": "Один из элементов больше этикетки. Исправьте код или размер.",
-          "issuesTitle": "Ошибок в JSON: {{count}}",
+          "issuesTitle": "Ошибок в коде: {{count}}",
           "warningsTitle": "Предупреждения: {{count}}",
           "acknowledgeWarnings": "Продолжить с этими предупреждениями ({{count}})",
           "warningUnknownProperty": "свойство не входит в модель и будет отброшено",
