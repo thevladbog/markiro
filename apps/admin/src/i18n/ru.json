@@ -2637,7 +2637,10 @@
       "disassembled": "Разобрана",
       "contentsChangedAfterClose": "Состав изменился после закрытия",
       "rejections": "Отказов: {{count}}",
-      "kind": { "production": "Производственная", "warehouse": "Складская" },
+      "kind": {
+        "production": "Производственная",
+        "warehouse": "Складская"
+      },
       "filters": {
         "kindLabel": "Вид паллеты",
         "kindAll": "Все",
@@ -2800,13 +2803,37 @@
           "sscc": "SSCC короба",
           "itemCount": "Кодов",
           "closedAt": "Закрыт",
-          "state": "Состояние"
+          "state": "Состояние",
+          "shift": "Смена короба"
         },
         "exceptionsTitle": "Исключения",
         "exceptionsEmpty": "Исключений нет",
         "exceptionKind": {
           "disassemble": "Разбор паллеты",
           "reprint": "Перепечать этикетки"
+        },
+        "noShift": "Вне смены (складская паллета)",
+        "kind": {
+          "production": "Производственная",
+          "warehouse": "Складская"
+        },
+        "rejections": {
+          "title": "Отказано в постановке",
+          "empty": "Все отсканированные короба поставлены на паллету",
+          "table": {
+            "sscc": "SSCC короба",
+            "reason": "Причина",
+            "winningPallet": "Паллета, где короб",
+            "addedAt": "Скан"
+          },
+          "reason": {
+            "already_on_pallet": "Уже на другой паллете",
+            "not_found": "Короб не найден",
+            "not_closed": "Короб не закрыт",
+            "disassembled": "Короб расформирован",
+            "pallet_closed": "Паллета уже закрыта",
+            "product_mismatch": "Другой товар"
+          }
         }
       },
       "history": {

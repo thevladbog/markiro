@@ -2637,7 +2637,10 @@
       "disassembled": "Taken apart",
       "contentsChangedAfterClose": "Contents changed after closing",
       "rejections": "Refused: {{count}}",
-      "kind": { "production": "Production", "warehouse": "Warehouse" },
+      "kind": {
+        "production": "Production",
+        "warehouse": "Warehouse"
+      },
       "filters": {
         "kindLabel": "Pallet kind",
         "kindAll": "All",
@@ -2800,13 +2803,37 @@
           "sscc": "Box SSCC",
           "itemCount": "Codes",
           "closedAt": "Closed",
-          "state": "State"
+          "state": "State",
+          "shift": "Box shift"
         },
         "exceptionsTitle": "Exceptions",
         "exceptionsEmpty": "No exceptions",
         "exceptionKind": {
           "disassemble": "Pallet taken apart",
           "reprint": "Label reprint"
+        },
+        "noShift": "No shift (warehouse pallet)",
+        "kind": {
+          "production": "Production",
+          "warehouse": "Warehouse"
+        },
+        "rejections": {
+          "title": "Refused memberships",
+          "empty": "Every scanned box was stacked on the pallet",
+          "table": {
+            "sscc": "Box SSCC",
+            "reason": "Reason",
+            "winningPallet": "Pallet holding the box",
+            "addedAt": "Scanned"
+          },
+          "reason": {
+            "already_on_pallet": "Already on another pallet",
+            "not_found": "Box not found",
+            "not_closed": "Box not closed",
+            "disassembled": "Box taken apart",
+            "pallet_closed": "Pallet already closed",
+            "product_mismatch": "Different product"
+          }
         }
       },
       "history": {

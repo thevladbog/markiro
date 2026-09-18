@@ -18,8 +18,14 @@ import { formatSsccHri } from "@markiro/domain";
 import { Alert, Badge, Button, Card, PageHeader, Spinner, StatusChip, Table } from "@markiro/ui";
 import type { StatusChipStatus, TableColumn } from "@markiro/ui";
 
-import { formatCreatedAt } from "../../lib/datetime.js";
-import { usePalletCard, type PalletCardBoxDto, type PalletCardDto } from "./api.js";
+import { formatCreatedAt, formatDate } from "../../lib/datetime.js";
+import {
+  usePalletCard,
+  type PalletCardBoxDto,
+  type PalletCardDto,
+  type PalletCardRejectionDto,
+  type PalletMembershipRejectionReason,
+} from "./api.js";
 
 // Identical mapping to the box card's: a pallet's three states mean the same
 // three things -- still being stacked, closed and labelled, taken apart.
@@ -28,6 +34,15 @@ const STATUS_TO_CHIP: Record<PalletCardDto["status"], StatusChipStatus> = {
   closed: "ok",
   disassembled: "neutral",
 };
+
+const REJECTION_REASONS: ReadonlySet<string> = new Set<PalletMembershipRejectionReason>([
+  "already_on_pallet",
+  "not_found",
+  "not_closed",
+  "disassembled",
+  "pallet_closed",
+  "product_mismatch",
+]);
 
 function DetailField({ label, value }: { label: string; value: ReactNode }) {
   return (
@@ -74,6 +89,24 @@ export function PalletCardPage() {
       ),
     },
     {
+      key: "shift",
+      title: t("pages.codeSearch.palletCard.table.shift"),
+      wrap: true,
+      // A box's OWN shift, not the pallet's: on a warehouse pallet every row
+      // may come from a different one, and the production date beside the
+      // number is what tells the manager how old the stack really is.
+      render: (row) => (
+        <span style={{ display: "inline-flex", flexDirection: "column", gap: 2 }}>
+          <Link to={`/shifts/${row.shiftId}`}>{row.shiftNumber ?? row.shiftId}</Link>
+          {row.productionDate ? (
+            <span style={{ font: "var(--text-caption)", color: "var(--fg-3)" }}>
+              {formatDate(row.productionDate, i18n.language)}
+            </span>
+          ) : null}
+        </span>
+      ),
+    },
+    {
       key: "itemCount",
       title: t("pages.codeSearch.palletCard.table.itemCount"),
       align: "right",
@@ -96,6 +129,40 @@ export function PalletCardPage() {
         row.disassembledAt ? (
           <Badge tone="warn">{t("pages.codeSearch.palletCard.boxDisassembled")}</Badge>
         ) : null,
+    },
+  ];
+
+  const rejectionColumns: TableColumn<PalletCardRejectionDto>[] = [
+    {
+      key: "boxSscc",
+      title: t("pages.codeSearch.palletCard.rejections.table.sscc"),
+      mono: true,
+      render: (row) =>
+        row.boxId ? (
+          <Link to={`/codes/box/${row.boxId}`}>{formatSsccHri(row.boxSscc)}</Link>
+        ) : (
+          formatSsccHri(row.boxSscc)
+        ),
+    },
+    {
+      key: "reason",
+      title: t("pages.codeSearch.palletCard.rejections.table.reason"),
+      wrap: true,
+      render: (row) =>
+        REJECTION_REASONS.has(row.reason)
+          ? t(`pages.codeSearch.palletCard.rejections.reason.${row.reason}`)
+          : row.reason,
+    },
+    {
+      key: "winningPalletSscc",
+      title: t("pages.codeSearch.palletCard.rejections.table.winningPallet"),
+      mono: true,
+      render: (row) => (row.winningPalletSscc ? formatSsccHri(row.winningPalletSscc) : "—"),
+    },
+    {
+      key: "addedAt",
+      title: t("pages.codeSearch.palletCard.rejections.table.addedAt"),
+      render: (row) => formatCreatedAt(row.addedAt, i18n.language),
     },
   ];
 
@@ -124,6 +191,9 @@ export function PalletCardPage() {
             >
               {t("pages.codeSearch.palletCard.printAction")}
             </Button>
+            <Badge tone={pallet.kind === "warehouse" ? "accent" : "neutral"}>
+              {t(`pages.codeSearch.palletCard.kind.${pallet.kind}`)}
+            </Badge>
             <StatusChip
               status={STATUS_TO_CHIP[pallet.status]}
               label={t(`pages.codeSearch.palletCard.status.${pallet.status}`)}
@@ -147,9 +217,15 @@ export function PalletCardPage() {
           <DetailField
             label={t("pages.codeSearch.palletCard.shiftLabel")}
             value={
-              <Link to={`/shifts/${pallet.shiftId}`}>
-                {pallet.shiftNumber ?? t("pages.codeSearch.palletCard.shiftLabel")}
-              </Link>
+              pallet.shiftId ? (
+                <Link to={`/shifts/${pallet.shiftId}`}>
+                  {pallet.shiftNumber ?? t("pages.codeSearch.palletCard.shiftLabel")}
+                </Link>
+              ) : (
+                // A warehouse pallet belongs to no shift: say so rather than
+                // linking to a shift that does not exist.
+                t("pages.codeSearch.palletCard.noShift")
+              )
             }
           />
           <DetailField
@@ -173,15 +249,29 @@ export function PalletCardPage() {
         </div>
       </Card>
 
-      <Card title={t("pages.codeSearch.palletCard.boxesTitle")}>
-        <Table
-          columns={boxColumns}
-          rows={pallet.boxes}
-          getRowKey={(row) => row.id}
-          empty={t("pages.codeSearch.palletCard.boxesEmpty")}
-          scrollLabel={t("pages.codeSearch.palletCard.boxesTitle")}
-        />
-      </Card>
+      <section role="region" aria-label={t("pages.codeSearch.palletCard.boxesTitle")}>
+        <Card title={t("pages.codeSearch.palletCard.boxesTitle")}>
+          <Table
+            columns={boxColumns}
+            rows={pallet.boxes}
+            getRowKey={(row) => row.id}
+            empty={t("pages.codeSearch.palletCard.boxesEmpty")}
+          />
+        </Card>
+      </section>
+
+      {pallet.kind === "warehouse" ? (
+        <section role="region" aria-label={t("pages.codeSearch.palletCard.rejections.title")}>
+          <Card title={t("pages.codeSearch.palletCard.rejections.title")}>
+            <Table
+              columns={rejectionColumns}
+              rows={pallet.rejections}
+              getRowKey={(row) => `${row.boxSscc}:${row.recordedAt}`}
+              empty={t("pages.codeSearch.palletCard.rejections.empty")}
+            />
+          </Card>
+        </section>
+      ) : null}
 
       <Card title={t("pages.codeSearch.palletCard.exceptionsTitle")}>
         {pallet.exceptions.length === 0 ? (

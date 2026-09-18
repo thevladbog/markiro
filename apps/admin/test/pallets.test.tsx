@@ -821,6 +821,7 @@ const PALLET_CARD = {
   id: "pal-1",
   sscc: PALLET.sscc,
   status: "closed",
+  kind: "production",
   shiftId: SHIFT.id,
   shiftNumber: "SEP26-001",
   productId: "p1",
@@ -835,6 +836,9 @@ const PALLET_CARD = {
     {
       id: "box-1",
       sscc: "00123460682000000101",
+      shiftId: SHIFT.id,
+      shiftNumber: "SEP26-001",
+      productionDate: "2026-09-11",
       itemCount: 12,
       closedAt: "2026-09-11T15:00:00.000Z",
       disassembledAt: null,
@@ -842,12 +846,16 @@ const PALLET_CARD = {
     {
       id: "box-2",
       sscc: "00123460682000000102",
+      shiftId: SHIFT.id,
+      shiftNumber: "SEP26-001",
+      productionDate: "2026-09-11",
       itemCount: 0,
       closedAt: "2026-09-11T15:00:00.000Z",
       disassembledAt: "2026-09-11T16:30:00.000Z",
     },
   ],
   exceptions: [],
+  rejections: [],
 };
 
 /** Renders both cards behind their real routes, so the link between them is exercised. */
@@ -891,7 +899,9 @@ describe("pallet card", () => {
 
     expect(await screen.findByRole("heading", { name: "(00)103460068200000004" })).toBeDefined();
     expect(screen.getByText("Линия розлива № 1")).toBeDefined();
-    expect(screen.getByRole("link", { name: "SEP26-001" })).toBeDefined();
+    // The shift link now also appears on each box's own row (same shift in
+    // this fixture), so assert presence rather than a single unique match.
+    expect(screen.getAllByRole("link", { name: "SEP26-001" }).length).toBeGreaterThan(0);
 
     const boxes = within(screen.getByRole("table"));
     // Each member box links on to its OWN card rather than inlining its codes.

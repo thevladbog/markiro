@@ -6,13 +6,14 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes } from "react-router";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
 
 import type { AccessDocument } from "../src/access/api.js";
 import { AccessProvider } from "../src/access/context.js";
+import { PalletCardPage } from "../src/pages/code-search/PalletCard.js";
 import { PalletsPage } from "../src/pages/pallets/index.js";
 import { jsonResponse } from "./helpers/http.js";
 
@@ -22,6 +23,10 @@ afterEach(() => {
 });
 
 const READ_ONLY: AccessDocument = { roles: [], capabilities: [CABINET_CAPABILITY.OPERATIONS_READ] };
+const READ_WRITE: AccessDocument = {
+  roles: [],
+  capabilities: [CABINET_CAPABILITY.OPERATIONS_READ, CABINET_CAPABILITY.OPERATIONS_WRITE],
+};
 
 function newQueryClient(): QueryClient {
   return new QueryClient({
@@ -158,5 +163,121 @@ describe("pallets registry", () => {
       "/api/pallets?limit=100&cursor=next-1",
     );
     expect(screen.queryByRole("button", { name: "Показать ещё" })).toBeNull();
+  });
+});
+
+const WAREHOUSE_CARD = {
+  id: "pal-w1",
+  sscc: "00104600682000000019",
+  status: "closed",
+  kind: "warehouse",
+  shiftId: null,
+  shiftNumber: null,
+  productId: "p1",
+  productName: "Молоко 1л",
+  terminalId: "hh-1",
+  lineName: null,
+  operatorId: null,
+  openedAt: "2026-09-17T09:00:00.000Z",
+  closedAt: "2026-09-17T10:00:00.000Z",
+  disassembledAt: null,
+  boxes: [
+    {
+      id: "box-1",
+      sscc: "00123460682000000101",
+      shiftId: "shift-a",
+      shiftNumber: "SEP26-001",
+      productionDate: "2026-09-10",
+      itemCount: 20,
+      closedAt: "2026-09-10T15:00:00.000Z",
+      disassembledAt: null,
+    },
+    {
+      id: "box-2",
+      sscc: "00123460682000000102",
+      shiftId: "shift-b",
+      shiftNumber: "SEP26-004",
+      productionDate: "2026-09-14",
+      itemCount: 20,
+      closedAt: "2026-09-14T15:00:00.000Z",
+      disassembledAt: null,
+    },
+  ],
+  exceptions: [],
+  rejections: [
+    {
+      boxSscc: "00123460682000000103",
+      boxId: "box-3",
+      reason: "already_on_pallet",
+      winningPalletSscc: "00104600682000000002",
+      addedAt: "2026-09-17T09:30:00.000Z",
+      recordedAt: "2026-09-17T09:31:00.000Z",
+    },
+    {
+      boxSscc: "00123460682000000999",
+      boxId: null,
+      reason: "not_found",
+      winningPalletSscc: null,
+      addedAt: "2026-09-17T09:35:00.000Z",
+      recordedAt: "2026-09-17T09:36:00.000Z",
+    },
+  ],
+};
+
+function LocationProbe() {
+  const location = useLocation();
+  return <div data-testid="location">{`${location.pathname}${location.search}`}</div>;
+}
+
+function renderCard(
+  card: unknown,
+  access: AccessDocument = READ_ONLY,
+  extra: FetchBody = () => ({ items: [] }),
+) {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url === "/api/code-search/pallets/pal-w1") return jsonResponse(200, card);
+    return jsonResponse(200, extra(url, init));
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <QueryClientProvider client={newQueryClient()}>
+      <AccessProvider value={access}>
+        <MemoryRouter initialEntries={["/codes/pallet/pal-w1"]}>
+          <Routes>
+            <Route path="/codes/pallet/:palletId" element={<PalletCardPage />} />
+            <Route path="/disaggregation/:id" element={<LocationProbe />} />
+          </Routes>
+        </MemoryRouter>
+      </AccessProvider>
+    </QueryClientProvider>,
+  );
+  return { fetchMock, user: userEvent.setup() };
+}
+
+describe("warehouse pallet card", () => {
+  it("shows the kind, no shift link, and each box's own origin shift", async () => {
+    renderCard(WAREHOUSE_CARD);
+
+    expect(await screen.findByRole("heading", { name: "(00)104600682000000019" })).toBeDefined();
+    expect(screen.getByText("Складская")).toBeDefined();
+    // Only the two boxes' own shift links exist -- no shift link for the
+    // pallet header, since this warehouse pallet is not tied to any shift.
+    expect(screen.getAllByRole("link", { name: /SEP26/ })).toHaveLength(2);
+    const boxes = within(screen.getByRole("region", { name: "Короба на паллете" }));
+    expect(boxes.getByText("SEP26-001")).toBeDefined();
+    expect(boxes.getByText("SEP26-004")).toBeDefined();
+  });
+
+  it("lists refused memberships with a readable reason and the winning pallet", async () => {
+    // Read-write access (used by Task 5's write actions) renders the same
+    // read-only card content; exercised here as a trivial use.
+    renderCard(WAREHOUSE_CARD, READ_WRITE);
+
+    const rejections = within(await screen.findByRole("region", { name: "Отказано в постановке" }));
+    expect(rejections.getByText("(00)123460682000000103")).toBeDefined();
+    expect(rejections.getByText("Уже на другой паллете")).toBeDefined();
+    expect(rejections.getByText("(00)104600682000000002")).toBeDefined();
+    expect(rejections.getByText("Короб не найден")).toBeDefined();
   });
 });
