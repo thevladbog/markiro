@@ -1,0 +1,3 @@
+{ "id": "6d2a1b7e-4c1f-4b7e-9c3a-1a2b3c4d5e6f", "type": "oms_auth",
+  "payload": { "trueApiBaseUrl": "https://markirovka.sandbox.crptech.ru/api/v3/true-api",
+               "omsConnection": "11b1abc1-f1ee-41db-8a11-f11ac11111e1" } }

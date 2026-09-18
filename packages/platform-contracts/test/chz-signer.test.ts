@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
+  chzSignerContracts,
   chzSignerPairRequestSchema,
   chzSignerPairResponseSchema,
   chzSignerTaskCompleteSchema,
@@ -83,5 +84,22 @@ describe("chz-signer contracts", () => {
         certThumbprint: "AB12",
       }).success,
     ).toBe(true);
+  });
+});
+
+describe("signer task union", () => {
+  it("parses an oms_auth task", () => {
+    const task = chzSignerContracts.task.parse(fixture("task-oms-auth.json"));
+    expect(task.type).toBe("oms_auth");
+    if (task.type === "oms_auth") expect(task.payload.omsConnection).toMatch(/^[0-9a-f-]{36}$/);
+  });
+  it("parses a sign_detached task and its signature completion", () => {
+    const task = chzSignerContracts.task.parse(fixture("task-sign-detached.json"));
+    expect(task.type).toBe("sign_detached");
+    const done = chzSignerContracts.taskCompleteBody.parse(fixture("task-complete-signature.json"));
+    expect("signatureBase64" in done).toBe(true);
+  });
+  it("rejects an unknown task type", () => {
+    expect(() => chzSignerContracts.task.parse({ id: crypto.randomUUID(), type: "nope", payload: {} })).toThrow();
   });
 });
