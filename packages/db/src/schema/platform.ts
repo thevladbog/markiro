@@ -653,7 +653,7 @@ export const stationSyncQuarantine = pgTable(
     // unrecognised kinds rather than throwing.
     check(
       "station_sync_quarantine_record_kind_check",
-      sql`${t.recordKind} IN ('item', 'box', 'exception', 'product_label_event', 'pallet', 'pallet_exception', 'pallet_membership')`,
+      sql`${t.recordKind} IN ('item', 'box', 'exception', 'product_label_event', 'pallet', 'pallet_exception', 'pallet_membership', 'pallet_membership_removal')`,
     ),
     check("station_sync_quarantine_record_index_check", sql`${t.recordIndex} >= 0`),
     check("station_sync_quarantine_reason_check", sql`char_length(${t.reason}) BETWEEN 1 AND 64`),

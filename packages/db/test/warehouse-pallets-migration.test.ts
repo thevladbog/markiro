@@ -248,6 +248,8 @@ describe.skipIf(!databaseUrl)("warehouse pallets migration", () => {
         WHERE conname = 'station_sync_quarantine_record_kind_check'`,
     );
     expect(check.rows[0]?.def).toContain("'pallet_membership'");
+    // 0165: a removal is denied and quarantined like the membership it undoes.
+    expect(check.rows[0]?.def).toContain("'pallet_membership_removal'");
   });
 
   it("adds can_build_pallets and the pallet export columns", async () => {
