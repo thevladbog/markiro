@@ -23,6 +23,7 @@ interface ZplState {
   fontWidthDots: number;
   align?: "left" | "center" | "right";
   maxWidthDots?: number;
+  maxLines?: number;
   hexIndicator?: string;
   moduleWidthDots?: number;
   barcode?: { format: "code128" | "ean13" | "datamatrix" | "qr"; sizeDots: number };
@@ -49,6 +50,9 @@ const SUPPORTED = new Set([
   "BQ",
   "GB",
 ]);
+
+/** `maxLines` ceiling of the label model (`wrappableTextShape` in model.ts). */
+const MAX_FIELD_BLOCK_LINES = 16;
 
 function fail(line: number, source: string, message: string): never {
   throw new DomainError("LABEL_CODE_INVALID", message, { cause: { line, source } });
@@ -184,6 +188,7 @@ function finalizeField(
     yMm,
     fontSizePt: pointsFromDots(state.fontHeightDots, dpi),
     maxWidthMm: state.maxWidthDots === undefined ? undefined : dotsToMm(state.maxWidthDots, dpi),
+    ...(state.maxLines === undefined ? {} : { maxLines: state.maxLines }),
   };
   const textCommon = state.align ? { ...common, align: state.align } : common;
   const element: LabelElement =
@@ -280,6 +285,16 @@ export function parseZplLabel(input: string, dpi: 203 | 300): LabelImportResult 
           if (!Number.isFinite(width) || width <= 0)
             fail(line, source, "invalid ZPL field block width");
           state.maxWidthDots = width;
+          // ^FB's second parameter is the maximum number of lines the block
+          // may wrap into -- the emitter writes `maxLines` there. Only a
+          // whole number of 2+ lines changes anything: 1 is the model's own
+          // default, and a missing or malformed value leaves the element
+          // single-line, exactly as every import before this parameter was
+          // read. Anything above the model's ceiling is clamped to it.
+          const lines = Number(parts[1]);
+          if (Number.isInteger(lines) && lines >= 2) {
+            state.maxLines = Math.min(lines, MAX_FIELD_BLOCK_LINES);
+          }
           const alignment = alignFromZpl(parts[3]?.trim());
           if (alignment) state.align = alignment;
           break;

@@ -8,13 +8,30 @@ export const MAX_LABEL_CODE_COMMANDS = 2_000;
 export const MAX_LABEL_CODE_ELEMENTS = 1_000;
 
 export type LabelCodeLanguage = "zpl" | "tspl";
-export type LabelImportWarningCode = "UNSUPPORTED_COMMAND";
+/**
+ * What the import dialog offers: the two printer languages, parsed from
+ * code, plus `json` -- the label model itself (`labelTemplateSpecSchema`),
+ * pasted as the same document `POST /label-templates` accepts.
+ */
+export type LabelImportFormat = LabelCodeLanguage | "json";
+export type LabelImportWarningCode =
+  /** ZPL/TSPL: a line the parser does not understand; replacing drops it. */
+  | "UNSUPPORTED_COMMAND"
+  /** JSON: a property outside the label model; the schema strips it. */
+  | "UNKNOWN_PROPERTY"
+  /** JSON: the wrapper's `purpose` differs from the template being edited. */
+  | "PURPOSE_MISMATCH";
 
 export interface LabelImportWarning {
-  line: number;
-  source: string;
   code: LabelImportWarningCode;
   message: string;
+  /**
+   * 1-based source line for ZPL/TSPL. `null` for JSON, which has no line
+   * bookkeeping after `JSON.parse`; there `source` is the dotted property
+   * path (`elements.3.maxlines`) or `purpose: "pallet"`.
+   */
+  line: number | null;
+  source: string;
 }
 
 export interface LabelImportResult {

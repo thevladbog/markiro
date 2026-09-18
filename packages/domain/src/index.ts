@@ -122,6 +122,7 @@ export {
 } from "./labels/import.js";
 export type {
   LabelCodeLanguage,
+  LabelImportFormat,
   LabelImportResult,
   LabelImportWarning,
   LabelImportWarningCode,
