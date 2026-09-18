@@ -655,15 +655,32 @@ function fixtures(locale: AdminLocale) {
   };
 
   /**
+   * Every shift fixture this mock might serve, in one place. `/api/pallets`
+   * derives its known-shift whitelist from this list (see `installApi`)
+   * instead of a hand-copied id array, so a shift fixture added here cannot
+   * silently fall off that whitelist and get a spurious 404.
+   */
+  const SHIFTS = [
+    PLANNED_SHIFT,
+    ACTIVE_SHIFT,
+    ACTIVE_SHIFT_09,
+    DUPLICATE_SHIFT,
+    CLOSED_SHIFT,
+    LATE_SHIFT,
+  ];
+
+  /**
    * Three pallets in the three states the panel can show: a plain closed one,
    * one whose member box was disassembled after the close, and a disassembled
-   * pallet. Only the first is printable, which is what makes the placard rule
-   * ("closed, still standing, has an SSCC") visible on the frame.
+   * pallet. The placard rule (`ShiftDetailsPanel.tsx:196-198`) is
+   * `closedAt !== null && disassembledAt === null && sscc !== null` -- it
+   * never looks at `contentsChangedAfterClose`, so the first TWO are
+   * printable and only the disassembled third is excluded.
    */
   const PALLETS = [
     {
       id: "90000000-0000-4000-8000-000000000001",
-      sscc: "00346006820000000015",
+      sscc: "00346006820000000014",
       kind: "production" as const,
       productId: PRODUCT_ID,
       productName: PRODUCT.name,
@@ -680,7 +697,7 @@ function fixtures(locale: AdminLocale) {
     },
     {
       id: "90000000-0000-4000-8000-000000000002",
-      sscc: "00346006820000000022",
+      sscc: "00346006820000000021",
       kind: "production" as const,
       productId: PRODUCT_ID,
       productName: PRODUCT.name,
@@ -697,7 +714,7 @@ function fixtures(locale: AdminLocale) {
     },
     {
       id: "90000000-0000-4000-8000-000000000003",
-      sscc: "00346006820000000039",
+      sscc: "00346006820000000038",
       kind: "production" as const,
       productId: PRODUCT_ID,
       productName: PRODUCT.name,
@@ -917,6 +934,7 @@ function fixtures(locale: AdminLocale) {
     DUPLICATE_SHIFT,
     CLOSED_SHIFT,
     LATE_SHIFT,
+    SHIFTS,
     PALLETS,
     DASHBOARD_UNDER_CONTROL,
     DASHBOARD_ATTENTION,
@@ -971,10 +989,12 @@ async function installApi(page: Page, scenario: Scenario, fx: Fixtures) {
     if (/^\/api\/shifts\/[0-9a-f-]+\/summary$/.test(path)) return json(route, fx.SHIFT_SUMMARY);
     // `GET /pallets` 404s for an unknown shift rather than returning an empty
     // list, so the panel treats an error as a real failure -- answer only the
-    // shifts these frames open.
+    // shifts these frames open. The whitelist comes from `fx.SHIFTS` (every
+    // shift fixture this mock knows about) rather than a hand-copied id list,
+    // so a new shift fixture cannot silently fall off it and 404 itself.
     if (path === "/api/pallets") {
       const shiftId = url.searchParams.get("shiftId");
-      const known = [SHIFT_ID, ACTIVE_SHIFT_ID, CLOSED_SHIFT_ID, LATE_SHIFT_ID];
+      const known = fx.SHIFTS.map((shift) => shift.id);
       if (shiftId && known.includes(shiftId)) return json(route, { items: fx.PALLETS });
       return route.fulfill({ status: 404, contentType: "application/json", body: "{}" });
     }
