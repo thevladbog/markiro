@@ -200,6 +200,51 @@ describe("shift panel pallet table", () => {
     );
   });
 
+  it("prints placards for every closed pallet of the shift in the chosen size", async () => {
+    const user = userEvent.setup();
+    const openMock = vi.fn();
+    vi.stubGlobal("open", openMock);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(routeShiftPanelFetch({ pallets: () => jsonResponse(200, { items: [PALLET] }) })),
+    );
+    renderShiftPanel();
+
+    const section = within(await screen.findByRole("region", { name: "Паллеты" }));
+    await user.click(await section.findByRole("button", { name: "Ярлыки" }));
+    const dialog = within(await screen.findByRole("dialog", { name: "Ярлыки паллет смены" }));
+    await user.click(dialog.getByRole("radio", { name: "A5" }));
+    await user.click(dialog.getByRole("button", { name: "Открыть" }));
+
+    expect(openMock).toHaveBeenCalledTimes(1);
+    expect(String(openMock.mock.calls[0]?.[0])).toMatch(
+      /^\/api\/code-search\/shifts\/11111111-1111-4111-8111-111111111111\/placards\?format=a5&timeZone=/,
+    );
+    expect(screen.queryByRole("dialog", { name: "Ярлыки паллет смены" })).toBeNull();
+  });
+
+  it("offers no placards when the shift has no closed, standing pallet", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        routeShiftPanelFetch({
+          pallets: () =>
+            jsonResponse(200, {
+              items: [
+                { ...PALLET, id: "pal-open", closedAt: null },
+                { ...PALLET, id: "pal-gone", disassembledAt: "2026-09-12T08:00:00.000Z" },
+              ],
+            }),
+        }),
+      ),
+    );
+    renderShiftPanel();
+
+    const section = within(await screen.findByRole("region", { name: "Паллеты" }));
+    expect(await section.findAllByText("(00)103460068200000004")).toHaveLength(2);
+    expect(section.queryByRole("button", { name: "Ярлыки" })).toBeNull();
+  });
+
   it("reports a failed pallet load instead of rendering an empty stack", async () => {
     vi.stubGlobal(
       "fetch",

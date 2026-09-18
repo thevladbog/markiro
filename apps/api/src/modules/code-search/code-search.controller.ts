@@ -57,7 +57,7 @@ import {
 import { CodeSearchService } from "./code-search.service";
 import { renderBoxReportHtml } from "./box-report";
 import { renderPalletReportHtml } from "./pallet-report";
-import { renderPalletPlacardHtml } from "./pallet-placard";
+import { renderPalletPlacardHtml, renderShiftPlacardsHtml } from "./pallet-placard";
 
 /**
  * Manager-only, entirely read-only module: classify a scanned/typed input
@@ -309,5 +309,34 @@ export class CodeSearchController {
     const data = await this.codeSearchService.palletPlacardData(req.tenantId!, palletId);
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     return renderPalletPlacardHtml(data, query.format);
+  }
+
+  /**
+   * Every closed pallet of a shift as one placard document, a page per
+   * pallet, for printing the whole shift's stacks in one go. Same contract as
+   * the single placard above.
+   */
+  @Get("shifts/:shiftId/placards")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiOperation({
+    summary: "Render placards for every closed pallet of a shift",
+    description:
+      "Print-ready A4 (default) or A5 HTML with one placard page per closed, not-disassembled pallet of the shift that carries an SSCC, in closing order. A shift with no such pallet answers 409 SHIFT_HAS_NO_PALLETS.",
+  })
+  @ApiParam({ name: "shiftId", schema: { type: "string", format: "uuid" } })
+  @ApiProduces("text/html")
+  @ApiZodQuery(palletPlacardQuerySchema)
+  @ApiZodValidationError()
+  @ApiOkResponse({ schema: { type: "string" }, description: "Print-ready HTML document." })
+  @ApiHttpErrors(401, 403, 404, 409)
+  async shiftPlacards(
+    @Req() req: RequestWithTenant,
+    @Param("shiftId", new ParseUUIDPipe()) shiftId: string,
+    @Res({ passthrough: true }) res: Response,
+    @Query(new ZodValidationPipe(palletPlacardQuerySchema)) query: PalletPlacardQueryDto,
+  ): Promise<string> {
+    const data = await this.codeSearchService.shiftPlacardsData(req.tenantId!, shiftId);
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    return renderShiftPlacardsHtml(data.pallets, query.format, data.shiftNumber);
   }
 }

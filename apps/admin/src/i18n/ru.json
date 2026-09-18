@@ -2504,6 +2504,10 @@
         "title": "Паллеты",
         "empty": "В этой смене нет паллет",
         "loadError": "Не удалось загрузить паллеты смены.",
+        "placards": {
+          "action": "Ярлыки",
+          "title": "Ярлыки паллет смены"
+        },
         "contentsChangedAfterClose": "Состав изменился после закрытия",
         "disassembled": "Разобрана",
         "noSscc": "Без SSCC",

@@ -5,6 +5,7 @@ import {
   datesWord,
   namePtFor,
   renderPalletPlacardHtml,
+  renderShiftPlacardsHtml,
   summarizeByProductionDate,
   type PalletPlacardBox,
   type PalletPlacardData,
@@ -126,7 +127,7 @@ describe("pallet placard", () => {
     expect(namePtFor(long, SIZES.a5)).toBe(14);
     expect(namePtFor(null, SIZES.a4)).toBe(30);
     expect(renderPalletPlacardHtml(fixture({ productName: long }), "a4")).toContain(
-      ".pl-name { font-size: 20pt;",
+      'class="pl-name" style="font-size: 20pt"',
     );
     expect(renderPalletPlacardHtml(fixture({ productName: long }), "a4")).toContain(
       "-webkit-line-clamp: 4;",
@@ -217,6 +218,34 @@ describe("pallet placard", () => {
     expect(html).toContain('pl-figure-value--gtin mono">—<');
     expect(html).not.toContain("ИНН");
     expect(html).toContain('data-brand-logo="markiro"');
+  });
+
+  it("lays out a whole shift as one page per pallet, in the order given, each sized by its own name", () => {
+    const long =
+      "Напиток безалкогольный сильногазированный ароматизированный «Атолл Лимон-Лайм Премиум» с подсластителями 0,5 л, ПЭТ";
+    const html = renderShiftPlacardsHtml(
+      [
+        fixture({ sscc: "00104600682000000019" }),
+        fixture({ sscc: "00104600682000000026", productName: long }),
+      ],
+      "a5",
+      "SEP26-004/S",
+    );
+    expect(html).toContain("<title>Ярлыки паллет смены SEP26-004/S</title>");
+    const pages = html.match(/data-placard-sscc="(\d{20})"/g) ?? [];
+    expect(pages).toEqual([
+      'data-placard-sscc="00104600682000000019"',
+      'data-placard-sscc="00104600682000000026"',
+    ]);
+    // One stylesheet, one @page size, a break after every page but the last.
+    expect(html.match(/@page \{ size: A5;/g)?.length).toBe(1);
+    expect(html).toContain("break-after: page; page-break-after: always;");
+    expect(html).toContain(".pl-page:last-child { break-after: auto;");
+    // A5: the 47-character fixture name sizes to 16 pt, the long one to 14 pt.
+    expect(html).toContain('class="pl-name" style="font-size: 16pt"');
+    expect(html).toContain('class="pl-name" style="font-size: 14pt"');
+    expect(html.match(/\(00\)104600682000000019/g)?.length).toBe(1);
+    expect(html.match(/\(00\)104600682000000026/g)?.length).toBe(1);
   });
 
   it("escapes tenant-controlled text", () => {
