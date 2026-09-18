@@ -1,0 +1,235 @@
+package app.markiro.handheld.core.pallets
+
+import androidx.room.Room
+import androidx.test.core.app.ApplicationProvider
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import app.markiro.handheld.core.box.ClosePallet
+import app.markiro.handheld.core.box.ClosePalletResult
+import app.markiro.handheld.core.box.PalletLock
+import app.markiro.handheld.core.box.ServerRange
+import app.markiro.handheld.core.box.SsccPool
+import app.markiro.handheld.core.storage.BoxRegistryEntity
+import app.markiro.handheld.core.storage.HandheldDatabase
+import app.markiro.handheld.core.storage.MembershipStatus
+import app.markiro.handheld.core.storage.MetaStore
+import app.markiro.handheld.core.storage.PalletKind
+import app.markiro.handheld.core.storage.PalletProductEntity
+import app.markiro.handheld.core.storage.initializeRecoveryForTest
+import kotlinx.coroutines.test.runTest
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Test
+import org.junit.runner.RunWith
+
+/**
+ * The warehouse pallet's own lifecycle (spec §3.2-§3.4): the first accepted
+ * scan opens it, the six refusals hold their spec order, removal only takes a
+ * pending row back, and closing either burns exactly one extension-1 serial or
+ * leaves the pallet open.
+ */
+@RunWith(AndroidJUnit4::class)
+class WarehousePalletsTest {
+    private lateinit var db: HandheldDatabase
+    private lateinit var pool: SsccPool
+    private lateinit var meta: MetaStore
+    private lateinit var pallets: WarehousePallets
+    private var now = 1_757_000_000_000L
+
+    private companion object {
+        const val PREFIX = "046006820"
+
+        /** 14 digits each; a bare `"…$id"` would not be a GTIN at all. */
+        val GTINS = mapOf("p-1" to "04600682000017", "p-2" to "04600682000024")
+    }
+
+    @Before
+    fun setUp() {
+        db = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), HandheldDatabase::class.java)
+            .allowMainThreadQueries().build()
+        pool = SsccPool(db)
+        meta = MetaStore(db)
+        val lock = PalletLock(db)
+        pallets = WarehousePallets(db, lock, ClosePallet(db, pool, lock) { now }, meta) { now }
+        db.initializeRecoveryForTest()
+    }
+
+    @After
+    fun tearDown() = db.close()
+
+    private suspend fun registry(
+        sscc: String,
+        productId: String = "p-1",
+        palletActive: Boolean = false,
+        palletSscc: String? = null,
+        localPalletId: String? = null,
+    ) = db.boxRegistryDao().upsert(
+        BoxRegistryEntity(
+            sscc = sscc, boxId = "b-$sscc", productId = productId, bottleCount = 6, contentKeysJson = "[]",
+            updatedAt = "t", palletId = if (palletActive) "srv" else null, palletSscc = palletSscc,
+            palletActive = palletActive, closedAt = "c", productionDate = "2026-09-10", localPalletId = localPalletId,
+        ),
+    )
+
+    private suspend fun product(id: String = "p-1", capacity: Int? = 2) {
+        val existing = listOf("p-1", "p-2").filter { it != id }.mapNotNull { db.palletProductDao().byId(it) }
+        db.palletProductDao().replaceAll(
+            existing + PalletProductEntity(id, GTINS.getValue(id), "Cola $id", null, 180, capacity, 8),
+        )
+    }
+
+    private suspend fun deviceId() = db.deviceConfigDao().get()!!.deviceId
+
+    @Test
+    fun theFirstAcceptedScanOpensThePalletWithTheBoxProduct() = runTest {
+        product()
+        registry("034600682000000018")
+        val r = pallets.attach("034600682000000018", "op-1") as AttachResult.Attached
+        assertEquals(PalletKind.WAREHOUSE, r.pallet.kind)
+        assertEquals("p-1", r.pallet.productId)
+        assertNull(r.pallet.shiftId)
+        assertEquals(deviceId(), r.pallet.deviceId)
+        assertEquals(r.pallet.deviceId, r.pallet.terminalId)
+        assertEquals(1, r.boxCount)
+        assertEquals(2, r.capacity)
+        assertFalse(r.atCapacity)
+        // The device's own claim, so a second scan before the next registry
+        // refresh is still caught.
+        assertEquals(r.pallet.palletId, db.boxRegistryDao().bySscc("034600682000000018")?.localPalletId)
+        val membership = db.palletMembershipDao().byPallet(r.pallet.palletId).single()
+        assertEquals(MembershipStatus.PENDING, membership.status)
+        // Snapshot at attach: the pallet label must not lose units when the
+        // registry mirror later drops the box's row.
+        assertEquals(6, membership.bottleCount)
+        assertEquals("2026-09-10", membership.productionDate)
+        assertEquals(6, db.palletMembershipDao().bottleSum(r.pallet.palletId))
+    }
+
+    @Test
+    fun refusalsInSpecOrder() = runTest {
+        product()
+        product("p-2", 5)
+        assertEquals(AttachResult.UnknownBox, pallets.attach("034600682000000999", null))
+        registry("034600682000000025", localPalletId = "other-local")
+        assertEquals(AttachResult.OnAnotherLocalPallet, pallets.attach("034600682000000025", null))
+        registry("034600682000000032", palletActive = true, palletSscc = "134600682000000017")
+        assertEquals(AttachResult.OnAnotherPallet("134600682000000017"), pallets.attach("034600682000000032", null))
+        registry("034600682000000018")
+        pallets.attach("034600682000000018", null)
+        assertEquals(AttachResult.AlreadyOnThisPallet, pallets.attach("034600682000000018", null))
+        registry("034600682000000049", productId = "p-2")
+        assertEquals(AttachResult.OtherProduct("Cola p-2"), pallets.attach("034600682000000049", null))
+        // The registry never lists a pallet, so an extension-1 SSCC must not
+        // read as an unknown box.
+        assertEquals(AttachResult.ThatIsAPallet, pallets.attach("134600682000000017", null))
+    }
+
+    @Test
+    fun aBoxWhoseProductIsNotMirroredYetIsRefusedByName() = runTest {
+        registry("034600682000000018")
+        assertEquals(AttachResult.UnknownProduct, pallets.attach("034600682000000018", null))
+    }
+
+    @Test
+    fun aRegistryBoxOnADisassembledPalletIsFree() = runTest {
+        product()
+        db.boxRegistryDao().upsert(
+            BoxRegistryEntity(
+                "034600682000000018", "b", "p-1", 6, "[]", "t",
+                palletId = "old", palletSscc = "134600682000000017", palletActive = false,
+            ),
+        )
+        assertTrue(pallets.attach("034600682000000018", null) is AttachResult.Attached)
+    }
+
+    @Test
+    fun aRejectedBoxCanBeScannedOntoTheSamePalletAgain() = runTest {
+        product()
+        registry("034600682000000018")
+        val first = pallets.attach("034600682000000018", "op-1") as AttachResult.Attached
+        db.palletMembershipDao().markRejected(
+            first.pallet.palletId, "034600682000000018", "box_on_another_pallet", "134600682000000017", "t",
+        )
+        val again = pallets.attach("034600682000000018", "op-1") as AttachResult.Attached
+        assertEquals(first.pallet.palletId, again.pallet.palletId)
+        val membership = db.palletMembershipDao().byPallet(first.pallet.palletId).single()
+        assertEquals(MembershipStatus.PENDING, membership.status)
+        assertNull(membership.reason)
+        assertNull(membership.winningPalletSscc)
+        assertEquals(1, again.boxCount)
+    }
+
+    @Test
+    fun capacityClosesThePalletAndBurnsAnExtensionOneSerial() = runTest {
+        product()
+        pool.addRange(ServerRange(PREFIX, SsccPool.PALLET_EXTENSION_DIGIT, 0, 199, null))
+        meta.put(MetaStore.PALLET_BOOTSTRAP_ISSUER_PREFIX, PREFIX)
+        registry("034600682000000018")
+        registry("034600682000000025")
+        pallets.attach("034600682000000018", "op-1")
+        val second = pallets.attach("034600682000000025", "op-1") as AttachResult.Attached
+        assertTrue(second.atCapacity)
+        val closed = pallets.close("op-1") as ClosePalletResult.Closed
+        assertEquals(2, closed.boxCount)
+        assertTrue(closed.sscc.startsWith("1$PREFIX"))
+        assertNull(db.palletDao().openWarehouse(second.pallet.deviceId!!))
+        assertEquals(199L, pool.remaining(PREFIX, SsccPool.PALLET_EXTENSION_DIGIT))
+    }
+
+    @Test
+    fun noIssuerOrNoSerialsLeavesThePalletOpen() = runTest {
+        product()
+        registry("034600682000000018")
+        pallets.attach("034600682000000018", null)
+        assertEquals(ClosePalletResult.NoIssuer, pallets.close(null))
+        meta.put(MetaStore.PALLET_BOOTSTRAP_ISSUER_PREFIX, PREFIX)
+        assertEquals(ClosePalletResult.NoSerials, pallets.close(null))
+        assertNotNull(db.palletDao().openWarehouse(deviceId()))
+    }
+
+    @Test
+    fun closingWithNoOpenPalletIsEmptyNotAnError() = runTest {
+        meta.put(MetaStore.PALLET_BOOTSTRAP_ISSUER_PREFIX, PREFIX)
+        pool.addRange(ServerRange(PREFIX, SsccPool.PALLET_EXTENSION_DIGIT, 0, 199, null))
+        assertEquals(ClosePalletResult.Empty, pallets.close("op-1"))
+        assertEquals(200L, pool.remaining(PREFIX, SsccPool.PALLET_EXTENSION_DIGIT))
+    }
+
+    @Test
+    fun removeOnlyTakesAPendingRowAndReleasesTheClaim() = runTest {
+        product()
+        registry("034600682000000018")
+        val r = pallets.attach("034600682000000018", null) as AttachResult.Attached
+        assertTrue(pallets.remove(r.pallet.palletId, "034600682000000018"))
+        assertNull(db.boxRegistryDao().bySscc("034600682000000018")?.localPalletId)
+        registry("034600682000000025")
+        pallets.attach("034600682000000025", null)
+        // A `sent` row may already be on the server; only the server can take
+        // that one back.
+        db.palletMembershipDao().markSent(r.pallet.palletId, "034600682000000025")
+        assertFalse(pallets.remove(r.pallet.palletId, "034600682000000025"))
+        assertEquals(r.pallet.palletId, db.boxRegistryDao().bySscc("034600682000000025")?.localPalletId)
+    }
+
+    @Test
+    fun acknowledgingARejectionClearsTheBanner() = runTest {
+        product()
+        registry("034600682000000018")
+        val r = pallets.attach("034600682000000018", "op-1") as AttachResult.Attached
+        db.palletMembershipDao().markRejected(r.pallet.palletId, "034600682000000018", "box_on_another_pallet", null, "t")
+        pallets.acknowledgeRejections(r.pallet.palletId)
+        assertNotNull(db.palletMembershipDao().byPallet(r.pallet.palletId).single().acknowledgedAt)
+    }
+
+    @Test
+    fun capacityIsReadFromTheProductMirror() = runTest {
+        product(capacity = 24)
+        registry("034600682000000018")
+        val r = pallets.attach("034600682000000018", null) as AttachResult.Attached
+        assertEquals(24, pallets.capacity(r.pallet))
+    }
+}

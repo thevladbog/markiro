@@ -145,4 +145,66 @@ class ClosePallet(
             ClosePalletResult.Empty
         }
     }
+
+    /**
+     * [close] for a WAREHOUSE pallet (spec §3.4).
+     *
+     * The same burn-and-close transaction with the same three invariants:
+     * emptiness is checked BEFORE burning, burning and closing are ONE commit,
+     * and the guarded close failing rolls the burn back with it. Only three
+     * things differ, and each is a property of the pallet rather than of the
+     * closing:
+     *
+     *  - the pallet is passed in rather than looked up by shift -- a warehouse
+     *    pallet belongs to the DEVICE, and `openWarehouse(deviceId)` is the
+     *    caller's own read under the same lock;
+     *  - the box count comes from `pallet_memberships`, because a warehouse
+     *    pallet's boxes were closed on other devices and this one holds no
+     *    `boxes` row for any of them;
+     *  - NO grant is completed. Warehouse work happens outside a shift task,
+     *    and the server keeps a warehouse closure out of grant evidence too, so
+     *    completing one here would invent a task fact that has no task.
+     */
+    suspend fun closeWarehouse(
+        held: PalletLock.Held,
+        pallet: PalletEntity,
+        issuerPrefix: String?,
+        operatorId: String?,
+    ): ClosePalletResult {
+        lock.requireHeld(held)
+        lock.requireNoTransaction("Closing a pallet")
+        if (issuerPrefix == null) return ClosePalletResult.NoIssuer
+        val boxCount = db.palletMembershipDao().countOnPallet(pallet.palletId)
+        if (boxCount == 0) return ClosePalletResult.Empty
+
+        return try {
+            db.recovery.commit {
+                val serial = pool.burn(issuerPrefix, SsccPool.PALLET_EXTENSION_DIGIT)
+                    ?: return@commit ClosePalletResult.NoSerials
+                val sscc = try {
+                    Sscc.build(SsccPool.PALLET_EXTENSION_DIGIT, issuerPrefix, serial)
+                } catch (_: SsccException) {
+                    return@commit ClosePalletResult.InvalidSerial
+                }
+                val closedAt = Iso.format(clock())
+                if (db.palletDao().close(pallet.palletId, sscc, closedAt, operatorId) == 0) {
+                    throw AlreadyClosed()
+                }
+                ClosePalletResult.Closed(
+                    pallet = pallet.copy(
+                        sscc = sscc,
+                        closedAt = closedAt,
+                        operatorId = operatorId,
+                        printState = PalletPrint.PENDING,
+                        printReason = null,
+                    ),
+                    sscc = sscc,
+                    boxCount = boxCount,
+                    closedAt = closedAt,
+                )
+            }
+        } catch (_: AlreadyClosed) {
+            ClosePalletResult.Empty
+        }
+    }
 }

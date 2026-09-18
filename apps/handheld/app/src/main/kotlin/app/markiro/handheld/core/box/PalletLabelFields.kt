@@ -57,7 +57,21 @@ data class PalletLabelInput(
  * / `formatLabelDate` functions this reuses, so the two field builders can
  * never disagree about «Дата производства» or «Годен до».
  */
-fun palletLabelFields(input: PalletLabelInput, zone: ZoneId = ZoneId.systemDefault()): Map<LabelField, String> {
+fun palletLabelFields(
+    input: PalletLabelInput,
+    zone: ZoneId = ZoneId.systemDefault(),
+    /**
+     * Leaves «Дата производства» and «Годен до» BLANK.
+     *
+     * A warehouse pallet is built from boxes of whatever shifts happen to be in
+     * the rack, so its member boxes can carry two different production dates.
+     * There is no single true date then, and printing one of them -- or the
+     * closing day, which is neither -- puts a wrong «Годен до» on a pallet a
+     * goods-in clerk will accept against it. Blank is the honest answer; the
+     * boxes' own labels still carry their own dates.
+     */
+    omitDates: Boolean = false,
+): Map<LabelField, String> {
     val effectiveDate = effectiveProductionIsoDate(input.closedAt, input.productionDate, zone)
     val effectiveExpiry = shelfLifeExpiryDate(effectiveDate, input.shelfLifeDays)
     return mapOf(
@@ -69,8 +83,8 @@ fun palletLabelFields(input: PalletLabelInput, zone: ZoneId = ZoneId.systemDefau
         LabelField.KM_CODE to "",
         LabelField.SSCC to input.sscc,
         LabelField.SHIFT_NO to (input.shiftNumber ?: ""),
-        LabelField.DATE to formatLabelDate(effectiveDate),
-        LabelField.EXPIRY to formatLabelDate(effectiveExpiry),
+        LabelField.DATE to if (omitDates) "" else formatLabelDate(effectiveDate),
+        LabelField.EXPIRY to if (omitDates) "" else formatLabelDate(effectiveExpiry),
         LabelField.QTY to input.itemCount.toString(),
         LabelField.QTY_BOXES to input.boxCount.toString(),
         LabelField.OPERATOR to (input.operatorName ?: ""),

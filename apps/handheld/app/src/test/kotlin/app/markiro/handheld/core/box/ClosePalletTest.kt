@@ -127,6 +127,63 @@ class ClosePalletTest {
         assertEquals(199L,pool.remaining(PREFIX,SsccPool.PALLET_EXTENSION_DIGIT))
     }
 
+    // -- closeWarehouse: the same transaction, without the shift -------------
+
+    /** Opens a warehouse pallet of this device and puts [boxes] memberships on it. */
+    private suspend fun givenWarehousePallet(boxes: Int): app.markiro.handheld.core.storage.PalletEntity {
+        val deviceId = checkNotNull(db.deviceConfigDao().get()).deviceId
+        val pallet = app.markiro.handheld.core.storage.PalletEntity(
+            palletId = "w1", shiftId = null, terminalId = deviceId, sscc = null, openedAt = "2026-09-11T07:00:00.000Z",
+            closedAt = null, operatorId = null, printState = app.markiro.handheld.core.storage.PalletPrint.PENDING, printReason = null, ackedAt = null,
+            kind = app.markiro.handheld.core.storage.PalletKind.WAREHOUSE, productId = "p-1", deviceId = deviceId,
+        )
+        db.recovery.commit {
+            db.palletDao().insert(pallet)
+            repeat(boxes) { index ->
+                db.palletMembershipDao().insert(
+                    app.markiro.handheld.core.storage.PalletMembershipEntity(
+                        palletId = pallet.palletId, sscc = "03460068200000000$index", addedAt = "t", operatorId = "op1",
+                        status = app.markiro.handheld.core.storage.MembershipStatus.PENDING, reason = null,
+                        winningPalletSscc = null, ackedAt = null, acknowledgedAt = null, bottleCount = 6,
+                        productionDate = "2026-09-10",
+                    ),
+                )
+            }
+        }
+        return pallet
+    }
+
+    @Test
+    fun aWarehousePalletCountsItsMembershipsAndCompletesNoGrant() = runTest {
+        // Strict shift authority is installed deliberately: a warehouse closure
+        // happens OUTSIDE any shift task, so it must neither complete a grant
+        // nor be denied by one.
+        givenShift(); seedPalletPool()
+        app.markiro.handheld.core.grants.installStrictShiftAuthority(db, "s1")
+        val pallet = givenWarehousePallet(boxes = 3)
+        val closed = palletLock.withLock { held -> closePallet.closeWarehouse(held, pallet, PREFIX, "op1") }
+        assertTrue(closed is ClosePalletResult.Closed)
+        closed as ClosePalletResult.Closed
+        // From pallet_memberships: this device holds no `boxes` row for a box
+        // another device closed.
+        assertEquals(3, closed.boxCount)
+        assertEquals('1', closed.sscc.first())
+        assertEquals(closed.sscc, db.palletDao().get("w1")!!.sscc)
+        assertTrue(db.grantDao().evidence().isEmpty())
+        assertEquals(199L, pool.remaining(PREFIX, SsccPool.PALLET_EXTENSION_DIGIT))
+    }
+
+    @Test
+    fun anEmptyOrUnnumberedWarehousePalletBurnsNothingAndStaysOpen() = runTest {
+        val empty = givenWarehousePallet(boxes = 0)
+        seedPalletPool()
+        assertEquals(ClosePalletResult.Empty, palletLock.withLock { closePallet.closeWarehouse(it, empty, PREFIX, "op1") })
+        assertEquals(200L, pool.remaining(PREFIX, SsccPool.PALLET_EXTENSION_DIGIT))
+        assertNull(db.palletDao().get("w1")!!.closedAt)
+        assertEquals(ClosePalletResult.NoIssuer, palletLock.withLock { closePallet.closeWarehouse(it, empty, null, "op1") })
+        assertEquals(200L, pool.remaining(PREFIX, SsccPool.PALLET_EXTENSION_DIGIT))
+    }
+
     // -- ClosePallet's own behaviour, mirroring CloseBoxTest -----------------
 
     @Test
