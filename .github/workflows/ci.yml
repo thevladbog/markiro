@@ -162,7 +162,11 @@ jobs:
     needs: classify-changes
     if: needs.classify-changes.outputs.verify_app_tests == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # The app suites (admin, kiosk, station, domain, ui, ...) take 11-15 min on
+    # a hosted runner as of 2026-09-18; at 15 the job was cut off after every
+    # step had already passed (shown as "cancelled"). A wall-clock budget for
+    # the whole job, not a test timeout.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
