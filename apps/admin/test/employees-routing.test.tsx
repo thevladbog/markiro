@@ -66,7 +66,7 @@ const JANE = {
   fullName: "Jane Doe",
   role: "Кассир",
   status: "active",
-  pickupPolicy: { limitMode: "limited", dayLimit: 12, canWriteoff: false },
+  pickupPolicy: { limitMode: "limited", dayLimit: 12, canWriteoff: false, canBuildPallets: false },
   badges: [],
   createdAt: "2026-01-01T00:00:00.000Z",
 };
@@ -824,7 +824,12 @@ it("keeps the employee numeric limit and writeoff permission when switching to u
     if (String(url) === "/api/employees/1/pickup-policy" && init?.method === "PATCH") {
       return jsonResponse(200, {
         ...JANE,
-        pickupPolicy: { limitMode: "unlimited", dayLimit: 12, canWriteoff: false },
+        pickupPolicy: {
+          limitMode: "unlimited",
+          dayLimit: 12,
+          canWriteoff: false,
+          canBuildPallets: false,
+        },
       });
     }
     if (String(url) === "/api/employees") return jsonResponse(200, { items: [JANE] });
@@ -843,7 +848,12 @@ it("keeps the employee numeric limit and writeoff permission when switching to u
       "/api/employees/1/pickup-policy",
       expect.objectContaining({
         method: "PATCH",
-        body: JSON.stringify({ limitMode: "unlimited", dayLimit: 12, canWriteoff: false }),
+        body: JSON.stringify({
+          limitMode: "unlimited",
+          dayLimit: 12,
+          canWriteoff: false,
+          canBuildPallets: false,
+        }),
       }),
     ),
   );

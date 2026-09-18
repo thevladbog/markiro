@@ -3311,6 +3311,8 @@
         "dayLimitError": "Enter a positive whole number",
         "canWriteoffLabel": "Allow writeoff",
         "canWriteoffHint": "Writeoff permission changes independently from the limit.",
+        "canBuildPalletsLabel": "Build pallets on a handheld",
+        "canBuildPalletsHint": "The employee can stack closed boxes onto a warehouse pallet in the handheld's Pallets mode.",
         "save": "Save pickup policy",
         "toasts": {
           "success": "Pickup policy saved",
