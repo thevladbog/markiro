@@ -37,12 +37,18 @@ const SAMPLE_DATA: Record<LabelTemplatePurpose, Record<LabelField, string>> = {
   box: boxSample,
   product_duplicate: duplicateSample,
   pallet: palletSample,
+  // A KM label shows a marking code exactly as a duplicate label does, so it
+  // reuses the same sample.
+  product_km: duplicateSample,
 };
 
 const RENDER_OPTIONS: Record<LabelTemplatePurpose, LabelRenderOptions> = {
   box: nativeOptions,
   product_duplicate: rasterOptions,
   pallet: nativeOptions,
+  // The code must be rasterised, not drawn as a native barcode -- same as
+  // product_duplicate.
+  product_km: rasterOptions,
 };
 
 export function labelPreviewData(

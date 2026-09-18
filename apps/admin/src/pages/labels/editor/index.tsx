@@ -103,8 +103,20 @@ function startingSpecFor(purpose: LabelTemplatePurpose): LabelTemplateSpec {
   return DEFAULT_SPEC;
 }
 
+/**
+ * The subset of `LabelTemplatePurpose` this settings-form editor can actually
+ * create or edit today. `@markiro/domain` widened `LabelTemplatePurpose` with
+ * a fourth member, `product_km`, but neither `CreateLabelTemplateInput`
+ * (`../api.js`) nor this editor's purpose picker below support it yet -- that
+ * UI is a later task. Keeping the editor's own state narrow (rather than the
+ * full `LabelTemplatePurpose`) is what keeps `purpose` and the create/update
+ * mutation calls in sync without silently widening what this screen can
+ * submit.
+ */
+type EditablePurpose = "box" | "product_duplicate" | "pallet";
+
 /** Narrows a Select's raw string value to the purpose union without a cast. */
-function toPurpose(value: string): LabelTemplatePurpose {
+function toPurpose(value: string): EditablePurpose {
   if (value === "product_duplicate") return "product_duplicate";
   if (value === "pallet") return "pallet";
   return "box";
@@ -188,7 +200,7 @@ interface LabelEditorContentProps {
   mode: "create" | "edit";
   id?: string;
   initialName: string;
-  initialPurpose: LabelTemplatePurpose;
+  initialPurpose: EditablePurpose;
   initialSpec: LabelTemplateSpec;
   initialEnabled: boolean;
   /** `null` = every category (see `LabelTemplateDto.chzProductGroupCodes`). */

@@ -248,6 +248,7 @@
     "inventory": "Inventories",
     "codes": "Code search",
     "conflicts": "Conflicts",
+    "kmOrders": "Code orders",
     "counterparties": "Counterparties",
     "labels": "Labels",
     "pickup": "Disposal",
@@ -270,6 +271,7 @@
     },
     "sections": {
       "production": "Production",
+      "marking": "Marking",
       "reference": "Reference data",
       "equipment": "Equipment and exchange",
       "organization": "Organization"
