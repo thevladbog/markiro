@@ -308,10 +308,16 @@ class WarehousePalletsTest {
         assertEquals("op-1", queued[0].operatorId)
         // The pallet still holds one box, so it stays open.
         assertNotNull(db.palletDao().get(r.pallet.palletId))
-        // A second removal of the same box before sync reuses the pending row.
+        // A second removal of the same box before sync reuses the pending row --
+        // refreshed to the LATEST removal, so the record the server eventually
+        // applies names the operator who actually took the box off and when.
         pallets.attach("034600682000000025", null)
-        assertTrue(pallets.remove(r.pallet.palletId, "034600682000000025", null))
-        assertEquals(1, db.palletMembershipRemovalDao().all().size)
+        now += 60_000
+        assertTrue(pallets.remove(r.pallet.palletId, "034600682000000025", "op-2"))
+        val reused = db.palletMembershipRemovalDao().all().single()
+        assertEquals(queued[0].id, reused.id)
+        assertEquals("op-2", reused.operatorId)
+        assertTrue(reused.removedAt > queued[0].removedAt)
         // ...but a SENT removal belongs to a pinned batch and gets a sibling.
         db.palletMembershipRemovalDao().markSent(queued[0].id)
         pallets.attach("034600682000000025", null)
@@ -347,6 +353,52 @@ class WarehousePalletsTest {
         db.palletMembershipDao().markRejected(r.pallet.palletId, "034600682000000018", "already_on_pallet", null, "t")
         assertFalse(pallets.remove(r.pallet.palletId, "034600682000000018", null))
         assertTrue(db.palletMembershipRemovalDao().all().isEmpty())
+    }
+
+    /**
+     * A pallet that is no longer open is out of reach of this flow entirely: it
+     * has an SSCC, a printed label and possibly an export, so «убрать» would
+     * make the paper on the stack overstate it with nothing to correct it. The
+     * operator's route is the disassemble flow. The server refuses the same way
+     * (`pallet_closed`); refusing locally keeps the queue from carrying a
+     * record that can only come back as that refusal.
+     */
+    @Test
+    fun removeRefusesOnAPalletThatIsNoLongerOpen() = runTest {
+        product()
+        pool.addRange(ServerRange(PREFIX, SsccPool.PALLET_EXTENSION_DIGIT, 0, 199, null))
+        meta.put(MetaStore.PALLET_BOOTSTRAP_ISSUER_PREFIX, PREFIX)
+        registry("034600682000000018")
+        registry("034600682000000025")
+        val r = pallets.attach("034600682000000018", "op-1") as AttachResult.Attached
+        pallets.attach("034600682000000025", "op-1")
+        assertTrue(pallets.close("op-1") is ClosePalletResult.Closed)
+
+        assertFalse(pallets.remove(r.pallet.palletId, "034600682000000018", "op-1"))
+        assertEquals(
+            listOf("034600682000000018", "034600682000000025"),
+            db.palletMembershipDao().byPallet(r.pallet.palletId).map { it.sscc }.sorted(),
+        )
+        assertTrue(db.palletMembershipRemovalDao().all().isEmpty())
+    }
+
+    /**
+     * The exemption below is for the NULL-SSCC refusal only. A concrete foreign
+     * SSCC means another device already closed a pallet around this box: a
+     * settled conflict a queued removal of ours says nothing about.
+     */
+    @Test
+    fun aQueuedRemovalDoesNotExcuseAConcreteForeignSscc() = runTest {
+        product()
+        registry("034600682000000018")
+        val r = pallets.attach("034600682000000018", null) as AttachResult.Attached
+        assertTrue(pallets.remove(r.pallet.palletId, "034600682000000018", null))
+        assertEquals(1, db.palletMembershipRemovalDao().all().size)
+        registry("034600682000000018", palletActive = true, palletSscc = "134600682000000099")
+        assertEquals(
+            AttachResult.OnAnotherPallet("134600682000000099"),
+            pallets.attach("034600682000000018", null),
+        )
     }
 
     /** The registry may still show the device's own claim that a queued removal undoes. */

@@ -40,6 +40,18 @@ interface PalletMembershipRemovalDao {
     @Query("SELECT * FROM pallet_membership_removals WHERE status = 'pending' AND palletId = :palletId AND sscc = :sscc LIMIT 1")
     suspend fun pendingFor(palletId: String, sscc: String): PalletMembershipRemovalEntity?
 
+    /**
+     * The reused `pending` row takes the LATEST removal's clock and operator:
+     * the record the server eventually applies must name who actually took the
+     * box off and when, not the first of a remove/re-scan/remove sequence.
+     */
+    @Query("UPDATE pallet_membership_removals SET removedAt = :removedAt, operatorId = :operatorId WHERE id = :id")
+    suspend fun refresh(id: Long, removedAt: String, operatorId: String?)
+
+    /**
+     * Both `pending` and `sent`: a removal in flight still means the registry's
+     * claim on this box is ours and is being released.
+     */
     @Query("SELECT COUNT(*) FROM pallet_membership_removals WHERE sscc = :sscc")
     suspend fun queuedFor(sscc: String): Int
 

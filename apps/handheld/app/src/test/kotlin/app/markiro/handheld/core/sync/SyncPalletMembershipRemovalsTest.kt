@@ -34,6 +34,7 @@ import okhttp3.mockwebserver.RecordedRequest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -198,6 +199,91 @@ class SyncPalletMembershipRemovalsTest {
         warehousePallet("w1", closed = false)
         removal("w1", "034600682000000018")
         assertEquals(1, engine().state.first { it.pending == 1 }.pending)
+    }
+
+    /**
+     * The pin must survive a LOCAL delete of a membership the pinned batch
+     * already carries. `WarehousePallets.remove` deletes the row at any status,
+     * so a `sent` one vanishes while its batch is still in flight; if the retry
+     * rebuilt its DTOs from a live `sent()` read it would resend the identical
+     * `batchId` with fewer memberships, the server would answer
+     * `station_batch_mismatch` (409), and every channel on this terminal would
+     * wedge forever. The snapshot taken inside the pin commit is what the retry
+     * sends.
+     */
+    @Test
+    fun removingASentMembershipDoesNotChangeThePinnedBatch() = runTest {
+        warehousePallet("w1", closed = false)
+        db.outboxDao().insert(
+            app.markiro.handheld.core.storage.OutboxEntity(
+                shiftId = "s1", raw = "raw-1", verdict = "ok", scannedAt = "2026-09-18T08:00:00.000Z", operatorId = "op-1",
+                codeHash = "a".repeat(64), gtin14 = "04600682000017", serial = "raw-1",
+            ),
+        )
+        membership("w1", "034600682000000018")
+        membership("w1", "034600682000000025")
+        server.enqueue(MockResponse().setResponseCode(500))
+        assertFalse(engine().drainAll())
+        val first = takeRequest().body.readUtf8()
+        val firstBatchId = Json.parseToJsonElement(first).jsonObject.getValue("batchId").jsonPrimitive.content
+
+        // Exactly what `remove` does to a `sent` row, plus the removal it queues.
+        db.palletMembershipDao().delete("w1", "034600682000000018")
+        removal("w1", "034600682000000018")
+        boxRegistry("034600682000000018", palletId = "srv", palletActive = true)
+
+        server.enqueue(
+            MockResponse().setResponseCode(201).setBody(
+                """{"applied":1,"alreadyApplied":false,"conflicts":[],"memberships":[""" +
+                    """{"palletId":"w1","boxSscc":"034600682000000018","status":"accepted"},""" +
+                    """{"palletId":"w1","boxSscc":"034600682000000025","status":"accepted"}]}""",
+            ),
+        )
+        server.enqueue(outcome("""{"palletId":"w1","boxSscc":"034600682000000018","status":"removed"}"""))
+        assertTrue(engine().drainAll())
+
+        val retryRaw = takeRequest().body.readUtf8()
+        assertEquals("the pinned batch must resend byte-identical bytes", first, retryRaw)
+        val retry = Json.parseToJsonElement(retryRaw).jsonObject
+        assertEquals(firstBatchId, retry.getValue("batchId").jsonPrimitive.content)
+        // The removal was queued after the pin, so it is not in the pinned batch...
+        assertEquals(0, retry["palletMembershipRemovals"]?.jsonArray?.size ?: 0)
+        // ...it rides the next one.
+        val next = bodyOf(takeRequest())
+        assertEquals(1, next.getValue("palletMembershipRemovals").jsonArray.size)
+        assertTrue(db.palletMembershipRemovalDao().all().isEmpty())
+        // `markAccepted` on the deleted row is a no-op; the surviving row is acked.
+        assertEquals(
+            listOf("034600682000000025" to MembershipStatus.ACCEPTED),
+            db.palletMembershipDao().byPallet("w1").map { it.sscc to it.status },
+        )
+        assertNull(meta().get(MetaStore.SYNC_PENDING_MEMBERSHIP_SNAPSHOT))
+    }
+
+    /**
+     * The twin of the membership suite's `alreadyApplied` guard: that flag alone
+     * says nothing about what happened to a removal this batch carried, and
+     * guessing would leave a box on a pallet it was taken off.
+     */
+    @Test
+    fun anAlreadyAppliedAnswerWithoutRemovalsWedgesRatherThanGuessing() = runTest {
+        warehousePallet("w1", closed = false)
+        removal("w1", "034600682000000018")
+        server.enqueue(MockResponse().setResponseCode(201).setBody("""{"applied":0,"alreadyApplied":true,"conflicts":[]}"""))
+        assertFalse(engine().drainAll())
+        assertEquals(RemovalStatus.SENT, db.palletMembershipRemovalDao().all().single().status)
+        assertNotNull(meta().get(MetaStore.SYNC_PENDING_BATCH_ID))
+    }
+
+    /** An answer shorter than the submitted list acks nothing: positions would be mis-attributed. */
+    @Test
+    fun aShortRemovalsAnswerAcksNothing() = runTest {
+        warehousePallet("w1", closed = false)
+        removal("w1", "034600682000000018")
+        removal("w1", "034600682000000025")
+        server.enqueue(outcome("""{"palletId":"w1","boxSscc":"034600682000000018","status":"removed"}"""))
+        assertFalse(engine().drainAll())
+        assertEquals(listOf(RemovalStatus.SENT, RemovalStatus.SENT), db.palletMembershipRemovalDao().all().map { it.status })
     }
 
     @Test

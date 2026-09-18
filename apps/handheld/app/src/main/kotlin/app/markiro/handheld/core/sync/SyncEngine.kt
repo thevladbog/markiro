@@ -42,6 +42,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.booleanOrNull
@@ -218,6 +219,28 @@ class SyncEngine(
         } else {
             MAX_PALLET_MEMBERSHIPS
         }
+        // The DTOs a batch in flight actually pinned, read back verbatim.
+        //
+        // Unlike every other channel, this one's rows can VANISH under a batch
+        // in flight: `WarehousePallets.remove` deletes a membership row at any
+        // status, `sent` included. A retry that rebuilt its body from a live
+        // `sent()` read would then resend the identical `batchId` with fewer
+        // memberships, the server would answer `station_batch_mismatch` (409),
+        // and the drain would fail forever -- wedging every channel on this
+        // terminal. The snapshot is written under the same commit as the pin,
+        // so a local delete cannot change the bytes a pinned batch resends.
+        //
+        // Absent only for a batch pinned by a build that predates the snapshot;
+        // that one falls back to the live `sent()` read below. A pin whose COUNT
+        // is zero carries no memberships whatever the snapshot says: the two are
+        // written under one commit, so they disagree only when the pin is
+        // damaged, and the count is the key every channel here is judged by.
+        val pinnedMemberships: List<PalletMembershipDto>? = if (pendingCeiling == null || membershipLimit == 0) {
+            null
+        } else {
+            meta.get(MetaStore.SYNC_PENDING_MEMBERSHIP_SNAPSHOT)
+                ?.let { json.decodeFromString(ListSerializer(PalletMembershipDto.serializer()), it) }
+        }
         // This read is provisional for the fresh-batch case (`pendingCeiling
         // == null`): it only decides, below, whether this drain has any work
         // at all. The set that is actually signed into the batch id and
@@ -225,9 +248,8 @@ class SyncEngine(
         // commit further down -- otherwise a `deletePending` racing this
         // drain between this read and that mark could leave the batch naming
         // a row that already vanished. For a retry (`pendingCeiling != null`)
-        // this IS the authoritative set: the `sent` rows a batch already
-        // pinned cannot change except through `revertSent` in a later pin
-        // cycle, so no re-read is needed.
+        // this is only the fallback for a snapshot-less pin: the snapshot
+        // above is authoritative when present.
         var membershipRows = when {
             membershipLimit == 0 -> emptyList()
             pendingCeiling != null -> db.palletMembershipDao().sent(membershipLimit)
@@ -317,7 +339,8 @@ class SyncEngine(
         // An empty outbox with unacknowledged boxes, pallets, events,
         // memberships or corrections of either kind is not empty.
         if (rows.isEmpty() && boxRows.isEmpty() && palletRows.isEmpty() && labelRows.isEmpty() &&
-            exceptionRows.isEmpty() && palletExceptionRows.isEmpty() && membershipRows.isEmpty() &&
+            exceptionRows.isEmpty() && palletExceptionRows.isEmpty() &&
+            (pinnedMemberships?.isEmpty() ?: membershipRows.isEmpty()) &&
             removalRows.isEmpty()
         ) {
             if (pendingCeiling != null) clearPending()
@@ -384,9 +407,25 @@ class SyncEngine(
             // a later batch sends them a second time under a different id.
             for (m in membershipRows) db.palletMembershipDao().markSent(m.palletId, m.sscc)
             for (r in removalRows) db.palletMembershipRemovalDao().markSent(r.id)
+            // ...and under that same commit, the exact DTO list this batch will
+            // send. A membership row can be DELETED locally while its batch is
+            // in flight (`WarehousePallets.remove` deletes at any status), so
+            // the pinned count and the `sent` marks are not enough to rebuild
+            // an identical body on a retry -- only these bytes are.
+            meta.put(
+                MetaStore.SYNC_PENDING_MEMBERSHIP_SNAPSHOT,
+                json.encodeToString(
+                    ListSerializer(PalletMembershipDto.serializer()),
+                    membershipRows.map { PalletMembershipDto(it.palletId, it.sscc, it.addedAt, it.operatorId) },
+                ),
+            )
             id
             }
         }
+        // What this batch sends and what its answer is matched against, in this
+        // order: the snapshot of a batch in flight, or the rows just pinned.
+        val membershipDtos = pinnedMemberships
+            ?: membershipRows.map { PalletMembershipDto(it.palletId, it.sscc, it.addedAt, it.operatorId) }
         val body = json.encodeToString(
             SyncBatchRequest.serializer(),
             SyncBatchRequest(
@@ -397,7 +436,7 @@ class SyncEngine(
                 labelRows.map { json.parseToJsonElement(it.payloadJson) },
                 exceptionRows.map { json.parseToJsonElement(it.payloadJson) },
                 palletExceptionRows.map { json.parseToJsonElement(it.payloadJson) },
-                membershipRows.map { PalletMembershipDto(it.palletId, it.sscc, it.addedAt, it.operatorId) },
+                membershipDtos,
                 removalRows.map { PalletMembershipRemovalDto(it.palletId, it.sscc, it.removedAt, it.operatorId) },
             ),
         )
@@ -421,7 +460,7 @@ class SyncEngine(
         // leaves the pin standing and resends the identical batch; a server
         // that never answers memberships wedges this device loudly, which is
         // the intended outcome.
-        if (membershipRows.isNotEmpty() && parsed.memberships?.size != membershipRows.size) return Step.FAILED
+        if (membershipDtos.isNotEmpty() && parsed.memberships?.size != membershipDtos.size) return Step.FAILED
         // The removals' answer is held to the identical standard, for the
         // identical reason: guessing which record an entry belongs to would
         // silently leave a box on a pallet it was taken off, or take one off a
@@ -482,15 +521,19 @@ class SyncEngine(
             // other: the record was quarantined server-side and the box stays
             // claimable once the subscription is back. An accepted record
             // leaves the claim alone; the registry refresh settles it.
-            if (membershipRows.isNotEmpty()) {
+            // A row this batch pinned may have been DELETED locally since
+            // (`WarehousePallets.remove` deletes at any status): both
+            // `markAccepted` and `markRejected` then match nothing, which is the
+            // intended no-op -- the queued removal is what settles that box.
+            if (membershipDtos.isNotEmpty()) {
                 parsed.memberships?.forEachIndexed { i, outcome ->
-                    val row = membershipRows[i]
+                    val row = membershipDtos[i]
                     when (outcome.status) {
-                        "accepted", "replayed" -> db.palletMembershipDao().markAccepted(row.palletId, row.sscc, Iso.format(at))
+                        "accepted", "replayed" -> db.palletMembershipDao().markAccepted(row.palletId, row.boxSscc, Iso.format(at))
                         else -> {
                             db.palletMembershipDao()
-                                .markRejected(row.palletId, row.sscc, outcome.status, outcome.winningPalletSscc, Iso.format(at))
-                            db.boxRegistryDao().release(row.sscc)
+                                .markRejected(row.palletId, row.boxSscc, outcome.status, outcome.winningPalletSscc, Iso.format(at))
+                            db.boxRegistryDao().release(row.boxSscc)
                         }
                     }
                 }
@@ -518,6 +561,7 @@ class SyncEngine(
             db.metaDao().remove(MetaStore.SYNC_PENDING_EXCEPTION_COUNT)
             db.metaDao().remove(MetaStore.SYNC_PENDING_PALLET_EXCEPTION_COUNT)
             db.metaDao().remove(MetaStore.SYNC_PENDING_MEMBERSHIP_COUNT)
+            db.metaDao().remove(MetaStore.SYNC_PENDING_MEMBERSHIP_SNAPSHOT)
             db.metaDao().remove(MetaStore.SYNC_PENDING_MEMBERSHIP_REMOVAL_COUNT)
             parsed.denied?.let { db.metaDao().put(MetaEntity(MetaStore.SYNC_LAST_DENIED, it)) }
             db.metaDao().put(MetaEntity(MetaStore.SYNC_LAST_SUCCESS_AT, at.toString()))
@@ -542,6 +586,7 @@ class SyncEngine(
         meta.remove(MetaStore.SYNC_PENDING_EXCEPTION_COUNT)
         meta.remove(MetaStore.SYNC_PENDING_PALLET_EXCEPTION_COUNT)
         meta.remove(MetaStore.SYNC_PENDING_MEMBERSHIP_COUNT)
+        meta.remove(MetaStore.SYNC_PENDING_MEMBERSHIP_SNAPSHOT)
         meta.remove(MetaStore.SYNC_PENDING_MEMBERSHIP_REMOVAL_COUNT)
         // The abandoned batch never reached the server, so its rows are owed
         // again -- as `pending`, or the next batch would read none of them.

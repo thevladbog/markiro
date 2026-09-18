@@ -354,7 +354,10 @@ Storage is Room 19 (the removal queue).
 When the server rejects a membership at sync (a race with another device), the screen
 shows a conflict banner listing the rejected SSCCs and reasons, sectioned by pallet, with
 «Принято» per section to acknowledge and dismiss it without discarding the rejection rows.
-The notice is device-wide rather than tied to the pallet currently open: a membership can
+When the last box is taken off an open pallet the pallet itself disappears, and any
+unacknowledged rejection notices for it go with it — the boxes those notices name were
+never on the pallet in the first place. The notice is device-wide rather than tied to
+the pallet currently open: a membership can
 still be pending when its pallet is closed and its label printed, and that label states
 the box count, so a rejection arriving afterwards leaves the paper on the stack
 overstating it. A closed pallet's section therefore also offers «Перепечатать этикетку»,
