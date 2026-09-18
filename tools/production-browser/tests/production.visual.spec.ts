@@ -312,6 +312,46 @@ const SHIFT_EXPORT_FORMATS_FIXTURE = [
     mimeType: "application/xml; charset=utf-8",
     boxMode: "boxes",
   },
+  {
+    id: "shift_txt_pallets",
+    version: 1,
+    label: "[TXT][Паллеты] Отчет смены",
+    extension: "txt",
+    mimeType: "text/plain; charset=utf-8",
+    boxMode: "pallets",
+  },
+  {
+    id: "shift_csv_pallets",
+    version: 1,
+    label: "[CSV][Паллеты] Отчет смены",
+    extension: "csv",
+    mimeType: "text/csv; charset=utf-8",
+    boxMode: "pallets",
+  },
+  {
+    id: "shift_xml_gismt_aggregation_pallets",
+    version: 1,
+    label: "[XML][ГИСМТ] Паллетная агрегация",
+    extension: "xml",
+    mimeType: "application/xml; charset=utf-8",
+    boxMode: "pallets",
+  },
+  {
+    id: "shift_txt_pallet_boxes",
+    version: 1,
+    label: "[TXT][Паллеты → короба] Отчет смены",
+    extension: "txt",
+    mimeType: "text/plain; charset=utf-8",
+    boxMode: "pallet_boxes",
+  },
+  {
+    id: "shift_xml_gismt_pallet_boxes",
+    version: 1,
+    label: "[XML][ГИСМТ] Агрегация паллет без кодов",
+    extension: "xml",
+    mimeType: "application/xml; charset=utf-8",
+    boxMode: "pallet_boxes",
+  },
 ];
 
 /**
@@ -615,6 +655,66 @@ function fixtures(locale: AdminLocale) {
   };
 
   /**
+   * Three pallets in the three states the panel can show: a plain closed one,
+   * one whose member box was disassembled after the close, and a disassembled
+   * pallet. Only the first is printable, which is what makes the placard rule
+   * ("closed, still standing, has an SSCC") visible on the frame.
+   */
+  const PALLETS = [
+    {
+      id: "90000000-0000-4000-8000-000000000001",
+      sscc: "00346006820000000015",
+      kind: "production" as const,
+      productId: PRODUCT_ID,
+      productName: PRODUCT.name,
+      deviceName: copy.station,
+      rejectedMembershipCount: 0,
+      terminalId: null,
+      lineName: LINE.name,
+      operatorId: null,
+      boxCount: 48,
+      unitCount: 576,
+      closedAt: "2026-08-30T11:20:00.000Z",
+      contentsChangedAfterClose: false,
+      disassembledAt: null,
+    },
+    {
+      id: "90000000-0000-4000-8000-000000000002",
+      sscc: "00346006820000000022",
+      kind: "production" as const,
+      productId: PRODUCT_ID,
+      productName: PRODUCT.name,
+      deviceName: copy.station,
+      rejectedMembershipCount: 0,
+      terminalId: null,
+      lineName: LINE.name,
+      operatorId: null,
+      boxCount: 47,
+      unitCount: 564,
+      closedAt: "2026-08-30T12:05:00.000Z",
+      contentsChangedAfterClose: true,
+      disassembledAt: null,
+    },
+    {
+      id: "90000000-0000-4000-8000-000000000003",
+      sscc: "00346006820000000039",
+      kind: "production" as const,
+      productId: PRODUCT_ID,
+      productName: PRODUCT.name,
+      deviceName: copy.station,
+      rejectedMembershipCount: 0,
+      terminalId: null,
+      lineName: LINE.name,
+      operatorId: null,
+      boxCount: 0,
+      unitCount: 0,
+      closedAt: "2026-08-30T09:40:00.000Z",
+      contentsChangedAfterClose: false,
+      disassembledAt: "2026-08-30T13:15:00.000Z",
+    },
+  ];
+
+  /**
    * `/api/dashboard/overview` is parsed with a `.strict()` zod schema
    * (apps/admin/src/pages/dashboard/api.ts:71-118), so these fixtures mirror
    * it field for field. Verdict, quality and the shift list must AGREE — a
@@ -817,6 +917,7 @@ function fixtures(locale: AdminLocale) {
     DUPLICATE_SHIFT,
     CLOSED_SHIFT,
     LATE_SHIFT,
+    PALLETS,
     DASHBOARD_UNDER_CONTROL,
     DASHBOARD_ATTENTION,
     EXPORT_READY,
@@ -868,6 +969,15 @@ async function installApi(page: Page, scenario: Scenario, fx: Fixtures) {
     if (path === "/api/pickup-orders") return json(route, PICKUP_ORDERS_EMPTY);
     // The details panel loads the summary for every shift status.
     if (/^\/api\/shifts\/[0-9a-f-]+\/summary$/.test(path)) return json(route, fx.SHIFT_SUMMARY);
+    // `GET /pallets` 404s for an unknown shift rather than returning an empty
+    // list, so the panel treats an error as a real failure -- answer only the
+    // shifts these frames open.
+    if (path === "/api/pallets") {
+      const shiftId = url.searchParams.get("shiftId");
+      const known = [SHIFT_ID, ACTIVE_SHIFT_ID, CLOSED_SHIFT_ID, LATE_SHIFT_ID];
+      if (shiftId && known.includes(shiftId)) return json(route, { items: fx.PALLETS });
+      return route.fulfill({ status: 404, contentType: "application/json", body: "{}" });
+    }
 
     if (scenario === "shiftDuplicate" || scenario === "shiftLabels") {
       if (path === "/api/shifts") return json(route, { items: [fx.DUPLICATE_SHIFT] });
