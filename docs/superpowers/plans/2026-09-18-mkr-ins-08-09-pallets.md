@@ -243,10 +243,18 @@ Expected: все тесты PASS. Открыть шесть новых PNG и у
 
 - [ ] **Step 5: Commit**
 
+Коммитить ТОЛЬКО шесть новых кадров поимённо: прочие кадры, переписанные
+этим прогоном, разбирает Task 3, и общий `git add` по каталогу утащил бы их
+без разбора.
+
 ```bash
 git add tools/production-browser/tests/production.visual.spec.ts \
-        packages/legal-documents/assets/instructions/mkr-ins-08 \
-        packages/legal-documents/assets/instructions/mkr-ins-09
+        packages/legal-documents/assets/instructions/mkr-ins-08/ru/shift-pallets.png \
+        packages/legal-documents/assets/instructions/mkr-ins-08/en/shift-pallets.png \
+        packages/legal-documents/assets/instructions/mkr-ins-09/ru/shift-pallets.png \
+        packages/legal-documents/assets/instructions/mkr-ins-09/en/shift-pallets.png \
+        packages/legal-documents/assets/instructions/mkr-ins-09/ru/pallet-placards.png \
+        packages/legal-documents/assets/instructions/mkr-ins-09/en/pallet-placards.png
 git commit -m "test(shifts): capture the pallet planning, panel and placard frames"
 ```
 
@@ -261,8 +269,8 @@ git commit -m "test(shifts): capture the pallet planning, panel and placard fram
 ```bash
 cd /Users/thevladbog/PRSOME/q-audit
 git status --short packages/legal-documents/assets | awk '{print $2}' | while IFS= read -r f; do
-  git show "HEAD:$f" > "$TMPDIR/base.png"
-  v=$(magick compare -metric PAE "$TMPDIR/base.png" "$f" null: 2>&1 | grep -oE '^[0-9]+')
+  git show "HEAD:$f" > /tmp/claude-501/base.png
+  v=$(magick compare -metric PAE /tmp/claude-501/base.png "$f" null: 2>&1 | grep -oE '^[0-9]+')
   printf "%-64s %s\n" "${f#packages/legal-documents/assets/instructions/}" "$v"
 done
 ```
