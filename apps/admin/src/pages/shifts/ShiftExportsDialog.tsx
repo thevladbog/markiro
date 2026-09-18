@@ -89,7 +89,9 @@ export function ShiftExportsContent({
     if (!canSubmit || !formatId) return;
     const selectedFormat = offeredFormats.find((format) => format.id === formatId);
     if (!selectedFormat) return;
-    // A new deliberate submission after a failed request starts a new idempotency scope.
+    // The same key is reused across retries of one unchanged submission, so a
+    // network hiccup cannot queue the export twice; editing any field resets
+    // it (see onValueChange).
     const requestIdempotencyKey = idempotencyKey.current ?? crypto.randomUUID();
     idempotencyKey.current = requestIdempotencyKey;
     setError(null);

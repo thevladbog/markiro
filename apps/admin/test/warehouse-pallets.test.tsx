@@ -144,6 +144,11 @@ describe("pallets registry", () => {
       const urls = fetchMock.mock.calls.map((call) => String(call[0]));
       expect(urls).toContain("/api/pallets?kind=warehouse&productId=p1&limit=100");
     });
+
+    const urls = fetchMock.mock.calls.map((call) => String(call[0]));
+    expect(
+      urls.some((url) => url.startsWith("/api/products") && url.includes("archived=all")),
+    ).toBe(true);
   });
 
   it("loads the next page with the server's cursor on «Показать ещё»", async () => {

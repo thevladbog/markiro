@@ -209,13 +209,20 @@ function AddLinesPanel({ docId }: { docId: string }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const [pasteValue, setPasteValue] = useState(() => searchParams.get("sscc") ?? "");
 
+  const dropSeededSscc = () => {
+    if (!searchParams.has("sscc")) return;
+    const next = new URLSearchParams(searchParams);
+    next.delete("sscc");
+    setSearchParams(next, { replace: true });
+  };
+
   const handleAddLines = async () => {
     const ssccs = splitSsccInput(pasteValue);
     if (ssccs.length === 0) return;
     try {
       await addLinesMutation.mutateAsync(ssccs);
       setPasteValue("");
-      if (searchParams.has("sscc")) setSearchParams({}, { replace: true });
+      dropSeededSscc();
     } catch (error) {
       toast(
         "error",
@@ -229,6 +236,7 @@ function AddLinesPanel({ docId }: { docId: string }) {
   const handleFile = async (file: File) => {
     try {
       await importMutation.mutateAsync(file);
+      dropSeededSscc();
     } catch (error) {
       toast(
         "error",

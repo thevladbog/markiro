@@ -73,7 +73,7 @@ export function PalletsPage() {
   );
 
   const query = useInfinitePallets(filters);
-  const { data: products } = useProducts();
+  const { data: products } = useProducts({ archived: "all" });
   const { data: devices } = useAllDevices();
 
   const kindOptions: SelectOption[] = [

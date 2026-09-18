@@ -19,7 +19,7 @@
  * real failure to report, not as "this shift has no pallets".
  */
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import type { UseQueryResult } from "@tanstack/react-query";
+import type { InfiniteData, UseInfiniteQueryResult, UseQueryResult } from "@tanstack/react-query";
 
 import { apiFetch } from "../../api/client.js";
 
@@ -123,7 +123,9 @@ export function usePallets(shiftId: string | undefined): UseQueryResult<PalletDt
  * key, so changing any filter starts a fresh first page rather than appending
  * to the previous list.
  */
-export function useInfinitePallets(filters: PalletListFilters) {
+export function useInfinitePallets(
+  filters: PalletListFilters,
+): UseInfiniteQueryResult<InfiniteData<ListPalletsResponse, string | undefined>> {
   return useInfiniteQuery({
     queryKey: [...PALLETS_QUERY_KEY, "registry", filters] as const,
     initialPageParam: undefined as string | undefined,
