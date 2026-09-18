@@ -195,6 +195,20 @@ export const palletMembershipSchema = z.object({
 export type PalletMembershipDto = z.infer<typeof palletMembershipSchema>;
 
 /**
+ * A box taken back off the device's own OPEN warehouse pallet (spec
+ * 2026-09-18-open-pallet-box-removal §2). The undo of `palletMembershipSchema`:
+ * same identity, applied BEFORE memberships so a removal and a re-scan in one
+ * batch land in that order.
+ */
+export const palletMembershipRemovalSchema = z.object({
+  palletId: z.string().min(1).max(64),
+  boxSscc: z.string().regex(/^\d{18}$/),
+  removedAt: z.string().datetime(),
+  operatorId: z.string().uuid().toLowerCase().nullable(),
+});
+export type PalletMembershipRemovalDto = z.infer<typeof palletMembershipRemovalSchema>;
+
+/**
  * An operator exception against a closed pallet. Only two kinds exist:
  * «закрыть паллету досрочно» is an ordinary close, not an exception.
  */
@@ -299,6 +313,17 @@ export const syncBatchSchema = z.object({
       (memberships) =>
         new Set(memberships.map((m) => `${m.palletId}|${m.boxSscc}`)).size === memberships.length,
       "Pallet memberships must name each (pallet, box) at most once in a batch",
+    )
+    .default([]),
+  // Boxes taken back off open warehouse pallets. Bounded by the membership
+  // cap: a removal is the undo of exactly one membership.
+  palletMembershipRemovals: z
+    .array(palletMembershipRemovalSchema)
+    .max(MAX_PALLET_MEMBERSHIPS_PER_SYNC_BATCH)
+    .refine(
+      (removals) =>
+        new Set(removals.map((r) => `${r.palletId}|${r.boxSscc}`)).size === removals.length,
+      "Pallet membership removals must name each (pallet, box) at most once in a batch",
     )
     .default([]),
   // Operator exceptions carried by this batch (undo/clear/disassemble/
@@ -431,7 +456,8 @@ export interface DeniedStationRecordDto {
     | "product_label_event"
     | "pallet"
     | "pallet_exception"
-    | "pallet_membership";
+    | "pallet_membership"
+    | "pallet_membership_removal";
   recordIndex: number;
   /** Null for a warehouse record, which belongs to no shift. */
   shiftId: string | null;
@@ -457,6 +483,15 @@ export interface PalletMembershipOutcomeDto {
   winningPalletSscc?: string;
 }
 
+export type PalletMembershipRemovalStatus =
+  "removed" | "replayed" | "not_found" | "pallet_closed" | "subscription_read_only";
+
+export interface PalletMembershipRemovalOutcomeDto {
+  palletId: string;
+  boxSscc: string;
+  status: PalletMembershipRemovalStatus;
+}
+
 export interface SyncBatchResponseDto {
   validationOccurrences?: ValidationOccurrenceOutcome[];
   applied: number;
@@ -472,6 +507,8 @@ export interface SyncBatchResponseDto {
   productLabelReceipt?: ProductLabelReceipt;
   /** Present when the batch carried `palletMemberships`; one entry per record, same order. */
   memberships?: PalletMembershipOutcomeDto[];
+  /** Present when the batch carried `palletMembershipRemovals`; one entry per record, same order. */
+  membershipRemovals?: PalletMembershipRemovalOutcomeDto[];
 }
 
 const codeHashOpenApiSchema = { type: "string", pattern: "^[0-9a-f]{64}$" } as const;
@@ -529,6 +566,7 @@ const deniedStationRecordOpenApiSchema: SchemaObject = {
         "pallet",
         "pallet_exception",
         "pallet_membership",
+        "pallet_membership_removal",
       ],
     },
     recordIndex: { type: "integer", minimum: 0 },
@@ -573,6 +611,20 @@ const palletMembershipOutcomeOpenApiSchema: SchemaObject = {
   },
 };
 
+const palletMembershipRemovalOutcomeOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["palletId", "boxSscc", "status"],
+  properties: {
+    palletId: { type: "string" },
+    boxSscc: { type: "string", pattern: "^[0-9]{18}$" },
+    status: {
+      type: "string",
+      enum: ["removed", "replayed", "not_found", "pallet_closed", "subscription_read_only"],
+    },
+  },
+};
+
 export const syncBatchResponseOpenApiSchema: SchemaObject = {
   type: "object",
   additionalProperties: false,
@@ -600,6 +652,12 @@ export const syncBatchResponseOpenApiSchema: SchemaObject = {
       items: palletMembershipOutcomeOpenApiSchema,
       description:
         "Present when the batch carried palletMemberships; one entry per record, same order.",
+    },
+    membershipRemovals: {
+      type: "array",
+      items: palletMembershipRemovalOutcomeOpenApiSchema,
+      description:
+        "Present when the batch carried palletMembershipRemovals; one entry per record, same order.",
     },
   },
 };

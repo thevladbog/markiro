@@ -169,8 +169,15 @@ function payloadDigest(body: SyncBatchDto): string {
   // closure, which is the ordinary offline-first case, not an edge one. So a
   // box that stands on no pallet hashes exactly as it did before 06d, and
   // only a box that names one contributes the key.
-  const { productLabelEvents, pallets, palletExceptions, palletMemberships, boxes, ...legacy } =
-    body;
+  const {
+    productLabelEvents,
+    pallets,
+    palletExceptions,
+    palletMemberships,
+    palletMembershipRemovals,
+    boxes,
+    ...legacy
+  } = body;
   const canonical: Record<string, unknown> = {
     ...legacy,
     boxes: boxes.map(({ devicePalletId, ...box }) =>
@@ -191,6 +198,8 @@ function payloadDigest(body: SyncBatchDto): string {
   }
   if (palletExceptions.length > 0) canonical.palletExceptions = palletExceptions;
   if (palletMemberships.length > 0) canonical.palletMemberships = palletMemberships;
+  if (palletMembershipRemovals.length > 0)
+    canonical.palletMembershipRemovals = palletMembershipRemovals;
   return createHash("sha256").update(canonicalJson(canonical)).digest("hex");
 }
 
@@ -242,7 +251,11 @@ export class StationScansService {
     tenantId: string,
     input: Omit<
       SyncBatchDto,
-      "productLabelEvents" | "pallets" | "palletExceptions" | "palletMemberships"
+      | "productLabelEvents"
+      | "pallets"
+      | "palletExceptions"
+      | "palletMemberships"
+      | "palletMembershipRemovals"
     > & {
       productLabelEvents?: SyncBatchDto["productLabelEvents"];
       // Optional for the same reason `productLabelEvents` is: a caller
@@ -251,6 +264,7 @@ export class StationScansService {
       pallets?: SyncBatchDto["pallets"];
       palletExceptions?: SyncBatchDto["palletExceptions"];
       palletMemberships?: SyncBatchDto["palletMemberships"];
+      palletMembershipRemovals?: SyncBatchDto["palletMembershipRemovals"];
     },
     authenticatedTerminalId: string,
     capabilities?: string,
@@ -283,6 +297,9 @@ export class StationScansService {
       // device-local id, and the pallet it resolves to is always the
       // authenticated device's own.
       palletMemberships: input.palletMemberships ?? [],
+      // Same: a removal names the device-local pallet id of the authenticated
+      // device's own pallet, so there is no terminal to substitute either.
+      palletMembershipRemovals: input.palletMembershipRemovals ?? [],
     };
     const digest = payloadDigest(body);
     // Ensure the months this batch actually needs have partitions BEFORE
@@ -417,6 +434,9 @@ export class StationScansService {
             // Replayed verbatim: the handheld's conflict view is rebuilt from
             // this answer, and a redelivery must not report a different one.
             ...(stored?.memberships ? { memberships: stored.memberships } : {}),
+            ...(stored?.membershipRemovals
+              ? { membershipRemovals: stored.membershipRemovals }
+              : {}),
           };
         }
 
@@ -580,6 +600,14 @@ export class StationScansService {
               shiftId: null,
               code: "subscription_read_only" as const,
             })),
+            // The undo of a membership is held to the same rule as the
+            // membership: always denied while read-only, quarantined, never dropped.
+            ...body.palletMembershipRemovals.map((_removal, recordIndex) => ({
+              recordKind: "pallet_membership_removal" as const,
+              recordIndex,
+              shiftId: null,
+              code: "subscription_read_only" as const,
+            })),
           ];
           await this.quarantine(tx, tenantId, authenticatedTerminalId, digest, body, denied);
           const deniedKeys = new Set(
@@ -598,6 +626,9 @@ export class StationScansService {
             ),
             palletMemberships: body.palletMemberships.filter(
               (_membership, index) => !deniedKeys.has(`pallet_membership:${index}`),
+            ),
+            palletMembershipRemovals: body.palletMembershipRemovals.filter(
+              (_removal, index) => !deniedKeys.has(`pallet_membership_removal:${index}`),
             ),
           };
         } else if (
@@ -1887,6 +1918,7 @@ export class StationScansService {
       pallet: body.pallets,
       pallet_exception: body.palletExceptions,
       pallet_membership: body.palletMemberships,
+      pallet_membership_removal: body.palletMembershipRemovals,
     } as const;
     await tx
       .insert(schema.stationSyncQuarantine)
