@@ -742,7 +742,12 @@ export async function applyPalletMembershipRemovals(
             eq(schema.pallets.devicePalletId, removal.palletId),
           ),
         )
-        .limit(1);
+        .limit(1)
+        // Row-locked for the rest of the transaction: the prune that may
+        // delete this draft runs later in the same batch, and a cabinet
+        // disassembly or another batch's closure of the same pallet must
+        // queue behind it rather than interleave between the two.
+        .for("update");
       pallet = row ? { id: row.id } : { id: "" };
       palletByDeviceId.set(removal.palletId, pallet);
     }

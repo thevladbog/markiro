@@ -15,7 +15,7 @@
 - Record kind name: `pallet_membership_removal` (quarantine CHECK, `DeniedStationRecordDto.recordKind`, quarantine payload map, OpenAPI enum) — all four must agree (spec §2).
 - Batch field: `palletMembershipRemovals`, element `{ palletId, boxSscc, removedAt, operatorId }`; response field `membershipRemovals`, element `{ palletId, boxSscc, status }` with `status ∈ removed | replayed | not_found | pallet_closed | subscription_read_only` (spec §2).
 - Cap: `MAX_PALLET_MEMBERSHIPS_PER_SYNC_BATCH` (existing, 100) on both sides; no new domain constant; `SyncEngine.MAX_PALLET_MEMBERSHIP_REMOVALS = 100` (spec Decisions, §3.3).
-- Ingest order: items → box closures → pre-pass → **removals** → memberships → **prune** → pallet closures → box exceptions → pallet exceptions (spec §2).
+- Ingest order: items → pallet pre-pass (closures and exceptions only, never memberships) → box closures → **removals** → membership pre-pass (`upsertPallets` for the warehouse pallets memberships name) → memberships → **prune** → pallet closures → box exceptions → pallet exceptions (spec §2). A removal never creates a pallet row, so a removal naming a pallet that a membership in the same batch creates answers `not_found`.
 - `payloadDigest` folds `palletMembershipRemovals` only when non-empty (spec §2).
 - Prune deletes `pallet_membership_rejections` for the pallet, then the pallet row, only when `kind = 'warehouse' AND closed_at IS NULL AND disassembled_at IS NULL` and no box has `pallet_id` = it (spec §2).
 - Handheld table `pallet_membership_removals(id AUTOINCREMENT, palletId, sscc, removedAt, operatorId, status)`, index `(status, id)`; Room version 19; `MIGRATION_18_19` (spec §3.1).
@@ -516,6 +516,18 @@ export async function pruneEmptyWarehouseDrafts(
       )
       .limit(1);
     if (!empty) continue;
+    // A rival device's rejection may point at this draft through
+    // `winning_pallet_id` (FK, ON DELETE NO ACTION): null the pointer first,
+    // keep that device's refusal record.
+    await tx
+      .update(schema.palletMembershipRejections)
+      .set({ winningPalletId: null })
+      .where(
+        and(
+          eq(schema.palletMembershipRejections.tenantId, tenantId),
+          eq(schema.palletMembershipRejections.winningPalletId, palletId),
+        ),
+      );
     await tx
       .delete(schema.palletMembershipRejections)
       .where(
