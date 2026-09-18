@@ -123,6 +123,23 @@ async function screenshotFullMain(page: Page, path: string): Promise<void> {
   await page.screenshot({ path, scale: "css", fullPage: true });
 }
 
+/**
+ * The "complex" side panel caps at 720px (`components.css:598`), narrower
+ * than the pallets table once a status badge carries the long "contents
+ * changed after close" text -- live, that is a horizontal scrollbar on
+ * `.mk-table__scroll`, but a printed frame has no scrollbar to drag, so an
+ * un-widened capture cuts that badge off mid-word (Russian needs the extra
+ * width; the shorter English string happens to already fit). Widen just the
+ * panel for the shot -- rendering-only, same accommodation
+ * `screenshotFullMain` makes for `<main>` overflow.
+ */
+async function widenPalletsPanel(page: Page): Promise<void> {
+  await page.addStyleTag({
+    content: ".mk-side-panel--complex { --mk-panel-width: 900px !important; }",
+  });
+  await settle(page);
+}
+
 function json(route: Route, body: unknown) {
   return route.fulfill({
     status: 200,
@@ -1371,6 +1388,29 @@ for (const locale of LOCALES) {
     expect(unexpected).toEqual([]);
   });
 
+  /**
+   * `palletsEnabledLabel` names the checkbox itself and is visible as soon as
+   * aggregation mode is picked (see the frame above), but the capacity and
+   * template fields it gates only mount once that checkbox is actually
+   * checked (`ShiftForm.tsx:938-956`). So the planning instruction's pallet
+   * frame follows the same product-then-mode order as the aggregation frame
+   * and then checks the box before shooting the fields it unlocks.
+   */
+  test(`shift planning shows the pallet fields (${locale})`, async ({ page }) => {
+    const fx = fixtures(locale);
+    const unexpected = await installApi(page, "shiftCreate", fx);
+    await openHarness(page, locale, "/shifts/new");
+    await page.getByRole("combobox", { name: t("pages.shifts.form.productLabel") }).click();
+    await page.getByRole("option", { name: fx.PRODUCT.name, exact: true }).click();
+    await page.getByRole("radio", { name: t("pages.shifts.form.modeAggregation") }).check();
+    await expect(page.getByText(t("pages.shifts.form.palletsEnabledLabel"))).toBeVisible();
+    await page.getByRole("checkbox", { name: t("pages.shifts.form.palletsEnabledLabel") }).check();
+    await expect(page.getByLabel(t("pages.shifts.form.palletBoxCapacityLabel"))).toBeVisible();
+    await expect(page.getByText(t("pages.shifts.form.palletLabelTemplateLabel"))).toBeVisible();
+    await screenshotFullMain(page, shot("shift-pallets"));
+    expect(unexpected).toEqual([]);
+  });
+
   test(`shifts list after planning (${locale})`, async ({ page }) => {
     const fx = fixtures(locale);
     const unexpected = await installApi(page, "shiftsPlanned", fx);
@@ -1502,6 +1542,56 @@ for (const locale of LOCALES) {
     ).toBeVisible();
     await expect(page.getByRole("button", { name: t("pages.shifts.close") })).toBeVisible();
     await screenshotFullMain(page, shot09("shifts-active"));
+    expect(unexpected).toEqual([]);
+  });
+
+  /**
+   * The pallets section only renders while `shift.palletsEnabled`
+   * (`ShiftDetailsPanel.tsx:499`), which every SHIFTS fixture now carries, and
+   * it holds all three states `PALLETS` exercises: a plain closed pallet, one
+   * whose contents changed after close, and a disassembled one
+   * (`ShiftDetailsPanel.tsx:196-198,250-255`). Shot as its own section rather
+   * than a full-page frame: the panel is very tall and a full capture would
+   * just repeat `shifts-active`.
+   */
+  test(`the shift panel lists the pallets of the shift (${locale})`, async ({ page }) => {
+    const fx = fixtures(locale);
+    const unexpected = await installApi(page, "shiftsClose", fx);
+    await openHarness(page, locale, "/shifts");
+    await openShiftDetails(page, t, "SEP26-004");
+    // `Table` gives its own horizontal-scroll wrapper the same accessible
+    // name via `scrollLabel`, so two "region"s share this name -- `.first()`
+    // is the outer `<section>` (it wraps the table, so it is first in
+    // document order), not the inner scroll container.
+    const pallets = page.getByRole("region", { name: t("pages.shifts.pallets.title") }).first();
+    await expect(pallets).toBeVisible();
+    await expect(page.getByText(t("pages.shifts.pallets.disassembled"))).toBeVisible();
+    await expect(page.getByText(t("pages.shifts.pallets.contentsChangedAfterClose"))).toBeVisible();
+    await widenPalletsPanel(page);
+    await pallets.screenshot({ path: shot09("shift-pallets"), scale: "css" });
+    expect(unexpected).toEqual([]);
+  });
+
+  /**
+   * The "Ярлыки" action only appears once some pallet is closed, still
+   * standing and carries an SSCC (`ShiftDetailsPanel.tsx:196-198`) -- two of
+   * the three `PALLETS` fixtures qualify, so SEP26-004 (same shift as the
+   * pallets list frame above) offers it.
+   */
+  test(`the pallet placard dialog offers its formats (${locale})`, async ({ page }) => {
+    const fx = fixtures(locale);
+    const unexpected = await installApi(page, "shiftsClose", fx);
+    await openHarness(page, locale, "/shifts");
+    await openShiftDetails(page, t, "SEP26-004");
+    await page.getByRole("button", { name: t("pages.shifts.pallets.placards.action") }).click();
+    await expect(
+      page.getByRole("dialog", { name: t("pages.shifts.pallets.placards.title") }),
+    ).toBeVisible();
+    // The pallets table sits dimmed behind this dialog; widen it too so the
+    // background is not showing a badge cut off mid-word (see
+    // `widenPalletsPanel`).
+    await widenPalletsPanel(page);
+    await screenshotFullMain(page, shot09("pallet-placards"));
     expect(unexpected).toEqual([]);
   });
 
