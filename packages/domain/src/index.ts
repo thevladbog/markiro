@@ -99,6 +99,11 @@ export {
 } from "./labels/defaults.js";
 export type { DefaultLabelTemplate, LegacyStockLabelTemplate } from "./labels/defaults.js";
 export {
+  KM_LABEL_TEMPLATE_NAME,
+  assertKmTemplate,
+  buildKmLabelTemplates,
+} from "./labels/km-defaults.js";
+export {
   buildPalletLabelTemplates,
   PALLET_LABEL_58X40_TEMPLATE_NAME,
   PALLET_LABEL_TEMPLATE_NAME,
