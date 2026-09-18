@@ -340,17 +340,23 @@ Hub tile «Паллеты» beside «Списание»; route `Routes.PALLETS` 
   `Sscc.parse` is not used here.
 - **Checks**, in order, against `box_registry`:
   1. no row → «Короб неизвестен. Обновите реестр» (with a refresh action);
-  2. already in the current pallet → «Уже на этой паллете» — soft, no error
-     state, idempotent. Runs before checks 3-4: once this device's own
+  2. `palletActive` with a concrete (non-null) `palletSscc` → «Уже на паллете
+     …{last 6 of palletSscc}». Runs before check 3: a concrete foreign SSCC
+     means another device already CLOSED a pallet around this box, which is a
+     real, already-settled conflict, and it outranks a merely pending/sent
+     membership row this device still holds locally on its own open pallet;
+  3. already in the current pallet → «Уже на этой паллете» — soft, no error
+     state, idempotent. Runs before checks 4-5: once this device's own
      membership is accepted and the registry refreshes, the box's row already
-     reads `localPalletId`/`palletActive` as if it conflicted with itself, so
-     the idempotent check must win over the hard refusals below;
-  3. `localPalletId` set to another open local pallet → «Уже на паллете
+     reads `localPalletId`/`palletActive` (with `palletSscc` still null while
+     that pallet is open) as if it conflicted with itself, so the idempotent
+     check must win over the hard refusals below;
+  4. `localPalletId` set to another open local pallet → «Уже на паллете
      (эта же ТСД)»;
-  4. `palletActive` → «Уже на паллете …{last 6 of palletSscc}» (or «на
-     открытой паллете другого устройства» when `palletSscc` is null);
-  5. `productId ≠ pallet.productId` → «Другой товар: {name}»;
-  6. accept: insert `pallet_memberships(pending)`, set `localPalletId`,
+  5. `palletActive` (here `palletSscc` is necessarily null, having failed
+     check 2) → «Уже на открытой паллете другого устройства»;
+  6. `productId ≠ pallet.productId` → «Другой товар: {name}»;
+  7. accept: insert `pallet_memberships(pending)`, set `localPalletId`,
      short vibration, count advances.
      An SSCC with extension digit 1, or one found in the local `pallets` table,
      is «Это паллета, не короб».

@@ -131,12 +131,51 @@ class WarehousePalletsTest {
     }
 
     @Test
-    fun onAnotherLocalPalletWinsWhenPalletActiveIsAlsoSet() = runTest {
+    fun aClosedForeignPalletOutranksAPendingMembershipOnOurOwnOpenPallet() = runTest {
+        // The box has a PENDING (not yet server-acked) membership row on our
+        // own open pallet -- exactly what `AlreadyOnThisPallet` would
+        // otherwise treat as the soft, idempotent duplicate -- but its
+        // registry row now says another device already CLOSED a pallet
+        // around it. The concrete foreign SSCC must win: it is a genuine,
+        // already-settled cross-device conflict, not a re-scan of our own
+        // claim.
+        product()
+        registry("034600682000000018")
+        pallets.attach("034600682000000018", "op-1")
+        registry(
+            "034600682000000018",
+            palletActive = true, palletSscc = "134600682000000099",
+        )
+        assertEquals(
+            AttachResult.OnAnotherPallet("134600682000000099"),
+            pallets.attach("034600682000000018", "op-1"),
+        )
+    }
+
+    @Test
+    fun onAnotherLocalPalletWinsWhenPalletActiveIsAlsoSetWithoutAConcreteSscc() = runTest {
         // A registry row can carry BOTH a stale `localPalletId` (this device's
         // own earlier claim, on a pallet that is not the currently open one)
-        // AND `palletActive = true` (the server already accepted it somewhere
-        // else). `OnAnotherLocalPallet` must win: it is this device's own
-        // conflict to resolve, not a report about a foreign pallet.
+        // AND `palletActive = true` with `palletSscc` still null (an open
+        // pallet somewhere, not yet a settled foreign closure). Absent a
+        // concrete foreign SSCC, `OnAnotherLocalPallet` must win: it is this
+        // device's own conflict to resolve, not a report about a foreign
+        // pallet.
+        product()
+        registry("034600682000000018")
+        pallets.attach("034600682000000018", null)
+        registry(
+            "034600682000000025", localPalletId = "other-local",
+            palletActive = true, palletSscc = null,
+        )
+        assertEquals(AttachResult.OnAnotherLocalPallet, pallets.attach("034600682000000025", null))
+    }
+
+    @Test
+    fun aClosedForeignPalletOutranksALocalMembershipClaim() = runTest {
+        // A concrete (non-null) `palletSscc` means another device already
+        // CLOSED a pallet around this box: a real, already-settled conflict
+        // that outranks a stale `localPalletId` claim this device still holds.
         product()
         registry("034600682000000018")
         pallets.attach("034600682000000018", null)
@@ -144,7 +183,10 @@ class WarehousePalletsTest {
             "034600682000000025", localPalletId = "other-local",
             palletActive = true, palletSscc = "134600682000000017",
         )
-        assertEquals(AttachResult.OnAnotherLocalPallet, pallets.attach("034600682000000025", null))
+        assertEquals(
+            AttachResult.OnAnotherPallet("134600682000000017"),
+            pallets.attach("034600682000000025", null),
+        )
     }
 
     @Test

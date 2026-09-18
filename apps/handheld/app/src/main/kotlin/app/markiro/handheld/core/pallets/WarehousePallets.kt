@@ -78,13 +78,23 @@ class WarehousePallets(
         pallet.productId?.let { db.palletProductDao().byId(it)?.palletBoxCapacity }
 
     /**
-     * The six checks of spec §3.2, in order; lease → lock → transaction, as
-     * `CloseBox` does. "Already on this pallet" runs second, right after
-     * `UnknownBox`: once a membership is accepted and the registry refreshes,
-     * the box's own row reads `palletActive = true`, so checking that BEFORE
-     * "already on this pallet" would turn every duplicate re-scan of an
-     * accepted box into the hard `OnAnotherPallet` refusal instead of the
-     * soft, idempotent one this same pallet already holds it under.
+     * The checks of spec §3.2, in order; lease → lock → transaction, as
+     * `CloseBox` does: `ThatIsAPallet` → `UnknownBox` → a concrete foreign
+     * `OnAnotherPallet(sscc)` → `AlreadyOnThisPallet` → `OnAnotherLocalPallet`
+     * → the open-but-unresolved `OnAnotherPallet(null)` → `UnknownProduct` →
+     * `OtherProduct` → accept.
+     *
+     * The concrete-SSCC `OnAnotherPallet` check runs before
+     * `AlreadyOnThisPallet` on purpose: a non-null `palletSscc` means another
+     * device already CLOSED a pallet around this box, which is a real,
+     * already-settled conflict that outranks a merely pending/sent membership
+     * row we still hold locally on our own open pallet. Once a membership is
+     * accepted and the registry refreshes, our own accepted row reads
+     * `palletActive = true` with `palletSscc` still null (that pallet is still
+     * open), so the null-SSCC form of `OnAnotherPallet` must stay AFTER
+     * `AlreadyOnThisPallet`: otherwise every duplicate re-scan of an accepted
+     * box would turn into a hard refusal instead of the soft, idempotent one
+     * this same pallet already holds it under.
      */
     suspend fun attach(sscc: String, operatorId: String?): AttachResult = db.recovery.exclusive {
         lock.withLock { attachOwned(sscc, operatorId) }
@@ -99,14 +109,21 @@ class WarehousePallets(
         if (sscc.firstOrNull() == '1' || db.palletDao().bySscc(sscc) != null) return AttachResult.ThatIsAPallet
         val box = db.boxRegistryDao().bySscc(sscc) ?: return AttachResult.UnknownBox
         val open = db.palletDao().openWarehouse(deviceId)
+        // A concrete foreign SSCC means another device already CLOSED a pallet
+        // around this box: that is a real, already-settled conflict, and it
+        // outranks any membership row we hold locally, including a
+        // pending/sent one on our own open pallet. Check it before
+        // `AlreadyOnThisPallet` so a closed foreign pallet is never masked by
+        // our own soft duplicate short-circuit.
+        if (box.palletActive && box.palletSscc != null) return AttachResult.OnAnotherPallet(box.palletSscc)
         // A REJECTED row is not membership: the server refused it, so the
         // operator must be able to resolve the conflict and re-scan the same
         // box onto the same pallet. The stale row is cleared below. This must
         // run before `OnAnotherLocalPallet`/`OnAnotherPallet`: after the server
         // accepts this box's membership and the registry refreshes, the box's
-        // own row already reads `palletActive = true` (or `localPalletId` set
-        // to this same open pallet), and a duplicate scan must stay the soft
-        // `AlreadyOnThisPallet` rather than read as a conflict with itself.
+        // own row already reads `palletActive = true` (with `palletSscc` still
+        // null while that pallet is open), and a duplicate scan must stay the
+        // soft `AlreadyOnThisPallet` rather than read as a conflict with itself.
         val existing = open?.let { pallet -> db.palletMembershipDao().byPallet(pallet.palletId).firstOrNull { it.sscc == sscc } }
         if (existing != null && existing.status != MembershipStatus.REJECTED) return AttachResult.AlreadyOnThisPallet
         if (box.localPalletId != null && box.localPalletId != open?.palletId) return AttachResult.OnAnotherLocalPallet
