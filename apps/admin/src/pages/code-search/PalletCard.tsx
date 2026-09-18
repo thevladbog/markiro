@@ -19,6 +19,7 @@ import { Alert, Badge, Button, Card, PageHeader, Spinner, StatusChip, Table } fr
 import type { StatusChipStatus, TableColumn } from "@markiro/ui";
 
 import { formatCreatedAt, formatDate } from "../../lib/datetime.js";
+import { PalletExportsSection } from "./PalletExportsSection.js";
 import {
   usePalletCard,
   type PalletCardBoxDto,
@@ -311,6 +312,12 @@ export function PalletCardPage() {
           </ul>
         )}
       </Card>
+
+      <section role="region" aria-label={t("pages.codeSearch.palletCard.exports.title")}>
+        <Card title={t("pages.codeSearch.palletCard.exports.title")}>
+          <PalletExportsSection pallet={pallet} />
+        </Card>
+      </section>
     </div>
   );
 }

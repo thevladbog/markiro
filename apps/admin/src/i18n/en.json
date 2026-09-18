@@ -2485,6 +2485,8 @@
           "SHIFT_DATE_MISSING": "The shift has no date.",
           "BOX_COVERAGE_INCOMPLETE": "Not every shift code is assigned to a box.",
           "SHIFT_HAS_NO_PALLETS": "The shift has no closed pallet: either no box was ever stacked on one, or no pallet has been closed yet.",
+          "PALLET_NOT_CLOSED": "The pallet is not closed yet — an export needs a closed pallet.",
+          "PALLET_DISASSEMBLED": "The pallet was taken apart — it can no longer be exported.",
           "ORG_INN_MISSING": "Set the organization INN in the profile to generate the GIS MT report.",
           "FORMAT_NOT_FOUND": "The selected report format is no longer available.",
           "INVALID_LINE_LIMIT": "The lines-per-part limit is invalid.",
@@ -2834,6 +2836,13 @@
             "pallet_closed": "Pallet already closed",
             "product_mismatch": "Different product"
           }
+        },
+        "exports": {
+          "title": "Pallet exports",
+          "create": "Create export",
+          "historyEmpty": "No exports have been created for this pallet yet.",
+          "afterCloseHint": "The export becomes available once the pallet is closed.",
+          "disassembledHint": "The pallet was taken apart — no new export can be created."
         }
       },
       "history": {

@@ -281,3 +281,87 @@ describe("warehouse pallet card", () => {
     expect(rejections.getByText("Короб не найден")).toBeDefined();
   });
 });
+
+const PALLET_FORMAT = {
+  id: "pallet_xml_gismt_aggregation",
+  version: 1,
+  label: "[XML][ГИСМТ] Агрегация паллеты",
+  extension: "xml",
+  mimeType: "application/xml; charset=utf-8",
+};
+
+const READY_EXPORT = {
+  id: "exp-1",
+  shiftId: null,
+  palletId: "pal-w1",
+  formatId: "pallet_xml_gismt_aggregation",
+  formatVersion: 1,
+  maxLines: null,
+  status: "ready",
+  errorCode: null,
+  productNameSnapshot: "Молоко 1л",
+  shiftDateSnapshot: "2026-09-17",
+  totalCodeCount: 0,
+  totalBoxCount: 2,
+  createdByUserId: "u1",
+  createdByName: "Елена Ким",
+  sourceSnapshotStartedAt: "2026-09-17T10:05:00.000Z",
+  completedAt: "2026-09-17T10:05:02.000Z",
+  attemptCount: 1,
+  createdAt: "2026-09-17T10:05:00.000Z",
+  stale: false,
+  artifacts: [
+    {
+      id: "art-1",
+      partNumber: 1,
+      physicalLineCount: 12,
+      codeCount: 0,
+      boxCount: 2,
+      filename: "Молоко_2026-09-17_паллета_00104600682000000019_2_коробов.xml",
+      mimeType: "application/xml; charset=utf-8",
+      byteSize: 512,
+      sha256: "0".repeat(64),
+    },
+  ],
+};
+
+describe("pallet exports section", () => {
+  it("orders the pallet aggregation export and shows the history", async () => {
+    let created = false;
+    const { fetchMock, user } = renderCard(WAREHOUSE_CARD, READ_ONLY, (url, init) => {
+      if (url === "/api/pallet-exports/formats") return [PALLET_FORMAT];
+      if (url === "/api/pallets/pal-w1/exports" && init?.method === "POST") {
+        created = true;
+        return { ...READY_EXPORT, status: "queued", artifacts: [] };
+      }
+      if (url === "/api/pallets/pal-w1/exports") return created ? [READY_EXPORT] : [];
+      return { items: [] };
+    });
+
+    const section = within(await screen.findByRole("region", { name: "Отчёты паллеты" }));
+    expect(await section.findByText("Отчёты для этой паллеты ещё не формировались.")).toBeDefined();
+    await user.click(section.getByRole("button", { name: "Сформировать отчёт" }));
+
+    await waitFor(() => {
+      const post = fetchMock.mock.calls.find(
+        (call) => String(call[0]) === "/api/pallets/pal-w1/exports" && call[1]?.method === "POST",
+      );
+      expect(post).toBeDefined();
+      const body = JSON.parse(String(post?.[1]?.body)) as Record<string, unknown>;
+      expect(body).toMatchObject({ formatId: "pallet_xml_gismt_aggregation", formatVersion: 1 });
+      expect(typeof body.idempotencyKey).toBe("string");
+      expect(body).not.toHaveProperty("maxLines");
+    });
+    expect(await section.findByText("Готов")).toBeDefined();
+    expect(section.getByText(/паллета_00104600682000000019/)).toBeDefined();
+    expect(section.getByText("2 коробов")).toBeDefined();
+  });
+
+  it("explains instead of offering the export while the pallet is not closed", async () => {
+    renderCard({ ...WAREHOUSE_CARD, status: "open", closedAt: null });
+
+    const section = within(await screen.findByRole("region", { name: "Отчёты паллеты" }));
+    expect(section.getByText("Отчёт доступен после закрытия паллеты.")).toBeDefined();
+    expect(section.queryByRole("button", { name: "Сформировать отчёт" })).toBeNull();
+  });
+});
