@@ -440,6 +440,7 @@
     <string name="print_reason_unreachable">The printer is not answering</string>
     <string name="print_reason_printer_unconfigured">No printer is set up</string>
     <string name="print_reason_template_missing">This shift has no label template</string>
+    <string name="print_reason_product_missing">Pallet product not found</string>
     <string name="print_reason_template_invalid">The label template cannot be read</string>
     <string name="print_reason_render_failed">The label could not be built</string>
     <string name="print_reason_transport_failed">The printer refused</string>

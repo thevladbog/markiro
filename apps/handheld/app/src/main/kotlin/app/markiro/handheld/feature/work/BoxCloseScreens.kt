@@ -46,6 +46,7 @@ fun printReasonLabel(reason: String): Int = when (reason) {
     PrintReason.UNREACHABLE -> R.string.print_reason_unreachable
     PrintReason.PRINTER_UNCONFIGURED -> R.string.print_reason_printer_unconfigured
     PrintReason.TEMPLATE_MISSING -> R.string.print_reason_template_missing
+    PrintReason.PRODUCT_MISSING -> R.string.print_reason_product_missing
     PrintReason.TEMPLATE_INVALID -> R.string.print_reason_template_invalid
     PrintReason.RENDER_FAILED -> R.string.print_reason_render_failed
     PrintReason.TRANSPORT_FAILED -> R.string.print_reason_transport_failed

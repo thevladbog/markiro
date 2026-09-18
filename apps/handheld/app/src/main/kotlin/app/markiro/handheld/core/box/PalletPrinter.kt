@@ -14,6 +14,9 @@ import app.markiro.handheld.core.print.sendRemembered
 import app.markiro.handheld.core.print.PrinterTransport
 import app.markiro.handheld.core.print.SendOutcome
 import app.markiro.handheld.core.storage.HandheldDatabase
+import app.markiro.handheld.core.storage.PalletEntity
+import app.markiro.handheld.core.storage.PalletKind
+import app.markiro.handheld.core.storage.PalletLabelTemplateEntity
 import app.markiro.handheld.core.storage.PalletPrint
 
 /**
@@ -52,11 +55,15 @@ class PalletPrinter(
         if (pallet.printState == PalletPrint.UNKNOWN && !allowUnknown) return PrintOutcome.Unknown(pallet.printReason ?: "interrupted")
         val closedAt = pallet.closedAt ?: return fail(palletId, PrintReason.PALLET_OPEN)
         val sscc = pallet.sscc ?: return fail(palletId, PrintReason.PALLET_OPEN)
-        // A warehouse pallet has no shift and no shift-bound template; it gets
-        // its own label path, so here a missing shift reads as "not printable".
-        val shiftId = pallet.shiftId ?: return fail(palletId, PrintReason.SHIFT_MISSING)
-        val shift = db.shiftDao().get(shiftId) ?: return fail(palletId, PrintReason.SHIFT_MISSING)
-        val templateJson = shift.palletLabelTemplateSpec ?: return fail(palletId, PrintReason.TEMPLATE_MISSING)
+        // A warehouse pallet has no shift and no shift-bound template: its
+        // product, its template and its dates come from the bootstrap caches
+        // and the membership rows instead.
+        val source = if (pallet.kind == PalletKind.WAREHOUSE) warehouseSource(pallet, sscc, closedAt) else shiftSource(pallet, sscc, closedAt)
+        val ready = when (source) {
+            is Source.Ready -> source
+            is Source.Refused -> return fail(palletId, source.reason)
+        }
+        val templateJson = ready.templateJson
         val destinations = PrintDestinations(db)
         if (reprint && pallet.printState == PalletPrint.PRINTED && !replaced) {
             val current = db.printerDao().assigned(PrintPurpose.PALLET) ?: return fail(palletId, PrintReason.PRINTER_UNCONFIGURED)
@@ -76,23 +83,17 @@ class PalletPrinter(
         val status = transport.statusRemembered(printer, db.printerDao(), db.recovery)
         if (status is PrinterStatus.NotReady) return fail(palletId, status.reason.wire())
 
-        val fields = palletLabelFields(
-            PalletLabelInput(
-                sscc = sscc,
-                boxCount = pallets.boxCount(palletId),
-                itemCount = pallets.itemCount(palletId),
-                productName = shift.productName.orEmpty(),
-                productPrintName = shift.productPrintName,
-                gtin14 = shift.productGtin14.orEmpty(),
-                egaisCode = shift.egaisCode,
-                shelfLifeDays = shift.shelfLifeDays,
-                operatorName = null,
-                counterpartyName = shift.counterpartyName,
-                closedAt = closedAt,
-                productionDate = shift.productionDate,
-                shiftNumber = shift.number,
-            ),
-        )
+        val boxCount = if (pallet.kind == PalletKind.WAREHOUSE) {
+            db.palletMembershipDao().countOnPallet(palletId)
+        } else {
+            pallets.boxCount(palletId)
+        }
+        val itemCount = if (pallet.kind == PalletKind.WAREHOUSE) {
+            db.palletMembershipDao().bottleSum(palletId)
+        } else {
+            pallets.itemCount(palletId)
+        }
+        val fields = palletLabelFields(ready.input(boxCount, itemCount), omitDates = ready.omitDates)
 
         pallets.setPrintState(palletId, PalletPrint.PRINTING, null)
         val document = try {
@@ -115,6 +116,89 @@ class PalletPrinter(
                 PrintOutcome.Unknown(outcome.cause)
             }
         }
+    }
+
+    /**
+     * Where one pallet's label facts come from.
+     *
+     * A production pallet reads them off its shift; a warehouse pallet has no
+     * shift and reads them off the bootstrap caches and its own membership
+     * rows. Modelled as one type so the rest of `printOwned` -- the status
+     * check, the `printing` state, the render and the send -- stays a single
+     * path that neither kind can drift away from.
+     */
+    private sealed interface Source {
+        data class Ready(
+            val templateJson: String,
+            val input: (boxCount: Int, itemCount: Int) -> PalletLabelInput,
+            val omitDates: Boolean,
+        ) : Source
+
+        data class Refused(val reason: String) : Source
+    }
+
+    private suspend fun shiftSource(pallet: PalletEntity, sscc: String, closedAt: String): Source {
+        val shiftId = pallet.shiftId ?: return Source.Refused(PrintReason.SHIFT_MISSING)
+        val shift = db.shiftDao().get(shiftId) ?: return Source.Refused(PrintReason.SHIFT_MISSING)
+        val templateJson = shift.palletLabelTemplateSpec ?: return Source.Refused(PrintReason.TEMPLATE_MISSING)
+        return Source.Ready(
+            templateJson,
+            { boxCount, itemCount ->
+                PalletLabelInput(
+                    sscc = sscc,
+                    boxCount = boxCount,
+                    itemCount = itemCount,
+                    productName = shift.productName.orEmpty(),
+                    productPrintName = shift.productPrintName,
+                    gtin14 = shift.productGtin14.orEmpty(),
+                    egaisCode = shift.egaisCode,
+                    shelfLifeDays = shift.shelfLifeDays,
+                    operatorName = null,
+                    counterpartyName = shift.counterpartyName,
+                    closedAt = closedAt,
+                    productionDate = shift.productionDate,
+                    shiftNumber = shift.number,
+                )
+            },
+            omitDates = false,
+        )
+    }
+
+    /**
+     * The product is the pallet's own, the template is the catalog category's
+     * before the organisation's, and the production date is only printed when
+     * every member box agrees on one: see `palletLabelFields`' `omitDates` for
+     * why a rack of two shifts gets a blank «Годен до» rather than a guess.
+     */
+    private suspend fun warehouseSource(pallet: PalletEntity, sscc: String, closedAt: String): Source {
+        val product = pallet.productId?.let { db.palletProductDao().byId(it) }
+            ?: return Source.Refused(PrintReason.PRODUCT_MISSING)
+        val template = product.chzProductGroupCode?.let { db.palletLabelTemplateDao().get(PalletLabelTemplateEntity.category(it)) }
+            ?: db.palletLabelTemplateDao().get(PalletLabelTemplateEntity.ORG)
+            ?: return Source.Refused(PrintReason.TEMPLATE_MISSING)
+        val dates = db.palletMembershipDao().productionDates(pallet.palletId)
+        val uniform = dates.singleOrNull()
+        return Source.Ready(
+            template.specJson,
+            { boxCount, itemCount ->
+                PalletLabelInput(
+                    sscc = sscc,
+                    boxCount = boxCount,
+                    itemCount = itemCount,
+                    productName = product.name,
+                    productPrintName = product.printName,
+                    gtin14 = product.gtin14,
+                    egaisCode = null,
+                    shelfLifeDays = product.shelfLifeDays,
+                    operatorName = null,
+                    counterpartyName = null,
+                    closedAt = closedAt,
+                    productionDate = uniform,
+                    shiftNumber = null,
+                )
+            },
+            omitDates = uniform == null,
+        )
     }
 
     /** The operator looked at the printer and says the label is there. Nothing is sent. */

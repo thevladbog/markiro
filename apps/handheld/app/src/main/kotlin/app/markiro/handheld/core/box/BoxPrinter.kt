@@ -38,6 +38,9 @@ object PrintReason {
     const val PALLET_OPEN = "pallet_open"
     const val SHIFT_MISSING = "shift_missing"
     const val TEMPLATE_MISSING = "template_missing"
+
+    /** A warehouse pallet whose product is no longer in the bootstrap cache: nothing to name on the label. */
+    const val PRODUCT_MISSING = "product_missing"
     const val TEMPLATE_INVALID = "template_invalid"
     const val PRINTER_UNCONFIGURED = "printer_unconfigured"
     const val RENDER_FAILED = "render_failed"

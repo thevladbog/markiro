@@ -456,6 +456,7 @@
     <string name="print_reason_unreachable">Принтер не отвечает</string>
     <string name="print_reason_printer_unconfigured">Принтер не настроен</string>
     <string name="print_reason_template_missing">У смены нет шаблона этикетки</string>
+    <string name="print_reason_product_missing">Товар паллеты не найден</string>
     <string name="print_reason_template_invalid">Шаблон этикетки не читается</string>
     <string name="print_reason_render_failed">Не удалось построить этикетку</string>
     <string name="print_reason_transport_failed">Принтер отказал</string>
