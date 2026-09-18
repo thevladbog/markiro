@@ -1087,11 +1087,15 @@ export class ShiftsService {
           );
         }
 
-        // Same rule, mirrored for the pallet-label snapshot.
+        // Same rule, mirrored for the pallet-label snapshot. On an ACTIVE
+        // shift whose pallets are off the field is not editable at all: the
+        // allow-list below answers 409 for it, and that answer must not be
+        // pre-empted by a 422 about a template the shift could never use.
         if (
           data.palletLabelTemplateId !== undefined &&
           data.palletLabelTemplateId !== null &&
-          data.palletLabelTemplateId !== current.palletLabelTemplateId
+          data.palletLabelTemplateId !== current.palletLabelTemplateId &&
+          (current.status !== "active" || current.palletsEnabled)
         ) {
           const product = await this.findProductRow(tenantId, current.productId);
           await this.assertPalletTemplateEligible(

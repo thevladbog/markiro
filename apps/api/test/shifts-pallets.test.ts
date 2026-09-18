@@ -345,6 +345,13 @@ describe.skipIf(!ready)("shift pallet configuration (task 8)", () => {
       .send({ palletLabelTemplateId: palletTemplateId })
       .expect(409);
     expect(String(rejected.body.message)).toContain("palletLabelTemplateId");
+    // The field being uneditable is the answer, before any look at the
+    // template itself: a box-purpose id gets the same 409, not a 422.
+    const rejectedBoxPurpose = await agent
+      .patch(`/shifts/${shift.id}`)
+      .send({ palletLabelTemplateId: boxTemplateId })
+      .expect(409);
+    expect(String(rejectedBoxPurpose.body.message)).toContain("palletLabelTemplateId");
   });
 
   it("prefills the box count from the product", async () => {
