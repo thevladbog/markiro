@@ -27,41 +27,47 @@
 
 ## File map
 
-| Path                                                                       | Responsibility                                                                    |
-| -------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `packages/domain/src/labels/defaults.ts`                                   | `BoxLabelQuantity`, `quantity` parameter, `buildPallet58x40LabelSpec()`           |
-| `packages/domain/src/labels/pallet-defaults.ts`, `src/index.ts`            | `PALLET_LABEL_58X40_TEMPLATE_NAME`, second entry of `buildPalletLabelTemplates()` |
-| `packages/domain/test/pallet-defaults.test.ts`                             | two templates, the 58×40 equals the box layout with one substitution              |
-| `packages/db/migrations/0164_pallet_label_58x40.sql`, `meta/_journal.json` | idempotent seed for existing tenants                                              |
-| `packages/db/test/pallets-migration.test.ts`                               | counts and drift guard for the new row                                            |
-| `apps/api/test/provision-tenant-owner.e2e.test.ts`                         | new tenants get both pallet templates                                             |
-| `apps/api/src/modules/code-search/pallet-placard.ts` (new)                 | pure placard renderer + `summarizeByProductionDate`                               |
-| `apps/api/test/pallet-placard.test.ts` (new)                               | renderer unit tests                                                               |
-| `apps/api/src/modules/code-search/code-search.service.ts`                  | `palletPlacardData`; report loader's product join fixed                           |
-| `apps/api/src/modules/code-search/dto.ts`, `code-search.controller.ts`     | `palletPlacardQuerySchema`, the route                                             |
-| `apps/api/test/code-search-pallets.e2e.test.ts`, `subscription-route-inventory.test.ts` | route behaviour, inventory line                                      |
-| `apps/admin/src/pages/code-search/PalletCard.tsx`, `i18n/ru.json`, `en.json` | «Ярлык» button + format modal                                                   |
-| `apps/admin/test/warehouse-pallets.test.tsx`                               | button visibility and opened URL                                                  |
+| Path                                                                                    | Responsibility                                                                    |
+| --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `packages/domain/src/labels/defaults.ts`                                                | `BoxLabelQuantity`, `quantity` parameter, `buildPallet58x40LabelSpec()`           |
+| `packages/domain/src/labels/pallet-defaults.ts`, `src/index.ts`                         | `PALLET_LABEL_58X40_TEMPLATE_NAME`, second entry of `buildPalletLabelTemplates()` |
+| `packages/domain/test/pallet-defaults.test.ts`                                          | two templates, the 58×40 equals the box layout with one substitution              |
+| `packages/db/migrations/0164_pallet_label_58x40.sql`, `meta/_journal.json`              | idempotent seed for existing tenants                                              |
+| `packages/db/test/pallets-migration.test.ts`                                            | counts and drift guard for the new row                                            |
+| `apps/api/test/provision-tenant-owner.e2e.test.ts`                                      | new tenants get both pallet templates                                             |
+| `apps/api/src/modules/code-search/pallet-placard.ts` (new)                              | pure placard renderer + `summarizeByProductionDate`                               |
+| `apps/api/test/pallet-placard.test.ts` (new)                                            | renderer unit tests                                                               |
+| `apps/api/src/modules/code-search/code-search.service.ts`                               | `palletPlacardData`; report loader's product join fixed                           |
+| `apps/api/src/modules/code-search/dto.ts`, `code-search.controller.ts`                  | `palletPlacardQuerySchema`, the route                                             |
+| `apps/api/test/code-search-pallets.e2e.test.ts`, `subscription-route-inventory.test.ts` | route behaviour, inventory line                                                   |
+| `apps/admin/src/pages/code-search/PalletCard.tsx`, `i18n/ru.json`, `en.json`            | «Ярлык» button + format modal                                                     |
+| `apps/admin/test/warehouse-pallets.test.tsx`                                            | button visibility and opened URL                                                  |
 
 ---
 
 ### Task 1: Domain — `quantity` parameter and the stock «Паллета 58×40» spec
 
 **Files:**
+
 - Modify: `packages/domain/src/labels/defaults.ts` (`buildBoxLabelSpec` at ~line 311; the caption fit list ~line 355; elements `cap-qty` ~line 461 and `val-qty` ~line 494; new export after `buildDefaultLabelTemplates`)
 - Modify: `packages/domain/src/labels/pallet-defaults.ts` (bottom)
 - Modify: `packages/domain/src/index.ts:101`
 - Test: `packages/domain/test/pallet-defaults.test.ts`
 
 **Interfaces:**
+
 - Produces:
+
   ```ts
   // defaults.ts
-  export interface BoxLabelQuantity { field: "qty" | "qty.boxes"; caption: string }
-  export function buildPallet58x40LabelSpec(): LabelTemplateSpec
+  export interface BoxLabelQuantity {
+    field: "qty" | "qty.boxes";
+    caption: string;
+  }
+  export function buildPallet58x40LabelSpec(): LabelTemplateSpec;
   // pallet-defaults.ts
   export const PALLET_LABEL_58X40_TEMPLATE_NAME = "Паллета 58×40";
-  export function buildPalletLabelTemplates(): DefaultLabelTemplate[] // [100×150, 58×40]
+  export function buildPalletLabelTemplates(): DefaultLabelTemplate[]; // [100×150, 58×40]
   ```
 
 - [ ] **Step 1: Write the failing tests**
@@ -86,33 +92,33 @@ import {
 Replace the first case (`"ships exactly one pallet template"`) with:
 
 ```ts
-  it("ships the 100×150 first and the 58×40 second", () => {
-    const names = buildPalletLabelTemplates().map((t) => t.name);
-    // Order is load-bearing: provisioning makes [0] the organisation default
-    // and the editor starts a new pallet template from [0].
-    expect(names).toEqual([PALLET_LABEL_TEMPLATE_NAME, PALLET_LABEL_58X40_TEMPLATE_NAME]);
-  });
+it("ships the 100×150 first and the 58×40 second", () => {
+  const names = buildPalletLabelTemplates().map((t) => t.name);
+  // Order is load-bearing: provisioning makes [0] the organisation default
+  // and the editor starts a new pallet template from [0].
+  expect(names).toEqual([PALLET_LABEL_TEMPLATE_NAME, PALLET_LABEL_58X40_TEMPLATE_NAME]);
+});
 ```
 
 Change every `buildPalletLabelTemplates()[0]!.spec` in the cases "binds both counts and the SSCC", "encodes the SSCC…", "leaves GS1's…" and "does not overlap its rows vertically" into a loop over both templates where the assertion holds for both; for "binds both counts" split it:
 
 ```ts
-  it("binds the counts and the SSCC", () => {
-    const [large, small] = buildPalletLabelTemplates();
-    const bound = (spec: LabelTemplateSpec) =>
-      new Set(spec.elements.flatMap((el) => (el.kind === "field" ? [el.field] : [])));
-    expect(bound(large!.spec).has("qty")).toBe(true);
-    expect(bound(large!.spec).has("qty.boxes")).toBe(true);
-    expect(bound(large!.spec).has("sscc")).toBe(true);
-    // The small label counts boxes only: «120 кор.» beside the dates.
-    const smallBound = bound(small!.spec);
-    expect(smallBound.has("qty.boxes")).toBe(true);
-    expect(smallBound.has("qty")).toBe(false);
-    expect(smallBound.has("product.printName")).toBe(true);
-    expect(smallBound.has("date")).toBe(true);
-    expect(smallBound.has("expiry")).toBe(true);
-    expect(smallBound.has("sscc")).toBe(true);
-  });
+it("binds the counts and the SSCC", () => {
+  const [large, small] = buildPalletLabelTemplates();
+  const bound = (spec: LabelTemplateSpec) =>
+    new Set(spec.elements.flatMap((el) => (el.kind === "field" ? [el.field] : [])));
+  expect(bound(large!.spec).has("qty")).toBe(true);
+  expect(bound(large!.spec).has("qty.boxes")).toBe(true);
+  expect(bound(large!.spec).has("sscc")).toBe(true);
+  // The small label counts boxes only: «120 кор.» beside the dates.
+  const smallBound = bound(small!.spec);
+  expect(smallBound.has("qty.boxes")).toBe(true);
+  expect(smallBound.has("qty")).toBe(false);
+  expect(smallBound.has("product.printName")).toBe(true);
+  expect(smallBound.has("date")).toBe(true);
+  expect(smallBound.has("expiry")).toBe(true);
+  expect(smallBound.has("sscc")).toBe(true);
+});
 ```
 
 (add `type LabelTemplateSpec` to the import). Then append a new `describe`:
@@ -255,12 +261,14 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ### Task 2: Seed «Паллета 58×40» for existing and new tenants
 
 **Files:**
+
 - Create: `packages/db/migrations/0164_pallet_label_58x40.sql`
 - Modify: `packages/db/migrations/meta/_journal.json` (append entry)
 - Modify: `packages/db/test/pallets-migration.test.ts:202-220`
 - Modify: `apps/api/test/provision-tenant-owner.e2e.test.ts:337-345`
 
 **Interfaces:**
+
 - Consumes: `buildPalletLabelTemplates()`, `PALLET_LABEL_58X40_TEMPLATE_NAME` (Task 1).
 
 - [ ] **Step 1: Update the migration test first**
@@ -268,22 +276,22 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 In `packages/db/test/pallets-migration.test.ts` import `PALLET_LABEL_58X40_TEMPLATE_NAME` alongside the existing domain imports, change the purpose-count case to expect `2`, and replace the seed case with:
 
 ```ts
-  it("seeds both stock pallet labels for every existing tenant, without duplicates", async () => {
-    for (const id of [tenantId, otherTenantId]) {
-      for (const [index, name] of [
-        PALLET_LABEL_TEMPLATE_NAME,
-        PALLET_LABEL_58X40_TEMPLATE_NAME,
-      ].entries()) {
-        const { rows } = await pool.query(
-          "SELECT spec FROM label_templates WHERE tenant_id=$1 AND name=$2 AND purpose='pallet'",
-          [id, name],
-        );
-        expect(rows, name).toHaveLength(1);
-        // The inlined migration JSON and the builder must not drift apart.
-        expect(rows[0]!.spec).toEqual(buildPalletLabelTemplates()[index]!.spec);
-      }
+it("seeds both stock pallet labels for every existing tenant, without duplicates", async () => {
+  for (const id of [tenantId, otherTenantId]) {
+    for (const [index, name] of [
+      PALLET_LABEL_TEMPLATE_NAME,
+      PALLET_LABEL_58X40_TEMPLATE_NAME,
+    ].entries()) {
+      const { rows } = await pool.query(
+        "SELECT spec FROM label_templates WHERE tenant_id=$1 AND name=$2 AND purpose='pallet'",
+        [id, name],
+      );
+      expect(rows, name).toHaveLength(1);
+      // The inlined migration JSON and the builder must not drift apart.
+      expect(rows[0]!.spec).toEqual(buildPalletLabelTemplates()[index]!.spec);
     }
-  });
+  }
+});
 ```
 
 - [ ] **Step 2: Run it to verify failure**
@@ -296,7 +304,148 @@ Expected: FAIL — count is 1 and «Паллета 58×40» has no row.
 Get the exact JSON by running from `packages/domain` (after its build): `node -e 'import("./dist/index.js").then(m=>console.log(JSON.stringify(m.buildPalletLabelTemplates()[1].spec)))'`. It must equal:
 
 ```json
-{"widthMm":58,"heightMm":40,"dpi":203,"language":"zpl","elements":[{"kind":"field","id":"name","xMm":2,"yMm":2,"field":"product.printName","fontSizePt":10,"bold":true,"maxWidthMm":54,"maxLines":3},{"kind":"line","id":"sep1","xMm":2,"yMm":18.2,"x2Mm":56,"y2Mm":18.2,"thicknessMm":0.3},{"kind":"text","id":"cap-date","xMm":2,"yMm":18.8,"text":"Дата производства:","fontSizePt":5,"maxWidthMm":18},{"kind":"text","id":"cap-expiry","xMm":20,"yMm":18.8,"text":"Годен до:","fontSizePt":5,"maxWidthMm":18},{"kind":"text","id":"cap-qty","xMm":38,"yMm":18.8,"text":"Коробов:","fontSizePt":5,"maxWidthMm":18},{"kind":"field","id":"val-date","xMm":2,"yMm":21.6,"field":"date","fontSizePt":8,"bold":true,"maxWidthMm":18},{"kind":"field","id":"val-expiry","xMm":20,"yMm":21.6,"field":"expiry","fontSizePt":8,"bold":true,"maxWidthMm":18},{"kind":"field","id":"val-qty","xMm":38,"yMm":20.9,"field":"qty.boxes","fontSizePt":8,"bold":true,"maxWidthMm":18},{"kind":"line","id":"sep2","xMm":2,"yMm":26.2,"x2Mm":56,"y2Mm":26.2,"thicknessMm":0.3},{"kind":"text","id":"cap-egais","xMm":2,"yMm":26.8,"text":"Код ЕГАИС:","fontSizePt":5,"maxWidthMm":18},{"kind":"field","id":"val-egais","xMm":20,"yMm":26.8,"field":"product.egais","fontSizePt":8,"bold":true,"maxWidthMm":36},{"kind":"line","id":"sep3","xMm":2,"yMm":31.4,"x2Mm":56,"y2Mm":31.4,"thicknessMm":0.3},{"kind":"barcode","id":"bc-sscc","xMm":9.5,"yMm":32,"format":"code128","data":"sscc","sizeMm":4.8,"moduleWidthMm":0.2502},{"kind":"field","id":"val-sscc","xMm":2,"yMm":37,"field":"sscc","fontSizePt":5,"align":"center","maxWidthMm":54}]}
+{
+  "widthMm": 58,
+  "heightMm": 40,
+  "dpi": 203,
+  "language": "zpl",
+  "elements": [
+    {
+      "kind": "field",
+      "id": "name",
+      "xMm": 2,
+      "yMm": 2,
+      "field": "product.printName",
+      "fontSizePt": 10,
+      "bold": true,
+      "maxWidthMm": 54,
+      "maxLines": 3
+    },
+    {
+      "kind": "line",
+      "id": "sep1",
+      "xMm": 2,
+      "yMm": 18.2,
+      "x2Mm": 56,
+      "y2Mm": 18.2,
+      "thicknessMm": 0.3
+    },
+    {
+      "kind": "text",
+      "id": "cap-date",
+      "xMm": 2,
+      "yMm": 18.8,
+      "text": "Дата производства:",
+      "fontSizePt": 5,
+      "maxWidthMm": 18
+    },
+    {
+      "kind": "text",
+      "id": "cap-expiry",
+      "xMm": 20,
+      "yMm": 18.8,
+      "text": "Годен до:",
+      "fontSizePt": 5,
+      "maxWidthMm": 18
+    },
+    {
+      "kind": "text",
+      "id": "cap-qty",
+      "xMm": 38,
+      "yMm": 18.8,
+      "text": "Коробов:",
+      "fontSizePt": 5,
+      "maxWidthMm": 18
+    },
+    {
+      "kind": "field",
+      "id": "val-date",
+      "xMm": 2,
+      "yMm": 21.6,
+      "field": "date",
+      "fontSizePt": 8,
+      "bold": true,
+      "maxWidthMm": 18
+    },
+    {
+      "kind": "field",
+      "id": "val-expiry",
+      "xMm": 20,
+      "yMm": 21.6,
+      "field": "expiry",
+      "fontSizePt": 8,
+      "bold": true,
+      "maxWidthMm": 18
+    },
+    {
+      "kind": "field",
+      "id": "val-qty",
+      "xMm": 38,
+      "yMm": 20.9,
+      "field": "qty.boxes",
+      "fontSizePt": 8,
+      "bold": true,
+      "maxWidthMm": 18
+    },
+    {
+      "kind": "line",
+      "id": "sep2",
+      "xMm": 2,
+      "yMm": 26.2,
+      "x2Mm": 56,
+      "y2Mm": 26.2,
+      "thicknessMm": 0.3
+    },
+    {
+      "kind": "text",
+      "id": "cap-egais",
+      "xMm": 2,
+      "yMm": 26.8,
+      "text": "Код ЕГАИС:",
+      "fontSizePt": 5,
+      "maxWidthMm": 18
+    },
+    {
+      "kind": "field",
+      "id": "val-egais",
+      "xMm": 20,
+      "yMm": 26.8,
+      "field": "product.egais",
+      "fontSizePt": 8,
+      "bold": true,
+      "maxWidthMm": 36
+    },
+    {
+      "kind": "line",
+      "id": "sep3",
+      "xMm": 2,
+      "yMm": 31.4,
+      "x2Mm": 56,
+      "y2Mm": 31.4,
+      "thicknessMm": 0.3
+    },
+    {
+      "kind": "barcode",
+      "id": "bc-sscc",
+      "xMm": 9.5,
+      "yMm": 32,
+      "format": "code128",
+      "data": "sscc",
+      "sizeMm": 4.8,
+      "moduleWidthMm": 0.2502
+    },
+    {
+      "kind": "field",
+      "id": "val-sscc",
+      "xMm": 2,
+      "yMm": 37,
+      "field": "sscc",
+      "fontSizePt": 5,
+      "align": "center",
+      "maxWidthMm": 54
+    }
+  ]
+}
 ```
 
 If the printed JSON differs (key order is irrelevant to `toEqual`, but values matter), use the printed one. Create `packages/db/migrations/0164_pallet_label_58x40.sql`:
@@ -341,16 +490,16 @@ Expected: green; `pallets-migration.test.ts` passes with both rows. If a `migrat
 In `apps/api/test/provision-tenant-owner.e2e.test.ts` change the comment/count to `// 16 box + 2 product_duplicate + 2 pallet (06d + spec 2026-09-18 §8).` and `expect(after).toHaveLength(20);`, import `PALLET_LABEL_58X40_TEMPLATE_NAME`, and make the pallets expectation:
 
 ```ts
-    expect(pallets).toEqual([
-      expect.objectContaining({
-        name: PALLET_LABEL_TEMPLATE_NAME,
-        spec: buildPalletLabelTemplates()[0]!.spec,
-      }),
-      expect.objectContaining({
-        name: PALLET_LABEL_58X40_TEMPLATE_NAME,
-        spec: buildPalletLabelTemplates()[1]!.spec,
-      }),
-    ]);
+expect(pallets).toEqual([
+  expect.objectContaining({
+    name: PALLET_LABEL_TEMPLATE_NAME,
+    spec: buildPalletLabelTemplates()[0]!.spec,
+  }),
+  expect.objectContaining({
+    name: PALLET_LABEL_58X40_TEMPLATE_NAME,
+    spec: buildPalletLabelTemplates()[1]!.spec,
+  }),
+]);
 ```
 
 (if `templates` there is not ordered by insertion, sort both sides by `name` first). Run: `pnpm --filter @markiro/api exec vitest run test/provision-tenant-owner.e2e.test.ts` (env loaded). Expected: PASS.
@@ -369,20 +518,45 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ### Task 3: Pure placard renderer
 
 **Files:**
+
 - Create: `apps/api/src/modules/code-search/pallet-placard.ts`
 - Test: `apps/api/test/pallet-placard.test.ts` (new)
 
 **Interfaces:**
+
 - Consumes: `brandLogo(org)`, `ssccBarcode(sscc20)`, `ssccHri(sscc20)`, `escapeHtml`, `ReportOrg` from `./contents-report`; `shelfLifeExpiryDate(productionDate, shelfLifeDays)` from `@markiro/domain`.
 - Produces:
+
   ```ts
   export type PlacardFormat = "a4" | "a5";
-  export interface PalletPlacardBox { productionDate: string | null; codeCount: number; disassembledAt: Date | null }
-  export interface PalletPlacardData { sscc: string | null; status: "open" | "closed" | "disassembled"; productName: string | null; gtin14: string | null; shelfLifeDays: number | null; org: ReportOrg | null; boxes: PalletPlacardBox[] }
-  export interface PlacardDateRow { productionDate: string | null; expiryDate: string | null; boxCount: number; unitCount: number; foldedDates?: number }
-  export function summarizeByProductionDate(boxes: PalletPlacardBox[], shelfLifeDays: number | null, maxRows: number): PlacardDateRow[]
-  export const PLACARD_ROW_CAP: Record<PlacardFormat, number> // { a4: 12, a5: 6 }
-  export function renderPalletPlacardHtml(data: PalletPlacardData, format: PlacardFormat): string
+  export interface PalletPlacardBox {
+    productionDate: string | null;
+    codeCount: number;
+    disassembledAt: Date | null;
+  }
+  export interface PalletPlacardData {
+    sscc: string | null;
+    status: "open" | "closed" | "disassembled";
+    productName: string | null;
+    gtin14: string | null;
+    shelfLifeDays: number | null;
+    org: ReportOrg | null;
+    boxes: PalletPlacardBox[];
+  }
+  export interface PlacardDateRow {
+    productionDate: string | null;
+    expiryDate: string | null;
+    boxCount: number;
+    unitCount: number;
+    foldedDates?: number;
+  }
+  export function summarizeByProductionDate(
+    boxes: PalletPlacardBox[],
+    shelfLifeDays: number | null,
+    maxRows: number,
+  ): PlacardDateRow[];
+  export const PLACARD_ROW_CAP: Record<PlacardFormat, number>; // { a4: 12, a5: 6 }
+  export function renderPalletPlacardHtml(data: PalletPlacardData, format: PlacardFormat): string;
   ```
 
 - [ ] **Step 1: Write the failing tests**
@@ -443,11 +617,17 @@ describe("summarizeByProductionDate", () => {
   });
 
   it("folds the tail past the row cap into one row whose counts keep the total exact", () => {
-    const boxes = Array.from({ length: 9 }, (_, i) => box(`2026-09-${String(i + 1).padStart(2, "0")}`));
+    const boxes = Array.from({ length: 9 }, (_, i) =>
+      box(`2026-09-${String(i + 1).padStart(2, "0")}`),
+    );
     const rows = summarizeByProductionDate(boxes, null, 6);
     expect(rows).toHaveLength(6);
     expect(rows.slice(0, 5).map((r) => r.productionDate)).toEqual([
-      "2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04", "2026-09-05",
+      "2026-09-01",
+      "2026-09-02",
+      "2026-09-03",
+      "2026-09-04",
+      "2026-09-05",
     ]);
     expect(rows[5]).toEqual({
       productionDate: null,
@@ -502,7 +682,9 @@ describe("pallet placard", () => {
   });
 
   it("folds a long date list on A5 and says how many dates were folded", () => {
-    const boxes = Array.from({ length: 9 }, (_, i) => box(`2026-09-${String(i + 1).padStart(2, "0")}`));
+    const boxes = Array.from({ length: 9 }, (_, i) =>
+      box(`2026-09-${String(i + 1).padStart(2, "0")}`),
+    );
     const html = renderPalletPlacardHtml(fixture({ boxes }), "a5");
     expect(html).toContain("и ещё 4 дат");
     expect(PLACARD_ROW_CAP.a5).toBe(6);
@@ -510,12 +692,9 @@ describe("pallet placard", () => {
 
   it("watermarks a disassembled pallet and nothing else", () => {
     expect(renderPalletPlacardHtml(fixture(), "a4")).not.toContain("РАСФОРМИРОВАНА");
-    expect(
-      renderPalletPlacardHtml(
-        fixture({ status: "disassembled" }),
-        "a4",
-      ),
-    ).toContain("РАСФОРМИРОВАНА");
+    expect(renderPalletPlacardHtml(fixture({ status: "disassembled" }), "a4")).toContain(
+      "РАСФОРМИРОВАНА",
+    );
   });
 
   it("prints dashes for a missing GTIN, shelf life and organisation", () => {
@@ -530,7 +709,10 @@ describe("pallet placard", () => {
 
   it("escapes tenant-controlled text", () => {
     const html = renderPalletPlacardHtml(
-      fixture({ productName: '<script>alert("x")</script>', org: { name: "A & <b>", inn: null, logo: null } }),
+      fixture({
+        productName: '<script>alert("x")</script>',
+        org: { name: "A & <b>", inn: null, logo: null },
+      }),
       "a4",
     );
     expect(html).not.toContain("<script>");
@@ -619,7 +801,9 @@ export function summarizeByProductionDate(
     groups.set(box.productionDate, group);
   }
   const dated = [...groups.entries()]
-    .filter((entry): entry is [string, { boxCount: number; unitCount: number }] => entry[0] !== null)
+    .filter(
+      (entry): entry is [string, { boxCount: number; unitCount: number }] => entry[0] !== null,
+    )
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([productionDate, counts]) => {
       const expiry = shelfLifeExpiryDate(productionDate, shelfLifeDays);
@@ -677,15 +861,35 @@ interface PageSize {
 }
 
 const SIZES: Record<PlacardFormat, PageSize> = {
-  a4: { page: "A4", widthMm: 210, heightMm: 297, marginMm: 14, namePt: 18, figurePt: 16, tablePt: 11, barsMm: 30, hriPt: 15 },
-  a5: { page: "A5", widthMm: 148, heightMm: 210, marginMm: 10, namePt: 14, figurePt: 13, tablePt: 10, barsMm: 22, hriPt: 11 },
+  a4: {
+    page: "A4",
+    widthMm: 210,
+    heightMm: 297,
+    marginMm: 14,
+    namePt: 18,
+    figurePt: 16,
+    tablePt: 11,
+    barsMm: 30,
+    hriPt: 15,
+  },
+  a5: {
+    page: "A5",
+    widthMm: 148,
+    heightMm: 210,
+    marginMm: 10,
+    namePt: 14,
+    figurePt: 13,
+    tablePt: 10,
+    barsMm: 22,
+    hriPt: 11,
+  },
 };
 
 function dateTable(rows: PlacardDateRow[], format: PlacardFormat): string {
   const compact = format === "a5";
   const head = compact
-    ? "<tr><th>Произв.</th><th>Годен до</th><th class=\"n\">Кор.</th></tr>"
-    : "<tr><th>Дата производства</th><th>Годен до</th><th class=\"n\">Коробов</th><th>Единиц</th></tr>";
+    ? '<tr><th>Произв.</th><th>Годен до</th><th class="n">Кор.</th></tr>'
+    : '<tr><th>Дата производства</th><th>Годен до</th><th class="n">Коробов</th><th>Единиц</th></tr>';
   const body = rows
     .map((row) => {
       const label =
@@ -726,7 +930,9 @@ export function renderPalletPlacardHtml(data: PalletPlacardData, format: Placard
     ? `<div class="pl-bars">${ssccBarcode(data.sscc)}</div><div class="pl-hri mono">${escapeHtml(hri ?? "")}</div>`
     : `<div class="pl-hri">Без SSCC</div>`;
   const watermark =
-    data.status === "disassembled" ? `<div class="pl-watermark" aria-hidden="true">РАСФОРМИРОВАНА</div>` : "";
+    data.status === "disassembled"
+      ? `<div class="pl-watermark" aria-hidden="true">РАСФОРМИРОВАНА</div>`
+      : "";
 
   return `<!DOCTYPE html>
 <html lang="ru">
@@ -809,6 +1015,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ### Task 4: Loader, route and e2e
 
 **Files:**
+
 - Modify: `apps/api/src/modules/code-search/code-search.service.ts` (imports ~line 5–10; `palletReportData` product join ~lines 1270–1276; new method after it)
 - Modify: `apps/api/src/modules/code-search/dto.ts` (after `boxReportQuerySchema`)
 - Modify: `apps/api/src/modules/code-search/code-search.controller.ts` (imports; new route after `palletReport`)
@@ -816,6 +1023,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 - Test: `apps/api/test/code-search-pallets.e2e.test.ts` (new `describe` after "printed contents form")
 
 **Interfaces:**
+
 - Consumes: `PalletPlacardData`, `PlacardFormat`, `renderPalletPlacardHtml` (Task 3).
 - Produces: `GET /code-search/pallets/:palletId/placard?format=a4|a5&timeZone=` (200 HTML; 404 unknown/foreign; 409 `{ code: "PALLET_NOT_CLOSED" }` when open or without SSCC).
 
@@ -824,67 +1032,67 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 In `apps/api/test/code-search-pallets.e2e.test.ts` add after the "printed contents form" `describe` (before the mutating tests):
 
 ```ts
-  describe("printed placard", () => {
-    it("renders the A4 placard by default and the A5 one on request", async () => {
-      const a4 = await agent
-        .get(`/code-search/pallets/${palletId}/placard`)
-        .expect(200)
-        .expect("Content-Type", /text\/html/);
-      expect(a4.text).toContain("@page { size: A4;");
-      expect(a4.text).toContain("ПАЛЛЕТА");
-      expect(a4.text).toContain(`(00)${palletSscc}`);
-      expect(a4.text).toContain("Cola");
-      expect(a4.text).toContain(VALID_GTIN14);
-      // Two live boxes, seven units, one production date.
-      expect(a4.text).toMatch(/pl-figure-value">2</);
-      expect(a4.text).toMatch(/pl-figure-value">7</);
-      const a5 = await agent
-        .get(`/code-search/pallets/${palletId}/placard`)
-        .query({ format: "a5" })
-        .expect(200);
-      expect(a5.text).toContain("@page { size: A5;");
-    });
-
-    it("refuses an open pallet with PALLET_NOT_CLOSED", async () => {
-      // A box that names a pallet the device never closed leaves an OPEN
-      // pallet row behind -- the ingest creates it on first mention.
-      await postBatch({
-        items: [item("c4-0", "b4", new Date(ITEM_BASE + 300_000).toISOString())],
-      });
-      await postBatch({
-        boxes: [
-          {
-            boxId: "b4",
-            shiftId,
-            terminalId: "t1",
-            sscc: "123460682000000204",
-            closedAt: BOX_CLOSED_AT,
-            operatorId,
-            devicePalletId: "p-open",
-          },
-        ],
-      });
-      const pallets = await agent.get(`/pallets?shiftId=${shiftId}`).expect(200);
-      const open = (pallets.body.items as { id: string; closedAt: string | null }[]).find(
-        (p) => p.closedAt === null,
-      );
-      expect(open).toBeDefined();
-      const res = await agent.get(`/code-search/pallets/${open!.id}/placard`).expect(409);
-      expect(res.body).toMatchObject({ code: "PALLET_NOT_CLOSED" });
-    });
-
-    it("validates the format, is denied to a station key and across tenants", async () => {
-      await agent.get(`/code-search/pallets/${palletId}/placard`).query({ format: "a3" }).expect(400);
-      await request(app!.getHttpServer())
-        .get(`/code-search/pallets/${palletId}/placard`)
-        .set("x-api-key", stationKey)
-        .expect(403);
-      const other = request.agent(app!.getHttpServer());
-      await signUpAndActivate(other);
-      await other.get(`/code-search/pallets/${palletId}/placard`).expect(404);
-      await agent.get(`/code-search/pallets/${randomUUID()}/placard`).expect(404);
-    });
+describe("printed placard", () => {
+  it("renders the A4 placard by default and the A5 one on request", async () => {
+    const a4 = await agent
+      .get(`/code-search/pallets/${palletId}/placard`)
+      .expect(200)
+      .expect("Content-Type", /text\/html/);
+    expect(a4.text).toContain("@page { size: A4;");
+    expect(a4.text).toContain("ПАЛЛЕТА");
+    expect(a4.text).toContain(`(00)${palletSscc}`);
+    expect(a4.text).toContain("Cola");
+    expect(a4.text).toContain(VALID_GTIN14);
+    // Two live boxes, seven units, one production date.
+    expect(a4.text).toMatch(/pl-figure-value">2</);
+    expect(a4.text).toMatch(/pl-figure-value">7</);
+    const a5 = await agent
+      .get(`/code-search/pallets/${palletId}/placard`)
+      .query({ format: "a5" })
+      .expect(200);
+    expect(a5.text).toContain("@page { size: A5;");
   });
+
+  it("refuses an open pallet with PALLET_NOT_CLOSED", async () => {
+    // A box that names a pallet the device never closed leaves an OPEN
+    // pallet row behind -- the ingest creates it on first mention.
+    await postBatch({
+      items: [item("c4-0", "b4", new Date(ITEM_BASE + 300_000).toISOString())],
+    });
+    await postBatch({
+      boxes: [
+        {
+          boxId: "b4",
+          shiftId,
+          terminalId: "t1",
+          sscc: "123460682000000204",
+          closedAt: BOX_CLOSED_AT,
+          operatorId,
+          devicePalletId: "p-open",
+        },
+      ],
+    });
+    const pallets = await agent.get(`/pallets?shiftId=${shiftId}`).expect(200);
+    const open = (pallets.body.items as { id: string; closedAt: string | null }[]).find(
+      (p) => p.closedAt === null,
+    );
+    expect(open).toBeDefined();
+    const res = await agent.get(`/code-search/pallets/${open!.id}/placard`).expect(409);
+    expect(res.body).toMatchObject({ code: "PALLET_NOT_CLOSED" });
+  });
+
+  it("validates the format, is denied to a station key and across tenants", async () => {
+    await agent.get(`/code-search/pallets/${palletId}/placard`).query({ format: "a3" }).expect(400);
+    await request(app!.getHttpServer())
+      .get(`/code-search/pallets/${palletId}/placard`)
+      .set("x-api-key", stationKey)
+      .expect(403);
+    const other = request.agent(app!.getHttpServer());
+    await signUpAndActivate(other);
+    await other.get(`/code-search/pallets/${palletId}/placard`).expect(404);
+    await agent.get(`/code-search/pallets/${randomUUID()}/placard`).expect(404);
+  });
+});
 ```
 
 Note: the open-pallet case ADDS a fourth box `b4` and pallet `p-open` to the shared fixture. Check the later mutating tests ("keeps a disassembled member box…", "reports the pallet's own disassembly…") only address `palletId`/`box2Id`, so an extra open pallet in the shift does not change their assertions; if one of them counts pallets in the shift, place this `describe` AFTER them instead.
@@ -1084,11 +1292,13 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ### Task 5: Cabinet — «Ярлык» button with A4/A5 choice
 
 **Files:**
+
 - Modify: `apps/admin/src/pages/code-search/PalletCard.tsx` (imports line 13–19; state after `createDocument` ~line 66; actions ~lines 212–234; modal before the closing `</div>` of the page)
 - Modify: `apps/admin/src/i18n/ru.json:2787` and `en.json:2787` (`pages.codeSearch.palletCard`)
 - Test: `apps/admin/test/warehouse-pallets.test.tsx` (append a `describe`)
 
 **Interfaces:**
+
 - Consumes: the route from Task 4; `Modal`, `RadioGroup`, `Button` from `@markiro/ui`; `renderCard`, `WAREHOUSE_CARD`, `READ_ONLY` from the test file.
 
 - [ ] **Step 1: Write the failing tests**
@@ -1175,74 +1385,76 @@ In `PalletCard.tsx`:
 2. After `const createDocument = useCreateDocument();`:
 
 ```tsx
-  const [placardOpen, setPlacardOpen] = useState(false);
-  const [placardFormat, setPlacardFormat] = useState<"a4" | "a5">("a4");
+const [placardOpen, setPlacardOpen] = useState(false);
+const [placardFormat, setPlacardFormat] = useState<"a4" | "a5">("a4");
 ```
 
 3. After `canDisassemble` (below the early returns):
 
 ```tsx
-  // A placard is a scannable SSCC on paper: only a closed (or disassembled,
-  // for a historical reprint) pallet that has one gets the action -- the same
-  // rule the server enforces with 409 PALLET_NOT_CLOSED.
-  const canPlacard = pallet.sscc !== null && pallet.status !== "open";
+// A placard is a scannable SSCC on paper: only a closed (or disassembled,
+// for a historical reprint) pallet that has one gets the action -- the same
+// rule the server enforces with 409 PALLET_NOT_CLOSED.
+const canPlacard = pallet.sscc !== null && pallet.status !== "open";
 
-  const openPlacard = () => {
-    const query = new URLSearchParams({
-      format: placardFormat,
-      timeZone: new Intl.DateTimeFormat().resolvedOptions().timeZone,
-    });
-    window.open(`/api/code-search/pallets/${pallet.id}/placard?${query}`);
-    setPlacardOpen(false);
-  };
+const openPlacard = () => {
+  const query = new URLSearchParams({
+    format: placardFormat,
+    timeZone: new Intl.DateTimeFormat().resolvedOptions().timeZone,
+  });
+  window.open(`/api/code-search/pallets/${pallet.id}/placard?${query}`);
+  setPlacardOpen(false);
+};
 ```
 
 4. In the header `actions`, after the «Распечатать» button:
 
 ```tsx
-            {canPlacard ? (
-              <Button type="button" variant="secondary" onClick={() => setPlacardOpen(true)}>
-                {t("pages.codeSearch.palletCard.placard.action")}
-              </Button>
-            ) : null}
+{
+  canPlacard ? (
+    <Button type="button" variant="secondary" onClick={() => setPlacardOpen(true)}>
+      {t("pages.codeSearch.palletCard.placard.action")}
+    </Button>
+  ) : null;
+}
 ```
 
 5. Before the page's closing `</div>` (after the exports section):
 
 ```tsx
-      <Modal
-        open={placardOpen}
-        title={t("pages.codeSearch.palletCard.placard.title")}
-        closeLabel={t("common.close")}
-        onClose={() => setPlacardOpen(false)}
-        width={420}
-        footer={
-          <>
-            <Button type="button" variant="secondary" onClick={() => setPlacardOpen(false)}>
-              {t("common.cancel")}
-            </Button>
-            <Button type="button" onClick={openPlacard}>
-              {t("pages.codeSearch.palletCard.placard.open")}
-            </Button>
-          </>
-        }
-      >
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <RadioGroup
-            label={t("pages.codeSearch.palletCard.placard.formatLabel")}
-            name="pallet-placard-format"
-            value={placardFormat}
-            onValueChange={(value) => setPlacardFormat(value === "a5" ? "a5" : "a4")}
-            options={[
-              { value: "a4", label: t("pages.codeSearch.palletCard.placard.format.a4") },
-              { value: "a5", label: t("pages.codeSearch.palletCard.placard.format.a5") },
-            ]}
-          />
-          <span style={{ font: "var(--text-caption)", color: "var(--fg-3)" }}>
-            {t("pages.codeSearch.palletCard.placard.hint")}
-          </span>
-        </div>
-      </Modal>
+<Modal
+  open={placardOpen}
+  title={t("pages.codeSearch.palletCard.placard.title")}
+  closeLabel={t("common.close")}
+  onClose={() => setPlacardOpen(false)}
+  width={420}
+  footer={
+    <>
+      <Button type="button" variant="secondary" onClick={() => setPlacardOpen(false)}>
+        {t("common.cancel")}
+      </Button>
+      <Button type="button" onClick={openPlacard}>
+        {t("pages.codeSearch.palletCard.placard.open")}
+      </Button>
+    </>
+  }
+>
+  <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+    <RadioGroup
+      label={t("pages.codeSearch.palletCard.placard.formatLabel")}
+      name="pallet-placard-format"
+      value={placardFormat}
+      onValueChange={(value) => setPlacardFormat(value === "a5" ? "a5" : "a4")}
+      options={[
+        { value: "a4", label: t("pages.codeSearch.palletCard.placard.format.a4") },
+        { value: "a5", label: t("pages.codeSearch.palletCard.placard.format.a5") },
+      ]}
+    />
+    <span style={{ font: "var(--text-caption)", color: "var(--fg-3)" }}>
+      {t("pages.codeSearch.palletCard.placard.hint")}
+    </span>
+  </div>
+</Modal>
 ```
 
 If `Modal` renders the dialog only when `open` is true and the accessible name comes from `title` (check `packages/ui/src/components/Modal.tsx` — it sets `aria-labelledby` to the title id), the test's `findByRole("dialog", { name: "Ярлык паллеты" })` resolves; otherwise pass the same string as `aria-label` via `className`-adjacent prop the component offers, and say so in the report.
@@ -1266,6 +1478,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ### Task 6: Full gates and spec status
 
 **Files:**
+
 - Modify: `docs/superpowers/specs/2026-09-18-pallet-placard-design.md:3` (status line)
 
 - [ ] **Step 1: Run every affected package's gates**
