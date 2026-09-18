@@ -348,7 +348,15 @@ this page (there is no shift), and the stock template does not use them.
 - Utilisation report through `POST /utilisation` (with keg volume AI 335x), receipts,
   and introduction into circulation through True API `lk/documents/create`.
 - Printing from a device-local reserve on the Station and the handheld, with the
-  "applied = printed and scanned" rule.
+  "applied = printed and scanned" rule. Owner requirement recorded on 2026-09-18 for
+  that phase: the operator sets a **pool size** (for example 30) and a **threshold**
+  (for example 25 scanned out of the current pool); when the threshold is reached the
+  station prints the next pool automatically on a dedicated code printer (a second
+  printer with a different label width), and a manual «Напечатать N» button always
+  remains. The reserve is replenished from the cloud while online and must last
+  several pools offline. Design mockups (admin list/card/dialogs, print page, station
+  strip and full-screen settings, handheld card, sidebar variants) were drawn in
+  pen.dev on the same day; the file is to be saved under `docs/design-briefs/`.
 - Multi-GTIN orders, `SELF_MADE` serial numbers, `paymentType = 1`, `REAPPLY`.
 - Registering the СУЗ installation by API once Markiro holds a partner
   `registrationKey`.
