@@ -83,23 +83,31 @@ export function summarizeByProductionDate(
       return { productionDate, expiryDate: expiry === "" ? null : expiry, ...counts };
     });
   const undated = groups.get(null);
-  const rows: PlacardDateRow[] = undated
-    ? [...dated, { productionDate: null, expiryDate: null, ...undated }]
-    : dated;
+  // The undated group is never folded: its row is the one that says «См. на
+  // продукции», and folding it into «и ещё N дат» would both miscount the
+  // dates and hide the instruction. It keeps the last slot; only the DATED
+  // rows compete for the rest.
+  const undatedRow: PlacardDateRow | null = undated
+    ? { productionDate: null, expiryDate: null, ...undated }
+    : null;
+  const budget = maxRows - (undatedRow ? 1 : 0);
 
-  if (rows.length <= maxRows || maxRows < 2) return rows;
-  const kept = rows.slice(0, maxRows - 1);
-  const folded = rows.slice(maxRows - 1);
-  return [
-    ...kept,
-    {
-      productionDate: null,
-      expiryDate: null,
-      boxCount: folded.reduce((n, r) => n + r.boxCount, 0),
-      unitCount: folded.reduce((n, r) => n + r.unitCount, 0),
-      foldedDates: folded.length,
-    },
-  ];
+  let datedRows: PlacardDateRow[] = dated;
+  if (dated.length > budget && budget >= 1) {
+    const kept = dated.slice(0, budget - 1);
+    const folded = dated.slice(budget - 1);
+    datedRows = [
+      ...kept,
+      {
+        productionDate: null,
+        expiryDate: null,
+        boxCount: folded.reduce((n, r) => n + r.boxCount, 0),
+        unitCount: folded.reduce((n, r) => n + r.unitCount, 0),
+        foldedDates: folded.length,
+      },
+    ];
+  }
+  return undatedRow ? [...datedRows, undatedRow] : datedRows;
 }
 
 /**

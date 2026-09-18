@@ -75,6 +75,31 @@ describe("summarizeByProductionDate", () => {
     });
     expect(rows.reduce((n, r) => n + r.boxCount, 0)).toBe(9);
   });
+
+  it("keeps the undated group as the last row and folds only the dated tail", () => {
+    const dated = Array.from({ length: 6 }, (_, i) =>
+      box(`2026-09-${String(i + 1).padStart(2, "0")}`),
+    );
+    const rows = summarizeByProductionDate([...dated, box(null), box(null, 5)], 180, 6);
+    expect(rows).toHaveLength(6);
+    expect(rows.slice(0, 4).map((r) => r.productionDate)).toEqual([
+      "2026-09-01",
+      "2026-09-02",
+      "2026-09-03",
+      "2026-09-04",
+    ]);
+    // The fold covers dated rows five and six only …
+    expect(rows[4]).toEqual({
+      productionDate: null,
+      expiryDate: null,
+      boxCount: 2,
+      unitCount: 40,
+      foldedDates: 2,
+    });
+    // … and the undated group keeps its own row after it, never folded.
+    expect(rows[5]).toEqual({ productionDate: null, expiryDate: null, boxCount: 2, unitCount: 25 });
+    expect(rows.reduce((n, r) => n + r.boxCount, 0)).toBe(8);
+  });
 });
 
 describe("pallet placard", () => {
@@ -114,6 +139,16 @@ describe("pallet placard", () => {
     // that would read as «no shelf life».
     expect(html.match(/См\. на продукции/g)?.length).toBe(2);
     expect(html).toContain("10.09.2026");
+  });
+
+  it("folds the dated tail but still prints «См. на продукции» for undated boxes", () => {
+    const dated = Array.from({ length: 6 }, (_, i) =>
+      box(`2026-09-${String(i + 1).padStart(2, "0")}`),
+    );
+    const html = renderPalletPlacardHtml(fixture({ boxes: [...dated, box(null)] }), "a5");
+    expect(html).toContain("и ещё 2 даты");
+    expect(html.match(/См\. на продукции/g)?.length).toBe(2);
+    expect(html.match(/<tr>/g)?.length).toBe(1 + 6);
   });
 
   it("prints the counts, the date summary and the total", () => {
