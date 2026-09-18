@@ -9,7 +9,9 @@ import app.markiro.handheld.core.storage.MetaStore
 import app.markiro.handheld.core.storage.PalletEntity
 import app.markiro.handheld.core.storage.PalletKind
 import app.markiro.handheld.core.storage.PalletMembershipEntity
+import app.markiro.handheld.core.storage.PalletMembershipRemovalEntity
 import app.markiro.handheld.core.storage.PalletPrint
+import app.markiro.handheld.core.storage.RemovalStatus
 import app.markiro.handheld.core.util.Iso
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -64,6 +66,12 @@ sealed interface AttachResult {
  * shift -- there need not be a shift at all -- and its member boxes were closed
  * elsewhere, so it holds no local `boxes` rows. Membership lives in
  * `pallet_memberships`, which is also the sync channel's queue.
+ *
+ * An open pallet is a DRAFT: no SSCC, no label, no export. So [remove] takes a
+ * box off it whatever the membership's status -- the row goes at once and the
+ * server learns through a queued `pallet_membership_removals` record -- and a
+ * draft emptied that way is deleted outright rather than closed or marked
+ * disassembled (spec 2026-09-18-open-pallet-box-removal §3.2).
  *
  * Every entry point takes the recovery lease FIRST, then [PalletLock], and only
  * then opens a transaction. That is the same order `CloseBox` and `ClosePallet`
@@ -137,7 +145,9 @@ class WarehousePallets(
         val existing = open?.let { pallet -> db.palletMembershipDao().byPallet(pallet.palletId).firstOrNull { it.sscc == sscc } }
         if (existing != null && existing.status != MembershipStatus.REJECTED) return AttachResult.AlreadyOnThisPallet
         if (box.localPalletId != null && box.localPalletId != open?.palletId) return AttachResult.OnAnotherLocalPallet
-        if (box.palletActive) return AttachResult.OnAnotherPallet(box.palletSscc)
+        // A queued removal is this device's own undo of the claim the registry
+        // may still show; the server will clear it in the same batch order.
+        if (box.palletActive && db.palletMembershipRemovalDao().queuedFor(sscc) == 0) return AttachResult.OnAnotherPallet(box.palletSscc)
         val product = db.palletProductDao().byId(box.productId) ?: return AttachResult.UnknownProduct
         if (open != null && open.productId != box.productId) return AttachResult.OtherProduct(product.name)
 
@@ -187,20 +197,45 @@ class WarehousePallets(
     }
 
     /**
-     * Takes a box back off the pallet. False when the row is no longer pending:
-     * a `sent` row may already be on the server, and only the server can take
-     * that one back.
+     * Takes a box back off the open pallet, whatever its membership status
+     * (spec 2026-09-18-open-pallet-box-removal §3.2). The row is gone at once;
+     * the server learns through a queued removal record. A `sent` removal
+     * belongs to a pinned batch and is never rewritten, so a later removal of
+     * the same box is a NEW row; a `pending` one is reused so a batch never
+     * carries the same key twice.
      *
      * Takes [PalletLock] like [attach] and [close]: without it, a `remove`
      * could interleave with a `close` that read `countOnPallet` for the same
      * pallet, closing with a stale count or racing the membership delete.
      */
-    suspend fun remove(palletId: String, sscc: String): Boolean = db.recovery.exclusive {
+    suspend fun remove(palletId: String, sscc: String, operatorId: String?): Boolean = db.recovery.exclusive {
         lock.withLock {
             db.recovery.commit {
-                val removed = db.palletMembershipDao().deletePending(palletId, sscc) > 0
-                if (removed) db.boxRegistryDao().release(sscc)
-                removed
+                val row = db.palletMembershipDao().byPallet(palletId).firstOrNull { it.sscc == sscc }
+                if (row == null || row.status == MembershipStatus.REJECTED) return@commit false
+                db.palletMembershipDao().delete(palletId, sscc)
+                db.boxRegistryDao().release(sscc)
+                // Optimistic: the server will say exactly this once the removal lands.
+                db.boxRegistryDao().clearPallet(sscc)
+                if (db.palletMembershipRemovalDao().pendingFor(palletId, sscc) == null) {
+                    db.palletMembershipRemovalDao().insert(
+                        PalletMembershipRemovalEntity(
+                            palletId = palletId,
+                            sscc = sscc,
+                            removedAt = Iso.format(clock()),
+                            operatorId = operatorId,
+                            status = RemovalStatus.PENDING,
+                        ),
+                    )
+                }
+                val pallet = db.palletDao().get(palletId)
+                if (pallet != null && pallet.closedAt == null && db.palletMembershipDao().countOnPallet(palletId) == 0) {
+                    // An empty draft is nothing: no SSCC, no label, no serial burned.
+                    db.palletMembershipDao().deleteForPallet(palletId)
+                    db.boxRegistryDao().releaseAll(palletId)
+                    db.palletDao().delete(palletId)
+                }
+                true
             }
         }
     }

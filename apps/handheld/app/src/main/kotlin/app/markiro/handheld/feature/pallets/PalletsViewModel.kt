@@ -272,7 +272,7 @@ class PalletsViewModel(
 
     fun remove(sscc: String) {
         val pallet = _state.value.pallet ?: return
-        viewModelScope.launch { runCatching { recovery.work { gateway.remove(pallet.palletId, sscc) } } }
+        viewModelScope.launch { runCatching { recovery.work { gateway.remove(pallet.palletId, sscc, operatorId) } } }
     }
 
     fun requestEarlyClose() {

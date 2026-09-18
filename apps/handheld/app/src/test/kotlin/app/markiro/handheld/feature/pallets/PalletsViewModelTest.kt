@@ -156,7 +156,7 @@ class PalletsViewModelTest {
             return next
         }
 
-        override suspend fun remove(palletId: String, sscc: String): Boolean {
+        override suspend fun remove(palletId: String, sscc: String, operatorId: String?): Boolean {
             removed = palletId to sscc
             return true
         }
