@@ -304,6 +304,8 @@ export async function buildImportPreview(
         )
       : undefined;
   if (choice && !target) throw new ConflictException("category_option_stale");
+  const schemaStale =
+    profile && !target ? await pinnedSchemaStale(tx, profile.schemaVersionId) : false;
   const options: StoredCategoryOption[] = profile
     ? []
     : compatible.map(({ version, mapping }) => ({
@@ -607,7 +609,12 @@ export async function buildImportPreview(
       before: currentValue == null ? null : String(currentValue),
       after: attribute.value,
       applicable: false,
-      reason: target || productField ? "attribute_not_importable" : "compatible_schema_required",
+      reason:
+        target || productField
+          ? "attribute_not_importable"
+          : schemaStale
+            ? "schema_version_stale"
+            : "compatible_schema_required",
       source: "national_catalog",
       selectedByDefault: false,
       requiresEntryIds: [],
@@ -716,6 +723,27 @@ export async function buildImportPreview(
       })),
     );
   return view;
+}
+/** Mirrors readiness: a pinned version is stale once it is no longer the active
+ * version of its scope. The card's category change flow re-binds the product. */
+async function pinnedSchemaStale(tx: DbTx, schemaVersionId: string): Promise<boolean> {
+  const [pinned] = await tx
+    .select({ scopeKey: schema.nationalCatalogSchemaVersions.scopeKey })
+    .from(schema.nationalCatalogSchemaVersions)
+    .where(eq(schema.nationalCatalogSchemaVersions.id, schemaVersionId))
+    .for("share");
+  if (!pinned) return false;
+  const [active] = await tx
+    .select({ id: schema.nationalCatalogSchemaVersions.id })
+    .from(schema.nationalCatalogSchemaVersions)
+    .where(
+      and(
+        eq(schema.nationalCatalogSchemaVersions.scopeKey, pinned.scopeKey),
+        eq(schema.nationalCatalogSchemaVersions.status, "active"),
+      ),
+    )
+    .for("share");
+  return active?.id !== schemaVersionId;
 }
 export function buildPhotoCandidates(
   source: NationalCatalogProduct,

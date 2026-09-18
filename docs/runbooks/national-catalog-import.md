@@ -37,6 +37,11 @@ Neither preview nor the default selection writes product data: the operator stil
 reviews and confirms the apply. Missing importable fields are preselected for
 existing products; existing values, names and photos require a deliberate choice
 to replace. Dependent attributes cannot be accepted without their category.
+For a bound product whose pinned schema version is no longer the active version
+of its scope, category attributes carry the reason `schema_version_stale` rather
+than `compatible_schema_required`: the comparison shows one notice with a link to
+the product card, where the category change flow re-binds the product to the
+active version. The preview never re-binds a product by itself.
 
 Initial category acceptance also transfers unambiguous full TN VED and OKPD2
 values from the same source GTIN. They appear with the category in comparison and

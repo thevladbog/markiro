@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { afterEach, expect, it, vi } from "vitest";
@@ -16,6 +16,10 @@ it.each([
   [
     "compatible_schema_required",
     "Перенос характеристик недоступен: нужна категория с настроенным сопоставлением Честного знака.",
+  ],
+  [
+    "schema_version_stale",
+    "Схема категории обновлена. Подтвердите смену категории в карточке товара.",
   ],
 ])("explains the actual import restriction for %s", (reason, message) => {
   const { props, preview } = review(false);
@@ -56,24 +60,69 @@ it("rebuilds the comparison immediately after a category is selected", async () 
   );
 });
 
-it("refreshes one stale schema-blocked comparison automatically", async () => {
-  const { props, preview } = review();
-  preview.fields.push({
+function blockedField(reason: string, label = "Характеристика упаковки") {
+  return {
     id: id(42),
-    label: "Характеристика упаковки",
+    label,
     before: null,
     after: "БУТЫЛКА",
     applicable: false,
-    reason: "compatible_schema_required",
-    source: "national_catalog",
+    reason,
+    source: "national_catalog" as const,
     selectedByDefault: false,
     requiresEntryIds: [],
-  });
-  const view = render(<ImportReview {...props} />, { wrapper: MemoryRouter });
+  };
+}
 
-  await waitFor(() => expect(props.onPrepare).toHaveBeenCalledTimes(1));
-  view.rerender(<ImportReview {...props} data={structuredClone(props.data)} />);
-  expect(props.onPrepare).toHaveBeenCalledTimes(1);
+it("leaves a schema-blocked comparison alone until the user refreshes it", async () => {
+  const { props, preview } = review();
+  preview.fields.push(blockedField("compatible_schema_required"));
+  render(<ImportReview {...props} />, { wrapper: MemoryRouter });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(props.onPrepare).not.toHaveBeenCalled();
+});
+
+it("explains a stale category schema once and links to the product card", () => {
+  const { props, preview } = review();
+  preview.fields.push(blockedField("schema_version_stale"), {
+    ...blockedField("schema_version_stale", "Цвет"),
+    id: id(43),
+  });
+  render(<ImportReview {...props} />, { wrapper: MemoryRouter });
+  expect(
+    screen.getAllByText(
+      "Схема категории обновлена. Откройте товар в каталоге, подтвердите смену категории на новую версию и обновите данные для проверки.",
+    ),
+  ).toHaveLength(1);
+  const links = screen.getAllByRole("link", { name: "Открыть товар в каталоге" });
+  expect(links.length).toBeGreaterThan(0);
+  for (const link of links) expect(link.getAttribute("href")).toBe(`/catalog/${id(21)}/edit`);
+});
+
+it("asks for an initial category while the card attributes are still blocked", () => {
+  const { props, preview } = review(false);
+  preview.categoryOptions = [
+    { optionId: id(40), label: "Сидр", selected: false },
+    { optionId: id(41), label: "Пиво", selected: false },
+  ];
+  preview.fields.push(blockedField("compatible_schema_required"));
+  render(<ImportReview {...props} />, { wrapper: MemoryRouter });
+  expect(
+    screen.getByText(
+      "Выберите начальную категорию, чтобы перенести характеристики карточки Честного знака.",
+    ),
+  ).toBeDefined();
+});
+
+it("explains a missing schema once when nothing on this screen can unblock it", () => {
+  const { props, preview } = review();
+  preview.fields.push(blockedField("compatible_schema_required"));
+  render(<ImportReview {...props} />, { wrapper: MemoryRouter });
+  expect(
+    screen.getAllByText(
+      "Характеристики карточки Честного знака не переносятся: для её категории нет активной схемы с проверенным сопоставлением группы. Остальные поля доступны; обратитесь в поддержку Markiro.",
+    ),
+  ).toHaveLength(1);
 });
 
 function review(existing = true) {

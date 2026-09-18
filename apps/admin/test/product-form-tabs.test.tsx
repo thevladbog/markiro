@@ -74,6 +74,23 @@ it("keeps basic and Chestny ZNAK fields in separate accessible tabs", async () =
   expect(screen.queryByRole("button", { name: "Сохранить" })).toBeNull();
 });
 
+it("hides the basic form for real while the Chestny ZNAK tab is active", async () => {
+  const { user } = mount();
+  const form = document.querySelector<HTMLFormElement>('form[role="tabpanel"]');
+  expect(form).not.toBeNull();
+  expect(getComputedStyle(form!).display).not.toBe("none");
+
+  await user.click(screen.getByRole("tab", { name: "Честный знак" }));
+  expect(getComputedStyle(form!).display).toBe("none");
+  const chz = document.getElementById("product-chz-tabpanel");
+  expect(chz).not.toBeNull();
+  expect(getComputedStyle(chz!).display).not.toBe("none");
+
+  await user.click(screen.getByRole("tab", { name: "Основное" }));
+  expect(getComputedStyle(form!).display).not.toBe("none");
+  expect(getComputedStyle(chz!).display).toBe("none");
+});
+
 it("blocks regulatory editing only after GTIN or product group changes", async () => {
   const onRegulatoryBlockChange = vi.fn();
   const { user } = mount(onRegulatoryBlockChange);

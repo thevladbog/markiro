@@ -496,9 +496,9 @@ export function ProductForm({
         role={hasRegulatoryTab ? "tabpanel" : undefined}
         aria-label={hasRegulatoryTab ? t("pages.catalog.form.tabs.basic") : undefined}
         hidden={hasRegulatoryTab && activeTab !== "basic"}
+        className="mk-product-form"
         onSubmit={(event) => void submit(event)}
         noValidate
-        style={{ display: "flex", flexDirection: "column", gap: 16 }}
       >
         <fieldset
           className="mk-product-form-fields"
