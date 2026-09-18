@@ -146,8 +146,15 @@ class PalletDisassembleViewModel @Inject constructor(
         }
     }
 
-    /** Backing out before the third step applies nothing. */
+    /**
+     * Backing out before the third step applies nothing. Once `confirm` has
+     * started, the retirement is already in flight and its own outcome
+     * (`Retired`/`Refused`) must be what the operator sees next -- resetting to
+     * the scan step here would let that outcome land on a screen that no longer
+     * expects it.
+     */
     fun cancel() {
+        if (confirming.get()) return
         chosen = null
         _step.value = PalletDisassembleStep.ScanPallet
     }

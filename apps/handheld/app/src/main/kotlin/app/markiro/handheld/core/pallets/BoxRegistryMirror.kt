@@ -8,6 +8,8 @@ import app.markiro.handheld.core.storage.MetaStore
 import app.markiro.handheld.core.writeoff.KEYS
 import app.markiro.handheld.core.writeoff.MirrorOutcome
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import java.io.IOException
@@ -78,7 +80,16 @@ class BoxRegistryMirror(
             null
         }
         if (outcome == MirrorOutcome.Ok) return outcome
-        val reclaimFailure = if (claims.isNotEmpty()) runCatching { reclaim(claims) }.exceptionOrNull() else null
+        // `NonCancellable` so a walk cancelled mid-way (the mode closing, the scope
+        // dying) still gives the carried claims back instead of skipping the
+        // reclaim at the first suspension point. `DeviceRecovery.commit` keeps its
+        // own generation check, so a rotated lease still surfaces as
+        // `RecoveryBlocked` from inside and is handled below like any other failure.
+        val reclaimFailure = if (claims.isNotEmpty()) {
+            runCatching { withContext(NonCancellable) { reclaim(claims) } }.exceptionOrNull()
+        } else {
+            null
+        }
         if (primary != null) {
             if (reclaimFailure != null) primary.addSuppressed(reclaimFailure)
             throw primary
