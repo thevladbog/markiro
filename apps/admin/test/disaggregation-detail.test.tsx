@@ -344,3 +344,39 @@ describe("DisaggregationDocumentPage", () => {
     expect(await screen.findByText("Списан/выдан через киоск")).toBeTruthy();
   });
 });
+
+it("prefills the SSCC textarea from ?sscc= and drops the parameter after adding", async () => {
+  const fetchMock = stubFetch(DOC_DRAFT_READY);
+  const router = createMemoryRouter(
+    createRoutesFromElements(
+      <Route path="/disaggregation/:id" element={<DisaggregationDocumentPage />} />,
+    ),
+    { initialEntries: ["/disaggregation/d1?sscc=00104600682000000019"] },
+  );
+  render(
+    <QueryClientProvider
+      client={
+        new QueryClient({
+          defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+        })
+      }
+    >
+      <AccessProvider value={ACCESS_WRITE}>
+        <RouterProvider router={router} />
+      </AccessProvider>
+    </QueryClientProvider>,
+  );
+  const user = userEvent.setup();
+
+  const textarea = await screen.findByRole("textbox", { name: "SSCC коробов" });
+  expect((textarea as HTMLTextAreaElement).value).toBe("00104600682000000019");
+
+  await user.click(screen.getByRole("button", { name: "Добавить строки" }));
+
+  await waitFor(() => expect(router.state.location.search).toBe(""));
+  expect(
+    fetchMock.mock.calls.some(
+      (call) => String(call[0]) === "/api/disaggregation/d1/lines" && call[1]?.method === "POST",
+    ),
+  ).toBe(true);
+});

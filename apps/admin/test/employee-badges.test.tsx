@@ -12,7 +12,7 @@ const JANE: EmployeeDto = {
   fullName: "Jane Doe",
   role: "Кассир",
   status: "active",
-  pickupPolicy: { limitMode: "limited", dayLimit: 5, canWriteoff: false },
+  pickupPolicy: { limitMode: "limited", dayLimit: 5, canWriteoff: false, canBuildPallets: false },
   badges: [
     {
       id: "b1",

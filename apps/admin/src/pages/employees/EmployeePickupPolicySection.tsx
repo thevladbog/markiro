@@ -31,17 +31,20 @@ export function EmployeePickupPolicySection({
     limitMode: incomingLimitMode,
     dayLimit: incomingDayLimit,
     canWriteoff: incomingCanWriteoff,
+    canBuildPallets: incomingCanBuildPallets,
   } = employee.pickupPolicy;
   const [limitMode, setLimitMode] = useState<EmployeePickupLimitMode>(incomingLimitMode);
   const [dayLimit, setDayLimit] = useState(String(incomingDayLimit));
   const [canWriteoff, setCanWriteoff] = useState(incomingCanWriteoff);
+  const [canBuildPallets, setCanBuildPallets] = useState(incomingCanBuildPallets);
   const [baseline, setBaseline] = useState<EmployeePickupPolicyInput>(employee.pickupPolicy);
   const [error, setError] = useState<string | null>(null);
   const validDayLimit = /^[1-9]\d*$/.test(dayLimit);
   const dirty =
     limitMode !== baseline.limitMode ||
     dayLimit !== String(baseline.dayLimit) ||
-    canWriteoff !== baseline.canWriteoff;
+    canWriteoff !== baseline.canWriteoff ||
+    canBuildPallets !== baseline.canBuildPallets;
   const dirtyRef = useRef(false);
   const employeeIdRef = useRef(employee.id);
 
@@ -62,11 +65,19 @@ export function EmployeePickupPolicySection({
       limitMode: incomingLimitMode,
       dayLimit: incomingDayLimit,
       canWriteoff: incomingCanWriteoff,
+      canBuildPallets: incomingCanBuildPallets,
     });
     setLimitMode(incomingLimitMode);
     setDayLimit(String(incomingDayLimit));
     setCanWriteoff(incomingCanWriteoff);
-  }, [employee.id, incomingCanWriteoff, incomingDayLimit, incomingLimitMode]);
+    setCanBuildPallets(incomingCanBuildPallets);
+  }, [
+    employee.id,
+    incomingCanBuildPallets,
+    incomingCanWriteoff,
+    incomingDayLimit,
+    incomingLimitMode,
+  ]);
 
   const submit = async () => {
     if (!validDayLimit) return;
@@ -74,12 +85,13 @@ export function EmployeePickupPolicySection({
       setError(null);
       const savedEmployee = await mutation.mutateAsync({
         id: employee.id,
-        input: { limitMode, dayLimit: Number(dayLimit), canWriteoff },
+        input: { limitMode, dayLimit: Number(dayLimit), canWriteoff, canBuildPallets },
       });
       setBaseline(savedEmployee.pickupPolicy);
       setLimitMode(savedEmployee.pickupPolicy.limitMode);
       setDayLimit(String(savedEmployee.pickupPolicy.dayLimit));
       setCanWriteoff(savedEmployee.pickupPolicy.canWriteoff);
+      setCanBuildPallets(savedEmployee.pickupPolicy.canBuildPallets);
       toast("ok", t("pages.employees.pickupPolicy.toasts.success"));
     } catch (cause) {
       setError(
@@ -129,6 +141,13 @@ export function EmployeePickupPolicySection({
           checked={canWriteoff}
           disabled={mutation.isPending}
           onCheckedChange={setCanWriteoff}
+        />
+        <Checkbox
+          label={t("pages.employees.pickupPolicy.canBuildPalletsLabel")}
+          hint={t("pages.employees.pickupPolicy.canBuildPalletsHint")}
+          checked={canBuildPallets}
+          disabled={mutation.isPending}
+          onCheckedChange={setCanBuildPallets}
         />
         <div>
           <Button

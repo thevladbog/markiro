@@ -2485,6 +2485,8 @@
           "SHIFT_DATE_MISSING": "У смены не указана дата.",
           "BOX_COVERAGE_INCOMPLETE": "Не все коды смены распределены по коробам.",
           "SHIFT_HAS_NO_PALLETS": "В смене нет закрытых паллет: коробы не ставились на паллеты либо ни одна паллета ещё не закрыта.",
+          "PALLET_NOT_CLOSED": "Паллета ещё не закрыта — отчёт формируется только по закрытой паллете.",
+          "PALLET_DISASSEMBLED": "Паллета разобрана — отчёт по ней больше не формируется.",
           "ORG_INN_MISSING": "Укажите ИНН организации в профиле, чтобы сформировать отчет для ГИС МТ.",
           "FORMAT_NOT_FOUND": "Выбранный формат отчета больше недоступен.",
           "INVALID_LINE_LIMIT": "Недопустимое ограничение строк в части.",
@@ -2629,6 +2631,43 @@
         "status": "Статус"
       }
     },
+    "pallets": {
+      "title": "Паллеты",
+      "empty": "Паллет по этим условиям нет",
+      "noSscc": "Без SSCC",
+      "loadMore": "Показать ещё",
+      "disassembled": "Разобрана",
+      "contentsChangedAfterClose": "Состав изменился после закрытия",
+      "rejections": "Отказов: {{count}}",
+      "kind": {
+        "production": "Производственная",
+        "warehouse": "Складская"
+      },
+      "filters": {
+        "kindLabel": "Вид паллеты",
+        "kindAll": "Все",
+        "kindProduction": "Производственные",
+        "kindWarehouse": "Складские",
+        "productLabel": "Товар",
+        "productAll": "Все товары",
+        "productSearchLabel": "Поиск товара",
+        "deviceLabel": "Устройство",
+        "deviceAll": "Все устройства",
+        "deviceSearchLabel": "Поиск устройства",
+        "fromLabel": "Закрыта с",
+        "toLabel": "Закрыта по"
+      },
+      "table": {
+        "sscc": "SSCC",
+        "kind": "Вид",
+        "product": "Товар",
+        "device": "Устройство",
+        "boxCount": "Коробов",
+        "unitCount": "Кодов",
+        "closedAt": "Закрыта",
+        "status": "Статус"
+      }
+    },
     "boxSell": {
       "title": "Продажа коробом",
       "ssccLabel": "SSCC короба",
@@ -2659,7 +2698,8 @@
       "tabs": {
         "label": "Разделы поиска кодов",
         "codes": "Коды",
-        "boxes": "Короба"
+        "boxes": "Короба",
+        "pallets": "Паллеты"
       },
       "searchPlaceholder": "Введите SSCC (можно часть номера) или код маркировки",
       "searchButton": "Найти",
@@ -2747,6 +2787,8 @@
       "palletCard": {
         "noSscc": "Без SSCC",
         "printAction": "Распечатать",
+        "disassembleAction": "Расформировать",
+        "disassembleError": "Не удалось создать документ разагрегации",
         "status": {
           "open": "Открыта",
           "closed": "Закрыта",
@@ -2765,13 +2807,44 @@
           "sscc": "SSCC короба",
           "itemCount": "Кодов",
           "closedAt": "Закрыт",
-          "state": "Состояние"
+          "state": "Состояние",
+          "shift": "Смена короба"
         },
         "exceptionsTitle": "Исключения",
         "exceptionsEmpty": "Исключений нет",
         "exceptionKind": {
           "disassemble": "Разбор паллеты",
           "reprint": "Перепечать этикетки"
+        },
+        "noShift": "Вне смены (складская паллета)",
+        "kind": {
+          "production": "Производственная",
+          "warehouse": "Складская"
+        },
+        "rejections": {
+          "title": "Отказано в постановке",
+          "empty": "Все отсканированные короба поставлены на паллету",
+          "table": {
+            "sscc": "SSCC короба",
+            "reason": "Причина",
+            "winningPallet": "Паллета, где короб",
+            "addedAt": "Скан"
+          },
+          "reason": {
+            "already_on_pallet": "Уже на другой паллете",
+            "not_found": "Короб не найден",
+            "not_closed": "Короб не закрыт",
+            "disassembled": "Короб расформирован",
+            "pallet_closed": "Паллета уже закрыта",
+            "product_mismatch": "Другой товар"
+          }
+        },
+        "exports": {
+          "title": "Отчёты паллеты",
+          "create": "Сформировать отчёт",
+          "historyEmpty": "Отчёты для этой паллеты ещё не формировались.",
+          "afterCloseHint": "Отчёт доступен после закрытия паллеты.",
+          "disassembledHint": "Паллета разобрана — новый отчёт не формируется."
         }
       },
       "history": {
@@ -3238,6 +3311,8 @@
         "dayLimitError": "Введите положительное целое число",
         "canWriteoffLabel": "Разрешить списание",
         "canWriteoffHint": "Право списания изменяется независимо от лимита.",
+        "canBuildPalletsLabel": "Сборка паллет на ТСД",
+        "canBuildPalletsHint": "Сотрудник сможет ставить закрытые короба на складскую паллету в режиме «Паллеты» терминала.",
         "save": "Сохранить правила выдачи",
         "toasts": {
           "success": "Правила выдачи сохранены",

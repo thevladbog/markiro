@@ -1,6 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
-import type { ShiftExportFormatDescriptor, ShiftExportFormatId } from "@markiro/domain";
+import type {
+  PalletExportFormatDescriptor,
+  PalletExportFormatId,
+  ShiftExportFormatDescriptor,
+  ShiftExportFormatId,
+} from "@markiro/domain";
 
 import { apiFetch } from "../../api/client.js";
 
@@ -18,10 +23,17 @@ export interface ShiftExportArtifactDto {
   sha256: string;
 }
 
+/**
+ * Mirrors `apps/api/src/modules/shift-exports/dto.ts`'s `ShiftExportDto`. One
+ * row type serves both scopes: a shift export has `shiftId` and no
+ * `palletId`; a per-pallet export (warehouse pallets, plan 1) the reverse.
+ */
 export interface ShiftExportDto {
   id: string;
-  shiftId: string;
-  formatId: ShiftExportFormatId;
+  /** Null exactly when this is a per-pallet export; `palletId` is then set. */
+  shiftId: string | null;
+  palletId: string | null;
+  formatId: ShiftExportFormatId | PalletExportFormatId;
   formatVersion: number;
   maxLines: number | null;
   status: ShiftExportStatus;
@@ -47,6 +59,13 @@ export interface CreateShiftExportInput {
   idempotencyKey: string;
 }
 
+/** A pallet export has no `maxLines`: one `pack_content`, never split into parts. */
+export interface CreatePalletExportInput {
+  formatId: PalletExportFormatId;
+  formatVersion: number;
+  idempotencyKey: string;
+}
+
 export interface ShiftExportDownloadDto {
   url: string;
   filename: string;
@@ -54,19 +73,39 @@ export interface ShiftExportDownloadDto {
 }
 
 export const SHIFT_EXPORT_FORMATS_QUERY_KEY = ["shift-export-formats"] as const;
+export const PALLET_EXPORT_FORMATS_QUERY_KEY = ["pallet-export-formats"] as const;
 
 export const shiftExportsQueryKey = (shiftId: string) => ["shift-exports", shiftId] as const;
+export const palletExportsQueryKey = (palletId: string) => ["pallet-exports", palletId] as const;
 
 function fetchShiftExportFormats(): Promise<ShiftExportFormatDescriptor[]> {
   return apiFetch<ShiftExportFormatDescriptor[]>("/shift-exports/formats");
+}
+
+function fetchPalletExportFormats(): Promise<PalletExportFormatDescriptor[]> {
+  return apiFetch<PalletExportFormatDescriptor[]>("/pallet-exports/formats");
 }
 
 function fetchShiftExports(shiftId: string): Promise<ShiftExportDto[]> {
   return apiFetch<ShiftExportDto[]>(`/shifts/${shiftId}/exports`);
 }
 
+function fetchPalletExports(palletId: string): Promise<ShiftExportDto[]> {
+  return apiFetch<ShiftExportDto[]>(`/pallets/${palletId}/exports`);
+}
+
 function postShiftExport(shiftId: string, input: CreateShiftExportInput): Promise<ShiftExportDto> {
   return apiFetch<ShiftExportDto>(`/shifts/${shiftId}/exports`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+function postPalletExport(
+  palletId: string,
+  input: CreatePalletExportInput,
+): Promise<ShiftExportDto> {
+  return apiFetch<ShiftExportDto>(`/pallets/${palletId}/exports`, {
     method: "POST",
     body: JSON.stringify(input),
   });
@@ -85,10 +124,24 @@ export function downloadShiftExportArtifact(
   );
 }
 
+/** Poll every 2 s while any row is still being produced. */
+function exportsRefetchInterval(items: ShiftExportDto[] | undefined): number | false {
+  return items?.some((item) => item.status === "queued" || item.status === "processing")
+    ? 2_000
+    : false;
+}
+
 export function useShiftExportFormats(): UseQueryResult<ShiftExportFormatDescriptor[]> {
   return useQuery({
     queryKey: SHIFT_EXPORT_FORMATS_QUERY_KEY,
     queryFn: fetchShiftExportFormats,
+  });
+}
+
+export function usePalletExportFormats(): UseQueryResult<PalletExportFormatDescriptor[]> {
+  return useQuery({
+    queryKey: PALLET_EXPORT_FORMATS_QUERY_KEY,
+    queryFn: fetchPalletExportFormats,
   });
 }
 
@@ -100,10 +153,19 @@ export function useShiftExports(
     queryKey: shiftExportsQueryKey(shiftId),
     queryFn: () => fetchShiftExports(shiftId),
     enabled,
-    refetchInterval: (query) =>
-      query.state.data?.some((item) => item.status === "queued" || item.status === "processing")
-        ? 2_000
-        : false,
+    refetchInterval: (query) => exportsRefetchInterval(query.state.data),
+  });
+}
+
+export function usePalletExports(
+  palletId: string,
+  enabled: boolean,
+): UseQueryResult<ShiftExportDto[]> {
+  return useQuery({
+    queryKey: palletExportsQueryKey(palletId),
+    queryFn: () => fetchPalletExports(palletId),
+    enabled,
+    refetchInterval: (query) => exportsRefetchInterval(query.state.data),
   });
 }
 
@@ -121,16 +183,39 @@ export function useCreateShiftExport(): UseMutationResult<
   });
 }
 
+export function useCreatePalletExport(): UseMutationResult<
+  ShiftExportDto,
+  Error,
+  { palletId: string; input: CreatePalletExportInput }
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ palletId, input }) => postPalletExport(palletId, input),
+    onSuccess: (_data, { palletId }) => {
+      void queryClient.invalidateQueries({ queryKey: palletExportsQueryKey(palletId) });
+    },
+  });
+}
+
+/**
+ * Retry is one endpoint for both scopes; the row's own `shiftId`/`palletId`
+ * says which history list to refresh afterwards.
+ */
 export function useRetryShiftExport(): UseMutationResult<
   ShiftExportDto,
   Error,
-  { shiftId: string; exportId: string }
+  { exportId: string; shiftId: string | null; palletId: string | null }
 > {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ exportId }) => postRetryShiftExport(exportId),
-    onSuccess: (_data, { shiftId }) => {
-      void queryClient.invalidateQueries({ queryKey: shiftExportsQueryKey(shiftId) });
+    onSuccess: (_data, { shiftId, palletId }) => {
+      if (shiftId) {
+        void queryClient.invalidateQueries({ queryKey: shiftExportsQueryKey(shiftId) });
+      }
+      if (palletId) {
+        void queryClient.invalidateQueries({ queryKey: palletExportsQueryKey(palletId) });
+      }
     },
   });
 }

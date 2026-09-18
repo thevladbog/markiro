@@ -131,6 +131,7 @@ function renderAccessRoute(
       if (path.includes("/api/devices"))
         return jsonResponse(200, { items: [], page: 1, pageSize: 8, total: 0 });
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
+      if (path.startsWith("/api/pallets")) return jsonResponse(200, { items: [] });
       if (path.endsWith("/api/inventories")) return jsonResponse(200, { items: [] });
       if (path.endsWith("/api/lines")) return jsonResponse(200, { items: [] });
       if (path.includes("/api/integrations/commerceml/candidates")) {
@@ -198,6 +199,16 @@ it("allows operations readers to open production lines and forbids users without
   reader.unmount();
 
   renderAccessRoute("/lines", INTEGRATIONS_ONLY_ACCESS);
+  expect(await screen.findByTestId("forbidden-page")).toBeDefined();
+});
+
+it("opens the pallets registry for operations readers and forbids users without read access", async () => {
+  const reader = renderAccessRoute("/pallets", OPERATIONS_READ_ONLY);
+  expect(await screen.findByRole("tab", { name: "Паллеты" })).toBeDefined();
+  expect(screen.queryByTestId("forbidden-page")).toBeNull();
+  reader.unmount();
+
+  renderAccessRoute("/pallets", INTEGRATIONS_ONLY_ACCESS);
   expect(await screen.findByTestId("forbidden-page")).toBeDefined();
 });
 

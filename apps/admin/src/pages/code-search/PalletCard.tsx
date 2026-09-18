@@ -12,14 +12,25 @@
  */
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useParams } from "react-router";
+import { Link, useNavigate, useParams } from "react-router";
 
-import { formatSsccHri } from "@markiro/domain";
+import { CABINET_CAPABILITY, formatSsccHri } from "@markiro/domain";
 import { Alert, Badge, Button, Card, PageHeader, Spinner, StatusChip, Table } from "@markiro/ui";
 import type { StatusChipStatus, TableColumn } from "@markiro/ui";
 
-import { formatCreatedAt } from "../../lib/datetime.js";
-import { usePalletCard, type PalletCardBoxDto, type PalletCardDto } from "./api.js";
+import { useCan } from "../../access/context.js";
+import { ApiRequestError } from "../../api/client.js";
+import { formatCreatedAt, formatDate } from "../../lib/datetime.js";
+import { toast } from "../../lib/toast.js";
+import { useCreateDocument } from "../disaggregation/api.js";
+import { PalletExportsSection } from "./PalletExportsSection.js";
+import {
+  usePalletCard,
+  type PalletCardBoxDto,
+  type PalletCardDto,
+  type PalletCardRejectionDto,
+  type PalletMembershipRejectionReason,
+} from "./api.js";
 
 // Identical mapping to the box card's: a pallet's three states mean the same
 // three things -- still being stacked, closed and labelled, taken apart.
@@ -28,6 +39,15 @@ const STATUS_TO_CHIP: Record<PalletCardDto["status"], StatusChipStatus> = {
   closed: "ok",
   disassembled: "neutral",
 };
+
+const REJECTION_REASONS: ReadonlySet<string> = new Set<PalletMembershipRejectionReason>([
+  "already_on_pallet",
+  "not_found",
+  "not_closed",
+  "disassembled",
+  "pallet_closed",
+  "product_mismatch",
+]);
 
 function DetailField({ label, value }: { label: string; value: ReactNode }) {
   return (
@@ -41,6 +61,9 @@ function DetailField({ label, value }: { label: string; value: ReactNode }) {
 export function PalletCardPage() {
   const { t, i18n } = useTranslation();
   const { palletId } = useParams();
+  const navigate = useNavigate();
+  const canWrite = useCan(CABINET_CAPABILITY.OPERATIONS_WRITE);
+  const createDocument = useCreateDocument();
 
   const { data: pallet, isPending, isError } = usePalletCard(palletId);
 
@@ -62,6 +85,29 @@ export function PalletCardPage() {
 
   const title = pallet.sscc ? formatSsccHri(pallet.sscc) : t("pages.codeSearch.palletCard.noSscc");
 
+  // Taking a pallet apart in the cabinet IS a disaggregation document (spec
+  // §4): the card only opens a fresh draft with this pallet's SSCC already in
+  // the paste box. Only a closed, labelled pallet can be taken apart, and only
+  // by someone allowed to write operations.
+  const canDisassemble = canWrite && pallet.status === "closed" && pallet.sscc !== null;
+
+  const startDisassembly = () => {
+    if (!pallet.sscc) return;
+    const sscc = pallet.sscc;
+    createDocument.mutate(undefined, {
+      onSuccess: (doc) => {
+        void navigate(`/disaggregation/${doc.id}?${new URLSearchParams({ sscc }).toString()}`);
+      },
+      onError: (error) =>
+        toast(
+          "error",
+          error instanceof ApiRequestError
+            ? error.message
+            : t("pages.codeSearch.palletCard.disassembleError"),
+        ),
+    });
+  };
+
   const boxColumns: TableColumn<PalletCardBoxDto>[] = [
     {
       key: "sscc",
@@ -71,6 +117,24 @@ export function PalletCardPage() {
         <Link to={`/codes/box/${row.id}`}>
           {row.sscc ? formatSsccHri(row.sscc) : t("pages.codeSearch.boxCard.noSscc")}
         </Link>
+      ),
+    },
+    {
+      key: "shift",
+      title: t("pages.codeSearch.palletCard.table.shift"),
+      wrap: true,
+      // A box's OWN shift, not the pallet's: on a warehouse pallet every row
+      // may come from a different one, and the production date beside the
+      // number is what tells the manager how old the stack really is.
+      render: (row) => (
+        <span style={{ display: "inline-flex", flexDirection: "column", gap: 2 }}>
+          <Link to={`/shifts/${row.shiftId}`}>{row.shiftNumber ?? row.shiftId}</Link>
+          {row.productionDate ? (
+            <span style={{ font: "var(--text-caption)", color: "var(--fg-3)" }}>
+              {formatDate(row.productionDate, i18n.language)}
+            </span>
+          ) : null}
+        </span>
       ),
     },
     {
@@ -99,6 +163,40 @@ export function PalletCardPage() {
     },
   ];
 
+  const rejectionColumns: TableColumn<PalletCardRejectionDto>[] = [
+    {
+      key: "boxSscc",
+      title: t("pages.codeSearch.palletCard.rejections.table.sscc"),
+      mono: true,
+      render: (row) =>
+        row.boxId ? (
+          <Link to={`/codes/box/${row.boxId}`}>{formatSsccHri(row.boxSscc)}</Link>
+        ) : (
+          formatSsccHri(row.boxSscc)
+        ),
+    },
+    {
+      key: "reason",
+      title: t("pages.codeSearch.palletCard.rejections.table.reason"),
+      wrap: true,
+      render: (row) =>
+        REJECTION_REASONS.has(row.reason)
+          ? t(`pages.codeSearch.palletCard.rejections.reason.${row.reason}`)
+          : row.reason,
+    },
+    {
+      key: "winningPalletSscc",
+      title: t("pages.codeSearch.palletCard.rejections.table.winningPallet"),
+      mono: true,
+      render: (row) => (row.winningPalletSscc ? formatSsccHri(row.winningPalletSscc) : "—"),
+    },
+    {
+      key: "addedAt",
+      title: t("pages.codeSearch.palletCard.rejections.table.addedAt"),
+      render: (row) => formatCreatedAt(row.addedAt, i18n.language),
+    },
+  ];
+
   return (
     <div style={{ padding: "28px 32px", display: "flex", flexDirection: "column", gap: 20 }}>
       <Link
@@ -112,6 +210,16 @@ export function PalletCardPage() {
         title={title}
         actions={
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {canDisassemble ? (
+              <Button
+                type="button"
+                variant="secondary"
+                loading={createDocument.isPending}
+                onClick={startDisassembly}
+              >
+                {t("pages.codeSearch.palletCard.disassembleAction")}
+              </Button>
+            ) : null}
             <Button
               type="button"
               variant="secondary"
@@ -124,6 +232,9 @@ export function PalletCardPage() {
             >
               {t("pages.codeSearch.palletCard.printAction")}
             </Button>
+            <Badge tone={pallet.kind === "warehouse" ? "accent" : "neutral"}>
+              {t(`pages.codeSearch.palletCard.kind.${pallet.kind}`)}
+            </Badge>
             <StatusChip
               status={STATUS_TO_CHIP[pallet.status]}
               label={t(`pages.codeSearch.palletCard.status.${pallet.status}`)}
@@ -147,9 +258,15 @@ export function PalletCardPage() {
           <DetailField
             label={t("pages.codeSearch.palletCard.shiftLabel")}
             value={
-              <Link to={`/shifts/${pallet.shiftId}`}>
-                {pallet.shiftNumber ?? t("pages.codeSearch.palletCard.shiftLabel")}
-              </Link>
+              pallet.shiftId ? (
+                <Link to={`/shifts/${pallet.shiftId}`}>
+                  {pallet.shiftNumber ?? t("pages.codeSearch.palletCard.shiftLabel")}
+                </Link>
+              ) : (
+                // A warehouse pallet belongs to no shift: say so rather than
+                // linking to a shift that does not exist.
+                t("pages.codeSearch.palletCard.noShift")
+              )
             }
           />
           <DetailField
@@ -182,6 +299,18 @@ export function PalletCardPage() {
           scrollLabel={t("pages.codeSearch.palletCard.boxesTitle")}
         />
       </Card>
+
+      {pallet.kind === "warehouse" ? (
+        <Card title={t("pages.codeSearch.palletCard.rejections.title")}>
+          <Table
+            columns={rejectionColumns}
+            rows={pallet.rejections}
+            getRowKey={(row) => `${row.boxSscc}:${row.recordedAt}`}
+            empty={t("pages.codeSearch.palletCard.rejections.empty")}
+            scrollLabel={t("pages.codeSearch.palletCard.rejections.title")}
+          />
+        </Card>
+      ) : null}
 
       <Card title={t("pages.codeSearch.palletCard.exceptionsTitle")}>
         {pallet.exceptions.length === 0 ? (
@@ -223,6 +352,12 @@ export function PalletCardPage() {
           </ul>
         )}
       </Card>
+
+      <section role="region" aria-label={t("pages.codeSearch.palletCard.exports.title")}>
+        <Card title={t("pages.codeSearch.palletCard.exports.title")}>
+          <PalletExportsSection pallet={pallet} />
+        </Card>
+      </section>
     </div>
   );
 }

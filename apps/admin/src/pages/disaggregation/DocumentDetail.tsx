@@ -13,7 +13,7 @@
  */
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useParams } from "react-router";
+import { Link, useParams, useSearchParams } from "react-router";
 
 import {
   Alert,
@@ -202,7 +202,19 @@ function AddLinesPanel({ docId }: { docId: string }) {
   const { t } = useTranslation();
   const addLinesMutation = useAddLines(docId);
   const importMutation = useImportLines(docId);
-  const [pasteValue, setPasteValue] = useState("");
+  // `?sscc=` is how the pallet card hands over the pallet it wants taken
+  // apart (`/codes/pallet/:id` → «Расформировать»). It seeds the paste box
+  // once and is dropped after the first successful add, so a reload of the
+  // document does not offer the same SSCC a second time.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [pasteValue, setPasteValue] = useState(() => searchParams.get("sscc") ?? "");
+
+  const dropSeededSscc = () => {
+    if (!searchParams.has("sscc")) return;
+    const next = new URLSearchParams(searchParams);
+    next.delete("sscc");
+    setSearchParams(next, { replace: true });
+  };
 
   const handleAddLines = async () => {
     const ssccs = splitSsccInput(pasteValue);
@@ -210,6 +222,7 @@ function AddLinesPanel({ docId }: { docId: string }) {
     try {
       await addLinesMutation.mutateAsync(ssccs);
       setPasteValue("");
+      dropSeededSscc();
     } catch (error) {
       toast(
         "error",
@@ -223,6 +236,7 @@ function AddLinesPanel({ docId }: { docId: string }) {
   const handleFile = async (file: File) => {
     try {
       await importMutation.mutateAsync(file);
+      dropSeededSscc();
     } catch (error) {
       toast(
         "error",

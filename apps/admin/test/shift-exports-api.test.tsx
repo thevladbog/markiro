@@ -160,7 +160,9 @@ describe("shift export mutations", () => {
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
     const { result } = renderHook(() => useRetryShiftExport(), { wrapper });
 
-    await act(() => result.current.mutateAsync({ shiftId: SHIFT_ID, exportId: EXPORT_ID }));
+    await act(() =>
+      result.current.mutateAsync({ shiftId: SHIFT_ID, palletId: null, exportId: EXPORT_ID }),
+    );
 
     expect(fetchMock).toHaveBeenCalledWith(
       `/api/shift-exports/${EXPORT_ID}/retry`,

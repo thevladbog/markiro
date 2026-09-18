@@ -2485,6 +2485,8 @@
           "SHIFT_DATE_MISSING": "The shift has no date.",
           "BOX_COVERAGE_INCOMPLETE": "Not every shift code is assigned to a box.",
           "SHIFT_HAS_NO_PALLETS": "The shift has no closed pallet: either no box was ever stacked on one, or no pallet has been closed yet.",
+          "PALLET_NOT_CLOSED": "The pallet is not closed yet — an export needs a closed pallet.",
+          "PALLET_DISASSEMBLED": "The pallet was taken apart — it can no longer be exported.",
           "ORG_INN_MISSING": "Set the organization INN in the profile to generate the GIS MT report.",
           "FORMAT_NOT_FOUND": "The selected report format is no longer available.",
           "INVALID_LINE_LIMIT": "The lines-per-part limit is invalid.",
@@ -2629,6 +2631,43 @@
         "status": "Status"
       }
     },
+    "pallets": {
+      "title": "Pallets",
+      "empty": "No pallets match these filters",
+      "noSscc": "No SSCC",
+      "loadMore": "Show more",
+      "disassembled": "Taken apart",
+      "contentsChangedAfterClose": "Contents changed after closing",
+      "rejections": "Refused: {{count}}",
+      "kind": {
+        "production": "Production",
+        "warehouse": "Warehouse"
+      },
+      "filters": {
+        "kindLabel": "Pallet kind",
+        "kindAll": "All",
+        "kindProduction": "Production",
+        "kindWarehouse": "Warehouse",
+        "productLabel": "Product",
+        "productAll": "All products",
+        "productSearchLabel": "Search product",
+        "deviceLabel": "Device",
+        "deviceAll": "All devices",
+        "deviceSearchLabel": "Search device",
+        "fromLabel": "Closed from",
+        "toLabel": "Closed to"
+      },
+      "table": {
+        "sscc": "SSCC",
+        "kind": "Kind",
+        "product": "Product",
+        "device": "Device",
+        "boxCount": "Boxes",
+        "unitCount": "Codes",
+        "closedAt": "Closed",
+        "status": "Status"
+      }
+    },
     "boxSell": {
       "title": "Sell box",
       "ssccLabel": "Box SSCC",
@@ -2659,7 +2698,8 @@
       "tabs": {
         "label": "Code search sections",
         "codes": "Codes",
-        "boxes": "Boxes"
+        "boxes": "Boxes",
+        "pallets": "Pallets"
       },
       "searchPlaceholder": "Enter an SSCC (a partial number works) or a marking code",
       "searchButton": "Search",
@@ -2747,6 +2787,8 @@
       "palletCard": {
         "noSscc": "No SSCC",
         "printAction": "Print",
+        "disassembleAction": "Take apart",
+        "disassembleError": "Could not create the disaggregation document",
         "status": {
           "open": "Open",
           "closed": "Closed",
@@ -2765,13 +2807,44 @@
           "sscc": "Box SSCC",
           "itemCount": "Codes",
           "closedAt": "Closed",
-          "state": "State"
+          "state": "State",
+          "shift": "Box shift"
         },
         "exceptionsTitle": "Exceptions",
         "exceptionsEmpty": "No exceptions",
         "exceptionKind": {
           "disassemble": "Pallet taken apart",
           "reprint": "Label reprint"
+        },
+        "noShift": "No shift (warehouse pallet)",
+        "kind": {
+          "production": "Production",
+          "warehouse": "Warehouse"
+        },
+        "rejections": {
+          "title": "Refused memberships",
+          "empty": "Every scanned box was stacked on the pallet",
+          "table": {
+            "sscc": "Box SSCC",
+            "reason": "Reason",
+            "winningPallet": "Pallet holding the box",
+            "addedAt": "Scanned"
+          },
+          "reason": {
+            "already_on_pallet": "Already on another pallet",
+            "not_found": "Box not found",
+            "not_closed": "Box not closed",
+            "disassembled": "Box taken apart",
+            "pallet_closed": "Pallet already closed",
+            "product_mismatch": "Different product"
+          }
+        },
+        "exports": {
+          "title": "Pallet exports",
+          "create": "Create export",
+          "historyEmpty": "No exports have been created for this pallet yet.",
+          "afterCloseHint": "The export becomes available once the pallet is closed.",
+          "disassembledHint": "The pallet was taken apart — no new export can be created."
         }
       },
       "history": {
@@ -3238,6 +3311,8 @@
         "dayLimitError": "Enter a positive whole number",
         "canWriteoffLabel": "Allow writeoff",
         "canWriteoffHint": "Writeoff permission changes independently from the limit.",
+        "canBuildPalletsLabel": "Build pallets on a handheld",
+        "canBuildPalletsHint": "The employee can stack closed boxes onto a warehouse pallet in the handheld's Pallets mode.",
         "save": "Save pickup policy",
         "toasts": {
           "success": "Pickup policy saved",

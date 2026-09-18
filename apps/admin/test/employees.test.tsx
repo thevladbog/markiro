@@ -90,7 +90,7 @@ const JANE: EmployeeDto = {
   fullName: "Jane Doe",
   role: "Кассир",
   status: "active",
-  pickupPolicy: { limitMode: "limited", dayLimit: 12, canWriteoff: false },
+  pickupPolicy: { limitMode: "limited", dayLimit: 12, canWriteoff: false, canBuildPallets: false },
   badges: [
     {
       id: "b1",
@@ -176,7 +176,12 @@ describe("EmployeePickupPolicySection", () => {
 
     rerenderEmployee({
       ...JANE,
-      pickupPolicy: { limitMode: "unlimited", dayLimit: 8, canWriteoff: true },
+      pickupPolicy: {
+        limitMode: "unlimited",
+        dayLimit: 8,
+        canWriteoff: true,
+        canBuildPallets: false,
+      },
     });
 
     await waitFor(() => {
@@ -201,7 +206,12 @@ describe("EmployeePickupPolicySection", () => {
     await user.click(screen.getByRole("checkbox", { name: "Разрешить списание" }));
     rerenderEmployee({
       ...JANE,
-      pickupPolicy: { limitMode: "unlimited", dayLimit: 8, canWriteoff: false },
+      pickupPolicy: {
+        limitMode: "unlimited",
+        dayLimit: 8,
+        canWriteoff: false,
+        canBuildPallets: false,
+      },
     });
 
     expect(
@@ -217,7 +227,12 @@ describe("EmployeePickupPolicySection", () => {
   it("uses the successful response as the clean baseline and updates employee caches", async () => {
     const savedEmployee: EmployeeDto = {
       ...JANE,
-      pickupPolicy: { limitMode: "limited", dayLimit: 9, canWriteoff: false },
+      pickupPolicy: {
+        limitMode: "limited",
+        dayLimit: 9,
+        canWriteoff: false,
+        canBuildPallets: false,
+      },
     };
     vi.stubGlobal(
       "fetch",
@@ -238,6 +253,52 @@ describe("EmployeePickupPolicySection", () => {
     await waitFor(() => expect(reporters.onDirtyChange).toHaveBeenLastCalledWith(false));
     expect((screen.getByLabelText("Позиций в день") as HTMLInputElement).value).toBe("9");
     expect(queryClient.getQueryData([...EMPLOYEES_QUERY_KEY, {}])).toEqual([savedEmployee]);
+  });
+
+  it("saves the handheld pallet-building permission alongside the pickup limits", async () => {
+    const savedEmployee: EmployeeDto = {
+      ...JANE,
+      pickupPolicy: {
+        limitMode: "limited",
+        dayLimit: 12,
+        canWriteoff: false,
+        canBuildPallets: true,
+      },
+    };
+    const fetchMock = vi.fn(async () => jsonResponse(200, savedEmployee));
+    vi.stubGlobal("fetch", fetchMock);
+    renderPickupPolicy();
+    const user = userEvent.setup();
+
+    const checkbox = screen.getByRole("checkbox", { name: "Сборка паллет на ТСД" });
+    expect(checkbox.getAttribute("aria-checked")).toBe("false");
+    await user.click(checkbox);
+    expect(checkbox.getAttribute("aria-checked")).toBe("true");
+    await user.click(screen.getByRole("button", { name: "Сохранить правила выдачи" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/employees/1/pickup-policy",
+        expect.objectContaining({
+          method: "PATCH",
+          body: JSON.stringify({
+            limitMode: "limited",
+            dayLimit: 12,
+            canWriteoff: false,
+            canBuildPallets: true,
+          }),
+        }),
+      ),
+    );
+
+    // The success toast renders in a global container outside this test's
+    // subtree, so it survives `cleanup()` unless dismissed -- close it to
+    // avoid leaking a stray `role="status"` node into later tests (as the
+    // sibling "uses the successful response..." case above also does).
+    const successToast = await screen.findByText("Правила выдачи сохранены");
+    const toastStatus = successToast.closest("[role=status]");
+    if (!toastStatus) throw new Error("Pickup policy success toast not found");
+    await user.click(within(toastStatus as HTMLElement).getByRole("button", { name: "Закрыть" }));
   });
 });
 

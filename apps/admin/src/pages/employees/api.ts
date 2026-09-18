@@ -21,6 +21,8 @@ export interface EmployeePickupPolicyInput {
   limitMode: EmployeePickupLimitMode;
   dayLimit: number;
   canWriteoff: boolean;
+  /** May build warehouse pallets on a handheld (spec §2.5); independent of the pickup limit. */
+  canBuildPallets: boolean;
 }
 
 /** Mirrors `apps/api/src/modules/employees/dto.ts`'s `BadgeDto`. */
