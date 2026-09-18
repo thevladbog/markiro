@@ -8,6 +8,8 @@ import { upperBoundCondition } from "../../lib/date-range";
 import { classifySearchInput } from "./input-classifier";
 import type { BoxReportData } from "./box-report";
 import type { PalletReportData } from "./pallet-report";
+import type { ReportOrg } from "./contents-report";
+import { OrgProfileService } from "../org-profile/org-profile.service";
 import type { PalletPlacardData } from "./pallet-placard";
 import type {
   BoxCardDto,
@@ -49,7 +51,31 @@ interface CodeListRow {
 
 @Injectable()
 export class CodeSearchService {
-  constructor(@Inject(DB) private readonly db: Db) {}
+  constructor(
+    @Inject(DB) private readonly db: Db,
+    private readonly orgProfile: OrgProfileService,
+  ) {}
+
+  /**
+   * The organisation block every printed form carries. The logo is the one
+   * uploaded in the profile (object storage, inlined as a data URL); the
+   * legacy `organization.logo` column is only a fallback for tenants that
+   * never uploaded one through the profile.
+   */
+  private async reportOrg(tenantId: string): Promise<ReportOrg | null> {
+    const [row] = await this.db
+      .select({
+        name: schema.organization.name,
+        inn: schema.orgProfiles.inn,
+        legacyLogo: schema.organization.logo,
+      })
+      .from(schema.organization)
+      .leftJoin(schema.orgProfiles, eq(schema.orgProfiles.tenantId, schema.organization.id))
+      .where(eq(schema.organization.id, tenantId));
+    if (!row) return null;
+    const uploaded = await this.orgProfile.reportLogoDataUrl(tenantId);
+    return { name: row.name, inn: row.inn, logo: uploaded ?? row.legacyLogo };
+  }
 
   /**
    * `exists (...)` fragment for the "aggregated" branch of the derived
@@ -1171,15 +1197,7 @@ export class CodeSearchService {
 
     if (!box) throw new NotFoundException();
 
-    const [org] = await this.db
-      .select({
-        name: schema.organization.name,
-        inn: schema.orgProfiles.inn,
-        logo: schema.organization.logo,
-      })
-      .from(schema.organization)
-      .leftJoin(schema.orgProfiles, eq(schema.orgProfiles.tenantId, schema.organization.id))
-      .where(eq(schema.organization.id, tenantId));
+    const org = await this.reportOrg(tenantId);
 
     // Join the hot code rows through the box item's own (codeHash, addedAt ==
     // the owning scan's scannedAt), NOT through code_registry — see
@@ -1232,7 +1250,7 @@ export class CodeSearchService {
       sscc: box.sscc === null ? null : formatSsccWithAi(box.sscc),
       status,
       productName: box.productName,
-      org: org ? { name: org.name, inn: org.inn, logo: org.logo } : null,
+      org,
       openedAt: box.openedAt,
       closedAt: box.closedAt,
       disassembledAt: box.disassembledAt,
@@ -1281,15 +1299,7 @@ export class CodeSearchService {
 
     if (!pallet) throw new NotFoundException();
 
-    const [org] = await this.db
-      .select({
-        name: schema.organization.name,
-        inn: schema.orgProfiles.inn,
-        logo: schema.organization.logo,
-      })
-      .from(schema.organization)
-      .leftJoin(schema.orgProfiles, eq(schema.orgProfiles.tenantId, schema.organization.id))
-      .where(eq(schema.organization.id, tenantId));
+    const org = await this.reportOrg(tenantId);
 
     const boxRows = await this.db
       .select({
@@ -1335,7 +1345,7 @@ export class CodeSearchService {
       sscc: pallet.sscc === null ? null : formatSsccWithAi(pallet.sscc),
       status,
       productName: pallet.productName,
-      org: org ? { name: org.name, inn: org.inn, logo: org.logo } : null,
+      org,
       openedAt: pallet.openedAt,
       closedAt: pallet.closedAt,
       disassembledAt: pallet.disassembledAt,
@@ -1440,15 +1450,7 @@ export class CodeSearchService {
       throw new ConflictException({ code: "PALLET_NOT_CLOSED", message: "Pallet must be closed" });
     }
 
-    const [org] = await this.db
-      .select({
-        name: schema.organization.name,
-        inn: schema.orgProfiles.inn,
-        logo: schema.organization.logo,
-      })
-      .from(schema.organization)
-      .leftJoin(schema.orgProfiles, eq(schema.orgProfiles.tenantId, schema.organization.id))
-      .where(eq(schema.organization.id, tenantId));
+    const org = await this.reportOrg(tenantId);
 
     // Each box's OWN production day (its shift's) -- the DECLARED one only.
     // Unlike the card, the placard never substitutes the planned date: a
@@ -1492,7 +1494,7 @@ export class CodeSearchService {
       productName: pallet.productName,
       gtin14: pallet.gtin14,
       shelfLifeDays: pallet.shelfLifeDays,
-      org: org ? { name: org.name, inn: org.inn, logo: org.logo } : null,
+      org,
       boxes: boxRows.map((row) => ({
         productionDate: row.productionDate,
         codeCount: row.codeCount,

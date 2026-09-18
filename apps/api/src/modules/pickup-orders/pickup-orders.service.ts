@@ -1256,7 +1256,15 @@ export class PickupOrdersService {
     return {
       orderNo: row.orderNo,
       createdAt: row.createdAt,
-      org: org ? { name: org.name, inn: org.inn, logo: org.logo } : null,
+      // The uploaded profile logo (inlined for a self-contained printout);
+      // the legacy `organization.logo` column only as a fallback.
+      org: org
+        ? {
+            name: org.name,
+            inn: org.inn,
+            logo: (await this.orgProfiles.reportLogoDataUrl(tenantId)) ?? org.logo,
+          }
+        : null,
       employee: {
         id: row.employeeId,
         fullName: row.employeeFullName ?? "",

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { PARENT_ROW_MM, parentRowHeightMm } from "../src/modules/code-search/contents-report";
 import {
   renderPalletReportHtml,
   type PalletReportData,
@@ -81,6 +82,25 @@ describe("pallet contents report", () => {
     const pages = html.match(/data-report-page="\d+"/g) ?? [];
     expect(pages.length).toBeGreaterThan(1);
     expect(html).toContain(`стр. ${pages.length} из ${pages.length}`);
+  });
+
+  /**
+   * Owner review 2026-09-18: the product name in the pallet row must print
+   * in full, however long. The row grows instead of clamping, and the
+   * pagination budget grows with it so the row cannot overrun the page.
+   */
+  it("prints a long product name in full and reserves a taller pallet row for it", () => {
+    const long =
+      "Сидр фруктовый газированный жемчужный фильтрованный пастеризованный «Кармилла Сайдер» 0,33 л, стекло, упаковка 12 шт.";
+    const html = renderPalletReportHtml(fixture({ productName: long }));
+    expect(html).toContain(`<span class="rep-product-name">${long}</span>`);
+    expect(html).not.toContain("line-clamp");
+    expect(html).toContain(".rep-box-row { min-height: 13mm;");
+    expect(parentRowHeightMm(null)).toBe(PARENT_ROW_MM);
+    expect(parentRowHeightMm("Cola")).toBe(PARENT_ROW_MM);
+    expect(parentRowHeightMm(long)).toBeGreaterThan(PARENT_ROW_MM);
+    // Five wrapped lines at ~28 characters: 2 + 5 × 4.6 → 25 mm.
+    expect(parentRowHeightMm(long)).toBe(25);
   });
 
   it("escapes tenant-controlled text", () => {

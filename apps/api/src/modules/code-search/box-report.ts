@@ -1,6 +1,6 @@
 import {
   CHILD_ROW_MM,
-  PARENT_ROW_MM,
+  parentRowHeightMm,
   dataMatrix,
   emptyNoteUnit,
   escapeHtml,
@@ -121,7 +121,9 @@ function codeRow(code: BoxReportCode, isLast: boolean): string {
 }
 
 function contentsUnits(data: BoxReportData): ReportUnit[] {
-  const units: ReportUnit[] = [{ kind: "band", heightMm: PARENT_ROW_MM, html: boxRow(data) }];
+  const units: ReportUnit[] = [
+    { kind: "band", heightMm: parentRowHeightMm(data.productName), html: boxRow(data) },
+  ];
   if (data.codes.length === 0) {
     units.push(emptyNoteUnit("Короб пуст"));
     return units;

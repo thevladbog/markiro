@@ -52,6 +52,51 @@ describe("OrgProfileService logo processing errors", () => {
   });
 });
 
+describe("OrgProfileService printed-form logo", () => {
+  /** A `select().from().innerJoin().where().limit()` chain answering `rows`. */
+  function logoAssetDb(rows: unknown[]): OrgProfileDatabase {
+    const select = vi.fn(() => ({
+      from: () => ({
+        innerJoin: () => ({ where: () => ({ limit: async () => rows }) }),
+      }),
+    }));
+    return profileDatabase({ select });
+  }
+  const active = { id: "rev-1", objectKey: "tenant/logo/rev-1.webp", contentType: "image/webp" };
+
+  it("inlines the active logo as a data URL", async () => {
+    const storage: OrgProfileStorage = {
+      ...unusedStorage,
+      get: async (key: string) => {
+        expect(key).toBe(active.objectKey);
+        return { body: Buffer.from("RIFF-webp-bytes"), contentType: "image/webp" };
+      },
+    };
+    const service = new OrgProfileService(logoAssetDb([active]), storage, unusedSscc);
+
+    await expect(service.reportLogoDataUrl("tenant")).resolves.toBe(
+      `data:image/webp;base64,${Buffer.from("RIFF-webp-bytes").toString("base64")}`,
+    );
+  });
+
+  it("answers null when the tenant has no active logo", async () => {
+    const service = profileService(logoAssetDb([]));
+    await expect(service.reportLogoDataUrl("tenant")).resolves.toBeNull();
+  });
+
+  it("answers null instead of failing the printout when the store is unavailable", async () => {
+    const storage: OrgProfileStorage = {
+      ...unusedStorage,
+      get: async () => {
+        throw new Error("object storage timed out");
+      },
+    };
+    const service = new OrgProfileService(logoAssetDb([active]), storage, unusedSscc);
+
+    await expect(service.reportLogoDataUrl("tenant")).resolves.toBeNull();
+  });
+});
+
 describe("OrgProfileService box label defaults", () => {
   const emptyProfile = {
     gln: null,

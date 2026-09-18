@@ -181,7 +181,10 @@ describe("pallet placard", () => {
     expect(a5).toContain("@page { size: A5;");
     expect(a4).toContain('<th class="n">Единиц</th>');
     expect(a5).not.toContain('<th class="n">Единиц</th>');
-    expect(a5).toContain("Произв.");
+    // A5 keeps the full caption and says what it counts (owner review).
+    expect(a5).toContain("<th>Дата производства</th>");
+    expect(a5).toContain('<th class="n">Кор., шт</th>');
+    expect(a5).not.toContain("Произв.");
     expect(a4).toContain("ИНН 7701234567");
     expect(a5).not.toContain("ИНН 7701234567");
   });
@@ -215,7 +218,7 @@ describe("pallet placard", () => {
       fixture({ gtin14: null, shelfLifeDays: null, org: null }),
       "a4",
     );
-    expect(html).toContain('pl-figure-value--gtin mono">—<');
+    expect(html).toContain('pl-figure-value--gtin">—<');
     expect(html).not.toContain("ИНН");
     expect(html).toContain('data-brand-logo="markiro"');
   });
