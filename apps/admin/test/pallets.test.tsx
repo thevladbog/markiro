@@ -318,6 +318,57 @@ describe("shift form pallet configuration", () => {
     expect(screen.queryByRole("option", { name: "Короб 58×40" })).toBeNull();
   });
 
+  /**
+   * The box template has always been swappable on an ACTIVE shift; the pallet
+   * template picker was frozen there for no reason of its own. It now behaves
+   * the same, and the active-edit payload carries only what changed.
+   */
+  it("lets an active shift change its pallet template and sends only that field", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse(200, { defaultBoxLabelTemplateId: null, defaultSource: null }),
+      ),
+    );
+    render(
+      <QueryClientProvider client={newQueryClient()}>
+        <MemoryRouter>
+          <ShiftForm
+            mode="edit"
+            editStatus="active"
+            initialValues={{
+              ...AGGREGATION_FORM_VALUES,
+              // A concrete box template: the form refuses an aggregation
+              // shift without one before it ever builds a payload.
+              boxLabelTemplateSelection: BOX_TEMPLATE.id,
+              palletsEnabled: true,
+            }}
+            products={[PRODUCT]}
+            lines={[]}
+            counterparties={[]}
+            formContext={{ labelTemplates: [BOX_TEMPLATE, PALLET_TEMPLATE], palletsEntitled: true }}
+            onSubmit={onSubmit}
+            onDirtyChange={() => undefined}
+            onClose={() => undefined}
+          />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    const picker = screen.getByLabelText("Шаблон этикетки паллеты");
+    expect(picker.hasAttribute("disabled")).toBe(false);
+    await user.click(picker);
+    await user.click(await screen.findByRole("option", { name: "Паллета 100×150" }));
+    const save = screen.getByRole("button", { name: "Сохранить" });
+    await waitFor(() => expect(save.hasAttribute("disabled")).toBe(false));
+    await user.click(save);
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0]?.[0]).toEqual({ palletLabelTemplateId: PALLET_TEMPLATE.id });
+  });
+
   it("labels the shift capacity field in boxes, not units", () => {
     renderShiftForm({ ...AGGREGATION_FORM_VALUES, palletsEnabled: true });
 
