@@ -103,6 +103,7 @@ export function summarizeByProductionDate(
  */
 function stretchBarcodeSvg(markup: string): string {
   if (!markup.startsWith("<svg")) return markup;
+  if (markup.includes("preserveAspectRatio=")) return markup;
   return markup.replace("<svg ", '<svg preserveAspectRatio="none" ');
 }
 

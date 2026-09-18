@@ -157,8 +157,9 @@ export class TenantProvisioningService {
       // Stock PALLET label (slice 06d). Its own family for the same reason
       // the duplicate labels are: `purpose` decides which picker offers a
       // template, and a pallet label must never appear where a box label is
-      // expected. Migration 0137 seeds the identical row for tenants that
-      // already existed, so both paths leave one stock pallet label, not two.
+      // expected. Migrations 0137 (100x150) and 0164 (58x40) seed the
+      // identical rows for tenants that already existed, so both paths leave
+      // exactly two stock pallet labels.
       let defaultPalletLabelTemplateId: string | null = null;
       for (const { name, spec } of buildPalletLabelTemplates()) {
         const templateId = createId();

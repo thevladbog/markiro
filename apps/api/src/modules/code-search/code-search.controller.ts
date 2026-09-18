@@ -284,7 +284,7 @@ export class CodeSearchController {
 
   /**
    * Print-ready A4/A5 pallet PLACARD: organisation, product, counts, a
-   * per-production-date summary and a large GS1-128 SSCC, for taping to the
+   * per-production-date summary and a large Code 128 SSCC, for taping to the
    * stack. Same open-in-new-tab HTML contract as the reports above.
    */
   @Get("pallets/:palletId/placard")
@@ -292,7 +292,7 @@ export class CodeSearchController {
   @ApiOperation({
     summary: "Render the pallet placard",
     description:
-      'Print-ready A4 (default) or A5 HTML placard for opening in a new tab: organisation and logo, product and GTIN, box and unit counts, a summary by production date with "годен до", and a large GS1-128 SSCC. Only a closed pallet with an SSCC has one; an open pallet or one without an SSCC answers 409 PALLET_NOT_CLOSED. A disassembled pallet prints with a watermark.',
+      'Print-ready A4 (default) or A5 HTML placard for opening in a new tab: organisation and logo, product and GTIN, box and unit counts, a summary by production date with "годен до", and a large Code 128 SSCC. Only a closed pallet with an SSCC has one; an open pallet or one without an SSCC answers 409 PALLET_NOT_CLOSED. A disassembled pallet prints with a watermark.',
   })
   @ApiParam({ name: "palletId", schema: { type: "string", format: "uuid" } })
   @ApiProduces("text/html")
