@@ -7,7 +7,7 @@ import {
   serializeKmCodesTxt,
 } from "../src/index.js";
 
-const GS = "";
+const GS = "\u001d";
 
 describe("chzUnitTemplateIdFor", () => {
   it("maps beer to template 18 and refuses groups with several UNIT templates", () => {
@@ -57,7 +57,7 @@ describe("code file serialisers", () => {
     expect(bytes[0]).toBe(0x30);
     const text = Buffer.from(bytes).toString("utf8");
     expect(text).toBe(`${codes[0]}\n${codes[1]}\n`);
-    expect(text.includes("")).toBe(true);
+    expect(text.includes("\u001d")).toBe(true);
   });
   it("writes CSV with a code header and quoted values", () => {
     const text = Buffer.from(serializeKmCodesCsv([`a"b${GS}c`])).toString("utf8");
