@@ -125,13 +125,6 @@ interface PalletDao {
     @Query("SELECT * FROM pallets WHERE kind = 'warehouse' AND deviceId = :deviceId AND closedAt IS NULL LIMIT 1")
     fun observeOpenWarehouse(deviceId: String): Flow<PalletEntity?>
 
-    /** Recent warehouse pallets of this device, newest first, for the mode's list. */
-    @Query(
-        "SELECT * FROM pallets WHERE kind = 'warehouse' AND deviceId = :deviceId " +
-            "ORDER BY closedAt IS NOT NULL, closedAt DESC, openedAt DESC LIMIT :limit",
-    )
-    fun observeWarehouse(deviceId: String, limit: Int): Flow<List<PalletEntity>>
-
     @Query("SELECT * FROM pallets WHERE sscc = :sscc LIMIT 1")
     suspend fun bySscc(sscc: String): PalletEntity?
 

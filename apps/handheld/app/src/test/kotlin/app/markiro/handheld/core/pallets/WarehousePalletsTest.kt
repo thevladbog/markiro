@@ -395,4 +395,17 @@ class WarehousePalletsTest {
         db.palletMembershipDao().acknowledge(mine.palletId, "t")
         assertTrue(db.palletMembershipDao().observeUnacknowledgedRejectionsForDevice(deviceId()).first().isEmpty())
     }
+    /**
+     * An unpaired device cannot answer the check at all -- there is no owner to
+     * write a pallet against. «Короб неизвестен. Обновите реестр» would be a
+     * wrong diagnosis that sends the operator to refresh a registry that is not
+     * the problem, and they would keep scanning a box that can never be taken.
+     */
+    @Test
+    fun anUnpairedDeviceIsUnavailableRatherThanAnUnknownBox() = runTest {
+        product()
+        registry("034600682000000018")
+        db.deviceConfigDao().clear()
+        assertEquals(AttachResult.Unavailable, pallets.attach("034600682000000018", null))
+    }
 }

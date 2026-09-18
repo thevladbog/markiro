@@ -65,6 +65,14 @@ sealed interface PalletVerdict {
     data object UnitCode : PalletVerdict
 
     data object NotACode : PalletVerdict
+
+    /**
+     * The check itself could not run -- a revoked lease, an unpaired device, a
+     * database error. Deliberately not [UnknownBox]: «Короб неизвестен» is a
+     * diagnosis, and a wrong one sends the operator to refresh a registry that
+     * was never the problem.
+     */
+    data object Unavailable : PalletVerdict
 }
 
 data class PalletsUi(
@@ -229,8 +237,18 @@ class PalletsViewModel(
 
     private suspend fun attach(sscc: String) {
         val tail = sscc.takeLast(TAIL)
-        val result = runCatching { recovery.work { gateway.attach(sscc, operatorId) } }
-            .getOrElse { return verdict(PalletVerdict.UnknownBox, SignalKind.ERROR) }
+        // A THROWN check is not a diagnosis. `RecoveryBlocked` is a
+        // `CancellationException` by type, so it is named before the real
+        // cancellation below, exactly as `closeNow` names it.
+        val result = try {
+            recovery.work { gateway.attach(sscc, operatorId) }
+        } catch (_: RecoveryBlocked) {
+            return verdict(PalletVerdict.Unavailable, SignalKind.ERROR)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Throwable) {
+            return verdict(PalletVerdict.Unavailable, SignalKind.ERROR)
+        }
         when (result) {
             is AttachResult.Attached -> {
                 verdict(PalletVerdict.Attached(tail), SignalKind.OK)
@@ -243,6 +261,7 @@ class PalletsViewModel(
             AttachResult.UnknownBox -> verdict(PalletVerdict.UnknownBox, SignalKind.ERROR)
             AttachResult.UnknownProduct -> verdict(PalletVerdict.UnknownProduct, SignalKind.ERROR)
             AttachResult.ThatIsAPallet -> verdict(PalletVerdict.IsPallet, SignalKind.ERROR)
+            AttachResult.Unavailable -> verdict(PalletVerdict.Unavailable, SignalKind.ERROR)
         }
     }
 

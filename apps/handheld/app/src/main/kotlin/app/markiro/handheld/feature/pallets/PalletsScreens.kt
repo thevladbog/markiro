@@ -192,6 +192,7 @@ private fun VerdictRow(verdict: PalletVerdict) {
         PalletVerdict.IsPallet -> Tone.Err to stringResource(R.string.pallets_verdict_is_pallet)
         PalletVerdict.UnitCode -> Tone.Err to stringResource(R.string.pallets_verdict_unit_code)
         PalletVerdict.NotACode -> Tone.Err to stringResource(R.string.pallets_verdict_not_a_code)
+        PalletVerdict.Unavailable -> Tone.Err to stringResource(R.string.pallets_verdict_unavailable)
     }
     Banner(text, tone, if (tone == Tone.Ok) Icons.Outlined.CheckCircle else Icons.Outlined.Warning)
 }

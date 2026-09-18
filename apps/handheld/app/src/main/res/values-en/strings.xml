@@ -516,6 +516,7 @@
     <string name="pallet_disassemble_unknown">Not a closed pallet\'s label</string>
     <string name="pallet_disassemble_not_closed">Pallet is still open</string>
     <string name="pallet_disassemble_already">Pallet already disassembled</string>
+    <string name="pallet_disassemble_unavailable">Could not disassemble — try again</string>
     <plurals name="pallet_disassemble_context">
         <item quantity="one">Pallet …%1$s · %2$d box</item>
         <item quantity="other">Pallet …%1$s · %2$d boxes</item>
@@ -707,6 +708,7 @@
     <string name="pallets_verdict_is_pallet">That is a pallet, not a box</string>
     <string name="pallets_verdict_unit_code">That is a unit code; scan the box SSCC</string>
     <string name="pallets_verdict_not_a_code">Not a code</string>
+    <string name="pallets_verdict_unavailable">Could not check the box — try again</string>
     <plurals name="pallets_rejected">
         <item quantity="one">Take %d box off the pallet</item>
         <item quantity="other">Take %d boxes off the pallet</item>

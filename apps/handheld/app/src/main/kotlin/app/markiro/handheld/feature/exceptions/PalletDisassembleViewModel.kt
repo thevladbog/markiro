@@ -12,8 +12,10 @@ import app.markiro.handheld.core.inventory.ScanInput
 import app.markiro.handheld.core.scan.ScanEvents
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.PalletKind
+import app.markiro.handheld.core.storage.RecoveryBlocked
 import app.markiro.handheld.feature.signin.SessionHolder
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -116,12 +118,27 @@ class PalletDisassembleViewModel @Inject constructor(
             try {
                 val deviceId = db.deviceConfigDao().get()?.deviceId
                 val operatorId = session.state.value.operator?.operatorId
-                _step.value = when (engine.disassemblePallet(at.palletId, reason, operatorId, deviceId)) {
-                    DisassemblePalletResult.Retired -> PalletDisassembleStep.Retired
-                    DisassemblePalletResult.AlreadyRetired ->
-                        PalletDisassembleStep.Refused(R.string.pallet_disassemble_already)
-                    DisassemblePalletResult.NotClosed ->
-                        PalletDisassembleStep.Refused(R.string.pallet_disassemble_not_closed)
+                // A THROWN retirement is not «уже расформирована». A revoked
+                // lease (`RecoveryBlocked`) or a database error would otherwise
+                // either be reported as a refusal that already happened or kill
+                // this coroutine in silence, leaving the confirm screen frozen
+                // with the operator pressing a button that does nothing.
+                // `RecoveryBlocked` IS a `CancellationException` by type, so it
+                // is named before the real cancellation is rethrown.
+                _step.value = try {
+                    when (engine.disassemblePallet(at.palletId, reason, operatorId, deviceId)) {
+                        DisassemblePalletResult.Retired -> PalletDisassembleStep.Retired
+                        DisassemblePalletResult.AlreadyRetired ->
+                            PalletDisassembleStep.Refused(R.string.pallet_disassemble_already)
+                        DisassemblePalletResult.NotClosed ->
+                            PalletDisassembleStep.Refused(R.string.pallet_disassemble_not_closed)
+                    }
+                } catch (_: RecoveryBlocked) {
+                    PalletDisassembleStep.Refused(R.string.pallet_disassemble_unavailable)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Throwable) {
+                    PalletDisassembleStep.Refused(R.string.pallet_disassemble_unavailable)
                 }
             } finally {
                 confirming.set(false)

@@ -44,6 +44,16 @@ sealed interface AttachResult {
     data object UnknownProduct : AttachResult
 
     data object ThatIsAPallet : AttachResult
+
+    /**
+     * The device could not answer at all -- it is not paired, so there is no
+     * owner to write a pallet against.
+     *
+     * Deliberately not [UnknownBox]: «Короб неизвестен. Обновите реестр» sends
+     * the operator to refresh a registry that is not the problem, and they
+     * would keep scanning a box that can never be accepted on this device.
+     */
+    data object Unavailable : AttachResult
 }
 
 /**
@@ -101,7 +111,7 @@ class WarehousePallets(
     }
 
     private suspend fun attachOwned(sscc: String, operatorId: String?): AttachResult {
-        val deviceId = deviceId() ?: return AttachResult.UnknownBox
+        val deviceId = deviceId() ?: return AttachResult.Unavailable
         // The registry lists boxes and never pallets, so a pallet label would
         // otherwise read as an unknown box. Extension digit 1 is a pallet SSCC
         // by construction; the lookup catches a pallet this device closed

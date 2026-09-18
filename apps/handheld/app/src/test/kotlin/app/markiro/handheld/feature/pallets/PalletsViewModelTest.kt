@@ -99,6 +99,9 @@ class PalletsViewModelTest {
 
         /** Makes `close` throw rather than answer, the way a revoked lease does. */
         var closeThrows: (() -> Throwable)? = null
+
+        /** Makes `attach` throw rather than answer, the way a revoked lease does. */
+        var attachThrows: (() -> Throwable)? = null
         var attachCalls = 0
         var closeCalls = 0
         var removed: Pair<String, String>? = null
@@ -146,6 +149,7 @@ class PalletsViewModelTest {
 
         override suspend fun attach(sscc: String, operatorId: String?): AttachResult {
             attachCalls++
+            attachThrows?.let { throw it() }
             return next
         }
 
@@ -374,6 +378,35 @@ class PalletsViewModelTest {
         assertEquals(0, gateway.reprints)
         assertTrue(gateway.prints.isEmpty())
         assertEquals(PalletCloseStep.Idle, vm.state.value.closeStep)
+    }
+
+    /**
+     * A check that THREW is not «короб неизвестен»: that diagnosis sends the
+     * operator to refresh a registry that was never the problem. Same reasoning
+     * -- and the same `RecoveryBlocked`-before-`CancellationException` order --
+     * as the close path.
+     */
+    @Test
+    fun aThrownAttachIsUnavailableNotAnUnknownBox() = runTest {
+        gateway.attachThrows = { app.markiro.handheld.core.storage.RecoveryBlocked() }
+        val vm = vm()
+        advanceUntilIdle()
+        scans.emit(ScanEvent("034600682000000014", null, "wedge", 0))
+        advanceUntilIdle()
+        assertEquals(PalletVerdict.Unavailable, vm.state.value.lastVerdict)
+        assertEquals(listOf(SignalKind.ERROR), signals)
+    }
+
+    /** An unpaired device answers `Unavailable` rather than blaming the box. */
+    @Test
+    fun anUnpairedDeviceIsUnavailableNotAnUnknownBox() = runTest {
+        gateway.next = AttachResult.Unavailable
+        val vm = vm()
+        advanceUntilIdle()
+        scans.emit(ScanEvent("034600682000000014", null, "wedge", 0))
+        advanceUntilIdle()
+        assertEquals(PalletVerdict.Unavailable, vm.state.value.lastVerdict)
+        assertEquals(listOf(SignalKind.ERROR), signals)
     }
 
     @Test
