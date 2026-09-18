@@ -213,7 +213,7 @@ export const SIZES: Record<PlacardFormat, PageSize> = {
 function dateTable(rows: PlacardDateRow[], format: PlacardFormat): string {
   const compact = format === "a5";
   const head = compact
-    ? '<tr><th>Произв.</th><th>Годен до</th><th class="n">Кор.</th></tr>'
+    ? '<tr><th>Дата производства</th><th>Годен до</th><th class="n">Кор., шт</th></tr>'
     : '<tr><th>Дата производства</th><th>Годен до</th><th class="n">Коробов</th><th class="n">Единиц</th></tr>';
   const body = rows
     .map((row) => {
@@ -279,7 +279,7 @@ function renderPlacardPage(data: PalletPlacardData, format: PlacardFormat): stri
   </header>
   <div class="pl-name" style="font-size: ${namePt}pt">${dash(data.productName)}</div>
   <div class="pl-figures">
-    <div class="pl-figure pl-figure--gtin"><span class="pl-figure-label">GTIN</span><span class="pl-figure-value pl-figure-value--gtin mono">${dash(data.gtin14)}</span></div>
+    <div class="pl-figure pl-figure--gtin"><span class="pl-figure-label">GTIN</span><span class="pl-figure-value pl-figure-value--gtin">${dash(data.gtin14)}</span></div>
     <div class="pl-figure"><span class="pl-figure-label">Коробов</span><span class="pl-figure-value">${boxCount}</span></div>
     <div class="pl-figure"><span class="pl-figure-label">Единиц</span><span class="pl-figure-value">${unitCount}</span></div>
   </div>
@@ -347,7 +347,7 @@ body { background: #E9E7E1; font-family: Arial, sans-serif; color: #17161A; }
 .pl-figure--gtin { flex: 1.7; }
 .pl-figure-label { display: block; color: #6B6862; font-size: ${size.tablePt - 2}pt; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
 .pl-figure-value { display: block; font-size: ${size.figurePt}pt; font-weight: 700; overflow-wrap: anywhere; }
-.pl-figure-value--gtin { font-size: ${Math.round(size.figurePt * 0.72)}pt; white-space: nowrap; }
+.pl-figure-value--gtin { white-space: nowrap; }
 .pl-dates { width: 100%; border-collapse: collapse; }
 .pl-dates th { text-align: left; font-weight: 700; color: #6B6862; padding: 1mm 2mm; border-bottom: .3mm solid #C9C6BD; border-left: .25mm solid #EDEBE5; }
 .pl-dates td { padding: 1mm 2mm; border-bottom: .25mm solid #EDEBE5; border-left: .25mm solid #EDEBE5; }

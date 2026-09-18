@@ -214,11 +214,9 @@ function ShiftPallets({ shift }: { shift: ShiftDto }) {
         </Link>
       ),
     },
-    {
-      key: "lineName",
-      title: t("pages.shifts.pallets.table.line"),
-      render: (row) => row.lineName ?? "—",
-    },
+    // No line column: a shift's pallets are stacked on the shift's own line,
+    // which «Параметры смены» already shows, and the side panel is too narrow
+    // to spend a column on repeating it -- the closing time was being cut off.
     {
       key: "boxCount",
       title: t("pages.shifts.pallets.table.boxCount"),
@@ -236,6 +234,9 @@ function ShiftPallets({ shift }: { shift: ShiftDto }) {
     {
       key: "closedAt",
       title: t("pages.shifts.pallets.table.closedAt"),
+      // Date and time may break onto two lines: the panel is narrow and a
+      // no-wrap timestamp is what pushed the status column off its edge.
+      wrap: true,
       render: (row) => (row.closedAt ? formatCreatedAt(row.closedAt, i18n.language) : "—"),
     },
     {

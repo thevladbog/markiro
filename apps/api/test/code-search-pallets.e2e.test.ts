@@ -14,6 +14,9 @@ import type { ScanItemDto } from "../src/modules/station-scans/dto";
 import { PALLET_EXTENSION_DIGIT, SsccService } from "../src/modules/sscc/sscc.service";
 import { createTestStationDevice, signUpAndActivate } from "./support/auth";
 import { listenOnLoopback } from "./support/listen-loopback";
+import { settleQueuedBackgroundWork } from "./support/background-work";
+import { ObjectStorageService } from "../src/modules/storage/object-storage.service";
+import sharp from "sharp";
 
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
@@ -51,6 +54,28 @@ describe.skipIf(!ready)("code search pallet card e2e", () => {
   let box1Id: string;
   let box2Id: string;
   let looseBoxId: string;
+
+  /**
+   * In-memory object store for the organisation logo: the printed forms
+   * inline the uploaded logo, and this is the only way to prove they do
+   * without a MinIO. Same shape as `kiosk-bootstrap-hashes.e2e.test.ts`.
+   */
+  const objects = new Map<string, { body: Buffer; contentType: string }>();
+  const storage = {
+    ensureBucket: async () => undefined,
+    put: async (key: string, body: Buffer, contentType: string) => {
+      objects.set(key, { body, contentType });
+    },
+    get: async (key: string) => {
+      const object = objects.get(key);
+      if (!object) throw Object.assign(new Error("missing"), { name: "NoSuchKey" });
+      return object;
+    },
+    delete: async (key: string) => {
+      objects.delete(key);
+    },
+    presignRead: async () => "unused",
+  };
 
   const BOX1_ITEM_COUNT = 4;
   const BOX2_ITEM_COUNT = 3;
@@ -92,10 +117,16 @@ describe.skipIf(!ready)("code search pallet card e2e", () => {
     const env = loadEnv();
     setup = setupAuth(env);
     db = setup.db;
+    // A previous file may have left logo reconciliation claimable; settle it
+    // before this suite's pg-boss workers can reach into the store above.
+    await settleQueuedBackgroundWork(db);
 
     const ref = await Test.createTestingModule({
       imports: [AppModule.forRoot({ ...setup, databaseUrl: env.DATABASE_URL })],
-    }).compile();
+    })
+      .overrideProvider(ObjectStorageService)
+      .useValue(storage)
+      .compile();
 
     app = ref.createNestApplication({ bodyParser: false });
     const server = app.getHttpAdapter().getInstance();
@@ -477,6 +508,39 @@ describe.skipIf(!ready)("code search pallet card e2e", () => {
         .get(`/code-search/shifts/${shiftId}/placards`)
         .set("x-api-key", stationKey)
         .expect(403);
+    });
+  });
+
+  describe("organisation logo on the printed forms", () => {
+    it("inlines the uploaded profile logo on the placard, the shift placards and the contents report", async () => {
+      // Before an upload every form falls back to the Markiro lockup.
+      const before = await agent.get(`/code-search/pallets/${palletId}/placard`).expect(200);
+      expect(before.text).toContain('data-brand-logo="markiro"');
+      expect(before.text).not.toContain("brand-logo--organization");
+
+      const source = await sharp({
+        create: { width: 900, height: 360, channels: 3, background: "#2463eb" },
+      })
+        .png()
+        .toBuffer();
+      await agent
+        .post("/org/profile/logo")
+        .attach("logo", source, { filename: "plant.png", contentType: "image/png" })
+        .expect(201);
+
+      for (const path of [
+        `/code-search/pallets/${palletId}/placard`,
+        `/code-search/shifts/${shiftId}/placards`,
+        `/code-search/pallets/${palletId}/report`,
+      ]) {
+        const res = await agent.get(path).expect(200);
+        // The bytes travel with the page: a printout or a saved PDF must not
+        // depend on a session or the store being reachable later.
+        expect(res.text, path).toContain(
+          '<img class="brand-logo brand-logo--organization" src="data:image/webp;base64,',
+        );
+        expect(res.text, path).not.toContain('data-brand-logo="markiro"');
+      }
     });
   });
 

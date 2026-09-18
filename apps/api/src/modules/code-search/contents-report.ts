@@ -180,6 +180,32 @@ export function dataMatrix(rawKm: string): string {
 export const TABLE_HEAD_MM = 8;
 /** The top-level row: a box in the box form, a pallet in the pallet form. */
 export const PARENT_ROW_MM = 13;
+/**
+ * Roughly how many characters of the product name fit one line of the
+ * product column (`.col-product` ≈ 66 mm at 10.5 px Arial). Deliberately a
+ * little low: over-estimating the lines only leaves white space, while
+ * under-estimating lets a row run past the page budget.
+ */
+const PRODUCT_CHARS_PER_LINE = 28;
+/** One wrapped line of the product name, at its font size and line height. */
+const PRODUCT_LINE_MM = 4.6;
+
+/**
+ * The top-level row grows with the product name instead of clamping it
+ * (owner review 2026-09-18: the name must print in full). The row's own CSS
+ * has `min-height` rather than `height`, so this is the pagination's view of
+ * the same growth, not a second layout.
+ */
+export function parentRowHeightMm(productName: string | null): number {
+  if (!productName) return PARENT_ROW_MM;
+  const lines = productName
+    .split(/\s*\n\s*/)
+    .reduce(
+      (n, paragraph) => n + Math.max(1, Math.ceil(paragraph.length / PRODUCT_CHARS_PER_LINE)),
+      0,
+    );
+  return Math.max(PARENT_ROW_MM, Math.ceil(2 + lines * PRODUCT_LINE_MM));
+}
 /** A nested row: a unit code under a box, or a box under a pallet. */
 export const CHILD_ROW_MM = 14.5;
 export const EMPTY_NOTE_MM = 8;
@@ -285,14 +311,14 @@ body { background: #E9E7E1; font-family: Arial, sans-serif; color: #17161A; }
 .rep-meta-detail { color: #45433E; font-size: 10px; }
 .rep-content { min-height: 0; display: flex; flex-direction: column; gap: 2.5mm; overflow: hidden; }
 .rep-table { width: 100%; table-layout: fixed; border-collapse: collapse; }
-.col-n { width: 8mm; } .col-sscc { width: 52mm; } .col-product { width: auto; } .col-count { width: 20mm; } .col-barcode { width: 52mm; }
+.col-n { width: 8mm; } .col-sscc { width: 44mm; } .col-product { width: auto; } .col-count { width: 18mm; } .col-barcode { width: 46mm; }
 .rep-table-head { display: table-header-group; }
 .rep-table-head tr { height: 7mm; background: #17161A; color: #FAFAF8; }
 .rep-table-head th { padding: 1.5mm 2mm; font-size: 8.5px; line-height: 1; text-align: left; text-transform: uppercase; letter-spacing: .04em; }
 .rep-table-head th:first-child { border-radius: 2mm 0 0 0; }
 .rep-table-head th:last-child { border-radius: 0 2mm 0 0; }
-.rep-box-row { height: 13mm; background: #F7F6F2; break-inside: avoid; page-break-inside: avoid; border-top: .25mm solid #C9C6BD; border-bottom: .25mm solid #E0DED7; }
-.rep-box-row td { height: 13mm; padding: 1mm 2mm; vertical-align: middle; overflow: hidden; }
+.rep-box-row { min-height: 13mm; background: #F7F6F2; break-inside: avoid; page-break-inside: avoid; border-top: .25mm solid #C9C6BD; border-bottom: .25mm solid #E0DED7; }
+.rep-box-row td { min-height: 13mm; padding: 1mm 2mm; vertical-align: middle; overflow: hidden; }
 .rep-code-row { height: 14.5mm; break-inside: avoid; page-break-inside: avoid; border-bottom: .25mm solid #EDEBE5; }
 .rep-code-row td { height: 14.5mm; padding: 1mm 2mm; vertical-align: middle; overflow: hidden; }
 .rep-km-label { color: #45433E; font-size: 8.5px; overflow-wrap: anywhere; padding-left: 5mm !important; }
@@ -301,12 +327,12 @@ body { background: #E9E7E1; font-family: Arial, sans-serif; color: #17161A; }
 .rep-code-row--empty { height: 8mm; }
 .rep-code-row--empty td { height: 8mm; color: #6B6862; font-size: 9.5px; }
 .rep-item-number { text-align: center; }
-.rep-product-name { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; line-height: 1.25; }
+.rep-product-name { display: block; line-height: 1.25; overflow-wrap: anywhere; }
 .rep-sscc-label { font-size: 9.5px; font-weight: 700; overflow-wrap: anywhere; }
 .rep-count { text-align: right !important; white-space: nowrap; }
 .rep-barcode-heading { text-align: center !important; }
 .sscc-box { height: 8mm; display: flex; align-items: center; justify-content: center; }
-.sscc-box svg { display: block; width: auto; max-width: 48mm; height: 100%; }
+.sscc-box svg { display: block; width: auto; max-width: 42mm; height: 100%; }
 .rep-code-missing { font-size: 9px; line-height: 1.2; color: #6B6862; text-align: center; }
 .dm-box { width: 11.5mm; height: 11.5mm; margin: 0 auto; display: flex; align-items: center; justify-content: center; }
 .dm-box svg { display: block; width: 100%; height: 100%; }
