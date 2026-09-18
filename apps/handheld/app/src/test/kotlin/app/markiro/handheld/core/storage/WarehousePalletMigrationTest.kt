@@ -25,7 +25,7 @@ class WarehousePalletMigrationTest {
         .addMigrations(
             MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8,
             MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14,
-            MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18,
+            MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19,
         ).build()
 
     @Test
@@ -102,6 +102,29 @@ class WarehousePalletMigrationTest {
             // The membership's OWN snapshot, not a join back into box_registry.
             assertEquals(12, db.palletMembershipDao().bottleSum("w1"))
             assertEquals(listOf("2026-09-10"), db.palletMembershipDao().productionDates("w1"))
+        } finally {
+            db.close()
+        }
+    }
+
+    /**
+     * A v18 device has never seen `pallet_membership_removals`; the migration
+     * only needs to create it, and Room's schema validation on open (no throw)
+     * is the proof that the DDL matches the entity.
+     */
+    @Test
+    fun aVersionEighteenDeviceGainsTheRemovalQueue() = runTest {
+        val name = "wh-removal-migration.db"
+        context.deleteDatabase(name)
+        database(name).apply { openHelper.writableDatabase }.close()
+        SQLiteDatabase.openOrCreateDatabase(context.getDatabasePath(name), null).use { raw ->
+            raw.execSQL("DROP TABLE IF EXISTS pallet_membership_removals")
+            raw.execSQL("PRAGMA user_version = 18")
+        }
+
+        val db = database(name)
+        try {
+            assertEquals(emptyList<PalletMembershipRemovalEntity>(), db.palletMembershipRemovalDao().all())
         } finally {
             db.close()
         }

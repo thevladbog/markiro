@@ -64,6 +64,10 @@ interface BoxRegistryDao {
     @Query("UPDATE box_registry SET localPalletId = NULL WHERE localPalletId = :localPalletId")
     suspend fun releaseAll(localPalletId: String)
 
+    /** The registry mirror after a removal: the server's state is now exactly that the box is free. */
+    @Query("UPDATE box_registry SET palletId = NULL, palletSscc = NULL, palletActive = 0 WHERE sscc = :sscc")
+    suspend fun clearPallet(sscc: String)
+
     @Query("DELETE FROM box_registry")
     suspend fun clear()
 }
