@@ -739,7 +739,9 @@ describe("wordmark alignment across the registry", () => {
     // Anything issued later is centred; anything already out keeps its bytes.
     // If a new release is added and this fails, the new one is simply not
     // legacy — remove it from the list rather than adding it.
-    expect(legacyWordmarkReleaseKeys()).toHaveLength(15);
+    // 15 -> 13: the pallet reissue moved MKR-INS-08 and MKR-INS-09 to new
+    // revisions, so both dropped off the list and are now centred.
+    expect(legacyWordmarkReleaseKeys()).toHaveLength(13);
   });
 
   it("gives a release that is not on the list the corrected header", () => {
