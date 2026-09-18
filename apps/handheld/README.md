@@ -306,6 +306,63 @@ it was generated in, because one case exercises the local-date path.
    Closing the shift with a non-empty queue must succeed, and the queue must still be
    there afterwards.
 
+## Паллеты (складская сборка)
+
+A warehouse pallet is built from boxes that were already closed earlier — in another
+shift, by another terminal, or on a pallet since disassembled — by scanning their SSCC
+labels, with no shift of its own. The hub tile «Паллеты» sits beside «Списание» and is
+gated on `canBuildPallets`, the operator's own flag from `GET /station/pallet-bootstrap`
+(products, per-operator permission, this device's extension-1 range and pallet label
+templates). The tile stays hidden (rather than disabled) until the bootstrap has run for
+the signed-in operator.
+
+The device decides everything offline against `box_registry`, a tenant-wide mirror that
+is shared with write-off — the table itself is the same one the write-off screen has
+always used (it was internally renamed from `writeoff_boxes`, but the sync cursor and
+bootstrap meta keys keep their original `writeoff_*` names). Each row also carries
+`localPalletId`, the device's own claim on a box, set on scan and cleared when the box
+is removed or the registry refresh confirms the server accepted it elsewhere.
+
+A scanned SSCC runs through six checks, in order: pallet label (wrong scan target) →
+box unknown to the registry → already on a closed pallet belonging to someone else →
+already on this pallet (idempotent, no error) → already on another open pallet on this
+same device → already on an open pallet on another device → wrong product for this
+pallet → accepted. Accepting a box snapshots its `bottleCount` and `productionDate`
+into the membership row at scan time, so the label's quantity and shared production
+date do not depend on registry rows a later delta or re-walk could drop.
+
+The pallet closes automatically at the product's `palletBoxCapacity`, or earlier through
+an explicit «Закрыть паллету досрочно» that names the current count. Closing burns a
+serial from the device's own extension-1 pool, exactly like a box in the aggregation
+mode; a pool that runs dry leaves the pallet open with the reason shown, and a missing
+label template reads «Нет шаблона этикетки паллеты — задайте его в кабинете». Printer
+selection reuses the shared `PrinterChoiceScreen`.
+
+When the server rejects a membership at sync (a race with another device), the pallet
+card turns to the attention colour with a conflict banner listing the rejected SSCCs and
+reasons, a reprint action (quantities changed), and «Принято» to acknowledge and dismiss
+the banner without discarding the rejection rows. A new pallet can be started while a
+conflict is still unacknowledged; the line is never blocked. `pallet_closed` and
+`subscription_read_only` are both server rejection reasons surfaced this way — the
+first because another device closed the pallet first, the second because the shift or
+box is in a read-only state at the server.
+
+Disassembling a pallet (production or warehouse) has two routes into the same
+scan-label → give-a-reason → `pallet_exceptions(disassemble)` flow: a shift-scoped one
+from a shift's own exceptions hub, and a shift-less one reached from the pallets
+screen's own app bar, for disassembling a warehouse pallet without opening any shift at
+all.
+
+Storage lives at Room database version 18. The migration renaming `writeoff_boxes` to
+`box_registry` and adding the pallet tables guards against a table that is already
+named `box_registry` (an idempotent upgrade path), and a device already sitting on the
+in-between schema needs its app data cleared rather than a second in-place migration.
+
+Sync folds pending `pallet_memberships` into the same batch-id signature as boxes,
+pallets and label events, so the sync channel is pinned against memberships that would
+otherwise join a batch after its id was already computed; the registry mirror refreshes
+on entering the pallets screen and after every accepted batch.
+
 ## Релизная сборка и подпись
 
 `assembleDebug` подписывается отладочным ключом и ставится где угодно. Релиз без

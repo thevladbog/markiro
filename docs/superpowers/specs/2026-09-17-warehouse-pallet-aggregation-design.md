@@ -3,7 +3,8 @@
 **Date:** 2026-09-17
 
 **Status:** Approved 2026-09-17; server side implemented in PR #595 (plan 1 of
-3); handheld and cabinet UI pending.
+3); handheld implemented (plan 2, `docs/superpowers/plans/2026-09-18-warehouse-pallets-handheld.md`);
+cabinet UI pending.
 
 **Scope:** Building a pallet out of boxes that were already closed earlier —
 in other shifts, by other terminals, or on pallets since disassembled — by
@@ -311,17 +312,23 @@ of the same codes. `unpalletizedBoxes` is empty by construction.
 
 ### 3.1 Storage (Room migration in `core/storage/Migrations.kt`)
 
-- `PalletEntity` gains `kind`, `productId`, `deviceId`; `shiftId` becomes
-  nullable. The DAO's `open(shiftId)` is joined by `openWarehouse()`.
+- `PalletEntity` gains `kind`, `productId`, `deviceId`, `disassembledAt`;
+  `shiftId` becomes nullable. The DAO's `open(shiftId)` is joined by
+  `openWarehouse()`.
 - `pallet_memberships`: `(palletId, sscc) PK, addedAt, operatorId, status
 (pending | sent | accepted | rejected), reason?, winningPalletSscc?,
-ackedAt?`. Pure facts after `sent`; `status` is the only column updated.
+ackedAt?`, plus a snapshot of `bottleCount` and `productionDate` taken at
+  scan time (Task 6): the label's Σ `bottleCount` and shared «Дата
+  производства» must not depend on `box_registry` rows a delta `remove` or a
+  full re-walk can drop later. Pure facts after `sent`; `status` is the only
+  column updated.
 - `writeoff_boxes` is renamed `box_registry` (the table is already the
   tenant-wide registry mirror, the name was an accident of the first
   consumer) and gains the five registry fields of §2.4 plus
   `localPalletId: String?` — the device's own claim, set on scan, cleared on
   local removal, so a second scan of the same box before the next registry
-  refresh is still caught.
+  refresh is still caught. The sync cursor and bootstrap meta keys keep
+  their pre-rename `writeoff_*` names.
 - `pallet_bootstrap` meta: products, operators' `canBuildPallets`, the
   template specs, `generatedAt`. The extension-1 range goes into the existing
   `sscc_ranges` table.
@@ -338,28 +345,30 @@ Hub tile «Паллеты» beside «Списание»; route `Routes.PALLETS` 
   screen are not involved.
 - **Classification** uses `ScanClassifier.classify` (check digit, `]C1`).
   `Sscc.parse` is not used here.
-- **Checks**, in order, against `box_registry`:
-  1. no row → «Короб неизвестен. Обновите реестр» (with a refresh action);
-  2. `palletActive` with a concrete (non-null) `palletSscc` → «Уже на паллете
-     …{last 6 of palletSscc}». Runs before check 3: a concrete foreign SSCC
+- **Checks**, as shipped in `WarehousePallets.attach` (Task 6), in order
+  against `box_registry`:
+  1. pallet label (extension digit 1, or found in the local `pallets`
+     table) → «Это паллета, не короб»;
+  2. no row → «Короб неизвестен. Обновите реестр» (with a refresh action);
+  3. `palletActive` with a concrete (non-null) `palletSscc` → «Уже на паллете
+     …{last 6 of palletSscc}». Runs before check 4: a concrete foreign SSCC
      means another device already CLOSED a pallet around this box, which is a
      real, already-settled conflict, and it outranks a merely pending/sent
      membership row this device still holds locally on its own open pallet;
-  3. already in the current pallet → «Уже на этой паллете» — soft, no error
-     state, idempotent. Runs before checks 4-5: once this device's own
+  4. already in the current pallet → «Уже на этой паллете» — soft, no error
+     state, idempotent. Runs before checks 5-6: once this device's own
      membership is accepted and the registry refreshes, the box's row already
      reads `localPalletId`/`palletActive` (with `palletSscc` still null while
      that pallet is open) as if it conflicted with itself, so the idempotent
      check must win over the hard refusals below;
-  4. `localPalletId` set to another open local pallet → «Уже на паллете
+  5. `localPalletId` set to another open local pallet → «Уже на паллете
      (эта же ТСД)»;
-  5. `palletActive` (here `palletSscc` is necessarily null, having failed
-     check 2) → «Уже на открытой паллете другого устройства»;
-  6. `productId ≠ pallet.productId` → «Другой товар: {name}»;
-  7. accept: insert `pallet_memberships(pending)`, set `localPalletId`,
-     short vibration, count advances.
-     An SSCC with extension digit 1, or one found in the local `pallets` table,
-     is «Это паллета, не короб».
+  6. `palletActive` (here `palletSscc` is necessarily null, having failed
+     check 3) → «Уже на открытой паллете другого устройства»;
+  7. `productId ≠ pallet.productId` → «Другой товар: {name}»;
+  8. accept: insert `pallet_memberships(pending)` with the snapshotted
+     `bottleCount`/`productionDate`, set `localPalletId`, short vibration,
+     count advances.
 - **Opening.** The first accepted scan creates the `PalletEntity` with
   `kind = warehouse`, `productId` from the box, `deviceId` from the device
   record. No serial is burned and no server row exists until then.
@@ -372,7 +381,12 @@ Hub tile «Паллеты» beside «Списание»; route `Routes.PALLETS` 
   that an `unknown` print is never resent automatically. Refusals mirror
   06d: `no-serials` leaves the pallet open over capacity with the attention
   strip; `no-template` is new and reads «Нет шаблона этикетки паллеты —
-  задайте его в кабинете».
+  задайте его в кабинете». `ClosePalletResult` also carries `Unavailable`
+  (Task 8) for a pallet the local state no longer has open — for example a
+  disassemble raced the close — distinct from `Empty`, so the operator is
+  not told «в паллете нет коробов» about a pallet that simply is not there
+  any more. Printer selection reuses the shared `PrinterChoiceScreen`
+  (`feature/printer`), including its «Другой принтер» chooser.
 - **Label.** Template: the product's category default, else the organisation
   default. Values: `sscc`, `qty.boxes`, `qty` = Σ `bottleCount`, product
   fields from bootstrap. «Дата производства»/«Годен до» are bound only when
@@ -388,10 +402,14 @@ Hub tile «Паллеты» beside «Списание»; route `Routes.PALLETS` 
   `reprint` pallet exception, since `qty.boxes` changed) and «Принято»,
   which dismisses the banner but keeps the rejection rows. A new pallet can
   be started meanwhile; the line is never blocked.
-- **Disassemble a pallet** (`kind` either) joins the handheld exceptions
-  hub: scan the pallet label → reason → `pallet_exceptions(disassemble)`.
-  06d left this undrawn; it is needed here because «move a box» is
-  «disassemble, then rebuild».
+- **Disassemble a pallet** (`kind` either) has two routes (Task 9), both
+  ending in the same scan → reason → `pallet_exceptions(disassemble)` flow:
+  a shift-scoped one at `exceptions/{shiftId}/pallet-disassemble` reached
+  from a shift's exceptions hub, and a shift-less one at
+  `pallets/disassemble` reached from the pallets screen's own app bar, for
+  disassembling a warehouse pallet without opening any shift. 06d left this
+  undrawn; it is needed here because «move a box» is «disassemble, then
+  rebuild».
 
 ### 3.3 Sync
 
