@@ -81,6 +81,8 @@ data class PalletsUi(
     val lastVerdict: PalletVerdict? = null,
     val confirmEarlyClose: Boolean = false,
     val closeStep: PalletCloseStep = PalletCloseStep.Idle,
+    /** Gates the app-bar disassemble action: nothing on this device is closed yet to take apart. */
+    val closedPalletCount: Int = 0,
 )
 
 /**
@@ -168,6 +170,9 @@ class PalletsViewModel(
             }
         }
         viewModelScope.launch { gateway.stampAt.collectLatest { at -> _state.update { it.copy(stampAt = at) } } }
+        viewModelScope.launch {
+            gateway.observeClosedPalletCount().collectLatest { count -> _state.update { it.copy(closedPalletCount = count) } }
+        }
         viewModelScope.launch {
             gateway.observeOpen().collectLatest { pallet ->
                 if (pallet == null) {

@@ -15,8 +15,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Close
-import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.Inventory2
+import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Warning
@@ -119,13 +119,18 @@ private fun PalletsListScreen(state: PalletsUi, cb: PalletsCallbacks) {
     Column(Modifier.fillMaxWidth().background(c.surfacePage)) {
         AppBar(stringResource(R.string.pallets_title), onBack = cb.onBack) {
             // Any closed pallet of this device, not only the one on screen: the
-            // stack being taken apart is usually one built a while ago.
+            // stack being taken apart is usually one built a while ago. Disabled
+            // with nothing closed yet, so the action does not open onto an
+            // instant «Нет закрытых паллет» refusal screen.
+            val hasClosedPallet = state.closedPalletCount > 0
             IconAction(
-                Icons.Outlined.DeleteSweep,
-                stringResource(R.string.exceptions_disassemble_pallet),
-                cb.onDisassemble,
+                icon = Icons.Outlined.Layers,
+                description = stringResource(R.string.exceptions_disassemble_pallet) +
+                    if (hasClosedPallet) "" else " " + stringResource(R.string.exceptions_no_closed_pallets),
+                enabled = hasClosedPallet,
+                onClick = cb.onDisassemble,
             )
-            IconAction(Icons.Outlined.Refresh, stringResource(R.string.pallets_refresh), cb.onRefresh)
+            IconAction(Icons.Outlined.Refresh, stringResource(R.string.pallets_refresh), onClick = cb.onRefresh)
         }
         state.stampAt?.let {
             Text(
@@ -265,7 +270,7 @@ private fun MemberRow(member: PalletMembershipEntity, onRemove: () -> Unit) {
         )
         MarkiroChip(stringResource(statusLabel(member.status)), statusTone(member.status))
         if (member.status == MembershipStatus.PENDING) {
-            IconAction(Icons.Outlined.Close, stringResource(R.string.pallets_remove), onRemove)
+            IconAction(Icons.Outlined.Close, stringResource(R.string.pallets_remove), onClick = onRemove)
         }
     }
 }

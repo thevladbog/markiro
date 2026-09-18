@@ -162,7 +162,7 @@ fun InventoryListScreen(state: InventoryListUi, cb: InventoryListCallbacks) {
         // Same pair as the shift list: `onRefresh` existed but the only way to
         // reach it was to hit an error first.
         AppBar(stringResource(R.string.inventory_title), cb.onBack) {
-            IconAction(Icons.Outlined.Refresh, stringResource(R.string.common_refresh), cb.onRefresh)
+            IconAction(Icons.Outlined.Refresh, stringResource(R.string.common_refresh), onClick = cb.onRefresh)
         }
         if (!state.reachable && state.listFetchedAt != null) {
             Text(

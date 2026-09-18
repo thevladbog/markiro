@@ -65,8 +65,8 @@ fun PalletDisassembleScreen(step: PalletDisassembleStep, cb: PalletDisassembleCa
             )
             FullScreenState(
                 icon = Icons.Outlined.QrCodeScanner,
-                title = stringResource(R.string.pallet_disassemble_scan_hint),
-                text = "",
+                title = "",
+                text = stringResource(R.string.pallet_disassemble_scan_hint),
                 secondary = StateAction(stringResource(R.string.common_cancel), cb.onBack),
             )
         }

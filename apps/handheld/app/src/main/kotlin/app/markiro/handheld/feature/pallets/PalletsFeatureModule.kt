@@ -39,6 +39,9 @@ interface PalletsGateway {
 
     fun observeOpen(): Flow<PalletEntity?>
 
+    /** Any closed pallet of this device, shift-less: gates the app-bar disassemble action. */
+    fun observeClosedPalletCount(): Flow<Int>
+
     /** «Другой принтер» on a failed pallet label needs the device's own profiles. */
     fun observePrinters(): Flow<List<PrinterEntity>>
 
@@ -98,6 +101,9 @@ class PalletsRepository(
     override suspend fun refresh(): MirrorOutcome = mirror.refresh()
 
     override fun observeOpen(): Flow<PalletEntity?> = pallets.observeOpen()
+
+    /** Shift-less: the mode's own route to disassemble reaches any closed pallet, not just this shift's. */
+    override fun observeClosedPalletCount(): Flow<Int> = db.palletDao().observeClosedCount(null)
 
     override fun observePrinters(): Flow<List<PrinterEntity>> = db.printerDao().observeAll()
 

@@ -109,6 +109,7 @@ class PalletsViewModelTest {
         var deferred: String? = null
         var reprints = 0
         val open = MutableStateFlow<PalletEntity?>(null)
+        val closedPalletCount = MutableStateFlow(0)
         val members = MutableStateFlow<List<PalletMembershipEntity>>(emptyList())
         val rejections = MutableStateFlow<List<PalletMembershipEntity>>(emptyList())
 
@@ -124,6 +125,8 @@ class PalletsViewModelTest {
         }
 
         override fun observeOpen(): Flow<PalletEntity?> = open
+
+        override fun observeClosedPalletCount(): Flow<Int> = closedPalletCount
 
         override fun observePrinters(): Flow<List<PrinterEntity>> = MutableStateFlow(emptyList())
 
@@ -471,5 +474,29 @@ class PalletsViewModelTest {
         scans.emit(ScanEvent("034600682000000014", null, "wedge", 0))
         advanceUntilIdle()
         assertEquals(0, gateway.attachCalls)
+    }
+
+    /**
+     * `setScanning(false)` is what lets `Routes.PALLETS` stop reading a scan while
+     * the pallet-disassemble route sits on top of it — otherwise the label
+     * scanned there would ALSO reach this mode and be refused as «это паллета».
+     * A scan while off must produce no verdict and never call the gateway;
+     * turning it back on must let the next scan through as usual.
+     */
+    @Test
+    fun scanningOffStopsScansAndScanningOnResumesThem() = runTest {
+        gateway.next = AttachResult.Attached(openPallet, 1, 12, false)
+        val vm = vm()
+        advanceUntilIdle()
+        vm.setScanning(false)
+        scans.emit(ScanEvent("034600682000000014", null, "wedge", 0))
+        advanceUntilIdle()
+        assertNull(vm.state.value.lastVerdict)
+        assertEquals(0, gateway.attachCalls)
+        vm.setScanning(true)
+        scans.emit(ScanEvent("034600682000000014", null, "wedge", 0))
+        advanceUntilIdle()
+        assertEquals(PalletVerdict.Attached("000014"), vm.state.value.lastVerdict)
+        assertEquals(1, gateway.attachCalls)
     }
 }

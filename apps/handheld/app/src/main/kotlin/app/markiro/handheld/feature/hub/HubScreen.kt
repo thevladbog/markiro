@@ -117,7 +117,7 @@ fun HubScreen(
                             color = c.fg1,
                         )
                     }
-                    IconAction(Icons.AutoMirrored.Outlined.Logout, stringResource(R.string.hub_sign_out), onSignOut)
+                    IconAction(Icons.AutoMirrored.Outlined.Logout, stringResource(R.string.hub_sign_out), onClick = onSignOut)
                 }
                 state.activeShift?.let { active ->
                     ActiveShiftCard(active, onContinue = { onContinueShift(active.shift.id) })

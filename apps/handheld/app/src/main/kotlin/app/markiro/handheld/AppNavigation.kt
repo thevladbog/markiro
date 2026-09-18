@@ -94,6 +94,7 @@ import app.markiro.handheld.feature.exceptions.ExceptionsScreen
 import app.markiro.handheld.feature.exceptions.ExceptionsViewModel
 import app.markiro.handheld.feature.exceptions.PalletDisassembleCallbacks
 import app.markiro.handheld.feature.exceptions.PalletDisassembleScreen
+import app.markiro.handheld.feature.exceptions.PalletDisassembleStep
 import app.markiro.handheld.feature.exceptions.PalletDisassembleViewModel
 import app.markiro.handheld.feature.exceptions.ReprintCallbacks
 import app.markiro.handheld.feature.exceptions.ReprintScreen
@@ -803,6 +804,15 @@ private fun printerViewModel(nav: NavHostController, entry: NavBackStackEntry): 
 private fun PalletDisassembleRoute(nav: NavHostController) {
     val vm: PalletDisassembleViewModel = hiltViewModel()
     val step by vm.step.collectAsStateWithLifecycle()
+    // Reason and Confirm apply nothing yet, so hardware Back steps back to the
+    // scan rather than leaving the flow -- the same shape `cancel()` already
+    // gives the on-screen «Отмена». Any other step pops the route as usual.
+    BackHandler(enabled = true) {
+        when (step) {
+            is PalletDisassembleStep.Reason, is PalletDisassembleStep.Confirm -> vm.cancel()
+            else -> nav.popBackStack()
+        }
+    }
     PalletDisassembleScreen(
         step,
         PalletDisassembleCallbacks(

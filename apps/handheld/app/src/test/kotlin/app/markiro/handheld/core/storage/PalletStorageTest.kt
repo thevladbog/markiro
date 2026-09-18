@@ -232,6 +232,20 @@ class PalletStorageTest {
     }
 
     /**
+     * A retired pallet's label is retired with it: `markDisassembled` must drop
+     * a closed, deferred pallet out of both the list and the count, exactly as
+     * a disassembled box already drops out of `BoxDao`'s deferred queue.
+     */
+    @Test
+    fun aDisassembledPalletLeavesTheUnprintedQueueAndItsCount() = runTest {
+        db.palletDao().insert(pallet("p1", "s1", closedAt = "2026-09-11T09:00:00.000Z").copy(printState = PalletPrint.DEFERRED))
+        assertEquals(1, db.palletDao().observeUnprintedCount().first())
+        db.palletDao().markDisassembled("p1", "2026-09-11T10:00:00.000Z")
+        assertEquals(0, db.palletDao().observeUnprintedCount().first())
+        assertEquals(emptyList<String>(), db.palletDao().observeUnprinted().first().map { it.palletId })
+    }
+
+    /**
      * Was `aWipeClearsPallets` before same-device recovery landed. A rejected
      * credential no longer empties the operational tables: recovery on the SAME
      * device keeps the work, and `StorageTest`\'s

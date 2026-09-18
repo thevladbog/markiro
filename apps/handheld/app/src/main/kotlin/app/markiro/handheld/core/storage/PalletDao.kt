@@ -90,11 +90,14 @@ interface PalletDao {
     @Query("UPDATE pallets SET printState = :state, printReason = :reason WHERE palletId = :palletId")
     suspend fun setPrintState(palletId: String, state: String, reason: String?)
 
-    /** The deferred-label queue's pallet half: closed pallets whose label is not resolved, oldest first. */
-    @Query("SELECT * FROM pallets WHERE closedAt IS NOT NULL AND printState <> 'printed' ORDER BY closedAt, palletId")
+    /**
+     * The deferred-label queue's pallet half: closed pallets whose label is not resolved, oldest
+     * first. A disassembled pallet's label is retired with it; it must not linger on this queue.
+     */
+    @Query("SELECT * FROM pallets WHERE closedAt IS NOT NULL AND printState <> 'printed' AND disassembledAt IS NULL ORDER BY closedAt, palletId")
     fun observeUnprinted(): Flow<List<PalletEntity>>
 
-    @Query("SELECT COUNT(*) FROM pallets WHERE closedAt IS NOT NULL AND printState <> 'printed'")
+    @Query("SELECT COUNT(*) FROM pallets WHERE closedAt IS NOT NULL AND printState <> 'printed' AND disassembledAt IS NULL")
     fun observeUnprintedCount(): Flow<Int>
 
     /** Anything the app left mid-print is unknown, never resumed -- same reasoning as `BoxDao.demoteInterruptedPrints`. */
