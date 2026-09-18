@@ -264,11 +264,18 @@ describe("label code import contract", () => {
       // Latin-only data keeps the emitter on the native ^A0N/^FB path: a
       // Cyrillic value is rasterized into ^GFA, which the importer reports
       // as unsupported.
-      const zpl = await generateZpl(spec, { ...sampleLabelData(), "product.printName": "Plain name" });
+      const zpl = await generateZpl(spec, {
+        ...sampleLabelData(),
+        "product.printName": "Plain name",
+      });
       expect(zpl).toMatch(/\^FB432,3,0,[LCR],0/);
 
       const back = parseZplLabel(zpl, 203);
-      expect(back.spec.elements[0]).toMatchObject({ kind: "text", text: "Plain name", maxLines: 3 });
+      expect(back.spec.elements[0]).toMatchObject({
+        kind: "text",
+        text: "Plain name",
+        maxLines: 3,
+      });
     });
   });
 

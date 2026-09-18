@@ -960,7 +960,9 @@ describe("Download (ZPL/TSPL byte safety)", () => {
     const blob = buildJsonBlob({ spec, purpose: "box", name: "Короб 58×40" });
     expect(blob.type).toBe("application/json");
     const text = new TextDecoder().decode(await blob.arrayBuffer());
-    expect(text).toBe(`${JSON.stringify({ name: "Короб 58×40", purpose: "box", spec }, null, 2)}\n`);
+    expect(text).toBe(
+      `${JSON.stringify({ name: "Короб 58×40", purpose: "box", spec }, null, 2)}\n`,
+    );
   });
 
   it("Скачать JSON downloads { name, purpose, spec } of the current editor state, and the file imports back unchanged", async () => {
