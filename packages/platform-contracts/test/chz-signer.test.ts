@@ -88,10 +88,26 @@ describe("chz-signer contracts", () => {
 });
 
 describe("signer task union", () => {
-  it("parses an oms_auth task", () => {
+  it("parses an oms_auth task with СУЗ-issued omsConnection", () => {
     const task = chzSignerContracts.task.parse(fixture("task-oms-auth.json"));
     expect(task.type).toBe("oms_auth");
-    if (task.type === "oms_auth") expect(task.payload.omsConnection).toMatch(/^[0-9a-f-]{36}$/);
+    if (task.type === "oms_auth") {
+      // Verify the fixture carries СУЗ's documented value exactly
+      expect(task.payload.omsConnection).toBe("11b1abc1-f1ee-11db-1a11-f11ac11111e1");
+    }
+  });
+
+  it("rejects malformed omsConnection values", () => {
+    expect(
+      chzSignerContracts.task.safeParse({
+        id: "3f0e0f5e-8d1c-4d7a-9b1a-111111111111",
+        type: "oms_auth",
+        payload: {
+          trueApiBaseUrl: "https://markirovka.sandbox.crptech.ru/api/v3/true-api",
+          omsConnection: "not-a-guid",
+        },
+      }).success,
+    ).toBe(false);
   });
   it("parses a sign_detached task and its signature completion", () => {
     const task = chzSignerContracts.task.parse(fixture("task-sign-detached.json"));

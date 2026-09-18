@@ -29,7 +29,8 @@ export const chzTrueApiAuthPayloadSchema = z
 export const chzOmsAuthPayloadSchema = z
   .object({
     trueApiBaseUrl: z.url(),
-    omsConnection: z.uuid(),
+    // СУЗ issues this identifier and documents it as hex-shaped only, so RFC-4122 validation would refuse real values.
+    omsConnection: z.guid(),
     inn: innSchema.optional(),
   })
   .strict();
