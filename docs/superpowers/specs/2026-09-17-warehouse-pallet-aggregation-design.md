@@ -410,6 +410,10 @@ the right).
   while its membership is `pending`; the row is deleted and `localPalletId`
   cleared. A membership already `sent` cannot be removed on the device — the
   server may already hold it; the operator disassembles instead.
+  **Superseded 2026-09-18** by
+  [2026-09-18-open-pallet-box-removal-design.md](2026-09-18-open-pallet-box-removal-design.md):
+  removal works for every status through a queued `palletMembershipRemovals`
+  record, and an emptied open pallet is deleted.
 - **Conflict state.** When a batch response marks memberships `rejected`,
   the pallet card turns to the attention colour with «Снимите с паллеты:»
   and the list of SSCCs with reasons, «Перепечатать этикетку» (the
