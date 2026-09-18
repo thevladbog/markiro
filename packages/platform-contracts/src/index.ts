@@ -469,17 +469,25 @@ export {
   chzSignerPairRequestSchema,
   chzSignerPairResponseSchema,
   chzSignerTaskCompleteSchema,
+  chzSignerSignatureCompleteSchema,
+  chzSignerTaskCompleteBodySchema,
   chzSignerTaskFailSchema,
   chzSignerTaskSchema,
   chzTrueApiAuthPayloadSchema,
+  chzOmsAuthPayloadSchema,
+  chzSignDetachedPayloadSchema,
 } from "./chz-signer.js";
 export type {
   ChzSignerPairRequest,
   ChzSignerPairResponse,
   ChzSignerTask,
   ChzSignerTaskComplete,
+  ChzSignerSignatureComplete,
+  ChzSignerTaskCompleteBody,
   ChzSignerTaskFail,
   ChzTrueApiAuthPayload,
+  ChzOmsAuthPayload,
+  ChzSignDetachedPayload,
 } from "./chz-signer.js";
 export {
   catalogCapabilitiesSchema,
