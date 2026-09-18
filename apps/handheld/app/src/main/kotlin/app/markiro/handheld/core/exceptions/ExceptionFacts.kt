@@ -110,11 +110,8 @@ fun ExceptionFact.toWireJson(): JsonObject {
 /** The two corrections the server accepts against a closed pallet. */
 enum class PalletExceptionKind(val wire: String) {
     /**
-     * Taking a pallet apart. No producer on this device yet -- the handheld's
-     * pallet-exceptions screen is a later task -- but the storage and sync
-     * channel below carry it, because the server's `palletExceptionSchema`
-     * accepts exactly these two and a channel that can only express one would
-     * have to be reopened to add the other.
+     * Taking a pallet apart, produced by `ExceptionEngine.disassemblePallet`
+     * for both pallet kinds.
      */
     DISASSEMBLE("disassemble"),
     REPRINT("reprint"),

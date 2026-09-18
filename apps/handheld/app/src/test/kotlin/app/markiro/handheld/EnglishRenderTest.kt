@@ -7,6 +7,9 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.markiro.handheld.core.design.MarkiroTheme
 import app.markiro.handheld.feature.hub.HubScreen
+import app.markiro.handheld.feature.exceptions.PalletDisassembleCallbacks
+import app.markiro.handheld.feature.exceptions.PalletDisassembleScreen
+import app.markiro.handheld.feature.exceptions.PalletDisassembleStep
 import app.markiro.handheld.feature.pallets.PalletVerdict
 import app.markiro.handheld.feature.pallets.PalletsCallbacks
 import app.markiro.handheld.feature.pallets.PalletsRoute
@@ -97,6 +100,33 @@ class EnglishRenderTest {
                     HubUi("Test Plant", "Anna Ivanova", "Line 2", shifts = 2, inventories = 0, countsAt = 0L, reachable = false, scannerLabel = "Zebra"),
                     onTile = {},
                     onSignOut = {},
+                )
+            }
+        }
+        assertNoCyrillic()
+    }
+
+    @Test
+    fun palletDisassembleReasonRendersInEnglish() {
+        compose.setContent {
+            MarkiroTheme {
+                PalletDisassembleScreen(
+                    PalletDisassembleStep.Reason("p-1", "346006820000000014", 12),
+                    PalletDisassembleCallbacks(),
+                )
+            }
+        }
+        assertNoCyrillic()
+    }
+
+    /** The plural in the confirmation body is the one that is easy to leave Russian-only. */
+    @Test
+    fun palletDisassembleConfirmRendersInEnglish() {
+        compose.setContent {
+            MarkiroTheme {
+                PalletDisassembleScreen(
+                    PalletDisassembleStep.Confirm("p-1", "346006820000000014", 1),
+                    PalletDisassembleCallbacks(),
                 )
             }
         }

@@ -509,6 +509,22 @@
     <string name="disassemble_not_closed">This box is still open — clear it instead of disassembling</string>
     <string name="disassemble_already">The box is already disassembled</string>
     <string name="disassemble_unknown_sscc">That SSCC belongs to no box of this shift</string>
+    <!-- Pallet disassembly (both kinds) -->
+    <string name="exceptions_disassemble_pallet">Disassemble pallet</string>
+    <string name="exceptions_no_closed_pallets">No closed pallets</string>
+    <string name="pallet_disassemble_scan_hint">Scan the pallet label</string>
+    <string name="pallet_disassemble_unknown">Not a closed pallet\'s label</string>
+    <string name="pallet_disassemble_not_closed">Pallet is still open</string>
+    <string name="pallet_disassemble_already">Pallet already disassembled</string>
+    <plurals name="pallet_disassemble_context">
+        <item quantity="one">Pallet …%1$s · %2$d box</item>
+        <item quantity="other">Pallet …%1$s · %2$d boxes</item>
+    </plurals>
+    <plurals name="pallet_disassemble_confirm_body">
+        <item quantity="one">Pallet …%1$s, %2$d box. Disassemble?</item>
+        <item quantity="other">Pallet …%1$s, %2$d boxes. Disassemble?</item>
+    </plurals>
+    <string name="pallet_disassemble_done">Pallet disassembled</string>
     <string name="reason_wrong_product">Wrong product</string>
     <string name="reason_wrong_quantity">Wrong quantity</string>
     <string name="reason_damaged_package">Packaging damaged</string>

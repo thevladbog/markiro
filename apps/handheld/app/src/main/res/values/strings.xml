@@ -525,6 +525,26 @@
     <string name="disassemble_not_closed">Этот короб ещё открыт — его можно очистить, а не расформировать</string>
     <string name="disassemble_already">Короб уже расформирован</string>
     <string name="disassemble_unknown_sscc">Этот SSCC не принадлежит коробу этой смены</string>
+    <!-- Расформирование паллеты (оба вида) -->
+    <string name="exceptions_disassemble_pallet">Расформировать паллету</string>
+    <string name="exceptions_no_closed_pallets">Нет закрытых паллет</string>
+    <string name="pallet_disassemble_scan_hint">Отсканируйте этикетку паллеты</string>
+    <string name="pallet_disassemble_unknown">Это не этикетка закрытой паллеты</string>
+    <string name="pallet_disassemble_not_closed">Паллета ещё открыта</string>
+    <string name="pallet_disassemble_already">Паллета уже расформирована</string>
+    <plurals name="pallet_disassemble_context">
+        <item quantity="one">Паллета …%1$s · %2$d короб</item>
+        <item quantity="few">Паллета …%1$s · %2$d короба</item>
+        <item quantity="many">Паллета …%1$s · %2$d коробов</item>
+        <item quantity="other">Паллета …%1$s · %2$d коробов</item>
+    </plurals>
+    <plurals name="pallet_disassemble_confirm_body">
+        <item quantity="one">Паллета …%1$s, %2$d короб. Расформировать?</item>
+        <item quantity="few">Паллета …%1$s, %2$d короба. Расформировать?</item>
+        <item quantity="many">Паллета …%1$s, %2$d коробов. Расформировать?</item>
+        <item quantity="other">Паллета …%1$s, %2$d коробов. Расформировать?</item>
+    </plurals>
+    <string name="pallet_disassemble_done">Паллета расформирована</string>
     <string name="reason_wrong_product">Неверный товар</string>
     <string name="reason_wrong_quantity">Неверное количество</string>
     <string name="reason_damaged_package">Упаковка повреждена</string>

@@ -15,6 +15,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.Inventory2
 import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material.icons.outlined.Refresh
@@ -59,6 +60,7 @@ data class PalletsCallbacks(
     val onConfirmEarlyClose: () -> Unit = {},
     val onAcknowledge: () -> Unit = {},
     val onRefresh: () -> Unit = {},
+    val onDisassemble: () -> Unit = {},
     val close: PalletCloseCallbacks = PalletCloseCallbacks(),
 )
 
@@ -116,6 +118,13 @@ private fun PalletsListScreen(state: PalletsUi, cb: PalletsCallbacks) {
     val t = MarkiroTheme.type
     Column(Modifier.fillMaxWidth().background(c.surfacePage)) {
         AppBar(stringResource(R.string.pallets_title), onBack = cb.onBack) {
+            // Any closed pallet of this device, not only the one on screen: the
+            // stack being taken apart is usually one built a while ago.
+            IconAction(
+                Icons.Outlined.DeleteSweep,
+                stringResource(R.string.exceptions_disassemble_pallet),
+                cb.onDisassemble,
+            )
             IconAction(Icons.Outlined.Refresh, stringResource(R.string.pallets_refresh), cb.onRefresh)
         }
         state.stampAt?.let {

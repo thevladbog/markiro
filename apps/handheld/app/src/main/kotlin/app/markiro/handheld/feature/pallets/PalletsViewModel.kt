@@ -121,6 +121,23 @@ class PalletsViewModel(
 
     private val operatorId: String? get() = session.state.value.operator?.operatorId
 
+    /**
+     * Whether the mode currently owns scans.
+     *
+     * This view model outlives its composable -- its back-stack entry keeps it
+     * alive while the pallet-disassemble route sits on top -- and the scanner
+     * is one app-wide flow, so the pallet label scanned to take a stack apart
+     * would otherwise ALSO be read here and refused as «это паллета».
+     * Defaults to true so a view model built outside navigation (every test)
+     * behaves as it always did; `AppNavigation` clears it, exactly as the work
+     * screen does.
+     */
+    private val scanning = MutableStateFlow(true)
+
+    fun setScanning(active: Boolean) {
+        scanning.value = active
+    }
+
     /** One close at a time: the automatic close at capacity and «Закрыть» can arrive together. */
     private val closing = AtomicBoolean(false)
     private val retrying = AtomicBoolean(false)
@@ -145,7 +162,9 @@ class PalletsViewModel(
             // A closed pallet's label owns the screen; a scan landing behind it
             // would attach a box to a pallet the operator has already finished.
             scans.events.collect { event ->
-                if (_state.value.blocked == null && _state.value.closeStep is PalletCloseStep.Idle) onScan(event.raw)
+                if (scanning.value && _state.value.blocked == null && _state.value.closeStep is PalletCloseStep.Idle) {
+                    onScan(event.raw)
+                }
             }
         }
         viewModelScope.launch { gateway.stampAt.collectLatest { at -> _state.update { it.copy(stampAt = at) } } }

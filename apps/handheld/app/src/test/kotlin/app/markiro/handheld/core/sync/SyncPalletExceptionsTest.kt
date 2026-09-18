@@ -3,6 +3,9 @@ package app.markiro.handheld.core.sync
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import app.markiro.handheld.core.exceptions.DisassemblePalletResult
+import app.markiro.handheld.core.exceptions.DisassembleReason
+import app.markiro.handheld.core.exceptions.ExceptionEngine
 import app.markiro.handheld.core.network.NetworkModule
 import app.markiro.handheld.core.network.RevocationBus
 import app.markiro.handheld.core.network.RevocationInterceptor
@@ -11,6 +14,7 @@ import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.MetaStore
 import app.markiro.handheld.core.storage.PalletEntity
 import app.markiro.handheld.core.storage.PalletExceptionEntity
+import app.markiro.handheld.core.storage.PalletKind
 import app.markiro.handheld.core.storage.initializeRecoveryForTest
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -19,6 +23,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -129,6 +134,45 @@ class SyncPalletExceptionsTest {
         assertEquals("reprint", fact.getValue("kind").jsonPrimitive.content)
         assertEquals("p1", fact.getValue("palletId").jsonPrimitive.content)
         // Every key the server declares, including the ones a lenient encoder drops.
+        assertEquals(
+            listOf("kind", "palletId", "shiftId", "terminalId", "operatorId", "reason", "occurredAt"),
+            fact.keys.toList(),
+        )
+        assertEquals(0, db.palletExceptionDao().unackedCount())
+    }
+
+    /**
+     * A warehouse pallet's disassembly, produced by the engine itself.
+     *
+     * Its `shiftId` is null the whole way -- that pallet belongs to no shift --
+     * and the key still has to be on the wire: `palletExceptionSchema` declares
+     * it nullable WITHOUT a default, so an absent key fails the whole batch.
+     */
+    @Test
+    fun aWarehouseDisassemblyLeavesTheDeviceWithANullShift() = runTest {
+        db.palletDao().insert(
+            PalletEntity(
+                palletId = "w1", shiftId = null, terminalId = "dev-1", sscc = "346006820000000014",
+                openedAt = "2026-09-10T07:00:00.000Z", closedAt = "2026-09-10T09:30:00.000Z",
+                operatorId = "op-1", printState = "printed", printReason = null,
+                ackedAt = "2026-09-10T09:30:15.000Z", kind = PalletKind.WAREHOUSE,
+                productId = "prod-1", deviceId = "dev-1",
+            ),
+        )
+        assertEquals(
+            DisassemblePalletResult.Retired,
+            ExceptionEngine(db) { clock }.disassemblePallet("w1", DisassembleReason.DAMAGED_PACKAGE, "op-1", "dev-1"),
+        )
+
+        server.enqueue(ok(0))
+        assertEquals(SyncEngine.Step.SENT, engine().drainOnce())
+        val facts = bodyOf().getValue("palletExceptions").jsonArray
+        assertEquals(1, facts.size)
+        val fact = facts[0].jsonObject
+        assertEquals("disassemble", fact.getValue("kind").jsonPrimitive.content)
+        assertEquals("w1", fact.getValue("palletId").jsonPrimitive.content)
+        assertEquals(JsonNull, fact.getValue("shiftId"))
+        assertEquals(DisassembleReason.DAMAGED_PACKAGE.audit, fact.getValue("reason").jsonPrimitive.content)
         assertEquals(
             listOf("kind", "palletId", "shiftId", "terminalId", "operatorId", "reason", "occurredAt"),
             fact.keys.toList(),
