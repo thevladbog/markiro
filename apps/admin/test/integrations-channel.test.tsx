@@ -191,15 +191,16 @@ function createFetchMock(options: FetchMockOptions = {}) {
       return jsonResponse(200, { keys: [] });
     }
     if (method === "GET" && path === "/signer-agents") {
-      return jsonResponse(200, {
-        agents: [],
-        token: {
-          status: "none",
-          obtainedAt: null,
-          expiresAt: null,
-          certThumbprint: null,
-        },
-      });
+      const noToken = {
+        status: "none",
+        tokenType: null,
+        obtainedAt: null,
+        expiresAt: null,
+        certThumbprint: null,
+      };
+      // Both tokens: `SignerAgentsPanel` draws one row per token, and the
+      // overview has always carried the pair (`SignerAgentsOverviewDto`).
+      return jsonResponse(200, { agents: [], token: noToken, omsToken: noToken });
     }
     if (method === "GET" && path === "/integrations/chestny_znak/code-statuses") {
       return jsonResponse(200, {

@@ -25,8 +25,6 @@ export interface LabelTemplateSummaryDto {
    * returns the stock `product_km` label every tenant is seeded with (see
    * `apps/api/.../tenant-provisioning.service.ts`), and the KM issue dialog
    * (`../km-orders/IssueKmCodesDialog.tsx`) selects on exactly that member.
-   * `LabelTemplateDto` below stays narrower on purpose -- the editor it feeds
-   * cannot create or edit a `product_km` template yet.
    */
   purpose: LabelTemplatePurpose;
   id: string;
@@ -42,7 +40,13 @@ export interface LabelTemplateSummaryDto {
 }
 
 export interface LabelTemplateDto {
-  purpose: "box" | "product_duplicate" | "pallet";
+  /**
+   * The same full union as the summary above, now that the editor can author
+   * every member of it (`editor/index.tsx`'s purpose picker): a `product_km`
+   * template opened from the library must land in the editor's own purpose
+   * state, not be narrowed away on the way in.
+   */
+  purpose: LabelTemplatePurpose;
   id: string;
   name: string;
   spec: LabelTemplateSpec;
@@ -83,7 +87,8 @@ function fetchLabelTemplate(id: string): Promise<LabelTemplateDto> {
 }
 
 export interface CreateLabelTemplateInput {
-  purpose?: "box" | "product_duplicate" | "pallet";
+  /** Mirrors `purposeSchema` in the API's `label-templates/dto.ts`, which accepts every member. */
+  purpose?: LabelTemplatePurpose;
   name: string;
   spec: LabelTemplateSpec;
   enabled?: boolean;

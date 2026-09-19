@@ -83,15 +83,12 @@ const FILTER_LABEL_KEY: Record<LibraryFilter, string> = {
  * added later cannot silently fall through to the box badge the way
  * "pallet" did before this map existed -- TypeScript requires every key of
  * the union to be present in a `Record<LabelTemplatePurpose, ...>` literal.
- *
- * `product_km` reuses the duplicate badge for now: the library UI for the
- * new purpose (a later task) is what gives it a badge of its own.
  */
 const PURPOSE_BADGE_KEY: Record<LabelTemplatePurpose, string> = {
   box: "pages.labels.purpose.box",
   product_duplicate: "pages.labels.purpose.duplicate",
   pallet: "pages.labels.purpose.pallet",
-  product_km: "pages.labels.purpose.duplicate",
+  product_km: "pages.labels.purpose.product_km",
 };
 
 function TemplateCard({

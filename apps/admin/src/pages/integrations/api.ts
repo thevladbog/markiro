@@ -664,6 +664,14 @@ export interface SignerRefreshTask {
 export interface SignerAgentsOverview {
   agents: SignerAgent[];
   token: SignerTokenStatus;
+  /**
+   * The СУЗ token the code-ordering flow spends, obtained from the True API
+   * token above and expiring on its own schedule -- `omsToken` in
+   * `SignerAgentsOverviewDto` (apps/api/src/modules/signer-agents/dto.ts),
+   * which the service has always populated. Its `tokenType` is always `null`;
+   * only a True API token has a persisted format.
+   */
+  omsToken: SignerTokenStatus;
   refreshTask: SignerRefreshTask | null;
 }
 

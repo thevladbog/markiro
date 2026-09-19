@@ -54,6 +54,7 @@ const NO_TOKEN: SignerTokenStatus = {
 
 let agentsFixture: SignerAgent[] = [];
 let tokenFixture: SignerTokenStatus = NO_TOKEN;
+let omsTokenFixture: SignerTokenStatus = NO_TOKEN;
 let listMode: "ok" | "pending" | "error" = "ok";
 let pairingCodeExpiresAt = new Date(Date.now() + 15 * 60_000).toISOString();
 let refreshTaskFixture: {
@@ -71,6 +72,7 @@ const refreshTokenSpy = vi.fn();
 beforeEach(() => {
   agentsFixture = [];
   tokenFixture = NO_TOKEN;
+  omsTokenFixture = NO_TOKEN;
   listMode = "ok";
   pairingCodeExpiresAt = new Date(Date.now() + 15 * 60_000).toISOString();
   refreshTaskFixture = null;
@@ -106,6 +108,7 @@ function renderPanel(access: AccessDocument = ADMIN_ACCESS) {
       return jsonResponse(200, {
         agents: agentsFixture,
         token: tokenFixture,
+        omsToken: omsTokenFixture,
         refreshTask: refreshTaskFixture,
       });
     }
@@ -151,6 +154,16 @@ function renderPanel(access: AccessDocument = ADMIN_ACCESS) {
   return { ...view, fetchMock };
 }
 
+/**
+ * The line a token's label sits on -- the panel draws one per token now, so
+ * a status assertion has to name WHICH token it is about.
+ */
+function tokenRow(label: RegExp): HTMLElement {
+  const row = screen.getByText(label).parentElement;
+  if (row === null) throw new Error(`Token label ${String(label)} has no row`);
+  return row;
+}
+
 describe("SignerAgentsPanel", () => {
   it("renders agents and token status", async () => {
     agentsFixture = [agentFixture()];
@@ -158,8 +171,33 @@ describe("SignerAgentsPanel", () => {
     renderPanel();
 
     expect(await screen.findByText("BUH-PC")).toBeDefined();
-    expect(screen.getByText(/нет токена|no token/i)).toBeDefined();
+    expect(
+      within(tokenRow(/токен True API|True API token/i)).getByText(/нет токена|no token/i),
+    ).toBeDefined();
     expect(screen.queryByText(/^UUID$/)).toBeNull();
+  });
+
+  /**
+   * Two independent tokens live on this panel now: the True API token an
+   * agent signs for, and the СУЗ token the code-ordering flow spends. The
+   * server has always returned both (`SignerAgentsOverviewDto.omsToken`), and
+   * an operator told "the token is fine" while the OTHER one is expired
+   * cannot order a single code.
+   */
+  it("shows the СУЗ token status and its expiry", async () => {
+    omsTokenFixture = {
+      status: "active",
+      tokenType: null,
+      obtainedAt: "2026-09-18T05:00:00Z",
+      expiresAt: "2026-09-19T05:00:00Z",
+      certThumbprint: null,
+    };
+    renderPanel();
+
+    await screen.findByText(/токен СУЗ|SUZ token/i);
+    const row = tokenRow(/токен СУЗ|SUZ token/i);
+    expect(within(row).getByText(/^действует$|^active$/i)).toBeDefined();
+    expect(within(row).getByText(/действует до|valid until/i)).toBeDefined();
   });
 
   it("shows the persisted format of an active True API token", async () => {
