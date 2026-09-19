@@ -132,7 +132,7 @@ export function UpdateCenter({
             </p>
             <StatusChip
               className="station-update-center__source-chip"
-              status={primarySource ? "ok" : "info"}
+              phase={primarySource ? "active" : "planned"}
               label={
                 controller.origin === "yandex"
                   ? t("updates.source.primary")

@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { Alert, Badge } from "@markiro/ui";
+import { Alert, Badge, StatusChip } from "@markiro/ui";
 
 import type { RecordInventoryScanResult } from "../../lib/inventory-journal.js";
 
@@ -91,7 +91,26 @@ export function InventoryScanInstrument({
         <Alert
           tone={tone}
           title={title}
-          action={badge ? <Badge tone={tone === "error" ? "error" : tone}>{badge}</Badge> : null}
+          action={
+            badge ? (
+              result?.verdict === "duplicate" ? (
+                // The phase dictionary built a dedicated `duplicate` phase
+                // (amber, glyph ⧉) for exactly this fact; the alert's own
+                // `tone` is a separate axis (`info` here, driving the
+                // alert's own color) and is not a substitute. `size="floor"`
+                // is the station's own tag size -- see `./ShiftCard.tsx`.
+                // The other verdict badges below keep the plain category
+                // `Badge` deliberately: converting them too would touch the
+                // `#root .mk-alert .mk-badge` geometry rule and its
+                // dedicated regression test in
+                // `inventory-scan-instrument.test.tsx` ("alert badge
+                // geometry, finding 6"), which is out of scope here.
+                <StatusChip size="floor" phase="duplicate" label={badge} />
+              ) : (
+                <Badge tone={tone === "error" ? "error" : tone}>{badge}</Badge>
+              )
+            ) : null
+          }
         >
           {detail}
         </Alert>

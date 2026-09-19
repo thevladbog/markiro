@@ -112,8 +112,8 @@ describe("KioskLayout", () => {
     expect(css).toMatch(/\.kiosk-status-strip\s*{[\s\S]*?height:\s*61px/);
     expect(css).toMatch(/\.kiosk-status-strip\s*{[\s\S]*?flex-wrap:\s*nowrap/);
     expect(css).toMatch(/\.kiosk-status-strip\s*{[\s\S]*?overflow:\s*hidden/);
-    expect(css).toMatch(/\.kiosk-status-strip\s+\.mk-chip\s*{[\s\S]*?min-width:\s*0/);
-    expect(css).toMatch(/\.kiosk-status-strip\s+\.mk-chip\s*{[\s\S]*?text-overflow:\s*ellipsis/);
+    expect(css).toMatch(/\.kiosk-status-strip\s+\.mk-tag\s*{[\s\S]*?min-width:\s*0/);
+    expect(css).toMatch(/\.kiosk-status-strip\s+\.mk-tag\s*{[\s\S]*?text-overflow:\s*ellipsis/);
   });
   it("keeps the status in shell flow and gives the screen its own bounded slot", () => {
     const { container } = render(

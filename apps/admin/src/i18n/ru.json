@@ -590,6 +590,7 @@
         "APPLIED": "Нанесён",
         "RETIRED": "Выбыл",
         "WRITTEN_OFF": "Списан",
+        "WITHDRAWN": "Изъят",
         "DISAGGREGATION": "Расформирован"
       },
       "exports": {

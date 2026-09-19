@@ -3,7 +3,16 @@ import { useTranslation } from "react-i18next";
 import { useNavigate, useSearchParams } from "react-router";
 
 import { formatSsccHri } from "@markiro/domain";
-import { Alert, Badge, Button, EmptyState, PageHeader, Select, Spinner, Table } from "@markiro/ui";
+import {
+  Alert,
+  Button,
+  EmptyState,
+  PageHeader,
+  Select,
+  Spinner,
+  StatusChip,
+  Table,
+} from "@markiro/ui";
 import type { SelectOption, TableColumn } from "@markiro/ui";
 
 import { formatCreatedAt, formatDate } from "../../lib/datetime.js";
@@ -117,7 +126,9 @@ export function BoxesPage() {
         title: t("pages.boxes.table.status"),
         render: (row) =>
           row.contentsChangedAfterClose ? (
-            <Badge tone="warn">{t("pages.boxes.contentsChangedAfterClose")}</Badge>
+            // Same fact, same phase as `pallets/index.tsx`'s
+            // `contentsChangedAfterClose` StatusChip.
+            <StatusChip phase="attention" label={t("pages.boxes.contentsChangedAfterClose")} />
           ) : null,
       },
     ],

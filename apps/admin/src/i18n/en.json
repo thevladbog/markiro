@@ -590,6 +590,7 @@
         "APPLIED": "Applied",
         "RETIRED": "Retired",
         "WRITTEN_OFF": "Written off",
+        "WITHDRAWN": "Withdrawn",
         "DISAGGREGATION": "Disaggregated"
       },
       "exports": {

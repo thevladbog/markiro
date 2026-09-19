@@ -6,7 +6,6 @@ import { CABINET_CAPABILITY } from "@markiro/domain";
 import {
   AdminPage,
   Alert,
-  Badge,
   Button,
   Card,
   Checkbox,
@@ -18,6 +17,7 @@ import {
   Spinner,
   StatusChip,
 } from "@markiro/ui";
+import type { TagPhase } from "@markiro/ui";
 
 import { useCan } from "../../access/context.js";
 import { ApiRequestError } from "../../api/client.js";
@@ -333,9 +333,9 @@ function ExportsStep({
                   <small>{status}</small>
                 </span>
                 {selected[status] ? (
-                  <Badge tone="ok">{t("pages.inventory.exports.ready")}</Badge>
+                  <StatusChip phase="done" label={t("pages.inventory.exports.ready")} />
                 ) : (
-                  <Badge>{t("pages.inventory.exports.missing")}</Badge>
+                  <StatusChip phase="none" label={t("pages.inventory.exports.missing")} />
                 )}
               </div>
               <ChzExportRunStatus
@@ -502,6 +502,17 @@ function SnapshotStep({
   );
 }
 
+/**
+ * Шаг готовности перед запуском инвентаризации: ноль онлайн-терминалов
+ * блокирует продолжение (см. кнопку «Продолжить» ниже в `TerminalsStep`).
+ * Значение определённое и мешает двигаться дальше — `attention`, а не
+ * `none` (там значения нет и не ожидается, а здесь оно есть и требует
+ * действия).
+ */
+export function onlineStationsPhase(onlineStations: number): TagPhase {
+  return onlineStations > 0 ? "active" : "attention";
+}
+
 function TerminalsStep({
   inventory,
   snapshot,
@@ -535,7 +546,7 @@ function TerminalsStep({
               </small>
             </span>
             <StatusChip
-              status={line.onlineStations > 0 ? "ok" : "neutral"}
+              phase={onlineStationsPhase(line.onlineStations)}
               label={t("pages.inventory.terminals.online", {
                 online: line.onlineStations,
                 total: line.assignedStations,

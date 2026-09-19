@@ -1,16 +1,34 @@
 import type { TFunction } from "i18next";
 
-import { StatusChip } from "@markiro/ui";
+import { StatusChip, type TagPhase } from "@markiro/ui";
 import type { PlatformHealth } from "@markiro/platform-contracts";
 
 const COMPONENTS = ["database", "jobs", "smtp", "storage"] as const;
+
+/**
+ * Фактический union — `platformHealthSchema["status"]`
+ * (`packages/platform-contracts/src/operations.ts`): `ok` | `degraded` |
+ * `unavailable`. `ok` — платформа сейчас исправна (`active`, по образцу
+ * «канал работает»), `unavailable` — система недоступна, системный сбой
+ * (`failed`), а не вывод из оборота человеком.
+ */
+function healthStatusPhase(status: PlatformHealth["status"]): TagPhase {
+  switch (status) {
+    case "ok":
+      return "active";
+    case "degraded":
+      return "attention";
+    case "unavailable":
+      return "failed";
+  }
+}
 
 export function HealthSummary({ health, t }: { health: PlatformHealth; t: TFunction }) {
   return (
     <div className="health-summary">
       <div className="health-summary__headline">
         <StatusChip
-          status={health.status === "ok" ? "ok" : health.status === "degraded" ? "warn" : "error"}
+          phase={healthStatusPhase(health.status)}
           label={t(`overview.health.status.${health.status}`)}
         />
         <span>

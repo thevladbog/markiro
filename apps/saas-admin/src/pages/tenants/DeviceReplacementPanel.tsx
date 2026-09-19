@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { Alert, Button, Card, ConfirmDialog, Input, Select, StatusChip } from "@markiro/ui";
+import type { TagPhase } from "@markiro/ui";
 import type {
   DeviceReplacementObservation,
   DeviceReplacementPreparation,
@@ -239,6 +240,25 @@ function PreparationEditor({
     </div>
   );
 }
+/**
+ * `prepared` — подготовка ждёт решения оператора: замена не выполняется
+ * прямо сейчас, а спланирована (`planned`), а не идёт в процессе (`running`
+ * дал бы вращающийся глиф рядом с «Отменено» — операция читалась бы как
+ * незавершённая). `cancelled` — отмену сделал человек, терминально и не
+ * ошибка (`retired`), по образцу `apps/admin/src/pages/devices/
+ * DeviceReplacementPanel.tsx`. Фактический union — `DeviceReplacementPreparation["state"]`
+ * (`packages/platform-contracts/src/device-replacements.ts`): `prepared` |
+ * `cancelled`.
+ */
+export function preparationPhase(state: DeviceReplacementPreparation["state"]): TagPhase {
+  switch (state) {
+    case "prepared":
+      return "planned";
+    case "cancelled":
+      return "retired";
+  }
+}
+
 function SavedPreparation({
   tenantId,
   preparation,
@@ -291,7 +311,10 @@ function SavedPreparation({
       aria-label={t("deviceReplacement.project")}
       style={{ display: "grid", gap: "var(--sp-3)", marginBlock: "var(--sp-4)" }}
     >
-      <StatusChip status="neutral" label={t(`deviceReplacement.state.${preparation.state}`)} />
+      <StatusChip
+        phase={preparationPhase(preparation.state)}
+        label={t(`deviceReplacement.state.${preparation.state}`)}
+      />
       {needsReview && preparation.state === "prepared" ? (
         <Alert tone="warn">{t("deviceReplacement.needsReview")}</Alert>
       ) : null}

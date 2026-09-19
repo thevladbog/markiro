@@ -350,7 +350,7 @@ function MobileNavigation({
                           onClick={onNavigate}
                         >
                           <span>{item.labelKey}</span>
-                          {item.badge != null ? <Badge>{item.badge}</Badge> : null}
+                          {item.badge != null ? <Badge mono>{item.badge}</Badge> : null}
                         </NavLink>
                       </li>
                     );

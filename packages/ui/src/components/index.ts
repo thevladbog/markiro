@@ -40,7 +40,7 @@ export { Badge } from "./Badge.js";
 export type { BadgeProps, BadgeTone } from "./Badge.js";
 
 export { StatusChip } from "./StatusChip.js";
-export type { StatusChipProps, StatusChipStatus } from "./StatusChip.js";
+export type { StatusChipProps, TagPhase, TagSize } from "./StatusChip.js";
 
 export { Table } from "./Table.js";
 export type { TableColumn, TableProps } from "./Table.js";

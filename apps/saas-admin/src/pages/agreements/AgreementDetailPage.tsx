@@ -3,16 +3,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams } from "react-router";
 import { AGREEMENT_TRANSITIONS, type AgreementStatus } from "@markiro/platform-contracts";
-import {
-  Alert,
-  Button,
-  Input,
-  SectionHeader,
-  Spinner,
-  StatusChip,
-  Table,
-  type StatusChipStatus,
-} from "@markiro/ui";
+import { Alert, Button, Input, SectionHeader, Spinner, StatusChip, Table } from "@markiro/ui";
 
 import {
   agreementTenantCandidates,
@@ -25,16 +16,9 @@ import {
   unlinkAgreementTenant,
   uploadAgreementAttachment,
 } from "./api.js";
+import { AGREEMENT_STATUS_TO_PHASE } from "./AgreementsPage.js";
 import { AgreementDocumentFormField } from "./AgreementDocumentFormField.js";
 import { AgreementRequisitesForm, fromRequisites } from "./AgreementRequisitesForm.js";
-
-const STATUS_CHIP: Record<AgreementStatus, StatusChipStatus> = {
-  draft: "neutral",
-  in_review: "info",
-  sent: "info",
-  signed: "ok",
-  terminated: "warn",
-};
 
 const ALLOWED_UPLOAD_TYPES = new Set([
   "application/pdf",
@@ -123,7 +107,7 @@ export function AgreementDetailPage() {
       />
 
       <StatusChip
-        status={STATUS_CHIP[detail.status]}
+        phase={AGREEMENT_STATUS_TO_PHASE[detail.status]}
         label={t(`agreements.statuses.${detail.status}`)}
       />
 
@@ -251,7 +235,7 @@ export function AgreementDetailPage() {
                 {row.stale && (
                   <>
                     {" "}
-                    <StatusChip status="warn" label={t("agreements.detail.staleBadge")} />
+                    <StatusChip phase="attention" label={t("agreements.detail.staleBadge")} />
                   </>
                 )}
               </>

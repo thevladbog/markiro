@@ -31,7 +31,7 @@ import {
   type KmOrder,
   type KmOrderState,
 } from "./schemas.js";
-import { kmOrderStateChipProps } from "./state.js";
+import { kmOrderStatePhase } from "./state.js";
 import "./km-orders.css";
 
 /**
@@ -314,7 +314,7 @@ export function KmOrderPage() {
       />
       <p className="mk-km-order-page__meta">
         <StatusChip
-          {...kmOrderStateChipProps(order.state)}
+          phase={kmOrderStatePhase(order.state)}
           label={t(`pages.kmOrders.state.${order.state}`)}
         />
         <span className="font-mono">

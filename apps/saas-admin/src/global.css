@@ -4016,7 +4016,7 @@ textarea {
     grid-template-columns: minmax(0, 1fr) auto;
   }
 
-  .decision-queue__item .mk-chip {
+  .decision-queue__item .mk-tag {
     grid-column: 1 / -1;
     width: fit-content;
   }

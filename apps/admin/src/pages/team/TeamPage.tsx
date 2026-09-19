@@ -12,7 +12,7 @@ import {
   StatusChip,
   Table,
 } from "@markiro/ui";
-import type { StatusChipStatus, TableColumn } from "@markiro/ui";
+import type { TableColumn, TagPhase } from "@markiro/ui";
 
 import { ApiRequestError } from "../../api/client.js";
 import { useAuthClient } from "../../auth/client.js";
@@ -28,15 +28,44 @@ import {
   type TeamResponse,
 } from "./api.js";
 
-const DELIVERY_TONE: Record<string, StatusChipStatus> = {
-  queued: "info",
-  sending: "info",
-  retrying: "warn",
-  sent: "ok",
-  delivered: "ok",
-  failed: "error",
-  canceled: "neutral",
+export const DELIVERY_STATUS_TO_PHASE: Record<string, TagPhase> = {
+  queued: "planned",
+  sending: "running",
+  retrying: "attention",
+  sent: "done",
+  delivered: "done",
+  failed: "failed",
+  canceled: "retired",
 };
+
+// `TeamInvitation["accessStatus"]` (`./api.ts`) is a five-value union, not a
+// pending/other split: an accepted invitation is a normal successful outcome
+// (`done`), while rejected, canceled and expired are three distinct ways an
+// invitation ends without being accepted -- none of them a system failure --
+// so they share the terminal, human/time-driven `retired` phase. A `switch`
+// without `default` so a sixth value the API ever adds fails typecheck here
+// instead of silently falling through to `none`.
+//
+// The team response is not runtime-validated (unlike, say,
+// `pages/inventory/schemas.ts`'s zod schemas), so a value the API sends but
+// this union does not list would defeat the `switch`'s exhaustiveness check
+// at the type level while still reaching this function at runtime -- falling
+// through every `case` with no `default` returns `undefined`, which
+// `StatusChip` has no phase config for. The call site below guards with
+// `?? "none"` for exactly that gap; this function's own type stays
+// exhaustive so a sixth *known* value still fails typecheck here.
+export function invitationAccessPhase(accessStatus: TeamInvitation["accessStatus"]): TagPhase {
+  switch (accessStatus) {
+    case "pending":
+      return "planned";
+    case "accepted":
+      return "done";
+    case "rejected":
+    case "canceled":
+    case "expired":
+      return "retired";
+  }
+}
 
 export function TeamPage() {
   const { t } = useTranslation();
@@ -125,7 +154,7 @@ function TeamContent({ team, currentUserId }: { team: TeamResponse; currentUserI
         title: t("pages.team.table.access"),
         render: (invitation) => (
           <StatusChip
-            status={invitation.accessStatus === "pending" ? "info" : "neutral"}
+            phase={invitationAccessPhase(invitation.accessStatus) ?? "none"}
             label={t(`pages.team.access.${invitation.accessStatus}`, {
               defaultValue: invitation.accessStatus,
             })}
@@ -142,7 +171,7 @@ function TeamContent({ team, currentUserId }: { team: TeamResponse; currentUserI
         title: t("pages.team.table.delivery"),
         render: (invitation) => (
           <StatusChip
-            status={DELIVERY_TONE[invitation.delivery?.status ?? ""] ?? "neutral"}
+            phase={DELIVERY_STATUS_TO_PHASE[invitation.delivery?.status ?? ""] ?? "none"}
             label={t(`pages.team.delivery.${invitation.delivery?.status ?? "none"}`, {
               defaultValue: invitation.delivery?.status ?? "—",
             })}
@@ -232,11 +261,15 @@ function EmployeeCell({ employee }: { employee: TeamEmployee | null }) {
       <span>{t("pages.team.operator.employee", { name: employee.fullName })}</span>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
         <StatusChip
-          status={employee.status === "active" ? "ok" : "neutral"}
+          phase={employee.status === "active" ? "active" : "retired"}
           label={t(`pages.team.employeeStatus.${employee.status}`)}
         />
         <StatusChip
-          status={employee.operatorAccess ? "ok" : "neutral"}
+          // Same fact `EmployeeStationAccessSection.tsx` already renders as
+          // `retired`: revoked station access is a human decision, cleanly
+          // ended, its record intact -- not "no value" (`none`), which would
+          // claim there is nothing to say about it at all.
+          phase={employee.operatorAccess ? "active" : "retired"}
           label={
             employee.operatorAccess
               ? t("pages.team.operator.enabled")
@@ -258,7 +291,7 @@ function InvitationActions({ invitation }: { invitation: TeamInvitation }) {
   if (invitation.accessStatus !== "pending") {
     return (
       <StatusChip
-        status="neutral"
+        phase="none"
         label={t("pages.team.actionsUnavailable")}
         title={t("pages.team.actionsUnavailableHint")}
       />

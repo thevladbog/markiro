@@ -16,7 +16,7 @@ import {
   Table,
   VisuallyHidden,
 } from "@markiro/ui";
-import type { SelectOption, StatusChipStatus, TableColumn } from "@markiro/ui";
+import type { BadgeTone, SelectOption, TableColumn, TagPhase } from "@markiro/ui";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
 
@@ -38,11 +38,17 @@ type StatusFilter = "all" | PickupOrderStatus;
 type ReasonFilter = "all" | PickupOrderReason;
 type SourceFilter = "all" | PickupDeviceKind;
 
-const STATUS_TO_CHIP: Record<PickupOrderStatus, StatusChipStatus> = {
-  pending: "warn",
-  punched: "ok",
-  writtenoff: "neutral",
-  cancelled: "error",
+export const PICKUP_STATUS_TO_PHASE: Record<PickupOrderStatus, TagPhase> = {
+  pending: "planned",
+  punched: "done",
+  writtenoff: "retired",
+  cancelled: "retired",
+};
+
+/** Киоск и ТСД — два равноправных вида устройства выдачи. */
+export const DEVICE_KIND_TO_TONE: Record<PickupDeviceKind, BadgeTone> = {
+  kiosk: "violet",
+  handheld: "teal",
 };
 
 interface PickupPageContentProps {
@@ -179,7 +185,9 @@ function PickupPageContent({
       render: (row) => (
         <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
           {row.device.name}
-          <Badge>{t(`pages.pickup.deviceKind.${row.device.kind}`)}</Badge>
+          <Badge tone={DEVICE_KIND_TO_TONE[row.device.kind]}>
+            {t(`pages.pickup.deviceKind.${row.device.kind}`)}
+          </Badge>
         </span>
       ),
     },
@@ -218,13 +226,14 @@ function PickupPageContent({
       render: (row) => (
         <div style={{ display: "flex", alignItems: "center", gap: "var(--sp-2)" }}>
           <StatusChip
-            status={STATUS_TO_CHIP[row.status]}
+            phase={PICKUP_STATUS_TO_PHASE[row.status]}
             label={t(`pages.pickup.status.${row.status}`)}
           />
           {row.conflictCount > 0 && (
-            <Badge tone="warn">
-              {t("pages.pickup.conflicts.badge", { count: row.conflictCount })}
-            </Badge>
+            <StatusChip
+              phase="attention"
+              label={t("pages.pickup.conflicts.badge", { count: row.conflictCount })}
+            />
           )}
         </div>
       ),

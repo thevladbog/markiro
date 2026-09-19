@@ -18,13 +18,13 @@ import {
 } from "@markiro/ui";
 
 import { useCan } from "../../access/context.js";
-import type { StatusChipStatus } from "@markiro/ui";
 
 import { ApiRequestError } from "../../api/client.js";
 import { errorProp } from "../../lib/form-error.js";
 import { toast } from "../../lib/toast.js";
 import { ApiKeysPanel } from "./ApiKeysPanel.js";
 import { CandidatesQueue } from "./CandidatesQueue.js";
+import { CHANNEL_STATE_TO_PHASE } from "./index.js";
 import { JournalList } from "./JournalList.js";
 import { SignerAgentsPanel } from "./SignerAgentsPanel.js";
 import {
@@ -33,18 +33,8 @@ import {
   useIssueCredentials,
   useUpdateChannelSettings,
   type ChannelDetailDto,
-  type ChannelState,
   type CredentialsIssuedDto,
 } from "./api.js";
-
-/** Same map as `pages/integrations/index.tsx`'s `ChannelCard` -- kept local rather than shared, since this page's header draws it once, not per card in a grid. */
-const STATE_STATUS: Record<ChannelState, StatusChipStatus> = {
-  working: "ok",
-  error: "error",
-  silent: "warn",
-  not_configured: "neutral",
-  unavailable: "info",
-};
 
 /** Options for each `statusMapping` row's value dropdown -- `labelKey` (not `label`) because it's an i18n key, translated at render time inside the component (`t(option.labelKey)`), same as every other label in this file. */
 const STATUS_MAPPING_OPTIONS: {
@@ -780,7 +770,7 @@ export function ChannelPage() {
         title={t(channel.labelKey)}
         actions={
           <StatusChip
-            status={STATE_STATUS[channel.state]}
+            phase={CHANNEL_STATE_TO_PHASE[channel.state]}
             label={t(`integrations.state.${channel.state}`)}
           />
         }

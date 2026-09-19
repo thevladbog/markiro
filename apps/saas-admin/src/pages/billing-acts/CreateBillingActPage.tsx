@@ -23,7 +23,7 @@ import { ApiRequestError } from "../../api/client.js";
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import { useNavigationGuard } from "../../layout/NavigationGuard.js";
 import { getInvoice, listInvoices } from "../billing/api.js";
-import { invoiceStatusTone } from "../billing/invoice-status.js";
+import { invoiceStatusPhase } from "../billing/invoice-status.js";
 import { getServicePeriod, listServicePeriods } from "../service-periods/api.js";
 import { createBillingAct, getBillingAct, issueBillingAct } from "./api.js";
 
@@ -358,7 +358,7 @@ function BillingActForm({ writable }: { writable: boolean }) {
                 <h2 id="billing-act-preview-title">{t("billingActs.preview.title")}</h2>
               </div>
               <StatusChip
-                status={invoiceStatusTone(detail.data.status)}
+                phase={invoiceStatusPhase(detail.data.status)}
                 label={t(`billing.statuses.${detail.data.status}`)}
               />
             </header>

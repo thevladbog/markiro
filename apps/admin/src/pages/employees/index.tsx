@@ -18,7 +18,7 @@ import {
   StatusChip,
   Table,
 } from "@markiro/ui";
-import type { SelectOption, StatusChipStatus, TableColumn } from "@markiro/ui";
+import type { SelectOption, TableColumn, TagPhase } from "@markiro/ui";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
 
@@ -39,9 +39,9 @@ import "./employees.css";
 
 type StatusFilter = "all" | EmployeeStatus;
 
-const STATUS_TO_CHIP: Record<EmployeeStatus, StatusChipStatus> = {
-  active: "ok",
-  archived: "neutral",
+export const EMPLOYEE_STATUS_TO_PHASE: Record<EmployeeStatus, TagPhase> = {
+  active: "active",
+  archived: "retired",
 };
 
 const TABLE_SKELETON_COLUMNS = ["full-name", "role", "status", "badges", "actions"];
@@ -248,7 +248,7 @@ export function EmployeesPage() {
         title: t("pages.employees.table.status"),
         render: (row) => (
           <StatusChip
-            status={STATUS_TO_CHIP[row.status]}
+            phase={EMPLOYEE_STATUS_TO_PHASE[row.status]}
             label={t(`pages.employees.status.${row.status}`)}
           />
         ),

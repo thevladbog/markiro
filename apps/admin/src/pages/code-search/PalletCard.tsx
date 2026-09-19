@@ -16,7 +16,7 @@ import { Link, useNavigate, useParams } from "react-router";
 
 import { CABINET_CAPABILITY, formatSsccHri } from "@markiro/domain";
 import { Alert, Badge, Button, Card, PageHeader, Spinner, StatusChip, Table } from "@markiro/ui";
-import type { StatusChipStatus, TableColumn } from "@markiro/ui";
+import type { BadgeTone, TableColumn, TagPhase } from "@markiro/ui";
 
 import { useCan } from "../../access/context.js";
 import { ApiRequestError } from "../../api/client.js";
@@ -36,10 +36,16 @@ import {
 
 // Identical mapping to the box card's: a pallet's three states mean the same
 // three things -- still being stacked, closed and labelled, taken apart.
-const STATUS_TO_CHIP: Record<PalletCardDto["status"], StatusChipStatus> = {
-  open: "info",
-  closed: "ok",
-  disassembled: "neutral",
+export const PALLET_STATUS_TO_PHASE: Record<PalletCardDto["status"], TagPhase> = {
+  open: "active",
+  closed: "done",
+  disassembled: "dismantled",
+};
+
+/** A production and a warehouse pallet are equally valid: neither outranks the other. */
+export const PALLET_KIND_TO_TONE: Record<PalletCardDto["kind"], BadgeTone> = {
+  production: "violet",
+  warehouse: "teal",
 };
 
 const REJECTION_REASONS: ReadonlySet<string> = new Set<PalletMembershipRejectionReason>([
@@ -168,10 +174,10 @@ export function PalletCardPage() {
       wrap: true,
       // A disassembled member box is kept on the list, never dropped: it is
       // the only evidence on screen that a closed, labelled pallet left the
-      // line a box short. Badge text, not colour alone.
+      // line a box short. Tag text, not colour alone.
       render: (row) =>
         row.disassembledAt ? (
-          <Badge tone="warn">{t("pages.codeSearch.palletCard.boxDisassembled")}</Badge>
+          <StatusChip phase="dismantled" label={t("pages.codeSearch.palletCard.boxDisassembled")} />
         ) : null,
     },
   ];
@@ -250,11 +256,11 @@ export function PalletCardPage() {
                 {t("pages.codeSearch.palletCard.placard.action")}
               </Button>
             ) : null}
-            <Badge tone={pallet.kind === "warehouse" ? "accent" : "neutral"}>
+            <Badge tone={PALLET_KIND_TO_TONE[pallet.kind]}>
               {t(`pages.codeSearch.palletCard.kind.${pallet.kind}`)}
             </Badge>
             <StatusChip
-              status={STATUS_TO_CHIP[pallet.status]}
+              phase={PALLET_STATUS_TO_PHASE[pallet.status]}
               label={t(`pages.codeSearch.palletCard.status.${pallet.status}`)}
             />
           </div>

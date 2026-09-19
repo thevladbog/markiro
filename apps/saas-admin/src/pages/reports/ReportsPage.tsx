@@ -13,6 +13,7 @@ import {
   Select,
   StatusChip,
   Table,
+  type TagPhase,
 } from "@markiro/ui";
 import {
   platformReportInputSchema,
@@ -37,11 +38,29 @@ const isoToday = () =>
 type PlatformReportType = PlatformReportInput["reportType"];
 type PlatformReportPrivacy = PlatformReportInput["privacy"];
 
-function statusTone(status: PlatformReport["status"]) {
-  if (status === "ready") return "ok" as const;
-  if (status === "failed") return "error" as const;
-  if (status === "expired") return "neutral" as const;
-  return "info" as const;
+/**
+ * Фактический union — `platformReportStatusSchema`
+ * (`packages/platform-contracts/src/platform-reports.ts`): пять значений.
+ * Раньше `queued` и `processing` вместе схлопывались в один и тот же `info`
+ * — по образцу экспортов смен и инвентаризации
+ * (`docs/superpowers/specs/2026-09-19-tag-semantics-and-geometry-design.md`):
+ * в очереди → `planned`, выполняется → `running`, готов → `done`, упал →
+ * `failed`. `expired` — отчёт истёк и больше не скачивается, запись
+ * осталась (`retired`), это не системная ошибка.
+ */
+function reportStatusPhase(status: PlatformReport["status"]): TagPhase {
+  switch (status) {
+    case "queued":
+      return "planned";
+    case "processing":
+      return "running";
+    case "ready":
+      return "done";
+    case "failed":
+      return "failed";
+    case "expired":
+      return "retired";
+  }
 }
 
 export function ReportsPage() {
@@ -523,7 +542,7 @@ export function ReportsPage() {
               render: (report: PlatformReport) => (
                 <>
                   <StatusChip
-                    status={statusTone(report.status)}
+                    phase={reportStatusPhase(report.status)}
                     label={t(`reports.statuses.${report.status}`)}
                   />
                   {report.errorCode ? (

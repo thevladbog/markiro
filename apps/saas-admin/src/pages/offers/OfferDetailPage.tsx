@@ -15,6 +15,7 @@ import { OfferReadiness } from "./OfferReadiness.js";
 import { OfferActions } from "./OfferActions.js";
 import { OfferDocuments } from "./OfferDocuments.js";
 import { OfferPreview } from "./OfferPreview.js";
+import { OFFER_STATUS_TO_PHASE } from "./OffersPage.js";
 import { offerDate, offerErrorKey, offerMoney, registryReturnTo } from "./offerPresentation.js";
 
 export function OfferDetailPage() {
@@ -71,9 +72,7 @@ function OfferDetail({ offerId }: { offerId: string }) {
           />
           <div className="offer-detail__meta">
             <StatusChip
-              status={
-                offer.status === "paid" ? "ok" : offer.status === "draft" ? "neutral" : "info"
-              }
+              phase={OFFER_STATUS_TO_PHASE[offer.status]}
               label={t(`offerWorkspace.status.${offer.status}`)}
             />
             <span>{t("offerWorkspace.revision", { revision: offer.revision })}</span>

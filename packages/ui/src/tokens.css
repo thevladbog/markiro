@@ -57,6 +57,29 @@
   --info-solid: #2e6fd0;
   --fg-on-info-solid: #ffffff; /* 4.88:1 */
 
+  /* semantic: завершено штатно — остывший зелёный.
+     Отделён от --ok-* насыщенностью, от --fg-2 оттенком: закрытая смена не
+     «идёт» и не «архив». Контраст подписи к фону 6.30:1. */
+  --done-fg: #3f5e4a;
+  --done-bg: #edf2ee;
+  --done-border: #dae4dd;
+
+  /* Категорийные тона: равноправные виды, а не статусы. Насыщенность ниже
+     статусной намеренно — ошибка обязана кричать громче категории.
+     Оттенки удалены от статусных (5°, 35°, 150°, 215°). */
+  --cat-violet-fg: #563091;
+  --cat-violet-bg: #f1ebfb;
+  --cat-violet-border: #e2d6f5;
+  --cat-teal-fg: #0e5b63;
+  --cat-teal-bg: #e2f3f5;
+  --cat-teal-border: #c9e6ea;
+  --cat-magenta-fg: #8e2a63;
+  --cat-magenta-bg: #fbe9f3;
+  --cat-magenta-border: #f4d5e7;
+  --cat-steel-fg: #3f4756;
+  --cat-steel-bg: #ebedf1;
+  --cat-steel-border: #d9dde4;
+
   --focus-ring: #1a4f9c;
 
   /* operational console aliases — composition-specific names, same shared palette */
@@ -119,6 +142,23 @@
   --info-border: #234066;
   --info-solid: #6db2ff;
   --fg-on-info-solid: #152740; /* 6.78:1 */
+
+  --done-fg: #9cc2a9;
+  --done-bg: #1a251d;
+  --done-border: #2c3d32; /* 7.91:1 */
+
+  --cat-violet-fg: #b3a0e0;
+  --cat-violet-bg: #241c3a;
+  --cat-violet-border: #3b2f5c; /* 6.72:1 */
+  --cat-teal-fg: #79c4cb;
+  --cat-teal-bg: #0f2b2f;
+  --cat-teal-border: #1c484e; /* 7.30:1 */
+  --cat-magenta-fg: #e094ba;
+  --cat-magenta-bg: #32172a;
+  --cat-magenta-border: #532642; /* 6.82:1 */
+  --cat-steel-fg: #a9b3c4;
+  --cat-steel-bg: #1f212a;
+  --cat-steel-border: #353947; /* 7.36:1 */
 
   --focus-ring: #6db2ff;
 }

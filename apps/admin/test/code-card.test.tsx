@@ -105,24 +105,30 @@ afterEach(() => {
 });
 
 describe("CodeCardPage", () => {
+  // CHZ status is the code's national lifecycle (emitted -> applied ->
+  // introduced -> retired/written off/withdrawn/disaggregated), so it gets a
+  // phase chip like any other lifecycle status -- not a flat category badge.
+  // Three ways to leave circulation (`RETIRED`, `WRITTEN_OFF`, `WITHDRAWN` --
+  // see `WITHDRAWN_STATUSES` in `chz-code-status-refresh.service.ts`) share
+  // the `retired` phase; disaggregation is its own `dismantled` phase; a
+  // status ЧЗ has not sent yet falls back to `none` with the raw,
+  // untranslated string as its label.
   it.each([
-    ["INTRODUCED", "В обороте", "ok"],
-    ["EMITTED", "Эмитирован", "info"],
-    ["APPLIED", "Нанесён", "info"],
-    ["RETIRED", "Выбыл", "warn"],
-    ["WRITTEN_OFF", "Списан", "warn"],
-    ["WITHDRAWN", "WITHDRAWN", "warn"],
-    ["DISAGGREGATION", "Расформирован", "neutral"],
-    ["FUTURE_STATUS", "FUTURE_STATUS", "neutral"],
+    ["INTRODUCED", "В обороте", "active"],
+    ["EMITTED", "Эмитирован", "planned"],
+    ["APPLIED", "Нанесён", "running"],
+    ["RETIRED", "Выбыл", "retired"],
+    ["WRITTEN_OFF", "Списан", "retired"],
+    ["WITHDRAWN", "Изъят", "retired"],
+    ["DISAGGREGATION", "Расформирован", "dismantled"],
+    ["FUTURE_STATUS", "FUTURE_STATUS", "none"],
   ])(
-    "shows CHZ status %s as a colored tag independently from the local status",
-    async (status, label, tone) => {
+    "shows CHZ status %s as a %s-phase tag independently from the local status",
+    async (status, label, phase) => {
       stubFetch(status);
       renderPage();
       expect(await screen.findByText("Статус в ЧЗ")).toBeTruthy();
-      expect(
-        screen.getByText(label).closest(".mk-chip")?.classList.contains(`mk-chip--${tone}`),
-      ).toBe(true);
+      expect(screen.getByText(label).closest(".mk-chip")?.className).toContain(`mk-chip--${phase}`);
       expect(screen.getByText("В коробе")).toBeTruthy();
     },
   );

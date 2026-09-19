@@ -21,7 +21,7 @@ import { formatCreatedAt } from "../../lib/datetime.js";
 import { useKmOrders } from "./api.js";
 import { CreateKmOrderDialog } from "./CreateKmOrderDialog.js";
 import { isTerminalKmOrderState, type KmOrderListItem } from "./schemas.js";
-import { kmOrderStateChipProps } from "./state.js";
+import { kmOrderStatePhase } from "./state.js";
 import "./km-orders.css";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -180,7 +180,7 @@ export function KmOrdersPage() {
           return (
             <span className="mk-km-orders__stack">
               <StatusChip
-                {...kmOrderStateChipProps(row.state)}
+                phase={kmOrderStatePhase(row.state)}
                 label={t(`pages.kmOrders.state.${row.state}`)}
               />
               {reason ? <small className="mk-km-orders__reason">{reason}</small> : null}

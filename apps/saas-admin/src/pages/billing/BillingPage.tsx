@@ -4,7 +4,7 @@ import { Link, useLocation } from "react-router";
 import { Alert, SectionHeader, StatusChip, Table } from "@markiro/ui";
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import { listInvoices, type Invoice } from "./api.js";
-import { invoiceStatusTone } from "./invoice-status.js";
+import { invoiceStatusPhase } from "./invoice-status.js";
 
 export function BillingPage() {
   const { t } = useTranslation();
@@ -85,7 +85,7 @@ export function BillingPage() {
               title: t("billing.status"),
               render: (invoice: Invoice) => (
                 <StatusChip
-                  status={invoiceStatusTone(invoice.status)}
+                  phase={invoiceStatusPhase(invoice.status)}
                   label={t(`billing.statuses.${invoice.status}`)}
                 />
               ),

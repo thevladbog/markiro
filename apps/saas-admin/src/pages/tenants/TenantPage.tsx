@@ -20,18 +20,8 @@ import { tenantErrorMessageKey } from "./errorMessages.js";
 import { SubscriptionPanel } from "./SubscriptionPanel.js";
 import { TenantEquipmentPanel } from "./TenantEquipmentPanel.js";
 import { TenantLegalPanel } from "./TenantLegalPanel.js";
+import { SUBSCRIPTION_STATUS_TO_PHASE } from "./TenantsPage.js";
 import { useUnsavedChanges } from "./useUnsavedChanges.js";
-
-const STATUS_TONE = {
-  pending_activation: "warn",
-  scheduled: "info",
-  trial: "info",
-  active: "ok",
-  expired: "error",
-  superseded: "neutral",
-  cancelled: "neutral",
-  unmanaged: "warn",
-} as const;
 
 export function TenantPage() {
   const { t, i18n } = useTranslation();
@@ -141,7 +131,7 @@ export function TenantPage() {
         actions={
           <>
             <StatusChip
-              status={STATUS_TONE[detail.subscriptionStatus]}
+              phase={SUBSCRIPTION_STATUS_TO_PHASE[detail.subscriptionStatus]}
               label={t(`tenants.status.${detail.subscriptionStatus}`)}
             />
             {principal.capabilities.includes("billing.write") ? (

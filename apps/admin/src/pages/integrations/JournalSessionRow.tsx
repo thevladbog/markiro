@@ -2,15 +2,21 @@ import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Button, StatusChip } from "@markiro/ui";
-import type { StatusChipStatus } from "@markiro/ui";
+import type { TagPhase } from "@markiro/ui";
 
 import type { JournalEventDto, JournalSessionDto } from "./api.js";
 
-const OUTCOME_STATUS: Record<string, StatusChipStatus> = {
-  ok: "ok",
-  warn: "warn",
-  error: "error",
-  running: "info",
+/**
+ * Journal outcomes are a free-form string on the DTO (see `outcomeKey`
+ * below: an unset outcome reads as `"running"`), so this table is keyed by
+ * `string`, not a union -- the indexer, and thus `?? "none"` at every call
+ * site, is deliberate rather than defensive filler.
+ */
+const OUTCOME_TO_PHASE: Record<string, TagPhase> = {
+  ok: "done",
+  warn: "attention",
+  error: "failed",
+  running: "running",
 };
 
 function outcomeKey(outcome: string | null): string {
@@ -101,7 +107,7 @@ function EventRow({
   const { t } = useTranslation();
   const raw = typeof event.details?.["raw"] === "string" ? event.details["raw"] : null;
   const warnings = journalWarnings(event.details);
-  const status = OUTCOME_STATUS[outcomeKey(event.outcome)] ?? "neutral";
+  const phase = OUTCOME_TO_PHASE[outcomeKey(event.outcome)] ?? "none";
 
   return (
     <li className="mk-journal-event">
@@ -112,7 +118,7 @@ function EventRow({
         })}
       </span>
       <StatusChip
-        status={status}
+        phase={phase}
         label={t(`pages.integrations.channel.journal.outcome.${outcomeKey(event.outcome)}`, {
           defaultValue: event.outcome,
         })}
@@ -241,7 +247,7 @@ export function JournalSessionRow({
           ) : null}
         </span>
         <StatusChip
-          status={OUTCOME_STATUS[key] ?? "neutral"}
+          phase={OUTCOME_TO_PHASE[key] ?? "none"}
           label={t(`pages.integrations.channel.journal.outcome.${key}`, { defaultValue: key })}
         />
         <span className="mk-journal-session__chevron" aria-hidden="true">

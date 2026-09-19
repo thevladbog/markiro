@@ -13,6 +13,7 @@ import {
   StatusChip,
   Table,
   type TableColumn,
+  type TagPhase,
 } from "@markiro/ui";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
@@ -24,6 +25,19 @@ import {
   previewOfflineGrantReadiness,
 } from "./offline-grant-readiness-api.js";
 import { OfflineGrantActivationPanel } from "./OfflineGrantActivationPanel.js";
+
+/**
+ * `eligible`/`blocked` — фактический union в
+ * `platformGrantReadinessRowSchema.eligibility`
+ * (`packages/platform-contracts/src/offline-grant-readiness.ts`). `blocked`
+ * перечисляет конкретные незакрытые предпосылки (`grantReadinessReasonSchema`
+ * — отсутствует подпись, конфигурация, свежий клиентский отчёт и т. п.), это
+ * не системная ошибка (`failed`), а обычное «нужно донастроить» — `attention`.
+ */
+const READINESS_STATUS_TO_PHASE = {
+  eligible: "active",
+  blocked: "attention",
+} as const satisfies Record<PlatformGrantReadinessRow["eligibility"]["status"], TagPhase>;
 
 export function OfflineGrantReadinessPanel({
   policies,
@@ -130,7 +144,7 @@ export function OfflineGrantReadinessPanel({
       title: t("catalog.offlineReadiness.columns.status"),
       render: (row) => (
         <StatusChip
-          status={row.eligibility.status === "eligible" ? "ok" : "warn"}
+          phase={READINESS_STATUS_TO_PHASE[row.eligibility.status]}
           label={t(`catalog.offlineReadiness.status.${row.eligibility.status}`)}
         />
       ),

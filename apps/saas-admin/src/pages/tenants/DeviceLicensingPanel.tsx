@@ -3,11 +3,64 @@ import { DeviceReplacementPanel } from "./DeviceReplacementPanel.js";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Alert, Button, ConfirmDialog, StatusChip, Table, type TableColumn } from "@markiro/ui";
+import {
+  Alert,
+  Button,
+  ConfirmDialog,
+  StatusChip,
+  Table,
+  type TableColumn,
+  type TagPhase,
+} from "@markiro/ui";
 import type { WorkingDevicePool } from "@markiro/platform-contracts";
+
 import { ApiRequestError } from "../../api/client.js";
 import { useAuthClient } from "../../auth/client.js";
 import { cancelTenantDeviceReservation, getTenantDeviceLicensing } from "./api.js";
+
+type PoolDevice = WorkingDevicePool["devices"][number];
+
+/**
+ * Тот же union, что `DeviceStatus` в `apps/admin/src/pages/devices/index.tsx`
+ * (`awaiting_pairing` | `online` | `offline` | `revoked`), и та же фаза для
+ * каждого значения: `revoked` — отзыв человеком, терминально и без тревоги
+ * (`retired`), `offline` — определённое состояние, требующее внимания
+ * (`attention`), а не отсутствие значения.
+ */
+export function connectionPhase(status: PoolDevice["connectionStatus"]): TagPhase {
+  switch (status) {
+    case "online":
+      return "active";
+    case "revoked":
+      return "retired";
+    case "offline":
+      return "attention";
+    case "awaiting_pairing":
+      return "planned";
+  }
+}
+
+/**
+ * Фактический union — `workingDeviceSchema["state"]`
+ * (`packages/platform-contracts/src/device-licensing.ts`): `reserved` |
+ * `assigned` | `released` | `inconsistent`. Раньше три ветки схлопывали
+ * `reserved` и `assigned` в один и тот же `info`, хотя «зарезервировано»
+ * ещё не занято устройством (`planned`), а «занято» — идёт прямо сейчас
+ * (`active`). `released` — освобождение места всегда по решению человека
+ * (`releaseReason`: `reservation_cancelled` | `security_revoked`) — `retired`.
+ */
+export function slotPhase(state: PoolDevice["state"]): TagPhase {
+  switch (state) {
+    case "reserved":
+      return "planned";
+    case "assigned":
+      return "active";
+    case "released":
+      return "retired";
+    case "inconsistent":
+      return "attention";
+  }
+}
 
 const poolKey = (tenantId: string) =>
   ["platform", "tenants", tenantId, "device-licensing"] as const;
@@ -132,15 +185,7 @@ export function DeviceLicensingPanel({
       title: t("tenants.detail.deviceLicensing.columns.connection"),
       render: (device) => (
         <StatusChip
-          status={
-            device.connectionStatus === "online"
-              ? "ok"
-              : device.connectionStatus === "revoked"
-                ? "error"
-                : device.connectionStatus === "offline"
-                  ? "neutral"
-                  : "info"
-          }
+          phase={connectionPhase(device.connectionStatus)}
           label={t(`tenants.detail.deviceLicensing.connection.${device.connectionStatus}`)}
         />
       ),
@@ -150,13 +195,7 @@ export function DeviceLicensingPanel({
       title: t("tenants.detail.deviceLicensing.columns.slot"),
       render: (device) => (
         <StatusChip
-          status={
-            device.state === "released"
-              ? "neutral"
-              : device.state === "inconsistent"
-                ? "error"
-                : "info"
-          }
+          phase={slotPhase(device.state)}
           label={t(`tenants.detail.deviceLicensing.state.${device.state}`)}
         />
       ),

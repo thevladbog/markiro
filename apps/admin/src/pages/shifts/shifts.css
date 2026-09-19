@@ -14,7 +14,7 @@
   gap: var(--sp-2);
 }
 
-.mk-shifts-table__stack > span:not(.mk-chip, .mk-badge) {
+.mk-shifts-table__stack > span:not(.mk-tag) {
   color: var(--fg-3);
   font: var(--text-caption);
   overflow-wrap: anywhere;
