@@ -2,8 +2,10 @@
 
 **Date:** 2026-09-18
 
-**Status:** Implemented — part A (cloud, API, admin). See «Implementation status»
-below for what was built differently from this spec.
+**Status:** Implemented — both part A (cloud, API, admin) and part B (Windows signer
+agent), in the same branch. Nothing has met a real СУЗ, and part B has never executed
+anywhere. See «Implementation status» below for what was built differently from this
+spec.
 
 **Scope:** Ordering marking codes (КМ) from Chestny ZNAK's order-management station
 (СУЗ, OMS API 3.0) from the admin cabinet, keeping the emitted codes as a per-tenant
@@ -13,15 +15,25 @@ printer. Utilisation reports («отчёт о нанесении»), introductio
 
 ## Implementation status (2026-09-19)
 
+Both parts are implemented in this branch.
+
 Part A — the `chz-km-orders` API module, the pg-boss runner, the encrypted code pool and
 the admin «Заказы кодов» surfaces — is implemented per
-`docs/superpowers/plans/2026-09-19-chz-km-orders-cloud.md`. The Windows signer side
-(`sign_detached`, `oms_auth`) is part B,
-`docs/superpowers/plans/2026-09-19-chz-km-orders-signer.md`. No part of this has met a
-real СУЗ: the first contact is the sandbox run in
-[`docs/runbooks/signer-agent-manual-e2e.md`](../../runbooks/signer-agent-manual-e2e.md),
-section «СУЗ: token and detached signature (sandbox)», and the open questions at the end
-of this spec stay open until it happens.
+`docs/superpowers/plans/2026-09-19-chz-km-orders-cloud.md`. Part B — the Windows signer
+side (`oms_auth`, `sign_detached`, the detached flag in both signing backends) — is
+implemented per `docs/superpowers/plans/2026-09-19-chz-km-orders-signer.md`.
+
+Implemented is not verified, and the two halves are unverified to different degrees:
+
+- **No part of this has met a real СУЗ.** The first contact is the sandbox run in
+  [`docs/runbooks/signer-agent-manual-e2e.md`](../../runbooks/signer-agent-manual-e2e.md),
+  section «СУЗ: token and detached signature (sandbox)», and the open questions at the
+  end of this spec stay open until it happens.
+- **Part B's Windows code has never run at all.** `signer_capi.rs` and
+  `signer_cades.rs` are `#[cfg(windows)]`, this branch was written on macOS where that
+  arm is not compiled, and no job executes them — the Windows CI job compiles both and
+  runs `cargo test`, but no test calls `CryptSignMessage` or `SignCades`. That sandbox
+  run is their first execution, ever.
 
 ### Deviations from this spec
 
@@ -47,12 +59,17 @@ of this spec stay open until it happens.
   drained and the block was no longer recoverable. Every pass now reconciles once before drawing
   anything (one `GET` over an empty list on a fresh order); the before-final-block reconcile
   stays but is skipped when the counter has not moved since the last one.
-- **Three error codes this spec does not name:** `CHZ_CODES_INCOMPLETE` (СУЗ commits nothing on a
+- **Four error codes this spec does not name:** `CHZ_CODES_INCOMPLETE` (СУЗ commits nothing on a
   block the runner still needs, so the pass stops instead of spinning until the deadline turns it
   into a misleading timeout), `CHZ_CODES_OVERDELIVERED` (СУЗ hands back more codes than the order
   asked for, which the counts CHECK would otherwise turn into a raw constraint violation
-  mid-transaction) and `CHZ_KM_ISSUE_INCONSISTENT` (the issue bookkeeping and the code rows
-  disagree, on the write path and on the read path).
+  mid-transaction), `CHZ_ORDER_SUBMIT_UNRECORDED` (the `submitted` write lost its fence, so the
+  СУЗ order id exists but our acceptance was never persisted — the order ends here rather than
+  letting a later pass sign and submit a second, separately billed one) and
+  `CHZ_KM_ISSUE_INCONSISTENT` (the issue bookkeeping and the code rows disagree, on the write path
+  and on the read path). The authoritative list is `CHZ_KM_ORDER_SAFE_ERROR_CODES` in
+  `apps/api/src/modules/chz-km-orders/chz-km-order-runner.service.ts`, eleven codes at the time of
+  writing, plus `CHZ_KM_ISSUE_INCONSISTENT` from the issue path in the same module's `dto.ts`.
 - **The print page rasterises every label through one reusable canvas** into PNG blobs
   shown as `<img>`. One canvas per label at the page's print DPI would ask the browser
   for roughly six gigabytes for the 5 000-label batch the dialog allows in a single
@@ -183,7 +200,7 @@ is registered in the СУЗ cabinet.
 `CHZ_SIGNER_TASK_TYPES` becomes `["true_api_auth", "oms_auth", "sign_detached"]` in
 `@markiro/db`, the platform contract and `signer-core`.
 
-- **`oms_auth`** — payload `{ trueApiBaseUrl, omsConnection, inn?, tokenFormat? }`. The
+- **`oms_auth`** — payload `{ trueApiBaseUrl, omsConnection, inn? }`. The
   agent runs the existing `auth/key` → attached sign → `POST /auth/simpleSignIn/{omsConnection}`
   flow and returns `{ token }`. The cloud stores it in a new `chz_oms_tokens` table with
   the same three-column encryption as `chz_api_tokens`; `expiresAt` = obtainedAt + 10 h
@@ -191,12 +208,16 @@ is registered in the СУЗ cabinet.
   for tenants whose settings carry `omsConnection`, with the same lead time as True API
   (`CHZ_TOKEN_REFRESH_LEAD_MS`), and reports the token status next to the True API one
   in the signer panel.
-- **`sign_detached`** — payload `{ purpose: "oms_order", dataBase64 }`, result
-  `{ signatureBase64 }`. The agent signs exactly the decoded bytes with a detached
-  CAdES-BES signature: `CryptSignMessage` with `fDetachedSignature = TRUE` in the
+- **`sign_detached`** — payload `{ purpose: "oms_order", orderId, dataBase64 }`, result
+  `{ signatureBase64, certThumbprint }`. The agent signs exactly the decoded bytes with a
+  detached CAdES-BES signature: `CryptSignMessage` with `fDetachedSignature = TRUE` in the
   CryptoAPI backend, `CADESCOM_CADES_BES` with detached mode in the CAdESCOM backend.
-  Both backends stay behind the existing signer trait; host Cargo tests use the fake
-  backend and assert the detached flag and byte identity. A Windows signer release is
+  Both backends stay behind the existing signer trait. Host Cargo tests reach only as far
+  as the trait: a recording fake proves `sign_detached` and `sign_attached` are distinct
+  paths (`signer.rs`), and the dispatcher test proves the bytes signed are exactly the
+  decoded `dataBase64` (`runtime.rs`). The Win32 flag itself — `fDetachedSignature`,
+  `bDetached` — is inside `#[cfg(windows)]` code no test here executes, and is verifiable
+  only on Windows, by the sandbox run in the runbook. A Windows signer release is
   required before production use; the release path exists (`signer-stable-release.yml`).
 
 Task payload and result live in `chz_signer_tasks.payload` / `result_summary` (jsonb).
@@ -216,9 +237,11 @@ redaction stays limited to tokens.
 - `chz-km-order-runner.service.ts` — the pg-boss state machine below.
 - `chz-km-orders.controller.ts` — routes under `/chz-km-orders`.
 - Domain additions in `@markiro/domain`: `CHZ_UNIT_TEMPLATE_ID_BY_GROUP` (group alias →
-  `templateId` for `cisType: UNIT` from СУЗ table 270, only groups with exactly one UNIT
-  template; `beer` → 18, `nabeer` → 28, `water` → 16, `milk` → 20, `tobacco` → 4,
-  `otp` → 14/15 is ambiguous and therefore absent), the order body builder with a
+  `templateId` for `cisType: UNIT` from СУЗ table 270, listing only groups with exactly
+  one UNIT template — a group with two, such as `otp` 14/15, is ambiguous and therefore
+  absent). The map itself is defined in `packages/domain/src/chz/km-orders.ts` and is
+  the single source of truth; the only entry this document needs to name is `beer` → 18,
+  the group the runbook sends an operator down. Also the order body builder with a
   stable key order, and the TXT/CSV serialisers.
 
 #### Preflight (synchronous, on `POST /chz-km-orders`)
@@ -346,8 +369,10 @@ the computer. The page shows the range and count above the labels only on screen
 (`@media print` hides it) so nothing but labels reaches the printer.
 
 Fields available to the template: every product field the duplicate template already
-offers plus `km.code` and two new text fields, `km.gtin` and `km.serial`, derived from the code. Date fields resolve to empty strings on
-this page (there is no shift), and the stock template does not use them.
+offers, plus `km.code`. (This spec originally proposed two further text fields,
+`km.gtin` and `km.serial`; they were not built — see Deviation 1.) Date fields resolve
+to empty strings on this page (there is no shift), and the stock template does not use
+them.
 
 ### Label template purpose `product_km`
 
@@ -399,7 +424,9 @@ this page (there is no shift), and the stock template does not use them.
   requests); controller access with cross-tenant denial; audit assertions on exact
   fields; scheduler creating `oms_auth` only for configured tenants.
 - **Signer:** platform-contract fixtures for both task types; `signer-core` host tests
-  with the fake backend asserting detached mode and exact bytes.
+  with the fake backend asserting that the trait's detached and attached paths are
+  distinct and that the bytes signed are exactly the decoded payload. The Win32 detached
+  flag is not reachable from a host test.
 - **Admin:** component tests for the list, dialog preflight errors, card actions and the
   print page's page count and `@page` size; API-client tests.
 - **Manual:** sandbox run through the signer e2e runbook (extended): register a sandbox

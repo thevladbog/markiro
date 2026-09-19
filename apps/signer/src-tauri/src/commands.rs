@@ -144,6 +144,9 @@ pub fn unsupported_platform_backends() -> (Arc<dyn Signer>, Arc<dyn SecretStore>
         fn sign_attached(&self, _t: &str, _p: &[u8]) -> Result<String, SignerError> {
             Err(SignerError::CryptoProviderMissing("Windows only".into()))
         }
+        fn sign_detached(&self, _t: &str, _p: &[u8]) -> Result<String, SignerError> {
+            Err(SignerError::CryptoProviderMissing("Windows only".into()))
+        }
     }
     impl SecretStore for Unsupported {
         fn protect(&self, _plaintext: &str) -> Result<String, SignerError> {

@@ -15,7 +15,7 @@
 - The private key never leaves the customer machine; the agent sends only signatures and tokens (spec «Background»).
 - `X-Signature` for СУЗ is a **detached** CMS signature; an attached one is rejected with HTTP 413 (spec «СУЗ facts»). The signed bytes must be exactly the decoded `dataBase64` payload, never re-serialised.
 - The СУЗ token lives 10 hours and the response carries no expiry; `expiresAt` is computed as `now + 10 h` in RFC 3339 with offset (spec «Signer agent»).
-- Task JSON must parse the shared fixtures in `packages/platform-contracts/fixtures/chz-signer/` byte-for-byte; `deny_unknown_fields` stays on every contract struct.
+- Task JSON must parse the shared fixtures in `packages/platform-contracts/fixtures/chz-signer/` byte-for-byte; `deny_unknown_fields` stays on every contract struct. **Retracted in Task 1:** serde does not support `#[serde(flatten)]` under `deny_unknown_fields`, so the outer `SignerTask` envelope drops it. Every payload struct keeps it, which is where unknown keys actually have to be refused.
 - Journal entries never include token values or signature bytes (existing redaction rules in `journal.rs`).
 - Host Cargo tests (`cargo test --manifest-path apps/signer/Cargo.toml --workspace`) prove the runtime loop and nothing about CryptoAPI, CAdESCOM or a real certificate; say so in the PR (repo AGENTS.md).
 - Commit after every task.
@@ -296,16 +296,10 @@ git commit -m "feat(signer): sign_detached on the Signer trait and test fakes"
 
 - [ ] **Step 1: Write the host-checkable test**
 
-No host test can exercise Win32; instead add a unit test in `signer_backend.rs` (host-built) that pins the contract both backends must satisfy through a shared helper:
+No host test can exercise Win32; instead add a unit test in `signer_backend.rs` (host-built) that pins the contract both backends must satisfy through a shared helper: in `strip_base64_line_breaks` tests, an assertion that a CAdESCOM-style wrapped signature normalises to one line (already present — keep). The real verification is the Windows sandbox run (runbook, Task 6).
 
-```rust
-/// Shared by both Windows backends: the CMS produced for СУЗ must be
-/// detached, base64, single-line. Documented here so the two `#[cfg(windows)]`
-/// modules cannot drift in what they return.
-pub const DETACHED_SIGNATURE_IS_SINGLE_LINE_BASE64: bool = true;
-```
-
-plus in `strip_base64_line_breaks` tests an assertion that a CAdESCOM-style wrapped signature normalises to one line (already present — keep). The real verification is the Windows sandbox run (runbook, Task 6).
+**Retracted after review:** this step also asked for a
+`pub const DETACHED_SIGNATURE_IS_SINGLE_LINE_BASE64: bool = true;` as documentation of that contract. It was written, referenced by nothing, and removed again: a constant cannot enforce the guarantee its doc comment asserted. `strip_base64_line_breaks` and its test are the whole of the host-side contract.
 
 - [ ] **Step 2: Implement CryptoAPI**
 
@@ -491,7 +485,10 @@ Add to `runtime.rs` tests (the module already has wiremock helpers and `test_run
         let server = MockServer::start().await;
         Mock::given(method("POST")).and(path("/signer-agent/tasks/3f0e0f5e-8d1c-4d7a-9b1a-222222222222/complete"))
             .and(body_json(serde_json::json!({
-                "signatureBase64": base64::engine::general_purpose::STANDARD.encode(b"detached-{\"productGroup\":\"beer\"}"),
+                // `Signer::sign_detached` already returns base64; the runtime forwards
+                // that string verbatim and must never re-encode it. The fake returns
+                // `format!("detached-{payload}")`, so this is the literal expected.
+                "signatureBase64": "detached-{\"productGroup\":\"beer\"}",
                 "certThumbprint": "AB"
             })))
             .respond_with(ResponseTemplate::new(204))
