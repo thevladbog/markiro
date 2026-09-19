@@ -23,6 +23,8 @@ interface ShiftListItem {
   number?: string | null;
   status: "planned" | "active" | "closing" | "closed";
   mode: "validation" | "aggregation";
+  /** Aggregation shifts that also build pallets; absent from pre-upgrade servers. */
+  palletsEnabled?: boolean;
   productName: string | null;
   /** Short operator-facing name from the catalog; null = use productName. */
   productPrintName?: string | null;
@@ -513,10 +515,12 @@ export function ShiftSelection({
                   locale={i18n.resolvedLanguage ?? i18n.language}
                   plannedQty={shift.plannedQty}
                   mode={shift.mode}
+                  palletsEnabled={shift.mode === "aggregation" && shift.palletsEnabled === true}
                   status={shift.status}
                   modeLabel={
                     shift.mode === "aggregation" ? t("shifts.aggregation") : t("shifts.validation")
                   }
+                  palletsLabel={t("shifts.withPallets")}
                   statusLabel={
                     shift.status === "closing"
                       ? t("shifts.closing")

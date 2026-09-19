@@ -188,6 +188,7 @@
     "notStarted": "Not started",
     "validation": "Validation",
     "aggregation": "Aggregation",
+    "withPallets": "pallets",
     "planned": "plan",
     "noPlan": "no plan",
     "forCounterparty": "for:",
