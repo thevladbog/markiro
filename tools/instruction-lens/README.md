@@ -64,6 +64,15 @@ them.
 | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `0`  | Every extracted quote matched the dictionary (`missing=0`), or the document has no content for the requested locale — a legitimate state (e.g. no English revision yet), not a finding. |
 | `1`  | One or more quotes were `MISSING`, **or** the extraction step itself found zero quotes.                                                                                                 |
+| `1`  | The `<ru\|en>` argument was something else (`xx`, `EN`, `en-US`, or missing). Printed on stderr as `invalid locale …`; nothing was checked.                                             |
+
+The locale is validated before the registry and the dictionary are even
+loaded, and its message deliberately does not read like the "no content for
+this locale" line above. Before the guard, `content["EN"]` simply missed and
+the run printed the reassuring `no content for MKR-INS-10 EN` and exited `0`
+having checked nothing — a gate wired up with a capitalised or typo'd locale
+would have stayed green forever. That is the same vacuous-pass class as the
+zero-quote case below, so it is a failure, not a clean run.
 
 The zero-quotes case is deliberately a failure, not a pass. Every real
 instruction in this series quotes the interface at least once, so a run that
@@ -161,6 +170,9 @@ fixture repository to prove the `root`/`dictDir` argument handling still
 resolves the registry and dictionary paths correctly after the move out of
 `/tmp`. `main()` takes an explicit `argv` array and returns the process exit
 status instead of calling `process.exit` itself, so the exit-code tests for
-both failure paths (a `MISSING` quote, and a zero-quote extraction) can
-assert on the returned number directly, in addition to the CLI-level tests
-that spawn the real subprocess and check its actual exit code.
+all three failure paths (a `MISSING` quote, a zero-quote extraction, and an
+unrecognised locale) can assert on the returned number directly, in addition
+to the CLI-level tests that spawn the real subprocess and check its actual
+exit code. The locale test runs against a temporary directory holding no
+registry and no dictionary at all, which is what proves the argument is
+rejected before anything is loaded rather than after.

@@ -14,6 +14,8 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const QUOTE_PATTERN = { ru: /«[^»]+»/gu, en: /“[^”]+”/gu };
+/** The only locales this series is published in, and the only ones the CLI accepts. */
+export const LOCALES = Object.keys(QUOTE_PATTERN);
 
 /**
  * Walks a document's compiled `content[locale]` tree and collects every
@@ -129,8 +131,15 @@ export function lint(rows, values, { code, locale, log = console.log } = {}) {
 /**
  * Runs the CLI end to end and returns a process exit status: `0` when every
  * quote matched (or the document legitimately has no content for the
- * requested locale), `1` when one or more quotes are `MISSING`, and `1` when
- * the extraction step itself found zero quotes.
+ * requested locale), `1` when one or more quotes are `MISSING`, `1` when the
+ * extraction step itself found zero quotes, and `1` when the requested locale
+ * is not one this series publishes.
+ *
+ * The locale is validated before anything is loaded, because an unknown value
+ * used to be indistinguishable from a legitimately absent revision: a lookup
+ * of `content["EN"]` (or `xx`, or `en-US`) simply missed, printed the
+ * reassuring "no content" line and exited 0 having checked nothing - the same
+ * vacuous pass this tool exists to catch, and a fatal one for a gate.
  *
  * The zero-quote case is deliberately treated as a tool failure, not a clean
  * document: every real instruction in this series quotes the interface, so
@@ -147,6 +156,14 @@ export function lint(rows, values, { code, locale, log = console.log } = {}) {
  */
 export async function main(argv = process.argv.slice(2)) {
   const [root, code, locale, dictDir = "apps/admin/src/i18n"] = argv;
+  if (!LOCALES.includes(locale)) {
+    console.error(
+      `invalid locale ${locale === undefined ? "(missing)" : `"${locale}"`}: expected one of ` +
+        `${LOCALES.join(", ")} (lowercase). Nothing was checked - this is a bad argument, not a ` +
+        "document without a revision in that locale.",
+    );
+    return 1;
+  }
   const { LEGAL_DOCUMENTS } = await import(
     pathToFileURL(join(root, "packages/legal-documents/dist/registry.js"))
   );

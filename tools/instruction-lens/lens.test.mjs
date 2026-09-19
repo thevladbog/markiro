@@ -353,6 +353,74 @@ test("main() returns 1 (Gap 2) when extraction finds zero quotes, and never prin
   });
 });
 
+// --- Locale validation: an unrecognised locale used to be swallowed by the
+// `content[locale]` lookup, which missed, printed "no content for ..." and
+// returned 0 having checked nothing. That is the same vacuous-pass class the
+// tool exists to catch, and it matters most where the tool is meant to run:
+// as a CI gate, where `EN` or a typo'd `xx` would keep the job green forever.
+
+test("main() rejects a locale outside ru/en instead of reading as an absent revision", async () => {
+  await withTempRepo(async (root) => {
+    // No registry and no dictionary are written at all: the guard has to fire
+    // before either is loaded, so a bad argument cannot depend on a built
+    // `legal-documents/dist` being present to be caught.
+    const captured = [];
+    const original = console.error;
+    console.error = (...args) => captured.push(args.join(" "));
+    let statuses;
+    try {
+      statuses = [
+        await main([root, "MKR-TEST", "xx"]),
+        await main([root, "MKR-TEST", "EN"]),
+        await main([root, "MKR-TEST", "en-US"]),
+        await main([root, "MKR-TEST", undefined]),
+      ];
+    } finally {
+      console.error = original;
+    }
+    assert.deepEqual(statuses, [1, 1, 1, 1]);
+    // The message must name the locale as invalid, and must not read as the
+    // legitimate "this document has no revision in that locale" path.
+    assert.equal(captured.length, 4);
+    for (const line of captured) {
+      assert.match(line, /invalid locale/);
+      assert.doesNotMatch(line, /no content for/);
+    }
+    assert.match(captured[0], /"xx"/);
+    assert.match(captured[3], /\(missing\)/);
+  });
+});
+
+test("CLI: an unknown locale exits non-zero", async () => {
+  await withTempRepo((root) => {
+    mkdirSync(join(root, "packages/legal-documents/dist"), { recursive: true });
+    mkdirSync(join(root, "apps/admin/src/i18n"), { recursive: true });
+    writeFileSync(
+      join(root, "packages/legal-documents/dist/registry.js"),
+      `export const LEGAL_DOCUMENTS = [{
+        releaseKey: "MKR-TEST/2026.01/01",
+        content: { ru: { summary: "«Метка»", sections: [] } },
+      }];\n`,
+    );
+    writeFileSync(join(root, "apps/admin/src/i18n/ru.json"), JSON.stringify({ label: "Метка" }));
+    let error;
+    try {
+      // `stdio: "pipe"` so the (expected) error line is captured here instead
+      // of being printed into the test runner's own stderr.
+      execFileSync("node", [LENS_PATH, root, "MKR-TEST", "EN"], {
+        encoding: "utf8",
+        stdio: "pipe",
+      });
+    } catch (e) {
+      error = e;
+    }
+    assert.ok(error, "expected the CLI to exit non-zero for a locale outside ru/en");
+    assert.equal(error.status, 1);
+    assert.match(error.stderr, /invalid locale "EN"/);
+    assert.doesNotMatch(error.stdout, /no content for/);
+  });
+});
+
 test("main() returns 0 for a document with no content in the requested locale - a legitimate state, not Gap 2", async () => {
   await withTempRepo(async (root) => {
     mkdirSync(join(root, "packages/legal-documents/dist"), { recursive: true });
