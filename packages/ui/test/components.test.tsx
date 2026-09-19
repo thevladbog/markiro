@@ -1310,47 +1310,116 @@ describe("Drawer", () => {
 });
 
 describe("Badge", () => {
-  it("renders its children as a compact mono pill", () => {
-    render(<Badge>12</Badge>);
+  it("рисует счётчик моноширинно по явному признаку", () => {
+    render(<Badge mono>12</Badge>);
     const badge = screen.getByText("12");
-    expect(badge.className).toContain("mk-badge--neutral");
+
+    expect(badge.className).toContain("mk-tag--neutral");
+    expect(badge.className).toContain("mk-tag--mono");
   });
 
   /**
-   * The default has to stay nowrap: a one-word status pill split across two
-   * lines is worse than a wide one, and every existing call site relies on it.
+   * Словесная подпись моноширинной быть не должна: у IBM Plex Mono пробел в
+   * полную ячейку, и двухсловный тег читается с двойным пробелом. В station.css
+   * это лечилось вручную через word-spacing: -0.35ch.
    */
-  it("keeps a short pill on one line at a fixed height by default", () => {
+  it("не включает моно для словесной подписи", () => {
+    render(<Badge>Разобрана</Badge>);
+    expect(screen.getByText("Разобрана").className).not.toContain("mk-tag--mono");
+  });
+
+  it.each(["violet", "teal", "magenta", "steel"] as const)(
+    "поддерживает категорийный тон %s",
+    (tone) => {
+      render(<Badge tone={tone}>Агрегация</Badge>);
+      expect(screen.getByText("Агрегация").className).toContain(`mk-tag--${tone}`);
+    },
+  );
+
+  /**
+   * Дефолт остаётся nowrap: однословный тег, разорванный на две строки, хуже
+   * широкого, и на это опирается каждая существующая точка вызова.
+   */
+  it("держит короткий тег в одну строку на фиксированной высоте", () => {
     render(<Badge>Разобрана</Badge>);
     const badge = screen.getByText("Разобрана");
-    expect(badge.style.whiteSpace).toBe("nowrap");
-    expect(badge.style.height).toBe("16px");
-    expect(badge.className).not.toContain("mk-badge--wrap");
+
+    expect(badge.className).toContain("mk-tag--office");
+    expect(badge.className).not.toContain("mk-tag--wrap");
+    expect(getComputedStyle(badge).height).toBe("22px");
   });
 
   /**
-   * `wrap` exists for a long label in a narrow column: nowrap makes the badge
-   * contribute its whole string to the column's min-content width, which
-   * overflowed the shift panel's pallet table and clipped the pill mid-word.
-   * Releasing the fixed height with it is part of the same contract -- a
-   * two-line pill inside a 16px box spills over its own background.
+   * `wrap` нужен длинной подписи в узкой колонке: nowrap заставляет тег
+   * отдавать всю строку в min-content колонки, из-за чего таблицу паллет в
+   * панели смены выносило в горизонтальное переполнение и тег обрезало.
    */
-  it("lets a long label wrap and grow past one line when asked", () => {
+  it("даёт длинной подписи перенос и рост выше одной строки", () => {
     render(<Badge wrap>Состав изменился после закрытия</Badge>);
     const badge = screen.getByText("Состав изменился после закрытия");
-    expect(badge.style.whiteSpace).toBe("normal");
-    expect(badge.style.height).toBe("auto");
-    expect(badge.style.minHeight).toBe("16px");
-    expect(badge.className).toContain("mk-badge--wrap");
+
+    expect(badge.className).toContain("mk-tag--wrap");
+    expect(getComputedStyle(badge).height).toBe("auto");
+    expect(getComputedStyle(badge).minHeight).toBe("22px");
   });
 
-  it("still lets a caller override the wrapping through style", () => {
+  it("сохраняет класс-зацепку mk-badge для накладок приложений", () => {
+    render(<Badge>Разобрана</Badge>);
+    expect(screen.getByText("Разобрана").className).toContain("mk-badge");
+  });
+
+  it("всё ещё позволяет вызывающей стороне переопределить перенос через style", () => {
     render(
       <Badge wrap style={{ whiteSpace: "nowrap" }}>
         Состав изменился после закрытия
       </Badge>,
     );
     expect(screen.getByText("Состав изменился после закрытия").style.whiteSpace).toBe("nowrap");
+  });
+});
+
+describe("геометрия тега", () => {
+  /**
+   * Смысл всей затеи: тег с глифом и тег без глифа обязаны иметь одну
+   * высоту. Раньше это были 24px против 16px, и в ячейке таблицы смен они
+   * читались как два несвязанных набора.
+   */
+  it("даёт одинаковую высоту тегу фазы и тегу категории", () => {
+    render(
+      <div>
+        <StatusChip phase="done" label="Закрыта" />
+        <Badge tone="violet">Валидация</Badge>
+      </div>,
+    );
+
+    const chip = screen.getByText("Закрыта").closest(".mk-tag");
+    const badge = screen.getByText("Валидация");
+
+    expect(chip).not.toBeNull();
+    expect(getComputedStyle(chip as Element).height).toBe("22px");
+    expect(getComputedStyle(badge).height).toBe("22px");
+  });
+
+  it("держит коробку глифа квадратной, чтобы подписи вставали в колонку", () => {
+    const { container } = render(<StatusChip phase="duplicate" label="Дубликат" />);
+
+    const glyph = container.querySelector(".mk-tag__glyph");
+    expect(glyph).not.toBeNull();
+
+    const box = getComputedStyle(glyph as Element);
+    expect(box.width).toBe("12px");
+    expect(box.height).toBe("12px");
+  });
+
+  it.each([
+    ["office", "22px"],
+    ["floor", "34px"],
+    ["wall", "40px"],
+  ] as const)("размер %s даёт высоту %s", (size, height) => {
+    render(<StatusChip phase="active" label="Активна" size={size} />);
+
+    const chip = screen.getByText("Активна").closest(".mk-tag");
+    expect(getComputedStyle(chip as Element).height).toBe(height);
   });
 });
 
