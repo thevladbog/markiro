@@ -167,7 +167,28 @@ export async function main(argv = process.argv.slice(2)) {
   const { LEGAL_DOCUMENTS } = await import(
     pathToFileURL(join(root, "packages/legal-documents/dist/registry.js"))
   );
-  const source = LEGAL_DOCUMENTS.find((d) => d.releaseKey.startsWith(code));
+  if (!code) {
+    console.error(
+      "missing document code: expected a release-key prefix such as MKR-INS-10. Nothing was " +
+        "checked.",
+    );
+    return 1;
+  }
+  // A release key is `<CODE>/<period>/<number>`, so the prefix has to stop at a
+  // separator. A bare `startsWith` would let `MKR-INS-1` silently resolve to
+  // `MKR-INS-10` (and an empty code to whichever document sorts first), then
+  // report `missing=0` for a document nobody asked about - the vacuous pass
+  // this tool exists to catch.
+  const source = LEGAL_DOCUMENTS.find(
+    (d) => d.releaseKey === code || d.releaseKey.startsWith(`${code}/`),
+  );
+  if (!source) {
+    console.error(
+      `no document matches "${code}". Expected a full release key or the code before the first ` +
+        "slash. Nothing was checked.",
+    );
+    return 1;
+  }
   const content = source.content[locale];
   if (!content) {
     console.log("no content for", code, locale);

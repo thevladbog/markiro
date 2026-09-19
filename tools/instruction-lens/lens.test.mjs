@@ -391,6 +391,72 @@ test("main() rejects a locale outside ru/en instead of reading as an absent revi
   });
 });
 
+// A release key is `<CODE>/<period>/<number>`. Resolving the code with a bare
+// `startsWith` made a truncated code silently pick a different document and
+// report `missing=0` for it - the same vacuous pass the locale guard above
+// closes, reached by a different typo. The registry below is the live
+// collision: `MKR-INS-1` is a prefix of both real codes.
+
+test("main() refuses a code that is only a partial prefix of a release key", async () => {
+  await withTempRepo(async (root) => {
+    mkdirSync(join(root, "packages/legal-documents/dist"), { recursive: true });
+    mkdirSync(join(root, "apps/admin/src/i18n"), { recursive: true });
+    writeFileSync(
+      join(root, "packages/legal-documents/dist/registry.js"),
+      `export const LEGAL_DOCUMENTS = [
+        { releaseKey: "MKR-INS-10/2026.09/02", content: { ru: { summary: "Обзор «Метка».", sections: [] } } },
+        { releaseKey: "MKR-INS-11/2026.09/01", content: { ru: { summary: "Обзор «Метка».", sections: [] } } },
+      ];\n`,
+    );
+    writeFileSync(join(root, "apps/admin/src/i18n/ru.json"), JSON.stringify({ label: "Метка" }));
+    const captured = [];
+    const original = console.error;
+    console.error = (...args) => captured.push(args.join(" "));
+    let status;
+    try {
+      status = await main([root, "MKR-INS-1", "ru"]);
+    } finally {
+      console.error = original;
+    }
+    // Without the guard this resolves to MKR-INS-10 and returns 0, having
+    // checked a document the caller never named.
+    assert.equal(status, 1);
+    assert.match(captured.join("\n"), /no document matches "MKR-INS-1"/);
+    // The exact key still resolves, and so does the code before the slash.
+    assert.equal(await main([root, "MKR-INS-11/2026.09/01", "ru"]), 0);
+    assert.equal(await main([root, "MKR-INS-11", "ru"]), 0);
+  });
+});
+
+test("main() refuses an empty code instead of matching whichever document sorts first", async () => {
+  await withTempRepo(async (root) => {
+    mkdirSync(join(root, "packages/legal-documents/dist"), { recursive: true });
+    mkdirSync(join(root, "apps/admin/src/i18n"), { recursive: true });
+    writeFileSync(
+      join(root, "packages/legal-documents/dist/registry.js"),
+      `export const LEGAL_DOCUMENTS = [{
+        releaseKey: "MKR-TEST/2026.01/01",
+        content: { ru: { summary: "Обзор «Метка».", sections: [] } },
+      }];\n`,
+    );
+    writeFileSync(join(root, "apps/admin/src/i18n/ru.json"), JSON.stringify({ label: "Метка" }));
+    const captured = [];
+    const original = console.error;
+    console.error = (...args) => captured.push(args.join(" "));
+    let statuses;
+    try {
+      // `""` used to satisfy `startsWith` for every document; `undefined`
+      // stringified to "undefined" and crashed on the missing match.
+      statuses = [await main([root, "", "ru"]), await main([root, undefined, "ru"])];
+    } finally {
+      console.error = original;
+    }
+    assert.deepEqual(statuses, [1, 1]);
+    assert.equal(captured.length, 2);
+    for (const line of captured) assert.match(line, /missing document code/);
+  });
+});
+
 test("CLI: an unknown locale exits non-zero", async () => {
   await withTempRepo((root) => {
     mkdirSync(join(root, "packages/legal-documents/dist"), { recursive: true });

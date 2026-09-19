@@ -65,6 +65,7 @@ them.
 | `0`  | Every extracted quote matched the dictionary (`missing=0`), or the document has no content for the requested locale — a legitimate state (e.g. no English revision yet), not a finding. |
 | `1`  | One or more quotes were `MISSING`, **or** the extraction step itself found zero quotes.                                                                                                 |
 | `1`  | The `<ru\|en>` argument was something else (`xx`, `EN`, `en-US`, or missing). Printed on stderr as `invalid locale …`; nothing was checked.                                             |
+| `1`  | The `<CODE>` argument was empty or missing (`missing document code …`), or matched no document (`no document matches …`). Nothing was checked.                                          |
 
 The locale is validated before the registry and the dictionary are even
 loaded, and its message deliberately does not read like the "no content for
@@ -73,6 +74,13 @@ the run printed the reassuring `no content for MKR-INS-10 EN` and exited `0`
 having checked nothing — a gate wired up with a capitalised or typo'd locale
 would have stayed green forever. That is the same vacuous-pass class as the
 zero-quote case below, so it is a failure, not a clean run.
+
+The document code is matched the same way, and for the same reason. A release
+key is `<CODE>/<period>/<number>`, so a code matches only the whole key or the
+part before the first slash. A bare `startsWith` let a truncated code resolve
+to a neighbour — `MKR-INS-1` is a prefix of both `MKR-INS-10` and
+`MKR-INS-11` — and an empty code matched whichever document sorted first, in
+both cases reporting `missing=0` for a document the caller never named.
 
 The zero-quotes case is deliberately a failure, not a pass. Every real
 instruction in this series quotes the interface at least once, so a run that
