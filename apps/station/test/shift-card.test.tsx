@@ -9,6 +9,32 @@ function dateParts(container: HTMLElement) {
 }
 
 describe("ShiftCard", () => {
+  /**
+   * CodeRabbit on #615 asked to treat an undefined descriptor as "no photo".
+   * It is not: `undefined` means a server from before the field existed, and
+   * ProductImage still reads the local cache pointer for it. What the card
+   * owes the design is that a lookup that yields nothing shows the SAME
+   * monogram as an explicit null, never the product name as text.
+   */
+  it("keeps the cache lookup for an unknown descriptor and falls back to the monogram", () => {
+    const { container } = render(
+      <ShiftCard
+        productName="Сидр"
+        counterpartyName={null}
+        counterpartyLabel="для:"
+        actionLabel="Открыть"
+        active={false}
+        disabled={false}
+        onSelect={vi.fn()}
+        productId="product-1"
+      />,
+    );
+    const fallback = container.querySelector(".shift-card__photo .product-image--fallback");
+    expect(fallback).not.toBeNull();
+    expect(fallback?.querySelector(".shift-card__photo-monogram")?.textContent).toBe("С");
+    expect(fallback?.textContent).toBe("С");
+  });
+
   it("keeps the print name and action together beside the product photo panel", () => {
     const productName =
       "Молоко ультрапастеризованное безлактозное обогащённое витаминами для детского питания 3,2%, 930 мл";

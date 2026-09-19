@@ -107,6 +107,11 @@ export function ShiftCard({
   // The panel's hue is derived from the product exactly as the work screen's
   // identity hero derives it: the photo's dominant colour, the GTIN hash as a
   // fallback, and no hue at all when there is neither.
+  const monogram = (
+    <span className="shift-card__photo-monogram" aria-hidden="true">
+      {productMonogram(productName ?? "")}
+    </span>
+  );
   const hue = useProductAccentHue({ exec, productId, image, gtin, refreshKey: imageRefreshKey });
   const photoStyle = hue === null ? undefined : ({ "--product-hue": String(hue) } as CSSProperties);
   // A full name equal to the headline says nothing twice.
@@ -121,6 +126,11 @@ export function ShiftCard({
           data-accent={hue === null ? undefined : "true"}
           style={photoStyle}
         >
+          {/* `undefined` is an unknown descriptor (a server from before the
+              field existed), not a missing photo: ProductImage still consults
+              the local cache pointer for it. Only an explicit null skips the
+              lookup. Either way a photo that cannot be produced shows the same
+              monogram, never the name as text on the gradient. */}
           {productId && image !== null ? (
             <ProductImage
               exec={exec}
@@ -128,11 +138,10 @@ export function ShiftCard({
               productName={productName}
               image={image}
               refreshKey={imageRefreshKey}
+              fallback={monogram}
             />
           ) : (
-            <span className="shift-card__photo-monogram" aria-hidden="true">
-              {productMonogram(productName ?? "")}
-            </span>
+            monogram
           )}
         </div>
         <div className="shift-card__details">
