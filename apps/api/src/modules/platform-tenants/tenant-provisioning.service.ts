@@ -157,7 +157,7 @@ export class TenantProvisioningService {
       }
       // Stock KM label (task 12): a single Chestny ZNAK marking code and its
       // Data Matrix, printed from the office before units go down the line.
-      // Migration 0165 seeds the identical row for tenants that already
+      // Migration 0166 seeds the identical row for tenants that already
       // existed (guarded by the same (tenant_id, name, purpose) identity), so
       // both paths leave exactly one stock KM label per tenant.
       for (const { name, spec } of buildKmLabelTemplates()) {

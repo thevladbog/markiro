@@ -26,7 +26,7 @@
 
 1. The stock «Этикетка КМ» prints the serial through the existing `km.code` field with `textFormat: "km_without_crypto"` and the GTIN through `product.gtin`; no new `km.gtin`/`km.serial` label fields are added (they would touch the label model, ZPL/TSPL emitters and the Station).
 2. The print dialog lets the admin pick any enabled `product_km` template eligible for the product's category, with the stock one preselected. Organisation/category default tables for this purpose are a follow-up, not part of this plan.
-3. Migration index: this plan uses `0165_chz_km_orders`. Open PR #605 also claims 0165; whichever merges second renumbers (file name, journal `idx`/`tag`) before merge.
+3. Migration index: `0166_chz_km_orders`. This plan originally claimed 0165, and `0165_pallet_membership_removal_quarantine` merged to `main` first, so this branch renumbered (file, snapshot, journal `idx`/`tag`). The snapshot chain still needs regenerating against `main`'s 0165 when the branch is integrated — see the ledger.
 
 ## File structure
 

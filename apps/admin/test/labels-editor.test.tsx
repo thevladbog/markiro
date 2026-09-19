@@ -1041,7 +1041,7 @@ it("builds a 58 by 40 product duplicate template when its purpose is selected", 
 
 /**
  * The stock KM label is what a tenant is seeded with (`buildKmLabelTemplates`
- * in `@markiro/domain`, seeded by tenant provisioning and migration 0165), so
+ * in `@markiro/domain`, seeded by tenant provisioning and migration 0166), so
  * a second KM label an operator mints from this editor must begin life as
  * that same 58x40 layout -- not as the blank default, which carries no Data
  * Matrix at all and which the server would reject as `KM_LABEL_TEMPLATE_INVALID`.
