@@ -3,6 +3,8 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { PgBoss } from "pg-boss";
 import { createDb } from "@markiro/db";
 
+import { RUN_CHZ_EXPORT_QUEUE, RUN_CHZ_KM_ORDER_QUEUE } from "../src/jobs/jobs.module";
+
 /**
  * `chz-export-job.test.ts` mocks `pg-boss` entirely (`vi.mock("pg-boss", ...)`),
  * so its dedup assertions only check that `jobs.module.ts` *calls*
@@ -31,9 +33,12 @@ import { createDb } from "@markiro/db";
  * call in `jobs.module.ts`.
  */
 const ready = Boolean(process.env.DATABASE_URL);
-const QUEUE_NAME = "run-chz-export";
+// Imported rather than re-typed: a rename in jobs.module.ts must break this
+// file, not leave it quietly asserting dedup on a queue nothing uses.
+const QUEUE_NAME = RUN_CHZ_EXPORT_QUEUE;
+const KM_ORDER_QUEUE_NAME = RUN_CHZ_KM_ORDER_QUEUE;
 
-describe.skipIf(!ready)("run-chz-export queue policy: real pg-boss dedup", () => {
+describe.skipIf(!ready)("run-chz-export and run-chz-km-order queue policy: dedup", () => {
   const databaseName = `markiro_chz_export_policy_${randomUUID().replaceAll("-", "_")}`;
   const maintenanceUrl = process.env.DATABASE_URL ?? "postgres://invalid";
   const scratchUrl = new URL(maintenanceUrl);
@@ -105,6 +110,46 @@ describe.skipIf(!ready)("run-chz-export queue policy: real pg-boss dedup", () =>
       const legacySecond = await boss.send(legacyQueue, { pass: 0 }, { singletonKey: legacyKey });
       expect(legacyFirst).not.toBeNull();
       expect(legacySecond).not.toBeNull();
+    },
+    30_000,
+  );
+
+  /**
+   * `run-chz-km-order` carries the same policy for a sharper reason than the
+   * export queue's pass budget: `ChzKmOrderRunnerService.storeBlock` fences
+   * its commit on `(state, attempts, fetchedCount)`, so a second concurrent
+   * pass for the same order loses that fence and silently discards a block
+   * of marking codes Chestny ZNAK has already drawn and billed. Exactly one
+   * job in flight per order is therefore a correctness requirement, and this
+   * is the only assertion that can see whether pg-boss actually delivers it.
+   */
+  it(
+    "dedupes a same-key created job on run-chz-km-order under stately, and records the policy " +
+      "assertChzKmOrderQueuePolicy reads at boot",
+    async () => {
+      boss = new PgBoss(scratchUrl.toString());
+      boss.on("error", () => undefined);
+      await boss.start();
+
+      await boss.createQueue(KM_ORDER_QUEUE_NAME, { policy: "stately" });
+
+      const { rows } = await boss
+        .getDb()
+        .executeSql("select policy from pgboss.queue where name = $1", [KM_ORDER_QUEUE_NAME]);
+      expect((rows[0] as { policy: string } | undefined)?.policy).toBe("stately");
+
+      // The real singleton key shape: `${tenantId}:${orderId}`.
+      const key = `${randomUUID()}:${randomUUID()}`;
+      const first = await boss.send(KM_ORDER_QUEUE_NAME, { pass: 0 }, { singletonKey: key });
+      const second = await boss.send(KM_ORDER_QUEUE_NAME, { pass: 0 }, { singletonKey: key });
+      expect(first).not.toBeNull();
+      expect(second).toBeNull();
+
+      // A different order is untouched by the dedup.
+      const otherKey = `${randomUUID()}:${randomUUID()}`;
+      await expect(
+        boss.send(KM_ORDER_QUEUE_NAME, { pass: 0 }, { singletonKey: otherKey }),
+      ).resolves.not.toBeNull();
     },
     30_000,
   );

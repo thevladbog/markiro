@@ -47,6 +47,9 @@ import { ChzTokenService } from "../modules/chz-exports/chz-token.service";
 import { TrueApiClient } from "../modules/chz-exports/true-api.client";
 import { ChzCodeStatusIngestService } from "../modules/chz-code-statuses/chz-code-status-ingest.service";
 import { ChzCodeStatusRefreshService } from "../modules/chz-code-statuses/chz-code-status-refresh.service";
+import { ChzKmOrderRunnerService } from "../modules/chz-km-orders/chz-km-order-runner.service";
+import { ChzOmsTokenService } from "../modules/chz-km-orders/chz-oms-token.service";
+import { OmsClient } from "../modules/chz-km-orders/oms.client";
 import { currentMonthUTC, nextMonthUTC } from "./months";
 import {
   MATERIALIZE_SUBSCRIPTION_STATUSES_CRON,
@@ -67,6 +70,7 @@ export const PG_CONNECTION_STRING = "JOBS_PG_CONNECTION_STRING";
 export const BUILD_SHIFT_EXPORT_QUEUE = "build-shift-export";
 export const BUILD_INVENTORY_DOCUMENT_QUEUE = "build-inventory-document-run";
 export const RUN_CHZ_EXPORT_QUEUE = "run-chz-export";
+export const RUN_CHZ_KM_ORDER_QUEUE = "run-chz-km-order";
 export const NATIONAL_CATALOG_SCHEMA_REFRESH_QUEUE = "national-catalog-schema-refresh";
 export const NATIONAL_CATALOG_PRODUCT_FRESHNESS_QUEUE = "national-catalog-product-freshness";
 const NATIONAL_CATALOG_SCHEMA_REFRESH_CRON = "15 2 * * *";
@@ -187,6 +191,86 @@ async function assertChzExportQueuePolicy(boss: PgBoss): Promise<void> {
         `policy, so the export dedup (chzExportSingletonKey) is silently inert on this ` +
         `database. Fix by confirming the queue has no jobs, then running: ` +
         `delete from pgboss.queue where name = '${RUN_CHZ_EXPORT_QUEUE}'; -- createQueue ` +
+        `will recreate it under the right policy on the next boot.`,
+    );
+  }
+}
+
+/**
+ * The floor under whatever `ChzKmOrderRunnerService.run` asks for. The runner
+ * reports a delay tuned to what it is waiting on (a signature, a buffer, a
+ * token refresh), and every one of those is already at or above this floor --
+ * but the floor is what `MAX_KM_ORDER_PASSES` below is counted in, so a
+ * shorter delay would spend the budget faster than the order's own 48-hour
+ * deadline and abandon it early. It also bounds how hard a misbehaving pass
+ * can hammer СУЗ.
+ */
+const CHZ_KM_ORDER_POLL_INTERVAL_SECONDS = 30;
+
+/**
+ * The same shape, and the same reason, as `MAX_EXPORT_PASSES` above: every
+ * `startAfter` re-enqueue is a brand-new pg-boss job, so `job.retryCount`
+ * resets each pass and cannot bound how many passes one order gets. The
+ * runner has its own wall-clock stop (`chz_km_orders.deadline_at`, 48 hours
+ * from `ChzKmOrdersService.ORDER_DEADLINE_MS`), and it is checked first on
+ * every pass -- but only a pass that actually runs can check it, and the
+ * runner's token gate returns before then, granting the order another pass
+ * whenever the tenant's token is merely `missing` or `expired`. Carrying the
+ * pass count in the payload gives that gate a budget that advances across
+ * re-enqueues: at the 30-second floor above this is 48 hours of passes,
+ * matching the deadline rather than pre-empting it, so the deadline stays
+ * the thing that normally ends a stuck order and this is the backstop for an
+ * order that can never reach the deadline check.
+ */
+const MAX_KM_ORDER_PASSES = 5760;
+
+interface ChzKmOrderJobData {
+  tenantId: string;
+  orderId: string;
+  /** Defaults to 0: the initial enqueue from `ChzKmOrdersService` omits it. */
+  pass?: number;
+}
+
+/**
+ * Same mechanism as `chzExportSingletonKey`, but guarding a sharper failure.
+ * An export chain that forks costs a reset pass budget; a КМ order chain that
+ * forks costs marking codes. `ChzKmOrderRunnerService.storeBlock` commits a
+ * block of codes and the order's `fetched_count` in one transaction fenced on
+ * `(state, attempts, fetched_count)` -- so when two passes draw from СУЗ's
+ * buffer at once, the loser's transaction rolls back and the codes it drew
+ * are gone: issued and billed by Chestny ZNAK, stored nowhere, and
+ * unrecoverable once the sub-order closes. `stately` plus this key is what
+ * makes a second `created`/`active` job for the same order impossible rather
+ * than merely unlikely, and `send` resolving to `null` is the normal dedup
+ * outcome, not a failure.
+ *
+ * The worker's own chain re-enqueue is not self-blocking for the same reason
+ * it is not for exports: pg-boss's unique index covers `(name, state,
+ * singleton_key)`, and the job doing the sending is `active` while its
+ * successor is inserted `created`.
+ */
+function chzKmOrderSingletonKey(tenantId: string, orderId: string): string {
+  return `${tenantId}:${orderId}`;
+}
+
+const RUN_CHZ_KM_ORDER_QUEUE_POLICY = "stately";
+
+/**
+ * Same reasoning and same `createQueue`-cannot-fix-it caveat as
+ * `assertChzExportQueuePolicy` above. This queue has more to lose from a
+ * stale `standard` policy than that one does: see `chzKmOrderSingletonKey`
+ * for what a forked chain costs an order mid-fetch.
+ */
+async function assertChzKmOrderQueuePolicy(boss: PgBoss): Promise<void> {
+  const actual = await queuePolicy(boss, RUN_CHZ_KM_ORDER_QUEUE);
+  if (actual !== RUN_CHZ_KM_ORDER_QUEUE_POLICY) {
+    throw new Error(
+      `${RUN_CHZ_KM_ORDER_QUEUE} queue policy is "${actual ?? "unknown"}", expected ` +
+        `"${RUN_CHZ_KM_ORDER_QUEUE_POLICY}". createQueue cannot change an existing queue's ` +
+        `policy, so the per-order dedup (chzKmOrderSingletonKey) is silently inert on this ` +
+        `database, and two concurrent passes for one order can lose a block of marking ` +
+        `codes. Fix by confirming the queue has no jobs, then running: ` +
+        `delete from pgboss.queue where name = '${RUN_CHZ_KM_ORDER_QUEUE}'; -- createQueue ` +
         `will recreate it under the right policy on the next boot.`,
     );
   }
@@ -316,7 +400,7 @@ export const REFRESH_CHZ_CODE_STATUSES_TENANT_CAP = 200;
 
 /**
  * Boots a dedicated pg-boss instance (its own `pgboss` schema, same
- * database as the app), four request-driven workers, and eleven schedules on it:
+ * database as the app), five request-driven workers, and eleven schedules on it:
  *  - keeps the `codes`/`scan_events` monthly partitions ahead of traffic:
  *    ensures the current + next month exist once at startup, then again
  *    every day at 04:00 UTC.
@@ -348,6 +432,13 @@ export const REFRESH_CHZ_CODE_STATUSES_TENANT_CAP = 200;
  *  - orders and imports the six Chestny ZNAK code-status exports for an
  *    inventory on demand, one pass per invocation, re-enqueuing itself with a
  *    delay until every run is terminal or `MAX_EXPORT_PASSES` is reached.
+ *  - advances a Chestny ZNAK КМ order (sign, submit to СУЗ, poll the code
+ *    buffer, fetch the codes) on demand, the same one-pass-per-invocation
+ *    shape, re-enqueuing itself after whatever delay the runner asks for --
+ *    floored at `CHZ_KM_ORDER_POLL_INTERVAL_SECONDS` -- until the order is
+ *    terminal or `MAX_KM_ORDER_PASSES` is reached. Exactly one job per order
+ *    may be in flight; see `chzKmOrderSingletonKey` for what a forked chain
+ *    would cost.
  *  - for every tenant with an active Chestny ZNAK signer agent (same
  *    tenant-selection query as `SignerSchedulerService.enqueueRefreshTasks`),
  *    ingests newly-known marking codes into `chz_code_statuses`
@@ -408,6 +499,7 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
     private readonly chzExportRunner: ChzExportRunnerService,
     private readonly chzCodeStatusIngest: ChzCodeStatusIngestService,
     private readonly chzCodeStatusRefresh: ChzCodeStatusRefreshService,
+    private readonly chzKmOrderRunner: ChzKmOrderRunnerService,
     @Optional() private readonly nationalCatalogFreshness?: NationalCatalogFreshnessService,
     @Optional() private readonly nationalCatalogSchemas?: NationalCatalogSchemaService,
     @Optional()
@@ -673,6 +765,80 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
       );
       await this.reconcileUnfinishedChzExports(boss);
 
+      await boss.createQueue(RUN_CHZ_KM_ORDER_QUEUE, {
+        // See `chzKmOrderSingletonKey` above for why exactly one job per
+        // order is a correctness requirement here, not merely tidiness.
+        policy: RUN_CHZ_KM_ORDER_QUEUE_POLICY,
+        retryLimit: 5,
+        retryDelay: 30,
+        retryBackoff: true,
+        retryDelayMax: 900,
+        expireInSeconds: 900,
+      });
+      // `createQueue` above is a no-op if this queue already existed under a
+      // different policy -- see `assertChzKmOrderQueuePolicy`.
+      await assertChzKmOrderQueuePolicy(boss);
+      this.workerIds.push(
+        await boss.work(
+          RUN_CHZ_KM_ORDER_QUEUE,
+          { includeMetadata: true },
+          async (jobs: JobWithMetadata<ChzKmOrderJobData>[]) => {
+            for (const job of jobs) {
+              const pass = job.data.pass ?? 0;
+              let finished: boolean;
+              let retryAfterSeconds: number;
+              try {
+                ({ finished, retryAfterSeconds } = await this.chzKmOrderRunner.run(
+                  job.data.tenantId,
+                  job.data.orderId,
+                  { retryCount: pass, retryLimit: MAX_KM_ORDER_PASSES },
+                ));
+              } catch (error) {
+                // Same gap, and same close, as the export worker above: a
+                // thrown pass sends no `startAfter` successor, so once
+                // pg-boss's own retry budget for this job is spent
+                // (`job.retryCount >= job.retryLimit`, its last attempt)
+                // nothing would advance this order again -- it would sit
+                // non-terminal, invisible to `ChzKmOrdersService.retry()`
+                // (which requires `state = 'failed'`) and reachable only by
+                // boot reconciliation below. A retryable attempt rethrows
+                // unchanged so pg-boss's retry/backoff still applies.
+                if (job.retryCount < job.retryLimit) throw error;
+                this.logger.error(
+                  `ChZ КМ order pass permanently failed for tenant ${job.data.tenantId} ` +
+                    `order ${job.data.orderId} after ${job.retryCount} job retries; ` +
+                    `failing the order`,
+                  error instanceof Error ? error.stack : undefined,
+                );
+                await this.chzKmOrderRunner.abandonAfterJobRetriesExhausted(
+                  job.data.tenantId,
+                  job.data.orderId,
+                );
+                continue;
+              }
+              if (!finished) {
+                // A `null` return means another `created` job already holds
+                // this order's next-pass slot (see `chzKmOrderSingletonKey`),
+                // which is exactly what should happen and needs no handling.
+                await boss.send(
+                  RUN_CHZ_KM_ORDER_QUEUE,
+                  {
+                    tenantId: job.data.tenantId,
+                    orderId: job.data.orderId,
+                    pass: pass + 1,
+                  },
+                  {
+                    startAfter: Math.max(CHZ_KM_ORDER_POLL_INTERVAL_SECONDS, retryAfterSeconds),
+                    singletonKey: chzKmOrderSingletonKey(job.data.tenantId, job.data.orderId),
+                  },
+                );
+              }
+            }
+          },
+        ),
+      );
+      await this.reconcileUnfinishedChzKmOrders(boss);
+
       await boss.createQueue(REFRESH_CHZ_CODE_STATUSES_QUEUE, {
         // No singleton key: every job on this queue does the same thing (walk
         // every enabled tenant), so `stately` alone is what stops two cron
@@ -899,6 +1065,26 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
+  /**
+   * `ChzKmOrdersService`'s `CHZ_KM_ORDER_QUEUE` port, implemented. `pass` is
+   * omitted, defaulting to 0 in the worker: this is always the first pass of
+   * a chain, whether it comes from `.create`, from `.retry`, or from boot
+   * reconciliation below.
+   *
+   * A `null` return means pg-boss deduped this against a job already pending
+   * for the order -- `.create`/`.retry` racing an in-flight chain -- which is
+   * the guarantee this queue exists to provide, not a failure. Both call
+   * sites discard the id and only need a chain to be in flight, which it is.
+   */
+  async enqueueChzKmOrder(tenantId: string, orderId: string): Promise<string | null> {
+    if (!this.boss || !this.started) throw new Error("pg-boss is not started");
+    return this.boss.send(
+      RUN_CHZ_KM_ORDER_QUEUE,
+      { tenantId, orderId },
+      { singletonKey: chzKmOrderSingletonKey(tenantId, orderId) },
+    );
+  }
+
   private async reconcileQueuedShiftExports(boss: PgBoss): Promise<void> {
     let queued: { id: string }[];
     try {
@@ -1013,6 +1199,64 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * Every order whose state is not one of the three terminal ones, oldest
+   * first, capped at `SHIFT_EXPORT_RECONCILE_LIMIT` like every other
+   * reconciliation pass in this file. A КМ order's chain lives only in
+   * pg-boss, so an order whose chain was lost (a crash between the runner's
+   * write and its re-enqueue) would otherwise sit untouched until its
+   * 48-hour deadline and then fail -- with codes possibly already drawn and
+   * paid for, and no way for an operator to resume it, since
+   * `ChzKmOrdersService.retry()` only accepts `failed`.
+   *
+   * The select is deliberately cross-tenant -- that is the whole point of a
+   * boot sweep -- but it carries each row's own `tenantId` into the job
+   * payload, and every query the runner then makes is scoped by that pair
+   * (`ChzKmOrderRunnerService.load`/`ownedOrderInState`). Nothing downstream
+   * ever sees an order id without the tenant it belongs to.
+   *
+   * This is the send site `chzKmOrderSingletonKey` guards most directly: an
+   * order's pg-boss chain usually survives the restart that triggers this
+   * sweep, still sitting `created` with its correct pass number, so a `null`
+   * return here is the expected outcome rather than a failure.
+   */
+  private async reconcileUnfinishedChzKmOrders(boss: PgBoss): Promise<void> {
+    let unfinished: { tenantId: string; id: string }[];
+    try {
+      unfinished = await this.db
+        .select({ tenantId: schema.chzKmOrders.tenantId, id: schema.chzKmOrders.id })
+        .from(schema.chzKmOrders)
+        .where(sql`${schema.chzKmOrders.state} not in ('completed', 'rejected', 'failed')`)
+        .orderBy(asc(schema.chzKmOrders.createdAt))
+        .limit(SHIFT_EXPORT_RECONCILE_LIMIT);
+    } catch (error) {
+      this.logger.error(
+        "chz km order reconciliation query failed",
+        error instanceof Error ? error.stack : undefined,
+      );
+      return;
+    }
+    for (const row of unfinished) {
+      try {
+        const jobId = await boss.send(
+          RUN_CHZ_KM_ORDER_QUEUE,
+          { tenantId: row.tenantId, orderId: row.id },
+          { singletonKey: chzKmOrderSingletonKey(row.tenantId, row.id) },
+        );
+        if (jobId === null) {
+          this.logger.log(
+            `chz km order reconciliation skipped for tenant ${row.tenantId} order ${row.id}: a chain is already pending`,
+          );
+        }
+      } catch (error) {
+        this.logger.error(
+          `chz km order reconciliation failed for tenant ${row.tenantId} order ${row.id}`,
+          error instanceof Error ? error.stack : undefined,
+        );
+      }
+    }
+  }
+
   async runNationalCatalogFreshness(): Promise<void> {
     await this.nationalCatalogFreshness?.run();
   }
@@ -1025,7 +1269,7 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
       throw new Error("pg-boss database probe failed");
     }
     if (
-      this.workerIds.length !== 23 + (this.platformReports ? 2 : 0) ||
+      this.workerIds.length !== 24 + (this.platformReports ? 2 : 0) ||
       this.workerIds.some((id) => id.length === 0) ||
       new Set(this.workerIds).size !== this.workerIds.length
     ) {
@@ -1232,6 +1476,17 @@ export class JobsModule {
         // rather than duplicating them again.
         ChzCodeStatusIngestService,
         ChzCodeStatusRefreshService,
+        // `ChzKmOrderRunnerService` (this module's `run-chz-km-order` worker)
+        // gets its own instance for the same reason `ChzExportRunnerService`
+        // above does, and it is the same circularity: `ChzKmOrdersModule`
+        // binds its `CHZ_KM_ORDER_QUEUE` port to `PgBossService`, which lives
+        // here, so importing that module back would be circular. Its
+        // `ChzCryptoService` and `JournalService` are the instances provided
+        // above; `OmsClient` needs a factory for the same erased-interface
+        // reason as `TrueApiClient`.
+        { provide: OmsClient, useFactory: () => new OmsClient() },
+        ChzOmsTokenService,
+        ChzKmOrderRunnerService,
       ],
       exports: [PgBossService, INVENTORY_DOCUMENT_GENERATOR_REGISTRY],
     };

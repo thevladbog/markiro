@@ -1,14 +1,11 @@
-import { Injectable, Module, type DynamicModule } from "@nestjs/common";
+import { Module, type DynamicModule } from "@nestjs/common";
 import type { Env } from "../../env";
+import { PgBossService } from "../../jobs/jobs.module";
 import { JournalService } from "../integrations/journal.service";
 import { ChzCryptoService } from "../signer-agents/chz-crypto.service";
 import { ChzKmOrderRunnerService } from "./chz-km-order-runner.service";
 import { ChzKmOrdersController } from "./chz-km-orders.controller";
-import {
-  CHZ_KM_ORDER_QUEUE,
-  ChzKmOrdersService,
-  type ChzKmOrderQueue,
-} from "./chz-km-orders.service";
+import { CHZ_KM_ORDER_QUEUE, ChzKmOrdersService } from "./chz-km-orders.service";
 import { ChzOmsTokenService } from "./chz-oms-token.service";
 import { OmsClient } from "./oms.client";
 
@@ -26,37 +23,13 @@ function provideOmsClient() {
 }
 
 /**
- * Placeholder for `CHZ_KM_ORDER_QUEUE` until Task 10 adds
- * `PgBossService.enqueueChzKmOrder` and its `run-chz-km-order` worker.
- *
- * `PgBossService` (`../../jobs/jobs.module`) is already reachable here
- * without a circular import -- `JobsModule` is `@Global()` and exports it,
- * the same way `ChzExportsService` injects it directly -- but it does not
- * yet implement `ChzKmOrderQueue.enqueueChzKmOrder`. Binding
- * `{ provide: CHZ_KM_ORDER_QUEUE, useExisting: PgBossService }` today would
- * compile (the token aliasing is untyped) and then fail at runtime the
- * moment `ChzKmOrdersService.create`/`retry` called the missing method. This
- * no-op stands in until that method exists.
- *
- * Task 10 must replace this provider with
- * `{ provide: CHZ_KM_ORDER_QUEUE, useExisting: PgBossService }` once
- * `PgBossService.enqueueChzKmOrder` is implemented, and delete this class.
- */
-@Injectable()
-class NoopChzKmOrderQueue implements ChzKmOrderQueue {
-  enqueueChzKmOrder(): Promise<string | null> {
-    return Promise.resolve(null);
-  }
-}
-
-/**
  * Assembles the ChZ КМ-order cabinet stack: `ChzKmOrdersService` (pre-flight,
  * create/list/get/retry, Task 8), `ChzKmOrdersController` (the cabinet HTTP
  * surface) and `ChzKmOrderRunnerService` (the background state machine,
- * Task 9). The pg-boss queue wiring (Task 10) will join this module the same
- * way `ChzExportRunnerService` joins `ChzExportsModule` -- see
- * `NoopChzKmOrderQueue` above for what that task must change. The runner
- * itself is not yet invoked by any worker; Task 10 adds that.
+ * Task 9). The runner instance below serves this module's own consumers; the
+ * `run-chz-km-order` worker in `JobsModule` (Task 10) provides a second one
+ * for itself, which is how the two modules avoid depending on each other --
+ * see the `CHZ_KM_ORDER_QUEUE` binding below.
  */
 @Module({})
 export class ChzKmOrdersModule {
@@ -72,7 +45,12 @@ export class ChzKmOrdersModule {
           provide: ChzCryptoService,
           useFactory: () => new ChzCryptoService(env.CHZ_TOKEN_ENCRYPTION_KEY),
         },
-        { provide: CHZ_KM_ORDER_QUEUE, useClass: NoopChzKmOrderQueue },
+        // `JobsModule` is `@Global()` and exports `PgBossService`, so this
+        // alias needs no import of it -- which is what keeps the dependency
+        // one-way: `JobsModule`'s `run-chz-km-order` worker builds its own
+        // `ChzKmOrderRunnerService` out of this directory's services rather
+        // than importing this module, so neither module imports the other.
+        { provide: CHZ_KM_ORDER_QUEUE, useExisting: PgBossService },
         ChzKmOrdersService,
         ChzKmOrderRunnerService,
       ],

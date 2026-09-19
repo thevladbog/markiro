@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import type { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import express from "express";
 import request from "supertest";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { schema, type Db } from "@markiro/db";
 
@@ -12,6 +12,9 @@ import { AppModule } from "../src/app.module";
 import { DB } from "../src/auth/auth.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
+import { PgBossService } from "../src/jobs/jobs.module";
+import { ChzKmOrderRunnerService } from "../src/modules/chz-km-orders/chz-km-order-runner.service";
+import { OmsClient } from "../src/modules/chz-km-orders/oms.client";
 import { ChzCryptoService } from "../src/modules/signer-agents/chz-crypto.service";
 import { listenOnLoopback } from "./support/listen-loopback";
 import { signUpAndActivate } from "./support/auth";
@@ -26,6 +29,7 @@ const ready = Boolean(
 const FIXTURE_GTIN = "04607034690014";
 const OMS_ID = "cdf12109-10d3-11e6-8b6f-0050569977a1";
 const OMS_CONNECTION = "b7f0c8b0-10d3-11e6-8b6f-0050569977a1";
+const OMS_ORDER_ID = "3f2a9b10-10d3-11e6-8b6f-0050569977a1";
 // `chz_product_groups` (migration 0099) seeds code 15 as alias "beer", and
 // `CHZ_UNIT_TEMPLATE_ID_BY_GROUP.beer` (packages/domain/src/chz/km-orders.ts)
 // is 18 -- both asserted against directly below.
@@ -39,6 +43,8 @@ describe.skipIf(!ready)("chz-km-orders cabinet e2e", () => {
   let setup: AuthSetup;
   let db: Db;
   let crypto: ChzCryptoService;
+  let runner: ChzKmOrderRunnerService;
+  let jobs: PgBossService;
   const seededTenantIds: string[] = [];
 
   beforeAll(async () => {
@@ -55,6 +61,8 @@ describe.skipIf(!ready)("chz-km-orders cabinet e2e", () => {
     await app.init();
     await listenOnLoopback(app);
     db = ref.get(DB);
+    runner = ref.get(ChzKmOrderRunnerService);
+    jobs = ref.get(PgBossService);
     crypto = new ChzCryptoService(env.CHZ_TOKEN_ENCRYPTION_KEY);
   });
 
@@ -190,5 +198,59 @@ describe.skipIf(!ready)("chz-km-orders cabinet e2e", () => {
     const created = await agent.post("/chz-km-orders").send({ productId, quantity: 1 }).expect(201);
 
     await agent.post(`/chz-km-orders/${created.body.id}/retry`).expect(409);
+  });
+
+  it("puts a failed order back in flight and re-enqueues it on the durable queue", async () => {
+    const { agent, tenantId, productId } = await readyTenant();
+    const created = await agent.post("/chz-km-orders").send({ productId, quantity: 5 }).expect(201);
+    const orderId: string = created.body.id;
+
+    // Drive the order to `failed` through the real runner rather than
+    // writing `state = 'failed'` by hand: a block carrying more codes than
+    // the order has room for is `CHZ_CODES_OVERDELIVERED` (staged the same
+    // way in chz-km-order-runner.service.test.ts). The order is first placed
+    // where the fetch loop starts; `chz_km_orders_state_consistency_check`
+    // requires `oms_order_id` for that state.
+    await db
+      .update(schema.chzKmOrders)
+      .set({ state: "fetching", omsOrderId: OMS_ORDER_ID })
+      .where(and(eq(schema.chzKmOrders.tenantId, tenantId), eq(schema.chzKmOrders.id, orderId)));
+    const listBlocks = vi
+      .spyOn(OmsClient.prototype, "listBlocks")
+      .mockResolvedValue({ status: "ok", value: [] });
+    const getCodes = vi.spyOn(OmsClient.prototype, "getCodes").mockResolvedValue({
+      status: "ok",
+      value: {
+        codes: Array.from({ length: 6 }, (_, i) => `01${FIXTURE_GTIN}21OVER${i}`),
+        blockId: randomUUID(),
+      },
+    });
+    try {
+      await runner.run(tenantId, orderId, { retryCount: 0, retryLimit: 5 });
+    } finally {
+      listBlocks.mockRestore();
+      getCodes.mockRestore();
+    }
+
+    const failed = await agent.get(`/chz-km-orders/${orderId}`).expect(200);
+    expect(failed.body).toMatchObject({ state: "failed", errorCode: "CHZ_CODES_OVERDELIVERED" });
+
+    // The retry must both reopen the order and hand it back to the durable
+    // queue -- until Task 10 that second half was a no-op placeholder, so a
+    // retried order sat in `created` with nothing to advance it.
+    const enqueue = vi.spyOn(jobs, "enqueueChzKmOrder").mockResolvedValue("job-id");
+    try {
+      const retried = await agent.post(`/chz-km-orders/${orderId}/retry`).expect(200);
+      expect(retried.body).toMatchObject({
+        id: orderId,
+        state: "created",
+        errorCode: null,
+        omsOrderId: null,
+        fetchedCount: 0,
+      });
+      expect(enqueue).toHaveBeenCalledWith(tenantId, orderId);
+    } finally {
+      enqueue.mockRestore();
+    }
   });
 });
