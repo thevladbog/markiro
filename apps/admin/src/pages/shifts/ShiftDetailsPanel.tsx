@@ -245,15 +245,25 @@ function ShiftPallets({ shift }: { shift: ShiftDto }) {
       wrap: true,
       // Two independent facts, both non-colour-only: a pallet can have been
       // taken apart AND have lost a box before that.
+      //
+      // `wrap` on the badges themselves, not just on the column: a badge is
+      // nowrap by default, so «Состав изменился после закрытия» made this
+      // column's min-content the whole string (235px). The table then could
+      // not fit in the 720px "complex" panel, so it clipped the pill mid-word
+      // and squeezed «Закрыта» until the date broke inside the number.
       render: (row) => (
-        <>
+        <div className="mk-shift-details__pallet-status">
           {row.disassembledAt ? (
-            <Badge tone="neutral">{t("pages.shifts.pallets.disassembled")}</Badge>
+            <Badge tone="neutral" wrap>
+              {t("pages.shifts.pallets.disassembled")}
+            </Badge>
           ) : null}
           {row.contentsChangedAfterClose ? (
-            <Badge tone="warn">{t("pages.shifts.pallets.contentsChangedAfterClose")}</Badge>
+            <Badge tone="warn" wrap>
+              {t("pages.shifts.pallets.contentsChangedAfterClose")}
+            </Badge>
           ) : null}
-        </>
+        </div>
       ),
     },
   ];

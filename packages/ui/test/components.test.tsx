@@ -1291,6 +1291,43 @@ describe("Badge", () => {
     const badge = screen.getByText("12");
     expect(badge.className).toContain("mk-badge--neutral");
   });
+
+  /**
+   * The default has to stay nowrap: a one-word status pill split across two
+   * lines is worse than a wide one, and every existing call site relies on it.
+   */
+  it("keeps a short pill on one line at a fixed height by default", () => {
+    render(<Badge>Разобрана</Badge>);
+    const badge = screen.getByText("Разобрана");
+    expect(badge.style.whiteSpace).toBe("nowrap");
+    expect(badge.style.height).toBe("16px");
+    expect(badge.className).not.toContain("mk-badge--wrap");
+  });
+
+  /**
+   * `wrap` exists for a long label in a narrow column: nowrap makes the badge
+   * contribute its whole string to the column's min-content width, which
+   * overflowed the shift panel's pallet table and clipped the pill mid-word.
+   * Releasing the fixed height with it is part of the same contract -- a
+   * two-line pill inside a 16px box spills over its own background.
+   */
+  it("lets a long label wrap and grow past one line when asked", () => {
+    render(<Badge wrap>Состав изменился после закрытия</Badge>);
+    const badge = screen.getByText("Состав изменился после закрытия");
+    expect(badge.style.whiteSpace).toBe("normal");
+    expect(badge.style.height).toBe("auto");
+    expect(badge.style.minHeight).toBe("16px");
+    expect(badge.className).toContain("mk-badge--wrap");
+  });
+
+  it("still lets a caller override the wrapping through style", () => {
+    render(
+      <Badge wrap style={{ whiteSpace: "nowrap" }}>
+        Состав изменился после закрытия
+      </Badge>,
+    );
+    expect(screen.getByText("Состав изменился после закрытия").style.whiteSpace).toBe("nowrap");
+  });
 });
 
 describe("Table", () => {

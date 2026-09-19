@@ -188,6 +188,52 @@ describe("shift panel pallet table", () => {
     expect(await within(section).findByText("Состав изменился после закрытия")).toBeDefined();
   });
 
+  /**
+   * Layout regression guard. «Состав изменился после закрытия» is 31 characters
+   * of mono type; as a nowrap badge it made the status column's min-content the
+   * whole string, which pushed the table to 731px inside the 669px-wide
+   * "complex" side panel -- the pill was clipped mid-word at the panel edge and
+   * the squeezed «Закрыта» column broke «30.08.2026, 14:20» inside the year.
+   * Both badges must be able to wrap, and they must stack rather than sit as
+   * two adjacent inline pills: adjacent inline pills offer no break opportunity
+   * between them and would re-create the same min-content sum.
+   */
+  it("wraps and stacks the status badges so they cannot overflow the panel", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        routeShiftPanelFetch({
+          pallets: () =>
+            jsonResponse(200, {
+              items: [
+                {
+                  ...PALLET,
+                  contentsChangedAfterClose: true,
+                  disassembledAt: "2026-09-12T08:00:00.000Z",
+                },
+              ],
+            }),
+        }),
+      ),
+    );
+    renderShiftPanel();
+
+    const section = within(await screen.findByRole("region", { name: "Паллеты" }));
+    const changed = await section.findByText("Состав изменился после закрытия");
+    const disassembled = section.getByText("Разобрана");
+
+    for (const badge of [changed, disassembled]) {
+      expect(badge.className).toContain("mk-badge--wrap");
+      expect(badge.style.whiteSpace).toBe("normal");
+      expect(badge.style.height).toBe("auto");
+    }
+    // Both facts are independent, so both pills show at once -- stacked in one
+    // container rather than glued side by side.
+    const stack = changed.closest(".mk-shift-details__pallet-status");
+    expect(stack).not.toBeNull();
+    expect(disassembled.closest(".mk-shift-details__pallet-status")).toBe(stack);
+  });
+
   it("does not query or show pallets for a shift that never used them", async () => {
     const fetchMock = vi.fn(routeShiftPanelFetch({}));
     vi.stubGlobal("fetch", fetchMock);

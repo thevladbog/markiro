@@ -24,8 +24,9 @@ const LEGACY_WORDMARK_RELEASES: ReadonlySet<string> = new Set([
   "MKR-INS-05/2026.09/01",
   "MKR-INS-06/2026.09/01",
   "MKR-INS-07/2026.08/03",
-  "MKR-INS-08/2026.09/01",
-  "MKR-INS-09/2026.09/03",
+  // MKR-INS-08 and MKR-INS-09 left this list with the pallet reissue
+  // (2026.09/02 and 2026.09/04): their revisions moved, so they pick up the
+  // centred header here rather than keeping the header they were issued with.
   "MKR-INS-10/2026.09/01",
   "MKR-INS-11/2026.09/01",
   "MKR-PD-01/2026.08/01",
