@@ -78,7 +78,9 @@ describe("legal document registry", () => {
       // grew from five formats to ten.
       "MKR-INS-08": "2026.09/02",
       "MKR-INS-09": "2026.09/04",
-      "MKR-INS-10": "2026.09/01",
+      // 2026-09-19: the product card gained a readiness model and category
+      // attributes, so the catalog card instruction was reissued.
+      "MKR-INS-10": "2026.09/02",
       "MKR-INS-11": "2026.09/01",
     };
     expect(
@@ -111,7 +113,7 @@ describe("legal document registry", () => {
     expect(findLegalRelease("MKR-INS-07").effectiveDate).toBe("2026-09-01");
     expect(findLegalRelease("MKR-INS-08").effectiveDate).toBe("2026-09-19");
     expect(findLegalRelease("MKR-INS-09").effectiveDate).toBe("2026-09-19");
-    expect(findLegalRelease("MKR-INS-10").effectiveDate).toBe("2026-09-10");
+    expect(findLegalRelease("MKR-INS-10").effectiveDate).toBe("2026-09-19");
     expect(findLegalRelease("MKR-INS-11").effectiveDate).toBe("2026-09-11");
     expect(new Set(LEGAL_RELEASES.flatMap(({ routes }) => Object.values(routes))).size).toBe(30);
     expect(findLegalRelease("MKR-PD-02")).toBe(LEGAL_RELEASES[1]);
