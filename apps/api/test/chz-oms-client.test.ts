@@ -152,7 +152,11 @@ describe("OmsClient", () => {
         );
       }),
     );
-    const result = await client.listBlocks(auth, "b024ae09-ef7c-449e-b461-05d8eb116c79", "04606038003172");
+    const result = await client.listBlocks(
+      auth,
+      "b024ae09-ef7c-449e-b461-05d8eb116c79",
+      "04606038003172",
+    );
     expect(result).toEqual({
       status: "ok",
       value: [

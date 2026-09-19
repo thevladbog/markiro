@@ -421,7 +421,10 @@ export class SignerTasksService {
         // The signature is the deliverable a later job (the order runner)
         // reads back from this row -- storing it here is the point of the
         // task, unlike the journal message below, which must never carry it.
-        resultSummary: { signatureBase64: body.signatureBase64, certThumbprint: body.certThumbprint },
+        resultSummary: {
+          signatureBase64: body.signatureBase64,
+          certThumbprint: body.certThumbprint,
+        },
       })
       .where(
         and(eq(schema.chzSignerTasks.tenantId, tenantId), eq(schema.chzSignerTasks.id, taskId)),
