@@ -5,7 +5,7 @@ import {
   PALLET_STATUS_TO_PHASE,
   PALLET_KIND_TO_TONE,
 } from "../src/pages/code-search/PalletCard.js";
-import { CODE_STATUS_TO_PHASE } from "../src/pages/code-search/CodeCard.js";
+import { CHZ_STATUS_TO_PHASE, CODE_STATUS_TO_PHASE } from "../src/pages/code-search/CodeCard.js";
 
 describe("семантика тегов поиска по коду", () => {
   /**
@@ -39,5 +39,28 @@ describe("семантика тегов поиска по коду", () => {
     expect(CODE_STATUS_TO_PHASE.free).toBe("active");
     expect(CODE_STATUS_TO_PHASE.aggregated).toBe("done");
     expect(CODE_STATUS_TO_PHASE.written_off).toBe("retired");
+  });
+
+  /**
+   * До ветки шесть статусов Честного знака различались цветом; плоский
+   * `Badge tone="steel"` стёр различие. Три способа выбытия из оборота
+   * делят фазу retired, а эмиссия, нанесение и ввод в оборот -- три разных
+   * этапа жизни кода -- обязаны остаться различимы.
+   */
+  it("даёт трём статусам выбытия из оборота одну фазу Честного знака", () => {
+    expect(CHZ_STATUS_TO_PHASE.get("RETIRED")).toBe("retired");
+    expect(CHZ_STATUS_TO_PHASE.get("WRITTEN_OFF")).toBe("retired");
+    expect(CHZ_STATUS_TO_PHASE.get("WITHDRAWN")).toBe("retired");
+  });
+
+  it("различает эмиссию, нанесение и ввод в оборот тремя разными фазами", () => {
+    const emitted = CHZ_STATUS_TO_PHASE.get("EMITTED");
+    const applied = CHZ_STATUS_TO_PHASE.get("APPLIED");
+    const introduced = CHZ_STATUS_TO_PHASE.get("INTRODUCED");
+
+    expect(emitted).toBe("planned");
+    expect(applied).toBe("running");
+    expect(introduced).toBe("active");
+    expect(new Set([emitted, applied, introduced]).size).toBe(3);
   });
 });

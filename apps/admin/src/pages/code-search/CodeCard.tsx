@@ -12,7 +12,7 @@ import { useTranslation } from "react-i18next";
 import { Link, useParams } from "react-router";
 
 import { formatSsccHri } from "@markiro/domain";
-import { Alert, Badge, Card, PageHeader, Spinner, StatusChip } from "@markiro/ui";
+import { Alert, Card, PageHeader, Spinner, StatusChip } from "@markiro/ui";
 import type { TagPhase } from "@markiro/ui";
 
 import { formatCreatedAt, formatDate } from "../../lib/datetime.js";
@@ -27,6 +27,20 @@ export const CODE_STATUS_TO_PHASE: Record<CodeStatus, TagPhase> = {
   aggregated: "done",
   written_off: "retired",
 };
+
+// Chestny Znak states are independent of local aggregation: a code can be
+// emitted and applied before the station has ever seen it. Its own lifecycle
+// -- emitted -> applied -> introduced into circulation -> retired/written
+// off/withdrawn -- gets the phase treatment too, not a flat category tone.
+// Unknown states stay without a phase (`none`).
+export const CHZ_STATUS_TO_PHASE = new Map<string, TagPhase>([
+  ["EMITTED", "planned"],
+  ["APPLIED", "running"],
+  ["INTRODUCED", "active"],
+  ["RETIRED", "retired"],
+  ["WRITTEN_OFF", "retired"],
+  ["WITHDRAWN", "retired"],
+]);
 
 function DetailField({ label, value }: { label: string; value: ReactNode }) {
   return (
@@ -170,11 +184,14 @@ export function CodeCardPage() {
             <DetailField
               label={t("pages.codeSearch.chzStatusLabel")}
               value={
-                <Badge tone="steel">
-                  {i18n.exists(`pages.inventory.chz.${card.chzStatus}`)
-                    ? t(`pages.inventory.chz.${card.chzStatus}`)
-                    : card.chzStatus}
-                </Badge>
+                <StatusChip
+                  phase={CHZ_STATUS_TO_PHASE.get(card.chzStatus) ?? "none"}
+                  label={
+                    i18n.exists(`pages.inventory.chz.${card.chzStatus}`)
+                      ? t(`pages.inventory.chz.${card.chzStatus}`)
+                      : card.chzStatus
+                  }
+                />
               }
             />
           )}

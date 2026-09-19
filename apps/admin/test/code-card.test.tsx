@@ -105,28 +105,27 @@ afterEach(() => {
 });
 
 describe("CodeCardPage", () => {
-  // CHZ status is a category tag, not a lifecycle phase -- it never carried
-  // a glyph even before this rewrite (`glyph={null}`). It renders as a flat
-  // `Badge tone="steel"` regardless of which CHZ status it names, so the
-  // check is the tag KIND (a badge, not a phase chip), not a per-status tone.
+  // CHZ status is the code's national lifecycle (emitted -> applied ->
+  // introduced -> retired/written off/withdrawn), so it gets a phase chip
+  // like any other lifecycle status -- not a flat category badge. The three
+  // ways to leave circulation share the `retired` phase; an unknown status
+  // (not one of the six CHZ states) falls back to `none`.
   it.each([
-    ["INTRODUCED", "В обороте"],
-    ["EMITTED", "Эмитирован"],
-    ["APPLIED", "Нанесён"],
-    ["RETIRED", "Выбыл"],
-    ["WRITTEN_OFF", "Списан"],
-    ["WITHDRAWN", "WITHDRAWN"],
-    ["DISAGGREGATION", "Расформирован"],
-    ["FUTURE_STATUS", "FUTURE_STATUS"],
+    ["INTRODUCED", "В обороте", "active"],
+    ["EMITTED", "Эмитирован", "planned"],
+    ["APPLIED", "Нанесён", "running"],
+    ["RETIRED", "Выбыл", "retired"],
+    ["WRITTEN_OFF", "Списан", "retired"],
+    ["WITHDRAWN", "WITHDRAWN", "retired"],
+    ["DISAGGREGATION", "Расформирован", "none"],
+    ["FUTURE_STATUS", "FUTURE_STATUS", "none"],
   ])(
-    "shows CHZ status %s as a category tag independently from the local status",
-    async (status, label) => {
+    "shows CHZ status %s as a %s-phase tag independently from the local status",
+    async (status, label, phase) => {
       stubFetch(status);
       renderPage();
       expect(await screen.findByText("Статус в ЧЗ")).toBeTruthy();
-      expect(
-        screen.getByText(label).closest(".mk-badge")?.classList.contains("mk-badge--steel"),
-      ).toBe(true);
+      expect(screen.getByText(label).closest(".mk-chip")?.className).toContain(`mk-chip--${phase}`);
       expect(screen.getByText("В коробе")).toBeTruthy();
     },
   );
