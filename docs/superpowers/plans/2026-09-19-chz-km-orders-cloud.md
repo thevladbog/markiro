@@ -641,7 +641,7 @@ describe.skipIf(!databaseUrl)("chz km orders migration", () => {
         productId,
         gtin14: "04607034690014",
         productGroupAlias: "beer",
-        productGroupCode: 12,
+        productGroupCode: 15,
         templateId: 18,
         quantity: 10,
         requestBody: "{}",
@@ -662,7 +662,7 @@ describe.skipIf(!databaseUrl)("chz km orders migration", () => {
         productId,
         gtin14: "04607034690014",
         productGroupAlias: "beer",
-        productGroupCode: 12,
+        productGroupCode: 15,
         templateId: 18,
         quantity: 10,
         requestBody: "{}",
@@ -1870,7 +1870,7 @@ it("refuses an order until СУЗ settings, an agent and a token exist", async (
   const tenantId = await signUpAndActivate(agent);
   const productId = await seedProduct(tenantId, {
     gtin14: "04607034690014",
-    chzProductGroupCode: 12,
+    chzProductGroupCode: 15,
   });
   const res = await agent.post("/chz-km-orders").send({ productId, quantity: 10 }).expect(422);
   expect(res.body).toMatchObject({
@@ -1938,7 +1938,7 @@ it("refuses retry unless the order failed", async () => {
 });
 ```
 
-`readyTenant()` inserts the `chestny_znak` channel settings (`environment: "sandbox"`, `omsId`, `omsConnection`), pairs an agent through `/signer-agents/pairing-code` + `/signer-agent/pair`, inserts a `chz_oms_tokens` row with `crypto.encrypt(tenantId, "tok")` and `expiresAt` one hour ahead, and seeds a product with `gtin14`, `chzProductGroupCode: 12` (beer), `status: "active"`.
+`readyTenant()` inserts the `chestny_znak` channel settings (`environment: "sandbox"`, `omsId`, `omsConnection`), pairs an agent through `/signer-agents/pairing-code` + `/signer-agent/pair`, inserts a `chz_oms_tokens` row with `crypto.encrypt(tenantId, "tok")` and `expiresAt` one hour ahead, and seeds a product with `gtin14`, `chzProductGroupCode: 15` (beer — the alias `beer` carries code 15 in `chz_product_groups`; 12 is `otp`), `status: "active"`.
 
 - [ ] **Step 2: Run test to verify it fails**
 
