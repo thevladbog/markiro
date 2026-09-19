@@ -58,6 +58,15 @@ const BOX_CARD = {
       displacedAt: null,
       removedAt: "2026-08-20T08:40:00.000Z",
     },
+    {
+      codeHash: "c".repeat(64),
+      gtin14: "04630000000001",
+      serial: "SN0003",
+      rawKm: null,
+      addedAt: "2026-08-20T08:07:00.000Z",
+      displacedAt: "2026-08-20T08:41:00.000Z",
+      removedAt: null,
+    },
   ],
   exceptions: [
     {
@@ -141,25 +150,37 @@ describe("BoxCardPage", () => {
     expect(screen.queryByText(BOX_CARD.shiftId)).toBeNull();
   });
 
-  it("renders 2 items with the removed row badged, and the disassemble exception with its DSG number", async () => {
+  it("renders 3 items with the removed and displaced rows tagged, and the disassemble exception with its DSG number", async () => {
     stubFetch();
     renderPage();
 
     expect(await screen.findByText("Молоко 1л")).toBeTruthy();
 
-    // Both code rows render, linking to their code cards. The first row has
-    // the full stored KM, so it shows the crypto tail with the GS control
-    // char made visible; the second (no rawKm) falls back to `01…21…`.
+    // All three code rows render, linking to their code cards. The first row
+    // has the full stored KM, so it shows the crypto tail with the GS
+    // control char made visible; the others (no rawKm) fall back to `01…21…`.
     const codeLink1 = screen.getByRole("link", { name: "010463000000000121SN0001␝93dGVz" });
     expect(codeLink1.getAttribute("href")).toBe(`/codes/km/${BOX_CARD.items[0]!.codeHash}`);
     const codeLink2 = screen.getByRole("link", { name: "010463000000000121SN0002" });
     expect(codeLink2.getAttribute("href")).toBe(`/codes/km/${BOX_CARD.items[1]!.codeHash}`);
+    const codeLink3 = screen.getByRole("link", { name: "010463000000000121SN0003" });
+    expect(codeLink3.getAttribute("href")).toBe(`/codes/km/${BOX_CARD.items[2]!.codeHash}`);
 
-    // The removed row is badged, and it must carry the terminal-negative
-    // `failed` phase, not just the label text.
+    // Finding 2 (final review): a box removal is a routine, human-initiated
+    // fact, not a system rejection -- the removed row must carry the same
+    // `dismantled` phase as the box's own disassembled status and
+    // disaggregation's `already_disassembled`, not the red `failed`.
     const removedTag = screen.getByText("Убран").closest(".mk-chip");
     expect(removedTag).not.toBeNull();
-    expect(removedTag?.className).toContain("mk-chip--failed");
+    expect(removedTag?.className).toContain("mk-chip--dismantled");
+    expect(removedTag?.querySelector(".mk-tag__glyph")?.textContent).toBe("⊘");
+
+    // A displaced code moved on to another box normally -- it is not stuck
+    // waiting for an intervention, so it carries `done`, not `attention`.
+    const displacedTag = screen.getByText("Перемещён").closest(".mk-chip");
+    expect(displacedTag).not.toBeNull();
+    expect(displacedTag?.className).toContain("mk-chip--done");
+    expect(displacedTag?.querySelector(".mk-tag__glyph")?.textContent).toBe("✓");
 
     // The disassemble exception shows its document number, linked.
     const docLink = screen.getByRole("link", { name: "DSG-26-0001" });

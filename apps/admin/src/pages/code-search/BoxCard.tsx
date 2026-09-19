@@ -60,6 +60,22 @@ function itemState(item: BoxCardItemDto): "active" | "displaced" | "removed" {
   return "active";
 }
 
+// `displaced` and `removed` are both routine, human/system-reconciliation
+// facts about this box's history, not system failures -- neither belongs
+// under `failed` or `attention`. `displaced` records that a code the station
+// once scanned into this box was later reconciled onto another box
+// (`station-scans.service.ts`'s displacement write, `apps/api/.../
+// station-scans/station-scans.service.ts`); the code is not lost, its story
+// in *this* box simply concluded normally, so it reads as `done` -- the same
+// "finished, no problem" phase as a closed box. `removed` is written by both
+// the per-code exception-removal path and whole-box release
+// (`emptyBox`/`releaseCode`) that a disassembly triggers, the same terminal
+// "taken apart, not present here anymore" fact as
+// `BOX_STATUS_TO_PHASE.disassembled` above and
+// `LINE_STATUS_TO_PHASE.already_disassembled`
+// (`../disaggregation/DocumentDetail.tsx`), so it shares their `dismantled`
+// phase rather than the red, system-rejection `failed`.
+
 export function BoxCardPage() {
   const { t, i18n } = useTranslation();
   const { boxId } = useParams();
@@ -123,10 +139,10 @@ export function BoxCardPage() {
       render: (row) => {
         const state = itemState(row);
         if (state === "displaced") {
-          return <StatusChip phase="attention" label={t("pages.codeSearch.boxCard.displaced")} />;
+          return <StatusChip phase="done" label={t("pages.codeSearch.boxCard.displaced")} />;
         }
         if (state === "removed") {
-          return <StatusChip phase="failed" label={t("pages.codeSearch.boxCard.removed")} />;
+          return <StatusChip phase="dismantled" label={t("pages.codeSearch.boxCard.removed")} />;
         }
         return null;
       },
