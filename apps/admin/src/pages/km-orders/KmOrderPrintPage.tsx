@@ -188,8 +188,11 @@ function PrintSheet({
       // unannounced.
       if (ctx === null) return null;
       try {
-        // `draw` clears and repaints the whole label area first, so nothing
-        // of label N survives into label N+1 on the shared canvas.
+        // `draw` clears the label area at its own unrounded size, which can
+        // fall up to a pixel short of the rounded canvas -- and on a canvas
+        // reused from label to label that uncleared strip would carry label N
+        // into label N+1. Clear the real bitmap first.
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
         draw(spec, ctx, SCALE, data, KM_RENDER_OPTIONS);
         await compositeRasterText(spec, ctx, SCALE, data, {
           fontFamily: PREVIEW_FONT_FAMILY,
@@ -373,6 +376,11 @@ function PrintSheet({
           <Button
             type="button"
             variant="secondary"
+            // Disabled until the batch is painted: clicking mid-rasterization
+            // would print label one straight away and then let the automatic
+            // dialog reopen minutes later over the full sheet, which is the
+            // opposite of what a calibration run wants.
+            disabled={!allReady}
             onClick={() => {
               setFirstOnly(true);
             }}
