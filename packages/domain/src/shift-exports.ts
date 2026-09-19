@@ -85,6 +85,8 @@ export interface ShiftExportPart {
   physicalLineCount: number;
   codeCount: number;
   boxCount: number;
+  /** Closed pallets this part covers; 0 outside the pallet formats. */
+  palletCount: number;
   filename: string;
   mimeType: ShiftExportFormatDescriptor["mimeType"];
   bytes: Uint8Array;
@@ -239,6 +241,8 @@ interface ShiftExportBlock {
   physicalLineCount: number;
   codeCount: number;
   boxCount: number;
+  /** 1 for a pallet-group block, absent (0) for a box or a loose line. */
+  palletCount?: number;
 }
 
 interface ShiftExportPartBlocks {
@@ -302,6 +306,9 @@ export function renderShiftExport(input: RenderShiftExportInput): ShiftExportPar
     const boxCount =
       (countFromBlocks ? undefined : xmlRendered?.boxCount) ??
       part.blocks.reduce((total, block) => total + block.boxCount, 0);
+    // A pallet group never splits across parts, so the part's pallet count
+    // is simply how many such blocks it holds.
+    const palletCount = part.blocks.reduce((total, block) => total + (block.palletCount ?? 0), 0);
     const body = xmlRendered?.bytes ?? encodePart(descriptor, part.blocks);
 
     return {
@@ -309,12 +316,14 @@ export function renderShiftExport(input: RenderShiftExportInput): ShiftExportPar
       physicalLineCount: xmlRendered?.physicalLineCount ?? part.physicalLineCount,
       codeCount,
       boxCount,
+      palletCount,
       filename: createFilename({
         descriptor,
         productName,
         shiftDate: input.shiftDate,
         codeCount,
         boxCount,
+        palletCount,
         partNumber,
         hasMultipleParts,
       }),
@@ -431,6 +440,7 @@ function buildPalletBoxesBlock(
       xmlBoxes: [],
       xmlPallet,
       isPalletGroup: true,
+      palletCount: 1,
       physicalLineCount: gismtAggregationPalletLineCount(xmlPallet),
       codeCount,
       boxCount,
@@ -442,7 +452,14 @@ function buildPalletBoxesBlock(
     ...pallet.boxes.map((box) => formatBoxSscc(box.sscc)),
     "",
   ];
-  return { lines, isPalletGroup: true, physicalLineCount: lines.length, codeCount, boxCount };
+  return {
+    lines,
+    isPalletGroup: true,
+    palletCount: 1,
+    physicalLineCount: lines.length,
+    codeCount,
+    boxCount,
+  };
 }
 
 /**
@@ -473,6 +490,7 @@ function buildPalletGroupBlock(
       xmlBoxes: boxBlocks.map(requireXmlBox),
       xmlPallet,
       isPalletGroup: true,
+      palletCount: 1,
       physicalLineCount: physicalLineCountOfBoxes + gismtAggregationPalletLineCount(xmlPallet),
       codeCount,
       boxCount,
@@ -483,6 +501,7 @@ function buildPalletGroupBlock(
     return {
       lines: [formatBoxSscc(pallet.sscc), ...boxBlocks.flatMap((block) => block.lines ?? [])],
       isPalletGroup: true,
+      palletCount: 1,
       physicalLineCount: 1 + physicalLineCountOfBoxes,
       codeCount,
       boxCount,
@@ -492,6 +511,7 @@ function buildPalletGroupBlock(
   return {
     csvRows: boxBlocks.flatMap((block) => block.csvRows ?? []),
     isPalletGroup: true,
+    palletCount: 1,
     physicalLineCount: physicalLineCountOfBoxes,
     codeCount,
     boxCount,
@@ -612,13 +632,20 @@ function createFilename(input: {
   shiftDate: string;
   codeCount: number;
   boxCount: number;
+  palletCount: number;
   partNumber: number;
   hasMultipleParts: boolean;
 }): string {
   const boxCountSegment = input.descriptor.boxMode === "flat" ? "" : `_${input.boxCount}box`;
+  // Only the pallet formats name pallets: a boxes-only file must keep the
+  // name it has always had.
+  const palletCountSegment =
+    shiftExportSourceModeFor(input.descriptor.boxMode) === "pallets"
+      ? `_${input.palletCount}pallet`
+      : "";
   const partSegment = input.hasMultipleParts ? `_часть_${input.partNumber}` : "";
 
-  return `${input.productName}_${input.codeCount}pcs${boxCountSegment}_${input.shiftDate}${partSegment}.${input.descriptor.extension}`;
+  return `${input.productName}_${input.codeCount}pcs${boxCountSegment}${palletCountSegment}_${input.shiftDate}${partSegment}.${input.descriptor.extension}`;
 }
 
 function formatBoxSscc(sscc: string): string {

@@ -40,6 +40,8 @@ export const shiftExports = pgTable(
     shiftDateSnapshot: date("shift_date_snapshot"),
     totalCodeCount: integer("total_code_count"),
     totalBoxCount: integer("total_box_count"),
+    /** Closed pallets the export covers; null until ready, 0 outside the pallet formats. */
+    totalPalletCount: integer("total_pallet_count"),
     createdByUserId: text("created_by_user_id")
       .notNull()
       .references(() => user.id),
@@ -92,6 +94,10 @@ export const shiftExports = pgTable(
       "shift_exports_total_box_count_nonnegative",
       sql`${table.totalBoxCount} is null or ${table.totalBoxCount} >= 0`,
     ),
+    check(
+      "shift_exports_total_pallet_count_nonnegative",
+      sql`${table.totalPalletCount} is null or ${table.totalPalletCount} >= 0`,
+    ),
     check("shift_exports_attempt_count_nonnegative", sql`${table.attemptCount} >= 0`),
     check(
       "shift_exports_target_shape",
@@ -118,6 +124,8 @@ export const shiftExportArtifacts = pgTable(
     physicalLineCount: integer("physical_line_count").notNull(),
     codeCount: integer("code_count").notNull(),
     boxCount: integer("box_count").notNull(),
+    /** Closed pallets this part covers; 0 outside the pallet formats. */
+    palletCount: integer("pallet_count").notNull().default(0),
     filename: text("filename").notNull(),
     mimeType: text("mime_type").notNull(),
     byteSize: bigint("byte_size", { mode: "number" }).notNull(),
@@ -149,6 +157,7 @@ export const shiftExportArtifacts = pgTable(
     // because this table does not know its export's target.
     check("shift_export_artifacts_code_count_nonnegative", sql`${table.codeCount} >= 0`),
     check("shift_export_artifacts_box_count_nonnegative", sql`${table.boxCount} >= 0`),
+    check("shift_export_artifacts_pallet_count_nonnegative", sql`${table.palletCount} >= 0`),
     check("shift_export_artifacts_byte_size_positive", sql`${table.byteSize} > 0`),
     check("shift_export_artifacts_sha256_check", sql`${table.sha256} ~ '^[0-9a-f]{64}$'`),
   ],

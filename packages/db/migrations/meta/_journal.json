@@ -1163,6 +1163,13 @@
       "when": 1789758354825,
       "tag": "0165_pallet_membership_removal_quarantine",
       "breakpoints": true
+    },
+    {
+      "idx": 166,
+      "version": "7",
+      "when": 1789837824173,
+      "tag": "0166_shift_export_pallet_counts",
+      "breakpoints": true
     }
   ]
 }

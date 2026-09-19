@@ -36,6 +36,7 @@ describe("pallet aggregation export", () => {
       partNumber: 1,
       codeCount: 0,
       boxCount: 2,
+      palletCount: 1,
       mimeType: "application/xml; charset=utf-8",
     });
     expect(part.filename).toBe("Cola_2026-09-17_паллета_00134600682000000017_2_коробов.xml");

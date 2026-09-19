@@ -544,6 +544,7 @@ function failedExport(errorCode: string) {
     shiftDateSnapshot: "2026-09-11",
     totalCodeCount: null,
     totalBoxCount: null,
+    totalPalletCount: null,
     createdByUserId: "u1",
     createdByName: "Иван Иванов",
     sourceSnapshotStartedAt: null,

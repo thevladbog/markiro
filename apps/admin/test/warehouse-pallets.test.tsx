@@ -308,6 +308,7 @@ const READY_EXPORT = {
   shiftDateSnapshot: "2026-09-17",
   totalCodeCount: 0,
   totalBoxCount: 2,
+  totalPalletCount: 1,
   createdByUserId: "u1",
   createdByName: "Елена Ким",
   sourceSnapshotStartedAt: "2026-09-17T10:05:00.000Z",

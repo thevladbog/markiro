@@ -277,6 +277,10 @@ export class ShiftExportRunnerService {
     const completedAt = new Date();
     const totalCodeCount = uploaded.reduce((total, artifact) => total + artifact.part.codeCount, 0);
     const totalBoxCount = uploaded.reduce((total, artifact) => total + artifact.part.boxCount, 0);
+    const totalPalletCount = uploaded.reduce(
+      (total, artifact) => total + artifact.part.palletCount,
+      0,
+    );
 
     await this.db.transaction(async (tx) => {
       await tx.insert(schema.shiftExportArtifacts).values(
@@ -287,6 +291,7 @@ export class ShiftExportRunnerService {
           physicalLineCount: part.physicalLineCount,
           codeCount: part.codeCount,
           boxCount: part.boxCount,
+          palletCount: part.palletCount,
           filename: part.filename,
           mimeType: part.mimeType,
           byteSize,
@@ -301,6 +306,7 @@ export class ShiftExportRunnerService {
           errorCode: null,
           totalCodeCount,
           totalBoxCount,
+          totalPalletCount,
           completedAt,
           updatedAt: completedAt,
         })
@@ -313,6 +319,7 @@ export class ShiftExportRunnerService {
         partCount: uploaded.length,
         totalCodeCount,
         totalBoxCount,
+        totalPalletCount,
         // Boxes rendered loose only because their pallet had not itself
         // closed yet -- 0 outside pallets mode. Surfaced here (rather than
         // left silent) so a factory does not mistake this export for having

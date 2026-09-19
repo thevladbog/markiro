@@ -89,6 +89,7 @@ export function renderPalletAggregationExport(
     // received no `boxes` of its own.
     codeCount: 0,
     boxCount,
+    palletCount: 1,
     filename: `${productName}_${input.closedDate}_паллета_00${input.pallet.sscc}_${boxCount}_коробов.${descriptor.extension}`,
     mimeType: descriptor.mimeType,
     bytes: rendered.bytes,

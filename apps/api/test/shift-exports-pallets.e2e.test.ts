@@ -242,7 +242,19 @@ describe.skipIf(!ready)("shift exports pallets e2e", () => {
       errorCode: null,
       totalCodeCount: 4,
       totalBoxCount: 3,
+      totalPalletCount: 1,
     });
+    // Owner report 2026-09-19: the part and its file name must say how many
+    // pallets the document covers, not only boxes.
+    const [artifact] = await db
+      .select({
+        palletCount: schema.shiftExportArtifacts.palletCount,
+        filename: schema.shiftExportArtifacts.filename,
+      })
+      .from(schema.shiftExportArtifacts)
+      .where(eq(schema.shiftExportArtifacts.exportId, exportId));
+    expect(artifact?.palletCount).toBe(1);
+    expect(artifact?.filename).toMatch(/_4pcs_3box_1pallet_\d{4}-\d{2}-\d{2}\.csv$/);
   });
 
   it("writes the pallet → boxes TXT with only SSCCs: the pallet, its boxes, no codes, no loose box", async () => {
@@ -278,6 +290,7 @@ describe.skipIf(!ready)("shift exports pallets e2e", () => {
       errorCode: null,
       totalCodeCount: 3,
       totalBoxCount: 2,
+      totalPalletCount: 1,
     });
     expect(row?.formatId).toBe("shift_txt_pallet_boxes");
   });

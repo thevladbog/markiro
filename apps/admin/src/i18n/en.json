@@ -2482,12 +2482,14 @@
           "format": "Format",
           "parameters": "Parameters",
           "codes": "Codes",
-          "boxes": "Boxes"
+          "boxes": "Boxes",
+          "pallets": "Pallets"
         },
         "counts": {
           "lines": "{{count}} lines",
           "codes": "{{count}} codes",
           "boxes": "{{count}} boxes",
+          "pallets": "{{count}} pallets",
           "bytes": "{{count}} B"
         },
         "validation": {
