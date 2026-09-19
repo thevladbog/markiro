@@ -13,7 +13,7 @@ import {
   StatusChip,
   Table,
 } from "@markiro/ui";
-import type { TableColumn } from "@markiro/ui";
+import type { TableColumn, TagPhase } from "@markiro/ui";
 import type { WorkingDevicePool } from "@markiro/platform-contracts";
 
 import { useCan } from "../../access/context.js";
@@ -51,6 +51,26 @@ function parseStatus(value: string | null): DeviceStatus | undefined {
 function parsePage(value: string | null): number {
   const number = Number(value);
   return Number.isInteger(number) && number > 0 ? number : 1;
+}
+
+/**
+ * `revoked` — отзыв устройства человеком, терминальное состояние без тревоги
+ * (`retired`), а не сбой системы (`failed`). `offline` — определённое
+ * состояние, требующее внимания (`attention`), а не отсутствие значения
+ * (`none`): страница считает `offline` наравне с `revoked` поводом для
+ * `attentionCount` выше по файлу, и тег обязан отражать ту же логику.
+ */
+export function deviceStatusPhase(status: DeviceStatus): TagPhase {
+  switch (status) {
+    case "online":
+      return "active";
+    case "revoked":
+      return "retired";
+    case "offline":
+      return "attention";
+    case "awaiting_pairing":
+      return "planned";
+  }
 }
 
 export function reservationCancelledOrUnknown(
@@ -159,15 +179,7 @@ export function DevicesPage() {
         title: t("pages.devices.table.status"),
         render: (row) => (
           <StatusChip
-            phase={
-              row.status === "online"
-                ? "active"
-                : row.status === "revoked"
-                  ? "failed"
-                  : row.status === "offline"
-                    ? "none"
-                    : "planned"
-            }
+            phase={deviceStatusPhase(row.status)}
             label={t(`pages.devices.status.${row.status}`)}
           />
         ),
