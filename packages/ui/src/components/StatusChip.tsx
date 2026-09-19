@@ -57,9 +57,9 @@ export const PHASE_GLYPH: Record<TagPhase, string> = Object.fromEntries(
   Object.entries(PHASE).map(([phase, config]) => [phase, config.glyph]),
 ) as Record<TagPhase, string>;
 
-export const PHASE_TONE: Record<TagPhase, string> = Object.fromEntries(
+export const PHASE_TONE: Record<TagPhase, PhaseTone> = Object.fromEntries(
   Object.entries(PHASE).map(([phase, config]) => [phase, config.tone]),
-) as Record<TagPhase, string>;
+) as Record<TagPhase, PhaseTone>;
 
 export interface StatusChipProps extends Omit<HTMLAttributes<HTMLSpanElement>, "children"> {
   phase: TagPhase;

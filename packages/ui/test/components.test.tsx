@@ -27,6 +27,12 @@ import {
   StatusChip,
   Table,
 } from "../src/components/index.js";
+// `PHASE_GLYPH`/`PHASE_TONE` are intentionally not exported from
+// `../src/components/index.js` -- a public tone lookup is the hole through
+// which apps would pick their own tone again. Import straight from the
+// module, as the invariant test below is meant to.
+import { PHASE_GLYPH, PHASE_TONE } from "../src/components/StatusChip.js";
+import type { TagPhase } from "../src/components/StatusChip.js";
 
 const sharedStyles = readFileSync("src/styles.css", "utf8") as string;
 const sharedStyleElement = document.createElement("style");
@@ -1380,9 +1386,15 @@ describe("Badge", () => {
     expect(getComputedStyle(badge).minHeight).toBe("22px");
   });
 
+  /**
+   * `toContain("mk-badge")` тривиально верен из-за соседнего класса
+   * `mk-badge--neutral` (дефолтный тон), который сам содержит "mk-badge" как
+   * подстроку -- пропажу голого `mk-badge` эта проверка не поймает. Точное
+   * членство в списке классов ловит именно это.
+   */
   it("сохраняет класс-зацепку mk-badge для накладок приложений", () => {
     render(<Badge>Разобрана</Badge>);
-    expect(screen.getByText("Разобрана").className).toContain("mk-badge");
+    expect(screen.getByText("Разобрана").classList.contains("mk-badge")).toBe(true);
   });
 
   it("всё ещё позволяет вызывающей стороне переопределить перенос через style", () => {
@@ -1497,5 +1509,34 @@ describe("Table", () => {
     render(<Table columns={[{ key: "batch", title: "Партия" }]} rows={[]} />);
 
     expect(screen.getByText("No data")).toBeDefined();
+  });
+});
+
+describe("инвариант словаря фаз", () => {
+  const PHASES = Object.keys(PHASE_GLYPH) as TagPhase[];
+
+  it("даёт каждой фазе непустой глиф", () => {
+    for (const phase of PHASES) {
+      expect(PHASE_GLYPH[phase].length).toBeGreaterThan(0);
+    }
+  });
+
+  /**
+   * Правило серого из спеки. Серый читается как «сущности больше нет»,
+   * поэтому фаза завершения серой быть не может — именно с этого начался
+   * разбор: закрытая смена выглядела как ненастроенный канал.
+   */
+  it("допускает серый только там, где значения действительно нет", () => {
+    const grey = PHASES.filter((phase) => PHASE_TONE[phase] === "neutral");
+
+    expect(new Set(grey)).toEqual(new Set(["draft", "retired", "dismantled", "none"]));
+  });
+
+  it("не оставляет ни одну фазу без тона из разрешённого набора", () => {
+    const allowed = new Set(["neutral", "ok", "done", "warn", "error", "info"]);
+
+    for (const phase of PHASES) {
+      expect(allowed.has(PHASE_TONE[phase])).toBe(true);
+    }
   });
 });
