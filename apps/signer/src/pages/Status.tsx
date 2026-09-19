@@ -13,9 +13,14 @@ import type { UpdateCheckResult } from "../lib/updates.js";
  * не привязан); `idle` — рабочее дежурное состояние агента (жив, ждёт задачу),
  * а не успех разовой операции, поэтому `active`, а не `done`; `degraded` уезжает
  * из `failed` в `attention` — деградация не равна недоступности, раньше они были
- * неразличимы (обе давали тон `error`).
+ * неразличимы (обе давали тон `error`). Задача 15: подпись `status.phase.degraded`
+ * до ревью читалась как «ошибка» — ровно определение `failed` в словаре фаз, и
+ * рядом с янтарным `!` стирала разницу с `unavailable` (у него подлинный
+ * `failed`). Подпись переписана на «работает с ограничениями» / «working with
+ * limitations» — агент продолжает опрашивать облако и подписывать, просто с
+ * ограничением, а не остановился.
  */
-const SIGNER_PHASE_TO_TAG_PHASE = {
+export const SIGNER_PHASE_TO_TAG_PHASE = {
   unpaired: "none",
   idle: "active",
   reconnecting: "attention",
