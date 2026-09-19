@@ -376,15 +376,19 @@ body,
   line-height: 26px !important;
 }
 
-/* Floor-size the alert badge separately: the generic 18px bump above made the
-   mono space inside two-word badges read as a double space. */
+/* Floor-size the alert badge separately: the generic 18px bump above would
+   otherwise apply to it too. Per the tag geometry spec
+   (docs/superpowers/specs/2026-09-19-tag-semantics-and-geometry-design.md),
+   `Badge` no longer defaults to IBM Plex Mono -- it renders `var(--font-ui)`
+   (sans) -- so the `word-spacing: -0.35ch` this rule used to carry to
+   compress Plex Mono's full-cell space is gone; on sans text it was pulling
+   out most of the word gap instead, running two-word labels like "НЕ УЧТЁН"
+   together. */
 #root .mk-alert .mk-badge {
   height: auto !important;
   padding: 2px 8px !important;
   font-size: 14px !important;
   line-height: 20px !important;
-  /* IBM Plex Mono's space is a full cell; pull word gaps back to sans-like width. */
-  word-spacing: -0.35ch;
 }
 
 .station-screen-slot {

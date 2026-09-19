@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -10,6 +12,11 @@ import {
   InventoryScanInstrument,
   type InventoryScanInstrumentLabels,
 } from "../src/ui/inventory/InventoryScanInstrument.js";
+
+const repositoryRoot = existsSync(resolve(process.cwd(), "apps/station/src/station.css"))
+  ? process.cwd()
+  : resolve(process.cwd(), "../..");
+const stationCss = readFileSync(resolve(repositoryRoot, "apps/station/src/station.css"), "utf8");
 
 afterEach(() => {
   cleanup();
@@ -104,5 +111,55 @@ describe("InventoryScanInstrument duplicate-verdict timestamp", () => {
     expect(detail).not.toContain("terminal-b");
     expect(detail).toContain(enTime);
     expect(detail).toMatch(/AM|PM/i);
+  });
+});
+
+describe("alert badge geometry (finding 6, final review)", () => {
+  const protectedResult: RecordInventoryScanResult = {
+    verdict: "protected",
+    scanKind: "item",
+    serialSuffix: "…0042",
+    ssccSuffix: null,
+    claimedCount: 0,
+    boxChildCount: 0,
+    firstWinning: null,
+  };
+
+  /**
+   * `#root .mk-alert .mk-badge` used to carry `word-spacing: -0.35ch` to
+   * compress `IBM Plex Mono`'s full-cell space. `Badge` now defaults to
+   * `var(--font-ui)` (sans), so that negative word-spacing would instead eat
+   * most of the gap between words in a two-word label like "НЕ УЧТЁН" --
+   * this is the exact scan-instrument badge the spec's geometry section
+   * calls out. The rule itself, not just the source text, must not carry
+   * `word-spacing` any more.
+   */
+  it("does not carry a word-spacing override on the alert badge rule", () => {
+    const rule = /#root \.mk-alert \.mk-badge\s*\{([^}]*)\}/.exec(stationCss)?.[1];
+    expect(rule).toBeDefined();
+    expect(rule).not.toContain("word-spacing");
+  });
+
+  it("renders the two-word protected badge without a compressed word gap", () => {
+    const stylesheet = document.createElement("style");
+    stylesheet.textContent = stationCss;
+    document.head.append(stylesheet);
+
+    render(
+      <div id="root">
+        <InventoryScanInstrument
+          result={protectedResult}
+          writeFailed={false}
+          currentDeviceId="terminal-a"
+          labels={labels}
+        />
+      </div>,
+    );
+
+    const badge = screen.getByText("НЕ УЧТЁН");
+    expect(badge.closest(".mk-alert")).not.toBeNull();
+    expect(getComputedStyle(badge).wordSpacing).not.toBe("-0.35ch");
+
+    stylesheet.remove();
   });
 });
