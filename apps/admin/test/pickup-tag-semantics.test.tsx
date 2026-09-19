@@ -27,4 +27,14 @@ describe("семантика тегов самовывоза", () => {
       expect(["violet", "teal", "magenta", "steel"]).toContain(tone);
     }
   });
+
+  /**
+   * Уникальность и членство в наборе выше не ловят перестановку: kiosk и
+   * handheld могли бы поменяться тонами местами и тест остался бы зелёным.
+   * Закрепляем точную пару.
+   */
+  it("закрепляет точную пару вид устройства -> тон", () => {
+    expect(DEVICE_KIND_TO_TONE.kiosk).toBe("violet");
+    expect(DEVICE_KIND_TO_TONE.handheld).toBe("teal");
+  });
 });

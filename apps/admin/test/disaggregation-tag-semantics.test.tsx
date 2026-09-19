@@ -33,4 +33,17 @@ describe("семантика тегов дезагрегации", () => {
     expect(LINE_STATUS_TO_PHASE.not_found).toBe("failed");
     expect(LINE_STATUS_TO_PHASE.written_off).toBe("retired");
   });
+
+  /**
+   * `LINE_STATUS_TO_PHASE` -- индексная сигнатура `Record<string, TagPhase>`,
+   * а не замкнутый союз, потому что строка документа может прийти с любым
+   * значением статуса от API. Единственный барьер, который ловит незнакомое
+   * значение, стоит в точке вызова: `LINE_STATUS_TO_PHASE[line.status] ??
+   * "none"`. Без этого теста опечатка в статусе тихо роняет тег в
+   * `undefined`, а не в безопасный `none`.
+   */
+  it("сворачивает незнакомый статус строки в фазу none на точке вызова", () => {
+    expect(LINE_STATUS_TO_PHASE["unknown_status_from_api"]).toBeUndefined();
+    expect(LINE_STATUS_TO_PHASE["unknown_status_from_api"] ?? "none").toBe("none");
+  });
 });

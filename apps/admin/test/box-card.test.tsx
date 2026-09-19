@@ -155,8 +155,11 @@ describe("BoxCardPage", () => {
     const codeLink2 = screen.getByRole("link", { name: "010463000000000121SN0002" });
     expect(codeLink2.getAttribute("href")).toBe(`/codes/km/${BOX_CARD.items[1]!.codeHash}`);
 
-    // The removed row is badged.
-    expect(screen.getByText("Убран")).toBeTruthy();
+    // The removed row is badged, and it must carry the terminal-negative
+    // `failed` phase, not just the label text.
+    const removedTag = screen.getByText("Убран").closest(".mk-chip");
+    expect(removedTag).not.toBeNull();
+    expect(removedTag?.className).toContain("mk-chip--failed");
 
     // The disassemble exception shows its document number, linked.
     const docLink = screen.getByRole("link", { name: "DSG-26-0001" });

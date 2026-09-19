@@ -42,6 +42,13 @@ describe("теги карточки смены", () => {
    * она попадала в ту же ветку, что и `planned`, и получала глиф ожидания.
    */
   it("отличает закрывающуюся смену от запланированной и от закрытой", () => {
+    const planned = render(
+      <ShiftCard {...base} number="СМ-100" status="planned" statusLabel="Запланирована" />,
+    );
+    expect(planned.container.querySelector(".shift-card__status .mk-tag__glyph")?.textContent).toBe(
+      "◷",
+    );
+
     const closing = render(
       <ShiftCard {...base} number="СМ-101" status="closing" statusLabel="Закрывается" />,
     );
@@ -64,6 +71,8 @@ describe("теги карточки смены", () => {
 
     const number = container.querySelector(".shift-card__number");
     expect(number?.className).toContain("mk-badge");
+    expect(number?.className).toContain("mk-tag--floor");
+    expect(number?.className).toContain("mk-tag--mono");
     expect(number?.querySelector(".mk-tag__glyph")).toBeNull();
   });
 });

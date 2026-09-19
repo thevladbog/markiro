@@ -35,6 +35,16 @@ describe("семантика тегов поиска по коду", () => {
     }
   });
 
+  /**
+   * Уникальность и членство в наборе выше не ловят перестановку: production
+   * и warehouse могли бы поменяться тонами местами и тест остался бы
+   * зелёным. Закрепляем точную пару.
+   */
+  it("закрепляет точную пару вид паллеты -> тон", () => {
+    expect(PALLET_KIND_TO_TONE.production).toBe("violet");
+    expect(PALLET_KIND_TO_TONE.warehouse).toBe("teal");
+  });
+
   it("раскладывает состояния кода по фазам", () => {
     expect(CODE_STATUS_TO_PHASE.free).toBe("active");
     expect(CODE_STATUS_TO_PHASE.aggregated).toBe("done");

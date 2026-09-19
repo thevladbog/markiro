@@ -48,13 +48,21 @@ describe("токены тегов", () => {
     expect(dark).not.toBe(light);
   });
 
-  it("держит тон done отдельно от ok и от neutral", () => {
-    const root = getComputedStyle(document.documentElement);
-    expect(root.getPropertyValue("--done-fg").trim()).not.toBe(
-      root.getPropertyValue("--ok-fg").trim(),
-    );
-    expect(root.getPropertyValue("--done-fg").trim()).not.toBe(
-      root.getPropertyValue("--fg-2").trim(),
-    );
-  });
+  /**
+   * Только светлая тема проверялась автоматически; тёмная сверялась вручную
+   * и могла молча разойтись со светлой при следующей правке токенов.
+   */
+  it.each(["light", "dark"] as const)(
+    "держит тон done отдельно от ok и от neutral в теме %s",
+    (theme) => {
+      document.documentElement.dataset.theme = theme === "light" ? "" : theme;
+      const root = getComputedStyle(document.documentElement);
+      expect(root.getPropertyValue("--done-fg").trim()).not.toBe(
+        root.getPropertyValue("--ok-fg").trim(),
+      );
+      expect(root.getPropertyValue("--done-fg").trim()).not.toBe(
+        root.getPropertyValue("--fg-2").trim(),
+      );
+    },
+  );
 });

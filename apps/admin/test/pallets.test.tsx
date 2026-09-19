@@ -1072,7 +1072,9 @@ describe("pallet card", () => {
     const row = boxes.getByRole("link", { name: "(00)123460682000000102" }).closest("tr");
     expect(row).not.toBeNull();
     // A word, not a colour: the pallet is short a box it can never recover.
-    expect(within(row!).getByText("Короб расформирован")).toBeDefined();
+    const disassembledTag = within(row!).getByText("Короб расформирован").closest(".mk-chip");
+    expect(disassembledTag).not.toBeNull();
+    expect(disassembledTag?.className).toContain("mk-chip--dismantled");
   });
 
   it("reports a pallet taken apart, with its exception reason", async () => {
