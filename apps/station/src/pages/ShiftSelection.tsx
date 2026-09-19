@@ -28,6 +28,8 @@ interface ShiftListItem {
   productName: string | null;
   /** Short operator-facing name from the catalog; null = use productName. */
   productPrintName?: string | null;
+  /** GTIN-14 of the product; seeds the card's fallback accent hue when there is no photo. */
+  gtin14?: string | null;
   plannedQty: number | null;
   plannedDate: string | null;
   productionDate?: string | null;
@@ -509,6 +511,8 @@ export function ShiftSelection({
                   key={shift.id}
                   number={shift.number ?? null}
                   productName={shift.productPrintName ?? shift.productName}
+                  productFullName={shift.productPrintName ? shift.productName : null}
+                  gtin={shift.gtin14 ?? null}
                   plannedDate={shift.plannedDate}
                   plannedDateLabel={t("shifts.shiftDateShort")}
                   productionDate={shift.productionDate ?? null}

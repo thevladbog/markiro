@@ -14,18 +14,20 @@ const base = {
 
 describe("теги карточки смены", () => {
   /**
-   * Цех читает карточку с расстояния. Офисные 22px здесь нечитаемы, поэтому
-   * размер задаётся пропом, а не накладкой в station.css: накладка была
-   * мертва, её перебивал инлайновый стиль компонента.
+   * Решение владельца 2026-09-20 (спека 2026-09-20-station-shift-card-redesign):
+   * только на этой карточке теги офисные. Цеховые 34px правы для вердикта,
+   * который читают с двух метров, а карточку смены читают с вытянутой руки при
+   * выборе, и теги там — метаданные, а не сообщение. Размер задаётся пропом,
+   * а не накладкой в station.css: накладку перебивает геометрия .mk-tag--*.
    */
-  it("берёт цеховой размер, а не офисный", () => {
+  it("берёт офисный размер, а не цеховой", () => {
     const { container } = render(
       <ShiftCard {...base} number="СМ-101" status="active" statusLabel="Активна" />,
     );
 
     const status = container.querySelector(".shift-card__status");
-    expect(status?.className).toContain("mk-tag--floor");
-    expect(status?.className).not.toContain("mk-tag--office");
+    expect(status?.className).toContain("mk-tag--office");
+    expect(status?.className).not.toContain("mk-tag--floor");
   });
 
   it("ставит фазу active, а не галочку завершения", () => {
@@ -71,7 +73,7 @@ describe("теги карточки смены", () => {
 
     const number = container.querySelector(".shift-card__number");
     expect(number?.className).toContain("mk-badge");
-    expect(number?.className).toContain("mk-tag--floor");
+    expect(number?.className).toContain("mk-tag--office");
     expect(number?.className).toContain("mk-tag--mono");
     expect(number?.querySelector(".mk-tag__glyph")).toBeNull();
   });

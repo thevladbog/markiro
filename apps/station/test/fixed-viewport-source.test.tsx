@@ -215,7 +215,7 @@ describe("fixed station viewport source contract", () => {
       /\.station-status-pill\[data-value-shown="false"\] dd\s*\{[^}]*display:\s*none;/s,
     );
     expect(css).toMatch(
-      /@media \(max-width: 1100px\)\s*\{[\s\S]*?\.shift-selection__grid\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);[^}]*\}[\s\S]*?\.shift-card__body\s*\{[^}]*grid-template-columns:\s*minmax\(150px, 36%\) minmax\(0, 1fr\);/s,
+      /@media \(max-width: 1100px\)\s*\{[\s\S]*?\.shift-selection__grid\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);[^}]*\}[\s\S]*?\.shift-card__body\s*\{[^}]*grid-template-columns:\s*minmax\(150px, 38%\) minmax\(0, 1fr\);/s,
     );
     expect(css).toMatch(
       /\.station-status-actions \.window-mode-control__action\s*\{[^}]*white-space:\s*normal;[^}]*overflow-wrap:\s*anywhere;/s,

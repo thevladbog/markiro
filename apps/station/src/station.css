@@ -2184,12 +2184,18 @@ body,
   display: grid;
   height: 100%;
   gap: var(--sp-3);
-  grid-template-columns: minmax(160px, 0.62fr) minmax(0, 1fr);
+  grid-template-columns: minmax(160px, 38%) minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
   overflow: hidden;
 }
 
+/*
+ * Строки: шапка · заголовок (единственная гибкая) · полное имя · даты ·
+ * режим · контрагент · кнопка. Полное имя и даты необязательны, поэтому
+ * кнопка закреплена за последней дорожкой явно (.shift-card__action):
+ * без этого она уезжала на 72px вверх, когда полного имени нет.
+ */
 .shift-card__details {
   display: grid;
   min-width: 0;
@@ -2197,7 +2203,7 @@ body,
   padding: var(--sp-2) var(--sp-2) var(--sp-1) 0;
   overflow: hidden;
   gap: var(--sp-1);
-  grid-template-rows: auto minmax(0, 1fr) auto auto 72px;
+  grid-template-rows: auto minmax(0, 1fr) auto auto auto auto 72px;
 }
 
 .shift-card__heading {
@@ -2206,6 +2212,38 @@ body,
   gap: var(--sp-2);
   align-items: center;
   justify-content: space-between;
+}
+
+/*
+ * Фото стоит на градиенте самого товара — тот же градиент, что у героя
+ * рабочего экрана, но насыщенность ниже на ~6 пунктов, чтобы две карточки
+ * рядом не кричали друг на друга. Каталожные снимки — прозрачный WebP, и
+ * светлая подложка с рамкой ставила бутылку в белый ящик на тёмном экране.
+ */
+.shift-card__photo {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--sp-3);
+  overflow: hidden;
+  border-radius: var(--r-2);
+  background: linear-gradient(305deg, #2c2b31, #1d1c21 55%, #141317);
+  place-items: center;
+}
+
+.shift-card__photo[data-accent="true"] {
+  background: linear-gradient(
+    305deg,
+    hsl(var(--product-hue) 40% 20%),
+    hsl(var(--product-hue) 36% 11%) 55%,
+    hsl(var(--product-hue) 32% 6%)
+  );
+}
+
+/* Замена фото, а не пустая рамка: монограмма на том же градиенте. */
+.shift-card__photo-monogram {
+  color: rgb(250 250 248 / 70%);
+  font: 700 clamp(40px, 5vw, 72px) / 1 var(--font-ui);
 }
 
 .product-image {
@@ -2230,23 +2268,18 @@ body,
   place-items: center;
 }
 
+/* Прозрачный WebP живёт прямо на градиенте: ни рамки, ни подложки. */
 .shift-card .product-image {
   width: 100%;
   height: 100%;
-  border: 1px solid var(--line);
-  background: var(--surface-panel);
+  border: 0;
+  background: none;
   object-fit: contain;
 }
 
-.shift-card__image-placeholder::before {
-  width: 44%;
-  aspect-ratio: 1;
-  border: 2px solid var(--line-strong);
-  border-radius: var(--r-2);
-  content: "";
-  background:
-    linear-gradient(135deg, transparent 48%, var(--line-strong) 49% 51%, transparent 52%),
-    radial-gradient(circle at 32% 30%, var(--line-strong) 0 8%, transparent 9%);
+/* Деградация фото до текста: имя товара читается на тёмном градиенте. */
+.shift-card .product-image--fallback {
+  color: rgb(250 250 248 / 70%);
 }
 
 /*
@@ -2288,64 +2321,53 @@ body,
   font: var(--floor-lg);
   letter-spacing: -0.015em;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 6;
+  -webkit-line-clamp: 3;
+}
+
+/* Полное каталожное имя — вторым голосом: не заголовок и не подпись тега. */
+.shift-card__product-full {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-3);
+  font: 400 13px/17px var(--font-ui);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 /* Short kiosk viewports (1366×768 and 1280×800): the compact overrides below
    only trigger on narrow widths, so tighten the title here by height instead —
-   otherwise the clamped 6-line title overflows its row or clips mid-line. */
+   otherwise the clamped title overflows its row or clips mid-line. */
 @media (max-height: 820px) {
   .shift-card__product {
     font: 600 20px/24px var(--font-ui);
-    -webkit-line-clamp: 4;
+    -webkit-line-clamp: 2;
   }
 }
 
-/* Размер задан пропом size="floor"; здесь остаётся только обрезка длинного
-   номера и подписи — геометрию трогать нельзя, она живёт в .mk-tag--floor. */
-.shift-card__heading .mk-tag {
-  min-width: 0;
-  overflow: hidden;
-}
-
-.shift-card__heading .mk-tag > span:last-child {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.shift-card__meta {
-  display: grid;
+/* Даты и план — мономаркированные факты, а не проза. */
+.shift-card__dates,
+.shift-card__plan {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-2);
-  font: var(--floor-body);
-  font-family: var(--font-mono);
+  font: 400 14px/18px var(--font-mono);
   font-variant-numeric: tabular-nums;
-  gap: 2px;
 }
 
-/* Mode and plan on one line when they fit; the plan wraps whole otherwise,
-   the same way the production date does below. */
-.shift-card__plan {
+/* Режим и паллеты — теги, план — текст рядом с ними; в узкой колонке строка
+   переносится целиком вместо обрезки подписи тега. */
+.shift-card__mode {
   display: flex;
   min-width: 0;
-  overflow: hidden;
+  gap: var(--sp-2);
   flex-wrap: wrap;
-  column-gap: var(--sp-3);
-}
-
-.shift-card__plan-part {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  align-items: center;
 }
 
 /* One line when both dates fit; the production date wraps whole otherwise. */
-.shift-card__date {
+.shift-card__dates {
   display: flex;
-  min-width: 0;
-  overflow: hidden;
   flex-wrap: wrap;
   column-gap: var(--sp-3);
 }
@@ -2375,6 +2397,9 @@ body,
   --control-floor: 72px;
 
   align-self: end;
+  /* Последняя дорожка сетки явно: полное имя и даты необязательны, и без
+     закрепления кнопка вставала на строку выше пустой 72px-дорожки. */
+  grid-row: -2 / -1;
 }
 
 .shift-selection__secondary-actions {
@@ -5014,7 +5039,7 @@ body,
   }
 
   .shift-card__body {
-    grid-template-columns: minmax(150px, 36%) minmax(0, 1fr);
+    grid-template-columns: minmax(150px, 38%) minmax(0, 1fr);
   }
 
   .shift-card__product {
@@ -5023,10 +5048,6 @@ body,
 
   .shift-card__details {
     gap: 2px;
-  }
-
-  .shift-card__meta {
-    font: 18px/20px var(--font-mono);
   }
 }
 
