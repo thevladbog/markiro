@@ -215,42 +215,57 @@ describe.skipIf(!ready)("chz-km-orders cabinet e2e", () => {
       .update(schema.chzKmOrders)
       .set({ state: "fetching", omsOrderId: OMS_ORDER_ID })
       .where(and(eq(schema.chzKmOrders.tenantId, tenantId), eq(schema.chzKmOrders.id, orderId)));
-    const listBlocks = vi
-      .spyOn(OmsClient.prototype, "listBlocks")
-      .mockResolvedValue({ status: "ok", value: [] });
-    const getCodes = vi.spyOn(OmsClient.prototype, "getCodes").mockResolvedValue({
-      status: "ok",
-      value: {
-        codes: Array.from({ length: 6 }, (_, i) => `01${FIXTURE_GTIN}21OVER${i}`),
-        blockId: randomUUID(),
-      },
-    });
+    // Everything from here runs under a terminalising `finally`. While this
+    // order is non-terminal it carries an `oms_order_id` and belongs to a
+    // tenant whose СУЗ token decrypts, so a row left behind by a failing
+    // assertion would be picked up by `reconcileUnfinishedChzKmOrders` the
+    // next time any suite boots `AppModule` against a shared development
+    // database -- and `CHZ_OMS_BASE_URLS` points at the real suzgrid host.
     try {
-      await runner.run(tenantId, orderId, { retryCount: 0, retryLimit: 5 });
-    } finally {
-      listBlocks.mockRestore();
-      getCodes.mockRestore();
-    }
-
-    const failed = await agent.get(`/chz-km-orders/${orderId}`).expect(200);
-    expect(failed.body).toMatchObject({ state: "failed", errorCode: "CHZ_CODES_OVERDELIVERED" });
-
-    // The retry must both reopen the order and hand it back to the durable
-    // queue -- until Task 10 that second half was a no-op placeholder, so a
-    // retried order sat in `created` with nothing to advance it.
-    const enqueue = vi.spyOn(jobs, "enqueueChzKmOrder").mockResolvedValue("job-id");
-    try {
-      const retried = await agent.post(`/chz-km-orders/${orderId}/retry`).expect(200);
-      expect(retried.body).toMatchObject({
-        id: orderId,
-        state: "created",
-        errorCode: null,
-        omsOrderId: null,
-        fetchedCount: 0,
+      const listBlocks = vi
+        .spyOn(OmsClient.prototype, "listBlocks")
+        .mockResolvedValue({ status: "ok", value: [] });
+      const getCodes = vi.spyOn(OmsClient.prototype, "getCodes").mockResolvedValue({
+        status: "ok",
+        value: {
+          codes: Array.from({ length: 6 }, (_, i) => `01${FIXTURE_GTIN}21OVER${i}`),
+          blockId: randomUUID(),
+        },
       });
-      expect(enqueue).toHaveBeenCalledWith(tenantId, orderId);
+      try {
+        await runner.run(tenantId, orderId, { retryCount: 0, retryLimit: 5 });
+      } finally {
+        listBlocks.mockRestore();
+        getCodes.mockRestore();
+      }
+
+      const failed = await agent.get(`/chz-km-orders/${orderId}`).expect(200);
+      expect(failed.body).toMatchObject({ state: "failed", errorCode: "CHZ_CODES_OVERDELIVERED" });
+
+      // The retry must both reopen the order and hand it back to the durable
+      // queue -- until Task 10 that second half was a no-op placeholder, so a
+      // retried order sat in `created` with nothing to advance it.
+      const enqueue = vi.spyOn(jobs, "enqueueChzKmOrder").mockResolvedValue("job-id");
+      try {
+        const retried = await agent.post(`/chz-km-orders/${orderId}/retry`).expect(200);
+        expect(retried.body).toMatchObject({
+          id: orderId,
+          state: "created",
+          errorCode: null,
+          omsOrderId: null,
+          fetchedCount: 0,
+        });
+        expect(enqueue).toHaveBeenCalledWith(tenantId, orderId);
+      } finally {
+        enqueue.mockRestore();
+      }
     } finally {
-      enqueue.mockRestore();
+      // `failed` is terminal, so the boot sweep skips it. `error_code` must
+      // be non-null for that state (`chz_km_orders_state_consistency_check`).
+      await db
+        .update(schema.chzKmOrders)
+        .set({ state: "failed", errorCode: "CHZ_CODES_OVERDELIVERED", omsOrderId: null })
+        .where(and(eq(schema.chzKmOrders.tenantId, tenantId), eq(schema.chzKmOrders.id, orderId)));
     }
   });
 });
