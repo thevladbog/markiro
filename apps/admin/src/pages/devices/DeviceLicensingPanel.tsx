@@ -122,12 +122,14 @@ export function DeviceLicensingPanel({ enabled }: { enabled: boolean }) {
           <div key={device.deviceId} className="devices-licensing-row">
             <span className="devices-licensing-row__name">{device.name}</span>
             <StatusChip
-              status={
+              phase={
                 device.state === "released"
-                  ? "neutral"
+                  ? "retired"
                   : device.state === "inconsistent"
-                    ? "error"
-                    : "info"
+                    ? "failed"
+                    : device.state === "reserved"
+                      ? "planned"
+                      : "running"
               }
               label={t(`pages.devices.licensing.state.${device.state}`)}
             />

@@ -292,7 +292,7 @@ function SavedPreparation({
       aria-label={t("deviceReplacement.project")}
       style={{ display: "grid", gap: "var(--sp-3)", marginBlock: "var(--sp-4)" }}
     >
-      <StatusChip status="neutral" label={t(`deviceReplacement.state.${preparation.state}`)} />
+      <StatusChip phase="running" label={t(`deviceReplacement.state.${preparation.state}`)} />
       {needsReview && preparation.state === "prepared" ? (
         <Alert tone="warn">{t("deviceReplacement.needsReview")}</Alert>
       ) : null}

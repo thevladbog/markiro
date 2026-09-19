@@ -129,12 +129,12 @@ export function LinesPage() {
         render: (line) => {
           const item = presenceByLine.get(line.id);
           if (!item || item.assignedStations === 0) {
-            return <StatusChip status="neutral" label={t("pages.lines.presence.unassigned")} />;
+            return <StatusChip phase="none" label={t("pages.lines.presence.unassigned")} />;
           }
           const online = item.onlineStations > 0;
           return (
             <StatusChip
-              status={online ? "ok" : "neutral"}
+              phase={online ? "active" : "none"}
               label={
                 online
                   ? t("pages.lines.presence.online", {

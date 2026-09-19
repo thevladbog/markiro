@@ -159,14 +159,14 @@ export function DevicesPage() {
         title: t("pages.devices.table.status"),
         render: (row) => (
           <StatusChip
-            status={
+            phase={
               row.status === "online"
-                ? "ok"
+                ? "active"
                 : row.status === "revoked"
-                  ? "error"
+                  ? "failed"
                   : row.status === "offline"
-                    ? "neutral"
-                    : "info"
+                    ? "none"
+                    : "planned"
             }
             label={t(`pages.devices.status.${row.status}`)}
           />

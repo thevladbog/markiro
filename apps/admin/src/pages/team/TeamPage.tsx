@@ -12,7 +12,7 @@ import {
   StatusChip,
   Table,
 } from "@markiro/ui";
-import type { StatusChipStatus, TableColumn } from "@markiro/ui";
+import type { TableColumn, TagPhase } from "@markiro/ui";
 
 import { ApiRequestError } from "../../api/client.js";
 import { useAuthClient } from "../../auth/client.js";
@@ -28,14 +28,14 @@ import {
   type TeamResponse,
 } from "./api.js";
 
-const DELIVERY_TONE: Record<string, StatusChipStatus> = {
-  queued: "info",
-  sending: "info",
-  retrying: "warn",
-  sent: "ok",
-  delivered: "ok",
-  failed: "error",
-  canceled: "neutral",
+export const DELIVERY_STATUS_TO_PHASE: Record<string, TagPhase> = {
+  queued: "planned",
+  sending: "running",
+  retrying: "attention",
+  sent: "done",
+  delivered: "done",
+  failed: "failed",
+  canceled: "retired",
 };
 
 export function TeamPage() {
@@ -125,7 +125,7 @@ function TeamContent({ team, currentUserId }: { team: TeamResponse; currentUserI
         title: t("pages.team.table.access"),
         render: (invitation) => (
           <StatusChip
-            status={invitation.accessStatus === "pending" ? "info" : "neutral"}
+            phase={invitation.accessStatus === "pending" ? "planned" : "none"}
             label={t(`pages.team.access.${invitation.accessStatus}`, {
               defaultValue: invitation.accessStatus,
             })}
@@ -142,7 +142,7 @@ function TeamContent({ team, currentUserId }: { team: TeamResponse; currentUserI
         title: t("pages.team.table.delivery"),
         render: (invitation) => (
           <StatusChip
-            status={DELIVERY_TONE[invitation.delivery?.status ?? ""] ?? "neutral"}
+            phase={DELIVERY_STATUS_TO_PHASE[invitation.delivery?.status ?? ""] ?? "none"}
             label={t(`pages.team.delivery.${invitation.delivery?.status ?? "none"}`, {
               defaultValue: invitation.delivery?.status ?? "—",
             })}
@@ -232,11 +232,11 @@ function EmployeeCell({ employee }: { employee: TeamEmployee | null }) {
       <span>{t("pages.team.operator.employee", { name: employee.fullName })}</span>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
         <StatusChip
-          status={employee.status === "active" ? "ok" : "neutral"}
+          phase={employee.status === "active" ? "active" : "retired"}
           label={t(`pages.team.employeeStatus.${employee.status}`)}
         />
         <StatusChip
-          status={employee.operatorAccess ? "ok" : "neutral"}
+          phase={employee.operatorAccess ? "active" : "none"}
           label={
             employee.operatorAccess
               ? t("pages.team.operator.enabled")
@@ -258,7 +258,7 @@ function InvitationActions({ invitation }: { invitation: TeamInvitation }) {
   if (invitation.accessStatus !== "pending") {
     return (
       <StatusChip
-        status="neutral"
+        phase="none"
         label={t("pages.team.actionsUnavailable")}
         title={t("pages.team.actionsUnavailableHint")}
       />
