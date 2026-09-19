@@ -486,7 +486,15 @@
         "empty": "This issue holds no codes",
         "emptyHint": "Open the order card and check its issue history.",
         "labelAria": "Label no. {{seq}}",
-        "renderFailed": "Label no. {{seq}} could not be rendered"
+        "renderFailed": "Label no. {{seq}} could not be rendered",
+        "progress": "Rendered {{done}} of {{total}}…",
+        "degraded_one": "Could not render {{formatted}} label of {{total}}",
+        "degraded_few": "Could not render {{formatted}} labels of {{total}}",
+        "degraded_many": "Could not render {{formatted}} labels of {{total}}",
+        "degraded_other": "Could not render {{formatted}} labels of {{total}}",
+        "degradedHint": "Those pages will come out blank. Cancel the print dialog: the codes in this issue are already spent, and «Print again» on the order card reopens this page.",
+        "printFirst": "Print the first label",
+        "printFirstHint": "The first run on a label printer is a calibration: print one label, check the margins, the offset and that the code scans, and only then print the whole issue."
       }
     },
     "inventory": {
@@ -2977,10 +2985,7 @@
           "action": "Placard",
           "title": "Pallet placard",
           "formatLabel": "Paper size",
-          "format": {
-            "a4": "A4",
-            "a5": "A5"
-          },
+          "format": { "a4": "A4", "a5": "A5" },
           "open": "Open",
           "hint": "Opens in a new tab — print it on an office printer and attach it to the pallet."
         },

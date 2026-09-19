@@ -1,6 +1,6 @@
 import { sampleLabelData, type LabelField, type LabelTemplatePurpose } from "@markiro/domain";
 
-type LabelRenderOptions = { kmDataMatrix?: "native" | "raster" };
+import type { LabelRenderOptions } from "./renderer.js";
 
 const boxSample = sampleLabelData();
 // Synthetic demonstration data, never a code taken from production.

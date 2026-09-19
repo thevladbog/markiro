@@ -59,6 +59,17 @@ import {
 export { elementBoundsMm };
 export type { BoundsMm };
 
+/**
+ * `draw`'s own options object, declared once and exported so every caller
+ * holding one as a constant (`preview-data.ts`'s per-purpose map, the KM
+ * print page) and every function passing one through (`raster-composite.ts`)
+ * refers to THIS type rather than to a structural copy that can drift the
+ * next time an option is added.
+ */
+export interface LabelRenderOptions {
+  kmDataMatrix?: "native" | "raster";
+}
+
 function mmToPx(mm: number, scale: number): number {
   return mm * scale;
 }
@@ -280,7 +291,7 @@ export function draw(
   ctx: CanvasRenderingContext2D,
   scale: number,
   data: Record<LabelField, string>,
-  options: { kmDataMatrix?: "native" | "raster" } = {},
+  options: LabelRenderOptions = {},
 ): void {
   const widthPx = mmToPx(spec.widthMm, scale);
   const heightPx = mmToPx(spec.heightMm, scale);

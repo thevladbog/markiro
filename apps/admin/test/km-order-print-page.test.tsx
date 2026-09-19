@@ -12,7 +12,7 @@
  * refetches do.
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createMemoryRouter, createRoutesFromElements, Route, RouterProvider } from "react-router";
 import { afterEach, expect, it, vi } from "vitest";
 
@@ -67,6 +67,18 @@ const CODES = [
   { seq: 1202, code: "0104680089900383215aBcD293XyZ02" },
   { seq: 1203, code: "0104680089900383215aBcD393XyZ03" },
 ];
+
+/**
+ * A batch of the same shape and any size. The "code" is an index, never a
+ * real marking code -- these fixtures exist to count canvases, not to be
+ * scanned.
+ */
+function manyCodes(count: number): Array<{ seq: number; code: string }> {
+  return Array.from({ length: count }, (_, index) => ({
+    seq: 1201 + index,
+    code: `010468008990038321TEST${String(index).padStart(4, "0")}93XyZ0`,
+  }));
+}
 
 const SPEC = {
   widthMm: 58,
@@ -308,6 +320,121 @@ it("renders one page per code, sizes the media from the template and prints once
   }
 });
 
+/**
+ * Fix 1's structural property. A canvas PER LABEL is what a browser silently
+ * evicts past its budget -- `getContext` still answers, `draw` still returns,
+ * and the dialog opens over blank pages with the codes already spent. jsdom
+ * rasterizes nothing, so memory cannot be measured here; what can be pinned
+ * is that the canvas count does not follow the label count.
+ */
+async function canvasesForBatch(count: number): Promise<number> {
+  const created: string[] = [];
+  const realCreateElement = document.createElement.bind(document);
+  const spy = vi
+    .spyOn(document, "createElement")
+    .mockImplementation((tagName: string, options?: ElementCreationOptions) => {
+      created.push(tagName);
+      return realCreateElement(tagName, options);
+    });
+  try {
+    const { container } = renderPrintPage({ template: TEMPLATE.stock, codes: manyCodes(count) });
+    await waitFor(() => expect(pages(container)).toHaveLength(count));
+    await waitFor(() =>
+      expect(pages(container).every((page) => page.dataset["ready"] === "true")).toBe(true),
+    );
+  } finally {
+    spy.mockRestore();
+    cleanup();
+  }
+  return created.filter((tagName) => tagName === "canvas").length;
+}
+
+it("paints the whole batch through one canvas, whatever the label count", async () => {
+  const forThree = await canvasesForBatch(3);
+  const forSixty = await canvasesForBatch(60);
+
+  expect(forThree).toBe(1);
+  expect(forSixty).toBe(forThree);
+});
+
+it("says on screen how many labels could not be drawn, and captions each one", async () => {
+  // Every label degrades under jsdom (no 2D context) -- the same shape an
+  // enterprise policy or a canvas-fingerprinting blocker produces in a real
+  // browser, where the whole batch would otherwise feed as blank stock.
+  const { container, print } = renderPrintPage({ template: TEMPLATE.stock });
+
+  await waitFor(() =>
+    expect(pages(container).every((page) => page.dataset["ready"] === "true")).toBe(true),
+  );
+
+  const banner = await screen.findByRole("alert");
+  expect(banner.textContent).toContain(
+    `Не удалось отрисовать ${number.format(3)} этикетки из ${number.format(3)}`,
+  );
+  for (const { seq } of CODES) {
+    expect(screen.getByText(`Этикетку № ${String(seq)} не удалось отрисовать`)).toBeDefined();
+  }
+
+  // The dialog still opens -- the operator decides -- but never silently.
+  await waitFor(() => expect(print).toHaveBeenCalledTimes(1));
+});
+
+it("prints one calibration label without spending the batch or touching the server", async () => {
+  const { container, print, urls } = renderPrintPage({ template: TEMPLATE.stock });
+
+  await waitFor(() => expect(print).toHaveBeenCalledTimes(1));
+  const requestsBefore = urls.length;
+  const scopes: string[] = [];
+  print.mockImplementation(() => {
+    scopes.push(container.querySelector(".mk-km-print")?.className ?? "");
+  });
+
+  fireEvent.click(screen.getByRole("button", { name: "Напечатать первую этикетку" }));
+
+  // One page in the printed document, and it is the first label.
+  expect(print).toHaveBeenCalledTimes(2);
+  expect(scopes).toHaveLength(1);
+  expect(scopes[0]).toContain("mk-km-print--first-only");
+
+  // Nothing was consumed: the sheet is intact, the scope is released again,
+  // and no request went out for the calibration.
+  expect(pages(container)).toHaveLength(3);
+  expect(container.querySelector(".mk-km-print")?.className).not.toContain("first-only");
+  expect(urls).toHaveLength(requestsBefore);
+});
+
+it("sizes the media from the template it was handed, not from a fixed page", async () => {
+  const { container } = renderPrintPage({
+    template: TEMPLATE.box,
+    templateById: full({ spec: { ...SPEC, widthMm: 100, heightMm: 150 } }),
+  });
+
+  await waitFor(() => expect(pages(container)).toHaveLength(3));
+
+  expect(container.querySelector("style")?.textContent).toBe(
+    "@page { size: 100mm 150mm; margin: 0 }",
+  );
+  for (const page of pages(container)) {
+    expect(page.style.width).toBe("100mm");
+    expect(page.style.height).toBe("150mm");
+  }
+});
+
+it("keeps an unchecked template size out of the @page stylesheet text", async () => {
+  // `useLabelTemplate` does not parse its response, and the `@page` rule is
+  // stylesheet TEXT rather than a React-sanitised style object.
+  const { container } = renderPrintPage({
+    template: TEMPLATE.stock,
+    templateById: full({
+      spec: { ...SPEC, widthMm: "58mm } .mk-km-print__page { display: none } @page { size: 9999mm" },
+    }),
+  });
+
+  await waitFor(() => expect(pages(container)).toHaveLength(3));
+
+  expect(container.querySelector("style")?.textContent).toBe("@page { margin: 0 }");
+});
+
 it("opens the print dialog once, across a re-render and a refetch", async () => {
   const { container, print, client, rerender, tree } = renderPrintPage({
     template: TEMPLATE.stock,
@@ -419,8 +546,13 @@ function fakeAuthClient(session: SessionData | null): AuthClientLike {
   };
 }
 
-function renderGuardedRoute(session: SessionData | null, access: AccessDocument) {
+function renderGuardedRoute(
+  session: SessionData | null,
+  access: AccessDocument,
+  options: { batch?: boolean } = {},
+) {
   const urls: string[] = [];
+  const orderUrl = `/api/chz-km-orders/${ID.order}`;
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL) => {
@@ -435,6 +567,11 @@ function renderGuardedRoute(session: SessionData | null, access: AccessDocument)
         });
       }
       if (url.endsWith("/api/access/me")) return jsonResponse(access);
+      if (options.batch === true) {
+        if (url === orderUrl) return jsonResponse(order());
+        if (url === `${orderUrl}/issues/${ID.issue}/codes`) return jsonResponse({ codes: CODES });
+        if (url.startsWith("/api/label-templates/")) return jsonResponse(full());
+      }
       throw new Error(`Unexpected request: ${url}`);
     }),
   );
@@ -446,7 +583,7 @@ function renderGuardedRoute(session: SessionData | null, access: AccessDocument)
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  render(
+  const { container } = render(
     <QueryClientProvider client={client}>
       <ThemeProvider defaultTheme="light">
         <AuthClientProvider client={fakeAuthClient(session)}>
@@ -455,7 +592,7 @@ function renderGuardedRoute(session: SessionData | null, access: AccessDocument)
       </ThemeProvider>
     </QueryClientProvider>,
   );
-  return { router, urls };
+  return { router, urls, container };
 }
 
 it("sends a visitor without a session to the login page instead of the codes", async () => {
@@ -470,4 +607,18 @@ it("refuses the page to a grant that may not hand codes to the floor", async () 
 
   expect(await screen.findByTestId("forbidden-page")).toBeDefined();
   expect(urls.some((url) => url.includes("/codes"))).toBe(false);
+});
+
+it("renders the sheet outside the application shell", async () => {
+  // The whole reason the route is split out of `ShellPage`: a sidebar on a
+  // page of physical labels would be printed. Both guard tests above pass
+  // just as well with the route nested inside the shell, so this is the
+  // assertion that holds the split in place.
+  const { container } = renderGuardedRoute(ACTIVE_SESSION, ACCESS_WRITE, { batch: true });
+
+  await waitFor(() => expect(pages(container)).toHaveLength(3));
+
+  expect(screen.queryByRole("navigation")).toBeNull();
+  expect(container.querySelector("nav")).toBeNull();
+  expect(container.querySelector(".mk-sidebar")).toBeNull();
 });

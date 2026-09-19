@@ -48,19 +48,12 @@ import {
 } from "../../../labels/fontCoverage.js";
 import { rasterizeText as realRasterizeText } from "../../../labels/rasterizer.js";
 import { labelPreviewData, labelRenderOptions } from "../preview-data.js";
-import { compositeRasterText, elementsNeedingRaster } from "../raster-composite.js";
+import {
+  compositeRasterText,
+  elementsNeedingRaster,
+  PREVIEW_FONT_FAMILY,
+} from "../raster-composite.js";
 import { draw } from "../renderer.js";
-
-/**
- * MVP SIMPLIFICATION (documented, not an oversight): `LabelTextElement`/
- * `LabelFieldElement` (`@markiro/domain`'s `model.ts`) carry no per-element
- * font-family field -- the domain model has no such concept yet (custom
- * font selection/upload is explicitly out of this plan's scope, see
- * `fontCoverage.ts`'s own doc comment) -- so there is exactly ONE
- * admin-wide font family the coverage check ever runs against, this
- * constant, rather than a per-element selector.
- */
-export const PREVIEW_FONT_FAMILY: LabelFontFamily = "IBM Plex Sans";
 
 /** Stable fallback sample data -- a MODULE-level constant (not a fresh
  * `sampleLabelData()` call per render) so omitting the `data` prop doesn't

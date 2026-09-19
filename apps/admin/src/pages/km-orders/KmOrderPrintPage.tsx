@@ -17,25 +17,31 @@
  * here may put one in a URL, a log, an analytics call or an error message:
  * a code that leaks is a code someone else can apply to their own goods.
  *
- * KNOWN LIMIT (not fixed here): a print batch may hold up to
- * `KM_PRINT_ISSUE_MAX_COUNT` codes, and this page mounts one canvas per code
- * at `PRINT_DPI`. A few hundred labels are comfortable; several thousand will
- * cost a browser far more memory than it should. Paginating or rasterizing
- * lazily is its own change.
+ * ONE CANVAS FOR THE WHOLE BATCH. A batch holds up to
+ * `KM_PRINT_ISSUE_MAX_COUNT` (5 000) codes and a 58x40 mm label at
+ * `PRINT_DPI` is a 685x472 px backing store, so a canvas per label would ask
+ * the browser for ~6 GiB -- and a browser past its canvas budget does not
+ * refuse: it evicts backing stores, every readiness callback still fires, and
+ * the dialog opens over a sheet whose earliest labels have silently gone
+ * blank, with the codes already spent. So each label is drawn into a SINGLE
+ * reusable canvas, exported to a PNG blob, and shown as an `<img>`: peak
+ * canvas memory is one label, the retained cost is a few kilobytes per label,
+ * and a blob is re-decodable, so the print preview cannot lose pixels either.
+ * The loop yields between chunks so the tab stays responsive and the header
+ * can count progress.
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useParams, useSearchParams } from "react-router";
 
-import type { LabelField, LabelTemplateSpec, RasterizeTextFn } from "@markiro/domain";
-import { Button, EmptyState, Spinner } from "@markiro/ui";
+import type { LabelField, LabelTemplateSpec } from "@markiro/domain";
+import { Alert, Button, cn, EmptyState, Spinner } from "@markiro/ui";
 
-import { rasterizeText as realRasterizeText } from "../../labels/rasterizer.js";
+import { rasterizeText } from "../../labels/rasterizer.js";
 import { useChzProductGroups } from "../catalog/api.js";
 import { useLabelTemplate, useLabelTemplates } from "../labels/api.js";
-import { PREVIEW_FONT_FAMILY } from "../labels/editor/PreviewPane.js";
-import { compositeRasterText, type LabelRenderOptions } from "../labels/raster-composite.js";
-import { draw } from "../labels/renderer.js";
+import { compositeRasterText, PREVIEW_FONT_FAMILY } from "../labels/raster-composite.js";
+import { draw, type LabelRenderOptions } from "../labels/renderer.js";
 import { useKmIssueCodes, useKmOrder } from "./api.js";
 import { eligibleKmTemplates, kmOrderGroupCode, preferredKmTemplate } from "./km-template.js";
 import type { KmIssueCode, KmOrder } from "./schemas.js";
@@ -60,6 +66,21 @@ const KM_RENDER_OPTIONS: LabelRenderOptions = { kmDataMatrix: "raster" };
 const SCALE = PRINT_DPI / 25.4;
 
 /**
+ * How many labels are rasterized between two yields to the event loop. Small
+ * enough that the tab keeps answering clicks and repainting the progress line
+ * on a five-thousand-label batch, large enough that the yields themselves do
+ * not dominate a short one.
+ */
+const RASTER_CHUNK = 20;
+
+/**
+ * How long the print dialog waits for the last chunk's images to finish
+ * loading. Bounded on purpose: a dialog that opens a moment late is a
+ * non-event, a dialog that never opens strands a batch whose codes are spent.
+ */
+const IMAGE_SETTLE_TIMEOUT_MS = 2_000;
+
+/**
  * The label's field values for one code. Deliberately a full literal rather
  * than an override of `sampleLabelData()`: a field this order cannot fill
  * prints EMPTY, never a sample. A template that happens to carry an operator
@@ -68,7 +89,10 @@ const SCALE = PRINT_DPI / 25.4;
  * The order DTO carries no separate print name, so the catalogue name fills
  * both -- the station applies the same "print name or name" fallback.
  */
-export function kmLabelData(order: KmOrder, code: string): Record<LabelField, string> {
+export function kmLabelData(
+  order: Pick<KmOrder, "productName" | "gtin14">,
+  code: string,
+): Record<LabelField, string> {
   return {
     "product.name": order.productName,
     "product.printName": order.productName,
@@ -86,113 +110,36 @@ export function kmLabelData(order: KmOrder, code: string): Record<LabelField, st
   };
 }
 
-interface LabelCanvasProps {
-  spec: LabelTemplateSpec;
-  scale: number;
-  data: Record<LabelField, string>;
-  seq: number;
-  /** Stable across renders: a fresh identity would repaint every label. */
-  onReady: (seq: number) => void;
-  rasterizeText?: RasterizeTextFn;
+/**
+ * The `@page` rule the browser sizes the media from. It is stylesheet TEXT,
+ * not a React-sanitised style object, and `useLabelTemplate` hands back a
+ * response it never parsed -- so the two numbers are checked here rather than
+ * trusted, and a template that cannot say how big its label is falls back to
+ * the browser's own paper rather than to whatever the field contained.
+ */
+export function printMediaRule(spec: Pick<LabelTemplateSpec, "widthMm" | "heightMm">): string {
+  const { widthMm, heightMm } = spec;
+  const sized =
+    Number.isFinite(widthMm) && Number.isFinite(heightMm) && widthMm > 0 && heightMm > 0;
+  return sized ? `@page { size: ${widthMm}mm ${heightMm}mm; margin: 0 }` : "@page { margin: 0 }";
 }
 
-/**
- * One label, painted exactly as `editor/PreviewPane.tsx` paints its preview:
- * the schematic `draw()` followed by the shared raster compositing pass.
- *
- * `onReady` fires exactly once per mounted label, whatever later repaints do,
- * and fires even when the label could not be painted at all -- under jsdom
- * (and any browser without a 2D context) `getContext` answers `null`, which
- * degrades to a placeholder rather than throwing and must not leave the page
- * waiting forever for a canvas that will never report in.
- */
-function LabelCanvas({
-  spec,
-  scale,
-  data,
-  seq,
-  onReady,
-  rasterizeText = realRasterizeText,
-}: LabelCanvasProps) {
-  const { t } = useTranslation();
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const readyRef = useRef(false);
-  const [drawable, setDrawable] = useState(true);
-  const [failed, setFailed] = useState(false);
-  const widthPx = Math.round(spec.widthMm * scale);
-  const heightPx = Math.round(spec.heightMm * scale);
+/** One label's terminal state: a PNG to show, or a page that stays blank. */
+type LabelRaster = { readonly kind: "ready"; readonly url: string } | { readonly kind: "degraded" };
 
-  useEffect(() => {
-    let cancelled = false;
-    const markReady = () => {
-      if (cancelled || readyRef.current) return;
-      readyRef.current = true;
-      onReady(seq);
-    };
+function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob | null> {
+  return new Promise((resolve) => {
+    canvas.toBlob((blob) => {
+      resolve(blob);
+    }, "image/png");
+  });
+}
 
-    const ctx = canvasRef.current?.getContext("2d") ?? null;
-    if (!ctx) {
-      setDrawable(false);
-      markReady();
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    try {
-      draw(spec, ctx, scale, data, KM_RENDER_OPTIONS);
-    } catch {
-      // Whatever went wrong, the reason may not be repeated back: the value
-      // that would appear in it is a live marking code.
-      setFailed(true);
-      markReady();
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    void (async () => {
-      try {
-        await compositeRasterText(spec, ctx, scale, data, {
-          fontFamily: PREVIEW_FONT_FAMILY,
-          rasterizeText,
-          renderOptions: KM_RENDER_OPTIONS,
-          isCancelled: () => cancelled,
-        });
-      } finally {
-        markReady();
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [spec, scale, data, seq, onReady, rasterizeText]);
-
-  if (!drawable || failed) {
-    return (
-      <>
-        {/* Decorative: it stands in for a label, it is not one. */}
-        <img className="mk-km-print__label" alt="" width={widthPx} height={heightPx} />
-        {failed ? (
-          <span className="mk-km-print__failed">
-            {t("pages.kmOrders.print.renderFailed", { seq })}
-          </span>
-        ) : null}
-      </>
-    );
-  }
-
-  return (
-    <canvas
-      ref={canvasRef}
-      className="mk-km-print__label"
-      role="img"
-      aria-label={t("pages.kmOrders.print.labelAria", { seq })}
-      width={widthPx}
-      height={heightPx}
-    />
-  );
+/** Hands the main thread back between chunks. */
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, 0);
+  });
 }
 
 function PrintSheet({
@@ -206,20 +153,100 @@ function PrintSheet({
 }) {
   const { t, i18n } = useTranslation();
   const number = useMemo(() => new Intl.NumberFormat(i18n.language), [i18n.language]);
-  // One record per code, memoised: `readySeqs` re-renders this component once
-  // per label, and a fresh `data` object each time would repaint every canvas
-  // on every one of those renders.
-  const labels = useMemo(
-    () => codes.map((code) => ({ seq: code.seq, data: kmLabelData(order, code.code) })),
-    [codes, order],
+  // Only the two order fields a label paints. The order card polls and the
+  // codes cache has a zero lifetime, so binding the batch to the whole order
+  // object would re-rasterize every label whenever a counter moves.
+  const product = useMemo(
+    () => ({ productName: order.productName, gtin14: order.gtin14 }),
+    [order.productName, order.gtin14],
   );
-  const [readySeqs, setReadySeqs] = useState<ReadonlySet<number>>(() => new Set());
-  const markReady = useCallback((seq: number) => {
-    setReadySeqs((previous) => (previous.has(seq) ? previous : new Set(previous).add(seq)));
-  }, []);
+  const labels = useMemo(
+    () => codes.map((code) => ({ seq: code.seq, data: kmLabelData(product, code.code) })),
+    [codes, product],
+  );
 
+  const widthPx = Math.round(spec.widthMm * SCALE);
+  const heightPx = Math.round(spec.heightMm * SCALE);
+  const [rasters, setRasters] = useState<ReadonlyMap<number, LabelRaster>>(() => new Map());
+
+  useEffect(() => {
+    let cancelled = false;
+    const urls: string[] = [];
+    // THE one canvas (see this module's doc comment). Created here rather
+    // than per label, and never resized: every label in a batch shares a
+    // template, so the same bitmap is reused from the first code to the last.
+    const canvas = document.createElement("canvas");
+    canvas.width = widthPx;
+    canvas.height = heightPx;
+    const ctx = canvas.getContext("2d");
+    const painted = new Map<number, LabelRaster>();
+
+    async function rasterizeLabel(data: Record<LabelField, string>): Promise<Blob | null> {
+      // No 2D context at all: jsdom, an enterprise policy, or a
+      // canvas-fingerprinting blocker. Every label degrades, and the header
+      // says so rather than letting blank stock run through the printer
+      // unannounced.
+      if (ctx === null) return null;
+      try {
+        // `draw` clears and repaints the whole label area first, so nothing
+        // of label N survives into label N+1 on the shared canvas.
+        draw(spec, ctx, SCALE, data, KM_RENDER_OPTIONS);
+        await compositeRasterText(spec, ctx, SCALE, data, {
+          fontFamily: PREVIEW_FONT_FAMILY,
+          rasterizeText,
+          renderOptions: KM_RENDER_OPTIONS,
+          isCancelled: () => cancelled,
+        });
+        return await canvasToBlob(canvas);
+      } catch {
+        // Whatever went wrong, the reason may not be repeated back: the value
+        // that would appear in it is a live marking code.
+        return null;
+      }
+    }
+
+    setRasters(new Map());
+    void (async () => {
+      for (const [index, label] of labels.entries()) {
+        const blob = await rasterizeLabel(label.data);
+        // Checked BEFORE the object URL exists, so the cleanup below cannot
+        // miss one: after cancellation no further URL is created.
+        if (cancelled) return;
+        if (blob === null) {
+          painted.set(label.seq, { kind: "degraded" });
+        } else {
+          const url = URL.createObjectURL(blob);
+          urls.push(url);
+          painted.set(label.seq, { kind: "ready", url });
+        }
+
+        const done = index + 1;
+        if (done % RASTER_CHUNK === 0 && done < labels.length) {
+          setRasters(new Map(painted));
+          await yieldToEventLoop();
+          if (cancelled) return;
+        }
+      }
+      if (!cancelled) setRasters(new Map(painted));
+    })();
+
+    return () => {
+      cancelled = true;
+      for (const url of urls) URL.revokeObjectURL(url);
+    };
+  }, [labels, spec, widthPx, heightPx]);
+
+  const degradedCount = useMemo(() => {
+    let count = 0;
+    for (const raster of rasters.values()) {
+      if (raster.kind === "degraded") count += 1;
+    }
+    return count;
+  }, [rasters]);
+
+  const sheetRef = useRef<HTMLDivElement>(null);
   const printedRef = useRef(false);
-  const allReady = labels.length > 0 && readySeqs.size === labels.length;
+  const allReady = labels.length > 0 && rasters.size === labels.length;
 
   useEffect(() => {
     // Exactly once per page load. The ref, not the dependency list, is what
@@ -227,10 +254,62 @@ function PrintSheet({
     // refocus is enough) re-runs this effect, and a second print dialog over
     // a job the office already sent to the printer is worse than none. The
     // «Открыть диалог печати» button below is the deliberate way back.
-    if (!allReady || printedRef.current) return;
+    if (!allReady || printedRef.current) return undefined;
     printedRef.current = true;
-    window.print();
+
+    // The last chunk's images were handed their blob URLs in the commit this
+    // effect follows, and an image decodes asynchronously even from a local
+    // blob. Opening the dialog over one that has not loaded yet is the same
+    // blank label the single canvas exists to prevent, so wait for them --
+    // bounded, because a late dialog is recoverable and a missing one is not.
+    let done = false;
+    let timer = 0;
+    const open = () => {
+      if (done) return;
+      done = true;
+      window.clearTimeout(timer);
+      window.print();
+    };
+
+    const pending = Array.from(sheetRef.current?.querySelectorAll("img") ?? []).filter(
+      (image) => image.getAttribute("src") !== null && !image.complete,
+    );
+    if (pending.length === 0) {
+      open();
+      return undefined;
+    }
+
+    let settled = 0;
+    const onSettled = () => {
+      settled += 1;
+      if (settled === pending.length) open();
+    };
+    for (const image of pending) {
+      image.addEventListener("load", onSettled, { once: true });
+      image.addEventListener("error", onSettled, { once: true });
+    }
+    timer = window.setTimeout(open, IMAGE_SETTLE_TIMEOUT_MS);
+
+    return () => {
+      done = true;
+      window.clearTimeout(timer);
+    };
   }, [allReady]);
+
+  // The first run on a label printer is a calibration: the media, the offset,
+  // whether the Data Matrix scans. Spending the whole batch to learn that the
+  // offset is wrong is not recoverable -- these codes are already issued --
+  // so one label can be sent on its own. It is a PRINT SCOPE, not a different
+  // page: nothing is re-fetched, nothing server-side is touched, the sheet on
+  // screen is untouched, and the full batch stays one click away.
+  const [firstOnly, setFirstOnly] = useState(false);
+  useEffect(() => {
+    if (!firstOnly) return;
+    // After the commit that put the scope class on the sheet, so the print
+    // stylesheet is already hiding every page but the first.
+    window.print();
+    setFirstOnly(false);
+  }, [firstOnly]);
 
   const first = labels[0];
   const last = labels[labels.length - 1];
@@ -243,10 +322,10 @@ function PrintSheet({
         });
 
   return (
-    <div className="mk-km-print">
+    <div className={cn("mk-km-print", firstOnly && "mk-km-print--first-only")} ref={sheetRef}>
       {/* Emitted inline, not in `print.css`: the media size is the template's,
           and only this render knows it. */}
-      <style>{`@page { size: ${spec.widthMm}mm ${spec.heightMm}mm; margin: 0 }`}</style>
+      <style>{printMediaRule(spec)}</style>
       <header className="mk-km-print__screen-only">
         <h1 className="mk-km-print__title">
           {t("pages.kmOrders.print.heading", {
@@ -266,29 +345,77 @@ function PrintSheet({
         <p className="mk-km-print__note">
           {t("pages.kmOrders.print.note", { width: spec.widthMm, height: spec.heightMm })}
         </p>
+        {allReady ? null : (
+          <p className="mk-km-print__note" role="status">
+            {t("pages.kmOrders.print.progress", {
+              done: number.format(rasters.size),
+              total: number.format(labels.length),
+            })}
+          </p>
+        )}
+        {degradedCount > 0 ? (
+          <Alert
+            className="mk-km-print__degraded"
+            tone="warn"
+            title={t("pages.kmOrders.print.degraded", {
+              count: degradedCount,
+              formatted: number.format(degradedCount),
+              total: number.format(labels.length),
+            })}
+          >
+            {t("pages.kmOrders.print.degradedHint")}
+          </Alert>
+        ) : null}
         <div className="mk-km-print__actions">
           <Button type="button" onClick={() => window.print()}>
             {t("pages.kmOrders.print.printAction")}
           </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => {
+              setFirstOnly(true);
+            }}
+          >
+            {t("pages.kmOrders.print.printFirst")}
+          </Button>
           <Link to={`/km-orders/${order.id}`}>{t("pages.kmOrders.print.back")}</Link>
         </div>
+        <p className="mk-km-print__note">{t("pages.kmOrders.print.printFirstHint")}</p>
       </header>
-      {labels.map((label) => (
-        <section
-          key={label.seq}
-          className="mk-km-print__page"
-          data-ready={readySeqs.has(label.seq) ? "true" : "false"}
-          style={{ width: `${spec.widthMm}mm`, height: `${spec.heightMm}mm` }}
-        >
-          <LabelCanvas
-            spec={spec}
-            scale={SCALE}
-            data={label.data}
-            seq={label.seq}
-            onReady={markReady}
-          />
-        </section>
-      ))}
+      {labels.map((label) => {
+        const raster = rasters.get(label.seq);
+        return (
+          <section
+            key={label.seq}
+            className="mk-km-print__page"
+            data-ready={raster === undefined ? "false" : "true"}
+            style={{ width: `${spec.widthMm}mm`, height: `${spec.heightMm}mm` }}
+          >
+            {raster !== undefined && raster.kind === "ready" ? (
+              <img
+                className="mk-km-print__label"
+                src={raster.url}
+                alt={t("pages.kmOrders.print.labelAria", { seq: label.seq })}
+                width={widthPx}
+                height={heightPx}
+              />
+            ) : (
+              <>
+                {/* Decorative: it stands in for a label, it is not one. */}
+                <img className="mk-km-print__label" alt="" width={widthPx} height={heightPx} />
+                {raster === undefined ? null : (
+                  // Printed, not screen-only: a page that came out of the
+                  // printer blank has to say which sequence number it was.
+                  <span className="mk-km-print__failed">
+                    {t("pages.kmOrders.print.renderFailed", { seq: label.seq })}
+                  </span>
+                )}
+              </>
+            )}
+          </section>
+        );
+      })}
     </div>
   );
 }

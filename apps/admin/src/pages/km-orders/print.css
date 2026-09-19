@@ -59,8 +59,11 @@
   background: #fff;
 }
 
-/* The canvas carries the label at PRINT_DPI; the page box carries the
-   physical millimetres. Filling the box is what scales one to the other. */
+/* The image carries the label at PRINT_DPI (one PNG per code, rasterized
+   through the single shared canvas -- see `KmOrderPrintPage.tsx`); the page
+   box carries the physical millimetres. Filling the box is what scales one to
+   the other. The same rule sizes the blank placeholder a label that could not
+   be drawn leaves behind. */
 .mk-km-print__label {
   display: block;
   width: 100%;
@@ -71,6 +74,10 @@
   display: block;
   font: var(--text-caption);
   color: var(--err-fg);
+}
+
+.mk-km-print__degraded {
+  width: 100%;
 }
 
 @media screen {
@@ -98,6 +105,19 @@
   /* Nothing follows the last label, so a trailing break would feed one blank
      page out of every batch. */
   .mk-km-print__page:last-child {
+    break-after: auto;
+  }
+
+  /* «Напечатать первую этикетку»: the first run on a label printer is a
+     calibration, and paying for it with the whole batch is not recoverable --
+     the codes are already issued. The sheet on screen is untouched; only the
+     printed document is narrowed to the first page, which then ends it, so no
+     trailing blank page is fed either. */
+  .mk-km-print--first-only .mk-km-print__page:not(:first-of-type) {
+    display: none;
+  }
+
+  .mk-km-print--first-only .mk-km-print__page:first-of-type {
     break-after: auto;
   }
 }

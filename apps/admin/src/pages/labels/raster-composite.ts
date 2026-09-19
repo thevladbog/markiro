@@ -39,10 +39,23 @@ import {
 
 import type { LabelFontFamily } from "../../labels/fontCoverage.js";
 import { decodeRasterToRgba, dotsToMm, rasterDestXPx } from "./editor/raster-preview.js";
-import { elementBoundsMm, LABEL_BACKGROUND_COLOR } from "./renderer.js";
+import { elementBoundsMm, LABEL_BACKGROUND_COLOR, type LabelRenderOptions } from "./renderer.js";
 
-/** `draw`'s own options object, named so callers can hold one as a constant. */
-export type LabelRenderOptions = { kmDataMatrix?: "native" | "raster" };
+/**
+ * MVP SIMPLIFICATION (documented, not an oversight): `LabelTextElement`/
+ * `LabelFieldElement` (`@markiro/domain`'s `model.ts`) carry no per-element
+ * font-family field -- the domain model has no such concept yet (custom font
+ * selection/upload is explicitly out of that plan's scope, see
+ * `fontCoverage.ts`'s own doc comment) -- so there is exactly ONE admin-wide
+ * font family, this constant, rather than a per-element selector.
+ *
+ * It lives here rather than in `editor/PreviewPane.tsx`, where it started,
+ * because both compositing callers need it and the print page must not pull
+ * an editor COMPONENT (and its transitive imports) into its bundle for one
+ * string. Preview and print composite with the same family or they are not
+ * the same pixels.
+ */
+export const PREVIEW_FONT_FAMILY: LabelFontFamily = "IBM Plex Sans";
 
 export interface RasterCompositeOptions {
   fontFamily: LabelFontFamily;
