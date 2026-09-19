@@ -199,12 +199,13 @@ export function StationScreenGallery({ request }: StationScreenGalleryProps) {
           shortLabel: copy.updateShort,
         },
         operatorControl: (
-          <Button size="floor" variant="secondary">
+          <Button size="floor" variant="secondary" className="station-rail-button">
             {copy.changeOperator}
           </Button>
         ),
         windowControl: (
           <WindowModeControl
+            compact
             snapshot={{
               mode: "locked",
               pending: false,

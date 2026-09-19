@@ -12,6 +12,7 @@ function renderControl(
     activeShift?: boolean;
     pending?: boolean;
     error?: boolean;
+    compact?: boolean;
     onSwitch?: () => Promise<void>;
     onDismissError?: () => void;
   } = {},
@@ -21,6 +22,7 @@ function renderControl(
       activeShift={options.activeShift ?? false}
       pending={options.pending ?? false}
       error={options.error ?? false}
+      compact={options.compact ?? false}
       onSwitch={options.onSwitch ?? vi.fn(async () => {})}
       onDismissError={options.onDismissError ?? vi.fn()}
     />,
@@ -93,6 +95,18 @@ describe("OperatorSwitchControl", () => {
     expect((action as HTMLButtonElement).disabled).toBe(true);
     expect(action.className).toContain("mk-btn--floor");
     expect(action.textContent).toBe("Saving the current operation…");
+  });
+
+  it("keeps its caption on the compact header rail", () => {
+    renderControl({ compact: true });
+
+    // Used every shift, so it stays a text button; only its height drops to the
+    // rail's 52px through --control-floor.
+    const action = screen.getByRole("button", { name: "Change operator" });
+    expect(action.classList.contains("station-rail-button")).toBe(true);
+    expect(action.classList.contains("station-rail-button--icon")).toBe(false);
+    expect(action.textContent).toBe("Change operator");
+    expect(action.style.height).toBe("var(--control-floor)");
   });
 
   it("keeps a touch-sized retryable control mounted after rejection", async () => {

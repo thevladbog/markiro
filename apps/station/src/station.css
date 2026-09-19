@@ -4578,6 +4578,7 @@ body,
 .station-status-bar {
   display: grid;
   min-width: 0;
+  min-height: 72px;
   padding: var(--sp-2) var(--sp-4);
   gap: var(--sp-4);
   grid-template-columns: minmax(0, 1fr) auto auto;
@@ -4587,27 +4588,69 @@ body,
   font: var(--floor-body);
 }
 
-/* Buttons size to their captions; every freed pixel belongs to the identity. */
+/*
+ * One row at every width. `Button` writes `height: var(--control-floor)` as an
+ * inline style for size="floor", so the rail redefines the variable instead of
+ * fighting that style: 52px is the header's floor size, 64px stays the floor
+ * size everywhere else on the station.
+ */
 .station-status-actions {
   display: flex;
   min-width: 0;
   gap: var(--sp-2);
   align-items: stretch;
   justify-content: flex-end;
+  flex-wrap: nowrap;
+  --control-floor: 52px;
+}
+
+/*
+ * A control's error banner is not part of the 72px row. While one is up the
+ * rail takes a full-width second row — what the deleted ≤1599px fallback used
+ * to do at every width — so the banner keeps its readable width instead of
+ * squeezing the identity deck and «Сменить оператора» to nothing beside it.
+ * The header returns to its single row the moment the banner is dismissed.
+ */
+.station-status-bar:has(.window-mode-control__error, .operator-switch-control__error) {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.station-status-bar:has(.window-mode-control__error, .operator-switch-control__error)
+  .station-status-actions {
+  grid-column: 1 / -1;
+  justify-content: flex-start;
   flex-wrap: wrap;
 }
 
 .station-status-actions > * {
   min-width: 0;
-  min-height: 64px;
+  min-height: 52px;
   max-width: 100%;
 }
 
 .station-status-actions :where(button, [role="button"]) {
   min-width: 0;
-  min-height: 64px;
+  min-height: 52px;
   max-width: 100%;
   overflow: hidden;
+}
+
+/*
+ * The rail's own control size. `padding` needs `!important` for the same reason
+ * the height does not: Button paints padding inline, and an icon button has no
+ * caption to pad around.
+ */
+.station-rail-button {
+  height: 52px;
+  min-height: 52px;
+  padding-inline: var(--sp-3) !important;
+  white-space: nowrap;
+}
+
+.station-rail-button--icon {
+  width: 52px;
+  min-width: 52px;
+  padding: 0 !important;
 }
 
 .station-status-actions .window-mode-control__action {
@@ -4670,13 +4713,25 @@ body,
   stroke-linejoin: round;
 }
 
+/*
+ * A glyph button on the rail. `relative` only makes it the containing block for
+ * the availability dot — the button itself stays in the header grid's flow.
+ */
 .station-update-indicator {
-  position: static;
-  padding: var(--sp-1) var(--sp-2);
-  overflow: hidden;
+  position: relative;
+  overflow: visible;
   text-align: center;
-  white-space: normal;
-  overflow-wrap: anywhere;
+}
+
+/* Present only while an update is actually waiting; severity colour included. */
+.station-update-indicator__dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentcolor;
 }
 
 .station-update-indicator[data-update-severity="info"] {
@@ -4845,15 +4900,16 @@ body,
   white-space: nowrap;
 }
 
+/* 16/13 keeps the deck's two rows inside the 72px row the compact header owns. */
 .station-status-identity__row--primary dd {
   color: var(--fg-1);
-  font: 700 17px/22px var(--font-ui);
+  font: 700 16px/20px var(--font-ui);
   letter-spacing: -0.01em;
 }
 
 .station-status-identity__row--secondary dd {
   color: var(--fg-2);
-  font: 400 15px/20px var(--font-ui);
+  font: 400 13px/18px var(--font-ui);
 }
 
 /*
@@ -4966,18 +5022,6 @@ body,
     border: 0;
     clip: rect(0 0 0 0);
     white-space: nowrap;
-  }
-}
-
-/* Narrower still: the action rail drops under the identity + pills row. */
-@media (max-width: 1599px) {
-  .station-status-bar {
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-
-  .station-status-actions {
-    grid-column: 1 / -1;
-    justify-content: flex-start;
   }
 }
 
@@ -5132,8 +5176,8 @@ body,
   min-height: 72px;
   padding-block: var(--sp-1);
   gap: var(--sp-3);
-  /* line · shift + pills + expand always fit one row; the ≤1599px two-column
-     fallback is for the expanded bar's action rail, not for this one. */
+  /* line · shift + pills + expand always fit one row, exactly like the expanded
+     bar above — neither has a two-row fallback any more. */
   grid-template-columns: minmax(0, 1fr) auto auto;
 }
 

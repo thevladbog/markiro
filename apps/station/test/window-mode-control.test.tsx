@@ -13,6 +13,7 @@ function renderControl(
   options: {
     activeShift?: boolean;
     disabled?: boolean;
+    compact?: boolean;
     onEnter?: () => void;
     onExit?: () => void;
     onDismissError?: () => void;
@@ -23,6 +24,7 @@ function renderControl(
       snapshot={snapshot}
       activeShift={options.activeShift ?? false}
       disabled={options.disabled ?? false}
+      compact={options.compact ?? false}
       onEnter={options.onEnter ?? vi.fn()}
       onExit={options.onExit ?? vi.fn()}
       onDismissError={options.onDismissError ?? vi.fn()}
@@ -137,5 +139,21 @@ describe("WindowModeControl", () => {
     expect(action.className).toContain("mk-btn--floor");
     expect(action.style.height).toBe("var(--control-floor)");
     expect(action.style.minWidth).toBe("var(--control-floor)");
+  });
+
+  it("drops its caption but not its name on the compact header rail", () => {
+    renderControl({ mode: "locked", pending: false, error: null }, { compact: true });
+
+    // 52px is the header rail's floor size; --control-floor stays the height
+    // source, so the rail sets it once for every control it holds.
+    const action = screen.getByRole("button", { name: "Exit fullscreen" });
+    expect(action.className).toContain("mk-btn--floor");
+    expect(action.classList.contains("station-rail-button")).toBe(true);
+    expect(action.classList.contains("station-rail-button--icon")).toBe(true);
+    expect(action.style.height).toBe("var(--control-floor)");
+    // Icon only: the glyph is aria-hidden, so nothing is painted as text.
+    expect(action.textContent).toBe("");
+    expect(action.querySelector(".window-mode-control__glyph")).not.toBeNull();
+    expect(screen.queryByText("Exit fullscreen")).toBeNull();
   });
 });

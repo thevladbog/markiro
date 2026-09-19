@@ -395,8 +395,11 @@ describe("development screen gallery", () => {
       expect(action.classList.contains("mk-btn--secondary")).toBe(true);
       expect(action.style.height).toBe("var(--control-floor)");
     }
-    expect(update.textContent).toBe("!Обновления");
-    expect(windowMode.textContent).toContain("Оконный режим");
+    // The compact rail paints glyphs; both labels stay in the accessible names
+    // the queries above already matched.
+    expect(update.textContent).toBe("!");
+    expect(windowMode.textContent).toBe("");
+    expect(operator.textContent).toBe("Сменить оператора");
 
     fireEvent.click(collapse);
     const expand = within(header).getByRole("button", {
@@ -608,8 +611,14 @@ describe("development screen gallery", () => {
 
       expect(actions.children).toHaveLength(3);
       expect(update.getAttribute("data-update-severity")).toBe("urgent");
+      // One 72px row: every rail control is the 52px header size, the update and
+      // window buttons icon-only, the operator button still captioned.
+      expect(update.textContent).toBe("!");
       expect(operator.classList.contains("mk-btn--floor")).toBe(true);
-      expect(operator.style.height).toBe("var(--control-floor)");
+      expect(operator.classList.contains("station-rail-button")).toBe(true);
+      expect(operator.textContent).toBe(operatorLabel);
+      expect(windowMode.classList.contains("station-rail-button--icon")).toBe(true);
+      expect(windowMode.textContent).toBe("");
       expect(windowMode.closest(".window-mode-control")).not.toBeNull();
       expect(view.container.querySelector(".station-floor-window-chrome")).toBeNull();
     },
