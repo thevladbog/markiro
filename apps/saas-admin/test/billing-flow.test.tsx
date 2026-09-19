@@ -434,9 +434,7 @@ describe("invoice commercial lifecycle", () => {
     expect(screen.getByText("Выставлен").closest(".mk-chip")?.className).toContain(
       "mk-chip--running",
     );
-    expect(screen.getByText("Черновик").closest(".mk-chip")?.className).toContain(
-      "mk-chip--draft",
-    );
+    expect(screen.getByText("Черновик").closest(".mk-chip")?.className).toContain("mk-chip--draft");
     expect(document.body.textContent).not.toContain(TENANT_ID);
   });
 

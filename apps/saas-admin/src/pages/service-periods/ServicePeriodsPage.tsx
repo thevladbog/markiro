@@ -1,4 +1,13 @@
-import { Alert, Button, Select, Spinner, StatusChip, Table, type TableColumn } from "@markiro/ui";
+import {
+  Alert,
+  Button,
+  Select,
+  Spinner,
+  StatusChip,
+  Table,
+  type TableColumn,
+  type TagPhase,
+} from "@markiro/ui";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -8,6 +17,22 @@ import { listServicePeriods, type ServicePeriodList } from "./api.js";
 import { ServicePeriodDrawer } from "./ServicePeriodDrawer.js";
 
 type Row = ServicePeriodList["items"][number];
+
+/**
+ * Фактический union — `servicePeriodStateSchema`
+ * (`packages/platform-contracts/src/service-periods.ts`): `upcoming` |
+ * `active` | `expired`. По образцу `servicePeriodPhase` в
+ * `apps/admin/src/pages/billing/format.ts`: предстоящий период ещё не
+ * начался (`planned`, не вывод из оборота — там же был найден и исправлен
+ * обратный дефект), завершённый — штатно закончен (`done`). Панель не
+ * показывает остаток минут по периоду, поэтому уточнение `exhausted` из
+ * кабинета здесь не переносится.
+ */
+const SERVICE_PERIOD_STATE_TO_PHASE = {
+  upcoming: "planned",
+  active: "active",
+  expired: "done",
+} as const satisfies Record<Row["state"], TagPhase>;
 export function ServicePeriodsPage() {
   const { t, i18n } = useTranslation();
   const principal = usePlatformPrincipal();
@@ -48,7 +73,7 @@ export function ServicePeriodsPage() {
       title: t("servicePeriods.columns.state"),
       render: (row) => (
         <StatusChip
-          status={row.state === "active" ? "ok" : "neutral"}
+          phase={SERVICE_PERIOD_STATE_TO_PHASE[row.state]}
           label={t(`servicePeriods.state.${row.state}`)}
         />
       ),

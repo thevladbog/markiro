@@ -154,7 +154,7 @@ export function BankAccountsPanel({
                   <span>{account.bankName}</span>
                 </div>
                 {account.isDefault ? (
-                  <StatusChip status="ok" label={t("legal.accounts.default")} />
+                  <StatusChip phase="active" label={t("legal.accounts.default")} />
                 ) : null}
               </div>
               <dl>

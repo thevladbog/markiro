@@ -5,7 +5,15 @@ import type {
   PlatformGrantActivationPrepareRequest,
   PlatformGrantReadinessPreviewResponse,
 } from "@markiro/platform-contracts";
-import { Alert, Button, Input, StatusChip, Table, type TableColumn, type TagPhase } from "@markiro/ui";
+import {
+  Alert,
+  Button,
+  Input,
+  StatusChip,
+  Table,
+  type TableColumn,
+  type TagPhase,
+} from "@markiro/ui";
 import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -37,7 +45,9 @@ type CancelAttempt = GrantActivationAttempt<PlatformGrantActivationCancelRequest
  * токен агента подписи в `apps/admin/src/pages/integrations/
  * SignerAgentsPanel.tsx`), а не `retired` (человек отозвал).
  */
-export function grantActivationStatePhase(state: PlatformGrantActivationPreparation["state"]): TagPhase {
+export function grantActivationStatePhase(
+  state: PlatformGrantActivationPreparation["state"],
+): TagPhase {
   switch (state) {
     case "prepared":
       return "planned";

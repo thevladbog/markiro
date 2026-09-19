@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Alert, Button, SectionHeader, Spinner, StatusChip } from "@markiro/ui";
+import { Alert, Button, SectionHeader, Spinner, StatusChip, type TagPhase } from "@markiro/ui";
 
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import {
@@ -14,6 +14,31 @@ import {
 } from "./api.js";
 
 const QUERY_KEY = ["platform", "operations", "national-catalog", "schemas"] as const;
+
+type SchemaVersion = NationalCatalogSchemas["versions"][number];
+
+/**
+ * Фактический union — `status` в `national-catalog.ts`
+ * (`packages/platform-contracts/src/national-catalog.ts`): `observed` |
+ * `validated` | `active` | `retired`. Раньше ветки читали только `active`
+ * против вычисляемого `blocked` — три разных статуса (`observed`,
+ * `validated`, `retired`) сворачивались в одну и ту же серую/голубую точку,
+ * и заблокированная версия не была отличима от обычной необработанной.
+ * `observed`/`validated` — ещё не введены в оборот, ждут проверки или
+ * активации (`planned`), если только `blockedReasons` не непусто — тогда
+ * версию нельзя активировать без вмешательства (`attention`).
+ */
+function schemaVersionPhase(status: SchemaVersion["status"], blocked: boolean): TagPhase {
+  switch (status) {
+    case "active":
+      return "active";
+    case "retired":
+      return "retired";
+    case "observed":
+    case "validated":
+      return blocked ? "attention" : "planned";
+  }
+}
 
 export function NationalCatalogPage() {
   const { t } = useTranslation();
@@ -110,7 +135,7 @@ export function NationalCatalogPage() {
                   <p className="national-catalog-card__id">{version.categoryId}</p>
                 </div>
                 <StatusChip
-                  status={version.status === "active" ? "ok" : blocked ? "error" : "info"}
+                  phase={schemaVersionPhase(version.status, blocked)}
                   label={t(`nationalCatalog.status.${version.status}`)}
                 />
               </header>
