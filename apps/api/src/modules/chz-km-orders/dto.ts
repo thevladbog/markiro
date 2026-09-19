@@ -26,6 +26,19 @@ export const CHZ_KM_ORDER_PREFLIGHT_FAILED_CODE = "CHZ_KM_ORDER_PREFLIGHT_FAILED
 /** `POST /chz-km-orders/:id/retry`'s 409 error surface: named rather than inline. */
 export const CHZ_KM_ORDER_NOT_FAILED_CODE = "CHZ_KM_ORDER_NOT_FAILED" as const;
 
+/** `POST /chz-km-orders/:id/issues` asked for more codes than the order still holds. */
+export const CHZ_KM_ISSUE_TOO_MANY_CODE = "CHZ_KM_ISSUE_TOO_MANY" as const;
+
+/**
+ * `POST /chz-km-orders/:id/issues` reached an order that is not `completed`.
+ * Reported ahead of `CHZ_KM_ISSUE_TOO_MANY` even though such an order also has
+ * zero available codes: the office has to wait, not to ask for fewer.
+ */
+export const CHZ_KM_ORDER_NOT_COMPLETED_CODE = "CHZ_KM_ORDER_NOT_COMPLETED" as const;
+
+/** `GET /chz-km-orders/:id/issues/:issueId/file` reached a print issue, which has no file. */
+export const CHZ_KM_ISSUE_NOT_EXPORT_CODE = "CHZ_KM_ISSUE_NOT_EXPORT" as const;
+
 export const createChzKmOrderSchema = z.object({
   productId: z.uuid(),
   quantity: z.number().int().min(1).max(150_000),
@@ -34,6 +47,40 @@ export const createChzKmOrderSchema = z.object({
 export type CreateChzKmOrderDto = z.infer<typeof createChzKmOrderSchema>;
 
 export const chzKmOrderIdSchema = z.uuid();
+export const chzKmIssueIdSchema = z.uuid();
+
+/**
+ * `print` is capped at 5 000 while `export` carries the order's own ceiling:
+ * a browser print job of tens of thousands of pages is not a workable office
+ * action, whereas a file of them is exactly what a labelling line wants.
+ */
+export const issueChzKmCodesSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("export"),
+      format: z.enum(["txt", "csv"]),
+      count: z.number().int().min(1).max(150_000),
+    })
+    .strict(),
+  z.object({ kind: z.literal("print"), count: z.number().int().min(1).max(5_000) }).strict(),
+]);
+export type IssueChzKmCodesDto = z.infer<typeof issueChzKmCodesSchema>;
+
+export interface ChzKmIssueCodeDto {
+  seq: number;
+  code: string;
+}
+
+export interface ChzKmIssueCodesDto {
+  codes: ChzKmIssueCodeDto[];
+}
+
+/** An export issue rendered for download; `bytes` is what the browser receives verbatim. */
+export interface ChzKmIssueFileDto {
+  fileName: string;
+  contentType: string;
+  bytes: Uint8Array;
+}
 
 export interface ChzKmOrderActorDto {
   id: string;
@@ -223,4 +270,81 @@ export const chzKmOrderNotFailedOpenApiSchema: SchemaObject = {
   properties: {
     code: { type: "string", enum: [CHZ_KM_ORDER_NOT_FAILED_CODE] },
   },
+};
+
+export const issueChzKmCodesOpenApiSchema: SchemaObject = {
+  oneOf: [
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["kind", "format", "count"],
+      properties: {
+        kind: { type: "string", enum: ["export"] },
+        format: { type: "string", enum: [...schema.CHZ_KM_ISSUE_FORMATS] },
+        count: { type: "integer", minimum: 1, maximum: 150_000 },
+      },
+    },
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["kind", "count"],
+      properties: {
+        kind: { type: "string", enum: ["print"] },
+        count: { type: "integer", minimum: 1, maximum: 5_000 },
+      },
+    },
+  ],
+};
+
+export const chzKmIssueCodesOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["codes"],
+  properties: {
+    codes: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["seq", "code"],
+        properties: {
+          seq: { type: "integer" },
+          code: { type: "string" },
+        },
+      },
+    },
+  },
+};
+
+export const chzKmIssueTooManyOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["code", "available"],
+  properties: {
+    code: { type: "string", enum: [CHZ_KM_ISSUE_TOO_MANY_CODE] },
+    available: { type: "integer" },
+  },
+};
+
+export const chzKmOrderNotCompletedOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["code"],
+  properties: {
+    code: { type: "string", enum: [CHZ_KM_ORDER_NOT_COMPLETED_CODE] },
+  },
+};
+
+export const chzKmIssueNotExportOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["code"],
+  properties: {
+    code: { type: "string", enum: [CHZ_KM_ISSUE_NOT_EXPORT_CODE] },
+  },
+};
+
+/** The two ways `POST /chz-km-orders/:id/issues` refuses, documented as one 409. */
+export const chzKmIssueConflictOpenApiSchema: SchemaObject = {
+  oneOf: [chzKmIssueTooManyOpenApiSchema, chzKmOrderNotCompletedOpenApiSchema],
 };

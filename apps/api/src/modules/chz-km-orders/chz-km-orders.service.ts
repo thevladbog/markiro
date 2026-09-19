@@ -7,21 +7,35 @@ import {
   UnprocessableEntityException,
 } from "@nestjs/common";
 import { schema, type Db } from "@markiro/db";
-import { and, desc, eq } from "drizzle-orm";
-import { buildChzKmOrderBody, chzUnitTemplateIdFor } from "@markiro/domain";
+import { and, asc, desc, eq, gte, lte } from "drizzle-orm";
+import {
+  buildChzKmOrderBody,
+  chzUnitTemplateIdFor,
+  kmOrderIssueFileName,
+  serializeKmCodesCsv,
+  serializeKmCodesTxt,
+} from "@markiro/domain";
 
 import { DB } from "../../auth/auth.module";
 import { chzSignerSettingsSchema } from "../integrations/channel-registry";
 import { CHZ_CHANNEL_TYPE } from "../signer-agents/chz-constants";
+import { ChzCryptoService } from "../signer-agents/chz-crypto.service";
 import { ChzOmsTokenService } from "./chz-oms-token.service";
 import {
+  CHZ_KM_ISSUE_NOT_EXPORT_CODE,
+  CHZ_KM_ISSUE_TOO_MANY_CODE,
+  CHZ_KM_ORDER_NOT_COMPLETED_CODE,
   CHZ_KM_ORDER_NOT_FAILED_CODE,
   CHZ_KM_ORDER_PREFLIGHT_FAILED_CODE,
+  type ChzKmIssueCodeDto,
+  type ChzKmIssueCodesDto,
   type ChzKmIssueDto,
+  type ChzKmIssueFileDto,
   type ChzKmOrderDto,
   type ChzKmOrderListItemDto,
   type ChzKmOrderPreflightCode,
   type CreateChzKmOrderDto,
+  type IssueChzKmCodesDto,
 } from "./dto";
 
 /** A signer task can take a while to sign, and the tenant's agent may be offline; 48h mirrors the export runner's own horizon before an order is abandoned as failed. */
@@ -60,6 +74,7 @@ export class ChzKmOrdersService {
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly omsTokens: ChzOmsTokenService,
+    private readonly crypto: ChzCryptoService,
     @Inject(CHZ_KM_ORDER_QUEUE) private readonly queue: ChzKmOrderQueue,
   ) {}
 
@@ -281,6 +296,190 @@ export class ChzKmOrdersService {
     }
     await this.queue.enqueueChzKmOrder(tenantId, id);
     return this.get(tenantId, id);
+  }
+
+  /**
+   * Hands the office a contiguous range of the lowest still-available codes.
+   *
+   * An issue is a permanent record of which codes left the system, so two
+   * issues must never contain the same code: a code printed twice becomes two
+   * physical units claiming one identity, and the tenant finds out at a
+   * Chestny ZNAK reconciliation. `for("update")` on the order row is what
+   * makes that true -- a second issue for the same order cannot read
+   * `issued_count` until the first has committed its new value -- and the
+   * `marked.length` check is the backstop: anything other than exactly `count`
+   * still-available rows in the range rolls the whole transaction back rather
+   * than hand out a short or overlapping batch.
+   */
+  async issue(
+    tenantId: string,
+    actorUserId: string,
+    orderId: string,
+    input: IssueChzKmCodesDto,
+  ): Promise<ChzKmIssueDto> {
+    return this.db.transaction(async (tx) => {
+      const [order] = await tx
+        .select()
+        .from(schema.chzKmOrders)
+        .where(and(eq(schema.chzKmOrders.tenantId, tenantId), eq(schema.chzKmOrders.id, orderId)))
+        .for("update");
+      if (!order) throw new NotFoundException();
+      if (order.state !== "completed") {
+        throw new ConflictException({ code: CHZ_KM_ORDER_NOT_COMPLETED_CODE });
+      }
+      const available = order.fetchedCount - order.issuedCount;
+      if (input.count > available) {
+        throw new ConflictException({ code: CHZ_KM_ISSUE_TOO_MANY_CODE, available });
+      }
+
+      // The issue records who released the codes, so the actor's name is read
+      // inside the same transaction. `created_by_user_id` references `user.id`,
+      // so a missing row here is a broken invariant, not a client's 404.
+      const [actor] = await tx
+        .select({ name: schema.user.name })
+        .from(schema.user)
+        .where(eq(schema.user.id, actorUserId));
+      if (!actor) throw new Error(`Issuing user ${actorUserId} has no user row`);
+
+      const fromSeq = order.issuedCount + 1;
+      const toSeq = order.issuedCount + input.count;
+      const [issue] = await tx
+        .insert(schema.chzKmIssues)
+        .values({
+          tenantId,
+          orderId,
+          kind: input.kind,
+          format: input.kind === "export" ? input.format : null,
+          fromSeq,
+          toSeq,
+          count: input.count,
+          createdByUserId: actorUserId,
+        })
+        .returning();
+      if (!issue) throw new Error("Expected the inserted chz_km_issues row to be returned");
+
+      const marked = await tx
+        .update(schema.chzKmCodes)
+        .set({ status: "issued", issueId: issue.id })
+        .where(
+          and(
+            eq(schema.chzKmCodes.tenantId, tenantId),
+            eq(schema.chzKmCodes.orderId, orderId),
+            eq(schema.chzKmCodes.status, "available"),
+            gte(schema.chzKmCodes.seq, fromSeq),
+            lte(schema.chzKmCodes.seq, toSeq),
+          ),
+        )
+        .returning({ seq: schema.chzKmCodes.seq });
+      if (marked.length !== input.count) {
+        throw new ConflictException({ code: CHZ_KM_ISSUE_TOO_MANY_CODE, available });
+      }
+
+      await tx
+        .update(schema.chzKmOrders)
+        .set({ issuedCount: toSeq, updatedAt: new Date() })
+        .where(and(eq(schema.chzKmOrders.tenantId, tenantId), eq(schema.chzKmOrders.id, orderId)));
+      return toIssueDto(issue, actor.name);
+    });
+  }
+
+  /** The list a browser print page renders. Raw codes, so never logged or journalled. */
+  async issueCodes(
+    tenantId: string,
+    orderId: string,
+    issueId: string,
+  ): Promise<ChzKmIssueCodesDto> {
+    await this.loadIssue(tenantId, orderId, issueId);
+    return { codes: await this.decryptIssueCodes(tenantId, orderId, issueId) };
+  }
+
+  /**
+   * The same codes as `issueCodes`, serialised by `@markiro/domain` so the
+   * download and any other consumer of an export cannot drift apart. A print
+   * issue has no `format` and therefore no file -- 409 rather than inventing
+   * one, because the office asked for the wrong artifact, not a missing one.
+   */
+  async issueFile(tenantId: string, orderId: string, issueId: string): Promise<ChzKmIssueFileDto> {
+    const { issue, gtin14 } = await this.loadIssue(tenantId, orderId, issueId);
+    const format = issue.format;
+    if (issue.kind !== "export" || (format !== "txt" && format !== "csv")) {
+      throw new ConflictException({ code: CHZ_KM_ISSUE_NOT_EXPORT_CODE });
+    }
+    const codes = (await this.decryptIssueCodes(tenantId, orderId, issueId)).map(
+      (entry) => entry.code,
+    );
+    return {
+      fileName: kmOrderIssueFileName(gtin14, issue.fromSeq, issue.toSeq, format),
+      contentType: format === "csv" ? "text/csv; charset=utf-8" : "text/plain; charset=utf-8",
+      bytes: format === "csv" ? serializeKmCodesCsv(codes) : serializeKmCodesTxt(codes),
+    };
+  }
+
+  /**
+   * 404, not 403, for another tenant's issue: possession of an issue id is not
+   * authorization, and confirming the id exists would itself leak. The order
+   * join also supplies the GTIN the export file is named after.
+   */
+  private async loadIssue(
+    tenantId: string,
+    orderId: string,
+    issueId: string,
+  ): Promise<{ issue: typeof schema.chzKmIssues.$inferSelect; gtin14: string }> {
+    const [row] = await this.db
+      .select({ issue: schema.chzKmIssues, gtin14: schema.chzKmOrders.gtin14 })
+      .from(schema.chzKmIssues)
+      .innerJoin(
+        schema.chzKmOrders,
+        and(
+          eq(schema.chzKmOrders.tenantId, schema.chzKmIssues.tenantId),
+          eq(schema.chzKmOrders.id, schema.chzKmIssues.orderId),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.chzKmIssues.tenantId, tenantId),
+          eq(schema.chzKmIssues.orderId, orderId),
+          eq(schema.chzKmIssues.id, issueId),
+        ),
+      );
+    if (!row) throw new NotFoundException();
+    return row;
+  }
+
+  /**
+   * The AAD has to be byte-identical to the one the runner sealed each code
+   * with (`tenantId/orderId/seq`); a mismatch surfaces as a decryption
+   * failure, not as wrong data.
+   */
+  private async decryptIssueCodes(
+    tenantId: string,
+    orderId: string,
+    issueId: string,
+  ): Promise<ChzKmIssueCodeDto[]> {
+    const rows = await this.db
+      .select({
+        seq: schema.chzKmCodes.seq,
+        encryptedCode: schema.chzKmCodes.encryptedCode,
+        codeNonce: schema.chzKmCodes.codeNonce,
+        codeTag: schema.chzKmCodes.codeTag,
+      })
+      .from(schema.chzKmCodes)
+      .where(
+        and(
+          eq(schema.chzKmCodes.tenantId, tenantId),
+          eq(schema.chzKmCodes.orderId, orderId),
+          eq(schema.chzKmCodes.issueId, issueId),
+        ),
+      )
+      .orderBy(asc(schema.chzKmCodes.seq));
+    return rows.map((row) => ({
+      seq: row.seq,
+      code: this.crypto.decryptWithAad(`${tenantId}/${orderId}/${row.seq}`, {
+        encryptedToken: row.encryptedCode,
+        tokenNonce: row.codeNonce,
+        tokenTag: row.codeTag,
+      }),
+    }));
   }
 
   /**

@@ -550,7 +550,7 @@ describe.skipIf(!ready)("ChzKmOrderRunnerService", () => {
     expect(reloaded.state).toBe("rejected");
     expect(reloaded.rejectionReason).toBe("ЧЗ отклонил заказ: неверный GTIN");
 
-    const service = new ChzKmOrdersService(db, tokens, {
+    const service = new ChzKmOrdersService(db, tokens, crypto, {
       enqueueChzKmOrder: vi.fn().mockResolvedValue(null),
     });
     await expect(service.retry(tenantId, order.id)).rejects.toMatchObject({
