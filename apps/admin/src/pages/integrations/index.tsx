@@ -10,20 +10,27 @@ import { useChannels, type ChannelState, type ChannelSummaryDto } from "./api.js
  * State -> phase, one-to-one with the five `ChannelState` values (brief 08's
  * "not configured / working / error / silent / unavailable").
  *
- * `not_configured` is the only legitimate `none` here: there genuinely is no
- * value and none is expected until an operator sets the channel up.
- * `unavailable` is a different story -- brief 08 calls it "a connection we
- * have not built yet", and `JournalFilters.tsx` already treats it exactly
- * like `silent` (same `warn`-toned notice, same "show me the latest" action):
- * both are "this channel should be doing something and isn't", which is
- * `attention`, not an absence of value.
+ * `not_configured` and `unavailable` share `none`, not because they mean the
+ * same thing, but because both mean "no working channel right now" -- they
+ * differ only in *why*, and the caption (`integrations.state.not_configured`
+ * vs `.unavailable`) is what carries that difference, per the spec rule that
+ * colour need not be the only signal. `not_configured` is an operator who
+ * hasn't set the channel up yet; `unavailable` is brief 08's "a connection we
+ * have not built" -- there is no adapter, so there is nothing an operator can
+ * do about it from this card (`ChannelCard` below deliberately never links an
+ * unavailable channel). A permanent amber "!" on a channel nobody can act on
+ * is exactly the pattern this phase system exists to stop: it trains people
+ * to read past warnings. `JournalFilters.tsx` still groups `unavailable` with
+ * `silent` for its own "show me the latest" journal action -- that is a
+ * different question (does the journal have anything to show) from this
+ * card's phase (is there a working channel to point at).
  */
 export const CHANNEL_STATE_TO_PHASE: Record<ChannelState, TagPhase> = {
   working: "active",
   error: "failed",
   silent: "attention",
   not_configured: "none",
-  unavailable: "attention",
+  unavailable: "none",
 };
 
 /**
