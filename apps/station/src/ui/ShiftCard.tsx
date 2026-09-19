@@ -12,8 +12,11 @@ export interface ShiftCardProps {
   locale?: string;
   plannedQty?: number | null;
   mode?: "validation" | "aggregation";
+  /** Aggregation shift that also builds pallets; shown beside the mode so it is not read as plain box aggregation. */
+  palletsEnabled?: boolean;
   status?: "planned" | "active" | "closing" | "closed";
   modeLabel?: string;
+  palletsLabel?: string;
   statusLabel?: string;
   noPlanLabel?: string;
   plannedLabel?: string;
@@ -51,8 +54,10 @@ export function ShiftCard({
   locale = "ru",
   plannedQty,
   mode,
+  palletsEnabled = false,
   status,
   modeLabel,
+  palletsLabel,
   statusLabel,
   noPlanLabel,
   plannedLabel,
@@ -121,6 +126,9 @@ export function ShiftCard({
             ) : null}
             <div className="shift-card__plan">
               {modeLabel ?? mode}
+              {palletsEnabled ? (
+                <span className="shift-card__pallets">{` · ${palletsLabel ?? "pallets"}`}</span>
+              ) : null}
               {formattedQuantity !== null
                 ? ` · ${plannedLabel ?? "plan"} ${formattedQuantity}`
                 : ` · ${noPlanLabel ?? "no plan"}`}

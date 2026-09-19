@@ -1439,6 +1439,7 @@ function ShiftFixture({ variant, locale }: { variant: string; locale: GalleryLoc
               : "Zhigulevskoye light filtered pasteurized beer, 0.5 l",
             active: true,
             mode: "aggregation" as const,
+            palletsEnabled: true,
             plannedQty: null,
           },
         ]
@@ -1487,6 +1488,8 @@ function ShiftFixture({ variant, locale }: { variant: string; locale: GalleryLoc
                 locale={locale}
                 plannedQty={shift.plannedQty}
                 mode={shift.mode}
+                palletsEnabled={"palletsEnabled" in shift && shift.palletsEnabled === true}
+                palletsLabel={ru ? "паллеты" : "pallets"}
                 status={shift.active ? "active" : "planned"}
                 modeLabel={
                   shift.mode === "aggregation"

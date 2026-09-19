@@ -42,6 +42,7 @@ describe("ShiftSelection", () => {
               id: "just-closed",
               status: "active",
               mode: "aggregation",
+              palletsEnabled: true,
               productName: "Waiting for close sync",
               plannedQty: 10,
               productId: "product-1",
@@ -59,10 +60,16 @@ describe("ShiftSelection", () => {
       },
     };
 
-    render(<ShiftSelection client={client} exec={exec} onSelected={() => {}} onNew={() => {}} />);
+    const { container } = render(
+      <ShiftSelection client={client} exec={exec} onSelected={() => {}} onNew={() => {}} />,
+    );
 
     await waitFor(() => expect(screen.getByText("Closing")).toBeDefined());
     expect(screen.getByText("Waiting for close sync")).toBeDefined();
+    // The list item carries `palletsEnabled`; the card must not read as plain box aggregation.
+    expect(container.querySelector(".shift-card__plan")?.textContent).toBe(
+      "Aggregation · pallets · plan 10",
+    );
     expect((screen.getByRole("button", { name: "Rejoin" }) as HTMLButtonElement).disabled).toBe(
       true,
     );

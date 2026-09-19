@@ -103,6 +103,41 @@ describe("ShiftCard", () => {
     expect(container.textContent).not.toContain("Производство");
   });
 
+  /** Owner request 2026-09-19: an aggregation shift that builds pallets must say so on the card. */
+  it("names pallets beside the mode only when the shift builds them", () => {
+    const props = {
+      productName: "Квас хлебный",
+      plannedDate: "2026-08-21",
+      locale: "ru",
+      plannedQty: 2_400,
+      mode: "aggregation" as const,
+      status: "planned" as const,
+      modeLabel: "Агрегация",
+      palletsLabel: "паллеты",
+      plannedLabel: "план",
+      noPlanLabel: "без плана",
+      counterpartyName: null,
+      counterpartyLabel: "Для",
+      actionLabel: "Открыть",
+      active: false,
+      disabled: false,
+      onSelect: vi.fn(),
+      productId: "product-1",
+      image: null,
+    };
+    const { container, rerender } = render(<ShiftCard {...props} palletsEnabled />);
+    expect(container.querySelector(".shift-card__plan")?.textContent).toBe(
+      "Агрегация · паллеты · план 2 400",
+    );
+    expect(container.querySelector(".shift-card__pallets")).not.toBeNull();
+
+    rerender(<ShiftCard {...props} palletsEnabled={false} />);
+    expect(container.querySelector(".shift-card__plan")?.textContent).toBe(
+      "Агрегация · план 2 400",
+    );
+    expect(container.querySelector(".shift-card__pallets")).toBeNull();
+  });
+
   it("formats a calendar date without exposing the API ISO representation", () => {
     expect(formatShiftPlannedDate("2026-08-21", "ru")).toBe("21.08.2026");
     expect(formatShiftPlannedDate("2026-08-21", "en")).toBe("08/21/2026");
