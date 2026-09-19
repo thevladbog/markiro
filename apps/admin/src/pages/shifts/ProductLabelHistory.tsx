@@ -10,8 +10,8 @@ import { useProductLabelEvents, useProductLabelHistory } from "./product-labels-
 // The job/verification state a row actually renders, derived below from
 // `job.verificationOutcome` and `job.status` -- the union `t(...states.*)`
 // covers in `apps/admin/src/i18n/ru.json`. This is the same seven-value
-// derivation `Events` and the JSX below already performed inline; naming it
-// lets `productLabelJobPhase` switch over the exact same union exhaustively.
+// derivation the JSX below already performed inline; naming it lets
+// `productLabelJobPhase` switch over the exact same union exhaustively.
 type ProductLabelJobDisplayState =
   "prepared" | "sending" | "awaiting_verification" | "attention" | "skipped" | "verified" | "sent";
 
