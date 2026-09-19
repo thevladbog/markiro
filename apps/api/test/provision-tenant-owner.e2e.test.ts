@@ -5,7 +5,9 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createDb, schema } from "@markiro/db";
 import {
   buildDuplicateLabelTemplate,
+  buildKmLabelTemplates,
   buildPalletLabelTemplates,
+  KM_LABEL_TEMPLATE_NAME,
   PALLET_LABEL_58X40_TEMPLATE_NAME,
   PALLET_LABEL_TEMPLATE_NAME,
 } from "@markiro/domain";
@@ -335,8 +337,9 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
       .select({ id: schema.labelTemplates.id })
       .from(schema.labelTemplates)
       .where(eq(schema.labelTemplates.tenantId, result.tenantId));
-    // 16 box + 2 product_duplicate + 2 pallet (06d + spec 2026-09-18 §8).
-    expect(after).toHaveLength(20);
+    // 16 box + 2 product_duplicate + 2 pallet (06d + spec 2026-09-18 §8) + 1
+    // product_km (task 12).
+    expect(after).toHaveLength(21);
     // Selection order is not guaranteed without ORDER BY; sort by name so the
     // comparison is deterministic regardless of physical row order.
     const pallets = templates
@@ -366,6 +369,17 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
         }),
       ]),
     );
+
+    // Stock KM label (task 12): exactly one product_km row, seeded straight
+    // from buildKmLabelTemplates() -- the same list the API validates a
+    // hand-created product_km template's spec against.
+    const kmTemplates = templates.filter((t) => t.purpose === "product_km");
+    expect(kmTemplates).toEqual([
+      expect.objectContaining({
+        name: KM_LABEL_TEMPLATE_NAME,
+        spec: buildKmLabelTemplates()[0]!.spec,
+      }),
+    ]);
   });
 
   it("renews an expired unused activation only when explicitly requested", async () => {

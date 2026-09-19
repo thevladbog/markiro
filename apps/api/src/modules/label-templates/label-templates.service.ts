@@ -15,6 +15,7 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import {
   assertDuplicateTemplate,
+  assertKmTemplate,
   DomainError,
   isBoxLabelTemplateEligible,
   isPalletLabelTemplateEligible,
@@ -285,9 +286,15 @@ export class LabelTemplatesService {
   }
 
   private assertPurposeSpec(purpose: LabelTemplatePurpose, spec: LabelTemplateSpec): void {
-    if (purpose !== "product_duplicate") return;
+    const assert =
+      purpose === "product_duplicate"
+        ? assertDuplicateTemplate
+        : purpose === "product_km"
+          ? assertKmTemplate
+          : null;
+    if (assert === null) return;
     try {
-      assertDuplicateTemplate(spec);
+      assert(spec);
     } catch (error) {
       if (!(error instanceof DomainError)) throw error;
       throw new BadRequestException({ code: error.code, message: error.message });

@@ -11,7 +11,7 @@ import { loadEnv } from "../src/env";
 import { schema, type Db } from "@markiro/db";
 import { listenOnLoopback } from "./support/listen-loopback";
 import { createTestStationDevice } from "./support/auth";
-import { buildDuplicateLabelTemplate } from "@markiro/domain";
+import { buildDuplicateLabelTemplate, buildKmLabelTemplates } from "@markiro/domain";
 
 /**
  * A minimal, valid `LabelTemplateSpec` (see packages/domain/src/labels/model.ts)
@@ -776,5 +776,53 @@ describe.skipIf(!ready)("label-templates e2e", () => {
       .send({ chzProductGroupCodes: null })
       .expect(200);
     expect(widened.body.chzProductGroupCodes).toBeNull();
+  });
+
+  // ---------------------------------------------------------------------
+  // KM-purpose templates (task 12): a single Chestny ZNAK marking code and
+  // its Data Matrix, printed from the office before units go down the line.
+  // `assertKmTemplate` wraps the same geometry invariant as a duplicate
+  // template (one in-bounds product Data Matrix, no SSCC), reported under
+  // its own KM_LABEL_TEMPLATE_INVALID code.
+  // ---------------------------------------------------------------------
+
+  it("POST /label-templates creates a product_km-purpose template with the stock KM spec", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+    const spec = buildKmLabelTemplates()[0]!.spec;
+
+    const created = await agent
+      .post("/label-templates")
+      .send({ name: "Этикетка КМ 58×40", purpose: "product_km", spec })
+      .expect(201);
+    expect(created.body).toMatchObject({
+      name: "Этикетка КМ 58×40",
+      purpose: "product_km",
+      spec,
+    });
+
+    // It is a real, listed template of the tenant, not a write-only echo.
+    const listed = await agent.get("/label-templates?enabled=all").expect(200);
+    expect(listed.body.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: created.body.id as string, purpose: "product_km" }),
+      ]),
+    );
+  });
+
+  it("POST /label-templates rejects a product_km template without its Data Matrix", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+    const spec = buildKmLabelTemplates()[0]!.spec;
+    const withoutDataMatrix = {
+      ...spec,
+      elements: spec.elements.filter((element) => element.kind !== "barcode"),
+    };
+
+    const rejected = await agent
+      .post("/label-templates")
+      .send({ name: "Broken KM", purpose: "product_km", spec: withoutDataMatrix })
+      .expect(400);
+    expect(rejected.body.code).toBe("KM_LABEL_TEMPLATE_INVALID");
   });
 });
