@@ -45,6 +45,50 @@ export function boxStatePhase(state: InventoryProgress["boxes"][number]["state"]
   }
 }
 
+/**
+ * Последнее событие живого хода: пятизначный union классификации плюс
+ * возможный `null` (`inventoryRecentEventSchema.classification` в
+ * `./schemas.ts`), не двухветочный тернарник «expected или нет». Фазы по
+ * смыслу подписей `pages.inventory.live.classification` (`ru.json`), не по
+ * прежнему тону:
+ * - `expected`/`protected` («Ожидаемый»/«Защищённый») — код найден и
+ *   совпал с тем, что от него ждали; `protectedFoundCount` в `./schemas.ts`
+ *   отслеживает находку защищённого кода тем же образом, что
+ *   `verifiedCount` — обычного, так что это тот же исход, `done`.
+ * - `unknown` («Неизвестный») — код, которого нет в исходном снимке вовсе:
+ *   единственный по-настоящему подозрительный случай в этом union,
+ *   `attention`.
+ * - `ineligible` («Не учитывается») — код по определению не участвует в
+ *   этой инвентаризации (не тот диапазон дат/статус); значения для текущей
+ *   проверки нет, `none`, а не тревога наравне с `unknown`.
+ * - `voided` («Отменён») — результат аннулирован человеком, завершённое
+ *   действие, как отменённое приглашение в `pages/team/TeamPage.tsx`
+ *   (`invitationAccessPhase`), `retired`, а не тревога.
+ * - `null` — короб-события (`known_box`/`old_box`) не несут классификацию
+ *   вовсе, не только предмет; значения нет, `none`, та же фаза, что у
+ *   `ineligible`.
+ *
+ * Прежний `event.classification === "expected" ? "done" : "attention"`
+ * уравнивал «Отменён» и «Не учитывается» с настоящими отклонениями.
+ */
+export function recentEventPhase(
+  classification: InventoryProgress["recentEvents"][number]["classification"],
+): TagPhase {
+  switch (classification) {
+    case "expected":
+    case "protected":
+      return "done";
+    case "unknown":
+      return "attention";
+    case "ineligible":
+      return "none";
+    case "voided":
+      return "retired";
+    case null:
+      return "none";
+  }
+}
+
 function formatCount(value: number, locale: string): string {
   return new Intl.NumberFormat(locale).format(value);
 }
@@ -268,7 +312,7 @@ export function InventoryLivePage({
                   <small>{event.terminalName}</small>
                 </span>
                 <StatusChip
-                  phase={event.classification === "expected" ? "done" : "attention"}
+                  phase={recentEventPhase(event.classification)}
                   label={
                     event.classification
                       ? t(`pages.inventory.live.classification.${event.classification}`)

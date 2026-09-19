@@ -6,7 +6,11 @@ import { productStatusPhase } from "../src/pages/catalog/index.js";
 import { chzStatusPhase } from "../src/pages/catalog/national-catalog/ChzStatus.js";
 import { onlineStationsPhase } from "../src/pages/inventory/InventoryDetailPage.js";
 import { lateEventResolutionPhase } from "../src/pages/inventory/InventoryLateEvents.js";
-import { boxStatePhase, participantStatePhase } from "../src/pages/inventory/InventoryLivePage.js";
+import {
+  boxStatePhase,
+  participantStatePhase,
+  recentEventPhase,
+} from "../src/pages/inventory/InventoryLivePage.js";
 import { INVENTORY_STATUS_TO_PHASE } from "../src/pages/inventory/status.js";
 
 /**
@@ -141,5 +145,30 @@ describe("minor: неподключённый биллинг-канал — none
   it("unmanaged не требует вмешательства, которого не существует", () => {
     expect(chipPhaseFor("unmanaged")).toBe("none");
     expect(chipPhaseFor("unmanaged")).not.toBe("attention");
+  });
+});
+
+describe("находка 4 (финальное ревью): последнее событие живого хода — пятизначный union, не expected/остальное", () => {
+  it("expected и protected — найденный код совпал с ожиданием, done", () => {
+    expect(recentEventPhase("expected")).toBe("done");
+    expect(recentEventPhase("protected")).toBe("done");
+  });
+
+  it("unknown остаётся единственным настоящим отклонением, attention", () => {
+    expect(recentEventPhase("unknown")).toBe("attention");
+  });
+
+  it("ineligible не участвует в проверке — none, а не тревога наравне с unknown", () => {
+    expect(recentEventPhase("ineligible")).toBe("none");
+    expect(recentEventPhase("ineligible")).not.toBe("attention");
+  });
+
+  it("voided — отменённое человеком действие, retired, а не тревога", () => {
+    expect(recentEventPhase("voided")).toBe("retired");
+    expect(recentEventPhase("voided")).not.toBe("attention");
+  });
+
+  it("null (короб-события без классификации) — none", () => {
+    expect(recentEventPhase(null)).toBe("none");
   });
 });
