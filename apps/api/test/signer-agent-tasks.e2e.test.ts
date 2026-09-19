@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import express from "express";
 import request from "supertest";
 import { Test } from "@nestjs/testing";
@@ -237,5 +238,120 @@ describe.skipIf(!ready)("signer agent task queue", () => {
         certThumbprint: "AB12",
       })
       .expect(400);
+  });
+
+  async function setOmsSettings(): Promise<void> {
+    await db
+      .insert(schema.integrationChannels)
+      .values({
+        tenantId,
+        type: "chestny_znak",
+        settings: {
+          environment: "sandbox",
+          omsId: "cdf12109-10d3-11e6-8b6f-0050569977a1",
+          omsConnection: "11b1abc1-f1ee-11db-1a11-f11ac11111e1",
+        },
+      })
+      .onConflictDoUpdate({
+        target: [schema.integrationChannels.tenantId, schema.integrationChannels.type],
+        set: {
+          settings: {
+            environment: "sandbox",
+            omsId: "cdf12109-10d3-11e6-8b6f-0050569977a1",
+            omsConnection: "11b1abc1-f1ee-11db-1a11-f11ac11111e1",
+          },
+        },
+      });
+  }
+
+  it("completes an oms_auth task into chz_oms_tokens", async () => {
+    const { agentId, secret } = await pairAgent();
+    await setOmsSettings();
+    const [row] = await db
+      .insert(schema.chzSignerTasks)
+      .values({
+        tenantId,
+        type: "oms_auth",
+        payload: {
+          trueApiBaseUrl: "https://markirovka.sandbox.crptech.ru/api/v3/true-api",
+          omsConnection: "11b1abc1-f1ee-11db-1a11-f11ac11111e1",
+        },
+      })
+      .returning({ id: schema.chzSignerTasks.id });
+    const next = await request(app!.getHttpServer())
+      .get("/signer-agent/tasks/next?wait=0")
+      .set("x-signer-token", secret)
+      .expect(200);
+    expect(next.body.task).toMatchObject({ id: row!.id, type: "oms_auth" });
+    const expiresAt = new Date(Date.now() + 10 * 3600_000).toISOString();
+    await request(app!.getHttpServer())
+      .post(`/signer-agent/tasks/${row!.id}/complete`)
+      .set("x-signer-token", secret)
+      .send({ token: "2f2222c2-cbc2-22ff-bc2c-2222222fbef2", expiresAt, certThumbprint: "AB12" })
+      .expect(204);
+    const [token] = await db
+      .select()
+      .from(schema.chzOmsTokens)
+      .where(eq(schema.chzOmsTokens.tenantId, tenantId));
+    expect(token).toMatchObject({
+      agentId,
+      sourceOmsConnection: "11b1abc1-f1ee-11db-1a11-f11ac11111e1",
+    });
+    expect(Buffer.from(token!.encryptedToken).toString("utf8")).not.toContain("2f2222c2");
+  });
+
+  it("completes a sign_detached task by storing the signature on the task", async () => {
+    const { secret } = await pairAgent();
+    const [row] = await db
+      .insert(schema.chzSignerTasks)
+      .values({
+        tenantId,
+        type: "sign_detached",
+        payload: { purpose: "oms_order", orderId: randomUUID(), dataBase64: "eyJhIjoxfQ==" },
+      })
+      .returning({ id: schema.chzSignerTasks.id });
+    await request(app!.getHttpServer())
+      .get("/signer-agent/tasks/next?wait=0")
+      .set("x-signer-token", secret)
+      .expect(200);
+    await request(app!.getHttpServer())
+      .post(`/signer-agent/tasks/${row!.id}/complete`)
+      .set("x-signer-token", secret)
+      .send({ signatureBase64: "MIIE5QYJKoZIhvcNAQcCoIIE1g==", certThumbprint: "AB12" })
+      .expect(204);
+    const [task] = await db
+      .select()
+      .from(schema.chzSignerTasks)
+      .where(eq(schema.chzSignerTasks.id, row!.id));
+    expect(task).toMatchObject({
+      status: "completed",
+      resultSummary: { signatureBase64: "MIIE5QYJKoZIhvcNAQcCoIIE1g==", certThumbprint: "AB12" },
+    });
+  });
+
+  it("refuses a token body for a sign_detached task", async () => {
+    const { secret } = await pairAgent();
+    const [row] = await db
+      .insert(schema.chzSignerTasks)
+      .values({
+        tenantId,
+        type: "sign_detached",
+        payload: { purpose: "oms_order", orderId: randomUUID(), dataBase64: "eyJhIjoxfQ==" },
+      })
+      .returning({ id: schema.chzSignerTasks.id });
+    await request(app!.getHttpServer())
+      .get("/signer-agent/tasks/next?wait=0")
+      .set("x-signer-token", secret)
+      .expect(200);
+    await request(app!.getHttpServer())
+      .post(`/signer-agent/tasks/${row!.id}/complete`)
+      .set("x-signer-token", secret)
+      .send({ token: "x", expiresAt: new Date().toISOString(), certThumbprint: "AB12" })
+      .expect(400);
+    await request(app!.getHttpServer())
+      .post(`/signer-agent/tasks/${row!.id}/fail`)
+      .set("x-signer-token", secret)
+      .send({ errorCode: "NETWORK", message: "cleanup" })
+      .expect(204);
   });
 });

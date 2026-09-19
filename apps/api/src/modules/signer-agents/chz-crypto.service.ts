@@ -34,20 +34,29 @@ export class ChzCryptoService {
     return this.key;
   }
 
-  encrypt(tenantId: string, token: string): EncryptedChzToken {
+  /** AAD-generic form: any caller can bind ciphertext to its own scope string, not just a tenant id. */
+  encryptWithAad(aad: string, value: string): EncryptedChzToken {
     const nonce = randomBytes(12);
     const cipher = createCipheriv("aes-256-gcm", this.requireKey(), nonce);
-    cipher.setAAD(Buffer.from(tenantId, "utf8"));
-    const encryptedToken = Buffer.concat([cipher.update(token, "utf8"), cipher.final()]);
+    cipher.setAAD(Buffer.from(aad, "utf8"));
+    const encryptedToken = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
     return { encryptedToken, tokenNonce: nonce, tokenTag: cipher.getAuthTag() };
   }
 
-  decrypt(tenantId: string, payload: EncryptedChzToken): string {
+  decryptWithAad(aad: string, payload: EncryptedChzToken): string {
     const decipher = createDecipheriv("aes-256-gcm", this.requireKey(), payload.tokenNonce);
-    decipher.setAAD(Buffer.from(tenantId, "utf8"));
+    decipher.setAAD(Buffer.from(aad, "utf8"));
     decipher.setAuthTag(payload.tokenTag);
     return Buffer.concat([decipher.update(payload.encryptedToken), decipher.final()]).toString(
       "utf8",
     );
+  }
+
+  encrypt(tenantId: string, token: string): EncryptedChzToken {
+    return this.encryptWithAad(tenantId, token);
+  }
+
+  decrypt(tenantId: string, payload: EncryptedChzToken): string {
+    return this.decryptWithAad(tenantId, payload);
   }
 }
