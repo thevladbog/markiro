@@ -38,6 +38,26 @@ export const DELIVERY_STATUS_TO_PHASE: Record<string, TagPhase> = {
   canceled: "retired",
 };
 
+// `TeamInvitation["accessStatus"]` (`./api.ts`) is a five-value union, not a
+// pending/other split: an accepted invitation is a normal successful outcome
+// (`done`), while rejected, canceled and expired are three distinct ways an
+// invitation ends without being accepted -- none of them a system failure --
+// so they share the terminal, human/time-driven `retired` phase. A `switch`
+// without `default` so a sixth value the API ever adds fails typecheck here
+// instead of silently falling through to `none`.
+export function invitationAccessPhase(accessStatus: TeamInvitation["accessStatus"]): TagPhase {
+  switch (accessStatus) {
+    case "pending":
+      return "planned";
+    case "accepted":
+      return "done";
+    case "rejected":
+    case "canceled":
+    case "expired":
+      return "retired";
+  }
+}
+
 export function TeamPage() {
   const { t } = useTranslation();
   const auth = useAuthClient();
@@ -125,7 +145,7 @@ function TeamContent({ team, currentUserId }: { team: TeamResponse; currentUserI
         title: t("pages.team.table.access"),
         render: (invitation) => (
           <StatusChip
-            phase={invitation.accessStatus === "pending" ? "planned" : "none"}
+            phase={invitationAccessPhase(invitation.accessStatus)}
             label={t(`pages.team.access.${invitation.accessStatus}`, {
               defaultValue: invitation.accessStatus,
             })}
@@ -236,7 +256,11 @@ function EmployeeCell({ employee }: { employee: TeamEmployee | null }) {
           label={t(`pages.team.employeeStatus.${employee.status}`)}
         />
         <StatusChip
-          phase={employee.operatorAccess ? "active" : "none"}
+          // Same fact `EmployeeStationAccessSection.tsx` already renders as
+          // `retired`: revoked station access is a human decision, cleanly
+          // ended, its record intact -- not "no value" (`none`), which would
+          // claim there is nothing to say about it at all.
+          phase={employee.operatorAccess ? "active" : "retired"}
           label={
             employee.operatorAccess
               ? t("pages.team.operator.enabled")

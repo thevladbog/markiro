@@ -7,7 +7,7 @@ import { ThemeProvider } from "@markiro/ui";
 
 import { AuthClientProvider, type AuthClientLike } from "../src/auth/client.js";
 import i18n from "../src/i18n/index.js";
-import { TeamPage } from "../src/pages/team/TeamPage.js";
+import { invitationAccessPhase, TeamPage } from "../src/pages/team/TeamPage.js";
 
 const TEAM = {
   members: [
@@ -174,6 +174,21 @@ describe("TeamPage", () => {
     expect(screen.getByText("Сотрудник в архиве")).toBeDefined();
     expect(screen.queryByRole("button", { name: /Изменить Елена Ким/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /Изменить Иван Петров/ })).toBeNull();
+
+    // Finding 3 (final review): an enabled operator access is `active`, and
+    // -- unlike before -- a revoked one is `retired` (a human decision,
+    // record intact), matching `EmployeeStationAccessSection.tsx`, not the
+    // "no value" `none`.
+    expect(screen.getByText("Есть доступ оператора").closest(".mk-chip")?.className).toContain(
+      "mk-chip--active",
+    );
+    const disabledAccess = screen.getByText("Доступ оператора выключен").closest(".mk-chip");
+    expect(disabledAccess?.className).toContain("mk-chip--retired");
+    expect(disabledAccess?.querySelector(".mk-tag__glyph")?.textContent).toBe("✕");
+
+    // The pending invitation's own access tag is `planned`, not `none`.
+    const pendingAccess = screen.getByText("Ожидает принятия").closest(".mk-chip");
+    expect(pendingAccess?.className).toContain("mk-chip--planned");
   });
 
   it("offers only unclaimed active employees and creates an invitation", async () => {
@@ -363,4 +378,30 @@ describe("TeamPage", () => {
 
     expect(await screen.findByText("Повторная отправка")).toBeDefined();
   });
+});
+
+describe("invitationAccessPhase", () => {
+  /**
+   * Finding 3 (final review): the previous ternary only distinguished
+   * `pending`; the other four of the five actual `accessStatus` values,
+   * including `accepted` (a normal successful outcome), all fell into
+   * `none`. Every branch of the real union gets its own assertion so a
+   * future regression to a two-way ternary fails here.
+   */
+  it("gives the pending invitation a waiting-to-start phase", () => {
+    expect(invitationAccessPhase("pending")).toBe("planned");
+  });
+
+  it("gives an accepted invitation a normal successful outcome, not none", () => {
+    expect(invitationAccessPhase("accepted")).toBe("done");
+    expect(invitationAccessPhase("accepted")).not.toBe("none");
+  });
+
+  it.each(["rejected", "canceled", "expired"] as const)(
+    "gives a terminally-ended invitation (%s) retired, not none",
+    (status) => {
+      expect(invitationAccessPhase(status)).toBe("retired");
+      expect(invitationAccessPhase(status)).not.toBe("none");
+    },
+  );
 });
