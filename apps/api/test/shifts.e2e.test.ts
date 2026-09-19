@@ -906,10 +906,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       boxCapacity: 12,
       palletBoxCapacity: 48,
     });
-    const created = await owner
-      .post("/shifts")
-      .send({ productId, mode: "validation" })
-      .expect(201);
+    const created = await owner.post("/shifts").send({ productId, mode: "validation" }).expect(201);
     const shiftId = created.body.id as string;
 
     const planned = await owner.get(`/shifts/${shiftId}/task-form`).expect(200);
@@ -923,9 +920,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     expect(active.text).toContain("В работе");
 
     await owner.post(`/shifts/${shiftId}/close`).send({ reason: "done" }).expect(200);
-    await owner
-      .get(`/shifts/${shiftId}/task-form`)
-      .expect(409, { code: "SHIFT_TASK_FORM_CLOSED" });
+    await owner.get(`/shifts/${shiftId}/task-form`).expect(409, { code: "SHIFT_TASK_FORM_CLOSED" });
   });
 
   it("keeps the task form out of reach of a station credential and of another tenant", async () => {
@@ -937,10 +932,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       boxCapacity: 12,
       palletBoxCapacity: 48,
     });
-    const created = await owner
-      .post("/shifts")
-      .send({ productId, mode: "validation" })
-      .expect(201);
+    const created = await owner.post("/shifts").send({ productId, mode: "validation" }).expect(201);
     const shiftId = created.body.id as string;
 
     const station = await createTestStationDevice(app!, owner, "Task-form terminal");
@@ -952,6 +944,45 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     const otherTenantOwner = request.agent(app!.getHttpServer());
     await signUpAndActivate(otherTenantOwner);
     await otherTenantOwner.get(`/shifts/${shiftId}/task-form`).expect(404);
+  });
+
+  it("prints the counterparty and the sscc issuer through their own joins, not swapped", async () => {
+    const owner = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(owner);
+    await setDefaultBoxLabelTemplate(owner, orgId);
+
+    const buyerId = await seedCounterparty(orgId, "Покупатель Ромашка");
+    const issuerId = await seedCounterparty(orgId, "Эмитент Атолл");
+    const productId = await seedProduct(orgId, {
+      status: "active",
+      chzProductGroupCode: 8,
+      boxCapacity: 12,
+      palletBoxCapacity: 48,
+    });
+
+    const created = await owner
+      .post("/shifts")
+      .send({
+        productId,
+        mode: "aggregation",
+        counterpartyId: buyerId,
+        ssccIssuerCounterpartyId: issuerId,
+      })
+      .expect(201);
+    const shiftId = created.body.id as string;
+
+    const form = await owner.get(`/shifts/${shiftId}/task-form`).expect(200);
+
+    // Each name must land beside its own label. If the sscc_issuer alias were
+    // ever joined on counterpartyId instead of ssccIssuerCounterpartyId (or
+    // vice versa), these two dt/dd pairs would swap and one of these
+    // assertions would fail.
+    expect(form.text).toContain(
+      '<div class="parameter"><dt>ДЛЯ КОНТРАГЕНТА</dt><dd>Покупатель Ромашка</dd></div>',
+    );
+    expect(form.text).toContain(
+      '<div class="parameter"><dt>НОМЕРА SSCC</dt><dd>Эмитент Атолл</dd></div>',
+    );
   });
 
   it("GET/list/PATCH omit a seeded legacy item binding and PATCH leaves its column untouched", async () => {
