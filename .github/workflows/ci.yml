@@ -317,7 +317,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: production-browser-${{ github.sha }}
-          path: tools/production-browser/test-results/production
+          # `outputDir` in production.playwright.config.ts — traces and failure
+          # screenshots land here, not under tools/production-browser.
+          path: .superpowers/sdd/production-browser-output
           if-no-files-found: ignore
           retention-days: 14
       - name: Verify the National Catalog import frames
@@ -327,7 +329,8 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: catalog-import-browser-${{ github.sha }}
-          path: tools/production-browser/test-results/catalog-import
+          # `outputDir` in catalog-import.playwright.config.ts.
+          path: .superpowers/sdd/catalog-import-browser-output
           if-no-files-found: ignore
           retention-days: 14
       - name: Verify asynchronous SaaS report downloads
