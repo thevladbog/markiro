@@ -62,7 +62,7 @@ export function ServicePeriodsPage() {
                   </p>
                 </div>
                 <StatusChip
-                  status={period.state === "active" && !exhausted ? "ok" : "neutral"}
+                  phase={period.state === "active" && !exhausted ? "active" : "retired"}
                   label={t(
                     exhausted
                       ? "pages.billing.servicePeriods.state.exhausted"

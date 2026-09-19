@@ -93,7 +93,7 @@ export function ServicePeriodDetailPage() {
       <Card title={t("pages.billing.servicePeriods.detail.balanceTitle")} titleAs="h3">
         <div className="mk-billing-service-detail-summary">
           <StatusChip
-            status={period.state === "active" && !exhausted ? "ok" : "neutral"}
+            phase={period.state === "active" && !exhausted ? "active" : "retired"}
             label={t(
               exhausted
                 ? "pages.billing.servicePeriods.state.exhausted"
@@ -142,7 +142,7 @@ export function ServicePeriodDetailPage() {
                 <div className="mk-billing-service-entry__header">
                   <strong>{entry.workReference}</strong>
                   <StatusChip
-                    status={entry.classification === "product_defect" ? "warn" : "neutral"}
+                    phase={entry.classification === "product_defect" ? "attention" : "none"}
                     label={t(`pages.billing.servicePeriods.classification.${entry.classification}`)}
                   />
                 </div>
