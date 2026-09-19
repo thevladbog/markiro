@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { createMemoryRouter, createRoutesFromElements, Route, RouterProvider } from "react-router";
 import { afterEach, expect, it, vi } from "vitest";
@@ -10,7 +10,8 @@ import type { AccessDocument } from "../src/access/api.js";
 import { AccessProvider } from "../src/access/context.js";
 import i18n from "../src/i18n/index.js";
 import { formatCreatedAt } from "../src/lib/datetime.js";
-import { KmOrderPage } from "../src/pages/km-orders/KmOrderPage.js";
+import { KmOrderPage, kmOrderTimeline } from "../src/pages/km-orders/KmOrderPage.js";
+import { kmOrderSchema } from "../src/pages/km-orders/schemas.js";
 
 const ACCESS_WRITE: AccessDocument = {
   roles: ["manager"],
@@ -57,6 +58,9 @@ function agoDays(days: number): string {
 }
 
 const EXPIRES_AT = inDays(62);
+/** Fixed once: every `order()` describes the same order, to the millisecond. */
+const CREATED_AT = agoDays(3);
+const UPDATED_AT = agoDays(2);
 
 const ISSUES = [
   {
@@ -103,8 +107,8 @@ function order(overrides: Record<string, unknown> = {}) {
     errorMessage: null,
     attempts: 1,
     createdBy: { id: "user_1", name: "Елена Ким" },
-    createdAt: agoDays(3),
-    updatedAt: agoDays(2),
+    createdAt: CREATED_AT,
+    updatedAt: UPDATED_AT,
     issues: ISSUES,
     ...overrides,
   };
@@ -138,6 +142,19 @@ const GROUPS = [
   { code: 7, alias: "beer", name: "Пиво" },
 ];
 
+/** The issue `POST /issues` answers with for a 500-code print of this order. */
+const FRESH_PRINT_ISSUE = {
+  id: ID.freshIssue,
+  kind: "print",
+  format: null,
+  fromSeq: 1201,
+  toSeq: 1700,
+  count: 500,
+  createdBy: { id: "user_1", name: "Елена Ким" },
+  createdAt: new Date().toISOString(),
+};
+const FRESH_PRINT_HREF = `/km-orders/${ID.order}/issues/${ID.freshIssue}/print?template=${TEMPLATE.stock}`;
+
 function jsonResponse(body: unknown, status = 200): Response {
   return {
     ok: status >= 200 && status < 300,
@@ -151,6 +168,12 @@ interface RenderOptions {
   access?: AccessDocument;
   card?: Record<string, unknown>;
   templates?: unknown[];
+  /** Fails `GET /chz-product-groups`, which decides which templates are eligible. */
+  groupsFail?: boolean;
+  /** Makes `window.open` answer `null`, the way a popup blocker does. */
+  popupBlocked?: boolean;
+  /** Answer every re-read of the order with this card, as a refresh would. */
+  nextCard?: Record<string, unknown>;
   onIssue?: (body: unknown) => Response;
   onRetry?: () => Response;
 }
@@ -161,6 +184,7 @@ function renderCard(options: RenderOptions = {}) {
   const card = options.card ?? order();
   const orderUrl = `/api/chz-km-orders/${String(card.id)}`;
   const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
+  let cardReads = 0;
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -176,15 +200,26 @@ function renderCard(options: RenderOptions = {}) {
         if (!retry) throw new Error("Unexpected retry request");
         return retry();
       }
-      if (url === orderUrl) return jsonResponse(card);
+      if (url === orderUrl) {
+        cardReads += 1;
+        const next = options.nextCard;
+        return jsonResponse(cardReads > 1 && next !== undefined ? next : card);
+      }
       if (url === "/api/label-templates?enabled=true") {
         return jsonResponse({ items: options.templates ?? TEMPLATES });
       }
-      if (url === "/api/chz-product-groups") return jsonResponse({ items: GROUPS });
+      if (url === "/api/chz-product-groups") {
+        return options.groupsFail === true
+          ? jsonResponse({ code: "INTERNAL_ERROR" }, 500)
+          : jsonResponse({ items: GROUPS });
+      }
       throw new Error(`Unexpected request: ${url}`);
     }),
   );
-  const open = vi.fn();
+  // A real `window.open` answers with the new tab's window, or `null` when a
+  // popup blocker swallows it -- the difference that decides whether the issue
+  // dialog may close. `window` itself stands in for the tab.
+  const open = vi.fn((): Window | null => (options.popupBlocked === true ? null : window));
   vi.stubGlobal("open", open);
   const assign = vi.fn();
   // `window.location.assign` is non-configurable in JSDOM, so the whole
@@ -205,20 +240,17 @@ function renderCard(options: RenderOptions = {}) {
     ),
     { initialEntries: [`/km-orders/${String(card.id)}`] },
   );
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
   render(
-    <QueryClientProvider
-      client={
-        new QueryClient({
-          defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-        })
-      }
-    >
+    <QueryClientProvider client={client}>
       <AccessProvider value={options.access ?? ACCESS_WRITE}>
         <RouterProvider router={router} />
       </AccessProvider>
     </QueryClientProvider>,
   );
-  return { requests, router, open, assign, user: userEvent.setup() };
+  return { requests, router, open, assign, client, user: userEvent.setup() };
 }
 
 function counterValue(label: string): string {
@@ -306,7 +338,10 @@ it("previews the exact range the server will issue next", async () => {
 
   // 1 200 codes are already issued, and the server hands out the lowest
   // still-available codes starting at `issuedCount + 1`.
-  expect(within(dialog).getByText(`№ ${n(1201)} – ${n(1700)}`)).toBeDefined();
+  const range = within(dialog).getByText(`№ ${n(1201)} – ${n(1700)}`);
+  // The range is its own node with nothing around it moving, so a screen
+  // reader only hears it change if it announces itself.
+  expect(range.getAttribute("aria-live")).toBe("polite");
 });
 
 it("offers TXT and CSV for an export and posts the chosen format", async () => {
@@ -374,20 +409,7 @@ it("offers only the KM templates this order's product group may print", async ()
 
 it("prints the chosen range through the preselected stock template", async () => {
   const { requests, open, user } = renderCard({
-    onIssue: () =>
-      jsonResponse(
-        {
-          id: ID.freshIssue,
-          kind: "print",
-          format: null,
-          fromSeq: 1201,
-          toSeq: 1700,
-          count: 500,
-          createdBy: { id: "user_1", name: "Елена Ким" },
-          createdAt: new Date().toISOString(),
-        },
-        201,
-      ),
+    onIssue: () => jsonResponse(FRESH_PRINT_ISSUE, 201),
   });
 
   const dialog = await openIssueDialog("Печать", "Печать кодов");
@@ -399,12 +421,58 @@ it("prints the chosen range through the preselected stock template", async () =>
   await waitFor(() => expect(requests.some(({ init }) => init?.method === "POST")).toBe(true));
   const issue = requests.find(({ init }) => init?.method === "POST");
   expect(JSON.parse(String(issue?.init?.body))).toEqual({ kind: "print", count: 500 });
-  await waitFor(() =>
-    expect(open).toHaveBeenCalledWith(
-      `/km-orders/${ID.order}/issues/${ID.freshIssue}/print?template=${TEMPLATE.stock}`,
-      "_blank",
+  await waitFor(() => expect(open).toHaveBeenCalledWith(FRESH_PRINT_HREF, "_blank"));
+  // The tab opened, so the dialog has delivered the batch and may go.
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+});
+
+it("keeps the dialog and links to the batch when the print tab is blocked", async () => {
+  const { requests, open, user } = renderCard({
+    popupBlocked: true,
+    onIssue: () => jsonResponse(FRESH_PRINT_ISSUE, 201),
+  });
+
+  const dialog = await openIssueDialog("Печать", "Печать кодов");
+  const templates = within(dialog).getByRole("combobox", { name: "Шаблон этикетки" });
+  await waitFor(() => expect(templates.hasAttribute("disabled")).toBe(false));
+  await typeCount(dialog, "500");
+  await user.click(within(dialog).getByRole("button", { name: "Напечатать" }));
+
+  await waitFor(() => expect(open).toHaveBeenCalledWith(FRESH_PRINT_HREF, "_blank"));
+  // The 500 codes are spent and unrecoverable: the dialog stays, says so, and
+  // hands over the page the swallowed tab would have shown.
+  expect(
+    await within(dialog).findByText("Коды выданы, но вкладка печати не открылась"),
+  ).toBeDefined();
+  const link = within(dialog).getByRole("link", { name: "Открыть страницу печати" });
+  expect(link.getAttribute("href")).toBe(FRESH_PRINT_HREF);
+  expect(link).toBe(document.activeElement);
+  // Nothing left to click that would burn a second batch by reflex.
+  expect(within(dialog).queryByRole("button", { name: "Напечатать" })).toBeNull();
+  expect(requests.filter(({ init }) => init?.method === "POST")).toHaveLength(1);
+});
+
+it("blocks the print when the product groups could not be loaded", async () => {
+  const { requests, user } = renderCard({ groupsFail: true });
+
+  const dialog = await openIssueDialog("Печать", "Печать кодов");
+  expect(
+    await within(dialog).findByText(
+      "Не удалось загрузить справочник групп продукции. Обновите страницу и повторите.",
     ),
-  );
+  ).toBeDefined();
+  // The tenant is never told its own template does not exist because a
+  // request failed.
+  expect(within(dialog).queryByText(/Нет шаблонов КМ/)).toBeNull();
+  // Without the group reference every group-scoped template silently drops
+  // out, so the picker must not stay open on whatever is left of the list.
+  const templates = within(dialog).getByRole("combobox", { name: "Шаблон этикетки" });
+  expect(templates.hasAttribute("disabled")).toBe(true);
+
+  await typeCount(dialog, "500");
+  await user.click(within(dialog).getByRole("button", { name: "Напечатать" }));
+
+  expect(requests.some(({ init }) => init?.method === "POST")).toBe(false);
 });
 
 it("caps «Все» at what is left, and at the print batch limit", async () => {
@@ -430,13 +498,17 @@ it("caps «Все» at what is left, and at the print batch limit", async () => 
 });
 
 it("refuses a count above what is left instead of previewing it", async () => {
-  const { requests } = renderCard();
+  const { requests, user } = renderCard();
 
   const dialog = await openIssueDialog("Выгрузить", "Выгрузка кодов в файл");
   await typeCount(dialog, "4000");
 
   expect(within(dialog).getByText(`Укажите от 1 до ${n(3800)} кодов.`)).toBeDefined();
   expect(within(dialog).queryByText(/№ /)).toBeNull();
+  // The submit button is not disabled, so the handler's own guard is the only
+  // thing between an over-large count and a request the server would have to
+  // refuse: press it.
+  await user.click(within(dialog).getByRole("button", { name: "Выгрузить" }));
   expect(requests.some(({ init }) => init?.method === "POST")).toBe(false);
 });
 
@@ -452,6 +524,9 @@ it("reports how many codes are left when the server refuses the issue", async ()
   expect(
     await within(dialog).findByText(`Осталось только ${n(120)} кодов. Уменьшите количество.`),
   ).toBeDefined();
+  // The refused range must not stay on screen next to a smaller count.
+  expect(within(dialog).queryByText(`№ ${n(1201)} – ${n(1700)}`)).toBeNull();
+  expect(within(dialog).getByText("Укажите количество кодов.")).toBeDefined();
 });
 
 it("reads out the refusal of a rejected order and offers no issue action", async () => {
@@ -498,6 +573,94 @@ it("retries a failed order", async () => {
       ),
     ).toBe(true),
   );
+});
+
+it("names the exhausted order instead of asking for «от 1 до 0» codes", async () => {
+  // A refresh while the dialog is open can take the last codes away -- the
+  // «Все» button already guards it, and the message has to as well.
+  const { client, user } = renderCard({
+    nextCard: order({ issuedCount: 5000, availableForIssue: 0 }),
+  });
+
+  const dialog = await openIssueDialog("Печать", "Печать кодов");
+  await act(async () => {
+    await client.invalidateQueries({ queryKey: ["km-orders", ID.order] });
+  });
+  await typeCount(dialog, "500");
+  await user.click(within(dialog).getByRole("button", { name: "Напечатать" }));
+
+  expect(within(dialog).getByText("Свободных кодов в этом заказе не осталось.")).toBeDefined();
+  expect(within(dialog).queryByText(/Укажите от 1 до/)).toBeNull();
+});
+
+it("pins «Ход заказа» and «Сведения о заказе», including the rows the DTO cannot fill", async () => {
+  renderCard();
+
+  const timeline = (await screen.findByRole("heading", { name: "Ход заказа" })).closest(".mk-card");
+  if (!timeline) throw new Error("No timeline card");
+  expect(
+    within(timeline as HTMLElement)
+      .getAllByRole("listitem")
+      .map((step) => step.textContent),
+  ).toEqual([
+    `✓СозданВыполнено${formatCreatedAt(CREATED_AT, "ru")}`,
+    "✓ПодписаниеВыполнено",
+    "✓Отправлен в СУЗВыполнено",
+    "✓Ожидание буфераВыполнено",
+    "✓Буфер готовВыполнено",
+    "✓Получение кодовВыполнено",
+    `●ЗавершёнСейчас${formatCreatedAt(UPDATED_AT, "ru")}`,
+  ]);
+  expect(
+    within(timeline as HTMLElement).getByText("Создал: Елена Ким", { exact: false }),
+  ).toBeDefined();
+
+  const details = screen.getByRole("heading", { name: "Сведения о заказе" }).closest(".mk-card");
+  if (!details) throw new Error("No details card");
+  // The exact row set, so the two constants stay and the rows this cabinet
+  // has no value for -- payment, contact person -- are not invented later.
+  expect(
+    within(details as HTMLElement)
+      .getAllByRole("term")
+      .map((term) => term.textContent),
+  ).toEqual([
+    "Заказ в СУЗ",
+    "Статус буфера",
+    "Группа продукции",
+    "Шаблон кода СУЗ",
+    "Серийные номера",
+    "Способ выпуска",
+    "Создал",
+  ]);
+  expect(within(details as HTMLElement).getByText("Присваивает оператор")).toBeDefined();
+  expect(within(details as HTMLElement).getByText("Производство")).toBeDefined();
+
+  // `kmOrderTimeline` itself: a terminal state outside the pipeline keeps the
+  // two timestamps the DTO has and claims nothing about the steps between.
+  const failed = kmOrderSchema.parse(order({ state: "failed", errorCode: "OMS_UNAVAILABLE" }));
+  expect(kmOrderTimeline(failed)).toEqual([
+    { state: "created", status: "done", at: failed.createdAt },
+    { state: "failed", status: "current", at: failed.updatedAt },
+  ]);
+  const inFlight = kmOrderSchema.parse(order({ state: "fetching" }));
+  expect(kmOrderTimeline(inFlight).map((step) => `${step.state}:${step.status}`)).toEqual([
+    "created:done",
+    "signing:done",
+    "submitted:done",
+    "buffer_pending:done",
+    "buffer_active:done",
+    "fetching:current",
+    "completed:pending",
+  ]);
+  expect(kmOrderTimeline(inFlight).map((step) => step.at)).toEqual([
+    inFlight.createdAt,
+    null,
+    null,
+    null,
+    null,
+    inFlight.updatedAt,
+    null,
+  ]);
 });
 
 it("hides every issue action from a read-only grant", async () => {

@@ -444,6 +444,7 @@
         "countHint": "{{available}} codes available.",
         "countHintPrint": "{{available}} codes available, at most {{max}} per print run.",
         "countRange": "Enter between 1 and {{max}} codes.",
+        "countExhausted": "No codes are left to issue from this order.",
         "quickLabel": "Quick amounts",
         "quickAll": "All",
         "rangeLabel": "Codes to be issued",
@@ -455,12 +456,16 @@
         "templatePlaceholder": "Choose a template",
         "templateEmpty": "No KM label templates for this product group. Create one under Labels.",
         "templateLoadError": "Could not load label templates. Refresh the page and try again.",
+        "groupLoadError": "Could not load the product group reference. Refresh the page and try again.",
         "templateRequired": "Choose a label template.",
         "printerNote": "The print page opens in a new tab: check the codes there and send them to the label printer.",
         "submitExport": "Download",
         "submitPrint": "Print",
         "tooMany": "Only {{available}} codes are left. Choose a smaller amount.",
-        "genericError": "Could not issue the codes. Try again."
+        "genericError": "Could not issue the codes. Try again.",
+        "printBlockedTitle": "Codes issued, but the print tab did not open",
+        "printBlocked": "The browser blocked the new tab. These codes have already been taken from the order — do not issue them again; open the print page from the link. You can reopen the same page later with \"Print again\" in the code issues list.",
+        "printBlockedLink": "Open the print page"
       }
     },
     "inventory": {
