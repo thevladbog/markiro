@@ -45,7 +45,11 @@ export function ChzStatus({ summary }: { summary: ChzSummary | undefined }) {
   const chip = (key: ChzStatusKey, index: number) => (
     <StatusChip
       key={`${key}-${index}`}
-      phase={chzStatusPhase(key)}
+      // `summary` rides on `ProductDto.chz` (`../api.ts`), which is not
+      // runtime-validated -- same gap as `invitationAccessPhase` in
+      // `pages/team/TeamPage.tsx`. Guard here rather than widen
+      // `chzStatusPhase`'s own return type.
+      phase={chzStatusPhase(key) ?? "none"}
       label={t(`pages.catalog.import.statuses.${key}`)}
     />
   );

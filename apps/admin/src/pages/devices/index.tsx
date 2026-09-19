@@ -179,7 +179,12 @@ export function DevicesPage() {
         title: t("pages.devices.table.status"),
         render: (row) => (
           <StatusChip
-            phase={deviceStatusPhase(row.status)}
+            // `/devices` is not runtime-validated (see `./api.ts`), so a
+            // value outside `DeviceStatus` reaches this exhaustive switch at
+            // runtime -- same gap as `invitationAccessPhase` in
+            // `pages/team/TeamPage.tsx`. Guard here rather than widen
+            // `deviceStatusPhase`'s own return type.
+            phase={deviceStatusPhase(row.status) ?? "none"}
             label={t(`pages.devices.status.${row.status}`)}
           />
         ),

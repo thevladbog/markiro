@@ -375,7 +375,13 @@ export function CatalogPage() {
             <StatusChip phase="retired" label={t("pages.catalog.status.archived")} />
           ) : (
             <StatusChip
-              phase={productStatusPhase(row.status)}
+              // `/products` is not runtime-validated (see `./api.ts`), so a
+              // value outside `ProductStatus` reaches this exhaustive switch
+              // at runtime despite failing typecheck for any *known* sixth
+              // value -- same gap as `invitationAccessPhase` in
+              // `pages/team/TeamPage.tsx`. Guard here rather than widen the
+              // function's own return type.
+              phase={productStatusPhase(row.status) ?? "none"}
               label={t(`pages.catalog.status.${row.status}`)}
             />
           ),

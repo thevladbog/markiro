@@ -45,6 +45,15 @@ export const DELIVERY_STATUS_TO_PHASE: Record<string, TagPhase> = {
 // so they share the terminal, human/time-driven `retired` phase. A `switch`
 // without `default` so a sixth value the API ever adds fails typecheck here
 // instead of silently falling through to `none`.
+//
+// The team response is not runtime-validated (unlike, say,
+// `pages/inventory/schemas.ts`'s zod schemas), so a value the API sends but
+// this union does not list would defeat the `switch`'s exhaustiveness check
+// at the type level while still reaching this function at runtime -- falling
+// through every `case` with no `default` returns `undefined`, which
+// `StatusChip` has no phase config for. The call site below guards with
+// `?? "none"` for exactly that gap; this function's own type stays
+// exhaustive so a sixth *known* value still fails typecheck here.
 export function invitationAccessPhase(accessStatus: TeamInvitation["accessStatus"]): TagPhase {
   switch (accessStatus) {
     case "pending":
@@ -145,7 +154,7 @@ function TeamContent({ team, currentUserId }: { team: TeamResponse; currentUserI
         title: t("pages.team.table.access"),
         render: (invitation) => (
           <StatusChip
-            phase={invitationAccessPhase(invitation.accessStatus)}
+            phase={invitationAccessPhase(invitation.accessStatus) ?? "none"}
             label={t(`pages.team.access.${invitation.accessStatus}`, {
               defaultValue: invitation.accessStatus,
             })}
