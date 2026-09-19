@@ -70,9 +70,25 @@ export interface StatusChipProps extends Omit<HTMLAttributes<HTMLSpanElement>, "
    */
   label: ReactNode;
   size?: TagSize;
+  /**
+   * Разрешить длинной подписи перенос. Фаза не ограничивает длину `label` —
+   * вызывающая сторона может дать длинное предложение фактом жизненного
+   * цикла (например «Состав изменился после закрытия»), и в узкой колонке
+   * nowrap-тег так же отдаёт всю строку в min-content контейнера, как и у
+   * `Badge`. Перенос — вопрос вёрстки, а не семантики фазы, поэтому признак
+   * включается явно и не завязан на конкретную фазу.
+   */
+  wrap?: boolean;
 }
 
-export function StatusChip({ phase, label, size = "office", className, ...rest }: StatusChipProps) {
+export function StatusChip({
+  phase,
+  label,
+  size = "office",
+  wrap = false,
+  className,
+  ...rest
+}: StatusChipProps) {
   const config = PHASE[phase];
 
   return (
@@ -81,6 +97,7 @@ export function StatusChip({ phase, label, size = "office", className, ...rest }
         "mk-tag",
         `mk-tag--${size}`,
         `mk-tag--${config.tone}`,
+        wrap && "mk-tag--wrap",
         "mk-chip",
         `mk-chip--${phase}`,
         className,

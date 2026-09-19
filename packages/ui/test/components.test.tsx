@@ -240,6 +240,23 @@ describe("StatusChip", () => {
     const { container } = render(<StatusChip phase="active" label="Активна" />);
     expect(container.querySelector(".mk-tag")?.className).toContain("mk-tag--office");
   });
+
+  /**
+   * `wrap` нужен тегу фазы по той же причине, что и `Badge`: `label` — это
+   * произвольный текст факта жизненного цикла, а не короткое фиксированное
+   * слово, и в узкой колонке nowrap заставляет его отдавать всю строку в
+   * min-content контейнера. Проверяем вычисленные размеры, а не только
+   * класс: именно высота и min-height определяют, обрежет ли колонку.
+   */
+  it("даёт длинной подписи перенос и рост выше одной строки", () => {
+    render(<StatusChip phase="attention" label="Состав изменился после закрытия" wrap />);
+    const chip = screen.getByText("Состав изменился после закрытия").closest(".mk-tag");
+
+    expect(chip).not.toBeNull();
+    expect(chip?.className).toContain("mk-tag--wrap");
+    expect(getComputedStyle(chip as Element).height).toBe("auto");
+    expect(getComputedStyle(chip as Element).minHeight).toBe("22px");
+  });
 });
 
 describe("Field", () => {

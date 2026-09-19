@@ -247,20 +247,22 @@ function ShiftPallets({ shift }: { shift: ShiftDto }) {
       // themselves, not just on the column, used to be how «Состав изменился
       // после закрытия» avoided making this column's min-content the whole
       // string (235px) and clipping the pill mid-word inside the 720px
-      // "complex" panel — a tag has no `wrap` prop, so that escape hatch is
-      // gone. It stays fine because a phase tag is short and fixed (glyph +
-      // a few words) and the column relies on
-      // `.mk-shift-details__pallet-status` stacking the two tags vertically
-      // instead of forcing them onto one line.
+      // "complex" panel. `StatusChip` now carries the same `wrap` prop as
+      // `Badge`, so both tags get it here: the label is still the same
+      // free-form sentence, and wrapping is a layout concern of this narrow
+      // column, not something tied to which tag renders it. The column
+      // still relies on `.mk-shift-details__pallet-status` stacking the two
+      // tags vertically instead of forcing them onto one line.
       render: (row) => (
         <div className="mk-shift-details__pallet-status">
           {row.disassembledAt ? (
-            <StatusChip phase="dismantled" label={t("pages.shifts.pallets.disassembled")} />
+            <StatusChip phase="dismantled" label={t("pages.shifts.pallets.disassembled")} wrap />
           ) : null}
           {row.contentsChangedAfterClose ? (
             <StatusChip
               phase="attention"
               label={t("pages.shifts.pallets.contentsChangedAfterClose")}
+              wrap
             />
           ) : null}
         </div>

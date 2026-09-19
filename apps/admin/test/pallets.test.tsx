@@ -190,17 +190,18 @@ describe("shift panel pallet table", () => {
 
   /**
    * Layout regression guard. «Состав изменился после закрытия» is 31 characters
-   * of mono type; as a nowrap badge it used to make the status column's
+   * of mono type; as a nowrap tag it used to make the status column's
    * min-content the whole string, which pushed the table to 731px inside the
    * 669px-wide "complex" side panel -- the pill was clipped mid-word at the
    * panel edge and the squeezed «Закрыта» column broke «30.08.2026, 14:20»
    * inside the year. Both facts are lifecycle facts now, so they render as
-   * phase tags (`dismantled`, `attention`) instead of wrapping badges: a tag
-   * has no `wrap` prop and does not need one, because its content is fixed --
-   * a glyph plus a short word -- not a free-form sentence. What still has to
-   * hold is the stack: two independent facts must not sit as adjacent inline
-   * pills with no break opportunity between them, so they still stack
-   * vertically in `.mk-shift-details__pallet-status`.
+   * phase tags (`dismantled`, `attention`) instead of badges, and `StatusChip`
+   * carries the same `wrap` prop as `Badge` -- the long label still needs to
+   * break, and wrapping is a layout concern of this column, not something the
+   * choice of tag component changes. What still has to hold alongside that is
+   * the stack: two independent facts must not sit as adjacent inline pills
+   * with no break opportunity between them, so they still stack vertically in
+   * `.mk-shift-details__pallet-status`.
    */
   it("renders the pallet status facts as phase tags stacked in one column", async () => {
     vi.stubGlobal(
@@ -232,11 +233,10 @@ describe("shift panel pallet table", () => {
     expect(disassembledTag).not.toBeNull();
     expect(changedTag?.className).toContain("mk-chip--attention");
     expect(disassembledTag?.className).toContain("mk-chip--dismantled");
-    // A phase tag is a fixed glyph-plus-word pill, not a free-form sentence,
-    // so it no longer needs to wrap the way a badge did.
-    for (const tag of [changedTag, disassembledTag]) {
-      expect(tag?.className).not.toContain("mk-tag--wrap");
-    }
+    // The long, free-form label still needs to wrap in this narrow column --
+    // that is unchanged by moving from badges to phase tags.
+    expect(changedTag?.className).toContain("mk-tag--wrap");
+    expect(disassembledTag?.className).toContain("mk-tag--wrap");
     // Both facts are independent, so both pills show at once -- stacked in one
     // container rather than glued side by side.
     const stack = changedTag?.closest(".mk-shift-details__pallet-status");
