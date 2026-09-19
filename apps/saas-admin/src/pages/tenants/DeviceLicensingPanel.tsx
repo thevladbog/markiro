@@ -14,6 +14,10 @@ import {
 } from "@markiro/ui";
 import type { WorkingDevicePool } from "@markiro/platform-contracts";
 
+import { ApiRequestError } from "../../api/client.js";
+import { useAuthClient } from "../../auth/client.js";
+import { cancelTenantDeviceReservation, getTenantDeviceLicensing } from "./api.js";
+
 type PoolDevice = WorkingDevicePool["devices"][number];
 
 /**
@@ -23,7 +27,7 @@ type PoolDevice = WorkingDevicePool["devices"][number];
  * (`retired`), `offline` — определённое состояние, требующее внимания
  * (`attention`), а не отсутствие значения.
  */
-function connectionPhase(status: PoolDevice["connectionStatus"]): TagPhase {
+export function connectionPhase(status: PoolDevice["connectionStatus"]): TagPhase {
   switch (status) {
     case "online":
       return "active";
@@ -45,7 +49,7 @@ function connectionPhase(status: PoolDevice["connectionStatus"]): TagPhase {
  * (`active`). `released` — освобождение места всегда по решению человека
  * (`releaseReason`: `reservation_cancelled` | `security_revoked`) — `retired`.
  */
-function slotPhase(state: PoolDevice["state"]): TagPhase {
+export function slotPhase(state: PoolDevice["state"]): TagPhase {
   switch (state) {
     case "reserved":
       return "planned";
@@ -57,9 +61,6 @@ function slotPhase(state: PoolDevice["state"]): TagPhase {
       return "attention";
   }
 }
-import { ApiRequestError } from "../../api/client.js";
-import { useAuthClient } from "../../auth/client.js";
-import { cancelTenantDeviceReservation, getTenantDeviceLicensing } from "./api.js";
 
 const poolKey = (tenantId: string) =>
   ["platform", "tenants", tenantId, "device-licensing"] as const;

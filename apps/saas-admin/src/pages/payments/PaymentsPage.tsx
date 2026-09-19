@@ -38,7 +38,7 @@ const MATCHES_KEY = ["platform", "payment-matches"] as const;
  * человеком, запись цела (`retired`), `needs_review` — буквально требует
  * проверки (`attention`).
  */
-const PAYMENT_MATCH_STATUS_TO_PHASE: Record<PaymentMatch["status"], TagPhase> = {
+export const PAYMENT_MATCH_STATUS_TO_PHASE: Record<PaymentMatch["status"], TagPhase> = {
   unmatched: "none",
   suggested: "planned",
   matched: "done",

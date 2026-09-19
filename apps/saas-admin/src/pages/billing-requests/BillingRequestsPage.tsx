@@ -65,7 +65,7 @@ const linkTypes = ["offer", "invoice", "payment", "act", "ordered_service"] as c
  * договоров. `clarification_required` буквально требует ответа —
  * `attention`.
  */
-const BILLING_REQUEST_STATUS_TO_PHASE = {
+export const BILLING_REQUEST_STATUS_TO_PHASE = {
   new: "planned",
   under_review: "running",
   clarification_required: "attention",
