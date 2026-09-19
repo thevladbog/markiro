@@ -54,6 +54,31 @@ screenshot) and the offending text. `missing=0` means every quote in the
 document was found in the dictionary — nothing more. It does not mean the
 document is otherwise accurate.
 
+## Exit codes
+
+The process exit code is what makes this usable as a CI gate; the printed
+lines alone are not enough because nothing enforces that a workflow reads
+them.
+
+| Exit | Meaning                                                                                                                                                                                 |
+| ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0`  | Every extracted quote matched the dictionary (`missing=0`), or the document has no content for the requested locale — a legitimate state (e.g. no English revision yet), not a finding. |
+| `1`  | One or more quotes were `MISSING`, **or** the extraction step itself found zero quotes.                                                                                                 |
+
+The zero-quotes case is deliberately a failure, not a pass. Every real
+instruction in this series quotes the interface at least once, so a run that
+extracts nothing means the quote pattern or the document content is broken —
+not that the document is clean. Concretely: a mistyped quote character in the
+extractor once made it match nothing and print what looked like a spotless
+`quotes=0 missing=0` line; the defect was only caught because a human happened
+to run the tool against a real document and notice. This exit path exists so
+the tool catches that itself instead of relying on a human to notice a
+suspiciously small quote count. It is printed as its own message
+(`extraction found nothing`) rather than as `quotes=0 missing=0`, and it is
+distinct from the "no content for this locale" exit above: a document
+genuinely missing an English revision is not the same failure as a broken
+extractor, and only the latter should fail the run.
+
 ## Verdict classes
 
 Every quote gets exactly one verdict, checked in this order:
@@ -124,9 +149,13 @@ node --test tools/instruction-lens/lens.test.mjs
 ```
 
 The suite exercises the tool's real exported functions (`classify`,
-`extractQuotes`, `flattenDictionaryValues`, `lint`) against small in-test
-dictionaries — never a reimplementation of the matching rules — plus a CLI
-smoke test that runs `lens.mjs` as a child process against a throwaway
+`extractQuotes`, `flattenDictionaryValues`, `lint`, `main`) against small
+in-test dictionaries — never a reimplementation of the matching rules — plus
+a CLI smoke test that runs `lens.mjs` as a child process against a throwaway
 fixture repository to prove the `root`/`dictDir` argument handling still
 resolves the registry and dictionary paths correctly after the move out of
-`/tmp`.
+`/tmp`. `main()` takes an explicit `argv` array and returns the process exit
+status instead of calling `process.exit` itself, so the exit-code tests for
+both failure paths (a `MISSING` quote, and a zero-quote extraction) can
+assert on the returned number directly, in addition to the CLI-level tests
+that spawn the real subprocess and check its actual exit code.

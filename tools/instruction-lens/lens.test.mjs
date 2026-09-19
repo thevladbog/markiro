@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
-import { classify, extractQuotes, flattenDictionaryValues, lint } from "./lens.mjs";
+import { classify, extractQuotes, flattenDictionaryValues, lint, main } from "./lens.mjs";
 
 const LENS_PATH = fileURLToPath(new URL("./lens.mjs", import.meta.url));
 
@@ -159,18 +159,23 @@ test("lint dedupes by quote+frame and counts only MISSING verdicts", () => {
 // --- CLI smoke test: proves the moved tool still resolves the registry and
 // dictionary paths relative to a `root` argument, exactly like the original
 // `/tmp` script did.
-
-function withTempRepo(fn) {
+//
+// `fn` may be async (several tests below call the exported `main()`, which
+// is async), so this awaits it and every call site awaits `withTempRepo`
+// itself - otherwise an assertion failure inside an async `fn` would surface
+// as an unhandled rejection after cleanup already ran, instead of failing
+// the owning test.
+async function withTempRepo(fn) {
   const root = mkdtempSync(join(tmpdir(), "instruction-lens-"));
   try {
-    fn(root);
+    await fn(root);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 }
 
-test("CLI: reports missing=0 for a document whose quotes are all in the dictionary", () => {
-  withTempRepo((root) => {
+test("CLI: reports missing=0 for a document whose quotes are all in the dictionary", async () => {
+  await withTempRepo((root) => {
     mkdirSync(join(root, "packages/legal-documents/dist"), { recursive: true });
     mkdirSync(join(root, "apps/admin/src/i18n"), { recursive: true });
     writeFileSync(
@@ -187,8 +192,8 @@ test("CLI: reports missing=0 for a document whose quotes are all in the dictiona
   });
 });
 
-test("CLI: reports a MISSING line for a quote absent from the dictionary", () => {
-  withTempRepo((root) => {
+test("CLI: reports a MISSING line for a quote absent from the dictionary, and exits non-zero", async () => {
+  await withTempRepo((root) => {
     mkdirSync(join(root, "packages/legal-documents/dist"), { recursive: true });
     mkdirSync(join(root, "apps/admin/src/i18n"), { recursive: true });
     writeFileSync(
@@ -199,14 +204,57 @@ test("CLI: reports a MISSING line for a quote absent from the dictionary", () =>
       }];\n`,
     );
     writeFileSync(join(root, "apps/admin/src/i18n/ru.json"), JSON.stringify({ label: "Другое" }));
-    const out = execFileSync("node", [LENS_PATH, root, "MKR-TEST", "ru"], { encoding: "utf8" });
-    assert.match(out, /MISSING\s+—\s+«Пропавшая длинная фраза»/);
-    assert.match(out, /MKR-TEST ru: quotes=1 missing=1/);
+    // A missing quote must fail the process, not just print a line a CI gate
+    // never looks at - this is Gap 1: a discarded `lint()` return value used
+    // to leave every run exiting 0 regardless of findings. execFileSync
+    // throws on a non-zero exit, so the failing status has to be read off
+    // the thrown error.
+    let error;
+    try {
+      execFileSync("node", [LENS_PATH, root, "MKR-TEST", "ru"], { encoding: "utf8" });
+    } catch (e) {
+      error = e;
+    }
+    assert.ok(error, "expected the CLI to exit non-zero when a quote is MISSING");
+    assert.equal(error.status, 1);
+    assert.match(error.stdout, /MISSING\s+—\s+«Пропавшая длинная фраза»/);
+    assert.match(error.stdout, /MKR-TEST ru: quotes=1 missing=1/);
   });
 });
 
-test("CLI: an accepted dictDir override is honored", () => {
-  withTempRepo((root) => {
+test("CLI: a run that extracts zero quotes fails loudly and exits non-zero", async () => {
+  await withTempRepo((root) => {
+    mkdirSync(join(root, "packages/legal-documents/dist"), { recursive: true });
+    mkdirSync(join(root, "apps/admin/src/i18n"), { recursive: true });
+    // Content is present for the locale (unlike the "no content" case below)
+    // but carries no guillemet-quoted text at all - the Gap 2 scenario: a
+    // mistyped quote character or a broken extractor would silently produce
+    // this same empty result and read as a spotless `missing=0` pass.
+    writeFileSync(
+      join(root, "packages/legal-documents/dist/registry.js"),
+      `export const LEGAL_DOCUMENTS = [{
+        releaseKey: "MKR-TEST/2026.01/01",
+        content: { ru: { summary: "Обзор без единой цитаты.", sections: [] } },
+      }];\n`,
+    );
+    writeFileSync(join(root, "apps/admin/src/i18n/ru.json"), JSON.stringify({ label: "Другое" }));
+    let error;
+    try {
+      execFileSync("node", [LENS_PATH, root, "MKR-TEST", "ru"], { encoding: "utf8" });
+    } catch (e) {
+      error = e;
+    }
+    assert.ok(error, "expected the CLI to exit non-zero when extraction finds zero quotes");
+    assert.equal(error.status, 1);
+    assert.match(error.stdout, /extraction found nothing/);
+    // The failure message must say the extractor is broken, not imply the
+    // document is clean.
+    assert.doesNotMatch(error.stdout, /quotes=0 missing=0/);
+  });
+});
+
+test("CLI: an accepted dictDir override is honored", async () => {
+  await withTempRepo((root) => {
     mkdirSync(join(root, "packages/legal-documents/dist"), { recursive: true });
     mkdirSync(join(root, "custom/i18n"), { recursive: true });
     writeFileSync(
@@ -224,8 +272,8 @@ test("CLI: an accepted dictDir override is honored", () => {
   });
 });
 
-test("CLI: locale absent from a document's content exits cleanly without crashing", () => {
-  withTempRepo((root) => {
+test("CLI: locale absent from a document's content exits cleanly without crashing", async () => {
+  await withTempRepo((root) => {
     mkdirSync(join(root, "packages/legal-documents/dist"), { recursive: true });
     mkdirSync(join(root, "apps/admin/src/i18n"), { recursive: true });
     writeFileSync(
@@ -238,5 +286,85 @@ test("CLI: locale absent from a document's content exits cleanly without crashin
     writeFileSync(join(root, "apps/admin/src/i18n/en.json"), JSON.stringify({ label: "Label" }));
     const out = execFileSync("node", [LENS_PATH, root, "MKR-TEST", "en"], { encoding: "utf8" });
     assert.match(out, /no content for MKR-TEST en/);
+  });
+});
+
+// --- Exit-status tests: exercise the exported `main()` directly against its
+// return value, rather than only spawning a subprocess to read an exit code.
+// `main()` accepts an explicit `argv` array precisely so these can run
+// in-process.
+
+test("main() returns 0 when every quote in the document matches the dictionary", async () => {
+  await withTempRepo(async (root) => {
+    mkdirSync(join(root, "packages/legal-documents/dist"), { recursive: true });
+    mkdirSync(join(root, "apps/admin/src/i18n"), { recursive: true });
+    writeFileSync(
+      join(root, "packages/legal-documents/dist/registry.js"),
+      `export const LEGAL_DOCUMENTS = [{
+        releaseKey: "MKR-TEST/2026.01/01",
+        content: { ru: { summary: "Обзор «Пример».", sections: [] } },
+      }];\n`,
+    );
+    writeFileSync(join(root, "apps/admin/src/i18n/ru.json"), JSON.stringify({ label: "Пример" }));
+    assert.equal(await main([root, "MKR-TEST", "ru"]), 0);
+  });
+});
+
+test("main() returns 1 (Gap 1) when lint finds a MISSING quote - the return value used to be discarded", async () => {
+  await withTempRepo(async (root) => {
+    mkdirSync(join(root, "packages/legal-documents/dist"), { recursive: true });
+    mkdirSync(join(root, "apps/admin/src/i18n"), { recursive: true });
+    writeFileSync(
+      join(root, "packages/legal-documents/dist/registry.js"),
+      `export const LEGAL_DOCUMENTS = [{
+        releaseKey: "MKR-TEST/2026.01/01",
+        content: { ru: { summary: "Обзор «Пропавшая длинная фраза».", sections: [] } },
+      }];\n`,
+    );
+    writeFileSync(join(root, "apps/admin/src/i18n/ru.json"), JSON.stringify({ label: "Другое" }));
+    assert.equal(await main([root, "MKR-TEST", "ru"]), 1);
+  });
+});
+
+test("main() returns 1 (Gap 2) when extraction finds zero quotes, and never prints a clean-looking summary", async () => {
+  await withTempRepo(async (root) => {
+    mkdirSync(join(root, "packages/legal-documents/dist"), { recursive: true });
+    mkdirSync(join(root, "apps/admin/src/i18n"), { recursive: true });
+    writeFileSync(
+      join(root, "packages/legal-documents/dist/registry.js"),
+      `export const LEGAL_DOCUMENTS = [{
+        releaseKey: "MKR-TEST/2026.01/01",
+        content: { ru: { summary: "Обзор без единой цитаты.", sections: [] } },
+      }];\n`,
+    );
+    writeFileSync(join(root, "apps/admin/src/i18n/ru.json"), JSON.stringify({ label: "Другое" }));
+    const captured = [];
+    const original = console.log;
+    console.log = (...args) => captured.push(args.join(" "));
+    let status;
+    try {
+      status = await main([root, "MKR-TEST", "ru"]);
+    } finally {
+      console.log = original;
+    }
+    assert.equal(status, 1);
+    assert.ok(captured.some((l) => l.includes("extraction found nothing")));
+    assert.ok(!captured.some((l) => l.includes("quotes=0 missing=0")));
+  });
+});
+
+test("main() returns 0 for a document with no content in the requested locale - a legitimate state, not Gap 2", async () => {
+  await withTempRepo(async (root) => {
+    mkdirSync(join(root, "packages/legal-documents/dist"), { recursive: true });
+    mkdirSync(join(root, "apps/admin/src/i18n"), { recursive: true });
+    writeFileSync(
+      join(root, "packages/legal-documents/dist/registry.js"),
+      `export const LEGAL_DOCUMENTS = [{
+        releaseKey: "MKR-TEST/2026.01/01",
+        content: { ru: { summary: "«Метка»", sections: [] } },
+      }];\n`,
+    );
+    writeFileSync(join(root, "apps/admin/src/i18n/en.json"), JSON.stringify({ label: "Label" }));
+    assert.equal(await main([root, "MKR-TEST", "en"]), 0);
   });
 });

@@ -126,8 +126,27 @@ export function lint(rows, values, { code, locale, log = console.log } = {}) {
   return missing;
 }
 
-async function main() {
-  const [root, code, locale, dictDir = "apps/admin/src/i18n"] = process.argv.slice(2);
+/**
+ * Runs the CLI end to end and returns a process exit status: `0` when every
+ * quote matched (or the document legitimately has no content for the
+ * requested locale), `1` when one or more quotes are `MISSING`, and `1` when
+ * the extraction step itself found zero quotes.
+ *
+ * The zero-quote case is deliberately treated as a tool failure, not a clean
+ * document: every real instruction in this series quotes the interface, so
+ * an extraction that comes back empty means the quote pattern or the
+ * document content stopped lining up - the exact defect that once let a
+ * mistyped quote character slip through as a silent `missing=0` pass. That
+ * is distinct from the "no content for this locale" early exit below, which
+ * is a legitimate state (e.g. a document with no English revision yet) and
+ * stays a non-failing exit.
+ *
+ * Exported (and parameterized over `argv`) so tests can assert on the
+ * returned status directly instead of spawning a subprocess just to read an
+ * exit code.
+ */
+export async function main(argv = process.argv.slice(2)) {
+  const [root, code, locale, dictDir = "apps/admin/src/i18n"] = argv;
   const { LEGAL_DOCUMENTS } = await import(
     pathToFileURL(join(root, "packages/legal-documents/dist/registry.js"))
   );
@@ -135,16 +154,26 @@ async function main() {
   const content = source.content[locale];
   if (!content) {
     console.log("no content for", code, locale);
-    process.exit(0);
+    return 0;
   }
   const rows = extractQuotes(content, locale);
+  if (rows.length === 0) {
+    console.log(
+      `${code} ${locale}: extraction found nothing (0 quotes) - the lens found no quotes to ` +
+        "check, not a document with no drift. Every real instruction in this series quotes " +
+        "the interface, so this means the quote pattern or the document content is broken, " +
+        "not that the document is clean.",
+    );
+    return 1;
+  }
   const values = flattenDictionaryValues(
     JSON.parse(readFileSync(join(root, dictDir, `${locale}.json`), "utf8")),
   );
-  lint(rows, values, { code, locale });
+  const missing = lint(rows, values, { code, locale });
+  return missing > 0 ? 1 : 0;
 }
 
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isMain) {
-  await main();
+  process.exit(await main());
 }
