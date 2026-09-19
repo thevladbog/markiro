@@ -133,4 +133,66 @@ describe("OmsClient", () => {
     );
     await expect(client.getCodes(auth, "y", "04606038003172", 150_001)).rejects.toThrow(RangeError);
   });
+
+  it("lists blocks by filtering malformed entries and mapping valid ones", async () => {
+    const calls: { url: string; init: RequestInit }[] = [];
+    const client = new OmsClient(
+      deps(async (url, init) => {
+        calls.push({ url: String(url), init: init as RequestInit });
+        return new Response(
+          JSON.stringify({
+            blocks: [
+              { blockId: "012cc7b0-c9e4-4511-8058-2de1f97a87b0", quantity: 100 },
+              { blockId: "not-a-uuid", quantity: 50 },
+              { quantity: 25 },
+              { blockId: "523dc9b1-d8f5-5622-9169-3ef2b08b98c1", quantity: 75 },
+            ],
+          }),
+          { status: 200 },
+        );
+      }),
+    );
+    const result = await client.listBlocks(auth, "b024ae09-ef7c-449e-b461-05d8eb116c79", "04606038003172");
+    expect(result).toEqual({
+      status: "ok",
+      value: [
+        { blockId: "012cc7b0-c9e4-4511-8058-2de1f97a87b0", quantity: 100 },
+        { blockId: "523dc9b1-d8f5-5622-9169-3ef2b08b98c1", quantity: 75 },
+      ],
+    });
+    expect(calls[0]!.url).toBe(
+      `${auth.baseUrl}/order/codes/blocks?omsId=${auth.omsId}&orderId=b024ae09-ef7c-449e-b461-05d8eb116c79&gtin=04606038003172`,
+    );
+    const headers = new Headers(calls[0]!.init.headers);
+    expect(headers.get("clientToken")).toBe("tok");
+  });
+
+  it("re-fetches a block's codes with raw GS separator and degrades mismatched shapes", async () => {
+    const clientOk = new OmsClient(
+      deps(
+        async () =>
+          new Response(
+            '{"omsId":"x","codes":["product\\u001dserialcode"],"blockId":"012cc7b0-c9e4-4511-8058-2de1f97a87b0"}',
+            { status: 200 },
+          ),
+      ),
+    );
+    const result = await clientOk.retryBlock(auth, "012cc7b0-c9e4-4511-8058-2de1f97a87b0");
+    expect(result).toEqual({
+      status: "ok",
+      value: {
+        codes: ["product\u001dserialcode"],
+        blockId: "012cc7b0-c9e4-4511-8058-2de1f97a87b0",
+      },
+    });
+
+    const clientBadShape = new OmsClient(
+      deps(
+        async () =>
+          new Response(JSON.stringify({ omsId: "x", codes: "not-an-array" }), { status: 200 }),
+      ),
+    );
+    const resultBad = await clientBadShape.retryBlock(auth, "012cc7b0-c9e4-4511-8058-2de1f97a87b0");
+    expect(resultBad).toEqual({ status: "unavailable" });
+  });
 });
