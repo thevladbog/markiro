@@ -123,10 +123,15 @@ because the text is not sourced from the admin i18n dictionary at all:
   not in `apps/admin/src/i18n`. They are Russian-only by design and rendered
   as-is in both the `ru` and `en` cabinet, so an `en` document quoting one
   will also read `MISSING` there.
-- **Server-rendered Russian print forms.** Documents like the inventory
-  task-order sheet (`«Открыть форму-задание»` → the printed A4 form itself,
-  not the button) are generated server-side as a print artifact, not drawn
-  from the admin React UI's i18n dictionary.
+- **Server-rendered Russian print forms.** A printed sheet is generated
+  server-side as an artifact; its headings never enter the admin React UI's
+  i18n dictionary, and they stay Russian on a printout an English-speaking
+  reader is still expected to recognise. MKR-INS-06 quotes the inventory
+  task-order heading `«Задание на инвентаризацию»` (frame `task-form`) in its
+  `en` text for exactly that reason, and the lens reports it `MISSING` there.
+  Note that the cabinet _button_ that opens the sheet is an ordinary
+  dictionary string (`openForm`) and resolves `exact` — the exception covers
+  what the print artifact renders, not the control that triggers it.
 - **Strings the UI composes at runtime from parts.** Some cabinet text is
   built by concatenating two or more independent dictionary values at
   render time rather than by filling a single `{{placeholder}}` template —
