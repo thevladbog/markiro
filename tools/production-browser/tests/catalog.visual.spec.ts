@@ -56,6 +56,8 @@ const COPY = {
     unit: "шт",
     priceType: "Розничная",
     categoryName: "Сиропы",
+    siblingCategoryJuice: "Соки и нектары",
+    siblingCategoryJam: "Джемы и варенье",
     attrVolume: "Объём",
     attrComposition: "Состав",
     attrPackage: "Упаковка",
@@ -76,6 +78,8 @@ const COPY = {
     unit: "pcs",
     priceType: "Retail",
     categoryName: "Syrups",
+    siblingCategoryJuice: "Juices and nectars",
+    siblingCategoryJam: "Jams and preserves",
     attrVolume: "Volume",
     attrComposition: "Composition",
     attrPackage: "Package",
@@ -421,10 +425,39 @@ function fixtures(locale: AdminLocale) {
    * `CategoryBinding` fetches this eagerly whenever the viewer can write and
    * the product is not archived -- before "change category" is ever opened --
    * so a strict mock has to answer it even though none of these frames open
-   * that editor. An empty list satisfies the schema without inventing a
-   * second category the document never shows.
+   * that editor. This MUST stay non-empty: `CategoryBinding.tsx` renders its
+   * "no categories configured" info alert exactly when `items.length === 0`,
+   * and that alert would sit directly under a confirmed category binding,
+   * contradicting the frame the document actually needs to show. The bound
+   * category reuses `copy.categoryName` and the profile's own ids so the two
+   * blocks agree; two siblings make the (unopened) picker read as a real
+   * choice rather than a list of one.
    */
-  const REGULATORY_CATEGORY_OPTIONS = { items: [] };
+  const REGULATORY_CATEGORY_OPTIONS = {
+    items: [
+      {
+        schemaVersionId: "40000000-0000-4000-8000-000000000001",
+        categoryId: "cat-syrup",
+        categoryName: copy.categoryName,
+        selectors: { catId: 118 },
+        mappingState: "exact" as const,
+      },
+      {
+        schemaVersionId: "40000000-0000-4000-8000-000000000002",
+        categoryId: "cat-juice",
+        categoryName: copy.siblingCategoryJuice,
+        selectors: { catId: 119 },
+        mappingState: "ambiguous" as const,
+      },
+      {
+        schemaVersionId: "40000000-0000-4000-8000-000000000003",
+        categoryId: "cat-jam",
+        categoryName: copy.siblingCategoryJam,
+        selectors: { catId: 120 },
+        mappingState: "unmapped" as const,
+      },
+    ],
+  };
 
   type Scenario = "list" | "listWithPlaque" | "productActive" | "productDraft" | "productNew";
 
