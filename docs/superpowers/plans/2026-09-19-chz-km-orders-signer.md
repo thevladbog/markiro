@@ -611,31 +611,64 @@ git commit -m "feat(signer): execute oms_auth and sign_detached tasks"
 
 ---
 
-### Task 6: Runbook, version bump and release notes
+### Task 6: Runbook for the СУЗ sandbox run
 
 **Files:**
 
 - Modify: `docs/runbooks/signer-agent-manual-e2e.md`
-- Modify: `apps/signer/src-tauri/tauri.conf.json`, `apps/signer/src-tauri/Cargo.toml`, `apps/signer/package.json` (patch version bump, all three in step — check `docs/runbooks/signer-release.md` for the exact files the release tooling compares)
-- Modify: `tools/signer-release/` changelog if the release contracts require an entry (see `docs/runbooks/signer-release.md`)
+
+**No version bump.** `docs/runbooks/signer-release.md` is explicit that the release
+workflow computes the version from the selected `bump` at dispatch time and injects it
+into the build "without committing a version-only PR", and that `tauri.conf.json`'s
+version is a development value rather than the stable one. There is therefore nothing to
+bump here; the earlier draft of this plan said otherwise and was wrong.
 
 - [ ] **Step 1: Write the runbook section**
 
-Under a new heading «СУЗ: token and detached signature (sandbox)»: pair the agent to a sandbox tenant; in the cabinet set `omsId`/`omsConnection` (registered on `https://suz-integrator.sandbox.crptech.ru` with the public registration key `4344d884-7f21-456c-981e-cd68e92391e8`, or in the СУЗ sandbox cabinet); wait for the scheduler's `oms_auth` task and confirm «СУЗ token delivered» in the agent journal and «Токен СУЗ» in the cabinet; place a 2-code order and confirm «Detached signature delivered» followed by the order reaching «Буфер активен» in the cabinet; record: whether `simpleSignIn/{omsConnection}` returned exactly `{"token"}`, whether СУЗ accepted the CryptoAPI detached signature (and the CAdESCOM one with `MARKIRO_SIGNER_BACKEND=cades`), any 413.
+Add a section «СУЗ: token and detached signature (sandbox)» to
+`docs/runbooks/signer-agent-manual-e2e.md`, after the existing True API sandbox steps and
+in the same voice. It must let an operator who has never seen this feature carry out the
+run and come back with answers. Cover, in order:
 
-- [ ] **Step 2: Bump versions per `docs/runbooks/signer-release.md`**
+1. Pair the agent with a sandbox tenant (point at the existing steps rather than
+   repeating them).
+2. Register an installation for Markiro. Either register it in the СУЗ sandbox cabinet,
+   or call `POST https://suz-integrator.sandbox.crptech.ru/api/v3/integration/connection?omsId={omsId}`
+   with the header `X-RegistrationKey: 4344d884-7f21-456c-981e-cd68e92391e8` (the public
+   sandbox registration key) and a detached signature of the body in `X-Signature`. Record
+   the returned `omsConnection`.
+3. Enter `omsId` and `omsConnection` in the cabinet's Chestny ZNAK channel settings.
+4. Wait for the scheduler's `oms_auth` task. Confirm «СУЗ token delivered» in the agent's
+   journal and the СУЗ token row in the cabinet's signer panel.
+5. Place a two-code order. Confirm «Detached signature delivered» in the journal, then
+   that the order reaches «Буфер активен» and the codes arrive.
+6. Repeat step 5 with `MARKIRO_SIGNER_BACKEND=cades` to exercise the CAdESCOM backend.
 
-Follow the runbook's version-bump checklist exactly (it names the files and the release contract tests in `tools/signer-release/`). Run: `node --test tools/signer-release/` (or the command the runbook gives).
-Expected: PASS.
+Then a «What to record» list, because this run is the only evidence that exists for code
+no test can reach:
+
+- the exact response body of `POST /auth/simpleSignIn/{omsConnection}` — whether it is
+  only `{"token": …}` as documented, and whether any expiry field accompanies it;
+- whether СУЗ accepted the CryptoAPI detached signature, and separately the CAdESCOM one;
+- any HTTP 413, which means an attached signature reached `X-Signature`;
+- the real shapes of `POST /order`, `GET /order/status` and `GET /codes`, including
+  whether a rejected order's `rejectionReason` matches what the cabinet displays;
+- whether `GET /codes` honours a 10 000-code block size.
+
+Close with the standing caveat that a green host-only `cargo test` proves the runtime loop
+and nothing about CryptoAPI, DPAPI, CAdESCOM or a real certificate.
+
+- [ ] **Step 2: Verify**
+
+Run: `pnpm exec prettier --check docs/runbooks/signer-agent-manual-e2e.md`
+Expected: passes. There is no code to test.
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add docs/runbooks/signer-agent-manual-e2e.md apps/signer tools/signer-release
-git commit -m "docs(signer): sandbox runbook for СУЗ tasks; bump agent version"
+git add docs/runbooks/signer-agent-manual-e2e.md
+git commit -m "docs(signer): sandbox runbook for the СУЗ token and detached signature"
 ```
-
----
 
 ## Self-review
 
