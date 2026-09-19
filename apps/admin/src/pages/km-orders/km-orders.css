@@ -1,0 +1,44 @@
+/* Width and vertical rhythm come from `.mk-admin-page` (the shell's full-width
+   content rail), exactly like every other admin route. Do not re-cap the width
+   here -- that produces a second, narrower rail on wide screens. */
+.mk-km-orders-page {
+  min-width: 0;
+}
+
+.mk-km-orders-page__description {
+  margin: 0;
+  font: var(--text-body);
+  color: var(--fg-3);
+}
+
+/* Two lines in one cell (chip + reason, timestamp + author) without letting
+   the table's default nowrap squash them onto one. */
+.mk-km-orders__stack {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+}
+
+.mk-km-orders__stack small {
+  font: var(--text-caption);
+  color: var(--fg-3);
+}
+
+.mk-km-orders__reason {
+  font: var(--text-caption);
+  color: var(--err-fg);
+}
+
+.mk-km-orders-blockers {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+}
+
+.mk-km-orders-summary {
+  margin: 0;
+  font: var(--text-body-sm);
+  color: var(--fg-3);
+}

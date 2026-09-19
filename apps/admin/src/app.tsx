@@ -64,6 +64,7 @@ import { LabelEditorPage } from "./pages/labels/editor/index.js";
 import { LabelTemplatesPage } from "./pages/labels/index.js";
 import { LinesPage } from "./pages/lines/index.js";
 import { LinePanelRoute } from "./pages/lines/LinePanelRoute.js";
+import { KmOrdersPage } from "./pages/km-orders/index.js";
 import { InventoryPage } from "./pages/inventory/index.js";
 import { InventoryCreatePage } from "./pages/inventory/InventoryCreatePage.js";
 import { InventoryCorrections } from "./pages/inventory/InventoryCorrections.js";
@@ -197,6 +198,19 @@ function appRouteElements() {
             element={
               <RequireCapability capability={C.OPERATIONS_WRITE}>
                 <LinePanelRoute mode="edit" />
+              </RequireCapability>
+            }
+          />
+        </Route>
+        {/* `km-orders/:orderId` (the order card) and its print page arrive
+            with `KmOrderPage`; until then the section is the list alone, so a
+            deep link 404s honestly rather than landing on a placeholder. */}
+        <Route path="km-orders">
+          <Route
+            index
+            element={
+              <RequireCapability capability={C.OPERATIONS_READ}>
+                <KmOrdersPage />
               </RequireCapability>
             }
           />

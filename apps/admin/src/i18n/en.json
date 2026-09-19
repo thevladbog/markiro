@@ -317,6 +317,74 @@
     "lastEvent": "Last event: {{time}}"
   },
   "pages": {
+    "kmOrders": {
+      "title": "Code orders",
+      "description": "Ordering marking codes from the Chestny ZNAK SUZ, receiving them, and handing them to production",
+      "createAction": "Order codes",
+      "loadError": "Could not load code orders",
+      "emptyTitle": "No code orders yet",
+      "emptyHint": "Before ordering codes, fill in the SUZ settings, pair a signer agent, and give the product a GTIN and a product group.",
+      "emptyLink": "Chestny ZNAK settings",
+      "metrics": {
+        "label": "Code order indicators",
+        "available": "Available to issue",
+        "expiring": "Expiring within 14 days",
+        "active": "Active orders",
+        "issued": "Issued in 30 days"
+      },
+      "list": {
+        "scrollLabel": "Code orders table, scrolls horizontally",
+        "product": "Product",
+        "gtin": "GTIN",
+        "quantity": "Ordered",
+        "fetched": "Received",
+        "issued": "Issued",
+        "available": "Available",
+        "expiry": "Valid until",
+        "state": "State",
+        "created": "Created"
+      },
+      "state": {
+        "created": "Created",
+        "signing": "Signing",
+        "submitted": "Sent to SUZ",
+        "buffer_pending": "Waiting for the buffer",
+        "buffer_active": "Buffer ready",
+        "fetching": "Receiving codes",
+        "completed": "Completed",
+        "rejected": "Rejected by SUZ",
+        "failed": "Failed"
+      },
+      "create": {
+        "title": "Order marking codes",
+        "product": "Product",
+        "productPlaceholder": "Choose a product",
+        "productSearch": "Search products",
+        "productRequired": "Choose a product.",
+        "productEmpty": "No products with a GTIN. Complete a product card in the catalog first.",
+        "productLoadError": "Could not load the catalog. Refresh the page and try again.",
+        "quantity": "Number of codes",
+        "quantityHint": "Between 1 and 150,000 codes per order.",
+        "quantityRange": "Enter between {{min}} and {{max}} codes.",
+        "contactPerson": "Contact person",
+        "contactPersonHint": "Sent to SUZ with the order. Optional.",
+        "summary": "{{quantity}} codes will be ordered for “{{product}}”, GTIN {{gtin}}.",
+        "summaryPlaceholder": "Choose a product and enter the number of codes.",
+        "submit": "Order",
+        "blockedTitle": "The order was not created",
+        "genericError": "Could not create the order. Try again."
+      },
+      "preflight": {
+        "OMS_SETTINGS_MISSING": "Fill in the SUZ settings under Integrations",
+        "AGENT_NOT_PAIRED": "Pair a signer agent under Integrations",
+        "OMS_TOKEN_UNAVAILABLE": "Refresh the SUZ token under Integrations",
+        "PRODUCT_NOT_FOUND": "The product no longer exists. Refresh the page and choose it again",
+        "PRODUCT_ARCHIVED": "The product is marked “do not use”. Clear that flag on the product card",
+        "PRODUCT_GTIN_MISSING": "Set the GTIN on the product card",
+        "PRODUCT_GROUP_MISSING": "Set the Chestny ZNAK product group on the product card",
+        "PRODUCT_GROUP_UNSUPPORTED": "Ordering codes is not available for this product group yet"
+      }
+    },
     "inventory": {
       "title": "Inventories",
       "description": "Preparation, station work, and final documents",
