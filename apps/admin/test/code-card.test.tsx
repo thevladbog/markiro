@@ -106,19 +106,20 @@ afterEach(() => {
 
 describe("CodeCardPage", () => {
   // CHZ status is the code's national lifecycle (emitted -> applied ->
-  // introduced -> retired/written off/disaggregated), so it gets a phase chip
-  // like any other lifecycle status -- not a flat category badge. The two
-  // ways to leave circulation share the `retired` phase; disaggregation is
-  // its own `dismantled` phase; an unknown status (not one of the six
-  // `INVENTORY_CHZ_STATUSES` domain states -- `WITHDRAWN` is not among them)
-  // falls back to `none` with the raw, untranslated string as its label.
+  // introduced -> retired/written off/withdrawn/disaggregated), so it gets a
+  // phase chip like any other lifecycle status -- not a flat category badge.
+  // Three ways to leave circulation (`RETIRED`, `WRITTEN_OFF`, `WITHDRAWN` --
+  // see `WITHDRAWN_STATUSES` in `chz-code-status-refresh.service.ts`) share
+  // the `retired` phase; disaggregation is its own `dismantled` phase; a
+  // status ЧЗ has not sent yet falls back to `none` with the raw,
+  // untranslated string as its label.
   it.each([
     ["INTRODUCED", "В обороте", "active"],
     ["EMITTED", "Эмитирован", "planned"],
     ["APPLIED", "Нанесён", "running"],
     ["RETIRED", "Выбыл", "retired"],
     ["WRITTEN_OFF", "Списан", "retired"],
-    ["WITHDRAWN", "WITHDRAWN", "none"],
+    ["WITHDRAWN", "Изъят", "retired"],
     ["DISAGGREGATION", "Расформирован", "dismantled"],
     ["FUTURE_STATUS", "FUTURE_STATUS", "none"],
   ])(

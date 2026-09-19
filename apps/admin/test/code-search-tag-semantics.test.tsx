@@ -79,17 +79,25 @@ describe("семантика тегов поиска по коду", () => {
    * Финальное ревью (находка 1): `DISAGGREGATION` есть в
    * `INVENTORY_CHZ_STATUSES` и в словаре `pages.inventory.chz`, но
    * отсутствовал в карте -- код с этим статусом молча получал `none`
-   * (серая точка «значения нет») вместо своей фазы. `WITHDRAWN` был в карте,
-   * но не в домене -- сырую строку без перевода не следует одевать в фазу,
-   * которую никто не запросит.
+   * (серая точка «значения нет») вместо своей фазы.
    */
   it("расформирование Честного знака получает dismantled, а не none", () => {
     expect(CHZ_STATUS_TO_PHASE.get("DISAGGREGATION")).toBe("dismantled");
     expect(CHZ_STATUS_TO_PHASE.get("DISAGGREGATION")).not.toBe("none");
   });
 
-  it("не несёт статус WITHDRAWN, которого нет в доменной константе", () => {
-    expect(CHZ_STATUS_TO_PHASE.has("WITHDRAWN")).toBe(false);
+  /**
+   * Повторное ревью: карта описывает вокабуляр ответа True API `cises/info`
+   * (колонка `chz_code_statuses.status`), а не `INVENTORY_CHZ_STATUSES` --
+   * тот домен снапшота инвентаризации, другого потребителя. `WITHDRAWN`
+   * реален в этом вокабуляре и явно выводит код из оборота наравне с
+   * `RETIRED`/`WRITTEN_OFF` (`WITHDRAWN_STATUSES` в
+   * `chz-code-status-refresh.service.ts`), поэтому у него та же фаза
+   * `retired`, а не серая точка «значения нет».
+   */
+  it("статус WITHDRAWN получает retired, а не отсутствует", () => {
+    expect(CHZ_STATUS_TO_PHASE.get("WITHDRAWN")).toBe("retired");
+    expect(CHZ_STATUS_TO_PHASE.has("WITHDRAWN")).toBe(true);
   });
 
   /**

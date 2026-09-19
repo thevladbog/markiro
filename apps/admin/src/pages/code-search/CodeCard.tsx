@@ -31,21 +31,32 @@ export const CODE_STATUS_TO_PHASE: Record<CodeStatus, TagPhase> = {
 // Chestny Znak states are independent of local aggregation: a code can be
 // emitted and applied before the station has ever seen it. Its own lifecycle
 // -- emitted -> applied -> introduced into circulation -> retired/written
-// off, or pulled apart by a disaggregation document -- gets the phase
-// treatment too, not a flat category tone. Unknown states stay without a
-// phase (`none`). Keys mirror `INVENTORY_CHZ_STATUSES`
-// (`packages/domain/src/inventory/status.ts`) exactly -- that domain
-// constant, not this map, is the source of truth for which Chestny Znak
-// statuses exist; a status this map invents (there is no `WITHDRAWN` in the
-// domain constant) gets a phase but no real label, and a status the domain
-// constant has and this map lacks (`DISAGGREGATION` did) silently falls back
-// to `none` although the value is real and has a translated label.
+// off/withdrawn, or pulled apart by a disaggregation document -- gets the
+// phase treatment too, not a flat category tone. Unknown states stay without
+// a phase (`none`).
+//
+// This map's real source of values is the vocabulary True API's `cises/info`
+// actually returns: `card.chzStatus` (`./api.ts`) is written straight from
+// that response into `chz_code_statuses.status` with no normalization (see
+// `apps/api/.../chz-code-status-refresh.service.ts`'s `writeFacts`), so any
+// string ЧЗ sends can arrive here. `INVENTORY_CHZ_STATUSES`
+// (`packages/domain/src/inventory/status.ts`) is a *different* consumer's
+// vocabulary -- the inventory snapshot's -- not this one's; the test suite
+// uses it only as a completeness floor (every status the snapshot can carry
+// must have a phase here too), not as the ceiling. `WITHDRAWN` is a real
+// `cises/info` status -- `chz-code-status-refresh.service.ts`'s
+// `WITHDRAWN_STATUSES` treats it as a third way out of circulation alongside
+// `RETIRED`/`WRITTEN_OFF` -- so it keeps the same `retired` phase here even
+// though the inventory snapshot never produces it. A status neither
+// vocabulary lists yet (ЧЗ is free to add more) falls back to `none` at the
+// call site, not to a silently invented phase.
 export const CHZ_STATUS_TO_PHASE = new Map<string, TagPhase>([
   ["EMITTED", "planned"],
   ["APPLIED", "running"],
   ["INTRODUCED", "active"],
   ["RETIRED", "retired"],
   ["WRITTEN_OFF", "retired"],
+  ["WITHDRAWN", "retired"],
   ["DISAGGREGATION", "dismantled"],
 ]);
 
