@@ -67,9 +67,9 @@ describe("ShiftSelection", () => {
     await waitFor(() => expect(screen.getByText("Closing")).toBeDefined());
     expect(screen.getByText("Waiting for close sync")).toBeDefined();
     // The list item carries `palletsEnabled`; the card must not read as plain box aggregation.
-    expect(container.querySelector(".shift-card__plan")?.textContent).toBe(
-      "Aggregation · pallets · plan 10",
-    );
+    expect(
+      [...container.querySelectorAll(".shift-card__plan-part")].map((part) => part.textContent),
+    ).toEqual(["Aggregation · pallets", "plan 10"]);
     expect((screen.getByRole("button", { name: "Rejoin" }) as HTMLButtonElement).disabled).toBe(
       true,
     );
@@ -140,7 +140,7 @@ describe("ShiftSelection", () => {
 
     await waitFor(() => expect(screen.getAllByText("Sparkling water").length).toBeGreaterThan(0));
     expect(screen.getByText("Produced: 08/15/2026")).toBeDefined();
-    expect(screen.getByText("08/21/2026")).toBeDefined();
+    expect(screen.getByText("Shift: 08/21/2026")).toBeDefined();
   });
 
   it("refreshes an open empty list and shows a shift created in the cabinet", async () => {

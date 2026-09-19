@@ -510,6 +510,7 @@ export function ShiftSelection({
                   number={shift.number ?? null}
                   productName={shift.productPrintName ?? shift.productName}
                   plannedDate={shift.plannedDate}
+                  plannedDateLabel={t("shifts.shiftDateShort")}
                   productionDate={shift.productionDate ?? null}
                   productionDateLabel={t("shifts.productionShort")}
                   locale={i18n.resolvedLanguage ?? i18n.language}

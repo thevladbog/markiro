@@ -2324,7 +2324,17 @@ body,
   gap: 2px;
 }
 
+/* Mode and plan on one line when they fit; the plan wraps whole otherwise,
+   the same way the production date does below. */
 .shift-card__plan {
+  display: flex;
+  min-width: 0;
+  overflow: hidden;
+  flex-wrap: wrap;
+  column-gap: var(--sp-3);
+}
+
+.shift-card__plan-part {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;

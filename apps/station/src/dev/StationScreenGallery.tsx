@@ -1483,6 +1483,7 @@ function ShiftFixture({ variant, locale }: { variant: string; locale: GalleryLoc
                 number={shift.number}
                 productName={shift.productName}
                 plannedDate={`2026-08-${String(21 - index - (page - 1) * 2).padStart(2, "0")}`}
+                plannedDateLabel={ru ? "Смена" : "Shift"}
                 productionDate={index === 0 ? "2026-08-15" : null}
                 productionDateLabel={ru ? "Производство" : "Produced"}
                 locale={locale}

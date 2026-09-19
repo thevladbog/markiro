@@ -163,6 +163,7 @@
     "modeLabel": "Режим смены",
     "productionDate": "Дата производства",
     "productionShort": "Производство",
+    "shiftDateShort": "Смена",
     "productionDateHint": "Необязательно. Берите с продукции.",
     "productionDatePlaceholder": "Выберите дату",
     "productionDateClear": "Очистить дату производства",

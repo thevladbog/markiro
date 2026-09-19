@@ -7,6 +7,8 @@ import { ProductImage } from "./ProductImage.js";
 export interface ShiftCardProps {
   number?: string | null;
   plannedDate?: string | null;
+  /** Caption before the planned date («Смена»); without it the bare date is shown. */
+  plannedDateLabel?: string;
   productionDate?: string | null;
   productionDateLabel?: string;
   locale?: string;
@@ -49,6 +51,7 @@ export function ShiftCard({
   number,
   productName,
   plannedDate,
+  plannedDateLabel,
   productionDate,
   productionDateLabel,
   locale = "ru",
@@ -115,7 +118,9 @@ export function ShiftCard({
             {formattedDate || formattedProductionDate ? (
               <div className="shift-card__date">
                 {formattedDate ? (
-                  <span className="shift-card__date-part">{formattedDate}</span>
+                  <span className="shift-card__date-part">
+                    {plannedDateLabel ? `${plannedDateLabel}: ${formattedDate}` : formattedDate}
+                  </span>
                 ) : null}
                 {formattedProductionDate ? (
                   <span className="shift-card__date-part">
@@ -124,14 +129,20 @@ export function ShiftCard({
                 ) : null}
               </div>
             ) : null}
+            {/* Two parts like the dates: on a narrow terminal the plan wraps
+                whole onto its own line instead of ellipsizing to «без…». */}
             <div className="shift-card__plan">
-              {modeLabel ?? mode}
-              {palletsEnabled ? (
-                <span className="shift-card__pallets">{` · ${palletsLabel ?? "pallets"}`}</span>
-              ) : null}
-              {formattedQuantity !== null
-                ? ` · ${plannedLabel ?? "plan"} ${formattedQuantity}`
-                : ` · ${noPlanLabel ?? "no plan"}`}
+              <span className="shift-card__plan-part">
+                {modeLabel ?? mode}
+                {palletsEnabled ? (
+                  <span className="shift-card__pallets">{` · ${palletsLabel ?? "pallets"}`}</span>
+                ) : null}
+              </span>
+              <span className="shift-card__plan-part">
+                {formattedQuantity !== null
+                  ? `${plannedLabel ?? "plan"} ${formattedQuantity}`
+                  : (noPlanLabel ?? "no plan")}
+              </span>
             </div>
           </div>
           <div className="shift-card__counterparty">

@@ -4,6 +4,10 @@ import { describe, expect, it, vi } from "vitest";
 import { formatShiftPlannedDate } from "../src/lib/format-date.js";
 import { ShiftCard } from "../src/ui/ShiftCard.js";
 
+function planParts(container: HTMLElement) {
+  return [...container.querySelectorAll(".shift-card__plan-part")].map((part) => part.textContent);
+}
+
 describe("ShiftCard", () => {
   it("keeps the full product name and action together beside the product photo", () => {
     const productName =
@@ -48,9 +52,7 @@ describe("ShiftCard", () => {
     expect(action.classList.contains("shift-card__action")).toBe(true);
     expect(action.parentElement).toBe(details);
     expect(container.querySelector(".shift-card__date")?.textContent).toBe("21.08.2026");
-    expect(container.querySelector(".shift-card__plan")?.textContent).toBe(
-      "Валидация · план 10 000",
-    );
+    expect(planParts(container)).toEqual(["Валидация", "план 10 000"]);
     expect(container.querySelector(".shift-card__meta")?.children).toHaveLength(2);
   });
 
@@ -59,6 +61,7 @@ describe("ShiftCard", () => {
       <ShiftCard
         productName="Пиво светлое"
         plannedDate="2026-08-21"
+        plannedDateLabel="Смена"
         productionDate="2026-08-15"
         productionDateLabel="Производство"
         locale="ru"
@@ -80,7 +83,7 @@ describe("ShiftCard", () => {
     );
     // Separate parts so the production date wraps whole on narrow cards
     // instead of ellipsizing the middle of one combined line.
-    expect(parts).toEqual(["21.08.2026", "Производство: 15.08.2026"]);
+    expect(parts).toEqual(["Смена: 21.08.2026", "Производство: 15.08.2026"]);
 
     rerender(
       <ShiftCard
@@ -126,15 +129,14 @@ describe("ShiftCard", () => {
       image: null,
     };
     const { container, rerender } = render(<ShiftCard {...props} palletsEnabled />);
-    expect(container.querySelector(".shift-card__plan")?.textContent).toBe(
-      "Агрегация · паллеты · план 2 400",
-    );
+    // Owner check on a line terminal 2026-09-19: «Агрегация · паллеты · без
+    // плана» ellipsized to «без…» as one line, so the plan is its own part
+    // that wraps whole (see the production date).
+    expect(planParts(container)).toEqual(["Агрегация · паллеты", "план 2 400"]);
     expect(container.querySelector(".shift-card__pallets")).not.toBeNull();
 
-    rerender(<ShiftCard {...props} palletsEnabled={false} />);
-    expect(container.querySelector(".shift-card__plan")?.textContent).toBe(
-      "Агрегация · план 2 400",
-    );
+    rerender(<ShiftCard {...props} palletsEnabled={false} plannedQty={null} />);
+    expect(planParts(container)).toEqual(["Агрегация", "без плана"]);
     expect(container.querySelector(".shift-card__pallets")).toBeNull();
   });
 
