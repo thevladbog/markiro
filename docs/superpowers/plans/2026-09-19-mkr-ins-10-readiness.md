@@ -56,115 +56,118 @@ Expected: десять упавших тестов; в `unexpected` строки
 Импорт по образцу `catalog-import.visual.spec.ts`, который берёт схемы из `../../../packages/platform-contracts/dist/index.js`:
 
 ```ts
-import {
-  categorySchemaDefinitionSchema,
-} from "../../../packages/domain/dist/index.js";
+import { categorySchemaDefinitionSchema } from "../../../packages/domain/dist/index.js";
 ```
 
 Внутри `fixtures(locale)` собрать определение категории и прогнать его через схему — набор должен показывать РАЗНЫЕ уровни обязательности, иначе кадр характеристик не покажет того, что описывает текст:
 
 ```ts
-  /**
-   * Three attributes at three requirement levels, so the frame shows what the
-   * document explains: one mandatory for code ordering, one mandatory for
-   * circulation, one recommended. Parsed through the real schema -- the client
-   * parses this response too, so an invented shape throws here instead of
-   * rendering an empty block.
-   */
-  const CATEGORY_DEFINITION = categorySchemaDefinitionSchema.parse({
-    formatVersion: 2,
-    categoryId: "cat-syrup",
-    scopeKey: "national_catalog",
-    attributes: [
-      {
-        id: "volume",
-        label: copy.attrVolume,
-        valueType: "decimal",
-        multiplicity: "one",
-        unit: { canonical: "л", allowed: ["л", "мл"] },
-        requirementRules: [{ layer: "code_ordering", level: "mandatory", when: null }],
-        presetMode: "none",
-        presets: [],
-      },
-      {
-        id: "composition",
-        label: copy.attrComposition,
-        valueType: "string",
-        multiplicity: "one",
-        unit: null,
-        requirementRules: [{ layer: "circulation", level: "mandatory", when: null }],
-        presetMode: "none",
-        presets: [],
-      },
-      {
-        id: "package",
-        label: copy.attrPackage,
-        valueType: "enum",
-        multiplicity: "one",
-        unit: null,
-        requirementRules: [{ layer: "circulation", level: "recommended", when: null }],
-        presetMode: "suggested",
-        presets: [{ value: "glass", label: copy.attrPackageGlass }],
-      },
-    ],
-  });
+/**
+ * Three attributes at three requirement levels, so the frame shows what the
+ * document explains: one mandatory for code ordering, one mandatory for
+ * circulation, one recommended. Parsed through the real schema -- the client
+ * parses this response too, so an invented shape throws here instead of
+ * rendering an empty block.
+ */
+const CATEGORY_DEFINITION = categorySchemaDefinitionSchema.parse({
+  formatVersion: 2,
+  categoryId: "cat-syrup",
+  scopeKey: "national_catalog",
+  attributes: [
+    {
+      id: "volume",
+      label: copy.attrVolume,
+      valueType: "decimal",
+      multiplicity: "one",
+      unit: { canonical: "л", allowed: ["л", "мл"] },
+      requirementRules: [{ layer: "code_ordering", level: "mandatory", when: null }],
+      presetMode: "none",
+      presets: [],
+    },
+    {
+      id: "composition",
+      label: copy.attrComposition,
+      valueType: "string",
+      multiplicity: "one",
+      unit: null,
+      requirementRules: [{ layer: "circulation", level: "mandatory", when: null }],
+      presetMode: "none",
+      presets: [],
+    },
+    {
+      id: "package",
+      label: copy.attrPackage,
+      valueType: "enum",
+      multiplicity: "one",
+      unit: null,
+      requirementRules: [{ layer: "circulation", level: "recommended", when: null }],
+      presetMode: "suggested",
+      presets: [{ value: "glass", label: copy.attrPackageGlass }],
+    },
+  ],
+});
 ```
 
 Профиль и готовность — рядом. Готовность должна нести разные состояния, иначе панель покажет четыре одинаковых строки:
 
 ```ts
-  const REGULATORY_PROFILE = {
-    productId: PRODUCT_ID,
-    binding: {
-      revision: 3,
-      categoryId: "cat-syrup",
-      categoryName: copy.categoryName,
-      schemaVersionId: "40000000-0000-4000-8000-000000000001",
-      tnVedCode: "2106909200",
-      okpd2Code: "10.89.19.190",
+const REGULATORY_PROFILE = {
+  productId: PRODUCT_ID,
+  binding: {
+    revision: 3,
+    categoryId: "cat-syrup",
+    categoryName: copy.categoryName,
+    schemaVersionId: "40000000-0000-4000-8000-000000000001",
+    tnVedCode: "2106909200",
+    okpd2Code: "10.89.19.190",
+    source: "national_catalog" as const,
+    confirmedAt: "2026-09-15T08:30:00.000Z",
+  },
+  definition: CATEGORY_DEFINITION,
+  values: [
+    {
+      entryId: "50000000-0000-4000-8000-000000000001",
+      attributeId: "volume",
+      value: { type: "decimal" as const, value: "0.5", unit: "л" },
       source: "national_catalog" as const,
-      confirmedAt: "2026-09-15T08:30:00.000Z",
+      observedAt: "2026-09-15T08:00:00.000Z",
+      appliedAt: "2026-09-15T08:30:00.000Z",
     },
-    definition: CATEGORY_DEFINITION,
-    values: [
-      {
-        entryId: "50000000-0000-4000-8000-000000000001",
-        attributeId: "volume",
-        value: { type: "decimal" as const, value: "0.5", unit: "л" },
-        source: "national_catalog" as const,
-        observedAt: "2026-09-15T08:00:00.000Z",
-        appliedAt: "2026-09-15T08:30:00.000Z",
-      },
-    ],
-    egaisCodes: [],
-    pendingProposalCount: 0,
-  };
+  ],
+  egaisCodes: [],
+  pendingProposalCount: 0,
+};
 
-  /**
-   * One dimension per state the panel can show, so the frame carries the whole
-   * vocabulary the document defines: production is ready, code ordering is
-   * blocked by a missing attribute, circulation needs a re-check after a new
-   * schema, EGAIS does not apply to this product group.
-   */
-  const READINESS = {
-    productId: PRODUCT_ID,
-    dimensions: [
-      { dimension: "production" as const, state: "ready" as const, reasons: [], recommendations: [] },
-      {
-        dimension: "code_ordering" as const,
-        state: "not_ready" as const,
-        reasons: [{ code: "ATTRIBUTE_REQUIRED", attributeId: "composition" }],
-        recommendations: [],
-      },
-      {
-        dimension: "circulation" as const,
-        state: "stale" as const,
-        reasons: [{ code: "SCHEMA_VERSION_STALE" }],
-        recommendations: [{ code: "ATTRIBUTE_RECOMMENDED", attributeId: "package" }],
-      },
-      { dimension: "egais" as const, state: "not_applicable" as const, reasons: [], recommendations: [] },
-    ],
-  };
+/**
+ * One dimension per state the panel can show, so the frame carries the whole
+ * vocabulary the document defines: production is ready, code ordering is
+ * blocked by a missing attribute, circulation needs a re-check after a new
+ * schema, EGAIS does not apply to this product group.
+ */
+const READINESS = {
+  productId: PRODUCT_ID,
+  dimensions: [
+    { dimension: "production" as const, state: "ready" as const, reasons: [], recommendations: [] },
+    {
+      dimension: "code_ordering" as const,
+      state: "not_ready" as const,
+      reasons: [{ code: "ATTRIBUTE_REQUIRED", attributeId: "composition" }],
+      recommendations: [],
+    },
+    {
+      dimension: "circulation" as const,
+      state: "stale" as const,
+      reasons: [{ code: "SCHEMA_VERSION_STALE" }],
+      recommendations: [{ code: "ATTRIBUTE_RECOMMENDED", attributeId: "package" }],
+    },
+    {
+      dimension: "egais" as const,
+      state: "not_applicable" as const,
+      reasons: [],
+      recommendations: [],
+    },
+  ],
+};
 ```
 
 `productAttributeValueSchema` — дискриминированное по `type` объединение `.strict()`; вариант `decimal` это `{ type: "decimal", value: "<строка-число>", unit: string | null }`. Другие варианты: `string`, `string_list`, `boolean`, `date`, `enum`, `enum_list`.
@@ -176,8 +179,8 @@ import {
 В `installApi`, до `unexpected.push`:
 
 ```ts
-    if (path.endsWith("/readiness")) return json(route, fx.READINESS);
-    if (path.endsWith("/regulatory-profile")) return json(route, fx.REGULATORY_PROFILE);
+if (path.endsWith("/readiness")) return json(route, fx.READINESS);
+if (path.endsWith("/regulatory-profile")) return json(route, fx.REGULATORY_PROFILE);
 ```
 
 Если карточка запрашивает их и для черновика/архивного товара, отвечать тем же — иначе строгий перехват свалит тесты.
@@ -222,15 +225,21 @@ git commit -m "test(catalog): teach the product card suite about readiness and a
 По образцу соседних тестов в файле; селекторы — только через `t("…")`:
 
 ```ts
-  test(`[${locale}] the card reports readiness per operation`, async ({ page }) => {
-    const unexpected = await installApi(page, "productActive");
-    await openHarness(page, locale, `/catalog/${PRODUCT_ID}/edit`);
-    await expect(page.getByRole("heading", { name: t("pages.catalog.regulatory.readiness") })).toBeVisible();
-    await expect(page.getByText(t("pages.catalog.regulatory.states.ready"), { exact: true })).toBeVisible();
-    await expect(page.getByText(t("pages.catalog.regulatory.states.not_applicable"), { exact: true })).toBeVisible();
-    await screenshotSection(page, "product-readiness-title", shot("product-readiness"));
-    expect(unexpected).toEqual([]);
-  });
+test(`[${locale}] the card reports readiness per operation`, async ({ page }) => {
+  const unexpected = await installApi(page, "productActive");
+  await openHarness(page, locale, `/catalog/${PRODUCT_ID}/edit`);
+  await expect(
+    page.getByRole("heading", { name: t("pages.catalog.regulatory.readiness") }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(t("pages.catalog.regulatory.states.ready"), { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(t("pages.catalog.regulatory.states.not_applicable"), { exact: true }),
+  ).toBeVisible();
+  await screenshotSection(page, "product-readiness-title", shot("product-readiness"));
+  expect(unexpected).toEqual([]);
+});
 ```
 
 Аналогично `product-category` (заголовок `pages.catalog.regulatory.category`, видимы «ТН ВЭД» и «ОКПД2») и `product-attributes` (заголовок `pages.catalog.regulatory.attributes`, видимы пометки «Обязательно для заказа кодов» и «Рекомендуется»).
