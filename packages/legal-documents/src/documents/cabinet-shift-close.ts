@@ -97,7 +97,7 @@ export const CABINET_SHIFT_CLOSE_CONTENT = {
               {
                 term: "Разобрана",
                 detail:
-                  "Паллету расформировали — её короба больше на ней не стоят; на снимке у такой паллеты нули в «Коробов» и «Кодов». Ярлык на неё не печатается, а отдельный отчёт по ней кабинет уже не сформирует (раздел 7).",
+                  "Паллету расформировали: она выведена из оборота и больше не собирается и не отгружается как единица. Короба с неё при этом не вскрывают — они остаются закрытыми и сохраняют запись о том, что стояли на этой паллете. Поэтому «Коробов» и «Кодов» у такой строки показывают те же числа, что и до расформирования: нулей там не будет, и это не ошибка. Ярлык на такую паллету не печатается, а отдельный отчёт по ней кабинет уже не сформирует (раздел 7).",
               },
               {
                 term: "Без SSCC",
@@ -467,7 +467,7 @@ export const CABINET_SHIFT_CLOSE_CONTENT = {
               {
                 term: "Taken apart",
                 detail:
-                  "The pallet was dismantled — its boxes no longer stand on it; in the screenshot such a pallet shows zeros under “Boxes” and “Codes”. It gets no placard page, and the cabinet will no longer generate a report for that pallet alone (section 7).",
+                  "The pallet was dismantled: it is retired and is no longer built up or shipped as one unit. Its boxes are not opened by that — they stay closed and keep the record that they stood on this pallet. So “Boxes” and “Codes” on such a row still show the same numbers they showed before it was taken apart: there will be no zeros there, and that is not an error. Such a pallet gets no placard page, and the cabinet will no longer generate a report for that pallet alone (section 7).",
               },
               {
                 term: "No SSCC",

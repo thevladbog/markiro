@@ -79,7 +79,7 @@ export const CABINET_SHIFT_PLANNING_CONTENT = {
         blocks: [
           {
             kind: "paragraph",
-            text: "Линия без станций бесполезна: открывать на ней смену будет негде. Станции закрепляются за линией в разделе «Устройства», который кабинет описывает так: «Состояние Station, ТСД и киосков, их подключение и лицензионные места.» Перед сменой менеджеру нужны три вещи: найти станцию, убедиться, что она в сети, и увидеть, за какой линией она закреплена.",
+            text: "Линия без станций бесполезна: открывать на ней смену будет негде. Станции закрепляются за линией в разделе «Устройства», который кабинет описывает так: «Состояние Station, ТСД и киосков, их подключение и лицензионные места.» Перед сменой менеджеру нужны три вещи: найти станцию, понять, доходит ли до неё задание, и увидеть, за какой линией она закреплена.",
           },
           {
             kind: "step",
@@ -93,8 +93,8 @@ export const CABINET_SHIFT_PLANNING_CONTENT = {
           },
           {
             kind: "step",
-            title: "Убедитесь, что станция в сети и знает свою линию",
-            text: "Колонка «Статус» показывает связь: «В сети», «Не в сети», «Ожидает привязки» или «Отозвано». Смену открывают только на станции со статусом «В сети»; «Ожидает привязки» означает, что устройство в кабинете завели, но код на самом компьютере ещё не ввели. Линия показана в колонке «Место» — отдельной колонки «Линия» в таблице нет.",
+            title: "Убедитесь, что станция получила задание и знает свою линию",
+            text: "Колонка «Статус» показывает связь: «В сети», «Не в сети», «Ожидает привязки» или «Отозвано». Это отметка о том, когда станция в последний раз выходила на связь, а не разрешение работать: открыть смену станция может и без связи. Смену станция берёт из своей локальной копии задания, поэтому важно другое — дошёл ли до неё план. Как только запланированная смена доехала до станции, оператор откроет её и в офлайне, пока действует офлайн-разрешение станции; когда разрешение исчерпано, станция сама попросит подключиться и обновить данные. «Ожидает привязки» — случай другой: устройство в кабинете завели, но код на самом компьютере ещё не ввели, поэтому задание на него пока не уходит вовсе. Линия показана в колонке «Место» — отдельной колонки «Линия» в таблице нет.",
           },
           {
             kind: "step",
@@ -110,7 +110,7 @@ export const CABINET_SHIFT_PLANNING_CONTENT = {
           {
             kind: "callout",
             tone: "warning",
-            text: "Добавление станции и выбор её линии требуют прав администратора кабинета. Менеджеру производства этот раздел доступен только на чтение: он видит реестр, статус и колонку «Место», но не может изменить назначение, а блока «Лицензии и замена устройств» в его кабинете нет вовсе. Снимок карточки устройства сделан под администратором — в кабинете менеджера боковое меню короче.",
+            text: "Станцию заводит и переназначает только администратор или владелец кабинета: эти действия требуют права на управление учётными данными, которого у менеджера производства нет. Остальное оборудование в его руках — кнопка «Добавить устройство» есть и в кабинете менеджера (она видна на снимке реестра), киоск и ТСД он заводит и переназначает сам. Блока «Лицензии и замена устройств» в кабинете менеджера нет вовсе, а колонка «Лицензионное место» остаётся у него пустой. Снимок карточки устройства сделан под администратором — в кабинете менеджера боковое меню короче.",
           },
         ],
       },
@@ -446,7 +446,7 @@ export const CABINET_SHIFT_PLANNING_CONTENT = {
         blocks: [
           {
             kind: "paragraph",
-            text: "A line with no stations is useless: there will be nowhere to open a shift on it. Stations are attached to a line in the “Devices” section, which the cabinet describes as “Station, handheld, and kiosk status, connectivity, and licensed slots.” Before a shift a manager needs three things: to find the station, to see that it is online, and to see which line it belongs to.",
+            text: "A line with no stations is useless: there will be nowhere to open a shift on it. Stations are attached to a line in the “Devices” section, which the cabinet describes as “Station, handheld, and kiosk status, connectivity, and licensed slots.” Before a shift a manager needs three things: to find the station, to see whether the plan reaches it, and to see which line it belongs to.",
           },
           {
             kind: "step",
@@ -460,8 +460,8 @@ export const CABINET_SHIFT_PLANNING_CONTENT = {
           },
           {
             kind: "step",
-            title: "Check that the station is online and knows its line",
-            text: "The “Status” column shows the connection: “Online”, “Offline”, “Awaiting pairing” or “Revoked”. A shift is only opened on a station whose status is “Online”; “Awaiting pairing” means the device record exists in the cabinet but the code has not been entered on the machine itself yet. The line is shown in the “Place” column — there is no separate “Line” column in the table.",
+            title: "Check that the station has the plan and knows its line",
+            text: "The “Status” column shows the connection: “Online”, “Offline”, “Awaiting pairing” or “Revoked”. It records when the cabinet last heard from the station, not permission to work: a station can open a shift with no connection at all. The station takes the shift from its own local copy of the plan, so what matters is whether the plan reached it. Once a planned shift has arrived at the station, an operator opens it offline too, for as long as the station's offline permission lasts; when that permission runs out the station itself asks to connect and refresh. “Awaiting pairing” is a different case: the device record exists in the cabinet but the code has not been entered on the machine itself yet, so no plan reaches it at all. The line is shown in the “Place” column — there is no separate “Line” column in the table.",
           },
           {
             kind: "step",
@@ -477,7 +477,7 @@ export const CABINET_SHIFT_PLANNING_CONTENT = {
           {
             kind: "callout",
             tone: "warning",
-            text: "Adding a station and choosing its line require cabinet administrator rights. For a production manager this section is read-only: they see the register, the status and the “Place” column but cannot change the assignment, and the “Device licensing and replacement” block is not in their cabinet at all. The device-card screenshot was taken as an administrator — in a manager's cabinet the side menu is shorter.",
+            text: "Only a cabinet administrator or owner adds or reassigns a station: those actions require the right to manage device credentials, which a production manager does not have. The rest of the equipment is theirs — the “Add device” button is in a manager's cabinet too (it is visible on the register screenshot), and they add and reassign kiosks and handhelds themselves. The “Device licensing and replacement” block is not in a manager's cabinet at all, and the “Working-device slot” column stays empty for them. The device-card screenshot was taken as an administrator — in a manager's cabinet the side menu is shorter.",
           },
         ],
       },
