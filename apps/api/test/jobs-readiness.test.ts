@@ -19,6 +19,7 @@ import type { SubscriptionStatusJob } from "../src/subscriptions/subscription-st
 import type { ChzExportRunnerService } from "../src/modules/chz-exports/chz-export-runner.service";
 import type { ChzCodeStatusIngestService } from "../src/modules/chz-code-statuses/chz-code-status-ingest.service";
 import type { ChzCodeStatusRefreshService } from "../src/modules/chz-code-statuses/chz-code-status-refresh.service";
+import type { ChzKmOrderRunnerService } from "../src/modules/chz-km-orders/chz-km-order-runner.service";
 import type { PlatformReportRunnerService } from "../src/platform-reports/platform-report-runner.service";
 
 const pgBossMock = vi.hoisted(() => ({
@@ -41,7 +42,7 @@ vi.mock("@markiro/db", async (importOriginal) => {
   };
 });
 
-const WORKER_IDS = Array.from({ length: 23 }, (_, index) => `worker-${index + 1}`);
+const WORKER_IDS = Array.from({ length: 24 }, (_, index) => `worker-${index + 1}`);
 
 function wip(id: string, state: WorkerState = "active"): WipData {
   return {
@@ -159,6 +160,10 @@ function serviceWith(
   const chzCodeStatusRefresh = {
     run: vi.fn(async () => ({ batches: 0, updated: 0, caughtUp: true })),
   } as unknown as ChzCodeStatusRefreshService;
+  const chzKmOrderRunner = {
+    run: vi.fn(async () => ({ finished: true, retryAfterSeconds: 0 })),
+    abandonAfterJobRetriesExhausted: vi.fn(async () => undefined),
+  } as unknown as ChzKmOrderRunnerService;
   return {
     service: new PgBossService(
       db,
@@ -174,6 +179,7 @@ function serviceWith(
       chzExportRunner,
       chzCodeStatusIngest,
       chzCodeStatusRefresh,
+      chzKmOrderRunner,
       undefined,
       undefined,
       options.nationalCatalogSchemaSourceTenantId,
@@ -234,14 +240,14 @@ describe("PgBossService readiness", () => {
     pgBossMock.instances.length = 0;
   });
 
-  it("accepts the exact twenty-three successfully registered active workers including National Catalog jobs", async () => {
+  it("accepts the exact twenty-four successfully registered active workers including National Catalog jobs", async () => {
     const boss = fakeBoss();
     const { service, subscriptionStatus, signerScheduler } = serviceWith(boss);
 
     await service.onModuleInit();
 
     await expect(service.checkReady()).resolves.toBeUndefined();
-    expect(boss.work).toHaveBeenCalledTimes(23);
+    expect(boss.work).toHaveBeenCalledTimes(24);
     expect(boss.work.mock.calls.map(([queue]) => queue)).toContain(BUILD_SHIFT_EXPORT_QUEUE);
     expect(boss.work.mock.calls.map(([queue]) => queue)).toContain(BUILD_INVENTORY_DOCUMENT_QUEUE);
     expect(boss.work.mock.calls.map(([queue]) => queue)).toContain(

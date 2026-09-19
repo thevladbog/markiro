@@ -118,8 +118,28 @@ export const chzSignerSettingsSchema = z
       .string()
       .regex(/^\d{10}(\d{2})?$/)
       .optional(),
+    /** СУЗ identifier from the tenant's СУЗ cabinet settings. */
+    /**
+     * `z.guid()`, not `z.uuid()`: СУЗ issues these and documents them only as
+     * hex-shaped (`[0-9a-fA-F]{8}-…`), so a real installation id can carry a
+     * non-RFC-4122 variant nibble — СУЗ's own documented example does. Our own
+     * identifiers stay `z.uuid()`.
+     */
+    omsId: z.guid().optional(),
+    /** The installation registered for Markiro in the СУЗ cabinet; one token per installation. */
+    omsConnection: z.guid().optional(),
+    omsContactPerson: z.string().trim().min(1).max(128).optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    if ((value.omsId === undefined) !== (value.omsConnection === undefined)) {
+      ctx.addIssue({
+        code: "custom",
+        message: "omsId and omsConnection must be set together",
+        path: ["omsConnection"],
+      });
+    }
+  });
 
 export const CHANNELS: readonly ChannelDescriptor[] = [
   {

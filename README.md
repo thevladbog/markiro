@@ -60,16 +60,16 @@ The platform is built for real production constraints: multiple terminals in one
 
 ## Core capabilities
 
-| Area                  | What is implemented                                                                                                 |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| Codes and validation  | GS1 check digits, GTIN normalization, KM parsing, scan classification, duplicate/error handling                     |
-| Production            | Shifts, multi-terminal scanning, offline journals, synchronization, conflicts, operator recovery actions, dashboard |
-| Aggregation           | SSCC pools, boxes, box labels, disassembly/reprint audit, shared aggregation state                                  |
-| Inventory             | Inventory tasks, station recount and repack, corrections and late events, GISMT aggregation XML and report package  |
-| Labels                | WYSIWYG templates, Cyrillic rasterization, ZPL/TSPL generation, product/shift bindings                              |
-| Disposal              | Paired kiosks, badge resolution, daily limits, offline queue/quarantine, cabinet reconciliation                     |
-| Chestny ZNAK          | Signer agent for the True API authentication flow, encrypted token storage, product groups, code-status exports     |
-| SaaS and integrations | Multi-tenant cabinet, roles/capabilities, billing and limits, CommerceML/1C exchange, mail, private object storage  |
+| Area                  | What is implemented                                                                                                                                                  |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Codes and validation  | GS1 check digits, GTIN normalization, KM parsing, scan classification, duplicate/error handling                                                                      |
+| Production            | Shifts, multi-terminal scanning, offline journals, synchronization, conflicts, operator recovery actions, dashboard                                                  |
+| Aggregation           | SSCC pools, boxes, box labels, disassembly/reprint audit, shared aggregation state                                                                                   |
+| Inventory             | Inventory tasks, station recount and repack, corrections and late events, GISMT aggregation XML and report package                                                   |
+| Labels                | WYSIWYG templates, Cyrillic rasterization, ZPL/TSPL generation, product/shift bindings                                                                               |
+| Disposal              | Paired kiosks, badge resolution, daily limits, offline queue/quarantine, cabinet reconciliation                                                                      |
+| Chestny ZNAK          | Signer agent for the True API authentication flow, encrypted token storage, product groups, code-status exports, KM orders, encrypted code pool, office export/print |
+| SaaS and integrations | Multi-tenant cabinet, roles/capabilities, billing and limits, CommerceML/1C exchange, mail, private object storage                                                   |
 
 ## Architecture
 

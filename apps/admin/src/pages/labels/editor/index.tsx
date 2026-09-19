@@ -37,7 +37,9 @@ import { useNavigate, useParams } from "react-router";
 import {
   EGAIS_PRODUCT_GROUP_CODE,
   assertDuplicateTemplate,
+  assertKmTemplate,
   buildDuplicateLabelTemplate,
+  buildKmLabelTemplates,
   buildPalletLabelTemplates,
   type LabelTemplatePurpose,
   generateTspl,
@@ -103,18 +105,43 @@ function matchPresetKey(widthMm: number, heightMm: number): string | null {
  * is the same builder tenant provisioning seeds from, so the second pallet
  * template a tenant mints begins life identical to its first (100×150, which
  * is one of SIZE_PRESETS, so the size select stays on a preset).
+ *
+ * `product_km` starts from the stock KM label for the same reason, with one
+ * extra: the blank default carries no Data Matrix at all, and a KM template
+ * without one is rejected outright (`assertKmTemplate`, mirrored by the
+ * server's own `assertPurposeSpec`) -- so the empty start would be a start
+ * that cannot be saved.
  */
 function startingSpecFor(purpose: LabelTemplatePurpose): LabelTemplateSpec {
   if (purpose === "product_duplicate") return buildDuplicateLabelTemplate();
   if (purpose === "pallet") return buildPalletLabelTemplates()[0]?.spec ?? DEFAULT_SPEC;
+  if (purpose === "product_km") return buildKmLabelTemplates()[0]?.spec ?? DEFAULT_SPEC;
   return DEFAULT_SPEC;
 }
 
-/** Narrows a Select's raw string value to the purpose union without a cast. */
+/**
+ * Narrows a Select's raw string value to `LabelTemplatePurpose` without a
+ * cast. Every member of the union is authorable here now, so an unrecognised
+ * value can only be a bug in the option list above -- it falls back to the
+ * box label rather than submitting a purpose the server would reject.
+ */
 function toPurpose(value: string): LabelTemplatePurpose {
   if (value === "product_duplicate") return "product_duplicate";
   if (value === "pallet") return "pallet";
+  if (value === "product_km") return "product_km";
   return "box";
+}
+
+/**
+ * Applies the geometry rule this purpose puts on its spec, and throws a
+ * `DomainError` when the spec breaks it. `box` and `pallet` have no such rule,
+ * so they pass unconditionally. Mirrors the server's own `assertPurposeSpec`
+ * (`label-templates.service.ts`), so Save refuses locally exactly where the
+ * API would answer 400.
+ */
+function assertSpecForPurpose(purpose: LabelTemplatePurpose, spec: LabelTemplateSpec): void {
+  if (purpose === "product_duplicate") assertDuplicateTemplate(spec);
+  if (purpose === "product_km") assertKmTemplate(spec);
 }
 
 /**
@@ -268,13 +295,11 @@ function LabelEditorContent({
   const updateMutation = useUpdateLabelTemplate();
 
   const spec = editor.state.spec;
-  let duplicateInvalid = false;
-  if (purpose === "product_duplicate") {
-    try {
-      assertDuplicateTemplate(spec);
-    } catch {
-      duplicateInvalid = true;
-    }
+  let specInvalid = false;
+  try {
+    assertSpecForPurpose(purpose, spec);
+  } catch {
+    specInvalid = true;
   }
   const egaisOutsideScope =
     scopeMode === "selected" &&
@@ -402,7 +427,7 @@ function LabelEditorContent({
     // `invalidSizeAxes`'s doc comment above) -- the spec was never updated,
     // so saving now would silently persist the last COMMITTED size instead
     // of the one on screen. Refuse until the user fixes or clears it.
-    if (hasInvalidSize || duplicateInvalid) return;
+    if (hasInvalidSize || specInvalid) return;
     if (scopeMode === "selected" && selectedCodes.length === 0) {
       setScopeError(t("pages.labels.editor.scopeEmptyError"));
       return;
@@ -448,12 +473,14 @@ function LabelEditorContent({
    */
   async function handleDownload(format: "zpl" | "tspl" | "json"): Promise<void> {
     // JSON is the model itself: nothing to generate, nothing that can fail,
-    // so it is offered even while a duplicate template is temporarily invalid.
+    // so it is offered even while the spec is temporarily invalid for its
+    // purpose -- `specInvalid` now covers the KM purpose as well as the
+    // duplicate one, and neither gate applies to exporting the model.
     if (format === "json") {
       downloadBlob(buildJsonBlob({ name, purpose, spec }), `${safeFileName(name)}.json`);
       return;
     }
-    if (duplicateInvalid) return;
+    if (specInvalid) return;
     const sample = labelPreviewData(purpose);
     try {
       if (format === "zpl") {
@@ -517,7 +544,7 @@ function LabelEditorContent({
         <Button
           type="button"
           loading={isSaving}
-          disabled={hasInvalidSize || duplicateInvalid}
+          disabled={hasInvalidSize || specInvalid}
           onClick={() => void handleSave()}
         >
           {t("pages.labels.editor.save")}
@@ -541,6 +568,10 @@ function LabelEditorContent({
               // pallet-template picker needs more than the one seeded row to
               // pick between.
               { value: "pallet", label: t("pages.labels.purpose.pallet") },
+              // Task 17: the KM label a tenant prints in the office for codes
+              // ordered from СУЗ. Same geometry rule as a duplicate label,
+              // its own purpose because its own pickers select on it.
+              { value: "product_km", label: t("pages.labels.purpose.product_km") },
             ]}
             onValueChange={(value) => {
               const next = toPurpose(value);
@@ -567,15 +598,16 @@ function LabelEditorContent({
             </Button>
           ) : null}
           {copying ? <Alert tone="info">{t("pages.labels.purpose.copyHint")}</Alert> : null}
-          {duplicateInvalid ? (
-            <Alert tone="error">{t("pages.labels.purpose.invalid")}</Alert>
-          ) : null}
-          {purpose === "product_duplicate" ? (
+          {specInvalid ? <Alert tone="error">{t("pages.labels.purpose.invalid")}</Alert> : null}
+          {/* Both stock layouts are 58 × 40, which is what the shared
+              button text names -- the way back from an import that does not
+              satisfy this purpose's geometry rule. */}
+          {purpose === "product_duplicate" || purpose === "product_km" ? (
             <Button
               type="button"
               variant="secondary"
               onClick={() => {
-                handleReplaceSpec(buildDuplicateLabelTemplate());
+                handleReplaceSpec(startingSpecFor(purpose));
                 setCustomSize(false);
                 clearSizeDrafts();
               }}

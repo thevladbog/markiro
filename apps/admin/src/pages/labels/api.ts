@@ -15,12 +15,18 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 
-import type { LabelTemplateSpec } from "@markiro/domain";
+import type { LabelTemplatePurpose, LabelTemplateSpec } from "@markiro/domain";
 
 import { apiFetch } from "../../api/client.js";
 
 export interface LabelTemplateSummaryDto {
-  purpose: "box" | "product_duplicate" | "pallet";
+  /**
+   * The full `LabelTemplatePurpose` union: `GET /label-templates` already
+   * returns the stock `product_km` label every tenant is seeded with (see
+   * `apps/api/.../tenant-provisioning.service.ts`), and the KM issue dialog
+   * (`../km-orders/IssueKmCodesDialog.tsx`) selects on exactly that member.
+   */
+  purpose: LabelTemplatePurpose;
   id: string;
   name: string;
   widthMm: number;
@@ -34,7 +40,13 @@ export interface LabelTemplateSummaryDto {
 }
 
 export interface LabelTemplateDto {
-  purpose: "box" | "product_duplicate" | "pallet";
+  /**
+   * The same full union as the summary above, now that the editor can author
+   * every member of it (`editor/index.tsx`'s purpose picker): a `product_km`
+   * template opened from the library must land in the editor's own purpose
+   * state, not be narrowed away on the way in.
+   */
+  purpose: LabelTemplatePurpose;
   id: string;
   name: string;
   spec: LabelTemplateSpec;
@@ -75,7 +87,8 @@ function fetchLabelTemplate(id: string): Promise<LabelTemplateDto> {
 }
 
 export interface CreateLabelTemplateInput {
-  purpose?: "box" | "product_duplicate" | "pallet";
+  /** Mirrors `purposeSchema` in the API's `label-templates/dto.ts`, which accepts every member. */
+  purpose?: LabelTemplatePurpose;
   name: string;
   spec: LabelTemplateSpec;
   enabled?: boolean;
@@ -101,13 +114,22 @@ function patchLabelTemplate(
   });
 }
 
-/** `GET /label-templates` -- the active tenant's label template summaries. */
+/**
+ * `GET /label-templates` -- the active tenant's label template summaries.
+ *
+ * `options.enabled` mirrors `useChzProductGroups`: a caller that only needs
+ * the list on one branch (the KM print page, which re-derives a template only
+ * when its link named none) still has to call the hook unconditionally, and
+ * this is how it avoids paying for a request it will not read.
+ */
 export function useLabelTemplates(
   params: ListLabelTemplatesParams = {},
+  options: { enabled?: boolean } = {},
 ): UseQueryResult<LabelTemplateSummaryDto[]> {
   return useQuery({
     queryKey: [...LABEL_TEMPLATES_QUERY_KEY, "list", params],
     queryFn: () => fetchLabelTemplates(params),
+    enabled: options.enabled ?? true,
   });
 }
 

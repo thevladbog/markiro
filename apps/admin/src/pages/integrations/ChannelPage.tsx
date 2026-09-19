@@ -63,12 +63,59 @@ interface CommercemlSettingsValues {
 
 interface ChzSettingsValues {
   mchdInn: string;
+  omsId: string;
+  omsConnection: string;
+  omsContactPerson: string;
+}
+
+function settingText(channel: ChannelDetailDto, key: string): string {
+  const value = channel.settings[key];
+  return typeof value === "string" ? value : "";
 }
 
 function chzSettingsValuesOf(channel: ChannelDetailDto): ChzSettingsValues {
   return {
-    mchdInn: typeof channel.settings["mchdInn"] === "string" ? channel.settings["mchdInn"] : "",
+    mchdInn: settingText(channel, "mchdInn"),
+    omsId: settingText(channel, "omsId"),
+    omsConnection: settingText(channel, "omsConnection"),
+    omsContactPerson: settingText(channel, "omsContactPerson"),
   };
+}
+
+/**
+ * The shape СУЗ issues, which is NOT an RFC 4122 UUID: its own documented
+ * example, `11b1abc1-f1ee-11db-1a11-f11ac11111e1`, carries the variant nibble
+ * `1`, so every strict UUID validator rejects a perfectly real installation
+ * id. The server validates these with `z.guid()` and not `z.uuid()` for
+ * exactly that reason (`apps/api/src/modules/integrations/channel-registry.ts`),
+ * and this client-side check must not be the stricter of the two.
+ */
+const OMS_GUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+/**
+ * `omsId` and `omsConnection` are saved together or not at all, and the check
+ * is not merely cosmetic: `chzSignerSettingsSchema.superRefine` runs over the
+ * PATCH BODY, not over the result of merging it into the stored settings, so
+ * one identifier alone is a 400 even when the other is already stored.
+ *
+ * The rule also fires when the operator CLEARS a saved pair (`saved`): the
+ * server merges (`settings || patch`) and cannot unset a key, so a patch
+ * carrying neither identifier would leave the stored pair in place behind a
+ * success toast. Refusing is the honest answer -- the pair is replaced by
+ * entering new values, never emptied from here.
+ */
+function omsPairRule(value: string, partner: string, saved: boolean): true | string {
+  if (value.trim() !== "") return true;
+  if (partner.trim() !== "" || saved) {
+    return "pages.integrations.channel.settings.omsPairError";
+  }
+  return true;
+}
+
+function omsShapeRule(value: string): true | string {
+  const trimmed = value.trim();
+  if (trimmed === "" || OMS_GUID.test(trimmed)) return true;
+  return "pages.integrations.channel.settings.omsGuidError";
 }
 
 /** Derives `useForm`'s values from the server's `ChannelDetailDto` -- shared by the initial `defaultValues` and by the resync effect below, so both read the same shape the same way. */
@@ -335,17 +382,33 @@ function ChzSettingsForm({
     reset,
     formState: { isDirty, errors },
   } = useForm<ChzSettingsValues>({ defaultValues: chzSettingsValuesOf(channel) });
+  const saved = chzSettingsValuesOf(channel);
+  const savedOmsPair = saved.omsId !== "" || saved.omsConnection !== "";
 
   useEffect(() => {
     if (!isDirty) reset(chzSettingsValuesOf(channel));
   }, [channel, isDirty, reset]);
 
   const submit = handleSubmit(async (values) => {
+    const omsId = values.omsId.trim();
+    const omsConnection = values.omsConnection.trim();
+    const omsContactPerson = values.omsContactPerson.trim();
     try {
-      await onSave({ mchdInn: values.mchdInn.trim() });
+      await onSave({
+        mchdInn: values.mchdInn.trim(),
+        // Both identifiers on EVERY save, even when the operator only
+        // touched the contact person: the server refines the pair on the
+        // patch it receives (see `omsPairRule` above), so re-sending the
+        // unchanged partner is what keeps an edit of one of them legal.
+        ...(omsId !== "" && omsConnection !== "" ? { omsId, omsConnection } : {}),
+        // Omitted when empty, like every other optional setting on this page
+        // (`priceType` in the CommerceML form documents the same limitation):
+        // the server merges and has no representation for "unset".
+        ...(omsContactPerson !== "" ? { omsContactPerson } : {}),
+      });
       reset(values);
     } catch {
-      // The wrapper reports the failure and the entered INN must stay editable.
+      // The wrapper reports the failure and the entered values must stay editable.
     }
   });
 
@@ -367,6 +430,37 @@ function ChzSettingsForm({
             message: "pages.integrations.channel.settings.mchdInnError",
           },
         })}
+      />
+      <Input
+        label={t("pages.integrations.channel.settings.omsIdLabel")}
+        {...errorProp(errors.omsId?.message ? t(errors.omsId.message) : undefined)}
+        {...register("omsId", {
+          // `deps`: filling this field clears the partner's "both together"
+          // error instead of leaving it on screen until the next submit.
+          deps: ["omsConnection"],
+          validate: {
+            paired: (value, values) => omsPairRule(value, values.omsConnection, savedOmsPair),
+            shape: omsShapeRule,
+          },
+        })}
+      />
+      <Input
+        label={t("pages.integrations.channel.settings.omsConnectionLabel")}
+        hint={t("pages.integrations.channel.settings.omsConnectionHint")}
+        {...errorProp(errors.omsConnection?.message ? t(errors.omsConnection.message) : undefined)}
+        {...register("omsConnection", {
+          deps: ["omsId"],
+          validate: {
+            paired: (value, values) => omsPairRule(value, values.omsId, savedOmsPair),
+            shape: omsShapeRule,
+          },
+        })}
+      />
+      <Input
+        label={t("pages.integrations.channel.settings.omsContactPersonLabel")}
+        hint={t("pages.integrations.channel.settings.omsContactPersonHint")}
+        maxLength={128}
+        {...register("omsContactPerson")}
       />
       <div>
         <Button type="submit" loading={saving}>

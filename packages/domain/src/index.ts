@@ -99,6 +99,12 @@ export {
 } from "./labels/defaults.js";
 export type { DefaultLabelTemplate, LegacyStockLabelTemplate } from "./labels/defaults.js";
 export {
+  KM_CODE_ONLY_LABEL_NAMES,
+  KM_LABEL_TEMPLATE_NAME,
+  assertKmTemplate,
+  buildKmLabelTemplates,
+} from "./labels/km-defaults.js";
+export {
   buildPalletLabelTemplates,
   PALLET_LABEL_58X40_TEMPLATE_NAME,
   PALLET_LABEL_TEMPLATE_NAME,
@@ -355,6 +361,16 @@ export type {
   PalletExportFormatId,
   RenderPalletAggregationExportInput,
 } from "./pallet-exports.js";
+
+export {
+  CHZ_UNIT_TEMPLATE_ID_BY_GROUP,
+  buildChzKmOrderBody,
+  chzUnitTemplateIdFor,
+  kmOrderIssueFileName,
+  serializeKmCodesCsv,
+  serializeKmCodesTxt,
+  type ChzKmOrderBodyInput,
+} from "./chz/km-orders.js";
 
 export * from "./validation-reprocessing.js";
 export * from "./offline-grants/types.js";

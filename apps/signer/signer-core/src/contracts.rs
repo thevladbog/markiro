@@ -2,7 +2,11 @@
 //!
 //! The TypeScript schemas are `.strict()`, so `deny_unknown_fields` here keeps
 //! both directions symmetric: a field the cloud adds without telling us fails
-//! loudly instead of being silently dropped. The shared JSON fixtures under
+//! loudly instead of being silently dropped. However, `SignerTask` flattens its
+//! tagged `kind` field, and serde does not allow `deny_unknown_fields` on a
+//! struct that uses `#[serde(flatten)]`, so the envelope cannot reject unknown
+//! siblings of `id`/`type`/`payload`. Payload structs still deny unknown fields,
+//! which is where it matters. The shared JSON fixtures under
 //! `packages/platform-contracts/fixtures/chz-signer/` are parsed by the tests
 //! on both sides — they are the contract.
 
@@ -62,25 +66,80 @@ pub struct TrueApiAuthPayload {
     pub token_format: TokenFormat,
 }
 
-/// The `type` discriminant of a task. Mirrors `z.literal("true_api_auth")` on
-/// the TS side; the spec reserves a future `sign_detached` variant. Modelling
-/// this as an enum rather than a bare `String` means an agent that does not
-/// yet know about a future task type fails to *deserialize* the task at all
-/// (serde rejects the unrecognised string) instead of accepting it and
-/// possibly signing a challenge for a task it does not understand.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum TaskType {
-    TrueApiAuth,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OmsAuthPayload {
+    pub true_api_base_url: String,
+    pub oms_connection: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inn: Option<String>,
+}
+
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SignDetachedPayload {
+    pub purpose: String,
+    pub order_id: String,
+    /// The exact bytes to sign, base64. Decoded once, signed as-is.
+    pub data_base64: String,
+}
+
+impl std::fmt::Debug for SignDetachedPayload {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SignDetachedPayload")
+            .field("purpose", &self.purpose)
+            .field("order_id", &self.order_id)
+            .field("data_base64", &format!("[{} chars]", self.data_base64.len()))
+            .finish()
+    }
+}
+
+/// The task discriminant plus its payload, mirroring the TS discriminated
+/// union on `type`. An agent that does not know a type fails to deserialize
+/// the task rather than signing something it does not understand.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", content = "payload", rename_all = "snake_case")]
+pub enum TaskKind {
+    TrueApiAuth(TrueApiAuthPayload),
+    OmsAuth(OmsAuthPayload),
+    SignDetached(SignDetachedPayload),
+}
+
+/// The task envelope with a discriminant and payload. The inner payload structs
+/// still reject unknown fields; the envelope cannot because `#[serde(flatten)]`
+/// is not compatible with `deny_unknown_fields` on the outer struct.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SignerTask {
     pub id: String,
-    #[serde(rename = "type")]
-    pub task_type: TaskType,
-    pub payload: TrueApiAuthPayload,
+    #[serde(flatten)]
+    pub kind: TaskKind,
+}
+
+impl SignerTask {
+    pub fn task_type(&self) -> &'static str {
+        match self.kind {
+            TaskKind::TrueApiAuth(_) => "true_api_auth",
+            TaskKind::OmsAuth(_) => "oms_auth",
+            TaskKind::SignDetached(_) => "sign_detached",
+        }
+    }
+}
+
+/// Completion body for `sign_detached`: the cloud stores it on the task.
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TaskCompleteSignature {
+    pub signature_base64: String,
+    pub cert_thumbprint: String,
+}
+
+impl std::fmt::Debug for TaskCompleteSignature {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TaskCompleteSignature")
+            .field("signature_base64", &"[REDACTED]")
+            .field("cert_thumbprint", &self.cert_thumbprint)
+            .finish()
+    }
 }
 
 /// The envelope of `GET /signer-agent/tasks/next`. An idle poll answers
@@ -175,6 +234,7 @@ pub fn cap_cert_subject(subject: &str) -> String {
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+    use base64::Engine as _;
     use crate::contracts::*;
 
     #[test]
@@ -228,9 +288,13 @@ mod tests {
         let res: PairResponse = serde_json::from_str(&fixture("pair-response.json")).unwrap();
         assert_eq!(res.tenant_name, "ООО Ромашка");
         let task: SignerTask = serde_json::from_str(&fixture("task.json")).unwrap();
-        assert_eq!(task.task_type, TaskType::TrueApiAuth);
-        assert_eq!(task.payload.inn.as_deref(), Some("7712345678"));
-        assert_eq!(task.payload.token_format, TokenFormat::Jwt);
+        match &task.kind {
+            TaskKind::TrueApiAuth(payload) => {
+                assert_eq!(payload.inn.as_deref(), Some("7712345678"));
+                assert_eq!(payload.token_format, TokenFormat::Jwt);
+            }
+            other => panic!("expected true_api_auth, got {other:?}"),
+        }
         let done: TaskComplete = serde_json::from_str(&fixture("task-complete.json")).unwrap();
         assert_eq!(done.cert_inn.as_deref(), Some("7712345678"));
         let failed: TaskFail = serde_json::from_str(&fixture("task-fail.json")).unwrap();
@@ -244,23 +308,82 @@ mod tests {
                 "payload":{"trueApiBaseUrl":"https://example.test","tokenFormat":"uuid"}}"#,
         )
         .unwrap();
-        assert_eq!(uuid_task.payload.token_format, TokenFormat::Uuid);
+        match uuid_task.kind {
+            TaskKind::TrueApiAuth(payload) => assert_eq!(payload.token_format, TokenFormat::Uuid),
+            other => panic!("expected true_api_auth, got {other:?}"),
+        }
 
         let legacy_task: SignerTask = serde_json::from_str(
             r#"{"id":"3f0e0f5e-8d1c-4d7a-9b1a-222222222222","type":"true_api_auth",
                 "payload":{"trueApiBaseUrl":"https://example.test"}}"#,
         )
         .unwrap();
-        assert_eq!(legacy_task.payload.token_format, TokenFormat::Jwt);
+        match legacy_task.kind {
+            TaskKind::TrueApiAuth(payload) => assert_eq!(payload.token_format, TokenFormat::Jwt),
+            other => panic!("expected true_api_auth, got {other:?}"),
+        }
     }
 
     #[test]
-    fn rejects_unknown_fields_from_the_server() {
+    fn rejects_unknown_fields_in_the_payload() {
+        // `#[serde(flatten)]` on `SignerTask::kind` is not compatible with
+        // `deny_unknown_fields` on the outer struct (serde does not support
+        // combining them), so an unknown field *sibling to* `id`/`type`/
+        // `payload` can no longer be rejected at the envelope level. Unknown
+        // fields inside the payload -- where it actually matters, since that
+        // is the part the cloud extends per task kind -- are still denied.
         let err = serde_json::from_str::<SignerTask>(
             r#"{"id":"3f0e0f5e-8d1c-4d7a-9b1a-222222222222","type":"true_api_auth",
-                "payload":{"trueApiBaseUrl":"https://example.test"},"extra":1}"#,
+                "payload":{"trueApiBaseUrl":"https://example.test","extra":1}}"#,
         );
-        assert!(err.is_err(), "unknown fields must not be silently ignored");
+        assert!(err.is_err(), "unknown payload fields must not be silently ignored");
+    }
+
+    #[test]
+    fn accepts_unknown_fields_at_the_envelope_level() {
+        // This documents a known serde limitation: `#[serde(flatten)]` is
+        // incompatible with `deny_unknown_fields`, so we cannot reject unknown
+        // siblings of `id`/`type`/`payload`. Payload-level strictness remains.
+        let task: SignerTask = serde_json::from_str(
+            r#"{"id":"3f0e0f5e-8d1c-4d7a-9b1a-222222222222","type":"true_api_auth",
+                "payload":{"trueApiBaseUrl":"https://example.test"},"extra":1}"#,
+        )
+        .unwrap();
+        assert_eq!(task.id, "3f0e0f5e-8d1c-4d7a-9b1a-222222222222");
+        assert!(matches!(task.kind, TaskKind::TrueApiAuth(_)));
+    }
+
+    #[test]
+    fn sign_detached_and_task_complete_signature_redact_secrets_in_debug() {
+        let payload = SignDetachedPayload {
+            purpose: "oms_order".into(),
+            order_id: "order-123".into(),
+            data_base64: "dGVzdC1kYXRhLWJhc2U2NA==".into(), // "test-data-base64"
+        };
+        let sig = TaskCompleteSignature {
+            signature_base64: "dGVzdC1zaWduYXR1cmUtYmFzZTY0".into(), // "test-signature-base64"
+            cert_thumbprint: "AB120F0000000000000000000000000000000000".into(),
+        };
+        for (debug, secret_field, secret_value) in [
+            (format!("{payload:?}"), "data_base64", "dGVzdC1kYXRhLWJhc2U2NA=="),
+            (format!("{payload:#?}"), "data_base64", "dGVzdC1kYXRhLWJhc2U2NA=="),
+            (format!("{sig:?}"), "signature_base64", "dGVzdC1zaWduYXR1cmUtYmFzZTY0"),
+            (format!("{sig:#?}"), "signature_base64", "dGVzdC1zaWduYXR1cmUtYmFzZTY0"),
+        ] {
+            assert!(
+                !debug.contains(secret_value),
+                "{secret_field} secret must not appear in Debug output"
+            );
+            assert!(debug.contains("["), "Debug output must contain redaction marker");
+        }
+        assert_eq!(
+            serde_json::to_value(&payload).unwrap()["dataBase64"],
+            payload.data_base64
+        );
+        assert_eq!(
+            serde_json::to_value(&sig).unwrap()["signatureBase64"],
+            sig.signature_base64
+        );
     }
 
     #[test]
@@ -287,15 +410,52 @@ mod tests {
     }
 
     #[test]
-    fn rejects_a_task_type_the_agent_does_not_understand() {
-        // A future `sign_detached` task type whose payload happens to
-        // deserialize as `TrueApiAuthPayload` must not be silently accepted
-        // and signed by an agent that only knows `true_api_auth`.
-        let err = serde_json::from_str::<SignerTask>(
-            r#"{"id":"3f0e0f5e-8d1c-4d7a-9b1a-222222222222","type":"sign_detached",
-                "payload":{"trueApiBaseUrl":"https://example.test"}}"#,
-        );
-        assert!(err.is_err(), "an unrecognised task type must not deserialize");
+    fn parses_the_oms_auth_fixture() {
+        let task: SignerTask = serde_json::from_str(&fixture("task-oms-auth.json")).unwrap();
+        match task.kind {
+            TaskKind::OmsAuth(payload) => {
+                assert_eq!(payload.oms_connection, "11b1abc1-f1ee-11db-1a11-f11ac11111e1");
+                assert!(payload.inn.is_none());
+            }
+            other => panic!("expected oms_auth, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_the_sign_detached_fixture_and_decodes_its_bytes() {
+        let task: SignerTask = serde_json::from_str(&fixture("task-sign-detached.json")).unwrap();
+        match task.kind {
+            TaskKind::SignDetached(payload) => {
+                assert_eq!(payload.purpose, "oms_order");
+                let bytes = base64::engine::general_purpose::STANDARD.decode(payload.data_base64).unwrap();
+                assert_eq!(bytes, br#"{"productGroup":"beer"}"#);
+            }
+            other => panic!("expected sign_detached, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn still_parses_the_true_api_auth_fixture() {
+        let task: SignerTask = serde_json::from_str(&fixture("task.json")).unwrap();
+        assert!(matches!(task.kind, TaskKind::TrueApiAuth(_)));
+        assert_eq!(task.task_type(), "true_api_auth");
+    }
+
+    #[test]
+    fn rejects_an_unknown_task_type() {
+        let json = r#"{"id":"3f0e0f5e-8d1c-4d7a-9b1a-222222222222","type":"nope","payload":{}}"#;
+        assert!(serde_json::from_str::<SignerTask>(json).is_err());
+    }
+
+    #[test]
+    fn signature_completion_serialises_to_the_shared_fixture_shape() {
+        let body = TaskCompleteSignature {
+            signature_base64: "MIIE5QYJKoZIhvcNAQcCoIIE1jCCBNICAQExDjAMBggqhQMHAQECAgUAMAsGCSqGSIb3DQEHAQ==".into(),
+            cert_thumbprint: "AB120F0000000000000000000000000000000000".into(),
+        };
+        let expected: serde_json::Value =
+            serde_json::from_str(&fixture("task-complete-signature.json")).unwrap();
+        assert_eq!(serde_json::to_value(&body).unwrap(), expected);
     }
 
     #[test]

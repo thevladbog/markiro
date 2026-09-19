@@ -25,11 +25,21 @@ impl Signer for CadesSigner {
     }
 
     fn sign_attached(&self, thumbprint: &str, payload: &[u8]) -> Result<String, SignerError> {
-        // `sign_attached` runs synchronously on a tokio worker thread, which
-        // may already be MTA-initialised by something else on the runtime;
-        // that yields RPC_E_CHANGED_MODE here rather than a fresh apartment.
-        // The apartment-model object still gets created (marshalled through
-        // the host's STA), so treat it as proceed-able. S_OK/S_FALSE are the
+        self.sign(thumbprint, payload, false)
+    }
+
+    fn sign_detached(&self, thumbprint: &str, payload: &[u8]) -> Result<String, SignerError> {
+        self.sign(thumbprint, payload, true)
+    }
+}
+
+impl CadesSigner {
+    fn sign(&self, thumbprint: &str, payload: &[u8], detached: bool) -> Result<String, SignerError> {
+        // This runs synchronously on a tokio worker thread, which may already
+        // be MTA-initialised by something else on the runtime; that yields
+        // RPC_E_CHANGED_MODE here rather than a fresh apartment. The
+        // apartment-model object still gets created (marshalled through the
+        // host's STA), so treat it as proceed-able. S_OK/S_FALSE are the
         // ordinary "initialised" / "already initialised, same mode" results.
         // Anything else means COM init genuinely failed, and letting that
         // fall through to `CoCreateInstance` would misreport as "CAdESCOM.Store
@@ -50,7 +60,7 @@ impl Signer for CadesSigner {
         let store = create_object("CAdESCOM.Store")?;
         let signer = create_object("CAdESCOM.CPSigner")?;
         let signed_data = create_object("CAdESCOM.CadesSignedData")?;
-        sign_via_cadescom(&store, &signer, &signed_data, thumbprint, payload)
+        sign_via_cadescom(&store, &signer, &signed_data, thumbprint, payload, detached)
     }
 }
 
@@ -75,8 +85,9 @@ const CADESCOM_CADES_BES: i32 = 1;
 /// `Store.Open` → `Store.Certificates.Find(SHA1_HASH, thumbprint)` →
 /// `Item(1)` → `Signer.Certificate = cert` → `SignedData.ContentEncoding` +
 /// `SignedData.Content = base64(payload)` →
-/// `SignedData.SignCades(Signer, CADES_BES, false)`, which returns the
-/// attached signature already base64-encoded.
+/// `SignedData.SignCades(Signer, CADES_BES, detached)`, which returns the
+/// attached (True API challenge) or detached (СУЗ's `X-Signature`) signature
+/// already base64-encoded.
 ///
 /// `Store.Close` must run on every path once `Open` has succeeded, not just
 /// the ones the original code happened to return from explicitly. The body
@@ -88,6 +99,7 @@ fn sign_via_cadescom(
     signed_data: &IDispatch,
     thumbprint: &str,
     payload: &[u8],
+    detached: bool,
 ) -> Result<String, SignerError> {
     use base64::Engine as _;
 
@@ -137,8 +149,9 @@ fn sign_via_cadescom(
             signed_data,
             "SignCades",
             &[
-                // Arguments are passed right-to-left by IDispatch convention.
-                VARIANT::from(false),
+                // Arguments are passed right-to-left by IDispatch convention:
+                // [bDetached, CadesType, Signer].
+                VARIANT::from(detached),
                 VARIANT::from(CADESCOM_CADES_BES),
                 VARIANT::from(signer.clone()),
             ],

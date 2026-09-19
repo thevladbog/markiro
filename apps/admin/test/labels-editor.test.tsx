@@ -1287,6 +1287,80 @@ it("builds a 58 by 40 product duplicate template when its purpose is selected", 
   });
 });
 
+/**
+ * The stock KM label is what a tenant is seeded with (`buildKmLabelTemplates`
+ * in `@markiro/domain`, seeded by tenant provisioning and migration 0166), so
+ * a second KM label an operator mints from this editor must begin life as
+ * that same 58x40 layout -- not as the blank default, which carries no Data
+ * Matrix at all and which the server would reject as `KM_LABEL_TEMPLATE_INVALID`.
+ */
+it("builds the stock KM label when its purpose is selected", async () => {
+  const fetchMock = stubCreateFetch("km-1");
+  renderCreateFlow();
+  await chooseOption(userEvent.setup(), "Назначение", "Этикетка КМ");
+  fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+  await waitFor(() =>
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(true),
+  );
+  const call = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
+  const body = JSON.parse(String(call?.[1]?.body));
+  expect(body.purpose).toBe("product_km");
+  expect(body.spec).toMatchObject({
+    widthMm: 58,
+    heightMm: 40,
+    elements: expect.arrayContaining([
+      expect.objectContaining({
+        kind: "barcode",
+        data: "km.code",
+        format: "datamatrix",
+        sizeMm: 24,
+      }),
+    ]),
+  });
+});
+
+/**
+ * `preview-data.ts` maps the KM purpose to the SAME synthetic marking code as
+ * the duplicate purpose, so a KM preview without a disclaimer looks like a
+ * live code on screen. The two sentences differ on purpose: a KM label is
+ * printed in the office from an issued code order, not from a code the line
+ * scanner just read.
+ */
+it("captions the KM preview as a sample, in its own words", async () => {
+  renderCreateFlow();
+  await chooseOption(userEvent.setup(), "Назначение", "Этикетка КМ");
+
+  expect(
+    screen.getByText(
+      "Образец с синтетическим кодом. В печать уходят коды маркировки из заказа кодов.",
+    ),
+  ).toBeDefined();
+  expect(
+    screen.queryByText("Образец с синтетическим кодом. На линии печатается код со сканера."),
+  ).toBeNull();
+});
+
+it("refuses to save an imported layout without a product code as a KM label", async () => {
+  const fetchMock = stubCreateFetch("invalid-km");
+  renderCreateFlow();
+  await chooseOption(userEvent.setup(), "Назначение", "Этикетка КМ");
+  importZpl(IMPORT_ZPL);
+  expect(
+    screen.getByText(
+      "Нужен один Data Matrix с полным кодом продукции внутри этикетки. Поле SSCC недопустимо.",
+    ),
+  ).toBeDefined();
+  // Assert the gate itself, not just the absence of a request: a disabled
+  // button dispatches nothing in jsdom, so the POST check below would pass
+  // even with the gate removed -- `handleSave` would run a microtask later.
+  const save = screen.getByRole("button", { name: "Сохранить" });
+  expect(save.hasAttribute("disabled")).toBe(true);
+  fireEvent.click(save);
+  await waitFor(() =>
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toEqual([]),
+  );
+});
+
 it("imports and saves a duplicate using the whole Data Matrix square", async () => {
   const fetchMock = stubCreateFetch("imported-duplicate");
   renderCreateFlow();

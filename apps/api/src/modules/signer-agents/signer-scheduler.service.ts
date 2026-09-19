@@ -9,6 +9,7 @@ import {
   CHZ_CHANNEL_TYPE,
   CHZ_TASK_STALE_MS,
   CHZ_TOKEN_REFRESH_LEAD_MS,
+  buildChzOmsAuthPayload,
   buildChzTrueApiAuthPayload,
 } from "./chz-constants";
 import { ChzCryptoService } from "./chz-crypto.service";
@@ -21,6 +22,11 @@ import { ChzCryptoService } from "./chz-crypto.service";
  */
 export interface SignerScheduler {
   run(now?: Date): Promise<void>;
+}
+
+/** Common shape of `chz_api_tokens`/`chz_oms_tokens`: enough for the refresh loop below. */
+interface RefreshableToken {
+  expiresAt: Date;
 }
 
 @Injectable()
@@ -83,7 +89,9 @@ export class SignerSchedulerService implements SignerScheduler {
       // enqueueing here would mean every 15-minute tick sends an agent
       // through a real login just to fail storing the result, expire after
       // 30 minutes, and re-enqueue: a silent infinite signing loop. Skip
-      // enqueueing entirely instead; stale-task expiry above still runs.
+      // enqueueing entirely instead; stale-task expiry above still runs. This
+      // applies to both true_api_auth and oms_auth alike -- an agent's real
+      // СУЗ login would fail the same way in SignerTasksService.complete.
       this.logger.error("CHZ_TOKEN_ENCRYPTION_KEY is not configured; token refresh paused");
       return;
     }
@@ -95,65 +103,8 @@ export class SignerSchedulerService implements SignerScheduler {
       // One tenant's failure (journal insert, task insert) must not abort
       // the whole run and leave every other tenant unprocessed for this tick.
       try {
-        const [token] = await this.db
-          .select()
-          .from(schema.chzApiTokens)
-          .where(eq(schema.chzApiTokens.tenantId, tenantId));
-
-        // Деградация: токен пересёк границу истечения в последнем cron-периоде —
-        // одно error-событие на переход (cron идёт каждые 15 минут).
-        if (
-          token &&
-          token.expiresAt <= now &&
-          token.expiresAt > new Date(now.getTime() - 15 * 60_000)
-        ) {
-          await this.journal.append({
-            tenantId,
-            channelType: CHZ_CHANNEL_TYPE,
-            sessionId: null,
-            direction: "local",
-            outcome: "error",
-            grain: "session",
-            message: "True API token expired; signer agent has not refreshed it",
-          });
-        }
-
-        const threshold = new Date(now.getTime() + CHZ_TOKEN_REFRESH_LEAD_MS);
-        if (token && token.expiresAt > threshold) continue;
-
-        const [open] = await this.db
-          .select({ id: schema.chzSignerTasks.id })
-          .from(schema.chzSignerTasks)
-          .where(
-            and(
-              eq(schema.chzSignerTasks.tenantId, tenantId),
-              eq(schema.chzSignerTasks.type, "true_api_auth"),
-              inArray(schema.chzSignerTasks.status, ["pending", "claimed"]),
-            ),
-          )
-          .limit(1);
-        if (open) continue;
-
-        const settings = await this.loadSettings(tenantId);
-        // This check-then-insert is an optimization, not the guarantee: two
-        // overlapping run() invocations (two API replicas booting, or boot
-        // racing the cron tick) can both pass the `open` check above for the
-        // same tenant. The partial unique index chz_signer_tasks_open_uq is
-        // the real backstop — onConflictDoNothing() makes the race loser a
-        // silent no-op instead of a duplicate КЭП login, and we only log when
-        // a row actually landed.
-        const [inserted] = await this.db
-          .insert(schema.chzSignerTasks)
-          .values({
-            tenantId,
-            type: "true_api_auth",
-            payload: buildChzTrueApiAuthPayload(settings),
-          })
-          .onConflictDoNothing()
-          .returning({ id: schema.chzSignerTasks.id });
-        if (inserted) {
-          this.logger.log(`Enqueued True API token refresh for tenant ${tenantId}`);
-        }
+        await this.refreshTokenKind(now, tenantId, "true_api_auth");
+        await this.refreshTokenKind(now, tenantId, "oms_auth");
       } catch (error) {
         this.logger.error(
           `Signer scheduler failed for tenant ${tenantId}`,
@@ -161,6 +112,120 @@ export class SignerSchedulerService implements SignerScheduler {
         );
       }
     }
+  }
+
+  /**
+   * Per-tenant, per-token-kind refresh check: read the current token (if
+   * any), emit the one-time degradation event if it just crossed its expiry,
+   * and enqueue a fresh signer task when none is already open. `oms_auth`
+   * additionally has a "not configured yet" exit: `buildChzOmsAuthPayload`
+   * returns `null` when the channel carries no СУЗ installation, and there is
+   * nothing to log in or refresh towards in that case.
+   */
+  private async refreshTokenKind(
+    now: Date,
+    tenantId: string,
+    kind: "true_api_auth" | "oms_auth",
+  ): Promise<void> {
+    const settings = await this.loadSettings(tenantId);
+
+    if (kind === "true_api_auth") {
+      const [token] = await this.db
+        .select()
+        .from(schema.chzApiTokens)
+        .where(eq(schema.chzApiTokens.tenantId, tenantId));
+      await this.emitExpiryDegradation(
+        tenantId,
+        now,
+        token,
+        "True API token expired; signer agent has not refreshed it",
+      );
+      if (token && token.expiresAt > new Date(now.getTime() + CHZ_TOKEN_REFRESH_LEAD_MS)) return;
+      if (await this.hasOpenTask(tenantId, "true_api_auth")) return;
+      const [inserted] = await this.db
+        .insert(schema.chzSignerTasks)
+        .values({
+          tenantId,
+          type: "true_api_auth",
+          payload: buildChzTrueApiAuthPayload(settings),
+        })
+        // This check-then-insert is an optimization, not the guarantee: two
+        // overlapping run() invocations (two API replicas booting, or boot
+        // racing the cron tick) can both pass the `hasOpenTask` check above
+        // for the same tenant. The partial unique index
+        // chz_signer_tasks_open_uq is the real backstop --
+        // onConflictDoNothing() makes the race loser a silent no-op instead
+        // of a duplicate КЭП login, and we only log when a row actually
+        // landed.
+        .onConflictDoNothing()
+        .returning({ id: schema.chzSignerTasks.id });
+      if (inserted) {
+        this.logger.log(`Enqueued True API token refresh for tenant ${tenantId}`);
+      }
+      return;
+    }
+
+    const payload = buildChzOmsAuthPayload(settings);
+    if (payload === null) return; // no СУЗ installation configured for this channel yet
+    const [token] = await this.db
+      .select()
+      .from(schema.chzOmsTokens)
+      .where(eq(schema.chzOmsTokens.tenantId, tenantId));
+    await this.emitExpiryDegradation(
+      tenantId,
+      now,
+      token,
+      "СУЗ token expired; signer agent has not refreshed it",
+    );
+    if (token && token.expiresAt > new Date(now.getTime() + CHZ_TOKEN_REFRESH_LEAD_MS)) return;
+    if (await this.hasOpenTask(tenantId, "oms_auth")) return;
+    const [inserted] = await this.db
+      .insert(schema.chzSignerTasks)
+      .values({ tenantId, type: "oms_auth", payload })
+      .onConflictDoNothing()
+      .returning({ id: schema.chzSignerTasks.id });
+    if (inserted) {
+      this.logger.log(`Enqueued СУЗ token refresh for tenant ${tenantId}`);
+    }
+  }
+
+  /** Деградация: токен пересёк границу истечения в последнем cron-периоде — одно error-событие на переход (cron идёт каждые 15 минут). */
+  private async emitExpiryDegradation(
+    tenantId: string,
+    now: Date,
+    token: RefreshableToken | undefined,
+    message: string,
+  ): Promise<void> {
+    if (
+      token &&
+      token.expiresAt <= now &&
+      token.expiresAt > new Date(now.getTime() - 15 * 60_000)
+    ) {
+      await this.journal.append({
+        tenantId,
+        channelType: CHZ_CHANNEL_TYPE,
+        sessionId: null,
+        direction: "local",
+        outcome: "error",
+        grain: "session",
+        message,
+      });
+    }
+  }
+
+  private async hasOpenTask(tenantId: string, type: string): Promise<boolean> {
+    const [open] = await this.db
+      .select({ id: schema.chzSignerTasks.id })
+      .from(schema.chzSignerTasks)
+      .where(
+        and(
+          eq(schema.chzSignerTasks.tenantId, tenantId),
+          eq(schema.chzSignerTasks.type, type),
+          inArray(schema.chzSignerTasks.status, ["pending", "claimed"]),
+        ),
+      )
+      .limit(1);
+    return Boolean(open);
   }
 
   private async loadSettings(tenantId: string): Promise<z.infer<typeof chzSignerSettingsSchema>> {

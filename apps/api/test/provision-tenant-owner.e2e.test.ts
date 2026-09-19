@@ -5,7 +5,9 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createDb, schema } from "@markiro/db";
 import {
   buildDuplicateLabelTemplate,
+  buildKmLabelTemplates,
   buildPalletLabelTemplates,
+  KM_LABEL_TEMPLATE_NAME,
   PALLET_LABEL_58X40_TEMPLATE_NAME,
   PALLET_LABEL_TEMPLATE_NAME,
 } from "@markiro/domain";
@@ -335,8 +337,10 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
       .select({ id: schema.labelTemplates.id })
       .from(schema.labelTemplates)
       .where(eq(schema.labelTemplates.tenantId, result.tenantId));
-    // 16 box + 2 product_duplicate + 2 pallet (06d + spec 2026-09-18 §8).
-    expect(after).toHaveLength(20);
+    // 16 box + 2 product_duplicate + 2 pallet (06d + spec 2026-09-18 §8) = 20,
+    // plus one row per stock product_km template (task 12: the informative
+    // 58×40 and the two code-only squares).
+    expect(after).toHaveLength(20 + buildKmLabelTemplates().length);
     // Selection order is not guaranteed without ORDER BY; sort by name so the
     // comparison is deterministic regardless of physical row order.
     const pallets = templates
@@ -366,6 +370,23 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
         }),
       ]),
     );
+
+    // Stock KM labels (task 12): one row per entry of buildKmLabelTemplates()
+    // -- the same list the API validates a hand-created product_km template's
+    // spec against. Compared against the builder rather than against literals
+    // repeated here, so adding a stock square cannot pass a stale assertion.
+    const kmTemplates = templates
+      .filter((t) => t.purpose === "product_km")
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const expectedKm = buildKmLabelTemplates()
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name));
+    expect(kmTemplates.map((t) => t.name)).toEqual(expectedKm.map((t) => t.name));
+    expect(kmTemplates).toEqual(
+      expectedKm.map((t) => expect.objectContaining({ name: t.name, spec: t.spec })),
+    );
+    // The informative 58×40 is still the one the print dialog preselects.
+    expect(kmTemplates.some((t) => t.name === KM_LABEL_TEMPLATE_NAME)).toBe(true);
   });
 
   it("renews an expired unused activation only when explicitly requested", async () => {

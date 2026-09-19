@@ -68,6 +68,7 @@ import { PlatformHttpModule } from "./platform-http/platform-http.module";
 import { HealthModule } from "./health/health.module";
 import { InventoriesModule } from "./modules/inventories/inventories.module";
 import { ChzExportsModule } from "./modules/chz-exports/chz-exports.module";
+import { ChzKmOrdersModule } from "./modules/chz-km-orders/chz-km-orders.module";
 import { ChzCodeStatusesModule } from "./modules/chz-code-statuses/chz-code-statuses.module";
 import { DashboardModule } from "./modules/dashboard/dashboard.module";
 import { ProductRegulatoryModule } from "./modules/product-regulatory/product-regulatory.module";
@@ -137,6 +138,7 @@ export class AppModule {
         InventoriesModule,
         PublicApiModule,
         ChzExportsModule.forRoot(env),
+        ChzKmOrdersModule.forRoot(env),
         ChzCodeStatusesModule.forRoot(env),
         ShiftExportsModule,
         StationShiftCloseModule,

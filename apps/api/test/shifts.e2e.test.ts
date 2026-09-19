@@ -5,7 +5,12 @@ import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
-import { buildDuplicateLabelTemplate, shiftMonthKey } from "@markiro/domain";
+import {
+  buildDuplicateLabelTemplate,
+  buildKmLabelTemplates,
+  KM_LABEL_TEMPLATE_NAME,
+  shiftMonthKey,
+} from "@markiro/domain";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
@@ -2208,5 +2213,48 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       .send({ productId, mode: "aggregation", boxLabelTemplateId: universal })
       .expect(400);
     expect(invalidBox.body.code).toBe("BOX_LABEL_TEMPLATE_NOT_ELIGIBLE");
+  });
+
+  it("never surfaces a product_km-purpose template through the box, pallet or duplicate station pickers (task 12)", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const productId = await seedProduct(tenantId, {
+      status: "active",
+      chzProductGroupCode: 15,
+      boxCapacity: 6,
+    });
+    const kmTemplateId = randomUUID();
+    await db.insert(schema.labelTemplates).values({
+      id: kmTemplateId,
+      tenantId,
+      name: KM_LABEL_TEMPLATE_NAME,
+      purpose: "product_km",
+      spec: buildKmLabelTemplates()[0]!.spec,
+    });
+    const box = await seedScopedLabelTemplate(tenantId, "Box", {});
+    const device = await createTestStationDevice(app!, agent, "KM exclusion station");
+    const server = app!.getHttpServer();
+
+    // A product_km template is a real, enabled, universally-scoped row --
+    // exactly the shape that would otherwise sail through every picker
+    // below. Each list is filtered by an equality check against its own
+    // purpose (shifts.service.ts), which a "product_km" row can never match.
+    const boxList = await request(server)
+      .get(`/shifts/box-label-templates?productId=${productId}`)
+      .set("x-api-key", device.apiKey)
+      .expect(200);
+    expect(boxList.body.items.map((item: { id: string }) => item.id)).toEqual([box]);
+
+    const palletList = await request(server)
+      .get(`/shifts/pallet-label-templates?productId=${productId}`)
+      .set("x-api-key", device.apiKey)
+      .expect(200);
+    expect(palletList.body.items).toEqual([]);
+
+    const duplicateList = await request(server)
+      .get(`/shifts/product-label-templates?productId=${productId}`)
+      .set("x-api-key", device.apiKey)
+      .expect(200);
+    expect(duplicateList.body.items).toEqual([]);
   });
 });

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
@@ -71,6 +71,65 @@ export const TOKEN_TYPE_TO_TONE: Record<NonNullable<SignerTokenStatus["tokenType
   jwt: "violet",
   uuid: "teal",
 };
+
+/**
+ * One token line: its name, its status, the persisted format when the token
+ * has one, and its expiry. Two tokens matter to a tenant and they fail
+ * independently -- the True API token an agent signs for, and the СУЗ token
+ * the code-ordering flow spends -- so both are drawn by this one component
+ * off the single `TOKEN_STATUS_TO_PHASE` mapping above, rather than a second row
+ * growing a status vocabulary of its own. The chip carries the status in
+ * WORDS as well as colour, and the token value itself is never rendered:
+ * status and expiry are all this panel ever knows.
+ */
+function TokenRow({
+  label,
+  token,
+  dateFormatter,
+  action,
+}: {
+  label: string;
+  token: SignerTokenStatus;
+  dateFormatter: Intl.DateTimeFormat;
+  action: ReactNode;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        gap: "var(--sp-3)",
+        flexWrap: "wrap",
+        padding: "var(--sp-3)",
+        border: "1px solid var(--line)",
+        borderRadius: "var(--r-2)",
+      }}
+    >
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <span style={{ font: "var(--text-body)", color: "var(--fg-2)" }}>{label}</span>
+        <StatusChip
+          phase={TOKEN_STATUS_TO_PHASE[token.status]}
+          label={t(`pages.integrations.channel.signer.token.${token.status}`)}
+        />
+        {token.tokenType ? (
+          <Badge tone={TOKEN_TYPE_TO_TONE[token.tokenType]}>
+            {t(`pages.integrations.channel.signer.tokenType.${token.tokenType}`)}
+          </Badge>
+        ) : null}
+        {token.expiresAt ? (
+          <span style={{ font: "var(--text-body)", color: "var(--fg-3)" }}>
+            {t("pages.integrations.channel.signer.tokenExpires", {
+              at: dateFormatter.format(new Date(token.expiresAt)),
+            })}
+          </span>
+        ) : null}
+      </div>
+      {action}
+    </div>
+  );
+}
 
 /**
  * The `chestny_znak` channel's own panel -- Task 8 (see the design brief
@@ -296,52 +355,37 @@ export function SignerAgentsPanel() {
           </SignerDownloadLink>
         </div>
 
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: "var(--sp-3)",
-            flexWrap: "wrap",
-            padding: "var(--sp-3)",
-            border: "1px solid var(--line)",
-            borderRadius: "var(--r-2)",
-          }}
-        >
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <span style={{ font: "var(--text-body)", color: "var(--fg-2)" }}>
-              {t("pages.integrations.channel.signer.tokenLabel")}
-            </span>
-            {data ? (
-              <StatusChip
-                phase={TOKEN_STATUS_TO_PHASE[data.token.status]}
-                label={t(`pages.integrations.channel.signer.token.${data.token.status}`)}
-              />
-            ) : null}
-            {data?.token.tokenType ? (
-              <Badge tone={TOKEN_TYPE_TO_TONE[data.token.tokenType]}>
-                {t(`pages.integrations.channel.signer.tokenType.${data.token.tokenType}`)}
-              </Badge>
-            ) : null}
-            {data?.token.expiresAt ? (
-              <span style={{ font: "var(--text-body)", color: "var(--fg-3)" }}>
-                {t("pages.integrations.channel.signer.tokenExpires", {
-                  at: dateFormatter.format(new Date(data.token.expiresAt)),
-                })}
-              </span>
-            ) : null}
-          </div>
-          {canManage && hasActiveAgent ? (
-            <Button
-              type="button"
-              variant="secondary"
-              loading={refreshing || refreshRequest !== null || refreshTaskOpen}
-              onClick={() => void handleRefreshToken()}
-            >
-              {t("pages.integrations.channel.signer.refreshToken")}
-            </Button>
-          ) : null}
-        </div>
+        {data ? (
+          <>
+            <TokenRow
+              label={t("pages.integrations.channel.signer.tokenLabel")}
+              token={data.token}
+              dateFormatter={dateFormatter}
+              action={
+                canManage && hasActiveAgent ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    loading={refreshing || refreshRequest !== null || refreshTaskOpen}
+                    onClick={() => void handleRefreshToken()}
+                  >
+                    {t("pages.integrations.channel.signer.refreshToken")}
+                  </Button>
+                ) : null
+              }
+            />
+            {/* Refreshed by the server off the True API token, so there is no
+                button of its own here -- but an operator told the True API
+                token is fine while THIS one has expired cannot order a single
+                code, which is why it gets its own visible line. */}
+            <TokenRow
+              label={t("pages.integrations.channel.signer.omsTokenLabel")}
+              token={data.omsToken}
+              dateFormatter={dateFormatter}
+              action={null}
+            />
+          </>
+        ) : null}
 
         {refreshRequest || refreshTaskOpen ? (
           <Alert tone="info">

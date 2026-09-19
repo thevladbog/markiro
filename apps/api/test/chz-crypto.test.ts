@@ -25,4 +25,11 @@ describe("ChzCryptoService", () => {
     const svc = new ChzCryptoService(undefined);
     expect(() => svc.encrypt("t", "x")).toThrow(/CHZ_TOKEN_ENCRYPTION_KEY/);
   });
+
+  it("binds a ciphertext to its AAD", () => {
+    const service = new ChzCryptoService(Buffer.alloc(32, 7));
+    const sealed = service.encryptWithAad("t/o/1", "010460703469001421AbC\u001d93dGVz");
+    expect(service.decryptWithAad("t/o/1", sealed)).toBe("010460703469001421AbC\u001d93dGVz");
+    expect(() => service.decryptWithAad("t/o/2", sealed)).toThrow();
+  });
 });

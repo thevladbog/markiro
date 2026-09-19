@@ -60,7 +60,7 @@ function renderPanel(access: AccessDocument = READ_ONLY_ACCESS) {
     const method = init?.method ?? "GET";
 
     if (method === "GET" && path === "/signer-agents") {
-      return jsonResponse(200, { agents: [], token: NO_TOKEN });
+      return jsonResponse(200, { agents: [], token: NO_TOKEN, omsToken: NO_TOKEN });
     }
 
     if (method === "GET" && path === "/integrations/chestny_znak/code-statuses") {

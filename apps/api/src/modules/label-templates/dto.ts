@@ -45,11 +45,13 @@ function parseSpecOrAddIssues(spec: unknown, ctx: z.RefinementCtx): LabelTemplat
 
 /**
  * Every value of the domain's `LabelTemplatePurpose`, including `pallet`
- * (06d). A tenant seeded with the one stock pallet label must be able to mint
- * its own -- the shift form offers a pallet-template picker, and a picker
- * over exactly one immutable row is not a choice. `pallet` was excluded here
- * until 06d closed the loop, which made both "Создать копию" on the stock
- * template and any second pallet layout an opaque 400.
+ * (06d) and `product_km` (task 12). A tenant seeded with the one stock
+ * pallet label must be able to mint its own -- the shift form offers a
+ * pallet-template picker, and a picker over exactly one immutable row is not
+ * a choice. `pallet` was excluded here until 06d closed the loop, which made
+ * both "Создать копию" on the stock template and any second pallet layout an
+ * opaque 400. `product_km` labels a single Chestny ZNAK marking code and its
+ * Data Matrix, printed from the office before units go down the line.
  *
  * Widening the INPUT enum does not widen where a purpose is accepted:
  * `ShiftsService.assertBoxTemplateEligible`/`assertPalletTemplateEligible`
@@ -57,7 +59,7 @@ function parseSpecOrAddIssues(spec: unknown, ctx: z.RefinementCtx): LabelTemplat
  * `LabelTemplatesService.updateLabelTemplate` still refuses to change an
  * existing template's purpose at all.
  */
-const purposeSchema = z.enum(["box", "product_duplicate", "pallet"]);
+const purposeSchema = z.enum(["box", "product_duplicate", "pallet", "product_km"]);
 
 /** Non-empty, duplicate-free ЧЗ product-group codes; `null` means every category. */
 const productGroupCodesSchema = z
@@ -193,7 +195,7 @@ export const labelTemplateOpenApiSchema: SchemaObject = {
     id: uuidSchema,
     name: { type: "string", minLength: 1, maxLength: 200 },
     spec: labelTemplateSpecOpenApiSchema,
-    purpose: { type: "string", enum: ["box", "product_duplicate", "pallet"] },
+    purpose: { type: "string", enum: ["box", "product_duplicate", "pallet", "product_km"] },
     enabled: { type: "boolean" },
     chzProductGroupCodes: productGroupCodesOpenApiSchema,
     createdAt: dateTimeSchema,
@@ -228,7 +230,7 @@ export const labelTemplateSummaryOpenApiSchema: SchemaObject = {
         "Authoring resolution used by the admin preview and code import. The station prints every template at its own printer's resolution; a station without a configured printer resolution prints box labels at this authoring resolution and refuses duplicate printing until one is set.",
     },
     language: { type: "string", enum: ["zpl", "tspl"] },
-    purpose: { type: "string", enum: ["box", "product_duplicate", "pallet"] },
+    purpose: { type: "string", enum: ["box", "product_duplicate", "pallet", "product_km"] },
     enabled: { type: "boolean" },
     chzProductGroupCodes: productGroupCodesOpenApiSchema,
     updatedAt: dateTimeSchema,

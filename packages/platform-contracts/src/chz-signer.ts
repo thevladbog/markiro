@@ -26,13 +26,47 @@ export const chzTrueApiAuthPayloadSchema = z
   })
   .strict();
 
-export const chzSignerTaskSchema = z
+export const chzOmsAuthPayloadSchema = z
   .object({
-    id: z.uuid(),
-    type: z.literal("true_api_auth"),
-    payload: chzTrueApiAuthPayloadSchema,
+    trueApiBaseUrl: z.url(),
+    // СУЗ issues this identifier and documents it as hex-shaped only, so RFC-4122 validation would refuse real values.
+    omsConnection: z.guid(),
+    inn: innSchema.optional(),
   })
   .strict();
+
+export const chzSignDetachedPayloadSchema = z
+  .object({
+    purpose: z.literal("oms_order"),
+    orderId: z.uuid(),
+    /** Exact request body bytes, base64. Order bodies are well under 1 KB; the cap only bounds abuse. */
+    dataBase64: z
+      .string()
+      .regex(/^[A-Za-z0-9+/]+={0,2}$/)
+      .min(4)
+      .max(256 * 1024),
+  })
+  .strict();
+
+export const chzSignerTaskSchema = z.discriminatedUnion("type", [
+  z
+    .object({
+      id: z.uuid(),
+      type: z.literal("true_api_auth"),
+      payload: chzTrueApiAuthPayloadSchema,
+    })
+    .strict(),
+  z
+    .object({ id: z.uuid(), type: z.literal("oms_auth"), payload: chzOmsAuthPayloadSchema })
+    .strict(),
+  z
+    .object({
+      id: z.uuid(),
+      type: z.literal("sign_detached"),
+      payload: chzSignDetachedPayloadSchema,
+    })
+    .strict(),
+]);
 
 export const chzSignerTaskCompleteSchema = z
   .object({
@@ -50,6 +84,22 @@ export const chzSignerTaskCompleteSchema = z
     certNotAfter: z.iso.datetime({ offset: true }).optional(),
   })
   .strict();
+
+export const chzSignerSignatureCompleteSchema = z
+  .object({
+    signatureBase64: z
+      .string()
+      .regex(/^[A-Za-z0-9+/]+={0,2}$/)
+      .min(4)
+      .max(64 * 1024),
+    certThumbprint: z.string().trim().min(1).max(128),
+  })
+  .strict();
+
+export const chzSignerTaskCompleteBodySchema = z.union([
+  chzSignerTaskCompleteSchema,
+  chzSignerSignatureCompleteSchema,
+]);
 
 export const CHZ_SIGNER_ERROR_CODES = [
   "CRYPTO_PROVIDER_MISSING",
@@ -71,8 +121,12 @@ export const chzSignerTaskFailSchema = z
 export type ChzSignerPairRequest = z.infer<typeof chzSignerPairRequestSchema>;
 export type ChzSignerPairResponse = z.infer<typeof chzSignerPairResponseSchema>;
 export type ChzTrueApiAuthPayload = z.infer<typeof chzTrueApiAuthPayloadSchema>;
+export type ChzOmsAuthPayload = z.infer<typeof chzOmsAuthPayloadSchema>;
+export type ChzSignDetachedPayload = z.infer<typeof chzSignDetachedPayloadSchema>;
 export type ChzSignerTask = z.infer<typeof chzSignerTaskSchema>;
 export type ChzSignerTaskComplete = z.infer<typeof chzSignerTaskCompleteSchema>;
+export type ChzSignerSignatureComplete = z.infer<typeof chzSignerSignatureCompleteSchema>;
+export type ChzSignerTaskCompleteBody = z.infer<typeof chzSignerTaskCompleteBodySchema>;
 export type ChzSignerTaskFail = z.infer<typeof chzSignerTaskFailSchema>;
 
 export const chzSignerContracts = {
@@ -80,6 +134,10 @@ export const chzSignerContracts = {
   pairResponse: chzSignerPairResponseSchema,
   task: chzSignerTaskSchema,
   trueApiAuthPayload: chzTrueApiAuthPayloadSchema,
+  omsAuthPayload: chzOmsAuthPayloadSchema,
+  signDetachedPayload: chzSignDetachedPayloadSchema,
   taskComplete: chzSignerTaskCompleteSchema,
+  signatureComplete: chzSignerSignatureCompleteSchema,
+  taskCompleteBody: chzSignerTaskCompleteBodySchema,
   taskFail: chzSignerTaskFailSchema,
 } as const;

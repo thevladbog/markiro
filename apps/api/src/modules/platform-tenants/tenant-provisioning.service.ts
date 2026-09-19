@@ -7,6 +7,7 @@ import {
   PALLET_LABEL_TEMPLATE_NAME,
   buildDefaultLabelTemplates,
   buildDuplicateLabelTemplates,
+  buildKmLabelTemplates,
   buildPalletLabelTemplates,
 } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
@@ -151,6 +152,20 @@ export class TenantProvisioningService {
           tenantId: tenant.id,
           name,
           purpose: "product_duplicate",
+          spec,
+        });
+      }
+      // Stock KM label (task 12): a single Chestny ZNAK marking code and its
+      // Data Matrix, printed from the office before units go down the line.
+      // Migration 0166 seeds the identical row for tenants that already
+      // existed (guarded by the same (tenant_id, name, purpose) identity), so
+      // both paths leave exactly one stock KM label per tenant.
+      for (const { name, spec } of buildKmLabelTemplates()) {
+        await tx.insert(schema.labelTemplates).values({
+          id: createId(),
+          tenantId: tenant.id,
+          name,
+          purpose: "product_km",
           spec,
         });
       }

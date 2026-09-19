@@ -13,6 +13,11 @@
  * embed. What's on screen here is the same bitmap that ships in the printed
  * ZPL/TSPL, not merely a font-substitute approximation of it.
  *
+ * The compositing pass itself lives in `../raster-composite.ts`: the KM print
+ * page (`../../km-orders/KmOrderPrintPage.tsx`) paints its labels through the
+ * same function, so what the office proofreads here and what its label printer
+ * puts on paper cannot drift apart.
+ *
  * TWO SEPARATE EFFECTS, deliberately:
  *  - The DRAW effect (schematic paint + raster compositing) needs a real 2D
  *    canvas context, which jsdom does not provide (see `renderer.ts`'s
@@ -30,16 +35,9 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
-  labelFieldDisplayValue,
-  mmToDots,
-  needsImageRendering,
-  ptToDots,
-  rasterAlignOffsetDots,
   type LabelTemplatePurpose,
   type LabelField,
-  type LabelFieldElement,
   type LabelTemplateSpec,
-  type LabelTextElement,
   type RasterizeTextFn,
 } from "@markiro/domain";
 import { Alert } from "@markiro/ui";
@@ -49,20 +47,13 @@ import {
   type LabelFontFamily,
 } from "../../../labels/fontCoverage.js";
 import { rasterizeText as realRasterizeText } from "../../../labels/rasterizer.js";
-import { decodeRasterToRgba, dotsToMm, rasterDestXPx } from "./raster-preview.js";
 import { labelPreviewData, labelRenderOptions } from "../preview-data.js";
-import { draw, elementBoundsMm, LABEL_BACKGROUND_COLOR } from "../renderer.js";
-
-/**
- * MVP SIMPLIFICATION (documented, not an oversight): `LabelTextElement`/
- * `LabelFieldElement` (`@markiro/domain`'s `model.ts`) carry no per-element
- * font-family field -- the domain model has no such concept yet (custom
- * font selection/upload is explicitly out of this plan's scope, see
- * `fontCoverage.ts`'s own doc comment) -- so there is exactly ONE
- * admin-wide font family the coverage check ever runs against, this
- * constant, rather than a per-element selector.
- */
-export const PREVIEW_FONT_FAMILY: LabelFontFamily = "IBM Plex Sans";
+import {
+  compositeRasterText,
+  elementsNeedingRaster,
+  PREVIEW_FONT_FAMILY,
+} from "../raster-composite.js";
+import { draw } from "../renderer.js";
 
 /** Stable fallback sample data -- a MODULE-level constant (not a fresh
  * `sampleLabelData()` call per render) so omitting the `data` prop doesn't
@@ -79,29 +70,6 @@ export interface PreviewPaneProps {
   scale?: number;
   rasterizeText?: RasterizeTextFn;
   checkFamilyCoverage?: (family: LabelFontFamily) => Promise<boolean>;
-}
-
-function resolvedTextOf(
-  element: LabelTextElement | LabelFieldElement,
-  data: Record<LabelField, string>,
-): string {
-  return element.kind === "text"
-    ? element.text
-    : labelFieldDisplayValue(element.field, data, element.textFormat);
-}
-
-/** Every text/field element whose RESOLVED text needs rasterization -- the
- * set this pane must both (a) actually rasterize-and-composite, and (b) run
- * the font-coverage check for (an empty set means no coverage check at all:
- * the warning would be meaningless noise on a label with no non-Latin1 text). */
-function elementsNeedingRaster(
-  spec: LabelTemplateSpec,
-  data: Record<LabelField, string>,
-): Array<LabelTextElement | LabelFieldElement> {
-  return spec.elements.filter(
-    (el): el is LabelTextElement | LabelFieldElement =>
-      (el.kind === "text" || el.kind === "field") && needsImageRendering(resolvedTextOf(el, data)),
-  );
 }
 
 type CoverageStatus = "ok" | "missing" | "check-failed";
@@ -134,69 +102,12 @@ export function PreviewPane({
     draw(spec, ctx, scale, resolvedData, renderOptions);
 
     let cancelled = false;
-    async function compositeRaster() {
-      for (const element of elementsNeedingRaster(spec, resolvedData)) {
-        const text = resolvedTextOf(element, resolvedData);
-        try {
-          const fontSizePx = ptToDots(element.fontSizePt, spec.dpi);
-          const raster = await rasterizeText(text, {
-            fontFamily: PREVIEW_FONT_FAMILY,
-            fontSizePx,
-            bold: element.bold ?? false,
-            ...(element.maxWidthMm !== undefined
-              ? { maxWidthPx: mmToDots(element.maxWidthMm, spec.dpi) }
-              : {}),
-            maxLines: element.maxLines ?? 1,
-          });
-          if (cancelled) return;
-
-          const offscreen = document.createElement("canvas");
-          offscreen.width = raster.width;
-          offscreen.height = raster.height;
-          const offCtx = offscreen.getContext("2d");
-          if (!offCtx) continue;
-          const rgba = decodeRasterToRgba(raster);
-          offCtx.putImageData(new ImageData(rgba, raster.width, raster.height), 0, 0);
-
-          // Mirror the same align/maxWidthMm offset `generateZpl`/
-          // `generateTspl`'s raster branch applies (see
-          // `rasterAlignOffsetDots`'s doc comment in `@markiro/domain`) so
-          // the preview's bitmap position never diverges from print.
-          const maxWidthDots =
-            element.maxWidthMm !== undefined ? mmToDots(element.maxWidthMm, spec.dpi) : undefined;
-          const offsetDots = rasterAlignOffsetDots(element.align, maxWidthDots, raster.width);
-          const destXPx = rasterDestXPx(element.xMm, offsetDots, spec.dpi, scale);
-          const destYPx = element.yMm * scale;
-          const destWidthPx = dotsToMm(raster.width, spec.dpi) * scale;
-          const destHeightPx = dotsToMm(raster.height, spec.dpi) * scale;
-
-          // `draw()` already schematic-painted this element with a plain
-          // `ctx.fillText` (see `renderer.ts`'s `drawTextElement`), whose
-          // approximate `AVG_CHAR_WIDTH_EM`/`LINE_HEIGHT_EM` heuristic bounds
-          // (`elementBoundsMm`) can be WIDER than the real rasterized bitmap
-          // about to be drawn on top of it (a genuinely proportional font's
-          // glyph tails can extend past the 0.55em/char average). Painting
-          // the label-background color over the schematic's own bounds
-          // FIRST ensures no stray schematic ink peeks out from under/around
-          // the bitmap once it's composited.
-          const schematicBounds = elementBoundsMm(element, resolvedData, renderOptions);
-          ctx!.fillStyle = LABEL_BACKGROUND_COLOR;
-          ctx!.fillRect(
-            schematicBounds.x * scale,
-            schematicBounds.y * scale,
-            schematicBounds.w * scale,
-            schematicBounds.h * scale,
-          );
-
-          ctx!.drawImage(offscreen, destXPx, destYPx, destWidthPx, destHeightPx);
-        } catch {
-          // A single element's rasterization failing (e.g. a real browser
-          // hitting some font-load edge case) must not blank the whole
-          // preview -- it just keeps its schematic `draw()` rendering.
-        }
-      }
-    }
-    void compositeRaster();
+    void compositeRasterText(spec, ctx, scale, resolvedData, {
+      fontFamily: PREVIEW_FONT_FAMILY,
+      rasterizeText,
+      renderOptions,
+      isCancelled: () => cancelled,
+    });
 
     return () => {
       cancelled = true;
@@ -249,9 +160,18 @@ export function PreviewPane({
       <span style={{ font: "400 12px/16px var(--font-mono)", color: "var(--fg-3)" }}>
         {t("pages.labels.editor.zoomCaption", { scale })}
       </span>
+      {/* `preview-data.ts` maps BOTH code-bearing purposes to the same
+          synthetic marking code, so both need the disclaimer -- a KM preview
+          without one looks like a live code. They need different sentences:
+          a KM label is printed in the office from an issued order, not from a
+          code the line scanner just read. */}
       {purpose === "product_duplicate" ? (
         <span style={{ font: "var(--text-body-sm)", color: "var(--fg-3)" }}>
           {t("pages.labels.purpose.sample")}
+        </span>
+      ) : purpose === "product_km" ? (
+        <span style={{ font: "var(--text-body-sm)", color: "var(--fg-3)" }}>
+          {t("pages.labels.purpose.sampleKm")}
         </span>
       ) : null}
       {coverageStatus === "missing" && (

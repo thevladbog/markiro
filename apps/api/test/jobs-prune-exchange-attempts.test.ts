@@ -18,6 +18,7 @@ import type { SignerScheduler } from "../src/modules/signer-agents/signer-schedu
 import type { ChzExportRunnerService } from "../src/modules/chz-exports/chz-export-runner.service";
 import type { ChzCodeStatusIngestService } from "../src/modules/chz-code-statuses/chz-code-status-ingest.service";
 import type { ChzCodeStatusRefreshService } from "../src/modules/chz-code-statuses/chz-code-status-refresh.service";
+import type { ChzKmOrderRunnerService } from "../src/modules/chz-km-orders/chz-km-order-runner.service";
 
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
@@ -67,6 +68,7 @@ describe.skipIf(!ready)("PgBossService: prune exchange_attempts", () => {
       {} as ChzExportRunnerService,
       {} as ChzCodeStatusIngestService,
       {} as ChzCodeStatusRefreshService,
+      {} as ChzKmOrderRunnerService,
     );
   });
 

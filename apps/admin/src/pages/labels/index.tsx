@@ -89,16 +89,20 @@ const PURPOSE_BADGE_KEY: Record<LabelTemplatePurpose, string> = {
   box: "pages.labels.purpose.box",
   product_duplicate: "pages.labels.purpose.duplicate",
   pallet: "pages.labels.purpose.pallet",
+  product_km: "pages.labels.purpose.product_km",
 };
 
 /**
- * Назначение шаблона — самая широкая категорийная ось в продукте: три
- * равноправных значения, ни одно из них не может быть серым.
+ * Назначение шаблона — самая широкая категорийная ось в продукте: четыре
+ * равноправных значения, ни одно из них не может быть серым. `steel` для
+ * «Этикетка КМ» — единственный оставшийся категорийный тон после violet,
+ * teal и magenta; ok/warn/error/info зарезервированы под состояния.
  */
 export const PURPOSE_TO_TONE: Record<LabelTemplatePurpose, BadgeTone> = {
   box: "violet",
   product_duplicate: "teal",
   pallet: "magenta",
+  product_km: "steel",
 };
 
 function TemplateCard({

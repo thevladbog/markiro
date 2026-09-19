@@ -28,6 +28,7 @@ import { JournalService } from "../src/modules/integrations/journal.service";
 import type { InventoriesService } from "../src/modules/inventories/inventories.service";
 import type { ChzCodeStatusIngestService } from "../src/modules/chz-code-statuses/chz-code-status-ingest.service";
 import type { ChzCodeStatusRefreshService } from "../src/modules/chz-code-statuses/chz-code-status-refresh.service";
+import type { ChzKmOrderRunnerService } from "../src/modules/chz-km-orders/chz-km-order-runner.service";
 import { createOrganization } from "./support/subscription-fixtures";
 
 const ready = Boolean(process.env.DATABASE_URL);
@@ -204,6 +205,10 @@ function serviceWith(
     {
       run: vi.fn(async () => ({ batches: 0, updated: 0, caughtUp: true })),
     } as unknown as ChzCodeStatusRefreshService,
+    {
+      run: vi.fn(async () => ({ finished: true, retryAfterSeconds: 0 })),
+      abandonAfterJobRetriesExhausted: vi.fn(async () => undefined),
+    } as unknown as ChzKmOrderRunnerService,
   );
 }
 

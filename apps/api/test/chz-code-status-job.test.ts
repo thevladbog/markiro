@@ -16,6 +16,7 @@ import type { InventoryDocumentRunnerService } from "../src/modules/inventories/
 import type { SignerScheduler } from "../src/modules/signer-agents/signer-scheduler.service";
 import type { SubscriptionStatusJob } from "../src/subscriptions/subscription-status.job";
 import type { ChzExportRunnerService } from "../src/modules/chz-exports/chz-export-runner.service";
+import type { ChzKmOrderRunnerService } from "../src/modules/chz-km-orders/chz-km-order-runner.service";
 import type { ChzCodeStatusIngestService } from "../src/modules/chz-code-statuses/chz-code-status-ingest.service";
 import type { ChzCodeStatusRefreshService } from "../src/modules/chz-code-statuses/chz-code-status-refresh.service";
 
@@ -131,6 +132,10 @@ function serviceWith(
     { run: vi.fn(async () => ({ finished: true })) } as unknown as ChzExportRunnerService,
     ingest,
     refresh,
+    {
+      run: vi.fn(async () => ({ finished: true, retryAfterSeconds: 0 })),
+      abandonAfterJobRetriesExhausted: vi.fn(async () => undefined),
+    } as unknown as ChzKmOrderRunnerService,
   );
 }
 

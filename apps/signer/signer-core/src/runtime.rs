@@ -10,12 +10,16 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use base64::Engine as _;
+
 use crate::cloud::{CloudClient, PairError};
-use crate::contracts::{cap_cert_subject, SignerErrorCode, TaskComplete, TaskFail};
+use crate::contracts::{
+    cap_cert_subject, SignerErrorCode, TaskComplete, TaskCompleteSignature, TaskFail, TaskKind,
+};
 use crate::journal::{redact, Journal, JournalEntry, JournalExportMetadata};
-use crate::signer::Signer;
+use crate::signer::{CertificateSummary, Signer};
 use crate::storage::{self, AgentConfig, SecretStore};
-use crate::trueapi::obtain_token;
+use crate::trueapi::{obtain_oms_token, obtain_token, TrueApiToken};
 use crate::SignerError;
 
 const POLL_WAIT_MS: u32 = 25_000;
@@ -438,7 +442,7 @@ impl Runtime {
         true
     }
 
-    async fn execute<F>(
+    pub(crate) async fn execute<F>(
         &self,
         client: &CloudClient,
         secret: &str,
@@ -505,35 +509,63 @@ impl Runtime {
             }
         };
 
-        let outcome = obtain_token(
-            &self.http,
-            &task.payload.true_api_base_url,
-            task.payload.inn.as_deref(),
-            task.payload.token_format,
-            &thumbprint,
-            self.signer.as_ref(),
-        )
-        .await;
+        // Each kind produces a different completion shape, but shares the
+        // same certificate lookup above and the same reporting/retry/failure
+        // path below: a token (True API or СУЗ) or a detached signature.
+        let outcome: Result<CompletionBody, SignerError> = match &task.kind {
+            TaskKind::TrueApiAuth(payload) => obtain_token(
+                &self.http,
+                &payload.true_api_base_url,
+                payload.inn.as_deref(),
+                payload.token_format,
+                &thumbprint,
+                self.signer.as_ref(),
+            )
+            .await
+            .map(|token| CompletionBody::Token(token_body(token, &thumbprint, certificate.as_ref()))),
+            TaskKind::OmsAuth(payload) => obtain_oms_token(
+                &self.http,
+                &payload.true_api_base_url,
+                &payload.oms_connection,
+                payload.inn.as_deref(),
+                &thumbprint,
+                self.signer.as_ref(),
+            )
+            .await
+            .map(|token| CompletionBody::Token(token_body(token, &thumbprint, certificate.as_ref()))),
+            TaskKind::SignDetached(payload) => base64::engine::general_purpose::STANDARD
+                .decode(&payload.data_base64)
+                .map_err(|_| {
+                    SignerError::TrueApi("sign_detached payload is not valid base64".into())
+                })
+                .and_then(|bytes| self.signer.sign_detached(&thumbprint, &bytes))
+                .map(|signature_base64| {
+                    CompletionBody::Signature(TaskCompleteSignature {
+                        signature_base64,
+                        cert_thumbprint: thumbprint.clone(),
+                    })
+                }),
+        };
 
         match outcome {
-            Ok(token) => {
-                let body = TaskComplete {
-                    token: token.token,
-                    expires_at: token.expires_at.clone(),
-                    cert_thumbprint: thumbprint,
-                    cert_subject: certificate.as_ref().map(|c| cap_cert_subject(&c.subject)),
-                    cert_inn: certificate.as_ref().and_then(|c| c.inn.clone()),
-                    cert_not_after: certificate.as_ref().map(|c| c.not_after.clone()),
-                };
-
-                // The PIN prompt, container access and True API round trip have
-                // already succeeded by this point; a single transient failure
-                // here must not throw that work away and leave the cloud
-                // sitting on the claim for its full 30-minute deadline, so
-                // retry a bounded number of times before giving up.
+            Ok(body) => {
+                // The PIN prompt, container access and the True API/СУЗ round
+                // trip or signing operation have already succeeded by this
+                // point; a single transient failure here must not throw that
+                // work away and leave the cloud sitting on the claim for its
+                // full 30-minute deadline, so retry a bounded number of times
+                // before giving up. Shared across all three kinds: this is a
+                // property of the transport, not of what is being reported.
                 let mut attempt = 0u32;
                 let result = loop {
-                    let outcome = client.complete(secret, &task.id, &body).await;
+                    let outcome = match &body {
+                        CompletionBody::Token(token_body) => {
+                            client.complete(secret, &task.id, token_body).await
+                        }
+                        CompletionBody::Signature(signature_body) => {
+                            client.complete(secret, &task.id, signature_body).await
+                        }
+                    };
                     attempt += 1;
                     // `Revoked` and `Protocol` are terminal verdicts from the
                     // cloud -- a 401 will not become a 200, and a 404 means the
@@ -550,14 +582,33 @@ impl Runtime {
 
                 match result {
                     Ok(()) => {
-                        self.note("True API token delivered", None);
-                        self.set_last_token_expires_at(Some(token.expires_at));
+                        // Journalled distinctly per kind so an operator can
+                        // tell a True API token, a СУЗ token and a detached
+                        // signature apart. Only the True API token updates
+                        // `last_token_expires_at`: the СУЗ token has its own,
+                        // different lifetime, and a signature has none at all.
+                        match &task.kind {
+                            TaskKind::TrueApiAuth(_) => {
+                                if let CompletionBody::Token(token_body) = &body {
+                                    self.set_last_token_expires_at(Some(
+                                        token_body.expires_at.clone(),
+                                    ));
+                                }
+                                self.note("True API token delivered", None);
+                            }
+                            TaskKind::OmsAuth(_) => {
+                                self.note("СУЗ token delivered", None);
+                            }
+                            TaskKind::SignDetached(_) => {
+                                self.note("Detached signature delivered", None);
+                            }
+                        }
                         self.set_last_error(None);
                         self.set_phase(AgentPhase::Idle);
                         on_change(self.status());
                     }
                     Err(error) => {
-                        self.note_report_failure("Could not report the token", &error);
+                        self.note_report_failure("Could not report the completion", &error);
                         self.set_last_error(Some(error.to_string()));
                         self.set_phase(AgentPhase::Degraded);
                         on_change(self.status());
@@ -651,14 +702,39 @@ impl Runtime {
     }
 }
 
+/// The two completion shapes the cloud accepts on the shared `/complete`
+/// endpoint: a token (True API or СУЗ, both carry certificate metadata) or a
+/// detached signature (no token, no expiry).
+enum CompletionBody {
+    Token(TaskComplete),
+    Signature(TaskCompleteSignature),
+}
+
+fn token_body(
+    token: TrueApiToken,
+    thumbprint: &str,
+    certificate: Option<&CertificateSummary>,
+) -> TaskComplete {
+    TaskComplete {
+        token: token.token,
+        expires_at: token.expires_at,
+        cert_thumbprint: thumbprint.to_string(),
+        cert_subject: certificate.map(|c| cap_cert_subject(&c.subject)),
+        cert_inn: certificate.and_then(|c| c.inn.clone()),
+        cert_not_after: certificate.map(|c| c.not_after.clone()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::contracts::{
-        SignerErrorCode, SignerTask, TaskType, TokenFormat, TrueApiAuthPayload,
+        SignDetachedPayload, SignerErrorCode, SignerTask, TaskKind, TokenFormat,
+        TrueApiAuthPayload,
     };
     use crate::signer::CertificateSummary;
     use std::io::ErrorKind;
+    use std::path::PathBuf;
     use wiremock::matchers::{body_json, body_json_string, method, path};
     use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 
@@ -668,6 +744,9 @@ mod tests {
             Ok(vec![])
         }
         fn sign_attached(&self, _t: &str, _p: &[u8]) -> Result<String, SignerError> {
+            Err(SignerError::PinRequired)
+        }
+        fn sign_detached(&self, _t: &str, _p: &[u8]) -> Result<String, SignerError> {
             Err(SignerError::PinRequired)
         }
     }
@@ -690,6 +769,9 @@ mod tests {
         fn sign_attached(&self, _thumbprint: &str, payload: &[u8]) -> Result<String, SignerError> {
             Ok(format!("signed-{}", String::from_utf8_lossy(payload)))
         }
+        fn sign_detached(&self, _t: &str, payload: &[u8]) -> Result<String, SignerError> {
+            Ok(format!("detached-{}", String::from_utf8_lossy(payload)))
+        }
     }
 
     /// A `Runtime` wired to a fresh temp config dir and inert Windows-only
@@ -706,6 +788,46 @@ mod tests {
         )
         .unwrap();
         (dir, runtime)
+    }
+
+    /// Like `test_runtime`, but pre-selects a certificate thumbprint and a
+    /// server URL in the on-disk config (as `select_certificate` and `pair`
+    /// would have) and takes a caller-chosen `Signer`, so dispatch tests can
+    /// exercise real signing behaviour without going through `pair`.
+    fn test_runtime_with(
+        signer: impl Signer + 'static,
+        server_url: &str,
+        thumbprint: &str,
+    ) -> (tempfile::TempDir, Runtime) {
+        let dir = tempfile::tempdir().unwrap();
+        storage::write_config(
+            dir.path(),
+            &AgentConfig {
+                server_url: Some(server_url.trim_end_matches('/').to_string()),
+                cert_thumbprint: Some(thumbprint.to_string()),
+                ..AgentConfig::default()
+            },
+        )
+        .unwrap();
+        let runtime = Runtime::new(
+            dir.path().to_path_buf(),
+            Arc::new(signer),
+            Arc::new(PlainStore),
+            "0.1.0".into(),
+        )
+        .unwrap();
+        (dir, runtime)
+    }
+
+    /// Reads a shared cross-language contract fixture, mirroring the helper
+    /// in `contracts.rs` — these JSON files are the contract, not a local
+    /// copy of it.
+    fn fixture(name: &str) -> String {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../packages/platform-contracts/fixtures/chz-signer")
+            .join(name);
+        std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
     }
 
     #[test]
@@ -948,12 +1070,11 @@ mod tests {
         let client = CloudClient::new(&server.uri(), "0.1.0").unwrap();
         let task = SignerTask {
             id: "t1".into(),
-            task_type: TaskType::TrueApiAuth,
-            payload: TrueApiAuthPayload {
+            kind: TaskKind::TrueApiAuth(TrueApiAuthPayload {
                 true_api_base_url: server.uri(),
                 inn: None,
                 token_format: TokenFormat::Jwt,
-            },
+            }),
         };
 
         runtime.execute(&client, "secret", &task, &|_| {}).await;
@@ -1017,12 +1138,11 @@ mod tests {
         let client = CloudClient::new(&server.uri(), "0.1.0").unwrap();
         let task = SignerTask {
             id: "t-network".into(),
-            task_type: TaskType::TrueApiAuth,
-            payload: TrueApiAuthPayload {
+            kind: TaskKind::TrueApiAuth(TrueApiAuthPayload {
                 true_api_base_url: server.uri(),
                 inn: None,
                 token_format: TokenFormat::Jwt,
-            },
+            }),
         };
 
         runtime.execute(&client, "secret", &task, &|_| {}).await;
@@ -1073,5 +1193,110 @@ mod tests {
         // `AgentStatus` carries *some* resolved name rather than requiring
         // the caller to supply one.
         assert!(!runtime.status().hostname.is_empty());
+    }
+
+    // --- Task 5: runtime dispatch per task kind. ---
+
+    #[tokio::test]
+    async fn a_sign_detached_task_reports_the_detached_signature_over_the_exact_bytes() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path(
+                "/signer-agent/tasks/3f0e0f5e-8d1c-4d7a-9b1a-222222222222/complete",
+            ))
+            .and(body_json(serde_json::json!({
+                // `PayloadSigner::sign_detached` already returns the final
+                // (in production, base64-encoded) signature material, same
+                // as `sign_attached` -- see the `data` field used verbatim
+                // below in the True API tests. Dispatch must forward it
+                // as-is, not re-encode it.
+                "signatureBase64": "detached-{\"productGroup\":\"beer\"}",
+                "certThumbprint": "AB"
+            })))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let (_dir, runtime) = test_runtime_with(PayloadSigner, &server.uri(), "AB");
+        let task: SignerTask = serde_json::from_str(&fixture("task-sign-detached.json")).unwrap();
+        let client = CloudClient::new(&server.uri(), "0.1.0").unwrap();
+        runtime.execute(&client, "secret", &task, &|_| {}).await;
+        assert!(runtime
+            .status()
+            .journal
+            .iter()
+            .any(|e| e.message == "Detached signature delivered"));
+    }
+
+    #[tokio::test]
+    async fn an_oms_auth_task_reports_a_ten_hour_token() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/auth/key"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(r#"{"uuid":"u1","data":"c"}"#))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/auth/simpleSignIn/11b1abc1-f1ee-11db-1a11-f11ac11111e1"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(r#"{"token":"tok"}"#))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path(
+                "/signer-agent/tasks/6d2a1b7e-4c1f-4b7e-9c3a-1a2b3c4d5e6f/complete",
+            ))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let (_dir, runtime) = test_runtime_with(PayloadSigner, &server.uri(), "AB");
+        let mut task: SignerTask = serde_json::from_str(&fixture("task-oms-auth.json")).unwrap();
+        if let TaskKind::OmsAuth(payload) = &mut task.kind {
+            payload.true_api_base_url = server.uri();
+        }
+        let client = CloudClient::new(&server.uri(), "0.1.0").unwrap();
+        runtime.execute(&client, "secret", &task, &|_| {}).await;
+        let received = server.received_requests().await.unwrap();
+        let complete = received
+            .iter()
+            .find(|r| r.url.path().ends_with("/complete"))
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&complete.body).unwrap();
+        assert_eq!(body["token"], "tok");
+        assert_eq!(body["certThumbprint"], "AB");
+        assert!(body["expiresAt"].as_str().unwrap().len() >= 20);
+        assert!(runtime
+            .status()
+            .journal
+            .iter()
+            .any(|e| e.message == "СУЗ token delivered"));
+    }
+
+    #[tokio::test]
+    async fn a_sign_detached_task_with_bad_base64_is_failed_not_signed() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/signer-agent/tasks/t1/fail"))
+            .and(body_json_string(
+                // `error.to_string()` includes `SignerError::TrueApi`'s
+                // `#[error(...)]` prefix -- the same convention the network
+                // exhaustion test above already relies on for its message.
+                r#"{"errorCode":"TRUE_API","message":"True API rejected the request: sign_detached payload is not valid base64"}"#,
+            ))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let (_dir, runtime) = test_runtime_with(PayloadSigner, &server.uri(), "AB");
+        let task = SignerTask {
+            id: "t1".into(),
+            kind: TaskKind::SignDetached(SignDetachedPayload {
+                purpose: "oms_order".into(),
+                order_id: "o".into(),
+                data_base64: "***".into(),
+            }),
+        };
+        let client = CloudClient::new(&server.uri(), "0.1.0").unwrap();
+        runtime.execute(&client, "secret", &task, &|_| {}).await;
     }
 }

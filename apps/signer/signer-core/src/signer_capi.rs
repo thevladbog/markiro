@@ -74,6 +74,16 @@ impl Signer for CapiSigner {
     }
 
     fn sign_attached(&self, thumbprint: &str, payload: &[u8]) -> Result<String, SignerError> {
+        self.sign(thumbprint, payload, false)
+    }
+
+    fn sign_detached(&self, thumbprint: &str, payload: &[u8]) -> Result<String, SignerError> {
+        self.sign(thumbprint, payload, true)
+    }
+}
+
+impl CapiSigner {
+    fn sign(&self, thumbprint: &str, payload: &[u8], detached: bool) -> Result<String, SignerError> {
         let store = open_my_store()?;
         let context = unsafe { find_by_thumbprint(store, thumbprint) };
         let context = match context {
@@ -84,7 +94,7 @@ impl Signer for CapiSigner {
             }
         };
 
-        let result = unsafe { sign_with_context(context, payload) };
+        let result = unsafe { sign_with_context(context, payload, detached) };
         unsafe {
             CertFreeCertificateContext(context);
             CertCloseStore(store, 0);
@@ -232,6 +242,7 @@ unsafe fn find_by_thumbprint(store: HCERTSTORE, thumbprint: &str) -> Option<*mut
 unsafe fn sign_with_context(
     context: *mut CERT_CONTEXT,
     payload: &[u8],
+    detached: bool,
 ) -> Result<Vec<u8>, SignerError> {
     let info = (*context).pCertInfo;
     if info.is_null() {
@@ -273,10 +284,11 @@ unsafe fn sign_with_context(
     let sizes: [u32; 1] = [payload.len() as u32];
     let mut blob_size: u32 = 0;
 
-    // fDetachedSignature = FALSE: True API wants the challenge embedded.
+    // fDetachedSignature: attached for the True API challenge, detached for
+    // СУЗ's `X-Signature`.
     if CryptSignMessage(
         &params,
-        0,
+        detached as i32,
         1,
         to_be_signed.as_ptr(),
         sizes.as_ptr(),
@@ -289,7 +301,7 @@ unsafe fn sign_with_context(
     let mut blob = vec![0u8; blob_size as usize];
     if CryptSignMessage(
         &params,
-        0,
+        detached as i32,
         1,
         to_be_signed.as_ptr(),
         sizes.as_ptr(),

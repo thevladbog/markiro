@@ -116,6 +116,29 @@ describe.skipIf(!ready)("signer token refresh scheduler", () => {
     return firstRow(tasks, `expected exactly one pending task for tenant ${tenantId}`);
   }
 
+  async function pendingTasksOfType(tenantId: string, type: string) {
+    return db
+      .select()
+      .from(schema.chzSignerTasks)
+      .where(
+        and(
+          eq(schema.chzSignerTasks.tenantId, tenantId),
+          eq(schema.chzSignerTasks.type, type),
+          inArray(schema.chzSignerTasks.status, ["pending", "claimed"]),
+        ),
+      );
+  }
+
+  async function setChzSettings(tenantId: string, settings: Record<string, unknown>) {
+    await db
+      .insert(schema.integrationChannels)
+      .values({ tenantId, type: "chestny_znak", settings })
+      .onConflictDoUpdate({
+        target: [schema.integrationChannels.tenantId, schema.integrationChannels.type],
+        set: { settings },
+      });
+  }
+
   /** Fetches a task row by id, asserting it still exists (row was not pruned/missing). */
   async function taskRow(id: string) {
     const rows = await db
@@ -295,6 +318,27 @@ describe.skipIf(!ready)("signer token refresh scheduler", () => {
     await svc.run(now);
     expect(await errorEvents(tenantId)).toHaveLength(0);
     expect(await pendingTasks(tenantId)).toHaveLength(1);
+  });
+
+  it("enqueues exactly one oms_auth task when settings carry an OMS connection and no token exists yet", async () => {
+    const tenantId = await freshTenant();
+    await insertAgent(tenantId);
+    await setChzSettings(tenantId, {
+      environment: "sandbox",
+      omsId: "cdf12109-10d3-11e6-8b6f-0050569977a1",
+      omsConnection: "11b1abc1-f1ee-11db-1a11-f11ac11111e1",
+    });
+    await svc.run(new Date());
+    const tasks = await pendingTasksOfType(tenantId, "oms_auth");
+    expect(tasks).toHaveLength(1);
+  });
+
+  it("does not enqueue an oms_auth task when settings carry no OMS connection", async () => {
+    const tenantId = await freshTenant();
+    await insertAgent(tenantId);
+    await setChzSettings(tenantId, { environment: "sandbox" });
+    await svc.run(new Date());
+    expect(await pendingTasksOfType(tenantId, "oms_auth")).toHaveLength(0);
   });
 
   // Final review, Finding A: without the key, an agent's real КЭП login

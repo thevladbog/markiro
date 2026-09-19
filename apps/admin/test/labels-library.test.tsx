@@ -336,6 +336,21 @@ it("distinguishes product duplicate templates from box templates", async () => {
   expect(screen.getByText("Короб")).toBeDefined();
 });
 
+// A KM label carries its own badge for the same reason the pallet one does:
+// it reused "Дубликат товара" while the editor could not author the purpose,
+// and a library card that names the wrong purpose is a card an operator
+// edits by mistake.
+it("gives KM templates their own badge", async () => {
+  const items = [
+    { ...BOX_SUMMARY, purpose: "box" },
+    { ...UNIT_SUMMARY, purpose: "product_km" },
+  ];
+  stubFetch(items);
+  renderPage();
+  expect(await screen.findByText("Этикетка КМ")).toBeDefined();
+  expect(screen.queryByText("Дубликат товара")).toBeNull();
+});
+
 // Slice 06d review fix: a pallet template's badge used to fall through the
 // old `purpose === "product_duplicate" ? duplicate : box` ternary straight to
 // "Короб" (box), because "pallet" matched neither branch. This pins the

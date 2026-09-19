@@ -5,7 +5,7 @@ import {
   type LabelTemplateSpec,
 } from "@markiro/domain";
 
-import { elementBoundsMm } from "./renderer.js";
+import { elementBoundsMm, type LabelRenderOptions } from "./renderer.js";
 
 export type ElementFitFailure = { ok: false; reason: "ELEMENT_TOO_LARGE" };
 export type ElementFitSuccess = { ok: true; element: LabelElement; adjusted: boolean };
@@ -17,7 +17,7 @@ export function fitElementWithinLabel(
   element: LabelElement,
   spec: Pick<LabelTemplateSpec, "widthMm" | "heightMm">,
   data: Record<LabelField, string> = sampleLabelData(),
-  options: { kmDataMatrix?: "native" | "raster" } = {},
+  options: LabelRenderOptions = {},
 ): ElementFitResult {
   if (
     !Number.isFinite(spec.widthMm) ||
@@ -75,7 +75,7 @@ export function fitElementWithinLabel(
 export function fitSpecElements(
   spec: LabelTemplateSpec,
   data: Record<LabelField, string> = sampleLabelData(),
-  options: { kmDataMatrix?: "native" | "raster" } = {},
+  options: LabelRenderOptions = {},
 ): { ok: true; spec: LabelTemplateSpec; adjustedIds: string[] } | ElementFitFailure {
   if (
     !Number.isFinite(spec.widthMm) ||

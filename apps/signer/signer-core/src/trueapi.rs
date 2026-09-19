@@ -177,6 +177,92 @@ async fn obtain_token_once(
     Ok(TrueApiToken { token, expires_at })
 }
 
+/// СУЗ client token: same challenge as True API, posted to the per-installation
+/// route. The response is `{"token": "<uuid>"}` with no expiry; СУЗ documents a
+/// 10-hour lifetime, so the expiry is computed here.
+pub async fn obtain_oms_token(
+    http: &reqwest::Client,
+    base_url: &str,
+    oms_connection: &str,
+    inn: Option<&str>,
+    thumbprint: &str,
+    signer: &dyn Signer,
+) -> Result<TrueApiToken, SignerError> {
+    let mut attempt = 1u32;
+    loop {
+        let outcome =
+            obtain_oms_token_once(http, base_url, oms_connection, inn, thumbprint, signer).await;
+        match outcome {
+            Err(SignerError::Network(_)) if attempt < AUTH_ATTEMPTS => {
+                // Same rule as obtain_token: never replay a signed one-time
+                // challenge, restart the whole flow after a short pause.
+                tokio::time::sleep(Duration::from_secs(2u64.saturating_pow(attempt))).await;
+                attempt += 1;
+            }
+            outcome => return outcome,
+        }
+    }
+}
+
+const OMS_TOKEN_TTL_SECS: u64 = 10 * 3600;
+
+async fn obtain_oms_token_once(
+    http: &reqwest::Client,
+    base_url: &str,
+    oms_connection: &str,
+    inn: Option<&str>,
+    thumbprint: &str,
+    signer: &dyn Signer,
+) -> Result<TrueApiToken, SignerError> {
+    let base = base_url.trim_end_matches('/');
+
+    let key_response = http
+        .get(format!("{base}/auth/key"))
+        .timeout(AUTH_TIMEOUT)
+        .send()
+        .await
+        .map_err(|e| SignerError::Network(e.to_string()))?;
+    if !key_response.status().is_success() {
+        return Err(classify_response(key_response).await);
+    }
+    let challenge: AuthKeyResponse = key_response
+        .json()
+        .await
+        .map_err(classify_json_error)?;
+
+    let signature = signer.sign_attached(thumbprint, challenge.data.as_bytes())?;
+
+    let sign_in_response = http
+        .post(format!("{base}/auth/simpleSignIn/{oms_connection}"))
+        .timeout(AUTH_TIMEOUT)
+        .json(&SignInRequest {
+            uuid: &challenge.uuid,
+            data: &signature,
+            inn,
+            united_token: None,
+        })
+        .send()
+        .await
+        .map_err(|e| SignerError::Network(e.to_string()))?;
+    if !sign_in_response.status().is_success() {
+        return Err(classify_response(sign_in_response).await);
+    }
+    let issued: SignInResponse = sign_in_response
+        .json()
+        .await
+        .map_err(classify_json_error)?;
+    let token = required_field(issued.token, "token")?;
+
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    Ok(TrueApiToken {
+        token,
+        expires_at: format_rfc3339(now + OMS_TOKEN_TTL_SECS),
+    })
+}
+
 fn required_field(value: Option<String>, name: &str) -> Result<String, SignerError> {
     match value.map(|value| value.trim().to_string()) {
         Some(value) if !value.is_empty() => Ok(value),
@@ -292,7 +378,7 @@ mod tests {
     use crate::signer::{CertificateSummary, Signer};
     use std::io::{ErrorKind, Read, Write};
     use std::net::{TcpListener, TcpStream};
-    use wiremock::matchers::{body_json_string, method, path};
+    use wiremock::matchers::{body_json, body_json_string, method, path};
     use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 
     struct FakeSigner {
@@ -307,6 +393,10 @@ mod tests {
             assert_eq!(payload, b"challenge-data");
             Ok(self.signature.to_string())
         }
+        fn sign_detached(&self, _thumbprint: &str, payload: &[u8]) -> Result<String, SignerError> {
+            assert_eq!(payload, b"challenge-data");
+            Ok(self.signature.to_string())
+        }
     }
 
     struct FailingSigner;
@@ -315,6 +405,9 @@ mod tests {
             Ok(vec![])
         }
         fn sign_attached(&self, _t: &str, _p: &[u8]) -> Result<String, SignerError> {
+            Err(SignerError::PinRequired)
+        }
+        fn sign_detached(&self, _t: &str, _p: &[u8]) -> Result<String, SignerError> {
             Err(SignerError::PinRequired)
         }
     }
@@ -326,6 +419,9 @@ mod tests {
         }
         fn sign_attached(&self, _thumbprint: &str, payload: &[u8]) -> Result<String, SignerError> {
             Ok(format!("signed-{}", String::from_utf8_lossy(payload)))
+        }
+        fn sign_detached(&self, _t: &str, payload: &[u8]) -> Result<String, SignerError> {
+            Ok(format!("detached-{}", String::from_utf8_lossy(payload)))
         }
     }
 
@@ -779,5 +875,77 @@ mod tests {
 
         assert_eq!(token_expiry_unix(&jwt, now), fallback);
         assert_eq!(token_expiry_unix("opaque-future-token", now), fallback);
+    }
+
+    #[tokio::test]
+    async fn obtains_a_suz_client_token_through_the_oms_connection_route() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/auth/key"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(r#"{"uuid":"u1","data":"challenge"}"#),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/auth/simpleSignIn/11b1abc1-f1ee-11db-1a11-f11ac11111e1"))
+            .and(body_json(serde_json::json!({"uuid":"u1","data":"signed-challenge"})))
+            .respond_with(ResponseTemplate::new(200).set_body_string(
+                r#"{"token":"2f2222c2-cbc2-22ff-bc2c-2222222fbef2"}"#,
+            ))
+            .mount(&server)
+            .await;
+        let http = reqwest::Client::new();
+        let token = obtain_oms_token(
+            &http,
+            &server.uri(),
+            "11b1abc1-f1ee-11db-1a11-f11ac11111e1",
+            None,
+            "AB",
+            &PayloadSigner,
+        )
+        .await
+        .unwrap();
+        assert_eq!(token.token, "2f2222c2-cbc2-22ff-bc2c-2222222fbef2");
+        let expires = token.expires_at.clone();
+        assert!(expires.ends_with("+00:00") || expires.ends_with('Z'));
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        assert_eq!(
+            &expires[..13],
+            &format_rfc3339_public(now + 10 * 3600)[..13]
+        );
+    }
+
+    #[tokio::test]
+    async fn passes_the_mchd_inn_to_the_oms_route() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/auth/key"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(r#"{"uuid":"u1","data":"c"}"#))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/auth/simpleSignIn/11b1abc1-f1ee-11db-1a11-f11ac11111e1"))
+            .and(body_json(
+                serde_json::json!({"uuid":"u1","data":"signed-c","inn":"7712345678"}),
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_string(r#"{"token":"t"}"#))
+            .mount(&server)
+            .await;
+        let token = obtain_oms_token(
+            &reqwest::Client::new(),
+            &server.uri(),
+            "11b1abc1-f1ee-11db-1a11-f11ac11111e1",
+            Some("7712345678"),
+            "AB",
+            &PayloadSigner,
+        )
+        .await
+        .unwrap();
+        assert_eq!(token.token, "t");
     }
 }

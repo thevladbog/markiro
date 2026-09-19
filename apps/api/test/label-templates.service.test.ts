@@ -28,13 +28,13 @@ describe("label template purpose contract", () => {
   it("documents purpose on full and summary responses", () => {
     for (const schema of [labelTemplateOpenApiSchema, labelTemplateSummaryOpenApiSchema]) {
       expect(schema.required).toContain("purpose");
-      // "pallet" joined the RESPONSE enum in 06d: tenant provisioning creates a
-      // pallet-purpose row and neither list nor get-by-id filters by purpose,
-      // so both schemas must document it. It is deliberately absent from
-      // `purposeSchema` above, which is the narrower CREATE input.
+      // "pallet" joined the RESPONSE enum in 06d, and "product_km" in task 12:
+      // tenant provisioning creates a row of each purpose and neither list nor
+      // get-by-id filters by purpose, so both schemas must document every
+      // value.
       expect(schema.properties?.purpose).toEqual({
         type: "string",
-        enum: ["box", "product_duplicate", "pallet"],
+        enum: ["box", "product_duplicate", "pallet", "product_km"],
       });
     }
   });

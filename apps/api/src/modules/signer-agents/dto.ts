@@ -45,6 +45,7 @@ export interface SignerRefreshTaskDto {
 export interface SignerAgentsOverviewDto {
   agents: SignerAgentSummaryDto[];
   token: SignerTokenStatusDto;
+  omsToken: SignerTokenStatusDto;
   refreshTask: SignerRefreshTaskDto | null;
 }
 
@@ -120,15 +121,16 @@ const signerRefreshTaskOpenApiSchema: SchemaObject = {
 export const signerAgentsOverviewOpenApiSchema: SchemaObject = {
   type: "object",
   additionalProperties: false,
-  required: ["agents", "token", "refreshTask"],
+  required: ["agents", "token", "omsToken", "refreshTask"],
   properties: {
     agents: { type: "array", items: signerAgentSummaryOpenApiSchema },
     token: signerTokenStatusOpenApiSchema,
+    omsToken: signerTokenStatusOpenApiSchema,
     refreshTask: { ...signerRefreshTaskOpenApiSchema, nullable: true },
   },
 };
 
-const signerTaskOpenApiSchema: SchemaObject = {
+const trueApiAuthTaskOpenApiSchema: SchemaObject = {
   type: "object",
   additionalProperties: false,
   required: ["id", "type", "payload"],
@@ -146,6 +148,50 @@ const signerTaskOpenApiSchema: SchemaObject = {
       },
     },
   },
+};
+
+const omsAuthTaskOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["id", "type", "payload"],
+  properties: {
+    id: { type: "string", format: "uuid" },
+    type: { type: "string", enum: ["oms_auth"] },
+    payload: {
+      type: "object",
+      additionalProperties: false,
+      required: ["trueApiBaseUrl", "omsConnection"],
+      properties: {
+        trueApiBaseUrl: { type: "string", format: "uri" },
+        omsConnection: { type: "string" },
+        inn: { type: "string" },
+      },
+    },
+  },
+};
+
+const signDetachedTaskOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["id", "type", "payload"],
+  properties: {
+    id: { type: "string", format: "uuid" },
+    type: { type: "string", enum: ["sign_detached"] },
+    payload: {
+      type: "object",
+      additionalProperties: false,
+      required: ["purpose", "orderId", "dataBase64"],
+      properties: {
+        purpose: { type: "string", enum: ["oms_order"] },
+        orderId: { type: "string", format: "uuid" },
+        dataBase64: { type: "string" },
+      },
+    },
+  },
+};
+
+const signerTaskOpenApiSchema: SchemaObject = {
+  oneOf: [trueApiAuthTaskOpenApiSchema, omsAuthTaskOpenApiSchema, signDetachedTaskOpenApiSchema],
 };
 
 /** `GET /signer-agent/tasks/next` response: no queued task is `{ task: null }`, not a 404. */

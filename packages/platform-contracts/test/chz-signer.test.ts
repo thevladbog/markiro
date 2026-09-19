@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
+  chzSignerContracts,
   chzSignerPairRequestSchema,
   chzSignerPairResponseSchema,
   chzSignerTaskCompleteSchema,
@@ -45,6 +46,36 @@ describe("chz-signer contracts", () => {
     ).toBe(false);
   });
 
+  it("rejects extra keys in the new strict schemas", () => {
+    // OMS auth payload with extra field
+    expect(
+      chzSignerContracts.omsAuthPayload.safeParse({
+        trueApiBaseUrl: "https://markirovka.sandbox.crptech.ru/api/v3/true-api",
+        omsConnection: "11b1abc1-f1ee-11db-1a11-f11ac11111e1",
+        extra: "field",
+      }).success,
+    ).toBe(false);
+
+    // Sign detached payload with extra field
+    expect(
+      chzSignerContracts.signDetachedPayload.safeParse({
+        purpose: "oms_order",
+        orderId: "3f0e0f5e-8d1c-4d7a-9b1a-111111111111",
+        dataBase64: "AQIDBAU=",
+        extra: "field",
+      }).success,
+    ).toBe(false);
+
+    // Signature complete with extra field
+    expect(
+      chzSignerContracts.signatureComplete.safeParse({
+        signatureBase64: "AQIDBAU=",
+        certThumbprint: "AB12",
+        extra: "field",
+      }).success,
+    ).toBe(false);
+  });
+
   it("requires a valid inn shape in the auth payload", () => {
     expect(
       chzSignerTaskSchema.safeParse({
@@ -83,5 +114,40 @@ describe("chz-signer contracts", () => {
         certThumbprint: "AB12",
       }).success,
     ).toBe(true);
+  });
+});
+
+describe("signer task union", () => {
+  it("parses an oms_auth task with СУЗ-issued omsConnection", () => {
+    const task = chzSignerContracts.task.parse(fixture("task-oms-auth.json"));
+    expect(task.type).toBe("oms_auth");
+    if (task.type === "oms_auth") {
+      // Verify the fixture carries СУЗ's documented value exactly
+      expect(task.payload.omsConnection).toBe("11b1abc1-f1ee-11db-1a11-f11ac11111e1");
+    }
+  });
+
+  it("rejects malformed omsConnection values", () => {
+    expect(
+      chzSignerContracts.task.safeParse({
+        id: "3f0e0f5e-8d1c-4d7a-9b1a-111111111111",
+        type: "oms_auth",
+        payload: {
+          trueApiBaseUrl: "https://markirovka.sandbox.crptech.ru/api/v3/true-api",
+          omsConnection: "not-a-guid",
+        },
+      }).success,
+    ).toBe(false);
+  });
+  it("parses a sign_detached task and its signature completion", () => {
+    const task = chzSignerContracts.task.parse(fixture("task-sign-detached.json"));
+    expect(task.type).toBe("sign_detached");
+    const done = chzSignerContracts.taskCompleteBody.parse(fixture("task-complete-signature.json"));
+    expect("signatureBase64" in done).toBe(true);
+  });
+  it("rejects an unknown task type", () => {
+    expect(() =>
+      chzSignerContracts.task.parse({ id: crypto.randomUUID(), type: "nope", payload: {} }),
+    ).toThrow();
   });
 });

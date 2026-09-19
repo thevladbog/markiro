@@ -40,9 +40,15 @@ export const NAV_ITEMS: ReadonlyArray<{
     capability: C.OPERATIONS_READ,
   },
   {
-    to: "/inventory",
-    key: "nav.inventory",
+    to: "/conflicts",
+    key: "nav.conflicts",
     sectionKey: "shell.sections.production",
+    capability: C.OPERATIONS_READ,
+  },
+  {
+    to: "/km-orders",
+    key: "nav.kmOrders",
+    sectionKey: "shell.sections.marking",
     capability: C.OPERATIONS_READ,
   },
   // "/boxes" and "/pallets" have no sidebar entry of their own: they are
@@ -51,30 +57,36 @@ export const NAV_ITEMS: ReadonlyArray<{
   {
     to: "/codes",
     key: "nav.codes",
-    sectionKey: "shell.sections.production",
+    sectionKey: "shell.sections.marking",
     capability: C.OPERATIONS_READ,
   },
   {
-    to: "/conflicts",
-    key: "nav.conflicts",
-    sectionKey: "shell.sections.production",
+    to: "/inventory",
+    key: "nav.inventory",
+    sectionKey: "shell.sections.marking",
     capability: C.OPERATIONS_READ,
   },
   {
     to: "/pickup",
     key: "nav.pickup",
-    sectionKey: "shell.sections.production",
+    sectionKey: "shell.sections.marking",
     capability: C.OPERATIONS_READ,
   },
   {
     to: "/disaggregation",
     key: "nav.disaggregation",
-    sectionKey: "shell.sections.production",
+    sectionKey: "shell.sections.marking",
     capability: C.OPERATIONS_READ,
   },
   {
     to: "/catalog",
     key: "nav.catalog",
+    sectionKey: "shell.sections.reference",
+    capability: C.OPERATIONS_READ,
+  },
+  {
+    to: "/labels",
+    key: "nav.labels",
     sectionKey: "shell.sections.reference",
     capability: C.OPERATIONS_READ,
   },
@@ -87,12 +99,6 @@ export const NAV_ITEMS: ReadonlyArray<{
   {
     to: "/employees",
     key: "nav.employees",
-    sectionKey: "shell.sections.reference",
-    capability: C.OPERATIONS_READ,
-  },
-  {
-    to: "/labels",
-    key: "nav.labels",
     sectionKey: "shell.sections.reference",
     capability: C.OPERATIONS_READ,
   },

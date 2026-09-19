@@ -87,6 +87,10 @@ export class SignerAgentsService {
       .select()
       .from(schema.chzApiTokens)
       .where(eq(schema.chzApiTokens.tenantId, tenantId));
+    const [omsToken] = await this.db
+      .select()
+      .from(schema.chzOmsTokens)
+      .where(eq(schema.chzOmsTokens.tenantId, tenantId));
     const [refreshTask] = await this.db
       .select({
         id: schema.chzSignerTasks.id,
@@ -118,7 +122,8 @@ export class SignerAgentsService {
         lastSeenAt: a.lastSeenAt?.toISOString() ?? null,
         createdAt: a.createdAt.toISOString(),
       })),
-      token: this.tokenStatus(token ?? null),
+      token: this.tokenStatus(token ?? null, token ? toTokenType(token.tokenType) : null),
+      omsToken: this.tokenStatus(omsToken ?? null, null),
       refreshTask: refreshTask
         ? {
             id: refreshTask.id,
@@ -132,7 +137,16 @@ export class SignerAgentsService {
     };
   }
 
-  private tokenStatus(token: typeof schema.chzApiTokens.$inferSelect | null): SignerTokenStatusDto {
+  /**
+   * Shared by both token kinds: `chz_api_tokens` and `chz_oms_tokens` agree on
+   * `obtainedAt`/`expiresAt`/`certThumbprint`, but only the former has a
+   * `tokenType` column (СУЗ's client token has no such distinction), so the
+   * caller passes it in rather than this method reading it off the row.
+   */
+  private tokenStatus(
+    token: { obtainedAt: Date; expiresAt: Date; certThumbprint: string | null } | null,
+    tokenType: "jwt" | "uuid" | null,
+  ): SignerTokenStatusDto {
     if (!token) {
       return {
         status: "none",
@@ -152,7 +166,7 @@ export class SignerAgentsService {
           : "active";
     return {
       status,
-      tokenType: toTokenType(token.tokenType),
+      tokenType,
       obtainedAt: token.obtainedAt.toISOString(),
       expiresAt: token.expiresAt.toISOString(),
       certThumbprint: token.certThumbprint,

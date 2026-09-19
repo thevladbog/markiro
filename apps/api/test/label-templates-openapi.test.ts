@@ -55,13 +55,15 @@ function requestBodySchema(document: OpenAPIObject, path: string, method: Method
 
 /**
  * `LabelTemplatePurpose` (packages/domain/src/product-labels/contracts.ts) is
- * `"box" | "product_duplicate" | "pallet"`. Tenant provisioning seeds a
- * `purpose: "pallet"` row for every tenant, and neither `listLabelTemplates`
- * nor `getLabelTemplate` filter by purpose, so both response schemas below
- * must document every value the endpoint can actually return -- not just the
- * two that existed before slice 06d added pallet templates.
+ * `"box" | "product_duplicate" | "pallet" | "product_km"`. Tenant
+ * provisioning seeds a `purpose: "pallet"` row and a `purpose: "product_km"`
+ * row for every tenant, and neither `listLabelTemplates` nor
+ * `getLabelTemplate` filter by purpose, so both response schemas below must
+ * document every value the endpoint can actually return -- not just the two
+ * that existed before slice 06d added pallet templates, or the three before
+ * task 12 added the KM marking-code purpose.
  */
-const EXPECTED_PURPOSE_ENUM = ["box", "product_duplicate", "pallet"];
+const EXPECTED_PURPOSE_ENUM = ["box", "product_duplicate", "pallet", "product_km"];
 
 describe("label-templates OpenAPI contract", () => {
   it("documents every purpose the list endpoint (summary schema) can return", async () => {

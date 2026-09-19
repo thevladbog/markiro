@@ -18,7 +18,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { organization, user } from "./auth.js";
 import { inventories, inventoryChzStatusEnum, inventoryImports } from "./inventory.js";
-import { chzProductGroups } from "./platform.js";
+import { chzProductGroups, products } from "./platform.js";
 
 const tenantId = () =>
   text("tenant_id")
@@ -34,7 +34,7 @@ const bytea = customType<{ data: Buffer }>({
 export const CHZ_SIGNER_AGENT_STATUSES = ["active", "revoked"] as const;
 export type ChzSignerAgentStatus = (typeof CHZ_SIGNER_AGENT_STATUSES)[number];
 
-export const CHZ_SIGNER_TASK_TYPES = ["true_api_auth"] as const;
+export const CHZ_SIGNER_TASK_TYPES = ["true_api_auth", "oms_auth", "sign_detached"] as const;
 export type ChzSignerTaskType = (typeof CHZ_SIGNER_TASK_TYPES)[number];
 
 export const CHZ_SIGNER_TASK_STATUSES = [
@@ -310,9 +310,208 @@ export const chzCodeStatusCursors = pgTable("chz_code_status_cursors", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+/** One СУЗ client token per tenant; same encryption shape as `chz_api_tokens`. */
+export const chzOmsTokens = pgTable(
+  "chz_oms_tokens",
+  {
+    tenantId: text("tenant_id")
+      .primaryKey()
+      .references(() => organization.id),
+    encryptedToken: bytea("encrypted_token").notNull(),
+    tokenNonce: bytea("token_nonce").notNull(),
+    tokenTag: bytea("token_tag").notNull(),
+    sourceOmsConnection: text("source_oms_connection").notNull(),
+    sourceTrueApiBaseUrl: text("source_true_api_base_url").notNull(),
+    obtainedAt: timestamp("obtained_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    agentId: uuid("agent_id"),
+    certThumbprint: text("cert_thumbprint"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({
+      name: "chz_oms_tokens_tenant_agent_fk",
+      columns: [t.tenantId, t.agentId],
+      foreignColumns: [chzSignerAgents.tenantId, chzSignerAgents.id],
+    }),
+  ],
+);
+
+export const CHZ_KM_ORDER_STATES = [
+  "created",
+  "signing",
+  "submitted",
+  "buffer_pending",
+  "buffer_active",
+  "fetching",
+  "completed",
+  "rejected",
+  "failed",
+] as const;
+export type ChzKmOrderState = (typeof CHZ_KM_ORDER_STATES)[number];
+export const chzKmOrderStateEnum = pgEnum("chz_km_order_state", CHZ_KM_ORDER_STATES);
+
+export const CHZ_KM_CODE_STATUSES = ["available", "issued"] as const;
+export const CHZ_KM_ISSUE_KINDS = ["export", "print"] as const;
+export const CHZ_KM_ISSUE_FORMATS = ["txt", "csv"] as const;
+
+/**
+ * One СУЗ order for one GTIN. `request_body` is the exact byte string the
+ * agent signed and the runner sent: a retry re-sends it verbatim, and it is
+ * the evidence of what was ordered.
+ */
+export const chzKmOrders = pgTable(
+  "chz_km_orders",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    productId: uuid("product_id").notNull(),
+    gtin14: char("gtin14", { length: 14 }).notNull(),
+    productGroupAlias: text("product_group_alias").notNull(),
+    productGroupCode: integer("product_group_code")
+      .notNull()
+      .references(() => chzProductGroups.code),
+    templateId: integer("template_id").notNull(),
+    quantity: integer("quantity").notNull(),
+    state: chzKmOrderStateEnum("state").notNull().default("created"),
+    requestBody: text("request_body").notNull(),
+    signerTaskId: uuid("signer_task_id"),
+    omsOrderId: uuid("oms_order_id"),
+    bufferStatus: text("buffer_status"),
+    bufferExpiresAt: timestamp("buffer_expires_at", { withTimezone: true }),
+    availableCodes: integer("available_codes"),
+    totalPassed: integer("total_passed"),
+    fetchedCount: integer("fetched_count").notNull().default(0),
+    issuedCount: integer("issued_count").notNull().default(0),
+    rejectionReason: text("rejection_reason"),
+    errorCode: text("error_code"),
+    errorMessage: text("error_message"),
+    attempts: integer("attempts").notNull().default(0),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    deadlineAt: timestamp("deadline_at", { withTimezone: true }).notNull(),
+    createdByUserId: text("created_by_user_id")
+      .notNull()
+      .references(() => user.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique("chz_km_orders_tenant_id_uq").on(t.tenantId, t.id),
+    foreignKey({
+      name: "chz_km_orders_tenant_product_fk",
+      columns: [t.tenantId, t.productId],
+      foreignColumns: [products.tenantId, products.id],
+    }),
+    index("chz_km_orders_tenant_created_idx").on(t.tenantId, t.createdAt),
+    index("chz_km_orders_unfinished_idx")
+      .on(t.tenantId)
+      .where(sql`${t.state} not in ('completed', 'rejected', 'failed')`),
+    check("chz_km_orders_quantity_check", sql`${t.quantity} between 1 and 150000`),
+    check(
+      "chz_km_orders_counts_check",
+      sql`${t.issuedCount} >= 0 and ${t.issuedCount} <= ${t.fetchedCount} and ${t.fetchedCount} <= ${t.quantity} and ${t.attempts} >= 0`,
+    ),
+    check(
+      "chz_km_orders_state_consistency_check",
+      sql`(${t.state} = 'created' and ${t.omsOrderId} is null and ${t.errorCode} is null)
+        or (${t.state} = 'signing' and ${t.signerTaskId} is not null and ${t.omsOrderId} is null and ${t.errorCode} is null)
+        or (${t.state} in ('submitted', 'buffer_pending', 'buffer_active', 'fetching') and ${t.omsOrderId} is not null and ${t.errorCode} is null)
+        or (${t.state} = 'completed' and ${t.omsOrderId} is not null and ${t.fetchedCount} = ${t.quantity} and ${t.errorCode} is null)
+        or (${t.state} = 'rejected' and ${t.omsOrderId} is not null and ${t.rejectionReason} is not null)
+        or (${t.state} = 'failed' and ${t.errorCode} is not null)`,
+    ),
+  ],
+);
+
+/** A batch handed to the office: a contiguous `seq` range of one order. */
+export const chzKmIssues = pgTable(
+  "chz_km_issues",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    orderId: uuid("order_id").notNull(),
+    kind: text("kind").notNull(),
+    format: text("format"),
+    fromSeq: integer("from_seq").notNull(),
+    toSeq: integer("to_seq").notNull(),
+    count: integer("count").notNull(),
+    createdByUserId: text("created_by_user_id")
+      .notNull()
+      .references(() => user.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique("chz_km_issues_tenant_id_uq").on(t.tenantId, t.id),
+    foreignKey({
+      name: "chz_km_issues_tenant_order_fk",
+      columns: [t.tenantId, t.orderId],
+      foreignColumns: [chzKmOrders.tenantId, chzKmOrders.id],
+    }),
+    index("chz_km_issues_order_idx").on(t.tenantId, t.orderId, t.createdAt),
+    check("chz_km_issues_kind_check", sql`${t.kind} in ('export', 'print')`),
+    check(
+      "chz_km_issues_format_check",
+      sql`(${t.kind} = 'export' and ${t.format} in ('txt', 'csv')) or (${t.kind} = 'print' and ${t.format} is null)`,
+    ),
+    check(
+      "chz_km_issues_range_check",
+      sql`${t.fromSeq} >= 1 and ${t.toSeq} >= ${t.fromSeq} and ${t.count} = ${t.toSeq} - ${t.fromSeq} + 1`,
+    ),
+  ],
+);
+
+/**
+ * One row per emitted code. The raw code lives only in the three encrypted
+ * columns (AAD `tenantId/orderId/seq`); `code_hash` is `kmHash` of the parsed
+ * code so a later scan of the same unit joins without decrypting anything.
+ */
+export const chzKmCodes = pgTable(
+  "chz_km_codes",
+  {
+    tenantId: tenantId(),
+    orderId: uuid("order_id").notNull(),
+    seq: integer("seq").notNull(),
+    encryptedCode: bytea("encrypted_code").notNull(),
+    codeNonce: bytea("code_nonce").notNull(),
+    codeTag: bytea("code_tag").notNull(),
+    codeHash: char("code_hash", { length: 64 }).notNull(),
+    blockId: uuid("block_id").notNull(),
+    status: text("status").notNull().default("available"),
+    issueId: uuid("issue_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.orderId, t.seq] }),
+    foreignKey({
+      name: "chz_km_codes_tenant_order_fk",
+      columns: [t.tenantId, t.orderId],
+      foreignColumns: [chzKmOrders.tenantId, chzKmOrders.id],
+    }),
+    foreignKey({
+      name: "chz_km_codes_tenant_issue_fk",
+      columns: [t.tenantId, t.issueId],
+      foreignColumns: [chzKmIssues.tenantId, chzKmIssues.id],
+    }),
+    uniqueIndex("chz_km_codes_tenant_hash_uq").on(t.tenantId, t.codeHash),
+    index("chz_km_codes_available_idx")
+      .on(t.tenantId, t.orderId, t.seq)
+      .where(sql`${t.status} = 'available'`),
+    check("chz_km_codes_seq_check", sql`${t.seq} >= 1`),
+    check("chz_km_codes_hash_check", sql`${t.codeHash} ~ '^[0-9a-f]{64}$'`),
+    check(
+      "chz_km_codes_status_check",
+      sql`(${t.status} = 'available' and ${t.issueId} is null) or (${t.status} = 'issued' and ${t.issueId} is not null)`,
+    ),
+  ],
+);
+
 export type ChzSignerAgentRow = typeof chzSignerAgents.$inferSelect;
 export type ChzSignerTaskRow = typeof chzSignerTasks.$inferSelect;
 export type ChzApiTokenRow = typeof chzApiTokens.$inferSelect;
 export type ChzExportRunRow = typeof chzExportRuns.$inferSelect;
 export type ChzCodeStatusRow = typeof chzCodeStatuses.$inferSelect;
 export type ChzCodeStatusCursorRow = typeof chzCodeStatusCursors.$inferSelect;
+export type ChzOmsTokenRow = typeof chzOmsTokens.$inferSelect;
+export type ChzKmOrderRow = typeof chzKmOrders.$inferSelect;
+export type ChzKmCodeRow = typeof chzKmCodes.$inferSelect;
+export type ChzKmIssueRow = typeof chzKmIssues.$inferSelect;

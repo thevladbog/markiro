@@ -14,10 +14,10 @@ import {
 import { ApiOkResponse, ApiOperation, ApiParam, ApiResponse, ApiTags } from "@nestjs/swagger";
 import { z } from "zod";
 import {
-  chzSignerTaskCompleteSchema,
+  chzSignerTaskCompleteBodySchema,
   chzSignerTaskFailSchema,
   type ChzSignerTask,
-  type ChzSignerTaskComplete,
+  type ChzSignerTaskCompleteBody,
   type ChzSignerTaskFail,
 } from "@markiro/platform-contracts";
 import {
@@ -65,16 +65,20 @@ export class SignerAgentTasksController {
 
   @Post("tasks/:id/complete")
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: "Report a signer task as completed with its True API token" })
+  @ApiOperation({
+    summary: "Report a signer task as completed",
+    description:
+      "Body shape depends on the claimed task's type: a True API/СУЗ auth task (`true_api_auth`/`oms_auth`) reports a bearer token, a `sign_detached` task reports a detached signature. A body shape that does not match the claimed task's type is a 400, not a coercion.",
+  })
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
-  @ApiZodBody(chzSignerTaskCompleteSchema)
+  @ApiZodBody(chzSignerTaskCompleteBodySchema)
   @ApiResponse({ status: 204, description: "The task was recorded as completed." })
   @ApiZodValidationError()
   @ApiHttpErrors(401, 404, 503)
   async complete(
     @Req() req: RequestWithSignerAgent,
     @Param("id", new ParseUUIDPipe()) id: string,
-    @Body(new ZodValidationPipe(chzSignerTaskCompleteSchema)) body: ChzSignerTaskComplete,
+    @Body(new ZodValidationPipe(chzSignerTaskCompleteBodySchema)) body: ChzSignerTaskCompleteBody,
   ): Promise<void> {
     await this.tasks.complete(req.tenantId!, req.signerAgentId!, id, body);
   }
