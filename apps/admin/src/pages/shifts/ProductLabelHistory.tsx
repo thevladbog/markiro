@@ -1,10 +1,62 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Alert, Badge, Button, Spinner } from "@markiro/ui";
+import { Alert, Button, Spinner, StatusChip } from "@markiro/ui";
+import type { TagPhase } from "@markiro/ui";
 import type { ProductLabelHistoryRow } from "@markiro/domain";
 import { useOperators } from "../employees/station-access-api.js";
 import { formatScanTime } from "../../lib/datetime.js";
 import { useProductLabelEvents, useProductLabelHistory } from "./product-labels-api.js";
+
+// The job/verification state a row actually renders, derived below from
+// `job.verificationOutcome` and `job.status` -- the union `t(...states.*)`
+// covers in `apps/admin/src/i18n/ru.json`. This is the same seven-value
+// derivation `Events` and the JSX below already performed inline; naming it
+// lets `productLabelJobPhase` switch over the exact same union exhaustively.
+type ProductLabelJobDisplayState =
+  "prepared" | "sending" | "awaiting_verification" | "attention" | "skipped" | "verified" | "sent";
+
+function productLabelJobDisplayState(job: ProductLabelHistoryRow): ProductLabelJobDisplayState {
+  if (job.verificationOutcome === "skipped") return "skipped";
+  if (job.verificationOutcome === "verified") return "verified";
+  if (job.status === "completed") return "sent";
+  return job.status;
+}
+
+/**
+ * The original bug this branch exists for: "Отправлено на принтер" (`sent`,
+ * derived from `job.status === "completed"`) rendered a flat `Badge
+ * tone="neutral"` -- a grey "завершено штатно" for a fact the phase
+ * dictionary reserves the `done` tone for, not `neutral`.
+ *
+ * `prepared` (accepted, not yet dispatched) is `planned` -- nothing is
+ * happening yet. `sending` is the system actively transmitting the job,
+ * outcome unknown -- `running`. `awaiting_verification` differs from
+ * `sending`: the system is no longer doing anything: the job is blocked on
+ * the operator's physical scan of the printed label to close it out, which
+ * is exactly the phase dictionary's "continues, but requires an
+ * intervention" -- `attention`, the same phase the job's own literal
+ * `attention` status (a failed-before-send/delivery-unknown print attempt,
+ * `packages/domain/src/product-labels/state.ts`) already carries; the two
+ * differ only in label text, not urgency. `verified`, `skipped`, and `sent`
+ * are three different ways a job concludes without anything left to do --
+ * confirmed by scan, explicitly bypassed, or simply dispatched with no
+ * verification required -- so all three share `done`.
+ */
+export function productLabelJobPhase(state: ProductLabelJobDisplayState): TagPhase {
+  switch (state) {
+    case "prepared":
+      return "planned";
+    case "sending":
+      return "running";
+    case "awaiting_verification":
+    case "attention":
+      return "attention";
+    case "verified":
+    case "skipped":
+    case "sent":
+      return "done";
+  }
+}
 
 function Events({ shiftId, job }: { shiftId: string; job: ProductLabelHistoryRow }) {
   const { t, i18n } = useTranslation();
@@ -112,29 +164,15 @@ export function ProductLabelHistory({ shiftId }: { shiftId: string }) {
         {rows.map((job) => {
           const key = JSON.stringify([shiftId, job.deviceId, job.jobId]);
           const open = expanded === key;
-          const status =
-            job.verificationOutcome === "skipped"
-              ? "skipped"
-              : job.verificationOutcome === "verified"
-                ? "verified"
-                : job.status === "completed"
-                  ? "sent"
-                  : job.status;
+          const status = productLabelJobDisplayState(job);
           return (
             <article className="mk-product-label-history__job" key={key}>
               <header>
                 <code>…{job.codeSuffix || "—"}</code>
-                <Badge
-                  tone={
-                    status === "verified"
-                      ? "ok"
-                      : status === "attention" || status === "skipped"
-                        ? "warn"
-                        : "neutral"
-                  }
-                >
-                  {t(`pages.shifts.productLabels.states.${status}`)}
-                </Badge>
+                <StatusChip
+                  phase={productLabelJobPhase(status)}
+                  label={t(`pages.shifts.productLabels.states.${status}`)}
+                />
               </header>
               <time dateTime={job.acceptedAt}>{formatScanTime(job.acceptedAt, i18n.language)}</time>
               {job.ownershipConflict ? (

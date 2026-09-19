@@ -206,7 +206,11 @@ export function ShiftsPage() {
               {...(row.status === "closed" && row.closeReason ? { title: row.closeReason } : {})}
             />
             {row.status === "closed" && row.closeReason && <span>{row.closeReason}</span>}
-            {row.lateDataAt && <Badge tone="warn">{t("pages.shifts.table.lateData")}</Badge>}
+            {row.lateDataAt && (
+              // Matches `dashboard/index.tsx`'s same "late data" fact, which
+              // already reads as `attention`, not a flat `Badge tone="warn"`.
+              <StatusChip phase="attention" label={t("pages.shifts.table.lateData")} />
+            )}
           </div>
         ),
       },
