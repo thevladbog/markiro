@@ -278,64 +278,9 @@ import tokenStyles from "virtual:ui-token-styles";
 
 - [ ] **Шаг 2: Написать падающий тест на геометрию**
 
-В `packages/ui/test/components.test.tsx`, в конец файла, добавить:
+Тесты геометрии живут в задаче 4, а не здесь: они обращаются к пропам `phase` и `size` и к тону `violet`, которых до задач 3 и 4 не существует, и любой написанный сейчас тест оставил бы `typecheck` красным на двух задачах подряд. Класс проверяется там, где появляется его потребитель.
 
-```tsx
-describe("геометрия тега", () => {
-  /**
-   * Смысл всей затеи: тег с глифом и тег без глифа обязаны иметь одну
-   * высоту. Раньше это были 24px против 16px, и в ячейке таблицы смен они
-   * читались как два несвязанных набора.
-   */
-  it("даёт одинаковую высоту тегу фазы и тегу категории", () => {
-    render(
-      <div>
-        <StatusChip phase="done" label="Закрыта" />
-        <Badge tone="violet">Валидация</Badge>
-      </div>,
-    );
-
-    const chip = screen.getByText("Закрыта").closest(".mk-tag");
-    const badge = screen.getByText("Валидация");
-
-    expect(chip).not.toBeNull();
-    expect(getComputedStyle(chip!).height).toBe("22px");
-    expect(getComputedStyle(badge).height).toBe("22px");
-  });
-
-  it("держит коробку глифа квадратной, чтобы подписи вставали в колонку", () => {
-    const { container } = render(<StatusChip phase="duplicate" label="Дубликат" />);
-
-    const glyph = container.querySelector(".mk-tag__glyph");
-    expect(glyph).not.toBeNull();
-
-    const box = getComputedStyle(glyph!);
-    expect(box.width).toBe("12px");
-    expect(box.height).toBe("12px");
-  });
-
-  it.each([
-    ["office", "22px"],
-    ["floor", "34px"],
-    ["wall", "40px"],
-  ] as const)("размер %s даёт высоту %s", (size, height) => {
-    render(<StatusChip phase="active" label="Активна" size={size} />);
-
-    const chip = screen.getByText("Активна").closest(".mk-tag");
-    expect(getComputedStyle(chip!).height).toBe(height);
-  });
-});
-```
-
-- [ ] **Шаг 3: Запустить тест и убедиться, что он падает**
-
-```bash
-pnpm --filter @markiro/ui exec vitest run test/components.test.tsx -t "геометрия тега"
-```
-
-Ожидается: падение компиляции — `phase`, `size` и тон `violet` ещё не существуют. Это ожидаемо: класс без компонента не проверить, поэтому тест зазеленеет в задачах 3 и 4. Зафиксировать текст ошибки и перейти к шагу 4.
-
-- [ ] **Шаг 4: Добавить класс `.mk-tag` в components.css**
+- [ ] **Шаг 2: Добавить класс `.mk-tag` в components.css**
 
 В конец `packages/ui/src/components.css` добавить:
 
@@ -485,12 +430,19 @@ pnpm --filter @markiro/ui exec vitest run test/components.test.tsx -t "геом�
 }
 ```
 
-- [ ] **Шаг 5: Коммит**
-
-Тест пока красный — он зазеленеет в задаче 4. Коммит фиксирует только CSS.
+- [ ] **Шаг 3: Убедиться, что существующие тесты пакета не сломались**
 
 ```bash
-git add packages/ui/src/components.css packages/ui/test/components.test.tsx packages/ui/test/styles.d.ts
+pnpm --filter @markiro/ui exec vitest run
+pnpm --filter @markiro/ui typecheck
+```
+
+Ожидается: PASS. Новый CSS пока никем не используется и ничего не должен менять; подключение токенов в `beforeAll` — единственное изменение в тестах.
+
+- [ ] **Шаг 4: Коммит**
+
+```bash
+git add packages/ui/src/components.css packages/ui/test/components.test.tsx
 git commit -m "feat(ui): класс mk-tag с единой геометрией и тремя размерами"
 ```
 
@@ -693,7 +645,7 @@ export type { StatusChipProps, TagPhase, TagSize } from "./StatusChip.js";
 pnpm --filter @markiro/ui exec vitest run test/components.test.tsx -t "StatusChip"
 ```
 
-Ожидается: PASS, 14 тестов. Тесты из задачи 2 про `Badge tone="violet"` пока красные — это нормально.
+Ожидается: PASS, 14 тестов.
 
 - [ ] **Шаг 6: Коммит**
 
@@ -793,6 +745,51 @@ describe("Badge", () => {
     expect(screen.getByText("Состав изменился после закрытия").style.whiteSpace).toBe("nowrap");
   });
 });
+
+describe("геометрия тега", () => {
+  /**
+   * Смысл всей затеи: тег с глифом и тег без глифа обязаны иметь одну
+   * высоту. Раньше это были 24px против 16px, и в ячейке таблицы смен они
+   * читались как два несвязанных набора.
+   */
+  it("даёт одинаковую высоту тегу фазы и тегу категории", () => {
+    render(
+      <div>
+        <StatusChip phase="done" label="Закрыта" />
+        <Badge tone="violet">Валидация</Badge>
+      </div>,
+    );
+
+    const chip = screen.getByText("Закрыта").closest(".mk-tag");
+    const badge = screen.getByText("Валидация");
+
+    expect(chip).not.toBeNull();
+    expect(getComputedStyle(chip as Element).height).toBe("22px");
+    expect(getComputedStyle(badge).height).toBe("22px");
+  });
+
+  it("держит коробку глифа квадратной, чтобы подписи вставали в колонку", () => {
+    const { container } = render(<StatusChip phase="duplicate" label="Дубликат" />);
+
+    const glyph = container.querySelector(".mk-tag__glyph");
+    expect(glyph).not.toBeNull();
+
+    const box = getComputedStyle(glyph as Element);
+    expect(box.width).toBe("12px");
+    expect(box.height).toBe("12px");
+  });
+
+  it.each([
+    ["office", "22px"],
+    ["floor", "34px"],
+    ["wall", "40px"],
+  ] as const)("размер %s даёт высоту %s", (size, height) => {
+    render(<StatusChip phase="active" label="Активна" size={size} />);
+
+    const chip = screen.getByText("Активна").closest(".mk-tag");
+    expect(getComputedStyle(chip as Element).height).toBe(height);
+  });
+});
 ```
 
 - [ ] **Шаг 2: Запустить тесты и убедиться, что они падают**
@@ -881,7 +878,7 @@ export type { BadgeProps, BadgeTone } from "./Badge.js";
 pnpm --filter @markiro/ui exec vitest run
 ```
 
-Ожидается: PASS целиком, включая блок «геометрия тега» из задачи 2.
+Ожидается: PASS целиком, включая блок «геометрия тега».
 
 - [ ] **Шаг 6: Собрать пакет и прогнать гейты**
 
