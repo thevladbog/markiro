@@ -2491,7 +2491,7 @@ git commit -m "feat(api): KM order runner: sign, submit, poll buffer, fetch and 
 
 - [ ] **Step 1: Write the failing job test**
 
-Copy `apps/api/test/chz-export-job.test.ts` to `chz-km-order-job.test.ts` and adapt: a fake runner returning `{ finished: false, retryAfterSeconds: 7 }` then `{ finished: true, retryAfterSeconds: 0 }`; assert the worker re-sends with `startAfter: 7` and `pass + 1`, and that `enqueueChzKmOrder` twice for the same order yields one job. Add to the queue-policy integration test an assertion that `run-chz-km-order` is created with policy `stately`.
+Copy `apps/api/test/chz-export-job.test.ts` to `chz-km-order-job.test.ts` and adapt: a fake runner returning `{ finished: false, retryAfterSeconds: 7 }` then `{ finished: true, retryAfterSeconds: 0 }`; assert the worker re-sends with `startAfter: 30` and `pass + 1` — the 30-second floor from Step 3, not the runner's 7, because `MAX_KM_ORDER_PASSES` budgets 48 hours at that floor and honouring a shorter delay would exhaust the passes before the order's own deadline; add a second case proving a longer delay such as 300 is passed through unchanged, and that `enqueueChzKmOrder` twice for the same order yields one job. Add to the queue-policy integration test an assertion that `run-chz-km-order` is created with policy `stately`.
 
 - [ ] **Step 2: Run test to verify it fails**
 
