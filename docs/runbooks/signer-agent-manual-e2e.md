@@ -279,28 +279,111 @@ who wrote it.
    settings.
 4. Wait for the scheduler's `oms_auth` task. Confirm «СУЗ token delivered» in
    the agent's journal, and the СУЗ token row in the cabinet's signer panel.
-5. Place a two-code order. Confirm «Detached signature delivered» in the
-   journal, then that the order reaches «Буфер активен» and the codes arrive.
-6. Repeat step 5 with `MARKIRO_SIGNER_BACKEND=cades` set before launching the
-   agent, to exercise the CAdESCOM backend. Both backends changed and neither
-   has been executed, so both must be run — do not skip the second pass
-   because the first one worked.
+5. Place a two-code order. In the cabinet open **Заказы кодов → Заказ кодов
+   маркировки**, pick a product whose GTIN belongs to a Chestny ZNAK group
+   with a single СУЗ UNIT template (beer, template 18, is the shortest path —
+   a group with several UNIT templates is refused by preflight), set
+   **Количество кодов** to `2`, and submit. Confirm «Detached signature
+   delivered» in the agent journal.
+6. Watch the order card's **Ход заказа** timeline. The expected sequence is
+   Создан → Подписание → Отправлен в СУЗ → Ожидание буфера → Буфер готов →
+   Получение кодов → Завершён; the runner polls, so this takes minutes rather
+   than seconds. Record which step the order sat in longest, and the buffer
+   expiry the card shows («Заказ в СУЗ действует до …»). A stall in
+   Подписание is the agent, not СУЗ: the signer task is visible in the signer
+   panel.
+7. Export one code as TXT. Press **Выгрузить**, ask for `1` code, choose
+   **TXT**, and download. Check that the file holds exactly one line, that the
+   code carries the GS1 group separator (the byte СУЗ sends as the JSON escape
+   `\u001d`), and that **Доступно к выдаче** on the card dropped from 2 to 1
+   while **Выдачи кодов** gained a row with the range. Do not paste the code
+   itself into this document or into an issue — a marking code is a sellable
+   asset; record its shape (length, the AIs present, the separator) instead.
+8. Print the remaining code as one label. Press **Печать**, ask for `1` code,
+   accept the preselected «Этикетка КМ» template, and submit. A new tab opens
+   with exactly one page. Record:
+   - that the page size in the browser's print dialog matches the template's
+     millimetre size (the on-screen note names it) and that «поля: Нет» gives
+     one label per page with no second blank page;
+   - that the printed DataMatrix scans back on a real scanner as a valid KM
+     for this order's GTIN;
+   - that **Доступно к выдаче** is now 0 and a second **Печать** is refused
+     with «Свободных кодов в этом заказе не осталось».
+9. Repeat steps 5–8 with `MARKIRO_SIGNER_BACKEND=cades` set before launching
+   the agent, to exercise the CAdESCOM backend. Both backends changed and
+   neither has been executed, so both must be run — do not skip the second
+   pass because the first one worked.
 
 **What to record**, because this run is the only evidence that exists for
 code no test can reach:
 
-- the exact response body of `POST /auth/simpleSignIn/{omsConnection}` —
-  whether it is only `{"token": …}` as documented, and whether any expiry
-  field accompanies it (СУЗ documents the ten-hour lifetime elsewhere, not in
-  the response itself);
 - whether СУЗ accepted the CryptoAPI detached signature, and separately the
   CAdESCOM one;
 - any HTTP 413 from СУЗ — that specific code means an attached signature
   reached `X-Signature` instead of a detached one;
-- the real shapes of `POST /order`, `GET /order/status` and `GET /codes`,
-  including whether a rejected order's `rejectionReason` matches what the
-  cabinet displays;
-- whether `GET /codes` honours a 10 000-code block size.
+- whether a rejected order's `rejectionReason` matches what the cabinet
+  displays in «СУЗ отклонил заказ»;
+- whether `GET /codes` honours the 10 000-code block size the runner asks for
+  (`CODES_BLOCK_SIZE`), or returns fewer codes per call;
+- whether the sandbox validates the GTIN against the National Catalogue
+  before accepting the order;
+- the four request/response shapes below.
+
+### Response shapes to record
+
+Note that the two sandbox hosts are different services: the installation is
+registered at `https://suz-integrator.sandbox.crptech.ru`, while every method
+below is called by the cloud against `https://suz.sandbox.crptech.ru/api/v3`
+(`CHZ_OMS_BASE_URLS` in `apps/api/src/modules/signer-agents/chz-constants.ts`).
+
+Fill the four blocks in during the run and commit them filled. They are
+placeholders, not observations: until somebody replaces them, this section
+records nothing. Paste bodies verbatim **except** for values that are secrets
+or assets — replace the СУЗ token, any raw marking code and any
+`X-Signature` base64 with `<redacted>` and describe their shape instead
+(length, character set, whether the token is UUID-shaped).
+
+```text
+POST {trueApiBaseUrl}/auth/simpleSignIn/{omsConnection}
+request body:   <paste, with the signed challenge data redacted>
+HTTP status:    <...>
+response body:  <paste; "token" redacted — is it UUID-shaped? yes/no>
+expiry field:   <name and format, or "none — only the documented 10 hours">
+```
+
+```text
+POST {suzBaseUrl}/order?omsId={omsId}
+X-Signature:    <detached CMS, base64 — redacted>
+request body:   <paste the exact bytes the agent signed>
+HTTP status:    <...>
+response body:  <paste — omsId / orderId / expectedCompleteTimestamp,
+                 plus any field the client does not read>
+```
+
+```text
+GET {suzBaseUrl}/order/status?omsId={omsId}&orderId={orderId}&gtin={gtin}
+HTTP status:    <...>
+response body:  <paste one PENDING and one ACTIVE reply: bufferStatus,
+                 availableCodes, leftInBuffer, totalPassed, expiredDate
+                 (Unix ms?), rejectionReason when rejected>
+```
+
+```text
+GET {suzBaseUrl}/codes?omsId={omsId}&orderId={orderId}&gtin={gtin}&quantity={n}
+HTTP status:    <...>
+response body:  <paste with every code redacted: how many codes came back for
+                 the quantity asked, whether "blockId" is present and what
+                 shape it has, and whether the codes carry the group
+                 separator as the JSON escape \u001d>
+```
+
+Write the group separator in this document only as the escape sequence
+`\u001d`. A literal separator byte pasted into Markdown is invisible, survives
+review, and has already had to be removed from this branch three times.
+
+| Date | Backend | simpleSignIn | order | order/status | codes | Export TXT | Print 1 label |
+| ---- | ------- | ------------ | ----- | ------------ | ----- | ---------- | ------------- |
+|      |         |              |       |              |       |            |               |
 
 A green host-only `cargo test` proves the runtime loop — task dispatch, retry
 classification, journal wording — and nothing about CryptoAPI, DPAPI,

@@ -2,13 +2,69 @@
 
 **Date:** 2026-09-18
 
-**Status:** Proposed for implementation
+**Status:** Implemented — part A (cloud, API, admin). See «Implementation status»
+below for what was built differently from this spec.
 
 **Scope:** Ordering marking codes (КМ) from Chestny ZNAK's order-management station
 (СУЗ, OMS API 3.0) from the admin cabinet, keeping the emitted codes as a per-tenant
 pool, and issuing them either as a file (TXT/CSV) or as a browser print page for a label
 printer. Utilisation reports («отчёт о нанесении»), introduction into circulation
 («ввод в оборот») and printing on the Station are explicitly later phases.
+
+## Implementation status (2026-09-19)
+
+Part A — the `chz-km-orders` API module, the pg-boss runner, the encrypted code pool and
+the admin «Заказы кодов» surfaces — is implemented per
+`docs/superpowers/plans/2026-09-19-chz-km-orders-cloud.md`. The Windows signer side
+(`sign_detached`, `oms_auth`) is part B,
+`docs/superpowers/plans/2026-09-19-chz-km-orders-signer.md`. No part of this has met a
+real СУЗ: the first contact is the sandbox run in
+[`docs/runbooks/signer-agent-manual-e2e.md`](../../runbooks/signer-agent-manual-e2e.md),
+section «СУЗ: token and detached signature (sandbox)», and the open questions at the end
+of this spec stay open until it happens.
+
+### Deviations from this spec
+
+1. **No `km.gtin` / `km.serial` label fields.** The stock «Этикетка КМ» prints the serial
+   through the existing `km.code` field with `textFormat: "km_without_crypto"` and the
+   GTIN through `product.gtin`. New KM sub-fields would touch the label model, the
+   ZPL/TSPL emitters and the Station, which this phase does not.
+2. **No per-purpose default template tables.** The print dialog lets the admin pick any
+   enabled `product_km` template eligible for the product's category, with the stock one
+   preselected. Organisation- and category-level defaults for this purpose are a
+   follow-up.
+3. **Migration index 0166, not 0165 (resolved).** The plan claimed `0165_chz_km_orders`;
+   `0165_pallet_membership_removal_quarantine` reached `main` first, so this branch took
+   the next free index and the migration ships as `0166_chz_km_orders` — SQL file,
+   snapshot and journal `idx`/`tag` together (commit `c4ed8b7d6`).
+
+### Decided during implementation, not visible from this spec
+
+- **Reconciliation runs at the start of every fetch pass**, not only before the final block as
+  «Runner state machine» and the error table below say. The spec's trigger is computed from our
+  own `fetchedCount`, and that counter is exactly what goes stale when a block is lost between
+  СУЗ's response and our commit — so the check only fired once the buffer had already been
+  drained and the block was no longer recoverable. Every pass now reconciles once before drawing
+  anything (one `GET` over an empty list on a fresh order); the before-final-block reconcile
+  stays but is skipped when the counter has not moved since the last one.
+- **Three error codes this spec does not name:** `CHZ_CODES_INCOMPLETE` (СУЗ commits nothing on a
+  block the runner still needs, so the pass stops instead of spinning until the deadline turns it
+  into a misleading timeout), `CHZ_CODES_OVERDELIVERED` (СУЗ hands back more codes than the order
+  asked for, which the counts CHECK would otherwise turn into a raw constraint violation
+  mid-transaction) and `CHZ_KM_ISSUE_INCONSISTENT` (the issue bookkeeping and the code rows
+  disagree, on the write path and on the read path).
+- **The print page rasterises every label through one reusable canvas** into PNG blobs
+  shown as `<img>`. One canvas per label at the page's print DPI would ask the browser
+  for roughly six gigabytes for the 5 000-label batch the dialog allows in a single
+  press, and a browser past its canvas budget returns blank pixels rather than an error.
+- **«Печать ещё раз» cannot reproduce the original run's template.** An issue row carries
+  no template id, so the print page re-derives one by the same eligibility rule. That
+  matches the original only when the tenant has a single eligible marking-code template.
+  Persisting the template on the issue is the real fix and needs a schema change.
+- **The integration settings form refuses to clear `omsId`/`omsConnection`** instead of
+  posting a patch that would do nothing: the server merges a settings patch
+  (`settings || patch`) and has no representation for unsetting a key, so a cleared field
+  would silently repopulate. A real unset needs a server-side representation.
 
 ## Background
 
