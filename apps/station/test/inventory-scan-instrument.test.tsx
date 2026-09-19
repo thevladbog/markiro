@@ -114,6 +114,33 @@ describe("InventoryScanInstrument duplicate-verdict timestamp", () => {
   });
 });
 
+describe("duplicate verdict badge is a phase tag (finding 5, final review 2)", () => {
+  /**
+   * Before this fix, every verdict badge -- including "ДУБЛЬ" -- was a plain
+   * `Badge` whose tone was borrowed from the alert's own `tone` (`info` for
+   * `duplicate`), so a repeat scan rendered as a blue, tone-neutral chip.
+   * The phase dictionary carries a dedicated `duplicate` phase (amber, glyph
+   * `⧉`) for exactly this fact; only this one verdict was converted to
+   * `StatusChip` -- see the inline comment in
+   * `InventoryScanInstrument.tsx` for why the others were not.
+   */
+  it("renders the duplicate badge as a duplicate-phase tag, not a plain info badge", async () => {
+    render(
+      <InventoryScanInstrument
+        result={duplicateOtherTerminal}
+        writeFailed={false}
+        currentDeviceId="terminal-a"
+        labels={labels}
+      />,
+    );
+
+    const badge = await screen.findByText("ДУБЛЬ");
+    expect(badge.closest(".mk-chip")?.className).toContain("mk-chip--duplicate");
+    expect(badge.closest(".mk-tag")?.className).toContain("mk-tag--warn");
+    expect(badge.closest(".mk-badge")).toBeNull();
+  });
+});
+
 describe("alert badge geometry (finding 6, final review)", () => {
   const protectedResult: RecordInventoryScanResult = {
     verdict: "protected",
