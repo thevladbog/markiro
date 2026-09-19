@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { INVENTORY_CHZ_STATUSES } from "@markiro/domain";
+
 import { BOX_STATUS_TO_PHASE } from "../src/pages/code-search/BoxCard.js";
 import {
   PALLET_STATUS_TO_PHASE,
@@ -53,14 +55,13 @@ describe("семантика тегов поиска по коду", () => {
 
   /**
    * До ветки шесть статусов Честного знака различались цветом; плоский
-   * `Badge tone="steel"` стёр различие. Три способа выбытия из оборота
+   * `Badge tone="steel"` стёр различие. Два способа выбытия из оборота
    * делят фазу retired, а эмиссия, нанесение и ввод в оборот -- три разных
    * этапа жизни кода -- обязаны остаться различимы.
    */
-  it("даёт трём статусам выбытия из оборота одну фазу Честного знака", () => {
+  it("даёт двум статусам выбытия из оборота одну фазу Честного знака", () => {
     expect(CHZ_STATUS_TO_PHASE.get("RETIRED")).toBe("retired");
     expect(CHZ_STATUS_TO_PHASE.get("WRITTEN_OFF")).toBe("retired");
-    expect(CHZ_STATUS_TO_PHASE.get("WITHDRAWN")).toBe("retired");
   });
 
   it("различает эмиссию, нанесение и ввод в оборот тремя разными фазами", () => {
@@ -72,5 +73,33 @@ describe("семантика тегов поиска по коду", () => {
     expect(applied).toBe("running");
     expect(introduced).toBe("active");
     expect(new Set([emitted, applied, introduced]).size).toBe(3);
+  });
+
+  /**
+   * Финальное ревью (находка 1): `DISAGGREGATION` есть в
+   * `INVENTORY_CHZ_STATUSES` и в словаре `pages.inventory.chz`, но
+   * отсутствовал в карте -- код с этим статусом молча получал `none`
+   * (серая точка «значения нет») вместо своей фазы. `WITHDRAWN` был в карте,
+   * но не в домене -- сырую строку без перевода не следует одевать в фазу,
+   * которую никто не запросит.
+   */
+  it("расформирование Честного знака получает dismantled, а не none", () => {
+    expect(CHZ_STATUS_TO_PHASE.get("DISAGGREGATION")).toBe("dismantled");
+    expect(CHZ_STATUS_TO_PHASE.get("DISAGGREGATION")).not.toBe("none");
+  });
+
+  it("не несёт статус WITHDRAWN, которого нет в доменной константе", () => {
+    expect(CHZ_STATUS_TO_PHASE.has("WITHDRAWN")).toBe(false);
+  });
+
+  /**
+   * Барьер против повторного расхождения: карта обязана нести фазу для
+   * каждого статуса, который реально может прийти со снапшота
+   * инвентаризации, иначе карта и домен снова разъедутся молча.
+   */
+  it("несёт фазу для каждого статуса из INVENTORY_CHZ_STATUSES", () => {
+    for (const status of INVENTORY_CHZ_STATUSES) {
+      expect(CHZ_STATUS_TO_PHASE.has(status)).toBe(true);
+    }
   });
 });
