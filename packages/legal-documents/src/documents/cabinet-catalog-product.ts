@@ -121,7 +121,7 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
           {
             kind: "step",
             title: "Сохраните карточку",
-            text: "Нажмите «Сохранить». Остальные поля раздела «Агрегация и цена» — «Цена за шт., ₽» и «Срок годности, дней» — необязательны и на статус не влияют. У сохранённой карточки над полями появляются две вкладки — «Основное» и «Честный знак»: готовность, категория и характеристики живут на второй (разделы 5 и 6).",
+            text: "Нажмите «Сохранить». Остальные поля раздела «Агрегация и цена» — «Цена за шт., ₽», «Срок годности, дней», а у части товарных групп ЕГАИС ещё и «Код ЕГАИС» (см. раздел 6), — необязательны и на статус не влияют. У сохранённой карточки над полями появляются две вкладки — «Основное» и «Честный знак»: готовность, категория и характеристики живут на второй (разделы 5 и 6).",
             image: {
               id: "product-active",
               caption: "Заполненная карточка: группа и обе вместимости на месте",
@@ -142,12 +142,12 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
         blocks: [
           {
             kind: "paragraph",
-            text: "Статус карточки и готовность к операциям — разные проверки. Статус («Активен» или «Черновик») отвечает ровно за одно: можно ли выбрать товар при планировании смены. Готовность кабинет считает отдельно для каждой из четырёх операций и проверяет её по сохранённым данным карточки, а не по тому, что набрано в открытой форме. Поэтому товар со статусом «Активен» вполне может быть не готов к заказу кодов или к вводу в оборот.",
+            text: "Статус карточки и готовность к операциям — разные проверки. Статус («Активен» или «Черновик») отвечает только за то, можно ли выбрать товар при планировании смены и в инвентаризации; к операциям Национального каталога он отношения не имеет. Готовность кабинет считает отдельно для каждой из четырёх операций и проверяет её по сохранённым данным карточки, а не по тому, что набрано в открытой форме. Поэтому товар со статусом «Активен» вполне может быть не готов к заказу кодов или к вводу в оборот.",
           },
           {
             kind: "step",
             title: "Откройте вкладку «Честный знак»",
-            text: "Откройте товар из списка. У сохранённой карточки над полями две вкладки: «Основное» — поля самого товара, «Честный знак» — всё, что связано с Национальным каталогом. Готовность, категория, характеристики и коды ЕГАИС находятся только на второй вкладке, под основными полями их нет.",
+            text: "Откройте товар из списка. У сохранённой карточки с правом редактирования над полями две вкладки: «Основное» — поля самого товара, «Честный знак» — всё, что связано с Национальным каталогом. Готовность, категория, характеристики и коды ЕГАИС находятся только на второй вкладке, под основными полями их нет. При доступе только на просмотр кабинет открывает карточку без вкладок: те же блоки показаны один за другим на одном экране.",
           },
           {
             kind: "step",
@@ -244,7 +244,7 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
           },
           {
             kind: "paragraph",
-            text: "Флажками отмечают то, что нужно перенести; кабинет предупреждает об этом строкой «Отмеченные значения перейдут в новую категорию. Остальные сохранятся в истории и перестанут участвовать в текущей готовности.». Смену применяет кнопка «Подтвердить категорию», и только после неё готовность пересчитывается по новой схеме.",
+            text: "У пунктов «Совместимо с новой категорией» и «Будет преобразовано в формат новой категории» флажок кабинет уже проставил сам — снимите те, что переносить не нужно. У пунктов «Не применяется в новой категории; останется в истории» и «Требует ручного заполнения в новой категории; текущее значение останется в истории» флажка нет вовсе: эти значения переносом не затрагиваются. Кабинет предупреждает об этом строкой «Отмеченные значения перейдут в новую категорию. Остальные сохранятся в истории и перестанут участвовать в текущей готовности.». Смену применяет кнопка «Подтвердить категорию», и только после неё готовность пересчитывается по новой схеме.",
           },
           {
             kind: "step",
@@ -254,7 +254,8 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
               id: "product-attributes",
               caption: "Характеристики категории, сгруппированные по требованию",
             },
-            expected: "После сохранения закрытые характеристики уходят из причин в блоке готовности.",
+            expected:
+              "После сохранения закрытые характеристики уходят из причин в блоке готовности.",
           },
           {
             kind: "definition-list",
@@ -284,7 +285,7 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
           {
             kind: "step",
             title: "Добавьте коды АП ЕГАИС",
-            text: "Блок «Коды АП ЕГАИС» кабинет показывает только для товарной группы, продукция которой учитывается в ЕГАИС, и только после того, как категория закреплена; у остальных групп измерение «ЕГАИС» в готовности подписано «Не применяется». Кнопка «Добавить код АП ЕГАИС» добавляет строку: каждый код — девятнадцать цифр, повторы в списке запрещены. Если кодов несколько, один отмечают как «Основной код АП ЕГАИС». Список сохраняется кнопкой «Сохранить коды ЕГАИС», отдельно от характеристик.",
+            text: "Блок «Коды АП ЕГАИС» кабинет показывает только для товарной группы, продукция которой учитывается в ЕГАИС, и только после того, как категория закреплена; у остальных групп измерение «ЕГАИС» в готовности подписано «Не применяется». Кнопка «Добавить код АП ЕГАИС» добавляет строку: каждый код — девятнадцать цифр, повторы в списке запрещены. Как только в списке появляется хотя бы один код, кабинет требует выбрать «Основной код АП ЕГАИС» и без этого не сохранит список. Список сохраняется кнопкой «Сохранить коды ЕГАИС», отдельно от характеристик.",
           },
           {
             kind: "paragraph",
@@ -556,7 +557,7 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
           {
             kind: "step",
             title: "Save the card",
-            text: "Press “Save”. The remaining fields of “Aggregation and price” — “Price per unit, ₽” and “Shelf life, days” — are optional and do not affect the status. A saved card gains two tabs above the fields, “Basic” and “Chestny ZNAK”: readiness, the category and the attributes live on the second one (sections 5 and 6).",
+            text: "Press “Save”. The remaining fields of “Aggregation and price” — “Price per unit, ₽”, “Shelf life, days”, and for some EGAIS product groups also “EGAIS code” (see section 6) — are optional and do not affect the status. A saved card gains two tabs above the fields, “Basic” and “Chestny ZNAK”: readiness, the category and the attributes live on the second one (sections 5 and 6).",
             image: {
               id: "product-active",
               caption: "A complete card: the group and both capacities are in place",
@@ -577,12 +578,12 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
         blocks: [
           {
             kind: "paragraph",
-            text: "The card status and readiness are two different checks. The status — “Active” or “Draft” — answers exactly one question: can the product be picked when planning a shift. Readiness is computed separately for each of four operations and against the saved card rather than against what is typed into an open form. So a product with the “Active” status can still be unready for ordering codes or for circulation.",
+            text: "The card status and readiness are two different checks. The status — “Active” or “Draft” — answers only whether the product can be picked when planning a shift or during a stock count; it says nothing about National Catalog operations. Readiness is computed separately for each of four operations and against the saved card rather than against what is typed into an open form. So a product with the “Active” status can still be unready for ordering codes or for circulation.",
           },
           {
             kind: "step",
             title: "Open the “Chestny ZNAK” tab",
-            text: "Open a product from the list. A saved card carries two tabs above the fields: “Basic” for the product's own fields and “Chestny ZNAK” for everything tied to the National Catalog. Readiness, the category, the attributes and the EGAIS codes live on the second tab only; they are not below the basic fields.",
+            text: "Open a product from the list. A saved card with write access carries two tabs above the fields: “Basic” for the product's own fields and “Chestny ZNAK” for everything tied to the National Catalog. Readiness, the category, the attributes and the EGAIS codes live on the second tab only; they are not below the basic fields. With read-only access the cabinet opens the card without tabs: the same blocks appear one after another on a single screen.",
           },
           {
             kind: "step",
@@ -592,7 +593,8 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
               id: "product-readiness",
               caption: "Readiness per operation: production is ready, code ordering is not",
             },
-            expected: "It is visible which operation is already available and which waits for data.",
+            expected:
+              "It is visible which operation is already available and which waits for data.",
           },
           {
             kind: "definition-list",
@@ -679,7 +681,7 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
           },
           {
             kind: "paragraph",
-            text: "Checkboxes mark what should move, which the cabinet states in the line “Selected values will transfer to the new category. Others will remain in history and no longer count towards current readiness.”. The “Confirm category” button applies the change, and only then is readiness recomputed against the new schema.",
+            text: "The checkboxes for “Compatible with the new category” and “Will be converted to the new category format” start ticked — clear the ones you do not want transferred. “Not applicable to the new category; kept in history” and “Requires manual entry in the new category; current value kept in history” have no checkbox at all: those values are not affected by the transfer. The cabinet states this in the line “Selected values will transfer to the new category. Others will remain in history and no longer count towards current readiness.”. The “Confirm category” button applies the change, and only then is readiness recomputed against the new schema.",
           },
           {
             kind: "step",
@@ -720,7 +722,7 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
           {
             kind: "step",
             title: "Add the EGAIS AP codes",
-            text: "The cabinet shows the “EGAIS AP codes” block only for the product group whose goods are tracked in EGAIS, and only once a category is pinned; for the other groups the “EGAIS” dimension is marked “Not applicable”. The “Add EGAIS AP code” button adds a row: every code is nineteen digits and repeats are rejected. When there is more than one code, one of them is marked as the “Primary EGAIS AP code”. The list is saved by “Save EGAIS codes”, separately from the attributes.",
+            text: "The cabinet shows the “EGAIS AP codes” block only for the product group whose goods are tracked in EGAIS, and only once a category is pinned; for the other groups the “EGAIS” dimension is marked “Not applicable”. The “Add EGAIS AP code” button adds a row: every code is nineteen digits and repeats are rejected. As soon as the list holds at least one code, the cabinet requires a “Primary EGAIS AP code” and will not save the list without one. The list is saved by “Save EGAIS codes”, separately from the attributes.",
           },
           {
             kind: "paragraph",
