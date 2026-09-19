@@ -11,7 +11,7 @@ export function ChzStatus({ summary }: { summary: ChzSummary | undefined }) {
   const chip = (key: ChzStatusKey, index: number) => (
     <StatusChip
       key={`${key}-${index}`}
-      status={key === "published" ? "ok" : key === "errors" ? "error" : "neutral"}
+      phase={key === "published" ? "done" : key === "errors" ? "failed" : "none"}
       label={t(`pages.catalog.import.statuses.${key}`)}
     />
   );
@@ -27,7 +27,7 @@ export function ChzStatus({ summary }: { summary: ChzSummary | undefined }) {
       ) : (
         <span>{t("pages.catalog.import.statuses.unknown")}</span>
       )}
-      {summary.hasChanges && <StatusChip status="warn" label={tr("changes")} />}
+      {summary.hasChanges && <StatusChip phase="attention" label={tr("changes")} />}
       {summary.refreshing && <span role="status">{tr("refreshing")}</span>}
       {summary.lastErrorCode && (
         <span className="mk-chz-status__error">

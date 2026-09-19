@@ -357,10 +357,10 @@ export function CatalogPage() {
         title: t("pages.catalog.table.status"),
         render: (row) =>
           row.archived ? (
-            <StatusChip status="neutral" label={t("pages.catalog.status.archived")} />
+            <StatusChip phase="retired" label={t("pages.catalog.status.archived")} />
           ) : (
             <StatusChip
-              status={row.status === "active" ? "ok" : "warn"}
+              phase={row.status === "active" ? "active" : "attention"}
               label={t(`pages.catalog.status.${row.status}`)}
             />
           ),
