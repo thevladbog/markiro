@@ -426,7 +426,10 @@ it("keeps an unchecked template size out of the @page stylesheet text", async ()
   const { container } = renderPrintPage({
     template: TEMPLATE.stock,
     templateById: full({
-      spec: { ...SPEC, widthMm: "58mm } .mk-km-print__page { display: none } @page { size: 9999mm" },
+      spec: {
+        ...SPEC,
+        widthMm: "58mm } .mk-km-print__page { display: none } @page { size: 9999mm",
+      },
     }),
   });
 
