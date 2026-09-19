@@ -14,7 +14,7 @@ import {
   StatusChip,
   Table,
 } from "@markiro/ui";
-import type { SelectOption, StatusChipStatus, TableColumn } from "@markiro/ui";
+import type { SelectOption, TableColumn } from "@markiro/ui";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
 
@@ -23,20 +23,8 @@ import { ApiRequestError } from "../../api/client.js";
 import { formatCreatedAt } from "../../lib/datetime.js";
 import { toast } from "../../lib/toast.js";
 import { usePickupReasons, type ReasonDto } from "../kiosks/api.js";
-import {
-  useCancelOrder,
-  usePickupOrder,
-  useResolveOrder,
-  type PickupOrderItemDto,
-  type PickupOrderStatus,
-} from "./api.js";
-
-const STATUS_TO_CHIP: Record<PickupOrderStatus, StatusChipStatus> = {
-  pending: "warn",
-  punched: "ok",
-  writtenoff: "neutral",
-  cancelled: "error",
-};
+import { useCancelOrder, usePickupOrder, useResolveOrder, type PickupOrderItemDto } from "./api.js";
+import { PICKUP_STATUS_TO_PHASE } from "./index.js";
 
 type ResolveModalKind = "punch" | "writeoff" | null;
 
@@ -352,7 +340,7 @@ export function OrderDetailPage() {
         title={order.orderNo}
         actions={
           <StatusChip
-            status={STATUS_TO_CHIP[order.status]}
+            phase={PICKUP_STATUS_TO_PHASE[order.status]}
             label={t(`pages.pickup.status.${order.status}`)}
           />
         }
