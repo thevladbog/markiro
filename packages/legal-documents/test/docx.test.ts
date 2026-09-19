@@ -741,7 +741,9 @@ describe("wordmark alignment across the registry", () => {
     // legacy — remove it from the list rather than adding it.
     // 15 -> 13: the pallet reissue moved MKR-INS-08 and MKR-INS-09 to new
     // revisions, so both dropped off the list and are now centred.
-    expect(legacyWordmarkReleaseKeys()).toHaveLength(13);
+    // 13 -> 12: the readiness/attributes reissue moved MKR-INS-10 to a new
+    // revision, so it dropped off the list too.
+    expect(legacyWordmarkReleaseKeys()).toHaveLength(12);
   });
 
   it("gives a release that is not on the list the corrected header", () => {
