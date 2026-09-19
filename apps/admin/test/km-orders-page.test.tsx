@@ -56,7 +56,7 @@ function orderRow(overrides: Record<string, unknown>) {
     omsOrderId: ID.oms,
     bufferStatus: "ACTIVE",
     bufferExpiresAt: inDays(10),
-    availableCodes: 0,
+    availableCodes: 4200,
     fetchedCount: 5000,
     issuedCount: 1200,
     availableForIssue: 3800,
@@ -180,7 +180,6 @@ function renderPage(options: RenderOptions = {}) {
     createRoutesFromElements(
       <>
         <Route path="/km-orders" element={<KmOrdersPage />} />
-        <Route path="/km-orders/:orderId" element={<div>Карточка заказа</div>} />
         <Route path="/integrations/:type" element={<div>Интеграция</div>} />
       </>,
     ),
@@ -243,17 +242,22 @@ it("computes the four KPI tiles from the list alone", async () => {
 
   await screen.findByText("Вода газированная 1,0 л");
   expect(metricValue("Доступно к выдаче")).toContain(number.format(4500));
-  expect(metricValue("Истекают в 14 дней")).toContain(number.format(3800));
+  // Sums `availableCodes` (4200, the buffer's own retrievable quantity), not
+  // `availableForIssue` (3800, already-downloaded stock a closing buffer
+  // cannot take away) -- only the completed order's buffer is within the
+  // 14-day horizon.
+  expect(metricValue("Истекает буфер (14 дней)")).toContain(number.format(4200));
   expect(metricValue("Активных заказов")).toContain("1");
-  expect(metricValue("Выдано за 30 дней")).toContain(number.format(1200));
+  expect(metricValue("Выдано по заказам за 30 дней")).toContain(number.format(1200));
 });
 
-it("links every row to its order card", async () => {
-  const { router, user } = renderPage();
+it("renders the product name as plain text, not a link", async () => {
+  renderPage();
 
-  await user.click(await screen.findByRole("link", { name: "Вода газированная 1,0 л" }));
-
-  await waitFor(() => expect(router.state.location.pathname).toBe(`/km-orders/${ID.completed}`));
+  await screen.findByText("Вода газированная 1,0 л");
+  // The order detail route does not exist yet (the next task adds it); a
+  // link here would send a click onto React Router's raw error page.
+  expect(screen.queryByRole("link", { name: "Вода газированная 1,0 л" })).toBeNull();
 });
 
 it("opens the order dialog with a product select and a quantity input", async () => {
@@ -342,6 +346,22 @@ it("refuses a quantity outside the СУЗ limits before sending anything", async
 
   expect(await screen.findByText("Укажите от 1 до 150 000 кодов.")).toBeDefined();
   expect(requests.some(({ init }) => init?.method === "POST")).toBe(false);
+  // A refused submit must not leave focus stranded on the button: the error
+  // text alone is silent to a screen-reader user who has already moved on.
+  expect(document.activeElement).toBe(quantity);
+});
+
+it("moves focus to the product select when no product is chosen", async () => {
+  const { requests, user } = renderPage();
+
+  await user.click(await screen.findByRole("button", { name: "Заказать коды" }));
+  const productField = await screen.findByRole("combobox", { name: "Продукт" });
+  await waitFor(() => expect(productField.hasAttribute("disabled")).toBe(false));
+  await user.click(screen.getByRole("button", { name: "Заказать" }));
+
+  expect(await screen.findByText("Выберите продукт.")).toBeDefined();
+  expect(requests.some(({ init }) => init?.method === "POST")).toBe(false);
+  expect(document.activeElement).toBe(productField);
 });
 
 it("hides the order action from a read-only grant", async () => {

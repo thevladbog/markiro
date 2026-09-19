@@ -8,6 +8,8 @@ import { kmOrderPreflightCodes, useCreateKmOrder } from "./api.js";
 import { KM_ORDER_MAX_QUANTITY, type KmOrderPreflightCode } from "./schemas.js";
 
 const FORM_ID = "km-order-create-form";
+const PRODUCT_FIELD_ID = "km-order-product-field";
+const QUANTITY_FIELD_ID = "km-order-quantity-field";
 const DEFAULT_QUANTITY = "1000";
 
 /**
@@ -71,7 +73,14 @@ export function CreateKmOrderDialog({ open, onClose }: { open: boolean; onClose:
         });
     setProductError(missingProduct);
     setQuantityError(badQuantity);
-    if (missingProduct !== null || badQuantity !== null) return;
+    if (missingProduct !== null || badQuantity !== null) {
+      // Announce nothing and the office re-clicks the same disabled-looking
+      // button: move focus to the first invalid control, in form order, the
+      // same way the browser's own validation would.
+      const firstInvalidFieldId = missingProduct !== null ? PRODUCT_FIELD_ID : QUANTITY_FIELD_ID;
+      document.getElementById(firstInvalidFieldId)?.focus();
+      return;
+    }
 
     const trimmedContact = contactPerson.trim();
     try {
@@ -80,9 +89,9 @@ export function CreateKmOrderDialog({ open, onClose }: { open: boolean; onClose:
         quantity: parsedQuantity,
         ...(trimmedContact ? { contactPerson: trimmedContact } : {}),
       });
-      setProductId("");
-      setQuantity(DEFAULT_QUANTITY);
-      setContactPerson("");
+      // No resets here: the parent mounts this dialog only while `dialogOpen`
+      // is true (see km-orders/index.tsx), so `close()` unmounts the whole
+      // component and any state set after it would never be observed.
       close();
     } catch (caught) {
       const codes = kmOrderPreflightCodes(caught);
@@ -114,12 +123,12 @@ export function CreateKmOrderDialog({ open, onClose }: { open: boolean; onClose:
     >
       <form
         id={FORM_ID}
+        className="mk-km-order-create-form"
         // Every refusal is reported through the fields' own `error` text, in
         // the cabinet's language; the browser's untranslated bubbles would
         // fire first and say something else.
         noValidate
         onSubmit={(event) => void submit(event)}
-        style={{ display: "flex", flexDirection: "column", gap: 14 }}
       >
         {blockedBy !== null ? (
           <Alert tone="error" role="alert" title={t("pages.kmOrders.create.blockedTitle")}>
@@ -136,6 +145,7 @@ export function CreateKmOrderDialog({ open, onClose }: { open: boolean; onClose:
           </Alert>
         ) : null}
         <Select
+          id={PRODUCT_FIELD_ID}
           label={t("pages.kmOrders.create.product")}
           value={productId}
           onValueChange={setProductId}
@@ -152,6 +162,7 @@ export function CreateKmOrderDialog({ open, onClose }: { open: boolean; onClose:
           {...(productHint !== null ? { hint: productHint } : {})}
         />
         <Input
+          id={QUANTITY_FIELD_ID}
           type="number"
           inputMode="numeric"
           min={1}

@@ -44,8 +44,14 @@ export interface KmOrderMetrics {
  * `issuedRecently` is therefore the codes issued **from orders created in the
  * window**, not the codes issued during it: the list DTO carries a cumulative
  * `issuedCount` and no per-issue timestamps (those live on the order card).
- * The tile's label says «за 30 дней» about the orders, which is the honest
- * reading of what this number counts.
+ * The tile's label, «Выдано по заказам за 30 дней», attaches «за 30 дней» to
+ * the orders rather than to the issuing, which is the honest reading of what
+ * this number counts.
+ *
+ * `expiringSoon` sums `availableCodes`, not `availableForIssue`: the buffer's
+ * expiry bounds what is still retrievable from the state system, and
+ * `availableForIssue` (`fetchedCount - issuedCount`) is already-downloaded
+ * stock that a closing buffer cannot take away.
  */
 export function kmOrderMetrics(orders: readonly KmOrderListItem[], now: number): KmOrderMetrics {
   const expiryHorizon = now + EXPIRY_HORIZON_DAYS * DAY_MS;
@@ -64,7 +70,7 @@ export function kmOrderMetrics(orders: readonly KmOrderListItem[], now: number):
     // case, and dropping them would make the tile fall silent exactly when
     // the codes became unusable.
     if (order.bufferExpiresAt !== null && Date.parse(order.bufferExpiresAt) <= expiryHorizon) {
-      metrics.expiringSoon += order.availableForIssue;
+      metrics.expiringSoon += order.availableCodes ?? 0;
     }
     if (Date.parse(order.createdAt) >= issuedSince) metrics.issuedRecently += order.issuedCount;
   }
@@ -114,7 +120,12 @@ export function KmOrdersPage() {
         key: "product",
         title: t("pages.kmOrders.list.product"),
         wrap: true,
-        render: (row) => <Link to={row.id}>{row.productName}</Link>,
+        // Plain text for now: app.tsx registers only the index route for
+        // this page, and has no `path="*"`/`errorElement` catch-all, so a
+        // `<Link to={row.id}>` here would drop the user onto React Router's
+        // raw "Unexpected Application Error!" page on click. The next task
+        // restores this as a link together with the detail route it needs.
+        render: (row) => row.productName,
       },
       { key: "gtin14", title: t("pages.kmOrders.list.gtin"), width: 150, mono: true },
       {

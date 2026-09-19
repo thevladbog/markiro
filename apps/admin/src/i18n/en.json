@@ -328,9 +328,9 @@
       "metrics": {
         "label": "Code order indicators",
         "available": "Available to issue",
-        "expiring": "Expiring within 14 days",
+        "expiring": "Buffer expiring in 14 days",
         "active": "Active orders",
-        "issued": "Issued in 30 days"
+        "issued": "Issued from orders created in 30 days"
       },
       "list": {
         "scrollLabel": "Code orders table, scrolls horizontally",
