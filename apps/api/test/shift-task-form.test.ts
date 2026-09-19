@@ -147,4 +147,37 @@ describe("renderShiftTaskFormHtml", () => {
 
     expect(html).toContain('data-layout="compact"');
   });
+
+  it("labels the product block the way the printed design does", () => {
+    const html = renderShiftTaskFormHtml(fixture());
+
+    expect(html).toContain('<div class="product-eyebrow">Продукция</div>');
+  });
+
+  it("omits the terminal short name when the catalog has none", () => {
+    const html = renderShiftTaskFormHtml(fixture({ productPrintName: null }));
+
+    expect(html).not.toContain("На терминале:");
+    expect(html).toContain("GTIN");
+  });
+
+  it("escapes every tenant-controlled name, not only the two on the hero line", () => {
+    const html = renderShiftTaskFormHtml(
+      fixture({
+        organizationName: '<b>Орг</b>',
+        lineName: '<i>Линия</i>',
+        productPrintName: '<u>Крат</u>',
+        ssccIssuerName: '<s>Эмитент</s>',
+      }),
+    );
+
+    expect(html).not.toContain("<b>Орг</b>");
+    expect(html).not.toContain("<i>Линия</i>");
+    expect(html).not.toContain("<u>Крат</u>");
+    expect(html).not.toContain("<s>Эмитент</s>");
+    expect(html).toContain("&lt;b&gt;Орг&lt;/b&gt;");
+    expect(html).toContain("&lt;i&gt;Линия&lt;/i&gt;");
+    expect(html).toContain("&lt;u&gt;Крат&lt;/u&gt;");
+    expect(html).toContain("&lt;s&gt;Эмитент&lt;/s&gt;");
+  });
 });
