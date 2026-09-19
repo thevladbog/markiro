@@ -169,6 +169,11 @@ export {
   renderQrSvg,
 } from "./barcodes/svg.js";
 export {
+  formatShiftTaskBarcode,
+  parseShiftTaskBarcode,
+  SHIFT_TASK_BARCODE_PREFIX,
+} from "./barcodes/task-tokens.js";
+export {
   deriveDigestB64,
   formatPhc,
   isCanonicalDigestB64,
