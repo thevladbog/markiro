@@ -24,7 +24,7 @@ import {
   type CredentialGeneration,
   type FloorWorkBarrier,
 } from "../lib/credential-recovery.js";
-import { parseStationInventoryBundleManifest } from "@markiro/domain";
+import { parseStationInventoryBundleManifest, SHIFT_TASK_BARCODE_PREFIX } from "@markiro/domain";
 import { InventoryTaskConfirmation } from "./InventoryTaskConfirmation.js";
 import {
   ShiftSelection,
@@ -496,6 +496,8 @@ export function TaskSelection({
 
   useEffect(() => {
     return source.start((barcode) => {
+      // The shift panel owns this namespace and subscribes to the same source.
+      if (barcode.startsWith(SHIFT_TASK_BARCODE_PREFIX)) return;
       if (!intakeOpen.current || busyRef.current || isCurrentRef.current?.() === false) return;
       const originGeneration = lifecycleGeneration.current;
       busyRef.current = true;
@@ -626,6 +628,7 @@ export function TaskSelection({
         client={client}
         exec={exec}
         {...(acquireShiftEntry ? { acquireShiftEntry } : {})}
+        source={source}
         onSelected={onShiftSelected}
         onNew={onNew}
         {...(onSetup ? { onSetup } : {})}

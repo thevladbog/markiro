@@ -116,24 +116,32 @@ function executor(): SqlExecutor {
   };
 }
 
+/**
+ * TaskSelection now renders ShiftSelection with the same `source`, and both
+ * subscribe independently -- matching `createKeyboardWedgeSource`, where
+ * every `start()` call attaches its own listener rather than replacing a
+ * single shared one. A fake that only remembered the last subscriber would
+ * let a later resubscribe (e.g. ShiftSelection's effect rerunning once its
+ * shift list loads) silently steal scans away from the inventory handler.
+ */
 function scanner() {
-  let listener: ScanListener | null = null;
-  let stopped = false;
+  const listeners = new Set<ScanListener>();
+  let everStarted = false;
   const source: ScanSource = {
     start(next) {
-      listener = next;
+      everStarted = true;
+      listeners.add(next);
       return () => {
-        stopped = true;
-        listener = null;
+        listeners.delete(next);
       };
     },
   };
   return {
     source,
     scan(raw: string) {
-      listener?.(raw);
+      for (const listener of listeners) listener(raw);
     },
-    stopped: () => stopped,
+    stopped: () => everStarted && listeners.size === 0,
   };
 }
 
