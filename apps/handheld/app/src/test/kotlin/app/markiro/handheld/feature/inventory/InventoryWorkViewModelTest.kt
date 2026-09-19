@@ -149,8 +149,14 @@ class InventoryWorkViewModelTest {
         assertEquals(1, vm.state.value.progress.verified)
         assertEquals(listOf(SignalKind.OK, SignalKind.ERROR, SignalKind.ERROR), played)
         vm.applyDateAndAccept()
-        val after = vm.state.first { it.progress.verified == 2 }
-        assertNull(after.held)
+        // `verified` comes from the Room-backed progress flow, `held` from its own
+        // MutableStateFlow that `onScan` clears only after `recorder.record` returns,
+        // and `state` combines the two -- so there is a real emission carrying the new
+        // count next to the not-yet-cleared mismatch. Waiting for the settled pair is
+        // the assertion: were `held` never cleared, this would not complete and the
+        // test would fail on `runTest`'s timeout. Same conjunction idiom as the
+        // `verified == 1 && thisTerminal == 1 && last != null` wait above.
+        vm.state.first { it.progress.verified == 2 && it.held == null }
         assertEquals("2026-08-22", vm.state.first { it.activeDate == "2026-08-22" }.activeDate)
         vm.setDate("2026-08-20")
         assertEquals("2026-08-20", vm.state.first { it.activeDate == "2026-08-20" }.activeDate)
@@ -170,9 +176,11 @@ class InventoryWorkViewModelTest {
         scans.tryEmit(ScanEvent(raw("A2"), null, "debug", 0))
         vm.state.first { it.held != null }
         vm.acceptAsIs()
-        val after = vm.state.first { it.progress.verified == 2 }
+        // Same two-source race as in `aMismatchHoldsScansUntilResolved`: `acceptAsIs`
+        // records through the same `onScan`, so wait for the settled pair rather than
+        // for the count alone. This one did not fail yet; it would have.
+        val after = vm.state.first { it.progress.verified == 2 && it.held == null }
         assertEquals("2026-08-20", after.activeDate)
-        assertNull(after.held)
     }
     @Test fun heldScanAndDateRemainOwnedByOriginalGeneration() = runTest {
         val vm = vm()
