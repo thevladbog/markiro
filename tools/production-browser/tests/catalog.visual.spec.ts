@@ -390,7 +390,12 @@ function fixtures(locale: AdminLocale) {
   const READINESS = {
     productId: PRODUCT_ID,
     dimensions: [
-      { dimension: "production" as const, state: "ready" as const, reasons: [], recommendations: [] },
+      {
+        dimension: "production" as const,
+        state: "ready" as const,
+        reasons: [],
+        recommendations: [],
+      },
       {
         dimension: "code_ordering" as const,
         state: "not_ready" as const,
@@ -403,7 +408,12 @@ function fixtures(locale: AdminLocale) {
         reasons: [{ code: "SCHEMA_VERSION_STALE" }],
         recommendations: [{ code: "ATTRIBUTE_RECOMMENDED", attributeId: "package" }],
       },
-      { dimension: "egais" as const, state: "not_applicable" as const, reasons: [], recommendations: [] },
+      {
+        dimension: "egais" as const,
+        state: "not_applicable" as const,
+        reasons: [],
+        recommendations: [],
+      },
     ],
   };
 
@@ -620,6 +630,67 @@ for (const locale of LOCALES) {
       page,
       "product-form-defaults",
       screenshotPath(locale, "product-defaults"),
+    );
+    expect(unexpected).toEqual([]);
+  });
+
+  test(`[${locale}] the card reports readiness per operation`, async ({ page }) => {
+    const unexpected = await installApi(page, "productActive");
+    await openHarness(page, `/catalog/${PRODUCT_ID}/edit`);
+    await page.getByRole("tab", { name: t("pages.catalog.form.tabs.chz") }).click();
+    await expect(
+      page.getByRole("heading", { name: t("pages.catalog.regulatory.readiness") }),
+    ).toBeVisible();
+    await expect(
+      page.getByText(t("pages.catalog.regulatory.states.ready"), { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByText(t("pages.catalog.regulatory.states.not_applicable"), { exact: true }),
+    ).toBeVisible();
+    await screenshotSection(
+      page,
+      "product-readiness-title",
+      screenshotPath(locale, "product-readiness"),
+    );
+    expect(unexpected).toEqual([]);
+  });
+
+  test(`[${locale}] the category block names the National Catalog binding`, async ({ page }) => {
+    const unexpected = await installApi(page, "productActive");
+    await openHarness(page, `/catalog/${PRODUCT_ID}/edit`);
+    await page.getByRole("tab", { name: t("pages.catalog.form.tabs.chz") }).click();
+    await expect(
+      page.getByRole("heading", { name: t("pages.catalog.regulatory.category") }),
+    ).toBeVisible();
+    await expect(
+      page.getByText(t("pages.catalog.regulatory.tnVed"), { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText(t("pages.catalog.regulatory.okpd"), { exact: true })).toBeVisible();
+    await screenshotSection(
+      page,
+      "category-binding-title",
+      screenshotPath(locale, "product-category"),
+    );
+    expect(unexpected).toEqual([]);
+  });
+
+  test(`[${locale}] category attributes carry different requirement levels`, async ({ page }) => {
+    const unexpected = await installApi(page, "productActive");
+    await openHarness(page, `/catalog/${PRODUCT_ID}/edit`);
+    await page.getByRole("tab", { name: t("pages.catalog.form.tabs.chz") }).click();
+    await expect(
+      page.getByRole("heading", { name: t("pages.catalog.regulatory.attributes") }),
+    ).toBeVisible();
+    await expect(
+      page.getByText(t("pages.catalog.regulatory.requiredOrdering"), { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByText(t("pages.catalog.regulatory.recommended"), { exact: true }),
+    ).toBeVisible();
+    await screenshotSection(
+      page,
+      "category-attributes-title",
+      screenshotPath(locale, "product-attributes"),
     );
     expect(unexpected).toEqual([]);
   });
