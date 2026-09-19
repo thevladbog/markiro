@@ -36,7 +36,7 @@ export const labelTemplates = pgTable(
     name: text("name").notNull(),
     spec: jsonb("spec").notNull(),
     purpose: text("purpose")
-      .$type<"box" | "product_duplicate" | "pallet">()
+      .$type<"box" | "product_duplicate" | "pallet" | "product_km">()
       .notNull()
       .default("box"),
     /**
@@ -63,7 +63,7 @@ export const labelTemplates = pgTable(
     unique("label_templates_tenant_id_uq").on(t.tenantId, t.id),
     check(
       "label_templates_purpose_check",
-      sql`${t.purpose} IN ('box', 'product_duplicate', 'pallet')`,
+      sql`${t.purpose} IN ('box', 'product_duplicate', 'pallet', 'product_km')`,
     ),
     check(
       "label_templates_product_group_codes_nonempty",
