@@ -4,6 +4,7 @@ import { EMPLOYEE_STATUS_TO_PHASE } from "../src/pages/employees/index.js";
 import { DELIVERY_STATUS_TO_PHASE } from "../src/pages/team/TeamPage.js";
 import { deviceStatusPhase } from "../src/pages/devices/index.js";
 import { licenseSlotPhase } from "../src/pages/devices/DeviceLicensingPanel.js";
+import { preparationPhase } from "../src/pages/devices/DeviceReplacementPanel.js";
 
 describe("семантика тегов людей и устройств", () => {
   it("отличает действующего сотрудника от выведенного", () => {
@@ -65,5 +66,21 @@ describe("семантика тегов людей и устройств", () =>
   it("сохраняет освобождённый и зарезервированный слот без изменений", () => {
     expect(licenseSlotPhase("released")).toBe("retired");
     expect(licenseSlotPhase("reserved")).toBe("planned");
+  });
+
+  /**
+   * Раньше фаза подготовки замены была статической `running`: правило
+   * механически подставляло прежний тон, и отменённая подготовка показывала
+   * вращающуюся стрелку рядом с подписью «Отменено». См. правку по находке
+   * ревью в .superpowers/sdd/briefs/task-10-report.md.
+   */
+  it("отменённая подготовка замены терминальна, а не идёт прямо сейчас", () => {
+    expect(preparationPhase("cancelled")).toBe("retired");
+    expect(preparationPhase("cancelled")).not.toBe("running");
+  });
+
+  it("подготовленная замена ждёт решения оператора, а не выполняется", () => {
+    expect(preparationPhase("prepared")).toBe("planned");
+    expect(preparationPhase("prepared")).not.toBe("running");
   });
 });
