@@ -174,7 +174,7 @@ interface RenderOptions {
   popupBlocked?: boolean;
   /** Answer every re-read of the order with this card, as a refresh would. */
   nextCard?: Record<string, unknown>;
-  onIssue?: (body: unknown) => Response;
+  onIssue?: (body: unknown) => Response | Promise<Response>;
   onRetry?: () => Response;
 }
 
@@ -327,6 +327,19 @@ it("reopens a print issue on its own print page", async () => {
   expect(open).toHaveBeenCalledWith(
     `/km-orders/${ID.order}/issues/${ID.printIssue}/print`,
     "_blank",
+  );
+});
+
+it("hands over the address when a popup blocker swallows the reprint tab", async () => {
+  // A reprint spends no codes, so nothing is lost -- but a button that does
+  // nothing at all reads as a broken cabinet, and the page is still reachable.
+  const { user } = renderCard({ popupBlocked: true });
+
+  await user.click(await screen.findByRole("button", { name: "Печать ещё раз" }));
+
+  expect(await screen.findByText("Вкладка печати не открылась")).toBeDefined();
+  expect(screen.getByRole("link", { name: "Открыть страницу печати" }).getAttribute("href")).toBe(
+    `/km-orders/${ID.order}/issues/${ID.printIssue}/print`,
   );
 });
 
@@ -529,6 +542,57 @@ it("reports how many codes are left when the server refuses the issue", async ()
   expect(within(dialog).getByText("Укажите количество кодов.")).toBeDefined();
 });
 
+/**
+ * Fires on every refusal that is not the too-many-codes conflict -- including
+ * the one that matters: the server committed the issue and the answer was
+ * lost. "Try again" would burn a second batch, so the copy has to point at
+ * the issue history instead.
+ */
+it("sends a lost issue answer to the issue history rather than inviting a repeat", async () => {
+  const { user } = renderCard({
+    onIssue: () => jsonResponse({ code: "INTERNAL_ERROR" }, 500),
+  });
+
+  const dialog = await openIssueDialog("Печать", "Печать кодов");
+  await typeCount(dialog, "500");
+  await user.click(within(dialog).getByRole("button", { name: "Напечатать" }));
+
+  const message = await within(dialog).findByText(/Не удалось подтвердить выдачу кодов/);
+  expect(message.textContent).toContain("Выдачи кодов");
+  expect(message.textContent).not.toContain("Повторите попытку");
+});
+
+/**
+ * The server commits the issue the moment the request lands, and the parent
+ * renders this dialog only while a mode is selected -- so a close during the
+ * round trip unmounts it and the operator reads the untouched card as "I
+ * cancelled, so nothing happened".
+ */
+it("refuses to close while the issue request is still in the air", async () => {
+  let release: (() => void) | undefined;
+  const { user } = renderCard({
+    onIssue: () =>
+      new Promise<Response>((resolve) => {
+        release = () => resolve(jsonResponse(FRESH_PRINT_ISSUE, 201));
+      }),
+  });
+
+  const dialog = await openIssueDialog("Выгрузить", "Выгрузка кодов в файл");
+  await typeCount(dialog, "500");
+  await user.click(within(dialog).getByRole("button", { name: "Выгрузить" }));
+
+  await user.click(within(dialog).getByRole("button", { name: "Отмена" }));
+  expect(await within(dialog).findByText(/Запрос на выдачу уже отправлен/)).toBeDefined();
+
+  // Escape and the × are the same close, and must behave the same way.
+  fireEvent.keyDown(dialog, { key: "Escape" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Закрыть" }));
+  expect(screen.getByRole("dialog", { name: "Выгрузка кодов в файл" })).toBeDefined();
+
+  release?.();
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+});
+
 it("reads out the refusal of a rejected order and offers no issue action", async () => {
   renderCard({
     card: order({
@@ -627,7 +691,7 @@ it("pins «Ход заказа» and «Сведения о заказе», inclu
     "Заказ в СУЗ",
     "Статус буфера",
     "Группа продукции",
-    "Шаблон кода СУЗ",
+    "Шаблон СУЗ",
     "Серийные номера",
     "Способ выпуска",
     "Создал",
@@ -661,6 +725,67 @@ it("pins «Ход заказа» and «Сведения о заказе», inclu
     inFlight.updatedAt,
     null,
   ]);
+});
+
+/**
+ * The runner writes one of `KM_ORDER_ERROR_CODES` and leaves `errorMessage`
+ * null for all but the СУЗ refusals, so without a translation the office
+ * reads a bare identifier in an otherwise Russian cabinet.
+ */
+it("translates the failure code the runner wrote instead of printing it raw", async () => {
+  renderCard({
+    card: order({
+      state: "failed",
+      errorCode: "CHZ_CODES_INCOMPLETE",
+      errorMessage: null,
+      fetchedCount: 4000,
+      issuedCount: 0,
+      availableForIssue: 0,
+      bufferExpiresAt: null,
+      issues: [],
+    }),
+  });
+
+  expect(await screen.findByText(/СУЗ выдал меньше кодов, чем было заказано/)).toBeDefined();
+  expect(screen.queryByText("CHZ_CODES_INCOMPLETE")).toBeNull();
+});
+
+it("translates the code that says the order was submitted but not recorded", async () => {
+  renderCard({
+    card: order({
+      state: "failed",
+      errorCode: "CHZ_ORDER_SUBMIT_UNRECORDED",
+      errorMessage: null,
+      fetchedCount: 0,
+      issuedCount: 0,
+      availableForIssue: 0,
+      bufferExpiresAt: null,
+      issues: [],
+    }),
+  });
+
+  // The one code whose recovery is outside this cabinet: the order is billed,
+  // so the operator must look in СУЗ before ordering again.
+  const message = await screen.findByText(/Заказ принят и оплачен в СУЗ/);
+  expect(message.textContent).toContain("Честного Знака");
+});
+
+it("falls back to the raw identifier for a code this build does not know", async () => {
+  // Better an untranslated identifier to quote to support than a blank alert.
+  renderCard({
+    card: order({
+      state: "failed",
+      errorCode: "CHZ_SOMETHING_NEWER",
+      errorMessage: null,
+      fetchedCount: 0,
+      issuedCount: 0,
+      availableForIssue: 0,
+      bufferExpiresAt: null,
+      issues: [],
+    }),
+  });
+
+  expect(await screen.findByText("CHZ_SOMETHING_NEWER")).toBeDefined();
 });
 
 it("hides every issue action from a read-only grant", async () => {

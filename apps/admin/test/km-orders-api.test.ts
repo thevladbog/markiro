@@ -92,7 +92,7 @@ afterEach(() => {
 });
 
 describe("km orders api client", () => {
-  it("posts a create request with the exact body and refreshes both cache keys", async () => {
+  it("posts a create request with the exact body and refreshes the cache once", async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(order(), 201));
     vi.stubGlobal("fetch", fetchMock);
     const { queryClient, wrapper } = createWrapper();
@@ -113,7 +113,13 @@ describe("km orders api client", () => {
       quantity: 5000,
       contactPerson: "Елена Ким",
     });
+    // ONE call: `invalidateQueries` matches on key prefix, so the list key
+    // already covers `kmOrderQueryKey(id)` and the codes key beneath it.
+    expect(invalidate).toHaveBeenCalledTimes(1);
     expect(invalidate).toHaveBeenCalledWith({ queryKey: KM_ORDERS_QUERY_KEY });
+    expect(kmOrderQueryKey(ORDER_ID).slice(0, KM_ORDERS_QUERY_KEY.length)).toEqual([
+      ...KM_ORDERS_QUERY_KEY,
+    ]);
   });
 
   it("omits an absent contact person instead of sending null", async () => {
@@ -189,6 +195,56 @@ describe("km orders api client", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(jsonResponse({ orders: [listItem({ rawCode: "0104680…" })] })),
+    );
+    const { wrapper } = createWrapper();
+    const hook = renderHook(() => useKmOrders(), { wrapper });
+
+    await waitFor(() => expect(hook.result.current.isError).toBe(true));
+  });
+
+  /**
+   * СУЗ's own documented example. Its third group starts `11db`, so the
+   * variant nibble is `1` and every RFC 4122 validator rejects it -- while the
+   * server (`OmsClient`'s plain hexadecimal check) and the `uuid` column both
+   * pass it straight through to this response. Tightening `omsOrderId` back to
+   * `z.uuid()` would blank the list, the card and the print page on the first
+   * real order, so pin the shape here.
+   */
+  it("accepts the СУЗ order identifier shape, which is not an RFC 4122 UUID", async () => {
+    const documented = "11b1abc1-f1ee-11db-1a11-f11ac11111e1";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(jsonResponse({ orders: [listItem({ omsOrderId: documented })] })),
+    );
+    const { wrapper } = createWrapper();
+    const hook = renderHook(() => useKmOrders(), { wrapper });
+
+    await waitFor(() => expect(hook.result.current.data).toBeDefined());
+    expect(hook.result.current.data?.[0]?.omsOrderId).toBe(documented);
+  });
+
+  it("still refuses an omsOrderId that is not hexadecimal at all", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(jsonResponse({ orders: [listItem({ omsOrderId: "not-an-order-id" })] })),
+    );
+    const { wrapper } = createWrapper();
+    const hook = renderHook(() => useKmOrders(), { wrapper });
+
+    await waitFor(() => expect(hook.result.current.isError).toBe(true));
+  });
+
+  /** The exemption is СУЗ's alone: identifiers we mint stay strict. */
+  it("keeps our own order id on the strict UUID check", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse({
+          orders: [listItem({ id: "11b1abc1-f1ee-11db-1a11-f11ac11111e1" })],
+        }),
+      ),
     );
     const { wrapper } = createWrapper();
     const hook = renderHook(() => useKmOrders(), { wrapper });

@@ -121,9 +121,14 @@ export function kmOrderRefetchInterval(state: KmOrderState | undefined): number 
   return state !== undefined && isTerminalKmOrderState(state) ? false : 5_000;
 }
 
-function invalidateKmOrders(queryClient: QueryClient, orderId?: string) {
+/**
+ * One call, not two: `kmOrderQueryKey(id)` and `kmIssueCodesQueryKey(id, …)`
+ * both extend `KM_ORDERS_QUERY_KEY`, and `invalidateQueries` matches on key
+ * PREFIX -- so invalidating the list already invalidates every card and every
+ * code read under it.
+ */
+function invalidateKmOrders(queryClient: QueryClient) {
   void queryClient.invalidateQueries({ queryKey: KM_ORDERS_QUERY_KEY });
-  if (orderId) void queryClient.invalidateQueries({ queryKey: kmOrderQueryKey(orderId) });
 }
 
 /**
@@ -168,7 +173,7 @@ export function useCreateKmOrder(): UseMutationResult<KmOrder, Error, CreateKmOr
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: postKmOrder,
-    onSuccess: (created) => invalidateKmOrders(queryClient, created.id),
+    onSuccess: () => invalidateKmOrders(queryClient),
   });
 }
 
@@ -176,7 +181,7 @@ export function useRetryKmOrder(): UseMutationResult<KmOrder, Error, string> {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: postKmOrderRetry,
-    onSuccess: (retried) => invalidateKmOrders(queryClient, retried.id),
+    onSuccess: () => invalidateKmOrders(queryClient),
   });
 }
 
@@ -188,7 +193,7 @@ export function useIssueKmCodes(): UseMutationResult<KmIssue, Error, IssueKmCode
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: postKmIssue,
-    onSuccess: (_issue, input) => invalidateKmOrders(queryClient, input.orderId),
+    onSuccess: () => invalidateKmOrders(queryClient),
   });
 }
 

@@ -405,7 +405,7 @@ it("prints one calibration label without spending the batch or touching the serv
 
 it("sizes the media from the template it was handed, not from a fixed page", async () => {
   const { container } = renderPrintPage({
-    template: TEMPLATE.box,
+    template: TEMPLATE.stock,
     templateById: full({ spec: { ...SPEC, widthMm: 100, heightMm: 150 } }),
   });
 
@@ -420,10 +420,12 @@ it("sizes the media from the template it was handed, not from a fixed page", asy
   }
 });
 
-it("keeps an unchecked template size out of the @page stylesheet text", async () => {
+it("refuses a template whose size is not two usable millimetre numbers", async () => {
   // `useLabelTemplate` does not parse its response, and the `@page` rule is
-  // stylesheet TEXT rather than a React-sanitised style object.
-  const { container } = renderPrintPage({
+  // stylesheet TEXT rather than a React-sanitised style object. Rendering
+  // anyway would round the canvas to zero pixels and run blank stock through
+  // the printer over codes that are already spent.
+  const { container, print } = renderPrintPage({
     template: TEMPLATE.stock,
     templateById: full({
       spec: {
@@ -433,9 +435,21 @@ it("keeps an unchecked template size out of the @page stylesheet text", async ()
     }),
   });
 
-  await waitFor(() => expect(pages(container)).toHaveLength(3));
+  expect(await screen.findByText("Шаблон этикетки не задаёт размер")).toBeDefined();
+  expect(pages(container)).toHaveLength(0);
+  expect(container.querySelector("style")).toBeNull();
+  expect(print).not.toHaveBeenCalled();
+});
 
-  expect(container.querySelector("style")?.textContent).toBe("@page { margin: 0 }");
+it("refuses a non-positive label size rather than printing a zero-sized page", async () => {
+  const { container, print } = renderPrintPage({
+    template: TEMPLATE.stock,
+    templateById: full({ spec: { ...SPEC, heightMm: 0 } }),
+  });
+
+  expect(await screen.findByText("Шаблон этикетки не задаёт размер")).toBeDefined();
+  expect(pages(container)).toHaveLength(0);
+  expect(print).not.toHaveBeenCalled();
 });
 
 it("opens the print dialog once, across a re-render and a refetch", async () => {
@@ -496,6 +510,55 @@ it("explains itself instead of rendering a blank page when no template is eligib
   expect(pages(container)).toHaveLength(0);
   expect(print).not.toHaveBeenCalled();
   expect(screen.getByRole("link", { name: "Вернуться к заказу" })).toBeDefined();
+});
+
+/**
+ * A `?template=` URL is a string an operator keeps, mails or bookmarks, and
+ * it outlives the template it names. Only the DERIVED branch used to be
+ * checked, so a stale link printed whatever the id resolved to -- including a
+ * box label with no marking-code element at all, over codes already spent.
+ */
+it("refuses a handed-in template that was repurposed away from marking codes", async () => {
+  const { container, print } = renderPrintPage({
+    template: TEMPLATE.box,
+    templateById: full({ id: TEMPLATE.box, name: "Короб 100×150", purpose: "box" }),
+  });
+
+  expect(await screen.findByText("Нет шаблона этикетки для этих кодов")).toBeDefined();
+  expect(pages(container)).toHaveLength(0);
+  expect(print).not.toHaveBeenCalled();
+});
+
+it("refuses a handed-in template that has since been disabled", async () => {
+  const { container, print } = renderPrintPage({
+    template: TEMPLATE.stock,
+    templateById: full({ enabled: false }),
+  });
+
+  expect(await screen.findByText("Нет шаблона этикетки для этих кодов")).toBeDefined();
+  expect(pages(container)).toHaveLength(0);
+  expect(print).not.toHaveBeenCalled();
+});
+
+it("refuses a handed-in template scoped to another product group", async () => {
+  // The order is `water` (group 3); this template only prints beer.
+  const { container, print } = renderPrintPage({
+    template: TEMPLATE.beer,
+    templateById: full({ id: TEMPLATE.beer, name: "КМ для пива", chzProductGroupCodes: [7] }),
+  });
+
+  expect(await screen.findByText("Нет шаблона этикетки для этих кодов")).toBeDefined();
+  expect(pages(container)).toHaveLength(0);
+  expect(print).not.toHaveBeenCalled();
+});
+
+it("prints a handed-in template scoped to the order's own product group", async () => {
+  const { container } = renderPrintPage({
+    template: TEMPLATE.water,
+    templateById: full({ id: TEMPLATE.water, name: "КМ для воды", chzProductGroupCodes: [3] }),
+  });
+
+  await waitFor(() => expect(pages(container)).toHaveLength(3));
 });
 
 it("says the template is missing when the id in the link no longer resolves", async () => {
@@ -573,6 +636,9 @@ function renderGuardedRoute(
       if (options.batch === true) {
         if (url === orderUrl) return jsonResponse(order());
         if (url === `${orderUrl}/issues/${ID.issue}/codes`) return jsonResponse({ codes: CODES });
+        // Read on the handed-in path as well: the page checks the named
+        // template against the order's product group before it prints.
+        if (url === "/api/chz-product-groups") return jsonResponse({ items: GROUPS });
         if (url.startsWith("/api/label-templates/")) return jsonResponse(full());
       }
       throw new Error(`Unexpected request: ${url}`);

@@ -160,9 +160,18 @@ export function PreviewPane({
       <span style={{ font: "400 12px/16px var(--font-mono)", color: "var(--fg-3)" }}>
         {t("pages.labels.editor.zoomCaption", { scale })}
       </span>
+      {/* `preview-data.ts` maps BOTH code-bearing purposes to the same
+          synthetic marking code, so both need the disclaimer -- a KM preview
+          without one looks like a live code. They need different sentences:
+          a KM label is printed in the office from an issued order, not from a
+          code the line scanner just read. */}
       {purpose === "product_duplicate" ? (
         <span style={{ font: "var(--text-body-sm)", color: "var(--fg-3)" }}>
           {t("pages.labels.purpose.sample")}
+        </span>
+      ) : purpose === "product_km" ? (
+        <span style={{ font: "var(--text-body-sm)", color: "var(--fg-3)" }}>
+          {t("pages.labels.purpose.sampleKm")}
         </span>
       ) : null}
       {coverageStatus === "missing" && (

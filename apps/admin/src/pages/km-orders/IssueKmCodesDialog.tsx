@@ -32,9 +32,11 @@ const QUICK_COUNTS = [100, 500, 1000] as const;
  * `window.open` answers `null` when a popup blocker swallows the tab, and
  * throws outright in a sandboxed frame. Both mean the operator did not get
  * the tab, which -- the codes being already spent by then -- the dialog has
- * to say out loud rather than treat as a successful print.
+ * to say out loud rather than treat as a successful print. Shared with the
+ * order card's «Печать ещё раз», which opens the same page: that one spends
+ * no codes, but a button that silently does nothing is still a dead button.
  */
-function openPrintTab(href: string): Window | null {
+export function openPrintTab(href: string): Window | null {
   try {
     return window.open(href, "_blank") ?? null;
   } catch {
@@ -80,6 +82,8 @@ export function IssueKmCodesDialog({ open, mode, order, onClose }: IssueKmCodesD
   // Set only once the codes have already been issued and the tab was blocked:
   // the batch is gone, so the dialog stays and hands over its address.
   const [blockedPrintHref, setBlockedPrintHref] = useState<string | null>(null);
+  // Set when a close was refused because the request was still in the air.
+  const [closeRefused, setCloseRefused] = useState(false);
 
   const number = useMemo(() => new Intl.NumberFormat(i18n.language), [i18n.language]);
   const maxCount = Math.min(
@@ -195,6 +199,25 @@ export function IssueKmCodesDialog({ open, mode, order, onClose }: IssueKmCodesD
     onClose();
   };
 
+  /**
+   * The one way out of this dialog, and the reason it is not `onClose`
+   * itself: the server commits an issue the moment the request lands, and the
+   * parent renders this dialog only while a mode is selected, so a close
+   * during the round trip UNMOUNTS it. The operator who pressed Escape after
+   * one second of a sixty-thousand-code export then sees an untouched card,
+   * reads it as "I cancelled, so nothing happened", and issues the batch
+   * again -- no network fault required, only impatience. Escape, the overlay,
+   * the × and «Отмена» all arrive here, and while the mutation is pending all
+   * four say what is happening instead of vanishing.
+   */
+  const requestClose = () => {
+    if (issueCodes.isPending) {
+      setCloseRefused(true);
+      return;
+    }
+    onClose();
+  };
+
   // The submit button is unmounted together with the form below, which would
   // drop focus onto the body and out of the Modal's Tab trap. A stable ref
   // callback puts it on the recovery link once, without an effect.
@@ -205,7 +228,7 @@ export function IssueKmCodesDialog({ open, mode, order, onClose }: IssueKmCodesD
   return (
     <Modal
       open={open}
-      onClose={onClose}
+      onClose={requestClose}
       closeLabel={t("common.close")}
       title={t(
         mode === "export" ? "pages.kmOrders.issue.exportTitle" : "pages.kmOrders.issue.printTitle",
@@ -220,7 +243,7 @@ export function IssueKmCodesDialog({ open, mode, order, onClose }: IssueKmCodesD
           </Button>
         ) : (
           <>
-            <Button type="button" variant="secondary" onClick={onClose}>
+            <Button type="button" variant="secondary" onClick={requestClose}>
               {t("common.cancel")}
             </Button>
             <Button type="submit" form={FORM_ID} loading={issueCodes.isPending}>
@@ -251,6 +274,11 @@ export function IssueKmCodesDialog({ open, mode, order, onClose }: IssueKmCodesD
           noValidate
           onSubmit={(event) => void submit(event)}
         >
+          {closeRefused && issueCodes.isPending ? (
+            <Alert tone="warn" role="alert">
+              {t("pages.kmOrders.issue.closeWhilePending")}
+            </Alert>
+          ) : null}
           {tooMany !== null ? (
             <Alert tone="error" role="alert">
               {t("pages.kmOrders.issue.tooMany", { available: number.format(tooMany) })}

@@ -52,6 +52,34 @@ export const KM_ORDER_PREFLIGHT_CODES = [
 export const kmOrderPreflightCodeSchema = z.enum(KM_ORDER_PREFLIGHT_CODES);
 export type KmOrderPreflightCode = z.infer<typeof kmOrderPreflightCodeSchema>;
 
+/**
+ * `CHZ_KM_ORDER_SAFE_ERROR_CODES` from
+ * `apps/api/src/modules/chz-km-orders/chz-km-order-runner.service.ts`, in the
+ * same order -- the closed set the runner is allowed to write to
+ * `chz_km_orders.error_code`. The card translates each one; an identifier the
+ * server adds before the cabinet ships is shown raw rather than swallowed,
+ * which is why `errorCode` itself stays a plain string in the DTO: an
+ * untranslated reason is bad, a card that refuses to load is worse.
+ */
+export const KM_ORDER_ERROR_CODES = [
+  "CHZ_OMS_SETTINGS_MISSING",
+  "CHZ_OMS_TOKEN_UNAVAILABLE",
+  "CHZ_SIGNING_FAILED",
+  "CHZ_ORDER_REJECTED_BY_SUZ",
+  "CHZ_ORDER_SUBMIT_UNRECORDED",
+  "CHZ_ORDER_TIMED_OUT",
+  "CHZ_CODES_UNPARSEABLE",
+  "CHZ_CODES_DUPLICATE",
+  "CHZ_CODES_INCOMPLETE",
+  "CHZ_CODES_OVERDELIVERED",
+  "CHZ_JOB_RETRIES_EXHAUSTED",
+] as const;
+export type KmOrderErrorCode = (typeof KM_ORDER_ERROR_CODES)[number];
+
+export function isKmOrderErrorCode(value: string): value is KmOrderErrorCode {
+  return (KM_ORDER_ERROR_CODES as readonly string[]).includes(value);
+}
+
 export const KM_ISSUE_KINDS = ["export", "print"] as const;
 export const KM_ISSUE_FORMATS = ["txt", "csv"] as const;
 export const kmIssueKindSchema = z.enum(KM_ISSUE_KINDS);
@@ -70,6 +98,26 @@ export const KM_PRINT_ISSUE_MAX_COUNT = 5_000;
 const actorSchema = z.strictObject({ id: z.string().min(1), name: z.string() });
 
 const nonNegativeInteger = z.number().int().nonnegative();
+
+/**
+ * СУЗ's own order identifier, which is NOT an RFC 4122 UUID: its documented
+ * example `11b1abc1-f1ee-11db-1a11-f11ac11111e1` carries the variant nibble
+ * `1`, so `z.uuid()` rejects a perfectly real order. The whole chain agrees on
+ * the lax shape -- `OmsClient` validates the value it receives with this same
+ * plain hexadecimal pattern (`apps/api/.../chz-km-orders/oms.client.ts`), the
+ * `uuid` column stores it without a variant check, and the integrations screen
+ * checks the installation id the same way -- so the cabinet must not be the
+ * one place that is stricter. It is the only identifier here with that
+ * exemption: our own ids stay `z.uuid()`.
+ *
+ * Getting this wrong is not a cosmetic parse failure. `omsOrderId` is present
+ * on every order from `submitted` onwards, so a rejection blanks the list, the
+ * card AND the print page's own order query -- which would leave an
+ * already-issued batch unprintable from the office.
+ */
+const omsOrderIdSchema = z
+  .string()
+  .regex(/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/);
 
 export const kmIssueSchema = z.strictObject({
   id: z.uuid(),
@@ -92,7 +140,7 @@ export const kmOrderListItemSchema = z.strictObject({
   templateId: z.number().int(),
   quantity: z.number().int().positive(),
   state: kmOrderStateSchema,
-  omsOrderId: z.uuid().nullable(),
+  omsOrderId: omsOrderIdSchema.nullable(),
   bufferStatus: z.string().nullable(),
   bufferExpiresAt: z.iso.datetime().nullable(),
   availableCodes: nonNegativeInteger.nullable(),

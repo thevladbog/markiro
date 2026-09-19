@@ -173,7 +173,12 @@ export function CreateKmOrderDialog({ open, onClose }: { open: boolean; onClose:
           onChange={(event) => setQuantity(event.target.value)}
           {...(quantityError !== null
             ? { error: quantityError }
-            : { hint: t("pages.kmOrders.create.quantityHint") })}
+            : {
+                hint: t("pages.kmOrders.create.quantityHint", {
+                  min: number.format(1),
+                  max: number.format(KM_ORDER_MAX_QUANTITY),
+                }),
+              })}
         />
         <Input
           label={t("pages.kmOrders.create.contactPerson")}

@@ -22,8 +22,9 @@ import { useCan } from "../../access/context.js";
 import { formatCreatedAt } from "../../lib/datetime.js";
 import { useChzProductGroups } from "../catalog/api.js";
 import { kmIssueFileUrl, kmIssuePrintPath, useKmOrder, useRetryKmOrder } from "./api.js";
-import { IssueKmCodesDialog } from "./IssueKmCodesDialog.js";
+import { IssueKmCodesDialog, openPrintTab } from "./IssueKmCodesDialog.js";
 import {
+  isKmOrderErrorCode,
   KM_ORDER_STATES,
   type KmIssue,
   type KmIssueKind,
@@ -88,6 +89,10 @@ export function KmOrderPage() {
   const retry = useRetryKmOrder();
   const groups = useChzProductGroups();
   const [issueMode, setIssueMode] = useState<KmIssueKind | null>(null);
+  // Set when a popup blocker swallowed a «Печать ещё раз» tab. No codes are
+  // consumed by a reprint, so this costs nothing but a click -- but a button
+  // that does nothing at all reads as a broken cabinet.
+  const [blockedPrintHref, setBlockedPrintHref] = useState<string | null>(null);
   const number = useMemo(() => new Intl.NumberFormat(i18n.language), [i18n.language]);
   const order = query.data;
 
@@ -190,7 +195,10 @@ export function KmOrderPage() {
             type="button"
             variant="secondary"
             size="compact"
-            onClick={() => window.open(kmIssuePrintPath(order.id, issue.id), "_blank")}
+            onClick={() => {
+              const href = kmIssuePrintPath(order.id, issue.id);
+              setBlockedPrintHref(openPrintTab(href) === null ? href : null);
+            }}
           >
             {t("pages.kmOrders.card.repeatPrint")}
           </Button>
@@ -228,7 +236,16 @@ export function KmOrderPage() {
   const groupName =
     groups.data?.find((group) => group.alias === order.productGroupAlias)?.name ??
     order.productGroupAlias;
-  const reason = order.rejectionReason ?? order.errorMessage ?? order.errorCode;
+  // The server writes one of `KM_ORDER_ERROR_CODES` and leaves `errorMessage`
+  // null for all but the СУЗ refusals, so without this the office reads a bare
+  // `CHZ_CODES_INCOMPLETE` in an otherwise translated cabinet. A code this
+  // build does not know still shows raw -- better an untranslated identifier
+  // to quote to support than a blank alert.
+  const errorCodeText =
+    order.errorCode !== null && isKmOrderErrorCode(order.errorCode)
+      ? t(`pages.kmOrders.errorCode.${order.errorCode}`)
+      : order.errorCode;
+  const reason = order.rejectionReason ?? order.errorMessage ?? errorCodeText;
   const canIssue = canWrite && order.state === "completed" && order.availableForIssue > 0;
   const issuedPercent =
     order.fetchedCount === 0 ? 0 : Math.round((order.issuedCount / order.fetchedCount) * 100);
@@ -337,6 +354,14 @@ export function KmOrderPage() {
       {retry.isError ? (
         <Alert tone="error" role="alert">
           {t("pages.kmOrders.card.retryError")}
+        </Alert>
+      ) : null}
+      {blockedPrintHref !== null ? (
+        <Alert tone="warn" role="alert" title={t("pages.kmOrders.card.repeatPrintBlockedTitle")}>
+          {t("pages.kmOrders.card.repeatPrintBlocked")}{" "}
+          <a href={blockedPrintHref} target="_blank" rel="noreferrer">
+            {t("pages.kmOrders.issue.printBlockedLink")}
+          </a>
         </Alert>
       ) : null}
       {order.bufferExpiresAt !== null ? (

@@ -330,7 +330,7 @@
         "available": "Available to issue",
         "expiring": "Buffer expiring in 14 days",
         "active": "Active orders",
-        "issued": "Issued from orders created in 30 days"
+        "issued": "Issued from orders created in the last 30 days"
       },
       "list": {
         "scrollLabel": "Code orders table, scrolls horizontally",
@@ -364,7 +364,7 @@
         "productEmpty": "No products with a GTIN. Complete a product card in the catalog first.",
         "productLoadError": "Could not load the catalog. Refresh the page and try again.",
         "quantity": "Number of codes",
-        "quantityHint": "Between 1 and 150,000 codes per order.",
+        "quantityHint": "Between {{min}} and {{max}} codes per order.",
         "quantityRange": "Enter between {{min}} and {{max}} codes.",
         "contactPerson": "Contact person",
         "contactPersonHint": "Sent to SUZ with the order. Optional.",
@@ -383,6 +383,19 @@
         "PRODUCT_GTIN_MISSING": "Set the GTIN on the product card",
         "PRODUCT_GROUP_MISSING": "Set the Chestny ZNAK product group on the product card",
         "PRODUCT_GROUP_UNSUPPORTED": "Ordering codes is not available for this product group yet"
+      },
+      "errorCode": {
+        "CHZ_OMS_SETTINGS_MISSING": "The SUZ settings are not filled in. Complete them under Integrations and order again.",
+        "CHZ_OMS_TOKEN_UNAVAILABLE": "There is no valid SUZ token. Check the signer agent under Integrations, wait for the token to refresh, and order again.",
+        "CHZ_SIGNING_FAILED": "The order could not be signed. Check that the signer agent is running and the certificate token is plugged in, then order again.",
+        "CHZ_ORDER_REJECTED_BY_SUZ": "SUZ rejected the order. The reason is in your Chestny ZNAK account.",
+        "CHZ_ORDER_SUBMIT_UNRECORDED": "SUZ accepted and billed the order, but our record of it was lost. Find the order in your Chestny ZNAK account and take the codes from there — do not place a new order before you have checked.",
+        "CHZ_ORDER_TIMED_OUT": "SUZ did not deliver the codes in time. Check the order in your Chestny ZNAK account before ordering codes again.",
+        "CHZ_CODES_UNPARSEABLE": "SUZ returned codes in a format the cabinet could not read. The codes were not accepted and ordering again will not help — contact support.",
+        "CHZ_CODES_DUPLICATE": "SUZ returned a code this order already holds. The codes were not accepted — contact support.",
+        "CHZ_CODES_INCOMPLETE": "SUZ delivered fewer codes than were ordered and has no more to give. The codes you did receive can still be issued; place a separate order for the rest.",
+        "CHZ_CODES_OVERDELIVERED": "SUZ returned more codes than were ordered. The codes were not accepted — contact support.",
+        "CHZ_JOB_RETRIES_EXHAUSTED": "The order ran out of processing attempts. Press «Try again»; if it fails again, contact support."
       },
       "range": "№ {{from}} – {{to}}",
       "card": {
@@ -416,7 +429,7 @@
         "detailsOms": "SUZ order",
         "detailsBuffer": "Buffer status",
         "detailsGroup": "Product group",
-        "detailsTemplate": "SUZ code template",
+        "detailsTemplate": "SUZ template",
         "detailsSerial": "Serial numbers",
         "detailsSerialValue": "Assigned by the operator",
         "detailsRelease": "Release method",
@@ -434,7 +447,9 @@
         "issuesExportKind": "{{format}} file",
         "issuesPrintKind": "Print",
         "repeatDownload": "Download again",
-        "repeatPrint": "Print again"
+        "repeatPrint": "Print again",
+        "repeatPrintBlockedTitle": "The print tab did not open",
+        "repeatPrintBlocked": "The browser blocked the new tab. The codes in this issue are untouched — open the print page from the link."
       },
       "issue": {
         "exportTitle": "Download codes as a file",
@@ -462,9 +477,10 @@
         "submitExport": "Download",
         "submitPrint": "Print",
         "tooMany": "Only {{available}} codes are left. Choose a smaller amount.",
-        "genericError": "Could not issue the codes. Try again.",
+        "genericError": "Could not confirm that the codes were issued. They may already have been taken from the order: check «Code issues» on the order card before issuing again.",
+        "closeWhilePending": "The issue request is already on its way — wait for the answer. If the codes are taken, the batch appears under «Code issues» on the order card.",
         "printBlockedTitle": "Codes issued, but the print tab did not open",
-        "printBlocked": "The browser blocked the new tab. These codes have already been taken from the order — do not issue them again; open the print page from the link. You can reopen the same page later with \"Print again\" in the code issues list.",
+        "printBlocked": "The browser blocked the new tab. These codes have already been taken from the order — do not issue them again; open the print page from the link. You can reopen the same page later with «Print again» in the code issues list.",
         "printBlockedLink": "Open the print page"
       },
       "print": {
@@ -482,7 +498,9 @@
         "loadError": "Could not load the codes to print",
         "loadErrorHint": "These codes are already spent — do not issue them again. Retry the load, or reopen this page with «Print again» on the order card.",
         "templateMissing": "No label template for these codes",
-        "templateMissingHint": "Create an enabled template with the «Marking code» purpose for this order's product group under «Labels», then open printing again. The codes in this issue are not lost.",
+        "templateMissingHint": "Create an enabled template with the «KM label» purpose for this order's product group under «Labels», then open printing again. The codes in this issue are not lost.",
+        "templateUnsized": "The label template gives no usable size",
+        "templateUnsizedHint": "The template does not state the label width and height in millimetres, so there is nothing to print. Fix it under «Labels» and open printing again. The codes in this issue are not lost.",
         "empty": "This issue holds no codes",
         "emptyHint": "Open the order card and check its issue history.",
         "labelAria": "Label no. {{seq}}",
@@ -494,7 +512,7 @@
         "degraded_other": "Could not render {{formatted}} labels of {{total}}",
         "degradedHint": "Those pages will come out blank. Cancel the print dialog: the codes in this issue are already spent, and «Print again» on the order card reopens this page.",
         "printFirst": "Print the first label",
-        "printFirstHint": "The first run on a label printer is a calibration: print one label, check the margins, the offset and that the code scans, and only then print the whole issue."
+        "printFirstHint": "The first run on new media is a calibration. The dialog for the whole issue opens by itself: cancel it, press «Print the first label», check the margins, the offset and that the code scans, and only then print the whole issue."
       }
     },
     "inventory": {
@@ -2396,6 +2414,7 @@
         "product_km": "KM label",
         "invalid": "One Data Matrix containing the full product code must fit inside the label. SSCC is not allowed.",
         "sample": "Synthetic sample code. The line prints the code received from the scanner.",
+        "sampleKm": "Synthetic sample code. A real print run uses marking codes from a code order.",
         "copy": "Create a copy",
         "copyName": "{{name}} — copy",
         "copyHint": "A new template will be created. Check its purpose and content before saving.",
@@ -2986,7 +3005,10 @@
           "action": "Placard",
           "title": "Pallet placard",
           "formatLabel": "Paper size",
-          "format": { "a4": "A4", "a5": "A5" },
+          "format": {
+            "a4": "A4",
+            "a5": "A5"
+          },
           "open": "Open",
           "hint": "Opens in a new tab — print it on an office printer and attach it to the pallet."
         },

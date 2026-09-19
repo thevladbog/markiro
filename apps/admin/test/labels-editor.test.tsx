@@ -1071,6 +1071,27 @@ it("builds the stock KM label when its purpose is selected", async () => {
   });
 });
 
+/**
+ * `preview-data.ts` maps the KM purpose to the SAME synthetic marking code as
+ * the duplicate purpose, so a KM preview without a disclaimer looks like a
+ * live code on screen. The two sentences differ on purpose: a KM label is
+ * printed in the office from an issued code order, not from a code the line
+ * scanner just read.
+ */
+it("captions the KM preview as a sample, in its own words", async () => {
+  renderCreateFlow();
+  await chooseOption(userEvent.setup(), "Назначение", "Этикетка КМ");
+
+  expect(
+    screen.getByText(
+      "Образец с синтетическим кодом. В печать уходят коды маркировки из заказа кодов.",
+    ),
+  ).toBeDefined();
+  expect(
+    screen.queryByText("Образец с синтетическим кодом. На линии печатается код со сканера."),
+  ).toBeNull();
+});
+
 it("refuses to save an imported layout without a product code as a KM label", async () => {
   const fetchMock = stubCreateFetch("invalid-km");
   renderCreateFlow();

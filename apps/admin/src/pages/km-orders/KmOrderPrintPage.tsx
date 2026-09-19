@@ -43,7 +43,12 @@ import { useLabelTemplate, useLabelTemplates } from "../labels/api.js";
 import { compositeRasterText, PREVIEW_FONT_FAMILY } from "../labels/raster-composite.js";
 import { draw, type LabelRenderOptions } from "../labels/renderer.js";
 import { useKmIssueCodes, useKmOrder } from "./api.js";
-import { eligibleKmTemplates, kmOrderGroupCode, preferredKmTemplate } from "./km-template.js";
+import {
+  eligibleKmTemplates,
+  isKmTemplateEligible,
+  kmOrderGroupCode,
+  preferredKmTemplate,
+} from "./km-template.js";
 import type { KmIssueCode, KmOrder } from "./schemas.js";
 import "./print.css";
 
@@ -110,18 +115,38 @@ export function kmLabelData(
   };
 }
 
+/** A label's millimetre size, once it has been checked and can be trusted. */
+export interface PrintLabelSizeMm {
+  readonly widthMm: number;
+  readonly heightMm: number;
+}
+
 /**
- * The `@page` rule the browser sizes the media from. It is stylesheet TEXT,
- * not a React-sanitised style object, and `useLabelTemplate` hands back a
- * response it never parsed -- so the two numbers are checked here rather than
- * trusted, and a template that cannot say how big its label is falls back to
- * the browser's own paper rather than to whatever the field contained.
+ * The template's label size, or `null` when the response cannot say how big
+ * its label is. THE single guard on those two numbers: `useLabelTemplate`
+ * hands back a body it never parsed, and each consumer fails silently on a
+ * bad one rather than loudly. The `@page` rule is stylesheet TEXT, so a
+ * string field would land in the document verbatim; `widthMm * SCALE` rounds
+ * a non-finite value into a zero-pixel canvas, which paints every label in
+ * the batch blank -- over codes that are already spent -- and the page-box
+ * style would print `NaNmm` boxes to match.
  */
-export function printMediaRule(spec: Pick<LabelTemplateSpec, "widthMm" | "heightMm">): string {
+export function printLabelSizeMm(
+  spec: Pick<LabelTemplateSpec, "widthMm" | "heightMm">,
+): PrintLabelSizeMm | null {
   const { widthMm, heightMm } = spec;
-  const sized =
-    Number.isFinite(widthMm) && Number.isFinite(heightMm) && widthMm > 0 && heightMm > 0;
-  return sized ? `@page { size: ${widthMm}mm ${heightMm}mm; margin: 0 }` : "@page { margin: 0 }";
+  if (!Number.isFinite(widthMm) || !Number.isFinite(heightMm) || widthMm <= 0 || heightMm <= 0) {
+    return null;
+  }
+  return { widthMm, heightMm };
+}
+
+/** The `@page` rule the browser sizes the media from, from that one guard. */
+export function printMediaRule(spec: Pick<LabelTemplateSpec, "widthMm" | "heightMm">): string {
+  const size = printLabelSizeMm(spec);
+  return size === null
+    ? "@page { margin: 0 }"
+    : `@page { size: ${size.widthMm}mm ${size.heightMm}mm; margin: 0 }`;
 }
 
 /** One label's terminal state: a PNG to show, or a page that stays blank. */
@@ -146,10 +171,15 @@ function PrintSheet({
   order,
   codes,
   spec,
+  // Passed in rather than re-read off `spec`, so every millimetre on this
+  // sheet comes from the one guard the page has already applied: the type
+  // makes it impossible to render a batch whose size was never checked.
+  size,
 }: {
   order: KmOrder;
   codes: KmIssueCode[];
   spec: LabelTemplateSpec;
+  size: PrintLabelSizeMm;
 }) {
   const { t, i18n } = useTranslation();
   const number = useMemo(() => new Intl.NumberFormat(i18n.language), [i18n.language]);
@@ -165,8 +195,8 @@ function PrintSheet({
     [codes, product],
   );
 
-  const widthPx = Math.round(spec.widthMm * SCALE);
-  const heightPx = Math.round(spec.heightMm * SCALE);
+  const widthPx = Math.round(size.widthMm * SCALE);
+  const heightPx = Math.round(size.heightMm * SCALE);
   const [rasters, setRasters] = useState<ReadonlyMap<number, LabelRaster>>(() => new Map());
 
   useEffect(() => {
@@ -328,7 +358,7 @@ function PrintSheet({
     <div className={cn("mk-km-print", firstOnly && "mk-km-print--first-only")} ref={sheetRef}>
       {/* Emitted inline, not in `print.css`: the media size is the template's,
           and only this render knows it. */}
-      <style>{printMediaRule(spec)}</style>
+      <style>{printMediaRule(size)}</style>
       <header className="mk-km-print__screen-only">
         <h1 className="mk-km-print__title">
           {t("pages.kmOrders.print.heading", {
@@ -346,7 +376,7 @@ function PrintSheet({
           })}
         </p>
         <p className="mk-km-print__note">
-          {t("pages.kmOrders.print.note", { width: spec.widthMm, height: spec.heightMm })}
+          {t("pages.kmOrders.print.note", { width: size.widthMm, height: size.heightMm })}
         </p>
         {allReady ? null : (
           <p className="mk-km-print__note" role="status">
@@ -398,7 +428,7 @@ function PrintSheet({
             key={label.seq}
             className="mk-km-print__page"
             data-ready={raster === undefined ? "false" : "true"}
-            style={{ width: `${spec.widthMm}mm`, height: `${spec.heightMm}mm` }}
+            style={{ width: `${size.widthMm}mm`, height: `${size.heightMm}mm` }}
           >
             {raster !== undefined && raster.kind === "ready" ? (
               <img
@@ -465,7 +495,10 @@ export function KmOrderPrintPage() {
   // needs a schema change.
   const requested = search.get("template")?.trim() ?? "";
   const derive = requested === "";
-  const groups = useChzProductGroups({ enabled: derive });
+  // Read on BOTH paths, not only the derived one: the group code is what
+  // decides whether a group-scoped template may print this order's codes, and
+  // a `?template=` link has to face that question too (see below).
+  const groups = useChzProductGroups();
   const templates = useLabelTemplates({ enabled: "true" }, { enabled: derive });
   const derived = useMemo(() => {
     if (!derive || templates.data === undefined || order.data === undefined) return null;
@@ -513,8 +546,8 @@ export function KmOrderPrintPage() {
   // A reference this page cannot read would silently drop every group-scoped
   // template and hand the office the universal one in its place, or claim it
   // has none at all. Same rule as the issue dialog: say so instead.
-  const referenceError = derive && (templates.isError || groups.isError);
-  const referencePending = derive && (templates.isPending || groups.isPending);
+  const referenceError = groups.isError || (derive && templates.isError);
+  const referencePending = groups.isPending || (derive && templates.isPending);
 
   if (order.isPending || codes.isPending || (referencePending && !referenceError)) {
     return (
@@ -552,5 +585,36 @@ export function KmOrderPrintPage() {
     );
   }
 
-  return <PrintSheet order={order.data} codes={codes.data} spec={template.data.spec} />;
+  // The same rule the derived branch applies through `eligibleKmTemplates`,
+  // now applied to a template the LINK named. A `?template=` URL is a string
+  // an operator can keep, mail or bookmark, and it outlives the template being
+  // disabled, rescoped to another product group or repurposed into a box
+  // label -- any of which would print plausible-looking labels carrying no
+  // marking code at all, over codes that are already spent.
+  const groupCode = kmOrderGroupCode(groups.data, order.data.productGroupAlias);
+  if (!isKmTemplateEligible(template.data, groupCode)) {
+    return (
+      <PrintMessage
+        orderId={orderId}
+        title={t("pages.kmOrders.print.templateMissing")}
+        hint={t("pages.kmOrders.print.templateMissingHint")}
+      />
+    );
+  }
+
+  // `useLabelTemplate` never parsed this body, and a label whose size is not
+  // two usable millimetre numbers rasterizes to a blank page rather than
+  // failing: refuse instead of running blank stock over spent codes.
+  const size = printLabelSizeMm(template.data.spec);
+  if (size === null) {
+    return (
+      <PrintMessage
+        orderId={orderId}
+        title={t("pages.kmOrders.print.templateUnsized")}
+        hint={t("pages.kmOrders.print.templateUnsizedHint")}
+      />
+    );
+  }
+
+  return <PrintSheet order={order.data} codes={codes.data} spec={template.data.spec} size={size} />;
 }

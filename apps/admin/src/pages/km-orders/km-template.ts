@@ -21,9 +21,20 @@ import type { LabelTemplateSummaryDto } from "../labels/api.js";
  * category rule as `isBoxLabelTemplateEligible` /
  * `isPalletLabelTemplateEligible` in `@markiro/domain`, which are gated on
  * their own purposes.
+ *
+ * Takes the three fields it actually reads rather than a whole summary, so
+ * the print page can put a template it fetched BY ID through the identical
+ * rule: a `?template=` link is an operator-held string that can outlive the
+ * template being disabled or repurposed, and only the derived path used to be
+ * checked.
  */
+export type KmTemplateEligibility = Pick<
+  LabelTemplateSummaryDto,
+  "purpose" | "enabled" | "chzProductGroupCodes"
+>;
+
 export function isKmTemplateEligible(
-  template: LabelTemplateSummaryDto,
+  template: KmTemplateEligibility,
   chzProductGroupCode: number | null,
 ): boolean {
   if (template.purpose !== "product_km" || !template.enabled) return false;
