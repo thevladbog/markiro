@@ -386,10 +386,27 @@ function fixtures(locale: AdminLocale) {
   };
 
   /**
-   * One dimension per state the panel can show, so the frame carries the whole
-   * vocabulary the document defines: production is ready, code ordering is
-   * blocked by a missing attribute, circulation needs a re-check after a new
-   * schema, EGAIS does not apply to this product group.
+   * What `evaluateProductReadiness` actually returns for the attribute data
+   * above (`packages/domain/src/product-attributes/readiness.ts`; for a
+   * product that has a profile, `readiness.service.ts` returns its output
+   * unchanged): production carries the group and both capacities, code
+   * ordering is ready because `volume` -- its only mandatory attribute -- has
+   * a value, circulation is blocked by the empty mandatory `composition` and
+   * carries the empty recommended `package` beneath it, and EGAIS does not
+   * apply to product group 23.
+   *
+   * Three of the four states is the most one frame can carry, so do not add a
+   * fourth: `stale` can only come from a regulatory dimension,
+   * `evaluateRegulatoryDimension` branches on the single shared
+   * `input.schemaStale`, so code ordering and circulation are stale together
+   * or not at all, and neither `production` nor `egais` can ever be stale.
+   * That branch also returns no recommendations, and `activeRequirementRules`
+   * filters strictly by layer, so a `circulation` rule can never surface
+   * under `code_ordering`.
+   *
+   * `schemaVersionId` is what the evaluator stamps on every attribute reason;
+   * the panel does not print it, but omitting it would document a response
+   * shape the API never sends.
    */
   const READINESS = {
     productId: PRODUCT_ID,
@@ -402,15 +419,27 @@ function fixtures(locale: AdminLocale) {
       },
       {
         dimension: "code_ordering" as const,
-        state: "not_ready" as const,
-        reasons: [{ code: "ATTRIBUTE_REQUIRED", attributeId: "composition" }],
+        state: "ready" as const,
+        reasons: [],
         recommendations: [],
       },
       {
         dimension: "circulation" as const,
-        state: "stale" as const,
-        reasons: [{ code: "SCHEMA_VERSION_STALE" }],
-        recommendations: [{ code: "ATTRIBUTE_RECOMMENDED", attributeId: "package" }],
+        state: "not_ready" as const,
+        reasons: [
+          {
+            code: "ATTRIBUTE_REQUIRED",
+            attributeId: "composition",
+            schemaVersionId: "40000000-0000-4000-8000-000000000001",
+          },
+        ],
+        recommendations: [
+          {
+            code: "ATTRIBUTE_RECOMMENDED",
+            attributeId: "package",
+            schemaVersionId: "40000000-0000-4000-8000-000000000001",
+          },
+        ],
       },
       {
         dimension: "egais" as const,
@@ -674,11 +703,35 @@ for (const locale of LOCALES) {
     await expect(
       page.getByRole("heading", { name: t("pages.catalog.regulatory.readiness") }),
     ).toBeVisible();
+    // Assert every dimension's own state rather than "some element says
+    // Ready": the frame's whole job is which operation stands where, and a
+    // page-wide text assertion passes just as happily when two dimensions
+    // swap states.
+    const stateOf = (dimension: string) =>
+      page
+        .locator(".mk-readiness-list > li")
+        .filter({
+          has: page.getByText(t(`pages.catalog.regulatory.dimensions.${dimension}`), {
+            exact: true,
+          }),
+        })
+        .locator(".mk-readiness-state");
+    const states = "pages.catalog.regulatory.states.";
+    await expect(stateOf("production")).toHaveText(t(`${states}ready`));
+    await expect(stateOf("code_ordering")).toHaveText(t(`${states}ready`));
+    await expect(stateOf("circulation")).toHaveText(t(`${states}not_ready`));
+    await expect(stateOf("egais")).toHaveText(t(`${states}not_applicable`));
     await expect(
-      page.getByText(t("pages.catalog.regulatory.states.ready"), { exact: true }),
+      page.getByText(
+        t("pages.catalog.regulatory.reasons.ATTRIBUTE_REQUIRED", { field: copy.attrComposition }),
+        { exact: true },
+      ),
     ).toBeVisible();
     await expect(
-      page.getByText(t("pages.catalog.regulatory.states.not_applicable"), { exact: true }),
+      page.getByText(
+        t("pages.catalog.regulatory.reasons.ATTRIBUTE_RECOMMENDED", { field: copy.attrPackage }),
+        { exact: true },
+      ),
     ).toBeVisible();
     await screenshotSection(
       page,

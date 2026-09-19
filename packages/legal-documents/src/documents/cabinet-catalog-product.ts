@@ -121,7 +121,7 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
           {
             kind: "step",
             title: "Сохраните карточку",
-            text: "Нажмите «Сохранить». Остальные поля раздела «Агрегация и цена» — «Цена за шт., ₽», «Срок годности, дней», а у части товарных групп ЕГАИС ещё и «Код ЕГАИС» (см. раздел 6), — необязательны и на статус не влияют. У сохранённой карточки над полями появляются две вкладки — «Основное» и «Честный знак»: готовность, категория и характеристики живут на второй (разделы 5 и 6).",
+            text: "Нажмите «Сохранить». Остальные поля раздела «Агрегация и цена» — «Цена за шт., ₽», «Срок годности, дней», а у товарной группы, продукция которой учитывается в ЕГАИС, ещё и «Код ЕГАИС» (см. раздел 6), — необязательны и на статус не влияют. У сохранённой карточки над полями появляются две вкладки — «Основное» и «Честный знак»: готовность, категория и характеристики живут на второй (разделы 5 и 6).",
             image: {
               id: "product-active",
               caption: "Заполненная карточка: группа и обе вместимости на месте",
@@ -155,7 +155,8 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
             text: "Блок «Готовность» показывает четыре измерения — «Производство», «Заказ кодов», «Ввод в оборот» и «ЕГАИС» — и состояние каждого: «Готово», «Не готово», «Нужна актуализация» или «Не применяется». Под измерением перечислено, чего не хватает; бледные строки ниже — рекомендации: они операцию не блокируют. «Не применяется» означает, что операция к этой товарной группе не относится — так подписан «ЕГАИС» у безалкогольного товара.",
             image: {
               id: "product-readiness",
-              caption: "Готовность по операциям: производство готово, заказ кодов — нет",
+              caption:
+                "Готовность по операциям: производство и заказ кодов готовы, ввод в оборот ждёт характеристику",
             },
             expected: "Видно, какая операция уже доступна, а какая ждёт данных.",
           },
@@ -212,7 +213,7 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
           {
             kind: "callout",
             tone: "info",
-            text: "Если в форме есть несохранённые правки «ГТИН» или «Группа продукции», кабинет блокирует эти блоки и показывает подсказку «Сначала сохраните основные данные товара, затем изменяйте категорию и характеристики.».",
+            text: "Если в форме есть несохранённые правки «ГТИН» или «Группа продукции», кабинет блокирует эти блоки и показывает подсказку «Сначала сохраните основные данные товара, затем изменяйте категорию и характеристики.». Замок работает и в обратную сторону: пока в блоке категории, характеристик или кодов ЕГАИС остались несохранённые правки, кабинет показывает «Сначала сохраните или отмените правки категории и характеристик.», поля вкладки «Основное» заблокированы, а кнопка «Сохранить» недоступна. Отдельная кнопка у каждого блока не делает блоки независимыми: незакрытая правка в одном из них останавливает работу в другом.",
           },
           {
             kind: "step",
@@ -557,7 +558,7 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
           {
             kind: "step",
             title: "Save the card",
-            text: "Press “Save”. The remaining fields of “Aggregation and price” — “Price per unit, ₽”, “Shelf life, days”, and for some EGAIS product groups also “EGAIS code” (see section 6) — are optional and do not affect the status. A saved card gains two tabs above the fields, “Basic” and “Chestny ZNAK”: readiness, the category and the attributes live on the second one (sections 5 and 6).",
+            text: "Press “Save”. The remaining fields of “Aggregation and price” — “Price per unit, ₽”, “Shelf life, days”, and for the product group whose goods are tracked in EGAIS also “EGAIS code” (see section 6) — are optional and do not affect the status. A saved card gains two tabs above the fields, “Basic” and “Chestny ZNAK”: readiness, the category and the attributes live on the second one (sections 5 and 6).",
             image: {
               id: "product-active",
               caption: "A complete card: the group and both capacities are in place",
@@ -591,7 +592,8 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
             text: "The “Readiness” block shows four dimensions — “Production”, “Code ordering”, “Putting into circulation” and “EGAIS” — and the state of each: “Ready”, “Not ready”, “Update required” or “Not applicable”. Under a dimension the cabinet lists what is missing; the paler lines below are recommendations and do not block the operation. “Not applicable” means the operation does not concern this product group — that is how “EGAIS” is marked for a non-alcoholic product.",
             image: {
               id: "product-readiness",
-              caption: "Readiness per operation: production is ready, code ordering is not",
+              caption:
+                "Readiness per operation: production and code ordering are ready, putting into circulation waits for an attribute",
             },
             expected:
               "It is visible which operation is already available and which waits for data.",
@@ -649,7 +651,7 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
           {
             kind: "callout",
             tone: "info",
-            text: "While the form holds unsaved edits to “GTIN” or “Product group”, the cabinet locks these blocks and shows the hint “Save the main product details before editing its category and attributes.”.",
+            text: "While the form holds unsaved edits to “GTIN” or “Product group”, the cabinet locks these blocks and shows the hint “Save the main product details before editing its category and attributes.”. The lock works the other way round too: while the category, the attributes or the EGAIS codes hold unsaved edits, the cabinet shows “Save or discard category and attribute edits first.”, the fields of the “Basic” tab stay locked and the card's “Save” button is unavailable. A button of its own per block does not make the blocks independent: an unfinished edit in one of them stops the work in another.",
           },
           {
             kind: "step",

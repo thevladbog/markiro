@@ -139,10 +139,11 @@ const REGULATORY_PROFILE = {
 };
 
 /**
- * One dimension per state the panel can show, so the frame carries the whole
- * vocabulary the document defines: production is ready, code ordering is
- * blocked by a missing attribute, circulation needs a re-check after a new
- * schema, EGAIS does not apply to this product group.
+ * What `evaluateProductReadiness` returns for the attribute data above.
+ * Three of the four states is the most one frame can carry: `stale` only
+ * comes from a regulatory dimension, both regulatory dimensions branch on the
+ * single shared `input.schemaStale`, and that branch returns no
+ * recommendations.
  */
 const READINESS = {
   productId: PRODUCT_ID,
@@ -150,15 +151,27 @@ const READINESS = {
     { dimension: "production" as const, state: "ready" as const, reasons: [], recommendations: [] },
     {
       dimension: "code_ordering" as const,
-      state: "not_ready" as const,
-      reasons: [{ code: "ATTRIBUTE_REQUIRED", attributeId: "composition" }],
+      state: "ready" as const,
+      reasons: [],
       recommendations: [],
     },
     {
       dimension: "circulation" as const,
-      state: "stale" as const,
-      reasons: [{ code: "SCHEMA_VERSION_STALE" }],
-      recommendations: [{ code: "ATTRIBUTE_RECOMMENDED", attributeId: "package" }],
+      state: "not_ready" as const,
+      reasons: [
+        {
+          code: "ATTRIBUTE_REQUIRED",
+          attributeId: "composition",
+          schemaVersionId: "40000000-0000-4000-8000-000000000001",
+        },
+      ],
+      recommendations: [
+        {
+          code: "ATTRIBUTE_RECOMMENDED",
+          attributeId: "package",
+          schemaVersionId: "40000000-0000-4000-8000-000000000001",
+        },
+      ],
     },
     {
       dimension: "egais" as const,
@@ -169,6 +182,14 @@ const READINESS = {
   ],
 };
 ```
+
+Первая редакция этой фикстуры была сверена с текстом документа, но не с
+`packages/domain/src/product-attributes/readiness.ts`, и описывала экран,
+который продукт выдать не может: два регулятивных измерения ветвятся по
+одному `input.schemaStale`, ветка `stale` не возвращает рекомендаций, а
+`activeRequirementRules` фильтрует правила строго по слою, поэтому правило
+`circulation` не может всплыть под «Заказом кодов». Любую фикстуру
+готовности сверять с вычислителем, а не с текстом.
 
 `productAttributeValueSchema` — дискриминированное по `type` объединение `.strict()`; вариант `decimal` это `{ type: "decimal", value: "<строка-число>", unit: string | null }`. Другие варианты: `string`, `string_list`, `boolean`, `date`, `enum`, `enum_list`.
 
