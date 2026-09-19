@@ -1,9 +1,9 @@
 # Station shift card and compact header — design
 
-**Status:** accepted by the owner 2026-09-20 (pen.dev mock, variant A «фото-панель»
-
-- variant D «компактная шапка»; canvas frames `10A`, `10D` and the notes frame
-  `10 Заметки к вариантам карточки смены` in `pencil-new.pen`).
+**Status:** accepted by the owner 2026-09-20 (pen.dev mock: variant A
+«фото-панель» together with variant D «компактная шапка»; canvas frames `10A`,
+`10D` and the notes frame `10 Заметки к вариантам карточки смены` in
+`pencil-new.pen`).
 
 ## Problem
 

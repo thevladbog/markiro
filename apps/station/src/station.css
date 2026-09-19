@@ -2203,7 +2203,9 @@ body,
   padding: var(--sp-2) var(--sp-2) var(--sp-1) 0;
   overflow: hidden;
   gap: var(--sp-1);
-  grid-template-rows: auto minmax(0, 1fr) auto auto auto auto 72px;
+  /* Факты стоят под заголовком плотной группой; свободное место уходит в
+     пустую дорожку ПЕРЕД кнопкой, а не между заголовком и датами. */
+  grid-template-rows: auto auto auto auto auto auto minmax(0, 1fr) 72px;
 }
 
 .shift-card__heading {
@@ -2314,9 +2316,6 @@ body,
 .shift-card__product {
   display: -webkit-box;
   align-self: start;
-  /* The row is minmax(0, 1fr): without this cap a long clamped title still
-     overflows the track and overlaps the dates/mode rows below. */
-  max-height: 100%;
   overflow: hidden;
   font: var(--floor-lg);
   letter-spacing: -0.015em;
