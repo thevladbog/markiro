@@ -7,11 +7,12 @@ import { DB } from "../../auth/auth.module";
 import { JournalService } from "../integrations/journal.service";
 import { CHZ_CHANNEL_TYPE } from "../signer-agents/chz-constants";
 import { ChzCryptoService } from "../signer-agents/chz-crypto.service";
-import { ChzOmsTokenService } from "./chz-oms-token.service";
+import { ChzOmsTokenService, type ChzOmsTokenResult } from "./chz-oms-token.service";
 import { OmsClient } from "./oms.client";
 import type { OmsAuth, OmsCodesBlock } from "./oms.types";
 
 type OrderRow = typeof schema.chzKmOrders.$inferSelect;
+type ActiveOmsToken = Extract<ChzOmsTokenResult, { status: "ok" }>;
 
 export const MAX_SIGN_ATTEMPTS = 5;
 export const CODES_BLOCK_SIZE = 10_000;
@@ -30,6 +31,8 @@ export const CHZ_KM_ORDER_SAFE_ERROR_CODES = [
   "CHZ_ORDER_TIMED_OUT",
   "CHZ_CODES_UNPARSEABLE",
   "CHZ_CODES_DUPLICATE",
+  "CHZ_CODES_INCOMPLETE",
+  "CHZ_CODES_OVERDELIVERED",
   "CHZ_JOB_RETRIES_EXHAUSTED",
 ] as const;
 export type ChzKmOrderSafeErrorCode = (typeof CHZ_KM_ORDER_SAFE_ERROR_CODES)[number];
@@ -84,31 +87,14 @@ export class ChzKmOrderRunnerService {
       return { finished: true, retryAfterSeconds: 0 };
     }
     if (order.state === "created") return this.startSigning(order);
-    if (order.state === "signing") return this.finishSigning(order);
+    if (order.state === "signing") return this.finishSigning(order, attempt);
 
-    const token = await this.tokens.getActiveToken(tenantId);
-    if (token.status !== "ok") {
-      if (
-        token.status === "unconfigured" ||
-        token.status === "undecryptable" ||
-        token.status === "settings_missing" ||
-        attempt.retryCount >= attempt.retryLimit
-      ) {
-        await this.fail(
-          order,
-          token.status === "settings_missing"
-            ? "CHZ_OMS_SETTINGS_MISSING"
-            : "CHZ_OMS_TOKEN_UNAVAILABLE",
-          null,
-        );
-        return { finished: true, retryAfterSeconds: 0 };
-      }
-      return { finished: false, retryAfterSeconds: TOKEN_WAIT_SECONDS };
-    }
+    const token = await this.requireToken(order, attempt);
+    if (token.status !== "ok") return token.outcome;
 
     try {
       if (order.state === "submitted" || order.state === "buffer_pending") {
-        order = await this.pollBuffer(order, token.auth, attempt);
+        order = await this.pollBuffer(order, token.auth);
         if (!order || order.state !== "buffer_active") {
           return {
             finished: order ? TERMINAL.has(order.state) : true,
@@ -133,37 +119,83 @@ export class ChzKmOrderRunnerService {
     };
   }
 
+  /**
+   * The one place that decides what a non-`ok` token status means. An
+   * unconfigured or rotated encryption key and missing СУЗ settings are
+   * operator work that no amount of waiting resolves, so they end the order
+   * with the diagnosis that names them; every other status is transient and
+   * worth another pass until the job's own retry budget is spent. Signing
+   * goes through here too: an order for a tenant with no СУЗ settings must
+   * not sit in `signing` re-polling a permanently broken token while it
+   * holds the tenant's only signing slot.
+   */
+  private async requireToken(
+    order: OrderRow,
+    attempt: AttemptContext,
+  ): Promise<ActiveOmsToken | { status: "stop"; outcome: RunOutcome }> {
+    const token = await this.tokens.getActiveToken(order.tenantId);
+    if (token.status === "ok") return token;
+    if (
+      token.status === "unconfigured" ||
+      token.status === "undecryptable" ||
+      token.status === "settings_missing" ||
+      attempt.retryCount >= attempt.retryLimit
+    ) {
+      await this.fail(
+        order,
+        token.status === "settings_missing"
+          ? "CHZ_OMS_SETTINGS_MISSING"
+          : "CHZ_OMS_TOKEN_UNAVAILABLE",
+        null,
+      );
+      return { status: "stop", outcome: { finished: true, retryAfterSeconds: 0 } };
+    }
+    return { status: "stop", outcome: { finished: false, retryAfterSeconds: TOKEN_WAIT_SECONDS } };
+  }
+
   private async startSigning(order: OrderRow): Promise<RunOutcome> {
     if (order.attempts >= MAX_SIGN_ATTEMPTS) {
       await this.fail(order, "CHZ_SIGNING_FAILED", null);
       return { finished: true, retryAfterSeconds: 0 };
     }
     const dataBase64 = Buffer.from(order.requestBody, "utf8").toString("base64");
-    const inserted = await this.db.transaction(async (tx) => {
-      const [task] = await tx
-        .insert(schema.chzSignerTasks)
-        .values({
-          tenantId: order.tenantId,
-          type: "sign_detached",
-          payload: { purpose: "oms_order", orderId: order.id, dataBase64 },
-        })
-        .onConflictDoNothing()
-        .returning({ id: schema.chzSignerTasks.id });
-      if (!task) return null;
-      const now = new Date();
-      const [updated] = await tx
-        .update(schema.chzKmOrders)
-        .set({
-          state: "signing",
-          signerTaskId: task.id,
-          claimedAt: now,
-          attempts: sql`${schema.chzKmOrders.attempts} + 1`,
-          updatedAt: now,
-        })
-        .where(this.ownedOrderInState(order, "created"))
-        .returning({ id: schema.chzKmOrders.id });
-      return updated ? task.id : null;
-    });
+    let inserted: string | null;
+    try {
+      inserted = await this.db.transaction(async (tx) => {
+        const [task] = await tx
+          .insert(schema.chzSignerTasks)
+          .values({
+            tenantId: order.tenantId,
+            type: "sign_detached",
+            payload: { purpose: "oms_order", orderId: order.id, dataBase64 },
+          })
+          .onConflictDoNothing()
+          .returning({ id: schema.chzSignerTasks.id });
+        if (!task) return null;
+        const now = new Date();
+        const [updated] = await tx
+          .update(schema.chzKmOrders)
+          .set({
+            state: "signing",
+            signerTaskId: task.id,
+            claimedAt: now,
+            attempts: sql`${schema.chzKmOrders.attempts} + 1`,
+            updatedAt: now,
+          })
+          .where(this.ownedOrderInState(order, "created"))
+          .returning({ id: schema.chzKmOrders.id });
+        // Returning here instead of throwing would commit the task row on
+        // its own: `chz_signer_tasks_open_uq` allows one open task per
+        // tenant and type, so that orphan would block every other order's
+        // signing with no order referencing it. Roll the insert back.
+        if (!updated) throw new OrderFenceLostError();
+        return task.id;
+      });
+    } catch (error) {
+      if (!(error instanceof OrderFenceLostError)) throw error;
+      this.logger.warn(`Order ${order.id} left 'created' while its signer task was being created`);
+      inserted = null;
+    }
     if (inserted === null) return { finished: false, retryAfterSeconds: SIGN_WAIT_SECONDS };
     await this.append(order, "ok", "Заказ КМ отправлен на подпись агенту", {
       signerTaskId: inserted,
@@ -171,7 +203,7 @@ export class ChzKmOrderRunnerService {
     return { finished: false, retryAfterSeconds: SIGN_WAIT_SECONDS };
   }
 
-  private async finishSigning(order: OrderRow): Promise<RunOutcome> {
+  private async finishSigning(order: OrderRow, attempt: AttemptContext): Promise<RunOutcome> {
     if (order.signerTaskId === null) return this.reset(order);
     const [task] = await this.db
       .select()
@@ -199,8 +231,8 @@ export class ChzKmOrderRunnerService {
       return { finished: false, retryAfterSeconds: SIGN_WAIT_SECONDS };
     const signature = (task.resultSummary as { signatureBase64?: unknown } | null)?.signatureBase64;
     if (typeof signature !== "string" || signature.length === 0) return this.reset(order);
-    const token = await this.tokens.getActiveToken(order.tenantId);
-    if (token.status !== "ok") return { finished: false, retryAfterSeconds: TOKEN_WAIT_SECONDS };
+    const token = await this.requireToken(order, attempt);
+    if (token.status !== "ok") return token.outcome;
     const created = await this.client.createOrder(token.auth, order.requestBody, signature);
     switch (created.status) {
       case "ok": {
@@ -240,11 +272,7 @@ export class ChzKmOrderRunnerService {
     return { finished: false, retryAfterSeconds: SIGN_WAIT_SECONDS };
   }
 
-  private async pollBuffer(
-    order: OrderRow,
-    auth: OmsAuth,
-    attempt: AttemptContext,
-  ): Promise<OrderRow | null> {
+  private async pollBuffer(order: OrderRow, auth: OmsAuth): Promise<OrderRow | null> {
     if (order.omsOrderId === null) return order;
     const status = await this.client.getBufferStatus(auth, order.omsOrderId, order.gtin14);
     if (status.status === "unauthorized") throw new OmsUnauthorizedError();
@@ -278,7 +306,6 @@ export class ChzKmOrderRunnerService {
       .update(schema.chzKmOrders)
       .set({ ...common, state })
       .where(this.ownedOrderInState(order, order.state));
-    void attempt;
     return this.load(order.tenantId, order.id);
   }
 
@@ -292,29 +319,51 @@ export class ChzKmOrderRunnerService {
         .where(this.ownedOrderInState(current, "buffer_active"));
       current = await this.load(order.tenantId, order.id);
     }
+    // `fetchedCount` as of this pass's last reconciliation; `null` until it
+    // has reconciled once.
+    let reconciledAt: number | null = null;
     while (current && current.state === "fetching" && current.fetchedCount < current.quantity) {
-      const remaining = current.quantity - current.fetchedCount;
-      const isLast = remaining <= this.blockSize;
-      if (isLast) {
-        // Blocks can only be re-fetched while the sub-order is open, and the
-        // last code closes it: reconcile what СУЗ says it handed out against
-        // what the database holds BEFORE asking for the final block.
-        const reconciled = await this.reconcileBlocks(current, auth);
+      const omsOrderId = current.omsOrderId;
+      if (omsOrderId === null) return current;
+      const isLast = current.quantity - current.fetchedCount <= this.blockSize;
+      // Blocks can only be re-fetched while the sub-order is open, and the
+      // last code closes it. Reconciling only before the final block is not
+      // enough: "final" is derived from our own counter, and that counter is
+      // exactly what goes stale when a block is lost between СУЗ's response
+      // and our commit. So every pass reconciles once before drawing
+      // anything -- one GET over an empty list on a fresh order, and on a
+      // resumed one it recovers the lost block while the buffer still holds
+      // the codes we have not drawn. The before-final-block reconcile stays,
+      // but is skipped when the counter has not moved since the last one.
+      if (reconciledAt !== current.fetchedCount && (reconciledAt === null || isLast)) {
+        const reconciled = await this.reconcileBlocks(current, auth, omsOrderId);
         if (reconciled === null) return current;
         current = reconciled;
-        if (current.fetchedCount >= current.quantity) break;
+        reconciledAt = current.fetchedCount;
+        if (current.state !== "fetching" || current.fetchedCount >= current.quantity) break;
       }
       const quantity = Math.min(this.blockSize, current.quantity - current.fetchedCount);
-      const block = await this.client.getCodes(auth, current.omsOrderId!, current.gtin14, quantity);
+      const block = await this.client.getCodes(auth, omsOrderId, current.gtin14, quantity);
       if (block.status === "unauthorized") throw new OmsUnauthorizedError();
       if (block.status === "rejected") {
         await this.fail(current, "CHZ_ORDER_REJECTED_BY_SUZ", block.message);
         return this.load(order.tenantId, order.id);
       }
       if (block.status !== "ok") return current;
+      const fetchedBefore = current.fetchedCount;
       const stored = await this.storeBlock(current, block.value);
       if (!stored) return this.load(order.tenantId, order.id);
       current = await this.load(order.tenantId, order.id);
+      // An empty block, or one whose blockId is already stored, commits
+      // nothing and leaves the loop's only exit condition untouched -- the
+      // next iteration would re-issue the identical request with no delay
+      // and no cap. Reconciliation has already run this pass and found
+      // nothing missing, so СУЗ has nothing more for us: say so instead of
+      // spinning until the deadline turns it into a misleading timeout.
+      if (current && current.fetchedCount <= fetchedBefore) {
+        await this.fail(current, "CHZ_CODES_INCOMPLETE", null);
+        return this.load(order.tenantId, order.id);
+      }
     }
     if (current && current.state === "fetching" && current.fetchedCount >= current.quantity) {
       await this.db
@@ -331,8 +380,12 @@ export class ChzKmOrderRunnerService {
   }
 
   /** Re-fetches every block СУЗ lists that the database does not hold. Returns null when СУЗ was unavailable. */
-  private async reconcileBlocks(order: OrderRow, auth: OmsAuth): Promise<OrderRow | null> {
-    const listed = await this.client.listBlocks(auth, order.omsOrderId!, order.gtin14);
+  private async reconcileBlocks(
+    order: OrderRow,
+    auth: OmsAuth,
+    omsOrderId: string,
+  ): Promise<OrderRow | null> {
+    const listed = await this.client.listBlocks(auth, omsOrderId, order.gtin14);
     if (listed.status === "unauthorized") throw new OmsUnauthorizedError();
     if (listed.status !== "ok") return null;
     const held = new Set(
@@ -367,6 +420,15 @@ export class ChzKmOrderRunnerService {
    * no-op, which makes the СУЗ retry path idempotent.
    */
   private async storeBlock(order: OrderRow, block: OmsCodesBlock): Promise<boolean> {
+    // `chz_km_orders_counts_check` asserts fetched_count <= quantity, so one
+    // code too many raises a raw SQLSTATE 23514 that no arm below matches:
+    // it would escape the runner, roll back codes СУЗ has already drawn, and
+    // hit the same violation again on every re-fetch. СУЗ handing out more
+    // than we asked for is a protocol violation; truncating would hide it.
+    if (order.fetchedCount + block.codes.length > order.quantity) {
+      await this.fail(order, "CHZ_CODES_OVERDELIVERED", null);
+      return false;
+    }
     const rows: (typeof schema.chzKmCodes.$inferInsert)[] = [];
     let seq = order.fetchedCount;
     for (const code of block.codes) {
@@ -418,7 +480,7 @@ export class ChzKmOrderRunnerService {
             ),
           )
           .returning({ id: schema.chzKmOrders.id });
-        if (!updated) throw new Error("fence lost");
+        if (!updated) throw new OrderFenceLostError();
       });
       return true;
     } catch (error) {
@@ -426,7 +488,12 @@ export class ChzKmOrderRunnerService {
         await this.fail(order, "CHZ_CODES_DUPLICATE", null);
         return false;
       }
-      if (error instanceof Error && error.message === "fence lost") return false;
+      if (error instanceof OrderFenceLostError) {
+        // Silent rollback otherwise: this is the only trace a concurrent
+        // second run for the same order would ever leave.
+        this.logger.warn(`Order fence lost while storing a code block for order ${order.id}`);
+        return false;
+      }
       throw error;
     }
   }
@@ -514,6 +581,9 @@ export class ChzKmOrderRunnerService {
 }
 
 class OmsUnauthorizedError extends Error {}
+
+/** The order row moved (state or `attempts`) between our read and our write. */
+class OrderFenceLostError extends Error {}
 
 function isUniqueViolation(error: unknown, constraint: string): boolean {
   const err = error as {

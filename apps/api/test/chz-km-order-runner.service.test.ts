@@ -369,12 +369,15 @@ describe.skipIf(!ready)("ChzKmOrderRunnerService", () => {
     const order = await insertOrder({ quantity: 25, state: "submitted", omsOrderId: OMS_ORDER_ID });
     await seedOmsToken();
     let bufferCall = 0;
-    const codeBatches = [
-      { codes: Array.from({ length: 10 }, (_, i) => makeKm(`BLOCKA${i}`)), blockId: randomUUID() },
-      { codes: Array.from({ length: 15 }, (_, i) => makeKm(`BLOCKB${i}`)), blockId: randomUUID() },
-    ];
     let codesCall = 0;
-    const { client } = fakeOmsClient({
+    // СУЗ hands out exactly what was asked for. The earlier fake returned 15
+    // codes for a 10-code request, so the counter jumped 0 -> 15 -> 25, the
+    // final block was never reached and `listBlocks` was never called -- and
+    // the over-delivery it simulated is the protocol violation the runner now
+    // refuses outright.
+    const issuedBlocks: OmsBlockSummary[] = [];
+    const issuedCodes: string[] = [];
+    const { client, calls } = fakeOmsClient({
       getBufferStatus: () => {
         bufferCall += 1;
         const info: OmsBufferInfo = {
@@ -388,11 +391,15 @@ describe.skipIf(!ready)("ChzKmOrderRunnerService", () => {
         };
         return { status: "ok", value: info };
       },
-      getCodes: () => {
-        const batch = codeBatches[codesCall]!;
+      getCodes: (_auth, _orderId, _gtin14, quantity) => {
         codesCall += 1;
-        return { status: "ok", value: batch };
+        const codes = Array.from({ length: quantity }, (_, i) => makeKm(`BLOCK${codesCall}N${i}`));
+        const blockId = randomUUID();
+        issuedBlocks.push({ blockId, quantity });
+        issuedCodes.push(...codes);
+        return { status: "ok", value: { codes, blockId } };
       },
+      listBlocks: () => ({ status: "ok", value: [...issuedBlocks] }),
     });
     const runner = runnerWith(client);
     runner.blockSize = 10;
@@ -407,6 +414,22 @@ describe.skipIf(!ready)("ChzKmOrderRunnerService", () => {
     const reloaded = await loadOrder(order.id);
     expect(reloaded.state).toBe("completed");
     expect(reloaded.fetchedCount).toBe(25);
+
+    // One reconcile opens the pass, the middle block needs none because the
+    // counter has not moved since it, and the last one is reconciled before
+    // the final block closes the sub-order.
+    expect(calls.map((call) => call.op)).toEqual([
+      "getBufferStatus",
+      "getBufferStatus",
+      "listBlocks",
+      "getCodes",
+      "getCodes",
+      "listBlocks",
+      "getCodes",
+    ]);
+    expect(calls.filter((call) => call.op === "getCodes").map((call) => call.quantity)).toEqual([
+      10, 10, 5,
+    ]);
 
     const rows = await codesFor(order.id);
     expect(rows).toHaveLength(25);
@@ -426,9 +449,7 @@ describe.skipIf(!ready)("ChzKmOrderRunnerService", () => {
     const details = (completionCall![0] as { details: Record<string, unknown> }).details;
     expect(details).toEqual({ orderId: order.id, omsOrderId: OMS_ORDER_ID, quantity: 25 });
     const journalled = JSON.stringify(journal.append.mock.calls);
-    for (const batch of codeBatches) {
-      for (const code of batch.codes) expect(journalled).not.toContain(code);
-    }
+    for (const code of issuedCodes) expect(journalled).not.toContain(code);
   });
 
   it("reconciles a block the database does not hold before requesting the final block", async () => {
@@ -612,7 +633,7 @@ describe.skipIf(!ready)("ChzKmOrderRunnerService", () => {
   it("fails the order on an unparseable code and stores no partial rows for that block", async () => {
     const order = await insertOrder({ quantity: 3, state: "fetching", omsOrderId: OMS_ORDER_ID });
     await seedOmsToken();
-    const { client } = fakeOmsClient({
+    const { client, calls } = fakeOmsClient({
       // The whole order fits in one block, so `fetchCodes` reconciles against
       // СУЗ's own block list before requesting it (see `reconcileBlocks`);
       // an empty list means nothing was lost from a previous pass.
@@ -630,11 +651,220 @@ describe.skipIf(!ready)("ChzKmOrderRunnerService", () => {
     const outcome = await runner.run(tenantId, order.id, { retryCount: 0, retryLimit: 5 });
 
     expect(outcome).toEqual({ finished: true, retryAfterSeconds: 30 });
+    // The whole order is one block, so the start-of-pass reconcile is also
+    // the before-final-block one: asking twice would buy nothing.
+    expect(calls.filter((call) => call.op === "listBlocks")).toHaveLength(1);
     const reloaded = await loadOrder(order.id);
     expect(reloaded.state).toBe("failed");
     expect(reloaded.errorCode).toBe("CHZ_CODES_UNPARSEABLE");
     expect(reloaded.fetchedCount).toBe(0);
     const rows = await codesFor(order.id);
     expect(rows).toHaveLength(0);
+  });
+
+  it("recovers a block lost before the commit by reconciling at the start of the pass", async () => {
+    // The Fix 2 trace: a previous pass drew a block of 10 and died before its
+    // commit, so СУЗ's buffer is 10 codes ahead of `fetchedCount`. A
+    // reconcile keyed on our own counter would only fire once the tail block
+    // had closed the sub-order -- too late for `retryBlock` to serve it.
+    const order = await insertOrder({
+      quantity: 25,
+      state: "fetching",
+      omsOrderId: OMS_ORDER_ID,
+      fetchedCount: 10,
+    });
+    await seedOmsToken();
+    const heldBlock = randomUUID();
+    const lostBlock = randomUUID();
+    await db.insert(schema.chzKmCodes).values(
+      Array.from({ length: 10 }, (_, i) => {
+        const code = makeKm(`HELDB${i}`);
+        const sealed = crypto.encryptWithAad(`${tenantId}/${order.id}/${i + 1}`, code);
+        return {
+          tenantId,
+          orderId: order.id,
+          seq: i + 1,
+          encryptedCode: sealed.encryptedToken,
+          codeNonce: sealed.tokenNonce,
+          codeTag: sealed.tokenTag,
+          codeHash: kmHash(parseKm(code)),
+          blockId: heldBlock,
+        };
+      }),
+    );
+
+    const { client, calls } = fakeOmsClient({
+      listBlocks: () => ({
+        status: "ok",
+        value: [
+          { blockId: heldBlock, quantity: 10 },
+          { blockId: lostBlock, quantity: 10 },
+        ],
+      }),
+      retryBlock: (_auth, blockId) => ({
+        status: "ok",
+        value: {
+          codes: Array.from({ length: 10 }, (_, i) => makeKm(`LOST${i}`)),
+          blockId,
+        },
+      }),
+      getCodes: (_auth, _orderId, _gtin14, quantity) => ({
+        status: "ok",
+        value: {
+          codes: Array.from({ length: quantity }, (_, i) => makeKm(`TAIL${i}`)),
+          blockId: randomUUID(),
+        },
+      }),
+    });
+    const runner = runnerWith(client);
+    runner.blockSize = 10;
+
+    const outcome = await runner.run(tenantId, order.id, { retryCount: 0, retryLimit: 5 });
+
+    expect(outcome.finished).toBe(true);
+    const retryIndex = calls.findIndex((call) => call.op === "retryBlock");
+    const firstCodesIndex = calls.findIndex((call) => call.op === "getCodes");
+    expect(retryIndex).toBeGreaterThanOrEqual(0);
+    expect(firstCodesIndex).toBeGreaterThan(retryIndex);
+    expect(calls[retryIndex]).toMatchObject({ blockId: lostBlock });
+    // The recovered block put the counter at 20, so the tail is one request
+    // for the 5 codes actually left -- and no second reconcile, because
+    // nothing has moved since.
+    expect(calls.filter((call) => call.op === "getCodes").map((call) => call.quantity)).toEqual([
+      5,
+    ]);
+    expect(calls.filter((call) => call.op === "listBlocks")).toHaveLength(1);
+
+    const reloaded = await loadOrder(order.id);
+    expect(reloaded.state).toBe("completed");
+    expect(reloaded.fetchedCount).toBe(25);
+    expect(await codesFor(order.id)).toHaveLength(25);
+  });
+
+  it("ends the fetch when a block stores nothing: an empty block", async () => {
+    const order = await insertOrder({ quantity: 5, state: "fetching", omsOrderId: OMS_ORDER_ID });
+    await seedOmsToken();
+    const { client, calls } = fakeOmsClient({
+      listBlocks: () => ({ status: "ok", value: [] }),
+      getCodes: () => ({ status: "ok", value: { codes: [], blockId: randomUUID() } }),
+    });
+    const runner = runnerWith(client);
+
+    const outcome = await runner.run(tenantId, order.id, { retryCount: 0, retryLimit: 5 });
+
+    expect(outcome.finished).toBe(true);
+    // The call count is the assertion that matters: the loop used to re-issue
+    // this request forever, since an empty block advances nothing.
+    expect(calls.filter((call) => call.op === "getCodes")).toHaveLength(1);
+    const reloaded = await loadOrder(order.id);
+    expect(reloaded.state).toBe("failed");
+    expect(reloaded.errorCode).toBe("CHZ_CODES_INCOMPLETE");
+    expect(reloaded.fetchedCount).toBe(0);
+    expect(await codesFor(order.id)).toHaveLength(0);
+  });
+
+  it("ends the fetch when a block stores nothing: a block already held", async () => {
+    const order = await insertOrder({ quantity: 25, state: "fetching", omsOrderId: OMS_ORDER_ID });
+    await seedOmsToken();
+    const blockId = randomUUID();
+    const block = { codes: Array.from({ length: 10 }, (_, i) => makeKm(`SAME${i}`)), blockId };
+    let handed = false;
+    const { client, calls } = fakeOmsClient({
+      listBlocks: () => ({ status: "ok", value: handed ? [{ blockId, quantity: 10 }] : [] }),
+      getCodes: () => {
+        handed = true;
+        return { status: "ok", value: block };
+      },
+    });
+    const runner = runnerWith(client);
+    runner.blockSize = 10;
+
+    const outcome = await runner.run(tenantId, order.id, { retryCount: 0, retryLimit: 5 });
+
+    expect(outcome.finished).toBe(true);
+    expect(calls.filter((call) => call.op === "getCodes")).toHaveLength(2);
+    const reloaded = await loadOrder(order.id);
+    expect(reloaded.state).toBe("failed");
+    expect(reloaded.errorCode).toBe("CHZ_CODES_INCOMPLETE");
+    expect(reloaded.fetchedCount).toBe(10);
+    expect(await codesFor(order.id)).toHaveLength(10);
+  });
+
+  it("fails the order when a block carries more codes than the order has room for", async () => {
+    const order = await insertOrder({ quantity: 5, state: "fetching", omsOrderId: OMS_ORDER_ID });
+    await seedOmsToken();
+    const { client } = fakeOmsClient({
+      listBlocks: () => ({ status: "ok", value: [] }),
+      getCodes: () => ({
+        status: "ok",
+        value: {
+          codes: Array.from({ length: 6 }, (_, i) => makeKm(`OVER${i}`)),
+          blockId: randomUUID(),
+        },
+      }),
+    });
+    const runner = runnerWith(client);
+
+    // `chz_km_orders_counts_check` would otherwise raise a raw 23514 straight
+    // through the runner, so the point of the assertion is that `run` returns
+    // at all.
+    await expect(
+      runner.run(tenantId, order.id, { retryCount: 0, retryLimit: 5 }),
+    ).resolves.toMatchObject({ finished: true });
+
+    const reloaded = await loadOrder(order.id);
+    expect(reloaded.state).toBe("failed");
+    expect(reloaded.errorCode).toBe("CHZ_CODES_OVERDELIVERED");
+    expect(reloaded.fetchedCount).toBe(0);
+    expect(await codesFor(order.id)).toHaveLength(0);
+  });
+
+  it("fails a signed order whose tenant has no СУЗ settings instead of polling the token", async () => {
+    const orderId = randomUUID();
+    const taskId = randomUUID();
+    await db.insert(schema.chzSignerTasks).values({
+      id: taskId,
+      tenantId,
+      type: "sign_detached",
+      payload: { purpose: "oms_order", orderId, dataBase64: "eA==" },
+    });
+    await completeSignerTask(taskId);
+    // Deliberately no `seedOmsToken()`: with no СУЗ channel the token reads
+    // `settings_missing`, which no amount of waiting fixes -- and waiting
+    // would hold the tenant's only signing slot until the deadline.
+    const order = await insertOrder({
+      id: orderId,
+      state: "signing",
+      signerTaskId: taskId,
+      attempts: 1,
+    });
+    const { client, calls } = fakeOmsClient();
+    const runner = runnerWith(client);
+
+    const outcome = await runner.run(tenantId, order.id, { retryCount: 0, retryLimit: 5 });
+
+    expect(outcome).toEqual({ finished: true, retryAfterSeconds: 0 });
+    expect(calls).toHaveLength(0);
+    const reloaded = await loadOrder(order.id);
+    expect(reloaded.state).toBe("failed");
+    expect(reloaded.errorCode).toBe("CHZ_OMS_SETTINGS_MISSING");
+  });
+
+  it("abandonAfterJobRetriesExhausted fails a live order and leaves a terminal one untouched", async () => {
+    const live = await insertOrder({ state: "submitted", omsOrderId: OMS_ORDER_ID });
+    const done = await insertOrder({ state: "failed", errorCode: "CHZ_ORDER_TIMED_OUT" });
+    const runner = runnerWith(fakeOmsClient().client);
+
+    await runner.abandonAfterJobRetriesExhausted(tenantId, live.id);
+    await runner.abandonAfterJobRetriesExhausted(tenantId, done.id);
+
+    const reloadedLive = await loadOrder(live.id);
+    expect(reloadedLive.state).toBe("failed");
+    expect(reloadedLive.errorCode).toBe("CHZ_JOB_RETRIES_EXHAUSTED");
+
+    const reloadedDone = await loadOrder(done.id);
+    expect(reloadedDone.state).toBe("failed");
+    expect(reloadedDone.errorCode).toBe("CHZ_ORDER_TIMED_OUT");
+    expect(reloadedDone.updatedAt).toEqual(done.updatedAt);
   });
 });
