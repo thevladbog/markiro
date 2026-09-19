@@ -41,6 +41,7 @@ import {
   type CatalogVersionPatch,
   type PlanEntitlements,
 } from "./api.js";
+import { CATALOG_STATUS_TO_PHASE } from "./CatalogPage.js";
 import type { CatalogPublicationReviewV3 as CatalogPublicationReview } from "@markiro/platform-contracts";
 import { CatalogQuotaField } from "./CatalogQuotaField.js";
 import { CatalogUnitField } from "./CatalogUnitField.js";
@@ -648,9 +649,7 @@ export function CatalogVersionPanel({
         </div>
         <div className="version-panel__header-actions">
           <StatusChip
-            status={
-              item.status === "published" ? "ok" : item.status === "draft" ? "warn" : "neutral"
-            }
+            phase={CATALOG_STATUS_TO_PHASE[item.status]}
             label={t(`catalog.status.${item.status}`)}
           />
           {canWrite && item.status === "published" ? (
@@ -1097,7 +1096,7 @@ export function CatalogVersionPanel({
           ) : null}
           {item.kind === "plan" && item.status === "published" && item.plan?.demoDurationDays ? (
             isDefaultDemo ? (
-              <StatusChip status="ok" label={t("catalog.defaultDemo")} />
+              <StatusChip phase="active" label={t("catalog.defaultDemo")} />
             ) : canWrite ? (
               <Button
                 variant="secondary"

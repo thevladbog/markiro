@@ -12,6 +12,7 @@ import {
   StatusChip,
   Table,
   type TableColumn,
+  type TagPhase,
 } from "@markiro/ui";
 
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
@@ -26,11 +27,11 @@ type CatalogKind = CatalogVersionDto["kind"];
 
 const CATALOG_PAGE_SIZE = 50;
 
-const STATUS_TONE = {
-  draft: "warn",
-  published: "ok",
-  retired: "neutral",
-} as const;
+export const CATALOG_STATUS_TO_PHASE = {
+  draft: "draft",
+  published: "active",
+  retired: "retired",
+} as const satisfies Record<string, TagPhase>;
 
 export function CatalogPage() {
   const { t } = useTranslation();
@@ -85,7 +86,10 @@ export function CatalogPage() {
       key: "status",
       title: t("catalog.columns.status"),
       render: (item) => (
-        <StatusChip status={STATUS_TONE[item.status]} label={t(`catalog.status.${item.status}`)} />
+        <StatusChip
+          phase={CATALOG_STATUS_TO_PHASE[item.status]}
+          label={t(`catalog.status.${item.status}`)}
+        />
       ),
     },
     ...(isSupport

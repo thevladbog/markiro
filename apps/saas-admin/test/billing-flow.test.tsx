@@ -431,9 +431,11 @@ describe("invoice commercial lifecycle", () => {
 
     const tenantLinks = await screen.findAllByRole("link", { name: TENANT_NAME });
     expect(tenantLinks[0]?.getAttribute("href")).toBe(`/tenants/${TENANT_ID}`);
-    expect(screen.getByText("Выставлен").closest(".mk-chip")?.className).toContain("mk-chip--info");
+    expect(screen.getByText("Выставлен").closest(".mk-chip")?.className).toContain(
+      "mk-chip--running",
+    );
     expect(screen.getByText("Черновик").closest(".mk-chip")?.className).toContain(
-      "mk-chip--neutral",
+      "mk-chip--draft",
     );
     expect(document.body.textContent).not.toContain(TENANT_ID);
   });
