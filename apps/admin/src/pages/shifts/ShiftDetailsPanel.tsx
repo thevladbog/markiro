@@ -552,6 +552,23 @@ export function ShiftDetailsPanel({ shift, onClose }: { shift: ShiftDto; onClose
             ) : null}
           </dl>
         </section>
+        {shift.status !== "closed" ? (
+          <section className="mk-shift-details__section">
+            <h3>{t("pages.shifts.details.taskFormTitle")}</h3>
+            <p className="mk-shift-details__reports-hint">
+              {t("pages.shifts.details.taskFormDescription")}
+            </p>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() =>
+                window.open(`/api/shifts/${shift.id}/task-form`, "_blank", "noopener,noreferrer")
+              }
+            >
+              {t("pages.shifts.details.openTaskForm")}
+            </Button>
+          </section>
+        ) : null}
         <section className="mk-shift-details__section">
           <h3>{t("pages.shifts.exports.title")}</h3>
           {shift.status === "closed" ? (
