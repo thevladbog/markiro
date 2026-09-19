@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use reqwest::{Client, StatusCode};
 
-use crate::contracts::{NextTaskResponse, PairRequest, PairResponse, SignerTask, TaskComplete, TaskFail};
+use crate::contracts::{NextTaskResponse, PairRequest, PairResponse, SignerTask, TaskFail};
 use crate::SignerError;
 
 /// Long polls hold for up to 25 s server-side; allow headroom before the
@@ -112,11 +112,15 @@ impl CloudClient {
         }
     }
 
-    pub async fn complete(
+    /// Generic over the completion body: `true_api_auth` and `oms_auth` report
+    /// a `TaskComplete` (a token plus certificate metadata), while
+    /// `sign_detached` reports a `TaskCompleteSignature` (a signature, no
+    /// token) — both share this one endpoint and retry/error handling.
+    pub async fn complete<B: serde::Serialize + ?Sized>(
         &self,
         secret: &str,
         task_id: &str,
-        body: &TaskComplete,
+        body: &B,
     ) -> Result<(), SignerError> {
         self.report(secret, &format!("/signer-agent/tasks/{task_id}/complete"), body)
             .await
@@ -132,7 +136,7 @@ impl CloudClient {
             .await
     }
 
-    async fn report<T: serde::Serialize>(
+    async fn report<T: serde::Serialize + ?Sized>(
         &self,
         secret: &str,
         path: &str,
@@ -169,7 +173,7 @@ impl CloudClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::contracts::SignerErrorCode;
+    use crate::contracts::{SignerErrorCode, TaskComplete};
     use wiremock::matchers::{body_json_string, header, method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
