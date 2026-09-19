@@ -893,6 +893,67 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     expect(res.body.message).toEqual(expect.stringContaining("Unknown counterparty"));
   });
 
+  // ---------------------------------------------------------------------
+  // Printable task form (Task 4)
+  // ---------------------------------------------------------------------
+
+  it("serves the printable task form to a read-only administrator and refuses a closed shift", async () => {
+    const owner = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(owner);
+    const productId = await seedProduct(orgId, {
+      status: "active",
+      chzProductGroupCode: 8,
+      boxCapacity: 12,
+      palletBoxCapacity: 48,
+    });
+    const created = await owner
+      .post("/shifts")
+      .send({ productId, mode: "validation" })
+      .expect(201);
+    const shiftId = created.body.id as string;
+
+    const planned = await owner.get(`/shifts/${shiftId}/task-form`).expect(200);
+    expect(planned.headers["content-type"]).toContain("text/html");
+    expect(planned.headers["cache-control"]).toBe("private, no-store");
+    expect(planned.text).toContain(`data-task-token="markiro:shift:v1:${shiftId}"`);
+    expect(planned.text).toContain("К запуску");
+
+    await owner.post(`/shifts/${shiftId}/open`).expect(200);
+    const active = await owner.get(`/shifts/${shiftId}/task-form`).expect(200);
+    expect(active.text).toContain("В работе");
+
+    await owner.post(`/shifts/${shiftId}/close`).send({ reason: "done" }).expect(200);
+    await owner
+      .get(`/shifts/${shiftId}/task-form`)
+      .expect(409, { code: "SHIFT_TASK_FORM_CLOSED" });
+  });
+
+  it("keeps the task form out of reach of a station credential and of another tenant", async () => {
+    const owner = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(owner);
+    const productId = await seedProduct(orgId, {
+      status: "active",
+      chzProductGroupCode: 8,
+      boxCapacity: 12,
+      palletBoxCapacity: 48,
+    });
+    const created = await owner
+      .post("/shifts")
+      .send({ productId, mode: "validation" })
+      .expect(201);
+    const shiftId = created.body.id as string;
+
+    const station = await createTestStationDevice(app!, owner, "Task-form terminal");
+    await request(app!.getHttpServer())
+      .get(`/shifts/${shiftId}/task-form`)
+      .set("x-api-key", station.apiKey)
+      .expect(403);
+
+    const otherTenantOwner = request.agent(app!.getHttpServer());
+    await signUpAndActivate(otherTenantOwner);
+    await otherTenantOwner.get(`/shifts/${shiftId}/task-form`).expect(404);
+  });
+
   it("GET/list/PATCH omit a seeded legacy item binding and PATCH leaves its column untouched", async () => {
     const agent = request.agent(app!.getHttpServer());
     const orgId = await signUpAndActivate(agent);

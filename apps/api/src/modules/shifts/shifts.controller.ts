@@ -26,6 +26,7 @@ import {
   Post,
   Query,
   Req,
+  Res,
   UseGuards,
 } from "@nestjs/common";
 import {
@@ -35,9 +36,11 @@ import {
   ApiOkResponse,
   ApiOperation,
   ApiParam,
+  ApiProduces,
   ApiResponse,
   ApiTags,
 } from "@nestjs/swagger";
+import type { Response } from "express";
 import {
   CABINET_CAPABILITY,
   productLabelTemplateListSchema,
@@ -329,6 +332,28 @@ export class ShiftsController {
     return req.authKind === "station"
       ? projectDeviceShiftOutput(result, req.get("x-station-capabilities"))
       : result;
+  }
+
+  @Get(":id/task-form")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiOperation({
+    summary: "Render the printable shift task form",
+    description: "Responds with a text/html page for printing, not JSON. Closed shifts are refused.",
+  })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiProduces("text/html")
+  @ApiOkResponse({ schema: { type: "string" } })
+  @ApiHttpErrors(401, 403, 404, 409)
+  @ApiCabinetAuth()
+  async taskForm(
+    @Req() req: RequestWithTenant,
+    @Param("id") id: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<string> {
+    const data = await this.shiftsService.taskFormData(req.tenantId!, id);
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Cache-Control", "private, no-store");
+    return this.shiftsService.renderTaskForm(data);
   }
 
   // Cabinet-only: a device reading an
