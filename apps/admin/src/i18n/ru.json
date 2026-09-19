@@ -2482,12 +2482,14 @@
           "format": "Формат",
           "parameters": "Параметры",
           "codes": "Коды",
-          "boxes": "Короба"
+          "boxes": "Короба",
+          "pallets": "Паллет"
         },
         "counts": {
           "lines": "{{count}} строк",
           "codes": "{{count}} кодов",
           "boxes": "{{count}} коробов",
+          "pallets": "{{count}} паллет",
           "bytes": "{{count}} Б"
         },
         "validation": {

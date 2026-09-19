@@ -46,6 +46,8 @@ export interface ShiftExportArtifactDto {
   physicalLineCount: number;
   codeCount: number;
   boxCount: number;
+  /** Closed pallets this part covers; 0 outside the pallet formats. */
+  palletCount: number;
   filename: string;
   mimeType: string;
   byteSize: number;
@@ -66,6 +68,8 @@ export interface ShiftExportDto {
   shiftDateSnapshot: string | null;
   totalCodeCount: number | null;
   totalBoxCount: number | null;
+  /** Null until ready; 0 outside the pallet formats. */
+  totalPalletCount: number | null;
   createdByUserId: string;
   createdByName: string | null;
   sourceSnapshotStartedAt: string | null;
@@ -155,6 +159,7 @@ export const shiftExportArtifactOpenApiSchema = {
     "physicalLineCount",
     "codeCount",
     "boxCount",
+    "palletCount",
     "filename",
     "mimeType",
     "byteSize",
@@ -167,6 +172,7 @@ export const shiftExportArtifactOpenApiSchema = {
     // 0 for a per-pallet aggregation, which names box SSCCs and no unit codes.
     codeCount: { type: "integer", minimum: 0 },
     boxCount: { type: "integer", minimum: 0 },
+    palletCount: { type: "integer", minimum: 0 },
     filename: { type: "string" },
     mimeType: { type: "string" },
     byteSize: { type: "integer", minimum: 1 },
@@ -190,6 +196,7 @@ export const shiftExportOpenApiSchema = {
     "shiftDateSnapshot",
     "totalCodeCount",
     "totalBoxCount",
+    "totalPalletCount",
     "createdByUserId",
     "createdByName",
     "sourceSnapshotStartedAt",
@@ -227,6 +234,7 @@ export const shiftExportOpenApiSchema = {
     shiftDateSnapshot: { type: "string", format: "date", nullable: true },
     totalCodeCount: { type: "integer", nullable: true, minimum: 0 },
     totalBoxCount: { type: "integer", nullable: true, minimum: 0 },
+    totalPalletCount: { type: "integer", nullable: true, minimum: 0 },
     createdByUserId: { type: "string" },
     createdByName: { type: "string", nullable: true },
     sourceSnapshotStartedAt: { type: "string", format: "date-time", nullable: true },

@@ -399,6 +399,9 @@ describe("shift export filenames", () => {
       "Вода_1pcs_1box_2026-08-13_часть_2.csv",
     ]);
     expect(render("shift_csv_flat", flat).filename).toBe("Вода_2pcs_2026-08-13.csv");
+    // Boxes-only and flat documents cover no pallets and keep their names.
+    expect(parts.map((part) => part.palletCount)).toEqual([0, 0]);
+    expect(render("shift_csv_flat", flat).palletCount).toBe(0);
   });
 });
 
@@ -773,10 +776,13 @@ describe("pallets shift export formats", () => {
         "",
       ].join("\n"),
     );
+    // Owner report 2026-09-19: the file name and the part's counters must
+    // say how many pallets the document covers, not only boxes.
     expect(part).toMatchObject({
       codeCount: 4,
       boxCount: 3,
-      filename: "Сидр_4pcs_3box_2026-08-19.txt",
+      palletCount: 1,
+      filename: "Сидр_4pcs_3box_1pallet_2026-08-19.txt",
     });
   });
 
@@ -996,7 +1002,8 @@ describe("pallet → boxes shift export formats (no codes)", () => {
       physicalLineCount: 7,
       codeCount: 4,
       boxCount: 3,
-      filename: "Сидр_4pcs_3box_2026-08-19.txt",
+      palletCount: 2,
+      filename: "Сидр_4pcs_3box_2pallet_2026-08-19.txt",
       mimeType: "text/plain; charset=utf-8",
     });
   });
@@ -1036,7 +1043,8 @@ describe("pallet → boxes shift export formats (no codes)", () => {
       physicalLineCount: 19,
       codeCount: 4,
       boxCount: 3,
-      filename: "Сидр_4pcs_3box_2026-08-19.xml",
+      palletCount: 2,
+      filename: "Сидр_4pcs_3box_2pallet_2026-08-19.xml",
       mimeType: "application/xml; charset=utf-8",
     });
   });
@@ -1053,9 +1061,11 @@ describe("pallet → boxes shift export formats (no codes)", () => {
       `00${palletOne}\n00${boxA}\n00${boxB}\n\n`,
       `00${palletTwo}\n00${palletTwoBox}\n\n`,
     ]);
-    expect(parts.map((part) => [part.codeCount, part.boxCount, part.filename])).toEqual([
-      [3, 2, "Сидр_3pcs_2box_2026-08-19_часть_1.txt"],
-      [1, 1, "Сидр_1pcs_1box_2026-08-19_часть_2.txt"],
+    expect(
+      parts.map((part) => [part.codeCount, part.boxCount, part.palletCount, part.filename]),
+    ).toEqual([
+      [3, 2, 1, "Сидр_3pcs_2box_1pallet_2026-08-19_часть_1.txt"],
+      [1, 1, 1, "Сидр_1pcs_1box_1pallet_2026-08-19_часть_2.txt"],
     ]);
 
     // XML: overhead 10 + pallet one (5) = 15; pallet two (4) does not fit in 16 alongside.

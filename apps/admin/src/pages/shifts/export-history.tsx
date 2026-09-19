@@ -127,6 +127,16 @@ function ExportParameters({
           </dd>
         </div>
       ) : null}
+      {item.totalPalletCount !== null && item.totalPalletCount > 0 ? (
+        <div>
+          <dt>{t("pages.shifts.exports.details.pallets")}</dt>
+          <dd>
+            {t("pages.shifts.exports.counts.pallets", {
+              count: formatExportNumber(item.totalPalletCount, language),
+            })}
+          </dd>
+        </div>
+      ) : null}
     </dl>
   );
 }
@@ -173,6 +183,13 @@ function ArtifactRow({
       ? [
           t("pages.shifts.exports.counts.boxes", {
             count: formatExportNumber(artifact.boxCount, language),
+          }),
+        ]
+      : []),
+    ...(artifact.palletCount > 0
+      ? [
+          t("pages.shifts.exports.counts.pallets", {
+            count: formatExportNumber(artifact.palletCount, language),
           }),
         ]
       : []),

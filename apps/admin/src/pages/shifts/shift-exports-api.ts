@@ -17,6 +17,8 @@ export interface ShiftExportArtifactDto {
   physicalLineCount: number;
   codeCount: number;
   boxCount: number;
+  /** Closed pallets this part covers; 0 outside the pallet formats. */
+  palletCount: number;
   filename: string;
   mimeType: string;
   byteSize: number;
@@ -42,6 +44,8 @@ export interface ShiftExportDto {
   shiftDateSnapshot: string | null;
   totalCodeCount: number | null;
   totalBoxCount: number | null;
+  /** Null until ready; 0 outside the pallet formats. */
+  totalPalletCount: number | null;
   createdByUserId: string;
   createdByName: string | null;
   sourceSnapshotStartedAt: string | null;
