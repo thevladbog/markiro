@@ -2,6 +2,7 @@ import { Injectable, Module, type DynamicModule } from "@nestjs/common";
 import type { Env } from "../../env";
 import { JournalService } from "../integrations/journal.service";
 import { ChzCryptoService } from "../signer-agents/chz-crypto.service";
+import { ChzKmOrderRunnerService } from "./chz-km-order-runner.service";
 import { ChzKmOrdersController } from "./chz-km-orders.controller";
 import {
   CHZ_KM_ORDER_QUEUE,
@@ -50,11 +51,12 @@ class NoopChzKmOrderQueue implements ChzKmOrderQueue {
 
 /**
  * Assembles the ChZ КМ-order cabinet stack: `ChzKmOrdersService` (pre-flight,
- * create/list/get/retry, Task 8) and `ChzKmOrdersController` (the cabinet
- * HTTP surface). The order runner and its pg-boss queue (Task 10) will join
- * this module's providers the same way `ChzExportRunnerService` joins
- * `ChzExportsModule` -- see `NoopChzKmOrderQueue` above for what that task
- * must change.
+ * create/list/get/retry, Task 8), `ChzKmOrdersController` (the cabinet HTTP
+ * surface) and `ChzKmOrderRunnerService` (the background state machine,
+ * Task 9). The pg-boss queue wiring (Task 10) will join this module the same
+ * way `ChzExportRunnerService` joins `ChzExportsModule` -- see
+ * `NoopChzKmOrderQueue` above for what that task must change. The runner
+ * itself is not yet invoked by any worker; Task 10 adds that.
  */
 @Module({})
 export class ChzKmOrdersModule {
@@ -72,8 +74,9 @@ export class ChzKmOrdersModule {
         },
         { provide: CHZ_KM_ORDER_QUEUE, useClass: NoopChzKmOrderQueue },
         ChzKmOrdersService,
+        ChzKmOrderRunnerService,
       ],
-      exports: [ChzKmOrdersService],
+      exports: [ChzKmOrdersService, ChzKmOrderRunnerService],
     };
   }
 }
