@@ -541,7 +541,7 @@
       "not_started": "Not started",
       "pending": "Pending",
       "applied": "Applied",
-      "failed": "Needs attention",
+      "failed": "Application failed",
       "skipped": "Already applied"
     },
     "flow": {
