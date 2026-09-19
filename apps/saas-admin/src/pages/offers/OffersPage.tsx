@@ -12,6 +12,7 @@ import {
   Spinner,
   StatusChip,
   Table,
+  type TagPhase,
 } from "@markiro/ui";
 import {
   platformOfferWorkspaceContracts,
@@ -24,6 +25,25 @@ import { OfferTenantFilter } from "./OfferTenantFilter.js";
 import { offerDate, offerMoney, registryReturnTo } from "./offerPresentation.js";
 
 const statuses = ["draft", "published", "paid", "superseded", "cancelled", "expired"] as const;
+
+/**
+ * Фактический union — `offerStatusSchema`
+ * (`packages/platform-contracts/src/commercial.ts`): шесть значений. Раньше
+ * три ветки схлопывали `published`, `superseded`, `cancelled` и `expired` в
+ * один и тот же `info`, и заменённое или отменённое предложение выглядело
+ * как обычное ожидание. `published` — предложение отправлено, ждёт решения
+ * тенанта (`running`, симметрично `AGREEMENT_STATUS_TO_PHASE.sent`).
+ * `superseded`/`cancelled`/`expired` — три разных способа выйти из оборота,
+ * запись цела (`retired`).
+ */
+export const OFFER_STATUS_TO_PHASE = {
+  draft: "draft",
+  published: "running",
+  paid: "done",
+  superseded: "retired",
+  cancelled: "retired",
+  expired: "retired",
+} as const satisfies Record<(typeof statuses)[number], TagPhase>;
 
 function nextMoscowMidnight(day: string): string {
   const next = new Date(`${day}T00:00:00Z`);
@@ -273,13 +293,7 @@ function OfferRegistryPage() {
                     title: t("offers.status"),
                     render: (offer) => (
                       <StatusChip
-                        status={
-                          offer.status === "paid"
-                            ? "ok"
-                            : offer.status === "draft"
-                              ? "neutral"
-                              : "info"
-                        }
+                        phase={OFFER_STATUS_TO_PHASE[offer.status]}
                         label={t(`offerWorkspace.status.${offer.status}`)}
                       />
                     ),
