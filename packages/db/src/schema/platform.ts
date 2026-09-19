@@ -29,6 +29,7 @@ export const shiftStatus = pgEnum("shift_status", ["planned", "active", "closed"
 export const shiftMode = pgEnum("shift_mode", ["validation", "aggregation"]);
 export const shiftOrigin = pgEnum("shift_origin", ["admin", "station"]);
 export const stationClosePolicy = pgEnum("station_close_policy", ["single_device", "admin_only"]);
+export const shiftEntryMethod = pgEnum("shift_entry_method", ["list", "task_barcode"]);
 export const stationShiftCloseOutcome = pgEnum("station_shift_close_outcome", [
   "accepted",
   "conflict",
@@ -511,6 +512,12 @@ export const shiftDeviceParticipants = pgTable(
     deviceId: uuid("device_id").notNull(),
     firstEnteredAt: timestamp("first_entered_at", { withTimezone: true }).notNull().defaultNow(),
     lastEnteredAt: timestamp("last_entered_at", { withTimezone: true }).notNull().defaultNow(),
+    /**
+     * How this device last got into the shift. `task_barcode` means the printed
+     * task form was scanned; the barcode grants nothing extra, so this answers
+     * "was the shop floor working from paper", not "was it allowed in".
+     */
+    entryMethod: shiftEntryMethod("entry_method").notNull().default("list"),
   },
   (t) => [
     unique("shift_device_participants_tenant_shift_device_uq").on(

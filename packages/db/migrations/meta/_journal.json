@@ -1170,6 +1170,13 @@
       "when": 1789837824173,
       "tag": "0166_shift_export_pallet_counts",
       "breakpoints": true
+    },
+    {
+      "idx": 167,
+      "version": "7",
+      "when": 1789900000000,
+      "tag": "0167_shift_entry_method",
+      "breakpoints": true
     }
   ]
 }
