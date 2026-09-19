@@ -22,6 +22,7 @@ import { CHZ_CHANNEL_TYPE } from "../signer-agents/chz-constants";
 import { ChzCryptoService } from "../signer-agents/chz-crypto.service";
 import { ChzOmsTokenService } from "./chz-oms-token.service";
 import {
+  CHZ_KM_ISSUE_INCONSISTENT_CODE,
   CHZ_KM_ISSUE_NOT_EXPORT_CODE,
   CHZ_KM_ISSUE_TOO_MANY_CODE,
   CHZ_KM_ORDER_NOT_COMPLETED_CODE,
@@ -372,7 +373,12 @@ export class ChzKmOrdersService {
         )
         .returning({ seq: schema.chzKmCodes.seq });
       if (marked.length !== input.count) {
-        throw new ConflictException({ code: CHZ_KM_ISSUE_TOO_MANY_CODE, available });
+        // Not CHZ_KM_ISSUE_TOO_MANY: `available` was computed from
+        // `issued_count` before this update, and reaching here means that
+        // counter disagrees with the codes' statuses, so the number would be
+        // fiction. Asking for fewer cannot clear it either -- the already
+        // issued sequence number sits below every future range's start.
+        throw new ConflictException({ code: CHZ_KM_ISSUE_INCONSISTENT_CODE });
       }
 
       await tx
@@ -389,8 +395,8 @@ export class ChzKmOrdersService {
     orderId: string,
     issueId: string,
   ): Promise<ChzKmIssueCodesDto> {
-    await this.loadIssue(tenantId, orderId, issueId);
-    return { codes: await this.decryptIssueCodes(tenantId, orderId, issueId) };
+    const { issue } = await this.loadIssue(tenantId, orderId, issueId);
+    return { codes: await this.decryptIssueCodes(tenantId, orderId, issue) };
   }
 
   /**
@@ -405,7 +411,7 @@ export class ChzKmOrdersService {
     if (issue.kind !== "export" || (format !== "txt" && format !== "csv")) {
       throw new ConflictException({ code: CHZ_KM_ISSUE_NOT_EXPORT_CODE });
     }
-    const codes = (await this.decryptIssueCodes(tenantId, orderId, issueId)).map(
+    const codes = (await this.decryptIssueCodes(tenantId, orderId, issue)).map(
       (entry) => entry.code,
     );
     return {
@@ -454,8 +460,9 @@ export class ChzKmOrdersService {
   private async decryptIssueCodes(
     tenantId: string,
     orderId: string,
-    issueId: string,
+    issue: typeof schema.chzKmIssues.$inferSelect,
   ): Promise<ChzKmIssueCodeDto[]> {
+    const issueId = issue.id;
     const rows = await this.db
       .select({
         seq: schema.chzKmCodes.seq,
@@ -472,6 +479,13 @@ export class ChzKmOrdersService {
         ),
       )
       .orderBy(asc(schema.chzKmCodes.seq));
+    // The write side makes a short read impossible, so this is the read path
+    // refusing to trust that promise: a file named for a range of 500 must
+    // never be served with 499 lines, because the difference becomes physical
+    // labels that no later check can tell apart.
+    if (rows.length !== issue.count) {
+      throw new ConflictException({ code: CHZ_KM_ISSUE_INCONSISTENT_CODE });
+    }
     return rows.map((row) => ({
       seq: row.seq,
       code: this.crypto.decryptWithAad(`${tenantId}/${orderId}/${row.seq}`, {

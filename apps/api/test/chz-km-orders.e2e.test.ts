@@ -538,6 +538,17 @@ describe.skipIf(!ready)("chz-km-orders cabinet e2e", () => {
       .post(`/chz-km-orders/${orderId}/issues`)
       .send({ kind: "export", format: "csv", count: 1 })
       .expect(201);
+    // The owning tenant first, so the CSV branch of `issueFile` -- its own
+    // content type, its own extension -- is driven through the route and not
+    // only through the domain serializer's unit test.
+    const own = await agent
+      .get(`/chz-km-orders/${orderId}/issues/${issue.body.id}/file`)
+      .expect(200);
+    expect(own.headers["content-type"]).toBe("text/csv; charset=utf-8");
+    expect(own.headers["content-disposition"]).toBe(
+      'attachment; filename="km-04607034690014-1-1.csv"',
+    );
+
     const other = request.agent(app!.getHttpServer());
     seededTenantIds.push(await signUpAndActivate(other));
     await other.get(`/chz-km-orders/${orderId}/issues/${issue.body.id}/file`).expect(404);

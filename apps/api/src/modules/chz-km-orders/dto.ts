@@ -39,6 +39,15 @@ export const CHZ_KM_ORDER_NOT_COMPLETED_CODE = "CHZ_KM_ORDER_NOT_COMPLETED" as c
 /** `GET /chz-km-orders/:id/issues/:issueId/file` reached a print issue, which has no file. */
 export const CHZ_KM_ISSUE_NOT_EXPORT_CODE = "CHZ_KM_ISSUE_NOT_EXPORT" as const;
 
+/**
+ * The order's `issued_count` disagrees with its codes' statuses, so the range
+ * the next issue would claim is not actually free. Unreachable while the row
+ * lock holds, and reported apart from `CHZ_KM_ISSUE_TOO_MANY` on purpose: that
+ * code tells the office to ask for fewer, which would never clear this state,
+ * because the bad sequence number is below every future range's start.
+ */
+export const CHZ_KM_ISSUE_INCONSISTENT_CODE = "CHZ_KM_ISSUE_INCONSISTENT" as const;
+
 export const createChzKmOrderSchema = z.object({
   productId: z.uuid(),
   quantity: z.number().int().min(1).max(150_000),
@@ -344,7 +353,20 @@ export const chzKmIssueNotExportOpenApiSchema: SchemaObject = {
   },
 };
 
-/** The two ways `POST /chz-km-orders/:id/issues` refuses, documented as one 409. */
+export const chzKmIssueInconsistentOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["code"],
+  properties: {
+    code: { type: "string", enum: [CHZ_KM_ISSUE_INCONSISTENT_CODE] },
+  },
+};
+
+/** The three ways `POST /chz-km-orders/:id/issues` refuses, documented as one 409. */
 export const chzKmIssueConflictOpenApiSchema: SchemaObject = {
-  oneOf: [chzKmIssueTooManyOpenApiSchema, chzKmOrderNotCompletedOpenApiSchema],
+  oneOf: [
+    chzKmIssueTooManyOpenApiSchema,
+    chzKmOrderNotCompletedOpenApiSchema,
+    chzKmIssueInconsistentOpenApiSchema,
+  ],
 };

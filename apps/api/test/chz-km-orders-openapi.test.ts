@@ -174,6 +174,7 @@ describe("chz-km-orders OpenAPI contract", () => {
       expect(conflict.oneOf?.map((variant) => property(variant, "code").enum)).toEqual([
         ["CHZ_KM_ISSUE_TOO_MANY"],
         ["CHZ_KM_ORDER_NOT_COMPLETED"],
+        ["CHZ_KM_ISSUE_INCONSISTENT"],
       ]);
       const notExport = errorSchema(
         document,
