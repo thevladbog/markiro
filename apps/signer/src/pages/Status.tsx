@@ -9,19 +9,25 @@ import { UpdateControl } from "../components/UpdateControl.js";
 import type { UpdateCheckResult } from "../lib/updates.js";
 
 /**
- * `unpaired` перестаёт быть просто серым и становится «значения нет» (агент ещё
- * не привязан); `idle` — рабочее дежурное состояние агента (жив, ждёт задачу),
- * а не успех разовой операции, поэтому `active`, а не `done`; `degraded` уезжает
- * из `failed` в `attention` — деградация не равна недоступности, раньше они были
+ * `idle` — рабочее дежурное состояние агента (жив, ждёт задачу), а не успех
+ * разовой операции, поэтому `active`, а не `done`; `degraded` уезжает из
+ * `failed` в `attention` — деградация не равна недоступности, раньше они были
  * неразличимы (обе давали тон `error`). Задача 15: подпись `status.phase.degraded`
  * до ревью читалась как «ошибка» — ровно определение `failed` в словаре фаз, и
  * рядом с янтарным `!` стирала разницу с `unavailable` (у него подлинный
  * `failed`). Подпись переписана на «работает с ограничениями» / «working with
  * limitations» — агент продолжает опрашивать облако и подписывать, просто с
  * ограничением, а не остановился.
+ *
+ * Финальное ревью (minor 2): `unpaired` получает `planned`, а не `none`.
+ * Привязка агента к тенанту ожидается -- пользователь сейчас проходит мастер
+ * привязки -- значение просто ещё не наступило, а `none` в словаре фаз
+ * значит «значения нет и не ожидается». Тот же факт «устройство ещё не
+ * привязано, привязка ожидается» в кабинете (`apps/admin/src/pages/devices/
+ * index.tsx`'s `deviceStatusPhase`) уже даёт `awaiting_pairing -> planned`.
  */
 export const SIGNER_PHASE_TO_TAG_PHASE = {
-  unpaired: "none",
+  unpaired: "planned",
   idle: "active",
   reconnecting: "attention",
   unavailable: "failed",
