@@ -13,8 +13,8 @@ import { useTranslation } from "react-i18next";
 import { Link, useParams } from "react-router";
 
 import { formatSsccHri } from "@markiro/domain";
-import { Alert, Badge, Button, Card, PageHeader, Spinner, StatusChip, Table } from "@markiro/ui";
-import type { StatusChipStatus, TableColumn } from "@markiro/ui";
+import { Alert, Button, Card, PageHeader, Spinner, StatusChip, Table } from "@markiro/ui";
+import type { TableColumn, TagPhase } from "@markiro/ui";
 
 import { formatCreatedAt } from "../../lib/datetime.js";
 import { lastRegistryHref } from "./registry-location.js";
@@ -22,14 +22,14 @@ import { useBoxCard, type BoxCardDto, type BoxCardItemDto } from "./api.js";
 
 // Box status has its own three-way meaning distinct from a code's ("open"
 // still in progress, "closed" a completed/normal end state, "disassembled"
-// a terminal removal from circulation) so it gets its own mapping rather
-// than reusing the code registry's `STATUS_TO_CHIP` --
-// open -> "info" (in progress), closed -> "ok" (successfully completed),
-// disassembled -> "neutral" (out of circulation, not an error in itself).
-const STATUS_TO_CHIP: Record<BoxCardDto["status"], StatusChipStatus> = {
-  open: "info",
-  closed: "ok",
-  disassembled: "neutral",
+// a terminal removal from circulation), but it is the same phase shape the
+// shift pages use -- open -> "active" (in progress), closed -> "done"
+// (successfully completed), disassembled -> "dismantled" (taken apart, not
+// an error in itself).
+export const BOX_STATUS_TO_PHASE: Record<BoxCardDto["status"], TagPhase> = {
+  open: "active",
+  closed: "done",
+  disassembled: "dismantled",
 };
 
 function DetailField({ label, value }: { label: string; value: ReactNode }) {
@@ -123,10 +123,10 @@ export function BoxCardPage() {
       render: (row) => {
         const state = itemState(row);
         if (state === "displaced") {
-          return <Badge tone="warn">{t("pages.codeSearch.boxCard.displaced")}</Badge>;
+          return <StatusChip phase="attention" label={t("pages.codeSearch.boxCard.displaced")} />;
         }
         if (state === "removed") {
-          return <Badge tone="error">{t("pages.codeSearch.boxCard.removed")}</Badge>;
+          return <StatusChip phase="failed" label={t("pages.codeSearch.boxCard.removed")} />;
         }
         return null;
       },
@@ -159,7 +159,7 @@ export function BoxCardPage() {
               {t("pages.codeSearch.boxCard.printAction")}
             </Button>
             <StatusChip
-              status={STATUS_TO_CHIP[box.status]}
+              phase={BOX_STATUS_TO_PHASE[box.status]}
               label={t(`pages.codeSearch.boxCard.status.${box.status}`)}
             />
           </div>

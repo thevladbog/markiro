@@ -105,23 +105,27 @@ afterEach(() => {
 });
 
 describe("CodeCardPage", () => {
+  // CHZ status is a category tag, not a lifecycle phase -- it never carried
+  // a glyph even before this rewrite (`glyph={null}`). It renders as a flat
+  // `Badge tone="steel"` regardless of which CHZ status it names, so the
+  // check is the tag KIND (a badge, not a phase chip), not a per-status tone.
   it.each([
-    ["INTRODUCED", "В обороте", "ok"],
-    ["EMITTED", "Эмитирован", "info"],
-    ["APPLIED", "Нанесён", "info"],
-    ["RETIRED", "Выбыл", "warn"],
-    ["WRITTEN_OFF", "Списан", "warn"],
-    ["WITHDRAWN", "WITHDRAWN", "warn"],
-    ["DISAGGREGATION", "Расформирован", "neutral"],
-    ["FUTURE_STATUS", "FUTURE_STATUS", "neutral"],
+    ["INTRODUCED", "В обороте"],
+    ["EMITTED", "Эмитирован"],
+    ["APPLIED", "Нанесён"],
+    ["RETIRED", "Выбыл"],
+    ["WRITTEN_OFF", "Списан"],
+    ["WITHDRAWN", "WITHDRAWN"],
+    ["DISAGGREGATION", "Расформирован"],
+    ["FUTURE_STATUS", "FUTURE_STATUS"],
   ])(
-    "shows CHZ status %s as a colored tag independently from the local status",
-    async (status, label, tone) => {
+    "shows CHZ status %s as a category tag independently from the local status",
+    async (status, label) => {
       stubFetch(status);
       renderPage();
       expect(await screen.findByText("Статус в ЧЗ")).toBeTruthy();
       expect(
-        screen.getByText(label).closest(".mk-chip")?.classList.contains(`mk-chip--${tone}`),
+        screen.getByText(label).closest(".mk-badge")?.classList.contains("mk-badge--steel"),
       ).toBe(true);
       expect(screen.getByText("В коробе")).toBeTruthy();
     },

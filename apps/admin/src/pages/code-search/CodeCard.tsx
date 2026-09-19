@@ -12,30 +12,21 @@ import { useTranslation } from "react-i18next";
 import { Link, useParams } from "react-router";
 
 import { formatSsccHri } from "@markiro/domain";
-import { Alert, Card, PageHeader, Spinner, StatusChip } from "@markiro/ui";
-import type { StatusChipStatus } from "@markiro/ui";
+import { Alert, Badge, Card, PageHeader, Spinner, StatusChip } from "@markiro/ui";
+import type { TagPhase } from "@markiro/ui";
 
 import { formatCreatedAt, formatDate } from "../../lib/datetime.js";
 import { lastRegistryHref } from "./registry-location.js";
 import { useCodeCard, type CodeHistoryEvent, type CodeStatus } from "./api.js";
 
-// Mirrors `./index.tsx`'s `STATUS_TO_CHIP` -- see its doc comment for why
-// "written_off" maps to "warn" rather than a nonexistent "success"/"danger" tone.
-const STATUS_TO_CHIP: Record<CodeStatus, StatusChipStatus> = {
-  free: "ok",
-  aggregated: "info",
-  written_off: "warn",
+// A code's own lifecycle: free (in circulation, not yet placed) -> aggregated
+// (placed in a box, its own job done) -> written_off (terminal, out of
+// circulation). `./index.tsx` imports this rather than keeping its own copy.
+export const CODE_STATUS_TO_PHASE: Record<CodeStatus, TagPhase> = {
+  free: "active",
+  aggregated: "done",
+  written_off: "retired",
 };
-
-// CHZ states are independent of local aggregation. Unknown states stay neutral.
-const CHZ_STATUS_TO_CHIP = new Map<string, StatusChipStatus>([
-  ["INTRODUCED", "ok"],
-  ["EMITTED", "info"],
-  ["APPLIED", "info"],
-  ["RETIRED", "warn"],
-  ["WRITTEN_OFF", "warn"],
-  ["WITHDRAWN", "warn"],
-]);
 
 function DetailField({ label, value }: { label: string; value: ReactNode }) {
   return (
@@ -170,7 +161,7 @@ export function CodeCardPage() {
             label={t("pages.codeSearch.codeCard.statusLabel")}
             value={
               <StatusChip
-                status={STATUS_TO_CHIP[card.status]}
+                phase={CODE_STATUS_TO_PHASE[card.status]}
                 label={t(`pages.codeSearch.status.${card.status}`)}
               />
             }
@@ -179,15 +170,11 @@ export function CodeCardPage() {
             <DetailField
               label={t("pages.codeSearch.chzStatusLabel")}
               value={
-                <StatusChip
-                  status={CHZ_STATUS_TO_CHIP.get(card.chzStatus) ?? "neutral"}
-                  glyph={null}
-                  label={
-                    i18n.exists(`pages.inventory.chz.${card.chzStatus}`)
-                      ? t(`pages.inventory.chz.${card.chzStatus}`)
-                      : card.chzStatus
-                  }
-                />
+                <Badge tone="steel">
+                  {i18n.exists(`pages.inventory.chz.${card.chzStatus}`)
+                    ? t(`pages.inventory.chz.${card.chzStatus}`)
+                    : card.chzStatus}
+                </Badge>
               }
             />
           )}
