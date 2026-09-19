@@ -2,7 +2,10 @@ import { join } from "node:path";
 
 import { expect, test, type Page, type Route } from "@playwright/test";
 
-import { categorySchemaDefinitionSchema } from "../../../packages/domain/dist/index.js";
+import {
+  categorySchemaDefinitionSchema,
+  productAttributeValueSchema,
+} from "../../../packages/domain/dist/index.js";
 
 import { adminI18n, type AdminLocale } from "./admin-i18n.js";
 
@@ -368,7 +371,7 @@ function fixtures(locale: AdminLocale) {
       {
         entryId: "50000000-0000-4000-8000-000000000001",
         attributeId: "volume",
-        value: { type: "decimal" as const, value: "0.5", unit: "л" },
+        value: productAttributeValueSchema.parse({ type: "decimal", value: "0.5", unit: "л" }),
         source: "national_catalog" as const,
         observedAt: "2026-09-15T08:00:00.000Z",
         appliedAt: "2026-09-15T08:30:00.000Z",
