@@ -6,7 +6,6 @@ import { CABINET_CAPABILITY } from "@markiro/domain";
 import {
   AdminPage,
   Alert,
-  Badge,
   Button,
   Card,
   Checkbox,
@@ -333,9 +332,9 @@ function ExportsStep({
                   <small>{status}</small>
                 </span>
                 {selected[status] ? (
-                  <Badge tone="ok">{t("pages.inventory.exports.ready")}</Badge>
+                  <StatusChip phase="done" label={t("pages.inventory.exports.ready")} />
                 ) : (
-                  <Badge>{t("pages.inventory.exports.missing")}</Badge>
+                  <StatusChip phase="none" label={t("pages.inventory.exports.missing")} />
                 )}
               </div>
               <ChzExportRunStatus
@@ -535,7 +534,7 @@ function TerminalsStep({
               </small>
             </span>
             <StatusChip
-              status={line.onlineStations > 0 ? "ok" : "neutral"}
+              phase={line.onlineStations > 0 ? "active" : "none"}
               label={t("pages.inventory.terminals.online", {
                 online: line.onlineStations,
                 total: line.assignedStations,

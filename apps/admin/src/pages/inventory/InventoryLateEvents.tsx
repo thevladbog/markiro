@@ -154,7 +154,7 @@ export function InventoryLateEvents({
                   <span className="mk-inventory-late-list__state">
                     <strong>{t("pages.inventory.late.events", { count: event.eventCount })}</strong>
                     <StatusChip
-                      status={event.resolution === "pending" ? "warn" : "neutral"}
+                      phase={event.resolution === "pending" ? "attention" : "done"}
                       label={t(`pages.inventory.late.resolution.${event.resolution}`)}
                     />
                     {inventoryStatus === "running" && event.replayAvailable ? (

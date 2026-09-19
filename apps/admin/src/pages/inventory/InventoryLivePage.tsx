@@ -2,12 +2,31 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
 import { AdminPage, Alert, Card, Spinner, StatusChip } from "@markiro/ui";
+import type { TagPhase } from "@markiro/ui";
 
 import { useInventoryProgress } from "./api.js";
 import { InventoryClosePanel } from "./InventoryClosePanel.js";
 import { InventoryDocuments } from "./InventoryDocuments.js";
-import type { InventoryDetail } from "./schemas.js";
+import type { InventoryDetail, InventoryParticipant } from "./schemas.js";
 import { inventoryStatusChipProps } from "./status.js";
+
+/**
+ * `active` — участок в работе прямо сейчас. `stale` — пропал сигнал: тот же
+ * повод для внимания, что и `offline` устройства (`deviceStatusPhase` в
+ * `pages/devices/index.tsx`), а не отсутствие значения. `left` — терминал
+ * штатно завершил участие (сервер видит `left_at`, а не тишину по таймауту),
+ * это законченное действие, а не вывод из оборота человеком.
+ */
+export function participantStatePhase(state: InventoryParticipant["state"]): TagPhase {
+  switch (state) {
+    case "active":
+      return "active";
+    case "stale":
+      return "attention";
+    case "left":
+      return "done";
+  }
+}
 
 function formatCount(value: number, locale: string): string {
   return new Intl.NumberFormat(locale).format(value);
@@ -131,13 +150,7 @@ export function InventoryLivePage({
                   </span>
                   <span className="mk-inventory-evidence-list__state">
                     <StatusChip
-                      status={
-                        participant.state === "active"
-                          ? "ok"
-                          : participant.state === "stale"
-                            ? "warn"
-                            : "neutral"
-                      }
+                      phase={participantStatePhase(participant.state)}
                       label={t(`pages.inventory.live.participantState.${participant.state}`)}
                     />
                     {participant.pendingEventCount > 0 ? (
@@ -206,7 +219,7 @@ export function InventoryLivePage({
                     </span>
                     <span className="mk-inventory-evidence-list__state">
                       <StatusChip
-                        status={box.state === "invalidated" ? "error" : "info"}
+                        phase={box.state === "invalidated" ? "failed" : "active"}
                         label={
                           box.invalidationSource === null
                             ? t(`pages.inventory.live.boxState.${box.state}`)
@@ -238,7 +251,7 @@ export function InventoryLivePage({
                   <small>{event.terminalName}</small>
                 </span>
                 <StatusChip
-                  status={event.classification === "expected" ? "ok" : "warn"}
+                  phase={event.classification === "expected" ? "done" : "attention"}
                   label={
                     event.classification
                       ? t(`pages.inventory.live.classification.${event.classification}`)
