@@ -13,7 +13,16 @@ import {
 import { recordProductLabelAcceptanceWithOfflineGrant } from "../src/lib/product-labels/acceptance.js";
 import { readStationChannelEvidence } from "../src/lib/offline-grants/scan-evidence.js";
 const cleanups: (() => void)[] = [];
-afterEach(() => cleanups.splice(0).forEach((close) => close()));
+// Last opened, first closed: `held` is a second connection to the fixture's
+// SQLite file, and `h.close()` removes the whole temp directory. Windows
+// refuses to delete a file another handle still holds (EPERM), which is
+// exactly what the station beta build hit on 2026-09-19.
+afterEach(() =>
+  cleanups
+    .splice(0)
+    .reverse()
+    .forEach((close) => close()),
+);
 async function fixture(exhaust: "scan" | "label" | null = null) {
   const generation = createCredentialGeneration("test-label-key");
   const owner = await credentialGenerationOwnership(generation);
