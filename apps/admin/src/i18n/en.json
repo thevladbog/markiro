@@ -3892,7 +3892,7 @@
           "omsGuidError": "Enter an identifier shaped like 11b1abc1-f1ee-11db-1a11-f11ac11111e1",
           "omsPairError": "The SUZ identifier and the connection are saved together — fill in both fields",
           "omsContactPersonLabel": "Contact person for orders",
-          "omsContactPersonHint": "Used for a code order that names no contact person of its own.",
+          "omsContactPersonHint": "Used for a code order that names no contact person of its own. If a contact person is already set, clearing this field will not reset it — the previous value stays in effect.",
           "writeoffDocumentTypeLabel": "Write-off document type",
           "writeoffDocumentTypeHint": "The ХозОперация value for write-off orders, when document splitting is on.",
           "orderStatusFieldLabel": "Order status requisite",

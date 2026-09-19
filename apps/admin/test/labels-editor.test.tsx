@@ -1081,8 +1081,15 @@ it("refuses to save an imported layout without a product code as a KM label", as
       "Нужен один Data Matrix с полным кодом продукции внутри этикетки. Поле SSCC недопустимо.",
     ),
   ).toBeDefined();
-  fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
-  expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toEqual([]);
+  // Assert the gate itself, not just the absence of a request: a disabled
+  // button dispatches nothing in jsdom, so the POST check below would pass
+  // even with the gate removed -- `handleSave` would run a microtask later.
+  const save = screen.getByRole("button", { name: "Сохранить" });
+  expect(save.hasAttribute("disabled")).toBe(true);
+  fireEvent.click(save);
+  await waitFor(() =>
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toEqual([]),
+  );
 });
 
 it("imports and saves a duplicate using the whole Data Matrix square", async () => {
