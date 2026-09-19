@@ -180,6 +180,7 @@ function renderPage(options: RenderOptions = {}) {
     createRoutesFromElements(
       <>
         <Route path="/km-orders" element={<KmOrdersPage />} />
+        <Route path="/km-orders/:orderId" element={<div>Карточка заказа</div>} />
         <Route path="/integrations/:type" element={<div>Интеграция</div>} />
       </>,
     ),
@@ -251,13 +252,11 @@ it("computes the four KPI tiles from the list alone", async () => {
   expect(metricValue("Выдано по заказам за 30 дней")).toContain(number.format(1200));
 });
 
-it("renders the product name as plain text, not a link", async () => {
+it("links every product name to that order's own card", async () => {
   renderPage();
 
-  await screen.findByText("Вода газированная 1,0 л");
-  // The order detail route does not exist yet (the next task adds it); a
-  // link here would send a click onto React Router's raw error page.
-  expect(screen.queryByRole("link", { name: "Вода газированная 1,0 л" })).toBeNull();
+  const link = await screen.findByRole("link", { name: "Вода газированная 1,0 л" });
+  expect(link.getAttribute("href")).toBe(`/km-orders/${ID.completed}`);
 });
 
 it("opens the order dialog with a product select and a quantity input", async () => {

@@ -134,6 +134,18 @@ export const kmOrderPreflightFailureSchema = z.object({
   blockedBy: z.array(kmOrderPreflightCodeSchema),
 });
 
+/**
+ * `POST /chz-km-orders/:id/issues`'s 409 body when the office asked for more
+ * codes than the order still holds. `available` is the count the server saw
+ * under its own row lock at the moment it refused, which is the only number
+ * the dialog may quote back -- the card's `availableForIssue` can already be
+ * stale by then.
+ */
+export const kmIssueTooManyFailureSchema = z.object({
+  code: z.literal("CHZ_KM_ISSUE_TOO_MANY"),
+  available: z.number().int().nonnegative(),
+});
+
 export interface CreateKmOrderInput {
   productId: string;
   quantity: number;

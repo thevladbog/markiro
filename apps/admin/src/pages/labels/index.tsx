@@ -84,11 +84,8 @@ const FILTER_LABEL_KEY: Record<LibraryFilter, string> = {
  * "pallet" did before this map existed -- TypeScript requires every key of
  * the union to be present in a `Record<LabelTemplatePurpose, ...>` literal.
  *
- * `product_km` reuses the duplicate badge for now: `LabelTemplateSummaryDto.
- * purpose` (`../labels/api.ts`) is still the narrower 3-member union, so no
- * template this screen lists can actually carry `product_km` yet -- this
- * entry only satisfies the exhaustiveness check until the library UI for the
- * new purpose (a later task) gives it a badge of its own.
+ * `product_km` reuses the duplicate badge for now: the library UI for the
+ * new purpose (a later task) is what gives it a badge of its own.
  */
 const PURPOSE_BADGE_KEY: Record<LabelTemplatePurpose, string> = {
   box: "pages.labels.purpose.box",

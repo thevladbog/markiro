@@ -16,6 +16,7 @@ import {
   isTerminalKmOrderState,
   kmIssueCodesSchema,
   kmIssueSchema,
+  kmIssueTooManyFailureSchema,
   kmOrderListSchema,
   kmOrderPreflightFailureSchema,
   kmOrderSchema,
@@ -51,6 +52,15 @@ function orderPath(orderId: string): string {
  */
 export function kmIssueFileUrl(orderId: string, issueId: string): string {
   return `${API_BASE}${orderPath(orderId)}/issues/${encodeURIComponent(issueId)}/file`;
+}
+
+/**
+ * The cabinet route that renders one issue for printing. Not an API URL: the
+ * print page is a real route the office opens in its own tab (the codes are
+ * fetched there by `useKmIssueCodes`), so it carries no `/api` prefix.
+ */
+export function kmIssuePrintPath(orderId: string, issueId: string): string {
+  return `/km-orders/${encodeURIComponent(orderId)}/issues/${encodeURIComponent(issueId)}/print`;
 }
 
 async function listKmOrders(): Promise<KmOrderListItem[]> {
@@ -126,6 +136,18 @@ export function kmOrderPreflightCodes(error: unknown): KmOrderPreflightCode[] | 
   if (!(error instanceof ApiRequestError) || error.status !== 422) return null;
   const parsed = kmOrderPreflightFailureSchema.safeParse(error.details);
   return parsed.success ? parsed.data.blockedBy : null;
+}
+
+/**
+ * How many codes the server says are still available, from a refused issue --
+ * or `null` when the refusal is anything else (`CHZ_KM_ORDER_NOT_COMPLETED`,
+ * `CHZ_KM_ISSUE_INCONSISTENT`, a transport failure), which the dialog reports
+ * as a generic refusal rather than as a number it never received.
+ */
+export function kmIssueTooManyAvailable(error: unknown): number | null {
+  if (!(error instanceof ApiRequestError) || error.status !== 409) return null;
+  const parsed = kmIssueTooManyFailureSchema.safeParse(error.details);
+  return parsed.success ? parsed.data.available : null;
 }
 
 /** `GET /chz-km-orders` -- the tenant's orders, newest first per the server. */

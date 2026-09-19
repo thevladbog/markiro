@@ -7,6 +7,8 @@ import { ApiRequestError } from "../src/api/client.js";
 import {
   KM_ORDERS_QUERY_KEY,
   kmIssueFileUrl,
+  kmIssueTooManyAvailable,
+  kmIssuePrintPath,
   kmOrderPreflightCodes,
   kmOrderQueryKey,
   kmOrderRefetchInterval,
@@ -241,5 +243,31 @@ describe("km orders api client", () => {
         }),
       ),
     ).toBeNull();
+  });
+
+  it("reads the remaining count out of a refused issue and nothing else", () => {
+    const refused = new ApiRequestError(409, "Conflict", "CHZ_KM_ISSUE_TOO_MANY", {
+      code: "CHZ_KM_ISSUE_TOO_MANY",
+      available: 120,
+    });
+    expect(kmIssueTooManyAvailable(refused)).toBe(120);
+
+    // The other two 409s carry no count; quoting one would tell the office to
+    // ask for fewer codes when the real answer is "wait" or "call support".
+    expect(
+      kmIssueTooManyAvailable(
+        new ApiRequestError(409, "Conflict", "CHZ_KM_ORDER_NOT_COMPLETED", {
+          code: "CHZ_KM_ORDER_NOT_COMPLETED",
+        }),
+      ),
+    ).toBeNull();
+    expect(kmIssueTooManyAvailable(new ApiRequestError(500, "Server error"))).toBeNull();
+    expect(kmIssueTooManyAvailable(new Error("network"))).toBeNull();
+  });
+
+  it("builds the cabinet print route without the api prefix", () => {
+    expect(kmIssuePrintPath(ORDER_ID, ISSUE_ID)).toBe(
+      `/km-orders/${ORDER_ID}/issues/${ISSUE_ID}/print`,
+    );
   });
 });

@@ -15,12 +15,20 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 
-import type { LabelTemplateSpec } from "@markiro/domain";
+import type { LabelTemplatePurpose, LabelTemplateSpec } from "@markiro/domain";
 
 import { apiFetch } from "../../api/client.js";
 
 export interface LabelTemplateSummaryDto {
-  purpose: "box" | "product_duplicate" | "pallet";
+  /**
+   * The full `LabelTemplatePurpose` union: `GET /label-templates` already
+   * returns the stock `product_km` label every tenant is seeded with (see
+   * `apps/api/.../tenant-provisioning.service.ts`), and the KM issue dialog
+   * (`../km-orders/IssueKmCodesDialog.tsx`) selects on exactly that member.
+   * `LabelTemplateDto` below stays narrower on purpose -- the editor it feeds
+   * cannot create or edit a `product_km` template yet.
+   */
+  purpose: LabelTemplatePurpose;
   id: string;
   name: string;
   widthMm: number;

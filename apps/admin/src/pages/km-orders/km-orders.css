@@ -48,3 +48,126 @@
   flex-direction: column;
   gap: var(--sp-4);
 }
+
+/* Order card -------------------------------------------------------------
+   Width and vertical rhythm come from `.mk-admin-page`, exactly like the
+   list above; only the card's own blocks are described here. */
+.mk-km-order-page {
+  min-width: 0;
+}
+
+.mk-km-order-page__back {
+  font: var(--text-body-sm);
+  color: var(--fg-3);
+}
+
+.mk-km-order-page__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+  margin: 0;
+  font: var(--text-body);
+  color: var(--fg-3);
+}
+
+.mk-km-order-progress {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.mk-km-order-progress__text {
+  font: var(--text-body-sm);
+  color: var(--fg-2);
+}
+
+.mk-km-order-progress__track {
+  display: block;
+  height: 8px;
+  border-radius: var(--r-2);
+  background: var(--surface-panel);
+  overflow: hidden;
+}
+
+.mk-km-order-progress__fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.mk-km-order-timeline {
+  display: grid;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mk-km-order-timeline__step {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-3);
+  font: var(--text-body);
+  color: var(--fg-3);
+}
+
+.mk-km-order-timeline__step--current {
+  color: var(--fg-1);
+}
+
+.mk-km-order-timeline__step--done .mk-km-order-timeline__glyph {
+  color: var(--ok-fg);
+}
+
+.mk-km-order-timeline__label {
+  min-width: 180px;
+}
+
+.mk-km-order-timeline__status,
+.mk-km-order-timeline__time,
+.mk-km-order-timeline__author {
+  font: var(--text-caption);
+  color: var(--fg-3);
+}
+
+.mk-km-order-timeline__author {
+  margin: var(--sp-3) 0 0;
+}
+
+.mk-km-issue-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.mk-km-issue-quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.mk-km-issue-range {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-2);
+  margin: 0;
+}
+
+.mk-km-issue-range__label {
+  font: var(--text-caption);
+  color: var(--fg-2);
+}
+
+.mk-km-issue-range__value {
+  font: var(--text-code);
+  color: var(--fg-1);
+}
+
+.mk-km-issue-note {
+  margin: 0;
+  font: var(--text-body-sm);
+  color: var(--fg-3);
+}

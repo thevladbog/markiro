@@ -120,12 +120,7 @@ export function KmOrdersPage() {
         key: "product",
         title: t("pages.kmOrders.list.product"),
         wrap: true,
-        // Plain text for now: app.tsx registers only the index route for
-        // this page, and has no `path="*"`/`errorElement` catch-all, so a
-        // `<Link to={row.id}>` here would drop the user onto React Router's
-        // raw "Unexpected Application Error!" page on click. The next task
-        // restores this as a link together with the detail route it needs.
-        render: (row) => row.productName,
+        render: (row) => <Link to={row.id}>{row.productName}</Link>,
       },
       { key: "gtin14", title: t("pages.kmOrders.list.gtin"), width: 150, mono: true },
       {
