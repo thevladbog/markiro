@@ -5,6 +5,7 @@ import { Link } from "react-router";
 import { CABINET_CAPABILITY } from "@markiro/domain";
 
 import { Alert, Button, PageHeader, StatusChip } from "@markiro/ui";
+import type { TagPhase } from "@markiro/ui";
 
 import { useCan } from "../../access/context.js";
 import { useDashboardOverview, type DashboardOverviewDto, type DashboardPeriod } from "./api.js";
@@ -266,11 +267,30 @@ function HeadlineFacts({ overview }: { overview: DashboardOverviewDto }) {
   );
 }
 
+/**
+ * `complete` — период устоялся, значение больше не изменится (`done`).
+ * `provisional` — активные смены ещё могут дописать данные: то же
+ * «предварительно», что и в шапке «Активные смены» ниже по странице
+ * (`pages.dashboard.active.provisional`), поэтому та же фаза (`running`).
+ * `insufficient` — не хватает данных для темпа, это повод обратить внимание,
+ * а не отсутствие значения: `attention`, а не `none`.
+ */
+function dashboardQualityPhase(
+  status: DashboardOverviewDto["dynamics"]["quality"]["status"],
+): TagPhase {
+  switch (status) {
+    case "complete":
+      return "done";
+    case "provisional":
+      return "running";
+    case "insufficient":
+      return "attention";
+  }
+}
+
 function ControlSignals({ overview }: { overview: DashboardOverviewDto }) {
   const { t } = useTranslation();
   const quality = overview.dynamics.quality;
-  const status =
-    quality.status === "complete" ? "ok" : quality.status === "provisional" ? "info" : "warn";
 
   return (
     <section className="mk-dashboard-signals" aria-labelledby="dashboard-signals-title">
@@ -279,7 +299,10 @@ function ControlSignals({ overview }: { overview: DashboardOverviewDto }) {
           <h2 id="dashboard-signals-title">{t("pages.dashboard.signals.title")}</h2>
           <p>{t("pages.dashboard.signals.hint")}</p>
         </div>
-        <StatusChip status={status} label={t(`pages.dashboard.signals.status.${quality.status}`)} />
+        <StatusChip
+          phase={dashboardQualityPhase(quality.status)}
+          label={t(`pages.dashboard.signals.status.${quality.status}`)}
+        />
       </div>
       {quality.reasons.length > 0 ? (
         <ul className="mk-dashboard-signals__list">
@@ -342,7 +365,7 @@ function ActiveShifts({
         <div className="mk-dashboard-section__title-group">
           <h2 id="dashboard-active-title">{t("pages.dashboard.active.title")}</h2>
           {overview.activeShifts.length > 0 ? (
-            <StatusChip status="info" label={t("pages.dashboard.active.provisional")} />
+            <StatusChip phase="running" label={t("pages.dashboard.active.provisional")} />
           ) : null}
         </div>
         <Link to="/shifts">{t("pages.dashboard.viewAll")}</Link>
@@ -388,7 +411,7 @@ function ActiveShifts({
                   <td>{dateTime.format(new Date(shift.openedAt))}</td>
                   <td>
                     <StatusChip
-                      status={shift.lateDataAt ? "warn" : "info"}
+                      phase={shift.lateDataAt ? "attention" : "active"}
                       label={t(
                         shift.lateDataAt
                           ? "pages.dashboard.active.late"
