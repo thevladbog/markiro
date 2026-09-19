@@ -2297,24 +2297,16 @@ body,
   }
 }
 
-/* Number and status render as floor-sized chips (like the status bar tags). */
-.shift-card__heading .mk-chip {
-  height: 34px;
+/* Размер задан пропом size="floor"; здесь остаётся только обрезка длинного
+   номера и подписи — геометрию трогать нельзя, она живёт в .mk-tag--floor. */
+.shift-card__heading .mk-tag {
   min-width: 0;
-  padding: 0 14px;
   overflow: hidden;
-  border-radius: 999px;
-  font: 700 15px/1 var(--font-ui);
 }
 
-.shift-card__heading .mk-chip > span:last-child {
+.shift-card__heading .mk-tag > span:last-child {
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.shift-card__number.mk-chip {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
 }
 
 .shift-card__meta {
@@ -4711,7 +4703,7 @@ body,
   background: var(--surface-card);
 }
 
-.station-update-center__source:has(.mk-chip--ok) {
+.station-update-center__source:has(.mk-chip--active) {
   border-left-color: var(--ok-solid);
 }
 

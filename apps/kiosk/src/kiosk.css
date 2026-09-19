@@ -37,14 +37,14 @@ body,
   box-sizing: border-box;
 }
 
-.kiosk-status-strip .mk-chip {
+.kiosk-status-strip .mk-tag {
   min-width: 0;
   flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.kiosk-status-strip .mk-chip > span:last-child {
+.kiosk-status-strip .mk-tag > span:last-child {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;

@@ -90,22 +90,19 @@ export function StatusStrip({
     ...(quarantined > 0 ? [quarantineLabel] : []),
   ].join(" · ");
 
-  // Kiosk-sized: `StatusChip`'s office default is 24px tall with 12px type,
+  // Kiosk-sized: `StatusChip`'s office default is 22px tall with 12px type,
   // which is unreadable at the distance someone stands from a wall-mounted
-  // tablet. `StatusChip` spreads `style` over its own, so this is an override
-  // rather than a fork.
-  const chip = { height: 40, padding: "0 16px", font: "600 16px/1 var(--font-ui)" } as const;
-
+  // tablet. `size="wall"` is the named 40px geometry for that distance.
   return (
     <div role="status" aria-label={fullLabel} title={fullLabel} className="kiosk-status-strip">
       {/* StatusChipProps omits `children`, so the copy goes through `label`. */}
-      <StatusChip status={online ? "ok" : "warn"} label={onlineLabel} style={chip} />
+      <StatusChip size="wall" phase={online ? "active" : "attention"} label={onlineLabel} />
       {/* UNOBTRUSIVE, and that is the design's word for it («ненавязчивая
           плашка», 2026-07-24 §7): a chip in the strip beside the others rather
           than a banner or a modal, and it gates nothing — a kiosk whose data is
           a day old goes on handing product out, which is why the routing in
           `nextKioskView` reads `blocked` and never `warn`. */}
-      {age !== "fresh" ? <StatusChip status="warn" label={staleLabel} style={chip} /> : null}
+      {age !== "fresh" ? <StatusChip size="wall" phase="attention" label={staleLabel} /> : null}
       {/* ONLY when there is one. A permanent «отклонил: 0» would teach everyone
           who walks past this kiosk to read straight through the line, on the
           day it finally has something to say.
@@ -118,7 +115,9 @@ export function StatusStrip({
           states its queue. Deliberately not an i18next plural: the RU
           categories (`_one/_few/_many/_other`) have no EN counterpart and the
           lockstep test requires identical key sets in both files. */}
-      {quarantined > 0 ? <StatusChip status="warn" label={quarantineLabel} style={chip} /> : null}
+      {quarantined > 0 ? (
+        <StatusChip size="wall" phase="attention" label={quarantineLabel} />
+      ) : null}
     </div>
   );
 }
