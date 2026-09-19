@@ -7,7 +7,7 @@ import type { TagPhase } from "@markiro/ui";
 import { useInventoryProgress } from "./api.js";
 import { InventoryClosePanel } from "./InventoryClosePanel.js";
 import { InventoryDocuments } from "./InventoryDocuments.js";
-import type { InventoryDetail, InventoryParticipant } from "./schemas.js";
+import type { InventoryDetail, InventoryParticipant, InventoryProgress } from "./schemas.js";
 import { inventoryStatusChipProps } from "./status.js";
 
 /**
@@ -25,6 +25,23 @@ export function participantStatePhase(state: InventoryParticipant["state"]): Tag
       return "attention";
     case "left":
       return "done";
+  }
+}
+
+/**
+ * Короб в живом ходе инвентаризации: `open`/`closed`/`invalidated`
+ * (`inventoryLiveBoxSchema.state` в `./schemas.ts`). Закрытый короб не идёт
+ * прямо сейчас — он завершён штатно, `done`, ровно как для того же понятия
+ * в `pages/code-search/BoxCard.tsx` (`BOX_STATUS_TO_PHASE.closed`).
+ */
+export function boxStatePhase(state: InventoryProgress["boxes"][number]["state"]): TagPhase {
+  switch (state) {
+    case "open":
+      return "active";
+    case "closed":
+      return "done";
+    case "invalidated":
+      return "failed";
   }
 }
 
@@ -219,7 +236,7 @@ export function InventoryLivePage({
                     </span>
                     <span className="mk-inventory-evidence-list__state">
                       <StatusChip
-                        phase={box.state === "invalidated" ? "failed" : "active"}
+                        phase={boxStatePhase(box.state)}
                         label={
                           box.invalidationSource === null
                             ? t(`pages.inventory.live.boxState.${box.state}`)

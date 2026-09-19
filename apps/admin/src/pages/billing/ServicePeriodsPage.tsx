@@ -5,7 +5,7 @@ import { Link } from "react-router";
 import { Alert, Button, EmptyState, Spinner, StatusChip } from "@markiro/ui";
 
 import { useServicePeriods } from "./api.js";
-import { formatBillingDate } from "./format.js";
+import { formatBillingDate, servicePeriodPhase } from "./format.js";
 
 export function ServicePeriodsPage() {
   const { t, i18n } = useTranslation();
@@ -62,7 +62,7 @@ export function ServicePeriodsPage() {
                   </p>
                 </div>
                 <StatusChip
-                  phase={period.state === "active" && !exhausted ? "active" : "retired"}
+                  phase={servicePeriodPhase(period.state, exhausted)}
                   label={t(
                     exhausted
                       ? "pages.billing.servicePeriods.state.exhausted"

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Alert, Button, Checkbox, Modal, Spinner, StatusChip, Textarea } from "@markiro/ui";
+import type { TagPhase } from "@markiro/ui";
 
 import {
   useDiscardInventoryLateEvents,
@@ -9,8 +10,31 @@ import {
   useReplayInventoryLateEvent,
   useReopenInventory,
 } from "./api.js";
+import type { InventoryLateEventsResponse } from "./schemas.js";
 
 const MAX_SELECTED_LATE_EVENTS = 100;
+
+/**
+ * Фактический union — `pending` | `replayed` | `discarded`
+ * (`inventoryLateEventSchema.resolution` в `./schemas.ts`). `pending`
+ * («Требует решения») ждёт решения администратора — `attention`. `replayed`
+ * («Обработан повторно») — успешно доведено до конца — `done`. `discarded`
+ * («Исключён») — администратор сознательно исключил событие из счёта, запись
+ * остаётся видимой в списке — вывод из оборота человеком, `retired`, а не
+ * штатное завершение.
+ */
+export function lateEventResolutionPhase(
+  resolution: InventoryLateEventsResponse["items"][number]["resolution"],
+): TagPhase {
+  switch (resolution) {
+    case "pending":
+      return "attention";
+    case "replayed":
+      return "done";
+    case "discarded":
+      return "retired";
+  }
+}
 
 export function InventoryLateEvents({
   inventoryId,
@@ -154,7 +178,7 @@ export function InventoryLateEvents({
                   <span className="mk-inventory-late-list__state">
                     <strong>{t("pages.inventory.late.events", { count: event.eventCount })}</strong>
                     <StatusChip
-                      phase={event.resolution === "pending" ? "attention" : "done"}
+                      phase={lateEventResolutionPhase(event.resolution)}
                       label={t(`pages.inventory.late.resolution.${event.resolution}`)}
                     />
                     {inventoryStatus === "running" && event.replayAvailable ? (

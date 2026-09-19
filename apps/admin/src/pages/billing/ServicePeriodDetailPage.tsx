@@ -5,7 +5,7 @@ import { Alert, Button, Card, Spinner, StatusChip } from "@markiro/ui";
 
 import type { TenantServicePeriodDetail } from "./api.js";
 import { useServicePeriod } from "./api.js";
-import { formatBillingDate, formatBillingDateTime } from "./format.js";
+import { formatBillingDate, formatBillingDateTime, servicePeriodPhase } from "./format.js";
 
 type Entry = TenantServicePeriodDetail["entries"][number];
 
@@ -93,7 +93,7 @@ export function ServicePeriodDetailPage() {
       <Card title={t("pages.billing.servicePeriods.detail.balanceTitle")} titleAs="h3">
         <div className="mk-billing-service-detail-summary">
           <StatusChip
-            phase={period.state === "active" && !exhausted ? "active" : "retired"}
+            phase={servicePeriodPhase(period.state, exhausted)}
             label={t(
               exhausted
                 ? "pages.billing.servicePeriods.state.exhausted"

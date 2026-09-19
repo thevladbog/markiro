@@ -17,6 +17,7 @@ import {
   Spinner,
   StatusChip,
 } from "@markiro/ui";
+import type { TagPhase } from "@markiro/ui";
 
 import { useCan } from "../../access/context.js";
 import { ApiRequestError } from "../../api/client.js";
@@ -501,6 +502,17 @@ function SnapshotStep({
   );
 }
 
+/**
+ * Шаг готовности перед запуском инвентаризации: ноль онлайн-терминалов
+ * блокирует продолжение (см. кнопку «Продолжить» ниже в `TerminalsStep`).
+ * Значение определённое и мешает двигаться дальше — `attention`, а не
+ * `none` (там значения нет и не ожидается, а здесь оно есть и требует
+ * действия).
+ */
+export function onlineStationsPhase(onlineStations: number): TagPhase {
+  return onlineStations > 0 ? "active" : "attention";
+}
+
 function TerminalsStep({
   inventory,
   snapshot,
@@ -534,7 +546,7 @@ function TerminalsStep({
               </small>
             </span>
             <StatusChip
-              phase={line.onlineStations > 0 ? "active" : "none"}
+              phase={onlineStationsPhase(line.onlineStations)}
               label={t("pages.inventory.terminals.online", {
                 online: line.onlineStations,
                 total: line.assignedStations,

@@ -28,8 +28,13 @@ export const BILLING_LIMIT_KEYS: BillingLimitKey[] = [
  * (`warn`): отмена и истечение не требуют вмешательства. `ordered` и
  * `in_progress` расходятся на ожидание (`planned`) и выполнение (`running`),
  * а не делят один статус. Неизвестное значение — `none`, а не `info`.
+ *
+ * `unmanaged` («Не подключено») — тот же случай, что у ненастроенного канала
+ * интеграции (`CHANNEL_STATE_TO_PHASE.not_configured` в
+ * `pages/integrations/index.tsx`): вмешательства не существует, канал просто
+ * не подключён, значения нет и не ожидается — `none`, а не `attention`.
  */
-function chipPhaseFor(value: string): TagPhase {
+export function chipPhaseFor(value: string): TagPhase {
   if (["active", "trial", "normal", "managed", "published"].includes(value)) return "active";
   if (["paid", "completed", "confirmed"].includes(value)) return "done";
   if (["pending_activation", "scheduled", "new", "ordered"].includes(value)) return "planned";
@@ -44,7 +49,6 @@ function chipPhaseFor(value: string): TagPhase {
       "clarification_required",
       "partially_paid",
       "read_only",
-      "unmanaged",
     ].includes(value)
   )
     return "attention";

@@ -17,7 +17,7 @@ import {
   StatusChip,
   Table,
 } from "@markiro/ui";
-import type { SelectOption, TableColumn } from "@markiro/ui";
+import type { SelectOption, TableColumn, TagPhase } from "@markiro/ui";
 
 import { chzStatusKeySchema } from "@markiro/platform-contracts";
 import { ChzStatus } from "./national-catalog/ChzStatus.js";
@@ -51,6 +51,21 @@ import "./catalog.css";
 const CANDIDATES_CHANNEL_TYPE = "commerceml";
 
 type StatusFilter = "all" | ProductStatus | "archived";
+
+/**
+ * Фактический union — только `draft` | `active` (`ProductStatus` в `./api.ts`).
+ * Черновик не архивирован и не отправлен на прилавок, но и не тревога — для
+ * него есть выделенная фаза `draft`, уже используемая для того же понятия в
+ * биллинге и инвентаризации в этом изменении.
+ */
+export function productStatusPhase(status: ProductStatus): TagPhase {
+  switch (status) {
+    case "active":
+      return "active";
+    case "draft":
+      return "draft";
+  }
+}
 
 function ProductThumbnail({ product }: { product: ProductDto }) {
   const [failed, setFailed] = useState(false);
@@ -360,7 +375,7 @@ export function CatalogPage() {
             <StatusChip phase="retired" label={t("pages.catalog.status.archived")} />
           ) : (
             <StatusChip
-              phase={row.status === "active" ? "active" : "attention"}
+              phase={productStatusPhase(row.status)}
               label={t(`pages.catalog.status.${row.status}`)}
             />
           ),
