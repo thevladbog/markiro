@@ -2,37 +2,28 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
 import { Alert, Card, EmptyState, PageHeader, Spinner, StatusChip } from "@markiro/ui";
-import type { StatusChipStatus } from "@markiro/ui";
+import type { TagPhase } from "@markiro/ui";
 
 import { useChannels, type ChannelState, type ChannelSummaryDto } from "./api.js";
 
 /**
- * State -> chip color, one-to-one with the five `ChannelState` values
- * (brief 08's "not configured / working / error / silent / unavailable").
- * `unavailable` gets its own tone (`info`) rather than reusing
- * `not_configured`'s (`neutral`) so the two read as different diagnoses even
- * before the label text is read -- "we haven't built this yet" is not the
- * same story as "you haven't set this up yet".
+ * State -> phase, one-to-one with the five `ChannelState` values (brief 08's
+ * "not configured / working / error / silent / unavailable").
  *
- * Review follow-up: `info`'s glyph (⟳, "Syncing" in `StatusChip.tsx`'s own
- * default label) reads as "in progress", which is the wrong story for a
- * channel with no adapter at all. It stays `info` anyway: `StatusChip`
- * exposes exactly five tones (`ok`/`error`/`warn`/`info`/`neutral`), and
- * `neutral` is already spoken for by `not_configured` above -- reusing it
- * here would collapse the one distinction this map exists to draw ("not set
- * up" vs. "not built yet"), which is the actual failure this comment is
- * about, worse than a glyph that half-fits. Nothing between the two is on
- * offer, so this is the least-wrong tone until `StatusChip` grows one
- * (`t(\`integrations.state.${channel.state}\`)` carries the real meaning
- * regardless -- color is never the only signal here, same rule
- * `StatusChip.tsx` documents for its own `neutral`).
+ * `not_configured` is the only legitimate `none` here: there genuinely is no
+ * value and none is expected until an operator sets the channel up.
+ * `unavailable` is a different story -- brief 08 calls it "a connection we
+ * have not built yet", and `JournalFilters.tsx` already treats it exactly
+ * like `silent` (same `warn`-toned notice, same "show me the latest" action):
+ * both are "this channel should be doing something and isn't", which is
+ * `attention`, not an absence of value.
  */
-const STATE_STATUS: Record<ChannelState, StatusChipStatus> = {
-  working: "ok",
-  error: "error",
-  silent: "warn",
-  not_configured: "neutral",
-  unavailable: "info",
+export const CHANNEL_STATE_TO_PHASE: Record<ChannelState, TagPhase> = {
+  working: "active",
+  error: "failed",
+  silent: "attention",
+  not_configured: "none",
+  unavailable: "attention",
 };
 
 /**
@@ -101,7 +92,7 @@ function ChannelCard({ channel }: { channel: ChannelSummaryDto }) {
           {t(channel.labelKey)}
         </span>
         <StatusChip
-          status={STATE_STATUS[channel.state]}
+          phase={CHANNEL_STATE_TO_PHASE[channel.state]}
           label={t(`integrations.state.${channel.state}`)}
         />
       </div>
