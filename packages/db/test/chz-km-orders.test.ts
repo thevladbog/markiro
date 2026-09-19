@@ -18,6 +18,11 @@ import {
 } from "../src/schema/chz.js";
 import { copyMigrationsThroughIndex } from "./support/legacy-migrations.js";
 
+// `chz_product_groups` (migration 0099) seeds code 15 as alias "beer", the
+// group cider belongs to; 12 is "otp", a different group entirely, and
+// `product_group_code` is a foreign key into that table.
+const BEER_GROUP_CODE = 15;
+
 describe("chz km orders schema", () => {
   it("declares the three signer task types", () => {
     expect([...CHZ_SIGNER_TASK_TYPES]).toEqual(["true_api_auth", "oms_auth", "sign_detached"]);
@@ -98,7 +103,7 @@ describe.skipIf(!databaseUrl)("chz km orders migration", () => {
       [userId, `${userId}@example.com`],
     );
     await pool.query(
-      `INSERT INTO products (id, tenant_id, name, gtin14, chz_product_group_code) VALUES ($1, $2, 'Сидр', '04607034690014', 12)`,
+      `INSERT INTO products (id, tenant_id, name, gtin14, chz_product_group_code) VALUES ($1, $2, 'Сидр', '04607034690014', ${BEER_GROUP_CODE})`,
       [productId, tenantId],
     );
   }, 120_000);
@@ -126,7 +131,7 @@ describe.skipIf(!databaseUrl)("chz km orders migration", () => {
         productId,
         gtin14: "04607034690014",
         productGroupAlias: "beer",
-        productGroupCode: 12,
+        productGroupCode: BEER_GROUP_CODE,
         templateId: 18,
         quantity: 10,
         requestBody: "{}",
@@ -151,7 +156,7 @@ describe.skipIf(!databaseUrl)("chz km orders migration", () => {
         productId,
         gtin14: "04607034690014",
         productGroupAlias: "beer",
-        productGroupCode: 12,
+        productGroupCode: BEER_GROUP_CODE,
         templateId: 18,
         quantity: 10,
         requestBody: "{}",

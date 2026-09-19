@@ -91,13 +91,14 @@ describe("OmsClient", () => {
       ),
     );
     const result = await client.getBufferStatus(auth, "y", "04606038003172");
+    // `leftInBuffer`, `totalCodes` and `unavailableCodes` are in the response
+    // above and deliberately absent here: nothing reads them, so the client
+    // does not parse them.
     expect(result).toEqual({
       status: "ok",
       value: {
         bufferStatus: "REJECTED",
         availableCodes: -1,
-        leftInBuffer: -1,
-        totalCodes: -1,
         totalPassed: -1,
         expiredDate: null,
         rejectionReason: "Order declined: 0106",

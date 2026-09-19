@@ -17,6 +17,7 @@ import {
 } from "@markiro/domain";
 
 import { DB } from "../../auth/auth.module";
+import { SecurityAuditService } from "../../authorization/security-audit.service";
 import { chzSignerSettingsSchema } from "../integrations/channel-registry";
 import { CHZ_CHANNEL_TYPE } from "../signer-agents/chz-constants";
 import { ChzCryptoService } from "../signer-agents/chz-crypto.service";
@@ -76,6 +77,7 @@ export class ChzKmOrdersService {
     @Inject(DB) private readonly db: Db,
     private readonly omsTokens: ChzOmsTokenService,
     private readonly crypto: ChzCryptoService,
+    private readonly audit: SecurityAuditService,
     @Inject(CHZ_KM_ORDER_QUEUE) private readonly queue: ChzKmOrderQueue,
   ) {}
 
@@ -187,6 +189,16 @@ export class ChzKmOrdersService {
       createdByUserId: actorUserId,
       deadlineAt: new Date(Date.now() + ORDER_DEADLINE_MS),
     });
+    // Ordering codes spends the tenant's СУЗ buffer, so the spec audits it
+    // alongside retry and each issue. The row's `created_by_user_id` says the
+    // same thing durably; this is the security trail's own copy.
+    this.audit.credentialMutation({
+      tenantId,
+      userId: actorUserId,
+      action: "chz_km_order.create",
+      resourceId: id,
+      outcome: "succeeded",
+    });
     await this.queue.enqueueChzKmOrder(tenantId, id);
     return this.get(tenantId, id);
   }
@@ -264,8 +276,17 @@ export class ChzKmOrdersService {
    * order that failed after being submitted to СУЗ (so it carries a real
    * `omsOrderId`) must not be written back to `created` with that id still
    * attached, or the update itself would violate the constraint.
+   *
+   * `attempts` is reset for the same reason as `deadlineAt`: it is a budget
+   * for this attempt at the order, not a lifetime counter.
+   * `ChzKmOrderRunnerService.startSigning` fails an order whose `attempts`
+   * has reached `MAX_SIGN_ATTEMPTS`, and a signer agent that was offline --
+   * the ordinary way an order burns that budget -- is exactly the failure an
+   * operator presses «Повторить» after fixing. Leaving the counter at five
+   * made the retry return 200 and then fail the order again on its very next
+   * pass, permanently: the codes could only be had by paying for a new order.
    */
-  async retry(tenantId: string, id: string): Promise<ChzKmOrderDto> {
+  async retry(tenantId: string, actorUserId: string, id: string): Promise<ChzKmOrderDto> {
     const now = new Date();
     const updated = await this.db
       .update(schema.chzKmOrders)
@@ -276,6 +297,7 @@ export class ChzKmOrdersService {
         errorMessage: null,
         signerTaskId: null,
         claimedAt: null,
+        attempts: 0,
         deadlineAt: new Date(now.getTime() + ORDER_DEADLINE_MS),
         updatedAt: now,
       })
@@ -295,6 +317,19 @@ export class ChzKmOrdersService {
       if (!existing) throw new NotFoundException();
       throw new ConflictException({ code: CHZ_KM_ORDER_NOT_FAILED_CODE });
     }
+    // Audited here rather than in the controller because this is the one
+    // place that knows the order really was re-sent: the conditional UPDATE
+    // above refuses an order that is not `failed`. Nothing durable records
+    // who retried -- `created_by_user_id` stays the original author -- so
+    // this log line is the whole answer to "who re-sent this order", with the
+    // order id as the pointer (`SecurityAuditService` carries no metadata).
+    this.audit.credentialMutation({
+      tenantId,
+      userId: actorUserId,
+      action: "chz_km_order.retry",
+      resourceId: id,
+      outcome: "succeeded",
+    });
     await this.queue.enqueueChzKmOrder(tenantId, id);
     return this.get(tenantId, id);
   }

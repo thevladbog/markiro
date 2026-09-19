@@ -221,12 +221,27 @@ describe.skipIf(!ready)("chz-km-orders cabinet e2e", () => {
     });
   });
 
-  it("creates an order in state created with the exact request body and lists it", async () => {
-    const { agent, productId } = await readyTenant();
-    const created = await agent
-      .post("/chz-km-orders")
-      .send({ productId, quantity: 10, contactPerson: "Ковалёва М. А." })
-      .expect(201);
+  it("creates an order in state created with the exact request body, audits it and lists it", async () => {
+    const { agent, tenantId, userId, productId } = await readyTenant();
+    const mutations = vi.spyOn(audit, "credentialMutation");
+    let created: Awaited<ReturnType<Agent["post"]>>;
+    try {
+      created = await agent
+        .post("/chz-km-orders")
+        .send({ productId, quantity: 10, contactPerson: "Ковалёва М. А." })
+        .expect(201);
+      // Ordering codes spends the tenant's СУЗ buffer: exact actor, tenant,
+      // action, target and result, not a call count.
+      expect(mutations).toHaveBeenCalledWith({
+        tenantId,
+        userId,
+        action: "chz_km_order.create",
+        resourceId: created.body.id,
+        outcome: "succeeded",
+      });
+    } finally {
+      mutations.mockRestore();
+    }
     expect(created.body).toMatchObject({
       state: "created",
       quantity: 10,
@@ -282,7 +297,7 @@ describe.skipIf(!ready)("chz-km-orders cabinet e2e", () => {
   });
 
   it("puts a failed order back in flight and re-enqueues it on the durable queue", async () => {
-    const { agent, tenantId, productId } = await readyTenant();
+    const { agent, tenantId, userId, productId } = await readyTenant();
     const created = await agent.post("/chz-km-orders").send({ productId, quantity: 5 }).expect(201);
     const orderId: string = created.body.id;
 
@@ -327,6 +342,7 @@ describe.skipIf(!ready)("chz-km-orders cabinet e2e", () => {
       // queue -- until Task 10 that second half was a no-op placeholder, so a
       // retried order sat in `created` with nothing to advance it.
       const enqueue = vi.spyOn(jobs, "enqueueChzKmOrder").mockResolvedValue("job-id");
+      const mutations = vi.spyOn(audit, "credentialMutation");
       try {
         const retried = await agent.post(`/chz-km-orders/${orderId}/retry`).expect(200);
         expect(retried.body).toMatchObject({
@@ -335,9 +351,22 @@ describe.skipIf(!ready)("chz-km-orders cabinet e2e", () => {
           errorCode: null,
           omsOrderId: null,
           fetchedCount: 0,
+          // The signing budget goes back with it, or the next pass would fail
+          // the order again on an agent that is now healthy.
+          attempts: 0,
         });
         expect(enqueue).toHaveBeenCalledWith(tenantId, orderId);
+        // Nothing durable records who re-sent an order, so this is the whole
+        // answer to that question: exact actor, tenant, action, target, result.
+        expect(mutations).toHaveBeenCalledWith({
+          tenantId,
+          userId,
+          action: "chz_km_order.retry",
+          resourceId: orderId,
+          outcome: "succeeded",
+        });
       } finally {
+        mutations.mockRestore();
         enqueue.mockRestore();
       }
     } finally {

@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, notInArray, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { kmHash, parseKm } from "@markiro/domain";
 
@@ -16,6 +16,31 @@ type ActiveOmsToken = Extract<ChzOmsTokenResult, { status: "ok" }>;
 
 export const MAX_SIGN_ATTEMPTS = 5;
 export const CODES_BLOCK_SIZE = 10_000;
+/**
+ * How many code-bearing СУЗ calls (`GET /codes` plus the reconciliation's
+ * `retryBlock`) one pass may make before handing the rest to its successor.
+ *
+ * The cap exists because the pass has to end inside its pg-boss lease
+ * (`expireInSeconds: 900` on `run-chz-km-order`). An expired lease makes the
+ * job runnable again while the original handler is still working, and two
+ * passes drawing from the same buffer is exactly what costs codes: the loser
+ * of the `fetched_count` fence rolls back codes СУЗ has already billed, and a
+ * closed sub-order can no longer re-list them. Without a cap a 150 000-code
+ * order is fifteen sequential `GET /codes` calls in one pass, each with the
+ * client's own 120-second timeout -- 1800 seconds of network ceiling alone,
+ * twice the lease.
+ *
+ * Four is that ceiling divided by the worst case a pass can face:
+ * 2 x `listBlocks` at the 15-second timeout (the start-of-pass reconcile and
+ * the before-final-block one) + 4 x 120 seconds of code calls = 510 seconds,
+ * leaving 390 of the 900 for the transactional inserts of up to four
+ * 10 000-row blocks and their round trips. Five would leave 270 and six only
+ * 150, less than a comfortable margin for a single block's insert. A capped
+ * pass returns `finished: false`, so the existing re-enqueue chain resumes it
+ * 30 seconds later -- fifteen blocks cost four passes and two minutes, well
+ * inside the order's 48-hour deadline.
+ */
+export const MAX_CODE_BLOCKS_PER_PASS = 4;
 const ERROR_MESSAGE_LIMIT = 500;
 const SIGN_WAIT_SECONDS = 30;
 const BUFFER_POLL_SECONDS = 30;
@@ -28,6 +53,7 @@ export const CHZ_KM_ORDER_SAFE_ERROR_CODES = [
   "CHZ_OMS_TOKEN_UNAVAILABLE",
   "CHZ_SIGNING_FAILED",
   "CHZ_ORDER_REJECTED_BY_SUZ",
+  "CHZ_ORDER_SUBMIT_UNRECORDED",
   "CHZ_ORDER_TIMED_OUT",
   "CHZ_CODES_UNPARSEABLE",
   "CHZ_CODES_DUPLICATE",
@@ -46,7 +72,16 @@ export interface RunOutcome {
   retryAfterSeconds: number;
 }
 
-const TERMINAL = new Set<OrderRow["state"]>(["completed", "rejected", "failed"]);
+/**
+ * The one TypeScript definition of "this order will never move again", shared
+ * by the runner's own guards, by `fail()`'s conditional `UPDATE` and by the
+ * boot sweep in `JobsModule`. The database keeps its own copies -- the
+ * `chz_km_orders_unfinished_idx` predicate in `packages/db/src/schema/chz.ts`
+ * -- because changing an index predicate needs a migration, not an import.
+ */
+export const CHZ_KM_ORDER_TERMINAL_STATES = ["completed", "rejected", "failed"] as const;
+
+const TERMINAL = new Set<OrderRow["state"]>(CHZ_KM_ORDER_TERMINAL_STATES);
 
 /**
  * One pass over one КМ order: sign it, submit it to СУЗ, poll the code
@@ -178,6 +213,11 @@ export class ChzKmOrderRunnerService {
           .set({
             state: "signing",
             signerTaskId: task.id,
+            // Nothing reads `claimed_at`: no staleness sweep needs it, because
+            // `finishSigning` re-reads the task on every pass. It is kept as
+            // the only record of when a signing slot was taken, for support
+            // reading a stuck order's row; dropping the column needs a
+            // migration, which this change does not carry.
             claimedAt: now,
             attempts: sql`${schema.chzKmOrders.attempts} + 1`,
             updatedAt: now,
@@ -237,10 +277,33 @@ export class ChzKmOrderRunnerService {
     switch (created.status) {
       case "ok": {
         const now = new Date();
-        await this.db
+        const [updated] = await this.db
           .update(schema.chzKmOrders)
           .set({ state: "submitted", omsOrderId: created.value.orderId, updatedAt: now })
-          .where(this.ownedOrderInState(order, "signing"));
+          .where(this.ownedOrderInState(order, "signing"))
+          .returning({ id: schema.chzKmOrders.id });
+        // СУЗ has created -- and billed -- the order the identifier below
+        // names, and the row moved (state or `attempts`) under a second pass
+        // before we could record it. Journalling an acceptance the write did
+        // not make would leave the order in its old state with the office
+        // told it succeeded, and whichever pass owns the row now would sign
+        // and submit a *second* billed order. So the acceptance is not
+        // journalled, the identifier is -- it is the only record that the
+        // first order exists -- and the order ends here for a human to
+        // reconcile in СУЗ. `fail` is fenced on the state only, so it lands
+        // whatever the other pass did with `attempts`, and is a no-op if that
+        // pass has already made the order terminal.
+        if (!updated) {
+          this.logger.error(
+            `Order fence lost recording СУЗ order ${created.value.orderId} for order ${order.id}`,
+          );
+          await this.append(order, "error", "Ответ СУЗ не записан: заказ КМ изменился", {
+            omsOrderId: created.value.orderId,
+          });
+          const latest = await this.load(order.tenantId, order.id);
+          if (latest) await this.fail(latest, "CHZ_ORDER_SUBMIT_UNRECORDED", null);
+          return { finished: true, retryAfterSeconds: 0 };
+        }
         await this.append(order, "ok", "Заказ КМ принят СУЗ", {
           omsOrderId: created.value.orderId,
         });
@@ -276,6 +339,17 @@ export class ChzKmOrderRunnerService {
     if (order.omsOrderId === null) return order;
     const status = await this.client.getBufferStatus(auth, order.omsOrderId, order.gtin14);
     if (status.status === "unauthorized") throw new OmsUnauthorizedError();
+    // A 4xx here is СУЗ's verdict on the request itself -- an order id it does
+    // not know, a closed one, a GTIN that does not belong to it -- and no
+    // amount of re-polling changes it. Re-polling would burn the full 48-hour
+    // deadline and then report `CHZ_ORDER_TIMED_OUT`, hiding the real
+    // diagnosis behind a misleading one, so this ends the order with СУЗ's
+    // own wording exactly as `finishSigning` and `fetchCodes` already do.
+    // Transport failures (`unavailable`) stay a wait: those do pass.
+    if (status.status === "rejected") {
+      await this.fail(order, "CHZ_ORDER_REJECTED_BY_SUZ", status.message);
+      return this.load(order.tenantId, order.id);
+    }
     if (status.status !== "ok") {
       this.logger.warn(`СУЗ buffer status ${status.status} for order ${order.id}`);
       return order;
@@ -285,6 +359,10 @@ export class ChzKmOrderRunnerService {
     const common = {
       bufferStatus: info.bufferStatus,
       availableCodes: info.availableCodes >= 0 ? info.availableCodes : null,
+      // Stored, never read back: `fetched_count` is what the runner and the
+      // cabinet count with. `total_passed` is СУЗ's own view of how many codes
+      // it has handed out, which is what support compares ours against when
+      // the two disagree. Kept for that; dropping the column needs a migration.
       totalPassed: info.totalPassed >= 0 ? info.totalPassed : null,
       bufferExpiresAt: info.expiredDate === null ? null : new Date(info.expiredDate),
       updatedAt: now,
@@ -322,6 +400,10 @@ export class ChzKmOrderRunnerService {
     // `fetchedCount` as of this pass's last reconciliation; `null` until it
     // has reconciled once.
     let reconciledAt: number | null = null;
+    // Shared by `getCodes` here and `retryBlock` inside `reconcileBlocks`:
+    // both draw a block over the same 120-second client timeout, so both
+    // spend the pass's lease. See `MAX_CODE_BLOCKS_PER_PASS`.
+    const budget = { remaining: MAX_CODE_BLOCKS_PER_PASS };
     while (current && current.state === "fetching" && current.fetchedCount < current.quantity) {
       const omsOrderId = current.omsOrderId;
       if (omsOrderId === null) return current;
@@ -336,12 +418,18 @@ export class ChzKmOrderRunnerService {
       // the codes we have not drawn. The before-final-block reconcile stays,
       // but is skipped when the counter has not moved since the last one.
       if (reconciledAt !== current.fetchedCount && (reconciledAt === null || isLast)) {
-        const reconciled = await this.reconcileBlocks(current, auth, omsOrderId);
-        if (reconciled === null) return current;
+        const reconciled = await this.reconcileBlocks(current, auth, omsOrderId, budget);
+        if (reconciled === null) return this.load(order.tenantId, order.id);
         current = reconciled;
         reconciledAt = current.fetchedCount;
         if (current.state !== "fetching" || current.fetchedCount >= current.quantity) break;
       }
+      // Out of block budget -- including a reconciliation that spent it and
+      // is therefore itself unfinished. The order stays `fetching`, so `run`
+      // reports `finished: false` and the next pass reconciles and carries on
+      // from the counter this one committed.
+      if (budget.remaining <= 0) return current;
+      budget.remaining -= 1;
       const quantity = Math.min(this.blockSize, current.quantity - current.fetchedCount);
       const block = await this.client.getCodes(auth, omsOrderId, current.gtin14, quantity);
       if (block.status === "unauthorized") throw new OmsUnauthorizedError();
@@ -379,14 +467,23 @@ export class ChzKmOrderRunnerService {
     return current;
   }
 
-  /** Re-fetches every block СУЗ lists that the database does not hold. Returns null when СУЗ was unavailable. */
+  /**
+   * Re-fetches every block СУЗ lists that the database does not hold.
+   * Returns null when the pass must stop: СУЗ was unavailable, or it rejected
+   * the request and the order is now `failed`.
+   */
   private async reconcileBlocks(
     order: OrderRow,
     auth: OmsAuth,
     omsOrderId: string,
+    budget: { remaining: number },
   ): Promise<OrderRow | null> {
     const listed = await this.client.listBlocks(auth, omsOrderId, order.gtin14);
     if (listed.status === "unauthorized") throw new OmsUnauthorizedError();
+    if (listed.status === "rejected") {
+      await this.fail(order, "CHZ_ORDER_REJECTED_BY_SUZ", listed.message);
+      return null;
+    }
     if (listed.status !== "ok") return null;
     const held = new Set(
       (
@@ -404,8 +501,18 @@ export class ChzKmOrderRunnerService {
     let current: OrderRow | null = order;
     for (const block of listed.value) {
       if (held.has(block.blockId) || !current) continue;
+      // Every recovered block is a 120-second call out of the same pass
+      // lease as a `getCodes`, so it spends the same budget. Stopping here
+      // leaves the order `fetching`; the next pass lists the blocks again and
+      // recovers the rest.
+      if (budget.remaining <= 0) return current;
+      budget.remaining -= 1;
       const again = await this.client.retryBlock(auth, block.blockId);
       if (again.status === "unauthorized") throw new OmsUnauthorizedError();
+      if (again.status === "rejected") {
+        await this.fail(current, "CHZ_ORDER_REJECTED_BY_SUZ", again.message);
+        return null;
+      }
       if (again.status !== "ok") return null;
       if (!(await this.storeBlock(current, again.value)))
         return this.load(order.tenantId, order.id);
@@ -525,7 +632,7 @@ export class ChzKmOrderRunnerService {
         and(
           eq(schema.chzKmOrders.tenantId, order.tenantId),
           eq(schema.chzKmOrders.id, order.id),
-          sql`${schema.chzKmOrders.state} not in ('completed', 'rejected', 'failed')`,
+          notInArray(schema.chzKmOrders.state, [...CHZ_KM_ORDER_TERMINAL_STATES]),
         ),
       )
       .returning({ id: schema.chzKmOrders.id });

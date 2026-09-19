@@ -10,7 +10,7 @@ import {
   type OnModuleInit,
 } from "@nestjs/common";
 import { PgBoss, type JobWithMetadata } from "pg-boss";
-import { asc, eq, inArray, sql } from "drizzle-orm";
+import { asc, eq, inArray, notInArray, sql } from "drizzle-orm";
 import { ensurePartitions, schema, type Db } from "@markiro/db";
 import { DB } from "../auth/auth.module";
 import { PlatformReportRunnerService } from "../platform-reports/platform-report-runner.service";
@@ -47,7 +47,10 @@ import { ChzTokenService } from "../modules/chz-exports/chz-token.service";
 import { TrueApiClient } from "../modules/chz-exports/true-api.client";
 import { ChzCodeStatusIngestService } from "../modules/chz-code-statuses/chz-code-status-ingest.service";
 import { ChzCodeStatusRefreshService } from "../modules/chz-code-statuses/chz-code-status-refresh.service";
-import { ChzKmOrderRunnerService } from "../modules/chz-km-orders/chz-km-order-runner.service";
+import {
+  CHZ_KM_ORDER_TERMINAL_STATES,
+  ChzKmOrderRunnerService,
+} from "../modules/chz-km-orders/chz-km-order-runner.service";
 import { ChzOmsTokenService } from "../modules/chz-km-orders/chz-oms-token.service";
 import { OmsClient } from "../modules/chz-km-orders/oms.client";
 import { currentMonthUTC, nextMonthUTC } from "./months";
@@ -1200,7 +1203,9 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Every order whose state is not one of the three terminal ones, oldest
+   * Every order whose state is not one of the three terminal ones -- read
+   * from `CHZ_KM_ORDER_TERMINAL_STATES`, the runner's own definition, so this
+   * sweep cannot drift from what the runner treats as finished -- oldest
    * first, capped at `SHIFT_EXPORT_RECONCILE_LIMIT` like every other
    * reconciliation pass in this file. A КМ order's chain lives only in
    * pg-boss, so an order whose chain was lost (a crash between the runner's
@@ -1226,7 +1231,7 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
       unfinished = await this.db
         .select({ tenantId: schema.chzKmOrders.tenantId, id: schema.chzKmOrders.id })
         .from(schema.chzKmOrders)
-        .where(sql`${schema.chzKmOrders.state} not in ('completed', 'rejected', 'failed')`)
+        .where(notInArray(schema.chzKmOrders.state, [...CHZ_KM_ORDER_TERMINAL_STATES]))
         .orderBy(asc(schema.chzKmOrders.createdAt))
         .limit(SHIFT_EXPORT_RECONCILE_LIMIT);
     } catch (error) {

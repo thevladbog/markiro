@@ -67,8 +67,6 @@ export class OmsClient {
         return {
           bufferStatus: row.bufferStatus,
           availableCodes: intOr(row.availableCodes, -1),
-          leftInBuffer: intOr(row.leftInBuffer, -1),
-          totalCodes: intOr(row.totalCodes, -1),
           totalPassed: intOr(row.totalPassed, -1),
           expiredDate: typeof row.expiredDate === "number" ? row.expiredDate : null,
           rejectionReason:

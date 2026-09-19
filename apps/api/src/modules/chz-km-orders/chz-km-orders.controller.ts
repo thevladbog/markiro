@@ -143,7 +143,10 @@ export class ChzKmOrdersController {
     @Req() req: RequestWithTenant,
     @Param("id", new ZodValidationPipe(chzKmOrderIdSchema)) id: string,
   ): Promise<ChzKmOrderDto> {
-    return this.chzKmOrders.retry(req.tenantId!, id);
+    // Creation and retry are audited by the service, which is the only place
+    // that knows the write happened; issuing and the two code reads are
+    // audited below, where the issue id the trail points at is created.
+    return this.chzKmOrders.retry(req.tenantId!, req.userId!, id);
   }
 
   @Post(":id/issues")

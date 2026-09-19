@@ -8,6 +8,7 @@ import { buildChzKmOrderBody, parseKm, kmHash } from "@markiro/domain";
 
 import {
   ChzKmOrderRunnerService,
+  MAX_CODE_BLOCKS_PER_PASS,
   MAX_SIGN_ATTEMPTS,
 } from "../src/modules/chz-km-orders/chz-km-order-runner.service";
 import { ChzOmsTokenService } from "../src/modules/chz-km-orders/chz-oms-token.service";
@@ -22,8 +23,12 @@ import type {
   OmsCreatedOrder,
   OmsResult,
 } from "../src/modules/chz-km-orders/oms.types";
+import type { SecurityAuditService } from "../src/authorization/security-audit.service";
 import { ChzCryptoService } from "../src/modules/signer-agents/chz-crypto.service";
-import { CHZ_CHANNEL_TYPE } from "../src/modules/signer-agents/chz-constants";
+import {
+  CHZ_CHANNEL_TYPE,
+  CHZ_TRUE_API_BASE_URLS,
+} from "../src/modules/signer-agents/chz-constants";
 import type { JournalService } from "../src/modules/integrations/journal.service";
 import { createOrganization } from "./support/subscription-fixtures";
 
@@ -175,6 +180,28 @@ describe.skipIf(!ready)("ChzKmOrderRunnerService", () => {
     journal = { append: vi.fn().mockResolvedValue(undefined) };
   });
 
+  /**
+   * The real cabinet service, so the retry cases below drive `retry()` itself
+   * rather than an imitation of it. The queue and the audit trail are fakes:
+   * what matters here is the row the retry leaves behind.
+   */
+  function ordersService(): {
+    service: ChzKmOrdersService;
+    enqueue: ReturnType<typeof vi.fn>;
+    audit: { credentialMutation: ReturnType<typeof vi.fn> };
+  } {
+    const enqueue = vi.fn().mockResolvedValue(null);
+    const audit = { credentialMutation: vi.fn() };
+    const service = new ChzKmOrdersService(
+      db,
+      tokens,
+      crypto,
+      audit as unknown as SecurityAuditService,
+      { enqueueChzKmOrder: enqueue },
+    );
+    return { service, enqueue, audit };
+  }
+
   function runnerWith(client: OmsClient): ChzKmOrderRunnerService {
     return new ChzKmOrderRunnerService(
       db,
@@ -197,7 +224,9 @@ describe.skipIf(!ready)("ChzKmOrderRunnerService", () => {
       tenantId,
       ...encrypted,
       sourceOmsConnection: omsConnection,
-      sourceTrueApiBaseUrl: "https://suz.sandbox.crptech.ru/api/v3",
+      // The column holds the True API base URL the agent authenticated
+      // against, not the СУЗ order-station one the runner calls.
+      sourceTrueApiBaseUrl: CHZ_TRUE_API_BASE_URLS.sandbox,
       obtainedAt: new Date(),
       expiresAt: new Date(Date.now() + 3_600_000),
     });
@@ -383,8 +412,6 @@ describe.skipIf(!ready)("ChzKmOrderRunnerService", () => {
         const info: OmsBufferInfo = {
           bufferStatus: bufferCall === 1 ? "PENDING" : "ACTIVE",
           availableCodes: 25,
-          leftInBuffer: 25,
-          totalCodes: 25,
           totalPassed: 0,
           expiredDate: null,
           rejectionReason: null,
@@ -533,8 +560,6 @@ describe.skipIf(!ready)("ChzKmOrderRunnerService", () => {
         value: {
           bufferStatus: "REJECTED",
           availableCodes: -1,
-          leftInBuffer: -1,
-          totalCodes: -1,
           totalPassed: -1,
           expiredDate: null,
           rejectionReason: "ЧЗ отклонил заказ: неверный GTIN",
@@ -550,10 +575,8 @@ describe.skipIf(!ready)("ChzKmOrderRunnerService", () => {
     expect(reloaded.state).toBe("rejected");
     expect(reloaded.rejectionReason).toBe("ЧЗ отклонил заказ: неверный GTIN");
 
-    const service = new ChzKmOrdersService(db, tokens, crypto, {
-      enqueueChzKmOrder: vi.fn().mockResolvedValue(null),
-    });
-    await expect(service.retry(tenantId, order.id)).rejects.toMatchObject({
+    const { service } = ordersService();
+    await expect(service.retry(tenantId, userId, order.id)).rejects.toMatchObject({
       response: { code: CHZ_KM_ORDER_NOT_FAILED_CODE },
     });
   });
@@ -581,6 +604,225 @@ describe.skipIf(!ready)("ChzKmOrderRunnerService", () => {
     const reloaded = await loadOrder(order.id);
     expect(reloaded.state).toBe("failed");
     expect(reloaded.errorCode).toBe("CHZ_SIGNING_FAILED");
+  });
+
+  it("retry() clears the signing budget so the next pass signs again instead of failing", async () => {
+    // The ordinary failure: the tenant's signer agent is offline, every task
+    // it was handed expires, and the order burns its whole signing budget.
+    const order = await insertOrder();
+    const { client } = fakeOmsClient();
+    const runner = runnerWith(client);
+
+    for (let cycle = 1; cycle <= MAX_SIGN_ATTEMPTS; cycle += 1) {
+      await runner.run(tenantId, order.id, { retryCount: 0, retryLimit: 5 });
+      const { signerTaskId } = await loadOrder(order.id);
+      await failSignerTask(signerTaskId!);
+      await runner.run(tenantId, order.id, { retryCount: 0, retryLimit: 5 });
+    }
+    const exhausted = await runner.run(tenantId, order.id, { retryCount: 0, retryLimit: 5 });
+    expect(exhausted).toEqual({ finished: true, retryAfterSeconds: 0 });
+    expect(await loadOrder(order.id)).toMatchObject({
+      state: "failed",
+      errorCode: "CHZ_SIGNING_FAILED",
+      attempts: MAX_SIGN_ATTEMPTS,
+    });
+
+    // The agent is back and the operator presses «Повторить».
+    const { service, enqueue, audit } = ordersService();
+    const retried = await service.retry(tenantId, userId, order.id);
+    expect(retried).toMatchObject({ state: "created", errorCode: null, attempts: 0 });
+    expect(enqueue).toHaveBeenCalledWith(tenantId, order.id);
+    expect(audit.credentialMutation).toHaveBeenCalledWith({
+      tenantId,
+      userId,
+      action: "chz_km_order.retry",
+      resourceId: order.id,
+      outcome: "succeeded",
+    });
+
+    // Without the budget reset this pass read the untouched counter and wrote
+    // `failed` straight back, which no further retry could ever undo.
+    const after = await runner.run(tenantId, order.id, { retryCount: 0, retryLimit: 5 });
+    expect(after).toEqual({ finished: false, retryAfterSeconds: 30 });
+    const reloaded = await loadOrder(order.id);
+    expect(reloaded.state).toBe("signing");
+    expect(reloaded.attempts).toBe(1);
+    const tasks = await signerTasksFor(order.id);
+    expect(tasks).toHaveLength(MAX_SIGN_ATTEMPTS + 1);
+    expect(reloaded.signerTaskId).not.toBeNull();
+    expect(tasks.map((task) => task.id)).toContain(reloaded.signerTaskId);
+  });
+
+  it("draws at most MAX_CODE_BLOCKS_PER_PASS blocks in a pass and finishes on the next one", async () => {
+    // One block more than a pass may draw: the pass must hand the tail to its
+    // successor rather than run past its own job lease.
+    const blockSize = 10;
+    const quantity = blockSize * (MAX_CODE_BLOCKS_PER_PASS + 1);
+    const order = await insertOrder({ quantity, state: "fetching", omsOrderId: OMS_ORDER_ID });
+    await seedOmsToken();
+    const issued: OmsBlockSummary[] = [];
+    const { client, calls } = fakeOmsClient({
+      listBlocks: () => ({ status: "ok", value: [...issued] }),
+      getCodes: (_auth, _orderId, _gtin14, requested) => {
+        const blockId = randomUUID();
+        issued.push({ blockId, quantity: requested });
+        return {
+          status: "ok",
+          value: {
+            codes: Array.from({ length: requested }, (_, i) => makeKm(`CAP${issued.length}N${i}`)),
+            blockId,
+          },
+        };
+      },
+    });
+    const runner = runnerWith(client);
+    runner.blockSize = blockSize;
+
+    const first = await runner.run(tenantId, order.id, { retryCount: 0, retryLimit: 5 });
+
+    expect(first).toEqual({ finished: false, retryAfterSeconds: 30 });
+    expect(calls.filter((call) => call.op === "getCodes")).toHaveLength(MAX_CODE_BLOCKS_PER_PASS);
+    const afterFirst = await loadOrder(order.id);
+    expect(afterFirst.state).toBe("fetching");
+    expect(afterFirst.fetchedCount).toBe(blockSize * MAX_CODE_BLOCKS_PER_PASS);
+
+    const second = await runner.run(tenantId, order.id, { retryCount: 1, retryLimit: 5 });
+
+    expect(second.finished).toBe(true);
+    expect(calls.filter((call) => call.op === "getCodes")).toHaveLength(
+      MAX_CODE_BLOCKS_PER_PASS + 1,
+    );
+    const reloaded = await loadOrder(order.id);
+    expect(reloaded.state).toBe("completed");
+    expect(reloaded.fetchedCount).toBe(quantity);
+    expect(await codesFor(order.id)).toHaveLength(quantity);
+  });
+
+  it("ends the order when it cannot record the СУЗ order it just created, and submits no second one", async () => {
+    const order = await insertOrder();
+    await seedOmsToken();
+    const { client, calls } = fakeOmsClient({
+      createOrder: async () => {
+        // A second pass got the row while this one was inside `POST /order`:
+        // it reset the signing attempt and took a fresh one, so this pass's
+        // fence (state plus `attempts`) no longer matches.
+        await db
+          .update(schema.chzKmOrders)
+          .set({ attempts: 2 })
+          .where(
+            and(eq(schema.chzKmOrders.tenantId, tenantId), eq(schema.chzKmOrders.id, order.id)),
+          );
+        return { status: "ok", value: { orderId: OMS_ORDER_ID, expectedCompleteMs: 5_000 } };
+      },
+    });
+    const runner = runnerWith(client);
+
+    await runner.run(tenantId, order.id, { retryCount: 0, retryLimit: 5 });
+    const [task] = await signerTasksFor(order.id);
+    await completeSignerTask(task!.id);
+
+    const outcome = await runner.run(tenantId, order.id, { retryCount: 0, retryLimit: 5 });
+
+    expect(outcome).toEqual({ finished: true, retryAfterSeconds: 0 });
+    const reloaded = await loadOrder(order.id);
+    expect(reloaded.state).toBe("failed");
+    expect(reloaded.errorCode).toBe("CHZ_ORDER_SUBMIT_UNRECORDED");
+    // The acceptance was never journalled, because it was never recorded.
+    const messages = journal.append.mock.calls.map(
+      (call) => (call[0] as { message: string }).message,
+    );
+    expect(messages).not.toContain("Заказ КМ принят СУЗ");
+    // But the СУЗ order id is: it was created and billed, and this line is
+    // the only record that it exists.
+    const orphan = journal.append.mock.calls.find(
+      (call) =>
+        (call[0] as { message: string }).message === "Ответ СУЗ не записан: заказ КМ изменился",
+    );
+    expect(orphan).toBeDefined();
+    expect((orphan![0] as { outcome: string }).outcome).toBe("error");
+    expect((orphan![0] as { details: Record<string, unknown> }).details).toEqual({
+      orderId: order.id,
+      omsOrderId: OMS_ORDER_ID,
+    });
+
+    // The whole point: no further pass signs and submits a second billed order.
+    const next = await runner.run(tenantId, order.id, { retryCount: 0, retryLimit: 5 });
+    expect(next).toEqual({ finished: true, retryAfterSeconds: 0 });
+    expect(calls.filter((call) => call.op === "createOrder")).toHaveLength(1);
+  });
+
+  it("fails the order when СУЗ rejects the buffer-status request, and waits when it is unavailable", async () => {
+    const order = await insertOrder({ state: "submitted", omsOrderId: OMS_ORDER_ID });
+    await seedOmsToken();
+    let answer: OmsResult<OmsBufferInfo> = { status: "unavailable" };
+    const { client } = fakeOmsClient({ getBufferStatus: () => answer });
+    const runner = runnerWith(client);
+
+    // A transport failure is still a wait: those pass.
+    const waiting = await runner.run(tenantId, order.id, { retryCount: 0, retryLimit: 5 });
+    expect(waiting).toEqual({ finished: false, retryAfterSeconds: 30 });
+    expect((await loadOrder(order.id)).state).toBe("submitted");
+
+    // A 4xx is СУЗ's verdict on the request and no amount of re-polling
+    // changes it; re-polling it for 48 hours reported CHZ_ORDER_TIMED_OUT,
+    // which names the wrong problem.
+    answer = { status: "rejected", code: "400", message: "Заказ не найден" };
+    const outcome = await runner.run(tenantId, order.id, { retryCount: 0, retryLimit: 5 });
+
+    expect(outcome).toEqual({ finished: true, retryAfterSeconds: 30 });
+    const reloaded = await loadOrder(order.id);
+    expect(reloaded.state).toBe("failed");
+    expect(reloaded.errorCode).toBe("CHZ_ORDER_REJECTED_BY_SUZ");
+    expect(reloaded.errorMessage).toBe("Заказ не найден");
+  });
+
+  it("fails the order when СУЗ rejects the block listing or a block re-fetch", async () => {
+    const listingRejected = await insertOrder({
+      quantity: 5,
+      state: "fetching",
+      omsOrderId: OMS_ORDER_ID,
+    });
+    await seedOmsToken();
+    const listing = fakeOmsClient({
+      listBlocks: () => ({ status: "rejected", code: "404", message: "Заказ не найден" }),
+    });
+
+    const listingOutcome = await runnerWith(listing.client).run(tenantId, listingRejected.id, {
+      retryCount: 0,
+      retryLimit: 5,
+    });
+
+    expect(listingOutcome).toEqual({ finished: true, retryAfterSeconds: 30 });
+    expect(await loadOrder(listingRejected.id)).toMatchObject({
+      state: "failed",
+      errorCode: "CHZ_ORDER_REJECTED_BY_SUZ",
+      errorMessage: "Заказ не найден",
+    });
+    // The listing's verdict ends the order before a single code is drawn.
+    expect(listing.calls.filter((call) => call.op === "getCodes")).toHaveLength(0);
+
+    const retryRejected = await insertOrder({
+      quantity: 5,
+      state: "fetching",
+      omsOrderId: OMS_ORDER_ID,
+    });
+    const refetch = fakeOmsClient({
+      listBlocks: () => ({ status: "ok", value: [{ blockId: randomUUID(), quantity: 5 }] }),
+      retryBlock: () => ({ status: "rejected", code: "400", message: "Блок недоступен" }),
+    });
+
+    const refetchOutcome = await runnerWith(refetch.client).run(tenantId, retryRejected.id, {
+      retryCount: 0,
+      retryLimit: 5,
+    });
+
+    expect(refetchOutcome).toEqual({ finished: true, retryAfterSeconds: 30 });
+    expect(await loadOrder(retryRejected.id)).toMatchObject({
+      state: "failed",
+      errorCode: "CHZ_ORDER_REJECTED_BY_SUZ",
+      errorMessage: "Блок недоступен",
+    });
+    expect(await codesFor(retryRejected.id)).toHaveLength(0);
   });
 
   it("a СУЗ order rejection fails the order with its own wording", async () => {

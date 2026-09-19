@@ -24,11 +24,15 @@ export interface OmsCreatedOrder {
   expectedCompleteMs: number;
 }
 
+/**
+ * The subset of СУЗ's order-status row the runner acts on or stores. The
+ * response also carries `leftInBuffer`, `totalCodes` and `unavailableCodes`;
+ * they are deliberately not parsed, because nothing reads them and a parsed
+ * field invites a reader to believe it is checked somewhere.
+ */
 export interface OmsBufferInfo {
   bufferStatus: string;
   availableCodes: number;
-  leftInBuffer: number;
-  totalCodes: number;
   totalPassed: number;
   expiredDate: number | null;
   rejectionReason: string | null;
