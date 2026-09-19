@@ -336,6 +336,17 @@ jobs:
           path: .superpowers/sdd/catalog-import-browser-output
           if-no-files-found: ignore
           retention-days: 14
+      - name: Verify the product card instruction frames
+        run: pnpm --dir tools/production-browser --ignore-workspace test:catalog
+      - name: Preserve product card browser failure evidence
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: catalog-browser-${{ github.sha }}
+          # `outputDir` in catalog.playwright.config.ts.
+          path: .superpowers/sdd/catalog-browser-output
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Verify asynchronous SaaS report downloads
         run: |
           pnpm turbo run build --filter='@markiro/saas-admin^...'
