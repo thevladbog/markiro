@@ -6,6 +6,7 @@ import { useState } from "react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import componentStyles from "virtual:ui-component-styles";
+import tokenStyles from "virtual:ui-token-styles";
 
 import {
   AdminPage,
@@ -45,7 +46,7 @@ afterEach(() => {
 
 beforeAll(() => {
   const style = document.createElement("style");
-  style.textContent = componentStyles;
+  style.textContent = `${tokenStyles}\n${componentStyles}`;
   document.head.append(style);
 
   Object.defineProperties(HTMLElement.prototype, {
