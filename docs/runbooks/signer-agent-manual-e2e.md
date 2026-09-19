@@ -249,3 +249,58 @@ table with nothing left to scan it again (e.g. one that only ever arrived
 through a bootstrap inventory export), within the next daily full sweep
 (`CHZ_CODE_STATUS_FULL_SWEEP_INTERVAL_MS`, currently 24 hours). So the remedy
 does reach every row already in the table — just not instantly.
+
+## СУЗ: token and detached signature (sandbox)
+
+This plan taught the agent two things no test here can reach: obtaining a СУЗ
+client token through `simpleSignIn`, and producing a **detached** GOST
+signature over exact bytes for `X-Signature`. Both signing backends changed —
+CryptoAPI (`signer_capi.rs`, default) and CAdESCOM (`signer_cades.rs`,
+selected by `MARKIRO_SIGNER_BACKEND=cades`) — and neither has run outside the
+author's machine. This run is the only evidence that will exist for that code
+before it reaches a customer, and the person doing it may not be the person
+who wrote it.
+
+**Do, in order:**
+
+1. Pair the agent with a sandbox tenant using steps 2–4 above (pairing code,
+   certificate selection). Skip this if the agent is already paired to the
+   tenant you are using.
+2. Register an installation for Markiro with СУЗ. Either register it through
+   the СУЗ sandbox cabinet's own interface — the path a tenant without
+   partner status would take — or call
+   `POST https://suz-integrator.sandbox.crptech.ru/api/v3/integration/connection?omsId={omsId}`
+   with the header `X-RegistrationKey: 4344d884-7f21-456c-981e-cd68e92391e8`
+   (the public sandbox registration key every participant may use) and a
+   **detached** signature of the request body in `X-Signature`. Record the
+   `omsConnection` the response returns.
+3. Enter `omsId` and `omsConnection` in the cabinet's Chestny ZNAK channel
+   settings.
+4. Wait for the scheduler's `oms_auth` task. Confirm «СУЗ token delivered» in
+   the agent's journal, and the СУЗ token row in the cabinet's signer panel.
+5. Place a two-code order. Confirm «Detached signature delivered» in the
+   journal, then that the order reaches «Буфер активен» and the codes arrive.
+6. Repeat step 5 with `MARKIRO_SIGNER_BACKEND=cades` set before launching the
+   agent, to exercise the CAdESCOM backend. Both backends changed and neither
+   has been executed, so both must be run — do not skip the second pass
+   because the first one worked.
+
+**What to record**, because this run is the only evidence that exists for
+code no test can reach:
+
+- the exact response body of `POST /auth/simpleSignIn/{omsConnection}` —
+  whether it is only `{"token": …}` as documented, and whether any expiry
+  field accompanies it (СУЗ documents the ten-hour lifetime elsewhere, not in
+  the response itself);
+- whether СУЗ accepted the CryptoAPI detached signature, and separately the
+  CAdESCOM one;
+- any HTTP 413 from СУЗ — that specific code means an attached signature
+  reached `X-Signature` instead of a detached one;
+- the real shapes of `POST /order`, `GET /order/status` and `GET /codes`,
+  including whether a rejected order's `rejectionReason` matches what the
+  cabinet displays;
+- whether `GET /codes` honours a 10 000-code block size.
+
+A green host-only `cargo test` proves the runtime loop — task dispatch, retry
+classification, journal wording — and nothing about CryptoAPI, DPAPI,
+CAdESCOM or a real certificate. Only this run does.
