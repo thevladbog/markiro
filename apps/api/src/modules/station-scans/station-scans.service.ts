@@ -25,8 +25,10 @@ import {
   applyPalletClosures,
   applyPalletExceptions,
   applyPalletMemberships,
+  applyPalletMembershipRemovals,
   assembleMembershipOutcomes,
   palletKey,
+  pruneEmptyWarehouseDrafts,
   upsertPallets,
   type PalletRef,
 } from "./pallet-ingest";
@@ -38,6 +40,7 @@ import type {
   BatchConflictDto,
   DeniedStationRecordDto,
   PalletMembershipOutcomeDto,
+  PalletMembershipRemovalOutcomeDto,
   StationCodeReleasesDto,
   StationCodeReleasesResponseDto,
   StationConflictStatusResponseDto,
@@ -169,8 +172,15 @@ function payloadDigest(body: SyncBatchDto): string {
   // closure, which is the ordinary offline-first case, not an edge one. So a
   // box that stands on no pallet hashes exactly as it did before 06d, and
   // only a box that names one contributes the key.
-  const { productLabelEvents, pallets, palletExceptions, palletMemberships, boxes, ...legacy } =
-    body;
+  const {
+    productLabelEvents,
+    pallets,
+    palletExceptions,
+    palletMemberships,
+    palletMembershipRemovals,
+    boxes,
+    ...legacy
+  } = body;
   const canonical: Record<string, unknown> = {
     ...legacy,
     boxes: boxes.map(({ devicePalletId, ...box }) =>
@@ -191,6 +201,8 @@ function payloadDigest(body: SyncBatchDto): string {
   }
   if (palletExceptions.length > 0) canonical.palletExceptions = palletExceptions;
   if (palletMemberships.length > 0) canonical.palletMemberships = palletMemberships;
+  if (palletMembershipRemovals.length > 0)
+    canonical.palletMembershipRemovals = palletMembershipRemovals;
   return createHash("sha256").update(canonicalJson(canonical)).digest("hex");
 }
 
@@ -242,7 +254,11 @@ export class StationScansService {
     tenantId: string,
     input: Omit<
       SyncBatchDto,
-      "productLabelEvents" | "pallets" | "palletExceptions" | "palletMemberships"
+      | "productLabelEvents"
+      | "pallets"
+      | "palletExceptions"
+      | "palletMemberships"
+      | "palletMembershipRemovals"
     > & {
       productLabelEvents?: SyncBatchDto["productLabelEvents"];
       // Optional for the same reason `productLabelEvents` is: a caller
@@ -251,6 +267,7 @@ export class StationScansService {
       pallets?: SyncBatchDto["pallets"];
       palletExceptions?: SyncBatchDto["palletExceptions"];
       palletMemberships?: SyncBatchDto["palletMemberships"];
+      palletMembershipRemovals?: SyncBatchDto["palletMembershipRemovals"];
     },
     authenticatedTerminalId: string,
     capabilities?: string,
@@ -283,6 +300,9 @@ export class StationScansService {
       // device-local id, and the pallet it resolves to is always the
       // authenticated device's own.
       palletMemberships: input.palletMemberships ?? [],
+      // Same: a removal names the device-local pallet id of the authenticated
+      // device's own pallet, so there is no terminal to substitute either.
+      palletMembershipRemovals: input.palletMembershipRemovals ?? [],
     };
     const digest = payloadDigest(body);
     // Ensure the months this batch actually needs have partitions BEFORE
@@ -417,6 +437,9 @@ export class StationScansService {
             // Replayed verbatim: the handheld's conflict view is rebuilt from
             // this answer, and a redelivery must not report a different one.
             ...(stored?.memberships ? { memberships: stored.memberships } : {}),
+            ...(stored?.membershipRemovals
+              ? { membershipRemovals: stored.membershipRemovals }
+              : {}),
           };
         }
 
@@ -474,6 +497,7 @@ export class StationScansService {
         // response reports one outcome per SUBMITTED membership, including the
         // ones this batch refuses to apply.
         const submittedMemberships = body.palletMemberships;
+        const submittedRemovals = body.palletMembershipRemovals;
         let denied: DeniedStationRecordDto[] = [];
         const deniedProductLabelEventIds = new Set<string>();
         if (access.access === "read_only") {
@@ -580,6 +604,14 @@ export class StationScansService {
               shiftId: null,
               code: "subscription_read_only" as const,
             })),
+            // The undo of a membership is held to the same rule as the
+            // membership: always denied while read-only, quarantined, never dropped.
+            ...body.palletMembershipRemovals.map((_removal, recordIndex) => ({
+              recordKind: "pallet_membership_removal" as const,
+              recordIndex,
+              shiftId: null,
+              code: "subscription_read_only" as const,
+            })),
           ];
           await this.quarantine(tx, tenantId, authenticatedTerminalId, digest, body, denied);
           const deniedKeys = new Set(
@@ -598,6 +630,9 @@ export class StationScansService {
             ),
             palletMemberships: body.palletMemberships.filter(
               (_membership, index) => !deniedKeys.has(`pallet_membership:${index}`),
+            ),
+            palletMembershipRemovals: body.palletMembershipRemovals.filter(
+              (_removal, index) => !deniedKeys.has(`pallet_membership_removal:${index}`),
             ),
           };
         } else if (
@@ -1645,6 +1680,25 @@ export class StationScansService {
           }
         }
 
+        // Removals BEFORE memberships (spec 2026-09-18 §2): a box taken off and
+        // re-scanned before the next sync arrives as both records, and the
+        // membership must land on a box that is already free.
+        let removalOutcomes: PalletMembershipRemovalOutcomeDto[] = [];
+        let removalTouched: string[] = [];
+        if (body.palletMembershipRemovals.length > 0) {
+          const applied = await applyPalletMembershipRemovals(
+            tx,
+            tenantId,
+            body.palletMembershipRemovals,
+            authenticatedTerminalId,
+          );
+          removalOutcomes = applied.outcomes;
+          removalTouched = applied.touchedPalletIds;
+          // A cleared `boxes.pallet_id` is exactly what the box registry
+          // advertises, so every handheld has to learn the box is free again.
+          await this.advanceBoxRegistryVersions(tx, tenantId, applied.changedBoxIds);
+        }
+
         // Warehouse memberships, after the box closures above so a box closed
         // and attached in the SAME batch is already closed by the time the
         // membership UPDATE tests `closed_at IS NOT NULL`, and before the
@@ -1712,6 +1766,26 @@ export class StationScansService {
           // An accepted membership rewrites `boxes.pallet_id`, which the box
           // registry advertises, so every handheld has to learn about it.
           await this.advanceBoxRegistryVersions(tx, tenantId, applied.changedBoxIds);
+        }
+
+        // A draft this batch emptied and did not refill is deleted: it has no
+        // SSCC, no label and no export, and the device already forgot it.
+        //
+        // This runs BEFORE the pallet closures below, so a batch that both
+        // empties a draft and carries a closure for the same device-local
+        // pallet would have that closure skip on the now-missing key. The
+        // handheld never sends that combination -- removing the last box
+        // deletes the draft locally, and a deleted draft is never closed --
+        // and closing a pallet the operator just emptied has nothing to print.
+        if (removalTouched.length > 0) {
+          const pruned = await pruneEmptyWarehouseDrafts(tx, tenantId, removalTouched);
+          for (const id of pruned) {
+            // The key map is read by the closure and exception loops below; a
+            // deleted pallet must not be handed to either as a live id.
+            for (const [key, palletId] of palletsByKey) {
+              if (palletId === id) palletsByKey.delete(key);
+            }
+          }
         }
 
         // Pallet closures, after the box closures above so a pallet closing in
@@ -1834,6 +1908,16 @@ export class StationScansService {
           ),
           membershipOutcomes,
         );
+        // Same contract for the removals, assembled the same way.
+        const membershipRemovals: PalletMembershipRemovalOutcomeDto[] = assembleMembershipOutcomes(
+          submittedRemovals,
+          new Set(
+            denied
+              .filter((record) => record.recordKind === "pallet_membership_removal")
+              .map((record) => record.recordIndex),
+          ),
+          removalOutcomes,
+        );
 
         const result: SyncBatchResponseDto = {
           applied: body.items.length,
@@ -1843,6 +1927,7 @@ export class StationScansService {
           ...(productLabelReceipt ? { productLabelReceipt } : {}),
           ...(validationOccurrences.length > 0 ? { validationOccurrences } : {}),
           ...(memberships.length > 0 ? { memberships } : {}),
+          ...(membershipRemovals.length > 0 ? { membershipRemovals } : {}),
         };
         await tx
           .update(schema.syncBatches)
@@ -1887,6 +1972,7 @@ export class StationScansService {
       pallet: body.pallets,
       pallet_exception: body.palletExceptions,
       pallet_membership: body.palletMemberships,
+      pallet_membership_removal: body.palletMembershipRemovals,
     } as const;
     await tx
       .insert(schema.stationSyncQuarantine)

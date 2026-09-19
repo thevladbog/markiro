@@ -1158,9 +1158,16 @@
       "breakpoints": true
     },
     {
+      "idx": 165,
+      "version": "7",
+      "when": 1789758354825,
+      "tag": "0165_pallet_membership_removal_quarantine",
+      "breakpoints": true
+    },
+    {
       "idx": 166,
       "version": "7",
-      "when": 1789777656167,
+      "when": 1789817683800,
       "tag": "0166_chz_km_orders",
       "breakpoints": true
     }

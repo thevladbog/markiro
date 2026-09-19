@@ -1,14 +1,20 @@
 import { describe, expect, it } from "vitest";
 
-import { LABEL_FIELDS, MAX_LABEL_CODE_BYTES } from "../src/index.js";
+import {
+  generateZpl,
+  LABEL_FIELDS,
+  MAX_LABEL_CODE_BYTES,
+  parseLabelTemplate,
+  sampleLabelData,
+} from "../src/index.js";
 import {
   assertImportInputLimits,
   importedElementId,
   parseTemplatePayload,
+  parseLabelCode,
 } from "../src/labels/import.js";
 import { parseZplLabel } from "../src/labels/zpl-import.js";
 import { parseTsplLabel } from "../src/labels/tspl-import.js";
-import { parseLabelCode } from "../src/labels/import.js";
 
 describe("label code import contract", () => {
   it("exports one canonical ordered label-field inventory", () => {
@@ -210,6 +216,66 @@ describe("label code import contract", () => {
         203,
       );
       expect(result.spec.elements[0]).toEqual(expect.objectContaining({ text: "Hello^World" }));
+    });
+
+    it("reads the ^FB line count into maxLines and leaves single-line fields untouched", () => {
+      const result = parseZplLabel(
+        [
+          "^XA",
+          "^PW464",
+          "^LL320",
+          "^FO16,16^A0N,28,28^FB432,3,0,L,0^FD{{product.printName}}^FS",
+          "^FO16,120^A0N,28,28^FB432,1,0,C,0^FDОдна строка^FS",
+          "^FO16,160^A0N,28,28^FB432^FDБез счётчика^FS",
+          "^FO16,200^A0N,28,28^FB432,99,0,L,0^FDПотолок^FS",
+          "^FO16,240^A0N,28,28^FB432,2.5,0,L,0^FDДробь^FS",
+          "^XZ",
+        ].join("\n"),
+        203,
+      );
+
+      const [wrapped, single, bare, capped, fractional] = result.spec.elements;
+      expect(wrapped).toMatchObject({ kind: "field", field: "product.printName", maxLines: 3 });
+      expect(single).not.toHaveProperty("maxLines");
+      expect(bare).not.toHaveProperty("maxLines");
+      expect(capped).toMatchObject({ kind: "text", text: "Потолок", maxLines: 16 });
+      expect(fractional).not.toHaveProperty("maxLines");
+    });
+
+    it("round-trips maxLines through generateZpl", async () => {
+      const spec = parseLabelTemplate({
+        widthMm: 58,
+        heightMm: 40,
+        dpi: 203,
+        language: "zpl",
+        elements: [
+          {
+            kind: "field",
+            id: "name",
+            xMm: 2,
+            yMm: 2,
+            field: "product.printName",
+            fontSizePt: 10,
+            maxWidthMm: 54,
+            maxLines: 3,
+          },
+        ],
+      });
+      // Latin-only data keeps the emitter on the native ^A0N/^FB path: a
+      // Cyrillic value is rasterized into ^GFA, which the importer reports
+      // as unsupported.
+      const zpl = await generateZpl(spec, {
+        ...sampleLabelData(),
+        "product.printName": "Plain name",
+      });
+      expect(zpl).toMatch(/\^FB432,3,0,[LCR],0/);
+
+      const back = parseZplLabel(zpl, 203);
+      expect(back.spec.elements[0]).toMatchObject({
+        kind: "text",
+        text: "Plain name",
+        maxLines: 3,
+      });
     });
   });
 

@@ -485,3 +485,17 @@ val MIGRATION_17_18 = object : Migration(17, 18) {
         db.execSQL("CREATE TABLE IF NOT EXISTS `pallet_label_templates` (`key` TEXT NOT NULL, `specJson` TEXT NOT NULL, PRIMARY KEY(`key`))")
     }
 }
+
+/**
+ * Room 18 → 19 (spec 2026-09-18-open-pallet-box-removal §3.1): the removal
+ * queue. Additive; nothing existing is touched.
+ */
+val MIGRATION_18_19 = object : Migration(18, 19) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `pallet_membership_removals` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                "`palletId` TEXT NOT NULL, `sscc` TEXT NOT NULL, `removedAt` TEXT NOT NULL, `operatorId` TEXT, `status` TEXT NOT NULL)",
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_pallet_membership_removals_status_id` ON `pallet_membership_removals` (`status`, `id`)")
+    }
+}

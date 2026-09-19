@@ -86,9 +86,13 @@ interface PalletMembershipDao {
     )
     suspend fun markRejected(palletId: String, sscc: String, reason: String, winner: String?, at: String)
 
-    /** Only a pending row can be taken off the pallet locally; a sent one may already be on the server. */
-    @Query("DELETE FROM pallet_memberships WHERE palletId = :palletId AND sscc = :sscc AND status = 'pending'")
-    suspend fun deletePending(palletId: String, sscc: String): Int
+    /** A box taken off an open pallet: the membership itself, any status. */
+    @Query("DELETE FROM pallet_memberships WHERE palletId = :palletId AND sscc = :sscc")
+    suspend fun delete(palletId: String, sscc: String): Int
+
+    /** Wipes every membership of a pallet, used when the pallet itself is pruned (design spec §3.2). */
+    @Query("DELETE FROM pallet_memberships WHERE palletId = :palletId")
+    suspend fun deleteForPallet(palletId: String): Int
 
     /**
      * Clears a rejected row so the operator can re-scan the box onto this same

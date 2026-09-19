@@ -238,6 +238,30 @@ const ACTIVE_SHIFT_09_ID = "80000000-0000-4000-8000-000000000005";
 const CLOSED_SHIFT_ID = "80000000-0000-4000-8000-000000000003";
 const LATE_SHIFT_ID = "80000000-0000-4000-8000-000000000004";
 
+/**
+ * Pallets get their own id space (`5…`). They used to start at
+ * `90000000-…-000000000001`, which is STATION_ID: two different objects
+ * sharing one identifier in a fixture that exists to show the product's real
+ * data.
+ */
+function palletUuid(serial: number): string {
+  return `50000000-0000-4000-8000-${String(serial).padStart(12, "0")}`;
+}
+/**
+ * A real SSCC: the 20 characters the cabinet stores ("00" + the 18-digit
+ * SSCC), whose last digit is the GS1 mod-10 check digit over the preceding
+ * 17. The frames print these numbers, so a reader who verifies one has to
+ * find it correct.
+ */
+function palletSscc(serial: number): string {
+  const body = `3460068200000${String(serial).padStart(4, "0")}`;
+  const sum = [...body].reduce(
+    (total, digit, index) => total + Number(digit) * (index % 2 === 0 ? 3 : 1),
+    0,
+  );
+  return `00${body}${(10 - (sum % 10)) % 10}`;
+}
+
 function dashboardWindow(
   start: string,
   end: string,
@@ -298,7 +322,7 @@ const SHIFT_EXPORT_FORMATS_FIXTURE = [
   },
   {
     id: "shift_csv_boxes",
-    version: 1,
+    version: 2,
     label: "[CSV][С коробами] Отчет смены",
     extension: "csv",
     mimeType: "text/csv; charset=utf-8",
@@ -311,6 +335,46 @@ const SHIFT_EXPORT_FORMATS_FIXTURE = [
     extension: "xml",
     mimeType: "application/xml; charset=utf-8",
     boxMode: "boxes",
+  },
+  {
+    id: "shift_txt_pallets",
+    version: 1,
+    label: "[TXT][Паллеты] Отчет смены",
+    extension: "txt",
+    mimeType: "text/plain; charset=utf-8",
+    boxMode: "pallets",
+  },
+  {
+    id: "shift_csv_pallets",
+    version: 1,
+    label: "[CSV][Паллеты] Отчет смены",
+    extension: "csv",
+    mimeType: "text/csv; charset=utf-8",
+    boxMode: "pallets",
+  },
+  {
+    id: "shift_xml_gismt_aggregation_pallets",
+    version: 1,
+    label: "[XML][ГИСМТ] Паллетная агрегация",
+    extension: "xml",
+    mimeType: "application/xml; charset=utf-8",
+    boxMode: "pallets",
+  },
+  {
+    id: "shift_txt_pallet_boxes",
+    version: 1,
+    label: "[TXT][Паллеты → короба] Отчет смены",
+    extension: "txt",
+    mimeType: "text/plain; charset=utf-8",
+    boxMode: "pallet_boxes",
+  },
+  {
+    id: "shift_xml_gismt_pallet_boxes",
+    version: 1,
+    label: "[XML][ГИСМТ] Агрегация паллет без кодов",
+    extension: "xml",
+    mimeType: "application/xml; charset=utf-8",
+    boxMode: "pallet_boxes",
   },
 ];
 
@@ -336,7 +400,7 @@ function fixtures(locale: AdminLocale) {
     productGroup: copy.productGroup,
     chzProductGroupCode: 15,
     boxCapacity: 12,
-    palletCapacity: 48,
+    palletBoxCapacity: 48,
     unitPrice: "189.00",
     printName: copy.productPrintName,
     egaisCode: null,
@@ -480,37 +544,98 @@ function fixtures(locale: AdminLocale) {
     nextCursor: null,
   };
 
+  /** The two people on the floor, named identically everywhere they appear. */
+  const PARTICIPANTS = [
+    {
+      employeeId: "60000000-0000-4000-8000-000000000001",
+      fullName: copy.participant,
+      role: copy.participantRole,
+    },
+    {
+      employeeId: "60000000-0000-4000-8000-000000000002",
+      fullName: copy.secondParticipant,
+      role: null,
+    },
+  ];
+
   /**
    * `GET /shifts/:id/summary` feeds the details panel's shift-result and
    * participants blocks (`ShiftDetailsPanel.tsx:72,93-142`). Not zod-parsed,
    * so the shape has to mirror `ShiftSummaryDto` field for field: a wrong
    * name renders an empty tile instead of throwing.
+   *
+   * Built PER SHIFT. The panel and the shift's own list row are printed on
+   * the SAME frame, so one shared summary showed a shift the list called
+   * planned and empty as having closed 96 boxes with two operators working on
+   * it — on a date after its own production date. Here the two named
+   * operators always add up to the shift's own `output`, and their activity
+   * falls on the shift's own production day.
    */
-  const SHIFT_SUMMARY = {
-    generatedAt: "2026-09-02T11:20:00.000Z",
-    output: { mode: "aggregation", closedBoxes: 96, containedUnits: 1152 },
-    participants: [
-      {
-        employeeId: "60000000-0000-4000-8000-000000000001",
-        fullName: copy.participant,
-        role: copy.participantRole,
-        firstActivityAt: "2026-09-02T04:15:00.000Z",
-        lastActivityAt: "2026-09-02T11:05:00.000Z",
-        acceptedScans: 812,
-        closedBoxes: 68,
+  function shiftActivity(productionDate: string) {
+    const [first, second] = PARTICIPANTS;
+    if (!first || !second) throw new Error("Expected two participants");
+    return {
+      generatedAt: `${productionDate}T11:20:00.000Z`,
+      first: {
+        ...first,
+        firstActivityAt: `${productionDate}T04:15:00.000Z`,
+        lastActivityAt: `${productionDate}T11:05:00.000Z`,
       },
-      {
-        employeeId: "60000000-0000-4000-8000-000000000002",
-        fullName: copy.secondParticipant,
-        role: null,
-        firstActivityAt: "2026-09-02T04:20:00.000Z",
-        lastActivityAt: "2026-09-02T10:40:00.000Z",
-        acceptedScans: 340,
-        closedBoxes: 28,
+      second: {
+        ...second,
+        firstActivityAt: `${productionDate}T04:20:00.000Z`,
+        lastActivityAt: `${productionDate}T10:40:00.000Z`,
       },
-    ],
-    unattributed: { eventCount: 4, acceptedScans: 4, closedBoxes: 0 },
-  };
+      // Four events nobody signed for, which is what raises the panel's
+      // "operations with no employee" notice.
+      unattributed: { eventCount: 4, acceptedScans: 4, closedBoxes: 0 },
+    };
+  }
+  /** Roughly seven tenths of the work on the first operator, as before. */
+  function share(total: number): [number, number] {
+    const first = Math.round(total * 0.7);
+    return [first, total - first];
+  }
+  function aggregationSummary(productionDate: string, closedBoxes: number, containedUnits: number) {
+    const { generatedAt, first, second, unattributed } = shiftActivity(productionDate);
+    const [firstBoxes, secondBoxes] = share(closedBoxes);
+    const [firstScans, secondScans] = share(containedUnits);
+    return {
+      generatedAt,
+      output: { mode: "aggregation", closedBoxes, containedUnits },
+      participants: [
+        { ...first, acceptedScans: firstScans, closedBoxes: firstBoxes },
+        { ...second, acceptedScans: secondScans, closedBoxes: secondBoxes },
+      ],
+      unattributed,
+    };
+  }
+  /** A validation shift closes no boxes, so its people close none either. */
+  function validationSummary(productionDate: string, acceptedUnits: number) {
+    const { generatedAt, first, second, unattributed } = shiftActivity(productionDate);
+    const [firstScans, secondScans] = share(acceptedUnits);
+    return {
+      generatedAt,
+      output: { mode: "validation", acceptedUnits },
+      participants: [
+        { ...first, acceptedScans: firstScans, closedBoxes: 0 },
+        { ...second, acceptedScans: secondScans, closedBoxes: 0 },
+      ],
+      unattributed: { ...unattributed, closedBoxes: 0 },
+    };
+  }
+  /** Nothing has run: no output, nobody on the shift, nothing unattributed. */
+  function plannedSummary(productionDate: string, mode: "aggregation" | "validation") {
+    return {
+      generatedAt: `${productionDate}T05:40:00.000Z`,
+      output:
+        mode === "validation"
+          ? { mode: "validation", acceptedUnits: 0 }
+          : { mode: "aggregation", closedBoxes: 0, containedUnits: 0 },
+      participants: [],
+      unattributed: { eventCount: 0, acceptedScans: 0, closedBoxes: 0 },
+    };
+  }
 
   /**
    * Number format comes from `formatInventoryNumber`'s sibling for shifts --
@@ -535,7 +660,7 @@ function fixtures(locale: AdminLocale) {
     plannedDate: "2026-08-31",
     productionDate: "2026-08-31",
     boxCapacity: 12,
-    palletCapacity: 48,
+    palletBoxCapacity: 48,
     palletsEnabled: true,
     createdFrom: "admin",
     openedAt: null,
@@ -586,6 +711,11 @@ function fixtures(locale: AdminLocale) {
   const DUPLICATE_SHIFT = {
     ...ACTIVE_SHIFT_09,
     mode: "validation",
+    // `assertPalletConfiguration` (apps/api/src/modules/shifts/shifts.service.ts)
+    // refuses pallets outside an aggregation shift, and the cabinet's own
+    // checkbox lives inside the aggregation section -- so a validation shift
+    // can never carry `palletsEnabled`, and its panel has no pallets section.
+    palletsEnabled: false,
     output: { mode: "validation", acceptedUnits: 1240 },
     validationPrint: {
       mode: "duplicate_dm",
@@ -605,7 +735,11 @@ function fixtures(locale: AdminLocale) {
     closedAt: "2026-09-01T12:40:00.000Z",
     closeReason: copy.closeReason,
     createdAt: "2026-08-31T14:00:00.000Z",
-    output: { mode: "aggregation", closedBoxes: 400, containedUnits: 4800 },
+    // The whole-shift report below (`EXPORT_READY`) covers every closed box of
+    // this shift, so the shift's own output is what that report totals: a
+    // report can never carry fewer codes than the shift closed.
+    plannedQty: 900,
+    output: { mode: "aggregation", closedBoxes: 74, containedUnits: 888 },
   };
   const LATE_SHIFT = {
     ...CLOSED_SHIFT,
@@ -613,6 +747,169 @@ function fixtures(locale: AdminLocale) {
     number: "SEP26-002",
     lateDataAt: "2026-09-01T14:05:00.000Z",
   };
+
+  /**
+   * Every shift fixture this mock might serve, in one place. `/api/pallets`
+   * derives its known-shift whitelist from this list (see `installApi`)
+   * instead of a hand-copied id array, so a shift fixture added here cannot
+   * silently fall off that whitelist and get a spurious 404.
+   */
+  const SHIFTS = [
+    PLANNED_SHIFT,
+    ACTIVE_SHIFT,
+    ACTIVE_SHIFT_09,
+    DUPLICATE_SHIFT,
+    CLOSED_SHIFT,
+    LATE_SHIFT,
+  ];
+
+  /**
+   * One summary per shift, each agreeing with that shift's own row. The
+   * duplicate shift shares `ACTIVE_SHIFT_09_ID` but runs in validation mode,
+   * and only one of the two is ever served in a given scenario, so it is
+   * listed under its own scenario's key below.
+   */
+  type ShiftSummaryFixture =
+    | ReturnType<typeof aggregationSummary>
+    | ReturnType<typeof validationSummary>
+    | ReturnType<typeof plannedSummary>;
+  const SHIFT_SUMMARIES = new Map<string, ShiftSummaryFixture>([
+    [SHIFT_ID, plannedSummary(PLANNED_SHIFT.productionDate, "aggregation")],
+    [
+      ACTIVE_SHIFT_ID,
+      aggregationSummary(
+        ACTIVE_SHIFT.productionDate,
+        ACTIVE_SHIFT.output.closedBoxes,
+        ACTIVE_SHIFT.output.containedUnits,
+      ),
+    ],
+    [
+      ACTIVE_SHIFT_09_ID,
+      aggregationSummary(
+        ACTIVE_SHIFT_09.productionDate,
+        ACTIVE_SHIFT_09.output.closedBoxes,
+        ACTIVE_SHIFT_09.output.containedUnits,
+      ),
+    ],
+    [
+      CLOSED_SHIFT_ID,
+      aggregationSummary(
+        CLOSED_SHIFT.productionDate,
+        CLOSED_SHIFT.output.closedBoxes,
+        CLOSED_SHIFT.output.containedUnits,
+      ),
+    ],
+    [
+      LATE_SHIFT_ID,
+      aggregationSummary(
+        LATE_SHIFT.productionDate,
+        LATE_SHIFT.output.closedBoxes,
+        LATE_SHIFT.output.containedUnits,
+      ),
+    ],
+  ]);
+  const DUPLICATE_SHIFT_SUMMARY = validationSummary(
+    DUPLICATE_SHIFT.productionDate,
+    DUPLICATE_SHIFT.output.acceptedUnits,
+  );
+
+  /**
+   * The pallets of ONE shift, in the three states the panel can show: a plain
+   * closed pallet, one whose member box was disassembled after the close, and
+   * a dismantled pallet. The placard rule (`ShiftDetailsPanel.tsx:196-198`) is
+   * `closedAt !== null && disassembledAt === null && sscc !== null` -- it
+   * never looks at `contentsChangedAfterClose`, so the first TWO are
+   * printable and only the dismantled third is excluded.
+   *
+   * The dismantled pallet keeps its counts, and that is the product's
+   * behaviour, not a fixture convenience. Dismantling writes ONLY
+   * `pallets.disassembledAt` (`apps/api/src/modules/station-scans/pallet-ingest.ts`:
+   * "Only the pallet is retired. Its boxes stay closed and keep `pallet_id`"),
+   * while `boxCount` / `unitCount` filter on the BOXES' own `disassembledAt`
+   * (`apps/api/src/modules/pallets/pallets.service.ts`), never the pallet's.
+   * Zeros here would require every member box to have been disassembled --
+   * which would in turn force `contentsChangedAfterClose` true, a mark this
+   * row does not carry. So a dismantled pallet that held 24 boxes still reads
+   * 24 / 288.
+   *
+   * Counts stay inside what the owning shift actually closed: the smallest
+   * shift these fixtures serve closed 74 boxes, and 24 + 23 + 24 = 71 fits
+   * under it. A pallet closed short of the 48-box capacity is ordinary (the
+   * operator closes it at a changeover or at the end of a run); a shift
+   * holding more palletised boxes than it ever closed is not.
+   */
+  function palletsOfShift(firstSerial: number, productionDate: string) {
+    const common = {
+      kind: "production" as const,
+      productId: PRODUCT_ID,
+      productName: PRODUCT.name,
+      deviceName: copy.station,
+      rejectedMembershipCount: 0,
+      terminalId: null,
+      lineName: LINE.name,
+      operatorId: null,
+    };
+    return [
+      {
+        ...common,
+        id: palletUuid(firstSerial),
+        sscc: palletSscc(firstSerial),
+        boxCount: 24,
+        unitCount: 288,
+        closedAt: `${productionDate}T06:40:00.000Z`,
+        contentsChangedAfterClose: false,
+        disassembledAt: null,
+      },
+      {
+        ...common,
+        id: palletUuid(firstSerial + 1),
+        sscc: palletSscc(firstSerial + 1),
+        // Closed with 24 boxes; one of them was taken apart afterwards.
+        boxCount: 23,
+        unitCount: 276,
+        closedAt: `${productionDate}T08:55:00.000Z`,
+        contentsChangedAfterClose: true,
+        disassembledAt: null,
+      },
+      {
+        ...common,
+        id: palletUuid(firstSerial + 2),
+        sscc: palletSscc(firstSerial + 2),
+        boxCount: 24,
+        unitCount: 288,
+        closedAt: `${productionDate}T09:40:00.000Z`,
+        contentsChangedAfterClose: false,
+        disassembledAt: `${productionDate}T10:50:00.000Z`,
+      },
+    ];
+  }
+
+  /**
+   * `GET /pallets` answers for ONE shift, so every shift fixture owns its own
+   * pallets instead of sharing a single list. Serving one list to all of them
+   * printed a never-launched shift holding pallets closed the day before its
+   * own production date.
+   *
+   * Built from `SHIFTS` so a shift fixture added later cannot fall off the
+   * mock, and keyed by id, so the two fixtures that share `ACTIVE_SHIFT_09_ID`
+   * answer identically.
+   */
+  const PALLETS_BY_SHIFT = new Map<string, ReturnType<typeof palletsOfShift>>();
+  let nextPalletSerial = 1;
+  for (const shift of SHIFTS) {
+    if (PALLETS_BY_SHIFT.has(shift.id)) continue;
+    if (shift.status === "planned") {
+      // Nothing has been produced yet, so there is nothing on the floor to
+      // stack: the section renders its documented "no pallets in this shift"
+      // empty state rather than rows from some other shift.
+      PALLETS_BY_SHIFT.set(shift.id, []);
+      continue;
+    }
+    // Pallets are closed during the shift that owns them, so their timestamps
+    // follow that shift's own production date.
+    PALLETS_BY_SHIFT.set(shift.id, palletsOfShift(nextPalletSerial, shift.productionDate));
+    nextPalletSerial += 3;
+  }
 
   /**
    * `/api/dashboard/overview` is parsed with a `.strict()` zod schema
@@ -762,7 +1059,10 @@ function fixtures(locale: AdminLocale) {
     ...EXPORT_READY,
     id: "a0000000-0000-4000-8000-000000000002",
     formatId: "shift_csv_boxes",
-    formatVersion: 1,
+    // The version the catalog advertises today: `export-history.tsx` looks a
+    // run's label up by `formatId@formatVersion`, so a run created now carries
+    // the current version.
+    formatVersion: 2,
     maxLines: null,
     status: "processing",
     completedAt: null,
@@ -808,7 +1108,9 @@ function fixtures(locale: AdminLocale) {
     PRODUCT_LABEL_TEMPLATES,
     DUPLICATE_PLANNING_CONFIG,
     PRODUCT_LABEL_HISTORY,
-    SHIFT_SUMMARY,
+    PARTICIPANTS,
+    SHIFT_SUMMARIES,
+    DUPLICATE_SHIFT_SUMMARY,
     PLANNED_SHIFT,
     ACTIVE_SHIFT,
     STATION_DEVICE,
@@ -817,6 +1119,8 @@ function fixtures(locale: AdminLocale) {
     DUPLICATE_SHIFT,
     CLOSED_SHIFT,
     LATE_SHIFT,
+    SHIFTS,
+    PALLETS_BY_SHIFT,
     DASHBOARD_UNDER_CONTROL,
     DASHBOARD_ATTENTION,
     EXPORT_READY,
@@ -866,8 +1170,37 @@ async function installApi(page: Page, scenario: Scenario, fx: Fixtures) {
       return json(route, scenario === "deviceDrawer" ? ACCESS_ADMIN : ACCESS);
     }
     if (path === "/api/pickup-orders") return json(route, PICKUP_ORDERS_EMPTY);
-    // The details panel loads the summary for every shift status.
-    if (/^\/api\/shifts\/[0-9a-f-]+\/summary$/.test(path)) return json(route, fx.SHIFT_SUMMARY);
+    // The details panel loads the summary for every shift status, and each
+    // shift gets ITS OWN: the summary sits on the same frame as the shift's
+    // list row, so the two have to tell one story.
+    const summaryMatch = /^\/api\/shifts\/([0-9a-f-]+)\/summary$/.exec(path);
+    if (summaryMatch?.[1]) {
+      // The duplicate shift reuses `ACTIVE_SHIFT_09_ID` with a validation
+      // output, so its own scenarios answer with the validation summary.
+      const summary =
+        scenario === "shiftDuplicate" || scenario === "shiftLabels"
+          ? fx.DUPLICATE_SHIFT_SUMMARY
+          : fx.SHIFT_SUMMARIES.get(summaryMatch[1]);
+      if (summary) return json(route, summary);
+      unexpected.push(`${route.request().method()} ${path}${url.search}`);
+      return route.abort();
+    }
+    // `GET /pallets` 404s for an unknown shift rather than returning an empty
+    // list, so the panel treats an error as a real failure -- answer each
+    // shift with ITS OWN pallets. `fx.PALLETS_BY_SHIFT` covers every shift
+    // fixture this mock knows about, so a shift the frames open always has an
+    // answer, and an empty list is a real empty list rather than a 404.
+    if (path === "/api/pallets") {
+      const shiftId = url.searchParams.get("shiftId");
+      const pallets = shiftId === null ? undefined : fx.PALLETS_BY_SHIFT.get(shiftId);
+      if (pallets !== undefined) return json(route, { items: pallets });
+      // A shift with no fixture is a defect in this mock, not a state worth
+      // photographing: the panel would draw its red "could not load the
+      // pallets" alert and the frame would be written anyway. Record it so
+      // the test fails instead of shipping that frame.
+      unexpected.push(`${route.request().method()} ${path}${url.search}`);
+      return route.fulfill({ status: 404, contentType: "application/json", body: "{}" });
+    }
 
     if (scenario === "shiftDuplicate" || scenario === "shiftLabels") {
       if (path === "/api/shifts") return json(route, { items: [fx.DUPLICATE_SHIFT] });
@@ -890,10 +1223,7 @@ async function installApi(page: Page, scenario: Scenario, fx: Fixtures) {
       }
       if (path === "/api/operators") {
         return json(route, {
-          items: fx.SHIFT_SUMMARY.participants.map(({ employeeId, fullName }) => ({
-            employeeId,
-            fullName,
-          })),
+          items: fx.PARTICIPANTS.map(({ employeeId, fullName }) => ({ employeeId, fullName })),
         });
       }
     }
@@ -1241,6 +1571,29 @@ for (const locale of LOCALES) {
     expect(unexpected).toEqual([]);
   });
 
+  /**
+   * `palletsEnabledLabel` names the checkbox itself and is visible as soon as
+   * aggregation mode is picked (see the frame above), but the capacity and
+   * template fields it gates only mount once that checkbox is actually
+   * checked (`ShiftForm.tsx:938-956`). So the planning instruction's pallet
+   * frame follows the same product-then-mode order as the aggregation frame
+   * and then checks the box before shooting the fields it unlocks.
+   */
+  test(`shift planning shows the pallet fields (${locale})`, async ({ page }) => {
+    const fx = fixtures(locale);
+    const unexpected = await installApi(page, "shiftCreate", fx);
+    await openHarness(page, locale, "/shifts/new");
+    await page.getByRole("combobox", { name: t("pages.shifts.form.productLabel") }).click();
+    await page.getByRole("option", { name: fx.PRODUCT.name, exact: true }).click();
+    await page.getByRole("radio", { name: t("pages.shifts.form.modeAggregation") }).check();
+    await expect(page.getByText(t("pages.shifts.form.palletsEnabledLabel"))).toBeVisible();
+    await page.getByRole("checkbox", { name: t("pages.shifts.form.palletsEnabledLabel") }).check();
+    await expect(page.getByLabel(t("pages.shifts.form.palletBoxCapacityLabel"))).toBeVisible();
+    await expect(page.getByText(t("pages.shifts.form.palletLabelTemplateLabel"))).toBeVisible();
+    await screenshotFullMain(page, shot("shift-pallets"));
+    expect(unexpected).toEqual([]);
+  });
+
   test(`shifts list after planning (${locale})`, async ({ page }) => {
     const fx = fixtures(locale);
     const unexpected = await installApi(page, "shiftsPlanned", fx);
@@ -1372,6 +1725,52 @@ for (const locale of LOCALES) {
     ).toBeVisible();
     await expect(page.getByRole("button", { name: t("pages.shifts.close") })).toBeVisible();
     await screenshotFullMain(page, shot09("shifts-active"));
+    expect(unexpected).toEqual([]);
+  });
+
+  /**
+   * The pallets section only renders while `shift.palletsEnabled`
+   * (`ShiftDetailsPanel.tsx:499`), which every SHIFTS fixture now carries, and
+   * it holds all three states `PALLETS` exercises: a plain closed pallet, one
+   * whose contents changed after close, and a disassembled one
+   * (`ShiftDetailsPanel.tsx:196-198,250-255`). Shot as its own section rather
+   * than a full-page frame: the panel is very tall and a full capture would
+   * just repeat `shifts-active`.
+   */
+  test(`the shift panel lists the pallets of the shift (${locale})`, async ({ page }) => {
+    const fx = fixtures(locale);
+    const unexpected = await installApi(page, "shiftsClose", fx);
+    await openHarness(page, locale, "/shifts");
+    await openShiftDetails(page, t, "SEP26-004");
+    // `Table` gives its own horizontal-scroll wrapper the same accessible
+    // name via `scrollLabel`, so two "region"s share this name -- `.first()`
+    // is the outer `<section>` (it wraps the table, so it is first in
+    // document order), not the inner scroll container.
+    const pallets = page.getByRole("region", { name: t("pages.shifts.pallets.title") }).first();
+    await expect(pallets).toBeVisible();
+    await expect(page.getByText(t("pages.shifts.pallets.disassembled"))).toBeVisible();
+    await expect(page.getByText(t("pages.shifts.pallets.contentsChangedAfterClose"))).toBeVisible();
+    await settle(page);
+    await pallets.screenshot({ path: shot09("shift-pallets"), scale: "css" });
+    expect(unexpected).toEqual([]);
+  });
+
+  /**
+   * The "Ярлыки" action only appears once some pallet is closed, still
+   * standing and carries an SSCC (`ShiftDetailsPanel.tsx:196-198`) -- two of
+   * the three `PALLETS` fixtures qualify, so SEP26-004 (same shift as the
+   * pallets list frame above) offers it.
+   */
+  test(`the pallet placard dialog offers its formats (${locale})`, async ({ page }) => {
+    const fx = fixtures(locale);
+    const unexpected = await installApi(page, "shiftsClose", fx);
+    await openHarness(page, locale, "/shifts");
+    await openShiftDetails(page, t, "SEP26-004");
+    await page.getByRole("button", { name: t("pages.shifts.pallets.placards.action") }).click();
+    await expect(
+      page.getByRole("dialog", { name: t("pages.shifts.pallets.placards.title") }),
+    ).toBeVisible();
+    await screenshotFullMain(page, shot09("pallet-placards"));
     expect(unexpected).toEqual([]);
   });
 

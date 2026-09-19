@@ -284,8 +284,8 @@ private fun rejectionText(row: PalletMembershipEntity): String = when (row.reaso
 /**
  * One box on the pallet.
  *
- * «Убрать» is offered only while the row is still pending: a `sent` row may
- * already be on the server, and only the server can take that one back.
+ * «Убрать» is offered for every box still on the pallet; a sent or accepted
+ * row is undone through a queued removal (spec 2026-09-18).
  */
 @Composable
 private fun MemberRow(member: PalletMembershipEntity, onRemove: () -> Unit) {
@@ -307,7 +307,7 @@ private fun MemberRow(member: PalletMembershipEntity, onRemove: () -> Unit) {
             modifier = Modifier.weight(1f),
         )
         MarkiroChip(stringResource(statusLabel(member.status)), statusTone(member.status))
-        if (member.status == MembershipStatus.PENDING) {
+        if (member.status != MembershipStatus.REJECTED) {
             IconAction(Icons.Outlined.Close, stringResource(R.string.pallets_remove), onClick = onRemove)
         }
     }

@@ -175,10 +175,22 @@
   border-radius: var(--r-2);
 }
 
-.label-editor__import-warnings code {
+.label-editor__import-warnings code,
+.label-editor__import-issues code {
   overflow-wrap: anywhere;
   color: var(--fg-2);
   font: 12px/1.4 var(--font-mono);
+}
+
+.label-editor__import-error p {
+  margin: 0;
+}
+
+.label-editor__import-issues {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0 0;
+  padding-left: 18px;
 }
 
 .label-editor__import-fields {

@@ -73,7 +73,7 @@ interface PalletsGateway {
 
     suspend fun attach(sscc: String, operatorId: String?): AttachResult
 
-    suspend fun remove(palletId: String, sscc: String): Boolean
+    suspend fun remove(palletId: String, sscc: String, operatorId: String?): Boolean
 
     suspend fun close(operatorId: String?): ClosePalletResult
 
@@ -148,7 +148,8 @@ class PalletsRepository(
 
     override suspend fun attach(sscc: String, operatorId: String?): AttachResult = pallets.attach(sscc, operatorId)
 
-    override suspend fun remove(palletId: String, sscc: String): Boolean = pallets.remove(palletId, sscc)
+    override suspend fun remove(palletId: String, sscc: String, operatorId: String?): Boolean =
+        pallets.remove(palletId, sscc, operatorId)
 
     override suspend fun close(operatorId: String?): ClosePalletResult = pallets.close(operatorId)
 

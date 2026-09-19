@@ -106,6 +106,8 @@ data class SyncBatchRequest(
     val palletExceptions: List<JsonElement> = emptyList(),
     /** Boxes joining a warehouse pallet (room 18) -- see `PalletMembershipDto`. */
     val palletMemberships: List<PalletMembershipDto> = emptyList(),
+    /** Boxes taken back off an open warehouse pallet -- see `PalletMembershipRemovalDto`. */
+    val palletMembershipRemovals: List<PalletMembershipRemovalDto> = emptyList(),
 )
 
 @Serializable

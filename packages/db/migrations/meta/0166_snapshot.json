@@ -1,6 +1,6 @@
 {
-  "id": "1e9808fd-30b1-4dd7-8085-cb6714484f5a",
-  "prevId": "608507a1-9630-4552-bbf9-1d24fc2f9b1d",
+  "id": "c7e63e92-5446-4273-abdf-67f865174912",
+  "prevId": "d2082255-7866-4d97-8d88-b034a96e3ea5",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -4436,7 +4436,7 @@
         },
         "station_sync_quarantine_record_kind_check": {
           "name": "station_sync_quarantine_record_kind_check",
-          "value": "\"station_sync_quarantine\".\"record_kind\" IN ('item', 'box', 'exception', 'product_label_event', 'pallet', 'pallet_exception', 'pallet_membership')"
+          "value": "\"station_sync_quarantine\".\"record_kind\" IN ('item', 'box', 'exception', 'product_label_event', 'pallet', 'pallet_exception', 'pallet_membership', 'pallet_membership_removal')"
         },
         "station_sync_quarantine_record_index_check": {
           "name": "station_sync_quarantine_record_index_check",

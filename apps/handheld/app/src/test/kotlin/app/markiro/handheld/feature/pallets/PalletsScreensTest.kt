@@ -3,9 +3,9 @@ package app.markiro.handheld.feature.pallets
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
-import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -59,27 +59,29 @@ class PalletsScreensTest {
         compose.onNodeWithText("Первый короб задаёт товар паллеты.").assertIsDisplayed()
     }
 
-    /** «Убрать» belongs to a pending row only: a sent one may already be on the server. */
+    /** Spec 2026-09-18: every non-rejected box can be taken off, whatever its sync status. */
     @Test
-    fun aPendingRowCanBeTakenOffAndASentOneCannot() {
-        var removed: String? = null
+    fun anyNonRejectedRowCanBeTakenOff() {
+        val removed = mutableListOf<String>()
         compose.setContent {
             MarkiroTheme {
                 PalletsRoute(
                     PalletsUi(
-                        pallet = pallet, productName = "Вода 0,5 л", boxCount = 2, capacity = 12,
-                        members = listOf(member("034600682000000014", MembershipStatus.SENT), member("034600682000000021", MembershipStatus.PENDING)),
+                        pallet = pallet, productName = "Вода 0,5 л", boxCount = 3, capacity = 12,
+                        members = listOf(
+                            member("034600682000000014", MembershipStatus.SENT),
+                            member("034600682000000021", MembershipStatus.PENDING),
+                            member("034600682000000038", MembershipStatus.ACCEPTED),
+                        ),
                     ),
-                    PalletsCallbacks(onRemove = { removed = it }),
+                    PalletsCallbacks(onRemove = { removed += it }),
                 )
             }
         }
-        compose.onNodeWithText("2 / 12 коробов").assertIsDisplayed()
-        compose.onNodeWithText("Вода 0,5 л").assertIsDisplayed()
-        compose.onNodeWithText("в очереди").assertIsDisplayed()
-        compose.onNodeWithText("отправляется").assertIsDisplayed()
-        compose.onNodeWithContentDescription("Убрать с паллеты").performClick()
-        assertEquals("034600682000000021", removed)
+        compose.onAllNodesWithContentDescription("Убрать с паллеты").assertCountEquals(3)
+        compose.onAllNodesWithContentDescription("Убрать с паллеты")[0].performClick()
+        // Rows are listed newest first.
+        assertEquals(listOf("034600682000000038"), removed)
     }
 
     /** No capacity is not «0 из 0»: the count still has to be honest -- and declined. */

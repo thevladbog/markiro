@@ -292,6 +292,40 @@ describe("warehouse pallet records", () => {
     ).toThrow(/at most once/);
   });
 
+  const removal = {
+    palletId: "w1",
+    boxSscc: "003460068200000018",
+    removedAt: "2026-09-18T10:00:00.000Z",
+    operatorId: null,
+  };
+
+  it("accepts palletMembershipRemovals and defaults them to empty", () => {
+    expect(syncBatchSchema.parse({ batchId: "b", items: [] }).palletMembershipRemovals).toEqual([]);
+    const parsed = syncBatchSchema.parse({
+      batchId: "b",
+      items: [],
+      palletMembershipRemovals: [removal],
+    });
+    expect(parsed.palletMembershipRemovals).toEqual([removal]);
+  });
+
+  it("caps palletMembershipRemovals at the membership limit and refuses a duplicate key", () => {
+    const tooMany = Array.from({ length: MAX_PALLET_MEMBERSHIPS_PER_SYNC_BATCH + 1 }, (_, i) => ({
+      ...removal,
+      boxSscc: `0034600682${String(i).padStart(8, "0")}`,
+    }));
+    expect(() =>
+      syncBatchSchema.parse({ batchId: "b", items: [], palletMembershipRemovals: tooMany }),
+    ).toThrow();
+    expect(() =>
+      syncBatchSchema.parse({
+        batchId: "b",
+        items: [],
+        palletMembershipRemovals: [removal, removal],
+      }),
+    ).toThrow();
+  });
+
   it("defaults a pallet closure to kind production and requires a shift there", () => {
     const closure = {
       palletId: "p1",

@@ -13,8 +13,9 @@
  * (`apps/station/src/lib/print-label.ts` reads the station's
  * `hardware-config` printer language and deliberately ignores
  * `spec.language`). One template serves Zebra and TSC alike, so the settings
- * panel must not claim otherwise: both downloads are always offered, and
- * `spec.language` survives only as the import dialog's initial format.
+ * panel must not claim otherwise: all three downloads (ZPL, TSPL, JSON) are
+ * always offered, and `spec.language` survives only as the import dialog's
+ * initial format.
  *
  * WHY name IS NOT PART OF THE SPEC STATE: `name` isn't a `LabelTemplateSpec`
  * field at all (it lives on the template's DB row / `LabelTemplateDto`, see
@@ -44,7 +45,6 @@ import {
   generateTspl,
   generateZpl,
   labelTemplateUsesField,
-  type LabelImportResult,
   type LabelTemplateSpec,
   type RasterizeTextFn,
 } from "@markiro/domain";
@@ -62,8 +62,15 @@ import { useCreateLabelTemplate, useLabelTemplate, useUpdateLabelTemplate } from
 import { labelPreviewData, labelRenderOptions } from "../preview-data.js";
 import { describeDefaultConflict } from "../scope.js";
 import "./editor.css";
-import { buildTsplBlob, buildZplBlob, downloadBlob, safeFileName } from "./download.js";
+import {
+  buildJsonBlob,
+  buildTsplBlob,
+  buildZplBlob,
+  downloadBlob,
+  safeFileName,
+} from "./download.js";
 import { ImportCodeDialog } from "./ImportCodeDialog.js";
+import type { ImportAnalysis } from "./import-analysis.js";
 import { PreviewPane } from "./PreviewPane.js";
 import { useSpecState } from "./useSpecState.js";
 
@@ -348,10 +355,24 @@ function LabelEditorContent({
     markDirty();
   }
 
-  function handleImportReplace(result: LabelImportResult): void {
-    editor.replaceSpec(result.spec);
-    setCustomSize(matchPresetKey(result.spec.widthMm, result.spec.heightMm) === null);
+  function handleImportReplace(analysis: ImportAnalysis): void {
+    const nextSpec = analysis.result.spec;
+    editor.replaceSpec(nextSpec);
+    setCustomSize(matchPresetKey(nextSpec.widthMm, nextSpec.heightMm) === null);
     clearSizeDrafts();
+    // A pasted `{ name, purpose, spec }` body names the template only in
+    // create/copy flows, and only while the name is still blank or the
+    // untouched default of a new template; a typed name is never
+    // overwritten, and editing an EXISTING template never adopts an
+    // imported name at all -- its saved name is not "no name chosen yet"
+    // even if the field happens to be blank mid-edit.
+    if (
+      !editingExisting &&
+      analysis.name !== undefined &&
+      (name.trim() === "" || name === t("pages.labels.editor.defaultName"))
+    ) {
+      setName(analysis.name);
+    }
     markDirty();
     setShowImportDialog(false);
   }
@@ -446,11 +467,19 @@ function LabelEditorContent({
   }
 
   /**
-   * Both downloads are generated from the SAME spec on demand -- nothing on
+   * All three downloads are generated from the SAME spec on demand -- nothing on
    * the template picks one language over the other, so neither button is ever
    * disabled or hidden.
    */
-  async function handleDownload(format: "zpl" | "tspl"): Promise<void> {
+  async function handleDownload(format: "zpl" | "tspl" | "json"): Promise<void> {
+    // JSON is the model itself: nothing to generate, nothing that can fail,
+    // so it is offered even while the spec is temporarily invalid for its
+    // purpose -- `specInvalid` now covers the KM purpose as well as the
+    // duplicate one, and neither gate applies to exporting the model.
+    if (format === "json") {
+      downloadBlob(buildJsonBlob({ name, purpose, spec }), `${safeFileName(name)}.json`);
+      return;
+    }
     if (specInvalid) return;
     const sample = labelPreviewData(purpose);
     try {
@@ -721,6 +750,9 @@ function LabelEditorContent({
           </Button>
           <Button type="button" variant="secondary" onClick={() => void handleDownload("tspl")}>
             {t("pages.labels.editor.download", { format: "TSPL (TSC)" })}
+          </Button>
+          <Button type="button" variant="secondary" onClick={() => void handleDownload("json")}>
+            {t("pages.labels.editor.download", { format: "JSON" })}
           </Button>
           {/* The invalid-dimension message wins when it is set: it describes
               the most recent action (a rejected entry never reached the

@@ -13,6 +13,16 @@ export type BadgeTone = "neutral" | "accent" | "ok" | "error" | "warn" | "info";
 
 export interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
   tone?: BadgeTone;
+  /**
+   * Let a long label break across lines. Opt-in, because a badge is normally
+   * a short pill that must not be split -- but a nowrap badge contributes its
+   * whole string to its container's min-content width, which in a narrow
+   * table column pushes every other column out and gets the pill clipped by
+   * the scroll container. Wrapping also releases the fixed 16px height: the
+   * pill grows to the lines it needs instead of spilling over its own
+   * background (`minHeight` keeps a one-line badge exactly as tall as before).
+   */
+  wrap?: boolean;
 }
 
 const TONE_STYLE: Record<BadgeTone, CSSProperties> = {
@@ -24,20 +34,28 @@ const TONE_STYLE: Record<BadgeTone, CSSProperties> = {
   info: { background: "var(--info-bg)", color: "var(--info-fg)" },
 };
 
-export function Badge({ tone = "neutral", className, style, children, ...rest }: BadgeProps) {
+export function Badge({
+  tone = "neutral",
+  wrap = false,
+  className,
+  style,
+  children,
+  ...rest
+}: BadgeProps) {
   return (
     <span
-      className={cn("mk-badge", `mk-badge--${tone}`, className)}
+      className={cn("mk-badge", `mk-badge--${tone}`, wrap && "mk-badge--wrap", className)}
       style={{
         display: "inline-flex",
         alignItems: "center",
         justifyContent: "center",
-        height: 16,
+        height: wrap ? "auto" : 16,
+        minHeight: 16,
         minWidth: 16,
         padding: "1px 6px",
         borderRadius: "var(--r-1)",
         font: "400 12px/16px var(--font-mono)",
-        whiteSpace: "nowrap",
+        whiteSpace: wrap ? "normal" : "nowrap",
         ...TONE_STYLE[tone],
         ...style,
       }}

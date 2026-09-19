@@ -586,6 +586,9 @@ describe("StationScansService sync batch payload digest", () => {
     const wire = { batchId: "legacy-digest-1", items: [], boxes: [], exceptions: [] };
     const body = syncBatchSchema.parse(wire);
     expect(body.palletMemberships).toEqual([]);
+    // ...and the removal channel added after it: "no removals leaves the digest
+    // alone" is the property this test exists for, so assert it explicitly.
+    expect(body.palletMembershipRemovals).toEqual([]);
 
     await service.applyBatch("tenant-1", body, "station-1");
 

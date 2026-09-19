@@ -24,7 +24,7 @@ export const CABINET_SHIFT_PLANNING_CONTENT = {
             items: [
               "Заведите производственную линию и назначьте ей станции.",
               "Убедитесь, что продукт есть в каталоге и доступен для выбора.",
-              "Запланируйте смену: продукт, режим, объём, даты, линия и — для агрегации — шаблон этикетки и вместимости.",
+              "Запланируйте смену: продукт, режим, объём, даты, линия и — для агрегации — шаблон этикетки, вместимость короба и, если нужны паллеты, число коробов на паллете.",
               "Передайте станцию оператору: дальше он открывает смену сам.",
             ],
           },
@@ -79,24 +79,38 @@ export const CABINET_SHIFT_PLANNING_CONTENT = {
         blocks: [
           {
             kind: "paragraph",
-            text: "Линия без станций бесполезна: открывать на ней смену будет негде. Станции закрепляются за линией в разделе «Устройства».",
+            text: "Линия без станций бесполезна: открывать на ней смену будет негде. Станции закрепляются за линией в разделе «Устройства», который кабинет описывает так: «Состояние Station, ТСД и киосков, их подключение и лицензионные места.» Перед сменой менеджеру нужны три вещи: найти станцию, понять, доходит ли до неё задание, и увидеть, за какой линией она закреплена.",
           },
           {
             kind: "step",
-            title: "Посмотрите, за какой линией закреплена станция",
-            text: "В списке устройств линия показана в колонке «Место» — отдельной колонки «Линия» в списке нет. Здесь же видно тип устройства и его текущий статус.",
-            image: { id: "device-list", caption: "Список устройств: линия в колонке «Место»" },
+            title: "Найдите станцию в реестре",
+            text: "Экран собран из двух частей. Сверху — сводка «Рабочий контур»: «Найдено устройств», «Использование слотов», «На странице» и «На странице требуют внимания». Она считает то, что кабинет видит прямо сейчас. Ниже — реестр «Оборудование организации» с таблицей всего оборудования; над таблицей два фильтра, «Тип» и «Статус». Чтобы отобрать только станции, выберите в «Тип» значение «Станция».",
+            image: {
+              id: "device-list",
+              caption: "Сводка «Рабочий контур» и реестр «Оборудование организации»",
+            },
+            expected: "В таблице реестра видна нужная станция.",
+          },
+          {
+            kind: "step",
+            title: "Убедитесь, что станция получила задание и знает свою линию",
+            text: "Колонка «Статус» показывает связь: «В сети», «Не в сети», «Ожидает привязки» или «Отозвано». Это отметка о том, когда станция в последний раз выходила на связь, а не разрешение работать: открыть смену станция может и без связи. Смену станция берёт из своей локальной копии задания, поэтому важно другое — дошёл ли до неё план. Как только запланированная смена доехала до станции, оператор откроет её и в офлайне, пока действует офлайн-разрешение станции; когда разрешение исчерпано, станция сама попросит подключиться и обновить данные. «Ожидает привязки» — случай другой: устройство в кабинете завели, но код на самом компьютере ещё не ввели, поэтому задание на него пока не уходит вовсе. Линия показана в колонке «Место» — отдельной колонки «Линия» в таблице нет.",
           },
           {
             kind: "step",
             title: "Назначьте линию станции",
-            text: "Линия выбирается в карточке устройства полем «Линия»; значение по умолчанию — «Без линии». Кабинет поясняет выбор так: «Выбранная линия задаёт для станции рабочее место по умолчанию и группирует её смены.» Ссылка «Управлять линиями» ведёт в раздел линий, если нужной ещё нет.",
+            text: "Линия выбирается в карточке устройства полем «Линия»; значение по умолчанию — «Без линии». Кабинет поясняет выбор так: «Выбранная линия задаёт для станции рабочее место по умолчанию и группирует её смены.» Ссылка «Управлять линиями» ведёт в раздел линий, если нужной ещё нет. У новой станции линия задаётся сразу в окне «Новое устройство», у уже заведённой — действием «Переназначить» в колонке «Действия».",
             image: { id: "device-line", caption: "Выбор линии в карточке устройства" },
+            expected: "В колонке «Место» появилось название линии.",
+          },
+          {
+            kind: "paragraph",
+            text: "Колонка «Лицензионное место» отвечает не на вопрос смены, а на вопрос подписки: занимает ли устройство место в тарифе — «Зарезервировано», «Занято», «Освобождено» или «Нужна проверка». Менеджеру производства кабинет эту колонку не заполняет: во всех строках стоит прочерк. Сами резервы, освобождение мест и подготовка замены собраны ниже, в блоке «Лицензии и замена устройств», и в этот документ не входят. Если станцию нужно заменить или освободить под неё место, обратитесь к администратору кабинета.",
           },
           {
             kind: "callout",
             tone: "warning",
-            text: "Добавление станции и выбор её линии требуют прав администратора кабинета. Менеджеру производства этот раздел доступен только на чтение: он видит колонку «Место», но не может изменить назначение. Снимок сделан под администратором — в кабинете менеджера боковое меню короче.",
+            text: "Станцию заводит и переназначает только администратор или владелец кабинета: эти действия требуют права на управление учётными данными, которого у менеджера производства нет. Остальное оборудование в его руках — кнопка «Добавить устройство» есть и в кабинете менеджера (она видна на снимке реестра), киоск и ТСД он заводит и переназначает сам. Блока «Лицензии и замена устройств» в кабинете менеджера нет вовсе, а колонка «Лицензионное место» остаётся у него пустой. Снимок карточки устройства сделан под администратором — в кабинете менеджера боковое меню короче.",
           },
         ],
       },
@@ -139,7 +153,7 @@ export const CABINET_SHIFT_PLANNING_CONTENT = {
           },
           {
             kind: "paragraph",
-            text: "Выбор продукта подставляет значения из его карточки: контрагента в «Для контрагента (толлинг)» и вместимости короба и паллеты. Это не ошибка и не случайность — так кабинет экономит ввод. Подставленные значения можно изменить: важно то, что сохранено в смене, а не то, что записано в продукте.",
+            text: "Выбор продукта подставляет значения из его карточки: контрагента в «Для контрагента (толлинг)», вместимость короба и число коробов на паллете. Сама укладка на паллеты при этом не включается: её включают отдельно, в параметрах агрегации. Это не ошибка и не случайность — так кабинет экономит ввод. Подставленные значения можно изменить: важно то, что сохранено в смене, а не то, что записано в продукте.",
           },
           {
             kind: "unordered-list",
@@ -198,7 +212,7 @@ export const CABINET_SHIFT_PLANNING_CONTENT = {
           {
             kind: "step",
             title: "Заполните параметры агрегации",
-            text: "Выберите «Агрегация» — в форме появится одноимённый раздел. «Вместимость короба, шт» подставляется из продукта. Отметка «Использовать паллеты» добавляет поле «Вместимость паллеты, шт»: пока отметка снята, этого поля нет. В разделе «Шаблоны» выберите «Шаблон этикетки короба» — для агрегации он обязателен, и без него смена не сохранится.",
+            text: "Выберите «Агрегация» — в форме появится одноимённый раздел. «Вместимость короба, шт» подставляется из продукта. В разделе «Шаблоны» выберите «Шаблон этикетки короба» — для агрегации он обязателен, и без него смена не сохранится.",
             image: { id: "shift-aggregation", caption: "Разделы «Шаблоны» и «Агрегация»" },
             expected: "Раздел «Агрегация» показан, вместимость короба заполнена.",
           },
@@ -206,6 +220,18 @@ export const CABINET_SHIFT_PLANNING_CONTENT = {
             kind: "callout",
             tone: "info",
             text: "Раздела «Агрегация» нет, пока выбран режим «Валидация», — это не сбой отображения. Если вы не находите вместимости коробов, проверьте сначала режим.",
+          },
+          {
+            kind: "step",
+            title: "Включите паллеты, если смена собирается на паллеты",
+            text: "Отметка «Использовать паллеты» в разделе «Агрегация» открывает два поля; пока отметка снята, их нет. «Коробов на паллете» считает короба, а не единицы продукции, и кабинет подписывает это прямо: «Сколько закрытых коробов встаёт на одну паллету.» «Шаблон этикетки паллеты» можно оставить на значении «По умолчанию организации» — подсказка объясняет порядок: «Пусто — берётся шаблон по умолчанию для категории товара, затем для организации.»",
+            image: { id: "shift-pallets", caption: "Раздел «Агрегация» с включёнными паллетами" },
+            expected: "Поля «Коробов на паллете» и «Шаблон этикетки паллеты» показаны.",
+          },
+          {
+            kind: "callout",
+            tone: "warning",
+            text: "Паллеты входят не во всякий тариф, и правило здесь несимметричное. Если функции в подписке нет, под отметкой стоит: «Паллеты не входят в текущий тариф. Чтобы включать их в сменах, добавьте функцию в подписку.» — и отметку не дадут поставить. Смена, запланированная с паллетами ещё при действовавшей функции, отметку сохраняет, но только на выключение: «Паллеты не входят в текущий тариф. Эта смена была запланирована с паллетами: их можно выключить, но включить обратно — нет.» Поэтому в такой смене не снимайте отметку, пока не убедились, что паллеты действительно не нужны: обратно вы их не вернёте.",
           },
           {
             kind: "step",
@@ -300,9 +326,9 @@ export const CABINET_SHIFT_PLANNING_CONTENT = {
                   "Он либо черновик — подпись «черновик — недоступно», — либо помечен как не используемый: подпись «не используется». Доведите карточку продукта в каталоге до рабочего состояния или снимите отметку «Не использовать».",
               },
               {
-                term: "Не вижу вместимости коробов и паллет",
+                term: "Не вижу параметры коробов и паллет",
                 detail:
-                  "Раздел «Агрегация» показывается только в режиме «Агрегация». Поле «Вместимость паллеты, шт» появляется после отметки «Использовать паллеты».",
+                  "Раздел «Агрегация» показывается только в режиме «Агрегация». Поле «Коробов на паллете» появляется после отметки «Использовать паллеты».",
               },
               {
                 term: "Смена не сохраняется в режиме агрегации",
@@ -322,7 +348,7 @@ export const CABINET_SHIFT_PLANNING_CONTENT = {
               {
                 term: "Не могу назначить линию станции",
                 detail:
-                  "Раздел устройств доступен менеджеру только на чтение. Назначение линии выполняет администратор кабинета.",
+                  "Линию станции назначает администратор или владелец кабинета: это действие требует права на управление учётными данными. Киоску и ТСД менеджер производства назначает линию сам.",
               },
               {
                 term: "Изменил активную смену, а станция работает по-старому",
@@ -362,7 +388,7 @@ export const CABINET_SHIFT_PLANNING_CONTENT = {
             items: [
               "Create a production line and assign stations to it.",
               "Make sure the product exists in the catalog and can be selected.",
-              "Plan the shift: product, mode, quantity, dates, line and — for aggregation — the label template and the capacities.",
+              "Plan the shift: product, mode, quantity, dates, line and — for aggregation — the label template, the box capacity and, if pallets are used, the number of boxes per pallet.",
               "Hand the station over to the operator: opening the shift is their job.",
             ],
           },
@@ -420,27 +446,38 @@ export const CABINET_SHIFT_PLANNING_CONTENT = {
         blocks: [
           {
             kind: "paragraph",
-            text: "A line with no stations is useless: there will be nowhere to open a shift on it. Stations are attached to a line in the “Devices” section.",
+            text: "A line with no stations is useless: there will be nowhere to open a shift on it. Stations are attached to a line in the “Devices” section, which the cabinet describes as “Station, handheld, and kiosk status, connectivity, and licensed slots.” Before a shift a manager needs three things: to find the station, to see whether the plan reaches it, and to see which line it belongs to.",
           },
           {
             kind: "step",
-            title: "See which line a station belongs to",
-            text: "In the device list the line is shown in the “Place” column — there is no separate “Line” column in the list. The same row shows the device type and its current status.",
+            title: "Find the station in the register",
+            text: "The screen has two parts. At the top is the “Working fleet” overview: “Devices found”, “Slot usage”, “On this page” and “Need attention on this page”. It counts what the cabinet sees right now. Below it is the “Organization equipment” register with the table of all the equipment; two filters, “Type” and “Status”, sit above the table. To list stations only, set “Type” to “Station”.",
             image: {
               id: "device-list",
-              caption: "The device list: the line in the “Place” column",
+              caption: "The “Working fleet” overview and the “Organization equipment” register",
             },
+            expected: "The station you need is visible in the register table.",
+          },
+          {
+            kind: "step",
+            title: "Check that the station has the plan and knows its line",
+            text: "The “Status” column shows the connection: “Online”, “Offline”, “Awaiting pairing” or “Revoked”. It records when the cabinet last heard from the station, not permission to work: a station can open a shift with no connection at all. The station takes the shift from its own local copy of the plan, so what matters is whether the plan reached it. Once a planned shift has arrived at the station, an operator opens it offline too, for as long as the station's offline permission lasts; when that permission runs out the station itself asks to connect and refresh. “Awaiting pairing” is a different case: the device record exists in the cabinet but the code has not been entered on the machine itself yet, so no plan reaches it at all. The line is shown in the “Place” column — there is no separate “Line” column in the table.",
           },
           {
             kind: "step",
             title: "Assign a line to a station",
-            text: "The line is picked in the device card with the “Line” field; the default value is “No line”. The cabinet explains the choice like this: “The selected line becomes the station's default workplace and groups its shifts.” The “Manage lines” link leads to the lines section if the line you need does not exist yet.",
+            text: "The line is picked in the device card with the “Line” field; the default value is “No line”. The cabinet explains the choice like this: “The selected line becomes the station's default workplace and groups its shifts.” The “Manage lines” link leads to the lines section if the line you need does not exist yet. A new station gets its line right in the “New device” dialog; an existing one is moved with the “Reassign” action in the “Actions” column.",
             image: { id: "device-line", caption: "Choosing the line in the device card" },
+            expected: "The line name appeared in the “Place” column.",
+          },
+          {
+            kind: "paragraph",
+            text: "The “Working-device slot” column answers a subscription question rather than a shift one: whether the device holds a slot in the plan — “Reserved”, “Occupied”, “Released” or “Needs review”. For a production manager the cabinet leaves that column unfilled: every row shows a dash. The reservations themselves, freeing a slot and preparing a replacement are gathered lower down, in the “Device licensing and replacement” block, and are outside this document. If a station has to be replaced, or a slot freed for it, ask a cabinet administrator.",
           },
           {
             kind: "callout",
             tone: "warning",
-            text: "Adding a station and choosing its line require cabinet administrator rights. For a production manager this section is read-only: they see the “Place” column but cannot change the assignment. The screenshot was taken as an administrator — in a manager's cabinet the side menu is shorter.",
+            text: "Only a cabinet administrator or owner adds or reassigns a station: those actions require the right to manage device credentials, which a production manager does not have. The rest of the equipment is theirs — the “Add device” button is in a manager's cabinet too (it is visible on the register screenshot), and they add and reassign kiosks and handhelds themselves. The “Device licensing and replacement” block is not in a manager's cabinet at all, and the “Working-device slot” column stays empty for them. The device-card screenshot was taken as an administrator — in a manager's cabinet the side menu is shorter.",
           },
         ],
       },
@@ -455,7 +492,7 @@ export const CABINET_SHIFT_PLANNING_CONTENT = {
           {
             kind: "step",
             title: "Check that the product can be selected",
-            text: "Open “Select a product”. A draft product is labeled “draft -- unavailable”, and a product marked as not in use is labeled “not in use”. Both are shown dimmed and cannot be picked: first bring the product in the catalog to a working state, or clear the “Do not use” checkbox on its card.",
+            text: "Open “Select a product”. A draft product is labeled “draft — unavailable”, and a product marked as not in use is labeled “not in use”. Both are shown dimmed and cannot be picked: first bring the product in the catalog to a working state, or clear the “Do not use” checkbox on its card.",
             image: { id: "shift-product-options", caption: "Unavailable products in the picker" },
           },
           {
@@ -483,7 +520,7 @@ export const CABINET_SHIFT_PLANNING_CONTENT = {
           },
           {
             kind: "paragraph",
-            text: "Choosing a product fills in values from its card: the counterparty in “For counterparty (tolling)” and the box and pallet capacities. This is neither a bug nor an accident — it is how the cabinet saves you typing. The prefilled values can be changed: what counts is what is saved in the shift, not what is written on the product.",
+            text: "Choosing a product fills in values from its card: the counterparty in “For counterparty (tolling)”, the box capacity and the number of boxes per pallet. Stacking onto pallets is not switched on by that: it is turned on separately, among the aggregation parameters. This is neither a bug nor an accident — it is how the cabinet saves you typing. The prefilled values can be changed: what counts is what is saved in the shift, not what is written on the product.",
           },
           {
             kind: "unordered-list",
@@ -520,7 +557,7 @@ export const CABINET_SHIFT_PLANNING_CONTENT = {
               {
                 term: "Whose numbers go on the boxes",
                 detail:
-                  "The “SSCC issuer” field, “Our organization” by default. The hint on the form: “Decides whose numbers appear on the boxes -- not the same question as which counterparty the goods are for.”",
+                  "The “SSCC issuer” field, “Our organization” by default. The hint on the form: “Decides whose numbers appear on the boxes — not the same question as which counterparty the goods are for.”",
               },
             ],
           },
@@ -542,7 +579,7 @@ export const CABINET_SHIFT_PLANNING_CONTENT = {
           {
             kind: "step",
             title: "Fill in the aggregation parameters",
-            text: "Choose “Aggregation” — a section with the same name appears in the form. “Box capacity, units” is filled in from the product. The “Use pallets” checkbox adds the “Pallet capacity, units” field: while the checkbox is clear, that field is not there. In the “Templates” section choose the “Box label template” — aggregation requires it, and the shift will not save without it.",
+            text: "Choose “Aggregation” — a section with the same name appears in the form. “Box capacity, units” is filled in from the product. In the “Templates” section choose the “Box label template” — aggregation requires it, and the shift will not save without it.",
             image: {
               id: "shift-aggregation",
               caption: "The “Templates” and “Aggregation” sections",
@@ -553,6 +590,21 @@ export const CABINET_SHIFT_PLANNING_CONTENT = {
             kind: "callout",
             tone: "info",
             text: "There is no “Aggregation” section while “Validation” is selected — that is not a display glitch. If you cannot find the box capacity, check the mode first.",
+          },
+          {
+            kind: "step",
+            title: "Turn pallets on if the shift builds pallets",
+            text: "The “Use pallets” checkbox in the “Aggregation” section opens two fields; while the checkbox is clear, they are not there. “Boxes per pallet” counts boxes, not product units, and the cabinet says so plainly: “How many closed boxes make up one full pallet.” “Pallet label template” can be left on “Organization default” — the hint spells out the order: “Blank — the product category's default is used, then the organization's.”",
+            image: {
+              id: "shift-pallets",
+              caption: "The “Aggregation” section with pallets turned on",
+            },
+            expected: "The “Boxes per pallet” and “Pallet label template” fields are shown.",
+          },
+          {
+            kind: "callout",
+            tone: "warning",
+            text: "Not every plan carries pallets, and the rule here is asymmetric. If the subscription does not have the feature, the line under the checkbox reads: “Pallets are not part of the current plan. Add the feature to the subscription to switch them on in a shift.” — and the checkbox cannot be set. A shift planned with pallets while the feature was still in force keeps a usable checkbox, but only for switching them off: “Pallets are not part of the current plan. This shift was planned with pallets: you can switch them off, but not back on.” So do not clear the checkbox in such a shift until you are sure the pallets are really not needed: you will not get them back.",
           },
           {
             kind: "step",
@@ -644,12 +696,12 @@ export const CABINET_SHIFT_PLANNING_CONTENT = {
               {
                 term: "The product cannot be selected",
                 detail:
-                  "It is either a draft — the “draft -- unavailable” label — or marked as not in use: the “not in use” label. Bring the product card in the catalog to a working state, or clear the “Do not use” checkbox.",
+                  "It is either a draft — the “draft — unavailable” label — or marked as not in use: the “not in use” label. Bring the product card in the catalog to a working state, or clear the “Do not use” checkbox.",
               },
               {
-                term: "I cannot find the box and pallet capacities",
+                term: "I cannot find the box and pallet fields",
                 detail:
-                  "The “Aggregation” section is only shown in “Aggregation” mode. The “Pallet capacity, units” field appears once the “Use pallets” checkbox is set.",
+                  "The “Aggregation” section is only shown in “Aggregation” mode. The “Boxes per pallet” field appears once the “Use pallets” checkbox is set.",
               },
               {
                 term: "The shift will not save in aggregation mode",
@@ -669,7 +721,7 @@ export const CABINET_SHIFT_PLANNING_CONTENT = {
               {
                 term: "I cannot assign a line to a station",
                 detail:
-                  "The devices section is read-only for a manager. A cabinet administrator assigns the line.",
+                  "A station's line is assigned by a cabinet administrator or owner: that action requires the right to manage device credentials. A production manager assigns the line of a kiosk or a handheld themselves.",
               },
               {
                 term: "I edited an active shift but the station still runs the old way",
