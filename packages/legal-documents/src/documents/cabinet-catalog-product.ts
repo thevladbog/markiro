@@ -5,7 +5,7 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
     locale: "ru",
     title: "Кабинет: каталог продукции и карточка товара",
     summary:
-      "Инструкция менеджера: как завести товар в каталоге, довести карточку до статуса «Активен», добавить фотографию и вывести товар из оборота.",
+      "Инструкция менеджера: как завести товар в каталоге, довести карточку до статуса «Активен», проверить готовность к операциям, подтвердить категорию Национального каталога и заполнить характеристики, добавить фотографию и вывести товар из оборота.",
     sections: [
       {
         id: "purpose",
@@ -19,8 +19,9 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
             kind: "unordered-list",
             items: [
               "Группа продукции нужна станции и подбору шаблона этикетки.",
-              "Вместимости короба и поддона задают, сколько единиц уходит в упаковку при агрегации.",
+              "Вместимость короба и число коробов на паллете задают, сколько уходит в упаковку при агрегации.",
               "«Наименование для печати» — короткое имя, которое попадает на этикетку вместо длинного полного названия.",
+              "Категория Национального каталога и её характеристики нужны не для смены, а для заказа кодов и ввода товара в оборот.",
             ],
           },
           {
@@ -37,7 +38,7 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
           {
             kind: "step",
             title: "Откройте раздел «Каталог»",
-            text: "В боковом меню кабинета выберите «Каталог» в группе «Справочники». Таблица показывает ГТИН, фото, название, группу, вместимость короба, статус карточки и сведения Честного знака; в столбце «Действия» — кнопки «Изменить» и «Удалить».",
+            text: "В боковом меню кабинета выберите «Каталог» в группе «Справочники». Таблица показывает ГТИН, фото, название, группу, вместимость короба, статус карточки и сведения Честного знака; в столбце «Действия» — кнопки «Изменить» и «Удалить». Название товара — ссылка: щелчок по нему открывает карточку так же, как кнопка «Изменить».",
             image: {
               id: "catalog-list",
               caption: "Каталог продукции: три товара в разных статусах",
@@ -58,7 +59,7 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
               },
               {
                 term: "Не используется",
-                detail: "Товар выведен из оборота вручную галочкой «Не использовать» (раздел 7).",
+                detail: "Товар выведен из оборота вручную галочкой «Не использовать» (раздел 9).",
               },
             ],
           },
@@ -81,7 +82,7 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
           {
             kind: "step",
             title: "Создайте карточку",
-            text: "Нажмите «Добавить продукт». Откроется панель «Новый продукт» с четырьмя разделами: «Основное», «Агрегация и цена», «Фотография» и «Значения по умолчанию».",
+            text: "Нажмите «Добавить продукт». Откроется панель «Новый продукт» с четырьмя разделами: «Основное», «Агрегация и цена», «Фотография» и «Значения по умолчанию». Вкладок в форме нового товара нет: всё, что касается Национального каталога, появляется только у сохранённой карточки.",
             image: { id: "product-new", caption: "Новая карточка товара: раздел «Основное»" },
           },
           {
@@ -111,7 +112,7 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
           {
             kind: "step",
             title: "Заполните недостающие поля",
-            text: "В черновике наверху карточки видна плашка «Черновик — заполните группу и вместимости, чтобы запускать смены». Выберите «Группа продукции» из справочника Честного знака и укажите «Вместимость короба, шт» и «Вместимость поддона, шт» — целыми числами больше нуля.",
+            text: "В черновике наверху карточки видна плашка «Черновик — заполните группу и вместимости, чтобы запускать смены». Выберите «Группа продукции» из справочника Честного знака и укажите «Вместимость короба, шт» и «Коробов на паллете» — целыми числами больше нуля. Второе поле считает короба, а не единицы товара, о чём кабинет напоминает подсказкой «Количество коробов, а не единиц товара.».",
             image: {
               id: "product-draft-banner",
               caption: "Черновик: группа и вместимости не заполнены",
@@ -120,7 +121,7 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
           {
             kind: "step",
             title: "Сохраните карточку",
-            text: "Нажмите «Сохранить». Остальные поля раздела «Агрегация и цена» — «Цена за шт., ₽», «Код ЕГАИС» и «Срок годности, дней» — необязательны и на статус не влияют.",
+            text: "Нажмите «Сохранить». Остальные поля раздела «Агрегация и цена» — «Цена за шт., ₽» и «Срок годности, дней» — необязательны и на статус не влияют. У сохранённой карточки над полями появляются две вкладки — «Основное» и «Честный знак»: готовность, категория и характеристики живут на второй (разделы 5 и 6).",
             image: {
               id: "product-active",
               caption: "Заполненная карточка: группа и обе вместимости на месте",
@@ -136,8 +137,168 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
         ],
       },
       {
+        id: "readiness",
+        heading: "5. Готовность к операциям",
+        blocks: [
+          {
+            kind: "paragraph",
+            text: "Статус карточки и готовность к операциям — разные проверки. Статус («Активен» или «Черновик») отвечает ровно за одно: можно ли выбрать товар при планировании смены. Готовность кабинет считает отдельно для каждой из четырёх операций и проверяет её по сохранённым данным карточки, а не по тому, что набрано в открытой форме. Поэтому товар со статусом «Активен» вполне может быть не готов к заказу кодов или к вводу в оборот.",
+          },
+          {
+            kind: "step",
+            title: "Откройте вкладку «Честный знак»",
+            text: "Откройте товар из списка. У сохранённой карточки над полями две вкладки: «Основное» — поля самого товара, «Честный знак» — всё, что связано с Национальным каталогом. Готовность, категория, характеристики и коды ЕГАИС находятся только на второй вкладке, под основными полями их нет.",
+          },
+          {
+            kind: "step",
+            title: "Прочитайте четыре измерения",
+            text: "Блок «Готовность» показывает четыре измерения — «Производство», «Заказ кодов», «Ввод в оборот» и «ЕГАИС» — и состояние каждого: «Готово», «Не готово», «Нужна актуализация» или «Не применяется». Под измерением перечислено, чего не хватает; бледные строки ниже — рекомендации: они операцию не блокируют. «Не применяется» означает, что операция к этой товарной группе не относится — так подписан «ЕГАИС» у безалкогольного товара.",
+            image: {
+              id: "product-readiness",
+              caption: "Готовность по операциям: производство готово, заказ кодов — нет",
+            },
+            expected: "Видно, какая операция уже доступна, а какая ждёт данных.",
+          },
+          {
+            kind: "definition-list",
+            items: [
+              {
+                term: "Не выбрана товарная группа",
+                detail:
+                  "Строка «Выберите товарную группу ЧЗ.» — без группы не готово «Производство», а значит, и смену запустить нельзя.",
+              },
+              {
+                term: "Не указано количество в коробе или на паллете",
+                detail:
+                  "Строки «Укажите количество в коробе.» и «Укажите количество на паллете.» относятся к полям раздела «Агрегация и цена» на вкладке «Основное».",
+              },
+              {
+                term: "Не подтверждена категория",
+                detail:
+                  "Строка «Подтвердите категорию Национального каталога.» — пока категория не закреплена, «Заказ кодов» и «Ввод в оборот» остаются в состоянии «Не готово» (раздел 6).",
+              },
+              {
+                term: "Доступна новая схема категории",
+                detail:
+                  "Строка «Доступна новая схема категории. Проверьте смену категории и перенос значений.» — карточка закреплена за устаревшей версией схемы, и операция переходит в «Нужна актуализация», пока вы не пройдёте смену категории.",
+              },
+              {
+                term: "Не заполнены характеристики",
+                detail:
+                  "Строки вида «Заполните: Состав.» перечисляют обязательные характеристики категории; строки вида «Рекомендуется заполнить: Упаковка.» — рекомендованные, их отсутствие операцию не блокирует.",
+              },
+              {
+                term: "Не хватает кодов ЕГАИС",
+                detail:
+                  "Строки «Добавьте код АП ЕГАИС.» и «Выберите основной код АП ЕГАИС.» появляются только у товарной группы, продукция которой учитывается в ЕГАИС (раздел 6).",
+              },
+            ],
+          },
+          {
+            kind: "callout",
+            tone: "info",
+            text: "Готовность считается по сохранённым данным. Пока вы не нажали «Сохранить», правки, набранные в форме, на неё не влияют.",
+          },
+        ],
+      },
+      {
+        id: "category",
+        heading: "6. Категория и характеристики",
+        blocks: [
+          {
+            kind: "paragraph",
+            text: "Товарная группа Честного знака задаёт вид товара крупно, а категория Национального каталога уточняет её и приносит набор характеристик, которые Честный знак ждёт при заказе кодов и вводе в оборот. Категория, характеристики и коды ЕГАИС находятся на вкладке «Честный знак» и сохраняются отдельно от основных полей товара, каждый блок своей кнопкой.",
+          },
+          {
+            kind: "callout",
+            tone: "info",
+            text: "Если в форме есть несохранённые правки «ГТИН» или «Группа продукции», кабинет блокирует эти блоки и показывает подсказку «Сначала сохраните основные данные товара, затем изменяйте категорию и характеристики.».",
+          },
+          {
+            kind: "step",
+            title: "Проверьте закреплённую категорию",
+            text: "Блок «Категория и классификация» показывает, за какой категорией закреплён товар: «Категория Национального каталога», коды «ТН ВЭД» и «ОКПД2», а также «Источник» — откуда значения попали в карточку. У карточки, принятой из Честного знака, источником указан «Национальный каталог». Кнопка «Сменить категорию» открывает мастер смены.",
+            image: {
+              id: "product-category",
+              caption: "Категория и классификация закреплённой карточки",
+            },
+          },
+          {
+            kind: "paragraph",
+            text: "У карточки без категории на том же месте стоит кнопка «Выбрать категорию», а вместо кодов — объяснение, что категорию можно перенести из карточки Честного знака или выбрать вручную. Если для товарной группы категории ещё не настроены, кабинет говорит об этом отдельным сообщением: основные поля товара при этом сохранить можно.",
+          },
+          {
+            kind: "step",
+            title: "Смените категорию через перенос значений",
+            text: "Нажмите «Сменить категорию» (на пустой карточке — «Выбрать категорию»), выберите категорию в списке и при необходимости поправьте «ТН ВЭД» и «ОКПД2». Если выбранная категория не сопоставлена с товарной группой однозначно, кабинет просит подтвердить выбор флажком «Подтверждаю, что категория подходит выбранной товарной группе ЧЗ.». Кнопка «Проверить изменения» ничего не применяет: она открывает экран «Проверьте перенос значений».",
+          },
+          {
+            kind: "unordered-list",
+            items: [
+              "«Совместимо с новой категорией» — значение переносится как есть.",
+              "«Будет преобразовано в формат новой категории» — значение переносится с приведением формата или единицы измерения.",
+              "«Не применяется в новой категории; останется в истории» — такой характеристики в новой схеме нет.",
+              "«Требует ручного заполнения в новой категории; текущее значение останется в истории» — характеристика есть, но значение автоматически не переносится.",
+              "«Коды ЕГАИС сохраняются» — список кодов смена категории не трогает.",
+            ],
+          },
+          {
+            kind: "paragraph",
+            text: "Флажками отмечают то, что нужно перенести; кабинет предупреждает об этом строкой «Отмеченные значения перейдут в новую категорию. Остальные сохранятся в истории и перестанут участвовать в текущей готовности.». Смену применяет кнопка «Подтвердить категорию», и только после неё готовность пересчитывается по новой схеме.",
+          },
+          {
+            kind: "step",
+            title: "Заполните характеристики категории",
+            text: "Блок «Характеристики категории» группирует поля по тому, зачем они нужны: сначала обязательные, затем рекомендованные и дополнительные. Пустой список выбора показывает «Не указано». У части характеристик единицу измерения выбирают рядом со значением; единицы приходят из справочника Национального каталога и не переводятся, поэтому на английском экране объём остаётся подписан по-русски. Под полем кабинет показывает уже принятое значение и его источник — например «Национальный каталог». Заполнив поля, нажмите «Сохранить характеристики».",
+            image: {
+              id: "product-attributes",
+              caption: "Характеристики категории, сгруппированные по требованию",
+            },
+            expected: "После сохранения закрытые характеристики уходят из причин в блоке готовности.",
+          },
+          {
+            kind: "definition-list",
+            items: [
+              {
+                term: "Обязательно для заказа кодов",
+                detail:
+                  "Без такой характеристики измерение «Заказ кодов» остаётся в состоянии «Не готово».",
+              },
+              {
+                term: "Обязательно для ввода в оборот",
+                detail:
+                  "То же самое для «Ввод в оборот»: заказать коды можно, а ввести товар в оборот — нет.",
+              },
+              {
+                term: "Рекомендуется",
+                detail:
+                  "Характеристика попадает в бледный список рекомендаций под измерением и операцию не блокирует.",
+              },
+              {
+                term: "Дополнительно",
+                detail:
+                  "Характеристика на готовность не влияет; заполняйте её, если значение известно.",
+              },
+            ],
+          },
+          {
+            kind: "step",
+            title: "Добавьте коды АП ЕГАИС",
+            text: "Блок «Коды АП ЕГАИС» кабинет показывает только для товарной группы, продукция которой учитывается в ЕГАИС, и только после того, как категория закреплена; у остальных групп измерение «ЕГАИС» в готовности подписано «Не применяется». Кнопка «Добавить код АП ЕГАИС» добавляет строку: каждый код — девятнадцать цифр, повторы в списке запрещены. Если кодов несколько, один отмечают как «Основной код АП ЕГАИС». Список сохраняется кнопкой «Сохранить коды ЕГАИС», отдельно от характеристик.",
+          },
+          {
+            kind: "paragraph",
+            text: "Пока категория у такого товара не закреплена, в разделе «Агрегация и цена» остаётся одно поле «Код ЕГАИС» — прежний способ хранить единственный код. После подтверждения категории поле уходит из формы, и готовность считается по списку «Коды АП ЕГАИС»; пока список пуст, учитывается сохранённое значение старого поля.",
+          },
+          {
+            kind: "paragraph",
+            text: "Внизу вкладки «Честный знак» есть раздел «Национальный каталог» со ссылкой «Открыть данные ЧЗ»: там видно, что прислал Честный знак, и предложения по обновлению карточки. Эта часть работы описана в отдельной инструкции по загрузке из Национального каталога.",
+          },
+        ],
+      },
+      {
         id: "image",
-        heading: "5. Фотография",
+        heading: "7. Фотография",
         blocks: [
           {
             kind: "step",
@@ -149,13 +310,13 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
           {
             kind: "callout",
             tone: "info",
-            text: "Пока снимка нет, карточка показывает «Фотография не добавлена», а в списке в столбце «Фото» стоит прочерк. На статус карточки фотография не влияет.",
+            text: "Пока снимка нет, карточка показывает «Фотография не добавлена», а в списке в столбце «Фото» стоит прочерк. На статус карточки и на готовность фотография не влияет.",
           },
         ],
       },
       {
         id: "defaults",
-        heading: "6. Значения по умолчанию",
+        heading: "8. Значения по умолчанию",
         blocks: [
           {
             kind: "step",
@@ -170,7 +331,7 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
       },
       {
         id: "retire",
-        heading: "7. Вывод товара из оборота",
+        heading: "9. Вывод товара из оборота",
         blocks: [
           {
             kind: "paragraph",
@@ -201,7 +362,7 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
       },
       {
         id: "external",
-        heading: "8. Товары из внешних источников",
+        heading: "10. Товары из внешних источников",
         blocks: [
           {
             kind: "paragraph",
@@ -224,7 +385,7 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
       },
       {
         id: "troubleshooting",
-        heading: "9. Частые вопросы",
+        heading: "11. Частые вопросы",
         blocks: [
           {
             kind: "definition-list",
@@ -240,6 +401,11 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
                   "Проверьте статус в каталоге: черновик недоступен, пока не заполнены группа и вместимости; товар с галочкой «Не использовать» скрыт из выбора намеренно.",
               },
               {
+                term: "Товар активен, но коды заказать нельзя",
+                detail:
+                  "Статус карточки и готовность — разные проверки. Откройте вкладку «Честный знак» и прочитайте блок «Готовность»: чаще всего не подтверждена категория или не заполнены обязательные характеристики (разделы 5 и 6).",
+              },
+              {
                 term: "Владелец ГТИН не определён",
                 detail:
                   "Код не найден ни за вашей организацией, ни за контрагентами. Проверьте его перед сохранением: чужой ГТИН в карточке приведёт к отбраковке кодов на линии.",
@@ -252,7 +418,7 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
               {
                 term: "В столбце «Честный знак» нет сведений",
                 detail:
-                  "Карточка не связана с Национальным каталогом или сведения ещё не получены. Связывание описано в инструкции по загрузке из Национального каталога.",
+                  "Карточка не связана с Национальным каталогом или сведения ещё не получены. Связь с карточкой Честного знака и готовность к операциям — разные вещи: товар может быть связан и не готов, а категорию для готовности можно выбрать и вручную. Связывание описано в инструкции по загрузке из Национального каталога.",
               },
             ],
           },
@@ -268,7 +434,7 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
     locale: "en",
     title: "Cabinet: the product catalog and the product card",
     summary:
-      "This is an informational translation. The matching Russian revision is authoritative. Manager's guide: adding a product to the catalog, completing its card so it reaches the active status, adding a photo, and retiring a product.",
+      "This is an informational translation. The matching Russian revision is authoritative. Manager's guide: adding a product to the catalog, completing its card so it reaches the active status, checking readiness per operation, confirming the National Catalog category and filling in its attributes, adding a photo, and retiring a product.",
     sections: [
       {
         id: "purpose",
@@ -282,8 +448,9 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
             kind: "unordered-list",
             items: [
               "The product group is needed by the station and by label-template selection.",
-              "Box and pallet capacities decide how many units go into a package during aggregation.",
+              "The box capacity and the number of boxes per pallet decide what goes into a package during aggregation.",
               "“Print name” is the short name that goes on the label instead of a long full name.",
+              "The National Catalog category and its attributes are needed not for a shift but for ordering codes and putting the product into circulation.",
             ],
           },
           {
@@ -294,7 +461,7 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
           {
             kind: "callout",
             tone: "info",
-            text: "The Chestny Znak product-group directory is maintained in Russian and the cabinet shows its names as received, so group names stay Russian on an English screen. Everything else on these screens follows the interface language.",
+            text: "The Chestny Znak product-group directory is maintained in Russian and the cabinet shows its names as received, so group names stay Russian on an English screen. National Catalog units of measure behave the same way. Everything else on these screens follows the interface language.",
           },
         ],
       },
@@ -305,7 +472,7 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
           {
             kind: "step",
             title: "Open the “Catalog” section",
-            text: "In the cabinet side menu pick “Catalog” under “Reference data”. The table shows GTIN, photo, name, group, per-box capacity, the card status and Chestny Znak information; the “Actions” column holds “Edit” and “Delete”.",
+            text: "In the cabinet side menu pick “Catalog” under “Reference data”. The table shows GTIN, photo, name, group, per-box capacity, the card status and Chestny Znak information; the “Actions” column holds “Edit” and “Delete”. The product name is a link: clicking it opens the card just as “Edit” does.",
             image: {
               id: "catalog-list",
               caption: "Product catalog: three products in different statuses",
@@ -327,7 +494,7 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
               {
                 term: "Not in use",
                 detail:
-                  "The product was retired by hand with the “Do not use” checkbox (section 7).",
+                  "The product was retired by hand with the “Do not use” checkbox (section 9).",
               },
             ],
           },
@@ -350,7 +517,7 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
           {
             kind: "step",
             title: "Create the card",
-            text: "Press “Add product”. The “New product” panel opens with four sections: “Basic”, “Aggregation and price”, “Product photo” and “Defaults”.",
+            text: "Press “Add product”. The “New product” panel opens with four sections: “Basic”, “Aggregation and price”, “Product photo” and “Defaults”. The new-product form has no tabs: everything that concerns the National Catalog appears only on a saved card.",
             image: { id: "product-new", caption: "A new product card: the “Basic” section" },
           },
           {
@@ -380,7 +547,7 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
           {
             kind: "step",
             title: "Fill in what is missing",
-            text: "A draft carries the banner “Draft — fill in the group and capacities to run shifts” at the top of the card. Pick “Product group” from the Chestny Znak directory and set “Box capacity, units” and “Pallet capacity, units” as whole numbers above zero.",
+            text: "A draft carries the banner “Draft — fill in the group and capacities to run shifts” at the top of the card. Pick “Product group” from the Chestny Znak directory and set “Box capacity, units” and “Boxes per pallet” as whole numbers above zero. The second field counts boxes rather than product units, which the cabinet repeats in the hint “A count of boxes, not of product units.”.",
             image: {
               id: "product-draft-banner",
               caption: "A draft: the group and the capacities are empty",
@@ -389,7 +556,7 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
           {
             kind: "step",
             title: "Save the card",
-            text: "Press “Save”. The remaining fields of “Aggregation and price” — “Price per unit, ₽”, “EGAIS code” and “Shelf life, days” — are optional and do not affect the status.",
+            text: "Press “Save”. The remaining fields of “Aggregation and price” — “Price per unit, ₽” and “Shelf life, days” — are optional and do not affect the status. A saved card gains two tabs above the fields, “Basic” and “Chestny ZNAK”: readiness, the category and the attributes live on the second one (sections 5 and 6).",
             image: {
               id: "product-active",
               caption: "A complete card: the group and both capacities are in place",
@@ -405,8 +572,169 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
         ],
       },
       {
+        id: "readiness",
+        heading: "5. Readiness per operation",
+        blocks: [
+          {
+            kind: "paragraph",
+            text: "The card status and readiness are two different checks. The status — “Active” or “Draft” — answers exactly one question: can the product be picked when planning a shift. Readiness is computed separately for each of four operations and against the saved card rather than against what is typed into an open form. So a product with the “Active” status can still be unready for ordering codes or for circulation.",
+          },
+          {
+            kind: "step",
+            title: "Open the “Chestny ZNAK” tab",
+            text: "Open a product from the list. A saved card carries two tabs above the fields: “Basic” for the product's own fields and “Chestny ZNAK” for everything tied to the National Catalog. Readiness, the category, the attributes and the EGAIS codes live on the second tab only; they are not below the basic fields.",
+          },
+          {
+            kind: "step",
+            title: "Read the four dimensions",
+            text: "The “Readiness” block shows four dimensions — “Production”, “Code ordering”, “Putting into circulation” and “EGAIS” — and the state of each: “Ready”, “Not ready”, “Update required” or “Not applicable”. Under a dimension the cabinet lists what is missing; the paler lines below are recommendations and do not block the operation. “Not applicable” means the operation does not concern this product group — that is how “EGAIS” is marked for a non-alcoholic product.",
+            image: {
+              id: "product-readiness",
+              caption: "Readiness per operation: production is ready, code ordering is not",
+            },
+            expected: "It is visible which operation is already available and which waits for data.",
+          },
+          {
+            kind: "definition-list",
+            items: [
+              {
+                term: "The product group is not selected",
+                detail:
+                  "The line “Select a Chestny ZNAK product group.” — without a group “Production” is not ready, so no shift can run either.",
+              },
+              {
+                term: "The box or pallet count is missing",
+                detail:
+                  "The lines “Enter the box capacity.” and “Enter the pallet capacity.” point at the fields of “Aggregation and price” on the “Basic” tab.",
+              },
+              {
+                term: "The category is not confirmed",
+                detail:
+                  "The line “Confirm the National Catalog category.” — until a category is pinned, “Code ordering” and “Putting into circulation” stay “Not ready” (section 6).",
+              },
+              {
+                term: "A newer category schema is available",
+                detail:
+                  "The line “A newer category schema is available. Review the category change and value transfer.” — the card is pinned to an outdated schema version, and the operation turns to “Update required” until you go through the category change.",
+              },
+              {
+                term: "Category attributes are incomplete",
+                detail:
+                  "Lines such as “Complete: Composition.” list the mandatory category attributes; lines such as “Recommended: Package.” list the recommended ones, whose absence does not block the operation.",
+              },
+              {
+                term: "EGAIS codes are missing",
+                detail:
+                  "The lines “Add an EGAIS AP code.” and “Select the primary EGAIS AP code.” appear only for the product group whose goods are tracked in EGAIS (section 6).",
+              },
+            ],
+          },
+          {
+            kind: "callout",
+            tone: "info",
+            text: "Readiness is computed from saved data. Until you press “Save”, edits typed into the form do not change it.",
+          },
+        ],
+      },
+      {
+        id: "category",
+        heading: "6. The category and its attributes",
+        blocks: [
+          {
+            kind: "paragraph",
+            text: "The Chestny Znak product group describes the kind of product coarsely; the National Catalog category refines it and brings the set of attributes Chestny Znak expects when codes are ordered and when the product is put into circulation. The category, the attributes and the EGAIS codes sit on the “Chestny ZNAK” tab and are saved separately from the basic product fields, each block with its own button.",
+          },
+          {
+            kind: "callout",
+            tone: "info",
+            text: "While the form holds unsaved edits to “GTIN” or “Product group”, the cabinet locks these blocks and shows the hint “Save the main product details before editing its category and attributes.”.",
+          },
+          {
+            kind: "step",
+            title: "Check the pinned category",
+            text: "The “Category and classification” block shows which category the product is pinned to: “National Catalog category”, the “TN VED” and “OKPD2” codes, and “Source” — where the values came from. A card accepted from Chestny Znak names “National Catalog” as its source. The “Change category” button opens the change wizard.",
+            image: {
+              id: "product-category",
+              caption: "Category and classification of a pinned card",
+            },
+          },
+          {
+            kind: "paragraph",
+            text: "A card without a category carries a “Select category” button in the same place, and instead of the codes an explanation that the category can be taken from the Chestny Znak card or picked by hand. If no categories are configured for the product group yet, the cabinet says so in a separate message; the basic product fields can still be saved.",
+          },
+          {
+            kind: "step",
+            title: "Change the category through value transfer",
+            text: "Press “Change category” — on an empty card, “Select category” — pick a category from the list and correct “TN VED” and “OKPD2” if needed. When the chosen category is not matched to the product group unambiguously, the cabinet asks you to confirm the choice with the “I confirm this category matches the selected Chestny ZNAK product group.” checkbox. The “Review changes” button applies nothing: it opens the “Review value transfer” screen.",
+          },
+          {
+            kind: "unordered-list",
+            items: [
+              "“Compatible with the new category” — the value transfers as it is.",
+              "“Will be converted to the new category format” — the value transfers with its format or unit converted.",
+              "“Not applicable to the new category; kept in history” — the new schema has no such attribute.",
+              "“Requires manual entry in the new category; current value kept in history” — the attribute exists, but the value does not transfer automatically.",
+              "“EGAIS codes are preserved” — a category change does not touch the code list.",
+            ],
+          },
+          {
+            kind: "paragraph",
+            text: "Checkboxes mark what should move, which the cabinet states in the line “Selected values will transfer to the new category. Others will remain in history and no longer count towards current readiness.”. The “Confirm category” button applies the change, and only then is readiness recomputed against the new schema.",
+          },
+          {
+            kind: "step",
+            title: "Fill in the category attributes",
+            text: "The “Category attributes” block groups the fields by what they are needed for: the mandatory ones first, then the recommended and the additional ones. An empty picker reads “Not specified”. Some attributes carry a unit chosen next to the value; units come from the National Catalog registry and are not translated, so the volume unit still reads л on an English screen. Under a field the cabinet prints the value already accepted and its source — for example “National Catalog”. When the fields are filled in, press “Save attributes”.",
+            image: {
+              id: "product-attributes",
+              caption: "Category attributes grouped by their requirement",
+            },
+            expected:
+              "After the save the closed attributes disappear from the reasons in the readiness block.",
+          },
+          {
+            kind: "definition-list",
+            items: [
+              {
+                term: "Required for code ordering",
+                detail:
+                  "Without such an attribute the “Code ordering” dimension stays “Not ready”.",
+              },
+              {
+                term: "Required for circulation",
+                detail:
+                  "The same for “Putting into circulation”: codes can be ordered, but the product cannot enter circulation.",
+              },
+              {
+                term: "Recommended",
+                detail:
+                  "The attribute goes into the pale list of recommendations under the dimension and does not block the operation.",
+              },
+              {
+                term: "Additional",
+                detail:
+                  "The attribute does not affect readiness; fill it in when the value is known.",
+              },
+            ],
+          },
+          {
+            kind: "step",
+            title: "Add the EGAIS AP codes",
+            text: "The cabinet shows the “EGAIS AP codes” block only for the product group whose goods are tracked in EGAIS, and only once a category is pinned; for the other groups the “EGAIS” dimension is marked “Not applicable”. The “Add EGAIS AP code” button adds a row: every code is nineteen digits and repeats are rejected. When there is more than one code, one of them is marked as the “Primary EGAIS AP code”. The list is saved by “Save EGAIS codes”, separately from the attributes.",
+          },
+          {
+            kind: "paragraph",
+            text: "While such a product has no pinned category, “Aggregation and price” keeps a single “EGAIS code” field — the former way of storing one code. Once the category is confirmed the field leaves the form and readiness is computed from the “EGAIS AP codes” list; while that list is empty, the saved value of the old field is used.",
+          },
+          {
+            kind: "paragraph",
+            text: "At the bottom of the “Chestny ZNAK” tab there is a “National Catalog” section with an “Open Chestny ZNAK data” link: it shows what Chestny Znak sent and the proposed card updates. That part of the work is covered by the separate instruction on importing from the National Catalog.",
+          },
+        ],
+      },
+      {
         id: "image",
-        heading: "5. Photo",
+        heading: "7. Photo",
         blocks: [
           {
             kind: "step",
@@ -418,13 +746,13 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
           {
             kind: "callout",
             tone: "info",
-            text: "Until a picture is uploaded the card shows “No photo added” and the list prints a dash in the “Photo” column. A photo does not affect the card status.",
+            text: "Until a picture is uploaded the card shows “No photo added” and the list prints a dash in the “Photo” column. A photo affects neither the card status nor readiness.",
           },
         ],
       },
       {
         id: "defaults",
-        heading: "6. Default values",
+        heading: "8. Default values",
         blocks: [
           {
             kind: "step",
@@ -436,7 +764,7 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
       },
       {
         id: "retire",
-        heading: "7. Retiring a product",
+        heading: "9. Retiring a product",
         blocks: [
           {
             kind: "paragraph",
@@ -464,7 +792,7 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
       },
       {
         id: "external",
-        heading: "8. Products from external sources",
+        heading: "10. Products from external sources",
         blocks: [
           {
             kind: "paragraph",
@@ -487,7 +815,7 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
       },
       {
         id: "troubleshooting",
-        heading: "9. Common questions",
+        heading: "11. Common questions",
         blocks: [
           {
             kind: "definition-list",
@@ -503,6 +831,11 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
                   "Check its status in the catalog: a draft stays unavailable until the group and the capacities are filled in, and a product marked “Do not use” is hidden from the picker on purpose.",
               },
               {
+                term: "The product is active but codes cannot be ordered",
+                detail:
+                  "The card status and readiness are different checks. Open the “Chestny ZNAK” tab and read the “Readiness” block: most often the category is not confirmed or the mandatory attributes are incomplete (sections 5 and 6).",
+              },
+              {
                 term: "The GTIN owner could not be determined",
                 detail:
                   "The code was found neither behind your organization nor behind a counterparty. Check it before saving: someone else's GTIN in a card leads to codes being rejected on the line.",
@@ -515,7 +848,7 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
               {
                 term: "The “Chestny ZNAK” column is empty",
                 detail:
-                  "The card is not linked to the National Catalog, or the information has not arrived yet. Linking is covered by the instruction on importing from the National Catalog.",
+                  "The card is not linked to the National Catalog, or the information has not arrived yet. The link to a Chestny Znak card and readiness are different things: a product can be linked and still unready, and a category can also be picked by hand. Linking is covered by the instruction on importing from the National Catalog.",
               },
             ],
           },
