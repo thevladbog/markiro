@@ -3,107 +3,94 @@ import type { HTMLAttributes, ReactNode } from "react";
 import { cn } from "../cn.js";
 
 /**
- * Port of `design-system/components/display/StatusChip.jsx`, remapped from
- * the handoff's `kind` union (ok/error/duplicate/syncing/offline/neutral) to
- * the plan's simplified `status` contract (ok/error/warn/info/neutral).
- * `warn` reuses the handoff's "duplicate" tokens/glyph, `info` reuses
- * "syncing" — same semantic colors, renamed to the generic status vocabulary.
- * Glyphs are the literal characters from `display/display.card.html`
- * (✓ ✕ ⧉ ⟳) rather than the `<Icon>` SVG set, since Task 2 does not port an
- * Icon component. `neutral` gets its own glyph + label so color is never the
- * only signal, even for the "no status" case.
+ * Тег фазы. Глиф и тон выводятся из фазы жизненного цикла и только из неё:
+ * до этого глиф читался из тона (`ok` всегда давал `✓`), а тон назначался
+ * заново на каждой странице, из-за чего активная смена получала галочку, а
+ * отменённый документ — глиф дубликата.
+ *
+ * Словарь фаз и правило серого — в спеке
+ * `docs/superpowers/specs/2026-09-19-tag-semantics-and-geometry-design.md`.
  */
-export type StatusChipStatus = "ok" | "error" | "warn" | "info" | "neutral";
+export type TagPhase =
+  | "draft"
+  | "planned"
+  | "active"
+  | "running"
+  | "done"
+  | "attention"
+  | "duplicate"
+  | "failed"
+  | "retired"
+  | "dismantled"
+  | "none";
 
-export interface StatusChipProps extends Omit<HTMLAttributes<HTMLSpanElement>, "children"> {
-  status: StatusChipStatus;
-  /** Override the default label text (e.g. for translated copy) */
-  label?: ReactNode;
-  /** Override the status glyph; `null` renders a glyphless chip. */
-  glyph?: ReactNode | null;
-  /** Fill with the solid status color (for dark panels) */
-  solid?: boolean;
-}
+/** Кабинет, цех и настенный планшет читают с разного расстояния. */
+export type TagSize = "office" | "floor" | "wall";
 
-interface StatusConfig {
-  fg: string;
-  bg: string;
-  border: string;
+type PhaseTone = "neutral" | "ok" | "done" | "warn" | "error" | "info";
+
+interface PhaseConfig {
   glyph: string;
-  label: string;
+  tone: PhaseTone;
 }
 
-const STATUS: Record<StatusChipStatus, StatusConfig> = {
-  ok: {
-    fg: "var(--ok-fg)",
-    bg: "var(--ok-bg)",
-    border: "var(--ok-border)",
-    glyph: "✓",
-    label: "OK",
-  },
-  error: {
-    fg: "var(--err-fg)",
-    bg: "var(--err-bg)",
-    border: "var(--err-border)",
-    glyph: "✕",
-    label: "Error",
-  },
-  warn: {
-    fg: "var(--warn-fg)",
-    bg: "var(--warn-bg)",
-    border: "var(--warn-border)",
-    glyph: "⧉",
-    label: "Duplicate",
-  },
-  info: {
-    fg: "var(--info-fg)",
-    bg: "var(--info-bg)",
-    border: "var(--info-border)",
-    glyph: "⟳",
-    label: "Syncing",
-  },
-  neutral: {
-    fg: "var(--fg-2)",
-    bg: "var(--surface-panel)",
-    border: "var(--line)",
-    glyph: "–",
-    label: "Neutral",
-  },
+/**
+ * `failed` и `retired` делят глиф `✕` намеренно: форма исхода у них одна —
+ * терминальный отрицательный результат, а различается срочность, и её несёт
+ * тон. Серый допустим только здесь: draft, retired, dismantled, none.
+ */
+const PHASE: Record<TagPhase, PhaseConfig> = {
+  draft: { glyph: "✎", tone: "neutral" },
+  planned: { glyph: "◷", tone: "info" },
+  active: { glyph: "▸", tone: "ok" },
+  running: { glyph: "⟳", tone: "info" },
+  done: { glyph: "✓", tone: "done" },
+  attention: { glyph: "!", tone: "warn" },
+  duplicate: { glyph: "⧉", tone: "warn" },
+  failed: { glyph: "✕", tone: "error" },
+  retired: { glyph: "✕", tone: "neutral" },
+  dismantled: { glyph: "⊘", tone: "neutral" },
+  none: { glyph: "·", tone: "neutral" },
 };
 
-export function StatusChip({
-  status,
-  label,
-  glyph,
-  solid = false,
-  className,
-  style,
-  ...rest
-}: StatusChipProps) {
-  const config = STATUS[status];
-  const resolvedGlyph = glyph === undefined ? config.glyph : glyph;
+export const PHASE_GLYPH: Record<TagPhase, string> = Object.fromEntries(
+  Object.entries(PHASE).map(([phase, config]) => [phase, config.glyph]),
+) as Record<TagPhase, string>;
+
+export const PHASE_TONE: Record<TagPhase, string> = Object.fromEntries(
+  Object.entries(PHASE).map(([phase, config]) => [phase, config.tone]),
+) as Record<TagPhase, string>;
+
+export interface StatusChipProps extends Omit<HTMLAttributes<HTMLSpanElement>, "children"> {
+  phase: TagPhase;
+  /**
+   * Подпись обязательна: тег без слова читается только по цвету, а цвет не
+   * может быть единственным носителем смысла. Переводом занимается вызывающая
+   * сторона — компонент не знает про i18n.
+   */
+  label: ReactNode;
+  size?: TagSize;
+}
+
+export function StatusChip({ phase, label, size = "office", className, ...rest }: StatusChipProps) {
+  const config = PHASE[phase];
 
   return (
     <span
-      className={cn("mk-chip", `mk-chip--${status}`, solid && "mk-chip--solid", className)}
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 6,
-        height: 24,
-        padding: "0 10px",
-        borderRadius: "var(--r-1)",
-        whiteSpace: "nowrap",
-        background: solid ? config.fg : config.bg,
-        color: solid ? "var(--surface-card)" : config.fg,
-        border: `1px solid ${solid ? config.fg : config.border}`,
-        font: "600 12px/1 var(--font-ui)",
-        ...style,
-      }}
+      className={cn(
+        "mk-tag",
+        `mk-tag--${size}`,
+        `mk-tag--${config.tone}`,
+        "mk-chip",
+        `mk-chip--${phase}`,
+        className,
+      )}
       {...rest}
     >
-      {resolvedGlyph !== null ? <span aria-hidden="true">{resolvedGlyph}</span> : null}
-      <span>{label ?? config.label}</span>
+      <span className="mk-tag__glyph" aria-hidden="true">
+        {config.glyph}
+      </span>
+      <span>{label}</span>
     </span>
   );
 }

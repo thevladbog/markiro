@@ -198,24 +198,47 @@ describe("generic document reset", () => {
 });
 
 describe("StatusChip", () => {
+  /**
+   * Инвариант всей затеи. Раньше глиф читался из тона таблицей STATUS, и
+   * активная смена получала галочку только потому, что её тон оказался `ok`.
+   * Теперь фаза выбирает и глиф, и тон, а вызывающая сторона — ни того, ни
+   * другого.
+   */
   it.each([
-    ["ok", "OK"],
-    ["error", "Error"],
-    ["warn", "Duplicate"],
-    ["info", "Syncing"],
-    ["neutral", "Neutral"],
-  ] as const)("renders an icon glyph and label text for status=%s", (status, label) => {
-    render(<StatusChip status={status} />);
+    ["draft", "✎"],
+    ["planned", "◷"],
+    ["active", "▸"],
+    ["running", "⟳"],
+    ["done", "✓"],
+    ["attention", "!"],
+    ["duplicate", "⧉"],
+    ["failed", "✕"],
+    ["retired", "✕"],
+    ["dismantled", "⊘"],
+    ["none", "·"],
+  ] as const)("фаза %s рисует глиф %s", (phase, glyph) => {
+    const { container } = render(<StatusChip phase={phase} label="Подпись" />);
 
-    const chip = screen.getByText(label).closest(".mk-chip");
-    expect(chip).not.toBeNull();
-    // icon glyph must be present alongside the label — never color alone
-    expect(chip!.textContent!.length).toBeGreaterThan(label.length);
+    expect(container.querySelector(".mk-tag__glyph")?.textContent).toBe(glyph);
+    expect(screen.getByText("Подпись")).toBeDefined();
   });
 
-  it("allows overriding the label text", () => {
-    render(<StatusChip status="ok" label="Отправлено" />);
-    expect(screen.getByText("Отправлено")).toBeDefined();
+  it("не даёт серый тон ни одной фазе завершения", () => {
+    const { container } = render(<StatusChip phase="done" label="Закрыта" />);
+    const chip = container.querySelector(".mk-tag");
+
+    expect(chip?.className).toContain("mk-tag--done");
+    expect(chip?.className).not.toContain("mk-tag--neutral");
+  });
+
+  it("сохраняет класс-зацепку mk-chip для накладок приложений", () => {
+    const { container } = render(<StatusChip phase="active" label="Активна" />);
+    expect(container.querySelector(".mk-chip")).not.toBeNull();
+  });
+
+  it("по умолчанию берёт офисный размер", () => {
+    const { container } = render(<StatusChip phase="active" label="Активна" />);
+    expect(container.querySelector(".mk-tag")?.className).toContain("mk-tag--office");
   });
 });
 
