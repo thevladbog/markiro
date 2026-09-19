@@ -11,7 +11,7 @@ import {
   StatusChip,
   Table,
 } from "@markiro/ui";
-import type { StatusChipStatus, TableColumn } from "@markiro/ui";
+import type { TableColumn } from "@markiro/ui";
 import { CABINET_CAPABILITY, formatSsccHri } from "@markiro/domain";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -35,13 +35,8 @@ import {
 } from "../code-search/PlacardFormatModal.js";
 import { usePallets, type PalletDto } from "./pallets-api.js";
 import { ShiftExportsContent } from "./ShiftExportsDialog.js";
+import { SHIFT_MODE_TO_TONE, SHIFT_STATUS_TO_PHASE } from "./index.js";
 import type { ShiftsPanelLocationState } from "./ShiftPanelRoute.js";
-
-const STATUS_TO_CHIP: Record<ShiftDto["status"], StatusChipStatus> = {
-  planned: "info",
-  active: "ok",
-  closed: "neutral",
-};
 
 function formatNumber(value: number, language: string): string {
   return new Intl.NumberFormat(language).format(value);
@@ -246,22 +241,27 @@ function ShiftPallets({ shift }: { shift: ShiftDto }) {
       // Two independent facts, both non-colour-only: a pallet can have been
       // taken apart AND have lost a box before that.
       //
-      // `wrap` on the badges themselves, not just on the column: a badge is
-      // nowrap by default, so «Состав изменился после закрытия» made this
-      // column's min-content the whole string (235px). The table then could
-      // not fit in the 720px "complex" panel, so it clipped the pill mid-word
-      // and squeezed «Закрыта» until the date broke inside the number.
+      // Both are lifecycle facts, not categories, so they render as phase
+      // tags now, not badges: a disassembled pallet gets `dismantled`, a
+      // changed-after-close one gets `attention`. `wrap` on the badges
+      // themselves, not just on the column, used to be how «Состав изменился
+      // после закрытия» avoided making this column's min-content the whole
+      // string (235px) and clipping the pill mid-word inside the 720px
+      // "complex" panel — a tag has no `wrap` prop, so that escape hatch is
+      // gone. It stays fine because a phase tag is short and fixed (glyph +
+      // a few words) and the column relies on
+      // `.mk-shift-details__pallet-status` stacking the two tags vertically
+      // instead of forcing them onto one line.
       render: (row) => (
         <div className="mk-shift-details__pallet-status">
           {row.disassembledAt ? (
-            <Badge tone="neutral" wrap>
-              {t("pages.shifts.pallets.disassembled")}
-            </Badge>
+            <StatusChip phase="dismantled" label={t("pages.shifts.pallets.disassembled")} />
           ) : null}
           {row.contentsChangedAfterClose ? (
-            <Badge tone="warn" wrap>
-              {t("pages.shifts.pallets.contentsChangedAfterClose")}
-            </Badge>
+            <StatusChip
+              phase="attention"
+              label={t("pages.shifts.pallets.contentsChangedAfterClose")}
+            />
           ) : null}
         </div>
       ),
@@ -452,7 +452,7 @@ export function ShiftDetailsPanel({ shift, onClose }: { shift: ShiftDto; onClose
       description={shift.productName ?? undefined}
       status={
         <StatusChip
-          status={STATUS_TO_CHIP[shift.status]}
+          phase={SHIFT_STATUS_TO_PHASE[shift.status]}
           label={t(`pages.shifts.status.${shift.status}`)}
         />
       }
@@ -525,7 +525,9 @@ export function ShiftDetailsPanel({ shift, onClose }: { shift: ShiftDto; onClose
             <div>
               <dt>{t("pages.shifts.table.mode")}</dt>
               <dd>
-                <Badge tone="neutral">{t(`pages.shifts.mode.${shift.mode}`)}</Badge>
+                <Badge tone={SHIFT_MODE_TO_TONE[shift.mode]}>
+                  {t(`pages.shifts.mode.${shift.mode}`)}
+                </Badge>
               </dd>
             </div>
             <div>

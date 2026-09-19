@@ -190,15 +190,19 @@ describe("shift panel pallet table", () => {
 
   /**
    * Layout regression guard. «Состав изменился после закрытия» is 31 characters
-   * of mono type; as a nowrap badge it made the status column's min-content the
-   * whole string, which pushed the table to 731px inside the 669px-wide
-   * "complex" side panel -- the pill was clipped mid-word at the panel edge and
-   * the squeezed «Закрыта» column broke «30.08.2026, 14:20» inside the year.
-   * Both badges must be able to wrap, and they must stack rather than sit as
-   * two adjacent inline pills: adjacent inline pills offer no break opportunity
-   * between them and would re-create the same min-content sum.
+   * of mono type; as a nowrap badge it used to make the status column's
+   * min-content the whole string, which pushed the table to 731px inside the
+   * 669px-wide "complex" side panel -- the pill was clipped mid-word at the
+   * panel edge and the squeezed «Закрыта» column broke «30.08.2026, 14:20»
+   * inside the year. Both facts are lifecycle facts now, so they render as
+   * phase tags (`dismantled`, `attention`) instead of wrapping badges: a tag
+   * has no `wrap` prop and does not need one, because its content is fixed --
+   * a glyph plus a short word -- not a free-form sentence. What still has to
+   * hold is the stack: two independent facts must not sit as adjacent inline
+   * pills with no break opportunity between them, so they still stack
+   * vertically in `.mk-shift-details__pallet-status`.
    */
-  it("wraps and stacks the status badges so they cannot overflow the panel", async () => {
+  it("renders the pallet status facts as phase tags stacked in one column", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(
@@ -219,19 +223,25 @@ describe("shift panel pallet table", () => {
     renderShiftPanel();
 
     const section = within(await screen.findByRole("region", { name: "Паллеты" }));
-    const changed = await section.findByText("Состав изменился после закрытия");
-    const disassembled = section.getByText("Разобрана");
+    const changedLabel = await section.findByText("Состав изменился после закрытия");
+    const disassembledLabel = section.getByText("Разобрана");
 
-    for (const badge of [changed, disassembled]) {
-      expect(badge.className).toContain("mk-badge--wrap");
-      expect(badge.style.whiteSpace).toBe("normal");
-      expect(badge.style.height).toBe("auto");
+    const changedTag = changedLabel.closest(".mk-chip");
+    const disassembledTag = disassembledLabel.closest(".mk-chip");
+    expect(changedTag).not.toBeNull();
+    expect(disassembledTag).not.toBeNull();
+    expect(changedTag?.className).toContain("mk-chip--attention");
+    expect(disassembledTag?.className).toContain("mk-chip--dismantled");
+    // A phase tag is a fixed glyph-plus-word pill, not a free-form sentence,
+    // so it no longer needs to wrap the way a badge did.
+    for (const tag of [changedTag, disassembledTag]) {
+      expect(tag?.className).not.toContain("mk-tag--wrap");
     }
     // Both facts are independent, so both pills show at once -- stacked in one
     // container rather than glued side by side.
-    const stack = changed.closest(".mk-shift-details__pallet-status");
+    const stack = changedTag?.closest(".mk-shift-details__pallet-status");
     expect(stack).not.toBeNull();
-    expect(disassembled.closest(".mk-shift-details__pallet-status")).toBe(stack);
+    expect(disassembledTag?.closest(".mk-shift-details__pallet-status")).toBe(stack);
   });
 
   it("does not query or show pallets for a shift that never used them", async () => {
