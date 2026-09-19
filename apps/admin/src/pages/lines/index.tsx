@@ -134,7 +134,13 @@ export function LinesPage() {
           const online = item.onlineStations > 0;
           return (
             <StatusChip
-              phase={online ? "active" : "none"}
+              // Zero online stations out of a nonzero assignment is a
+              // definite, blocking fact -- the same one
+              // `onlineStationsPhase` (`../inventory/InventoryDetailPage.tsx`)
+              // and `deviceStatusPhase`'s `offline` case already give
+              // `attention`, not the "no value" `none`. Only the row above
+              // (no stations assigned at all) is a genuine `none`.
+              phase={online ? "active" : "attention"}
               label={
                 online
                   ? t("pages.lines.presence.online", {
