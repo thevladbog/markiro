@@ -348,7 +348,7 @@ export const CABINET_SHIFT_PLANNING_CONTENT = {
               {
                 term: "Не могу назначить линию станции",
                 detail:
-                  "Раздел устройств доступен менеджеру только на чтение. Назначение линии выполняет администратор кабинета.",
+                  "Линию станции назначает администратор или владелец кабинета: это действие требует права на управление учётными данными. Киоску и ТСД менеджер производства назначает линию сам.",
               },
               {
                 term: "Изменил активную смену, а станция работает по-старому",
@@ -721,7 +721,7 @@ export const CABINET_SHIFT_PLANNING_CONTENT = {
               {
                 term: "I cannot assign a line to a station",
                 detail:
-                  "The devices section is read-only for a manager. A cabinet administrator assigns the line.",
+                  "A station's line is assigned by a cabinet administrator or owner: that action requires the right to manage device credentials. A production manager assigns the line of a kiosk or a handheld themselves.",
               },
               {
                 term: "I edited an active shift but the station still runs the old way",
