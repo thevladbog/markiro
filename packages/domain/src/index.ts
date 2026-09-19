@@ -122,6 +122,7 @@ export {
 } from "./labels/import.js";
 export type {
   LabelCodeLanguage,
+  LabelImportFormat,
   LabelImportResult,
   LabelImportWarning,
   LabelImportWarningCode,
@@ -129,6 +130,8 @@ export type {
 } from "./labels/import.js";
 export { parseZplLabel } from "./labels/zpl-import.js";
 export { parseTsplLabel } from "./labels/tspl-import.js";
+export { parseLabelJson } from "./labels/json-import.js";
+export type { LabelJsonImportResult, ParseLabelJsonOptions } from "./labels/json-import.js";
 export {
   buildGfaCommand,
   generateZpl,

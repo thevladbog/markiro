@@ -57,7 +57,12 @@ import {
   type RasterizeTextFn,
 } from "@markiro/domain";
 
-import { buildZplBlob, latin1ToUint8Array } from "../src/pages/labels/editor/download.js";
+import {
+  buildJsonBlob,
+  buildZplBlob,
+  latin1ToUint8Array,
+} from "../src/pages/labels/editor/download.js";
+import { analyzeImport } from "../src/pages/labels/editor/import-analysis.js";
 import { labelPreviewData } from "../src/pages/labels/preview-data.js";
 import { LabelEditorPage } from "../src/pages/labels/editor/index.js";
 import { decodeRasterToRgba, rasterDestXPx } from "../src/pages/labels/editor/raster-preview.js";
@@ -218,6 +223,58 @@ const CYRILLIC_FIELD_ZPL = [
   "^XZ",
 ].join("\n");
 
+const JSON_NAME_FIELD = {
+  kind: "field",
+  id: "name",
+  xMm: 2,
+  yMm: 2,
+  field: "product.printName",
+  fontSizePt: 10,
+  bold: true,
+  maxWidthMm: 54,
+  maxLines: 3,
+};
+
+/** Four elements of the pallet 58×40 layout from the JSON-import task, as the API accepts it. */
+const JSON_SPEC = {
+  widthMm: 58,
+  heightMm: 40,
+  dpi: 203,
+  language: "zpl",
+  elements: [
+    JSON_NAME_FIELD,
+    { kind: "line", id: "sep1", xMm: 2, yMm: 18.2, x2Mm: 56, y2Mm: 18.2, thicknessMm: 0.3 },
+    {
+      kind: "text",
+      id: "cap-date",
+      xMm: 2,
+      yMm: 18.8,
+      text: "Дата производства:",
+      fontSizePt: 5,
+      maxWidthMm: 18,
+    },
+    {
+      kind: "field",
+      id: "val-date",
+      xMm: 2,
+      yMm: 21.6,
+      field: "date",
+      fontSizePt: 8,
+      bold: true,
+      maxWidthMm: 18,
+    },
+  ],
+};
+
+/** Opens the dialog, switches it to JSON and pastes `source`; returns the dialog. */
+async function openJsonImport(source: string): Promise<HTMLElement> {
+  fireEvent.click(screen.getByRole("button", { name: "Импорт кода" }));
+  const dialog = screen.getByRole("dialog", { name: "Импорт кода" });
+  await chooseOption(userEvent.setup(), "Формат кода", "JSON (Markiro)");
+  fireEvent.change(within(dialog).getByLabelText("JSON шаблона"), { target: { value: source } });
+  return dialog;
+}
+
 const PRODUCT_GROUPS = {
   items: [
     { code: 8, alias: "milk", name: "Молочная продукция" },
@@ -261,13 +318,13 @@ describe("Settings form", () => {
     renderCreateFlow();
 
     expect(
-      screen.getByText("Содержимое этикетки не задано — импортируйте код ZPL или TSPL."),
+      screen.getByText("Содержимое этикетки не задано — импортируйте код ZPL, TSPL или JSON."),
     ).toBeDefined();
 
     importZpl(IMPORT_ZPL);
 
     expect(
-      screen.queryByText("Содержимое этикетки не задано — импортируйте код ZPL или TSPL."),
+      screen.queryByText("Содержимое этикетки не задано — импортируйте код ZPL, TSPL или JSON."),
     ).toBeNull();
   });
 
@@ -303,6 +360,7 @@ describe("Settings form", () => {
     ).toBeDefined();
     expect(screen.getByRole("button", { name: "Скачать ZPL" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Скачать TSPL (TSC)" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Скачать JSON" })).toBeDefined();
   });
 
   it("a size preset round-trips and re-fits imported elements inside the smaller label", async () => {
@@ -692,6 +750,110 @@ describe("Import is the only content path", () => {
   });
 });
 
+describe("JSON import", () => {
+  it("offers JSON as a third format, hides the import DPI and switches the fields panel", async () => {
+    renderCreateFlow();
+    fireEvent.click(screen.getByRole("button", { name: "Импорт кода" }));
+    const dialog = screen.getByRole("dialog", { name: "Импорт кода" });
+    expect(within(dialog).getByRole("combobox", { name: "DPI импорта" })).toBeDefined();
+    expect(within(dialog).getByLabelText("Код ZPL")).toBeDefined();
+
+    await chooseOption(userEvent.setup(), "Формат кода", "JSON (Markiro)");
+
+    expect(within(dialog).queryByRole("combobox", { name: "DPI импорта" })).toBeNull();
+    expect(within(dialog).getByLabelText("JSON шаблона")).toBeDefined();
+    expect(within(dialog).getByText("product.printName")).toBeDefined();
+    expect(within(dialog).queryByText("{{product.printName}}")).toBeNull();
+  });
+
+  it("checks pasted JSON, replaces the spec, fills the default name and Save POSTs the same spec", async () => {
+    const fetchMock = stubCreateFetch("new-json");
+    renderCreateFlow();
+    const dialog = await openJsonImport(
+      JSON.stringify({ name: "Паллета 58×40", purpose: "box", spec: JSON_SPEC }),
+    );
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Проверить код" }));
+    expect(within(dialog).getByText("Распознано элементов: 4 · размер 58.0×40.0 мм")).toBeDefined();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Заменить этикетку" }));
+
+    expect(screen.queryByRole("dialog", { name: "Импорт кода" })).toBeNull();
+    expect((screen.getByLabelText("Название") as HTMLInputElement).value).toBe("Паллета 58×40");
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(postedSpec<typeof JSON_SPEC>(fetchMock)).toEqual(JSON_SPEC);
+  });
+
+  it("keeps a typed name and stays on the pasted JSON's dpi and language", async () => {
+    renderCreateFlow();
+    fireEvent.change(screen.getByLabelText("Название"), { target: { value: "Моё имя" } });
+    const dialog = await openJsonImport(
+      JSON.stringify({ name: "Паллета 58×40", spec: { ...JSON_SPEC, dpi: 300, language: "tspl" } }),
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Проверить код" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Заменить этикетку" }));
+
+    expect((screen.getByLabelText("Название") as HTMLInputElement).value).toBe("Моё имя");
+    expect(
+      screen.getByRole("combobox", { name: "Разрешение предпросмотра" }).textContent,
+    ).toContain("300");
+  });
+
+  it("lists every schema issue with its path and blocks replacement", async () => {
+    renderCreateFlow();
+    const dialog = await openJsonImport(
+      JSON.stringify({
+        ...JSON_SPEC,
+        elements: [{ kind: "text", id: "a", xMm: 1, yMm: 1, text: "x" }],
+      }),
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Проверить код" }));
+
+    const alert = within(dialog).getByRole("alert");
+    expect(within(alert).getByText(/^Ошибок в коде: \d+$/)).toBeDefined();
+    expect(within(alert).getByText("elements.0.fontSizePt")).toBeDefined();
+    expect(
+      within(dialog).getByRole("button", { name: "Заменить этикетку" }).hasAttribute("disabled"),
+    ).toBe(true);
+  });
+
+  it("shows a JSON syntax error as one message", async () => {
+    renderCreateFlow();
+    const dialog = await openJsonImport("{");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Проверить код" }));
+    expect(within(dialog).getByRole("alert").textContent).toMatch(/^invalid JSON: /);
+  });
+
+  it("requires acknowledgement for unknown properties and a purpose mismatch, then drops them", async () => {
+    const fetchMock = stubCreateFetch("new-json-2");
+    renderCreateFlow();
+    const dialog = await openJsonImport(
+      JSON.stringify({
+        purpose: "pallet",
+        spec: { ...JSON_SPEC, elements: [{ ...JSON_NAME_FIELD, maxlines: 2 }] },
+      }),
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Проверить код" }));
+
+    expect(within(dialog).getByText("Предупреждения: 2")).toBeDefined();
+    expect(within(dialog).getByText("elements.0.maxlines")).toBeDefined();
+    expect(within(dialog).getByText('purpose: "pallet"')).toBeDefined();
+    const replace = within(dialog).getByRole("button", { name: "Заменить этикетку" });
+    expect(replace.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(
+      within(dialog).getByRole("checkbox", { name: /Продолжить с этими предупреждениями/ }),
+    );
+    expect(replace.hasAttribute("disabled")).toBe(false);
+    fireEvent.click(replace);
+
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const spec = postedSpec<{ elements: Array<Record<string, unknown>> }>(fetchMock);
+    expect(spec.elements[0]).not.toHaveProperty("maxlines");
+    expect(spec.elements[0]).toMatchObject({ maxLines: 3 });
+  });
+});
+
 describe("Edit flow (load + PATCH)", () => {
   it("loads an existing template and Save PATCHes it", async () => {
     const existingSpec = {
@@ -748,6 +910,47 @@ describe("Edit flow (load + PATCH)", () => {
     expect(body.name).toBe("Короб v2");
     expect(await screen.findByText("Шаблон сохранён")).toBeDefined();
   });
+
+  it("never adopts a pasted JSON name while editing an existing template, even if the field is blank", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "/api/label-templates/tpl-9" && (!init || init.method === undefined)) {
+        return jsonResponse(200, {
+          id: "tpl-9",
+          name: "Короб",
+          purpose: "box",
+          spec: {
+            widthMm: 58,
+            heightMm: 40,
+            dpi: 203 as const,
+            language: "zpl" as const,
+            elements: [],
+          },
+          enabled: true,
+          chzProductGroupCodes: null,
+          createdAt: "2026-07-01T00:00:00.000Z",
+          updatedAt: "2026-07-01T00:00:00.000Z",
+        });
+      }
+      throw new Error(`Unexpected fetch: ${init?.method ?? "GET"} ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderEditFlow("tpl-9");
+    const nameInput = (await screen.findByLabelText("Название")) as HTMLInputElement;
+    expect(nameInput.value).toBe("Короб");
+
+    // The user clears the name field mid-edit -- this must NOT be read as
+    // "no name chosen yet" the way it would be for a brand-new template: the
+    // template already has an established, saved name.
+    fireEvent.change(nameInput, { target: { value: "" } });
+    const dialog = await openJsonImport(
+      JSON.stringify({ name: "Паллета 58×40", purpose: "box", spec: JSON_SPEC }),
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Проверить код" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Заменить этикетку" }));
+
+    expect((screen.getByLabelText("Название") as HTMLInputElement).value).toBe("");
+  });
 });
 
 describe("decodeRasterToRgba (pure bit-unpacking, no canvas needed)", () => {
@@ -791,6 +994,51 @@ describe("Download (ZPL/TSPL byte safety)", () => {
     const bytes = new Uint8Array(await blob.arrayBuffer());
     expect(Array.from(bytes)).toContain(0xe9);
     expect(Array.from(bytes)).not.toContain(0xc3); // the UTF-8 lead byte "é" would become if re-encoded
+  });
+
+  it("buildJsonBlob pretty-prints UTF-8 JSON in name/purpose/spec order with a trailing newline", async () => {
+    const spec = parseLabelTemplate(JSON_SPEC);
+    const blob = buildJsonBlob({ spec, purpose: "box", name: "Короб 58×40" });
+    expect(blob.type).toBe("application/json");
+    const text = new TextDecoder().decode(await blob.arrayBuffer());
+    expect(text).toBe(
+      `${JSON.stringify({ name: "Короб 58×40", purpose: "box", spec }, null, 2)}\n`,
+    );
+  });
+
+  it("Скачать JSON downloads { name, purpose, spec } of the current editor state, and the file imports back unchanged", async () => {
+    const blobs: Blob[] = [];
+    vi.spyOn(URL, "createObjectURL").mockImplementation((value) => {
+      if (!(value instanceof Blob)) throw new Error("Expected a downloadable label");
+      blobs.push(value);
+      return "blob:mock-url";
+    });
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
+    renderCreateFlow();
+    importZpl(IMPORT_ZPL);
+    fireEvent.change(screen.getByLabelText("Название"), { target: { value: "Короб 58×40" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Скачать JSON" }));
+
+    await waitFor(() => expect(blobs).toHaveLength(1));
+    const blob = blobs[0];
+    if (!blob) throw new Error("Missing downloaded JSON");
+    expect(blob.type).toBe("application/json");
+    const text = new TextDecoder().decode(await blob.arrayBuffer());
+    const payload = JSON.parse(text) as { name: string; purpose: string; spec: unknown };
+    expect(Object.keys(payload)).toEqual(["name", "purpose", "spec"]);
+    expect(payload.name).toBe("Короб 58×40");
+    expect(payload.purpose).toBe("box");
+    expect(() => parseLabelTemplate(payload.spec)).not.toThrow();
+    expect((payload.spec as { elements: unknown[] }).elements).toHaveLength(2);
+
+    // Round trip: the downloaded file is exactly what the JSON importer takes back.
+    const outcome = analyzeImport({ source: text, format: "json", dpi: 203, purpose: "box" });
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.analysis.result.spec).toEqual(payload.spec);
+    expect(outcome.analysis.result.warnings).toEqual([]);
+    expect(outcome.analysis.name).toBe("Короб 58×40");
   });
 
   it("Скачать ZPL produces a Blob whose text contains ^XA (and the raster fallback)", async () => {
