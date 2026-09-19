@@ -81,6 +81,7 @@ import type {
   ShiftPalletLabelTemplatesDto,
   ShiftBundleDto,
   ShiftDto,
+  ShiftEntryMethod,
   ShiftMode,
   ShiftOrigin,
   ShiftOutputDto,
@@ -1565,8 +1566,9 @@ export class ShiftsService {
     actor: { domain: "cabinet" | "station_device"; id: string },
     deviceId?: string,
     capabilities?: string,
+    entryMethod: ShiftEntryMethod = "list",
   ): Promise<ShiftDto> {
-    if (deviceId) return this.enterShift(tenantId, id, deviceId, capabilities);
+    if (deviceId) return this.enterShift(tenantId, id, deviceId, capabilities, entryMethod);
     const facts = await this.admission.capture(tenantId);
     await this.db.transaction(async (tx) => {
       const [current] = await tx
@@ -1629,6 +1631,7 @@ export class ShiftsService {
     id: string,
     deviceId: string,
     capabilities?: string,
+    entryMethod: ShiftEntryMethod = "list",
   ): Promise<ShiftDto> {
     const facts = await this.admission.capture(tenantId);
     await this.db.transaction(async (tx) => {
@@ -1699,14 +1702,21 @@ export class ShiftsService {
       const now = new Date();
       await tx
         .insert(schema.shiftDeviceParticipants)
-        .values({ tenantId, shiftId: id, deviceId, firstEnteredAt: now, lastEnteredAt: now })
+        .values({
+          tenantId,
+          shiftId: id,
+          deviceId,
+          firstEnteredAt: now,
+          lastEnteredAt: now,
+          entryMethod,
+        })
         .onConflictDoUpdate({
           target: [
             schema.shiftDeviceParticipants.tenantId,
             schema.shiftDeviceParticipants.shiftId,
             schema.shiftDeviceParticipants.deviceId,
           ],
-          set: { lastEnteredAt: now },
+          set: { lastEnteredAt: now, entryMethod },
         });
 
       if (shift.stationClosePolicy === "admin_only") return;

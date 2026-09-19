@@ -2301,4 +2301,120 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       .expect(400);
     expect(invalidBox.body.code).toBe("BOX_LABEL_TEMPLATE_NOT_ELIGIBLE");
   });
+
+  // ---------------------------------------------------------------------
+  // Entry method (Task 6): the printed task form's barcode enters a shift
+  // through the station's /open route; the handheld enters through /enter.
+  // Both converge on ShiftsService.enterShift, which is what writes
+  // shift_device_participants, so either route must record what the
+  // terminal actually sent (or `list` when it sent nothing at all).
+  // ---------------------------------------------------------------------
+
+  it("records the entry method on both entry routes and defaults a bodiless request to the list", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+    const productId = await seedProduct(orgId, {
+      status: "active",
+      chzProductGroupCode: 8,
+      boxCapacity: 12,
+      palletBoxCapacity: 48,
+    });
+    const server = app!.getHttpServer();
+    const station = await createTestStationDevice(app!, agent, "Entry-method station");
+    const handheld = await createTestStationDevice(app!, agent, "Entry-method handheld", {
+      kind: "handheld",
+    });
+
+    const scanned = await agent.post("/shifts").send({ productId, mode: "validation" }).expect(201);
+    await request(server)
+      .post(`/shifts/${scanned.body.id}/open`)
+      .set("x-api-key", station.apiKey)
+      .send({ entryMethod: "task_barcode" })
+      .expect(200);
+
+    const picked = await agent.post("/shifts").send({ productId, mode: "validation" }).expect(201);
+    await request(server)
+      .post(`/shifts/${picked.body.id}/open`)
+      .set("x-api-key", station.apiKey)
+      .expect(200);
+
+    const enteredByHandheld = await agent
+      .post("/shifts")
+      .send({ productId, mode: "validation" })
+      .expect(201);
+    await request(server)
+      .post(`/shifts/${enteredByHandheld.body.id}/enter`)
+      .set("x-api-key", handheld.apiKey)
+      .send({ entryMethod: "task_barcode" })
+      .expect(200);
+
+    const rows = await db
+      .select({
+        shiftId: schema.shiftDeviceParticipants.shiftId,
+        entryMethod: schema.shiftDeviceParticipants.entryMethod,
+      })
+      .from(schema.shiftDeviceParticipants)
+      .where(eq(schema.shiftDeviceParticipants.tenantId, orgId));
+    const byShift = new Map(rows.map((row) => [row.shiftId, row.entryMethod]));
+
+    expect(byShift.get(scanned.body.id as string)).toBe("task_barcode");
+    expect(byShift.get(picked.body.id as string)).toBe("list");
+    expect(byShift.get(enteredByHandheld.body.id as string)).toBe("task_barcode");
+  });
+
+  it("refuses an unknown entry method instead of silently recording the default", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+    const productId = await seedProduct(orgId, {
+      status: "active",
+      chzProductGroupCode: 8,
+      boxCapacity: 12,
+      palletBoxCapacity: 48,
+    });
+    const station = await createTestStationDevice(app!, agent, "Entry-method rejection station");
+    const shift = await agent.post("/shifts").send({ productId, mode: "validation" }).expect(201);
+
+    await request(app!.getHttpServer())
+      .post(`/shifts/${shift.body.id}/open`)
+      .set("x-api-key", station.apiKey)
+      .send({ entryMethod: "telepathy" })
+      .expect(400);
+  });
+
+  it("overwrites the entry method when the same device comes back a different way", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+    const productId = await seedProduct(orgId, {
+      status: "active",
+      chzProductGroupCode: 8,
+      boxCapacity: 12,
+      palletBoxCapacity: 48,
+    });
+    const server = app!.getHttpServer();
+    const station = await createTestStationDevice(app!, agent, "Entry-method overwrite station");
+    const shift = await agent.post("/shifts").send({ productId, mode: "validation" }).expect(201);
+    const shiftId = shift.body.id as string;
+
+    await request(server)
+      .post(`/shifts/${shiftId}/open`)
+      .set("x-api-key", station.apiKey)
+      .send({ entryMethod: "task_barcode" })
+      .expect(200);
+    await request(server)
+      .post(`/shifts/${shiftId}/enter`)
+      .set("x-api-key", station.apiKey)
+      .send({ entryMethod: "list" })
+      .expect(200);
+
+    const [row] = await db
+      .select({ entryMethod: schema.shiftDeviceParticipants.entryMethod })
+      .from(schema.shiftDeviceParticipants)
+      .where(
+        and(
+          eq(schema.shiftDeviceParticipants.tenantId, orgId),
+          eq(schema.shiftDeviceParticipants.shiftId, shiftId),
+        ),
+      );
+    expect(row?.entryMethod).toBe("list");
+  });
 });

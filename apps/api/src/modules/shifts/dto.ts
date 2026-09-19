@@ -127,6 +127,23 @@ export const closeShiftSchema = z.object({
 });
 export type CloseShiftDto = z.infer<typeof closeShiftSchema>;
 
+export const SHIFT_ENTRY_METHODS = ["list", "task_barcode"] as const;
+export type ShiftEntryMethod = (typeof SHIFT_ENTRY_METHODS)[number];
+
+/**
+ * How the device says it got in. Absent body means `list`, which is what
+ * every terminal built before the printed task form sends -- the top-level
+ * `.default` covers a request with no body at all (`ZodValidationPipe`
+ * receives `undefined`, not `{}`, in that case), and the property default
+ * covers a body that omits the field.
+ */
+export const shiftEntrySchema = z
+  .strictObject({
+    entryMethod: z.enum(SHIFT_ENTRY_METHODS).default("list"),
+  })
+  .default({ entryMethod: "list" });
+export type ShiftEntryDto = z.infer<typeof shiftEntrySchema>;
+
 /**
  * GET /shifts query schema. `from`/`to` filter on `plannedDate`, inclusive;
  * `productionFrom`/`productionTo` filter on the EFFECTIVE production date --

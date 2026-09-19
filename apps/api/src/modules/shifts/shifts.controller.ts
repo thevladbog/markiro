@@ -97,6 +97,8 @@ import {
   type BoxLabelTemplateProductQueryDto,
   productLabelTemplateProductQuerySchema,
   type ProductLabelTemplateProductQueryDto,
+  shiftEntrySchema,
+  type ShiftEntryDto,
 } from "./dto";
 import { ShiftsService, type EffectiveListShiftsQuery } from "./shifts.service";
 
@@ -338,7 +340,8 @@ export class ShiftsController {
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
   @ApiOperation({
     summary: "Render the printable shift task form",
-    description: "Responds with a text/html page for printing, not JSON. Closed shifts are refused.",
+    description:
+      "Responds with a text/html page for printing, not JSON. Closed shifts are refused.",
   })
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
   @ApiProduces("text/html")
@@ -486,9 +489,15 @@ export class ShiftsController {
   @ApiOperation({ summary: "Open a shift" })
   @ApiCabinetOrStationAuth()
   @ApiParam({ name: "id", format: "uuid" })
+  @ApiZodBody(shiftEntrySchema)
   @ApiOkResponse({ schema: shiftOpenApiSchema })
+  @ApiZodValidationError()
   @ApiHttpErrors(401, 403, 404, 409, 429)
-  async openShift(@Req() req: RequestWithTenant, @Param("id") id: string) {
+  async openShift(
+    @Req() req: RequestWithTenant,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(shiftEntrySchema)) body: ShiftEntryDto,
+  ) {
     const result = await this.shiftsService.openShift(
       req.tenantId!,
       id,
@@ -497,6 +506,7 @@ export class ShiftsController {
         : { domain: "cabinet", id: req.userId! },
       req.deviceId,
       req.get("x-station-capabilities"),
+      body.entryMethod,
     );
     return req.authKind === "station"
       ? projectDeviceValidationPrint(result, req.get("x-station-capabilities"))
@@ -519,15 +529,22 @@ export class ShiftsController {
   })
   @ApiStationAuth()
   @ApiParam({ name: "id", format: "uuid" })
+  @ApiZodBody(shiftEntrySchema)
   @ApiOkResponse({ schema: shiftOpenApiSchema })
+  @ApiZodValidationError()
   @ApiHttpErrors(401, 403, 404, 409, 429)
-  async enterShift(@Req() req: RequestWithTenant, @Param("id") id: string) {
+  async enterShift(
+    @Req() req: RequestWithTenant,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(shiftEntrySchema)) body: ShiftEntryDto,
+  ) {
     if (!req.deviceId) throw new Error("Station device identity is missing");
     const result = await this.shiftsService.enterShift(
       req.tenantId!,
       id,
       req.deviceId,
       req.get("x-station-capabilities"),
+      body.entryMethod,
     );
     return projectDeviceValidationPrint(result, req.get("x-station-capabilities"));
   }
