@@ -466,6 +466,27 @@
         "printBlockedTitle": "Codes issued, but the print tab did not open",
         "printBlocked": "The browser blocked the new tab. These codes have already been taken from the order — do not issue them again; open the print page from the link. You can reopen the same page later with \"Print again\" in the code issues list.",
         "printBlockedLink": "Open the print page"
+      },
+      "print": {
+        "documentTitle": "Print codes · {{product}}",
+        "heading": "Issue {{range}} · {{labels}}",
+        "labels_one": "{{formatted}} label",
+        "labels_few": "{{formatted}} labels",
+        "labels_many": "{{formatted}} labels",
+        "labels_other": "{{formatted}} labels",
+        "product": "{{product}} · GTIN {{gtin}}",
+        "note": "One label per page, {{width}}×{{height}} mm. This block is not printed. In the print dialog pick the label printer and set margins to none.",
+        "printAction": "Open the print dialog",
+        "back": "Back to the order",
+        "loading": "Preparing the labels…",
+        "loadError": "Could not load the codes to print",
+        "loadErrorHint": "These codes are already spent — do not issue them again. Retry the load, or reopen this page with «Print again» on the order card.",
+        "templateMissing": "No label template for these codes",
+        "templateMissingHint": "Create an enabled template with the «Marking code» purpose for this order's product group under «Labels», then open printing again. The codes in this issue are not lost.",
+        "empty": "This issue holds no codes",
+        "emptyHint": "Open the order card and check its issue history.",
+        "labelAria": "Label no. {{seq}}",
+        "renderFailed": "Label no. {{seq}} could not be rendered"
       }
     },
     "inventory": {
@@ -2956,7 +2977,10 @@
           "action": "Placard",
           "title": "Pallet placard",
           "formatLabel": "Paper size",
-          "format": { "a4": "A4", "a5": "A5" },
+          "format": {
+            "a4": "A4",
+            "a5": "A5"
+          },
           "open": "Open",
           "hint": "Opens in a new tab — print it on an office printer and attach it to the pallet."
         },

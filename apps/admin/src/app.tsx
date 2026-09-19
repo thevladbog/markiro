@@ -66,6 +66,7 @@ import { LinesPage } from "./pages/lines/index.js";
 import { LinePanelRoute } from "./pages/lines/LinePanelRoute.js";
 import { KmOrdersPage } from "./pages/km-orders/index.js";
 import { KmOrderPage } from "./pages/km-orders/KmOrderPage.js";
+import { KmOrderPrintPage } from "./pages/km-orders/KmOrderPrintPage.js";
 import { InventoryPage } from "./pages/inventory/index.js";
 import { InventoryCreatePage } from "./pages/inventory/InventoryCreatePage.js";
 import { InventoryCorrections } from "./pages/inventory/InventoryCorrections.js";
@@ -77,7 +78,7 @@ import { ProfilePage } from "./pages/profile/ProfilePage.js";
 import { SettingsPage } from "./pages/settings/index.js";
 import { ShiftsPage } from "./pages/shifts/index.js";
 import { ShiftPanelRoute } from "./pages/shifts/ShiftPanelRoute.js";
-import { ShellPage } from "./pages/Shell.js";
+import { PrintShellPage, ShellPage } from "./pages/Shell.js";
 import { TeamPage } from "./pages/team/TeamPage.js";
 import { BillingLayout } from "./pages/billing/BillingLayout.js";
 import { BillingOverviewPage } from "./pages/billing/BillingOverviewPage.js";
@@ -109,6 +110,22 @@ function appRouteElements() {
       <Route path="/profile" element={<ProfilePage />} />
       <Route path="/org/create" element={<CreateOrgPage />} />
       <Route path="/org/select" element={<SelectOrgPage />} />
+      {/* Outside the application shell -- its output is physical labels, and a
+          printed sidebar is not one -- but inside the same session, profile
+          and access gate, because the page renders live marking codes.
+          Repeating an issue hands those codes to the floor again, which is
+          the same product action as issuing them, so it is gated on the write
+          capability exactly like the buttons that open this page. */}
+      <Route path="/km-orders/:orderId/issues/:issueId/print" element={<PrintShellPage />}>
+        <Route
+          index
+          element={
+            <RequireCapability capability={C.OPERATIONS_WRITE}>
+              <KmOrderPrintPage />
+            </RequireCapability>
+          }
+        />
+      </Route>
       <Route path="/" element={<ShellPage />}>
         <Route
           index

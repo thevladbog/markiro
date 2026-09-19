@@ -1,5 +1,6 @@
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Navigate, useLocation } from "react-router";
+import { Navigate, Outlet, useLocation } from "react-router";
 
 import { Button, EmptyState, Spinner } from "@markiro/ui";
 
@@ -18,6 +19,32 @@ import { useProfile } from "./profile/api.js";
  * content per `app.tsx`'s nested "/" route).
  */
 export function ShellPage() {
+  return (
+    <GuardedRoute>
+      <AppShell />
+    </GuardedRoute>
+  );
+}
+
+/**
+ * The same guard chain with NO application shell: a route that owns the whole
+ * viewport renders its own `<Outlet/>` here, after the session, profile and
+ * access gates the sidebar-bearing routes go through.
+ *
+ * Today that is the KM print page (`km-orders/KmOrderPrintPage.tsx`), whose
+ * output is physical labels: a sidebar on the page would be printed, and the
+ * codes on it must still be unreachable for a visitor without a session, an
+ * active organization, or the capability the route names.
+ */
+export function PrintShellPage() {
+  return (
+    <GuardedRoute>
+      <Outlet />
+    </GuardedRoute>
+  );
+}
+
+function GuardedRoute({ children }: { children: ReactNode }) {
   const authClient = useAuthClient();
   const { data: session, isPending } = authClient.useSession();
 
@@ -41,16 +68,20 @@ export function ShellPage() {
     <ProfileCompletionGate
       userId={session.user.id}
       activeOrganizationId={session.session.activeOrganizationId}
-    />
+    >
+      {children}
+    </ProfileCompletionGate>
   );
 }
 
 function ProfileCompletionGate({
   userId,
   activeOrganizationId,
+  children,
 }: {
   userId: string;
   activeOrganizationId: string;
+  children: ReactNode;
 }) {
   const location = useLocation();
   const profile = useProfile();
@@ -64,15 +95,21 @@ function ProfileCompletionGate({
     return <Navigate to={`/profile?complete=1&returnTo=${encodeURIComponent(returnTo)}`} replace />;
   }
 
-  return <AccessGate userId={userId} activeOrganizationId={activeOrganizationId} />;
+  return (
+    <AccessGate userId={userId} activeOrganizationId={activeOrganizationId}>
+      {children}
+    </AccessGate>
+  );
 }
 
 function AccessGate({
   userId,
   activeOrganizationId,
+  children,
 }: {
   userId: string;
   activeOrganizationId: string;
+  children: ReactNode;
 }) {
   const access = useAccessDocument(userId, activeOrganizationId);
 
@@ -84,11 +121,7 @@ function AccessGate({
     return <AccessLoadError onRetry={() => void access.refetch()} />;
   if (access.data.capabilities.length === 0) return <NoCabinetAccess />;
 
-  return (
-    <AccessProvider value={access.data}>
-      <AppShell />
-    </AccessProvider>
-  );
+  return <AccessProvider value={access.data}>{children}</AccessProvider>;
 }
 
 function CenteredSpinner() {

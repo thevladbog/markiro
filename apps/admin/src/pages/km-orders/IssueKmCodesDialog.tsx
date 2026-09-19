@@ -1,17 +1,17 @@
 import { useCallback, useMemo, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 
-import { KM_LABEL_TEMPLATE_NAME } from "@markiro/domain";
 import { Alert, Button, Input, Modal, RadioGroup, Select } from "@markiro/ui";
 
 import { useChzProductGroups } from "../catalog/api.js";
-import { useLabelTemplates, type LabelTemplateSummaryDto } from "../labels/api.js";
+import { useLabelTemplates } from "../labels/api.js";
 import {
   kmIssueFileUrl,
   kmIssuePrintPath,
   kmIssueTooManyAvailable,
   useIssueKmCodes,
 } from "./api.js";
+import { eligibleKmTemplates, kmOrderGroupCode, preferredKmTemplate } from "./km-template.js";
 import {
   KM_ORDER_MAX_QUANTITY,
   KM_PRINT_ISSUE_MAX_COUNT,
@@ -27,24 +27,6 @@ const TEMPLATE_FIELD_ID = "km-issue-template-field";
 
 /** Round amounts an office asks for; «Все» is computed from what is left. */
 const QUICK_COUNTS = [100, 500, 1000] as const;
-
-/**
- * Whether a label template may print the marking codes of this order: the KM
- * purpose, and either a universal template or one scoped to the order's own
- * ЧЗ product group. Same category rule as `isBoxLabelTemplateEligible` /
- * `isPalletLabelTemplateEligible` in `@markiro/domain`, which are gated on
- * their own purposes; `enabled` is already filtered by the query.
- */
-function isKmTemplateEligible(
-  template: LabelTemplateSummaryDto,
-  chzProductGroupCode: number | null,
-): boolean {
-  if (template.purpose !== "product_km" || !template.enabled) return false;
-  if (template.chzProductGroupCodes === null) return true;
-  return (
-    chzProductGroupCode !== null && template.chzProductGroupCodes.includes(chzProductGroupCode)
-  );
-}
 
 /**
  * `window.open` answers `null` when a popup blocker swallows the tab, and
@@ -107,19 +89,16 @@ export function IssueKmCodesDialog({ open, mode, order, onClose }: IssueKmCodesD
   const parsedCount = /^\d+$/.test(count.trim()) ? Number(count.trim()) : Number.NaN;
   const countInRange = parsedCount >= 1 && parsedCount <= maxCount;
 
-  const groupCode =
-    groups.data?.find((group) => group.alias === order.productGroupAlias)?.code ?? null;
+  const groupCode = kmOrderGroupCode(groups.data, order.productGroupAlias);
   const eligibleTemplates = useMemo(
-    () => (templates.data ?? []).filter((template) => isKmTemplateEligible(template, groupCode)),
+    () => eligibleKmTemplates(templates.data ?? [], groupCode),
     [groupCode, templates.data],
   );
   // Derived during render rather than pushed into state by an effect: `null`
   // means "the operator has not chosen", which resolves to the stock KM label
   // (the one every tenant is seeded with) and otherwise to whatever else is
   // eligible.
-  const stockTemplate =
-    eligibleTemplates.find((template) => template.name === KM_LABEL_TEMPLATE_NAME) ??
-    eligibleTemplates[0];
+  const stockTemplate = preferredKmTemplate(eligibleTemplates);
   const selectedTemplateId = templateId ?? stockTemplate?.id ?? "";
   const templatesPending = templates.isPending || groups.isPending;
   // A failed product-groups read leaves `groupCode` null, which quietly drops

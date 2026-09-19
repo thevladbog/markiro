@@ -1,0 +1,103 @@
+/* The KM print page: one label per physical page.
+
+   Design tokens are used for the on-screen chrome, which is part of the
+   cabinet and follows its theme. The pages themselves are NOT themeable: a
+   thermal label is black ink on white stock whatever the operator's theme
+   says, and the `@media print` block below is a description of paper, not of
+   a surface anyone can restyle. The `@page` size itself is emitted inline by
+   `KmOrderPrintPage.tsx`, because it comes from the template. */
+
+.mk-km-print {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-5) var(--sp-4);
+}
+
+.mk-km-print__screen-only {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.mk-km-print__title {
+  margin: 0;
+  font: var(--text-h2);
+  color: var(--fg-1);
+}
+
+.mk-km-print__product {
+  margin: 0;
+  font: var(--text-body);
+  color: var(--fg-2);
+}
+
+.mk-km-print__note {
+  margin: 0;
+  font: var(--text-body-sm);
+  color: var(--fg-3);
+}
+
+.mk-km-print__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.mk-km-print__page {
+  /* `break-after` rather than the legacy `page-break-after`: every browser
+     this cabinet supports implements the fragmentation property, and the
+     legacy alias is only an alias. */
+  break-after: page;
+  overflow: hidden;
+  background: #fff;
+}
+
+/* The canvas carries the label at PRINT_DPI; the page box carries the
+   physical millimetres. Filling the box is what scales one to the other. */
+.mk-km-print__label {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.mk-km-print__failed {
+  display: block;
+  font: var(--text-caption);
+  color: var(--err-fg);
+}
+
+@media screen {
+  .mk-km-print__page {
+    box-shadow: var(--shadow-2);
+    margin: 16px auto;
+  }
+}
+
+@media print {
+  .mk-km-print__screen-only {
+    display: none;
+  }
+
+  body {
+    margin: 0;
+  }
+
+  .mk-km-print {
+    display: block;
+    padding: 0;
+    gap: 0;
+  }
+
+  /* Nothing follows the last label, so a trailing break would feed one blank
+     page out of every batch. */
+  .mk-km-print__page:last-child {
+    break-after: auto;
+  }
+}

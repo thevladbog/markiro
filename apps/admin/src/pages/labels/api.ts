@@ -109,13 +109,22 @@ function patchLabelTemplate(
   });
 }
 
-/** `GET /label-templates` -- the active tenant's label template summaries. */
+/**
+ * `GET /label-templates` -- the active tenant's label template summaries.
+ *
+ * `options.enabled` mirrors `useChzProductGroups`: a caller that only needs
+ * the list on one branch (the KM print page, which re-derives a template only
+ * when its link named none) still has to call the hook unconditionally, and
+ * this is how it avoids paying for a request it will not read.
+ */
 export function useLabelTemplates(
   params: ListLabelTemplatesParams = {},
+  options: { enabled?: boolean } = {},
 ): UseQueryResult<LabelTemplateSummaryDto[]> {
   return useQuery({
     queryKey: [...LABEL_TEMPLATES_QUERY_KEY, "list", params],
     queryFn: () => fetchLabelTemplates(params),
+    enabled: options.enabled ?? true,
   });
 }
 
