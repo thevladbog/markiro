@@ -26,7 +26,7 @@ real 1024×768 line terminal:
 - Card: photo on a product-tinted gradient, print name as the headline, full
   name small below it, one quiet line of number + status, dates and mode as
   labelled facts, the action button unchanged (64 px).
-- Header: one 72 px row — identity, telemetry pills, compact actions — on every
+- Header: one 80 px row — identity, telemetry pills, compact actions — on every
   station screen, not only shift selection.
 - Nothing about behaviour changes: same props feed the same actions; the card
   still fits two per page on 1024×768 and 1280×800.
@@ -64,16 +64,18 @@ real 1024×768 line terminal:
   counterparty line stays as today. The plan text never shares a badge.
 - **Compact header.** `StatusBar` renders one row at all widths:
   `grid-template-columns: minmax(0, 1fr) auto auto` with no ≤1599 px two-row
-  fallback. The action rail holds three 52 px controls: the update indicator
-  as an icon button (`↻`/`!` glyph, severity colour, a dot when an update is
-  available; the full label stays in `aria-label`), «Сменить оператора» as a
-  52 px text button (it is used every shift), the window-mode control as an
-  icon-only 52 px button (its glyph already exists; the label stays in
-  `aria-label`). The collapsed variant (active shift) is unchanged. The
+  fallback. The action rail holds three 64 px controls — the floor touch
+  target the production gallery contract enforces on every interactive
+  element, so the header saves height by dropping the second row and the
+  captions, not by shrinking buttons: the update indicator as an icon button
+  (`↻`/`!` glyph, severity colour, a dot when an update is available; the
+  full label stays in `aria-label`), «Сменить оператора» as a 64 px text
+  button (it is used every shift), the window-mode control as an icon-only
+  64 × 64 button (its glyph already exists; the label stays in `aria-label`). The collapsed variant (active shift) is unchanged. The
   identity deck keeps its two rows but its fonts drop to 16/13 px; pills keep
   their ≤1679 px caption rule.
 - **Error banners of the controls** (operator switch / window mode) keep
-  rendering under the rail as today; they are not part of the 72 px budget.
+  rendering under the rail as today; they are not part of the 80 px budget.
 
 ## Card anatomy (`ShiftCard`)
 
@@ -107,9 +109,10 @@ Props: `productName` stays the headline; new optional `productFullName`
 Богатырев Владислав Сергеевич
 ```
 
-`.station-status-actions` becomes a non-wrapping flex rail whose children are
-52 px tall (`min-height: 52px`), icon buttons 52 px wide. Below 1100 px the
-identity fonts and pill paddings already shrink; the rail does not wrap.
+`.station-status-actions` becomes a non-wrapping flex rail whose children keep
+the 64 px floor target (`min-height: 64px`), icon buttons 64 px wide. Below
+1100 px the identity fonts and pill paddings already shrink; the rail does not
+wrap.
 
 ## Tests to update or add
 
@@ -125,10 +128,10 @@ identity fonts and pill paddings already shrink; the rail does not wrap.
   `data-update-severity`; the window control is icon-only with its label in
   `aria-label`.
 - `test/fixed-viewport-source.test.tsx`: rewrite the header assertions for the
-  single-row rail (52 px children, no ≤1599 px two-row fallback, no wrap) and
+  single-row rail (64 px children, no ≤1599 px two-row fallback, no wrap) and
   the card grid (`minmax(150px, 38%)`); keep the pill caption rules.
 - `test/window-mode-control.test.tsx` «keeps the persistent action touch-sized»:
-  52 px is the new floor for header controls; 64 px stays for everything else.
+  the header controls keep the 64 px floor target; only the caption goes.
 - Gallery: `shift-page-1/2` show the print name, gradient panel and office tags;
   `floor-header-actions` shows the compact rail.
 

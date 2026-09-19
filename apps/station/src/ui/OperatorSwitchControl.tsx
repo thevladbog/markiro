@@ -7,7 +7,7 @@ export interface OperatorSwitchControlProps {
   pending: boolean;
   error: boolean;
   /**
-   * Header rail: the 52px rail height. The caption stays — this is used every
+   * Header rail: the 64px rail height, no second row. The caption stays — this is used every
    * shift and must not become a glyph to guess at.
    */
   compact?: boolean;

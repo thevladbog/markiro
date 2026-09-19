@@ -144,7 +144,7 @@ describe("WindowModeControl", () => {
   it("drops its caption but not its name on the compact header rail", () => {
     renderControl({ mode: "locked", pending: false, error: null }, { compact: true });
 
-    // 52px is the header rail's floor size; --control-floor stays the height
+    // 64px is the floor touch target; --control-floor stays the height
     // source, so the rail sets it once for every control it holds.
     const action = screen.getByRole("button", { name: "Exit fullscreen" });
     expect(action.className).toContain("mk-btn--floor");

@@ -4577,7 +4577,7 @@ body,
 .station-status-bar {
   display: grid;
   min-width: 0;
-  min-height: 72px;
+  min-height: 80px;
   padding: var(--sp-2) var(--sp-4);
   gap: var(--sp-4);
   grid-template-columns: minmax(0, 1fr) auto auto;
@@ -4590,7 +4590,7 @@ body,
 /*
  * One row at every width. `Button` writes `height: var(--control-floor)` as an
  * inline style for size="floor", so the rail redefines the variable instead of
- * fighting that style: 52px is the header's floor size, 64px stays the floor
+ * the rail controls keep the 64px floor touch target; the header saves height by dropping the caption row, and 64px stays the floor
  * size everywhere else on the station.
  */
 .station-status-actions {
@@ -4600,7 +4600,6 @@ body,
   align-items: stretch;
   justify-content: flex-end;
   flex-wrap: nowrap;
-  --control-floor: 52px;
 }
 
 /*
@@ -4623,13 +4622,13 @@ body,
 
 .station-status-actions > * {
   min-width: 0;
-  min-height: 52px;
+  min-height: 64px;
   max-width: 100%;
 }
 
 .station-status-actions :where(button, [role="button"]) {
   min-width: 0;
-  min-height: 52px;
+  min-height: 64px;
   max-width: 100%;
   overflow: hidden;
 }
@@ -4640,15 +4639,18 @@ body,
  * caption to pad around.
  */
 .station-rail-button {
-  height: 52px;
-  min-height: 52px;
+  /* 64px, the floor touch target (gloves): the production gallery contract
+     rejects any interactive element below 64px, so the compact rail saves
+     height by dropping the second row and the captions, not by shrinking
+     the buttons; `Button` already sets the floor height inline. */
+  min-height: 64px;
   padding-inline: var(--sp-3) !important;
   white-space: nowrap;
 }
 
 .station-rail-button--icon {
-  width: 52px;
-  min-width: 52px;
+  width: 64px;
+  min-width: 64px;
   padding: 0 !important;
 }
 

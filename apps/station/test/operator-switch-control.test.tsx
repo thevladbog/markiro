@@ -101,7 +101,7 @@ describe("OperatorSwitchControl", () => {
     renderControl({ compact: true });
 
     // Used every shift, so it stays a text button; only its height drops to the
-    // rail's 52px through --control-floor.
+    // rail's 64px floor target.
     const action = screen.getByRole("button", { name: "Change operator" });
     expect(action.classList.contains("station-rail-button")).toBe(true);
     expect(action.classList.contains("station-rail-button--icon")).toBe(false);

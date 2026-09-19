@@ -611,7 +611,7 @@ describe("development screen gallery", () => {
 
       expect(actions.children).toHaveLength(3);
       expect(update.getAttribute("data-update-severity")).toBe("urgent");
-      // One 72px row: every rail control is the 52px header size, the update and
+      // One 80px row: every rail control keeps the 64px floor target, the update and
       // window buttons icon-only, the operator button still captioned.
       expect(update.textContent).toBe("!");
       expect(operator.classList.contains("mk-btn--floor")).toBe(true);

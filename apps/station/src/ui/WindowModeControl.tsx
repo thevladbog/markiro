@@ -8,7 +8,7 @@ export interface WindowModeControlProps {
   activeShift: boolean;
   disabled?: boolean;
   /**
-   * Header rail: a 52px icon-only button. The label stays in `aria-label`, so
+   * Header rail: a 64px icon-only button. The label stays in `aria-label`, so
    * nothing about who can reach the control changes. Off the rail (the floating
    * window chrome, the exception screen) the captioned 64px button stays.
    */

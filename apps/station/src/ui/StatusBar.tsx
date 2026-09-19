@@ -106,7 +106,7 @@ export function StatusBar({
       : serverReachability === "reachable"
         ? t("shell.serverAvailable")
         : t("shell.serverUnavailable");
-  // The compact rail spends 52px on this control, so the words move entirely
+  // The compact rail spends 64px on this control, so the words move entirely
   // into the accessible name (and the mouse tooltip): the glyph plus the
   // severity colour say "look here", and a dot appears only when an update is
   // actually waiting. «↻ Обновления» stays the name AT and the tests read.

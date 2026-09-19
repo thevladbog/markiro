@@ -194,23 +194,25 @@ describe("fixed station viewport source contract", () => {
     expect(css).toMatch(
       /\.station-status-actions\s*\{[^}]*display:\s*flex;[^}]*justify-content:\s*flex-end;/s,
     );
-    // The rail is one row at every width: 52px controls, no wrapping. Button
-    // sets `height: var(--control-floor)` inline, so the rail redefines the
-    // variable instead of fighting the inline style.
-    expect(css).toMatch(/\.station-status-actions\s*\{[^}]*--control-floor:\s*52px;/s);
+    // The rail is one row at every width: no wrapping, and its controls keep
+    // the 64px floor touch target -- the production gallery contract rejects
+    // any interactive element below 64px, so nothing here redefines
+    // `--control-floor`.
+    expect(css).not.toMatch(/\.station-status-actions[^{]*\{[^}]*--control-floor/s);
+    expect(css).not.toMatch(/\.station-rail-button[^{]*\{[^}]*--control-floor/s);
     expect(css).toMatch(/\.station-status-actions\s*\{[^}]*flex-wrap:\s*nowrap;/s);
     expect(css).toMatch(
-      /\.station-status-actions\s*>\s*\*\s*\{[^}]*min-width:\s*0;[^}]*min-height:\s*52px;/s,
+      /\.station-status-actions\s*>\s*\*\s*\{[^}]*min-width:\s*0;[^}]*min-height:\s*64px;/s,
     );
     expect(css).toMatch(
-      /\.station-status-actions :where\(button, \[role="button"\]\)\s*\{[^}]*min-height:\s*52px;/s,
+      /\.station-status-actions :where\(button, \[role="button"\]\)\s*\{[^}]*min-height:\s*64px;/s,
     );
-    expect(css).toMatch(/\.station-rail-button--icon\s*\{[^}]*width:\s*52px;/s);
+    expect(css).toMatch(/\.station-rail-button--icon\s*\{[^}]*width:\s*64px;/s);
     expect(css).not.toMatch(
       /\.station-status-actions\s*>\s*\*\s*\{[^}]*(?<![a-z-])width:\s*100%;/s,
     );
     expect(css).toMatch(
-      /\.station-status-bar\s*\{[^}]*min-height:\s*72px;[^}]*grid-template-columns:\s*minmax\(0, 1fr\) auto auto;/s,
+      /\.station-status-bar\s*\{[^}]*min-height:\s*80px;[^}]*grid-template-columns:\s*minmax\(0, 1fr\) auto auto;/s,
     );
     expect(css).not.toMatch(/\.station-status-bar\s*\{[^}]*minmax\(960px/s);
     // Below 1680 the healthy pills drop their caption and keep the tone dot.
@@ -218,9 +220,9 @@ describe("fixed station viewport source contract", () => {
       /@media \(max-width: 1679px\)\s*\{[\s\S]*?\.station-status-pill\[data-value-shown="false"\] dt\s*\{[^}]*clip:\s*rect\(0 0 0 0\);/s,
     );
     // ...and the rail never drops to a second row because of a viewport width:
-    // the 1024px terminal shows the same single 72px header as a 1920px one.
+    // the 1024px terminal shows the same single 80px header as a 1920px one.
     // The one exception is a control's error banner, which is not part of the
-    // 72px budget — and that rule is gated on the banner, not on a width.
+    // 80px budget — and that rule is gated on the banner, not on a width.
     expect(css).not.toMatch(/@media \(max-width: 1599px\)/);
     expect(css.match(/\.station-status-actions\s*\{[^}]*flex-wrap:\s*wrap;/gs) ?? []).toHaveLength(
       1,
@@ -244,7 +246,7 @@ describe("fixed station viewport source contract", () => {
     // The update indicator is a glyph button now: nothing to wrap, and the
     // availability dot is placed against the button itself (in flow, never
     // absolutely positioned out of the header grid).
-    expect(css).toMatch(/\.station-rail-button\s*\{[^}]*height:\s*52px/s);
+    expect(css).toMatch(/\.station-rail-button\s*\{[^}]*min-height:\s*64px/s);
     expect(css).toMatch(/\.station-update-indicator__dot\s*\{/s);
     expect(css).toMatch(
       /\.station-status-actions \.window-mode-control__error\s*\{[^}]*display:\s*grid;[^}]*width:\s*100%;[^}]*min-width:\s*0;[^}]*max-width:\s*100%;/s,
