@@ -8,8 +8,9 @@
  * controls.
  *
  * Mirrors `pages/pickup/OrderDetail.tsx`'s structure (PageHeader +
- * DetailField grid + Table + ConfirmDialog) and reuses `./index.tsx`'s
- * document-status -> StatusChip tone mapping.
+ * DetailField grid + Table + ConfirmDialog). Owns the document-status ->
+ * `TagPhase` mapping (`DOCUMENT_STATUS_TO_PHASE`), which `./index.tsx`'s
+ * list table imports rather than duplicating.
  */
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
@@ -29,7 +30,7 @@ import {
   Table,
   Textarea,
 } from "@markiro/ui";
-import type { SelectOption, StatusChipStatus, TableColumn } from "@markiro/ui";
+import type { SelectOption, TableColumn, TagPhase } from "@markiro/ui";
 
 import { CABINET_CAPABILITY, formatSsccHri } from "@markiro/domain";
 
@@ -50,28 +51,34 @@ import {
   type LineDto,
 } from "./api.js";
 
-// See `./index.tsx`'s `STATUS_TO_CHIP` doc comment for why "applied"/"cancelled"
-// map to "ok"/"warn" rather than StatusChip's nonexistent "success" tone.
-const STATUS_TO_CHIP: Record<DocumentDetailDto["status"], StatusChipStatus> = {
-  draft: "neutral",
-  applied: "ok",
-  cancelled: "warn",
+// Document-level status (`DocumentDetailDto["status"]`): a draft stays
+// `draft`, an applied document is `done` (a completed, successful outcome),
+// and a cancelled one is `retired` -- a normal user-initiated terminal
+// state, not a failure and not a duplicate. Reused by `./index.tsx`'s list
+// table rather than duplicated there.
+export const DOCUMENT_STATUS_TO_PHASE: Record<DocumentDetailDto["status"], TagPhase> = {
+  draft: "draft",
+  applied: "done",
+  cancelled: "retired",
 };
 
 // Line-level statuses (`apps/api/src/modules/disaggregation/dto.ts`'s
 // `LineDto.status`): "ok" is the only status that lets a line take part in
-// an apply. "not_found"/"written_off" are hard failures (the box either
-// never existed or is already gone) so they read as "error"; the rest are
-// transient/soft blockers (still closing, still open, already handled
-// elsewhere) so they read as "warn".
-const LINE_STATUS_TO_CHIP: Record<string, StatusChipStatus> = {
-  ok: "ok",
-  not_found: "error",
-  written_off: "error",
-  not_closed: "warn",
-  shift_open: "warn",
-  already_disassembled: "warn",
-  duplicate: "warn",
+// an apply, so it reads as `done`. "not_found" is a hard failure (the box
+// never existed) so it's `failed`; "written_off" is a normal terminal
+// disposal so it's `retired`; "already_disassembled" names a box that's
+// already been taken apart elsewhere, so it's `dismantled`. "not_closed" and
+// "shift_open" are transient/soft blockers the operator can still resolve,
+// so both read as `attention`. Only a genuine duplicate row keeps
+// `duplicate`.
+export const LINE_STATUS_TO_PHASE: Record<string, TagPhase> = {
+  ok: "done",
+  not_found: "failed",
+  written_off: "retired",
+  not_closed: "attention",
+  shift_open: "attention",
+  already_disassembled: "dismantled",
+  duplicate: "duplicate",
 };
 
 function DetailField({ label, value }: { label: string; value: ReactNode }) {
@@ -475,7 +482,7 @@ export function DisaggregationDocumentPage() {
       title: t("pages.disaggregation.detail.table.status"),
       render: (line) => (
         <StatusChip
-          status={LINE_STATUS_TO_CHIP[line.status] ?? "neutral"}
+          phase={LINE_STATUS_TO_PHASE[line.status] ?? "none"}
           label={t(`pages.disaggregation.lineStatus.${line.status}`)}
         />
       ),
@@ -523,7 +530,7 @@ export function DisaggregationDocumentPage() {
               {t("pages.disaggregation.detail.printFull")}
             </Button>
             <StatusChip
-              status={STATUS_TO_CHIP[doc.status]}
+              phase={DOCUMENT_STATUS_TO_PHASE[doc.status]}
               label={t(`pages.disaggregation.status.${doc.status}`)}
             />
           </div>
