@@ -164,10 +164,10 @@ describe("renderShiftTaskFormHtml", () => {
   it("escapes every tenant-controlled name, not only the two on the hero line", () => {
     const html = renderShiftTaskFormHtml(
       fixture({
-        organizationName: '<b>Орг</b>',
-        lineName: '<i>Линия</i>',
-        productPrintName: '<u>Крат</u>',
-        ssccIssuerName: '<s>Эмитент</s>',
+        organizationName: "<b>Орг</b>",
+        lineName: "<i>Линия</i>",
+        productPrintName: "<u>Крат</u>",
+        ssccIssuerName: "<s>Эмитент</s>",
       }),
     );
 
