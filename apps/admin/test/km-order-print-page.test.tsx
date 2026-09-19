@@ -63,9 +63,9 @@ const number = new Intl.NumberFormat("ru");
  * never a code's text, and one test pins that no request URL carries one.
  */
 const CODES = [
-  { seq: 1201, code: "0104680089900383215aBcD193XyZ01" },
-  { seq: 1202, code: "0104680089900383215aBcD293XyZ02" },
-  { seq: 1203, code: "0104680089900383215aBcD393XyZ03" },
+  { seq: 1201, code: "0104680089900383215aBcD1\u001d93XyZ01" },
+  { seq: 1202, code: "0104680089900383215aBcD2\u001d93XyZ02" },
+  { seq: 1203, code: "0104680089900383215aBcD3\u001d93XyZ03" },
 ];
 
 /**
