@@ -190,15 +190,20 @@ describe("shift panel pallet table", () => {
 
   /**
    * Layout regression guard. «Состав изменился после закрытия» is 31 characters
-   * of mono type; as a nowrap badge it made the status column's min-content the
-   * whole string, which pushed the table to 731px inside the 669px-wide
-   * "complex" side panel -- the pill was clipped mid-word at the panel edge and
-   * the squeezed «Закрыта» column broke «30.08.2026, 14:20» inside the year.
-   * Both badges must be able to wrap, and they must stack rather than sit as
-   * two adjacent inline pills: adjacent inline pills offer no break opportunity
-   * between them and would re-create the same min-content sum.
+   * of mono type; as a nowrap tag it used to make the status column's
+   * min-content the whole string, which pushed the table to 731px inside the
+   * 669px-wide "complex" side panel -- the pill was clipped mid-word at the
+   * panel edge and the squeezed «Закрыта» column broke «30.08.2026, 14:20»
+   * inside the year. Both facts are lifecycle facts now, so they render as
+   * phase tags (`dismantled`, `attention`) instead of badges, and `StatusChip`
+   * carries the same `wrap` prop as `Badge` -- the long label still needs to
+   * break, and wrapping is a layout concern of this column, not something the
+   * choice of tag component changes. What still has to hold alongside that is
+   * the stack: two independent facts must not sit as adjacent inline pills
+   * with no break opportunity between them, so they still stack vertically in
+   * `.mk-shift-details__pallet-status`.
    */
-  it("wraps and stacks the status badges so they cannot overflow the panel", async () => {
+  it("renders the pallet status facts as phase tags stacked in one column", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(
@@ -219,19 +224,24 @@ describe("shift panel pallet table", () => {
     renderShiftPanel();
 
     const section = within(await screen.findByRole("region", { name: "Паллеты" }));
-    const changed = await section.findByText("Состав изменился после закрытия");
-    const disassembled = section.getByText("Разобрана");
+    const changedLabel = await section.findByText("Состав изменился после закрытия");
+    const disassembledLabel = section.getByText("Разобрана");
 
-    for (const badge of [changed, disassembled]) {
-      expect(badge.className).toContain("mk-badge--wrap");
-      expect(badge.style.whiteSpace).toBe("normal");
-      expect(badge.style.height).toBe("auto");
-    }
+    const changedTag = changedLabel.closest(".mk-chip");
+    const disassembledTag = disassembledLabel.closest(".mk-chip");
+    expect(changedTag).not.toBeNull();
+    expect(disassembledTag).not.toBeNull();
+    expect(changedTag?.className).toContain("mk-chip--attention");
+    expect(disassembledTag?.className).toContain("mk-chip--dismantled");
+    // The long, free-form label still needs to wrap in this narrow column --
+    // that is unchanged by moving from badges to phase tags.
+    expect(changedTag?.className).toContain("mk-tag--wrap");
+    expect(disassembledTag?.className).toContain("mk-tag--wrap");
     // Both facts are independent, so both pills show at once -- stacked in one
     // container rather than glued side by side.
-    const stack = changed.closest(".mk-shift-details__pallet-status");
+    const stack = changedTag?.closest(".mk-shift-details__pallet-status");
     expect(stack).not.toBeNull();
-    expect(disassembled.closest(".mk-shift-details__pallet-status")).toBe(stack);
+    expect(disassembledTag?.closest(".mk-shift-details__pallet-status")).toBe(stack);
   });
 
   it("does not query or show pallets for a shift that never used them", async () => {
@@ -1062,7 +1072,9 @@ describe("pallet card", () => {
     const row = boxes.getByRole("link", { name: "(00)123460682000000102" }).closest("tr");
     expect(row).not.toBeNull();
     // A word, not a colour: the pallet is short a box it can never recover.
-    expect(within(row!).getByText("Короб расформирован")).toBeDefined();
+    const disassembledTag = within(row!).getByText("Короб расформирован").closest(".mk-chip");
+    expect(disassembledTag).not.toBeNull();
+    expect(disassembledTag?.className).toContain("mk-chip--dismantled");
   });
 
   it("reports a pallet taken apart, with its exception reason", async () => {

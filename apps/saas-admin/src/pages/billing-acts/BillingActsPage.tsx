@@ -1,12 +1,24 @@
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
-import { Alert, SectionHeader, StatusChip, Table } from "@markiro/ui";
+import { Alert, SectionHeader, StatusChip, Table, type TagPhase } from "@markiro/ui";
 import type { BillingAct } from "@markiro/platform-contracts";
 
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import { listInvoices, type Invoice } from "../billing/api.js";
 import { listBillingActs } from "./api.js";
+
+/**
+ * `issued` — акт выпущен и печатная форма готова, это завершённое действие
+ * (`done`), а не «идёт прямо сейчас». `cancelled` — отозван человеком,
+ * запись сохранена в истории — `retired`, симметрично прекращённому
+ * договору (`AGREEMENT_STATUS_TO_PHASE.terminated`).
+ */
+export const BILLING_ACT_STATUS_TO_PHASE: Record<BillingAct["status"], TagPhase> = {
+  draft: "draft",
+  issued: "done",
+  cancelled: "retired",
+};
 
 export function BillingActsPage() {
   const { t } = useTranslation();
@@ -99,9 +111,7 @@ export function BillingActsPage() {
               title: t("billingActs.detail.status"),
               render: (act: BillingAct) => (
                 <StatusChip
-                  status={
-                    act.status === "issued" ? "ok" : act.status === "draft" ? "warn" : "neutral"
-                  }
+                  phase={BILLING_ACT_STATUS_TO_PHASE[act.status]}
                   label={t(`billingActs.status.${act.status}`)}
                 />
               ),

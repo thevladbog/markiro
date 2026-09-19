@@ -13,7 +13,7 @@ import {
   StatusChip,
   Table,
 } from "@markiro/ui";
-import type { StatusChipStatus, TableColumn } from "@markiro/ui";
+import type { BadgeTone, TableColumn, TagPhase } from "@markiro/ui";
 
 import { useCan } from "../../access/context.js";
 import { ApiRequestError } from "../../api/client.js";
@@ -32,16 +32,44 @@ import {
 } from "./api.js";
 import { SignerDownloadLink } from "./SignerDownloadLink.js";
 
-const TOKEN_CHIP_STATUS: Record<SignerTokenStatus["status"], StatusChipStatus> = {
-  none: "neutral",
-  active: "ok",
-  expiring: "warn",
-  expired: "error",
+/**
+ * `none` is the one legitimate `none` phase here: no token has ever been
+ * obtained, so there is genuinely no value to show, not a value withheld.
+ * `expiring` and `expired` deliberately land on different phases --
+ * `attention` still works, `failed` no longer does.
+ */
+export const TOKEN_STATUS_TO_PHASE: Record<SignerTokenStatus["status"], TagPhase> = {
+  none: "none",
+  active: "active",
+  expiring: "attention",
+  expired: "failed",
 };
 
-const AGENT_CHIP_STATUS: Record<SignerAgentStatus, StatusChipStatus> = {
-  active: "ok",
-  revoked: "neutral",
+/** A revoked agent was withdrawn by a person; the record itself stays -- `retired`, not `none`. */
+export const AGENT_STATUS_TO_PHASE: Record<SignerAgentStatus, TagPhase> = {
+  active: "active",
+  revoked: "retired",
+};
+
+/**
+ * Token type is a category axis (which kind of credential this is), not a
+ * lifecycle phase, so it is a `Badge`, not a `StatusChip` -- no glyph, no
+ * `TagPhase`. Per the categorical-tone rule, tones within one axis are
+ * assigned in the fixed order `violet`, `teal`, `magenta`, `steel` so the
+ * same value keeps the same colour across pages: `jwt` is the first member
+ * of `SignerTokenStatus["tokenType"]`, so it gets `violet`; `uuid` is the
+ * second, so it gets `teal`. A single static tone for the whole axis would
+ * make JWT and UUID indistinguishable by colour, defeating the point of a
+ * categorical tag.
+ *
+ * `null` (no token has ever been obtained) is not in this table by design:
+ * the call site only renders the `Badge` when `tokenType` is truthy, so
+ * there is no "no type" tone to pick -- the tag simply does not exist yet,
+ * same as it wouldn't exist for a channel with no data at all.
+ */
+export const TOKEN_TYPE_TO_TONE: Record<NonNullable<SignerTokenStatus["tokenType"]>, BadgeTone> = {
+  jwt: "violet",
+  uuid: "teal",
 };
 
 /**
@@ -202,7 +230,7 @@ export function SignerAgentsPanel() {
         title: t("pages.integrations.channel.signer.columns.status"),
         render: (agent) => (
           <StatusChip
-            status={AGENT_CHIP_STATUS[agent.status]}
+            phase={AGENT_STATUS_TO_PHASE[agent.status]}
             label={t(`pages.integrations.channel.signer.status.${agent.status}`)}
           />
         ),
@@ -286,12 +314,12 @@ export function SignerAgentsPanel() {
             </span>
             {data ? (
               <StatusChip
-                status={TOKEN_CHIP_STATUS[data.token.status]}
+                phase={TOKEN_STATUS_TO_PHASE[data.token.status]}
                 label={t(`pages.integrations.channel.signer.token.${data.token.status}`)}
               />
             ) : null}
             {data?.token.tokenType ? (
-              <Badge tone="neutral">
+              <Badge tone={TOKEN_TYPE_TO_TONE[data.token.tokenType]}>
                 {t(`pages.integrations.channel.signer.tokenType.${data.token.tokenType}`)}
               </Badge>
             ) : null}

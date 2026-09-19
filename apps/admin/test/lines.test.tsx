@@ -168,6 +168,54 @@ describe("LinesPage states and permissions", () => {
     expect(screen.queryByRole("columnheader", { name: "Действия" })).toBeNull();
   });
 
+  it.each([
+    {
+      name: "no stations assigned at all",
+      presence: { lineId: LINE.id, assignedStations: 0, onlineStations: 0 },
+      label: "Станции не назначены",
+      phaseClass: "mk-chip--none",
+      glyph: "·",
+    },
+    {
+      name: "assigned but none online",
+      presence: { lineId: LINE.id, assignedStations: 2, onlineStations: 0 },
+      label: "Офлайн",
+      phaseClass: "mk-chip--attention",
+      glyph: "!",
+    },
+    {
+      name: "assigned and some online",
+      presence: { lineId: LINE.id, assignedStations: 2, onlineStations: 1 },
+      label: "Онлайн · 1 из 2 станций",
+      phaseClass: "mk-chip--active",
+      glyph: "▸",
+    },
+  ])(
+    // Finding 4 (final review): a line with assigned stations but zero
+    // online used to render the exact same `none` ("no value") phase as a
+    // line with no stations assigned at all -- indistinguishable despite
+    // being opposite facts. Zero-online-of-assigned now matches
+    // `InventoryDetailPage.tsx`'s `onlineStationsPhase` and
+    // `deviceStatusPhase`'s `offline` case: `attention`, not `none`.
+    "renders line presence for $name as $phaseClass",
+    async ({ presence, label, phaseClass, glyph }) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string) => {
+          if (url === "/api/lines/presence") return jsonResponse(200, { items: [presence] });
+          return jsonResponse(200, { items: [LINE] });
+        }),
+      );
+
+      renderPage();
+
+      const tag = (await screen.findByText(label)).closest(".mk-chip");
+      expect(tag).not.toBeNull();
+      expect(tag?.className).toContain(phaseClass);
+      expect(tag?.querySelector(".mk-tag__glyph")?.textContent).toBe(glyph);
+    },
+  );
+
   it("keeps the same line-management copy available in English", async () => {
     await i18n.changeLanguage("en");
     vi.stubGlobal(

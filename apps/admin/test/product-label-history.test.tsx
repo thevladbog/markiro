@@ -2,7 +2,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import i18n from "../src/i18n/index.js";
-import { ProductLabelHistory } from "../src/pages/shifts/ProductLabelHistory.js";
+import {
+  productLabelJobPhase,
+  ProductLabelHistory,
+} from "../src/pages/shifts/ProductLabelHistory.js";
 const shiftId = "11111111-1111-4111-8111-111111111111",
   jobId = "22222222-2222-4222-8222-222222222222",
   deviceId = "33333333-3333-4333-8333-333333333333",
@@ -155,7 +158,14 @@ describe("cabinet label history", () => {
     await screen.findByText("…IAL-42");
     fireEvent.click(screen.getByRole("button", { name: "Загрузить ещё" }));
     await screen.findByText("…IAL-43");
-    await screen.findByText("Отправлено на принтер");
+
+    // Finding 7 (final review): "Отправлено на принтер" used to render a
+    // flat `Badge tone="neutral"` -- the exact original owner complaint --
+    // instead of the `done` phase a normally-completed job earns.
+    const sentTag = screen.getByText("Отправлено на принтер").closest(".mk-chip");
+    expect(sentTag).not.toBeNull();
+    expect(sentTag?.className).toContain("mk-chip--done");
+    expect(sentTag?.querySelector(".mk-tag__glyph")?.textContent).toBe("✓");
   });
   it("shows a recoverable read error instead of inventing zero totals", async () => {
     await i18n.changeLanguage("ru");
@@ -174,5 +184,33 @@ describe("cabinet label history", () => {
       expect(screen.queryByText("Не удалось загрузить историю печати")).toBeNull(),
     );
     await screen.findByText("Этикеток пока нет");
+  });
+});
+
+describe("productLabelJobPhase", () => {
+  /**
+   * Finding 7 (final review): the whole seven-value union used to be a
+   * three-way tone ternary written inline (`ok`/`warn`/`neutral`) with no
+   * exhaustiveness check. Each of the seven real states gets its own
+   * assertion here.
+   */
+  it("gives the not-yet-dispatched job a waiting-to-start phase", () => {
+    expect(productLabelJobPhase("prepared")).toBe("planned");
+  });
+
+  it("gives the in-flight send a system-running phase", () => {
+    expect(productLabelJobPhase("sending")).toBe("running");
+  });
+
+  it("gives a job blocked on the operator's verification scan the same urgency as a literal failure", () => {
+    expect(productLabelJobPhase("awaiting_verification")).toBe("attention");
+    expect(productLabelJobPhase("attention")).toBe("attention");
+  });
+
+  it("gives every terminal successful outcome done, not neutral", () => {
+    expect(productLabelJobPhase("verified")).toBe("done");
+    expect(productLabelJobPhase("skipped")).toBe("done");
+    expect(productLabelJobPhase("sent")).toBe("done");
+    expect(productLabelJobPhase("sent")).not.toBe("none");
   });
 });

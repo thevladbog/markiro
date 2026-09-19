@@ -130,7 +130,7 @@ export function EmployeeBadgesSection({
                 <div className="mk-employee-badges-section__actions">
                   {badge.revokedAt === null ? (
                     <>
-                      <StatusChip status="ok" label={t("pages.employees.badges.activeBadge")} />
+                      <StatusChip phase="active" label={t("pages.employees.badges.activeBadge")} />
                       <Button
                         type="button"
                         size="compact"
@@ -141,7 +141,7 @@ export function EmployeeBadgesSection({
                       </Button>
                     </>
                   ) : (
-                    <StatusChip status="neutral" label={t("pages.employees.badges.revokedBadge")} />
+                    <StatusChip phase="retired" label={t("pages.employees.badges.revokedBadge")} />
                   )}
                 </div>
               </li>

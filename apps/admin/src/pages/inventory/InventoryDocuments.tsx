@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Alert, Button, Card, Checkbox, EmptyState, Spinner, StatusChip } from "@markiro/ui";
+import type { TagPhase } from "@markiro/ui";
 
 import { ApiRequestError } from "../../api/client.js";
 import {
@@ -60,16 +61,16 @@ function openDownload(value: InventoryDocumentDownload): void {
   document.body.removeChild(anchor);
 }
 
-function statusTone(status: InventoryDocumentRun["status"]): "neutral" | "info" | "ok" | "error" {
+function statusPhase(status: InventoryDocumentRun["status"]): TagPhase {
   switch (status) {
     case "queued":
-      return "neutral";
+      return "planned";
     case "processing":
-      return "info";
+      return "running";
     case "ready":
-      return "ok";
+      return "done";
     case "failed":
-      return "error";
+      return "failed";
   }
 }
 
@@ -361,7 +362,7 @@ function DocumentRun({
           </small>
         </span>
         <StatusChip
-          status={statusTone(item.status)}
+          phase={statusPhase(item.status)}
           label={t(`pages.inventory.documents.status.${item.status}`)}
         />
       </header>

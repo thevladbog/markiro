@@ -13,28 +13,51 @@ import { Link, useParams } from "react-router";
 
 import { formatSsccHri } from "@markiro/domain";
 import { Alert, Card, PageHeader, Spinner, StatusChip } from "@markiro/ui";
-import type { StatusChipStatus } from "@markiro/ui";
+import type { TagPhase } from "@markiro/ui";
 
 import { formatCreatedAt, formatDate } from "../../lib/datetime.js";
 import { lastRegistryHref } from "./registry-location.js";
 import { useCodeCard, type CodeHistoryEvent, type CodeStatus } from "./api.js";
 
-// Mirrors `./index.tsx`'s `STATUS_TO_CHIP` -- see its doc comment for why
-// "written_off" maps to "warn" rather than a nonexistent "success"/"danger" tone.
-const STATUS_TO_CHIP: Record<CodeStatus, StatusChipStatus> = {
-  free: "ok",
-  aggregated: "info",
-  written_off: "warn",
+// A code's own lifecycle: free (in circulation, not yet placed) -> aggregated
+// (placed in a box, its own job done) -> written_off (terminal, out of
+// circulation). `./index.tsx` imports this rather than keeping its own copy.
+export const CODE_STATUS_TO_PHASE: Record<CodeStatus, TagPhase> = {
+  free: "active",
+  aggregated: "done",
+  written_off: "retired",
 };
 
-// CHZ states are independent of local aggregation. Unknown states stay neutral.
-const CHZ_STATUS_TO_CHIP = new Map<string, StatusChipStatus>([
-  ["INTRODUCED", "ok"],
-  ["EMITTED", "info"],
-  ["APPLIED", "info"],
-  ["RETIRED", "warn"],
-  ["WRITTEN_OFF", "warn"],
-  ["WITHDRAWN", "warn"],
+// Chestny Znak states are independent of local aggregation: a code can be
+// emitted and applied before the station has ever seen it. Its own lifecycle
+// -- emitted -> applied -> introduced into circulation -> retired/written
+// off/withdrawn, or pulled apart by a disaggregation document -- gets the
+// phase treatment too, not a flat category tone. Unknown states stay without
+// a phase (`none`).
+//
+// This map's real source of values is the vocabulary True API's `cises/info`
+// actually returns: `card.chzStatus` (`./api.ts`) is written straight from
+// that response into `chz_code_statuses.status` with no normalization (see
+// `apps/api/.../chz-code-status-refresh.service.ts`'s `writeFacts`), so any
+// string ЧЗ sends can arrive here. `INVENTORY_CHZ_STATUSES`
+// (`packages/domain/src/inventory/status.ts`) is a *different* consumer's
+// vocabulary -- the inventory snapshot's -- not this one's; the test suite
+// uses it only as a completeness floor (every status the snapshot can carry
+// must have a phase here too), not as the ceiling. `WITHDRAWN` is a real
+// `cises/info` status -- `chz-code-status-refresh.service.ts`'s
+// `WITHDRAWN_STATUSES` treats it as a third way out of circulation alongside
+// `RETIRED`/`WRITTEN_OFF` -- so it keeps the same `retired` phase here even
+// though the inventory snapshot never produces it. A status neither
+// vocabulary lists yet (ЧЗ is free to add more) falls back to `none` at the
+// call site, not to a silently invented phase.
+export const CHZ_STATUS_TO_PHASE = new Map<string, TagPhase>([
+  ["EMITTED", "planned"],
+  ["APPLIED", "running"],
+  ["INTRODUCED", "active"],
+  ["RETIRED", "retired"],
+  ["WRITTEN_OFF", "retired"],
+  ["WITHDRAWN", "retired"],
+  ["DISAGGREGATION", "dismantled"],
 ]);
 
 function DetailField({ label, value }: { label: string; value: ReactNode }) {
@@ -170,7 +193,7 @@ export function CodeCardPage() {
             label={t("pages.codeSearch.codeCard.statusLabel")}
             value={
               <StatusChip
-                status={STATUS_TO_CHIP[card.status]}
+                phase={CODE_STATUS_TO_PHASE[card.status]}
                 label={t(`pages.codeSearch.status.${card.status}`)}
               />
             }
@@ -180,8 +203,7 @@ export function CodeCardPage() {
               label={t("pages.codeSearch.chzStatusLabel")}
               value={
                 <StatusChip
-                  status={CHZ_STATUS_TO_CHIP.get(card.chzStatus) ?? "neutral"}
-                  glyph={null}
+                  phase={CHZ_STATUS_TO_PHASE.get(card.chzStatus) ?? "none"}
                   label={
                     i18n.exists(`pages.inventory.chz.${card.chzStatus}`)
                       ? t(`pages.inventory.chz.${card.chzStatus}`)

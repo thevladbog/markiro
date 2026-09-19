@@ -108,7 +108,7 @@ function InvitationSummary({ invitation }: { invitation: PublicInvitation }) {
   return (
     <header style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       <StatusChip
-        status="info"
+        phase="planned"
         label={t("invitation.pending")}
         style={{ alignSelf: "flex-start" }}
       />

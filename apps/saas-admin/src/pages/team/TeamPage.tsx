@@ -10,6 +10,7 @@ import {
   Spinner,
   StatusChip,
   Table,
+  type TagPhase,
 } from "@markiro/ui";
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import {
@@ -24,6 +25,19 @@ import {
 } from "./api.js";
 
 const roles: PlatformRole[] = ["platform_admin", "support", "accountant"];
+
+/**
+ * Фактический union — `platformTeamStatusSchema`
+ * (`packages/platform-contracts/src/platform-auth.ts`): `active` | `suspended`
+ * | `invited`. `suspended` — приостановка человеком, терминально до нового
+ * решения и не ошибка (`retired`), симметрично отменённой подготовке замены
+ * устройства. `invited` — приглашение отправлено, ждёт активации (`planned`).
+ */
+const TEAM_STATUS_TO_PHASE: Record<PlatformUser["status"], TagPhase> = {
+  active: "active",
+  suspended: "retired",
+  invited: "planned",
+};
 
 export function TeamPage() {
   const { t } = useTranslation();
@@ -94,7 +108,7 @@ export function TeamPage() {
       title: t("team.status"),
       render: (user: PlatformUser) => (
         <StatusChip
-          status={user.status === "active" ? "ok" : user.status === "suspended" ? "error" : "warn"}
+          phase={TEAM_STATUS_TO_PHASE[user.status]}
           label={t(`team.statuses.${user.status}`)}
         />
       ),

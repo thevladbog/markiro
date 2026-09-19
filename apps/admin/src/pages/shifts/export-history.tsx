@@ -9,7 +9,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Alert, Button, Spinner, StatusChip } from "@markiro/ui";
-import type { StatusChipStatus } from "@markiro/ui";
+import type { TagPhase } from "@markiro/ui";
 
 import { ApiRequestError } from "../../api/client.js";
 import {
@@ -20,11 +20,11 @@ import {
   type ShiftExportStatus,
 } from "./shift-exports-api.js";
 
-export const EXPORT_STATUS_TO_CHIP: Record<ShiftExportStatus, StatusChipStatus> = {
-  queued: "info",
-  processing: "warn",
-  ready: "ok",
-  failed: "error",
+export const EXPORT_STATUS_TO_PHASE: Record<ShiftExportStatus, TagPhase> = {
+  queued: "planned",
+  processing: "running",
+  ready: "done",
+  failed: "failed",
 };
 
 /**
@@ -233,7 +233,7 @@ export function HistoryRow({
     <article className="mk-shift-exports__history-row">
       <div className="mk-shift-exports__history-head">
         <StatusChip
-          status={EXPORT_STATUS_TO_CHIP[item.status]}
+          phase={EXPORT_STATUS_TO_PHASE[item.status]}
           label={t(`pages.shifts.exports.status.${item.status}`)}
         />
         <span>{formatExportDateTime(item.completedAt ?? item.createdAt, language) ?? "—"}</span>

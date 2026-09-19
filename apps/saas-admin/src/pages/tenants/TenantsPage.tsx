@@ -17,6 +17,7 @@ import {
   Table,
   type SelectOption,
   type TableColumn,
+  type TagPhase,
 } from "@markiro/ui";
 
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
@@ -24,16 +25,22 @@ import { listTenants, type TenantListItem, type TenantSubscriptionStatus } from 
 
 type StatusFilter = "all" | TenantSubscriptionStatus;
 
-const STATUS_TONE = {
-  pending_activation: "warn",
-  scheduled: "info",
-  trial: "info",
-  active: "ok",
-  expired: "error",
-  superseded: "neutral",
-  cancelled: "neutral",
-  unmanaged: "warn",
-} as const;
+/**
+ * `superseded` и `cancelled` были одинаково серыми (`neutral`), хотя оба —
+ * вывод из оборота человеком/системой: обе получают `retired`. `unmanaged`
+ * был жёлтым наравне с `pending_activation`, хотя это не ожидание активации,
+ * а отсутствие управляемой подписки — `none`.
+ */
+export const SUBSCRIPTION_STATUS_TO_PHASE = {
+  pending_activation: "planned",
+  scheduled: "planned",
+  trial: "active",
+  active: "active",
+  expired: "retired",
+  superseded: "retired",
+  cancelled: "retired",
+  unmanaged: "none",
+} as const satisfies Record<TenantSubscriptionStatus, TagPhase>;
 
 export function TenantsPage() {
   const { t, i18n } = useTranslation();
@@ -89,7 +96,7 @@ export function TenantsPage() {
         title: t("tenants.columns.status"),
         render: (item) => (
           <StatusChip
-            status={STATUS_TONE[item.subscriptionStatus]}
+            phase={SUBSCRIPTION_STATUS_TO_PHASE[item.subscriptionStatus]}
             label={t(`tenants.status.${item.subscriptionStatus}`)}
           />
         ),

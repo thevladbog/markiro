@@ -12,6 +12,7 @@ import {
   Spinner,
   StatusChip,
   Table,
+  type TagPhase,
 } from "@markiro/ui";
 import {
   platformCommercialContracts,
@@ -53,6 +54,27 @@ const requestTypes = [
   "other",
 ] as const;
 const linkTypes = ["offer", "invoice", "payment", "act", "ordered_service"] as const;
+
+/**
+ * Фактический union — `platformBillingRequestStatusSchema`
+ * (`packages/platform-contracts/src/commercial.ts`): восемь значений. Раньше
+ * `StatusChip` получал статический `status="neutral"` при подписи, зависящей
+ * от `request.status` — все восемь заявок выглядели одинаково-архивными.
+ * `offer_prepared`/`awaiting_payment`/`in_progress` — мяч на стороне другой
+ * стороны или идёт работа (`running`), симметрично `sent`→`running` у
+ * договоров. `clarification_required` буквально требует ответа —
+ * `attention`.
+ */
+export const BILLING_REQUEST_STATUS_TO_PHASE = {
+  new: "planned",
+  under_review: "running",
+  clarification_required: "attention",
+  offer_prepared: "running",
+  awaiting_payment: "running",
+  in_progress: "running",
+  completed: "done",
+  cancelled: "retired",
+} as const satisfies Record<(typeof requestStatuses)[number], TagPhase>;
 
 export function BillingRequestsPage() {
   const { t } = useTranslation();
@@ -171,7 +193,7 @@ function RequestList() {
               title: t("billingRequests.fields.status"),
               render: (request: BillingRequestListItem) => (
                 <StatusChip
-                  status="neutral"
+                  phase={BILLING_REQUEST_STATUS_TO_PHASE[request.status]}
                   label={t(`billingRequests.status.${request.status}`)}
                 />
               ),

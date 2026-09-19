@@ -5,6 +5,7 @@ import { MetricStrip, SectionHeader, StatusChip } from "@markiro/ui";
 
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import { PanelState } from "../../components/PanelState.js";
+import { auditOutcomePhase } from "../audit/AuditPage.js";
 import { DecisionQueue } from "./DecisionQueue.js";
 import { HealthSummary } from "./HealthSummary.js";
 import { getOperationsOverview, getPlatformMonitoring } from "./api.js";
@@ -106,13 +107,7 @@ export function OverviewPage() {
                     {overview.data.recentActivity.map((event) => (
                       <li key={event.id}>
                         <StatusChip
-                          status={
-                            event.outcome === "success"
-                              ? "ok"
-                              : event.outcome === "denied"
-                                ? "warn"
-                                : "error"
-                          }
+                          phase={auditOutcomePhase(event.outcome)}
                           label={t(`audit.outcomes.${event.outcome}`)}
                         />
                         <span className="activity-list__action">{event.action}</span>

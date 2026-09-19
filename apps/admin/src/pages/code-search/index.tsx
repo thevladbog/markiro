@@ -16,7 +16,7 @@ import {
   StatusChip,
   Table,
 } from "@markiro/ui";
-import type { ComboboxOption, SelectOption, StatusChipStatus, TableColumn } from "@markiro/ui";
+import type { ComboboxOption, SelectOption, TableColumn } from "@markiro/ui";
 
 import { formatCreatedAt, formatDate } from "../../lib/datetime.js";
 import { useProducts } from "../catalog/api.js";
@@ -28,21 +28,10 @@ import {
   type ClassifyBoxMatchDto,
   type CodeListItemDto,
 } from "./api.js";
+import { CODE_STATUS_TO_PHASE } from "./CodeCard.js";
 import { RegistryTabs } from "./RegistryTabs.js";
 
 type StatusFilter = "all" | "free" | "aggregated" | "written_off";
-
-// StatusChip only defines ok/error/warn/info/neutral tones (see
-// packages/ui/src/components/StatusChip.tsx) -- "free" (still scannable)
-// maps to the positive "ok" tone, "aggregated" (currently inside a box) to
-// the informational "info" tone, and "written_off" (terminal, out of
-// circulation) to "warn" rather than "neutral" so it stays visually
-// distinct from the "all" filter's absence of a chip entirely.
-const STATUS_TO_CHIP: Record<Exclude<StatusFilter, "all">, StatusChipStatus> = {
-  free: "ok",
-  aggregated: "info",
-  written_off: "warn",
-};
 
 type SearchErrorCode = "unrecognized" | "not_found" | "generic";
 
@@ -174,7 +163,7 @@ export function CodeSearchPage() {
       title: t("pages.codeSearch.table.status"),
       render: (row) => (
         <StatusChip
-          status={STATUS_TO_CHIP[row.status]}
+          phase={CODE_STATUS_TO_PHASE[row.status]}
           label={t(`pages.codeSearch.status.${row.status}`)}
         />
       ),

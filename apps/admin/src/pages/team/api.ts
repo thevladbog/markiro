@@ -27,12 +27,21 @@ export interface TeamMember {
   createdAt: string;
 }
 
+// `apps/api/src/modules/team/team.service.ts`'s `listTeam`: Better Auth's
+// invitation `status` column (`pending` | `accepted` | `rejected` |
+// `canceled`) plus the server's own computed `expired`, substituted once
+// `expiresAt` has passed. The DTO on the wire is `{ type: "string" }`
+// (`apps/api/src/modules/team/dto.ts`), but every value this endpoint
+// actually produces is one of these five -- narrowed here so
+// `TeamPage.tsx`'s phase mapping can be a real exhaustive `switch`.
+export type TeamAccessStatus = "pending" | "accepted" | "rejected" | "canceled" | "expired";
+
 export interface TeamInvitation {
   id: string;
   email: string;
   role: string | null;
   position: string | null;
-  accessStatus: string;
+  accessStatus: TeamAccessStatus;
   expiresAt: string;
   employee: TeamEmployee | null;
   delivery: { id: string; status: string; errorCategory: string | null } | null;

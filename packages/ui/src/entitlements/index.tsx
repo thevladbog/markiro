@@ -92,7 +92,7 @@ export function EntitlementSnapshotView({
                 <div>
                   <strong>{t(`entitlements.kinds.${source.kind}`)}</strong>
                   <StatusChip
-                    status="info"
+                    phase="planned"
                     label={t(
                       source.prepared
                         ? "entitlements.prepared"

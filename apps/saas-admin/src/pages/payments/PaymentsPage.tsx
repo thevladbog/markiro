@@ -4,7 +4,15 @@ import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
-import { Alert, Button, FileDropZone, SectionHeader, StatusChip, Table } from "@markiro/ui";
+import {
+  Alert,
+  Button,
+  FileDropZone,
+  SectionHeader,
+  StatusChip,
+  Table,
+  type TagPhase,
+} from "@markiro/ui";
 
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import {
@@ -19,6 +27,24 @@ import {
 
 const PAYMENTS_KEY = ["platform", "payments"] as const;
 const MATCHES_KEY = ["platform", "payment-matches"] as const;
+
+/**
+ * Фактический union — `paymentMatchSchema["status"]`
+ * (`packages/platform-contracts/src/commercial.ts`): пять значений. Раньше
+ * четыре ветки схлопывали `unmatched` и `suggested` в один и тот же
+ * `neutral`, хотя «предложено» — рабочая гипотеза, ждущая решения
+ * (`planned`), а «не сопоставлен» — кандидата ещё нет вовсе (`none`).
+ * `matched` — подтверждённое соответствие (`done`), `rejected` — отклонено
+ * человеком, запись цела (`retired`), `needs_review` — буквально требует
+ * проверки (`attention`).
+ */
+export const PAYMENT_MATCH_STATUS_TO_PHASE: Record<PaymentMatch["status"], TagPhase> = {
+  unmatched: "none",
+  suggested: "planned",
+  matched: "done",
+  rejected: "retired",
+  needs_review: "attention",
+};
 
 export function PaymentsPage() {
   const { t } = useTranslation();
@@ -169,14 +195,6 @@ function PaymentMatchCard({ match, canWrite }: { match: PaymentMatch; canWrite: 
   const canMatch = match.tenantId !== null && match.invoiceId !== null;
   const pendingDecision = match.status === "suggested" || match.status === "needs_review";
   const reference = match.bankReference ?? match.sourceRowId;
-  const statusTone =
-    match.status === "matched"
-      ? "ok"
-      : match.status === "rejected"
-        ? "neutral"
-        : match.status === "needs_review"
-          ? "warn"
-          : "neutral";
 
   const confirm = async () => {
     if (!canMatch || match.tenantId === null || match.invoiceId === null) return;
@@ -196,7 +214,10 @@ function PaymentMatchCard({ match, canWrite }: { match: PaymentMatch; canWrite: 
           <span className="payment-match-reference">{reference}</span>
           <h3>{match.payerName ?? t("payments.review.payerUnavailable")}</h3>
         </div>
-        <StatusChip status={statusTone} label={t(`payments.statuses.${match.status}`)} />
+        <StatusChip
+          phase={PAYMENT_MATCH_STATUS_TO_PHASE[match.status]}
+          label={t(`payments.statuses.${match.status}`)}
+        />
       </header>
       <dl className="payment-match-data">
         <div>

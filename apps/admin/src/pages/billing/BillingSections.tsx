@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
 import { StatusChip } from "@markiro/ui";
-import type { StatusChipStatus } from "@markiro/ui";
+import type { TagPhase } from "@markiro/ui";
 
 import { useCan } from "../../access/context.js";
 import type {
@@ -21,24 +21,40 @@ export const BILLING_LIMIT_KEYS: BillingLimitKey[] = [
   "cabinetUsers",
 ];
 
-function chipStatusFor(value: string): StatusChipStatus {
-  if (["active", "trial", "normal", "paid", "completed", "confirmed"].includes(value)) return "ok";
+/**
+ * Перечень значений взят из `apps/admin/src/i18n/ru.json`, ветка
+ * `pages.billing.status`, и покрывает все семь видов целиком. `cancelled`,
+ * `revoked` и `expired` — вывод из оборота (`retired`), а не тревога
+ * (`warn`): отмена и истечение не требуют вмешательства. `ordered` и
+ * `in_progress` расходятся на ожидание (`planned`) и выполнение (`running`),
+ * а не делят один статус. Неизвестное значение — `none`, а не `info`.
+ *
+ * `unmanaged` («Не подключено») — тот же случай, что у ненастроенного канала
+ * интеграции (`CHANNEL_STATE_TO_PHASE.not_configured` в
+ * `pages/integrations/index.tsx`): вмешательства не существует, канал просто
+ * не подключён, значения нет и не ожидается — `none`, а не `attention`.
+ */
+export function chipPhaseFor(value: string): TagPhase {
+  if (["active", "trial", "normal", "managed", "published"].includes(value)) return "active";
+  if (["paid", "completed", "confirmed"].includes(value)) return "done";
+  if (["pending_activation", "scheduled", "new", "ordered"].includes(value)) return "planned";
+  if (["issued", "in_progress", "under_review", "offer_prepared"].includes(value)) return "running";
   if (
     [
       "approaching",
       "reached",
       "exceeded",
-      "expired",
       "overdue",
-      "cancelled",
-      "revoked",
-      "clarification_required",
       "awaiting_payment",
+      "clarification_required",
+      "partially_paid",
+      "read_only",
     ].includes(value)
   )
-    return "warn";
-  if (["superseded", "draft"].includes(value)) return "neutral";
-  return "info";
+    return "attention";
+  if (["cancelled", "revoked", "superseded", "expired"].includes(value)) return "retired";
+  if (value === "draft") return "draft";
+  return "none";
 }
 
 export function BillingStatusChip({
@@ -50,7 +66,7 @@ export function BillingStatusChip({
 }) {
   const { t } = useTranslation();
   return (
-    <StatusChip status={chipStatusFor(value)} label={t(`pages.billing.status.${kind}.${value}`)} />
+    <StatusChip phase={chipPhaseFor(value)} label={t(`pages.billing.status.${kind}.${value}`)} />
   );
 }
 

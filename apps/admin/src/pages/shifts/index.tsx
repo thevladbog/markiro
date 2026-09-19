@@ -17,7 +17,7 @@ import {
   StatusChip,
   Table,
 } from "@markiro/ui";
-import type { BadgeTone, SelectOption, StatusChipStatus, TableColumn } from "@markiro/ui";
+import type { BadgeTone, SelectOption, TagPhase, TableColumn } from "@markiro/ui";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
 
@@ -33,15 +33,19 @@ import "./shifts.css";
 
 type StatusFilter = "all" | ShiftStatus;
 
-const STATUS_TO_CHIP: Record<ShiftStatus, StatusChipStatus> = {
-  planned: "info",
-  active: "ok",
-  closed: "neutral",
+export const SHIFT_STATUS_TO_PHASE: Record<ShiftStatus, TagPhase> = {
+  planned: "planned",
+  active: "active",
+  closed: "done",
 };
 
-const MODE_TO_BADGE_TONE: Record<ShiftDto["mode"], BadgeTone> = {
-  validation: "neutral",
-  aggregation: "accent",
+/**
+ * Валидация и агрегация равноправны. Раньше одна была `neutral`, вторая
+ * `accent`, и таблица смен подсказывала, что агрегация «лучше».
+ */
+export const SHIFT_MODE_TO_TONE: Record<ShiftDto["mode"], BadgeTone> = {
+  validation: "violet",
+  aggregation: "teal",
 };
 
 function formatShiftOutput(output: ShiftDto["output"], t: TFunction, language: string): string {
@@ -183,7 +187,7 @@ export function ShiftsPage() {
         render: (row) => (
           <div className="mk-shifts-table__stack">
             <span>{row.lineName ?? "—"}</span>
-            <Badge tone={MODE_TO_BADGE_TONE[row.mode]}>{t(`pages.shifts.mode.${row.mode}`)}</Badge>
+            <Badge tone={SHIFT_MODE_TO_TONE[row.mode]}>{t(`pages.shifts.mode.${row.mode}`)}</Badge>
           </div>
         ),
       },
@@ -197,12 +201,16 @@ export function ShiftsPage() {
             <strong className="font-mono">{row.plannedQty ?? "—"}</strong>
             <span>{t("pages.shifts.table.plannedQty")}</span>
             <StatusChip
-              status={STATUS_TO_CHIP[row.status]}
+              phase={SHIFT_STATUS_TO_PHASE[row.status]}
               label={t(`pages.shifts.status.${row.status}`)}
               {...(row.status === "closed" && row.closeReason ? { title: row.closeReason } : {})}
             />
             {row.status === "closed" && row.closeReason && <span>{row.closeReason}</span>}
-            {row.lateDataAt && <Badge tone="warn">{t("pages.shifts.table.lateData")}</Badge>}
+            {row.lateDataAt && (
+              // Matches `dashboard/index.tsx`'s same "late data" fact, which
+              // already reads as `attention`, not a flat `Badge tone="warn"`.
+              <StatusChip phase="attention" label={t("pages.shifts.table.lateData")} />
+            )}
           </div>
         ),
       },

@@ -182,7 +182,19 @@ describe("tenant service periods", () => {
     expect(within(usage).getByText("Уточнение продолжительности")).toBeDefined();
     expect(within(usage).getByText(/Выполнено/)).toBeDefined();
     expect(within(usage).getAllByText(/Проведено/)).toHaveLength(2);
-    expect(screen.getByText("Не списывается из пакета")).toBeDefined();
+
+    // Minor 1 (final review): `classification` is a two-value category, not
+    // a phase -- both entries now render `Badge` category tones (violet for
+    // the ordinary "работа из пакета", teal for the defect correction), not
+    // `StatusChip` with the ordinary case silently defaulting to `none`.
+    const customerServiceTag = within(usage).getByText("Работа из пакета");
+    expect(customerServiceTag.closest(".mk-badge")?.className).toContain("mk-badge--violet");
+    expect(customerServiceTag.closest(".mk-chip")).toBeNull();
+
+    const defectTag = screen.getByText("Не списывается из пакета");
+    expect(defectTag.closest(".mk-badge")?.className).toContain("mk-badge--teal");
+    expect(defectTag.closest(".mk-chip")).toBeNull();
+
     expect(screen.queryByText("Диагностика завершена")).toBeNull();
   });
 

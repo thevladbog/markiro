@@ -1,7 +1,16 @@
 import { useId, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Alert, Badge, Button, EmptyState, PageHeader, Select, Spinner, Table } from "@markiro/ui";
+import {
+  Alert,
+  Button,
+  EmptyState,
+  PageHeader,
+  Select,
+  Spinner,
+  StatusChip,
+  Table,
+} from "@markiro/ui";
 import type { SelectOption, TableColumn } from "@markiro/ui";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
@@ -218,7 +227,7 @@ function ConflictsTable({ baseColumns, rows, onReview, pendingReviewId }: Confli
       align: "right",
       render: (row) =>
         row.reviewedAt ? (
-          <Badge tone="neutral">{t("pages.conflicts.reviewed")}</Badge>
+          <StatusChip phase="done" label={t("pages.conflicts.reviewed")} />
         ) : onReview ? (
           <Button
             type="button"

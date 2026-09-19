@@ -14,7 +14,7 @@ import {
   StatusChip,
   Table,
 } from "@markiro/ui";
-import type { SelectOption, StatusChipStatus, TableColumn } from "@markiro/ui";
+import type { SelectOption, TableColumn } from "@markiro/ui";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
 
@@ -28,22 +28,9 @@ import {
   useDocuments,
   type DocumentDto,
 } from "./api.js";
+import { DOCUMENT_STATUS_TO_PHASE } from "./DocumentDetail.js";
 
 type StatusFilter = "all" | "draft" | "applied" | "cancelled";
-
-// StatusChip only defines ok/error/warn/info/neutral tones (see
-// packages/ui/src/components/StatusChip.tsx) -- "applied" maps to the
-// positive "ok" tone and "cancelled" to "warn" (cancellation is a normal
-// user-initiated terminal state, not a failure, so "error" would be
-// misleading -- "warn" is the closest analog to a "muted/undone" tone the
-// component actually exposes) so the three document states stay visually
-// distinct rather than collapsing draft and cancelled onto the same neutral
-// chip.
-const STATUS_TO_CHIP: Record<Exclude<StatusFilter, "all">, StatusChipStatus> = {
-  draft: "neutral",
-  applied: "ok",
-  cancelled: "warn",
-};
 
 /** Debounce delay (ms) between the last keystroke in the docNo search box and the refetch -- mirrors `pages/catalog/index.tsx`'s pattern. */
 const SEARCH_DEBOUNCE_MS = 300;
@@ -115,7 +102,7 @@ export function DisaggregationPage() {
       title: t("pages.disaggregation.table.status"),
       render: (row) => (
         <StatusChip
-          status={STATUS_TO_CHIP[row.status]}
+          phase={DOCUMENT_STATUS_TO_PHASE[row.status]}
           label={t(`pages.disaggregation.status.${row.status}`)}
         />
       ),

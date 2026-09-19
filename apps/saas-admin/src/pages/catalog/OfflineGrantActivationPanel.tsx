@@ -5,7 +5,15 @@ import type {
   PlatformGrantActivationPrepareRequest,
   PlatformGrantReadinessPreviewResponse,
 } from "@markiro/platform-contracts";
-import { Alert, Button, Input, StatusChip, Table, type TableColumn } from "@markiro/ui";
+import {
+  Alert,
+  Button,
+  Input,
+  StatusChip,
+  Table,
+  type TableColumn,
+  type TagPhase,
+} from "@markiro/ui";
 import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -26,6 +34,33 @@ type PrepareAttempt = GrantActivationAttempt<
 >;
 type ConfirmAttempt = GrantActivationAttempt<PlatformGrantActivationConfirmRequest, null>;
 type CancelAttempt = GrantActivationAttempt<PlatformGrantActivationCancelRequest, null>;
+
+/**
+ * Фактический union — `grantActivationStateSchema`
+ * (`packages/platform-contracts/src/offline-grant-activations.ts`): пять
+ * значений. Раньше три ветки схлопывали `cancelled`, `expired` и
+ * `needs_review` в один и тот же серый тег, и партия, которой нужна ручная
+ * проверка, выглядела как обычная отменённая партия. `expired` — система
+ * прекратила действие сама, без участия человека (`failed`, как истёкший
+ * токен агента подписи в `apps/admin/src/pages/integrations/
+ * SignerAgentsPanel.tsx`), а не `retired` (человек отозвал).
+ */
+export function grantActivationStatePhase(
+  state: PlatformGrantActivationPreparation["state"],
+): TagPhase {
+  switch (state) {
+    case "prepared":
+      return "planned";
+    case "confirmed":
+      return "done";
+    case "cancelled":
+      return "retired";
+    case "expired":
+      return "failed";
+    case "needs_review":
+      return "attention";
+  }
+}
 
 export function OfflineGrantActivationPanel({
   preview,
@@ -187,9 +222,7 @@ export function OfflineGrantActivationPanel({
       title: t("catalog.offlineActivation.columns.state"),
       render: (item) => (
         <StatusChip
-          status={
-            item.state === "confirmed" ? "ok" : item.state === "prepared" ? "warn" : "neutral"
-          }
+          phase={grantActivationStatePhase(item.state)}
           label={t(`catalog.offlineActivation.state.${item.state}`)}
         />
       ),

@@ -507,7 +507,13 @@ describe("ShiftsPage", () => {
 
     renderPage();
 
-    expect(await screen.findByText("Данные после закрытия")).toBeDefined();
+    // Finding 7 (final review): this used to be a flat `Badge tone="warn"`,
+    // unlike `dashboard/index.tsx`'s identical "late data" fact, which was
+    // already `attention`.
+    const lateDataTag = (await screen.findByText("Данные после закрытия")).closest(".mk-chip");
+    expect(lateDataTag).not.toBeNull();
+    expect(lateDataTag?.className).toContain("mk-chip--attention");
+    expect(lateDataTag?.querySelector(".mk-tag__glyph")?.textContent).toBe("!");
   });
 
   it("does not mark a shift that received nothing late", async () => {

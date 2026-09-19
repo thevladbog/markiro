@@ -327,7 +327,9 @@ it("does not cancel a saved preparation before explicit confirmation", async () 
   await userEvent.click(
     within(screen.getByRole("alertdialog")).getByRole("button", { name: "Confirm cancellation" }),
   );
-  await screen.findByText("Cancelled");
+  const cancelledLabel = await screen.findByText("Cancelled");
+  expect(cancelledLabel.closest(".mk-chip")?.className).toContain("mk-chip--retired");
+  expect(cancelledLabel.closest(".mk-chip")?.className).not.toContain("mk-chip--running");
   expect(bodies[0]?.body).toEqual({ requestId: expect.any(String), expectedRevision: 1 });
 });
 

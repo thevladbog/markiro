@@ -8,6 +8,7 @@ import {
   Table,
   Textarea,
   type TableColumn,
+  type TagPhase,
 } from "@markiro/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
@@ -23,6 +24,17 @@ import { OfflineGrantReadinessPanel } from "./OfflineGrantReadinessPanel.js";
 
 const POLICY_QUERY_KEY = ["platform", "catalog", "lifecycle-policies"] as const;
 const EMPTY_BOUNDS = "{}";
+
+/**
+ * `approved` — политика утверждена и доступна для использования в партиях
+ * активации прямо сейчас (`active`), а не разово завершённое действие
+ * (`done`): те же policyKey+version продолжают применяться, пока политику не
+ * заменят новой версией.
+ */
+const OFFLINE_GRANT_POLICY_STATUS_TO_PHASE = {
+  draft: "draft",
+  approved: "active",
+} as const satisfies Record<OfflineGrantPolicyDto["status"], TagPhase>;
 
 export function OfflineGrantPoliciesPanel({
   canWrite,
@@ -142,7 +154,7 @@ export function OfflineGrantPoliciesPanel({
       title: t("catalog.offlinePolicies.columns.status"),
       render: (policy) => (
         <StatusChip
-          status={policy.status === "approved" ? "ok" : "warn"}
+          phase={OFFLINE_GRANT_POLICY_STATUS_TO_PHASE[policy.status]}
           label={t(`catalog.offlinePolicies.status.${policy.status}`)}
         />
       ),

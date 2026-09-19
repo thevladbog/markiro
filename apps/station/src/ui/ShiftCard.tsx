@@ -1,4 +1,5 @@
-import { Button, Card, StatusChip } from "@markiro/ui";
+import { Badge, Button, Card, StatusChip } from "@markiro/ui";
+import type { TagPhase } from "@markiro/ui";
 import { formatShiftPlannedDate, stationDisplayLocale } from "../lib/format-date.js";
 import type { SqlExecutor, StationProductImageDescriptor } from "../lib/mirror.js";
 import { ProductImage } from "./ProductImage.js";
@@ -28,6 +29,17 @@ export interface ShiftCardProps {
   image?: StationProductImageDescriptor | null | undefined;
   imageRefreshKey?: number;
 }
+
+/**
+ * `closing` — самостоятельная фаза `running`, а не разновидность ожидания:
+ * смена ещё не закрыта, закрытие идёт.
+ */
+const SHIFT_CARD_STATUS_TO_PHASE: Record<NonNullable<ShiftCardProps["status"]>, TagPhase> = {
+  planned: "planned",
+  active: "active",
+  closing: "running",
+  closed: "done",
+};
 
 /** A fixed-height floor card; the parent supplies a bounded page of at most two. */
 export function ShiftCard({
@@ -82,17 +94,14 @@ export function ShiftCard({
         <div className="shift-card__details">
           <div className="shift-card__heading">
             {number ? (
-              <StatusChip
-                className="shift-card__number"
-                status="neutral"
-                glyph={null}
-                label={number}
-              />
+              <Badge className="shift-card__number" size="floor" mono>
+                {number}
+              </Badge>
             ) : null}
             <StatusChip
               className="shift-card__status"
-              status={status === "active" ? "ok" : status === "closed" ? "neutral" : "info"}
-              glyph={status === "active" ? "●" : status === "closed" ? "■" : "◷"}
+              size="floor"
+              phase={SHIFT_CARD_STATUS_TO_PHASE[status ?? "planned"]}
               label={statusLabel ?? status}
             />
           </div>

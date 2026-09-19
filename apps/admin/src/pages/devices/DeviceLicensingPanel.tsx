@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button, Card, ConfirmDialog, StatusChip } from "@markiro/ui";
+import type { TagPhase } from "@markiro/ui";
 import { ApiRequestError } from "../../api/client.js";
 import { CABINET_ACCESS_QUERY_KEY } from "../../access/api.js";
 import { useAuthClient } from "../../auth/client.js";
@@ -16,6 +17,27 @@ import {
 import type { WorkingDevicePool } from "@markiro/platform-contracts";
 
 const attemptKey = (deviceId: string) => ["device-licensing", "cancel-attempt", deviceId] as const;
+
+/**
+ * `assigned` — устоявшееся владение лицензионным слотом («Занято»), а не
+ * системная операция в процессе (`running` рисует вращающуюся стрелку —
+ * исход ещё не известен). `inconsistent` — просьба проверить («Нужна
+ * проверка»), а не сообщение об ошибке (`failed`): `attention` даёт янтарный
+ * тон вместо тревожного красного.
+ */
+export function licenseSlotPhase(state: WorkingDevicePool["devices"][number]["state"]): TagPhase {
+  switch (state) {
+    case "released":
+      return "retired";
+    case "inconsistent":
+      return "attention";
+    case "reserved":
+      return "planned";
+    case "assigned":
+      return "active";
+  }
+}
+
 export function DeviceLicensingPanel({ enabled }: { enabled: boolean }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
@@ -122,13 +144,7 @@ export function DeviceLicensingPanel({ enabled }: { enabled: boolean }) {
           <div key={device.deviceId} className="devices-licensing-row">
             <span className="devices-licensing-row__name">{device.name}</span>
             <StatusChip
-              status={
-                device.state === "released"
-                  ? "neutral"
-                  : device.state === "inconsistent"
-                    ? "error"
-                    : "info"
-              }
+              phase={licenseSlotPhase(device.state)}
               label={t(`pages.devices.licensing.state.${device.state}`)}
             />
             {device.canCancel && pool.canCancelReservations ? (

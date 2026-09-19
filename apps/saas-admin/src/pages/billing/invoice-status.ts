@@ -1,15 +1,15 @@
-import type { StatusChipStatus } from "@markiro/ui";
+import type { TagPhase } from "@markiro/ui";
 
 import type { Invoice } from "./api.js";
 
-const TONES: Record<Invoice["status"], StatusChipStatus> = {
-  draft: "neutral",
-  issued: "info",
-  partially_paid: "warn",
-  paid: "ok",
-  cancelled: "error",
+const PHASES: Record<Invoice["status"], TagPhase> = {
+  draft: "draft",
+  issued: "running",
+  partially_paid: "attention",
+  paid: "done",
+  cancelled: "retired",
 };
 
-export function invoiceStatusTone(status: Invoice["status"]): StatusChipStatus {
-  return TONES[status];
+export function invoiceStatusPhase(status: Invoice["status"]): TagPhase {
+  return PHASES[status];
 }
