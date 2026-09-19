@@ -381,8 +381,13 @@ them.
   existing `product_duplicate` code paths.
 - Validation: a `product_km` template must contain exactly one `datamatrix` element bound
   to `km.code` (reuse the duplicate check, not the duplicate policy).
-- A stock default template ships with the seed: DataMatrix, product name, GTIN and serial
-  as text, sized for a common 58 × 40 mm label.
+- Three stock templates ship with the seed. «Этикетка КМ 58×40» carries the DataMatrix,
+  product name, GTIN and serial as text, sized for a common 58 × 40 mm label and
+  preselected by the print dialog. «Этикетка КМ 15×15» and «Этикетка КМ 20×20» carry the
+  code and nothing else, for stock too narrow for any text: the symbol is centred with a
+  blank physical margin on every side (2 mm and 2.5 mm), which is separate from the
+  symbol's own quiet zone — the raster reserves that inside `sizeMm`. Added on request
+  2026-09-19, after the rest of this phase was implemented.
 - The Station bundle does not receive `product_km` templates in this phase; the bundle
   schema is untouched.
 

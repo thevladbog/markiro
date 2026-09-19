@@ -107,13 +107,30 @@ CREATE INDEX "chz_km_orders_tenant_created_idx" ON "chz_km_orders" USING btree (
 CREATE INDEX "chz_km_orders_unfinished_idx" ON "chz_km_orders" USING btree ("tenant_id") WHERE "chz_km_orders"."state" not in ('completed', 'rejected', 'failed');--> statement-breakpoint
 ALTER TABLE "label_templates" ADD CONSTRAINT "label_templates_purpose_check" CHECK ("label_templates"."purpose" IN ('box', 'product_duplicate', 'pallet', 'product_km'));
 --> statement-breakpoint
--- Stock KM label for tenants that already exist; new tenants get it from
+-- Stock KM labels for tenants that already exist; new tenants get them from
 -- tenant-provisioning.service.ts (`buildKmLabelTemplates()`). (tenant_id,
--- name, purpose) is the seed identity, so a re-run cannot duplicate it.
+-- name, purpose) is the seed identity, so a re-run cannot duplicate them.
+-- The two squares carry the code alone for stock too narrow for any text.
 INSERT INTO label_templates (id, tenant_id, name, purpose, spec)
 SELECT gen_random_uuid(), o.id, 'Этикетка КМ 58×40', 'product_km', '{"widthMm":58,"heightMm":40,"dpi":203,"language":"zpl","elements":[{"kind":"barcode","id":"km","xMm":2,"yMm":2,"format":"datamatrix","data":"km.code","sizeMm":24},{"kind":"field","id":"name","xMm":28,"yMm":3,"field":"product.printName","fontSizePt":9,"bold":true,"maxWidthMm":28,"maxLines":3},{"kind":"text","id":"cap-gtin","xMm":28,"yMm":19,"text":"GTIN","fontSizePt":5,"maxWidthMm":28},{"kind":"field","id":"gtin","xMm":28,"yMm":21.5,"field":"product.gtin","fontSizePt":7,"maxWidthMm":28},{"kind":"field","id":"serial","xMm":2,"yMm":29,"field":"km.code","textFormat":"km_without_crypto","fontSizePt":6,"maxWidthMm":54,"maxLines":1}]}'::jsonb
 FROM organization o
 WHERE NOT EXISTS (
   SELECT 1 FROM label_templates lt
   WHERE lt.tenant_id = o.id AND lt.name = 'Этикетка КМ 58×40' AND lt.purpose = 'product_km'
+);
+
+INSERT INTO label_templates (id, tenant_id, name, purpose, spec)
+SELECT gen_random_uuid(), o.id, 'Этикетка КМ 15×15', 'product_km', '{"widthMm":15,"heightMm":15,"dpi":203,"language":"zpl","elements":[{"kind":"barcode","id":"km","xMm":2,"yMm":2,"format":"datamatrix","data":"km.code","sizeMm":11}]}'::jsonb
+FROM organization o
+WHERE NOT EXISTS (
+  SELECT 1 FROM label_templates lt
+  WHERE lt.tenant_id = o.id AND lt.name = 'Этикетка КМ 15×15' AND lt.purpose = 'product_km'
+);
+
+INSERT INTO label_templates (id, tenant_id, name, purpose, spec)
+SELECT gen_random_uuid(), o.id, 'Этикетка КМ 20×20', 'product_km', '{"widthMm":20,"heightMm":20,"dpi":203,"language":"zpl","elements":[{"kind":"barcode","id":"km","xMm":2.5,"yMm":2.5,"format":"datamatrix","data":"km.code","sizeMm":15}]}'::jsonb
+FROM organization o
+WHERE NOT EXISTS (
+  SELECT 1 FROM label_templates lt
+  WHERE lt.tenant_id = o.id AND lt.name = 'Этикетка КМ 20×20' AND lt.purpose = 'product_km'
 );

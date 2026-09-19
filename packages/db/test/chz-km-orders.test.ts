@@ -8,6 +8,7 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { eq } from "drizzle-orm";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { buildKmLabelTemplates } from "@markiro/domain";
 import * as schema from "../src/schema.js";
 import {
   CHZ_SIGNER_TASK_TYPES,
@@ -115,12 +116,37 @@ describe.skipIf(!databaseUrl)("chz km orders migration", () => {
     if (temporaryRoot) await rm(temporaryRoot, { recursive: true, force: true });
   });
 
-  it("seeds the stock KM template for an existing tenant exactly once", async () => {
-    const { rows } = await pool.query(
-      `SELECT count(*)::int AS n FROM label_templates WHERE tenant_id = $1 AND purpose = 'product_km' AND name = 'Этикетка КМ 58×40'`,
+  it("seeds every stock KM template for an existing tenant exactly once, byte-for-byte", async () => {
+    // The migration carries its own copy of each spec as a SQL literal, so
+    // this is the only thing standing between it and `buildKmLabelTemplates()`
+    // drifting apart. Compare the stored jsonb against the builder rather than
+    // against a literal repeated here, which would just be a third copy.
+    const expected = buildKmLabelTemplates();
+    const { rows } = await pool.query<{ name: string; spec: unknown; n: number }>(
+      `SELECT name, spec, count(*) OVER (PARTITION BY name)::int AS n
+         FROM label_templates
+        WHERE tenant_id = $1 AND purpose = 'product_km'
+        ORDER BY name`,
       [tenantId],
     );
-    expect(rows[0]).toEqual({ n: 1 });
+
+    expect(rows.map((r) => r.name).sort()).toEqual(expected.map((t) => t.name).sort());
+    for (const row of rows) {
+      expect(row.n, `${row.name} must be seeded exactly once`).toBe(1);
+      const match = expected.find((t) => t.name === row.name);
+      expect(row.spec, `${row.name} spec must match buildKmLabelTemplates()`).toEqual(match?.spec);
+    }
+  });
+
+  it("re-running the seed cannot duplicate a template", async () => {
+    // The guard is `WHERE NOT EXISTS (tenant_id, name, purpose)`; a fresh
+    // database plus a second migrate is the only way to exercise it.
+    await migrate(drizzle(pool), { migrationsFolder });
+    const { rows } = await pool.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM label_templates WHERE tenant_id = $1 AND purpose = 'product_km'`,
+      [tenantId],
+    );
+    expect(rows[0]?.n).toBe(buildKmLabelTemplates().length);
   });
 
   it("accepts a created order and refuses issued > fetched", async () => {
