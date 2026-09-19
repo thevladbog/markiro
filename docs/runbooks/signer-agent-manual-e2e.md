@@ -280,9 +280,12 @@ person who wrote it.
    partner status would take — or call
    `POST https://suz-integrator.sandbox.crptech.ru/api/v3/integration/connection?omsId={omsId}`
    (`omsId` is your own СУЗ operator identifier from the cabinet's settings)
-   with the header `X-RegistrationKey: 4344d884-7f21-456c-981e-cd68e92391e8`
-   (the public sandbox registration key every participant may use) and a
-   **detached** signature of the request body in `X-Signature`. Record the
+   with the header `X-RegistrationKey: <public sandbox registration key>` and
+   a **detached** signature of the request body in `X-Signature`. The key is
+   the one Chestny ZNAK publishes for the sandbox, identical for every
+   participant — take it from the СУЗ integration documentation
+   (`API_СУЗ_3.0.pdf`, the integration/connection section) rather than from
+   this file, which does not carry credential-shaped literals. Record the
    `omsConnection` the response returns.
 4. Enter `omsId` and `omsConnection` in the cabinet's Chestny ZNAK channel
    settings.

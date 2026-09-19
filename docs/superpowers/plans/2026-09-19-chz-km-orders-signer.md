@@ -631,8 +631,8 @@ run and come back with answers. Cover, in order:
    repeating them).
 2. Register an installation for Markiro. Either register it in the СУЗ sandbox cabinet,
    or call `POST https://suz-integrator.sandbox.crptech.ru/api/v3/integration/connection?omsId={omsId}`
-   with the header `X-RegistrationKey: 4344d884-7f21-456c-981e-cd68e92391e8` (the public
-   sandbox registration key) and a detached signature of the body in `X-Signature`. Record
+   with the header `X-RegistrationKey: <public sandbox registration key>` and a detached
+   signature of the body in `X-Signature`. Record
    the returned `omsConnection`.
 3. Enter `omsId` and `omsConnection` in the cabinet's Chestny ZNAK channel settings.
 4. Wait for the scheduler's `oms_auth` task. Confirm «СУЗ token delivered» in the agent's

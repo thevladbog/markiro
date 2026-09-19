@@ -2995,7 +2995,7 @@ git commit -m "feat(admin): product_km in the label editor, СУЗ settings and 
 
 **Files:**
 
-- Modify: `docs/runbooks/signer-agent-manual-e2e.md` (sandbox section for СУЗ: register an installation with the public sandbox key `4344d884-7f21-456c-981e-cd68e92391e8` at `https://suz-integrator.sandbox.crptech.ru`, enter `omsId`/`omsConnection`, wait for the СУЗ token, order 2 codes, watch the state timeline, export TXT, print one label; record the real shapes of `simpleSignIn/{omsConnection}`, `order`, `order/status`, `codes`)
+- Modify: `docs/runbooks/signer-agent-manual-e2e.md` (sandbox section for СУЗ: register an installation with the public sandbox registration key at `https://suz-integrator.sandbox.crptech.ru`, enter `omsId`/`omsConnection`, wait for the СУЗ token, order 2 codes, watch the state timeline, export TXT, print one label; record the real shapes of `simpleSignIn/{omsConnection}`, `order`, `order/status`, `codes`)
 - Modify: `docs/superpowers/specs/2026-09-18-chz-km-orders-design.md` (status line → «Implemented: part A», list the three deviations)
 - Modify: `README.md` Chestny ZNAK row (add «KM orders, encrypted code pool, office export/print»)
 
