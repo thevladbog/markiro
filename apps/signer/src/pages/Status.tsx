@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
-import { Alert, Button, Card, DataTabs, StatusChip } from "@markiro/ui";
+import { Alert, Button, Card, DataTabs, StatusChip, type TagPhase } from "@markiro/ui";
 import { bridge, type AgentStatus } from "../lib/bridge.js";
 import { AutostartControl } from "../components/AutostartControl.js";
 import { CertificatePicker } from "../components/CertificatePicker.js";
@@ -8,14 +8,21 @@ import { JournalList } from "../components/JournalList.js";
 import { UpdateControl } from "../components/UpdateControl.js";
 import type { UpdateCheckResult } from "../lib/updates.js";
 
-const PHASE_TONE = {
-  unpaired: "neutral",
-  idle: "ok",
-  reconnecting: "warn",
-  unavailable: "error",
-  working: "info",
-  degraded: "error",
-} as const;
+/**
+ * `unpaired` перестаёт быть просто серым и становится «значения нет» (агент ещё
+ * не привязан); `idle` — рабочее дежурное состояние агента (жив, ждёт задачу),
+ * а не успех разовой операции, поэтому `active`, а не `done`; `degraded` уезжает
+ * из `failed` в `attention` — деградация не равна недоступности, раньше они были
+ * неразличимы (обе давали тон `error`).
+ */
+const SIGNER_PHASE_TO_TAG_PHASE = {
+  unpaired: "none",
+  idle: "active",
+  reconnecting: "attention",
+  unavailable: "failed",
+  working: "running",
+  degraded: "attention",
+} as const satisfies Record<string, TagPhase>;
 
 type StatusTab = "status" | "journal";
 
@@ -82,7 +89,7 @@ export function Status({
             <div className="signer-status__tenant">
               <strong>{status.tenantName}</strong>
               <StatusChip
-                status={PHASE_TONE[status.phase]}
+                phase={SIGNER_PHASE_TO_TAG_PHASE[status.phase]}
                 label={t(`status.phase.${status.phase}`)}
               />
             </div>
