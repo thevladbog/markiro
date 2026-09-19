@@ -12,12 +12,14 @@ import {
   PageHeader,
   Select,
   Spinner,
+  StatusChip,
   Table,
 } from "@markiro/ui";
 import type { SelectOption, TableColumn } from "@markiro/ui";
 
 import { formatCreatedAt } from "../../lib/datetime.js";
 import { useProducts } from "../catalog/api.js";
+import { PALLET_KIND_TO_TONE } from "../code-search/PalletCard.js";
 import { RegistryTabs } from "../code-search/RegistryTabs.js";
 import { useAllDevices } from "../devices/api.js";
 import {
@@ -147,9 +149,7 @@ export function PalletsPage() {
         key: "kind",
         title: t("pages.pallets.table.kind"),
         render: (row) => (
-          <Badge tone={row.kind === "warehouse" ? "accent" : "neutral"}>
-            {t(`pages.pallets.kind.${row.kind}`)}
-          </Badge>
+          <Badge tone={PALLET_KIND_TO_TONE[row.kind]}>{t(`pages.pallets.kind.${row.kind}`)}</Badge>
         ),
       },
       {
@@ -192,17 +192,18 @@ export function PalletsPage() {
         render: (row) => (
           <span style={{ display: "inline-flex", gap: 6, flexWrap: "wrap" }}>
             {row.disassembledAt ? (
-              <Badge tone="neutral">{t("pages.pallets.disassembled")}</Badge>
+              <StatusChip phase="dismantled" label={t("pages.pallets.disassembled")} />
             ) : null}
             {row.contentsChangedAfterClose ? (
-              <Badge tone="warn">{t("pages.pallets.contentsChangedAfterClose")}</Badge>
+              <StatusChip phase="attention" label={t("pages.pallets.contentsChangedAfterClose")} />
             ) : null}
             {row.rejectedMembershipCount > 0 ? (
-              <Badge tone="error">
-                {t("pages.pallets.rejections", {
+              <StatusChip
+                phase="failed"
+                label={t("pages.pallets.rejections", {
                   count: new Intl.NumberFormat(i18n.language).format(row.rejectedMembershipCount),
                 })}
-              </Badge>
+              />
             ) : null}
           </span>
         ),
