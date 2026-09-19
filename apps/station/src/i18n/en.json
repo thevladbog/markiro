@@ -141,6 +141,7 @@
     "barcodeFailed": "The shift form barcode could not be read.",
     "barcodeClosed": "This shift is closed.",
     "barcodeNotOnLine": "This shift is not on this line.",
+    "barcodeListLoading": "The shift list is still loading. Scan the form again.",
     "loading": "Loading shifts…",
     "empty": "No open shifts",
     "emptyHint": "The list refreshes automatically. Create a shift or wait for one planned in the admin panel.",

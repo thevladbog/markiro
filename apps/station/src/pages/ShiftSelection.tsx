@@ -395,12 +395,22 @@ export function ShiftSelection({
       // an inventory form. Staying silent on them is the difference between a
       // shared scanner and one that argues with its neighbours.
       if (!raw.startsWith(SHIFT_TASK_BARCODE_PREFIX)) return;
+      // A screen that is busy entering a shift should not report scan errors
+      // for any branch below, malformed tokens included.
+      if (controlsDisabled) return;
       const shiftId = parseShiftTaskBarcode(raw);
       if (shiftId === null) {
         setError(t("shifts.barcodeFailed"));
         return;
       }
-      if (controlsDisabled) return;
+      // The initial `GET /shifts` for this client has not settled yet, so an
+      // empty `items` cannot be trusted to mean "not on this line" -- it just
+      // means the list has not arrived. Say so instead of misdirecting the
+      // operator to another terminal.
+      if (loading) {
+        setError(t("shifts.barcodeListLoading"));
+        return;
+      }
       // `items`, not `openItems`: the closed shift is in the list, and naming it
       // beats sending an operator to look for a shift that already ended.
       const match = items.find((shift) => shift.id === shiftId);
@@ -417,7 +427,7 @@ export function ShiftSelection({
         ? rejoinRef.current(match)
         : openRef.current(match, "task_barcode"));
     });
-  }, [alternateActive, controlsDisabled, items, source, t]);
+  }, [alternateActive, controlsDisabled, items, loading, source, t]);
 
   async function enterRoute(enter: () => void, options?: ShiftSelectionRouteIntentOptions) {
     if (!onRouteIntent) {

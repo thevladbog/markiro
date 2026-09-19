@@ -37,7 +37,7 @@ function scanner() {
   };
 }
 
-function shiftFixture(status: "planned" | "active" | "closed") {
+function shiftFixture(status: "planned" | "active" | "closed" | "closing") {
   return {
     id: SHIFT_ID,
     status,
@@ -54,6 +54,7 @@ function shiftFixture(status: "planned" | "active" | "closed") {
 const plannedShift = () => shiftFixture("planned");
 const activeShift = () => shiftFixture("active");
 const closedShift = () => shiftFixture("closed");
+const closingShift = () => shiftFixture("closing");
 
 type PostMock = (path: string, body?: unknown) => Promise<unknown>;
 type OnSelectedMock = (shift: { id: string; status: string; mode: string }) => void;
@@ -128,13 +129,74 @@ describe("ShiftSelection barcode scanning", () => {
     expect(await screen.findByText("This shift is closed.")).toBeDefined();
   });
 
+  it("says a closing shift is closed rather than pretending the barcode is unreadable", async () => {
+    const scan = scanner();
+    renderSelection({ scan, items: [closingShift()] });
+
+    await waitFor(() => expect(screen.getByText("Test product")).toBeDefined());
+    act(() => scan.scan(`markiro:shift:v1:${SHIFT_ID}`));
+
+    expect(await screen.findByText("This shift is closed.")).toBeDefined();
+  });
+
   it("says the shift belongs to another line when it is not in this terminal's list", async () => {
     const scan = scanner();
     renderSelection({ scan, items: [] });
 
+    // Wait for the (empty) initial list to settle so this exercises the
+    // genuine "not on this line" case, not the loading race covered below.
+    await waitFor(() => expect(screen.getByText("No open shifts")).toBeDefined());
     act(() => scan.scan("markiro:shift:v1:44444444-4444-4444-8444-444444444444"));
 
     expect(await screen.findByText("This shift is not on this line.")).toBeDefined();
+  });
+
+  it("does not call a shift absent while the list is still loading", async () => {
+    const scan = scanner();
+    // The initial `GET /shifts` promise is held open deliberately so the scan
+    // below fires while `loading` is still true -- the exact window where the
+    // handler must not judge a shift absent from an empty, not-yet-loaded list.
+    let resolveFetch: (response: Response) => void = () => {};
+    const pendingFetch = new Promise<Response>((resolve) => {
+      resolveFetch = resolve;
+    });
+    vi.spyOn(globalThis, "fetch").mockReturnValue(pendingFetch);
+    const baseClient = createStationClient({
+      machineId: "m1",
+      apiKey: "k",
+      serverUrl: "http://localhost:3000",
+    });
+    const post = vi
+      .fn<PostMock>()
+      .mockResolvedValue({ id: SHIFT_ID, status: "active", mode: "validation" });
+    const client: StationClient = {
+      ...baseClient,
+      post: <T,>(path: string, body?: unknown) => post(path, body) as Promise<T>,
+    };
+    const onSelected = vi.fn<OnSelectedMock>();
+    render(
+      <ShiftSelection
+        client={client}
+        onSelected={onSelected}
+        onNew={() => {}}
+        source={scan.source}
+      />,
+    );
+
+    act(() => scan.scan(`markiro:shift:v1:${SHIFT_ID}`));
+
+    expect(
+      await screen.findByText("The shift list is still loading. Scan the form again."),
+    ).toBeDefined();
+    expect(screen.queryByText("This shift is not on this line.")).toBeNull();
+    expect(onSelected).not.toHaveBeenCalled();
+
+    resolveFetch(new Response(JSON.stringify({ items: [plannedShift()] }), { status: 200 }));
+    await waitFor(() => expect(screen.getByText("Test product")).toBeDefined());
+
+    act(() => scan.scan(`markiro:shift:v1:${SHIFT_ID}`));
+
+    await waitFor(() => expect(onSelected).toHaveBeenCalled());
   });
 
   it("reports an unreadable barcode for a well-prefixed payload that is not a shift id", async () => {
