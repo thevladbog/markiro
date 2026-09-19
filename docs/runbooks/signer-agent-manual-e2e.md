@@ -270,6 +270,7 @@ who wrote it.
    the СУЗ sandbox cabinet's own interface — the path a tenant without
    partner status would take — or call
    `POST https://suz-integrator.sandbox.crptech.ru/api/v3/integration/connection?omsId={omsId}`
+   (`omsId` is your own СУЗ operator identifier from the cabinet's settings)
    with the header `X-RegistrationKey: 4344d884-7f21-456c-981e-cd68e92391e8`
    (the public sandbox registration key every participant may use) and a
    **detached** signature of the request body in `X-Signature`. Record the
