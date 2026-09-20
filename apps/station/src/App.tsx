@@ -1599,26 +1599,28 @@ export function App() {
         device_id: string;
         owner_kind: "station";
         credential_epoch: number;
-        mode: "observe" | "strict";
       }>(
-        "SELECT tenant_id,device_id,owner_kind,credential_epoch,mode FROM offline_grant_install_state WHERE id=1",
+        "SELECT tenant_id,device_id,owner_kind,credential_epoch FROM offline_grant_install_state WHERE id=1",
       );
       if (grantState) {
         const admission = new StationGrantAdmission(tauriExecutor, sampleGrantClock);
         // The ordinary bundle mirror starts only after this function publishes
         // the floor task, so a first entry has no projection to bind yet.
-        const execution = await ensureShiftExecutionProjection({
-          client: activeClient,
-          exec: tauriExecutor,
-          shiftId: entered.id,
-          terminalId: floorConfig.deviceId,
-          generation: floorGeneration,
-        });
+        const projection = (force = false) =>
+          ensureShiftExecutionProjection({
+            client: activeClient,
+            exec: tauriExecutor,
+            shiftId: entered.id,
+            terminalId: floorConfig.deviceId ?? null,
+            generation: floorGeneration,
+            force,
+          });
+        const execution = await projection();
         if (!lease.isCurrent() || !credentialGenerationIsCurrent(floorGeneration)) return;
         const decision = await admitTaskEntry({
           admission,
           generation: floorGeneration,
-          mode: grantState.mode,
+          refreshExecution: () => projection(true),
           owner: {
             tenantId: grantState.tenant_id,
             deviceId: grantState.device_id,
@@ -1683,9 +1685,8 @@ export function App() {
         device_id: string;
         owner_kind: "station";
         credential_epoch: number;
-        mode: "observe" | "strict";
       }>(
-        "SELECT tenant_id,device_id,owner_kind,credential_epoch,mode FROM offline_grant_install_state WHERE id=1",
+        "SELECT tenant_id,device_id,owner_kind,credential_epoch FROM offline_grant_install_state WHERE id=1",
       );
       if (grantState) {
         const admission = new StationGrantAdmission(tauriExecutor, sampleGrantClock);
@@ -1695,7 +1696,6 @@ export function App() {
         const decision = await admitTaskEntry({
           admission,
           generation: floorGeneration,
-          mode: grantState.mode,
           owner: {
             tenantId: grantState.tenant_id,
             deviceId: grantState.device_id,

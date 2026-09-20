@@ -136,6 +136,49 @@ describe("shift entry execution projection", () => {
     expect(get).not.toHaveBeenCalled();
     expect(projection).toBeNull();
   });
+
+  it("re-reads a mirrored projection when the caller forces a refresh", async () => {
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+    const get = vi.fn().mockResolvedValue(bundle);
+    await ensureShiftExecutionProjection({ client: { get }, exec, shiftId: "s1" });
+    get.mockClear();
+    get.mockResolvedValue({
+      ...bundle,
+      shift: { ...bundle.shift, stationCloseAccess: { kind: "admin_only" } },
+    });
+
+    const projection = await ensureShiftExecutionProjection({
+      client: { get },
+      exec,
+      shiftId: "s1",
+      force: true,
+    });
+
+    expect(get).toHaveBeenCalledWith("/shifts/s1/reference-bundle");
+    expect(projection?.scope.shift).toMatchObject({
+      stationClosePolicy: "admin_only",
+      stationCloseOwnerDeviceId: null,
+    });
+  });
+
+  it("keeps the mirrored projection when a forced refresh cannot run or fails", async () => {
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+    const get = vi.fn().mockResolvedValue(bundle);
+    await ensureShiftExecutionProjection({ client: { get }, exec, shiftId: "s1" });
+    get.mockClear();
+    get.mockRejectedValue(new Error("offline"));
+
+    const projection = await ensureShiftExecutionProjection({
+      client: { get },
+      exec,
+      shiftId: "s1",
+      force: true,
+    });
+
+    expect(projection?.scope.shift).toMatchObject({ stationClosePolicy: "single_device" });
+  });
 });
 
 const owner = {
@@ -159,83 +202,118 @@ const entry = {
 };
 
 describe("task entry admission", () => {
-  it("observes instead of blocking the floor when no projection could be bound", async () => {
-    const admission = {
-      commitNewWork: vi.fn(),
-      assessTaskWork: vi.fn(),
-    };
+  const stub = (mode: "observe" | "strict", methods: Record<string, unknown> = {}) => ({
+    commitNewWork: vi.fn(),
+    assessTaskWork: vi.fn(),
+    installedMode: vi.fn().mockResolvedValue(mode),
+    ...methods,
+  });
 
-    await expect(
-      admitTaskEntry({ ...entry, admission, mode: "observe", execution: null }),
-    ).resolves.toEqual({ allow: true, observe: true });
+  it("observes instead of blocking the floor when no projection could be bound", async () => {
+    const admission = stub("observe");
+
+    await expect(admitTaskEntry({ ...entry, admission, execution: null })).resolves.toEqual({
+      allow: true,
+      observe: true,
+    });
     expect(admission.commitNewWork).not.toHaveBeenCalled();
   });
 
   it("refuses an unbound task in strict mode", async () => {
-    const admission = {
-      commitNewWork: vi.fn(),
-      assessTaskWork: vi.fn(),
-    };
+    const admission = stub("strict");
 
-    await expect(
-      admitTaskEntry({ ...entry, admission, mode: "strict", execution: null }),
-    ).resolves.toEqual({ allow: false, reason: "execution_unavailable" });
+    await expect(admitTaskEntry({ ...entry, admission, execution: null })).resolves.toEqual({
+      allow: false,
+      reason: "execution_unavailable",
+    });
   });
 
-  it("observes a scope that no longer matches its signed grant", async () => {
-    const admission = {
-      commitNewWork: vi.fn().mockRejectedValue(new Error("offline grant active shift mismatch")),
-      assessTaskWork: vi.fn(),
-    };
+  it("reads the mode at the decision, not from a snapshot taken before the refresh", async () => {
+    // A readiness refresh installs strict while entry waits on the network.
+    const admission = stub("strict");
 
-    await expect(
-      admitTaskEntry({ ...entry, admission, mode: "observe", execution }),
-    ).resolves.toEqual({ allow: true, observe: true });
+    await expect(admitTaskEntry({ ...entry, admission, execution: null })).resolves.toEqual({
+      allow: false,
+      reason: "execution_unavailable",
+    });
+    expect(admission.installedMode).toHaveBeenCalledOnce();
   });
 
-  it("refuses a scope that no longer matches its signed grant in strict mode", async () => {
-    const admission = {
-      commitNewWork: vi.fn().mockRejectedValue(new Error("offline grant active shift mismatch")),
-      assessTaskWork: vi.fn(),
-    };
+  it("rebinds against a refreshed projection before judging a mismatch", async () => {
+    const refreshed: ShiftExecutionProjection = { ...execution, taskId: "s1" };
+    const commitNewWork = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("offline grant active shift mismatch"))
+      .mockResolvedValueOnce({ allow: true });
+    const admission = stub("strict", {
+      commitNewWork,
+      assessTaskWork: vi.fn().mockResolvedValue({ allow: true }),
+    });
+    const refreshExecution = vi.fn().mockResolvedValue(refreshed);
 
     await expect(
-      admitTaskEntry({ ...entry, admission, mode: "strict", execution }),
+      admitTaskEntry({ ...entry, admission, execution, refreshExecution }),
+    ).resolves.toEqual({ allow: true, observe: false });
+    expect(refreshExecution).toHaveBeenCalledOnce();
+    expect(commitNewWork).toHaveBeenCalledTimes(2);
+  });
+
+  it("refuses a mismatch that survives the refresh in strict mode", async () => {
+    const admission = stub("strict", {
+      commitNewWork: vi.fn().mockRejectedValue(new Error("offline grant active shift mismatch")),
+    });
+    const refreshExecution = vi.fn().mockResolvedValue(execution);
+
+    await expect(
+      admitTaskEntry({ ...entry, admission, execution, refreshExecution }),
     ).resolves.toEqual({ allow: false, reason: "execution_mismatch" });
+    expect(refreshExecution).toHaveBeenCalledOnce();
+  });
+
+  it("observes a mismatch that survives the refresh", async () => {
+    const admission = stub("observe", {
+      commitNewWork: vi.fn().mockRejectedValue(new Error("offline grant active shift mismatch")),
+    });
+
+    await expect(admitTaskEntry({ ...entry, admission, execution })).resolves.toEqual({
+      allow: true,
+      observe: true,
+    });
   });
 
   it("passes a bound task through and reports an observed allowance", async () => {
-    const admission = {
+    const admission = stub("observe", {
       commitNewWork: vi.fn().mockResolvedValue({ allow: true, reason: "missing_grant" }),
       assessTaskWork: vi.fn().mockResolvedValue({ allow: true }),
-    };
+    });
 
-    await expect(
-      admitTaskEntry({ ...entry, admission, mode: "observe", execution }),
-    ).resolves.toEqual({ allow: true, observe: true });
+    await expect(admitTaskEntry({ ...entry, admission, execution })).resolves.toEqual({
+      allow: true,
+      observe: true,
+    });
     expect(admission.assessTaskWork).toHaveBeenCalledOnce();
+    expect(admission.installedMode).not.toHaveBeenCalled();
   });
 
   it("does not consume new-work authority for a resumed task", async () => {
-    const admission = {
-      commitNewWork: vi.fn(),
+    const admission = stub("strict", {
       assessTaskWork: vi.fn().mockResolvedValue({ allow: true }),
-    };
+    });
 
     await expect(
-      admitTaskEntry({ ...entry, admission, mode: "strict", resuming: true, execution }),
+      admitTaskEntry({ ...entry, admission, resuming: true, execution }),
     ).resolves.toEqual({ allow: true, observe: false });
     expect(admission.commitNewWork).not.toHaveBeenCalled();
   });
 
   it("returns the denial reason a strict grant produced", async () => {
-    const admission = {
+    const admission = stub("strict", {
       commitNewWork: vi.fn().mockResolvedValue({ allow: false, reason: "exhausted" }),
-      assessTaskWork: vi.fn(),
-    };
+    });
 
-    await expect(
-      admitTaskEntry({ ...entry, admission, mode: "strict", execution }),
-    ).resolves.toEqual({ allow: false, reason: "exhausted" });
+    await expect(admitTaskEntry({ ...entry, admission, execution })).resolves.toEqual({
+      allow: false,
+      reason: "exhausted",
+    });
   });
 });

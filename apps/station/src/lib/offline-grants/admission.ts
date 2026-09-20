@@ -153,6 +153,17 @@ export class StationGrantAdmission {
     return { devices, tasks };
   }
 
+  /**
+   * The installed mode as this admission itself reads it. Entry-time policy
+   * for cases that never produce a decision (no execution projection, a
+   * binding that throws) must read the mode from here rather than from a
+   * snapshot its caller took earlier: a readiness refresh can install a new
+   * mode while entry is still waiting on the network.
+   */
+  async installedMode(): Promise<"observe" | "strict"> {
+    return (await this.context()).mode;
+  }
+
   async assessNewWork(intent: GrantIntent): Promise<StationAdmissionDecision> {
     const context = await this.context(),
       { devices } = await this.grants();
