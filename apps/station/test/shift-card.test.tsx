@@ -3,12 +3,60 @@ import { describe, expect, it, vi } from "vitest";
 
 import { formatShiftPlannedDate } from "../src/lib/format-date.js";
 import { ShiftCard } from "../src/ui/ShiftCard.js";
+import { primePhotoAccent } from "../src/lib/product-accent.js";
+import type { SqlExecutor } from "../src/lib/mirror.js";
 
 function dateParts(container: HTMLElement) {
   return [...container.querySelectorAll(".shift-card__date-part")].map((part) => part.textContent);
 }
 
 describe("ShiftCard", () => {
+  /**
+   * Каталожный снимок бывает двух родов, и подача у них разная. Вырезка на
+   * прозрачном фоне стоит прямо на градиенте товара. У студийного снимка своя
+   * белая подложка, которая на градиенте читается забытым белым прямоугольником,
+   * поэтому он подаётся КАК снимок — по признаку `data-photo` CSS даёт ему
+   * скругление и тень. Признак приходит из разбора самих пикселей, а не из
+   * заголовков файла, так что в jsdom его подкладывают в кэш напрямую.
+   */
+  it("marks a photo that carries its own background so it is framed as a photo", () => {
+    const exec: SqlExecutor = { run: async () => undefined, all: async () => [] };
+    const imageOf = (checksum: string) => ({
+      checksum,
+      contentType: "image/webp" as const,
+      byteSize: 1,
+      width: 1,
+      height: 1,
+    });
+    primePhotoAccent("shift-card-studio", { hue: 20, opaque: true });
+    primePhotoAccent("shift-card-cutout", { hue: 20, opaque: false });
+    const props = {
+      productName: "Сидр",
+      counterpartyName: null,
+      counterpartyLabel: "для:",
+      actionLabel: "Открыть",
+      active: false,
+      disabled: false,
+      onSelect: vi.fn(),
+      exec,
+      productId: "product-1",
+    };
+
+    const { container, rerender } = render(
+      <ShiftCard {...props} image={imageOf("shift-card-studio")} />,
+    );
+    const photo = () => container.querySelector<HTMLElement>(".shift-card__photo");
+    expect(photo()?.getAttribute("data-photo")).toBe("opaque");
+
+    // Вырезка — и признака нет: плашка под ней была бы белой коробкой.
+    rerender(<ShiftCard {...props} image={imageOf("shift-card-cutout")} />);
+    expect(photo()?.getAttribute("data-photo")).toBeNull();
+
+    // Нет фото — нет и подачи снимка.
+    rerender(<ShiftCard {...props} image={null} />);
+    expect(photo()?.getAttribute("data-photo")).toBeNull();
+  });
+
   /**
    * CodeRabbit on #615 asked to treat an undefined descriptor as "no photo".
    * It is not: `undefined` means a server from before the field existed, and
@@ -129,9 +177,11 @@ describe("ShiftCard", () => {
     expect(photo?.style.getPropertyValue("--product-hue")).not.toBe("");
     // No photo: the monogram stands in on the same gradient, never a light box.
     expect(container.querySelector(".shift-card__photo-monogram")?.textContent).toBe("С");
-    expect(
-      container.querySelector(".shift-card__number")?.classList.contains("mk-tag--office"),
-    ).toBe(true);
+    // Номер — адрес смены: текст рядом со статусом, а не четвёртая коробка
+    // в строке. Тегом остаётся только статус.
+    const number = container.querySelector(".shift-card__number");
+    expect(number?.textContent).toBe("SEP26-008/S");
+    expect(number?.className).toBe("shift-card__number");
     expect(
       container.querySelector(".shift-card__status")?.classList.contains("mk-tag--office"),
     ).toBe(true);
@@ -140,8 +190,10 @@ describe("ShiftCard", () => {
       [...container.querySelectorAll(".shift-card__date-part")].map((n) => n.textContent),
     ).toEqual(["Смена: 19.09.2026", "Производство: 20.09.2026"]);
     expect(container.querySelector(".shift-card__mode-badge")?.textContent).toBe("Агрегация");
+    // Цвет на карточке несёт только статус; режимы различаются словом и
+    // звучат одинаково тихо — ни один из них не «успех» и не «архив».
     expect(
-      container.querySelector(".shift-card__mode-badge")?.classList.contains("mk-tag--teal"),
+      container.querySelector(".shift-card__mode-badge")?.classList.contains("mk-tag--neutral"),
     ).toBe(true);
     expect(container.querySelector(".shift-card__pallets")?.textContent).toBe("Паллеты");
     expect(container.querySelector(".shift-card__plan")?.textContent).toBe("без плана");
@@ -167,9 +219,16 @@ describe("ShiftCard", () => {
     expect(container.querySelector(".shift-card__product-full")).toBeNull();
     expect(container.querySelector(".shift-card__photo")?.getAttribute("data-accent")).toBeNull();
     expect(
-      container.querySelector(".shift-card__mode-badge")?.classList.contains("mk-tag--violet"),
+      container.querySelector(".shift-card__mode-badge")?.classList.contains("mk-tag--neutral"),
     ).toBe(true);
     expect(container.querySelector(".shift-card__pallets")).toBeNull();
+    // Полное имя совпало с заголовком и не рисуется — значит, его строки
+    // свободны, и заголовок получает право их занять.
+    expect(
+      container
+        .querySelector(".shift-card__product")
+        ?.classList.contains("shift-card__product--only"),
+    ).toBe(true);
   });
 
   it("shows the labeled production date beside the planned date and hides it when absent", () => {

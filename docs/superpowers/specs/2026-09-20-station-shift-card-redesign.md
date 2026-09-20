@@ -140,3 +140,47 @@ wrap.
 - No API change (`gtin14`, `productPrintName` already exist).
 - The work screen's identity hero and the collapsed status bar are untouched.
 - Variant B/C from the canvas are documented in the notes frame and not built.
+
+## Revision, 2026-09-20: what the terminal showed
+
+The redesign shipped in station beta 2.1.0-beta.1 and the owner compared it
+against the approved mock on a real 1024x768 terminal. Five things had drifted;
+all five are corrected in the same spec because each is one line of the same
+card.
+
+- **The shift number was a tag.** The heading row carried four boxes -- number,
+  status, mode, pallets -- and read as a row of buttons. The number is the
+  shift's address, not a property of it: quiet mono text beside the status, and
+  the status is the only tag left in that row.
+- **Tags looked like boxes.** The vocabulary's 4 px radius at the 22 px office
+  size reads square at arm's length. On this card only, the radius now also
+  carries the kind: a phase (`StatusChip`) is a pill, a category (`Badge`) a
+  6 px rounded rectangle. Size, glyph and tone stay the vocabulary's.
+- **Mode and pallets were coloured.** In the approved mock the only colour on
+  the card is the shift's status; the modes differ by word. Both category tags
+  are neutral. This does not reopen the rule the tag vocabulary settled: what
+  it forbids is the ASYMMETRY that made one mode read as success and the other
+  as an archive, and two equally quiet tags do not create it.
+- **The facts were glued together.** The details column had a 4 px gap, and the
+  two dates wrapped with no row gap at all, so the headline, the dates and the
+  tags formed one block. The gap is 8 px, the dates carry their own 4 px row
+  gap, and the column's top padding matches the mock's.
+- **A catalogue photo with its own background became a white box.** The mock
+  assumed a transparent cut-out; a studio shot on white is at least as common.
+  The photo sampler already decodes the image for the accent hue, so it now
+  also reports whether the border ring is opaque, and the card frames the two
+  kinds differently: a cut-out stands directly on the product gradient, a
+  studio photo is presented AS a photo -- a box that hugs the image, with a
+  radius and a shadow. Note that `object-fit: contain` makes a radius on the
+  full-size box useless: it clips the empty letterbox corners, not the
+  picture's.
+
+One more case the mock could not show: a product with no print name. The
+headline then falls back to the full catalogue name, and three lines clipped it
+mid-word -- while the two lines reserved for the full name sat empty right
+below. When the full name is not drawn, the headline takes its lines (five, or
+four under `max-height: 820px`).
+
+The gallery covers both photo kinds side by side (`shift-page-1`) and a long
+catalogue name with no print name (`shift-page-2`), so a regression to either
+is visible in one screenshot.

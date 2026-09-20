@@ -70,7 +70,20 @@ import {
   type GalleryLocale,
   type GalleryRequest,
 } from "./gallery-fixtures.js";
-import { galleryProductImage, galleryProductImageExecutor } from "./gallery-product-image.js";
+import {
+  galleryProductImage,
+  galleryProductImageExecutor,
+  galleryProductImageFor,
+} from "./gallery-product-image.js";
+
+/**
+ * The second card on every page carries a studio photo (shot on white) and the
+ * first a cut-out, so one screenshot shows both framings the shift card has to
+ * get right.
+ */
+function galleryShiftProductId(page: number, index: number): string {
+  return `gallery-shift-product-${page}-${index}${index === 1 ? "-studio" : ""}`;
+}
 
 export interface StationScreenGalleryProps {
   request: GalleryRequest;
@@ -1460,9 +1473,12 @@ function ShiftFixture({ variant, locale }: { variant: string; locale: GalleryLoc
           },
           {
             number: "AUG26-038",
-            // No print name in the catalog: the headline falls back to the
-            // full name and no second line is drawn.
-            printName: ru ? "Квас хлебный фильтрованный, 1,5 л" : "Filtered bread kvass, 1.5 l",
+            // Наименования для печати у товара нет, и заголовком становится
+            // полное каталожное имя. Оно длинное — именно этот случай
+            // обрезался на полуслове, пока заголовок держал три строки.
+            printName: ru
+              ? "Сидр полусухой газированный «ДИКИЙ КРЕСТ» яблочный, 0,45 л"
+              : "Semi-dry sparkling apple cider «DICKIY CREST», 0.45 l",
             fullName: null,
             gtin: "04600682000048",
             active: false,
@@ -1528,8 +1544,8 @@ function ShiftFixture({ variant, locale }: { variant: string; locale: GalleryLoc
                 disabled={false}
                 onSelect={() => undefined}
                 exec={galleryProductImageExecutor}
-                productId={`gallery-shift-product-${page}-${index}`}
-                image={galleryProductImage}
+                productId={galleryShiftProductId(page, index)}
+                image={galleryProductImageFor(galleryShiftProductId(page, index))}
               />
             ))}
           </div>

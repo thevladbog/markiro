@@ -1,9 +1,9 @@
 import type { CSSProperties } from "react";
 import { Badge, Button, Card, StatusChip } from "@markiro/ui";
-import type { BadgeTone, TagPhase } from "@markiro/ui";
+import type { TagPhase } from "@markiro/ui";
 import { formatShiftPlannedDate, stationDisplayLocale } from "../lib/format-date.js";
 import type { SqlExecutor, StationProductImageDescriptor } from "../lib/mirror.js";
-import { useProductAccentHue } from "../lib/product-accent.js";
+import { useProductPhotoAccent } from "../lib/product-accent.js";
 import { ProductImage } from "./ProductImage.js";
 import { productMonogram } from "./work/ScanResultInstrument.js";
 
@@ -57,16 +57,6 @@ const SHIFT_CARD_STATUS_TO_PHASE: Record<NonNullable<ShiftCardProps["status"]>, 
   closed: "done",
 };
 
-/**
- * Режимы равноправны, поэтому тона категорийные и равногромкие: первый член
- * объединения получает violet, второй — teal (словарь тегов). Ни `neutral`,
- * ни `ok` здесь недопустимы — они читались бы как «архив» и «успех».
- */
-const MODE_TONE: Record<"validation" | "aggregation", BadgeTone> = {
-  validation: "violet",
-  aggregation: "teal",
-};
-
 /** A fixed-height floor card; the parent supplies a bounded page of at most two. */
 export function ShiftCard({
   number,
@@ -112,7 +102,13 @@ export function ShiftCard({
       {productMonogram(productName ?? "")}
     </span>
   );
-  const hue = useProductAccentHue({ exec, productId, image, gtin, refreshKey: imageRefreshKey });
+  const { hue, opaque } = useProductPhotoAccent({
+    exec,
+    productId,
+    image,
+    gtin,
+    refreshKey: imageRefreshKey,
+  });
   const photoStyle = hue === null ? undefined : ({ "--product-hue": String(hue) } as CSSProperties);
   // A full name equal to the headline says nothing twice.
   const fullName = productFullName && productFullName !== productName ? productFullName : null;
@@ -124,6 +120,10 @@ export function ShiftCard({
         <div
           className="shift-card__photo"
           data-accent={hue === null ? undefined : "true"}
+          /* Снимок-вырезка стоит прямо на градиенте; у снимка со своей
+             подложкой она никуда не денется, поэтому он подаётся КАК снимок —
+             скруглённой карточкой с тенью, а не белым прямоугольником. */
+          data-photo={opaque ? "opaque" : undefined}
           style={photoStyle}
         >
           {/* `undefined` is an unknown descriptor (a server from before the
@@ -146,11 +146,9 @@ export function ShiftCard({
         </div>
         <div className="shift-card__details">
           <div className="shift-card__heading">
-            {number ? (
-              <Badge className="shift-card__number" size="office" mono>
-                {number}
-              </Badge>
-            ) : null}
+            {/* Номер — адрес смены, а не её свойство: тег здесь добавлял
+                четвёртую коробку в строку, где и так есть статус. */}
+            {number ? <span className="shift-card__number">{number}</span> : null}
             <StatusChip
               className="shift-card__status"
               size="office"
@@ -158,7 +156,16 @@ export function ShiftCard({
               label={statusLabel ?? status}
             />
           </div>
-          <div className="shift-card__product">{productName ?? "—"}</div>
+          {/* Без полного имени заголовку достаются и его строки: у товара
+              без наименования для печати обрезался единственный текст, по
+              которому смену отличают друг от друга. */}
+          <div
+            className={
+              fullName ? "shift-card__product" : "shift-card__product shift-card__product--only"
+            }
+          >
+            {productName ?? "—"}
+          </div>
           {fullName ? <div className="shift-card__product-full">{fullName}</div> : null}
           {/* Two parts so the production date wraps whole on a narrow card
               instead of ellipsizing the middle of one combined line. */}
@@ -176,15 +183,17 @@ export function ShiftCard({
               ) : null}
             </div>
           ) : null}
-          {/* Facts, not prose: the mode and the pallet flag are tags, the plan
-              is plain mono text and never shares a badge with them. */}
+          {/* Факты, а не проза: режим и признак паллет — теги, план — просто
+              моношрифтовый текст и никогда не делит с ними тег.
+
+              Тона нейтральные у обоих: в принятом макете цвет на карточке
+              несёт только статус смены, а режимы различаются словом. Правило
+              словаря тегов («двум равноправным режимам — violet и teal»)
+              запрещает АСИММЕТРИЮ, из-за которой «Проверка» читалась архивом,
+              а «Агрегация» — успехом; два одинаково тихих тега её не создают. */}
           <div className="shift-card__mode">
             {modeCaption ? (
-              <Badge
-                className="shift-card__mode-badge"
-                size="office"
-                tone={MODE_TONE[mode ?? "validation"]}
-              >
+              <Badge className="shift-card__mode-badge" size="office">
                 {modeCaption}
               </Badge>
             ) : null}

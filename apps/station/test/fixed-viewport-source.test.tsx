@@ -252,4 +252,33 @@ describe("fixed station viewport source contract", () => {
       /\.station-status-actions \.window-mode-control__error\s*\{[^}]*display:\s*grid;[^}]*width:\s*100%;[^}]*min-width:\s*0;[^}]*max-width:\s*100%;/s,
     );
   });
+
+  /**
+   * Карточка смены на реальном терминале разошлась с принятым макетом сразу в
+   * нескольких мелочах, и каждая из них — одна строка CSS, которую легко
+   * потерять обратно.
+   */
+  it("keeps the shift card's approved geometry: air between the facts, soft tags, a framed studio photo", () => {
+    const css = stationSource("station.css");
+    // 4px между заголовком, датами и тегами склеивали их в одно пятно.
+    expect(css).toMatch(/\.shift-card__details\s*\{[^}]*gap:\s*var\(--sp-2\);/s);
+    // Две даты переносятся по строкам и не слипаются.
+    expect(css).toMatch(/\.shift-card__dates\s*\{[^}]*row-gap:\s*var\(--sp-1\);/s);
+    // Форма различает род тега: фаза — пилюля, категория — скруглённый
+    // прямоугольник. 4px словаря на 22px читались коробкой.
+    expect(css).toMatch(/\.shift-card \.mk-tag\s*\{[^}]*border-radius:\s*6px;/s);
+    expect(css).toMatch(/\.shift-card \.mk-chip\s*\{[^}]*border-radius:\s*999px;/s);
+    // Номер смены — текст, а не тег: у него своё правило, а не .mk-tag.
+    expect(css).toMatch(/\.shift-card__number\s*\{[^}]*font:[^;]*var\(--font-mono\);/s);
+    // Снимок со своей подложкой обнимается коробкой, иначе скругление режет
+    // пустые углы `contain`, а не углы картинки.
+    expect(css).toMatch(
+      /\.shift-card__photo\[data-photo="opaque"\] \.product-image\s*\{[^}]*width:\s*auto;[^}]*height:\s*auto;[^}]*max-width:\s*100%;[^}]*max-height:\s*100%;[^}]*border-radius:/s,
+    );
+    // Заголовок без полного имени занимает его строки.
+    expect(css).toMatch(/\.shift-card__product--only\s*\{[^}]*-webkit-line-clamp:\s*5;/s);
+    expect(css).toMatch(
+      /@media \(max-height: 820px\)\s*\{[\s\S]*?\.shift-card__product--only\s*\{[^}]*-webkit-line-clamp:\s*4;/s,
+    );
+  });
 });

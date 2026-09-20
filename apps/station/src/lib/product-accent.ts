@@ -30,16 +30,42 @@ export function hueFromGtin(gtin: string): number {
 }
 
 /**
- * Dominant hue of a product photo, or null when none can be established.
+ * What one product photo tells the surfaces that frame it.
  *
- * Near-white pixels are skipped because catalogue photos are studio shots on
- * white; near-black and near-grey pixels carry no hue worth voting with. The
- * remaining pixels vote into twelve 30° hue bins weighted by saturation, and
- * the winning bin answers with its weighted mean hue. Any environment without
- * canvas/ImageBitmap support (jsdom, a headless webview) degrades to null —
- * the caller falls back to the GTIN hue.
+ * `hue` — the photo's dominant hue, or null when none can be established.
+ * `opaque` — the photo carries its own background (a studio shot on white)
+ * instead of being a cut-out on transparency. The two need different framing:
+ * a cut-out stands directly on the product gradient, while a photo with a
+ * baked background has to be presented AS a photo — a rounded plate with a
+ * shadow — or its background reads as a white box nobody meant to be there.
  */
-export async function extractAccentHue(blob: Blob): Promise<number | null> {
+export interface ProductPhotoAccent {
+  hue: number | null;
+  opaque: boolean;
+}
+
+/**
+ * How much of the sampled border ring must be fully opaque before the photo
+ * counts as carrying its own background. A cut-out's ring is transparent
+ * almost everywhere, a studio shot's is opaque everywhere, so the threshold
+ * sits far from both: neither antialiasing nor a bottle touching one edge can
+ * flip the answer.
+ */
+const OPAQUE_BORDER_SHARE = 0.75;
+
+/**
+ * Dominant hue and background kind of a product photo.
+ *
+ * Near-white pixels are skipped for the hue because catalogue photos are
+ * studio shots on white; near-black and near-grey pixels carry no hue worth
+ * voting with. The remaining pixels vote into twelve 30° hue bins weighted by
+ * saturation, and the winning bin answers with its weighted mean hue.
+ * Opacity is read from the border ring alone — the middle of a cut-out is its
+ * subject and is opaque there too. Any environment without canvas/ImageBitmap
+ * support (jsdom, a headless webview) degrades to null: the caller falls back
+ * to the GTIN hue and to the cut-out framing.
+ */
+export async function extractPhotoAccent(blob: Blob): Promise<ProductPhotoAccent | null> {
   try {
     if (typeof createImageBitmap !== "function") return null;
     const bitmap = await createImageBitmap(blob);
@@ -53,11 +79,20 @@ export async function extractAccentHue(blob: Blob): Promise<number | null> {
       const { data } = context.getImageData(0, 0, SAMPLE_SIZE, SAMPLE_SIZE);
       const weights = new Array<number>(12).fill(0);
       const hueSums = new Array<number>(12).fill(0);
+      let borderPixels = 0;
+      let opaqueBorderPixels = 0;
       for (let offset = 0; offset < data.length; offset += 4) {
         const r = data[offset]!;
         const g = data[offset + 1]!;
         const b = data[offset + 2]!;
         const alpha = data[offset + 3]!;
+        const pixel = offset / 4;
+        const column = pixel % SAMPLE_SIZE;
+        const row = (pixel - column) / SAMPLE_SIZE;
+        if (column === 0 || row === 0 || column === SAMPLE_SIZE - 1 || row === SAMPLE_SIZE - 1) {
+          borderPixels += 1;
+          if (alpha > 250) opaqueBorderPixels += 1;
+        }
         if (alpha < 128) continue;
         const max = Math.max(r, g, b);
         const min = Math.min(r, g, b);
@@ -75,6 +110,7 @@ export async function extractAccentHue(blob: Blob): Promise<number | null> {
         weights[bin] = weights[bin]! + saturation;
         hueSums[bin] = hueSums[bin]! + hue * saturation;
       }
+      const opaque = borderPixels > 0 && opaqueBorderPixels / borderPixels >= OPAQUE_BORDER_SHARE;
       let best = -1;
       for (let bin = 0; bin < 12; bin += 1) {
         if (best === -1 || weights[bin]! > weights[best]!) best = bin;
@@ -82,8 +118,8 @@ export async function extractAccentHue(blob: Blob): Promise<number | null> {
       // Fewer than ~4 saturated pixels' worth of votes means the photo is
       // effectively monochrome; a hue extracted from noise would flicker
       // between builds of the same image.
-      if (best === -1 || weights[best]! < 0.5) return null;
-      return Math.round(hueSums[best]! / weights[best]!);
+      if (best === -1 || weights[best]! < 0.5) return { hue: null, opaque };
+      return { hue: Math.round(hueSums[best]! / weights[best]!), opaque };
     } finally {
       bitmap.close?.();
     }
@@ -97,15 +133,23 @@ export async function extractAccentHue(blob: Blob): Promise<number | null> {
  * bytes, so the answer can never go stale and is shared across remounts and
  * across every screen that shows the product.
  */
-const accentByChecksum = new Map<string, number | null>();
+const accentByChecksum = new Map<string, ProductPhotoAccent>();
+
+/** What a product with no usable photo answers: no hue of its own, no plate. */
+const NO_PHOTO: ProductPhotoAccent = { hue: null, opaque: false };
 
 /**
  * Pre-seeds the checksum cache. Production never needs this — the hook fills
  * the cache itself — but tests exercising the hook's transition guarantees
  * have no canvas to extract with, so this is their only way in.
  */
+export function primePhotoAccent(checksum: string, accent: ProductPhotoAccent): void {
+  accentByChecksum.set(checksum, accent);
+}
+
+/** Seeds a hue for a cut-out photo; see {@link primePhotoAccent}. */
 export function primeAccentHue(checksum: string, hue: number | null): void {
-  accentByChecksum.set(checksum, hue);
+  primePhotoAccent(checksum, { hue, opaque: false });
 }
 
 /**
@@ -117,7 +161,7 @@ export function primeAccentHue(checksum: string, hue: number | null): void {
  */
 interface ExtractedAccent {
   checksum: string;
-  hue: number | null;
+  accent: ProductPhotoAccent;
 }
 
 export interface ProductAccentSource {
@@ -129,22 +173,25 @@ export interface ProductAccentSource {
 }
 
 /**
- * The hue for the identity hero. Answers the GTIN fallback immediately (no
- * flash of the neutral gradient) and upgrades to the photo's dominant hue once
- * the cached bytes have been read and sampled.
+ * Everything a surface needs to frame one product photo. Answers the GTIN
+ * fallback hue immediately (no flash of the neutral gradient) and upgrades to
+ * the photo's own hue and background kind once the cached bytes have been read
+ * and sampled. `opaque` stays false until then: a cut-out framed for one frame
+ * as a cut-out is invisible, while a plate that appears and then disappears is
+ * not.
  */
-export function useProductAccentHue({
+export function useProductPhotoAccent({
   exec,
   productId,
   image,
   gtin,
   refreshKey,
-}: ProductAccentSource): number | null {
-  const fallback = gtin ? hueFromGtin(gtin) : null;
+}: ProductAccentSource): ProductPhotoAccent {
+  const fallbackHue = gtin ? hueFromGtin(gtin) : null;
   const [extracted, setExtracted] = useState<ExtractedAccent | null>(() => {
     if (!image) return null;
     const known = accentByChecksum.get(image.checksum);
-    return known === undefined ? null : { checksum: image.checksum, hue: known };
+    return known === undefined ? null : { checksum: image.checksum, accent: known };
   });
 
   useEffect(() => {
@@ -156,17 +203,17 @@ export function useProductAccentHue({
     const checksum = image.checksum;
     const known = accentByChecksum.get(checksum);
     if (known !== undefined) {
-      setExtracted({ checksum, hue: known });
+      setExtracted({ checksum, accent: known });
       return;
     }
     void (async () => {
       let blob: Blob | null = await readStationProductImage(exec, productId, image);
       if (!blob) blob = await readCachedStationProductImage(productId, image, exec);
-      const hue = blob ? await extractAccentHue(blob) : null;
+      const accent = blob ? ((await extractPhotoAccent(blob)) ?? NO_PHOTO) : NO_PHOTO;
       // A missing blob is not cached: media sync may still be landing the
       // bytes, and the next refreshKey bump should get to try again.
-      if (blob) accentByChecksum.set(checksum, hue);
-      if (!cancelled) setExtracted({ checksum, hue });
+      if (blob) accentByChecksum.set(checksum, accent);
+      if (!cancelled) setExtracted({ checksum, accent });
     })().catch(() => {
       if (!cancelled) setExtracted(null);
     });
@@ -175,9 +222,14 @@ export function useProductAccentHue({
     };
   }, [exec, productId, image, refreshKey]);
 
-  // The guard, not the effect, is what makes stale hues impossible: the
+  // The guard, not the effect, is what makes stale answers impossible: the
   // effect only runs after the new image has already painted once.
-  const extractedHue =
-    extracted !== null && image && extracted.checksum === image.checksum ? extracted.hue : null;
-  return extractedHue ?? fallback;
+  const current =
+    extracted !== null && image && extracted.checksum === image.checksum ? extracted.accent : null;
+  return { hue: current?.hue ?? fallbackHue, opaque: current?.opaque ?? false };
+}
+
+/** The hue alone, for surfaces that only tint a gradient. */
+export function useProductAccentHue(source: ProductAccentSource): number | null {
+  return useProductPhotoAccent(source).hue;
 }
