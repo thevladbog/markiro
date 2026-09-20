@@ -83,7 +83,10 @@ describe("fixed station viewport source contract", () => {
     expect(app.match(/await refreshStationTaskAuthority\(\{/g)).toHaveLength(2);
     expect(app).toContain('task: { taskKind: "shift", taskId: entered.id }');
     expect(app).toContain('task: { taskKind: "inventory", taskId: entered.inventory.inventoryId }');
-    expect(app.match(/if \(!authority\?\.resuming\)/g)).toHaveLength(2);
+    // Both handlers hand the resume verdict to the shared entry admission,
+    // which is what skips new-work consumption for a resumed task; see
+    // `admitTaskEntry` and test/shift-entry-admission.test.ts.
+    expect(app.match(/resuming: authority\?\.resuming \?\? false,/g)).toHaveLength(2);
   });
 
   it("keeps the alert badge compact so two-word badges do not read as double-spaced", () => {
