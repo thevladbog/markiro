@@ -137,9 +137,14 @@ class ShiftRepository(
 
     /**
      * A shift already mirrored on this device, by id -- the same table the
-     * list and `enter` itself read. The task-barcode scan resolves against
-     * this: no barcode-lookup endpoint exists for a shift, and none should be
-     * added for what a scan merely shortcuts to the card for.
+     * list and `enter` itself read. The task-barcode scan checks this only as
+     * a fallback, after the shift lists already visible on screen (own line,
+     * plus any other-line groups already expanded): an other-line shift lives
+     * only in that in-memory state, since a line-less refresh never mirrors it
+     * here, while this table still covers a shift cached from a previous
+     * entry but no longer listed -- a closed shift, for instance. No
+     * barcode-lookup endpoint exists for a shift, and none should be added for
+     * what a scan merely shortcuts to the card for.
      */
     suspend fun listed(shiftId: String): ShiftEntity? = db.shiftDao().get(shiftId)
 

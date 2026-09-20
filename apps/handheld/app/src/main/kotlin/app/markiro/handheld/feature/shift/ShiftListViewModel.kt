@@ -201,13 +201,23 @@ class ShiftListViewModel(
     /**
      * The printed form's barcode is a shortcut to the card, not a key: a shift
      * of another line still goes through the same confirmation the list would
-     * show. Resolution never leaves the shifts already mirrored on this
-     * device -- no lookup endpoint exists for a scan, and none is added here.
+     * show. Resolution first checks everything already visible to the
+     * operator on this screen -- this device's own list plus any other-line
+     * groups already expanded via `expandOthers()`. An other-line shift lives
+     * only in that in-memory `others` state until it is entered: the server
+     * scopes a line-less refresh to this device's own line (plus unassigned
+     * shifts), so `expandOthers()` never writes an other-line shift into Room.
+     * `repository.listed(...)` is the fallback, covering a shift cached from a
+     * previous entry but no longer in either visible list -- a closed shift,
+     * for instance, which both lists above always exclude. No lookup endpoint
+     * exists for a scan, and none is added here.
      */
     private suspend fun onScan(raw: String) {
         if (dialog.value != null) return
         val shiftId = ShiftTaskToken.parse(raw.trim()) ?: return
-        val match = repository.listed(shiftId)
+        val ui = state.value
+        val visible = (listOfNotNull(ui.continueShift) + ui.mine).map { it.toDto() } + ui.others.flatMap { it.shifts }
+        val match = visible.firstOrNull { it.id == shiftId } ?: repository.listed(shiftId)?.toDto()
         if (match == null) {
             dialog.value = ShiftDialog.BarcodeUnknown
             return
@@ -218,7 +228,7 @@ class ShiftListViewModel(
         }
         val ownLine = config.get()?.lineId
         if (match.lineId != null && match.lineId != ownLine) {
-            dialog.value = ShiftDialog.ConfirmOther(match.toDto(), match.lineName.orEmpty(), entryMethod = "task_barcode")
+            dialog.value = ShiftDialog.ConfirmOther(match, match.lineName.orEmpty(), entryMethod = "task_barcode")
             return
         }
         enter(match.id, "task_barcode")

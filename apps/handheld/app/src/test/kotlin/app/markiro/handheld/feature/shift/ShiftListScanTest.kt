@@ -14,6 +14,7 @@ import app.markiro.handheld.core.network.InventoryTaskListResponse
 import app.markiro.handheld.core.network.JoinInventoryRequest
 import app.markiro.handheld.core.network.LeaveInventoryRequest
 import app.markiro.handheld.core.network.LeaveInventoryResponse
+import app.markiro.handheld.core.network.LineDto
 import app.markiro.handheld.core.network.LineListResponse
 import app.markiro.handheld.core.network.NetworkModule
 import app.markiro.handheld.core.network.PalletBootstrapDto
@@ -67,7 +68,23 @@ private class FakeStationApi(shifts: List<ShiftDto>) : StationApi {
     var lastEnterBody: ShiftEntryRequest? = null
         private set
 
-    override suspend fun shifts(status: String?, lineId: String?) = ShiftListResponse(byId.values.toList())
+    /**
+     * Mirrors the server's own scoping (`shifts.controller.ts`): a line-less
+     * query returns only this device's own line plus unassigned shifts, and a
+     * scoped query returns only that line. Until this honoured `lineId`, the
+     * ordinary line-less refresh silently mirrored every other line's shifts
+     * into Room too, which is not what the real backend does and hid the
+     * exact defect these tests exist to catch.
+     */
+    override suspend fun shifts(status: String?, lineId: String?): ShiftListResponse {
+        val items = byId.values.toList()
+        val scoped = if (lineId != null) {
+            items.filter { it.lineId == lineId }
+        } else {
+            items.filter { it.lineId == OWN_LINE || it.lineId == null }
+        }
+        return ShiftListResponse(scoped)
+    }
 
     override suspend fun enter(id: String, body: ShiftEntryRequest): ShiftDto {
         enteredShiftId = id
@@ -98,7 +115,10 @@ private class FakeStationApi(shifts: List<ShiftDto>) : StationApi {
     override suspend fun grantInventoryLeave(id: String, body: JsonObject): JsonObject = error("not used")
     override suspend fun codeHistory(id: String, cursor: String?, snapshot: String?, limit: Int): ValidationHistoryPage = error("not used")
     override suspend fun summary(id: String): ShiftSummaryDto = error("not used")
-    override suspend fun lines(): LineListResponse = error("not used")
+
+    /** Every line a configured shift sits on, other than the device's own -- enough for `expandOthers()`. */
+    override suspend fun lines(): LineListResponse =
+        LineListResponse(byId.values.mapNotNull { it.lineId }.distinct().filter { it != OWN_LINE }.map { LineDto(it, "Линия $it") })
     override suspend fun writeoffBootstrap(): WriteoffBootstrapDto = error("not used")
     override suspend fun palletBootstrap(): PalletBootstrapDto = error("not used")
     override suspend fun boxRegistry(since: String?, until: String?, cursor: String?, limit: Int): BoxRegistryPageDto = error("not used")
@@ -164,6 +184,17 @@ class ShiftListScanTest {
      */
     private suspend fun ShiftListViewModel.settled() = state.first { !it.loading }
 
+    /**
+     * Expands the other-line groups and waits until the target shift is
+     * actually inside one of them -- `expandOthers()` populates `others`
+     * asynchronously through the fake, so this is the same seed-vs-real-
+     * emission trap `settled()` guards against, one field over.
+     */
+    private suspend fun ShiftListViewModel.othersExpandedWith(id: String) {
+        expandOthers()
+        state.first { ui -> ui.others.any { line -> line.shifts.any { it.id == id } } }
+    }
+
     @Test
     fun `scanned shift of this line is entered with the barcode entry method`() = runTest {
         val api = FakeStationApi(shifts = listOf(plannedShift(shiftId, OWN_LINE)))
@@ -183,6 +214,9 @@ class ShiftListScanTest {
         val api = FakeStationApi(shifts = listOf(plannedShift(shiftId, OTHER_LINE)))
         val model = viewModel(api, ScanRouterAdapter(scans))
         model.settled()
+        // Own-line shifts only, exactly as the server's line-less list scopes it --
+        // this shift is visible to the operator only after expanding other lines.
+        model.othersExpandedWith(shiftId)
 
         scan("markiro:shift:v1:$shiftId")
         val dialog = model.state.first { it.dialog != null }.dialog
@@ -196,6 +230,7 @@ class ShiftListScanTest {
         val api = FakeStationApi(shifts = listOf(plannedShift(shiftId, OTHER_LINE)))
         val model = viewModel(api, ScanRouterAdapter(scans))
         model.settled()
+        model.othersExpandedWith(shiftId)
 
         scan("markiro:shift:v1:$shiftId")
         model.state.first { it.dialog is ShiftDialog.ConfirmOther }
@@ -204,6 +239,36 @@ class ShiftListScanTest {
 
         assertEquals(shiftId, api.enteredShiftId)
         assertEquals("task_barcode", api.lastEnterBody?.entryMethod)
+    }
+
+    /**
+     * The exact regression this defect needs: a shift the ordinary line-less
+     * refresh never mirrors into Room, made visible only by expanding other
+     * lines. Before `onScan` also searched `others`, this scan reported
+     * `BarcodeUnknown` even though the shift was sitting right there on
+     * screen -- `repository.listed(...)` was the only place it looked, and an
+     * other-line shift is never in that table.
+     */
+    @Test
+    fun `scan of a shift visible only after expanding other lines opens confirmation, not unknown`() = runTest {
+        val api = FakeStationApi(shifts = listOf(plannedShift(shiftId, OTHER_LINE)))
+        val model = viewModel(api, ScanRouterAdapter(scans))
+        model.settled()
+
+        // The ordinary line-less refresh must not have mirrored the other
+        // line's shift -- reintroducing that gap is exactly what let the old,
+        // `lineId`-blind fake hide this defect: every test scan resolved
+        // through Room regardless of which line actually owned the shift.
+        assertNull(db.shiftDao().get(shiftId))
+        assertTrue(model.state.value.mine.none { it.id == shiftId })
+
+        model.othersExpandedWith(shiftId)
+
+        scan("markiro:shift:v1:$shiftId")
+        val dialog = model.state.first { it.dialog != null }.dialog
+
+        assertTrue(dialog is ShiftDialog.ConfirmOther)
+        assertNull(api.enteredShiftId)
     }
 
     @Test
