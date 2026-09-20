@@ -164,6 +164,21 @@ export class StationGrantAdmission {
     return (await this.context()).mode;
   }
 
+  /**
+   * Whether an approved policy governs this device at all. The configuration
+   * receipt carries a policy revision only once the platform has approved one
+   * and attached it; without that the server answers issuance with
+   * `policy_not_configured`, and the configuration trigger refuses to move the
+   * installed mode. There is then no authority to confirm, so nothing for the
+   * floor to be told about.
+   */
+  async hasApprovedPolicy(): Promise<boolean> {
+    const [row] = await this.exec.all<{ policy_revision: string | null }>(
+      "SELECT policy_revision FROM offline_grant_configuration WHERE id=1",
+    );
+    return typeof row?.policy_revision === "string" && row.policy_revision.length > 0;
+  }
+
   async assessNewWork(intent: GrantIntent): Promise<StationAdmissionDecision> {
     const context = await this.context(),
       { devices } = await this.grants();

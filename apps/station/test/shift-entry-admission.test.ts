@@ -202,10 +202,15 @@ const entry = {
 };
 
 describe("task entry admission", () => {
-  const stub = (mode: "observe" | "strict", methods: Record<string, unknown> = {}) => ({
+  const stub = (
+    mode: "observe" | "strict",
+    methods: Record<string, unknown> = {},
+    approvedPolicy = true,
+  ) => ({
     commitNewWork: vi.fn(),
     assessTaskWork: vi.fn(),
     installedMode: vi.fn().mockResolvedValue(mode),
+    hasApprovedPolicy: vi.fn().mockResolvedValue(approvedPolicy),
     ...methods,
   });
 
@@ -304,6 +309,33 @@ describe("task entry admission", () => {
       admitTaskEntry({ ...entry, admission, resuming: true, execution }),
     ).resolves.toEqual({ allow: true, observe: false });
     expect(admission.commitNewWork).not.toHaveBeenCalled();
+  });
+
+  it("stays silent when no approved policy governs the device", async () => {
+    // Every station receives grant configuration; only an attached policy
+    // gives the floor something to confirm.
+    const admission = stub("observe", {}, false);
+
+    await expect(admitTaskEntry({ ...entry, admission, execution: null })).resolves.toEqual({
+      allow: true,
+      observe: false,
+    });
+  });
+
+  it("stays silent about an observed allowance when no policy is attached", async () => {
+    const admission = stub(
+      "observe",
+      {
+        commitNewWork: vi.fn().mockResolvedValue({ allow: true, reason: "missing_grant" }),
+        assessTaskWork: vi.fn().mockResolvedValue({ allow: true }),
+      },
+      false,
+    );
+
+    await expect(admitTaskEntry({ ...entry, admission, execution })).resolves.toEqual({
+      allow: true,
+      observe: false,
+    });
   });
 
   it("returns the denial reason a strict grant produced", async () => {

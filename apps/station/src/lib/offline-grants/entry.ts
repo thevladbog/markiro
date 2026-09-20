@@ -6,10 +6,10 @@ import type { ExecutionProjection } from "./semantic.js";
 export type TaskEntryAdmission =
   { allow: true; observe: boolean } | { allow: false; reason: string };
 
-/** The three entry-time methods, so callers can exercise this policy without a grant store. */
+/** The entry-time methods only, so callers can exercise this policy without a grant store. */
 type EntryAdmission = Pick<
   StationGrantAdmission,
-  "commitNewWork" | "assessTaskWork" | "installedMode"
+  "commitNewWork" | "assessTaskWork" | "installedMode" | "hasApprovedPolicy"
 >;
 
 /**
@@ -52,10 +52,17 @@ export async function admitTaskEntry(input: {
   refreshExecution?: () => Promise<ExecutionProjection | null>;
 }): Promise<TaskEntryAdmission> {
   const { admission } = input;
+  // An allowance is only worth reporting when there is authority to confirm.
+  // Every station receives grant configuration, including tenants the platform
+  // has never attached a policy to; telling those operators on every entry that
+  // an offline permission is unconfirmed is noise about a feature their tenant
+  // does not use.
+  const observedAllowance = async (): Promise<TaskEntryAdmission> => ({
+    allow: true,
+    observe: await admission.hasApprovedPolicy(),
+  });
   const unbound = async (reason: string): Promise<TaskEntryAdmission> =>
-    (await admission.installedMode()) === "strict"
-      ? { allow: false, reason }
-      : { allow: true, observe: true };
+    (await admission.installedMode()) === "strict" ? { allow: false, reason } : observedAllowance();
   if (!input.execution) return unbound("execution_unavailable");
   const observed = (decision: StationAdmissionDecision): boolean =>
     decision.allow && Boolean(decision.reason);
@@ -88,7 +95,9 @@ export async function admitTaskEntry(input: {
       execution,
     });
     if (!taskDecision.allow) return { allow: false, reason: taskDecision.reason ?? "denied" };
-    return { allow: true, observe: observe || observed(taskDecision) };
+    return observe || observed(taskDecision)
+      ? observedAllowance()
+      : { allow: true, observe: false };
   };
 
   try {
