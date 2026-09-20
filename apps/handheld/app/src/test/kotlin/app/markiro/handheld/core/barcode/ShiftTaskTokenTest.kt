@@ -34,4 +34,18 @@ class ShiftTaskTokenTest {
         assertNull(ShiftTaskToken.parse(shiftId))
         assertNull(ShiftTaskToken.parse("010468008990038321ABC93XYZ"))
     }
+
+    @Test
+    fun `accepts the nil uuid exactly as the TypeScript rule does`() {
+        assertEquals(
+            "00000000-0000-0000-0000-000000000000",
+            ShiftTaskToken.parse("markiro:shift:v1:00000000-0000-0000-0000-000000000000"),
+        )
+    }
+
+    @Test
+    fun `still refuses an out-of-range version and variant`() {
+        assertNull(ShiftTaskToken.parse("markiro:shift:v1:11111111-1111-9111-8111-111111111111"))
+        assertNull(ShiftTaskToken.parse("markiro:shift:v1:11111111-1111-4111-c111-111111111111"))
+    }
 }
