@@ -18,7 +18,10 @@ import {
   stationOperatorIsCurrentlyActive,
 } from "./offline-grants/admission.js";
 import { sampleGrantClock, type GrantClockSample } from "./offline-grants/clock.js";
-import { readInventoryExecutionProjection } from "./offline-grants/semantic.js";
+import {
+  readExecutionToBind,
+  readInventoryExecutionProjection,
+} from "./offline-grants/semantic.js";
 import { setInventoryProductionDate } from "./inventory-date.js";
 
 export type InventoryLocalVerdict =
@@ -1410,8 +1413,9 @@ async function recordInventoryScanInternal(
     device_id: string;
     owner_kind: "station";
     credential_epoch: number;
+    mode: "observe" | "strict";
   }>(
-    "SELECT tenant_id,device_id,owner_kind,credential_epoch FROM offline_grant_install_state WHERE id=1",
+    "SELECT tenant_id,device_id,owner_kind,credential_epoch,mode FROM offline_grant_install_state WHERE id=1",
   );
   if (grantState && !generation) throw new Error("offline grant-aware inventory owner required");
   if (grantState) {
@@ -1538,7 +1542,15 @@ async function recordInventoryScanInternal(
     outcome: "recorded" as const,
     ...resultFrom(classification, verdict, summary.total, firstWinning),
   };
-  if (grantState) {
+  // An inventory this device cannot bind takes the same path as a device with
+  // no grant state: journalled, uncharged, and never blocked where grants only
+  // observe.
+  const inventoryExecution = grantState
+    ? await readExecutionToBind(grantState.mode, () =>
+        readInventoryExecutionProjection(exec, input.inventoryId),
+      )
+    : null;
+  if (grantState && inventoryExecution) {
     const [binding] = await exec.all<{ snapshot_digest: string }>(
       `SELECT json_extract(grant_json,'$.snapshotDigest') snapshot_digest
          FROM offline_grant_grants
@@ -1564,7 +1576,7 @@ async function recordInventoryScanInternal(
         eventType: "inventory.scan.v1",
         cost: {},
       },
-      execution: await readInventoryExecutionProjection(exec, input.inventoryId),
+      execution: inventoryExecution,
       event: { input, payloadJson, verdict },
       facts: { units: summary.total },
       result,

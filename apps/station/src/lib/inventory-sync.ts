@@ -25,7 +25,10 @@ import {
   sendStationEvidence,
   stationEvidenceCommitExecutor,
 } from "./offline-grants/evidence-store.js";
-import { readInventoryExecutionProjection } from "./offline-grants/semantic.js";
+import {
+  readExecutionToBind,
+  readInventoryExecutionProjection,
+} from "./offline-grants/semantic.js";
 
 export interface InventorySyncState {
   pending: number;
@@ -502,12 +505,21 @@ export async function leaveInventoryTask(deps: LeaveInventoryTaskDeps): Promise<
       device_id: string;
       owner_kind: "station";
       credential_epoch: number;
+      mode: "observe" | "strict";
     }>(
-      "SELECT tenant_id,device_id,owner_kind,credential_epoch FROM offline_grant_install_state WHERE id=1",
+      "SELECT tenant_id,device_id,owner_kind,credential_epoch,mode FROM offline_grant_install_state WHERE id=1",
     );
     let response: unknown;
     let intentKey: string | null = null;
-    if (grantState) {
+    // Leaving an inventory this device cannot bind takes the ungranted path
+    // where grants only observe; refusing would strand the terminal in a task
+    // it can neither finish nor leave.
+    const execution = grantState
+      ? await readExecutionToBind(grantState.mode, () =>
+          readInventoryExecutionProjection(deps.exec, deps.inventoryId),
+        )
+      : null;
+    if (grantState && execution) {
       const [terminal] = await deps.exec.all<{ operator_id: string | null }>(
         `SELECT operator_id FROM inventory_terminal_state
           WHERE inventory_id=? AND snapshot_id=? AND device_id=?`,
@@ -553,7 +565,7 @@ export async function leaveInventoryTask(deps: LeaveInventoryTaskDeps): Promise<
           eventType: "inventory.close.v1",
           cost: {},
         },
-        execution: await readInventoryExecutionProjection(deps.exec, deps.inventoryId),
+        execution,
         event: { eventType: "inventory.close.v1", leavePayload },
         facts: {},
         result: { intentKey },

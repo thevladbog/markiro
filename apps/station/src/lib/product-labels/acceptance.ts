@@ -8,7 +8,7 @@ import {
   stationOperatorIsCurrentlyActive,
 } from "../offline-grants/admission.js";
 import { sampleGrantClock, type GrantClockSample } from "../offline-grants/clock.js";
-import { readShiftExecutionProjection } from "../offline-grants/semantic.js";
+import { readExecutionToBind, readShiftExecutionProjection } from "../offline-grants/semantic.js";
 import type { PreparedProductLabelAcceptance, ProductLabelAcceptResult } from "./types.js";
 import { parseProductLabelAcceptance } from "./validation.js";
 
@@ -142,8 +142,9 @@ export async function recordProductLabelAcceptanceWithOfflineGrant(
       device_id: string;
       owner_kind: "station";
       credential_epoch: number;
+      mode: "observe" | "strict";
     }>(
-      "SELECT tenant_id,device_id,owner_kind,credential_epoch FROM offline_grant_install_state WHERE id=1",
+      "SELECT tenant_id,device_id,owner_kind,credential_epoch,mode FROM offline_grant_install_state WHERE id=1",
     );
     if (!state) return recordProductLabelAcceptanceLegacy(exec, input);
     // An already committed native acceptance remains recovery; installing grants
@@ -170,7 +171,15 @@ export async function recordProductLabelAcceptanceWithOfflineGrant(
     );
     const result = { status: "accepted" as const, jobId: value.jobId };
     try {
-      const execution = await readShiftExecutionProjection(exec, value.shiftId);
+      // A device that cannot bind the shift has no grant to charge. Strict mode
+      // must refuse rather than print an unbound duplicate; observe mode records
+      // production exactly as a device without grant state does, because an
+      // observing station has no authority to stop the line -- and refusing here
+      // stopped it at the first scan, before anything printed.
+      const execution = await readExecutionToBind(state.mode, () =>
+        readShiftExecutionProjection(exec, value.shiftId),
+      );
+      if (!execution) return recordProductLabelAcceptanceLegacy(exec, input);
       assertPreparedLabelMatchesExecution(value, execution);
       const part = {
         operatorId: value.operatorId,

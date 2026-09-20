@@ -225,3 +225,25 @@ export function assertExecutionScopeMatches(
   if (stable(expected) !== stable(actual.scope))
     throw new Error("offline grant active shift mismatch");
 }
+
+/**
+ * Reads the projection a productive write must bind to, and says what an
+ * unbindable task means.
+ *
+ * Strict mode propagates the failure: unbound work must not be charged to a
+ * signed allowance. Observe mode returns null so the caller records production
+ * exactly as a device with no grant state does — an observing station has no
+ * authority to stop the line, and the projection is missing for reasons the
+ * floor cannot act on (a bundle this device has never mirrored).
+ */
+export async function readExecutionToBind<T>(
+  mode: "observe" | "strict",
+  read: () => Promise<T>,
+): Promise<T | null> {
+  try {
+    return await read();
+  } catch (error) {
+    if (mode === "strict") throw error;
+    return null;
+  }
+}

@@ -9,7 +9,7 @@ import {
   stationOperatorIsCurrentlyActive,
 } from "./offline-grants/admission.js";
 import { sampleGrantClock, type GrantClockSample } from "./offline-grants/clock.js";
-import { readShiftExecutionProjection } from "./offline-grants/semantic.js";
+import { readExecutionToBind, readShiftExecutionProjection } from "./offline-grants/semantic.js";
 import { OfflineGrantDeniedError } from "./journal.js";
 
 /**
@@ -134,10 +134,17 @@ export async function closeCurrentPalletWithOfflineGrant(
       device_id: string;
       owner_kind: "station";
       credential_epoch: number;
+      mode: "observe" | "strict";
     }>(
-      "SELECT tenant_id,device_id,owner_kind,credential_epoch FROM offline_grant_install_state WHERE id=1",
+      "SELECT tenant_id,device_id,owner_kind,credential_epoch,mode FROM offline_grant_install_state WHERE id=1",
     );
     if (!state) return closeCurrentPalletLegacy(deps, shiftId, operatorId);
+    // Same rule as the box: a pallet on an unbindable shift still closes where
+    // grants only observe.
+    const execution = await readExecutionToBind(state.mode, () =>
+      readShiftExecutionProjection(deps.exec, shiftId),
+    );
+    if (!execution) return closeCurrentPalletLegacy(deps, shiftId, operatorId);
     if (!operatorId) throw new OfflineGrantDeniedError("operator_unauthorized");
     if (!(await stationOperatorIsCurrentlyActive(deps.exec, operatorId)))
       throw new OfflineGrantDeniedError("operator_unauthorized");
@@ -185,7 +192,7 @@ export async function closeCurrentPalletWithOfflineGrant(
         eventType: "shift.pallet.close.v1",
         cost: {},
       },
-      execution: await readShiftExecutionProjection(deps.exec, shiftId),
+      execution,
       event: {
         eventId,
         shiftId,
