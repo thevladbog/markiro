@@ -130,6 +130,15 @@ if (INTRODUCED_FILTER.length === 0 || CHZ_HEADER.length === 0) {
   throw new Error("Expected inventory CSV fixture header");
 }
 const UTF8_BOM = Buffer.from([0xef, 0xbb, 0xbf]);
+
+/** Mirrors the generator's attribute escaping so expectations stay literal. */
+function xmlAttribute(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
 const syntheticDescriptor = {
   id: "synthetic_stock",
   version: 1,
@@ -1178,14 +1187,29 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
         serial: CLEAN_ELIGIBLE_SERIAL,
       },
     ].sort((left, right) => left.storedSscc.localeCompare(right.storedSscc));
+    // The GISMT aggregation XSD requires these attributes, and the runner
+    // fills them from the frozen run snapshot -- so the expectation has to
+    // read the same row rather than hard-code a header.
+    const [runRow] = await db
+      .select({
+        createdAt: schema.inventoryDocumentRuns.createdAt,
+        organizationNameSnapshot: schema.inventoryDocumentRuns.organizationNameSnapshot,
+        inventoryClosedAtSnapshot: schema.inventoryDocumentRuns.inventoryClosedAtSnapshot,
+      })
+      .from(schema.inventoryDocumentRuns)
+      .where(eq(schema.inventoryDocumentRuns.id, runId))
+      .limit(1);
+    if (!runRow) throw new Error("Expected the document run row");
     const aggregationXml = Buffer.from(
       [
         '<?xml version="1.0" encoding="UTF-8"?>',
-        "<unit_pack>",
-        "    <Document>",
+        `<unit_pack document_id="${runId}" VerForm="1.03"` +
+          ` file_date_time="${runRow.createdAt.toISOString()}" action_id="30" version="1">`,
+        `    <Document operation_date_time="${runRow.inventoryClosedAtSnapshot.toISOString()}"` +
+          ` document_number="${owner.inventoryNumber}">`,
         "        <organisation>",
         "            <id_info>",
-        '                <LP_info LP_TIN="9705119097" />',
+        `                <LP_info org_name="${xmlAttribute(runRow.organizationNameSnapshot)}" LP_TIN="9705119097" />`,
         "            </id_info>",
         "        </organisation>",
         ...boxRows.flatMap((box) => [

@@ -8,6 +8,8 @@ import {
 } from "../src/modules/shift-exports/shift-export-source.service";
 
 const SNAPSHOT_STARTED_AT = new Date("2026-08-13T12:34:56.789Z");
+/** The GISMT document's `operation_date_time`: when the shift actually closed. */
+const SHIFT_CLOSED_AT = new Date("2026-08-13T11:00:00.000Z");
 const FLAT = { boxMode: "flat", extension: "txt" } as const;
 const BOXES = { boxMode: "boxes", extension: "txt" } as const;
 const XML_BOXES = { boxMode: "boxes", extension: "xml" } as const;
@@ -24,6 +26,10 @@ interface ShiftRow {
   productionDate: string | null;
   plannedDate: string | null;
   productName: string | null;
+  numberMonthKey: string;
+  numberSeq: number;
+  createdFrom: "admin" | "station";
+  closedAt: Date | null;
 }
 
 interface RegistryRow {
@@ -60,7 +66,8 @@ interface PalletRow {
 
 interface Fixture {
   shifts?: ShiftRow[];
-  orgProfiles?: { tenantId: string; inn: string | null }[];
+  /** The joined `organization` + `org_profiles` row the GISMT XML formats load. */
+  organizations?: { id: string; name: string | null; inn: string | null }[];
   registry?: RegistryRow[];
   codeHistory?: CodeHistoryRow[];
   memberships?: BoxMembershipRow[];
@@ -99,7 +106,7 @@ function fakeDb(fixture: Fixture): FakeDbResult {
 
   const rowsFor = (table: unknown): unknown[] => {
     if (table === schema.shifts) return fixture.shifts ?? [];
-    if (table === schema.orgProfiles) return fixture.orgProfiles ?? [];
+    if (table === schema.organization) return fixture.organizations ?? [];
     if (table === schema.boxItems) return fixture.memberships ?? [];
     if (table === schema.pallets) return fixture.pallets ?? [];
     if (table === schema.codeRegistry) {
@@ -177,6 +184,10 @@ function closedShift(overrides: Partial<ShiftRow> = {}): ShiftRow {
     productionDate: null,
     plannedDate: "2026-08-13",
     productName: "Вода газированная",
+    numberMonthKey: "AUG26",
+    numberSeq: 7,
+    createdFrom: "admin",
+    closedAt: SHIFT_CLOSED_AT,
     ...overrides,
   };
 }
@@ -268,7 +279,11 @@ describe("ShiftExportSourceService", () => {
       sourceSnapshotStartedAt: SNAPSHOT_STARTED_AT,
       productName: "Вода газированная",
       shiftDate: "2026-08-13",
+      shiftNumber: "AUG26-007",
+      shiftClosedAt: SHIFT_CLOSED_AT,
+      // A flat TXT export embeds no participant identity, so neither is loaded.
       organizationInn: null,
+      organizationName: null,
       openPalletSuppressedBoxCount: 0,
       source: { mode: "flat", codes: ["code-a", "code-b", "code-c"] },
     });
@@ -497,7 +512,7 @@ describe("ShiftExportSourceService", () => {
   it("loads the organization INN for the GISMT XML format", async () => {
     const fake = fakeDb({
       shifts: [closedShift()],
-      orgProfiles: [{ tenantId: "tenant-1", inn: " 9705119097 " }],
+      organizations: [{ id: "tenant-1", name: "ООО «Пивоварня»", inn: " 9705119097 " }],
       registry: [registryRow(HASH_A, "2026-08-13T10:00:00.000Z")],
       codeHistory: [codeRow(HASH_A, "2026-08-13T10:00:00.000Z", "code-a")],
       memberships: [membership("box-1", "100000000000000001", HASH_A)],
@@ -508,24 +523,48 @@ describe("ShiftExportSourceService", () => {
     ).resolves.toMatchObject({ organizationInn: "9705119097" });
   });
 
-  it.each([
-    ["no profile row", []],
-    ["blank INN", [{ tenantId: "tenant-1", inn: "   " }]],
-    ["null INN", [{ tenantId: "tenant-1", inn: null }]],
-  ])("rejects the GISMT XML format with %s", async (_case, orgProfiles) => {
-    const fake = fakeDb({
-      shifts: [closedShift()],
-      orgProfiles,
-      registry: [registryRow(HASH_A, "2026-08-13T10:00:00.000Z")],
-      codeHistory: [codeRow(HASH_A, "2026-08-13T10:00:00.000Z", "code-a")],
-      memberships: [membership("box-1", "100000000000000001", HASH_A)],
-    });
+  const incompleteOrganizations: {
+    label: string;
+    organizations: NonNullable<Fixture["organizations"]>;
+    code: ShiftExportSourceError["code"];
+  }[] = [
+    { label: "no organization row", organizations: [], code: "ORG_INN_MISSING" },
+    {
+      label: "blank INN",
+      organizations: [{ id: "tenant-1", name: "ООО «Пивоварня»", inn: "   " }],
+      code: "ORG_INN_MISSING",
+    },
+    {
+      label: "null INN",
+      organizations: [{ id: "tenant-1", name: "ООО «Пивоварня»", inn: null }],
+      code: "ORG_INN_MISSING",
+    },
+    {
+      // `org_name` is as required by the XSD as `LP_TIN`; a nameless tenant
+      // must be told so rather than handed a document the portal rejects.
+      label: "blank name",
+      organizations: [{ id: "tenant-1", name: "  ", inn: "9705119097" }],
+      code: "ORG_NAME_MISSING",
+    },
+  ];
 
-    await expectSourceError(
-      new ShiftExportSourceService(fake.db).load("tenant-1", "shift-1", XML_BOXES),
-      "ORG_INN_MISSING",
-    );
-  });
+  it.each(incompleteOrganizations)(
+    "rejects the GISMT XML format with $label",
+    async ({ organizations, code }) => {
+      const fake = fakeDb({
+        shifts: [closedShift()],
+        organizations,
+        registry: [registryRow(HASH_A, "2026-08-13T10:00:00.000Z")],
+        codeHistory: [codeRow(HASH_A, "2026-08-13T10:00:00.000Z", "code-a")],
+        memberships: [membership("box-1", "100000000000000001", HASH_A)],
+      });
+
+      await expectSourceError(
+        new ShiftExportSourceService(fake.db).load("tenant-1", "shift-1", XML_BOXES),
+        code,
+      );
+    },
+  );
 
   describe("pallets grouping", () => {
     it("groups eligible boxes by pallet_id, ordering pallets by closed_at and loose boxes after them", async () => {
@@ -777,7 +816,7 @@ describe("ShiftExportSourceService", () => {
     it("loads the pallet → boxes formats from the same pallets source, INN included for XML", async () => {
       const fake = fakeDb({
         shifts: [closedShift()],
-        orgProfiles: [{ tenantId: "tenant-1", inn: "9705119097" }],
+        organizations: [{ id: "tenant-1", name: "ООО «Пивоварня»", inn: "9705119097" }],
         registry: [
           registryRow(HASH_A, "2026-08-13T10:00:00.000Z"),
           registryRow(HASH_B, "2026-08-13T10:00:01.000Z"),
@@ -811,7 +850,7 @@ describe("ShiftExportSourceService", () => {
 
       const loose = fakeDb({
         shifts: [closedShift()],
-        orgProfiles: [{ tenantId: "tenant-1", inn: "9705119097" }],
+        organizations: [{ id: "tenant-1", name: "ООО «Пивоварня»", inn: "9705119097" }],
         registry: [registryRow(HASH_A, "2026-08-13T10:00:00.000Z")],
         codeHistory: [codeRow(HASH_A, "2026-08-13T10:00:00.000Z", "code-a")],
         memberships: [membership("box-1", "100000000000000001", HASH_A)],

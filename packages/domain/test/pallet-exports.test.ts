@@ -5,6 +5,13 @@ import {
   ShiftExportDomainError,
 } from "../src/index.js";
 
+/** The document attributes the GISMT aggregation XSD requires. */
+const documentFixture = {
+  documentId: "11a0e30d-7cf6-4134-9ce5-68a3792ae8b1",
+  fileDateTime: "2026-09-18T10:00:00.000Z",
+  operationDateTime: "2026-09-17T18:00:00.000Z",
+};
+
 const pallet = {
   sscc: "134600682000000017",
   boxSsccs: ["034600682000000018", "034600682000000025"],
@@ -22,8 +29,10 @@ describe("pallet aggregation export", () => {
       formatId: "pallet_xml_gismt_aggregation",
       formatVersion: 1,
       organizationInn: "7701234567",
+      organizationName: "ООО «Кола»",
       productName: "Cola",
       closedDate: "2026-09-17",
+      ...documentFixture,
       pallet,
     });
     const xml = Buffer.from(part.bytes).toString("utf8");
@@ -47,8 +56,10 @@ describe("pallet aggregation export", () => {
       formatId: "pallet_xml_gismt_aggregation" as const,
       formatVersion: 1,
       organizationInn: "7701234567",
+      organizationName: "ООО «Кола»",
       productName: "Cola",
       closedDate: "2026-09-17",
+      ...documentFixture,
     };
     expect(() =>
       renderPalletAggregationExport({ ...base, pallet: { sscc: pallet.sscc, boxSsccs: [] } }),
@@ -67,8 +78,10 @@ describe("pallet aggregation export", () => {
         formatId: "pallet_xml_gismt_aggregation",
         formatVersion: 1,
         organizationInn: "7701234567",
+        organizationName: "ООО «Кола»",
         productName: "Cola",
         closedDate: "2026-09-17",
+        ...documentFixture,
         pallet: { sscc: pallet.sscc, boxSsccs: ["nonsense"] },
       }),
     ).toThrow(/INVALID_BOX_SSCC/);

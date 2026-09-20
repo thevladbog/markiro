@@ -11,6 +11,14 @@ import {
 
 const decoder = new TextDecoder();
 
+/** The document attributes every GISMT aggregation XML must carry. */
+const shiftDocumentFixture = {
+  documentId: "11a0e30d-7cf6-4134-9ce5-68a3792ae8b1",
+  documentNumber: "AUG26-007",
+  fileDateTime: "2026-08-20T10:00:00.000Z",
+  operationDateTime: "2026-08-19T18:00:00.000Z",
+};
+
 function decode(bytes: Uint8Array): string {
   return decoder.decode(bytes);
 }
@@ -528,6 +536,8 @@ describe("GISMT aggregation XML format", () => {
       maxLines,
       source,
       organizationInn,
+      organizationName: "ООО «Пивоварня»",
+      document: shiftDocumentFixture,
     });
   }
 
@@ -554,11 +564,12 @@ describe("GISMT aggregation XML format", () => {
     expect(decode(part!.bytes)).toBe(
       [
         '<?xml version="1.0" encoding="UTF-8"?>',
-        "<unit_pack>",
-        "    <Document>",
+        '<unit_pack document_id="11a0e30d-7cf6-4134-9ce5-68a3792ae8b1" VerForm="1.03"' +
+          ' file_date_time="2026-08-20T10:00:00.000Z" action_id="30" version="1">',
+        '    <Document operation_date_time="2026-08-19T18:00:00.000Z" document_number="AUG26-007">',
         "        <organisation>",
         "            <id_info>",
-        '                <LP_info LP_TIN="9705119097" />',
+        '                <LP_info org_name="ООО «Пивоварня»" LP_TIN="9705119097" />',
         "            </id_info>",
         "        </organisation>",
         "        <pack_content>",
@@ -582,18 +593,24 @@ describe("GISMT aggregation XML format", () => {
     expect(renderXml(source)[0]!.bytes).toEqual(renderXml(source)[0]!.bytes);
   });
 
-  it("escapes XML-reserved characters in cis serials and the LP_TIN attribute", () => {
-    const [part] = renderXml(
-      {
+  it("escapes XML-reserved characters in cis serials and the org_name attribute", () => {
+    const [part] = renderShiftExport({
+      formatId: "shift_xml_gismt_aggregation",
+      formatVersion: 1,
+      productName: "Сидр",
+      shiftDate: "2026-08-19",
+      maxLines: null,
+      source: {
         mode: "boxes",
         boxes: [{ sscc: "046800899000256001", codes: [km("hPdPG&"), km("Ia>3<Y")] }],
       },
-      null,
-      'IN"N&1',
-    );
+      organizationInn: "9705119097",
+      organizationName: 'ООО "Ф&Б" <1>',
+      document: shiftDocumentFixture,
+    });
     const body = decode(part!.bytes);
 
-    expect(body).toContain('<LP_info LP_TIN="IN&quot;N&amp;1" />');
+    expect(body).toContain('org_name="ООО &quot;Ф&amp;Б&quot; &lt;1&gt;"');
     expect(body).toContain("<cis>010468008990001721hPdPG&amp;</cis>");
     expect(body).toContain("<cis>010468008990001721Ia&gt;3&lt;Y</cis>");
     expect(body).not.toContain("\u001d");
@@ -637,6 +654,24 @@ describe("GISMT aggregation XML format", () => {
       expect(body.startsWith('<?xml version="1.0" encoding="UTF-8"?>')).toBe(true);
       expect(body.endsWith("</unit_pack>\n")).toBe(true);
     }
+    // Each part is uploaded to ЧЗ as its own document, so the file identifier
+    // and the document number must not repeat between them.
+    expect(decode(parts[0]!.bytes)).toContain(`document_id="${shiftDocumentFixture.documentId}-1"`);
+    expect(decode(parts[0]!.bytes)).toContain('document_number="AUG26-007-1"');
+    expect(decode(parts[1]!.bytes)).toContain(`document_id="${shiftDocumentFixture.documentId}-2"`);
+    expect(decode(parts[1]!.bytes)).toContain('document_number="AUG26-007-2"');
+  });
+
+  it("keeps the base document id and number when the export is a single file", () => {
+    const [part, ...rest] = renderXml({
+      mode: "boxes",
+      boxes: [{ sscc: "046800899000256001", codes: [km("A")] }],
+    });
+
+    expect(rest).toEqual([]);
+    const body = decode(part!.bytes);
+    expect(body).toContain(`document_id="${shiftDocumentFixture.documentId}"`);
+    expect(body).toContain('document_number="AUG26-007"');
   });
 
   it("rejects a missing INN, an unparseable code, and a malformed SSCC", () => {
@@ -753,6 +788,8 @@ describe("pallets shift export formats", () => {
       maxLines,
       source,
       organizationInn,
+      organizationName: "ООО «Пивоварня»",
+      document: shiftDocumentFixture,
     });
   }
 
@@ -964,6 +1001,8 @@ describe("pallet → boxes shift export formats (no codes)", () => {
       maxLines,
       source,
       organizationInn,
+      organizationName: "ООО «Пивоварня»",
+      document: shiftDocumentFixture,
     });
   }
 
@@ -1016,11 +1055,12 @@ describe("pallet → boxes shift export formats (no codes)", () => {
     expect(xml).toBe(
       [
         '<?xml version="1.0" encoding="UTF-8"?>',
-        "<unit_pack>",
-        "    <Document>",
+        '<unit_pack document_id="11a0e30d-7cf6-4134-9ce5-68a3792ae8b1" VerForm="1.03"' +
+          ' file_date_time="2026-08-20T10:00:00.000Z" action_id="30" version="1">',
+        '    <Document operation_date_time="2026-08-19T18:00:00.000Z" document_number="AUG26-007">',
         "        <organisation>",
         "            <id_info>",
-        '                <LP_info LP_TIN="9705119097" />',
+        '                <LP_info org_name="ООО «Пивоварня»" LP_TIN="9705119097" />',
         "            </id_info>",
         "        </organisation>",
         "        <pack_content>",

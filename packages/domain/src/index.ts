@@ -343,6 +343,7 @@ export {
 export type {
   RenderShiftExportInput,
   ShiftExportBoxMode,
+  ShiftExportDocumentMetadata,
   ShiftExportDomainErrorCode,
   ShiftExportFormatDescriptor,
   ShiftExportFormatId,

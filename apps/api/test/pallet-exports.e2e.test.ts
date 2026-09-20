@@ -336,6 +336,18 @@ describe.skipIf(!ready)("pallet exports e2e", () => {
     expect(xml).toContain(`<sscc>00${box2Sscc}</sscc>`);
     expect((xml.match(/<pack_content>/g) ?? []).length).toBe(1);
     expect(xml).toContain('LP_TIN="7701234567"');
+    // Without every one of these the ЧЗ portal rejects the upload as
+    // «Передаваемый файл XML не соответствует XSD-схеме», which is exactly
+    // what happened to the documents this export produced before 2026-09-20.
+    expect(xml).toContain(`<unit_pack document_id="${body.id}" VerForm="1.03"`);
+    expect(xml).toMatch(/ file_date_time="\d{4}-\d{2}-\d{2}T[\d:.]+Z" action_id="30" version="1">/);
+    expect(xml).toMatch(
+      new RegExp(
+        `<Document operation_date_time="\\d{4}-\\d{2}-\\d{2}T[\\d:.]+Z"` +
+          ` document_number="00${productionPalletSscc}">`,
+      ),
+    );
+    expect(xml).toContain('org_name="');
 
     const list = await agent.get(`/pallets/${productionPalletId}/exports`).expect(200);
     const listed = (list.body as Record<string, unknown>[])[0];
