@@ -1017,8 +1017,7 @@ body,
   grid-template-rows: auto auto minmax(0, 1fr);
 }
 
-.inventory-task-selection__scan,
-.shift-selection__scan {
+.inventory-task-selection__scan {
   display: grid;
   min-width: 0;
   min-height: 80px;
@@ -1032,8 +1031,7 @@ body,
   align-items: center;
 }
 
-.inventory-task-selection__scan-mark,
-.shift-selection__scan-mark {
+.inventory-task-selection__scan-mark {
   position: relative;
   display: block;
   width: 48px;
@@ -1043,29 +1041,23 @@ body,
 }
 
 .inventory-task-selection__scan-mark::before,
-.inventory-task-selection__scan-mark::after,
-.shift-selection__scan-mark::before,
-.shift-selection__scan-mark::after {
+.inventory-task-selection__scan-mark::after {
   position: absolute;
   inset: 12px;
   border: solid var(--accent);
   content: "";
 }
 
-.inventory-task-selection__scan-mark::before,
-.shift-selection__scan-mark::before {
+.inventory-task-selection__scan-mark::before {
   border-width: 2px 0 0 2px;
 }
 
-.inventory-task-selection__scan-mark::after,
-.shift-selection__scan-mark::after {
+.inventory-task-selection__scan-mark::after {
   border-width: 0 2px 2px 0;
 }
 
 .inventory-task-selection__scan h2,
 .inventory-task-selection__scan p,
-.shift-selection__scan h2,
-.shift-selection__scan p,
 .inventory-task-selection__heading h3,
 .inventory-task-selection__body p,
 .inventory-task-card :where(strong, span, small),
@@ -1073,13 +1065,11 @@ body,
   margin: 0;
 }
 
-.inventory-task-selection__scan h2,
-.shift-selection__scan h2 {
+.inventory-task-selection__scan h2 {
   font: var(--floor-body-strong);
 }
 
-.inventory-task-selection__scan p,
-.shift-selection__scan p {
+.inventory-task-selection__scan p {
   display: -webkit-box;
   overflow: hidden;
   color: var(--fg-2);
@@ -1088,8 +1078,7 @@ body,
   -webkit-line-clamp: 2;
 }
 
-.inventory-task-selection__scan > strong,
-.shift-selection__scan > strong {
+.inventory-task-selection__scan > strong {
   color: var(--fg-3);
   font: var(--floor-caption);
   letter-spacing: 0.08em;

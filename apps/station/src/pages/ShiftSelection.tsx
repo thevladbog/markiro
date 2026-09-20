@@ -544,16 +544,6 @@ export function ShiftSelection({
         className={`shift-selection__content${alternateActive ? " shift-selection__content--alternate" : ""}`}
       >
         <div className="shift-selection__slot">
-          {source && !alternateActive ? (
-            <section className="shift-selection__scan" aria-labelledby="shift-scan-title">
-              <span className="shift-selection__scan-mark" aria-hidden="true" />
-              <div>
-                <h2 id="shift-scan-title">{t("shifts.scanTitle")}</h2>
-                <p>{t("shifts.scanHint")}</p>
-              </div>
-              <strong>{t("shifts.taskBarcode")}</strong>
-            </section>
-          ) : null}
           {alternateActive ? (
             alternateContent
           ) : persistentState === "loading" ? (
