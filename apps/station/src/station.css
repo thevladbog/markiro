@@ -4556,7 +4556,9 @@ body,
   display: grid;
   inset: var(--sp-3) var(--sp-3) 84px;
   overflow: hidden;
-  place-items: center;
+  gap: var(--sp-3);
+  align-content: center;
+  justify-items: center;
   pointer-events: none;
 }
 
@@ -4565,6 +4567,106 @@ body,
   max-height: 100%;
   overflow: hidden;
   pointer-events: auto;
+}
+
+/* An overlay Alert carries plain block content, so its prompt, its choices and
+   its action row need an explicit rhythm here: without one the floor buttons
+   land side by side as inline-block neighbours with nothing between them. */
+.work-overlay {
+  padding: var(--sp-4) !important;
+}
+
+.work-overlay__title {
+  font: var(--floor-lg);
+}
+
+.work-overlay__body {
+  display: grid;
+  min-width: 0;
+  margin-top: var(--sp-1);
+  gap: var(--sp-3);
+  font: var(--floor-body);
+}
+
+.work-overlay__body > p {
+  margin: 0;
+}
+
+.work-overlay__actions {
+  display: grid;
+  min-width: 0;
+  min-height: var(--control-floor);
+  margin-top: var(--sp-1);
+  gap: var(--sp-3);
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+}
+
+.work-overlay__actions .mk-btn {
+  min-width: 0 !important;
+  padding-inline: var(--sp-3) !important;
+}
+
+/* Reason picker: every option stays a visible 64px target instead of hiding
+   behind a mouse-sized native dropdown. */
+.floor-choice-group {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-2);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.floor-choice {
+  display: flex;
+  min-width: 0;
+  min-height: var(--control-floor);
+  padding: var(--sp-2) var(--sp-3);
+  gap: var(--sp-3);
+  align-items: center;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-2);
+  background: var(--surface-card);
+  color: var(--fg-1);
+  font: var(--floor-body);
+  text-align: left;
+  cursor: pointer;
+}
+
+.floor-choice[aria-checked="true"] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--surface-card) 88%, var(--accent) 12%);
+  font: var(--floor-body-strong);
+}
+
+.floor-choice:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.floor-choice__mark {
+  display: grid;
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  border: 2px solid var(--line-strong);
+  border-radius: 50%;
+  place-items: center;
+}
+
+.floor-choice[aria-checked="true"] .floor-choice__mark {
+  border-color: var(--accent);
+}
+
+.floor-choice[aria-checked="true"] .floor-choice__mark::after {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  content: "";
+}
+
+.floor-choice__label {
+  min-width: 0;
 }
 
 #root :where(button, [role="button"], a[href]) {

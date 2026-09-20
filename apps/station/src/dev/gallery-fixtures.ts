@@ -10,6 +10,7 @@ const VISUAL_STRESS_GALLERY_STATE_IDS = [
   "setup-printers-many",
   "work-pallet-66",
   "work-aggregation-waiting",
+  "work-close-reason",
   "pairing-recovery",
   "floor-header-actions",
   "floor-header-window-error",
@@ -254,6 +255,14 @@ export const GALLERY_FIXTURES: readonly GalleryFixture[] = [
     id: "work-clear-confirm",
     kind: "work-overlay",
     variant: "clear-confirm",
+    source: "synthetic",
+  },
+  // The longest overlay: six reason options on top of the prompt and the
+  // action row, all of them full floor touch targets.
+  {
+    id: "work-close-reason",
+    kind: "work-overlay",
+    variant: "close-reason",
     source: "synthetic",
   },
   // Not a "signal" fixture like duplicate/error: production never shows a
