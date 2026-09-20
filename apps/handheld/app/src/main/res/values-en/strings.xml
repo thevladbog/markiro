@@ -200,6 +200,8 @@
     <string name="shifts_update_required_text">It requires a capability this build does not have. Update the app, use a station, or change the shift policy in the cabinet.</string>
     <string name="shifts_closed_title">The shift is already closed</string>
     <string name="shifts_closed_text">The list has been refreshed.</string>
+    <string name="shifts_barcode_unknown_title">Shift not found</string>
+    <string name="shifts_barcode_unknown_text">The form barcode matched no shift in the list. Refresh the list or pick the shift by hand.</string>
     <string name="shifts_refused_title">The server refused</string>
     <string name="shifts_refused_text">%1$s · HTTP %2$d · %3$s\n\nThe shift is not closed — this is something else. Show this line to an administrator.</string>
     <string name="shifts_refused_step_enter">entering the shift</string>

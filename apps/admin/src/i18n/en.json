@@ -2374,7 +2374,10 @@
         "unattributed_other": "{{count}} operations have no employee assigned.",
         "counterparty": "Counterparty",
         "reportsAfterClose": "Reports can be requested and downloaded after the shift is closed.",
-        "summaryError": "Shift statistics could not be loaded. Other data and actions are still available."
+        "summaryError": "Shift statistics could not be loaded. Other data and actions are still available.",
+        "taskFormTitle": "Shift form",
+        "taskFormDescription": "A printable A4 sheet whose barcode opens the shift on a terminal.",
+        "openTaskForm": "Open shift form"
       },
       "form": {
         "createTitle": "New shift",

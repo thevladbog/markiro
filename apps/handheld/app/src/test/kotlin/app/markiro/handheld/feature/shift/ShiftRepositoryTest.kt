@@ -510,7 +510,8 @@ class ShiftRepositoryTest {
         val requested = CompletableDeferred<Unit>()
         val finish = CompletableDeferred<Unit>()
         api = object : StationApi by api {
-            override suspend fun enter(id: String) = NetworkModule.json().decodeFromString<app.markiro.handheld.core.network.ShiftDto>(activeShiftJson)
+            override suspend fun enter(id: String, body: app.markiro.handheld.core.network.ShiftEntryRequest) =
+                NetworkModule.json().decodeFromString<app.markiro.handheld.core.network.ShiftDto>(activeShiftJson)
             override suspend fun bundle(id: String): app.markiro.handheld.core.network.ShiftBundleDto {
                 requested.complete(Unit)
                 finish.await()
@@ -534,7 +535,7 @@ class ShiftRepositoryTest {
         val requested = CompletableDeferred<Unit>()
         val finish = CompletableDeferred<Unit>()
         api = object : StationApi by api {
-            override suspend fun enter(id: String): app.markiro.handheld.core.network.ShiftDto {
+            override suspend fun enter(id: String, body: app.markiro.handheld.core.network.ShiftEntryRequest): app.markiro.handheld.core.network.ShiftDto {
                 requested.complete(Unit)
                 finish.await()
                 throw java.io.IOException("synthetic offline")
@@ -561,14 +562,14 @@ class ShiftRepositoryTest {
                 listCalls++
                 return app.markiro.handheld.core.network.ShiftListResponse(emptyList())
             }
-            override suspend fun enter(id: String): app.markiro.handheld.core.network.ShiftDto {
+            override suspend fun enter(id: String, body: app.markiro.handheld.core.network.ShiftEntryRequest): app.markiro.handheld.core.network.ShiftDto {
                 requested.complete(Unit)
                 finish.await()
                 throw retrofit2.HttpException(retrofit2.Response.error<Any>(403,
                     """{"code":"subscription_read_only"}""".toResponseBody("application/json".toMediaType())))
             }
         }
-        val vm = main.track(ShiftListViewModel(repo(), db.deviceConfigDao(), db.recovery, app.markiro.handheld.core.network.ReachabilityTracker(), flowOf(Unit)))
+        val vm = main.track(ShiftListViewModel(repo(), db.deviceConfigDao(), db.recovery, app.markiro.handheld.core.network.ReachabilityTracker(), app.markiro.handheld.core.scan.ScanRouterAdapter(flowOf()), flowOf(Unit)))
         vm.state.first { !it.loading }
         vm.select(cached)
         requested.await()
@@ -591,11 +592,11 @@ class ShiftRepositoryTest {
                 listCalls++
                 return app.markiro.handheld.core.network.ShiftListResponse(emptyList())
             }
-            override suspend fun enter(id: String): app.markiro.handheld.core.network.ShiftDto =
+            override suspend fun enter(id: String, body: app.markiro.handheld.core.network.ShiftEntryRequest): app.markiro.handheld.core.network.ShiftDto =
                 throw retrofit2.HttpException(retrofit2.Response.error<Any>(403,
                     """{"code":"subscription_read_only"}""".toResponseBody("application/json".toMediaType())))
         }
-        val vm = main.track(ShiftListViewModel(repo(), db.deviceConfigDao(), db.recovery, app.markiro.handheld.core.network.ReachabilityTracker(), flowOf(Unit)))
+        val vm = main.track(ShiftListViewModel(repo(), db.deviceConfigDao(), db.recovery, app.markiro.handheld.core.network.ReachabilityTracker(), app.markiro.handheld.core.scan.ScanRouterAdapter(flowOf()), flowOf(Unit)))
         vm.state.first { !it.loading }
         vm.select(cached)
         vm.state.first { it.dialog is ShiftDialog.Refused }

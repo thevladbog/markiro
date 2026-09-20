@@ -24,7 +24,7 @@ import {
   type CredentialGeneration,
   type FloorWorkBarrier,
 } from "../lib/credential-recovery.js";
-import { parseStationInventoryBundleManifest } from "@markiro/domain";
+import { parseStationInventoryBundleManifest, SHIFT_TASK_BARCODE_PREFIX } from "@markiro/domain";
 import { InventoryTaskConfirmation } from "./InventoryTaskConfirmation.js";
 import {
   ShiftSelection,
@@ -496,6 +496,16 @@ export function TaskSelection({
 
   useEffect(() => {
     return source.start((barcode) => {
+      // The shift panel owns this namespace and subscribes to the same source
+      // -- but only while the shifts tab is showing (`!alternateActive`
+      // there). On the warehouse tab it does not subscribe at all, so a
+      // shift-form scan would otherwise vanish here with no feedback.
+      // Trimmed only for this prefix decision, matching `ShiftSelection`'s own
+      // normalization -- the inventory resolve call below keeps the raw value.
+      if (barcode.trim().startsWith(SHIFT_TASK_BARCODE_PREFIX)) {
+        if (category === "warehouse") setError(t("inventory.barcodeIsShiftForm"));
+        return;
+      }
       if (!intakeOpen.current || busyRef.current || isCurrentRef.current?.() === false) return;
       const originGeneration = lifecycleGeneration.current;
       busyRef.current = true;
@@ -541,7 +551,7 @@ export function TaskSelection({
         }
       })();
     });
-  }, [client, joinTask, source, t]);
+  }, [category, client, joinTask, source, t]);
 
   const pageCount = Math.max(1, Math.ceil(tasks.length / INVENTORY_PAGE_SIZE));
   const currentPage = Math.min(page, pageCount);
@@ -626,6 +636,7 @@ export function TaskSelection({
         client={client}
         exec={exec}
         {...(acquireShiftEntry ? { acquireShiftEntry } : {})}
+        source={source}
         onSelected={onShiftSelected}
         onNew={onNew}
         {...(onSetup ? { onSetup } : {})}

@@ -174,6 +174,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "GET /shifts/:id/product-labels (ShiftsController.getProductLabels)",
       "GET /shifts/:id/reprocessings (ShiftsController.getReprocessings)",
       "GET /shifts/:id/product-labels/:jobId/events (ShiftsController.getProductLabelEvents)",
+      "GET /shifts/:id/task-form (ShiftsController.taskForm)",
       "GET /shifts/:shiftId/exports (ShiftExportsController.list)",
       "GET /lines/presence (LinesController.listPresence)",
       "GET /shift-close-conflicts (StationShiftCloseController.list)",

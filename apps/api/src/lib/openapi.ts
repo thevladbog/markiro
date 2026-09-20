@@ -25,9 +25,19 @@ export function zodApiSchema(schema: ZodType): SchemaObject {
   return wireSchema as SchemaObject;
 }
 
-/** ApiBody with the schema derived from the same zod schema the route validates with. */
-export function ApiZodBody(schema: ZodType): MethodDecorator {
-  return ApiBody({ schema: zodApiSchema(schema) });
+/**
+ * ApiBody with the schema derived from the same zod schema the route
+ * validates with. `@nestjs/swagger`'s ApiBody merges over a default of
+ * `{ required: true }`, so a route whose schema tolerates a missing/empty
+ * body (for example one with a top-level `.default(...)`) must say so
+ * explicitly with `{ required: false }`, or the published contract claims a
+ * body is mandatory when the server does not actually require one.
+ */
+export function ApiZodBody(schema: ZodType, options?: { required?: boolean }): MethodDecorator {
+  return ApiBody({
+    schema: zodApiSchema(schema),
+    ...(options?.required === false ? { required: false } : {}),
+  });
 }
 
 /**

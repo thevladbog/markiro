@@ -45,3 +45,10 @@ docs/superpowers/plans/2026-09-10-handheld-shift-validation.md
 
 # Android app: Gradle project, formatted by Android Studio/ktlint, not Prettier.
 apps/handheld/
+
+# Characterisation fixture: these bytes ARE the contract. The inventory task
+# form's rendered HTML is screenshotted into the printed instruction MKR-INS-06,
+# and `inventory-task-form-snapshot.test.ts` compares the live render against
+# this file byte for byte. Reformatting it would make the lock compare the
+# renderer against Prettier's opinion instead of against the shipped artefact.
+apps/api/test/fixtures/inventory-task-form.snapshot.html

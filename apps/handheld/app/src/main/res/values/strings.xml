@@ -210,6 +210,8 @@
     <string name="shifts_update_required_text">Эта смена требует возможности, которой нет в установленной версии. Обновите приложение, используйте станцию или измените политику смены в кабинете.</string>
     <string name="shifts_closed_title">Смена уже закрыта</string>
     <string name="shifts_closed_text">Список обновлён.</string>
+    <string name="shifts_barcode_unknown_title">Смена не найдена</string>
+    <string name="shifts_barcode_unknown_text">Штрихкод бланка не совпал ни с одной сменой в списке. Обновите список или выберите смену вручную.</string>
     <string name="shifts_refused_title">Сервер отказал</string>
     <string name="shifts_refused_text">%1$s · HTTP %2$d · %3$s\n\nСмена не закрыта — дело в другом. Покажите эту строку администратору.</string>
     <string name="shifts_refused_step_enter">вход в смену</string>

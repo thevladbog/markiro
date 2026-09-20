@@ -38,6 +38,13 @@ describe("station shift close schema", () => {
     );
   });
 
+  it("records how a device entered a shift, defaulting old rows to the list", () => {
+    const column = schema.shiftDeviceParticipants.entryMethod;
+    expect(column.notNull).toBe(true);
+    expect(column.default).toBe("list");
+    expect(schema.shiftEntryMethod.enumValues).toEqual(["list", "task_barcode"]);
+  });
+
   it("creates the local close outbox and is safe to apply twice", () => {
     const db = new DatabaseSync(":memory:");
     applyMigrations(db);

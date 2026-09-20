@@ -8,7 +8,12 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import { request as expressRequest } from "express";
 
-import { createShiftSchema, updateShiftSchema, type ShiftDto } from "../src/modules/shifts/dto";
+import {
+  createShiftSchema,
+  shiftEntrySchema,
+  updateShiftSchema,
+  type ShiftDto,
+} from "../src/modules/shifts/dto";
 import { ShiftsController } from "../src/modules/shifts/shifts.controller";
 import type { ShiftsService } from "../src/modules/shifts/shifts.service";
 import type { RequestWithTenant } from "../src/tenancy/tenant.guard";
@@ -165,13 +170,14 @@ describe("ShiftsController.enterShift", () => {
     request.headers = { "x-station-capabilities": "validation-dm-duplicate-v1" };
     request.get = expressRequest.get;
 
-    await controller.enterShift(request, "shift-1");
+    await controller.enterShift(request, "shift-1", shiftEntrySchema.parse(undefined));
 
     expect(enterShift).toHaveBeenCalledWith(
       "tenant-1",
       "shift-1",
       "device-1",
       "validation-dm-duplicate-v1",
+      "list",
     );
   });
 });
@@ -266,9 +272,22 @@ describe("shift owner identity and device policy projection", () => {
     it(`open forwards the authenticated owner and preserves the ${surface} response`, async () => {
       const openShift = vi.fn(async () => saved);
       const controller = new ShiftsController({ openShift } as unknown as ShiftsService);
-      expect(await controller.openShift(authenticatedRequest(), saved.id)).toEqual(expected);
+      expect(
+        await controller.openShift(
+          authenticatedRequest(),
+          saved.id,
+          shiftEntrySchema.parse(undefined),
+        ),
+      ).toEqual(expected);
       expect(openShift.mock.calls).toEqual([
-        ["tenant-owner", saved.id, actor, station ? "device-owner" : undefined, capabilities],
+        [
+          "tenant-owner",
+          saved.id,
+          actor,
+          station ? "device-owner" : undefined,
+          capabilities,
+          "list",
+        ],
       ]);
       expect(saved.validationPrint).toEqual(policy);
     });

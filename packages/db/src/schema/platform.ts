@@ -29,6 +29,7 @@ export const shiftStatus = pgEnum("shift_status", ["planned", "active", "closed"
 export const shiftMode = pgEnum("shift_mode", ["validation", "aggregation"]);
 export const shiftOrigin = pgEnum("shift_origin", ["admin", "station"]);
 export const stationClosePolicy = pgEnum("station_close_policy", ["single_device", "admin_only"]);
+export const shiftEntryMethod = pgEnum("shift_entry_method", ["list", "task_barcode"]);
 export const stationShiftCloseOutcome = pgEnum("station_shift_close_outcome", [
   "accepted",
   "conflict",
@@ -511,6 +512,21 @@ export const shiftDeviceParticipants = pgTable(
     deviceId: uuid("device_id").notNull(),
     firstEnteredAt: timestamp("first_entered_at", { withTimezone: true }).notNull().defaultNow(),
     lastEnteredAt: timestamp("last_entered_at", { withTimezone: true }).notNull().defaultNow(),
+    /**
+     * How this device got into the shift. `task_barcode` means the printed task
+     * form was scanned; the barcode grants nothing extra, so this answers "was
+     * the shop floor working from paper", not "was it allowed in".
+     *
+     * Read it as "last entry" only for a handheld, which calls `/enter` every
+     * time. A station writes this once, when it opens a planned shift: its
+     * re-entry path (`rejoin` in ShiftSelection) never reaches the server, so a
+     * station that opened by scanning and later re-entered from the list still
+     * reads `task_barcode`. Closing that gap would register a second station as
+     * a participant and flip `station_close_policy` to `admin_only`, taking
+     * close authority away from the floor -- a deliberate non-goal, recorded in
+     * docs/superpowers/specs/2026-09-20-shift-task-form-design.md.
+     */
+    entryMethod: shiftEntryMethod("entry_method").notNull().default("list"),
   },
   (t) => [
     unique("shift_device_participants_tenant_shift_device_uq").on(

@@ -368,4 +368,48 @@ describe("shifts OpenAPI contract", () => {
       await app.close();
     }
   });
+
+  it("documents the printable shift task form as a text/html route", async () => {
+    const moduleRef = await Test.createTestingModule({
+      controllers: [ShiftsController],
+      providers: [{ provide: ShiftsService, useValue: {} }],
+    })
+      .overrideGuard(TenantGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(AuthorizationGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(SubscriptionAccessGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
+    const app = moduleRef.createNestApplication();
+    try {
+      const document = SwaggerModule.createDocument(
+        app,
+        new DocumentBuilder().setTitle("contract test").setVersion("test").build(),
+      );
+
+      const taskForm = operation(document, "/shifts/{id}/task-form", "get");
+      const taskFormResponse = taskForm.responses["200"];
+      if (!taskFormResponse || "$ref" in taskFormResponse) {
+        throw new Error("Missing inline shift task-form response");
+      }
+      expect(Object.keys(taskFormResponse.content ?? {})).toEqual(["text/html"]);
+      expect(taskFormResponse.content?.["text/html"]?.schema).toEqual({ type: "string" });
+
+      // shiftEntrySchema defaults the whole body to { entryMethod: "list" }
+      // so that a station or handheld build already deployed in the field
+      // keeps opening/entering shifts with a bodiless request across a
+      // rollout. The published contract must say the body is optional, or a
+      // reader could conclude those older builds are non-conforming.
+      for (const path of ["/shifts/{id}/open", "/shifts/{id}/enter"] as const) {
+        const requestBody = operation(document, path, "post").requestBody;
+        if (!requestBody || "$ref" in requestBody) {
+          throw new Error(`Missing inline request body for POST ${path}`);
+        }
+        expect(requestBody.required).toBe(false);
+      }
+    } finally {
+      await app.close();
+    }
+  });
 });
