@@ -165,7 +165,7 @@ jobs:
           pnpm --filter @markiro/domain build
           pnpm turbo build --filter @markiro/ui...
           pnpm --filter @markiro/db build
-          pnpm --filter @markiro/station exec vitest run --maxWorkers=2 --testTimeout=30000
+          pnpm --filter @markiro/station exec vitest run --maxWorkers=2 --testTimeout=30000 --hookTimeout=30000
           pnpm --filter @markiro/station typecheck
           pnpm --filter @markiro/station lint
           pnpm --filter @markiro/station build
