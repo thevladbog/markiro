@@ -292,6 +292,40 @@ describe("inventory journal", () => {
     ]);
   });
 
+  it("finalizes an observe-mode scan the device could not bind to its task", async () => {
+    const { db, exec } = await setup();
+    db.prepare(
+      "INSERT INTO operators_mirror(operator_id,name,role,pin_hash,active) VALUES(?,?,?,?,1)",
+    ).run(OPERATOR_ID, "Operator", "operator", "hash");
+    // Grant configuration installed, task never mirrored: the scan takes the
+    // ungranted branch, so nothing else will finalize its reservation.
+    db.exec(`INSERT INTO offline_grant_install_state(id,tenant_id,device_id,owner_kind,credential_epoch,request_sequence,mode) VALUES(1,'tenant','${DEVICE_ID}','station',2,1,'observe');
+      INSERT INTO offline_grant_clock(id,server_ms,monotonic_ms,boot_id,high_water_ms,wall_high_water_ms) VALUES(1,100,10,'boot',100,200);`);
+    const seeded = seedCode(db, "OBSERVE-ITEM");
+
+    const outcome = await recordInventoryScan(
+      exec,
+      input(seeded.km.raw, "observe-event"),
+      createCredentialGeneration("secret"),
+      async () => ({ bootId: "boot", monotonicMs: 11, wallMs: 201 }),
+    );
+
+    expect(expectRecorded(outcome).claimedCount).toBe(1);
+    expect(
+      db
+        .prepare(
+          "SELECT commit_state FROM inventory_scan_events_mirror WHERE event_id='observe-event'",
+        )
+        .get(),
+    ).toEqual({ commit_state: "committed" });
+    expect(db.prepare("SELECT event_id FROM inventory_outbox").get()).toEqual({
+      event_id: "observe-event",
+    });
+    expect(db.prepare("SELECT count(*) count FROM offline_grant_consumption").get()).toEqual({
+      count: 0,
+    });
+  });
+
   it("repairs a round-1 committed orphan before it can be presented as accepted", async () => {
     const db = round1Db();
     const code = seedCode(db, "ROUND1-ORPHAN");

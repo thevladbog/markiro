@@ -87,6 +87,14 @@ const shiftExecutionScopeSchema = z.strictObject({
   templates: z.array(z.strictObject({ id: z.string().min(1), spec: z.unknown() })),
 });
 
+/**
+ * The task has no durable execution projection to bind against — no mirrored
+ * bundle, or one this build can no longer read. Distinct from a storage or
+ * parsing fault so callers can degrade on exactly this case and on nothing
+ * else.
+ */
+export class ExecutionProjectionUnavailableError extends Error {}
+
 export async function readShiftExecutionProjection(
   exec: SqlExecutor,
   taskId: string,
@@ -96,9 +104,14 @@ export async function readShiftExecutionProjection(
     [taskId],
   );
   if (!row?.execution_scope_json)
-    throw new Error("offline grant active shift requires a fresh bundle");
+    throw new ExecutionProjectionUnavailableError(
+      "offline grant active shift requires a fresh bundle",
+    );
   const parsed = shiftExecutionScopeSchema.safeParse(JSON.parse(row.execution_scope_json));
-  if (!parsed.success) throw new Error("offline grant active shift requires a fresh bundle");
+  if (!parsed.success)
+    throw new ExecutionProjectionUnavailableError(
+      "offline grant active shift requires a fresh bundle",
+    );
   return { taskKind: "shift", taskId, scope: parsed.data };
 }
 
@@ -121,7 +134,9 @@ export async function readInventoryExecutionProjection(
     !row.active_content_digest ||
     !row.active_manifest_json
   )
-    throw new Error("offline grant active inventory requires a fresh bundle");
+    throw new ExecutionProjectionUnavailableError(
+      "offline grant active inventory requires a fresh bundle",
+    );
   return {
     taskKind: "inventory",
     taskId,
@@ -224,4 +239,29 @@ export function assertExecutionScopeMatches(
   };
   if (stable(expected) !== stable(actual.scope))
     throw new Error("offline grant active shift mismatch");
+}
+
+/**
+ * Reads the projection a productive write must bind to, and says what an
+ * unbindable task means.
+ *
+ * Strict mode propagates the failure: unbound work must not be charged to a
+ * signed allowance. Observe mode returns null so the caller records production
+ * exactly as a device with no grant state does — an observing station has no
+ * authority to stop the line, and the projection is missing for reasons the
+ * floor cannot act on (a bundle this device has never mirrored).
+ */
+export async function readExecutionToBind<T>(
+  mode: "observe" | "strict",
+  read: () => Promise<T>,
+): Promise<T | null> {
+  try {
+    return await read();
+  } catch (error) {
+    // Only a missing binding degrades. A failed read, unreadable JSON or a
+    // broken invariant is a fault the floor must see rather than silently
+    // produce against, in either mode.
+    if (mode === "strict" || !(error instanceof ExecutionProjectionUnavailableError)) throw error;
+    return null;
+  }
 }

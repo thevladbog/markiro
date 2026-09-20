@@ -15,7 +15,7 @@ import {
   stationOperatorIsCurrentlyActive,
 } from "./offline-grants/admission.js";
 import { sampleGrantClock, type GrantClockSample } from "./offline-grants/clock.js";
-import { readShiftExecutionProjection } from "./offline-grants/semantic.js";
+import { readExecutionToBind, readShiftExecutionProjection } from "./offline-grants/semantic.js";
 import { OfflineGrantDeniedError } from "./journal.js";
 
 /**
@@ -233,10 +233,17 @@ export async function closeCurrentBoxWithOfflineGrant(
       device_id: string;
       owner_kind: "station";
       credential_epoch: number;
+      mode: "observe" | "strict";
     }>(
-      "SELECT tenant_id,device_id,owner_kind,credential_epoch FROM offline_grant_install_state WHERE id=1",
+      "SELECT tenant_id,device_id,owner_kind,credential_epoch,mode FROM offline_grant_install_state WHERE id=1",
     );
     if (!state) return closeCurrentBoxLegacy(deps, shiftId, operatorId);
+    // A box on a shift this device cannot bind still has to close where grants
+    // only observe: the operator cannot finish the box any other way.
+    const execution = await readExecutionToBind(state.mode, () =>
+      readShiftExecutionProjection(deps.exec, shiftId),
+    );
+    if (!execution) return closeCurrentBoxLegacy(deps, shiftId, operatorId);
     if (!operatorId) throw new OfflineGrantDeniedError("operator_unauthorized");
     if (!(await stationOperatorIsCurrentlyActive(deps.exec, operatorId)))
       throw new OfflineGrantDeniedError("operator_unauthorized");
@@ -293,7 +300,7 @@ export async function closeCurrentBoxWithOfflineGrant(
         eventType: "shift.box.close.v1",
         cost: {},
       },
-      execution: await readShiftExecutionProjection(deps.exec, shiftId),
+      execution,
       event: {
         eventId,
         shiftId,

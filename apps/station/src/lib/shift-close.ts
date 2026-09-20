@@ -11,7 +11,7 @@ import {
   stationOperatorIsCurrentlyActive,
 } from "./offline-grants/admission.js";
 import { sampleGrantClock, type GrantClockSample } from "./offline-grants/clock.js";
-import { readShiftExecutionProjection } from "./offline-grants/semantic.js";
+import { readExecutionToBind, readShiftExecutionProjection } from "./offline-grants/semantic.js";
 
 export interface OfflineShiftCloseSummary {
   eventId: string;
@@ -241,8 +241,9 @@ export async function closeShiftOfflineWithGrant(
       device_id: string;
       owner_kind: "station";
       credential_epoch: number;
+      mode: "observe" | "strict";
     }>(
-      "SELECT tenant_id,device_id,owner_kind,credential_epoch FROM offline_grant_install_state WHERE id=1",
+      "SELECT tenant_id,device_id,owner_kind,credential_epoch,mode FROM offline_grant_install_state WHERE id=1",
     );
     if (!state) return closeShiftOfflineLegacy(exec, input, now);
     if (!input.operatorId) throw new Error("offline grant operator unauthorized");
@@ -301,6 +302,12 @@ export async function closeShiftOfflineWithGrant(
       `SELECT json_extract(grant_json,'$.snapshotDigest') snapshot_digest FROM offline_grant_grants WHERE json_extract(grant_json,'$.kindOfGrant')='task' AND json_extract(grant_json,'$.taskKind')='shift' AND json_extract(grant_json,'$.taskId')=? ORDER BY installed_sequence DESC LIMIT 1`,
       [input.shiftId],
     );
+    // A shift this device cannot bind must still close where grants only
+    // observe; refusing here left the shift open with no way to finish it.
+    const execution = await readExecutionToBind(state.mode, () =>
+      readShiftExecutionProjection(exec, input.shiftId),
+    );
+    if (!execution) return closeShiftOfflineLegacy(exec, input, now);
     const closedAt = now().toISOString(),
       eventId = crypto.randomUUID();
     const result: OfflineShiftCloseSummary = {
@@ -330,7 +337,7 @@ export async function closeShiftOfflineWithGrant(
         eventType: "shift.close.v1",
         cost: {},
       },
-      execution: await readShiftExecutionProjection(exec, input.shiftId),
+      execution,
       event: result,
       facts: {},
       result,
