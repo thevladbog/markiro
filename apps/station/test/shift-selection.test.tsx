@@ -44,6 +44,8 @@ describe("ShiftSelection", () => {
               mode: "aggregation",
               palletsEnabled: true,
               productName: "Waiting for close sync",
+              productPrintName: "Сидр Дикий Крест 0,45",
+              gtin14: "04600682000017",
               plannedQty: 10,
               productId: "product-1",
               image: null,
@@ -65,11 +67,20 @@ describe("ShiftSelection", () => {
     );
 
     await waitFor(() => expect(screen.getByText("Closing")).toBeDefined());
+    // The print name leads; the catalogue name stays available beneath it.
+    expect(container.querySelector(".shift-card__product")?.textContent).toBe(
+      "Сидр Дикий Крест 0,45",
+    );
+    expect(container.querySelector(".shift-card__product-full")?.textContent).toBe(
+      "Waiting for close sync",
+    );
     expect(screen.getByText("Waiting for close sync")).toBeDefined();
     // The list item carries `palletsEnabled`; the card must not read as plain box aggregation.
-    expect(container.querySelector(".shift-card__plan")?.textContent).toBe(
-      "Aggregation · pallets · plan 10",
-    );
+    expect(container.querySelector(".shift-card__mode-badge")?.textContent).toBe("Aggregation");
+    expect(container.querySelector(".shift-card__pallets")?.textContent).toBe("Pallets");
+    expect(container.querySelector(".shift-card__plan")?.textContent).toBe("plan 10");
+    // `gtin14` from the list item seeds the photo panel's fallback accent hue.
+    expect(container.querySelector(".shift-card__photo")?.getAttribute("data-accent")).toBe("true");
     expect((screen.getByRole("button", { name: "Rejoin" }) as HTMLButtonElement).disabled).toBe(
       true,
     );
@@ -104,15 +115,23 @@ describe("ShiftSelection", () => {
       ),
     );
 
-    render(<ShiftSelection client={client} onSelected={() => {}} onNew={() => {}} />);
+    const { container } = render(
+      <ShiftSelection client={client} onSelected={() => {}} onNew={() => {}} />,
+    );
 
     await waitFor(() =>
       expect(screen.getAllByText("Дикий Крест Особый 5%").length).toBeGreaterThan(0),
     );
-    // The full name never renders when a print name exists…
-    expect(screen.queryByText("Сидр сухой газированный Дикий Крест Особый 5%")).toBeNull();
-    // …and the fallback keeps the full name when it does not.
-    expect(screen.getAllByText("Квас хлебный фильтрованный, 1,5 л").length).toBeGreaterThan(0);
+    const headlines = [...container.querySelectorAll(".shift-card__product")].map(
+      (node) => node.textContent,
+    );
+    const fullNames = [...container.querySelectorAll(".shift-card__product-full")].map(
+      (node) => node.textContent,
+    );
+    // The print name is the headline; the catalogue name moves beneath it…
+    expect(headlines).toEqual(["Дикий Крест Особый 5%", "Квас хлебный фильтрованный, 1,5 л"]);
+    // …and only the card that has a print name carries a second line.
+    expect(fullNames).toEqual(["Сидр сухой газированный Дикий Крест Особый 5%"]);
   });
 
   it("renders the shift's production date from the server list", async () => {
@@ -140,7 +159,7 @@ describe("ShiftSelection", () => {
 
     await waitFor(() => expect(screen.getAllByText("Sparkling water").length).toBeGreaterThan(0));
     expect(screen.getByText("Produced: 08/15/2026")).toBeDefined();
-    expect(screen.getByText("08/21/2026")).toBeDefined();
+    expect(screen.getByText("Shift: 08/21/2026")).toBeDefined();
   });
 
   it("refreshes an open empty list and shows a shift created in the cabinet", async () => {

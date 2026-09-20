@@ -11,6 +11,10 @@ export type UpdateSeverity = "none" | "info" | "warn" | "urgent";
 export interface UpdateIndicatorModel {
   severity: UpdateSeverity;
   label: string;
+  /**
+   * Kept for callers that still compute it; the compact header rail paints the
+   * glyph only and carries the full label in `aria-label`/`title`.
+   */
   shortLabel?: string;
   glyph: "↻" | "!";
   available: boolean;
@@ -102,19 +106,26 @@ export function StatusBar({
       : serverReachability === "reachable"
         ? t("shell.serverAvailable")
         : t("shell.serverUnavailable");
+  // The compact rail spends 64px on this control, so the words move entirely
+  // into the accessible name (and the mouse tooltip): the glyph plus the
+  // severity colour say "look here", and a dot appears only when an update is
+  // actually waiting. «↻ Обновления» stays the name AT and the tests read.
   const updateButton =
     update && onOpenUpdates ? (
       <Button
         size="floor"
         variant="secondary"
-        className="station-update-indicator"
+        className="station-update-indicator station-rail-button station-rail-button--icon"
         data-update-severity={update.severity}
         aria-label={`${update.glyph} ${update.label}`}
+        title={update.label}
         disabled={actionsDisabled}
         onClick={onOpenUpdates}
         icon={<span aria-hidden="true">{update.glyph}</span>}
       >
-        {update.shortLabel ?? update.label}
+        {update.available ? (
+          <span className="station-update-indicator__dot" aria-hidden="true" />
+        ) : null}
       </Button>
     ) : null;
   const toggleButton = onToggleCollapsed ? (

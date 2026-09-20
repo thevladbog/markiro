@@ -199,12 +199,13 @@ export function StationScreenGallery({ request }: StationScreenGalleryProps) {
           shortLabel: copy.updateShort,
         },
         operatorControl: (
-          <Button size="floor" variant="secondary">
+          <Button size="floor" variant="secondary" className="station-rail-button">
             {copy.changeOperator}
           </Button>
         ),
         windowControl: (
           <WindowModeControl
+            compact
             snapshot={{
               mode: "locked",
               pending: false,
@@ -1425,18 +1426,22 @@ function ShiftFixture({ variant, locale }: { variant: string; locale: GalleryLoc
       ? [
           {
             number: "AUG26-041",
-            productName: ru
+            printName: ru ? "Молоко безлактозное 3,2%" : "Lactose-free milk 3.2%",
+            fullName: ru
               ? "Молоко ультрапастеризованное безлактозное обогащённое витаминами A и D для детского питания с массовой долей жира 3,2%, 930 мл"
               : "Ultra-pasteurized lactose-free milk enriched with vitamins A and D for children, 3.2% fat, 930 ml",
+            gtin: "04600682000017",
             active: false,
             mode: "validation" as const,
             plannedQty: 10_000,
           },
           {
             number: "AUG26-040/S",
-            productName: ru
+            printName: ru ? "Жигулёвское 0,5" : "Zhigulevskoye 0.5",
+            fullName: ru
               ? "Пиво светлое фильтрованное пастеризованное «Жигулёвское», 0,5 л"
               : "Zhigulevskoye light filtered pasteurized beer, 0.5 l",
+            gtin: "04600682000024",
             active: true,
             mode: "aggregation" as const,
             palletsEnabled: true,
@@ -1446,14 +1451,20 @@ function ShiftFixture({ variant, locale }: { variant: string; locale: GalleryLoc
       : [
           {
             number: "AUG26-039",
-            productName: ru ? "Вода питьевая газированная, 1 л" : "Sparkling drinking water, 1 l",
+            printName: ru ? "Вода газированная 1 л" : "Sparkling water 1 l",
+            fullName: ru ? "Вода питьевая газированная, 1 л" : "Sparkling drinking water, 1 l",
+            gtin: "04600682000031",
             active: false,
             mode: "validation" as const,
             plannedQty: 4_000,
           },
           {
             number: "AUG26-038",
-            productName: ru ? "Квас хлебный фильтрованный, 1,5 л" : "Filtered bread kvass, 1.5 l",
+            // No print name in the catalog: the headline falls back to the
+            // full name and no second line is drawn.
+            printName: ru ? "Квас хлебный фильтрованный, 1,5 л" : "Filtered bread kvass, 1.5 l",
+            fullName: null,
+            gtin: "04600682000048",
             active: false,
             mode: "aggregation" as const,
             plannedQty: 2_400,
@@ -1481,15 +1492,18 @@ function ShiftFixture({ variant, locale }: { variant: string; locale: GalleryLoc
               <ShiftCard
                 key={shift.number}
                 number={shift.number}
-                productName={shift.productName}
+                productName={shift.printName}
+                productFullName={shift.fullName}
+                gtin={shift.gtin}
                 plannedDate={`2026-08-${String(21 - index - (page - 1) * 2).padStart(2, "0")}`}
+                plannedDateLabel={ru ? "Смена" : "Shift"}
                 productionDate={index === 0 ? "2026-08-15" : null}
                 productionDateLabel={ru ? "Производство" : "Produced"}
                 locale={locale}
                 plannedQty={shift.plannedQty}
                 mode={shift.mode}
                 palletsEnabled={"palletsEnabled" in shift && shift.palletsEnabled === true}
-                palletsLabel={ru ? "паллеты" : "pallets"}
+                palletsLabel={ru ? "Паллеты" : "Pallets"}
                 status={shift.active ? "active" : "planned"}
                 modeLabel={
                   shift.mode === "aggregation"

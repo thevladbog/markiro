@@ -1293,16 +1293,19 @@ export function App() {
 
   switchOperatorRef.current = switchOperator;
 
-  const windowModeControl = (
-    <WindowModeControl
-      snapshot={lockdownSnapshot}
-      activeShift={activeFloorTask !== null}
-      disabled={operatorSwitchState !== "idle" || floorRecoveryBlocked || shiftEntryPending}
-      onEnter={enterLockdown}
-      onExit={exitLockdown}
-      onDismissError={clearLockdownError}
-    />
-  );
+  const windowModeControlProps = {
+    snapshot: lockdownSnapshot,
+    activeShift: activeFloorTask !== null,
+    disabled: operatorSwitchState !== "idle" || floorRecoveryBlocked || shiftEntryPending,
+    onEnter: enterLockdown,
+    onExit: exitLockdown,
+    onDismissError: clearLockdownError,
+  };
+  // Two renderings of the same control: the floating window chrome and the
+  // exception screen keep the captioned 64px button, while the compact header
+  // rail gets the 52px icon-only one (same action, same accessible name).
+  const windowModeControl = <WindowModeControl {...windowModeControlProps} />;
+  const headerWindowModeControl = <WindowModeControl {...windowModeControlProps} compact />;
 
   function withWindowChrome(content: ReactNode): ReactNode {
     return (
@@ -1540,6 +1543,7 @@ export function App() {
   };
   const operatorControl = (
     <OperatorSwitchControl
+      compact
       activeShift={activeFloorTask !== null}
       pending={operatorSwitchState === "settling" || floorRecoveryBlocked || shiftEntryPending}
       error={operatorSwitchState === "failed"}
@@ -1821,7 +1825,7 @@ export function App() {
   // since it cannot be proven alive without printing to it.
   return (
     <FloorShell
-      windowControl={windowModeControl}
+      windowControl={headerWindowModeControl}
       operatorControl={operatorControl}
       stationName={config.deviceName ?? config.deviceId ?? config.machineId}
       lineName={config.lineName ?? null}
