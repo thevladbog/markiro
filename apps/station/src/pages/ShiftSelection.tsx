@@ -391,14 +391,18 @@ export function ShiftSelection({
   useEffect(() => {
     if (!source || alternateActive) return;
     return source.start((raw) => {
+      // A scanner-appended terminator or stray whitespace must not change
+      // which handler claims the scan, nor make a well-formed token fail to
+      // parse -- trim once and use that value for both decisions below.
+      const trimmed = raw.trim();
       // Every other scan on this screen belongs to somebody else -- a unit code,
       // an inventory form. Staying silent on them is the difference between a
       // shared scanner and one that argues with its neighbours.
-      if (!raw.startsWith(SHIFT_TASK_BARCODE_PREFIX)) return;
+      if (!trimmed.startsWith(SHIFT_TASK_BARCODE_PREFIX)) return;
       // A screen that is busy entering a shift should not report scan errors
       // for any branch below, malformed tokens included.
       if (controlsDisabled) return;
-      const shiftId = parseShiftTaskBarcode(raw);
+      const shiftId = parseShiftTaskBarcode(trimmed);
       if (shiftId === null) {
         setError(t("shifts.barcodeFailed"));
         return;

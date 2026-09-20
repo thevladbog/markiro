@@ -207,6 +207,36 @@ describe("ShiftSelection barcode scanning", () => {
     await waitFor(() => expect(onSelected).toHaveBeenCalled());
   });
 
+  it("opens the scanned shift when the scanner appends a trailing terminator", async () => {
+    const scan = scanner();
+    const post = vi
+      .fn<PostMock>()
+      .mockResolvedValue({ id: SHIFT_ID, status: "active", mode: "aggregation" });
+    const onSelected = vi.fn<OnSelectedMock>();
+    renderSelection({ scan, post, onSelected, items: [plannedShift()] });
+
+    await waitFor(() => expect(screen.getByText("Test product")).toBeDefined());
+    act(() => scan.scan(`markiro:shift:v1:${SHIFT_ID}\r`));
+
+    await waitFor(() => expect(onSelected).toHaveBeenCalled());
+    expect(post).toHaveBeenCalledWith(`/shifts/${SHIFT_ID}/open`, { entryMethod: "task_barcode" });
+  });
+
+  it("opens the scanned shift when the scanner surrounds it with whitespace", async () => {
+    const scan = scanner();
+    const post = vi
+      .fn<PostMock>()
+      .mockResolvedValue({ id: SHIFT_ID, status: "active", mode: "aggregation" });
+    const onSelected = vi.fn<OnSelectedMock>();
+    renderSelection({ scan, post, onSelected, items: [plannedShift()] });
+
+    await waitFor(() => expect(screen.getByText("Test product")).toBeDefined());
+    act(() => scan.scan(`  markiro:shift:v1:${SHIFT_ID}  `));
+
+    await waitFor(() => expect(onSelected).toHaveBeenCalled());
+    expect(post).toHaveBeenCalledWith(`/shifts/${SHIFT_ID}/open`, { entryMethod: "task_barcode" });
+  });
+
   it("reports an unreadable barcode for a well-prefixed payload that is not a shift id", async () => {
     const scan = scanner();
     renderSelection({ scan, items: [plannedShift()] });

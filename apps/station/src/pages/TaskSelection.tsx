@@ -500,7 +500,9 @@ export function TaskSelection({
       // -- but only while the shifts tab is showing (`!alternateActive`
       // there). On the warehouse tab it does not subscribe at all, so a
       // shift-form scan would otherwise vanish here with no feedback.
-      if (barcode.startsWith(SHIFT_TASK_BARCODE_PREFIX)) {
+      // Trimmed only for this prefix decision, matching `ShiftSelection`'s own
+      // normalization -- the inventory resolve call below keeps the raw value.
+      if (barcode.trim().startsWith(SHIFT_TASK_BARCODE_PREFIX)) {
         if (category === "warehouse") setError(t("inventory.barcodeIsShiftForm"));
         return;
       }
