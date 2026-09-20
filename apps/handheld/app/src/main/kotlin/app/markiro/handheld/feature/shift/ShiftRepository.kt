@@ -6,8 +6,10 @@ import app.markiro.handheld.core.network.ErrorBody
 import app.markiro.handheld.core.network.LineDto
 import app.markiro.handheld.core.network.ShiftBundleDto
 import app.markiro.handheld.core.network.ShiftDto
+import app.markiro.handheld.core.network.ShiftEntryRequest
 import app.markiro.handheld.core.network.StationApi
 import app.markiro.handheld.core.network.UPDATE_REQUIRED_CODE
+import app.markiro.handheld.core.network.ValidationPrintDto
 import app.markiro.handheld.core.pallets.SsccBlockApplier
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.ShiftEntity
@@ -94,6 +96,32 @@ fun ShiftDto.toEntity(existing: ShiftEntity?, now: Long) = ShiftEntity(
         ?: validationPrint.allowPreviouslyAcceptedCodes,
 )
 
+/**
+ * Just enough of the cached row for the other-line confirmation card; `enter`
+ * re-fetches the full shift and its bundle from the server regardless of
+ * whether the operator got here by scanning a form or picking from the list.
+ */
+fun ShiftEntity.toDto() = ShiftDto(
+    id = id,
+    number = number,
+    status = status,
+    mode = mode,
+    validationPrint = ValidationPrintDto(validationPrintMode),
+    productId = productId,
+    productName = productName,
+    productPrintName = productPrintName,
+    lineId = lineId,
+    lineName = lineName,
+    counterpartyName = counterpartyName,
+    plannedQty = plannedQty,
+    plannedDate = plannedDate,
+    productionDate = productionDate,
+    boxCapacity = boxCapacity,
+    palletBoxCapacity = palletBoxCapacity,
+    palletsEnabled = palletsEnabled,
+    openedAt = openedAt,
+)
+
 /** Shift list cache, entry (server participation + bundle) and the local leave mark. */
 class ShiftRepository(
     private val api: StationApi,
@@ -106,6 +134,14 @@ class ShiftRepository(
     private val history = ValidationHistoryMirror(db, api, json)
 
     fun observeShifts(): Flow<List<ShiftEntity>> = db.shiftDao().observeAll()
+
+    /**
+     * A shift already mirrored on this device, by id -- the same table the
+     * list and `enter` itself read. The task-barcode scan resolves against
+     * this: no barcode-lookup endpoint exists for a shift, and none should be
+     * added for what a scan merely shortcuts to the card for.
+     */
+    suspend fun listed(shiftId: String): ShiftEntity? = db.shiftDao().get(shiftId)
 
     /** Own line plus unassigned shifts; rows without a bundle that vanished from the list are dropped. */
     suspend fun refreshList(): Boolean = db.recovery.work { refreshListOwned() }
@@ -136,13 +172,13 @@ class ShiftRepository(
      * together made a missing product or label template look like a closed
      * shift.
      */
-    suspend fun enter(shiftId: String): EnterResult = db.recovery.work { enterOwned(shiftId) }
+    suspend fun enter(shiftId: String, entryMethod: String = "list"): EnterResult = db.recovery.work { enterOwned(shiftId, entryMethod) }
 
-    private suspend fun enterOwned(shiftId: String): EnterResult {
+    private suspend fun enterOwned(shiftId: String, entryMethod: String): EnterResult {
         GrantTransport(db,api).refreshConfiguredDevice()
         val cached = db.shiftDao().get(shiftId)
         val entered = try {
-            api.enter(shiftId)
+            api.enter(shiftId, ShiftEntryRequest(entryMethod))
         } catch (e: HttpException) {
             return refusal(EnterStep.ENTER, e)
         } catch (_: IOException) {

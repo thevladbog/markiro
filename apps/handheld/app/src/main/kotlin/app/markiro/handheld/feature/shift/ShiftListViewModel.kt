@@ -2,8 +2,10 @@ package app.markiro.handheld.feature.shift
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import app.markiro.handheld.core.barcode.ShiftTaskToken
 import app.markiro.handheld.core.network.ReachabilityTracker
 import app.markiro.handheld.core.network.ShiftDto
+import app.markiro.handheld.core.scan.ScanEvents
 import app.markiro.handheld.core.storage.DeviceConfigDao
 import app.markiro.handheld.core.storage.DeviceConfigEntity
 import app.markiro.handheld.core.storage.DeviceRecovery
@@ -26,12 +28,18 @@ import javax.inject.Inject
 data class OtherLine(val id: String, val name: String, val shifts: List<ShiftDto>)
 
 sealed interface ShiftDialog {
-    data class ConfirmOther(val shift: ShiftDto, val lineName: String) : ShiftDialog
+    /**
+     * @param entryMethod What confirming should send: `"list"` when the operator tapped
+     * the card, `"task_barcode"` when a form scan opened this same confirmation.
+     */
+    data class ConfirmOther(val shift: ShiftDto, val lineName: String, val entryMethod: String = "list") : ShiftDialog
     data object Entering : ShiftDialog
     data object UpdateRequired : ShiftDialog
     data object Closed : ShiftDialog
     data object Unavailable : ShiftDialog
     data class Refused(val step: EnterStep, val status: Int, val code: String?) : ShiftDialog
+    /** The scanned form's barcode matched no shift already mirrored on this device. */
+    data object BarcodeUnknown : ShiftDialog
 }
 
 data class ShiftListUi(
@@ -69,15 +77,17 @@ class ShiftListViewModel(
     private val config: DeviceConfigDao,
     private val recovery: DeviceRecovery,
     reachability: ReachabilityTracker,
+    scans: ScanEvents,
     /** Re-evaluates the reachability window while nothing else changes; tests pass a single tick. */
     tick: Flow<Unit>,
 ) : ViewModel() {
     @Inject
-    constructor(repository: ShiftRepository, config: DeviceConfigDao, recovery: DeviceRecovery, reachability: ReachabilityTracker) : this(
+    constructor(repository: ShiftRepository, config: DeviceConfigDao, recovery: DeviceRecovery, reachability: ReachabilityTracker, scans: ScanEvents) : this(
         repository,
         config,
         recovery,
         reachability,
+        scans,
         flow {
             while (true) {
                 emit(Unit)
@@ -134,6 +144,7 @@ class ShiftListViewModel(
         }.stateIn(viewModelScope, SharingStarted.Eagerly, ShiftListUi(true, null, emptyList(), emptyList(), false, false, null, false, null, null))
 
     init {
+        launchOwned { scans.events.collect { event -> onScan(event.raw) } }
         refresh()
     }
 
@@ -167,11 +178,11 @@ class ShiftListViewModel(
             dialog.value = ShiftDialog.Unavailable
             return
         }
-        enter(shift.id, null)
+        enter(shift.id, "list")
     }
 
     fun continueCurrent() {
-        state.value.continueShift?.let { enter(it.id, null) }
+        state.value.continueShift?.let { enter(it.id, "list") }
     }
 
     fun selectOther(shift: ShiftDto, lineName: String) {
@@ -180,17 +191,43 @@ class ShiftListViewModel(
 
     fun confirmOther() {
         val d = dialog.value as? ShiftDialog.ConfirmOther ?: return
-        enter(d.shift.id, d.shift)
+        enter(d.shift.id, d.entryMethod)
     }
 
     fun dismissDialog() {
         dialog.value = null
     }
 
-    private fun enter(shiftId: String, fallback: ShiftDto?) {
+    /**
+     * The printed form's barcode is a shortcut to the card, not a key: a shift
+     * of another line still goes through the same confirmation the list would
+     * show. Resolution never leaves the shifts already mirrored on this
+     * device -- no lookup endpoint exists for a scan, and none is added here.
+     */
+    private suspend fun onScan(raw: String) {
+        if (dialog.value != null) return
+        val shiftId = ShiftTaskToken.parse(raw.trim()) ?: return
+        val match = repository.listed(shiftId)
+        if (match == null) {
+            dialog.value = ShiftDialog.BarcodeUnknown
+            return
+        }
+        if (match.status == "closed") {
+            dialog.value = ShiftDialog.Closed
+            return
+        }
+        val ownLine = config.get()?.lineId
+        if (match.lineId != null && match.lineId != ownLine) {
+            dialog.value = ShiftDialog.ConfirmOther(match.toDto(), match.lineName.orEmpty(), entryMethod = "task_barcode")
+            return
+        }
+        enter(match.id, "task_barcode")
+    }
+
+    private fun enter(shiftId: String, entryMethod: String) {
         launchOwned {
             dialog.value = ShiftDialog.Entering
-            when (val result = repository.enter(shiftId)) {
+            when (val result = repository.enter(shiftId, entryMethod)) {
                 EnterResult.Ok -> {
                     dialog.value = null
                     _events.emit(ShiftListEvent.Entered(shiftId))

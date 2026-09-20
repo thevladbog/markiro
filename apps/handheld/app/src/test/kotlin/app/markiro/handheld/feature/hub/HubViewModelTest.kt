@@ -136,7 +136,7 @@ class HubViewModelTest {
                 listOf(InventoryTaskDto("i1", "INV-0007", "Вода 0,5 л", null, "check", "line-2", "Линия 2", "2026-08-01", "2026-08-31")),
             )
         }
-        override suspend fun enter(id: String): ShiftDto = enter(id)
+        override suspend fun enter(id: String, body: app.markiro.handheld.core.network.ShiftEntryRequest): ShiftDto = enter(id)
         override suspend fun bundle(id: String): ShiftBundleDto = bundle(id)
         override suspend fun summary(id: String): ShiftSummaryDto = throw UnsupportedOperationException()
         override suspend fun lines(): LineListResponse = throw UnsupportedOperationException()

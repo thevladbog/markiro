@@ -56,7 +56,7 @@ interface StationApi {
     suspend fun grantInventoryLeave(@Path("id") id: String, @Body body: kotlinx.serialization.json.JsonObject): kotlinx.serialization.json.JsonObject
 
     @POST("shifts/{id}/enter")
-    suspend fun enter(@Path("id") id: String): ShiftDto
+    suspend fun enter(@Path("id") id: String, @Body body: ShiftEntryRequest): ShiftDto
 
     @GET("shifts/{id}/bundle")
     suspend fun bundle(@Path("id") id: String): ShiftBundleDto

@@ -2,6 +2,7 @@ package app.markiro.handheld.feature.shift
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Factory
+import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material.icons.outlined.Report
 import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.SystemUpdate
@@ -95,6 +96,17 @@ fun ShiftDialogScreen(
                 },
                 primary = StateAction(stringResource(R.string.common_got_it), onDismiss),
                 tone = Tone.Err,
+                primaryIsAccent = false,
+            )
+        }
+        ShiftDialog.BarcodeUnknown -> {
+            AppBar(stringResource(R.string.shifts_title), onDismiss)
+            FullScreenState(
+                Icons.Outlined.QrCodeScanner,
+                stringResource(R.string.shifts_barcode_unknown_title),
+                stringResource(R.string.shifts_barcode_unknown_text),
+                primary = StateAction(stringResource(R.string.common_got_it), onDismiss),
+                tone = Tone.Warn,
                 primaryIsAccent = false,
             )
         }

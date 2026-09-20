@@ -72,6 +72,7 @@ class ShiftListViewModelTest {
             db.deviceConfigDao(),
             db.recovery,
             ReachabilityTracker { 1_757_500_000_000L },
+            app.markiro.handheld.core.scan.ScanRouterAdapter(flowOf()),
             flowOf(Unit),
         ),
     )
