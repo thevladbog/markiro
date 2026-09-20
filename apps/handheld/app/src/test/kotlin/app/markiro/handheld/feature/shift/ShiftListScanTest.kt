@@ -40,6 +40,7 @@ import app.markiro.handheld.core.storage.DeviceConfigDao
 import app.markiro.handheld.core.storage.DeviceConfigEntity
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.initializeRecoveryForTest
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -74,6 +75,18 @@ private class FakeStationApi(shifts: List<ShiftDto>) : StationApi {
         private set
 
     /**
+     * When set, `shifts()` suspends here before returning, so a test can hold
+     * a refresh open and scan into that exact `loading == true` window
+     * deterministically instead of racing Room's own executor thread.
+     */
+    var shiftsGate: CompletableDeferred<Unit>? = null
+
+    /** Adds a shift only once its refresh is meant to find it, e.g. after a gate opens. */
+    fun addShift(shift: ShiftDto) {
+        byId[shift.id] = shift
+    }
+
+    /**
      * How many times `shifts()` has been called, exposed as a `StateFlow` so a
      * test can `first { it > n }` and genuinely await the next fetch rather
      * than racing it with `advanceUntilIdle()` -- the same seed-vs-real-
@@ -91,6 +104,7 @@ private class FakeStationApi(shifts: List<ShiftDto>) : StationApi {
      * exact defect these tests exist to catch.
      */
     override suspend fun shifts(status: String?, lineId: String?): ShiftListResponse {
+        shiftsGate?.await()
         _shiftsCallCount.value += 1
         val items = byId.values.toList()
         val scoped = if (lineId != null) {
@@ -361,6 +375,68 @@ class ShiftListScanTest {
         val dialog = model.state.first { it.dialog != null }.dialog
 
         assertEquals(ShiftDialog.BarcodeUnknown, dialog)
+    }
+
+    /**
+     * Finding B (PR #616 review): a scan that lands while `loading` is true
+     * and the shift is not yet in `mine`/`others`/Room must retry the lookup
+     * once the in-flight refresh settles, rather than reporting the shift
+     * unknown. Settles the model first (the established pattern every other
+     * test here uses to get the scan collector genuinely running), then
+     * exercises the exact same `onScan` loading-check with a second, gated
+     * `refresh()` -- this makes `loading == true` a guarantee rather than a
+     * race against Room's own executor thread, since nothing but the gated
+     * `shifts()` call can flip it back to `false`.
+     */
+    @Test
+    fun `scan that arrives while a refresh is in flight is entered once that refresh finds it`() = runTest {
+        val api = FakeStationApi(shifts = emptyList())
+        val model = viewModel(api, ScanRouterAdapter(scans))
+        model.settled()
+        assertTrue(model.state.value.mine.none { it.id == shiftId })
+
+        val gate = CompletableDeferred<Unit>()
+        api.shiftsGate = gate
+        api.addShift(plannedShift(shiftId, OWN_LINE))
+        model.refresh()
+        model.state.first { it.loading }
+
+        scan("markiro:shift:v1:$shiftId")
+        // Only now let the refresh -- and with it, the retried lookup -- proceed.
+        gate.complete(Unit)
+
+        model.state.first { it.continueShift?.id == shiftId }
+
+        assertEquals(shiftId, api.enteredShiftId)
+        assertEquals("task_barcode", api.lastEnterBody?.entryMethod)
+        assertTrue(model.state.value.dialog !is ShiftDialog.BarcodeUnknown)
+    }
+
+    /**
+     * The other half of the same fix: a shift that genuinely never appears
+     * must still resolve to `BarcodeUnknown` once the held-open refresh
+     * settles, proving the retry does not hang past
+     * `SCAN_LOADING_RETRY_TIMEOUT_MS` and does not fabricate a match out of
+     * an empty list.
+     */
+    @Test
+    fun `scan for a shift that never appears still ends in the unknown-barcode dialog`() = runTest {
+        val api = FakeStationApi(shifts = emptyList())
+        val model = viewModel(api, ScanRouterAdapter(scans))
+        model.settled()
+
+        val gate = CompletableDeferred<Unit>()
+        api.shiftsGate = gate
+        model.refresh()
+        model.state.first { it.loading }
+
+        scan("markiro:shift:v1:$shiftId")
+        gate.complete(Unit)
+
+        val dialog = model.state.first { it.dialog != null }.dialog
+
+        assertEquals(ShiftDialog.BarcodeUnknown, dialog)
+        assertNull(api.enteredShiftId)
     }
 
     @Test

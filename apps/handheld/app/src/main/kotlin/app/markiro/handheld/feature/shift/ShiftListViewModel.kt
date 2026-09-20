@@ -20,9 +20,11 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 
 data class OtherLine(val id: String, val name: String, val shifts: List<ShiftDto>)
@@ -68,6 +70,18 @@ sealed interface ShiftListEvent {
 
 private const val REACHABLE_WINDOW_MS = 2 * 60 * 1000L
 private const val REACHABLE_TICK_MS = 30 * 1000L
+/**
+ * Bounded wait for a scan that lands before the first `refreshList()` settles.
+ * `refresh()` does not reset `loading` in a `finally`, so a refresh that
+ * throws leaves it stuck `true` for the life of the screen -- an unbounded
+ * `state.first { !it.loading }` here would then hang the scan collector
+ * forever, the exact failure mode CC-3 removed for the grant-denial path.
+ * Five seconds comfortably covers a single shift-list fetch on a factory
+ * Wi-Fi network while staying well under OkHttp's 30 s connect/read timeouts,
+ * so a genuinely stuck refresh still resolves to `BarcodeUnknown` instead of
+ * leaving the operator staring at a frozen scan.
+ */
+private const val SCAN_LOADING_RETRY_TIMEOUT_MS = 5_000L
 
 private data class Lists(val current: ShiftEntity?, val mine: List<ShiftEntity>, val config: DeviceConfigEntity?, val reachable: Boolean)
 
@@ -214,13 +228,22 @@ class ShiftListViewModel(
      * previous entry but no longer in either visible list -- a closed shift,
      * for instance, which both lists above always exclude. No lookup endpoint
      * exists for a scan, and none is added here.
+     *
+     * A scan that lands while the very first `refreshList()` is still in
+     * flight would otherwise miss on an empty `mine`/`others` even though the
+     * shift is genuinely the operator's own -- `loading` starts `true` and the
+     * screen has nothing mirrored yet. On a miss while still loading, wait
+     * (bounded by [SCAN_LOADING_RETRY_TIMEOUT_MS]) for loading to finish and
+     * look up the same shift once more before giving up.
      */
     private suspend fun onScan(raw: String) {
         if (dialog.value != null) return
         val shiftId = ShiftTaskToken.parse(raw.trim()) ?: return
-        val ui = state.value
-        val visible = (listOfNotNull(ui.continueShift) + ui.mine).map { it.toDto() } + ui.others.flatMap { it.shifts }
-        val match = visible.firstOrNull { it.id == shiftId } ?: repository.listed(shiftId)?.toDto()
+        var match = matchFromVisible(shiftId, state.value) ?: repository.listed(shiftId)?.toDto()
+        if (match == null && state.value.loading) {
+            withTimeoutOrNull(SCAN_LOADING_RETRY_TIMEOUT_MS) { state.first { !it.loading } }
+            match = matchFromVisible(shiftId, state.value) ?: repository.listed(shiftId)?.toDto()
+        }
         if (match == null) {
             dialog.value = ShiftDialog.BarcodeUnknown
             return
@@ -239,6 +262,12 @@ class ShiftListViewModel(
             return
         }
         enter(match.id, "task_barcode")
+    }
+
+    /** Everything already visible to the operator on this screen; see `onScan`. */
+    private fun matchFromVisible(shiftId: String, ui: ShiftListUi): ShiftDto? {
+        val visible = (listOfNotNull(ui.continueShift) + ui.mine).map { it.toDto() } + ui.others.flatMap { it.shifts }
+        return visible.firstOrNull { it.id == shiftId }
     }
 
     private fun enter(shiftId: String, entryMethod: String) {
