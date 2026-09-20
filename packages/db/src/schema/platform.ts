@@ -513,9 +513,18 @@ export const shiftDeviceParticipants = pgTable(
     firstEnteredAt: timestamp("first_entered_at", { withTimezone: true }).notNull().defaultNow(),
     lastEnteredAt: timestamp("last_entered_at", { withTimezone: true }).notNull().defaultNow(),
     /**
-     * How this device last got into the shift. `task_barcode` means the printed
-     * task form was scanned; the barcode grants nothing extra, so this answers
-     * "was the shop floor working from paper", not "was it allowed in".
+     * How this device got into the shift. `task_barcode` means the printed task
+     * form was scanned; the barcode grants nothing extra, so this answers "was
+     * the shop floor working from paper", not "was it allowed in".
+     *
+     * Read it as "last entry" only for a handheld, which calls `/enter` every
+     * time. A station writes this once, when it opens a planned shift: its
+     * re-entry path (`rejoin` in ShiftSelection) never reaches the server, so a
+     * station that opened by scanning and later re-entered from the list still
+     * reads `task_barcode`. Closing that gap would register a second station as
+     * a participant and flip `station_close_policy` to `admin_only`, taking
+     * close authority away from the floor -- a deliberate non-goal, recorded in
+     * docs/superpowers/specs/2026-09-20-shift-task-form-design.md.
      */
     entryMethod: shiftEntryMethod("entry_method").notNull().default("list"),
   },
