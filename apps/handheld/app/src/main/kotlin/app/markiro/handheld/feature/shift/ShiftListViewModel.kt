@@ -144,7 +144,10 @@ class ShiftListViewModel(
         }.stateIn(viewModelScope, SharingStarted.Eagerly, ShiftListUi(true, null, emptyList(), emptyList(), false, false, null, false, null, null))
 
     init {
-        launchOwned { scans.events.collect { event -> onScan(event.raw) } }
+        launchOwned { scans.events.collect { event ->
+            try { onScan(event.raw) }
+            catch (_: app.markiro.handheld.core.grants.GrantDenied) { dialog.value=null; grantDenial.show() }
+        } }
         refresh()
     }
 
@@ -224,6 +227,10 @@ class ShiftListViewModel(
         }
         if (match.status == "closed") {
             dialog.value = ShiftDialog.Closed
+            // Matches the `EnterResult.Closed` branch of `enter()`: the dialog's own
+            // text claims the list was refreshed, so this scan path must actually do
+            // it too, not just leave the stale row for the operator to dismiss into.
+            repository.refreshList()
             return
         }
         val ownLine = config.get()?.lineId

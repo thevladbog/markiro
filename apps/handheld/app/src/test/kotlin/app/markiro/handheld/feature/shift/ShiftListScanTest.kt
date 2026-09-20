@@ -5,6 +5,8 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.markiro.handheld.MainDispatcherRule
 import app.markiro.handheld.core.box.SsccPool
+import app.markiro.handheld.core.grants.GrantDenied
+import app.markiro.handheld.core.grants.GrantEvidenceEntity
 import app.markiro.handheld.core.network.BoxRegistryPageDto
 import app.markiro.handheld.core.network.BundleProductDto
 import app.markiro.handheld.core.network.IdentityResponse
@@ -34,10 +36,13 @@ import app.markiro.handheld.core.network.WriteoffBootstrapDto
 import app.markiro.handheld.core.scan.ScanEvent
 import app.markiro.handheld.core.scan.ScanEvents
 import app.markiro.handheld.core.scan.ScanRouterAdapter
+import app.markiro.handheld.core.storage.DeviceConfigDao
 import app.markiro.handheld.core.storage.DeviceConfigEntity
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.initializeRecoveryForTest
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -69,6 +74,15 @@ private class FakeStationApi(shifts: List<ShiftDto>) : StationApi {
         private set
 
     /**
+     * How many times `shifts()` has been called, exposed as a `StateFlow` so a
+     * test can `first { it > n }` and genuinely await the next fetch rather
+     * than racing it with `advanceUntilIdle()` -- the same seed-vs-real-
+     * emission trap `settled()` guards against, one call site over.
+     */
+    private val _shiftsCallCount = MutableStateFlow(0)
+    val shiftsCallCount: StateFlow<Int> = _shiftsCallCount
+
+    /**
      * Mirrors the server's own scoping (`shifts.controller.ts`): a line-less
      * query returns only this device's own line plus unassigned shifts, and a
      * scoped query returns only that line. Until this honoured `lineId`, the
@@ -77,6 +91,7 @@ private class FakeStationApi(shifts: List<ShiftDto>) : StationApi {
      * exact defect these tests exist to catch.
      */
     override suspend fun shifts(status: String?, lineId: String?): ShiftListResponse {
+        _shiftsCallCount.value += 1
         val items = byId.values.toList()
         val scoped = if (lineId != null) {
             items.filter { it.lineId == lineId }
@@ -124,6 +139,35 @@ private class FakeStationApi(shifts: List<ShiftDto>) : StationApi {
     override suspend fun boxRegistry(since: String?, until: String?, cursor: String?, limit: Int): BoxRegistryPageDto = error("not used")
 }
 
+/**
+ * Wraps the real `DeviceConfigDao` and throws `GrantDenied` from the first
+ * call to `get()` -- the call `onScan` makes to resolve the device's own
+ * line -- then delegates normally from then on. Everything else (`observe()`,
+ * used by the view model's own state `combine`) is untouched, so the screen
+ * keeps working while only the scan path's own lookup is made to fail once.
+ */
+private class FailOnceConfigDao(private val real: DeviceConfigDao) : DeviceConfigDao {
+    private var thrown = false
+    override fun observe() = real.observe()
+    override suspend fun get(): DeviceConfigEntity? {
+        if (!thrown) {
+            thrown = true
+            throw GrantDenied(
+                GrantEvidenceEntity(
+                    ownerKey = "owner", eventId = "test-denial", taskKind = "SHIFT", taskId = "irrelevant",
+                    snapshotDigest = "d", payloadDigest = "p", costs = "{}", grantId = null, compact = null,
+                    mode = "strict", reason = "test", trustedTime = null, generation = 1, epoch = 0,
+                ),
+                null,
+            )
+        }
+        return real.get()
+    }
+    override suspend fun count() = real.count()
+    override suspend fun upsert(config: DeviceConfigEntity) = real.upsert(config)
+    override suspend fun clear() = real.clear()
+}
+
 @RunWith(AndroidJUnit4::class)
 class ShiftListScanTest {
     @get:Rule
@@ -162,10 +206,10 @@ class ShiftListScanTest {
 
     private fun closedShift(id: String) = plannedShift(id, OWN_LINE).copy(status = "closed")
 
-    private fun viewModel(api: StationApi, scans: ScanEvents) = main.track(
+    private fun viewModel(api: StationApi, scans: ScanEvents, config: DeviceConfigDao = db.deviceConfigDao()) = main.track(
         ShiftListViewModel(
             ShiftRepository(api, db, NetworkModule.json(), SsccPool(db)) { 1_757_500_000_000L },
-            db.deviceConfigDao(),
+            config,
             db.recovery,
             ReachabilityTracker { 1_757_500_000_000L },
             scans,
@@ -283,6 +327,30 @@ class ShiftListScanTest {
         assertEquals(ShiftDialog.Closed, dialog)
     }
 
+    /**
+     * CC-2: the closed dialog's own text says «Список обновлён.», which was
+     * only true of the other producer of this same dialog state --
+     * `EnterResult.Closed` in `enter()`, which refreshes right after setting
+     * it. A scan of a shift that closed while the form was in transit must
+     * make that sentence true too, not just leave the stale row on screen for
+     * the operator to dismiss into.
+     */
+    @Test
+    fun `scanned closed shift also refreshes the list, so the dialog's claim is true`() = runTest {
+        val api = FakeStationApi(shifts = listOf(closedShift(shiftId)))
+        val model = viewModel(api, ScanRouterAdapter(scans))
+        model.settled()
+        val callsBeforeScan = api.shiftsCallCount.value
+
+        scan("markiro:shift:v1:$shiftId")
+        val dialog = model.state.first { it.dialog != null }.dialog
+        assertEquals(ShiftDialog.Closed, dialog)
+
+        // Genuinely await the next fetch rather than a bare `advanceUntilIdle()`;
+        // without the fix this never happens and the test times out.
+        api.shiftsCallCount.first { it > callsBeforeScan }
+    }
+
     @Test
     fun `scan of a shift missing from the list shows the unknown-barcode dialog`() = runTest {
         val api = FakeStationApi(shifts = emptyList())
@@ -326,5 +394,34 @@ class ShiftListScanTest {
 
         assertNull(api.enteredShiftId)
         assertNull(model.state.value.dialog)
+    }
+
+    /**
+     * CC-3: `launchOwned`'s try/catch used to sit outside `scans.events.collect`,
+     * so a `GrantDenied` thrown while handling one scan cancelled the whole
+     * collection -- the operator's next scan of the printed sheet, and every
+     * one after it, would then do nothing at all. `FailOnceConfigDao` makes
+     * `onScan`'s own `config.get()` throw exactly once, the same way a real
+     * offline-grant refusal would; the second, good scan must still resolve,
+     * proving the collector survived the first.
+     */
+    @Test
+    fun `a scan that fails with a grant denial does not kill later scans`() = runTest {
+        val api = FakeStationApi(shifts = listOf(plannedShift(shiftId, OWN_LINE)))
+        val failingConfig = FailOnceConfigDao(db.deviceConfigDao())
+        val model = viewModel(api, ScanRouterAdapter(scans), config = failingConfig)
+        model.settled()
+
+        scan("markiro:shift:v1:$shiftId")
+        // The failed scan must not open any dialog of its own and must surface
+        // through the same grant-denial channel every other refusal does.
+        model.grantDenial.isVisible.first { it }
+        assertNull(api.enteredShiftId)
+
+        scan("markiro:shift:v1:$shiftId")
+        model.state.first { it.continueShift?.id == shiftId }
+
+        assertEquals(shiftId, api.enteredShiftId)
+        assertEquals("task_barcode", api.lastEnterBody?.entryMethod)
     }
 }
