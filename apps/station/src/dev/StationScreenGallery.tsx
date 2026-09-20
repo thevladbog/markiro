@@ -18,8 +18,10 @@ import {
 } from "react";
 import { Alert, Button, Card, PinPad, SignalOverlay } from "@markiro/ui";
 import type { OperatorMirrorRecord } from "@markiro/db/station-sqlite";
+import { SHIFT_CLOSE_REASON_CODES } from "@markiro/domain";
 import type { StationInventoryBundleManifest } from "@markiro/domain";
 
+import { FloorChoiceGroup } from "../ui/FloorChoiceGroup.js";
 import i18n from "../i18n/index.js";
 import type { BoxPrintErrorCode, ClosedBoxSummary } from "../lib/boxes.js";
 import type { HardwareContract, UsbPrinterInfo } from "../lib/hardware.js";
@@ -1826,37 +1828,85 @@ function galleryRecentOperations(): RecentOperation[] {
 function WorkOverlayFixture({ overlay, locale }: { overlay: string; locale: GalleryLocale }) {
   const ru = locale === "ru";
   const clear = overlay === "clear-confirm";
+  if (overlay === "close-reason") return <CloseReasonOverlayFixture locale={locale} />;
   return (
     <StationScreen title={ru ? "Рабочая смена" : "Active shift"}>
       <div className="gallery-centered-card">
+        {/* Same classes as the real overlays in WorkScreen, so the reviewed
+            spacing here is the spacing the floor gets. */}
         <Alert
           tone="warn"
+          className="work-overlay"
           title={
-            clear
-              ? ru
-                ? "Очистить короб?"
-                : "Clear the box?"
-              : ru
-                ? "Есть неотправленные операции"
-                : "Operations are still pending"
+            <span className="work-overlay__title">
+              {clear
+                ? ru
+                  ? "Очистить короб?"
+                  : "Clear the box?"
+                : ru
+                  ? "Есть неотправленные операции"
+                  : "Operations are still pending"}
+            </span>
           }
         >
-          <p>
-            {clear
-              ? ru
-                ? "Все коды текущего тестового короба будут освобождены."
-                : "All codes in the current synthetic box will be released."
-              : ru
-                ? "7 операций сохранены локально и ещё не синхронизированы."
-                : "7 operations are stored locally and have not synced yet."}
-          </p>
-          <div className="gallery-two-actions">
-            <Button size="floor">
-              {clear ? (ru ? "Очистить" : "Clear") : ru ? "Выйти" : "Exit"}
-            </Button>
-            <Button size="floor" variant="secondary">
-              {ru ? "Остаться" : "Stay"}
-            </Button>
+          <div className="work-overlay__body">
+            <p>
+              {clear
+                ? ru
+                  ? "Все коды текущего тестового короба будут освобождены."
+                  : "All codes in the current synthetic box will be released."
+                : ru
+                  ? "7 операций сохранены локально и ещё не синхронизированы."
+                  : "7 operations are stored locally and have not synced yet."}
+            </p>
+            <div className="work-overlay__actions">
+              <Button size="floor">
+                {clear ? (ru ? "Очистить" : "Clear") : ru ? "Выйти" : "Exit"}
+              </Button>
+              <Button size="floor" variant="secondary">
+                {ru ? "Остаться" : "Stay"}
+              </Button>
+            </div>
+          </div>
+        </Alert>
+      </div>
+    </StationScreen>
+  );
+}
+
+/**
+ * The shift-close discrepancy prompt, built from the same parts as
+ * WorkScreen's own overlay: it is the tallest one the floor sees, and the only
+ * one whose body is a control rather than a sentence.
+ */
+function CloseReasonOverlayFixture({ locale }: { locale: GalleryLocale }) {
+  const t = i18n.getFixedT(locale);
+  const [reason, setReason] = useState<string>("production_defect");
+  return (
+    <StationScreen title={locale === "ru" ? "Рабочая смена" : "Active shift"}>
+      <div className="gallery-centered-card">
+        <Alert
+          tone="warn"
+          className="work-overlay"
+          title={<span className="work-overlay__title">{t("work.closeReasonTitle")}</span>}
+        >
+          <div className="work-overlay__body">
+            <p>{t("work.closeReasonDetail")}</p>
+            <FloorChoiceGroup
+              label={t("work.closeReasonTitle")}
+              choices={SHIFT_CLOSE_REASON_CODES.map((code) => ({
+                value: code,
+                label: t(`work.closeReasons.${code}`),
+              }))}
+              value={reason}
+              onChange={setReason}
+            />
+            <div className="work-overlay__actions">
+              <Button size="floor">{t("work.closeReasonConfirm")}</Button>
+              <Button size="floor" variant="secondary">
+                {t("work.stay")}
+              </Button>
+            </div>
           </div>
         </Alert>
       </div>

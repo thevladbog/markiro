@@ -1,4 +1,5 @@
 import { SavedPrinterDestination } from "../ui/PrinterDestination.js";
+import { FloorChoiceGroup } from "../ui/FloorChoiceGroup.js";
 import {
   bindPrintDestination,
   readPrintDestination,
@@ -21,6 +22,7 @@ import {
   type LabelTemplateSpec,
   palletLabelFields,
   parseDuplicateKm,
+  SHIFT_CLOSE_REASON_CODES,
   type ScanVerdict,
   type PrinterDpi,
 } from "@markiro/domain";
@@ -298,6 +300,14 @@ export function WorkScreen({
   const [confirmExit, setConfirmExit] = useState(false);
   const [closeReasonPicker, setCloseReasonPicker] = useState(false);
   const [closeReason, setCloseReason] = useState<string>("production_defect");
+  const closeReasonChoices = useMemo(
+    () =>
+      SHIFT_CLOSE_REASON_CODES.map((code) => ({
+        value: code,
+        label: t(`work.closeReasons.${code}`),
+      })),
+    [t],
+  );
   const [closeError, setCloseError] = useState<string | null>(null);
   const closeRequestRef = useRef(false);
   const [closeRequestPending, setCloseRequestPending] = useState(false);
@@ -2617,161 +2627,213 @@ export function WorkScreen({
 
       <div className="work-screen__overlays">
         {overlayState === "exit-pending" ? (
-          <Alert tone="warn" style={{ position: "relative", zIndex: 1 }}>
-            <p>{t("work.exitPending", { count: pendingSync })}</p>
-            <Button size="floor" onClick={onExit}>
-              {t("work.exitAnyway")}
-            </Button>
-            <Button size="floor" variant="secondary" onClick={() => setConfirmExit(false)}>
-              {t("work.stay")}
-            </Button>
+          <Alert tone="warn" className="work-overlay" style={{ position: "relative", zIndex: 1 }}>
+            <div className="work-overlay__body">
+              <p>{t("work.exitPending", { count: pendingSync })}</p>
+              <div className="work-overlay__actions">
+                <Button size="floor" onClick={onExit}>
+                  {t("work.exitAnyway")}
+                </Button>
+                <Button size="floor" variant="secondary" onClick={() => setConfirmExit(false)}>
+                  {t("work.stay")}
+                </Button>
+              </div>
+            </div>
           </Alert>
         ) : null}
         {overlayState === "clear-confirm" ? (
-          <Alert tone="warn" title={t("box.confirmClearTitle")}>
-            <p>{t("box.confirmClearDetail")}</p>
-            <Button size="floor" onClick={confirmClearBox}>
-              {t("box.confirmClear")}
-            </Button>
-            <Button size="floor" variant="secondary" onClick={() => setConfirmClear(false)}>
-              {t("box.cancelClear")}
-            </Button>
+          <Alert
+            tone="warn"
+            className="work-overlay"
+            title={<span className="work-overlay__title">{t("box.confirmClearTitle")}</span>}
+          >
+            <div className="work-overlay__body">
+              <p>{t("box.confirmClearDetail")}</p>
+              <div className="work-overlay__actions">
+                <Button size="floor" onClick={confirmClearBox}>
+                  {t("box.confirmClear")}
+                </Button>
+                <Button size="floor" variant="secondary" onClick={() => setConfirmClear(false)}>
+                  {t("box.cancelClear")}
+                </Button>
+              </div>
+            </div>
           </Alert>
         ) : null}
         {closeReasonPicker ? (
-          <Alert tone="warn" title={t("work.closeReasonTitle")}>
-            <p>{t("work.closeReasonDetail")}</p>
-            <select value={closeReason} onChange={(event) => setCloseReason(event.target.value)}>
-              <option value="production_defect">{t("work.closeReasons.production_defect")}</option>
-              <option value="material_shortage">{t("work.closeReasons.material_shortage")}</option>
-              <option value="equipment_stop">{t("work.closeReasons.equipment_stop")}</option>
-              <option value="production_order_changed">
-                {t("work.closeReasons.production_order_changed")}
-              </option>
-              <option value="planned_quantity_error">
-                {t("work.closeReasons.planned_quantity_error")}
-              </option>
-              <option value="other_production_deviation">
-                {t("work.closeReasons.other_production_deviation")}
-              </option>
-            </select>
-            <Button
-              size="floor"
-              disabled={closeRequestPending}
-              onClick={() => void performClose(closeReason)}
-            >
-              {t("work.closeReasonConfirm")}
-            </Button>
-            <Button size="floor" variant="secondary" onClick={() => setCloseReasonPicker(false)}>
-              {t("work.stay")}
-            </Button>
+          <Alert
+            tone="warn"
+            className="work-overlay"
+            title={<span className="work-overlay__title">{t("work.closeReasonTitle")}</span>}
+          >
+            <div className="work-overlay__body">
+              <p>{t("work.closeReasonDetail")}</p>
+              <FloorChoiceGroup
+                label={t("work.closeReasonTitle")}
+                choices={closeReasonChoices}
+                value={closeReason}
+                onChange={setCloseReason}
+                disabled={closeRequestPending}
+              />
+              <div className="work-overlay__actions">
+                <Button
+                  size="floor"
+                  disabled={closeRequestPending}
+                  onClick={() => void performClose(closeReason)}
+                >
+                  {t("work.closeReasonConfirm")}
+                </Button>
+                <Button
+                  size="floor"
+                  variant="secondary"
+                  onClick={() => setCloseReasonPicker(false)}
+                >
+                  {t("work.stay")}
+                </Button>
+              </div>
+            </div>
           </Alert>
         ) : null}
         {planReachedPrompt !== null ? (
-          <Alert tone="ok" title={t("work.planReachedTitle")}>
-            <p>{t("work.planReachedDetail", { count: planReachedPrompt })}</p>
-            <Button
-              size="floor"
-              disabled={closeRequestPending}
-              onClick={() => void confirmPlanClose()}
-            >
-              {t("work.closeShift")}
-            </Button>
-            <Button
-              size="floor"
-              variant="secondary"
-              onClick={() => {
-                planReachedPromptRef.current = false;
-                planReachedAcknowledgedRef.current = true;
-                setPlanReachedPrompt(null);
-              }}
-            >
-              {t("work.continue")}
-            </Button>
+          <Alert
+            tone="ok"
+            className="work-overlay"
+            title={<span className="work-overlay__title">{t("work.planReachedTitle")}</span>}
+          >
+            <div className="work-overlay__body">
+              <p>{t("work.planReachedDetail", { count: planReachedPrompt })}</p>
+              <div className="work-overlay__actions">
+                <Button
+                  size="floor"
+                  disabled={closeRequestPending}
+                  onClick={() => void confirmPlanClose()}
+                >
+                  {t("work.closeShift")}
+                </Button>
+                <Button
+                  size="floor"
+                  variant="secondary"
+                  onClick={() => {
+                    planReachedPromptRef.current = false;
+                    planReachedAcknowledgedRef.current = true;
+                    setPlanReachedPrompt(null);
+                  }}
+                >
+                  {t("work.continue")}
+                </Button>
+              </div>
+            </div>
           </Alert>
         ) : null}
         {closeError ? (
-          <Alert tone="error" title={t("work.closeFailed")}>
-            <p>{closeError}</p>
-            <Button size="floor" onClick={() => setCloseError(null)}>
-              {t("work.stay")}
-            </Button>
+          <Alert
+            tone="error"
+            className="work-overlay"
+            title={<span className="work-overlay__title">{t("work.closeFailed")}</span>}
+          >
+            <div className="work-overlay__body">
+              <p>{closeError}</p>
+              <div className="work-overlay__actions">
+                <Button size="floor" onClick={() => setCloseError(null)}>
+                  {t("work.stay")}
+                </Button>
+              </div>
+            </div>
           </Alert>
         ) : null}
         {palletMenuOpen ? (
-          <Alert tone="info" title={t("work.more")} style={{ position: "relative", zIndex: 1 }}>
-            <Button
-              size="floor"
-              onClick={() => {
-                setPalletMenuOpen(false);
-                setPalletEarlyCloseConfirm(true);
-              }}
-            >
-              {t("pallet.earlyClose")}
-            </Button>
-            <Button size="floor" variant="secondary" onClick={() => setPalletMenuOpen(false)}>
-              {t("work.stay")}
-            </Button>
+          <Alert
+            tone="info"
+            className="work-overlay"
+            title={<span className="work-overlay__title">{t("work.more")}</span>}
+            style={{ position: "relative", zIndex: 1 }}
+          >
+            <div className="work-overlay__body">
+              <div className="work-overlay__actions">
+                <Button
+                  size="floor"
+                  onClick={() => {
+                    setPalletMenuOpen(false);
+                    setPalletEarlyCloseConfirm(true);
+                  }}
+                >
+                  {t("pallet.earlyClose")}
+                </Button>
+                <Button size="floor" variant="secondary" onClick={() => setPalletMenuOpen(false)}>
+                  {t("work.stay")}
+                </Button>
+              </div>
+            </div>
           </Alert>
         ) : null}
         {palletEarlyCloseConfirm ? (
           <Alert
             tone="warn"
-            title={t("pallet.earlyClose")}
+            className="work-overlay"
+            title={<span className="work-overlay__title">{t("pallet.earlyClose")}</span>}
             style={{ position: "relative", zIndex: 1 }}
           >
-            <p>
-              {t("pallet.earlyCloseDetail", {
-                count: pallet?.boxCount ?? 0,
-                capacity: palletBoxCapacity ?? 0,
-              })}
-            </p>
-            <Button
-              size="floor"
-              onClick={() => {
-                setPalletEarlyCloseConfirm(false);
-                enqueueManualPalletClose();
-              }}
-            >
-              {t("box.confirmAction")}
-            </Button>
-            <Button
-              size="floor"
-              variant="secondary"
-              onClick={() => setPalletEarlyCloseConfirm(false)}
-            >
-              {t("work.stay")}
-            </Button>
+            <div className="work-overlay__body">
+              <p>
+                {t("pallet.earlyCloseDetail", {
+                  count: pallet?.boxCount ?? 0,
+                  capacity: palletBoxCapacity ?? 0,
+                })}
+              </p>
+              <div className="work-overlay__actions">
+                <Button
+                  size="floor"
+                  onClick={() => {
+                    setPalletEarlyCloseConfirm(false);
+                    enqueueManualPalletClose();
+                  }}
+                >
+                  {t("box.confirmAction")}
+                </Button>
+                <Button
+                  size="floor"
+                  variant="secondary"
+                  onClick={() => setPalletEarlyCloseConfirm(false)}
+                >
+                  {t("work.stay")}
+                </Button>
+              </div>
+            </div>
           </Alert>
         ) : null}
         {shiftClosePalletConfirm ? (
           <Alert
             tone="warn"
-            title={t("work.closeShift")}
+            className="work-overlay"
+            title={<span className="work-overlay__title">{t("work.closeShift")}</span>}
             style={{ position: "relative", zIndex: 1 }}
           >
-            <p>
-              {t("work.palletOpenAtClose", {
-                count: shiftClosePalletConfirm.boxCount,
-                capacity: palletBoxCapacity ?? 0,
-              })}
-            </p>
-            {shiftClosePalletConfirm.blockedBySerials ? (
-              <p role="alert">{t("work.palletOpenAtCloseNoSerials")}</p>
-            ) : null}
-            <Button size="floor" onClick={() => void confirmShiftClosePallet()}>
-              {t("work.palletOpenAtCloseConfirm")}
-            </Button>
-            <Button
-              size="floor"
-              variant="secondary"
-              onClick={() => {
-                pendingShiftCloseReasonRef.current = undefined;
-                setShiftClosePalletConfirm(null);
-              }}
-            >
-              {t("work.stay")}
-            </Button>
+            <div className="work-overlay__body">
+              <p>
+                {t("work.palletOpenAtClose", {
+                  count: shiftClosePalletConfirm.boxCount,
+                  capacity: palletBoxCapacity ?? 0,
+                })}
+              </p>
+              {shiftClosePalletConfirm.blockedBySerials ? (
+                <p role="alert">{t("work.palletOpenAtCloseNoSerials")}</p>
+              ) : null}
+              <div className="work-overlay__actions">
+                <Button size="floor" onClick={() => void confirmShiftClosePallet()}>
+                  {t("work.palletOpenAtCloseConfirm")}
+                </Button>
+                <Button
+                  size="floor"
+                  variant="secondary"
+                  onClick={() => {
+                    pendingShiftCloseReasonRef.current = undefined;
+                    setShiftClosePalletConfirm(null);
+                  }}
+                >
+                  {t("work.stay")}
+                </Button>
+              </div>
+            </div>
           </Alert>
         ) : null}
       </div>
