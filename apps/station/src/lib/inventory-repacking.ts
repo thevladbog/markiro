@@ -372,10 +372,11 @@ async function writeProductiveJournal(
     }>(
       "SELECT tenant_id,device_id,owner_kind,credential_epoch,mode FROM offline_grant_install_state WHERE id=1",
     );
-    if (!state) {
-      await writeJournal(exec, input);
-      return;
-    }
+    // Journalling alone would leave `next_device_sequence` where it was: the
+    // productive path takes the sequence from terminal state and advances it
+    // together with the row, so the ungranted fallback must do the same or the
+    // next event reuses this one's sequence.
+    if (!state) return writeRecoveryJournal(exec, input, generation);
     if (!(await stationOperatorIsCurrentlyActive(exec, input.event.operatorId)))
       throw new OfflineGrantDeniedError("operator_unauthorized");
     const [binding] = await exec.all<{ snapshot_digest: string }>(
@@ -394,10 +395,7 @@ async function writeProductiveJournal(
     const execution = await readExecutionToBind(state.mode, () =>
       readInventoryExecutionProjection(exec, input.inventoryId),
     );
-    if (!execution) {
-      await writeJournal(exec, input);
-      return;
-    }
+    if (!execution) return writeRecoveryJournal(exec, input, generation);
     const statement = journalStatement(input);
     const sequenceStatement = (decisionGuard: string, decisionIds: readonly string[]) => ({
       sql: `UPDATE inventory_terminal_state SET next_device_sequence=next_device_sequence+1 WHERE inventory_id=? AND snapshot_id=? AND device_id=? AND next_device_sequence=? AND ${decisionGuard}`,

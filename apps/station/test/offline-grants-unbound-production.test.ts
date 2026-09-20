@@ -11,6 +11,10 @@ import { restoreProductLabelWork } from "../src/lib/product-labels/recovery.js";
 import { requireProductLabelJob } from "../src/lib/product-labels/store.js";
 import { recordScanWithOfflineGrant } from "../src/lib/journal.js";
 import { closeShiftOfflineWithGrant } from "../src/lib/shift-close.js";
+import {
+  ExecutionProjectionUnavailableError,
+  readExecutionToBind,
+} from "../src/lib/offline-grants/semantic.js";
 import { STATION_MIGRATIONS } from "@markiro/db/station-sqlite";
 import type { SqlExecutor } from "../src/lib/mirror.js";
 
@@ -305,5 +309,31 @@ describe("closing a shift a station cannot bind", () => {
         async () => ({ bootId: "boot", monotonicMs: 11, wallMs: 201 }),
       ),
     ).rejects.toThrow("offline grant active shift requires a fresh bundle");
+  });
+});
+
+describe("readExecutionToBind", () => {
+  it("degrades only on a missing binding", async () => {
+    await expect(
+      readExecutionToBind("observe", () => {
+        throw new ExecutionProjectionUnavailableError("requires a fresh bundle");
+      }),
+    ).resolves.toBeNull();
+  });
+
+  it("surfaces storage and parsing faults even in observe mode", async () => {
+    await expect(
+      readExecutionToBind("observe", () => {
+        throw new Error("SQLITE_BUSY: database is locked");
+      }),
+    ).rejects.toThrow("SQLITE_BUSY");
+  });
+
+  it("surfaces a missing binding in strict mode", async () => {
+    await expect(
+      readExecutionToBind("strict", () => {
+        throw new ExecutionProjectionUnavailableError("requires a fresh bundle");
+      }),
+    ).rejects.toThrow("requires a fresh bundle");
   });
 });

@@ -1631,7 +1631,10 @@ async function recordInventoryScanInternal(
   ) {
     throw new Error("inventory outbox reservation mismatch");
   }
-  if (!grantState)
+  // The granted branch finalizes the event inside its own admission commit;
+  // every other branch -- including a grant-state device whose task could not
+  // be bound -- still has to finalize here, or the event stays pending forever.
+  if (!grantState || !inventoryExecution)
     await finalizePendingEvent(exec, input.inventoryId, input.snapshotId, input.eventId);
   return result;
 }

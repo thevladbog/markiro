@@ -241,6 +241,39 @@ describe("durable inventory repacking", () => {
     });
   });
 
+  it("journals an unbindable repack in observe mode and still advances the sequence", async () => {
+    const { db, exec, seed } = await setup(1);
+    await recordInventoryRepackScan(
+      exec,
+      input(OLD_SSCC, "77777777-7777-4777-8777-777777777771", 2),
+    );
+    const item = seed("DUAL");
+    const generation = enableStrictGrant(db);
+    // A device that received grant configuration but never mirrored the task:
+    // observe mode journals production, and journalling must advance the device
+    // sequence exactly as the charged path does.
+    db.exec("UPDATE offline_grant_install_state SET mode='observe' WHERE id=1");
+    db.exec("UPDATE inventory_task_mirror SET active_snapshot_id=NULL");
+    const before = db.prepare("SELECT next_device_sequence n FROM inventory_terminal_state").get();
+
+    await expect(
+      recordInventoryRepackScan(exec, {
+        ...input(item.km.raw, "88888888-8888-4888-8888-888888888882", 2),
+        credentialGeneration: generation,
+        sampleGrantClock: async () => ({ bootId: "boot", monotonicMs: 11, wallMs: 101 }),
+      }),
+    ).resolves.toMatchObject({ verdict: "expected" });
+
+    expect(db.prepare("SELECT next_device_sequence n FROM inventory_terminal_state").get()).toEqual(
+      {
+        n: (before as { n: number }).n + 1,
+      },
+    );
+    expect(db.prepare("SELECT count(*) count FROM offline_grant_consumption").get()).toEqual({
+      count: 0,
+    });
+  });
+
   it("atomically charges both accepted-item and capacity-close dimensions", async () => {
     const { db, exec, seed } = await setup(1);
     await recordInventoryRepackScan(
