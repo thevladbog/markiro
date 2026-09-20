@@ -69,7 +69,11 @@ import {
   readShiftMirror,
   type ShiftContextRow,
 } from "./lib/mirror.js";
-import { mirrorShiftBundle, refreshShiftBundleForRecovery } from "./lib/shift-bundle.js";
+import {
+  ensureShiftExecutionProjection,
+  mirrorShiftBundle,
+  refreshShiftBundleForRecovery,
+} from "./lib/shift-bundle.js";
 import { createOperatorRosterRefresher } from "./lib/roster-sync.js";
 import { createKeyboardWedgeSource } from "./lib/scan-source.js";
 import { createActivityAwareScanSource, createOperatorIdleLock } from "./lib/operator-idle-lock.js";
@@ -93,10 +97,8 @@ import {
   hasStationReadinessDeviceGrant,
   prepareStationGrantReadiness,
 } from "./lib/offline-grants/store.js";
-import {
-  readInventoryExecutionProjection,
-  readShiftExecutionProjection,
-} from "./lib/offline-grants/semantic.js";
+import { readInventoryExecutionProjection } from "./lib/offline-grants/semantic.js";
+import { admitTaskEntry } from "./lib/offline-grants/entry.js";
 import { ConfigTransitionCoordinator } from "./lib/config-transition.js";
 import {
   resetCredentialForPairing as resetCredentialConfig,
@@ -1602,41 +1604,37 @@ export function App() {
       );
       if (grantState) {
         const admission = new StationGrantAdmission(tauriExecutor, sampleGrantClock);
-        const execution = await readShiftExecutionProjection(tauriExecutor, entered.id);
-        const owner = {
-          tenantId: grantState.tenant_id,
-          deviceId: grantState.device_id,
-          kind: grantState.owner_kind,
-          credentialEpoch: grantState.credential_epoch,
-        };
-        if (!authority?.resuming) {
-          const decision = await admission.commitNewWork(
-            {
-              intent: {
-                owner,
-                capability: "shift.start.v1",
-                taskId: entered.id,
-                snapshotDigest: "start",
-                eventId: crypto.randomUUID(),
-                eventType: "shift.scan.v1",
-                cost: {},
-              },
-              execution,
-            },
-            floorGeneration,
-          );
-          setOfflineGrantNotice(
-            decision.allow && decision.reason ? t("shifts.offlineGrantObserve") : null,
-          );
-          if (!decision.allow) throw new OfflineGrantDeniedError(decision.reason ?? "denied");
-        }
-        const taskDecision = await admission.assessTaskWork({
-          owner,
+        // The ordinary bundle mirror starts only after this function publishes
+        // the floor task, so a first entry has no projection to bind yet.
+        const projection = (force = false) =>
+          ensureShiftExecutionProjection({
+            client: activeClient,
+            exec: tauriExecutor,
+            shiftId: entered.id,
+            terminalId: floorConfig.deviceId ?? null,
+            generation: floorGeneration,
+            force,
+          });
+        const execution = await projection();
+        if (!lease.isCurrent() || !credentialGenerationIsCurrent(floorGeneration)) return;
+        const decision = await admitTaskEntry({
+          admission,
+          generation: floorGeneration,
+          refreshExecution: () => projection(true),
+          owner: {
+            tenantId: grantState.tenant_id,
+            deviceId: grantState.device_id,
+            kind: grantState.owner_kind,
+            credentialEpoch: grantState.credential_epoch,
+          },
           capability: "shift.start.v1",
           eventType: "shift.scan.v1",
+          taskId: entered.id,
+          resuming: authority?.resuming ?? false,
           execution,
         });
-        if (!taskDecision.allow) throw new OfflineGrantDeniedError(taskDecision.reason ?? "denied");
+        if (!decision.allow) throw new OfflineGrantDeniedError(decision.reason);
+        setOfflineGrantNotice(decision.observe ? t("shifts.offlineGrantObserve") : null);
       }
     }
     if (!lease.isCurrent() || (floorGeneration && !credentialGenerationIsCurrent(floorGeneration)))
@@ -1692,44 +1690,29 @@ export function App() {
       );
       if (grantState) {
         const admission = new StationGrantAdmission(tauriExecutor, sampleGrantClock);
-        const execution = await readInventoryExecutionProjection(
-          tauriExecutor,
-          entered.inventory.inventoryId,
-        );
-        const owner = {
-          tenantId: grantState.tenant_id,
-          deviceId: grantState.device_id,
-          kind: grantState.owner_kind,
-          credentialEpoch: grantState.credential_epoch,
-        };
-        if (!authority?.resuming) {
-          const decision = await admission.commitNewWork(
-            {
-              intent: {
-                owner,
-                capability: "inventory.start.v1",
-                taskId: entered.inventory.inventoryId,
-                snapshotDigest: "start",
-                eventId: crypto.randomUUID(),
-                eventType: "inventory.scan.v1",
-                cost: {},
-              },
-              execution,
-            },
-            floorGeneration,
-          );
-          setOfflineGrantNotice(
-            decision.allow && decision.reason ? t("inventory.offlineGrantObserve") : null,
-          );
-          if (!decision.allow) throw new OfflineGrantDeniedError(decision.reason ?? "denied");
-        }
-        const taskDecision = await admission.assessTaskWork({
-          owner,
+        // Unlike a shift, the inventory bundle is published before entry, so a
+        // missing projection here is a real fault rather than the ordinary
+        // first-entry state -- it still must not stop an observing station.
+        const decision = await admitTaskEntry({
+          admission,
+          generation: floorGeneration,
+          owner: {
+            tenantId: grantState.tenant_id,
+            deviceId: grantState.device_id,
+            kind: grantState.owner_kind,
+            credentialEpoch: grantState.credential_epoch,
+          },
           capability: "inventory.start.v1",
           eventType: "inventory.scan.v1",
-          execution,
+          taskId: entered.inventory.inventoryId,
+          resuming: authority?.resuming ?? false,
+          execution: await readInventoryExecutionProjection(
+            tauriExecutor,
+            entered.inventory.inventoryId,
+          ).catch(() => null),
         });
-        if (!taskDecision.allow) throw new OfflineGrantDeniedError(taskDecision.reason ?? "denied");
+        if (!decision.allow) throw new OfflineGrantDeniedError(decision.reason);
+        setOfflineGrantNotice(decision.observe ? t("inventory.offlineGrantObserve") : null);
       }
     }
     if (!lease.isCurrent() || (floorGeneration && !credentialGenerationIsCurrent(floorGeneration)))

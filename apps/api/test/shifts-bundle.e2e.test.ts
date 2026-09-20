@@ -385,6 +385,40 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
     expect(bundle.body.shift).toMatchObject({ id, productId });
   });
 
+  // The signed offline-grant task scope binds `stationClosePolicy` and
+  // `stationCloseOwnerDeviceId` (see device-grants/frozen-task.ts). A device
+  // derives both from this field alone, so omitting it here leaves every
+  // station's execution projection permanently unable to match its own grant.
+  it("carries the close authority a device must bind against its offline grant", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+    const productId = await seedProduct(orgId, { status: "active" });
+    const created = await agent.post("/shifts").send({ productId, mode: "validation" }).expect(201);
+    const id = created.body.id as string;
+    const server = app!.getHttpServer();
+    const first = await createTestStationDevice(app!, agent, "Line 1 terminal");
+
+    await request(server).post(`/shifts/${id}/open`).set("x-api-key", first.apiKey).expect(200);
+    const owned = await request(server)
+      .get(`/shifts/${id}/bundle`)
+      .set("x-api-key", first.apiKey)
+      .expect(200);
+    expect(owned.body.shift.stationCloseAccess).toEqual({
+      kind: "single_device",
+      ownerDeviceId: first.deviceId,
+    });
+
+    // A second participant demotes the shift to admin-only closure; the
+    // bundle must say so, because the scope the server signs already does.
+    const second = await createTestStationDevice(app!, agent, "Line 2 terminal");
+    await request(server).post(`/shifts/${id}/open`).set("x-api-key", second.apiKey).expect(200);
+    const shared = await request(server)
+      .get(`/shifts/${id}/bundle`)
+      .set("x-api-key", second.apiKey)
+      .expect(200);
+    expect(shared.body.shift.stationCloseAccess).toEqual({ kind: "admin_only" });
+  });
+
   describe("box serial block on the bundle (Task 7)", () => {
     // Two distinct, check-digit-shaped GLNs so a bug that swapped the
     // organisation's own issuer for the shift's explicit one (or vice versa)

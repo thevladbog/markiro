@@ -2,7 +2,14 @@ import { refreshValidationHistory } from "./validation-reprocessing.js";
 import { DomainError } from "@markiro/domain";
 import { productLabelContextForBundle } from "./product-labels/context.js";
 import type { StationClient } from "./api-client.js";
-import type { CredentialGeneration } from "./credential-recovery.js";
+import {
+  readBackfilledBoxTemplateRecovery,
+  type CredentialGeneration,
+} from "./credential-recovery.js";
+import {
+  readShiftExecutionProjection,
+  type ShiftExecutionProjection,
+} from "./offline-grants/semantic.js";
 import {
   upsertBundle,
   upsertReferenceBundle,
@@ -213,6 +220,58 @@ export function refreshShiftBundleForRecovery(
   return trackShiftBundleMirror(shiftId, async () => {
     await mirrorShiftBundleBody(client, exec, shiftId, generation, false);
   });
+}
+
+/**
+ * The durable execution projection an offline grant binds a shift to, fetched
+ * on demand at entry.
+ *
+ * The ordinary bundle mirror only starts AFTER entry (App publishes the floor
+ * task first, and the allocating mirror waits for recovery classification), so
+ * a first entry has nothing to bind against. The grant design answers a cache
+ * missing required execution fields with an authenticated refresh, and the
+ * reference bundle is exactly that refresh: reference and template state
+ * without cutting an SSCC block before the classification has run.
+ *
+ * `force` re-reads the projection even when one is mirrored, for the caller
+ * that has just found the mirrored one no longer matching its signed scope.
+ * Entry does not force by default: the mirror is rewritten after every
+ * successful entry anyway, and paying a round trip — up to the request
+ * deadline on a degraded plant link — on every entry would tax the ordinary
+ * path to repair the exceptional one.
+ *
+ * Two deliberate non-repairs. A pending backfilled box-template recovery is
+ * left alone — writing the template behind its back would hide the
+ * operator-facing reprint that recovery exists to force. And a refresh that
+ * fails falls back to whatever is mirrored, or null: whether an unbindable
+ * task may still enter the floor is the admission's decision (see
+ * `admitTaskEntry`), not this function's.
+ */
+export async function ensureShiftExecutionProjection(input: {
+  client: Pick<StationClient, "get"> & Partial<Pick<StationClient, "download">>;
+  exec: SqlExecutor;
+  shiftId: string;
+  terminalId?: string | null;
+  generation?: CredentialGeneration;
+  force?: boolean;
+}): Promise<ShiftExecutionProjection | null> {
+  const read = async (): Promise<ShiftExecutionProjection | null> =>
+    readShiftExecutionProjection(input.exec, input.shiftId).catch(() => null);
+  const mirrored = await read();
+  if (mirrored && !input.force) return mirrored;
+  const recovery = await readBackfilledBoxTemplateRecovery(
+    input.exec,
+    input.shiftId,
+    input.terminalId ?? null,
+  ).catch(() => null);
+  if (recovery) return mirrored;
+  try {
+    await refreshShiftBundleForRecovery(input.client, input.exec, input.shiftId, input.generation);
+  } catch {
+    console.error("station: shift execution projection refresh failed");
+    return mirrored;
+  }
+  return (await read()) ?? mirrored;
 }
 
 export function mirrorShiftBundle(

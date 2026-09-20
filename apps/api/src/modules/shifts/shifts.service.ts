@@ -1842,6 +1842,12 @@ export class ShiftsService {
       palletBoxCapacity: shift.palletsEnabled ? shift.palletBoxCapacity : null,
       palletsEnabled: shift.palletsEnabled,
       createdFrom: shift.createdFrom,
+      // Close authority rides along because the signed offline-grant task
+      // scope binds `stationClosePolicy`/`stationCloseOwnerDeviceId`
+      // (device-grants/frozen-task.ts). Devices derive both from this field
+      // alone, so an omitted one leaves their execution projection unable to
+      // match the very grant issued for the shift they just entered.
+      ...(shift.stationCloseAccess ? { stationCloseAccess: shift.stationCloseAccess } : {}),
       openedAt: shift.openedAt,
       closedAt: shift.closedAt,
       closeReason: shift.closeReason,
