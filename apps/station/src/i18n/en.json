@@ -140,7 +140,7 @@
     "taskBarcode": "FORM BARCODE",
     "barcodeFailed": "The shift form barcode could not be read.",
     "barcodeClosed": "This shift is closed.",
-    "barcodeNotOnLine": "This shift is not on this line.",
+    "barcodeNotOnLine": "The form barcode matched no shift in the list. Refresh the list or pick the shift by hand.",
     "barcodeListLoading": "The shift list is still loading. Scan the form again.",
     "loading": "Loading shifts…",
     "empty": "No open shifts",

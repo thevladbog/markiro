@@ -139,16 +139,20 @@ describe("ShiftSelection barcode scanning", () => {
     expect(await screen.findByText("This shift is closed.")).toBeDefined();
   });
 
-  it("says the shift belongs to another line when it is not in this terminal's list", async () => {
+  it("says the barcode matched nothing in the list, not that the shift belongs elsewhere", async () => {
     const scan = scanner();
     renderSelection({ scan, items: [] });
 
     // Wait for the (empty) initial list to settle so this exercises the
-    // genuine "not on this line" case, not the loading race covered below.
+    // genuine "not in the list" case, not the loading race covered below.
     await waitFor(() => expect(screen.getByText("No open shifts")).toBeDefined());
     act(() => scan.scan("markiro:shift:v1:44444444-4444-4444-8444-444444444444"));
 
-    expect(await screen.findByText("This shift is not on this line.")).toBeDefined();
+    expect(
+      await screen.findByText(
+        "The form barcode matched no shift in the list. Refresh the list or pick the shift by hand.",
+      ),
+    ).toBeDefined();
   });
 
   it("does not call a shift absent while the list is still loading", async () => {
@@ -188,7 +192,11 @@ describe("ShiftSelection barcode scanning", () => {
     expect(
       await screen.findByText("The shift list is still loading. Scan the form again."),
     ).toBeDefined();
-    expect(screen.queryByText("This shift is not on this line.")).toBeNull();
+    expect(
+      screen.queryByText(
+        "The form barcode matched no shift in the list. Refresh the list or pick the shift by hand.",
+      ),
+    ).toBeNull();
     expect(onSelected).not.toHaveBeenCalled();
 
     resolveFetch(new Response(JSON.stringify({ items: [plannedShift()] }), { status: 200 }));

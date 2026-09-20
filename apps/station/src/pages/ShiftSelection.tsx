@@ -404,9 +404,9 @@ export function ShiftSelection({
         return;
       }
       // The initial `GET /shifts` for this client has not settled yet, so an
-      // empty `items` cannot be trusted to mean "not on this line" -- it just
-      // means the list has not arrived. Say so instead of misdirecting the
-      // operator to another terminal.
+      // empty `items` cannot be trusted to mean "no match in the list" -- it
+      // just means the list has not arrived. Say so instead of misdirecting
+      // the operator to another terminal.
       if (loading) {
         setError(t("shifts.barcodeListLoading"));
         return;
