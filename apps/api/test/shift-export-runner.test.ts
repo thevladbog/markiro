@@ -18,6 +18,10 @@ import type { ObjectStorageService } from "../src/modules/storage/object-storage
 
 const EXPORT_ID = "11111111-1111-4111-8111-111111111111";
 const SNAPSHOT_AT = new Date("2026-08-13T12:34:56.789Z");
+/** `operation_date_time` of a shift document: when the shift closed. */
+const SHIFT_CLOSED_AT = new Date("2026-08-13T11:00:00.000Z");
+/** `operation_date_time` of a pallet document: when the pallet closed. */
+const PALLET_CLOSED_AT = new Date("2026-08-13T10:00:00.000Z");
 
 interface ExportRow {
   id: string;
@@ -213,7 +217,10 @@ function source(snapshot?: Partial<ShiftExportSnapshot>): ShiftExportSourceServi
       sourceSnapshotStartedAt: SNAPSHOT_AT,
       productName: "Вода",
       shiftDate: "2026-08-13",
+      shiftNumber: "AUG26-007",
+      shiftClosedAt: SHIFT_CLOSED_AT,
       organizationInn: null,
+      organizationName: "ООО «Пивоварня»",
       openPalletSuppressedBoxCount: 0,
       source: { mode: "flat", codes: ["code-a", "code-b"] },
       ...snapshot,
@@ -228,7 +235,9 @@ function palletSource(snapshot?: Partial<PalletExportSnapshot>): ShiftExportSour
       sourceSnapshotStartedAt: SNAPSHOT_AT,
       productName: "Вода",
       closedDate: "2026-08-13",
+      closedAt: PALLET_CLOSED_AT,
       organizationInn: "7701234567",
+      organizationName: "ООО «Пивоварня»",
       pallet: {
         sscc: "134600682000000017",
         boxSsccs: ["034600682000000018", "034600682000000025"],
@@ -747,6 +756,8 @@ describe("ShiftExportRunnerService", () => {
       "PALLET_NOT_CLOSED",
       "PALLET_DISASSEMBLED",
       "ORG_INN_MISSING",
+      "ORG_NAME_MISSING",
+      "INVALID_ORG_INN",
       "FORMAT_NOT_FOUND",
       "INVALID_LINE_LIMIT",
       "BOX_EXCEEDS_LINE_LIMIT",

@@ -7,6 +7,7 @@ import {
   gismtAggregationPalletLineCount,
   renderGismtAggregationXml,
   type GismtAggregationBox,
+  type GismtAggregationDocument,
   type GismtAggregationPallet,
   type GismtAggregationRenderResult,
 } from "./gismt-aggregation.js";
@@ -78,6 +79,26 @@ export interface RenderShiftExportInput {
   source: ShiftExportSource;
   /** Tenant's tax id (ИНН); required by the GISMT aggregation XML (`LP_TIN`). */
   organizationInn?: string | null;
+  /** Tenant's full name; required by the GISMT aggregation XML (`org_name`). */
+  organizationName?: string | null;
+  /**
+   * Document-level metadata the GISMT aggregation XSD requires. Mandatory for
+   * every `xml` format and ignored by the others. Each rendered PART is its
+   * own file and its own ЧЗ document, so a multi-part export suffixes both
+   * `document_id` and `document_number` with the part number.
+   */
+  document?: ShiftExportDocumentMetadata | null;
+}
+
+export interface ShiftExportDocumentMetadata {
+  /** Base `document_id`; the part number is appended when the export splits. */
+  documentId: string;
+  /** Base `document_number` -- the shift's human number. */
+  documentNumber: string;
+  /** Canonical ISO instant the files are being formed. */
+  fileDateTime: string;
+  /** Canonical ISO instant the shift closed -- the aggregation operation. */
+  operationDateTime: string;
 }
 
 export interface ShiftExportPart {
@@ -101,7 +122,11 @@ export type ShiftExportDomainErrorCode =
   | "PALLET_EXCEEDS_LINE_LIMIT"
   | "INVALID_BOX_SSCC"
   | "INVALID_CIS"
-  | "ORG_INN_MISSING";
+  | "INVALID_ORG_INN"
+  | "INVALID_DOCUMENT_METADATA"
+  | "ORG_INN_MISSING"
+  | "ORG_NAME_MISSING"
+  | "DOCUMENT_METADATA_MISSING";
 
 export class ShiftExportDomainError extends Error {
   constructor(readonly code: ShiftExportDomainErrorCode) {
@@ -276,13 +301,32 @@ export function renderShiftExport(input: RenderShiftExportInput): ShiftExportPar
   validateLineLimit(input.maxLines);
 
   const organizationInn = input.organizationInn?.trim() ?? "";
-  if (descriptor.extension === "xml" && organizationInn === "") {
-    throw new ShiftExportDomainError("ORG_INN_MISSING");
+  const organizationName = input.organizationName?.trim() ?? "";
+  if (descriptor.extension === "xml") {
+    if (organizationInn === "") throw new ShiftExportDomainError("ORG_INN_MISSING");
+    if (organizationName === "") throw new ShiftExportDomainError("ORG_NAME_MISSING");
+    if (!input.document) throw new ShiftExportDomainError("DOCUMENT_METADATA_MISSING");
   }
+  const documentFor = (partNumber: number, hasMultipleParts: boolean): GismtAggregationDocument => {
+    const base = input.document;
+    // Unreachable: the xml guard above returns first, and no other format
+    // calls this. Kept as a throw so the narrowing carries no cast.
+    if (!base) throw new ShiftExportDomainError("DOCUMENT_METADATA_MISSING");
+    // Each part is a separate file and a separate ЧЗ document, so neither the
+    // file identifier nor the document number may repeat across them.
+    const suffix = hasMultipleParts ? `-${partNumber}` : "";
+    return {
+      documentId: `${base.documentId}${suffix}`,
+      documentNumber: `${base.documentNumber}${suffix}`,
+      fileDateTime: base.fileDateTime,
+      operationDateTime: base.operationDateTime,
+      organizationName,
+    };
+  };
 
   const blocks = createBlocks(descriptor, input.source);
   if (descriptor.extension === "xml") {
-    renderXmlPart(organizationInn, blocks);
+    renderXmlPart(organizationInn, documentFor(1, false), blocks);
   }
   if (blocks.reduce((total, block) => total + block.codeCount, 0) === 0) {
     throw new ShiftExportDomainError("EMPTY_SOURCE");
@@ -295,7 +339,9 @@ export function renderShiftExport(input: RenderShiftExportInput): ShiftExportPar
   return partBlocks.map((part, index) => {
     const partNumber = index + 1;
     const xmlRendered =
-      descriptor.extension === "xml" ? renderXmlPart(organizationInn, part.blocks) : null;
+      descriptor.extension === "xml"
+        ? renderXmlPart(organizationInn, documentFor(partNumber, hasMultipleParts), part.blocks)
+        : null;
     // The XML renderer counts what it WRITES (`<cis>`, box pack_content); a
     // `pallet_boxes` document writes neither, so its counters come from the
     // blocks, which know what each pallet covers.
@@ -661,11 +707,13 @@ function formatBoxSscc(sscc: string): string {
 
 function renderXmlPart(
   organizationInn: string,
+  document: GismtAggregationDocument,
   blocks: readonly ShiftExportBlock[],
 ): GismtAggregationRenderResult {
   try {
     return renderGismtAggregationXml({
       organizationInn,
+      document,
       boxes: blocks.flatMap(collectXmlBoxes),
       pallets: blocks.flatMap(collectXmlPallets),
     });

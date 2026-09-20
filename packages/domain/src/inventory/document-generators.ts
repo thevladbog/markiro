@@ -121,6 +121,13 @@ export function generateInventoryAggregationXmlV2(
   try {
     const rendered = renderGismtAggregationXml({
       organizationInn: metadata.organizationInn,
+      document: {
+        documentId: metadata.documentId,
+        documentNumber: metadata.inventoryNumber,
+        fileDateTime: metadata.fileDateTime,
+        operationDateTime: metadata.operationDateTime,
+        organizationName: metadata.organizationName,
+      },
       boxes: boxes.map((box) => ({
         sscc: box.sscc,
         codes: box.codes.map((code) => code.canonicalRaw),
@@ -144,7 +151,9 @@ export function generateInventoryAggregationXmlV2(
           ? "INVALID_CIS"
           : error.code === "INVALID_SSCC"
             ? "INVALID_SSCC"
-            : "INVALID_ORGANIZATION_INN",
+            : error.code === "INVALID_DOCUMENT_METADATA"
+              ? "INVALID_DOCUMENT_METADATA"
+              : "INVALID_ORGANIZATION_INN",
       );
     }
     throw error;

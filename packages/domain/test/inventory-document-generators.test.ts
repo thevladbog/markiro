@@ -317,6 +317,13 @@ describe("inventory GISMT aggregation XML", () => {
       shiftDate: "2026-08-27",
       maxLines: null,
       organizationInn: metadata.organizationInn,
+      organizationName: metadata.organizationName,
+      document: {
+        documentId: metadata.documentId,
+        documentNumber: metadata.inventoryNumber,
+        fileDateTime: metadata.fileDateTime,
+        operationDateTime: metadata.operationDateTime,
+      },
       source: {
         mode: "boxes",
         boxes: eligibleBoxes.map((box) => ({

@@ -1,4 +1,8 @@
-import { GismtAggregationError, renderGismtAggregationXml } from "./gismt-aggregation.js";
+import {
+  formatGismtAggregationSscc,
+  GismtAggregationError,
+  renderGismtAggregationXml,
+} from "./gismt-aggregation.js";
 import {
   sanitizeShiftExportFilenameSegment,
   ShiftExportDomainError,
@@ -46,9 +50,16 @@ export interface RenderPalletAggregationExportInput {
   formatId: PalletExportFormatId;
   formatVersion: number;
   organizationInn: string | null;
+  organizationName: string | null;
   productName: string;
   /** Civil date the pallet closed, YYYY-MM-DD, for the filename. */
   closedDate: string;
+  /** `document_id` for the single file this export produces. */
+  documentId: string;
+  /** Canonical ISO instant the file is being formed. */
+  fileDateTime: string;
+  /** Canonical ISO instant the pallet closed -- the aggregation operation. */
+  operationDateTime: string;
   pallet: { sscc: string; boxSsccs: readonly string[] };
 }
 
@@ -60,11 +71,24 @@ export function renderPalletAggregationExport(
   if (input.pallet.boxSsccs.length === 0) throw new ShiftExportDomainError("EMPTY_SOURCE");
   const organizationInn = input.organizationInn?.trim() ?? "";
   if (organizationInn === "") throw new ShiftExportDomainError("ORG_INN_MISSING");
+  const organizationName = input.organizationName?.trim() ?? "";
+  if (organizationName === "") throw new ShiftExportDomainError("ORG_NAME_MISSING");
 
   let rendered;
   try {
     rendered = renderGismtAggregationXml({
       organizationInn,
+      document: {
+        documentId: input.documentId,
+        // A pallet has no document number of its own, so its own SSCC -- in
+        // the same 20-digit form the document writes into `pack_code` --
+        // names it. Stable across retries, and the number the ЧЗ cabinet
+        // shows matches the code printed on the pallet.
+        documentNumber: formatGismtAggregationSscc(input.pallet.sscc),
+        fileDateTime: input.fileDateTime,
+        operationDateTime: input.operationDateTime,
+        organizationName,
+      },
       // No `boxes`: this document aggregates BOXES ONTO A PALLET, never units
       // into a box, so it carries exactly one `pack_content` and no `<cis>`.
       boxes: [],

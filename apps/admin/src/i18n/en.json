@@ -2507,6 +2507,8 @@
           "PALLET_NOT_CLOSED": "The pallet is not closed yet — an export needs a closed pallet.",
           "PALLET_DISASSEMBLED": "The pallet was taken apart — it can no longer be exported.",
           "ORG_INN_MISSING": "Set the organization INN in the profile to generate the GIS MT report.",
+          "ORG_NAME_MISSING": "Set the organization name in the profile: GIS MT requires it in the document.",
+          "INVALID_ORG_INN": "The organization INN must be 10 digits — GIS MT accepts this report from a legal entity only.",
           "FORMAT_NOT_FOUND": "The selected report format is no longer available.",
           "INVALID_LINE_LIMIT": "The lines-per-part limit is invalid.",
           "BOX_EXCEEDS_LINE_LIMIT": "A box does not fit within the lines-per-part limit.",

@@ -24,6 +24,8 @@ export const SHIFT_EXPORT_SAFE_ERROR_CODES = [
   "PALLET_NOT_CLOSED",
   "PALLET_DISASSEMBLED",
   "ORG_INN_MISSING",
+  "ORG_NAME_MISSING",
+  "INVALID_ORG_INN",
   "FORMAT_NOT_FOUND",
   "INVALID_LINE_LIMIT",
   "BOX_EXCEEDS_LINE_LIMIT",
@@ -160,6 +162,15 @@ export class ShiftExportRunnerService {
         maxLines: claimed.maxLines,
         source: snapshot.source,
         organizationInn: snapshot.organizationInn,
+        organizationName: snapshot.organizationName,
+        document: {
+          // The export run identifies the file(s); a multi-part export gets
+          // its part suffix from the domain renderer.
+          documentId: claimed.id,
+          documentNumber: snapshot.shiftNumber,
+          fileDateTime: snapshot.sourceSnapshotStartedAt.toISOString(),
+          operationDateTime: snapshot.shiftClosedAt.toISOString(),
+        },
       }),
       extension: format.extension,
       openPalletSuppressedBoxCount: snapshot.openPalletSuppressedBoxCount,
@@ -192,8 +203,12 @@ export class ShiftExportRunnerService {
           formatId: format.id,
           formatVersion: format.version,
           organizationInn: snapshot.organizationInn,
+          organizationName: snapshot.organizationName,
           productName: snapshot.productName,
           closedDate: snapshot.closedDate,
+          documentId: claimed.id,
+          fileDateTime: snapshot.sourceSnapshotStartedAt.toISOString(),
+          operationDateTime: snapshot.closedAt.toISOString(),
           pallet: snapshot.pallet,
         }),
       ],
@@ -438,6 +453,8 @@ function safeDomainErrorCode(error: unknown): ShiftExportSafeErrorCode | null {
     case "INVALID_BOX_SSCC":
     case "INVALID_CIS":
     case "ORG_INN_MISSING":
+    case "ORG_NAME_MISSING":
+    case "INVALID_ORG_INN":
       return error.code;
     case "FORMAT_SOURCE_MISMATCH":
     case "EMPTY_SOURCE":
