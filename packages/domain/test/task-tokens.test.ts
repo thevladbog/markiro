@@ -35,4 +35,29 @@ describe("shift task barcode", () => {
   it("normalises an uppercase uuid so one shift has one identity", () => {
     expect(parseShiftTaskBarcode(`markiro:shift:v1:${SHIFT_ID.toUpperCase()}`)).toBe(SHIFT_ID);
   });
+
+  it("accepts every version nibble from 1 through 8", () => {
+    const v6 = "11111111-1111-6111-8111-111111111111";
+    const v8 = "11111111-1111-8111-8111-111111111111";
+    expect(parseShiftTaskBarcode(`markiro:shift:v1:${v6}`)).toBe(v6);
+    expect(parseShiftTaskBarcode(`markiro:shift:v1:${v8}`)).toBe(v8);
+  });
+
+  it("refuses a version or variant nibble outside the accepted range", () => {
+    expect(
+      parseShiftTaskBarcode("markiro:shift:v1:11111111-1111-9111-8111-111111111111"),
+    ).toBeNull();
+    expect(
+      parseShiftTaskBarcode("markiro:shift:v1:11111111-1111-4111-c111-111111111111"),
+    ).toBeNull();
+  });
+
+  it("mirrors ShiftTaskToken.kt: accepts the nil and max uuid sentinels in either case", () => {
+    const nil = "00000000-0000-0000-0000-000000000000";
+    const max = "ffffffff-ffff-ffff-ffff-ffffffffffff";
+    expect(parseShiftTaskBarcode(`markiro:shift:v1:${nil}`)).toBe(nil);
+    expect(parseShiftTaskBarcode(`markiro:shift:v1:${nil.toUpperCase()}`)).toBe(nil);
+    expect(parseShiftTaskBarcode(`markiro:shift:v1:${max}`)).toBe(max);
+    expect(parseShiftTaskBarcode(`markiro:shift:v1:${max.toUpperCase()}`)).toBe(max);
+  });
 });

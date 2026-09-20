@@ -1,5 +1,3 @@
-import { z } from "zod";
-
 /**
  * Frozen v1 namespace for the printed shift task form's Data Matrix.
  *
@@ -10,7 +8,20 @@ import { z } from "zod";
  */
 export const SHIFT_TASK_BARCODE_PREFIX = "markiro:shift:v1:";
 
-const shiftIdSchema = z.uuid().toLowerCase();
+/**
+ * The shift id rule, matched against the lowercased payload: an 8-4-4-4-12
+ * hex UUID with a version nibble of 1-8 and a variant nibble of 8/9/a/b, or
+ * the nil UUID (00000000-0000-0000-0000-000000000000) or the max UUID
+ * (ffffffff-ffff-ffff-ffff-ffffffffffff) explicitly, in any case. Input is
+ * case-insensitive; the returned id is always lowercase, so one shift has one
+ * identity.
+ *
+ * This is an explicit, self-contained rule -- not delegated to a validation
+ * library -- because it must match `ShiftTaskToken` in the handheld's Kotlin
+ * (`core/barcode/ShiftTaskToken.kt`) case for case. Change both or neither.
+ */
+const SHIFT_ID_PATTERN =
+  /^(?:00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff|[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/;
 
 export function formatShiftTaskBarcode(shiftId: string): string {
   return `${SHIFT_TASK_BARCODE_PREFIX}${shiftId}`;
@@ -23,6 +34,6 @@ export function formatShiftTaskBarcode(shiftId: string): string {
  */
 export function parseShiftTaskBarcode(barcode: string): string | null {
   if (!barcode.startsWith(SHIFT_TASK_BARCODE_PREFIX)) return null;
-  const parsed = shiftIdSchema.safeParse(barcode.slice(SHIFT_TASK_BARCODE_PREFIX.length));
-  return parsed.success ? parsed.data : null;
+  const candidate = barcode.slice(SHIFT_TASK_BARCODE_PREFIX.length).toLowerCase();
+  return SHIFT_ID_PATTERN.test(candidate) ? candidate : null;
 }

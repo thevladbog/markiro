@@ -36,16 +36,26 @@ class ShiftTaskTokenTest {
     }
 
     @Test
-    fun `accepts the nil uuid exactly as the TypeScript rule does`() {
-        assertEquals(
-            "00000000-0000-0000-0000-000000000000",
-            ShiftTaskToken.parse("markiro:shift:v1:00000000-0000-0000-0000-000000000000"),
-        )
+    fun `accepts every version nibble from 1 through 8`() {
+        val v6 = "11111111-1111-6111-8111-111111111111"
+        val v8 = "11111111-1111-8111-8111-111111111111"
+        assertEquals(v6, ShiftTaskToken.parse("markiro:shift:v1:$v6"))
+        assertEquals(v8, ShiftTaskToken.parse("markiro:shift:v1:$v8"))
     }
 
     @Test
     fun `still refuses an out-of-range version and variant`() {
         assertNull(ShiftTaskToken.parse("markiro:shift:v1:11111111-1111-9111-8111-111111111111"))
         assertNull(ShiftTaskToken.parse("markiro:shift:v1:11111111-1111-4111-c111-111111111111"))
+    }
+
+    @Test
+    fun `mirrors the TypeScript task-tokens rule, accepting the nil and max uuid sentinels in either case`() {
+        val nil = "00000000-0000-0000-0000-000000000000"
+        val max = "ffffffff-ffff-ffff-ffff-ffffffffffff"
+        assertEquals(nil, ShiftTaskToken.parse("markiro:shift:v1:$nil"))
+        assertEquals(nil, ShiftTaskToken.parse("markiro:shift:v1:${nil.uppercase()}"))
+        assertEquals(max, ShiftTaskToken.parse("markiro:shift:v1:$max"))
+        assertEquals(max, ShiftTaskToken.parse("markiro:shift:v1:${max.uppercase()}"))
     }
 }
