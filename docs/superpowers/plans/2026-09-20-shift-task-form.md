@@ -27,18 +27,18 @@
 
 **Создаются:**
 
-| Файл | Ответственность |
-| --- | --- |
-| `packages/domain/src/barcodes/task-tokens.ts` | Формат и разбор токена бланка смены |
-| `packages/domain/test/task-tokens.test.ts` | Тесты формата и разбора |
-| `apps/api/src/modules/print/task-form-chrome.ts` | Общий каркас печатных бланков: логотип, экранирование, форматы, склонения, базовый CSS |
-| `apps/api/src/modules/shifts/shift-task-form.ts` | Чистый рендерер HTML бланка смены |
-| `apps/api/test/shift-task-form.test.ts` | Тесты рендерера бланка смены |
-| `apps/api/test/fixtures/inventory-task-form.snapshot.html` | Эталон вывода бланка инвентаризации |
-| `apps/api/test/inventory-task-form-snapshot.test.ts` | Проверка байтовой идентичности бланка инвентаризации |
-| `packages/db/migrations/0167_shift_entry_method.sql` | Колонка `entry_method` |
-| `apps/handheld/app/src/main/kotlin/app/markiro/handheld/core/barcode/ShiftTaskToken.kt` | Kotlin-разбор токена |
-| `apps/handheld/app/src/test/kotlin/app/markiro/handheld/core/barcode/ShiftTaskTokenTest.kt` | Тесты Kotlin-разбора |
+| Файл                                                                                        | Ответственность                                                                        |
+| ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `packages/domain/src/barcodes/task-tokens.ts`                                               | Формат и разбор токена бланка смены                                                    |
+| `packages/domain/test/task-tokens.test.ts`                                                  | Тесты формата и разбора                                                                |
+| `apps/api/src/modules/print/task-form-chrome.ts`                                            | Общий каркас печатных бланков: логотип, экранирование, форматы, склонения, базовый CSS |
+| `apps/api/src/modules/shifts/shift-task-form.ts`                                            | Чистый рендерер HTML бланка смены                                                      |
+| `apps/api/test/shift-task-form.test.ts`                                                     | Тесты рендерера бланка смены                                                           |
+| `apps/api/test/fixtures/inventory-task-form.snapshot.html`                                  | Эталон вывода бланка инвентаризации                                                    |
+| `apps/api/test/inventory-task-form-snapshot.test.ts`                                        | Проверка байтовой идентичности бланка инвентаризации                                   |
+| `packages/db/migrations/0167_shift_entry_method.sql`                                        | Колонка `entry_method`                                                                 |
+| `apps/handheld/app/src/main/kotlin/app/markiro/handheld/core/barcode/ShiftTaskToken.kt`     | Kotlin-разбор токена                                                                   |
+| `apps/handheld/app/src/test/kotlin/app/markiro/handheld/core/barcode/ShiftTaskTokenTest.kt` | Тесты Kotlin-разбора                                                                   |
 
 **Изменяются:** `packages/domain/src/index.ts`, `apps/api/src/modules/inventories/inventory-task-form.ts`, `apps/api/src/modules/shifts/{shifts.controller.ts,shifts.service.ts,dto.ts}`, `apps/api/test/{shifts-openapi.test.ts,shifts.e2e.test.ts}`, `packages/db/src/schema/platform.ts`, `apps/admin/src/pages/shifts/ShiftDetailsPanel.tsx`, `apps/admin/src/i18n/{ru,en}.json`, `apps/station/src/pages/{ShiftSelection.tsx,TaskSelection.tsx}`, `apps/station/src/i18n/{ru,en}.json`, `apps/station/src/station.css`, `apps/handheld/.../feature/shift/{ShiftListViewModel.kt,ShiftRepository.kt}`, `apps/handheld/.../core/network/{StationApi.kt,Dtos.kt}`, `apps/handheld/app/src/main/res/values{,-en}/strings.xml`.
 
@@ -47,11 +47,13 @@
 ## Task 1: Токен бланка смены в домене
 
 **Files:**
+
 - Create: `packages/domain/src/barcodes/task-tokens.ts`
 - Create: `packages/domain/test/task-tokens.test.ts`
 - Modify: `packages/domain/src/index.ts`
 
 **Interfaces:**
+
 - Consumes: ничего.
 - Produces: `SHIFT_TASK_BARCODE_PREFIX: "markiro:shift:v1:"`, `formatShiftTaskBarcode(shiftId: string): string`, `parseShiftTaskBarcode(barcode: string): string | null`. Все три экспортируются из `@markiro/domain`.
 
@@ -185,12 +187,14 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ## Task 2: Каркас печатных бланков без изменения бланка инвентаризации
 
 **Files:**
+
 - Create: `apps/api/test/fixtures/inventory-task-form.snapshot.html`
 - Create: `apps/api/test/inventory-task-form-snapshot.test.ts`
 - Create: `apps/api/src/modules/print/task-form-chrome.ts`
 - Modify: `apps/api/src/modules/inventories/inventory-task-form.ts`
 
 **Interfaces:**
+
 - Consumes: ничего.
 - Produces: из `apps/api/src/modules/print/task-form-chrome.ts` — `escapeHtml(value: string): string`, `boundPrintText(value: string): string`, `formatCivilDate(value: string): string`, `formatGeneratedAt(value: Date): string`, `formatInteger(value: number): string`, `countNoun(value: number, one: string, few: string, many: string): string`, `taskFormLogoSvg(): string`, `taskFormParameter(label: string, value: string): string`, `taskFormStep(number: number, text: string): string`, `TASK_FORM_BASE_CSS: string`.
 
@@ -431,10 +435,12 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ## Task 3: Рендерер бланка смены
 
 **Files:**
+
 - Create: `apps/api/src/modules/shifts/shift-task-form.ts`
 - Create: `apps/api/test/shift-task-form.test.ts`
 
 **Interfaces:**
+
 - Consumes: `formatShiftTaskBarcode` из `@markiro/domain` (Task 1); `TASK_FORM_BASE_CSS`, `taskFormLogoSvg`, `taskFormParameter`, `taskFormStep`, `escapeHtml`, `boundPrintText`, `formatCivilDate`, `formatGeneratedAt`, `formatInteger`, `countNoun` из `../print/task-form-chrome` (Task 2).
 - Produces: `interface ShiftTaskFormData` и `renderShiftTaskFormHtml(data: ShiftTaskFormData): string`.
 
@@ -676,9 +682,7 @@ export function renderShiftTaskFormHtml(data: ShiftTaskFormData): string {
   const compact =
     organizationText.length + productText.length + lineText.length + counterpartyText.length >
       240 ||
-    [organizationText, productText, lineText, counterpartyText].some(
-      (value) => value.length > 100,
-    );
+    [organizationText, productText, lineText, counterpartyText].some((value) => value.length > 100);
   const aggregation = data.mode === "aggregation";
   const modeTitle = aggregation
     ? data.palletsEnabled
@@ -749,19 +753,70 @@ ${SHIFT_FORM_CSS}
 - `<style>` содержит `${TASK_FORM_BASE_CSS}`, затем собственные правила бланка смены:
 
 ```css
-    .product { display: grid; grid-template-columns: 28mm minmax(0, 1fr); gap: 5mm; align-items: center; padding: 5mm 0 4mm; border-bottom: .2mm solid #d8d5cf; }
-    .product--no-photo { grid-template-columns: minmax(0, 1fr); }
-    .product-photo { width: 28mm; height: 28mm; border: .2mm solid #d8d5cf; background: #f1efe8; overflow: hidden; }
-    .product-photo img { width: 100%; height: 100%; object-fit: contain; display: block; }
-    .product-eyebrow { color: #706d67; font-size: 8pt; letter-spacing: .03em; text-transform: uppercase; }
-    .product-name { margin-top: 1mm; font-size: 12pt; font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
-    .product-meta { margin-top: 1mm; color: #4f4c47; font-size: 9pt; }
-    .product-meta strong, .product-meta span { font-weight: 700; }
-    .compact .product { grid-template-columns: 22mm minmax(0, 1fr); gap: 4mm; padding: 3mm 0; }
-    .compact .product--no-photo { grid-template-columns: minmax(0, 1fr); }
-    .compact .product-photo { width: 22mm; height: 22mm; }
-    .compact .product-name { font-size: 10pt; }
-    .compact .product-meta { font-size: 8pt; }
+.product {
+  display: grid;
+  grid-template-columns: 28mm minmax(0, 1fr);
+  gap: 5mm;
+  align-items: center;
+  padding: 5mm 0 4mm;
+  border-bottom: 0.2mm solid #d8d5cf;
+}
+.product--no-photo {
+  grid-template-columns: minmax(0, 1fr);
+}
+.product-photo {
+  width: 28mm;
+  height: 28mm;
+  border: 0.2mm solid #d8d5cf;
+  background: #f1efe8;
+  overflow: hidden;
+}
+.product-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+.product-eyebrow {
+  color: #706d67;
+  font-size: 8pt;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+.product-name {
+  margin-top: 1mm;
+  font-size: 12pt;
+  font-weight: 700;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+.product-meta {
+  margin-top: 1mm;
+  color: #4f4c47;
+  font-size: 9pt;
+}
+.product-meta strong,
+.product-meta span {
+  font-weight: 700;
+}
+.compact .product {
+  grid-template-columns: 22mm minmax(0, 1fr);
+  gap: 4mm;
+  padding: 3mm 0;
+}
+.compact .product--no-photo {
+  grid-template-columns: minmax(0, 1fr);
+}
+.compact .product-photo {
+  width: 22mm;
+  height: 22mm;
+}
+.compact .product-name {
+  font-size: 10pt;
+}
+.compact .product-meta {
+  font-size: 8pt;
+}
 ```
 
 - шапка: `taskFormLogoSvg()` и `<span class="eyebrow">Бланк смены</span>` + номер;
@@ -843,12 +898,14 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ## Task 4: Сбор данных и маршрут `GET /shifts/:id/task-form`
 
 **Files:**
+
 - Modify: `apps/api/src/modules/shifts/shifts.service.ts`
 - Modify: `apps/api/src/modules/shifts/shifts.controller.ts`
 - Modify: `apps/api/test/shifts-openapi.test.ts`
 - Modify: `apps/api/test/shifts.e2e.test.ts`
 
 **Interfaces:**
+
 - Consumes: `renderShiftTaskFormHtml`, `ShiftTaskFormData` (Task 3).
 - Produces: `ShiftsService.taskFormData(tenantId: string, id: string, generatedAt?: Date): Promise<ShiftTaskFormData>`; маршрут `GET /shifts/:id/task-form`.
 
@@ -871,9 +928,7 @@ it("serves the printable task form to a read-only administrator and refuses a cl
   expect(active.text).toContain("В работе");
 
   await owner.post(`/shifts/${shift.id}/close`).send({ reason: "done" }).expect(200);
-  await owner
-    .get(`/shifts/${shift.id}/task-form`)
-    .expect(409, { code: "SHIFT_TASK_FORM_CLOSED" });
+  await owner.get(`/shifts/${shift.id}/task-form`).expect(409, { code: "SHIFT_TASK_FORM_CLOSED" });
 });
 
 it("keeps the task form out of reach of a station credential and of another tenant", async () => {
@@ -1076,11 +1131,13 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ## Task 5: Колонка способа входа
 
 **Files:**
+
 - Create: `packages/db/migrations/0167_shift_entry_method.sql`
 - Modify: `packages/db/migrations/meta/_journal.json`
 - Modify: `packages/db/src/schema/platform.ts:506-533`
 
 **Interfaces:**
+
 - Consumes: ничего.
 - Produces: `schema.shiftEntryMethod` — `pgEnum("shift_entry_method", ["list", "task_barcode"])`; колонка `shiftDeviceParticipants.entryMethod` типа `"list" | "task_barcode"`, `NOT NULL DEFAULT 'list'`.
 
@@ -1136,13 +1193,13 @@ ALTER TABLE "shift_device_participants" ADD COLUMN "entry_method" "shift_entry_m
 В `packages/db/migrations/meta/_journal.json` добавить последним элементом массива:
 
 ```json
-    {
-      "idx": 167,
-      "version": "7",
-      "when": 1789900000000,
-      "tag": "0167_shift_entry_method",
-      "breakpoints": true
-    }
+{
+  "idx": 167,
+  "version": "7",
+  "when": 1789900000000,
+  "tag": "0167_shift_entry_method",
+  "breakpoints": true
+}
 ```
 
 Значение `when` должно быть больше, чем у записи `0166` (`1789837824173`).
@@ -1170,12 +1227,14 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ## Task 6: `entryMethod` на обоих маршрутах входа
 
 **Files:**
+
 - Modify: `apps/api/src/modules/shifts/dto.ts`
 - Modify: `apps/api/src/modules/shifts/shifts.controller.ts:452-500`
 - Modify: `apps/api/src/modules/shifts/shifts.service.ts` (`openShift`, `enterShift`)
 - Modify: `apps/api/test/shifts.e2e.test.ts`
 
 **Interfaces:**
+
 - Consumes: `schema.shiftDeviceParticipants.entryMethod` (Task 5).
 - Produces: `shiftEntrySchema` — `z.strictObject({ entryMethod: z.enum(["list", "task_barcode"]).default("list") })`; `type ShiftEntryDto`. `openShift` и `enterShift` принимают дополнительный аргумент `entryMethod: "list" | "task_barcode"`.
 
@@ -1186,7 +1245,10 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ```ts
 it("records the entry method on both entry routes and defaults a bodiless request to the list", async () => {
   const scanned = await createPlannedShift();
-  await station.post(`/shifts/${scanned.id}/open`).send({ entryMethod: "task_barcode" }).expect(200);
+  await station
+    .post(`/shifts/${scanned.id}/open`)
+    .send({ entryMethod: "task_barcode" })
+    .expect(200);
 
   const picked = await createPlannedShift();
   await station.post(`/shifts/${picked.id}/open`).expect(200);
@@ -1332,12 +1394,14 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ## Task 7: Кнопка бланка в админке
 
 **Files:**
+
 - Modify: `apps/admin/src/pages/shifts/ShiftDetailsPanel.tsx:553-570`
 - Modify: `apps/admin/src/i18n/ru.json`
 - Modify: `apps/admin/src/i18n/en.json`
 - Test: `apps/admin/test/shift-task-form.test.tsx`
 
 **Interfaces:**
+
 - Consumes: маршрут `GET /shifts/:id/task-form` (Task 4).
 - Produces: ничего для последующих задач.
 
@@ -1410,23 +1474,25 @@ pnpm --filter @markiro/admin exec vitest run test/shift-task-form.test.tsx
 В `apps/admin/src/pages/shifts/ShiftDetailsPanel.tsx` перед секцией `pages.shifts.exports.title` вставить:
 
 ```tsx
-{shift.status !== "closed" ? (
-  <section className="mk-shift-details__section">
-    <h3>{t("pages.shifts.details.taskFormTitle")}</h3>
-    <p className="mk-shift-details__reports-hint">
-      {t("pages.shifts.details.taskFormDescription")}
-    </p>
-    <Button
-      type="button"
-      variant="secondary"
-      onClick={() =>
-        window.open(`/api/shifts/${shift.id}/task-form`, "_blank", "noopener,noreferrer")
-      }
-    >
-      {t("pages.shifts.details.openTaskForm")}
-    </Button>
-  </section>
-) : null}
+{
+  shift.status !== "closed" ? (
+    <section className="mk-shift-details__section">
+      <h3>{t("pages.shifts.details.taskFormTitle")}</h3>
+      <p className="mk-shift-details__reports-hint">
+        {t("pages.shifts.details.taskFormDescription")}
+      </p>
+      <Button
+        type="button"
+        variant="secondary"
+        onClick={() =>
+          window.open(`/api/shifts/${shift.id}/task-form`, "_blank", "noopener,noreferrer")
+        }
+      >
+        {t("pages.shifts.details.openTaskForm")}
+      </Button>
+    </section>
+  ) : null;
+}
 ```
 
 Секция сознательно не закрыта проверкой `canWrite`: напечатать наряд — операция чтения, и администратор со правом только на чтение должен её выполнять.
@@ -1453,6 +1519,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ## Task 8: Сканирование бланка на станции
 
 **Files:**
+
 - Modify: `apps/station/src/pages/ShiftSelection.tsx`
 - Modify: `apps/station/src/pages/TaskSelection.tsx:497-543`
 - Modify: `apps/station/src/i18n/ru.json`
@@ -1461,6 +1528,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - Test: `apps/station/test/shift-selection-barcode.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `parseShiftTaskBarcode`, `SHIFT_TASK_BARCODE_PREFIX` из `@markiro/domain` (Task 1); тело `entryMethod` у `POST /shifts/:id/open` (Task 6).
 - Produces: `ShiftSelectionProps.source?: ScanSource`.
 
@@ -1624,16 +1692,18 @@ useEffect(() => {
 Зону сканирования отрисовать первым элементом внутри `shift-selection__slot`, только когда `source` передан и `alternateActive !== true`:
 
 ```tsx
-{source && !alternateActive ? (
-  <section className="shift-selection__scan" aria-labelledby="shift-scan-title">
-    <span className="shift-selection__scan-mark" aria-hidden="true" />
-    <div>
-      <h2 id="shift-scan-title">{t("shifts.scanTitle")}</h2>
-      <p>{t("shifts.scanHint")}</p>
-    </div>
-    <strong>{t("shifts.taskBarcode")}</strong>
-  </section>
-) : null}
+{
+  source && !alternateActive ? (
+    <section className="shift-selection__scan" aria-labelledby="shift-scan-title">
+      <span className="shift-selection__scan-mark" aria-hidden="true" />
+      <div>
+        <h2 id="shift-scan-title">{t("shifts.scanTitle")}</h2>
+        <p>{t("shifts.scanHint")}</p>
+      </div>
+      <strong>{t("shifts.taskBarcode")}</strong>
+    </section>
+  ) : null;
+}
 ```
 
 - [ ] **Step 5: Переиспользовать стили зоны сканирования**
@@ -1665,7 +1735,10 @@ return source.start((barcode) => {
 В `ShiftSelection.open` передать способ входа — он приходит из того, чем оператор воспользовался:
 
 ```ts
-async function open(shift: ShiftListItem, entryMethod: "list" | "task_barcode" = "list"): Promise<void> {
+async function open(
+  shift: ShiftListItem,
+  entryMethod: "list" | "task_barcode" = "list",
+): Promise<void> {
   await enterShift(shift, () =>
     client.post<{ id: string; status: string; mode: string }>(`/shifts/${shift.id}/open`, {
       entryMethod,
@@ -1700,10 +1773,12 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ## Task 9: Разбор токена на ТСД
 
 **Files:**
+
 - Create: `apps/handheld/app/src/main/kotlin/app/markiro/handheld/core/barcode/ShiftTaskToken.kt`
 - Create: `apps/handheld/app/src/test/kotlin/app/markiro/handheld/core/barcode/ShiftTaskTokenTest.kt`
 
 **Interfaces:**
+
 - Consumes: правило формата из Task 1 (повторяется, а не импортируется — это другой язык).
 - Produces: `object ShiftTaskToken` с `const val PREFIX: String` и `fun parse(raw: String): String?`.
 
@@ -1813,6 +1888,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ## Task 10: Сканирование бланка на ТСД
 
 **Files:**
+
 - Modify: `apps/handheld/app/src/main/kotlin/app/markiro/handheld/core/network/StationApi.kt:58-59`
 - Modify: `apps/handheld/app/src/main/kotlin/app/markiro/handheld/core/network/Dtos.kt`
 - Modify: `apps/handheld/app/src/main/kotlin/app/markiro/handheld/feature/shift/ShiftRepository.kt:139-192`
@@ -1822,6 +1898,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - Test: `apps/handheld/app/src/test/kotlin/app/markiro/handheld/feature/shift/ShiftListScanTest.kt`
 
 **Interfaces:**
+
 - Consumes: `ShiftTaskToken` (Task 9); тело `entryMethod` у `POST /shifts/:id/enter` (Task 6).
 - Produces: ничего для последующих задач.
 
