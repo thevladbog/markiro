@@ -496,8 +496,14 @@ export function TaskSelection({
 
   useEffect(() => {
     return source.start((barcode) => {
-      // The shift panel owns this namespace and subscribes to the same source.
-      if (barcode.startsWith(SHIFT_TASK_BARCODE_PREFIX)) return;
+      // The shift panel owns this namespace and subscribes to the same source
+      // -- but only while the shifts tab is showing (`!alternateActive`
+      // there). On the warehouse tab it does not subscribe at all, so a
+      // shift-form scan would otherwise vanish here with no feedback.
+      if (barcode.startsWith(SHIFT_TASK_BARCODE_PREFIX)) {
+        if (category === "warehouse") setError(t("inventory.barcodeIsShiftForm"));
+        return;
+      }
       if (!intakeOpen.current || busyRef.current || isCurrentRef.current?.() === false) return;
       const originGeneration = lifecycleGeneration.current;
       busyRef.current = true;
@@ -543,7 +549,7 @@ export function TaskSelection({
         }
       })();
     });
-  }, [client, joinTask, source, t]);
+  }, [category, client, joinTask, source, t]);
 
   const pageCount = Math.max(1, Math.ceil(tasks.length / INVENTORY_PAGE_SIZE));
   const currentPage = Math.min(page, pageCount);

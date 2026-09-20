@@ -248,6 +248,7 @@
     "offlineGrantClock": "Offline time cannot be trusted after a restart or clock rollback. Connect and refresh before starting new warehouse work.",
     "offlineGrantObserve": "Offline permission could not be confirmed. Work continues in observation mode; connect and refresh when possible.",
     "barcodeFailed": "The task barcode could not be resolved.",
+    "barcodeIsShiftForm": "This is a shift form. Open \"Shifts\" to scan it.",
     "continue": "Continue",
     "continueLabel": "Continue {{number}}",
     "joining": "Verifying task…",

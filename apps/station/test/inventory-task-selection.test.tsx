@@ -2,7 +2,11 @@ import { DatabaseSync } from "node:sqlite";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { inventorySnapshotContentDigest, inventorySnapshotPageDigest } from "@markiro/domain";
+import {
+  inventorySnapshotContentDigest,
+  inventorySnapshotPageDigest,
+  SHIFT_TASK_BARCODE_PREFIX,
+} from "@markiro/domain";
 
 import i18n from "../src/i18n/index.js";
 import type { StationClient } from "../src/lib/api-client.js";
@@ -1034,6 +1038,42 @@ describe("TaskSelection inventory entry", () => {
     expect(screen.getByText("Production juice")).toBeDefined();
     expect(screen.queryByText("INV-00047")).toBeNull();
     expect(screen.getByRole("button", { name: "New shift" })).toBeDefined();
+  });
+
+  it("tells the operator to switch tabs when a shift form is scanned on the warehouse tab", async () => {
+    const exec = executor();
+    await applyMigrations(exec);
+    const scan = scanner();
+    const { api } = client({ shifts });
+    const onShiftSelected = vi.fn();
+    const onInventorySelected = vi.fn();
+    render(
+      <TaskSelection
+        client={api}
+        exec={exec}
+        source={scan.source}
+        operatorId="66666666-6666-4666-8666-666666666666"
+        currentLineName="Розлив №2"
+        onShiftSelected={onShiftSelected}
+        onInventorySelected={onInventorySelected}
+        onNew={() => {}}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Warehouse operations 1" }));
+    expect(await screen.findByText("INV-00047")).toBeDefined();
+
+    act(() => scan.scan(`${SHIFT_TASK_BARCODE_PREFIX}shift-1`));
+
+    expect(
+      await screen.findByText('This is a shift form. Open "Shifts" to scan it.'),
+    ).toBeDefined();
+    expect(onShiftSelected).not.toHaveBeenCalled();
+    expect(onInventorySelected).not.toHaveBeenCalled();
+    // The scanned shift stays reachable: switching tabs still opens it, so
+    // the operator loses nothing by having scanned it on the wrong tab.
+    fireEvent.click(screen.getByRole("button", { name: "Back to shifts 2" }));
+    expect(await screen.findByText("Production water")).toBeDefined();
   });
 
   it("shows three warehouse tasks per page at the compact 1024 viewport", async () => {
