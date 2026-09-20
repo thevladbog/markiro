@@ -2211,9 +2211,9 @@ body,
   display: grid;
   min-width: 0;
   min-height: 0;
-  padding: var(--sp-2) var(--sp-2) var(--sp-1) 0;
+  padding: var(--sp-3) var(--sp-3) var(--sp-2) 0;
   overflow: hidden;
-  gap: var(--sp-1);
+  gap: var(--sp-2);
   /* Факты стоят под заголовком плотной группой; свободное место уходит в
      пустую дорожку ПЕРЕД кнопкой, а не между заголовком и датами. */
   grid-template-rows: auto auto auto auto auto auto minmax(0, 1fr) 72px;
@@ -2225,6 +2225,31 @@ body,
   gap: var(--sp-2);
   align-items: center;
   justify-content: space-between;
+}
+
+/* Номер смены — её адрес: тихий моноширинный текст рядом со статусом. */
+.shift-card__number {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-3);
+  font: 500 13px/17px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * Геометрия тегов НА ЭТОЙ КАРТОЧКЕ, а не в словаре: 4px на 22px читаются
+ * коробкой с расстояния вытянутой руки. Форма при этом различает род тега —
+ * фаза (StatusChip) пилюлей, категория (Badge) скруглённым прямоугольником, —
+ * а размер, глиф и тон остаются словарными.
+ */
+.shift-card .mk-tag {
+  border-radius: 6px;
+}
+
+.shift-card .mk-chip {
+  border-radius: 999px;
 }
 
 /*
@@ -2290,6 +2315,22 @@ body,
   object-fit: contain;
 }
 
+/*
+ * Снимок со своей подложкой (студийное фото на белом) на градиенте выглядел
+ * забытым белым прямоугольником: у `object-fit: contain` скругление режет
+ * пустые углы коробки, а не углы самой картинки. Поэтому коробка здесь
+ * обнимает картинку (`auto` при обоих максимумах), и скругление с тенью
+ * превращают подложку в намеренную карточку снимка.
+ */
+.shift-card__photo[data-photo="opaque"] .product-image {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: var(--r-2);
+  box-shadow: 0 10px 28px rgb(0 0 0 / 45%);
+}
+
 /* Деградация фото до текста: имя товара читается на тёмном градиенте. */
 .shift-card .product-image--fallback {
   color: rgb(250 250 248 / 70%);
@@ -2334,6 +2375,15 @@ body,
   -webkit-line-clamp: 3;
 }
 
+/*
+ * Товар без наименования для печати отдаёт заголовку своё полное имя, и три
+ * строки его обрезали на полуслове. Строки полного имени в этом случае всё
+ * равно свободны — заголовок забирает их себе.
+ */
+.shift-card__product--only {
+  -webkit-line-clamp: 5;
+}
+
 /* Полное каталожное имя — вторым голосом: не заголовок и не подпись тега. */
 .shift-card__product-full {
   display: -webkit-box;
@@ -2352,6 +2402,10 @@ body,
   .shift-card__product {
     font: 600 20px/24px var(--font-ui);
     -webkit-line-clamp: 2;
+  }
+
+  .shift-card__product--only {
+    -webkit-line-clamp: 4;
   }
 }
 
@@ -2380,6 +2434,7 @@ body,
   display: flex;
   flex-wrap: wrap;
   column-gap: var(--sp-3);
+  row-gap: var(--sp-1);
 }
 
 .shift-card__date-part {

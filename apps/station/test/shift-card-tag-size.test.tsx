@@ -66,15 +66,45 @@ describe("теги карточки смены", () => {
     );
   });
 
-  it("рисует номер смены тегом категории без глифа", () => {
+  /**
+   * Номер смены — её адрес, а не свойство. Тегом он добавлял в одну строку
+   * четвёртую коробку рядом со статусом, режимом и признаком паллет, и строка
+   * читалась как набор кнопок. Осталась одна коробка — статус.
+   */
+  it("рисует номер смены текстом, а не тегом", () => {
     const { container } = render(
       <ShiftCard {...base} number="СМ-101" status="active" statusLabel="Активна" />,
     );
 
     const number = container.querySelector(".shift-card__number");
-    expect(number?.className).toContain("mk-badge");
-    expect(number?.className).toContain("mk-tag--office");
-    expect(number?.className).toContain("mk-tag--mono");
-    expect(number?.querySelector(".mk-tag__glyph")).toBeNull();
+    expect(number?.textContent).toBe("СМ-101");
+    expect(number?.className).toBe("shift-card__number");
+    expect(container.querySelectorAll(".shift-card__heading .mk-tag")).toHaveLength(1);
+  });
+
+  /**
+   * Тона режимов нейтральные ОБА: правило словаря запрещает асимметрию, из-за
+   * которой один режим читался успехом, а другой архивом, — два одинаково
+   * тихих тега её не создают, а цвет на карточке остаётся за статусом.
+   */
+  it("не красит режим и признак паллет", () => {
+    const { container } = render(
+      <ShiftCard
+        {...base}
+        number="СМ-101"
+        status="active"
+        statusLabel="Активна"
+        mode="aggregation"
+        modeLabel="Агрегация"
+        palletsEnabled
+        palletsLabel="Паллеты"
+      />,
+    );
+
+    for (const selector of [".shift-card__mode-badge", ".shift-card__pallets"]) {
+      const tag = container.querySelector(selector);
+      expect(tag?.className).toContain("mk-tag--neutral");
+      expect(tag?.className).toContain("mk-tag--office");
+    }
   });
 });
