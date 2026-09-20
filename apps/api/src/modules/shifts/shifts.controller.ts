@@ -101,6 +101,7 @@ import {
   type ShiftEntryDto,
 } from "./dto";
 import { ShiftsService, type EffectiveListShiftsQuery } from "./shifts.service";
+import { renderShiftTaskFormHtml } from "./shift-task-form";
 
 @ApiTags("shifts")
 @Controller("shifts")
@@ -356,7 +357,7 @@ export class ShiftsController {
     const data = await this.shiftsService.taskFormData(req.tenantId!, id);
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.setHeader("Cache-Control", "private, no-store");
-    return this.shiftsService.renderTaskForm(data);
+    return renderShiftTaskFormHtml(data);
   }
 
   // Cabinet-only: a device reading an
@@ -489,7 +490,7 @@ export class ShiftsController {
   @ApiOperation({ summary: "Open a shift" })
   @ApiCabinetOrStationAuth()
   @ApiParam({ name: "id", format: "uuid" })
-  @ApiZodBody(shiftEntrySchema)
+  @ApiZodBody(shiftEntrySchema, { required: false })
   @ApiOkResponse({ schema: shiftOpenApiSchema })
   @ApiZodValidationError()
   @ApiHttpErrors(401, 403, 404, 409, 429)
@@ -529,7 +530,7 @@ export class ShiftsController {
   })
   @ApiStationAuth()
   @ApiParam({ name: "id", format: "uuid" })
-  @ApiZodBody(shiftEntrySchema)
+  @ApiZodBody(shiftEntrySchema, { required: false })
   @ApiOkResponse({ schema: shiftOpenApiSchema })
   @ApiZodValidationError()
   @ApiHttpErrors(401, 403, 404, 409, 429)

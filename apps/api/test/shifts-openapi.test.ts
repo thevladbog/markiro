@@ -395,6 +395,19 @@ describe("shifts OpenAPI contract", () => {
       }
       expect(Object.keys(taskFormResponse.content ?? {})).toEqual(["text/html"]);
       expect(taskFormResponse.content?.["text/html"]?.schema).toEqual({ type: "string" });
+
+      // shiftEntrySchema defaults the whole body to { entryMethod: "list" }
+      // so that a station or handheld build already deployed in the field
+      // keeps opening/entering shifts with a bodiless request across a
+      // rollout. The published contract must say the body is optional, or a
+      // reader could conclude those older builds are non-conforming.
+      for (const path of ["/shifts/{id}/open", "/shifts/{id}/enter"] as const) {
+        const requestBody = operation(document, path, "post").requestBody;
+        if (!requestBody || "$ref" in requestBody) {
+          throw new Error(`Missing inline request body for POST ${path}`);
+        }
+        expect(requestBody.required).toBe(false);
+      }
     } finally {
       await app.close();
     }

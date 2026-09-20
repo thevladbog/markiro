@@ -92,7 +92,7 @@ import type {
 } from "./dto";
 import { EntitlementsService } from "../../subscriptions/entitlements.service";
 import { SubscriptionReadOnlyException } from "../../subscriptions/subscription-errors";
-import { renderShiftTaskFormHtml, type ShiftTaskFormData } from "./shift-task-form";
+import type { ShiftTaskFormData } from "./shift-task-form";
 
 import {
   assertProductLabelCapability,
@@ -676,10 +676,6 @@ export class ShiftsService {
       allowPreviouslyAcceptedCodes: row.allowPreviouslyAcceptedCodes,
       generatedAt,
     };
-  }
-
-  renderTaskForm(data: ShiftTaskFormData): string {
-    return renderShiftTaskFormHtml(data);
   }
 
   getProductLabelHistory(tenantId: string, id: string, query: ProductLabelHistoryQuery) {
