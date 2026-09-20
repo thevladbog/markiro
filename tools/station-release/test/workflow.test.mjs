@@ -82,7 +82,7 @@ test("station beta build and dual-origin publication use separate exact protecte
   );
   assert.match(
     verifyStep.run,
-    /pnpm --filter @markiro\/station exec vitest run --maxWorkers=2 --testTimeout=30000/,
+    /pnpm --filter @markiro\/station exec vitest run --maxWorkers=2 --testTimeout=30000 --hookTimeout=30000/,
   );
   const corsStep = workflow.jobs.build.steps.find(
     (step) => step.name === "Verify production station pairing CORS",
