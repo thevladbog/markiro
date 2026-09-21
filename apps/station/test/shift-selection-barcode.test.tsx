@@ -65,8 +65,12 @@ function renderSelection(options: {
   post?: PostMock;
   onSelected?: OnSelectedMock;
 }) {
-  vi.spyOn(globalThis, "fetch").mockResolvedValue(
-    new Response(JSON.stringify({ items: options.items }), { status: 200 }),
+  // A `Response` body can be read once. Returning one shared instance makes the
+  // second refresh -- the 30 s poll, or any effect-driven reload -- fail to
+  // parse, which surfaces as an unrelated load error replacing whatever the
+  // test was asserting.
+  vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+    Promise.resolve(new Response(JSON.stringify({ items: options.items }), { status: 200 })),
   );
   const baseClient = createStationClient({
     machineId: "m1",
@@ -153,6 +157,36 @@ describe("ShiftSelection barcode scanning", () => {
         "The form barcode matched no shift in the list. Refresh the list or pick the shift by hand.",
       ),
     ).toBeDefined();
+  });
+
+  it("keeps the scan verdict on screen when the background poll refreshes the list", async () => {
+    // The poll clears the message it owns before every refresh. A verdict the
+    // operator was just given is not that message: wiping it mid-read makes the
+    // scan look ignored, and on a slow terminal it vanished within a second of
+    // appearing.
+    vi.useFakeTimers();
+    try {
+      const scan = scanner();
+      renderSelection({ scan, items: [] });
+      // Flush the resolved list fetch and its effects without leaning on a
+      // timer: the scan below must see a settled, genuinely empty list.
+      await act(async () => {});
+      expect(screen.getByText("No open shifts")).toBeDefined();
+
+      act(() => scan.scan("markiro:shift:v1:44444444-4444-4444-8444-444444444444"));
+      const verdict =
+        "The form barcode matched no shift in the list. Refresh the list or pick the shift by hand.";
+      expect(screen.getByText(verdict)).toBeDefined();
+
+      await act(async () => {
+        vi.advanceTimersByTime(30_000);
+      });
+      await act(async () => {});
+
+      expect(screen.getByText(verdict)).toBeDefined();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does not call a shift absent while the list is still loading", async () => {
