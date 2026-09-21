@@ -154,6 +154,24 @@ describe("production on a station that cannot bind its shift", () => {
     expect(restored?.jobId).toBe(f.value.jobId);
   });
 
+  it("reports a code already accepted elsewhere as a duplicate, not a storage failure", async () => {
+    const f = await fixture("observe");
+    // Exactly what the floor hits when the operator scans codes left over from
+    // earlier shifts: the acceptance trigger aborts with VALIDATION_CODE_DUPLICATE.
+    await f.exec.run(
+      "INSERT INTO codes_mirror(code_hash,shift_id,gtin14,serial,scanned_at) VALUES(?,?,?,?,?)",
+      [f.value.codeHash, "earlier-shift", f.value.gtin14, f.value.serial, f.value.acceptedAt],
+    );
+
+    await expect(
+      recordProductLabelAcceptanceWithOfflineGrant(f.exec, f.value, f.generation, async () => ({
+        bootId: "boot",
+        monotonicMs: 11,
+        wallMs: 201,
+      })),
+    ).resolves.toEqual({ status: "duplicate" });
+  });
+
   it("keeps accepting product labels in observe mode without an execution projection", async () => {
     const f = await fixture("observe");
     // What a station looks like when the bundle mirror never wrote a scope:
@@ -335,5 +353,148 @@ describe("readExecutionToBind", () => {
         throw new ExecutionProjectionUnavailableError("requires a fresh bundle");
       }),
     ).rejects.toThrow("requires a fresh bundle");
+  });
+});
+
+/**
+ * Same station, but with the shift bound: an execution projection to commit
+ * against and an atomic hook that lets a test interleave a competing writer
+ * between the pre-check and the granted insert.
+ */
+function boundShift(mode: "observe" | "strict", beforeCommit?: () => void) {
+  const f = unboundShift(mode);
+  f.db.prepare("UPDATE shift_mirror SET execution_scope_json=? WHERE id='shift'").run(
+    JSON.stringify({
+      shift: {
+        id: "shift",
+        productId: "product",
+        mode: "aggregation",
+        lineId: null,
+        counterpartyId: null,
+        counterpartyName: null,
+        labelTemplateId: null,
+        boxLabelTemplateId: null,
+        palletLabelTemplateId: null,
+        validationPrintMode: "none",
+        allowPreviouslyAcceptedCodes: false,
+        validationPrintVerification: "none",
+        validationPrintTemplateId: null,
+        validationPrintSnapshot: null,
+        validationPrintPolicyRevision: null,
+        boxCapacity: null,
+        palletsEnabled: false,
+        palletBoxCapacity: null,
+        stationClosePolicy: "single_device",
+        stationCloseOwnerDeviceId: "device",
+        plannedDate: "2026-09-20",
+        productionDate: null,
+        number: "SEP26-001",
+      },
+      product: {
+        id: "product",
+        gtin14: "04600000000015",
+        name: "Widget",
+        printName: null,
+        egaisCode: null,
+        shelfLifeDays: null,
+      },
+      templates: [],
+    }),
+  );
+  const commits = { count: 0 };
+  const exec: SqlExecutor = {
+    ...f.exec,
+    async atomic(statements) {
+      commits.count += 1;
+      beforeCommit?.();
+      f.db.exec("BEGIN IMMEDIATE");
+      try {
+        const changes = statements.map((statement) =>
+          Number(
+            f.db.prepare(statement.sql).run(...([...(statement.values ?? [])] as never[])).changes,
+          ),
+        );
+        f.db.exec("COMMIT");
+        return changes;
+      } catch (error) {
+        f.db.exec("ROLLBACK");
+        throw error;
+      }
+    },
+  };
+  return { ...f, exec, commits };
+}
+
+describe("closing a shift another owner already closed", () => {
+  it("resumes the deferred writes of a close that persisted before them", async () => {
+    const f = unboundShift("observe");
+    // The durable event outlived the mirror writes that follow it.
+    f.db
+      .prepare(
+        `INSERT INTO shift_close_outbox(event_id,shift_id,device_id,operator_id,product_id,product_name,planned_qty_snapshot,actual_qty,closed_box_count,reason_code,closed_at)
+         VALUES('other-event','shift','other-device','operator','product','Widget',NULL,0,0,NULL,'2026-09-21T00:30:00.000Z')`,
+      )
+      .run();
+
+    const closed = await closeShiftOfflineWithGrant(
+      f.exec,
+      { shiftId: "shift", deviceId: "device", operatorId: "operator" },
+      f.generation,
+      () => new Date("2026-09-21T01:00:00.000Z"),
+      async () => ({ bootId: "boot", monotonicMs: 11, wallMs: 201 }),
+    );
+
+    expect(closed).toEqual(expect.objectContaining({ eventId: "other-event", shiftId: "shift" }));
+    expect(f.db.prepare("SELECT status FROM shift_mirror WHERE id='shift'").get()).toEqual({
+      status: "closed",
+    });
+  });
+
+  it("returns the winner's close when another owner commits mid-flight", async () => {
+    let raced = false;
+    // The competing writer lands after this caller's pre-check and immediately
+    // before its own insert, which is the only window the pre-check cannot see.
+    const f: ReturnType<typeof boundShift> = boundShift("observe", () => {
+      if (raced) return;
+      raced = true;
+      f.db
+        .prepare(
+          `INSERT INTO shift_close_outbox(event_id,shift_id,device_id,operator_id,product_id,product_name,planned_qty_snapshot,actual_qty,closed_box_count,reason_code,closed_at)
+           VALUES('winner-event','shift','other-device','operator','product','Widget',NULL,0,0,NULL,'2026-09-21T00:45:00.000Z')`,
+        )
+        .run();
+    });
+
+    const closed = await closeShiftOfflineWithGrant(
+      f.exec,
+      { shiftId: "shift", deviceId: "device", operatorId: "operator" },
+      f.generation,
+      () => new Date("2026-09-21T01:00:00.000Z"),
+      async () => ({ bootId: "boot", monotonicMs: 11, wallMs: 201 }),
+    );
+
+    expect(f.commits.count).toBeGreaterThan(0);
+    expect(raced).toBe(true);
+    expect(closed).toEqual(expect.objectContaining({ eventId: "winner-event", shiftId: "shift" }));
+    expect(f.db.prepare("SELECT status FROM shift_mirror WHERE id='shift'").get()).toEqual({
+      status: "closed",
+    });
+    expect(
+      f.db.prepare("SELECT count(*) count FROM shift_close_outbox WHERE shift_id='shift'").get(),
+    ).toEqual({ count: 1 });
+  });
+
+  it("refuses to close an unbound shift in strict mode", async () => {
+    const f = unboundShift("strict");
+
+    await expect(
+      closeShiftOfflineWithGrant(
+        f.exec,
+        { shiftId: "shift", deviceId: "device", operatorId: "operator" },
+        f.generation,
+        () => new Date("2026-09-21T01:00:00.000Z"),
+        async () => ({ bootId: "boot", monotonicMs: 11, wallMs: 201 }),
+      ),
+    ).rejects.toThrow("offline grant active shift requires a fresh bundle");
   });
 });

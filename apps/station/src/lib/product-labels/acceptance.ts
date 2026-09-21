@@ -37,6 +37,21 @@ export function assertPreparedLabelMatchesExecution(
     throw new Error("offline grant prepared label execution changed");
 }
 
+/**
+ * The two ways a code already accepted elsewhere comes back. The acceptance
+ * trigger aborts with its own name; the mirror's unique index speaks for
+ * itself when the insert gets that far. Both mean one physical unit scanned
+ * twice, and both paths -- granted and legacy -- must read them the same way:
+ * telling the operator "duplicate" is a verdict, while letting either escape
+ * stops printing and acceptance with a storage failure.
+ */
+function isDuplicateCodeRejection(message: string): boolean {
+  return (
+    message.includes("VALIDATION_CODE_DUPLICATE") ||
+    /UNIQUE constraint failed: codes_mirror\.code_hash(?:\s|$)/i.test(message)
+  );
+}
+
 /** One INSERT invokes a SQLite trigger; no transaction may span calls on the Tauri SQL pool. */
 async function recordProductLabelAcceptanceLegacy(
   exec: SqlExecutor,
@@ -71,11 +86,8 @@ async function recordProductLabelAcceptanceLegacy(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (message.includes("PRODUCT_LABEL_BUSY")) return { status: "busy" };
-    // Only this exact constraint means a duplicate unit. Other unique/write failures must surface.
-    if (
-      message.includes("VALIDATION_CODE_DUPLICATE") ||
-      /UNIQUE constraint failed: codes_mirror\.code_hash(?:\s|$)/i.test(message)
-    ) {
+    // Only these exact rejections mean a duplicate unit. Other write failures must surface.
+    if (isDuplicateCodeRejection(message)) {
       await recordScan(
         exec,
         {
@@ -244,7 +256,8 @@ export async function recordProductLabelAcceptanceWithOfflineGrant(
         );
       return result;
     } catch (error) {
-      if (!/UNIQUE constraint failed: codes_mirror\.code_hash/i.test(String(error))) throw error;
+      if (!isDuplicateCodeRejection(error instanceof Error ? error.message : String(error)))
+        throw error;
       await recordScanWithOfflineGrant(
         exec,
         {
