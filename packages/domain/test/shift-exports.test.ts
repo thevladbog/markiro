@@ -842,8 +842,11 @@ describe("pallets shift export formats", () => {
     expect(xml.indexOf(`<pack_code>00${palletSscc}</pack_code>`)).toBeGreaterThan(
       xml.indexOf(`<pack_code>00${boxB}</pack_code>`),
     );
-    expect(xml).toContain(`<sscc>00${boxA}</sscc>`);
-    expect(xml).toContain(`<sscc>00${boxB}</sscc>`);
+    expect(xml).toContain(`<cis>00${boxA}</cis>`);
+    expect(xml).toContain(`<cis>00${boxB}</cis>`);
+    // The portal rejects `<sscc>` members outright; see the note on
+    // `renderGismtAggregationXml`.
+    expect(xml).not.toContain("<sscc>");
   });
 
   it("emits unpalletized boxes with the others and in no pallet", () => {
@@ -851,7 +854,9 @@ describe("pallets shift export formats", () => {
     const xml = decode(part!.bytes);
 
     expect(xml).toContain(`<pack_code>00${looseBox}</pack_code>`);
-    expect(xml.match(/<sscc>/g) ?? []).toHaveLength(2);
+    // Exactly the two member boxes of the single pallet; the loose box gets
+    // its own pack_content and is nested under nothing.
+    expect(xml.match(/<cis>00\d{18}<\/cis>/g) ?? []).toHaveLength(2);
   });
 
   it("keeps a pallet block whole when splitting by line limit", () => {
@@ -861,7 +866,7 @@ describe("pallets shift export formats", () => {
     const parts = renderXmlPallets(xmlPalletsSource, 26);
 
     expect(parts).toHaveLength(2);
-    const palletParts = parts.filter((p) => decode(p.bytes).includes("<sscc>"));
+    const palletParts = parts.filter((p) => decode(p.bytes).includes(`<pack_code>00${palletSscc}`));
     expect(palletParts).toHaveLength(1);
   });
 
@@ -1047,7 +1052,7 @@ describe("pallet → boxes shift export formats (no codes)", () => {
     });
   });
 
-  it("renders XML with only pallet pack_content and <sscc> children, no <cis> and no box pack_content", () => {
+  it("renders XML with only pallet pack_content naming its boxes, and no box pack_content", () => {
     const [part, ...rest] = renderXml();
     const xml = decode(part!.bytes);
 
@@ -1065,19 +1070,22 @@ describe("pallet → boxes shift export formats (no codes)", () => {
         "        </organisation>",
         "        <pack_content>",
         `            <pack_code>00${palletOne}</pack_code>`,
-        `            <sscc>00${boxA}</sscc>`,
-        `            <sscc>00${boxB}</sscc>`,
+        `            <cis>00${boxA}</cis>`,
+        `            <cis>00${boxB}</cis>`,
         "        </pack_content>",
         "        <pack_content>",
         `            <pack_code>00${palletTwo}</pack_code>`,
-        `            <sscc>00${palletTwoBox}</sscc>`,
+        `            <cis>00${palletTwoBox}</cis>`,
         "        </pack_content>",
         "    </Document>",
         "</unit_pack>",
         "",
       ].join("\n"),
     );
-    expect(xml).not.toContain("<cis>");
+    // The `<cis>` entries above are box SSCCs, never the units' own KM
+    // codes: this format reports pallet membership and nothing else.
+    expect(xml).not.toContain("KM-");
+    expect(xml).not.toContain("<sscc>");
     expect(xml).not.toContain(looseBox);
     expect(part).toMatchObject({
       physicalLineCount: 19,

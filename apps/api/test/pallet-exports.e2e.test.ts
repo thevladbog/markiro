@@ -330,10 +330,10 @@ describe.skipIf(!ready)("pallet exports e2e", () => {
     expect(enqueueShiftExport).toHaveBeenCalledWith(body.id);
 
     const xml = await runAndReadArtifact(body.id);
-    expect(xml).not.toContain("<cis>");
+    expect(xml).not.toContain("<sscc>");
     expect(xml).toContain(`<pack_code>00${productionPalletSscc}</pack_code>`);
-    expect(xml).toContain(`<sscc>00${box1Sscc}</sscc>`);
-    expect(xml).toContain(`<sscc>00${box2Sscc}</sscc>`);
+    expect(xml).toContain(`<cis>00${box1Sscc}</cis>`);
+    expect(xml).toContain(`<cis>00${box2Sscc}</cis>`);
     expect((xml.match(/<pack_content>/g) ?? []).length).toBe(1);
     expect(xml).toContain('LP_TIN="7701234567"');
     // Without every one of these the ЧЗ portal rejects the upload as
@@ -450,10 +450,10 @@ describe.skipIf(!ready)("pallet exports e2e", () => {
     const exportId = (created.body as { id: string }).id;
 
     const xml = await runAndReadArtifact(exportId);
-    expect(xml).not.toContain("<cis>");
+    expect(xml).not.toContain("<sscc>");
     expect(xml).toContain(`<pack_code>00${warehousePalletSscc}</pack_code>`);
-    expect(xml).toContain(`<sscc>00${box3Sscc}</sscc>`);
-    expect(xml).toContain(`<sscc>00${box4Sscc}</sscc>`);
+    expect(xml).toContain(`<cis>00${box3Sscc}</cis>`);
+    expect(xml).toContain(`<cis>00${box4Sscc}</cis>`);
 
     const [row] = await db
       .select()

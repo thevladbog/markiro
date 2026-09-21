@@ -9,9 +9,10 @@ export interface GismtAggregationBox {
 
 /**
  * A pallet aggregate: its own SSCC plus the SSCCs of the boxes stacked on it.
- * Rendered as a second `pack_content` whose children are `<sscc>`, never
- * `<cis>` -- the boxes it names are aggregated elsewhere, in their OWN
- * `pack_content` blocks (see the ordering note on `renderGismtAggregationXml`).
+ * Rendered as a further `pack_content` whose children are `<cis>` carrying
+ * those box SSCCs -- the element the ЧЗ portal actually accepts, see the note
+ * on `renderGismtAggregationXml`. The boxes themselves are aggregated
+ * elsewhere, in their OWN `pack_content` blocks.
  */
 export interface GismtAggregationPallet {
   sscc: string;
@@ -115,13 +116,21 @@ export function renderGismtAggregationXml(input: {
     // Boxes first, pallets last. An aggregate cannot be nested before it
     // exists, and the parts of a split document are submitted in
     // part-number order -- so a pallet naming a box SSCC must never precede
-    // that box's own pack_content. The XSD permits either child (`cis` or
-    // `sscc`) under pack_content; the ORDER is ours to get right.
+    // that box's own pack_content. The ORDER is ours to get right.
+    //
+    // Member boxes are written as `<cis>`, NOT `<sscc>`. The XSD offers
+    // either, and `sscc` is the one it documents for a transport package,
+    // but the ЧЗ portal does not accept it: a pallet document with `<sscc>`
+    // members was rejected as «Передаваемый файл XML не соответствует
+    // XSD-схеме» while the cabinet listed «Содержит: 0 вложений», and the
+    // byte-identical document with `<cis>` members was accepted on
+    // 2026-09-21. The portal, not the published schema, is the contract
+    // here -- see docs/contracts/inventory-documents/v1/README.md.
     ...pallets.flatMap((pallet) => [
       "        <pack_content>",
       `            <pack_code>${xmlText(formatGismtAggregationSscc(pallet.sscc))}</pack_code>`,
       ...pallet.boxSsccs.map(
-        (sscc) => `            <sscc>${xmlText(formatGismtAggregationSscc(sscc))}</sscc>`,
+        (sscc) => `            <cis>${xmlText(formatGismtAggregationSscc(sscc))}</cis>`,
       ),
       "        </pack_content>",
     ]),

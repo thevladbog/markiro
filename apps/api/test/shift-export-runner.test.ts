@@ -309,7 +309,13 @@ describe("ShiftExportRunnerService", () => {
     expect(objects.putVerified).toHaveBeenCalledTimes(1);
     const [key, body] = objects.putVerified.mock.calls[0] as [string, Buffer];
     expect(key).toBe(`tenants/tenant-1/shift-exports/${EXPORT_ID}/attempt-1/part-1.xml`);
-    expect(body.toString("utf-8")).not.toContain("<cis>");
+    // A pallet document carries its member boxes as `<cis>` (the element the
+    // ЧЗ portal accepts) and no unit codes at all -- `totalCodeCount: 0`
+    // above is the counter side of the same fact.
+    const xml = body.toString("utf-8");
+    expect(xml).toContain("<cis>00034600682000000018</cis>");
+    expect(xml).toContain("<cis>00034600682000000025</cis>");
+    expect(xml).not.toContain("<sscc>");
     expect(fake.state.artifacts).toEqual([
       expect.objectContaining({
         partNumber: 1,
