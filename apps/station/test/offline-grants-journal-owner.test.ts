@@ -65,7 +65,13 @@ function fixture(maximum = 1, beforeAtomic?: () => void, grantId = "grant") {
   }
   const exec: SqlExecutor = {
     async run(sql: string, values = []) {
-      if (sql.includes("offline_grant_scan_commands")) beforeAtomic?.();
+      // Command inserts are the commit boundary for the paths that drive their
+      // trigger through `run` rather than `atomic`.
+      if (
+        sql.includes("offline_grant_scan_commands") ||
+        sql.includes("offline_grant_box_close_commands")
+      )
+        beforeAtomic?.();
       db.prepare(sql).run(...(values as never[]));
     },
     async all<T>(sql: string, values = []) {
@@ -459,6 +465,64 @@ describe("grant-backed scan owner transaction", () => {
       { budget_line_id: "shift.box.close.v1:containers", consumed: 1 },
       { budget_line_id: "shift.box.close.v1:events", consumed: 1 },
     ]);
+  });
+
+  it("names a box another owner closed first, instead of claiming a second SSCC", async () => {
+    const holder: { db?: DatabaseSync } = {};
+    // The winner commits between `currentBox` and this caller's own commit, so
+    // the trigger's `closed_at IS NULL` guard leaves our SSCC unused.
+    let racedOnce = false;
+    const raced = fixture(1, () => {
+      // The hook also fires while the fixture itself writes; the race is the
+      // first commit that finds this box open.
+      if (racedOnce || !holder.db) return;
+      const changed = holder.db
+        .prepare(
+          // The winner's own SSCC, cut from a different serial than ours.
+          "UPDATE boxes_mirror SET sscc='046006820000000025',closed_at='2026-09-13T00:30:00.000Z' WHERE box_id='box' AND closed_at IS NULL",
+        )
+        .run();
+      racedOnce = Number(changed.changes) === 1;
+    });
+    holder.db = raced.db;
+    const stored = JSON.parse(
+      (
+        raced.db
+          .prepare("SELECT grant_json FROM offline_grant_grants WHERE grant_id='grant'")
+          .get() as { grant_json: string }
+      ).grant_json,
+    );
+    stored.eventTypes.push("shift.box.close.v1");
+    stored.budget.push(
+      { id: "shift.box.close.v1:events", unit: "event", maximum: 1 },
+      { id: "shift.box.close.v1:containers", unit: "container", maximum: 1 },
+    );
+    raced.db
+      .prepare("UPDATE offline_grant_grants SET grant_json=? WHERE grant_id='grant'")
+      .run(JSON.stringify(stored));
+    raced.db.exec(
+      "INSERT INTO boxes_mirror(box_id,shift_id,opened_at) VALUES('box','shift','2026-09-13T00:00:00.000Z'); INSERT INTO codes_mirror(code_hash,shift_id,gtin14,serial,scanned_at,box_id) VALUES('boxed','shift','04600000000001','s','2026-09-13T00:00:00.000Z','box'); INSERT INTO sscc_pool(issuer_prefix,extension_digit,from_serial,to_serial,next_serial) VALUES('460068200',0,1,1,1)",
+    );
+
+    const result = await closeCurrentBoxWithOfflineGrant(
+      {
+        exec: raced.exec,
+        issuerPrefix: "460068200",
+        palletBoxCapacity: null,
+        terminalId: "device",
+        now: () => Date.parse("2026-09-13T01:00:00.000Z"),
+      },
+      "shift",
+      "operator",
+      raced.generation,
+      clock,
+    );
+
+    expect(racedOnce).toBe(true);
+    expect(result).toEqual({ status: "already-closed" });
+    expect(raced.db.prepare("SELECT sscc FROM boxes_mirror WHERE box_id='box'").get()).toEqual({
+      sscc: "046006820000000025",
+    });
   });
 
   it("does not leave the exported legacy box writer usable with active grant state", async () => {

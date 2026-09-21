@@ -265,3 +265,25 @@ export async function readExecutionToBind<T>(
     return null;
   }
 }
+
+/**
+ * Runs a granted close and turns the trigger's own concurrency refusal into
+ * "someone else closed it first".
+ *
+ * The close triggers refuse to claim a container another owner already closed,
+ * and the ungranted paths report exactly that as an `already-closed` verdict
+ * rather than a failure. Letting the abort escape instead would tell the
+ * operator the close broke, for a container that is closed — and send them to
+ * close it again against a second serial.
+ */
+export async function closeWithConflictVerdict<T>(
+  commit: () => Promise<T>,
+  abort: "OFFLINE_GRANT_BOX_CLOSE_CONFLICT" | "OFFLINE_GRANT_PALLET_CLOSE_CONFLICT",
+): Promise<T | null> {
+  try {
+    return await commit();
+  } catch (error) {
+    if (!(error instanceof Error ? error.message : String(error)).includes(abort)) throw error;
+    return null;
+  }
+}
