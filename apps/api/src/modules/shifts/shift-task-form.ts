@@ -44,9 +44,9 @@ const STATUS_LABEL: Record<ShiftTaskFormData["status"], string> = {
   active: "В работе",
 };
 
-const SHIFT_FORM_CSS = `    .product { display: grid; grid-template-columns: 28mm minmax(0, 1fr); gap: 5mm; align-items: center; padding: 5mm 0 4mm; border-bottom: .2mm solid #d8d5cf; }
+const SHIFT_FORM_CSS = `    .product { display: grid; grid-template-columns: 22mm minmax(0, 1fr); gap: 5mm; align-items: center; padding: 3mm 0; border-bottom: .2mm solid #d8d5cf; }
     .product--no-photo { grid-template-columns: minmax(0, 1fr); }
-    .product-photo { width: 28mm; height: 28mm; border: .2mm solid #d8d5cf; background: #f1efe8; overflow: hidden; }
+    .product-photo { width: 22mm; height: 22mm; border: .2mm solid #d8d5cf; background: #f1efe8; overflow: hidden; }
     .product-photo img { width: 100%; height: 100%; object-fit: contain; display: block; }
     .product-eyebrow { color: #706d67; font-size: 8pt; letter-spacing: .03em; text-transform: uppercase; }
     .product-name { margin-top: 1mm; font-size: 12pt; font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
@@ -56,7 +56,15 @@ const SHIFT_FORM_CSS = `    .product { display: grid; grid-template-columns: 28m
     .compact .product--no-photo { grid-template-columns: minmax(0, 1fr); }
     .compact .product-photo { width: 22mm; height: 22mm; }
     .compact .product-name { font-size: 10pt; }
-    .compact .product-meta { font-size: 8pt; }`;
+    .compact .product-meta { font-size: 8pt; }
+    .task-passport { padding: 5mm 0; }
+    h1 { font-size: 20pt; }
+    .scan-zone { min-height: 0; }
+    .barcode { width: 28mm; height: 28mm; }
+    .parameter { min-height: 0; padding: 1.2mm 4mm 1.2mm 0; }
+    .steps { margin-top: 3mm; }
+    .rules { margin-top: 3mm; padding: 2.5mm 4mm; }
+    .comments { min-height: 24mm; margin-top: 3mm; }`;
 
 export function renderShiftTaskFormHtml(data: ShiftTaskFormData): string {
   const number = escapeHtml(data.shiftNumber);
@@ -67,9 +75,15 @@ export function renderShiftTaskFormHtml(data: ShiftTaskFormData): string {
   const lineText = data.lineName === null ? "" : boundPrintText(data.lineName);
   const counterpartyText =
     data.counterpartyName === null ? "" : boundPrintText(data.counterpartyName);
+  // Measured against the real sheet in a browser, not guessed: at 180 combined
+  // code points the standard layout still lands its footer exactly on the
+  // bottom margin, and past it the parameter grid gains a wrapped row that
+  // pushes the footer into the margin. The per-name limit stays at 100 because
+  // one long product name alone still fits -- it is the combined bulk, plus the
+  // extra parameter rows a counterparty and an SSCC issuer bring, that spills.
   const compact =
     organizationText.length + productText.length + lineText.length + counterpartyText.length >
-      240 ||
+      180 ||
     [organizationText, productText, lineText, counterpartyText].some((value) => value.length > 100);
   const aggregation = data.mode === "aggregation";
   const modeTitle = aggregation
