@@ -286,8 +286,14 @@ export async function closeShiftOfflineWithGrant(
       );
       if (pending) throw new Error("PRODUCT_LABEL_UNRESOLVED");
     }
+    // `station_processed_codes`, not `codes_mirror`: the ungranted close, the
+    // work screen's plan counter and the duplicate-print close guard all count
+    // accepted units through that view. A code reprocessed from an earlier
+    // shift keeps its mirror row under that shift, so counting the mirror here
+    // under-reports the fact -- the operator was asked to explain a gap the
+    // screen never showed, and the guard then refused the close outright.
     const [{ actualQty = 0 } = {}] = await exec.all<{ actualQty: number }>(
-      "SELECT COUNT(*) actualQty FROM codes_mirror WHERE shift_id=?",
+      "SELECT COUNT(*) actualQty FROM station_processed_codes WHERE shift_id=?",
       [input.shiftId],
     );
     const [{ closedBoxCount = 0 } = {}] = await exec.all<{ closedBoxCount: number }>(

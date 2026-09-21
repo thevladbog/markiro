@@ -16,7 +16,7 @@ import {
   readExecutionToBind,
 } from "../src/lib/offline-grants/semantic.js";
 import { STATION_MIGRATIONS } from "@markiro/db/station-sqlite";
-import type { SqlExecutor } from "../src/lib/mirror.js";
+import { markServerClosedShifts, type SqlExecutor } from "../src/lib/mirror.js";
 
 const cleanups: (() => void)[] = [];
 afterEach(() =>
@@ -496,5 +496,76 @@ describe("closing a shift another owner already closed", () => {
         async () => ({ bootId: "boot", monotonicMs: 11, wallMs: 201 }),
       ),
     ).rejects.toThrow("offline grant active shift requires a fresh bundle");
+  });
+});
+
+describe("closing a duplicate-print shift whose plan is met", () => {
+  it("counts reprocessed units the way the screen and the close guard do", async () => {
+    const f = boundShift("observe");
+    // A duplicate-print shift with a plan of one, met by a code reprocessed
+    // from an earlier shift: its mirror row stays under that shift, so only
+    // `station_processed_codes` sees the unit this shift accepted.
+    f.db
+      .prepare(
+        "UPDATE shift_mirror SET mode='validation', planned_qty=1, validation_print_context=? WHERE id='shift'",
+      )
+      .run(JSON.stringify({ policy: { mode: "duplicate_dm" } }));
+    f.db
+      .prepare(
+        "INSERT INTO codes_mirror(code_hash,shift_id,gtin14,serial,scanned_at) VALUES('unit','earlier-shift','04600000000015','s1','2026-09-21T00:10:00.000Z')",
+      )
+      .run();
+    f.db
+      .prepare(
+        `INSERT INTO validation_occurrences(shift_id,code_hash,scanned_at,credential_ownership,terminal_id,operator_id,source_shift_id,canonical_raw)
+         VALUES('shift','unit','2026-09-21T00:20:00.000Z','owner','device','operator','earlier-shift','raw')`,
+      )
+      .run();
+
+    const closed = await closeShiftOfflineWithGrant(
+      f.exec,
+      {
+        shiftId: "shift",
+        deviceId: "device",
+        operatorId: "operator",
+        credentialOwnership: "owner",
+      },
+      f.generation,
+      () => new Date("2026-09-21T01:00:00.000Z"),
+      async () => ({ bootId: "boot", monotonicMs: 11, wallMs: 201 }),
+    );
+
+    // Plan met: no discrepancy reason was required, and the guard accepted the
+    // snapshot instead of refusing the close.
+    expect(closed).toEqual(
+      expect.objectContaining({ shiftId: "shift", actualQty: 1, plannedQtySnapshot: 1 }),
+    );
+    expect(f.db.prepare("SELECT status FROM shift_mirror WHERE id='shift'").get()).toEqual({
+      status: "closed",
+    });
+  });
+});
+
+describe("a shift closed somewhere else", () => {
+  it("stops counting as active locally once the server reports it closed", async () => {
+    const f = unboundShift("observe");
+    f.db
+      .prepare(
+        "INSERT INTO shift_mirror(id,status,mode,product_id) VALUES('earlier','active','validation','product')",
+      )
+      .run();
+
+    await markServerClosedShifts(f.exec, [
+      { id: "earlier", status: "closed" },
+      { id: "shift", status: "active" },
+    ]);
+
+    expect(f.db.prepare("SELECT status FROM shift_mirror WHERE id='earlier'").get()).toEqual({
+      status: "closed",
+    });
+    // The open shift is untouched: closing only ever moves one way.
+    expect(f.db.prepare("SELECT status FROM shift_mirror WHERE id='shift'").get()).toEqual({
+      status: "active",
+    });
   });
 });

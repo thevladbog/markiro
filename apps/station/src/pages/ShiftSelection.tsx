@@ -7,7 +7,7 @@ import { OfflineGrantDeniedError } from "../lib/journal.js";
 import { paginate } from "../lib/pagination.js";
 import { FloorFooter } from "../ui/FloorFooter.js";
 import { ShiftCard } from "../ui/ShiftCard.js";
-import type { SqlExecutor } from "../lib/mirror.js";
+import { markServerClosedShifts, type SqlExecutor } from "../lib/mirror.js";
 import type { ScanSource } from "../lib/scan-source.js";
 import type { AcquireShiftEntry, ShiftEntryLease } from "../lib/shift-entry-lease.js";
 import { StationScreen } from "../ui/StationScreen.js";
@@ -233,6 +233,12 @@ export function ShiftSelection({
             return;
           }
           if (!mounted.current || listRequest.current?.id !== id) return;
+          // Carry the server's own closures into the mirror before anything
+          // reads it: a shift closed elsewhere must stop counting as active.
+          if (exec)
+            await markServerClosedShifts(exec, response.items).catch((err: unknown) => {
+              console.error("station: closed shift mirror reconciliation failed", err);
+            });
           setItems(visibleItems);
           loadedClient.current = client;
           for (const shift of visibleItems) {
