@@ -228,11 +228,14 @@ export function useShift(id: string | undefined, enabled: boolean): UseQueryResu
       return fetchShift(id);
     },
     enabled: enabled && id !== undefined,
-    // A 404 is the server's final answer about this id, not a blip worth three
+    // A refusal (404 for a shift this tenant cannot see, 401/403 for a session
+    // that may not ask) is the server's final answer, not a blip worth three
     // backed-off retries -- the panel would sit on a spinner for seconds
-    // before admitting the shift is gone.
+    // before admitting it cannot show the shift. Only transport and server
+    // faults are worth asking again.
     retry: (failureCount, error) =>
-      !(error instanceof ApiRequestError && error.status === 404) && failureCount < 3,
+      !(error instanceof ApiRequestError && error.status >= 400 && error.status < 500) &&
+      failureCount < 3,
   });
 }
 
