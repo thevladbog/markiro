@@ -148,6 +148,41 @@ describe("renderShiftTaskFormHtml", () => {
     expect(html).toContain('data-layout="compact"');
   });
 
+  /**
+   * The boundary below was measured against the rendered sheet in a browser:
+   * at 180 combined code points the standard layout lands its footer exactly on
+   * the bottom margin, and one code point more pushes it past. Moving either
+   * side of this pair without re-measuring is how the sheet silently starts
+   * printing its footer into the margin again.
+   */
+  it("keeps the standard layout at the measured limit and drops to compact past it", () => {
+    // Four names of similar length, each well under the separate 100-per-name
+    // limit, so this pins the combined rule and nothing else.
+    const names = (total: number) => ({
+      organizationName: "О".repeat(45),
+      lineName: "Л".repeat(45),
+      counterpartyName: "К".repeat(45),
+      productName: "П".repeat(total - 135),
+    });
+
+    expect(renderShiftTaskFormHtml(fixture(names(180)))).toContain('data-layout="standard"');
+    expect(renderShiftTaskFormHtml(fixture(names(181)))).toContain('data-layout="compact"');
+  });
+
+  /**
+   * These two sizes are what make the sheet fit A4: the shift form carries a
+   * product block the inventory form does not, so it overrides the shared
+   * chrome's 32mm barcode and its own 28mm photo. Both were cut to the values
+   * below after measuring the real sheet; dropping either override reintroduces
+   * the clipped footer that shipped in #616.
+   */
+  it("keeps the print dimensions the A4 fit depends on", () => {
+    const html = renderShiftTaskFormHtml(fixture());
+
+    expect(html).toMatch(/\.barcode\s*\{[^}]*width:\s*28mm[^}]*height:\s*28mm/s);
+    expect(html).toMatch(/\.product-photo\s*\{[^}]*width:\s*22mm[^}]*height:\s*22mm/s);
+  });
+
   it("labels the product block the way the printed design does", () => {
     const html = renderShiftTaskFormHtml(fixture());
 
