@@ -117,6 +117,11 @@ function stubDependencies(shifts = [SHIFT], createError?: string) {
       if (path === "/api/shift-exports/formats") return jsonResponse(200, [EXPORT_FORMAT]);
       if (path.startsWith("/api/shifts/") && path.endsWith("/exports"))
         return jsonResponse(200, []);
+      const byId = /^\/api\/shifts\/([^/?]+)$/.exec(path);
+      if (byId && init?.method === undefined) {
+        const found = shifts.find((item) => item.id === byId[1]);
+        return found ? jsonResponse(200, found) : jsonResponse(404, { message: "Not Found" });
+      }
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: shifts });
       if (path.startsWith("/api/products")) return jsonResponse(200, { items: [PRODUCT] });
       return jsonResponse(200, { items: [] });
@@ -234,6 +239,75 @@ it("shows a not-found state instead of a blank edit form", async () => {
 
   expect(await screen.findByText("Смена не найдена")).toBeDefined();
   expect(screen.queryByLabelText("Плановое количество, шт")).toBeNull();
+});
+
+/**
+ * Closing from the drawer takes the row out of the list beside it: the list is
+ * filtered, and `status=active` stops returning the shift the moment it
+ * closes. The panel must keep showing the shift it is already open on instead
+ * of contradicting its own «Смена закрыта» toast with «Смена не найдена».
+ */
+it("shows the closed shift in the drawer after the filtered list drops its row", async () => {
+  const active: ShiftDto = { ...SHIFT, status: "active", openedAt: "2026-08-06T06:00:00.000Z" };
+  let current: ShiftDto = active;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path === "/api/shifts/s1/close" && init?.method === "POST") {
+        current = {
+          ...active,
+          status: "closed",
+          closedAt: "2026-08-06T14:00:00.000Z",
+          closeReason: "Конец смены",
+        };
+        return jsonResponse(200, current);
+      }
+      if (path === "/api/shifts/s1") return jsonResponse(200, current);
+      if (path === "/api/shifts/s1/summary") {
+        return jsonResponse(200, {
+          generatedAt: "2026-08-06T14:00:00.000Z",
+          output: { mode: "validation", acceptedUnits: 12 },
+          participants: [],
+          unattributed: { eventCount: 0, acceptedScans: 0, closedBoxes: 0 },
+        });
+      }
+      if (path === "/api/shift-exports/formats") return jsonResponse(200, [EXPORT_FORMAT]);
+      if (path === "/api/shifts/s1/exports") return jsonResponse(200, []);
+      // The «Активна» filter the panel was opened from.
+      if (path.startsWith("/api/shifts")) {
+        return jsonResponse(200, { items: current.status === "active" ? [current] : [] });
+      }
+      if (path.startsWith("/api/products")) return jsonResponse(200, { items: [PRODUCT] });
+      return jsonResponse(200, { items: [] });
+    }),
+  );
+
+  const { user } = renderPanel(["/shifts/s1"]);
+
+  await user.click(await screen.findByRole("button", { name: "Закрыть смену" }));
+  fireEvent.change(screen.getByLabelText("Причина закрытия"), {
+    target: { value: "Конец смены" },
+  });
+  await user.click(
+    within(screen.getByRole("alertdialog")).getByRole("button", { name: "Закрыть смену" }),
+  );
+
+  const panel = await screen.findByRole("dialog", { name: "Смена AUG26-001" });
+  expect(await within(panel).findByText("Закрыта")).toBeDefined();
+  expect(await within(panel).findByRole("radio", { name: EXPORT_FORMAT.label })).toBeDefined();
+  expect(screen.queryByText("Смена не найдена")).toBeNull();
+
+  // The success toast renders into its own root on `document.body`, which
+  // RTL's cleanup never sees; dismissing it keeps a four-second
+  // `role="status"` from bleeding into the next test.
+  const toasts = Array.from(
+    document.querySelectorAll<HTMLElement>("[data-mk-toast-root] [role='status']"),
+  );
+  expect(toasts.map((node) => node.textContent ?? "").join(" ")).toContain("Смена закрыта");
+  for (const node of toasts) {
+    await user.click(within(node).getByRole("button", { name: "Закрыть" }));
+  }
 });
 
 it("keeps the create panel open and shows the server message after a conflict", async () => {

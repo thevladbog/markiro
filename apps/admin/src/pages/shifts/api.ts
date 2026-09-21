@@ -16,7 +16,7 @@ import {
 } from "@markiro/domain";
 
 import { CABINET_ACCESS_QUERY_KEY } from "../../access/api.js";
-import { apiFetch } from "../../api/client.js";
+import { ApiRequestError, apiFetch } from "../../api/client.js";
 
 export type ShiftMode = "validation" | "aggregation";
 export type ShiftStatus = "planned" | "active" | "closed";
@@ -165,6 +165,10 @@ async function fetchShifts(params: ListShiftsParams): Promise<ShiftDto[]> {
   return response.items;
 }
 
+function fetchShift(id: string): Promise<ShiftDto> {
+  return apiFetch<ShiftDto>(`/shifts/${id}`);
+}
+
 function fetchShiftPlanningConfig(productId: string): Promise<ShiftPlanningConfigDto> {
   return apiFetch<ShiftPlanningConfigDto>(
     `/shifts/planning-config?productId=${encodeURIComponent(productId)}`,
@@ -205,6 +209,33 @@ export function useShifts(params: ListShiftsParams = {}): UseQueryResult<ShiftDt
   return useQuery({
     queryKey: shiftsQueryKey(params),
     queryFn: () => fetchShifts(params),
+  });
+}
+
+/**
+ * `GET /shifts/:id` -- one shift, for when the filtered list cannot answer:
+ * closing a shift while the list is filtered to «Активна» drops its row, and
+ * a directly entered panel URL may name a shift outside the current filter.
+ * Kept under `SHIFTS_QUERY_KEY` so every shift mutation invalidates it along
+ * with the list. Idle unless the caller asks, so the ordinary path (the shift
+ * is in the list beside the panel) still costs no request.
+ */
+export function useShift(id: string | undefined, enabled: boolean): UseQueryResult<ShiftDto> {
+  return useQuery({
+    queryKey: [...SHIFTS_QUERY_KEY, "detail", id],
+    queryFn: () => {
+      if (id === undefined) throw new Error("Shift id is required");
+      return fetchShift(id);
+    },
+    enabled: enabled && id !== undefined,
+    // A refusal (404 for a shift this tenant cannot see, 401/403 for a session
+    // that may not ask) is the server's final answer, not a blip worth three
+    // backed-off retries -- the panel would sit on a spinner for seconds
+    // before admitting it cannot show the shift. Only transport and server
+    // faults are worth asking again.
+    retry: (failureCount, error) =>
+      !(error instanceof ApiRequestError && error.status >= 400 && error.status < 500) &&
+      failureCount < 3,
   });
 }
 
