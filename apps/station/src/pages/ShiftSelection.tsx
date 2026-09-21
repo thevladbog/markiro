@@ -272,7 +272,7 @@ export function ShiftSelection({
         setManualRefreshing(false);
       });
     },
-    [client, exec, onCoordinatedRefresh, t],
+    [client, exec, onCoordinatedRefresh, setError, t],
   );
 
   useEffect(() => {
@@ -446,7 +446,7 @@ export function ShiftSelection({
         ? rejoinRef.current(match)
         : openRef.current(match, "task_barcode"));
     });
-  }, [alternateActive, controlsDisabled, items, loading, source, t]);
+  }, [alternateActive, controlsDisabled, items, loading, setError, source, t]);
 
   async function enterRoute(enter: () => void, options?: ShiftSelectionRouteIntentOptions) {
     if (!onRouteIntent) {
