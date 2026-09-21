@@ -154,6 +154,24 @@ describe("production on a station that cannot bind its shift", () => {
     expect(restored?.jobId).toBe(f.value.jobId);
   });
 
+  it("reports a code already accepted elsewhere as a duplicate, not a storage failure", async () => {
+    const f = await fixture("observe");
+    // Exactly what the floor hits when the operator scans codes left over from
+    // earlier shifts: the acceptance trigger aborts with VALIDATION_CODE_DUPLICATE.
+    await f.exec.run(
+      "INSERT INTO codes_mirror(code_hash,shift_id,gtin14,serial,scanned_at) VALUES(?,?,?,?,?)",
+      [f.value.codeHash, "earlier-shift", f.value.gtin14, f.value.serial, f.value.acceptedAt],
+    );
+
+    await expect(
+      recordProductLabelAcceptanceWithOfflineGrant(f.exec, f.value, f.generation, async () => ({
+        bootId: "boot",
+        monotonicMs: 11,
+        wallMs: 201,
+      })),
+    ).resolves.toEqual({ status: "duplicate" });
+  });
+
   it("keeps accepting product labels in observe mode without an execution projection", async () => {
     const f = await fixture("observe");
     // What a station looks like when the bundle mirror never wrote a scope:
@@ -335,5 +353,32 @@ describe("readExecutionToBind", () => {
         throw new ExecutionProjectionUnavailableError("requires a fresh bundle");
       }),
     ).rejects.toThrow("requires a fresh bundle");
+  });
+});
+
+describe("closing a shift another owner already closed", () => {
+  it("returns the stored close instead of failing the granted path", async () => {
+    const f = unboundShift("observe");
+    // A concurrent owner commits the close between this caller's pre-check and
+    // its own commit: the outbox unique index is what makes that visible.
+    f.db
+      .prepare(
+        `INSERT INTO shift_close_outbox(event_id,shift_id,device_id,operator_id,product_id,product_name,planned_qty_snapshot,actual_qty,closed_box_count,reason_code,closed_at)
+         VALUES('other-event','shift','other-device','operator','product','Widget',NULL,0,0,NULL,'2026-09-21T00:30:00.000Z')`,
+      )
+      .run();
+
+    const closed = await closeShiftOfflineWithGrant(
+      f.exec,
+      { shiftId: "shift", deviceId: "device", operatorId: "operator" },
+      f.generation,
+      () => new Date("2026-09-21T01:00:00.000Z"),
+      async () => ({ bootId: "boot", monotonicMs: 11, wallMs: 201 }),
+    );
+
+    expect(closed).toEqual(expect.objectContaining({ eventId: "other-event", shiftId: "shift" }));
+    expect(f.db.prepare("SELECT status FROM shift_mirror WHERE id='shift'").get()).toEqual({
+      status: "closed",
+    });
   });
 });

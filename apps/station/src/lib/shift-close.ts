@@ -250,7 +250,15 @@ export async function closeShiftOfflineWithGrant(
     if (!(await stationOperatorIsCurrentlyActive(exec, input.operatorId)))
       throw new Error("offline grant operator unauthorized");
     const stored = await loadStoredClose(exec, input.shiftId);
-    if (stored) return presentStoredClose(stored);
+    if (stored) {
+      // Same resume as the ungranted path: the durable event can outlive the
+      // mirror writes that follow it (a restart mid-close). Returning the
+      // snapshot without finishing them leaves the shift showing active on the
+      // terminal, so the operator closes a shift that is already closed.
+      await removeEmptyOpenBoxes(exec, input.shiftId);
+      await exec.run("UPDATE shift_mirror SET status = 'closed' WHERE id = ?", [input.shiftId]);
+      return presentStoredClose(stored);
+    }
     const [shift] = await exec.all<{
       id: string;
       product_id: string;
@@ -372,6 +380,17 @@ export async function closeShiftOfflineWithGrant(
     if (!committed.decision.allow)
       throw new Error(`offline grant denied: ${committed.decision.reason}`);
     return committed.result as OfflineShiftCloseSummary;
+  } catch (error) {
+    // The pre-check above cannot see a close another owner commits while this
+    // one is in flight. The ungranted path resolves that race into the stored
+    // close instead of an error, and so must this one: the shift IS closed,
+    // and telling the operator otherwise sends them to close it twice.
+    if (!isShiftCloseUniquenessConflict(error)) throw error;
+    const concurrentClose = await loadStoredClose(exec, input.shiftId);
+    if (!concurrentClose) throw error;
+    await removeEmptyOpenBoxes(exec, input.shiftId);
+    await exec.run("UPDATE shift_mirror SET status = 'closed' WHERE id = ?", [input.shiftId]);
+    return presentStoredClose(concurrentClose);
   } finally {
     lease.release();
   }
