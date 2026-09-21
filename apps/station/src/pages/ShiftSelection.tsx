@@ -157,7 +157,18 @@ export function ShiftSelection({
 }: ShiftSelectionProps) {
   const { t, i18n } = useTranslation();
   const [items, setItems] = useState<ShiftListItem[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setErrorState] = useState<string | null>(null);
+  /**
+   * Whether the visible message is a scan verdict. The 30 s poll clears the
+   * message it owns before every refresh; a verdict the operator has just been
+   * given ("this form is not in the list") is not that message, and wiping it
+   * mid-read leaves the scan looking ignored.
+   */
+  const scanNotice = useRef(false);
+  const setError = useCallback((text: string | null, source: "scan" | "task" = "task") => {
+    scanNotice.current = source === "scan" && text !== null;
+    setErrorState(text);
+  }, []);
   const [loadFailed, setLoadFailed] = useState(false);
   const [loading, setLoading] = useState(true);
   /**
@@ -203,7 +214,9 @@ export function ShiftSelection({
       if (initialForClient) setLoading(true);
       if (manual) setManualRefreshing(true);
       setLoadFailed(false);
-      setError(null);
+      // An operator-initiated refresh answers the scan verdict, so it may clear
+      // it; the background poll may not.
+      if (manual || !scanNotice.current) setError(null);
       const shiftRequest = client
         .get<{ items: ShiftListItem[] }>("/shifts")
         .then(async (response) => {
@@ -259,7 +272,7 @@ export function ShiftSelection({
         setManualRefreshing(false);
       });
     },
-    [client, exec, onCoordinatedRefresh, t],
+    [client, exec, onCoordinatedRefresh, setError, t],
   );
 
   useEffect(() => {
@@ -406,7 +419,7 @@ export function ShiftSelection({
       if (controlsDisabled) return;
       const shiftId = parseShiftTaskBarcode(trimmed);
       if (shiftId === null) {
-        setError(t("shifts.barcodeFailed"));
+        setError(t("shifts.barcodeFailed"), "scan");
         return;
       }
       // The initial `GET /shifts` for this client has not settled yet, so an
@@ -414,18 +427,18 @@ export function ShiftSelection({
       // just means the list has not arrived. Say so instead of misdirecting
       // the operator to another terminal.
       if (loading) {
-        setError(t("shifts.barcodeListLoading"));
+        setError(t("shifts.barcodeListLoading"), "scan");
         return;
       }
       // `items`, not `openItems`: the closed shift is in the list, and naming it
       // beats sending an operator to look for a shift that already ended.
       const match = items.find((shift) => shift.id === shiftId);
       if (!match) {
-        setError(t("shifts.barcodeNotOnLine"));
+        setError(t("shifts.barcodeNotOnLine"), "scan");
         return;
       }
       if (match.status === "closed" || match.status === "closing") {
-        setError(t("shifts.barcodeClosed"));
+        setError(t("shifts.barcodeClosed"), "scan");
         return;
       }
       setError(null);
@@ -433,7 +446,7 @@ export function ShiftSelection({
         ? rejoinRef.current(match)
         : openRef.current(match, "task_barcode"));
     });
-  }, [alternateActive, controlsDisabled, items, loading, source, t]);
+  }, [alternateActive, controlsDisabled, items, loading, setError, source, t]);
 
   async function enterRoute(enter: () => void, options?: ShiftSelectionRouteIntentOptions) {
     if (!onRouteIntent) {
