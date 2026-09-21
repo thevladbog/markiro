@@ -37,9 +37,11 @@ describe("pallet aggregation export", () => {
     });
     const xml = Buffer.from(part.bytes).toString("utf8");
     expect(xml).toContain("<pack_code>00134600682000000017</pack_code>");
-    expect(xml).toContain("<sscc>00034600682000000018</sscc>");
-    expect(xml).toContain("<sscc>00034600682000000025</sscc>");
-    expect(xml).not.toContain("<cis>");
+    // Box members are `<cis>` carrying their SSCCs: the ЧЗ portal rejects
+    // `<sscc>` even though the XSD allows it (see `renderGismtAggregationXml`).
+    expect(xml).toContain("<cis>00034600682000000018</cis>");
+    expect(xml).toContain("<cis>00034600682000000025</cis>");
+    expect(xml).not.toContain("<sscc>");
     expect((xml.match(/<pack_content>/g) ?? []).length).toBe(1);
     expect(part).toMatchObject({
       partNumber: 1,

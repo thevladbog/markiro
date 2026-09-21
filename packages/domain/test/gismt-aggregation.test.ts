@@ -150,7 +150,16 @@ describe("GISMT aggregation XML pallets", () => {
     );
   });
 
-  it("nests boxes under a pallet as sscc children, not cis", () => {
+  /**
+   * The XSD offers `cis` OR `sscc` under `pack_content`, and `sscc` is the
+   * one its own documentation describes for a transport package. The ЧЗ
+   * portal nonetheless does not accept it: a document whose pallet members
+   * were `<sscc>` was rejected as «Передаваемый файл XML не соответствует
+   * XSD-схеме» while the cabinet showed «Содержит: 0 вложений», and the byte
+   * -identical document with `<cis>` members was accepted on 2026-09-21.
+   * Follow the portal, not the published schema.
+   */
+  it("nests boxes under a pallet as cis children, never sscc", () => {
     const xml = decoder.decode(
       renderGismtAggregationXml({
         organizationInn: "7701234567",
@@ -159,9 +168,9 @@ describe("GISMT aggregation XML pallets", () => {
         pallets: [{ sscc: palletA, boxSsccs: [boxA, boxB] }],
       }).bytes,
     );
-    expect(xml).toContain(`<sscc>${formatGismtAggregationSscc(boxA)}</sscc>`);
-    expect(xml).toContain(`<sscc>${formatGismtAggregationSscc(boxB)}</sscc>`);
-    expect(xml).not.toContain(`<cis>${boxA}`);
+    expect(xml).toContain(`<cis>${formatGismtAggregationSscc(boxA)}</cis>`);
+    expect(xml).toContain(`<cis>${formatGismtAggregationSscc(boxB)}</cis>`);
+    expect(xml).not.toContain("<sscc>");
   });
 
   it("prefixes every pallet SSCC with the 00 application identifier", () => {
