@@ -17,6 +17,12 @@ Requires JDK 17 and the Android SDK (platform 35); point `local.properties` at i
 (`sdk.dir=…`, the file is gitignored). Fonts are bundled (see FONT-LICENSES.md;
 `tools/fetch-fonts.sh` re-downloads them).
 
+Unit tests use one 512 MiB JVM at a time and restart it after 25 test classes to
+bound retained Robolectric/Room state across the full suite. An out-of-memory
+failure exits the test worker immediately. This profile applies to both CI and
+the signed-release workflow; the Gradle daemon's separate heap setting does not
+set the test worker's heap.
+
 ## Device replacement drain
 
 Room v20 adds a durable replacement intent and exact readiness/closure request bodies.

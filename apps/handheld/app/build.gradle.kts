@@ -117,6 +117,13 @@ android {
             // entry rather than the assertion. The report HTML stays on the
             // runner, so the log is the only thing anyone gets to read.
             all { test ->
+                // Bound Robolectric/Room state retained across classes instead of letting the
+                // entire suite accumulate in Gradle's default single 512 MiB test JVM.
+                test.maxHeapSize = "512m"
+                test.maxParallelForks = 1
+                test.forkEvery = 25L
+                // A dead test worker must fail the gate, not hang until the workflow timeout.
+                test.jvmArgs("-XX:+ExitOnOutOfMemoryError")
                 test.testLogging {
                     exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
                     showStackTraces = true
