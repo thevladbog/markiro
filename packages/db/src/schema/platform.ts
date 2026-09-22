@@ -484,6 +484,8 @@ export const stationDevices = pgTable(
     // apikey is a Better Auth-managed table without a (tenant_id, id) unique.
     apiKeyId: text("api_key_id"),
     credentialEpoch: integer("credential_epoch").notNull().default(1),
+    /** Explicit security revokes preserve revokedAt while retiring later recovery authority. */
+    securityRevocationRevision: integer("security_revocation_revision").notNull().default(0),
     lineId: uuid("line_id"),
     enrolledAt: timestamp("enrolled_at", { withTimezone: true }).notNull().defaultNow(),
     pairedAt: timestamp("paired_at", { withTimezone: true }),
@@ -494,6 +496,7 @@ export const stationDevices = pgTable(
     unique("station_devices_tenant_id_uq").on(t.tenantId, t.id),
     unique("station_devices_tenant_id_kind_uq").on(t.tenantId, t.id, t.kind),
     check("station_devices_credential_epoch_check", sql`${t.credentialEpoch} > 0`),
+    check("station_devices_security_revocation_check", sql`${t.securityRevocationRevision} >= 0`),
     foreignKey({
       name: "station_devices_tenant_line_fk",
       columns: [t.tenantId, t.lineId],
@@ -697,6 +700,7 @@ export const stationPairingCodes = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     tenantId: tenantId(),
     stationDeviceId: uuid("station_device_id").notNull(),
+    purpose: text("purpose").$type<"normal" | "replacement_recovery">().notNull().default("normal"),
     codeHash: text("code_hash").notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     usedAt: timestamp("used_at", { withTimezone: true }),
@@ -705,6 +709,10 @@ export const stationPairingCodes = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
+    check(
+      "station_pairing_codes_purpose_check",
+      sql`${t.purpose} in ('normal','replacement_recovery')`,
+    ),
     unique("station_pairing_codes_tenant_id_uq").on(t.tenantId, t.id),
     index("station_pairing_codes_hash_idx").on(t.codeHash),
     foreignKey({

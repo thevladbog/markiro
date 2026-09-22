@@ -89,6 +89,68 @@ class WarehousePalletsTest {
 
     private suspend fun deviceId() = db.deviceConfigDao().get()!!.deviceId
 
+    private suspend fun startDrain() {
+        val intent = kotlinx.serialization.json.Json.parseToJsonElement("""{"version":1,"state":"active","intent":{"intentId":"11111111-1111-4111-8111-111111111111","preparationId":"22222222-2222-4222-8222-222222222222","credentialEpoch":7,"preparationRevision":2,"requestedAt":"2026-09-16T00:00:00Z","expiresAt":"2026-09-17T00:00:00Z"}}""") as kotlinx.serialization.json.JsonObject
+        app.markiro.handheld.core.replacement.ReplacementReadiness(db).apply(db.recovery.token(), intent)
+    }
+
+    @Test
+    fun replacementDrainBlocksNewWarehouseAttachmentsButKeepsRemovalRecovery() = runTest {
+        product()
+        registry("034600682000000018")
+        registry("034600682000000025")
+        val open = pallets.attach("034600682000000018", "op-1") as AttachResult.Attached
+        startDrain()
+        assertTrue(runCatching { pallets.attach("034600682000000025", "op-1") }.exceptionOrNull() is app.markiro.handheld.core.replacement.ReplacementDenied)
+        assertEquals(1, db.palletMembershipDao().countOnPallet(open.pallet.palletId))
+        assertTrue(pallets.remove(open.pallet.palletId, "034600682000000018", "op-1"))
+        assertNull(db.palletDao().openWarehouse(deviceId()))
+        assertEquals(1, db.palletMembershipRemovalDao().all().size)
+        assertTrue(runCatching { pallets.attach("034600682000000025", "op-1") }.exceptionOrNull() is app.markiro.handheld.core.replacement.ReplacementDenied)
+        assertNull(db.palletDao().openWarehouse(deviceId()))
+    }
+
+    @Test
+    fun drainAllowsClosingTheRetainedWarehousePallet() = runTest {
+        product()
+        pool.addRange(ServerRange(PREFIX, SsccPool.PALLET_EXTENSION_DIGIT, 0, 199, null))
+        meta.put(MetaStore.PALLET_BOOTSTRAP_ISSUER_PREFIX, PREFIX)
+        registry("034600682000000018")
+        val open = pallets.attach("034600682000000018", "op-1") as AttachResult.Attached
+        startDrain()
+        val closed = pallets.close("op-1") as ClosePalletResult.Closed
+        assertEquals(1, closed.boxCount)
+        assertTrue(closed.sscc.startsWith("1$PREFIX"))
+        assertNull(db.palletDao().openWarehouse(deviceId()))
+        assertNotNull(db.palletDao().get(open.pallet.palletId)?.closedAt)
+    }
+
+    @Test
+    fun replacementTargetAndEvidenceRecoveryFenceWarehouseAdmission() = runTest {
+        product()
+        registry("034600682000000018")
+        val token = db.recovery.token()
+        val fence = app.markiro.handheld.core.network.ReplacementTargetFence(
+            1, "11111111-1111-4111-8111-111111111111", 7,
+            2_000L, 1_000L,
+        )
+        val target = app.markiro.handheld.core.replacement.ReplacementTarget(db)
+        target.persistPublication(token.owner, token.generation, fence)
+        assertTrue(runCatching { pallets.attach("034600682000000018", "op-1") }.exceptionOrNull() is app.markiro.handheld.core.replacement.ReplacementDenied)
+        assertNull(db.palletDao().openWarehouse(deviceId()))
+        target.applyConfiguration(token, fence.copy(serverTime = fence.newWorkAllowedAt))
+        app.markiro.handheld.core.replacement.ReplacementEvidenceRecoveryState(db).persistPublication(
+            token.owner, token.generation,
+            app.markiro.handheld.core.network.ReplacementEvidenceRecovery(
+                1, "replacement_evidence_recovery", "11111111-1111-4111-8111-111111111111",
+                "22222222-2222-4222-8222-222222222222", 7,
+                "2026-09-17T00:00:00Z", "2026-09-18T00:00:00Z", "preserve_sealed",
+            ),
+        )
+        assertTrue(runCatching { pallets.attach("034600682000000018", "op-1") }.exceptionOrNull() is app.markiro.handheld.core.replacement.ReplacementDenied)
+        assertNull(db.palletDao().openWarehouse(deviceId()))
+    }
+
     @Test
     fun theFirstAcceptedScanOpensThePalletWithTheBoxProduct() = runTest {
         product()

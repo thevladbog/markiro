@@ -75,7 +75,7 @@ data class InventoryBundlePageDto(
 )
 
 @Serializable
-data class LeaveInventoryRequest(val pendingEventCount: Int, val openBoxCount: Int)
+data class LeaveInventoryRequest(val pendingEventCount: Int, val openBoxCount: Int, val requestId: String? = null)
 
 @Serializable
 data class LeaveInventoryResponse(val outcome: String)

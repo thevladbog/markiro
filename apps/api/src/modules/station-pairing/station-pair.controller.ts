@@ -1,3 +1,4 @@
+import { AllowReplacementEvidenceRecovery } from "../device-licensing/replacement-recovery-policy";
 import {
   stationRecoveryRequestSchema,
   stationRecoveryResponseSchema,
@@ -40,6 +41,7 @@ export class StationPairController {
   constructor(private readonly pairing: StationPairingService) {}
 
   @Get("identity")
+  @AllowReplacementEvidenceRecovery()
   @UseGuards(TenantGuard, StationOnlyGuard)
   @Header("Cache-Control", "no-store")
   @ApiOperation({
@@ -92,6 +94,7 @@ export class StationPairController {
       req.tenantId!,
       req.deviceId!,
       hasCapability(capabilities, "subscription-state-v1"),
+      req.replacementRecoveryExecutionId,
     );
   }
 
@@ -100,7 +103,7 @@ export class StationPairController {
   @ApiOperation({
     summary: "Recover the same station identity by code",
     description:
-      "Unauthenticated by design: the authorized single-use code and shared rate limiter authenticate recovery. The expected tenant/device/kind must match the code's device before any credential is changed. Mismatch is a generic 401 and leaves the code live. Existing subscription write access and restoration quota checks apply; subscription is present only with subscription-state-v1, and handheld clients send handheld-v1.",
+      "Unauthenticated by design: the authorized single-use code and shared rate limiter authenticate recovery. The expected tenant/device/kind must match the code's device before any credential is changed. Mismatch is a generic 401 and leaves the code live. Purpose-bound replacement recovery preserves the revoked/released source, carries no productive authority, and needs replacement-evidence-recovery-v1. Ordinary restoration still checks subscription write access and quota; subscription is present only with subscription-state-v1, and handheld clients send handheld-v1.",
   })
   @ApiZodBody(stationRecoveryRequestSchema)
   @ApiResponse({
@@ -158,8 +161,10 @@ export class StationPairController {
   ): Promise<StationRecoveryResponse> {
     const paired = await this.pairing.redeem(body.code, ip, {
       expectedRecoveryIdentity: body.expected,
+      replacementEvidenceRecovery: hasCapability(capabilities, "replacement-evidence-recovery-v1"),
       includeSubscription: hasCapability(capabilities, "subscription-state-v1"),
       handheldClient: hasCapability(capabilities, "handheld-v1"),
+      replacementBoundary: hasCapability(capabilities, "replacement-boundary-v1"),
     });
     return { version: 1, ...paired };
   }
@@ -188,6 +193,7 @@ export class StationPairController {
     return this.pairing.redeem(body.code, ip, {
       includeSubscription: hasCapability(capabilities, "subscription-state-v1"),
       handheldClient: hasCapability(capabilities, "handheld-v1"),
+      replacementBoundary: hasCapability(capabilities, "replacement-boundary-v1"),
     });
   }
 }

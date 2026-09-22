@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  prepareProductLabelReprint,
   sendPreparedProductLabel,
   verifyProductLabel,
 } from "../src/lib/product-labels/printing.js";
@@ -27,11 +28,35 @@ describe("product label recovery", () => {
     await work.exec.run("UPDATE shift_mirror SET status='closed' WHERE id=?", [work.input.shiftId]);
     expect(await readProductLabelRecoveryShift(work.exec, work.input.credentialOwnership)).toEqual({
       id: work.input.shiftId,
+      jobId: work.input.jobId,
       status: "closed",
       mode: "validation",
     });
     expect(await readProductLabelRecoveryShift(work.exec, "another-credential")).toBeNull();
     expect(work.print).not.toHaveBeenCalled();
+  });
+
+  it("cannot turn a completed active-shift job into another recovery print", async () => {
+    const work = await fixture();
+    await sendPreparedProductLabel(work.deps, work.input.jobId);
+    await verifyProductLabel(work.exec, {
+      ...work.deps,
+      jobId: work.input.jobId,
+      attemptId: work.input.preparedEvent.attemptId,
+      raw: work.input.raw,
+    });
+    const before = await work.exec.all("SELECT * FROM product_label_events");
+    await expect(
+      prepareProductLabelReprint(work.exec, {
+        ...work.actor,
+        credentialOwnership: work.input.credentialOwnership,
+        shiftId: work.input.shiftId,
+        jobId: work.input.jobId,
+        reason: "not_printed",
+        recovery: true,
+      }),
+    ).rejects.toThrow("PRODUCT_LABEL_RECOVERY_UNAVAILABLE");
+    expect(await work.exec.all("SELECT * FROM product_label_events")).toEqual(before);
   });
 
   it("restores prepared work without starting transport", async () => {

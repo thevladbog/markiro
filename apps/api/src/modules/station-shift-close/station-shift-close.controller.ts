@@ -1,3 +1,4 @@
+import { AllowReplacementEvidenceRecovery } from "../device-licensing/replacement-recovery-policy";
 import { Body, Controller, Get, HttpCode, Param, Post, Req, UseGuards } from "@nestjs/common";
 import {
   ApiBody,
@@ -19,6 +20,7 @@ import { AuthorizationGuard } from "../../authorization/authorization.guard";
 import {
   RequireSubscriptionWrite,
   AllowSubscriptionReadOnly,
+  AllowSubscriptionRecovery,
 } from "../../subscriptions/subscription-access-policy";
 import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access.guard";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
@@ -43,14 +45,15 @@ export class StationShiftCloseController {
   constructor(private readonly service: StationShiftCloseService) {}
 
   @Post("station/shift-closures")
+  @AllowReplacementEvidenceRecovery()
   @HttpCode(200)
   @UseGuards(StationOnlyGuard)
   @AllowStationOrPermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
-  @RequireSubscriptionWrite()
+  @AllowSubscriptionRecovery("station")
   @ApiOperation({
     summary: "Record a station shift close",
     description:
-      "Idempotent by `eventId`; a close raced by another device resolves to the `conflict` outcome instead of an error.",
+      "Waiting replacement targets retain the submission without business effects and return 409 with code device_replacement_waiting, outcome quarantined, receiptId and newWorkAllowedAt. Exact retries replay the receipt; old draining-source closure remains available. Closure, replay and quarantine remain available with a read-only or expired subscription. Idempotent by `eventId`; a close raced by another device resolves to the `conflict` outcome instead of an error.",
   })
   @ApiStationAuth()
   @ApiBody({ schema: stationShiftCloseOpenApiSchema })

@@ -1,3 +1,4 @@
+import { AllowReplacementEvidenceRecovery } from "../device-licensing/replacement-recovery-policy";
 import {
   validationOccurrenceStatusQuerySchema,
   validationOccurrenceStatusSchema,
@@ -56,6 +57,7 @@ export class StationScansController {
   constructor(private readonly service: StationScansService) {}
 
   @Post("validation-occurrences/status")
+  @AllowReplacementEvidenceRecovery()
   @HttpCode(200)
   @AllowSubscriptionRecovery("station")
   @ApiOperation({ summary: "Reconcile own validation occurrences, including later displacement" })
@@ -72,6 +74,7 @@ export class StationScansController {
   }
 
   @Post("conflicts/status")
+  @AllowReplacementEvidenceRecovery()
   @HttpCode(200)
   @AllowSubscriptionRecovery("station")
   @ApiOperation({
@@ -94,6 +97,7 @@ export class StationScansController {
   }
 
   @Post("codes/releases")
+  @AllowReplacementEvidenceRecovery()
   @HttpCode(200)
   @AllowSubscriptionRecovery("station")
   @ApiOperation({
@@ -116,11 +120,12 @@ export class StationScansController {
   }
 
   @Post("scans")
+  @AllowReplacementEvidenceRecovery()
   @AllowSubscriptionRecovery("station")
   @ApiOperation({
     summary: "Record a station scan batch",
     description:
-      "Idempotent by `batchId`: a resend of an already-applied batch acknowledges without reapplying. Nonempty productLabelEvents receive an explicit productLabelReceipt with stable event IDs. `denied` is returned only when the x-station-capabilities header includes station-recovery-v1.",
+      "Before a replacement target’s newWorkAllowedAt, nonempty legacy batches are retained without business effects and return 409 with code device_replacement_waiting, outcome quarantined, receiptId and newWorkAllowedAt; exact retries replay that receipt. Old draining-source sync remains available. After emergency source transfer, unproven first-delivery payloads are retained without effects as device_replacement_recovery / unproven_pre_replacement_evidence; exact committed receipts replay. Idempotent by `batchId`: a resend of an already-applied batch acknowledges without reapplying. Nonempty productLabelEvents receive an explicit productLabelReceipt with stable event IDs. `denied` is returned only when the x-station-capabilities header includes station-recovery-v1.",
   })
   @ApiZodBody(syncBatchSchema)
   @ApiCreatedResponse({ schema: syncBatchResponseOpenApiSchema })

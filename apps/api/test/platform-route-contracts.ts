@@ -76,6 +76,27 @@ const route = (
 ): PlatformRouteContract => ({ method, path, status, response, ...options });
 
 export const CURRENT_SAAS_ROUTES = [
+  route(
+    "post",
+    "/platform/tenants/{tenantId}/device-licensing/replacements/{preparationId}/target/code",
+    "200",
+    platformDeviceReplacementContracts.targetCode.response,
+    { body: platformDeviceReplacementContracts.targetCode.body },
+  ),
+  route(
+    "post",
+    "/platform/tenants/{tenantId}/device-licensing/replacements/{preparationId}/recovery/code",
+    "200",
+    platformDeviceReplacementContracts.recoveryCode.response,
+    { body: platformDeviceReplacementContracts.recoveryCode.body },
+  ),
+  route(
+    "post",
+    "/platform/tenants/{tenantId}/device-licensing/replacements/{preparationId}/recovery/close",
+    "200",
+    platformDeviceReplacementContracts.recoveryClose.response,
+    { body: platformDeviceReplacementContracts.recoveryClose.body },
+  ),
   route("get", "/platform/service-periods", "200", platformServicePeriodContracts.list.response, {
     query: platformServicePeriodContracts.list.query,
   }),
@@ -243,10 +264,45 @@ export const CURRENT_SAAS_ROUTES = [
     { body: platformDeviceRetentionContracts.confirm.body },
   ),
   route(
+    "post",
+    "/platform/tenants/{tenantId}/device-licensing/replacements/{preparationId}/execution/preview",
+    "200",
+    platformDeviceReplacementContracts.executionPreview.response,
+    { body: platformDeviceReplacementContracts.executionPreview.body },
+  ),
+  route(
+    "post",
+    "/platform/tenants/{tenantId}/device-licensing/replacements/{preparationId}/execute",
+    "200",
+    platformDeviceReplacementContracts.execute.response,
+    { body: platformDeviceReplacementContracts.execute.body },
+  ),
+  route(
+    "post",
+    "/platform/tenants/{tenantId}/device-licensing/replacements/{preparationId}/emergency/preview",
+    "200",
+    platformDeviceReplacementContracts.emergencyPreview.response,
+    { body: platformDeviceReplacementContracts.emergencyPreview.body },
+  ),
+  route(
+    "post",
+    "/platform/tenants/{tenantId}/device-licensing/replacements/{preparationId}/emergency/execute",
+    "200",
+    platformDeviceReplacementContracts.emergencyExecute.response,
+    { body: platformDeviceReplacementContracts.emergencyExecute.body },
+  ),
+  route(
     "get",
     "/platform/tenants/{tenantId}/device-licensing/replacements",
     "200",
     platformDeviceReplacementContracts.list.response,
+  ),
+  route(
+    "post",
+    "/platform/tenants/{tenantId}/device-licensing/replacements/{preparationId}/drain",
+    "200",
+    platformDeviceReplacementContracts.drain.response,
+    { body: platformDeviceReplacementContracts.drain.body },
   ),
   route(
     "post",

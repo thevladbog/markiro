@@ -1,3 +1,4 @@
+import { readReplacementEvidenceRecovery } from "../replacement-evidence-recovery.js";
 import {
   assessClock,
   assessCompletion,
@@ -10,6 +11,7 @@ import {
   type LocalDecision,
   type TaskGrant,
 } from "@markiro/domain";
+import { replacementBlocksNewWork } from "../device-replacement.js";
 import type { SqlExecutor } from "../mirror.js";
 import { acquireCredentialCommitLease, type CredentialGeneration } from "../credential-recovery.js";
 import type { GrantClockSample } from "./clock.js";
@@ -180,6 +182,8 @@ export class StationGrantAdmission {
   }
 
   async assessNewWork(intent: GrantIntent): Promise<StationAdmissionDecision> {
+    if (await replacementBlocksNewWork(this.exec))
+      return { allow: false, reason: "missing_grant", mode: "strict" };
     const context = await this.context(),
       { devices } = await this.grants();
     const decision = assessNewWork(
@@ -197,6 +201,8 @@ export class StationGrantAdmission {
     input: { intent: GrantIntent; execution: ExecutionProjection },
     generation: CredentialGeneration,
   ): Promise<StationAdmissionDecision> {
+    if (await replacementBlocksNewWork(this.exec))
+      return { allow: false, reason: "missing_grant", mode: "strict" };
     const context = await this.context();
     const { devices, tasks } = await this.grants();
     const assessed = assessNewWork(
@@ -284,6 +290,8 @@ export class StationGrantAdmission {
     eventType: GrantIntent["eventType"];
     execution: ExecutionProjection;
   }): Promise<StationAdmissionDecision> {
+    if (await readReplacementEvidenceRecovery(this.exec))
+      return { allow: false, reason: "missing_grant", mode: "strict" };
     const context = await this.context();
     const { tasks } = await this.grants();
     const selected = tasks.find(
@@ -377,6 +385,12 @@ export class StationGrantAdmission {
         replay: true,
       };
     }
+    if (await readReplacementEvidenceRecovery(this.exec))
+      return {
+        decision: { allow: false, reason: "missing_grant", mode: "strict" },
+        result: null,
+        replay: false,
+      };
     const context = await this.context(),
       { tasks } = await this.grants();
     const selected = tasks.find(
@@ -490,6 +504,12 @@ export class StationGrantAdmission {
     second: StationAdmissionDecision;
     result: unknown;
   }> {
+    if (await readReplacementEvidenceRecovery(this.exec))
+      return {
+        first: { allow: false, reason: "missing_grant", mode: "strict" },
+        second: { allow: false, reason: "missing_grant", mode: "strict" },
+        result: null,
+      };
     if (!this.exec.atomic) throw new Error("offline grant productive transaction unavailable");
     const build = async (part: typeof input.first) => {
       const eventDigest = await sha256(part.event);

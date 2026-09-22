@@ -17,6 +17,7 @@ import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : AppCompatActivity() {
+    @Inject lateinit var replacement: app.markiro.handheld.core.replacement.ReplacementCoordinator
     @Inject lateinit var grants: app.markiro.handheld.core.grants.GrantRefresher
 
     @Inject lateinit var scanRouter: ScanRouter
@@ -38,6 +39,7 @@ class MainActivity : AppCompatActivity() {
         setContent { MarkiroApp(shell, session, refresher, preferences) }
         shell.onUserInteraction()
         grants.start()
+        replacement.start()
     }
 
     override fun onUserInteraction() {

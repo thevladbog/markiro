@@ -84,6 +84,23 @@ class GrantTransportTest {
         return MockResponse().setHeader("Content-Type","application/json").setBody(result.toString())
     }
 
+    @Test fun waitingTargetPersistsStrictPolicyEvenWhenIssuanceIsDenied() = runTest {
+        val server = MockWebServer(); server.start()
+        val db = database(server.url("/").toString().trimEnd('/'))
+        try {
+            val token = db.recovery.token()
+            val fence = app.markiro.handheld.core.network.ReplacementTargetFence(1, java.util.UUID.randomUUID().toString(), 7, 2000, 500)
+            app.markiro.handheld.core.replacement.ReplacementTarget(db).persistPublication(token.owner, token.generation, fence)
+            val wireFence = Json.encodeToJsonElement(app.markiro.handheld.core.network.ReplacementTargetFence.serializer(), fence.copy(serverTime = 1000))
+            val config = configuration(envelope(token.owner))
+            server.enqueue(response(JsonObject(config + ("replacement" to wireFence))))
+            server.enqueue(response(buildJsonObject { put("status", "denied"); put("reason", "not_entitled") }))
+            assertFalse(GrantTransport(db, api(server)).refreshIfAvailable())
+            assertTrue(app.markiro.handheld.core.replacement.ReplacementReadiness(db).blocked())
+            assertEquals("strict", db.grantDao().state()!!.mode)
+        } finally { db.close(); server.shutdown() }
+    }
+
     @Test fun retirementPersistsWhenIssuanceIsDeniedOrMalformed() = runTest {
         for (failure in listOf(response(buildJsonObject { put("status","denied"); put("reason","subscription_restricted") }), MockResponse().setResponseCode(403), response(buildJsonObject { put("status","issued"); put("envelope",buildJsonObject {}) }))) {
             val server=MockWebServer(); server.start(); val db=database(server.url("/").toString().trimEnd('/'))
@@ -466,4 +483,60 @@ class GrantTransportTest {
             assertTrue(db.grantDao().pendingReadiness(owner.grantOwnerKey(),1).isEmpty())
         } finally { db.close(); server.shutdown() }
     }
+    @Test fun replacementFencesDelayedConfigurationAndGrantAcrossDurableCancellationAck() = runTest {
+        for (stage in listOf("configuration", "grant")) for (startedWhilePending in listOf(false,true)) {
+            val server=MockWebServer(); server.start(); val db=database(server.url("/").toString().trimEnd('/'))
+            val arrived=CountDownLatch(1); val release=CountDownLatch(1)
+            try {
+                val token=db.recovery.token(); val owner=token.owner
+                val transport=GrantTransport(db,api(server))
+                server.enqueue(response(configuration(envelope(owner)))); server.enqueue(response(envelope(owner)))
+                transport.refresh()
+                val local=app.markiro.handheld.core.replacement.ReplacementReadiness(db)
+                val intent=Json.parseToJsonElement("""{"version":1,"state":"active","intent":{"intentId":"11111111-1111-4111-8111-111111111111","preparationId":"22222222-2222-4222-8222-222222222222","credentialEpoch":7,"preparationRevision":2,"requestedAt":"2026-09-16T00:00:00Z","expiresAt":"2026-09-17T00:00:00Z"}}""").jsonObject
+                val closure=Json.parseToJsonElement("""{"version":1,"state":"cancelled","intentId":"11111111-1111-4111-8111-111111111111","preparationId":"22222222-2222-4222-8222-222222222222","credentialEpoch":7,"preparationRevision":3,"closedAt":"2026-09-16T01:00:00Z"}""").jsonObject
+                if(startedWhilePending) { local.apply(token,intent); local.apply(token,closure) }
+                server.dispatcher=object: okhttp3.mockwebserver.Dispatcher() {
+                    override fun dispatch(request: RecordedRequest): MockResponse {
+                        val configuration=request.path!!.endsWith("configuration")
+                        if(configuration == (stage == "configuration")) { arrived.countDown(); check(release.await(15,TimeUnit.SECONDS)) }
+                        return if(configuration) response(configuration(envelope(owner,time=1200,mode="observe"))) else response(envelope(owner,time=1200,mode="observe"))
+                    }
+                }
+                // Task refresh remains available while draining; it must not reopen device authority.
+                val pending=async(Dispatchers.IO) { transport.refresh(TaskKind.SHIFT,"existing") }
+                withContext(Dispatchers.IO) { check(arrived.await(15,TimeUnit.SECONDS)) }
+                if(!startedWhilePending) { local.apply(token,intent); local.apply(token,closure) }
+                val body=checkNotNull(local.pendingClosure(token))
+                assertTrue(local.blocked())
+                local.acknowledgeClosure(token,body,JsonObject(body+("acknowledgedAt" to JsonPrimitive("2026-09-16T01:00:01Z"))))
+                release.countDown(); pending.await()
+                assertFalse(local.blocked())
+                assertNull(db.grantDao().token(grantSlot(owner.grantOwnerKey(),"device","")))
+                // A response applied before drain can legitimately set mode; a delayed one cannot.
+                if(stage == "configuration" || startedWhilePending) assertEquals("strict",db.grantDao().state()?.mode)
+            } finally { release.countDown(); db.close(); server.shutdown() }
+        }
+    }
+
+    @Test fun upgradingRoomDoesNotStrandAnOlderDurableGrantReadinessRequest() = runTest {
+        val server=MockWebServer(); server.start(); val db=database(server.url("/").toString().trimEnd('/'))
+        try {
+            val token=db.recovery.token(); val transport=GrantTransport(db,api(server))
+            val id="11111111-1111-4111-8111-111111111111"
+            val body=buildJsonObject {
+                put("protocol","offline-grants-v1"); put("capability","offline-grants-readiness-v1"); put("requestId",id)
+                put("clientBuild","handheld:previous"); put("storageRevision",16)
+                put("installed",buildJsonObject { put("mode","strict"); put("policyRevision","approved"); put("keysetRevision","keys"); put("verifiedGrantId",id) })
+            }
+            db.grantDao().readiness(GrantReadinessOutboxEntity(id,token.owner.grantOwnerKey(),token.generation,body.toString()))
+            server.enqueue(response(buildJsonObject {
+                put("protocol","offline-grants-v1"); put("requestId",id); put("receivedAt","2026-09-16T12:00:00Z")
+                put("accepted",true); put("matchesCurrentConfiguration",true); put("verifiedGrantMatched",true)
+            }))
+            assertTrue(transport.flushReadinessIfAvailable())
+            assertEquals(body.toString(),server.takeRequest().body.readUtf8())
+        } finally { db.close(); server.shutdown() }
+    }
+
 }

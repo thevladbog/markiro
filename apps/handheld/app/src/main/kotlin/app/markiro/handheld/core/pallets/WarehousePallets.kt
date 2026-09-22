@@ -160,6 +160,9 @@ class WarehousePallets(
         if (open != null && open.productId != box.productId) return AttachResult.OtherProduct(product.name)
 
         return db.recovery.commit {
+            // Attaching another box creates new work. Drain keeps removal,
+            // closure, printing and sync of retained pallets available.
+            app.markiro.handheld.core.replacement.ReplacementReadiness(db).requireAdmission()
             val pallet = open ?: PalletEntity(
                 palletId = UUID.randomUUID().toString(),
                 shiftId = null,

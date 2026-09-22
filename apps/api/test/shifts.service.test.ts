@@ -119,6 +119,7 @@ describe("ShiftsService.getBundle's bundleSscc degrade path (Task 7 correction)"
       new Map<unknown, unknown[]>([
         [schema.shifts, [SHIFT_ROW]],
         [schema.products, [PRODUCT_ROW]],
+        [schema.stationDevices, [{ id: "device-1" }]],
       ]),
     );
     // A plain Error, deliberately NOT a BadRequestException: the bundle's
@@ -150,7 +151,7 @@ describe("ShiftsService.getBundle's bundleSscc degrade path (Task 7 correction)"
     );
 
     await expect(service.getBundle("tenant-1", "shift-1", "device-1")).rejects.toBe(boom);
-    expect(lockedTables).toEqual([schema.shifts]);
+    expect(lockedTables).toEqual([schema.stationDevices, schema.shifts]);
   });
 });
 

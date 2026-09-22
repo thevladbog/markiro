@@ -4,6 +4,10 @@ import type {
   DeviceReplacementPreviewRequest,
   DeviceReplacementPreview,
   DeviceReplacementCancel,
+  DeviceReplacementDrainRequest,
+  DeviceReplacementEmergencyPreviewRequest,
+  DeviceReplacementExecuteRequest,
+  DeviceReplacementRecoveryCloseRequest,
 } from "@markiro/platform-contracts";
 export type Notice = "uncertain" | "conflict" | "authorization" | "saved";
 export type Intent = { name: string; kind: "station" | "handheld"; reason: string };
@@ -21,6 +25,10 @@ export type CancelAttempt = {
 };
 export const emptyAttempt: PrepareAttempt = { intent: { name: "", kind: "station", reason: "" } };
 export const replacementKeys = {
+  workflow: (tenantId: string, preparationId: string) =>
+    ["device-replacement-attempt", tenantId, preparationId, "workflow"] as const,
+  dialog: (tenantId: string, preparationId: string) =>
+    ["device-replacement-dialog", tenantId, preparationId] as const,
   list: (tenantId: string) => ["device-replacements", tenantId, "list"] as const,
   scope: (tenantId: string) => ["device-replacement-attempt", tenantId] as const,
   prepare: (tenantId: string, sourceId: string) =>
@@ -66,3 +74,17 @@ export function useReplacementPending(tenantId: string) {
     () => false,
   );
 }
+
+export type WorkflowOperation =
+  | { kind: "drain"; request: DeviceReplacementDrainRequest }
+  | { kind: "normalPreview"; request: DeviceReplacementDrainRequest }
+  | { kind: "recoveryCode"; request: DeviceReplacementDrainRequest }
+  | { kind: "targetCode"; request: DeviceReplacementDrainRequest }
+  | { kind: "emergencyPreview"; request: DeviceReplacementEmergencyPreviewRequest }
+  | { kind: "execute"; request: DeviceReplacementExecuteRequest }
+  | { kind: "recoveryClose"; request: DeviceReplacementRecoveryCloseRequest };
+export type WorkflowAttempt = {
+  operation: WorkflowOperation;
+  pending: boolean;
+  notice?: "uncertain";
+};

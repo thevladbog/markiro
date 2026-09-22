@@ -116,7 +116,7 @@ class ShiftListViewModel(
 
     private fun launchOwned(block: suspend CoroutineScope.() -> Unit) = viewModelScope.launch {
         try { recovery.work(generation) { block() } }
-        catch (_: app.markiro.handheld.core.grants.GrantDenied) { dialog.value=null; grantDenial.show() }
+        catch (denied: app.markiro.handheld.core.grants.WorkAdmissionDenied) { dialog.value=null; grantDenial.show(denied) }
     }
 
     private val now: () -> Long = System::currentTimeMillis
@@ -160,7 +160,7 @@ class ShiftListViewModel(
     init {
         launchOwned { scans.events.collect { event ->
             try { onScan(event.raw) }
-            catch (_: app.markiro.handheld.core.grants.GrantDenied) { dialog.value=null; grantDenial.show() }
+            catch (denied: app.markiro.handheld.core.grants.WorkAdmissionDenied) { dialog.value=null; grantDenial.show(denied) }
         } }
         refresh()
     }

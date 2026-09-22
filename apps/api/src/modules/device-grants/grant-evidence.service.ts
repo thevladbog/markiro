@@ -1,3 +1,5 @@
+import { replacementSourceEvidenceBoundary } from "../device-licensing/device-replacement-evidence";
+import { replacementTargetWaiting } from "../device-licensing/device-replacement-admission";
 import { createHash } from "node:crypto";
 import {
   BadRequestException,
@@ -87,8 +89,9 @@ export class GrantEvidenceService {
       throw new BadRequestException({ code: "EVIDENCE_PAYLOAD_DIGEST_MISMATCH" });
     const requestIdentity = evidenceIdentity(identity, operation, envelope.batchId);
     const envelopeDigest = productLabelValueDigest(envelope);
+    let initialQuarantine: GrantEvidenceReceipt | undefined;
     const receipt = await this.db.transaction(async (tx) => {
-      const owner = await lockCurrentGrantOwner(tx, identity, this.now());
+      const owner = await lockCurrentGrantOwner(tx, identity, this.now(), true);
       if (!owner) throw new UnauthorizedException();
       const [existing] = await tx
         .select()
@@ -141,22 +144,58 @@ export class GrantEvidenceService {
         })
         .returning();
       if (!created) throw new Error("Evidence receipt insert returned no row");
+      const recovery =
+        owner.kind !== "kiosk" &&
+        (await replacementSourceEvidenceBoundary(tx, owner.tenantId, owner.deviceId));
+      const waiting =
+        owner.kind !== "kiosk" &&
+        (await replacementTargetWaiting(tx, owner.tenantId, owner.deviceId, new Date(this.now())));
+      if (recovery || waiting) {
+        // Pin the boundary classification in the retention commit itself.
+        // A process lost here must not resume these records as production once
+        // the deadline passes, even when no native transaction ever started.
+        initialQuarantine = this.response(
+          created,
+          "quarantined",
+          recovery ? "unproven_pre_replacement_evidence" : "device_replacement_waiting",
+          "not_applied",
+          null,
+          null,
+        );
+        await this.finalize(tx, owner, created, initialQuarantine, 0, envelope);
+      }
       return created;
     });
+    if (initialQuarantine) return initialQuarantine;
     if (receipt.finalResponse) return this.duplicate(receipt.finalResponse);
     let final: GrantEvidenceReceipt | undefined;
     const hook: EvidenceTransactionHook<T> = {
       before: async (tx) => {
-        await this.lockReceipt(tx, identity, receipt.id);
+        const owner = await this.lockReceipt(tx, identity, receipt.id);
+        const recovery =
+          owner.kind !== "kiosk" &&
+          (await replacementSourceEvidenceBoundary(tx, owner.tenantId, owner.deviceId));
+        // Only this exact payload's immutable, pre-cutover server receipt can
+        // resume business reconciliation. First delivery under recovery never
+        // establishes production authority, irrespective of observe mode.
+        if (recovery && receipt.receivedAt.getTime() >= recovery.startedAt.getTime())
+          throw new Quarantine("unproven_pre_replacement_evidence");
+        // Waiting is an operational fence even when rollout is still observe.
+        // The native transaction rolls back; catch below finalizes retained evidence.
+        if (
+          owner.kind !== "kiosk" &&
+          (await replacementTargetWaiting(tx, owner.tenantId, owner.deviceId, new Date(this.now())))
+        )
+          throw new Quarantine("device_replacement_waiting");
       },
       after: async (tx, result) => {
-        const owner = await lockCurrentGrantOwner(tx, identity, this.now());
+        const owner = await lockCurrentGrantOwner(tx, identity, this.now(), true);
         if (!owner) throw new UnauthorizedException();
         const actualFacts = await facts(tx, result);
         const reason = await this.charge(tx, owner, receipt, envelope, actualFacts);
         if (reason && receipt.mode === "strict") throw new Quarantine(reason);
         final = this.response(receipt, "accepted", reason, reconciliation(result), 200, result);
-        if (!(await lockCurrentGrantOwner(tx, identity, this.now())))
+        if (!(await lockCurrentGrantOwner(tx, identity, this.now(), true)))
           throw new UnauthorizedException();
         await this.finalize(tx, owner, receipt, final, actualFacts.length, envelope);
       },
@@ -212,7 +251,7 @@ export class GrantEvidenceService {
     identity: GrantCredentialIdentity,
     id: string,
   ): Promise<GrantOwner> {
-    const owner = await lockCurrentGrantOwner(tx, identity, this.now());
+    const owner = await lockCurrentGrantOwner(tx, identity, this.now(), true);
     if (!owner) throw new UnauthorizedException();
     const [row] = await tx
       .select()

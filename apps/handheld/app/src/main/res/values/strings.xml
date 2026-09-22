@@ -697,6 +697,20 @@
         <item quantity="many">коробов %d</item>
         <item quantity="other">коробов %d</item>
     </plurals>
+    <string name="replacement_drain">Подготовка к замене ТСД. Завершите текущую работу и синхронизацию. Новые задания недоступны.</string>
+    <string name="replacement_closed">ТСД заменён. Новые задания недоступны. Сохранённые данные доступны для восстановления.</string>
+    <string name="replacement_scans">Сканы: %1$s</string>
+    <string name="replacement_inventories">События инвентаризации: %1$s</string>
+    <string name="replacement_closures">Закрытия смен: %1$s</string>
+    <string name="replacement_labels">Этикетки изделий: %1$s</string>
+    <string name="replacement_boxes">Короба и паллеты: %1$s</string>
+    <string name="replacement_exceptions">Исключения и списания: %1$s</string>
+    <string name="replacement_conflicts">Конфликты: %1$s</string>
+    <string name="replacement_prints">Неизвестный результат печати: %1$s</string>
+    <string name="replacement_tasks">Активные задания: %1$d</string>
+    <string name="replacement_denied_title">Новая работа недоступна</string>
+    <string name="replacement_denied_body">ТСД находится в режиме замены. Новые задания и списания недоступны. Завершите текущую работу или обратитесь к администратору.</string>
+    <string name="replacement_waiting">Устройство подключено и ожидает безопасного перехода. Новая работа станет доступна после истечения автономных разрешений старого устройства и подтверждения сервера.</string>
 
     <!-- Warehouse pallets -->
     <string name="pallets_title">Паллеты</string>

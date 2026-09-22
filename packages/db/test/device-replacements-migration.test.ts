@@ -64,7 +64,9 @@ describe.skipIf(!databaseUrl)("working device replacement forward migration", ()
     });
     await migrate(drizzle(pool), { migrationsFolder: throughActorIdentity });
     beforeDevices = (
-      await pool.query("SELECT *, 1 AS credential_epoch FROM station_devices ORDER BY id")
+      await pool.query(
+        "SELECT *, 1 AS credential_epoch, 0 AS security_revocation_revision FROM station_devices ORDER BY id",
+      )
     ).rows;
     beforeAssignments = (await pool.query("SELECT * FROM working_device_assignments ORDER BY id"))
       .rows;

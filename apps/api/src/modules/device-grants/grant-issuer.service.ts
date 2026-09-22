@@ -1,3 +1,7 @@
+import {
+  replacementTargetFence,
+  replacementTargetWaiting,
+} from "../device-licensing/device-replacement-admission";
 import { resolveGrantRollout } from "./grant-rollout";
 import { randomUUID, createHash } from "node:crypto";
 import {
@@ -62,7 +66,7 @@ export class GrantIssuerService {
   }
   async keyset(identity: GrantCredentialIdentity) {
     return this.db.transaction(async (tx) => {
-      if (!(await lockCurrentGrantOwner(tx, identity, this.clock())))
+      if (!(await lockCurrentGrantOwner(tx, identity, this.clock(), true)))
         throw new UnauthorizedException();
       return (
         this.signing?.keyset ?? {
@@ -96,12 +100,35 @@ export class GrantIssuerService {
       );
       if (!(await lockCurrentGrantOwner(tx, identity, this.clock())))
         throw new UnauthorizedException();
+      const waiting =
+        owner.kind === "kiosk"
+          ? null
+          : await replacementTargetWaiting(
+              tx,
+              owner.tenantId,
+              owner.deviceId,
+              new Date(this.clock()),
+            );
+      const frozenPolicy = waiting?.serverFacts.policyRevision;
+      const configurationNow = this.clock();
+      const replacement =
+        owner.kind === "kiosk"
+          ? undefined
+          : await replacementTargetFence(
+              tx,
+              owner.tenantId,
+              owner.deviceId,
+              owner.credentialEpoch,
+              new Date(configurationNow),
+            );
       return {
         protocol: "offline-grants-v1",
         owner,
-        serverTime: this.clock(),
-        mode: configuration.mode,
-        policyRevision: configuration.policyRevision,
+        serverTime: configurationNow,
+        mode: waiting ? "strict" : configuration.mode,
+        policyRevision:
+          configuration.policyRevision ?? (typeof frozenPolicy === "string" ? frozenPolicy : null),
+        ...(replacement ? { replacement } : {}),
         keyset: this.signing?.keyset ?? null,
       };
     });

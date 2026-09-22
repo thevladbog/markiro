@@ -1,3 +1,9 @@
+import {
+  prepareReplacementReadiness,
+  applyReplacementClosure,
+  acknowledgeReplacementClosure,
+} from "../src/lib/device-replacement.js";
+import { StationGrantAdmission } from "../src/lib/offline-grants/admission.js";
 import { DatabaseSync } from "node:sqlite";
 import fixtures from "../../../packages/platform-contracts/fixtures/offline-grants-v1.json" with { type: "json" };
 import { STATION_MIGRATIONS } from "@markiro/db/station-sqlite";
@@ -286,6 +292,161 @@ describe("signed Station grant installation", () => {
       .run(owner.tenantId, owner.deviceId, owner.kind, owner.credentialEpoch);
     return { ...state, generation };
   }
+
+  it("cannot reinstall new-work authority from a delayed signed grant after durable drain", async () => {
+    const { db, exec, generation } = await installedReadinessFixture();
+    await prepareReplacementReadiness({
+      exec,
+      generation,
+      expectedDevice: owner,
+      intent: {
+        intentId: "22222222-2222-4222-8222-222222222222",
+        preparationId: "33333333-3333-4333-8333-333333333333",
+        credentialEpoch: 1,
+        preparationRevision: 2,
+        requestedAt: "2026-09-16T10:00:00Z",
+        expiresAt: "2026-09-16T10:05:00Z",
+      },
+    });
+    await installStationGrant({
+      exec,
+      envelope,
+      keyset,
+      configuredOrigin: origin,
+      generation,
+      expectedDevice: owner,
+      requestSequence: 3,
+      clock: { serverMs: envelope.serverTime, monotonicMs: 10, bootId: "boot", wallMs: 20 },
+    });
+    expect(
+      db
+        .prepare(
+          "SELECT COUNT(*) count FROM offline_grant_grants WHERE json_extract(grant_json,'$.kindOfGrant')='device'",
+        )
+        .get(),
+    ).toEqual({ count: 0 });
+    // A late configuration may still update the authenticated rollout mode;
+    // it cannot override the independent durable replacement fence.
+    db.exec(
+      "UPDATE offline_grant_install_state SET mode='observe'; UPDATE offline_grant_configuration SET mode='observe'",
+    );
+    const admission = new StationGrantAdmission(exec, async () => ({
+      bootId: "boot",
+      monotonicMs: 10,
+      wallMs: 20,
+    }));
+    expect(
+      (
+        await admission.assessNewWork({
+          owner,
+          capability: "shift.start.v1",
+          taskId: "task",
+          snapshotDigest: "start",
+          eventId: "entry",
+          eventType: "shift.scan.v1",
+          cost: {},
+        })
+      ).allow,
+    ).toBe(false);
+    await applyReplacementClosure({
+      exec,
+      generation,
+      tombstone: {
+        version: 1,
+        state: "cancelled",
+        intentId: "22222222-2222-4222-8222-222222222222",
+        preparationId: "33333333-3333-4333-8333-333333333333",
+        credentialEpoch: 1,
+        preparationRevision: 3,
+        closedAt: "2026-09-16T10:02:00Z",
+      },
+    });
+    const floor = (
+      await exec.all<{ grant_install_floor: number }>(
+        "SELECT grant_install_floor FROM device_replacement_drain",
+      )
+    )[0]?.grant_install_floor;
+    if (floor === undefined) throw new Error("missing grant floor");
+    expect(
+      await installStationGrant({
+        exec,
+        envelope,
+        keyset,
+        configuredOrigin: origin,
+        generation,
+        expectedDevice: owner,
+        requestSequence: floor,
+        clock: { serverMs: envelope.serverTime, monotonicMs: 10, bootId: "boot", wallMs: 20 },
+      }),
+    ).toBe(false);
+    await refreshStationOfflineGrant({
+      exec,
+      client: issuerClient(keyset, { status: "issued", envelope }),
+      configuredOrigin: origin,
+      generation,
+      expectedDevice: owner,
+      sampleClock: async () => ({ bootId: "boot", monotonicMs: 10, wallMs: 20 }),
+    });
+    expect(
+      db
+        .prepare(
+          "SELECT count(*) count FROM offline_grant_grants WHERE json_extract(grant_json,'$.kindOfGrant')='device'",
+        )
+        .get(),
+    ).toEqual({ count: 0 });
+    const [pending] = await exec.all<{ sequence: number }>(
+      "SELECT MAX(request_sequence)+1 sequence FROM offline_grant_install_commands",
+    );
+    if (!pending) throw new Error("missing pending sequence");
+    await acknowledgeReplacementClosure({
+      exec,
+      generation,
+      client: {
+        post: async (_path, body) => ({
+          ...(body as object),
+          acknowledgedAt: "2026-09-16T10:03:00Z",
+        }),
+      },
+    });
+    expect(
+      await installStationGrant({
+        exec,
+        envelope,
+        keyset,
+        configuredOrigin: origin,
+        generation,
+        expectedDevice: owner,
+        requestSequence: pending.sequence,
+        clock: { serverMs: envelope.serverTime, monotonicMs: 10, bootId: "boot", wallMs: 20 },
+      }),
+    ).toBe(false);
+    await refreshStationOfflineGrant({
+      exec,
+      client: issuerClient(keyset, { status: "issued", envelope }),
+      configuredOrigin: origin,
+      generation,
+      expectedDevice: owner,
+      sampleClock: async () => ({ bootId: "boot", monotonicMs: 10, wallMs: 20 }),
+    });
+    expect(
+      db
+        .prepare("SELECT count(*) count FROM offline_grant_grants WHERE installed_sequence>?")
+        .get(floor),
+    ).toEqual({ count: 1 });
+    expect(
+      (
+        await admission.assessNewWork({
+          owner,
+          capability: "shift.start.v1",
+          taskId: "task",
+          snapshotDigest: "start",
+          eventId: "entry",
+          eventType: "shift.scan.v1",
+          cost: {},
+        })
+      ).allow,
+    ).toBe(true);
+  });
 
   it("builds readiness only from configuration, keyset and a verified device grant reread from SQLite", async () => {
     const { db, exec, generation } = await installedReadinessFixture();

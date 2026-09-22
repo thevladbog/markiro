@@ -86,3 +86,104 @@ describe("working device replacement schema", () => {
     }
   });
 });
+
+describe("working device replacement execution schema", () => {
+  it.each([
+    "workingDeviceReplacementExecutionPreviews",
+    "workingDeviceReplacementReadinessIntents",
+    "workingDeviceReplacementReadinessReports",
+    "workingDeviceReplacementExecutions",
+    "workingDeviceReplacementClosureAcknowledgements",
+  ])("exports %s for durable restart recovery", (name) => {
+    expect(schema).toHaveProperty(name);
+  });
+
+  it("defaults legacy pairing codes to normal purpose", () => {
+    expect(schema.stationPairingCodes).toHaveProperty("purpose");
+  });
+});
+
+it("pins closure acknowledgements to the exact tenant, source, intent and epoch", () => {
+  const table = schema.workingDeviceReplacementClosureAcknowledgements;
+  expect(
+    getTableConfig(table).foreignKeys.some(
+      (key) =>
+        key
+          .reference()
+          .columns.map((column) => column.name)
+          .join(",") === "tenant_id,device_id,preparation_id,intent_id,credential_epoch",
+    ),
+  ).toBe(true);
+  expect(table.requestHash.notNull).toBe(true);
+  expect(table.response.notNull).toBe(true);
+  expect(
+    getTableConfig(table).uniqueConstraints.some(
+      (constraint) =>
+        constraint.columns.map((column) => column.name).join(",") === "tenant_id,request_id",
+    ),
+  ).toBe(true);
+});
+
+it("binds immutable execution previews to the exact tenant, source and preparation", () => {
+  const table = schema.workingDeviceReplacementExecutionPreviews;
+  expect(
+    getTableConfig(table).foreignKeys.some(
+      (key) =>
+        key
+          .reference()
+          .columns.map((column) => column.name)
+          .join(",") === "tenant_id,device_id,preparation_id",
+    ),
+  ).toBe(true);
+  for (const column of [
+    table.actorDomain,
+    table.actorId,
+    table.requestId,
+    table.requestHash,
+    table.expectedRevision,
+    table.factsFingerprint,
+    table.expiresAt,
+    table.newWorkAllowedAt,
+  ])
+    expect(column.notNull).toBe(true);
+  expect(
+    getTableConfig(table).uniqueConstraints.some(
+      (constraint) =>
+        constraint.columns.map((column) => column.name).join(",") ===
+        "tenant_id,actor_domain,request_id",
+    ),
+  ).toBe(true);
+});
+
+describe("replacement client capability evidence", () => {
+  it("binds bounded server observations to tenant, device and credential epoch", () => {
+    const table = schema.workingDeviceReplacementCapabilities;
+    expect(getTableName(table)).toBe("working_device_replacement_capabilities");
+    expect(Object.keys(table)).toEqual(
+      expect.arrayContaining([
+        "tenantId",
+        "deviceId",
+        "credentialEpoch",
+        "supported",
+        "observedAt",
+        "expiresAt",
+      ]),
+    );
+    const config = getTableConfig(table);
+    expect(config.primaryKeys[0]?.columns.map((column) => column.name)).toEqual([
+      "tenant_id",
+      "device_id",
+      "credential_epoch",
+    ]);
+    expect(config.foreignKeys[0]?.reference().columns.map((column) => column.name)).toEqual([
+      "tenant_id",
+      "device_id",
+    ]);
+    expect(config.checks.map((check) => check.name)).toEqual(
+      expect.arrayContaining([
+        "replacement_capabilities_epoch_check",
+        "replacement_capabilities_interval_check",
+      ]),
+    );
+  });
+});

@@ -13,6 +13,7 @@ import app.markiro.handheld.core.print.PrinterEntity
         GrantStateEntity::class, GrantTokenEntity::class, GrantCounterEntity::class, GrantEvidenceEntity::class, GrantTaskBindingEntity::class, GrantTaskProvenanceEntity::class, GrantReadinessOutboxEntity::class,
         DeviceConfigEntity::class,
         DeviceRecoveryEntity::class,
+        ReplacementDrainEntity::class,
         OperatorEntity::class,
         ShiftEntity::class,
         CodeEntity::class,
@@ -57,6 +58,7 @@ import app.markiro.handheld.core.print.PrinterEntity
 abstract class HandheldDatabase : RoomDatabase() {
     val grants: GrantRepository by lazy { GrantRepository(this) }
     abstract fun grantDao(): GrantDao
+    abstract fun replacementDao(): ReplacementDao
     private var coordinator: DeviceRecovery? = null
     val recovery: DeviceRecovery get() = checkNotNull(coordinator) { "Device recovery must initialize before work" }
     internal fun attachRecovery(value: DeviceRecovery) {
@@ -102,4 +104,4 @@ abstract class HandheldDatabase : RoomDatabase() {
     abstract fun palletLabelTemplateDao(): PalletLabelTemplateDao
 }
 
-const val HANDHELD_DATABASE_VERSION = 19
+const val HANDHELD_DATABASE_VERSION = 20

@@ -150,6 +150,9 @@ export async function readDeviceReplacementFacts(
   const inventories = work.inventories
     .filter((row) => row.deviceId === deviceId)
     .map(({ deviceId: _, ...row }) => row);
+  const warehousePallets = work.warehousePallets
+    .filter((row) => row.deviceId === deviceId)
+    .map(({ deviceId: _, ...row }) => row);
   const jobs = work.jobs
     .filter((row) => row.deviceId === deviceId)
     .map(({ deviceId: _, ...row }) => row);
@@ -202,7 +205,7 @@ export async function readDeviceReplacementFacts(
     execution: { available: false, reasons },
   });
   const retentions = readOnlyFacts?.retentions ?? (await readRetentionIdentities(tx, tenantId));
-  const fingerprint = replacementDigest({
+  const authorityFacts = {
     retentions,
     credential,
     priorPairing,
@@ -228,10 +231,22 @@ export async function readDeviceReplacementFacts(
     usageRevision: facts.usageRevision,
     policy: facts.policyFingerprint,
     registry: entitlementRegistryFingerprint(),
+  };
+  // Preparation previews retain their full work snapshot. Drain authority survives
+  // expected task closure, print acknowledgement and quarantine resolution.
+  const fingerprint = replacementDigest({
+    ...authorityFacts,
     shifts,
     inventories,
+    warehousePallets,
     jobs,
     quarantine,
   });
-  return { observation, fingerprint, nextChangeAt: facts.snapshot.nextChangeAt };
+  return {
+    observation,
+    fingerprint,
+    readinessFingerprint: replacementDigest(authorityFacts),
+    work,
+    nextChangeAt: facts.snapshot.nextChangeAt,
+  };
 }

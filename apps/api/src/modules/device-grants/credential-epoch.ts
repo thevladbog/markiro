@@ -1,3 +1,7 @@
+import {
+  currentReplacementRecovery,
+  recoveryKeyMetadata,
+} from "../device-licensing/replacement-recovery-policy";
 import { and, eq } from "drizzle-orm";
 import { schema } from "@markiro/db";
 import type { GrantOwner } from "@markiro/domain";
@@ -18,6 +22,7 @@ export async function lockCurrentGrantOwner(
   tx: SubscriptionTransaction,
   identity: GrantCredentialIdentity,
   now: number,
+  allowRecovery = false,
 ): Promise<GrantOwner | null> {
   if (!Number.isSafeInteger(now) || now < 0) return null;
   if (identity.kind === "kiosk") {
@@ -54,7 +59,7 @@ export async function lockCurrentGrantOwner(
     .for("update");
   if (
     !device ||
-    device.revokedAt ||
+    (device.revokedAt && !allowRecovery) ||
     device.kind !== identity.kind ||
     device.apiKeyId !== identity.apiKeyId
   )
@@ -72,6 +77,11 @@ export async function lockCurrentGrantOwner(
     .for("share");
   if (!key || key.enabled === false || (key.expiresAt !== null && key.expiresAt.getTime() <= now))
     return null;
+  const recovery = recoveryKeyMetadata(key.metadata);
+  if (device.revokedAt || recovery) {
+    if (!allowRecovery || !recovery || !(await currentReplacementRecovery(tx, device, recovery)))
+      return null;
+  }
   return {
     tenantId: device.tenantId,
     deviceId: device.id,

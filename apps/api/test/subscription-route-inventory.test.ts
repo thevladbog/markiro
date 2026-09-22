@@ -68,6 +68,47 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
   routes: readonly string[];
 }[] = [
   {
+    contract: customerContract(CABINET_GUARDS, {
+      mode: "licensing",
+      operation: "replacement_recovery",
+    }),
+    routes: [
+      "POST /device-licensing/replacements/:preparationId/recovery/code (DeviceReplacementController.recoveryCode)",
+      "POST /device-licensing/replacements/:preparationId/recovery/close (DeviceReplacementController.recoveryClose)",
+    ],
+  },
+  {
+    contract: customerContract(CABINET_GUARDS, {
+      mode: "licensing",
+      operation: "replacement_execute",
+    }),
+    routes: [
+      "POST /device-licensing/replacements/:preparationId/execution/preview (DeviceReplacementController.executionPreview)",
+      "POST /device-licensing/replacements/:preparationId/execute (DeviceReplacementController.execute)",
+      "POST /device-licensing/replacements/:preparationId/emergency/preview (DeviceReplacementController.emergencyPreview)",
+      "POST /device-licensing/replacements/:preparationId/emergency/execute (DeviceReplacementController.emergencyExecute)",
+    ],
+  },
+  {
+    contract: customerContract(CABINET_GUARDS, {
+      mode: "licensing",
+      operation: "replacement_drain",
+    }),
+    routes: [
+      "POST /device-licensing/replacements/:preparationId/drain (DeviceReplacementController.drain)",
+    ],
+  },
+  {
+    contract: customerContract(STATION_GUARDS, { mode: "recovery", kind: "replacement_readiness" }),
+    routes: [
+      "GET /station/device-replacement-intent (DeviceReplacementReadinessController.currentIntent)",
+      "GET /station/device-replacement-intent/v1 (DeviceReplacementReadinessController.currentIntentV1)",
+      "POST /station/device-replacement-intent/v1/acknowledge (DeviceReplacementReadinessController.acknowledgeClosure)",
+      "POST /station/device-replacement-readiness (DeviceReplacementReadinessController.report)",
+      "POST /station/replacement-recovery/readiness (ReplacementRecoveryReadinessController.report)",
+    ],
+  },
+  {
     contract: customerContract(CABINET_GUARDS, { mode: "read_only_allowed", reason: "read" }),
     routes: [
       "GET /access/entitlements (AccessController.entitlementSnapshot)",
@@ -418,8 +459,11 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
   },
   {
     contract: customerContract(CABINET_STATION_GUARDS, { mode: "write" }),
+    routes: ["POST /shifts/:id/enter (ShiftsController.enterShift)"],
+  },
+  {
+    contract: customerContract(CABINET_STATION_GUARDS, { mode: "recovery", kind: "station" }),
     routes: [
-      "POST /shifts/:id/enter (ShiftsController.enterShift)",
       "POST /station/shift-closures (StationShiftCloseController.close)",
       "POST /station/writeoffs (StationWriteoffsController.create)",
     ],
@@ -579,6 +623,30 @@ const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
   ),
   "PlatformDeviceRetentionController.confirm": platform(
     "retention requires fresh tenant and billing platform write capabilities",
+  ),
+  "PlatformDeviceReplacementController.targetCode": platform(
+    "replacement target code requires tenant and billing write capabilities",
+  ),
+  "PlatformDeviceReplacementController.recoveryCode": platform(
+    "recovery requires current platform tenant and billing write capabilities",
+  ),
+  "PlatformDeviceReplacementController.recoveryClose": platform(
+    "recovery requires current platform tenant and billing write capabilities",
+  ),
+  "PlatformDeviceReplacementController.executionPreview": platform(
+    "execution requires fresh tenant and billing write capabilities",
+  ),
+  "PlatformDeviceReplacementController.execute": platform(
+    "execution requires fresh tenant and billing write capabilities",
+  ),
+  "PlatformDeviceReplacementController.emergencyPreview": platform(
+    "execution requires fresh tenant and billing write capabilities",
+  ),
+  "PlatformDeviceReplacementController.emergencyExecute": platform(
+    "execution requires fresh tenant and billing write capabilities",
+  ),
+  "PlatformDeviceReplacementController.drain": platform(
+    "drain requires tenant and billing write capabilities",
   ),
   "PlatformDeviceReplacementController.preview": platform(
     "replacement preparation requires fresh tenant and billing platform write capabilities",
@@ -1056,7 +1124,9 @@ describe("registered subscription route inventory", () => {
             : route.controller.name === "StationScansController" ||
                 route.controller.name === "StationInventoriesController" ||
                 route.controller.name === "StationProductImagesController" ||
-                route.controller.name === "DeviceGrantsController"
+                route.controller.name === "DeviceGrantsController" ||
+                route.controller.name === "DeviceReplacementReadinessController" ||
+                route.controller.name === "ReplacementRecoveryReadinessController"
               ? ["TenantGuard", "StationOnlyGuard", "SubscriptionAccessGuard"]
               : stationOnlyCabinetRoute
                 ? [

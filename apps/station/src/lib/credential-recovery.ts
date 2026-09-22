@@ -442,7 +442,12 @@ export async function clearRejectedCredentialState({
   // Serialized with roster publishing. The purge first installs a fail-closed
   // read gate, then strictly clears both slots and the selector; no deletion
   // failure is swallowed.
-  await purgeOperatorsMirror(exec);
+  const [recovery] = preserveRecoveryContext
+    ? await exec.all<{ owner_json: string | null }>(
+        "SELECT owner_json FROM station_device_recovery WHERE id=1 AND phase IN ('sealing','sealed','restoring')",
+      )
+    : [];
+  await purgeOperatorsMirror(exec, recovery?.owner_json ?? undefined);
   if (preserveRecoveryContext) return;
   await exec.run("DELETE FROM validation_history_publications");
   await exec.run("DELETE FROM validation_code_history");

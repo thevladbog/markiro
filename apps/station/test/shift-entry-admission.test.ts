@@ -2,8 +2,17 @@ import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
 import { applyMigrations, type SqlExecutor, type StationBundle } from "../src/lib/mirror.js";
 import { ensureShiftExecutionProjection } from "../src/lib/shift-bundle.js";
+import {
+  prepareReplacementReadiness,
+  replacementBlocksNewWork,
+  replacementCanEnterTask,
+} from "../src/lib/device-replacement.js";
+import { StationGrantAdmission } from "../src/lib/offline-grants/admission.js";
 import { admitTaskEntry } from "../src/lib/offline-grants/entry.js";
-import type { ShiftExecutionProjection } from "../src/lib/offline-grants/semantic.js";
+import type {
+  ExecutionProjection,
+  ShiftExecutionProjection,
+} from "../src/lib/offline-grants/semantic.js";
 import { createCredentialGeneration } from "../src/lib/credential-recovery.js";
 
 function nodeExecutor(): SqlExecutor {
@@ -348,4 +357,76 @@ describe("task entry admission", () => {
       reason: "exhausted",
     });
   });
+});
+
+describe("task entry during replacement drain", () => {
+  it.each(["shift", "inventory"] as const)(
+    "resumes a saved %s task without consuming retired new-work authority",
+    async (kind) => {
+      const exec = nodeExecutor();
+      await applyMigrations(exec);
+      const generation = createCredentialGeneration("replacement-entry-test");
+      // Configuration receipts install this state even without an approved policy.
+      await exec.run("INSERT INTO offline_grant_install_state VALUES(1,?,?,?,1,1,?)", [
+        owner.tenantId,
+        owner.deviceId,
+        owner.kind,
+        "observe",
+      ]);
+      await prepareReplacementReadiness({
+        exec,
+        generation,
+        expectedDevice: { tenantId: owner.tenantId, deviceId: owner.deviceId },
+        activeTask: { taskId: entry.taskId, kind },
+        intent: {
+          intentId: "11111111-1111-4111-8111-111111111111",
+          preparationId: "22222222-2222-4222-8222-222222222222",
+          credentialEpoch: 1,
+          preparationRevision: 2,
+          requestedAt: "2026-09-16T10:00:00.000Z",
+          expiresAt: "2026-09-16T10:05:00.000Z",
+        },
+      });
+      const taskExecution: ExecutionProjection | null =
+        kind === "shift"
+          ? await ensureShiftExecutionProjection({
+              exec,
+              client: { get: vi.fn().mockResolvedValue(bundle) },
+              shiftId: entry.taskId,
+            })
+          : {
+              taskKind: "inventory",
+              taskId: entry.taskId,
+              scope: {
+                manifest: {},
+                snapshotId: "snapshot",
+                combinedDigest: "combined",
+                contentDigest: "content",
+              },
+            };
+      const admission = new StationGrantAdmission(exec, async () => ({
+        bootId: "boot",
+        monotonicMs: 1,
+        wallMs: 1,
+      }));
+      const commit = vi.spyOn(admission, "commitNewWork");
+      const taskAssessment = vi.spyOn(admission, "assessTaskWork");
+      expect(await replacementCanEnterTask(exec, entry.taskId, kind)).toBe(true);
+      expect(await replacementCanEnterTask(exec, "different-task", kind)).toBe(false);
+      await expect(
+        admitTaskEntry({
+          ...entry,
+          generation,
+          admission,
+          capability: kind === "shift" ? "shift.start.v1" : "inventory.start.v1",
+          eventType: kind === "shift" ? "shift.scan.v1" : "inventory.scan.v1",
+          resuming: await replacementBlocksNewWork(exec),
+          execution: taskExecution,
+        }),
+      ).resolves.toEqual({ allow: true, observe: false });
+      expect(commit).not.toHaveBeenCalled();
+      expect(taskAssessment).toHaveBeenCalledOnce();
+      expect(await exec.all("SELECT * FROM offline_grant_task_admissions")).toEqual([]);
+    },
+  );
 });

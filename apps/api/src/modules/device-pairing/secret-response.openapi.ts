@@ -1,3 +1,5 @@
+import { deviceReplacementTargetFenceSchema } from "@markiro/platform-contracts";
+import { zodApiSchema } from "../../lib/openapi";
 import { ApiResponse, type ApiResponseOptions } from "@nestjs/swagger";
 
 type ResponseSchema = Extract<ApiResponseOptions, { schema: object }>["schema"];
@@ -66,6 +68,7 @@ const stationPairSchema: ResponseSchema = {
   additionalProperties: false,
   required: ["device", "credential", "operators"],
   properties: {
+    replacement: zodApiSchema(deviceReplacementTargetFenceSchema),
     device: {
       type: "object",
       required: ["id", "name", "tenantId", "organizationName", "line"],

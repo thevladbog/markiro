@@ -172,7 +172,11 @@ describe.skipIf(!process.env.DATABASE_URL)("inventory entitlement admission owne
       { originalName: "introduced.csv", mimeType: "text/csv", bytes },
     );
     expect(replayedImport).toEqual(imported);
-    expect((await observations(connection.db, f.tenantId)).at(-1)).toMatchObject({
+    expect(
+      (await observations(connection.db, f.tenantId)).find(
+        (row) => row.operationId === "inventory.file.create.v1",
+      ),
+    ).toMatchObject({
       operationId: "inventory.file.create.v1",
       resourceScope: {
         digest: admissionScopeDigest({
@@ -254,13 +258,15 @@ describe.skipIf(!process.env.DATABASE_URL)("inventory entitlement admission owne
     expect(await f.lifecycle.start(f.tenantId, f.actorUserId, created.id)).toEqual(manifest);
 
     const rows = await observations(connection.db, f.tenantId);
-    expect(rows.map((row) => row.operationId)).toEqual([
-      "inventory.task.create.v1",
+    // PostgreSQL does not promise insertion order without ORDER BY. Assert
+    // the exact observations and their named scope rather than physical order.
+    expect(rows.map((row) => row.operationId).sort()).toEqual([
       "inventory.file.create.v1",
+      "inventory.task.create.v1",
       "inventory.task.start.v1",
     ]);
     expect(rows.every((row) => row.registryVersion === "p1c.native.v1")).toBe(true);
-    expect(rows.at(-1)).toMatchObject({
+    expect(rows.find((row) => row.operationId === "inventory.task.start.v1")).toMatchObject({
       resourceScope: {
         digest: admissionScopeDigest({
           inventoryId: created.id,

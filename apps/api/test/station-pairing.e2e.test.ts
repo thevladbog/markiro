@@ -22,6 +22,7 @@ import { signUpAndActivate } from "./support/auth";
 import { SecurityAuditService } from "../src/authorization/security-audit.service";
 import { OperatorsService } from "../src/modules/operators/operators.service";
 import { StationPairingService } from "../src/modules/station-pairing/station-pairing.service";
+import { seedGrantPolicy } from "./support/grant-policy-fixture";
 import { createManagedSubscription, createPublishedPlan } from "./support/subscription-fixtures";
 import {
   preTask8IdentityDecoderAccepts,
@@ -127,6 +128,86 @@ describe.skipIf(!ready)("station pairing e2e", () => {
       .expect(201);
     return paired.body.credential.apiKey as string;
   }
+
+  it("pairs an emergency target immediately with a durable boundary contract and refuses unfenced clients", async () => {
+    const sourceKey = await pairCurrentDevice();
+    const policy = await seedGrantPolicy(db, {});
+    const planVersionId = await createPublishedPlan(db, {
+      maxLines: null,
+      maxStations: 1,
+      maxKiosks: null,
+      maxCabinetUsers: null,
+      lifecyclePolicyId: policy.id,
+    });
+    await createManagedSubscription(db, { tenantId, planVersionId });
+    const requestId = randomUUID();
+    const preview = await agent
+      .post(`/device-licensing/${deviceId}/replacements/preview`)
+      .send({
+        requestId,
+        target: { name: "Emergency target", kind: "station" },
+        reason: "broken source",
+      })
+      .expect(200);
+    const preparation = await agent
+      .post(`/device-licensing/${deviceId}/replacements/confirm`)
+      .send({ requestId, previewId: preview.body.id })
+      .expect(200);
+    const preparationId = preparation.body.preparation.id as string;
+    const executionRequest = {
+      requestId: randomUUID(),
+      expectedRevision: 1,
+      reason: "source unavailable",
+    };
+    const boundary = await agent
+      .post(`/device-licensing/replacements/${preparationId}/emergency/preview`)
+      .send(executionRequest)
+      .expect(200);
+    const receipt = await agent
+      .post(`/device-licensing/replacements/${preparationId}/emergency/execute`)
+      .send({
+        requestId: executionRequest.requestId,
+        expectedRevision: 1,
+        previewId: boundary.body.id,
+        mode: "emergency",
+      })
+      .expect(200);
+    const execution = receipt.body.preparation.execution;
+    expect(Date.parse(execution.newWorkAllowedAt)).toBeGreaterThan(Date.now());
+    await request(app!.getHttpServer())
+      .get("/station/identity")
+      .set("x-api-key", sourceKey)
+      .expect(401);
+    await agent.post(`/station-devices/${deviceId}/pairing-code`).send({}).expect(409);
+    const code = await agent
+      .post(`/station-devices/${execution.targetDeviceId}/pairing-code`)
+      .send({})
+      .expect(201);
+    const unsupported = await request(app!.getHttpServer())
+      .post("/station/pair")
+      .send({ code: code.body.code })
+      .expect(401);
+    expect(unsupported.body.code).toBe("PAIR_UPDATE_REQUIRED");
+    const paired = await request(app!.getHttpServer())
+      .post("/station/pair")
+      .set("x-station-capabilities", "replacement-boundary-v1")
+      .send({ code: code.body.code })
+      .expect(201);
+    expect(paired.body.replacement).toEqual({
+      version: 1,
+      executionId: execution.id,
+      credentialEpoch: expect.any(Number),
+      newWorkAllowedAt: Date.parse(execution.newWorkAllowedAt),
+      serverTime: expect.any(Number),
+    });
+    expect(paired.body.replacement.serverTime).toBeLessThan(
+      paired.body.replacement.newWorkAllowedAt,
+    );
+    await request(app!.getHttpServer())
+      .get("/station/identity")
+      .set("x-api-key", paired.body.credential.apiKey)
+      .expect(200);
+  });
 
   async function manageCurrentTenant(maxStations: number): Promise<void> {
     const planVersionId = await createPublishedPlan(db, {

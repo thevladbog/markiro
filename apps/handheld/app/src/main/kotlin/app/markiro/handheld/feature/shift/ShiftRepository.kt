@@ -180,6 +180,7 @@ class ShiftRepository(
     suspend fun enter(shiftId: String, entryMethod: String = "list"): EnterResult = db.recovery.work { enterOwned(shiftId, entryMethod) }
 
     private suspend fun enterOwned(shiftId: String, entryMethod: String): EnterResult {
+        db.recovery.commit { app.markiro.handheld.core.replacement.ReplacementReadiness(db).requireAdmission("shift", shiftId) }
         GrantTransport(db,api).refreshConfiguredDevice()
         val cached = db.shiftDao().get(shiftId)
         val entered = try {
@@ -199,6 +200,7 @@ class ShiftRepository(
         val now = clock()
         applySsccBlock(bundle)
         db.recovery.commit {
+            app.markiro.handheld.core.replacement.ReplacementReadiness(db).requireAdmission("shift", shiftId)
             if(cached?.enteredAt == null) db.grants.start(TaskKind.SHIFT,shiftId,"shift.enter:$shiftId")
             db.shiftDao().upsert(
                 bundle.shift.toEntity(cached, now).copy(
@@ -279,6 +281,7 @@ class ShiftRepository(
     private suspend fun enterOffline(cached: ShiftEntity) = db.recovery.commit { enterOfflineOwned(cached) }
 
     private suspend fun enterOfflineOwned(cached: ShiftEntity) {
+        app.markiro.handheld.core.replacement.ReplacementReadiness(db).requireAdmission("shift", cached.id)
         val now = clock()
         db.recovery.commit {
             if(cached.enteredAt == null) db.grants.start(TaskKind.SHIFT,cached.id,"shift.enter:${cached.id}")

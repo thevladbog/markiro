@@ -74,6 +74,7 @@ class InventoryRepository(
     override suspend fun join(task: InventoryTaskDto, operatorId: String, confirmDifferentLine: Boolean, barcode: String?): JoinResult = db.recovery.work { joinOwned(task, operatorId, confirmDifferentLine, barcode) }
 
     private suspend fun joinOwned(task: InventoryTaskDto, operatorId: String, confirmDifferentLine: Boolean, barcode: String?): JoinResult = try {
+        db.recovery.commit { app.markiro.handheld.core.replacement.ReplacementReadiness(db).requireAdmission("inventory", task.inventoryId) }
         JoinResult.Ok(api.joinInventory(task.inventoryId, JoinInventoryRequest(operatorId, barcode, confirmDifferentLine.takeIf { it })).copy(recoveryGeneration = app.markiro.handheld.core.storage.DeviceRecovery.generationContext.get()))
     } catch (e: HttpException) {
         when (errorCode(e)) {
@@ -100,6 +101,7 @@ class InventoryRepository(
     override suspend fun activate(inventoryId: String) = db.recovery.commit { activateOwned(inventoryId) }
 
     private suspend fun activateOwned(inventoryId: String) {
+        app.markiro.handheld.core.replacement.ReplacementReadiness(db).requireAdmission("inventory", inventoryId)
         val now = clock()
         db.recovery.commit {
             InventoryLeaveJournal(db).activate(inventoryId)

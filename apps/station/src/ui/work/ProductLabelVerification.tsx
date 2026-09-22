@@ -72,12 +72,14 @@ export function ProductLabelVerification({
   onPause,
   onSetup,
   onSkipped,
+  recovery = false,
 }: {
   state: ProductLabelWorkState;
   work: ProductLabelWork;
   onPause: () => void;
   onSetup?: () => void;
   onSkipped?: () => void;
+  recovery?: boolean;
 }) {
   const { t } = useTranslation();
   const [reasonOpen, setReasonOpen] = useState(false);
@@ -231,15 +233,17 @@ export function ProductLabelVerification({
           ) : null}
           <p className="print-verification__instruction">
             {t(
-              state.closed
-                ? "productLabels.closedHint"
-                : job?.attemptState === "delivery_unknown"
-                  ? "productLabels.unknownHint"
-                  : job?.status === "prepared"
-                    ? "productLabels.preparedHint"
-                    : job?.attemptState === "failed_before_send"
-                      ? "productLabels.failedHint"
-                      : "productLabels.scanHint",
+              recovery
+                ? "productLabels.recoveryHint"
+                : state.closed
+                  ? "productLabels.closedHint"
+                  : job?.attemptState === "delivery_unknown"
+                    ? "productLabels.unknownHint"
+                    : job?.status === "prepared"
+                      ? "productLabels.preparedHint"
+                      : job?.attemptState === "failed_before_send"
+                        ? "productLabels.failedHint"
+                        : "productLabels.scanHint",
             )}
           </p>
           {job ? <p className="print-verification__sscc">…{job.codeSuffix}</p> : null}

@@ -31,6 +31,7 @@ class InventoryBundleMirror(
     suspend fun mirror(manifest: InventoryManifestDto, onProgress: suspend (staged: Int, total: Int) -> Unit): MirrorResult = db.recovery.work { mirrorOwned(manifest, onProgress) }
 
     private suspend fun mirrorOwned(manifest: InventoryManifestDto, onProgress: suspend (staged: Int, total: Int) -> Unit): MirrorResult {
+        db.recovery.commit { replacementAdmission(manifest) }
         if (manifest.mode == "repack") return MirrorResult.Repack
         if (manifest.snapshotRevision != 1 || manifest.productionDateFrom > manifest.productionDateTo || manifest.mode != "check") {
             return MirrorResult.Invalid("manifest")
@@ -42,6 +43,7 @@ class InventoryBundleMirror(
             existing.contentDigest == manifest.contentDigest
         ) {
             db.recovery.commit {
+                replacementAdmission(manifest)
                 db.inventoryTaskDao().setJoinedAt(id, clock())
                 db.grants.saveProvenance(TaskKind.INVENTORY,id,Json.encodeToString(InventoryManifestDto.serializer(),manifest))
             }
@@ -51,6 +53,7 @@ class InventoryBundleMirror(
         var task = existing
         if (task == null || task.snapshotId != manifest.snapshotId || task.contentDigest != manifest.contentDigest || task.state != "staging") {
             task = db.recovery.commit {
+                replacementAdmission(manifest)
                 existing?.let { old ->
                     db.inventorySnapshotCodeDao().deleteSnapshot(old.snapshotId)
                     if (old.snapshotId != manifest.snapshotId) {
@@ -76,6 +79,7 @@ class InventoryBundleMirror(
             staged += rows.size
             val next = page.nextCursor
             db.recovery.commit {
+                replacementAdmission(manifest)
                 db.inventorySnapshotCodeDao().insertAll(rows)
                 db.inventoryTaskDao().setStaging(id, next ?: cursor, staged)
             }
@@ -84,6 +88,17 @@ class InventoryBundleMirror(
             cursor = next
         }
         return publish(manifest)
+    }
+
+    private suspend fun replacementAdmission(manifest: InventoryManifestDto) {
+        val replacement = app.markiro.handheld.core.replacement.ReplacementReadiness(db)
+        replacement.requireAdmission("inventory", manifest.inventoryId)
+        if (replacement.blocked()) {
+            val saved = db.inventoryTaskDao().get(manifest.inventoryId)
+            if (saved == null || saved.snapshotId != manifest.snapshotId || saved.contentDigest != manifest.contentDigest || saved.combinedDigest != manifest.combinedDigest) {
+                throw app.markiro.handheld.core.replacement.ReplacementDenied()
+            }
+        }
     }
 
     private fun verifyPage(manifest: InventoryManifestDto, cursor: String?, page: InventoryBundlePageDto): String? {
@@ -142,6 +157,7 @@ class InventoryBundleMirror(
         if (count != manifest.codeCount || digest.finish() != manifest.contentDigest) return discard(manifest, "content digest")
         val expectedCount = db.inventorySnapshotCodeDao().countExpected(manifest.snapshotId)
         db.recovery.commit {
+            replacementAdmission(manifest)
             db.grants.start(TaskKind.INVENTORY,manifest.inventoryId,"inventory.enter:${manifest.inventoryId}:${manifest.snapshotId}")
             db.inventoryTaskDao().activate(manifest.inventoryId, expectedCount, clock())
             db.grants.saveProvenance(TaskKind.INVENTORY,manifest.inventoryId,Json.encodeToString(InventoryManifestDto.serializer(),manifest))

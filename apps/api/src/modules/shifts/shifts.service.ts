@@ -1,3 +1,4 @@
+import { assertDeviceReplacementNewWorkAllowed } from "../device-licensing/device-replacement-admission";
 import { loadValidationReprocessingDetails } from "./validation-reprocessing-details";
 import type { ValidationReprocessingDetailsQuery } from "@markiro/domain";
 import { loadValidationCodeHistory } from "./validation-code-history";
@@ -975,6 +976,8 @@ export class ShiftsService {
     const facts = palletsEnabled ? await this.admission.capture(tenantId) : undefined;
     try {
       const [row] = await this.db.transaction(async (tx) => {
+        if (actor.domain === "station_device")
+          await assertDeviceReplacementNewWorkAllowed(tx, tenantId, actor.id);
         const validationPrint = await snapshotValidationPrintPolicy(
           tx,
           tenantId,
@@ -1631,6 +1634,7 @@ export class ShiftsService {
   ): Promise<ShiftDto> {
     const facts = await this.admission.capture(tenantId);
     await this.db.transaction(async (tx) => {
+      await assertDeviceReplacementNewWorkAllowed(tx, tenantId, deviceId, { kind: "shift", id });
       const [device] = await tx
         .select({ id: schema.stationDevices.id })
         .from(schema.stationDevices)
@@ -1951,6 +1955,12 @@ export class ShiftsService {
     deviceId: string,
   ): Promise<BundleAllocation> {
     return this.db.transaction(async (tx) => {
+      // This GET can allocate fresh box/pallet authority. Keep the device
+      // fence ahead of the shift lock, while preserving source task recovery.
+      await assertDeviceReplacementNewWorkAllowed(tx, tenantId, deviceId, {
+        kind: "shift",
+        id: shiftId,
+      });
       const [shift] = await tx
         .select({
           status: schema.shifts.status,

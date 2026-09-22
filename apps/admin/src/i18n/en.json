@@ -4179,8 +4179,8 @@
     "comparison": "Effects on the prepared model"
   },
   "deviceReplacement": {
-    "title": "Device replacement preparation",
-    "intro": "Prepare a future replacement. This saves a project only; the source device, credentials and local data remain unchanged. Re-pairing is a separate action.",
+    "title": "Device replacement",
+    "intro": "Prepare a replacement, check source readiness and transfer its working slot. Emergency replacement preserves a recovery path for source evidence.",
     "loading": "Loading preparations…",
     "loadError": "Could not load replacement preparations.",
     "readonly": "You can inspect saved preparations. Preparation changes are unavailable with current permissions.",
@@ -4203,7 +4203,11 @@
     "project": "Saved replacement preparation",
     "state": {
       "prepared": "Prepared",
-      "cancelled": "Cancelled"
+      "cancelled": "Cancelled",
+      "draining": "Draining",
+      "ready": "Ready to replace",
+      "executing": "Executing replacement",
+      "completed": "Replacement completed"
     },
     "needsReview": "Needs review",
     "observed": "Saved observation at {{at}}; these are historical facts.",
@@ -4221,12 +4225,123 @@
       "transfer_not_available": "Replacement cannot be completed yet.",
       "local_data_unknown": "Local queues require separate verification.",
       "source_authority_transition_required": "Moving access from the source device is not available yet.",
-      "handheld_unavailable": "Handheld access is currently unavailable.",
-      "capacity_unavailable": "Capacity for the eventual replacement is currently unavailable.",
-      "lifecycle_policy_not_ready": "The lifecycle policy is not ready for execution."
+      "handheld_unavailable": "Handheld access is currently unavailable. Enable Handheld in tenant services or choose a Station target, then preview again.",
+      "capacity_unavailable": "Capacity for the eventual replacement is currently unavailable. Review occupied slots and plan capacity, then preview again.",
+      "lifecycle_policy_not_ready": "The lifecycle policy is not ready for execution. Ask a platform administrator to configure the device lifecycle policy, then preview again."
     },
     "slotsSaved": "Slots at preparation: {{usage}} of {{limit}}.",
-    "slotsSavedUnlimited": "Slots at preparation: {{usage}}, unlimited capacity."
+    "slotsSavedUnlimited": "Slots at preparation: {{usage}}, unlimited capacity.",
+    "workflow": {
+      "revision": "Preparation revision",
+      "epoch": "Credential epoch",
+      "received": "Last server report",
+      "notReported": "Not received",
+      "unsupported": "Unsupported by client",
+      "noMeasurements": "No measured local report is available. Unknown channels are not zero.",
+      "scans": "Scans",
+      "inventories": "Inventories",
+      "shiftClosures": "Shift closures",
+      "productLabels": "Product labels",
+      "boxes": "Boxes",
+      "exceptions": "Exceptions",
+      "conflicts": "Conflicts",
+      "unknownPrints": "Unknown print outcomes",
+      "activeTasks": "Active local tasks",
+      "installedGrants": "Installed grants",
+      "journal": "Journal sequence",
+      "storageRevision": "Storage revision",
+      "reportSequence": "Report sequence",
+      "clientBuild": "Client build",
+      "executionStep": "Execution step",
+      "executionRevision": "Execution revision",
+      "targetId": "Target device ID",
+      "executedAt": "Executed at",
+      "boundary": "New work allowed from",
+      "boundaryHint": "The server enforces this boundary. Pairing does not grant early production access.",
+      "unknownBlocker": "Server blocker: {{reason}}. Refresh the report or contact support.",
+      "mode": {
+        "normal": "Normal replacement",
+        "emergency": "Emergency replacement"
+      },
+      "step": {
+        "revoke_pending": "Credential revocation pending. Refresh to check automatic recovery.",
+        "credential_revoked": "Source credential revoked; slot transfer pending.",
+        "transferred": "Slot transferred"
+      },
+      "recovery": {
+        "not_required": "Evidence recovery is not required.",
+        "required": "Source evidence recovery is required. Issue a recovery code for the original device.",
+        "draining": "Source recovery is draining. Send retained evidence from the original device and refresh.",
+        "completed": "Source evidence recovery completed.",
+        "evidence_unavailable": "Local evidence is unavailable. Its completeness has not been confirmed."
+      },
+      "next": {
+        "prepared": "Request drain to finish existing work on the source, or choose emergency replacement if it is unavailable.",
+        "draining": "Finish current work and send pending data from the source. Resolve the blockers, then refresh.",
+        "ready": "The server reports readiness. Preview and confirm the slot transfer.",
+        "executing": "Execution is recoverable. The server continues the saved transfer; refresh to check its result.",
+        "completed": "The replacement target has been created. Issue its pairing code to connect it.",
+        "cancelled": "This preparation is cancelled."
+      },
+      "blocker": {
+        "pending_scans": "Send pending scans from the source.",
+        "pending_inventories": "Send pending inventory evidence.",
+        "pending_shift_closures": "Send pending shift closures.",
+        "pending_product_labels": "Finish and send product label work.",
+        "pending_boxes": "Send pending boxes.",
+        "pending_exceptions": "Resolve and send pending exceptions.",
+        "conflicts": "Resolve source conflicts.",
+        "unknown_prints": "Resolve unknown print outcomes on the source.",
+        "active_tasks": "Finish active local and server work.",
+        "installed_grants": "Retire installed production grants through source drain.",
+        "client_upgrade_required": "Update the source client to measure every required channel.",
+        "credential_epoch_mismatch": "Refresh the source credential and request drain again.",
+        "facts_changed": "Facts changed. Request a fresh drain report.",
+        "report_stale": "The report is stale or missing. Refresh or request drain again."
+      },
+      "refresh": "Refresh replacement state",
+      "retry": "Retry same request",
+      "drain": "Request drain",
+      "preview": "Preview execution",
+      "emergency": "Emergency replacement",
+      "normal": "Normal replacement",
+      "close": "Close as evidence unavailable",
+      "targetCode": "Issue target pairing code",
+      "recoveryCode": "Issue source recovery code",
+      "confirmNormal": "Confirm replacement",
+      "confirmEmergency": "Confirm emergency replacement",
+      "confirmClose": "Confirm evidence unavailable",
+      "emergencyPreview": "Calculate emergency boundary",
+      "emergencyReason": "Emergency reason",
+      "closeReason": "Reason for unavailable evidence",
+      "acknowledge": "I understand that the old credential will be revoked, the target must wait until the boundary, and source evidence needs recovery.",
+      "previewRevision": "Confirming preparation revision {{revision}}.",
+      "previewExpires": "Preview expires at",
+      "codeExpires": "Code expires at",
+      "hideCode": "Hide code",
+      "secret": {
+        "source": "Source recovery code",
+        "target": "Target pairing code"
+      },
+      "codeLost": "The code response could not be verified. Issue a new code; the previous code will be retired. The old secret cannot be recovered.",
+      "dialog": {
+        "normal": "Transfer the working slot to the target and revoke the source credential. The source data stays on its original device.",
+        "emergency": "Use emergency replacement when the source cannot finish drain. The old credential will be revoked. The target can be paired immediately but cannot start work before the server boundary.",
+        "close": "Record that the source evidence cannot be recovered. This does not create missing evidence or confirm that local data was synchronized."
+      },
+      "recoveryReport": "Current source recovery report. Server blockers can remain even when local counters are zero.",
+      "savedReport": "Saved source measurements; these do not describe current recovery readiness.",
+      "recoveryBlockers": "Recovery blockers reported by the server",
+      "recoveryBlocker": {
+        "report_stale": "The recovery report is stale or missing. Send a fresh recovery report from the original device, then refresh.",
+        "facts_changed": "Recovery facts changed. Send a fresh recovery report from the original device, then refresh.",
+        "credential_epoch_mismatch": "The recovery credential changed. Issue a new recovery code for the original device and send a fresh report.",
+        "installed_grants": "Reconcile retained production grants on the source and send a fresh recovery report."
+      }
+    },
+    "cancelDrainBody": "Cancel this drain? After the source receives the cancellation, the source can resume new work under its current access rules. No slot is transferred.",
+    "observationBlockers": "Execution prerequisites in this preview",
+    "observationBlockersSaved": "Execution prerequisites at preparation (historical)"
   },
   "deviceRetention": {
     "title": "Devices to retain after a reduction",

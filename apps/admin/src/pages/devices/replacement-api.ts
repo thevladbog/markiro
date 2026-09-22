@@ -4,6 +4,10 @@ import {
   type DeviceReplacementPreviewRequest,
   type DeviceReplacementConfirm,
   type DeviceReplacementCancel,
+  type DeviceReplacementDrainRequest,
+  type DeviceReplacementEmergencyPreviewRequest,
+  type DeviceReplacementExecuteRequest,
+  type DeviceReplacementRecoveryCloseRequest,
 } from "@markiro/platform-contracts";
 import { ApiRequestError, apiFetch } from "../../api/client.js";
 const conflicts = z.enum([
@@ -12,6 +16,13 @@ const conflicts = z.enum([
   "device_replacement_request_conflict",
   "device_replacement_stale",
   "device_replacement_already_prepared",
+  "device_replacement_recovery_conflict",
+  "device_replacement_facts_unknown",
+  "device_replacement_capacity_unavailable",
+  "device_replacement_facts_too_large",
+  "device_replacement_offline_boundary_unknown",
+  "device_replacement_not_ready",
+  "client_upgrade_required",
 ]);
 export function replacementErrorKind(error: unknown): "authorization" | "conflict" | "uncertain" {
   if (!(error instanceof ApiRequestError)) return "uncertain";
@@ -105,4 +116,144 @@ export async function cancelDeviceReplacement(
   )
     throw new Error("Replacement response identity mismatch");
   return result;
+}
+
+export async function requestReplacementDrain(
+  tenantId: string,
+  preparationId: string,
+  body: DeviceReplacementDrainRequest,
+) {
+  const c = contracts.drain;
+  const request = c.body.parse(body);
+  const result = c.response.parse(
+    await apiFetch<unknown>(route(c.path, tenantId, "preparationId", preparationId), {
+      method: c.method,
+      body: JSON.stringify(request),
+    }),
+  );
+  if (result.requestId !== request.requestId || result.preparation.id !== preparationId)
+    throw new Error("Replacement response identity mismatch");
+  return result;
+}
+
+export async function previewReplacementExecution(
+  tenantId: string,
+  preparationId: string,
+  body: DeviceReplacementDrainRequest,
+) {
+  const c = contracts.executionPreview;
+  const request = c.body.parse(body);
+  const result = c.response.parse(
+    await apiFetch<unknown>(route(c.path, tenantId, "preparationId", preparationId), {
+      method: c.method,
+      body: JSON.stringify(request),
+    }),
+  );
+  if (
+    result.requestId !== request.requestId ||
+    result.preparationId !== preparationId ||
+    result.expectedRevision !== request.expectedRevision ||
+    result.mode !== "normal"
+  )
+    throw new Error("Replacement response identity mismatch");
+  return result;
+}
+
+export async function previewEmergencyReplacement(
+  tenantId: string,
+  preparationId: string,
+  body: DeviceReplacementEmergencyPreviewRequest,
+) {
+  const c = contracts.emergencyPreview;
+  const request = c.body.parse(body);
+  const result = c.response.parse(
+    await apiFetch<unknown>(route(c.path, tenantId, "preparationId", preparationId), {
+      method: c.method,
+      body: JSON.stringify(request),
+    }),
+  );
+  if (
+    result.requestId !== request.requestId ||
+    result.preparationId !== preparationId ||
+    result.expectedRevision !== request.expectedRevision ||
+    result.mode !== "emergency"
+  )
+    throw new Error("Replacement response identity mismatch");
+  return result;
+}
+
+export async function executeReplacement(
+  tenantId: string,
+  preparationId: string,
+  body: DeviceReplacementExecuteRequest,
+) {
+  const c = body.mode === "emergency" ? contracts.emergencyExecute : contracts.execute;
+  const request = c.body.parse(body);
+  const result = c.response.parse(
+    await apiFetch<unknown>(route(c.path, tenantId, "preparationId", preparationId), {
+      method: c.method,
+      body: JSON.stringify(request),
+    }),
+  );
+  if (result.requestId !== request.requestId || result.preparation.id !== preparationId)
+    throw new Error("Replacement response identity mismatch");
+  if (
+    result.preparation.execution?.mode !== request.mode ||
+    !["executing", "completed"].includes(result.preparation.state)
+  )
+    throw new Error("Replacement execution mismatch");
+  return result;
+}
+
+export async function issueReplacementRecoveryCode(
+  tenantId: string,
+  preparationId: string,
+  body: DeviceReplacementDrainRequest,
+) {
+  const c = contracts.recoveryCode;
+  const request = c.body.parse(body);
+  const result = c.response.parse(
+    await apiFetch<unknown>(route(c.path, tenantId, "preparationId", preparationId), {
+      method: c.method,
+      body: JSON.stringify(request),
+    }),
+  );
+  if (result.requestId !== request.requestId || result.preparation.id !== preparationId)
+    throw new Error("Replacement response identity mismatch");
+  return result;
+}
+
+export async function closeReplacementRecovery(
+  tenantId: string,
+  preparationId: string,
+  body: DeviceReplacementRecoveryCloseRequest,
+) {
+  const c = contracts.recoveryClose;
+  const request = c.body.parse(body);
+  const result = c.response.parse(
+    await apiFetch<unknown>(route(c.path, tenantId, "preparationId", preparationId), {
+      method: c.method,
+      body: JSON.stringify(request),
+    }),
+  );
+  if (result.requestId !== request.requestId || result.preparation.id !== preparationId)
+    throw new Error("Replacement response identity mismatch");
+  return result;
+}
+
+export async function issueReplacementTargetCode(
+  _tenantId: string,
+  _preparationId: string,
+  targetDeviceId: string,
+  _body: DeviceReplacementDrainRequest,
+) {
+  return z
+    .object({ code: z.string().regex(/^\d{8}$/), expiresAt: z.iso.datetime() })
+    .strict()
+    .parse(
+      await apiFetch<unknown>(
+        `/station-devices/${encodeURIComponent(targetDeviceId)}/pairing-code`,
+        { method: "POST" },
+      ),
+    );
 }

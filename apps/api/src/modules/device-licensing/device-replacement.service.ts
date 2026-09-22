@@ -1,3 +1,8 @@
+import {
+  deviceReplacementServerWorkBlockers,
+  type DeviceReplacementWorkBlockers,
+} from "./device-replacement-readiness-work";
+import { replacementPreparationProjection } from "./device-replacement-readiness-projection";
 import { randomUUID } from "node:crypto";
 import {
   BadRequestException,
@@ -7,7 +12,7 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { schema, type Db } from "@markiro/db";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import {
   deviceReplacementCancelSchema,
   deviceReplacementConfirmSchema,
@@ -97,20 +102,33 @@ export class DeviceReplacementService {
         const items = [];
         for (const row of rows) {
           let needsReview = false;
-          if (row.state === "prepared") {
+          let currentFingerprint: string | null = null;
+          let currentWorkBlockers: DeviceReplacementWorkBlockers = [];
+          if (["prepared", "draining", "ready"].includes(row.state)) {
             try {
               const facts = await readFacts(
                 row.deviceId,
                 deviceReplacementObservationSchema.parse(row.observation).target,
               );
-              needsReview = facts.fingerprint !== row.factsFingerprint;
+              currentFingerprint =
+                row.state === "prepared" ? facts.fingerprint : facts.readinessFingerprint;
+              currentWorkBlockers = deviceReplacementServerWorkBlockers(facts.work, row.deviceId);
+              needsReview = row.state === "prepared" && facts.fingerprint !== row.factsFingerprint;
             } catch (error) {
               if (error instanceof ConflictException || error instanceof NotFoundException)
                 needsReview = true;
               else throw error;
             }
           }
-          items.push({ preparation: publicPreparation(row), needsReview });
+          items.push({
+            preparation: await replacementPreparationProjection(
+              tx,
+              row,
+              currentFingerprint,
+              currentWorkBlockers,
+            ),
+            needsReview,
+          });
         }
         return deviceReplacementListSchema.parse({ canPrepare: authority.canCancel, items });
       },
@@ -348,8 +366,12 @@ export class DeviceReplacementService {
         )
         .for("update");
       if (!row) throw new NotFoundException();
-      if (row.state !== "prepared" || row.revision !== request.expectedRevision) conflict("stale");
-      const before = publicPreparation(row);
+      if (
+        !["prepared", "draining", "ready"].includes(row.state) ||
+        row.revision !== request.expectedRevision
+      )
+        conflict("stale");
+      const before = await replacementPreparationProjection(tx, row);
       const [next] = await tx
         .update(schema.workingDeviceReplacementPreparations)
         .set({
@@ -362,6 +384,16 @@ export class DeviceReplacementService {
         .where(eq(schema.workingDeviceReplacementPreparations.id, preparationId))
         .returning();
       if (!next) throw new Error("Replacement cancellation failed");
+      await tx
+        .update(schema.workingDeviceReplacementReadinessIntents)
+        .set({ state: "cancelled", closedAt: next.cancelledAt })
+        .where(
+          and(
+            eq(schema.workingDeviceReplacementReadinessIntents.tenantId, tenantId),
+            eq(schema.workingDeviceReplacementReadinessIntents.preparationId, preparationId),
+            eq(schema.workingDeviceReplacementReadinessIntents.state, "active"),
+          ),
+        );
       const receipt = deviceReplacementReceiptSchema.parse({
         requestId: request.requestId,
         preparation: publicPreparation(next),
@@ -416,7 +448,12 @@ export class DeviceReplacementService {
         and(
           eq(schema.workingDeviceReplacementPreparations.tenantId, tenantId),
           eq(schema.workingDeviceReplacementPreparations.deviceId, deviceId),
-          eq(schema.workingDeviceReplacementPreparations.state, "prepared"),
+          inArray(schema.workingDeviceReplacementPreparations.state, [
+            "prepared",
+            "draining",
+            "ready",
+            "executing",
+          ]),
         ),
       );
     if (row) conflict("already_prepared");

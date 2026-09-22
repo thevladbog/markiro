@@ -1,3 +1,13 @@
+import { persistReplacementEvidenceRecovery } from "./replacement-evidence-recovery.js";
+import {
+  replacementEvidenceRecoverySchema,
+  type ReplacementEvidenceRecovery,
+} from "@markiro/platform-contracts";
+import { persistTargetReplacementFence } from "./replacement-target.js";
+import {
+  deviceReplacementTargetFenceSchema,
+  type DeviceReplacementTargetFence,
+} from "@markiro/platform-contracts";
 import {
   stationRecoveryResponseSchema,
   type StationRecoveryIdentity,
@@ -15,7 +25,11 @@ import { parsePhc } from "@markiro/domain";
 import type { OperatorMirrorRecord } from "@markiro/db/station-sqlite";
 import { postUnauthenticatedStationRequest } from "./api-client.js";
 import type { StationConfig } from "./config.js";
-import { replaceOperatorsMirror, type SqlExecutor } from "./mirror.js";
+import {
+  replaceOperatorsMirror,
+  restoreSealedOperatorsMirror,
+  type SqlExecutor,
+} from "./mirror.js";
 
 export type PairingError =
   | "invalid"
@@ -39,6 +53,8 @@ export interface StationProvisioning {
   serverUrl: string;
   operators: OperatorMirrorRecord[];
   subscription?: StationSubscriptionAccess;
+  replacement?: DeviceReplacementTargetFence;
+  recovery?: ReplacementEvidenceRecovery;
 }
 
 interface StationSubscriptionAccess {
@@ -132,6 +148,8 @@ export async function redeemStationRecovery(
       credential: parsed.data.credential,
       operators: parsed.data.operators,
       ...(parsed.data.subscription ? { subscription: parsed.data.subscription } : {}),
+      ...(parsed.data.replacement ? { replacement: parsed.data.replacement } : {}),
+      ...(parsed.data.recovery ? { recovery: parsed.data.recovery } : {}),
     });
     if (!provisioning) return { ok: false, error: "invalid_response" };
     const actual = stationOwner({ machineId: "", ...provisioning });
@@ -166,9 +184,26 @@ export async function persistStationProvisioning(
   if (!provisioning.operators.every(isOperator)) {
     throw new Error("Invalid operator roster");
   }
+  if (provisioning.recovery && !expectedOwner) throw new Error("Recovery identity required");
   const publish = async (config: StationConfig) => {
-    await replaceOperatorsMirror(exec, provisioning.operators);
-    onRosterPublished?.();
+    await persistReplacementEvidenceRecovery(exec, provisioning);
+    if (!provisioning.recovery) await persistTargetReplacementFence(exec, provisioning);
+    if (provisioning.recovery && expectedOwner) {
+      await restoreSealedOperatorsMirror(
+        exec,
+        JSON.stringify({
+          serverOrigin: expectedOwner.serverOrigin,
+          tenantId: expectedOwner.tenantId,
+          deviceId: expectedOwner.deviceId,
+          kind: expectedOwner.kind,
+        }),
+      );
+      onRosterPublished?.();
+    } else {
+      await replaceOperatorsMirror(exec, provisioning.operators);
+      onRosterPublished?.();
+      await exec.run("DELETE FROM station_meta WHERE key=?", ["sealed_operator_roster_v1"]);
+    }
     await writeConfig(config);
   };
   if (expectedOwner) {
@@ -214,10 +249,24 @@ async function readJson(response: Response): Promise<unknown> {
  * write. A partial response must never leave the station half-paired.
  */
 function decodeProvisioning(value: unknown): StationProvisioning | null {
-  if (!isExactRecordWithOptional(value, ["device", "credential", "operators"], ["subscription"])) {
+  if (
+    !isExactRecordWithOptional(
+      value,
+      ["device", "credential", "operators"],
+      ["subscription", "replacement", "recovery"],
+    )
+  ) {
     return null;
   }
-  const { device, credential, operators, subscription } = value;
+  const { device, credential, operators, subscription, replacement, recovery } = value;
+  const evidence =
+    recovery === undefined ? undefined : replacementEvidenceRecoverySchema.safeParse(recovery);
+  if (evidence && !evidence.success) return null;
+  const fence =
+    replacement === undefined
+      ? undefined
+      : deviceReplacementTargetFenceSchema.safeParse(replacement);
+  if (fence && !fence.success) return null;
   if (!isExactRecord(device, ["id", "name", "tenantId", "organizationName", "line"])) return null;
   if (!isExactRecord(credential, ["apiKey", "serverUrl"])) return null;
   if (
@@ -259,6 +308,8 @@ function decodeProvisioning(value: unknown): StationProvisioning | null {
     serverUrl: credential.serverUrl,
     operators,
     ...(subscription !== undefined ? { subscription } : {}),
+    ...(fence?.success ? { replacement: fence.data } : {}),
+    ...(evidence?.success ? { recovery: evidence.data } : {}),
   };
 }
 

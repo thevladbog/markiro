@@ -39,6 +39,8 @@ const val EFFECTIVE_CODES = "SELECT codeHash, shiftId FROM codes_mirror c WHERE 
     "AND o.scannedAt=c.scannedAt AND o.outcome='conflict') UNION SELECT codeHash, shiftId FROM " +
     "validation_occurrences WHERE kind='reprocessed' AND outcome<>'conflict'"
 
+const val PENDING_VALIDATION_OCCURRENCES_COUNT = "SELECT COUNT(*) FROM validation_occurrences WHERE outcome='pending'"
+
 @Dao
 interface ValidationDao {
     @Insert suspend fun insert(row: ValidationOccurrenceEntity)
@@ -47,8 +49,10 @@ interface ValidationDao {
     suspend fun get(shiftId: String, hash: String): ValidationOccurrenceEntity?
     @Query("SELECT * FROM validation_occurrences WHERE (shiftId>:afterShift OR (shiftId=:afterShift AND codeHash>:afterHash)) ORDER BY shiftId, codeHash LIMIT :limit")
     suspend fun page(afterShift: String, afterHash: String, limit: Int): List<ValidationOccurrenceEntity>
-    @Query("SELECT COUNT(*) FROM validation_occurrences WHERE outcome='pending'")
+    @Query(PENDING_VALIDATION_OCCURRENCES_COUNT)
     fun pendingCount(): Flow<Int>
+    @Query(PENDING_VALIDATION_OCCURRENCES_COUNT)
+    suspend fun pendingCountNow(): Int
     @Query("SELECT COUNT(*) FROM validation_occurrences WHERE shiftId=:shiftId AND outcome=:outcome")
     fun observeCount(shiftId: String, outcome: String): Flow<Int>
     @Query("SELECT EXISTS(SELECT 1 FROM (" + EFFECTIVE_CODES + ") e LEFT JOIN shift_mirror s ON s.id=e.shiftId WHERE e.codeHash=:hash AND e.shiftId<>:shiftId AND COALESCE(s.status,'active')<>'closed' AND e.shiftId<>COALESCE(:closedSource,''))")

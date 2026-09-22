@@ -31,6 +31,8 @@ const workSchema = z.object({
       projection: z.unknown(),
     }),
   ),
+  warehousePallets: z.array(z.object({ id: z.string(), deviceId: z.string() })),
+  nativeEvidence: z.array(z.object({ id: z.string(), deviceId: z.string() })),
   quarantine: z.array(
     z.object({
       id: z.string(),
@@ -44,7 +46,15 @@ const workSchema = z.object({
 });
 
 /** One PostgreSQL statement snapshot for work that does not share licensing
- * locks. The observation counts and its fingerprint use these same exact rows. */
+ * locks. The observation counts and its fingerprint use these same exact rows.
+ * Native receipts are resolved only after finalized productive reconciliation
+ * (applied or terminal rejection). Quarantine/not_applied/unknown stays blocking;
+ * retained legacy native quarantine has no resolution marker and remains blocked.
+ * Terminal inventory receipts may still have late-event quarantine; only its
+ * explicit replayed/discarded resolution clears that retained recovery work.
+ * Warehouse pallets have no shift participant, so unfinished server-owned pallets
+ * must block independently of a device's possibly empty local report.
+ * Include all credential epochs: credential recovery must not hide pending work. */
 export async function readDeviceLicensingWork(tx: SubscriptionTransaction, tenantId: string) {
   const result = await tx.execute(sql`select
     coalesce((select jsonb_agg(x order by x.id,x."deviceId") from (
@@ -58,12 +68,33 @@ export async function readDeviceLicensingWork(tx: SubscriptionTransaction, tenan
       where i.tenant_id=${tenantId} and i.status not in ('completed','cancelled')
     ) x),'[]'::jsonb) as inventories,
     coalesce((select jsonb_agg(x order by x."deviceId",x.id) from (
+      select id,device_id as "deviceId" from pallets
+      where tenant_id=${tenantId} and kind='warehouse'
+        and closed_at is null and disassembled_at is null
+    ) x),'[]'::jsonb) as "warehousePallets",
+    coalesce((select jsonb_agg(x order by x."deviceId",x.id) from (
       select job_id as id,device_id as "deviceId",latest_sequence as "latestSequence",payload_digest as "payloadDigest",projection
       from product_label_jobs where tenant_id=${tenantId}
     ) x),'[]'::jsonb) as jobs,
     coalesce((select jsonb_agg(x order by x.id) from (
       select id,terminal_id as "deviceId",batch_id as "batchId",record_kind as "recordKind",record_index as "recordIndex",payload_digest as "payloadDigest"
       from station_sync_quarantine where tenant_id=${tenantId}
-    ) x),'[]'::jsonb) as quarantine`);
+    ) x),'[]'::jsonb) as quarantine,
+    coalesce((select jsonb_agg(x order by x."deviceId",x.id) from (
+      select id,station_device_id as "deviceId"
+      from device_grant_ingest_receipts
+      where tenant_id=${tenantId} and station_device_id is not null
+        and not coalesce(finalized_at is not null
+          and final_response->>'outcome' in ('accepted','duplicate')
+          and final_response->'reconciliation'->>'status' in ('applied','rejected'), false)
+      union all
+      select id,station_device_id as "deviceId"
+      from device_grant_evidence
+      where tenant_id=${tenantId} and station_device_id is not null and disposition='quarantined'
+      union all
+      select id,device_id as "deviceId"
+      from inventory_late_events
+      where tenant_id=${tenantId} and resolution='pending'
+    ) x),'[]'::jsonb) as "nativeEvidence"`);
   return workSchema.parse(result.rows[0]);
 }

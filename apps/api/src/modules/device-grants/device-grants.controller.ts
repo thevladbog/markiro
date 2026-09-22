@@ -1,3 +1,4 @@
+import { AllowReplacementEvidenceRecovery } from "../device-licensing/replacement-recovery-policy";
 import { GrantEvidenceNativeService } from "./grant-evidence-native.service";
 import {
   Body,
@@ -126,6 +127,7 @@ export class DeviceGrantsController {
   }
   @ApiOperation({ summary: "Read the authenticated offline grant verifier keyset" })
   @Get("keyset")
+  @AllowReplacementEvidenceRecovery()
   @AllowSubscriptionReadOnly("read")
   @ApiOkResponse({ schema: zodApiSchema(grantKeysetResultSchema) })
   @ApiHttpErrors(401, 403, 429)
@@ -133,9 +135,14 @@ export class DeviceGrantsController {
     return this.issuer.keyset(identity(req));
   }
   @Post("evidence/scans")
+  @AllowReplacementEvidenceRecovery()
   @HttpCode(200)
   @AllowSubscriptionRecovery("station")
-  @ApiOperation({ summary: "Retain negotiated offline evidence and return durable reconciliation" })
+  @ApiOperation({
+    summary: "Retain negotiated offline evidence and return durable reconciliation",
+    description:
+      "Before a replacement target’s newWorkAllowedAt, evidence is durably quarantined with reason device_replacement_waiting and reconciliation.status not_applied, including observe mode. Retries preserve the classification after the boundary. Old draining-source evidence remains recoverable. After emergency source transfer, first delivery is quarantined as unproven_pre_replacement_evidence even in observe mode; only exact pre-cutover server receipts can resume reconciliation.",
+  })
   @ApiZodBody(grantEvidenceEnvelopeSchema)
   @ApiOkResponse({ schema: zodApiSchema(grantEvidenceReceiptSchema) })
   @ApiHttpErrors(400, 401, 403, 409, 413, 429)
@@ -147,9 +154,14 @@ export class DeviceGrantsController {
     return this.evidence.scanBatch(identity(req), body, req.rawBody, capabilities);
   }
   @Post("evidence/shift-closures")
+  @AllowReplacementEvidenceRecovery()
   @HttpCode(200)
   @AllowSubscriptionRecovery("station")
-  @ApiOperation({ summary: "Retain negotiated offline evidence and return durable reconciliation" })
+  @ApiOperation({
+    summary: "Retain negotiated offline evidence and return durable reconciliation",
+    description:
+      "Before a replacement target’s newWorkAllowedAt, evidence is durably quarantined with reason device_replacement_waiting and reconciliation.status not_applied, including observe mode. Retries preserve the classification after the boundary. Old draining-source evidence remains recoverable. After emergency source transfer, first delivery is quarantined as unproven_pre_replacement_evidence even in observe mode; only exact pre-cutover server receipts can resume reconciliation.",
+  })
   @ApiZodBody(grantEvidenceEnvelopeSchema)
   @ApiOkResponse({ schema: zodApiSchema(grantEvidenceReceiptSchema) })
   @ApiHttpErrors(400, 401, 403, 409, 413, 429)
@@ -160,9 +172,14 @@ export class DeviceGrantsController {
     return this.evidence.shiftClose(identity(req), body, req.rawBody);
   }
   @Post("evidence/inventories/:id/event-batches")
+  @AllowReplacementEvidenceRecovery()
   @HttpCode(200)
   @AllowSubscriptionRecovery("station")
-  @ApiOperation({ summary: "Retain negotiated offline evidence and return durable reconciliation" })
+  @ApiOperation({
+    summary: "Retain negotiated offline evidence and return durable reconciliation",
+    description:
+      "Before a replacement target’s newWorkAllowedAt, evidence is durably quarantined with reason device_replacement_waiting and reconciliation.status not_applied, including observe mode. Retries preserve the classification after the boundary. Old draining-source evidence remains recoverable. After emergency source transfer, first delivery is quarantined as unproven_pre_replacement_evidence even in observe mode; only exact pre-cutover server receipts can resume reconciliation.",
+  })
   @ApiZodBody(grantEvidenceEnvelopeSchema)
   @ApiOkResponse({ schema: zodApiSchema(grantEvidenceReceiptSchema) })
   @ApiHttpErrors(400, 401, 403, 409, 413, 429)
@@ -174,9 +191,14 @@ export class DeviceGrantsController {
     return this.evidence.inventoryEvents(identity(req), id, body, req.rawBody);
   }
   @Post("evidence/inventories/:id/leave")
+  @AllowReplacementEvidenceRecovery()
   @HttpCode(200)
   @AllowSubscriptionRecovery("station")
-  @ApiOperation({ summary: "Retain negotiated offline evidence and return durable reconciliation" })
+  @ApiOperation({
+    summary: "Retain negotiated offline evidence and return durable reconciliation",
+    description:
+      "Before a replacement target’s newWorkAllowedAt, evidence is durably quarantined with reason device_replacement_waiting and reconciliation.status not_applied, including observe mode. Retries preserve the classification after the boundary. Old draining-source evidence remains recoverable. After emergency source transfer, first delivery is quarantined as unproven_pre_replacement_evidence even in observe mode; only exact pre-cutover server receipts can resume reconciliation.",
+  })
   @ApiZodBody(grantEvidenceEnvelopeSchema)
   @ApiOkResponse({ schema: zodApiSchema(grantEvidenceReceiptSchema) })
   @ApiHttpErrors(400, 401, 403, 409, 413, 429)

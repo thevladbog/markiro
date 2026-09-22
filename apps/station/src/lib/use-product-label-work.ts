@@ -21,7 +21,10 @@ import {
   skipProductLabelVerification,
   changePreparedProductLabelPrinter,
 } from "./product-labels/printing.js";
-import { restoreProductLabelWork } from "./product-labels/recovery.js";
+import {
+  requireReplacementLabelRecovery,
+  restoreProductLabelWork,
+} from "./product-labels/recovery.js";
 import {
   listProductLabelJobViews,
   presentProductLabelJob,
@@ -57,6 +60,7 @@ interface ProductLabelWorkOptions {
   shiftId: string;
   credentialOwnership: string;
   generation?: CredentialGeneration;
+  recoveryJobId?: string;
   getPrinting(): ProductLabelPrintingDeps;
   canPrint?(): boolean;
   printers?(): PrinterProfile[];
@@ -66,7 +70,7 @@ interface ProductLabelWorkOptions {
 
 /** One admission latch covers preparation, durable events, transport and verification. */
 export function createProductLabelWork(options: ProductLabelWorkOptions) {
-  const { exec, credentialOwnership, shiftId, generation } = options;
+  const { exec, credentialOwnership, shiftId, generation, recoveryJobId } = options;
   let state: ProductLabelWorkState = {
     ready: false,
     busy: false,
@@ -95,7 +99,11 @@ export function createProductLabelWork(options: ProductLabelWorkOptions) {
     if (generation && !lease)
       return Promise.reject(new DomainError("PRODUCT_LABEL_STALE", "Credential is retired"));
     publish({ busy: true, result: null });
-    const result = Promise.resolve().then(operation);
+    const result = Promise.resolve().then(async () => {
+      if (recoveryJobId)
+        await requireReplacementLabelRecovery(exec, credentialOwnership, shiftId, recoveryJobId);
+      return operation();
+    });
     const tracked = result.finally(() => {
       lease?.release();
       if (pending === tracked) pending = null;
@@ -111,16 +119,23 @@ export function createProductLabelWork(options: ProductLabelWorkOptions) {
     );
     const job = jobId
       ? presentProductLabelJob(await requireProductLabelJob(exec, credentialOwnership, jobId))
-      : await restoreProductLabelWork(exec, credentialOwnership, options.getPrinting());
+      : await restoreProductLabelWork(
+          exec,
+          credentialOwnership,
+          options.getPrinting(),
+          recoveryJobId,
+        );
     if (job && job.shiftId !== shiftId) {
       publish({ job: null, closed: true, error: "another_shift" });
       return;
     }
     publish({
       job,
-      closed: shift?.status !== "active",
+      closed: Boolean(recoveryJobId) || shift?.status !== "active",
       error:
-        (!job || job.status === "completed") && options.canPrint?.() === false ? "printer" : null,
+        !recoveryJobId && (!job || job.status === "completed") && options.canPrint?.() === false
+          ? "printer"
+          : null,
     });
   }
   async function send(jobId: string) {
@@ -157,7 +172,9 @@ export function createProductLabelWork(options: ProductLabelWorkOptions) {
     },
     list: () =>
       current()
-        ? listProductLabelJobViews(exec, credentialOwnership, shiftId)
+        ? recoveryJobId
+          ? Promise.resolve(state.job ? [state.job] : [])
+          : listProductLabelJobViews(exec, credentialOwnership, shiftId)
         : Promise.resolve([]),
     subscribe: (listener: () => void) => {
       listeners.add(listener);
@@ -166,6 +183,7 @@ export function createProductLabelWork(options: ProductLabelWorkOptions) {
       };
     },
     canAccept: () =>
+      !recoveryJobId &&
       current() &&
       state.ready &&
       !state.busy &&
@@ -332,6 +350,8 @@ export function createProductLabelWork(options: ProductLabelWorkOptions) {
       });
     },
     async reprint(jobId: string, reason: ReprintReason, printer?: PrinterProfile) {
+      if (recoveryJobId && jobId !== recoveryJobId)
+        throw new Error("PRODUCT_LABEL_RECOVERY_UNAVAILABLE");
       await run(async () => {
         if (
           printer &&
@@ -390,9 +410,10 @@ export function useProductLabelWork(input: {
   terminalId: string | null;
   operatorId: string;
   environment?: ProductLabelWorkEnvironment;
+  recoveryJobId?: string;
   register?: (barrier: FloorWorkBarrier) => () => void;
 }) {
-  const { exec, shiftId, environment } = input;
+  const { exec, shiftId, environment, recoveryJobId } = input;
   const current = useRef(input);
   current.current = input;
   const generation = environment?.generation;
@@ -402,7 +423,10 @@ export function useProductLabelWork(input: {
     verification: ProductLabelJobView["verification"] | null;
     error: boolean;
   } | null>(null);
-  const key = useMemo(() => ({ exec, shiftId, generation }), [exec, shiftId, generation]);
+  const key = useMemo(
+    () => ({ exec, shiftId, generation, recoveryJobId }),
+    [exec, shiftId, generation, recoveryJobId],
+  );
   useEffect(() => {
     if (!generation) return;
     let active = true;
@@ -459,8 +483,10 @@ export function useProductLabelWork(input: {
           shiftId,
           credentialOwnership: owner,
           generation,
+          ...(recoveryJobId ? { recoveryJobId } : {}),
           isCurrent: () =>
             current.current.shiftId === shiftId &&
+            current.current.recoveryJobId === recoveryJobId &&
             current.current.environment?.generation === generation,
           getPrinting,
           printers: () => {
@@ -528,7 +554,7 @@ export function useProductLabelWork(input: {
         .then(() => controller?.close())
         .finally(() => unregister?.());
     };
-  }, [exec, shiftId, generation, key]);
+  }, [exec, shiftId, generation, key, recoveryJobId]);
   const available = loaded?.key === key ? loaded : null;
   const work = available?.work ?? null;
   useEffect(() => {

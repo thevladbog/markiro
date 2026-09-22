@@ -673,6 +673,20 @@
         <item quantity="one">%d box</item>
         <item quantity="other">%d boxes</item>
     </plurals>
+    <string name="replacement_drain">Preparing to replace this handheld. Finish current work and synchronization. New tasks are unavailable.</string>
+    <string name="replacement_closed">This handheld was replaced. New tasks are unavailable. Saved data remains available for recovery.</string>
+    <string name="replacement_scans">Scans: %1$s</string>
+    <string name="replacement_inventories">Inventory events: %1$s</string>
+    <string name="replacement_closures">Shift closures: %1$s</string>
+    <string name="replacement_labels">Product labels: %1$s</string>
+    <string name="replacement_boxes">Boxes and pallets: %1$s</string>
+    <string name="replacement_exceptions">Exceptions and write-offs: %1$s</string>
+    <string name="replacement_conflicts">Conflicts: %1$s</string>
+    <string name="replacement_prints">Unknown print outcomes: %1$s</string>
+    <string name="replacement_tasks">Active tasks: %1$d</string>
+    <string name="replacement_denied_title">New work unavailable</string>
+    <string name="replacement_denied_body">This device is being replaced. New tasks and write-offs are unavailable. Finish existing work or contact an administrator.</string>
+    <string name="replacement_waiting">Device connected and waiting for safe handover. New work unlocks after the old offline grants expire and the server confirms the boundary.</string>
 
     <!-- Warehouse pallets -->
     <string name="pallets_title">Pallets</string>

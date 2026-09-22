@@ -1,3 +1,4 @@
+import { assertDeviceReplacementNewWorkAllowed } from "../device-licensing/device-replacement-admission";
 import { BadRequestException, Inject, Injectable, Logger } from "@nestjs/common";
 import { and, eq } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
@@ -114,6 +115,7 @@ export class StationPalletsService {
     // nothing, so committing them changes no counter.
     try {
       return await this.db.transaction(async (tx) => {
+        await assertDeviceReplacementNewWorkAllowed(tx, tenantId, deviceId);
         const access = await this.entitlements.resolveRecovery(tenantId, tx, new Date());
         if (access.access === "read_only") return none;
         let issuerPrefix: string;

@@ -561,7 +561,7 @@ export class ShiftsController {
   @ApiOperation({
     summary: "Download the shift bundle",
     description:
-      "Everything the station needs offline. On aggregation shifts a station caller also allocates or reconciles its SSCC serial block.",
+      "Everything the station needs offline. On aggregation shifts a station caller also allocates or reconciles its SSCC serial block. Allocation is denied with device_replacement_waiting before the target's newWorkAllowedAt; reference-bundle remains available for recovery.",
   })
   @ApiCabinetOrStationAuth()
   @ApiParam({ name: "id", format: "uuid" })

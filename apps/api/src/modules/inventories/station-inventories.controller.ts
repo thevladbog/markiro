@@ -1,3 +1,4 @@
+import { AllowReplacementEvidenceRecovery } from "../device-licensing/replacement-recovery-policy";
 import {
   Body,
   Controller,
@@ -147,11 +148,15 @@ export class StationInventoriesController {
   }
 
   @Get("inventories/:id/bundle/manifest")
-  @ApiOperation({ summary: "Get the inventory bundle manifest" })
+  @ApiOperation({
+    summary: "Get the inventory bundle manifest",
+    description:
+      "A repack manifest can allocate serial ranges and is denied with device_replacement_waiting before the target's newWorkAllowedAt. Check manifests remain reference-only.",
+  })
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
   @ApiOkResponse({ schema: stationInventoryBundleManifestOpenApiSchema })
   @ApiZodValidationError()
-  @ApiHttpErrors(401, 403)
+  @ApiHttpErrors(401, 403, 409)
   manifest(
     @Req() req: RequestWithTenant,
     @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
@@ -191,14 +196,19 @@ export class StationInventoriesController {
   }
 
   @Post("inventories/:id/event-batches")
+  @AllowReplacementEvidenceRecovery()
   @HttpCode(200)
   @AllowSubscriptionRecovery("station")
-  @ApiOperation({ summary: "Submit an inventory scan event batch" })
+  @ApiOperation({
+    summary: "Submit an inventory scan event batch",
+    description:
+      "Waiting replacement targets retain bounded batches without business effects and return 409 with code device_replacement_waiting, outcome quarantined, receiptId and newWorkAllowedAt. Exact retries replay the receipt. Old draining-source sync remains available. After emergency source transfer, unproven first-delivery payloads are retained without effects as device_replacement_recovery / unproven_pre_replacement_evidence; exact committed receipts replay.",
+  })
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
   @ApiBody({ schema: stationInventoryEventBatchOpenApiSchema })
   @ApiOkResponse({ schema: stationInventoryEventBatchResponseOpenApiSchema })
   @ApiZodValidationError()
-  @ApiHttpErrors(401, 403)
+  @ApiHttpErrors(401, 403, 409, 413)
   eventBatch(
     @Req() req: RequestWithTenant,
     @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
@@ -210,6 +220,7 @@ export class StationInventoriesController {
   }
 
   @Get("inventories/:id/progress")
+  @AllowReplacementEvidenceRecovery()
   @ApiOperation({
     summary: "Get incremental inventory progress",
     description: "Cursor-based feed of progress updates for station polling.",
@@ -239,14 +250,19 @@ export class StationInventoriesController {
   }
 
   @Post("inventories/:id/leave")
+  @AllowReplacementEvidenceRecovery()
   @HttpCode(200)
   @AllowSubscriptionRecovery("station")
-  @ApiOperation({ summary: "Leave an inventory" })
+  @ApiOperation({
+    summary: "Leave an inventory",
+    description:
+      "A waiting target retains the request before participant validation and returns its saved quarantine receipt even after the boundary. Retries must keep requestId and body unchanged; omitted requestId uses one fixed legacy identity. A new leave requires a new requestId or native batchId. Existing source recovery remains available under read-only subscriptions. A transferred source retains an unproven leave as device_replacement_recovery without changing participant state.",
+  })
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
   @ApiBody({ schema: leaveStationInventoryOpenApiSchema })
   @ApiOkResponse({ schema: leaveStationInventoryResponseOpenApiSchema })
   @ApiZodValidationError()
-  @ApiHttpErrors(401, 403)
+  @ApiHttpErrors(401, 403, 409, 413)
   leave(
     @Req() req: RequestWithTenant,
     @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,

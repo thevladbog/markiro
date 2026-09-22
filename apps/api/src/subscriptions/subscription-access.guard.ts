@@ -6,7 +6,8 @@ import {
   type ExecutionContext,
 } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
-import type { Request } from "express";
+import type { RequestWithTenant } from "../tenancy/tenant.guard";
+import { REPLACEMENT_RECOVERY_POLICY } from "../modules/device-licensing/replacement-recovery-policy";
 import { EntitlementsService, SUBSCRIPTION_ENFORCEMENT_MODE } from "./entitlements.service";
 import type { SubscriptionEnforcementMode } from "./entitlements.types";
 import {
@@ -18,10 +19,6 @@ import {
   SubscriptionReadOnlyException,
   SubscriptionUnmanagedException,
 } from "./subscription-errors";
-
-interface RequestWithSubscriptionTenant extends Request {
-  tenantId?: string;
-}
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
@@ -35,7 +32,7 @@ export class SubscriptionAccessGuard implements CanActivate {
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const request = context.switchToHttp().getRequest<RequestWithSubscriptionTenant>();
+    const request = context.switchToHttp().getRequest<RequestWithTenant>();
     const policy = this.reflector.getAllAndOverride<SubscriptionAccessPolicy>(
       ROUTE_SUBSCRIPTION_ACCESS_POLICY,
       [context.getHandler(), context.getClass()],
@@ -47,9 +44,24 @@ export class SubscriptionAccessGuard implements CanActivate {
     }
     if (!request.tenantId) throw new ForbiddenException({ code: "subscription_policy_missing" });
 
+    // TenantGuard supplies the execution binding only after authenticating the
+    // purpose, revoked source, released assignment and live recovery epoch.
+    // The handler must independently opt in; ordinary station recovery is unchanged.
+    if (
+      request.authKind === "station" &&
+      request.replacementRecoveryExecutionId &&
+      this.reflector.get(REPLACEMENT_RECOVERY_POLICY, context.getHandler()) === true &&
+      (policy.mode === "recovery" || policy.mode === "read_only_allowed")
+    )
+      return true;
+
     const resolved = await this.entitlements.resolve(request.tenantId, undefined, new Date());
     if (resolved.access === "unmanaged") {
-      if (policy.mode === "licensing") return true;
+      if (
+        policy.mode === "licensing" ||
+        (policy.mode === "recovery" && policy.kind === "replacement_readiness")
+      )
+        return true;
       if (this.enforcementMode === "all") throw new SubscriptionUnmanagedException();
       return true;
     }

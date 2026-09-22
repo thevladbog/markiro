@@ -1,3 +1,4 @@
+import { deviceReplacementTargetFenceSchema } from "./device-replacements.js";
 import { z } from "zod";
 import { grantOwnerSchema } from "@markiro/domain";
 export {
@@ -195,6 +196,7 @@ export const grantConfigurationSchema = z
     mode: z.enum(["observe", "strict"]),
     policyRevision: z.string().min(1).nullable(),
     keyset: grantKeysetSchema.nullable(),
+    replacement: deviceReplacementTargetFenceSchema.optional(),
   })
   .strict();
 export type GrantConfiguration = z.infer<typeof grantConfigurationSchema>;

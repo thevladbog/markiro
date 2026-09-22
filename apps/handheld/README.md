@@ -17,6 +17,27 @@ Requires JDK 17 and the Android SDK (platform 35); point `local.properties` at i
 (`sdk.dir=…`, the file is gitignored). Fonts are bundled (see FONT-LICENSES.md;
 `tools/fetch-fonts.sh` re-downloads them).
 
+## Device replacement drain
+
+Room v20 adds a durable replacement intent and exact readiness/closure request bodies.
+An authenticated versioned intent retires only device grants, blocks new shifts,
+inventories, write-offs and warehouse box attachments, and leaves existing task completion,
+warehouse pallet closure/removal, printing recovery and sync workers available. The hub shows
+each pending channel, conflicts, unknown printing and active tasks. Warehouse membership and removal queues count toward pending boxes;
+unacknowledged membership rejections count as conflicts. Existing inventory snapshots cannot
+be replaced while draining.
+
+A missing intent or `none` response never clears saved drain. Cancellation releases new
+work only after the exact credential-bound acknowledgement is committed locally; lost
+responses retry the saved request. A `closed` tombstone keeps source new work disabled.
+Delayed configuration and grant responses cannot restore authority across these transitions.
+Credential rotation retains the old evidence and refuses to acknowledge it with a new
+generation. Room migration preserves recovery journals and prepared bytes, including
+previous-version grant-readiness outbox requests.
+
+Unit/Robolectric, Room restart and MockWebServer checks verify these software boundaries.
+They do not establish vendor scanner, physical printer or production TSD acceptance.
+
 ## Debug aids (debug build only)
 
 - The pairing screen has an editable server address; point it at the local API

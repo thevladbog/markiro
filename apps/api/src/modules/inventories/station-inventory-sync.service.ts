@@ -1,4 +1,9 @@
 import {
+  preflightReplacementSubmission,
+  withReplacementTransaction,
+  type ReplacementSubmission,
+} from "../device-licensing/device-replacement-evidence";
+import {
   withEvidenceTransaction,
   type EvidenceTransactionHook,
 } from "../device-grants/evidence-transaction";
@@ -213,7 +218,7 @@ export class StationInventorySyncService {
     });
   }
 
-  private ingestBatch(
+  private async ingestBatch(
     tenantId: string,
     deviceId: string,
     inventoryId: string,
@@ -221,7 +226,34 @@ export class StationInventorySyncService {
     replayRequest: { lateEventId: string; actorUserId: string } | null,
     evidence?: EvidenceTransactionHook<StationInventoryEventBatchResponseDto>,
   ): Promise<StationInventoryEventBatchResponseDto> {
-    return this.db.transaction(async (tx) =>
+    const replacementSubmission: ReplacementSubmission | undefined = !evidence
+      ? {
+          tenantId: tenantId,
+          deviceId: deviceId,
+          operation: `inventories/${inventoryId}/event-batches`,
+          submissionId: input.batchId,
+          payload: input,
+          alreadyApplied: async (tx) => {
+            const [existing] = await tx
+              .select({ payloadDigest: schema.inventoryScanBatches.payloadDigest })
+              .from(schema.inventoryScanBatches)
+              .where(
+                and(
+                  eq(schema.inventoryScanBatches.tenantId, tenantId),
+                  eq(schema.inventoryScanBatches.inventoryId, inventoryId),
+                  eq(schema.inventoryScanBatches.deviceId, deviceId),
+                  eq(schema.inventoryScanBatches.batchId, input.batchId),
+                ),
+              );
+            if (existing && existing.payloadDigest !== input.payloadDigest)
+              throw new ConflictException({ code: "INVENTORY_BATCH_DIGEST_CONFLICT" });
+            return Boolean(existing);
+          },
+        }
+      : undefined;
+    await preflightReplacementSubmission(this.db, replacementSubmission);
+
+    return withReplacementTransaction(this.db, replacementSubmission, async (tx) =>
       withEvidenceTransaction(tx, evidence, async () => {
         let replayAuthorization: { lateEventId: string; actorUserId: string } | null = null;
         const [inventory] = await tx
@@ -1073,14 +1105,25 @@ export class StationInventorySyncService {
     );
   }
 
-  leave(
+  async leave(
     tenantId: string,
     deviceId: string,
     inventoryId: string,
     input: LeaveStationInventoryDto,
     evidence?: EvidenceTransactionHook<LeaveStationInventoryResponseDto>,
   ): Promise<LeaveStationInventoryResponseDto> {
-    return this.db.transaction(async (tx) =>
+    const replacementSubmission: ReplacementSubmission | undefined = !evidence
+      ? {
+          tenantId: tenantId,
+          deviceId: deviceId,
+          operation: `inventories/${inventoryId}/leave`,
+          submissionId: input.requestId ? `request:${input.requestId}` : "legacy",
+          payload: input,
+        }
+      : undefined;
+    await preflightReplacementSubmission(this.db, replacementSubmission);
+
+    return withReplacementTransaction(this.db, replacementSubmission, async (tx) =>
       withEvidenceTransaction(tx, evidence, async () => {
         const [inventory] = await tx
           .select({ id: schema.inventories.id })

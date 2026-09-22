@@ -1,3 +1,5 @@
+import { ReplacementRecoveryReadinessController } from "../src/modules/device-licensing/replacement-recovery-readiness.controller";
+import { DeviceReplacementReadinessController } from "../src/modules/device-licensing/device-replacement-readiness.controller";
 import { DeviceRetentionController } from "../src/modules/device-licensing/device-retention.controller";
 import { DeviceReplacementController } from "../src/modules/device-licensing/device-replacement.controller";
 import type { Type } from "@nestjs/common";
@@ -308,6 +310,14 @@ const ADMINISTRATIVE_CONTROLLERS: readonly [
   [
     DeviceReplacementController,
     {
+      recoveryCode: credentialsPolicy,
+      recoveryClose: credentialsPolicy,
+      executionPreview: credentialsPolicy,
+      execute: credentialsPolicy,
+      emergencyPreview: credentialsPolicy,
+      emergencyExecute: credentialsPolicy,
+
+      drain: credentialsPolicy,
       list: credentialsPolicy,
       preview: credentialsPolicy,
       confirm: credentialsPolicy,
@@ -339,6 +349,11 @@ const ADMINISTRATIVE_CONTROLLERS: readonly [
 ];
 
 const STATION_ONLY_CONTROLLERS: readonly [ControllerClass, readonly string[]][] = [
+  [ReplacementRecoveryReadinessController, ["report"]],
+  [
+    DeviceReplacementReadinessController,
+    ["currentIntent", "currentIntentV1", "acknowledgeClosure", "report"],
+  ],
   [StationOperatorsController, ["listRoster"]],
   [StationScansController, ["codeReleases", "conflictStatus", "ingest", "occurrenceStatus"]],
   [

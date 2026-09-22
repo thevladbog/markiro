@@ -1501,3 +1501,60 @@ export const offlineGrantEvidenceCommitGuards = sqliteTable(
     originalOwner: text("original_owner").notNull(),
   },
 );
+
+/** Durable replacement drain survives response loss and restart. */
+export const deviceReplacementDrain = sqliteTable(
+  "device_replacement_drain",
+  {
+    id: integer("id").primaryKey(),
+    intentId: text("intent_id").notNull(),
+    state: text("state", { enum: ["draining", "cancelled", "closed"] })
+      .notNull()
+      .default("draining"),
+    closureJson: text("closure_json"),
+    closureAcknowledgedAt: text("closure_acknowledged_at"),
+    grantInstallFloor: integer("grant_install_floor").notNull().default(0),
+    intentJson: text("intent_json").notNull(),
+    resumeTasksJson: text("resume_tasks_json").notNull().default("[]"),
+    tenantId: text("tenant_id").notNull(),
+    deviceId: text("device_id").notNull(),
+    credentialEpoch: integer("credential_epoch").notNull(),
+    credentialOwnership: text("credential_ownership").notNull(),
+    reportSequence: integer("report_sequence").notNull().default(-1),
+    storageRevision: integer("storage_revision").notNull().default(1),
+    requestId: text("request_id"),
+    bodyJson: text("body_json"),
+    acknowledgedAt: text("acknowledged_at"),
+    responseJson: text("response_json"),
+  },
+  (table) => [
+    check(
+      "device_replacement_drain_state",
+      sql`${table.state} IN ('draining','cancelled','closed')`,
+    ),
+    check(
+      "device_replacement_drain_closure",
+      sql`${table.closureJson} IS NULL OR json_valid(${table.closureJson})`,
+    ),
+    check("device_replacement_drain_grant_floor", sql`${table.grantInstallFloor}>=0`),
+    check("device_replacement_drain_singleton", sql`${table.id}=1`),
+    check("device_replacement_drain_intent_json", sql`json_valid(${table.intentJson})`),
+    check("device_replacement_drain_resume_json", sql`json_valid(${table.resumeTasksJson})`),
+    check("device_replacement_drain_epoch", sql`${table.credentialEpoch}>0`),
+    check("device_replacement_drain_ownership", sql`length(${table.credentialOwnership})=64`),
+    check("device_replacement_drain_sequence", sql`${table.reportSequence}>=-1`),
+    check("device_replacement_drain_revision", sql`${table.storageRevision}>0`),
+    check(
+      "device_replacement_drain_body",
+      sql`${table.bodyJson} IS NULL OR json_valid(${table.bodyJson})`,
+    ),
+    check(
+      "device_replacement_drain_response",
+      sql`${table.responseJson} IS NULL OR json_valid(${table.responseJson})`,
+    ),
+    check(
+      "device_replacement_drain_request",
+      sql`(${table.requestId} IS NULL)=(${table.bodyJson} IS NULL)`,
+    ),
+  ],
+);

@@ -1,3 +1,4 @@
+import { assertDeviceReplacementNewWorkAllowed } from "../device-licensing/device-replacement-admission";
 import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { and, eq } from "drizzle-orm";
 
@@ -68,6 +69,10 @@ export class StationInventoryAccessService {
       throw new ConflictException({ code: "INVENTORY_DEVICE_LINE_REQUIRED" });
     }
     return this.db.transaction(async (tx) => {
+      await assertDeviceReplacementNewWorkAllowed(tx, tenantId, deviceId, {
+        kind: "inventory",
+        id: inventoryId,
+      });
       const [inventory] = await tx
         .select({
           id: schema.inventories.id,

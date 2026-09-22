@@ -1,7 +1,13 @@
+import {
+  factualObservation,
+  preview,
+} from "../../../apps/saas-admin/test/device-replacement-fixtures.js";
+import type { DeviceReplacementPreparation } from "../../../packages/platform-contracts/src/index.js";
 import { test as base, expect } from "@playwright/test";
 import type { Route } from "@playwright/test";
 import {
   platformCapabilitiesForRole,
+  platformDeviceReplacementContracts,
   platformDeviceLicensingContracts,
   platformTenantV3Contracts,
 } from "../../../packages/platform-contracts/src/index.js";
@@ -81,7 +87,13 @@ const devicePool = platformDeviceLicensingContracts.inspect.response.parse({
 });
 
 function makeFixture() {
-  return { unhandled: [] as string[] };
+  return {
+    replacementPreviewBlocked: false,
+    replacementDrainRefused: false,
+    refusedDrainAttempts: 0,
+    unhandled: [] as string[],
+    replacement: null as DeviceReplacementPreparation | null,
+  };
 }
 
 export const test = base.extend<{ fixture: ReturnType<typeof makeFixture> }>({
@@ -130,7 +142,12 @@ export const test = base.extend<{ fixture: ReturnType<typeof makeFixture> }>({
         url.pathname === `/api/platform/tenants/${TENANT_ID}/device-licensing/replacements` &&
         method === "GET"
       ) {
-        json = { canPrepare: true, items: [] };
+        json = {
+          canPrepare: true,
+          items: fixture.replacement
+            ? [{ preparation: fixture.replacement, needsReview: false }]
+            : [],
+        };
       } else if (
         url.pathname === `/api/platform/tenants/${TENANT_ID}/device-licensing/retention` &&
         method === "GET"
@@ -140,6 +157,49 @@ export const test = base.extend<{ fixture: ReturnType<typeof makeFixture> }>({
           observation: null,
           selections: [],
           currentShadow: { awaitingSelection: false, affectedDeviceIds: [], enforced: false },
+        };
+      } else if (
+        fixture.replacementDrainRefused &&
+        method === "POST" &&
+        url.pathname.endsWith("/drain")
+      ) {
+        platformDeviceReplacementContracts.drain.body.parse(request.postDataJSON());
+        if (!fixture.replacement) throw new Error("Missing preparation");
+        fixture.replacement = {
+          ...fixture.replacement,
+          drainEligibility: { status: "blocked", reasons: ["client_upgrade_required"] },
+        };
+        fixture.refusedDrainAttempts++;
+        await route.fulfill({
+          status: 409,
+          json: {
+            code: "client_upgrade_required",
+            message: "Replacement blocked",
+            requestId: TENANT_ID,
+          },
+        });
+        return;
+      } else if (
+        fixture.replacementPreviewBlocked &&
+        method === "POST" &&
+        url.pathname.endsWith("/replacements/preview")
+      ) {
+        const body = platformDeviceReplacementContracts.preview.body.parse(request.postDataJSON());
+        const source = devicePool.devices[0];
+        if (!source) throw new Error("Missing source fixture");
+        json = {
+          ...preview(body.requestId),
+          sourceDeviceId: source.deviceId,
+          observation: {
+            ...factualObservation,
+            source: {
+              ...factualObservation.source,
+              deviceId: source.deviceId,
+              assignmentId: source.assignmentId,
+              name: source.name,
+            },
+            target: body.target,
+          },
         };
       } else {
         fixture.unhandled.push(`${method} ${url.pathname}${url.search}`);

@@ -862,6 +862,7 @@
     "unknownHint": "The print result is unknown. Scan the label if it printed, or select a reason to print it again.",
     "preparedHint": "The job is saved. It will not be sent again automatically.",
     "failedHint": "Check the printer connection, language and resolution, then reprint.",
+    "recoveryHint": "Finish the saved label. New units cannot be accepted during device recovery.",
     "closedHint": "This shift is closed. Finish this label; new units cannot be accepted.",
     "mismatch": "Code does not match",
     "invalid": "Could not read a full Data Matrix",
@@ -924,5 +925,28 @@
     "saveResult": "Save result",
     "resultNotSaved": "The label was sent, but the result was not saved. Retry saving; no new label will print.",
     "storageFailed": "Could not save the print job. Please try again."
+  },
+  "replacement": {
+    "title": "Device replacement: draining",
+    "hint": "New tasks are blocked. Finish existing work; synchronization and recovery remain available.",
+    "retrying": "Waiting for the server. The saved report will be retried.",
+    "counters": "Pending work",
+    "unsupported": "Cannot measure — update required",
+    "resume": "Resume {{id}}",
+    "resumeFailed": "Unable to resume. Check recovery and connection.",
+    "conflicts": "Resolve conflicts",
+    "setup": "Equipment settings",
+    "channels": {
+      "scans": "Scans",
+      "inventories": "Inventory events",
+      "shiftClosures": "Shift closures",
+      "productLabels": "Product labels",
+      "boxes": "Containers",
+      "exceptions": "Exceptions",
+      "conflicts": "Conflicts",
+      "unknownPrints": "Unknown print results"
+    },
+    "waitingTitle": "Waiting to start work",
+    "waitingHint": "The old device may work offline until {{time}}. Stay connected: work will unlock when the server confirms the safe handover."
   }
 }

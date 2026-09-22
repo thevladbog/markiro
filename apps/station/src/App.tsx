@@ -1,3 +1,5 @@
+import { useDeviceReplacement } from "./lib/use-device-replacement.js";
+import { replacementBlocksNewWork, replacementCanEnterTask } from "./lib/device-replacement.js";
 import { configuredPrinterOutput, configuredPrinterRouting } from "./lib/printer-routing.js";
 import { RecoveryWorkSummary } from "./ui/RecoveryWorkSummary.js";
 import {
@@ -82,7 +84,12 @@ import { loadSoundSettings, type SoundSettings } from "./lib/signal-sound.js";
 import { tauriExecutor } from "./lib/sqlite.js";
 import { resolveLegacyStationIdentity } from "./lib/legacy-identity.js";
 import { createLockdownLifecycle } from "./lib/lockdown.js";
-import { readProductLabelRecoveryShift } from "./lib/product-labels/recovery.js";
+import { SavedProductLabelRecovery } from "./pages/SavedProductLabelRecovery.js";
+import { readReplacementEvidenceRecovery } from "./lib/replacement-evidence-recovery.js";
+import {
+  readProductLabelRecoveryShift,
+  requireReplacementLabelRecovery,
+} from "./lib/product-labels/recovery.js";
 import { findUnresolvedBoxPrint } from "./lib/boxes.js";
 import { stationServerOrigin } from "./lib/device-recovery.js";
 import { StationGrantAdmission } from "./lib/offline-grants/admission.js";
@@ -905,6 +912,34 @@ export function App() {
     verifiedClient,
   ]);
   const authenticatedClient = credentialRecovery ? null : credentialBoundClient;
+  const [replacementAuthorityEpoch, setReplacementAuthorityEpoch] = useState(0);
+  const replacement = useDeviceReplacement({
+    exec: tauriExecutor,
+    client: authenticatedClient,
+    generation: credentialGeneration,
+    expectedDevice:
+      config?.tenantId && config.deviceId
+        ? { tenantId: config.tenantId, deviceId: config.deviceId }
+        : null,
+    clientBuild: async () => `station:${await getVersion().catch(() => "unknown")}`,
+    activeTask:
+      activeFloorTask?.kind === "production"
+        ? { taskId: activeFloorTask.shift.id, kind: "shift" }
+        : activeFloorTask?.kind === "inventory"
+          ? { taskId: activeFloorTask.inventory.inventoryId, kind: "inventory" }
+          : null,
+    onCancelled: () => setReplacementAuthorityEpoch((epoch) => epoch + 1),
+    onDrain: () => {
+      shiftEntryLeaseRef.current?.release();
+      setFloorView("select");
+    },
+  });
+  const [savedLabelEntry, setSavedLabelEntry] = useState<{
+    generation: CredentialGeneration;
+    operatorId: string;
+    shiftId: string;
+    jobId: string;
+  } | null>(null);
   const [labelRecoveryEpoch, setLabelRecoveryEpoch] = useState(0);
   const labelRecoveryKey = useMemo(
     () => ({
@@ -917,7 +952,7 @@ export function App() {
   );
   const [labelRecovery, setLabelRecovery] = useState<{
     key: object;
-    shift: ProductionShiftTask | null;
+    shift: (ProductionShiftTask & { jobId: string }) | null;
     error: boolean;
   } | null>(null);
   useEffect(() => {
@@ -1054,6 +1089,7 @@ export function App() {
     config?.serverUrl,
     config?.tenantId,
     credentialGeneration,
+    replacementAuthorityEpoch,
   ]);
 
   // The hook is mounted unconditionally to preserve hook order, but it only
@@ -1567,6 +1603,8 @@ export function App() {
   ): Promise<void> {
     if (!lease || shiftEntryLeaseRef.current !== lease || !lease.isCurrent()) return;
     if (floorGeneration && !credentialGenerationIsCurrent(floorGeneration)) return;
+    if (!(await replacementCanEnterTask(tauriExecutor, entered.id, "shift")))
+      throw new Error(t("replacement.title"));
     if (floorGeneration && floorConfig.tenantId && floorConfig.deviceId && floorConfig.serverUrl) {
       // The task snapshot is compared against a fresh authenticated bundle before it can
       // authorize entry. If the network is down, the already-installed durable grant is
@@ -1630,13 +1668,18 @@ export function App() {
           capability: "shift.start.v1",
           eventType: "shift.scan.v1",
           taskId: entered.id,
-          resuming: authority?.resuming ?? false,
+          // The replacement boundary above admits only saved resume tasks during drain.
+          resuming: Boolean(authority?.resuming) || (await replacementBlocksNewWork(tauriExecutor)),
           execution,
         });
         if (!decision.allow) throw new OfflineGrantDeniedError(decision.reason);
         setOfflineGrantNotice(decision.observe ? t("shifts.offlineGrantObserve") : null);
       }
     }
+    if (!lease.isCurrent() || (floorGeneration && !credentialGenerationIsCurrent(floorGeneration)))
+      return;
+    if (!(await replacementCanEnterTask(tauriExecutor, entered.id, "shift")))
+      throw new Error(t("replacement.title"));
     if (!lease.isCurrent() || (floorGeneration && !credentialGenerationIsCurrent(floorGeneration)))
       return;
     setNewShiftDraft(null);
@@ -1656,6 +1699,8 @@ export function App() {
   ): Promise<void> {
     if (!lease || shiftEntryLeaseRef.current !== lease || !lease.isCurrent()) return;
     if (floorGeneration && !credentialGenerationIsCurrent(floorGeneration)) return;
+    if (!(await replacementCanEnterTask(tauriExecutor, entered.inventory.inventoryId, "inventory")))
+      throw new Error(t("replacement.title"));
     if (floorGeneration && floorConfig.tenantId && floorConfig.deviceId && floorConfig.serverUrl) {
       await refreshStationGrantConfiguration({
         exec: tauriExecutor,
@@ -1705,7 +1750,8 @@ export function App() {
           capability: "inventory.start.v1",
           eventType: "inventory.scan.v1",
           taskId: entered.inventory.inventoryId,
-          resuming: authority?.resuming ?? false,
+          // The replacement boundary above admits only saved resume tasks during drain.
+          resuming: Boolean(authority?.resuming) || (await replacementBlocksNewWork(tauriExecutor)),
           execution: await readInventoryExecutionProjection(
             tauriExecutor,
             entered.inventory.inventoryId,
@@ -1715,6 +1761,10 @@ export function App() {
         setOfflineGrantNotice(decision.observe ? t("inventory.offlineGrantObserve") : null);
       }
     }
+    if (!lease.isCurrent() || (floorGeneration && !credentialGenerationIsCurrent(floorGeneration)))
+      return;
+    if (!(await replacementCanEnterTask(tauriExecutor, entered.inventory.inventoryId, "inventory")))
+      throw new Error(t("replacement.title"));
     if (!lease.isCurrent() || (floorGeneration && !credentialGenerationIsCurrent(floorGeneration)))
       return;
     activeShiftIdRef.current = entered.inventory.inventoryId;
@@ -1855,6 +1905,11 @@ export function App() {
       footer={legacyNotice}
       statusBarCollapsible={shift !== null}
     >
+      {replacement.drain && activeFloorTask && (
+        <p role="status">
+          {t("replacement.title")} — {t("replacement.hint")}
+        </p>
+      )}
       {operatorSwitchState !== "idle" ? (
         <main className="station-centered-screen" data-testid="operator-switch-settling">
           <Card style={{ width: "min(720px, calc(100vw - 64px))", padding: 32 }}>
@@ -1905,6 +1960,29 @@ export function App() {
         <main className="station-centered-screen" data-testid="floor-route-loading">
           <p role="status">{t("inventory.loadingLocalTask")}</p>
         </main>
+      ) : savedLabelEntry &&
+        savedLabelEntry.generation === floorGeneration &&
+        savedLabelEntry.operatorId === operator.operatorId &&
+        config.deviceId ? (
+        <SavedProductLabelRecovery
+          exec={tauriExecutor}
+          shiftId={savedLabelEntry.shiftId}
+          jobId={savedLabelEntry.jobId}
+          operatorId={operator.operatorId}
+          source={scanSource}
+          environment={{
+            generation: savedLabelEntry.generation,
+            deviceId: config.deviceId,
+            operatorName: operator.name,
+            hardwareConfig,
+            print: (target, bytes) => tauriHardware.print(target, bytes),
+          }}
+          register={registerFloorWorkBarrier}
+          onClose={() => {
+            setSavedLabelEntry(null);
+            setLabelRecoveryEpoch((epoch) => epoch + 1);
+          }}
+        />
       ) : activeFloorTask ? (
         activeFloorTask.kind === "production" ? (
           boxTemplateRecovery ? (
@@ -2092,7 +2170,27 @@ export function App() {
                 void acquireShiftEntry()
                   .then(async (lease) => {
                     try {
-                      await handleShiftEntered(pending, lease);
+                      if (await readReplacementEvidenceRecovery(tauriExecutor)) {
+                        if (!floorGeneration) throw new Error("Credential missing");
+                        const owner = await credentialGenerationOwnership(floorGeneration);
+                        if (!owner) throw new Error("Credential missing");
+                        await requireReplacementLabelRecovery(
+                          tauriExecutor,
+                          owner,
+                          pending.id,
+                          pending.jobId,
+                        );
+                        if (!lease.isCurrent() || !credentialGenerationIsCurrent(floorGeneration))
+                          return;
+                        setSavedLabelEntry({
+                          generation: floorGeneration,
+                          operatorId: operator.operatorId,
+                          shiftId: pending.id,
+                          jobId: pending.jobId,
+                        });
+                      } else {
+                        await handleShiftEntered(pending, lease);
+                      }
                     } finally {
                       lease.release();
                     }
@@ -2106,6 +2204,73 @@ export function App() {
         >
           <p>{t("productLabels.resumeHint")}</p>
         </FullScreenDialog>
+      ) : !replacement.loaded ? (
+        <p role="status">{t("app.booting")}</p>
+      ) : replacement.drain ? (
+        <Card style={{ padding: 32 }}>
+          <h1>
+            {t(
+              replacement.drain.targetWaitingUntil
+                ? "replacement.waitingTitle"
+                : "replacement.title",
+            )}
+          </h1>
+          <p>
+            {replacement.drain.targetWaitingUntil
+              ? t("replacement.waitingHint", {
+                  time: new Date(replacement.drain.targetWaitingUntil).toLocaleString(),
+                })
+              : t("replacement.hint")}
+          </p>
+          {replacement.drain.reportFailed && <p role="status">{t("replacement.retrying")}</p>}
+          <dl aria-label={t("replacement.counters")}>
+            {Object.entries({
+              ...replacement.drain.measurements?.pending,
+              conflicts: replacement.drain.measurements?.conflicts,
+              unknownPrints: replacement.drain.measurements?.unknownPrints,
+            }).map(([channel, count]) => (
+              <div key={channel}>
+                <dt>{t(`replacement.channels.${channel}`)}</dt>
+                <dd>{typeof count === "number" ? count : t("replacement.unsupported")}</dd>
+              </div>
+            ))}
+          </dl>
+          {replacement.drain.resumeTasks
+            .filter(
+              (task) =>
+                task.kind === "shift" &&
+                replacement.drain?.measurements?.activeTasks.some(
+                  (active) => active.kind === task.kind && active.taskId === task.taskId,
+                ),
+            )
+            .map((task) => (
+              <Button
+                key={task.taskId}
+                onClick={() => {
+                  void acquireShiftEntry()
+                    .then(async (lease) => {
+                      try {
+                        const saved = await readShiftMirror(tauriExecutor, task.taskId);
+                        if (!saved || saved.status !== "active")
+                          throw new Error("replacement task no longer active");
+                        await handleShiftEntered(
+                          { id: task.taskId, status: saved.status, mode: saved.mode },
+                          lease,
+                        );
+                      } finally {
+                        lease.release();
+                      }
+                    })
+                    .catch(() => setOfflineGrantNotice(t("replacement.resumeFailed")));
+                }}
+              >
+                {t("replacement.resume", { id: task.taskId })}
+              </Button>
+            ))}
+          {offlineGrantNotice && <p role="alert">{offlineGrantNotice}</p>}
+          <Button onClick={() => setShowConflicts(true)}>{t("replacement.conflicts")}</Button>
+          <Button onClick={() => setShowSetup(true)}>{t("replacement.setup")}</Button>
+        </Card>
       ) : floorView === "select" ? (
         <TaskSelection
           client={activeClient}

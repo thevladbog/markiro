@@ -8,6 +8,18 @@ import retrofit2.http.Query
 
 /** Station-only endpoints; the handheld authenticates exactly like a station (`x-api-key`). */
 interface StationApi {
+    @GET("station/device-replacement-intent/v1")
+    suspend fun replacementIntent(@Query("knownIntentId") knownIntentId: String? = null): kotlinx.serialization.json.JsonObject?
+
+    @POST("station/replacement-recovery/readiness")
+    suspend fun replacementRecoveryReadiness(@Body body: kotlinx.serialization.json.JsonObject): kotlinx.serialization.json.JsonObject
+
+    @POST("station/device-replacement-readiness")
+    suspend fun replacementReadiness(@Body body: kotlinx.serialization.json.JsonObject): kotlinx.serialization.json.JsonObject
+
+    @POST("station/device-replacement-intent/v1/acknowledge")
+    suspend fun replacementAcknowledge(@Body body: kotlinx.serialization.json.JsonObject): kotlinx.serialization.json.JsonObject
+
     @POST("station/grants/v1/configuration")
     suspend fun grantConfiguration(@Body body: kotlinx.serialization.json.JsonObject): kotlinx.serialization.json.JsonObject
 

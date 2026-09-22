@@ -61,6 +61,7 @@ class InterceptorsTest {
         val request = server.takeRequest()
         assertEquals("mk_live_abc", request.getHeader("x-api-key"))
         assertEquals(HANDHELD_CAPABILITIES, request.getHeader("x-station-capabilities"))
+        assertTrue(checkNotNull(request.getHeader("x-station-capabilities")).split(',').contains("replacement-readiness-v1"))
         assertNotNull(reachability.lastSuccessAt.value)
     }
 

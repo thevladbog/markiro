@@ -120,6 +120,10 @@ class HubViewModelTest {
         override suspend fun grantKeyset(): kotlinx.serialization.json.JsonObject = throw java.io.IOException("unconfigured")
         override suspend fun deviceGrant(body: kotlinx.serialization.json.JsonObject): kotlinx.serialization.json.JsonObject = throw java.io.IOException("unconfigured")
         override suspend fun taskGrant(body: kotlinx.serialization.json.JsonObject): kotlinx.serialization.json.JsonObject = throw java.io.IOException("unconfigured")
+        override suspend fun replacementIntent(knownIntentId: String?): kotlinx.serialization.json.JsonObject? = throw java.io.IOException("unconfigured")
+        override suspend fun replacementRecoveryReadiness(body: kotlinx.serialization.json.JsonObject): kotlinx.serialization.json.JsonObject = error("Not expected")
+        override suspend fun replacementReadiness(body: kotlinx.serialization.json.JsonObject): kotlinx.serialization.json.JsonObject = throw java.io.IOException("unconfigured")
+        override suspend fun replacementAcknowledge(body: kotlinx.serialization.json.JsonObject): kotlinx.serialization.json.JsonObject = throw java.io.IOException("unconfigured")
         override suspend fun grantReadiness(body: kotlinx.serialization.json.JsonObject): kotlinx.serialization.json.JsonObject = throw java.io.IOException("unconfigured")
         override suspend fun codeHistory(id: String, cursor: String?, snapshot: String?, limit: Int): app.markiro.handheld.core.network.ValidationHistoryPage = error("not used")
         override suspend fun identity(): IdentityResponse = throw UnsupportedOperationException()
@@ -209,6 +213,25 @@ class HubViewModelTest {
         assertEquals(1, entered)
         assertEquals("468008990", db.shiftDao().get("s1")?.ssccIssuerPrefix)
         assertNull(model.state.first { it.dialog == null }.dialog)
+    }
+
+    @Test
+    fun targetBoundaryRefusesContinueThroughTheTypedReplacementDialog() = runTest {
+        db.shiftDao().upsert(ShiftEntityFixtures.bundled("s1"))
+        db.deviceConfigDao().upsert(paired.copy(activeShiftId = "s1"))
+        var entered = 0
+        val api = api(enter = { entered++; dto("s1", "SEP26-001", "active") })
+        val model = vm(api, repository = repository(api))
+        model.state.first { it.activeShiftId == "s1" }
+        val token = db.recovery.token()
+        app.markiro.handheld.core.replacement.ReplacementTarget(db).persistPublication(
+            token.owner, token.generation,
+            app.markiro.handheld.core.network.ReplacementTargetFence(1, "11111111-1111-4111-8111-111111111111", 7, 2_000, 1_000),
+        )
+        model.continueShift()
+        model.grantDenial.isVisible.first { it }
+        assertNull(model.state.first { it.dialog == null }.dialog)
+        assertEquals(0, entered)
     }
 
     @Test

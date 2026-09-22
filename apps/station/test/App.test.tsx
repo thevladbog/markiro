@@ -142,7 +142,7 @@ import type { HardwareConfig } from "../src/lib/hardware-config.js";
 import type * as HardwareModule from "../src/lib/hardware.js";
 import type { ScannerStatus } from "../src/lib/hardware.js";
 import type * as LockdownModule from "../src/lib/lockdown.js";
-import { applyMigrations, readShiftContext } from "../src/lib/mirror.js";
+import { applyMigrations, readShiftContext, replaceOperatorsMirror } from "../src/lib/mirror.js";
 import { tauriExecutor } from "../src/lib/sqlite.js";
 import { BACKOFF_START_MS } from "../src/lib/sync.js";
 import { OPERATOR_IDLE_TIMEOUT_MS } from "../src/lib/operator-idle-lock.js";
@@ -151,6 +151,12 @@ import * as WorkScreenModule from "../src/pages/WorkScreen.js";
 import type { OperatorMirrorRecord } from "@markiro/db/station-sqlite";
 import { inventorySnapshotContentDigest, inventorySnapshotPageDigest } from "@markiro/domain";
 
+import { persistReplacementEvidenceRecovery } from "../src/lib/replacement-evidence-recovery.js";
+import {
+  appendProductLabelEvent,
+  requireProductLabelJob,
+} from "../src/lib/product-labels/store.js";
+import { verifyProductLabel } from "../src/lib/product-labels/printing.js";
 import { openProductLabelWork } from "./support/product-label-work.js";
 import {
   createCredentialGeneration,
@@ -2969,6 +2975,9 @@ describe("App", () => {
     let inventoryRequests = 0;
     const fetchMock = vi.fn((url: string) => {
       const path = new URL(url).pathname;
+      // The replacement poll, like the roster retry below, has no response
+      // during this simulated connectivity gap.
+      if (path === "/station/device-replacement-intent/v1") return new Promise<Response>(() => {});
       if (path === "/station/operators") {
         operatorRequests += 1;
         return operatorRequests === 1
@@ -5455,6 +5464,182 @@ it("gates startup on the current credential's saved label and resumes a remotely
   }
 });
 
+describe("restricted saved-label recovery after restart", () => {
+  async function setup(accepted = true) {
+    lockdownMock.getSnapshot.mockImplementation(() => lockdownMock.snapshot);
+    const owner = await credentialGenerationOwnership(createCredentialGeneration("mk_key"));
+    const h = await openProductLabelWork("required", owner ?? undefined, accepted, true);
+    if (accepted) {
+      await appendProductLabelEvent(h.exec, h.input.credentialOwnership, {
+        ...h.eventBase(2),
+        kind: "sending",
+      });
+      await appendProductLabelEvent(h.exec, h.input.credentialOwnership, {
+        ...h.eventBase(3),
+        kind: "delivery_unknown",
+        errorCode: "interrupted",
+      });
+    }
+    await persistReplacementEvidenceRecovery(h.exec, {
+      tenantId: "tenant-1",
+      deviceId: h.input.deviceId,
+      serverUrl: "http://localhost:3000",
+      apiKey: "mk_key",
+      deviceName: "Station",
+      organizationName: "Org",
+      operators: [],
+      recovery: {
+        version: 1,
+        purpose: "replacement_evidence_recovery",
+        operatorRoster: "preserve_sealed",
+        executionId: crypto.randomUUID(),
+        intentId: crypto.randomUUID(),
+        credentialEpoch: 3,
+        requestedAt: "2026-09-17T00:00:00Z",
+        expiresAt: "2026-09-18T00:00:00Z",
+      },
+    });
+    await replaceOperatorsMirror(h.exec, [
+      {
+        operatorId: h.input.operatorId,
+        name: "Ivan",
+        login: OPERATOR_LOGIN,
+        role: "operator",
+        pinHash: await hashSecret(OPERATOR_PIN),
+        badgeHash: null,
+        active: true,
+      },
+    ]);
+    await h.exec.run("INSERT INTO station_meta(key,value) VALUES(?,?)", [
+      "hardware_config",
+      JSON.stringify({
+        scanner: null,
+        printer: null,
+        printerLanguage: "zpl",
+        verifyPrintedLabel: false,
+      }),
+    ]);
+    h.restart();
+    usesRealDatabase = true;
+    invokeMock.mockImplementation(async (cmd, payload) => {
+      if (cmd === "read_config")
+        return {
+          machine_id: "m1",
+          device_id: h.input.deviceId,
+          tenant_id: "tenant-1",
+          api_key: "mk_key",
+          server_url: "http://localhost:3000",
+        };
+      if (cmd === "plugin:sql|load") return "sqlite:station-mirror.db";
+      const { query, values } = (payload ?? {}) as { query: string; values?: unknown[] };
+      if (cmd === "plugin:sql|select") return h.exec.all(query, values);
+      if (cmd === "plugin:sql|execute") {
+        await h.exec.run(query, values);
+        return [0, 0];
+      }
+      return undefined;
+    });
+    const fetch = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(
+      async () => new Response(JSON.stringify({ message: "restricted" }), { status: 403 }),
+    );
+    vi.stubGlobal("fetch", fetch);
+    const view = render(<App />);
+    await signInAsOperator();
+    return {
+      h,
+      fetch,
+      close: async () => {
+        view.unmount();
+        await Promise.resolve();
+        h.close();
+      },
+    };
+  }
+
+  it("opens only the retained unknown print and reconciles its exact code without productive entry", async () => {
+    const { h, fetch, close } = await setup();
+    try {
+      const resume = await screen.findByRole("button", { name: "Resume saved label" });
+      const before = await h.exec.all("SELECT * FROM product_label_accept_commands");
+      fireEvent.click(resume);
+      await screen.findByRole("button", { name: "Print again" });
+      expect(screen.queryByRole("button", { name: "New shift" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Close shift" })).toBeNull();
+      expect(
+        (await requireProductLabelJob(h.exec, h.input.credentialOwnership, h.input.jobId))
+          .projection.attemptState,
+      ).toBe("delivery_unknown");
+      act(() => {
+        for (const key of h.input.raw) fireEvent.keyDown(window, { key });
+        fireEvent.keyDown(window, { key: "Enter" });
+      });
+      await screen.findByText("Label verified");
+      expect(
+        (await requireProductLabelJob(h.exec, h.input.credentialOwnership, h.input.jobId))
+          .projection.status,
+      ).toBe("completed");
+      // The source shift is still active: finishing recovery must never reopen unit intake.
+      act(() => {
+        for (const key of h.input.raw.replace(/.$/, "Z")) fireEvent.keyDown(window, { key });
+        fireEvent.keyDown(window, { key: "Enter" });
+      });
+      expect(await h.exec.all("SELECT * FROM product_label_accept_commands")).toEqual(before);
+      expect(await h.exec.all("SELECT * FROM product_label_jobs")).toHaveLength(1);
+      expect(screen.queryByRole("button", { name: "Print again" })).toBeNull();
+      expect(hardwareMock.print).not.toHaveBeenCalled();
+      expect(
+        fetch.mock.calls.filter(
+          ([url, init]) =>
+            /\/bundle|\/grants\/v1\/(?:device|tasks)$/.test(new URL(url).pathname) ||
+            (new URL(url).pathname.startsWith("/shifts") && init?.method === "POST"),
+        ),
+      ).toEqual([]);
+    } finally {
+      await close();
+    }
+  });
+
+  it("offers no saved recovery or new print when no durable job exists", async () => {
+    const { h, close } = await setup(false);
+    try {
+      await screen.findByText("Device replacement: draining");
+      expect(screen.queryByRole("button", { name: "Resume saved label" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "New shift" })).toBeNull();
+      expect(await h.exec.all("SELECT * FROM product_label_jobs")).toEqual([]);
+      expect(hardwareMock.print).not.toHaveBeenCalled();
+    } finally {
+      await close();
+    }
+  });
+
+  it("rejects a stale resume dialog after the exact saved job was completed", async () => {
+    const { h, fetch, close } = await setup();
+    try {
+      const resume = await screen.findByRole("button", { name: "Resume saved label" });
+      await verifyProductLabel(h.exec, {
+        ...h.deps,
+        jobId: h.input.jobId,
+        attemptId: h.input.preparedEvent.attemptId,
+        raw: h.input.raw,
+      });
+      fireEvent.click(resume);
+      await screen.findByText("Device replacement: draining");
+      expect(screen.queryByRole("button", { name: "Print again" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "New shift" })).toBeNull();
+      expect(hardwareMock.print).not.toHaveBeenCalled();
+      expect(
+        fetch.mock.calls.filter(
+          ([url, init]) =>
+            /\/bundle|\/grants\/v1\/(?:device|tasks)$/.test(new URL(url).pathname) ||
+            (new URL(url).pathname.startsWith("/shifts") && init?.method === "POST"),
+        ),
+      ).toEqual([]);
+    } finally {
+      await close();
+    }
+  });
+});
+
 it("starts all stored COM ports and reports partial availability", async () => {
   lockdownMock.getSnapshot.mockImplementation(() => lockdownMock.snapshot);
   const pinHash = await hashSecret(OPERATOR_PIN);
@@ -5489,4 +5674,70 @@ it("starts all stored COM ports and reports partial availability", async () => {
   expect(screen.getByTestId("scanner-status").textContent).toBe("Some scanners disconnected");
   act(() => publishStatus("connected"));
   expect(screen.getByTestId("scanner-status").textContent).toBe("Connected");
+});
+
+it("restores a durable replacement drain before task selection while device sync stays mounted", async () => {
+  const pinHash = await hashSecret(OPERATOR_PIN);
+  mockInvokeForFloor(
+    pinHash,
+    { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
+    [],
+  );
+  const previous = invokeMock.getMockImplementation();
+  invokeMock.mockImplementation(async (cmd, payload) => {
+    const query = (payload as { query?: string } | undefined)?.query;
+    if (cmd === "plugin:sql|select" && query?.includes("SELECT * FROM device_replacement_drain"))
+      return [
+        {
+          id: 1,
+          intent_id: "11111111-1111-4111-8111-111111111111",
+          state: "draining",
+          intent_json: "{}",
+          resume_tasks_json: "[]",
+          credential_ownership: "a".repeat(64),
+          report_sequence: 0,
+          storage_revision: 1,
+          request_id: null,
+          body_json: null,
+          acknowledged_at: null,
+          response_json: null,
+        },
+      ];
+    if (cmd === "plugin:sql|select" && query?.includes("highestSequence"))
+      return [
+        {
+          scans: 3,
+          inventories: 2,
+          shiftClosures: 1,
+          productLabels: 0,
+          boxes: 0,
+          exceptions: 0,
+          conflicts: 0,
+          unknownPrints: 0,
+          tasks: "[]",
+          grants: "[]",
+          highestSequence: 3,
+        },
+      ];
+    return previous?.(cmd, payload);
+  });
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response(JSON.stringify({ items: [] }), { status: 200 })),
+  );
+  render(<App />);
+  await signInAsOperator();
+  expect(
+    await screen.findByRole("heading", { name: "Device replacement: draining" }),
+  ).toBeDefined();
+  expect(screen.queryByRole("button", { name: /new shift/i })).toBeNull();
+  expect(screen.getByRole("button", { name: "Resolve conflicts" })).toBeDefined();
+  expect(screen.getByLabelText("Pending work").textContent).toContain("Scans3");
+  expect(
+    invokeMock.mock.calls.some(
+      ([cmd, payload]) =>
+        cmd === "plugin:sql|select" &&
+        (payload as { query?: string })?.query?.includes("FROM outbox"),
+    ),
+  ).toBe(true);
 });

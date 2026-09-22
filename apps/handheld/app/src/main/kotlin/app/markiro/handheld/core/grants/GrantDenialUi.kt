@@ -15,16 +15,21 @@ import kotlinx.coroutines.flow.MutableStateFlow
 class GrantDenialUi {
     private val visible = MutableStateFlow(false)
     val isVisible: kotlinx.coroutines.flow.StateFlow<Boolean> = visible
-    fun show() { visible.value=true }
-    val handler = CoroutineExceptionHandler { _, error -> if(error is GrantDenied) show() else throw error }
+    private val replacement = MutableStateFlow(false)
+    fun show(error: WorkAdmissionDenied? = null) {
+        replacement.value = error is app.markiro.handheld.core.replacement.ReplacementDenied
+        visible.value = true
+    }
+    val handler = CoroutineExceptionHandler { _, error -> if(error is WorkAdmissionDenied) show(error) else throw error }
     suspend fun guard(block: suspend () -> Unit) {
-        try { block() } catch (_: GrantDenied) { show() }
+        try { block() } catch (error: WorkAdmissionDenied) { show(error) }
     }
     @Composable fun Dialog() {
         val show by visible.collectAsState()
+        val draining by replacement.collectAsState()
         if(show) AlertDialog(onDismissRequest={visible.value=false},
-            title={Text(stringResource(R.string.offline_grant_denied_title))},
-            text={Text(stringResource(R.string.offline_grant_denied_body))},
+            title={Text(stringResource(if (draining) R.string.replacement_denied_title else R.string.offline_grant_denied_title))},
+            text={Text(stringResource(if (draining) R.string.replacement_denied_body else R.string.offline_grant_denied_body))},
             confirmButton={TextButton(onClick={visible.value=false}) { Text(stringResource(android.R.string.ok)) }})
     }
 }

@@ -120,6 +120,230 @@ describe("device replacement contracts", () => {
     }
   });
 
+  it("defines strict drain, execution and recovery commands without client authority", () => {
+    const base = { requestId, expectedRevision: 2 };
+    expect(contracts.deviceReplacementDrainRequestSchema.parse(base)).toEqual(base);
+    expect(contracts.deviceReplacementExecutionPreviewRequestSchema.parse(base)).toEqual(base);
+    expect(
+      contracts.deviceReplacementExecuteRequestSchema.parse({
+        ...base,
+        previewId,
+        mode: "normal",
+      }),
+    ).toEqual({ ...base, previewId, mode: "normal" });
+    expect(
+      contracts.deviceReplacementExecuteRequestSchema.parse({
+        ...base,
+        previewId,
+        mode: "emergency",
+      }),
+    ).toEqual({ ...base, previewId, mode: "emergency" });
+
+    for (const invalid of [
+      { ...base, requestedAt: createdAt },
+      { ...base, force: true },
+      { ...base, expectedRevision: 0 },
+      { ...base, expectedRevision: -1 },
+      { ...base, expectedRevision: 1.5 },
+    ]) {
+      expect(contracts.deviceReplacementDrainRequestSchema.safeParse(invalid).success).toBe(false);
+    }
+    for (const invalid of [
+      { ...base, previewId, mode: "normal", executeAt: createdAt },
+      { ...base, previewId, mode: "unsupported" },
+    ]) {
+      expect(contracts.deviceReplacementExecuteRequestSchema.safeParse(invalid).success).toBe(
+        false,
+      );
+    }
+
+    expect(
+      contracts.deviceReplacementEmergencyPreviewRequestSchema.parse({
+        ...base,
+        reason: "  Source device is unavailable  ",
+      }),
+    ).toEqual({ ...base, reason: "Source device is unavailable" });
+    expect(
+      contracts.deviceReplacementEmergencyPreviewRequestSchema.safeParse({
+        ...base,
+        reason: " ",
+      }).success,
+    ).toBe(false);
+    expect(contracts.deviceReplacementRecoveryCodeRequestSchema.parse(base)).toEqual(base);
+    const recoveryCode = {
+      requestId,
+      preparation: {
+        id: preparationId,
+        sourceDeviceId,
+        revision: 1,
+        state: "prepared",
+        preparedAt: createdAt,
+        cancelledAt: null,
+        observation,
+      },
+      code: "12345678",
+      expiresAt,
+    } as const;
+    expect(contracts.deviceReplacementRecoveryCodeResponseSchema.parse(recoveryCode)).toEqual(
+      recoveryCode,
+    );
+    expect(
+      contracts.deviceReplacementRecoveryCodeResponseSchema.safeParse({
+        ...recoveryCode,
+        code: "recovery-secret",
+      }).success,
+    ).toBe(false);
+    expect(
+      contracts.deviceReplacementRecoveryCodeResponseSchema.safeParse({
+        ...recoveryCode,
+        plaintext: "must-not-persist",
+      }).success,
+    ).toBe(false);
+    expect(
+      contracts.deviceReplacementRecoveryCloseRequestSchema.safeParse({ requestId }).success,
+    ).toBe(false);
+    expect(
+      contracts.deviceReplacementRecoveryCloseRequestSchema.parse({
+        ...base,
+        reason: "  Evidence unavailable  ",
+      }),
+    ).toEqual({ ...base, reason: "Evidence unavailable" });
+  });
+
+  it("accepts only a strict, de-duplicated readiness report and publishes server eligibility", () => {
+    const report = {
+      requestId,
+      intentId: previewId,
+      credentialEpoch: 4,
+      reportSequence: 7,
+      clientBuild: "station-2.0.0",
+      storageRevision: 1,
+      pending: {
+        scans: 0,
+        inventories: 0,
+        shiftClosures: 0,
+        productLabels: 0,
+        boxes: 0,
+        exceptions: 0,
+      },
+      conflicts: 0,
+      unknownPrints: 0,
+      activeTasks: [],
+      installedGrants: [],
+      journal: { digest: "a".repeat(64), highestSequence: 42 },
+    };
+    expect(contracts.deviceReplacementReadinessRequestSchema.parse(report)).toEqual(report);
+    const unsupported = {
+      ...report,
+      pending: { ...report.pending, scans: "unsupported" },
+    } as const;
+    expect(contracts.deviceReplacementReadinessRequestSchema.parse(unsupported)).toEqual(
+      unsupported,
+    );
+    for (const invalid of [
+      { ...report, extra: true },
+      { ...report, receivedAt: createdAt },
+      { ...report, clientTimestamp: createdAt },
+      { ...report, credentialEpoch: 0 },
+      { ...report, reportSequence: -1 },
+      { ...report, conflicts: -1 },
+      { ...report, pending: { ...report.pending, boxes: -1 } },
+      {
+        ...report,
+        activeTasks: [
+          { taskId: sourceDeviceId, kind: "shift" },
+          { taskId: sourceDeviceId, kind: "shift" },
+        ],
+      },
+      { ...report, journal: { ...report.journal, highestSequence: -1 } },
+    ]) {
+      expect(contracts.deviceReplacementReadinessRequestSchema.safeParse(invalid).success).toBe(
+        false,
+      );
+    }
+
+    const response = {
+      requestId,
+      intentId: previewId,
+      receivedAt: createdAt,
+      unsupportedChannels: [],
+      eligibility: { status: "eligible", reasons: [] },
+    } as const;
+    expect(contracts.deviceReplacementReadinessResponseSchema.parse(response)).toEqual(response);
+    expect(
+      contracts.deviceReplacementReadinessResponseSchema.safeParse({
+        ...response,
+        eligibility: { status: "eligible", reasons: ["pending_scans"] },
+      }).success,
+    ).toBe(false);
+    expect(
+      contracts.deviceReplacementReadinessResponseSchema.parse({
+        ...response,
+        unsupportedChannels: ["scans"],
+        eligibility: { status: "blocked", reasons: ["client_upgrade_required"] },
+      }),
+    ).toMatchObject({ eligibility: { status: "blocked", reasons: ["client_upgrade_required"] } });
+    expect(
+      contracts.deviceReplacementReadinessResponseSchema.safeParse({
+        ...response,
+        unsupportedChannels: ["scans"],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("requires an immutable completed execution receipt", () => {
+    const completed = {
+      requestId,
+      preparation: {
+        id: preparationId,
+        sourceDeviceId,
+        revision: 4,
+        state: "completed",
+        preparedAt: createdAt,
+        cancelledAt: null,
+        observation,
+        execution: {
+          id: previewId,
+          revision: 3,
+          step: "transferred",
+          mode: "emergency",
+          targetDeviceId: previewId,
+          executedAt: expiresAt,
+          newWorkAllowedAt: expiresAt,
+          recoveryState: "required",
+        },
+        readiness: null,
+        recovery: { state: "required", closedAt: null },
+      },
+    } as const;
+    expect(contracts.deviceReplacementReceiptSchema.parse(completed)).toEqual(completed);
+    for (const invalid of [
+      {
+        ...completed,
+        preparation: {
+          ...completed.preparation,
+          execution: { ...completed.preparation.execution, targetDeviceId: undefined },
+        },
+      },
+      {
+        ...completed,
+        preparation: {
+          ...completed.preparation,
+          execution: { ...completed.preparation.execution, mode: "invalid" },
+        },
+      },
+      {
+        ...completed,
+        preparation: {
+          ...completed.preparation,
+          execution: { ...completed.preparation.execution, newWorkAllowedAt: null },
+        },
+      },
+    ]) {
+      expect(contracts.deviceReplacementReceiptSchema.safeParse(invalid).success).toBe(false);
+    }
+  });
+
   it("requires an unavailable execution with every invariant reason and unknown local data", () => {
     expect(contracts.deviceReplacementObservationSchema.parse(observation)).toEqual(observation);
 
@@ -265,6 +489,55 @@ describe("device replacement contracts", () => {
 
   it("publishes separate cabinet and platform replacement routes with 200 mutations", () => {
     expect(contracts.cabinetDeviceReplacementContracts).toEqual({
+      recoveryCode: {
+        method: "POST",
+        path: "/device-licensing/replacements/:preparationId/recovery/code",
+        status: 200,
+        body: contracts.deviceReplacementRecoveryCodeRequestSchema,
+        response: contracts.deviceReplacementRecoveryCodeResponseSchema,
+      },
+      recoveryClose: {
+        method: "POST",
+        path: "/device-licensing/replacements/:preparationId/recovery/close",
+        status: 200,
+        body: contracts.deviceReplacementRecoveryCloseRequestSchema,
+        response: contracts.deviceReplacementRecoveryCloseResponseSchema,
+      },
+      executionPreview: {
+        method: "POST",
+        path: "/device-licensing/replacements/:preparationId/execution/preview",
+        status: 200,
+        body: contracts.deviceReplacementExecutionPreviewRequestSchema,
+        response: contracts.deviceReplacementExecutionPreviewSchema,
+      },
+      execute: {
+        method: "POST",
+        path: "/device-licensing/replacements/:preparationId/execute",
+        status: 200,
+        body: contracts.deviceReplacementExecuteRequestSchema,
+        response: contracts.deviceReplacementReceiptSchema,
+      },
+      emergencyPreview: {
+        method: "POST",
+        path: "/device-licensing/replacements/:preparationId/emergency/preview",
+        status: 200,
+        body: contracts.deviceReplacementEmergencyPreviewRequestSchema,
+        response: contracts.deviceReplacementExecutionPreviewSchema,
+      },
+      emergencyExecute: {
+        method: "POST",
+        path: "/device-licensing/replacements/:preparationId/emergency/execute",
+        status: 200,
+        body: contracts.deviceReplacementExecuteRequestSchema,
+        response: contracts.deviceReplacementReceiptSchema,
+      },
+      drain: {
+        method: "POST",
+        path: "/device-licensing/replacements/:preparationId/drain",
+        status: 200,
+        body: contracts.deviceReplacementDrainRequestSchema,
+        response: contracts.deviceReplacementDrainResponseSchema,
+      },
       list: {
         method: "GET",
         path: "/device-licensing/replacements",
@@ -293,6 +566,62 @@ describe("device replacement contracts", () => {
       },
     });
     expect(contracts.platformDeviceReplacementContracts).toEqual({
+      targetCode: {
+        method: "POST",
+        path: "/platform/tenants/:tenantId/device-licensing/replacements/:preparationId/target/code",
+        status: 200,
+        body: contracts.deviceReplacementRecoveryCodeRequestSchema,
+        response: contracts.deviceReplacementRecoveryCodeResponseSchema,
+      },
+      recoveryCode: {
+        method: "POST",
+        path: "/platform/tenants/:tenantId/device-licensing/replacements/:preparationId/recovery/code",
+        status: 200,
+        body: contracts.deviceReplacementRecoveryCodeRequestSchema,
+        response: contracts.deviceReplacementRecoveryCodeResponseSchema,
+      },
+      recoveryClose: {
+        method: "POST",
+        path: "/platform/tenants/:tenantId/device-licensing/replacements/:preparationId/recovery/close",
+        status: 200,
+        body: contracts.deviceReplacementRecoveryCloseRequestSchema,
+        response: contracts.deviceReplacementRecoveryCloseResponseSchema,
+      },
+      executionPreview: {
+        method: "POST",
+        path: "/platform/tenants/:tenantId/device-licensing/replacements/:preparationId/execution/preview",
+        status: 200,
+        body: contracts.deviceReplacementExecutionPreviewRequestSchema,
+        response: contracts.deviceReplacementExecutionPreviewSchema,
+      },
+      execute: {
+        method: "POST",
+        path: "/platform/tenants/:tenantId/device-licensing/replacements/:preparationId/execute",
+        status: 200,
+        body: contracts.deviceReplacementExecuteRequestSchema,
+        response: contracts.deviceReplacementReceiptSchema,
+      },
+      emergencyPreview: {
+        method: "POST",
+        path: "/platform/tenants/:tenantId/device-licensing/replacements/:preparationId/emergency/preview",
+        status: 200,
+        body: contracts.deviceReplacementEmergencyPreviewRequestSchema,
+        response: contracts.deviceReplacementExecutionPreviewSchema,
+      },
+      emergencyExecute: {
+        method: "POST",
+        path: "/platform/tenants/:tenantId/device-licensing/replacements/:preparationId/emergency/execute",
+        status: 200,
+        body: contracts.deviceReplacementExecuteRequestSchema,
+        response: contracts.deviceReplacementReceiptSchema,
+      },
+      drain: {
+        method: "POST",
+        path: "/platform/tenants/:tenantId/device-licensing/replacements/:preparationId/drain",
+        status: 200,
+        body: contracts.deviceReplacementDrainRequestSchema,
+        response: contracts.deviceReplacementDrainResponseSchema,
+      },
       list: {
         method: "GET",
         path: "/platform/tenants/:tenantId/device-licensing/replacements",
@@ -321,4 +650,166 @@ describe("device replacement contracts", () => {
       },
     });
   });
+});
+
+it("shares a strict nullable device drain intent with both native clients", () => {
+  const intent = {
+    intentId: previewId,
+    preparationId,
+    credentialEpoch: 1,
+    preparationRevision: 2,
+    requestedAt: createdAt,
+    expiresAt,
+  };
+  expect(contracts.deviceReplacementCurrentIntentResponseSchema.parse(null)).toBeNull();
+  expect(contracts.deviceReplacementCurrentIntentResponseSchema.parse(intent)).toEqual(intent);
+  expect(
+    contracts.deviceReplacementCurrentIntentResponseSchema.safeParse({
+      ...intent,
+      tenantId: "client-claimed",
+    }).success,
+  ).toBe(false);
+  expect(
+    contracts.deviceReplacementCurrentIntentResponseSchema.safeParse({
+      ...intent,
+      expiresAt: createdAt,
+    }).success,
+  ).toBe(false);
+  expect(contracts.stationDeviceReplacementContracts.currentIntent.path).toBe(
+    "/station/device-replacement-intent",
+  );
+});
+
+it("requires versioned matching closure metadata before resuming a drained device", () => {
+  const tombstone = {
+    version: 1,
+    state: "cancelled",
+    intentId: "11111111-1111-4111-8111-111111111111",
+    preparationId: "22222222-2222-4222-8222-222222222222",
+    credentialEpoch: 1,
+    preparationRevision: 3,
+    closedAt: "2026-09-16T12:00:00Z",
+  };
+  expect(contracts.deviceReplacementIntentProjectionSchema.parse(tombstone)).toEqual({
+    ...tombstone,
+    closedAt: "2026-09-16T12:00:00.000Z",
+  });
+  expect(contracts.deviceReplacementIntentProjectionSchema.safeParse(null).success).toBe(false);
+  expect(
+    contracts.deviceReplacementClosureAcknowledgementRequestSchema.safeParse({
+      requestId: "33333333-3333-4333-8333-333333333333",
+      tombstone,
+    }).success,
+  ).toBe(true);
+  expect(
+    contracts.deviceReplacementIntentProjectionSchema.safeParse({
+      ...tombstone,
+      state: "cancelled",
+      resume: true,
+    }).success,
+  ).toBe(false);
+});
+
+it("projects measured report metadata strictly without fabricating unsupported zero", () => {
+  const report = {
+    reportSequence: 2,
+    clientBuild: "station-2.1",
+    storageRevision: 8,
+    pending: {
+      scans: 3,
+      inventories: 0,
+      shiftClosures: 0,
+      productLabels: 0,
+      boxes: 0,
+      exceptions: "unsupported",
+    },
+    conflicts: 0,
+    unknownPrints: 0,
+    activeTasks: [],
+    installedGrants: [],
+    journal: { digest: "a".repeat(64), highestSequence: 9 },
+  };
+  const row = {
+    id: preparationId,
+    sourceDeviceId,
+    revision: 2,
+    state: "draining",
+    preparedAt: createdAt,
+    cancelledAt: null,
+    observation,
+    readiness: {
+      intentId: requestId,
+      credentialEpoch: 1,
+      receivedAt: createdAt,
+      eligibility: { status: "blocked", reasons: ["pending_scans", "client_upgrade_required"] },
+      report,
+    },
+  };
+  expect(contracts.deviceReplacementPreparationSchema.parse(row).readiness).toMatchObject({
+    report,
+  });
+  for (const patch of [{ secret: "never" }, { pending: { ...report.pending, scans: -1 } }])
+    expect(
+      contracts.deviceReplacementPreparationSchema.safeParse({
+        ...row,
+        readiness: { ...row.readiness, report: { ...report, ...patch } },
+      }).success,
+    ).toBe(false);
+});
+
+it("publishes platform target pairing with strict one-time secret response", () => {
+  expect(contracts.platformDeviceReplacementContracts).toHaveProperty("targetCode");
+});
+
+it.each(["prepared", "cancelled"] as const)(
+  "keeps legacy %s preparation bytes parseable without execution or readiness",
+  (state) => {
+    const legacy = {
+      id: preparationId,
+      sourceDeviceId,
+      revision: state === "prepared" ? 1 : 2,
+      state,
+      preparedAt: createdAt,
+      cancelledAt: state === "cancelled" ? expiresAt : null,
+      observation,
+    };
+    expect(JSON.stringify(contracts.deviceReplacementPreparationSchema.parse(legacy))).toBe(
+      JSON.stringify(legacy),
+    );
+    expect(contracts.deviceReplacementPreparationSchema.parse(legacy)).not.toHaveProperty(
+      "execution",
+    );
+    expect(contracts.deviceReplacementPreparationSchema.parse(legacy)).not.toHaveProperty(
+      "readiness",
+    );
+  },
+);
+
+it("strictly projects capability eligibility before any drain intent exists", () => {
+  const preparation = {
+    id: preparationId,
+    sourceDeviceId,
+    revision: 1,
+    state: "prepared",
+    preparedAt: createdAt,
+    cancelledAt: null,
+    observation,
+  };
+  for (const drainEligibility of [
+    { status: "eligible", reasons: [] },
+    { status: "blocked", reasons: ["client_upgrade_required"] },
+  ])
+    expect(
+      contracts.deviceReplacementPreparationSchema.parse({ ...preparation, drainEligibility }),
+    ).toMatchObject({ drainEligibility });
+  for (const drainEligibility of [
+    { status: "blocked", reasons: [] },
+    { status: "eligible", reasons: ["client_upgrade_required"] },
+    { status: "blocked", reasons: ["unknown"] },
+    { status: "eligible", reasons: [], credentialEpoch: 1 },
+  ])
+    expect(
+      contracts.deviceReplacementPreparationSchema.safeParse({ ...preparation, drainEligibility })
+        .success,
+    ).toBe(false);
 });

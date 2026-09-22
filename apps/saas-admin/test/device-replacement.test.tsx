@@ -11,7 +11,14 @@ import {
   type CancelAttempt,
 } from "../src/pages/tenants/replacement-state.js";
 import { DeviceReplacementPanel } from "../src/pages/tenants/DeviceReplacementPanel.js";
-import { pool, SOURCE, preparation, preview, response } from "./device-replacement-fixtures.js";
+import {
+  pool,
+  SOURCE,
+  preparation,
+  preview,
+  response,
+  factualObservation,
+} from "./device-replacement-fixtures.js";
 const authRefetch = vi.hoisted(() => vi.fn());
 vi.mock("../src/auth/client.js", () => ({
   useAuthClient: () => ({ useSession: () => ({ refetch: authRefetch }) }),
@@ -385,8 +392,8 @@ it("formats the saved observation date in the selected Russian locale", async ()
     `Наблюдение сохранено ${new Date(preparation.preparedAt).toLocaleString("ru")}; это исторические факты.`,
   );
   expect(screen.getByText(/сохранённые задания печати: 3/)).toBeDefined();
-  expect(screen.getByText("Замену пока нельзя завершить")).toBeDefined();
-  expect(screen.getByText("Перенос доступа с исходного устройства ещё недоступен")).toBeDefined();
+  expect(screen.getByRole("button", { name: "Запросить завершение работы" })).toBeDefined();
+  expect(screen.queryByText("Перенос доступа с исходного устройства ещё недоступен")).toBeNull();
 });
 
 it("invalidates an ordinary source preview across A to B to A while retaining intent", async () => {
@@ -610,3 +617,44 @@ it("clears a cancellation conflict after a successful fresh attempt", async () =
     view.client.getQueryData(replacementKeys.cancel(pool.tenantId, SOURCE, preparation.id)),
   ).toBeNull();
 });
+
+it.each(["en", "ru"])(
+  "shows actionable factual prerequisites in a fresh preparation preview in %s",
+  async (locale) => {
+    fail = (url, body) =>
+      url.endsWith("/preview")
+        ? response({ ...preview(String(body.requestId)), observation: factualObservation })
+        : undefined;
+    setup();
+    await inspect();
+    await i18n.changeLanguage(locale);
+    await screen.findByText(
+      locale === "ru"
+        ? "Условия исполнения в этом расчёте"
+        : "Execution prerequisites in this preview",
+    );
+    expect(
+      screen.getByText(locale === "ru" ? /Подключите сервис ТСД/ : /Enable Handheld/),
+    ).toBeDefined();
+    expect(
+      screen.getByText(
+        locale === "ru"
+          ? /Проверьте занятые места и лимит тарифа/
+          : /Review occupied slots and plan capacity/,
+      ),
+    ).toBeDefined();
+    expect(
+      screen.getByText(
+        locale === "ru"
+          ? /настроить политику жизненного цикла устройств/
+          : /configure the device lifecycle policy/,
+      ),
+    ).toBeDefined();
+    expect(
+      screen.queryByText(
+        /Replacement cannot be completed yet|Moving access from the source device is not available yet/,
+      ),
+    ).toBeNull();
+    expect(screen.queryByText(/Execution prerequisites at preparation/)).toBeNull();
+  },
+);

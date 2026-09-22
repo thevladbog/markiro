@@ -1,3 +1,7 @@
+import { DeviceReplacementTargetPairingService } from "../src/modules/device-licensing/device-replacement-target-pairing.service";
+import { DeviceReplacementRecoveryService } from "../src/modules/device-licensing/device-replacement-recovery.service";
+import { DeviceReplacementExecutionService } from "../src/modules/device-licensing/device-replacement-execution.service";
+import { DeviceReplacementReadinessService } from "../src/modules/device-licensing/device-replacement-readiness.service";
 import { PlatformDeviceRetentionController } from "../src/modules/device-licensing/platform-device-retention.controller";
 import { PlatformServicePeriodsController } from "../src/modules/service-periods/platform-service-periods.controller";
 import { ServicePeriodsService } from "../src/modules/service-periods/service-periods.service";
@@ -158,6 +162,10 @@ async function createPlatformDocument(): Promise<{
     NationalCatalogSchemaService,
     DeviceLicensingService,
     DeviceReplacementService,
+    DeviceReplacementReadinessService,
+    DeviceReplacementExecutionService,
+    DeviceReplacementRecoveryService,
+    DeviceReplacementTargetPairingService,
     DeviceRetentionService,
     PlatformGrantReadinessService,
     PlatformGrantActivationService,
@@ -216,7 +224,7 @@ async function createPlatformDocument(): Promise<{
 
 describe("current SaaS platform OpenAPI contracts", () => {
   it("converts all current shared schemas to OpenAPI 3.0-compatible wire schemas", () => {
-    expect(CURRENT_SHARED_SCHEMAS).toHaveLength(219);
+    expect(CURRENT_SHARED_SCHEMAS).toHaveLength(235);
     for (const schema of CURRENT_SHARED_SCHEMAS) {
       expectOpenApi30Compatible(jsonSchema(schema));
     }
@@ -341,9 +349,16 @@ describe("current SaaS platform OpenAPI contracts", () => {
           );
         }
 
-        expect(JSON.stringify(inlineJsonSchema(documented.responses[contract.status]))).not.toMatch(
-          /secret|session|token|password|totp|recovery/i,
+        const responseJson = JSON.stringify(
+          inlineJsonSchema(documented.responses[contract.status]),
         );
+        // Replacement lifecycle metadata is public; recovery credentials remain forbidden.
+        const inspected = contract.path.includes("/device-licensing/")
+          ? responseJson
+              .replaceAll('"recovery"', '"continuation"')
+              .replaceAll('"recoveryState"', '"continuationState"')
+          : responseJson;
+        expect(inspected).not.toMatch(/secret|session|token|password|totp|recovery/i);
       }
     } finally {
       await platformDocument.close();

@@ -66,6 +66,10 @@ data class HubUi(
     val writeoffPending: Int = 0,
     /** Null until the mirror has run at least once: unknown is not the same as refused. */
     val canWriteoff: Boolean? = null,
+    val replacementBlocked: Boolean = false,
+    val replacementClosed: Boolean = false,
+    val replacementTargetWaiting: Boolean = false,
+    val replacementCounters: kotlinx.serialization.json.JsonObject? = null,
     /** Null until the pallet bootstrap has covered this operator; false is a real refusal. */
     val canBuildPallets: Boolean? = null,
     /** Pallet memberships this device still owes the server; already part of [queue]'s own total. */
@@ -110,6 +114,7 @@ class HubViewModel(
     palletPermissions: app.markiro.handheld.core.storage.PalletPermissionDao,
     memberships: app.markiro.handheld.core.storage.PalletMembershipDao,
     private val scannerLabel: () -> String,
+    private val replacement: app.markiro.handheld.core.replacement.ReplacementCoordinator? = null,
     private val now: () -> Long = System::currentTimeMillis,
     /** Refreshes the online indicator and the joined shift summary; tests pass controlled ticks. */
     tick: Flow<Unit> = flow {
@@ -142,6 +147,7 @@ class HubViewModel(
         memberships: app.markiro.handheld.core.storage.PalletMembershipDao,
         scannerLabel: app.markiro.handheld.core.scan.ScannerLabel,
         shiftRepository: app.markiro.handheld.feature.shift.ShiftRepository,
+        replacement: app.markiro.handheld.core.replacement.ReplacementCoordinator,
     ) : this(
         recovery,
         api,
@@ -164,6 +170,7 @@ class HubViewModel(
         // «Urovo» on one and a bare «Сканер» on the other.
         scannerLabel = { scannerLabel() },
         shiftRepository = shiftRepository,
+        replacement = replacement,
     )
 
     val grantDenial = app.markiro.handheld.core.grants.GrantDenialUi()
@@ -218,6 +225,7 @@ class HubViewModel(
         config.observe(), session.state, reachability.lastSuccessAt, tick, sync.state, activeShift, inventorySync.state, activeInventory,
         printers.observeRouting(), boxes.observeUnprintedCount(), writeoffSync.state, writeoffPermission, dialog,
         palletPermission, memberships.observePendingCount(),
+        replacement?.state ?: flowOf(null), replacement?.counters ?: flowOf(null), replacement?.targetWaiting ?: flowOf(false),
     ) { values ->
         val cfg = values[0] as DeviceConfigEntity?
         val ses = values[1] as SessionState
@@ -256,6 +264,10 @@ class HubViewModel(
             canWriteoff = canWriteoff,
             canBuildPallets = canBuildPallets,
             palletsPending = palletsPending,
+            replacementTargetWaiting = values[17] as Boolean,
+            replacementBlocked = (values[17] as Boolean) || (values[15] as app.markiro.handheld.core.storage.ReplacementDrainEntity?)?.blocked == true,
+            replacementClosed = (values[15] as app.markiro.handheld.core.storage.ReplacementDrainEntity?)?.state == "closed",
+            replacementCounters = (values[16] as app.markiro.handheld.core.replacement.JsonSnapshot?)?.value,
             activeShiftId = current?.shift?.id,
             continueShiftNumber = current?.shift?.number,
             activeShift = current,
@@ -263,7 +275,7 @@ class HubViewModel(
             continueInventoryNumber = inventory?.inventoryNumber,
             dialog = shiftDialog,
         )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HubUi())
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HubUi(replacementBlocked = replacement != null))
 
     /** Fetches live counts; on any failure the cached counts and their timestamp stay untouched. */
     fun refresh() {
@@ -273,7 +285,7 @@ class HubViewModel(
                 val shifts = api.shifts().items.count { it.status in OPEN_SHIFT_STATUSES }
                 val tasks = api.inventoryTasks().items.size
                 shifts to tasks
-            }.getOrNull() ?: return@work
+            }.getOrElse { if (it is kotlinx.coroutines.CancellationException) throw it else return@work }
             recovery.commit { config.upsert(current.copy(shiftsCount = counts.first, inventoryCount = counts.second, countsAt = now())) }
         }
         }
@@ -319,9 +331,9 @@ class HubViewModel(
                         recovery.work { repository.refreshList() }
                     }
                 }
-            } catch (_: app.markiro.handheld.core.grants.GrantDenied) {
+            } catch (denied: app.markiro.handheld.core.grants.WorkAdmissionDenied) {
                 dialog.value = null
-                grantDenial.show()
+                grantDenial.show(denied)
             }
         }
     }

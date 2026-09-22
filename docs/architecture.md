@@ -195,6 +195,66 @@ aggregation, and saved historical reports and generated exports remain unchanged
   operator/shift/product caches; same-device re-pair reseeds those caches and
   resumes the unchanged queue.
 
+### Working-device replacement authority
+
+The accepted [execution protocol](superpowers/specs/2026-09-16-device-replacement-execution-design.md)
+extends a saved preparation with tenant/source-bound readiness intents, append-only
+reports and an execution aggregate. `prepared` changes no admission. Ordinary drain
+requires fresh authenticated client capability evidence for the current credential
+epoch before storing an intent or fencing work. Older or stale clients receive
+`client_upgrade_required`; emergency remains an explicit separate decision.
+
+Station persists drain/report/closure acknowledgement in SQLite; Handheld uses
+Room. Both pin request bytes before transport, reject late old-generation commits,
+keep durable journals and never infer cancellation from an absent intent. A
+cancelled source resumes only after the exact credential-bound ACK is durable.
+A completed source remains terminal. Readiness combines measured local channels,
+retained grant IDs, server work and authoritative revisions; unsupported data is
+never a zero, and heartbeat is not readiness. Source server-work changes and stale
+reports can invalidate `ready` without rewriting the saved preparation observation.
+
+Execution first stores `executing/revoke_pending`, confirms cloud credential
+revocation, then moves the assignment and publishes one target in the existing
+ordered quota/fact transaction. Target uniqueness, immutable receipt identity and
+current revocation checks make retry/repair idempotent across processes. The
+registered repair provider resumes committed executions at startup and every
+30 seconds; it excludes overlapping local scans and waits for an active pass on
+shutdown. Failed attempts persist a bounded exponential retry schedule (30 seconds
+to one hour) in the execution aggregate. Due ordering by next retry or original
+start prevents a permanently failing batch from starving later work, and an atomic
+attempt comparison prevents duplicate replicas from advancing the same schedule.
+The supported targeted maintenance CLI bypasses that schedule and uses the same execution service
+and original actor. It cannot initiate a replacement. Structured completion,
+pending and scan-failure events expose repair without logging secrets or payloads.
+
+Emergency persists a reason and server-derived `newWorkAllowedAt`. The deadline
+includes unexpired grants from all relevant source credential epochs and inherited
+upstream replacement boundaries; unknown issuance uses a conservative approved
+policy bound or denies the operation. Capable targets can pair immediately, but
+persist the wait before credential/configuration publication and cannot start new
+work or receive grants early, including observe mode. Waiting evidence retains its
+quarantine classification across retries after the deadline.
+
+Source recovery uses purpose `replacement_evidence_recovery`, bound to the exact
+sealed owner, completed emergency execution and current epoch. Explicit handler
+allowlisting permits evidence/read/closure operations even for restricted tenants;
+new work, allocation, grants and catalog mutation stay denied. First delivery
+without pre-cutover proof is retained, not silently applied as new production.
+Exact prior receipts retain their original result. Native recovery preserves the
+sealed operator verifier roster and saved bytes; Station's print reconciliation
+opens only the retained job and never a productive shift. A fresh eligible zero
+report revokes recovery authority; audited `evidence_unavailable` closure records
+incompleteness without inventing missing facts.
+
+Deployment applies all forward migrations before API readers and repair. Cabinet
+and SaaS are packaged in edge; Station and Android use their separate signed/native
+release workflows. A source version string alone is not compatibility evidence.
+Rollback must retain drain/ACK, target-boundary and recovery understanding after
+execution starts; historical authority cannot be restored by an old binary or a
+database restore. See the [operations guide](operations/entitlements-p1b2.md#executing-a-replacement)
+and [acceptance record](acceptance/device-replacement-execution.md) for exact
+rollout, diagnostic queries and evidence limits.
+
 ## 4. Data & retention (hot / warm / cold)
 
 - Postgres (Yandex Managed), multi-tenant via `tenant_id` on every row.

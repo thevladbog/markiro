@@ -100,6 +100,7 @@ class WriteoffRepository(
         val documentId = newId()
         val createdAt = Iso.format(clock())
         db.recovery.commit {
+            app.markiro.handheld.core.replacement.ReplacementReadiness(db).requireAdmission()
             val seq = (meta.get(MetaStore.WRITEOFF_NEXT_DEVICE_SEQ)?.toLongOrNull() ?: 1L)
             val units = lines.filterIsInstance<WriteoffLine.Unit>()
             val boxes = lines.filterIsInstance<WriteoffLine.Box>()

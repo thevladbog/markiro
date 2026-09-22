@@ -13,7 +13,8 @@ import {
 import { stationDevices } from "./platform.js";
 
 export type WorkingDeviceAssignmentState = "reserved" | "assigned" | "released";
-export type WorkingDeviceReleaseReason = "reservation_cancelled" | "security_revoked";
+export type WorkingDeviceReleaseReason =
+  "reservation_cancelled" | "security_revoked" | "replacement_transferred";
 
 /** Immutable transition journal; actors and receipts are supplied by the owning transaction. */
 export const workingDeviceEvents = pgTable(
@@ -35,6 +36,13 @@ export const workingDeviceEvents = pgTable(
         | "reservation_cancelled"
         | "replacement_prepared"
         | "replacement_cancelled"
+        | "replacement_drain_requested"
+        | "replacement_ready"
+        | "replacement_execution_started"
+        | "replacement_transferred"
+        | "replacement_recovery_started"
+        | "replacement_recovery_completed"
+        | "replacement_recovery_unavailable"
       >()
       .notNull(),
     before: jsonb("before").$type<Record<string, unknown>>(),
@@ -60,15 +68,19 @@ export const workingDeviceEvents = pgTable(
     ),
     check(
       "working_device_events_action_check",
-      sql`${t.action} in ('observed','reserved','assigned','released','reservation_cancelled','replacement_prepared','replacement_cancelled') and ${t.outcome} = 'success'`,
+      sql`${t.action} in ('observed','reserved','assigned','released','reservation_cancelled','replacement_prepared','replacement_cancelled','replacement_drain_requested','replacement_ready','replacement_execution_started','replacement_transferred','replacement_recovery_started','replacement_recovery_completed','replacement_recovery_unavailable') and ${t.outcome} = 'success'`,
     ),
     check(
       "working_device_events_json_check",
       sql`(${t.before} is null or jsonb_typeof(${t.before})='object') and jsonb_typeof(${t.after})='object'`,
     ),
     check(
+      "working_device_events_execution_check",
+      sql`${t.action} not in ('replacement_drain_requested','replacement_ready','replacement_execution_started','replacement_transferred','replacement_recovery_started','replacement_recovery_completed','replacement_recovery_unavailable') or ((${t.actorDomain} in ('cabinet','platform','system','device') and ${t.actorId} is not null and length(btrim(${t.actorId})) between 1 and 256 and ${t.requestId} is not null and ${t.requestHash} is not null and ${t.requestHash} ~ '^[0-9a-f]{64}$' and ${t.response} is not null and jsonb_typeof(${t.response}) = 'object' and ${t.response}->>'requestId' = ${t.requestId}::text and ${t.before} is not null) is true)`,
+    ),
+    check(
       "working_device_events_replacement_check",
-      sql`${t.action} not in ('replacement_prepared','replacement_cancelled') or ((${t.actorDomain} in ('cabinet','platform') and ${t.actorId} is not null and ${t.requestId} is not null and ${t.requestHash} is not null and ${t.requestHash} ~ '^[0-9a-f]{64}$' and ${t.response} is not null and jsonb_typeof(${t.response}) = 'object' and ${t.response}->>'requestId' is not null and ${t.response}->>'requestId' = ${t.requestId}::text and ${t.after}->>'id' is not null and ${t.response}#>>'{preparation,id}' is not null and ${t.response}#>>'{preparation,id}' = ${t.after}->>'id' and ((${t.action} = 'replacement_prepared' and ${t.before} is null and ${t.after}->>'state' = 'prepared' and ${t.response}#>>'{preparation,state}' = 'prepared') or (${t.action} = 'replacement_cancelled' and ${t.before} is not null and ${t.before}->>'state' = 'prepared' and ${t.after}->>'state' = 'cancelled' and ${t.response}#>>'{preparation,state}' = 'cancelled'))) is true)`,
+      sql`${t.action} not in ('replacement_prepared','replacement_cancelled') or ((${t.actorDomain} in ('cabinet','platform') and ${t.actorId} is not null and ${t.requestId} is not null and ${t.requestHash} is not null and ${t.requestHash} ~ '^[0-9a-f]{64}$' and ${t.response} is not null and jsonb_typeof(${t.response}) = 'object' and ${t.response}->>'requestId' is not null and ${t.response}->>'requestId' = ${t.requestId}::text and ${t.after}->>'id' is not null and ${t.response}#>>'{preparation,id}' is not null and ${t.response}#>>'{preparation,id}' = ${t.after}->>'id' and ((${t.action} = 'replacement_prepared' and ${t.before} is null and ${t.after}->>'state' = 'prepared' and ${t.response}#>>'{preparation,state}' = 'prepared') or (${t.action} = 'replacement_cancelled' and ${t.before} is not null and ${t.before}->>'state' in ('prepared','draining','ready') and ${t.after}->>'state' = 'cancelled' and ${t.response}#>>'{preparation,state}' = 'cancelled'))) is true)`,
     ),
   ],
 );
@@ -112,7 +124,7 @@ export const workingDeviceAssignments = pgTable(
     ),
     check(
       "working_device_assignments_release_check",
-      sql`(${t.state} <> 'released' and ${t.releasedAt} is null and ${t.releaseReason} is null) or (${t.state} = 'released' and ${t.releasedAt} is not null and ${t.releaseReason} is not null and ${t.releaseReason} in ('reservation_cancelled','security_revoked'))`,
+      sql`(${t.state} <> 'released' and ${t.releasedAt} is null and ${t.releaseReason} is null) or (${t.state} = 'released' and ${t.releasedAt} is not null and ${t.releaseReason} is not null and ${t.releaseReason} in ('reservation_cancelled','security_revoked','replacement_transferred'))`,
     ),
   ],
 );

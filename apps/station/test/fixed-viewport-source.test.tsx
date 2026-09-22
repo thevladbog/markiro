@@ -86,7 +86,11 @@ describe("fixed station viewport source contract", () => {
     // Both handlers hand the resume verdict to the shared entry admission,
     // which is what skips new-work consumption for a resumed task; see
     // `admitTaskEntry` and test/shift-entry-admission.test.ts.
-    expect(app.match(/resuming: authority\?\.resuming \?\? false,/g)).toHaveLength(2);
+    expect(
+      app.match(
+        /resuming: Boolean\(authority\?\.resuming\) \|\| \(await replacementBlocksNewWork\(tauriExecutor\)\),/g,
+      ),
+    ).toHaveLength(2);
   });
 
   it("keeps the alert badge compact so two-word badges do not read as double-spaced", () => {

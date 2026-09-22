@@ -1,7 +1,13 @@
 import {
+  quarantineReplacementSubmission,
+  withReplacementTransaction,
+  type ReplacementSubmission,
+} from "../device-licensing/device-replacement-evidence";
+import {
   withEvidenceTransaction,
   type EvidenceTransactionHook,
 } from "../device-grants/evidence-transaction";
+import { assertDeviceReplacementNewWorkAllowed } from "../device-licensing/device-replacement-admission";
 import type { SubscriptionTransaction } from "../../subscriptions/entitlements.types";
 import {
   BadRequestException,
@@ -258,6 +264,31 @@ export class PickupOrdersService {
       await this.consumeKioskAdmission(this.db, tenantId, source, dto.deviceSeq);
       return { ...existing, status: "pending" };
     }
+    const replacementSubmission: ReplacementSubmission | undefined =
+      source.kind === "handheld" && !evidence
+        ? {
+            tenantId,
+            deviceId: source.stationDeviceId,
+            operation: "writeoffs",
+            submissionId: String(dto.deviceSeq),
+            payload: dto,
+            alreadyApplied: async (tx) =>
+              Boolean(await this.findOrderOutcome(tenantId, source, dto.deviceSeq, tx)),
+          }
+        : undefined;
+    const quarantineReplacementEvidence = async () => {
+      if (source.kind !== "handheld" || evidence) return;
+      await quarantineReplacementSubmission(
+        this.db,
+        tenantId,
+        source.stationDeviceId,
+        "writeoffs",
+        String(dto.deviceSeq),
+        dto,
+        async (tx) => Boolean(await this.findOrderOutcome(tenantId, source, dto.deviceSeq, tx)),
+      );
+    };
+    await quarantineReplacementEvidence();
     if (processing.vNext) {
       const rejection = await this.findRejectionOutcome(tenantId, source, dto.deviceSeq);
       if (rejection) this.throwPersistedKioskRejection(rejection);
@@ -355,8 +386,8 @@ export class PickupOrdersService {
         scannedAt: when,
       };
       const winner = processing.vNext
-        ? await this.persistSerializedEarlyRejection(row, hasLines)
-        : await this.persistLegacyEarlyRejection(row, hasLines);
+        ? await this.persistSerializedEarlyRejection(row, hasLines, replacementSubmission)
+        : await this.persistLegacyEarlyRejection(row, hasLines, replacementSubmission);
       if (winner)
         return this.finishKioskEvidence(tenantId, source, dto.deviceSeq, winner, evidence);
       throw new UnprocessableEntityException("Unknown or inactive badge");
@@ -375,8 +406,8 @@ export class PickupOrdersService {
         scannedAt: when,
       };
       const winner = processing.vNext
-        ? await this.persistSerializedEarlyRejection(row, true)
-        : await this.persistLegacyEarlyRejection(row, true);
+        ? await this.persistSerializedEarlyRejection(row, true, replacementSubmission)
+        : await this.persistLegacyEarlyRejection(row, true, replacementSubmission);
       if (winner)
         return this.finishKioskEvidence(tenantId, source, dto.deviceSeq, winner, evidence);
       throw new UnprocessableEntityException({
@@ -413,8 +444,8 @@ export class PickupOrdersService {
         scannedAt: when,
       };
       const winner = processing.vNext
-        ? await this.persistSerializedEarlyRejection(row, true)
-        : await this.persistLegacyEarlyRejection(row, true);
+        ? await this.persistSerializedEarlyRejection(row, true, replacementSubmission)
+        : await this.persistLegacyEarlyRejection(row, true, replacementSubmission);
       if (winner)
         return this.finishKioskEvidence(tenantId, source, dto.deviceSeq, winner, evidence);
       throw error;
@@ -441,7 +472,21 @@ export class PickupOrdersService {
       processing.boxes,
       processing.vNext,
       evidence,
-    );
+      replacementSubmission,
+    ).catch(async (error: unknown) => {
+      // Drain may have begun after the initial retention check. Admission's
+      // device lock wins that race; persist this request after its rollback.
+      const response = error instanceof ConflictException ? error.getResponse() : null;
+      if (
+        response &&
+        typeof response === "object" &&
+        "code" in response &&
+        (response.code === "device_replacement_draining" ||
+          response.code === "device_replacement_waiting")
+      )
+        await quarantineReplacementEvidence();
+      throw error;
+    });
 
     if (order.writeoffForbidden) {
       throw new UnprocessableEntityException({
@@ -1672,8 +1717,9 @@ export class PickupOrdersService {
   private async persistLegacyEarlyRejection(
     row: Parameters<PickupOrdersService["recordScanRejection"]>[1],
     hasLines: boolean,
+    replacementSubmission?: ReplacementSubmission,
   ): Promise<null> {
-    await this.db.transaction(async (tx) => {
+    await withReplacementTransaction(this.db, replacementSubmission, async (tx) => {
       if (hasLines) await this.recordScanRejection(tx, row);
       await this.consumeKioskAdmission(tx, row.tenantId, row.source, row.deviceSeq);
     });
@@ -1721,8 +1767,9 @@ export class PickupOrdersService {
   private async persistSerializedEarlyRejection(
     row: Parameters<PickupOrdersService["recordScanRejection"]>[1],
     hasLines: boolean,
+    replacementSubmission?: ReplacementSubmission,
   ): Promise<KioskOrderOutcome | null> {
-    return this.db.transaction(async (tx) => {
+    return withReplacementTransaction(this.db, replacementSubmission, async (tx) => {
       await this.lockDeviceRow(tx, row.tenantId, row.source);
       const order = await this.findOrderOutcome(row.tenantId, row.source, row.deviceSeq, tx);
       if (order) {
@@ -2341,6 +2388,7 @@ export class PickupOrdersService {
     requestedBoxes: NonNullable<CreateOrderDto["boxes"]>,
     vNext: boolean,
     evidence?: EvidenceTransactionHook<CreateOrderResultDto>,
+    replacementSubmission?: ReplacementSubmission,
   ): Promise<KioskOrderOutcome> {
     let remaining = [...items];
     const accumulatedConflicts = [...conflicts];
@@ -2351,14 +2399,7 @@ export class PickupOrdersService {
       let attemptedAccepted: ResolvedItem[] = [];
       let attemptedBoxes: ResolvedOrderBox[] = [];
       try {
-        return await this.db.transaction(async (tx) => {
-          const utcDay = when.toISOString().slice(0, 10);
-          await lockPickupOrderTransaction(tx, {
-            tenantId,
-            employeeId,
-            utcDay,
-          });
-
+        return await withReplacementTransaction(this.db, replacementSubmission, async (tx) => {
           // Lock the kiosk row before inserting. `PairingService.attemptRedeem`
           // takes this SAME row lock before it computes nextDeviceSeq during a
           // re-pair, so the two paths can never interleave: a device that is
@@ -2368,8 +2409,17 @@ export class PickupOrdersService {
           // failure this closes -- a replacement device silently losing its
           // first genuine order to a false idempotency-key replay. Scoped to
           // just this one row, for only the remainder of this transaction.
-          await this.lockDeviceRow(tx, tenantId, source);
+          // Station source ownership serializes with replacement before registry locks.
+          // Kiosks retain registry -> employee/day -> kiosk ordering used by admission.
+          if (source.kind === "handheld") await this.lockDeviceRow(tx, tenantId, source);
+          const utcDay = when.toISOString().slice(0, 10);
+          await lockPickupOrderTransaction(tx, {
+            tenantId,
+            employeeId,
+            utcDay,
+          });
 
+          if (source.kind === "kiosk") await this.lockDeviceRow(tx, tenantId, source);
           await evidence?.before(tx);
           const apply = async (): Promise<KioskOrderOutcome> => {
             // The optimistic lookup at createFromKiosk's entry keeps ordinary
@@ -2387,6 +2437,13 @@ export class PickupOrdersService {
             if (serializedWinner) {
               await this.consumeKioskAdmission(tx, tenantId, source, deviceSeq);
               return serializedWinner;
+            }
+
+            // Historical delivery/replay stays recoverable. Only a fresh
+            // handheld document acquires new productive scope under this lock.
+            if (source.kind === "handheld") {
+              await assertDeviceReplacementNewWorkAllowed(tx, tenantId, source.stationDeviceId);
+              await this.entitlements.assertWriteAccess(tenantId, tx, new Date());
             }
 
             const policy = await this.resolveLivePickupPolicy(tx, tenantId, employeeId);

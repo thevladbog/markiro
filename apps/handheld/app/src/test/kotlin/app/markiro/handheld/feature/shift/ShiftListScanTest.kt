@@ -67,6 +67,10 @@ private const val OTHER_LINE = "l2"
  * point of these tests is the view model's local resolution, not HTTP framing.
  */
 private class FakeStationApi(shifts: List<ShiftDto>) : StationApi {
+    override suspend fun replacementIntent(knownIntentId: String?): kotlinx.serialization.json.JsonObject? = null
+    override suspend fun replacementRecoveryReadiness(body: kotlinx.serialization.json.JsonObject): kotlinx.serialization.json.JsonObject = error("unused")
+    override suspend fun replacementReadiness(body: kotlinx.serialization.json.JsonObject): kotlinx.serialization.json.JsonObject = error("unused")
+    override suspend fun replacementAcknowledge(body: kotlinx.serialization.json.JsonObject): kotlinx.serialization.json.JsonObject = error("unused")
     private val byId = shifts.associateBy { it.id }.toMutableMap()
 
     var enteredShiftId: String? = null
@@ -160,12 +164,13 @@ private class FakeStationApi(shifts: List<ShiftDto>) : StationApi {
  * used by the view model's own state `combine`) is untouched, so the screen
  * keeps working while only the scan path's own lookup is made to fail once.
  */
-private class FailOnceConfigDao(private val real: DeviceConfigDao) : DeviceConfigDao {
+private class FailOnceConfigDao(private val real: DeviceConfigDao, private val replacement: Boolean = false) : DeviceConfigDao {
     private var thrown = false
     override fun observe() = real.observe()
     override suspend fun get(): DeviceConfigEntity? {
         if (!thrown) {
             thrown = true
+            if (replacement) throw app.markiro.handheld.core.replacement.ReplacementDenied()
             throw GrantDenied(
                 GrantEvidenceEntity(
                     ownerKey = "owner", eventId = "test-denial", taskKind = "SHIFT", taskId = "irrelevant",
@@ -500,4 +505,17 @@ class ShiftListScanTest {
         assertEquals(shiftId, api.enteredShiftId)
         assertEquals("task_barcode", api.lastEnterBody?.entryMethod)
     }
+    @Test
+    fun `a replacement refusal does not stop the task barcode collector`() = runTest {
+        val api = FakeStationApi(shifts = listOf(plannedShift(shiftId, OWN_LINE)))
+        val model = viewModel(api, ScanRouterAdapter(scans), config = FailOnceConfigDao(db.deviceConfigDao(), replacement = true))
+        model.settled()
+        scan("markiro:shift:v1:$shiftId")
+        model.grantDenial.isVisible.first { it }
+        assertNull(api.enteredShiftId)
+        scan("markiro:shift:v1:$shiftId")
+        model.state.first { it.continueShift?.id == shiftId }
+        assertEquals(shiftId, api.enteredShiftId)
+    }
+
 }

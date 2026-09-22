@@ -72,6 +72,7 @@ class WriteoffViewModelTest {
         private val reasonFlow = MutableStateFlow(reasons)
         private val document = MutableStateFlow<WriteoffOutboxEntity?>(null)
         var refreshes = 0
+        var beforeFile: suspend () -> Unit = {}
 
         override fun observeReasons(): Flow<List<WriteoffReasonEntity>> = reasonFlow
 
@@ -93,6 +94,7 @@ class WriteoffViewModelTest {
         }
 
         override suspend fun file(operatorId: String, reason: WriteoffReasonEntity, lines: List<WriteoffLine>): String {
+            beforeFile()
             filed += Triple(operatorId, reason, lines)
             document.value = WriteoffOutboxEntity(
                 documentId = "doc-1", deviceSeq = 1, operatorId = operatorId, reasonId = reason.id, reasonName = reason.name,
@@ -299,4 +301,21 @@ class WriteoffViewModelTest {
         const val SSCC = "046000000000000022"
         val REASON = WriteoffReasonEntity("r-1", "Бой", 0)
     }
+    @Test fun drainWhileConfirmationIsOpenShowsDenialAndKeepsUnfiledList() = runTest {
+        val gateway=FakeGateway(products=mapOf(GTIN to "Water"))
+        val model=vm(gateway)
+        emit(km("SAVED")); model.state.first { it.unitCount == 1 }
+        model.next(); model.selectReason(REASON); model.toConfirm()
+        val intent=kotlinx.serialization.json.Json.parseToJsonElement("""{"version":1,"state":"active","intent":{"intentId":"11111111-1111-4111-8111-111111111111","preparationId":"22222222-2222-4222-8222-222222222222","credentialEpoch":7,"preparationRevision":2,"requestedAt":"2026-09-16T00:00:00Z","expiresAt":"2026-09-17T00:00:00Z"}}""") as kotlinx.serialization.json.JsonObject
+        val local=app.markiro.handheld.core.replacement.ReplacementReadiness(db)
+        local.apply(db.recovery.token(),intent)
+        gateway.beforeFile={ db.recovery.commit { local.requireAdmission() } }
+        model.confirm()
+        model.grantDenial.isVisible.first { it }
+        assertEquals(WriteoffStep.CONFIRM,model.state.value.step)
+        assertEquals(1,model.state.value.lines.size)
+        assertNull(model.state.value.filedDocumentId)
+        assertTrue(gateway.filed.isEmpty())
+    }
+
 }

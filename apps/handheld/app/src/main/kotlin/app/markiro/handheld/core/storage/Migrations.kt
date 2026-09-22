@@ -499,3 +499,10 @@ val MIGRATION_18_19 = object : Migration(18, 19) {
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_pallet_membership_removals_status_id` ON `pallet_membership_removals` (`status`, `id`)")
     }
 }
+
+/** Replacement state is additive; all business journals, grant task authority and saved bytes survive. */
+val MIGRATION_19_20 = object : Migration(19, 20) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS replacement_drain (id INTEGER NOT NULL PRIMARY KEY, ownerKey TEXT NOT NULL, generation INTEGER NOT NULL, intentJson TEXT NOT NULL, state TEXT NOT NULL, resumeTasksJson TEXT NOT NULL, reportSequence INTEGER NOT NULL, reportJson TEXT, closureJson TEXT, acknowledgedAt TEXT)")
+    }
+}

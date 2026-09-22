@@ -128,6 +128,9 @@ describe("ShiftSelection barcode scanning", () => {
     renderSelection({ scan, items: [closedShift()] });
 
     await waitFor(() => expect(screen.getByText("No open shifts")).toBeDefined());
+    // The DOM mutation can wake waitFor before the scanner's passive effect
+    // replaces its loading-state listener. Settle that subscription as well.
+    await act(async () => {});
     act(() => scan.scan(`markiro:shift:v1:${SHIFT_ID}`));
 
     expect(await screen.findByText("This shift is closed.")).toBeDefined();
@@ -150,6 +153,9 @@ describe("ShiftSelection barcode scanning", () => {
     // Wait for the (empty) initial list to settle so this exercises the
     // genuine "not in the list" case, not the loading race covered below.
     await waitFor(() => expect(screen.getByText("No open shifts")).toBeDefined());
+    // The DOM mutation can wake waitFor before the scanner's passive effect
+    // replaces its loading-state listener. Settle that subscription as well.
+    await act(async () => {});
     act(() => scan.scan("markiro:shift:v1:44444444-4444-4444-8444-444444444444"));
 
     expect(

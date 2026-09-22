@@ -4,7 +4,8 @@ import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
 import { handheldSource } from "../pickup-orders/document-source";
 import { PickupOrdersService } from "../pickup-orders/pickup-orders.service";
-import type { CreateOrderResultDto } from "../pickup-orders/dto";
+import { quarantineReplacementSubmission } from "../device-licensing/device-replacement-evidence";
+import type { CreateOrderResultDto, CreatePickupDocumentInput } from "../pickup-orders/dto";
 import type { StationWriteoffBootstrapDto, StationWriteoffDto } from "./dto";
 
 @Injectable()
@@ -50,8 +51,7 @@ export class StationWriteoffsService {
     stationDeviceId: string,
     dto: StationWriteoffDto,
   ): Promise<CreateOrderResultDto> {
-    await this.assertCanWriteoff(tenantId, dto.operatorId);
-    return this.pickupOrders.createForDevice(tenantId, handheldSource(stationDeviceId), {
+    const document: CreatePickupDocumentInput = {
       deviceSeq: dto.deviceSeq,
       operatorId: dto.operatorId,
       reason: "writeoff",
@@ -59,7 +59,32 @@ export class StationWriteoffsService {
       items: dto.items,
       boxes: dto.boxes,
       createdAt: dto.createdAt,
-    });
+    };
+    // A waiting target's well-formed payload is evidence even when its asserted
+    // operator is invalid. Retain it before ordinary business authorization.
+    await quarantineReplacementSubmission(
+      this.db,
+      tenantId,
+      stationDeviceId,
+      "writeoffs",
+      String(dto.deviceSeq),
+      document,
+      async (tx) => {
+        const [existing] = await tx
+          .select({ id: schema.pickupOrders.id })
+          .from(schema.pickupOrders)
+          .where(
+            and(
+              eq(schema.pickupOrders.tenantId, tenantId),
+              eq(schema.pickupOrders.stationDeviceId, stationDeviceId),
+              eq(schema.pickupOrders.deviceSeq, dto.deviceSeq),
+            ),
+          );
+        return Boolean(existing);
+      },
+    );
+    await this.assertCanWriteoff(tenantId, dto.operatorId);
+    return this.pickupOrders.createForDevice(tenantId, handheldSource(stationDeviceId), document);
   }
 
   async bootstrap(tenantId: string): Promise<StationWriteoffBootstrapDto> {

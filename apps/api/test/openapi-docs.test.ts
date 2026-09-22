@@ -439,7 +439,15 @@ describe("self-hosted OpenAPI documentation", () => {
         "credential",
         "device",
         "operators",
+        "replacement",
         "subscription",
+      ]);
+      expectExactObjectFields(property(station, "replacement"), [
+        "version",
+        "executionId",
+        "credentialEpoch",
+        "newWorkAllowedAt",
+        "serverTime",
       ]);
       const stationDevice = property(station, "device");
       expectExactObjectFields(stationDevice, [

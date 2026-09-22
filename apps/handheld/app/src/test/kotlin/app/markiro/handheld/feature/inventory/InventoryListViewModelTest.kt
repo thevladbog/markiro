@@ -219,6 +219,27 @@ class InventoryListViewModelTest {
         assertEquals(InventoryError.INVALID_SNAPSHOT, (ui.dialog as InventoryDialog.Error).kind)
         assertNull(db.deviceConfigDao().get()?.activeInventoryId)
     }
+    @Test
+    fun drainDuringDownloadShowsAdmissionNoticeWithoutNavigation() = runTest {
+        val repo = FakeRepo()
+        repo.beforeDownloadReturn = {
+            val local = app.markiro.handheld.core.replacement.ReplacementReadiness(db)
+            val intent = kotlinx.serialization.json.Json.parseToJsonElement("""{"version":1,"state":"active","intent":{"intentId":"11111111-1111-4111-8111-111111111111","preparationId":"22222222-2222-4222-8222-222222222222","credentialEpoch":7,"preparationRevision":2,"requestedAt":"2026-09-16T00:00:00Z","expiresAt":"2026-09-17T00:00:00Z"}}""") as kotlinx.serialization.json.JsonObject
+            local.apply(db.recovery.token(), intent)
+            db.recovery.commit { local.requireAdmission("inventory", "i1") }
+        }
+        val model = vm(repo)
+        model.state.first { !it.loading }
+        model.events.test(timeout = 60.seconds) {
+            model.select(own)
+            model.grantDenial.isVisible.first { it }
+            model.state.first { it.dialog == null }
+            expectNoEvents()
+        }
+        assertNull(db.deviceConfigDao().get()?.activeInventoryId)
+        assertNull(db.inventoryTaskDao().get("i1"))
+    }
+
     @Test fun oldDownloadContinuationCannotActivateAfterRecovery() = runTest {
         val config = checkNotNull(db.deviceConfigDao().get())
         val repo = FakeRepo()

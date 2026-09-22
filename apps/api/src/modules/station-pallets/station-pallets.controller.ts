@@ -24,11 +24,11 @@ export class StationPalletsController {
   @ApiOperation({
     summary: "Get the handheld warehouse-pallet bootstrap",
     description:
-      "Catalogue with pallet capacities, per-operator pallet permission, this device's extension-1 SSCC block for the organisation's GLN, and the default pallet label templates. The block is null when the subscription is read-only, the organisation has no GLN, or the prefix is exhausted.",
+      "Catalogue with pallet capacities, per-operator pallet permission, this device's extension-1 SSCC block for the organisation's GLN, and the default pallet label templates. The block is null when the subscription is read-only, the organisation has no GLN, or the prefix is exhausted. Allocation is denied while the device is draining for replacement or before the replacement target newWorkAllowedAt.",
   })
   @ApiStationAuth()
   @ApiOkResponse({ schema: stationPalletBootstrapOpenApiSchema })
-  @ApiHttpErrors(401, 403, 429)
+  @ApiHttpErrors(401, 403, 409, 429)
   bootstrap(@Req() req: RequestWithTenant): Promise<StationPalletBootstrapDto> {
     if (!req.deviceId) throw new Error("Station device identity is missing");
     return this.service.bootstrap(req.tenantId!, req.deviceId);

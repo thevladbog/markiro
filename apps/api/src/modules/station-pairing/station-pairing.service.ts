@@ -1,3 +1,10 @@
+import { redeemReplacementTarget } from "./replacement-target-pairing";
+import { redeemReplacementRecovery } from "./replacement-recovery-pairing";
+import {
+  replacementTargetFence,
+  replacementTargetWaiting,
+  assertReplacementSourcePairingAllowed,
+} from "../device-licensing/device-replacement-admission";
 import type { StationRecoveryIdentity } from "@markiro/platform-contracts";
 import {
   Inject,
@@ -42,6 +49,8 @@ const MINT_ATTEMPTS = 5;
 export interface RedeemOptions {
   includeSubscription?: boolean;
   handheldClient?: boolean;
+  replacementBoundary?: boolean;
+  replacementEvidenceRecovery?: boolean;
   expectedRecoveryIdentity?: StationRecoveryIdentity;
 }
 
@@ -89,6 +98,7 @@ export class StationPairingService {
     tenantId: string,
     deviceId: string,
     includeSubscription = false,
+    recoveryExecutionId?: string,
   ): Promise<StationIdentityResultDto> {
     const serverNow = new Date();
     const [station] = await this.db
@@ -114,7 +124,7 @@ export class StationPairingService {
         and(
           eq(schema.stationDevices.tenantId, tenantId),
           eq(schema.stationDevices.id, deviceId),
-          isNull(schema.stationDevices.revokedAt),
+          recoveryExecutionId ? undefined : isNull(schema.stationDevices.revokedAt),
         ),
       );
     if (!station) throw new UnauthorizedException();
@@ -154,6 +164,7 @@ export class StationPairingService {
           )
           .for("update");
         if (!station) throw new NotFoundException();
+        await assertReplacementSourcePairingAllowed(tx, tenantId, stationDeviceId);
         assertReservationOpen(await workingAssignment(tx, tenantId, stationDeviceId));
         await tx
           .update(schema.stationPairingCodes)
@@ -227,6 +238,7 @@ export class StationPairingService {
     const codeHash = hashPairingCode(code, loadEnv().PAIRING_CODE_PEPPER);
     const rows = await this.db
       .select({
+        purpose: schema.stationPairingCodes.purpose,
         id: schema.stationPairingCodes.id,
         tenantId: schema.stationPairingCodes.tenantId,
         stationDeviceId: schema.stationPairingCodes.stationDeviceId,
@@ -318,11 +330,56 @@ export class StationPairingService {
       throw new StationPairingException("PAIR_KIND_MISMATCH");
     }
 
+    if (candidate.purpose === "replacement_recovery") {
+      if (!options.expectedRecoveryIdentity || !options.replacementEvidenceRecovery)
+        throw new StationPairingException("PAIR_UPDATE_REQUIRED");
+      return redeemReplacementRecovery({
+        db: this.db,
+        entitlements: this.entitlements,
+        candidate,
+        station,
+      });
+    }
+
     await this.entitlements.assertWriteAccess(candidate.tenantId, this.db, new Date());
 
+    const initialWaiting = await this.db.transaction((tx) =>
+      replacementTargetWaiting(tx, candidate.tenantId, candidate.stationDeviceId),
+    );
+    if (initialWaiting && !options.replacementBoundary)
+      throw new StationPairingException("PAIR_UPDATE_REQUIRED");
+    let replacement: PairStationResultDto["replacement"];
     // Build before the conditional claim. If an operator mirror cannot be
     // prepared, the code stays live and no candidate key exists to clean up.
     const operators = await this.operators.buildRoster(candidate.tenantId);
+    const targetPairing = await redeemReplacementTarget({
+      db: this.db,
+      entitlements: this.entitlements,
+      candidate,
+      station,
+    });
+    if (targetPairing)
+      return {
+        device: {
+          id: station.id,
+          name: station.name,
+          kind: station.kind as StationDeviceKind,
+          tenantId: station.tenantId,
+          organizationName: station.organizationName,
+          line:
+            station.lineId !== null && station.lineName !== null
+              ? { id: station.lineId, name: station.lineName }
+              : null,
+        },
+        credential: { apiKey: targetPairing.key.key, serverUrl: loadEnv().BETTER_AUTH_URL },
+        ...(options.replacementBoundary && targetPairing.replacement
+          ? { replacement: targetPairing.replacement }
+          : {}),
+        operators,
+        ...(options.includeSubscription
+          ? { subscription: await this.entitlements.accessSnapshot(candidate.tenantId) }
+          : {}),
+      };
     const key = await this.auth.api.createApiKey({
       body: {
         configId: "station",
@@ -356,6 +413,16 @@ export class StationPairingService {
             )
             .for("update");
           if (!lockedStation) throw new PairClaimLostError();
+          await assertReplacementSourcePairingAllowed(
+            tx,
+            candidate.tenantId,
+            candidate.stationDeviceId,
+          );
+          if (
+            !options.replacementBoundary &&
+            (await replacementTargetWaiting(tx, candidate.tenantId, candidate.stationDeviceId))
+          )
+            throw new StationPairingException("PAIR_UPDATE_REQUIRED");
           const assignment = await workingAssignment(
             tx,
             candidate.tenantId,
@@ -420,6 +487,13 @@ export class StationPairingService {
               )
               .returning();
             if (!paired) throw new PairClaimLostError();
+            if (options.replacementBoundary)
+              replacement = await replacementTargetFence(
+                tx,
+                candidate.tenantId,
+                candidate.stationDeviceId,
+                paired.credentialEpoch,
+              );
             await transitionWorkingAssignment(tx, paired, { domain: "device", id: paired.id });
           };
 
@@ -456,6 +530,7 @@ export class StationPairingService {
             : null,
       },
       credential: { apiKey: key.key, serverUrl: loadEnv().BETTER_AUTH_URL },
+      ...(replacement ? { replacement } : {}),
       operators,
       ...(options.includeSubscription
         ? { subscription: await this.entitlements.accessSnapshot(candidate.tenantId) }

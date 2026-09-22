@@ -10,7 +10,7 @@ internal fun DeviceOwner.grantOwnerKey(): String = JsonArray(listOf(serverOrigin
 internal fun grantDigest(value: String): String = MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
 internal fun grantSlot(owner: String, kind: String, task: String) = JsonArray(listOf(owner, kind, task).map(::JsonPrimitive)).toString()
 
-class GrantDenied internal constructor(val decision: GrantEvidenceEntity, internal val clockState: GrantStateEntity?) : IllegalStateException("Offline grant: ${decision.reason}")
+class GrantDenied internal constructor(val decision: GrantEvidenceEntity, internal val clockState: GrantStateEntity?) : WorkAdmissionDenied("Offline grant: ${decision.reason}")
 internal data class GrantRefreshTicket(val token: GenerationToken, val sequence: Long)
 
 /** Every admission is nested in the business owner's recovery commit; no network or signature work here. */
@@ -41,6 +41,7 @@ class GrantRepository(private val db: HandheldDatabase) {
 
     private suspend fun admit(kind: TaskKind, taskId: String, eventId: String, event: GrantEventType?, costs: Map<String, Long>, payload: String = eventId, executionFingerprint: String? = null) = db.recovery.commit {
         require(kind != TaskKind.PICKUP && (event == null || event in setOf(GrantEventType.SHIFT_SCAN,GrantEventType.SHIFT_BOX_CLOSE,GrantEventType.SHIFT_PALLET_CLOSE,GrantEventType.SHIFT_LABEL_PREPARE,GrantEventType.SHIFT_CLOSE,GrantEventType.INVENTORY_SCAN,GrantEventType.INVENTORY_CLOSE))) { "Unsupported Handheld productive event" }
+        if (event == null) app.markiro.handheld.core.replacement.ReplacementReadiness(db).requireAdmission(kind.wire, taskId)
         val token = db.recovery.token()
         val ownerKey = token.owner.grantOwnerKey()
         val dao = db.grantDao()
@@ -56,6 +57,7 @@ class GrantRepository(private val db: HandheldDatabase) {
             require(prior.payloadDigest == identity) { "Grant event identity conflict" }
             return@commit
         }
+        if (app.markiro.handheld.core.replacement.ReplacementEvidenceRecoveryState(db).blocked()) throw app.markiro.handheld.core.replacement.ReplacementDenied()
         val row = dao.token(grantSlot(ownerKey, if (event == null) "device" else kind.wire, if (event == null) "" else taskId))
         val retired = state?.let { Json.parseToJsonElement(it.retiredKids).jsonArray.map { x -> x.jsonPrimitive.content }.toSet() } ?: emptySet()
         val grant = row?.takeIf { it.ownerKey == ownerKey && it.generation == token.generation && it.epoch == state?.epoch && it.kid !in retired }?.let { runCatching { decoder.parseStored(it.compact) }.getOrNull() }

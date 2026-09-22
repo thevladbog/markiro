@@ -8,7 +8,7 @@ import kotlinx.serialization.Serializable
  * validation policy prints a duplicate at all -- without it the server answers
  * `409 STATION_UPDATE_REQUIRED`.
  */
-const val HANDHELD_CAPABILITIES = "handheld-v1,subscription-state-v1,station-recovery-v1,validation-dm-duplicate-v1,validation-reprocessing-v1"
+const val HANDHELD_CAPABILITIES = "handheld-v1,subscription-state-v1,station-recovery-v1,replacement-boundary-v1,replacement-readiness-v1,replacement-evidence-recovery-v1,validation-dm-duplicate-v1,validation-reprocessing-v1"
 const val REVOKED_CODE = "STATION_CREDENTIAL_REVOKED"
 const val UPDATE_REQUIRED_CODE = "STATION_UPDATE_REQUIRED"
 
@@ -43,7 +43,26 @@ data class OperatorDto(
 )
 
 @Serializable
-data class PairResponse(val device: DeviceDto, val credential: CredentialDto, val operators: List<OperatorDto>)
+data class PairResponse(val device: DeviceDto, val credential: CredentialDto, val operators: List<OperatorDto>, val replacement: ReplacementTargetFence? = null, val recovery: ReplacementEvidenceRecovery? = null)
+
+@Serializable
+data class ReplacementTargetFence(
+    val version: Int,
+    val executionId: String,
+    val credentialEpoch: Long,
+    val newWorkAllowedAt: Long,
+    val serverTime: Long,
+) {
+    fun validate(): ReplacementTargetFence {
+        require(
+            version == 1 && RecoveryResponse.UUID_PATTERN.matches(executionId) &&
+                credentialEpoch in 1..9_007_199_254_740_991 &&
+                newWorkAllowedAt in 0..9_007_199_254_740_991 &&
+                serverTime in 0..9_007_199_254_740_991
+        )
+        return this
+    }
+}
 
 @Serializable
 data class IdentityResponse(val device: DeviceDto)

@@ -44,6 +44,27 @@ const entitlementsServiceStub = {
   resolveRecovery: async () => ({ access: "managed" }),
 } as unknown as EntitlementsService;
 
+// These fixtures are ordinary devices, with no incoming replacement fence.
+function noReplacementSelect() {
+  return {
+    from: (table: unknown) => {
+      expect(table).toBe(schema.workingDeviceReplacementExecutions);
+      return { where: () => Promise.resolve([]) };
+    },
+  };
+}
+
+function unfencedSourceSelect(table: unknown) {
+  if (table === schema.stationDevices)
+    return {
+      where: () => ({ for: () => Promise.resolve([{ kind: "station" }]) }),
+    };
+  if (table === schema.workingDeviceReplacementExecutions || table === schema.deviceGrantEvidence) {
+    return { where: () => Promise.resolve([]) };
+  }
+  return undefined;
+}
+
 describe("StationScansService box registry versioning", () => {
   it("advances a closed box with the monotonic registry cursor expression in the batch transaction", async () => {
     const boxUpdates: Array<Record<string, unknown>> = [];
@@ -52,6 +73,7 @@ describe("StationScansService box registry versioning", () => {
     const shiftId = "11111111-1111-1111-1111-111111111111";
     const terminalId = "22222222-2222-2222-2222-222222222222";
     const dbStub = {
+      select: noReplacementSelect,
       transaction: async (run: (tx: unknown) => Promise<unknown>) => {
         const tx = {
           insert: (table: unknown) => {
@@ -68,13 +90,14 @@ describe("StationScansService box registry versioning", () => {
             };
           },
           select: () => ({
-            from: () => ({
-              where: () => ({
-                orderBy: () => ({
-                  for: () => Promise.resolve([{ id: shiftId, openedAt: new Date() }]),
+            from: (table: unknown) =>
+              unfencedSourceSelect(table) ?? {
+                where: () => ({
+                  orderBy: () => ({
+                    for: () => Promise.resolve([{ id: shiftId, openedAt: new Date() }]),
+                  }),
                 }),
-              }),
-            }),
+              },
           }),
           execute: (query: SQL) => {
             const rendered = new PgDialect().sqlToQuery(query);
@@ -198,6 +221,8 @@ describe("StationScansService box registry versioning", () => {
       }),
       select: () => ({
         from: (table: unknown) => {
+          const source = unfencedSourceSelect(table);
+          if (source) return source;
           if (table !== schema.shifts) throw new Error("Unexpected select table");
           return {
             where: (condition: SQL) => {
@@ -236,6 +261,7 @@ describe("StationScansService box registry versioning", () => {
       }),
     };
     const dbStub = {
+      select: noReplacementSelect,
       transaction: (run: (writer: typeof tx) => Promise<unknown>) => run(tx),
     } as unknown as Db;
     const ssccService = {
@@ -345,8 +371,13 @@ describe("StationScansService.applyBatch month cap (Finding 2)", () => {
       // The shift-ownership guard (Finding 2) now runs before the month cap
       // -- answer it as "owned" so this test isolates the cap itself.
       select: () => ({
-        from: () => ({
-          where: () => Promise.resolve([{ id: "11111111-1111-1111-1111-111111111111" }]),
+        from: (table: unknown) => ({
+          where: () =>
+            Promise.resolve(
+              table === schema.workingDeviceReplacementExecutions
+                ? []
+                : [{ id: "11111111-1111-1111-1111-111111111111" }],
+            ),
         }),
       }),
       transaction: () => {
@@ -389,8 +420,13 @@ describe("StationScansService.applyBatch month cap (Finding 2)", () => {
       // (all these items share `item()`'s fixed shiftId) so this test still
       // isolates what it actually cares about: the month cap itself.
       select: () => ({
-        from: () => ({
-          where: () => Promise.resolve([{ id: "11111111-1111-1111-1111-111111111111" }]),
+        from: (table: unknown) => ({
+          where: () =>
+            Promise.resolve(
+              table === schema.workingDeviceReplacementExecutions
+                ? []
+                : [{ id: "11111111-1111-1111-1111-111111111111" }],
+            ),
         }),
       }),
       transaction: async () => {
@@ -424,7 +460,7 @@ describe("StationScansService.applyBatch month cap (Finding 2)", () => {
 
 /**
  * Unit-level coverage for the rest of Finding 2. The pure timestamp window is
- * rejected before database work; unknown shifts are filtered out of the
+ * rejected before business database work (after the replacement-fence lookup); unknown shifts are filtered out of the
  * partition preflight and then rejected only after the authoritative
  * tenant-scoped shift load is locked inside the write transaction.
  */
@@ -432,9 +468,7 @@ describe("StationScansService.applyBatch shift-ownership guard ordering (Finding
   it("rejects a batch with a scannedAt outside the acceptable window before ever querying shifts, calling ensurePartitions, or opening a transaction", async () => {
     ensurePartitionsMock.mockClear();
     const dbStub = {
-      select: () => {
-        throw new Error("must not query shifts for a batch outside the timestamp window");
-      },
+      select: noReplacementSelect,
       transaction: () => {
         throw new Error("must not open a transaction for a batch outside the timestamp window");
       },
@@ -483,11 +517,12 @@ describe("StationScansService.applyBatch shift-ownership guard ordering (Finding
             }),
           }),
           select: () => ({
-            from: () => ({
-              where: () => ({
-                orderBy: () => ({ for: () => Promise.resolve([]) }),
-              }),
-            }),
+            from: (table: unknown) =>
+              unfencedSourceSelect(table) ?? {
+                where: () => ({
+                  orderBy: () => ({ for: () => Promise.resolve([]) }),
+                }),
+              },
           }),
         };
         return fn(tx);
@@ -552,17 +587,18 @@ describe("StationScansService sync batch payload digest", () => {
       },
     }),
     select: () => ({
-      from: () => ({
-        // `where(...)` is awaited directly on some paths and refined with
-        // `.for("update")` / `.orderBy(...)` on others, so the stub answers
-        // both: an empty row set everywhere except the locked shift lookup.
-        where: () => ({
-          for: () => Promise.resolve([]),
-          orderBy: () => ({ for: () => Promise.resolve(shiftRows) }),
-          then: (resolve: (rows: Record<string, unknown>[]) => unknown) =>
-            Promise.resolve([]).then(resolve),
-        }),
-      }),
+      from: (table: unknown) =>
+        unfencedSourceSelect(table) ?? {
+          // `where(...)` is awaited directly on some paths and refined with
+          // `.for("update")` / `.orderBy(...)` on others, so the stub answers
+          // both: an empty row set everywhere except the locked shift lookup.
+          where: () => ({
+            for: () => Promise.resolve([]),
+            orderBy: () => ({ for: () => Promise.resolve(shiftRows) }),
+            then: (resolve: (rows: Record<string, unknown>[]) => unknown) =>
+              Promise.resolve([]).then(resolve),
+          }),
+        },
     }),
     execute: () => Promise.resolve(),
     update: () => ({
@@ -574,7 +610,10 @@ describe("StationScansService sync batch payload digest", () => {
     const captured: Record<string, unknown>[] = [];
     const tx = legacyDigestTx(captured, "legacy-digest-1");
     const service = new StationScansService(
-      { transaction: (run: (executor: typeof tx) => unknown) => run(tx) } as never,
+      {
+        select: noReplacementSelect,
+        transaction: (run: (executor: typeof tx) => unknown) => run(tx),
+      } as never,
       ssccServiceStub,
       entitlementsServiceStub,
     );
@@ -613,7 +652,10 @@ describe("StationScansService sync batch payload digest", () => {
       },
     ]);
     const service = new StationScansService(
-      { transaction: (run: (executor: typeof tx) => unknown) => run(tx) } as never,
+      {
+        select: noReplacementSelect,
+        transaction: (run: (executor: typeof tx) => unknown) => run(tx),
+      } as never,
       ssccServiceStub,
       entitlementsServiceStub,
     );
