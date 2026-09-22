@@ -191,7 +191,11 @@ export class EmployeesService {
         throw new InternalServerErrorException("Employee pickup policy is not configured");
       }
       const before = this.toPickupPolicyDto(policy);
-      const after: EmployeePickupPolicyDto = dto;
+      // An omitted `canBuildPallets` means «leave it alone», not «revoke it».
+      const after: EmployeePickupPolicyDto = {
+        ...dto,
+        canBuildPallets: dto.canBuildPallets ?? before.canBuildPallets,
+      };
       await tx
         .update(schema.employeePickupPolicies)
         .set({ ...after, updatedAt: new Date() })
@@ -215,6 +219,7 @@ export class EmployeesService {
       limitMode: dto.limitMode,
       dayLimit: dto.dayLimit,
       canWriteoff: before.canWriteoff,
+      canBuildPallets: before.canBuildPallets,
     }));
   }
 
@@ -227,6 +232,7 @@ export class EmployeesService {
       limitMode: before.limitMode,
       dayLimit: before.dayLimit,
       canWriteoff: dto.canWriteoff,
+      canBuildPallets: before.canBuildPallets,
     }));
   }
 
@@ -395,6 +401,7 @@ export class EmployeesService {
       limitMode: policy.limitMode,
       dayLimit: policy.dayLimit,
       canWriteoff: policy.canWriteoff,
+      canBuildPallets: policy.canBuildPallets,
     };
   }
 

@@ -429,6 +429,28 @@ describe.skipIf(!ready)("replacement productive route matrix", () => {
           exceptions: [{ ...exception, boxId: randomUUID(), codeHash: null }],
         },
         { name: "pallet exception", palletExceptions: [{ ...exception, palletId: randomUUID() }] },
+        {
+          name: "warehouse membership",
+          palletMemberships: [
+            {
+              palletId: randomUUID(),
+              boxSscc: "046011122200000019",
+              addedAt: occurredAt,
+              operatorId: f.operatorId,
+            },
+          ],
+        },
+        {
+          name: "warehouse removal",
+          palletMembershipRemovals: [
+            {
+              palletId: randomUUID(),
+              boxSscc: "046011122200000019",
+              removedAt: occurredAt,
+              operatorId: f.operatorId,
+            },
+          ],
+        },
       ].map(({ name, ...channels }) => ({
         name,
         path: "/station/scans",
@@ -638,6 +660,11 @@ describe.skipIf(!ready)("replacement productive route matrix", () => {
           status: 200,
         },
         {
+          name: "allocate warehouse pallet range",
+          run: () => f.get("/station/pallet-bootstrap"),
+          status: 200,
+        },
+        {
           name: "join inventory",
           run: () =>
             f.post(`/station/inventories/${f.inventoryId}/join`, { operatorId: f.operatorId }),
@@ -823,6 +850,18 @@ describe.skipIf(!ready)("replacement productive route matrix", () => {
             },
           ],
         },
+        ...(["palletMemberships", "palletMembershipRemovals"] as const).map((channel) => ({
+          batchId: randomUUID(),
+          items: [],
+          [channel]: [
+            {
+              palletId: randomUUID(),
+              boxSscc: "046011122200000019",
+              [channel === "palletMemberships" ? "addedAt" : "removedAt"]: occurredAt,
+              operatorId: f.operatorId,
+            },
+          ],
+        })),
       ];
       const inventoryPayload = {
         snapshotId: randomUUID(),
@@ -1750,7 +1789,7 @@ describe.skipIf(!ready)("replacement productive route matrix", () => {
     const f = await waitingTarget("station");
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(f.boundary + 1);
-    await f.post(`/shifts/${f.active.id}/enter`, { operatorId: f.operatorId }).expect(200);
+    await f.post(`/shifts/${f.active.id}/enter`, { entryMethod: "list" }).expect(200);
     const preview = await preparationService.preview(
       f.tenantId,
       f.targetId,

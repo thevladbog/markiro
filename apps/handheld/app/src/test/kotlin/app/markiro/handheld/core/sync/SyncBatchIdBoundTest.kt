@@ -11,9 +11,13 @@ import app.markiro.handheld.core.storage.BoxEntity
 import app.markiro.handheld.core.storage.BoxExceptionEntity
 import app.markiro.handheld.core.storage.DeviceConfigEntity
 import app.markiro.handheld.core.storage.HandheldDatabase
+import app.markiro.handheld.core.storage.MembershipStatus
 import app.markiro.handheld.core.storage.MetaStore
 import app.markiro.handheld.core.storage.PalletEntity
 import app.markiro.handheld.core.storage.PalletExceptionEntity
+import app.markiro.handheld.core.storage.PalletKind
+import app.markiro.handheld.core.storage.PalletMembershipEntity
+import app.markiro.handheld.core.storage.PalletMembershipRemovalEntity
 import app.markiro.handheld.core.storage.ProductLabelEventEntity
 import app.markiro.handheld.core.storage.ProductLabelJobEntity
 import kotlinx.coroutines.CoroutineScope
@@ -147,6 +151,29 @@ class SyncBatchIdBoundTest {
         ),
     )
 
+    private suspend fun warehousePallet(palletId: String) = db.palletDao().insert(
+        PalletEntity(
+            palletId = palletId, shiftId = null, terminalId = "dev-1", sscc = null,
+            openedAt = "2026-09-10T08:00:00.000Z", closedAt = null, operatorId = "op-1",
+            printState = "pending", printReason = null, ackedAt = null, kind = PalletKind.WAREHOUSE, productId = "p-1", deviceId = "dev-1",
+        ),
+    )
+
+    /** 18 digits, unique and lexically ordered by index -- the order `PalletMembershipDao.pending` submits them in. */
+    private fun memberSscc(index: Int) = "03460068200000%04d".format(index)
+
+    private suspend fun membership(palletId: String, index: Int) = db.palletMembershipDao().insert(
+        PalletMembershipEntity(palletId, memberSscc(index), "2026-09-10T15:00:00.000Z", "op-1", MembershipStatus.PENDING, null, null, null, null),
+    )
+
+    /** The removal channel (room 19), the seventh signature folded into the id. */
+    private suspend fun removal(palletId: String, index: Int) = db.palletMembershipRemovalDao().insert(
+        PalletMembershipRemovalEntity(
+            palletId = palletId, sscc = memberSscc(index), removedAt = "2026-09-10T16:00:00.000Z",
+            operatorId = "op-1", status = app.markiro.handheld.core.storage.RemovalStatus.PENDING,
+        ),
+    )
+
     private fun job(id: String) = ProductLabelJobEntity(
         jobId = id, shiftId = "s1", codeHash = "c".repeat(64), canonicalRaw = "raw",
         acceptedAt = "2026-09-10T08:00:00.000Z", operatorId = "op-1", policyRevision = "rev",
@@ -156,11 +183,23 @@ class SyncBatchIdBoundTest {
         verificationOutcome = "not_required", status = "prepared", lastFailure = null,
     )
 
-    private fun ok(applied: Int, acceptedEventIds: List<String> = emptyList()) = MockResponse().setResponseCode(201).setBody(
-        """{"applied":$applied,"alreadyApplied":false,"conflicts":[],""" +
-            """"productLabelReceipt":{"acceptedEventIds":${acceptedEventIds.joinToString(",", "[", "]") { "\"$it\"" }},""" +
-            """"quarantined":[]}}""",
-    )
+    private fun ok(
+        applied: Int,
+        acceptedEventIds: List<String> = emptyList(),
+        membershipSsccs: List<String> = emptyList(),
+        removalSsccs: List<String> = emptyList(),
+    ) =
+        MockResponse().setResponseCode(201).setBody(
+            """{"applied":$applied,"alreadyApplied":false,"conflicts":[],""" +
+                """"productLabelReceipt":{"acceptedEventIds":${acceptedEventIds.joinToString(",", "[", "]") { "\"$it\"" }},""" +
+                """"quarantined":[]},""" +
+                """"memberships":${
+                    membershipSsccs.joinToString(",", "[", "]") { """{"palletId":"wbulk","boxSscc":"$it","status":"accepted"}""" }
+                },""" +
+                """"membershipRemovals":${
+                    removalSsccs.joinToString(",", "[", "]") { """{"palletId":"wbulk","boxSscc":"$it","status":"removed"}""" }
+                }}""",
+        )
 
     private fun bodyOf(request: RecordedRequest) = Json.parseToJsonElement(request.body.readUtf8()).jsonObject
 
@@ -176,11 +215,22 @@ class SyncBatchIdBoundTest {
         // roughly the length of two real signatures.
         repeat(SyncEngine.MAX_EXCEPTIONS) { boxException(it) }
         repeat(SyncEngine.MAX_PALLET_EXCEPTIONS) { palletException(palletIds[it]) }
+        // The membership channel (room 18), the sixth signature folded into
+        // the id: loaded to its own ceiling too, or this would not measure
+        // the actual worst case.
+        warehousePallet("wbulk")
+        repeat(SyncEngine.MAX_PALLET_MEMBERSHIPS) { membership("wbulk", it) }
+        val membershipSsccs = (0 until SyncEngine.MAX_PALLET_MEMBERSHIPS).map { memberSscc(it) }
+        // The removal channel (room 19), the seventh signature: without it this
+        // measures a worst case that is one whole signature short of the real one.
+        repeat(SyncEngine.MAX_PALLET_MEMBERSHIP_REMOVALS) { removal("wbulk", it) }
+        val removalSsccs = (0 until SyncEngine.MAX_PALLET_MEMBERSHIP_REMOVALS).map { memberSscc(it) }
 
-        // The response acknowledges every event too, so this stays a single
-        // round trip -- an unacknowledged event would otherwise ride a second,
-        // unloaded batch straight after and defeat the point of this test.
-        server.enqueue(ok(0, eventIds))
+        // The response acknowledges every event and every membership too, so
+        // this stays a single round trip -- an unacknowledged record would
+        // otherwise ride a second, unloaded batch straight after and defeat
+        // the point of this test.
+        server.enqueue(ok(0, eventIds, membershipSsccs, removalSsccs))
         assertTrue(engine().drainAll())
         val body = bodyOf(server.takeRequest())
 
@@ -191,12 +241,24 @@ class SyncBatchIdBoundTest {
         assertEquals(SyncEngine.MAX_PRODUCT_LABEL_EVENTS, body.getValue("productLabelEvents").jsonArray.size)
         assertEquals(SyncEngine.MAX_EXCEPTIONS, body.getValue("exceptions").jsonArray.size)
         assertEquals(SyncEngine.MAX_PALLET_EXCEPTIONS, body.getValue("palletExceptions").jsonArray.size)
+        assertEquals(SyncEngine.MAX_PALLET_MEMBERSHIPS, body.getValue("palletMemberships").jsonArray.size)
+        assertEquals(
+            SyncEngine.MAX_PALLET_MEMBERSHIP_REMOVALS,
+            body.getValue("palletMembershipRemovals").jsonArray.size,
+        )
 
         val batchId = body.getValue("batchId").jsonPrimitive.content
         assertTrue(
-            "batchId is ${batchId.length} chars, over SyncEngine.MAX_SYNC_BATCH_ID_CHARS (${SyncEngine.MAX_SYNC_BATCH_ID_CHARS})",
+            "batchId is ${batchId.length} chars, over MAX_SYNC_BATCH_ID_CHARS (${SyncEngine.MAX_SYNC_BATCH_ID_CHARS})",
             batchId.length <= SyncEngine.MAX_SYNC_BATCH_ID_CHARS,
         )
+        // Whichever side of the bound this fully-loaded key actually lands on
+        // -- `boundedBatchId` returns it untouched under the bound, or folded
+        // to a `sync:`-prefixed digest over it -- a folded id must be
+        // recognizable as such, per `anOverLongKeyFoldsToABoundedDeterministicDigest` below.
+        if (batchId.startsWith("sync:")) {
+            assertEquals("sync:".length + 64, batchId.length)
+        }
     }
 
     // -- `boundedBatchId` itself. The loaded drain above measures today's worst

@@ -200,6 +200,8 @@
     <string name="shifts_update_required_text">It requires a capability this build does not have. Update the app, use a station, or change the shift policy in the cabinet.</string>
     <string name="shifts_closed_title">The shift is already closed</string>
     <string name="shifts_closed_text">The list has been refreshed.</string>
+    <string name="shifts_barcode_unknown_title">Shift not found</string>
+    <string name="shifts_barcode_unknown_text">The form barcode matched no shift in the list. Refresh the list or pick the shift by hand.</string>
     <string name="shifts_refused_title">The server refused</string>
     <string name="shifts_refused_text">%1$s · HTTP %2$d · %3$s\n\nThe shift is not closed — this is something else. Show this line to an administrator.</string>
     <string name="shifts_refused_step_enter">entering the shift</string>
@@ -395,6 +397,8 @@
     <!-- Aggregation: boxes -->
     <string name="work_box_header">Box %1$d · %2$d / %3$d</string>
     <string name="work_close_box_early">Close the box early (%1$d)</string>
+    <string name="work_close_box_full">Close the box (%1$d)</string>
+    <string name="work_box_full">BOX FULL</string>
     <!-- Aggregation: pallets (06d) -->
     <string name="pallet_strip">%1$d / %2$d boxes</string>
     <string name="work_close_pallet_early">Close the pallet early</string>
@@ -421,6 +425,10 @@
     <string name="box_refused_no_serials_hint">The box stayed open. Connect to the network and the device will be granted a new block.</string>
     <string name="box_refused_empty">The box is empty</string>
     <string name="box_refused_no_issuer">This shift has no SSCC issuer</string>
+    <string name="sscc_warning_org_gln">The organisation has no GLN — boxes will not get SSCCs. Set the GLN in the cabinet: Settings → Organisation profile, then re-enter the shift.</string>
+    <string name="sscc_warning_issuer_gln">The SSCC issuer counterparty has no GLN — boxes will not get SSCCs. Set the GLN in the cabinet: Counterparties, then re-enter the shift.</string>
+    <string name="sscc_warning_no_block">The shift has no SSCC number block — boxes cannot close. Re-enter the shift while the server is reachable.</string>
+    <string name="box_refused_no_issuer_hint">The box stayed open. Set the GLN in the cabinet and re-enter the shift.</string>
     <string name="box_refused_invalid_serial">The number does not fit the prefix</string>
     <string name="box_refused_invalid_serial_hint">The box stayed open. Try closing it again.</string>
     <string name="box_refused_dismiss">Got it</string>
@@ -434,6 +442,7 @@
     <string name="print_reason_unreachable">The printer is not answering</string>
     <string name="print_reason_printer_unconfigured">No printer is set up</string>
     <string name="print_reason_template_missing">This shift has no label template</string>
+    <string name="print_reason_product_missing">Pallet product not found</string>
     <string name="print_reason_template_invalid">The label template cannot be read</string>
     <string name="print_reason_render_failed">The label could not be built</string>
     <string name="print_reason_transport_failed">The printer refused</string>
@@ -502,6 +511,23 @@
     <string name="disassemble_not_closed">This box is still open — clear it instead of disassembling</string>
     <string name="disassemble_already">The box is already disassembled</string>
     <string name="disassemble_unknown_sscc">That SSCC belongs to no box of this shift</string>
+    <!-- Pallet disassembly (both kinds) -->
+    <string name="exceptions_disassemble_pallet">Disassemble pallet</string>
+    <string name="exceptions_no_closed_pallets">No closed pallets</string>
+    <string name="pallet_disassemble_scan_hint">Scan the pallet label</string>
+    <string name="pallet_disassemble_unknown">Not a closed pallet\'s label</string>
+    <string name="pallet_disassemble_not_closed">Pallet is still open</string>
+    <string name="pallet_disassemble_already">Pallet already disassembled</string>
+    <string name="pallet_disassemble_unavailable">Could not disassemble — try again</string>
+    <plurals name="pallet_disassemble_context">
+        <item quantity="one">Pallet …%1$s · %2$d box</item>
+        <item quantity="other">Pallet …%1$s · %2$d boxes</item>
+    </plurals>
+    <plurals name="pallet_disassemble_confirm_body">
+        <item quantity="one">Pallet …%1$s, %2$d box. Disassemble?</item>
+        <item quantity="other">Pallet …%1$s, %2$d boxes. Disassemble?</item>
+    </plurals>
+    <string name="pallet_disassemble_done">Pallet disassembled</string>
     <string name="reason_wrong_product">Wrong product</string>
     <string name="reason_wrong_quantity">Wrong quantity</string>
     <string name="reason_damaged_package">Packaging damaged</string>
@@ -510,6 +536,7 @@
     <string name="reason_unreadable_label">Label unreadable</string>
     <string name="reason_printer_jam">Printer jam / nothing printed</string>
     <string name="reason_quality_request">Quality control request</string>
+    <string name="reason_pallet_contents_changed">Pallet contents changed</string>
     <string name="reprint_title">Reprint label</string>
     <string name="reprint_last">Latest · box %1$d</string>
     <string name="reprint_scan">Scan the box SSCC</string>
@@ -660,4 +687,63 @@
     <string name="replacement_denied_title">New work unavailable</string>
     <string name="replacement_denied_body">This device is being replaced. New tasks and write-offs are unavailable. Finish existing work or contact an administrator.</string>
     <string name="replacement_waiting">Device connected and waiting for safe handover. New work unlocks after the old offline grants expire and the server confirms the boundary.</string>
+
+    <!-- Warehouse pallets -->
+    <string name="pallets_title">Pallets</string>
+    <string name="hub_tile_pallets">Pallets</string>
+    <string name="hub_pallets_no_permission">no permission</string>
+    <plurals name="hub_pallets_pending">
+        <item quantity="one">%d box not sent</item>
+        <item quantity="other">%d boxes not sent</item>
+    </plurals>
+    <string name="pallets_blocked_permission_title">No permission to build pallets</string>
+    <string name="pallets_blocked_permission_text">Ask a manager to enable “Build pallets on handheld” for this employee.</string>
+    <string name="pallets_blocked_sync_title">Catalogue not loaded yet</string>
+    <string name="pallets_blocked_sync_text">Connect to the network and reopen this section.</string>
+    <string name="pallets_to_hub">To the hub</string>
+    <string name="pallets_refresh">Refresh registry</string>
+    <string name="pallets_empty_title">Scan a box</string>
+    <string name="pallets_empty_text">The first box sets the pallet\'s product.</string>
+    <plurals name="pallets_count_no_capacity">
+        <item quantity="one">%d box · no capacity set</item>
+        <item quantity="other">%d boxes · no capacity set</item>
+    </plurals>
+    <string name="pallets_member_box">box …%1$s</string>
+    <string name="pallets_status_pending">queued</string>
+    <string name="pallets_status_sent">sending</string>
+    <string name="pallets_status_accepted">accepted</string>
+    <string name="pallets_remove">Remove from pallet</string>
+    <string name="pallets_verdict_attached">Accepted …%1$s</string>
+    <string name="pallets_verdict_already">Already on this pallet …%1$s</string>
+    <string name="pallets_verdict_on_pallet">Already on pallet …%1$s</string>
+    <string name="pallets_verdict_on_open_pallet">Already on another device\'s open pallet</string>
+    <string name="pallets_verdict_on_local">Already on another pallet of this handheld</string>
+    <string name="pallets_verdict_other_product">Different product: %1$s</string>
+    <string name="pallets_verdict_unknown_box">Unknown box. Refresh the registry</string>
+    <string name="pallets_verdict_unknown_product">Unknown product</string>
+    <string name="pallets_verdict_is_pallet">That is a pallet, not a box</string>
+    <string name="pallets_verdict_unit_code">That is a unit code; scan the box SSCC</string>
+    <string name="pallets_verdict_not_a_code">Not a code</string>
+    <string name="pallets_verdict_unavailable">Could not check the box — try again</string>
+    <plurals name="pallets_rejected">
+        <item quantity="one">Take %d box off the pallet</item>
+        <item quantity="other">Take %d boxes off the pallet</item>
+    </plurals>
+    <string name="pallets_reject_already_on_pallet">On pallet …%1$s</string>
+    <string name="pallets_reject_already_on_open_pallet">On another device\'s open pallet</string>
+    <string name="pallets_reject_not_found">Unknown to the server</string>
+    <string name="pallets_reject_not_closed">Box not closed</string>
+    <string name="pallets_reject_disassembled">Box disassembled</string>
+    <string name="pallets_reject_pallet_closed">Pallet already closed on the server</string>
+    <string name="pallets_reject_product_mismatch">Different product</string>
+    <string name="pallets_reject_read_only">Subscription is read-only</string>
+    <string name="pallets_reject_other">Refused by the server</string>
+    <string name="pallets_acknowledge">Got it</string>
+    <string name="pallets_rejected_pallet">Pallet …%1$s</string>
+    <string name="pallets_rejected_pallet_open">Open pallet</string>
+    <string name="pallets_rejection_pallet_unknown">Pallet</string>
+    <string name="pallets_reprint">Reprint the label</string>
+    <string name="pallet_refused_no_template">No pallet label template — set one in the cabinet</string>
+    <string name="pallet_refused_no_issuer">The organisation has no GLN — the pallet cannot be numbered</string>
+    <string name="pallet_refused_unavailable">Could not close the pallet — try again</string>
 </resources>

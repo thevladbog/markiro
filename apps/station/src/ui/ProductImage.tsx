@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { SqlExecutor, StationProductImageDescriptor } from "../lib/mirror.js";
 import {
   readCachedStationProductImage,
@@ -12,6 +12,13 @@ export interface ProductImageProps {
   image?: StationProductImageDescriptor | null | undefined;
   className?: string;
   refreshKey?: number | undefined;
+  /**
+   * What to show while no photo can be produced. Defaults to the product
+   * name as text; a caller that already has a designed placeholder (the shift
+   * card's monogram on the product gradient) passes it here so a missing
+   * photo and an unknown descriptor look the same.
+   */
+  fallback?: ReactNode;
 }
 
 /** Offline-first product photo. A missing/corrupt photo deliberately degrades to text. */
@@ -22,6 +29,7 @@ export function ProductImage({
   image,
   className,
   refreshKey,
+  fallback,
 }: ProductImageProps) {
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
@@ -113,7 +121,7 @@ export function ProductImage({
   if (!objectUrl || failed) {
     return (
       <div className={`${classes} product-image--fallback`} aria-label={label}>
-        {label}
+        {fallback ?? label}
       </div>
     );
   }

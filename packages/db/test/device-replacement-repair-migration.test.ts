@@ -8,16 +8,16 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runRuntimeMigrations } from "../src/runtime-migrate.js";
 import { copyMigrationsThroughIndex } from "./support/legacy-migrations.js";
 const migrationsFolder = fileURLToPath(new URL("../migrations", import.meta.url));
-it("registers forward repair scheduling metadata after 0166", async () => {
+it("registers forward repair scheduling metadata after 0172", async () => {
   const journal = JSON.parse(await readFile(join(migrationsFolder, "meta/_journal.json"), "utf8"));
   expect(journal.entries).toEqual(
     expect.arrayContaining([
-      expect.objectContaining({ idx: 166, tag: "0166_device_replacement_capabilities" }),
-      expect.objectContaining({ idx: 167, tag: "0167_device_replacement_repair_schedule" }),
+      expect.objectContaining({ idx: 172, tag: "0172_device_replacement_capabilities" }),
+      expect.objectContaining({ idx: 173, tag: "0173_device_replacement_repair_schedule" }),
     ]),
   );
   const snapshot = JSON.parse(
-    await readFile(join(migrationsFolder, "meta/0167_snapshot.json"), "utf8"),
+    await readFile(join(migrationsFolder, "meta/0173_snapshot.json"), "utf8"),
   );
   expect(snapshot.tables["public.working_device_replacement_executions"].columns).toMatchObject({
     repair_attempts: { type: "integer", notNull: true, default: 0 },
@@ -58,7 +58,7 @@ describe.skipIf(!process.env.DATABASE_URL)("replacement repair forward migration
     await copyMigrationsThroughIndex({
       sourceFolder: migrationsFolder,
       targetFolder: temporaryRoot,
-      lastIncludedIndex: 166,
+      lastIncludedIndex: 172,
     });
     await runRuntimeMigrations({
       databaseUrl: url.toString(),

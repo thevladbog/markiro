@@ -18,6 +18,64 @@ cover ordinary and emergency replacement, source evidence recovery and both web
 surfaces. The [operations guide](../operations/entitlements-p1b2.md#executing-a-replacement)
 is the operator entrypoint.
 
+## Main integration — 2026-09-22
+
+PR #632 integrates `main` at `412eaeaa0afb02909bbb85eb6beea9551957c004`
+into the implementation branch. The earlier verification sections below are
+historical records of the pre-merge source and migration numbering.
+
+- All 326 existing migration/snapshot files from main and its journal entries
+  remain unchanged. Replacement migrations now follow main as **0168–0174**;
+  the runtime migrator still commits creation before constraint validation.
+  The final snapshot matches the current generated Drizzle schema, including
+  main's shift entry method. The complete snapshot lineage is valid.
+- Handheld preserves released Room migrations through 19 and adds **19→20**.
+  Upgrade tests retain warehouse membership/removal queues and replacement state.
+- Station retains main's entry helper, reference-bundle refresh, observe/no-policy
+  behavior, unassigned-task production, scan verdicts and monotone shift closure.
+  New real-SQLite tests combine those paths with replacement task resumption.
+- Warehouse pallet bootstrap allocation and membership/removal evidence now use
+  the same replacement boundaries as other productive paths. Queued native
+  synchronization does not depend on bootstrap success. Open server-owned
+  warehouse pallets block normal replacement independently of local reports and
+  participate in execution preview freshness.
+- Both cabinet panels retain the complete replacement workflow using main's new
+  status phases and category badges.
+
+Focused integration evidence: Station 1,838 tests; Handheld 1,207 tests plus
+`lintDebug` and `assembleDebug`; DB 629 tests including upgrade from main;
+Cabinet 1,612 tests; SaaS Admin 561 tests; API route/recovery/pallet matrix 54 tests
+and readiness/execution 47 tests; production bundle contracts 567 tests.
+An initial concurrent SaaS run had 14 failures, chiefly timeouts. Its affected
+77 tests and the full 561-test sequential run passed with unchanged timeouts and
+assertions; that initial failed run is not counted as successful verification.
+
+Local Chromium passed 24 Cabinet and 28 SaaS Admin scenarios, covering RU/EN
+at 1440 and 390 px. Representative desktop recovery and narrow unsupported-client
+screenshots were inspected.
+
+The full sequential workspace attempt completed 27 tasks before one API unit-test
+fixture failure stopped the remaining application tasks. API had 4,599 passing
+and four intentionally skipped tests; the legacy pallet digest fixture lacked the
+replacement preflight/device lookup. Only that fixture was corrected, retaining
+the exact digest assertions; all nine tests in its file then passed. The unchanged
+API implementation therefore has 4,600 passing tests across these runs. The
+complete API suite was not repeated after this test-only correction.
+
+The resumed non-API run exposed a Station barcode test synchronization race:
+its DOM wait could finish before React refreshed the scanner subscription,
+so the scan reached the initial loading-state listener. A deterministic
+MutationObserver probe reproduced that ordering. The two settled-empty-list
+tests now flush passive effects before scanning; production code, assertions
+and timeouts are unchanged. All 173 tests in six focused Station suites passed.
+The final non-API workspace gate completed **48/48 tasks**, including all 1,838
+Station tests, with 43 unchanged successful tasks reused from the earlier
+attempts. The command was `corepack pnpm turbo lint typecheck test build
+--concurrency=1 --filter='!@markiro/api'`. The initial API run plus its focused
+fixture correction and this completed gate cover the workspace; this is not a
+claim that the initial forced run passed in one attempt.
+No production, physical scanner, printer or Windows acceptance is claimed.
+
 ## Required behavior and evidence owners
 
 | Acceptance boundary                                                                 | Automated evidence                                                                                                                     |

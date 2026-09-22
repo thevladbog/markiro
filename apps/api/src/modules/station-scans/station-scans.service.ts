@@ -29,7 +29,11 @@ import { sortExceptions, type ExceptionDto } from "./box-exceptions";
 import {
   applyPalletClosures,
   applyPalletExceptions,
+  applyPalletMemberships,
+  applyPalletMembershipRemovals,
+  assembleMembershipOutcomes,
   palletKey,
+  pruneEmptyWarehouseDrafts,
   upsertPallets,
   type PalletRef,
 } from "./pallet-ingest";
@@ -40,6 +44,8 @@ import { loadCodeReleasePage } from "./code-releases";
 import type {
   BatchConflictDto,
   DeniedStationRecordDto,
+  PalletMembershipOutcomeDto,
+  PalletMembershipRemovalOutcomeDto,
   StationCodeReleasesDto,
   StationCodeReleasesResponseDto,
   StationConflictStatusResponseDto,
@@ -171,7 +177,15 @@ function payloadDigest(body: SyncBatchDto): string {
   // closure, which is the ordinary offline-first case, not an edge one. So a
   // box that stands on no pallet hashes exactly as it did before 06d, and
   // only a box that names one contributes the key.
-  const { productLabelEvents, pallets, palletExceptions, boxes, ...legacy } = body;
+  const {
+    productLabelEvents,
+    pallets,
+    palletExceptions,
+    palletMemberships,
+    palletMembershipRemovals,
+    boxes,
+    ...legacy
+  } = body;
   const canonical: Record<string, unknown> = {
     ...legacy,
     boxes: boxes.map(({ devicePalletId, ...box }) =>
@@ -179,8 +193,21 @@ function payloadDigest(body: SyncBatchDto): string {
     ),
   };
   if (productLabelEvents.length > 0) canonical.productLabelEvents = productLabelEvents;
-  if (pallets.length > 0) canonical.pallets = pallets;
+  if (pallets.length > 0) {
+    // `kind` and `productId` are zod defaults on `palletClosureSchema`, so
+    // they are present on EVERY parsed closure -- including one a device
+    // built before warehouse pallets existed. Folding them in unconditionally
+    // would move the digest of every already-delivered production closure,
+    // which is the same wedge `devicePalletId` above avoids; only a warehouse
+    // closure, which no pre-feature device can produce, contributes them.
+    canonical.pallets = pallets.map(({ kind, productId, ...closure }) =>
+      kind === "production" && productId === null ? closure : { ...closure, kind, productId },
+    );
+  }
   if (palletExceptions.length > 0) canonical.palletExceptions = palletExceptions;
+  if (palletMemberships.length > 0) canonical.palletMemberships = palletMemberships;
+  if (palletMembershipRemovals.length > 0)
+    canonical.palletMembershipRemovals = palletMembershipRemovals;
   return createHash("sha256").update(canonicalJson(canonical)).digest("hex");
 }
 
@@ -230,13 +257,22 @@ export class StationScansService {
    */
   async applyBatch(
     tenantId: string,
-    input: Omit<SyncBatchDto, "productLabelEvents" | "pallets" | "palletExceptions"> & {
+    input: Omit<
+      SyncBatchDto,
+      | "productLabelEvents"
+      | "pallets"
+      | "palletExceptions"
+      | "palletMemberships"
+      | "palletMembershipRemovals"
+    > & {
       productLabelEvents?: SyncBatchDto["productLabelEvents"];
       // Optional for the same reason `productLabelEvents` is: a caller
       // constructed before 06d (and every pre-existing unit test) carries
       // neither pallet channel.
       pallets?: SyncBatchDto["pallets"];
       palletExceptions?: SyncBatchDto["palletExceptions"];
+      palletMemberships?: SyncBatchDto["palletMemberships"];
+      palletMembershipRemovals?: SyncBatchDto["palletMembershipRemovals"];
     },
     authenticatedTerminalId: string,
     capabilities?: string,
@@ -265,6 +301,13 @@ export class StationScansService {
         ...exception,
         terminalId: authenticatedTerminalId,
       })),
+      // No terminal to substitute: a membership names only the pallet's
+      // device-local id, and the pallet it resolves to is always the
+      // authenticated device's own.
+      palletMemberships: input.palletMemberships ?? [],
+      // Same: a removal names the device-local pallet id of the authenticated
+      // device's own pallet, so there is no terminal to substitute either.
+      palletMembershipRemovals: input.palletMembershipRemovals ?? [],
     };
     const digest = payloadDigest(body);
     const replacementSubmission: ReplacementSubmission | undefined =
@@ -276,6 +319,8 @@ export class StationScansService {
         body.productLabelEvents,
         body.pallets,
         body.palletExceptions,
+        body.palletMemberships,
+        body.palletMembershipRemovals,
       ].some((records) => records.length > 0)
         ? {
             tenantId: tenantId,
@@ -437,6 +482,12 @@ export class StationScansService {
             ...(stored?.productLabelReceipt
               ? { productLabelReceipt: stored.productLabelReceipt }
               : {}),
+            // Replayed verbatim: the handheld's conflict view is rebuilt from
+            // this answer, and a redelivery must not report a different one.
+            ...(stored?.memberships ? { memberships: stored.memberships } : {}),
+            ...(stored?.membershipRemovals
+              ? { membershipRemovals: stored.membershipRemovals }
+              : {}),
           };
         }
 
@@ -457,8 +508,11 @@ export class StationScansService {
             // touches, not a second lock of their own: a pallet closure must
             // not be able to race a shift close, and a second lock taken later
             // would be a second point in the lock order to deadlock against.
-            ...body.pallets.map((pallet) => pallet.shiftId),
-            ...body.palletExceptions.map((exception) => exception.shiftId),
+            // A warehouse pallet belongs to no shift, so it locks none.
+            ...body.pallets.flatMap((pallet) => (pallet.shiftId === null ? [] : [pallet.shiftId])),
+            ...body.palletExceptions.flatMap((exception) =>
+              exception.shiftId === null ? [] : [exception.shiftId],
+            ),
           ]),
         ].sort();
         // Cabinet production-date changes lock this same tenant-scoped shift
@@ -487,6 +541,11 @@ export class StationScansService {
             );
         }
         const shiftById = new Map(shiftRows.map((shift) => [shift.id, shift]));
+        // Captured BEFORE the read-only filter below rewrites `body`: the
+        // response reports one outcome per SUBMITTED membership, including the
+        // ones this batch refuses to apply.
+        const submittedMemberships = body.palletMemberships;
+        const submittedRemovals = body.palletMembershipRemovals;
         let denied: DeniedStationRecordDto[] = [];
         const deniedProductLabelEventIds = new Set<string>();
         if (access.access === "read_only") {
@@ -548,8 +607,15 @@ export class StationScansService {
             // never the body, and the device's drain acks and DELETEs its outbox
             // rows unconditionally, so a physically labelled pallet's closure
             // would have survived nowhere at all.
-            ...body.pallets.flatMap((pallet, recordIndex) =>
-              eligible(pallet.shiftId)
+            ...body.pallets.flatMap((pallet, recordIndex) => {
+              // A warehouse pallet has no shift to date the work by, so its
+              // own closure instant stands in for the shift's opening: work
+              // finished before the subscription lapsed is still accepted.
+              const ok =
+                pallet.shiftId === null
+                  ? endsAt !== null && new Date(pallet.closedAt) < endsAt
+                  : eligible(pallet.shiftId);
+              return ok
                 ? []
                 : [
                     {
@@ -558,10 +624,14 @@ export class StationScansService {
                       shiftId: pallet.shiftId,
                       code: "subscription_read_only" as const,
                     },
-                  ],
-            ),
-            ...body.palletExceptions.flatMap((exception, recordIndex) =>
-              eligible(exception.shiftId)
+                  ];
+            }),
+            ...body.palletExceptions.flatMap((exception, recordIndex) => {
+              const ok =
+                exception.shiftId === null
+                  ? endsAt !== null && new Date(exception.occurredAt) < endsAt
+                  : eligible(exception.shiftId);
+              return ok
                 ? []
                 : [
                     {
@@ -570,8 +640,26 @@ export class StationScansService {
                       shiftId: exception.shiftId,
                       code: "subscription_read_only" as const,
                     },
-                  ],
-            ),
+                  ];
+            }),
+            // Always denied while read-only: attaching a box to a warehouse
+            // pallet is new work with no shift to date it by, and the record
+            // is quarantined rather than dropped for the same reason every
+            // other kind is.
+            ...body.palletMemberships.map((_membership, recordIndex) => ({
+              recordKind: "pallet_membership" as const,
+              recordIndex,
+              shiftId: null,
+              code: "subscription_read_only" as const,
+            })),
+            // The undo of a membership is held to the same rule as the
+            // membership: always denied while read-only, quarantined, never dropped.
+            ...body.palletMembershipRemovals.map((_removal, recordIndex) => ({
+              recordKind: "pallet_membership_removal" as const,
+              recordIndex,
+              shiftId: null,
+              code: "subscription_read_only" as const,
+            })),
           ];
           await this.quarantine(tx, tenantId, authenticatedTerminalId, digest, body, denied);
           const deniedKeys = new Set(
@@ -588,6 +676,12 @@ export class StationScansService {
             palletExceptions: body.palletExceptions.filter(
               (_exception, index) => !deniedKeys.has(`pallet_exception:${index}`),
             ),
+            palletMemberships: body.palletMemberships.filter(
+              (_membership, index) => !deniedKeys.has(`pallet_membership:${index}`),
+            ),
+            palletMembershipRemovals: body.palletMembershipRemovals.filter(
+              (_removal, index) => !deniedKeys.has(`pallet_membership_removal:${index}`),
+            ),
           };
         } else if (
           [
@@ -596,7 +690,7 @@ export class StationScansService {
             ...body.exceptions,
             ...body.pallets,
             ...body.palletExceptions,
-          ].some((record) => !shiftById.has(record.shiftId))
+          ].some((record) => record.shiftId !== null && !shiftById.has(record.shiftId))
         ) {
           // Tenant scoping lives in the `shiftById` query above: a shift from
           // another tenant is absent from it exactly like one that does not
@@ -1361,6 +1455,12 @@ export class StationScansService {
         // per-box round trip -- a box's membership and its closure are ONE
         // statement. Unconditional: a batch can carry pallet facts and no boxes
         // at all, exactly as it can carry box closures and no items.
+        //
+        // Memberships are NOT resolved here: a membership names its box by
+        // SSCC, and `boxes.sscc` is only written by the box-closure loop
+        // below, so a batch that closes a box and attaches it in one go would
+        // find no product and seed no pallet. Their refs get a second
+        // `upsertPallets` pass after that loop instead.
         const palletRefs: PalletRef[] = [
           ...body.boxes.flatMap((closure) =>
             closure.devicePalletId === null
@@ -1370,6 +1470,9 @@ export class StationScansService {
                     shiftId: closure.shiftId,
                     terminalId: closure.terminalId,
                     devicePalletId: closure.devicePalletId,
+                    kind: "production" as const,
+                    productId: null,
+                    deviceId: null,
                   },
                 ],
           ),
@@ -1377,11 +1480,23 @@ export class StationScansService {
             shiftId: closure.shiftId,
             terminalId: closure.terminalId,
             devicePalletId: closure.palletId,
+            kind: closure.kind,
+            productId: closure.productId,
+            // `pallets_warehouse_terminal_check` requires terminal_id =
+            // device_id::text, and the substitution above already set
+            // `terminalId` to this same value.
+            deviceId: closure.kind === "warehouse" ? authenticatedTerminalId : null,
           })),
           ...body.palletExceptions.map((exception) => ({
             shiftId: exception.shiftId,
             terminalId: exception.terminalId,
             devicePalletId: exception.palletId,
+            kind: exception.shiftId === null ? ("warehouse" as const) : ("production" as const),
+            // An exception never CREATES a warehouse pallet: `upsertPallets`
+            // skips a ref with no product, and a missing pallet is already a
+            // no-op in `applyPalletExceptions`.
+            productId: null,
+            deviceId: exception.shiftId === null ? authenticatedTerminalId : null,
           })),
         ];
         const palletsByKey = await upsertPallets(tx, tenantId, palletRefs);
@@ -1613,10 +1728,118 @@ export class StationScansService {
           }
         }
 
+        // Removals BEFORE memberships (spec 2026-09-18 §2): a box taken off and
+        // re-scanned before the next sync arrives as both records, and the
+        // membership must land on a box that is already free.
+        let removalOutcomes: PalletMembershipRemovalOutcomeDto[] = [];
+        let removalTouched: string[] = [];
+        if (body.palletMembershipRemovals.length > 0) {
+          const applied = await applyPalletMembershipRemovals(
+            tx,
+            tenantId,
+            body.palletMembershipRemovals,
+            authenticatedTerminalId,
+          );
+          removalOutcomes = applied.outcomes;
+          removalTouched = applied.touchedPalletIds;
+          // A cleared `boxes.pallet_id` is exactly what the box registry
+          // advertises, so every handheld has to learn the box is free again.
+          await this.advanceBoxRegistryVersions(tx, tenantId, applied.changedBoxIds);
+        }
+
+        // Warehouse memberships, after the box closures above so a box closed
+        // and attached in the SAME batch is already closed by the time the
+        // membership UPDATE tests `closed_at IS NOT NULL`, and before the
+        // pallet closures below so a warehouse pallet closing in this batch
+        // already owns everything this batch put on it.
+        let membershipOutcomes: PalletMembershipOutcomeDto[] = [];
+        if (body.palletMemberships.length > 0) {
+          // A warehouse pallet's product is not on the wire for a membership --
+          // the handheld only knows the box's SSCC -- so every distinct SSCC in
+          // the batch is resolved to its shift's product in ONE query. It runs
+          // HERE, after the box closures above, because `boxes.sscc` is written
+          // by that loop: a batch that closes a box and puts it on a new pallet
+          // in the same delivery must still find the product that seeds the
+          // pallet.
+          const membershipProducts = new Map<string, string>();
+          const productRows = await tx
+            .select({ sscc: schema.boxes.sscc, productId: schema.shifts.productId })
+            .from(schema.boxes)
+            .innerJoin(
+              schema.shifts,
+              and(
+                eq(schema.shifts.tenantId, schema.boxes.tenantId),
+                eq(schema.shifts.id, schema.boxes.shiftId),
+              ),
+            )
+            .where(
+              and(
+                eq(schema.boxes.tenantId, tenantId),
+                inArray(schema.boxes.sscc, [
+                  ...new Set(body.palletMemberships.map((membership) => membership.boxSscc)),
+                ]),
+              ),
+            );
+          for (const row of productRows) {
+            if (row.sscc !== null) membershipProducts.set(row.sscc, row.productId);
+          }
+          // Product seeding follows WIRE order (`upsertPallets` keeps the first
+          // ref that knows a product) while the INSERTs it issues run sorted by
+          // key, so a first-ever batch mixing two products on one pallet seeds
+          // the wire-first product and the rest report `product_mismatch`.
+          const membershipPallets = await upsertPallets(
+            tx,
+            tenantId,
+            body.palletMemberships.map((membership) => ({
+              shiftId: null,
+              terminalId: authenticatedTerminalId,
+              devicePalletId: membership.palletId,
+              kind: "warehouse" as const,
+              productId: membershipProducts.get(membership.boxSscc) ?? null,
+              deviceId: authenticatedTerminalId,
+            })),
+          );
+          // Merged rather than replacing: a warehouse pallet can also be named
+          // by a closure or an exception in this same batch, and those keys
+          // were resolved by the pre-pass.
+          for (const [key, id] of membershipPallets) palletsByKey.set(key, id);
+          const applied = await applyPalletMemberships(
+            tx,
+            tenantId,
+            body.palletMemberships,
+            palletsByKey,
+            authenticatedTerminalId,
+          );
+          membershipOutcomes = applied.outcomes;
+          // An accepted membership rewrites `boxes.pallet_id`, which the box
+          // registry advertises, so every handheld has to learn about it.
+          await this.advanceBoxRegistryVersions(tx, tenantId, applied.changedBoxIds);
+        }
+
+        // A draft this batch emptied and did not refill is deleted: it has no
+        // SSCC, no label and no export, and the device already forgot it.
+        //
+        // This runs BEFORE the pallet closures below, so a batch that both
+        // empties a draft and carries a closure for the same device-local
+        // pallet would have that closure skip on the now-missing key. The
+        // handheld never sends that combination -- removing the last box
+        // deletes the draft locally, and a deleted draft is never closed --
+        // and closing a pallet the operator just emptied has nothing to print.
+        if (removalTouched.length > 0) {
+          const pruned = await pruneEmptyWarehouseDrafts(tx, tenantId, removalTouched);
+          for (const id of pruned) {
+            // The key map is read by the closure and exception loops below; a
+            // deleted pallet must not be handed to either as a live id.
+            for (const [key, palletId] of palletsByKey) {
+              if (palletId === id) palletsByKey.delete(key);
+            }
+          }
+        }
+
         // Pallet closures, after the box closures above so a pallet closing in
         // the same batch that filled it already owns its member boxes.
         if (body.pallets.length > 0) {
-          await applyPalletClosures(
+          const closedWarehouseMembers = await applyPalletClosures(
             tx,
             tenantId,
             body.pallets,
@@ -1632,6 +1855,9 @@ export class StationScansService {
               this.ssccService.recordConsumedSerial(tenantId, sscc, tx),
             this.logger,
           );
+          // A warehouse pallet's serial only exists once it closes, so its
+          // member boxes' registry entries change at that moment.
+          await this.advanceBoxRegistryVersions(tx, tenantId, closedWarehouseMembers);
         }
 
         // Exception facts (undo/clear/disassemble/reprint -- Task 4 wires up
@@ -1656,7 +1882,13 @@ export class StationScansService {
         // reason: an exception targeting a pallet closed in this very batch must
         // find a row that already exists.
         if (body.palletExceptions.length > 0) {
-          await applyPalletExceptions(tx, tenantId, body.palletExceptions, palletsByKey);
+          const disassembledMembers = await applyPalletExceptions(
+            tx,
+            tenantId,
+            body.palletExceptions,
+            palletsByKey,
+          );
+          await this.advanceBoxRegistryVersions(tx, tenantId, disassembledMembers);
         }
 
         // Any fact delivered after its shift closed is late data, not only a
@@ -1667,8 +1899,10 @@ export class StationScansService {
             ...body.items.map((item) => item.shiftId),
             ...body.boxes.map((box) => box.shiftId),
             ...body.exceptions.map((exception) => exception.shiftId),
-            ...body.pallets.map((pallet) => pallet.shiftId),
-            ...body.palletExceptions.map((exception) => exception.shiftId),
+            ...body.pallets.flatMap((pallet) => (pallet.shiftId === null ? [] : [pallet.shiftId])),
+            ...body.palletExceptions.flatMap((exception) =>
+              exception.shiftId === null ? [] : [exception.shiftId],
+            ),
           ]),
         ];
         if (touchedShiftIds.length > 0) {
@@ -1709,6 +1943,30 @@ export class StationScansService {
           denied.push(...deniedLabels);
         }
 
+        // One entry per SUBMITTED membership, in the caller's order: the
+        // records this batch refused to apply at all (read-only subscription)
+        // keep their original position and report that refusal, and the rest
+        // take their outcome from the filtered list in order.
+        const memberships = assembleMembershipOutcomes(
+          submittedMemberships,
+          new Set(
+            denied
+              .filter((record) => record.recordKind === "pallet_membership")
+              .map((record) => record.recordIndex),
+          ),
+          membershipOutcomes,
+        );
+        // Same contract for the removals, assembled the same way.
+        const membershipRemovals: PalletMembershipRemovalOutcomeDto[] = assembleMembershipOutcomes(
+          submittedRemovals,
+          new Set(
+            denied
+              .filter((record) => record.recordKind === "pallet_membership_removal")
+              .map((record) => record.recordIndex),
+          ),
+          removalOutcomes,
+        );
+
         const result: SyncBatchResponseDto = {
           applied: body.items.length,
           alreadyApplied: false,
@@ -1716,6 +1974,8 @@ export class StationScansService {
           ...(denied.length > 0 ? { denied } : {}),
           ...(productLabelReceipt ? { productLabelReceipt } : {}),
           ...(validationOccurrences.length > 0 ? { validationOccurrences } : {}),
+          ...(memberships.length > 0 ? { memberships } : {}),
+          ...(membershipRemovals.length > 0 ? { membershipRemovals } : {}),
         };
         await tx
           .update(schema.syncBatches)
@@ -1759,6 +2019,8 @@ export class StationScansService {
       product_label_event: body.productLabelEvents,
       pallet: body.pallets,
       pallet_exception: body.palletExceptions,
+      pallet_membership: body.palletMemberships,
+      pallet_membership_removal: body.palletMembershipRemovals,
     } as const;
     await tx
       .insert(schema.stationSyncQuarantine)

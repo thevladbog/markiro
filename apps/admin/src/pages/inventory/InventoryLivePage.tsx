@@ -2,12 +2,92 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
 import { AdminPage, Alert, Card, Spinner, StatusChip } from "@markiro/ui";
+import type { TagPhase } from "@markiro/ui";
 
 import { useInventoryProgress } from "./api.js";
 import { InventoryClosePanel } from "./InventoryClosePanel.js";
 import { InventoryDocuments } from "./InventoryDocuments.js";
-import type { InventoryDetail } from "./schemas.js";
+import type { InventoryDetail, InventoryParticipant, InventoryProgress } from "./schemas.js";
 import { inventoryStatusChipProps } from "./status.js";
+
+/**
+ * `active` — участок в работе прямо сейчас. `stale` — пропал сигнал: тот же
+ * повод для внимания, что и `offline` устройства (`deviceStatusPhase` в
+ * `pages/devices/index.tsx`), а не отсутствие значения. `left` — терминал
+ * штатно завершил участие (сервер видит `left_at`, а не тишину по таймауту),
+ * это законченное действие, а не вывод из оборота человеком.
+ */
+export function participantStatePhase(state: InventoryParticipant["state"]): TagPhase {
+  switch (state) {
+    case "active":
+      return "active";
+    case "stale":
+      return "attention";
+    case "left":
+      return "done";
+  }
+}
+
+/**
+ * Короб в живом ходе инвентаризации: `open`/`closed`/`invalidated`
+ * (`inventoryLiveBoxSchema.state` в `./schemas.ts`). Закрытый короб не идёт
+ * прямо сейчас — он завершён штатно, `done`, ровно как для того же понятия
+ * в `pages/code-search/BoxCard.tsx` (`BOX_STATUS_TO_PHASE.closed`).
+ */
+export function boxStatePhase(state: InventoryProgress["boxes"][number]["state"]): TagPhase {
+  switch (state) {
+    case "open":
+      return "active";
+    case "closed":
+      return "done";
+    case "invalidated":
+      return "failed";
+  }
+}
+
+/**
+ * Последнее событие живого хода: пятизначный union классификации плюс
+ * возможный `null` (`inventoryRecentEventSchema.classification` в
+ * `./schemas.ts`), не двухветочный тернарник «expected или нет». Фазы по
+ * смыслу подписей `pages.inventory.live.classification` (`ru.json`), не по
+ * прежнему тону:
+ * - `expected`/`protected` («Ожидаемый»/«Защищённый») — код найден и
+ *   совпал с тем, что от него ждали; `protectedFoundCount` в `./schemas.ts`
+ *   отслеживает находку защищённого кода тем же образом, что
+ *   `verifiedCount` — обычного, так что это тот же исход, `done`.
+ * - `unknown` («Неизвестный») — код, которого нет в исходном снимке вовсе:
+ *   единственный по-настоящему подозрительный случай в этом union,
+ *   `attention`.
+ * - `ineligible` («Не учитывается») — код по определению не участвует в
+ *   этой инвентаризации (не тот диапазон дат/статус); значения для текущей
+ *   проверки нет, `none`, а не тревога наравне с `unknown`.
+ * - `voided` («Отменён») — результат аннулирован человеком, завершённое
+ *   действие, как отменённое приглашение в `pages/team/TeamPage.tsx`
+ *   (`invitationAccessPhase`), `retired`, а не тревога.
+ * - `null` — короб-события (`known_box`/`old_box`) не несут классификацию
+ *   вовсе, не только предмет; значения нет, `none`, та же фаза, что у
+ *   `ineligible`.
+ *
+ * Прежний `event.classification === "expected" ? "done" : "attention"`
+ * уравнивал «Отменён» и «Не учитывается» с настоящими отклонениями.
+ */
+export function recentEventPhase(
+  classification: InventoryProgress["recentEvents"][number]["classification"],
+): TagPhase {
+  switch (classification) {
+    case "expected":
+    case "protected":
+      return "done";
+    case "unknown":
+      return "attention";
+    case "ineligible":
+      return "none";
+    case "voided":
+      return "retired";
+    case null:
+      return "none";
+  }
+}
 
 function formatCount(value: number, locale: string): string {
   return new Intl.NumberFormat(locale).format(value);
@@ -131,13 +211,7 @@ export function InventoryLivePage({
                   </span>
                   <span className="mk-inventory-evidence-list__state">
                     <StatusChip
-                      status={
-                        participant.state === "active"
-                          ? "ok"
-                          : participant.state === "stale"
-                            ? "warn"
-                            : "neutral"
-                      }
+                      phase={participantStatePhase(participant.state)}
                       label={t(`pages.inventory.live.participantState.${participant.state}`)}
                     />
                     {participant.pendingEventCount > 0 ? (
@@ -206,7 +280,7 @@ export function InventoryLivePage({
                     </span>
                     <span className="mk-inventory-evidence-list__state">
                       <StatusChip
-                        status={box.state === "invalidated" ? "error" : "info"}
+                        phase={boxStatePhase(box.state)}
                         label={
                           box.invalidationSource === null
                             ? t(`pages.inventory.live.boxState.${box.state}`)
@@ -238,7 +312,7 @@ export function InventoryLivePage({
                   <small>{event.terminalName}</small>
                 </span>
                 <StatusChip
-                  status={event.classification === "expected" ? "ok" : "warn"}
+                  phase={recentEventPhase(event.classification)}
                   label={
                     event.classification
                       ? t(`pages.inventory.live.classification.${event.classification}`)

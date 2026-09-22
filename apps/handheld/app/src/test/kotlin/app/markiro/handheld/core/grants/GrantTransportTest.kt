@@ -143,7 +143,7 @@ class GrantTransportTest {
             val body=Json.parseToJsonElement(firstBody).jsonObject
             assertEquals("offline-grants-readiness-v1",body["capability"]?.jsonPrimitive?.content)
             assertEquals("handheld:0.1.0",body["clientBuild"]?.jsonPrimitive?.content)
-            assertEquals(HANDHELD_DATABASE_VERSION,body["storageRevision"]?.jsonPrimitive?.int)
+            assertEquals(app.markiro.handheld.core.storage.HANDHELD_DATABASE_VERSION,body["storageRevision"]?.jsonPrimitive?.int)
             assertEquals("strict",body["installed"]?.jsonObject?.get("mode")?.jsonPrimitive?.content)
             assertEquals("approved",body["installed"]?.jsonObject?.get("policyRevision")?.jsonPrimitive?.content)
             assertEquals("opaque-revision",body["installed"]?.jsonObject?.get("keysetRevision")?.jsonPrimitive?.content)

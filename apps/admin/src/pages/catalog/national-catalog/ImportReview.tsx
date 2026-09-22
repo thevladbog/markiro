@@ -4,7 +4,7 @@ import type {
   ImportPreview,
 } from "@markiro/platform-contracts";
 import { Alert, Button, Checkbox, DataTabs, Input, Select, RadioCard, Spinner } from "@markiro/ui";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { productImageUrl, type ProductDto } from "../api.js";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
@@ -108,26 +108,29 @@ export function ImportReview({
       ),
     ),
   }));
-  const effectiveDrafts: ReviewDrafts = {
-    manualNames: {
-      ...Object.fromEntries(
-        data.items.flatMap((p) =>
-          p.fields
-            .filter((f) => f.source === "manual" && f.after !== null)
-            .map((f) => [p.itemId, f.after ?? ""]),
+  const effectiveDrafts: ReviewDrafts = useMemo(
+    () => ({
+      manualNames: {
+        ...Object.fromEntries(
+          data.items.flatMap((p) =>
+            p.fields
+              .filter((f) => f.source === "manual" && f.after !== null)
+              .map((f) => [p.itemId, f.after ?? ""]),
+          ),
         ),
-      ),
-      ...drafts.manualNames,
-    },
-    categoryChoices: {
-      ...Object.fromEntries(
-        data.items.flatMap((p) =>
-          p.categoryOptions.filter((o) => o.selected).map((o) => [p.itemId, o.optionId]),
+        ...drafts.manualNames,
+      },
+      categoryChoices: {
+        ...Object.fromEntries(
+          data.items.flatMap((p) =>
+            p.categoryOptions.filter((o) => o.selected).map((o) => [p.itemId, o.optionId]),
+          ),
         ),
-      ),
-      ...drafts.categoryChoices,
-    },
-  };
+        ...drafts.categoryChoices,
+      },
+    }),
+    [data.items, drafts],
+  );
   const [dirtyPreparationId, setDirtyPreparationId] = useState<string | null>(null);
   const dirty = dirtyPreparationId === data.preparation.id;
   const choiceFor = (p: ImportPreview) => currentChoice(p, choices[p.itemId]?.choice);
@@ -181,6 +184,14 @@ export function ImportReview({
     ready &&
     applicable.length > 0 &&
     validChoices.length === applicable.length;
+  /** One explanation per product for a blocked attribute set; the reason is the
+   * same for every category attribute, so it is not repeated under each field. */
+  const schemaNotice = (preview: ImportPreview) => {
+    const reasons = new Set(preview.fields.map((field) => field.reason));
+    if (reasons.has("schema_version_stale")) return "stale" as const;
+    if (!reasons.has("compatible_schema_required")) return null;
+    return preview.categoryOptions.length > 0 ? ("chooseCategory" as const) : ("missing" as const);
+  };
   const totals = {
     created: validChoices.filter((p) => !p.productId).length,
     attached: validChoices.filter((p) => p.linkAction === "attach").length,
@@ -281,6 +292,7 @@ export function ImportReview({
         const choice = choiceFor(preview);
         const product = products.find((item) => item.id === preview.productId);
         const currentPhoto = product ? productImageUrl(product) : null;
+        const notice = schemaNotice(preview);
         return (
           <div
             role="tabpanel"
@@ -364,6 +376,20 @@ export function ImportReview({
                   }}
                 />
               )}
+              {notice && (
+                <Alert
+                  tone={notice === "stale" ? "warn" : "info"}
+                  {...(notice === "stale" && preview.productId
+                    ? {
+                        action: (
+                          <Link to={`/catalog/${preview.productId}/edit`}>{tr("openProduct")}</Link>
+                        ),
+                      }
+                    : {})}
+                >
+                  {tr(`schemaBanner.${notice}`)}
+                </Alert>
+              )}
               <div className="mk-nc-fields">
                 <div className="mk-nc-comparison-head" aria-hidden="true">
                   <span>{tr("currentColumn")}</span>
@@ -404,7 +430,7 @@ export function ImportReview({
                           label={`${title} — ${tr("currentColumn")}`}
                           title={title}
                           caption={tr("currentColumn")}
-                          checked={!accepted}
+                          checked={!accepted && field.applicable}
                           disabled={!canWrite || busy || !preview.canApply || !field.applicable}
                           onSelect={() =>
                             update(preview, (c) => toggleField(preview, c, field.id, false))

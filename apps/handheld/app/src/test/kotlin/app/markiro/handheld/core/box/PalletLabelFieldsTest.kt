@@ -90,6 +90,22 @@ class PalletLabelFieldsTest {
         assertEquals("10.10.2026", fields[LabelField.EXPIRY])
     }
 
+    @Test
+    fun omitDatesBlanksBothDateFieldsAndTouchesNothingElse() {
+        // A warehouse pallet can hold boxes of two shifts, and there is no
+        // single true production date then. Blank, never a guess.
+        val input = input().copy(shelfLifeDays = 30)
+        val dated = palletLabelFields(input)
+        val blank = palletLabelFields(input, omitDates = true)
+        assertEquals("", blank[LabelField.DATE])
+        assertEquals("", blank[LabelField.EXPIRY])
+        assertEquals(dated.keys, blank.keys)
+        for ((field, value) in dated) {
+            if (field == LabelField.DATE || field == LabelField.EXPIRY) continue
+            assertEquals(field.name, value, blank[field])
+        }
+    }
+
     /** A minimal, valid base input for the two literal assertions above. */
     private fun input() = PalletLabelInput(
         sscc = "103460068200000004",

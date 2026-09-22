@@ -12,7 +12,16 @@ import {
   isValidGtin,
   normalizeToGtin14,
 } from "@markiro/domain";
-import { Alert, Button, Checkbox, FileDropZone, Input, Select, SidePanel } from "@markiro/ui";
+import {
+  Alert,
+  Button,
+  Checkbox,
+  DataTabs,
+  FileDropZone,
+  Input,
+  Select,
+  SidePanel,
+} from "@markiro/ui";
 import type { OverlayDismissReason, SelectOption } from "@markiro/ui";
 
 import { useCan } from "../../access/context.js";
@@ -124,6 +133,7 @@ export interface ProductFormProps {
   regulatoryBusy?: boolean;
   profileBound?: boolean;
   onDirtyChange?: (dirty: boolean) => void;
+  onRegulatoryBlockChange?: (blocked: boolean) => void;
   onSubmit: (
     input: CreateProductInput,
     image?: File | null,
@@ -211,6 +221,7 @@ export function ProductForm({
   regulatoryBusy = false,
   profileBound = false,
   onDirtyChange = () => {},
+  onRegulatoryBlockChange = () => {},
   onSubmit,
   onClose,
 }: ProductFormProps) {
@@ -251,7 +262,7 @@ export function ProductForm({
     setError,
     clearErrors,
     getValues,
-    formState: { errors, isDirty },
+    formState: { errors, isDirty, dirtyFields },
   } = useForm<ProductFormValues>({
     resolver: zodResolver(productFormSchema),
     defaultValues: initialValues ?? EMPTY_VALUES,
@@ -269,6 +280,9 @@ export function ProductForm({
   const defaultCounterpartyId = watch("defaultCounterpartyId");
   const chzProductGroupCode = watch("chzProductGroupCode");
   const archivedValue = watch("archived");
+  const [activeTab, setActiveTab] = useState<"basic" | "chz">("basic");
+  const hasRegulatoryTab = mode === "edit" && Boolean(regulatoryContent);
+  const regulatoryBlocked = Boolean(dirtyFields.gtin || dirtyFields.chzProductGroupCode);
 
   // Re-seed clean forms when their server values change. A background refetch
   // must never overwrite unsaved operator input, so dirty forms retain their
@@ -325,6 +339,11 @@ export function ProductForm({
     isDirtyRef.current = isDirty;
     onDirtyChange(isDirty || Boolean(selectedImage));
   }, [isDirty, onDirtyChange, selectedImage]);
+
+  useEffect(() => {
+    onRegulatoryBlockChange(regulatoryBlocked);
+    return () => onRegulatoryBlockChange(false);
+  }, [onRegulatoryBlockChange, regulatoryBlocked]);
 
   // GTIN owner hint (design brief 03): only ever calls the check for a
   // checksum-valid GTIN (`isValidGtin`, client-side, before any network
@@ -434,27 +453,52 @@ export function ProductForm({
           >
             {t("pages.catalog.cancel")}
           </Button>
-          <Button
-            type="submit"
-            form={FORM_ID}
-            loading={submitting}
-            disabled={regulatoryDirty || regulatoryBusy}
-          >
-            {mode === "create"
-              ? t("pages.catalog.form.submitCreate")
-              : t("pages.catalog.form.submitUpdate")}
-          </Button>
+          {(!hasRegulatoryTab || activeTab === "basic") && (
+            <Button
+              type="submit"
+              form={FORM_ID}
+              loading={submitting}
+              disabled={regulatoryDirty || regulatoryBusy}
+            >
+              {mode === "create"
+                ? t("pages.catalog.form.submitCreate")
+                : t("pages.catalog.form.submitUpdate")}
+            </Button>
+          )}
         </>
       }
     >
       {regulatoryDirty && (
         <Alert tone="info">{t("pages.catalog.regulatory.saveRegulatoryFirst")}</Alert>
       )}
+      {hasRegulatoryTab && (
+        <DataTabs
+          className="mk-product-form-tabs"
+          label={t("pages.catalog.form.tabs.label")}
+          activeId={activeTab}
+          onChange={setActiveTab}
+          items={[
+            {
+              id: "basic",
+              label: t("pages.catalog.form.tabs.basic"),
+              panelId: FORM_ID,
+            },
+            {
+              id: "chz",
+              label: t("pages.catalog.form.tabs.chz"),
+              panelId: "product-chz-tabpanel",
+            },
+          ]}
+        />
+      )}
       <form
         id={FORM_ID}
+        role={hasRegulatoryTab ? "tabpanel" : undefined}
+        aria-label={hasRegulatoryTab ? t("pages.catalog.form.tabs.basic") : undefined}
+        hidden={hasRegulatoryTab && activeTab !== "basic"}
+        className="mk-product-form"
         onSubmit={(event) => void submit(event)}
         noValidate
-        style={{ display: "flex", flexDirection: "column", gap: 16 }}
       >
         <fieldset
           className="mk-product-form-fields"
@@ -667,7 +711,18 @@ export function ProductForm({
           </section>
         </fieldset>
       </form>
-      {regulatoryContent}
+      {hasRegulatoryTab ? (
+        <div
+          id="product-chz-tabpanel"
+          role="tabpanel"
+          aria-label={t("pages.catalog.form.tabs.chz")}
+          hidden={activeTab !== "chz"}
+        >
+          {regulatoryContent}
+        </div>
+      ) : (
+        regulatoryContent
+      )}
     </SidePanel>
   );
 }

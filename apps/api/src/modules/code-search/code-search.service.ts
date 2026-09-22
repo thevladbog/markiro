@@ -1,5 +1,6 @@
-import { Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { and, desc, eq, gte, inArray, isNotNull, isNull, like, or, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { schema, type Db } from "@markiro/db";
 import { formatShiftNumber, formatSsccWithAi } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
@@ -7,6 +8,9 @@ import { upperBoundCondition } from "../../lib/date-range";
 import { classifySearchInput } from "./input-classifier";
 import type { BoxReportData } from "./box-report";
 import type { PalletReportData } from "./pallet-report";
+import type { ReportOrg } from "./contents-report";
+import { OrgProfileService } from "../org-profile/org-profile.service";
+import type { PalletPlacardData } from "./pallet-placard";
 import type {
   BoxCardDto,
   ClassifySearchResponseDto,
@@ -47,7 +51,31 @@ interface CodeListRow {
 
 @Injectable()
 export class CodeSearchService {
-  constructor(@Inject(DB) private readonly db: Db) {}
+  constructor(
+    @Inject(DB) private readonly db: Db,
+    private readonly orgProfile: OrgProfileService,
+  ) {}
+
+  /**
+   * The organisation block every printed form carries. The logo is the one
+   * uploaded in the profile (object storage, inlined as a data URL); the
+   * legacy `organization.logo` column is only a fallback for tenants that
+   * never uploaded one through the profile.
+   */
+  private async reportOrg(tenantId: string): Promise<ReportOrg | null> {
+    const [row] = await this.db
+      .select({
+        name: schema.organization.name,
+        inn: schema.orgProfiles.inn,
+        legacyLogo: schema.organization.logo,
+      })
+      .from(schema.organization)
+      .leftJoin(schema.orgProfiles, eq(schema.orgProfiles.tenantId, schema.organization.id))
+      .where(eq(schema.organization.id, tenantId));
+    if (!row) return null;
+    const uploaded = await this.orgProfile.reportLogoDataUrl(tenantId);
+    return { name: row.name, inn: row.inn, logo: uploaded ?? row.legacyLogo };
+  }
 
   /**
    * `exists (...)` fragment for the "aggregated" branch of the derived
@@ -896,6 +924,7 @@ export class CodeSearchService {
       .select({
         id: schema.pallets.id,
         sscc: schema.pallets.sscc,
+        kind: schema.pallets.kind,
         shiftId: schema.pallets.shiftId,
         shiftNumberMonthKey: schema.shifts.numberMonthKey,
         shiftNumberSeq: schema.shifts.numberSeq,
@@ -917,20 +946,24 @@ export class CodeSearchService {
           eq(schema.shifts.id, schema.pallets.shiftId),
         ),
       )
+      // A warehouse pallet carries its own `product_id` (it has no shift to
+      // reach one through), a production one the shift's -- the same
+      // coalesce `PalletsService.listPallets` uses.
       .leftJoin(
         schema.products,
         and(
-          eq(schema.products.tenantId, schema.shifts.tenantId),
-          eq(schema.products.id, schema.shifts.productId),
+          eq(schema.products.tenantId, schema.pallets.tenantId),
+          sql`${schema.products.id} = coalesce(${schema.pallets.productId}, ${schema.shifts.productId})`,
         ),
       )
       // `pallets.terminalId` is the device's own text id, so the station
-      // lookup casts exactly as PalletsService.listPallets does.
+      // lookup casts exactly as PalletsService.listPallets does -- including
+      // its coalesce over a warehouse pallet's `device_id`.
       .leftJoin(
         schema.stationDevices,
         and(
           eq(schema.stationDevices.tenantId, schema.pallets.tenantId),
-          sql`${schema.stationDevices.id}::text = ${schema.pallets.terminalId}`,
+          sql`${schema.stationDevices.id}::text = coalesce(${schema.pallets.deviceId}::text, ${schema.pallets.terminalId})`,
         ),
       )
       .leftJoin(
@@ -962,12 +995,29 @@ export class CodeSearchService {
         sscc: schema.boxes.sscc,
         closedAt: schema.boxes.closedAt,
         disassembledAt: schema.boxes.disassembledAt,
+        // Each box's OWN origin shift. On a warehouse pallet these differ
+        // from box to box, and the pallet itself has no shift to fall back
+        // on -- so this is the only place the stack's provenance is visible.
+        shiftId: schema.boxes.shiftId,
+        shiftNumberMonthKey: schema.shifts.numberMonthKey,
+        shiftNumberSeq: schema.shifts.numberSeq,
+        shiftCreatedFrom: schema.shifts.createdFrom,
+        productionDate: sql<
+          string | null
+        >`coalesce(${schema.shifts.productionDate}, ${schema.shifts.plannedDate})::text`,
         itemCount:
           sql<number>`count(${schema.boxItems.codeHash}) filter (where ${schema.boxItems.displacedAt} is null and ${schema.boxItems.removedAt} is null)`.mapWith(
             Number,
           ),
       })
       .from(schema.boxes)
+      .innerJoin(
+        schema.shifts,
+        and(
+          eq(schema.shifts.tenantId, schema.boxes.tenantId),
+          eq(schema.shifts.id, schema.boxes.shiftId),
+        ),
+      )
       .leftJoin(
         schema.boxItems,
         and(
@@ -976,7 +1026,7 @@ export class CodeSearchService {
         ),
       )
       .where(and(eq(schema.boxes.tenantId, tenantId), eq(schema.boxes.palletId, palletId)))
-      .groupBy(schema.boxes.id)
+      .groupBy(schema.boxes.id, schema.shifts.id)
       .orderBy(sql`${schema.boxes.closedAt} desc nulls first`, schema.boxes.id);
 
     const exceptionRows = await this.db
@@ -1004,6 +1054,40 @@ export class CodeSearchService {
       )
       .orderBy(schema.palletExceptions.recordedAt);
 
+    /**
+     * The refusals this pallet collected (spec §1.4). A fourth statement for
+     * the same reason the three above are separate: this is another
+     * independent one-to-many. The self-join to `pallets` resolves the
+     * WINNING pallet's serial for an `already_on_pallet` refusal -- null
+     * while that rival pallet is still open, exactly as the station's own
+     * batch answer reports it.
+     */
+    const winningPallet = alias(schema.pallets, "winning_pallet");
+    const rejectionRows = await this.db
+      .select({
+        boxSscc: schema.palletMembershipRejections.boxSscc,
+        boxId: schema.palletMembershipRejections.boxId,
+        reason: schema.palletMembershipRejections.reason,
+        winningPalletSscc: winningPallet.sscc,
+        addedAt: schema.palletMembershipRejections.addedAt,
+        recordedAt: schema.palletMembershipRejections.recordedAt,
+      })
+      .from(schema.palletMembershipRejections)
+      .leftJoin(
+        winningPallet,
+        and(
+          eq(winningPallet.tenantId, schema.palletMembershipRejections.tenantId),
+          eq(winningPallet.id, schema.palletMembershipRejections.winningPalletId),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.palletMembershipRejections.tenantId, tenantId),
+          eq(schema.palletMembershipRejections.palletId, palletId),
+        ),
+      )
+      .orderBy(schema.palletMembershipRejections.recordedAt);
+
     const status: PalletCardDto["status"] = pallet.disassembledAt
       ? "disassembled"
       : pallet.closedAt
@@ -1014,6 +1098,7 @@ export class CodeSearchService {
       id: pallet.id,
       sscc: pallet.sscc === null ? null : formatSsccWithAi(pallet.sscc),
       status,
+      kind: pallet.kind,
       shiftId: pallet.shiftId,
       shiftNumber:
         pallet.shiftNumberMonthKey !== null &&
@@ -1036,11 +1121,34 @@ export class CodeSearchService {
       boxes: boxRows.map((row) => ({
         id: row.id,
         sscc: row.sscc === null ? null : formatSsccWithAi(row.sscc),
+        shiftId: row.shiftId,
+        shiftNumber:
+          row.shiftNumberMonthKey !== null &&
+          row.shiftNumberSeq !== null &&
+          row.shiftCreatedFrom !== null
+            ? formatShiftNumber({
+                monthKey: row.shiftNumberMonthKey,
+                seq: row.shiftNumberSeq,
+                createdFrom: row.shiftCreatedFrom,
+              })
+            : null,
+        productionDate: row.productionDate,
         itemCount: row.itemCount,
         closedAt: row.closedAt,
         disassembledAt: row.disassembledAt,
       })),
       exceptions: exceptionRows,
+      rejections: rejectionRows.map((row) => ({
+        // AI-00-prefixed like every other SSCC the cabinet shows; the table
+        // stores the bare 18 digits the handheld scanned.
+        boxSscc: formatSsccWithAi(row.boxSscc),
+        boxId: row.boxId,
+        reason: row.reason,
+        winningPalletSscc:
+          row.winningPalletSscc === null ? null : formatSsccWithAi(row.winningPalletSscc),
+        addedAt: row.addedAt,
+        recordedAt: row.recordedAt,
+      })),
     };
   }
 
@@ -1089,15 +1197,7 @@ export class CodeSearchService {
 
     if (!box) throw new NotFoundException();
 
-    const [org] = await this.db
-      .select({
-        name: schema.organization.name,
-        inn: schema.orgProfiles.inn,
-        logo: schema.organization.logo,
-      })
-      .from(schema.organization)
-      .leftJoin(schema.orgProfiles, eq(schema.orgProfiles.tenantId, schema.organization.id))
-      .where(eq(schema.organization.id, tenantId));
+    const org = await this.reportOrg(tenantId);
 
     // Join the hot code rows through the box item's own (codeHash, addedAt ==
     // the owning scan's scannedAt), NOT through code_registry — see
@@ -1150,7 +1250,7 @@ export class CodeSearchService {
       sscc: box.sscc === null ? null : formatSsccWithAi(box.sscc),
       status,
       productName: box.productName,
-      org: org ? { name: org.name, inn: org.inn, logo: org.logo } : null,
+      org,
       openedAt: box.openedAt,
       closedAt: box.closedAt,
       disassembledAt: box.disassembledAt,
@@ -1186,26 +1286,20 @@ export class CodeSearchService {
           eq(schema.shifts.id, schema.pallets.shiftId),
         ),
       )
+      // A warehouse pallet carries its own `product_id`, a production one the
+      // shift's -- the same coalesce `getPalletCard` and `PalletsService` use.
       .leftJoin(
         schema.products,
         and(
-          eq(schema.products.tenantId, schema.shifts.tenantId),
-          eq(schema.products.id, schema.shifts.productId),
+          eq(schema.products.tenantId, schema.pallets.tenantId),
+          sql`${schema.products.id} = coalesce(${schema.pallets.productId}, ${schema.shifts.productId})`,
         ),
       )
       .where(and(eq(schema.pallets.tenantId, tenantId), eq(schema.pallets.id, palletId)));
 
     if (!pallet) throw new NotFoundException();
 
-    const [org] = await this.db
-      .select({
-        name: schema.organization.name,
-        inn: schema.orgProfiles.inn,
-        logo: schema.organization.logo,
-      })
-      .from(schema.organization)
-      .leftJoin(schema.orgProfiles, eq(schema.orgProfiles.tenantId, schema.organization.id))
-      .where(eq(schema.organization.id, tenantId));
+    const org = await this.reportOrg(tenantId);
 
     const boxRows = await this.db
       .select({
@@ -1251,12 +1345,158 @@ export class CodeSearchService {
       sscc: pallet.sscc === null ? null : formatSsccWithAi(pallet.sscc),
       status,
       productName: pallet.productName,
-      org: org ? { name: org.name, inn: org.inn, logo: org.logo } : null,
+      org,
       openedAt: pallet.openedAt,
       closedAt: pallet.closedAt,
       disassembledAt: pallet.disassembledAt,
       boxes: boxRows.map((row) => ({
         sscc: row.sscc === null ? null : formatSsccWithAi(row.sscc),
+        codeCount: row.codeCount,
+        disassembledAt: row.disassembledAt,
+      })),
+    };
+  }
+
+  /**
+   * Every pallet of a shift that has a placard to print -- closed, not taken
+   * apart, with an SSCC -- in stacking order, each loaded exactly as its own
+   * placard would be (owner request 2026-09-18: print a shift's stacks in one
+   * go). 404 for a shift the tenant cannot see; a shift with nothing
+   * printable is a 409 so the cabinet can say so instead of opening an empty
+   * document.
+   */
+  async shiftPlacardsData(
+    tenantId: string,
+    shiftId: string,
+  ): Promise<{ shiftNumber: string | null; pallets: PalletPlacardData[] }> {
+    const [shift] = await this.db
+      .select({
+        numberMonthKey: schema.shifts.numberMonthKey,
+        numberSeq: schema.shifts.numberSeq,
+        createdFrom: schema.shifts.createdFrom,
+      })
+      .from(schema.shifts)
+      .where(and(eq(schema.shifts.tenantId, tenantId), eq(schema.shifts.id, shiftId)));
+    if (!shift) throw new NotFoundException();
+
+    const rows = await this.db
+      .select({ id: schema.pallets.id })
+      .from(schema.pallets)
+      .where(
+        and(
+          eq(schema.pallets.tenantId, tenantId),
+          eq(schema.pallets.shiftId, shiftId),
+          isNotNull(schema.pallets.closedAt),
+          isNull(schema.pallets.disassembledAt),
+          isNotNull(schema.pallets.sscc),
+        ),
+      )
+      // The order the stacks left the line, as the shift panel lists them.
+      .orderBy(schema.pallets.closedAt, schema.pallets.id);
+    if (rows.length === 0) {
+      throw new ConflictException({
+        code: "SHIFT_HAS_NO_PALLETS",
+        message: "Shift has no closed pallets to print",
+      });
+    }
+
+    const pallets: PalletPlacardData[] = [];
+    for (const row of rows) pallets.push(await this.palletPlacardData(tenantId, row.id));
+    return {
+      shiftNumber: formatShiftNumber({
+        monthKey: shift.numberMonthKey,
+        seq: shift.numberSeq,
+        createdFrom: shift.createdFrom,
+      }),
+      pallets,
+    };
+  }
+
+  /**
+   * The printed placard's data (spec 2026-09-18): identity plus each member
+   * box's production day and live unit count. Refuses a pallet that is open
+   * or has no SSCC -- a placard without a scannable symbol is not a placard,
+   * and the card never offers one for such a pallet.
+   */
+  async palletPlacardData(tenantId: string, palletId: string): Promise<PalletPlacardData> {
+    const [pallet] = await this.db
+      .select({
+        sscc: schema.pallets.sscc,
+        closedAt: schema.pallets.closedAt,
+        disassembledAt: schema.pallets.disassembledAt,
+        productName: schema.products.name,
+        gtin14: schema.products.gtin14,
+        shelfLifeDays: schema.products.shelfLifeDays,
+      })
+      .from(schema.pallets)
+      .leftJoin(
+        schema.shifts,
+        and(
+          eq(schema.shifts.tenantId, schema.pallets.tenantId),
+          eq(schema.shifts.id, schema.pallets.shiftId),
+        ),
+      )
+      .leftJoin(
+        schema.products,
+        and(
+          eq(schema.products.tenantId, schema.pallets.tenantId),
+          sql`${schema.products.id} = coalesce(${schema.pallets.productId}, ${schema.shifts.productId})`,
+        ),
+      )
+      .where(and(eq(schema.pallets.tenantId, tenantId), eq(schema.pallets.id, palletId)));
+
+    if (!pallet) throw new NotFoundException();
+    if (pallet.closedAt === null || pallet.sscc === null) {
+      throw new ConflictException({ code: "PALLET_NOT_CLOSED", message: "Pallet must be closed" });
+    }
+
+    const org = await this.reportOrg(tenantId);
+
+    // Each box's OWN production day (its shift's) -- the DECLARED one only.
+    // Unlike the card, the placard never substitutes the planned date: a
+    // placard is glued next to the boxes' own labels, and a guessed date that
+    // disagrees with them is worse than «См. на продукции» (owner decision
+    // 2026-09-18). The live count is the report's predicate, so the two forms
+    // never disagree about what stands on the stack.
+    const boxRows = await this.db
+      .select({
+        productionDate: sql<string | null>`${schema.shifts.productionDate}::text`,
+        disassembledAt: schema.boxes.disassembledAt,
+        codeCount: sql<number>`count(${schema.boxItems.codeHash})::int`,
+      })
+      .from(schema.boxes)
+      .innerJoin(
+        schema.shifts,
+        and(
+          eq(schema.shifts.tenantId, schema.boxes.tenantId),
+          eq(schema.shifts.id, schema.boxes.shiftId),
+        ),
+      )
+      .leftJoin(
+        schema.boxItems,
+        and(
+          eq(schema.boxItems.tenantId, schema.boxes.tenantId),
+          eq(schema.boxItems.boxId, schema.boxes.id),
+          isNull(schema.boxItems.displacedAt),
+          or(
+            isNull(schema.boxItems.removedAt),
+            eq(schema.boxItems.removedAt, schema.boxes.disassemblyReceivedAt),
+          ),
+        ),
+      )
+      .where(and(eq(schema.boxes.tenantId, tenantId), eq(schema.boxes.palletId, palletId)))
+      .groupBy(schema.boxes.id, schema.shifts.id)
+      .orderBy(schema.boxes.closedAt, schema.boxes.id);
+
+    return {
+      sscc: formatSsccWithAi(pallet.sscc),
+      status: pallet.disassembledAt ? "disassembled" : "closed",
+      productName: pallet.productName,
+      gtin14: pallet.gtin14,
+      shelfLifeDays: pallet.shelfLifeDays,
+      org,
+      boxes: boxRows.map((row) => ({
+        productionDate: row.productionDate,
         codeCount: row.codeCount,
         disassembledAt: row.disassembledAt,
       })),

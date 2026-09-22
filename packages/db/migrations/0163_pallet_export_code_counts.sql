@@ -1,0 +1,4 @@
+ALTER TABLE "shift_export_artifacts" DROP CONSTRAINT "shift_export_artifacts_code_count_positive";--> statement-breakpoint
+ALTER TABLE "shift_exports" DROP CONSTRAINT "shift_exports_total_code_count_positive";--> statement-breakpoint
+ALTER TABLE "shift_export_artifacts" ADD CONSTRAINT "shift_export_artifacts_code_count_nonnegative" CHECK ("shift_export_artifacts"."code_count" >= 0);--> statement-breakpoint
+ALTER TABLE "shift_exports" ADD CONSTRAINT "shift_exports_total_code_count_positive" CHECK ("shift_exports"."total_code_count" is null or ("shift_exports"."pallet_id" is null and "shift_exports"."total_code_count" > 0) or ("shift_exports"."pallet_id" is not null and "shift_exports"."total_code_count" = 0));

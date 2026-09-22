@@ -162,7 +162,11 @@ jobs:
     needs: classify-changes
     if: needs.classify-changes.outputs.verify_app_tests == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # The app suites (admin, kiosk, station, domain, ui, ...) take 11-15 min on
+    # a hosted runner as of 2026-09-18; at 15 the job was cut off after every
+    # step had already passed (shown as "cancelled"). A wall-clock budget for
+    # the whole job, not a test timeout.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -251,7 +255,10 @@ jobs:
     runs-on: ubuntu-latest
     # Galleries, image builds and landing checks take ~20 minutes on slow runners.
     # Leave time for migrations and the production/API-docs smoke checks as well.
-    timeout-minutes: 30
+    # The shift and National Catalog import instruction frames added ~4 minutes
+    # (178s + 65s measured on run 35409879759), which put the job over its old
+    # 30-minute budget and cancelled it mid-step.
+    timeout-minutes: 40
     env:
       COMPOSE_PROJECT_NAME: markiro-production
       MARKIRO_IMAGE_TAG: ${{ github.sha }}
@@ -306,6 +313,40 @@ jobs:
           retention-days: 14
       - name: Verify National Catalog cabinet fixtures
         run: pnpm --dir tools/production-browser --ignore-workspace test:national-catalog
+      - name: Verify the shift instruction frames
+        run: pnpm --dir tools/production-browser --ignore-workspace test:production
+      - name: Preserve shift instruction browser failure evidence
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: production-browser-${{ github.sha }}
+          # `outputDir` in production.playwright.config.ts — traces and failure
+          # screenshots land here, not under tools/production-browser.
+          path: .superpowers/sdd/production-browser-output
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Verify the National Catalog import frames
+        run: pnpm --dir tools/production-browser --ignore-workspace test:catalog-import
+      - name: Preserve catalog import browser failure evidence
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: catalog-import-browser-${{ github.sha }}
+          # `outputDir` in catalog-import.playwright.config.ts.
+          path: .superpowers/sdd/catalog-import-browser-output
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Verify the product card instruction frames
+        run: pnpm --dir tools/production-browser --ignore-workspace test:catalog
+      - name: Preserve product card browser failure evidence
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: catalog-browser-${{ github.sha }}
+          # `outputDir` in catalog.playwright.config.ts.
+          path: .superpowers/sdd/catalog-browser-output
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Verify asynchronous SaaS report downloads
         run: |
           pnpm turbo run build --filter='@markiro/saas-admin^...'

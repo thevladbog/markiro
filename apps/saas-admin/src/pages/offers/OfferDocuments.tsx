@@ -1,10 +1,27 @@
 import type { OfferWorkspaceV4 as OfferWorkspace } from "@markiro/platform-contracts";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Alert, Button, ConfirmDialog, Spinner, StatusChip } from "@markiro/ui";
+import { Alert, Button, ConfirmDialog, Spinner, StatusChip, type TagPhase } from "@markiro/ui";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { downloadOfferDocument, listOfferDocuments, renderOfferDocuments } from "./api.js";
 import { offerErrorKey } from "./offerPresentation.js";
+
+/**
+ * Фактический union — `commercialDocumentStatusSchema`
+ * (`packages/platform-contracts/src/commercial.ts`): `pending` | `ready` |
+ * `failed`. По образцу отчётов и других генерируемых документов платформы:
+ * очередь/выполнение/готово/ошибка.
+ */
+function documentPhase(status: OfferWorkspace["documents"][number]["status"]): TagPhase {
+  switch (status) {
+    case "pending":
+      return "running";
+    case "ready":
+      return "done";
+    case "failed":
+      return "failed";
+  }
+}
 
 export function OfferDocuments({
   workspace,
@@ -74,9 +91,7 @@ export function OfferDocuments({
               <div className="offer-document-row" key={item.id}>
                 <span className="offer-money">{item.format.toUpperCase()}</span>
                 <StatusChip
-                  status={
-                    item.status === "ready" ? "ok" : item.status === "failed" ? "error" : "info"
-                  }
+                  phase={documentPhase(item.status)}
                   label={t(`offerWorkspace.fileState.${item.status}`)}
                 />
                 {item.status === "ready" ? (

@@ -141,6 +141,7 @@ for (const group of [23, 33, 35])
       await page.goto(`/test/browser/production.html?route=/catalog/${PRODUCT_ID}/edit`);
       const panel = page.getByRole("dialog", { name: "Изменить продукт" });
       await expect(panel).toBeVisible();
+      await panel.getByRole("tab", { name: "Честный знак", exact: true }).click();
       const quantity = panel.getByLabel(group === 33 ? "Масса нетто" : "Объём", { exact: true });
       await expect(quantity).toHaveValue("500");
       await expect(panel.getByLabel("Код ЕГАИС", { exact: true })).toHaveCount(0);
@@ -152,7 +153,7 @@ for (const group of [23, 33, 35])
         }),
       ).toBeFocused();
       await quantity.fill("750");
-      await expect(panel.getByRole("button", { name: "Сохранить", exact: true })).toBeDisabled();
+      await expect(panel.getByRole("button", { name: "Сохранить", exact: true })).toHaveCount(0);
       await panel.getByRole("button", { name: "Закрыть", exact: true }).click();
       await page.getByRole("button", { name: "Продолжить редактирование", exact: true }).click();
       await expect(quantity).toHaveValue("750");

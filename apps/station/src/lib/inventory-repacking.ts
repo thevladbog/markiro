@@ -19,7 +19,10 @@ import {
   stationOperatorIsCurrentlyActive,
 } from "./offline-grants/admission.js";
 import { sampleGrantClock, type GrantClockSample } from "./offline-grants/clock.js";
-import { readInventoryExecutionProjection } from "./offline-grants/semantic.js";
+import {
+  readExecutionToBind,
+  readInventoryExecutionProjection,
+} from "./offline-grants/semantic.js";
 import { OfflineGrantDeniedError } from "./journal.js";
 
 const BOX_EXTENSION_DIGIT = 0;
@@ -365,13 +368,15 @@ async function writeProductiveJournal(
       device_id: string;
       owner_kind: "station";
       credential_epoch: number;
+      mode: "observe" | "strict";
     }>(
-      "SELECT tenant_id,device_id,owner_kind,credential_epoch FROM offline_grant_install_state WHERE id=1",
+      "SELECT tenant_id,device_id,owner_kind,credential_epoch,mode FROM offline_grant_install_state WHERE id=1",
     );
-    if (!state) {
-      await writeJournal(exec, input);
-      return;
-    }
+    // Journalling alone would leave `next_device_sequence` where it was: the
+    // productive path takes the sequence from terminal state and advances it
+    // together with the row, so the ungranted fallback must do the same or the
+    // next event reuses this one's sequence.
+    if (!state) return writeRecoveryJournal(exec, input, generation);
     if (!(await stationOperatorIsCurrentlyActive(exec, input.event.operatorId)))
       throw new OfflineGrantDeniedError("operator_unauthorized");
     const [binding] = await exec.all<{ snapshot_digest: string }>(
@@ -385,7 +390,12 @@ async function writeProductiveJournal(
       kind: state.owner_kind,
       credentialEpoch: state.credential_epoch,
     } as const;
-    const execution = await readInventoryExecutionProjection(exec, input.inventoryId);
+    // An inventory this device cannot bind still journals where grants only
+    // observe, exactly as a device without grant state does.
+    const execution = await readExecutionToBind(state.mode, () =>
+      readInventoryExecutionProjection(exec, input.inventoryId),
+    );
+    if (!execution) return writeRecoveryJournal(exec, input, generation);
     const statement = journalStatement(input);
     const sequenceStatement = (decisionGuard: string, decisionIds: readonly string[]) => ({
       sql: `UPDATE inventory_terminal_state SET next_device_sequence=next_device_sequence+1 WHERE inventory_id=? AND snapshot_id=? AND device_id=? AND next_device_sequence=? AND ${decisionGuard}`,

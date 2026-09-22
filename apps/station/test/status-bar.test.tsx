@@ -110,11 +110,33 @@ describe("StatusBar", () => {
         onOpenUpdates={() => {}}
       />,
     );
-    expect(
-      screen
-        .getByRole("button", { name: "! Update 0.1.0-beta.2" })
-        .getAttribute("data-update-severity"),
-    ).toBe("warn");
+    const update = screen.getByRole("button", { name: "! Update 0.1.0-beta.2" });
+    expect(update.getAttribute("data-update-severity")).toBe("warn");
+    // The compact rail paints the glyph and an availability dot; the words stay
+    // in the accessible name, which is what AT and the floor tests read.
+    expect(update.textContent).toBe("!");
+    expect(update.querySelector(".station-update-indicator__dot")).not.toBeNull();
+    expect(update.classList.contains("station-rail-button")).toBe(true);
+    expect(update.classList.contains("station-rail-button--icon")).toBe(true);
+  });
+
+  it("paints the availability dot only when an update is actually available", () => {
+    render(
+      <StatusBar
+        {...context}
+        serverReachability="reachable"
+        scanner="keyboard"
+        printerConfigured={false}
+        syncPending={0}
+        syncStuck={false}
+        conflicts={0}
+        update={{ severity: "none", glyph: "↻", label: "Current version", available: false }}
+        onOpenUpdates={() => {}}
+      />,
+    );
+    const current = screen.getByRole("button", { name: "↻ Current version" });
+    expect(current.textContent).toBe("↻");
+    expect(current.querySelector(".station-update-indicator__dot")).toBeNull();
   });
 
   it("owns update, operator, and window controls inside one labelled action rail", () => {
@@ -140,7 +162,10 @@ describe("StatusBar", () => {
       within(actions)
         .getAllByRole("button")
         .map((button) => button.textContent),
-    ).toEqual(["↻Current version", "Change operator", "Window mode"]);
+    ).toEqual(["↻", "Change operator", "Window mode"]);
+    // One row at every width: the rail carries no wrapping modifier class.
+    expect(actions.className).toBe("station-status-actions");
+    expect(within(actions).getByRole("button", { name: "↻ Current version" })).toBeDefined();
   });
 
   it("does not invent agent or teammate status without a live source", () => {

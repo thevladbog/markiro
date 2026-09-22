@@ -104,7 +104,7 @@ fun AppBar(title: String, onBack: (() -> Unit)? = null, actions: @Composable Row
             .padding(start = if (onBack == null) MarkiroSizes.sp4 else MarkiroSizes.sp1, end = MarkiroSizes.sp1),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (onBack != null) IconAction(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.common_back), onBack)
+        if (onBack != null) IconAction(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.common_back), onClick = onBack)
         Text(
             title,
             style = MarkiroTheme.type.title.copy(fontSize = 20.sp, lineHeight = 26.sp),
@@ -116,11 +116,12 @@ fun AppBar(title: String, onBack: (() -> Unit)? = null, actions: @Composable Row
 }
 
 @Composable
-fun IconAction(icon: ImageVector, description: String, onClick: () -> Unit) {
+fun IconAction(icon: ImageVector, description: String, enabled: Boolean = true, onClick: () -> Unit) {
+    val c = MarkiroTheme.colors
     Box(
-        modifier = Modifier.size(MarkiroSizes.controlIcon).clip(CircleShape).clickable(onClick = onClick),
+        modifier = Modifier.size(MarkiroSizes.controlIcon).clip(CircleShape).clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
-    ) { Icon(icon, contentDescription = description, tint = MarkiroTheme.colors.fg1, modifier = Modifier.size(24.dp)) }
+    ) { Icon(icon, contentDescription = description, tint = if (enabled) c.fg1 else c.fg3, modifier = Modifier.size(24.dp)) }
 }
 
 @Composable

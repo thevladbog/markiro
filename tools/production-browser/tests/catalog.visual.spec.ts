@@ -2,6 +2,11 @@ import { join } from "node:path";
 
 import { expect, test, type Page, type Route } from "@playwright/test";
 
+import {
+  categorySchemaDefinitionSchema,
+  productAttributeValueSchema,
+} from "../../../packages/domain/dist/index.js";
+
 import { adminI18n, type AdminLocale } from "./admin-i18n.js";
 
 /**
@@ -50,6 +55,13 @@ const COPY = {
     candidateTwo: "Сироп «Смородина», 0.5 л",
     unit: "шт",
     priceType: "Розничная",
+    categoryName: "Сиропы",
+    siblingCategoryJuice: "Соки и нектары",
+    siblingCategoryJam: "Джемы и варенье",
+    attrVolume: "Объём",
+    attrComposition: "Состав",
+    attrPackage: "Упаковка",
+    attrPackageGlass: "Стекло",
   },
   en: {
     managerFirstName: "Igor",
@@ -65,6 +77,13 @@ const COPY = {
     candidateTwo: "Blackcurrant syrup, 0.5 L",
     unit: "pcs",
     priceType: "Retail",
+    categoryName: "Syrups",
+    siblingCategoryJuice: "Juices and nectars",
+    siblingCategoryJam: "Jams and preserves",
+    attrVolume: "Volume",
+    attrComposition: "Composition",
+    attrPackage: "Package",
+    attrPackageGlass: "Glass",
   },
 } as const satisfies Record<AdminLocale, Record<string, string>>;
 
@@ -188,7 +207,7 @@ function fixtures(locale: AdminLocale) {
     productGroup: "Соковая продукция и безалкогольные напитки",
     chzProductGroupCode: 23,
     boxCapacity: 12,
-    palletCapacity: 48,
+    palletBoxCapacity: 48,
     unitPrice: "189.00",
     printName: copy.productPrintName,
     egaisCode: null,
@@ -209,7 +228,7 @@ function fixtures(locale: AdminLocale) {
   /**
    * A draft is a card MISSING the three fields that make it usable, so this
    * fixture clears them: the server computes `status` from
-   * chzProductGroupCode/boxCapacity/palletCapacity, and a "draft" carrying all
+   * chzProductGroupCode/boxCapacity/palletBoxCapacity, and a "draft" carrying all
    * three would be a state the cabinet never produces.
    */
   const DRAFT_PRODUCT = {
@@ -221,7 +240,7 @@ function fixtures(locale: AdminLocale) {
     productGroup: null,
     chzProductGroupCode: null,
     boxCapacity: null,
-    palletCapacity: null,
+    palletBoxCapacity: null,
     unitPrice: null,
     shelfLifeDays: null,
     status: "draft",
@@ -294,6 +313,181 @@ function fixtures(locale: AdminLocale) {
     "UklGRtABAABXRUJQVlA4IMQBAACwDgCdASp4AHgAPm00mEckIyKhKhWZGIANiWcA1OTATP+ynyjg57xAWK6mrhcvK4uEOEJOeKcf68ccMaTvrvXuFK8HkwkvF9qI/5W9qQ4ziV0yXsdpwU1bSgSqpLThYrtGfCUP38EDWeNBmTKxkvTNs3vUY9k5uqRyhulTZIAA/vo8Ly0lehcyDUOF0mwMucDqrz8TB1AUgnCSKYyf6i0GiEISFpEah96xvzuKxlWPHGXpVerx9h049ZZZUPNCdLytMBUXTtqsdj3X2LIBRkGcpqUkQy8BR4bu61Q74IBFl2Q5EXUhYbNGgbBgkEzFdc/LtBHm+BUm7Io8DqEleiFF9NXysIZN3jIIrTXSlzWFjlq+s6fH/N/pvNfIPpzCGS/Vj1Mv0cYT+9r/c6bIj3/5SCP7A/cK/TnU34NI4hdSeP2/BIZUH6C+4mX08y/yPUxTadyZ/XrAVm1T4991HgkUgl1U6XqYApaTXt0I36QmwJL+RJATyfb6HuWUYvrnZu8sxmNLJAMk7H5haduYgcEiP3XoD0mwifGsmMRplQEM0d1W9m/o/xhYy1r6K++Nl3ErUqob73rOCKf7gdQ+afmAAAAAAA==";
   const PRODUCT_IMAGE_BYTES = Buffer.from(PRODUCT_IMAGE_BASE64, "base64");
 
+  /**
+   * Three attributes at three requirement levels, so the frame shows what the
+   * document explains: one mandatory for code ordering, one mandatory for
+   * circulation, one recommended. Parsed through the real schema -- the client
+   * parses this response too, so an invented shape throws here instead of
+   * rendering an empty block.
+   */
+  const CATEGORY_DEFINITION = categorySchemaDefinitionSchema.parse({
+    formatVersion: 2,
+    categoryId: "cat-syrup",
+    scopeKey: "national_catalog",
+    attributes: [
+      {
+        id: "volume",
+        label: copy.attrVolume,
+        valueType: "decimal",
+        multiplicity: "one",
+        unit: { canonical: "л", allowed: ["л", "мл"] },
+        requirementRules: [{ layer: "code_ordering", level: "mandatory", when: null }],
+        presetMode: "none",
+        presets: [],
+      },
+      {
+        id: "composition",
+        label: copy.attrComposition,
+        valueType: "string",
+        multiplicity: "one",
+        unit: null,
+        requirementRules: [{ layer: "circulation", level: "mandatory", when: null }],
+        presetMode: "none",
+        presets: [],
+      },
+      {
+        id: "package",
+        label: copy.attrPackage,
+        valueType: "enum",
+        multiplicity: "one",
+        unit: null,
+        requirementRules: [{ layer: "circulation", level: "recommended", when: null }],
+        presetMode: "suggested",
+        presets: [{ value: "glass", label: copy.attrPackageGlass }],
+      },
+    ],
+  });
+
+  const REGULATORY_PROFILE = {
+    productId: PRODUCT_ID,
+    binding: {
+      revision: 3,
+      categoryId: "cat-syrup",
+      categoryName: copy.categoryName,
+      schemaVersionId: "40000000-0000-4000-8000-000000000001",
+      tnVedCode: "2106909200",
+      okpd2Code: "10.89.19.190",
+      source: "national_catalog" as const,
+      confirmedAt: "2026-09-15T08:30:00.000Z",
+    },
+    definition: CATEGORY_DEFINITION,
+    values: [
+      {
+        entryId: "50000000-0000-4000-8000-000000000001",
+        attributeId: "volume",
+        value: productAttributeValueSchema.parse({ type: "decimal", value: "0.5", unit: "л" }),
+        source: "national_catalog" as const,
+        observedAt: "2026-09-15T08:00:00.000Z",
+        appliedAt: "2026-09-15T08:30:00.000Z",
+      },
+    ],
+    egaisCodes: [],
+    pendingProposalCount: 0,
+  };
+
+  /**
+   * What `evaluateProductReadiness` actually returns for the attribute data
+   * above (`packages/domain/src/product-attributes/readiness.ts`; for a
+   * product that has a profile, `readiness.service.ts` returns its output
+   * unchanged): production carries the group and both capacities, code
+   * ordering is ready because `volume` -- its only mandatory attribute -- has
+   * a value, circulation is blocked by the empty mandatory `composition` and
+   * carries the empty recommended `package` beneath it, and EGAIS does not
+   * apply to product group 23.
+   *
+   * Three of the four states is the most one frame can carry, so do not add a
+   * fourth: `stale` can only come from a regulatory dimension,
+   * `evaluateRegulatoryDimension` branches on the single shared
+   * `input.schemaStale`, so code ordering and circulation are stale together
+   * or not at all, and neither `production` nor `egais` can ever be stale.
+   * That branch also returns no recommendations, and `activeRequirementRules`
+   * filters strictly by layer, so a `circulation` rule can never surface
+   * under `code_ordering`.
+   *
+   * `schemaVersionId` is what the evaluator stamps on every attribute reason;
+   * the panel does not print it, but omitting it would document a response
+   * shape the API never sends.
+   */
+  const READINESS = {
+    productId: PRODUCT_ID,
+    dimensions: [
+      {
+        dimension: "production" as const,
+        state: "ready" as const,
+        reasons: [],
+        recommendations: [],
+      },
+      {
+        dimension: "code_ordering" as const,
+        state: "ready" as const,
+        reasons: [],
+        recommendations: [],
+      },
+      {
+        dimension: "circulation" as const,
+        state: "not_ready" as const,
+        reasons: [
+          {
+            code: "ATTRIBUTE_REQUIRED",
+            attributeId: "composition",
+            schemaVersionId: "40000000-0000-4000-8000-000000000001",
+          },
+        ],
+        recommendations: [
+          {
+            code: "ATTRIBUTE_RECOMMENDED",
+            attributeId: "package",
+            schemaVersionId: "40000000-0000-4000-8000-000000000001",
+          },
+        ],
+      },
+      {
+        dimension: "egais" as const,
+        state: "not_applicable" as const,
+        reasons: [],
+        recommendations: [],
+      },
+    ],
+  };
+
+  /**
+   * `CategoryBinding` fetches this eagerly whenever the viewer can write and
+   * the product is not archived -- before "change category" is ever opened --
+   * so a strict mock has to answer it even though none of these frames open
+   * that editor. This MUST stay non-empty: `CategoryBinding.tsx` renders its
+   * "no categories configured" info alert exactly when `items.length === 0`,
+   * and that alert would sit directly under a confirmed category binding,
+   * contradicting the frame the document actually needs to show. The bound
+   * category reuses `copy.categoryName` and the profile's own ids so the two
+   * blocks agree; two siblings make the (unopened) picker read as a real
+   * choice rather than a list of one.
+   */
+  const REGULATORY_CATEGORY_OPTIONS = {
+    items: [
+      {
+        schemaVersionId: "40000000-0000-4000-8000-000000000001",
+        categoryId: "cat-syrup",
+        categoryName: copy.categoryName,
+        selectors: { catId: 118 },
+        mappingState: "exact" as const,
+      },
+      {
+        schemaVersionId: "40000000-0000-4000-8000-000000000002",
+        categoryId: "cat-juice",
+        categoryName: copy.siblingCategoryJuice,
+        selectors: { catId: 119 },
+        mappingState: "ambiguous" as const,
+      },
+      {
+        schemaVersionId: "40000000-0000-4000-8000-000000000003",
+        categoryId: "cat-jam",
+        categoryName: copy.siblingCategoryJam,
+        selectors: { catId: 120 },
+        mappingState: "unmapped" as const,
+      },
+    ],
+  };
+
   type Scenario = "list" | "listWithPlaque" | "productActive" | "productDraft" | "productNew";
 
   /**
@@ -344,6 +538,15 @@ function fixtures(locale: AdminLocale) {
           counterpartyName: COUNTERPARTY.name,
         });
       }
+      // The product card fetches these for every edit-mode product -- draft
+      // and archived included, since `ProductRegulatorySections` mounts
+      // regardless of status. The scenarios differ in card status, not in
+      // regulatory data, so every product id answers with the same fixture.
+      if (path.endsWith("/readiness")) return json(route, READINESS);
+      if (path.endsWith("/regulatory-profile")) return json(route, REGULATORY_PROFILE);
+      if (path.endsWith("/regulatory-category-options")) {
+        return json(route, REGULATORY_CATEGORY_OPTIONS);
+      }
 
       unexpected.push(`${route.request().method()} ${path}${url.search}`);
       return route.abort();
@@ -351,7 +554,7 @@ function fixtures(locale: AdminLocale) {
     return unexpected;
   }
 
-  return { installApi };
+  return { installApi, READINESS, REGULATORY_PROFILE };
 }
 
 for (const locale of LOCALES) {
@@ -461,7 +664,7 @@ for (const locale of LOCALES) {
       page.getByRole("heading", { name: t("pages.catalog.form.sections.aggregation") }),
     ).toBeVisible();
     await expect(page.getByLabel(t("pages.catalog.form.boxCapacityLabel"))).toHaveValue("12");
-    await expect(page.getByLabel(t("pages.catalog.form.palletCapacityLabel"))).toHaveValue("48");
+    await expect(page.getByLabel(t("pages.catalog.form.palletBoxCapacityLabel"))).toHaveValue("48");
     await screenshotFullMain(page, screenshotPath(locale, "product-active"));
     expect(unexpected).toEqual([]);
   });
@@ -489,6 +692,91 @@ for (const locale of LOCALES) {
       page,
       "product-form-defaults",
       screenshotPath(locale, "product-defaults"),
+    );
+    expect(unexpected).toEqual([]);
+  });
+
+  test(`[${locale}] the card reports readiness per operation`, async ({ page }) => {
+    const unexpected = await installApi(page, "productActive");
+    await openHarness(page, `/catalog/${PRODUCT_ID}/edit`);
+    await page.getByRole("tab", { name: t("pages.catalog.form.tabs.chz") }).click();
+    await expect(
+      page.getByRole("heading", { name: t("pages.catalog.regulatory.readiness") }),
+    ).toBeVisible();
+    // Assert every dimension's own state rather than "some element says
+    // Ready": the frame's whole job is which operation stands where, and a
+    // page-wide text assertion passes just as happily when two dimensions
+    // swap states.
+    const stateOf = (dimension: string) =>
+      page
+        .locator(".mk-readiness-list > li")
+        .filter({
+          has: page.getByText(t(`pages.catalog.regulatory.dimensions.${dimension}`), {
+            exact: true,
+          }),
+        })
+        .locator(".mk-readiness-state");
+    const states = "pages.catalog.regulatory.states.";
+    await expect(stateOf("production")).toHaveText(t(`${states}ready`));
+    await expect(stateOf("code_ordering")).toHaveText(t(`${states}ready`));
+    await expect(stateOf("circulation")).toHaveText(t(`${states}not_ready`));
+    await expect(stateOf("egais")).toHaveText(t(`${states}not_applicable`));
+    await expect(
+      page.getByText(
+        t("pages.catalog.regulatory.reasons.ATTRIBUTE_REQUIRED", { field: copy.attrComposition }),
+        { exact: true },
+      ),
+    ).toBeVisible();
+    await expect(
+      page.getByText(
+        t("pages.catalog.regulatory.reasons.ATTRIBUTE_RECOMMENDED", { field: copy.attrPackage }),
+        { exact: true },
+      ),
+    ).toBeVisible();
+    await screenshotSection(
+      page,
+      "product-readiness-title",
+      screenshotPath(locale, "product-readiness"),
+    );
+    expect(unexpected).toEqual([]);
+  });
+
+  test(`[${locale}] the category block names the National Catalog binding`, async ({ page }) => {
+    const unexpected = await installApi(page, "productActive");
+    await openHarness(page, `/catalog/${PRODUCT_ID}/edit`);
+    await page.getByRole("tab", { name: t("pages.catalog.form.tabs.chz") }).click();
+    await expect(
+      page.getByRole("heading", { name: t("pages.catalog.regulatory.category") }),
+    ).toBeVisible();
+    await expect(
+      page.getByText(t("pages.catalog.regulatory.tnVed"), { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText(t("pages.catalog.regulatory.okpd"), { exact: true })).toBeVisible();
+    await screenshotSection(
+      page,
+      "category-binding-title",
+      screenshotPath(locale, "product-category"),
+    );
+    expect(unexpected).toEqual([]);
+  });
+
+  test(`[${locale}] category attributes carry different requirement levels`, async ({ page }) => {
+    const unexpected = await installApi(page, "productActive");
+    await openHarness(page, `/catalog/${PRODUCT_ID}/edit`);
+    await page.getByRole("tab", { name: t("pages.catalog.form.tabs.chz") }).click();
+    await expect(
+      page.getByRole("heading", { name: t("pages.catalog.regulatory.attributes") }),
+    ).toBeVisible();
+    await expect(
+      page.getByText(t("pages.catalog.regulatory.requiredOrdering"), { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByText(t("pages.catalog.regulatory.recommended"), { exact: true }),
+    ).toBeVisible();
+    await screenshotSection(
+      page,
+      "category-attributes-title",
+      screenshotPath(locale, "product-attributes"),
     );
     expect(unexpected).toEqual([]);
   });

@@ -154,7 +154,7 @@ export function RejectionsPage() {
       title: t("pages.pickup.rejections.table.state"),
       render: (row) => (
         <StatusChip
-          status={row.acknowledgedAt ? "ok" : "warn"}
+          phase={row.acknowledgedAt ? "done" : "attention"}
           label={
             row.acknowledgedAt
               ? t("pages.pickup.rejections.state.acknowledged")

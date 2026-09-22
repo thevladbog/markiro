@@ -26,12 +26,17 @@ import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
+  createPalletExportOpenApiSchema,
+  createPalletExportSchema,
   createShiftExportOpenApiSchema,
   createShiftExportSchema,
+  palletExportFormatOpenApiSchema,
   shiftExportDownloadOpenApiSchema,
   shiftExportFormatOpenApiSchema,
   shiftExportOpenApiSchema,
+  type CreatePalletExportDto,
   type CreateShiftExportDto,
+  type PalletExportFormatsDto,
   type ShiftExportDownloadDto,
   type ShiftExportDto,
   type ShiftExportFormatsDto,
@@ -87,6 +92,46 @@ export class ShiftExportsController {
     @Param("shiftId", new ParseUUIDPipe()) shiftId: string,
   ): Promise<ShiftExportDto[]> {
     return this.exports.list(req.tenantId, shiftId);
+  }
+
+  @Get("pallet-exports/formats")
+  @ApiOperation({ summary: "List pallet export formats" })
+  @ApiOkResponse({ schema: { type: "array", items: palletExportFormatOpenApiSchema } })
+  @ApiHttpErrors(401, 403)
+  palletFormats(): PalletExportFormatsDto {
+    return this.exports.palletFormats();
+  }
+
+  @Post("pallets/:palletId/exports")
+  @AllowSubscriptionReadOnly("export")
+  @ApiOperation({
+    summary: "Create a pallet export",
+    description:
+      "Queues a GIS MT aggregation of the pallet's box SSCCs (no unit codes); idempotent per idempotencyKey.",
+  })
+  @ApiParam({ name: "palletId", format: "uuid", type: "string" })
+  @ApiBody({ schema: createPalletExportOpenApiSchema })
+  @ApiCreatedResponse({ schema: shiftExportOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403, 404, 409)
+  createPalletExport(
+    @Req() req: SessionRequest,
+    @Param("palletId", new ParseUUIDPipe()) palletId: string,
+    @Body(new ZodValidationPipe(createPalletExportSchema)) body: CreatePalletExportDto,
+  ): Promise<ShiftExportDto> {
+    return this.exports.createForPallet(req.tenantId, req.userId, palletId, body);
+  }
+
+  @Get("pallets/:palletId/exports")
+  @ApiOperation({ summary: "List exports for a pallet" })
+  @ApiParam({ name: "palletId", format: "uuid", type: "string" })
+  @ApiOkResponse({ schema: { type: "array", items: shiftExportOpenApiSchema } })
+  @ApiHttpErrors(401, 403)
+  listPalletExports(
+    @Req() req: SessionRequest,
+    @Param("palletId", new ParseUUIDPipe()) palletId: string,
+  ): Promise<ShiftExportDto[]> {
+    return this.exports.listForPallet(req.tenantId, palletId);
   }
 
   @Post("shift-exports/:exportId/retry")

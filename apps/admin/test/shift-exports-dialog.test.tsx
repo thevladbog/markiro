@@ -89,6 +89,7 @@ const READY_EXPORT = {
   shiftDateSnapshot: "2026-08-13",
   totalCodeCount: 3,
   totalBoxCount: 2,
+  totalPalletCount: 1,
   createdByUserId: "user-1",
   createdByName: "Иванов Иван",
   sourceSnapshotStartedAt: "2026-08-13T16:00:01.000Z",
@@ -103,6 +104,7 @@ const READY_EXPORT = {
       physicalLineCount: 1,
       codeCount: 1,
       boxCount: 1,
+      palletCount: 0,
       filename: "second.txt",
       mimeType: "text/plain; charset=utf-8",
       byteSize: 24,
@@ -114,6 +116,7 @@ const READY_EXPORT = {
       physicalLineCount: 2,
       codeCount: 2,
       boxCount: 1,
+      palletCount: 1,
       filename: "first.txt",
       mimeType: "text/plain; charset=utf-8",
       byteSize: 42,
@@ -212,8 +215,14 @@ describe("ShiftExportsDialog", () => {
     expect(within(dialog).queryByText("shift_txt_boxes")).toBeNull();
     expect(within(dialog).getByText("3 кодов")).toBeDefined();
     expect(within(dialog).getByText("2 коробов")).toBeDefined();
+    // Pallets are named only where the document covers them: the export
+    // header, the part that holds the pallet -- and not the part without one.
+    expect(within(dialog).getByText("1 паллет")).toBeDefined();
     expect(within(dialog).getByText("Часть 1")).toBeDefined();
-    expect(within(dialog).getByText("2 строк · 2 кодов · 1 коробов · 42 Б")).toBeDefined();
+    expect(
+      within(dialog).getByText("2 строк · 2 кодов · 1 коробов · 1 паллет · 42 Б"),
+    ).toBeDefined();
+    expect(within(dialog).getByText("1 строк · 1 кодов · 1 коробов · 24 Б")).toBeDefined();
 
     const downloadButton = within(dialog).getAllByRole("button", { name: "Скачать" })[0];
     if (!downloadButton) throw new Error("download button is missing");

@@ -20,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.outlined.Factory
 import androidx.compose.material.icons.outlined.Inventory2
+import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.material.icons.outlined.Print
 import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material.icons.outlined.RemoveShoppingCart
@@ -50,9 +51,27 @@ import app.markiro.handheld.core.design.Tone
 import app.markiro.handheld.core.util.TimeText
 
 @Composable
-fun HubScreen(state: HubUi, onTile: (HubTile) -> Unit, onSignOut: () -> Unit, onLabelQueue: () -> Unit = {}, onContinueShift: (String) -> Unit = { onTile(HubTile.SHIFT) }) {
+fun HubScreen(
+    state: HubUi,
+    onTile: (HubTile) -> Unit,
+    onSignOut: () -> Unit,
+    onLabelQueue: () -> Unit = {},
+    onContinueShift: (String) -> Unit = { onTile(HubTile.SHIFT) },
+    onDismissDialog: () -> Unit = {},
+) {
     val c = MarkiroTheme.colors
     val t = MarkiroTheme.type
+    // «Продолжить» goes through the list's own entry and can be refused the
+    // same way; while it is, the entry's state takes the screen as it does there.
+    state.dialog?.let { dialog ->
+        Column(Modifier.fillMaxSize().background(c.surfacePage)) {
+            app.markiro.handheld.feature.shift.ShiftDialogScreen(
+                dialog, state.lineName, onDismiss = onDismissDialog,
+                onRetry = { state.activeShiftId?.let(onContinueShift) ?: onDismissDialog() },
+            )
+        }
+        return
+    }
     Column(Modifier.fillMaxSize().background(c.surfacePage)) {
         StatusStrip(
             listOf(
@@ -99,7 +118,7 @@ fun HubScreen(state: HubUi, onTile: (HubTile) -> Unit, onSignOut: () -> Unit, on
                             color = c.fg1,
                         )
                     }
-                    IconAction(Icons.AutoMirrored.Outlined.Logout, stringResource(R.string.hub_sign_out), onSignOut)
+                    IconAction(Icons.AutoMirrored.Outlined.Logout, stringResource(R.string.hub_sign_out), onClick = onSignOut)
                 }
                 if (state.replacementBlocked) {
                     Banner(stringResource(if (state.replacementTargetWaiting) R.string.replacement_waiting else if (state.replacementClosed) R.string.replacement_closed else R.string.replacement_drain), Tone.Warn, Icons.Outlined.Sync)
@@ -158,6 +177,21 @@ fun HubScreen(state: HubUi, onTile: (HubTile) -> Unit, onSignOut: () -> Unit, on
                             modifier,
                             enabled = !state.replacementBlocked,
                             statusTone = if (state.canWriteoff == false || state.writeoffPending > 0) Tone.Warn else Tone.Neutral,
+                        )
+                    },
+                    { modifier ->
+                        Tile(
+                            Icons.Outlined.Layers,
+                            stringResource(R.string.hub_tile_pallets),
+                            when {
+                                state.canBuildPallets == false -> stringResource(R.string.hub_pallets_no_permission)
+                                state.palletsPending > 0 ->
+                                    pluralStringResource(R.plurals.hub_pallets_pending, state.palletsPending, state.palletsPending)
+                                else -> ""
+                            },
+                            { onTile(HubTile.PALLETS) },
+                            modifier,
+                            statusTone = if (state.canBuildPallets == false || state.palletsPending > 0) Tone.Warn else Tone.Neutral,
                         )
                     },
                     { modifier ->

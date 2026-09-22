@@ -47,7 +47,7 @@ data class WriteoffReasonEntity(
 )
 
 /**
- * The tenant catalogue as the scanner sees it. `id` is what `writeoff_boxes`
+ * The tenant catalogue as the scanner sees it. `id` is what `box_registry`
  * names a product by; `gtin14` is what a unit scan resolves through.
  */
 @Entity(tableName = "writeoff_products", indices = [Index(value = ["id"])])
@@ -62,19 +62,4 @@ data class WriteoffProductEntity(
 data class WriteoffPermissionEntity(
     @PrimaryKey val employeeId: String,
     val canWriteoff: Boolean,
-)
-
-/**
- * Closed boxes from `/station/box-registry`, keyed by SSCC because that is what
- * the scanner produces. `contentKeysJson` is a JSON array of `01…21…` keys so a
- * unit already inside a listed box reads as a duplicate.
- */
-@Entity(tableName = "writeoff_boxes")
-data class WriteoffBoxEntity(
-    @PrimaryKey val sscc: String,
-    val boxId: String,
-    val productId: String,
-    val bottleCount: Int,
-    val contentKeysJson: String,
-    val updatedAt: String,
 )

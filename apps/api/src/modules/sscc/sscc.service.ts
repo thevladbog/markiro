@@ -4,6 +4,7 @@ import {
   Inject,
   Injectable,
   InternalServerErrorException,
+  UnprocessableEntityException,
 } from "@nestjs/common";
 import {
   and,
@@ -72,6 +73,28 @@ export interface RevokedSsccBlock {
  * revoked row against the SAME device's live rows in one query.
  */
 const liveBlocks = alias(schema.ssccBlocks, "live_sscc_blocks");
+
+/** `code` of the refusal when the shift's named issuer counterparty has no usable GLN. */
+export const SSCC_ISSUER_GLN_MISSING = "SSCC_ISSUER_GLN_MISSING";
+/** `code` of the refusal when the shift's numbers come from the organisation and its profile has no GLN. */
+export const ORG_GLN_MISSING = "ORG_GLN_MISSING";
+
+/**
+ * How the bundle names a missing issuer to the device (`ShiftBundleDto.ssccIssuerProblem`),
+ * or null for any other reason the block is absent.
+ */
+export function ssccIssuerProblemOf(error: BadRequestException): SsccIssuerProblem | null {
+  const response = error.getResponse();
+  const code =
+    typeof response === "object" && response !== null && "code" in response
+      ? (response as { code?: unknown }).code
+      : null;
+  if (code === ORG_GLN_MISSING) return "org_gln_missing";
+  if (code === SSCC_ISSUER_GLN_MISSING) return "issuer_gln_missing";
+  return null;
+}
+
+export type SsccIssuerProblem = "org_gln_missing" | "issuer_gln_missing";
 
 /** A GS1 GLN is always exactly 13 digits; the issuer prefix is its first 9. */
 const GLN_PATTERN = /^\d{13}$/;
@@ -336,27 +359,94 @@ export class SsccService {
       .from(schema.shifts)
       .where(and(eq(schema.shifts.tenantId, tenantId), eq(schema.shifts.id, shiftId)));
     if (!shift) throw new BadRequestException("shift not found");
+    return this.resolveIssuerPrefixFor(tenantId, shift.issuer, executor);
+  }
 
-    if (shift.issuer) {
-      const [cp] = await executor
+  /**
+   * `resolveIssuerPrefix` for a shift that may not exist yet, or whose
+   * issuer is about to change: the same two lookups, keyed on the issuer
+   * choice itself.
+   *
+   * Both refusals carry a `code` (`SSCC_ISSUER_GLN_MISSING`,
+   * `ORG_GLN_MISSING`) on top of the message: the bundle turns them into
+   * `ssccIssuerProblem` so the handheld can say WHICH GLN is missing and
+   * where to fix it, and the activation guard re-throws them as 422 with the
+   * same code for the cabinet and the device.
+   */
+  async resolveIssuerPrefixFor(
+    tenantId: string,
+    issuerCounterpartyId: string | null,
+    executor: Pick<Db, "select"> = this.db,
+    options: { lock?: boolean } = {},
+  ): Promise<string> {
+    // `lock` takes the issuer row FOR UPDATE inside the caller's transaction,
+    // so a concurrent profile/counterparty update that clears the GLN waits
+    // for the activation to commit (or the activation sees the cleared
+    // value) rather than the two interleaving. Only activation asks for it:
+    // bundle fetches and settings reads must not serialise on the profile row.
+    if (issuerCounterpartyId) {
+      const counterparty = executor
         .select({ gln: schema.counterparties.gln })
         .from(schema.counterparties)
         .where(
           and(
             eq(schema.counterparties.tenantId, tenantId),
-            eq(schema.counterparties.id, shift.issuer),
+            eq(schema.counterparties.id, issuerCounterpartyId),
           ),
         );
-      if (!cp?.gln) throw new BadRequestException("sscc issuer counterparty has no GLN");
+      const [cp] = options.lock ? await counterparty.for("update") : await counterparty;
+      if (!cp?.gln) {
+        throw new BadRequestException({
+          code: SSCC_ISSUER_GLN_MISSING,
+          message: "sscc issuer counterparty has no GLN",
+        });
+      }
       return deriveIssuerPrefix(cp.gln, "sscc issuer counterparty");
     }
 
-    const [profile] = await executor
+    const profileQuery = executor
       .select({ gln: schema.orgProfiles.gln })
       .from(schema.orgProfiles)
       .where(eq(schema.orgProfiles.tenantId, tenantId));
-    if (!profile?.gln) throw new BadRequestException("organisation profile has no GLN");
+    const [profile] = options.lock ? await profileQuery.for("update") : await profileQuery;
+    if (!profile?.gln) {
+      throw new BadRequestException({
+        code: ORG_GLN_MISSING,
+        message: "organisation profile has no GLN",
+      });
+    }
     return deriveIssuerPrefix(profile.gln, "organisation profile");
+  }
+
+  /** The organisation's own prefix — what every warehouse pallet carries (spec «Decisions»). */
+  async resolveOrganisationIssuerPrefix(
+    tenantId: string,
+    executor: Pick<Db, "select"> = this.db,
+  ): Promise<string> {
+    return this.resolveIssuerPrefixFor(tenantId, null, executor);
+  }
+
+  /**
+   * Refuses to START an aggregation shift that could never number a box.
+   *
+   * Found on the handheld: a shift opened with no GLN anywhere reached the
+   * device with `sscc: null` and only a server WARN, and the operator learned
+   * about it from a refused close twenty scans in. Planning stays allowed --
+   * the GLN can be filled in later -- but `openShift`/`enterShift` call this
+   * before flipping `planned` to `active`. 422 with the resolver's own code,
+   * so the cabinet and the device can both say which GLN is missing.
+   */
+  async assertIssuerConfiguredForActivation(
+    tenantId: string,
+    issuerCounterpartyId: string | null,
+    executor: Pick<Db, "select"> = this.db,
+  ): Promise<void> {
+    try {
+      await this.resolveIssuerPrefixFor(tenantId, issuerCounterpartyId, executor, { lock: true });
+    } catch (error) {
+      if (!(error instanceof BadRequestException)) throw error;
+      throw new UnprocessableEntityException(error.getResponse());
+    }
   }
 
   /**

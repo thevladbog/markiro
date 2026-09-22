@@ -83,6 +83,7 @@ describe.skipIf(!ready)("employees e2e", () => {
         limitMode: schema.employeePickupPolicies.limitMode,
         dayLimit: schema.employeePickupPolicies.dayLimit,
         canWriteoff: schema.employeePickupPolicies.canWriteoff,
+        canBuildPallets: schema.employeePickupPolicies.canBuildPallets,
       })
       .from(schema.employeePickupPolicies)
       .where(eq(schema.employeePickupPolicies.employeeId, employeeId));
@@ -103,6 +104,7 @@ describe.skipIf(!ready)("employees e2e", () => {
       limitMode: "limited",
       dayLimit: 5,
       canWriteoff: false,
+      canBuildPallets: false,
     });
     expect(await employeePolicy(id)).toEqual(created.body.pickupPolicy);
 
@@ -283,6 +285,7 @@ describe.skipIf(!ready)("employees e2e", () => {
       limitMode: "unlimited",
       dayLimit: 12,
       canWriteoff: true,
+      canBuildPallets: false,
     });
     const [audit] = await setup.db
       .select()
@@ -314,6 +317,87 @@ describe.skipIf(!ready)("employees e2e", () => {
       .send({ limitMode: "limited", dayLimit: 3, canWriteoff: false })
       .expect(404);
     expect(await employeePolicy(employeeId)).toEqual(response.body.pickupPolicy);
+  });
+
+  it("stores canBuildPallets on the pickup policy and audits the change", async () => {
+    const owner = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(owner);
+    const actorUserId = await ownerUserId(tenantId);
+    const created = await owner.post("/employees").send({ fullName: "Комплектовщик" }).expect(201);
+    const employeeId = created.body.id as string;
+
+    const res = await owner
+      .patch(`/employees/${employeeId}/pickup-policy`)
+      .send({ limitMode: "limited", dayLimit: 5, canWriteoff: false, canBuildPallets: true })
+      .expect(200);
+    expect(res.body.pickupPolicy).toMatchObject({ canBuildPallets: true });
+    const got = await owner.get("/employees").expect(200);
+    expect(
+      got.body.items.find((item: { id: string }) => item.id === employeeId).pickupPolicy
+        .canBuildPallets,
+    ).toBe(true);
+    const [audit] = await setup.db
+      .select()
+      .from(schema.tenantAuditEvents)
+      .where(
+        and(
+          eq(schema.tenantAuditEvents.organizationId, tenantId),
+          eq(schema.tenantAuditEvents.action, "employee.pickup_policy.updated"),
+          eq(schema.tenantAuditEvents.targetId, employeeId),
+        ),
+      )
+      .orderBy(desc(schema.tenantAuditEvents.createdAt))
+      .limit(1);
+    expect(audit).toMatchObject({
+      actorUserId,
+      outcome: "success",
+      targetType: "employee",
+      targetId: employeeId,
+      before: { canBuildPallets: false },
+      after: { canBuildPallets: true },
+    });
+  });
+
+  // The admin pickup form still posts only the three limit fields, so a
+  // full-replace body without `canBuildPallets` must not revoke the grant.
+  it("preserves canBuildPallets when the client omits it", async () => {
+    const owner = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(owner);
+    const created = await owner.post("/employees").send({ fullName: "Без права" }).expect(201);
+    const employeeId = created.body.id as string;
+
+    await owner
+      .patch(`/employees/${employeeId}/pickup-policy`)
+      .send({ limitMode: "limited", dayLimit: 5, canWriteoff: false, canBuildPallets: true })
+      .expect(200);
+    const res = await owner
+      .patch(`/employees/${employeeId}/pickup-policy`)
+      .send({ limitMode: "limited", dayLimit: 7, canWriteoff: false })
+      .expect(200);
+    expect(res.body.pickupPolicy).toMatchObject({ dayLimit: 7, canBuildPallets: true });
+    const got = await owner.get("/employees").expect(200);
+    expect(
+      got.body.items.find((item: { id: string }) => item.id === employeeId).pickupPolicy
+        .canBuildPallets,
+    ).toBe(true);
+    const [audit] = await setup.db
+      .select()
+      .from(schema.tenantAuditEvents)
+      .where(
+        and(
+          eq(schema.tenantAuditEvents.organizationId, tenantId),
+          eq(schema.tenantAuditEvents.action, "employee.pickup_policy.updated"),
+          eq(schema.tenantAuditEvents.targetId, employeeId),
+        ),
+      )
+      .orderBy(desc(schema.tenantAuditEvents.createdAt))
+      .limit(1);
+    expect(audit).toMatchObject({
+      outcome: "success",
+      before: { dayLimit: 5, canBuildPallets: true },
+      after: { dayLimit: 7, canBuildPallets: true },
+    });
+    expect(await employeePolicy(employeeId)).toMatchObject({ canBuildPallets: true });
   });
 
   it("reports a missing active employee pickup policy as a configuration error", async () => {
@@ -360,12 +444,14 @@ describe.skipIf(!ready)("employees e2e", () => {
         limitMode: "unlimited",
         dayLimit: 17,
         canWriteoff: true,
+        canBuildPallets: false,
       },
       {
         employeeId: second.body.id,
         limitMode: "unlimited",
         dayLimit: 17,
         canWriteoff: false,
+        canBuildPallets: false,
       },
     ]);
     const audits = await setup.db
@@ -385,13 +471,28 @@ describe.skipIf(!ready)("employees e2e", () => {
       [
         {
           employeeId: first.body.id,
-          before: { limitMode: "limited", dayLimit: 5, canWriteoff: true },
-          after: { limitMode: "unlimited", dayLimit: 17, canWriteoff: true },
+          before: { limitMode: "limited", dayLimit: 5, canWriteoff: true, canBuildPallets: false },
+          after: {
+            limitMode: "unlimited",
+            dayLimit: 17,
+            canWriteoff: true,
+            canBuildPallets: false,
+          },
         },
         {
           employeeId: second.body.id,
-          before: { limitMode: "limited", dayLimit: 5, canWriteoff: false },
-          after: { limitMode: "unlimited", dayLimit: 17, canWriteoff: false },
+          before: {
+            limitMode: "limited",
+            dayLimit: 5,
+            canWriteoff: false,
+            canBuildPallets: false,
+          },
+          after: {
+            limitMode: "unlimited",
+            dayLimit: 17,
+            canWriteoff: false,
+            canBuildPallets: false,
+          },
         },
       ]
         .sort((left, right) => left.employeeId.localeCompare(right.employeeId))
@@ -434,12 +535,14 @@ describe.skipIf(!ready)("employees e2e", () => {
         limitMode: "unlimited",
         dayLimit: 11,
         canWriteoff: true,
+        canBuildPallets: false,
       },
       {
         employeeId: second.body.id,
         limitMode: "limited",
         dayLimit: 7,
         canWriteoff: true,
+        canBuildPallets: false,
       },
     ]);
   });
@@ -526,11 +629,13 @@ describe.skipIf(!ready)("employees e2e", () => {
       limitMode: "limited",
       dayLimit: 5,
       canWriteoff: false,
+      canBuildPallets: false,
     });
     expect(await employeePolicy(foreign.body.id)).toEqual({
       limitMode: "limited",
       dayLimit: 5,
       canWriteoff: false,
+      canBuildPallets: false,
     });
     const localAudits = await setup.db
       .select({ id: schema.tenantAuditEvents.id })

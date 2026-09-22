@@ -98,7 +98,11 @@ export {
   buildPrintNameBoxLabelTemplates,
 } from "./labels/defaults.js";
 export type { DefaultLabelTemplate, LegacyStockLabelTemplate } from "./labels/defaults.js";
-export { buildPalletLabelTemplates, PALLET_LABEL_TEMPLATE_NAME } from "./labels/pallet-defaults.js";
+export {
+  buildPalletLabelTemplates,
+  PALLET_LABEL_58X40_TEMPLATE_NAME,
+  PALLET_LABEL_TEMPLATE_NAME,
+} from "./labels/pallet-defaults.js";
 export type {
   LabelBarcodeElement,
   LabelBoxElement,
@@ -118,6 +122,7 @@ export {
 } from "./labels/import.js";
 export type {
   LabelCodeLanguage,
+  LabelImportFormat,
   LabelImportResult,
   LabelImportWarning,
   LabelImportWarningCode,
@@ -125,6 +130,8 @@ export type {
 } from "./labels/import.js";
 export { parseZplLabel } from "./labels/zpl-import.js";
 export { parseTsplLabel } from "./labels/tspl-import.js";
+export { parseLabelJson } from "./labels/json-import.js";
+export type { LabelJsonImportResult, ParseLabelJsonOptions } from "./labels/json-import.js";
 export {
   buildGfaCommand,
   generateZpl,
@@ -162,6 +169,11 @@ export {
   renderQrSvg,
 } from "./barcodes/svg.js";
 export {
+  formatShiftTaskBarcode,
+  parseShiftTaskBarcode,
+  SHIFT_TASK_BARCODE_PREFIX,
+} from "./barcodes/task-tokens.js";
+export {
   deriveDigestB64,
   formatPhc,
   isCanonicalDigestB64,
@@ -173,6 +185,7 @@ export type { ParsedPhc } from "./crypto/phc.js";
 export {
   MAX_BOX_CLOSURES_PER_SYNC_BATCH,
   MAX_PALLET_CLOSURES_PER_SYNC_BATCH,
+  MAX_PALLET_MEMBERSHIPS_PER_SYNC_BATCH,
   MAX_SYNC_BATCH_ID_CHARS,
 } from "./sync/limits.js";
 export {
@@ -324,10 +337,13 @@ export {
   sanitizeShiftExportFilenameSegment,
   SHIFT_EXPORT_FORMATS,
   ShiftExportDomainError,
+  shiftExportFormatRequiresPallets,
+  shiftExportSourceModeFor,
 } from "./shift-exports.js";
 export type {
   RenderShiftExportInput,
   ShiftExportBoxMode,
+  ShiftExportDocumentMetadata,
   ShiftExportDomainErrorCode,
   ShiftExportFormatDescriptor,
   ShiftExportFormatId,
@@ -335,6 +351,16 @@ export type {
   ShiftExportPart,
   ShiftExportSource,
 } from "./shift-exports.js";
+export {
+  getPalletExportFormat,
+  PALLET_EXPORT_FORMATS,
+  renderPalletAggregationExport,
+} from "./pallet-exports.js";
+export type {
+  PalletExportFormatDescriptor,
+  PalletExportFormatId,
+  RenderPalletAggregationExportInput,
+} from "./pallet-exports.js";
 
 export * from "./validation-reprocessing.js";
 export * from "./offline-grants/types.js";

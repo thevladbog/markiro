@@ -117,7 +117,8 @@ afterEach(async () => {
 });
 it("renders measured channels without turning unsupported into zero and shows server reasons", async () => {
   setup();
-  await screen.findByText("Draining");
+  const drainingLabel = await screen.findByText("Draining");
+  expect(drainingLabel.closest(".mk-chip")?.className).toContain("mk-chip--running");
   for (const [label, value] of [
     ["Scans", "3"],
     ["Inventories", "2"],
@@ -145,7 +146,7 @@ it.each(["prepared", "ready", "executing", "completed"] as const)(
   async (state) => {
     current = workflowPreparation(state);
     setup();
-    await screen.findByText(
+    const stateLabel = await screen.findByText(
       state === "prepared"
         ? "Prepared"
         : state === "ready"
@@ -154,6 +155,9 @@ it.each(["prepared", "ready", "executing", "completed"] as const)(
             ? "Executing replacement"
             : "Replacement completed",
     );
+    const expectedPhase =
+      state === "completed" ? "done" : state === "executing" ? "running" : "planned";
+    expect(stateLabel.closest(".mk-chip")?.className).toContain(`mk-chip--${expectedPhase}`);
     expect(Boolean(screen.queryByRole("button", { name: "Request drain" }))).toBe(
       state === "prepared",
     );
@@ -172,7 +176,9 @@ it.each(["required", "draining", "completed", "evidence_unavailable"] as const)(
   async (recovery) => {
     current = workflowPreparation("completed", recovery);
     setup();
-    await screen.findByText("Emergency replacement");
+    const modeLabel = await screen.findByText("Emergency replacement");
+    expect(modeLabel.closest(".mk-badge")?.className).toContain("mk-badge--warn");
+    expect(modeLabel.querySelector(".mk-tag__glyph")).toBeNull();
     expect(screen.getByText(/New work allowed from/).textContent).toContain("2026");
     expect(screen.getByText(SECOND)).toBeDefined();
     expect(screen.getByText("Execution revision").closest("div")?.textContent).toContain("9");

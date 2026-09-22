@@ -39,7 +39,11 @@ describe.skipIf(!process.env.DATABASE_URL)("replacement drain readiness", () => 
     if (created) await maintenance.pool.query(`DROP DATABASE "${name}"`);
     await maintenance.pool.end();
   });
-  async function fixture(kind: "station" | "handheld" = "station", credentialEpoch = 1) {
+  async function fixture(
+    kind: "station" | "handheld" = "station",
+    credentialEpoch = 1,
+    withPeer = false,
+  ) {
     const tenantId = await createOrganization(db);
     const id = randomUUID();
     await db.insert(schema.user).values({ id, name: "Owner", email: `${id}@example.invalid` });
@@ -65,6 +69,17 @@ describe.skipIf(!process.env.DATABASE_URL)("replacement drain readiness", () => 
       .returning();
     if (!device) throw new Error("fixture");
     await db.transaction((tx) => transitionWorkingAssignment(tx, device));
+    const [peer] = withPeer
+      ? await db
+          .insert(schema.stationDevices)
+          .values({
+            tenantId,
+            name: "Other handheld",
+            kind: "handheld",
+          })
+          .returning()
+      : [];
+    if (peer) await db.transaction((tx) => transitionWorkingAssignment(tx, peer));
     await readiness.currentIntentProjection(
       { tenantId, deviceId: device.id, kind, apiKeyId },
       undefined,
@@ -86,6 +101,7 @@ describe.skipIf(!process.env.DATABASE_URL)("replacement drain readiness", () => 
     return {
       tenantId,
       device,
+      peer,
       actor,
       prepared,
       identity: { tenantId, deviceId: device.id, kind, apiKeyId },
@@ -607,6 +623,73 @@ describe.skipIf(!process.env.DATABASE_URL)("replacement drain readiness", () => 
         })
       ).eligibility,
     ).toEqual({ status: "blocked", reasons: ["pending_product_labels", "unknown_prints"] });
+  });
+  it("blocks a zero local report on source-owned open warehouse pallets and releases after closure", async () => {
+    const f = await fixture("handheld", 1, true);
+    const d = await drain(f);
+    const productId = randomUUID();
+    await db.insert(schema.products).values({
+      id: productId,
+      tenantId: f.tenantId,
+      gtin14: "04680089900024",
+      name: "Product",
+      status: "active",
+    });
+    const peer = f.peer;
+    if (!peer) throw new Error("peer missing");
+    await db.insert(schema.pallets).values({
+      tenantId: f.tenantId,
+      kind: "warehouse",
+      productId,
+      deviceId: peer.id,
+      terminalId: peer.id,
+      devicePalletId: "peer-open",
+    });
+    expect((await readiness.report(f.identity, d.body)).eligibility).toEqual({
+      status: "eligible",
+      reasons: [],
+    });
+    const [pallet] = await db
+      .insert(schema.pallets)
+      .values({
+        tenantId: f.tenantId,
+        kind: "warehouse",
+        productId,
+        deviceId: f.device.id,
+        terminalId: f.device.id,
+        devicePalletId: "source-open",
+      })
+      .returning();
+    if (!pallet) throw new Error("pallet missing");
+    expect((await service.list(f.tenantId, f.actor)).items[0]?.preparation).toMatchObject({
+      state: "draining",
+      readiness: { eligibility: { status: "blocked", reasons: ["pending_boxes"] } },
+    });
+    expect(
+      (
+        await readiness.report(f.identity, {
+          ...d.body,
+          requestId: randomUUID(),
+          reportSequence: 1,
+        })
+      ).eligibility,
+    ).toEqual({ status: "blocked", reasons: ["pending_boxes"] });
+    await db
+      .update(schema.pallets)
+      .set({ closedAt: new Date() })
+      .where(eq(schema.pallets.id, pallet.id));
+    expect(
+      (
+        await readiness.report(f.identity, {
+          ...d.body,
+          requestId: randomUUID(),
+          reportSequence: 2,
+        })
+      ).eligibility,
+    ).toEqual({ status: "eligible", reasons: [] });
+    expect((await readiness.currentIntent(f.identity, "replacement-readiness-v1"))?.intentId).toBe(
+      d.intent.intentId,
+    );
   });
   it("rejects a readiness request ID already used for the drain command", async () => {
     const f = await fixture();

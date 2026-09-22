@@ -711,6 +711,18 @@ describe.skipIf(!process.env.DATABASE_URL)("replacement evidence recovery", () =
             },
           ],
         },
+        ...(["palletMemberships", "palletMembershipRemovals"] as const).map((channel) => ({
+          batchId: randomUUID(),
+          items: [],
+          [channel]: [
+            {
+              palletId: randomUUID(),
+              boxSscc: "046011122200000019",
+              [channel === "palletMemberships" ? "addedAt" : "removedAt"]: occurredAt,
+              operatorId: operatorId,
+            },
+          ],
+        })),
       ];
       const inventoryPayload = {
         snapshotId: randomUUID(),

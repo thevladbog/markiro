@@ -6,6 +6,7 @@ import { useState } from "react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import componentStyles from "virtual:ui-component-styles";
+import tokenStyles from "virtual:ui-token-styles";
 
 import {
   AdminPage,
@@ -26,6 +27,12 @@ import {
   StatusChip,
   Table,
 } from "../src/components/index.js";
+// `PHASE_GLYPH`/`PHASE_TONE` are intentionally not exported from
+// `../src/components/index.js` -- a public tone lookup is the hole through
+// which apps would pick their own tone again. Import straight from the
+// module, as the invariant test below is meant to.
+import { PHASE_GLYPH, PHASE_TONE } from "../src/components/StatusChip.js";
+import type { TagPhase } from "../src/components/StatusChip.js";
 
 const sharedStyles = readFileSync("src/styles.css", "utf8") as string;
 const sharedStyleElement = document.createElement("style");
@@ -45,7 +52,7 @@ afterEach(() => {
 
 beforeAll(() => {
   const style = document.createElement("style");
-  style.textContent = componentStyles;
+  style.textContent = `${tokenStyles}\n${componentStyles}`;
   document.head.append(style);
 
   Object.defineProperties(HTMLElement.prototype, {
@@ -197,24 +204,64 @@ describe("generic document reset", () => {
 });
 
 describe("StatusChip", () => {
+  /**
+   * Инвариант всей затеи. Раньше глиф читался из тона таблицей STATUS, и
+   * активная смена получала галочку только потому, что её тон оказался `ok`.
+   * Теперь фаза выбирает и глиф, и тон, а вызывающая сторона — ни того, ни
+   * другого.
+   */
   it.each([
-    ["ok", "OK"],
-    ["error", "Error"],
-    ["warn", "Duplicate"],
-    ["info", "Syncing"],
-    ["neutral", "Neutral"],
-  ] as const)("renders an icon glyph and label text for status=%s", (status, label) => {
-    render(<StatusChip status={status} />);
+    ["draft", "✎"],
+    ["planned", "◷"],
+    ["active", "▸"],
+    ["running", "⟳"],
+    ["done", "✓"],
+    ["attention", "!"],
+    ["duplicate", "⧉"],
+    ["failed", "✕"],
+    ["retired", "✕"],
+    ["dismantled", "⊘"],
+    ["none", "·"],
+  ] as const)("фаза %s рисует глиф %s", (phase, glyph) => {
+    const { container } = render(<StatusChip phase={phase} label="Подпись" />);
 
-    const chip = screen.getByText(label).closest(".mk-chip");
-    expect(chip).not.toBeNull();
-    // icon glyph must be present alongside the label — never color alone
-    expect(chip!.textContent!.length).toBeGreaterThan(label.length);
+    expect(container.querySelector(".mk-tag__glyph")?.textContent).toBe(glyph);
+    expect(screen.getByText("Подпись")).toBeDefined();
   });
 
-  it("allows overriding the label text", () => {
-    render(<StatusChip status="ok" label="Отправлено" />);
-    expect(screen.getByText("Отправлено")).toBeDefined();
+  it("не даёт серый тон ни одной фазе завершения", () => {
+    const { container } = render(<StatusChip phase="done" label="Закрыта" />);
+    const chip = container.querySelector(".mk-tag");
+
+    expect(chip?.className).toContain("mk-tag--done");
+    expect(chip?.className).not.toContain("mk-tag--neutral");
+  });
+
+  it("сохраняет класс-зацепку mk-chip для накладок приложений", () => {
+    const { container } = render(<StatusChip phase="active" label="Активна" />);
+    expect(container.querySelector(".mk-chip")).not.toBeNull();
+  });
+
+  it("по умолчанию берёт офисный размер", () => {
+    const { container } = render(<StatusChip phase="active" label="Активна" />);
+    expect(container.querySelector(".mk-tag")?.className).toContain("mk-tag--office");
+  });
+
+  /**
+   * `wrap` нужен тегу фазы по той же причине, что и `Badge`: `label` — это
+   * произвольный текст факта жизненного цикла, а не короткое фиксированное
+   * слово, и в узкой колонке nowrap заставляет его отдавать всю строку в
+   * min-content контейнера. Проверяем вычисленные размеры, а не только
+   * класс: именно высота и min-height определяют, обрежет ли колонку.
+   */
+  it("даёт длинной подписи перенос и рост выше одной строки", () => {
+    render(<StatusChip phase="attention" label="Состав изменился после закрытия" wrap />);
+    const chip = screen.getByText("Состав изменился после закрытия").closest(".mk-tag");
+
+    expect(chip).not.toBeNull();
+    expect(chip?.className).toContain("mk-tag--wrap");
+    expect(getComputedStyle(chip as Element).height).toBe("auto");
+    expect(getComputedStyle(chip as Element).minHeight).toBe("22px");
   });
 });
 
@@ -1286,10 +1333,122 @@ describe("Drawer", () => {
 });
 
 describe("Badge", () => {
-  it("renders its children as a compact mono pill", () => {
-    render(<Badge>12</Badge>);
+  it("рисует счётчик моноширинно по явному признаку", () => {
+    render(<Badge mono>12</Badge>);
     const badge = screen.getByText("12");
-    expect(badge.className).toContain("mk-badge--neutral");
+
+    expect(badge.className).toContain("mk-tag--neutral");
+    expect(badge.className).toContain("mk-tag--mono");
+  });
+
+  /**
+   * Словесная подпись моноширинной быть не должна: у IBM Plex Mono пробел в
+   * полную ячейку, и двухсловный тег читается с двойным пробелом. В station.css
+   * это лечилось вручную через word-spacing: -0.35ch.
+   */
+  it("не включает моно для словесной подписи", () => {
+    render(<Badge>Разобрана</Badge>);
+    expect(screen.getByText("Разобрана").className).not.toContain("mk-tag--mono");
+  });
+
+  it.each(["violet", "teal", "magenta", "steel"] as const)(
+    "поддерживает категорийный тон %s",
+    (tone) => {
+      render(<Badge tone={tone}>Агрегация</Badge>);
+      expect(screen.getByText("Агрегация").className).toContain(`mk-tag--${tone}`);
+    },
+  );
+
+  /**
+   * Дефолт остаётся nowrap: однословный тег, разорванный на две строки, хуже
+   * широкого, и на это опирается каждая существующая точка вызова.
+   */
+  it("держит короткий тег в одну строку на фиксированной высоте", () => {
+    render(<Badge>Разобрана</Badge>);
+    const badge = screen.getByText("Разобрана");
+
+    expect(badge.className).toContain("mk-tag--office");
+    expect(badge.className).not.toContain("mk-tag--wrap");
+    expect(getComputedStyle(badge).height).toBe("22px");
+  });
+
+  /**
+   * `wrap` нужен длинной подписи в узкой колонке: nowrap заставляет тег
+   * отдавать всю строку в min-content колонки, из-за чего таблицу паллет в
+   * панели смены выносило в горизонтальное переполнение и тег обрезало.
+   */
+  it("даёт длинной подписи перенос и рост выше одной строки", () => {
+    render(<Badge wrap>Состав изменился после закрытия</Badge>);
+    const badge = screen.getByText("Состав изменился после закрытия");
+
+    expect(badge.className).toContain("mk-tag--wrap");
+    expect(getComputedStyle(badge).height).toBe("auto");
+    expect(getComputedStyle(badge).minHeight).toBe("22px");
+  });
+
+  /**
+   * `toContain("mk-badge")` тривиально верен из-за соседнего класса
+   * `mk-badge--neutral` (дефолтный тон), который сам содержит "mk-badge" как
+   * подстроку -- пропажу голого `mk-badge` эта проверка не поймает. Точное
+   * членство в списке классов ловит именно это.
+   */
+  it("сохраняет класс-зацепку mk-badge для накладок приложений", () => {
+    render(<Badge>Разобрана</Badge>);
+    expect(screen.getByText("Разобрана").classList.contains("mk-badge")).toBe(true);
+  });
+
+  it("всё ещё позволяет вызывающей стороне переопределить перенос через style", () => {
+    render(
+      <Badge wrap style={{ whiteSpace: "nowrap" }}>
+        Состав изменился после закрытия
+      </Badge>,
+    );
+    expect(screen.getByText("Состав изменился после закрытия").style.whiteSpace).toBe("nowrap");
+  });
+});
+
+describe("геометрия тега", () => {
+  /**
+   * Смысл всей затеи: тег с глифом и тег без глифа обязаны иметь одну
+   * высоту. Раньше это были 24px против 16px, и в ячейке таблицы смен они
+   * читались как два несвязанных набора.
+   */
+  it("даёт одинаковую высоту тегу фазы и тегу категории", () => {
+    render(
+      <div>
+        <StatusChip phase="done" label="Закрыта" />
+        <Badge tone="violet">Валидация</Badge>
+      </div>,
+    );
+
+    const chip = screen.getByText("Закрыта").closest(".mk-tag");
+    const badge = screen.getByText("Валидация");
+
+    expect(chip).not.toBeNull();
+    expect(getComputedStyle(chip as Element).height).toBe("22px");
+    expect(getComputedStyle(badge).height).toBe("22px");
+  });
+
+  it("держит коробку глифа квадратной, чтобы подписи вставали в колонку", () => {
+    const { container } = render(<StatusChip phase="duplicate" label="Дубликат" />);
+
+    const glyph = container.querySelector(".mk-tag__glyph");
+    expect(glyph).not.toBeNull();
+
+    const box = getComputedStyle(glyph as Element);
+    expect(box.width).toBe("12px");
+    expect(box.height).toBe("12px");
+  });
+
+  it.each([
+    ["office", "22px"],
+    ["floor", "34px"],
+    ["wall", "40px"],
+  ] as const)("размер %s даёт высоту %s", (size, height) => {
+    render(<StatusChip phase="active" label="Активна" size={size} />);
+
+    const chip = screen.getByText("Активна").closest(".mk-tag");
+    expect(getComputedStyle(chip as Element).height).toBe(height);
   });
 });
 
@@ -1350,5 +1509,34 @@ describe("Table", () => {
     render(<Table columns={[{ key: "batch", title: "Партия" }]} rows={[]} />);
 
     expect(screen.getByText("No data")).toBeDefined();
+  });
+});
+
+describe("инвариант словаря фаз", () => {
+  const PHASES = Object.keys(PHASE_GLYPH) as TagPhase[];
+
+  it("даёт каждой фазе непустой глиф", () => {
+    for (const phase of PHASES) {
+      expect(PHASE_GLYPH[phase].length).toBeGreaterThan(0);
+    }
+  });
+
+  /**
+   * Правило серого из спеки. Серый читается как «сущности больше нет»,
+   * поэтому фаза завершения серой быть не может — именно с этого начался
+   * разбор: закрытая смена выглядела как ненастроенный канал.
+   */
+  it("допускает серый только там, где значения действительно нет", () => {
+    const grey = PHASES.filter((phase) => PHASE_TONE[phase] === "neutral");
+
+    expect(new Set(grey)).toEqual(new Set(["draft", "retired", "dismantled", "none"]));
+  });
+
+  it("не оставляет ни одну фазу без тона из разрешённого набора", () => {
+    const allowed = new Set(["neutral", "ok", "done", "warn", "error", "info"]);
+
+    for (const phase of PHASES) {
+      expect(allowed.has(PHASE_TONE[phase])).toBe(true);
+    }
   });
 });

@@ -41,11 +41,16 @@ import app.markiro.handheld.core.print.PrinterEntity
         BoxExceptionEntity::class,
         PalletEntity::class,
         PalletExceptionEntity::class,
+        PalletMembershipRemovalEntity::class,
         WriteoffOutboxEntity::class,
         WriteoffReasonEntity::class,
         WriteoffProductEntity::class,
         WriteoffPermissionEntity::class,
-        WriteoffBoxEntity::class,
+        BoxRegistryEntity::class,
+        PalletMembershipEntity::class,
+        PalletProductEntity::class,
+        PalletPermissionEntity::class,
+        PalletLabelTemplateEntity::class,
     ],
     version = HANDHELD_DATABASE_VERSION,
     exportSchema = false,
@@ -65,6 +70,7 @@ abstract class HandheldDatabase : RoomDatabase() {
     abstract fun boxDao(): BoxDao
     abstract fun ssccPoolDao(): SsccPoolDao
     abstract fun palletDao(): PalletDao
+    abstract fun palletMembershipRemovalDao(): PalletMembershipRemovalDao
     abstract fun productLabelJobDao(): ProductLabelJobDao
     abstract fun productLabelEventDao(): ProductLabelEventDao
     abstract fun boxExceptionDao(): BoxExceptionDao
@@ -91,7 +97,11 @@ abstract class HandheldDatabase : RoomDatabase() {
     abstract fun writeoffReasonDao(): WriteoffReasonDao
     abstract fun writeoffProductDao(): WriteoffProductDao
     abstract fun writeoffPermissionDao(): WriteoffPermissionDao
-    abstract fun writeoffBoxDao(): WriteoffBoxDao
+    abstract fun boxRegistryDao(): BoxRegistryDao
+    abstract fun palletMembershipDao(): PalletMembershipDao
+    abstract fun palletProductDao(): PalletProductDao
+    abstract fun palletPermissionDao(): PalletPermissionDao
+    abstract fun palletLabelTemplateDao(): PalletLabelTemplateDao
 }
 
-const val HANDHELD_DATABASE_VERSION = 17
+const val HANDHELD_DATABASE_VERSION = 20

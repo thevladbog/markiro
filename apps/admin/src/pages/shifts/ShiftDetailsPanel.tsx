@@ -11,7 +11,7 @@ import {
   StatusChip,
   Table,
 } from "@markiro/ui";
-import type { StatusChipStatus, TableColumn } from "@markiro/ui";
+import type { TableColumn } from "@markiro/ui";
 import { CABINET_CAPABILITY, formatSsccHri } from "@markiro/domain";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -28,15 +28,15 @@ import {
   type ShiftDto,
   type ShiftParticipantDto,
 } from "./api.js";
+import {
+  PlacardFormatModal,
+  placardQuery,
+  type PlacardFormat,
+} from "../code-search/PlacardFormatModal.js";
 import { usePallets, type PalletDto } from "./pallets-api.js";
 import { ShiftExportsContent } from "./ShiftExportsDialog.js";
+import { SHIFT_MODE_TO_TONE, SHIFT_STATUS_TO_PHASE } from "./index.js";
 import type { ShiftsPanelLocationState } from "./ShiftPanelRoute.js";
-
-const STATUS_TO_CHIP: Record<ShiftDto["status"], StatusChipStatus> = {
-  planned: "info",
-  active: "ok",
-  closed: "neutral",
-};
 
 function formatNumber(value: number, language: string): string {
   return new Intl.NumberFormat(language).format(value);
@@ -183,6 +183,18 @@ function ShiftOutput({ shift }: { shift: ShiftDto }) {
 function ShiftPallets({ shift }: { shift: ShiftDto }) {
   const { t, i18n } = useTranslation();
   const pallets = usePallets(shift.palletsEnabled ? shift.id : undefined);
+  const [placardsOpen, setPlacardsOpen] = useState(false);
+
+  // One placard page per closed, still-standing pallet with an SSCC -- the
+  // same set the server prints; with none of them the action is absent
+  // rather than opening a document the server would refuse (409).
+  const printablePallets = (pallets.data ?? []).filter(
+    (row) => row.closedAt !== null && row.disassembledAt === null && row.sscc !== null,
+  );
+  const openPlacards = (format: PlacardFormat) => {
+    window.open(`/api/code-search/shifts/${shift.id}/placards?${placardQuery(format)}`);
+    setPlacardsOpen(false);
+  };
 
   const columns: TableColumn<PalletDto>[] = [
     {
@@ -197,11 +209,9 @@ function ShiftPallets({ shift }: { shift: ShiftDto }) {
         </Link>
       ),
     },
-    {
-      key: "lineName",
-      title: t("pages.shifts.pallets.table.line"),
-      render: (row) => row.lineName ?? "—",
-    },
+    // No line column: a shift's pallets are stacked on the shift's own line,
+    // which «Параметры смены» already shows, and the side panel is too narrow
+    // to spend a column on repeating it -- the closing time was being cut off.
     {
       key: "boxCount",
       title: t("pages.shifts.pallets.table.boxCount"),
@@ -219,6 +229,9 @@ function ShiftPallets({ shift }: { shift: ShiftDto }) {
     {
       key: "closedAt",
       title: t("pages.shifts.pallets.table.closedAt"),
+      // Date and time may break onto two lines: the panel is narrow and a
+      // no-wrap timestamp is what pushed the status column off its edge.
+      wrap: true,
       render: (row) => (row.closedAt ? formatCreatedAt(row.closedAt, i18n.language) : "—"),
     },
     {
@@ -227,22 +240,59 @@ function ShiftPallets({ shift }: { shift: ShiftDto }) {
       wrap: true,
       // Two independent facts, both non-colour-only: a pallet can have been
       // taken apart AND have lost a box before that.
+      //
+      // Both are lifecycle facts, not categories, so they render as phase
+      // tags now, not badges: a disassembled pallet gets `dismantled`, a
+      // changed-after-close one gets `attention`. `wrap` on the badges
+      // themselves, not just on the column, used to be how «Состав изменился
+      // после закрытия» avoided making this column's min-content the whole
+      // string (235px) and clipping the pill mid-word inside the 720px
+      // "complex" panel. `StatusChip` now carries the same `wrap` prop as
+      // `Badge`, so both tags get it here: the label is still the same
+      // free-form sentence, and wrapping is a layout concern of this narrow
+      // column, not something tied to which tag renders it. The column
+      // still relies on `.mk-shift-details__pallet-status` stacking the two
+      // tags vertically instead of forcing them onto one line.
       render: (row) => (
-        <>
+        <div className="mk-shift-details__pallet-status">
           {row.disassembledAt ? (
-            <Badge tone="neutral">{t("pages.shifts.pallets.disassembled")}</Badge>
+            <StatusChip phase="dismantled" label={t("pages.shifts.pallets.disassembled")} wrap />
           ) : null}
           {row.contentsChangedAfterClose ? (
-            <Badge tone="warn">{t("pages.shifts.pallets.contentsChangedAfterClose")}</Badge>
+            <StatusChip
+              phase="attention"
+              label={t("pages.shifts.pallets.contentsChangedAfterClose")}
+              wrap
+            />
           ) : null}
-        </>
+        </div>
       ),
     },
   ];
 
   return (
     <section className="mk-shift-details__section" aria-label={t("pages.shifts.pallets.title")}>
-      <h3>{t("pages.shifts.pallets.title")}</h3>
+      <div
+        style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}
+      >
+        <h3>{t("pages.shifts.pallets.title")}</h3>
+        {printablePallets.length > 0 ? (
+          <Button
+            type="button"
+            size="compact"
+            variant="secondary"
+            onClick={() => setPlacardsOpen(true)}
+          >
+            {t("pages.shifts.pallets.placards.action")}
+          </Button>
+        ) : null}
+      </div>
+      <PlacardFormatModal
+        open={placardsOpen}
+        title={t("pages.shifts.pallets.placards.title")}
+        onClose={() => setPlacardsOpen(false)}
+        onOpen={openPlacards}
+      />
       {pallets.isPending ? (
         <Spinner label={t("common.loading")} />
       ) : pallets.isError ? (
@@ -404,7 +454,7 @@ export function ShiftDetailsPanel({ shift, onClose }: { shift: ShiftDto; onClose
       description={shift.productName ?? undefined}
       status={
         <StatusChip
-          status={STATUS_TO_CHIP[shift.status]}
+          phase={SHIFT_STATUS_TO_PHASE[shift.status]}
           label={t(`pages.shifts.status.${shift.status}`)}
         />
       }
@@ -477,7 +527,9 @@ export function ShiftDetailsPanel({ shift, onClose }: { shift: ShiftDto; onClose
             <div>
               <dt>{t("pages.shifts.table.mode")}</dt>
               <dd>
-                <Badge tone="neutral">{t(`pages.shifts.mode.${shift.mode}`)}</Badge>
+                <Badge tone={SHIFT_MODE_TO_TONE[shift.mode]}>
+                  {t(`pages.shifts.mode.${shift.mode}`)}
+                </Badge>
               </dd>
             </div>
             <div>
@@ -500,6 +552,23 @@ export function ShiftDetailsPanel({ shift, onClose }: { shift: ShiftDto; onClose
             ) : null}
           </dl>
         </section>
+        {shift.status !== "closed" ? (
+          <section className="mk-shift-details__section">
+            <h3>{t("pages.shifts.details.taskFormTitle")}</h3>
+            <p className="mk-shift-details__reports-hint">
+              {t("pages.shifts.details.taskFormDescription")}
+            </p>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() =>
+                window.open(`/api/shifts/${shift.id}/task-form`, "_blank", "noopener,noreferrer")
+              }
+            >
+              {t("pages.shifts.details.openTaskForm")}
+            </Button>
+          </section>
+        ) : null}
         <section className="mk-shift-details__section">
           <h3>{t("pages.shifts.exports.title")}</h3>
           {shift.status === "closed" ? (

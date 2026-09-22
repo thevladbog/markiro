@@ -543,3 +543,14 @@ require recent authenticated capability evidence before changing admission.
 These fixes use focused regression tests and the final integrated gates recorded
 in [the acceptance record](../../acceptance/device-replacement-execution.md).
 Task 9 Step 7 remains unauthorized: no push, PR, merge or deployment is included.
+
+## Integration follow-up — 2026-09-22
+
+The user subsequently authorized push/PR and resolution of PR #632 conflicts.
+Main `412eaeaa0afb02909bbb85eb6beea9551957c004` is integrated without replacing
+its released Station fixes or migration history. Replacement PostgreSQL migrations
+now follow main as 0168–0174; Handheld adds Room 19→20. The warehouse operations
+added on main are covered by the same drain, evidence and target boundaries.
+Current integration evidence and remaining external gates are recorded in the
+[acceptance record](../../acceptance/device-replacement-execution.md#main-integration--2026-09-22).
+Production deployment and physical acceptance remain separate steps.

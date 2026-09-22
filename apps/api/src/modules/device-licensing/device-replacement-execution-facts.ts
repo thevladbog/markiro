@@ -244,6 +244,7 @@ export async function readReplacementExecutionFacts(
   const sourceWork = {
     shifts: facts.work.shifts.filter((w) => w.owner === deviceId || w.deviceId === deviceId),
     inventories: facts.work.inventories.filter((w) => w.deviceId === deviceId),
+    warehousePallets: facts.work.warehousePallets.filter((w) => w.deviceId === deviceId),
     jobs: facts.work.jobs.filter((w) => w.deviceId === deviceId),
     quarantine: facts.work.quarantine.filter((w) => w.deviceId === deviceId),
     nativeEvidence: facts.work.nativeEvidence.filter((w) => w.deviceId === deviceId),

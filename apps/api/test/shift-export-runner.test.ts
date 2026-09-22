@@ -10,6 +10,7 @@ import {
 } from "../src/modules/shift-exports/shift-export-runner.service";
 import {
   ShiftExportSourceError,
+  type PalletExportSnapshot,
   type ShiftExportSnapshot,
   type ShiftExportSourceService,
 } from "../src/modules/shift-exports/shift-export-source.service";
@@ -17,11 +18,17 @@ import type { ObjectStorageService } from "../src/modules/storage/object-storage
 
 const EXPORT_ID = "11111111-1111-4111-8111-111111111111";
 const SNAPSHOT_AT = new Date("2026-08-13T12:34:56.789Z");
+/** `operation_date_time` of a shift document: when the shift closed. */
+const SHIFT_CLOSED_AT = new Date("2026-08-13T11:00:00.000Z");
+/** `operation_date_time` of a pallet document: when the pallet closed. */
+const PALLET_CLOSED_AT = new Date("2026-08-13T10:00:00.000Z");
 
 interface ExportRow {
   id: string;
   tenantId: string;
-  shiftId: string;
+  /** Exactly one of the two is set, as `shift_exports_target_shape` requires. */
+  shiftId: string | null;
+  palletId: string | null;
   formatId: string;
   formatVersion: number;
   maxLines: number | null;
@@ -62,6 +69,7 @@ function baseRow(overrides: Partial<ExportRow> = {}): ExportRow {
     id: EXPORT_ID,
     tenantId: "tenant-1",
     shiftId: "22222222-2222-4222-8222-222222222222",
+    palletId: null,
     formatId: "shift_csv_flat",
     formatVersion: 1,
     maxLines: 2,
@@ -209,9 +217,31 @@ function source(snapshot?: Partial<ShiftExportSnapshot>): ShiftExportSourceServi
       sourceSnapshotStartedAt: SNAPSHOT_AT,
       productName: "Вода",
       shiftDate: "2026-08-13",
+      shiftNumber: "AUG26-007",
+      shiftClosedAt: SHIFT_CLOSED_AT,
       organizationInn: null,
+      organizationName: "ООО «Пивоварня»",
       openPalletSuppressedBoxCount: 0,
       source: { mode: "flat", codes: ["code-a", "code-b"] },
+      ...snapshot,
+    }),
+  } as unknown as ShiftExportSourceService;
+}
+
+function palletSource(snapshot?: Partial<PalletExportSnapshot>): ShiftExportSourceService {
+  return {
+    load: vi.fn().mockRejectedValue(new Error("a pallet export must not load a shift")),
+    loadPallet: vi.fn().mockResolvedValue({
+      sourceSnapshotStartedAt: SNAPSHOT_AT,
+      productName: "Вода",
+      closedDate: "2026-08-13",
+      closedAt: PALLET_CLOSED_AT,
+      organizationInn: "7701234567",
+      organizationName: "ООО «Пивоварня»",
+      pallet: {
+        sscc: "134600682000000017",
+        boxSsccs: ["034600682000000018", "034600682000000025"],
+      },
       ...snapshot,
     }),
   } as unknown as ShiftExportSourceService;
@@ -244,6 +274,114 @@ function sqlText(fragment: unknown): string {
 }
 
 describe("ShiftExportRunnerService", () => {
+  it("renders a claimed pallet row from loadPallet as one code-free artifact", async () => {
+    const fake = fakeDb(
+      baseRow({
+        shiftId: null,
+        palletId: "33333333-3333-4333-8333-333333333333",
+        formatId: "pallet_xml_gismt_aggregation",
+        formatVersion: 1,
+        maxLines: null,
+      }),
+    );
+    const loader = palletSource();
+    const objects = storage();
+
+    await new ShiftExportRunnerService(fake.db, loader, objects).run(EXPORT_ID, {
+      retryCount: 0,
+      retryLimit: 5,
+    });
+
+    expect(loader.loadPallet).toHaveBeenCalledWith(
+      "tenant-1",
+      "33333333-3333-4333-8333-333333333333",
+    );
+    expect(loader.load).not.toHaveBeenCalled();
+    expect(fake.state.row).toMatchObject({
+      status: "ready",
+      productNameSnapshot: "Вода",
+      // The pallet's own closing date occupies the shift-date snapshot column.
+      shiftDateSnapshot: "2026-08-13",
+      totalCodeCount: 0,
+      totalBoxCount: 2,
+      errorCode: null,
+    });
+    expect(objects.putVerified).toHaveBeenCalledTimes(1);
+    const [key, body] = objects.putVerified.mock.calls[0] as [string, Buffer];
+    expect(key).toBe(`tenants/tenant-1/shift-exports/${EXPORT_ID}/attempt-1/part-1.xml`);
+    // A pallet document carries its member boxes as `<cis>` (the element the
+    // ЧЗ portal accepts) and no unit codes at all -- `totalCodeCount: 0`
+    // above is the counter side of the same fact.
+    const xml = body.toString("utf-8");
+    expect(xml).toContain("<cis>00034600682000000018</cis>");
+    expect(xml).toContain("<cis>00034600682000000025</cis>");
+    expect(xml).not.toContain("<sscc>");
+    expect(fake.state.artifacts).toEqual([
+      expect.objectContaining({
+        partNumber: 1,
+        codeCount: 0,
+        boxCount: 2,
+        mimeType: "application/xml; charset=utf-8",
+        filename: "Вода_2026-08-13_паллета_00134600682000000017_2_коробов.xml",
+      }),
+    ]);
+    expect(fake.state.audits).toEqual([
+      expect.objectContaining({
+        action: "pallet_export.completed",
+        targetType: "shift_export",
+        targetId: EXPORT_ID,
+        outcome: "success",
+        after: expect.objectContaining({
+          shiftId: null,
+          palletId: "33333333-3333-4333-8333-333333333333",
+          totalCodeCount: 0,
+          totalBoxCount: 2,
+          partCount: 1,
+        }),
+      }),
+    ]);
+  });
+
+  it("finishes a disassembled pallet's claimed row as a safe pallet_export.failed refusal", async () => {
+    const fake = fakeDb(
+      baseRow({
+        shiftId: null,
+        palletId: "33333333-3333-4333-8333-333333333333",
+        formatId: "pallet_xml_gismt_aggregation",
+        formatVersion: 1,
+        maxLines: null,
+      }),
+    );
+    const loader = palletSource();
+    vi.mocked(loader.loadPallet).mockRejectedValue(
+      new ShiftExportSourceError("PALLET_DISASSEMBLED"),
+    );
+    const objects = storage();
+
+    await expect(
+      new ShiftExportRunnerService(fake.db, loader, objects).run(EXPORT_ID, {
+        retryCount: 0,
+        retryLimit: 5,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(fake.state.row).toMatchObject({ status: "failed", errorCode: "PALLET_DISASSEMBLED" });
+    expect(objects.putVerified).not.toHaveBeenCalled();
+    expect(fake.state.audits).toEqual([
+      expect.objectContaining({
+        action: "pallet_export.failed",
+        targetType: "shift_export",
+        targetId: EXPORT_ID,
+        outcome: "failure",
+        after: expect.objectContaining({
+          shiftId: null,
+          palletId: "33333333-3333-4333-8333-333333333333",
+          errorCode: "PALLET_DISASSEMBLED",
+        }),
+      }),
+    ]);
+  });
+
   it("claims a queued tenant row and atomically publishes verified rendered parts", async () => {
     const fake = fakeDb();
     const loader = source();
@@ -621,7 +759,11 @@ describe("ShiftExportRunnerService", () => {
       "SHIFT_DATE_MISSING",
       "BOX_COVERAGE_INCOMPLETE",
       "SHIFT_HAS_NO_PALLETS",
+      "PALLET_NOT_CLOSED",
+      "PALLET_DISASSEMBLED",
       "ORG_INN_MISSING",
+      "ORG_NAME_MISSING",
+      "INVALID_ORG_INN",
       "FORMAT_NOT_FOUND",
       "INVALID_LINE_LIMIT",
       "BOX_EXCEEDS_LINE_LIMIT",

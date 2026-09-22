@@ -1948,6 +1948,57 @@ describe("immutable pre-product comparisons and durable preparation", () => {
       { itemId, reason: "category_change_separate", retryable: false },
     ]);
   });
+  it("marks attributes stale, not schema-less, when a newer activation retired the pinned profile version", async () => {
+    const c = await category();
+    const p = await local();
+    await db
+      .update(schema.products)
+      .set({ chzProductGroupCode: 23 })
+      .where(eq(schema.products.id, p.id));
+    await db.insert(schema.productRegulatoryProfiles).values({
+      tenantId: actor.tenantId,
+      productId: p.id,
+      categoryId: c.categoryId,
+      categoryName: "Existing",
+      schemaVersionId: c.id,
+      source: "national_catalog",
+      confirmedAt: new Date(),
+      revision: 3,
+    });
+    const [pinned] = await db
+      .select()
+      .from(schema.nationalCatalogSchemaVersions)
+      .where(eq(schema.nationalCatalogSchemaVersions.id, c.id));
+    const successorId = randomUUID();
+    await db
+      .update(schema.nationalCatalogSchemaVersions)
+      .set({ status: "retired", retiredAt: new Date() })
+      .where(eq(schema.nationalCatalogSchemaVersions.id, c.id));
+    await db.insert(schema.nationalCatalogSchemaVersions).values({
+      ...pinned!,
+      id: successorId,
+      status: "active",
+      contentHash: "f".repeat(64),
+      activatedAt: new Date(),
+      retiredAt: null,
+    });
+    await db.insert(schema.nationalCatalogCategoryGroupMappings).values({
+      chzProductGroupCode: 23,
+      schemaVersionId: successorId,
+      categoryId: c.categoryId,
+      state: "exact",
+      reviewedBy: actor.userId,
+      reviewedAt: new Date(),
+    });
+    const result = await run();
+    const item = result.items[0]!;
+    expect(item.categoryOptions).toEqual([]);
+    expect(item.fields.find((f) => f.labelKey === "name")).toMatchObject({ applicable: true });
+    expect(item.fields.find((f) => f.label === "Цвет")).toMatchObject({
+      applicable: false,
+      reason: "schema_version_stale",
+    });
+  });
   it("does not import attributes of different packaging GTIN into the selected product", async () => {
     const c = await category();
     c.value.attributes[0]!.gtin = "14601234567890";

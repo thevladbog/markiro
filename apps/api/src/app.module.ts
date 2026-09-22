@@ -62,6 +62,7 @@ import { SubscriptionsModule } from "./subscriptions/subscriptions.module";
 import { ShiftExportsModule } from "./modules/shift-exports/shift-exports.module";
 import { StationShiftCloseModule } from "./modules/station-shift-close/station-shift-close.module";
 import { StationWriteoffsModule } from "./modules/station-writeoffs/station-writeoffs.module";
+import { StationPalletsModule } from "./modules/station-pallets/station-pallets.module";
 import { DemoRequestsModule } from "./modules/demo-requests/demo-requests.module";
 import { PlatformHttpModule } from "./platform-http/platform-http.module";
 import { HealthModule } from "./health/health.module";
@@ -140,6 +141,7 @@ export class AppModule {
         ShiftExportsModule,
         StationShiftCloseModule,
         StationWriteoffsModule,
+        StationPalletsModule,
         LabelTemplatesModule,
         StationDevicesModule,
         DevicesModule,

@@ -19,6 +19,8 @@ export function deviceReplacementServerWorkBlockers(
     )
   )
     reasons.push("active_tasks");
+  if (work.warehousePallets.some((pallet) => pallet.deviceId === deviceId))
+    reasons.push("pending_boxes");
   for (const job of work.jobs.filter((job) => job.deviceId === deviceId)) {
     const projection = job.projection;
     if (

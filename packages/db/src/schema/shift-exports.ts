@@ -14,7 +14,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { organization, user } from "./auth.js";
-import { shifts } from "./platform.js";
+import { pallets, shifts } from "./platform.js";
 
 export const SHIFT_EXPORT_STATUSES = ["queued", "processing", "ready", "failed"] as const;
 export type ShiftExportStatus = (typeof SHIFT_EXPORT_STATUSES)[number];
@@ -28,7 +28,9 @@ export const shiftExports = pgTable(
     tenantId: text("tenant_id")
       .notNull()
       .references(() => organization.id),
-    shiftId: uuid("shift_id").notNull(),
+    /** Null for a per-pallet export; exactly one of shift_id / pallet_id is set. */
+    shiftId: uuid("shift_id"),
+    palletId: uuid("pallet_id"),
     formatId: text("format_id").notNull(),
     formatVersion: integer("format_version").notNull(),
     maxLines: integer("max_lines"),
@@ -38,6 +40,8 @@ export const shiftExports = pgTable(
     shiftDateSnapshot: date("shift_date_snapshot"),
     totalCodeCount: integer("total_code_count"),
     totalBoxCount: integer("total_box_count"),
+    /** Closed pallets the export covers; null until ready, 0 outside the pallet formats. */
+    totalPalletCount: integer("total_pallet_count"),
     createdByUserId: text("created_by_user_id")
       .notNull()
       .references(() => user.id),
@@ -60,6 +64,11 @@ export const shiftExports = pgTable(
       columns: [table.tenantId, table.shiftId],
       foreignColumns: [shifts.tenantId, shifts.id],
     }),
+    foreignKey({
+      name: "shift_exports_tenant_pallet_fk",
+      columns: [table.tenantId, table.palletId],
+      foreignColumns: [pallets.tenantId, pallets.id],
+    }),
     index("shift_exports_tenant_shift_created_idx").on(
       table.tenantId,
       table.shiftId,
@@ -73,15 +82,27 @@ export const shiftExports = pgTable(
       "shift_exports_max_lines_range",
       sql`${table.maxLines} is null or ${table.maxLines} between 2 and 1000000`,
     ),
+    // A per-pallet export names box SSCCs only -- no unit codes at all -- so
+    // its total is legitimately 0. A SHIFT export still has to carry codes:
+    // an empty shift document fails as EMPTY_SOURCE long before it reaches
+    // this table, and that guarantee stays asserted here.
     check(
       "shift_exports_total_code_count_positive",
-      sql`${table.totalCodeCount} is null or ${table.totalCodeCount} > 0`,
+      sql`${table.totalCodeCount} is null or (${table.palletId} is null and ${table.totalCodeCount} > 0) or (${table.palletId} is not null and ${table.totalCodeCount} = 0)`,
     ),
     check(
       "shift_exports_total_box_count_nonnegative",
       sql`${table.totalBoxCount} is null or ${table.totalBoxCount} >= 0`,
     ),
+    check(
+      "shift_exports_total_pallet_count_nonnegative",
+      sql`${table.totalPalletCount} is null or ${table.totalPalletCount} >= 0`,
+    ),
     check("shift_exports_attempt_count_nonnegative", sql`${table.attemptCount} >= 0`),
+    check(
+      "shift_exports_target_shape",
+      sql`(${table.shiftId} IS NOT NULL AND ${table.palletId} IS NULL) OR (${table.shiftId} IS NULL AND ${table.palletId} IS NOT NULL)`,
+    ),
     check(
       "shift_exports_status_consistency",
       sql`(${table.status} = 'ready' and ${table.completedAt} is not null and ${table.errorCode} is null)
@@ -103,6 +124,8 @@ export const shiftExportArtifacts = pgTable(
     physicalLineCount: integer("physical_line_count").notNull(),
     codeCount: integer("code_count").notNull(),
     boxCount: integer("box_count").notNull(),
+    /** Closed pallets this part covers; 0 outside the pallet formats. */
+    palletCount: integer("pallet_count").notNull().default(0),
     filename: text("filename").notNull(),
     mimeType: text("mime_type").notNull(),
     byteSize: bigint("byte_size", { mode: "number" }).notNull(),
@@ -127,8 +150,14 @@ export const shiftExportArtifacts = pgTable(
       "shift_export_artifacts_physical_line_count_positive",
       sql`${table.physicalLineCount} > 0`,
     ),
-    check("shift_export_artifacts_code_count_positive", sql`${table.codeCount} > 0`),
+    // >= 0, not > 0: a per-pallet aggregation artifact lists the pallet's box
+    // SSCCs and no `<cis>` at all, so it carries zero unit codes. The export
+    // row's own `shift_exports_total_code_count_positive` keeps the "a shift
+    // export is never empty" invariant, which cannot be expressed here
+    // because this table does not know its export's target.
+    check("shift_export_artifacts_code_count_nonnegative", sql`${table.codeCount} >= 0`),
     check("shift_export_artifacts_box_count_nonnegative", sql`${table.boxCount} >= 0`),
+    check("shift_export_artifacts_pallet_count_nonnegative", sql`${table.palletCount} >= 0`),
     check("shift_export_artifacts_byte_size_positive", sql`${table.byteSize} > 0`),
     check("shift_export_artifacts_sha256_check", sql`${table.sha256} ~ '^[0-9a-f]{64}$'`),
   ],

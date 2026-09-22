@@ -184,11 +184,18 @@ describe("BoxesPage", () => {
     renderPage();
     await screen.findByRole("table");
 
-    expect(screen.getByText("Изменилось после закрытия")).toBeDefined();
-    // Only ONE of the two rows earns the badge -- this is the assertion a
+    const tag = screen.getByText("Изменилось после закрытия").closest(".mk-chip");
+    expect(tag).not.toBeNull();
+    // Only ONE of the two rows earns the tag -- this is the assertion a
     // query that flagged every box regardless of `closed_at`/`displaced_at`
     // would still pass without.
     expect(screen.getAllByText("Изменилось после закрытия")).toHaveLength(1);
+
+    // Finding 7 (final review): this used to be a flat `Badge tone="warn"`,
+    // unlike `pallets/index.tsx`'s identical fact, which was already a
+    // `StatusChip phase="attention"`.
+    expect(tag?.className).toContain("mk-chip--attention");
+    expect(tag?.querySelector(".mk-tag__glyph")?.textContent).toBe("!");
   });
 
   it("shows a spinner (not EmptyState) while the list request is still pending", async () => {

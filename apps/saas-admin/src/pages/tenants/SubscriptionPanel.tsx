@@ -13,9 +13,11 @@ import {
   Select,
   StatusChip,
   type ComboboxOption,
+  type TagPhase,
 } from "@markiro/ui";
 
 import { EntitlementsPanel } from "./EntitlementsPanel.js";
+import { SUBSCRIPTION_STATUS_TO_PHASE } from "./TenantsPage.js";
 import { ENTITLEMENT_FEATURE_KEYS, type PlatformCapability } from "@markiro/platform-contracts";
 import { PanelState } from "../../components/PanelState.js";
 import {
@@ -82,6 +84,21 @@ function formatDate(value: string | null, language: "ru" | "en") {
   }).format(new Date(value));
 }
 
+/**
+ * Фактический union у надбавки — `tenantSubscriptionAddonSchema["status"]`
+ * (`packages/platform-contracts/src/tenants.ts`): `scheduled` | `active` |
+ * `expired` | `revoked` — отдельный от статуса подписки (там нет `revoked`,
+ * зато есть `pending_activation`/`superseded`/`cancelled`). Раньше три ветки
+ * схлопывали `scheduled`, `expired` и `revoked` в один и тот же `info`, и
+ * истёкшая или отозванная надбавка выглядела как предстоящая.
+ */
+const ADDON_STATUS_TO_PHASE: Record<TenantSubscriptionAddon["status"], TagPhase> = {
+  scheduled: "planned",
+  active: "active",
+  expired: "retired",
+  revoked: "retired",
+};
+
 function SubscriptionCard({
   title,
   subscription,
@@ -106,7 +123,7 @@ function SubscriptionCard({
       <div className="subscription-card__heading">
         <strong>{versionLabel(version, language)}</strong>
         <StatusChip
-          status={subscription.status === "active" ? "ok" : "info"}
+          phase={SUBSCRIPTION_STATUS_TO_PHASE[subscription.status]}
           label={t(`tenants.status.${subscription.status}`)}
         />
       </div>
@@ -170,7 +187,7 @@ function AddonList({
               </div>
               <div className="addon-timeline__term">
                 <StatusChip
-                  status={addon.status === "active" ? "ok" : "info"}
+                  phase={ADDON_STATUS_TO_PHASE[addon.status]}
                   label={t(`tenants.addonStatus.${addon.status}`)}
                 />
                 <span>

@@ -2,6 +2,7 @@ package app.markiro.handheld.feature.exceptions
 
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -30,8 +31,11 @@ class ExceptionsScreenTest {
         openBoxOrdinal: Int = 27,
         openBoxCount: Int = 0,
         reprintableCount: Int = 0,
+        closedPalletCount: Int = 0,
         step: ExceptionsStep = ExceptionsStep.List,
-    ) = ExceptionsUi(canUndo, undoTarget, openBoxId, openBoxOrdinal, openBoxCount, reprintableCount, step)
+    ) = ExceptionsUi(
+        canUndo, undoTarget, openBoxId, openBoxOrdinal, openBoxCount, reprintableCount, closedPalletCount, step,
+    )
 
     private fun render(state: ExceptionsUi, cb: ExceptionsCallbacks = ExceptionsCallbacks()) {
         compose.setContent { MarkiroTheme { ExceptionsScreen(state, cb) } }
@@ -48,6 +52,16 @@ class ExceptionsScreenTest {
         compose.onAllNodesWithText("В этой смене нет закрытых коробов").assertCountEquals(2)
         compose.onNode(hasText("Очистить короб")).assertIsNotEnabled()
         compose.onNode(hasText("Расформировать короб")).assertIsNotEnabled()
+        // The pallet action explains itself the same way.
+        compose.onNodeWithText("Нет закрытых паллет").assertIsDisplayed()
+        compose.onNode(hasText("Расформировать паллету")).assertIsNotEnabled()
+    }
+
+    /** A closed pallet in this shift is what makes the pallet action reachable. */
+    @Test
+    fun aClosedPalletEnablesThePalletAction() {
+        render(ui(closedPalletCount = 1))
+        compose.onNode(hasText("Расформировать паллету")).assertIsEnabled()
     }
 
     @Test
@@ -87,6 +101,20 @@ class ExceptionsScreenTest {
         render(ui(openBoxId = "box-1", openBoxCount = 12, step = ExceptionsStep.ConfirmClear))
         compose.onNodeWithText("Очистить короб?").assertIsDisplayed()
         compose.onNode(hasText("12", substring = true)).assertIsDisplayed()
+    }
+
+    /**
+     * The result step borrowed the shared «Отмена» label, so «Скан отменён»
+     * closed with a button that read as «отменить отмену».
+     */
+    @Test
+    fun aResultStepClosesWithGotItNotCancel() {
+        var dismissed = false
+        render(ui(step = ExceptionsStep.Done(R.string.exceptions_undone)), ExceptionsCallbacks(onDismiss = { dismissed = true }))
+        compose.onNodeWithText("Скан отменён").assertIsDisplayed()
+        compose.onNodeWithText("Отмена").assertDoesNotExist()
+        compose.onNodeWithText("Понятно").assertIsDisplayed().performClick()
+        assertEquals(true, dismissed)
     }
 
     @Test

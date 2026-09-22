@@ -45,6 +45,8 @@ data class ShiftEntity(
     val egaisCode: String? = null,
     /** The 9-digit issuer prefix this shift's SSCC block was cut from. */
     val ssccIssuerPrefix: String? = null,
+    /** Why the bundle carried no block, as the server named it (`ShiftBundleDto.ssccIssuerProblem`); null when it did. */
+    val ssccIssuerProblem: String? = null,
     /** `none` or `required`; null when the shift prints no duplicate. */
     val duplicateVerification: String? = null,
     /** The duplicate template's spec as the bundle delivered it, and the digest that pins its revision. */

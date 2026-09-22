@@ -29,6 +29,7 @@ export const shiftStatus = pgEnum("shift_status", ["planned", "active", "closed"
 export const shiftMode = pgEnum("shift_mode", ["validation", "aggregation"]);
 export const shiftOrigin = pgEnum("shift_origin", ["admin", "station"]);
 export const stationClosePolicy = pgEnum("station_close_policy", ["single_device", "admin_only"]);
+export const shiftEntryMethod = pgEnum("shift_entry_method", ["list", "task_barcode"]);
 export const stationShiftCloseOutcome = pgEnum("station_shift_close_outcome", [
   "accepted",
   "conflict",
@@ -514,6 +515,21 @@ export const shiftDeviceParticipants = pgTable(
     deviceId: uuid("device_id").notNull(),
     firstEnteredAt: timestamp("first_entered_at", { withTimezone: true }).notNull().defaultNow(),
     lastEnteredAt: timestamp("last_entered_at", { withTimezone: true }).notNull().defaultNow(),
+    /**
+     * How this device got into the shift. `task_barcode` means the printed task
+     * form was scanned; the barcode grants nothing extra, so this answers "was
+     * the shop floor working from paper", not "was it allowed in".
+     *
+     * Read it as "last entry" only for a handheld, which calls `/enter` every
+     * time. A station writes this once, when it opens a planned shift: its
+     * re-entry path (`rejoin` in ShiftSelection) never reaches the server, so a
+     * station that opened by scanning and later re-entered from the list still
+     * reads `task_barcode`. Closing that gap would register a second station as
+     * a participant and flip `station_close_policy` to `admin_only`, taking
+     * close authority away from the floor -- a deliberate non-goal, recorded in
+     * docs/superpowers/specs/2026-09-20-shift-task-form-design.md.
+     */
+    entryMethod: shiftEntryMethod("entry_method").notNull().default("list"),
   },
   (t) => [
     unique("shift_device_participants_tenant_shift_device_uq").on(
@@ -656,7 +672,7 @@ export const stationSyncQuarantine = pgTable(
     // unrecognised kinds rather than throwing.
     check(
       "station_sync_quarantine_record_kind_check",
-      sql`${t.recordKind} IN ('item', 'box', 'exception', 'product_label_event', 'pallet', 'pallet_exception')`,
+      sql`${t.recordKind} IN ('item', 'box', 'exception', 'product_label_event', 'pallet', 'pallet_exception', 'pallet_membership', 'pallet_membership_removal')`,
     ),
     check("station_sync_quarantine_record_index_check", sql`${t.recordIndex} >= 0`),
     check("station_sync_quarantine_reason_check", sql`char_length(${t.reason}) BETWEEN 1 AND 64`),
@@ -1070,7 +1086,25 @@ export const pallets = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     tenantId: tenantId(),
-    shiftId: uuid("shift_id").notNull(),
+    /**
+     * Null for a warehouse pallet (kind = 'warehouse'), which is built from
+     * boxes of arbitrary shifts and belongs to none; not null for a
+     * production pallet. `pallets_kind_shape` enforces the pairing.
+     */
+    shiftId: uuid("shift_id"),
+    kind: text("kind").$type<"production" | "warehouse">().notNull().default("production"),
+    /**
+     * Written only for a warehouse pallet: the product every member box must
+     * carry (spec «Homogeneity»). A production pallet's product is reached
+     * through its shift, exactly as a box's is.
+     */
+    productId: uuid("product_id"),
+    /**
+     * The authenticated station device that built a warehouse pallet. Part
+     * of its identity (`pallets_warehouse_device_pallet_uq`) because the
+     * device-local `device_pallet_id` is not unique across devices.
+     */
+    deviceId: uuid("device_id"),
     terminalId: text("terminal_id"),
     devicePalletId: text("device_pallet_id").notNull(),
     sscc: char("sscc", { length: 18 }),
@@ -1108,14 +1142,64 @@ export const pallets = pgTable(
     // Unlike `boxes`, this table is CREATED by the migration that carries the
     // constraint, so it is written correctly in the CREATE TABLE rather than
     // hand-patched afterwards.
+    //
+    // Kept unconditional (not scoped to `kind = 'production'`) because the
+    // production-pallet upsert in `pallet-ingest.ts` targets this exact
+    // arbiter with `onConflictDoNothing({ target: [tenantId, shiftId,
+    // terminalId, devicePalletId] })`; a partial index cannot be inferred as
+    // an arbiter, so scoping it would break that already-shipped upsert
+    // (Postgres 42P10). A warehouse pallet always has `shiftId = NULL` and
+    // `terminalId = deviceId`, so this constraint already makes
+    // `(tenantId, NULL, deviceId, devicePalletId)` unique across warehouse
+    // pallets under NULLS NOT DISTINCT — no scoping is needed for
+    // correctness; `pallets_warehouse_device_pallet_uq` below exists only so
+    // a duplicate warehouse pallet reports its own constraint name.
+    // `db:generate` does not model `NULLS NOT DISTINCT` on a plain
+    // `unique()` differently than any other unique constraint, so this
+    // needs no hand-patching.
     unique("pallets_device_pallet_uq")
       .on(t.tenantId, t.shiftId, t.terminalId, t.devicePalletId)
       .nullsNotDistinct(),
+    // Scoped to `kind = 'warehouse'`: identity for a warehouse pallet is
+    // `(tenant, device, device_pallet_id)`, independent of `pallets_device_pallet_uq`
+    // above. Task 4's warehouse upsert targets this index as its arbiter.
+    uniqueIndex("pallets_warehouse_device_pallet_uq")
+      .on(t.tenantId, t.deviceId, t.devicePalletId)
+      .where(sql`${t.kind} = 'warehouse'`),
     index("pallets_tenant_shift_idx").on(t.tenantId, t.shiftId),
+    index("pallets_tenant_kind_closed_idx").on(t.tenantId, t.kind, t.closedAt),
+    check("pallets_kind_check", sql`${t.kind} IN ('production', 'warehouse')`),
+    check(
+      "pallets_kind_shape",
+      sql`(${t.kind} = 'production' AND ${t.shiftId} IS NOT NULL) OR (${t.kind} = 'warehouse' AND ${t.shiftId} IS NULL AND ${t.productId} IS NOT NULL AND ${t.deviceId} IS NOT NULL)`,
+    ),
+    // `pallets_device_pallet_uq` only dedupes a warehouse pallet correctly if
+    // its `terminalId` equals its own `deviceId` (both stay text so the
+    // comparison casts the uuid side); otherwise two different terminal
+    // strings for the same device would each get their own row under that
+    // NULLS-NOT-DISTINCT constraint, silently bypassing
+    // `pallets_warehouse_device_pallet_uq`'s per-device uniqueness intent.
+    // The NOT NULL half is not redundant: `NULL = deviceId::text` is NULL, and
+    // a CHECK that evaluates to NULL passes, so without it a warehouse pallet
+    // could be stored with no `terminal_id` at all.
+    check(
+      "pallets_warehouse_terminal_check",
+      sql`${t.kind} <> 'warehouse' OR (${t.terminalId} IS NOT NULL AND ${t.terminalId} = ${t.deviceId}::text)`,
+    ),
     foreignKey({
       name: "pallets_tenant_shift_fk",
       columns: [t.tenantId, t.shiftId],
       foreignColumns: [shifts.tenantId, shifts.id],
+    }),
+    foreignKey({
+      name: "pallets_tenant_product_fk",
+      columns: [t.tenantId, t.productId],
+      foreignColumns: [products.tenantId, products.id],
+    }),
+    foreignKey({
+      name: "pallets_tenant_device_fk",
+      columns: [t.tenantId, t.deviceId],
+      foreignColumns: [stationDevices.tenantId, stationDevices.id],
     }),
     // Nullable — MATCH SIMPLE skips the check when a pallet closes before an
     // operator is attributed, exactly as for boxes.
@@ -1143,7 +1227,7 @@ export const palletExceptions = pgTable(
     tenantId: tenantId(),
     kind: text("kind").$type<"disassemble" | "reprint">().notNull(),
     palletId: uuid("pallet_id").notNull(),
-    shiftId: uuid("shift_id").notNull(),
+    shiftId: uuid("shift_id"),
     terminalId: text("terminal_id"),
     operatorId: uuid("operator_id"),
     reason: text("reason").notNull(),
@@ -1178,6 +1262,62 @@ export const palletExceptions = pgTable(
       name: "pallet_exceptions_tenant_operator_fk",
       columns: [t.tenantId, t.operatorId],
       foreignColumns: [employees.tenantId, employees.id],
+    }),
+  ],
+);
+
+/**
+ * A membership the server refused (spec §1.4). Append-only: a handheld that
+ * reboots after the batch answer has nothing else to rebuild its conflict
+ * view from, and the cabinet card counts these. Unique per (pallet, sscc)
+ * so a replayed batch cannot duplicate a refusal.
+ */
+export const palletMembershipRejections = pgTable(
+  "pallet_membership_rejections",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    palletId: uuid("pallet_id").notNull(),
+    boxSscc: char("box_sscc", { length: 18 }).notNull(),
+    boxId: uuid("box_id"),
+    reason: text("reason")
+      .$type<
+        | "already_on_pallet"
+        | "not_found"
+        | "not_closed"
+        | "disassembled"
+        | "pallet_closed"
+        | "product_mismatch"
+      >()
+      .notNull(),
+    winningPalletId: uuid("winning_pallet_id"),
+    addedAt: timestamp("added_at", { withTimezone: true }).notNull(),
+    recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique("pallet_membership_rejections_tenant_pallet_sscc_uq").on(
+      t.tenantId,
+      t.palletId,
+      t.boxSscc,
+    ),
+    check(
+      "pallet_membership_rejections_reason_check",
+      sql`${t.reason} IN ('already_on_pallet', 'not_found', 'not_closed', 'disassembled', 'pallet_closed', 'product_mismatch')`,
+    ),
+    foreignKey({
+      name: "pallet_membership_rejections_tenant_pallet_fk",
+      columns: [t.tenantId, t.palletId],
+      foreignColumns: [pallets.tenantId, pallets.id],
+    }),
+    foreignKey({
+      name: "pallet_membership_rejections_tenant_box_fk",
+      columns: [t.tenantId, t.boxId],
+      foreignColumns: [boxes.tenantId, boxes.id],
+    }),
+    foreignKey({
+      name: "pallet_membership_rejections_tenant_winning_pallet_fk",
+      columns: [t.tenantId, t.winningPalletId],
+      foreignColumns: [pallets.tenantId, pallets.id],
     }),
   ],
 );

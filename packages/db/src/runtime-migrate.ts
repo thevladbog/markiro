@@ -73,7 +73,7 @@ export async function runRuntimeMigrations(
           offerVariantIndex,
           packaged.indexOf("0136_validate_working_device_events"),
           packaged.indexOf("0151_offline_grant_readiness"),
-          packaged.indexOf("0163_validate_device_replacement_execution"),
+          packaged.indexOf("0169_validate_device_replacement_execution"),
         );
       }
     } catch (error) {
@@ -203,7 +203,7 @@ async function migrateWithOnlineOfferVariants(
     nextIndex = readinessIndex + 1;
   }
   if (replacementValidationIndex >= nextIndex) {
-    // Release 0162's ADD CONSTRAINT locks before scanning existing tables in 0163.
+    // Release 0168's ADD CONSTRAINT locks before scanning existing tables in 0169.
     // The session advisory lock still serializes the complete migration run.
     await dialect.migrate(migrations.slice(nextIndex, replacementValidationIndex), session, {
       migrationsFolder,

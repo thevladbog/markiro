@@ -59,73 +59,91 @@ const wrappableTextShape = {
   maxLines: z.number().int().min(1).max(16).optional(),
 };
 
-const textElementSchema = z.object({
+/*
+ * Every element is declared as a SHAPE and then wrapped twice: `z.object`
+ * for `labelTemplateSpecSchema` (the validator -- unknown keys are stripped,
+ * exactly as the API has always behaved) and `z.strictObject` for
+ * `labelTemplateSpecStrictSchema` below (unknown keys are REPORTED). Sharing
+ * the shape objects is what keeps the two twins from ever drifting apart.
+ */
+const textElementShape = {
   kind: z.literal("text"),
   ...elementBaseShape,
   text: z.string(),
   ...wrappableTextShape,
-});
+};
+const textElementSchema = z.object(textElementShape);
 export type LabelTextElement = z.infer<typeof textElementSchema>;
 
-const fieldElementSchema = z.object({
+const fieldElementShape = {
   kind: z.literal("field"),
   ...elementBaseShape,
   field: labelFieldSchema,
   /** Human-readable identity only; the barcode continues to use the original field bytes. */
   textFormat: z.literal("km_without_crypto").optional(),
   ...wrappableTextShape,
-});
+};
+const fieldElementSchema = z.object(fieldElementShape);
 export type LabelFieldElement = z.infer<typeof fieldElementSchema>;
 
 const barcodeFormatSchema = z.enum(["datamatrix", "code128", "ean13", "qr"]);
 
-const barcodeElementSchema = z.object({
-  kind: z.literal("barcode"),
-  ...elementBaseShape,
-  format: barcodeFormatSchema,
-  // For code128/ean13, sizeMm is the barcode height (width is derived from the
-  // encoded data). For matrix codes (datamatrix/qr) it is the module square side.
-  data: z.union([labelFieldSchema, z.object({ literal: z.string() })]),
-  sizeMm: z.number().positive(),
-  /**
-   * LINEAR (code128/ean13) X-DIMENSION — the width of one narrow bar, in
-   * millimetres, matching the rest of this mm-based model. Ignored by the
-   * matrix formats, whose module side is `sizeMm`.
-   *
-   * OPTIONAL, and absent means "leave it to the printer": both emitters then
-   * emit exactly what they emitted before this field existed (ZPL: no `^BY`,
-   * so the printer's modal default applies; TSPL: its historical fixed 2-dot
-   * narrow bar). That default is precisely the problem this field exists to
-   * solve — a modal `^BY` left behind by a previously printed label changes
-   * the width of a barcode whose template never mentioned one, so the same
-   * spec prints differently on two printers and even on the same printer at
-   * different times. Templates that care state the X-dimension explicitly;
-   * every stock template in `defaults.ts` does.
-   *
-   * The emitters convert it to whole dots (`mmToDots`), which is the only
-   * unit a printer accepts, so a value that is not a whole number of dots at
-   * the spec's `dpi` is rounded to the nearest one.
-   */
-  moduleWidthMm: z.number().positive().optional(),
-});
+/**
+ * `literalData` is the `{ literal }` branch of `data`, passed in so the
+ * lenient and strict twins share every other line of this shape.
+ */
+function barcodeElementShape(literalData: z.ZodType<{ literal: string }, { literal: string }>) {
+  return {
+    kind: z.literal("barcode"),
+    ...elementBaseShape,
+    format: barcodeFormatSchema,
+    // For code128/ean13, sizeMm is the barcode height (width is derived from the
+    // encoded data). For matrix codes (datamatrix/qr) it is the module square side.
+    data: z.union([labelFieldSchema, literalData]),
+    sizeMm: z.number().positive(),
+    /**
+     * LINEAR (code128/ean13) X-DIMENSION — the width of one narrow bar, in
+     * millimetres, matching the rest of this mm-based model. Ignored by the
+     * matrix formats, whose module side is `sizeMm`.
+     *
+     * OPTIONAL, and absent means "leave it to the printer": both emitters then
+     * emit exactly what they emitted before this field existed (ZPL: no `^BY`,
+     * so the printer's modal default applies; TSPL: its historical fixed 2-dot
+     * narrow bar). That default is precisely the problem this field exists to
+     * solve — a modal `^BY` left behind by a previously printed label changes
+     * the width of a barcode whose template never mentioned one, so the same
+     * spec prints differently on two printers and even on the same printer at
+     * different times. Templates that care state the X-dimension explicitly;
+     * every stock template in `defaults.ts` does.
+     *
+     * The emitters convert it to whole dots (`mmToDots`), which is the only
+     * unit a printer accepts, so a value that is not a whole number of dots at
+     * the spec's `dpi` is rounded to the nearest one.
+     */
+    moduleWidthMm: z.number().positive().optional(),
+  };
+}
+const barcodeElementSchema = z.object(barcodeElementShape(z.object({ literal: z.string() })));
 export type LabelBarcodeElement = z.infer<typeof barcodeElementSchema>;
 
-const lineElementSchema = z.object({
+const lineElementShape = {
   kind: z.literal("line"),
   ...elementBaseShape,
   x2Mm: z.number(),
   y2Mm: z.number(),
   thicknessMm: z.number().positive(),
-});
+};
+const lineElementSchema = z.object(lineElementShape);
 export type LabelLineElement = z.infer<typeof lineElementSchema>;
 
-const boxElementSchema = z.object({
+const boxElementShape = {
   kind: z.literal("box"),
   ...elementBaseShape,
   widthMm: z.number().positive(),
   heightMm: z.number().positive(),
   thicknessMm: z.number().positive(),
-});
+};
+const boxElementSchema = z.object(boxElementShape);
 export type LabelBoxElement = z.infer<typeof boxElementSchema>;
 
 const labelElementSchema = z.discriminatedUnion("kind", [
@@ -141,6 +159,14 @@ const dpiSchema = z.union([z.literal(203), z.literal(300)]);
 
 /** A printer resolution the emitters support. */
 export type PrinterDpi = z.infer<typeof dpiSchema>;
+
+/** The spec's own scalar fields; each twin adds its `elements`. */
+const specShape = {
+  widthMm: z.number().min(10).max(300),
+  heightMm: z.number().min(10).max(300),
+  dpi: dpiSchema,
+  language: z.enum(["zpl", "tspl"]),
+};
 
 /**
  * A printer-agnostic label layout: physical size, AUTHORING resolution,
@@ -163,13 +189,7 @@ export type PrinterDpi = z.infer<typeof dpiSchema>;
  * relationship BETWEEN elements, not a single element's own field.
  */
 export const labelTemplateSpecSchema = z
-  .object({
-    widthMm: z.number().min(10).max(300),
-    heightMm: z.number().min(10).max(300),
-    dpi: dpiSchema,
-    language: z.enum(["zpl", "tspl"]),
-    elements: z.array(labelElementSchema),
-  })
+  .object({ ...specShape, elements: z.array(labelElementSchema) })
   .superRefine((spec, ctx) => {
     const seenIds = new Set<string>();
     for (const element of spec.elements) {
@@ -195,6 +215,29 @@ export const labelTemplateSpecSchema = z
     }
   });
 export type LabelTemplateSpec = z.infer<typeof labelTemplateSpecSchema>;
+
+/**
+ * Strict twin of `labelTemplateSpecSchema`: the SAME shapes, but an unknown
+ * property is reported as an `unrecognized_keys` issue instead of being
+ * silently stripped. It exists for ONE consumer -- the JSON importer, which
+ * runs it first to WARN the author about properties the lenient schema is
+ * about to drop (a typo such as `maxlines` would otherwise vanish without a
+ * trace). It is never the validator: `parseLabelTemplate` (lenient, with the
+ * unique-id refinement) stays the single source of truth, and the API keeps
+ * accepting and stripping unknown keys exactly as before.
+ */
+export const labelTemplateSpecStrictSchema = z.strictObject({
+  ...specShape,
+  elements: z.array(
+    z.discriminatedUnion("kind", [
+      z.strictObject(textElementShape),
+      z.strictObject(fieldElementShape),
+      z.strictObject(barcodeElementShape(z.strictObject({ literal: z.string() }))),
+      z.strictObject(lineElementShape),
+      z.strictObject(boxElementShape),
+    ]),
+  ),
+});
 
 /** Parses and validates an unknown value as a `LabelTemplateSpec`. */
 export function parseLabelTemplate(json: unknown): LabelTemplateSpec {

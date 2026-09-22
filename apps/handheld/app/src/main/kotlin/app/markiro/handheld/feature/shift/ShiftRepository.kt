@@ -1,15 +1,16 @@
 package app.markiro.handheld.feature.shift
 
 import app.markiro.handheld.core.grants.*
-import app.markiro.handheld.core.box.ServerRange
 import app.markiro.handheld.core.box.SsccPool
-import app.markiro.handheld.core.network.BundleSsccDto
 import app.markiro.handheld.core.network.ErrorBody
 import app.markiro.handheld.core.network.LineDto
 import app.markiro.handheld.core.network.ShiftBundleDto
 import app.markiro.handheld.core.network.ShiftDto
+import app.markiro.handheld.core.network.ShiftEntryRequest
 import app.markiro.handheld.core.network.StationApi
 import app.markiro.handheld.core.network.UPDATE_REQUIRED_CODE
+import app.markiro.handheld.core.network.ValidationPrintDto
+import app.markiro.handheld.core.pallets.SsccBlockApplier
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.ShiftEntity
 import kotlinx.coroutines.flow.Flow
@@ -86,6 +87,7 @@ fun ShiftDto.toEntity(existing: ShiftEntity?, now: Long) = ShiftEntity(
     shelfLifeDays = existing?.shelfLifeDays,
     egaisCode = existing?.egaisCode,
     ssccIssuerPrefix = existing?.ssccIssuerPrefix,
+    ssccIssuerProblem = existing?.ssccIssuerProblem,
     duplicateVerification = existing?.duplicateVerification,
     duplicateTemplate = existing?.duplicateTemplate,
     duplicateTemplateDigest = existing?.duplicateTemplateDigest,
@@ -94,17 +96,57 @@ fun ShiftDto.toEntity(existing: ShiftEntity?, now: Long) = ShiftEntity(
         ?: validationPrint.allowPreviouslyAcceptedCodes,
 )
 
+/**
+ * Just enough of the cached row for the other-line confirmation card; `enter`
+ * re-fetches the full shift and its bundle from the server regardless of
+ * whether the operator got here by scanning a form or picking from the list.
+ */
+fun ShiftEntity.toDto() = ShiftDto(
+    id = id,
+    number = number,
+    status = status,
+    mode = mode,
+    validationPrint = ValidationPrintDto(validationPrintMode),
+    productId = productId,
+    productName = productName,
+    productPrintName = productPrintName,
+    lineId = lineId,
+    lineName = lineName,
+    counterpartyName = counterpartyName,
+    plannedQty = plannedQty,
+    plannedDate = plannedDate,
+    productionDate = productionDate,
+    boxCapacity = boxCapacity,
+    palletBoxCapacity = palletBoxCapacity,
+    palletsEnabled = palletsEnabled,
+    openedAt = openedAt,
+)
+
 /** Shift list cache, entry (server participation + bundle) and the local leave mark. */
 class ShiftRepository(
     private val api: StationApi,
     private val db: HandheldDatabase,
     private val json: Json,
     private val pool: SsccPool,
+    private val blocks: SsccBlockApplier = SsccBlockApplier(pool),
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
     private val history = ValidationHistoryMirror(db, api, json)
 
     fun observeShifts(): Flow<List<ShiftEntity>> = db.shiftDao().observeAll()
+
+    /**
+     * A shift already mirrored on this device, by id -- the same table the
+     * list and `enter` itself read. The task-barcode scan checks this only as
+     * a fallback, after the shift lists already visible on screen (own line,
+     * plus any other-line groups already expanded): an other-line shift lives
+     * only in that in-memory state, since a line-less refresh never mirrors it
+     * here, while this table still covers a shift cached from a previous
+     * entry but no longer listed -- a closed shift, for instance. No
+     * barcode-lookup endpoint exists for a shift, and none should be added for
+     * what a scan merely shortcuts to the card for.
+     */
+    suspend fun listed(shiftId: String): ShiftEntity? = db.shiftDao().get(shiftId)
 
     /** Own line plus unassigned shifts; rows without a bundle that vanished from the list are dropped. */
     suspend fun refreshList(): Boolean = db.recovery.work { refreshListOwned() }
@@ -135,14 +177,14 @@ class ShiftRepository(
      * together made a missing product or label template look like a closed
      * shift.
      */
-    suspend fun enter(shiftId: String): EnterResult = db.recovery.work { enterOwned(shiftId) }
+    suspend fun enter(shiftId: String, entryMethod: String = "list"): EnterResult = db.recovery.work { enterOwned(shiftId, entryMethod) }
 
-    private suspend fun enterOwned(shiftId: String): EnterResult {
+    private suspend fun enterOwned(shiftId: String, entryMethod: String): EnterResult {
         db.recovery.commit { app.markiro.handheld.core.replacement.ReplacementReadiness(db).requireAdmission("shift", shiftId) }
         GrantTransport(db,api).refreshConfiguredDevice()
         val cached = db.shiftDao().get(shiftId)
         val entered = try {
-            api.enter(shiftId)
+            api.enter(shiftId, ShiftEntryRequest(entryMethod))
         } catch (e: HttpException) {
             return refusal(EnterStep.ENTER, e)
         } catch (_: IOException) {
@@ -171,6 +213,7 @@ class ShiftRepository(
                     shelfLifeDays = bundle.product.shelfLifeDays,
                     egaisCode = bundle.product.egaisCode,
                     ssccIssuerPrefix = bundle.sscc?.issuerPrefix,
+                    ssccIssuerProblem = bundle.ssccIssuerProblem,
                     duplicateVerification = bundle.shift.validationPrint.verification,
                     duplicateTemplate = bundle.shift.validationPrint.snapshot?.spec?.toString(),
                     duplicateTemplateDigest = bundle.shift.validationPrint.snapshot?.digest,
@@ -231,45 +274,8 @@ class ShiftRepository(
      * this shift's, and it holds its own lock.
      */
     private suspend fun applySsccBlock(bundle: ShiftBundleDto) {
-        applyBlock(bundle.sscc, bundle.ssccRevokedFrom)
-        applyBlock(bundle.palletSscc, bundle.palletSsccRevokedFrom)
-    }
-
-    /**
-     * Revoked blocks are dropped BEFORE the new one is applied. Burning picks
-     * the lowest `fromSerial` with room, so a revoked range left in place keeps
-     * winning over the replacement an admin just cut, and the reseeded number
-     * never reaches a label.
-     *
-     * The bundle's OWN block is excluded from that list, belt and braces with
-     * the server's matching exclusion. Two blocks can share a `fromSerial` -- a
-     * revoked one and the replacement cut after an admin reseeded the counter
-     * back to a value already seeded before -- and deleting that row here is
-     * unrecoverable: the delete takes the local cursor with it, and `addRange`
-     * then rebuilds it from the server's `consumedThroughSerial`, still null
-     * while this device's printed labels sit unsent. Burning would hand out
-     * serials that are already on physical labels, which no later sync repairs.
-     *
-     * Scoped to the prefix AND digit the block itself names: `dropRanges` keys
-     * on all three, so crossing the streams would let a pallet revocation
-     * delete a box range that merely shares a `fromSerial`.
-     */
-    private suspend fun applyBlock(block: BundleSsccDto?, revokedFrom: List<Long>) {
-        if (block == null) return
-        pool.dropRanges(
-            block.issuerPrefix,
-            block.extensionDigit,
-            revokedFrom.filter { it != block.fromSerial },
-        )
-        pool.addRange(
-            ServerRange(
-                issuerPrefix = block.issuerPrefix,
-                extensionDigit = block.extensionDigit,
-                fromSerial = block.fromSerial,
-                toSerial = block.toSerial,
-                consumedThroughSerial = block.consumedThroughSerial,
-            ),
-        )
+        blocks.apply(bundle.sscc, bundle.ssccRevokedFrom)
+        blocks.apply(bundle.palletSscc, bundle.palletSsccRevokedFrom)
     }
 
     private suspend fun enterOffline(cached: ShiftEntity) = db.recovery.commit { enterOfflineOwned(cached) }
@@ -286,7 +292,16 @@ class ShiftRepository(
 
     suspend fun leave(shiftId: String) = db.recovery.commit { leaveOwned(shiftId) }
 
-    private suspend fun leaveOwned(shiftId: String) = db.shiftDao().setLeftAt(shiftId, clock())
+    /**
+     * A local mark only. The hub card and the list's «Продолжить» follow
+     * `activeShiftId`, so it goes with the shift (as `ShiftCloser` and the
+     * inventory leave already do); the mirror row, its bundle, queued scans and
+     * unprinted boxes stay for the sync engines and a later re-entry.
+     */
+    private suspend fun leaveOwned(shiftId: String) {
+        db.shiftDao().setLeftAt(shiftId, clock())
+        db.deviceConfigDao().get()?.let { if (it.activeShiftId == shiftId) db.deviceConfigDao().upsert(it.copy(activeShiftId = null)) }
+    }
 
     private fun errorCode(e: HttpException): String? =
         runCatching { json.decodeFromString(ErrorBody.serializer(), e.response()?.errorBody()?.string().orEmpty()).code }.getOrNull()

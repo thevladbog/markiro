@@ -2,37 +2,35 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
 import { Alert, Card, EmptyState, PageHeader, Spinner, StatusChip } from "@markiro/ui";
-import type { StatusChipStatus } from "@markiro/ui";
+import type { TagPhase } from "@markiro/ui";
 
 import { useChannels, type ChannelState, type ChannelSummaryDto } from "./api.js";
 
 /**
- * State -> chip color, one-to-one with the five `ChannelState` values
- * (brief 08's "not configured / working / error / silent / unavailable").
- * `unavailable` gets its own tone (`info`) rather than reusing
- * `not_configured`'s (`neutral`) so the two read as different diagnoses even
- * before the label text is read -- "we haven't built this yet" is not the
- * same story as "you haven't set this up yet".
+ * State -> phase, one-to-one with the five `ChannelState` values (brief 08's
+ * "not configured / working / error / silent / unavailable").
  *
- * Review follow-up: `info`'s glyph (⟳, "Syncing" in `StatusChip.tsx`'s own
- * default label) reads as "in progress", which is the wrong story for a
- * channel with no adapter at all. It stays `info` anyway: `StatusChip`
- * exposes exactly five tones (`ok`/`error`/`warn`/`info`/`neutral`), and
- * `neutral` is already spoken for by `not_configured` above -- reusing it
- * here would collapse the one distinction this map exists to draw ("not set
- * up" vs. "not built yet"), which is the actual failure this comment is
- * about, worse than a glyph that half-fits. Nothing between the two is on
- * offer, so this is the least-wrong tone until `StatusChip` grows one
- * (`t(\`integrations.state.${channel.state}\`)` carries the real meaning
- * regardless -- color is never the only signal here, same rule
- * `StatusChip.tsx` documents for its own `neutral`).
+ * `not_configured` and `unavailable` share `none`, not because they mean the
+ * same thing, but because both mean "no working channel right now" -- they
+ * differ only in *why*, and the caption (`integrations.state.not_configured`
+ * vs `.unavailable`) is what carries that difference, per the spec rule that
+ * colour need not be the only signal. `not_configured` is an operator who
+ * hasn't set the channel up yet; `unavailable` is brief 08's "a connection we
+ * have not built" -- there is no adapter, so there is nothing an operator can
+ * do about it from this card (`ChannelCard` below deliberately never links an
+ * unavailable channel). A permanent amber "!" on a channel nobody can act on
+ * is exactly the pattern this phase system exists to stop: it trains people
+ * to read past warnings. `JournalFilters.tsx` still groups `unavailable` with
+ * `silent` for its own "show me the latest" journal action -- that is a
+ * different question (does the journal have anything to show) from this
+ * card's phase (is there a working channel to point at).
  */
-const STATE_STATUS: Record<ChannelState, StatusChipStatus> = {
-  working: "ok",
-  error: "error",
-  silent: "warn",
-  not_configured: "neutral",
-  unavailable: "info",
+export const CHANNEL_STATE_TO_PHASE: Record<ChannelState, TagPhase> = {
+  working: "active",
+  error: "failed",
+  silent: "attention",
+  not_configured: "none",
+  unavailable: "none",
 };
 
 /**
@@ -101,7 +99,7 @@ function ChannelCard({ channel }: { channel: ChannelSummaryDto }) {
           {t(channel.labelKey)}
         </span>
         <StatusChip
-          status={STATE_STATUS[channel.state]}
+          phase={CHANNEL_STATE_TO_PHASE[channel.state]}
           label={t(`integrations.state.${channel.state}`)}
         />
       </div>

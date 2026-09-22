@@ -140,7 +140,8 @@ export async function openProductLabelWork(
     },
     close() {
       for (const db of databases) db.close();
-      rmSync(directory, { recursive: true, force: true });
+      // Windows can keep a just-closed SQLite file busy for a moment.
+      rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     },
     eventBase(sequence: number): ProductLabelEventBase {
       return {

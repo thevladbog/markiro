@@ -43,6 +43,7 @@ import {
   listCodesOpenApiSchema,
   listCodesQuerySchema,
   palletCardOpenApiSchema,
+  palletPlacardQuerySchema,
   type BoxCardDto,
   type BoxReportQueryDto,
   type ClassifyQueryDto,
@@ -51,10 +52,12 @@ import {
   type ListCodesQueryDto,
   type ListCodesResponseDto,
   type PalletCardDto,
+  type PalletPlacardQueryDto,
 } from "./dto";
 import { CodeSearchService } from "./code-search.service";
 import { renderBoxReportHtml } from "./box-report";
 import { renderPalletReportHtml } from "./pallet-report";
+import { renderPalletPlacardHtml, renderShiftPlacardsHtml } from "./pallet-placard";
 
 /**
  * Manager-only, entirely read-only module: classify a scanned/typed input
@@ -277,5 +280,63 @@ export class CodeSearchController {
     const data = await this.codeSearchService.palletReportData(req.tenantId!, palletId);
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     return renderPalletReportHtml(data, query.timeZone);
+  }
+
+  /**
+   * Print-ready A4/A5 pallet PLACARD: organisation, product, counts, a
+   * per-production-date summary and a large Code 128 SSCC, for taping to the
+   * stack. Same open-in-new-tab HTML contract as the reports above.
+   */
+  @Get("pallets/:palletId/placard")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiOperation({
+    summary: "Render the pallet placard",
+    description:
+      'Print-ready A4 (default) or A5 HTML placard for opening in a new tab: organisation and logo, product and GTIN, box and unit counts, a summary by production date with "годен до", and a large Code 128 SSCC. Only a closed pallet with an SSCC has one; an open pallet or one without an SSCC answers 409 PALLET_NOT_CLOSED. A disassembled pallet prints with a watermark.',
+  })
+  @ApiParam({ name: "palletId", schema: { type: "string", format: "uuid" } })
+  @ApiProduces("text/html")
+  @ApiZodQuery(palletPlacardQuerySchema)
+  @ApiZodValidationError()
+  @ApiOkResponse({ schema: { type: "string" }, description: "Print-ready HTML document." })
+  @ApiHttpErrors(401, 403, 404, 409)
+  async palletPlacard(
+    @Req() req: RequestWithTenant,
+    @Param("palletId", new ParseUUIDPipe()) palletId: string,
+    @Res({ passthrough: true }) res: Response,
+    @Query(new ZodValidationPipe(palletPlacardQuerySchema)) query: PalletPlacardQueryDto,
+  ): Promise<string> {
+    const data = await this.codeSearchService.palletPlacardData(req.tenantId!, palletId);
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    return renderPalletPlacardHtml(data, query.format);
+  }
+
+  /**
+   * Every closed pallet of a shift as one placard document, a page per
+   * pallet, for printing the whole shift's stacks in one go. Same contract as
+   * the single placard above.
+   */
+  @Get("shifts/:shiftId/placards")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiOperation({
+    summary: "Render placards for every closed pallet of a shift",
+    description:
+      "Print-ready A4 (default) or A5 HTML with one placard page per closed, not-disassembled pallet of the shift that carries an SSCC, in closing order. A shift with no such pallet answers 409 SHIFT_HAS_NO_PALLETS.",
+  })
+  @ApiParam({ name: "shiftId", schema: { type: "string", format: "uuid" } })
+  @ApiProduces("text/html")
+  @ApiZodQuery(palletPlacardQuerySchema)
+  @ApiZodValidationError()
+  @ApiOkResponse({ schema: { type: "string" }, description: "Print-ready HTML document." })
+  @ApiHttpErrors(401, 403, 404, 409)
+  async shiftPlacards(
+    @Req() req: RequestWithTenant,
+    @Param("shiftId", new ParseUUIDPipe()) shiftId: string,
+    @Res({ passthrough: true }) res: Response,
+    @Query(new ZodValidationPipe(palletPlacardQuerySchema)) query: PalletPlacardQueryDto,
+  ): Promise<string> {
+    const data = await this.codeSearchService.shiftPlacardsData(req.tenantId!, shiftId);
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    return renderShiftPlacardsHtml(data.pallets, query.format, data.shiftNumber);
   }
 }

@@ -96,6 +96,11 @@ const SHIFT: ShiftDto = {
 const PALLET = {
   id: "pal-1",
   sscc: "00103460068200000004",
+  kind: "production",
+  productId: "p1",
+  productName: "Молоко 1л",
+  deviceName: "Станция 1",
+  rejectedMembershipCount: 0,
   terminalId: "t1",
   lineName: "Линия розлива № 1",
   operatorId: null,
@@ -183,6 +188,62 @@ describe("shift panel pallet table", () => {
     expect(await within(section).findByText("Состав изменился после закрытия")).toBeDefined();
   });
 
+  /**
+   * Layout regression guard. «Состав изменился после закрытия» is 31 characters
+   * of mono type; as a nowrap tag it used to make the status column's
+   * min-content the whole string, which pushed the table to 731px inside the
+   * 669px-wide "complex" side panel -- the pill was clipped mid-word at the
+   * panel edge and the squeezed «Закрыта» column broke «30.08.2026, 14:20»
+   * inside the year. Both facts are lifecycle facts now, so they render as
+   * phase tags (`dismantled`, `attention`) instead of badges, and `StatusChip`
+   * carries the same `wrap` prop as `Badge` -- the long label still needs to
+   * break, and wrapping is a layout concern of this column, not something the
+   * choice of tag component changes. What still has to hold alongside that is
+   * the stack: two independent facts must not sit as adjacent inline pills
+   * with no break opportunity between them, so they still stack vertically in
+   * `.mk-shift-details__pallet-status`.
+   */
+  it("renders the pallet status facts as phase tags stacked in one column", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        routeShiftPanelFetch({
+          pallets: () =>
+            jsonResponse(200, {
+              items: [
+                {
+                  ...PALLET,
+                  contentsChangedAfterClose: true,
+                  disassembledAt: "2026-09-12T08:00:00.000Z",
+                },
+              ],
+            }),
+        }),
+      ),
+    );
+    renderShiftPanel();
+
+    const section = within(await screen.findByRole("region", { name: "Паллеты" }));
+    const changedLabel = await section.findByText("Состав изменился после закрытия");
+    const disassembledLabel = section.getByText("Разобрана");
+
+    const changedTag = changedLabel.closest(".mk-chip");
+    const disassembledTag = disassembledLabel.closest(".mk-chip");
+    expect(changedTag).not.toBeNull();
+    expect(disassembledTag).not.toBeNull();
+    expect(changedTag?.className).toContain("mk-chip--attention");
+    expect(disassembledTag?.className).toContain("mk-chip--dismantled");
+    // The long, free-form label still needs to wrap in this narrow column --
+    // that is unchanged by moving from badges to phase tags.
+    expect(changedTag?.className).toContain("mk-tag--wrap");
+    expect(disassembledTag?.className).toContain("mk-tag--wrap");
+    // Both facts are independent, so both pills show at once -- stacked in one
+    // container rather than glued side by side.
+    const stack = changedTag?.closest(".mk-shift-details__pallet-status");
+    expect(stack).not.toBeNull();
+    expect(disassembledTag?.closest(".mk-shift-details__pallet-status")).toBe(stack);
+  });
+
   it("does not query or show pallets for a shift that never used them", async () => {
     const fetchMock = vi.fn(routeShiftPanelFetch({}));
     vi.stubGlobal("fetch", fetchMock);
@@ -193,6 +254,51 @@ describe("shift panel pallet table", () => {
     expect(fetchMock.mock.calls.some((call) => String(call[0]).startsWith("/api/pallets"))).toBe(
       false,
     );
+  });
+
+  it("prints placards for every closed pallet of the shift in the chosen size", async () => {
+    const user = userEvent.setup();
+    const openMock = vi.fn();
+    vi.stubGlobal("open", openMock);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(routeShiftPanelFetch({ pallets: () => jsonResponse(200, { items: [PALLET] }) })),
+    );
+    renderShiftPanel();
+
+    const section = within(await screen.findByRole("region", { name: "Паллеты" }));
+    await user.click(await section.findByRole("button", { name: "Ярлыки" }));
+    const dialog = within(await screen.findByRole("dialog", { name: "Ярлыки паллет смены" }));
+    await user.click(dialog.getByRole("radio", { name: "A5" }));
+    await user.click(dialog.getByRole("button", { name: "Открыть" }));
+
+    expect(openMock).toHaveBeenCalledTimes(1);
+    expect(String(openMock.mock.calls[0]?.[0])).toMatch(
+      /^\/api\/code-search\/shifts\/11111111-1111-4111-8111-111111111111\/placards\?format=a5&timeZone=/,
+    );
+    expect(screen.queryByRole("dialog", { name: "Ярлыки паллет смены" })).toBeNull();
+  });
+
+  it("offers no placards when the shift has no closed, standing pallet", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        routeShiftPanelFetch({
+          pallets: () =>
+            jsonResponse(200, {
+              items: [
+                { ...PALLET, id: "pal-open", closedAt: null },
+                { ...PALLET, id: "pal-gone", disassembledAt: "2026-09-12T08:00:00.000Z" },
+              ],
+            }),
+        }),
+      ),
+    );
+    renderShiftPanel();
+
+    const section = within(await screen.findByRole("region", { name: "Паллеты" }));
+    expect(await section.findAllByText("(00)103460068200000004")).toHaveLength(2);
+    expect(section.queryByRole("button", { name: "Ярлыки" })).toBeNull();
   });
 
   it("reports a failed pallet load instead of rendering an empty stack", async () => {
@@ -313,6 +419,57 @@ describe("shift form pallet configuration", () => {
     expect(screen.queryByRole("option", { name: "Короб 58×40" })).toBeNull();
   });
 
+  /**
+   * The box template has always been swappable on an ACTIVE shift; the pallet
+   * template picker was frozen there for no reason of its own. It now behaves
+   * the same, and the active-edit payload carries only what changed.
+   */
+  it("lets an active shift change its pallet template and sends only that field", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse(200, { defaultBoxLabelTemplateId: null, defaultSource: null }),
+      ),
+    );
+    render(
+      <QueryClientProvider client={newQueryClient()}>
+        <MemoryRouter>
+          <ShiftForm
+            mode="edit"
+            editStatus="active"
+            initialValues={{
+              ...AGGREGATION_FORM_VALUES,
+              // A concrete box template: the form refuses an aggregation
+              // shift without one before it ever builds a payload.
+              boxLabelTemplateSelection: BOX_TEMPLATE.id,
+              palletsEnabled: true,
+            }}
+            products={[PRODUCT]}
+            lines={[]}
+            counterparties={[]}
+            formContext={{ labelTemplates: [BOX_TEMPLATE, PALLET_TEMPLATE], palletsEntitled: true }}
+            onSubmit={onSubmit}
+            onDirtyChange={() => undefined}
+            onClose={() => undefined}
+          />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    const picker = screen.getByLabelText("Шаблон этикетки паллеты");
+    expect(picker.hasAttribute("disabled")).toBe(false);
+    await user.click(picker);
+    await user.click(await screen.findByRole("option", { name: "Паллета 100×150" }));
+    const save = screen.getByRole("button", { name: "Сохранить" });
+    await waitFor(() => expect(save.hasAttribute("disabled")).toBe(false));
+    await user.click(save);
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0]?.[0]).toEqual({ palletLabelTemplateId: PALLET_TEMPLATE.id });
+  });
+
   it("labels the shift capacity field in boxes, not units", () => {
     renderShiftForm({ ...AGGREGATION_FORM_VALUES, palletsEnabled: true });
 
@@ -356,6 +513,22 @@ const FORMATS = [
     mimeType: "application/xml; charset=utf-8",
     boxMode: "pallets",
   },
+  {
+    id: "shift_txt_pallet_boxes",
+    version: 1,
+    label: "[TXT][Паллеты → короба] Отчет смены",
+    extension: "txt",
+    mimeType: "text/plain; charset=utf-8",
+    boxMode: "pallet_boxes",
+  },
+  {
+    id: "shift_xml_gismt_pallet_boxes",
+    version: 1,
+    label: "[XML][ГИСМТ] Агрегация паллет без кодов",
+    extension: "xml",
+    mimeType: "application/xml; charset=utf-8",
+    boxMode: "pallet_boxes",
+  },
 ] as const;
 
 function failedExport(errorCode: string) {
@@ -371,6 +544,7 @@ function failedExport(errorCode: string) {
     shiftDateSnapshot: "2026-09-11",
     totalCodeCount: null,
     totalBoxCount: null,
+    totalPalletCount: null,
     createdByUserId: "u1",
     createdByName: "Иван Иванов",
     sourceSnapshotStartedAt: null,
@@ -407,6 +581,8 @@ describe("pallet export formats", () => {
     expect(await screen.findByLabelText("[TXT][Паллеты] Отчет смены")).toBeDefined();
     expect(screen.getByLabelText("[CSV][Паллеты] Отчет смены")).toBeDefined();
     expect(screen.getByLabelText("[XML][ГИСМТ] Паллетная агрегация")).toBeDefined();
+    expect(screen.getByLabelText("[TXT][Паллеты → короба] Отчет смены")).toBeDefined();
+    expect(screen.getByLabelText("[XML][ГИСМТ] Агрегация паллет без кодов")).toBeDefined();
   });
 
   it("hides every pallet format for a shift that never used pallets", async () => {
@@ -798,6 +974,7 @@ const PALLET_CARD = {
   id: "pal-1",
   sscc: PALLET.sscc,
   status: "closed",
+  kind: "production",
   shiftId: SHIFT.id,
   shiftNumber: "SEP26-001",
   productId: "p1",
@@ -812,6 +989,9 @@ const PALLET_CARD = {
     {
       id: "box-1",
       sscc: "00123460682000000101",
+      shiftId: SHIFT.id,
+      shiftNumber: "SEP26-001",
+      productionDate: "2026-09-11",
       itemCount: 12,
       closedAt: "2026-09-11T15:00:00.000Z",
       disassembledAt: null,
@@ -819,12 +999,16 @@ const PALLET_CARD = {
     {
       id: "box-2",
       sscc: "00123460682000000102",
+      shiftId: SHIFT.id,
+      shiftNumber: "SEP26-001",
+      productionDate: "2026-09-11",
       itemCount: 0,
       closedAt: "2026-09-11T15:00:00.000Z",
       disassembledAt: "2026-09-11T16:30:00.000Z",
     },
   ],
   exceptions: [],
+  rejections: [],
 };
 
 /** Renders both cards behind their real routes, so the link between them is exercised. */
@@ -835,12 +1019,14 @@ function renderCodeSearchCards(entry: string, body: (url: string) => unknown) {
   );
   return render(
     <QueryClientProvider client={newQueryClient()}>
-      <MemoryRouter initialEntries={[entry]}>
-        <Routes>
-          <Route path="/codes/box/:boxId" element={<BoxCardPage />} />
-          <Route path="/codes/pallet/:palletId" element={<PalletCardPage />} />
-        </Routes>
-      </MemoryRouter>
+      <AccessProvider value={ACCESS}>
+        <MemoryRouter initialEntries={[entry]}>
+          <Routes>
+            <Route path="/codes/box/:boxId" element={<BoxCardPage />} />
+            <Route path="/codes/pallet/:palletId" element={<PalletCardPage />} />
+          </Routes>
+        </MemoryRouter>
+      </AccessProvider>
     </QueryClientProvider>,
   );
 }
@@ -868,7 +1054,9 @@ describe("pallet card", () => {
 
     expect(await screen.findByRole("heading", { name: "(00)103460068200000004" })).toBeDefined();
     expect(screen.getByText("Линия розлива № 1")).toBeDefined();
-    expect(screen.getByRole("link", { name: "SEP26-001" })).toBeDefined();
+    // The shift link now also appears on each box's own row (same shift in
+    // this fixture), so assert presence rather than a single unique match.
+    expect(screen.getAllByRole("link", { name: "SEP26-001" }).length).toBeGreaterThan(0);
 
     const boxes = within(screen.getByRole("table"));
     // Each member box links on to its OWN card rather than inlining its codes.
@@ -885,7 +1073,9 @@ describe("pallet card", () => {
     const row = boxes.getByRole("link", { name: "(00)123460682000000102" }).closest("tr");
     expect(row).not.toBeNull();
     // A word, not a colour: the pallet is short a box it can never recover.
-    expect(within(row!).getByText("Короб расформирован")).toBeDefined();
+    const disassembledTag = within(row!).getByText("Короб расформирован").closest(".mk-chip");
+    expect(disassembledTag).not.toBeNull();
+    expect(disassembledTag?.className).toContain("mk-chip--dismantled");
   });
 
   it("reports a pallet taken apart, with its exception reason", async () => {
@@ -920,11 +1110,13 @@ describe("pallet card", () => {
     );
     render(
       <QueryClientProvider client={newQueryClient()}>
-        <MemoryRouter initialEntries={["/codes/pallet/pal-1"]}>
-          <Routes>
-            <Route path="/codes/pallet/:palletId" element={<PalletCardPage />} />
-          </Routes>
-        </MemoryRouter>
+        <AccessProvider value={ACCESS}>
+          <MemoryRouter initialEntries={["/codes/pallet/pal-1"]}>
+            <Routes>
+              <Route path="/codes/pallet/:palletId" element={<PalletCardPage />} />
+            </Routes>
+          </MemoryRouter>
+        </AccessProvider>
       </QueryClientProvider>,
     );
 

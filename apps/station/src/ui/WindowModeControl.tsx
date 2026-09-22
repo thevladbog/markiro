@@ -7,6 +7,12 @@ export interface WindowModeControlProps {
   snapshot: LockdownSnapshot;
   activeShift: boolean;
   disabled?: boolean;
+  /**
+   * Header rail: a 64px icon-only button. The label stays in `aria-label`, so
+   * nothing about who can reach the control changes. Off the rail (the floating
+   * window chrome, the exception screen) the captioned 64px button stays.
+   */
+  compact?: boolean;
   onEnter: () => void | Promise<void>;
   onExit: () => void | Promise<void>;
   onDismissError: () => void;
@@ -16,6 +22,7 @@ export function WindowModeControl({
   snapshot,
   activeShift,
   disabled = false,
+  compact = false,
   onEnter,
   onExit,
   onDismissError,
@@ -49,9 +56,14 @@ export function WindowModeControl({
       <Button
         size="floor"
         variant="secondary"
-        className="window-mode-control__action"
+        className={
+          compact
+            ? "window-mode-control__action station-rail-button station-rail-button--icon"
+            : "window-mode-control__action"
+        }
         disabled={disabled || snapshot.pending}
         aria-label={actionLabel}
+        {...(compact ? { title: actionLabel } : {})}
         onClick={handleAction}
         icon={
           <span
@@ -60,7 +72,7 @@ export function WindowModeControl({
           />
         }
       >
-        {actionText}
+        {compact ? null : actionText}
       </Button>
 
       {snapshot.error ? (

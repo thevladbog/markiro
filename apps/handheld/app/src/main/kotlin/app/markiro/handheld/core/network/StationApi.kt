@@ -68,7 +68,7 @@ interface StationApi {
     suspend fun grantInventoryLeave(@Path("id") id: String, @Body body: kotlinx.serialization.json.JsonObject): kotlinx.serialization.json.JsonObject
 
     @POST("shifts/{id}/enter")
-    suspend fun enter(@Path("id") id: String): ShiftDto
+    suspend fun enter(@Path("id") id: String, @Body body: ShiftEntryRequest): ShiftDto
 
     @GET("shifts/{id}/bundle")
     suspend fun bundle(@Path("id") id: String): ShiftBundleDto
@@ -86,6 +86,10 @@ interface StationApi {
     /** Reasons, the tenant catalog and per-operator permission for the offline write-off mode. */
     @GET("station/writeoff-bootstrap")
     suspend fun writeoffBootstrap(): WriteoffBootstrapDto
+
+    /** Products, per-operator pallet permission, this device's extension-1 block and pallet label templates, no shift needed. */
+    @GET("station/pallet-bootstrap")
+    suspend fun palletBootstrap(): PalletBootstrapDto
 
     /**
      * Incremental box registry. `until` is null on the first page of a walk and

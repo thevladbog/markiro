@@ -4,7 +4,15 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate, useParams } from "react-router";
-import { Alert, Button, Checkbox, ConfirmDialog, SectionHeader, StatusChip } from "@markiro/ui";
+import {
+  Alert,
+  Button,
+  Checkbox,
+  ConfirmDialog,
+  SectionHeader,
+  StatusChip,
+  type TagPhase,
+} from "@markiro/ui";
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import {
   applyInvoice,
@@ -19,10 +27,35 @@ import {
   type RecordInvoicePaymentInput,
 } from "./api.js";
 import { InvoiceFlowSteps, type FlowState } from "./InvoiceFlowSteps.js";
-import { invoiceStatusTone } from "./invoice-status.js";
+import { invoiceStatusPhase } from "./invoice-status.js";
 
 const DOCUMENT_PENDING_TIMEOUT_MS = 5 * 60 * 1000;
 const DOCUMENT_REFRESH_INTERVAL_MS = 2_000;
+
+/**
+ * Фактический union — `invoiceApplicationEventSchema["status"]`
+ * (`packages/platform-contracts/src/commercial.ts`): `pending` | `applied` |
+ * `failed` | `skipped`, плюс синтетическое `not_started`, когда по строке
+ * счёта ещё нет ни одного события. `skipped` пишется, когда предыдущая
+ * попытка уже применила строку («billing-application.service.ts»): исход тот
+ * же, что у `applied`, поэтому оба — `done`. Раньше три ветки схлопывали
+ * `pending`, `skipped` и отсутствие события в один и тот же `warn`.
+ */
+function invoiceApplicationEventPhase(
+  status: "pending" | "applied" | "failed" | "skipped" | "not_started",
+): TagPhase {
+  switch (status) {
+    case "not_started":
+      return "planned";
+    case "pending":
+      return "running";
+    case "applied":
+    case "skipped":
+      return "done";
+    case "failed":
+      return "failed";
+  }
+}
 
 function flowState(invoice: InvoiceDetail): FlowState {
   if (invoice.status === "draft") return "draft";
@@ -252,7 +285,7 @@ export function InvoiceDetailPage() {
         actionsLabel={t("billing.detailActionsLabel")}
         actions={
           <StatusChip
-            status={invoiceStatusTone(invoice.status)}
+            phase={invoiceStatusPhase(invoice.status)}
             label={t(`billing.statuses.${invoice.status}`)}
           />
         }
@@ -349,13 +382,7 @@ export function InvoiceDetailPage() {
                     </td>
                     <td>
                       <StatusChip
-                        status={
-                          event?.status === "applied"
-                            ? "ok"
-                            : event?.status === "failed"
-                              ? "error"
-                              : "warn"
-                        }
+                        phase={invoiceApplicationEventPhase(event?.status ?? "not_started")}
                         label={t(`billing.applicationStatuses.${event?.status ?? "not_started"}`)}
                       />
                     </td>

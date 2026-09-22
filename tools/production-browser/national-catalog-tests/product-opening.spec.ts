@@ -132,6 +132,8 @@ for (const width of [390, 1280]) {
     await expect(importedPhoto).toHaveJSProperty("complete", true);
     await expect(importedPhoto).toHaveJSProperty("naturalWidth", 120);
     await expect(importedPhoto).toHaveJSProperty("naturalHeight", 120);
+    await expect(dialog.getByRole("button", { name: "Сохранить", exact: true })).toBeEnabled();
+    await dialog.getByRole("tab", { name: "Честный знак", exact: true }).click();
     const readiness = dialog.getByRole("region", { name: "Готовность", exact: true });
     for (const dimension of ["Производство", "Заказ кодов", "Ввод в оборот", "ЕГАИС"])
       await expect(readiness.getByText(dimension, { exact: true })).toBeVisible();
@@ -142,7 +144,7 @@ for (const width of [390, 1280]) {
       }),
     ).toBeVisible();
     await expect(dialog.getByRole("button", { name: "Выбрать категорию" })).toHaveCount(0);
-    await expect(dialog.getByRole("button", { name: "Сохранить", exact: true })).toBeEnabled();
+    await expect(dialog.getByRole("button", { name: "Сохранить", exact: true })).toHaveCount(0);
     expect(errors).toEqual([]);
   });
 }

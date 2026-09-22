@@ -127,6 +127,23 @@ export const closeShiftSchema = z.object({
 });
 export type CloseShiftDto = z.infer<typeof closeShiftSchema>;
 
+export const SHIFT_ENTRY_METHODS = ["list", "task_barcode"] as const;
+export type ShiftEntryMethod = (typeof SHIFT_ENTRY_METHODS)[number];
+
+/**
+ * How the device says it got in. Absent body means `list`, which is what
+ * every terminal built before the printed task form sends -- the top-level
+ * `.default` covers a request with no body at all (`ZodValidationPipe`
+ * receives `undefined`, not `{}`, in that case), and the property default
+ * covers a body that omits the field.
+ */
+export const shiftEntrySchema = z
+  .strictObject({
+    entryMethod: z.enum(SHIFT_ENTRY_METHODS).default("list"),
+  })
+  .default({ entryMethod: "list" });
+export type ShiftEntryDto = z.infer<typeof shiftEntrySchema>;
+
 /**
  * GET /shifts query schema. `from`/`to` filter on `plannedDate`, inclusive;
  * `productionFrom`/`productionTo` filter on the EFFECTIVE production date --
@@ -237,6 +254,14 @@ export interface ShiftPlanningConfigDto {
   defaultBoxLabelTemplateId: string | null;
   /** Which default answered: the product's category, the organisation, or none. */
   defaultSource: BoxLabelTemplateDefaultSource | null;
+  /**
+   * Whether the organisation profile carries a GLN -- the SSCC source of an
+   * aggregation shift that names no issuer counterparty. A boolean, not the
+   * GLN itself: the full profile is protected from managers, and the shift
+   * form only needs to know whether starting such a shift would be refused
+   * (`SsccService.assertIssuerConfiguredForActivation`).
+   */
+  orgGlnConfigured: boolean;
 }
 
 /**
@@ -338,6 +363,16 @@ export interface ShiftBundleDto {
     consumedThroughSerial: number | null;
   } | null;
   /**
+   * Why `sscc` is null when the shift's issuer cannot be resolved at all:
+   * the organisation profile has no GLN (`org_gln_missing`) or the shift's
+   * named issuer counterparty has none (`issuer_gln_missing`). Null when a
+   * block was cut, and for every OTHER reason `sscc` is null (a planned
+   * shift, a read-only subscription, an exhausted prefix, a reference
+   * bundle). The device warns from entry rather than letting the operator
+   * find out on the twentieth scan; see `SsccService.ssccIssuerProblemOf`.
+   */
+  ssccIssuerProblem: "org_gln_missing" | "issuer_gln_missing" | null;
+  /**
    * `fromSerial` of every block this device was handed and that has since
    * been revoked by an admin reseeding the counter. The station deletes the
    * matching `sscc_pool` rows (`dropRanges`) before applying `sscc` above --
@@ -363,8 +398,12 @@ export interface ShiftBundleDto {
  * GET /shifts/:id/reference-bundle response. It carries only mirrored
  * reference data and can never allocate or reconcile an SSCC block.
  */
-export type ShiftReferenceBundleDto = Omit<ShiftBundleDto, "sscc" | "palletSscc"> & {
+export type ShiftReferenceBundleDto = Omit<
+  ShiftBundleDto,
+  "sscc" | "ssccIssuerProblem" | "palletSscc"
+> & {
   sscc: null;
+  ssccIssuerProblem: null;
   palletSscc: null;
 };
 
@@ -432,9 +471,19 @@ const defaultSourceOpenApiSchema: SchemaObject = {
 export const shiftPlanningConfigOpenApiSchema: SchemaObject = {
   type: "object",
   additionalProperties: false,
-  required: ["defaultBoxLabelTemplateId", "defaultSource", "validationPrintProtocol"],
+  required: [
+    "defaultBoxLabelTemplateId",
+    "defaultSource",
+    "validationPrintProtocol",
+    "orgGlnConfigured",
+  ],
   properties: {
     validationPrintProtocol: { type: "string", enum: [PRODUCT_LABEL_PROTOCOL], nullable: true },
+    orgGlnConfigured: {
+      type: "boolean",
+      description:
+        "Whether the organisation profile has a GLN; an aggregation shift with no issuer counterparty cannot start without one.",
+    },
     validationReprocessingProtocol: {
       type: "string",
       enum: [VALIDATION_REPROCESSING_PROTOCOL],
@@ -771,6 +820,7 @@ const shiftBundleRequiredFields = [
   "counterpartyGln",
   "operators",
   "sscc",
+  "ssccIssuerProblem",
   "ssccRevokedFrom",
   "palletSscc",
   "palletSsccRevokedFrom",
@@ -789,6 +839,13 @@ export const shiftBundleOpenApiSchema = {
     counterpartyGln: { type: "string", nullable: true },
     operators: { type: "array", items: operatorMirrorOpenApiSchema },
     sscc: ssccBundleOpenApiSchema,
+    ssccIssuerProblem: {
+      type: "string",
+      nullable: true,
+      enum: ["org_gln_missing", "issuer_gln_missing", null],
+      description:
+        "Why `sscc` is null when the shift's issuer has no GLN; null when a block was cut or it is missing for another reason.",
+    },
     ssccRevokedFrom: { type: "array", items: { type: "integer", minimum: 0 } },
     palletSscc: ssccBundleOpenApiSchema,
     palletSsccRevokedFrom: { type: "array", items: { type: "integer", minimum: 0 } },

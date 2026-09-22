@@ -1,6 +1,6 @@
 import {
   CHILD_ROW_MM,
-  PARENT_ROW_MM,
+  parentRowHeightMm,
   emptyNoteUnit,
   escapeHtml,
   formatDateTime,
@@ -153,7 +153,9 @@ function boxRow(box: PalletReportBox, index: number, isLast: boolean, timeZone: 
 }
 
 function contentsUnits(data: PalletReportData, timeZone: string): ReportUnit[] {
-  const units: ReportUnit[] = [{ kind: "band", heightMm: PARENT_ROW_MM, html: palletRow(data) }];
+  const units: ReportUnit[] = [
+    { kind: "band", heightMm: parentRowHeightMm(data.productName), html: palletRow(data) },
+  ];
   if (data.boxes.length === 0) {
     units.push(emptyNoteUnit("На паллете нет коробов"));
     return units;

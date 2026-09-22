@@ -9,7 +9,7 @@ import {
 } from "./offline-grants/admission.js";
 import { sampleGrantClock } from "./offline-grants/clock.js";
 import type { GrantClockSample } from "./offline-grants/clock.js";
-import { readShiftExecutionProjection } from "./offline-grants/semantic.js";
+import { readExecutionToBind, readShiftExecutionProjection } from "./offline-grants/semantic.js";
 
 /** One row of the local scan journal — every scan, accepted or not. */
 export interface ScanEventRow {
@@ -349,8 +349,9 @@ export async function recordScanWithOfflineGrant(
       device_id: string;
       owner_kind: "station";
       credential_epoch: number;
+      mode: "observe" | "strict";
     }>(
-      "SELECT tenant_id,device_id,owner_kind,credential_epoch FROM offline_grant_install_state WHERE id=1",
+      "SELECT tenant_id,device_id,owner_kind,credential_epoch,mode FROM offline_grant_install_state WHERE id=1",
     );
     if (!state) return recordScanLegacy(exec, e, code);
     if (!e.operatorId) throw new OfflineGrantDeniedError("operator_unauthorized");
@@ -367,7 +368,14 @@ export async function recordScanWithOfflineGrant(
     );
     const snapshotDigest = binding?.snapshot_digest ?? "missing";
     const eventId = e.eventId ?? crypto.randomUUID();
-    const execution = await readShiftExecutionProjection(exec, e.shiftId);
+    // Same rule as the label acceptance: an unbindable shift is a refusal only
+    // where grants enforce. Observe mode journals the scan exactly as a device
+    // without grant state does, so a missing bundle cannot stop scanning or
+    // leave a shift unclosable.
+    const execution = await readExecutionToBind(state.mode, () =>
+      readShiftExecutionProjection(exec, e.shiftId),
+    );
+    if (!execution) return recordScanLegacy(exec, e, code);
     if (code && e.verdict === "ok" && code.gtin14 !== execution.scope.product.gtin14)
       throw new OfflineGrantDeniedError("wrong_task");
     const decision = await new StationGrantAdmission(exec, sampleClock).commitCompletion({

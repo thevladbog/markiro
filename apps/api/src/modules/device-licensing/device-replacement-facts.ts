@@ -150,6 +150,9 @@ export async function readDeviceReplacementFacts(
   const inventories = work.inventories
     .filter((row) => row.deviceId === deviceId)
     .map(({ deviceId: _, ...row }) => row);
+  const warehousePallets = work.warehousePallets
+    .filter((row) => row.deviceId === deviceId)
+    .map(({ deviceId: _, ...row }) => row);
   const jobs = work.jobs
     .filter((row) => row.deviceId === deviceId)
     .map(({ deviceId: _, ...row }) => row);
@@ -235,6 +238,7 @@ export async function readDeviceReplacementFacts(
     ...authorityFacts,
     shifts,
     inventories,
+    warehousePallets,
     jobs,
     quarantine,
   });

@@ -1,6 +1,7 @@
 package app.markiro.handheld.core.writeoff
 
 import app.markiro.handheld.core.network.ServerUrlProvider
+import app.markiro.handheld.core.pallets.BoxRegistryMirror
 import app.markiro.handheld.core.network.StationApi
 import app.markiro.handheld.core.network.Strict
 import app.markiro.handheld.core.storage.HandheldDatabase
@@ -21,8 +22,8 @@ import javax.inject.Singleton
 object WriteoffModule {
     @Provides
     @Singleton
-    fun writeoffMirror(api: StationApi, db: HandheldDatabase, meta: MetaStore): WriteoffMirror =
-        WriteoffMirror(api, db, meta)
+    fun writeoffMirror(api: StationApi, db: HandheldDatabase, meta: MetaStore, registry: BoxRegistryMirror): WriteoffMirror =
+        WriteoffMirror(api, db, meta, registry)
 
     /** The authenticated client already adds the key, the capabilities, revocation and reachability handling. */
     @Provides

@@ -19,11 +19,13 @@ Requires JDK 17 and the Android SDK (platform 35); point `local.properties` at i
 
 ## Device replacement drain
 
-Room v17 adds a durable replacement intent and exact readiness/closure request bodies.
+Room v20 adds a durable replacement intent and exact readiness/closure request bodies.
 An authenticated versioned intent retires only device grants, blocks new shifts,
-inventories and write-offs, and leaves existing task completion, printing recovery and
-sync workers available. The hub shows each pending channel, conflicts, unknown printing
-and active tasks. Existing inventory snapshots cannot be replaced while draining.
+inventories, write-offs and warehouse box attachments, and leaves existing task completion,
+warehouse pallet closure/removal, printing recovery and sync workers available. The hub shows
+each pending channel, conflicts, unknown printing and active tasks. Warehouse membership and removal queues count toward pending boxes;
+unacknowledged membership rejections count as conflicts. Existing inventory snapshots cannot
+be replaced while draining.
 
 A missing intent or `none` response never clears saved drain. Cancellation releases new
 work only after the exact credential-bound acknowledgement is committed locally; lost
@@ -49,8 +51,15 @@ They do not establish vendor scanner, physical printer or production TSD accepta
 ## Active shift on the hub
 
 The joined, locally cached shift appears above the mode tiles with its product,
-line, mode and progress. **Continue** resumes that shift; the **Shift** tile opens
+line, mode and progress. **Continue** re-enters that shift the same way the list
+does (`enter`, then a fresh bundle), so a GLN, serial block or template changed in
+the cabinet after entry reaches the device; offline it falls back to the cached
+bundle, and a refused entry shows the list's own states. The **Shift** tile opens
 all available shifts. Leaving or locally closing the shift removes the card.
+
+An aggregation shift whose bundle carried no SSCC block warns on this card and on
+the work screen from entry — «В организации не задан GLN» or «У контрагента-эмитента
+нет GLN», with where in the cabinet to fix it — rather than on the twentieth scan.
 
 The card uses the work screen's accepted-unit counter: the larger of the server's
 `acceptedUnits` and this handheld's accepted code count. A server snapshot carries
@@ -298,8 +307,12 @@ it was generated in, because one case exercises the local-date path.
 ### Aggregation walk-through against the local API
 
 1. In the cabinet the shift needs four things a validation shift does not: mode
-   «агрегация», a box capacity, a box label template, and a counterparty with a GLN as
-   the SSCC issuer. Without the issuer the device can close no box at all, and says so.
+   «агрегация», a box capacity, a box label template, and a GLN on the organisation
+   profile or on a counterparty named as the SSCC issuer. The server refuses to start an
+   aggregation shift without one (422 `ORG_GLN_MISSING` / `SSCC_ISSUER_GLN_MISSING`), and
+   a shift that lost its GLN after starting warns on the card and the work screen. A full
+   box whose close is refused accepts no further units: the strip says «КОРОБ ПОЛОН» and
+   the reason stays in a banner until a close succeeds.
 2. Enter the shift and send `boxCapacity` scans. The grid fills; the last unit closes the
    box, prints, and the screen clears itself after about a second.
 3. What the stand-in printer captured should carry the bare 18-digit SSCC — the `(00)`
@@ -313,6 +326,84 @@ it was generated in, because one case exercises the local-date path.
 5. Exhausting the pool needs a small block: the box stays open and names the reason.
    Closing the shift with a non-empty queue must succeed, and the queue must still be
    there afterwards.
+
+## Паллеты (складская сборка)
+
+A warehouse pallet is built from boxes that were already closed earlier — in another
+shift, by another terminal, or on a pallet since disassembled — by scanning their SSCC
+labels, with no shift of its own. The hub tile «Паллеты» sits beside «Списание» and is
+gated on `canBuildPallets`, the operator's own flag from `GET /station/pallet-bootstrap`
+(products, per-operator permission, this device's extension-1 range and pallet label
+templates). The tile is never hidden: without the right it carries the status «нет прав»
+in the attention colour, and opening it lands on a full-screen refusal naming the flag
+and where a manager grants it. A tile that vanishes teaches an operator that the terminal
+is broken; one that says why teaches them whom to ask.
+
+The device decides everything offline against `box_registry`, a tenant-wide mirror that
+is shared with write-off — the table itself is the same one the write-off screen has
+always used (it was internally renamed from `writeoff_boxes`, but the sync cursor and
+bootstrap meta keys keep their original `writeoff_*` names). Each row also carries
+`localPalletId`, the device's own claim on a box, set on scan and cleared when the box
+is removed or the registry refresh confirms the server accepted it elsewhere.
+
+A scanned SSCC runs through eight checks, in order: pallet label (wrong scan target) →
+box unknown to the registry → already on a closed pallet belonging to someone else
+(a concrete foreign SSCC) → already on this pallet (idempotent, no error) → already on
+another open pallet on this same device → already on an open pallet on another device
+(no number to name yet) → product unknown to the bootstrap mirror → wrong product for
+this pallet → accepted. The closed-foreign-pallet check deliberately runs before the
+idempotent one: a settled cross-device conflict outranks a membership row this device
+still holds only locally. Accepting a box snapshots its `bottleCount` and `productionDate`
+into the membership row at scan time, so the label's quantity and shared production
+date do not depend on registry rows a later delta or re-walk could drop.
+
+The pallet closes automatically at the product's `palletBoxCapacity`, or earlier through
+an explicit «Закрыть паллету досрочно» that names the current count. Closing burns a
+serial from the device's own extension-1 pool, exactly like a box in the aggregation
+mode; a pool that runs dry leaves the pallet open with the reason shown, and a missing
+label template reads «Нет шаблона этикетки паллеты — задайте его в кабинете». Printer
+selection reuses the shared `PrinterChoiceScreen`.
+
+Any box can be taken off the open pallet with «Убрать с паллеты», whatever its sync
+status. A pending row is simply deleted; a sent or accepted one is undone by a queued
+`pallet_membership_removals` record that rides the next batch ahead of any
+memberships, so the server clears `boxes.pallet_id` before a re-scan of the same box
+lands. Taking off the last box deletes the open pallet on the device and, once the
+removal is applied, on the server — no serial is burned and nothing is printed.
+Storage is Room 19 (the removal queue).
+
+When the server rejects a membership at sync (a race with another device), the screen
+shows a conflict banner listing the rejected SSCCs and reasons, sectioned by pallet, with
+«Принято» per section to acknowledge and dismiss it without discarding the rejection rows.
+When the last box is taken off an open pallet the pallet itself disappears, and any
+unacknowledged rejection notices for it go with it — the boxes those notices name were
+never on the pallet in the first place. The notice is device-wide rather than tied to
+the pallet currently open: a membership can
+still be pending when its pallet is closed and its label printed, and that label states
+the box count, so a rejection arriving afterwards leaves the paper on the stack
+overstating it. A closed pallet's section therefore also offers «Перепечатать этикетку»,
+which records a «Состав паллеты изменился» reprint exception before sending the
+replacement label. A new pallet can be started while a conflict is still unacknowledged;
+the line is never blocked. `pallet_closed` and `subscription_read_only` are both server
+rejection reasons surfaced this way — the first because this device's own target pallet
+had already been closed or disassembled on the server, the second because the tenant's
+subscription is read-only and the server quarantined the record rather than applying it.
+
+Disassembling a pallet (production or warehouse) has two routes into the same
+scan-label → give-a-reason → `pallet_exceptions(disassemble)` flow: a shift-scoped one
+from a shift's own exceptions hub, and a shift-less one reached from the pallets
+screen's own app bar, for disassembling a warehouse pallet without opening any shift at
+all.
+
+Storage lives at Room database version 19. The migration renaming `writeoff_boxes` to
+`box_registry` and adding the pallet tables guards against a table that is already
+named `box_registry` (an idempotent upgrade path), and a device already sitting on the
+in-between schema needs its app data cleared rather than a second in-place migration.
+
+Sync folds pending `pallet_memberships` into the same batch-id signature as boxes,
+pallets and label events, so the sync channel is pinned against memberships that would
+otherwise join a batch after its id was already computed; the registry mirror refreshes
+on entering the pallets screen and after every accepted batch.
 
 ## Релизная сборка и подпись
 

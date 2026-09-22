@@ -222,7 +222,7 @@ export function EmployeeStationAccessSection({
               </span>
               <div className="mk-employee-station-access-section__actions">
                 <StatusChip
-                  status={access.active ? "ok" : "neutral"}
+                  phase={access.active ? "active" : "retired"}
                   label={
                     access.active
                       ? t("pages.employees.stationAccess.activeBadge")

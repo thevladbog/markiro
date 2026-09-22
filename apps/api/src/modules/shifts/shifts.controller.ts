@@ -26,6 +26,7 @@ import {
   Post,
   Query,
   Req,
+  Res,
   UseGuards,
 } from "@nestjs/common";
 import {
@@ -35,9 +36,11 @@ import {
   ApiOkResponse,
   ApiOperation,
   ApiParam,
+  ApiProduces,
   ApiResponse,
   ApiTags,
 } from "@nestjs/swagger";
+import type { Response } from "express";
 import {
   CABINET_CAPABILITY,
   productLabelTemplateListSchema,
@@ -94,8 +97,11 @@ import {
   type BoxLabelTemplateProductQueryDto,
   productLabelTemplateProductQuerySchema,
   type ProductLabelTemplateProductQueryDto,
+  shiftEntrySchema,
+  type ShiftEntryDto,
 } from "./dto";
 import { ShiftsService, type EffectiveListShiftsQuery } from "./shifts.service";
+import { renderShiftTaskFormHtml } from "./shift-task-form";
 
 @ApiTags("shifts")
 @Controller("shifts")
@@ -331,6 +337,29 @@ export class ShiftsController {
       : result;
   }
 
+  @Get(":id/task-form")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiOperation({
+    summary: "Render the printable shift task form",
+    description:
+      "Responds with a text/html page for printing, not JSON. Closed shifts are refused.",
+  })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiProduces("text/html")
+  @ApiOkResponse({ schema: { type: "string" } })
+  @ApiHttpErrors(401, 403, 404, 409)
+  @ApiCabinetAuth()
+  async taskForm(
+    @Req() req: RequestWithTenant,
+    @Param("id") id: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<string> {
+    const data = await this.shiftsService.taskFormData(req.tenantId!, id);
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Cache-Control", "private, no-store");
+    return renderShiftTaskFormHtml(data);
+  }
+
   // Cabinet-only: a device reading an
   // arbitrary shift by id has no legitimate use once it can already
   // list/open/bundle its own.
@@ -461,9 +490,15 @@ export class ShiftsController {
   @ApiOperation({ summary: "Open a shift" })
   @ApiCabinetOrStationAuth()
   @ApiParam({ name: "id", format: "uuid" })
+  @ApiZodBody(shiftEntrySchema, { required: false })
   @ApiOkResponse({ schema: shiftOpenApiSchema })
+  @ApiZodValidationError()
   @ApiHttpErrors(401, 403, 404, 409, 429)
-  async openShift(@Req() req: RequestWithTenant, @Param("id") id: string) {
+  async openShift(
+    @Req() req: RequestWithTenant,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(shiftEntrySchema)) body: ShiftEntryDto,
+  ) {
     const result = await this.shiftsService.openShift(
       req.tenantId!,
       id,
@@ -472,6 +507,7 @@ export class ShiftsController {
         : { domain: "cabinet", id: req.userId! },
       req.deviceId,
       req.get("x-station-capabilities"),
+      body.entryMethod,
     );
     return req.authKind === "station"
       ? projectDeviceValidationPrint(result, req.get("x-station-capabilities"))
@@ -494,15 +530,22 @@ export class ShiftsController {
   })
   @ApiStationAuth()
   @ApiParam({ name: "id", format: "uuid" })
+  @ApiZodBody(shiftEntrySchema, { required: false })
   @ApiOkResponse({ schema: shiftOpenApiSchema })
+  @ApiZodValidationError()
   @ApiHttpErrors(401, 403, 404, 409, 429)
-  async enterShift(@Req() req: RequestWithTenant, @Param("id") id: string) {
+  async enterShift(
+    @Req() req: RequestWithTenant,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(shiftEntrySchema)) body: ShiftEntryDto,
+  ) {
     if (!req.deviceId) throw new Error("Station device identity is missing");
     const result = await this.shiftsService.enterShift(
       req.tenantId!,
       id,
       req.deviceId,
       req.get("x-station-capabilities"),
+      body.entryMethod,
     );
     return projectDeviceValidationPrint(result, req.get("x-station-capabilities"));
   }

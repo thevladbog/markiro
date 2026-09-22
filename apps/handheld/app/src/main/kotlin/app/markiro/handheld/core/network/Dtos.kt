@@ -103,6 +103,10 @@ data class ShiftDto(
 @Serializable
 data class ShiftListResponse(val items: List<ShiftDto>)
 
+/** Body of `POST /shifts/:id/enter`; distinguishes a paper-form scan from picking the shift off the list. */
+@Serializable
+data class ShiftEntryRequest(val entryMethod: String)
+
 /** `GET /station/inventory-tasks` item; every field is sent by the server. */
 @Serializable
 data class InventoryTaskDto(

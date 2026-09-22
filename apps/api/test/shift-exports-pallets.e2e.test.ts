@@ -242,7 +242,57 @@ describe.skipIf(!ready)("shift exports pallets e2e", () => {
       errorCode: null,
       totalCodeCount: 4,
       totalBoxCount: 3,
+      totalPalletCount: 1,
     });
+    // Owner report 2026-09-19: the part and its file name must say how many
+    // pallets the document covers, not only boxes.
+    const [artifact] = await db
+      .select({
+        palletCount: schema.shiftExportArtifacts.palletCount,
+        filename: schema.shiftExportArtifacts.filename,
+      })
+      .from(schema.shiftExportArtifacts)
+      .where(eq(schema.shiftExportArtifacts.exportId, exportId));
+    expect(artifact?.palletCount).toBe(1);
+    expect(artifact?.filename).toMatch(/_4pcs_3box_1pallet_\d{4}-\d{2}-\d{2}\.csv$/);
+  });
+
+  it("writes the pallet → boxes TXT with only SSCCs: the pallet, its boxes, no codes, no loose box", async () => {
+    const { agent, shiftId, box1Sscc, box2Sscc, box3Sscc, palletSscc } = await fixture();
+
+    putVerified.mockClear();
+    const created = await agent
+      .post(`/shifts/${shiftId}/exports`)
+      .send({
+        formatId: "shift_txt_pallet_boxes",
+        formatVersion: 1,
+        maxLines: null,
+        idempotencyKey: randomUUID(),
+      })
+      .expect(201);
+    const exportId = (created.body as { id: string }).id;
+
+    await app!.get(ShiftExportRunnerService).run(exportId, { retryCount: 0, retryLimit: 5 });
+
+    expect(putVerified).toHaveBeenCalledTimes(1);
+    const [, body] = putVerified.mock.calls[0]!;
+    const txt = (body as Buffer).toString("utf-8");
+    expect(txt).toBe(`00${palletSscc}\n00${box1Sscc}\n00${box2Sscc}\n\n`);
+    expect(txt).not.toContain(box3Sscc);
+    expect(txt).not.toContain(VALID_GTIN14);
+
+    const [row] = await db
+      .select()
+      .from(schema.shiftExports)
+      .where(eq(schema.shiftExports.id, exportId));
+    expect(row).toMatchObject({
+      status: "ready",
+      errorCode: null,
+      totalCodeCount: 3,
+      totalBoxCount: 2,
+      totalPalletCount: 1,
+    });
+    expect(row?.formatId).toBe("shift_txt_pallet_boxes");
   });
 
   it("rejects a pallets-mode format for a shift with no pallets as a precise, terminal failure", async () => {

@@ -126,6 +126,24 @@ class ShiftListScreenTest {
         compose.onNodeWithText("Смена уже закрыта").assertDoesNotExist()
     }
 
+    /** A refusal this build CAN name is said in words, with where to fix it, not as a code. */
+    @Test
+    fun aRefusalForAMissingGlnIsSaidInWords() {
+        compose.setContent {
+            MarkiroTheme {
+                ShiftListScreen(
+                    ShiftListUi(
+                        false, null, emptyList(), emptyList(), false, false, 0L, true, "Линия 2",
+                        ShiftDialog.Refused(EnterStep.ENTER, 422, "ORG_GLN_MISSING"),
+                    ),
+                    ShiftListCallbacks(),
+                )
+            }
+        }
+        compose.onNodeWithText("В организации не задан GLN", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("ORG_GLN_MISSING", substring = true).assertDoesNotExist()
+    }
+
     /**
      * A refused refresh looked exactly like a successful one, and with the pull
      * gesture that is worse than before: the spinner turns, the list does not

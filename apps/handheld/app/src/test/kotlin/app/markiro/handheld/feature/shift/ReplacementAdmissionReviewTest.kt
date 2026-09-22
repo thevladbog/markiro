@@ -73,6 +73,7 @@ class ReplacementAdmissionReviewTest {
             db.deviceConfigDao(),
             db.recovery,
             ReachabilityTracker { 1_757_500_000_000L },
+            app.markiro.handheld.core.scan.ScanRouterAdapter(kotlinx.coroutines.flow.MutableSharedFlow()),
             flowOf(Unit),
         ),
     )

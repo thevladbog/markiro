@@ -8,7 +8,7 @@ import {
   stationOperatorIsCurrentlyActive,
 } from "../offline-grants/admission.js";
 import { sampleGrantClock, type GrantClockSample } from "../offline-grants/clock.js";
-import { readShiftExecutionProjection } from "../offline-grants/semantic.js";
+import { readExecutionToBind, readShiftExecutionProjection } from "../offline-grants/semantic.js";
 import type { PreparedProductLabelAcceptance, ProductLabelAcceptResult } from "./types.js";
 import { parseProductLabelAcceptance } from "./validation.js";
 
@@ -35,6 +35,21 @@ export function assertPreparedLabelMatchesExecution(
     value.fields["counterparty.name"] === (shift.counterpartyName ?? "");
   if (!policyMatches || !fieldsMatch)
     throw new Error("offline grant prepared label execution changed");
+}
+
+/**
+ * The two ways a code already accepted elsewhere comes back. The acceptance
+ * trigger aborts with its own name; the mirror's unique index speaks for
+ * itself when the insert gets that far. Both mean one physical unit scanned
+ * twice, and both paths -- granted and legacy -- must read them the same way:
+ * telling the operator "duplicate" is a verdict, while letting either escape
+ * stops printing and acceptance with a storage failure.
+ */
+function isDuplicateCodeRejection(message: string): boolean {
+  return (
+    message.includes("VALIDATION_CODE_DUPLICATE") ||
+    /UNIQUE constraint failed: codes_mirror\.code_hash(?:\s|$)/i.test(message)
+  );
 }
 
 /** One INSERT invokes a SQLite trigger; no transaction may span calls on the Tauri SQL pool. */
@@ -71,11 +86,8 @@ async function recordProductLabelAcceptanceLegacy(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (message.includes("PRODUCT_LABEL_BUSY")) return { status: "busy" };
-    // Only this exact constraint means a duplicate unit. Other unique/write failures must surface.
-    if (
-      message.includes("VALIDATION_CODE_DUPLICATE") ||
-      /UNIQUE constraint failed: codes_mirror\.code_hash(?:\s|$)/i.test(message)
-    ) {
+    // Only these exact rejections mean a duplicate unit. Other write failures must surface.
+    if (isDuplicateCodeRejection(message)) {
       await recordScan(
         exec,
         {
@@ -142,8 +154,9 @@ export async function recordProductLabelAcceptanceWithOfflineGrant(
       device_id: string;
       owner_kind: "station";
       credential_epoch: number;
+      mode: "observe" | "strict";
     }>(
-      "SELECT tenant_id,device_id,owner_kind,credential_epoch FROM offline_grant_install_state WHERE id=1",
+      "SELECT tenant_id,device_id,owner_kind,credential_epoch,mode FROM offline_grant_install_state WHERE id=1",
     );
     if (!state) return recordProductLabelAcceptanceLegacy(exec, input);
     // An already committed native acceptance remains recovery; installing grants
@@ -170,7 +183,15 @@ export async function recordProductLabelAcceptanceWithOfflineGrant(
     );
     const result = { status: "accepted" as const, jobId: value.jobId };
     try {
-      const execution = await readShiftExecutionProjection(exec, value.shiftId);
+      // A device that cannot bind the shift has no grant to charge. Strict mode
+      // must refuse rather than print an unbound duplicate; observe mode records
+      // production exactly as a device without grant state does, because an
+      // observing station has no authority to stop the line -- and refusing here
+      // stopped it at the first scan, before anything printed.
+      const execution = await readExecutionToBind(state.mode, () =>
+        readShiftExecutionProjection(exec, value.shiftId),
+      );
+      if (!execution) return recordProductLabelAcceptanceLegacy(exec, input);
       assertPreparedLabelMatchesExecution(value, execution);
       const part = {
         operatorId: value.operatorId,
@@ -235,7 +256,8 @@ export async function recordProductLabelAcceptanceWithOfflineGrant(
         );
       return result;
     } catch (error) {
-      if (!/UNIQUE constraint failed: codes_mirror\.code_hash/i.test(String(error))) throw error;
+      if (!isDuplicateCodeRejection(error instanceof Error ? error.message : String(error)))
+        throw error;
       await recordScanWithOfflineGrant(
         exec,
         {

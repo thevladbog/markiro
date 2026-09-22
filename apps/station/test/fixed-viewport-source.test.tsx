@@ -83,9 +83,12 @@ describe("fixed station viewport source contract", () => {
     expect(app.match(/await refreshStationTaskAuthority\(\{/g)).toHaveLength(2);
     expect(app).toContain('task: { taskKind: "shift", taskId: entered.id }');
     expect(app).toContain('task: { taskKind: "inventory", taskId: entered.inventory.inventoryId }');
+    // Both handlers hand the resume verdict to the shared entry admission,
+    // which is what skips new-work consumption for a resumed task; see
+    // `admitTaskEntry` and test/shift-entry-admission.test.ts.
     expect(
       app.match(
-        /if \(!authority\?\.resuming && !\(await replacementBlocksNewWork\(tauriExecutor\)\)\)/g,
+        /resuming: Boolean\(authority\?\.resuming\) \|\| \(await replacementBlocksNewWork\(tauriExecutor\)\),/g,
       ),
     ).toHaveLength(2);
   });
@@ -185,7 +188,9 @@ describe("fixed station viewport source contract", () => {
     const css = stationSource("station.css");
     const statusBar = stationSource("ui/StatusBar.tsx");
 
-    expect(css).toMatch(/\.station-update-indicator\s*\{[^}]*position:\s*static;/s);
+    // `relative` only makes the button the containing block for its dot; the
+    // button itself stays in the header grid's flow, never absolute.
+    expect(css).toMatch(/\.station-update-indicator\s*\{[^}]*position:\s*relative;/s);
     expect(css).not.toMatch(/\.station-update-indicator\s*\{[^}]*position:\s*absolute;/s);
     expect(statusBar.match(/<Button/g)).toHaveLength(3);
     expect(statusBar.match(/size="floor"/g)).toHaveLength(3);
@@ -196,39 +201,91 @@ describe("fixed station viewport source contract", () => {
     expect(css).toMatch(
       /\.station-status-actions\s*\{[^}]*display:\s*flex;[^}]*justify-content:\s*flex-end;/s,
     );
+    // The rail is one row at every width: no wrapping, and its controls keep
+    // the 64px floor touch target -- the production gallery contract rejects
+    // any interactive element below 64px, so nothing here redefines
+    // `--control-floor`.
+    expect(css).not.toMatch(/\.station-status-actions[^{]*\{[^}]*--control-floor/s);
+    expect(css).not.toMatch(/\.station-rail-button[^{]*\{[^}]*--control-floor/s);
+    expect(css).toMatch(/\.station-status-actions\s*\{[^}]*flex-wrap:\s*nowrap;/s);
     expect(css).toMatch(
       /\.station-status-actions\s*>\s*\*\s*\{[^}]*min-width:\s*0;[^}]*min-height:\s*64px;/s,
     );
+    expect(css).toMatch(
+      /\.station-status-actions :where\(button, \[role="button"\]\)\s*\{[^}]*min-height:\s*64px;/s,
+    );
+    expect(css).toMatch(/\.station-rail-button--icon\s*\{[^}]*width:\s*64px;/s);
     expect(css).not.toMatch(
       /\.station-status-actions\s*>\s*\*\s*\{[^}]*(?<![a-z-])width:\s*100%;/s,
     );
     expect(css).toMatch(
-      /\.station-status-bar\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) auto auto;/s,
+      /\.station-status-bar\s*\{[^}]*min-height:\s*80px;[^}]*grid-template-columns:\s*minmax\(0, 1fr\) auto auto;/s,
     );
     expect(css).not.toMatch(/\.station-status-bar\s*\{[^}]*minmax\(960px/s);
     // Below 1680 the healthy pills drop their caption and keep the tone dot.
     expect(css).toMatch(
       /@media \(max-width: 1679px\)\s*\{[\s\S]*?\.station-status-pill\[data-value-shown="false"\] dt\s*\{[^}]*clip:\s*rect\(0 0 0 0\);/s,
     );
-    // Narrower still, the action rail drops to its own row.
+    // ...and the rail never drops to a second row because of a viewport width:
+    // the 1024px terminal shows the same single 80px header as a 1920px one.
+    // The one exception is a control's error banner, which is not part of the
+    // 80px budget — and that rule is gated on the banner, not on a width.
+    expect(css).not.toMatch(/@media \(max-width: 1599px\)/);
+    expect(css.match(/\.station-status-actions\s*\{[^}]*flex-wrap:\s*wrap;/gs) ?? []).toHaveLength(
+      1,
+    );
+    expect(
+      css.match(/\.station-status-actions\s*\{[^}]*grid-column:\s*1 \/ -1;/gs) ?? [],
+    ).toHaveLength(1);
     expect(css).toMatch(
-      /@media \(max-width: 1599px\)\s*\{[\s\S]*?\.station-status-bar\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) auto;[\s\S]*?\.station-status-actions\s*\{[^}]*grid-column:\s*1 \/ -1;/s,
+      /\.station-status-bar:has\([^)]*__error[^)]*\)\s*\.station-status-actions\s*\{[^}]*grid-column:\s*1 \/ -1;[^}]*flex-wrap:\s*wrap;/s,
     );
     // A pill that has nothing to say paints no value text at any width.
     expect(css).toMatch(
       /\.station-status-pill\[data-value-shown="false"\] dd\s*\{[^}]*display:\s*none;/s,
     );
     expect(css).toMatch(
-      /@media \(max-width: 1100px\)\s*\{[\s\S]*?\.shift-selection__grid\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);[^}]*\}[\s\S]*?\.shift-card__body\s*\{[^}]*grid-template-columns:\s*minmax\(150px, 36%\) minmax\(0, 1fr\);/s,
+      /@media \(max-width: 1100px\)\s*\{[\s\S]*?\.shift-selection__grid\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);[^}]*\}[\s\S]*?\.shift-card__body\s*\{[^}]*grid-template-columns:\s*minmax\(150px, 38%\) minmax\(0, 1fr\);/s,
     );
     expect(css).toMatch(
       /\.station-status-actions \.window-mode-control__action\s*\{[^}]*white-space:\s*normal;[^}]*overflow-wrap:\s*anywhere;/s,
     );
-    expect(css).toMatch(
-      /\.station-update-indicator\s*\{[^}]*white-space:\s*normal;[^}]*overflow-wrap:\s*anywhere;/s,
-    );
+    // The update indicator is a glyph button now: nothing to wrap, and the
+    // availability dot is placed against the button itself (in flow, never
+    // absolutely positioned out of the header grid).
+    expect(css).toMatch(/\.station-rail-button\s*\{[^}]*min-height:\s*64px/s);
+    expect(css).toMatch(/\.station-update-indicator__dot\s*\{/s);
     expect(css).toMatch(
       /\.station-status-actions \.window-mode-control__error\s*\{[^}]*display:\s*grid;[^}]*width:\s*100%;[^}]*min-width:\s*0;[^}]*max-width:\s*100%;/s,
+    );
+  });
+
+  /**
+   * Карточка смены на реальном терминале разошлась с принятым макетом сразу в
+   * нескольких мелочах, и каждая из них — одна строка CSS, которую легко
+   * потерять обратно.
+   */
+  it("keeps the shift card's approved geometry: air between the facts, soft tags, a framed studio photo", () => {
+    const css = stationSource("station.css");
+    // 4px между заголовком, датами и тегами склеивали их в одно пятно.
+    expect(css).toMatch(/\.shift-card__details\s*\{[^}]*gap:\s*var\(--sp-2\);/s);
+    // Две даты переносятся по строкам и не слипаются.
+    expect(css).toMatch(/\.shift-card__dates\s*\{[^}]*row-gap:\s*var\(--sp-1\);/s);
+    // Форма различает род тега: фаза — пилюля, категория — скруглённый
+    // прямоугольник. 4px словаря на 22px читались коробкой.
+    expect(css).toMatch(/\.shift-card \.mk-tag\s*\{[^}]*border-radius:\s*6px;/s);
+    expect(css).toMatch(/\.shift-card \.mk-chip\s*\{[^}]*border-radius:\s*999px;/s);
+    // Номер смены — текст, а не тег: у него своё правило, а не .mk-tag.
+    expect(css).toMatch(/\.shift-card__number\s*\{[^}]*font:[^;]*var\(--font-mono\);/s);
+    // Снимок со своей подложкой обнимается коробкой, иначе скругление режет
+    // пустые углы `contain`, а не углы картинки.
+    expect(css).toMatch(
+      /\.shift-card__photo\[data-photo="opaque"\] \.product-image\s*\{[^}]*width:\s*auto;[^}]*height:\s*auto;[^}]*max-width:\s*100%;[^}]*max-height:\s*100%;[^}]*border-radius:/s,
+    );
+    // Заголовок без полного имени занимает его строки.
+    expect(css).toMatch(/\.shift-card__product--only\s*\{[^}]*-webkit-line-clamp:\s*5;/s);
+    expect(css).toMatch(
+      /@media \(max-height: 820px\)\s*\{[\s\S]*?\.shift-card__product--only\s*\{[^}]*-webkit-line-clamp:\s*4;/s,
     );
   });
 });

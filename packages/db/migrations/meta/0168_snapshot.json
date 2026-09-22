@@ -1,6 +1,6 @@
 {
-  "id": "d4e266d8-3878-413c-8c76-6bbe8d07e49c",
-  "prevId": "79ae6912-b6f0-45c3-9712-eb65d37a4092",
+  "id": "6d25e341-6345-4385-b8b9-6cac346a2954",
+  "prevId": "14ad86da-dd8a-462d-8849-0ac4f2e99cab",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1994,7 +1994,7 @@
           "name": "shift_id",
           "type": "uuid",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "terminal_id": {
           "name": "terminal_id",
@@ -2161,6 +2161,149 @@
       },
       "isRLSEnabled": false
     },
+    "public.pallet_membership_rejections": {
+      "name": "pallet_membership_rejections",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pallet_id": {
+          "name": "pallet_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "box_sscc": {
+          "name": "box_sscc",
+          "type": "char(18)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "box_id": {
+          "name": "box_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "winning_pallet_id": {
+          "name": "winning_pallet_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "added_at": {
+          "name": "added_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "recorded_at": {
+          "name": "recorded_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "pallet_membership_rejections_tenant_id_organization_id_fk": {
+          "name": "pallet_membership_rejections_tenant_id_organization_id_fk",
+          "tableFrom": "pallet_membership_rejections",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "pallet_membership_rejections_tenant_pallet_fk": {
+          "name": "pallet_membership_rejections_tenant_pallet_fk",
+          "tableFrom": "pallet_membership_rejections",
+          "tableTo": "pallets",
+          "columnsFrom": [
+            "tenant_id",
+            "pallet_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "pallet_membership_rejections_tenant_box_fk": {
+          "name": "pallet_membership_rejections_tenant_box_fk",
+          "tableFrom": "pallet_membership_rejections",
+          "tableTo": "boxes",
+          "columnsFrom": [
+            "tenant_id",
+            "box_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "pallet_membership_rejections_tenant_winning_pallet_fk": {
+          "name": "pallet_membership_rejections_tenant_winning_pallet_fk",
+          "tableFrom": "pallet_membership_rejections",
+          "tableTo": "pallets",
+          "columnsFrom": [
+            "tenant_id",
+            "winning_pallet_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "pallet_membership_rejections_tenant_pallet_sscc_uq": {
+          "name": "pallet_membership_rejections_tenant_pallet_sscc_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "pallet_id",
+            "box_sscc"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "pallet_membership_rejections_reason_check": {
+          "name": "pallet_membership_rejections_reason_check",
+          "value": "\"pallet_membership_rejections\".\"reason\" IN ('already_on_pallet', 'not_found', 'not_closed', 'disassembled', 'pallet_closed', 'product_mismatch')"
+        }
+      },
+      "isRLSEnabled": false
+    },
     "public.pallets": {
       "name": "pallets",
       "schema": "",
@@ -2182,7 +2325,26 @@
           "name": "shift_id",
           "type": "uuid",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'production'"
+        },
+        "product_id": {
+          "name": "product_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "device_id": {
+          "name": "device_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
         },
         "terminal_id": {
           "name": "terminal_id",
@@ -2254,6 +2416,34 @@
         }
       },
       "indexes": {
+        "pallets_warehouse_device_pallet_uq": {
+          "name": "pallets_warehouse_device_pallet_uq",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "device_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "device_pallet_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"pallets\".\"kind\" = 'warehouse'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "pallets_tenant_shift_idx": {
           "name": "pallets_tenant_shift_idx",
           "columns": [
@@ -2265,6 +2455,33 @@
             },
             {
               "expression": "shift_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "pallets_tenant_kind_closed_idx": {
+          "name": "pallets_tenant_kind_closed_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "kind",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "closed_at",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -2297,6 +2514,36 @@
           "columnsFrom": [
             "tenant_id",
             "shift_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "pallets_tenant_product_fk": {
+          "name": "pallets_tenant_product_fk",
+          "tableFrom": "pallets",
+          "tableTo": "products",
+          "columnsFrom": [
+            "tenant_id",
+            "product_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "pallets_tenant_device_fk": {
+          "name": "pallets_tenant_device_fk",
+          "tableFrom": "pallets",
+          "tableTo": "station_devices",
+          "columnsFrom": [
+            "tenant_id",
+            "device_id"
           ],
           "columnsTo": [
             "tenant_id",
@@ -2351,7 +2598,20 @@
         }
       },
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "pallets_kind_check": {
+          "name": "pallets_kind_check",
+          "value": "\"pallets\".\"kind\" IN ('production', 'warehouse')"
+        },
+        "pallets_kind_shape": {
+          "name": "pallets_kind_shape",
+          "value": "(\"pallets\".\"kind\" = 'production' AND \"pallets\".\"shift_id\" IS NOT NULL) OR (\"pallets\".\"kind\" = 'warehouse' AND \"pallets\".\"shift_id\" IS NULL AND \"pallets\".\"product_id\" IS NOT NULL AND \"pallets\".\"device_id\" IS NOT NULL)"
+        },
+        "pallets_warehouse_terminal_check": {
+          "name": "pallets_warehouse_terminal_check",
+          "value": "\"pallets\".\"kind\" <> 'warehouse' OR (\"pallets\".\"terminal_id\" IS NOT NULL AND \"pallets\".\"terminal_id\" = \"pallets\".\"device_id\"::text)"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.product_images": {
@@ -2703,6 +2963,14 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "entry_method": {
+          "name": "entry_method",
+          "type": "shift_entry_method",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'list'"
         }
       },
       "indexes": {
@@ -3549,13 +3817,6 @@
           "notNull": true,
           "default": 1
         },
-        "security_revocation_revision": {
-          "name": "security_revocation_revision",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
         "line_id": {
           "name": "line_id",
           "type": "uuid",
@@ -3644,10 +3905,6 @@
         "station_devices_credential_epoch_check": {
           "name": "station_devices_credential_epoch_check",
           "value": "\"station_devices\".\"credential_epoch\" > 0"
-        },
-        "station_devices_security_revocation_check": {
-          "name": "station_devices_security_revocation_check",
-          "value": "\"station_devices\".\"security_revocation_revision\" >= 0"
         },
         "station_devices_kind_check": {
           "name": "station_devices_kind_check",
@@ -4199,7 +4456,7 @@
         },
         "station_sync_quarantine_record_kind_check": {
           "name": "station_sync_quarantine_record_kind_check",
-          "value": "\"station_sync_quarantine\".\"record_kind\" IN ('item', 'box', 'exception', 'product_label_event', 'pallet', 'pallet_exception')"
+          "value": "\"station_sync_quarantine\".\"record_kind\" IN ('item', 'box', 'exception', 'product_label_event', 'pallet', 'pallet_exception', 'pallet_membership', 'pallet_membership_removal')"
         },
         "station_sync_quarantine_record_index_check": {
           "name": "station_sync_quarantine_record_index_check",
@@ -5869,6 +6126,13 @@
         },
         "can_writeoff": {
           "name": "can_writeoff",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "can_build_pallets": {
+          "name": "can_build_pallets",
           "type": "boolean",
           "primaryKey": false,
           "notNull": true,
@@ -14708,766 +14972,6 @@
       },
       "isRLSEnabled": false
     },
-    "public.working_device_replacement_capabilities": {
-      "name": "working_device_replacement_capabilities",
-      "schema": "",
-      "columns": {
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "device_id": {
-          "name": "device_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "credential_epoch": {
-          "name": "credential_epoch",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "supported": {
-          "name": "supported",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "observed_at": {
-          "name": "observed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "replacement_capabilities_tenant_device_fk": {
-          "name": "replacement_capabilities_tenant_device_fk",
-          "tableFrom": "working_device_replacement_capabilities",
-          "tableTo": "station_devices",
-          "columnsFrom": [
-            "tenant_id",
-            "device_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "working_device_replacement_capabilities_tenant_id_device_id_credential_epoch_pk": {
-          "name": "working_device_replacement_capabilities_tenant_id_device_id_credential_epoch_pk",
-          "columns": [
-            "tenant_id",
-            "device_id",
-            "credential_epoch"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "replacement_capabilities_epoch_check": {
-          "name": "replacement_capabilities_epoch_check",
-          "value": "\"working_device_replacement_capabilities\".\"credential_epoch\" > 0"
-        },
-        "replacement_capabilities_interval_check": {
-          "name": "replacement_capabilities_interval_check",
-          "value": "isfinite(\"working_device_replacement_capabilities\".\"observed_at\") and isfinite(\"working_device_replacement_capabilities\".\"expires_at\") and \"working_device_replacement_capabilities\".\"expires_at\" > \"working_device_replacement_capabilities\".\"observed_at\" and \"working_device_replacement_capabilities\".\"expires_at\" <= \"working_device_replacement_capabilities\".\"observed_at\" + interval '5 minutes'"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.working_device_replacement_closure_acknowledgements": {
-      "name": "working_device_replacement_closure_acknowledgements",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "device_id": {
-          "name": "device_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "preparation_id": {
-          "name": "preparation_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "intent_id": {
-          "name": "intent_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "credential_epoch": {
-          "name": "credential_epoch",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "request_id": {
-          "name": "request_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "request_hash": {
-          "name": "request_hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "response": {
-          "name": "response",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "acknowledged_at": {
-          "name": "acknowledged_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "working_device_replacement_closure_ack_intent_idx": {
-          "name": "working_device_replacement_closure_ack_intent_idx",
-          "columns": [
-            {
-              "expression": "tenant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "device_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "intent_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "credential_epoch",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "working_device_replacement_closure_ack_intent_fk": {
-          "name": "working_device_replacement_closure_ack_intent_fk",
-          "tableFrom": "working_device_replacement_closure_acknowledgements",
-          "tableTo": "working_device_replacement_readiness_intents",
-          "columnsFrom": [
-            "tenant_id",
-            "device_id",
-            "preparation_id",
-            "intent_id",
-            "credential_epoch"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "device_id",
-            "preparation_id",
-            "id",
-            "credential_epoch"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "working_device_replacement_closure_ack_request_uq": {
-          "name": "working_device_replacement_closure_ack_request_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "request_id"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "working_device_replacement_closure_ack_bounds": {
-          "name": "working_device_replacement_closure_ack_bounds",
-          "value": "\"working_device_replacement_closure_acknowledgements\".\"credential_epoch\" between 1 and 9007199254740991 and \"working_device_replacement_closure_acknowledgements\".\"request_hash\" ~ '^[0-9a-f]{64}$' and jsonb_typeof(\"working_device_replacement_closure_acknowledgements\".\"response\")='object' and octet_length(\"working_device_replacement_closure_acknowledgements\".\"response\"::text)<=8192 and isfinite(\"working_device_replacement_closure_acknowledgements\".\"acknowledged_at\")"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.working_device_replacement_execution_previews": {
-      "name": "working_device_replacement_execution_previews",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "device_id": {
-          "name": "device_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "preparation_id": {
-          "name": "preparation_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "actor_domain": {
-          "name": "actor_domain",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "actor_id": {
-          "name": "actor_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "request_id": {
-          "name": "request_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "request_hash": {
-          "name": "request_hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "expected_revision": {
-          "name": "expected_revision",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "mode": {
-          "name": "mode",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "emergency_reason": {
-          "name": "emergency_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "facts_fingerprint": {
-          "name": "facts_fingerprint",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "new_work_allowed_at": {
-          "name": "new_work_allowed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "replacement_execution_previews_preparation_fk": {
-          "name": "replacement_execution_previews_preparation_fk",
-          "tableFrom": "working_device_replacement_execution_previews",
-          "tableTo": "working_device_replacement_preparations",
-          "columnsFrom": [
-            "tenant_id",
-            "device_id",
-            "preparation_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "device_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "replacement_execution_previews_request_uq": {
-          "name": "replacement_execution_previews_request_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "actor_domain",
-            "request_id"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "replacement_execution_previews_identity_check": {
-          "name": "replacement_execution_previews_identity_check",
-          "value": "\"working_device_replacement_execution_previews\".\"actor_domain\" in ('cabinet','platform') and length(btrim(\"working_device_replacement_execution_previews\".\"actor_id\")) between 1 and 256 and \"working_device_replacement_execution_previews\".\"expected_revision\" > 0 and \"working_device_replacement_execution_previews\".\"request_hash\" ~ '^[0-9a-f]{64}$' and \"working_device_replacement_execution_previews\".\"facts_fingerprint\" ~ '^[0-9a-f]{64}$'"
-        },
-        "replacement_execution_previews_mode_check": {
-          "name": "replacement_execution_previews_mode_check",
-          "value": "((\"working_device_replacement_execution_previews\".\"mode\" = 'normal' and \"working_device_replacement_execution_previews\".\"emergency_reason\" is null) or (\"working_device_replacement_execution_previews\".\"mode\" = 'emergency' and \"working_device_replacement_execution_previews\".\"emergency_reason\" is not null and length(btrim(\"working_device_replacement_execution_previews\".\"emergency_reason\")) between 1 and 1000)) is true"
-        },
-        "replacement_execution_previews_interval_check": {
-          "name": "replacement_execution_previews_interval_check",
-          "value": "isfinite(\"working_device_replacement_execution_previews\".\"created_at\") and isfinite(\"working_device_replacement_execution_previews\".\"expires_at\") and isfinite(\"working_device_replacement_execution_previews\".\"new_work_allowed_at\") and \"working_device_replacement_execution_previews\".\"expires_at\" > \"working_device_replacement_execution_previews\".\"created_at\" and \"working_device_replacement_execution_previews\".\"expires_at\" <= \"working_device_replacement_execution_previews\".\"created_at\" + interval '5 minutes'"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.working_device_replacement_executions": {
-      "name": "working_device_replacement_executions",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "device_id": {
-          "name": "device_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "preparation_id": {
-          "name": "preparation_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "actor_domain": {
-          "name": "actor_domain",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "actor_id": {
-          "name": "actor_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "request_id": {
-          "name": "request_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "request_hash": {
-          "name": "request_hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "revision": {
-          "name": "revision",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 1
-        },
-        "mode": {
-          "name": "mode",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "state": {
-          "name": "state",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'executing'"
-        },
-        "step": {
-          "name": "step",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'revoke_pending'"
-        },
-        "source_credential_epoch": {
-          "name": "source_credential_epoch",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "source_api_key_id": {
-          "name": "source_api_key_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "facts_fingerprint": {
-          "name": "facts_fingerprint",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "readiness_report_id": {
-          "name": "readiness_report_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "emergency_reason": {
-          "name": "emergency_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "server_facts": {
-          "name": "server_facts",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::jsonb"
-        },
-        "target_device_id": {
-          "name": "target_device_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "offline_authority_until": {
-          "name": "offline_authority_until",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "new_work_allowed_at": {
-          "name": "new_work_allowed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "started_at": {
-          "name": "started_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "repair_attempts": {
-          "name": "repair_attempts",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "last_repair_at": {
-          "name": "last_repair_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "next_repair_at": {
-          "name": "next_repair_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "credential_revoked_at": {
-          "name": "credential_revoked_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "executed_at": {
-          "name": "executed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "response": {
-          "name": "response",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "recovery_state": {
-          "name": "recovery_state",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'not_required'"
-        },
-        "recovery_credential_epoch": {
-          "name": "recovery_credential_epoch",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "recovery_closed_at": {
-          "name": "recovery_closed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "recovery_close_reason": {
-          "name": "recovery_close_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "working_device_replacement_executions_repair_idx": {
-          "name": "working_device_replacement_executions_repair_idx",
-          "columns": [
-            {
-              "expression": "state",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "started_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "replacement_executions_due_repair_idx": {
-          "name": "replacement_executions_due_repair_idx",
-          "columns": [
-            {
-              "expression": "coalesce(\"next_repair_at\", \"started_at\")",
-              "asc": true,
-              "isExpression": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "started_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"working_device_replacement_executions\".\"state\" = 'executing'",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "working_device_replacement_executions_source_fk": {
-          "name": "working_device_replacement_executions_source_fk",
-          "tableFrom": "working_device_replacement_executions",
-          "tableTo": "station_devices",
-          "columnsFrom": [
-            "tenant_id",
-            "device_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "working_device_replacement_executions_preparation_fk": {
-          "name": "working_device_replacement_executions_preparation_fk",
-          "tableFrom": "working_device_replacement_executions",
-          "tableTo": "working_device_replacement_preparations",
-          "columnsFrom": [
-            "tenant_id",
-            "device_id",
-            "preparation_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "device_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "working_device_replacement_executions_target_fk": {
-          "name": "working_device_replacement_executions_target_fk",
-          "tableFrom": "working_device_replacement_executions",
-          "tableTo": "station_devices",
-          "columnsFrom": [
-            "tenant_id",
-            "target_device_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "working_device_replacement_executions_report_fk": {
-          "name": "working_device_replacement_executions_report_fk",
-          "tableFrom": "working_device_replacement_executions",
-          "tableTo": "working_device_replacement_readiness_reports",
-          "columnsFrom": [
-            "tenant_id",
-            "device_id",
-            "preparation_id",
-            "readiness_report_id",
-            "source_credential_epoch"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "device_id",
-            "preparation_id",
-            "id",
-            "credential_epoch"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "working_device_replacement_executions_preparation_uq": {
-          "name": "working_device_replacement_executions_preparation_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "preparation_id"
-          ]
-        },
-        "working_device_replacement_executions_request_uq": {
-          "name": "working_device_replacement_executions_request_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "actor_domain",
-            "request_id"
-          ]
-        },
-        "working_device_replacement_executions_target_uq": {
-          "name": "working_device_replacement_executions_target_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "target_device_id"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "replacement_executions_repair_check": {
-          "name": "replacement_executions_repair_check",
-          "value": "((\"working_device_replacement_executions\".\"repair_attempts\" = 0 and \"working_device_replacement_executions\".\"last_repair_at\" is null and \"working_device_replacement_executions\".\"next_repair_at\" is null) or (\"working_device_replacement_executions\".\"repair_attempts\" > 0 and \"working_device_replacement_executions\".\"last_repair_at\" is not null and \"working_device_replacement_executions\".\"next_repair_at\" is not null and isfinite(\"working_device_replacement_executions\".\"last_repair_at\") and isfinite(\"working_device_replacement_executions\".\"next_repair_at\") and \"working_device_replacement_executions\".\"last_repair_at\" >= \"working_device_replacement_executions\".\"started_at\" and \"working_device_replacement_executions\".\"next_repair_at\" >= \"working_device_replacement_executions\".\"last_repair_at\")) is true"
-        },
-        "working_device_replacement_executions_identity_check": {
-          "name": "working_device_replacement_executions_identity_check",
-          "value": "\"working_device_replacement_executions\".\"revision\" > 0 and \"working_device_replacement_executions\".\"actor_domain\" in ('cabinet','platform') and length(btrim(\"working_device_replacement_executions\".\"actor_id\")) between 1 and 256 and \"working_device_replacement_executions\".\"request_hash\" ~ '^[0-9a-f]{64}$' and \"working_device_replacement_executions\".\"facts_fingerprint\" ~ '^[0-9a-f]{64}$' and \"working_device_replacement_executions\".\"source_credential_epoch\" between 1 and 9007199254740991 and (\"working_device_replacement_executions\".\"target_device_id\" is null or \"working_device_replacement_executions\".\"target_device_id\" <> \"working_device_replacement_executions\".\"device_id\") and (\"working_device_replacement_executions\".\"source_api_key_id\" is null or length(btrim(\"working_device_replacement_executions\".\"source_api_key_id\")) between 1 and 256)"
-        },
-        "working_device_replacement_executions_mode_check": {
-          "name": "working_device_replacement_executions_mode_check",
-          "value": "((\"working_device_replacement_executions\".\"mode\" = 'normal' and \"working_device_replacement_executions\".\"readiness_report_id\" is not null and \"working_device_replacement_executions\".\"emergency_reason\" is null and \"working_device_replacement_executions\".\"recovery_state\" = 'not_required') or (\"working_device_replacement_executions\".\"mode\" = 'emergency' and \"working_device_replacement_executions\".\"emergency_reason\" is not null and length(btrim(\"working_device_replacement_executions\".\"emergency_reason\")) between 1 and 1000 and \"working_device_replacement_executions\".\"recovery_state\" in ('required','draining','completed','evidence_unavailable'))) is true"
-        },
-        "working_device_replacement_executions_step_check": {
-          "name": "working_device_replacement_executions_step_check",
-          "value": "((\"working_device_replacement_executions\".\"state\" = 'executing' and \"working_device_replacement_executions\".\"target_device_id\" is null and \"working_device_replacement_executions\".\"executed_at\" is null and \"working_device_replacement_executions\".\"response\" is null and ((\"working_device_replacement_executions\".\"step\" = 'revoke_pending' and \"working_device_replacement_executions\".\"credential_revoked_at\" is null) or (\"working_device_replacement_executions\".\"step\" = 'credential_revoked' and \"working_device_replacement_executions\".\"credential_revoked_at\" is not null))) or (\"working_device_replacement_executions\".\"state\" = 'completed' and \"working_device_replacement_executions\".\"step\" = 'transferred' and \"working_device_replacement_executions\".\"target_device_id\" is not null and \"working_device_replacement_executions\".\"credential_revoked_at\" is not null and \"working_device_replacement_executions\".\"executed_at\" is not null and \"working_device_replacement_executions\".\"response\" is not null)) is true"
-        },
-        "working_device_replacement_executions_interval_check": {
-          "name": "working_device_replacement_executions_interval_check",
-          "value": "isfinite(\"working_device_replacement_executions\".\"started_at\") and isfinite(\"working_device_replacement_executions\".\"offline_authority_until\") and isfinite(\"working_device_replacement_executions\".\"new_work_allowed_at\") and \"working_device_replacement_executions\".\"new_work_allowed_at\" >= \"working_device_replacement_executions\".\"offline_authority_until\" and (\"working_device_replacement_executions\".\"credential_revoked_at\" is null or (isfinite(\"working_device_replacement_executions\".\"credential_revoked_at\") and \"working_device_replacement_executions\".\"credential_revoked_at\" >= \"working_device_replacement_executions\".\"started_at\")) and (\"working_device_replacement_executions\".\"executed_at\" is null or (isfinite(\"working_device_replacement_executions\".\"executed_at\") and \"working_device_replacement_executions\".\"executed_at\" >= \"working_device_replacement_executions\".\"credential_revoked_at\"))"
-        },
-        "working_device_replacement_executions_payload_check": {
-          "name": "working_device_replacement_executions_payload_check",
-          "value": "jsonb_typeof(\"working_device_replacement_executions\".\"server_facts\") = 'object' and octet_length(\"working_device_replacement_executions\".\"server_facts\"::text) <= 262144 and (\"working_device_replacement_executions\".\"response\" is null or (jsonb_typeof(\"working_device_replacement_executions\".\"response\") = 'object' and octet_length(\"working_device_replacement_executions\".\"response\"::text) <= 262144))"
-        },
-        "working_device_replacement_executions_recovery_check": {
-          "name": "working_device_replacement_executions_recovery_check",
-          "value": "((\"working_device_replacement_executions\".\"recovery_state\" in ('not_required','required','draining') and \"working_device_replacement_executions\".\"recovery_closed_at\" is null and \"working_device_replacement_executions\".\"recovery_close_reason\" is null) or (\"working_device_replacement_executions\".\"recovery_state\" in ('completed','evidence_unavailable') and \"working_device_replacement_executions\".\"state\" = 'completed' and \"working_device_replacement_executions\".\"recovery_closed_at\" is not null and isfinite(\"working_device_replacement_executions\".\"recovery_closed_at\") and \"working_device_replacement_executions\".\"recovery_closed_at\" >= \"working_device_replacement_executions\".\"executed_at\" and ((\"working_device_replacement_executions\".\"recovery_state\" = 'completed' and \"working_device_replacement_executions\".\"recovery_close_reason\" is null) or (\"working_device_replacement_executions\".\"recovery_state\" = 'evidence_unavailable' and \"working_device_replacement_executions\".\"recovery_close_reason\" is not null and length(btrim(\"working_device_replacement_executions\".\"recovery_close_reason\")) between 1 and 1000)))) and (\"working_device_replacement_executions\".\"recovery_credential_epoch\" is null or (\"working_device_replacement_executions\".\"mode\" = 'emergency' and \"working_device_replacement_executions\".\"recovery_credential_epoch\" > \"working_device_replacement_executions\".\"source_credential_epoch\" and \"working_device_replacement_executions\".\"recovery_credential_epoch\" <= 9007199254740991))"
-        }
-      },
-      "isRLSEnabled": false
-    },
     "public.working_device_replacement_preparations": {
       "name": "working_device_replacement_preparations",
       "schema": "",
@@ -15821,471 +15325,6 @@
         "working_device_replacement_previews_result_check": {
           "name": "working_device_replacement_previews_result_check",
           "value": "(\"working_device_replacement_previews\".\"confirmed_at\" is null and \"working_device_replacement_previews\".\"result_preparation_id\" is null and \"working_device_replacement_previews\".\"response\" is null) or (\"working_device_replacement_previews\".\"confirmed_at\" is not null and \"working_device_replacement_previews\".\"result_preparation_id\" is not null and \"working_device_replacement_previews\".\"response\" is not null and isfinite(\"working_device_replacement_previews\".\"confirmed_at\") and \"working_device_replacement_previews\".\"confirmed_at\" >= \"working_device_replacement_previews\".\"created_at\" and \"working_device_replacement_previews\".\"confirmed_at\" < \"working_device_replacement_previews\".\"expires_at\")"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.working_device_replacement_readiness_intents": {
-      "name": "working_device_replacement_readiness_intents",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "device_id": {
-          "name": "device_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "preparation_id": {
-          "name": "preparation_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "actor_domain": {
-          "name": "actor_domain",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "actor_id": {
-          "name": "actor_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "request_id": {
-          "name": "request_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "request_hash": {
-          "name": "request_hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "credential_epoch": {
-          "name": "credential_epoch",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "preparation_revision": {
-          "name": "preparation_revision",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "assignment_revision": {
-          "name": "assignment_revision",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "entitlement_revision": {
-          "name": "entitlement_revision",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "usage_revision": {
-          "name": "usage_revision",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "grant_configuration_id": {
-          "name": "grant_configuration_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "grant_configuration_sequence": {
-          "name": "grant_configuration_sequence",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "facts_fingerprint": {
-          "name": "facts_fingerprint",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "state": {
-          "name": "state",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'active'"
-        },
-        "requested_at": {
-          "name": "requested_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "closed_at": {
-          "name": "closed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "response": {
-          "name": "response",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "working_device_replacement_intents_active_uq": {
-          "name": "working_device_replacement_intents_active_uq",
-          "columns": [
-            {
-              "expression": "tenant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "preparation_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"working_device_replacement_readiness_intents\".\"state\" = 'active'",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "working_device_replacement_intents_source_fk": {
-          "name": "working_device_replacement_intents_source_fk",
-          "tableFrom": "working_device_replacement_readiness_intents",
-          "tableTo": "station_devices",
-          "columnsFrom": [
-            "tenant_id",
-            "device_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "working_device_replacement_intents_preparation_fk": {
-          "name": "working_device_replacement_intents_preparation_fk",
-          "tableFrom": "working_device_replacement_readiness_intents",
-          "tableTo": "working_device_replacement_preparations",
-          "columnsFrom": [
-            "tenant_id",
-            "device_id",
-            "preparation_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "device_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "working_device_replacement_intents_configuration_fk": {
-          "name": "working_device_replacement_intents_configuration_fk",
-          "tableFrom": "working_device_replacement_readiness_intents",
-          "tableTo": "device_grant_configurations",
-          "columnsFrom": [
-            "tenant_id",
-            "grant_configuration_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "working_device_replacement_intents_identity_uq": {
-          "name": "working_device_replacement_intents_identity_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "device_id",
-            "preparation_id",
-            "id",
-            "credential_epoch"
-          ]
-        },
-        "working_device_replacement_intents_request_uq": {
-          "name": "working_device_replacement_intents_request_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "actor_domain",
-            "request_id"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "working_device_replacement_intents_identity_check": {
-          "name": "working_device_replacement_intents_identity_check",
-          "value": "\"working_device_replacement_readiness_intents\".\"actor_domain\" in ('cabinet','platform') and length(btrim(\"working_device_replacement_readiness_intents\".\"actor_id\")) between 1 and 256 and \"working_device_replacement_readiness_intents\".\"request_hash\" ~ '^[0-9a-f]{64}$' and \"working_device_replacement_readiness_intents\".\"facts_fingerprint\" ~ '^[0-9a-f]{64}$' and \"working_device_replacement_readiness_intents\".\"credential_epoch\" between 1 and 9007199254740991 and \"working_device_replacement_readiness_intents\".\"preparation_revision\" > 0 and \"working_device_replacement_readiness_intents\".\"assignment_revision\" > 0 and \"working_device_replacement_readiness_intents\".\"entitlement_revision\" >= 0 and \"working_device_replacement_readiness_intents\".\"usage_revision\" >= 0 and ((\"working_device_replacement_readiness_intents\".\"grant_configuration_id\" is null and \"working_device_replacement_readiness_intents\".\"grant_configuration_sequence\" is null) or (\"working_device_replacement_readiness_intents\".\"grant_configuration_id\" is not null and \"working_device_replacement_readiness_intents\".\"grant_configuration_sequence\" is not null and \"working_device_replacement_readiness_intents\".\"grant_configuration_sequence\" > 0))"
-        },
-        "working_device_replacement_intents_interval_check": {
-          "name": "working_device_replacement_intents_interval_check",
-          "value": "isfinite(\"working_device_replacement_readiness_intents\".\"requested_at\") and isfinite(\"working_device_replacement_readiness_intents\".\"expires_at\") and \"working_device_replacement_readiness_intents\".\"expires_at\" > \"working_device_replacement_readiness_intents\".\"requested_at\" and ((\"working_device_replacement_readiness_intents\".\"state\" = 'active' and \"working_device_replacement_readiness_intents\".\"closed_at\" is null) or (\"working_device_replacement_readiness_intents\".\"state\" in ('superseded','cancelled','completed') and \"working_device_replacement_readiness_intents\".\"closed_at\" is not null and isfinite(\"working_device_replacement_readiness_intents\".\"closed_at\") and \"working_device_replacement_readiness_intents\".\"closed_at\" >= \"working_device_replacement_readiness_intents\".\"requested_at\"))"
-        },
-        "working_device_replacement_intents_response_check": {
-          "name": "working_device_replacement_intents_response_check",
-          "value": "\"working_device_replacement_readiness_intents\".\"response\" is null or (jsonb_typeof(\"working_device_replacement_readiness_intents\".\"response\") = 'object' and octet_length(\"working_device_replacement_readiness_intents\".\"response\"::text) <= 262144)"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.working_device_replacement_readiness_reports": {
-      "name": "working_device_replacement_readiness_reports",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "device_id": {
-          "name": "device_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "preparation_id": {
-          "name": "preparation_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "intent_id": {
-          "name": "intent_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "request_id": {
-          "name": "request_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "credential_epoch": {
-          "name": "credential_epoch",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "report_sequence": {
-          "name": "report_sequence",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "client_build": {
-          "name": "client_build",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "storage_revision": {
-          "name": "storage_revision",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "payload": {
-          "name": "payload",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "payload_hash": {
-          "name": "payload_hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "counters": {
-          "name": "counters",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "eligibility": {
-          "name": "eligibility",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "response": {
-          "name": "response",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "received_at": {
-          "name": "received_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "working_device_replacement_reports_received_idx": {
-          "name": "working_device_replacement_reports_received_idx",
-          "columns": [
-            {
-              "expression": "tenant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "device_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "received_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "working_device_replacement_reports_source_fk": {
-          "name": "working_device_replacement_reports_source_fk",
-          "tableFrom": "working_device_replacement_readiness_reports",
-          "tableTo": "station_devices",
-          "columnsFrom": [
-            "tenant_id",
-            "device_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "working_device_replacement_reports_intent_fk": {
-          "name": "working_device_replacement_reports_intent_fk",
-          "tableFrom": "working_device_replacement_readiness_reports",
-          "tableTo": "working_device_replacement_readiness_intents",
-          "columnsFrom": [
-            "tenant_id",
-            "device_id",
-            "preparation_id",
-            "intent_id",
-            "credential_epoch"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "device_id",
-            "preparation_id",
-            "id",
-            "credential_epoch"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "working_device_replacement_reports_identity_uq": {
-          "name": "working_device_replacement_reports_identity_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "device_id",
-            "preparation_id",
-            "id",
-            "credential_epoch"
-          ]
-        },
-        "working_device_replacement_reports_request_uq": {
-          "name": "working_device_replacement_reports_request_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "request_id"
-          ]
-        },
-        "working_device_replacement_reports_sequence_uq": {
-          "name": "working_device_replacement_reports_sequence_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "intent_id",
-            "report_sequence"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "working_device_replacement_reports_identity_check": {
-          "name": "working_device_replacement_reports_identity_check",
-          "value": "\"working_device_replacement_readiness_reports\".\"credential_epoch\" between 1 and 9007199254740991 and \"working_device_replacement_readiness_reports\".\"report_sequence\" between 0 and 9007199254740991 and \"working_device_replacement_readiness_reports\".\"storage_revision\" between 1 and 9007199254740991 and length(btrim(\"working_device_replacement_readiness_reports\".\"client_build\")) between 1 and 100 and \"working_device_replacement_readiness_reports\".\"payload_hash\" ~ '^[0-9a-f]{64}$' and isfinite(\"working_device_replacement_readiness_reports\".\"received_at\")"
-        },
-        "working_device_replacement_reports_payload_check": {
-          "name": "working_device_replacement_reports_payload_check",
-          "value": "jsonb_typeof(\"working_device_replacement_readiness_reports\".\"payload\") = 'object' and octet_length(\"working_device_replacement_readiness_reports\".\"payload\"::text) <= 262144 and jsonb_typeof(\"working_device_replacement_readiness_reports\".\"response\") = 'object' and octet_length(\"working_device_replacement_readiness_reports\".\"response\"::text) <= 262144 and jsonb_typeof(\"working_device_replacement_readiness_reports\".\"counters\") = 'object' and octet_length(\"working_device_replacement_readiness_reports\".\"counters\"::text) <= 4096 and \"working_device_replacement_readiness_reports\".\"counters\" ?& array['scans','inventories','shiftClosures','productLabels','boxes','exceptions','conflicts','unknownPrints'] and \"working_device_replacement_readiness_reports\".\"counters\" - array['scans','inventories','shiftClosures','productLabels','boxes','exceptions','conflicts','unknownPrints'] = '{}'::jsonb and not jsonb_path_exists(\"working_device_replacement_readiness_reports\".\"counters\", '$.* ? ((@.type() != \"number\" && @.type() != \"string\") || (@.type() == \"string\" && @ != \"unsupported\") || (@.type() == \"number\" && (@ < 0 || @ > 9007199254740991 || @.floor() != @)))')"
-        },
-        "working_device_replacement_reports_eligibility_check": {
-          "name": "working_device_replacement_reports_eligibility_check",
-          "value": "(jsonb_typeof(\"working_device_replacement_readiness_reports\".\"eligibility\") = 'object' and octet_length(\"working_device_replacement_readiness_reports\".\"eligibility\"::text) <= 4096 and \"working_device_replacement_readiness_reports\".\"eligibility\" ?& array['status','reasons'] and \"working_device_replacement_readiness_reports\".\"eligibility\" - array['status','reasons'] = '{}'::jsonb and jsonb_typeof(\"working_device_replacement_readiness_reports\".\"eligibility\"->'reasons') = 'array' and ((\"working_device_replacement_readiness_reports\".\"eligibility\"->>'status' = 'eligible' and \"working_device_replacement_readiness_reports\".\"eligibility\"->'reasons' = '[]'::jsonb) or (\"working_device_replacement_readiness_reports\".\"eligibility\"->>'status' = 'blocked' and jsonb_array_length(\"working_device_replacement_readiness_reports\".\"eligibility\"->'reasons') between 1 and 32))) is true"
         }
       },
       "isRLSEnabled": false
@@ -21446,6 +20485,13 @@
           "primaryKey": false,
           "notNull": true
         },
+        "pallet_count": {
+          "name": "pallet_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
         "filename": {
           "name": "filename",
           "type": "text",
@@ -21545,13 +20591,17 @@
           "name": "shift_export_artifacts_physical_line_count_positive",
           "value": "\"shift_export_artifacts\".\"physical_line_count\" > 0"
         },
-        "shift_export_artifacts_code_count_positive": {
-          "name": "shift_export_artifacts_code_count_positive",
-          "value": "\"shift_export_artifacts\".\"code_count\" > 0"
+        "shift_export_artifacts_code_count_nonnegative": {
+          "name": "shift_export_artifacts_code_count_nonnegative",
+          "value": "\"shift_export_artifacts\".\"code_count\" >= 0"
         },
         "shift_export_artifacts_box_count_nonnegative": {
           "name": "shift_export_artifacts_box_count_nonnegative",
           "value": "\"shift_export_artifacts\".\"box_count\" >= 0"
+        },
+        "shift_export_artifacts_pallet_count_nonnegative": {
+          "name": "shift_export_artifacts_pallet_count_nonnegative",
+          "value": "\"shift_export_artifacts\".\"pallet_count\" >= 0"
         },
         "shift_export_artifacts_byte_size_positive": {
           "name": "shift_export_artifacts_byte_size_positive",
@@ -21585,7 +20635,13 @@
           "name": "shift_id",
           "type": "uuid",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
+        },
+        "pallet_id": {
+          "name": "pallet_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
         },
         "format_id": {
           "name": "format_id",
@@ -21639,6 +20695,12 @@
         },
         "total_box_count": {
           "name": "total_box_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "total_pallet_count": {
+          "name": "total_pallet_count",
           "type": "integer",
           "primaryKey": false,
           "notNull": false
@@ -21775,6 +20837,21 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
+        },
+        "shift_exports_tenant_pallet_fk": {
+          "name": "shift_exports_tenant_pallet_fk",
+          "tableFrom": "shift_exports",
+          "tableTo": "pallets",
+          "columnsFrom": [
+            "tenant_id",
+            "pallet_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -21809,15 +20886,23 @@
         },
         "shift_exports_total_code_count_positive": {
           "name": "shift_exports_total_code_count_positive",
-          "value": "\"shift_exports\".\"total_code_count\" is null or \"shift_exports\".\"total_code_count\" > 0"
+          "value": "\"shift_exports\".\"total_code_count\" is null or (\"shift_exports\".\"pallet_id\" is null and \"shift_exports\".\"total_code_count\" > 0) or (\"shift_exports\".\"pallet_id\" is not null and \"shift_exports\".\"total_code_count\" = 0)"
         },
         "shift_exports_total_box_count_nonnegative": {
           "name": "shift_exports_total_box_count_nonnegative",
           "value": "\"shift_exports\".\"total_box_count\" is null or \"shift_exports\".\"total_box_count\" >= 0"
         },
+        "shift_exports_total_pallet_count_nonnegative": {
+          "name": "shift_exports_total_pallet_count_nonnegative",
+          "value": "\"shift_exports\".\"total_pallet_count\" is null or \"shift_exports\".\"total_pallet_count\" >= 0"
+        },
         "shift_exports_attempt_count_nonnegative": {
           "name": "shift_exports_attempt_count_nonnegative",
           "value": "\"shift_exports\".\"attempt_count\" >= 0"
+        },
+        "shift_exports_target_shape": {
+          "name": "shift_exports_target_shape",
+          "value": "(\"shift_exports\".\"shift_id\" IS NOT NULL AND \"shift_exports\".\"pallet_id\" IS NULL) OR (\"shift_exports\".\"shift_id\" IS NULL AND \"shift_exports\".\"pallet_id\" IS NOT NULL)"
         },
         "shift_exports_status_consistency": {
           "name": "shift_exports_status_consistency",
@@ -36196,6 +35281,807 @@
         }
       },
       "isRLSEnabled": false
+    },
+    "public.working_device_replacement_executions": {
+      "name": "working_device_replacement_executions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "device_id": {
+          "name": "device_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "preparation_id": {
+          "name": "preparation_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actor_domain": {
+          "name": "actor_domain",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actor_id": {
+          "name": "actor_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "request_id": {
+          "name": "request_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "request_hash": {
+          "name": "request_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "mode": {
+          "name": "mode",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "state": {
+          "name": "state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'executing'"
+        },
+        "step": {
+          "name": "step",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'revoke_pending'"
+        },
+        "source_credential_epoch": {
+          "name": "source_credential_epoch",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source_api_key_id": {
+          "name": "source_api_key_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "facts_fingerprint": {
+          "name": "facts_fingerprint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "readiness_report_id": {
+          "name": "readiness_report_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "emergency_reason": {
+          "name": "emergency_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "server_facts": {
+          "name": "server_facts",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "target_device_id": {
+          "name": "target_device_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "offline_authority_until": {
+          "name": "offline_authority_until",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "new_work_allowed_at": {
+          "name": "new_work_allowed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "credential_revoked_at": {
+          "name": "credential_revoked_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "executed_at": {
+          "name": "executed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "response": {
+          "name": "response",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "recovery_state": {
+          "name": "recovery_state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'not_required'"
+        },
+        "recovery_credential_epoch": {
+          "name": "recovery_credential_epoch",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "recovery_closed_at": {
+          "name": "recovery_closed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "recovery_close_reason": {
+          "name": "recovery_close_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "working_device_replacement_executions_repair_idx": {
+          "name": "working_device_replacement_executions_repair_idx",
+          "columns": [
+            {
+              "expression": "state",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "started_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "working_device_replacement_executions_source_fk": {
+          "name": "working_device_replacement_executions_source_fk",
+          "tableFrom": "working_device_replacement_executions",
+          "tableTo": "station_devices",
+          "columnsFrom": [
+            "tenant_id",
+            "device_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "working_device_replacement_executions_preparation_fk": {
+          "name": "working_device_replacement_executions_preparation_fk",
+          "tableFrom": "working_device_replacement_executions",
+          "tableTo": "working_device_replacement_preparations",
+          "columnsFrom": [
+            "tenant_id",
+            "device_id",
+            "preparation_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "device_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "working_device_replacement_executions_target_fk": {
+          "name": "working_device_replacement_executions_target_fk",
+          "tableFrom": "working_device_replacement_executions",
+          "tableTo": "station_devices",
+          "columnsFrom": [
+            "tenant_id",
+            "target_device_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "working_device_replacement_executions_report_fk": {
+          "name": "working_device_replacement_executions_report_fk",
+          "tableFrom": "working_device_replacement_executions",
+          "tableTo": "working_device_replacement_readiness_reports",
+          "columnsFrom": [
+            "tenant_id",
+            "device_id",
+            "preparation_id",
+            "readiness_report_id",
+            "source_credential_epoch"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "device_id",
+            "preparation_id",
+            "id",
+            "credential_epoch"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "working_device_replacement_executions_preparation_uq": {
+          "name": "working_device_replacement_executions_preparation_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "preparation_id"
+          ]
+        },
+        "working_device_replacement_executions_request_uq": {
+          "name": "working_device_replacement_executions_request_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "actor_domain",
+            "request_id"
+          ]
+        },
+        "working_device_replacement_executions_target_uq": {
+          "name": "working_device_replacement_executions_target_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "target_device_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "working_device_replacement_executions_identity_check": {
+          "name": "working_device_replacement_executions_identity_check",
+          "value": "\"working_device_replacement_executions\".\"revision\" > 0 and \"working_device_replacement_executions\".\"actor_domain\" in ('cabinet','platform') and length(btrim(\"working_device_replacement_executions\".\"actor_id\")) between 1 and 256 and \"working_device_replacement_executions\".\"request_hash\" ~ '^[0-9a-f]{64}$' and \"working_device_replacement_executions\".\"facts_fingerprint\" ~ '^[0-9a-f]{64}$' and \"working_device_replacement_executions\".\"source_credential_epoch\" between 1 and 9007199254740991 and (\"working_device_replacement_executions\".\"target_device_id\" is null or \"working_device_replacement_executions\".\"target_device_id\" <> \"working_device_replacement_executions\".\"device_id\") and (\"working_device_replacement_executions\".\"source_api_key_id\" is null or length(btrim(\"working_device_replacement_executions\".\"source_api_key_id\")) between 1 and 256)"
+        },
+        "working_device_replacement_executions_mode_check": {
+          "name": "working_device_replacement_executions_mode_check",
+          "value": "((\"working_device_replacement_executions\".\"mode\" = 'normal' and \"working_device_replacement_executions\".\"readiness_report_id\" is not null and \"working_device_replacement_executions\".\"emergency_reason\" is null and \"working_device_replacement_executions\".\"recovery_state\" = 'not_required') or (\"working_device_replacement_executions\".\"mode\" = 'emergency' and \"working_device_replacement_executions\".\"emergency_reason\" is not null and length(btrim(\"working_device_replacement_executions\".\"emergency_reason\")) between 1 and 1000 and \"working_device_replacement_executions\".\"recovery_state\" in ('required','draining','completed','evidence_unavailable'))) is true"
+        },
+        "working_device_replacement_executions_step_check": {
+          "name": "working_device_replacement_executions_step_check",
+          "value": "((\"working_device_replacement_executions\".\"state\" = 'executing' and \"working_device_replacement_executions\".\"target_device_id\" is null and \"working_device_replacement_executions\".\"executed_at\" is null and \"working_device_replacement_executions\".\"response\" is null and ((\"working_device_replacement_executions\".\"step\" = 'revoke_pending' and \"working_device_replacement_executions\".\"credential_revoked_at\" is null) or (\"working_device_replacement_executions\".\"step\" = 'credential_revoked' and \"working_device_replacement_executions\".\"credential_revoked_at\" is not null))) or (\"working_device_replacement_executions\".\"state\" = 'completed' and \"working_device_replacement_executions\".\"step\" = 'transferred' and \"working_device_replacement_executions\".\"target_device_id\" is not null and \"working_device_replacement_executions\".\"credential_revoked_at\" is not null and \"working_device_replacement_executions\".\"executed_at\" is not null and \"working_device_replacement_executions\".\"response\" is not null)) is true"
+        },
+        "working_device_replacement_executions_interval_check": {
+          "name": "working_device_replacement_executions_interval_check",
+          "value": "isfinite(\"working_device_replacement_executions\".\"started_at\") and isfinite(\"working_device_replacement_executions\".\"offline_authority_until\") and isfinite(\"working_device_replacement_executions\".\"new_work_allowed_at\") and \"working_device_replacement_executions\".\"new_work_allowed_at\" >= \"working_device_replacement_executions\".\"offline_authority_until\" and (\"working_device_replacement_executions\".\"credential_revoked_at\" is null or (isfinite(\"working_device_replacement_executions\".\"credential_revoked_at\") and \"working_device_replacement_executions\".\"credential_revoked_at\" >= \"working_device_replacement_executions\".\"started_at\")) and (\"working_device_replacement_executions\".\"executed_at\" is null or (isfinite(\"working_device_replacement_executions\".\"executed_at\") and \"working_device_replacement_executions\".\"executed_at\" >= \"working_device_replacement_executions\".\"credential_revoked_at\"))"
+        },
+        "working_device_replacement_executions_payload_check": {
+          "name": "working_device_replacement_executions_payload_check",
+          "value": "jsonb_typeof(\"working_device_replacement_executions\".\"server_facts\") = 'object' and octet_length(\"working_device_replacement_executions\".\"server_facts\"::text) <= 262144 and (\"working_device_replacement_executions\".\"response\" is null or (jsonb_typeof(\"working_device_replacement_executions\".\"response\") = 'object' and octet_length(\"working_device_replacement_executions\".\"response\"::text) <= 262144))"
+        },
+        "working_device_replacement_executions_recovery_check": {
+          "name": "working_device_replacement_executions_recovery_check",
+          "value": "((\"working_device_replacement_executions\".\"recovery_state\" in ('not_required','required','draining') and \"working_device_replacement_executions\".\"recovery_closed_at\" is null and \"working_device_replacement_executions\".\"recovery_close_reason\" is null) or (\"working_device_replacement_executions\".\"recovery_state\" in ('completed','evidence_unavailable') and \"working_device_replacement_executions\".\"state\" = 'completed' and \"working_device_replacement_executions\".\"recovery_closed_at\" is not null and isfinite(\"working_device_replacement_executions\".\"recovery_closed_at\") and \"working_device_replacement_executions\".\"recovery_closed_at\" >= \"working_device_replacement_executions\".\"executed_at\" and ((\"working_device_replacement_executions\".\"recovery_state\" = 'completed' and \"working_device_replacement_executions\".\"recovery_close_reason\" is null) or (\"working_device_replacement_executions\".\"recovery_state\" = 'evidence_unavailable' and \"working_device_replacement_executions\".\"recovery_close_reason\" is not null and length(btrim(\"working_device_replacement_executions\".\"recovery_close_reason\")) between 1 and 1000)))) and (\"working_device_replacement_executions\".\"recovery_credential_epoch\" is null or (\"working_device_replacement_executions\".\"mode\" = 'emergency' and \"working_device_replacement_executions\".\"recovery_credential_epoch\" > \"working_device_replacement_executions\".\"source_credential_epoch\" and \"working_device_replacement_executions\".\"recovery_credential_epoch\" <= 9007199254740991))"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.working_device_replacement_readiness_reports": {
+      "name": "working_device_replacement_readiness_reports",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "device_id": {
+          "name": "device_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "preparation_id": {
+          "name": "preparation_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "intent_id": {
+          "name": "intent_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "request_id": {
+          "name": "request_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "credential_epoch": {
+          "name": "credential_epoch",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "report_sequence": {
+          "name": "report_sequence",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "client_build": {
+          "name": "client_build",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "storage_revision": {
+          "name": "storage_revision",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payload": {
+          "name": "payload",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payload_hash": {
+          "name": "payload_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "counters": {
+          "name": "counters",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "eligibility": {
+          "name": "eligibility",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "response": {
+          "name": "response",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "received_at": {
+          "name": "received_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "working_device_replacement_reports_received_idx": {
+          "name": "working_device_replacement_reports_received_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "device_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "received_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "working_device_replacement_reports_source_fk": {
+          "name": "working_device_replacement_reports_source_fk",
+          "tableFrom": "working_device_replacement_readiness_reports",
+          "tableTo": "station_devices",
+          "columnsFrom": [
+            "tenant_id",
+            "device_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "working_device_replacement_reports_intent_fk": {
+          "name": "working_device_replacement_reports_intent_fk",
+          "tableFrom": "working_device_replacement_readiness_reports",
+          "tableTo": "working_device_replacement_readiness_intents",
+          "columnsFrom": [
+            "tenant_id",
+            "device_id",
+            "preparation_id",
+            "intent_id",
+            "credential_epoch"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "device_id",
+            "preparation_id",
+            "id",
+            "credential_epoch"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "working_device_replacement_reports_identity_uq": {
+          "name": "working_device_replacement_reports_identity_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "device_id",
+            "preparation_id",
+            "id",
+            "credential_epoch"
+          ]
+        },
+        "working_device_replacement_reports_request_uq": {
+          "name": "working_device_replacement_reports_request_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "request_id"
+          ]
+        },
+        "working_device_replacement_reports_sequence_uq": {
+          "name": "working_device_replacement_reports_sequence_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "intent_id",
+            "report_sequence"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "working_device_replacement_reports_identity_check": {
+          "name": "working_device_replacement_reports_identity_check",
+          "value": "\"working_device_replacement_readiness_reports\".\"credential_epoch\" between 1 and 9007199254740991 and \"working_device_replacement_readiness_reports\".\"report_sequence\" between 0 and 9007199254740991 and \"working_device_replacement_readiness_reports\".\"storage_revision\" between 1 and 9007199254740991 and length(btrim(\"working_device_replacement_readiness_reports\".\"client_build\")) between 1 and 100 and \"working_device_replacement_readiness_reports\".\"payload_hash\" ~ '^[0-9a-f]{64}$' and isfinite(\"working_device_replacement_readiness_reports\".\"received_at\")"
+        },
+        "working_device_replacement_reports_payload_check": {
+          "name": "working_device_replacement_reports_payload_check",
+          "value": "jsonb_typeof(\"working_device_replacement_readiness_reports\".\"payload\") = 'object' and octet_length(\"working_device_replacement_readiness_reports\".\"payload\"::text) <= 262144 and jsonb_typeof(\"working_device_replacement_readiness_reports\".\"response\") = 'object' and octet_length(\"working_device_replacement_readiness_reports\".\"response\"::text) <= 262144 and jsonb_typeof(\"working_device_replacement_readiness_reports\".\"counters\") = 'object' and octet_length(\"working_device_replacement_readiness_reports\".\"counters\"::text) <= 4096 and \"working_device_replacement_readiness_reports\".\"counters\" ?& array['scans','inventories','shiftClosures','productLabels','boxes','exceptions','conflicts','unknownPrints'] and \"working_device_replacement_readiness_reports\".\"counters\" - array['scans','inventories','shiftClosures','productLabels','boxes','exceptions','conflicts','unknownPrints'] = '{}'::jsonb and not jsonb_path_exists(\"working_device_replacement_readiness_reports\".\"counters\", '$.* ? ((@.type() != \"number\" && @.type() != \"string\") || (@.type() == \"string\" && @ != \"unsupported\") || (@.type() == \"number\" && (@ < 0 || @ > 9007199254740991 || @.floor() != @)))')"
+        },
+        "working_device_replacement_reports_eligibility_check": {
+          "name": "working_device_replacement_reports_eligibility_check",
+          "value": "(jsonb_typeof(\"working_device_replacement_readiness_reports\".\"eligibility\") = 'object' and octet_length(\"working_device_replacement_readiness_reports\".\"eligibility\"::text) <= 4096 and \"working_device_replacement_readiness_reports\".\"eligibility\" ?& array['status','reasons'] and \"working_device_replacement_readiness_reports\".\"eligibility\" - array['status','reasons'] = '{}'::jsonb and jsonb_typeof(\"working_device_replacement_readiness_reports\".\"eligibility\"->'reasons') = 'array' and ((\"working_device_replacement_readiness_reports\".\"eligibility\"->>'status' = 'eligible' and \"working_device_replacement_readiness_reports\".\"eligibility\"->'reasons' = '[]'::jsonb) or (\"working_device_replacement_readiness_reports\".\"eligibility\"->>'status' = 'blocked' and jsonb_array_length(\"working_device_replacement_readiness_reports\".\"eligibility\"->'reasons') between 1 and 32))) is true"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.working_device_replacement_readiness_intents": {
+      "name": "working_device_replacement_readiness_intents",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "device_id": {
+          "name": "device_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "preparation_id": {
+          "name": "preparation_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actor_domain": {
+          "name": "actor_domain",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actor_id": {
+          "name": "actor_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "request_id": {
+          "name": "request_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "request_hash": {
+          "name": "request_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "credential_epoch": {
+          "name": "credential_epoch",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "preparation_revision": {
+          "name": "preparation_revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "assignment_revision": {
+          "name": "assignment_revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "entitlement_revision": {
+          "name": "entitlement_revision",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "usage_revision": {
+          "name": "usage_revision",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "grant_configuration_id": {
+          "name": "grant_configuration_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "grant_configuration_sequence": {
+          "name": "grant_configuration_sequence",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "facts_fingerprint": {
+          "name": "facts_fingerprint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "state": {
+          "name": "state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'active'"
+        },
+        "requested_at": {
+          "name": "requested_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "closed_at": {
+          "name": "closed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "response": {
+          "name": "response",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "working_device_replacement_intents_active_uq": {
+          "name": "working_device_replacement_intents_active_uq",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "preparation_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"working_device_replacement_readiness_intents\".\"state\" = 'active'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "working_device_replacement_intents_source_fk": {
+          "name": "working_device_replacement_intents_source_fk",
+          "tableFrom": "working_device_replacement_readiness_intents",
+          "tableTo": "station_devices",
+          "columnsFrom": [
+            "tenant_id",
+            "device_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "working_device_replacement_intents_preparation_fk": {
+          "name": "working_device_replacement_intents_preparation_fk",
+          "tableFrom": "working_device_replacement_readiness_intents",
+          "tableTo": "working_device_replacement_preparations",
+          "columnsFrom": [
+            "tenant_id",
+            "device_id",
+            "preparation_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "device_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "working_device_replacement_intents_configuration_fk": {
+          "name": "working_device_replacement_intents_configuration_fk",
+          "tableFrom": "working_device_replacement_readiness_intents",
+          "tableTo": "device_grant_configurations",
+          "columnsFrom": [
+            "tenant_id",
+            "grant_configuration_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "working_device_replacement_intents_identity_uq": {
+          "name": "working_device_replacement_intents_identity_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "device_id",
+            "preparation_id",
+            "id",
+            "credential_epoch"
+          ]
+        },
+        "working_device_replacement_intents_request_uq": {
+          "name": "working_device_replacement_intents_request_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "actor_domain",
+            "request_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "working_device_replacement_intents_identity_check": {
+          "name": "working_device_replacement_intents_identity_check",
+          "value": "\"working_device_replacement_readiness_intents\".\"actor_domain\" in ('cabinet','platform') and length(btrim(\"working_device_replacement_readiness_intents\".\"actor_id\")) between 1 and 256 and \"working_device_replacement_readiness_intents\".\"request_hash\" ~ '^[0-9a-f]{64}$' and \"working_device_replacement_readiness_intents\".\"facts_fingerprint\" ~ '^[0-9a-f]{64}$' and \"working_device_replacement_readiness_intents\".\"credential_epoch\" between 1 and 9007199254740991 and \"working_device_replacement_readiness_intents\".\"preparation_revision\" > 0 and \"working_device_replacement_readiness_intents\".\"assignment_revision\" > 0 and \"working_device_replacement_readiness_intents\".\"entitlement_revision\" >= 0 and \"working_device_replacement_readiness_intents\".\"usage_revision\" >= 0 and ((\"working_device_replacement_readiness_intents\".\"grant_configuration_id\" is null and \"working_device_replacement_readiness_intents\".\"grant_configuration_sequence\" is null) or (\"working_device_replacement_readiness_intents\".\"grant_configuration_id\" is not null and \"working_device_replacement_readiness_intents\".\"grant_configuration_sequence\" is not null and \"working_device_replacement_readiness_intents\".\"grant_configuration_sequence\" > 0))"
+        },
+        "working_device_replacement_intents_interval_check": {
+          "name": "working_device_replacement_intents_interval_check",
+          "value": "isfinite(\"working_device_replacement_readiness_intents\".\"requested_at\") and isfinite(\"working_device_replacement_readiness_intents\".\"expires_at\") and \"working_device_replacement_readiness_intents\".\"expires_at\" > \"working_device_replacement_readiness_intents\".\"requested_at\" and ((\"working_device_replacement_readiness_intents\".\"state\" = 'active' and \"working_device_replacement_readiness_intents\".\"closed_at\" is null) or (\"working_device_replacement_readiness_intents\".\"state\" in ('superseded','cancelled','completed') and \"working_device_replacement_readiness_intents\".\"closed_at\" is not null and isfinite(\"working_device_replacement_readiness_intents\".\"closed_at\") and \"working_device_replacement_readiness_intents\".\"closed_at\" >= \"working_device_replacement_readiness_intents\".\"requested_at\"))"
+        },
+        "working_device_replacement_intents_response_check": {
+          "name": "working_device_replacement_intents_response_check",
+          "value": "\"working_device_replacement_readiness_intents\".\"response\" is null or (jsonb_typeof(\"working_device_replacement_readiness_intents\".\"response\") = 'object' and octet_length(\"working_device_replacement_readiness_intents\".\"response\"::text) <= 262144)"
+        }
+      },
+      "isRLSEnabled": false
     }
   },
   "enums": {
@@ -37082,6 +36968,14 @@
         "published",
         "archived",
         "unknown"
+      ]
+    },
+    "public.shift_entry_method": {
+      "name": "shift_entry_method",
+      "schema": "public",
+      "values": [
+        "list",
+        "task_barcode"
       ]
     }
   },

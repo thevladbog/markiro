@@ -36,6 +36,18 @@ export const MAX_BOX_CLOSURES_PER_SYNC_BATCH = 50;
 export const MAX_PALLET_CLOSURES_PER_SYNC_BATCH = 20;
 
 /**
+ * Upper bound on `palletMemberships` per `/station/scans` batch — one box
+ * scanned onto a warehouse pallet per record. Shared with the handheld's
+ * `SyncEngine` for the same reason the two limits above are: if the device
+ * drains more memberships than the endpoint accepts, the whole batch is
+ * rejected every retry and every channel on that device wedges.
+ *
+ * 100 matches `items`: a membership is one scan, and a batch that carries
+ * 100 unit scans can carry 100 box scans.
+ */
+export const MAX_PALLET_MEMBERSHIPS_PER_SYNC_BATCH = 100;
+
+/**
  * Upper bound on the length of a `/station/scans` batch id, shared between the
  * API's request schema (`syncBatchSchema.batchId`) and the station's own key
  * builder (`createSyncEngine` in `apps/station/src/lib/sync.ts`).

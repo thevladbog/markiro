@@ -9,21 +9,21 @@ const read = (path) => readFile(new URL(path, root), "utf8");
 test("replacement migrations ship in journal order and API image before readers", async () => {
   const journal = JSON.parse(await read("packages/db/migrations/meta/_journal.json"));
   const names = [
-    "0162_device_replacement_execution",
-    "0163_validate_device_replacement_execution",
-    "0164_device_replacement_closure_ack",
-    "0165_device_replacement_execution_preview",
-    "0166_device_replacement_capabilities",
-    "0167_device_replacement_repair_schedule",
+    "0168_device_replacement_execution",
+    "0169_validate_device_replacement_execution",
+    "0170_device_replacement_closure_ack",
+    "0171_device_replacement_execution_preview",
+    "0172_device_replacement_capabilities",
+    "0173_device_replacement_repair_schedule",
   ];
   assert.deepEqual(
-    journal.entries.slice(162, 168).map((entry) => entry.tag),
+    journal.entries.slice(168, 174).map((entry) => entry.tag),
     names,
   );
   for (const name of names) assert.ok((await read(`packages/db/migrations/${name}.sql`)).length);
   assert.match(
     await read("packages/db/src/runtime-migrate.ts"),
-    /packaged\.indexOf\("0163_validate_device_replacement_execution"\)/,
+    /packaged\.indexOf\("0169_validate_device_replacement_execution"\)/,
   );
   const dockerfile = await read("deploy/production/api.Dockerfile");
   assert.match(

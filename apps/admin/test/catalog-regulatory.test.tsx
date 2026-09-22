@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { afterEach, expect, it, vi } from "vitest";
@@ -16,6 +16,7 @@ import {
   product,
   profile,
   readiness,
+  AT,
   PRODUCT_ID,
   SCHEMA_ID,
   PROPOSAL_ID,
@@ -153,6 +154,62 @@ it.each([23, 33, 35])(
     expect(screen.queryByLabelText("Код АП ЕГАИС")).toBeNull();
   },
 );
+
+function describedText(element: HTMLElement) {
+  return (element.getAttribute("aria-describedby") ?? "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((id) => document.getElementById(id)?.textContent ?? "")
+    .join(" ");
+}
+it("lists category attributes in one column, grouped by requirement in order", async () => {
+  const customProfile = profileSchema.parse(profile(23));
+  const sweet = customProfile.values.find((row) => row.attributeId === "sweet");
+  if (sweet) sweet.value = { type: "boolean", value: true };
+  mount({ customProfile });
+  await screen.findByLabelText("Объём");
+  expect(document.querySelector(".mk-regulatory-attributes-grid")).toBeNull();
+  const groups = [...document.querySelectorAll(".mk-regulatory-group")];
+  expect(groups.map((group) => group.querySelector("h4")?.textContent)).toEqual([
+    "Обязательно для заказа кодов",
+    "Обязательно для ввода в оборот",
+    "Дополнительно",
+  ]);
+  expect(groups[0]?.contains(screen.getByLabelText("Объём"))).toBe(true);
+  const list = screen.getByRole("group", { name: "Наименования подсластителей" });
+  expect(groups[1]?.contains(list)).toBe(true);
+  expect(within(list).getByText("Национальный каталог: Стевия")).toBeDefined();
+  expect(groups[2]?.contains(screen.getByLabelText("Содержит подсластитель"))).toBe(true);
+});
+it("shows each accepted value's source under its field, using preset labels", async () => {
+  const customProfile = profileSchema.parse(profile(23));
+  customProfile.definition?.attributes.push({
+    id: "kind",
+    label: "Вид напитка",
+    valueType: "enum",
+    multiplicity: "one",
+    unit: null,
+    requirementRules: [],
+    presetMode: "restricted",
+    presets: [{ value: "juice", label: "Сок" }],
+  });
+  customProfile.values.push({
+    entryId: "00000000-0000-4000-8000-000000000044",
+    attributeId: "kind",
+    value: { type: "enum", value: "juice" },
+    source: "national_catalog",
+    observedAt: AT,
+    appliedAt: AT,
+  });
+  mount({ customProfile });
+  const quantity = await screen.findByLabelText("Объём");
+  expect(describedText(quantity)).toContain("Национальный каталог: 500 мл");
+  expect(describedText(screen.getByLabelText("Вид напитка"))).toContain(
+    "Национальный каталог: Сок",
+  );
+  expect(describedText(screen.getByLabelText("Содержит подсластитель"))).toContain("Вручную: Нет");
+  expect(screen.queryByText(/juice/)).toBeNull();
+});
 it("preserves hidden stored attributes and sends only changed visible fields with the captured revision", async () => {
   const { user, writes } = mount();
   const quantity = await screen.findByLabelText("Объём");

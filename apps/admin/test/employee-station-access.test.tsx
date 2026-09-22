@@ -20,7 +20,7 @@ const JANE: EmployeeDto = {
   fullName: "Jane Doe",
   role: "Кассир",
   status: "active",
-  pickupPolicy: { limitMode: "limited", dayLimit: 5, canWriteoff: false },
+  pickupPolicy: { limitMode: "limited", dayLimit: 5, canWriteoff: false, canBuildPallets: false },
   badges: [],
   createdAt: "2026-01-01T00:00:00.000Z",
 };

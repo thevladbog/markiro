@@ -126,10 +126,10 @@ class ReplacementReadiness(private val db: HandheldDatabase) {
                 put("inventories",count("inventory_outbox"))
                 put("shiftClosures",count("shift_close_outbox","state <> 'accepted'"))
                 put("productLabels",count("product_label_events","ackedAt IS NULL") + count("product_label_jobs","status <> 'completed'"))
-                put("boxes",count("boxes","disassembledAt IS NULL AND (closedAt IS NULL OR ackedAt IS NULL OR printState <> 'printed')") + count("pallets","closedAt IS NULL OR ackedAt IS NULL OR printState <> 'printed'"))
+                put("boxes",count("boxes","disassembledAt IS NULL AND (closedAt IS NULL OR ackedAt IS NULL OR printState <> 'printed')") + count("pallets","closedAt IS NULL OR ackedAt IS NULL OR printState <> 'printed'")+count("pallet_memberships","status IN ('pending','sent')")+count("pallet_membership_removals"))
                 put("exceptions",count("box_exceptions","ackedAt IS NULL")+count("pallet_exceptions","ackedAt IS NULL")+count("writeoff_outbox","state = 'pending'")+retainedEvidence())
             })
-            put("conflicts",count("conflicts_mirror")+count("product_label_events","quarantineCode IS NOT NULL")+count("shift_close_outbox","state = 'conflict'")+count("inventory_events","serverStatus IN ('conflict','quarantined','rejected')"))
+            put("conflicts",count("conflicts_mirror")+count("pallet_memberships","status = 'rejected' AND acknowledgedAt IS NULL")+count("product_label_events","quarantineCode IS NOT NULL")+count("shift_close_outbox","state = 'conflict'")+count("inventory_events","serverStatus IN ('conflict','quarantined','rejected')"))
             put("unknownPrints",count("boxes","disassembledAt IS NULL AND printState IN ('printing','unknown')")+count("pallets","printState IN ('printing','unknown')")+count("product_label_jobs","status <> 'completed' AND attemptState IN ('sending','delivery_unknown')"))
             put("activeTasks",activeTasks())
             // Device authority is retired atomically; task grants remain available for recovery.

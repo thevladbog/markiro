@@ -6,6 +6,11 @@ export interface OperatorSwitchControlProps {
   activeShift: boolean;
   pending: boolean;
   error: boolean;
+  /**
+   * Header rail: the 64px rail height, no second row. The caption stays — this is used every
+   * shift and must not become a glyph to guess at.
+   */
+  compact?: boolean;
   onSwitch: () => Promise<void>;
   onDismissError: () => void;
 }
@@ -14,6 +19,7 @@ export function OperatorSwitchControl({
   activeShift,
   pending,
   error,
+  compact = false,
   onSwitch,
   onDismissError,
 }: OperatorSwitchControlProps) {
@@ -50,6 +56,7 @@ export function OperatorSwitchControl({
         type="button"
         size="floor"
         variant="secondary"
+        {...(compact ? { className: "station-rail-button" } : {})}
         disabled={switchPending || error}
         aria-label={t(switchPending ? "operatorSwitch.pending" : "operatorSwitch.action")}
         onClick={requestSwitch}

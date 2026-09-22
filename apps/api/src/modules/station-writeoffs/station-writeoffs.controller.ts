@@ -22,10 +22,10 @@ import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard"
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
   BOX_REGISTRY_REVISION_PATTERN,
-  boxRegistryPageOpenApiSchema,
   boxRegistryQuerySchema,
+  stationBoxRegistryPageOpenApiSchema,
   type BoxRegistryQueryDto,
-  type KioskBoxRegistryPage,
+  type StationBoxRegistryPage,
 } from "../kiosk/box-registry.dto";
 import { BoxRegistryService } from "../kiosk/box-registry.service";
 import type { CreateOrderResultDto } from "../pickup-orders/dto";
@@ -93,7 +93,7 @@ export class StationWriteoffsController {
   @ApiOperation({
     summary: "Sync the handheld box registry",
     description:
-      "Revision-bounded, cursor-paged snapshot or delta of the tenant's closed-box registry. Same service and contract as the kiosk route: the registry was always tenant-scoped, never kiosk-scoped.",
+      "Revision-bounded, cursor-paged snapshot or delta of the tenant's closed-box registry. Same service as the kiosk route -- the registry was always tenant-scoped, never kiosk-scoped -- plus the pallet placement block, which only this route carries.",
   })
   @ApiStationAuth()
   @ApiQuery({
@@ -122,13 +122,13 @@ export class StationWriteoffsController {
   })
   @ApiOkResponse({
     description: "A stable committed box-registry revision page.",
-    schema: boxRegistryPageOpenApiSchema,
+    schema: stationBoxRegistryPageOpenApiSchema,
   })
   @ApiHttpErrors(401, 403, 429)
   boxRegistry(
     @Req() req: RequestWithTenant,
     @Query(new ZodValidationPipe(boxRegistryQuerySchema)) query: BoxRegistryQueryDto,
-  ): Promise<KioskBoxRegistryPage> {
-    return this.boxRegistryService.list(req.tenantId!, query);
+  ): Promise<StationBoxRegistryPage> {
+    return this.boxRegistryService.list(req.tenantId!, query, { view: "station" });
   }
 }

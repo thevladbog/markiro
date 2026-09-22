@@ -263,6 +263,21 @@ class LabelQueueViewModelTest {
         assertEquals(LabelKind.PALLET, items.single().kind)
     }
 
+    /**
+     * A retired pallet's label is retired with it. Without the
+     * `disassembledAt IS NULL` guard on the pallet half of the deferred queue,
+     * a closed-and-deferred pallet taken apart on the terminal keeps showing
+     * up in «Очередь этикеток» for a label nobody will ever print.
+     */
+    @Test
+    fun aDisassembledPalletDisappearsFromTheDeferredQueue() = runTest {
+        pallet("p1", "146800899000000012", PalletPrint.DEFERRED)
+        val items = model().state.first { it.items.size == 1 }.items
+        assertEquals(listOf("p1"), items.map { it.id })
+        db.palletDao().markDisassembled("p1", "2026-09-10T09:00:00.000Z")
+        model().state.first { it.items.isEmpty() }
+    }
+
     @Test
     fun aQueuedPalletCanBePrintedOneAtATimeByAPerson() = runTest {
         pallet("p1", "146800899000000012", PalletPrint.FAILED)

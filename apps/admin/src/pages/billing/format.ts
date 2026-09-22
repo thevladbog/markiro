@@ -1,3 +1,31 @@
+import type { TagPhase } from "@markiro/ui";
+
+import type { TenantServicePeriodState } from "./api.js";
+
+/**
+ * Общая для `ServicePeriodsPage` и `ServicePeriodDetailPage` фаза чипа
+ * периода обслуживания. Фактический union состояний — `upcoming` | `active`
+ * | `expired` (сверено с `apps/api/src/modules/service-periods/
+ * service-period-read-model.ts`, `servicePeriodState`); список периодов не
+ * фильтруется по состоянию, поэтому все три доходят до экрана.
+ *
+ * `upcoming` («Предстоящий») ещё не начался — `planned`, а не вывод из
+ * оборота. `expired` («Завершён») закончился штатно — `done`. `active`
+ * идёт прямо сейчас — `active`, если только лимит минут ещё не выбран
+ * (`exhausted`): тогда период по-прежнему активен, но требует внимания —
+ * `attention`, отдельная подпись «Пакет исчерпан».
+ */
+export function servicePeriodPhase(state: TenantServicePeriodState, exhausted: boolean): TagPhase {
+  switch (state) {
+    case "upcoming":
+      return "planned";
+    case "active":
+      return exhausted ? "attention" : "active";
+    case "expired":
+      return "done";
+  }
+}
+
 /** Formats a strict API money amount without leaking Intl failures into billing pages. */
 export function formatMoney(
   value: string | number | null,

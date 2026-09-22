@@ -367,6 +367,8 @@ class DeviceRecovery(private val db: HandheldDatabase, private val credential: C
      * whose closure only this device knows about, counted here on the same
      * `closedAt IS NOT NULL AND ackedAt IS NULL` terms the sync engine's own
      * queue indicator already counts it on (`SyncEngine.observeUnackedCount`).
+     * Warehouse membership and removal queues also belong to this line, even
+     * after removing the last box deletes the local draft pallet.
      * Its interrupted and unknown prints join `unknownPrints` for the same
      * reason a box's do -- `PalletPrinter` mirrors `BoxPrinter` state for
      * state, so a pallet label with an unresolved outcome needs the same pair
@@ -375,9 +377,10 @@ class DeviceRecovery(private val db: HandheldDatabase, private val credential: C
     suspend fun summary(): Map<String, Long> = db.withTransaction {
         mapOf("scans" to count("outbox"), "inventory" to count("inventory_outbox"),
             "labels" to count("product_label_events", "ackedAt IS NULL"), "boxes" to count("boxes", "closedAt IS NOT NULL AND ackedAt IS NULL"),
-            "pallets" to count("pallets", "closedAt IS NOT NULL AND ackedAt IS NULL"),
+            "pallets" to count("pallets", "closedAt IS NOT NULL AND ackedAt IS NULL") +
+                count("pallet_memberships", "status IN ('pending','sent')") + count("pallet_membership_removals"),
             "exceptions" to count("box_exceptions", "ackedAt IS NULL"), "closes" to count("shift_close_outbox", "state = 'pending'"),
-            "conflicts" to count("conflicts_mirror"), "unknownPrints" to count("boxes", "printState IN ('printing','unknown')") +
+            "conflicts" to count("conflicts_mirror") + count("pallet_memberships", "status = 'rejected' AND acknowledgedAt IS NULL"), "unknownPrints" to count("boxes", "printState IN ('printing','unknown')") +
                 count("pallets", "printState IN ('printing','unknown')") +
                 count("product_label_jobs", "attemptState IN ('sending','delivery_unknown')"),
             // A queued write-off is unsent production work like a pending shift

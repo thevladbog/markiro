@@ -8,6 +8,7 @@ import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import { getBillingRequest } from "../billing-requests/api.js";
 import { getInvoice } from "../billing/api.js";
 import { getBillingAct, getBillingActDocumentDownload } from "./api.js";
+import { BILLING_ACT_STATUS_TO_PHASE } from "./BillingActsPage.js";
 
 export function BillingActDetailPage() {
   const { t, i18n } = useTranslation();
@@ -78,7 +79,7 @@ export function BillingActDetailPage() {
         actions={
           <div className="billing-request-actions">
             <StatusChip
-              status={act.status === "issued" ? "ok" : act.status === "draft" ? "warn" : "neutral"}
+              phase={BILLING_ACT_STATUS_TO_PHASE[act.status]}
               label={t(`billingActs.status.${act.status}`)}
             />
             {act.requestId ? (

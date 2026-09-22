@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { Alert, Button, Checkbox, ConfirmDialog, Input, StatusChip } from "@markiro/ui";
+import { Alert, Badge, Button, Checkbox, ConfirmDialog, Input } from "@markiro/ui";
 import type {
   DeviceReplacementPreparation,
   DeviceReplacementList,
@@ -287,11 +287,9 @@ export function DeviceReplacementWorkflow({
       <p style={{ margin: 0 }}>{t(`deviceReplacement.workflow.next.${p.state}`)}</p>
       {p.execution ? (
         <>
-          <StatusChip
-            style={{ justifySelf: "start" }}
-            status={p.execution.mode === "emergency" ? "warn" : "neutral"}
-            label={t(`deviceReplacement.workflow.mode.${p.execution.mode}`)}
-          />
+          <Badge tone={p.execution.mode === "emergency" ? "warn" : "info"}>
+            {t(`deviceReplacement.workflow.mode.${p.execution.mode}`)}
+          </Badge>
           <dl style={{ margin: 0, ...grid }}>
             {field("executionRevision", p.execution.revision)}
             {field("executionStep", t(`deviceReplacement.workflow.step.${p.execution.step}`))}

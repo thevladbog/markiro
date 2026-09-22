@@ -12,6 +12,7 @@ import type { CounterpartyDto } from "../counterparties/api.js";
 import type { LabelTemplateSummaryDto } from "../labels/api.js";
 import {
   useCreateShift,
+  useShift,
   useUpdateShift,
   type CreateShiftInput,
   type LineDto,
@@ -52,6 +53,15 @@ export function ShiftPanelRoute({ mode }: { mode: "create" | "edit" | "details" 
   return <EditShiftPanel />;
 }
 
+/** The refusal codes the shift form can say in words; anything else keeps the server's message. */
+const NAMED_SHIFT_REFUSALS = new Set(["ORG_GLN_MISSING", "SSCC_ISSUER_GLN_MISSING"]);
+
+function shiftSubmissionMessage(cause: ApiRequestError, t: (key: string) => string): string {
+  return cause.code && NAMED_SHIFT_REFUSALS.has(cause.code)
+    ? t(`pages.shifts.form.errors.${cause.code}`)
+    : cause.message;
+}
+
 function usePanelContext() {
   const context = useOutletContext<ShiftsPanelContext>();
   const location = useLocation();
@@ -71,6 +81,23 @@ function usePanelContext() {
  */
 function usePalletsEntitled(): boolean {
   return useAccess().features?.pallets !== false;
+}
+
+/**
+ * The shift an open panel is about. The list behind the panel is filtered, so
+ * a shift can legitimately leave it while its panel stays open -- closing a
+ * shift under the «Активна» filter is the ordinary case, and the panel used to
+ * answer the «Смена закрыта» toast with «Смена не найдена». The list entry
+ * still answers first, so the common path costs no extra request; the by-id
+ * read covers a shift the current filter no longer returns, including a
+ * directly entered URL. `loading` is the by-id read's first fetch only: a
+ * disabled query never reports it.
+ */
+function usePanelShift(context: ShiftsPanelContext, shiftId: string | undefined) {
+  const listed = context.shifts.find((item) => item.id === shiftId);
+  const settled = !context.panelPending && !context.panelError;
+  const query = useShift(shiftId, settled && listed === undefined);
+  return { shift: listed ?? query.data, loading: query.isLoading };
 }
 
 function PanelState({ mode }: { mode: "create" | "edit" | "details" }) {
@@ -104,8 +131,8 @@ function DetailsShiftPanel() {
   const { shiftId } = useParams();
   const { t } = useTranslation();
   const { context, close } = usePanelContext();
+  const { shift, loading } = usePanelShift(context, shiftId);
   if (context.panelPending || context.panelError) return <PanelState mode="details" />;
-  const shift = context.shifts.find((item) => item.id === shiftId);
   if (!shift) {
     return (
       <SidePanel
@@ -115,7 +142,13 @@ function DetailsShiftPanel() {
         closeLabel={t("common.close")}
         onClose={close}
       >
-        <Alert tone="error">{t("pages.shifts.form.notFound")}</Alert>
+        {loading ? (
+          <div className="mk-shift-panel-skeleton">
+            <Spinner label={t("common.loading")} />
+          </div>
+        ) : (
+          <Alert tone="error">{t("pages.shifts.form.notFound")}</Alert>
+        )}
       </SidePanel>
     );
   }
@@ -175,7 +208,7 @@ function CreateShiftPanel() {
           } catch (cause) {
             setError(
               cause instanceof ApiRequestError
-                ? cause.message
+                ? shiftSubmissionMessage(cause, t)
                 : t("pages.shifts.toasts.createError"),
             );
           }
@@ -199,7 +232,7 @@ function EditShiftPanel() {
   const [criticalInput, setCriticalInput] = useState<UpdateShiftInput | null>(null);
   const guard = useRoutePanelGuard(close, mutation.isPending);
   const palletsEntitled = usePalletsEntitled();
-  const shift = context.shifts.find((item) => item.id === shiftId);
+  const { shift, loading } = usePanelShift(context, shiftId);
   const initialValues = useMemo<ShiftFormValues | undefined>(
     () =>
       shift
@@ -264,7 +297,13 @@ function EditShiftPanel() {
         closeLabel={t("common.close")}
         onClose={close}
       >
-        <Alert tone="warn">{t("pages.shifts.form.notFound")}</Alert>
+        {loading ? (
+          <div className="mk-shift-panel-skeleton">
+            <Spinner label={t("common.loading")} />
+          </div>
+        ) : (
+          <Alert tone="warn">{t("pages.shifts.form.notFound")}</Alert>
+        )}
       </SidePanel>
     );
   }
@@ -286,7 +325,9 @@ function EditShiftPanel() {
     } catch (cause) {
       setCriticalInput(null);
       setError(
-        cause instanceof ApiRequestError ? cause.message : t("pages.shifts.toasts.updateError"),
+        cause instanceof ApiRequestError
+          ? shiftSubmissionMessage(cause, t)
+          : t("pages.shifts.toasts.updateError"),
       );
     }
   };

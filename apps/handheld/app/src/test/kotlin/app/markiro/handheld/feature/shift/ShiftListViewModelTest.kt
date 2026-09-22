@@ -19,6 +19,7 @@ import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -71,6 +72,7 @@ class ShiftListViewModelTest {
             db.deviceConfigDao(),
             db.recovery,
             ReachabilityTracker { 1_757_500_000_000L },
+            app.markiro.handheld.core.scan.ScanRouterAdapter(flowOf()),
             flowOf(Unit),
         ),
     )
@@ -85,6 +87,20 @@ class ShiftListViewModelTest {
     fun aRefusedRefreshIsCarriedIntoTheState() = runTest {
         server.enqueue(MockResponse().setResponseCode(503))
         assertTrue(vm().state.first { !it.loading }.refreshFailed)
+    }
+
+    /** The list pinned «Продолжить» by `activeShiftId` alone, so a shift the operator had left was still offered first. */
+    @Test
+    fun aLeftShiftIsNoLongerOfferedForContinuing() = runTest {
+        server.enqueue(MockResponse().setBody("""{"items":[]}"""))
+        db.shiftDao().upsert(ShiftEntityFixtures.bundled("s1"))
+        val repository = ShiftRepository(api, db, NetworkModule.json(), SsccPool(db)) { 1_757_500_000_000L }
+        db.deviceConfigDao().get()!!.let { db.deviceConfigDao().upsert(it.copy(activeShiftId = "s1")) }
+        val model = vm()
+        assertEquals("s1", model.state.first { it.continueShift != null }.continueShift?.id)
+        repository.leave("s1")
+        val ui = model.state.first { it.continueShift == null }
+        assertEquals(listOf("s1"), ui.mine.map { it.id })
     }
 
     @Test

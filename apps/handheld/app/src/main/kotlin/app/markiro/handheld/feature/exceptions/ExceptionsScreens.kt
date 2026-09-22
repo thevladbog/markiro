@@ -18,6 +18,7 @@ import androidx.compose.material.icons.automirrored.outlined.Undo
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.Inventory2
+import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.material.icons.outlined.Print
 import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.Icon
@@ -41,6 +42,7 @@ import app.markiro.handheld.core.design.Tone
 data class ExceptionsCallbacks(
     val onBack: () -> Unit = {},
     val onDisassemble: () -> Unit = {},
+    val onDisassemblePallet: () -> Unit = {},
     val onClear: () -> Unit = {},
     val onReprint: () -> Unit = {},
     val onUndo: () -> Unit = {},
@@ -94,11 +96,13 @@ fun ExceptionsScreen(state: ExceptionsUi, cb: ExceptionsCallbacks) {
             return
         }
         is ExceptionsStep.Done -> {
+            // A result, not a question: «Отмена» under «Скан отменён» read as
+            // «отменить отмену». The same closing word as every other result screen.
             FullScreenState(
                 icon = Icons.Outlined.CheckCircle,
                 title = stringResource(step.message),
                 text = "",
-                primary = StateAction(stringResource(R.string.common_cancel), cb.onDismiss),
+                primary = StateAction(stringResource(R.string.common_got_it), cb.onDismiss),
                 tone = Tone.Ok,
             )
             return
@@ -108,7 +112,7 @@ fun ExceptionsScreen(state: ExceptionsUi, cb: ExceptionsCallbacks) {
                 icon = Icons.Outlined.Warning,
                 title = stringResource(step.message),
                 text = "",
-                primary = StateAction(stringResource(R.string.common_cancel), cb.onDismiss),
+                primary = StateAction(stringResource(R.string.common_got_it), cb.onDismiss),
                 tone = Tone.Warn,
             )
             return
@@ -127,6 +131,13 @@ fun ExceptionsScreen(state: ExceptionsUi, cb: ExceptionsCallbacks) {
                 enabled = state.reprintableCount > 0,
                 unavailable = stringResource(R.string.exceptions_no_closed_boxes),
                 onClick = cb.onDisassemble,
+            )
+            ActionRow(
+                icon = Icons.Outlined.Layers,
+                label = stringResource(R.string.exceptions_disassemble_pallet),
+                enabled = state.closedPalletCount > 0,
+                unavailable = stringResource(R.string.exceptions_no_closed_pallets),
+                onClick = cb.onDisassemblePallet,
             )
             ActionRow(
                 icon = Icons.Outlined.DeleteSweep,

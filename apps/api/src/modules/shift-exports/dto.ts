@@ -1,5 +1,10 @@
 import { z } from "zod";
-import type { ShiftExportFormatDescriptor, ShiftExportFormatId } from "@markiro/domain";
+import type {
+  PalletExportFormatDescriptor,
+  PalletExportFormatId,
+  ShiftExportFormatDescriptor,
+  ShiftExportFormatId,
+} from "@markiro/domain";
 
 export const createShiftExportSchema = z.strictObject({
   formatId: z.enum([
@@ -11,6 +16,8 @@ export const createShiftExportSchema = z.strictObject({
     "shift_txt_pallets",
     "shift_csv_pallets",
     "shift_xml_gismt_aggregation_pallets",
+    "shift_txt_pallet_boxes",
+    "shift_xml_gismt_pallet_boxes",
   ]),
   formatVersion: z.number().int().min(1),
   maxLines: z.number().int().min(2).max(1_000_000).nullable(),
@@ -20,12 +27,27 @@ export const createShiftExportSchema = z.strictObject({
 export type CreateShiftExportDto = z.infer<typeof createShiftExportSchema>;
 export type ShiftExportFormatsDto = readonly ShiftExportFormatDescriptor[];
 
+/**
+ * A pallet export has no `maxLines`: the document is one `pack_content`
+ * naming the pallet's boxes, never large enough to split into parts.
+ */
+export const createPalletExportSchema = z.strictObject({
+  formatId: z.enum(["pallet_xml_gismt_aggregation"]),
+  formatVersion: z.number().int().min(1),
+  idempotencyKey: z.uuid(),
+});
+
+export type CreatePalletExportDto = z.infer<typeof createPalletExportSchema>;
+export type PalletExportFormatsDto = readonly PalletExportFormatDescriptor[];
+
 export interface ShiftExportArtifactDto {
   id: string;
   partNumber: number;
   physicalLineCount: number;
   codeCount: number;
   boxCount: number;
+  /** Closed pallets this part covers; 0 outside the pallet formats. */
+  palletCount: number;
   filename: string;
   mimeType: string;
   byteSize: number;
@@ -34,8 +56,10 @@ export interface ShiftExportArtifactDto {
 
 export interface ShiftExportDto {
   id: string;
-  shiftId: string;
-  formatId: ShiftExportFormatId;
+  /** Null exactly when this is a per-pallet export; `palletId` is then set. */
+  shiftId: string | null;
+  palletId: string | null;
+  formatId: ShiftExportFormatId | PalletExportFormatId;
   formatVersion: number;
   maxLines: number | null;
   status: "queued" | "processing" | "ready" | "failed";
@@ -44,6 +68,8 @@ export interface ShiftExportDto {
   shiftDateSnapshot: string | null;
   totalCodeCount: number | null;
   totalBoxCount: number | null;
+  /** Null until ready; 0 outside the pallet formats. */
+  totalPalletCount: number | null;
   createdByUserId: string;
   createdByName: string | null;
   sourceSnapshotStartedAt: string | null;
@@ -76,13 +102,39 @@ export const shiftExportFormatOpenApiSchema = {
         "shift_txt_pallets",
         "shift_csv_pallets",
         "shift_xml_gismt_aggregation_pallets",
+        "shift_txt_pallet_boxes",
+        "shift_xml_gismt_pallet_boxes",
       ],
     },
     version: { type: "integer", enum: [1, 2] },
     label: { type: "string" },
     extension: { type: "string", enum: ["txt", "csv", "xml"] },
     mimeType: { type: "string" },
-    boxMode: { type: "string", enum: ["flat", "boxes", "pallets"] },
+    boxMode: { type: "string", enum: ["flat", "boxes", "pallets", "pallet_boxes"] },
+  },
+};
+
+export const palletExportFormatOpenApiSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["id", "version", "label", "extension", "mimeType"],
+  properties: {
+    id: { type: "string", enum: ["pallet_xml_gismt_aggregation"] },
+    version: { type: "integer", enum: [1] },
+    label: { type: "string" },
+    extension: { type: "string", enum: ["xml"] },
+    mimeType: { type: "string" },
+  },
+};
+
+export const createPalletExportOpenApiSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["formatId", "formatVersion", "idempotencyKey"],
+  properties: {
+    formatId: palletExportFormatOpenApiSchema.properties.id,
+    formatVersion: { type: "integer", minimum: 1 },
+    idempotencyKey: { type: "string", format: "uuid" },
   },
 };
 
@@ -107,6 +159,7 @@ export const shiftExportArtifactOpenApiSchema = {
     "physicalLineCount",
     "codeCount",
     "boxCount",
+    "palletCount",
     "filename",
     "mimeType",
     "byteSize",
@@ -116,8 +169,10 @@ export const shiftExportArtifactOpenApiSchema = {
     id: { type: "string", format: "uuid" },
     partNumber: { type: "integer", minimum: 1 },
     physicalLineCount: { type: "integer", minimum: 1 },
-    codeCount: { type: "integer", minimum: 1 },
+    // 0 for a per-pallet aggregation, which names box SSCCs and no unit codes.
+    codeCount: { type: "integer", minimum: 0 },
     boxCount: { type: "integer", minimum: 0 },
+    palletCount: { type: "integer", minimum: 0 },
     filename: { type: "string" },
     mimeType: { type: "string" },
     byteSize: { type: "integer", minimum: 1 },
@@ -131,6 +186,7 @@ export const shiftExportOpenApiSchema = {
   required: [
     "id",
     "shiftId",
+    "palletId",
     "formatId",
     "formatVersion",
     "maxLines",
@@ -140,6 +196,7 @@ export const shiftExportOpenApiSchema = {
     "shiftDateSnapshot",
     "totalCodeCount",
     "totalBoxCount",
+    "totalPalletCount",
     "createdByUserId",
     "createdByName",
     "sourceSnapshotStartedAt",
@@ -151,8 +208,15 @@ export const shiftExportOpenApiSchema = {
   ],
   properties: {
     id: { type: "string", format: "uuid" },
-    shiftId: { type: "string", format: "uuid" },
-    formatId: shiftExportFormatOpenApiSchema.properties.id,
+    shiftId: { type: "string", format: "uuid", nullable: true },
+    palletId: { type: "string", format: "uuid", nullable: true },
+    formatId: {
+      type: "string",
+      enum: [
+        ...shiftExportFormatOpenApiSchema.properties.id.enum,
+        ...palletExportFormatOpenApiSchema.properties.id.enum,
+      ],
+    },
     formatVersion: { type: "integer", minimum: 1 },
     maxLines: { type: "integer", nullable: true, minimum: 2, maximum: 1_000_000 },
     status: { type: "string", enum: ["queued", "processing", "ready", "failed"] },
@@ -162,12 +226,15 @@ export const shiftExportOpenApiSchema = {
       description:
         'Present only when status is "failed". SHIFT_HAS_NO_PALLETS covers two distinct ' +
         "shift histories: no box in the shift ever stood on a pallet, or pallets were used " +
-        "but none of them has closed yet -- not only the former.",
+        "but none of them has closed yet -- not only the former. PALLET_NOT_CLOSED and " +
+        "PALLET_DISASSEMBLED belong to a per-pallet export whose pallet changed state " +
+        "between queueing and running.",
     },
     productNameSnapshot: { type: "string", nullable: true },
     shiftDateSnapshot: { type: "string", format: "date", nullable: true },
-    totalCodeCount: { type: "integer", nullable: true, minimum: 1 },
+    totalCodeCount: { type: "integer", nullable: true, minimum: 0 },
     totalBoxCount: { type: "integer", nullable: true, minimum: 0 },
+    totalPalletCount: { type: "integer", nullable: true, minimum: 0 },
     createdByUserId: { type: "string" },
     createdByName: { type: "string", nullable: true },
     sourceSnapshotStartedAt: { type: "string", format: "date-time", nullable: true },

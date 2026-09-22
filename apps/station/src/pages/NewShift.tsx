@@ -16,6 +16,7 @@ import {
   type ValidationPrintInput,
 } from "@markiro/domain";
 import { StationApiError, type StationClient } from "../lib/api-client.js";
+import { OfflineGrantDeniedError } from "../lib/journal.js";
 import { DEFAULT_HARDWARE_CONFIG, type HardwareConfig } from "../lib/hardware-config.js";
 import { paginate } from "../lib/pagination.js";
 import type { ScanSource } from "../lib/scan-source.js";
@@ -546,7 +547,16 @@ export function NewShift({
       setError(
         err instanceof StationApiError && err.code === "BOX_LABEL_TEMPLATE_REQUIRED"
           ? t("shifts.boxLabelTemplateRequired")
-          : t("shifts.actionFailed"),
+          : // The shift is already open on the server by the time entry is
+            // refused, so the operator needs the actual reason -- the same one
+            // ShiftSelection shows -- not the generic retry prompt.
+            err instanceof OfflineGrantDeniedError
+            ? t(
+                err.reason === "clock_untrusted"
+                  ? "shifts.offlineGrantClock"
+                  : "shifts.offlineGrantDenied",
+              )
+            : t("shifts.actionFailed"),
       );
     } finally {
       lease?.release();

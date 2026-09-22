@@ -571,6 +571,48 @@ export class OrgProfileService {
     }
   }
 
+  /**
+   * The organisation's active logo as a `data:` URL for the printed forms
+   * (contents reports, placards, disaggregation, pickup slips). Those pages
+   * must stay self-contained -- they are opened, printed and saved as PDF --
+   * so the bytes are inlined rather than linked. Null when no logo is set or
+   * the store cannot be read: a report that prints with the Markiro lockup is
+   * better than one that does not print, so a storage failure is logged, not
+   * thrown.
+   */
+  async reportLogoDataUrl(tenantId: string): Promise<string | null> {
+    const [asset] = await this.db
+      .select({
+        id: schema.organizationLogoAssets.id,
+        objectKey: schema.organizationLogoAssets.objectKey,
+        contentType: schema.organizationLogoAssets.contentType,
+      })
+      .from(schema.orgProfiles)
+      .innerJoin(
+        schema.organizationLogoAssets,
+        and(
+          eq(schema.organizationLogoAssets.tenantId, schema.orgProfiles.tenantId),
+          eq(schema.organizationLogoAssets.id, schema.orgProfiles.logoAssetId),
+          eq(schema.organizationLogoAssets.status, "active"),
+        ),
+      )
+      .where(eq(schema.orgProfiles.tenantId, tenantId))
+      .limit(1);
+    if (!asset || asset.contentType !== "image/webp") return null;
+    try {
+      const object = await this.storage.get(asset.objectKey);
+      if (object.contentType !== "image/webp") return null;
+      return `data:image/webp;base64,${object.body.toString("base64")}`;
+    } catch (error) {
+      if (!isMissingObjectError(error)) {
+        this.logger.warn(
+          `Could not read organization logo for the printed form, tenant ${tenantId}, revision ${asset.id}: ${errorMessage(error)}`,
+        );
+      }
+      return null;
+    }
+  }
+
   async reconcileLogoAssets(now = new Date(), limit = 50): Promise<number> {
     const staleBefore = new Date(now.getTime() - 15 * 60 * 1_000);
     const candidates = await this.db

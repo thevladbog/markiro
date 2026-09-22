@@ -23,6 +23,7 @@ import app.markiro.handheld.core.box.SsccPool
 import app.markiro.handheld.core.network.NetworkModule
 import app.markiro.handheld.core.network.StationApi
 import app.markiro.handheld.core.storage.BoxEntity
+import app.markiro.handheld.core.storage.OutboxEntity
 import app.markiro.handheld.core.storage.DeviceConfigEntity
 import app.markiro.handheld.core.storage.HandheldDatabase
 import kotlinx.coroutines.flow.first
@@ -239,6 +240,48 @@ class ShiftRepositoryTest {
         assertNull(db.shiftDao().get("s1"))
     }
 
+    /**
+     * Leaving is a local mark: the pointer that pins the shift on the hub and
+     * in the list goes, but nothing the device still owes the server does --
+     * queued scans, closed-but-unprinted boxes and the mirror row with its
+     * bundle all stay for the sync engines and a later re-entry.
+     */
+    @Test
+    fun leavingClearsTheActivePointerButKeepsQueuedWork() = runTest {
+        server.shutdown()
+        db.shiftDao().upsert(ShiftEntityFixtures.bundled("s1"))
+        assertEquals(EnterResult.Ok, repo().enter("s1"))
+        db.outboxDao().insert(
+            OutboxEntity(shiftId = "s1", raw = "raw", verdict = "accepted", scannedAt = "2026-09-10T10:00:00Z", operatorId = "op-1", codeHash = "h", gtin14 = "04600682000013", serial = "one"),
+        )
+        db.boxDao().insert(
+            BoxEntity(boxId = "b1", shiftId = "s1", sscc = "146800899000000019", openedAt = "2026-09-10T09:00:00Z", closedAt = "2026-09-10T10:00:00Z", operatorId = "op-1", printState = BoxPrint.PENDING, printReason = null, ackedAt = null),
+        )
+
+        repo().leave("s1")
+
+        assertNull(db.deviceConfigDao().get()?.activeShiftId)
+        val left = checkNotNull(db.shiftDao().get("s1"))
+        assertEquals(clock, left.leftAt)
+        assertNotNull(left.enteredAt)
+        assertNotNull(left.bundleFetchedAt)
+        assertEquals(1, db.outboxDao().countNow())
+        assertEquals(1, db.boxDao().observeUnprintedCount().first())
+    }
+
+    @Test
+    fun leavingAnotherShiftLeavesTheActivePointerAlone() = runTest {
+        server.shutdown()
+        db.shiftDao().upsertAll(listOf(ShiftEntityFixtures.bundled("s1"), ShiftEntityFixtures.bundled("s2")))
+        assertEquals(EnterResult.Ok, repo().enter("s1"))
+
+        repo().leave("s2")
+
+        assertEquals("s1", db.deviceConfigDao().get()?.activeShiftId)
+        assertEquals(clock, db.shiftDao().get("s2")?.leftAt)
+        assertNull(db.shiftDao().get("s1")?.leftAt)
+    }
+
     @Test
     fun offlineEntryWorksOnlyWithABundle() = runTest {
         server.shutdown()
@@ -247,6 +290,33 @@ class ShiftRepositoryTest {
         assertEquals(EnterResult.Ok, repo().enter("s1"))
         assertNull(db.shiftDao().get("s1")?.leftAt)
         assertEquals("s1", db.deviceConfigDao().get()?.activeShiftId)
+    }
+
+    /**
+     * Found on the emulator: the server answered `sscc: null` and wrote only a
+     * WARN to its own log, so the operator learned about the missing GLN on
+     * the twentieth scan. The bundle now names the reason, and the device
+     * keeps it to warn from entry -- and drops it once a block arrives.
+     */
+    @Test
+    fun enteringAnAggregationShiftWithoutAnIssuerKeepsTheServersReason() = runTest {
+        val degraded = aggregationBundleJson
+            .replace(""""sscc":{"issuerPrefix":"468008990","extensionDigit":0,"fromSerial":101,"toSerial":1000,"consumedThroughSerial":100},""", """"sscc":null,"ssccIssuerProblem":"org_gln_missing",""")
+        server.enqueue(MockResponse().setBody(aggregationShiftJson))
+        server.enqueue(MockResponse().setBody(degraded))
+        assertEquals(EnterResult.Ok, repo().enter("s1"))
+        val stuck = db.shiftDao().get("s1")!!
+        assertNull(stuck.ssccIssuerPrefix)
+        assertEquals("org_gln_missing", stuck.ssccIssuerProblem)
+        assertEquals(SsccWarning.ORG_GLN_MISSING, stuck.ssccWarning())
+
+        server.enqueue(MockResponse().setBody(aggregationShiftJson))
+        server.enqueue(MockResponse().setBody(aggregationBundleJson))
+        assertEquals(EnterResult.Ok, repo().enter("s1"))
+        val fixed = db.shiftDao().get("s1")!!
+        assertEquals("468008990", fixed.ssccIssuerPrefix)
+        assertNull(fixed.ssccIssuerProblem)
+        assertNull(fixed.ssccWarning())
     }
 
     @Test
@@ -440,7 +510,8 @@ class ShiftRepositoryTest {
         val requested = CompletableDeferred<Unit>()
         val finish = CompletableDeferred<Unit>()
         api = object : StationApi by api {
-            override suspend fun enter(id: String) = NetworkModule.json().decodeFromString<app.markiro.handheld.core.network.ShiftDto>(activeShiftJson)
+            override suspend fun enter(id: String, body: app.markiro.handheld.core.network.ShiftEntryRequest) =
+                NetworkModule.json().decodeFromString<app.markiro.handheld.core.network.ShiftDto>(activeShiftJson)
             override suspend fun bundle(id: String): app.markiro.handheld.core.network.ShiftBundleDto {
                 requested.complete(Unit)
                 finish.await()
@@ -464,7 +535,7 @@ class ShiftRepositoryTest {
         val requested = CompletableDeferred<Unit>()
         val finish = CompletableDeferred<Unit>()
         api = object : StationApi by api {
-            override suspend fun enter(id: String): app.markiro.handheld.core.network.ShiftDto {
+            override suspend fun enter(id: String, body: app.markiro.handheld.core.network.ShiftEntryRequest): app.markiro.handheld.core.network.ShiftDto {
                 requested.complete(Unit)
                 finish.await()
                 throw java.io.IOException("synthetic offline")
@@ -491,14 +562,14 @@ class ShiftRepositoryTest {
                 listCalls++
                 return app.markiro.handheld.core.network.ShiftListResponse(emptyList())
             }
-            override suspend fun enter(id: String): app.markiro.handheld.core.network.ShiftDto {
+            override suspend fun enter(id: String, body: app.markiro.handheld.core.network.ShiftEntryRequest): app.markiro.handheld.core.network.ShiftDto {
                 requested.complete(Unit)
                 finish.await()
                 throw retrofit2.HttpException(retrofit2.Response.error<Any>(403,
                     """{"code":"subscription_read_only"}""".toResponseBody("application/json".toMediaType())))
             }
         }
-        val vm = main.track(ShiftListViewModel(repo(), db.deviceConfigDao(), db.recovery, app.markiro.handheld.core.network.ReachabilityTracker(), flowOf(Unit)))
+        val vm = main.track(ShiftListViewModel(repo(), db.deviceConfigDao(), db.recovery, app.markiro.handheld.core.network.ReachabilityTracker(), app.markiro.handheld.core.scan.ScanRouterAdapter(flowOf()), flowOf(Unit)))
         vm.state.first { !it.loading }
         vm.select(cached)
         requested.await()
@@ -521,11 +592,11 @@ class ShiftRepositoryTest {
                 listCalls++
                 return app.markiro.handheld.core.network.ShiftListResponse(emptyList())
             }
-            override suspend fun enter(id: String): app.markiro.handheld.core.network.ShiftDto =
+            override suspend fun enter(id: String, body: app.markiro.handheld.core.network.ShiftEntryRequest): app.markiro.handheld.core.network.ShiftDto =
                 throw retrofit2.HttpException(retrofit2.Response.error<Any>(403,
                     """{"code":"subscription_read_only"}""".toResponseBody("application/json".toMediaType())))
         }
-        val vm = main.track(ShiftListViewModel(repo(), db.deviceConfigDao(), db.recovery, app.markiro.handheld.core.network.ReachabilityTracker(), flowOf(Unit)))
+        val vm = main.track(ShiftListViewModel(repo(), db.deviceConfigDao(), db.recovery, app.markiro.handheld.core.network.ReachabilityTracker(), app.markiro.handheld.core.scan.ScanRouterAdapter(flowOf()), flowOf(Unit)))
         vm.state.first { !it.loading }
         vm.select(cached)
         vm.state.first { it.dialog is ShiftDialog.Refused }

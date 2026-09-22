@@ -12,21 +12,26 @@ import {
   Spinner,
   StatusChip,
   Table,
-  type StatusChipStatus,
+  type TagPhase,
 } from "@markiro/ui";
 
 import { listAgreements, type AgreementStatus, type AgreementSummary } from "./api.js";
 
 const STATUSES = ["draft", "in_review", "sent", "signed", "terminated"] as const;
 
-// StatusChip pairs every status with its own glyph and label, so the state is
-// never carried by colour alone.
-const STATUS_CHIP: Record<AgreementStatus, StatusChipStatus> = {
-  draft: "neutral",
-  in_review: "info",
-  sent: "info",
-  signed: "ok",
-  terminated: "warn",
+/**
+ * `in_review` и `sent` — предложено спекой как `attention`/`running`
+ * (`docs/superpowers/specs/2026-09-19-tag-semantics-and-geometry-design.md`),
+ * хотя граница между «на согласовании» и «отправлен» в продукте нечёткая:
+ * обе фазы означают «ждём решения не от нас». Решение оставлено как в спеке
+ * до отдельного продуктового разбора.
+ */
+export const AGREEMENT_STATUS_TO_PHASE: Record<AgreementStatus, TagPhase> = {
+  draft: "draft",
+  in_review: "attention",
+  sent: "running",
+  signed: "done",
+  terminated: "retired",
 };
 
 export function AgreementsPage() {
@@ -115,7 +120,7 @@ export function AgreementsPage() {
               title: t("agreements.columns.status"),
               render: (row) => (
                 <StatusChip
-                  status={STATUS_CHIP[row.status]}
+                  phase={AGREEMENT_STATUS_TO_PHASE[row.status]}
                   label={t(`agreements.statuses.${row.status}`)}
                 />
               ),

@@ -4699,135 +4699,161 @@ describe("App", () => {
   // nothing ever reset it back to "select", so exiting such a shift
   // re-rendered NewShift instead of shift selection -- the opposite of what
   // the exit control promises ("return to shift selection").
-  it("returns to shift selection, not the new-shift form, after exiting a shift entered via NewShift (Finding 5)", async () => {
-    lockdownMock.getSnapshot.mockImplementation(() => lockdownMock.snapshot);
-    // mirrorShiftBundle's own download (GET /shifts/:id/bundle) is not
-    // meaningfully mocked below, so it fails and logs -- expected and
-    // harmless (see shift-bundle.ts's doc comment on why that path is
-    // best-effort), silenced the same way other failure-inducing tests here
-    // silence it.
-    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    try {
-      const pinHash = await hashSecret(OPERATOR_PIN);
-      invokeMock.mockImplementation((cmd: string, payload?: unknown): Promise<unknown> => {
-        if (cmd === "read_config") {
-          return Promise.resolve({
-            machine_id: "m1",
-            tenant_id: "tenant-1",
-            device_id: "device-1",
-            api_key: "mk_key",
-            server_url: "http://localhost:3000",
-          });
-        }
-        if (cmd === "plugin:sql|load") return Promise.resolve("sqlite:station-mirror.db");
-        if (cmd === "plugin:sql|execute") return Promise.resolve([0, 0]);
-        if (cmd === "plugin:sql|select") {
-          const { query, values } = (payload ?? {}) as { query: string; values?: unknown[] };
-          if (query.includes("FROM outbox")) {
-            if (query.startsWith("SELECT COUNT(*)")) return Promise.resolve([{ n: 0 }]);
-            return Promise.resolve([]);
-          }
-          if (/FROM operators_mirror\b/.test(query)) {
-            return Promise.resolve([operatorMirrorRow(pinHash)]);
-          }
-          // readShiftContext's join (mirror.ts) -- answered with a fixed
-          // product row for whatever shift id NewShift's own flow creates
-          // below (`s9`), so WorkScreen actually renders instead of getting
-          // stuck on "Preparing the shift…" forever.
-          if (query.includes("shift_mirror")) {
-            return Promise.resolve([
-              { gtin14: "04600000000015", name: "Cola", counterparty_name: null },
-            ]);
-          }
-          if (query.includes("station_meta")) {
-            if (values?.[0] === "hardware_config") {
-              return Promise.resolve([
-                {
-                  value: JSON.stringify({
-                    scanner: null,
-                    printer: null,
-                    printerLanguage: "zpl",
-                    verifyPrintedLabel: false,
-                  }),
-                },
-              ]);
-            }
-            if (values?.[0] === "install_id") {
-              return Promise.resolve([{ value: "test-install-id" }]);
-            }
-            return Promise.resolve([]);
-          }
-          return Promise.resolve([]);
-        }
-        return Promise.resolve(undefined);
-      });
-
-      vi.stubGlobal(
-        "fetch",
-        vi.fn(async (url: string, init?: RequestInit) => {
-          const path = new URL(url).pathname;
-          const method = init?.method ?? "GET";
-          if (path === "/products/gtin-check" && method === "POST") {
-            return new Response(JSON.stringify({ gtin14: "04600000000015", owner: "own" }), {
-              status: 200,
+  // The grant-state variant is the regression for a station that has ever
+  // received a grant configuration receipt: that receipt alone installs
+  // `offline_grant_install_state`, and entry then binds a grant against a
+  // bundle no first entry has mirrored yet. It used to abort every entry
+  // while the server had already opened the shift.
+  it.each([
+    ["without installed grant state", false],
+    ["with installed grant state", true],
+  ] as const)(
+    "returns to shift selection, not the new-shift form, after exiting a shift entered via NewShift %s (Finding 5)",
+    async (_name, grantsInstalled) => {
+      lockdownMock.getSnapshot.mockImplementation(() => lockdownMock.snapshot);
+      // mirrorShiftBundle's own download (GET /shifts/:id/bundle) is not
+      // meaningfully mocked below, so it fails and logs -- expected and
+      // harmless (see shift-bundle.ts's doc comment on why that path is
+      // best-effort), silenced the same way other failure-inducing tests here
+      // silence it.
+      const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        const pinHash = await hashSecret(OPERATOR_PIN);
+        invokeMock.mockImplementation((cmd: string, payload?: unknown): Promise<unknown> => {
+          if (cmd === "read_config") {
+            return Promise.resolve({
+              machine_id: "m1",
+              tenant_id: "tenant-1",
+              device_id: "device-1",
+              api_key: "mk_key",
+              server_url: "http://localhost:3000",
             });
           }
-          if (path === "/products" && method === "GET") {
-            return new Response(
-              JSON.stringify({
-                items: [{ id: "p1", gtin14: "04600000000015", name: "Cola", boxCapacity: null }],
-              }),
-              { status: 200 },
-            );
+          if (cmd === "plugin:sql|load") return Promise.resolve("sqlite:station-mirror.db");
+          if (cmd === "plugin:sql|execute") return Promise.resolve([0, 0]);
+          if (cmd === "plugin:sql|select") {
+            const { query, values } = (payload ?? {}) as { query: string; values?: unknown[] };
+            if (query.includes("FROM outbox")) {
+              if (query.startsWith("SELECT COUNT(*)")) return Promise.resolve([{ n: 0 }]);
+              return Promise.resolve([]);
+            }
+            if (/FROM operators_mirror\b/.test(query)) {
+              return Promise.resolve([operatorMirrorRow(pinHash)]);
+            }
+            if (query.includes("offline_grant_install_state")) {
+              return Promise.resolve(
+                grantsInstalled
+                  ? [
+                      {
+                        tenant_id: "tenant-1",
+                        device_id: "device-1",
+                        owner_kind: "station",
+                        credential_epoch: 1,
+                        mode: "observe",
+                      },
+                    ]
+                  : [],
+              );
+            }
+            // readShiftContext's join (mirror.ts) -- answered with a fixed
+            // product row for whatever shift id NewShift's own flow creates
+            // below (`s9`), so WorkScreen actually renders instead of getting
+            // stuck on "Preparing the shift…" forever.
+            if (query.includes("shift_mirror")) {
+              return Promise.resolve([
+                { gtin14: "04600000000015", name: "Cola", counterparty_name: null },
+              ]);
+            }
+            if (query.includes("station_meta")) {
+              if (values?.[0] === "hardware_config") {
+                return Promise.resolve([
+                  {
+                    value: JSON.stringify({
+                      scanner: null,
+                      printer: null,
+                      printerLanguage: "zpl",
+                      verifyPrintedLabel: false,
+                    }),
+                  },
+                ]);
+              }
+              if (values?.[0] === "install_id") {
+                return Promise.resolve([{ value: "test-install-id" }]);
+              }
+              return Promise.resolve([]);
+            }
+            return Promise.resolve([]);
           }
-          if (path === "/shifts" && method === "POST") {
-            return new Response(
-              JSON.stringify({ id: "s9", status: "planned", mode: "validation" }),
-              { status: 201 },
-            );
-          }
-          if (path === "/shifts/s9/open" && method === "POST") {
-            return new Response(
-              JSON.stringify({ id: "s9", status: "active", mode: "validation" }),
-              { status: 200 },
-            );
-          }
-          // Roster sync, ShiftSelection's own listing, mirrorShiftBundle's
-          // bundle download, and the sync engine's drain (empty outbox here,
-          // so /station/scans should not actually be hit) -- a harmless
-          // empty body for anything else.
-          return new Response(JSON.stringify({ items: [] }), { status: 200 });
-        }),
-      );
+          return Promise.resolve(undefined);
+        });
 
-      render(<App />);
-      await signInAsOperator();
+        vi.stubGlobal(
+          "fetch",
+          vi.fn(async (url: string, init?: RequestInit) => {
+            const path = new URL(url).pathname;
+            const method = init?.method ?? "GET";
+            if (path === "/products/gtin-check" && method === "POST") {
+              return new Response(JSON.stringify({ gtin14: "04600000000015", owner: "own" }), {
+                status: 200,
+              });
+            }
+            if (path === "/products" && method === "GET") {
+              return new Response(
+                JSON.stringify({
+                  items: [{ id: "p1", gtin14: "04600000000015", name: "Cola", boxCapacity: null }],
+                }),
+                { status: 200 },
+              );
+            }
+            if (path === "/shifts" && method === "POST") {
+              return new Response(
+                JSON.stringify({ id: "s9", status: "planned", mode: "validation" }),
+                { status: 201 },
+              );
+            }
+            if (path === "/shifts/s9/open" && method === "POST") {
+              return new Response(
+                JSON.stringify({ id: "s9", status: "active", mode: "validation" }),
+                { status: 200 },
+              );
+            }
+            // Roster sync, ShiftSelection's own listing, mirrorShiftBundle's
+            // bundle download, and the sync engine's drain (empty outbox here,
+            // so /station/scans should not actually be hit) -- a harmless
+            // empty body for anything else.
+            return new Response(JSON.stringify({ items: [] }), { status: 200 });
+          }),
+        );
 
-      fireEvent.click(screen.getByRole("button", { name: "New shift" }));
-      await waitFor(() => expect(screen.getByLabelText("Type or scan a GTIN")).toBeDefined());
+        render(<App />);
+        await signInAsOperator();
 
-      fireEvent.change(screen.getByLabelText("Type or scan a GTIN"), {
-        target: { value: "4600000000015" },
-      });
-      fireEvent.submit(screen.getByLabelText("Type or scan a GTIN").closest("form")!);
-      await waitFor(() => expect(screen.getByText("Cola")).toBeDefined());
-      fireEvent.click(screen.getByRole("button", { name: "Start" }));
+        fireEvent.click(screen.getByRole("button", { name: "New shift" }));
+        await waitFor(() => expect(screen.getByLabelText("Type or scan a GTIN")).toBeDefined());
 
-      // Reached the floor via NewShift's own path -- floorView is "new" here.
-      // WorkScreen's fixed footer exposes a dedicated Pause action;
-      // waiting for it also proves shiftContext landed.
-      await waitFor(() => expect(screen.getByRole("button", { name: "Pause" })).toBeDefined());
+        fireEvent.change(screen.getByLabelText("Type or scan a GTIN"), {
+          target: { value: "4600000000015" },
+        });
+        fireEvent.submit(screen.getByLabelText("Type or scan a GTIN").closest("form")!);
+        await waitFor(() => expect(screen.getByText("Cola")).toBeDefined());
+        fireEvent.click(screen.getByRole("button", { name: "Start" }));
 
-      fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+        // Reached the floor via NewShift's own path -- floorView is "new" here.
+        // WorkScreen's fixed footer exposes a dedicated Pause action;
+        // waiting for it also proves shiftContext landed.
+        await waitFor(() => expect(screen.getByRole("button", { name: "Pause" })).toBeDefined());
 
-      // No scans were queued for this shift, so Exit leaves immediately
-      // without the pending-sync confirmation step.
-      await waitFor(() => expect(screen.getByText("Shifts")).toBeDefined());
-      expect(screen.queryByLabelText("Type or scan a GTIN")).toBeNull();
-    } finally {
-      consoleErrorSpy.mockRestore();
-    }
-  });
+        fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+
+        // No scans were queued for this shift, so Exit leaves immediately
+        // without the pending-sync confirmation step.
+        await waitFor(() => expect(screen.getByText("Shifts")).toBeDefined());
+        expect(screen.queryByLabelText("Type or scan a GTIN")).toBeNull();
+      } finally {
+        consoleErrorSpy.mockRestore();
+      }
+    },
+  );
 
   it("keeps sync and the floor sealed until a transient shift-mirror read is retried", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});

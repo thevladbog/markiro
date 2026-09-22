@@ -22,6 +22,18 @@ sealed interface DisassembleResult {
 }
 
 /**
+ * The pallet twin of [DisassembleResult]. A separate type rather than a reused
+ * one: a caller that can only handle a box outcome must not compile against a
+ * pallet call by accident, and the two flows refuse for different reasons
+ * ("this pallet is still open" is not "this box is still open").
+ */
+sealed interface DisassemblePalletResult {
+    data object Retired : DisassemblePalletResult
+    data object AlreadyRetired : DisassemblePalletResult
+    data object NotClosed : DisassemblePalletResult
+}
+
+/**
  * The four operator corrections, applied on this device and queued for the
  * server.
  *
@@ -130,6 +142,62 @@ class ExceptionEngine(
         DisassembleResult.Retired
     }
 
+    /**
+     * Takes a CLOSED pallet apart, whichever kind it is (spec §3.2).
+     *
+     * Both effects and the queued fact land in one transaction, for the same
+     * reason [disassemble] does: a stack the operator saw taken apart must not
+     * be missing from the queue, and a fact must never describe a release that
+     * did not happen.
+     *
+     * Two things deliberately do NOT happen here.
+     *
+     * The member boxes are not retired. A pallet is a way of stacking boxes;
+     * taking the stack apart says nothing about the boxes on it, and each one
+     * keeps its own SSCC, its own codes and its own life.
+     *
+     * The membership rows stay. They are the historical fact that these boxes
+     * stood on this pallet -- the same rule `PalletDao.boxCount` documents for
+     * a production pallet's `boxes.palletId`. What DOES go is the device's own
+     * claim in `box_registry.localPalletId`: that claim exists only to stop a
+     * box being scanned onto a second pallet, and a pallet that no longer
+     * exists must not keep its boxes hostage.
+     */
+    suspend fun disassemblePallet(
+        palletId: String,
+        reason: DisassembleReason,
+        operatorId: String?,
+        terminalId: String?,
+    ): DisassemblePalletResult = db.recovery.commit { disassemblePalletOwned(palletId, reason, operatorId, terminalId) }
+
+    private suspend fun disassemblePalletOwned(
+        palletId: String,
+        reason: DisassembleReason,
+        operatorId: String?,
+        terminalId: String?,
+    ): DisassemblePalletResult = db.recovery.commit {
+        val pallet = db.palletDao().get(palletId) ?: return@commit DisassemblePalletResult.NotClosed
+        if (pallet.closedAt == null) return@commit DisassemblePalletResult.NotClosed
+        val at = Iso.format(clock())
+        // The guarded UPDATE is the decision, not the row read above it: two
+        // confirmations racing here both saw a retirable pallet, and only the
+        // one that actually moved the row may queue a fact.
+        if (db.palletDao().markDisassembled(palletId, at) == 0) return@commit DisassemblePalletResult.AlreadyRetired
+        // A no-op for a production pallet: its boxes were never claimed here.
+        db.boxRegistryDao().releaseAll(palletId)
+        queuePallet(
+            PalletExceptionFact(
+                kind = PalletExceptionKind.DISASSEMBLE,
+                palletId = palletId,
+                // Null for a warehouse pallet, which belongs to no shift.
+                shiftId = pallet.shiftId,
+                terminalId = terminalId, operatorId = operatorId,
+                reason = reason.audit, occurredAt = at,
+            ),
+        )
+        DisassemblePalletResult.Retired
+    }
+
     /** Records the request. The printing itself is the caller's business. */
     suspend fun reprint(
         shiftId: String,
@@ -163,7 +231,7 @@ class ExceptionEngine(
      * pallets off the same physical event and keep different ledgers.
      */
     suspend fun reprintPallet(
-        shiftId: String,
+        shiftId: String?,
         palletId: String,
         reason: ReprintReason,
         operatorId: String?,
@@ -171,7 +239,7 @@ class ExceptionEngine(
     ) = db.recovery.work { reprintPalletOwned(shiftId, palletId, reason, operatorId, terminalId) }
 
     private suspend fun reprintPalletOwned(
-        shiftId: String,
+        shiftId: String?,
         palletId: String,
         reason: ReprintReason,
         operatorId: String?,

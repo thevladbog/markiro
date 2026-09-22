@@ -163,6 +163,11 @@ export class StationScansController {
       ...(result.validationOccurrences
         ? { validationOccurrences: result.validationOccurrences }
         : {}),
+      // Not gated on station-recovery-v1: a membership outcome is the ANSWER
+      // to a record the device just sent, not recovery metadata, and a
+      // handheld that cannot read it has no way to learn its box was refused.
+      ...(result.memberships ? { memberships: result.memberships } : {}),
+      ...(result.membershipRemovals ? { membershipRemovals: result.membershipRemovals } : {}),
     };
   }
 }

@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 
-import { Alert, Badge, Button, type BadgeTone } from "@markiro/ui";
+import { Alert, Button, StatusChip } from "@markiro/ui";
+import type { TagPhase } from "@markiro/ui";
 
 import { useChzExportState, useOrderChzExports, useRetryChzExport } from "./api.js";
 import { CHZ_EXPORT_SAFE_ERROR_CODES } from "./schemas.js";
@@ -20,12 +21,20 @@ function isSafeErrorCode(code: string): code is ChzExportSafeErrorCode {
   return (CHZ_EXPORT_SAFE_ERROR_CODES as readonly string[]).includes(code);
 }
 
-const RUN_BADGE_TONE: Record<ChzExportRunState, BadgeTone> = {
-  queued: "neutral",
-  ordered: "info",
-  ready: "info",
-  imported: "ok",
-  failed: "error",
+/**
+ * `ready` и `imported` обе означают, что файл получен -- в первом случае он
+ * ещё дожидается автоматического пятнадцатиминутного импортёра
+ * (`ChzExportRunnerService.importReadyRuns`), во втором уже загружен в
+ * систему. От администратора в промежутке ничего не требуется: импорт
+ * происходит сам, без ручного шага, поэтому обе делят `done` и различаются
+ * только подписью, а не тоном.
+ */
+const RUN_STATE_TO_PHASE: Record<ChzExportRunState, TagPhase> = {
+  queued: "planned",
+  ordered: "running",
+  ready: "done",
+  imported: "done",
+  failed: "failed",
 };
 
 /**
@@ -94,9 +103,10 @@ export function ChzExportRunStatus({
 
   return (
     <div className="mk-chz-export-run">
-      <Badge tone={RUN_BADGE_TONE[run.state]}>
-        {t(`pages.inventory.chzExports.state.${run.state}`)}
-      </Badge>
+      <StatusChip
+        phase={RUN_STATE_TO_PHASE[run.state]}
+        label={t(`pages.inventory.chzExports.state.${run.state}`)}
+      />
       {run.orderedAt && (run.state === "ordered" || run.state === "ready") ? (
         <small>
           {t("pages.inventory.chzExports.orderedAt", {

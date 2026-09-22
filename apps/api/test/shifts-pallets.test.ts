@@ -163,6 +163,10 @@ describe.skipIf(!ready)("shift pallet configuration (task 8)", () => {
   }> {
     const agent = request.agent(app!.getHttpServer());
     const tenantId = await signUpAndActivate(agent);
+    // Starting an aggregation shift needs an SSCC source (see
+    // `SsccService.assertIssuerConfiguredForActivation`); the GLN itself is
+    // not under test here.
+    await agent.put("/org/profile").send({ gln: "4601112222005" }).expect(200);
     const boxTemplateId = await setDefaultBoxLabelTemplate(agent, tenantId);
     const { id: productId } = await seedProductRow(tenantId);
     return { agent, tenantId, boxTemplateId, productId };
@@ -277,6 +281,77 @@ describe.skipIf(!ready)("shift pallet configuration (task 8)", () => {
     const bundle = await getBundle(shiftId, device.apiKey);
     expect(bundle.shift).toMatchObject({ palletsEnabled: true, palletBoxCapacity: 66 });
     expect(bundle.palletLabelTemplate?.id).toBe(palletTemplateId);
+  });
+
+  /**
+   * The box template has always been editable on an ACTIVE shift (the station
+   * picks it up at the next print); the pallet template was left out of that
+   * allow-list in 06d for no reason of its own. Owner request 2026-09-18: the
+   * two behave the same.
+   */
+  it("changes the pallet label template on an active shift, like the box template", async () => {
+    const { agent, tenantId, productId, boxTemplateId } = await setupOrg();
+    const first = await seedPalletLabelTemplate(tenantId, "Pallet A");
+    const second = await seedPalletLabelTemplate(tenantId, "Pallet B");
+    const shift = await postShift(agent, productId, {
+      mode: "aggregation",
+      palletsEnabled: true,
+      boxLabelTemplateId: boxTemplateId,
+      palletLabelTemplateId: first,
+    });
+    await agent.post(`/shifts/${shift.id}/open`).expect(200);
+
+    const changed = await agent
+      .patch(`/shifts/${shift.id}`)
+      .send({ palletLabelTemplateId: second })
+      .expect(200);
+    expect(changed.body).toMatchObject({ status: "active", palletLabelTemplateId: second });
+
+    // The device sees the new template on its next bundle, exactly as it
+    // sees a changed box template.
+    const device = await createTestStationDevice(app!, agent, "Station relabel");
+    const bundle = await getBundle(shift.id, device.apiKey);
+    expect(bundle.palletLabelTemplate?.id).toBe(second);
+
+    // Pallets on means a template is required, active or not.
+    const cleared = await agent
+      .patch(`/shifts/${shift.id}`)
+      .send({ palletLabelTemplateId: null })
+      .expect(422);
+    expect(cleared.body).toMatchObject({ code: "PALLET_LABEL_TEMPLATE_REQUIRED" });
+    // And a box-purpose template is refused in the pallet slot here too.
+    await agent
+      .patch(`/shifts/${shift.id}`)
+      .send({ palletLabelTemplateId: boxTemplateId })
+      .expect(422);
+    const unchanged = await agent.get(`/shifts/${shift.id}`).expect(200);
+    expect(unchanged.body.palletLabelTemplateId).toBe(second);
+  });
+
+  it("refuses a pallet template on an active shift whose pallets are off", async () => {
+    const { agent, tenantId, productId, boxTemplateId } = await setupOrg();
+    const palletTemplateId = await seedPalletLabelTemplate(tenantId);
+    const shift = await postShift(agent, productId, {
+      mode: "aggregation",
+      palletsEnabled: false,
+      boxLabelTemplateId: boxTemplateId,
+    });
+    await agent.post(`/shifts/${shift.id}/open`).expect(200);
+    // Turning pallets on is an active-shift edit the server refuses; a bare
+    // template for a shift that prints no pallet labels is refused the same
+    // way rather than stored as a dangling reference.
+    const rejected = await agent
+      .patch(`/shifts/${shift.id}`)
+      .send({ palletLabelTemplateId: palletTemplateId })
+      .expect(409);
+    expect(String(rejected.body.message)).toContain("palletLabelTemplateId");
+    // The field being uneditable is the answer, before any look at the
+    // template itself: a box-purpose id gets the same 409, not a 422.
+    const rejectedBoxPurpose = await agent
+      .patch(`/shifts/${shift.id}`)
+      .send({ palletLabelTemplateId: boxTemplateId })
+      .expect(409);
+    expect(String(rejectedBoxPurpose.body.message)).toContain("palletLabelTemplateId");
   });
 
   it("prefills the box count from the product", async () => {

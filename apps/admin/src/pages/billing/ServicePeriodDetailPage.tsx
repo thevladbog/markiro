@@ -1,13 +1,28 @@
 import { useTranslation } from "react-i18next";
 import { Link, useParams } from "react-router";
 
-import { Alert, Button, Card, Spinner, StatusChip } from "@markiro/ui";
+import { Alert, Badge, Button, Card, Spinner, StatusChip } from "@markiro/ui";
+import type { BadgeTone } from "@markiro/ui";
 
 import type { TenantServicePeriodDetail } from "./api.js";
 import { useServicePeriod } from "./api.js";
-import { formatBillingDate, formatBillingDateTime } from "./format.js";
+import { formatBillingDate, formatBillingDateTime, servicePeriodPhase } from "./format.js";
 
 type Entry = TenantServicePeriodDetail["entries"][number];
+
+// Minor 1 (final review): `classification` is a two-value category axis --
+// service work billed from the package vs. a product-defect correction that
+// is not -- not a lifecycle. Neither is "better" than the other, so it
+// belongs on `Badge` with equal-loudness category tones, not `StatusChip`
+// with `attention`/`none`, which used to mark `product_defect` as needing
+// intervention and `customer_service` (the ordinary case) as having no
+// value at all. Order matches the actual union
+// (`serviceUsageClassificationSchema`, `packages/platform-contracts/src/
+// service-periods.ts`): `customer_service` first, `product_defect` second.
+export const ENTRY_CLASSIFICATION_TO_TONE: Record<Entry["classification"], BadgeTone> = {
+  customer_service: "violet",
+  product_defect: "teal",
+};
 
 function MinuteDelta({ value }: { value: number }) {
   const { t } = useTranslation();
@@ -93,7 +108,7 @@ export function ServicePeriodDetailPage() {
       <Card title={t("pages.billing.servicePeriods.detail.balanceTitle")} titleAs="h3">
         <div className="mk-billing-service-detail-summary">
           <StatusChip
-            status={period.state === "active" && !exhausted ? "ok" : "neutral"}
+            phase={servicePeriodPhase(period.state, exhausted)}
             label={t(
               exhausted
                 ? "pages.billing.servicePeriods.state.exhausted"
@@ -141,10 +156,9 @@ export function ServicePeriodDetailPage() {
               <li aria-label={entry.workReference} key={entry.id}>
                 <div className="mk-billing-service-entry__header">
                   <strong>{entry.workReference}</strong>
-                  <StatusChip
-                    status={entry.classification === "product_defect" ? "warn" : "neutral"}
-                    label={t(`pages.billing.servicePeriods.classification.${entry.classification}`)}
-                  />
+                  <Badge tone={ENTRY_CLASSIFICATION_TO_TONE[entry.classification]}>
+                    {t(`pages.billing.servicePeriods.classification.${entry.classification}`)}
+                  </Badge>
                 </div>
                 <p>{entry.description}</p>
                 <div className="mk-billing-service-entry__minutes">

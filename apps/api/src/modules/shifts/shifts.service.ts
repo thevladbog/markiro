@@ -27,6 +27,7 @@ import {
   UnprocessableEntityException,
 } from "@nestjs/common";
 import { and, desc, eq, gte, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { schema, type Db } from "@markiro/db";
 import {
   formatShiftNumber,
@@ -53,7 +54,22 @@ import {
   PALLET_EXTENSION_DIGIT,
   SsccCapacityExhaustedException,
   SsccService,
+  ssccIssuerProblemOf,
 } from "../sscc/sscc.service";
+
+type BundleAllocation = Pick<
+  ShiftBundleDto,
+  "sscc" | "ssccIssuerProblem" | "ssccRevokedFrom" | "palletSscc" | "palletSsccRevokedFrom"
+>;
+
+/** A bundle with no serial block and no issuer to blame for it. */
+const NO_ALLOCATION: BundleAllocation = {
+  sscc: null,
+  ssccIssuerProblem: null,
+  ssccRevokedFrom: [],
+  palletSscc: null,
+  palletSsccRevokedFrom: [],
+};
 import type {
   BoxTemplateResolution,
   CloseShiftDto,
@@ -66,6 +82,7 @@ import type {
   ShiftPalletLabelTemplatesDto,
   ShiftBundleDto,
   ShiftDto,
+  ShiftEntryMethod,
   ShiftMode,
   ShiftOrigin,
   ShiftOutputDto,
@@ -76,6 +93,7 @@ import type {
 } from "./dto";
 import { EntitlementsService } from "../../subscriptions/entitlements.service";
 import { SubscriptionReadOnlyException } from "../../subscriptions/subscription-errors";
+import type { ShiftTaskFormData } from "./shift-task-form";
 
 import {
   assertProductLabelCapability,
@@ -292,6 +310,10 @@ export class ShiftsService {
   async getPlanningConfig(tenantId: string, productId?: string): Promise<ShiftPlanningConfigDto> {
     const chzProductGroupCode = await this.productGroupCodeForPicker(tenantId, productId);
     const resolved = await resolveDefaultBoxLabelTemplate(this.db, tenantId, chzProductGroupCode);
+    const [profile] = await this.db
+      .select({ gln: schema.orgProfiles.gln })
+      .from(schema.orgProfiles)
+      .where(eq(schema.orgProfiles.tenantId, tenantId));
     return {
       defaultBoxLabelTemplateId: resolved.templateId,
       defaultSource: resolved.source,
@@ -299,6 +321,7 @@ export class ShiftsService {
       validationReprocessingProtocol: this.duplicateEnabled
         ? VALIDATION_REPROCESSING_PROTOCOL
         : null,
+      orgGlnConfigured: Boolean(profile?.gln),
     };
   }
 
@@ -556,6 +579,104 @@ export class ShiftsService {
     const shift = this.mapShiftRow(row);
     const outputs = await this.fetchShiftOutputs(tenantId, [shift]);
     return { ...shift, output: outputs.get(shift.id) ?? defaultShiftOutput(shift.mode) };
+  }
+
+  /**
+   * Everything the printed shift task form shows, in one read.
+   *
+   * The SSCC issuer needs its own alias: `counterparties` is already joined for
+   * "who is this shift for", and "whose numbers do its boxes carry" is a
+   * different question with a different answer.
+   */
+  async taskFormData(
+    tenantId: string,
+    id: string,
+    generatedAt = new Date(),
+  ): Promise<ShiftTaskFormData> {
+    const issuer = alias(schema.counterparties, "sscc_issuer");
+    const [row] = await this.db
+      .select({
+        id: schema.shifts.id,
+        numberMonthKey: schema.shifts.numberMonthKey,
+        numberSeq: schema.shifts.numberSeq,
+        createdFrom: schema.shifts.createdFrom,
+        status: schema.shifts.status,
+        mode: schema.shifts.mode,
+        plannedDate: schema.shifts.plannedDate,
+        productionDate: schema.shifts.productionDate,
+        plannedQty: schema.shifts.plannedQty,
+        boxCapacity: schema.shifts.boxCapacity,
+        palletsEnabled: schema.shifts.palletsEnabled,
+        palletBoxCapacity: schema.shifts.palletBoxCapacity,
+        validationPrintMode: schema.shifts.validationPrintMode,
+        validationPrintVerification: schema.shifts.validationPrintVerification,
+        allowPreviouslyAcceptedCodes: schema.shifts.allowPreviouslyAcceptedCodes,
+        organizationName: schema.organization.name,
+        productId: schema.products.id,
+        productName: schema.products.name,
+        productPrintName: schema.products.printName,
+        gtin14: schema.products.gtin14,
+        imageChecksum: schema.mediaAssets.checksum,
+        lineName: schema.lines.name,
+        counterpartyName: schema.counterparties.name,
+        ssccIssuerName: issuer.name,
+      })
+      .from(schema.shifts)
+      .innerJoin(schema.organization, eq(schema.organization.id, schema.shifts.tenantId))
+      .innerJoin(schema.products, eq(schema.products.id, schema.shifts.productId))
+      .leftJoin(schema.lines, eq(schema.lines.id, schema.shifts.lineId))
+      .leftJoin(schema.counterparties, eq(schema.counterparties.id, schema.shifts.counterpartyId))
+      .leftJoin(issuer, eq(issuer.id, schema.shifts.ssccIssuerCounterpartyId))
+      .leftJoin(
+        schema.productImages,
+        and(
+          eq(schema.productImages.tenantId, schema.shifts.tenantId),
+          eq(schema.productImages.productId, schema.shifts.productId),
+        ),
+      )
+      .leftJoin(
+        schema.mediaAssets,
+        and(
+          eq(schema.mediaAssets.id, schema.productImages.assetId),
+          eq(schema.mediaAssets.ownerTenantId, tenantId),
+          eq(schema.mediaAssets.status, "active"),
+        ),
+      )
+      .where(and(eq(schema.shifts.tenantId, tenantId), eq(schema.shifts.id, id)))
+      .limit(1);
+    if (!row) throw new NotFoundException();
+    if (row.status !== "planned" && row.status !== "active") {
+      throw new ConflictException({ code: "SHIFT_TASK_FORM_CLOSED" });
+    }
+    return {
+      shiftId: row.id,
+      shiftNumber: formatShiftNumber({
+        monthKey: row.numberMonthKey,
+        seq: row.numberSeq,
+        createdFrom: row.createdFrom,
+      }),
+      status: row.status,
+      mode: row.mode,
+      organizationName: row.organizationName,
+      productId: row.productId,
+      productName: row.productName,
+      productPrintName: row.productPrintName,
+      gtin14: row.gtin14,
+      imageChecksum: row.imageChecksum,
+      lineName: row.lineName,
+      plannedDate: row.plannedDate,
+      productionDate: row.productionDate,
+      plannedQty: row.plannedQty,
+      boxCapacity: row.boxCapacity,
+      palletsEnabled: row.palletsEnabled,
+      palletBoxCapacity: row.palletBoxCapacity,
+      counterpartyName: row.counterpartyName,
+      ssccIssuerName: row.ssccIssuerName,
+      validationPrintMode: row.validationPrintMode,
+      validationPrintVerification: row.validationPrintVerification,
+      allowPreviouslyAcceptedCodes: row.allowPreviouslyAcceptedCodes,
+      generatedAt,
+    };
   }
 
   getProductLabelHistory(tenantId: string, id: string, query: ProductLabelHistoryQuery) {
@@ -1070,11 +1191,15 @@ export class ShiftsService {
           );
         }
 
-        // Same rule, mirrored for the pallet-label snapshot.
+        // Same rule, mirrored for the pallet-label snapshot. On an ACTIVE
+        // shift whose pallets are off the field is not editable at all: the
+        // allow-list below answers 409 for it, and that answer must not be
+        // pre-empted by a 422 about a template the shift could never use.
         if (
           data.palletLabelTemplateId !== undefined &&
           data.palletLabelTemplateId !== null &&
-          data.palletLabelTemplateId !== current.palletLabelTemplateId
+          data.palletLabelTemplateId !== current.palletLabelTemplateId &&
+          (current.status !== "active" || current.palletsEnabled)
         ) {
           const product = await this.findProductRow(tenantId, current.productId);
           await this.assertPalletTemplateEligible(
@@ -1085,12 +1210,19 @@ export class ShiftsService {
         }
 
         if (current.status === "active") {
+          // The pallet template joins the box template here: both are read
+          // by the device at the next print, so swapping either mid-shift is
+          // equally safe. It is only meaningful while the shift's pallets are
+          // ON -- for a pallets-off shift the field stays as forbidden as
+          // `palletsEnabled` itself, since the two cannot be switched on
+          // mid-shift.
           const allowedFields = new Set<keyof UpdateShiftDto>([
             "lineId",
             "plannedQty",
             "plannedDate",
             "productionDate",
             "boxLabelTemplateId",
+            ...(current.palletsEnabled ? (["palletLabelTemplateId"] as const) : []),
           ]);
           const forbiddenField = (Object.keys(data) as (keyof UpdateShiftDto)[]).find(
             (field) => !allowedFields.has(field),
@@ -1100,11 +1232,21 @@ export class ShiftsService {
               `Active shift field cannot be edited: ${String(forbiddenField)}`,
             );
           }
+          if (data.palletLabelTemplateId !== undefined) {
+            // Pallets on means a template is required, active or not
+            // (eligibility of a non-null value was already asserted above).
+            this.assertPalletTemplateRule(current.palletsEnabled, data.palletLabelTemplateId);
+          }
 
           const changes: Partial<
             Pick<
               ShiftRow,
-              "lineId" | "plannedQty" | "plannedDate" | "productionDate" | "boxLabelTemplateId"
+              | "lineId"
+              | "plannedQty"
+              | "plannedDate"
+              | "productionDate"
+              | "boxLabelTemplateId"
+              | "palletLabelTemplateId"
             >
           > = {};
           if (data.lineId !== undefined) changes.lineId = data.lineId;
@@ -1113,6 +1255,31 @@ export class ShiftsService {
           if (productionDateChange) changes.productionDate = productionDateChange.after;
           if (data.boxLabelTemplateId !== undefined) {
             changes.boxLabelTemplateId = data.boxLabelTemplateId;
+          }
+          if (
+            data.palletLabelTemplateId !== undefined &&
+            data.palletLabelTemplateId !== current.palletLabelTemplateId
+          ) {
+            changes.palletLabelTemplateId = data.palletLabelTemplateId;
+            // The same admission record a planned shift writes when its pallet
+            // configuration changes (see the planned branch below).
+            await this.admission.observe({
+              tenantId,
+              actor: { domain: "cabinet", id: actorUserId },
+              facts,
+              operationId: "pallets.shift.configure.v1",
+              transaction: tx,
+              runtime: { enabled: true, observedAt: new Date() },
+              scopeDigest: admissionScopeDigest({
+                action: "update",
+                shiftId: id,
+                mode: current.mode,
+                palletsEnabled: current.palletsEnabled,
+                boxCapacity: current.boxCapacity,
+                palletBoxCapacity: current.palletBoxCapacity,
+                palletLabelTemplateId: data.palletLabelTemplateId,
+              }),
+            });
           }
           if (Object.keys(changes).length === 0) return { kind: "updated", id };
 
@@ -1398,8 +1565,9 @@ export class ShiftsService {
     actor: { domain: "cabinet" | "station_device"; id: string },
     deviceId?: string,
     capabilities?: string,
+    entryMethod: ShiftEntryMethod = "list",
   ): Promise<ShiftDto> {
-    if (deviceId) return this.enterShift(tenantId, id, deviceId, capabilities);
+    if (deviceId) return this.enterShift(tenantId, id, deviceId, capabilities, entryMethod);
     const facts = await this.admission.capture(tenantId);
     await this.db.transaction(async (tx) => {
       const [current] = await tx
@@ -1410,6 +1578,15 @@ export class ShiftsService {
       if (!current) throw new NotFoundException();
       if (current.status !== "planned")
         throw new ConflictException("Shift can only be opened while planned");
+      // An aggregation shift that could never number a box must not start;
+      // see `SsccService.assertIssuerConfiguredForActivation`.
+      if (current.mode === "aggregation") {
+        await this.sscc.assertIssuerConfiguredForActivation(
+          tenantId,
+          current.ssccIssuerCounterpartyId,
+          tx,
+        );
+      }
       if (current.palletsEnabled) await this.entitlements.assertFeatureAccess(tenantId, "pallets");
       // A shift planned before this slice can hold palletsEnabled with a
       // null capacity; opening it must fail loudly rather than hand a
@@ -1453,6 +1630,7 @@ export class ShiftsService {
     id: string,
     deviceId: string,
     capabilities?: string,
+    entryMethod: ShiftEntryMethod = "list",
   ): Promise<ShiftDto> {
     const facts = await this.admission.capture(tenantId);
     await this.db.transaction(async (tx) => {
@@ -1480,6 +1658,15 @@ export class ShiftsService {
       assertProductLabelCapability(previous, capabilities);
       if (shift.status === "closed") throw new ConflictException("Closed shifts cannot be entered");
       if (shift.status === "planned") {
+        // Same guard as openShift: a device entering a planned shift is what
+        // starts it, and it must not start without an SSCC source.
+        if (shift.mode === "aggregation") {
+          await this.sscc.assertIssuerConfiguredForActivation(
+            tenantId,
+            shift.ssccIssuerCounterpartyId,
+            tx,
+          );
+        }
         if (shift.palletsEnabled) await this.entitlements.assertFeatureAccess(tenantId, "pallets");
         // Same guard as openShift, for the device-entry path into an active shift.
         assertPalletConfiguration({
@@ -1515,14 +1702,21 @@ export class ShiftsService {
       const now = new Date();
       await tx
         .insert(schema.shiftDeviceParticipants)
-        .values({ tenantId, shiftId: id, deviceId, firstEnteredAt: now, lastEnteredAt: now })
+        .values({
+          tenantId,
+          shiftId: id,
+          deviceId,
+          firstEnteredAt: now,
+          lastEnteredAt: now,
+          entryMethod,
+        })
         .onConflictDoUpdate({
           target: [
             schema.shiftDeviceParticipants.tenantId,
             schema.shiftDeviceParticipants.shiftId,
             schema.shiftDeviceParticipants.deviceId,
           ],
-          set: { lastEnteredAt: now },
+          set: { lastEnteredAt: now, entryMethod },
         });
 
       if (shift.stationClosePolicy === "admin_only") return;
@@ -1568,7 +1762,7 @@ export class ShiftsService {
     const allocation =
       referenceBundle.shift.mode === "aggregation" && deviceId
         ? await this.bundleSscc(tenantId, referenceBundle.shift.id, deviceId)
-        : { sscc: null, ssccRevokedFrom: [], palletSscc: null, palletSsccRevokedFrom: [] };
+        : NO_ALLOCATION;
     return { ...referenceBundle, ...allocation };
   }
 
@@ -1652,6 +1846,12 @@ export class ShiftsService {
       palletBoxCapacity: shift.palletsEnabled ? shift.palletBoxCapacity : null,
       palletsEnabled: shift.palletsEnabled,
       createdFrom: shift.createdFrom,
+      // Close authority rides along because the signed offline-grant task
+      // scope binds `stationClosePolicy`/`stationCloseOwnerDeviceId`
+      // (device-grants/frozen-task.ts). Devices derive both from this field
+      // alone, so an omitted one leaves their execution projection unable to
+      // match the very grant issued for the shift they just entered.
+      ...(shift.stationCloseAccess ? { stationCloseAccess: shift.stationCloseAccess } : {}),
       openedAt: shift.openedAt,
       closedAt: shift.closedAt,
       closeReason: shift.closeReason,
@@ -1689,6 +1889,7 @@ export class ShiftsService {
       counterpartyGln,
       operators,
       sscc: null,
+      ssccIssuerProblem: null,
       ssccRevokedFrom: [],
       palletSscc: null,
       palletSsccRevokedFrom: [],
@@ -1752,9 +1953,7 @@ export class ShiftsService {
     tenantId: string,
     shiftId: string,
     deviceId: string,
-  ): Promise<
-    Pick<ShiftBundleDto, "sscc" | "ssccRevokedFrom" | "palletSscc" | "palletSsccRevokedFrom">
-  > {
+  ): Promise<BundleAllocation> {
     return this.db.transaction(async (tx) => {
       // This GET can allocate fresh box/pallet authority. Keep the device
       // fence ahead of the shift lock, while preserving source task recovery.
@@ -1773,14 +1972,14 @@ export class ShiftsService {
         .where(and(eq(schema.shifts.tenantId, tenantId), eq(schema.shifts.id, shiftId)))
         .for("update");
       if (!shift || shift.status !== "active" || shift.mode !== "aggregation") {
-        return { sscc: null, ssccRevokedFrom: [], palletSscc: null, palletSsccRevokedFrom: [] };
+        return NO_ALLOCATION;
       }
 
       const access = await this.entitlements.resolveRecovery(tenantId, tx, new Date());
       if (access.access === "read_only") {
         const endsAt = access.subscription?.endsAt;
         if (!endsAt || !shift.openedAt || shift.openedAt >= endsAt) {
-          return { sscc: null, ssccRevokedFrom: [], palletSscc: null, palletSsccRevokedFrom: [] };
+          return NO_ALLOCATION;
         }
       }
 
@@ -1789,16 +1988,16 @@ export class ShiftsService {
         issuerPrefix = await this.sscc.resolveIssuerPrefix(tenantId, shiftId, tx);
       } catch (error) {
         if (!(error instanceof BadRequestException)) throw error;
-        // The station never sees this (the bundle just comes back with
-        // sscc: null, silently, by the design note above), so the server log
-        // is the ONLY place this is ever visible -- it must carry enough to
-        // act on: which tenant, which shift, and resolveIssuerPrefix's own
-        // reason (no org GLN, or no GLN on the shift's named sscc issuer
-        // counterparty).
+        // The bundle still comes back with `sscc: null` (the design note
+        // above), but the device is no longer left to guess why: the two
+        // issuer refusals travel as `ssccIssuerProblem`, so the handheld can
+        // warn from entry -- «В организации не задан GLN» / «У
+        // контрагента-эмитента нет GLN» -- instead of on the twentieth scan.
+        // The log line stays for the office, with tenant, shift and reason.
         this.logger.warn(
           `Shift ${shiftId} (tenant ${tenantId}) bundle has no box serial block -- ${error.message}`,
         );
-        return { sscc: null, ssccRevokedFrom: [], palletSscc: null, palletSsccRevokedFrom: [] };
+        return { ...NO_ALLOCATION, ssccIssuerProblem: ssccIssuerProblemOf(error) };
       }
       try {
         const sscc = await this.sscc.allocateForBundle(
@@ -1854,13 +2053,19 @@ export class ShiftsService {
           }
         }
 
-        return { sscc, ssccRevokedFrom, palletSscc, palletSsccRevokedFrom };
+        return {
+          sscc,
+          ssccIssuerProblem: null,
+          ssccRevokedFrom,
+          palletSscc,
+          palletSsccRevokedFrom,
+        };
       } catch (error) {
         if (!(error instanceof SsccCapacityExhaustedException)) throw error;
         this.logger.warn(
           `Shift ${shiftId} (tenant ${tenantId}) bundle has no box serial block -- ${error.message}`,
         );
-        return { sscc: null, ssccRevokedFrom: [], palletSscc: null, palletSsccRevokedFrom: [] };
+        return NO_ALLOCATION;
       }
     });
   }

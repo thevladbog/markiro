@@ -70,9 +70,17 @@ describe("legal document registry", () => {
       // the details panel, the list gained an actual-output line and
       // validation shifts can duplicate the Data Matrix -- so both shift
       // documents were reissued.
-      "MKR-INS-08": "2026.09/01",
-      "MKR-INS-09": "2026.09/03",
-      "MKR-INS-10": "2026.09/01",
+      // 2026-09-19: the product gained pallets, so both were reissued again.
+      // MKR-INS-08 (2026.09/02): the equipment screen was rebuilt around a
+      // live overview and a device register with a licence-slot column, and
+      // shift planning gained pallets. MKR-INS-09 (2026.09/04): the shift
+      // panel gained a pallets section with placards, and the report catalog
+      // grew from five formats to ten.
+      "MKR-INS-08": "2026.09/02",
+      "MKR-INS-09": "2026.09/04",
+      // 2026-09-19: the product card gained a readiness model and category
+      // attributes, so the catalog card instruction was reissued.
+      "MKR-INS-10": "2026.09/02",
       "MKR-INS-11": "2026.09/01",
     };
     expect(
@@ -103,9 +111,9 @@ describe("legal document registry", () => {
     expect(findLegalRelease("MKR-INS-05").effectiveDate).toBe("2026-09-02");
     expect(findLegalRelease("MKR-INS-06").effectiveDate).toBe("2026-09-10");
     expect(findLegalRelease("MKR-INS-07").effectiveDate).toBe("2026-09-01");
-    expect(findLegalRelease("MKR-INS-08").effectiveDate).toBe("2026-09-10");
-    expect(findLegalRelease("MKR-INS-09").effectiveDate).toBe("2026-09-10");
-    expect(findLegalRelease("MKR-INS-10").effectiveDate).toBe("2026-09-10");
+    expect(findLegalRelease("MKR-INS-08").effectiveDate).toBe("2026-09-19");
+    expect(findLegalRelease("MKR-INS-09").effectiveDate).toBe("2026-09-19");
+    expect(findLegalRelease("MKR-INS-10").effectiveDate).toBe("2026-09-19");
     expect(findLegalRelease("MKR-INS-11").effectiveDate).toBe("2026-09-11");
     expect(new Set(LEGAL_RELEASES.flatMap(({ routes }) => Object.values(routes))).size).toBe(30);
     expect(findLegalRelease("MKR-PD-02")).toBe(LEGAL_RELEASES[1]);

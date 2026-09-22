@@ -941,3 +941,147 @@
 .mk-radio-card__reason {
   margin: 0;
 }
+
+/* Теги. Одна геометрия для тега фазы (StatusChip) и тега категории (Badge):
+   раньше они различались на 8px высоты и читались как два разных набора.
+   Геометрия живёт здесь, а не в инлайновом style компонента, — иначе
+   накладки приложений молча проигрывают инлайну и оказываются мёртвыми. */
+.mk-tag {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: var(--r-1);
+  font-family: var(--font-ui);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.mk-tag--office {
+  height: 22px;
+  min-height: 22px;
+  min-width: 22px;
+  gap: 5px;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.mk-tag--floor {
+  height: 34px;
+  min-height: 34px;
+  min-width: 34px;
+  gap: 7px;
+  padding: 0 14px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.mk-tag--wall {
+  height: 40px;
+  min-height: 40px;
+  min-width: 40px;
+  gap: 8px;
+  padding: 0 16px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.mk-tag__glyph {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Натуральная ширина у ✓ ✕ ⧉ ⟳ ▸ разная, поэтому без фиксированной коробки
+   подписи в столбце тегов не встают друг под друга. */
+.mk-tag--office .mk-tag__glyph {
+  width: 12px;
+  height: 12px;
+  font-size: 11px;
+}
+
+.mk-tag--floor .mk-tag__glyph {
+  width: 16px;
+  height: 16px;
+  font-size: 15px;
+}
+
+.mk-tag--wall .mk-tag__glyph {
+  width: 18px;
+  height: 18px;
+  font-size: 17px;
+}
+
+.mk-tag--mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Идёт после размеров намеренно: специфичность та же, решает порядок. */
+.mk-tag--wrap {
+  height: auto;
+  white-space: normal;
+}
+
+.mk-tag--neutral {
+  border-color: var(--line);
+  background: var(--surface-panel);
+  color: var(--fg-2);
+}
+
+.mk-tag--ok {
+  border-color: var(--ok-border);
+  background: var(--ok-bg);
+  color: var(--ok-fg);
+}
+
+.mk-tag--done {
+  border-color: var(--done-border);
+  background: var(--done-bg);
+  color: var(--done-fg);
+}
+
+.mk-tag--warn {
+  border-color: var(--warn-border);
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+}
+
+.mk-tag--error {
+  border-color: var(--err-border);
+  background: var(--err-bg);
+  color: var(--err-fg);
+}
+
+.mk-tag--info {
+  border-color: var(--info-border);
+  background: var(--info-bg);
+  color: var(--info-fg);
+}
+
+.mk-tag--violet {
+  border-color: var(--cat-violet-border);
+  background: var(--cat-violet-bg);
+  color: var(--cat-violet-fg);
+}
+
+.mk-tag--teal {
+  border-color: var(--cat-teal-border);
+  background: var(--cat-teal-bg);
+  color: var(--cat-teal-fg);
+}
+
+.mk-tag--magenta {
+  border-color: var(--cat-magenta-border);
+  background: var(--cat-magenta-bg);
+  color: var(--cat-magenta-fg);
+}
+
+.mk-tag--steel {
+  border-color: var(--cat-steel-border);
+  background: var(--cat-steel-bg);
+  color: var(--cat-steel-fg);
+}

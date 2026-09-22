@@ -49,7 +49,7 @@ describe.skipIf(!databaseUrl)("replacement execution forward migration", () => {
     await copyMigrationsThroughIndex({
       sourceFolder: migrationsFolder,
       targetFolder: temporaryRoot,
-      lastIncludedIndex: 161,
+      lastIncludedIndex: 167,
     });
     await runRuntimeMigrations({
       databaseUrl: url.toString(),

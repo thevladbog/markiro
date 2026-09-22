@@ -238,6 +238,7 @@ const OPERATIONAL_CONTROLLERS: readonly [
       getProductLabelEvents: readPolicy,
       getCodeHistory: sharedReadPolicy,
       getReprocessings: readPolicy,
+      taskForm: readPolicy,
       getShift: readPolicy,
       createShift: sharedWritePolicy,
       updateShift: writePolicy,

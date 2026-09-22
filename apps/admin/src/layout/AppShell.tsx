@@ -45,9 +45,9 @@ export const NAV_ITEMS: ReadonlyArray<{
     sectionKey: "shell.sections.production",
     capability: C.OPERATIONS_READ,
   },
-  // "/boxes" has no sidebar entry of its own: it is reachable as the
-  // "Короба" tab inside the code-search section (see
-  // pages/code-search/RegistryTabs.tsx).
+  // "/boxes" and "/pallets" have no sidebar entry of their own: they are
+  // reachable as the "Короба" and "Паллеты" tabs inside the code-search
+  // section (see pages/code-search/RegistryTabs.tsx).
   {
     to: "/codes",
     key: "nav.codes",
@@ -129,6 +129,16 @@ export const NAV_ITEMS: ReadonlyArray<{
 ];
 
 /**
+ * `/boxes` and `/pallets` have no sidebar entries of their own: they are the
+ * "Короба" and "Паллеты" tabs inside the code-search section (see
+ * pages/code-search/RegistryTabs.tsx), so the "Поиск кодов" item stays lit
+ * on them too.
+ */
+function isCodeSearchSubRoute(pathname: string): boolean {
+  return pathname.startsWith("/boxes") || pathname.startsWith("/pallets");
+}
+
+/**
  * The real app shell -- sidebar navigation, global header, routed content --
  * rendered by `pages/Shell.tsx`'s guard once a session with an active
  * organization is confirmed.
@@ -200,9 +210,7 @@ export function AppShell() {
             className={({ isActive }) =>
               cn(
                 "mk-sidebar__link",
-                // /boxes lives under the code-search section as its "Короба"
-                // tab, so the "Поиск кодов" item stays lit there too.
-                (isActive || (item.to === "/codes" && location.pathname.startsWith("/boxes"))) &&
+                (isActive || (item.to === "/codes" && isCodeSearchSubRoute(location.pathname))) &&
                   "mk-sidebar__link--active",
               )
             }
@@ -319,7 +327,7 @@ function MobileNavigation({
                 <ul className="mk-mobile-navigation__list">
                   {group.items.map((item) => {
                     const boxesRouteIsActive =
-                      item.to === "/codes" && pathname.startsWith("/boxes");
+                      item.to === "/codes" && isCodeSearchSubRoute(pathname);
                     return (
                       <li key={item.to}>
                         <NavLink
@@ -336,7 +344,7 @@ function MobileNavigation({
                           onClick={onNavigate}
                         >
                           <span>{item.labelKey}</span>
-                          {item.badge != null ? <Badge>{item.badge}</Badge> : null}
+                          {item.badge != null ? <Badge mono>{item.badge}</Badge> : null}
                         </NavLink>
                       </li>
                     );

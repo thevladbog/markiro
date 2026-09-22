@@ -196,13 +196,29 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       defaultSource: "organization",
       validationPrintProtocol: null,
       validationReprocessingProtocol: null,
+      // The manager cannot read the profile, but can learn that planning an
+      // aggregation shift on the organisation's numbers would be refused.
+      orgGlnConfigured: false,
     });
     expect(Object.keys(response.body)).toEqual([
       "defaultBoxLabelTemplateId",
       "defaultSource",
       "validationPrintProtocol",
       "validationReprocessingProtocol",
+      "orgGlnConfigured",
     ]);
+  });
+
+  it("GET /shifts/planning-config reports the organisation GLN as configured once it is set", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+    expect((await agent.get("/shifts/planning-config").expect(200)).body.orgGlnConfigured).toBe(
+      false,
+    );
+    await agent.put("/org/profile").send({ gln: "4601112222005" }).expect(200);
+    expect((await agent.get("/shifts/planning-config").expect(200)).body.orgGlnConfigured).toBe(
+      true,
+    );
   });
 
   // ---------------------------------------------------------------------
@@ -877,6 +893,98 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     expect(res.body.message).toEqual(expect.stringContaining("Unknown counterparty"));
   });
 
+  // ---------------------------------------------------------------------
+  // Printable task form (Task 4)
+  // ---------------------------------------------------------------------
+
+  it("serves the printable task form to a read-only administrator and refuses a closed shift", async () => {
+    const owner = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(owner);
+    const productId = await seedProduct(orgId, {
+      status: "active",
+      chzProductGroupCode: 8,
+      boxCapacity: 12,
+      palletBoxCapacity: 48,
+    });
+    const created = await owner.post("/shifts").send({ productId, mode: "validation" }).expect(201);
+    const shiftId = created.body.id as string;
+
+    const planned = await owner.get(`/shifts/${shiftId}/task-form`).expect(200);
+    expect(planned.headers["content-type"]).toContain("text/html");
+    expect(planned.headers["cache-control"]).toBe("private, no-store");
+    expect(planned.text).toContain(`data-task-token="markiro:shift:v1:${shiftId}"`);
+    expect(planned.text).toContain("К запуску");
+
+    await owner.post(`/shifts/${shiftId}/open`).expect(200);
+    const active = await owner.get(`/shifts/${shiftId}/task-form`).expect(200);
+    expect(active.text).toContain("В работе");
+
+    await owner.post(`/shifts/${shiftId}/close`).send({ reason: "done" }).expect(200);
+    await owner.get(`/shifts/${shiftId}/task-form`).expect(409, { code: "SHIFT_TASK_FORM_CLOSED" });
+  });
+
+  it("keeps the task form out of reach of a station credential and of another tenant", async () => {
+    const owner = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(owner);
+    const productId = await seedProduct(orgId, {
+      status: "active",
+      chzProductGroupCode: 8,
+      boxCapacity: 12,
+      palletBoxCapacity: 48,
+    });
+    const created = await owner.post("/shifts").send({ productId, mode: "validation" }).expect(201);
+    const shiftId = created.body.id as string;
+
+    const station = await createTestStationDevice(app!, owner, "Task-form terminal");
+    await request(app!.getHttpServer())
+      .get(`/shifts/${shiftId}/task-form`)
+      .set("x-api-key", station.apiKey)
+      .expect(403);
+
+    const otherTenantOwner = request.agent(app!.getHttpServer());
+    await signUpAndActivate(otherTenantOwner);
+    await otherTenantOwner.get(`/shifts/${shiftId}/task-form`).expect(404);
+  });
+
+  it("prints the counterparty and the sscc issuer through their own joins, not swapped", async () => {
+    const owner = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(owner);
+    await setDefaultBoxLabelTemplate(owner, orgId);
+
+    const buyerId = await seedCounterparty(orgId, "Покупатель Ромашка");
+    const issuerId = await seedCounterparty(orgId, "Эмитент Атолл");
+    const productId = await seedProduct(orgId, {
+      status: "active",
+      chzProductGroupCode: 8,
+      boxCapacity: 12,
+      palletBoxCapacity: 48,
+    });
+
+    const created = await owner
+      .post("/shifts")
+      .send({
+        productId,
+        mode: "aggregation",
+        counterpartyId: buyerId,
+        ssccIssuerCounterpartyId: issuerId,
+      })
+      .expect(201);
+    const shiftId = created.body.id as string;
+
+    const form = await owner.get(`/shifts/${shiftId}/task-form`).expect(200);
+
+    // Each name must land beside its own label. If the sscc_issuer alias were
+    // ever joined on counterpartyId instead of ssccIssuerCounterpartyId (or
+    // vice versa), these two dt/dd pairs would swap and one of these
+    // assertions would fail.
+    expect(form.text).toContain(
+      '<div class="parameter"><dt>ДЛЯ КОНТРАГЕНТА</dt><dd>Покупатель Ромашка</dd></div>',
+    );
+    expect(form.text).toContain(
+      '<div class="parameter"><dt>НОМЕРА SSCC</dt><dd>Эмитент Атолл</dd></div>',
+    );
+  });
+
   it("GET/list/PATCH omit a seeded legacy item binding and PATCH leaves its column untouched", async () => {
     const agent = request.agent(app!.getHttpServer());
     const orgId = await signUpAndActivate(agent);
@@ -1023,6 +1131,10 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
   it("POST /shifts snapshots the organisation default box template when omitted", async () => {
     const agent = request.agent(app!.getHttpServer());
     const orgId = await signUpAndActivate(agent);
+    // Starting an aggregation shift needs an SSCC source (see
+    // `SsccService.assertIssuerConfiguredForActivation`); the GLN itself is
+    // not under test here.
+    await agent.put("/org/profile").send({ gln: "4601112222005" }).expect(200);
     const defaultTemplateId = await setDefaultBoxLabelTemplate(agent, orgId, "Original Default");
     const replacementTemplateId = await seedLabelTemplate(orgId, "Replacement Default");
     const productId = await seedProduct(orgId, {
@@ -1265,6 +1377,10 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
   it("PATCH /shifts/:id updates safe metadata on an active shift and rejects operational changes", async () => {
     const agent = request.agent(app!.getHttpServer());
     const orgId = await signUpAndActivate(agent);
+    // Starting an aggregation shift needs an SSCC source (see
+    // `SsccService.assertIssuerConfiguredForActivation`); the GLN itself is
+    // not under test here.
+    await agent.put("/org/profile").send({ gln: "4601112222005" }).expect(200);
     const productId = await seedProduct(orgId, {
       status: "active",
       chzProductGroupCode: 8,
@@ -1951,6 +2067,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       validationReprocessingProtocol: null,
       defaultBoxLabelTemplateId: beerDefault,
       defaultSource: "category",
+      orgGlnConfigured: false,
     });
     const milkConfig = await agent.get(`/shifts/planning-config?productId=${milk}`).expect(200);
     expect(milkConfig.body).toEqual({
@@ -1958,6 +2075,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       validationReprocessingProtocol: null,
       defaultBoxLabelTemplateId: orgDefault,
       defaultSource: "organization",
+      orgGlnConfigured: false,
     });
     const orgConfig = await agent.get("/shifts/planning-config").expect(200);
     expect(orgConfig.body).toEqual({
@@ -1965,6 +2083,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       validationReprocessingProtocol: null,
       defaultBoxLabelTemplateId: orgDefault,
       defaultSource: "organization",
+      orgGlnConfigured: false,
     });
     await agent.get(`/shifts/planning-config?productId=${randomUUID()}`).expect(404);
 
@@ -2181,5 +2300,121 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       .send({ productId, mode: "aggregation", boxLabelTemplateId: universal })
       .expect(400);
     expect(invalidBox.body.code).toBe("BOX_LABEL_TEMPLATE_NOT_ELIGIBLE");
+  });
+
+  // ---------------------------------------------------------------------
+  // Entry method (Task 6): the printed task form's barcode enters a shift
+  // through the station's /open route; the handheld enters through /enter.
+  // Both converge on ShiftsService.enterShift, which is what writes
+  // shift_device_participants, so either route must record what the
+  // terminal actually sent (or `list` when it sent nothing at all).
+  // ---------------------------------------------------------------------
+
+  it("records the entry method on both entry routes and defaults a bodiless request to the list", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+    const productId = await seedProduct(orgId, {
+      status: "active",
+      chzProductGroupCode: 8,
+      boxCapacity: 12,
+      palletBoxCapacity: 48,
+    });
+    const server = app!.getHttpServer();
+    const station = await createTestStationDevice(app!, agent, "Entry-method station");
+    const handheld = await createTestStationDevice(app!, agent, "Entry-method handheld", {
+      kind: "handheld",
+    });
+
+    const scanned = await agent.post("/shifts").send({ productId, mode: "validation" }).expect(201);
+    await request(server)
+      .post(`/shifts/${scanned.body.id}/open`)
+      .set("x-api-key", station.apiKey)
+      .send({ entryMethod: "task_barcode" })
+      .expect(200);
+
+    const picked = await agent.post("/shifts").send({ productId, mode: "validation" }).expect(201);
+    await request(server)
+      .post(`/shifts/${picked.body.id}/open`)
+      .set("x-api-key", station.apiKey)
+      .expect(200);
+
+    const enteredByHandheld = await agent
+      .post("/shifts")
+      .send({ productId, mode: "validation" })
+      .expect(201);
+    await request(server)
+      .post(`/shifts/${enteredByHandheld.body.id}/enter`)
+      .set("x-api-key", handheld.apiKey)
+      .send({ entryMethod: "task_barcode" })
+      .expect(200);
+
+    const rows = await db
+      .select({
+        shiftId: schema.shiftDeviceParticipants.shiftId,
+        entryMethod: schema.shiftDeviceParticipants.entryMethod,
+      })
+      .from(schema.shiftDeviceParticipants)
+      .where(eq(schema.shiftDeviceParticipants.tenantId, orgId));
+    const byShift = new Map(rows.map((row) => [row.shiftId, row.entryMethod]));
+
+    expect(byShift.get(scanned.body.id as string)).toBe("task_barcode");
+    expect(byShift.get(picked.body.id as string)).toBe("list");
+    expect(byShift.get(enteredByHandheld.body.id as string)).toBe("task_barcode");
+  });
+
+  it("refuses an unknown entry method instead of silently recording the default", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+    const productId = await seedProduct(orgId, {
+      status: "active",
+      chzProductGroupCode: 8,
+      boxCapacity: 12,
+      palletBoxCapacity: 48,
+    });
+    const station = await createTestStationDevice(app!, agent, "Entry-method rejection station");
+    const shift = await agent.post("/shifts").send({ productId, mode: "validation" }).expect(201);
+
+    await request(app!.getHttpServer())
+      .post(`/shifts/${shift.body.id}/open`)
+      .set("x-api-key", station.apiKey)
+      .send({ entryMethod: "telepathy" })
+      .expect(400);
+  });
+
+  it("overwrites the entry method when the same device comes back a different way", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+    const productId = await seedProduct(orgId, {
+      status: "active",
+      chzProductGroupCode: 8,
+      boxCapacity: 12,
+      palletBoxCapacity: 48,
+    });
+    const server = app!.getHttpServer();
+    const station = await createTestStationDevice(app!, agent, "Entry-method overwrite station");
+    const shift = await agent.post("/shifts").send({ productId, mode: "validation" }).expect(201);
+    const shiftId = shift.body.id as string;
+
+    await request(server)
+      .post(`/shifts/${shiftId}/open`)
+      .set("x-api-key", station.apiKey)
+      .send({ entryMethod: "task_barcode" })
+      .expect(200);
+    await request(server)
+      .post(`/shifts/${shiftId}/enter`)
+      .set("x-api-key", station.apiKey)
+      .send({ entryMethod: "list" })
+      .expect(200);
+
+    const [row] = await db
+      .select({ entryMethod: schema.shiftDeviceParticipants.entryMethod })
+      .from(schema.shiftDeviceParticipants)
+      .where(
+        and(
+          eq(schema.shiftDeviceParticipants.tenantId, orgId),
+          eq(schema.shiftDeviceParticipants.shiftId, shiftId),
+        ),
+      );
+    expect(row?.entryMethod).toBe("list");
   });
 });

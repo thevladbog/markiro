@@ -251,6 +251,68 @@ describe.skipIf(!process.env.DATABASE_URL)("replacement execution", () => {
       ).toHaveLength(1);
     }
   });
+  it("rechecks newly opened warehouse pallets before normal transfer revokes the source", async () => {
+    const f = await ready();
+    const p = await preview(f);
+    const productId = randomUUID();
+    await db.insert(schema.products).values({
+      id: productId,
+      tenantId: f.tenantId,
+      gtin14: "04680089900024",
+      name: "Product",
+      status: "active",
+    });
+    await db.insert(schema.pallets).values({
+      tenantId: f.tenantId,
+      kind: "warehouse",
+      productId,
+      deviceId: f.device.id,
+      terminalId: f.device.id,
+      devicePalletId: "opened-after-preview",
+    });
+    await expect(
+      execution.executeNormal(f.tenantId, f.preparation.id, p.request, f.actor),
+    ).rejects.toMatchObject({ status: 409 });
+    expect(
+      await db.select().from(schema.apikey).where(eq(schema.apikey.id, f.identity.apiKeyId)),
+    ).toHaveLength(1);
+  });
+  it("binds warehouse pallet changes into emergency execution preview facts", async () => {
+    const f = await fixture("station", 1, true);
+    const p = await execution.previewEmergency(
+      f.tenantId,
+      f.prepared.preparation.id,
+      { requestId: randomUUID(), expectedRevision: 1, reason: "Source destroyed" },
+      f.actor,
+    );
+    const productId = randomUUID();
+    await db.insert(schema.products).values({
+      id: productId,
+      tenantId: f.tenantId,
+      gtin14: "04680089900024",
+      name: "Product",
+      status: "active",
+    });
+    await db.insert(schema.pallets).values({
+      tenantId: f.tenantId,
+      kind: "warehouse",
+      productId,
+      deviceId: f.device.id,
+      terminalId: f.device.id,
+      devicePalletId: "opened-after-preview",
+    });
+    await expect(
+      execution.executeEmergency(
+        f.tenantId,
+        f.prepared.preparation.id,
+        { requestId: p.requestId, expectedRevision: 1, previewId: p.id, mode: "emergency" },
+        f.actor,
+      ),
+    ).rejects.toMatchObject({ status: 409 });
+    expect(
+      await db.select().from(schema.apikey).where(eq(schema.apikey.id, f.identity.apiKeyId)),
+    ).toHaveLength(1);
+  });
   it("enforces execution preview immutability and tenant/source preparation identity in PostgreSQL", async () => {
     const f = await ready();
     const p = await preview(f);

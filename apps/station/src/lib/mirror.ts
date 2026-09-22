@@ -95,6 +95,13 @@ export interface StationBundle {
   counterpartyGln: string | null;
   operators: OperatorMirrorRecord[];
   /**
+   * Why `sscc` is null when the shift's issuer has no GLN (`org_gln_missing`
+   * / `issuer_gln_missing`); null otherwise. Optional for rolling
+   * compatibility, like `palletLabelTemplate`; the station does not act on
+   * it yet -- the handheld does.
+   */
+  ssccIssuerProblem?: "org_gln_missing" | "issuer_gln_missing" | null;
+  /**
    * The box serial block this device may print from -- aggregation shifts
    * only, and only when this device fetched the bundle over its own
    * api-key (see ShiftBundleDto.sscc in shifts/dto.ts on the server).
@@ -989,4 +996,28 @@ export async function readOperatorRosterSnapshot(
 
 export async function readOperatorsMirror(exec: SqlExecutor): Promise<OperatorMirrorRecord[]> {
   return (await readOperatorRosterSnapshot(exec)).operators;
+}
+
+/**
+ * Marks mirrored shifts closed once the server says they are.
+ *
+ * The local close is authoritative in the other direction — a durable close
+ * overrides a list response that still reports `active` — but nothing carried
+ * the server's own closure back into the mirror. A shift closed in the office,
+ * or by another terminal, therefore stayed `active` here forever, and every
+ * code it ever accepted kept reading as "being processed in another active
+ * shift" on every later shift. Closing only ever moves one way, so this never
+ * reopens anything.
+ */
+export async function markServerClosedShifts(
+  exec: SqlExecutor,
+  shifts: readonly { id: string; status: string }[],
+): Promise<void> {
+  const closed = shifts.filter((shift) => shift.status === "closed").map((shift) => shift.id);
+  if (closed.length === 0) return;
+  await exec.run(
+    `UPDATE shift_mirror SET status='closed'
+      WHERE status<>'closed' AND id IN (${closed.map(() => "?").join(", ")})`,
+    closed,
+  );
 }

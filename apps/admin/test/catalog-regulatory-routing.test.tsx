@@ -115,14 +115,16 @@ it("keeps creation compact, then opens the saved product to complete category at
   expect(requests.some((path) => /regulatory|readiness/.test(path))).toBe(false);
   await user.click(screen.getByRole("button", { name: "Создать" }));
   await waitFor(() => expect(router.state.location.pathname).toBe(`/catalog/${PRODUCT_ID}/edit`));
+  await user.click(await screen.findByRole("tab", { name: "Честный знак" }));
   expect(await screen.findByRole("heading", { name: "Характеристики категории" })).toBeDefined();
 });
 it("guards dirty category fields on close and blocks a base save from discarding them", async () => {
   const { user, router, writes } = mount();
+  await user.click(await screen.findByRole("tab", { name: "Честный знак" }));
   const field = await screen.findByLabelText("Объём");
   await user.clear(field);
   await user.type(field, "750");
-  expect(screen.getByRole("button", { name: "Сохранить" })).toHaveProperty("disabled", true);
+  expect(screen.queryByRole("button", { name: "Сохранить" })).toBeNull();
   expect(document.querySelector("form form")).toBeNull();
   await user.click(
     within(screen.getByRole("dialog", { name: "Изменить продукт" })).getByRole("button", {

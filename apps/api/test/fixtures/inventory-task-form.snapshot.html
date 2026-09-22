@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Форма-задание на инвентаризацию IVN-26-0042</title>
+  <style>
+    @page { size: A4 portrait; margin: 0; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: #fff; color: #17161a; font-family: Arial, "Helvetica Neue", sans-serif; }
+    body { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+    .page { width: 210mm; height: 297mm; margin: 0 auto; padding: 16mm; background: #fff; display: flex; flex-direction: column; overflow: hidden; }
+    .top { display: flex; justify-content: space-between; align-items: center; padding-bottom: 6mm; border-bottom: .25mm solid #cbc7bf; }
+    .brand-logo { width: 34mm; height: 8mm; display: block; }
+    .task-id { text-align: right; }
+    .eyebrow { display: block; color: #706d67; font-size: 8pt; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+    .task-id strong { display: block; margin-top: 1.5mm; font: 700 14pt/1.1 ui-monospace, SFMono-Regular, Consolas, monospace; }
+    .task-passport { display: grid; grid-template-columns: minmax(0, 1fr) 48mm; gap: 8mm; align-items: center; padding: 8mm 0 7mm; border-bottom: .35mm solid #17161a; }
+    .hero { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; }
+    h1 { margin: 0; font-size: 23pt; line-height: 1.08; letter-spacing: -.02em; }
+    .subtitle { margin: 2.5mm 0 0; color: #4f4c47; font-size: 11pt; }
+    .status { min-width: 36mm; margin-top: 3mm; padding: 4mm 5mm; border: .25mm solid #b7dfc8; border-radius: 3mm; background: #e7f6ed; color: #126b39; font-size: 9pt; font-weight: 800; text-align: center; text-transform: uppercase; }
+    .scan-zone { min-height: 44mm; border-left: .25mm solid #cbc7bf; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #fff; }
+    .barcode { width: 32mm; height: 32mm; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+    .barcode svg { display: block; max-width: 100%; width: 100%; height: 100%; }
+    .barcode-caption { margin-top: 1mm; font: 700 12pt/1.1 ui-monospace, SFMono-Regular, Consolas, monospace; }
+    .scan-hint { max-width: 42mm; margin-top: 1mm; color: #77736d; font-size: 8pt; text-align: center; }
+    h2 { margin: 4.5mm 0 2mm; font-size: 12pt; line-height: 1.2; }
+    dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; border-top: .2mm solid #cbc7bf; }
+    .parameter { min-height: 10mm; padding: 2mm 4mm 1.5mm 0; border-bottom: .2mm solid #d8d5cf; }
+    .parameter:nth-child(odd) { border-right: .2mm solid #d8d5cf; }
+    .parameter:nth-child(even) { padding-left: 4mm; }
+    dt { color: #706d67; font-size: 8pt; }
+    dd { margin: 1mm 0 0; text-align: left; font-size: 10pt; font-weight: 700; overflow-wrap: anywhere; }
+    .steps { margin-top: 4mm; padding-top: 1mm; border-top: .2mm solid #d8d5cf; }
+    .steps ol { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2.5mm 7mm; margin: 0; padding: 0; list-style: none; }
+    .steps li { display: grid; grid-template-columns: 7mm 1fr; gap: 3mm; align-items: start; color: #4f4c47; font-size: 8.5pt; line-height: 1.28; }
+    .step-number { width: 6mm; height: 6mm; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: #17161a; color: #fff; font-size: 7pt; font-weight: 800; line-height: 1; padding-top: .25mm; }
+    .rules { margin-top: 5mm; padding: 3mm 4mm; border: .3mm solid #17161a; background: #fff; color: #17161a; }
+    .rules h2 { margin: 0 0 2mm; color: #17161a; }
+    .rules ul { margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2mm 6mm; list-style: none; font-size: 7.5pt; line-height: 1.25; }
+    .rules li { padding-left: 3mm; border-left: .7mm solid #17161a; }
+    .rules li:first-child { grid-column: 1 / -1; }
+    .comments { flex: 1; min-height: 34mm; margin-top: 5mm; border-top: .25mm solid #9f9b95; background-image: radial-gradient(circle, #aaa69f .25mm, transparent .3mm); background-size: 4mm 4mm; background-position: 0 11mm; }
+    .comments-header { display: flex; align-items: baseline; justify-content: space-between; gap: 6mm; padding: 2.5mm 0 2mm; background: #fff; }
+    .comments h2 { margin: 0; }
+    .comments span { color: #77736d; font-size: 7.5pt; }
+    .footer { margin-top: auto; padding-top: 3.5mm; border-top: .2mm solid #d8d5cf; display: flex; justify-content: space-between; color: #77736d; font-size: 7.5pt; }
+    .compact { padding: 12mm 14mm; }
+    .compact .top { padding-bottom: 4mm; }
+    .compact .task-passport { grid-template-columns: minmax(0, 1fr) 42mm; gap: 6mm; padding: 4mm 0; }
+    .compact h1 { font-size: 19pt; }
+    .compact .subtitle { margin-top: 1mm; max-width: 126mm; font-size: 8.5pt; line-height: 1.15; overflow-wrap: anywhere; }
+    .compact .status { margin-top: 2mm; padding: 3mm 4mm; }
+    .compact .scan-zone { min-height: 38mm; }
+    .compact .barcode { width: 28mm; height: 28mm; }
+    .compact h2 { margin: 2.5mm 0 1.2mm; font-size: 10.5pt; }
+    .compact .parameter { min-height: 7mm; padding: 1mm 3mm 1mm 0; }
+    .compact .parameter:nth-child(even) { padding-left: 3mm; }
+    .compact dt { font-size: 7pt; }
+    .compact dd { font-size: 8.5pt; line-height: 1.08; }
+    .compact .steps { margin-top: 2mm; padding-top: 0; }
+    .compact .steps ol { gap: 1.5mm 5mm; }
+    .compact .steps li { font-size: 7.5pt; line-height: 1.2; }
+    .compact .rules { margin-top: 3mm; padding: 2.5mm 3mm; }
+    .compact .rules ul { gap: 1mm 4mm; font-size: 6.5pt; line-height: 1.18; }
+    .compact .comments { min-height: 20mm; margin-top: 3mm; background-position: 0 9mm; }
+    .compact .comments-header { padding: 1.5mm 0; }
+    .compact .comments span { display: none; }
+    .compact .footer { padding-top: 2mm; font-size: 7pt; }
+    @media screen { .page { box-shadow: 0 2mm 8mm rgba(23, 22, 26, .12); } }
+    @media print { html, body { background: #fff; } .page { margin: 0; box-shadow: none; } }
+  </style>
+</head>
+<body>
+  <main class="page" data-layout="standard">
+    <header class="top"><svg class="brand-logo" data-brand-logo="markiro" viewBox="0 0 280 64" preserveAspectRatio="xMinYMid meet" role="img" aria-label="Маркиро" xmlns="http://www.w3.org/2000/svg">
+    <rect x="4" y="4" width="56" height="56" fill="#17161A"/>
+    <g fill="#FFFFFF">
+      <rect x="14" y="14" width="8" height="8"/><rect x="14" y="26" width="8" height="8"/><rect x="14" y="38" width="8" height="8"/>
+      <rect x="26" y="22" width="8" height="8"/><rect x="38" y="14" width="8" height="8"/><rect x="38" y="26" width="8" height="8"/>
+      <rect x="38" y="38" width="8" height="8"/><rect x="26" y="42" width="8" height="8" fill="#3DDC7A"/>
+    </g>
+    <text x="76" y="45" font-family="Arial, sans-serif" font-weight="700" font-size="34" fill="#17161A">маркиро</text>
+  </svg><div class="task-id"><span class="eyebrow">Форма-задание</span><strong>IVN-26-0042</strong></div></header>
+    <section class="task-passport"><section class="hero"><div><h1>Задание на инвентаризацию</h1><p class="subtitle">С переупаковкой · ООО «Пивоварня»</p></div><div class="status">К запуску</div></section><section class="scan-zone" aria-label="Штрихкод задания"><div class="barcode" data-barcode-symbology="datamatrix" data-task-token="markiro:inventory:v1:11111111-1111-4111-8111-111111111111"><svg viewBox="0 0 156 156" xmlns="http://www.w3.org/2000/svg">
+<path d="M0 156L156 156L156 150L138 150L138 144L144 144L144 132L156 132L156 126L144 126L144 120L138 120L138 114L150 114L150 108L156 108L156 102L150 102L150 96L144 96L144 90L150 90L150 84L144 84L144 78L138 78L138 72L132 72L132 78L126 78L126 90L132 90L132 84L138 84L138 96L132 96L132 102L120 102L120 108L132 108L132 114L120 114L120 108L96 108L96 96L114 96L114 90L90 90L90 78L108 78L108 84L114 84L114 72L108 72L108 66L114 66L114 54L120 54L120 48L114 48L114 36L108 36L108 54L102 54L102 48L96 48L96 66L102 66L102 72L96 72L96 66L90 66L90 72L84 72L84 78L78 78L78 84L72 84L72 90L66 90L66 96L78 96L78 90L84 90L84 96L78 96L78 102L84 102L84 108L78 108L78 114L66 114L66 108L60 108L60 114L54 114L54 126L48 126L48 120L42 120L42 126L36 126L36 132L30 132L30 120L24 120L24 114L30 114L30 120L36 120L36 114L48 114L48 108L60 108L60 102L66 102L66 96L54 96L54 84L60 84L60 66L54 66L54 78L48 78L48 84L42 84L42 90L48 90L48 102L36 102L36 96L42 96L42 90L36 90L36 84L30 84L30 72L24 72L24 90L30 90L30 108L24 108L24 102L18 102L18 126L24 126L24 132L18 132L18 144L24 144L24 150L18 150L18 144L12 144L12 150L6 150L6 144L12 144L12 132L6 132L6 126L12 126L12 114L6 114L6 108L12 108L12 102L6 102L6 84L12 84L12 78L18 78L18 72L12 72L12 66L6 66L6 60L12 60L12 66L30 66L30 60L24 60L24 54L30 54L30 36L36 36L36 54L42 54L42 42L48 42L48 36L42 36L42 30L24 30L24 36L18 36L18 24L12 24L12 6L6 6L6 0L0 0ZM30 150L30 138L36 138L36 150ZM42 150L42 144L48 144L48 150ZM84 150L84 144L78 144L78 138L84 138L84 126L96 126L96 138L90 138L90 144L102 144L102 132L108 132L108 126L96 126L96 120L90 120L90 114L102 114L102 120L108 120L108 114L114 114L114 120L132 120L132 132L126 132L126 126L114 126L114 144L108 144L108 150ZM114 150L114 144L120 144L120 138L132 138L132 144L126 144L126 150ZM54 144L54 138L60 138L60 144ZM150 144L156 144L156 138L150 138ZM42 138L42 132L54 132L54 138ZM60 138L60 132L78 132L78 138ZM12 132L18 132L18 126L12 126ZM72 126L72 120L84 120L84 126ZM150 120L156 120L156 114L150 114ZM72 108L78 108L78 102L72 102ZM12 102L18 102L18 96L24 96L24 90L18 90L18 84L12 84ZM114 102L120 102L120 96L114 96ZM120 96L126 96L126 90L120 90ZM150 96L156 96L156 90L150 90ZM114 90L120 90L120 84L114 84ZM66 84L72 84L72 78L66 78ZM150 84L156 84L156 78L150 78ZM36 78L48 78L48 66L42 66L42 60L36 60ZM66 72L72 72L72 66L78 66L78 54L72 54L72 48L66 48L66 42L48 42L48 48L54 48L54 54L48 54L48 66L54 66L54 60L60 60L60 54L66 54ZM114 72L126 72L126 66L114 66ZM138 72L144 72L144 60L132 60L132 54L138 54L138 48L126 48L126 66L138 66ZM150 72L156 72L156 66L150 66ZM84 66L90 66L90 60L84 60ZM144 60L156 60L156 54L144 54ZM6 54L6 48L18 48L18 54ZM78 54L90 54L90 48L96 48L96 42L90 42L90 36L96 36L96 30L90 30L90 24L84 24L84 12L78 12L78 18L72 18L72 12L78 12L78 0L72 0L72 6L66 6L66 0L60 0L60 6L54 6L54 0L48 0L48 6L42 6L42 12L48 12L48 18L54 18L54 24L72 24L72 30L78 30L78 36L84 36L84 48L78 48ZM18 48L18 42L24 42L24 48ZM120 48L126 48L126 24L120 24ZM144 48L156 48L156 42L144 42ZM6 42L6 36L12 36L12 42ZM66 42L72 42L72 30L54 30L54 24L48 24L48 18L42 18L42 30L48 30L48 36L66 36ZM96 42L102 42L102 36L96 36ZM132 42L138 42L138 36L156 36L156 30L144 30L144 24L156 24L156 18L150 18L150 12L156 12L156 6L150 6L150 0L144 0L144 18L138 18L138 12L132 12ZM102 36L108 36L108 30L114 30L114 18L108 18L108 12L102 12L102 0L96 0L96 6L90 6L90 0L84 0L84 12L90 12L90 24L96 24L96 18L102 18ZM30 24L36 24L36 18L30 18ZM24 18L30 18L30 12L24 12ZM114 18L126 18L126 12L120 12L120 6L114 6ZM126 12L132 12L132 6L126 6ZM12 6L18 6L18 0L12 0ZM24 6L30 6L30 0L24 0ZM36 6L42 6L42 0L36 0ZM108 6L114 6L114 0L108 0ZM120 6L126 6L126 0L120 0ZM132 6L138 6L138 0L132 0Z" fill="#000000" fill-rule="evenodd" />
+</svg>
+</div><div class="barcode-caption">IVN-26-0042</div><div class="scan-hint">Отсканируйте на терминале, чтобы открыть задание</div></section></section>
+    <section class="parameters"><h2>Параметры задания</h2><dl><div class="parameter"><dt>ПРОДУКТ</dt><dd>Пиво светлое 0,45 л</dd></div><div class="parameter"><dt>GTIN</dt><dd>04680089900383</dd></div><div class="parameter"><dt>ЛИНИЯ</dt><dd>Упаковка А</dd></div><div class="parameter"><dt>РЕЖИМ</dt><dd>С переупаковкой</dd></div><div class="parameter"><dt>ДАТА ПРОИЗВОДСТВА</dt><dd>01.09.2025 - 31.12.2025</dd></div><div class="parameter"><dt>ОЖИДАЕТСЯ К ПРОВЕРКЕ</dt><dd>4&nbsp;116 кодов</dd></div><div class="parameter"><dt>ВМЕСТИМОСТЬ НОВОГО КОРОБА</dt><dd>20 бутылок</dd></div></dl></section>
+    <section class="steps"><h2>Как начать работу</h2><ol><li><span class="step-number">1</span><span>Откройте терминал на выбранной линии и войдите оператором.</span></li><li><span class="step-number">2</span><span>Отсканируйте штрихкод задания. На своей линии оно также будет видно в списке.</span></li><li><span class="step-number">3</span><span>Если терминал относится к другой линии, подтвердите предупреждение перед входом.</span></li><li><span class="step-number">4</span><span>Отсканируйте старый короб, затем все бутылки. Новый короб закроется и напечатается автоматически после 20-го кода.</span></li></ol></section>
+    <aside class="rules"><h2>Важные правила</h2><ul><li><strong>MOVING_BY_UD:</strong> код в отгрузке. Его нельзя учитывать, списывать или включать в документы.</li><li>При переупаковке содержимое старого короба всегда сканируется поштучно.</li><li>Дата производства действует на терминале до следующего изменения; в одном новом коробе одна дата.</li><li>Чтобы поставить работу на паузу, выйдите из задания. Закрыть инвентаризацию можно только в админке.</li><li>На время инвентаризации движения продукции по складу остановлены.</li></ul></aside>
+    <section class="comments" aria-label="Комментарии оператора"><div class="comments-header"><h2>Комментарии оператора</h2><span>Расхождения · номера коробов · замечания</span></div></section>
+    <footer class="footer"><span>Сформировано: 24.08.2026 17:40 · Маркиро</span><span>IVN-26-0042 · 1 / 1</span></footer>
+  </main>
+</body>
+</html>

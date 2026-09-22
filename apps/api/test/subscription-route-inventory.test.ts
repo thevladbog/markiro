@@ -128,6 +128,8 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "GET /code-search/pallets/:palletId (CodeSearchController.getPalletCard)",
       "GET /code-search/boxes/:boxId/report (CodeSearchController.boxReport)",
       "GET /code-search/pallets/:palletId/report (CodeSearchController.palletReport)",
+      "GET /code-search/pallets/:palletId/placard (CodeSearchController.palletPlacard)",
+      "GET /code-search/shifts/:shiftId/placards (CodeSearchController.shiftPlacards)",
       "GET /conflicts (ConflictsController.listConflicts)",
       "GET /counterparties (CounterpartiesController.listCounterparties)",
       "GET /counterparties/:id (CounterpartiesController.getCounterparty)",
@@ -201,6 +203,8 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "POST /billing/offers/:id/change-request (TenantBillingController.requestOfferChanges)",
       "GET /shift-exports/:exportId/artifacts/:artifactId/download (ShiftExportsController.download)",
       "GET /shift-exports/formats (ShiftExportsController.formats)",
+      "GET /pallet-exports/formats (ShiftExportsController.palletFormats)",
+      "GET /pallets/:palletId/exports (ShiftExportsController.listPalletExports)",
       "GET /shifts (ShiftsController.listShifts)",
       "GET /shifts/planning-config (ShiftsController.getPlanningConfig)",
       "GET /shifts/box-label-templates (ShiftsController.listBoxLabelTemplates)",
@@ -211,6 +215,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "GET /shifts/:id/product-labels (ShiftsController.getProductLabels)",
       "GET /shifts/:id/reprocessings (ShiftsController.getReprocessings)",
       "GET /shifts/:id/product-labels/:jobId/events (ShiftsController.getProductLabelEvents)",
+      "GET /shifts/:id/task-form (ShiftsController.taskForm)",
       "GET /shifts/:shiftId/exports (ShiftExportsController.list)",
       "GET /lines/presence (LinesController.listPresence)",
       "GET /shift-close-conflicts (StationShiftCloseController.list)",
@@ -307,6 +312,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "POST /pickup-orders/export (PickupOrdersController.export)",
       "POST /shift-exports/:exportId/retry (ShiftExportsController.retry)",
       "POST /shifts/:shiftId/exports (ShiftExportsController.create)",
+      "POST /pallets/:palletId/exports (ShiftExportsController.createPalletExport)",
     ],
   },
   {
@@ -475,6 +481,18 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "GET /station/writeoff-bootstrap (StationWriteoffsController.bootstrap)",
       "GET /station/box-registry (StationWriteoffsController.boxRegistry)",
     ],
+  },
+  {
+    // The handheld's pallet reference data. Reading pallet capacities, the
+    // operator's pallet permission and the device's SSCC block is not
+    // aggregation work, so it stays available while a subscription is
+    // read-only -- the service withholds the SSCC block in that state instead
+    // of refusing the whole bootstrap.
+    contract: customerContract(CABINET_STATION_GUARDS, {
+      mode: "read_only_allowed",
+      reason: "read",
+    }),
+    routes: ["GET /station/pallet-bootstrap (StationPalletsController.bootstrap)"],
   },
   {
     contract: customerContract(KIOSK_GUARDS, { mode: "read_only_allowed", reason: "read" }),
@@ -1097,7 +1115,8 @@ describe("registered subscription route inventory", () => {
             ["enterShift", "getCodeHistory"].includes(route.handlerName)) ||
           (route.controller.name === "StationShiftCloseController" &&
             route.handlerName === "close") ||
-          route.controller.name === "StationWriteoffsController";
+          route.controller.name === "StationWriteoffsController" ||
+          route.controller.name === "StationPalletsController";
         const expected =
           route.controller.name === "KioskController" ||
           route.controller.name === "KioskGrantsController"

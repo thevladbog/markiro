@@ -1,11 +1,13 @@
 import { Inject, Injectable } from "@nestjs/common";
+import { formatShiftNumber } from "@markiro/domain";
 import type {
   ShiftExportFormatDescriptor,
   ShiftExportPalletGroup,
   ShiftExportSource,
 } from "@markiro/domain";
 import { schema, type Db } from "@markiro/db";
-import { and, eq, sql } from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { DB } from "../../auth/auth.module";
 
 export type ShiftExportSourceErrorCode =
@@ -14,7 +16,10 @@ export type ShiftExportSourceErrorCode =
   | "SHIFT_DATE_MISSING"
   | "BOX_COVERAGE_INCOMPLETE"
   | "SHIFT_HAS_NO_PALLETS"
-  | "ORG_INN_MISSING";
+  | "PALLET_NOT_CLOSED"
+  | "PALLET_DISASSEMBLED"
+  | "ORG_INN_MISSING"
+  | "ORG_NAME_MISSING";
 
 export class ShiftExportSourceError extends Error {
   constructor(readonly code: ShiftExportSourceErrorCode) {
@@ -27,8 +32,19 @@ export interface ShiftExportSnapshot {
   sourceSnapshotStartedAt: Date;
   productName: string;
   shiftDate: string;
+  /** The shift's human number (`SEP26-003`), used as the GISMT `document_number`. */
+  shiftNumber: string;
+  /**
+   * When the shift closed -- the instant the GISMT document reports as
+   * `operation_date_time`. Falls back to the snapshot instant for the
+   * anomalous closed shift whose `closed_at` was never written, so a factory
+   * export is never blocked by a missing audit timestamp.
+   */
+  shiftClosedAt: Date;
   /** Tenant's ИНН; loaded only for formats that embed it (GISMT XML). */
   organizationInn: string | null;
+  /** Tenant's full name (`org_name`); loaded only for the GISMT XML formats. */
+  organizationName: string | null;
   /**
    * Eligible boxes rendered LOOSE only because the pallet they closed onto has
    * not itself closed yet (no SSCC to name it with) -- always 0 outside
@@ -43,7 +59,24 @@ export interface ShiftExportSnapshot {
   source: ShiftExportSource;
 }
 
+/** One closed, non-disassembled pallet and the box SSCCs it carries. */
+export interface PalletExportSnapshot {
+  sourceSnapshotStartedAt: Date;
+  productName: string;
+  /** Civil date the pallet closed (UTC), YYYY-MM-DD. */
+  closedDate: string;
+  /** The instant the pallet closed -- the GISMT `operation_date_time`. */
+  closedAt: Date;
+  organizationInn: string | null;
+  /** Tenant's full name (`org_name`). */
+  organizationName: string | null;
+  pallet: { sscc: string; boxSsccs: readonly string[] };
+}
+
 type ShiftExportSourceFormat = Pick<ShiftExportFormatDescriptor, "boxMode" | "extension">;
+
+/** The product of a PRODUCTION pallet, reached through its shift. */
+const shiftProducts = alias(schema.products, "shift_products");
 
 interface AuthoritativeCodeRow {
   tenantId: string;
@@ -103,6 +136,110 @@ export class ShiftExportSourceService {
     );
   }
 
+  /**
+   * A per-pallet aggregation source. Both pallet kinds resolve here: a
+   * warehouse pallet carries its own `product_id` and no shift, a production
+   * pallet reaches its product through its shift, and both name their member
+   * boxes through `boxes.pallet_id`.
+   */
+  loadPallet(tenantId: string, palletId: string): Promise<PalletExportSnapshot> {
+    return this.db.transaction(
+      async (tx) => {
+        const [pallet] = await tx
+          .select({
+            sscc: schema.pallets.sscc,
+            closedAt: schema.pallets.closedAt,
+            disassembledAt: schema.pallets.disassembledAt,
+            productName: sql<
+              string | null
+            >`coalesce(${schema.products.name}, ${shiftProducts.name})`,
+          })
+          .from(schema.pallets)
+          .leftJoin(
+            schema.products,
+            and(
+              eq(schema.products.tenantId, schema.pallets.tenantId),
+              eq(schema.products.id, schema.pallets.productId),
+            ),
+          )
+          .leftJoin(
+            schema.shifts,
+            and(
+              eq(schema.shifts.tenantId, schema.pallets.tenantId),
+              eq(schema.shifts.id, schema.pallets.shiftId),
+            ),
+          )
+          .leftJoin(
+            shiftProducts,
+            and(
+              eq(shiftProducts.tenantId, schema.shifts.tenantId),
+              eq(shiftProducts.id, schema.shifts.productId),
+            ),
+          )
+          .where(and(eq(schema.pallets.tenantId, tenantId), eq(schema.pallets.id, palletId)))
+          .limit(1);
+        // A pallet that vanished, never closed or has no SSCC to name itself
+        // with is the same terminal answer for this export: there is no
+        // aggregate to submit.
+        if (!pallet || pallet.sscc === null || pallet.closedAt === null) {
+          throw new ShiftExportSourceError("PALLET_NOT_CLOSED");
+        }
+        if (pallet.disassembledAt !== null) {
+          throw new ShiftExportSourceError("PALLET_DISASSEMBLED");
+        }
+
+        const boxes = await tx
+          .select({ sscc: schema.boxes.sscc })
+          .from(schema.boxes)
+          .where(
+            and(
+              eq(schema.boxes.tenantId, tenantId),
+              eq(schema.boxes.palletId, palletId),
+              isNotNull(schema.boxes.closedAt),
+              isNull(schema.boxes.disassembledAt),
+            ),
+          )
+          .orderBy(asc(schema.boxes.closedAt), asc(schema.boxes.id));
+
+        const organization = await this.loadOrganization(tx, tenantId);
+
+        return {
+          sourceSnapshotStartedAt: new Date(),
+          productName: pallet.productName ?? "Продукция",
+          closedDate: pallet.closedAt.toISOString().slice(0, 10),
+          closedAt: pallet.closedAt,
+          organizationInn: organization.inn,
+          organizationName: organization.name,
+          pallet: {
+            sscc: pallet.sscc,
+            boxSsccs: boxes.flatMap((box) => (box.sscc === null ? [] : [box.sscc])),
+          },
+        };
+      },
+      { isolationLevel: "repeatable read", accessMode: "read only" },
+    );
+  }
+
+  /**
+   * The participant's identity as the GISMT XML needs it: the trimmed ИНН for
+   * `LP_TIN` and the organisation's full name for `org_name`. Both are
+   * returned as null when blank so the domain renderer produces the precise
+   * `ORG_INN_MISSING` / `ORG_NAME_MISSING` error instead of writing an empty
+   * attribute the XSD rejects.
+   */
+  private async loadOrganization(
+    tx: ShiftExportTransaction,
+    tenantId: string,
+  ): Promise<{ inn: string | null; name: string | null }> {
+    const [row] = await tx
+      .select({ name: schema.organization.name, inn: schema.orgProfiles.inn })
+      .from(schema.organization)
+      .leftJoin(schema.orgProfiles, eq(schema.orgProfiles.tenantId, schema.organization.id))
+      .where(eq(schema.organization.id, tenantId))
+      .limit(1);
+    return { inn: row?.inn?.trim() || null, name: row?.name?.trim() || null };
+  }
+
   private async loadFromTransaction(
     tx: ShiftExportTransaction,
     tenantId: string,
@@ -132,6 +269,10 @@ export class ShiftExportSourceService {
         status: schema.shifts.status,
         productionDate: schema.shifts.productionDate,
         plannedDate: schema.shifts.plannedDate,
+        numberMonthKey: schema.shifts.numberMonthKey,
+        numberSeq: schema.shifts.numberSeq,
+        createdFrom: schema.shifts.createdFrom,
+        closedAt: schema.shifts.closedAt,
         productName: schema.products.name,
       })
       .from(schema.shifts)
@@ -159,15 +300,16 @@ export class ShiftExportSourceService {
     }
 
     let organizationInn: string | null = null;
+    let organizationName: string | null = null;
     if (format.extension === "xml") {
-      const [profile] = await tx
-        .select({ inn: schema.orgProfiles.inn })
-        .from(schema.orgProfiles)
-        .where(eq(schema.orgProfiles.tenantId, tenantId))
-        .limit(1);
-      organizationInn = profile?.inn?.trim() || null;
+      const organization = await this.loadOrganization(tx, tenantId);
+      organizationInn = organization.inn;
+      organizationName = organization.name;
       if (organizationInn === null) {
         throw new ShiftExportSourceError("ORG_INN_MISSING");
+      }
+      if (organizationName === null) {
+        throw new ShiftExportSourceError("ORG_NAME_MISSING");
       }
     }
 
@@ -238,7 +380,14 @@ export class ShiftExportSourceService {
       sourceSnapshotStartedAt,
       productName: shift.productName ?? "Продукция",
       shiftDate,
+      shiftNumber: formatShiftNumber({
+        monthKey: shift.numberMonthKey,
+        seq: shift.numberSeq,
+        createdFrom: shift.createdFrom,
+      }),
+      shiftClosedAt: shift.closedAt ?? sourceSnapshotStartedAt,
       organizationInn,
+      organizationName,
       openPalletSuppressedBoxCount,
       source,
     };
@@ -361,7 +510,7 @@ export class ShiftExportSourceService {
     shiftId: string,
     eligibleBoxes: readonly EligibleBox[],
   ): Promise<{ source: ShiftExportSource; openPalletSuppressedBoxCount: number }> {
-    const palletRows: PalletRow[] = await tx
+    const rawPalletRows = await tx
       .select({
         tenantId: schema.pallets.tenantId,
         shiftId: schema.pallets.shiftId,
@@ -371,6 +520,14 @@ export class ShiftExportSourceService {
       })
       .from(schema.pallets)
       .where(and(eq(schema.pallets.tenantId, tenantId), eq(schema.pallets.shiftId, shiftId)));
+    // `eq(schema.pallets.shiftId, shiftId)` above only matches rows whose
+    // (non-null) shiftId equals the caller's own `shiftId` param, so a null
+    // here is unreachable -- this source only ever renders production
+    // pallets for one shift's export.
+    const palletRows: PalletRow[] = rawPalletRows.map((row) => {
+      if (row.shiftId === null) throw new Error("Pallet row for a shift export has no shift");
+      return { ...row, shiftId: row.shiftId };
+    });
     const tenantPalletRows = palletRows.filter(
       (row) => row.tenantId === tenantId && row.shiftId === shiftId,
     );

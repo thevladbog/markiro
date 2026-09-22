@@ -47,7 +47,18 @@ The explicit `allowPreviouslyAcceptedCodes` flag is also part of shift scope. A
 grant issued without that permission cannot authorize reprocessing after the live
 shift policy changes; clients must bind the newly issued scope before new work.
 Capacities use the raw shift values consumed by native clients; null does not
-introduce a product-default fallback.
+introduce a product-default fallback. Shift scope also binds close authority
+(`stationClosePolicy`, `stationCloseOwnerDeviceId`), which devices read from the
+shift list and the shift bundle's `stationCloseAccess`: a response that omits it
+leaves the device unable to reproduce the scope the server signed.
+
+A Station entering a shift has not mirrored its bundle yet — the ordinary mirror
+starts once the floor task is published — so it fetches the non-allocating
+reference bundle first and binds against that. Two outcomes are deliberately not
+a refusal in observe mode: no projection at all (the refresh could not complete)
+and a projection that no longer matches the signed scope. Observe mode records
+the doubt in the floor notice and lets production continue; only strict mode
+refuses, naming the reason so the operator can reconnect and refresh the task.
 
 ## Approved rollout and recovery configuration
 

@@ -46,5 +46,14 @@ class SyncLimitsFixturesTest {
             fixtures.getValue("maxPalletClosuresPerSyncBatch").jsonPrimitive.int,
             SyncEngine.MAX_PALLET_EXCEPTIONS,
         )
+        assertEquals(
+            fixtures.getValue("maxPalletMembershipsPerSyncBatch").jsonPrimitive.int,
+            SyncEngine.MAX_PALLET_MEMBERSHIPS,
+        )
+        // Removals are bounded by the MEMBERSHIP cap: a removal is the undo of one membership.
+        assertEquals(
+            fixtures.getValue("maxPalletMembershipsPerSyncBatch").jsonPrimitive.int,
+            SyncEngine.MAX_PALLET_MEMBERSHIP_REMOVALS,
+        )
     }
 }

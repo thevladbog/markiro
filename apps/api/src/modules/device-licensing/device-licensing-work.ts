@@ -31,6 +31,7 @@ const workSchema = z.object({
       projection: z.unknown(),
     }),
   ),
+  warehousePallets: z.array(z.object({ id: z.string(), deviceId: z.string() })),
   nativeEvidence: z.array(z.object({ id: z.string(), deviceId: z.string() })),
   quarantine: z.array(
     z.object({
@@ -51,6 +52,8 @@ const workSchema = z.object({
  * retained legacy native quarantine has no resolution marker and remains blocked.
  * Terminal inventory receipts may still have late-event quarantine; only its
  * explicit replayed/discarded resolution clears that retained recovery work.
+ * Warehouse pallets have no shift participant, so unfinished server-owned pallets
+ * must block independently of a device's possibly empty local report.
  * Include all credential epochs: credential recovery must not hide pending work. */
 export async function readDeviceLicensingWork(tx: SubscriptionTransaction, tenantId: string) {
   const result = await tx.execute(sql`select
@@ -64,6 +67,11 @@ export async function readDeviceLicensingWork(tx: SubscriptionTransaction, tenan
       from inventories i join inventory_device_participants p on p.tenant_id=i.tenant_id and p.inventory_id=i.id
       where i.tenant_id=${tenantId} and i.status not in ('completed','cancelled')
     ) x),'[]'::jsonb) as inventories,
+    coalesce((select jsonb_agg(x order by x."deviceId",x.id) from (
+      select id,device_id as "deviceId" from pallets
+      where tenant_id=${tenantId} and kind='warehouse'
+        and closed_at is null and disassembled_at is null
+    ) x),'[]'::jsonb) as "warehousePallets",
     coalesce((select jsonb_agg(x order by x."deviceId",x.id) from (
       select job_id as id,device_id as "deviceId",latest_sequence as "latestSequence",payload_digest as "payloadDigest",projection
       from product_label_jobs where tenant_id=${tenantId}

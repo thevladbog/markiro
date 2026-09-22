@@ -38,8 +38,9 @@ export class PalletsController {
 
   @Get()
   @ApiOperation({
-    summary: "List pallets for a shift",
-    description: "Ordered by closedAt descending with still-open pallets first.",
+    summary: "List pallets",
+    description:
+      "Org-wide, optionally filtered by shift, kind, product, device and closure window. Ordered by closedAt descending with still-open pallets first; paged with limit + cursor. A shiftId outside the caller's tenant is a 404.",
   })
   @ApiZodQuery(listPalletsQuerySchema)
   @ApiOkResponse({ schema: listPalletsOpenApiSchema })

@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { Alert, Button, Card, ConfirmDialog, Input, Select, StatusChip } from "@markiro/ui";
+import type { TagPhase } from "@markiro/ui";
 import type {
   DeviceReplacementObservation,
   DeviceReplacementPreparation,
@@ -252,6 +253,22 @@ function PreparationEditor({
     </div>
   );
 }
+/** Waiting for confirmation is planned; draining and cutover are running work. */
+export function preparationPhase(state: DeviceReplacementPreparation["state"]): TagPhase {
+  switch (state) {
+    case "prepared":
+    case "ready":
+      return "planned";
+    case "draining":
+    case "executing":
+      return "running";
+    case "completed":
+      return "done";
+    case "cancelled":
+      return "retired";
+  }
+}
+
 function SavedPreparation({
   tenantId,
   preparation,
@@ -309,8 +326,7 @@ function SavedPreparation({
       style={{ display: "grid", gap: "var(--sp-3)", marginBlock: "var(--sp-4)" }}
     >
       <StatusChip
-        status="neutral"
-        style={{ justifySelf: "start" }}
+        phase={preparationPhase(preparation.state)}
         label={t(`deviceReplacement.state.${preparation.state}`)}
       />
       {needsReview && preparation.state === "prepared" ? (

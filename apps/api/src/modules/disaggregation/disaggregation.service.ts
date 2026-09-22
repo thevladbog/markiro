@@ -10,6 +10,7 @@ import { schema, type Db } from "@markiro/db";
 import { formatSsccWithAi, parseScannedSscc } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
 import { upperBoundCondition } from "../../lib/date-range";
+import { OrgProfileService } from "../org-profile/org-profile.service";
 import { lockTenantBoxRegistry } from "../boxes/box-registry-lock";
 import { advanceBoxRegistryVersion } from "../boxes/box-registry-version";
 import { nextDocNo } from "./doc-number";
@@ -32,7 +33,10 @@ const PAGE_SIZE = 50;
 
 @Injectable()
 export class DisaggregationService {
-  constructor(@Inject(DB) private readonly db: Db) {}
+  constructor(
+    @Inject(DB) private readonly db: Db,
+    private readonly orgProfile: OrgProfileService,
+  ) {}
 
   async createDocument(
     tenantId: string,
@@ -404,6 +408,21 @@ export class DisaggregationService {
             disaggregationDocumentId: documentId,
           })),
         );
+
+        // Member boxes keep `pallet_id`, but every handheld's registry
+        // mirror must learn the pallet is retired, or it keeps refusing
+        // these boxes as «already on a pallet» (spec §2.3).
+        const memberBoxes = await tx
+          .select({ id: schema.boxes.id })
+          .from(schema.boxes)
+          .where(
+            and(eq(schema.boxes.tenantId, tenantId), inArray(schema.boxes.palletId, palletIds)),
+          );
+        await advanceBoxRegistryVersion(
+          tx,
+          tenantId,
+          memberBoxes.map((box) => box.id),
+        );
       }
 
       await tx
@@ -618,7 +637,15 @@ export class DisaggregationService {
       status: row.status,
       createdAt: row.createdAt,
       appliedAt: row.appliedAt,
-      org: org ? { name: org.name, inn: org.inn, logo: org.logo } : null,
+      // The uploaded profile logo (inlined for a self-contained printout);
+      // the legacy `organization.logo` column only as a fallback.
+      org: org
+        ? {
+            name: org.name,
+            inn: org.inn,
+            logo: (await this.orgProfile.reportLogoDataUrl(tenantId)) ?? org.logo,
+          }
+        : null,
       createdByName: userNameById.get(row.createdByUserId) ?? null,
       appliedByName: row.appliedByUserId ? (userNameById.get(row.appliedByUserId) ?? null) : null,
       reasonName,

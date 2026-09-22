@@ -32,6 +32,7 @@ const ARTIFACT = {
   physicalLineCount: 2,
   codeCount: 2,
   boxCount: 0,
+  palletCount: 0,
   filename: "Отчет.txt",
   mimeType: "text/plain; charset=utf-8",
   byteSize: 12,
@@ -50,6 +51,7 @@ const QUEUED_EXPORT = {
   shiftDateSnapshot: null,
   totalCodeCount: null,
   totalBoxCount: null,
+  totalPalletCount: null,
   createdByUserId: "user-1",
   createdByName: "Иванов Иван",
   sourceSnapshotStartedAt: null,
@@ -160,7 +162,9 @@ describe("shift export mutations", () => {
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
     const { result } = renderHook(() => useRetryShiftExport(), { wrapper });
 
-    await act(() => result.current.mutateAsync({ shiftId: SHIFT_ID, exportId: EXPORT_ID }));
+    await act(() =>
+      result.current.mutateAsync({ shiftId: SHIFT_ID, palletId: null, exportId: EXPORT_ID }),
+    );
 
     expect(fetchMock).toHaveBeenCalledWith(
       `/api/shift-exports/${EXPORT_ID}/retry`,

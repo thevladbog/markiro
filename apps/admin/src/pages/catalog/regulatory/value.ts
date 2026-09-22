@@ -16,11 +16,19 @@ export function attributeVisible(
     )
   );
 }
-export function valueText(value: ProductAttributeValue | null | undefined, t: TFunction): string {
+/** Human text for a stored value; enum codes become their preset labels when the
+ * attribute definition is known. */
+export function valueText(
+  value: ProductAttributeValue | null | undefined,
+  t: TFunction,
+  definition?: CategoryAttributeDefinition,
+): string {
   if (!value) return "—";
   if (value.type === "boolean")
     return t("pages.catalog.regulatory." + (value.value ? "yes" : "no"));
   if (value.type === "decimal") return [value.value, value.unit].filter(Boolean).join(" ");
-  if (Array.isArray(value.value)) return value.value.join(", ");
-  return String(value.value);
+  const label = (item: string) =>
+    definition?.presets.find((preset) => preset.value === item)?.label ?? item;
+  if (Array.isArray(value.value)) return value.value.map(label).join(", ");
+  return label(String(value.value));
 }

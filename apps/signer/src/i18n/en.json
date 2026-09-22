@@ -26,7 +26,7 @@
       "reconnecting": "reconnecting",
       "unavailable": "unavailable",
       "working": "signing",
-      "degraded": "error"
+      "degraded": "working with limitations"
     },
     "tokenExpires": "Token valid until {{at}}",
     "noToken": "No token received yet",

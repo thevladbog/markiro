@@ -2,7 +2,8 @@ import { useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
-import { Alert, Badge, Button, EmptyState, PageHeader, Spinner } from "@markiro/ui";
+import { Alert, Badge, Button, EmptyState, PageHeader, Spinner, StatusChip } from "@markiro/ui";
+import type { BadgeTone } from "@markiro/ui";
 
 import { CABINET_CAPABILITY, type LabelTemplatePurpose } from "@markiro/domain";
 
@@ -90,6 +91,16 @@ const PURPOSE_BADGE_KEY: Record<LabelTemplatePurpose, string> = {
   pallet: "pages.labels.purpose.pallet",
 };
 
+/**
+ * Назначение шаблона — самая широкая категорийная ось в продукте: три
+ * равноправных значения, ни одно из них не может быть серым.
+ */
+export const PURPOSE_TO_TONE: Record<LabelTemplatePurpose, BadgeTone> = {
+  box: "violet",
+  product_duplicate: "teal",
+  pallet: "magenta",
+};
+
 function TemplateCard({
   item,
   groups,
@@ -151,14 +162,15 @@ function TemplateCard({
           and the station picks both from its own printer (specs 2026-08-20
           and 2026-09-10), so no card badges either. */}
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-        <Badge>
+        <Badge mono>
           {t("pages.labels.sizeBadge", {
             width: item.widthMm.toFixed(1),
             height: item.heightMm.toFixed(1),
           })}
         </Badge>
-        <Badge>{t(PURPOSE_BADGE_KEY[item.purpose])}</Badge>
+        <Badge tone={PURPOSE_TO_TONE[item.purpose]}>{t(PURPOSE_BADGE_KEY[item.purpose])}</Badge>
         <Badge
+          tone="steel"
           {...(scope.title ? { title: scope.title } : {})}
           style={{
             maxWidth: "100%",
@@ -169,7 +181,9 @@ function TemplateCard({
         >
           {scope.label}
         </Badge>
-        {item.enabled ? null : <Badge tone="neutral">{t("pages.labels.disabledBadge")}</Badge>}
+        {item.enabled ? null : (
+          <StatusChip phase="retired" label={t("pages.labels.disabledBadge")} />
+        )}
       </div>
       {canWrite ? (
         <Button

@@ -45,6 +45,22 @@ and compatibility wrapper `LP_base_types_v2.xsd`
 
 - Root attributes required by the XSD are emitted even though the official example omits them:
   `document_id`, `VerForm="1.03"`, `file_date_time`, `action_id="30"`, and `version="1"`.
+- These attributes are emitted by the SHARED serializer (`renderGismtAggregationXml`), so the
+  aggregation v2 generator, the shift exports and the per-pallet exports all carry them. Until
+  2026-09-20 only the v1 generator wrote its own header, and everything routed through the shared
+  serializer produced a document the portal rejected as «Передаваемый файл XML не соответствует
+  XSD-схеме». `packages/domain/test/gismt-aggregation-xsd.test.ts` now runs the serializer's output
+  through `source/aggregation.xsd` with `xmllint`, and skips only where `xmllint` is absent.
+- **A pallet's member boxes are written as `<cis>`, never `<sscc>`.** The XSD offers either
+  child under `pack_content` and documents `sscc` as the transport-package one, but the ЧЗ portal
+  does not accept it. A pallet document whose members were `<sscc>` was rejected as «Передаваемый
+  файл XML не соответствует XSD-схеме» while the cabinet listed «Содержит: 0 вложений»; the
+  byte-identical document with `<cis>` members was accepted on 2026-09-21. Both forms pass
+  `xmllint` against the published schema, so no local validation can catch this — only the portal
+  can, and the portal is the contract. Do not "fix" this back to `sscc` on the strength of the XSD.
+- The serializer accepts only the ten-digit `LP_TIN_type` INN. A sole proprietor would need
+  `SP_info` with a surname and first name, which none of these callers hold, so such a tenant is
+  refused at generation instead of receiving a file the portal rejects.
 - `Document` carries the frozen close timestamp as `operation_date_time` and inventory number as
   `document_number`; `LP_info` carries the frozen organization name and ten-digit legal-entity INN.
 - Only closed, printed new boxes whose every child belongs to `verified` are emitted. Open,

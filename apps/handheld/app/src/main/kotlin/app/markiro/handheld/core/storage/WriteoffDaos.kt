@@ -5,7 +5,6 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
-import androidx.room.Upsert
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -116,22 +115,4 @@ interface WriteoffPermissionDao {
 
     @Query("SELECT * FROM writeoff_permissions WHERE employeeId = :employeeId")
     fun observe(employeeId: String): Flow<WriteoffPermissionEntity?>
-}
-
-@Dao
-interface WriteoffBoxDao {
-    @Upsert
-    suspend fun upsert(row: WriteoffBoxEntity)
-
-    @Query("DELETE FROM writeoff_boxes WHERE sscc = :sscc")
-    suspend fun remove(sscc: String)
-
-    @Query("SELECT * FROM writeoff_boxes WHERE sscc = :sscc")
-    suspend fun bySscc(sscc: String): WriteoffBoxEntity?
-
-    @Query("SELECT COUNT(*) FROM writeoff_boxes")
-    suspend fun count(): Int
-
-    @Query("DELETE FROM writeoff_boxes")
-    suspend fun clear()
 }

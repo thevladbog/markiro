@@ -388,6 +388,39 @@ export function ShiftForm({
       }
     }
 
+    // An aggregation shift needs an SSCC source to start at all (the server
+    // refuses `open` without one): refuse here, with the reason and where to
+    // fix it, rather than letting the operator find out on the handheld. The
+    // organisation's side comes from `planning-config`'s `orgGlnConfigured`
+    // (the profile itself is protected from managers); an unknown answer
+    // (`undefined`, planning not loaded) defers to the server's own refusal.
+    // An ACTIVE shift is already started and its issuer is frozen (the select
+    // is disabled), so editing its metadata must not be held up by a GLN that
+    // went missing after the start.
+    if (values.mode === "aggregation" && !activeEdit) {
+      const issuerId = values.ssccIssuerCounterpartyId?.trim();
+      const issuer = issuerId ? counterparties.find((c) => c.id === issuerId) : undefined;
+      // Planning may still be resolving for a freshly chosen product; settle
+      // it rather than deciding on a stale or absent answer.
+      let config = planning.data;
+      if (!issuerId && !config && hasProduct) config = (await planning.refetch()).data;
+      const problem = issuer
+        ? issuer.gln
+          ? null
+          : "SSCC_ISSUER_GLN_MISSING"
+        : !issuerId && config?.orgGlnConfigured === false
+          ? "ORG_GLN_MISSING"
+          : null;
+      if (problem) {
+        setError("ssccIssuerCounterpartyId", {
+          type: "manual",
+          message: `pages.shifts.form.errors.${problem}`,
+        });
+        return;
+      }
+    }
+    clearErrors("ssccIssuerCounterpartyId");
+
     // The default may still be resolving (or have failed) for a freshly chosen
     // product; wait for or retry it rather than snapshotting a stale or empty
     // answer.
@@ -428,6 +461,7 @@ export function ShiftForm({
           plannedDate: dirtyFields.plannedDate === true,
           productionDate: dirtyFields.productionDate === true,
           boxLabelTemplate: dirtyFields.boxLabelTemplateSelection === true,
+          palletLabelTemplate: dirtyFields.palletLabelTemplateId === true,
         },
         reprocessingSupported,
       ),
@@ -731,8 +765,10 @@ export function ShiftForm({
                 value={ssccIssuerCounterpartyId ?? ""}
                 disabled={activeEdit}
                 hint={t("pages.shifts.form.ssccIssuerHint")}
+                {...errorProp(translateFieldError(t, errors.ssccIssuerCounterpartyId?.message))}
                 onValueChange={(value) => {
                   ssccIssuerTouchedRef.current = true;
+                  clearErrors("ssccIssuerCounterpartyId");
                   setValue("ssccIssuerCounterpartyId", value, {
                     shouldDirty: true,
                     shouldValidate: true,
@@ -920,7 +956,9 @@ export function ShiftForm({
                     hint={t("pages.shifts.form.palletLabelTemplateHint")}
                     options={palletLabelTemplateOptions}
                     value={palletLabelTemplateId}
-                    disabled={activeEdit}
+                    // Editable on an active shift like the box template: the
+                    // device reads it at the next print, so nothing already
+                    // printed changes.
                     searchable
                     searchLabel={t("pages.shifts.form.boxLabelTemplateSearch")}
                     searchPlaceholder={t("pages.shifts.form.boxLabelTemplateSearch")}
@@ -966,10 +1004,10 @@ export function ShiftForm({
  *   omitted, touched or not), because the user can see a concrete number in
  *   the input and expects that exact value to be saved. They're omitted only
  *   when hidden (`mode === "validation"`), where they're not applicable.
- * - Active-shift edits send `lineId`, `plannedQty`, `plannedDate`, and
- *   `productionDate` only when their final value differs from the form
- *   default. This prevents a stale edit panel from overwriting a concurrent
- *   correction.
+ * - Active-shift edits send `lineId`, `plannedQty`, `plannedDate`,
+ *   `productionDate`, `boxLabelTemplateId` and `palletLabelTemplateId` only
+ *   when their final value differs from the form default. This prevents a
+ *   stale edit panel from overwriting a concurrent correction.
  * - Every other field (`mode`, `lineId`, `plannedQty`, `plannedDate`,
  *   `palletsEnabled`) is always sent as shown, matching the simpler
  *   full-form-resend convention `ProductForm`/`CounterpartyForm` already use.
@@ -993,12 +1031,14 @@ function toPayload(
     plannedDate: boolean;
     productionDate: boolean;
     boxLabelTemplate: boolean;
+    palletLabelTemplate: boolean;
   } = {
     lineId: true,
     plannedQty: true,
     plannedDate: true,
     productionDate: true,
     boxLabelTemplate: true,
+    palletLabelTemplate: true,
   },
   reprocessingSupported = false,
 ): CreateShiftInput | UpdateShiftInput {
@@ -1029,6 +1069,13 @@ function toPayload(
     }
     if (changed.boxLabelTemplate) {
       activePayload.boxLabelTemplateId = resolvedBoxLabelTemplateId;
+    }
+    // Only a concrete template is sent: the empty «organisation default»
+    // option is resolved by the server solely when pallets are switched on,
+    // which an active shift cannot do, and a null here would be refused
+    // (pallets on require a template). Choosing it mid-shift is a no-op.
+    if (changed.palletLabelTemplate && values.palletsEnabled && palletLabelTemplateId) {
+      activePayload.palletLabelTemplateId = palletLabelTemplateId;
     }
     return activePayload;
   }

@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import app.markiro.handheld.R
 import app.markiro.handheld.core.exceptions.ExceptionEngine
 import app.markiro.handheld.core.exceptions.UndoResult
+import app.markiro.handheld.core.km.serialTail
 import app.markiro.handheld.core.storage.CodeEntity
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.util.Iso
@@ -33,6 +34,8 @@ data class ExceptionsUi(
     val openBoxOrdinal: Int = 0,
     val openBoxCount: Int = 0,
     val reprintableCount: Int = 0,
+    /** Closed, not yet retired pallets of this shift: what «Расформировать паллету» acts on. */
+    val closedPalletCount: Int = 0,
     val step: ExceptionsStep = ExceptionsStep.List,
 )
 
@@ -81,14 +84,25 @@ class ExceptionsViewModel @Inject constructor(
      */
     private val reprintable = db.boxDao().observeReprintable(shiftId)
 
-    val state: StateFlow<ExceptionsUi> = combine(openBox, filled, target, reprintable, step) { box, count, undo, closed, current ->
+    /**
+     * Observed for the same reason [reprintable] is: a pallet retired on the
+     * pallet-disassemble route leaves this count while this screen is still on
+     * the back stack, and a one-shot read would keep offering the action with
+     * nothing behind it. Paired into one flow because `combine` takes five.
+     */
+    private val closedWork = combine(reprintable, db.palletDao().observeClosedCount(shiftId)) { boxes, pallets ->
+        boxes.size to pallets
+    }
+
+    val state: StateFlow<ExceptionsUi> = combine(openBox, filled, target, closedWork, step) { box, count, undo, closed, current ->
         ExceptionsUi(
             canUndo = box != null && undo != null,
             undoTarget = undo,
             openBoxId = box?.boxId,
             openBoxOrdinal = box?.let { ordinals[it.boxId] ?: 0 } ?: 0,
             openBoxCount = count,
-            reprintableCount = closed.size,
+            reprintableCount = closed.first,
+            closedPalletCount = closed.second,
             step = current,
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, ExceptionsUi())
@@ -110,8 +124,10 @@ class ExceptionsViewModel @Inject constructor(
         }
     }
 
+    // The same serial tail the work screen's journal shows, so the operator can
+    // match «Последний скан: …» to a journal row. A hash tail named nothing.
     private fun targetOf(last: CodeEntity) = UndoTarget(
-        codeTail = last.codeHash.takeLast(6).uppercase(),
+        codeTail = serialTail(last.serial),
         scannedAt = Iso.parse(last.scannedAt)?.let { TimeText.hhmmss(it) } ?: last.scannedAt,
         codeHash = last.codeHash,
     )

@@ -4,6 +4,13 @@ import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
+object PalletKind {
+    const val PRODUCTION = "production"
+
+    /** Built from closed boxes of any shift; belongs to this device, not to a shift (spec §3). */
+    const val WAREHOUSE = "warehouse"
+}
+
 /**
  * A pallet on this device.
  *
@@ -21,10 +28,11 @@ import androidx.room.PrimaryKey
  * is exactly what "we do not know whether paper moved" means, and resuming
  * would be an automatic resend.
  */
-@Entity(tableName = "pallets", indices = [Index(value = ["shiftId", "closedAt"])])
+@Entity(tableName = "pallets", indices = [Index(value = ["shiftId", "closedAt"]), Index(value = ["deviceId", "kind", "closedAt"])])
 data class PalletEntity(
     @PrimaryKey val palletId: String,
-    val shiftId: String,
+    /** Null for a warehouse pallet. */
+    val shiftId: String?,
     val terminalId: String?,
     val sscc: String?,
     val openedAt: String,
@@ -33,6 +41,13 @@ data class PalletEntity(
     val printState: String,
     val printReason: String?,
     val ackedAt: String?,
+    val kind: String = PalletKind.PRODUCTION,
+    /** The one product every member box carries; set only for a warehouse pallet. */
+    val productId: String? = null,
+    /** This device, for a warehouse pallet; the server keys the pallet on it. */
+    val deviceId: String? = null,
+    /** Set when this closed pallet was taken apart on the device (Task 9). */
+    val disassembledAt: String? = null,
 )
 
 /**

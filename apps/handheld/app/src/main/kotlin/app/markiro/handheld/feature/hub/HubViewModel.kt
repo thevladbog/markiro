@@ -1,9 +1,7 @@
 package app.markiro.handheld.feature.hub
 
-import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import app.markiro.handheld.R
 import app.markiro.handheld.core.inventory.InventorySyncEngine
 import app.markiro.handheld.core.print.PrinterDao
 import app.markiro.handheld.core.print.PrinterRouting
@@ -13,9 +11,6 @@ import app.markiro.handheld.core.inventory.InventorySyncState
 import app.markiro.handheld.core.box.BoxRepository
 import app.markiro.handheld.core.network.ReachabilityTracker
 import app.markiro.handheld.core.network.StationApi
-import app.markiro.handheld.core.scan.ScanPreferences
-import app.markiro.handheld.core.scan.ScanSourceKind
-import app.markiro.handheld.core.scan.VendorProfiles
 import app.markiro.handheld.core.storage.CodeDao
 import app.markiro.handheld.core.storage.DeviceConfigDao
 import app.markiro.handheld.core.storage.DeviceConfigEntity
@@ -30,7 +25,6 @@ import app.markiro.handheld.feature.work.TeamState
 import app.markiro.handheld.feature.signin.SessionHolder
 import app.markiro.handheld.feature.signin.SessionState
 import dagger.hilt.android.lifecycle.HiltViewModel
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -76,12 +70,23 @@ data class HubUi(
     val replacementClosed: Boolean = false,
     val replacementTargetWaiting: Boolean = false,
     val replacementCounters: kotlinx.serialization.json.JsonObject? = null,
+    /** Null until the pallet bootstrap has covered this operator; false is a real refusal. */
+    val canBuildPallets: Boolean? = null,
+    /** Pallet memberships this device still owes the server; already part of [queue]'s own total. */
+    val palletsPending: Int = 0,
+    /** The entry «Продолжить» is going through, or how it was refused; the list's own states. */
+    val dialog: app.markiro.handheld.feature.shift.ShiftDialog? = null,
 )
+
+sealed interface HubEvent {
+    /** The active shift was entered again and its bundle refreshed; the work screen may open. */
+    data class Entered(val shiftId: String) : HubEvent
+}
 
 /** Same accepted-unit total as the work screen; a missing summary is explicitly local. */
 data class HubActiveShift(val shift: ShiftEntity, val acceptedUnits: Int, val summaryAt: Long? = null)
 
-enum class HubTile { SHIFT, INVENTORY, WRITEOFF, SETTINGS }
+enum class HubTile { SHIFT, INVENTORY, WRITEOFF, PALLETS, SETTINGS }
 
 /** Reachable = an HTTP response within the last two minutes (the station's online threshold). */
 private const val REACHABLE_WINDOW_MS = 2 * 60 * 1000L
@@ -106,6 +111,8 @@ class HubViewModel(
     team: TeamRefresher,
     writeoffSync: app.markiro.handheld.core.writeoff.WriteoffSyncEngine,
     permissions: app.markiro.handheld.core.storage.WriteoffPermissionDao,
+    palletPermissions: app.markiro.handheld.core.storage.PalletPermissionDao,
+    memberships: app.markiro.handheld.core.storage.PalletMembershipDao,
     private val scannerLabel: () -> String,
     private val replacement: app.markiro.handheld.core.replacement.ReplacementCoordinator? = null,
     private val now: () -> Long = System::currentTimeMillis,
@@ -116,10 +123,11 @@ class HubViewModel(
             delay(REACHABLE_TICK_MS)
         }
     },
+    /** Null only in tests that never continue a shift. */
+    private val shiftRepository: app.markiro.handheld.feature.shift.ShiftRepository? = null,
 ) : ViewModel() {
     @Inject
     constructor(
-        @ApplicationContext context: Context,
         recovery: app.markiro.handheld.core.storage.DeviceRecovery,
         api: StationApi,
         config: DeviceConfigDao,
@@ -135,7 +143,10 @@ class HubViewModel(
         team: TeamRefresher,
         writeoffSync: app.markiro.handheld.core.writeoff.WriteoffSyncEngine,
         permissions: app.markiro.handheld.core.storage.WriteoffPermissionDao,
-        scan: ScanPreferences,
+        palletPermissions: app.markiro.handheld.core.storage.PalletPermissionDao,
+        memberships: app.markiro.handheld.core.storage.PalletMembershipDao,
+        scannerLabel: app.markiro.handheld.core.scan.ScannerLabel,
+        shiftRepository: app.markiro.handheld.feature.shift.ShiftRepository,
         replacement: app.markiro.handheld.core.replacement.ReplacementCoordinator,
     ) : this(
         recovery,
@@ -153,15 +164,19 @@ class HubViewModel(
         team,
         writeoffSync,
         permissions,
+        palletPermissions,
+        memberships,
+        // One text for the hub and the work screen, so the same device is not
+        // «Urovo» on one and a bare «Сканер» on the other.
+        scannerLabel = { scannerLabel() },
+        shiftRepository = shiftRepository,
         replacement = replacement,
-        scannerLabel = {
-            when (scan.sourceKind) {
-                ScanSourceKind.BUILTIN_INTENT -> VendorProfiles.byId(scan.profileId).label.substringBefore(" ·")
-                ScanSourceKind.KEYBOARD_WEDGE -> context.getString(R.string.scanner_source_wedge)
-                ScanSourceKind.DEBUG -> context.getString(R.string.scanner_source_debug)
-            }
-        },
     )
+
+    val grantDenial = app.markiro.handheld.core.grants.GrantDenialUi()
+    private val dialog = kotlinx.coroutines.flow.MutableStateFlow<app.markiro.handheld.feature.shift.ShiftDialog?>(null)
+    private val _events = kotlinx.coroutines.flow.MutableSharedFlow<HubEvent>(extraBufferCapacity = 1)
+    val events: kotlinx.coroutines.flow.SharedFlow<HubEvent> = _events
 
     private val activeShift: Flow<HubActiveShift?> = config.observe()
         .map { it?.activeShiftId }
@@ -197,9 +212,19 @@ class HubViewModel(
         .distinctUntilChanged()
         .flatMapLatest { id -> if (id == null) flowOf(null) else permissions.observe(id).map { it?.canWriteoff } }
 
+    /** The signed-in operator's right to build pallets, as the last bootstrap left it. */
+    private val palletPermission: Flow<Boolean?> = session.state
+        .map { it.operator?.operatorId }
+        .distinctUntilChanged()
+        .flatMapLatest { id -> if (id == null) flowOf(null) else palletPermissions.observe(id).map { it?.canBuildPallets } }
+
+    // Positional `values` rather than the typed `combine` overloads: there are
+    // more sources than those overloads take. Each one is named below before it
+    // is used, so adding a source never silently shifts another's meaning.
     val state: StateFlow<HubUi> = combine(
         config.observe(), session.state, reachability.lastSuccessAt, tick, sync.state, activeShift, inventorySync.state, activeInventory,
-        printers.observeRouting(), boxes.observeUnprintedCount(), writeoffSync.state, writeoffPermission,
+        printers.observeRouting(), boxes.observeUnprintedCount(), writeoffSync.state, writeoffPermission, dialog,
+        palletPermission, memberships.observePendingCount(),
         replacement?.state ?: flowOf(null), replacement?.counters ?: flowOf(null), replacement?.targetWaiting ?: flowOf(false),
     ) { values ->
         val cfg = values[0] as DeviceConfigEntity?
@@ -210,12 +235,17 @@ class HubViewModel(
         val inventoryState = values[6] as InventorySyncState
         val inventory = (values[7] as InventoryTaskEntity?)?.takeIf { it.state == "active" }
         val printer = values[8] as PrinterRouting
+        val unprinted = values[9] as Int
         val writeoffState = values[10] as app.markiro.handheld.core.writeoff.WriteoffSyncState
+        val canWriteoff = values[11] as Boolean?
+        val shiftDialog = values[12] as app.markiro.handheld.feature.shift.ShiftDialog?
+        val canBuildPallets = values[13] as Boolean?
+        val palletsPending = values[14] as Int
         HubUi(
             printerConfigured = printer.missing.isEmpty() && printer.attention.isEmpty(),
             missingPrinterPurposes = printer.missing,
             printerAttentionPurposes = printer.attention,
-            unprintedLabels = values[9] as Int,
+            unprintedLabels = unprinted,
             organization = cfg?.organizationName.orEmpty(),
             operatorName = ses.operator?.name.orEmpty(),
             lineName = cfg?.lineName,
@@ -224,19 +254,26 @@ class HubViewModel(
             countsAt = cfg?.countsAt,
             reachable = lastOk != null && now() - lastOk <= REACHABLE_WINDOW_MS,
             scannerLabel = scannerLabel(),
+            // `pallet_memberships` is one of the sync engine's own channels, so
+            // `syncState.pending` ALREADY counts every unsent membership. Adding
+            // `palletsPending` here again showed the operator twice the work they
+            // owe; the tile keeps its own count for its own hint.
             queue = syncState.pending + inventoryState.pending + writeoffState.pending,
             stuck = syncState.stuck || inventoryState.stuck || writeoffState.stuck,
             writeoffPending = writeoffState.pending,
-            canWriteoff = values[11] as Boolean?,
-            replacementTargetWaiting = values[14] as Boolean,
-            replacementBlocked = (values[14] as Boolean) || (values[12] as app.markiro.handheld.core.storage.ReplacementDrainEntity?)?.blocked == true,
-            replacementClosed = (values[12] as app.markiro.handheld.core.storage.ReplacementDrainEntity?)?.state == "closed",
-            replacementCounters = (values[13] as app.markiro.handheld.core.replacement.JsonSnapshot?)?.value,
+            canWriteoff = canWriteoff,
+            canBuildPallets = canBuildPallets,
+            palletsPending = palletsPending,
+            replacementTargetWaiting = values[17] as Boolean,
+            replacementBlocked = (values[17] as Boolean) || (values[15] as app.markiro.handheld.core.storage.ReplacementDrainEntity?)?.blocked == true,
+            replacementClosed = (values[15] as app.markiro.handheld.core.storage.ReplacementDrainEntity?)?.state == "closed",
+            replacementCounters = (values[16] as app.markiro.handheld.core.replacement.JsonSnapshot?)?.value,
             activeShiftId = current?.shift?.id,
             continueShiftNumber = current?.shift?.number,
             activeShift = current,
             activeInventoryId = inventory?.inventoryId,
             continueInventoryNumber = inventory?.inventoryNumber,
+            dialog = shiftDialog,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HubUi(replacementBlocked = replacement != null))
 
@@ -252,6 +289,57 @@ class HubViewModel(
             recovery.commit { config.upsert(current.copy(shiftsCount = counts.first, inventoryCount = counts.second, countsAt = now())) }
         }
         }
+    }
+
+
+    /**
+     * «Продолжить» on the active-shift card.
+     *
+     * The same path as picking the shift from the list -- `enter`, then the
+     * bundle -- rather than a jump straight to the work screen. Found on the
+     * emulator: a GLN, a serial block or a template changed in the cabinet
+     * after entry never reached the device until the operator left the shift
+     * and came back through the list. Offline, `enter` falls back to the
+     * cached bundle exactly as the list does, so a line without network is
+     * not held up by this.
+     */
+    fun continueShift() {
+        val id = state.value.activeShiftId ?: return
+        val repository = shiftRepository
+        if (repository == null) {
+            _events.tryEmit(HubEvent.Entered(id))
+            return
+        }
+        viewModelScope.launch {
+            try {
+                dialog.value = app.markiro.handheld.feature.shift.ShiftDialog.Entering
+                when (val result = recovery.work { repository.enter(id) }) {
+                    app.markiro.handheld.feature.shift.EnterResult.Ok -> {
+                        dialog.value = null
+                        _events.emit(HubEvent.Entered(id))
+                    }
+                    app.markiro.handheld.feature.shift.EnterResult.UpdateRequired ->
+                        dialog.value = app.markiro.handheld.feature.shift.ShiftDialog.UpdateRequired
+                    app.markiro.handheld.feature.shift.EnterResult.Closed -> {
+                        dialog.value = app.markiro.handheld.feature.shift.ShiftDialog.Closed
+                        recovery.work { repository.refreshList() }
+                    }
+                    app.markiro.handheld.feature.shift.EnterResult.Unavailable ->
+                        dialog.value = app.markiro.handheld.feature.shift.ShiftDialog.Unavailable
+                    is app.markiro.handheld.feature.shift.EnterResult.Refused -> {
+                        dialog.value = app.markiro.handheld.feature.shift.ShiftDialog.Refused(result.step, result.status, result.code)
+                        recovery.work { repository.refreshList() }
+                    }
+                }
+            } catch (denied: app.markiro.handheld.core.grants.WorkAdmissionDenied) {
+                dialog.value = null
+                grantDenial.show(denied)
+            }
+        }
+    }
+
+    fun dismissDialog() {
+        dialog.value = null
     }
 
     fun signOut() = session.signOut()

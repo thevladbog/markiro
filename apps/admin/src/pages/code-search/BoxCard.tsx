@@ -13,22 +13,23 @@ import { useTranslation } from "react-i18next";
 import { Link, useParams } from "react-router";
 
 import { formatSsccHri } from "@markiro/domain";
-import { Alert, Badge, Button, Card, PageHeader, Spinner, StatusChip, Table } from "@markiro/ui";
-import type { StatusChipStatus, TableColumn } from "@markiro/ui";
+import { Alert, Button, Card, PageHeader, Spinner, StatusChip, Table } from "@markiro/ui";
+import type { TableColumn, TagPhase } from "@markiro/ui";
 
 import { formatCreatedAt } from "../../lib/datetime.js";
+import { lastRegistryHref } from "./registry-location.js";
 import { useBoxCard, type BoxCardDto, type BoxCardItemDto } from "./api.js";
 
 // Box status has its own three-way meaning distinct from a code's ("open"
 // still in progress, "closed" a completed/normal end state, "disassembled"
-// a terminal removal from circulation) so it gets its own mapping rather
-// than reusing the code registry's `STATUS_TO_CHIP` --
-// open -> "info" (in progress), closed -> "ok" (successfully completed),
-// disassembled -> "neutral" (out of circulation, not an error in itself).
-const STATUS_TO_CHIP: Record<BoxCardDto["status"], StatusChipStatus> = {
-  open: "info",
-  closed: "ok",
-  disassembled: "neutral",
+// a terminal removal from circulation), but it is the same phase shape the
+// shift pages use -- open -> "active" (in progress), closed -> "done"
+// (successfully completed), disassembled -> "dismantled" (taken apart, not
+// an error in itself).
+export const BOX_STATUS_TO_PHASE: Record<BoxCardDto["status"], TagPhase> = {
+  open: "active",
+  closed: "done",
+  disassembled: "dismantled",
 };
 
 function DetailField({ label, value }: { label: string; value: ReactNode }) {
@@ -58,6 +59,22 @@ function itemState(item: BoxCardItemDto): "active" | "displaced" | "removed" {
   if (item.displacedAt) return "displaced";
   return "active";
 }
+
+// `displaced` and `removed` are both routine, human/system-reconciliation
+// facts about this box's history, not system failures -- neither belongs
+// under `failed` or `attention`. `displaced` records that a code the station
+// once scanned into this box was later reconciled onto another box
+// (`station-scans.service.ts`'s displacement write, `apps/api/.../
+// station-scans/station-scans.service.ts`); the code is not lost, its story
+// in *this* box simply concluded normally, so it reads as `done` -- the same
+// "finished, no problem" phase as a closed box. `removed` is written by both
+// the per-code exception-removal path and whole-box release
+// (`emptyBox`/`releaseCode`) that a disassembly triggers, the same terminal
+// "taken apart, not present here anymore" fact as
+// `BOX_STATUS_TO_PHASE.disassembled` above and
+// `LINE_STATUS_TO_PHASE.already_disassembled`
+// (`../disaggregation/DocumentDetail.tsx`), so it shares their `dismantled`
+// phase rather than the red, system-rejection `failed`.
 
 export function BoxCardPage() {
   const { t, i18n } = useTranslation();
@@ -122,10 +139,10 @@ export function BoxCardPage() {
       render: (row) => {
         const state = itemState(row);
         if (state === "displaced") {
-          return <Badge tone="warn">{t("pages.codeSearch.boxCard.displaced")}</Badge>;
+          return <StatusChip phase="done" label={t("pages.codeSearch.boxCard.displaced")} />;
         }
         if (state === "removed") {
-          return <Badge tone="error">{t("pages.codeSearch.boxCard.removed")}</Badge>;
+          return <StatusChip phase="dismantled" label={t("pages.codeSearch.boxCard.removed")} />;
         }
         return null;
       },
@@ -135,7 +152,7 @@ export function BoxCardPage() {
   return (
     <div style={{ padding: "28px 32px", display: "flex", flexDirection: "column", gap: 20 }}>
       <Link
-        to="/codes"
+        to={lastRegistryHref()}
         style={{ font: "var(--text-body)", color: "var(--fg-3)", textDecoration: "none" }}
       >
         {t("pages.codeSearch.backAction")}
@@ -158,7 +175,7 @@ export function BoxCardPage() {
               {t("pages.codeSearch.boxCard.printAction")}
             </Button>
             <StatusChip
-              status={STATUS_TO_CHIP[box.status]}
+              phase={BOX_STATUS_TO_PHASE[box.status]}
               label={t(`pages.codeSearch.boxCard.status.${box.status}`)}
             />
           </div>

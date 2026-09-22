@@ -157,15 +157,15 @@ available capacity; the saved preparation is not a reservation of future capacit
 1. Record the database restore point, approved source SHA, API/edge image digests,
    and intended Station/Handheld artifacts. Keep all journals and pending evidence.
 2. Apply the full runtime migration chain through
-   `0168_station_security_revocation` **before starting API readers**, including the repair worker.
-   `0162_device_replacement_execution` adds intents/reports/executions;
-   `0163_validate_device_replacement_execution` validates additive constraints after
-   0162 commits; `0164_device_replacement_closure_ack` preserves cancellation ACKs;
-   `0165_device_replacement_execution_preview` stores actor-bound execution previews;
-   `0166_device_replacement_capabilities` retains epoch-bound capability observations;
-   `0167_device_replacement_repair_schedule` adds durable retry timing and the due-row
+   `0174_station_security_revocation` **before starting API readers**, including the repair worker.
+   `0168_device_replacement_execution` adds intents/reports/executions;
+   `0169_validate_device_replacement_execution` validates additive constraints after
+   0168 commits; `0170_device_replacement_closure_ack` preserves cancellation ACKs;
+   `0171_device_replacement_execution_preview` stores actor-bound execution previews;
+   `0172_device_replacement_capabilities` retains epoch-bound capability observations;
+   `0173_device_replacement_repair_schedule` adds durable retry timing and the due-row
    index while preserving execution transition and completion guards;
-   `0168_station_security_revocation` adds a server-managed security generation so
+   `0174_station_security_revocation` adds a server-managed security generation so
    a revoke retires recovery authority without changing the original revocation date.
    Use the runtime migrator, which retains its migration lock across validation
    transaction boundaries. Never rewrite applied migrations or run manual down SQL.
@@ -178,7 +178,7 @@ available capacity; the saved preparation is not a reservation of future capacit
    Minimum capability is durable `replacement-readiness-v1` polling/ACK support,
    `replacement-boundary-v1` target pairing and
    `replacement-evidence-recovery-v1` same-owner recovery. Station requires this
-   branch's complete SQLite migration list; Handheld requires Room v17 plus the
+   branch's complete SQLite migration list; Handheld requires Room v20 plus the
    recovery/authority changes. Deploy the complete artifact, not individual JS,
    Kotlin or SQLite files.
 5. Deploy Cabinet and SaaS with the matching strict replacement contracts. Both

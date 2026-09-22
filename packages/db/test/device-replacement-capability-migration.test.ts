@@ -12,11 +12,11 @@ it("registers the capability table in a new forward migration and snapshot", asy
   const journal = JSON.parse(await readFile(join(migrationsFolder, "meta/_journal.json"), "utf8"));
   expect(journal.entries).toEqual(
     expect.arrayContaining([
-      expect.objectContaining({ idx: 166, tag: "0166_device_replacement_capabilities" }),
+      expect.objectContaining({ idx: 172, tag: "0172_device_replacement_capabilities" }),
     ]),
   );
   const snapshot = JSON.parse(
-    await readFile(join(migrationsFolder, "meta/0166_snapshot.json"), "utf8"),
+    await readFile(join(migrationsFolder, "meta/0172_snapshot.json"), "utf8"),
   );
   expect(snapshot.tables["public.working_device_replacement_capabilities"]).toBeDefined();
 });
@@ -48,7 +48,7 @@ describe.skipIf(!process.env.DATABASE_URL)("replacement capability forward migra
     await copyMigrationsThroughIndex({
       sourceFolder: migrationsFolder,
       targetFolder: temporaryRoot,
-      lastIncludedIndex: 165,
+      lastIncludedIndex: 171,
     });
     await runRuntimeMigrations({
       databaseUrl: url.toString(),

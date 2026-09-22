@@ -11,7 +11,7 @@ import {
   stationOperatorIsCurrentlyActive,
 } from "./offline-grants/admission.js";
 import { sampleGrantClock, type GrantClockSample } from "./offline-grants/clock.js";
-import { readShiftExecutionProjection } from "./offline-grants/semantic.js";
+import { readExecutionToBind, readShiftExecutionProjection } from "./offline-grants/semantic.js";
 
 export interface OfflineShiftCloseSummary {
   eventId: string;
@@ -241,15 +241,24 @@ export async function closeShiftOfflineWithGrant(
       device_id: string;
       owner_kind: "station";
       credential_epoch: number;
+      mode: "observe" | "strict";
     }>(
-      "SELECT tenant_id,device_id,owner_kind,credential_epoch FROM offline_grant_install_state WHERE id=1",
+      "SELECT tenant_id,device_id,owner_kind,credential_epoch,mode FROM offline_grant_install_state WHERE id=1",
     );
     if (!state) return closeShiftOfflineLegacy(exec, input, now);
     if (!input.operatorId) throw new Error("offline grant operator unauthorized");
     if (!(await stationOperatorIsCurrentlyActive(exec, input.operatorId)))
       throw new Error("offline grant operator unauthorized");
     const stored = await loadStoredClose(exec, input.shiftId);
-    if (stored) return presentStoredClose(stored);
+    if (stored) {
+      // Same resume as the ungranted path: the durable event can outlive the
+      // mirror writes that follow it (a restart mid-close). Returning the
+      // snapshot without finishing them leaves the shift showing active on the
+      // terminal, so the operator closes a shift that is already closed.
+      await removeEmptyOpenBoxes(exec, input.shiftId);
+      await exec.run("UPDATE shift_mirror SET status = 'closed' WHERE id = ?", [input.shiftId]);
+      return presentStoredClose(stored);
+    }
     const [shift] = await exec.all<{
       id: string;
       product_id: string;
@@ -277,8 +286,14 @@ export async function closeShiftOfflineWithGrant(
       );
       if (pending) throw new Error("PRODUCT_LABEL_UNRESOLVED");
     }
+    // `station_processed_codes`, not `codes_mirror`: the ungranted close, the
+    // work screen's plan counter and the duplicate-print close guard all count
+    // accepted units through that view. A code reprocessed from an earlier
+    // shift keeps its mirror row under that shift, so counting the mirror here
+    // under-reports the fact -- the operator was asked to explain a gap the
+    // screen never showed, and the guard then refused the close outright.
     const [{ actualQty = 0 } = {}] = await exec.all<{ actualQty: number }>(
-      "SELECT COUNT(*) actualQty FROM codes_mirror WHERE shift_id=?",
+      "SELECT COUNT(*) actualQty FROM station_processed_codes WHERE shift_id=?",
       [input.shiftId],
     );
     const [{ closedBoxCount = 0 } = {}] = await exec.all<{ closedBoxCount: number }>(
@@ -301,6 +316,12 @@ export async function closeShiftOfflineWithGrant(
       `SELECT json_extract(grant_json,'$.snapshotDigest') snapshot_digest FROM offline_grant_grants WHERE json_extract(grant_json,'$.kindOfGrant')='task' AND json_extract(grant_json,'$.taskKind')='shift' AND json_extract(grant_json,'$.taskId')=? ORDER BY installed_sequence DESC LIMIT 1`,
       [input.shiftId],
     );
+    // A shift this device cannot bind must still close where grants only
+    // observe; refusing here left the shift open with no way to finish it.
+    const execution = await readExecutionToBind(state.mode, () =>
+      readShiftExecutionProjection(exec, input.shiftId),
+    );
+    if (!execution) return closeShiftOfflineLegacy(exec, input, now);
     const closedAt = now().toISOString(),
       eventId = crypto.randomUUID();
     const result: OfflineShiftCloseSummary = {
@@ -330,7 +351,7 @@ export async function closeShiftOfflineWithGrant(
         eventType: "shift.close.v1",
         cost: {},
       },
-      execution: await readShiftExecutionProjection(exec, input.shiftId),
+      execution,
       event: result,
       facts: {},
       result,
@@ -365,6 +386,17 @@ export async function closeShiftOfflineWithGrant(
     if (!committed.decision.allow)
       throw new Error(`offline grant denied: ${committed.decision.reason}`);
     return committed.result as OfflineShiftCloseSummary;
+  } catch (error) {
+    // The pre-check above cannot see a close another owner commits while this
+    // one is in flight. The ungranted path resolves that race into the stored
+    // close instead of an error, and so must this one: the shift IS closed,
+    // and telling the operator otherwise sends them to close it twice.
+    if (!isShiftCloseUniquenessConflict(error)) throw error;
+    const concurrentClose = await loadStoredClose(exec, input.shiftId);
+    if (!concurrentClose) throw error;
+    await removeEmptyOpenBoxes(exec, input.shiftId);
+    await exec.run("UPDATE shift_mirror SET status = 'closed' WHERE id = ?", [input.shiftId]);
+    return presentStoredClose(concurrentClose);
   } finally {
     lease.release();
   }

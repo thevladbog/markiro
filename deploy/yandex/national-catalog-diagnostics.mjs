@@ -80,6 +80,12 @@ try {
       ? row.definition.source.attributes
       : [];
     const attribute = attributes.find((candidate) => candidate?.attr_id === 22999) ?? null;
+    const referencedIds = new Set(
+      (Array.isArray(attribute?.dependent_attributes) ? attribute.dependent_attributes : [])
+        .flatMap((dependency) => Array.isArray(dependency?.atters) ? dependency.atters : [])
+        .map((candidate) => candidate?.attr_id)
+        .filter((id) => Number.isSafeInteger(id) && id > 0),
+    );
     return {
       categoryId: row.category_id,
       fetchedAt: row.fetched_at,
@@ -93,6 +99,69 @@ try {
         hasPresetUrl: typeof attribute.preset_url === "string" && attribute.preset_url.length > 0,
         dependentAttributes: attribute.dependent_attributes ?? null,
       },
+      referencedAttributes: attributes
+        .filter((candidate) => referencedIds.has(candidate?.attr_id))
+        .map((candidate) => ({
+          attrId: candidate.attr_id,
+          attrType: candidate.attr_type ?? null,
+          fieldType: candidate.attr_field_type ?? null,
+          multiplicity: candidate.attr_multiplicity ?? null,
+          multiplicityType: candidate.attr_multiplicity_type ?? null,
+          firstLayer: candidate.first_layer ?? null,
+          secondLayer: candidate.second_layer ?? null,
+          presetOnly: candidate.attr_preset_only ?? null,
+          presetCount: Array.isArray(candidate.attr_preset) ? candidate.attr_preset.length : null,
+          hasPresetUrl: typeof candidate.preset_url === "string" && candidate.preset_url.length > 0,
+        })),
+    };
+  });
+  process.stdout.write(JSON.stringify(result));
+} finally {
+  await pool.end();
+}
+`;
+}
+
+function productCategoryDiagnosticSource(gtins) {
+  return `
+const { createDb } = await import("@markiro/db");
+const { pool } = createDb(process.env.DATABASE_URL, { max: 1 });
+function sanitize(value, depth = 0) {
+  if (value === null || typeof value === "boolean" || typeof value === "number") return value;
+  if (typeof value === "string") return value.slice(0, 256);
+  if (depth >= 3) return "[bounded]";
+  if (Array.isArray(value)) return value.slice(0, 20).map((item) => sanitize(item, depth + 1));
+  if (typeof value !== "object") return null;
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => /^[A-Za-z0-9_]{1,64}$/.test(key))
+      .slice(0, 20)
+      .map(([key, item]) => [key, sanitize(item, depth + 1)]),
+  );
+}
+try {
+  const { rows } = await pool.query(
+    "select distinct on (gtin14) gtin14::text as gtin14, created_at, source from national_catalog_import_items where gtin14::text = any($1::text[]) and source is not null order by gtin14, created_at desc",
+    [${JSON.stringify(gtins)}],
+  );
+  const result = rows.map((row) => {
+    const source = row.source && typeof row.source === "object" && !Array.isArray(row.source)
+      ? row.source
+      : {};
+    const raw = source.raw && typeof source.raw === "object" && !Array.isArray(source.raw)
+      ? source.raw
+      : {};
+    const categoryEntries = Object.entries(raw).filter(([key]) =>
+      /(?:category|categories|group|^cat_|_cat)/i.test(key),
+    );
+    return {
+      gtin14: row.gtin14,
+      createdAt: row.created_at,
+      parsedCategories: sanitize(source.categories ?? null),
+      rawKeys: Object.keys(raw).sort().slice(0, 100),
+      rawCategoryFields: Object.fromEntries(
+        categoryEntries.slice(0, 20).map(([key, value]) => [key, sanitize(value)]),
+      ),
     };
   });
   process.stdout.write(JSON.stringify(result));
@@ -108,6 +177,14 @@ function diagnosticCategoryIds(value) {
   if (ids.length === 0 || ids.length > 20 || ids.some((id) => !/^[1-9][0-9]{0,8}$/.test(id)))
     throw new Error("National Catalog diagnostic category IDs are invalid");
   return ids;
+}
+
+function diagnosticGtins(value) {
+  if (!value) return [];
+  const gtins = [...new Set(value.split(",").map((gtin) => gtin.trim()))];
+  if (gtins.length === 0 || gtins.length > 20 || gtins.some((gtin) => !/^\d{14}$/.test(gtin)))
+    throw new Error("National Catalog diagnostic GTINs are invalid");
+  return gtins;
 }
 const FAILURE_STAGES = Object.freeze([
   "configuration",
@@ -414,6 +491,29 @@ export async function runHostedNationalCatalogDiagnostics(
       if (dependencyExecution.exitCode !== 0 || dependencyExecution.stdout.length === 0)
         throw new NationalCatalogDiagnosticStageError("api-cli-exit", invalidResponse());
       result.categoryDependency = JSON.parse(dependencyExecution.stdout);
+    }
+    const gtins = diagnosticGtins(environment.NATIONAL_CATALOG_DIAGNOSTIC_GTINS);
+    if (gtins.length > 0) {
+      const productExecution = await atFailureStage("api-cli-transport", () =>
+        system.runDiagnostic(
+          "ssh",
+          [
+            ...sshBase,
+            "sudo",
+            "/usr/local/bin/docker",
+            "exec",
+            "-i",
+            containerId,
+            "node",
+            "--input-type=module",
+            "-",
+          ],
+          { input: productCategoryDiagnosticSource(gtins) },
+        ),
+      );
+      if (productExecution.exitCode !== 0 || productExecution.stdout.length === 0)
+        throw new NationalCatalogDiagnosticStageError("api-cli-exit", invalidResponse());
+      result.productCategory = JSON.parse(productExecution.stdout);
     }
   } catch (error) {
     failure = error;

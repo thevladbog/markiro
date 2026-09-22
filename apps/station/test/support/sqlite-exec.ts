@@ -38,15 +38,39 @@ import type { SqlExecutor } from "../../src/lib/mirror.js";
  * first to go, but every file-backed suite here sat on the same cliff.
  *
  * `synchronous=OFF` removes ONLY the fsync barriers. It does not change the
- * file format, the journal mode (still `delete`), inter-connection locking
- * and visibility, or what survives `db.close()` -- SQLite still writes every
- * page through to the file, so closing and reopening the path reads the data
- * back exactly as before. The single guarantee dropped is survival of a
- * power cut or kernel panic mid-write, which no station test asserts.
+ * file format, inter-connection locking and visibility, or what survives
+ * `db.close()` -- SQLite still writes every page through to the file, so
+ * closing and reopening the path reads the data back exactly as before. The
+ * single guarantee dropped is survival of a power cut or kernel panic
+ * mid-write, which no station test asserts.
+ *
+ * `journal_mode=MEMORY` is the Windows half of the same trade. In the default
+ * `delete` mode every autocommit statement creates a `-journal` file next to
+ * the database and deletes it again, so a migration replay is ~330 file
+ * creations and deletions per connection pair. On the hosted Windows runner
+ * that runs the station release build, a real-time scanner opens each new
+ * file, `DeleteFileW` then fails with a sharing violation, and SQLite's
+ * Windows VFS sleeps and retries (up to ~2.5 s per delete) instead of
+ * failing. The stall is invisible on Linux and macOS and shows up on Windows
+ * exactly when the other vitest worker is busy loading a fresh test file:
+ * three Publish station beta runs in a row (35480730035, 35493576374,
+ * 35504179192) timed out in three different file-backed suites, and in each
+ * one the slow tests began the moment `product-labels-recovery.test.ts`
+ * started in the other worker, the same 2-3 s test taking 14, 21 and 35 s.
+ *
+ * A memory journal keeps the rollback journal in RAM. Locking is the same
+ * rollback-journal protocol as `delete` (SHARED/RESERVED/EXCLUSIVE on the
+ * database file), statement rollback still works, and cross-connection
+ * visibility is unchanged; what goes is the journal file and, with it, hot
+ * journal recovery after a crash mid-transaction, which no station test
+ * exercises. `WAL` would also drop the churn but changes reader/writer
+ * visibility, and the acceptance suites assert real contention between
+ * two connections, so it is deliberately not used here.
  */
 export function openFileDatabase(path: string): DatabaseSync {
   const db = new DatabaseSync(path);
   db.exec("PRAGMA synchronous = OFF");
+  db.exec("PRAGMA journal_mode = MEMORY");
   return db;
 }
 

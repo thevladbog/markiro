@@ -5,10 +5,19 @@ import {
   sanitizeShiftExportFilenameSegment,
   SHIFT_EXPORT_FORMATS,
   ShiftExportDomainError,
+  shiftExportFormatRequiresPallets,
   type ShiftExportSource,
 } from "../src/shift-exports.js";
 
 const decoder = new TextDecoder();
+
+/** The document attributes every GISMT aggregation XML must carry. */
+const shiftDocumentFixture = {
+  documentId: "11a0e30d-7cf6-4134-9ce5-68a3792ae8b1",
+  documentNumber: "AUG26-007",
+  fileDateTime: "2026-08-20T10:00:00.000Z",
+  operationDateTime: "2026-08-19T18:00:00.000Z",
+};
 
 function decode(bytes: Uint8Array): string {
   return decoder.decode(bytes);
@@ -127,6 +136,22 @@ describe("shift export formats", () => {
         extension: "xml",
         mimeType: "application/xml; charset=utf-8",
         boxMode: "pallets",
+      },
+      {
+        id: "shift_txt_pallet_boxes",
+        version: 1,
+        label: "[TXT][Паллеты → короба] Отчет смены",
+        extension: "txt",
+        mimeType: "text/plain; charset=utf-8",
+        boxMode: "pallet_boxes",
+      },
+      {
+        id: "shift_xml_gismt_pallet_boxes",
+        version: 1,
+        label: "[XML][ГИСМТ] Агрегация паллет без кодов",
+        extension: "xml",
+        mimeType: "application/xml; charset=utf-8",
+        boxMode: "pallet_boxes",
       },
     ]);
     expect(getShiftExportFormat("shift_txt_flat", 1)).toBe(SHIFT_EXPORT_FORMATS[0]);
@@ -382,6 +407,9 @@ describe("shift export filenames", () => {
       "Вода_1pcs_1box_2026-08-13_часть_2.csv",
     ]);
     expect(render("shift_csv_flat", flat).filename).toBe("Вода_2pcs_2026-08-13.csv");
+    // Boxes-only and flat documents cover no pallets and keep their names.
+    expect(parts.map((part) => part.palletCount)).toEqual([0, 0]);
+    expect(render("shift_csv_flat", flat).palletCount).toBe(0);
   });
 });
 
@@ -508,6 +536,8 @@ describe("GISMT aggregation XML format", () => {
       maxLines,
       source,
       organizationInn,
+      organizationName: "ООО «Пивоварня»",
+      document: shiftDocumentFixture,
     });
   }
 
@@ -534,11 +564,12 @@ describe("GISMT aggregation XML format", () => {
     expect(decode(part!.bytes)).toBe(
       [
         '<?xml version="1.0" encoding="UTF-8"?>',
-        "<unit_pack>",
-        "    <Document>",
+        '<unit_pack document_id="11a0e30d-7cf6-4134-9ce5-68a3792ae8b1" VerForm="1.03"' +
+          ' file_date_time="2026-08-20T10:00:00.000Z" action_id="30" version="1">',
+        '    <Document operation_date_time="2026-08-19T18:00:00.000Z" document_number="AUG26-007">',
         "        <organisation>",
         "            <id_info>",
-        '                <LP_info LP_TIN="9705119097" />',
+        '                <LP_info org_name="ООО «Пивоварня»" LP_TIN="9705119097" />',
         "            </id_info>",
         "        </organisation>",
         "        <pack_content>",
@@ -562,18 +593,24 @@ describe("GISMT aggregation XML format", () => {
     expect(renderXml(source)[0]!.bytes).toEqual(renderXml(source)[0]!.bytes);
   });
 
-  it("escapes XML-reserved characters in cis serials and the LP_TIN attribute", () => {
-    const [part] = renderXml(
-      {
+  it("escapes XML-reserved characters in cis serials and the org_name attribute", () => {
+    const [part] = renderShiftExport({
+      formatId: "shift_xml_gismt_aggregation",
+      formatVersion: 1,
+      productName: "Сидр",
+      shiftDate: "2026-08-19",
+      maxLines: null,
+      source: {
         mode: "boxes",
         boxes: [{ sscc: "046800899000256001", codes: [km("hPdPG&"), km("Ia>3<Y")] }],
       },
-      null,
-      'IN"N&1',
-    );
+      organizationInn: "9705119097",
+      organizationName: 'ООО "Ф&Б" <1>',
+      document: shiftDocumentFixture,
+    });
     const body = decode(part!.bytes);
 
-    expect(body).toContain('<LP_info LP_TIN="IN&quot;N&amp;1" />');
+    expect(body).toContain('org_name="ООО &quot;Ф&amp;Б&quot; &lt;1&gt;"');
     expect(body).toContain("<cis>010468008990001721hPdPG&amp;</cis>");
     expect(body).toContain("<cis>010468008990001721Ia&gt;3&lt;Y</cis>");
     expect(body).not.toContain("\u001d");
@@ -617,6 +654,24 @@ describe("GISMT aggregation XML format", () => {
       expect(body.startsWith('<?xml version="1.0" encoding="UTF-8"?>')).toBe(true);
       expect(body.endsWith("</unit_pack>\n")).toBe(true);
     }
+    // Each part is uploaded to ЧЗ as its own document, so the file identifier
+    // and the document number must not repeat between them.
+    expect(decode(parts[0]!.bytes)).toContain(`document_id="${shiftDocumentFixture.documentId}-1"`);
+    expect(decode(parts[0]!.bytes)).toContain('document_number="AUG26-007-1"');
+    expect(decode(parts[1]!.bytes)).toContain(`document_id="${shiftDocumentFixture.documentId}-2"`);
+    expect(decode(parts[1]!.bytes)).toContain('document_number="AUG26-007-2"');
+  });
+
+  it("keeps the base document id and number when the export is a single file", () => {
+    const [part, ...rest] = renderXml({
+      mode: "boxes",
+      boxes: [{ sscc: "046800899000256001", codes: [km("A")] }],
+    });
+
+    expect(rest).toEqual([]);
+    const body = decode(part!.bytes);
+    expect(body).toContain(`document_id="${shiftDocumentFixture.documentId}"`);
+    expect(body).toContain('document_number="AUG26-007"');
   });
 
   it("rejects a missing INN, an unparseable code, and a malformed SSCC", () => {
@@ -733,6 +788,8 @@ describe("pallets shift export formats", () => {
       maxLines,
       source,
       organizationInn,
+      organizationName: "ООО «Пивоварня»",
+      document: shiftDocumentFixture,
     });
   }
 
@@ -756,10 +813,13 @@ describe("pallets shift export formats", () => {
         "",
       ].join("\n"),
     );
+    // Owner report 2026-09-19: the file name and the part's counters must
+    // say how many pallets the document covers, not only boxes.
     expect(part).toMatchObject({
       codeCount: 4,
       boxCount: 3,
-      filename: "Сидр_4pcs_3box_2026-08-19.txt",
+      palletCount: 1,
+      filename: "Сидр_4pcs_3box_1pallet_2026-08-19.txt",
     });
   });
 
@@ -782,8 +842,11 @@ describe("pallets shift export formats", () => {
     expect(xml.indexOf(`<pack_code>00${palletSscc}</pack_code>`)).toBeGreaterThan(
       xml.indexOf(`<pack_code>00${boxB}</pack_code>`),
     );
-    expect(xml).toContain(`<sscc>00${boxA}</sscc>`);
-    expect(xml).toContain(`<sscc>00${boxB}</sscc>`);
+    expect(xml).toContain(`<cis>00${boxA}</cis>`);
+    expect(xml).toContain(`<cis>00${boxB}</cis>`);
+    // The portal rejects `<sscc>` members outright; see the note on
+    // `renderGismtAggregationXml`.
+    expect(xml).not.toContain("<sscc>");
   });
 
   it("emits unpalletized boxes with the others and in no pallet", () => {
@@ -791,7 +854,9 @@ describe("pallets shift export formats", () => {
     const xml = decode(part!.bytes);
 
     expect(xml).toContain(`<pack_code>00${looseBox}</pack_code>`);
-    expect(xml.match(/<sscc>/g) ?? []).toHaveLength(2);
+    // Exactly the two member boxes of the single pallet; the loose box gets
+    // its own pack_content and is nested under nothing.
+    expect(xml.match(/<cis>00\d{18}<\/cis>/g) ?? []).toHaveLength(2);
   });
 
   it("keeps a pallet block whole when splitting by line limit", () => {
@@ -801,7 +866,7 @@ describe("pallets shift export formats", () => {
     const parts = renderXmlPallets(xmlPalletsSource, 26);
 
     expect(parts).toHaveLength(2);
-    const palletParts = parts.filter((p) => decode(p.bytes).includes("<sscc>"));
+    const palletParts = parts.filter((p) => decode(p.bytes).includes(`<pack_code>00${palletSscc}`));
     expect(palletParts).toHaveLength(1);
   });
 
@@ -891,5 +956,201 @@ describe("pallets shift export formats", () => {
     expect(() => renderPalletParts("shift_txt_pallets", empty)).toThrow(
       new ShiftExportDomainError("EMPTY_SOURCE"),
     );
+  });
+});
+
+describe("pallet → boxes shift export formats (no codes)", () => {
+  const boxA = "046800899000256001";
+  const boxB = "046800899000256018";
+  const looseBox = "046800899000256032";
+  const palletOne = "046800899000256025";
+  const palletTwo = "046800899000256049";
+
+  /** Two pallets (2 boxes + 1 box) and one loose box that must NOT be written. */
+  const source: ShiftExportSource = {
+    mode: "pallets",
+    pallets: [
+      {
+        sscc: palletOne,
+        boxes: [
+          { sscc: boxA, codes: ["KM-1", "KM-2"] },
+          { sscc: boxB, codes: ["KM-3"] },
+        ],
+      },
+      { sscc: palletTwo, boxes: [{ sscc: looseBox.slice(0, 17) + "6", codes: ["KM-5"] }] },
+    ],
+    looseBoxes: [{ sscc: looseBox, codes: ["KM-4"] }],
+  };
+  const palletTwoBox = source.mode === "pallets" ? source.pallets[1]!.boxes[0]!.sscc : "";
+
+  function renderTxt(maxLines: number | null = null) {
+    return renderShiftExport({
+      formatId: "shift_txt_pallet_boxes",
+      formatVersion: 1,
+      productName: "Сидр",
+      shiftDate: "2026-08-19",
+      maxLines,
+      source,
+    });
+  }
+
+  function renderXml(
+    maxLines: number | null = null,
+    organizationInn: string | null = "9705119097",
+  ) {
+    return renderShiftExport({
+      formatId: "shift_xml_gismt_pallet_boxes",
+      formatVersion: 1,
+      productName: "Сидр",
+      shiftDate: "2026-08-19",
+      maxLines,
+      source,
+      organizationInn,
+      organizationName: "ООО «Пивоварня»",
+      document: shiftDocumentFixture,
+    });
+  }
+
+  it("marks both new formats as pallet-gated alongside the code-bearing pallet formats", () => {
+    expect(
+      SHIFT_EXPORT_FORMATS.filter(shiftExportFormatRequiresPallets).map((format) => format.id),
+    ).toEqual([
+      "shift_txt_pallets",
+      "shift_csv_pallets",
+      "shift_xml_gismt_aggregation_pallets",
+      "shift_txt_pallet_boxes",
+      "shift_xml_gismt_pallet_boxes",
+    ]);
+  });
+
+  it("renders TXT as one block per pallet: pallet SSCC, its box SSCCs, a blank line; loose boxes omitted", () => {
+    const [part, ...rest] = renderTxt();
+
+    expect(rest).toEqual([]);
+    expect(decode(part!.bytes)).toBe(
+      [
+        `00${palletOne}`,
+        `00${boxA}`,
+        `00${boxB}`,
+        "",
+        `00${palletTwo}`,
+        `00${palletTwoBox}`,
+        "",
+        "",
+      ].join("\n"),
+    );
+    expect(decode(part!.bytes)).not.toContain("KM-");
+    expect(decode(part!.bytes)).not.toContain(looseBox);
+    expect(part).toMatchObject({
+      partNumber: 1,
+      physicalLineCount: 7,
+      codeCount: 4,
+      boxCount: 3,
+      palletCount: 2,
+      filename: "Сидр_4pcs_3box_2pallet_2026-08-19.txt",
+      mimeType: "text/plain; charset=utf-8",
+    });
+  });
+
+  it("renders XML with only pallet pack_content naming its boxes, and no box pack_content", () => {
+    const [part, ...rest] = renderXml();
+    const xml = decode(part!.bytes);
+
+    expect(rest).toEqual([]);
+    expect(xml).toBe(
+      [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<unit_pack document_id="11a0e30d-7cf6-4134-9ce5-68a3792ae8b1" VerForm="1.03"' +
+          ' file_date_time="2026-08-20T10:00:00.000Z" action_id="30" version="1">',
+        '    <Document operation_date_time="2026-08-19T18:00:00.000Z" document_number="AUG26-007">',
+        "        <organisation>",
+        "            <id_info>",
+        '                <LP_info org_name="ООО «Пивоварня»" LP_TIN="9705119097" />',
+        "            </id_info>",
+        "        </organisation>",
+        "        <pack_content>",
+        `            <pack_code>00${palletOne}</pack_code>`,
+        `            <cis>00${boxA}</cis>`,
+        `            <cis>00${boxB}</cis>`,
+        "        </pack_content>",
+        "        <pack_content>",
+        `            <pack_code>00${palletTwo}</pack_code>`,
+        `            <cis>00${palletTwoBox}</cis>`,
+        "        </pack_content>",
+        "    </Document>",
+        "</unit_pack>",
+        "",
+      ].join("\n"),
+    );
+    // The `<cis>` entries above are box SSCCs, never the units' own KM
+    // codes: this format reports pallet membership and nothing else.
+    expect(xml).not.toContain("KM-");
+    expect(xml).not.toContain("<sscc>");
+    expect(xml).not.toContain(looseBox);
+    expect(part).toMatchObject({
+      physicalLineCount: 19,
+      codeCount: 4,
+      boxCount: 3,
+      palletCount: 2,
+      filename: "Сидр_4pcs_3box_2pallet_2026-08-19.xml",
+      mimeType: "application/xml; charset=utf-8",
+    });
+  });
+
+  it("requires the organisation INN for the XML variant", () => {
+    expect(() => renderXml(null, null)).toThrow(new ShiftExportDomainError("ORG_INN_MISSING"));
+  });
+
+  it("splits by pallet, keeping each pallet block whole, and counts per part", () => {
+    // Pallet one block = 4 lines, pallet two block = 3 lines; limit 5 fits one each.
+    const parts = renderTxt(5);
+
+    expect(parts.map((part) => decode(part.bytes))).toEqual([
+      `00${palletOne}\n00${boxA}\n00${boxB}\n\n`,
+      `00${palletTwo}\n00${palletTwoBox}\n\n`,
+    ]);
+    expect(
+      parts.map((part) => [part.codeCount, part.boxCount, part.palletCount, part.filename]),
+    ).toEqual([
+      [3, 2, 1, "Сидр_3pcs_2box_1pallet_2026-08-19_часть_1.txt"],
+      [1, 1, 1, "Сидр_1pcs_1box_1pallet_2026-08-19_часть_2.txt"],
+    ]);
+
+    // XML: overhead 10 + pallet one (5) = 15; pallet two (4) does not fit in 16 alongside.
+    const xmlParts = renderXml(16);
+    expect(xmlParts).toHaveLength(2);
+    expect(decode(xmlParts[0]!.bytes)).toContain(`<pack_code>00${palletOne}</pack_code>`);
+    expect(decode(xmlParts[0]!.bytes)).not.toContain(`<pack_code>00${palletTwo}</pack_code>`);
+    expect(decode(xmlParts[1]!.bytes)).toContain(`<pack_code>00${palletTwo}</pack_code>`);
+  });
+
+  it("reports a pallet that cannot fit the line limit as PALLET_EXCEEDS_LINE_LIMIT", () => {
+    expect(() => renderTxt(3)).toThrow(new ShiftExportDomainError("PALLET_EXCEEDS_LINE_LIMIT"));
+  });
+
+  it("treats a source with no pallet group as empty", () => {
+    expect(() =>
+      renderShiftExport({
+        formatId: "shift_txt_pallet_boxes",
+        formatVersion: 1,
+        productName: "Сидр",
+        shiftDate: "2026-08-19",
+        maxLines: null,
+        source: { mode: "pallets", pallets: [], looseBoxes: [{ sscc: boxA, codes: ["KM-1"] }] },
+      }),
+    ).toThrow(new ShiftExportDomainError("EMPTY_SOURCE"));
+  });
+
+  it("rejects a boxes source for a pallet → boxes format", () => {
+    expect(() =>
+      renderShiftExport({
+        formatId: "shift_txt_pallet_boxes",
+        formatVersion: 1,
+        productName: "Сидр",
+        shiftDate: "2026-08-19",
+        maxLines: null,
+        source: { mode: "boxes", boxes: [{ sscc: boxA, codes: ["KM-1"] }] },
+      }),
+    ).toThrow(new ShiftExportDomainError("FORMAT_SOURCE_MISMATCH"));
   });
 });

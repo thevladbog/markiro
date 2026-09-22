@@ -72,6 +72,23 @@ class HubScreenTest {
         assertEquals(HubTile.SHIFT, selected)
     }
 
+    /** «Продолжить» goes through the same entry as the list, so it can be refused the same way. */
+    @Test
+    fun anEntryRefusalOnTheHubIsShownInWords() {
+        var dismissed = false
+        compose.setContent {
+            MarkiroTheme {
+                HubScreen(
+                    HubUi(activeShiftId = "s1", dialog = app.markiro.handheld.feature.shift.ShiftDialog.Closed),
+                    onTile = {}, onSignOut = {}, onDismissDialog = { dismissed = true },
+                )
+            }
+        }
+        compose.onNodeWithText("Смена уже закрыта").assertIsDisplayed()
+        compose.onNodeWithText("Понятно").performClick()
+        assertEquals(true, dismissed)
+    }
+
     @Test
     fun narrowHandheldShowsTheFullInventoryTitleOnOneLine() {
         compose.setContent {
@@ -132,7 +149,8 @@ class HubScreenTest {
         }
         compose.onNodeWithText("Проверка кода").assertDoesNotExist()
         compose.onNodeWithText("АКТИВНАЯ СМЕНА").assertDoesNotExist()
-        compose.onNodeWithText("Настройки").assertIsDisplayed()
+        // The pallet tile made the grid taller than the screen; the tile is still there.
+        compose.onNodeWithText("Настройки").performScrollTo().assertIsDisplayed()
     }
 
     @Test
@@ -154,5 +172,29 @@ class HubScreenTest {
         compose.onNodeWithText("Продолжить").assertIsDisplayed()
         compose.onNodeWithText("На этом ТСД").assertIsDisplayed()
         compose.onNodeWithText("заданий нет · данные на", substring = true).performScrollTo().assertIsDisplayed()
+    }
+
+    /**
+     * The pallet tile carries the same two facts the write-off one does: a
+     * missing right, and work this device still owes the server.
+     */
+    @Test
+    fun thePalletTileShowsAMissingRightAndTheQueueItOwes() {
+        var selected: HubTile? = null
+        compose.setContent {
+            MarkiroTheme { HubScreen(HubUi(canBuildPallets = false), onTile = { selected = it }, onSignOut = {}) }
+        }
+        compose.onNodeWithText("Паллеты").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("нет прав").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Паллеты").performScrollTo().performClick()
+        assertEquals(HubTile.PALLETS, selected)
+    }
+
+    @Test
+    fun thePalletTileCountsUnsentMembershipsInWords() {
+        compose.setContent {
+            MarkiroTheme { HubScreen(HubUi(canBuildPallets = true, palletsPending = 3), onTile = {}, onSignOut = {}) }
+        }
+        compose.onNodeWithText("3 короба не отправлены").performScrollTo().assertIsDisplayed()
     }
 }

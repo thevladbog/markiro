@@ -29,7 +29,7 @@ describe.skipIf(!process.env.DATABASE_URL)("security revocation forward migratio
     await copyMigrationsThroughIndex({
       sourceFolder: migrationsFolder,
       targetFolder: temporaryRoot,
-      lastIncludedIndex: 167,
+      lastIncludedIndex: 173,
     });
     await runRuntimeMigrations({
       databaseUrl: url.toString(),

@@ -390,6 +390,7 @@
         "APPLIED": "Applied",
         "RETIRED": "Retired",
         "WRITTEN_OFF": "Written off",
+        "WITHDRAWN": "Withdrawn",
         "DISAGGREGATION": "Disaggregated"
       },
       "exports": {
@@ -1603,6 +1604,11 @@
         "noCounterparty": "None selected",
         "submitCreate": "Create",
         "submitUpdate": "Save",
+        "tabs": {
+          "label": "Product card sections",
+          "basic": "Basic",
+          "chz": "Chestny ZNAK"
+        },
         "sections": {
           "basic": "Basic",
           "aggregation": "Aggregation and price",
@@ -1782,6 +1788,11 @@
           "unchanged": "Current photo kept",
           "failed": "Failed"
         },
+        "schemaBanner": {
+          "stale": "The category schema has been updated. Open the product in the catalog, confirm the category change to the new version, then refresh the comparison.",
+          "chooseCategory": "Choose an initial category to import the Chestny ZNAK card attributes.",
+          "missing": "Chestny ZNAK card attributes cannot be imported: the card category has no active schema with a reviewed product-group mapping. Other fields remain available; contact Markiro support."
+        },
         "reasons": {
           "product_group_unavailable": "The ChZ categories do not identify a product group. Select it in the product form.",
           "product_group_ambiguous": "The ChZ categories indicate multiple or conflicting groups. Select the group in the product form.",
@@ -1791,6 +1802,7 @@
           "values_match": "Matches the National Catalog data.",
           "attribute_not_importable": "Import from Chestny ZNAK is not configured for this field. You can view the value in the source card and enter it in Markiro manually.",
           "compatible_schema_required": "Importing attributes requires a category with a configured Chestny ZNAK mapping.",
+          "schema_version_stale": "The category schema has been updated. Confirm the category change in the product card.",
           "barcode_mismatch": "The photo GTIN differs from this product. Select only after checking it.",
           "invalid_barcode": "This photo has an invalid GTIN and cannot be selected.",
           "manual_name_required": "Enter a product name and refresh the review.",
@@ -2135,7 +2147,7 @@
         "scopeEmptyError": "Select at least one category or switch to “All categories”.",
         "scopeLoadError": "Could not load the category dictionary.",
         "egaisScopeHint": "The EGAIS field is filled only for products in the “Beer” category. It will be empty for the selected categories.",
-        "empty": "No label content yet — import ZPL or TSPL code.",
+        "empty": "No label content yet — import ZPL, TSPL or JSON code.",
         "geometryError": "An element no longer fits the label. Enlarge the label or re-import the code.",
         "invalidSizeError": "Label size must be between 10 and 300 mm. Enter a value in that range.",
         "import": {
@@ -2144,6 +2156,7 @@
           "formatLabel": "Code format",
           "dpiLabel": "Import DPI",
           "codeLabel": "{{format}} code",
+          "jsonLabel": "Template JSON",
           "cancel": "Cancel",
           "check": "Check code",
           "replace": "Replace label",
@@ -2153,8 +2166,14 @@
           "acknowledge": "Remove unsupported lines ({{count}})",
           "adjusted": "Fitted to label bounds: {{count}}",
           "elementTooLarge": "An element is larger than the label. Fix the code or label size.",
+          "issuesTitle": "Errors: {{count}}",
+          "warningsTitle": "Warnings: {{count}}",
+          "acknowledgeWarnings": "Continue despite these warnings ({{count}})",
+          "warningUnknownProperty": "is not part of the label model and will be dropped",
+          "warningPurposeMismatch": "does not match this template's purpose; the layout is imported as is",
           "fieldsTitle": "Template fields",
           "fieldsHint": "Insert the complete placeholder into text or barcode content.",
+          "fieldsHintJson": "Use as the field value of a text element or the data value of a barcode.",
           "copy": "Copy {{placeholder}}",
           "copyShort": "Copy",
           "copied": "Placeholder copied",
@@ -2355,7 +2374,10 @@
         "unattributed_other": "{{count}} operations have no employee assigned.",
         "counterparty": "Counterparty",
         "reportsAfterClose": "Reports can be requested and downloaded after the shift is closed.",
-        "summaryError": "Shift statistics could not be loaded. Other data and actions are still available."
+        "summaryError": "Shift statistics could not be loaded. Other data and actions are still available.",
+        "taskFormTitle": "Shift form",
+        "taskFormDescription": "A printable A4 sheet whose barcode opens the shift on a terminal.",
+        "openTaskForm": "Open shift form"
       },
       "form": {
         "createTitle": "New shift",
@@ -2415,7 +2437,9 @@
           "productRequired": "Select a product",
           "qtyInvalid": "Enter a positive whole number",
           "capacityInvalid": "Enter a positive whole number",
-          "boxLabelTemplateRequired": "Select a box label template for aggregation"
+          "boxLabelTemplateRequired": "Select a box label template for aggregation",
+          "ORG_GLN_MISSING": "The organization has no GLN — the boxes of an aggregation shift will not get SSCCs. Set the GLN under Settings → Organization profile.",
+          "SSCC_ISSUER_GLN_MISSING": "The selected issuer has no GLN — boxes will not get SSCCs. Set the counterparty's GLN under Counterparties."
         }
       },
       "closeModal": {
@@ -2461,12 +2485,14 @@
           "format": "Format",
           "parameters": "Parameters",
           "codes": "Codes",
-          "boxes": "Boxes"
+          "boxes": "Boxes",
+          "pallets": "Pallets"
         },
         "counts": {
           "lines": "{{count}} lines",
           "codes": "{{count}} codes",
           "boxes": "{{count}} boxes",
+          "pallets": "{{count}} pallets",
           "bytes": "{{count}} B"
         },
         "validation": {
@@ -2478,7 +2504,11 @@
           "SHIFT_DATE_MISSING": "The shift has no date.",
           "BOX_COVERAGE_INCOMPLETE": "Not every shift code is assigned to a box.",
           "SHIFT_HAS_NO_PALLETS": "The shift has no closed pallet: either no box was ever stacked on one, or no pallet has been closed yet.",
+          "PALLET_NOT_CLOSED": "The pallet is not closed yet — an export needs a closed pallet.",
+          "PALLET_DISASSEMBLED": "The pallet was taken apart — it can no longer be exported.",
           "ORG_INN_MISSING": "Set the organization INN in the profile to generate the GIS MT report.",
+          "ORG_NAME_MISSING": "Set the organization name in the profile: GIS MT requires it in the document.",
+          "INVALID_ORG_INN": "The organization INN must be 10 digits — GIS MT accepts this report from a legal entity only.",
           "FORMAT_NOT_FOUND": "The selected report format is no longer available.",
           "INVALID_LINE_LIMIT": "The lines-per-part limit is invalid.",
           "BOX_EXCEEDS_LINE_LIMIT": "A box does not fit within the lines-per-part limit.",
@@ -2495,6 +2525,10 @@
         "title": "Pallets",
         "empty": "No pallets in this shift",
         "loadError": "Could not load this shift's pallets.",
+        "placards": {
+          "action": "Placards",
+          "title": "Placards for the shift's pallets"
+        },
         "contentsChangedAfterClose": "Contents changed after closing",
         "disassembled": "Taken apart",
         "noSscc": "No SSCC",
@@ -2622,6 +2656,43 @@
         "status": "Status"
       }
     },
+    "pallets": {
+      "title": "Pallets",
+      "empty": "No pallets match these filters",
+      "noSscc": "No SSCC",
+      "loadMore": "Show more",
+      "disassembled": "Taken apart",
+      "contentsChangedAfterClose": "Contents changed after closing",
+      "rejections": "Refused: {{count}}",
+      "kind": {
+        "production": "Production",
+        "warehouse": "Warehouse"
+      },
+      "filters": {
+        "kindLabel": "Pallet kind",
+        "kindAll": "All",
+        "kindProduction": "Production",
+        "kindWarehouse": "Warehouse",
+        "productLabel": "Product",
+        "productAll": "All products",
+        "productSearchLabel": "Search product",
+        "deviceLabel": "Device",
+        "deviceAll": "All devices",
+        "deviceSearchLabel": "Search device",
+        "fromLabel": "Closed from",
+        "toLabel": "Closed to"
+      },
+      "table": {
+        "sscc": "SSCC",
+        "kind": "Kind",
+        "product": "Product",
+        "device": "Device",
+        "boxCount": "Boxes",
+        "unitCount": "Codes",
+        "closedAt": "Closed",
+        "status": "Status"
+      }
+    },
     "boxSell": {
       "title": "Sell box",
       "ssccLabel": "Box SSCC",
@@ -2652,7 +2723,8 @@
       "tabs": {
         "label": "Code search sections",
         "codes": "Codes",
-        "boxes": "Boxes"
+        "boxes": "Boxes",
+        "pallets": "Pallets"
       },
       "searchPlaceholder": "Enter an SSCC (a partial number works) or a marking code",
       "searchButton": "Search",
@@ -2740,6 +2812,16 @@
       "palletCard": {
         "noSscc": "No SSCC",
         "printAction": "Print",
+        "disassembleAction": "Take apart",
+        "disassembleError": "Could not create the disaggregation document",
+        "placard": {
+          "action": "Placard",
+          "title": "Pallet placard",
+          "formatLabel": "Paper size",
+          "format": { "a4": "A4", "a5": "A5" },
+          "open": "Open",
+          "hint": "Opens in a new tab — print it on an office printer and attach it to the pallet."
+        },
         "status": {
           "open": "Open",
           "closed": "Closed",
@@ -2758,13 +2840,44 @@
           "sscc": "Box SSCC",
           "itemCount": "Codes",
           "closedAt": "Closed",
-          "state": "State"
+          "state": "State",
+          "shift": "Box shift"
         },
         "exceptionsTitle": "Exceptions",
         "exceptionsEmpty": "No exceptions",
         "exceptionKind": {
           "disassemble": "Pallet taken apart",
           "reprint": "Label reprint"
+        },
+        "noShift": "No shift (warehouse pallet)",
+        "kind": {
+          "production": "Production",
+          "warehouse": "Warehouse"
+        },
+        "rejections": {
+          "title": "Refused memberships",
+          "empty": "Every scanned box was stacked on the pallet",
+          "table": {
+            "sscc": "Box SSCC",
+            "reason": "Reason",
+            "winningPallet": "Pallet holding the box",
+            "addedAt": "Scanned"
+          },
+          "reason": {
+            "already_on_pallet": "Already on another pallet",
+            "not_found": "Box not found",
+            "not_closed": "Box not closed",
+            "disassembled": "Box taken apart",
+            "pallet_closed": "Pallet already closed",
+            "product_mismatch": "Different product"
+          }
+        },
+        "exports": {
+          "title": "Pallet exports",
+          "create": "Create export",
+          "historyEmpty": "No exports have been created for this pallet yet.",
+          "afterCloseHint": "The export becomes available once the pallet is closed.",
+          "disassembledHint": "The pallet was taken apart — no new export can be created."
         }
       },
       "history": {
@@ -3231,6 +3344,8 @@
         "dayLimitError": "Enter a positive whole number",
         "canWriteoffLabel": "Allow writeoff",
         "canWriteoffHint": "Writeoff permission changes independently from the limit.",
+        "canBuildPalletsLabel": "Build pallets on a handheld",
+        "canBuildPalletsHint": "The employee can stack closed boxes onto a warehouse pallet in the handheld's Pallets mode.",
         "save": "Save pickup policy",
         "toasts": {
           "success": "Pickup policy saved",

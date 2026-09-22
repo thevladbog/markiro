@@ -8,12 +8,20 @@ import {
 } from "@nestjs/common";
 import { and, asc, desc, eq, getTableColumns, inArray } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
-import { SHIFT_EXPORT_FORMATS, type ShiftExportFormatId } from "@markiro/domain";
+import {
+  PALLET_EXPORT_FORMATS,
+  SHIFT_EXPORT_FORMATS,
+  type PalletExportFormatId,
+  type ShiftExportFormatId,
+} from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
 import { PgBossService } from "../../jobs/jobs.module";
 import { ObjectStorageService } from "../storage/object-storage.service";
+import { shiftExportAuditAction } from "./audit-action";
 import type {
+  CreatePalletExportDto,
   CreateShiftExportDto,
+  PalletExportFormatsDto,
   ShiftExportArtifactDto,
   ShiftExportDownloadDto,
   ShiftExportDto,
@@ -42,6 +50,10 @@ export class ShiftExportsService {
 
   formats(): ShiftExportFormatsDto {
     return SHIFT_EXPORT_FORMATS;
+  }
+
+  palletFormats(): PalletExportFormatsDto {
+    return PALLET_EXPORT_FORMATS;
   }
 
   async create(
@@ -135,6 +147,101 @@ export class ShiftExportsService {
     return this.toDtos(rows);
   }
 
+  async listForPallet(tenantId: string, palletId: string): Promise<ShiftExportDto[]> {
+    const rows = await this.listedRows(
+      and(eq(schema.shiftExports.tenantId, tenantId), eq(schema.shiftExports.palletId, palletId)),
+    );
+    return this.toDtos(rows);
+  }
+
+  async createForPallet(
+    tenantId: string,
+    actorUserId: string,
+    palletId: string,
+    input: CreatePalletExportDto,
+  ): Promise<ShiftExportDto> {
+    const advertised = PALLET_EXPORT_FORMATS.some(
+      (format) => format.id === input.formatId && format.version === input.formatVersion,
+    );
+    if (!advertised) {
+      throw new BadRequestException("Unknown or superseded export format version");
+    }
+
+    let row: ShiftExportRow;
+    let shouldEnqueue = true;
+    try {
+      row = await this.db.transaction(async (tx) => {
+        const [pallet] = await tx
+          .select({
+            closedAt: schema.pallets.closedAt,
+            disassembledAt: schema.pallets.disassembledAt,
+          })
+          .from(schema.pallets)
+          .where(and(eq(schema.pallets.tenantId, tenantId), eq(schema.pallets.id, palletId)))
+          .limit(1);
+        if (!pallet) throw new NotFoundException();
+        if (pallet.closedAt === null) throw new ConflictException("Pallet must be closed");
+        if (pallet.disassembledAt !== null) throw new ConflictException("Pallet is disassembled");
+
+        const [created] = await tx
+          .insert(schema.shiftExports)
+          .values({
+            tenantId,
+            shiftId: null,
+            palletId,
+            formatId: input.formatId,
+            formatVersion: input.formatVersion,
+            // A pallet document is one part; splitting it would break the
+            // aggregate it describes.
+            maxLines: null,
+            createdByUserId: actorUserId,
+            idempotencyKey: input.idempotencyKey,
+          })
+          .returning();
+        if (!created) throw new Error("Failed to create pallet export");
+        await this.writeAudit(tx, created, actorUserId, "shift_export.created", "success", {
+          status: "queued",
+        });
+        return created;
+      });
+    } catch (error) {
+      if (!isIdempotencyConflict(error)) throw error;
+      const [existing] = await this.db
+        .select()
+        .from(schema.shiftExports)
+        .where(
+          and(
+            eq(schema.shiftExports.tenantId, tenantId),
+            eq(schema.shiftExports.createdByUserId, actorUserId),
+            eq(schema.shiftExports.idempotencyKey, input.idempotencyKey),
+          ),
+        )
+        .limit(1);
+      if (!existing) throw error;
+      if (
+        existing.palletId !== palletId ||
+        existing.formatId !== input.formatId ||
+        existing.formatVersion !== input.formatVersion
+      ) {
+        throw new ConflictException("Idempotency key already belongs to another export request");
+      }
+      row = existing;
+      // Same reasoning as `create`: a queued row may still have an in-flight
+      // send from the original request, so a duplicate must not re-send.
+      shouldEnqueue = false;
+      if (existing.status === "failed" && existing.errorCode === "QUEUE_FAILED") {
+        const restored = await this.restoreFailed(existing, actorUserId);
+        if (restored) {
+          row = restored;
+          shouldEnqueue = true;
+        }
+      }
+    }
+
+    if (shouldEnqueue) await this.enqueueOrFail(row, actorUserId);
+    return this.getById(tenantId, row.id);
+  }
+
   async retry(tenantId: string, actorUserId: string, exportId: string): Promise<ShiftExportDto> {
     const [existing] = await this.db
       .select()
@@ -200,27 +307,32 @@ export class ShiftExportsService {
   }
 
   private listedRows(where: ReturnType<typeof and>): Promise<ListedShiftExportRow[]> {
-    return this.db
-      .select({
-        ...getTableColumns(schema.shiftExports),
-        lateDataAt: schema.shifts.lateDataAt,
-        userName: schema.user.name,
-        firstName: schema.userProfiles.firstName,
-        lastName: schema.userProfiles.lastName,
-        middleName: schema.userProfiles.middleName,
-      })
-      .from(schema.shiftExports)
-      .innerJoin(
-        schema.shifts,
-        and(
-          eq(schema.shifts.tenantId, schema.shiftExports.tenantId),
-          eq(schema.shifts.id, schema.shiftExports.shiftId),
-        ),
-      )
-      .innerJoin(schema.user, eq(schema.user.id, schema.shiftExports.createdByUserId))
-      .leftJoin(schema.userProfiles, eq(schema.userProfiles.userId, schema.user.id))
-      .where(where)
-      .orderBy(desc(schema.shiftExports.createdAt));
+    return (
+      this.db
+        .select({
+          ...getTableColumns(schema.shiftExports),
+          lateDataAt: schema.shifts.lateDataAt,
+          userName: schema.user.name,
+          firstName: schema.userProfiles.firstName,
+          lastName: schema.userProfiles.lastName,
+          middleName: schema.userProfiles.middleName,
+        })
+        .from(schema.shiftExports)
+        // LEFT, not INNER: a per-pallet export has no shift at all, and an
+        // inner join would drop it from every listing. `lateDataAt` is then
+        // null, which `toDtos` already reads as "never stale".
+        .leftJoin(
+          schema.shifts,
+          and(
+            eq(schema.shifts.tenantId, schema.shiftExports.tenantId),
+            eq(schema.shifts.id, schema.shiftExports.shiftId),
+          ),
+        )
+        .innerJoin(schema.user, eq(schema.user.id, schema.shiftExports.createdByUserId))
+        .leftJoin(schema.userProfiles, eq(schema.userProfiles.userId, schema.user.id))
+        .where(where)
+        .orderBy(desc(schema.shiftExports.createdAt))
+    );
   }
 
   private async toDtos(rows: ListedShiftExportRow[]): Promise<ShiftExportDto[]> {
@@ -248,6 +360,7 @@ export class ShiftExportsService {
         physicalLineCount: artifact.physicalLineCount,
         codeCount: artifact.codeCount,
         boxCount: artifact.boxCount,
+        palletCount: artifact.palletCount,
         filename: artifact.filename,
         mimeType: artifact.mimeType,
         byteSize: artifact.byteSize,
@@ -258,7 +371,8 @@ export class ShiftExportsService {
     return rows.map((row) => ({
       id: row.id,
       shiftId: row.shiftId,
-      formatId: row.formatId as ShiftExportFormatId,
+      palletId: row.palletId,
+      formatId: row.formatId as ShiftExportFormatId | PalletExportFormatId,
       formatVersion: row.formatVersion,
       maxLines: row.maxLines,
       status: row.status,
@@ -267,6 +381,7 @@ export class ShiftExportsService {
       shiftDateSnapshot: row.shiftDateSnapshot,
       totalCodeCount: row.totalCodeCount,
       totalBoxCount: row.totalBoxCount,
+      totalPalletCount: row.totalPalletCount,
       createdByUserId: row.createdByUserId,
       createdByName: creatorName(row),
       sourceSnapshotStartedAt: row.sourceSnapshotStartedAt?.toISOString() ?? null,
@@ -352,14 +467,16 @@ export class ShiftExportsService {
     return tx.insert(schema.tenantAuditEvents).values({
       organizationId: row.tenantId,
       actorUserId,
-      action,
+      action: shiftExportAuditAction(row, action),
       outcome,
+      // Still `shift_export`: `shift_exports` is the table both kinds live in.
       targetType: "shift_export",
       targetId: row.id,
       after: {
         tenantId: row.tenantId,
         actorUserId,
         shiftId: row.shiftId,
+        palletId: row.palletId,
         exportId: row.id,
         formatId: row.formatId,
         formatVersion: row.formatVersion,

@@ -1,8 +1,30 @@
 import type { TFunction } from "i18next";
 import { Link } from "react-router";
 
-import { StatusChip } from "@markiro/ui";
+import { StatusChip, type TagPhase } from "@markiro/ui";
 import type { OperationsDecisionItem } from "@markiro/platform-contracts";
+
+/**
+ * Фактический union — `OperationsDecisionItem["severity"]`
+ * (`packages/platform-contracts/src/operations.ts`): `warning` | `critical`
+ * | `attention` (по одному литералу на каждый вид решения). Все три —
+ * незакрытые операционные решения, ни одно не является системной ошибкой
+ * (`failed`) или выведенной сущностью: очередь решений целиком про
+ * «продолжается, но требует вмешательства», поэтому все три сводятся к
+ * фазе `attention`. Степень срочности несёт подпись
+ * (`overview.severity.${severity}`), а не отдельная фаза — в словаре фаз нет
+ * ступеней внимания. Раньше буквальное значение `severity: "attention"`
+ * (просроченный реквизит) отображалось тоном `info`, а не тем, что
+ * интуитивно ожидалось от «attention».
+ */
+function decisionSeverityPhase(severity: OperationsDecisionItem["severity"]): TagPhase {
+  switch (severity) {
+    case "critical":
+    case "warning":
+    case "attention":
+      return "attention";
+  }
+}
 
 function decisionDestination(item: OperationsDecisionItem): string {
   if (item.kind === "overdue_invoice") return `/invoices/${item.invoiceId}`;
@@ -39,9 +61,7 @@ export function DecisionQueue({ items, t }: { items: OperationsDecisionItem[]; t
       {items.map((item) => (
         <li className="decision-queue__item" key={item.id}>
           <StatusChip
-            status={
-              item.severity === "critical" ? "error" : item.severity === "warning" ? "warn" : "info"
-            }
+            phase={decisionSeverityPhase(item.severity)}
             label={t(`overview.severity.${item.severity}`)}
           />
           <Link className="decision-queue__link" to={decisionDestination(item)}>

@@ -1,0 +1,147 @@
+/**
+ * Print chrome shared by every A4 task form: the inventory task form and the
+ * shift task form. Two forms that a factory holds side by side must not drift
+ * in logo, date format or hairline weight, and the only way to guarantee that
+ * is one source for both.
+ */
+
+const PRINT_TEXT_MAX_CODE_POINTS = 200;
+
+export function boundPrintText(value: string): string {
+  const codePoints = Array.from(value);
+  if (codePoints.length <= PRINT_TEXT_MAX_CODE_POINTS) return value;
+  return `${codePoints.slice(0, PRINT_TEXT_MAX_CODE_POINTS - 1).join("")}…`;
+}
+
+export function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+export function formatCivilDate(value: string): string {
+  const [year, month, day] = value.split("-");
+  return `${day}.${month}.${year}`;
+}
+
+export function formatGeneratedAt(value: Date): string {
+  return new Intl.DateTimeFormat("ru-RU", {
+    timeZone: "Europe/Moscow",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  })
+    .format(value)
+    .replace(",", "");
+}
+
+export function formatInteger(value: number): string {
+  return new Intl.NumberFormat("ru-RU").format(value).replaceAll("\u00a0", "&nbsp;");
+}
+
+export function countNoun(value: number, one: string, few: string, many: string): string {
+  const mod100 = value % 100;
+  const mod10 = value % 10;
+  if (mod100 < 11 || mod100 > 14) {
+    if (mod10 === 1) return one;
+    if (mod10 >= 2 && mod10 <= 4) return few;
+  }
+  return many;
+}
+
+export function taskFormLogoSvg(): string {
+  return `<svg class="brand-logo" data-brand-logo="markiro" viewBox="0 0 280 64" preserveAspectRatio="xMinYMid meet" role="img" aria-label="Маркиро" xmlns="http://www.w3.org/2000/svg">
+    <rect x="4" y="4" width="56" height="56" fill="#17161A"/>
+    <g fill="#FFFFFF">
+      <rect x="14" y="14" width="8" height="8"/><rect x="14" y="26" width="8" height="8"/><rect x="14" y="38" width="8" height="8"/>
+      <rect x="26" y="22" width="8" height="8"/><rect x="38" y="14" width="8" height="8"/><rect x="38" y="26" width="8" height="8"/>
+      <rect x="38" y="38" width="8" height="8"/><rect x="26" y="42" width="8" height="8" fill="#3DDC7A"/>
+    </g>
+    <text x="76" y="45" font-family="Arial, sans-serif" font-weight="700" font-size="34" fill="#17161A">маркиро</text>
+  </svg>`;
+}
+
+export function taskFormParameter(label: string, value: string): string {
+  return `<div class="parameter"><dt>${label}</dt><dd>${value}</dd></div>`;
+}
+
+export function taskFormStep(number: number, text: string): string {
+  return `<li><span class="step-number">${number}</span><span>${text}</span></li>`;
+}
+
+/**
+ * The exact stylesheet the inventory task form shipped with, byte for byte.
+ * `inventory-task-form-snapshot.test.ts` fails on any drift here, because the
+ * published MKR-INS-06 screenshot was taken from these rules.
+ */
+export const TASK_FORM_BASE_CSS = `    @page { size: A4 portrait; margin: 0; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: #fff; color: #17161a; font-family: Arial, "Helvetica Neue", sans-serif; }
+    body { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+    .page { width: 210mm; height: 297mm; margin: 0 auto; padding: 16mm; background: #fff; display: flex; flex-direction: column; overflow: hidden; }
+    .top { display: flex; justify-content: space-between; align-items: center; padding-bottom: 6mm; border-bottom: .25mm solid #cbc7bf; }
+    .brand-logo { width: 34mm; height: 8mm; display: block; }
+    .task-id { text-align: right; }
+    .eyebrow { display: block; color: #706d67; font-size: 8pt; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+    .task-id strong { display: block; margin-top: 1.5mm; font: 700 14pt/1.1 ui-monospace, SFMono-Regular, Consolas, monospace; }
+    .task-passport { display: grid; grid-template-columns: minmax(0, 1fr) 48mm; gap: 8mm; align-items: center; padding: 8mm 0 7mm; border-bottom: .35mm solid #17161a; }
+    .hero { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; }
+    h1 { margin: 0; font-size: 23pt; line-height: 1.08; letter-spacing: -.02em; }
+    .subtitle { margin: 2.5mm 0 0; color: #4f4c47; font-size: 11pt; }
+    .status { min-width: 36mm; margin-top: 3mm; padding: 4mm 5mm; border: .25mm solid #b7dfc8; border-radius: 3mm; background: #e7f6ed; color: #126b39; font-size: 9pt; font-weight: 800; text-align: center; text-transform: uppercase; }
+    .scan-zone { min-height: 44mm; border-left: .25mm solid #cbc7bf; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #fff; }
+    .barcode { width: 32mm; height: 32mm; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+    .barcode svg { display: block; max-width: 100%; width: 100%; height: 100%; }
+    .barcode-caption { margin-top: 1mm; font: 700 12pt/1.1 ui-monospace, SFMono-Regular, Consolas, monospace; }
+    .scan-hint { max-width: 42mm; margin-top: 1mm; color: #77736d; font-size: 8pt; text-align: center; }
+    h2 { margin: 4.5mm 0 2mm; font-size: 12pt; line-height: 1.2; }
+    dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; border-top: .2mm solid #cbc7bf; }
+    .parameter { min-height: 10mm; padding: 2mm 4mm 1.5mm 0; border-bottom: .2mm solid #d8d5cf; }
+    .parameter:nth-child(odd) { border-right: .2mm solid #d8d5cf; }
+    .parameter:nth-child(even) { padding-left: 4mm; }
+    dt { color: #706d67; font-size: 8pt; }
+    dd { margin: 1mm 0 0; text-align: left; font-size: 10pt; font-weight: 700; overflow-wrap: anywhere; }
+    .steps { margin-top: 4mm; padding-top: 1mm; border-top: .2mm solid #d8d5cf; }
+    .steps ol { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2.5mm 7mm; margin: 0; padding: 0; list-style: none; }
+    .steps li { display: grid; grid-template-columns: 7mm 1fr; gap: 3mm; align-items: start; color: #4f4c47; font-size: 8.5pt; line-height: 1.28; }
+    .step-number { width: 6mm; height: 6mm; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: #17161a; color: #fff; font-size: 7pt; font-weight: 800; line-height: 1; padding-top: .25mm; }
+    .rules { margin-top: 5mm; padding: 3mm 4mm; border: .3mm solid #17161a; background: #fff; color: #17161a; }
+    .rules h2 { margin: 0 0 2mm; color: #17161a; }
+    .rules ul { margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2mm 6mm; list-style: none; font-size: 7.5pt; line-height: 1.25; }
+    .rules li { padding-left: 3mm; border-left: .7mm solid #17161a; }
+    .rules li:first-child { grid-column: 1 / -1; }
+    .comments { flex: 1; min-height: 34mm; margin-top: 5mm; border-top: .25mm solid #9f9b95; background-image: radial-gradient(circle, #aaa69f .25mm, transparent .3mm); background-size: 4mm 4mm; background-position: 0 11mm; }
+    .comments-header { display: flex; align-items: baseline; justify-content: space-between; gap: 6mm; padding: 2.5mm 0 2mm; background: #fff; }
+    .comments h2 { margin: 0; }
+    .comments span { color: #77736d; font-size: 7.5pt; }
+    .footer { margin-top: auto; padding-top: 3.5mm; border-top: .2mm solid #d8d5cf; display: flex; justify-content: space-between; color: #77736d; font-size: 7.5pt; }
+    .compact { padding: 12mm 14mm; }
+    .compact .top { padding-bottom: 4mm; }
+    .compact .task-passport { grid-template-columns: minmax(0, 1fr) 42mm; gap: 6mm; padding: 4mm 0; }
+    .compact h1 { font-size: 19pt; }
+    .compact .subtitle { margin-top: 1mm; max-width: 126mm; font-size: 8.5pt; line-height: 1.15; overflow-wrap: anywhere; }
+    .compact .status { margin-top: 2mm; padding: 3mm 4mm; }
+    .compact .scan-zone { min-height: 38mm; }
+    .compact .barcode { width: 28mm; height: 28mm; }
+    .compact h2 { margin: 2.5mm 0 1.2mm; font-size: 10.5pt; }
+    .compact .parameter { min-height: 7mm; padding: 1mm 3mm 1mm 0; }
+    .compact .parameter:nth-child(even) { padding-left: 3mm; }
+    .compact dt { font-size: 7pt; }
+    .compact dd { font-size: 8.5pt; line-height: 1.08; }
+    .compact .steps { margin-top: 2mm; padding-top: 0; }
+    .compact .steps ol { gap: 1.5mm 5mm; }
+    .compact .steps li { font-size: 7.5pt; line-height: 1.2; }
+    .compact .rules { margin-top: 3mm; padding: 2.5mm 3mm; }
+    .compact .rules ul { gap: 1mm 4mm; font-size: 6.5pt; line-height: 1.18; }
+    .compact .comments { min-height: 20mm; margin-top: 3mm; background-position: 0 9mm; }
+    .compact .comments-header { padding: 1.5mm 0; }
+    .compact .comments span { display: none; }
+    .compact .footer { padding-top: 2mm; font-size: 7pt; }
+    @media screen { .page { box-shadow: 0 2mm 8mm rgba(23, 22, 26, .12); } }
+    @media print { html, body { background: #fff; } .page { margin: 0; box-shadow: none; } }`;

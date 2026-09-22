@@ -112,11 +112,15 @@ describe("actual entitlement operation adapters", () => {
           .filter(ts.isFunctionDeclaration)
           .find((fn) => fn.name?.getText(source) === method);
       expect(owner?.body).toBeDefined();
-      expect(owner && calls(owner, operation)).toBe(
-        method === "resumePreparation" || file.endsWith("national-catalog-image.service.ts")
-          ? 2
-          : 1,
-      );
+      // `updateShift` observes the pallet configuration on two paths that
+      // never share code: the planned-shift rewrite and the active-shift
+      // pallet-template swap (spec 2026-09-18, owner request). Both are real
+      // admission calls for the same operation, so two is the honest count.
+      const twoCallSites =
+        method === "resumePreparation" ||
+        file.endsWith("national-catalog-image.service.ts") ||
+        (method === "updateShift" && operation === "pallets.shift.configure.v1");
+      expect(owner && calls(owner, operation)).toBe(twoCallSites ? 2 : 1);
       expect(["p1a_adapter", "p1b_adapter"]).toContain(ENTITLEMENT_OPERATIONS[operation].coverage);
     },
   );

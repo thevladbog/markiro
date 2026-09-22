@@ -376,15 +376,19 @@ body,
   line-height: 26px !important;
 }
 
-/* Floor-size the alert badge separately: the generic 18px bump above made the
-   mono space inside two-word badges read as a double space. */
+/* Floor-size the alert badge separately: the generic 18px bump above would
+   otherwise apply to it too. Per the tag geometry spec
+   (docs/superpowers/specs/2026-09-19-tag-semantics-and-geometry-design.md),
+   `Badge` no longer defaults to IBM Plex Mono -- it renders `var(--font-ui)`
+   (sans) -- so the `word-spacing: -0.35ch` this rule used to carry to
+   compress Plex Mono's full-cell space is gone; on sans text it was pulling
+   out most of the word gap instead, running two-word labels like "НЕ УЧТЁН"
+   together. */
 #root .mk-alert .mk-badge {
   height: auto !important;
   padding: 2px 8px !important;
   font-size: 14px !important;
   line-height: 20px !important;
-  /* IBM Plex Mono's space is a full cell; pull word gaps back to sans-like width. */
-  word-spacing: -0.35ch;
 }
 
 .station-screen-slot {
@@ -2180,20 +2184,28 @@ body,
   display: grid;
   height: 100%;
   gap: var(--sp-3);
-  grid-template-columns: minmax(160px, 0.62fr) minmax(0, 1fr);
+  grid-template-columns: minmax(160px, 38%) minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
   overflow: hidden;
 }
 
+/*
+ * Строки: шапка · заголовок (единственная гибкая) · полное имя · даты ·
+ * режим · контрагент · кнопка. Полное имя и даты необязательны, поэтому
+ * кнопка закреплена за последней дорожкой явно (.shift-card__action):
+ * без этого она уезжала на 72px вверх, когда полного имени нет.
+ */
 .shift-card__details {
   display: grid;
   min-width: 0;
   min-height: 0;
-  padding: var(--sp-2) var(--sp-2) var(--sp-1) 0;
+  padding: var(--sp-3) var(--sp-3) var(--sp-2) 0;
   overflow: hidden;
-  gap: var(--sp-1);
-  grid-template-rows: auto minmax(0, 1fr) auto auto 72px;
+  gap: var(--sp-2);
+  /* Факты стоят под заголовком плотной группой; свободное место уходит в
+     пустую дорожку ПЕРЕД кнопкой, а не между заголовком и датами. */
+  grid-template-rows: auto auto auto auto auto auto minmax(0, 1fr) 72px;
 }
 
 .shift-card__heading {
@@ -2202,6 +2214,63 @@ body,
   gap: var(--sp-2);
   align-items: center;
   justify-content: space-between;
+}
+
+/* Номер смены — её адрес: тихий моноширинный текст рядом со статусом. */
+.shift-card__number {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-3);
+  font: 500 13px/17px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * Геометрия тегов НА ЭТОЙ КАРТОЧКЕ, а не в словаре: 4px на 22px читаются
+ * коробкой с расстояния вытянутой руки. Форма при этом различает род тега —
+ * фаза (StatusChip) пилюлей, категория (Badge) скруглённым прямоугольником, —
+ * а размер, глиф и тон остаются словарными.
+ */
+.shift-card .mk-tag {
+  border-radius: 6px;
+}
+
+.shift-card .mk-chip {
+  border-radius: 999px;
+}
+
+/*
+ * Фото стоит на градиенте самого товара — тот же градиент, что у героя
+ * рабочего экрана, но насыщенность ниже на ~6 пунктов, чтобы две карточки
+ * рядом не кричали друг на друга. Каталожные снимки — прозрачный WebP, и
+ * светлая подложка с рамкой ставила бутылку в белый ящик на тёмном экране.
+ */
+.shift-card__photo {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--sp-3);
+  overflow: hidden;
+  border-radius: var(--r-2);
+  background: linear-gradient(305deg, #2c2b31, #1d1c21 55%, #141317);
+  place-items: center;
+}
+
+.shift-card__photo[data-accent="true"] {
+  background: linear-gradient(
+    305deg,
+    hsl(var(--product-hue) 40% 20%),
+    hsl(var(--product-hue) 36% 11%) 55%,
+    hsl(var(--product-hue) 32% 6%)
+  );
+}
+
+/* Замена фото, а не пустая рамка: монограмма на том же градиенте. */
+.shift-card__photo-monogram {
+  color: rgb(250 250 248 / 70%);
+  font: 700 clamp(40px, 5vw, 72px) / 1 var(--font-ui);
 }
 
 .product-image {
@@ -2226,23 +2295,34 @@ body,
   place-items: center;
 }
 
+/* Прозрачный WebP живёт прямо на градиенте: ни рамки, ни подложки. */
 .shift-card .product-image {
   width: 100%;
   height: 100%;
-  border: 1px solid var(--line);
-  background: var(--surface-panel);
+  border: 0;
+  background: none;
   object-fit: contain;
 }
 
-.shift-card__image-placeholder::before {
-  width: 44%;
-  aspect-ratio: 1;
-  border: 2px solid var(--line-strong);
+/*
+ * Снимок со своей подложкой (студийное фото на белом) на градиенте выглядел
+ * забытым белым прямоугольником: у `object-fit: contain` скругление режет
+ * пустые углы коробки, а не углы самой картинки. Поэтому коробка здесь
+ * обнимает картинку (`auto` при обоих максимумах), и скругление с тенью
+ * превращают подложку в намеренную карточку снимка.
+ */
+.shift-card__photo[data-photo="opaque"] .product-image {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
   border-radius: var(--r-2);
-  content: "";
-  background:
-    linear-gradient(135deg, transparent 48%, var(--line-strong) 49% 51%, transparent 52%),
-    radial-gradient(circle at 32% 30%, var(--line-strong) 0 8%, transparent 9%);
+  box-shadow: 0 10px 28px rgb(0 0 0 / 45%);
+}
+
+/* Деградация фото до текста: имя товара читается на тёмном градиенте. */
+.shift-card .product-image--fallback {
+  color: rgb(250 250 248 / 70%);
 }
 
 /*
@@ -2277,71 +2357,73 @@ body,
 .shift-card__product {
   display: -webkit-box;
   align-self: start;
-  /* The row is minmax(0, 1fr): without this cap a long clamped title still
-     overflows the track and overlaps the dates/mode rows below. */
-  max-height: 100%;
   overflow: hidden;
   font: var(--floor-lg);
   letter-spacing: -0.015em;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 6;
+  -webkit-line-clamp: 3;
+}
+
+/*
+ * Товар без наименования для печати отдаёт заголовку своё полное имя, и три
+ * строки его обрезали на полуслове. Строки полного имени в этом случае всё
+ * равно свободны — заголовок забирает их себе.
+ */
+.shift-card__product--only {
+  -webkit-line-clamp: 5;
+}
+
+/* Полное каталожное имя — вторым голосом: не заголовок и не подпись тега. */
+.shift-card__product-full {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-3);
+  font: 400 13px/17px var(--font-ui);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 /* Short kiosk viewports (1366×768 and 1280×800): the compact overrides below
    only trigger on narrow widths, so tighten the title here by height instead —
-   otherwise the clamped 6-line title overflows its row or clips mid-line. */
+   otherwise the clamped title overflows its row or clips mid-line. */
 @media (max-height: 820px) {
   .shift-card__product {
     font: 600 20px/24px var(--font-ui);
+    -webkit-line-clamp: 2;
+  }
+
+  .shift-card__product--only {
     -webkit-line-clamp: 4;
   }
 }
 
-/* Number and status render as floor-sized chips (like the status bar tags). */
-.shift-card__heading .mk-chip {
-  height: 34px;
-  min-width: 0;
-  padding: 0 14px;
-  overflow: hidden;
-  border-radius: 999px;
-  font: 700 15px/1 var(--font-ui);
-}
-
-.shift-card__heading .mk-chip > span:last-child {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.shift-card__number.mk-chip {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-}
-
-.shift-card__meta {
-  display: grid;
-  min-width: 0;
-  overflow: hidden;
-  color: var(--fg-2);
-  font: var(--floor-body);
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  gap: 2px;
-}
-
+/* Даты и план — мономаркированные факты, а не проза. */
+.shift-card__dates,
 .shift-card__plan {
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  color: var(--fg-2);
+  font: 400 14px/18px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Режим и паллеты — теги, план — текст рядом с ними; в узкой колонке строка
+   переносится целиком вместо обрезки подписи тега. */
+.shift-card__mode {
+  display: flex;
+  min-width: 0;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  align-items: center;
 }
 
 /* One line when both dates fit; the production date wraps whole otherwise. */
-.shift-card__date {
+.shift-card__dates {
   display: flex;
-  min-width: 0;
-  overflow: hidden;
   flex-wrap: wrap;
   column-gap: var(--sp-3);
+  row-gap: var(--sp-1);
 }
 
 .shift-card__date-part {
@@ -2369,6 +2451,9 @@ body,
   --control-floor: 72px;
 
   align-self: end;
+  /* Последняя дорожка сетки явно: полное имя и даты необязательны, и без
+     закрепления кнопка вставала на строку выше пустой 72px-дорожки. */
+  grid-row: -2 / -1;
 }
 
 .shift-selection__secondary-actions {
@@ -4471,7 +4556,9 @@ body,
   display: grid;
   inset: var(--sp-3) var(--sp-3) 84px;
   overflow: hidden;
-  place-items: center;
+  gap: var(--sp-3);
+  align-content: center;
+  justify-items: center;
   pointer-events: none;
 }
 
@@ -4480,6 +4567,106 @@ body,
   max-height: 100%;
   overflow: hidden;
   pointer-events: auto;
+}
+
+/* An overlay Alert carries plain block content, so its prompt, its choices and
+   its action row need an explicit rhythm here: without one the floor buttons
+   land side by side as inline-block neighbours with nothing between them. */
+.work-overlay {
+  padding: var(--sp-4) !important;
+}
+
+.work-overlay__title {
+  font: var(--floor-lg);
+}
+
+.work-overlay__body {
+  display: grid;
+  min-width: 0;
+  margin-top: var(--sp-1);
+  gap: var(--sp-3);
+  font: var(--floor-body);
+}
+
+.work-overlay__body > p {
+  margin: 0;
+}
+
+.work-overlay__actions {
+  display: grid;
+  min-width: 0;
+  min-height: var(--control-floor);
+  margin-top: var(--sp-1);
+  gap: var(--sp-3);
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+}
+
+.work-overlay__actions .mk-btn {
+  min-width: 0 !important;
+  padding-inline: var(--sp-3) !important;
+}
+
+/* Reason picker: every option stays a visible 64px target instead of hiding
+   behind a mouse-sized native dropdown. */
+.floor-choice-group {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-2);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.floor-choice {
+  display: flex;
+  min-width: 0;
+  min-height: var(--control-floor);
+  padding: var(--sp-2) var(--sp-3);
+  gap: var(--sp-3);
+  align-items: center;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-2);
+  background: var(--surface-card);
+  color: var(--fg-1);
+  font: var(--floor-body);
+  text-align: left;
+  cursor: pointer;
+}
+
+.floor-choice[aria-checked="true"] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--surface-card) 88%, var(--accent) 12%);
+  font: var(--floor-body-strong);
+}
+
+.floor-choice:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.floor-choice__mark {
+  display: grid;
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  border: 2px solid var(--line-strong);
+  border-radius: 50%;
+  place-items: center;
+}
+
+.floor-choice[aria-checked="true"] .floor-choice__mark {
+  border-color: var(--accent);
+}
+
+.floor-choice[aria-checked="true"] .floor-choice__mark::after {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  content: "";
+}
+
+.floor-choice__label {
+  min-width: 0;
 }
 
 #root :where(button, [role="button"], a[href]) {
@@ -4547,6 +4734,7 @@ body,
 .station-status-bar {
   display: grid;
   min-width: 0;
+  min-height: 80px;
   padding: var(--sp-2) var(--sp-4);
   gap: var(--sp-4);
   grid-template-columns: minmax(0, 1fr) auto auto;
@@ -4556,13 +4744,36 @@ body,
   font: var(--floor-body);
 }
 
-/* Buttons size to their captions; every freed pixel belongs to the identity. */
+/*
+ * One row at every width. `Button` writes `height: var(--control-floor)` as an
+ * inline style for size="floor", so the rail redefines the variable instead of
+ * the rail controls keep the 64px floor touch target; the header saves height by dropping the caption row, and 64px stays the floor
+ * size everywhere else on the station.
+ */
 .station-status-actions {
   display: flex;
   min-width: 0;
   gap: var(--sp-2);
   align-items: stretch;
   justify-content: flex-end;
+  flex-wrap: nowrap;
+}
+
+/*
+ * A control's error banner is not part of the 72px row. While one is up the
+ * rail takes a full-width second row — what the deleted ≤1599px fallback used
+ * to do at every width — so the banner keeps its readable width instead of
+ * squeezing the identity deck and «Сменить оператора» to nothing beside it.
+ * The header returns to its single row the moment the banner is dismissed.
+ */
+.station-status-bar:has(.window-mode-control__error, .operator-switch-control__error) {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.station-status-bar:has(.window-mode-control__error, .operator-switch-control__error)
+  .station-status-actions {
+  grid-column: 1 / -1;
+  justify-content: flex-start;
   flex-wrap: wrap;
 }
 
@@ -4577,6 +4788,27 @@ body,
   min-height: 64px;
   max-width: 100%;
   overflow: hidden;
+}
+
+/*
+ * The rail's own control size. `padding` needs `!important` for the same reason
+ * the height does not: Button paints padding inline, and an icon button has no
+ * caption to pad around.
+ */
+.station-rail-button {
+  /* 64px, the floor touch target (gloves): the production gallery contract
+     rejects any interactive element below 64px, so the compact rail saves
+     height by dropping the second row and the captions, not by shrinking
+     the buttons; `Button` already sets the floor height inline. */
+  min-height: 64px;
+  padding-inline: var(--sp-3) !important;
+  white-space: nowrap;
+}
+
+.station-rail-button--icon {
+  width: 64px;
+  min-width: 64px;
+  padding: 0 !important;
 }
 
 .station-status-actions .window-mode-control__action {
@@ -4639,13 +4871,25 @@ body,
   stroke-linejoin: round;
 }
 
+/*
+ * A glyph button on the rail. `relative` only makes it the containing block for
+ * the availability dot — the button itself stays in the header grid's flow.
+ */
 .station-update-indicator {
-  position: static;
-  padding: var(--sp-1) var(--sp-2);
-  overflow: hidden;
+  position: relative;
+  overflow: visible;
   text-align: center;
-  white-space: normal;
-  overflow-wrap: anywhere;
+}
+
+/* Present only while an update is actually waiting; severity colour included. */
+.station-update-indicator__dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentcolor;
 }
 
 .station-update-indicator[data-update-severity="info"] {
@@ -4711,7 +4955,7 @@ body,
   background: var(--surface-card);
 }
 
-.station-update-center__source:has(.mk-chip--ok) {
+.station-update-center__source:has(.mk-chip--active) {
   border-left-color: var(--ok-solid);
 }
 
@@ -4814,15 +5058,16 @@ body,
   white-space: nowrap;
 }
 
+/* 16/13 keeps the deck's two rows inside the 72px row the compact header owns. */
 .station-status-identity__row--primary dd {
   color: var(--fg-1);
-  font: 700 17px/22px var(--font-ui);
+  font: 700 16px/20px var(--font-ui);
   letter-spacing: -0.01em;
 }
 
 .station-status-identity__row--secondary dd {
   color: var(--fg-2);
-  font: 400 15px/20px var(--font-ui);
+  font: 400 13px/18px var(--font-ui);
 }
 
 /*
@@ -4938,18 +5183,6 @@ body,
   }
 }
 
-/* Narrower still: the action rail drops under the identity + pills row. */
-@media (max-width: 1599px) {
-  .station-status-bar {
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-
-  .station-status-actions {
-    grid-column: 1 / -1;
-    justify-content: flex-start;
-  }
-}
-
 @media (max-width: 1100px) {
   .operator-login {
     --control-keypad: 80px;
@@ -5008,7 +5241,7 @@ body,
   }
 
   .shift-card__body {
-    grid-template-columns: minmax(150px, 36%) minmax(0, 1fr);
+    grid-template-columns: minmax(150px, 38%) minmax(0, 1fr);
   }
 
   .shift-card__product {
@@ -5017,10 +5250,6 @@ body,
 
   .shift-card__details {
     gap: 2px;
-  }
-
-  .shift-card__meta {
-    font: 18px/20px var(--font-mono);
   }
 }
 
@@ -5105,8 +5334,8 @@ body,
   min-height: 72px;
   padding-block: var(--sp-1);
   gap: var(--sp-3);
-  /* line · shift + pills + expand always fit one row; the ≤1599px two-column
-     fallback is for the expanded bar's action rail, not for this one. */
+  /* line · shift + pills + expand always fit one row, exactly like the expanded
+     bar above — neither has a two-row fallback any more. */
   grid-template-columns: minmax(0, 1fr) auto auto;
 }
 

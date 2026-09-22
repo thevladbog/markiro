@@ -13,6 +13,11 @@ on:
         required: false
         type: string
         default: ""
+      national_catalog_gtins:
+        description: Optional comma-separated GTIN-14 values for sanitized product category metadata
+        required: false
+        type: string
+        default: ""
       recurring_services:
         description: Run the read-only recurring-services migration diagnostic
         required: true
@@ -46,6 +51,7 @@ jobs:
           YC_APP_DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.YC_APP_DEPLOY_SSH_PRIVATE_KEY }}
           RUN_NATIONAL_CATALOG_DIAGNOSTIC: ${{ inputs.national_catalog }}
           NATIONAL_CATALOG_DIAGNOSTIC_CATEGORY_IDS: ${{ inputs.national_catalog_category_ids }}
+          NATIONAL_CATALOG_DIAGNOSTIC_GTINS: ${{ inputs.national_catalog_gtins }}
           RUN_RECURRING_SERVICES_DIAGNOSTIC: ${{ inputs.recurring_services }}
         run: |
           set -euo pipefail

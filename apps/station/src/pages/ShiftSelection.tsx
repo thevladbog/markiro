@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button, Pager } from "@markiro/ui";
+import { parseShiftTaskBarcode, SHIFT_TASK_BARCODE_PREFIX } from "@markiro/domain";
 import { StationApiError, type StationClient } from "../lib/api-client.js";
 import { OfflineGrantDeniedError } from "../lib/journal.js";
 import { paginate } from "../lib/pagination.js";
 import { FloorFooter } from "../ui/FloorFooter.js";
 import { ShiftCard } from "../ui/ShiftCard.js";
-import type { SqlExecutor } from "../lib/mirror.js";
+import { markServerClosedShifts, type SqlExecutor } from "../lib/mirror.js";
+import type { ScanSource } from "../lib/scan-source.js";
 import type { AcquireShiftEntry, ShiftEntryLease } from "../lib/shift-entry-lease.js";
 import { StationScreen } from "../ui/StationScreen.js";
 import {
@@ -23,9 +25,13 @@ interface ShiftListItem {
   number?: string | null;
   status: "planned" | "active" | "closing" | "closed";
   mode: "validation" | "aggregation";
+  /** Aggregation shifts that also build pallets; absent from pre-upgrade servers. */
+  palletsEnabled?: boolean;
   productName: string | null;
   /** Short operator-facing name from the catalog; null = use productName. */
   productPrintName?: string | null;
+  /** GTIN-14 of the product; seeds the card's fallback accent hue when there is no photo. */
+  gtin14?: string | null;
   plannedQty: number | null;
   plannedDate: string | null;
   productionDate?: string | null;
@@ -70,6 +76,8 @@ export interface ShiftSelectionProps {
   client: StationClient;
   exec?: SqlExecutor;
   acquireShiftEntry?: AcquireShiftEntry;
+  /** Scanner feed; omitted where the screen has no scanner (tests, gallery). */
+  source?: ScanSource;
   onSelected: (
     shift: { id: string; status: string; mode: string },
     lease?: ShiftEntryLease,
@@ -129,6 +137,7 @@ export function ShiftSelection({
   client,
   exec,
   acquireShiftEntry,
+  source,
   onSelected,
   onNew,
   onSetup,
@@ -148,7 +157,18 @@ export function ShiftSelection({
 }: ShiftSelectionProps) {
   const { t, i18n } = useTranslation();
   const [items, setItems] = useState<ShiftListItem[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setErrorState] = useState<string | null>(null);
+  /**
+   * Whether the visible message is a scan verdict. The 30 s poll clears the
+   * message it owns before every refresh; a verdict the operator has just been
+   * given ("this form is not in the list") is not that message, and wiping it
+   * mid-read leaves the scan looking ignored.
+   */
+  const scanNotice = useRef(false);
+  const setError = useCallback((text: string | null, source: "scan" | "task" = "task") => {
+    scanNotice.current = source === "scan" && text !== null;
+    setErrorState(text);
+  }, []);
   const [loadFailed, setLoadFailed] = useState(false);
   const [loading, setLoading] = useState(true);
   /**
@@ -194,7 +214,9 @@ export function ShiftSelection({
       if (initialForClient) setLoading(true);
       if (manual) setManualRefreshing(true);
       setLoadFailed(false);
-      setError(null);
+      // An operator-initiated refresh answers the scan verdict, so it may clear
+      // it; the background poll may not.
+      if (manual || !scanNotice.current) setError(null);
       const shiftRequest = client
         .get<{ items: ShiftListItem[] }>("/shifts")
         .then(async (response) => {
@@ -211,6 +233,12 @@ export function ShiftSelection({
             return;
           }
           if (!mounted.current || listRequest.current?.id !== id) return;
+          // Carry the server's own closures into the mirror before anything
+          // reads it: a shift closed elsewhere must stop counting as active.
+          if (exec)
+            await markServerClosedShifts(exec, response.items).catch((err: unknown) => {
+              console.error("station: closed shift mirror reconciliation failed", err);
+            });
           setItems(visibleItems);
           loadedClient.current = client;
           for (const shift of visibleItems) {
@@ -250,7 +278,7 @@ export function ShiftSelection({
         setManualRefreshing(false);
       });
     },
-    [client, exec, onCoordinatedRefresh, t],
+    [client, exec, onCoordinatedRefresh, setError, t],
   );
 
   useEffect(() => {
@@ -357,15 +385,74 @@ export function ShiftSelection({
     }
   }
 
-  async function open(shift: ShiftListItem): Promise<void> {
+  async function open(
+    shift: ShiftListItem,
+    entryMethod: "list" | "task_barcode" = "list",
+  ): Promise<void> {
     await enterShift(shift, () =>
-      client.post<{ id: string; status: string; mode: string }>(`/shifts/${shift.id}/open`),
+      client.post<{ id: string; status: string; mode: string }>(`/shifts/${shift.id}/open`, {
+        entryMethod,
+      }),
     );
   }
 
   async function rejoin(shift: ShiftListItem): Promise<void> {
     await enterShift(shift, () => Promise.resolve(shift));
   }
+
+  // `open`/`rejoin` are plain functions redefined every render (they close
+  // over render-local state), but the barcode scan can fire between renders.
+  // Refs hold the latest versions so the subscription effect below neither
+  // reads a stale closure nor has to resubscribe on every render.
+  const openRef = useRef(open);
+  openRef.current = open;
+  const rejoinRef = useRef(rejoin);
+  rejoinRef.current = rejoin;
+
+  useEffect(() => {
+    if (!source || alternateActive) return;
+    return source.start((raw) => {
+      // A scanner-appended terminator or stray whitespace must not change
+      // which handler claims the scan, nor make a well-formed token fail to
+      // parse -- trim once and use that value for both decisions below.
+      const trimmed = raw.trim();
+      // Every other scan on this screen belongs to somebody else -- a unit code,
+      // an inventory form. Staying silent on them is the difference between a
+      // shared scanner and one that argues with its neighbours.
+      if (!trimmed.startsWith(SHIFT_TASK_BARCODE_PREFIX)) return;
+      // A screen that is busy entering a shift should not report scan errors
+      // for any branch below, malformed tokens included.
+      if (controlsDisabled) return;
+      const shiftId = parseShiftTaskBarcode(trimmed);
+      if (shiftId === null) {
+        setError(t("shifts.barcodeFailed"), "scan");
+        return;
+      }
+      // The initial `GET /shifts` for this client has not settled yet, so an
+      // empty `items` cannot be trusted to mean "no match in the list" -- it
+      // just means the list has not arrived. Say so instead of misdirecting
+      // the operator to another terminal.
+      if (loading) {
+        setError(t("shifts.barcodeListLoading"), "scan");
+        return;
+      }
+      // `items`, not `openItems`: the closed shift is in the list, and naming it
+      // beats sending an operator to look for a shift that already ended.
+      const match = items.find((shift) => shift.id === shiftId);
+      if (!match) {
+        setError(t("shifts.barcodeNotOnLine"), "scan");
+        return;
+      }
+      if (match.status === "closed" || match.status === "closing") {
+        setError(t("shifts.barcodeClosed"), "scan");
+        return;
+      }
+      setError(null);
+      void (match.status === "active"
+        ? rejoinRef.current(match)
+        : openRef.current(match, "task_barcode"));
+    });
+  }, [alternateActive, controlsDisabled, items, loading, setError, source, t]);
 
   async function enterRoute(enter: () => void, options?: ShiftSelectionRouteIntentOptions) {
     if (!onRouteIntent) {
@@ -507,16 +594,21 @@ export function ShiftSelection({
                   key={shift.id}
                   number={shift.number ?? null}
                   productName={shift.productPrintName ?? shift.productName}
+                  productFullName={shift.productPrintName ? shift.productName : null}
+                  gtin={shift.gtin14 ?? null}
                   plannedDate={shift.plannedDate}
+                  plannedDateLabel={t("shifts.shiftDateShort")}
                   productionDate={shift.productionDate ?? null}
                   productionDateLabel={t("shifts.productionShort")}
                   locale={i18n.resolvedLanguage ?? i18n.language}
                   plannedQty={shift.plannedQty}
                   mode={shift.mode}
+                  palletsEnabled={shift.mode === "aggregation" && shift.palletsEnabled === true}
                   status={shift.status}
                   modeLabel={
                     shift.mode === "aggregation" ? t("shifts.aggregation") : t("shifts.validation")
                   }
+                  palletsLabel={t("shifts.withPallets")}
                   statusLabel={
                     shift.status === "closing"
                       ? t("shifts.closing")

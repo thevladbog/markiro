@@ -54,6 +54,10 @@ describe.skipIf(!ready)("template and pallet admission actual HTTP owners", () =
   async function fixture(labelEditorEnabled = true) {
     const agent = request.agent(app.getHttpServer());
     const tenantId = await signUpAndActivate(agent);
+    // Starting an aggregation shift needs an SSCC source (see
+    // `SsccService.assertIssuerConfiguredForActivation`); the GLN itself is
+    // not under test here.
+    await agent.put("/org/profile").send({ gln: "4601112222005" }).expect(200);
     const planVersionId = await createPublishedPlan(db, {
       maxLines: 20,
       maxStations: 20,

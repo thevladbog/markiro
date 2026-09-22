@@ -46,8 +46,44 @@ class MetaStore(private val db: HandheldDatabase) {
         const val WRITEOFF_LAST_SUCCESS_AT = "writeoff_sync_last_success_at"
         /** When the bootstrap last landed; the «данные на 10:42» stamp. */
         const val WRITEOFF_BOOTSTRAP_AT = "writeoff_bootstrap_at"
-        /** The box-registry revision this device has fully applied; the next refresh asks for a delta from here. */
-        const val WRITEOFF_REGISTRY_UNTIL = "writeoff_registry_until"
+        /**
+         * The box-registry revision this device has fully applied; the next
+         * refresh asks for a delta from here. The stored key keeps its
+         * write-off name so an installed device keeps its cursor across the
+         * rename of the table it feeds.
+         */
+        const val BOX_REGISTRY_UNTIL = "writeoff_registry_until"
+
+        /** Memberships' own pin, for the identical reason every other channel here has one. */
+        const val SYNC_PENDING_MEMBERSHIP_COUNT = "sync_pending_membership_count"
+
+        /**
+         * The membership DTOs a batch in flight actually pinned, as JSON.
+         *
+         * A count alone is not enough for THIS channel: `WarehousePallets.remove`
+         * deletes a membership row at any status, so a `sent` row can vanish
+         * while its batch is still in flight. Rebuilding the retry's body from a
+         * live `sent()` read would then resend the identical `batchId` with
+         * fewer memberships, and the server answers `station_batch_mismatch`
+         * (409) forever -- wedging every channel on the device. The snapshot is
+         * written under the same commit as the pin, so a local delete cannot
+         * change the bytes a pinned batch resends.
+         *
+         * `SYNC_PENDING_MEMBERSHIP_COUNT` stays the authority on how many rows a
+         * pin holds and this key on which bytes they are; a pin left by a build
+         * that predates this key is materialised from `sent()` before its first
+         * retry, and abandoned if its rows are already gone.
+         */
+        const val SYNC_PENDING_MEMBERSHIP_SNAPSHOT = "sync_pending_membership_snapshot"
+
+        /** Membership removals' own pin, kept separately for the same reason memberships have one. */
+        const val SYNC_PENDING_MEMBERSHIP_REMOVAL_COUNT = "sync_pending_membership_removal_count"
+
+        /** When the pallet bootstrap last landed; the «данные на 10:42» stamp. */
+        const val PALLET_BOOTSTRAP_AT = "pallet_bootstrap_at"
+
+        /** The SSCC issuer prefix the pallet bootstrap carried, for locally minted pallet SSCCs. */
+        const val PALLET_BOOTSTRAP_ISSUER_PREFIX = "pallet_bootstrap_issuer_prefix"
 
         /** The in-flight document, so a retry re-sends exactly that row and nothing else. */
         fun writeoffPin(documentId: String) = "writeoff_pending:$documentId"

@@ -336,6 +336,18 @@ fieldset.mk-nc-comparison-row,
   min-width: 140px;
 }
 
+/* Layout lives in a class so the `hidden` attribute of an inactive tab panel
+   keeps its user-agent `display: none`; an inline display would override it. */
+.mk-product-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.mk-product-form[hidden] {
+  display: none;
+}
+
 .mk-product-form-fields {
   display: flex;
   flex-direction: column;
@@ -346,13 +358,15 @@ fieldset.mk-nc-comparison-row,
   border: 0;
 }
 
+.mk-product-form-tabs {
+  margin-bottom: var(--sp-4);
+}
+
 .mk-product-regulatory {
   display: flex;
   flex-direction: column;
   gap: 24px;
-  margin-top: 24px;
-  border-top: 1px solid var(--line);
-  padding-top: 24px;
+  margin-top: 0;
 }
 
 .mk-regulatory form,
@@ -361,6 +375,35 @@ fieldset.mk-nc-comparison-row,
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+/* One column, like the basic tab: a group per requirement level, each field
+   with its label, control and source hint in the same rhythm. */
+.mk-regulatory-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.mk-regulatory-group h4 {
+  margin: 0;
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+  font-weight: 600;
+}
+
+.mk-regulatory-attribute-control {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.mk-regulatory-hint {
+  margin: 0;
+  color: var(--fg-3);
+  font: var(--text-body-sm);
+  overflow-wrap: anywhere;
 }
 
 .mk-regulatory-meta {
@@ -435,11 +478,15 @@ fieldset.mk-nc-comparison-row,
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-width: 0;
 }
+/* Number and unit on one row; the unit select has no visible label, so both
+   controls share a baseline when aligned to the end of the row. */
 .mk-regulatory-quantity {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) 150px;
   gap: 12px;
+  align-items: end;
 }
 .mk-regulatory-list {
   margin: 0;

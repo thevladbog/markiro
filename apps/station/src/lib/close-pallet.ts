@@ -9,7 +9,11 @@ import {
   stationOperatorIsCurrentlyActive,
 } from "./offline-grants/admission.js";
 import { sampleGrantClock, type GrantClockSample } from "./offline-grants/clock.js";
-import { readShiftExecutionProjection } from "./offline-grants/semantic.js";
+import {
+  closeWithConflictVerdict,
+  readExecutionToBind,
+  readShiftExecutionProjection,
+} from "./offline-grants/semantic.js";
 import { OfflineGrantDeniedError } from "./journal.js";
 
 /**
@@ -134,10 +138,17 @@ export async function closeCurrentPalletWithOfflineGrant(
       device_id: string;
       owner_kind: "station";
       credential_epoch: number;
+      mode: "observe" | "strict";
     }>(
-      "SELECT tenant_id,device_id,owner_kind,credential_epoch FROM offline_grant_install_state WHERE id=1",
+      "SELECT tenant_id,device_id,owner_kind,credential_epoch,mode FROM offline_grant_install_state WHERE id=1",
     );
     if (!state) return closeCurrentPalletLegacy(deps, shiftId, operatorId);
+    // Same rule as the box: a pallet on an unbindable shift still closes where
+    // grants only observe.
+    const execution = await readExecutionToBind(state.mode, () =>
+      readShiftExecutionProjection(deps.exec, shiftId),
+    );
+    if (!execution) return closeCurrentPalletLegacy(deps, shiftId, operatorId);
     if (!operatorId) throw new OfflineGrantDeniedError("operator_unauthorized");
     if (!(await stationOperatorIsCurrentlyActive(deps.exec, operatorId)))
       throw new OfflineGrantDeniedError("operator_unauthorized");
@@ -169,53 +180,58 @@ export async function closeCurrentPalletWithOfflineGrant(
       boxCount: pallet.boxCount,
       closedAt,
     };
-    const committed = await new StationGrantAdmission(deps.exec, clock).commitCompletion({
-      operatorId,
-      intent: {
-        owner: {
-          tenantId: state.tenant_id,
-          deviceId: state.device_id,
-          kind: state.owner_kind,
-          credentialEpoch: state.credential_epoch,
-        },
-        capability: "shift.start.v1",
-        taskId: shiftId,
-        snapshotDigest: binding?.snapshot_digest ?? "missing",
-        eventId,
-        eventType: "shift.pallet.close.v1",
-        cost: {},
-      },
-      execution: await readShiftExecutionProjection(deps.exec, shiftId),
-      event: {
-        eventId,
-        shiftId,
-        palletId: pallet.palletId,
-        sscc,
-        boxCount: pallet.boxCount,
-        closedAt,
-        operatorId,
-        terminalId: deps.terminalId,
-      },
-      facts: { containers: 1 },
-      result,
-      wrapCommand(command) {
-        return {
-          sql: "INSERT INTO offline_grant_pallet_close_commands(event_id,payload_json) VALUES(?,?)",
-          values: [
+    const committed = await closeWithConflictVerdict(
+      () =>
+        new StationGrantAdmission(deps.exec, clock).commitCompletion({
+          operatorId,
+          intent: {
+            owner: {
+              tenantId: state.tenant_id,
+              deviceId: state.device_id,
+              kind: state.owner_kind,
+              credentialEpoch: state.credential_epoch,
+            },
+            capability: "shift.start.v1",
+            taskId: shiftId,
+            snapshotDigest: binding?.snapshot_digest ?? "missing",
             eventId,
-            JSON.stringify({
-              grantCommand: JSON.parse(String(command.values[1])) as unknown,
-              poolRowId: pool.rowid,
-              serial: pool.serial,
-              palletId: pallet.palletId,
-              sscc,
-              closedAt,
-              operatorId,
-            }),
-          ],
-        };
-      },
-    });
+            eventType: "shift.pallet.close.v1",
+            cost: {},
+          },
+          execution,
+          event: {
+            eventId,
+            shiftId,
+            palletId: pallet.palletId,
+            sscc,
+            boxCount: pallet.boxCount,
+            closedAt,
+            operatorId,
+            terminalId: deps.terminalId,
+          },
+          facts: { containers: 1 },
+          result,
+          wrapCommand(command) {
+            return {
+              sql: "INSERT INTO offline_grant_pallet_close_commands(event_id,payload_json) VALUES(?,?)",
+              values: [
+                eventId,
+                JSON.stringify({
+                  grantCommand: JSON.parse(String(command.values[1])) as unknown,
+                  poolRowId: pool.rowid,
+                  serial: pool.serial,
+                  palletId: pallet.palletId,
+                  sscc,
+                  closedAt,
+                  operatorId,
+                }),
+              ],
+            };
+          },
+        }),
+      "OFFLINE_GRANT_PALLET_CLOSE_CONFLICT",
+    );
+    if (!committed) return { status: "already-closed" };
     if (!committed.decision.allow)
       throw new OfflineGrantDeniedError(committed.decision.reason ?? "denied");
     return committed.result as ClosePalletResult;

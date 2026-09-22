@@ -345,7 +345,9 @@ describe("SEO generators", () => {
       .sort()
       .at(-1);
 
-    expect(newest).toBe("2026-09-11");
+    // The pallet reissue of MKR-INS-08/09 made 2026-09-19 the newest
+    // effective date in the registry.
+    expect(newest).toBe("2026-09-19");
     expect(sitemap).toMatch(
       new RegExp(`<loc>https://markiro\\.app/legal/</loc>[\\s\\S]*?<lastmod>${newest}</lastmod>`),
     );

@@ -49,4 +49,22 @@ class ReplacementReadinessReviewTest {
         } finally { db.close() }
     }
 
+    @Test fun warehouseMembershipQueuesAndRejectedConflictsPreventFalseReadiness() = runTest {
+        val db=Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(),HandheldDatabase::class.java).allowMainThreadQueries().build()
+        db.initializeRecoveryForTest()
+        try {
+            val pending = PalletMembershipEntity("p", "box", "t", null, MembershipStatus.PENDING, null, null, null, null)
+            db.palletMembershipDao().insert(pending)
+            db.palletMembershipDao().insert(pending.copy(sscc="sent", status=MembershipStatus.SENT))
+            db.palletMembershipDao().insert(pending.copy(sscc="rejected", status=MembershipStatus.REJECTED))
+            db.palletMembershipRemovalDao().insert(PalletMembershipRemovalEntity(palletId="p", sscc="removed", removedAt="t", operatorId=null, status=RemovalStatus.PENDING))
+            val snapshot=ReplacementReadiness(db).snapshot()
+            assertEquals(3L, snapshot.getValue("pending").jsonObject.getValue("boxes").jsonPrimitive.long)
+            assertEquals(1L, snapshot.getValue("conflicts").jsonPrimitive.long)
+            assertEquals(3L, db.recovery.summary().getValue("pallets"))
+            db.palletMembershipDao().acknowledge("p", "t")
+            assertEquals(0L, ReplacementReadiness(db).snapshot().getValue("conflicts").jsonPrimitive.long)
+        } finally { db.close() }
+    }
+
 }

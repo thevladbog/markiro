@@ -18,8 +18,10 @@ import {
 } from "react";
 import { Alert, Button, Card, PinPad, SignalOverlay } from "@markiro/ui";
 import type { OperatorMirrorRecord } from "@markiro/db/station-sqlite";
+import { SHIFT_CLOSE_REASON_CODES } from "@markiro/domain";
 import type { StationInventoryBundleManifest } from "@markiro/domain";
 
+import { FloorChoiceGroup } from "../ui/FloorChoiceGroup.js";
 import i18n from "../i18n/index.js";
 import type { BoxPrintErrorCode, ClosedBoxSummary } from "../lib/boxes.js";
 import type { HardwareContract, UsbPrinterInfo } from "../lib/hardware.js";
@@ -70,7 +72,20 @@ import {
   type GalleryLocale,
   type GalleryRequest,
 } from "./gallery-fixtures.js";
-import { galleryProductImage, galleryProductImageExecutor } from "./gallery-product-image.js";
+import {
+  galleryProductImage,
+  galleryProductImageExecutor,
+  galleryProductImageFor,
+} from "./gallery-product-image.js";
+
+/**
+ * The second card on every page carries a studio photo (shot on white) and the
+ * first a cut-out, so one screenshot shows both framings the shift card has to
+ * get right.
+ */
+function galleryShiftProductId(page: number, index: number): string {
+  return `gallery-shift-product-${page}-${index}${index === 1 ? "-studio" : ""}`;
+}
 
 export interface StationScreenGalleryProps {
   request: GalleryRequest;
@@ -199,12 +214,13 @@ export function StationScreenGallery({ request }: StationScreenGalleryProps) {
           shortLabel: copy.updateShort,
         },
         operatorControl: (
-          <Button size="floor" variant="secondary">
+          <Button size="floor" variant="secondary" className="station-rail-button">
             {copy.changeOperator}
           </Button>
         ),
         windowControl: (
           <WindowModeControl
+            compact
             snapshot={{
               mode: "locked",
               pending: false,
@@ -1425,34 +1441,48 @@ function ShiftFixture({ variant, locale }: { variant: string; locale: GalleryLoc
       ? [
           {
             number: "AUG26-041",
-            productName: ru
+            printName: ru ? "Молоко безлактозное 3,2%" : "Lactose-free milk 3.2%",
+            fullName: ru
               ? "Молоко ультрапастеризованное безлактозное обогащённое витаминами A и D для детского питания с массовой долей жира 3,2%, 930 мл"
               : "Ultra-pasteurized lactose-free milk enriched with vitamins A and D for children, 3.2% fat, 930 ml",
+            gtin: "04600682000017",
             active: false,
             mode: "validation" as const,
             plannedQty: 10_000,
           },
           {
             number: "AUG26-040/S",
-            productName: ru
+            printName: ru ? "Жигулёвское 0,5" : "Zhigulevskoye 0.5",
+            fullName: ru
               ? "Пиво светлое фильтрованное пастеризованное «Жигулёвское», 0,5 л"
               : "Zhigulevskoye light filtered pasteurized beer, 0.5 l",
+            gtin: "04600682000024",
             active: true,
             mode: "aggregation" as const,
+            palletsEnabled: true,
             plannedQty: null,
           },
         ]
       : [
           {
             number: "AUG26-039",
-            productName: ru ? "Вода питьевая газированная, 1 л" : "Sparkling drinking water, 1 l",
+            printName: ru ? "Вода газированная 1 л" : "Sparkling water 1 l",
+            fullName: ru ? "Вода питьевая газированная, 1 л" : "Sparkling drinking water, 1 l",
+            gtin: "04600682000031",
             active: false,
             mode: "validation" as const,
             plannedQty: 4_000,
           },
           {
             number: "AUG26-038",
-            productName: ru ? "Квас хлебный фильтрованный, 1,5 л" : "Filtered bread kvass, 1.5 l",
+            // Наименования для печати у товара нет, и заголовком становится
+            // полное каталожное имя. Оно длинное — именно этот случай
+            // обрезался на полуслове, пока заголовок держал три строки.
+            printName: ru
+              ? "Сидр полусухой газированный «ДИКИЙ КРЕСТ» яблочный, 0,45 л"
+              : "Semi-dry sparkling apple cider «DICKIY CREST», 0.45 l",
+            fullName: null,
+            gtin: "04600682000048",
             active: false,
             mode: "aggregation" as const,
             plannedQty: 2_400,
@@ -1480,13 +1510,18 @@ function ShiftFixture({ variant, locale }: { variant: string; locale: GalleryLoc
               <ShiftCard
                 key={shift.number}
                 number={shift.number}
-                productName={shift.productName}
+                productName={shift.printName}
+                productFullName={shift.fullName}
+                gtin={shift.gtin}
                 plannedDate={`2026-08-${String(21 - index - (page - 1) * 2).padStart(2, "0")}`}
+                plannedDateLabel={ru ? "Смена" : "Shift"}
                 productionDate={index === 0 ? "2026-08-15" : null}
                 productionDateLabel={ru ? "Производство" : "Produced"}
                 locale={locale}
                 plannedQty={shift.plannedQty}
                 mode={shift.mode}
+                palletsEnabled={"palletsEnabled" in shift && shift.palletsEnabled === true}
+                palletsLabel={ru ? "Паллеты" : "Pallets"}
                 status={shift.active ? "active" : "planned"}
                 modeLabel={
                   shift.mode === "aggregation"
@@ -1511,8 +1546,8 @@ function ShiftFixture({ variant, locale }: { variant: string; locale: GalleryLoc
                 disabled={false}
                 onSelect={() => undefined}
                 exec={galleryProductImageExecutor}
-                productId={`gallery-shift-product-${page}-${index}`}
-                image={galleryProductImage}
+                productId={galleryShiftProductId(page, index)}
+                image={galleryProductImageFor(galleryShiftProductId(page, index))}
               />
             ))}
           </div>
@@ -1793,37 +1828,85 @@ function galleryRecentOperations(): RecentOperation[] {
 function WorkOverlayFixture({ overlay, locale }: { overlay: string; locale: GalleryLocale }) {
   const ru = locale === "ru";
   const clear = overlay === "clear-confirm";
+  if (overlay === "close-reason") return <CloseReasonOverlayFixture locale={locale} />;
   return (
     <StationScreen title={ru ? "Рабочая смена" : "Active shift"}>
       <div className="gallery-centered-card">
+        {/* Same classes as the real overlays in WorkScreen, so the reviewed
+            spacing here is the spacing the floor gets. */}
         <Alert
           tone="warn"
+          className="work-overlay"
           title={
-            clear
-              ? ru
-                ? "Очистить короб?"
-                : "Clear the box?"
-              : ru
-                ? "Есть неотправленные операции"
-                : "Operations are still pending"
+            <span className="work-overlay__title">
+              {clear
+                ? ru
+                  ? "Очистить короб?"
+                  : "Clear the box?"
+                : ru
+                  ? "Есть неотправленные операции"
+                  : "Operations are still pending"}
+            </span>
           }
         >
-          <p>
-            {clear
-              ? ru
-                ? "Все коды текущего тестового короба будут освобождены."
-                : "All codes in the current synthetic box will be released."
-              : ru
-                ? "7 операций сохранены локально и ещё не синхронизированы."
-                : "7 operations are stored locally and have not synced yet."}
-          </p>
-          <div className="gallery-two-actions">
-            <Button size="floor">
-              {clear ? (ru ? "Очистить" : "Clear") : ru ? "Выйти" : "Exit"}
-            </Button>
-            <Button size="floor" variant="secondary">
-              {ru ? "Остаться" : "Stay"}
-            </Button>
+          <div className="work-overlay__body">
+            <p>
+              {clear
+                ? ru
+                  ? "Все коды текущего тестового короба будут освобождены."
+                  : "All codes in the current synthetic box will be released."
+                : ru
+                  ? "7 операций сохранены локально и ещё не синхронизированы."
+                  : "7 operations are stored locally and have not synced yet."}
+            </p>
+            <div className="work-overlay__actions">
+              <Button size="floor">
+                {clear ? (ru ? "Очистить" : "Clear") : ru ? "Выйти" : "Exit"}
+              </Button>
+              <Button size="floor" variant="secondary">
+                {ru ? "Остаться" : "Stay"}
+              </Button>
+            </div>
+          </div>
+        </Alert>
+      </div>
+    </StationScreen>
+  );
+}
+
+/**
+ * The shift-close discrepancy prompt, built from the same parts as
+ * WorkScreen's own overlay: it is the tallest one the floor sees, and the only
+ * one whose body is a control rather than a sentence.
+ */
+function CloseReasonOverlayFixture({ locale }: { locale: GalleryLocale }) {
+  const t = i18n.getFixedT(locale);
+  const [reason, setReason] = useState<string>("production_defect");
+  return (
+    <StationScreen title={locale === "ru" ? "Рабочая смена" : "Active shift"}>
+      <div className="gallery-centered-card">
+        <Alert
+          tone="warn"
+          className="work-overlay"
+          title={<span className="work-overlay__title">{t("work.closeReasonTitle")}</span>}
+        >
+          <div className="work-overlay__body">
+            <p>{t("work.closeReasonDetail")}</p>
+            <FloorChoiceGroup
+              label={t("work.closeReasonTitle")}
+              choices={SHIFT_CLOSE_REASON_CODES.map((code) => ({
+                value: code,
+                label: t(`work.closeReasons.${code}`),
+              }))}
+              value={reason}
+              onChange={setReason}
+            />
+            <div className="work-overlay__actions">
+              <Button size="floor">{t("work.closeReasonConfirm")}</Button>
+              <Button size="floor" variant="secondary">
+                {t("work.stay")}
+              </Button>
+            </div>
           </div>
         </Alert>
       </div>

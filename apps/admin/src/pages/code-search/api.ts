@@ -168,6 +168,15 @@ export interface BoxCardDto {
 export interface PalletCardBoxDto {
   id: string;
   sscc: string | null;
+  /**
+   * The shift this box CLOSED in -- its own origin, not the pallet's. On a
+   * warehouse pallet the members come from arbitrary shifts, and that is
+   * exactly what a manager needs to see.
+   */
+  shiftId: string;
+  shiftNumber: string | null;
+  /** That shift's effective production day (`YYYY-MM-DD`). */
+  productionDate: string | null;
   /** Live items only, the same figure the box list reports for this box. */
   itemCount: number;
   closedAt: string | null;
@@ -175,12 +184,37 @@ export interface PalletCardBoxDto {
   disassembledAt: string | null;
 }
 
+/** `pallet_membership_rejections.reason` values (spec §1.4). */
+export type PalletMembershipRejectionReason =
+  | "already_on_pallet"
+  | "not_found"
+  | "not_closed"
+  | "disassembled"
+  | "pallet_closed"
+  | "product_mismatch";
+
+/** One membership the server refused for this pallet. */
+export interface PalletCardRejectionDto {
+  /** 20-значный код с GS1 AI "00", как и любой SSCC в кабинете. */
+  boxSscc: string;
+  boxId: string | null;
+  /** A known reason renders translated; an unknown one (newer server) renders raw. */
+  reason: PalletMembershipRejectionReason | (string & {});
+  /** The pallet that already holds the box, for `already_on_pallet`; null while that rival is still open. */
+  winningPalletSscc: string | null;
+  addedAt: string;
+  recordedAt: string;
+}
+
 /** Mirrors `apps/api/src/modules/code-search/dto.ts`'s `PalletCardDto`, `Date` fields as `string`. */
 export interface PalletCardDto {
   id: string;
   sscc: string | null;
   status: "open" | "closed" | "disassembled";
-  shiftId: string;
+  /** `warehouse` is built on a handheld from closed boxes of arbitrary shifts. */
+  kind: "production" | "warehouse";
+  /** Null for a warehouse pallet, which is not tied to any shift. */
+  shiftId: string | null;
   /** Saved human-readable shift number, e.g. `AUG26-003/S`. */
   shiftNumber: string | null;
   productId: string | null;
@@ -201,6 +235,8 @@ export interface PalletCardDto {
     disaggregationDocumentId: string | null;
     disaggregationDocNo: string | null;
   }[];
+  /** Always empty for a production pallet, whose boxes join it through their own closure. */
+  rejections: PalletCardRejectionDto[];
 }
 
 /** Shared TanStack Query cache key prefix for code-search queries (all variants). */

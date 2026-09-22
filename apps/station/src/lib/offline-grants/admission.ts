@@ -155,6 +155,32 @@ export class StationGrantAdmission {
     return { devices, tasks };
   }
 
+  /**
+   * The installed mode as this admission itself reads it. Entry-time policy
+   * for cases that never produce a decision (no execution projection, a
+   * binding that throws) must read the mode from here rather than from a
+   * snapshot its caller took earlier: a readiness refresh can install a new
+   * mode while entry is still waiting on the network.
+   */
+  async installedMode(): Promise<"observe" | "strict"> {
+    return (await this.context()).mode;
+  }
+
+  /**
+   * Whether an approved policy governs this device at all. The configuration
+   * receipt carries a policy revision only once the platform has approved one
+   * and attached it; without that the server answers issuance with
+   * `policy_not_configured`, and the configuration trigger refuses to move the
+   * installed mode. There is then no authority to confirm, so nothing for the
+   * floor to be told about.
+   */
+  async hasApprovedPolicy(): Promise<boolean> {
+    const [row] = await this.exec.all<{ policy_revision: string | null }>(
+      "SELECT policy_revision FROM offline_grant_configuration WHERE id=1",
+    );
+    return typeof row?.policy_revision === "string" && row.policy_revision.length > 0;
+  }
+
   async assessNewWork(intent: GrantIntent): Promise<StationAdmissionDecision> {
     if (await replacementBlocksNewWork(this.exec))
       return { allow: false, reason: "missing_grant", mode: "strict" };
