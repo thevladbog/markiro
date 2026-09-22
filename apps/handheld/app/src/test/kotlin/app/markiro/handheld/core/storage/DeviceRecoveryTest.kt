@@ -86,11 +86,16 @@ class DeviceRecoveryTest {
             vm.onDigit('1')
             vm.onConfirm()
             advanceUntilIdle()
-            kotlinx.coroutines.withTimeout(5_000) { vm.state.first { it is app.markiro.handheld.feature.signin.SignInUi.Pin && it.operatorName == "Operator" } }
+            // Room runs on real worker threads; a virtual timeout can expire before its query returns.
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                kotlinx.coroutines.withTimeout(5_000) { vm.state.first { it is app.markiro.handheld.feature.signin.SignInUi.Pin && it.operatorName == "Operator" } }
+            }
             "4821".forEach(vm::onDigit)
             vm.onConfirm()
             advanceUntilIdle()
-            kotlinx.coroutines.withTimeout(5_000) { session.state.first { it.operator != null } }
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                kotlinx.coroutines.withTimeout(5_000) { session.state.first { it.operator != null } }
+            }
             assertEquals("op-1", session.state.value.operator?.operatorId)
             assertEquals("unknown", db.boxDao().get("box-pending")?.printState)
             assertEquals(1L, recovery.summary()["unknownPrints"])
