@@ -37,7 +37,7 @@ describe.skipIf(!databaseUrl)("working device retention forward migration", () =
         async (table) =>
           (
             await pool.query(
-              `SELECT *${beforeEpochMigration && table === "station_devices" ? ", 1 AS credential_epoch" : ""} FROM ${table} ORDER BY id`,
+              `SELECT *${beforeEpochMigration && table === "station_devices" ? ", 1 AS credential_epoch, 0 AS security_revocation_revision" : ""} FROM ${table} ORDER BY id`,
             )
           ).rows,
       ),

@@ -53,6 +53,17 @@ function noReplacementSelect() {
   };
 }
 
+function unfencedSourceSelect(table: unknown) {
+  if (table === schema.stationDevices)
+    return {
+      where: () => ({ for: () => Promise.resolve([{ kind: "station" }]) }),
+    };
+  if (table === schema.workingDeviceReplacementExecutions || table === schema.deviceGrantEvidence) {
+    return { where: () => Promise.resolve([]) };
+  }
+  return undefined;
+}
+
 describe("StationScansService box registry versioning", () => {
   it("advances a closed box with the monotonic registry cursor expression in the batch transaction", async () => {
     const boxUpdates: Array<Record<string, unknown>> = [];
@@ -78,13 +89,14 @@ describe("StationScansService box registry versioning", () => {
             };
           },
           select: () => ({
-            from: () => ({
-              where: () => ({
-                orderBy: () => ({
-                  for: () => Promise.resolve([{ id: shiftId, openedAt: new Date() }]),
+            from: (table: unknown) =>
+              unfencedSourceSelect(table) ?? {
+                where: () => ({
+                  orderBy: () => ({
+                    for: () => Promise.resolve([{ id: shiftId, openedAt: new Date() }]),
+                  }),
                 }),
-              }),
-            }),
+              },
           }),
           execute: (query: SQL) => {
             const rendered = new PgDialect().sqlToQuery(query);
@@ -208,6 +220,8 @@ describe("StationScansService box registry versioning", () => {
       }),
       select: () => ({
         from: (table: unknown) => {
+          const source = unfencedSourceSelect(table);
+          if (source) return source;
           if (table !== schema.shifts) throw new Error("Unexpected select table");
           return {
             where: (condition: SQL) => {
@@ -502,11 +516,12 @@ describe("StationScansService.applyBatch shift-ownership guard ordering (Finding
             }),
           }),
           select: () => ({
-            from: () => ({
-              where: () => ({
-                orderBy: () => ({ for: () => Promise.resolve([]) }),
-              }),
-            }),
+            from: (table: unknown) =>
+              unfencedSourceSelect(table) ?? {
+                where: () => ({
+                  orderBy: () => ({ for: () => Promise.resolve([]) }),
+                }),
+              },
           }),
         };
         return fn(tx);

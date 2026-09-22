@@ -1,4 +1,8 @@
-import { quarantineReplacementSubmission } from "../device-licensing/device-replacement-evidence";
+import {
+  preflightReplacementSubmission,
+  withReplacementTransaction,
+  type ReplacementSubmission,
+} from "../device-licensing/device-replacement-evidence";
 import {
   withEvidenceTransaction,
   type EvidenceTransactionHook,
@@ -40,34 +44,35 @@ export class StationShiftCloseService {
       closedAt: input.closedAt.toISOString(),
     };
     const payloadDigest = createHash("sha256").update(JSON.stringify(normalized)).digest("hex");
-    if (!evidence)
-      await quarantineReplacementSubmission(
-        this.db,
-        tenantId,
-        deviceId,
-        "shift-closures",
-        input.eventId,
-        normalized,
-        async (tx) => {
-          const [existing] = await tx
-            .select({
-              digest: schema.stationShiftCloseEvents.payloadDigest,
-              deviceId: schema.stationShiftCloseEvents.deviceId,
-            })
-            .from(schema.stationShiftCloseEvents)
-            .where(
-              and(
-                eq(schema.stationShiftCloseEvents.tenantId, tenantId),
-                eq(schema.stationShiftCloseEvents.eventId, input.eventId),
-              ),
-            );
-          if (existing && (existing.deviceId !== deviceId || existing.digest !== payloadDigest))
-            throw new ConflictException("Close event payload changed");
-          return Boolean(existing);
-        },
-      );
+    const replacementSubmission: ReplacementSubmission | undefined = !evidence
+      ? {
+          tenantId: tenantId,
+          deviceId: deviceId,
+          operation: "shift-closures",
+          submissionId: input.eventId,
+          payload: normalized,
+          alreadyApplied: async (tx) => {
+            const [existing] = await tx
+              .select({
+                digest: schema.stationShiftCloseEvents.payloadDigest,
+                deviceId: schema.stationShiftCloseEvents.deviceId,
+              })
+              .from(schema.stationShiftCloseEvents)
+              .where(
+                and(
+                  eq(schema.stationShiftCloseEvents.tenantId, tenantId),
+                  eq(schema.stationShiftCloseEvents.eventId, input.eventId),
+                ),
+              );
+            if (existing && (existing.deviceId !== deviceId || existing.digest !== payloadDigest))
+              throw new ConflictException("Close event payload changed");
+            return Boolean(existing);
+          },
+        }
+      : undefined;
+    await preflightReplacementSubmission(this.db, replacementSubmission);
 
-    const result = await this.db.transaction(async (tx) =>
+    const result = await withReplacementTransaction(this.db, replacementSubmission, async (tx) =>
       withEvidenceTransaction(tx, evidence, async () => {
         const [existing] = await tx
           .select({

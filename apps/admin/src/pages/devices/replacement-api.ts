@@ -22,6 +22,7 @@ const conflicts = z.enum([
   "device_replacement_facts_too_large",
   "device_replacement_offline_boundary_unknown",
   "device_replacement_not_ready",
+  "client_upgrade_required",
 ]);
 export function replacementErrorKind(error: unknown): "authorization" | "conflict" | "uncertain" {
   if (!(error instanceof ApiRequestError)) return "uncertain";

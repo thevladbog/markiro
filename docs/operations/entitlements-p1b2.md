@@ -156,15 +156,17 @@ available capacity; the saved preparation is not a reservation of future capacit
 
 1. Record the database restore point, approved source SHA, API/edge image digests,
    and intended Station/Handheld artifacts. Keep all journals and pending evidence.
-2. Apply the full runtime migration chain through the replacement repair scheduling
-   migration `0167_device_replacement_repair_schedule` **before starting API readers**, including the repair worker.
+2. Apply the full runtime migration chain through
+   `0168_station_security_revocation` **before starting API readers**, including the repair worker.
    `0162_device_replacement_execution` adds intents/reports/executions;
    `0163_validate_device_replacement_execution` validates additive constraints after
    0162 commits; `0164_device_replacement_closure_ack` preserves cancellation ACKs;
    `0165_device_replacement_execution_preview` stores actor-bound execution previews;
    `0166_device_replacement_capabilities` retains epoch-bound capability observations;
    `0167_device_replacement_repair_schedule` adds durable retry timing and the due-row
-   index while preserving execution transition and completion guards.
+   index while preserving execution transition and completion guards;
+   `0168_station_security_revocation` adds a server-managed security generation so
+   a revoke retires recovery authority without changing the original revocation date.
    Use the runtime migrator, which retains its migration lock across validation
    transaction boundaries. Never rewrite applied migrations or run manual down SQL.
 3. Deploy the compatible API while old native clients remain accepted. The
@@ -277,6 +279,17 @@ unrevoke ordinary source authority. Its credential has purpose
 `replacement_evidence_recovery`, current epoch/execution binding and bounded
 24-hour expiry. Every request reloads that binding and is deny-by-default.
 
+An explicit security revoke on a completed replacement source retires unused
+recovery codes, deletes any active recovery key and supersedes its readiness
+intent. It advances the source
+credential epoch and execution revision even when the source was already revoked
+and no key is currently attached. The original `revokedAt` and released assignment
+remain unchanged. Repeating revoke is safe; a subsequent recovery attempt needs a
+new authorized issuance against the current execution revision. A previously
+queued issuance or old pairing code cannot restore that authority. Ordinary
+already-revoked devices with no live key or unused pairing code retain their
+existing duplicate-revoke no-op behavior.
+
 Allowed handlers read identity/verifier keys, upload retained evidence, return
 acknowledgements, close/leave existing work and publish recovery readiness.
 New task selection/start/join, allocation, productive grants, catalog mutation and
@@ -284,7 +297,12 @@ credential issuance are denied. Expired/unmanaged tenants can use only those
 explicit recovery handlers. First-delivered facts without pre-cutover proof remain
 quarantined (`unproven_pre_replacement_evidence` or the route-specific
 `unproven_pre_drain_scope`); exact already-committed receipts replay their original
-outcome. Evidence retention is not automatic acceptance of new business effects.
+outcome. Each legacy mutation rechecks the source fence while holding the source
+row lock in its business transaction, before acquiring task/container locks. If
+normal or emergency cutover wins, the transaction commits only the quarantine
+receipt; an earlier preflight is not proof of admission. Native retained-receipt
+and acknowledgement rules remain unchanged. Evidence retention is not automatic
+acceptance of new business effects.
 
 Native recovery retains sealed operator verifiers for permitted login, journals,
 outboxes and saved print bytes. Station's saved-label recovery opens only the exact

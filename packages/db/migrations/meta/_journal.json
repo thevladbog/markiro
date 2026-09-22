@@ -1177,6 +1177,13 @@
       "when": 1789624900021,
       "tag": "0167_device_replacement_repair_schedule",
       "breakpoints": true
+    },
+    {
+      "idx": 168,
+      "version": "7",
+      "when": 1789628901745,
+      "tag": "0168_station_security_revocation",
+      "breakpoints": true
     }
   ]
 }

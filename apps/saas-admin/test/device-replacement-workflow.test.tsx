@@ -22,7 +22,7 @@ vi.mock("../src/auth/client.js", () => ({
 }));
 let current = workflowPreparation();
 let bodies: Array<{ url: string; body: Record<string, unknown> }>;
-let failure: "lost" | "stale" | "auth" | null;
+let failure: "lost" | "stale" | "auth" | "upgrade" | null;
 let writable = true;
 let failRefresh = false;
 function setup(
@@ -69,6 +69,17 @@ beforeEach(async () => {
         failure = null;
         return response(
           { code: "device_replacement_stale", message: "Stale", requestId: PROJECT },
+          409,
+        );
+      }
+      if (failure === "upgrade") {
+        failure = null;
+        current = {
+          ...current,
+          drainEligibility: { status: "blocked", reasons: ["client_upgrade_required"] },
+        };
+        return response(
+          { code: "client_upgrade_required", message: "Replacement blocked", requestId: PROJECT },
           409,
         );
       }
@@ -425,4 +436,31 @@ it("shows client upgrade before drain while preserving emergency replacement", a
   ).toBe(false);
   await userEvent.click(drain);
   expect(bodies).toHaveLength(0);
+});
+
+it("releases a definitively refused drain after capability becomes stale and keeps emergency available", async () => {
+  current = workflowPreparation("prepared");
+  const mounted = setup();
+  const drain = await screen.findByRole("button", { name: "Request drain" });
+  expect(drain.hasAttribute("disabled")).toBe(false);
+  failure = "upgrade";
+  await userEvent.click(drain);
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Request drain" }).hasAttribute("disabled")).toBe(
+      true,
+    ),
+  );
+  expect(
+    screen.getByText("Update the source client to measure every required channel."),
+  ).toBeTruthy();
+  expect(
+    screen.getByRole("button", { name: "Emergency replacement" }).hasAttribute("disabled"),
+  ).toBe(false);
+  expect(bodies).toHaveLength(1);
+  mounted.unmount();
+  setup(mounted.client);
+  expect(
+    (await screen.findByRole("button", { name: "Emergency replacement" })).hasAttribute("disabled"),
+  ).toBe(false);
+  expect(screen.queryByRole("button", { name: "Retry exact request" })).toBeNull();
 });

@@ -16,12 +16,26 @@ for (const width of [1440, 390])
       "recovery-blocked",
       "preview-blocked",
       "client-unsupported",
+      "client-expired",
     ] as const) {
       test(`replacement cabinet ${mode} ${locale} ${width}`, async ({ page }, info) => {
         const unexpected: string[] = [];
+        let capabilityExpired = false;
+        let refusedAttempts = 0;
         await page.route(/^http:\/\/127\.0\.0\.1:\d+\/api\//, async (route) => {
           const path = new URL(route.request().url()).pathname;
           let json: unknown;
+          if (
+            mode === "client-expired" &&
+            path.endsWith("/drain") &&
+            route.request().method() === "POST"
+          ) {
+            cabinetDeviceReplacementContracts.drain.body.parse(route.request().postDataJSON());
+            capabilityExpired = true;
+            refusedAttempts++;
+            await route.fulfill({ status: 409, json: { code: "client_upgrade_required" } });
+            return;
+          }
           if (path === "/api/access/me") json = resolveCabinetAccess("owner");
           else if (path === "/api/profile")
             json = { firstName: "Igor", lastName: "Volkov", middleName: null, image: null };
@@ -36,7 +50,7 @@ for (const width of [1440, 390])
                   : [
                       {
                         preparation:
-                          mode === "client-unsupported"
+                          mode === "client-unsupported" || capabilityExpired
                             ? {
                                 ...workflowPreparation("prepared"),
                                 drainEligibility: {
@@ -44,12 +58,14 @@ for (const width of [1440, 390])
                                   reasons: ["client_upgrade_required"],
                                 },
                               }
-                            : mode === "recovery-blocked"
-                              ? blockedRecoveryPreparation()
-                              : workflowPreparation(
-                                  mode === "ready" ? "ready" : "completed",
-                                  mode === "ready" ? "not_required" : "required",
-                                ),
+                            : mode === "client-expired"
+                              ? workflowPreparation("prepared")
+                              : mode === "recovery-blocked"
+                                ? blockedRecoveryPreparation()
+                                : workflowPreparation(
+                                    mode === "ready" ? "ready" : "completed",
+                                    mode === "ready" ? "not_required" : "required",
+                                  ),
                         needsReview: false,
                       },
                     ],
@@ -144,7 +160,7 @@ for (const width of [1440, 390])
           await expect(
             panel.getByRole("button", {
               name:
-                mode === "client-unsupported"
+                mode === "client-unsupported" || mode === "client-expired"
                   ? ru
                     ? "Запросить завершение работы"
                     : "Request drain"
@@ -159,7 +175,23 @@ for (const width of [1440, 390])
           ).toBeVisible();
           if (mode === "recovery" || mode === "recovery-blocked")
             await expect(panel.locator('time[datetime="2026-09-18T12:30:00.000Z"]')).toBeVisible();
-          if (mode === "client-unsupported") {
+          if (mode === "client-expired") {
+            const drain = panel.getByRole("button", {
+              name: ru ? "Запросить завершение работы" : "Request drain",
+              exact: true,
+            });
+            await expect(drain).toBeEnabled();
+            await drain.click();
+            await expect(drain).toBeDisabled();
+            expect(refusedAttempts).toBe(1);
+            await expect(
+              panel.getByRole("button", {
+                name: ru ? "Повторить тот же запрос" : "Retry exact request",
+                exact: true,
+              }),
+            ).toHaveCount(0);
+          }
+          if (mode === "client-unsupported" || mode === "client-expired") {
             await expect(
               panel.getByRole("button", {
                 name: ru ? "Запросить завершение работы" : "Request drain",

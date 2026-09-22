@@ -1,8 +1,8 @@
 import { randomUUID, generateKeyPairSync } from "node:crypto";
 import type { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
-import { schema, type Auth } from "@markiro/db";
-import { AUTH } from "../src/auth/auth.module";
+import { schema, type Auth, type Db } from "@markiro/db";
+import { AUTH, DB } from "../src/auth/auth.module";
 import {
   inventorySnapshotContentDigest,
   canonicalizeKm,
@@ -25,6 +25,7 @@ import {
 } from "../src/modules/device-grants/grant-keyset";
 import { GrantEvidenceService } from "../src/modules/device-grants/grant-evidence.service";
 import { quarantineReplacementSubmission } from "../src/modules/device-licensing/device-replacement-evidence";
+import { DeviceReplacementRecoveryService } from "../src/modules/device-licensing/device-replacement-recovery.service";
 import { GrantIssuerService } from "../src/modules/device-grants/grant-issuer.service";
 import { replacementExecutionHarness } from "./support/device-replacement-execution-fixture";
 import { createPublishedAddon } from "./support/subscription-fixtures";
@@ -32,6 +33,14 @@ import { listenOnLoopback } from "./support/listen-loopback";
 
 const GTIN = "04600682000013";
 const ready = Boolean(process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET);
+
+function signal() {
+  let resolve = () => {};
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
 
 describe.skipIf(!ready)("replacement productive route matrix", () => {
   // Close the app before the harness drops its isolated database.
@@ -295,6 +304,314 @@ describe.skipIf(!ready)("replacement productive route matrix", () => {
     };
   }
 
+  it("quarantines every legacy mutation losing to cutover inside its business transaction", async () => {
+    const f = await waitingTarget("handheld");
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(f.boundary + 1);
+    await f.post(`/shifts/${f.active.id}/enter`, {}).expect(200);
+    await f
+      .post(`/station/inventories/${f.inventoryId}/join`, { operatorId: f.operatorId })
+      .expect(200);
+    const [inventory] = await db
+      .select()
+      .from(schema.inventories)
+      .where(eq(schema.inventories.id, f.inventoryId));
+    if (!inventory?.activeSnapshotId) throw new Error("Missing inventory");
+    const progress = await f.get(`/station/inventories/${f.inventoryId}/progress`).expect(200);
+    const participantBefore = await db
+      .select()
+      .from(schema.inventoryDeviceParticipants)
+      .where(eq(schema.inventoryDeviceParticipants.inventoryId, f.inventoryId));
+    const p = await preparationService.preview(
+      f.tenantId,
+      f.targetId,
+      {
+        requestId: randomUUID(),
+        target: { name: "Next target", kind: "handheld" },
+        reason: "Cutover",
+      },
+      f.actor,
+    );
+    const prepared = await preparationService.confirm(
+      f.tenantId,
+      f.targetId,
+      { requestId: p.requestId, previewId: p.id },
+      f.actor,
+    );
+    const occurredAt = new Date().toISOString();
+    const raw = `01${GTIN}21CUTOVER12345678901${String.fromCharCode(29)}93Abcd`;
+    const km = canonicalizeKm(raw),
+      codeHash = kmHash(km);
+    const scan = {
+      shiftId: f.active.id,
+      terminalId: null,
+      raw,
+      verdict: "ok",
+      scannedAt: occurredAt,
+      code: { codeHash, gtin14: km.gtin14, serial: km.serial },
+      boxId: null,
+      operatorId: f.operatorId,
+    };
+    const label = {
+      eventId: randomUUID(),
+      jobId: randomUUID(),
+      attemptId: randomUUID(),
+      sequence: 1,
+      shiftId: f.active.id,
+      codeHash,
+      acceptedAt: occurredAt,
+      policyRevision: randomUUID(),
+      templateDigest: "b".repeat(64),
+      payloadDigest: "c".repeat(64),
+      operatorId: f.operatorId,
+      occurredAt,
+      kind: "prepared",
+      attemptNo: 1,
+      reason: null,
+      language: "zpl",
+      dpi: 203,
+      bytesDigest: "d".repeat(64),
+    };
+    const container = {
+      shiftId: f.aggregation.id,
+      terminalId: null,
+      closedAt: occurredAt,
+      operatorId: f.operatorId,
+    };
+    const exception = {
+      kind: "reprint",
+      shiftId: f.aggregation.id,
+      terminalId: null,
+      operatorId: f.operatorId,
+      reason: "Saved evidence",
+      occurredAt,
+    };
+    const batch = {
+      snapshotId: inventory.activeSnapshotId,
+      snapshotRevision: 1,
+      sequenceCeiling: 1,
+      pendingEventCount: 7,
+      openBoxCount: 0,
+      events: [
+        {
+          eventId: randomUUID(),
+          deviceSequence: 1,
+          operatorId: f.operatorId,
+          scannedAt: occurredAt,
+          kind: "item",
+          normalizedIdentity: `km:${codeHash}`,
+          codeHash,
+          canonicalRaw: km.raw,
+          activeProductionDate: "2026-08-01",
+          localVerdict: "unknown",
+        },
+      ],
+    };
+    const writeoff = {
+      deviceSeq: 301,
+      operatorId: f.operatorId,
+      writeoffReasonId: f.reasonId,
+      items: [{ rawKm: raw }],
+      boxes: [],
+      createdAt: occurredAt,
+    };
+    const routes: { name: string; path: string; payload: object; transactions: number }[] = [
+      ...[
+        { name: "scan", items: [scan] },
+        { name: "label", productLabelEvents: [label] },
+        { name: "box", boxes: [{ ...container, boxId: randomUUID(), sscc: "046011122200000019" }] },
+        {
+          name: "pallet",
+          pallets: [{ ...container, palletId: randomUUID(), sscc: "146011122200000016" }],
+        },
+        {
+          name: "box exception",
+          exceptions: [{ ...exception, boxId: randomUUID(), codeHash: null }],
+        },
+        { name: "pallet exception", palletExceptions: [{ ...exception, palletId: randomUUID() }] },
+      ].map(({ name, ...channels }) => ({
+        name,
+        path: "/station/scans",
+        transactions: 2,
+        payload: { batchId: randomUUID(), items: [], ...channels },
+      })),
+      {
+        name: "close",
+        path: "/station/shift-closures",
+        transactions: 2,
+        payload: {
+          eventId: randomUUID(),
+          shiftId: f.active.id,
+          operatorId: f.operatorId,
+          plannedQtySnapshot: null,
+          actualQty: 0,
+          closedBoxCount: 0,
+          closedAt: occurredAt,
+        },
+      },
+      {
+        name: "inventory event and progress",
+        path: `/station/inventories/${f.inventoryId}/event-batches`,
+        transactions: 2,
+        payload: {
+          ...batch,
+          batchId: randomUUID(),
+          payloadDigest: inventoryEventBatchDigest(batch),
+        },
+      },
+      {
+        name: "leave",
+        path: `/station/inventories/${f.inventoryId}/leave`,
+        transactions: 2,
+        payload: { requestId: randomUUID(), pendingEventCount: 0, openBoxCount: 0 },
+      },
+      { name: "writeoff", path: "/station/writeoffs", payload: writeoff, transactions: 3 },
+      {
+        name: "persisted writeoff rejection",
+        path: "/station/writeoffs",
+        transactions: 3,
+        payload: { ...writeoff, deviceSeq: 302, writeoffReasonId: randomUUID() },
+      },
+    ];
+    const database = app.get<Db>(DB);
+    const transaction = database.transaction.bind(database);
+    const pending: {
+      route: (typeof routes)[number];
+      response: Promise<request.Response>;
+      release: () => void;
+    }[] = [];
+    try {
+      for (const route of routes) {
+        const entered = signal(),
+          release = signal();
+        let transactions = 0;
+        const barrier = vi.spyOn(database, "transaction").mockImplementation(async (...args) => {
+          if (++transactions === route.transactions) {
+            entered.resolve();
+            await release.promise;
+          }
+          return transaction(...args);
+        });
+        const response = f.post(route.path, route.payload).then((value) => value);
+        pending.push({ route, response, release: release.resolve });
+        // Any early HTTP result is a setup failure, not a passing race assertion.
+        await Promise.race([
+          entered.promise,
+          response.then((value) => {
+            throw new Error(`${route.name}: returned ${value.status} before business transaction`);
+          }),
+        ]);
+        barrier.mockRestore();
+      }
+      const preview = await execution.previewEmergency(
+        f.tenantId,
+        prepared.preparation.id,
+        { requestId: randomUUID(), expectedRevision: 1, reason: "Emergency race" },
+        f.actor,
+      );
+      const completed = await execution.executeEmergency(
+        f.tenantId,
+        prepared.preparation.id,
+        {
+          requestId: preview.requestId,
+          expectedRevision: 1,
+          previewId: preview.id,
+          mode: "emergency",
+        },
+        f.actor,
+      );
+      for (const item of pending) item.release();
+      const issued = await app
+        .get(DeviceReplacementRecoveryService)
+        .issueReplacementRecoveryCode(
+          f.tenantId,
+          prepared.preparation.id,
+          { requestId: randomUUID(), expectedRevision: completed.preparation.execution!.revision },
+          f.actor,
+        );
+      const paired = await request(app.getHttpServer())
+        .post("/station/pair/recovery")
+        .set("x-station-capabilities", "replacement-evidence-recovery-v1,handheld-v1")
+        .send({
+          version: 1,
+          code: issued.code,
+          expected: { tenantId: f.tenantId, deviceId: f.targetId, kind: "handheld" },
+        })
+        .expect(201);
+      for (const item of pending) {
+        const response = await item.response;
+        expect(response.status, item.route.name).toBe(409);
+        expect(response.body, item.route.name).toMatchObject({
+          outcome: "quarantined",
+          receiptId: expect.any(String),
+        });
+        const replay = await request(app.getHttpServer())
+          .post(item.route.path)
+          .set("x-api-key", paired.body.credential.apiKey)
+          .send(item.route.payload)
+          .expect(409);
+        expect(replay.body, item.route.name).toEqual(response.body);
+      }
+      const changed = await request(app.getHttpServer())
+        .post("/station/scans")
+        .set("x-api-key", paired.body.credential.apiKey)
+        .send({ ...routes[0]!.payload, items: [{ ...scan, operatorId: randomUUID() }] })
+        .expect(409);
+      expect(changed.body.code).toBe("device_replacement_evidence_conflict");
+      const recoveredProgress = await request(app.getHttpServer())
+        .get(`/station/inventories/${f.inventoryId}/progress`)
+        .set("x-api-key", paired.body.credential.apiKey)
+        .expect(200);
+      expect(recoveredProgress.body).toEqual(progress.body);
+      expect(
+        await db
+          .select()
+          .from(schema.inventoryDeviceParticipants)
+          .where(eq(schema.inventoryDeviceParticipants.inventoryId, f.inventoryId)),
+      ).toEqual(participantBefore);
+      expect(
+        (await db.select().from(schema.shifts).where(eq(schema.shifts.id, f.active.id)))[0]?.status,
+      ).toBe("active");
+      for (const query of [
+        db.select().from(schema.codes).where(eq(schema.codes.tenantId, f.tenantId)),
+        db.select().from(schema.scanEvents).where(eq(schema.scanEvents.terminalId, f.targetId)),
+        db.select().from(schema.syncBatches).where(eq(schema.syncBatches.terminalId, f.targetId)),
+        db
+          .select()
+          .from(schema.productLabelJobs)
+          .where(eq(schema.productLabelJobs.deviceId, f.targetId)),
+        db.select().from(schema.boxes).where(eq(schema.boxes.terminalId, f.targetId)),
+        db.select().from(schema.pallets).where(eq(schema.pallets.terminalId, f.targetId)),
+        db
+          .select()
+          .from(schema.stationShiftCloseEvents)
+          .where(eq(schema.stationShiftCloseEvents.deviceId, f.targetId)),
+        db
+          .select()
+          .from(schema.inventoryScanEvents)
+          .where(eq(schema.inventoryScanEvents.deviceId, f.targetId)),
+        db
+          .select()
+          .from(schema.pickupOrders)
+          .where(eq(schema.pickupOrders.stationDeviceId, f.targetId)),
+        db
+          .select()
+          .from(schema.pickupScanRejections)
+          .where(eq(schema.pickupScanRejections.stationDeviceId, f.targetId)),
+      ])
+        expect(await query).toHaveLength(0);
+      expect(
+        await db
+          .select()
+          .from(schema.deviceGrantEvidence)
+          .where(eq(schema.deviceGrantEvidence.stationDeviceId, f.targetId)),
+      ).toHaveLength(routes.length);
+    } finally {
+      vi.restoreAllMocks();
+      for (const item of pending) item.release();
+      await Promise.allSettled(pending.map((item) => item.response));
+    }
+  }, 30_000);
   it.each(["station", "handheld"] as const)(
     "%s: fences all productive starts and allocations until the saved boundary",
     async (kind) => {
@@ -998,28 +1315,27 @@ describe.skipIf(!ready)("replacement productive route matrix", () => {
       boxes: [],
       createdAt: new Date().toISOString(),
     };
-    // Pause the real HTTP request at its transaction lock, after the initial
-    // quarantine preflight has released its device lock but before insertion.
+    // Pause before the business transaction takes its source lock; holding a
+    // later registry lock would now correctly make drain wait for the source.
     await f
       .get("/station/device-replacement-intent/v1")
       .set("x-station-capabilities", "replacement-readiness-v1")
       .expect(200);
-    const holder = await connection.pool.connect();
-    await holder.query("BEGIN");
-    await holder.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
-      `box-registry:${f.tenantId}`,
-    ]);
+    const database = app.get<Db>(DB);
+    const transaction = database.transaction.bind(database);
+    const entered = signal(),
+      release = signal();
+    let transactions = 0;
+    const barrier = vi.spyOn(database, "transaction").mockImplementation(async (...args) => {
+      if (++transactions === 3) {
+        entered.resolve();
+        await release.promise;
+      }
+      return transaction(...args);
+    });
     const pending = f.post("/station/writeoffs", body).then((response) => response);
     try {
-      let blocked = false;
-      for (let i = 0; i < 200 && !blocked; i++) {
-        const result = await connection.pool.query(
-          `SELECT pid FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND wait_event = 'advisory'`,
-        );
-        blocked = result.rowCount === 1;
-        if (!blocked) await new Promise((resolve) => setTimeout(resolve, 20));
-      }
-      expect(blocked).toBe(true);
+      await entered.promise;
       await readiness.requestDrain(
         f.tenantId,
         prepared.preparation.id,
@@ -1027,8 +1343,8 @@ describe.skipIf(!ready)("replacement productive route matrix", () => {
         f.actor,
       );
     } finally {
-      await holder.query("COMMIT");
-      holder.release();
+      release.resolve();
+      barrier.mockRestore();
     }
     const response = await pending;
     expect(response.status).toBe(409);

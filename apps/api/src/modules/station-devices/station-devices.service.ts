@@ -5,7 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
 import type { EntitlementsExecutor } from "../../subscriptions/entitlements.types";
@@ -139,10 +139,6 @@ export class StationDevicesService {
       await this.db.delete(schema.apikey).where(eq(schema.apikey.id, current.device.apiKeyId));
     }
 
-    // A duplicate successful revoke is an idempotent no-op. Its original
-    // timestamp remains the durable security event rather than moving forward.
-    if (current.device.apiKeyId === null && current.device.revokedAt !== null) return;
-
     const deletedKeys = new Set(current.device.apiKeyId === null ? [] : [current.device.apiKeyId]);
     for (let attempt = 0; attempt < 5; attempt++) {
       const nextKey = await this.db.transaction((tx) =>
@@ -159,6 +155,91 @@ export class StationDevicesService {
           // key deletion. Acquiring a second pooled connection while holding the
           // quota lock could starve the pool behind concurrent waiting revokes.
           if (locked.apiKeyId !== null && !deletedKeys.has(locked.apiKeyId)) return locked.apiKeyId;
+          // Replacement leaves revokedAt set, but recovery issuance may have added
+          // a code/key since then. Retire those capabilities under the same source
+          // lock as issuance/redemption without rewriting the historical revoke.
+          // Every explicit replacement-source revoke advances authority, even
+          // without a visible key/code: issuance may already be waiting on this
+          // lock with the preceding execution revision.
+          if (locked.revokedAt !== null) {
+            const now = new Date();
+            const retired = await tx
+              .update(schema.stationPairingCodes)
+              .set({ usedAt: now })
+              .where(
+                and(
+                  eq(schema.stationPairingCodes.tenantId, tenantId),
+                  eq(schema.stationPairingCodes.stationDeviceId, id),
+                  isNull(schema.stationPairingCodes.usedAt),
+                ),
+              )
+              .returning({ id: schema.stationPairingCodes.id });
+            const [replacement] = await tx
+              .select({ id: schema.workingDeviceReplacementExecutions.id })
+              .from(schema.workingDeviceReplacementExecutions)
+              .where(
+                and(
+                  eq(schema.workingDeviceReplacementExecutions.tenantId, tenantId),
+                  eq(schema.workingDeviceReplacementExecutions.deviceId, id),
+                  eq(schema.workingDeviceReplacementExecutions.state, "completed"),
+                ),
+              );
+            // Ordinary duplicate revoke remains an idempotent no-op. Unlike a
+            // replacement source it cannot have a queued recovery issuance.
+            if (!replacement && locked.apiKeyId === null && retired.length === 0) return null;
+            const [revoked] = await tx
+              .update(schema.stationDevices)
+              .set({
+                apiKeyId: null,
+                securityRevocationRevision: locked.securityRevocationRevision + 1,
+              })
+              .where(
+                and(eq(schema.stationDevices.tenantId, tenantId), eq(schema.stationDevices.id, id)),
+              )
+              .returning();
+            if (!revoked) throw new NotFoundException();
+            await tx
+              .update(schema.workingDeviceReplacementReadinessIntents)
+              .set({ state: "superseded", closedAt: now })
+              .where(
+                and(
+                  eq(schema.workingDeviceReplacementReadinessIntents.tenantId, tenantId),
+                  eq(schema.workingDeviceReplacementReadinessIntents.deviceId, id),
+                  eq(schema.workingDeviceReplacementReadinessIntents.state, "active"),
+                ),
+              );
+            await tx
+              .update(schema.workingDeviceReplacementExecutions)
+              .set({
+                revision: sql`${schema.workingDeviceReplacementExecutions.revision} + 1`,
+              })
+              .where(
+                and(
+                  eq(schema.workingDeviceReplacementExecutions.tenantId, tenantId),
+                  eq(schema.workingDeviceReplacementExecutions.deviceId, id),
+                  eq(schema.workingDeviceReplacementExecutions.state, "completed"),
+                ),
+              );
+            await tx.insert(schema.tenantAuditEvents).values({
+              organizationId: tenantId,
+              actorUserId: actor?.domain === "cabinet" ? actor.id : null,
+              action: "device.replacement.recovery_security_revoked",
+              outcome: "success",
+              targetType: "station_device",
+              targetId: id,
+              before: { credentialEpoch: locked.credentialEpoch },
+              after: {
+                actorDomain: actor?.domain ?? "system",
+                actorId: actor?.id ?? null,
+                deviceId: id,
+                credentialEpoch: revoked.credentialEpoch,
+                securityRevocationRevision: revoked.securityRevocationRevision,
+                retiredPairingCodeIds: retired.map((code) => code.id),
+                revokedAt: locked.revokedAt.toISOString(),
+              },
+            });
+            return null;
+          }
           // Execution owns the durable source transition once its intent commits.
           // Security revocation above is still immediate; repair completes its journal.
           const [execution] = await tx
@@ -173,11 +254,14 @@ export class StationDevicesService {
             );
           if (execution) return null;
           assertReservationOpen(await workingAssignment(tx, tenantId, id));
-          if (locked.revokedAt !== null) return null;
           const revokedAt = new Date();
           const [revoked] = await tx
             .update(schema.stationDevices)
-            .set({ apiKeyId: null, revokedAt })
+            .set({
+              apiKeyId: null,
+              revokedAt,
+              securityRevocationRevision: locked.securityRevocationRevision + 1,
+            })
             .where(
               and(
                 eq(schema.stationDevices.tenantId, tenantId),

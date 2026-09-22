@@ -1,4 +1,8 @@
-import { quarantineReplacementSubmission } from "../device-licensing/device-replacement-evidence";
+import {
+  preflightReplacementSubmission,
+  withReplacementTransaction,
+  type ReplacementSubmission,
+} from "../device-licensing/device-replacement-evidence";
 import {
   withEvidenceTransaction,
   type EvidenceTransactionHook,
@@ -263,7 +267,7 @@ export class StationScansService {
       })),
     };
     const digest = payloadDigest(body);
-    if (
+    const replacementSubmission: ReplacementSubmission | undefined =
       !evidence &&
       [
         body.items,
@@ -273,36 +277,36 @@ export class StationScansService {
         body.pallets,
         body.palletExceptions,
       ].some((records) => records.length > 0)
-    ) {
-      await quarantineReplacementSubmission(
-        this.db,
-        tenantId,
-        authenticatedTerminalId,
-        "scans",
-        body.batchId,
-        body,
-        async (tx) => {
-          const [existing] = await tx
-            .select({
-              terminalId: schema.syncBatches.terminalId,
-              payloadDigest: schema.syncBatches.payloadDigest,
-            })
-            .from(schema.syncBatches)
-            .where(
-              and(
-                eq(schema.syncBatches.tenantId, tenantId),
-                eq(schema.syncBatches.batchId, body.batchId),
-              ),
-            );
-          if (
-            existing &&
-            (existing.terminalId !== authenticatedTerminalId || existing.payloadDigest !== digest)
-          )
-            throw new ConflictException({ code: "station_batch_mismatch" });
-          return Boolean(existing);
-        },
-      );
-    }
+        ? {
+            tenantId: tenantId,
+            deviceId: authenticatedTerminalId,
+            operation: "scans",
+            submissionId: body.batchId,
+            payload: body,
+            alreadyApplied: async (tx) => {
+              const [existing] = await tx
+                .select({
+                  terminalId: schema.syncBatches.terminalId,
+                  payloadDigest: schema.syncBatches.payloadDigest,
+                })
+                .from(schema.syncBatches)
+                .where(
+                  and(
+                    eq(schema.syncBatches.tenantId, tenantId),
+                    eq(schema.syncBatches.batchId, body.batchId),
+                  ),
+                );
+              if (
+                existing &&
+                (existing.terminalId !== authenticatedTerminalId ||
+                  existing.payloadDigest !== digest)
+              )
+                throw new ConflictException({ code: "station_batch_mismatch" });
+              return Boolean(existing);
+            },
+          }
+        : undefined;
+    await preflightReplacementSubmission(this.db, replacementSubmission);
 
     // Ensure the months this batch actually needs have partitions BEFORE
     // opening the transaction below. Only the scheduled job (JobsModule)
@@ -375,9 +379,9 @@ export class StationScansService {
       );
     }
 
-    return this.db.transaction(async (tx) => {
-      if (evidence) await lockTenantBoxRegistry(tx, tenantId);
+    return withReplacementTransaction(this.db, replacementSubmission, async (tx) => {
       return withEvidenceTransaction(tx, evidence, async () => {
+        if (evidence) await lockTenantBoxRegistry(tx, tenantId);
         const claimed = await tx
           .insert(schema.syncBatches)
           .values({

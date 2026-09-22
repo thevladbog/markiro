@@ -61,7 +61,9 @@ describe.skipIf(!databaseUrl)("working device forward migration", () => {
       }
     }
     beforeDevices = (
-      await pool.query("SELECT *, 1 AS credential_epoch FROM station_devices ORDER BY id")
+      await pool.query(
+        "SELECT *, 1 AS credential_epoch, 0 AS security_revocation_revision FROM station_devices ORDER BY id",
+      )
     ).rows;
     legacyOccupied = (
       await pool.query(

@@ -198,3 +198,15 @@ it.each(["execution_incomplete", "credential_revoke_unconfirmed"])(
     expect(replacementErrorKind(error)).toBe("uncertain");
   },
 );
+
+it("treats a definitive unsupported-client refusal as a conflict, freeing the workflow for emergency replacement", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(response({ code: "client_upgrade_required" }, 409)),
+  );
+  const error = await requestReplacementDrain("tenant-1", PROJECT, {
+    requestId: SOURCE,
+    expectedRevision: 1,
+  }).catch((error) => error);
+  expect(replacementErrorKind(error)).toBe("conflict");
+});

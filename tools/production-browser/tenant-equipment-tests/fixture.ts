@@ -89,6 +89,8 @@ const devicePool = platformDeviceLicensingContracts.inspect.response.parse({
 function makeFixture() {
   return {
     replacementPreviewBlocked: false,
+    replacementDrainRefused: false,
+    refusedDrainAttempts: 0,
     unhandled: [] as string[],
     replacement: null as DeviceReplacementPreparation | null,
   };
@@ -156,6 +158,27 @@ export const test = base.extend<{ fixture: ReturnType<typeof makeFixture> }>({
           selections: [],
           currentShadow: { awaitingSelection: false, affectedDeviceIds: [], enforced: false },
         };
+      } else if (
+        fixture.replacementDrainRefused &&
+        method === "POST" &&
+        url.pathname.endsWith("/drain")
+      ) {
+        platformDeviceReplacementContracts.drain.body.parse(request.postDataJSON());
+        if (!fixture.replacement) throw new Error("Missing preparation");
+        fixture.replacement = {
+          ...fixture.replacement,
+          drainEligibility: { status: "blocked", reasons: ["client_upgrade_required"] },
+        };
+        fixture.refusedDrainAttempts++;
+        await route.fulfill({
+          status: 409,
+          json: {
+            code: "client_upgrade_required",
+            message: "Replacement blocked",
+            requestId: TENANT_ID,
+          },
+        });
+        return;
       } else if (
         fixture.replacementPreviewBlocked &&
         method === "POST" &&

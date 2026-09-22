@@ -1,7 +1,8 @@
 # Device replacement execution acceptance
 
-Date: 2026-09-17. This is software verification and an operational acceptance
-record, not production deployment or factory acceptance.
+Initial verification: 2026-09-17. Final API verification resumed on 2026-09-22.
+This is software verification and an operational acceptance record, not
+production deployment or factory acceptance.
 
 Implementation branch: `codex/device-replacement-execution`.
 Branch base: `d26129dc45b18389e1b20ed330b482a6493d5580`.
@@ -68,6 +69,60 @@ The API skips are explicit external opt-ins: `local-infrastructure.e2e.test.ts`
 case each in `national-catalog-image.test.ts` (private MinIO) and
 `provision-tenant-owner.e2e.test.ts` (the real provisioning subprocess with local
 infrastructure). They were not exercised; database-backed replacement tests ran.
+
+## Final branch review corrections
+
+The final review of input `9a1ad3cf6c44b51de7e96baae0d4a6cf56c31e44` found
+security revoke skipping source recovery authority, a legacy ingestion/cutover
+race, and missing capability-refusal classification in both web applications.
+The correction round covers all three:
+
+- Migration 0168 gives explicit security revocation its own monotone generation.
+  Revoke retires unused recovery codes and active keys under the source lock,
+  fences queued issuance by epoch/execution revision, and preserves the original
+  revocation date and released assignment. Real-service races exercise both lock
+  orderings, repeated revoke, no key, active recovery and fresh authorized reissue.
+  The existing ordinary-device duplicate-revoke assertion remains unchanged.
+- Legacy mutation owners recheck replacement in the same source-locked business
+  transaction. Eleven HTTP channels losing to emergency cutover retain stable
+  quarantine receipts without business changes; recovery retries return the same
+  receipt. Normal transfer is fenced too. Native proof and ACK behavior remain.
+- Both strict error decoders classify `client_upgrade_required` as definitive.
+  Supported-to-stale component and Chromium scenarios clear the refused attempt,
+  refetch current facts and keep emergency available.
+
+Correction gates completed on 2026-09-17: Cabinet 114 files / 1,460 tests; SaaS 52 / 545; Station
+118 / 1,767; DB 112 / 613; contracts 36 / 358; forced Android execution 143 suites /
+1,016 tests, lint and APK; production bundle contracts 567. All passed without
+skips. Relevant package typecheck/lint/build and browser typecheck passed; Cabinet
+lint reports five existing hook warnings and no errors. Browser scenarios passed
+24 Cabinet + 28 SaaS cases across both locales and viewport widths, including the
+new transition. Two representative transition screenshots were inspected.
+
+Final API verification on 2026-09-22 used a fresh disposable database migrated
+through 0168 in the same isolated PostgreSQL container, with synthetic test
+configuration. The uninterrupted full package run exited 0: **395 files / 4,449
+tests passed**, with 4 files / 26 tests skipped. Two inventory suites require the
+separate `INVENTORY_TEST_DATABASE_URL` alias; after configuring it to that same
+disposable database, their focused supplement exited 0: **2 files / 22 tests
+passed**, no skips. Combined coverage is **397 files / 4,471 tests passed**.
+The four remaining skips are the explicit external opt-ins: Mailpit/MinIO
+lifecycle (`local-infrastructure.e2e.test.ts`), live National Catalog
+(`national-catalog.live.test.ts`), private MinIO image storage
+(`national-catalog-image.test.ts`) and the real local-infrastructure provisioning
+subprocess (`provision-tenant-owner.e2e.test.ts`). No database-backed replacement
+or inventory test remains skipped. This is combined full-run and focused-supplement
+evidence, not a claim of one four-skip invocation.
+
+Repository `format:check`, final document formatting and staged/unstaged
+`git diff --check` passed on 2026-09-22. Snapshot 0168 has the correct 0167
+predecessor and changes only the new `station_devices` column and check metadata.
+Other affected package gates above were completed on 2026-09-17 and were not
+rerun on 2026-09-22. Earlier RED reproductions, runner configuration corrections,
+exact correction commit metadata and local result summaries are retained in the
+ignored SDD `final-review-fix-report.md`; they are not prerequisites for reading
+these acceptance results. No additional unrelated workspace, Rust, physical
+hardware or deployment acceptance is implied by this correction.
 
 ## Local browser evidence
 
