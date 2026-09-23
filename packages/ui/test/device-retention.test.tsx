@@ -252,6 +252,7 @@ it.each([
 });
 it("renders original history through the injected snapshot renderer", () => {
   const view = setup({ saved: true });
+  fireEvent.click(screen.getByRole("button", { name: "deviceRetention.historyCount:1" }));
   expect(screen.getAllByText("Original station").length).toBeGreaterThan(0);
   expect(view.snapshot).toHaveBeenCalledWith(
     view.inspection.selections[0]?.selection.observation.future,
@@ -324,6 +325,26 @@ it.each([
   ).toBe(showsCount);
   expect(screen.queryByText("deviceRetention.awaitingSelection") !== null).toBe(showsAwaiting);
   expect(screen.getByText("deviceRetention.noBoundary")).toBeTruthy();
+});
+it("shows an inactive limit calculation without an alarm", () => {
+  setup({
+    observationAvailable: false,
+    currentShadow: { awaitingSelection: true, affectedDeviceIds: [ID], enforced: false },
+  });
+  expect(screen.getByRole("heading", { name: "deviceRetention.noBoundary" })).toBeTruthy();
+  expect(screen.queryByRole("alert")).toBeNull();
+  const details = screen.getByText("deviceRetention.calculationDetails");
+  expect(details.closest("details")?.open).toBe(false);
+  fireEvent.click(details);
+  expect(screen.getByText("deviceRetention.currentShadow:1")).toBeTruthy();
+});
+it("keeps saved selection warnings inside closed history when no boundary is active", () => {
+  setup({ saved: true, observationAvailable: false });
+  const history = screen.getByRole("button", { name: "deviceRetention.historyCount:1" });
+  expect(history.getAttribute("aria-expanded")).toBe("false");
+  expect(screen.queryByRole("alert")).toBeNull();
+  fireEvent.click(history);
+  expect(screen.getByText("deviceRetention.needsReview")).toBeTruthy();
 });
 
 it("starts blank at the stored date revision when a different boundary key shares the date", async () => {

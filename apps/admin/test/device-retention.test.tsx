@@ -167,6 +167,7 @@ it("shows original saved selection, stale/reached and shadow independently", asy
   facts.observation = null;
   facts.currentShadow = { awaitingSelection: true, affectedDeviceIds: [id], enforced: false };
   setup();
+  fireEvent.click(await screen.findByRole("button", { name: "Selection history (1)" }));
   await screen.findByText(/Needs a new review/);
   expect(screen.getByText(/Boundary has been reached/)).toBeTruthy();
   expect(screen.getByText(/Current shadow calculation/)).toBeTruthy();
@@ -288,6 +289,7 @@ it.each(["ineligible", "absent", "zero"])(
       device.reasons = ["device_released"];
     } else facts.observation.future.candidate.quotas.stations = { limit: 0, used: 1, remaining: 0 };
     setup();
+    fireEvent.click(await screen.findByRole("button", { name: "Selection history (1)" }));
     fireEvent.click(await screen.findByRole("button", { name: "Edit saved selection" }));
     expect(screen.getAllByText("Selected devices: 1").length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole("button", { name: "Start a blank selection" }));

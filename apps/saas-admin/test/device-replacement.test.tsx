@@ -157,6 +157,7 @@ it("supports readonly saved projects and authoritative permission denial", async
   await screen.findByText("Needs review");
   expect(screen.queryByRole("combobox")).toBeNull();
   expect(screen.queryByRole("button", { name: "Cancel preparation" })).toBeNull();
+  await userEvent.click(screen.getByRole("button", { name: "Saved calculation" }));
   expect(screen.getByText(/Local journals/)).toBeDefined();
 });
 it("includes security-released legacy candidates with null public pairing timestamps", async () => {
@@ -352,8 +353,30 @@ it("does not cancel a saved preparation before explicit confirmation", async () 
   await userEvent.click(
     within(screen.getByRole("alertdialog")).getByRole("button", { name: "Confirm cancellation" }),
   );
-  await screen.findByText("Cancelled");
+  const history = await screen.findByRole("button", { name: "Replacement history (1)" });
+  expect(history.getAttribute("aria-expanded")).toBe("false");
+  expect(screen.queryByRole("alert")).toBeNull();
+  await userEvent.click(history);
+  expect(screen.getByText("Cancelled")).toBeTruthy();
   expect(bodies[0]?.body).toEqual({ requestId: expect.any(String), expectedRevision: 1 });
+});
+it("keeps cancelled replacement diagnostics in the closed history until requested", async () => {
+  saved = true;
+  cancelled = true;
+  setup();
+  const history = await screen.findByRole("button", { name: "Replacement history (1)" });
+  expect(history.getAttribute("aria-expanded")).toBe("false");
+  expect(screen.queryByRole("alert")).toBeNull();
+  await userEvent.click(history);
+  expect(screen.getByText("Cancelled")).toBeTruthy();
+  await userEvent.click(screen.getByRole("button", { name: "Saved calculation" }));
+  expect(screen.getByText(/Local journals, outbox/)).toBeTruthy();
+});
+it("identifies a saved replacement before expanding its calculation", async () => {
+  saved = true;
+  setup();
+  await screen.findByText("Source 1 (Station) → Future device (Handheld)");
+  expect(screen.queryByText(/Local journals, outbox/)).toBeNull();
 });
 
 it("honors server canPrepare even when the local write capability is present", async () => {
@@ -391,6 +414,7 @@ it("formats the saved observation date in the selected Russian locale", async ()
   await screen.findByText(
     `Наблюдение сохранено ${new Date(preparation.preparedAt).toLocaleString("ru")}; это исторические факты.`,
   );
+  await userEvent.click(screen.getByRole("button", { name: "Сохранённый расчёт" }));
   expect(screen.getByText(/сохранённые задания печати: 3/)).toBeDefined();
   expect(screen.getByRole("button", { name: "Запросить завершение работы" })).toBeDefined();
   expect(screen.queryByText("Перенос доступа с исходного устройства ещё недоступен")).toBeNull();
@@ -438,7 +462,8 @@ it("explains a lost result inside the active cancellation dialog and retries the
   await within(dialog).findByText(/Result is unknown/);
   expect(within(dialog).getByRole("alert")).toBeDefined();
   await userEvent.click(within(dialog).getByRole("button", { name: "Confirm cancellation" }));
-  await screen.findByText("Cancelled");
+  await userEvent.click(await screen.findByRole("button", { name: "Replacement history (1)" }));
+  expect(screen.getByText("Cancelled")).toBeTruthy();
   expect(bodies).toHaveLength(2);
   expect(bodies[1]?.body).toEqual(bodies[0]?.body);
   expect(randomUUID).toHaveBeenCalledTimes(1);
@@ -453,6 +478,11 @@ it.each(["ru", "en"])(
     const project = await screen.findByRole("region", {
       name: language === "ru" ? "Сохранённая подготовка замены" : "Saved replacement preparation",
     });
+    await userEvent.click(
+      within(project).getByRole("button", {
+        name: language === "ru" ? "Сохранённый расчёт" : "Saved calculation",
+      }),
+    );
     expect(
       within(project).getByText(
         language === "ru"
@@ -591,7 +621,8 @@ it("clears a cancellation conflict after a successful fresh attempt", async () =
   await userEvent.click(
     within(screen.getByRole("alertdialog")).getByRole("button", { name: "Confirm cancellation" }),
   );
-  await screen.findByText("Cancelled");
+  await userEvent.click(await screen.findByRole("button", { name: "Replacement history (1)" }));
+  expect(screen.getByText("Cancelled")).toBeTruthy();
   expect(screen.queryByText(/Facts changed/)).toBeNull();
   expect(screen.queryByRole("alertdialog")).toBeNull();
   expect(screen.queryByRole("button", { name: "Cancel preparation" })).toBeNull();

@@ -41,6 +41,7 @@ export function DeviceReplacementPanel({
     queryFn: () => listDeviceReplacements(pool.tenantId),
   });
   const [sourceId, setSourceId] = useReplacementCache(replacementKeys.selection(pool.tenantId), "");
+  const [historyOpen, setHistoryOpen] = useState(false);
   const pending = useReplacementPending(pool.tenantId);
   const writable = canWrite && !list.isError && list.data?.canPrepare === true;
   const changeSource = (nextSourceId: string) => {
@@ -59,8 +60,15 @@ export function DeviceReplacementPanel({
       device.state === "assigned" ||
       (device.state === "released" && device.releaseReason === "security_revoked"),
   );
+  const inHistory = (item: NonNullable<typeof list.data>["items"][number]) =>
+    item.preparation.state === "cancelled" &&
+    !qc.getQueryData<CancelAttempt>(
+      replacementKeys.cancel(pool.tenantId, item.preparation.sourceDeviceId, item.preparation.id),
+    );
+  const active = list.data?.items.filter((item) => !inHistory(item)) ?? [];
+  const history = list.data?.items.filter(inHistory) ?? [];
   return (
-    <Card title={t("deviceReplacement.title")} titleAs="h2">
+    <Card title={t("deviceReplacement.title")} titleAs="h2" className="device-replacement-panel">
       <p style={{ margin: 0 }}>{t("deviceReplacement.intro")}</p>
       {list.isPending ? (
         <p role="status">{t("deviceReplacement.loading")}</p>
@@ -102,7 +110,7 @@ export function DeviceReplacementPanel({
           ) : null}
         </>
       ) : null}
-      {list.data?.items.map((item) => (
+      {active.map((item) => (
         <SavedPreparation
           key={`${pool.tenantId}:${item.preparation.id}`}
           tenantId={pool.tenantId}
@@ -111,6 +119,30 @@ export function DeviceReplacementPanel({
           canWrite={writable}
         />
       ))}
+      {history.length ? (
+        <section>
+          <Button
+            variant="secondary"
+            aria-expanded={historyOpen}
+            onClick={() => setHistoryOpen(!historyOpen)}
+          >
+            {t("deviceReplacement.historyCount", { count: history.length })}
+          </Button>
+          {historyOpen ? (
+            <div style={{ display: "grid", gap: "var(--sp-4)", marginBlockStart: "var(--sp-3)" }}>
+              {history.map((item) => (
+                <SavedPreparation
+                  key={`${pool.tenantId}:${item.preparation.id}`}
+                  tenantId={pool.tenantId}
+                  preparation={item.preparation}
+                  needsReview={item.needsReview}
+                  canWrite={writable}
+                />
+              ))}
+            </div>
+          ) : null}
+        </section>
+      ) : null}
     </Card>
   );
 }
@@ -289,6 +321,7 @@ function SavedPreparation({
     null,
   );
   const [open, setOpen] = useState(false);
+  const [factsOpen, setFactsOpen] = useState(false);
   const busy = useReplacementPending(tenantId);
   const refresh = useRefresh(tenantId);
   const cancel = async () => {
@@ -329,6 +362,14 @@ function SavedPreparation({
         phase={preparationPhase(preparation.state)}
         label={t(`deviceReplacement.state.${preparation.state}`)}
       />
+      <p style={{ margin: 0, font: "var(--text-body-lg)", fontWeight: 600 }}>
+        {t("deviceReplacement.transition", {
+          oldName: preparation.observation.source.name,
+          oldKind: t(`deviceReplacement.kind.${preparation.observation.source.kind}`),
+          newName: preparation.observation.target.name,
+          newKind: t(`deviceReplacement.kind.${preparation.observation.target.kind}`),
+        })}
+      </p>
       {needsReview && preparation.state === "prepared" ? (
         <Alert tone="warn">{t("deviceReplacement.needsReview")}</Alert>
       ) : null}
@@ -339,11 +380,21 @@ function SavedPreparation({
           ),
         })}
       </p>
-      <Observation
-        observation={preparation.observation}
-        historical
-        showLocalUnknown={!preparation.readiness}
-      />
+      <Button
+        variant="secondary"
+        aria-expanded={factsOpen}
+        onClick={() => setFactsOpen(!factsOpen)}
+      >
+        {t("deviceReplacement.savedFacts")}
+      </Button>
+      {factsOpen ? (
+        <Observation
+          observation={preparation.observation}
+          historical
+          showLocalUnknown={!preparation.readiness}
+          showTransition={false}
+        />
+      ) : null}
       <DeviceReplacementWorkflow
         tenantId={tenantId}
         preparation={preparation}
@@ -387,10 +438,12 @@ function Observation({
   observation: o,
   historical = false,
   showLocalUnknown = true,
+  showTransition = true,
 }: {
   observation: DeviceReplacementObservation;
   historical?: boolean;
   showLocalUnknown?: boolean;
+  showTransition?: boolean;
 }) {
   const { t } = useTranslation();
   const reasons = o.execution.reasons.filter(
@@ -403,14 +456,16 @@ function Observation({
   );
   return (
     <div style={{ display: "grid", gap: "var(--sp-2)" }}>
-      <p style={{ margin: 0 }}>
-        {t("deviceReplacement.transition", {
-          oldName: o.source.name,
-          oldKind: t(`deviceReplacement.kind.${o.source.kind}`),
-          newName: o.target.name,
-          newKind: t(`deviceReplacement.kind.${o.target.kind}`),
-        })}
-      </p>
+      {showTransition ? (
+        <p style={{ margin: 0 }}>
+          {t("deviceReplacement.transition", {
+            oldName: o.source.name,
+            oldKind: t(`deviceReplacement.kind.${o.source.kind}`),
+            newName: o.target.name,
+            newKind: t(`deviceReplacement.kind.${o.target.kind}`),
+          })}
+        </p>
+      ) : null}
       <p style={{ margin: 0 }}>
         {t(
           historical

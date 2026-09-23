@@ -4180,7 +4180,9 @@
   },
   "deviceReplacement": {
     "title": "Device replacement",
-    "intro": "Prepare a replacement, check source readiness and transfer its working slot. Emergency replacement preserves a recovery path for source evidence.",
+    "intro": "Choose the device to replace. The next steps will appear after preparation.",
+    "historyCount": "Replacement history ({{count}})",
+    "savedFacts": "Saved calculation",
     "loading": "Loading preparations…",
     "loadError": "Could not load replacement preparations.",
     "readonly": "You can inspect saved preparations. Preparation changes are unavailable with current permissions.",
@@ -4232,6 +4234,7 @@
     "slotsSaved": "Slots at preparation: {{usage}} of {{limit}}.",
     "slotsSavedUnlimited": "Slots at preparation: {{usage}}, unlimited capacity.",
     "workflow": {
+      "reportDetails": "Technical report",
       "revision": "Preparation revision",
       "epoch": "Credential epoch",
       "received": "Last server report",
@@ -4344,12 +4347,15 @@
     "observationBlockersSaved": "Execution prerequisites at preparation (historical)"
   },
   "deviceRetention": {
-    "title": "Devices to retain after a reduction",
+    "title": "Devices when capacity changes",
     "intro": "Choose the complete set for the server-defined change. Nothing is selected automatically.",
+    "inactiveBody": "There is nothing to select now. Device work is not restricted; the next steps will appear if a change date is set.",
+    "calculationDetails": "About the preliminary calculation",
+    "historyCount": "Selection history ({{count}})",
     "shadowOnly": "Execution is not enabled. Saving a selection does not change current access or device data.",
     "readonly": "You can inspect selections, but do not have permission to change them.",
     "currentShadow": "Current shadow calculation: {{count}} affected devices. This does not block current work.",
-    "noBoundary": "No future device reduction is currently known.",
+    "noBoundary": "No device limit reduction is scheduled",
     "receipt": "Original confirmation receipt",
     "saved": "Selection saved for {{at}}. Execution is not enabled.",
     "needsReview": "Needs a new review of devices and conditions. Start an explicit new preview before confirming.",

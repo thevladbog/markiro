@@ -2,7 +2,10 @@ import {
   factualObservation,
   preview,
 } from "../../../apps/saas-admin/test/device-replacement-fixtures.js";
-import type { DeviceReplacementPreparation } from "../../../packages/platform-contracts/src/index.js";
+import type {
+  DeviceReplacementPreparation,
+  DeviceRetentionInspection,
+} from "../../../packages/platform-contracts/src/index.js";
 import { test as base, expect } from "@playwright/test";
 import type { Route } from "@playwright/test";
 import {
@@ -93,6 +96,11 @@ function makeFixture() {
     refusedDrainAttempts: 0,
     unhandled: [] as string[],
     replacement: null as DeviceReplacementPreparation | null,
+    retentionShadow: {
+      awaitingSelection: false,
+      affectedDeviceIds: [],
+      enforced: false,
+    } as DeviceRetentionInspection["currentShadow"],
   };
 }
 
@@ -156,7 +164,7 @@ export const test = base.extend<{ fixture: ReturnType<typeof makeFixture> }>({
           canSelect: false,
           observation: null,
           selections: [],
-          currentShadow: { awaitingSelection: false, affectedDeviceIds: [], enforced: false },
+          currentShadow: fixture.retentionShadow,
         };
       } else if (
         fixture.replacementDrainRefused &&

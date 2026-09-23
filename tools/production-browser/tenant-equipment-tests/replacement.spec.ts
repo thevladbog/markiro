@@ -95,9 +95,14 @@ for (const width of [1440, 390])
           panel = page.getByRole("region", {
             name: ru ? "Сохранённая подготовка замены" : "Saved replacement preparation",
           });
-          await expect(
-            panel.getByText(ru ? "Ревизия проекта" : "Preparation revision"),
-          ).toBeVisible();
+          const report = panel.locator("summary").filter({
+            hasText: ru ? "Технические данные проверки" : "Technical report",
+          });
+          const revision = panel.getByText(ru ? "Ревизия проекта" : "Preparation revision");
+          await expect(revision).toBeHidden();
+          await report.click();
+          await expect(revision).toBeVisible();
+          await report.click();
           await expect(
             panel.getByRole("button", {
               name:
@@ -161,6 +166,7 @@ for (const width of [1440, 390])
                   : "Recovery blockers reported by the server",
               ),
             ).toBeVisible();
+            await report.click();
             await expect(
               panel
                 .getByText(ru ? "Исключения" : "Exceptions", { exact: true })
@@ -172,6 +178,7 @@ for (const width of [1440, 390])
                 ru ? /Разберите и отправьте исключения/ : /Resolve and send pending exceptions/,
               ),
             ).toBeVisible();
+            await report.click();
           }
         }
         await expect(panel).not.toContainText(/returned an object|deviceReplacement\./);
@@ -193,3 +200,41 @@ for (const width of [1440, 390])
         expect(fixture.unhandled).toEqual([]);
       });
     }
+
+test("closed replacement and inactive capacity stay calm at desktop width", async ({
+  page,
+  fixture,
+}, info) => {
+  fixture.replacement = {
+    ...workflowPreparation("prepared"),
+    state: "cancelled",
+    revision: 4,
+    cancelledAt: "2026-09-18T12:30:00.000Z",
+  };
+  fixture.retentionShadow = {
+    awaitingSelection: true,
+    affectedDeviceIds: [
+      "16111111-1111-4111-8111-111111111111",
+      "18111111-1111-4111-8111-111111111111",
+      "20111111-1111-4111-8111-111111111111",
+    ],
+    enforced: false,
+  };
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto(`/tenants/${TENANT_ID}?tab=equipment`);
+  await page.getByRole("button", { name: "RU", exact: true }).click();
+  await page.locator("summary").filter({ hasText: "Замена устройства" }).click();
+  await expect(page.getByRole("button", { name: "История замен (1)" })).toBeVisible();
+  await expect(page.getByText("Этот проект замены отменён.")).toBeHidden();
+  await page.locator("summary").filter({ hasText: "Лимит устройств" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Уменьшение лимита не запланировано" }),
+  ).toBeVisible();
+  await expect(page.getByText("Сейчас ничего выбирать не нужно.", { exact: false })).toBeVisible();
+  await expect(page.getByText(/Текущий теневой расчёт/)).toBeHidden();
+  await page.screenshot({
+    path: info.outputPath("equipment-calm-inactive-ru-1440.png"),
+    fullPage: true,
+  });
+  expect(fixture.unhandled).toEqual([]);
+});
