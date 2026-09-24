@@ -77,6 +77,11 @@ export const STATION_PREFLIGHTS = Object.freeze([
     headers: "content-type,x-api-key,x-station-capabilities",
   },
   {
+    path: "/station/boxes/reconciliation",
+    method: "POST",
+    headers: "content-type,x-api-key,x-station-capabilities",
+  },
+  {
     path: "/station/scans",
     method: "POST",
     headers: "content-type,x-api-key,x-station-capabilities",

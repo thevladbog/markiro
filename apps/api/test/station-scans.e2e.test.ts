@@ -284,6 +284,51 @@ describe.skipIf(!ready)("station-scans e2e", () => {
     expect(reconciliationLog).not.toContain("membershipDigest");
   });
 
+  it("isolates unknown and foreign shifts without blocking valid reconciliation facts", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+    const apiKey = await deviceKey(agent);
+    const shiftId = await openShift(agent);
+    const foreignAgent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(foreignAgent);
+    const foreignShiftId = await openShift(foreignAgent);
+    const boxes = [shiftId, randomUUID(), foreignShiftId].map((requestedShiftId, index) => ({
+      shiftId: requestedShiftId,
+      boxId: `scope-${index}`,
+      sscc: buildSscc(0, "034600682", 1580 + index),
+      closedAt: "2026-09-23T00:03:00.000Z",
+      devicePalletId: null,
+      itemCount: 0,
+      membershipDigest: boxMembershipDigestV1([]),
+      digestVersion: 1,
+    }));
+    const response = await request(app!.getHttpServer())
+      .post("/station/boxes/reconciliation")
+      .set("x-api-key", apiKey)
+      .send({ boxes })
+      .expect(200);
+    expect(response.body.results).toEqual([
+      {
+        boxId: "scope-0",
+        status: "replay_required",
+        reasonCode: "box_absent",
+        serverItemCount: null,
+      },
+      {
+        boxId: "scope-1",
+        status: "identity_conflict",
+        reasonCode: "shift_or_device_conflict",
+        serverItemCount: null,
+      },
+      {
+        boxId: "scope-2",
+        status: "identity_conflict",
+        reasonCode: "shift_or_device_conflict",
+        serverItemCount: null,
+      },
+    ]);
+  });
+
   it("confirms exact server membership and flags a changed digest without altering the box", async () => {
     const agent = request.agent(app!.getHttpServer());
     const tenantId = await signUpAndActivate(agent);

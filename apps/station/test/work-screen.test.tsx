@@ -1174,6 +1174,54 @@ describe("WorkScreen", () => {
     await waitFor(() => expect(onExit).toHaveBeenCalledOnce());
   });
 
+  it("does not start a second pause after a rerender while the first pause is in flight", async () => {
+    let releaseAudit!: () => void;
+    const audit = new Promise<void>((resolve) => {
+      releaseAudit = resolve;
+    });
+    const onPauseShift = vi.fn(() => audit);
+    const onExit = vi.fn();
+    const props: WorkScreenProps = {
+      exec: makeExec(),
+      shiftId: "s1",
+      terminalId: "dev-1",
+      operatorId: "operator-1",
+      expectedGtin14: "04600000000015",
+      productName: "Water 0.5",
+      source: manualSource(),
+      sound: { muted: true, volume: 1 },
+      onPauseShift,
+      onExit,
+      pendingSync: 0,
+      issuerPrefix: null,
+      boxCapacity: null,
+      verifyPrintedLabel: false,
+    };
+    const view = render(<WorkScreen {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+    await waitFor(() => expect(onPauseShift).toHaveBeenCalledOnce());
+    view.rerender(<WorkScreen {...props} productName="Updated" />);
+    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+    expect(onPauseShift).toHaveBeenCalledOnce();
+    releaseAudit();
+    await waitFor(() => expect(onExit).toHaveBeenCalledOnce());
+  });
+
+  it("allows a new pause attempt after the reconciliation barrier fails", async () => {
+    const onExit = vi.fn();
+    const onPauseShift = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("audit unavailable"))
+      .mockResolvedValueOnce(undefined);
+    renderWorkScreen({ onExit, onPauseShift, pendingSync: 0 });
+    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+    await screen.findByText("audit unavailable");
+    expect(onExit).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+    await waitFor(() => expect(onPauseShift).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(onExit).toHaveBeenCalledOnce());
+  });
+
   it("warns about queued scans before leaving, and leaves anyway on confirm", async () => {
     const onExit = vi.fn();
     renderWorkScreen({ onExit, pendingSync: 12 });

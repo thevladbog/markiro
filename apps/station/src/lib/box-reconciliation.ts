@@ -201,8 +201,8 @@ export async function readBoxReconciliationBatch(
       AND (last_checked_revision<reconciliation_revision
         OR (confirmed_revision<reconciliation_revision AND NOT EXISTS(
           SELECT 1 FROM box_reconciliation_issues issue WHERE issue.box_id=boxes_mirror.box_id))
-        OR server_reconciled_at IS NULL
-        OR (? IS NOT NULL AND server_reconciled_at<?))
+        OR (confirmed_revision<reconciliation_revision AND
+          (server_reconciled_at IS NULL OR (? IS NOT NULL AND server_reconciled_at<?))))
       ${shiftId ? "AND shift_id=?" : ""}
     ORDER BY rowid LIMIT ?`,
     [checkedBefore ?? null, checkedBefore ?? null, ...(shiftId ? [shiftId] : []), limit],

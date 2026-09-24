@@ -1708,6 +1708,7 @@ export function App() {
     shiftRecoverySyncPaused.current = true;
     pauseSync();
     setResumeSyncAfterRecoveryCommit(false);
+    setBoxAuditNotice(null);
     setShift(entered);
     setShiftContext(null);
     setBoxTemplateRecovery(null);

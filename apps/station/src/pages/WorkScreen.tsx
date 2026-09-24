@@ -1138,6 +1138,7 @@ export function WorkScreen({
   const closingRef = useRef(false);
   const [closing, setClosing] = useState(false);
   const [boxActionPending, setBoxActionPending] = useState(false);
+  const pauseInFlightRef = useRef(false);
   // Render-time guard for callbacks already handed to physical scan sources.
   // Effect cleanup cannot revoke a callback synchronously: a source may invoke
   // the old function after this render commits but before the passive cleanup
@@ -1145,6 +1146,7 @@ export function WorkScreen({
   // the current blocking state in a ref so those stale callbacks are harmless.
   const ordinaryScanBlockedRef = useRef(false);
   ordinaryScanBlockedRef.current = Boolean(
+    pauseInFlightRef.current ||
     productLabelsBlocked ||
     !printRecoveryHydrated ||
     printAdmissionBlocked ||
@@ -1166,6 +1168,8 @@ export function WorkScreen({
   );
 
   async function pauseProductLabels() {
+    if (pauseInFlightRef.current) return;
+    pauseInFlightRef.current = true;
     ordinaryScanBlockedRef.current = true;
     queue.discardBufferedScans();
     try {
@@ -1178,10 +1182,13 @@ export function WorkScreen({
       queue.open();
       ordinaryScanBlockedRef.current = false;
       setCloseError(error instanceof Error ? error.message : String(error));
+    } finally {
+      pauseInFlightRef.current = false;
     }
   }
   async function pauseShift() {
-    if (ordinaryScanBlockedRef.current) return;
+    if (pauseInFlightRef.current || ordinaryScanBlockedRef.current) return;
+    pauseInFlightRef.current = true;
     ordinaryScanBlockedRef.current = true;
     try {
       await queue.close();
@@ -1191,9 +1198,12 @@ export function WorkScreen({
       queue.open();
       ordinaryScanBlockedRef.current = false;
       setCloseError(error instanceof Error ? error.message : String(error));
+    } finally {
+      pauseInFlightRef.current = false;
     }
   }
   function requestExit() {
+    if (pauseInFlightRef.current) return;
     if (
       productLabelsRef.current.work ||
       productLabelsRef.current.loading ||

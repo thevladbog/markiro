@@ -1,4 +1,3 @@
-import { BadRequestException } from "@nestjs/common";
 import { boxMembershipDigestV1 } from "@markiro/domain";
 import { schema, type Db } from "@markiro/db";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
@@ -21,11 +20,21 @@ export async function reconcileStationBoxes(
       .select({ id: schema.shifts.id })
       .from(schema.shifts)
       .where(and(eq(schema.shifts.tenantId, tenantId), inArray(schema.shifts.id, shiftIds)));
-    if (ownedShifts.length !== shiftIds.length) throw new BadRequestException("Unknown shift");
+    const ownedShiftIds = new Set(ownedShifts.map((shift) => shift.id));
+    const validBoxes = body.boxes.filter((box) => ownedShiftIds.has(box.shiftId));
+    if (validBoxes.length === 0)
+      return {
+        results: body.boxes.map((box) => ({
+          boxId: box.boxId,
+          status: "identity_conflict" as const,
+          reasonCode: "shift_or_device_conflict" as const,
+          serverItemCount: null,
+        })),
+      };
 
     // Ingest takes these same advisory locks before changing a box. Locking in
     // sorted order also keeps a concurrent 200-box audit from deadlocking.
-    const lockKeys = body.boxes
+    const lockKeys = validBoxes
       .map((box) => `${tenantId}|${box.shiftId}|${deviceId}|${box.boxId}`)
       .sort();
     for (const key of lockKeys) {
@@ -46,10 +55,10 @@ export async function reconcileStationBoxes(
         and(
           eq(schema.boxes.tenantId, tenantId),
           eq(schema.boxes.terminalId, deviceId),
-          inArray(schema.boxes.shiftId, shiftIds),
+          inArray(schema.boxes.shiftId, [...ownedShiftIds]),
           inArray(
             schema.boxes.deviceBoxId,
-            body.boxes.map((box) => box.boxId),
+            validBoxes.map((box) => box.boxId),
           ),
         ),
       );
@@ -62,14 +71,14 @@ export async function reconcileStationBoxes(
           eq(schema.boxes.tenantId, tenantId),
           inArray(
             schema.boxes.sscc,
-            body.boxes.map((box) => box.sscc),
+            validBoxes.map((box) => box.sscc),
           ),
         ),
       );
     const boxBySscc = new Map(ssccRows.map((box) => [box.sscc, box.id]));
     const palletIds = [
       ...new Set(
-        body.boxes.flatMap((box) => (box.devicePalletId === null ? [] : [box.devicePalletId])),
+        validBoxes.flatMap((box) => (box.devicePalletId === null ? [] : [box.devicePalletId])),
       ),
     ];
     const palletRows =
@@ -87,7 +96,7 @@ export async function reconcileStationBoxes(
                 eq(schema.pallets.tenantId, tenantId),
                 eq(schema.pallets.terminalId, deviceId),
                 eq(schema.pallets.kind, "production"),
-                inArray(schema.pallets.shiftId, shiftIds),
+                inArray(schema.pallets.shiftId, [...ownedShiftIds]),
                 inArray(schema.pallets.devicePalletId, palletIds),
               ),
             );
@@ -135,6 +144,10 @@ export async function reconcileStationBoxes(
         reasonCode,
         serverItemCount,
       });
+      if (!ownedShiftIds.has(requested.shiftId)) {
+        results.push(result("identity_conflict", "shift_or_device_conflict", null));
+        continue;
+      }
       if (!found) {
         results.push(
           result(

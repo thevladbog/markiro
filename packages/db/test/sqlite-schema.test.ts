@@ -60,7 +60,12 @@ function migratedDb(): DatabaseSync {
 
 describe("STATION_MIGRATIONS", () => {
   it("makes existing delivered boxes due for reconciliation without changing delivery state", () => {
-    const db = migratedDb();
+    const db = new DatabaseSync(":memory:");
+    const index = STATION_MIGRATIONS.findIndex((sql) =>
+      sql.includes("ALTER TABLE boxes_mirror ADD COLUMN reconciliation_revision"),
+    );
+    expect(index).toBeGreaterThan(0);
+    applyStatements(db, STATION_MIGRATIONS.slice(0, index));
     db.prepare(
       "INSERT INTO boxes_mirror(box_id,shift_id,opened_at,closed_at,sscc,acked_at) VALUES(?,?,?,?,?,?)",
     ).run(
@@ -71,6 +76,7 @@ describe("STATION_MIGRATIONS", () => {
       "046800899000615754",
       "2026-09-23T00:02:00Z",
     );
+    applyStatements(db, STATION_MIGRATIONS.slice(index));
     expect(
       db
         .prepare(

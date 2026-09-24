@@ -207,6 +207,54 @@ describe("closed-box reconciliation", () => {
     expect((await readBoxReconciliationSummary(exec, "shift-1")).confirmed).toBe(1);
   });
 
+  it("uses a fresh batch identity when repairing a previously delivered box-only closure", async () => {
+    const { db, exec } = fixture();
+    box(db, "b1", false);
+    scans(db, "b1", 1);
+    const deliveredBatchIds: string[] = [];
+    const claimed = new Set<string>();
+    const engine = createSyncEngine({
+      exec,
+      machineId: "machine-1",
+      credentialGeneration: createCredentialGeneration("test-key"),
+      onState: () => {},
+      client: {
+        async post<T>(path: string, body?: unknown): Promise<T> {
+          if (path === "/station/scans") {
+            const batchId = (body as { batchId: string }).batchId;
+            deliveredBatchIds.push(batchId);
+            const alreadyApplied = claimed.has(batchId);
+            claimed.add(batchId);
+            return { applied: 0, alreadyApplied, conflicts: [] } as T;
+          }
+          if (path === "/station/boxes/reconciliation")
+            return {
+              results: [
+                { boxId: "b1", status: "confirmed", reasonCode: "matched", serverItemCount: 1 },
+              ],
+            } as T;
+          if (path === "/station/conflicts/status") return { reviewedCodeHashes: [] } as T;
+          if (path === "/station/codes/releases")
+            return { until: "0", releasedCodeHashes: [] } as T;
+          throw new Error(`unexpected route ${path}`);
+        },
+      },
+    });
+    engine.nudge();
+    await engine.idle();
+    await requestFullShiftReconciliation(exec, "shift-1");
+    const facts = await readBoxReconciliationBatch(exec, "shift-1");
+    await applyBoxReconciliationResults(exec, facts, [
+      { boxId: "b1", status: "replay_required", reasonCode: "closure_absent", serverItemCount: 1 },
+    ]);
+    engine.nudge();
+    await engine.idle();
+    engine.stop();
+    expect(deliveredBatchIds).toHaveLength(2);
+    expect(deliveredBatchIds[1]).not.toBe(deliveredBatchIds[0]);
+    expect(claimed.size).toBe(2);
+  });
+
   it("does not apply a reconciliation reply after its credential generation is sealed", async () => {
     const { db, exec } = fixture();
     box(db, "b1");
@@ -351,6 +399,31 @@ describe("closed-box reconciliation", () => {
       issues: 1,
     });
     expect(await readBoxReconciliationBatch(exec, "shift-1")).toEqual([]);
+  });
+
+  it("does not periodically recheck a confirmed revision", async () => {
+    const { db, exec } = fixture();
+    box(db, "b1");
+    const facts = await readBoxReconciliationBatch(exec, "shift-1");
+    await applyBoxReconciliationResults(exec, facts, [
+      { boxId: "b1", status: "confirmed", reasonCode: "matched", serverItemCount: 0 },
+    ]);
+    expect(
+      await readBoxReconciliationBatch(exec, "shift-1", 200, "9999-01-01T00:00:00.000Z"),
+    ).toEqual([]);
+  });
+
+  it("retries an unresolved issue only after its two-minute check window", async () => {
+    const { db, exec } = fixture();
+    box(db, "b1");
+    const facts = await readBoxReconciliationBatch(exec, "shift-1");
+    await applyBoxReconciliationResults(exec, facts, [
+      { boxId: "b1", status: "content_mismatch", reasonCode: "count_mismatch", serverItemCount: 1 },
+    ]);
+    expect(await readBoxReconciliationBatch(exec, "shift-1")).toEqual([]);
+    expect(
+      await readBoxReconciliationBatch(exec, "shift-1", 200, "9999-01-01T00:00:00.000Z"),
+    ).toHaveLength(1);
   });
 
   it("stops automatic replay when the server still reports the box absent after re-ack", async () => {

@@ -565,6 +565,8 @@ interface BoxClosureRow {
    * API's `boxClosureSchema`.
    */
   devicePalletId: string | null;
+  /** Zero on first delivery; reconciliation advances this before requeueing a closure. */
+  lastCheckedRevision: number;
   /** SQLite's own rowid -- see `readClosedUnackedBoxes`'s doc comment. */
   rowid: number;
 }
@@ -607,7 +609,7 @@ async function readClosedUnackedBoxes(
   ceilingRowid?: number | null,
 ): Promise<BoxClosureRow[]> {
   const columns = `SELECT rowid, box_id, shift_id, terminal_id, sscc, closed_at, closed_by,
-                  print_verified_at, print_skipped_at, pallet_id
+                  print_verified_at, print_skipped_at, pallet_id, last_checked_revision
              FROM boxes_mirror`;
   const rows =
     ceilingRowid != null
@@ -633,6 +635,7 @@ async function readClosedUnackedBoxes(
     printVerifiedAt: r.print_verified_at,
     printSkippedAt: r.print_skipped_at,
     devicePalletId: r.pallet_id,
+    lastCheckedRevision: r.last_checked_revision,
     rowid: r.rowid,
   }));
 }
@@ -647,6 +650,7 @@ interface BoxClosureSqlRow {
   print_verified_at: string | null;
   print_skipped_at: string | null;
   pallet_id: string | null;
+  last_checked_revision: number;
   rowid: number;
 }
 
@@ -785,18 +789,21 @@ function toPalletExceptionPayload(exceptions: PendingPalletException[]) {
  * 1) -- either because a box was added (the ceiling rowid grows) or because
  * an already-included box's print-verification outcome resolved (Task 13
  * review, Finding 1's `acked_at`-clearing resend, which reuses the SAME
- * rowid). One character per box -- `u`nresolved, `v`erified, or `s`kipped --
- * keeps this well within `batchId`'s 200-character budget even at
- * `MAX_BOX_CLOSURES_PER_SYNC_BATCH` boxes, and each box transitions its
- * character exactly once (an outcome is terminal), so this cannot cycle back
- * to a signature already used for a genuinely different set.
+ * rowid). The checked revision is zero on original delivery and advances
+ * before reconciliation requeues a closure, so a repair cannot reuse the
+ * server's already-claimed box-only batch id. Long signatures are bounded
+ * by `boundedBatchId` before transport.
  */
 function boxSetSignature(boxes: BoxClosureRow[]): string {
   const ceiling = boxes[boxes.length - 1]!.rowid;
   const outcomes = boxes
     .map((b) => (b.printVerifiedAt !== null ? "v" : b.printSkippedAt !== null ? "s" : "u"))
     .join("");
-  return `${ceiling}:${outcomes}`;
+  const base = `${ceiling}:${outcomes}`;
+  const checkedRevisions = boxes.map((box) => box.lastCheckedRevision);
+  return checkedRevisions.some((revision) => revision > 0)
+    ? `${base}:${checkedRevisions.join(",")}`
+    : base;
 }
 
 /**

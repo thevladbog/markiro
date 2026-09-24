@@ -2274,6 +2274,32 @@ describe("App", () => {
     }
   });
 
+  it("clears a paused shift's audit notice when entering the next floor session", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await renderActiveShiftForOperatorSwitch();
+      const originalInvoke = invokeMock.getMockImplementation();
+      if (!originalInvoke) throw new Error("floor invoke mock is unavailable");
+      invokeMock.mockImplementation((cmd, payload) => {
+        if (
+          cmd === "plugin:sql|select" &&
+          (payload as { query?: string } | undefined)?.query?.includes("COUNT(*) local_closed")
+        )
+          return Promise.resolve([{ local_closed: 1, delivered: 1, confirmed: 0, pending: 1 }]);
+        return originalInvoke(cmd, payload);
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+      await screen.findByText(/The shift is paused; box reconciliation will continue/);
+      fireEvent.click(await screen.findByRole("button", { name: "Open" }));
+      await waitFor(() => expect(screen.getByRole("button", { name: "Pause" })).toBeDefined());
+      expect(
+        screen.queryByText(/The shift is paused; box reconciliation will continue/),
+      ).toBeNull();
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
   it("locks the operator after ten inactive minutes without clearing credentials or queued work", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     try {

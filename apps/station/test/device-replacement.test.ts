@@ -59,8 +59,10 @@ function setup(path?: string) {
 describe("replacement durable drain", () => {
   it("keeps acknowledged but unconfirmed boxes and issues in replacement readiness", async () => {
     const s = setup();
-    s.db.exec(`INSERT INTO boxes_mirror(box_id,shift_id,opened_at,closed_at,acked_at)
-      VALUES('box-recheck','shift','now','later','ack');
+    s.db.exec(`INSERT INTO boxes_mirror(box_id,shift_id,sscc,opened_at,closed_at,acked_at)
+      VALUES('box-recheck','shift','123456789012345675','now','later','ack');
+      INSERT INTO boxes_mirror(box_id,shift_id,opened_at,closed_at,acked_at)
+      VALUES('box-without-sscc','shift','now','later','ack');
       INSERT INTO box_reconciliation_issues(box_id,shift_id,status,reason_code,local_item_count,checked_at)
       VALUES('box-recheck','shift','identity_conflict','sscc_conflict',1,'now');`);
     const measured = await readReplacementMeasurements(s.exec);
