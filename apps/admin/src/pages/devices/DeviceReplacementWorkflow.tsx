@@ -211,60 +211,65 @@ export function DeviceReplacementWorkflow({
   };
   return (
     <div style={grid}>
-      {p.readiness && p.state === "completed" ? (
-        <p style={{ margin: 0 }}>
-          {t(`deviceReplacement.workflow.${recoveryReadiness ? "recoveryReport" : "savedReport"}`)}
-        </p>
-      ) : null}
-      <dl
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 180px), 1fr))",
-          gap: "0 var(--sp-4)",
-          margin: 0,
-        }}
-      >
-        {field("revision", p.revision)}
-        {p.readiness ? (
-          <>
-            {field("epoch", p.readiness.credentialEpoch)}
-            {field(
-              "received",
-              p.readiness.receivedAt
-                ? date(p.readiness.receivedAt)
-                : t("deviceReplacement.workflow.notReported"),
+      <details>
+        <summary>{t("deviceReplacement.workflow.reportDetails")}</summary>
+        {p.readiness && p.state === "completed" ? (
+          <p style={{ margin: 0 }}>
+            {t(
+              `deviceReplacement.workflow.${recoveryReadiness ? "recoveryReport" : "savedReport"}`,
             )}
-          </>
+          </p>
         ) : null}
-        {report ? (
-          <>
-            {Object.entries(report.pending).map(([name, value]) =>
-              field(
-                name,
-                typeof value === "number" ? value : t("deviceReplacement.workflow.unsupported"),
-              ),
-            )}
-            {field(
-              "conflicts",
-              report.conflicts === "unsupported"
-                ? t("deviceReplacement.workflow.unsupported")
-                : report.conflicts,
-            )}
-            {field(
-              "unknownPrints",
-              report.unknownPrints === "unsupported"
-                ? t("deviceReplacement.workflow.unsupported")
-                : report.unknownPrints,
-            )}
-            {field("activeTasks", report.activeTasks.length)}
-            {field("installedGrants", report.installedGrants.length)}
-            {field("journal", report.journal.highestSequence)}
-            {field("storageRevision", report.storageRevision)}
-            {field("reportSequence", report.reportSequence)}
-            {field("clientBuild", report.clientBuild)}
-          </>
-        ) : null}
-      </dl>
+        <dl
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 180px), 1fr))",
+            gap: "0 var(--sp-4)",
+            margin: 0,
+          }}
+        >
+          {field("revision", p.revision)}
+          {p.readiness ? (
+            <>
+              {field("epoch", p.readiness.credentialEpoch)}
+              {field(
+                "received",
+                p.readiness.receivedAt
+                  ? date(p.readiness.receivedAt)
+                  : t("deviceReplacement.workflow.notReported"),
+              )}
+            </>
+          ) : null}
+          {report ? (
+            <>
+              {Object.entries(report.pending).map(([name, value]) =>
+                field(
+                  name,
+                  typeof value === "number" ? value : t("deviceReplacement.workflow.unsupported"),
+                ),
+              )}
+              {field(
+                "conflicts",
+                report.conflicts === "unsupported"
+                  ? t("deviceReplacement.workflow.unsupported")
+                  : report.conflicts,
+              )}
+              {field(
+                "unknownPrints",
+                report.unknownPrints === "unsupported"
+                  ? t("deviceReplacement.workflow.unsupported")
+                  : report.unknownPrints,
+              )}
+              {field("activeTasks", report.activeTasks.length)}
+              {field("installedGrants", report.installedGrants.length)}
+              {field("journal", report.journal.highestSequence)}
+              {field("storageRevision", report.storageRevision)}
+              {field("reportSequence", report.reportSequence)}
+              {field("clientBuild", report.clientBuild)}
+            </>
+          ) : null}
+        </dl>
+      </details>
       {p.readiness && !report ? (
         <Alert tone="warn">{t("deviceReplacement.workflow.noMeasurements")}</Alert>
       ) : null}

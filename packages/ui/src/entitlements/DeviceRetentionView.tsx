@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Alert, Button, Card, Checkbox, Input } from "../components/index.js";
 import type {
   DeviceRetentionObservation,
@@ -57,6 +57,7 @@ export function DeviceRetentionView({
   language,
   renderSnapshot,
 }: DeviceRetentionViewProps) {
+  const [historyOpen, setHistoryOpen] = useState(false);
   const view = { translate: t, language, renderSnapshot };
   const writable = canWrite && inspection.data?.canSelect === true;
   const locked = attempt.pending === true || attempt.notice === "uncertain";
@@ -188,25 +189,56 @@ export function DeviceRetentionView({
     <Card
       title={t("deviceRetention.title")}
       titleAs="h2"
+      className="device-retention-panel"
       style={{ minWidth: 0, overflowWrap: "anywhere" }}
     >
-      <p>{t("deviceRetention.intro")}</p>
-      <Alert tone="warn">{t("deviceRetention.shadowOnly")}</Alert>
+      {!live && !locked && inspection.data ? (
+        <section>
+          <h3 style={{ margin: 0 }}>{t("deviceRetention.noBoundary")}</h3>
+          <p style={{ marginBlockEnd: 0, color: "var(--fg-2)" }}>
+            {t("deviceRetention.inactiveBody")}
+          </p>
+        </section>
+      ) : (
+        <p style={{ margin: 0 }}>{t("deviceRetention.intro")}</p>
+      )}
+      {live || locked ? <p style={{ margin: 0 }}>{t("deviceRetention.shadowOnly")}</p> : null}
       {inspection.isPending ? <p role="status">{t("deviceRetention.loading")}</p> : null}
       {inspection.isError ? <Alert tone="error">{t("deviceRetention.loadError")}</Alert> : null}
-      {inspection.data && !writable ? <p>{t("deviceRetention.readonly")}</p> : null}
-      {inspection.data?.currentShadow.awaitingSelection ||
-      inspection.data?.currentShadow.affectedDeviceIds.length ? (
-        <Alert tone="warn">
-          {t("deviceRetention.currentShadow", {
-            count: inspection.data.currentShadow.affectedDeviceIds.length,
-          })}
-        </Alert>
+      {inspection.data && !writable && (live || locked) ? (
+        <p style={{ margin: 0 }}>{t("deviceRetention.readonly")}</p>
       ) : null}
-      {inspection.data?.currentShadow.awaitingSelection ? (
-        <Alert tone="warn">{t("deviceRetention.awaitingSelection")}</Alert>
+      {inspection.data &&
+      (!live ||
+        locked ||
+        inspection.data.currentShadow.awaitingSelection ||
+        inspection.data.currentShadow.affectedDeviceIds.length > 0) ? (
+        <details>
+          <summary>{t("deviceRetention.calculationDetails")}</summary>
+          <div style={{ display: "grid", gap: "var(--sp-2)", marginBlockStart: "var(--sp-2)" }}>
+            {!live && !locked ? (
+              <p style={{ margin: 0 }}>{t("deviceRetention.shadowOnly")}</p>
+            ) : null}
+            {inspection.data.currentShadow.awaitingSelection ||
+            inspection.data.currentShadow.affectedDeviceIds.length ? (
+              <p style={{ margin: 0 }}>
+                {t("deviceRetention.currentShadow", {
+                  count: inspection.data.currentShadow.affectedDeviceIds.length,
+                })}
+              </p>
+            ) : null}
+            {inspection.data.currentShadow.awaitingSelection ? (
+              <p style={{ margin: 0 }}>{t("deviceRetention.awaitingSelection")}</p>
+            ) : null}
+          </div>
+        </details>
       ) : null}
-      {!live && !locked && inspection.data ? <p>{t("deviceRetention.noBoundary")}</p> : null}
+      {saved?.needsReview && live ? (
+        <Alert tone="warn">{t("deviceRetention.needsReview")}</Alert>
+      ) : null}
+      {saved?.boundaryReached && live ? (
+        <Alert tone="warn">{t("deviceRetention.reached")}</Alert>
+      ) : null}
       {attempt.receipt ? (
         <section aria-label={t("deviceRetention.receipt")}>
           <Alert tone="ok">
@@ -320,36 +352,55 @@ export function DeviceRetentionView({
           ) : null}
         </div>
       ) : null}
-      {inspection.data?.selections.map((item) => (
-        <section
-          key={item.selection.id}
-          aria-label={t("deviceRetention.history")}
-          style={{ marginBlock: "var(--sp-4)" }}
-        >
-          <p>
-            {t("deviceRetention.saved", {
-              at: date(item.selection.observation.boundary.effectiveAt),
-            })}
-          </p>
-          <p>
-            {t("deviceRetention.revision", {
-              revision: item.selection.revision,
-              at: date(item.selection.preparedAt),
-            })}
-          </p>
-          {item.needsReview ? <Alert tone="warn">{t("deviceRetention.needsReview")}</Alert> : null}
-          {item.boundaryReached ? <Alert tone="warn">{t("deviceRetention.reached")}</Alert> : null}
-          <Selected
-            translate={t}
-            observation={item.selection.observation}
-            ids={item.selection.selectedDeviceIds}
-          />
-          <details>
-            <summary>{t("deviceRetention.originalFacts")}</summary>
-            <Observation {...view} observation={item.selection.observation} historical />
-          </details>
+      {inspection.data?.selections.length ? (
+        <section>
+          <Button
+            variant="secondary"
+            aria-expanded={historyOpen}
+            onClick={() => setHistoryOpen(!historyOpen)}
+          >
+            {t("deviceRetention.historyCount", { count: inspection.data.selections.length })}
+          </Button>
+          {historyOpen ? (
+            <div style={{ display: "grid", gap: "var(--sp-3)" }}>
+              {inspection.data.selections.map((item) => (
+                <section
+                  key={item.selection.id}
+                  aria-label={t("deviceRetention.history")}
+                  style={{ marginBlock: "var(--sp-4)" }}
+                >
+                  <p>
+                    {t("deviceRetention.saved", {
+                      at: date(item.selection.observation.boundary.effectiveAt),
+                    })}
+                  </p>
+                  <p>
+                    {t("deviceRetention.revision", {
+                      revision: item.selection.revision,
+                      at: date(item.selection.preparedAt),
+                    })}
+                  </p>
+                  {item.needsReview ? (
+                    <Alert tone="warn">{t("deviceRetention.needsReview")}</Alert>
+                  ) : null}
+                  {item.boundaryReached ? (
+                    <Alert tone="warn">{t("deviceRetention.reached")}</Alert>
+                  ) : null}
+                  <Selected
+                    translate={t}
+                    observation={item.selection.observation}
+                    ids={item.selection.selectedDeviceIds}
+                  />
+                  <details>
+                    <summary>{t("deviceRetention.originalFacts")}</summary>
+                    <Observation {...view} observation={item.selection.observation} historical />
+                  </details>
+                </section>
+              ))}
+            </div>
+          ) : null}
         </section>
-      ))}
+      ) : null}
     </Card>
   );
 }

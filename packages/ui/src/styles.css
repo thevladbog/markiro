@@ -274,3 +274,9 @@ select,
 textarea {
   font: inherit;
 }
+.mk-card.device-replacement-panel > .mk-card__body,
+.mk-card.device-retention-panel > .mk-card__body {
+  display: grid;
+  gap: var(--sp-4);
+  min-width: 0;
+}

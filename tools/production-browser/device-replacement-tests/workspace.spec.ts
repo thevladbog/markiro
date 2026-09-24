@@ -17,6 +17,7 @@ for (const width of [1440, 390])
       "preview-blocked",
       "client-unsupported",
       "client-expired",
+      "inactive",
     ] as const) {
       test(`replacement cabinet ${mode} ${locale} ${width}`, async ({ page }, info) => {
         const unexpected: string[] = [];
@@ -50,22 +51,29 @@ for (const width of [1440, 390])
                   : [
                       {
                         preparation:
-                          mode === "client-unsupported" || capabilityExpired
+                          mode === "inactive"
                             ? {
                                 ...workflowPreparation("prepared"),
-                                drainEligibility: {
-                                  status: "blocked",
-                                  reasons: ["client_upgrade_required"],
-                                },
+                                state: "cancelled",
+                                revision: 4,
+                                cancelledAt: "2026-09-18T12:30:00.000Z",
                               }
-                            : mode === "client-expired"
-                              ? workflowPreparation("prepared")
-                              : mode === "recovery-blocked"
-                                ? blockedRecoveryPreparation()
-                                : workflowPreparation(
-                                    mode === "ready" ? "ready" : "completed",
-                                    mode === "ready" ? "not_required" : "required",
-                                  ),
+                            : mode === "client-unsupported" || capabilityExpired
+                              ? {
+                                  ...workflowPreparation("prepared"),
+                                  drainEligibility: {
+                                    status: "blocked",
+                                    reasons: ["client_upgrade_required"],
+                                  },
+                                }
+                              : mode === "client-expired"
+                                ? workflowPreparation("prepared")
+                                : mode === "recovery-blocked"
+                                  ? blockedRecoveryPreparation()
+                                  : workflowPreparation(
+                                      mode === "ready" ? "ready" : "completed",
+                                      mode === "ready" ? "not_required" : "required",
+                                    ),
                         needsReview: false,
                       },
                     ],
@@ -75,7 +83,11 @@ for (const width of [1440, 390])
               canSelect: false,
               observation: null,
               selections: [],
-              currentShadow: { awaitingSelection: false, affectedDeviceIds: [], enforced: false },
+              currentShadow: {
+                awaitingSelection: mode === "inactive",
+                affectedDeviceIds: mode === "inactive" ? [pool.devices[0]!.deviceId] : [],
+                enforced: false,
+              },
             };
           else if (path === "/api/pickup-orders")
             json = { items: [], total: 0, page: 1, pageSize: 20 };
@@ -97,10 +109,30 @@ for (const width of [1440, 390])
         });
         await page.setViewportSize({ width, height: 1000 });
         await page.goto(`/test/browser/production.html?route=/devices&locale=${locale}`);
+        if (mode === "inactive" && locale === "ru" && width === 1440)
+          await page.getByRole("button", { name: "Переключить тему" }).click();
         await page.locator(".devices-service-workflows > summary").click();
         const ru = locale === "ru";
         let panel;
-        if (mode === "preview-blocked") {
+        if (mode === "inactive") {
+          panel = page.getByRole("button", {
+            name: ru ? "История замен (1)" : "Replacement history (1)",
+          });
+          await expect(panel).toBeVisible();
+          await expect(
+            page.getByText(ru ? "Этот проект замены отменён." : "This preparation is cancelled."),
+          ).toBeHidden();
+          await expect(
+            page.getByRole("heading", {
+              name: ru
+                ? "Уменьшение лимита не запланировано"
+                : "No device limit reduction is scheduled",
+            }),
+          ).toBeVisible();
+          await expect(
+            page.getByText(ru ? /Текущий теневой расчёт/ : /Current shadow calculation/),
+          ).toBeHidden();
+        } else if (mode === "preview-blocked") {
           await page
             .getByRole("combobox", { name: ru ? "Исходное устройство" : "Source device" })
             .click();
@@ -154,9 +186,14 @@ for (const width of [1440, 390])
           panel = page.getByRole("region", {
             name: ru ? "Сохранённая подготовка замены" : "Saved replacement preparation",
           });
-          await expect(
-            panel.getByText(ru ? "Ревизия проекта" : "Preparation revision"),
-          ).toBeVisible();
+          const report = panel.locator("summary").filter({
+            hasText: ru ? "Технические данные проверки" : "Technical report",
+          });
+          const revision = panel.getByText(ru ? "Ревизия проекта" : "Preparation revision");
+          await expect(revision).toBeHidden();
+          await report.click();
+          await expect(revision).toBeVisible();
+          await report.click();
           await expect(
             panel.getByRole("button", {
               name:
@@ -220,6 +257,7 @@ for (const width of [1440, 390])
                   : "Recovery blockers reported by the server",
               ),
             ).toBeVisible();
+            await report.click();
             await expect(
               panel
                 .getByText(ru ? "Исключения" : "Exceptions", { exact: true })
@@ -231,6 +269,7 @@ for (const width of [1440, 390])
                 ru ? /Разберите и отправьте исключения/ : /Resolve and send pending exceptions/,
               ),
             ).toBeVisible();
+            await report.click();
           }
         }
         await expect(panel).not.toContainText(/returned an object|deviceReplacement\./);
@@ -248,9 +287,15 @@ for (const width of [1440, 390])
           el.scrollTop = 0;
         });
         await panel.scrollIntoViewIfNeeded();
-        await panel.screenshot({
-          path: info.outputPath(`replacement-cabinet-${mode}-${locale}-${width}.png`),
-        });
+        if (mode === "inactive")
+          await page.screenshot({
+            path: info.outputPath(`replacement-cabinet-${mode}-${locale}-${width}.png`),
+            fullPage: true,
+          });
+        else
+          await panel.screenshot({
+            path: info.outputPath(`replacement-cabinet-${mode}-${locale}-${width}.png`),
+          });
         expect(unexpected).toEqual([]);
       });
     }

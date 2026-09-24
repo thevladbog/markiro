@@ -141,6 +141,13 @@ it("renders measured channels without turning unsupported into zero and shows se
   expect(screen.queryByText(/Execution is not enabled/)).toBeNull();
   expect(screen.queryByRole("button", { name: "Preview execution" })).toBeNull();
 });
+it("keeps technical counters in details while current blockers remain visible", async () => {
+  setup();
+  const details = await screen.findByText("Technical report");
+  expect(details.closest("details")?.open).toBe(false);
+  expect(screen.getByText("Scans").closest("details")).toBe(details.closest("details"));
+  expect(screen.getByText(/Update the source client/)).toBeTruthy();
+});
 it.each(["prepared", "ready", "executing", "completed"] as const)(
   "renders %s with precise available actions",
   async (state) => {
@@ -194,6 +201,7 @@ it("read-only principals inspect facts with no mutations", async () => {
   setup(undefined, false);
   await screen.findByText("Emergency replacement");
   expect(screen.getAllByRole("button").map((x) => x.textContent)).toEqual([
+    "Saved calculation",
     "Refresh replacement state",
   ]);
 });
@@ -422,6 +430,7 @@ it("preserves unsupported recovery measurements and their client remediation", a
 it("labels saved execution prerequisites as historical", async () => {
   current = { ...workflowPreparation("prepared"), observation: factualObservation };
   setup();
+  await userEvent.click(await screen.findByRole("button", { name: "Saved calculation" }));
   await screen.findByText(/Execution prerequisites at preparation/);
   expect(screen.getAllByText(/Handheld access is currently unavailable/)).toHaveLength(1);
   expect(screen.queryByText("Execution prerequisites in this preview")).toBeNull();
