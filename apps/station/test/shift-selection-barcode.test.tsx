@@ -141,6 +141,8 @@ describe("ShiftSelection barcode scanning", () => {
     renderSelection({ scan, items: [closingShift()] });
 
     await waitFor(() => expect(screen.getByText("Test product")).toBeDefined());
+    // Let the scanner's passive effect replace the initial loading-state listener.
+    await act(async () => {});
     act(() => scan.scan(`markiro:shift:v1:${SHIFT_ID}`));
 
     expect(await screen.findByText("This shift is closed.")).toBeDefined();
