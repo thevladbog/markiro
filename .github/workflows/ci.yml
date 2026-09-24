@@ -112,10 +112,10 @@ jobs:
     needs: classify-changes
     if: needs.classify-changes.outputs.verify_api_tests == 'true'
     runs-on: ubuntu-latest
-    # The db+api suite finishes green in ~15:05 on slow runners; a 15-minute
-    # budget killed two fully passing runs right at the summary line, and a
-    # 20-minute one cancelled a run that had taken 18:42 the attempt before.
-    timeout-minutes: 30
+    # The db+api matrix finished all seven tasks in 29:08 on run 36059314055,
+    # but the 30-minute job budget cancelled the runner after its green summary
+    # because checkout, install, and migrations count toward the same budget.
+    timeout-minutes: 40
     services:
       postgres:
         image: postgres:17-alpine
