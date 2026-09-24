@@ -224,6 +224,7 @@ interface RenderWorkScreenOverrides {
   onScanRecorded?: () => void;
   onScanQueueRegister?: (queue: ScanQueue) => () => void;
   onExit?: () => void;
+  onPauseShift?: () => Promise<void>;
   onCloseShift?: (reasonCode?: string | null) => Promise<{
     eventId: string;
     shiftId: string;
@@ -253,6 +254,7 @@ function renderWorkScreen(overrides: RenderWorkScreenOverrides = {}) {
     onScanRecorded,
     onScanQueueRegister,
     onExit = () => {},
+    onPauseShift,
     onCloseShift,
     pendingSync = 0,
   } = overrides;
@@ -272,6 +274,7 @@ function renderWorkScreen(overrides: RenderWorkScreenOverrides = {}) {
       {...(onScanRecorded ? { onScanRecorded } : {})}
       {...(onScanQueueRegister ? { onScanQueueRegister } : {})}
       onExit={onExit}
+      {...(onPauseShift ? { onPauseShift } : {})}
       {...(onCloseShift ? { onCloseShift } : {})}
       pendingSync={pendingSync}
       // None of the tests in this file's outer `describe` care about boxes:
@@ -571,6 +574,34 @@ describe("WorkScreen", () => {
     await waitFor(() => expect(onExit).toHaveBeenCalledOnce());
   });
 
+  it("requests a bounded box audit before persisting local shift close", async () => {
+    const order: string[] = [];
+    const onPauseShift = vi.fn(async () => {
+      order.push("audit");
+    });
+    const onCloseShift = vi.fn(async () => {
+      order.push("close");
+      return {
+        eventId: "close-1",
+        shiftId: "s1",
+        productId: "product-1",
+        productName: "Water 0.5",
+        plannedQtySnapshot: null,
+        actualQty: 0,
+        closedBoxCount: 0,
+        reasonCode: null,
+        closedAt: "2026-09-23T00:03:00.000Z",
+      };
+    });
+    const onExit = vi.fn(() => {
+      order.push("exit");
+    });
+    renderWorkScreen({ onPauseShift, onCloseShift, onExit });
+    fireEvent.click(screen.getByRole("button", { name: "Close shift" }));
+    await waitFor(() => expect(onExit).toHaveBeenCalledOnce());
+    expect(order).toEqual(["audit", "close", "exit"]);
+  });
+
   it("submits shift closing only once when the close control is double-tapped", async () => {
     let finishClose!: (summary: {
       eventId: string;
@@ -606,7 +637,7 @@ describe("WorkScreen", () => {
     fireEvent.click(close);
     fireEvent.click(close);
 
-    expect(onCloseShift).toHaveBeenCalledOnce();
+    await waitFor(() => expect(onCloseShift).toHaveBeenCalledOnce());
     finishClose({
       eventId: "close-1",
       shiftId: "s1",
@@ -1125,12 +1156,70 @@ describe("WorkScreen", () => {
     consoleError.mockRestore();
   });
 
-  it("leaves the shift immediately when nothing is queued", async () => {
+  it("leaves after the local scan queue and reconciliation barrier settle", async () => {
     const onExit = vi.fn();
-    renderWorkScreen({ onExit, pendingSync: 0 });
+    let resolveAudit!: () => void;
+    const onPauseShift = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveAudit = resolve;
+        }),
+    );
+    renderWorkScreen({ onExit, onPauseShift, pendingSync: 0 });
 
     fireEvent.click(screen.getByRole("button", { name: "Pause" }));
-    expect(onExit).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onPauseShift).toHaveBeenCalledOnce());
+    expect(onExit).not.toHaveBeenCalled();
+    resolveAudit();
+    await waitFor(() => expect(onExit).toHaveBeenCalledOnce());
+  });
+
+  it("does not start a second pause after a rerender while the first pause is in flight", async () => {
+    let releaseAudit!: () => void;
+    const audit = new Promise<void>((resolve) => {
+      releaseAudit = resolve;
+    });
+    const onPauseShift = vi.fn(() => audit);
+    const onExit = vi.fn();
+    const props: WorkScreenProps = {
+      exec: makeExec(),
+      shiftId: "s1",
+      terminalId: "dev-1",
+      operatorId: "operator-1",
+      expectedGtin14: "04600000000015",
+      productName: "Water 0.5",
+      source: manualSource(),
+      sound: { muted: true, volume: 1 },
+      onPauseShift,
+      onExit,
+      pendingSync: 0,
+      issuerPrefix: null,
+      boxCapacity: null,
+      verifyPrintedLabel: false,
+    };
+    const view = render(<WorkScreen {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+    await waitFor(() => expect(onPauseShift).toHaveBeenCalledOnce());
+    view.rerender(<WorkScreen {...props} productName="Updated" />);
+    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+    expect(onPauseShift).toHaveBeenCalledOnce();
+    releaseAudit();
+    await waitFor(() => expect(onExit).toHaveBeenCalledOnce());
+  });
+
+  it("allows a new pause attempt after the reconciliation barrier fails", async () => {
+    const onExit = vi.fn();
+    const onPauseShift = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("audit unavailable"))
+      .mockResolvedValueOnce(undefined);
+    renderWorkScreen({ onExit, onPauseShift, pendingSync: 0 });
+    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+    await screen.findByText("audit unavailable");
+    expect(onExit).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+    await waitFor(() => expect(onPauseShift).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(onExit).toHaveBeenCalledOnce());
   });
 
   it("warns about queued scans before leaving, and leaves anyway on confirm", async () => {
@@ -1142,7 +1231,7 @@ describe("WorkScreen", () => {
     expect(screen.getByText("12 scans have not reached the server yet.")).toBeDefined();
 
     fireEvent.click(screen.getByRole("button", { name: "Leave anyway" }));
-    expect(onExit).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onExit).toHaveBeenCalledOnce());
   });
 
   it("stays on the shift when the operator cancels", async () => {

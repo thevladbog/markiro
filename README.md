@@ -120,7 +120,9 @@ Run the admin app in another terminal:
 pnpm --filter @markiro/admin dev
 ```
 
-The admin UI is available at `http://localhost:5173`; the API and Scalar OpenAPI explorer use `http://localhost:3000` and `http://localhost:3000/docs`. The development stack also exposes Mailpit at `http://localhost:8025` and MinIO Console at `http://localhost:9001`. Values in `.env.example` are development-only.
+The admin UI is available at `http://localhost:5173`; the API and Scalar OpenAPI explorer use `http://localhost:3000` and `http://localhost:3000/docs`. The development stack also exposes Mailpit at `http://localhost:8025` and a private SeaweedFS S3 endpoint at `http://localhost:9000`. Values in `.env.example` are development-only.
+
+If upgrading an existing development stack, stop the old MinIO container before starting SeaweedFS so port `9000` is free. The old `miniodata` volume is left untouched; objects are not migrated automatically into the new `seaweedfsdata` volume.
 
 <details>
 <summary>Provision the first tenant owner</summary>

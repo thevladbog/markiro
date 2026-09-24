@@ -224,6 +224,8 @@ export const scanEventsMirror = sqliteTable("scan_events_mirror", {
   verdict: text("verdict").notNull(),
   scannedAt: text("scanned_at").notNull(),
   operatorId: text("operator_id"),
+  codeHash: text("code_hash"),
+  boxId: text("box_id"),
 });
 
 /**
@@ -246,6 +248,8 @@ export const outbox = sqliteTable("outbox", {
   // can attribute a synced scan to its box and to the operator who made it.
   boxId: text("box_id"),
   operatorId: text("operator_id"),
+  replayEventId: text("replay_event_id"),
+  replayOrigin: integer("replay_origin").notNull().default(0),
 });
 
 /**
@@ -269,6 +273,10 @@ export const boxesMirror = sqliteTable("boxes_mirror", {
   closedAt: text("closed_at"),
   closedBy: text("closed_by"),
   ackedAt: text("acked_at"),
+  reconciliationRevision: integer("reconciliation_revision").notNull().default(1),
+  confirmedRevision: integer("confirmed_revision").notNull().default(0),
+  lastCheckedRevision: integer("last_checked_revision").notNull().default(0),
+  serverReconciledAt: text("server_reconciled_at"),
   printVerifiedAt: text("print_verified_at"),
   printSkippedAt: text("print_skipped_at"),
   disassembledAt: text("disassembled_at"),
@@ -280,6 +288,17 @@ export const boxesMirror = sqliteTable("boxes_mirror", {
    * disassembled pallet still records which boxes stood on it.
    */
   palletId: text("pallet_id"),
+});
+
+/** Durable hard discrepancies found by the per-box server audit. */
+export const boxReconciliationIssues = sqliteTable("box_reconciliation_issues", {
+  boxId: text("box_id").primaryKey(),
+  shiftId: text("shift_id").notNull(),
+  status: text("status").notNull(),
+  reasonCode: text("reason_code").notNull(),
+  localItemCount: integer("local_item_count").notNull(),
+  serverItemCount: integer("server_item_count"),
+  checkedAt: text("checked_at").notNull(),
 });
 
 /**

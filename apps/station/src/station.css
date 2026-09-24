@@ -5094,6 +5094,49 @@ body,
   border-radius: 999px;
 }
 
+.station-sync-control {
+  padding: 0;
+}
+.station-sync-control dd {
+  overflow: visible;
+}
+.station-sync-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: inherit;
+  padding: 8px 14px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.station-sync-button:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.station-box-reconciliation-counters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  gap: var(--sp-2);
+  margin: var(--sp-4) 0;
+}
+.station-box-reconciliation-counters > div {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: var(--sp-3);
+}
+.station-box-reconciliation-counters dt {
+  color: var(--fg-2);
+}
+.station-box-reconciliation-counters dd {
+  margin: var(--sp-2) 0 0;
+  font-size: 24px;
+  font-weight: 700;
+}
+
 .station-status-pill__dot {
   width: 10px;
   height: 10px;

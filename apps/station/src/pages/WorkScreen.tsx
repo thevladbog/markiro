@@ -147,6 +147,8 @@ export interface WorkScreenProps {
   onFloorWorkRegister?: (barrier: FloorWorkBarrier) => () => void;
   /** Return to shift selection. Does NOT close the shift — that is a cabinet action. */
   onExit: () => void;
+  /** Requests a durable, bounded box audit before pause or local close. */
+  onPauseShift?: () => Promise<void>;
   /** Persists a local close and queues it for the server. */
   onCloseShift?: (reasonCode?: string | null) => Promise<OfflineShiftCloseSummary>;
   /** Scans still queued on this device, shown before the operator walks away. */
@@ -252,6 +254,7 @@ export function WorkScreen({
   onScanQueueRegister,
   onFloorWorkRegister,
   onExit,
+  onPauseShift,
   onCloseShift,
   pendingSync,
   exceptionWindowControl,
@@ -1135,6 +1138,7 @@ export function WorkScreen({
   const closingRef = useRef(false);
   const [closing, setClosing] = useState(false);
   const [boxActionPending, setBoxActionPending] = useState(false);
+  const pauseInFlightRef = useRef(false);
   // Render-time guard for callbacks already handed to physical scan sources.
   // Effect cleanup cannot revoke a callback synchronously: a source may invoke
   // the old function after this render commits but before the passive cleanup
@@ -1142,6 +1146,7 @@ export function WorkScreen({
   // the current blocking state in a ref so those stale callbacks are harmless.
   const ordinaryScanBlockedRef = useRef(false);
   ordinaryScanBlockedRef.current = Boolean(
+    pauseInFlightRef.current ||
     productLabelsBlocked ||
     !printRecoveryHydrated ||
     printAdmissionBlocked ||
@@ -1163,14 +1168,42 @@ export function WorkScreen({
   );
 
   async function pauseProductLabels() {
+    if (pauseInFlightRef.current) return;
+    pauseInFlightRef.current = true;
     ordinaryScanBlockedRef.current = true;
     queue.discardBufferedScans();
-    const closing = queue.close();
-    await productLabelsRef.current.work?.close();
-    await closing;
-    onExit();
+    try {
+      const closing = queue.close();
+      await productLabelsRef.current.work?.close();
+      await closing;
+      await onPauseShift?.();
+      onExit();
+    } catch (error) {
+      queue.open();
+      ordinaryScanBlockedRef.current = false;
+      setCloseError(error instanceof Error ? error.message : String(error));
+    } finally {
+      pauseInFlightRef.current = false;
+    }
+  }
+  async function pauseShift() {
+    if (pauseInFlightRef.current || ordinaryScanBlockedRef.current) return;
+    pauseInFlightRef.current = true;
+    ordinaryScanBlockedRef.current = true;
+    try {
+      await queue.close();
+      await onPauseShift?.();
+      onExit();
+    } catch (error) {
+      queue.open();
+      ordinaryScanBlockedRef.current = false;
+      setCloseError(error instanceof Error ? error.message : String(error));
+    } finally {
+      pauseInFlightRef.current = false;
+    }
   }
   function requestExit() {
+    if (pauseInFlightRef.current) return;
     if (
       productLabelsRef.current.work ||
       productLabelsRef.current.loading ||
@@ -1181,7 +1214,7 @@ export function WorkScreen({
     }
     if (ordinaryScanBlockedRef.current) return;
     if (pendingSync > 0) setConfirmExit(true);
-    else onExit();
+    else void pauseShift();
   }
 
   async function performClose(reasonCode?: string | null): Promise<void> {
@@ -1212,6 +1245,7 @@ export function WorkScreen({
       await new Promise<void>((resolve, reject) => {
         const accepted = queue.enqueueJob(async () => {
           try {
+            await onPauseShift?.();
             await onCloseShift(reasonCode ?? null);
             resolve();
           } catch (error) {
@@ -2631,7 +2665,7 @@ export function WorkScreen({
             <div className="work-overlay__body">
               <p>{t("work.exitPending", { count: pendingSync })}</p>
               <div className="work-overlay__actions">
-                <Button size="floor" onClick={onExit}>
+                <Button size="floor" onClick={() => void pauseShift()}>
                   {t("work.exitAnyway")}
                 </Button>
                 <Button size="floor" variant="secondary" onClick={() => setConfirmExit(false)}>

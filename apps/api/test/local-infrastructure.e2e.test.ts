@@ -19,7 +19,7 @@ import { listenOnLoopback } from "./support/listen-loopback";
 
 const ready = process.env.LOCAL_INFRA_SMOKE === "1";
 
-describe.skipIf(!ready)("local Mailpit and MinIO product lifecycle", () => {
+describe.skipIf(!ready)("local Mailpit and S3 product lifecycle", () => {
   let env: ReturnType<typeof loadEnv>;
   let setup: AuthSetup;
   let app: INestApplication;

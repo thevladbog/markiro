@@ -112,10 +112,10 @@ jobs:
     needs: classify-changes
     if: needs.classify-changes.outputs.verify_api_tests == 'true'
     runs-on: ubuntu-latest
-    # The db+api suite finishes green in ~15:05 on slow runners; a 15-minute
-    # budget killed two fully passing runs right at the summary line, and a
-    # 20-minute one cancelled a run that had taken 18:42 the attempt before.
-    timeout-minutes: 30
+    # The db+api matrix finished all seven tasks in 29:08 on run 36059314055,
+    # but the 30-minute job budget cancelled the runner after its green summary
+    # because checkout, install, and migrations count toward the same budget.
+    timeout-minutes: 40
     services:
       postgres:
         image: postgres:17-alpine
@@ -220,12 +220,10 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Start PostgreSQL, Mailpit, and MinIO
+      - name: Start PostgreSQL, Mailpit, and SeaweedFS
         run: >-
           docker compose -f docker-compose.dev.yml up -d --wait --wait-timeout 120
-          postgres mailpit minio
-      - name: Initialize the private development bucket
-        run: docker compose -f docker-compose.dev.yml run --rm minio-init
+          postgres mailpit seaweedfs
       - run: pnpm --filter @markiro/db db:migrate
       - name: Build API workspace dependencies
         run: pnpm turbo build --filter '@markiro/api...'
@@ -238,7 +236,7 @@ jobs:
         run: >-
           pnpm --filter @markiro/api exec vitest run
           test/local-infrastructure.e2e.test.ts
-      - name: Verify National Catalog images in private MinIO
+      - name: Verify National Catalog images in private S3 storage
         run: >-
           pnpm --filter @markiro/api exec vitest run
           test/national-catalog-image.test.ts
@@ -439,7 +437,7 @@ jobs:
             printf '%s\n' "SMTP_FROM_NAME=Markiro CI"
             printf '%s\n' "SMTP_REPLY_TO="
             printf '%s\n' "MAIL_PAYLOAD_ENCRYPTION_KEY=$mail_payload_key"
-            printf '%s\n' "S3_ENDPOINT=http://minio:9000"
+            printf '%s\n' "S3_ENDPOINT=http://seaweedfs:8333"
             printf '%s\n' "S3_REGION=us-east-1"
             printf '%s\n' "S3_BUCKET=markiro-private"
             printf '%s\n' "S3_ACCESS_KEY_ID=markiro"
@@ -478,11 +476,7 @@ jobs:
         run: >-
           docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml
           -f deploy/production/compose.ci.yml up -d --wait --wait-timeout 120
-          postgres mailpit minio
-      - name: Initialize the test bucket
-        run: >-
-          docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml
-          -f deploy/production/compose.ci.yml run --rm minio-init
+          postgres mailpit seaweedfs
       - name: Run production migrations twice
         run: |
           docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml -f deploy/production/compose.ci.yml run --rm migrate

@@ -41,6 +41,8 @@ export interface UseSyncEngineResult {
   pauseAndWaitForIdle: () => Promise<void>;
   /** Resumes normal device-wide draining after a fail-closed window. */
   resume: () => void;
+  requestFullShiftAudit: (shiftId?: string) => Promise<void>;
+  reconcileNow: () => Promise<void>;
 }
 
 /**
@@ -131,5 +133,15 @@ export function useSyncEngine(deps: UseSyncEngineDeps): UseSyncEngineResult {
     engineRef.current?.resume();
   }, []);
 
-  return { state, nudge, pause, pauseAndWaitForIdle, resume };
+  const requestFullShiftAudit = useCallback(async (shiftId?: string) => {
+    const engine = engineRef.current;
+    if (!engine) throw new Error("Station sync engine unavailable for box audit intent");
+    await engine.requestFullShiftAudit(shiftId);
+  }, []);
+
+  const reconcileNow = useCallback(async () => {
+    await engineRef.current?.reconcileNow();
+  }, []);
+
+  return { state, nudge, pause, pauseAndWaitForIdle, resume, requestFullShiftAudit, reconcileNow };
 }

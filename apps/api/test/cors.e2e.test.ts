@@ -245,6 +245,7 @@ describe.skipIf(!ready)("cors e2e", () => {
         ],
         ["POST", "/station/conflicts/status"],
         ["POST", "/station/codes/releases"],
+        ["POST", "/station/boxes/reconciliation"],
         ["POST", "/station/scans"],
         ["GET", "/station/inventory-tasks"],
         ["POST", "/station/inventory-tasks/resolve-barcode"],

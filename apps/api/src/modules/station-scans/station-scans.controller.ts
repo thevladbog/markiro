@@ -28,6 +28,10 @@ import { ZodValidationPipe } from "../../zod.pipe";
 import { AllowSubscriptionRecovery } from "../../subscriptions/subscription-access-policy";
 import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access.guard";
 import {
+  stationBoxReconciliationResponseSchema,
+  stationBoxReconciliationSchema,
+  type StationBoxReconciliationDto,
+  type StationBoxReconciliationResponseDto,
   stationCodeReleasesResponseOpenApiSchema,
   stationCodeReleasesSchema,
   stationConflictStatusResponseOpenApiSchema,
@@ -55,6 +59,23 @@ import { StationScansService } from "./station-scans.service";
 @ApiStationAuth()
 export class StationScansController {
   constructor(private readonly service: StationScansService) {}
+
+  @Post("boxes/reconciliation")
+  @AllowReplacementEvidenceRecovery()
+  @AllowSubscriptionRecovery("station")
+  @HttpCode(200)
+  @ApiOperation({ summary: "Reconcile a station's closed boxes with server membership" })
+  @ApiZodBody(stationBoxReconciliationSchema)
+  @ApiOkResponse({ schema: zodApiSchema(stationBoxReconciliationResponseSchema) })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403, 429)
+  reconcileBoxes(
+    @Req() req: RequestWithTenant,
+    @Body(new ZodValidationPipe(stationBoxReconciliationSchema)) body: StationBoxReconciliationDto,
+  ): Promise<StationBoxReconciliationResponseDto> {
+    if (!req.deviceId) throw new ForbiddenException("Station device authentication required");
+    return this.service.reconcileBoxes(req.tenantId!, req.deviceId, body);
+  }
 
   @Post("validation-occurrences/status")
   @AllowReplacementEvidenceRecovery()

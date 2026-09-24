@@ -1,4 +1,7 @@
 import { useDeviceReplacement } from "./lib/use-device-replacement.js";
+import { readBoxReconciliationSummary } from "./lib/box-reconciliation.js";
+import { runShiftReconciliationBarrier } from "./lib/shift-reconciliation-barrier.js";
+import { SyncDetailsDialog } from "./ui/SyncDetailsDialog.js";
 import { replacementBlocksNewWork, replacementCanEnterTask } from "./lib/device-replacement.js";
 import { configuredPrinterOutput, configuredPrinterRouting } from "./lib/printer-routing.js";
 import { RecoveryWorkSummary } from "./ui/RecoveryWorkSummary.js";
@@ -334,6 +337,9 @@ export function App() {
   const [setupPrinterTab, setSetupPrinterTab] = useState(false);
   const [showConflicts, setShowConflicts] = useState(false);
   const [showUpdates, setShowUpdates] = useState(false);
+  const [showSyncDetails, setShowSyncDetails] = useState(false);
+  const [boxIssueCount, setBoxIssueCount] = useState(0);
+  const [boxAuditNotice, setBoxAuditNotice] = useState<string | null>(null);
   const [operatorSwitchState, setOperatorSwitchState] = useState<"idle" | "settling" | "failed">(
     "idle",
   );
@@ -991,6 +997,8 @@ export function App() {
     pause: pauseSync,
     pauseAndWaitForIdle: pauseSyncAndWaitForIdle,
     resume: resumeSync,
+    requestFullShiftAudit,
+    reconcileNow: reconcileBoxesNow,
   } = useSyncEngine({
     exec: tauriExecutor,
     client: authenticatedClient,
@@ -999,6 +1007,18 @@ export function App() {
     onCredentialRejected,
   });
   pauseSyncAndWaitForIdleRef.current = pauseSyncAndWaitForIdle;
+
+  useEffect(() => {
+    let current = true;
+    void readBoxReconciliationSummary(tauriExecutor)
+      .then((summary) => {
+        if (current) setBoxIssueCount(summary.issues);
+      })
+      .catch(() => {});
+    return () => {
+      current = false;
+    };
+  }, [syncState]);
 
   // Successful recovery first commits the unblocked floor render; only the
   // following effect may let the device-wide outbox resume. This prevents a
@@ -1688,6 +1708,7 @@ export function App() {
     shiftRecoverySyncPaused.current = true;
     pauseSync();
     setResumeSyncAfterRecoveryCommit(false);
+    setBoxAuditNotice(null);
     setShift(entered);
     setShiftContext(null);
     setBoxTemplateRecovery(null);
@@ -1893,6 +1914,8 @@ export function App() {
         : {})}
       syncPending={syncState.pending}
       syncStuck={syncState.stuck}
+      syncAttention={boxIssueCount > 0}
+      onOpenSyncDetails={() => setShowSyncDetails(true)}
       conflicts={syncState.conflicts}
       update={updateIndicator}
       actionsDisabled={operatorSwitchState !== "idle" || floorRecoveryBlocked || shiftEntryPending}
@@ -1902,7 +1925,12 @@ export function App() {
         }
         setShowUpdates(true);
       }}
-      footer={legacyNotice}
+      footer={
+        <>
+          {legacyNotice}
+          {boxAuditNotice ? <Alert tone="warn" title={boxAuditNotice} /> : null}
+        </>
+      }
       statusBarCollapsible={shift !== null}
     >
       {replacement.drain && activeFloorTask && (
@@ -2064,6 +2092,22 @@ export function App() {
                 shiftEntryGenerationRef.current += 1;
                 setShift(null);
                 setFloorView("select");
+              }}
+              onPauseShift={async () => {
+                const outcome = await runShiftReconciliationBarrier(
+                  shift.id,
+                  { requestFullShiftAudit, reconcileNow: reconcileBoxesNow },
+                  () => readBoxReconciliationSummary(tauriExecutor, shift.id),
+                );
+                setBoxAuditNotice(
+                  outcome.complete
+                    ? null
+                    : t(
+                        outcome.hardIssues > 0
+                          ? "boxReconciliation.pauseIssues"
+                          : "boxReconciliation.pausePending",
+                      ),
+                );
               }}
               onCloseShift={async (reasonCode) => {
                 if (!config?.deviceId) throw new Error("Идентификатор станции недоступен");
@@ -2319,6 +2363,17 @@ export function App() {
           }}
         />
       )}
+      <SyncDetailsDialog
+        open={showSyncDetails}
+        exec={tauriExecutor}
+        shiftId={shift?.id ?? null}
+        serverReachability={serverReachability}
+        onClose={() => setShowSyncDetails(false)}
+        onReconcileNow={async () => {
+          await requestFullShiftAudit(shift?.id);
+          await reconcileBoxesNow();
+        }}
+      />
     </FloorShell>
   );
 }

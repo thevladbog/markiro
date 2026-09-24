@@ -531,6 +531,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "POST /station/conflicts/status (StationScansController.conflictStatus)",
       "POST /station/validation-occurrences/status (StationScansController.occurrenceStatus)",
       "POST /station/codes/releases (StationScansController.codeReleases)",
+      "POST /station/boxes/reconciliation (StationScansController.reconcileBoxes)",
       "POST /station/scans (StationScansController.ingest)",
       "POST /station/grants/v1/evidence/scans (DeviceGrantsController.evidenceScans)",
       "POST /station/grants/v1/evidence/shift-closures (DeviceGrantsController.evidenceShiftClose)",

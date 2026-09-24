@@ -42,6 +42,7 @@ const expected = [
     "content-type,x-api-key,x-station-capabilities",
   ],
   ["/station/codes/releases", "POST", "content-type,x-api-key,x-station-capabilities"],
+  ["/station/boxes/reconciliation", "POST", "content-type,x-api-key,x-station-capabilities"],
   ["/station/scans", "POST", "content-type,x-api-key,x-station-capabilities"],
   ["/station/inventory-tasks", "GET", "content-type,x-api-key,x-station-capabilities"],
   [

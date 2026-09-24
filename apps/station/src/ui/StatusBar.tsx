@@ -42,6 +42,8 @@ export interface StatusBarProps {
   syncPending: number;
   /** The queue has work and has stopped moving — see sync.ts's STUCK_AFTER_MS. */
   syncStuck: boolean;
+  syncAttention?: boolean;
+  onOpenSyncDetails?: () => void;
   /**
    * Codes this device scanned that an earlier scan elsewhere already owns
    * (see conflicts.ts's conflictCount). A quiet, always-present count — never
@@ -72,6 +74,8 @@ export function StatusBar({
   onOpenPrinters,
   syncPending,
   syncStuck,
+  syncAttention = false,
+  onOpenSyncDetails,
   conflicts,
   update,
   onOpenUpdates,
@@ -205,14 +209,38 @@ export function StatusBar({
           testId="server-status"
           live="polite"
         />
-        <StatusPill
-          label={t("shell.sync")}
-          shortLabel={t("shell.syncShort")}
-          value={syncStuck ? `${syncPending} — ${t("shell.syncStuck")}` : String(syncPending)}
-          tone={syncStuck ? "warn" : "ok"}
-          valueShown
-          testId="sync-status"
-        />
+        {onOpenSyncDetails ? (
+          <div
+            className="station-status-item station-status-pill station-sync-control"
+            data-tone={syncAttention || syncStuck ? "warn" : "ok"}
+          >
+            <dt className="station-visually-hidden">{t("shell.sync")}</dt>
+            <dd>
+              <button
+                type="button"
+                className="station-sync-button"
+                onClick={onOpenSyncDetails}
+                aria-label={`${t("shell.sync")}: ${syncPending}${syncAttention ? `, ${t("boxReconciliation.attention")}` : ""}`}
+              >
+                <span className="station-status-pill__dot" aria-hidden="true" />
+                <span>{t("shell.syncShort")}</span>
+                <span data-testid="sync-status">
+                  {syncStuck ? `${syncPending} — ${t("shell.syncStuck")}` : syncPending}
+                </span>
+                {syncAttention ? <span aria-hidden="true">!</span> : null}
+              </button>
+            </dd>
+          </div>
+        ) : (
+          <StatusPill
+            label={t("shell.sync")}
+            shortLabel={t("shell.syncShort")}
+            value={syncStuck ? `${syncPending} — ${t("shell.syncStuck")}` : String(syncPending)}
+            tone={syncStuck ? "warn" : "ok"}
+            valueShown
+            testId="sync-status"
+          />
+        )}
         <StatusPill
           label={t("shell.conflicts")}
           shortLabel={t("shell.conflictsShort")}

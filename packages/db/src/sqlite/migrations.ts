@@ -4740,6 +4740,52 @@ export const STATION_MIGRATIONS: string[] = [
   `DELETE FROM offline_grant_grants
    WHERE json_extract(grant_json,'$.kindOfGrant')='device'
      AND EXISTS(SELECT 1 FROM device_replacement_drain WHERE state<>'cancelled' OR closure_acknowledged_at IS NULL);`,
+  // Keep the reconciliation intent even after the normal outbox is acknowledged
+  // and deleted. Existing closed boxes start at requested 1 / confirmed 0.
+  `ALTER TABLE boxes_mirror ADD COLUMN reconciliation_revision INTEGER NOT NULL DEFAULT 1;`,
+  `ALTER TABLE boxes_mirror ADD COLUMN confirmed_revision INTEGER NOT NULL DEFAULT 0;`,
+  `ALTER TABLE boxes_mirror ADD COLUMN last_checked_revision INTEGER NOT NULL DEFAULT 0;`,
+  `ALTER TABLE boxes_mirror ADD COLUMN server_reconciled_at TEXT;`,
+  `ALTER TABLE scan_events_mirror ADD COLUMN code_hash TEXT;`,
+  `ALTER TABLE scan_events_mirror ADD COLUMN box_id TEXT;`,
+  `ALTER TABLE outbox ADD COLUMN replay_event_id TEXT;`,
+  `ALTER TABLE outbox ADD COLUMN replay_origin INTEGER NOT NULL DEFAULT 0 CHECK(replay_origin IN (0,1));`,
+  // Replayed rows carry their original grant link in replay_event_id. They
+  // must never consume a new productive event's one-shot pending association.
+  `DROP TRIGGER IF EXISTS offline_grant_scan_evidence_outbox;`,
+  `CREATE TRIGGER IF NOT EXISTS offline_grant_scan_evidence_outbox
+   AFTER INSERT ON outbox WHEN NEW.replay_origin=0 BEGIN
+     SELECT CASE WHEN (SELECT COUNT(*) FROM offline_grant_event_evidence WHERE scan_pending=1)>1
+       THEN RAISE(ABORT,'OFFLINE_GRANT_SCAN_ASSOCIATION_CONFLICT') END;
+     UPDATE offline_grant_event_evidence SET outbox_id=NEW.id,scan_pending=0
+       WHERE scan_pending=1 AND outbox_id IS NULL
+         AND EXISTS (SELECT 1 FROM offline_grant_decisions decision
+           WHERE decision.event_id=offline_grant_event_evidence.event_id
+             AND json_extract(decision.decision_json,'$.allow')=1);
+   END;`,
+  `CREATE TABLE IF NOT EXISTS box_reconciliation_issues (
+     box_id TEXT PRIMARY KEY,
+     shift_id TEXT NOT NULL,
+     status TEXT NOT NULL CHECK(status IN ('content_mismatch','identity_conflict','replay_evidence_missing')),
+     reason_code TEXT NOT NULL,
+     local_item_count INTEGER NOT NULL CHECK(local_item_count>=0),
+     server_item_count INTEGER CHECK(server_item_count IS NULL OR server_item_count>=0),
+     checked_at TEXT NOT NULL
+   );`,
+  `CREATE INDEX IF NOT EXISTS box_reconciliation_issues_shift_idx
+     ON box_reconciliation_issues(shift_id);`,
+  `CREATE INDEX IF NOT EXISTS boxes_mirror_reconciliation_due_idx
+     ON boxes_mirror(acked_at,reconciliation_revision,confirmed_revision);`,
+  // The productive journal insert precedes its outbox insert in both legacy
+  // and grant-aware paths. The accepted outbox identity annotates that exact
+  // scan event in the same transaction whenever the grant path is used.
+  `CREATE TRIGGER IF NOT EXISTS scan_event_box_identity_from_outbox
+   AFTER INSERT ON outbox WHEN NEW.code_hash IS NOT NULL AND NEW.box_id IS NOT NULL BEGIN
+     UPDATE scan_events_mirror SET code_hash=NEW.code_hash,box_id=NEW.box_id
+      WHERE id=(SELECT id FROM scan_events_mirror
+                 WHERE shift_id=NEW.shift_id AND raw=NEW.raw AND scanned_at=NEW.scanned_at
+                   AND code_hash IS NULL ORDER BY id DESC LIMIT 1);
+   END;`,
 ];
 
 export interface StationMigrationEntry {

@@ -30,32 +30,18 @@ services:
       timeout: 5s
       retries: 10
 
-  minio:
-    # See docker-compose.dev.yml: Docker Hub denies `minio/minio` outright now.
-    # Same releases, different registry.
-    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
-    command: server /data --console-address ":9001"
+  seaweedfs:
+    image: docker.io/chrislusf/seaweedfs:4.47@sha256:ce9e796f1fe6f06968f4c04bdaf8f678dad9c8acdfef3d244133d71bfa6bf882
     environment:
-      MINIO_ROOT_USER: markiro
-      MINIO_ROOT_PASSWORD: markiro-development-only
+      AWS_ACCESS_KEY_ID: markiro
+      AWS_SECRET_ACCESS_KEY: markiro-development-only
+      S3_BUCKET: markiro-private
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
+      test:
+        [
+          "CMD-SHELL",
+          'test "$$(curl -sS -o /dev/null -w ''%{http_code}'' http://127.0.0.1:8333/$${S3_BUCKET}/healthcheck)" = 403',
+        ]
       interval: 5s
       timeout: 5s
       retries: 20
-
-  minio-init:
-    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
-    depends_on:
-      minio:
-        condition: service_healthy
-    environment:
-      MINIO_ROOT_USER: markiro
-      MINIO_ROOT_PASSWORD: markiro-development-only
-      MINIO_BUCKET: markiro-private
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - >-
-        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}" &&
-        mc mb --ignore-existing "local/$${MINIO_BUCKET}" &&
-        mc anonymous set none "local/$${MINIO_BUCKET}"

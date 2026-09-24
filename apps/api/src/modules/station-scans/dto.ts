@@ -429,6 +429,54 @@ export const stationCodeReleasesSchema = z
   });
 export type StationCodeReleasesDto = z.infer<typeof stationCodeReleasesSchema>;
 
+export const stationBoxReconciliationSchema = z.strictObject({
+  boxes: z
+    .array(
+      z.strictObject({
+        shiftId: z.string().uuid().toLowerCase(),
+        boxId: z.string().min(1).max(64),
+        sscc: z.string().regex(/^\d{18}$/),
+        closedAt: z.string().datetime(),
+        devicePalletId: z.string().min(1).max(64).nullable(),
+        itemCount: z.number().int().nonnegative().max(10_000),
+        membershipDigest: z.string().regex(/^[0-9a-f]{64}$/),
+        digestVersion: z.literal(1),
+      }),
+    )
+    .min(1)
+    .max(200)
+    .refine(
+      (boxes) => new Set(boxes.map((box) => `${box.shiftId}|${box.boxId}`)).size === boxes.length,
+      "Box identities must be unique in a reconciliation request",
+    ),
+});
+export type StationBoxReconciliationDto = z.infer<typeof stationBoxReconciliationSchema>;
+
+export const stationBoxReconciliationResponseSchema = z.strictObject({
+  results: z.array(
+    z.strictObject({
+      boxId: z.string(),
+      status: z.enum(["confirmed", "replay_required", "content_mismatch", "identity_conflict"]),
+      reasonCode: z.enum([
+        "matched",
+        "box_absent",
+        "closure_absent",
+        "pallet_absent",
+        "count_mismatch",
+        "digest_mismatch",
+        "sscc_conflict",
+        "shift_or_device_conflict",
+        "closure_conflict",
+        "pallet_conflict",
+      ]),
+      serverItemCount: z.number().int().nonnegative().nullable(),
+    }),
+  ),
+});
+export type StationBoxReconciliationResponseDto = z.infer<
+  typeof stationBoxReconciliationResponseSchema
+>;
+
 export interface StationCodeReleasesResponseDto {
   until: string;
   releasedCodeHashes: string[];

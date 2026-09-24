@@ -79,6 +79,15 @@ const bundle: StationBundle = {
 };
 
 describe("mirror", () => {
+  it("keeps the replay-aware grant association trigger stable across restarts", async () => {
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+    await applyMigrations(exec);
+    const [trigger] = await exec.all<{ sql: string }>(
+      "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='offline_grant_scan_evidence_outbox'",
+    );
+    expect(trigger?.sql).toContain("NEW.replay_origin=0");
+  });
   it.each([false, true])(
     "does not reopen a locally closed shift from a stale bundle (acknowledged: %s)",
     async (acknowledged) => {

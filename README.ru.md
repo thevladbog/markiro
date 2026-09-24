@@ -120,7 +120,9 @@ pnpm --filter @markiro/api dev
 pnpm --filter @markiro/admin dev
 ```
 
-Админ-панель доступна по адресу `http://localhost:5173`; API и обозреватель Scalar OpenAPI — по адресам `http://localhost:3000` и `http://localhost:3000/docs`. Стек разработки также открывает Mailpit на `http://localhost:8025` и MinIO Console на `http://localhost:9001`. Значения из `.env.example` предназначены только для разработки.
+Админ-панель доступна по адресу `http://localhost:5173`; API и обозреватель Scalar OpenAPI — по адресам `http://localhost:3000` и `http://localhost:3000/docs`. Стек разработки также открывает Mailpit на `http://localhost:8025` и приватный S3-эндпоинт SeaweedFS на `http://localhost:9000`. Значения из `.env.example` предназначены только для разработки.
+
+При обновлении существующего стека разработки сначала остановите старый контейнер MinIO, чтобы освободить порт `9000`. Прежний том `miniodata` остаётся нетронутым; объекты не переносятся автоматически в новый том `seaweedfsdata`.
 
 <details>
 <summary>Создать первого владельца арендатора</summary>

@@ -27,7 +27,27 @@ vi.mock("@tauri-apps/api/core", () => ({
       this.onmessage = onmessage;
     }
   },
-  invoke: (...args: unknown[]) => invokeMock(...(args as [string])),
+  invoke: async (...args: unknown[]) => {
+    const [cmd, payload] = args as [
+      string,
+      { statements?: { sql: string; values?: unknown[] }[] }?,
+    ];
+    if (cmd === "grant_atomic_execute") {
+      // App navigation mocks the plugin-sql bridge. Route held-connection
+      // audit intent through the same fake SQL store; native transaction
+      // semantics are covered by the SQLite reconciliation tests.
+      const changes: number[] = [];
+      for (const statement of payload?.statements ?? []) {
+        await invokeMock("plugin:sql|execute", {
+          query: statement.sql,
+          values: statement.values ?? [],
+        });
+        changes.push(1);
+      }
+      return changes;
+    }
+    return args.length === 1 ? invokeMock(cmd) : invokeMock(cmd, payload);
+  },
 }));
 
 // `@tauri-apps/plugin-sql` is a real npm package outside the Vite SSR module
@@ -2249,6 +2269,32 @@ describe("App", () => {
         ["set_system_awake", { awake: true }],
         ["set_system_awake", { awake: false }],
       ]);
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it("clears a paused shift's audit notice when entering the next floor session", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await renderActiveShiftForOperatorSwitch();
+      const originalInvoke = invokeMock.getMockImplementation();
+      if (!originalInvoke) throw new Error("floor invoke mock is unavailable");
+      invokeMock.mockImplementation((cmd, payload) => {
+        if (
+          cmd === "plugin:sql|select" &&
+          (payload as { query?: string } | undefined)?.query?.includes("COUNT(*) local_closed")
+        )
+          return Promise.resolve([{ local_closed: 1, delivered: 1, confirmed: 0, pending: 1 }]);
+        return originalInvoke(cmd, payload);
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+      await screen.findByText(/The shift is paused; box reconciliation will continue/);
+      fireEvent.click(await screen.findByRole("button", { name: "Open" }));
+      await waitFor(() => expect(screen.getByRole("button", { name: "Pause" })).toBeDefined());
+      expect(
+        screen.queryByText(/The shift is paused; box reconciliation will continue/),
+      ).toBeNull();
     } finally {
       consoleErrorSpy.mockRestore();
     }

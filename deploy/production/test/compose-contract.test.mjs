@@ -174,6 +174,7 @@ test("production Compose contains only hardened application services", async () 
     /postgres:/,
     /mailpit/,
     /minio/,
+    /seaweedfs/,
     /build:/,
     /\.\//,
     /source:/,
@@ -295,25 +296,17 @@ test("CI overlay supplies only local image selectors and pinned test dependencie
   const compose = await readFile(ciCompose, "utf8");
   const services = compose.match(/^  ([a-z][a-z-]*):$/gm)?.map((entry) => entry.trim());
 
-  assert.deepEqual(services, [
-    "migrate:",
-    "api:",
-    "edge:",
-    "postgres:",
-    "mailpit:",
-    "minio:",
-    "minio-init:",
-  ]);
+  assert.deepEqual(services, ["migrate:", "api:", "edge:", "postgres:", "mailpit:", "seaweedfs:"]);
   assert.match(compose, /image: postgres:17-alpine/);
   assert.match(compose, /image: axllent\/mailpit:v1\.30\.0/);
   assert.match(compose, /MP_DATABASE: \/tmp\/mailpit\.db/);
-  // quay.io, not Docker Hub: `docker pull minio/minio` is denied for every tag
-  // now. The registry is pinned here as deliberately as the release is, because
-  // a silent move to an unpinned or unexpected origin is exactly what this
-  // contract exists to catch.
-  assert.match(compose, /image: quay\.io\/minio\/minio:RELEASE\.2025-09-07T16-13-09Z/);
-  assert.match(compose, /image: quay\.io\/minio\/mc:RELEASE\.2025-08-13T08-35-41Z/);
-  assert.match(compose, /^  minio-init:$/m);
+  assert.match(
+    compose,
+    /image: docker\.io\/chrislusf\/seaweedfs:4\.47@sha256:ce9e796f1fe6f06968f4c04bdaf8f678dad9c8acdfef3d244133d71bfa6bf882/,
+  );
+  assert.match(compose, /AWS_ACCESS_KEY_ID: markiro/);
+  assert.match(compose, /AWS_SECRET_ACCESS_KEY: markiro-development-only/);
+  assert.match(compose, /S3_BUCKET: markiro-private/);
   assert.doesNotMatch(compose, /^\s+ports:/m);
   assert.doesNotMatch(compose, /read_only: false/);
   assert.doesNotMatch(compose, /cap_drop: \[\]/);
