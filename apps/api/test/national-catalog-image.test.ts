@@ -1260,17 +1260,17 @@ describe("private National Catalog images (real PostgreSQL and normalized bytes)
     expect(link?.reviewedPhoto).toBeNull();
   });
 
-  // The PostgreSQL-only API job has no MinIO. The infrastructure job runs this
-  // same file with LOCAL_INFRA_SMOKE=1 and an initialized private bucket.
+  // The PostgreSQL-only API job has no local S3. The infrastructure job runs
+  // this file with LOCAL_INFRA_SMOKE=1 and a private bucket.
   it.skipIf(process.env.LOCAL_INFRA_SMOKE !== "1")(
-    "serves the same normalized bytes from private local MinIO before and after activation",
+    "serves the same normalized bytes from private local S3 before and after activation",
     async () => {
       const { loadEnv } = await import("../src/env");
       const { ObjectStorageService } =
         await import("../src/modules/storage/object-storage.service");
       const env = loadEnv();
       if (!["localhost", "127.0.0.1"].includes(new URL(env.S3_ENDPOINT).hostname))
-        throw new Error("Local MinIO only");
+        throw new Error("Local S3 only");
       const storage = new ObjectStorageService(env);
       const rt = runtime();
       const service = new NationalCatalogImageService(

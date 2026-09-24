@@ -103,7 +103,7 @@ rules; keep shared policies here and detailed procedures beside their code.
 ## Toolchain and local setup
 
 Use Node 24 or newer and the repository-declared pnpm version through Corepack.
-Docker is required for the development Postgres, Mailpit, and MinIO services.
+Docker is required for the development Postgres, Mailpit, and SeaweedFS services.
 
 ```bash
 corepack enable

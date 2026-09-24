@@ -50,7 +50,7 @@ describe("object storage environment", () => {
     expect(() => loadEnv({ ...base, S3_ENDPOINT: "file:///tmp/objects" })).toThrow();
   });
 
-  it("defaults development to private path-style MinIO", () => {
+  it("defaults development to private path-style local S3", () => {
     const env = loadEnv({
       ...PLATFORM_TEST_ENV,
       DATABASE_URL: "postgres://user:pass@localhost/db",
@@ -66,7 +66,7 @@ describe("object storage environment", () => {
     });
   });
 
-  it("treats blank development storage variables as unset and keeps MinIO defaults", () => {
+  it("treats blank development storage variables as unset and keeps local S3 defaults", () => {
     const env = loadEnv({
       ...PLATFORM_TEST_ENV,
       DATABASE_URL: "postgres://user:pass@localhost/db",

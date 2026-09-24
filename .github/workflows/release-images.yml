@@ -128,7 +128,7 @@ jobs:
             printf '%s\n' "SMTP_FROM_NAME=Markiro CI"
             printf '%s\n' "SMTP_REPLY_TO="
             printf '%s\n' "MAIL_PAYLOAD_ENCRYPTION_KEY=$mail_payload_key"
-            printf '%s\n' "S3_ENDPOINT=http://minio:9000"
+            printf '%s\n' "S3_ENDPOINT=http://seaweedfs:8333"
             printf '%s\n' "S3_REGION=us-east-1"
             printf '%s\n' "S3_BUCKET=markiro-private"
             printf '%s\n' "S3_ACCESS_KEY_ID=markiro"
@@ -163,11 +163,7 @@ jobs:
         run: >-
           docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml
           -f deploy/production/compose.ci.yml up -d --wait --wait-timeout 120
-          postgres mailpit minio
-      - name: Initialize the test bucket
-        run: >-
-          docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml
-          -f deploy/production/compose.ci.yml run --rm minio-init
+          postgres mailpit seaweedfs
       - name: Run production migrations twice
         run: |
           docker compose --env-file "$MARKIRO_ENV_FILE" -f compose.production.yml -f deploy/production/compose.ci.yml run --rm migrate

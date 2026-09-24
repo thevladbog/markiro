@@ -182,8 +182,9 @@ test("Signer Windows verification includes the stable release contract", () => {
   assert.ok(job.steps.some((step) => step.run === "pnpm test:signer-release:contract"));
 });
 
-test("National Catalog storage checks run after local MinIO initialization", () => {
+test("National Catalog storage checks run after private SeaweedFS is healthy", () => {
   const job = workflow.jobs["tenant-team-infrastructure"];
+  const storageStart = stepByName(job, "Start PostgreSQL, Mailpit, and SeaweedFS");
   const storage = job.steps.find((step) =>
     step.run?.includes("test/national-catalog-image.test.ts"),
   );
@@ -191,10 +192,8 @@ test("National Catalog storage checks run after local MinIO initialization", () 
   assert.equal(job.env.LOCAL_INFRA_SMOKE, "1");
   assert.equal(job.env.S3_ENDPOINT, "http://127.0.0.1:9000");
   assert.equal(storage.if, undefined, "storage coverage must not silently skip");
-  assert.ok(
-    job.steps.indexOf(storage) >
-      job.steps.indexOf(stepByName(job, "Initialize the private development bucket")),
-  );
+  assert.match(storageStart.run, /postgres mailpit seaweedfs/);
+  assert.ok(job.steps.indexOf(storage) > job.steps.indexOf(storageStart));
   assert.ok(
     job.steps.indexOf(storage) >
       job.steps.indexOf(stepByName(job, "Build API workspace dependencies")),
