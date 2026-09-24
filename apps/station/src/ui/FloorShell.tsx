@@ -16,6 +16,8 @@ export interface FloorShellProps {
   onOpenPrinters?: () => void;
   syncPending: number;
   syncStuck: boolean;
+  syncAttention?: boolean;
+  onOpenSyncDetails?: () => void;
   conflicts: number;
   update?: UpdateIndicatorModel;
   onOpenUpdates?: () => void;
@@ -42,6 +44,8 @@ export function FloorShell({
   onOpenPrinters,
   syncPending,
   syncStuck,
+  syncAttention,
+  onOpenSyncDetails,
   conflicts,
   update,
   onOpenUpdates,
@@ -85,6 +89,8 @@ export function FloorShell({
         {...(onOpenPrinters ? { onOpenPrinters } : {})}
         syncPending={syncPending}
         syncStuck={syncStuck}
+        {...(syncAttention !== undefined ? { syncAttention } : {})}
+        {...(onOpenSyncDetails ? { onOpenSyncDetails } : {})}
         conflicts={conflicts}
         {...(update ? { update } : {})}
         {...(onOpenUpdates ? { onOpenUpdates } : {})}

@@ -40,6 +40,7 @@ const documentedStationSurface = [
   ["POST", "/station/conflicts/status"],
   ["POST", "/station/validation-occurrences/status"],
   ["POST", "/station/codes/releases"],
+  ["POST", "/station/boxes/reconciliation"],
   ["POST", "/station/scans"],
   ["GET", "/station/inventory-tasks"],
   ["POST", "/station/inventory-tasks/resolve-barcode"],

@@ -144,8 +144,8 @@ export async function readReplacementMeasurements(
       (SELECT COUNT(*) FROM inventory_outbox) inventories,
       (SELECT COUNT(*) FROM shift_close_outbox) shiftClosures,
       (SELECT COUNT(*) FROM product_label_outbox)+(SELECT COUNT(*) FROM product_label_jobs WHERE status<>'completed') productLabels,
-      (SELECT COUNT(*) FROM boxes_mirror WHERE acked_at IS NULL AND disassembled_at IS NULL)+(SELECT COUNT(*) FROM pallets_mirror WHERE acked_at IS NULL AND disassembled_at IS NULL)+(SELECT COUNT(*) FROM inventory_repack_boxes_mirror WHERE state='open') boxes,
-      (SELECT COUNT(*) FROM box_exceptions_mirror)+(SELECT COUNT(*) FROM pallet_exceptions_mirror)+(SELECT COUNT(*) FROM product_label_receipts WHERE outcome='quarantined')+
+      (SELECT COUNT(*) FROM boxes_mirror WHERE disassembled_at IS NULL AND (acked_at IS NULL OR (closed_at IS NOT NULL AND confirmed_revision<reconciliation_revision)))+(SELECT COUNT(*) FROM pallets_mirror WHERE acked_at IS NULL AND disassembled_at IS NULL)+(SELECT COUNT(*) FROM inventory_repack_boxes_mirror WHERE state='open') boxes,
+      (SELECT COUNT(*) FROM box_exceptions_mirror)+(SELECT COUNT(*) FROM box_reconciliation_issues)+(SELECT COUNT(*) FROM pallet_exceptions_mirror)+(SELECT COUNT(*) FROM product_label_receipts WHERE outcome='quarantined')+
       (SELECT COUNT(*) FROM station_meta WHERE key LIKE 'offline_grant_evidence_pin:%' OR key LIKE 'inventory_sync_batch_v1:%') exceptions,
       (SELECT COUNT(*) FROM conflicts_mirror)+(SELECT COUNT(*) FROM inventory_conflicts_mirror WHERE state<>'resolved')+(SELECT COUNT(*) FROM shift_close_outbox WHERE state='conflict')+(SELECT COUNT(*) FROM product_label_jobs WHERE ownership_conflict=1) conflicts,
       (SELECT COUNT(*) FROM product_label_jobs WHERE status<>'completed' AND json_extract(projection_json,'$.attemptState') IN ('sending','delivery_unknown'))+

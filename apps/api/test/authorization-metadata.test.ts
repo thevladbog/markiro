@@ -355,7 +355,10 @@ const STATION_ONLY_CONTROLLERS: readonly [ControllerClass, readonly string[]][] 
     ["currentIntent", "currentIntentV1", "acknowledgeClosure", "report"],
   ],
   [StationOperatorsController, ["listRoster"]],
-  [StationScansController, ["codeReleases", "conflictStatus", "ingest", "occurrenceStatus"]],
+  [
+    StationScansController,
+    ["codeReleases", "conflictStatus", "ingest", "occurrenceStatus", "reconcileBoxes"],
+  ],
   [
     StationInventoriesController,
     ["codes", "eventBatch", "join", "leave", "list", "manifest", "progress", "resolveBarcode"],

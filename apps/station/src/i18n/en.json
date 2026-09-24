@@ -425,6 +425,38 @@
     "setup": "Workstation setup",
     "conflicts": "Conflicts"
   },
+  "boxReconciliation": {
+    "title": "Box reconciliation",
+    "close": "Close",
+    "checkNow": "Check now",
+    "checking": "Checking…",
+    "readError": "Could not read reconciliation state. Device data is retained.",
+    "currentShift": "Current shift",
+    "wholeDevice": "All shifts on this station",
+    "allShifts": "All shifts",
+    "automaticRepair": "Pending boxes will be checked and resent automatically if needed.",
+    "offlineRetry": "No connection. Reconciliation will retry automatically when the server is reachable.",
+    "lastChecked": "Last checked: {{time}}",
+    "localClosed": "Closed locally",
+    "delivered": "Delivered",
+    "confirmed": "Server confirmed",
+    "pending": "Awaiting check",
+    "issues": "Discrepancies",
+    "attention": "discrepancies need attention",
+    "pausePending": "The shift is paused; box reconciliation will continue when the server is reachable.",
+    "pauseIssues": "The shift is paused; some boxes need attention. Open Sync for details.",
+    "shifts": "Shifts awaiting reconciliation",
+    "issueList": "Needs attention",
+    "reason": {
+      "count_mismatch": "Different code count",
+      "digest_mismatch": "Different box contents",
+      "sscc_conflict": "SSCC belongs to another box",
+      "closure_conflict": "Different closure time",
+      "pallet_conflict": "Linked to another pallet",
+      "replay_evidence_missing": "Local history is insufficient for safe recovery",
+      "replay_not_confirmed": "The server still cannot confirm the box after replay"
+    }
+  },
   "updates": {
     "title": "Station updates",
     "actions": "Update actions",

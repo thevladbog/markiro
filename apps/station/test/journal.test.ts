@@ -66,6 +66,15 @@ function failingExecOn(exec: SqlExecutor, pattern: RegExp): SqlExecutor {
 }
 
 describe("journal", () => {
+  it("records the accepted code and box identity on the same scan event", async () => {
+    const exec = makeExec();
+    await recordScan(exec, EVENT, { ...CODE, boxId: "box-1" });
+    expect(
+      await exec.all<{ code_hash: string | null; box_id: string | null }>(
+        "SELECT code_hash,box_id FROM scan_events_mirror",
+      ),
+    ).toEqual([{ code_hash: CODE.codeHash, box_id: "box-1" }]);
+  });
   it("presents a captured DataMatrix as labelled AI values without GS characters", async () => {
     const exec = makeExec();
     const km = "010460000000001521SERIAL-42\u001d91KEY\u001d92SIGNATURE\u001d93TAIL";

@@ -11,11 +11,13 @@ export async function readStationChannelEvidence(
   let eventId: string | undefined;
   let recoveryOnly = false;
   if (channel === "items") {
-    const [row] = await exec.all<{ event_id: string }>(
-      "SELECT event_id FROM offline_grant_event_evidence WHERE outbox_id=?",
+    const [row] = await exec.all<{ event_id: string | null }>(
+      `SELECT COALESCE(outbox.replay_event_id,evidence.event_id) event_id
+       FROM outbox LEFT JOIN offline_grant_event_evidence evidence ON evidence.outbox_id=outbox.id
+       WHERE outbox.id=?`,
       [identity],
     );
-    eventId = row?.event_id;
+    eventId = row?.event_id ?? undefined;
   } else if (channel === "boxes" || channel === "pallets") {
     const table =
       channel === "boxes"

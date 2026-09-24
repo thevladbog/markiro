@@ -41,7 +41,10 @@ import { SsccService } from "../sscc/sscc.service";
 import { advanceBoxRegistryVersion } from "../boxes/box-registry-version";
 import { lockTenantBoxRegistry } from "../boxes/box-registry-lock";
 import { loadCodeReleasePage } from "./code-releases";
+import { reconcileStationBoxes } from "./box-reconciliation";
 import type {
+  StationBoxReconciliationDto,
+  StationBoxReconciliationResponseDto,
   BatchConflictDto,
   DeniedStationRecordDto,
   PalletMembershipOutcomeDto,
@@ -220,6 +223,31 @@ export class StationScansService {
     private readonly ssccService: SsccService,
     private readonly entitlements: EntitlementsService,
   ) {}
+
+  async reconcileBoxes(
+    tenantId: string,
+    deviceId: string,
+    request: StationBoxReconciliationDto,
+  ): Promise<StationBoxReconciliationResponseDto> {
+    const startedAt = Date.now();
+    const response = await reconcileStationBoxes(this.db, tenantId, deviceId, request);
+    const statuses: Record<string, number> = {};
+    const reasons: Record<string, number> = {};
+    for (const result of response.results) {
+      statuses[result.status] = (statuses[result.status] ?? 0) + 1;
+      reasons[result.reasonCode] = (reasons[result.reasonCode] ?? 0) + 1;
+    }
+    this.logger.log(
+      JSON.stringify({
+        event: "station_box_reconciliation",
+        boxes: request.boxes.length,
+        durationMs: Date.now() - startedAt,
+        statuses,
+        reasons,
+      }),
+    );
+    return response;
+  }
 
   async reviewedConflictHashes(
     tenantId: string,

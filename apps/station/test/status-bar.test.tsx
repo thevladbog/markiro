@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import i18n from "../src/i18n/index.js";
 import { StatusBar } from "../src/ui/StatusBar.js";
 
@@ -14,6 +14,28 @@ describe("StatusBar", () => {
     operatorName: "Alex Morgan",
     shiftLabel: "Shift 17",
   };
+
+  it("uses the existing sync pill as one accessible dialog button", () => {
+    const onOpenSyncDetails = vi.fn();
+    render(
+      <StatusBar
+        {...context}
+        serverReachability="reachable"
+        scanner="connected"
+        printerConfigured
+        syncPending={5}
+        syncStuck={false}
+        conflicts={0}
+        syncAttention
+        onOpenSyncDetails={onOpenSyncDetails}
+      />,
+    );
+    const button = screen.getByRole("button", { name: /Sync.*5.*discrepancies/i });
+    expect(button.closest(".station-status-pill")).not.toBeNull();
+    expect(screen.getAllByTestId("sync-status")).toHaveLength(1);
+    fireEvent.click(button);
+    expect(onOpenSyncDetails).toHaveBeenCalledOnce();
+  });
 
   it.each([
     ["checking", "Checking"],

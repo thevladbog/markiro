@@ -40,6 +40,21 @@ async function migratedExec(
   return exec;
 }
 
+describe("reconciliation during credential recovery", () => {
+  it("counts acknowledged boxes awaiting confirmation and their durable issues", async () => {
+    const exec = await migratedExec();
+    await exec.run(`INSERT INTO boxes_mirror(box_id,shift_id,opened_at,closed_at,acked_at)
+      VALUES('box-recheck','shift','now','later','ack')`);
+    await exec.run(`INSERT INTO box_reconciliation_issues
+      (box_id,shift_id,status,reason_code,local_item_count,checked_at)
+      VALUES('box-recheck','shift','identity_conflict','sscc_conflict',1,'now')`);
+    await exec.run(`INSERT INTO boxes_mirror
+      (box_id,shift_id,opened_at,closed_at,acked_at,disassembled_at)
+      VALUES('box-disassembled','shift','now','later','ack','after')`);
+    expect(await readSealedWorkSummary(exec)).toMatchObject({ boxes: 1, exceptions: 1 });
+  });
+});
+
 async function applyMigrationStatements(
   exec: SqlExecutor,
   statements: readonly string[],
@@ -141,6 +156,9 @@ async function seedRecoveryFixture(exec: SqlExecutor): Promise<void> {
       "operator-a",
       "2026-08-06T06:11:00.000Z",
     ],
+  );
+  await exec.run(
+    "UPDATE boxes_mirror SET confirmed_revision=reconciliation_revision WHERE box_id='box-acked'",
   );
   await exec.run(
     `INSERT INTO box_exceptions_mirror

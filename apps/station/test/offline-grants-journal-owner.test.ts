@@ -156,6 +156,21 @@ const code = (hash: string): AcceptedCode => ({
 const clock = async () => ({ bootId: "boot", monotonicMs: 11, wallMs: 201 });
 
 describe("grant-backed scan owner transaction", () => {
+  it("retains the accepted box identity in the grant-backed scan journal", async () => {
+    const { db, exec, generation } = fixture();
+    await recordScanWithOfflineGrant(
+      exec,
+      event("boxed"),
+      { ...code("hash-boxed"), boxId: "box-1" },
+      generation,
+      clock,
+    );
+    expect(db.prepare("SELECT code_hash,box_id FROM scan_events_mirror").get()).toEqual({
+      code_hash: "hash-boxed",
+      box_id: "box-1",
+    });
+    db.close();
+  });
   it("uploads retired grant evidence from the actual scan owner and ACKs only native reconciliation", async () => {
     const grantId = "11111111-1111-4111-8111-111111111111";
     const { db, exec, generation } = fixture(2, undefined, grantId);

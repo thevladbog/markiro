@@ -353,7 +353,7 @@ export async function retireFloorWork(
   await beginFloorWorkRetirement(barriers).wait(timeoutMs);
 }
 
-/** Counts only facts that have not yet received a server acknowledgement. */
+/** Counts facts still requiring delivery or server reconciliation. */
 export async function readSealedWorkSummary(
   exec: SqlExecutor,
   floorWork: Iterable<FloorWorkBarrier> = [],
@@ -376,8 +376,9 @@ export async function readSealedWorkSummary(
        (SELECT COUNT(*) FROM inventory_outbox) AS inventory_scans,
        (SELECT COUNT(*) FROM product_label_outbox) AS product_labels,
        (SELECT COUNT(*) FROM boxes_mirror
-         WHERE closed_at IS NOT NULL AND acked_at IS NULL) AS boxes,
-       (SELECT COUNT(*) FROM box_exceptions_mirror) AS exceptions,
+         WHERE closed_at IS NOT NULL AND (acked_at IS NULL OR
+           (disassembled_at IS NULL AND confirmed_revision<reconciliation_revision))) AS boxes,
+       (SELECT COUNT(*) FROM box_exceptions_mirror)+(SELECT COUNT(*) FROM box_reconciliation_issues) AS exceptions,
        (SELECT COUNT(*) FROM shift_close_outbox)+
        (SELECT COUNT(*) FROM offline_grant_inventory_leave_intents WHERE left_at IS NULL) AS closes,
        (SELECT COUNT(*) FROM conflicts_mirror)+(SELECT COUNT(*) FROM inventory_conflicts_mirror) AS conflicts,

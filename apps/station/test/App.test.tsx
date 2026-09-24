@@ -27,7 +27,27 @@ vi.mock("@tauri-apps/api/core", () => ({
       this.onmessage = onmessage;
     }
   },
-  invoke: (...args: unknown[]) => invokeMock(...(args as [string])),
+  invoke: async (...args: unknown[]) => {
+    const [cmd, payload] = args as [
+      string,
+      { statements?: { sql: string; values?: unknown[] }[] }?,
+    ];
+    if (cmd === "grant_atomic_execute") {
+      // App navigation mocks the plugin-sql bridge. Route held-connection
+      // audit intent through the same fake SQL store; native transaction
+      // semantics are covered by the SQLite reconciliation tests.
+      const changes: number[] = [];
+      for (const statement of payload?.statements ?? []) {
+        await invokeMock("plugin:sql|execute", {
+          query: statement.sql,
+          values: statement.values ?? [],
+        });
+        changes.push(1);
+      }
+      return changes;
+    }
+    return args.length === 1 ? invokeMock(cmd) : invokeMock(cmd, payload);
+  },
 }));
 
 // `@tauri-apps/plugin-sql` is a real npm package outside the Vite SSR module

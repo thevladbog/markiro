@@ -59,6 +59,50 @@ function migratedDb(): DatabaseSync {
 }
 
 describe("STATION_MIGRATIONS", () => {
+  it("makes existing delivered boxes due for reconciliation without changing delivery state", () => {
+    const db = migratedDb();
+    db.prepare(
+      "INSERT INTO boxes_mirror(box_id,shift_id,opened_at,closed_at,sscc,acked_at) VALUES(?,?,?,?,?,?)",
+    ).run(
+      "box-1",
+      "shift-1",
+      "2026-09-23T00:00:00Z",
+      "2026-09-23T00:01:00Z",
+      "046800899000615754",
+      "2026-09-23T00:02:00Z",
+    );
+    expect(
+      db
+        .prepare(
+          "SELECT reconciliation_revision,confirmed_revision,server_reconciled_at,acked_at FROM boxes_mirror WHERE box_id='box-1'",
+        )
+        .get(),
+    ).toEqual({
+      reconciliation_revision: 1,
+      confirmed_revision: 0,
+      server_reconciled_at: null,
+      acked_at: "2026-09-23T00:02:00Z",
+    });
+    expect(
+      db
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name='box_reconciliation_issues'",
+        )
+        .get(),
+    ).toEqual({ name: "box_reconciliation_issues" });
+    applyStationMigrations(db);
+    expect(
+      db
+        .prepare(
+          "SELECT reconciliation_revision,confirmed_revision FROM boxes_mirror WHERE box_id='box-1'",
+        )
+        .get(),
+    ).toEqual({
+      reconciliation_revision: 1,
+      confirmed_revision: 0,
+    });
+    db.close();
+  });
   it("adds local printer destinations without rewriting old journals and replays safely", () => {
     const db = new DatabaseSync(":memory:");
     const index = STATION_MIGRATIONS.findIndex((sql) =>

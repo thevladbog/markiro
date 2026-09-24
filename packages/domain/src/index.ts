@@ -45,6 +45,7 @@ export type { ScanInput } from "./scan/classify.js";
 export { validatePickupKm } from "./scan/pickup.js";
 export type { PickupKmResult } from "./scan/pickup.js";
 export { validateShiftScan } from "./scan/validate.js";
+export { boxMembershipDigestV1 } from "./sync/box-reconciliation.js";
 export type { ScanVerdict, ShiftScanContext } from "./scan/validate.js";
 export {
   LABEL_FIELDS,

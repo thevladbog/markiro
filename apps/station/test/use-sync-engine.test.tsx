@@ -38,6 +38,15 @@ async function seedOneRow(exec: SqlExecutor): Promise<void> {
 }
 
 describe("useSyncEngine", () => {
+  it("does not report a durable audit intent when no credential-bound engine exists", async () => {
+    const exec = await migratedExec();
+    const { result } = renderHook((deps: UseSyncEngineDeps) => useSyncEngine(deps), {
+      initialProps: { exec, client: null, machineId: null },
+    });
+    await expect(result.current.requestFullShiftAudit("s1")).rejects.toThrow(
+      "sync engine unavailable",
+    );
+  });
   it("nudges on mount and drains a seeded row", async () => {
     const exec = await migratedExec();
     await seedOneRow(exec);

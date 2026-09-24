@@ -7,7 +7,7 @@ import { Logger, type INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
-import { buildSscc, canonicalizeKm, kmHash } from "@markiro/domain";
+import { boxMembershipDigestV1, buildSscc, canonicalizeKm, kmHash } from "@markiro/domain";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
@@ -235,6 +235,337 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       .where(and(eq(schema.scanEvents.tenantId, tenantId), eq(schema.scanEvents.shiftId, shiftId)));
     expect(terminals.every((row) => row.terminalId === deviceId)).toBe(true);
   });
+
+  it("reports an absent own box through the station reconciliation route", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+    const apiKey = await deviceKey(agent);
+    const shiftId = await openShift(agent);
+    const logs: string[] = [];
+    const logSpy = vi.spyOn(Logger.prototype, "log").mockImplementation((message) => {
+      logs.push(String(message));
+    });
+    const response = await (async () => {
+      try {
+        return await request(app!.getHttpServer())
+          .post("/station/boxes/reconciliation")
+          .set("x-api-key", apiKey)
+          .send({
+            boxes: [
+              {
+                shiftId,
+                boxId: "missing-1575",
+                sscc: buildSscc(0, "034600682", 1575),
+                closedAt: "2026-09-23T00:03:00.000Z",
+                devicePalletId: null,
+                itemCount: 0,
+                membershipDigest: boxMembershipDigestV1([]),
+                digestVersion: 1,
+              },
+            ],
+          })
+          .expect(200);
+      } finally {
+        logSpy.mockRestore();
+      }
+    })();
+    expect(response.body.results).toEqual([
+      {
+        boxId: "missing-1575",
+        status: "replay_required",
+        reasonCode: "box_absent",
+        serverItemCount: null,
+      },
+    ]);
+    const reconciliationLog = logs.find((line) => line.includes("station_box_reconciliation"));
+    expect(reconciliationLog).toBeDefined();
+    expect(reconciliationLog).toContain('"box_absent":1');
+    expect(reconciliationLog).not.toContain(apiKey);
+    expect(reconciliationLog).not.toContain("membershipDigest");
+  });
+
+  it("confirms exact server membership and flags a changed digest without altering the box", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const apiKey = await deviceKey(agent);
+    const shiftId = await openShift(agent);
+    const boxId = `reconcile-${randomUUID()}`;
+    const sscc = buildSscc(0, "034600682", 1576);
+    const closedAt = "2026-09-23T00:03:00.000Z";
+    const scan = item(shiftId, 1, { boxId });
+    await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", apiKey)
+      .send({
+        batchId: `reconcile-${randomUUID()}`,
+        items: [scan],
+        boxes: [{ boxId, shiftId, terminalId: "spoofed", sscc, closedAt, operatorId: null }],
+      })
+      .expect(201);
+    const boxRows = await db
+      .select({ id: schema.boxes.id })
+      .from(schema.boxes)
+      .where(and(eq(schema.boxes.tenantId, tenantId), eq(schema.boxes.deviceBoxId, boxId)));
+    expect(boxRows).toHaveLength(1);
+    const input = {
+      shiftId,
+      boxId,
+      sscc,
+      closedAt,
+      devicePalletId: null,
+      itemCount: 1,
+      membershipDigest: boxMembershipDigestV1([scan.code!.codeHash]),
+      digestVersion: 1,
+    };
+    const check = async (membershipDigest: string) =>
+      request(app!.getHttpServer())
+        .post("/station/boxes/reconciliation")
+        .set("x-api-key", apiKey)
+        .send({ boxes: [{ ...input, membershipDigest }] })
+        .expect(200);
+    expect((await check(input.membershipDigest)).body.results).toEqual([
+      {
+        boxId,
+        status: "confirmed",
+        reasonCode: "matched",
+        serverItemCount: 1,
+      },
+    ]);
+    expect((await check(boxMembershipDigestV1([]))).body.results).toEqual([
+      {
+        boxId,
+        status: "content_mismatch",
+        reasonCode: "digest_mismatch",
+        serverItemCount: 1,
+      },
+    ]);
+  });
+
+  it("fills only an absent pallet link after exact identity and membership match", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const apiKey = await deviceKey(agent);
+    const shiftId = await openShift(agent);
+    const boxId = `reconcile-${randomUUID()}`;
+    const palletId = `pallet-${randomUUID()}`;
+    const sscc = buildSscc(0, "034600682", 1577);
+    const palletSscc = buildSscc(1, "034600682", 1577);
+    const closedAt = "2026-09-23T00:03:00.000Z";
+    const scan = item(shiftId, 1, { boxId });
+    await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", apiKey)
+      .send({
+        batchId: `reconcile-${randomUUID()}`,
+        items: [scan],
+        boxes: [{ boxId, shiftId, terminalId: "t1", sscc, closedAt, operatorId: null }],
+        pallets: [
+          {
+            palletId,
+            shiftId,
+            terminalId: "t1",
+            sscc: palletSscc,
+            closedAt,
+            operatorId: null,
+            printVerifiedAt: null,
+            printSkippedAt: null,
+          },
+        ],
+      })
+      .expect(201);
+    const input = {
+      shiftId,
+      boxId,
+      sscc,
+      closedAt,
+      devicePalletId: palletId,
+      itemCount: 1,
+      membershipDigest: boxMembershipDigestV1([scan.code!.codeHash]),
+      digestVersion: 1,
+    };
+    const check = async () =>
+      request(app!.getHttpServer())
+        .post("/station/boxes/reconciliation")
+        .set("x-api-key", apiKey)
+        .send({ boxes: [input] })
+        .expect(200);
+    expect((await check()).body.results).toEqual([
+      {
+        boxId,
+        status: "confirmed",
+        reasonCode: "matched",
+        serverItemCount: 1,
+      },
+    ]);
+    const [linked] = await db
+      .select({ palletId: schema.boxes.palletId, registryVersion: schema.boxes.registryVersion })
+      .from(schema.boxes)
+      .where(and(eq(schema.boxes.tenantId, tenantId), eq(schema.boxes.deviceBoxId, boxId)));
+    expect(linked?.palletId).not.toBeNull();
+    await check();
+    const [again] = await db
+      .select({ palletId: schema.boxes.palletId, registryVersion: schema.boxes.registryVersion })
+      .from(schema.boxes)
+      .where(and(eq(schema.boxes.tenantId, tenantId), eq(schema.boxes.deviceBoxId, boxId)));
+    expect(again).toEqual(linked);
+    const wrongPallet = await request(app!.getHttpServer())
+      .post("/station/boxes/reconciliation")
+      .set("x-api-key", apiKey)
+      .send({ boxes: [{ ...input, devicePalletId: `missing-${randomUUID()}` }] })
+      .expect(200);
+    expect(wrongPallet.body.results).toEqual([
+      { boxId, status: "identity_conflict", reasonCode: "pallet_conflict", serverItemCount: 1 },
+    ]);
+  });
+
+  it("does not expose another station's box or accept a cabinet session", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+    const firstKey = await deviceKey(agent);
+    const otherKey = await deviceKey(agent);
+    const shiftId = await openShift(agent);
+    const boxId = `reconcile-${randomUUID()}`;
+    const sscc = buildSscc(0, "034600682", 1578);
+    const closedAt = "2026-09-23T00:03:00.000Z";
+    const scan = item(shiftId, 1, { boxId });
+    await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", firstKey)
+      .send({
+        batchId: `reconcile-${randomUUID()}`,
+        items: [scan],
+        boxes: [{ boxId, shiftId, terminalId: "spoofed", sscc, closedAt, operatorId: null }],
+      })
+      .expect(201);
+    const body = {
+      boxes: [
+        {
+          shiftId,
+          boxId,
+          sscc,
+          closedAt,
+          devicePalletId: null,
+          itemCount: 1,
+          membershipDigest: boxMembershipDigestV1([scan.code!.codeHash]),
+          digestVersion: 1,
+        },
+      ],
+    };
+    const other = await request(app!.getHttpServer())
+      .post("/station/boxes/reconciliation")
+      .set("x-api-key", otherKey)
+      .send(body)
+      .expect(200);
+    expect(other.body.results).toEqual([
+      { boxId, status: "identity_conflict", reasonCode: "sscc_conflict", serverItemCount: null },
+    ]);
+    await agent.post("/station/boxes/reconciliation").send(body).expect(403);
+    await request(app!.getHttpServer())
+      .post("/station/boxes/reconciliation")
+      .set("x-api-key", firstKey)
+      .send({ boxes: Array(201).fill(body.boxes[0]) })
+      .expect(400);
+  });
+
+  it("reconciles the 58-versus-66 pallet gap without changing the 58 existing boxes", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const apiKey = await deviceKey(agent);
+    const shiftId = await openShift(agent);
+    const palletId = `pallet-${randomUUID()}`;
+    const closedAt = "2026-09-23T00:03:00.000Z";
+    const boxes = Array.from({ length: 66 }, (_, index) => {
+      const serial = 1517 + index;
+      const boxId = `incident-${serial}`;
+      const scans = Array.from({ length: 20 }, (_, unit) => {
+        const raw = `01${VALID_GTIN14}21S-${serial}-${unit}`;
+        const km = canonicalizeKm(raw);
+        return {
+          shiftId,
+          terminalId: "untrusted",
+          raw,
+          verdict: "ok",
+          scannedAt: new Date(Date.UTC(2026, 8, 23, 0, 0, index * 20 + unit)).toISOString(),
+          code: { codeHash: kmHash(km), gtin14: km.gtin14, serial: km.serial },
+          boxId,
+          operatorId: null,
+        };
+      });
+      return {
+        boxId,
+        sscc: buildSscc(0, "034600682", serial),
+        scans,
+        membershipDigest: boxMembershipDigestV1(scans.map((scan) => scan.code.codeHash)),
+      };
+    });
+    const deliver = async (selected: typeof boxes) => {
+      for (let start = 0; start < selected.length; start += 5) {
+        const group = selected.slice(start, start + 5);
+        const delivered = await request(app!.getHttpServer())
+          .post("/station/scans")
+          .set("x-api-key", apiKey)
+          .send({
+            batchId: `incident-${randomUUID()}`,
+            items: group.flatMap((box) => box.scans),
+            boxes: group.map((box) => ({
+              boxId: box.boxId,
+              shiftId,
+              terminalId: "untrusted",
+              sscc: box.sscc,
+              closedAt,
+              operatorId: null,
+              devicePalletId: palletId,
+            })),
+          });
+        expect(delivered.status, JSON.stringify(delivered.body)).toBe(201);
+      }
+    };
+    const requestBody = {
+      boxes: boxes.map((box) => ({
+        shiftId,
+        boxId: box.boxId,
+        sscc: box.sscc,
+        closedAt,
+        devicePalletId: palletId,
+        itemCount: 20,
+        membershipDigest: box.membershipDigest,
+        digestVersion: 1,
+      })),
+    };
+    const reconcile = async () =>
+      request(app!.getHttpServer())
+        .post("/station/boxes/reconciliation")
+        .set("x-api-key", apiKey)
+        .send(requestBody)
+        .expect(200);
+    await deliver(boxes.slice(0, 58));
+    const first = (await reconcile()).body.results as Array<{ boxId: string; status: string }>;
+    expect(first.filter((result) => result.status === "confirmed")).toHaveLength(58);
+    expect(
+      first.filter((result) => result.status === "replay_required").map((result) => result.boxId),
+    ).toEqual(boxes.slice(58).map((box) => box.boxId));
+    const original = await db
+      .select({ id: schema.boxes.id, registryVersion: schema.boxes.registryVersion })
+      .from(schema.boxes)
+      .where(and(eq(schema.boxes.tenantId, tenantId), eq(schema.boxes.shiftId, shiftId)));
+    await deliver(boxes.slice(58));
+    const second = (await reconcile()).body.results as Array<{
+      status: string;
+      serverItemCount: number;
+    }>;
+    expect(second).toHaveLength(66);
+    expect(
+      second.every((result) => result.status === "confirmed" && result.serverItemCount === 20),
+    ).toBe(true);
+    const after = await db
+      .select({ id: schema.boxes.id, registryVersion: schema.boxes.registryVersion })
+      .from(schema.boxes)
+      .where(and(eq(schema.boxes.tenantId, tenantId), eq(schema.boxes.shiftId, shiftId)));
+    expect(after).toHaveLength(66);
+    expect(after.filter((row) => original.some((before) => before.id === row.id))).toEqual(
+      expect.arrayContaining(original),
+    );
+  }, 60_000);
 
   it("is idempotent: the same batchId applied twice stores one set of rows", async () => {
     const agent = request.agent(app!.getHttpServer());

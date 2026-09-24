@@ -5,6 +5,11 @@ import {
 } from "./validation-reprocessing.js";
 import { z } from "zod";
 import {
+  applyBoxReconciliationResults,
+  readBoxReconciliationBatch,
+  requestFullShiftReconciliation,
+} from "./box-reconciliation.js";
+import {
   readStationSavedEvidence,
   readStationEvidencePin,
   sendStationEvidence,
@@ -250,6 +255,10 @@ export interface SyncEngine {
   stop(): void;
   /** Resolves when no drain is in flight (tests await this instead of sleeping). */
   idle(): Promise<void>;
+  /** Persist an audit request and let the device-wide worker perform it. */
+  requestFullShiftAudit(shiftId?: string): Promise<void>;
+  /** Wait for one scheduled drain/reconciliation pass, without bypassing backoff. */
+  reconcileNow(): Promise<void>;
 }
 
 /** One of this device's scans that lost ownership, as the server reports it. */
@@ -281,6 +290,17 @@ interface CodeReleaseResponse {
   releasedCodeHashes: string[];
   nextCursor?: string;
 }
+
+const boxReconciliationResponseSchema = z.strictObject({
+  results: z.array(
+    z.strictObject({
+      boxId: z.string(),
+      status: z.enum(["confirmed", "replay_required", "content_mismatch", "identity_conflict"]),
+      reasonCode: z.string(),
+      serverItemCount: z.number().int().nonnegative().nullable(),
+    }),
+  ),
+});
 
 /**
  * `pallet` and `pallet_exception` are carried here, not only server-side:
@@ -2089,6 +2109,65 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
           else console.warn("station: validation occurrence confirmation pending");
         }
       }
+      if (!pauseInvalidated() && !credentialGeneration.sealed && retryTimer === null) {
+        try {
+          const owner = await productLabelOwnership;
+          if (!owner) {
+            // Legacy/mock engines have no credential owner to fence a repair.
+            // The paired production path always carries one.
+          } else {
+            // This pass runs inside the same single-flight drain as scan acks.
+            // Replayed rows are queued only after the existing batch has retired.
+            const facts = await readBoxReconciliationBatch(
+              deps.exec,
+              undefined,
+              200,
+              new Date(now() - 120_000).toISOString(),
+            );
+            if (facts.length > 0 && !pauseInvalidated() && !credentialGeneration.sealed) {
+              const raw = await deps.client.post("/station/boxes/reconciliation", {
+                boxes: facts.map(
+                  ({
+                    codeHashes: _codeHashes,
+                    revision: _revision,
+                    controlAfterReplay: _controlAfterReplay,
+                    ...wire
+                  }) => wire,
+                ),
+              });
+              const response = boxReconciliationResponseSchema.parse(raw);
+              if (!pauseInvalidated() && !credentialGeneration.sealed) {
+                const lease = acquireCredentialCommitLease(credentialGeneration);
+                if (lease) {
+                  try {
+                    // A real paired station has an ownership digest. Without it,
+                    // a response cannot acquire the SQLite generation fence.
+                    if (owner && !pauseInvalidated() && !credentialGeneration.sealed) {
+                      const writer = await stationEvidenceCommitExecutor(
+                        deps.exec,
+                        credentialGeneration,
+                        owner,
+                      );
+                      await applyBoxReconciliationResults(writer, facts, response.results);
+                      if (response.results.some((result) => result.status === "replay_required"))
+                        requested = true;
+                      else if (facts.length === 200) requested = true;
+                    }
+                  } finally {
+                    lease.release();
+                  }
+                }
+              }
+            }
+          }
+        } catch (err) {
+          if (isStationCredentialRejection(err)) await rejectCredential();
+          else {
+            console.warn("station: box reconciliation pending", err);
+            scheduleRetry();
+          }
+        }
+      }
     } catch (err) {
       if (err instanceof StationEvidenceRecoveryError) evidenceNeedsRecovery = true;
       // readBatch can fail (e.g. device DB is locked or corrupt). ackThrough
@@ -2202,5 +2281,23 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
       }
     },
     idle,
+    async requestFullShiftAudit(shiftId) {
+      if (stopped || credentialGeneration.sealed) return;
+      const lease = acquireCredentialCommitLease(credentialGeneration);
+      if (!lease) return;
+      try {
+        const owner = await productLabelOwnership;
+        if (!owner || credentialGeneration.sealed) return;
+        const writer = await stationEvidenceCommitExecutor(deps.exec, credentialGeneration, owner);
+        await requestFullShiftReconciliation(writer, shiftId);
+      } finally {
+        lease.release();
+      }
+      this.nudge();
+    },
+    async reconcileNow() {
+      this.nudge();
+      await idle();
+    },
   };
 }
