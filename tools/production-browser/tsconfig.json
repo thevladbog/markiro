@@ -13,6 +13,8 @@
     "product-labels-tests/**/*.ts",
     "national-catalog-tests/**/*.ts",
     "reports-tests/**/*.ts",
-    "offers-tests/**/*.ts"
+    "offers-tests/**/*.ts",
+    "device-replacement-tests/**/*.ts",
+    "tenant-equipment-tests/**/*.ts"
   ]
 }
