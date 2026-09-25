@@ -219,8 +219,9 @@ the hero does today.
   first state publication, when there is nothing yet to merge the answer into
   (see the publish-path comment on `publishWatchedProgress` in `sync.ts`).
   After a restart, the saved answer therefore appears only once that first
-  state publishes, which follows the first drain attempt (up to the 30 s
-  request timeout on a hanging link); from then on, a restart without network
+  state publishes, which follows the first drain attempt: one 30 s timeout
+  per request the first drain sends on a hanging link — one when scans are
+  queued, usually two when not; from then on, a restart without network
   still knows the other terminals' last contribution. An answer for another
   shift is ignored.
 - Failures of this step never schedule a sync retry and never mark sync as
@@ -241,8 +242,9 @@ WHERE shift_id = ?` — the count the shift close and the plan prompt already
   each published sync state that brings a new progress answer or moves
   `SyncState.lastSuccessAt`, which advances only when a drain's batch is
   acknowledged (`sync.ts`, where `lastSuccessAt` is set). `reconcileReleasedCodes`
-  applies a server release that deletes local codes on every drain, whether or
-  not a batch was acknowledged, so on an idle line a release reaches the band
+  applies a server release that deletes local codes on every drain that reaches
+  that step (it is skipped while a retry is pending), whether or not a batch
+  was acknowledged, so on an idle line a release reaches the band
   with the next progress answer (within 15 s on a current server) or, on an
   older server, only with the next own scan, undo, clear or disassembly.
 - **Display**: `total = acceptedUnits − deviceAcceptedUnits + local`.

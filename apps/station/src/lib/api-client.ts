@@ -32,14 +32,14 @@ export function isStationCredentialRejection(error: unknown): error is StationAp
 export interface StationGetOptions {
   /**
    * A display-only read: an observer of reachability, never a reporter of
-   * outages. It never claims the newest request sequence, so a request that
-   * starts later always owns the next reachability report instead of being
-   * silenced by this one. On an HTTP answer (ok or error status) it reports
-   * the server reachable, but only when no newer request has started since
-   * it began; on a failure without any response (a network error, a CORS
-   * rejection by an older server, a timeout) it never reports anything,
-   * leaving that to the requests that carry sync. A credential rejection
-   * still applies, exactly as for any other request.
+   * outages. It never claims the newest request sequence, so a request
+   * already in flight when this read starts keeps its right to report,
+   * instead of being silenced by this one. On an HTTP answer (ok or error
+   * status) it reports the server reachable, but only when no newer request
+   * has started since it began; on a failure without any response (a
+   * network error, a CORS rejection by an older server, a timeout) it never
+   * reports anything, leaving that to the requests that carry sync. A
+   * credential rejection still applies, exactly as for any other request.
    */
   readonly displayOnly?: boolean;
 }
