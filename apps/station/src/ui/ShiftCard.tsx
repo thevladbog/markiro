@@ -5,7 +5,7 @@ import { formatShiftPlannedDate, stationDisplayLocale } from "../lib/format-date
 import type { SqlExecutor, StationProductImageDescriptor } from "../lib/mirror.js";
 import { useProductPhotoAccent } from "../lib/product-accent.js";
 import { ProductImage } from "./ProductImage.js";
-import { productMonogram } from "./work/ScanResultInstrument.js";
+import { productMonogram } from "./work/ShiftBand.js";
 
 export interface ShiftCardProps {
   number?: string | null;

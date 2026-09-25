@@ -3,6 +3,7 @@ import type { RecentOperation } from "../../lib/journal.js";
 import type { SqlExecutor, StationProductImageDescriptor } from "../../lib/mirror.js";
 import { useProductAccentHue } from "../../lib/product-accent.js";
 import { ProductImage } from "../ProductImage.js";
+import { productMonogram } from "./ShiftBand.js";
 
 export interface ScanResultLabels {
   waiting: string;
@@ -44,12 +45,6 @@ export function operationStatusLabel(verdict: string, labels: ScanResultLabels):
   if (verdict === "invalid") return labels.invalid;
   if (verdict === "wrong_gtin") return labels.wrong_gtin;
   return labels.unknown;
-}
-
-/** «Балтика 7…» → «Б». The photo slot's stand-in when the product has no photo. */
-export function productMonogram(name: string): string {
-  const first = [...name.normalize("NFC")].find((character) => /[\p{L}\p{N}]/u.test(character));
-  return first ? ([...first.toUpperCase()][0] ?? "?") : "?";
 }
 
 export function ScanResultInstrument({

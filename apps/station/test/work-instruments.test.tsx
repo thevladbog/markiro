@@ -4,7 +4,8 @@ import { hueFromGtin, primeAccentHue } from "../src/lib/product-accent.js";
 import type { SqlExecutor } from "../src/lib/mirror.js";
 import { BoxFillInstrument, buildBoxCells } from "../src/ui/work/BoxFillInstrument.js";
 import { RecentOperations } from "../src/ui/work/RecentOperations.js";
-import { ScanResultInstrument, productMonogram } from "../src/ui/work/ScanResultInstrument.js";
+import { ScanResultInstrument } from "../src/ui/work/ScanResultInstrument.js";
+import { productMonogram } from "../src/ui/work/ShiftBand.js";
 import { WorkCounters } from "../src/ui/work/WorkCounters.js";
 import { WorkFooter } from "../src/ui/work/WorkFooter.js";
 
