@@ -4,12 +4,14 @@ import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
 import { canonicalizeKm, kmHash } from "@markiro/domain";
 import { schema, type Db } from "@markiro/db";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import type { ScanItemDto } from "../src/modules/station-scans/dto";
+import { hashDeviceToken } from "../src/pickup/device-token";
 import { listenOnLoopback } from "./support/listen-loopback";
 import { createTestStationDevice, signUpAndActivate } from "./support/auth";
 
@@ -85,7 +87,21 @@ describe.skipIf(!ready)("GET /station/shifts/:id/progress", () => {
     };
   }
 
-  async function post(apiKey: string, body: { items?: ScanItemDto[]; exceptions?: unknown[] }) {
+  // Same shape as boxes.e2e.test.ts's own `ClosureFixture`: the box closure
+  // half of a sync batch, needed to close a box before it can be disassembled.
+  interface BoxClosureFixture {
+    boxId: string;
+    shiftId: string;
+    terminalId: string | null;
+    sscc: string;
+    closedAt: string;
+    operatorId: string | null;
+  }
+
+  async function post(
+    apiKey: string,
+    body: { items?: ScanItemDto[]; boxes?: BoxClosureFixture[]; exceptions?: unknown[] },
+  ) {
     await http()
       .post("/station/scans")
       .set("x-api-key", apiKey)
@@ -266,5 +282,127 @@ describe.skipIf(!ready)("GET /station/shifts/:id/progress", () => {
       .expect(404);
     await owner.get(`/station/shifts/${shiftId}/progress`).expect(403);
     await http().get(`/station/shifts/${shiftId}/progress`).expect(401);
+  });
+
+  // Missing-coverage task 1: box disassembly deletes the box's `code_registry`
+  // rows via `releaseCode` (station-scans.service.ts's "disassemble" branch,
+  // which only ever acts on a CLOSED box -- see boxes.e2e.test.ts's "surfaces
+  // a non-null disassembledAt for a disassembled box via GET /boxes", mirrored
+  // here: scan into an open box, close it, disassemble it, then read progress
+  // at each step so the drop is attributed to disassembly and not the close).
+  it("excludes a disassembled box's codes from the total", async () => {
+    const agent = request.agent(app.getHttpServer());
+    await signUpAndActivate(agent);
+    const station = await createTestStationDevice(app, agent, "Line 1");
+    const shiftId = await openValidationShift(agent);
+
+    await post(station.apiKey, {
+      items: [scan(shiftId, "jj", station.deviceId, "2026-07-01T14:00:00.000Z", "b7")],
+    });
+    await post(station.apiKey, {
+      boxes: [
+        {
+          boxId: "b7",
+          shiftId,
+          terminalId: station.deviceId,
+          sscc: "112233445566778899",
+          closedAt: "2026-07-01T14:00:01.000Z",
+          operatorId: null,
+        },
+      ],
+    });
+    const closed = await http()
+      .get(`/station/shifts/${shiftId}/progress`)
+      .set("x-api-key", station.apiKey)
+      .expect(200);
+    // Closing alone must not drop the code: only disassembly does.
+    expect(closed.body).toMatchObject({ acceptedUnits: 1, deviceAcceptedUnits: 1 });
+
+    await post(station.apiKey, {
+      exceptions: [
+        {
+          kind: "disassemble",
+          boxId: "b7",
+          codeHash: null,
+          targetScannedAt: null,
+          shiftId,
+          terminalId: station.deviceId,
+          operatorId: null,
+          reason: "packed for wrong customer",
+          occurredAt: new Date().toISOString(),
+        },
+      ],
+    });
+    const disassembled = await http()
+      .get(`/station/shifts/${shiftId}/progress`)
+      .set("x-api-key", station.apiKey)
+      .expect(200);
+    expect(disassembled.body).toMatchObject({ acceptedUnits: 0, deviceAcceptedUnits: 0 });
+  });
+
+  // Missing-coverage task 2: a cross-terminal duplicate moves the
+  // `code_registry` row to the earliest scan's shift and terminal
+  // (conflict-resolution.ts's `displacedIncumbents`, via station-scans
+  // .service.ts) -- mirrors station-scans.e2e.test.ts's "lets an earlier
+  // scan displace the incumbent, and does not report that to the sender".
+  // Two real devices of the same tenant scan the SAME code into the same
+  // shift; the later-arriving-but-earlier-scanned device becomes the sole
+  // owner, so the shift's total must still count the code once, credited
+  // only to the winner.
+  it("counts a cross-terminal duplicate once, credited to the winning device", async () => {
+    const agent = request.agent(app.getHttpServer());
+    await signUpAndActivate(agent);
+    const stationA = await createTestStationDevice(app, agent, "Line 1");
+    const stationB = await createTestStationDevice(app, agent, "Line 2");
+    const shiftId = await openValidationShift(agent);
+
+    const late = scan(shiftId, "kk", stationA.deviceId, "2026-07-01T15:00:05.000Z", "b8");
+    await post(stationA.apiKey, { items: [late] });
+    // Same code (same label -> same codeHash), an earlier scannedAt, a
+    // different authenticated device -- station B displaces station A.
+    const earlier = { ...late, scannedAt: "2026-07-01T15:00:00.000Z" };
+    await post(stationB.apiKey, { items: [earlier] });
+
+    const winner = await http()
+      .get(`/station/shifts/${shiftId}/progress`)
+      .set("x-api-key", stationB.apiKey)
+      .expect(200);
+    expect(winner.body).toMatchObject({ acceptedUnits: 1, deviceAcceptedUnits: 1 });
+
+    const loser = await http()
+      .get(`/station/shifts/${shiftId}/progress`)
+      .set("x-api-key", stationA.apiKey)
+      .expect(200);
+    expect(loser.body).toMatchObject({ acceptedUnits: 1, deviceAcceptedUnits: 0 });
+  });
+
+  // Missing-coverage task 3 (kiosk half): a kiosk device authenticates via
+  // `x-kiosk-token` through `KioskDeviceGuard` against `kiosks
+  // .device_token_hash` -- a different secret and table entirely, never the
+  // `apikey` row `TenantGuard`'s station branch queries (`configId:
+  // "station"`). Mirrors device-key-triage.e2e.test.ts's lightweight paired-
+  // kiosk fixture (direct row insert, no pairing-code ceremony needed) and
+  // device-grants-routes.test.ts's established cross-header probe (presenting
+  // one credential kind's real secret through another kind's transport) --
+  // presenting the kiosk's own real, active token as `x-api-key` proves a
+  // paired kiosk cannot authenticate as a station device. The cabinet-403 and
+  // anonymous-401 cases already exist above; the platform-principal case
+  // needs a mounted platform Better Auth instance and lives in
+  // station-shift-progress-guards.e2e.test.ts instead.
+  it("refuses a paired kiosk device credential", async () => {
+    const agent = request.agent(app.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const kioskId = randomUUID();
+    const kioskToken = `kiosk-token-${randomUUID()}`;
+    await db.insert(schema.kiosks).values({ id: kioskId, tenantId, name: "Киоск" });
+    await db
+      .update(schema.kiosks)
+      .set({ deviceTokenHash: hashDeviceToken(kioskToken) })
+      .where(eq(schema.kiosks.id, kioskId));
+
+    await http()
+      .get(`/station/shifts/${randomUUID()}/progress`)
+      .set("x-api-key", kioskToken)
+      .expect(401);
   });
 });
