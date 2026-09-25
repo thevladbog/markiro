@@ -642,61 +642,36 @@ describe("boxReportQuerySchema", () => {
 
 В `.prettierignore` заменить строку `apps/api/test/fixtures/print-forms/` на `packages/domain/test/fixtures/print-forms/`, а в комментарии над ней слова «while the forms move into @markiro/domain» — на «of the forms in @markiro/domain».
 
-- [ ] **Step 7: Перевести браузерный контракт админки на исходник домена**
+- [ ] **Step 7: Перевести браузерный контракт админки на собранный домен**
 
-В `apps/admin/test/browser/box-report-render.mjs` заменить абзац комментария
+> Исправлено при исполнении, 2026-09-26. Первая редакция этого шага грузила исходник домена через resolver-хук. В strip-only режиме Node так нельзя: `packages/domain/src/errors.ts` использует свойство-параметр конструктора (`ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`). Контракт читает генератор из собранного пакета, как любой потребитель. До переноса он и так зависел от `dist` домена через исходник API, а задание `production-bundle` собирает зависимости админки до этого шага.
 
-```js
-// The API imports its own modules without an extension (`./contents-report`),
-// which its TypeScript build resolves and Node's ESM resolver does not. Only
-// for a relative import from a TypeScript file that Node cannot find, retry the
-// `.ts` source, so the API's import style and build stay untouched. Those
-// sources are ES modules written in TypeScript; saying so spares Node a
-// CommonJS attempt and the typeless-package warning for apps/api. The hook
-// must be registered before the renderer loads, hence the dynamic import.
-```
-
-на
+Заменить всё содержимое `apps/admin/test/browser/box-report-render.mjs` на
 
 ```js
-// The domain package writes Node ESM imports with a `.js` suffix
-// (`./contents-report.js`) that its TypeScript build maps to `.ts` files, which
-// Node's resolver cannot find in source form. Only for a relative import from a
-// TypeScript file that Node cannot find, retry the `.ts` source, so the
-// package's import style and build stay untouched. Those sources are ES modules
-// written in TypeScript; saying so spares Node a CommonJS attempt. The hook
-// must be registered before the renderer loads, hence the dynamic import.
-```
+import { readFileSync } from "node:fs";
 
-заменить функцию `resolveSource` целиком на
+// Rendered in a plain Node process because Playwright's transform cannot load
+// bwip-js/generic through CJS. The generator lives in @markiro/domain and is
+// read from its built dist, like every other consumer of the package: the
+// production-bundle job builds the admin's workspace dependencies before this
+// contract runs, and locally `pnpm turbo run build --filter='@markiro/admin^...'`
+// does the same. Loading the domain's TypeScript source instead would require
+// every module on the import path to be Node strip-only compatible.
+import { renderBoxReportHtml } from "@markiro/domain";
 
-```js
-function resolveSource(specifier, context, nextResolve) {
-  try {
-    return nextResolve(specifier, context);
-  } catch (error) {
-    const relativeSourceImport =
-      error?.code === "ERR_MODULE_NOT_FOUND" &&
-      /^\.\.?\//.test(specifier) &&
-      context.parentURL?.endsWith(".ts");
-    if (!relativeSourceImport) throw error;
-    const source = specifier.endsWith(".js") ? `${specifier.slice(0, -3)}.ts` : `${specifier}.ts`;
-    return nextResolve(source, context);
-  }
-}
-```
-
-и строку импорта рендерера
-
-```js
-const { renderBoxReportHtml } = await import("../../../api/src/modules/code-search/box-report.ts");
-```
-
-на
-
-```js
-const { renderBoxReportHtml } =
-  await import("../../../../packages/domain/src/print-forms/box-report.ts");
+const { data, timeZone } = JSON.parse(readFileSync(0, "utf8"));
+process.stdout.write(
+  renderBoxReportHtml(
+    {
+      ...data,
+      openedAt: new Date(data.openedAt),
+      closedAt: data.closedAt ? new Date(data.closedAt) : null,
+      disassembledAt: data.disassembledAt ? new Date(data.disassembledAt) : null,
+    },
+    timeZone,
+  ),
+);
 ```
 
 - [ ] **Step 8: Проверить домен: слепки без перезаписи и тесты рендера**
@@ -733,7 +708,7 @@ Run:
 printf '%s' '{"timeZone":"Europe/Moscow","data":{"sscc":"00146007034967000010","status":"closed","productName":"Молоко 1л","org":null,"openedAt":"2026-09-09T21:58:00.000Z","closedAt":"2026-09-09T22:08:00.000Z","disassembledAt":null,"codes":[]}}' | node apps/admin/test/browser/box-report-render.mjs | grep -o "открыт 10.09.2026 00:58"
 ```
 
-Expected: вывод `открыт 10.09.2026 00:58` (модуль разрешился из исходников домена, часовой пояс применён). Полный браузерный контракт (`pnpm --dir tools/production-browser --ignore-workspace test:product-labels`) требует поднятого production-бандла и выполняется в CI в задании `production-bundle`; локально его не запускать и в отчёте указать как не выполненный.
+Expected: вывод `открыт 10.09.2026 00:58` (генератор загружен из собранного домена — сборка сделана в шаге 8, — часовой пояс применён). Полный браузерный контракт (`pnpm --dir tools/production-browser --ignore-workspace test:product-labels`) требует поднятого production-бандла и выполняется в CI в задании `production-bundle`; локально его не запускать и в отчёте указать как не выполненный.
 
 - [ ] **Step 11: Прочие проверки и commit**
 
