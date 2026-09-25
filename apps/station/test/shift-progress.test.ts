@@ -4,6 +4,7 @@ import { StationApiError } from "../src/lib/api-client.js";
 import { applyMigrations, type SqlExecutor } from "../src/lib/mirror.js";
 import {
   SHIFT_PROGRESS_INTERVAL_MS,
+  SHIFT_PROGRESS_META_KEY,
   SHIFT_PROGRESS_STALE_AFTER_MS,
   SHIFT_PROGRESS_UNSUPPORTED_RETRY_MS,
   createShiftProgressTracker,
@@ -187,5 +188,142 @@ describe("createShiftProgressTracker", () => {
     tracker.watch("s1");
     await tracker.refresh(() => false);
     expect(await tracker.current()).toBeNull();
+  });
+
+  it("treats a damaged cache (invalid JSON) as no cached answer, then replaces it after a refresh", async () => {
+    const exec = await migratedExec();
+    await exec.run("INSERT INTO station_meta (key, value) VALUES (?, ?)", [
+      SHIFT_PROGRESS_META_KEY,
+      "{not json",
+    ]);
+    const get = vi.fn().mockResolvedValue(answer);
+    const tracker = createShiftProgressTracker({ exec, client: { get }, now: () => 1_000_000 });
+    tracker.watch("s1");
+    expect(await tracker.current()).toBeNull();
+    await tracker.refresh(() => true);
+    expect(await tracker.current()).toMatchObject(answer);
+  });
+
+  it("treats a damaged cache (schema-invalid answer) as no cached answer, then replaces it after a refresh", async () => {
+    const exec = await migratedExec();
+    await exec.run("INSERT INTO station_meta (key, value) VALUES (?, ?)", [
+      SHIFT_PROGRESS_META_KEY,
+      JSON.stringify({
+        shiftId: "s1",
+        acceptedUnits: 5,
+        deviceAcceptedUnits: 10, // invalid: exceeds acceptedUnits
+        asOf: "2026-09-25T09:00:00.000Z",
+        fetchedAt: "2026-09-25T09:00:01.000Z",
+      }),
+    ]);
+    const get = vi.fn().mockResolvedValue(answer);
+    const tracker = createShiftProgressTracker({ exec, client: { get }, now: () => 1_000_000 });
+    tracker.watch("s1");
+    expect(await tracker.current()).toBeNull();
+    await tracker.refresh(() => true);
+    expect(await tracker.current()).toMatchObject(answer);
+  });
+
+  it("shares one in-flight load across concurrent current() calls instead of racing separate reads", async () => {
+    const exec = await migratedExec();
+    const seed = createShiftProgressTracker({
+      exec,
+      client: { get: vi.fn().mockResolvedValue(answer) },
+      now: () => 1_000_000,
+    });
+    seed.watch("s1");
+    await seed.refresh(() => true);
+
+    // A fresh tracker instance (as after a station restart) has not loaded
+    // station_meta yet. Gate the read so it is still in flight when the
+    // second current() call starts; both calls must wait for the same read
+    // and see the persisted answer rather than the second one short-
+    // circuiting past an in-progress load and returning null.
+    let releaseRead: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      releaseRead = resolve;
+    });
+    const gatedExec: SqlExecutor = {
+      run: exec.run,
+      async all<T>(sql: string, params: unknown[] = []): Promise<T[]> {
+        await gate;
+        return exec.all<T>(sql, params);
+      },
+    };
+    const tracker = createShiftProgressTracker({
+      exec: gatedExec,
+      client: {},
+      now: () => 1_000_000,
+    });
+    tracker.watch("s1");
+    const first = tracker.current();
+    const second = tracker.current();
+    releaseRead?.();
+    expect(await first).toMatchObject(answer);
+    expect(await second).toMatchObject(answer);
+  });
+
+  it("does not let a load that resolves late overwrite an answer refresh() already stored", async () => {
+    const exec = await migratedExec();
+    let releaseFirstRead: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      releaseFirstRead = resolve;
+    });
+    let firstRead = true;
+    const staleRow = {
+      value: JSON.stringify({
+        shiftId: "s1",
+        acceptedUnits: 1,
+        deviceAcceptedUnits: 1,
+        asOf: "2020-01-01T00:00:00.000Z",
+        fetchedAt: "2020-01-01T00:00:00.000Z",
+      }),
+    };
+    const gatedExec: SqlExecutor = {
+      run: exec.run,
+      async all<T>(sql: string, params: unknown[] = []): Promise<T[]> {
+        if (firstRead) {
+          firstRead = false;
+          // Simulate the SELECT having started (and captured a stale row)
+          // before refresh() writes a fresh answer, but not resolving to
+          // its caller until released below — well after refresh() stored
+          // the fresh answer.
+          await gate;
+          return [staleRow] as T[];
+        }
+        return exec.all<T>(sql, params);
+      },
+    };
+    const get = vi.fn().mockResolvedValue(answer);
+    const tracker = createShiftProgressTracker({
+      exec: gatedExec,
+      client: { get },
+      now: () => 1_000_000,
+    });
+    tracker.watch("s1");
+
+    const currentBeforeLoad = tracker.current();
+    await tracker.refresh(() => true);
+    releaseFirstRead?.();
+
+    expect(await currentBeforeLoad).toMatchObject(answer);
+    expect(await tracker.current()).toMatchObject(answer);
+  });
+
+  it("degrades to no cached answer, without rejecting, when the station_meta read fails", async () => {
+    const exec = await migratedExec();
+    const failingExec: SqlExecutor = {
+      run: exec.run,
+      all: () => Promise.reject(new Error("disk read failed")),
+    };
+    const tracker = createShiftProgressTracker({
+      exec: failingExec,
+      client: {},
+      now: () => 1_000_000,
+    });
+    tracker.watch("s1");
+    await expect(tracker.current()).resolves.toBeNull();
+    // A later call must not keep rejecting either.
+    await expect(tracker.current()).resolves.toBeNull();
   });
 });

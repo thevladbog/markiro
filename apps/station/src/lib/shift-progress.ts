@@ -113,25 +113,49 @@ export function createShiftProgressTracker(deps: {
 }): ShiftProgressTracker {
   let watchedShiftId: string | null = null;
   let snapshot: ShiftProgressSnapshot | null = null;
-  let loaded = false;
+  let loadPromise: Promise<void> | null = null;
   let lastAttemptAt: number | null = null;
   let suspendedUntil: number | null = null;
 
-  async function ensureLoaded(): Promise<void> {
-    if (loaded) return;
-    loaded = true;
-    const rows = await deps.exec.all<{ value: string | null }>(
-      "SELECT value FROM station_meta WHERE key = ?",
-      [SHIFT_PROGRESS_META_KEY],
-    );
-    const raw = rows[0]?.value;
-    if (!raw) return;
-    try {
-      const parsed = snapshotSchema.safeParse(JSON.parse(raw));
-      if (parsed.success) snapshot = parsed.data;
-    } catch {
-      // A damaged cache is no cache: the next answer replaces it.
+  /**
+   * Reads the persisted answer at most once per tracker instance. Memoized
+   * so every caller (`current()` and `refresh()`) shares the same in-flight
+   * read instead of racing separate queries — a second `current()` call that
+   * starts before the first read resolves awaits the same promise rather
+   * than short-circuiting past the in-progress read and returning no answer.
+   *
+   * A `station_meta` read failure degrades to "no cached answer": the
+   * promise still resolves (never rejects) and that resolution is cached,
+   * so a display-only read failure neither blocks `current()` — called from
+   * the sync engine's state publication — nor makes every later call reject.
+   *
+   * If `refresh()` stores a fresher answer before this read's row arrives,
+   * the guard below leaves `snapshot` alone instead of overwriting it with
+   * the older (or absent) persisted value.
+   */
+  function ensureLoaded(): Promise<void> {
+    if (!loadPromise) {
+      loadPromise = (async () => {
+        try {
+          const rows = await deps.exec.all<{ value: string | null }>(
+            "SELECT value FROM station_meta WHERE key = ?",
+            [SHIFT_PROGRESS_META_KEY],
+          );
+          const raw = rows[0]?.value;
+          if (!raw) return;
+          try {
+            const parsed = snapshotSchema.safeParse(JSON.parse(raw));
+            if (parsed.success && snapshot === null) snapshot = parsed.data;
+          } catch {
+            // A damaged cache is no cache: the next answer replaces it.
+          }
+        } catch {
+          // station_meta is a display-only cache; a read failure means no
+          // cached answer, not a rejection callers must handle.
+        }
+      })();
     }
+    return loadPromise;
   }
 
   return {
@@ -173,8 +197,11 @@ export function createShiftProgressTracker(deps: {
          ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
         [SHIFT_PROGRESS_META_KEY, JSON.stringify(next)],
       );
-      loaded = true;
       snapshot = next;
+      // Skip a redundant station_meta read on a later current() call, but
+      // never touch a load that is already in flight — its own guard above
+      // is what keeps it from overwriting the fresh answer just stored.
+      if (!loadPromise) loadPromise = Promise.resolve();
     },
   };
 }
