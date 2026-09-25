@@ -240,6 +240,38 @@ test("National Catalog fixtures use existing Chromium job and preserve portable 
   assert.match(config, /43183 --strictPort/);
 });
 
+test("product-labels browser contract runs in the Chromium job after both app builds and keeps failure evidence", () => {
+  const job = workflow.jobs["production-bundle"];
+  const browser = stepByName(job, "Verify the product-labels browser contract");
+  assert.equal(
+    browser.run,
+    "pnpm --dir tools/production-browser --ignore-workspace test:product-labels",
+  );
+  // It serves both the admin and the Station harness, so both dependency builds come first.
+  for (const build of [
+    "Verify the station inventory gallery contract",
+    "Verify the inventory admin gallery contract",
+  ]) {
+    assert.ok(job.steps.indexOf(browser) > job.steps.indexOf(stepByName(job, build)));
+  }
+  const artifact = stepByName(job, "Preserve product-labels browser failure evidence");
+  assert.equal(artifact.if, "failure()");
+  assert.match(artifact.uses, /^actions\/upload-artifact@[a-f0-9]{40}$/);
+  assert.equal(artifact.with.path, "tools/production-browser/test-results/product-labels");
+  const config = readFileSync(
+    "tools/production-browser/product-labels.playwright.config.ts",
+    "utf8",
+  );
+  assert.match(config, /outputDir: "\.\/test-results\/product-labels"/);
+  assert.match(config, /trace: "retain-on-failure"/);
+  assert.match(config, /screenshot: "only-on-failure"/);
+  assert.match(config, /retries: 0/);
+  // Distinct from the National Catalog harness (43183) that runs in the same job.
+  assert.match(config, /"PRODUCT_LABELS_ADMIN_PORT", 43181/);
+  assert.match(config, /"PRODUCT_LABELS_STATION_PORT", 43182/);
+  assert.equal(config.match(/--strictPort/g)?.length, 2);
+});
+
 test("Android gate verifies original signed and budget fixture byte parity before Gradle", () => {
   const steps = workflow.jobs["handheld-android"].steps;
   const parity = steps.findIndex((step) => step.name === "Verify shared offline grant fixtures");
