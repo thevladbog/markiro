@@ -17,6 +17,7 @@ import {
   type ScanSource,
 } from "../src/lib/scan-source.js";
 import type { ScanQueue } from "../src/lib/scan-queue.js";
+import type { ShiftProgressSnapshot } from "../src/lib/shift-progress.js";
 import * as signalSound from "../src/lib/signal-sound.js";
 import type { SoundSettings } from "../src/lib/signal-sound.js";
 import { addRange } from "../src/lib/sscc-pool.js";
@@ -237,6 +238,8 @@ interface RenderWorkScreenOverrides {
     closedAt: string;
   }>;
   pendingSync?: number;
+  shiftProgress?: ShiftProgressSnapshot | null;
+  onWatchShiftProgress?: (shiftId: string | null) => void;
 }
 
 function renderWorkScreen(overrides: RenderWorkScreenOverrides = {}) {
@@ -257,6 +260,8 @@ function renderWorkScreen(overrides: RenderWorkScreenOverrides = {}) {
     onPauseShift,
     onCloseShift,
     pendingSync = 0,
+    shiftProgress,
+    onWatchShiftProgress,
   } = overrides;
 
   return render(
@@ -277,6 +282,8 @@ function renderWorkScreen(overrides: RenderWorkScreenOverrides = {}) {
       {...(onPauseShift ? { onPauseShift } : {})}
       {...(onCloseShift ? { onCloseShift } : {})}
       pendingSync={pendingSync}
+      {...(shiftProgress !== undefined ? { shiftProgress } : {})}
+      {...(onWatchShiftProgress ? { onWatchShiftProgress } : {})}
       // None of the tests in this file's outer `describe` care about boxes:
       // `issuerPrefix: null` keeps the whole box section off, exactly like a
       // validation-mode shift, so none of these pre-existing assertions
@@ -536,7 +543,7 @@ describe("WorkScreen", () => {
       const rows = await exec.all<{ code_hash: string }>("SELECT code_hash FROM codes_mirror");
       expect(rows).toHaveLength(1);
     });
-    expect(await screen.findByText("1")).toBeDefined();
+    await waitFor(() => expect(screen.getByTestId("shift-total").textContent).toBe("1"));
   });
 
   it("offers to close or continue once the accepted total reaches the plan", async () => {
@@ -862,7 +869,7 @@ describe("WorkScreen", () => {
     const view = renderWorkScreen({ source });
 
     expect(view.container.querySelector(".work-screen__instruments")).not.toBeNull();
-    expect(screen.getByRole("heading", { name: "Recent operations" })).toBeDefined();
+    expect(screen.getByRole("heading", { name: "Shift journal" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Exceptions" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Pause" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Close shift" })).toBeDefined();
@@ -1000,11 +1007,12 @@ describe("WorkScreen", () => {
     renderWorkScreen({ source, exec });
 
     source.emit(KM);
-    await screen.findByText("1");
+    await waitFor(() => expect(screen.getByTestId("shift-total").textContent).toBe("1"));
     source.emit(KM);
 
     const alert = await screen.findByRole("alert");
     await waitFor(() => expect(alert.dataset.tone).toBe("duplicate"));
+    await waitFor(() => expect(screen.getByTestId("journal-duplicates").textContent).toBe("1"));
     const codes = await exec.all<{ code_hash: string }>("SELECT code_hash FROM codes_mirror");
     expect(codes).toHaveLength(1); // not stored twice
 
@@ -1045,7 +1053,7 @@ describe("WorkScreen", () => {
     await waitFor(async () => {
       expect(await exec.all("SELECT code_hash FROM codes_mirror")).toHaveLength(1);
     });
-    expect(await screen.findByText("1")).toBeDefined();
+    await waitFor(() => expect(screen.getByTestId("shift-total").textContent).toBe("1"));
     expect(
       await exec.all<{ verdict: string }>(
         "SELECT verdict FROM scan_events_mirror ORDER BY id DESC LIMIT 1",
@@ -1116,7 +1124,7 @@ describe("WorkScreen", () => {
     expect(screen.getByText(/Plant X/)).toBeDefined();
   });
 
-  it("shows the system-error signal and counts the scan as rejected when the journal write throws", async () => {
+  it("shows the system-error signal and does not count a failed write as an error", async () => {
     const source = manualSource();
     const exec = makeThrowingRunExec();
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -1127,7 +1135,7 @@ describe("WorkScreen", () => {
     const alert = await screen.findByRole("alert");
     await waitFor(() => expect(alert.dataset.tone).toBe("error"));
     expect(alert.textContent).toContain("WRITE FAILED");
-    expect(await screen.findByText("1")).toBeDefined(); // rejected counter, not accepted
+    expect(screen.getByTestId("journal-errors").textContent).toBe("0");
 
     expect(consoleError).toHaveBeenCalled();
     const logged = JSON.stringify(consoleError.mock.calls);
@@ -1150,7 +1158,7 @@ describe("WorkScreen", () => {
       const rows = await exec.all<{ code_hash: string }>("SELECT code_hash FROM codes_mirror");
       expect(rows).toHaveLength(1);
     });
-    expect(await screen.findByText("1")).toBeDefined(); // accepted counter
+    await waitFor(() => expect(screen.getByTestId("shift-total").textContent).toBe("1"));
 
     expect(consoleError).toHaveBeenCalled();
     consoleError.mockRestore();
@@ -1268,6 +1276,43 @@ describe("WorkScreen", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Pause" }));
     expect(screen.getByText("1 scan has not reached the server yet.")).toBeDefined();
+  });
+
+  it("keeps the shift counts after the screen is reopened", async () => {
+    const exec = makeExec();
+    const source = manualSource();
+    const view = renderWorkScreen({ source, exec });
+    source.emit(KM);
+    await waitFor(() => expect(screen.getByTestId("shift-total").textContent).toBe("1"));
+    source.emit(KM);
+    await waitFor(() => expect(screen.getByTestId("journal-duplicates").textContent).toBe("1"));
+    view.unmount();
+    renderWorkScreen({ source: manualSource(), exec });
+    await waitFor(() => expect(screen.getByTestId("shift-total").textContent).toBe("1"));
+    await waitFor(() => expect(screen.getByTestId("journal-duplicates").textContent).toBe("1"));
+  });
+
+  it("watches this shift's total and adds other terminals to the band", async () => {
+    const onWatchShiftProgress = vi.fn();
+    const source = manualSource();
+    const view = renderWorkScreen({
+      source,
+      onWatchShiftProgress,
+      shiftProgress: {
+        shiftId: "s1",
+        acceptedUnits: 10,
+        deviceAcceptedUnits: 0,
+        asOf: new Date().toISOString(),
+        fetchedAt: new Date().toISOString(),
+      },
+    });
+    expect(onWatchShiftProgress).toHaveBeenCalledWith("s1");
+    source.emit(KM);
+    await waitFor(() => expect(screen.getByTestId("shift-total").textContent).toBe("11"));
+    expect(screen.getByText("In shift · all terminals")).toBeDefined();
+    expect(screen.getByText("this terminal 1")).toBeDefined();
+    view.unmount();
+    expect(onWatchShiftProgress).toHaveBeenLastCalledWith(null);
   });
 });
 
@@ -3187,7 +3232,9 @@ describe("WorkScreen box progress, closing and printing", () => {
     expect(screen.queryByRole("button", { name: "Закрыть короб" })).toBeNull();
 
     act(() => scan(KM));
-    await waitFor(() => expect(screen.getByText("1")).toBeDefined());
+    // The shift total is durable: the nine seeded codes belong to this shift
+    // too, so the accepted scan shows as the tenth.
+    await waitFor(() => expect(screen.getByTestId("shift-total").textContent).toBe("10"));
     expect(close).not.toHaveBeenCalled();
   });
 });

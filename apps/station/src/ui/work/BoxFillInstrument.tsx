@@ -25,7 +25,7 @@ export interface BoxFillInstrumentProps {
    * serial alone identifies the bottle to a worker mid-box; the full
    * normalized code stays in the recent-operations list. When given (non-
    * undefined), this instrument owns the screen's accepted-scan live region —
-   * the caller must pass `showVerdict={false}` to its ScanResultInstrument.
+   * the caller must not render a ScanResultInstrument beside it.
    */
   lastAccepted?: { serial: string } | null;
   /** Labels for the accepted readout; required whenever lastAccepted is used. */

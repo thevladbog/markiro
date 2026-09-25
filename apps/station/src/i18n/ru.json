@@ -412,7 +412,7 @@
     "sync": "Синхронизация",
     "syncShort": "Синх.",
     "syncStuck": "Не отправляется",
-    "conflictsShort": "Дубли",
+    "conflictsShort": "Конфликты",
     "scanner": "Сканер",
     "printer": "Принтер",
     "notConfigured": "Не настроено",
@@ -423,7 +423,7 @@
     "scannerPartial": "Часть сканеров недоступна",
     "tasks": "Задачи",
     "setup": "Настройка рабочего места",
-    "conflicts": "Дубли кодов"
+    "conflicts": "Конфликты кодов"
   },
   "boxReconciliation": {
     "title": "Сверка коробов",
@@ -530,7 +530,6 @@
     "systemError": "ОШИБКА ЗАПИСИ"
   },
   "work": {
-    "accepted": "Принято",
     "rejected": "Отклонено",
     "waiting": "Ожидание скана…",
     "gtin": "GTIN",
@@ -548,14 +547,14 @@
     "noOpenBox": "Нет открытого короба",
     "boxItems": "Позиций",
     "plan": "План",
+    "shiftTotalAll": "В смене · все терминалы",
+    "shiftTotalTerminal": "В смене · этот терминал",
+    "planPercent": "{{percent}} плана",
+    "terminalShare": "этот терминал {{value}}",
+    "othersAsOf": "другие терминалы — на {{time}}",
     "boxGrouped": "Одна ячейка показывает несколько позиций",
     "capacityUnknown": "Вместимость не задана",
-    "synchronized": "Синхронизировано",
-    "pendingSync_one": "Не отправлено: {{count}}",
-    "pendingSync_few": "Не отправлено: {{count}}",
-    "pendingSync_many": "Не отправлено: {{count}}",
-    "pendingSync_other": "Не отправлено: {{count}}",
-    "recentOperations": "Последние операции",
+    "journal": "Журнал смены",
     "noRecentOperations": "Сканов пока нет",
     "timeUnknown": "Время неизвестно",
     "exitPending_one": "{{count}} скан ещё не дошёл до сервера.",
@@ -586,7 +585,6 @@
       "planned_quantity_error": "Ошибка в плановом количестве",
       "other_production_deviation": "Другое производственное отклонение"
     },
-    "more": "Ещё",
     "palletOpenAtClose": "На паллете {{count}} из {{capacity}} коробов — закрыть?",
     "palletOpenAtCloseConfirm": "Закрыть паллету и смену",
     "palletOpenAtCloseNoSerials": "Номера для паллет закончились. Подключите станцию к сети, чтобы получить новые номера.",

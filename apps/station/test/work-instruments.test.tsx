@@ -1,12 +1,10 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { hueFromGtin, primeAccentHue } from "../src/lib/product-accent.js";
-import type { SqlExecutor } from "../src/lib/mirror.js";
+import { hueFromGtin } from "../src/lib/product-accent.js";
 import { BoxFillInstrument, buildBoxCells } from "../src/ui/work/BoxFillInstrument.js";
 import { RecentOperations } from "../src/ui/work/RecentOperations.js";
 import { ScanResultInstrument } from "../src/ui/work/ScanResultInstrument.js";
 import { productMonogram } from "../src/ui/work/ShiftBand.js";
-import { WorkCounters } from "../src/ui/work/WorkCounters.js";
 import { WorkFooter } from "../src/ui/work/WorkFooter.js";
 
 const labels = {
@@ -34,139 +32,6 @@ const boxLabels = {
 };
 
 describe("work instruments", () => {
-  it("shows the mirrored plan beside the product identity", () => {
-    render(
-      <ScanResultInstrument
-        productName="Widget"
-        counterpartyName={null}
-        plannedQty={120}
-        planLabel="Plan"
-        operation={null}
-        labels={labels}
-      />,
-    );
-
-    expect(screen.getByText("Plan: 120")).toBeDefined();
-  });
-
-  it("prints the expected GTIN as a chip and seeds the identity accent from it", () => {
-    const { container } = render(
-      <ScanResultInstrument
-        productName="Widget"
-        counterpartyName="Plant North"
-        operation={null}
-        labels={labels}
-        gtin="04607000000042"
-      />,
-    );
-
-    expect(screen.getByText("GTIN 04607000000042")).toBeDefined();
-    const identity = container.querySelector<HTMLElement>(".work-scan-result__identity");
-    expect(identity?.getAttribute("data-accent")).toBe("true");
-    expect(identity?.style.getPropertyValue("--product-hue")).toBe(
-      String(hueFromGtin("04607000000042")),
-    );
-    // The GTIN chip is product identity, not scan output -- it must stay out
-    // of the verdict live region.
-    expect(screen.getByRole("status").textContent).not.toContain("GTIN");
-  });
-
-  it("keeps a neutral hero and shows a monogram when there is no photo and no GTIN", () => {
-    const { container } = render(
-      <ScanResultInstrument
-        productName="Ягодный морс"
-        counterpartyName={null}
-        operation={null}
-        labels={labels}
-      />,
-    );
-
-    const identity = container.querySelector<HTMLElement>(".work-scan-result__identity");
-    expect(identity?.getAttribute("data-accent")).toBeNull();
-    expect(container.querySelector(".work-scan-result__monogram")?.textContent).toBe("Я");
-  });
-
-  it("never reuses one image's extracted hue for another image or after the photo is gone", () => {
-    const exec: SqlExecutor = {
-      run: async () => undefined,
-      all: async () => [],
-    };
-    const imageOf = (checksum: string) => ({
-      checksum,
-      contentType: "image/webp" as const,
-      byteSize: 1,
-      width: 1,
-      height: 1,
-    });
-    primeAccentHue("accent-test-a", 200);
-
-    const props = {
-      productName: "Widget",
-      counterpartyName: null,
-      operation: null,
-      labels,
-      exec,
-      productId: "p1",
-      gtin: null,
-    };
-    const { container, rerender } = render(
-      <ScanResultInstrument {...props} image={imageOf("accent-test-a")} />,
-    );
-    const identity = () => container.querySelector<HTMLElement>(".work-scan-result__identity");
-    expect(identity()?.style.getPropertyValue("--product-hue")).toBe("200");
-
-    // A different image whose hue is not yet known must not inherit 200.
-    rerender(<ScanResultInstrument {...props} image={imageOf("accent-test-b")} />);
-    expect(identity()?.getAttribute("data-accent")).toBeNull();
-
-    // Losing the photo entirely must not resurrect it either.
-    rerender(<ScanResultInstrument {...props} image={null} />);
-    expect(identity()?.getAttribute("data-accent")).toBeNull();
-
-    // With a GTIN, both transitions land on the GTIN fallback instead.
-    const gtin = "04607000000042";
-    rerender(<ScanResultInstrument {...props} gtin={gtin} image={imageOf("accent-test-a")} />);
-    expect(identity()?.style.getPropertyValue("--product-hue")).toBe("200");
-    rerender(<ScanResultInstrument {...props} gtin={gtin} image={imageOf("accent-test-c")} />);
-    expect(identity()?.style.getPropertyValue("--product-hue")).toBe(String(hueFromGtin(gtin)));
-  });
-
-  it("omits the counterparty chip for a non-tolling shift", () => {
-    // Producing for yourself: the bundle carries counterpartyName = null and
-    // the identity shows no legal-entity chip at all.
-    const { container } = render(
-      <ScanResultInstrument
-        productName="Widget"
-        counterpartyName={null}
-        operation={null}
-        labels={labels}
-        gtin="04607000000042"
-      />,
-    );
-
-    const chips = [...container.querySelectorAll(".work-scan-result__chip")].map(
-      (chip) => chip.textContent,
-    );
-    expect(chips).toEqual(["GTIN 04607000000042"]);
-  });
-
-  it("renders identity only and hands the accepted readout to the box instrument", () => {
-    const { container } = render(
-      <ScanResultInstrument
-        productName="Widget"
-        counterpartyName="Plant North"
-        operation={null}
-        labels={labels}
-        showVerdict={false}
-      />,
-    );
-
-    const scan = container.querySelector(".work-scan-result");
-    expect(scan?.getAttribute("data-identity-only")).toBe("true");
-    expect(container.querySelector(".work-scan-result__verdict")).toBeNull();
-    expect(screen.queryByRole("status")).toBeNull();
-  });
-
   it("prints the latest accepted serial beside the box readout, waiting otherwise", () => {
     const props = {
       box: { boxId: "b1", itemCount: 2 },
@@ -231,23 +96,12 @@ describe("work instruments", () => {
     expect(productMonogram("  ")).toBe("?");
   });
 
-  it("keeps a long product identity and a non-color-only latest result visible", () => {
-    const longName = "A very long production product name ".repeat(8);
-    const { rerender } = render(
-      <ScanResultInstrument
-        productName={longName}
-        counterpartyName="Plant North"
-        operation={null}
-        labels={labels}
-      />,
-    );
-    expect(screen.getByRole("heading", { name: longName.trim() })).toBeDefined();
+  it("keeps a non-color-only latest result visible", () => {
+    const { rerender } = render(<ScanResultInstrument operation={null} labels={labels} />);
     expect(screen.getByText("Waiting for a scan")).toBeDefined();
 
     rerender(
       <ScanResultInstrument
-        productName={longName}
-        counterpartyName="Plant North"
         operation={{
           verdict: "ok",
           scannedAt: "2026-08-06T10:00:00.000Z",
@@ -479,43 +333,7 @@ describe("work instruments", () => {
     expect(secondAnimationCell).not.toBe(firstAnimationCell);
   });
 
-  it("shows large counters and explicit synchronized or pending state", () => {
-    const { rerender } = render(
-      <WorkCounters
-        accepted={1234567}
-        rejected={98765}
-        duplicates={5}
-        pendingSync={17}
-        labels={{
-          accepted: "Accepted",
-          errors: "Errors",
-          duplicates: "Duplicates",
-          synchronized: "Synchronized",
-        }}
-      />,
-    );
-    expect(screen.getByText("1,234,567")).toBeDefined();
-    expect(screen.getByText("98,760")).toBeDefined();
-    expect(screen.getByText("17 pending")).toBeDefined();
-
-    rerender(
-      <WorkCounters
-        accepted={0}
-        rejected={0}
-        duplicates={0}
-        pendingSync={0}
-        labels={{
-          accepted: "Accepted",
-          errors: "Errors",
-          duplicates: "Duplicates",
-          synchronized: "Synchronized",
-        }}
-      />,
-    );
-    expect(screen.getByText("Synchronized")).toBeDefined();
-  });
-
-  it("renders no more than six recent rows and labels malformed time safely", () => {
+  it("renders the shift journal: six rows, serials, and the shift's error counts", () => {
     render(
       <RecentOperations
         operations={Array.from({ length: 8 }, (_, index) => ({
@@ -529,15 +347,26 @@ describe("work instruments", () => {
             normalized: `(01)04600000000015 (21)SERIAL-${index}`,
           },
         }))}
-        labels={{ title: "Recent operations", empty: "No scans yet", invalidTime: "Time unknown" }}
+        counts={{ errors: 2, duplicates: 3 }}
+        labels={{
+          title: "Shift journal",
+          empty: "No scans yet",
+          invalidTime: "Time unknown",
+          errors: "Errors",
+          duplicates: "Duplicates",
+        }}
         statusLabels={labels}
         locale="en-US"
       />,
     );
+    expect(screen.getByRole("heading", { name: "Shift journal" })).toBeDefined();
+    expect(screen.getByTestId("journal-errors").textContent).toBe("2");
+    expect(screen.getByTestId("journal-duplicates").textContent).toBe("3");
+    expect(screen.getByTestId("journal-duplicates").getAttribute("data-tone")).toBe("warn");
     expect(screen.getAllByRole("listitem")).toHaveLength(6);
     expect(screen.getByText("Duplicate")).toBeDefined();
     expect(screen.getByText("Time unknown")).toBeDefined();
-    expect(screen.getAllByText("04600000000015")).toHaveLength(6);
+    expect(screen.queryByText(/04600000000015/)).toBeNull();
     expect(screen.getByText("SERIAL-0")).toBeDefined();
     expect(screen.queryByText("SERIAL-7")).toBeNull();
   });

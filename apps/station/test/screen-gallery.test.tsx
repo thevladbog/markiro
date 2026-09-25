@@ -301,16 +301,15 @@ describe("development screen gallery", () => {
       <StationScreenGallery request={{ state: "work-aggregation", locale: "ru" }} />,
     );
 
-    // The aggregation card is the identity hero alone: the accepted-scan
-    // readout lives in the box instrument and prints the serial only, while
-    // the full code stays in the recent-operations list.
-    const scan = view.container.querySelector<HTMLElement>(".work-scan-result");
-    expect(scan).not.toBeNull();
-    expect(scan?.getAttribute("data-identity-only")).toBe("true");
-    expect(scan?.querySelector('[data-semantic="accepted-marker"]')).toBeNull();
-    expect(scan?.querySelector('[data-semantic="normalized-code"]')).toBeNull();
-    expect(scan?.textContent).not.toContain("ПРИНЯТО");
-    expect(scan?.textContent).not.toContain("Криптохвост");
+    expect(view.container.querySelector(".work-scan-result")).toBeNull();
+    const band = view.container.querySelector<HTMLElement>(".work-shift-band");
+    expect(band).not.toBeNull();
+    if (!band) throw new Error("shift band was not rendered");
+    expect(within(band).getByRole("heading", { name: "Тестовый товар А" })).toBeDefined();
+    expect(within(band).getByText("В смене · этот терминал")).toBeDefined();
+    expect(within(band).getByTestId("shift-total").textContent).toBe(
+      new Intl.NumberFormat("ru-RU").format(1248),
+    );
     expect(view.container.querySelector(".mk-signal-overlay")).toBeNull();
 
     const box = view.container.querySelector<HTMLElement>(".work-box-fill");
@@ -344,7 +343,8 @@ describe("development screen gallery", () => {
 
     const image = await screen.findByRole("img", { name: "Тестовый товар А" });
     expect(image.getAttribute("src")).toBe("blob:gallery-product");
-    expect(image.classList.contains("work-scan-result__image")).toBe(true);
+    // The product photo lives in the shift band now, not in the scan card.
+    expect(image.classList.contains("work-shift-band__image")).toBe(true);
   });
 
   it("covers the compact active-shift waiting state with the product image", async () => {
@@ -474,7 +474,7 @@ describe("development screen gallery", () => {
     // scan result and counters, the same as production.
     view.rerender(<StationScreenGallery request={{ state: "box-full", locale: "ru" }} />);
     expect(view.container.querySelector(".work-screen")).not.toBeNull();
-    expect(view.container.querySelector(".work-scan-result")).not.toBeNull();
+    expect(view.container.querySelector(".work-shift-band")).not.toBeNull();
     const grouped = view.container.querySelector<HTMLElement>(".work-box-fill__grid");
     expect(grouped?.getAttribute("data-grouped")).toBe("true");
     expect(grouped?.getAttribute("aria-valuemax")).toBe("120");

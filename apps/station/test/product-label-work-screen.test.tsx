@@ -137,9 +137,7 @@ describe("duplicate printing through the real WorkScreen scanner", () => {
     view.unmount();
     render(element);
     const summary = await screen.findByRole("complementary", { name: "Итоги смены" });
-    await waitFor(() =>
-      expect(within(summary).getByText("Принято").parentElement?.textContent).toContain("1"),
-    );
+    await waitFor(() => expect(screen.getByTestId("shift-total").textContent).toBe("1"));
     expect(within(summary).queryByText("Синхронизировано")).toBeNull();
   });
 
@@ -186,14 +184,18 @@ describe("duplicate printing through the real WorkScreen scanner", () => {
     expect(await h.exec.all("SELECT * FROM validation_occurrences")).toHaveLength(1);
     expect(await h.exec.all("SELECT * FROM product_label_jobs")).toHaveLength(1);
     const summary = await screen.findByRole("complementary", { name: "Итоги смены" });
+    // Durable counts arrive with an asynchronous journal read; «Ошибки» is
+    // checked against that same fresh read, not the initial zero.
+    await waitFor(() =>
+      expect(within(summary).getByText("Дубли").parentElement?.textContent).toContain("1"),
+    );
     expect(within(summary).getByText("Ошибки").parentElement?.textContent).toContain("0");
-    expect(within(summary).getByText("Дубли").parentElement?.textContent).toContain("1");
     view.unmount();
     render(element);
     const restored = await screen.findByRole("complementary", { name: "Итоги смены" });
-    await waitFor(() =>
-      expect(within(restored).getByText("Принято").parentElement?.textContent).toContain("1"),
-    );
+    await waitFor(() => expect(screen.getByTestId("shift-total").textContent).toBe("1"));
+    // The refusal was journaled once, so it survives the remount exactly once.
+    expect(within(restored).getByTestId("journal-duplicates").textContent).toBe("1");
     expect(within(restored).queryByText("Синхронизировано")).toBeNull();
     expect(screen.queryByText("Этикетка подтверждена")).toBeNull();
     expect(h.print).toHaveBeenCalledTimes(1);

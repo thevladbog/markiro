@@ -1,9 +1,4 @@
-import type { CSSProperties } from "react";
 import type { RecentOperation } from "../../lib/journal.js";
-import type { SqlExecutor, StationProductImageDescriptor } from "../../lib/mirror.js";
-import { useProductAccentHue } from "../../lib/product-accent.js";
-import { ProductImage } from "../ProductImage.js";
-import { productMonogram } from "./ShiftBand.js";
 
 export interface ScanResultLabels {
   waiting: string;
@@ -18,25 +13,8 @@ export interface ScanResultLabels {
 }
 
 export interface ScanResultInstrumentProps {
-  productName: string;
-  counterpartyName: string | null;
-  plannedQty?: number | null | undefined;
-  planLabel?: string | undefined;
   operation: RecentOperation | null;
   labels: ScanResultLabels;
-  exec?: SqlExecutor | undefined;
-  productId?: string | undefined;
-  image?: StationProductImageDescriptor | null | undefined;
-  /** Expected GTIN-14 of the shift's product; prints as a chip and seeds the fallback accent hue. */
-  gtin?: string | null | undefined;
-  refreshKey?: number;
-  /**
-   * False when an aggregation shift shows the accepted-scan readout inside the
-   * box instrument instead (BoxFillInstrument's `lastAccepted`) — this card
-   * then renders the product identity alone, so the screen never carries two
-   * live verdict regions.
-   */
-  showVerdict?: boolean;
 }
 
 export function operationStatusLabel(verdict: string, labels: ScanResultLabels): string {
@@ -47,67 +25,14 @@ export function operationStatusLabel(verdict: string, labels: ScanResultLabels):
   return labels.unknown;
 }
 
-export function ScanResultInstrument({
-  productName,
-  counterpartyName,
-  plannedQty,
-  planLabel,
-  operation,
-  labels,
-  exec,
-  productId,
-  image,
-  gtin,
-  refreshKey,
-  showVerdict = true,
-}: ScanResultInstrumentProps) {
-  const hue = useProductAccentHue({ exec, productId, image, gtin, refreshKey });
-  const heroStyle = hue === null ? undefined : ({ "--product-hue": String(hue) } as CSSProperties);
+/**
+ * The validation verdict. Product identity lives in the shift band
+ * (`ShiftBand.tsx`); aggregation shows its accepted serial in the box instrument.
+ */
+export function ScanResultInstrument({ operation, labels }: ScanResultInstrumentProps) {
   return (
-    <section
-      className="work-instrument work-scan-result"
-      aria-label={productName}
-      data-identity-only={showVerdict ? undefined : "true"}
-    >
-      <div
-        className="work-scan-result__identity"
-        data-accent={hue === null ? undefined : "true"}
-        style={heroStyle}
-      >
-        {productId && image !== null ? (
-          <ProductImage
-            exec={exec}
-            productId={productId}
-            productName={productName}
-            image={image}
-            refreshKey={refreshKey}
-            className="work-scan-result__image"
-          />
-        ) : (
-          <span aria-hidden="true" className="work-scan-result__image work-scan-result__monogram">
-            {productMonogram(productName)}
-          </span>
-        )}
-        <div className="work-scan-result__copy">
-          <h2 title={productName}>{productName}</h2>
-          <div className="work-scan-result__chips">
-            {planLabel && plannedQty !== null && plannedQty !== undefined ? (
-              <span className="work-scan-result__chip">{`${planLabel}: ${plannedQty}`}</span>
-            ) : null}
-            {counterpartyName ? (
-              <span className="work-scan-result__chip" title={counterpartyName}>
-                {counterpartyName}
-              </span>
-            ) : null}
-            {gtin ? (
-              <span className="work-scan-result__chip work-scan-result__chip--mono">
-                {`${labels.gtin} ${gtin}`}
-              </span>
-            ) : null}
-          </div>
-        </div>
-      </div>
-      {showVerdict ? <ScanVerdict operation={operation} labels={labels} /> : null}
+    <section className="work-instrument work-scan-result">
+      <ScanVerdict operation={operation} labels={labels} />
     </section>
   );
 }

@@ -3,21 +3,48 @@ import { operationStatusLabel, type ScanResultLabels } from "./ScanResultInstrum
 
 export interface RecentOperationsProps {
   operations: RecentOperation[];
-  labels: { title: string; empty: string; invalidTime: string };
+  /** This terminal's shift counts from the local journal (`readShiftJournalCounts`). */
+  counts: { errors: number; duplicates: number };
+  labels: {
+    title: string;
+    empty: string;
+    invalidTime: string;
+    errors: string;
+    duplicates: string;
+  };
   statusLabels: ScanResultLabels;
   locale: string;
 }
 
 export function RecentOperations({
   operations,
+  counts,
   labels,
   statusLabels,
   locale,
 }: RecentOperationsProps) {
   const visible = operations.slice(0, 6);
+  const number = new Intl.NumberFormat(locale);
   return (
     <section className="work-instrument work-recent" aria-labelledby="work-recent-title">
-      <h2 id="work-recent-title">{labels.title}</h2>
+      <div className="work-recent__head">
+        <h2 id="work-recent-title">{labels.title}</h2>
+        <dl className="work-recent__quality">
+          <div>
+            <dt>{labels.errors}</dt>
+            <dd data-testid="journal-errors">{number.format(counts.errors)}</dd>
+          </div>
+          <div>
+            <dt>{labels.duplicates}</dt>
+            <dd
+              data-testid="journal-duplicates"
+              data-tone={counts.duplicates > 0 ? "warn" : undefined}
+            >
+              {number.format(counts.duplicates)}
+            </dd>
+          </div>
+        </dl>
+      </div>
       {visible.length === 0 ? (
         <p className="work-recent__empty">{labels.empty}</p>
       ) : (
@@ -29,16 +56,19 @@ export function RecentOperations({
             >
               <strong>{operationStatusLabel(operation.verdict, statusLabels)}</strong>
               {operation.identity ? (
-                <dl className="work-recent__identity">
-                  <div>
-                    <dt>{statusLabels.gtin}</dt>
-                    <dd>{operation.identity.gtin14}</dd>
-                  </div>
-                  <div>
-                    <dt>{statusLabels.serial}</dt>
-                    <dd>{operation.identity.serial}</dd>
-                  </div>
-                </dl>
+                <span className="work-recent__identity">
+                  <code
+                    className="work-recent__serial"
+                    title={`${statusLabels.serial}: ${operation.identity.serial}`}
+                  >
+                    {operation.identity.serial}
+                  </code>
+                  {operation.verdict === "wrong_gtin" ? (
+                    <span className="work-recent__gtin">
+                      {`${statusLabels.gtin} ${operation.identity.gtin14}`}
+                    </span>
+                  ) : null}
+                </span>
               ) : (
                 <span>{operation.codeSuffix ?? "—"}</span>
               )}

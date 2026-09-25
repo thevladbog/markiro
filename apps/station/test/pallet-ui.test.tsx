@@ -533,8 +533,8 @@ describe("WorkScreen pallet early close", () => {
     renderWork({ exec, palletBoxCapacity: 12 });
     await screen.findByText(i18n.t("pallet.progress", { boxes: 3, capacity: 12 }));
 
-    fireEvent.click(screen.getByRole("button", { name: i18n.t("work.more") }));
-    fireEvent.click(screen.getByRole("button", { name: i18n.t("pallet.earlyClose") }));
+    expect(screen.queryByRole("button", { name: "Ещё" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("pallet.closeCurrent") }));
     expect(
       screen.getByText(i18n.t("pallet.earlyCloseDetail", { count: 3, capacity: 12 })),
     ).toBeDefined();
@@ -562,8 +562,7 @@ describe("WorkScreen pallet early close", () => {
       palletPrinting: null,
     });
     await screen.findByText(i18n.t("pallet.progress", { boxes: 3, capacity: 12 }));
-    fireEvent.click(screen.getByRole("button", { name: i18n.t("work.more") }));
-    fireEvent.click(screen.getByRole("button", { name: i18n.t("pallet.earlyClose") }));
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("pallet.closeCurrent") }));
     fireEvent.click(screen.getByRole("button", { name: i18n.t("box.confirmAction") }));
     await screen.findByText(i18n.t("box.printRecovery.errors.printerUnconfigured"));
     expect(print).not.toHaveBeenCalled();
@@ -596,8 +595,7 @@ describe("WorkScreen pallet early close", () => {
     });
     await screen.findByText(i18n.t("pallet.progress", { boxes: 3, capacity: 12 }));
 
-    fireEvent.click(screen.getByRole("button", { name: i18n.t("work.more") }));
-    fireEvent.click(screen.getByRole("button", { name: i18n.t("pallet.earlyClose") }));
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("pallet.closeCurrent") }));
     fireEvent.click(screen.getByRole("button", { name: i18n.t("box.confirmAction") }));
 
     expect(await screen.findByText(i18n.t("pallet.closed"))).toBeDefined();

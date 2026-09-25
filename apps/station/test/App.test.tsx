@@ -935,6 +935,9 @@ async function renderActiveShiftForOperatorSwitch(
   const outboxOperatorIds: string[] = [];
   const postPaths: string[] = [];
   let boxItemCount = 3;
+  // Codes this device accepted into the shift: what the work screen's band
+  // reads back as the shift's durable local total.
+  let acceptedCodes = 0;
 
   invokeMock.mockImplementation((cmd: string, payload?: unknown): Promise<unknown> => {
     if (cmd === "plugin:sql|select") {
@@ -1023,10 +1026,16 @@ async function renderActiveShiftForOperatorSwitch(
         ]);
       }
       if (query.includes("FROM codes_mirror")) return Promise.resolve([]);
+      if (query.includes("AS accepted FROM station_processed_codes")) {
+        return Promise.resolve([{ accepted: acceptedCodes }]);
+      }
     }
     if (cmd === "plugin:sql|execute") {
       const { query, values = [] } = (payload ?? {}) as { query: string; values?: unknown[] };
-      if (/^\s*INSERT INTO codes_mirror\b/i.test(query)) boxItemCount += 1;
+      if (/^\s*INSERT INTO codes_mirror\b/i.test(query)) {
+        boxItemCount += 1;
+        acceptedCodes += 1;
+      }
       if (/^\s*INSERT INTO scan_events_mirror\b/i.test(query)) {
         journalOperatorIds.push(values[5] as string);
         if (journalOperatorIds.length === 1) {
@@ -2365,14 +2374,15 @@ describe("App", () => {
       await expandStatusPanelIfCollapsed();
       expect(screen.getByText("Maria")).toBeDefined();
       await waitFor(() => expect(screen.getByTestId("box-progress").textContent).toBe("4 / 10"));
-      const counters = within(screen.getByRole("region", { name: "Accepted, Errors, Duplicates" }));
-      expect(counters.getAllByRole("definition")[0]?.textContent).toBe("0");
+      // The band's total is the shift's durable count, so the first
+      // operator's drained scan stays counted after the switch.
+      await waitFor(() => expect(screen.getByTestId("shift-total").textContent).toBe("1"));
 
       act(() => floor.emitScan(SECOND_KM));
       await waitFor(() => expect(floor.journalOperatorIds).toEqual(["op1", "op2"]));
       expect(floor.outboxOperatorIds).toEqual(["op1", "op2"]);
       expect(floor.postPaths.some((path) => path.endsWith("/close"))).toBe(false);
-      expect(counters.getAllByRole("definition")[0]?.textContent).toBe("1");
+      await waitFor(() => expect(screen.getByTestId("shift-total").textContent).toBe("2"));
     } finally {
       consoleErrorSpy.mockRestore();
     }
