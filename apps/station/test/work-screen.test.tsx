@@ -312,6 +312,7 @@ const SSCC = buildSscc(0, TEST_ISSUER_PREFIX, 777);
  * pin it explicitly rather than letting `Date.now()` leak in. */
 const CLOSED_AT = "2026-07-23T09:15:00.000Z";
 interface RenderWorkOverrides extends RenderWorkScreenOverrides {
+  onBoxClosed?: () => void;
   printers?: WorkScreenProps["printers"];
   issuerPrefix?: string | null;
   boxCapacity?: number | null;
@@ -415,6 +416,7 @@ function renderWork(overrides: RenderWorkOverrides = {}) {
     source = manualSource(),
     sound = { muted: true, volume: 1 },
     onScanRecorded,
+    onBoxClosed,
     onScanQueueRegister,
     onExit = () => {},
     pendingSync = 0,
@@ -474,6 +476,7 @@ function renderWork(overrides: RenderWorkOverrides = {}) {
       source={source}
       sound={sound}
       {...(onScanRecorded ? { onScanRecorded } : {})}
+      {...(onBoxClosed ? { onBoxClosed } : {})}
       {...(onScanQueueRegister ? { onScanQueueRegister } : {})}
       onExit={onExit}
       pendingSync={pendingSync}
@@ -1817,6 +1820,22 @@ describe("WorkScreen box progress, closing and printing", () => {
     renderWorkTracked({ boxCapacity: 10, boxItemCount: 9, closeCurrentBox: close });
     act(() => scan(KM));
     await waitFor(() => expect(close).toHaveBeenCalledOnce());
+  });
+
+  it("notifies the serial top-up coordinator after a box closes", async () => {
+    const onBoxClosed = vi.fn();
+    const close = vi
+      .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()
+      .mockResolvedValue({
+        status: "closed",
+        sscc: SSCC,
+        itemCount: 10,
+        closedAt: CLOSED_AT,
+        pallet: null,
+      });
+    renderWorkTracked({ boxCapacity: 10, boxItemCount: 9, closeCurrentBox: close, onBoxClosed });
+    act(() => scan(KM));
+    await waitFor(() => expect(onBoxClosed).toHaveBeenCalledOnce());
   });
 
   it("lets the operator close a partial box", async () => {

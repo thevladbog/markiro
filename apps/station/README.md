@@ -37,7 +37,19 @@ The Windows installer is produced in CI (see `.github/workflows/ci.yml`); a
    the API base embedded at build time, then persists the returned device
    credential and roster before it routes to operator sign-in (`OperatorLogin`).
 3. The manual URL + API-key screen is retained only as a service recovery
-   path; it probes `GET /shifts` before persisting a credential.
+   path; it proves the key with the presence probe below before persisting a
+   credential.
+
+While enrolled, the station calls `POST /station/heartbeat` once a minute even
+when the line is idle. `TenantGuard` records the device's `lastSeenAt`, which
+the cabinet uses for line presence, and the route does no other work, so the
+probe stays constant-cost as shift history grows. A server that predates the
+route answers 404, or, in the webview, fails the CORS preflight for the
+unlisted path; the station then proves the same key with
+`GET /shifts?status=active`, bounded to open shifts. Reachability is published
+from whichever attempt finally answers, so an older server does not flash
+"No connection". An explicit server answer (401, 403, 429, 5xx) or a timeout
+is final and never retried through the older route.
 
 ### Pairing API base and CORS
 

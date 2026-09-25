@@ -79,6 +79,7 @@ import {
   shiftBoxLabelTemplatesOpenApiSchema,
   shiftPalletLabelTemplatesOpenApiSchema,
   shiftBundleOpenApiSchema,
+  boxSsccTopUpOpenApiSchema,
   shiftOpenApiSchema,
   shiftPlanningConfigOpenApiSchema,
   shiftReferenceBundleOpenApiSchema,
@@ -91,6 +92,7 @@ import {
   type ShiftBoxLabelTemplatesDto,
   type ShiftPalletLabelTemplatesDto,
   type ShiftDto,
+  type BoxSsccTopUpDto,
   type ShiftPlanningConfigDto,
   type UpdateShiftDto,
   boxLabelTemplateProductQuerySchema,
@@ -580,6 +582,24 @@ export class ShiftsController {
           shift: projectDeviceValidationPrint(result.shift, req.get("x-station-capabilities")),
         }
       : result;
+  }
+
+  @Post(":id/sscc/top-up")
+  @HttpCode(200)
+  @UseGuards(StationOnlyGuard)
+  @AllowStationOrPermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @AllowSubscriptionRecovery("shift")
+  @ApiOperation({ summary: "Reconcile and top up this device's box SSCC ranges" })
+  @ApiStationAuth()
+  @ApiParam({ name: "id", format: "uuid" })
+  @ApiOkResponse({ schema: boxSsccTopUpOpenApiSchema })
+  @ApiHttpErrors(400, 401, 403, 404, 409, 429)
+  async topUpBoxSscc(
+    @Req() req: RequestWithTenant,
+    @Param("id") id: string,
+  ): Promise<BoxSsccTopUpDto> {
+    if (!req.deviceId) throw new Error("Station device identity is missing");
+    return this.shiftsService.topUpBoxSscc(req.tenantId!, id, req.deviceId);
   }
 
   @Get(":id/reference-bundle")

@@ -18,6 +18,7 @@ import { KiosksController } from "../src/modules/kiosks/kiosks.controller";
 import { KiosksService } from "../src/modules/kiosks/kiosks.service";
 import { StationDevicesController } from "../src/modules/station-devices/station-devices.controller";
 import { StationDevicesService } from "../src/modules/station-devices/station-devices.service";
+import { StationHeartbeatController } from "../src/modules/station-pairing/station-heartbeat.controller";
 import { StationPairController } from "../src/modules/station-pairing/station-pair.controller";
 import { StationPairingService } from "../src/modules/station-pairing/station-pairing.service";
 import { ProductsController } from "../src/modules/products/products.controller";
@@ -80,7 +81,7 @@ function scriptSources(html: string): string[] {
 function operationResponse(
   document: OpenAPIObject,
   path: string,
-  status: "200" | "201" | "401" | "403" | "409",
+  status: "200" | "201" | "204" | "401" | "403" | "409",
   method: "get" | "post" = "post",
 ): Record<string, unknown> {
   const operation = document.paths[path]?.[method];
@@ -243,6 +244,35 @@ describe("self-hosted OpenAPI documentation", () => {
         "endsAt",
       ]);
       expect(JSON.stringify(response)).not.toMatch(/apiKey|credential|secret/i);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("documents the station heartbeat as an empty, device-key-only POST", async () => {
+    const moduleRef = await Test.createTestingModule({
+      controllers: [StationHeartbeatController],
+    })
+      .overrideGuard(TenantGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(StationOnlyGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
+    const app = moduleRef.createNestApplication();
+    await app.init();
+
+    try {
+      const document = SwaggerModule.createDocument(
+        app,
+        new DocumentBuilder().setTitle("contract test").setVersion("test").build(),
+      );
+      expect(Object.keys(document.paths["/station/heartbeat"] ?? {})).toEqual(["post"]);
+      const operation = document.paths["/station/heartbeat"]?.post;
+      expect(operation?.security).toEqual([{ stationApiKey: [] }]);
+      expect(operation?.requestBody).toBeUndefined();
+      expect(Object.keys(operation?.responses ?? {}).sort()).toEqual(["204", "401", "403", "429"]);
+      const response = operationResponse(document, "/station/heartbeat", "204", "post");
+      expect(response).not.toHaveProperty("content");
     } finally {
       await app.close();
     }

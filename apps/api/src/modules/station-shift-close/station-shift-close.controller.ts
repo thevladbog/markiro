@@ -53,7 +53,7 @@ export class StationShiftCloseController {
   @ApiOperation({
     summary: "Record a station shift close",
     description:
-      "Waiting replacement targets retain the submission without business effects and return 409 with code device_replacement_waiting, outcome quarantined, receiptId and newWorkAllowedAt. Exact retries replay the receipt; old draining-source closure remains available. Closure, replay and quarantine remain available with a read-only or expired subscription. Idempotent by `eventId`; a close raced by another device resolves to the `conflict` outcome instead of an error.",
+      "Waiting replacement targets retain the submission without business effects and return 409 with code device_replacement_waiting, outcome quarantined, receiptId and newWorkAllowedAt. Exact retries replay the receipt; old draining-source closure remains available. Closure, replay and quarantine remain available with a read-only or expired subscription. Idempotent by `eventId`; a close of a shift that another station has entered, or already stored scans or boxes for, resolves to the `conflict` outcome instead of an error.",
   })
   @ApiStationAuth()
   @ApiBody({ schema: stationShiftCloseOpenApiSchema })

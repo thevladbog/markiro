@@ -33,6 +33,11 @@ export interface StationClient {
   get<T>(path: string): Promise<T>;
   download(path: string): Promise<Blob>;
   post<T>(path: string, body?: unknown): Promise<T>;
+  /**
+   * Authenticated presence and reachability probe: the idle-line heartbeat
+   * and service enrollment's key check. Resolves once the server accepted the
+   * device key; TenantGuard records the device's `lastSeenAt` on the way.
+   */
   whoami(signal?: AbortSignal): Promise<{ ok: true }>;
 }
 
@@ -72,6 +77,31 @@ export interface StationClientOptions {
  */
 export const REQUEST_TIMEOUT_MS = 30_000;
 export const STATION_CAPABILITIES = `subscription-state-v1,station-recovery-v1,replacement-boundary-v1,replacement-readiness-v1,replacement-evidence-recovery-v1,${PRODUCT_LABEL_PROTOCOL},${VALIDATION_REPROCESSING_PROTOCOL}`;
+
+/** Constant-cost presence heartbeat; the handler does no work beyond TenantGuard. */
+const HEARTBEAT_PATH = "/station/heartbeat";
+/**
+ * The same key proof on a server that predates the heartbeat route. Every
+ * server version accepts this status filter, which bounds the answer to open
+ * work instead of the tenant's whole shift history, and the older station
+ * CORS surface allows `GET /shifts` whatever the query string.
+ */
+const LEGACY_PRESENCE_PATH = "/shifts?status=active";
+
+/**
+ * A server without `POST /station/heartbeat` answers 404 (or 405) to a direct
+ * request. The webview never sees that answer: the older CORS policy does not
+ * list the path, so the preflight fails and fetch rejects with a TypeError
+ * before any response. That rejection is indistinguishable from an offline
+ * link, which is why the fallback, not the first attempt, reports
+ * reachability for it.
+ */
+function heartbeatRouteUnavailable(error: unknown): boolean {
+  return (
+    error instanceof TypeError ||
+    (error instanceof StationApiError && (error.status === 404 || error.status === 405))
+  );
+}
 
 /**
  * Sends the one unauthenticated request an unpaired station is allowed to
@@ -138,11 +168,16 @@ export function createStationClient(
     );
   }
 
+  /**
+   * `retriedElsewhere` names failures the caller answers with a second route;
+   * such a failure without a response leaves reachability to that attempt.
+   */
   async function request<T>(
     method: "GET" | "POST",
     path: string,
     body?: unknown,
     signal?: AbortSignal,
+    retriedElsewhere?: (error: unknown) => boolean,
   ): Promise<T> {
     if (credentialBoundary?.generation.sealed) {
       throw new Error("station credential generation is sealed");
@@ -183,7 +218,7 @@ export function createStationClient(
       if (res.status === 204) return undefined as T;
       return (await res.json()) as T;
     } catch (error) {
-      if (!receivedResponse) reportReachability("unreachable");
+      if (!receivedResponse && !retriedElsewhere?.(error)) reportReachability("unreachable");
       await rejectCredentialIfExplicit(error);
       throw error;
     } finally {
@@ -224,10 +259,16 @@ export function createStationClient(
       }
     },
     post: (path, body) => request("POST", path, body),
-    // A cheap reachability + auth probe used by enrollment; GET /shifts is
-    // TenantGuard-protected, so a 200 proves the key resolves a tenant.
+    // Both routes are TenantGuard-protected, so success proves the key still
+    // resolves a live device. Only an unknown route falls back: an explicit
+    // server answer (401, 403, 429, 5xx) or a timeout is the probe's result.
     whoami: async (signal) => {
-      await request("GET", "/shifts", undefined, signal);
+      try {
+        await request("POST", HEARTBEAT_PATH, undefined, signal, heartbeatRouteUnavailable);
+      } catch (error) {
+        if (!heartbeatRouteUnavailable(error)) throw error;
+        await request("GET", LEGACY_PRESENCE_PATH, undefined, signal);
+      }
       return { ok: true };
     },
   };

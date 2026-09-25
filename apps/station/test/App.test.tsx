@@ -3027,6 +3027,7 @@ describe("App", () => {
       rejectInitialInventory = reject;
     });
     let operatorRequests = 0;
+    let heartbeatRequests = 0;
     let shiftRequests = 0;
     let inventoryRequests = 0;
     const fetchMock = vi.fn((url: string) => {
@@ -3040,9 +3041,13 @@ describe("App", () => {
           ? Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 }))
           : new Promise<Response>(() => {});
       }
+      if (path === "/station/heartbeat") {
+        heartbeatRequests += 1;
+        return Promise.resolve(new Response(null, { status: 204 }));
+      }
       if (path === "/shifts") {
         shiftRequests += 1;
-        return shiftRequests === 2
+        return shiftRequests === 1
           ? initialShifts
           : Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 }));
       }
@@ -3057,7 +3062,7 @@ describe("App", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
-    await waitFor(() => expect(shiftRequests).toBe(1));
+    await waitFor(() => expect(heartbeatRequests).toBe(1));
     await signInAsOperator();
 
     expect(screen.getByTestId("server-status").textContent).toBe("Available");
@@ -3091,10 +3096,11 @@ describe("App", () => {
       [],
       persistedConfig,
     );
-    let rejectOldShift!: (reason?: unknown) => void;
-    const oldShift = new Promise<Response>((_resolve, reject) => {
-      rejectOldShift = reject;
+    let rejectOldHeartbeat!: (reason?: unknown) => void;
+    const oldHeartbeat = new Promise<Response>((_resolve, reject) => {
+      rejectOldHeartbeat = reject;
     });
+    let heartbeatRequests = 0;
     let shiftRequests = 0;
     vi.stubGlobal(
       "fetch",
@@ -3120,19 +3126,20 @@ describe("App", () => {
             ),
           );
         }
-        if (path === "/shifts") {
-          shiftRequests += 1;
-          return shiftRequests === 1
-            ? oldShift
-            : Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+        if (path === "/station/heartbeat") {
+          heartbeatRequests += 1;
+          return heartbeatRequests === 1
+            ? oldHeartbeat
+            : Promise.resolve(new Response(null, { status: 204 }));
         }
+        if (path === "/shifts") shiftRequests += 1;
         return Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 }));
       }),
     );
 
     render(<App />);
     await signInAsOperator();
-    await waitFor(() => expect(shiftRequests).toBe(2));
+    await waitFor(() => expect(shiftRequests).toBe(1));
     // `shiftRequests` counts requests ISSUED. "Available" is published from the
     // client's `onReachabilityChange` when the second one SETTLES -- a React
     // state change a further turn later -- so the count proving the request went
@@ -3148,8 +3155,10 @@ describe("App", () => {
     await signInAsOperator();
     await waitFor(() => expect(screen.getByTestId("server-status").textContent).toBe("Available"));
 
+    // A timed-out attempt is final (a transport TypeError would first retry
+    // the pre-heartbeat probe), so this is the old client's own late outcome.
     await act(async () => {
-      rejectOldShift(new TypeError("late old-client failure"));
+      rejectOldHeartbeat(new DOMException("late old-client timeout", "AbortError"));
       await Promise.resolve();
     });
     expect(screen.getByTestId("server-status").textContent).toBe("Available");
@@ -3786,6 +3795,39 @@ describe("App", () => {
     expect(paths).not.toContain("/station/identity");
   });
 
+  it("keeps an idle line's presence fresh through the dedicated heartbeat, never the shift history", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    mockInvokeForFloor(pinHash, {
+      scanner: null,
+      printer: null,
+      printerLanguage: "zpl",
+      verifyPrintedLabel: false,
+    });
+    const requests: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const { pathname, search } = new URL(url);
+        requests.push(`${init?.method ?? "GET"} ${pathname}${search}`);
+        if (pathname === "/station/heartbeat") return new Response(null, { status: 204 });
+        return new Response(JSON.stringify({ items: [] }), { status: 200 });
+      }),
+    );
+    const heartbeats = () => requests.filter((line) => line === "POST /station/heartbeat").length;
+
+    // Installed before render: the heartbeat interval is armed on mount.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    render(<App />);
+    await waitFor(() => expect(heartbeats()).toBeGreaterThan(0));
+    const beforeInterval = heartbeats();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    await waitFor(() => expect(heartbeats()).toBeGreaterThan(beforeInterval));
+
+    expect(requests.filter((line) => line.startsWith("GET /shifts"))).toEqual([]);
+  });
+
   it("readShiftContext resolves null for a shift whose bundle has not been mirrored yet, so the 'preparing' branch is genuinely reachable", async () => {
     invokeMock.mockImplementation((cmd: string): Promise<unknown> => {
       if (cmd === "plugin:sql|select") return Promise.resolve([]);
@@ -4041,7 +4083,7 @@ describe("App", () => {
       [],
       persistedConfig,
     );
-    let shiftRequests = 0;
+    let heartbeatRequests = 0;
     vi.stubGlobal(
       "fetch",
       vi.fn((url: string) => {
@@ -4049,20 +4091,17 @@ describe("App", () => {
         if (path === "/station/operators") {
           return Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 }));
         }
-        if (path === "/shifts") {
-          shiftRequests += 1;
-          return Promise.resolve(
-            shiftRequests === 1
-              ? new Response(JSON.stringify({ items: [] }), { status: 200 })
-              : revokedStationCredentialResponse(),
-          );
+        if (path === "/station/heartbeat") {
+          heartbeatRequests += 1;
+          return Promise.resolve(new Response(null, { status: 204 }));
         }
+        if (path === "/shifts") return Promise.resolve(revokedStationCredentialResponse());
         return Promise.resolve(new Response("{}", { status: 200 }));
       }),
     );
 
     render(<App />);
-    await waitFor(() => expect(shiftRequests).toBe(1));
+    await waitFor(() => expect(heartbeatRequests).toBe(1));
     await signInAsOperator();
 
     await expectEmptyQueueCredentialRecovery(persistedConfig, outbox);
@@ -5426,6 +5465,12 @@ describe("App", () => {
               { status: 200 },
             );
           }
+          if (path === "/shifts/s9/sscc/top-up" && method === "POST") {
+            return new Response(
+              JSON.stringify({ blocks: [], revokedFrom: [], issuerProblem: null }),
+              { status: 200 },
+            );
+          }
           // Roster sync, ShiftSelection's own listing, mirrorShiftBundle's
           // bundle download, and the sync engine's drain -- a harmless empty
           // body for anything else; the SELECT mocks above are what this
@@ -5452,6 +5497,17 @@ describe("App", () => {
       // actually carried.
       expect((await screen.findByTestId("box-progress")).textContent).toBe("0 / 10");
       expect(screen.getByRole("button", { name: "Close box" })).toBeDefined(); // en.json's "box.close"
+      await waitFor(() =>
+        expect(
+          vi
+            .mocked(fetch)
+            .mock.calls.some(
+              ([url, init]) =>
+                new URL(String(url)).pathname === "/shifts/s9/sscc/top-up" &&
+                (init as RequestInit | undefined)?.method === "POST",
+            ),
+        ).toBe(true),
+      );
     } finally {
       consoleErrorSpy.mockRestore();
     }

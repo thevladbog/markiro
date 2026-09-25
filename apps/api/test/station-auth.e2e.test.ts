@@ -4,7 +4,7 @@ import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { AppModule } from "../src/app.module";
 import { DB } from "../src/auth/auth.module";
@@ -114,5 +114,106 @@ describe.skipIf(!ready)("station api-key auth e2e", () => {
 
   it("no auth at all -> 401", async () => {
     await request(app!.getHttpServer()).get("/shifts").expect(401);
+  });
+
+  describe("POST /station/heartbeat", () => {
+    async function lastSeenById(deviceIds: string[]): Promise<Record<string, Date | null>> {
+      const rows = await app!
+        .get<Db>(DB)
+        .select({ id: schema.stationDevices.id, lastSeenAt: schema.stationDevices.lastSeenAt })
+        .from(schema.stationDevices)
+        .where(inArray(schema.stationDevices.id, deviceIds));
+      return Object.fromEntries(rows.map((row) => [row.id, row.lastSeenAt]));
+    }
+
+    it("refreshes presence for exactly the calling device and answers an empty 204", async () => {
+      const agent = request.agent(app!.getHttpServer());
+      await signUpAndActivate(agent);
+      const station = await createTestStationDevice(app!, agent, "Heartbeat terminal");
+      const sibling = await createTestStationDevice(app!, agent, "Idle terminal");
+      const foreignAgent = request.agent(app!.getHttpServer());
+      await signUpAndActivate(foreignAgent);
+      const foreign = await createTestStationDevice(app!, foreignAgent, "Foreign terminal");
+      const deviceIds = [station.deviceId, sibling.deviceId, foreign.deviceId];
+      const stale = new Date(Date.now() - 60 * 60_000);
+      await app!
+        .get<Db>(DB)
+        .update(schema.stationDevices)
+        .set({ lastSeenAt: stale })
+        .where(inArray(schema.stationDevices.id, deviceIds));
+      const probedAt = Date.now();
+
+      // Exactly what the Station sends: a JSON content type and no body.
+      const response = await request(app!.getHttpServer())
+        .post("/station/heartbeat")
+        .set("x-api-key", station.apiKey)
+        .set("Content-Type", "application/json")
+        .expect(204);
+
+      expect(response.text).toBe("");
+      const seen = await lastSeenById(deviceIds);
+      expect(seen).toEqual({
+        [station.deviceId]: expect.any(Date),
+        [sibling.deviceId]: stale,
+        [foreign.deviceId]: stale,
+      });
+      expect(seen[station.deviceId]!.getTime()).toBeGreaterThanOrEqual(probedAt);
+    });
+
+    it("records a handheld's own presence through the shared device credential", async () => {
+      const agent = request.agent(app!.getHttpServer());
+      await signUpAndActivate(agent);
+      const handheld = await createTestStationDevice(app!, agent, "Handheld terminal", {
+        kind: "handheld",
+      });
+
+      await request(app!.getHttpServer())
+        .post("/station/heartbeat")
+        .set("x-api-key", handheld.apiKey)
+        .expect(204);
+
+      expect(await lastSeenById([handheld.deviceId])).toEqual({
+        [handheld.deviceId]: expect.any(Date),
+      });
+    });
+
+    it("rejects a cabinet session without recording any device presence", async () => {
+      const agent = request.agent(app!.getHttpServer());
+      await signUpAndActivate(agent);
+      const station = await createTestStationDevice(app!, agent, "Session-probed terminal");
+
+      await agent.post("/station/heartbeat").expect(403);
+
+      expect(await lastSeenById([station.deviceId])).toEqual({ [station.deviceId]: null });
+    });
+
+    it("answers a revoked key with the explicit revocation code and leaves presence unchanged", async () => {
+      const agent = request.agent(app!.getHttpServer());
+      await signUpAndActivate(agent);
+      const station = await createTestStationDevice(app!, agent, "Revoked terminal");
+      await request(app!.getHttpServer())
+        .post("/station/heartbeat")
+        .set("x-api-key", station.apiKey)
+        .expect(204);
+      const beforeRevocation = await lastSeenById([station.deviceId]);
+      await agent.delete(`/station-devices/${station.deviceId}`).expect(204);
+
+      const rejected = await request(app!.getHttpServer())
+        .post("/station/heartbeat")
+        .set("x-api-key", station.apiKey)
+        .expect(401);
+
+      expect(rejected.body).toMatchObject({ code: "STATION_CREDENTIAL_REVOKED" });
+      expect(await lastSeenById([station.deviceId])).toEqual(beforeRevocation);
+    });
+
+    it("requires a known device key", async () => {
+      await request(app!.getHttpServer()).post("/station/heartbeat").expect(401);
+      const unknown = await request(app!.getHttpServer())
+        .post("/station/heartbeat")
+        .set("x-api-key", "mk_not_real")
+        .expect(401);
+      expect(unknown.body).toMatchObject({ code: "STATION_CREDENTIAL_REVOKED" });
+    });
   });
 });

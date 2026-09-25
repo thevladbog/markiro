@@ -104,23 +104,30 @@ describe("ShiftSelection barcode scanning", () => {
     renderSelection({ scan, post, onSelected, items: [plannedShift()] });
 
     await waitFor(() => expect(screen.getByText("Test product")).toBeDefined());
+    // The card can appear before the scanner effect replaces its loading-state listener.
+    await act(async () => {});
     act(() => scan.scan(`markiro:shift:v1:${SHIFT_ID}`));
 
     await waitFor(() => expect(onSelected).toHaveBeenCalled());
     expect(post).toHaveBeenCalledWith(`/shifts/${SHIFT_ID}/open`, { entryMethod: "task_barcode" });
   });
 
-  it("enters a scanned active shift without asking the server to open it again", async () => {
+  it("records the paper entry into a scanned active shift without opening it again", async () => {
     const scan = scanner();
-    const post = vi.fn<PostMock>();
+    const post = vi
+      .fn<PostMock>()
+      .mockResolvedValue({ id: SHIFT_ID, status: "active", mode: "validation" });
     const onSelected = vi.fn<OnSelectedMock>();
     renderSelection({ scan, post, onSelected, items: [activeShift()] });
 
     await waitFor(() => expect(screen.getByText("Test product")).toBeDefined());
+    await act(async () => {});
     act(() => scan.scan(`markiro:shift:v1:${SHIFT_ID}`));
 
     await waitFor(() => expect(onSelected).toHaveBeenCalled());
-    expect(post).not.toHaveBeenCalled();
+    expect(post.mock.calls).toEqual([
+      [`/shifts/${SHIFT_ID}/enter`, { entryMethod: "task_barcode" }],
+    ]);
   });
 
   it("says the shift is closed rather than pretending the barcode is unreadable", async () => {
@@ -243,6 +250,7 @@ describe("ShiftSelection barcode scanning", () => {
 
     resolveFetch(new Response(JSON.stringify({ items: [plannedShift()] }), { status: 200 }));
     await waitFor(() => expect(screen.getByText("Test product")).toBeDefined());
+    await act(async () => {});
 
     act(() => scan.scan(`markiro:shift:v1:${SHIFT_ID}`));
 
@@ -258,6 +266,7 @@ describe("ShiftSelection barcode scanning", () => {
     renderSelection({ scan, post, onSelected, items: [plannedShift()] });
 
     await waitFor(() => expect(screen.getByText("Test product")).toBeDefined());
+    await act(async () => {});
     act(() => scan.scan(`markiro:shift:v1:${SHIFT_ID}\r`));
 
     await waitFor(() => expect(onSelected).toHaveBeenCalled());
@@ -273,6 +282,7 @@ describe("ShiftSelection barcode scanning", () => {
     renderSelection({ scan, post, onSelected, items: [plannedShift()] });
 
     await waitFor(() => expect(screen.getByText("Test product")).toBeDefined());
+    await act(async () => {});
     act(() => scan.scan(`  markiro:shift:v1:${SHIFT_ID}  `));
 
     await waitFor(() => expect(onSelected).toHaveBeenCalled());

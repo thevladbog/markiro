@@ -10,6 +10,7 @@ const expected = [
   ["/station/grants/v1/configuration", "POST", "content-type,x-api-key,x-station-capabilities"],
   ["/station/grants/v1/device", "POST", "content-type,x-api-key,x-station-capabilities"],
   ["/station/grants/v1/tasks", "POST", "content-type,x-api-key,x-station-capabilities"],
+  ["/station/grants/v1/readiness", "POST", "content-type,x-api-key,x-station-capabilities"],
   ["/station/grants/v1/evidence/scans", "POST", "content-type,x-api-key,x-station-capabilities"],
   [
     "/station/grants/v1/evidence/shift-closures",
@@ -28,8 +29,26 @@ const expected = [
   ],
 
   ["/station/pair", "POST", "content-type,x-station-capabilities"],
+  ["/station/pair/recovery", "POST", "content-type,x-station-capabilities"],
   ["/station/identity", "GET", "content-type,x-api-key,x-station-capabilities"],
+  ["/station/heartbeat", "POST", "content-type,x-api-key,x-station-capabilities"],
   ["/station/operators", "GET", "content-type,x-api-key,x-station-capabilities"],
+  ["/station/device-replacement-intent/v1", "GET", "content-type,x-api-key,x-station-capabilities"],
+  [
+    "/station/device-replacement-intent/v1/acknowledge",
+    "POST",
+    "content-type,x-api-key,x-station-capabilities",
+  ],
+  [
+    "/station/device-replacement-readiness",
+    "POST",
+    "content-type,x-api-key,x-station-capabilities",
+  ],
+  [
+    "/station/replacement-recovery/readiness",
+    "POST",
+    "content-type,x-api-key,x-station-capabilities",
+  ],
   [
     "/station/products/00000000-0000-0000-0000-000000000000/image/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "GET",
@@ -85,6 +104,8 @@ const expected = [
   ["/shifts/box-label-templates", "GET", "content-type,x-api-key,x-station-capabilities"],
   ["/shifts/pallet-label-templates", "GET", "content-type,x-api-key,x-station-capabilities"],
   ["/shifts/cors-probe/open", "POST", "content-type,x-api-key,x-station-capabilities"],
+  ["/shifts/cors-probe/enter", "POST", "content-type,x-api-key,x-station-capabilities"],
+  ["/shifts/cors-probe/sscc/top-up", "POST", "content-type,x-api-key,x-station-capabilities"],
   ["/shifts/cors-probe/bundle", "GET", "content-type,x-api-key,x-station-capabilities"],
   ["/shifts/cors-probe/reference-bundle", "GET", "content-type,x-api-key,x-station-capabilities"],
   ["/shifts/cors-probe/code-history", "GET", "content-type,x-api-key,x-station-capabilities"],

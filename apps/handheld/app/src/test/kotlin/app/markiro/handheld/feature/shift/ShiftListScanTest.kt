@@ -132,6 +132,8 @@ private class FakeStationApi(shifts: List<ShiftDto>) : StationApi {
         return ShiftBundleDto(shift = shift, product = BundleProductDto(shift.productId, "04600682000013", "Вода 0,5"))
     }
 
+    override suspend fun topUpBoxSscc(id: String): app.markiro.handheld.core.network.BoxSsccTopUpDto = error("not used")
+
     override suspend fun grantConfiguration(body: JsonObject): JsonObject = error("not used")
     override suspend fun grantKeyset(): JsonObject = error("not used")
     override suspend fun deviceGrant(body: JsonObject): JsonObject = error("not used")

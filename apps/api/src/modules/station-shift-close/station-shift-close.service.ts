@@ -19,6 +19,7 @@ import type {
   StationShiftCloseDto,
   StationShiftCloseResponseDto,
 } from "./dto";
+import { otherShiftDeviceObserved } from "./shift-device-evidence";
 
 @Injectable()
 export class StationShiftCloseService {
@@ -126,18 +127,9 @@ export class StationShiftCloseService {
           }
         }
 
-        const participants = await tx
-          .select({ deviceId: schema.shiftDeviceParticipants.deviceId })
-          .from(schema.shiftDeviceParticipants)
-          .where(
-            and(
-              eq(schema.shiftDeviceParticipants.tenantId, tenantId),
-              eq(schema.shiftDeviceParticipants.shiftId, input.shiftId),
-            ),
-          );
         const multipleDevices =
           shift.stationClosePolicy === "admin_only" ||
-          participants.some((p) => p.deviceId !== deviceId);
+          (await otherShiftDeviceObserved(tx, tenantId, input.shiftId, deviceId));
         const outcome = multipleDevices ? "conflict" : "accepted";
         await tx.insert(schema.stationShiftCloseEvents).values({
           eventId: input.eventId,

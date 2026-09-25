@@ -814,6 +814,7 @@ export class SsccService {
     transaction?: SsccTransaction,
   ): Promise<OrderedSsccBlock> {
     const perform = async (tx: SsccTransaction): Promise<OrderedSsccBlock> => {
+      await this.lockDeviceStream(tx, tenantId, issuerPrefix, extensionDigit, deviceId);
       const [existing] = await tx
         .select({
           allocationOrder: schema.ssccBlocks.allocationOrder,
@@ -884,6 +885,63 @@ export class SsccService {
       return { ...block, allocationOrder: Number(created.allocationOrder) };
     };
     return transaction ? perform(transaction) : this.db.transaction(perform);
+  }
+
+  /** Bundle and top-up must serialize the latest-block read, not only the counter increment. */
+  private async lockDeviceStream(
+    tx: SsccTransaction,
+    tenantId: string,
+    issuerPrefix: string,
+    extensionDigit: number,
+    deviceId: string,
+  ): Promise<void> {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtextextended(${`${tenantId}:${deviceId}:${issuerPrefix}:${extensionDigit}`}, 0))`,
+    );
+  }
+
+  /** Reserve at most one unused successor when the latest box block reaches low water. */
+  async topUpForDevice(
+    tenantId: string,
+    issuerPrefix: string,
+    deviceId: string,
+    size: number,
+    threshold: number,
+    tx: SsccTransaction,
+  ): Promise<void> {
+    await this.lockDeviceStream(tx, tenantId, issuerPrefix, BOX_EXTENSION_DIGIT, deviceId);
+    const [latest] = await tx
+      .select({
+        fromSerial: schema.ssccBlocks.fromSerial,
+        toSerial: schema.ssccBlocks.toSerial,
+        consumedThroughSerial: schema.ssccBlocks.consumedThroughSerial,
+      })
+      .from(schema.ssccBlocks)
+      .where(
+        and(
+          eq(schema.ssccBlocks.tenantId, tenantId),
+          eq(schema.ssccBlocks.issuerPrefix, issuerPrefix),
+          eq(schema.ssccBlocks.extensionDigit, BOX_EXTENSION_DIGIT),
+          eq(schema.ssccBlocks.deviceId, deviceId),
+          isNull(schema.ssccBlocks.revokedAt),
+        ),
+      )
+      .orderBy(desc(schema.ssccBlocks.allocationOrder))
+      .limit(1);
+    const shouldAllocate =
+      !latest ||
+      (latest.consumedThroughSerial !== null &&
+        latest.toSerial - latest.consumedThroughSerial <= threshold);
+    if (!shouldAllocate) return;
+    try {
+      // A capacity refusal must roll back the attempted counter increment while
+      // the outer transaction remains free to return previously held blocks.
+      await tx.transaction(async (savepoint) => {
+        await this.allocate(tenantId, issuerPrefix, BOX_EXTENSION_DIGIT, deviceId, size, savepoint);
+      });
+    } catch (error) {
+      if (!(error instanceof SsccCapacityExhaustedException)) throw error;
+    }
   }
 
   async allocateForBundle(

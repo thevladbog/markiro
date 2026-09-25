@@ -237,8 +237,15 @@ describe.skipIf(!ready)("cors e2e", () => {
     it("accepts a preflight for every documented station request", async () => {
       for (const [method, path] of [
         ["POST", "/station/pair"],
+        ["POST", "/station/pair/recovery"],
         ["GET", "/station/identity"],
+        ["POST", "/station/heartbeat"],
         ["GET", "/station/operators"],
+        ["GET", "/station/device-replacement-intent/v1?knownIntentId=intent-1"],
+        ["POST", "/station/device-replacement-intent/v1/acknowledge"],
+        ["POST", "/station/device-replacement-readiness"],
+        ["POST", "/station/replacement-recovery/readiness"],
+        ["POST", "/station/grants/v1/readiness"],
         [
           "GET",
           "/station/products/00000000-0000-0000-0000-000000000000/image/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -257,6 +264,8 @@ describe.skipIf(!ready)("cors e2e", () => {
         ["GET", "/shifts/shift-1/bundle"],
         ["GET", "/shifts/shift-1/reference-bundle"],
         ["POST", "/shifts/shift-1/open"],
+        ["POST", "/shifts/shift-1/enter"],
+        ["POST", "/shifts/shift-1/sscc/top-up"],
         ["GET", "/products?search=04600000000000"],
         ["POST", "/products/gtin-check/"],
       ] as const) {
@@ -276,8 +285,16 @@ describe.skipIf(!ready)("cors e2e", () => {
     it("refuses adjacent methods, cabinet, auth, platform, kiosk, and unknown routes", async () => {
       for (const [method, path] of [
         ["GET", "/station/pair"],
+        ["GET", "/station/pair/recovery"],
         ["POST", "/station/identity"],
+        ["GET", "/station/heartbeat"],
         ["POST", "/station/operators"],
+        ["GET", "/station/device-replacement-intent"],
+        ["POST", "/station/device-replacement-intent/v1"],
+        ["GET", "/station/device-replacement-intent/v1/acknowledge"],
+        ["GET", "/station/device-replacement-readiness"],
+        ["GET", "/station/replacement-recovery/readiness"],
+        ["GET", "/station/grants/v1/readiness"],
         [
           "POST",
           "/station/products/00000000-0000-0000-0000-000000000000/image/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -297,6 +314,8 @@ describe.skipIf(!ready)("cors e2e", () => {
         ["PATCH", "/shifts"],
         ["GET", "/shifts/shift-1"],
         ["POST", "/shifts/shift-1/close"],
+        ["GET", "/shifts/shift-1/enter"],
+        ["GET", "/shifts/shift-1/sscc/top-up"],
         ["POST", "/products"],
         ["GET", "/products/product-1"],
         ["POST", "/products/gtin-check/extra"],

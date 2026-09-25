@@ -25,6 +25,11 @@ export const STATION_PREFLIGHTS = Object.freeze([
     headers: "content-type,x-api-key,x-station-capabilities",
   },
   {
+    path: "/station/grants/v1/readiness",
+    method: "POST",
+    headers: "content-type,x-api-key,x-station-capabilities",
+  },
+  {
     path: "/station/grants/v1/evidence/scans",
     method: "POST",
     headers: "content-type,x-api-key,x-station-capabilities",
@@ -47,13 +52,43 @@ export const STATION_PREFLIGHTS = Object.freeze([
 
   { path: "/station/pair", method: "POST", headers: "content-type,x-station-capabilities" },
   {
+    path: "/station/pair/recovery",
+    method: "POST",
+    headers: "content-type,x-station-capabilities",
+  },
+  {
     path: "/station/identity",
     method: "GET",
     headers: "content-type,x-api-key,x-station-capabilities",
   },
   {
+    path: "/station/heartbeat",
+    method: "POST",
+    headers: "content-type,x-api-key,x-station-capabilities",
+  },
+  {
     path: "/station/operators",
     method: "GET",
+    headers: "content-type,x-api-key,x-station-capabilities",
+  },
+  {
+    path: "/station/device-replacement-intent/v1",
+    method: "GET",
+    headers: "content-type,x-api-key,x-station-capabilities",
+  },
+  {
+    path: "/station/device-replacement-intent/v1/acknowledge",
+    method: "POST",
+    headers: "content-type,x-api-key,x-station-capabilities",
+  },
+  {
+    path: "/station/device-replacement-readiness",
+    method: "POST",
+    headers: "content-type,x-api-key,x-station-capabilities",
+  },
+  {
+    path: "/station/replacement-recovery/readiness",
+    method: "POST",
     headers: "content-type,x-api-key,x-station-capabilities",
   },
   {
@@ -160,6 +195,16 @@ export const STATION_PREFLIGHTS = Object.freeze([
   },
   {
     path: "/shifts/cors-probe/open",
+    method: "POST",
+    headers: "content-type,x-api-key,x-station-capabilities",
+  },
+  {
+    path: "/shifts/cors-probe/enter",
+    method: "POST",
+    headers: "content-type,x-api-key,x-station-capabilities",
+  },
+  {
+    path: "/shifts/cors-probe/sscc/top-up",
     method: "POST",
     headers: "content-type,x-api-key,x-station-capabilities",
   },

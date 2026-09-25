@@ -143,6 +143,8 @@ export interface WorkScreenProps {
   /** Signals a scan was just written, so a queued outbox row does not have
    * to wait for the sync engine's 15s heartbeat before draining. */
   onScanRecorded?: () => void;
+  /** A successful local box close may lower the SSCC pool to its prefetch threshold. */
+  onBoxClosed?: () => void;
   /** Registers the ordered scan/job queue with App's credential-recovery barrier. */
   onScanQueueRegister?: (queue: ScanQueue) => () => void;
   onFloorWorkRegister?: (barrier: FloorWorkBarrier) => () => void;
@@ -256,6 +258,7 @@ export function WorkScreen({
   source,
   sound,
   onScanRecorded,
+  onBoxClosed,
   onScanQueueRegister,
   onFloorWorkRegister,
   onExit,
@@ -1796,6 +1799,11 @@ export function WorkScreen({
       }
 
       setNoSerials(false);
+      try {
+        onBoxClosed?.();
+      } catch (error) {
+        console.error("station: box serial top-up notification failed", error);
+      }
       if (!closingBoxId) {
         console.error("station: closed box identity unavailable for print recovery");
         return;

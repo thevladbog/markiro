@@ -455,7 +455,10 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
   },
   {
     contract: customerContract(CABINET_STATION_GUARDS, { mode: "recovery", kind: "shift" }),
-    routes: ["GET /shifts/:id/code-history (ShiftsController.getCodeHistory)"],
+    routes: [
+      "GET /shifts/:id/code-history (ShiftsController.getCodeHistory)",
+      "POST /shifts/:id/sscc/top-up (ShiftsController.topUpBoxSscc)",
+    ],
   },
   {
     contract: customerContract(CABINET_STATION_GUARDS, { mode: "write" }),
@@ -820,6 +823,11 @@ const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
     reason:
       "unpaired kiosk has no device identity; PairingService resolves the authoritative tenant and enforces write access",
   },
+  "StationHeartbeatController.heartbeat": {
+    reason:
+      "line presence carries no business data and must stay visible under every subscription state; TenantGuard records only the authenticated device's lastSeenAt",
+    requiredGuards: ["TenantGuard", "StationOnlyGuard"],
+  },
   "StationPairController.recovery": {
     reason:
       "recovery authenticates the single-use code and expected identity; StationPairingService enforces authoritative tenant write/quota access",
@@ -1114,7 +1122,7 @@ describe("registered subscription route inventory", () => {
         const names = guards.map((guard) => guard.name);
         const stationOnlyCabinetRoute =
           (route.controller.name === "ShiftsController" &&
-            ["enterShift", "getCodeHistory"].includes(route.handlerName)) ||
+            ["enterShift", "getCodeHistory", "topUpBoxSscc"].includes(route.handlerName)) ||
           (route.controller.name === "StationShiftCloseController" &&
             route.handlerName === "close") ||
           route.controller.name === "StationWriteoffsController" ||

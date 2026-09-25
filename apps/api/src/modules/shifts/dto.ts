@@ -394,6 +394,13 @@ export interface ShiftBundleDto {
   palletSsccRevokedFrom: number[];
 }
 
+/** Device-only box range reconciliation; the server selects the issuer and cursor. */
+export interface BoxSsccTopUpDto {
+  blocks: NonNullable<ShiftBundleDto["sscc"]>[];
+  revokedFrom: number[];
+  issuerProblem: ShiftBundleDto["ssccIssuerProblem"];
+}
+
 /**
  * GET /shifts/:id/reference-bundle response. It carries only mirrored
  * reference data and can never allocate or reconcile an SSCC block.
@@ -808,6 +815,21 @@ const ssccBundleOpenApiSchema = {
     fromSerial: { type: "integer", minimum: 0 },
     toSerial: { type: "integer", minimum: 0 },
     consumedThroughSerial: { type: "integer", minimum: 0, nullable: true },
+  },
+};
+
+export const boxSsccTopUpOpenApiSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["blocks", "revokedFrom", "issuerProblem"],
+  properties: {
+    blocks: { type: "array", items: { ...ssccBundleOpenApiSchema, nullable: false } },
+    revokedFrom: { type: "array", items: { type: "integer", minimum: 0 } },
+    issuerProblem: {
+      type: "string",
+      nullable: true,
+      enum: ["org_gln_missing", "issuer_gln_missing", null],
+    },
   },
 };
 

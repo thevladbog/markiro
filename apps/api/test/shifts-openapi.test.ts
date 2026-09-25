@@ -2,6 +2,7 @@ import { Test } from "@nestjs/testing";
 import { DocumentBuilder, SwaggerModule, type OpenAPIObject } from "@nestjs/swagger";
 import { describe, expect, it } from "vitest";
 import { AuthorizationGuard } from "../src/authorization/authorization.guard";
+import { boxSsccTopUpOpenApiSchema } from "../src/modules/shifts/dto";
 import { ShiftsController } from "../src/modules/shifts/shifts.controller";
 import { ShiftsService } from "../src/modules/shifts/shifts.service";
 import { SubscriptionAccessGuard } from "../src/subscriptions/subscription-access.guard";
@@ -108,6 +109,29 @@ const requiredShiftProperties = shiftProperties.filter(
 );
 
 describe("shifts OpenAPI contract", () => {
+  it("documents the station box SSCC top-up response", async () => {
+    const moduleRef = await Test.createTestingModule({
+      controllers: [ShiftsController],
+      providers: [{ provide: ShiftsService, useValue: {} }],
+    })
+      .overrideGuard(TenantGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(AuthorizationGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(SubscriptionAccessGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
+    const app = moduleRef.createNestApplication();
+    try {
+      const document = SwaggerModule.createDocument(app, new DocumentBuilder().build());
+      const path = "/shifts/{id}/sscc/top-up";
+      expect(responseSchema(document, path, "post", "200")).toEqual(boxSsccTopUpOpenApiSchema);
+      expect(operation(document, path, "post").requestBody).toBeUndefined();
+    } finally {
+      await app.close();
+    }
+  });
+
   it("documents the product-specific duplicate template picker without exposing specs", async () => {
     const moduleRef = await Test.createTestingModule({
       controllers: [ShiftsController],
