@@ -89,12 +89,12 @@ the hero does today.
   «В смене · все терминалы» (or «В смене · этот терминал», see the states
   below), the number in mono, «/ plan» when a plan exists, a plan bar, and one
   meta line. Without a plan there is no bar and no percentage.
-- The verdict half of `ScanResultInstrument` becomes its own instrument
-  (`ScanVerdictInstrument`), rendered in the left column in plain validation
-  mode and taking its full height. Aggregation keeps the accepted-serial
-  readout inside the box instrument, exactly as now; duplicate-DM validation
-  keeps `ValidationProcessingStatus` and `ProductLabelInstrument` in the left
-  column.
+- `ScanResultInstrument` keeps only the verdict half and is rendered in the
+  left column in plain validation mode, taking its full height; its identity
+  half (and `productMonogram`) moves to `ShiftBand`. Aggregation keeps the
+  accepted-serial readout inside the box instrument, exactly as now;
+  duplicate-DM validation keeps `ValidationProcessingStatus` and
+  `ProductLabelInstrument` in the left column.
 
 ### Box instrument (`BoxFillInstrument`)
 
@@ -175,7 +175,12 @@ the hero does today.
   tolerantly):
 
   ```json
-  { "shiftId": "…", "acceptedUnits": 1302, "deviceAcceptedUnits": 302, "asOf": "2026-09-25T09:00:11.000Z" }
+  {
+    "shiftId": "…",
+    "acceptedUnits": 1302,
+    "deviceAcceptedUnits": 302,
+    "asOf": "2026-09-25T09:00:11.000Z"
+  }
   ```
 
   - `acceptedUnits`: `code_registry` rows of the shift, plus
@@ -186,12 +191,19 @@ the hero does today.
     device (`terminal_id = deviceId`).
   - `asOf`: the transaction timestamp; both counts come from one read-only
     repeatable-read snapshot.
+
 - Index `code_registry (tenant_id, shift_id, terminal_id)`, declared in the
   Drizzle schema, built **online** (`CREATE INDEX CONCURRENTLY`) through the
   established `runtime-migrate` prepare stage (exact-definition check, rebuild
   of an invalid leftover), with the journaled migration recording it.
 - Route inventory, subscription inventory, OpenAPI coverage and
   `docs/device-key-surface.md` are updated with the route.
+- The station webview is cross-origin, so the route joins the Station CORS
+  surface: `apps/api/src/cors.ts`, its authoritative test
+  `apps/api/test/cors-station-surface.test.ts`, and the release tooling's
+  `STATION_PREFLIGHTS` (`tools/station-release/verify-api-cors.mjs` and its
+  two ordered test lists). Station releases verify production CORS against
+  that list, which fixes the rollout order (see "Delivery").
 
 ### Station
 
@@ -205,10 +217,12 @@ the hero does today.
   and published with the sync state. A restart without network still knows the
   other terminals' last contribution. An answer for another shift is ignored.
 - Failures of this step never schedule a sync retry and never mark sync as
-  stuck. A 404 (older server) suspends the step for 10 minutes. A credential
-  rejection takes the engine's existing rejection path.
+  stuck; any failure keeps the last answer and the next attempt waits for the
+  normal 15 s interval. A 404 (a server without the route whose CORS still
+  answers) suspends the step for 10 minutes. A credential rejection takes the
+  engine's existing rejection path.
 - **Local contribution** is `SELECT COUNT(*) FROM station_processed_codes
-  WHERE shift_id = ?` — the count the shift close and the plan prompt already
+WHERE shift_id = ?` — the count the shift close and the plan prompt already
   use. `WorkScreen` refreshes it off the scan's critical path (as it already
   refreshes the journal) after a scan outcome, undo, clear, box disassembly and
   each published sync state.
@@ -220,7 +234,7 @@ the hero does today.
   - no answer yet (entered offline, older server): label «В смене · этот
     терминал», number = local;
   - an answer, no other terminal counted (`acceptedUnits ===
-    deviceAcceptedUnits`): «В смене · все терминалы», meta «14 % плана»;
+deviceAcceptedUnits`): «В смене · все терминалы», meta «14 % плана»;
   - an answer with other terminals: meta adds «· этот терминал 302»;
   - the answer is older than 2 minutes and other terminals are counted: meta
     reads «другие терминалы — на 11:58» (local time of `fetchedAt`).
@@ -246,6 +260,10 @@ the hero does today.
   `duplicate`; «Ошибки» = every other non-`ok` verdict. A failed journal write
   keeps its «ОШИБКА ЗАПИСИ» signal and is not counted: it has no verdict.
 - The counts are this terminal's (the journal is local) for the whole shift.
+- A duplicate-DM refusal is the one rejection the journal never sees: the
+  acceptance trigger aborts its whole statement, journal row included. Such
+  refusals are marked `journaled: false` on the scan outcome and counted for
+  the session on top of the journal's «Дубли», as they are today.
 - Station SQLite migrations add `scan_events_mirror (shift_id, verdict)` and
   `codes_mirror (shift_id)` indexes, in `packages/db/src/sqlite/` with the
   authoritative DDL. Today the plan check scans `codes_mirror` in full on every
@@ -264,14 +282,16 @@ the hero does today.
     duplicate counted for the winner only; `deviceAcceptedUnits` per device;
   - 404 for another tenant's shift and an unknown id; denial for cabinet,
     kiosk and platform credentials; restricted-subscription behaviour;
-  - route inventory, subscription inventory and OpenAPI contract tests.
+  - route inventory, subscription inventory and OpenAPI contract tests;
+  - the Station CORS surface test and the release tooling's preflight lists
+    (`pnpm test:station-release:contract`).
 - **Station**:
   - `shiftTotalView`: no answer, fresh, stale, no other terminals, others;
   - sync engine (`test/sync.test.ts`, `test/use-sync-engine.test.tsx`): watched
     shift, 15 s throttle, persisted answer, ignored foreign answer, 404
     suspension without stuck state, credential rejection path;
   - `readShiftJournalCounts` and the counters surviving a `WorkScreen` remount
-    (`test/work-screen.test.tsx`);
+    (`test/work-screen.test.tsx`, `test/product-label-work-screen.test.tsx`);
   - components (`test/work-instruments.test.tsx`,
     `test/recent-operations.test.tsx`, new `test/shift-band.test.tsx`): band
     total states and plan bar; box head row; compact pallet; journal rows with
@@ -303,9 +323,12 @@ the hero does today.
 
 ## Delivery
 
-One PR, commits split by layer (DB → API → station). Rollout order does not
-matter: an older station never calls the new route, and a new station on an
-older server shows «В смене · этот терминал».
+One PR, commits split by layer (DB → API → station). Functionally either
+order works: an older station never calls the new route, and a new station on
+an older server shows «В смене · этот терминал». The release pipeline does
+fix the order: **deploy the API first**, then publish the station build, because
+the station release verifies production CORS against `STATION_PREFLIGHTS`,
+which now includes the new route.
 
 ## Not in scope
 
