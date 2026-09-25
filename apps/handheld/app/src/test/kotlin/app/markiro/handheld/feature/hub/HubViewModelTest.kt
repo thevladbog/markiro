@@ -142,6 +142,7 @@ class HubViewModelTest {
         }
         override suspend fun enter(id: String, body: app.markiro.handheld.core.network.ShiftEntryRequest): ShiftDto = enter(id)
         override suspend fun bundle(id: String): ShiftBundleDto = bundle(id)
+        override suspend fun topUpBoxSscc(id: String): app.markiro.handheld.core.network.BoxSsccTopUpDto = error("Unused")
         override suspend fun summary(id: String): ShiftSummaryDto = throw UnsupportedOperationException()
         override suspend fun lines(): LineListResponse = throw UnsupportedOperationException()
         override suspend fun resolveInventoryBarcode(body: ResolveTaskRequest): ResolveTaskResponse = throw UnsupportedOperationException()

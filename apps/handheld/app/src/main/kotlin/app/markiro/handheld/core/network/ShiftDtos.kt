@@ -48,6 +48,14 @@ data class BundleSsccDto(
     val consumedThroughSerial: Long? = null,
 )
 
+/** `POST /shifts/:id/sscc/top-up`: every live box block, not only the newest one. */
+@Serializable
+data class BoxSsccTopUpDto(
+    val blocks: List<BundleSsccDto>,
+    val revokedFrom: List<Long>,
+    val issuerProblem: String?,
+)
+
 /** One label template as the bundle delivers it; the box and pallet slots share this shape. */
 @Serializable
 data class BundleLabelTemplateDto(val id: String, val name: String, val spec: JsonElement)

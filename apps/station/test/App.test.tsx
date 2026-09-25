@@ -5416,6 +5416,12 @@ describe("App", () => {
               { status: 200 },
             );
           }
+          if (path === "/shifts/s9/sscc/top-up" && method === "POST") {
+            return new Response(
+              JSON.stringify({ blocks: [], revokedFrom: [], issuerProblem: null }),
+              { status: 200 },
+            );
+          }
           // Roster sync, ShiftSelection's own listing, mirrorShiftBundle's
           // bundle download, and the sync engine's drain -- a harmless empty
           // body for anything else; the SELECT mocks above are what this
@@ -5442,6 +5448,17 @@ describe("App", () => {
       // actually carried.
       expect((await screen.findByTestId("box-progress")).textContent).toBe("0 / 10");
       expect(screen.getByRole("button", { name: "Close box" })).toBeDefined(); // en.json's "box.close"
+      await waitFor(() =>
+        expect(
+          vi
+            .mocked(fetch)
+            .mock.calls.some(
+              ([url, init]) =>
+                new URL(String(url)).pathname === "/shifts/s9/sscc/top-up" &&
+                (init as RequestInit | undefined)?.method === "POST",
+            ),
+        ).toBe(true),
+      );
     } finally {
       consoleErrorSpy.mockRestore();
     }

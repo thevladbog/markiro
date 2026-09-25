@@ -73,6 +73,9 @@ interface StationApi {
     @GET("shifts/{id}/bundle")
     suspend fun bundle(@Path("id") id: String): ShiftBundleDto
 
+    @POST("shifts/{id}/sscc/top-up")
+    suspend fun topUpBoxSscc(@Path("id") id: String): BoxSsccTopUpDto
+
     @GET("shifts/{id}/code-history")
     suspend fun codeHistory(@Path("id") id: String, @Query("cursor") cursor: String? = null,
         @Query("snapshot") snapshot: String? = null, @Query("limit") limit: Int = 1000): ValidationHistoryPage
