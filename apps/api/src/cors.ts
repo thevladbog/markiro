@@ -90,7 +90,7 @@ function isStationRequest(req: Request): boolean {
     (method === "GET" && /^\/station\/inventories\/[^/]+\/progress$/.test(path)) ||
     (method === "GET" &&
       /^\/shifts\/[^/]+\/(?:bundle|reference-bundle|code-history)$/.test(path)) ||
-    (method === "POST" && /^\/shifts\/[^/]+\/open$/.test(path))
+    (method === "POST" && /^\/shifts\/[^/]+\/(?:open|enter)$/.test(path))
   );
 }
 

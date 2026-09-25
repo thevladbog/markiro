@@ -46,6 +46,24 @@ interface ShiftListItem {
   } | null;
 }
 
+/**
+ * The error that stops a rejoin, or null when the local entry goes ahead.
+ * Reporting the entry is how the server learns that a second station works a
+ * shift, which makes closing it administrator-only; the rejoin itself stays
+ * offline-first. No response, a failing or throttled server, and the
+ * subscription or replacement policies the local rejoin never depended on all
+ * leave the operator's entry as it was. A rejected credential, a required
+ * station update and an already closed shift stop it.
+ */
+function rejoinRefusal(error: unknown, closedMessage: string): StationApiError | null {
+  if (!(error instanceof StationApiError)) return null;
+  if (error.status === 401) return error;
+  if (error.status !== 409) return null;
+  // `/enter` answers a closed shift with its only conflict that carries no code.
+  if (error.code === undefined) return new StationApiError(error.status, closedMessage);
+  return error.code === "STATION_UPDATE_REQUIRED" ? error : null;
+}
+
 async function reconcileLocallyClosedShifts(
   exec: SqlExecutor | undefined,
   items: ShiftListItem[],
@@ -396,8 +414,19 @@ export function ShiftSelection({
     );
   }
 
-  async function rejoin(shift: ShiftListItem): Promise<void> {
-    await enterShift(shift, () => Promise.resolve(shift));
+  async function rejoin(
+    shift: ShiftListItem,
+    entryMethod: "list" | "task_barcode" = "list",
+  ): Promise<void> {
+    await enterShift(shift, async () => {
+      try {
+        await client.post(`/shifts/${shift.id}/enter`, { entryMethod });
+      } catch (err) {
+        const refusal = rejoinRefusal(err, t("shifts.barcodeClosed"));
+        if (refusal) throw refusal;
+      }
+      return shift;
+    });
   }
 
   // `open`/`rejoin` are plain functions redefined every render (they close
@@ -449,7 +478,7 @@ export function ShiftSelection({
       }
       setError(null);
       void (match.status === "active"
-        ? rejoinRef.current(match)
+        ? rejoinRef.current(match, "task_barcode")
         : openRef.current(match, "task_barcode"));
     });
   }, [alternateActive, controlsDisabled, items, loading, setError, source, t]);

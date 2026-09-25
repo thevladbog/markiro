@@ -38,6 +38,7 @@ import app.markiro.handheld.core.util.Iso
 import app.markiro.handheld.core.sync.SyncEngine
 import app.markiro.handheld.core.sync.SyncState
 import app.markiro.handheld.feature.shift.ShiftRepository
+import app.markiro.handheld.feature.shift.BoxSerialTopUp
 import app.markiro.handheld.feature.signin.SessionHolder
 import app.markiro.handheld.feature.signin.SessionState
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -269,6 +270,10 @@ class WorkViewModel(
     val grantDenial = app.markiro.handheld.core.grants.GrantDenialUi()
 
     private val generation = db.recovery.token()
+    private var boxSerialTopUp: BoxSerialTopUp? = null
+    /** Initialized before `init`, whose coroutine may run immediately on the real UI dispatcher. */
+    private val scanning = MutableStateFlow(true)
+    private var boxTopUpEpoch = 0
     private val last = MutableStateFlow<LastScan?>(null)
     private val teamState = MutableStateFlow<TeamState?>(null)
     private val palletUi = MutableStateFlow<PalletUi?>(null)
@@ -405,6 +410,8 @@ class WorkViewModel(
     }.stateIn(viewModelScope, SharingStarted.Eagerly, WorkUi(null, null, 0, null, 0, 0, 0, emptyList(), SyncState(), false, null))
 
     init {
+        val initialTopUpEpoch = boxTopUpEpoch
+        viewModelScope.launch(grantDenial.handler) { db.recovery.work(generation) { startBoxSerialTopUp(initialTopUpEpoch) } }
         // The pallet strip (06d) is shown from entry rather than only after the
         // first box closes into one, for the same reason the box grid is
         // (`boxUi`): an operator should not meet the validation layout first.
@@ -573,6 +580,9 @@ class WorkViewModel(
         if (result != CloseResult.Empty) boxRefusal.value = result.takeUnless { it is CloseResult.Closed }
         when (result) {
             is CloseResult.Closed -> {
+                // The close is already durable. Checking for the next range must
+                // neither wait for the network nor hold up this label's print.
+                boxSerialTopUp?.nudge()
                 val closed = ClosedBoxUi(
                     boxId = result.box.boxId,
                     ordinal = boxes.ordinal(result.box),
@@ -732,10 +742,32 @@ class WorkViewModel(
      * behaves as it always did; `AppNavigation` clears it while another route
      * is on top.
      */
-    private val scanning = MutableStateFlow(true)
-
     fun setScanning(active: Boolean) {
         scanning.value = active
+        val epoch = ++boxTopUpEpoch
+        if (active) {
+            viewModelScope.launch(grantDenial.handler) { db.recovery.work(generation) { startBoxSerialTopUp(epoch) } }
+        } else {
+            boxSerialTopUp?.stop()
+            boxSerialTopUp = null
+        }
+    }
+
+    private suspend fun startBoxSerialTopUp(epoch: Int) {
+        if (!scanning.value || boxTopUpEpoch != epoch || boxSerialTopUp != null) return
+        val shift = db.shiftDao().get(shiftId) ?: return
+        // A pause or new entry may have happened while Room was reading.
+        if (!scanning.value || boxTopUpEpoch != epoch || boxSerialTopUp != null) return
+        val prefix = shift.ssccIssuerPrefix ?: return
+        if (shift.mode != "aggregation" || shift.status != "active") return
+        val controller = repository?.boxSerialTopUp(shiftId, prefix, generation, viewModelScope) ?: return
+        boxSerialTopUp = controller
+        controller.nudge()
+    }
+
+    override fun onCleared() {
+        boxSerialTopUp?.stop()
+        super.onCleared()
     }
 
     /** An explicit second send, chosen by a person who has looked at the printer. */

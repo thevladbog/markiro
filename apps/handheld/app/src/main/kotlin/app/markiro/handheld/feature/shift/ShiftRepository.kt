@@ -133,6 +133,13 @@ class ShiftRepository(
 ) {
     private val history = ValidationHistoryMirror(db, api, json)
 
+    fun boxSerialTopUp(
+        shiftId: String,
+        issuerPrefix: String,
+        generation: app.markiro.handheld.core.storage.GenerationToken,
+        scope: kotlinx.coroutines.CoroutineScope,
+    ) = BoxSerialTopUp(db, pool, shiftId, issuerPrefix, generation, scope, api::topUpBoxSscc)
+
     fun observeShifts(): Flow<List<ShiftEntity>> = db.shiftDao().observeAll()
 
     /**

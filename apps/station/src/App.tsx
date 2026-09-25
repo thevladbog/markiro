@@ -1,5 +1,6 @@
 import { useDeviceReplacement } from "./lib/use-device-replacement.js";
 import { readBoxReconciliationSummary } from "./lib/box-reconciliation.js";
+import { createBoxSerialTopUp } from "./lib/box-serial-top-up.js";
 import { runShiftReconciliationBarrier } from "./lib/shift-reconciliation-barrier.js";
 import { SyncDetailsDialog } from "./ui/SyncDetailsDialog.js";
 import { replacementBlocksNewWork, replacementCanEnterTask } from "./lib/device-replacement.js";
@@ -78,6 +79,7 @@ import {
   ensureShiftExecutionProjection,
   mirrorShiftBundle,
   refreshShiftBundleForRecovery,
+  waitForShiftBundleMirrors,
 } from "./lib/shift-bundle.js";
 import { createOperatorRosterRefresher } from "./lib/roster-sync.js";
 import { createKeyboardWedgeSource } from "./lib/scan-source.js";
@@ -296,6 +298,7 @@ export function App() {
   // signal (see its own `CloseBoxDeps` doc comment).
   const [palletBoxCapacity, setPalletBoxCapacity] = useState<number | null>(null);
   const [issuerPrefix, setIssuerPrefix] = useState<string | null>(null);
+  const boxSerialTopUpRef = useRef<ReturnType<typeof createBoxSerialTopUp> | null>(null);
   const [boxTemplateRecovery, setBoxTemplateRecovery] = useState<BoxTemplateRecoveryState | null>(
     null,
   );
@@ -1007,6 +1010,42 @@ export function App() {
     onCredentialRejected,
   });
   pauseSyncAndWaitForIdleRef.current = pauseSyncAndWaitForIdle;
+
+  const topUpShiftId = shift?.id;
+  const topUpHasShiftContext = shiftContext !== null;
+
+  useEffect(() => {
+    if (
+      !topUpShiftId ||
+      !topUpHasShiftContext ||
+      !issuerPrefix ||
+      !authenticatedClient ||
+      !credentialGeneration
+    ) {
+      return;
+    }
+    const shiftId = topUpShiftId;
+    const entryGeneration = shiftEntryGenerationRef.current;
+    const controller = createBoxSerialTopUp({
+      client: authenticatedClient,
+      exec: tauriExecutor,
+      shiftId,
+      issuerPrefix,
+      generation: credentialGeneration,
+      waitForBundle: waitForShiftBundleMirrors,
+      isCurrent: () =>
+        activeShiftIdRef.current === shiftId && shiftEntryGenerationRef.current === entryGeneration,
+    });
+    boxSerialTopUpRef.current = controller;
+    void controller.nudge();
+    const onOnline = () => void controller.nudge();
+    window.addEventListener("online", onOnline);
+    return () => {
+      window.removeEventListener("online", onOnline);
+      controller.stop();
+      if (boxSerialTopUpRef.current === controller) boxSerialTopUpRef.current = null;
+    };
+  }, [topUpShiftId, topUpHasShiftContext, issuerPrefix, authenticatedClient, credentialGeneration]);
 
   useEffect(() => {
     let current = true;
@@ -2080,6 +2119,7 @@ export function App() {
               source={scanSource}
               sound={sound}
               onScanRecorded={nudgeSync}
+              onBoxClosed={() => void boxSerialTopUpRef.current?.nudge()}
               onScanQueueRegister={registerFloorWorkBarrier}
               onFloorWorkRegister={registerFloorWorkBarrier}
               exceptionWindowControl={windowModeControl}
