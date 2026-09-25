@@ -4786,6 +4786,13 @@ export const STATION_MIGRATIONS: string[] = [
                  WHERE shift_id=NEW.shift_id AND raw=NEW.raw AND scanned_at=NEW.scanned_at
                    AND code_hash IS NULL ORDER BY id DESC LIMIT 1);
    END;`,
+  // The work screen counts one shift's journal verdicts and accepted units
+  // after every scan (design 2026-09-25); without these both reads scan the
+  // device's whole history. IF NOT EXISTS: every statement re-runs on boot.
+  `CREATE INDEX IF NOT EXISTS scan_events_mirror_shift_verdict_idx
+     ON scan_events_mirror(shift_id,verdict);`,
+  `CREATE INDEX IF NOT EXISTS codes_mirror_shift_idx
+     ON codes_mirror(shift_id);`,
 ];
 
 export interface StationMigrationEntry {

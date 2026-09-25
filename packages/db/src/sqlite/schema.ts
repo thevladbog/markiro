@@ -200,14 +200,18 @@ export const shiftCloseOutbox = sqliteTable(
  * a plain column rather than a join table, so it rides the insert `recordScan`
  * already makes here instead of widening its compensate-on-failure surface.
  */
-export const codesMirror = sqliteTable("codes_mirror", {
-  codeHash: text("code_hash").primaryKey(),
-  shiftId: text("shift_id").notNull(),
-  gtin14: text("gtin14").notNull(),
-  serial: text("serial").notNull(),
-  scannedAt: text("scanned_at").notNull(),
-  boxId: text("box_id"),
-});
+export const codesMirror = sqliteTable(
+  "codes_mirror",
+  {
+    codeHash: text("code_hash").primaryKey(),
+    shiftId: text("shift_id").notNull(),
+    gtin14: text("gtin14").notNull(),
+    serial: text("serial").notNull(),
+    scannedAt: text("scanned_at").notNull(),
+    boxId: text("box_id"),
+  },
+  (t) => [index("codes_mirror_shift_idx").on(t.shiftId)],
+);
 
 /**
  * Local journal mirror of server `scan_events` (05b writes here).
@@ -216,17 +220,21 @@ export const codesMirror = sqliteTable("codes_mirror", {
  * in when it happened -- captured here because, unlike a report, an
  * attribution never recorded cannot be recovered later.
  */
-export const scanEventsMirror = sqliteTable("scan_events_mirror", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  shiftId: text("shift_id").notNull(),
-  terminalId: text("terminal_id"),
-  raw: text("raw").notNull(),
-  verdict: text("verdict").notNull(),
-  scannedAt: text("scanned_at").notNull(),
-  operatorId: text("operator_id"),
-  codeHash: text("code_hash"),
-  boxId: text("box_id"),
-});
+export const scanEventsMirror = sqliteTable(
+  "scan_events_mirror",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    shiftId: text("shift_id").notNull(),
+    terminalId: text("terminal_id"),
+    raw: text("raw").notNull(),
+    verdict: text("verdict").notNull(),
+    scannedAt: text("scanned_at").notNull(),
+    operatorId: text("operator_id"),
+    codeHash: text("code_hash"),
+    boxId: text("box_id"),
+  },
+  (t) => [index("scan_events_mirror_shift_verdict_idx").on(t.shiftId, t.verdict)],
+);
 
 /**
  * Device-local transport queue: one row per scan, drained to the server and
