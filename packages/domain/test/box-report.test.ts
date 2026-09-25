@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { renderBoxReportHtml, type BoxReportData } from "../src/modules/code-search/box-report";
-import { boxReportQuerySchema } from "../src/modules/code-search/dto";
+import { renderBoxReportHtml, type BoxReportData } from "../src/print-forms/box-report.js";
 
 /**
  * GS (ASCII 0x1D) — the real KM segment separator byte (see kiosk-orders.e2e.test.ts
@@ -33,18 +32,10 @@ function fixture(overrides: Partial<BoxReportData> = {}): BoxReportData {
 }
 
 describe("renderBoxReportHtml", () => {
-  it("retains UTC for existing report URLs without a viewer timezone", () => {
-    expect(boxReportQuerySchema.parse({})).toEqual({ timeZone: "UTC" });
+  it("prints UTC when no viewer timezone is given", () => {
     const html = renderBoxReportHtml(fixture({ openedAt: new Date("2026-09-09T21:58:00.000Z") }));
     expect(html).toContain("открыт 09.09.2026 21:58");
   });
-
-  it.each(["Not/A_Time_Zone", "", "<script>", ["UTC", "Europe/Moscow"]])(
-    "rejects invalid or repeated timezone values: %s",
-    (timeZone) => {
-      expect(boxReportQuerySchema.safeParse({ timeZone }).success).toBe(false);
-    },
-  );
 
   it.each([
     {

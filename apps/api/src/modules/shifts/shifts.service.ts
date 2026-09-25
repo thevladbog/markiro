@@ -94,7 +94,7 @@ import type {
 } from "./dto";
 import { EntitlementsService } from "../../subscriptions/entitlements.service";
 import { SubscriptionReadOnlyException } from "../../subscriptions/subscription-errors";
-import type { ShiftTaskFormData } from "./shift-task-form";
+import type { ShiftTaskFormData } from "@markiro/domain";
 
 import {
   assertProductLabelCapability,

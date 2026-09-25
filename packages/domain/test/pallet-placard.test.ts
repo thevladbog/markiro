@@ -9,7 +9,7 @@ import {
   summarizeByProductionDate,
   type PalletPlacardBox,
   type PalletPlacardData,
-} from "../src/modules/code-search/pallet-placard";
+} from "../src/print-forms/pallet-placard.js";
 
 function box(productionDate: string | null, codeCount = 20, disassembledAt: Date | null = null) {
   return { productionDate, codeCount, disassembledAt } satisfies PalletPlacardBox;

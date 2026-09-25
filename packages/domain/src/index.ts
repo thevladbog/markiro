@@ -370,3 +370,26 @@ export * from "./offline-grants/jws.js";
 export * from "./offline-grants/clock.js";
 export * from "./offline-grants/decision.js";
 export * from "./offline-grants/budgets.js";
+
+export type { ReportCode, ReportOrg } from "./print-forms/contents-report.js";
+export { renderBoxReportHtml } from "./print-forms/box-report.js";
+export type { BoxReportCode, BoxReportData } from "./print-forms/box-report.js";
+export { renderPalletReportHtml } from "./print-forms/pallet-report.js";
+export type { PalletReportBox, PalletReportData } from "./print-forms/pallet-report.js";
+export {
+  renderPalletPlacardHtml,
+  renderShiftPlacardsHtml,
+  summarizeByProductionDate,
+} from "./print-forms/pallet-placard.js";
+export type {
+  PalletPlacardBox,
+  PalletPlacardData,
+  PlacardDateRow,
+  PlacardFormat,
+} from "./print-forms/pallet-placard.js";
+export { renderShiftTaskFormHtml } from "./print-forms/shift-task-form.js";
+export type { ShiftTaskFormData } from "./print-forms/shift-task-form.js";
+// Chrome helpers stay grouped: `escapeHtml` and friends are generic names, and
+// the box-report module has its own `escapeHtml` that must not be confused
+// with this one.
+export * as taskFormChrome from "./print-forms/task-form-chrome.js";

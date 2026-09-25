@@ -6,11 +6,13 @@ import { formatShiftNumber, formatSsccWithAi } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
 import { upperBoundCondition } from "../../lib/date-range";
 import { classifySearchInput } from "./input-classifier";
-import type { BoxReportData } from "./box-report";
-import type { PalletReportData } from "./pallet-report";
-import type { ReportOrg } from "./contents-report";
+import type {
+  BoxReportData,
+  PalletPlacardData,
+  PalletReportData,
+  ReportOrg,
+} from "@markiro/domain";
 import { OrgProfileService } from "../org-profile/org-profile.service";
-import type { PalletPlacardData } from "./pallet-placard";
 import type {
   BoxCardDto,
   ClassifySearchResponseDto,

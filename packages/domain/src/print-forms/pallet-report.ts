@@ -9,7 +9,7 @@ import {
   ssccHri,
   type ReportOrg,
   type ReportUnit,
-} from "./contents-report";
+} from "./contents-report.js";
 
 /** One box standing on the pallet. */
 export interface PalletReportBox {

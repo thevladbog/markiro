@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { PARENT_ROW_MM, parentRowHeightMm } from "../src/modules/code-search/contents-report";
-import {
-  renderPalletReportHtml,
-  type PalletReportData,
-} from "../src/modules/code-search/pallet-report";
+import { PARENT_ROW_MM, parentRowHeightMm } from "../src/print-forms/contents-report.js";
+import { renderPalletReportHtml, type PalletReportData } from "../src/print-forms/pallet-report.js";
 
 function box(n: number, codeCount = 12, disassembledAt: Date | null = null) {
   return {

@@ -1,19 +1,16 @@
 import { describe, expect, it } from "vitest";
 
-import { renderBoxReportHtml, type BoxReportData } from "../src/modules/code-search/box-report";
+import { renderBoxReportHtml, type BoxReportData } from "../src/print-forms/box-report.js";
 import {
   renderPalletPlacardHtml,
   renderShiftPlacardsHtml,
   type PalletPlacardData,
-} from "../src/modules/code-search/pallet-placard";
-import {
-  renderPalletReportHtml,
-  type PalletReportData,
-} from "../src/modules/code-search/pallet-report";
+} from "../src/print-forms/pallet-placard.js";
+import { renderPalletReportHtml, type PalletReportData } from "../src/print-forms/pallet-report.js";
 import {
   renderShiftTaskFormHtml,
   type ShiftTaskFormData,
-} from "../src/modules/shifts/shift-task-form";
+} from "../src/print-forms/shift-task-form.js";
 
 /**
  * Characterisation lock for moving the printable forms into @markiro/domain

@@ -1,5 +1,5 @@
-import { shelfLifeExpiryDate } from "@markiro/domain";
-import { brandLogo, escapeHtml, ssccBarcode, ssccHri, type ReportOrg } from "./contents-report";
+import { shelfLifeExpiryDate } from "../labels/shelf-life.js";
+import { brandLogo, escapeHtml, ssccBarcode, ssccHri, type ReportOrg } from "./contents-report.js";
 
 /**
  * The printed pallet PLACARD (spec 2026-09-18): one page, A4 or A5, meant to

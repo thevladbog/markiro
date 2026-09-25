@@ -1,6 +1,8 @@
-import { renderLiteralDataMatrixSvg } from "@markiro/domain";
+import { renderLiteralDataMatrixSvg, taskFormChrome } from "@markiro/domain";
 
-import {
+import { formatInventoryTaskBarcode } from "./station-inventory.dto";
+
+const {
   boundPrintText,
   countNoun,
   escapeHtml,
@@ -11,8 +13,7 @@ import {
   taskFormLogoSvg,
   taskFormParameter,
   taskFormStep,
-} from "../print/task-form-chrome";
-import { formatInventoryTaskBarcode } from "./station-inventory.dto";
+} = taskFormChrome;
 
 export interface InventoryTaskFormData {
   inventoryId: string;

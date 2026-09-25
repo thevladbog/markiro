@@ -1,4 +1,4 @@
-import { renderCode128Svg, renderDataMatrixSvg } from "@markiro/domain";
+import { renderCode128Svg, renderDataMatrixSvg } from "../barcodes/svg.js";
 
 /**
  * The print chrome shared by the "Состав короба" and "Состав паллеты" forms:

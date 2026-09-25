@@ -103,7 +103,7 @@ import {
   type ShiftEntryDto,
 } from "./dto";
 import { ShiftsService, type EffectiveListShiftsQuery } from "./shifts.service";
-import { renderShiftTaskFormHtml } from "./shift-task-form";
+import { renderShiftTaskFormHtml } from "@markiro/domain";
 
 @ApiTags("shifts")
 @Controller("shifts")

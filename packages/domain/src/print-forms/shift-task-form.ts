@@ -1,4 +1,5 @@
-import { formatShiftTaskBarcode, renderLiteralDataMatrixSvg } from "@markiro/domain";
+import { renderLiteralDataMatrixSvg } from "../barcodes/svg.js";
+import { formatShiftTaskBarcode } from "../barcodes/task-tokens.js";
 
 import {
   boundPrintText,
@@ -11,7 +12,7 @@ import {
   taskFormLogoSvg,
   taskFormParameter,
   taskFormStep,
-} from "../print/task-form-chrome";
+} from "./task-form-chrome.js";
 
 export interface ShiftTaskFormData {
   shiftId: string;

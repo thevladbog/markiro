@@ -12,7 +12,7 @@ import {
   type ReportCode,
   type ReportOrg,
   type ReportUnit,
-} from "./contents-report";
+} from "./contents-report.js";
 
 /** One unit code inside the box — feeds `renderDataMatrixSvg` as-is. */
 export type BoxReportCode = ReportCode;
