@@ -426,6 +426,39 @@ describe("closed-box reconciliation", () => {
     ).toHaveLength(1);
   });
 
+  it("clears a pallet conflict once a later check confirms the box", async () => {
+    const { db, exec } = fixture();
+    box(db, "b1");
+    scans(db, "b1", 1);
+    const first = await readBoxReconciliationBatch(exec, "shift-1");
+    await applyBoxReconciliationResults(exec, first, [
+      {
+        boxId: "b1",
+        status: "identity_conflict",
+        reasonCode: "pallet_conflict",
+        serverItemCount: 1,
+      },
+    ]);
+    expect(await readBoxReconciliationSummary(exec, "shift-1")).toMatchObject({
+      confirmed: 0,
+      issues: 1,
+    });
+    const retry = await readBoxReconciliationBatch(
+      exec,
+      "shift-1",
+      200,
+      "9999-01-01T00:00:00.000Z",
+    );
+    await applyBoxReconciliationResults(exec, retry, [
+      { boxId: "b1", status: "confirmed", reasonCode: "matched", serverItemCount: 1 },
+    ]);
+    expect(await readBoxReconciliationSummary(exec, "shift-1")).toMatchObject({
+      confirmed: 1,
+      pending: 0,
+      issues: 0,
+    });
+  });
+
   it("stops automatic replay when the server still reports the box absent after re-ack", async () => {
     const { db, exec } = fixture();
     box(db, "b1");

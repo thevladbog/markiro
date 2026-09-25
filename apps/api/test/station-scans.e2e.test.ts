@@ -463,6 +463,201 @@ describe.skipIf(!ready)("station-scans e2e", () => {
     ]);
   });
 
+  /**
+   * One closed single-item station box plus the tenant's handheld, which may
+   * later put that box on a warehouse pallet. `stationPallet` is how the
+   * station's own pallet reached the server: not at all, linked by the box
+   * closure, or closed while the box closure carried no link.
+   */
+  async function palletReconciliationFixture(
+    serial: number,
+    stationPallet: "none" | "linked" | "unlinked",
+  ) {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const apiKey = await deviceKey(agent);
+    const handheld = await createTestStationDevice(app!, agent, "TSD-1", { kind: "handheld" });
+    const shiftId = await openShift(agent);
+    const boxId = `reconcile-${randomUUID()}`;
+    const palletId = `pallet-${randomUUID()}`;
+    const sscc = buildSscc(0, "034600682", serial);
+    const closedAt = "2026-09-23T00:03:00.000Z";
+    const scan = item(shiftId, 1, { boxId });
+    await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", apiKey)
+      .send({
+        batchId: `reconcile-${randomUUID()}`,
+        items: [scan],
+        boxes: [
+          {
+            boxId,
+            shiftId,
+            terminalId: "t1",
+            sscc,
+            closedAt,
+            operatorId: null,
+            ...(stationPallet === "linked" ? { devicePalletId: palletId } : {}),
+          },
+        ],
+        pallets:
+          stationPallet === "none"
+            ? []
+            : [
+                {
+                  palletId,
+                  shiftId,
+                  terminalId: "t1",
+                  sscc: buildSscc(1, "034600682", serial),
+                  closedAt,
+                  operatorId: null,
+                  printVerifiedAt: null,
+                  printSkippedAt: null,
+                },
+              ],
+      })
+      .expect(201);
+    return {
+      tenantId,
+      apiKey,
+      handheldKey: handheld.apiKey,
+      shiftId,
+      boxId,
+      palletId,
+      sscc,
+      fact: {
+        shiftId,
+        boxId,
+        sscc,
+        closedAt,
+        devicePalletId: stationPallet === "none" ? null : palletId,
+        itemCount: 1,
+        membershipDigest: boxMembershipDigestV1([scan.code!.codeHash]),
+        digestVersion: 1,
+      },
+    };
+  }
+
+  async function putOnWarehousePallet(handheldKey: string, boxSscc: string) {
+    const response = await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", handheldKey)
+      .send({
+        batchId: `warehouse-${randomUUID()}`,
+        items: [],
+        palletMemberships: [
+          { palletId: "w1", boxSscc, addedAt: "2026-09-24T08:00:00.000Z", operatorId: null },
+        ],
+      })
+      .expect(201);
+    return response.body.memberships as unknown;
+  }
+
+  async function reconcileBox(apiKey: string, fact: Record<string, unknown>) {
+    const response = await request(app!.getHttpServer())
+      .post("/station/boxes/reconciliation")
+      .set("x-api-key", apiKey)
+      .send({ boxes: [fact] })
+      .expect(200);
+    return response.body.results as unknown;
+  }
+
+  async function serverPalletLink(tenantId: string, boxId: string) {
+    const [row] = await db
+      .select({
+        palletId: schema.boxes.palletId,
+        palletKind: schema.pallets.kind,
+        registryVersion: schema.boxes.registryVersion,
+      })
+      .from(schema.boxes)
+      .leftJoin(
+        schema.pallets,
+        and(
+          eq(schema.pallets.tenantId, schema.boxes.tenantId),
+          eq(schema.pallets.id, schema.boxes.palletId),
+        ),
+      )
+      .where(and(eq(schema.boxes.tenantId, tenantId), eq(schema.boxes.deviceBoxId, boxId)));
+    return row;
+  }
+
+  it("confirms a pallet-less box that a handheld later put on a warehouse pallet", async () => {
+    const box = await palletReconciliationFixture(1590, "none");
+    expect(await putOnWarehousePallet(box.handheldKey, box.sscc)).toEqual([
+      { palletId: "w1", boxSscc: box.sscc, status: "accepted" },
+    ]);
+    const aggregated = await serverPalletLink(box.tenantId, box.boxId);
+    expect(aggregated?.palletKind).toBe("warehouse");
+
+    expect(await reconcileBox(box.apiKey, box.fact)).toEqual([
+      { boxId: box.boxId, status: "confirmed", reasonCode: "matched", serverItemCount: 1 },
+    ]);
+    expect(await serverPalletLink(box.tenantId, box.boxId)).toEqual(aggregated);
+  });
+
+  it("confirms a box moved to a warehouse pallet after its station pallet was taken apart", async () => {
+    const box = await palletReconciliationFixture(1591, "linked");
+    await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", box.apiKey)
+      .send({
+        batchId: `disassemble-${randomUUID()}`,
+        items: [],
+        palletExceptions: [
+          {
+            kind: "disassemble",
+            palletId: box.palletId,
+            shiftId: box.shiftId,
+            terminalId: "t1",
+            operatorId: null,
+            reason: "Пересборка на складе",
+            occurredAt: "2026-09-24T07:00:00.000Z",
+          },
+        ],
+      })
+      .expect(201);
+    expect(await putOnWarehousePallet(box.handheldKey, box.sscc)).toEqual([
+      { palletId: "w1", boxSscc: box.sscc, status: "accepted" },
+    ]);
+    const moved = await serverPalletLink(box.tenantId, box.boxId);
+    expect(moved?.palletKind).toBe("warehouse");
+
+    expect(await reconcileBox(box.apiKey, box.fact)).toEqual([
+      { boxId: box.boxId, status: "confirmed", reasonCode: "matched", serverItemCount: 1 },
+    ]);
+    expect(await serverPalletLink(box.tenantId, box.boxId)).toEqual(moved);
+  });
+
+  it("keeps a pallet conflict when no later aggregation explains the other link", async () => {
+    // The station reports no pallet, yet its own closure linked the box to one.
+    const linked = await palletReconciliationFixture(1592, "linked");
+    expect(await reconcileBox(linked.apiKey, { ...linked.fact, devicePalletId: null })).toEqual([
+      {
+        boxId: linked.boxId,
+        status: "identity_conflict",
+        reasonCode: "pallet_conflict",
+        serverItemCount: 1,
+      },
+    ]);
+
+    // The station's pallet still stands, but the box it names went onto a
+    // warehouse pallet while the server had no link for it.
+    const standing = await palletReconciliationFixture(1593, "unlinked");
+    expect(await putOnWarehousePallet(standing.handheldKey, standing.sscc)).toEqual([
+      { palletId: "w1", boxSscc: standing.sscc, status: "accepted" },
+    ]);
+    const aggregated = await serverPalletLink(standing.tenantId, standing.boxId);
+    expect(await reconcileBox(standing.apiKey, standing.fact)).toEqual([
+      {
+        boxId: standing.boxId,
+        status: "identity_conflict",
+        reasonCode: "pallet_conflict",
+        serverItemCount: 1,
+      },
+    ]);
+    expect(await serverPalletLink(standing.tenantId, standing.boxId)).toEqual(aggregated);
+  });
+
   it("does not expose another station's box or accept a cabinet session", async () => {
     const agent = request.agent(app!.getHttpServer());
     await signUpAndActivate(agent);
