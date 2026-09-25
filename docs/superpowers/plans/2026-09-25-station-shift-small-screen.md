@@ -16,13 +16,17 @@
 - Supported minimum viewport: 1024×690. At 1024×697 the box grid gets at least two rows (`minmax(96px, 1fr)`).
 - Station stays offline-first: nothing on the work screen waits for the network; the progress fetch never schedules a sync retry and never marks sync as stuck.
 - The shift total is `acceptedUnits − deviceAcceptedUnits + local`, where `local = COUNT(*) FROM station_processed_codes WHERE shift_id = ?`.
-- «Ошибки» / «Дубли» are this terminal's shift counts from `scan_events_mirror`; duplicate-DM refusals (never journaled) are added for the session on top.
+- «Ошибки» / «Дубли» are this terminal's shift counts from `scan_events_mirror`: «Дубли» = verdict `duplicate`; «Ошибки» = verdicts other than `ok`, `duplicate`, `undone`.
 - The new route derives tenant and device from the credential, answers 404 for a foreign, unknown or malformed shift id, declares `@AllowSubscriptionRecovery("station")`, and must appear in the route inventory, device-key docs and the Station CORS surface.
 - Postgres index `code_registry_tenant_shift_terminal_idx` is built `CONCURRENTLY` by `runtime-migrate.ts`; the journaled `.sql` keeps drizzle-kit's plain statement.
 - Station SQLite DDL is appended to `packages/db/src/sqlite/migrations.ts` with `IF NOT EXISTS` (every statement re-runs on each boot); never reorder existing entries.
 - i18n: RU and EN key sets stay identical; a missing key throws in tests. Do not pass a string option named `count` (it triggers plural lookup).
 - TypeScript strict with `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes`: no `any`, no non-null assertions, no broad casts.
 - Stage explicit paths only; do not touch `exports/`, `output/`, `screenshots/` or unrelated files. Do not push, release or deploy without user authorization. Rollout order when authorized: API first, then the station build.
+
+## Erratum (2026-09-25)
+
+Implementation showed that duplicate-DM refusals reach the journal: when the acceptance trigger aborts, `apps/station/src/lib/product-labels/acceptance.ts` records the scan with the verdict `duplicate`. «Дубли» therefore counts them from `scan_events_mirror` alone, once and across remounts; there is no `ScanOutcome.journaled` field and no `unjournaledDuplicates` session counter. The undo correction row (`undone`, written by `undoLastScan`) is not an error, so «Ошибки» counts the verdicts other than `ok`, `duplicate` and `undone`. The spec records the same since commit 4dddf2a09 ("Journal counters"). The tasks below keep their original wording; each passage this note overrides is marked «Superseded — see Erratum».
 
 ## File map
 
@@ -2005,6 +2009,8 @@ export async function readShiftJournalCounts(
 }
 ```
 
+> **Superseded — see [Erratum (2026-09-25)](#erratum-2026-09-25):** the shipped query also excludes `undone` from `errors`.
+
 - [ ] **Step 4: Run the journal test**
 
 Run: `pnpm --config.verifyDepsBeforeRun=false --filter @markiro/station exec vitest run test/journal.test.ts`
@@ -2730,6 +2736,7 @@ git commit -m "feat(station): one-row box head and compact pallet strip"
 - Delete: `apps/station/src/ui/work/WorkCounters.tsx`
 - Modify: `apps/station/src/ui/work/work-labels.ts`
 - Modify: `apps/station/src/lib/scan-queue.ts` (`ScanOutcome.journaled`)
+  - Superseded — see [Erratum (2026-09-25)](#erratum-2026-09-25): `scan-queue.ts` stays unchanged.
 - Modify: `apps/station/src/components/ValidationProcessingStatus.tsx` (`onState` optional)
 - Modify: `apps/station/src/pages/WorkScreen.tsx`
 - Create: `apps/station/src/lib/shift-label.ts`
@@ -3053,6 +3060,8 @@ export function RecentOperations({
 }
 ```
 
+> **Superseded — see [Erratum (2026-09-25)](#erratum-2026-09-25):** `counts.duplicates` above includes no unjournaled refusals.
+
 - [ ] **Step 5: Footer, labels, copy, queue outcome, processing status**
 
 `WorkFooter.tsx`: remove `more?: string` from `labels`, the `onMore` prop and its doc comment, `showMore`, the fourth button, and simplify `ariaLabel` to `` `${labels.exceptions}, ${labels.pause}, ${labels.close}` ``.
@@ -3109,6 +3118,8 @@ Remove from both files, after `grep -rn` shows no remaining reader in `apps/stat
   journaled?: false;
 ```
 
+> **Superseded — see [Erratum (2026-09-25)](#erratum-2026-09-25):** `ScanOutcome` gains no `journaled` field.
+
 `ValidationProcessingStatus.tsx` — make `onState` optional (`onState?: (...) => void;`) and call `onState?.(next);`.
 
 - [ ] **Step 6: Recompose `WorkScreen.tsx`**
@@ -3158,6 +3169,8 @@ useEffect(() => {
 }, [refreshJournalCounts, shiftProgress]);
 ```
 
+> **Superseded — see [Erratum (2026-09-25)](#erratum-2026-09-25):** there is no `unjournaledDuplicates` state.
+
 4. `live` ref: add `refreshJournalCounts` to both the initial object and the object assigned in the following effect.
 
 5. In `process()`, the duplicate-DM refusal return gains `journaled: false`:
@@ -3173,6 +3186,8 @@ if (result.status === "duplicate")
   };
 ```
 
+> **Superseded — see [Erratum (2026-09-25)](#erratum-2026-09-25):** the refusal return above gains no `journaled: false`.
+
 6. In `onOutcome`, replace the block that increments `setAccepted` / `setRejected` / `setDuplicates` with:
 
 ```ts
@@ -3181,6 +3196,8 @@ if (outcome.journaled === false && outcome.verdict.status === "duplicate")
 ```
 
 and next to `void live.current.refreshRecentOperations();` add `live.current.refreshJournalCounts();`. In `onError`, delete `setRejected((n) => n + 1);` (a failed write has no verdict to count; the «ОШИБКА ЗАПИСИ» signal stays).
+
+> **Superseded — see [Erratum (2026-09-25)](#erratum-2026-09-25):** `onOutcome` keeps no `setUnjournaledDuplicates` block; it only refreshes the journal counts.
 
 7. In `enqueueExceptionJob`, after `await job();` add `live.current.refreshJournalCounts();`.
 
@@ -3301,6 +3318,8 @@ const shiftTotal = shiftTotalView({
           </div>
         )}
 ```
+
+> **Superseded — see [Erratum (2026-09-25)](#erratum-2026-09-25):** `counts.duplicates` above is `journalTotals.duplicates` alone.
 
 The previous `refreshKey={accepted + rejected}` of `ValidationProcessingStatus` becomes the journal-count sum above, so it still re-reads after every recorded scan.
 

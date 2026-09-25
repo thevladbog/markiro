@@ -214,18 +214,26 @@ the hero does today.
   the watched shift's progress at most once per 15 s.
 - The last answer is persisted in `station_meta` (one key, the watched shift
   only) as `{ shiftId, acceptedUnits, deviceAcceptedUnits, asOf, fetchedAt }`
-  and published with the sync state. A restart without network still knows the
-  other terminals' last contribution. An answer for another shift is ignored.
+  and published with the sync state; watching a shift publishes its persisted
+  answer at once, without waiting for a drain. A restart without network still
+  knows the other terminals' last contribution. An answer for another shift is
+  ignored.
 - Failures of this step never schedule a sync retry and never mark sync as
   stuck; any failure keeps the last answer and the next attempt waits for the
   normal 15 s interval. A 404 (a server without the route whose CORS still
-  answers) suspends the step for 10 minutes. A credential rejection takes the
+  answers) suspends the step for 10 minutes. A server whose CORS predates the
+  route rejects the preflight instead, so the request fails without any
+  response; the progress GET is display-only
+  (`StationClient.get(path, { displayOnly: true })`) and leaves the header's
+  server pill to the requests that carry sync. A credential rejection takes the
   engine's existing rejection path.
 - **Local contribution** is `SELECT COUNT(*) FROM station_processed_codes
 WHERE shift_id = ?` — the count the shift close and the plan prompt already
   use. `WorkScreen` refreshes it off the scan's critical path (as it already
   refreshes the journal) after a scan outcome, undo, clear, box disassembly and
-  each published sync state.
+  each published sync state that brings a new progress answer or a new
+  `SyncState.lastSuccessAt` (a drain can apply a server release that deletes
+  local codes without a new answer).
 - **Display**: `total = acceptedUnits − deviceAcceptedUnits + local`.
   Own scans, undo, clear and disassembly move the number immediately; other
   terminals' progress arrives with the next answer. While this terminal's
@@ -235,9 +243,12 @@ WHERE shift_id = ?` — the count the shift close and the plan prompt already
     терминал», number = local;
   - an answer, no other terminal counted (`acceptedUnits ===
 deviceAcceptedUnits`): «В смене · все терминалы», meta «14 % плана»;
-  - an answer with other terminals: meta adds «· этот терминал 302»;
-  - the answer is older than 2 minutes and other terminals are counted: meta
-    reads «другие терминалы — на 11:58» (local time of `fetchedAt`).
+  - an answer with other terminals: meta adds «· этот терминал 302» (without a
+    plan the meta is only «этот терминал 302»);
+  - the answer is older than 2 minutes and other terminals are counted: the
+    stale note replaces the terminal share and the plan percentage stays —
+    «14 % плана · другие терминалы — на 11:58» with a plan, only «другие
+    терминалы — на 11:58» without one (local time of `fetchedAt`).
 - The plan prompt («план выполнен») and the close summary stay local: a
   station closes only single-device shifts.
 
