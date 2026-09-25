@@ -909,6 +909,29 @@ describe("readShiftJournalCounts", () => {
       duplicates: 0,
     });
   });
+
+  it("does not count an undo correction as an error", async () => {
+    const exec = makeExec();
+    const verdicts: Array<[string, string]> = [
+      ["s1", "ok"],
+      ["s1", "invalid"],
+      ["s1", "wrong_gtin"],
+      ["s1", "duplicate"],
+      ["s1", "undone"],
+    ];
+    for (const [shiftId, verdict] of verdicts) {
+      await exec.run(
+        `INSERT INTO scan_events_mirror (shift_id, terminal_id, raw, verdict, scanned_at)
+         VALUES (?, ?, ?, ?, ?)`,
+        [shiftId, "t1", "RAW", verdict, "2026-09-25T09:00:00.000Z"],
+      );
+    }
+    expect(await readShiftJournalCounts(exec, "s1")).toEqual({
+      accepted: 0,
+      errors: 2,
+      duplicates: 1,
+    });
+  });
 });
 
 describe("undoLastScan", () => {

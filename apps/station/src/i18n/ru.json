@@ -546,7 +546,6 @@
     "boxNumber": "Короб № {{number}}",
     "noOpenBox": "Нет открытого короба",
     "boxItems": "Позиций",
-    "plan": "План",
     "shiftTotalAll": "В смене · все терминалы",
     "shiftTotalTerminal": "В смене · этот терминал",
     "planPercent": "{{percent}} плана",

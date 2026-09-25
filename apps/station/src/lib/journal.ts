@@ -130,7 +130,7 @@ export async function findLatestAcceptedOperation(
 export interface ShiftJournalCounts {
   /** Units the shift holds here: the same view shift close and the plan prompt count. */
   accepted: number;
-  /** Journal rows rejected for any reason other than a duplicate. */
+  /** Rejected scans other than duplicates. Does not include undo correction rows (undone). */
   errors: number;
   duplicates: number;
 }
@@ -142,7 +142,7 @@ export async function readShiftJournalCounts(
   const [verdicts, processed] = await Promise.all([
     exec.all<{ duplicates: number | null; errors: number | null }>(
       `SELECT SUM(CASE WHEN verdict = 'duplicate' THEN 1 ELSE 0 END) AS duplicates,
-              SUM(CASE WHEN verdict NOT IN ('ok', 'duplicate') THEN 1 ELSE 0 END) AS errors
+              SUM(CASE WHEN verdict NOT IN ('ok', 'duplicate', 'undone') THEN 1 ELSE 0 END) AS errors
          FROM scan_events_mirror
         WHERE shift_id = ?`,
       [shiftId],

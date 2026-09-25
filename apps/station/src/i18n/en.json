@@ -546,7 +546,6 @@
     "boxNumber": "Box no. {{number}}",
     "noOpenBox": "No open box",
     "boxItems": "Items",
-    "plan": "Plan",
     "shiftTotalAll": "In shift · all terminals",
     "shiftTotalTerminal": "In shift · this terminal",
     "planPercent": "{{percent}} of plan",
