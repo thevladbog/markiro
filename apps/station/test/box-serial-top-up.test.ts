@@ -131,6 +131,36 @@ describe("box serial top-up", () => {
     controller.stop();
   });
 
+  it("waits a minute before polling again when a successful check grants no new range", async () => {
+    const exec = await setup();
+    await addRange(exec, { ...oldBlock, consumedThroughSerial: 1600 });
+    const post = vi.fn().mockResolvedValue({
+      blocks: [{ ...oldBlock, consumedThroughSerial: 1600 }],
+      revokedFrom: [],
+      issuerProblem: null,
+    });
+    const controller = createBoxSerialTopUp({
+      client: { post },
+      exec,
+      shiftId: "shift-1",
+      issuerPrefix,
+      generation: createCredentialGeneration(),
+      isCurrent: () => true,
+    });
+    vi.useFakeTimers();
+    try {
+      await controller.nudge();
+      expect(post).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(post).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(45_000);
+      expect(post).toHaveBeenCalledTimes(2);
+    } finally {
+      controller.stop();
+      vi.useRealTimers();
+    }
+  });
+
   it("waits for an in-flight bundle mirror before applying a top-up response", async () => {
     const exec = await setup();
     let releaseBundle!: () => void;

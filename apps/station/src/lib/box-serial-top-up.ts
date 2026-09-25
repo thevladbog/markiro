@@ -130,7 +130,7 @@ export function createBoxSerialTopUp(input: {
       }
       retryDelay = INITIAL_RETRY_MS;
       if (current() && (await remaining(input.exec, input.issuerPrefix, 0)) <= LOW_WATER) {
-        schedule(INITIAL_RETRY_MS);
+        schedule(MAX_RETRY_MS);
       }
     } catch (error) {
       if (error instanceof StationApiError && error.status === 404) {
