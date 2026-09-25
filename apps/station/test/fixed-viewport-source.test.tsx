@@ -121,6 +121,10 @@ describe("fixed station viewport source contract", () => {
     const instrument = stationSource("ui/work/BoxFillInstrument.tsx");
 
     expect(css).toMatch(/\.work-box-fill__readout strong\s*\{[^}]*white-space:\s*nowrap;/s);
+    expect(css).toMatch(/\.work-box-fill__readout > span\s*\{[^}]*white-space:\s*nowrap;/s);
+    expect(css).toMatch(
+      /@media \(max-width:\s*1100px\), \(max-height:\s*767px\)[\s\S]*?\.work-box-fill__readout strong\s*\{[^}]*font:\s*600 40px\/44px var\(--font-mono\);/s,
+    );
     expect(instrument).toContain('className="work-box-fill__grid"');
     expect(instrument).not.toContain('className="work-box-fill__track"');
     expect(css).not.toContain(".work-box-fill__track");
