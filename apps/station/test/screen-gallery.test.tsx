@@ -711,4 +711,36 @@ describe("development screen gallery", () => {
     expect(await screen.findByText("0.1.0-beta.22")).toBeDefined();
     expect(screen.getByText("На станции установлена актуальная версия.")).toBeDefined();
   });
+
+  it("shows the owner's small-screen case: a 20-place box, pallet 15/66 and the shift total", () => {
+    const view = render(
+      <StationScreenGallery request={{ state: "work-pallet-20", locale: "ru" }} />,
+    );
+    const band = view.container.querySelector<HTMLElement>(".work-shift-band");
+    if (!band) throw new Error("shift band was not rendered");
+    const ru = new Intl.NumberFormat("ru-RU");
+    expect(within(band).getByText("В смене · все терминалы")).toBeDefined();
+    expect(within(band).getByTestId("shift-total").textContent).toBe(ru.format(1302));
+    // `collapseWhitespace: false` keeps `Intl.NumberFormat`'s U+00A0 grouping
+    // space intact so it matches the DOM's raw text -- the default
+    // normalizer would otherwise collapse it to an ASCII space and never
+    // equal this un-normalized matcher.
+    expect(
+      within(band).getByText(`/ ${ru.format(9580)}`, { collapseWhitespace: false }),
+    ).toBeDefined();
+    expect(band.querySelector(".work-shift-band__meta")?.textContent).toContain(
+      "этот терминал 302",
+    );
+    expect(view.container.querySelectorAll(".work-box-fill__cell")).toHaveLength(20);
+    expect(within(view.container).getByText("15 / 66 коробов")).toBeDefined();
+  });
+
+  it("says how old the other terminals' share is when the answer is stale", () => {
+    const view = render(
+      <StationScreenGallery request={{ state: "work-pallet-20-stale", locale: "ru" }} />,
+    );
+    expect(view.container.querySelector(".work-shift-band__meta")?.textContent).toContain(
+      "другие терминалы — на",
+    );
+  });
 });

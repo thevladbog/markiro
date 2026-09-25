@@ -9,6 +9,8 @@ const VISUAL_STRESS_GALLERY_STATE_IDS = [
   "setup-printers-empty",
   "setup-printers-many",
   "work-pallet-66",
+  "work-pallet-20",
+  "work-pallet-20-stale",
   "work-aggregation-waiting",
   "work-close-reason",
   "pairing-recovery",
@@ -238,6 +240,15 @@ export const GALLERY_FIXTURES: readonly GalleryFixture[] = [
   { id: "shift-page-2", kind: "shift", variant: "2", source: "synthetic" },
   { id: "work-validation", kind: "work", variant: "validation", source: "synthetic" },
   { id: "work-pallet-66", kind: "work", variant: "aggregation-pallet", source: "synthetic" },
+  // The owner's 2026-09-25 photo: a 20-place box with two items on pallet
+  // 15 of 66, the shift total counting another terminal.
+  { id: "work-pallet-20", kind: "work", variant: "aggregation-pallet-20", source: "synthetic" },
+  {
+    id: "work-pallet-20-stale",
+    kind: "work",
+    variant: "aggregation-pallet-20-stale",
+    source: "synthetic",
+  },
   { id: "work-aggregation", kind: "work", variant: "aggregation", source: "synthetic" },
   {
     id: "work-aggregation-waiting",

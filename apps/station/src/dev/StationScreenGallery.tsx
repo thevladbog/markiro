@@ -1663,6 +1663,8 @@ const galleryPalletExecutor: SqlExecutor = {
 };
 const galleryPalletIdle = async () => {};
 
+const GALLERY_PROGRESS_NOW = Date.parse("2026-09-25T09:00:00.000Z");
+
 function WorkFixture({
   mode,
   locale,
@@ -1694,22 +1696,37 @@ function WorkFixture({
   // Validation-mode shifts carry a plan target the way the shift list's own
   // validation-mode card does (see ShiftFixture's AUG26-041); aggregation-mode
   // shifts in this gallery have no plan, matching the shift list there too.
-  const plannedQty = mode === "validation" ? 10_000 : undefined;
+  // The owner's small-screen case (pallet20) carries the pallet's planned
+  // quantity instead.
+  const pallet20 = mode.startsWith("aggregation-pallet-20");
+  const plannedQty = mode === "validation" ? 10_000 : pallet20 ? 9_580 : undefined;
   // A grouped, >100-capacity box (see BoxFillInstrument's own `grouped` rule)
   // exercises the same viewport-review case the standalone "box-empty"
   // fixture already covers for the empty end of the range. The ordinary
   // aggregation fixture is a ten-place box — the production norm on the line —
   // which exercises the large numbered-segment mode; the 11–100 rows-of-ten
-  // mode stays covered by "box-empty"'s 20-place panel.
-  const boxCapacity = boxFull ? 120 : 10;
+  // mode stays covered by "box-empty"'s 20-place panel; pallet20 is the
+  // owner's 20-place box.
+  const boxCapacity = boxFull ? 120 : pallet20 ? 20 : 10;
   const boxItemCount = boxFull ? 120 : 2;
   const productName = ru ? "Тестовый товар А" : "Sample product A";
   const total = shiftTotalView({
     shiftId: "gallery-shift",
-    snapshot: null,
-    local: waiting ? 0 : 1_248,
+    snapshot: pallet20
+      ? {
+          shiftId: "gallery-shift",
+          acceptedUnits: 1_302,
+          deviceAcceptedUnits: 302,
+          asOf: "2026-09-25T08:54:00.000Z",
+          fetchedAt:
+            mode === "aggregation-pallet-20-stale"
+              ? "2026-09-25T08:55:00.000Z"
+              : "2026-09-25T08:59:50.000Z",
+        }
+      : null,
+    local: waiting ? 0 : pallet20 ? 302 : 1_248,
     plannedQty,
-    nowMs: Date.now(),
+    nowMs: pallet20 ? GALLERY_PROGRESS_NOW : Date.now(),
   });
   return (
     <main className="work-screen" aria-label={productName}>
@@ -1767,6 +1784,15 @@ function WorkFixture({
                   capacity={66}
                   serials="available"
                   lastBoxSscc="004601234560000042"
+                  onShowContents={() => setShowPalletContents(true)}
+                  onClose={() => undefined}
+                />
+              ) : pallet20 ? (
+                <PalletStrip
+                  boxCount={15}
+                  capacity={66}
+                  serials="available"
+                  lastBoxSscc="004601234560619998"
                   onShowContents={() => setShowPalletContents(true)}
                   onClose={() => undefined}
                 />
