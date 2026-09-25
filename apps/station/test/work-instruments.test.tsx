@@ -14,6 +14,7 @@ const labels = {
   invalid: "Invalid code",
   wrong_gtin: "Wrong product",
   unknown: "Rejected",
+  undone: "Undone",
   gtin: "GTIN",
   serial: "Serial number",
   crypto: "Crypto tail",

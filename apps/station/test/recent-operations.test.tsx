@@ -9,6 +9,7 @@ const statusLabels = {
   invalid: "Invalid code",
   wrong_gtin: "Wrong product",
   unknown: "Rejected",
+  undone: "Undone",
   gtin: "GTIN",
   serial: "Serial number",
   crypto: "Crypto tail",
@@ -60,5 +61,34 @@ describe("RecentOperations", () => {
     expect(screen.getByText("GTIN 04600000000022")).toBeDefined();
     expect(screen.queryByText(/04600000000015/)).toBeNull();
     expect(screen.getByTestId("journal-duplicates").getAttribute("data-tone")).toBeNull();
+  });
+
+  it("labels an undone row as a correction, not an error", () => {
+    render(
+      <RecentOperations
+        operations={[
+          {
+            verdict: "undone",
+            scannedAt: "2026-08-13T10:00:02.000Z",
+            codeSuffix: null,
+            identity: null,
+          },
+        ]}
+        counts={{ errors: 0, duplicates: 0 }}
+        labels={{
+          title: "Shift journal",
+          empty: "No scans yet",
+          invalidTime: "Time unknown",
+          errors: "Errors",
+          duplicates: "Duplicates",
+        }}
+        statusLabels={statusLabels}
+        locale="en-US"
+      />,
+    );
+
+    expect(screen.getByText("Undone")).toBeDefined();
+    expect(screen.getByRole("listitem").getAttribute("data-tone")).toBe("neutral");
+    expect(screen.getByTestId("journal-errors").textContent).toBe("0");
   });
 });

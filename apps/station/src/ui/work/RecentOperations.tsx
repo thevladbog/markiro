@@ -52,7 +52,13 @@ export function RecentOperations({
           {visible.map((operation, index) => (
             <li
               key={`${operation.scannedAt ?? "invalid"}:${index}`}
-              data-tone={operation.verdict === "ok" ? "ok" : "error"}
+              data-tone={
+                operation.verdict === "ok"
+                  ? "ok"
+                  : operation.verdict === "undone"
+                    ? "neutral"
+                    : "error"
+              }
             >
               <strong>{operationStatusLabel(operation.verdict, statusLabels)}</strong>
               {operation.identity ? (

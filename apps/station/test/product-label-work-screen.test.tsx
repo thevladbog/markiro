@@ -136,9 +136,15 @@ describe("duplicate printing through the real WorkScreen scanner", () => {
     await idle();
     view.unmount();
     render(element);
-    const summary = await screen.findByRole("complementary", { name: "Итоги смены" });
     await waitFor(() => expect(screen.getByTestId("shift-total").textContent).toBe("1"));
-    expect(within(summary).queryByText("Синхронизировано")).toBeNull();
+    // The accepted code's reprocessing-check row is durable too: it reads
+    // back as still pending after the remount instead of silently vanishing.
+    const status = await screen.findByTestId("validation-processing-status");
+    expect(
+      within(status).getByText(i18n.t("productLabels.processingPending", { count: 1 }), {
+        exact: false,
+      }),
+    ).toBeDefined();
   });
 
   it("skips explicitly with an audit event and admits the next unit without a verified claim", async () => {
@@ -183,20 +189,22 @@ describe("duplicate printing through the real WorkScreen scanner", () => {
     expect(h.print).toHaveBeenCalledTimes(1);
     expect(await h.exec.all("SELECT * FROM validation_occurrences")).toHaveLength(1);
     expect(await h.exec.all("SELECT * FROM product_label_jobs")).toHaveLength(1);
-    const summary = await screen.findByRole("complementary", { name: "Итоги смены" });
     // Durable counts arrive with an asynchronous journal read; «Ошибки» is
     // checked against that same fresh read, not the initial zero.
-    await waitFor(() =>
-      expect(within(summary).getByText("Дубли").parentElement?.textContent).toContain("1"),
-    );
-    expect(within(summary).getByText("Ошибки").parentElement?.textContent).toContain("0");
+    await waitFor(() => expect(screen.getByTestId("journal-duplicates").textContent).toBe("1"));
+    expect(screen.getByTestId("journal-errors").textContent).toBe("0");
     view.unmount();
     render(element);
-    const restored = await screen.findByRole("complementary", { name: "Итоги смены" });
     await waitFor(() => expect(screen.getByTestId("shift-total").textContent).toBe("1"));
     // The refusal was journaled once, so it survives the remount exactly once.
-    expect(within(restored).getByTestId("journal-duplicates").textContent).toBe("1");
-    expect(within(restored).queryByText("Синхронизировано")).toBeNull();
+    expect(screen.getByTestId("journal-duplicates").textContent).toBe("1");
+    // The accepted code's reprocessing-check row is durable too.
+    const status = await screen.findByTestId("validation-processing-status");
+    expect(
+      within(status).getByText(i18n.t("productLabels.processingPending", { count: 1 }), {
+        exact: false,
+      }),
+    ).toBeDefined();
     expect(screen.queryByText("Этикетка подтверждена")).toBeNull();
     expect(h.print).toHaveBeenCalledTimes(1);
   });

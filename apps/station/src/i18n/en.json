@@ -531,6 +531,7 @@
   },
   "work": {
     "rejected": "Rejected",
+    "undone": "Undone",
     "waiting": "Waiting for a scan…",
     "gtin": "GTIN",
     "serial": "Serial number",

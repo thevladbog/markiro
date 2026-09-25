@@ -7,6 +7,8 @@ export interface ScanResultLabels {
   invalid: string;
   wrong_gtin: string;
   unknown: string;
+  /** The undo correction row (`journal.ts`'s `undone` verdict) — a fix, not a rejection. */
+  undone: string;
   gtin: string;
   serial: string;
   crypto: string;
@@ -22,6 +24,7 @@ export function operationStatusLabel(verdict: string, labels: ScanResultLabels):
   if (verdict === "duplicate") return labels.duplicate;
   if (verdict === "invalid") return labels.invalid;
   if (verdict === "wrong_gtin") return labels.wrong_gtin;
+  if (verdict === "undone") return labels.undone;
   return labels.unknown;
 }
 

@@ -9,6 +9,7 @@ export function buildWorkLabels(t: TFunction, language: string, boxNumber: numbe
       invalid: t("signal.wrongCode"),
       wrong_gtin: t("signal.wrongGtin"),
       unknown: t("work.rejected"),
+      undone: t("work.undone"),
       gtin: t("work.gtin"),
       serial: t("work.serial"),
       crypto: t("work.crypto"),

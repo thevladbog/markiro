@@ -1314,6 +1314,16 @@ describe("WorkScreen", () => {
     view.unmount();
     expect(onWatchShiftProgress).toHaveBeenLastCalledWith(null);
   });
+
+  it("counts an invalid scan as a journal error without moving the shift total", async () => {
+    const source = manualSource();
+    renderWorkScreen({ source });
+
+    act(() => source.emit("invalid-0"));
+
+    await waitFor(() => expect(screen.getByTestId("journal-errors").textContent).toBe("1"));
+    expect(screen.getByTestId("shift-total").textContent).toBe("0");
+  });
 });
 
 describe("WorkScreen box progress, closing and printing", () => {
