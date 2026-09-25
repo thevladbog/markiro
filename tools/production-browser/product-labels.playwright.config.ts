@@ -1,6 +1,4 @@
 import { defineConfig } from "@playwright/test";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
 export function productLabelsEndpoints(env: NodeJS.ProcessEnv = process.env) {
   function port(key: string, fallback: number): number {
     const raw = env[key];
@@ -30,7 +28,8 @@ export default defineConfig({
   timeout: 60000,
   expect: { timeout: 10000 },
   reporter: "list",
-  outputDir: join(tmpdir(), "markiro-dm-browser"),
+  // Inside the workspace so CI can upload traces and failure screenshots.
+  outputDir: "./test-results/product-labels",
   use: {
     baseURL: stationUrl,
     browserName: "chromium",

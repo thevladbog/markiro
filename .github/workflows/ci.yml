@@ -256,7 +256,10 @@ jobs:
     # The shift and National Catalog import instruction frames added ~4 minutes
     # (178s + 65s measured on run 35409879759), which put the job over its old
     # 30-minute budget and cancelled it mid-step.
-    timeout-minutes: 40
+    # The job then took 26-34 minutes (runs 36142260084, 36147194885,
+    # 36150539644); the product-labels contract adds about 2 more (59 tests,
+    # 1.8 minutes locally), so keep the same headroom above that.
+    timeout-minutes: 45
     env:
       COMPOSE_PROJECT_NAME: markiro-production
       MARKIRO_IMAGE_TAG: ${{ github.sha }}
@@ -299,6 +302,16 @@ jobs:
         run: |
           pnpm turbo run build --filter='@markiro/admin^...'
           pnpm test:inventory:browser
+      - name: Verify the product-labels browser contract
+        run: pnpm --dir tools/production-browser --ignore-workspace test:product-labels
+      - name: Preserve product-labels browser failure evidence
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: product-labels-browser-${{ github.sha }}
+          path: tools/production-browser/test-results/product-labels
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Verify category-specific catalog editing
         run: pnpm --dir tools/production-browser --ignore-workspace test:catalog-regulatory
       - name: Preserve catalog regulatory browser failure evidence
