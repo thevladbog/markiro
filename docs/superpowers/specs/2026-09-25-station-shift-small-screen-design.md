@@ -256,14 +256,16 @@ deviceAcceptedUnits`): «В смене · все терминалы», meta «14
 ## Journal counters
 
 - `readShiftJournalCounts(exec, shiftId)` in `src/lib/journal.ts` returns
-  `{ errors, duplicates }` from `scan_events_mirror`: «Дубли» = verdict
-  `duplicate`; «Ошибки» = every other non-`ok` verdict. A failed journal write
+  `{ accepted, errors, duplicates }`; the verdict counts come from
+  `scan_events_mirror`: «Дубли» = verdict `duplicate`; «Ошибки» = every other
+  rejected scan (`invalid`, `wrong_gtin`, …). The undo correction row
+  (`undone`, written by `undoLastScan`) is not an error. A failed journal write
   keeps its «ОШИБКА ЗАПИСИ» signal and is not counted: it has no verdict.
 - The counts are this terminal's (the journal is local) for the whole shift.
-- A duplicate-DM refusal is the one rejection the journal never sees: the
-  acceptance trigger aborts its whole statement, journal row included. Such
-  refusals are marked `journaled: false` on the scan outcome and counted for
-  the session on top of the journal's «Дубли», as they are today.
+- Duplicate-DM refusals are journaled too: when the acceptance trigger aborts,
+  `product-labels/acceptance.ts` records the scan as `duplicate`, so the
+  journal alone counts them, once, and across remounts. (Revised 2026-09-25
+  during implementation; the first draft assumed they left no journal row.)
 - Station SQLite migrations add `scan_events_mirror (shift_id, verdict)` and
   `codes_mirror (shift_id)` indexes, in `packages/db/src/sqlite/` with the
   authoritative DDL. Today the plan check scans `codes_mirror` in full on every
