@@ -120,6 +120,7 @@ describe("fixed station viewport source contract", () => {
     const css = stationSource("station.css");
     const instrument = stationSource("ui/work/BoxFillInstrument.tsx");
 
+    expect(css).toMatch(/\.work-box-fill__readout strong\s*\{[^}]*white-space:\s*nowrap;/s);
     expect(instrument).toContain('className="work-box-fill__grid"');
     expect(instrument).not.toContain('className="work-box-fill__track"');
     expect(css).not.toContain(".work-box-fill__track");
@@ -145,6 +146,9 @@ describe("fixed station viewport source contract", () => {
 
   it("puts the shift band above two work columns and never lets the box grid collapse", () => {
     const css = stationSource("station.css");
+    expect(css).toMatch(
+      /\.work-shift-band__meta\s*\{[^}]*white-space:\s*normal;[^}]*-webkit-line-clamp:\s*2;/s,
+    );
     expect(stationSource("pages/WorkScreen.tsx")).toContain('className="work-screen__work"');
     expect(css).toMatch(
       /\.work-screen__work\s*\{[^}]*grid-template-rows:\s*auto minmax\(0, 1fr\);/s,

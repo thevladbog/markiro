@@ -3618,6 +3618,15 @@ body,
   font: 500 13px/17px var(--font-ui);
 }
 
+/* The age of the other terminals' share is the point of a stale note: wrap
+   to a second line instead of cutting the time off. */
+.work-shift-band__meta {
+  display: -webkit-box;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
 .work-shift-band__value {
   display: flex;
   min-width: 0;
@@ -3800,6 +3809,11 @@ body,
 .work-box-fill__readout strong {
   font: var(--floor-counter-sm);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.work-box-fill__readout > span {
+  white-space: nowrap;
 }
 
 .work-box-fill__readout span,
@@ -5410,6 +5424,10 @@ body,
     overflow: hidden;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 3;
+  }
+
+  .work-box-fill__readout strong {
+    font: 600 40px/44px var(--font-mono);
   }
 }
 
