@@ -215,25 +215,36 @@ the hero does today.
 - The last answer is persisted in `station_meta` (one key, the watched shift
   only) as `{ shiftId, acceptedUnits, deviceAcceptedUnits, asOf, fetchedAt }`
   and published with the sync state; watching a shift publishes its persisted
-  answer at once, without waiting for a drain. A restart without network still
-  knows the other terminals' last contribution. An answer for another shift is
-  ignored.
+  answer at once, without waiting for a drain — except before the engine's
+  first state publication, when there is nothing yet to merge the answer into
+  (see the publish-path comment on `publishWatchedProgress` in `sync.ts`).
+  After a restart, the saved answer therefore appears only once that first
+  state publishes, which follows the first drain attempt (up to the 30 s
+  request timeout on a hanging link); from then on, a restart without network
+  still knows the other terminals' last contribution. An answer for another
+  shift is ignored.
 - Failures of this step never schedule a sync retry and never mark sync as
   stuck; any failure keeps the last answer and the next attempt waits for the
   normal 15 s interval. A 404 (a server without the route whose CORS still
   answers) suspends the step for 10 minutes. A server whose CORS predates the
   route rejects the preflight instead, so the request fails without any
   response; the progress GET is display-only
-  (`StationClient.get(path, { displayOnly: true })`) and leaves the header's
-  server pill to the requests that carry sync. A credential rejection takes the
-  engine's existing rejection path.
+  (`StationClient.get(path, { displayOnly: true })`): it never reports a
+  failure, and it reports the server reachable only when no newer request has
+  started since it began, leaving the header's server pill to the requests
+  that carry sync otherwise. A credential rejection takes the engine's
+  existing rejection path.
 - **Local contribution** is `SELECT COUNT(*) FROM station_processed_codes
 WHERE shift_id = ?` — the count the shift close and the plan prompt already
   use. `WorkScreen` refreshes it off the scan's critical path (as it already
   refreshes the journal) after a scan outcome, undo, clear, box disassembly and
-  each published sync state that brings a new progress answer or a new
-  `SyncState.lastSuccessAt` (a drain can apply a server release that deletes
-  local codes without a new answer).
+  each published sync state that brings a new progress answer or moves
+  `SyncState.lastSuccessAt`, which advances only when a drain's batch is
+  acknowledged (`sync.ts`, where `lastSuccessAt` is set). `reconcileReleasedCodes`
+  applies a server release that deletes local codes on every drain, whether or
+  not a batch was acknowledged, so on an idle line a release reaches the band
+  with the next progress answer (within 15 s on a current server) or, on an
+  older server, only with the next own scan, undo, clear or disassembly.
 - **Display**: `total = acceptedUnits − deviceAcceptedUnits + local`.
   Own scans, undo, clear and disassembly move the number immediately; other
   terminals' progress arrives with the next answer. While this terminal's

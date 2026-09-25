@@ -3963,7 +3963,7 @@ body,
 }
 
 /* «15 / 66 коробов»: the unit word gives way first on a narrow strip; the
-   count and the percentage beside it never do. */
+   percentage beside it never does. */
 .pallet-strip__progress {
   overflow: hidden;
   min-width: 0;
