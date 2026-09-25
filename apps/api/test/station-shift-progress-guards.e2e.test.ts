@@ -110,7 +110,9 @@ describe.skipIf(!ready)("GET /station/shifts/:id/progress guard boundaries", () 
     const cookies = Array.isArray(values) ? values : typeof values === "string" ? [values] : [];
     const cookie = cookies.find((value) => value.startsWith("markiro-platform.session_token="));
     if (!cookie) throw new Error("Expected a platform session cookie");
-    return cookie.split(";", 1)[0]!;
+    const [name] = cookie.split(";", 1);
+    if (name === undefined) throw new Error("Expected a non-empty Set-Cookie header");
+    return name;
   }
 
   // Seeds a station device credential without going through

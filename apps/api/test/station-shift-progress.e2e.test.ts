@@ -359,8 +359,9 @@ describe.skipIf(!ready)("GET /station/shifts/:id/progress", () => {
     const late = scan(shiftId, "kk", stationA.deviceId, "2026-07-01T15:00:05.000Z", "b8");
     await post(stationA.apiKey, { items: [late] });
     // Same code (same label -> same codeHash), an earlier scannedAt, a
-    // different authenticated device -- station B displaces station A.
-    const earlier = { ...late, scannedAt: "2026-07-01T15:00:00.000Z" };
+    // different authenticated device -- station B displaces station A. Its
+    // own box id, not station A's "b8", matching real device payload shapes.
+    const earlier = { ...late, scannedAt: "2026-07-01T15:00:00.000Z", boxId: "b9" };
     await post(stationB.apiKey, { items: [earlier] });
 
     const winner = await http()

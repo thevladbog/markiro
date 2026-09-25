@@ -21,8 +21,8 @@ type JsonSchema = {
 
 function operation(document: OpenAPIObject, path: string, method: "get") {
   const value = document.paths[path]?.[method];
-  expect(value, `missing ${method.toUpperCase()} ${path}`).toBeDefined();
-  return value!;
+  if (!value) throw new Error(`missing ${method.toUpperCase()} ${path}`);
+  return value;
 }
 
 function responseSchema(document: OpenAPIObject, path: string, method: "get"): JsonSchema {

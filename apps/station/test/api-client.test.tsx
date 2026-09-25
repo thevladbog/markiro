@@ -164,24 +164,71 @@ describe("createStationClient", () => {
     expect(onReachabilityChange.mock.calls).toEqual([["reachable"], ["unreachable"]]);
   });
 
-  it("does not let a display-only read's late answer report once a newer request has started", async () => {
-    const displayFetch = deferredResponse();
+  it.each([
+    [
+      "an HTTP answer",
+      (): Promise<Response> =>
+        Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 })),
+      "reachable",
+    ],
+    [
+      "a failure without a response",
+      (): Promise<Response> => Promise.reject<Response>(new TypeError("Failed to fetch")),
+      "unreachable",
+    ],
+  ])(
+    "does not let a display-only read's late answer report once a newer request settles with %s",
+    async (_name, plainOutcome, expected) => {
+      const displayFetch = deferredResponse();
+      const fetchMock = vi
+        .spyOn(globalThis, "fetch")
+        .mockReturnValueOnce(displayFetch.promise)
+        .mockImplementationOnce(plainOutcome);
+      const onReachabilityChange = vi.fn();
+      const client = createStationClient(
+        { apiKey: "key", serverUrl: "https://station.example" },
+        { onReachabilityChange },
+      );
+
+      const display = client.get("/station/shifts/s1/progress", { displayOnly: true });
+      await client.get("/shifts").catch(() => undefined);
+      expect(onReachabilityChange.mock.calls).toEqual([[expected]]);
+
+      displayFetch.resolve(new Response(JSON.stringify({ shiftId: "s1" }), { status: 200 }));
+      await display;
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(onReachabilityChange.mock.calls).toEqual([[expected]]);
+    },
+  );
+
+  // Two display-only reads never silence each other -- neither ever claims
+  // `latestRequestSequence` (see the `request()` doc comment), so each one
+  // that gets an HTTP answer reports on its own; only the failure without a
+  // response reports nothing, whichever order the two settle in.
+  it("reports only the answering read's reachability when two display-only reads overlap", async () => {
+    const answeringFetch = deferredResponse();
+    const failingFetch = deferredResponse();
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
-      .mockReturnValueOnce(displayFetch.promise)
-      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+      .mockReturnValueOnce(answeringFetch.promise)
+      .mockReturnValueOnce(failingFetch.promise);
     const onReachabilityChange = vi.fn();
     const client = createStationClient(
       { apiKey: "key", serverUrl: "https://station.example" },
       { onReachabilityChange },
     );
 
-    const display = client.get("/station/shifts/s1/progress", { displayOnly: true });
-    await client.get("/shifts");
-    expect(onReachabilityChange.mock.calls).toEqual([["reachable"]]);
+    const answering = client.get("/station/shifts/s1/progress", { displayOnly: true });
+    const failing = client.get("/station/shifts/s2/progress", { displayOnly: true });
 
-    displayFetch.resolve(new Response(JSON.stringify({ shiftId: "s1" }), { status: 200 }));
-    await display;
+    const refusal = new TypeError("Failed to fetch");
+    failingFetch.reject(refusal);
+    await expect(failing).rejects.toBe(refusal);
+    expect(onReachabilityChange).not.toHaveBeenCalled();
+
+    answeringFetch.resolve(new Response(JSON.stringify({ shiftId: "s1" }), { status: 200 }));
+    await answering;
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(onReachabilityChange.mock.calls).toEqual([["reachable"]]);
