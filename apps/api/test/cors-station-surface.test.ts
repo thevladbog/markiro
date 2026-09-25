@@ -32,7 +32,7 @@ const documentedStationSurface = [
 
   ["POST", "/station/pair"],
   ["GET", "/station/identity"],
-  ["GET", "/station/heartbeat"],
+  ["POST", "/station/heartbeat"],
   ["GET", "/station/operators"],
   [
     "GET",
@@ -105,7 +105,7 @@ describe("station CORS surface", () => {
   it.each([
     ["GET", "/station/pair"],
     ["POST", "/station/identity"],
-    ["POST", "/station/heartbeat"],
+    ["GET", "/station/heartbeat"],
     ["POST", "/station/operators"],
     [
       "POST",

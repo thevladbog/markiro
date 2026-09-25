@@ -53,7 +53,7 @@ export const STATION_PREFLIGHTS = Object.freeze([
   },
   {
     path: "/station/heartbeat",
-    method: "GET",
+    method: "POST",
     headers: "content-type,x-api-key,x-station-capabilities",
   },
   {

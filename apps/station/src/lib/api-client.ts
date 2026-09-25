@@ -78,7 +78,7 @@ export interface StationClientOptions {
 export const REQUEST_TIMEOUT_MS = 30_000;
 export const STATION_CAPABILITIES = `subscription-state-v1,station-recovery-v1,replacement-boundary-v1,replacement-readiness-v1,replacement-evidence-recovery-v1,${PRODUCT_LABEL_PROTOCOL},${VALIDATION_REPROCESSING_PROTOCOL}`;
 
-/** Constant-cost presence probe; the handler does no work beyond TenantGuard. */
+/** Constant-cost presence heartbeat; the handler does no work beyond TenantGuard. */
 const HEARTBEAT_PATH = "/station/heartbeat";
 /**
  * The same key proof on a server that predates the heartbeat route. Every
@@ -89,7 +89,7 @@ const HEARTBEAT_PATH = "/station/heartbeat";
 const LEGACY_PRESENCE_PATH = "/shifts?status=active";
 
 /**
- * A server without `GET /station/heartbeat` answers 404 (or 405) to a direct
+ * A server without `POST /station/heartbeat` answers 404 (or 405) to a direct
  * request. The webview never sees that answer: the older CORS policy does not
  * list the path, so the preflight fails and fetch rejects with a TypeError
  * before any response. That rejection is indistinguishable from an offline
@@ -264,7 +264,7 @@ export function createStationClient(
     // server answer (401, 403, 429, 5xx) or a timeout is the probe's result.
     whoami: async (signal) => {
       try {
-        await request("GET", HEARTBEAT_PATH, undefined, signal, heartbeatRouteUnavailable);
+        await request("POST", HEARTBEAT_PATH, undefined, signal, heartbeatRouteUnavailable);
       } catch (error) {
         if (!heartbeatRouteUnavailable(error)) throw error;
         await request("GET", LEGACY_PRESENCE_PATH, undefined, signal);

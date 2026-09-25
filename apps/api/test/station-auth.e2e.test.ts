@@ -116,7 +116,7 @@ describe.skipIf(!ready)("station api-key auth e2e", () => {
     await request(app!.getHttpServer()).get("/shifts").expect(401);
   });
 
-  describe("GET /station/heartbeat", () => {
+  describe("POST /station/heartbeat", () => {
     async function lastSeenById(deviceIds: string[]): Promise<Record<string, Date | null>> {
       const rows = await app!
         .get<Db>(DB)
@@ -126,7 +126,7 @@ describe.skipIf(!ready)("station api-key auth e2e", () => {
       return Object.fromEntries(rows.map((row) => [row.id, row.lastSeenAt]));
     }
 
-    it("refreshes presence for exactly the calling device and answers an empty, uncached 204", async () => {
+    it("refreshes presence for exactly the calling device and answers an empty 204", async () => {
       const agent = request.agent(app!.getHttpServer());
       await signUpAndActivate(agent);
       const station = await createTestStationDevice(app!, agent, "Heartbeat terminal");
@@ -143,13 +143,14 @@ describe.skipIf(!ready)("station api-key auth e2e", () => {
         .where(inArray(schema.stationDevices.id, deviceIds));
       const probedAt = Date.now();
 
+      // Exactly what the Station sends: a JSON content type and no body.
       const response = await request(app!.getHttpServer())
-        .get("/station/heartbeat")
+        .post("/station/heartbeat")
         .set("x-api-key", station.apiKey)
+        .set("Content-Type", "application/json")
         .expect(204);
 
       expect(response.text).toBe("");
-      expect(response.headers["cache-control"]).toBe("no-store");
       const seen = await lastSeenById(deviceIds);
       expect(seen).toEqual({
         [station.deviceId]: expect.any(Date),
@@ -167,7 +168,7 @@ describe.skipIf(!ready)("station api-key auth e2e", () => {
       });
 
       await request(app!.getHttpServer())
-        .get("/station/heartbeat")
+        .post("/station/heartbeat")
         .set("x-api-key", handheld.apiKey)
         .expect(204);
 
@@ -181,7 +182,7 @@ describe.skipIf(!ready)("station api-key auth e2e", () => {
       await signUpAndActivate(agent);
       const station = await createTestStationDevice(app!, agent, "Session-probed terminal");
 
-      await agent.get("/station/heartbeat").expect(403);
+      await agent.post("/station/heartbeat").expect(403);
 
       expect(await lastSeenById([station.deviceId])).toEqual({ [station.deviceId]: null });
     });
@@ -191,14 +192,14 @@ describe.skipIf(!ready)("station api-key auth e2e", () => {
       await signUpAndActivate(agent);
       const station = await createTestStationDevice(app!, agent, "Revoked terminal");
       await request(app!.getHttpServer())
-        .get("/station/heartbeat")
+        .post("/station/heartbeat")
         .set("x-api-key", station.apiKey)
         .expect(204);
       const beforeRevocation = await lastSeenById([station.deviceId]);
       await agent.delete(`/station-devices/${station.deviceId}`).expect(204);
 
       const rejected = await request(app!.getHttpServer())
-        .get("/station/heartbeat")
+        .post("/station/heartbeat")
         .set("x-api-key", station.apiKey)
         .expect(401);
 
@@ -207,9 +208,9 @@ describe.skipIf(!ready)("station api-key auth e2e", () => {
     });
 
     it("requires a known device key", async () => {
-      await request(app!.getHttpServer()).get("/station/heartbeat").expect(401);
+      await request(app!.getHttpServer()).post("/station/heartbeat").expect(401);
       const unknown = await request(app!.getHttpServer())
-        .get("/station/heartbeat")
+        .post("/station/heartbeat")
         .set("x-api-key", "mk_not_real")
         .expect(401);
       expect(unknown.body).toMatchObject({ code: "STATION_CREDENTIAL_REVOKED" });

@@ -249,7 +249,7 @@ describe("self-hosted OpenAPI documentation", () => {
     }
   });
 
-  it("documents the station heartbeat as an empty, uncached, device-key-only probe", async () => {
+  it("documents the station heartbeat as an empty, device-key-only POST", async () => {
     const moduleRef = await Test.createTestingModule({
       controllers: [StationHeartbeatController],
     })
@@ -266,13 +266,12 @@ describe("self-hosted OpenAPI documentation", () => {
         app,
         new DocumentBuilder().setTitle("contract test").setVersion("test").build(),
       );
-      const operation = document.paths["/station/heartbeat"]?.get;
+      expect(Object.keys(document.paths["/station/heartbeat"] ?? {})).toEqual(["post"]);
+      const operation = document.paths["/station/heartbeat"]?.post;
       expect(operation?.security).toEqual([{ stationApiKey: [] }]);
+      expect(operation?.requestBody).toBeUndefined();
       expect(Object.keys(operation?.responses ?? {}).sort()).toEqual(["204", "401", "403", "429"]);
-      const response = operationResponse(document, "/station/heartbeat", "204", "get");
-      expect(response).toMatchObject({
-        headers: { "Cache-Control": { schema: { type: "string", enum: ["no-store"] } } },
-      });
+      const response = operationResponse(document, "/station/heartbeat", "204", "post");
       expect(response).not.toHaveProperty("content");
     } finally {
       await app.close();

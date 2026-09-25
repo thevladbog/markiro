@@ -40,7 +40,7 @@ The Windows installer is produced in CI (see `.github/workflows/ci.yml`); a
    path; it proves the key with the presence probe below before persisting a
    credential.
 
-While enrolled, the station calls `GET /station/heartbeat` once a minute even
+While enrolled, the station calls `POST /station/heartbeat` once a minute even
 when the line is idle. `TenantGuard` records the device's `lastSeenAt`, which
 the cabinet uses for line presence, and the route does no other work, so the
 probe stays constant-cost as shift history grows. A server that predates the

@@ -238,7 +238,7 @@ describe.skipIf(!ready)("cors e2e", () => {
       for (const [method, path] of [
         ["POST", "/station/pair"],
         ["GET", "/station/identity"],
-        ["GET", "/station/heartbeat"],
+        ["POST", "/station/heartbeat"],
         ["GET", "/station/operators"],
         [
           "GET",
@@ -278,7 +278,7 @@ describe.skipIf(!ready)("cors e2e", () => {
       for (const [method, path] of [
         ["GET", "/station/pair"],
         ["POST", "/station/identity"],
-        ["POST", "/station/heartbeat"],
+        ["GET", "/station/heartbeat"],
         ["POST", "/station/operators"],
         [
           "POST",

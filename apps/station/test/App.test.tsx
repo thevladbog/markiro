@@ -3803,7 +3803,7 @@ describe("App", () => {
         return new Response(JSON.stringify({ items: [] }), { status: 200 });
       }),
     );
-    const heartbeats = () => requests.filter((line) => line === "GET /station/heartbeat").length;
+    const heartbeats = () => requests.filter((line) => line === "POST /station/heartbeat").length;
 
     // Installed before render: the heartbeat interval is armed on mount.
     vi.useFakeTimers({ shouldAdvanceTime: true });

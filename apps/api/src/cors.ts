@@ -52,16 +52,14 @@ function isStationRequest(req: Request): boolean {
   if (
     (method === "POST" &&
       (path === "/station/pair" ||
+        path === "/station/heartbeat" ||
         path === "/station/codes/releases" ||
         path === "/station/boxes/reconciliation" ||
         path === "/station/conflicts/status" ||
         path === "/station/validation-occurrences/status" ||
         path === "/station/scans" ||
         path === "/station/shift-closures")) ||
-    (method === "GET" &&
-      (path === "/station/identity" ||
-        path === "/station/heartbeat" ||
-        path === "/station/operators")) ||
+    (method === "GET" && (path === "/station/identity" || path === "/station/operators")) ||
     ((method === "GET" || method === "POST") && path === "/shifts") ||
     (method === "GET" && path === "/shifts/box-label-templates") ||
     (method === "GET" && path === "/shifts/pallet-label-templates") ||

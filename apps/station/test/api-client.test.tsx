@@ -414,7 +414,8 @@ describe("whoami presence probe", () => {
 
     expect(requestedUrls(fetchMock)).toEqual([HEARTBEAT_URL]);
     const init = fetchMock.mock.calls[0]![1]!;
-    expect(init.method).toBe("GET");
+    expect(init.method).toBe("POST");
+    expect(init.body).toBeUndefined();
     expect((init.headers as Record<string, string>)["x-api-key"]).toBe("mk_key");
     expect(onReachabilityChange.mock.calls).toEqual([["reachable"]]);
   });
