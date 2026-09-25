@@ -43,6 +43,7 @@ import app.markiro.handheld.core.storage.MetaStore
 import app.markiro.handheld.core.sync.SyncEngine
 import app.markiro.handheld.core.sync.SyncTransport
 import app.markiro.handheld.feature.shift.ShiftEntityFixtures
+import app.markiro.handheld.feature.shift.ShiftRepository
 import app.markiro.handheld.feature.signin.SessionHolder
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.CoroutineScope
@@ -52,8 +53,19 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.setMain
 import okhttp3.OkHttpClient
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
+import retrofit2.Retrofit
+import retrofit2.converter.kotlinx.serialization.asConverterFactory
+import app.markiro.handheld.core.network.StationApi
+import java.util.concurrent.TimeUnit
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -125,7 +137,7 @@ class WorkViewModelTest {
         }
     }
 
-    private fun vm(team: TeamRefresher = TeamRefresher { null }): WorkViewModel {
+    private fun vm(team: TeamRefresher = TeamRefresher { null }, repository: ShiftRepository? = null): WorkViewModel {
         val engine = SyncEngine(
             db, MetaStore(db), db.deviceConfigDao(), SyncTransport(OkHttpClient()) { "http://127.0.0.1:1/" },
             NetworkModule.strictJson(), engineScope,
@@ -145,7 +157,7 @@ class WorkViewModelTest {
         return main.track(
             WorkViewModel(
                 SavedStateHandle(mapOf("shiftId" to "s1")), db, ScanRecorder(db), ScanRouterAdapter(scans),
-                { kind -> played += kind }, engine, session, ReachabilityTracker(), team, null,
+                { kind -> played += kind }, engine, session, ReachabilityTracker(), team, repository,
                 boxes, CloseBox(db, boxes, pool, pallets, closePallet, palletLock),
                 BoxPrinter(db, boxes, LabelRenderer(rasterize), transport),
                 DuplicateJobs(db, LabelRenderer(rasterize), transport),
@@ -255,6 +267,89 @@ class WorkViewModelTest {
     }
 
     private fun scan(serial: String) = scans.tryEmit(ScanEvent("010460068200001321$serial", null, "debug", 0))
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun topUpCanStartWhenMainDispatcherRunsImmediatelyDuringConstruction() = runTest {
+        aggregating()
+        val server = MockWebServer()
+        server.start()
+        try {
+            server.enqueue(MockResponse().setResponseCode(200)
+                .setBody("""{"blocks":[],"revokedFrom":[],"issuerProblem":null}"""))
+            val json = NetworkModule.json()
+            val api = Retrofit.Builder().baseUrl(server.url("/"))
+                .client(OkHttpClient())
+                .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
+                .build().create(StationApi::class.java)
+            Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
+            try {
+                vm(repository = ShiftRepository(api, db, json, SsccPool(db)))
+                val request = server.takeRequest(5, TimeUnit.SECONDS)
+                assertEquals("POST", request?.method)
+                assertEquals("/shifts/s1/sscc/top-up", request?.path)
+            } finally {
+                Dispatchers.setMain(main.dispatcher)
+            }
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun pausingTheWorkScreenInvalidatesAQueuedTopUpStart() = runTest {
+        aggregating()
+        val server = MockWebServer()
+        server.start()
+        try {
+            server.enqueue(MockResponse().setResponseCode(200)
+                .setBody("""{"blocks":[],"revokedFrom":[],"issuerProblem":null}"""))
+            val json = NetworkModule.json()
+            val api = Retrofit.Builder().baseUrl(server.url("/"))
+                .client(OkHttpClient())
+                .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
+                .build().create(StationApi::class.java)
+            val vm = vm(repository = ShiftRepository(api, db, json, SsccPool(db)))
+            vm.setScanning(false)
+            runCurrent()
+            kotlinx.coroutines.withContext(Dispatchers.IO) { kotlinx.coroutines.delay(100) }
+            runCurrent()
+            assertEquals(0, server.requestCount)
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun topUpChecksOnEntryAndAfterABoxCloses() = runTest {
+        aggregating(capacity = 1)
+        // 100 + 301 = 401 locally: entry must not call the server. The first
+        // closed box burns one serial, crossing the low-water boundary.
+        SsccPool(db).addRange(ServerRange("468008990", 0, 101, 401, null))
+        val server = MockWebServer()
+        server.start()
+        try {
+            server.enqueue(MockResponse().setResponseCode(200).setBody(
+                """{"blocks":[{"issuerPrefix":"468008990","extensionDigit":0,"fromSerial":1,"toSerial":100,"consumedThroughSerial":null},{"issuerPrefix":"468008990","extensionDigit":0,"fromSerial":101,"toSerial":401,"consumedThroughSerial":null},{"issuerPrefix":"468008990","extensionDigit":0,"fromSerial":402,"toSerial":2401,"consumedThroughSerial":null}],"revokedFrom":[],"issuerProblem":null}""",
+            ))
+            val json = NetworkModule.json()
+            val api = Retrofit.Builder().baseUrl(server.url("/"))
+                .client(OkHttpClient())
+                .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
+                .build().create(StationApi::class.java)
+            val vm = vm(repository = ShiftRepository(api, db, json, SsccPool(db)))
+            runCurrent()
+            assertEquals(0, server.requestCount)
+            scan("topup")
+            vm.closeStep.first { it is BoxCloseStep.Printed }
+            val request = server.takeRequest(5, TimeUnit.SECONDS)
+            assertEquals("POST", request?.method)
+            assertEquals("/shifts/s1/sscc/top-up", request?.path)
+            assertEquals(1, server.requestCount)
+        } finally {
+            server.shutdown()
+        }
+    }
 
     @Test
     fun aScanInAnAggregationShiftJoinsTheOpenBox() = runTest {

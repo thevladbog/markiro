@@ -71,6 +71,7 @@ const NO_ALLOCATION: BundleAllocation = {
   palletSsccRevokedFrom: [],
 };
 import type {
+  BoxSsccTopUpDto,
   BoxTemplateResolution,
   CloseShiftDto,
   CreateShiftDto,
@@ -1764,6 +1765,88 @@ export class ShiftsService {
         ? await this.bundleSscc(tenantId, referenceBundle.shift.id, deviceId)
         : NO_ALLOCATION;
     return { ...referenceBundle, ...allocation };
+  }
+
+  async topUpBoxSscc(
+    tenantId: string,
+    shiftId: string,
+    deviceId: string,
+  ): Promise<BoxSsccTopUpDto> {
+    return this.db.transaction(async (tx) => {
+      await assertDeviceReplacementNewWorkAllowed(tx, tenantId, deviceId, {
+        kind: "shift",
+        id: shiftId,
+      });
+      const [shift] = await tx
+        .select({
+          status: schema.shifts.status,
+          mode: schema.shifts.mode,
+          openedAt: schema.shifts.openedAt,
+        })
+        .from(schema.shifts)
+        .where(and(eq(schema.shifts.tenantId, tenantId), eq(schema.shifts.id, shiftId)))
+        .for("update");
+      if (!shift) throw new NotFoundException("Shift not found");
+      const [participant] = await tx
+        .select({ deviceId: schema.shiftDeviceParticipants.deviceId })
+        .from(schema.shiftDeviceParticipants)
+        .where(
+          and(
+            eq(schema.shiftDeviceParticipants.tenantId, tenantId),
+            eq(schema.shiftDeviceParticipants.shiftId, shiftId),
+            eq(schema.shiftDeviceParticipants.deviceId, deviceId),
+          ),
+        )
+        .limit(1);
+      if (!participant) throw new ForbiddenException("Device is not a participant of this shift");
+      if (shift.status !== "active" || shift.mode !== "aggregation") {
+        return { blocks: [], revokedFrom: [], issuerProblem: null };
+      }
+      let issuerPrefix: string;
+      try {
+        issuerPrefix = await this.sscc.resolveIssuerPrefix(tenantId, shiftId, tx);
+      } catch (error) {
+        if (!(error instanceof BadRequestException)) throw error;
+        return { blocks: [], revokedFrom: [], issuerProblem: ssccIssuerProblemOf(error) };
+      }
+      const access = await this.entitlements.resolveRecovery(tenantId, tx, new Date());
+      const mayAllocate =
+        access.access !== "read_only" ||
+        (access.subscription?.endsAt !== undefined &&
+          access.subscription.endsAt !== null &&
+          shift.openedAt !== null &&
+          shift.openedAt < access.subscription.endsAt);
+      if (mayAllocate) {
+        await this.sscc.topUpForDevice(tenantId, issuerPrefix, deviceId, BOX_BLOCK_SIZE, 400, tx);
+      }
+      const blocks = await tx
+        .select({
+          issuerPrefix: schema.ssccBlocks.issuerPrefix,
+          extensionDigit: schema.ssccBlocks.extensionDigit,
+          fromSerial: schema.ssccBlocks.fromSerial,
+          toSerial: schema.ssccBlocks.toSerial,
+          consumedThroughSerial: schema.ssccBlocks.consumedThroughSerial,
+        })
+        .from(schema.ssccBlocks)
+        .where(
+          and(
+            eq(schema.ssccBlocks.tenantId, tenantId),
+            eq(schema.ssccBlocks.deviceId, deviceId),
+            eq(schema.ssccBlocks.issuerPrefix, issuerPrefix),
+            eq(schema.ssccBlocks.extensionDigit, BOX_EXTENSION_DIGIT),
+            isNull(schema.ssccBlocks.revokedAt),
+          ),
+        )
+        .orderBy(schema.ssccBlocks.allocationOrder);
+      const revokedFrom = await this.sscc.revokedFromSerials(
+        tenantId,
+        issuerPrefix,
+        BOX_EXTENSION_DIGIT,
+        deviceId,
+        tx,
+      );
+      return { blocks, revokedFrom, issuerProblem: null };
+    });
   }
 
   /**

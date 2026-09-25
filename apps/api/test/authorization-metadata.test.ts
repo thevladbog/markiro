@@ -247,6 +247,7 @@ const OPERATIONAL_CONTROLLERS: readonly [
       openShift: sharedWritePolicy,
       enterShift: sharedWritePolicy,
       getBundle: sharedReadPolicy,
+      topUpBoxSscc: sharedWritePolicy,
       getReferenceBundle: sharedReadPolicy,
     },
   ],
