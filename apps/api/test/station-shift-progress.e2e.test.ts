@@ -5,6 +5,7 @@ import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { canonicalizeKm, kmHash } from "@markiro/domain";
+import { schema, type Db } from "@markiro/db";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
@@ -20,10 +21,12 @@ const codeHashFor = (label: string) => kmHash(canonicalizeKm(`01${VALID_GTIN14}2
 
 describe.skipIf(!ready)("GET /station/shifts/:id/progress", () => {
   let app: INestApplication;
+  let db: Db;
 
   beforeAll(async () => {
     const env = loadEnv();
     const setup = setupAuth(env);
+    db = setup.db;
     const module = await Test.createTestingModule({
       imports: [AppModule.forRoot({ ...setup, databaseUrl: env.DATABASE_URL })],
     }).compile();
@@ -110,6 +113,46 @@ describe.skipIf(!ready)("GET /station/shifts/:id/progress", () => {
     return shiftId;
   }
 
+  /**
+   * Setup pattern from `box-registry-pallets.e2e.test.ts`: an aggregation
+   * shift needs a box label template and an org GLN (SSCC issuer) before it
+   * can open at all.
+   */
+  async function openAggregationShift(
+    agent: ReturnType<typeof request.agent>,
+    tenantId: string,
+  ): Promise<string> {
+    const product = await agent
+      .post("/products")
+      .send({
+        name: "Cola",
+        gtin: VALID_GTIN14,
+        chzProductGroupCode: 8,
+        boxCapacity: 10,
+        palletBoxCapacity: 5,
+      })
+      .expect(201);
+    const boxLabelTemplateId = randomUUID();
+    await db.insert(schema.labelTemplates).values({
+      id: boxLabelTemplateId,
+      tenantId,
+      name: "Progress aggregation template",
+      spec: { widthMm: 58, heightMm: 40, dpi: 203, language: "zpl", elements: [] },
+    });
+    const shift = await agent
+      .post("/shifts")
+      .send({
+        productId: (product.body as { id: string }).id,
+        mode: "aggregation",
+        boxLabelTemplateId,
+      })
+      .expect(201);
+    const shiftId = (shift.body as { id: string }).id;
+    await agent.put("/org/profile").send({ gln: "0346006820014" }).expect(200);
+    await agent.post(`/shifts/${shiftId}/open`).expect(200);
+    return shiftId;
+  }
+
   it("counts the whole shift and the caller's share, net of undone codes", async () => {
     const agent = request.agent(app.getHttpServer());
     await signUpAndActivate(agent);
@@ -177,6 +220,28 @@ describe.skipIf(!ready)("GET /station/shifts/:id/progress", () => {
       .set("x-api-key", station.apiKey)
       .expect(200);
     expect(res.body).toMatchObject({ acceptedUnits: 0, deviceAcceptedUnits: 0 });
+  });
+
+  it("counts an aggregation shift's scans while their box is still open", async () => {
+    const agent = request.agent(app.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const station = await createTestStationDevice(app, agent, "Line 1");
+    const shiftId = await openAggregationShift(agent, tenantId);
+
+    // Only `items`, never a matching `boxes` closure: box "b1" stays open.
+    await post(station.apiKey, {
+      items: [
+        scan(shiftId, "gg", station.deviceId, "2026-07-01T12:00:00.000Z", "b1"),
+        scan(shiftId, "hh", station.deviceId, "2026-07-01T12:00:01.000Z", "b1"),
+        scan(shiftId, "ii", station.deviceId, "2026-07-01T12:00:02.000Z", "b1"),
+      ],
+    });
+
+    const res = await http()
+      .get(`/station/shifts/${shiftId}/progress`)
+      .set("x-api-key", station.apiKey)
+      .expect(200);
+    expect(res.body).toMatchObject({ acceptedUnits: 3, deviceAcceptedUnits: 3 });
   });
 
   it("hides foreign, unknown and malformed shifts and refuses other credential kinds", async () => {
