@@ -52,13 +52,20 @@ function isStationRequest(req: Request): boolean {
   if (
     (method === "POST" &&
       (path === "/station/pair" ||
+        path === "/station/pair/recovery" ||
         path === "/station/codes/releases" ||
         path === "/station/boxes/reconciliation" ||
         path === "/station/conflicts/status" ||
         path === "/station/validation-occurrences/status" ||
         path === "/station/scans" ||
-        path === "/station/shift-closures")) ||
-    (method === "GET" && (path === "/station/identity" || path === "/station/operators")) ||
+        path === "/station/shift-closures" ||
+        path === "/station/device-replacement-intent/v1/acknowledge" ||
+        path === "/station/device-replacement-readiness" ||
+        path === "/station/replacement-recovery/readiness")) ||
+    (method === "GET" &&
+      (path === "/station/identity" ||
+        path === "/station/operators" ||
+        path === "/station/device-replacement-intent/v1")) ||
     ((method === "GET" || method === "POST") && path === "/shifts") ||
     (method === "GET" && path === "/shifts/box-label-templates") ||
     (method === "GET" && path === "/shifts/pallet-label-templates") ||
@@ -72,7 +79,8 @@ function isStationRequest(req: Request): boolean {
 
   return (
     (method === "GET" && path === "/station/grants/v1/keyset") ||
-    (method === "POST" && /^\/station\/grants\/v1\/(?:configuration|device|tasks)$/.test(path)) ||
+    (method === "POST" &&
+      /^\/station\/grants\/v1\/(?:configuration|device|tasks|readiness)$/.test(path)) ||
     (method === "POST" &&
       /^\/station\/grants\/v1\/evidence\/(?:scans|shift-closures)$/.test(path)) ||
     (method === "POST" &&

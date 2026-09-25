@@ -33,7 +33,8 @@ A fresh station obtains its API base only from the trusted build-time
 `VITE_STATION_API_URL`; it never derives a backend host from the webview URL.
 After pairing, the durable station config retains that server URL for recovery.
 Cross-origin station requests require the exact `STATION_ORIGIN`. CORS grants
-it only to the exact method/path pairs in the device table below, including
+it only to the unauthenticated `POST /station/pair` and `POST /station/pair/recovery`
+and to the exact method/path pairs in the device table below, including
 the shared `/shifts` and `/products` routes; it is not added to adjacent
 cabinet-only methods, cabinet-session routes, or kiosk routes. Preflight is
 classified by `Access-Control-Request-Method`, while path matching ignores a
@@ -85,6 +86,11 @@ that legacy queue can be adopted.
 | `POST /station/validation-occurrences/status`                                                                        | Reconciles up to 500 own occurrence identities in participated shifts, including acknowledged acceptances subsequently displaced. Returns no foreign device metadata.                                                                                                                                                                                                                                                                      |
 | `POST /station/conflicts/status`                                                                                     | reconciles only hashes already present in this device's local conflict mirror; the response is tenant- and authenticated-device-scoped and identifies only manager-reviewed rows, so it exposes neither raw codes nor another terminal's conflicts                                                                                                                                                                                         |
 | `POST /station/codes/releases`                                                                                       | incrementally returns tenant-scoped hashes whose exact ownership was released by undo, clear, or disassembly; the station persists the box-registry revision and deletes only matching local duplicate keys, while raw marking codes never cross this read boundary                                                                                                                                                                        |
+| `GET /station/device-replacement-intent/v1`                                                                          | reads this device's replacement drain intent or explicit source closure tombstone (optional `knownIntentId`); `StationOnlyGuard`, available for replacement-readiness subscription recovery                                                                                                                                                                                                                                                |
+| `POST /station/device-replacement-intent/v1/acknowledge`                                                             | acknowledges an exact replacement closure from the authenticated source device, so its local drain can end                                                                                                                                                                                                                                                                                                                                 |
+| `POST /station/device-replacement-readiness`                                                                         | reports bounded replacement readiness evidence for the authenticated device; `StationOnlyGuard`                                                                                                                                                                                                                                                                                                                                            |
+| `POST /station/replacement-recovery/readiness`                                                                       | the purpose-bound replacement evidence recovery report; `AllowReplacementEvidenceRecovery` admits the recovery credential, and a fresh zero report revokes it                                                                                                                                                                                                                                                                              |
+| `POST /station/grants/v1/readiness`                                                                                  | reports the durable offline-grant installation of the authenticated device; `StationOnlyGuard`, allowed with a read-only subscription                                                                                                                                                                                                                                                                                                      |
 
 ## Cabinet-only (`RequirePermissions`; bootstrap `RequireMembership`)
 
@@ -215,7 +221,10 @@ belong in either section:
   also carries **no guard**: a factory station has no credential until it redeems its
   one-time eight-digit pairing code. Its HMAC-protected code and the same persisted
   per-source/global pairing limiter are the deliberate boundary; it must not gain
-  `TenantGuard` or a cabinet authorization policy. Conversely,
+  `TenantGuard` or a cabinet authorization policy. `POST /station/pair/recovery`
+  restores the same station identity on the same terms: it is unguarded, bounded by
+  the code and the same limiter, and changes no credential unless the expected
+  tenant, device and kind match the code's device. Conversely,
   `POST /station-devices/:id/pairing-code` stays cabinet-only under
   `CREDENTIALS_MANAGE`, so a station key cannot issue a replacement credential.
 - `GET/POST /1c_exchange` (`apps/api/src/modules/exchange/exchange.controller.ts`)
