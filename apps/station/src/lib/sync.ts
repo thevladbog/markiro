@@ -82,6 +82,7 @@ import {
   readPalletExceptions,
   type PendingPalletException,
 } from "./pallets.js";
+import { createShiftProgressTracker, type ShiftProgressSnapshot } from "./shift-progress.js";
 
 const nullableCeiling = z.number().int().nonnegative().nullable();
 const scanEvidenceCheckpointSchema = z.object({
@@ -164,6 +165,11 @@ export interface SyncState {
    * apart.
    */
   serialsLeft: number;
+  /**
+   * The last server answer for the shift the work screen watches (null when
+   * none is watched or none arrived yet). See `shift-progress.ts`.
+   */
+  shiftProgress: ShiftProgressSnapshot | null;
 }
 
 async function drainShiftCloseRows(
@@ -232,7 +238,7 @@ async function drainShiftCloseRows(
 
 export interface SyncEngineDeps {
   exec: SqlExecutor;
-  client: Pick<StationClient, "post">;
+  client: Pick<StationClient, "post"> & Partial<Pick<StationClient, "get">>;
   /** Always present in the station config; makes the batch id unique per device. */
   machineId: string;
   now?: () => number;
@@ -259,6 +265,8 @@ export interface SyncEngine {
   requestFullShiftAudit(shiftId?: string): Promise<void>;
   /** Wait for one scheduled drain/reconciliation pass, without bypassing backoff. */
   reconcileNow(): Promise<void>;
+  /** Which shift's total to fetch after drains; null stops. Does not nudge. */
+  watchShiftProgress(shiftId: string | null): void;
 }
 
 /** One of this device's scans that lost ownership, as the server reports it. */
@@ -1087,6 +1095,11 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
   const now = deps.now ?? (() => Date.now());
   const credentialGeneration = deps.credentialGeneration ?? createCredentialGeneration();
   const productLabelOwnership = credentialGenerationOwnership(credentialGeneration);
+  const shiftProgress = createShiftProgressTracker({
+    exec: deps.exec,
+    client: deps.client,
+    now,
+  });
   let draining = false;
   let stopped = false;
   let evidenceNeedsRecovery = false;
@@ -1349,12 +1362,14 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
     }
     const conflicts = await conflictCount(deps.exec);
     const serialsLeft = await computeSerialsLeft(deps.exec);
+    const progress = await shiftProgress.current();
     deps.onState({
       pending,
       lastSuccessAt,
       stuck: stuck || evidenceNeedsRecovery,
       conflicts,
       serialsLeft,
+      shiftProgress: progress,
     });
   }
 
@@ -2175,6 +2190,16 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
           }
         }
       }
+      if (!pauseInvalidated() && !credentialGeneration.sealed && retryTimer === null) {
+        try {
+          // Display-only: a failure keeps the last answer and never schedules
+          // a retry or marks the queue stuck.
+          await shiftProgress.refresh(() => !pauseInvalidated() && !credentialGeneration.sealed);
+        } catch (err) {
+          if (isStationCredentialRejection(err)) await rejectCredential();
+          else console.warn("station: shift progress unavailable");
+        }
+      }
     } catch (err) {
       if (err instanceof StationEvidenceRecoveryError) evidenceNeedsRecovery = true;
       // readBatch can fail (e.g. device DB is locked or corrupt). ackThrough
@@ -2305,6 +2330,9 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
     async reconcileNow() {
       this.nudge();
       await idle();
+    },
+    watchShiftProgress(shiftId) {
+      shiftProgress.watch(shiftId);
     },
   };
 }

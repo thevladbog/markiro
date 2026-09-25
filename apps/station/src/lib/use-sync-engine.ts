@@ -14,7 +14,7 @@ export const HEARTBEAT_MS = 15_000;
 export interface UseSyncEngineDeps {
   exec: SqlExecutor;
   /** `null` before the device has an API client (not yet enrolled). */
-  client: Pick<StationClient, "post"> | null;
+  client: (Pick<StationClient, "post"> & Partial<Pick<StationClient, "get">>) | null;
   /** `null`/`undefined` whenever `client` is `null`. */
   machineId: string | null | undefined;
   credentialGeneration?: CredentialGeneration;
@@ -43,6 +43,8 @@ export interface UseSyncEngineResult {
   resume: () => void;
   requestFullShiftAudit: (shiftId?: string) => Promise<void>;
   reconcileNow: () => Promise<void>;
+  /** Keep this shift's total fresh (the work screen's band); null stops. Stable identity. */
+  watchShiftProgress: (shiftId: string | null) => void;
 }
 
 /**
@@ -81,9 +83,11 @@ export function useSyncEngine(deps: UseSyncEngineDeps): UseSyncEngineResult {
     stuck: false,
     conflicts: 0,
     serialsLeft: 0,
+    shiftProgress: null,
   });
   const engineRef = useRef<SyncEngine | null>(null);
   const pausedRef = useRef(false);
+  const watchedShiftRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!client || !machineId) {
@@ -100,6 +104,7 @@ export function useSyncEngine(deps: UseSyncEngineDeps): UseSyncEngineResult {
       ...(onCredentialRejected ? { onCredentialRejected } : {}),
     });
     engineRef.current = engine;
+    if (watchedShiftRef.current !== null) engine.watchShiftProgress(watchedShiftRef.current);
     if (pausedRef.current) engine.pause();
     else engine.nudge();
     const heartbeat = setInterval(() => engine.nudge(), HEARTBEAT_MS);
@@ -143,5 +148,22 @@ export function useSyncEngine(deps: UseSyncEngineDeps): UseSyncEngineResult {
     await engineRef.current?.reconcileNow();
   }, []);
 
-  return { state, nudge, pause, pauseAndWaitForIdle, resume, requestFullShiftAudit, reconcileNow };
+  const watchShiftProgress = useCallback((shiftId: string | null) => {
+    watchedShiftRef.current = shiftId;
+    const engine = engineRef.current;
+    if (!engine) return;
+    engine.watchShiftProgress(shiftId);
+    if (!pausedRef.current) engine.nudge();
+  }, []);
+
+  return {
+    state,
+    nudge,
+    pause,
+    pauseAndWaitForIdle,
+    resume,
+    requestFullShiftAudit,
+    reconcileNow,
+    watchShiftProgress,
+  };
 }

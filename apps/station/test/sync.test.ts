@@ -9,6 +9,7 @@ import {
   MAX_BOX_CLOSURES_PER_SYNC_BATCH,
   STUCK_AFTER_MS,
 } from "../src/lib/sync.js";
+import { SHIFT_PROGRESS_INTERVAL_MS } from "../src/lib/shift-progress.js";
 import { addRange, remaining } from "../src/lib/sscc-pool.js";
 import {
   closeBox,
@@ -1799,6 +1800,72 @@ describe("sync engine", () => {
     expect(post).not.toHaveBeenCalled();
     expect(states.at(-1)).toMatchObject({ stuck: false });
     engine.stop();
+  });
+
+  it("publishes the watched shift's progress and never retries a failed fetch", async () => {
+    const exec = await migratedExec();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const post = vi.fn();
+    const get = vi.fn().mockRejectedValueOnce(new Error("offline")).mockResolvedValue({
+      shiftId: "s1",
+      acceptedUnits: 12,
+      deviceAcceptedUnits: 2,
+      asOf: "2026-09-25T09:00:00.000Z",
+    });
+    let clock = 1_000_000;
+    const states: Array<{ stuck: boolean; progress: unknown }> = [];
+    const engine = createSyncEngine({
+      exec,
+      client: { post, get },
+      machineId: "m1",
+      now: () => clock,
+      onState: (state) => states.push({ stuck: state.stuck, progress: state.shiftProgress }),
+    });
+    engine.watchShiftProgress("s1");
+    engine.nudge();
+    await engine.idle();
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(states.at(-1)).toEqual({ stuck: false, progress: null });
+
+    clock += SHIFT_PROGRESS_INTERVAL_MS;
+    engine.nudge();
+    await engine.idle();
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(states.at(-1)?.progress).toMatchObject({
+      shiftId: "s1",
+      acceptedUnits: 12,
+      deviceAcceptedUnits: 2,
+    });
+
+    engine.watchShiftProgress(null);
+    engine.nudge();
+    await engine.idle();
+    expect(states.at(-1)?.progress).toBeNull();
+    engine.stop();
+  });
+
+  it("takes the credential rejection path when the progress fetch is refused", async () => {
+    const exec = await migratedExec();
+    const onCredentialRejected = vi.fn();
+    const engine = createSyncEngine({
+      exec,
+      client: {
+        post: vi.fn(),
+        get: vi
+          .fn()
+          .mockRejectedValue(new StationApiError(401, "rejected", "STATION_CREDENTIAL_REVOKED")),
+      },
+      machineId: "machine-1",
+      onState: () => {},
+      onCredentialRejected,
+    });
+    engine.watchShiftProgress("s1");
+    engine.nudge();
+    await engine.idle();
+    expect(onCredentialRejected).toHaveBeenCalledOnce();
+    expect(onCredentialRejected).toHaveBeenCalledWith(
+      expect.objectContaining({ machineId: "machine-1" }),
+    );
   });
 });
 
