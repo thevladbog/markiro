@@ -526,6 +526,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "GET /station/inventories/:id/bundle/codes (StationInventoriesController.codes)",
       "GET /station/inventories/:id/bundle/manifest (StationInventoriesController.manifest)",
       "GET /station/inventories/:id/progress (StationInventoriesController.progress)",
+      "GET /station/shifts/:id/progress (StationShiftProgressController.progress)",
       "GET /station/inventory-tasks (StationInventoriesController.list)",
       "POST /station/inventories/:id/event-batches (StationInventoriesController.eventBatch)",
       "POST /station/inventories/:id/join (StationInventoriesController.join)",
@@ -1133,6 +1134,7 @@ describe("registered subscription route inventory", () => {
             : route.controller.name === "StationScansController" ||
                 route.controller.name === "StationInventoriesController" ||
                 route.controller.name === "StationProductImagesController" ||
+                route.controller.name === "StationShiftProgressController" ||
                 route.controller.name === "DeviceGrantsController" ||
                 route.controller.name === "DeviceReplacementReadinessController" ||
                 route.controller.name === "ReplacementRecoveryReadinessController"

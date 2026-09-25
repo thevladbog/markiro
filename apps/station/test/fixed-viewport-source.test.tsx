@@ -120,6 +120,11 @@ describe("fixed station viewport source contract", () => {
     const css = stationSource("station.css");
     const instrument = stationSource("ui/work/BoxFillInstrument.tsx");
 
+    expect(css).toMatch(/\.work-box-fill__readout strong\s*\{[^}]*white-space:\s*nowrap;/s);
+    expect(css).toMatch(/\.work-box-fill__readout > span\s*\{[^}]*white-space:\s*nowrap;/s);
+    expect(css).toMatch(
+      /@media \(max-width:\s*1100px\), \(max-height:\s*767px\)[\s\S]*?\.work-box-fill__readout strong\s*\{[^}]*font:\s*600 40px\/44px var\(--font-mono\);/s,
+    );
     expect(instrument).toContain('className="work-box-fill__grid"');
     expect(instrument).not.toContain('className="work-box-fill__track"');
     expect(css).not.toContain(".work-box-fill__track");
@@ -131,10 +136,10 @@ describe("fixed station viewport source contract", () => {
       /\.work-box-fill__actions\s*\{(?![^}]*background:)[^}]*min-height:\s*64px;/s,
     );
     expect(css).toMatch(
-      /\.work-box-fill\s*\{[^}]*grid-template-rows:\s*auto auto minmax\(0, 1fr\) minmax\(64px, auto\);/s,
+      /\.work-box-fill\s*\{[^}]*grid-template-rows:\s*auto minmax\(96px, 1fr\) minmax\(64px, auto\);/s,
     );
     expect(css).toMatch(
-      /\.work-box-fill\[data-grouped="true"\]\s*\{[^}]*grid-template-rows:\s*auto auto minmax\(0, 1fr\) auto minmax\(64px, auto\);/s,
+      /\.work-box-fill\[data-grouped="true"\]\s*\{[^}]*grid-template-rows:\s*auto minmax\(96px, 1fr\) auto minmax\(64px, auto\);/s,
     );
     expect(css).toMatch(/\.work-box-fill__grid\s*\{[^}]*height:\s*100%;/s);
     expect(css).toMatch(/\.work-box-fill__cell\s*\{[^}]*height:\s*100%;/s);
@@ -143,30 +148,42 @@ describe("fixed station viewport source contract", () => {
     );
   });
 
-  it("gives box progress most of the work surface at 1024px without hiding the product photo", () => {
+  it("puts the shift band above two work columns and never lets the box grid collapse", () => {
     const css = stationSource("station.css");
-
     expect(css).toMatch(
-      /@media \(max-width:\s*1100px\), \(max-height:\s*767px\)[\s\S]*?\.work-screen__primary\s*\{[^}]*grid-template-rows:\s*minmax\(124px, 0\.55fr\) minmax\(0, 1\.45fr\);/s,
+      /\.work-shift-band__meta\s*\{[^}]*white-space:\s*normal;[^}]*-webkit-line-clamp:\s*2;/s,
+    );
+    expect(stationSource("pages/WorkScreen.tsx")).toContain('className="work-screen__work"');
+    expect(css).toMatch(
+      /\.work-screen__work\s*\{[^}]*grid-template-rows:\s*auto minmax\(0, 1fr\);/s,
     );
     expect(css).toMatch(
-      /@media \(max-width:\s*1100px\), \(max-height:\s*767px\)[\s\S]*?\.work-scan-result\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1\.35fr\) minmax\(150px, 0\.65fr\);[^}]*grid-template-rows:\s*minmax\(0, 1fr\);/s,
-    );
-    // The side-by-side compact is for sharing the column with the box panel;
-    // a boxless scan result stacks hero-over-verdict instead of stretching
-    // the gradient into an empty tower.
-    expect(css).toMatch(
-      /@media \(max-width:\s*1100px\), \(max-height:\s*767px\)[\s\S]*?\.work-screen__primary\s*>\s*\.work-scan-result:only-child\s*\{[^}]*grid-template-columns:\s*none;[^}]*grid-template-rows:\s*auto minmax\(0, 1fr\);/s,
-    );
-    // The photo shrinks at 1024 but keeps its 3:4 portrait (the base rule owns
-    // the aspect ratio) -- a bottle is never re-cropped into a square.
-    expect(css).toMatch(/\.work-scan-result__image\s*\{[^}]*aspect-ratio:\s*3 \/ 4;/s);
-    expect(css).toMatch(
-      /@media \(max-width:\s*1100px\), \(max-height:\s*767px\)[\s\S]*?\.work-scan-result__image\s*\{[^}]*width:\s*96px;/s,
+      /\.work-screen__instruments\s*\{[^}]*grid-template-columns:\s*minmax\(0, 3fr\) minmax\(340px, 2fr\);/s,
     );
     expect(css).toMatch(
-      /@media \(max-width:\s*1100px\), \(max-height:\s*767px\)[\s\S]*?\.work-box-fill__readout strong\s*\{[^}]*font:\s*var\(--floor-counter-sm\);/s,
+      /\.work-screen__primary:has\(> \.pallet-strip\)\s*\{[^}]*grid-template-rows:\s*minmax\(0, 1fr\) auto;/s,
     );
+    // The band's photo keeps its 3:4 portrait; at 1024 it shrinks to 60px wide.
+    expect(css).toMatch(/\.work-shift-band__image\s*\{[^}]*aspect-ratio:\s*3 \/ 4;/s);
+    expect(css).toMatch(
+      /@media \(max-width:\s*1100px\), \(max-height:\s*767px\)[\s\S]*?\.work-shift-band__image\s*\{[^}]*width:\s*60px;/s,
+    );
+    // Both pallet actions sit side by side instead of stacking.
+    expect(css).toMatch(/\.pallet-strip__actions\s*\{[^}]*grid-auto-flow:\s*column;/s);
+    // «Паллета 15 / 66 коробов · 23 %»: the count in mono, the unit in the UI
+    // font; the unit gives way first on a narrow strip, never the percentage.
+    // Word-sized gaps are what fit the Russian readout at 1024 px (measured
+    // in a browser: 8 px gaps cut «коробов» to «короб…»).
+    expect(css).toMatch(/\.pallet-strip__readout\s*\{[^}]*gap:\s*var\(--sp-1\);/s);
+    expect(css).toMatch(
+      /\.pallet-strip__count\s*\{[^}]*font:\s*600 24px\/30px var\(--font-mono\);/s,
+    );
+    expect(css).toMatch(
+      /\.pallet-strip__progress\s*\{[^}]*font:\s*var\(--floor-body\);[^}]*text-overflow:\s*ellipsis;/s,
+    );
+    expect(css).toMatch(/\.pallet-strip__percent\s*\{[^}]*flex:\s*0 0 auto;/s);
+    expect(css).not.toContain(".work-counters");
+    expect(css).not.toContain("data-identity-only");
     expect(css).toMatch(
       /@media \(max-width:\s*1100px\), \(max-height:\s*767px\)[\s\S]*?\.work-scan-result__normalized\s*\{[^}]*-webkit-line-clamp:\s*3;/s,
     );

@@ -175,4 +175,40 @@ describe("useSyncEngine", () => {
       expect(result.current.state.pending).toBe(0);
     },
   );
+
+  it("fetches a watched shift and keeps watching it across an engine rebuild", async () => {
+    const exec = await migratedExec();
+    const post = vi.fn().mockResolvedValue({});
+    const first = {
+      post,
+      get: vi.fn().mockResolvedValue({
+        shiftId: "s1",
+        acceptedUnits: 3,
+        deviceAcceptedUnits: 1,
+        asOf: "2026-09-25T09:00:00.000Z",
+      }),
+    };
+    const { result, rerender } = renderHook((deps: UseSyncEngineDeps) => useSyncEngine(deps), {
+      initialProps: { exec, client: first, machineId: "m1" },
+    });
+    act(() => result.current.watchShiftProgress("s1"));
+    await waitFor(() =>
+      expect(result.current.state.shiftProgress).toMatchObject({ shiftId: "s1", acceptedUnits: 3 }),
+    );
+    const second = {
+      post,
+      get: vi.fn().mockResolvedValue({
+        shiftId: "s1",
+        acceptedUnits: 4,
+        deviceAcceptedUnits: 1,
+        asOf: "2026-09-25T09:01:00.000Z",
+      }),
+    };
+    rerender({ exec, client: second, machineId: "m1" });
+    await waitFor(() =>
+      expect(second.get).toHaveBeenCalledWith("/station/shifts/s1/progress", {
+        displayOnly: true,
+      }),
+    );
+  });
 });

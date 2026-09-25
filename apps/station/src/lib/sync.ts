@@ -82,6 +82,7 @@ import {
   readPalletExceptions,
   type PendingPalletException,
 } from "./pallets.js";
+import { createShiftProgressTracker, type ShiftProgressSnapshot } from "./shift-progress.js";
 
 const nullableCeiling = z.number().int().nonnegative().nullable();
 const scanEvidenceCheckpointSchema = z.object({
@@ -164,6 +165,11 @@ export interface SyncState {
    * apart.
    */
   serialsLeft: number;
+  /**
+   * The last server answer for the shift the work screen watches (null when
+   * none is watched or none arrived yet). See `shift-progress.ts`.
+   */
+  shiftProgress: ShiftProgressSnapshot | null;
 }
 
 async function drainShiftCloseRows(
@@ -232,7 +238,7 @@ async function drainShiftCloseRows(
 
 export interface SyncEngineDeps {
   exec: SqlExecutor;
-  client: Pick<StationClient, "post">;
+  client: Pick<StationClient, "post"> & Partial<Pick<StationClient, "get">>;
   /** Always present in the station config; makes the batch id unique per device. */
   machineId: string;
   now?: () => number;
@@ -259,6 +265,11 @@ export interface SyncEngine {
   requestFullShiftAudit(shiftId?: string): Promise<void>;
   /** Wait for one scheduled drain/reconciliation pass, without bypassing backoff. */
   reconcileNow(): Promise<void>;
+  /**
+   * Which shift's total to fetch after drains; null stops. Publishes that
+   * shift's persisted answer at once. Does not nudge.
+   */
+  watchShiftProgress(shiftId: string | null): void;
 }
 
 /** One of this device's scans that lost ownership, as the server reports it. */
@@ -1087,6 +1098,11 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
   const now = deps.now ?? (() => Date.now());
   const credentialGeneration = deps.credentialGeneration ?? createCredentialGeneration();
   const productLabelOwnership = credentialGenerationOwnership(credentialGeneration);
+  const shiftProgress = createShiftProgressTracker({
+    exec: deps.exec,
+    client: deps.client,
+    now,
+  });
   let draining = false;
   let stopped = false;
   let evidenceNeedsRecovery = false;
@@ -1101,6 +1117,10 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
   let backoffMs = BACKOFF_START_MS;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
   let idleResolvers: (() => void)[] = [];
+  // The state `onState` last received, and a counter bumped by every
+  // `watchShiftProgress` call -- see `publishWatchedProgress`.
+  let lastPublished: SyncState | null = null;
+  let watchGeneration = 0;
   // The `maxId` of the batch currently awaiting acknowledgement, or `null`
   // when no batch is in flight. Set right before the batch is posted (and
   // persisted to `station_meta` at that same point — see
@@ -1349,13 +1369,38 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
     }
     const conflicts = await conflictCount(deps.exec);
     const serialsLeft = await computeSerialsLeft(deps.exec);
-    deps.onState({
+    const progress = await shiftProgress.current();
+    publish({
       pending,
       lastSuccessAt,
       stuck: stuck || evidenceNeedsRecovery,
       conflicts,
       serialsLeft,
+      shiftProgress: progress,
     });
+  }
+
+  function publish(state: SyncState): void {
+    lastPublished = state;
+    deps.onState(state);
+  }
+
+  /**
+   * Publishes the watched shift's persisted answer without waiting for a
+   * drain: after a restart without network, a pending backoff retry holds the
+   * next drain -- and with it the next full publication -- for up to a
+   * minute. Only `shiftProgress` changes. Every other field belongs to the
+   * drain loop and is republished exactly as it last published it; recounting
+   * them out here could let a read that started before an acknowledgement
+   * land after the loop's fresher post-drain state. Before the first full
+   * publication there is nothing to merge into, and that publication reads
+   * the watched shift's answer itself.
+   */
+  async function publishWatchedProgress(generation: number): Promise<void> {
+    const progress = await shiftProgress.current();
+    if (stopped || generation !== watchGeneration || lastPublished === null) return;
+    if (lastPublished.shiftProgress === progress) return;
+    publish({ ...lastPublished, shiftProgress: progress });
   }
 
   async function drain(): Promise<void> {
@@ -2175,6 +2220,16 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
           }
         }
       }
+      if (!pauseInvalidated() && !credentialGeneration.sealed && retryTimer === null) {
+        try {
+          // Display-only: a failure keeps the last answer and never schedules
+          // a retry or marks the queue stuck.
+          await shiftProgress.refresh(() => !pauseInvalidated() && !credentialGeneration.sealed);
+        } catch (err) {
+          if (isStationCredentialRejection(err)) await rejectCredential();
+          else console.warn("station: shift progress unavailable");
+        }
+      }
     } catch (err) {
       if (err instanceof StationEvidenceRecoveryError) evidenceNeedsRecovery = true;
       // readBatch can fail (e.g. device DB is locked or corrupt). ackThrough
@@ -2305,6 +2360,13 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
     async reconcileNow() {
       this.nudge();
       await idle();
+    },
+    watchShiftProgress(shiftId) {
+      shiftProgress.watch(shiftId);
+      watchGeneration += 1;
+      publishWatchedProgress(watchGeneration).catch((publishErr: unknown) => {
+        console.error("station: sync state publish failed", publishErr);
+      });
     },
   };
 }

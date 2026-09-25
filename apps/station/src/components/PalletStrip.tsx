@@ -43,16 +43,20 @@ export function PalletStrip({
       data-serials={serials}
     >
       <div className="pallet-strip__summary">
-        <h2>{t("pallet.current")}</h2>
+        {/* «Паллета 15 / 66 коробов · 23 %»: the count in mono, the unit in the UI font. */}
         <div className="pallet-strip__readout">
-          <strong
-            key={highlight}
-            data-highlight={highlight > 0 ? "true" : undefined}
-            className="pallet-strip__progress"
-          >
-            {t("pallet.progress", { boxes: boxCount, capacity })}
-          </strong>
-          <span>{percent}</span>
+          <h2>{t("pallet.title")}</h2>
+          <span className="pallet-strip__progress">
+            <strong
+              key={highlight}
+              data-highlight={highlight > 0 ? "true" : undefined}
+              className="pallet-strip__count"
+            >
+              {`${boxCount} / ${capacity}`}
+            </strong>{" "}
+            {t("pallet.progressUnit")}
+          </span>
+          <span className="pallet-strip__percent">{`· ${percent}`}</span>
         </div>
         <div
           className="pallet-strip__bar"
@@ -65,14 +69,15 @@ export function PalletStrip({
         >
           <span style={{ width: `${Math.min(100, Math.max(0, ratio * 100))}%` }} />
         </div>
-        <p className="pallet-strip__remaining">
-          {t("pallet.remaining", { count: Math.max(0, capacity - boxCount) })}
+        <p className="pallet-strip__meta">
+          <span>{t("pallet.remaining", { count: Math.max(0, capacity - boxCount) })}</span>
+          {lastBoxSscc ? (
+            <span className="pallet-strip__last">
+              {` · ${t("pallet.lastBoxShort")} `}
+              <code>…{lastBoxSscc.slice(-6)}</code>
+            </span>
+          ) : null}
         </p>
-        {lastBoxSscc ? (
-          <p className="pallet-strip__last">
-            {t("pallet.lastBox")} <code>…{lastBoxSscc.slice(-6)}</code>
-          </p>
-        ) : null}
       </div>
       <div className="pallet-strip__actions">
         {onShowContents ? (

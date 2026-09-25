@@ -882,3 +882,23 @@ export const shiftReferenceBundleOpenApiSchema = {
     palletSscc: { type: "object", nullable: true, enum: [null] },
   },
 };
+
+/** A shift's current code owners across every device, and the caller's share. */
+export interface StationShiftProgressDto {
+  shiftId: string;
+  acceptedUnits: number;
+  deviceAcceptedUnits: number;
+  asOf: string;
+}
+
+export const stationShiftProgressOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["shiftId", "acceptedUnits", "deviceAcceptedUnits", "asOf"],
+  properties: {
+    shiftId: { type: "string", format: "uuid" },
+    acceptedUnits: { type: "integer", minimum: 0 },
+    deviceAcceptedUnits: { type: "integer", minimum: 0 },
+    asOf: { type: "string", format: "date-time" },
+  },
+};

@@ -8,7 +8,13 @@ import {
   createSyncEngine,
   MAX_BOX_CLOSURES_PER_SYNC_BATCH,
   STUCK_AFTER_MS,
+  type SyncState,
 } from "../src/lib/sync.js";
+import {
+  SHIFT_PROGRESS_INTERVAL_MS,
+  SHIFT_PROGRESS_META_KEY,
+  type ShiftProgressSnapshot,
+} from "../src/lib/shift-progress.js";
 import { addRange, remaining } from "../src/lib/sscc-pool.js";
 import {
   closeBox,
@@ -1799,6 +1805,135 @@ describe("sync engine", () => {
     expect(post).not.toHaveBeenCalled();
     expect(states.at(-1)).toMatchObject({ stuck: false });
     engine.stop();
+  });
+
+  it("publishes the watched shift's progress and never retries a failed fetch", async () => {
+    const exec = await migratedExec();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const post = vi.fn();
+    const get = vi.fn().mockRejectedValueOnce(new Error("offline")).mockResolvedValue({
+      shiftId: "s1",
+      acceptedUnits: 12,
+      deviceAcceptedUnits: 2,
+      asOf: "2026-09-25T09:00:00.000Z",
+    });
+    let clock = 1_000_000;
+    const states: Array<{ stuck: boolean; progress: unknown }> = [];
+    const engine = createSyncEngine({
+      exec,
+      client: { post, get },
+      machineId: "m1",
+      now: () => clock,
+      onState: (state) => states.push({ stuck: state.stuck, progress: state.shiftProgress }),
+    });
+    engine.watchShiftProgress("s1");
+    engine.nudge();
+    await engine.idle();
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(states.at(-1)).toEqual({ stuck: false, progress: null });
+
+    clock += SHIFT_PROGRESS_INTERVAL_MS;
+    engine.nudge();
+    await engine.idle();
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(states.at(-1)?.progress).toMatchObject({
+      shiftId: "s1",
+      acceptedUnits: 12,
+      deviceAcceptedUnits: 2,
+    });
+
+    engine.watchShiftProgress(null);
+    engine.nudge();
+    await engine.idle();
+    expect(states.at(-1)?.progress).toBeNull();
+    engine.stop();
+  });
+
+  it("takes the credential rejection path when the progress fetch is refused", async () => {
+    const exec = await migratedExec();
+    const onCredentialRejected = vi.fn();
+    const engine = createSyncEngine({
+      exec,
+      client: {
+        post: vi.fn(),
+        get: vi
+          .fn()
+          .mockRejectedValue(new StationApiError(401, "rejected", "STATION_CREDENTIAL_REVOKED")),
+      },
+      machineId: "machine-1",
+      onState: () => {},
+      onCredentialRejected,
+    });
+    engine.watchShiftProgress("s1");
+    engine.nudge();
+    await engine.idle();
+    expect(onCredentialRejected).toHaveBeenCalledOnce();
+    expect(onCredentialRejected).toHaveBeenCalledWith(
+      expect.objectContaining({ machineId: "machine-1" }),
+    );
+  });
+
+  it("publishes the watched shift's persisted answer at once while a failed drain waits out its backoff", async () => {
+    // Installed before the first nudge so the failed drain's backoff retry
+    // stays pending for the whole test: no drain can publish on its behalf.
+    vi.useFakeTimers();
+    const exec = await migratedExec();
+    await seed(exec, 1);
+    const persisted: ShiftProgressSnapshot = {
+      shiftId: "s1",
+      acceptedUnits: 12,
+      deviceAcceptedUnits: 2,
+      asOf: "2026-09-25T09:00:00.000Z",
+      fetchedAt: "2026-09-25T09:00:01.000Z",
+    };
+    await exec.run("INSERT INTO station_meta (key, value) VALUES (?, ?)", [
+      SHIFT_PROGRESS_META_KEY,
+      JSON.stringify(persisted),
+    ]);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const post = vi.fn().mockRejectedValue(new Error("offline"));
+    const get = vi.fn();
+    const states: SyncState[] = [];
+    const engine = createSyncEngine({
+      exec,
+      client: { post, get },
+      machineId: "m1",
+      onState: (state) => states.push(state),
+    });
+    engine.nudge();
+    await engine.idle();
+    expect(post).toHaveBeenCalledTimes(1);
+    const afterFailedDrain = states.at(-1);
+    expect(afterFailedDrain).toMatchObject({ pending: 1, shiftProgress: null });
+
+    // A restart without network: the work screen opens during the backoff.
+    // Only the answer changes; every other field stays the drain loop's.
+    engine.watchShiftProgress("s1");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(states.at(-1)).toEqual({ ...afterFailedDrain, shiftProgress: persisted });
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(get).not.toHaveBeenCalled();
+
+    // Another shift never shows s1's answer.
+    engine.watchShiftProgress("s2");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(states.at(-1)?.shiftProgress).toBeNull();
+
+    // A later watch change drops the earlier shift's pending publication, even
+    // one that lands after s1's answer was read but before it was published,
+    // and a stopped engine publishes no stale answer either.
+    const published = states.length;
+    engine.watchShiftProgress("s1");
+    queueMicrotask(() => engine.watchShiftProgress(null));
+    await vi.advanceTimersByTimeAsync(0);
+    engine.watchShiftProgress("s1");
+    engine.watchShiftProgress(null);
+    await vi.advanceTimersByTimeAsync(0);
+    engine.stop();
+    engine.watchShiftProgress("s1");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(states.slice(published).filter((state) => state.shiftProgress !== null)).toEqual([]);
+    expect(post).toHaveBeenCalledTimes(1);
   });
 });
 

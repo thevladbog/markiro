@@ -1,0 +1,1 @@
+CREATE INDEX "code_registry_tenant_shift_terminal_idx" ON "code_registry" USING btree ("tenant_id","shift_id","terminal_id");

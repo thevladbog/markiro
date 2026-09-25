@@ -39,6 +39,7 @@ import { PickupReasonsController } from "../src/modules/pickup-reasons/pickup-re
 import { PickupRejectionsController } from "../src/modules/pickup-rejections/pickup-rejections.controller";
 import { ProductsController } from "../src/modules/products/products.controller";
 import { ShiftsController } from "../src/modules/shifts/shifts.controller";
+import { StationShiftProgressController } from "../src/modules/shifts/station-shift-progress.controller";
 import { StationDevicesController } from "../src/modules/station-devices/station-devices.controller";
 import { StationPairController } from "../src/modules/station-pairing/station-pair.controller";
 import { StationScansController } from "../src/modules/station-scans/station-scans.controller";
@@ -364,6 +365,7 @@ const STATION_ONLY_CONTROLLERS: readonly [ControllerClass, readonly string[]][] 
     StationInventoriesController,
     ["codes", "eventBatch", "join", "leave", "list", "manifest", "progress", "resolveBarcode"],
   ],
+  [StationShiftProgressController, ["progress"]],
 ];
 
 const reflector = new Reflector();

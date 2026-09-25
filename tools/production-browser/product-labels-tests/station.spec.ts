@@ -484,6 +484,89 @@ for (const locale of ["ru", "en"])
       }
     });
 
+// The owner's case from the line (design 2026-09-25): a maximized window on a
+// 1024×768 monitor leaves 1024×697 above the Windows 10 taskbar.
+for (const locale of ["ru", "en"])
+  test(`20-place box on pallet 15 of 66 keeps its grid, readouts and actions in view ${locale}`, async ({
+    page,
+  }, info) => {
+    for (const viewport of [
+      { width: 1024, height: 697 },
+      { width: 1024, height: 768 },
+    ]) {
+      await page.setViewportSize(viewport);
+      await page.goto(`${station}/?gallery=1&state=work-pallet-20&locale=${locale}`);
+      await expect(page.getByTestId("station-screen-gallery")).toHaveAttribute(
+        "data-gallery-state",
+        "work-pallet-20",
+      );
+      await page.evaluate(() => document.fonts.ready);
+      const pallet = page.locator(".pallet-strip");
+      await expect(pallet.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "15");
+      await expect(pallet.getByRole("progressbar")).toHaveAttribute("aria-valuemax", "66");
+      await expect(pallet.getByText(/23\s*%/)).toBeVisible();
+      // «15 / 66 коробов» fits whole: the unit word is the first to be cut.
+      expect(
+        await pallet
+          .locator(".pallet-strip__progress")
+          .evaluate((element) => element.scrollWidth <= element.clientWidth),
+      ).toBe(true);
+      // Two rows of cells, never a collapsed strip of dots.
+      expect(
+        (await page.locator(".work-box-fill__grid").boundingBox())?.height,
+      ).toBeGreaterThanOrEqual(96);
+      // The box count «2 / 20» sits on one line.
+      expect(
+        await page.locator(".work-box-fill__readout strong").evaluate((element) => {
+          const range = document.createRange();
+          range.selectNodeContents(element);
+          return new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size;
+        }),
+      ).toBe(1);
+      for (const control of [
+        pallet,
+        ...(await pallet.getByRole("button").all()),
+        ...(await page.locator(".work-box-fill__actions button").all()),
+        ...(await page.locator(".work-footer").getByRole("button").all()),
+      ]) {
+        await expect(control).toBeInViewport({ ratio: 1 });
+      }
+      for (const selector of [".pallet-strip", ".work-box-fill"]) {
+        expect(
+          await page
+            .locator(selector)
+            .evaluate(
+              (element) =>
+                element.scrollHeight <= element.clientHeight &&
+                element.scrollWidth <= element.clientWidth,
+            ),
+          `${selector} overflows`,
+        ).toBe(true);
+      }
+      const undersized = await page.evaluate(() =>
+        [...document.querySelectorAll<HTMLElement>('button, [role="button"]')]
+          .filter(
+            (element) =>
+              element.getClientRects().length > 0 &&
+              getComputedStyle(element).visibility !== "hidden",
+          )
+          .map((element) => {
+            const rect = element.getBoundingClientRect();
+            return {
+              name: element.getAttribute("aria-label") ?? element.textContent?.trim() ?? "",
+              width: rect.width,
+              height: rect.height,
+            };
+          })
+          .filter((button) => button.width < 64 || button.height < 64),
+      );
+      expect(undersized).toEqual([]);
+      await page.screenshot({
+        path: info.outputPath(`pallet-20-${viewport.width}x${viewport.height}-${locale}.png`),
+      });
+    }
+  });
+
 for (const locale of ["ru", "en"])
   for (const theme of ["light", "dark"])
     test(`station creates pallet aggregation using product capacity and separate labels ${locale} ${theme}`, async ({

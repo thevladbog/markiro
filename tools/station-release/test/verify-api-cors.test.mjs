@@ -95,6 +95,7 @@ const expected = [
     "POST",
     "content-type,x-api-key,x-station-capabilities",
   ],
+  ["/station/shifts/cors-probe/progress", "GET", "content-type,x-api-key,x-station-capabilities"],
   ["/station/shift-closures", "POST", "content-type,x-api-key,x-station-capabilities"],
   ["/shifts", "GET", "content-type,x-api-key,x-station-capabilities"],
   ["/shifts", "POST", "content-type,x-api-key,x-station-capabilities"],

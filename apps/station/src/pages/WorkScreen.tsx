@@ -11,7 +11,6 @@ import {
   type PrinterProfile,
 } from "../lib/printer-routing.js";
 import { readValidationRejectionReason } from "../lib/validation-reprocessing.js";
-import type { readValidationProcessingState } from "../lib/validation-reprocessing.js";
 import { ValidationProcessingStatus } from "../components/ValidationProcessingStatus.js";
 import { PalletContents } from "../components/PalletContents.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -99,8 +98,10 @@ import { BoxPrintRecovery, type BoxPrintRecoveryErrorCode } from "../ui/BoxPrint
 import { BoxFillInstrument } from "../ui/work/BoxFillInstrument.js";
 import { RecentOperations } from "../ui/work/RecentOperations.js";
 import { ScanResultInstrument } from "../ui/work/ScanResultInstrument.js";
+import { ShiftBand } from "../ui/work/ShiftBand.js";
 import type { StationProductImageDescriptor } from "../lib/mirror.js";
-import { WorkCounters } from "../ui/work/WorkCounters.js";
+import { shiftTotalView, type ShiftProgressSnapshot } from "../lib/shift-progress.js";
+import { useShiftJournalCounts } from "../lib/use-shift-journal-counts.js";
 import { WorkFooter } from "../ui/work/WorkFooter.js";
 import { buildWorkLabels } from "../ui/work/work-labels.js";
 import {
@@ -155,6 +156,16 @@ export interface WorkScreenProps {
   onCloseShift?: (reasonCode?: string | null) => Promise<OfflineShiftCloseSummary>;
   /** Scans still queued on this device, shown before the operator walks away. */
   pendingSync: number;
+  /** The sync engine's last server answer for this shift's total; null before the first. */
+  shiftProgress?: ShiftProgressSnapshot | null;
+  /**
+   * `SyncState.lastSuccessAt` of the latest published sync state. A drain can
+   * release this terminal's codes without bringing a new progress answer, so
+   * each change re-reads the local count.
+   */
+  syncLastSuccessAt?: number | null;
+  /** Tells the sync engine which shift's total to keep fresh; null when leaving. */
+  onWatchShiftProgress?: (shiftId: string | null) => void;
   /**
    * The station's window-mode control, surfaced inside the exception flow's
    * header so leaving fullscreen never requires abandoning a half-done
@@ -188,7 +199,7 @@ export interface WorkScreenProps {
   closeCurrentBox?: (shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>;
   /**
    * Injectable for tests; defaults to the real `closeCurrentPallet` bound to
-   * this device's `issuerPrefix`, used by the early-close overflow action.
+   * this device's `issuerPrefix`, used by the pallet strip's early-close action.
    */
   closeCurrentPallet?: (shiftId: string, operatorId: string | null) => Promise<ClosePalletResult>;
   /** Fires for every raw payload the scan queue processes, whatever the verdict — test-only observability. */
@@ -260,6 +271,9 @@ export function WorkScreen({
   onPauseShift,
   onCloseShift,
   pendingSync,
+  shiftProgress = null,
+  syncLastSuccessAt = null,
+  onWatchShiftProgress,
   exceptionWindowControl,
   issuerPrefix,
   boxCapacity,
@@ -292,12 +306,27 @@ export function WorkScreen({
     productLabels.error ||
     Boolean(productLabels.work && !productLabels.work.canAccept());
 
-  const [accepted, setAccepted] = useState(0);
-  const [duplicates, setDuplicates] = useState(0);
-  const [rejected, setRejected] = useState(0);
-  const [processingState, setProcessingState] = useState<Awaited<
-    ReturnType<typeof readValidationProcessingState>
-  > | null>(null);
+  const { counts: journalTotals, refresh: refreshJournalCounts } = useShiftJournalCounts(
+    exec,
+    shiftId,
+  );
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowMs(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  useEffect(() => {
+    if (!onWatchShiftProgress) return;
+    onWatchShiftProgress(shiftId);
+    return () => onWatchShiftProgress(null);
+  }, [onWatchShiftProgress, shiftId]);
+  // A drain can apply a server release that deletes this terminal's local
+  // codes, with or without a new progress answer (the progress step may be
+  // suspended or failing), so a new answer and each new `lastSuccessAt` of
+  // the published sync state both re-read the local count.
+  useEffect(() => {
+    refreshJournalCounts();
+  }, [refreshJournalCounts, shiftProgress, syncLastSuccessAt]);
   const [signal, setSignal] = useState<{ tone: SignalTone; title: string; detail?: string } | null>(
     null,
   );
@@ -512,7 +541,6 @@ export function WorkScreen({
   const [closedPallets, setClosedPallets] = useState<ClosedPalletSummary[]>([]);
   const [palletExceptionsOpen, setPalletExceptionsOpen] = useState(false);
   const [palletContentsId, setPalletContentsId] = useState<string | null>(null);
-  const [palletMenuOpen, setPalletMenuOpen] = useState(false);
   const [palletEarlyCloseConfirm, setPalletEarlyCloseConfirm] = useState(false);
   const [shiftClosePalletConfirm, setShiftClosePalletConfirm] = useState<{
     boxCount: number;
@@ -754,8 +782,8 @@ export function WorkScreen({
 
   /**
    * Reacts to a `ClosePalletResult` from either an automatic close (a box
-   * reaching pallet capacity, folded into `closeCurrentBox`) or the manual
-   * early-close overflow action. `empty`/`already-closed` are silent no-ops,
+   * reaching pallet capacity, folded into `closeCurrentBox`) or the pallet
+   * strip's manual early-close action. `empty`/`already-closed` are silent no-ops,
    * mirroring how `performReservedClose` treats the box's own versions of
    * those statuses -- nothing this device did actually needs surfacing.
    * `no-serials` is the one rule the brief is explicit about: text-only, on
@@ -847,7 +875,7 @@ export function WorkScreen({
     if (palletCloseRef.current?.print === "printed") dismissPalletClose();
   }
 
-  /** The "Ещё" overflow action: close the current pallet before it reaches capacity. */
+  /** The pallet strip's early-close action: close the current pallet before it reaches capacity. */
   function enqueueManualPalletClose(): void {
     if (issuerPrefix === null || palletBoxCapacity === null) return;
     const capturedIssuerPrefix = issuerPrefix;
@@ -1165,7 +1193,6 @@ export function WorkScreen({
     palletClose ||
     palletExceptionsOpen ||
     palletContentsId !== null ||
-    palletMenuOpen ||
     palletEarlyCloseConfirm ||
     shiftClosePalletConfirm,
   );
@@ -1879,6 +1906,7 @@ export function WorkScreen({
     refreshBox: refreshBoxAndMaybeClose,
     refreshRecentOperations,
     refreshLatestAcceptedOperation,
+    refreshJournalCounts,
     plannedQty,
   });
   useEffect(() => {
@@ -1892,6 +1920,7 @@ export function WorkScreen({
       refreshBox: refreshBoxAndMaybeClose,
       refreshRecentOperations,
       refreshLatestAcceptedOperation,
+      refreshJournalCounts,
       plannedQty,
     };
   });
@@ -1972,6 +2001,8 @@ export function WorkScreen({
               const result = await labelWork.accept(raw);
               if (result.status === "busy") throw new Error("PRODUCT_LABEL_BUSY");
               keys.current.add(codeHash);
+              // product-labels/acceptance.ts journals a refused acceptance as a
+              // `duplicate` row, so the journal's shift counts already hold it.
               if (result.status === "duplicate")
                 return {
                   raw,
@@ -2059,11 +2090,6 @@ export function WorkScreen({
         },
         onOutcome(outcome) {
           const { t: liveT, language, onScanRecorded: liveOnScanRecorded } = live.current;
-          if (outcome.verdict.status === "ok") setAccepted((n) => n + 1);
-          else {
-            setRejected((n) => n + 1);
-            if (outcome.verdict.status === "duplicate") setDuplicates((n) => n + 1);
-          }
 
           const title =
             outcome.verdict.status === "ok"
@@ -2098,6 +2124,7 @@ export function WorkScreen({
           // path. This display-only read is deliberately detached so a slow
           // mirror query cannot delay intake or the next queued scan.
           void live.current.refreshRecentOperations();
+          live.current.refreshJournalCounts();
           if (outcome.verdict.status === "ok") {
             void live.current.refreshLatestAcceptedOperation();
             if (outcome.planReached) setPlanReachedPrompt(live.current.plannedQty ?? null);
@@ -2109,7 +2136,6 @@ export function WorkScreen({
           // signal, distinct from an ordinary rejection, so they know to
           // rescan rather than assume the code was accepted.
           console.error("station: scan write failed", { category: "journal_write" });
-          setRejected((n) => n + 1);
           const { t: liveT } = live.current;
           showTimedSignal("error", liveT("signal.systemError"));
         },
@@ -2181,6 +2207,7 @@ export function WorkScreen({
       const accepted = queue.enqueueJob(async () => {
         try {
           await job();
+          live.current.refreshJournalCounts();
           resolve();
         } catch (err) {
           reject(err instanceof Error ? err : new Error(String(err)));
@@ -2270,7 +2297,6 @@ export function WorkScreen({
       boxActionPending ||
       showExceptions ||
       palletExceptionsOpen ||
-      palletMenuOpen ||
       palletEarlyCloseConfirm ||
       shiftClosePalletConfirm
     ) {
@@ -2331,7 +2357,6 @@ export function WorkScreen({
     showExceptions,
     palletClose,
     palletExceptionsOpen,
-    palletMenuOpen,
     palletContentsId,
     palletEarlyCloseConfirm,
     shiftClosePalletConfirm,
@@ -2496,6 +2521,13 @@ export function WorkScreen({
     : confirmClear
       ? "clear-confirm"
       : null;
+  const shiftTotal = shiftTotalView({
+    shiftId,
+    snapshot: shiftProgress,
+    local: journalTotals.accepted,
+    plannedQty,
+    nowMs,
+  });
 
   return (
     <main className="work-screen" aria-label={productName}>
@@ -2534,104 +2566,101 @@ export function WorkScreen({
               : {})}
           />
         ) : (
-          <div className="work-screen__instruments">
-            <div className="work-screen__primary">
-              <ScanResultInstrument
-                productName={productName}
-                counterpartyName={counterpartyName ?? null}
-                plannedQty={plannedQty}
-                planLabel={t("work.plan")}
-                operation={latestAcceptedOperation}
-                labels={workLabels.status}
-                exec={exec}
-                productId={productId}
-                image={productImage}
-                gtin={expectedGtin14}
-                refreshKey={imageRefreshKey}
-                showVerdict={issuerPrefix === null && !productLabels.work}
-              />
-              {productLabels.work ? (
-                <>
-                  <ValidationProcessingStatus
-                    exec={exec}
-                    shiftId={shiftId}
-                    refreshKey={accepted + rejected}
-                    onState={setProcessingState}
+          <div className="work-screen__work">
+            <ShiftBand
+              productName={productName}
+              counterpartyName={counterpartyName ?? null}
+              gtin={expectedGtin14}
+              exec={exec}
+              productId={productId}
+              image={productImage}
+              refreshKey={imageRefreshKey}
+              total={shiftTotal}
+              locale={workLabels.locale}
+              labels={workLabels.band}
+            />
+            <div className="work-screen__instruments">
+              <div className="work-screen__primary">
+                {issuerPrefix === null && !productLabels.work ? (
+                  <ScanResultInstrument
+                    operation={latestAcceptedOperation}
+                    labels={workLabels.status}
                   />
-                  <ProductLabelInstrument
-                    job={productLabels.state.job}
-                    busy={productLabels.state.busy}
-                    verification={productLabels.verification}
+                ) : null}
+                {productLabels.work ? (
+                  <>
+                    <ValidationProcessingStatus
+                      exec={exec}
+                      shiftId={shiftId}
+                      refreshKey={
+                        journalTotals.accepted + journalTotals.errors + journalTotals.duplicates
+                      }
+                    />
+                    <ProductLabelInstrument
+                      job={productLabels.state.job}
+                      busy={productLabels.state.busy}
+                      verification={productLabels.verification}
+                    />
+                  </>
+                ) : null}
+                {issuerPrefix !== null ? (
+                  <BoxFillInstrument
+                    box={box}
+                    ordinal={boxNumber}
+                    acceptedToken={
+                      lastScanned !== null && lastScanned.boxId === box?.boxId
+                        ? `${lastScanned.codeHash}:${lastScanned.scannedAt}`
+                        : null
+                    }
+                    capacity={boxCapacity}
+                    canUndo={lastScanned?.boxId === box?.boxId}
+                    closeDisabled={closing}
+                    labels={workLabels.box}
+                    lastAccepted={
+                      latestAcceptedOperation?.identity
+                        ? { serial: latestAcceptedOperation.identity.serial }
+                        : null
+                    }
+                    verdictLabels={{
+                      ok: workLabels.status.ok,
+                      waiting: workLabels.status.waiting,
+                    }}
+                    onClose={enqueueManualClose}
+                    onUndo={() => void handleUndo()}
+                    onClear={() => setConfirmClear(true)}
                   />
-                </>
-              ) : null}
-              {issuerPrefix !== null ? (
-                <BoxFillInstrument
-                  box={box}
-                  ordinal={boxNumber}
-                  acceptedToken={
-                    lastScanned !== null && lastScanned.boxId === box?.boxId
-                      ? `${lastScanned.codeHash}:${lastScanned.scannedAt}`
-                      : null
-                  }
-                  capacity={boxCapacity}
-                  canUndo={lastScanned?.boxId === box?.boxId}
-                  closeDisabled={closing}
-                  labels={workLabels.box}
-                  lastAccepted={
-                    latestAcceptedOperation?.identity
-                      ? { serial: latestAcceptedOperation.identity.serial }
-                      : null
-                  }
-                  verdictLabels={{
-                    ok: workLabels.status.ok,
-                    waiting: workLabels.status.waiting,
-                  }}
-                  onClose={enqueueManualClose}
-                  onUndo={() => void handleUndo()}
-                  onClear={() => setConfirmClear(true)}
+                ) : null}
+                {palletBoxCapacity !== null && issuerPrefix !== null ? (
+                  <PalletStrip
+                    key={pallet?.palletId ?? "empty-pallet"}
+                    lastBoxSscc={pallet?.lastBoxSscc ?? null}
+                    disabled={ordinaryScanBlockedRef.current || closing}
+                    onShowContents={() => {
+                      if (!pallet || ordinaryScanBlockedRef.current) return;
+                      ordinaryScanBlockedRef.current = true;
+                      setPalletContentsId(pallet.palletId);
+                    }}
+                    onClose={() => {
+                      if (ordinaryScanBlockedRef.current) return;
+                      ordinaryScanBlockedRef.current = true;
+                      setPalletEarlyCloseConfirm(true);
+                    }}
+                    boxCount={pallet?.boxCount ?? 0}
+                    capacity={palletBoxCapacity}
+                    serials={palletNoSerials ? "empty" : "available"}
+                  />
+                ) : null}
+              </div>
+              <aside className="work-screen__secondary" aria-label={workLabels.summary}>
+                <RecentOperations
+                  operations={recentOperations}
+                  counts={{ errors: journalTotals.errors, duplicates: journalTotals.duplicates }}
+                  labels={workLabels.recent}
+                  statusLabels={workLabels.status}
+                  locale={workLabels.locale}
                 />
-              ) : null}
-              {palletBoxCapacity !== null && issuerPrefix !== null ? (
-                <PalletStrip
-                  key={pallet?.palletId ?? "empty-pallet"}
-                  lastBoxSscc={pallet?.lastBoxSscc ?? null}
-                  disabled={ordinaryScanBlockedRef.current || closing}
-                  onShowContents={() => {
-                    if (!pallet || ordinaryScanBlockedRef.current) return;
-                    ordinaryScanBlockedRef.current = true;
-                    setPalletContentsId(pallet.palletId);
-                  }}
-                  onClose={() => {
-                    if (ordinaryScanBlockedRef.current) return;
-                    ordinaryScanBlockedRef.current = true;
-                    setPalletEarlyCloseConfirm(true);
-                  }}
-                  boxCount={pallet?.boxCount ?? 0}
-                  capacity={palletBoxCapacity}
-                  serials={palletNoSerials ? "empty" : "available"}
-                />
-              ) : null}
+              </aside>
             </div>
-            <aside className="work-screen__secondary" aria-label={workLabels.summary}>
-              <WorkCounters
-                accepted={productLabels.work ? (processingState?.processed ?? 0) : accepted}
-                rejected={rejected}
-                duplicates={duplicates}
-                pendingSync={Math.max(
-                  pendingSync,
-                  productLabels.work ? (processingState?.pending ?? 0) : 0,
-                )}
-                locale={workLabels.locale}
-                labels={workLabels.counters}
-              />
-              <RecentOperations
-                operations={recentOperations}
-                labels={workLabels.recent}
-                statusLabels={workLabels.status}
-                locale={workLabels.locale}
-              />
-            </aside>
           </div>
         )}
       </div>
@@ -2642,9 +2671,6 @@ export function WorkScreen({
         onPause={requestExit}
         onClose={() => void requestClose()}
         closeDisabled={closeRequestPending || productLabelsBlocked}
-        {...(palletBoxCapacity !== null && issuerPrefix !== null
-          ? { onMore: () => setPalletMenuOpen(true) }
-          : {})}
       />
 
       {productLabels.work && productLabelsBlocked && !showExceptions ? (
@@ -2777,31 +2803,6 @@ export function WorkScreen({
               <p>{closeError}</p>
               <div className="work-overlay__actions">
                 <Button size="floor" onClick={() => setCloseError(null)}>
-                  {t("work.stay")}
-                </Button>
-              </div>
-            </div>
-          </Alert>
-        ) : null}
-        {palletMenuOpen ? (
-          <Alert
-            tone="info"
-            className="work-overlay"
-            title={<span className="work-overlay__title">{t("work.more")}</span>}
-            style={{ position: "relative", zIndex: 1 }}
-          >
-            <div className="work-overlay__body">
-              <div className="work-overlay__actions">
-                <Button
-                  size="floor"
-                  onClick={() => {
-                    setPalletMenuOpen(false);
-                    setPalletEarlyCloseConfirm(true);
-                  }}
-                >
-                  {t("pallet.earlyClose")}
-                </Button>
-                <Button size="floor" variant="secondary" onClick={() => setPalletMenuOpen(false)}>
                   {t("work.stay")}
                 </Button>
               </div>

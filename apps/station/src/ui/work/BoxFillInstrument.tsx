@@ -25,7 +25,7 @@ export interface BoxFillInstrumentProps {
    * serial alone identifies the bottle to a worker mid-box; the full
    * normalized code stays in the recent-operations list. When given (non-
    * undefined), this instrument owns the screen's accepted-scan live region —
-   * the caller must pass `showVerdict={false}` to its ScanResultInstrument.
+   * the caller must not render a ScanResultInstrument beside it.
    */
   lastAccepted?: { serial: string } | null;
   /** Labels for the accepted readout; required whenever lastAccepted is used. */
@@ -100,9 +100,9 @@ export function BoxFillInstrument({
       data-grouped={grouped}
       data-persistent-state={persistentState}
     >
-      <h2 id="work-box-fill-title">{box && ordinal !== null ? labels.number : labels.title}</h2>
-      {box ? (
-        <>
+      <div className="work-box-fill__head">
+        <h2 id="work-box-fill-title">{box && ordinal !== null ? labels.number : labels.title}</h2>
+        {box ? (
           <div className="work-box-fill__readout">
             <strong data-testid="box-progress">
               {usableCapacity ? `${box.itemCount} / ${usableCapacity}` : box.itemCount}
@@ -128,6 +128,10 @@ export function BoxFillInstrument({
               </div>
             ) : null}
           </div>
+        ) : null}
+      </div>
+      {box ? (
+        <>
           {usableCapacity ? (
             <div
               className="work-box-fill__grid"

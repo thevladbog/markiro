@@ -62,7 +62,8 @@ import { WindowModeControl } from "../ui/WindowModeControl.js";
 import { BoxFillInstrument } from "../ui/work/BoxFillInstrument.js";
 import { RecentOperations } from "../ui/work/RecentOperations.js";
 import { ScanResultInstrument } from "../ui/work/ScanResultInstrument.js";
-import { WorkCounters } from "../ui/work/WorkCounters.js";
+import { ShiftBand } from "../ui/work/ShiftBand.js";
+import { shiftTotalView } from "../lib/shift-progress.js";
 import { WorkFooter } from "../ui/work/WorkFooter.js";
 import { buildWorkLabels } from "../ui/work/work-labels.js";
 import {
@@ -1662,6 +1663,8 @@ const galleryPalletExecutor: SqlExecutor = {
 };
 const galleryPalletIdle = async () => {};
 
+const GALLERY_PROGRESS_NOW = Date.parse("2026-09-25T09:00:00.000Z");
+
 function WorkFixture({
   mode,
   locale,
@@ -1693,87 +1696,118 @@ function WorkFixture({
   // Validation-mode shifts carry a plan target the way the shift list's own
   // validation-mode card does (see ShiftFixture's AUG26-041); aggregation-mode
   // shifts in this gallery have no plan, matching the shift list there too.
-  const plannedQty = mode === "validation" ? 10_000 : undefined;
+  // The owner's small-screen case (pallet20) carries the pallet's planned
+  // quantity instead.
+  const pallet20 = mode.startsWith("aggregation-pallet-20");
+  const plannedQty = mode === "validation" ? 10_000 : pallet20 ? 9_580 : undefined;
   // A grouped, >100-capacity box (see BoxFillInstrument's own `grouped` rule)
   // exercises the same viewport-review case the standalone "box-empty"
   // fixture already covers for the empty end of the range. The ordinary
   // aggregation fixture is a ten-place box — the production norm on the line —
   // which exercises the large numbered-segment mode; the 11–100 rows-of-ten
-  // mode stays covered by "box-empty"'s 20-place panel.
-  const boxCapacity = boxFull ? 120 : 10;
+  // mode stays covered by "box-empty"'s 20-place panel; pallet20 is the
+  // owner's 20-place box.
+  const boxCapacity = boxFull ? 120 : pallet20 ? 20 : 10;
   const boxItemCount = boxFull ? 120 : 2;
+  const productName = ru ? "Тестовый товар А" : "Sample product A";
+  const total = shiftTotalView({
+    shiftId: "gallery-shift",
+    snapshot: pallet20
+      ? {
+          shiftId: "gallery-shift",
+          acceptedUnits: 1_302,
+          deviceAcceptedUnits: 302,
+          asOf: "2026-09-25T08:54:00.000Z",
+          fetchedAt:
+            mode === "aggregation-pallet-20-stale"
+              ? "2026-09-25T08:55:00.000Z"
+              : "2026-09-25T08:59:50.000Z",
+        }
+      : null,
+    local: waiting ? 0 : pallet20 ? 302 : 1_248,
+    plannedQty,
+    nowMs: pallet20 ? GALLERY_PROGRESS_NOW : Date.now(),
+  });
   return (
-    <main className="work-screen" aria-label={ru ? "Тестовый товар А" : "Sample product A"}>
+    <main className="work-screen" aria-label={productName}>
       <div className="work-screen__content">
-        <div className="work-screen__instruments">
-          <div className="work-screen__primary">
-            <ScanResultInstrument
-              exec={galleryProductImageExecutor}
-              productId="gallery-product-berry-syrup"
-              image={galleryProductImage}
-              productName={ru ? "Тестовый товар А" : "Sample product A"}
-              counterpartyName={ru ? "ООО «Тестовый производитель»" : "Sample Manufacturer Ltd"}
-              plannedQty={plannedQty}
-              planLabel={t("work.plan")}
-              gtin="04607000000042"
-              operation={waiting ? null : (operations[0] ?? null)}
-              labels={workLabels.status}
-              showVerdict={!aggregation && !productLabel}
-            />
-            {productLabel ? (
-              <ProductLabelInstrument
-                {...productLabel}
-                verification={productLabel.job?.verification ?? "required"}
+        <div className="work-screen__work">
+          <ShiftBand
+            exec={galleryProductImageExecutor}
+            productId="gallery-product-berry-syrup"
+            image={galleryProductImage}
+            productName={productName}
+            counterpartyName={ru ? "ООО «Тестовый производитель»" : "Sample Manufacturer Ltd"}
+            gtin="04607000000042"
+            total={total}
+            locale={workLabels.locale}
+            labels={workLabels.band}
+          />
+          <div className="work-screen__instruments">
+            <div className="work-screen__primary">
+              {!aggregation && !productLabel ? (
+                <ScanResultInstrument
+                  operation={waiting ? null : (operations[0] ?? null)}
+                  labels={workLabels.status}
+                />
+              ) : null}
+              {productLabel ? (
+                <ProductLabelInstrument
+                  {...productLabel}
+                  verification={productLabel.job?.verification ?? "required"}
+                />
+              ) : null}
+              {aggregation ? (
+                <BoxFillInstrument
+                  box={{ boxId: "gallery-box-1", itemCount: boxItemCount }}
+                  ordinal={1}
+                  acceptedToken={boxFull ? "gallery-box-full" : "gallery-accepted-2"}
+                  capacity={boxCapacity}
+                  canUndo
+                  labels={workLabels.box}
+                  lastAccepted={
+                    waiting
+                      ? null
+                      : operations[0]?.identity
+                        ? { serial: operations[0].identity.serial }
+                        : null
+                  }
+                  verdictLabels={{ ok: workLabels.status.ok, waiting: workLabels.status.waiting }}
+                  onClose={() => undefined}
+                  onUndo={() => undefined}
+                  onClear={() => undefined}
+                />
+              ) : null}
+              {mode === "aggregation-pallet" ? (
+                <PalletStrip
+                  boxCount={42}
+                  capacity={66}
+                  serials="available"
+                  lastBoxSscc="004601234560000042"
+                  onShowContents={() => setShowPalletContents(true)}
+                  onClose={() => undefined}
+                />
+              ) : pallet20 ? (
+                <PalletStrip
+                  boxCount={15}
+                  capacity={66}
+                  serials="available"
+                  lastBoxSscc="004601234560619998"
+                  onShowContents={() => setShowPalletContents(true)}
+                  onClose={() => undefined}
+                />
+              ) : null}
+            </div>
+            <aside className="work-screen__secondary" aria-label={workLabels.summary}>
+              <RecentOperations
+                operations={operations}
+                counts={{ errors: waiting ? 0 : 2, duplicates: waiting ? 0 : 1 }}
+                labels={workLabels.recent}
+                statusLabels={workLabels.status}
+                locale={workLabels.locale}
               />
-            ) : null}
-            {aggregation ? (
-              <BoxFillInstrument
-                box={{ boxId: "gallery-box-1", itemCount: boxItemCount }}
-                ordinal={1}
-                acceptedToken={boxFull ? "gallery-box-full" : "gallery-accepted-2"}
-                capacity={boxCapacity}
-                canUndo
-                labels={workLabels.box}
-                lastAccepted={
-                  waiting
-                    ? null
-                    : operations[0]?.identity
-                      ? { serial: operations[0].identity.serial }
-                      : null
-                }
-                verdictLabels={{ ok: workLabels.status.ok, waiting: workLabels.status.waiting }}
-                onClose={() => undefined}
-                onUndo={() => undefined}
-                onClear={() => undefined}
-              />
-            ) : null}
-            {mode === "aggregation-pallet" ? (
-              <PalletStrip
-                boxCount={42}
-                capacity={66}
-                serials="available"
-                lastBoxSscc="004601234560000042"
-                onShowContents={() => setShowPalletContents(true)}
-                onClose={() => undefined}
-              />
-            ) : null}
+            </aside>
           </div>
-          <aside className="work-screen__secondary" aria-label={workLabels.summary}>
-            <WorkCounters
-              accepted={waiting ? 0 : 1248}
-              rejected={waiting ? 0 : 3}
-              duplicates={waiting ? 0 : 1}
-              pendingSync={mode === "offline" ? 7 : 0}
-              locale={workLabels.locale}
-              labels={workLabels.counters}
-            />
-            <RecentOperations
-              operations={operations}
-              labels={workLabels.recent}
-              statusLabels={workLabels.status}
-              locale={workLabels.locale}
-            />
-          </aside>
         </div>
       </div>
       <WorkFooter

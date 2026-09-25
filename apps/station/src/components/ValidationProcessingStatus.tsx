@@ -13,7 +13,7 @@ export function ValidationProcessingStatus({
   exec: SqlExecutor;
   shiftId: string;
   refreshKey: number;
-  onState: (state: Awaited<ReturnType<typeof readValidationProcessingState>>) => void;
+  onState?: (state: Awaited<ReturnType<typeof readValidationProcessingState>>) => void;
 }) {
   const { t, i18n } = useTranslation();
   const [state, setState] = useState<Awaited<
@@ -31,7 +31,7 @@ export function ValidationProcessingStatus({
         );
         if (current) {
           setState(next);
-          onState(next);
+          onState?.(next);
           setEnabled(policy?.enabled === 1);
         }
       } catch {

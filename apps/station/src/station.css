@@ -2326,32 +2326,28 @@ body,
 }
 
 /*
- * The identity hero's photo: 3:4 portrait, contained (a bottle is never
+ * The shift band's photo: 3:4 portrait, contained (a bottle is never
  * cropped into a square), on the light pad the catalogue shots are shot for.
- * Width scales with the viewport so a 1920px line monitor is not showing the
- * 1024px tablet's thumbnail.
  */
-.work-scan-result__image {
-  width: clamp(120px, 11vw, 200px);
+.work-shift-band__image {
+  width: clamp(60px, 6.5vw, 120px);
   height: auto;
   flex: 0 0 auto;
   aspect-ratio: 3 / 4;
   margin: 0;
-  border-radius: 14px;
+  border-radius: 10px;
   background: #f4f2ee;
-  box-shadow: 0 12px 32px rgb(0 0 0 / 45%);
   object-fit: contain;
 }
 
 /* The photo slot's stand-in when the product has no photo. */
-.work-scan-result__monogram {
+.work-shift-band__monogram {
   display: grid;
   place-items: center;
   border: 2px solid rgb(255 255 255 / 18%);
   background: rgb(255 255 255 / 8%);
-  box-shadow: none;
   color: rgb(255 255 255 / 70%);
-  font: 700 clamp(32px, 3.4vw, 64px) / 1 var(--font-ui);
+  font: 700 clamp(28px, 2.6vw, 48px) / 1 var(--font-ui);
 }
 
 .shift-card__product {
@@ -3472,6 +3468,7 @@ body,
 }
 
 .work-screen__content,
+.work-screen__work,
 .work-screen__instruments,
 .work-screen__primary,
 .work-screen__secondary,
@@ -3486,6 +3483,18 @@ body,
   padding: var(--sp-3);
 }
 
+/*
+ * Design 2026-09-25 («лента смены»): the band names the product and carries
+ * the shift total across both columns; the columns get every remaining pixel.
+ */
+.work-screen__work {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  gap: var(--sp-3);
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
 .work-screen__instruments {
   display: grid;
   width: 100%;
@@ -3498,17 +3507,16 @@ body,
 .work-screen__secondary {
   display: grid;
   gap: var(--sp-3);
+  grid-template-rows: minmax(0, 1fr);
 }
 
-.work-screen__primary {
-  grid-template-rows: minmax(0, 1.1fr) minmax(0, 0.9fr);
+/* The box keeps the flexible row; the pallet strip takes its content height. */
+.work-screen__primary:has(> .pallet-strip) {
+  grid-template-rows: minmax(0, 1fr) auto;
 }
 
-.work-screen__primary > :only-child {
-  grid-row: 1 / -1;
-}
-
-.work-screen__secondary {
+/* Duplicate-DM validation: the processing status above the print job. */
+.work-screen__primary:has(> .work-product-label) {
   grid-template-rows: auto minmax(0, 1fr);
 }
 
@@ -3518,54 +3526,24 @@ body,
   background: var(--surface-card);
 }
 
-.work-scan-result {
+/*
+ * The band's HUE comes from the product -- the photo's dominant colour, or a
+ * GTIN hash when there is no photo (src/lib/product-accent.ts). Lightness is
+ * clamped here so white text keeps contrast on every product.
+ */
+.work-shift-band {
   display: grid;
-  padding: var(--sp-4);
-  gap: var(--sp-3);
-  grid-template-rows: auto minmax(0, 1fr);
-}
-
-/*
- * Aggregation shifts move the accepted-scan readout into the box instrument
- * (`.work-box-fill__last`), so the card is the identity hero alone and the
- * primary column hands every remaining pixel to the box.
- */
-.work-scan-result[data-identity-only="true"] {
-  padding: 0;
-  border: none;
-  background: transparent;
-  grid-template-columns: none;
-  grid-template-rows: auto;
-}
-
-/* Without the instrument shell the gradient hero IS the card. */
-.work-scan-result[data-identity-only="true"] .work-scan-result__identity {
-  padding: var(--sp-4);
-  border-radius: var(--r-3);
-}
-
-.work-screen__primary:has(> .work-scan-result[data-identity-only="true"]) {
-  grid-template-rows: auto minmax(0, 1fr);
-}
-
-/*
- * The identity hero (design 2026-08: гибрид A+C). The gradient's HUE comes
- * from the product — the photo's dominant colour, or a GTIN hash when there
- * is no photo (src/lib/product-accent.ts). Lightness is clamped here, in one
- * place, so white text keeps contrast on every product; only the hue may vary.
- */
-.work-scan-result__identity {
   min-width: 0;
-  display: flex;
-  gap: clamp(16px, 1.8vw, 28px);
-  align-items: center;
   overflow: hidden;
-  padding: clamp(14px, 1.6vw, 24px);
-  border-radius: var(--r-2);
+  padding: var(--sp-3) var(--sp-4);
+  gap: var(--sp-4);
+  grid-template-columns: auto minmax(0, 1fr) minmax(240px, 320px);
+  align-items: center;
+  border-radius: var(--r-3);
   background: linear-gradient(305deg, #2c2b31, #1d1c21 55%, #141317);
 }
 
-.work-scan-result__identity[data-accent="true"] {
+.work-shift-band[data-accent="true"] {
   background: linear-gradient(
     305deg,
     hsl(var(--product-hue) 46% 21%),
@@ -3574,53 +3552,127 @@ body,
   );
 }
 
-.work-scan-result__identity h2,
-.work-box-fill h2,
-.work-recent h2,
-.work-box-fill__empty,
-.work-recent__empty,
-.work-counters__sync {
-  margin: 0;
-}
-
-.work-scan-result__copy {
-  min-width: 0;
+.work-shift-band__copy {
   display: grid;
-  gap: clamp(8px, 1vw, 14px);
+  min-width: 0;
+  gap: var(--sp-2);
 }
 
-.work-scan-result__identity h2 {
+.work-shift-band__copy h2 {
   display: -webkit-box;
+  margin: 0;
   overflow: hidden;
   color: #fff;
-  font: 700 clamp(26px, 2.2vw, 42px) / 1.15 var(--font-ui);
-  letter-spacing: -0.015em;
+  font: 700 clamp(19px, 1.8vw, 34px) / 1.2 var(--font-ui);
+  letter-spacing: -0.01em;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
 
-.work-scan-result__chips {
-  min-width: 0;
+.work-shift-band__chips {
   display: flex;
+  min-width: 0;
   flex-wrap: wrap;
   gap: 8px;
 }
 
-.work-scan-result__chip {
+.work-shift-band__chip {
   overflow: hidden;
   max-width: 100%;
-  padding: 7px 14px;
+  padding: 5px 12px;
   border-radius: 999px;
   background: rgb(255 255 255 / 10%);
   color: rgb(255 255 255 / 85%);
-  font: 600 15px/1.2 var(--font-ui);
+  font: 600 14px/1.2 var(--font-ui);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.work-scan-result__chip--mono {
+.work-shift-band__chip--mono {
   font-family: var(--font-mono);
   font-weight: 400;
+}
+
+.work-shift-band__total {
+  display: grid;
+  min-width: 0;
+  padding-left: var(--sp-4);
+  gap: 6px;
+  border-left: 1px solid rgb(255 255 255 / 15%);
+}
+
+.work-shift-band__label,
+.work-shift-band__meta {
+  margin: 0;
+  overflow: hidden;
+  color: rgb(255 255 255 / 72%);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.work-shift-band__label {
+  font: 600 14px/18px var(--font-ui);
+}
+
+.work-shift-band__meta {
+  font: 500 13px/17px var(--font-ui);
+}
+
+/* The age of the other terminals' share is the point of a stale note: wrap
+   to a second line instead of cutting the time off. */
+.work-shift-band__meta {
+  display: -webkit-box;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.work-shift-band__value {
+  display: flex;
+  min-width: 0;
+  margin: 0;
+  gap: var(--sp-2);
+  align-items: baseline;
+  font-variant-numeric: tabular-nums;
+}
+
+.work-shift-band__value strong {
+  color: #fff;
+  font: 600 clamp(34px, 3vw, 56px) / 1 var(--font-mono);
+}
+
+.work-shift-band__value span {
+  overflow: hidden;
+  color: rgb(255 255 255 / 72%);
+  font: 500 clamp(20px, 1.6vw, 30px) / 1.1 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.work-shift-band__bar {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: rgb(255 255 255 / 15%);
+}
+
+.work-shift-band__bar > span {
+  display: block;
+  height: 100%;
+  background: var(--ok-solid);
+}
+
+.work-scan-result {
+  display: grid;
+  padding: var(--sp-4);
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.work-box-fill h2,
+.work-recent h2,
+.work-box-fill__empty,
+.work-recent__empty {
+  margin: 0;
 }
 
 .work-scan-result__verdict {
@@ -3692,11 +3744,11 @@ body,
   display: grid;
   padding: var(--sp-3);
   gap: var(--sp-2);
-  grid-template-rows: auto auto minmax(0, 1fr) minmax(64px, auto);
+  grid-template-rows: auto minmax(96px, 1fr) minmax(64px, auto);
 }
 
 .work-box-fill[data-grouped="true"] {
-  grid-template-rows: auto auto minmax(0, 1fr) auto minmax(64px, auto);
+  grid-template-rows: auto minmax(96px, 1fr) auto minmax(64px, auto);
 }
 
 .work-box-fill h2,
@@ -3704,9 +3756,22 @@ body,
   font: var(--floor-lg);
 }
 
+/* Title, count and the last serial share one row: the grid keeps the height. */
+.work-box-fill__head {
+  display: flex;
+  min-width: 0;
+  gap: var(--sp-3);
+  align-items: baseline;
+}
+
+.work-box-fill__head h2 {
+  flex: 0 0 auto;
+}
+
 .work-box-fill__readout {
   display: flex;
   min-width: 0;
+  flex: 1 1 auto;
   gap: var(--sp-3);
   align-items: baseline;
 }
@@ -3742,8 +3807,13 @@ body,
 }
 
 .work-box-fill__readout strong {
-  font: var(--floor-title);
+  font: var(--floor-counter-sm);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.work-box-fill__readout > span {
+  white-space: nowrap;
 }
 
 .work-box-fill__readout span,
@@ -3860,15 +3930,7 @@ body,
   white-space: normal;
 }
 
-/* Pallet progress stays compact alongside the current box, even for 66+ boxes. */
-.work-screen__primary:has(> .pallet-strip) {
-  grid-template-rows: auto minmax(0, 1fr) auto;
-}
-
-.work-screen__primary:has(> .pallet-strip):not(:has(> .work-box-fill)) {
-  grid-template-rows: minmax(0, 1fr) auto;
-}
-
+/* One row: the readout and its bar on the left, both actions side by side. */
 .pallet-strip {
   display: grid;
   padding: var(--sp-3);
@@ -3878,71 +3940,108 @@ body,
 }
 
 .pallet-strip__summary {
+  display: grid;
   min-width: 0;
+  gap: 6px;
 }
-.pallet-strip h2 {
-  margin: 0 0 var(--sp-1);
-  color: var(--fg-2);
-  font: var(--floor-body);
-}
+
+/* Spaced like the sentence it is, «Паллета 15 / 66 коробов · 23 %»: a
+   word-sized gap is what lets the Russian readout fit the strip at 1024 px. */
 .pallet-strip__readout {
   display: flex;
+  min-width: 0;
+  gap: var(--sp-1);
   align-items: baseline;
-  gap: var(--sp-2);
-  justify-content: space-between;
   font-variant-numeric: tabular-nums;
 }
-.pallet-strip__readout > span {
+
+.pallet-strip h2 {
+  flex: 0 0 auto;
+  margin: 0;
+  color: var(--fg-2);
+  font: var(--floor-body-strong);
+}
+
+/* «15 / 66 коробов»: the unit word gives way first on a narrow strip; the
+   percentage beside it never does. */
+.pallet-strip__progress {
+  overflow: hidden;
+  min-width: 0;
   color: var(--fg-2);
   font: var(--floor-body);
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
-.pallet-strip__progress {
+
+.pallet-strip__count {
   color: var(--fg-1);
-  font: var(--floor-title);
+  font: 600 24px/30px var(--font-mono);
 }
-.pallet-strip__progress[data-highlight="true"] {
+
+.pallet-strip__count[data-highlight="true"] {
   animation: pallet-count-added 300ms ease-out;
 }
+
 @keyframes pallet-count-added {
   50% {
     color: var(--ok-fg);
   }
 }
+
 @media (prefers-reduced-motion: reduce) {
-  .pallet-strip__progress[data-highlight="true"] {
+  .pallet-strip__count[data-highlight="true"] {
     animation: none;
   }
 }
+
+.pallet-strip__percent {
+  flex: 0 0 auto;
+  color: var(--fg-2);
+  font: var(--floor-body);
+  white-space: nowrap;
+}
+
 .pallet-strip__bar {
   height: 8px;
-  margin-block: var(--sp-1);
   overflow: hidden;
   border-radius: var(--r-1);
   background: var(--surface-panel);
 }
+
 .pallet-strip__bar > span {
   display: block;
   height: 100%;
   background: var(--fg-2);
 }
-.pallet-strip__remaining,
-.pallet-strip__last {
+
+.pallet-strip__meta {
   margin: 0;
+  overflow: hidden;
   color: var(--fg-2);
-  font: var(--floor-body);
+  font: 400 15px/20px var(--font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.pallet-strip__last code {
+
+.pallet-strip__meta code {
   color: var(--fg-1);
   font-family: var(--font-mono);
 }
+
 .pallet-strip__actions {
   display: grid;
-  gap: var(--sp-1);
+  gap: var(--sp-2);
+  grid-auto-flow: column;
+  grid-auto-columns: 116px;
 }
+
 .pallet-strip__actions .mk-btn {
+  min-width: 0 !important;
   padding-inline: var(--sp-2) !important;
+  line-height: 1.15;
+  white-space: normal;
 }
+
 .pallet-strip__warning {
   grid-column: 1 / -1;
   margin: 0;
@@ -3983,43 +4082,6 @@ body,
   font-family: var(--font-mono);
 }
 
-.work-counters {
-  padding: var(--sp-3);
-}
-
-.work-counters dl {
-  display: grid;
-  margin: 0;
-  gap: var(--sp-3);
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.work-counters dt {
-  color: var(--fg-2);
-  font: var(--floor-body);
-}
-
-.work-counters dd {
-  overflow: hidden;
-  margin: 0;
-  font: var(--floor-title);
-  font-variant-numeric: tabular-nums;
-  text-overflow: ellipsis;
-}
-
-.work-counters__sync {
-  margin-top: var(--sp-2);
-  font: var(--floor-body-strong);
-}
-
-.work-counters__sync[data-tone="ok"] {
-  color: var(--ok-fg);
-}
-
-.work-counters__sync[data-tone="warn"] {
-  color: var(--warn-fg);
-}
-
 .work-recent {
   display: grid;
   padding: var(--sp-3);
@@ -4057,6 +4119,11 @@ body,
   border-left-color: var(--ok-border);
 }
 
+/* An undo is a correction, not an error: no red edge. */
+.work-recent li[data-tone="neutral"] {
+  border-left-color: var(--line-strong);
+}
+
 .work-recent li strong,
 .work-recent li span,
 .work-recent li time {
@@ -4065,36 +4132,61 @@ body,
   white-space: nowrap;
 }
 
+.work-recent__head {
+  display: flex;
+  min-width: 0;
+  gap: var(--sp-3);
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.work-recent__quality {
+  display: flex;
+  margin: 0;
+  gap: var(--sp-4);
+  align-items: baseline;
+}
+
+.work-recent__quality > div {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+
+.work-recent__quality dt {
+  color: var(--fg-2);
+  font: var(--floor-body);
+}
+
+.work-recent__quality dd {
+  margin: 0;
+  font: 600 24px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.work-recent__quality dd[data-tone="warn"] {
+  color: var(--warn-fg);
+}
+
 .work-recent__identity {
   display: grid;
   min-width: 0;
-  margin: 0;
-  font: var(--text-code);
 }
 
-.work-recent__identity > div {
-  display: grid;
-  min-width: 0;
-  gap: var(--sp-1);
-  grid-template-columns: auto minmax(0, 1fr);
-}
-
-.work-recent__identity dt,
-.work-recent__identity dd {
-  min-width: 0;
-  margin: 0;
+.work-recent__serial {
   overflow: hidden;
+  color: var(--fg-1);
+  font: 600 17px/22px var(--font-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.work-recent__identity dt {
+.work-recent__gtin {
+  overflow: hidden;
   color: var(--fg-2);
-  font-weight: 600;
-}
-
-.work-recent__identity dt::after {
-  content: ":";
+  font: var(--text-code);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .work-recent__empty {
@@ -5297,56 +5389,35 @@ body,
 }
 
 @media (max-width: 1100px), (max-height: 767px) {
-  .work-screen__primary {
-    grid-template-rows: minmax(124px, 0.55fr) minmax(0, 1.45fr);
+  .work-shift-band {
+    padding: var(--sp-2) var(--sp-3);
+    gap: var(--sp-3);
+    grid-template-columns: auto minmax(0, 1fr) minmax(220px, 280px);
+  }
+
+  .work-shift-band__image {
+    width: 60px;
+  }
+
+  .work-shift-band__copy h2 {
+    font: 700 19px/23px var(--font-ui);
+  }
+
+  .work-shift-band__chip {
+    padding: 4px 10px;
+    font-size: 13px;
+  }
+
+  .work-shift-band__value strong {
+    font: 600 34px/1 var(--font-mono);
+  }
+
+  .work-shift-band__value span {
+    font: 500 20px/1.1 var(--font-mono);
   }
 
   .work-scan-result {
     padding: var(--sp-3);
-    gap: var(--sp-2);
-    grid-template-columns: minmax(0, 1.35fr) minmax(150px, 0.65fr);
-    grid-template-rows: minmax(0, 1fr);
-  }
-
-  /*
-   * The side-by-side compact above exists to share a ~230px slot with the box
-   * instrument. Without a box the scan result owns the whole column, and the
-   * hero must not stretch into a tower of empty gradient beside a one-word
-   * verdict squeezed into a strip: identity folds to a content-high row on
-   * top and the verdict takes the full width below, as on wide screens.
-   */
-  .work-screen__primary > .work-scan-result:only-child {
-    grid-template-columns: none;
-    grid-template-rows: auto minmax(0, 1fr);
-  }
-
-  .work-scan-result__identity {
-    gap: var(--sp-3);
-    padding: var(--sp-3);
-  }
-
-  /* Compact hero: the photo shrinks but stays a portrait, never a square crop. */
-  .work-scan-result__image {
-    width: 96px;
-    border-radius: 10px;
-    box-shadow: none;
-  }
-
-  .work-scan-result__copy {
-    gap: var(--sp-2);
-  }
-
-  .work-scan-result__identity h2 {
-    font: 700 20px/24px var(--font-ui);
-  }
-
-  .work-scan-result__chips {
-    gap: 6px;
-  }
-
-  .work-scan-result__chip {
-    padding: 5px 10px;
-    font-size: 13px;
   }
 
   .work-scan-result__verdict[data-compact-success="true"] {
@@ -5365,7 +5436,7 @@ body,
   }
 
   .work-box-fill__readout strong {
-    font: var(--floor-counter-sm);
+    font: 600 40px/44px var(--font-mono);
   }
 }
 

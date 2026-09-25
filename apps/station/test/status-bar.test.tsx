@@ -410,8 +410,8 @@ describe("StatusBar", () => {
           conflicts={15}
         />,
       );
-      expect(screen.getByText("Дубли кодов")).toBeDefined();
-      expect(screen.getByText("Дубли")).toBeDefined();
+      expect(screen.getByText("Конфликты кодов")).toBeDefined();
+      expect(screen.getByText("Конфликты")).toBeDefined();
       expect(screen.getByTestId("conflicts-status").textContent).toBe("15");
     } finally {
       await act(() => i18n.changeLanguage("en"));

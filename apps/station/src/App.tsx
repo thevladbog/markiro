@@ -117,6 +117,7 @@ import {
   type RunConfigTransition,
 } from "./lib/credential-reset.js";
 import { useSyncEngine } from "./lib/use-sync-engine.js";
+import { headerShiftLabel } from "./lib/shift-label.js";
 import { closeShiftOffline, closeShiftOfflineWithGrant } from "./lib/shift-close.js";
 import { OfflineGrantDeniedError } from "./lib/journal.js";
 import {
@@ -1002,6 +1003,7 @@ export function App() {
     resume: resumeSync,
     requestFullShiftAudit,
     reconcileNow: reconcileBoxesNow,
+    watchShiftProgress,
   } = useSyncEngine({
     exec: tauriExecutor,
     client: authenticatedClient,
@@ -1924,15 +1926,7 @@ export function App() {
       stationName={config.deviceName ?? config.deviceId ?? config.machineId}
       lineName={config.lineName ?? null}
       operatorName={operator.name}
-      shiftLabel={
-        shift
-          ? shiftContext
-            ? shiftContext.number
-              ? `${shiftContext.number} · ${shiftContext.productName}`
-              : shiftContext.productName
-            : shift.id
-          : null
-      }
+      shiftLabel={headerShiftLabel(shiftContext ?? null, shift ? shift.id : null)}
       serverReachability={serverReachability}
       scanner={scannerIndicator(hardwareConfig, scannerStatus)}
       printerConfigured={Object.values(printerRouting.assignments).some(Boolean)}
@@ -2171,6 +2165,9 @@ export function App() {
                 return summary;
               }}
               pendingSync={syncState.pending}
+              shiftProgress={syncState.shiftProgress}
+              syncLastSuccessAt={syncState.lastSuccessAt}
+              onWatchShiftProgress={watchShiftProgress}
               // Read off `shift_mirror` alongside `shiftContext` above (Task 13
               // review, Finding 1) -- null for a validation-mode shift, or a
               // device the server could not resolve an issuer prefix for,

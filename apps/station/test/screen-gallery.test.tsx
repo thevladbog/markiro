@@ -301,16 +301,15 @@ describe("development screen gallery", () => {
       <StationScreenGallery request={{ state: "work-aggregation", locale: "ru" }} />,
     );
 
-    // The aggregation card is the identity hero alone: the accepted-scan
-    // readout lives in the box instrument and prints the serial only, while
-    // the full code stays in the recent-operations list.
-    const scan = view.container.querySelector<HTMLElement>(".work-scan-result");
-    expect(scan).not.toBeNull();
-    expect(scan?.getAttribute("data-identity-only")).toBe("true");
-    expect(scan?.querySelector('[data-semantic="accepted-marker"]')).toBeNull();
-    expect(scan?.querySelector('[data-semantic="normalized-code"]')).toBeNull();
-    expect(scan?.textContent).not.toContain("ПРИНЯТО");
-    expect(scan?.textContent).not.toContain("Криптохвост");
+    expect(view.container.querySelector(".work-scan-result")).toBeNull();
+    const band = view.container.querySelector<HTMLElement>(".work-shift-band");
+    expect(band).not.toBeNull();
+    if (!band) throw new Error("shift band was not rendered");
+    expect(within(band).getByRole("heading", { name: "Тестовый товар А" })).toBeDefined();
+    expect(within(band).getByText("В смене · этот терминал")).toBeDefined();
+    expect(within(band).getByTestId("shift-total").textContent).toBe(
+      new Intl.NumberFormat("ru-RU").format(1248),
+    );
     expect(view.container.querySelector(".mk-signal-overlay")).toBeNull();
 
     const box = view.container.querySelector<HTMLElement>(".work-box-fill");
@@ -344,7 +343,8 @@ describe("development screen gallery", () => {
 
     const image = await screen.findByRole("img", { name: "Тестовый товар А" });
     expect(image.getAttribute("src")).toBe("blob:gallery-product");
-    expect(image.classList.contains("work-scan-result__image")).toBe(true);
+    // The product photo lives in the shift band now, not in the scan card.
+    expect(image.classList.contains("work-shift-band__image")).toBe(true);
   });
 
   it("covers the compact active-shift waiting state with the product image", async () => {
@@ -474,7 +474,7 @@ describe("development screen gallery", () => {
     // scan result and counters, the same as production.
     view.rerender(<StationScreenGallery request={{ state: "box-full", locale: "ru" }} />);
     expect(view.container.querySelector(".work-screen")).not.toBeNull();
-    expect(view.container.querySelector(".work-scan-result")).not.toBeNull();
+    expect(view.container.querySelector(".work-shift-band")).not.toBeNull();
     const grouped = view.container.querySelector<HTMLElement>(".work-box-fill__grid");
     expect(grouped?.getAttribute("data-grouped")).toBe("true");
     expect(grouped?.getAttribute("aria-valuemax")).toBe("120");
@@ -710,5 +710,44 @@ describe("development screen gallery", () => {
 
     expect(await screen.findByText("0.1.0-beta.22")).toBeDefined();
     expect(screen.getByText("На станции установлена актуальная версия.")).toBeDefined();
+  });
+
+  it("shows the owner's small-screen case: a 20-place box, pallet 15/66 and the shift total", () => {
+    const view = render(
+      <StationScreenGallery request={{ state: "work-pallet-20", locale: "ru" }} />,
+    );
+    const band = view.container.querySelector<HTMLElement>(".work-shift-band");
+    if (!band) throw new Error("shift band was not rendered");
+    const ru = new Intl.NumberFormat("ru-RU");
+    expect(within(band).getByText("В смене · все терминалы")).toBeDefined();
+    expect(within(band).getByTestId("shift-total").textContent).toBe(ru.format(1302));
+    // `collapseWhitespace: false` keeps `Intl.NumberFormat`'s U+00A0 grouping
+    // space intact so it matches the DOM's raw text -- the default
+    // normalizer would otherwise collapse it to an ASCII space and never
+    // equal this un-normalized matcher.
+    expect(
+      within(band).getByText(`/ ${ru.format(9580)}`, { collapseWhitespace: false }),
+    ).toBeDefined();
+    expect(band.querySelector(".work-shift-band__meta")?.textContent).toContain(
+      "этот терминал 302",
+    );
+    expect(view.container.querySelectorAll(".work-box-fill__cell")).toHaveLength(20);
+    // «Паллета 15 / 66 коробов · 23 %», the count in its own (mono) element.
+    expect(within(view.container).getByText("15 / 66").className).toBe("pallet-strip__count");
+    expect(view.container.querySelector(".pallet-strip__progress")?.textContent).toBe(
+      "15 / 66 коробов",
+    );
+    expect(view.container.querySelector(".pallet-strip__percent")?.textContent).toMatch(
+      /^· 23\s%$/,
+    );
+  });
+
+  it("says how old the other terminals' share is when the answer is stale", () => {
+    const view = render(
+      <StationScreenGallery request={{ state: "work-pallet-20-stale", locale: "ru" }} />,
+    );
+    expect(view.container.querySelector(".work-shift-band__meta")?.textContent).toContain(
+      "другие терминалы — на",
+    );
   });
 });

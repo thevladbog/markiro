@@ -162,6 +162,11 @@ export const STATION_PREFLIGHTS = Object.freeze([
     headers: "content-type,x-api-key,x-station-capabilities",
   },
   {
+    path: "/station/shifts/cors-probe/progress",
+    method: "GET",
+    headers: "content-type,x-api-key,x-station-capabilities",
+  },
+  {
     path: "/station/shift-closures",
     method: "POST",
     headers: "content-type,x-api-key,x-station-capabilities",

@@ -96,6 +96,7 @@ function isStationRequest(req: Request): boolean {
     (method === "GET" &&
       /^\/station\/inventories\/[^/]+\/bundle\/(?:manifest|codes)$/.test(path)) ||
     (method === "GET" && /^\/station\/inventories\/[^/]+\/progress$/.test(path)) ||
+    (method === "GET" && /^\/station\/shifts\/[^/]+\/progress$/.test(path)) ||
     (method === "GET" &&
       /^\/shifts\/[^/]+\/(?:bundle|reference-bundle|code-history)$/.test(path)) ||
     (method === "POST" && /^\/shifts\/[^/]+\/(?:open|enter|sscc\/top-up)$/.test(path))

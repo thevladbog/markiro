@@ -29,8 +29,23 @@ export function isStationCredentialRejection(error: unknown): error is StationAp
   );
 }
 
+export interface StationGetOptions {
+  /**
+   * A display-only read: an observer of reachability, never a reporter of
+   * outages. It never claims the newest request sequence, so a request
+   * already in flight when this read starts keeps its right to report,
+   * instead of being silenced by this one. On an HTTP answer (ok or error
+   * status) it reports the server reachable, but only when no newer request
+   * has started since it began; on a failure without any response (a
+   * network error, a CORS rejection by an older server, a timeout) it never
+   * reports anything, leaving that to the requests that carry sync. A
+   * credential rejection still applies, exactly as for any other request.
+   */
+  readonly displayOnly?: boolean;
+}
+
 export interface StationClient {
-  get<T>(path: string): Promise<T>;
+  get<T>(path: string, options?: StationGetOptions): Promise<T>;
   download(path: string): Promise<Blob>;
   post<T>(path: string, body?: unknown): Promise<T>;
   /**
@@ -157,6 +172,13 @@ export function createStationClient(
   const credentialBoundary = options.credentialBoundary;
   let latestRequestSequence = 0;
 
+  interface RequestOptions {
+    readonly body?: unknown;
+    readonly signal?: AbortSignal | undefined;
+    readonly retriedElsewhere?: ((error: unknown) => boolean) | undefined;
+    readonly displayOnly?: boolean | undefined;
+  }
+
   async function rejectCredentialIfExplicit(error: unknown): Promise<void> {
     if (!credentialBoundary || !isStationCredentialRejection(error)) return;
     await rejectCredentialGeneration(
@@ -169,20 +191,32 @@ export function createStationClient(
   }
 
   /**
-   * `retriedElsewhere` names failures the caller answers with a second route;
-   * such a failure without a response leaves reachability to that attempt.
+   * `retriedElsewhere` names a failure whose reachability a second request
+   * the caller tries next already reports (the heartbeat's legacy-probe
+   * fallback): such a failure without a response reports nothing here
+   * either.
+   *
+   * `displayOnly` marks a read that only observes reachability instead of
+   * owning it — see `StationGetOptions` for the exact contract this flag
+   * implements. It never claims the newest request sequence, and a failure
+   * without a response never reports through it, regardless of sequence.
    */
   async function request<T>(
     method: "GET" | "POST",
     path: string,
-    body?: unknown,
-    signal?: AbortSignal,
-    retriedElsewhere?: (error: unknown) => boolean,
+    { body, signal, retriedElsewhere, displayOnly }: RequestOptions = {},
   ): Promise<T> {
     if (credentialBoundary?.generation.sealed) {
       throw new Error("station credential generation is sealed");
     }
-    const requestSequence = ++latestRequestSequence;
+    // A display-only request never claims the newest sequence number: it
+    // observes whichever request currently owns reachability instead of
+    // taking that ownership away from it. Claiming a new sequence here
+    // unconditionally (the bug this replaces) made every earlier in-flight
+    // request's later report stale -- including the requests that actually
+    // carry sync -- so a hanging link went unreported while a display-only
+    // read kept overtaking the heartbeat.
+    const requestSequence = displayOnly ? latestRequestSequence : ++latestRequestSequence;
     const reportReachability = (state: Exclude<ServerReachability, "checking">) => {
       if (requestSequence === latestRequestSequence) options.onReachabilityChange?.(state);
     };
@@ -218,7 +252,9 @@ export function createStationClient(
       if (res.status === 204) return undefined as T;
       return (await res.json()) as T;
     } catch (error) {
-      if (!receivedResponse && !retriedElsewhere?.(error)) reportReachability("unreachable");
+      if (!receivedResponse && !displayOnly && !retriedElsewhere?.(error)) {
+        reportReachability("unreachable");
+      }
       await rejectCredentialIfExplicit(error);
       throw error;
     } finally {
@@ -228,7 +264,7 @@ export function createStationClient(
   }
 
   return {
-    get: (path) => request("GET", path),
+    get: (path, options) => request("GET", path, { displayOnly: options?.displayOnly }),
     // Binary media is an optional display enhancement. Generic image/CDN
     // failures must not seal the line's credential generation, but an explicit
     // server revocation code still crosses the same credential boundary as any
@@ -258,16 +294,19 @@ export function createStationClient(
         clearTimeout(timer);
       }
     },
-    post: (path, body) => request("POST", path, body),
+    post: (path, body) => request("POST", path, { body }),
     // Both routes are TenantGuard-protected, so success proves the key still
     // resolves a live device. Only an unknown route falls back: an explicit
     // server answer (401, 403, 429, 5xx) or a timeout is the probe's result.
     whoami: async (signal) => {
       try {
-        await request("POST", HEARTBEAT_PATH, undefined, signal, heartbeatRouteUnavailable);
+        await request("POST", HEARTBEAT_PATH, {
+          signal,
+          retriedElsewhere: heartbeatRouteUnavailable,
+        });
       } catch (error) {
         if (!heartbeatRouteUnavailable(error)) throw error;
-        await request("GET", LEGACY_PRESENCE_PATH, undefined, signal);
+        await request("GET", LEGACY_PRESENCE_PATH, { signal });
       }
       return { ok: true };
     },
