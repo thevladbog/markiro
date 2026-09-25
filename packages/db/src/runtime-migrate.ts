@@ -74,6 +74,7 @@ export async function runRuntimeMigrations(
           packaged.indexOf("0136_validate_working_device_events"),
           packaged.indexOf("0151_offline_grant_readiness"),
           packaged.indexOf("0169_validate_device_replacement_execution"),
+          packaged.indexOf("0175_code_registry_shift_terminal_idx"),
         );
       }
     } catch (error) {
@@ -134,6 +135,7 @@ async function migrateWithOnlineOfferVariants(
   validationIndex: number,
   readinessIndex: number,
   replacementValidationIndex: number,
+  codeRegistryShiftIndex: number,
 ): Promise<void> {
   const { readMigrationFiles } = await import("drizzle-orm/migrator");
   const { PgDialect } = await import("drizzle-orm/pg-core");
@@ -210,6 +212,19 @@ async function migrateWithOnlineOfferVariants(
     });
     nextIndex = replacementValidationIndex;
   }
+  if (codeRegistryShiftIndex >= nextIndex) {
+    // code_registry takes every accepted scan: a plain CREATE INDEX would
+    // block ingest for the whole build. The journaled .sql keeps drizzle-kit's
+    // plain statement for tests that run migrate() directly; at runtime this
+    // stage builds the index concurrently and journals the migration itself.
+    await dialect.migrate(migrations.slice(nextIndex, codeRegistryShiftIndex), session, {
+      migrationsFolder,
+    });
+    const shiftIndexMigration = migrations[codeRegistryShiftIndex];
+    if (!shiftIndexMigration) throw new Error("Missing code registry shift index migration");
+    await migrateWithOnlineCodeRegistryShiftIndex(client, shiftIndexMigration);
+    nextIndex = codeRegistryShiftIndex + 1;
+  }
   await dialect.migrate(migrations.slice(nextIndex), session, { migrationsFolder });
 }
 
@@ -275,6 +290,64 @@ async function prepareOnlineGrantReadiness(client: pg.PoolClient): Promise<void>
   if (!prepared?.indisvalid)
     await client.query(`CREATE UNIQUE INDEX CONCURRENTLY device_grant_configurations_tenant_id_uq_idx
       ON public.device_grant_configurations (tenant_id, id)`);
+}
+
+async function migrateWithOnlineCodeRegistryShiftIndex(
+  client: pg.PoolClient,
+  migration: { hash: string; folderMillis: number; sql: string[] },
+): Promise<void> {
+  if (migration.hash !== "ed69c199cc2487148f0057a1bbf186b4a33e1acc9daf6b5285394fd851f5f533") {
+    throw new Error("Online code registry shift index migration hash mismatch");
+  }
+  const latest = await client.query<{ created_at: string }>(
+    "SELECT created_at FROM drizzle.__drizzle_migrations ORDER BY created_at DESC LIMIT 1",
+  );
+  if (Number(latest.rows[0]?.created_at ?? 0) >= migration.folderMillis) return;
+  if (migration.sql.length !== 1) {
+    throw new Error("Unexpected online code registry shift index migration");
+  }
+  // Runs under the session's statement_timeout; a cancelled build leaves an
+  // INVALID index that the next run drops and rebuilds.
+  await prepareOnlineCodeRegistryShiftIndex(client);
+  const timeout = await client.query<{ lock_timeout: string }>("SHOW lock_timeout");
+  const previousTimeout = timeout.rows[0]?.lock_timeout;
+  if (!previousTimeout) throw new Error("Missing migration lock timeout");
+  await client.query("SELECT set_config('lock_timeout', '5s', false)");
+  try {
+    await client.query("BEGIN");
+    try {
+      await client.query(
+        "INSERT INTO drizzle.__drizzle_migrations (hash, created_at) VALUES ($1, $2)",
+        [migration.hash, migration.folderMillis],
+      );
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    }
+  } finally {
+    await client.query("SELECT set_config('lock_timeout', $1, false)", [previousTimeout]);
+  }
+}
+
+async function prepareOnlineCodeRegistryShiftIndex(client: pg.PoolClient): Promise<void> {
+  const existing = await client.query<{ indisvalid: boolean; definition: string }>(
+    `SELECT indisvalid, pg_get_indexdef(indexrelid) AS definition FROM pg_index
+      WHERE indexrelid = to_regclass('public.code_registry_tenant_shift_terminal_idx')`,
+  );
+  const prepared = existing.rows[0];
+  if (
+    prepared &&
+    prepared.definition !==
+      "CREATE INDEX code_registry_tenant_shift_terminal_idx ON public.code_registry USING btree (tenant_id, shift_id, terminal_id)"
+  )
+    throw new Error("Unexpected prepared code registry shift index");
+  // IF NOT EXISTS alone would silently reuse an INVALID leftover.
+  if (prepared && !prepared.indisvalid)
+    await client.query("DROP INDEX CONCURRENTLY public.code_registry_tenant_shift_terminal_idx");
+  if (!prepared?.indisvalid)
+    await client.query(`CREATE INDEX CONCURRENTLY code_registry_tenant_shift_terminal_idx
+      ON public.code_registry (tenant_id, shift_id, terminal_id)`);
 }
 
 async function prepareOnlineOfferVariants(client: pg.PoolClient): Promise<void> {

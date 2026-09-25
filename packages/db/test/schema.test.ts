@@ -264,6 +264,17 @@ describe("platform schema", () => {
     ).toEqual(["tenant_id", "number_month_key", "number_seq"]);
   });
 
+  it("indexes code_registry by tenant, shift and terminal for shift progress reads", () => {
+    const index = getTableConfig(codeRegistry).indexes.find(
+      (item) => item.config.name === "code_registry_tenant_shift_terminal_idx",
+    );
+    expect(index, "missing code_registry (tenant, shift, terminal) index").toBeDefined();
+    expect(index?.config.unique).toBe(false);
+    expect(
+      index?.config.columns.map((column) => (is(column, IndexedColumn) ? column.name : undefined)),
+    ).toEqual(["tenant_id", "shift_id", "terminal_id"]);
+  });
+
   it("stores an optional production date on a shift without a default", () => {
     expect(shifts.productionDate).toBeDefined();
     expect(shifts.productionDate.notNull).toBe(false);

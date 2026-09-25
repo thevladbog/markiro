@@ -1226,6 +1226,13 @@
       "when": 1789900000007,
       "tag": "0174_station_security_revocation",
       "breakpoints": true
+    },
+    {
+      "idx": 175,
+      "version": "7",
+      "when": 1790336144247,
+      "tag": "0175_code_registry_shift_terminal_idx",
+      "breakpoints": true
     }
   ]
 }

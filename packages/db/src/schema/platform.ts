@@ -353,6 +353,9 @@ export const codeRegistry = pgTable(
   (t) => [
     primaryKey({ columns: [t.tenantId, t.codeHash] }),
     index("code_registry_tenant_scanned_idx").on(t.tenantId, t.scannedAt),
+    // GET /station/shifts/:id/progress (and the shift summary) count one
+    // shift's current owners and one device's share of them.
+    index("code_registry_tenant_shift_terminal_idx").on(t.tenantId, t.shiftId, t.terminalId),
     check("code_registry_hash_check", sql`${t.codeHash} ~ '^[0-9a-f]{64}$'`),
     // Composite FK: shift_id must belong to the same tenant as the
     // registry row referencing it — same shape as shifts' own FKs to
