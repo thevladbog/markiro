@@ -265,6 +265,7 @@ describe.skipIf(!ready)("cors e2e", () => {
         ["GET", "/shifts/shift-1/reference-bundle"],
         ["POST", "/shifts/shift-1/open"],
         ["POST", "/shifts/shift-1/enter"],
+        ["POST", "/shifts/shift-1/sscc/top-up"],
         ["GET", "/products?search=04600000000000"],
         ["POST", "/products/gtin-check/"],
       ] as const) {
@@ -314,6 +315,7 @@ describe.skipIf(!ready)("cors e2e", () => {
         ["GET", "/shifts/shift-1"],
         ["POST", "/shifts/shift-1/close"],
         ["GET", "/shifts/shift-1/enter"],
+        ["GET", "/shifts/shift-1/sscc/top-up"],
         ["POST", "/products"],
         ["GET", "/products/product-1"],
         ["POST", "/products/gtin-check/extra"],

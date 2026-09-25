@@ -69,6 +69,7 @@ const documentedStationSurface = [
   ["GET", "/shifts/shift-1/code-history"],
   ["POST", "/shifts/shift-1/open"],
   ["POST", "/shifts/shift-1/enter"],
+  ["POST", "/shifts/shift-1/sscc/top-up"],
   ["GET", "/products"],
   ["POST", "/products/gtin-check"],
 ] as const;
@@ -167,6 +168,10 @@ describe("station CORS surface", () => {
     ["GET", "/shifts/shift-1/open"],
     ["GET", "/shifts/shift-1/enter"],
     ["POST", "/shifts/shift-1/enter/extra"],
+    ["GET", "/shifts/shift-1/sscc/top-up"],
+    ["PATCH", "/shifts/shift-1/sscc/top-up"],
+    ["POST", "/shifts/shift-1/sscc/top-up/extra"],
+    ["POST", "/shifts/shift-1/sscc"],
     ["POST", "/shifts/shift-1/summary"],
     ["POST", "/shifts/shift-1/bundle"],
     ["POST", "/shifts/shift-1/reference-bundle"],
