@@ -77,8 +77,8 @@ export function taskFormStep(number: number, text: string): string {
 
 /**
  * The exact stylesheet the inventory task form shipped with, byte for byte.
- * `inventory-task-form-snapshot.test.ts` fails on any drift here, because the
- * published MKR-INS-06 screenshot was taken from these rules.
+ * `apps/api/test/inventory-task-form-snapshot.test.ts` fails on any drift here,
+ * because the published MKR-INS-06 screenshot was taken from these rules.
  */
 export const TASK_FORM_BASE_CSS = `    @page { size: A4 portrait; margin: 0; }
     * { box-sizing: border-box; }

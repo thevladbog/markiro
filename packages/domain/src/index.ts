@@ -389,7 +389,7 @@ export type {
 } from "./print-forms/pallet-placard.js";
 export { renderShiftTaskFormHtml } from "./print-forms/shift-task-form.js";
 export type { ShiftTaskFormData } from "./print-forms/shift-task-form.js";
-// Chrome helpers stay grouped: `escapeHtml` and friends are generic names, and
-// the box-report module has its own `escapeHtml` that must not be confused
-// with this one.
+// The chrome helpers stay grouped under one name: `escapeHtml`, `formatInteger`
+// and friends are generic names that should not crowd the package root, and
+// contents-report.ts has a different `escapeHtml` of its own.
 export * as taskFormChrome from "./print-forms/task-form-chrome.js";

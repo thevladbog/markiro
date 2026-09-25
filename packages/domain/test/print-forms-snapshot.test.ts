@@ -13,10 +13,13 @@ import {
 } from "../src/print-forms/shift-task-form.js";
 
 /**
- * Characterisation lock for moving the printable forms into @markiro/domain
- * (docs/superpowers/plans/2026-09-26-standalone-00-print-forms-to-domain.md).
- * The files under fixtures/print-forms are the contract: the move must not
- * change a single byte, so they are compared verbatim and kept out of Prettier.
+ * Byte-level contract of the printable forms. The fixtures were written before
+ * the forms moved from apps/api into @markiro/domain
+ * (docs/superpowers/plans/2026-09-26-standalone-00-print-forms-to-domain.md) and
+ * remain the reference: every render is compared verbatim, and the files are
+ * kept out of Prettier and of git's whitespace checks. To change a form on
+ * purpose, run `pnpm --filter @markiro/domain exec vitest run -u
+ * test/print-forms-snapshot.test.ts` and review the fixture diff like code.
  */
 
 /** GS (ASCII 0x1D), the real KM separator byte. */

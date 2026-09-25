@@ -2,3 +2,8 @@
 # machine-generated (required for `db:generate` diffing — never hand-edited),
 # so collapse them in PR diffs and exclude them from language stats.
 packages/db/migrations/meta/*.json linguist-generated=true
+
+# Characterisation fixtures of the printable forms: the renderers emit trailing
+# spaces (an empty `${watermark}` slot) and every byte is the contract, so git
+# must neither flag nor convert them.
+packages/domain/test/fixtures/print-forms/*.html -whitespace -text

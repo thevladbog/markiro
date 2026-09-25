@@ -2,14 +2,15 @@ import { describe, expect, it } from "vitest";
 import { renderBoxReportHtml, type BoxReportData } from "../src/print-forms/box-report.js";
 
 /**
- * GS (ASCII 0x1D) — the real KM segment separator byte (see kiosk-orders.e2e.test.ts
- * for the full rationale on why fixtures must use it, not a printable stand-in).
+ * GS (ASCII 0x1D) — the real KM segment separator byte (see
+ * apps/api/test/kiosk-orders.e2e.test.ts for the full rationale on why fixtures must use
+ * it, not a printable stand-in).
  */
 const GS = String.fromCharCode(0x1d);
 
 /**
  * `renderDataMatrixSvg` enforces the AI-01 GTIN mod-10 check digit —
- * "04600682000013" is check-digit VALID (same vector as slip.test.ts).
+ * "04600682000013" is check-digit VALID (same vector as apps/api/test/slip.test.ts).
  */
 const GTIN = "04600682000013";
 
