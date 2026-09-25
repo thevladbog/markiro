@@ -190,6 +190,28 @@
 			}
 		}
 
+		@stationSsccTopUp {
+			path_regexp stationSsccTopUp ^/shifts/[^/]+/sscc/top-up$
+			method POST
+			header X-Api-Key *
+		}
+		handle @stationSsccTopUp {
+			reverse_proxy api:3000 {
+				import standard_api_transport
+			}
+		}
+
+		@stationSsccTopUpPreflight {
+			path_regexp stationSsccTopUpPreflight ^/shifts/[^/]+/sscc/top-up$
+			method OPTIONS
+			header Access-Control-Request-Method POST
+		}
+		handle @stationSsccTopUpPreflight {
+			reverse_proxy api:3000 {
+				import standard_api_transport
+			}
+		}
+
 		@assets path /assets/*
 		handle @assets {
 			header Cache-Control "public, max-age=31536000, immutable"
