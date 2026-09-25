@@ -870,7 +870,7 @@
     "remaining_few": "{{count}} boxes remaining",
     "remaining_many": "{{count}} boxes remaining",
     "remaining_other": "{{count}} boxes remaining",
-    "lastBox": "Last box:",
+    "lastBoxShort": "last",
     "backToAssembly": "Back to assembly",
     "contentsLoading": "Loading pallet contents…",
     "contentsError": "Could not read pallet contents",

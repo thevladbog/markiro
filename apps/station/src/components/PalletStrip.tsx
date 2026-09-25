@@ -43,8 +43,8 @@ export function PalletStrip({
       data-serials={serials}
     >
       <div className="pallet-strip__summary">
-        <h2>{t("pallet.current")}</h2>
         <div className="pallet-strip__readout">
+          <h2>{t("pallet.title")}</h2>
           <strong
             key={highlight}
             data-highlight={highlight > 0 ? "true" : undefined}
@@ -65,14 +65,15 @@ export function PalletStrip({
         >
           <span style={{ width: `${Math.min(100, Math.max(0, ratio * 100))}%` }} />
         </div>
-        <p className="pallet-strip__remaining">
-          {t("pallet.remaining", { count: Math.max(0, capacity - boxCount) })}
+        <p className="pallet-strip__meta">
+          <span>{t("pallet.remaining", { count: Math.max(0, capacity - boxCount) })}</span>
+          {lastBoxSscc ? (
+            <span className="pallet-strip__last">
+              {` · ${t("pallet.lastBoxShort")} `}
+              <code>…{lastBoxSscc.slice(-6)}</code>
+            </span>
+          ) : null}
         </p>
-        {lastBoxSscc ? (
-          <p className="pallet-strip__last">
-            {t("pallet.lastBox")} <code>…{lastBoxSscc.slice(-6)}</code>
-          </p>
-        ) : null}
       </div>
       <div className="pallet-strip__actions">
         {onShowContents ? (

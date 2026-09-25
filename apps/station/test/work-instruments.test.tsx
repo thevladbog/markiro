@@ -194,6 +194,31 @@ describe("work instruments", () => {
     );
   });
 
+  it("puts the title, the count and the last serial in one head row", () => {
+    const { container } = render(
+      <BoxFillInstrument
+        box={{ boxId: "b1", itemCount: 2 }}
+        ordinal={416}
+        acceptedToken={null}
+        capacity={20}
+        canUndo={false}
+        labels={{ ...boxLabels, number: "Box no. 416" }}
+        lastAccepted={{ serial: "5A)5>JE" }}
+        verdictLabels={{ ok: "Accepted", waiting: "Waiting for a scan" }}
+        onClose={vi.fn()}
+        onUndo={vi.fn()}
+        onClear={vi.fn()}
+      />,
+    );
+    const head = container.querySelector(".work-box-fill__head");
+    expect(head?.querySelector("h2")?.textContent).toBe("Box no. 416");
+    expect(head?.querySelector('[data-testid="box-progress"]')?.textContent).toBe("2 / 20");
+    expect(head?.querySelector('[role="status"]')?.getAttribute("aria-label")).toBe(
+      "Accepted: 5A)5>JE",
+    );
+    expect(container.querySelector(".work-box-fill__head + .work-box-fill__grid")).not.toBeNull();
+  });
+
   it("derives a stable in-range hue from the GTIN and a first-letter monogram", () => {
     expect(hueFromGtin("04607000000042")).toBe(hueFromGtin("04607000000042"));
     expect(hueFromGtin("04607000000042")).not.toBe(hueFromGtin("04607000000043"));

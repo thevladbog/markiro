@@ -870,7 +870,7 @@
     "remaining_few": "Осталось {{count}} короба",
     "remaining_many": "Осталось {{count}} коробов",
     "remaining_other": "Осталось {{count}} короба",
-    "lastBox": "Последний короб:",
+    "lastBoxShort": "последний",
     "backToAssembly": "К сборке",
     "contentsLoading": "Загружаем состав паллеты…",
     "contentsError": "Не удалось прочитать состав паллеты",

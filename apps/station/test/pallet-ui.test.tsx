@@ -275,6 +275,26 @@ describe("PalletStrip", () => {
     const root = container.querySelector(".pallet-strip");
     expect(root?.classList.contains("work-instrument")).toBe(true);
   });
+
+  it("fits the pallet into one row: title, count, bar, remaining and last box", () => {
+    const { container } = render(
+      <PalletStrip
+        boxCount={15}
+        capacity={66}
+        serials="available"
+        lastBoxSscc="004601234560619998"
+        onShowContents={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("heading", { name: i18n.t("pallet.title") })).toBeDefined();
+    const meta = container.querySelector(".pallet-strip__meta");
+    expect(meta?.textContent).toBe(
+      `${i18n.t("pallet.remaining", { count: 51 })} · ${i18n.t("pallet.lastBoxShort")} …619998`,
+    );
+    const actions = container.querySelector(".pallet-strip__actions");
+    expect(actions?.querySelectorAll("button")).toHaveLength(2);
+  });
 });
 
 describe("PalletContents", () => {
