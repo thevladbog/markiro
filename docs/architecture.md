@@ -44,7 +44,8 @@ apps/
   landing/    Astro 7 — marketing site
 packages/
   domain/     GS1 validation, SSCC, ZPL/TSPL generation, Cyrillic
-              rasterization, export formats — shared by api/admin/station
+              rasterization, export formats, printable A4/A5 forms
+              — shared by api/admin/station
   platform-contracts/
               Zod request, response, error, and primitive contracts shared by
               the platform API, SaaS administration browser, and OpenAPI

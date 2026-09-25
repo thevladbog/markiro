@@ -70,7 +70,8 @@ rules; keep shared policies here and detailed procedures beside their code.
 - `apps/landing`: Astro public site with localized content, SEO, the demo form,
   and published legal artifacts.
 - `packages/domain`: shared GS1/KM/GTIN/SSCC validation, label models,
-  ZPL/TSPL, rasterization, and other framework-independent rules.
+  ZPL/TSPL, rasterization, printable A4/A5 forms, and other
+  framework-independent rules.
 - `packages/db`: Drizzle models, Postgres migrations, the station SQLite mirror,
   and runtime migration helpers.
 - `packages/platform-contracts`: shared Zod schemas for the platform, tenant,
