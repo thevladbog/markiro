@@ -158,6 +158,12 @@ export interface WorkScreenProps {
   pendingSync: number;
   /** The sync engine's last server answer for this shift's total; null before the first. */
   shiftProgress?: ShiftProgressSnapshot | null;
+  /**
+   * `SyncState.lastSuccessAt` of the latest published sync state. A drain can
+   * release this terminal's codes without bringing a new progress answer, so
+   * each change re-reads the local count.
+   */
+  syncLastSuccessAt?: number | null;
   /** Tells the sync engine which shift's total to keep fresh; null when leaving. */
   onWatchShiftProgress?: (shiftId: string | null) => void;
   /**
@@ -266,6 +272,7 @@ export function WorkScreen({
   onCloseShift,
   pendingSync,
   shiftProgress = null,
+  syncLastSuccessAt = null,
   onWatchShiftProgress,
   exceptionWindowControl,
   issuerPrefix,
@@ -313,10 +320,13 @@ export function WorkScreen({
     onWatchShiftProgress(shiftId);
     return () => onWatchShiftProgress(null);
   }, [onWatchShiftProgress, shiftId]);
-  // A new sync answer can also mean a server release removed local codes.
+  // A drain can apply a server release that deletes this terminal's local
+  // codes, with or without a new progress answer (the progress step may be
+  // suspended or failing), so a new answer and each new `lastSuccessAt` of
+  // the published sync state both re-read the local count.
   useEffect(() => {
     refreshJournalCounts();
-  }, [refreshJournalCounts, shiftProgress]);
+  }, [refreshJournalCounts, shiftProgress, syncLastSuccessAt]);
   const [signal, setSignal] = useState<{ tone: SignalTone; title: string; detail?: string } | null>(
     null,
   );

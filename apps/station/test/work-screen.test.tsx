@@ -1318,6 +1318,50 @@ describe("WorkScreen", () => {
     expect(onWatchShiftProgress).toHaveBeenLastCalledWith(null);
   });
 
+  it("re-reads this terminal's count with each published sync state, not only a new answer", async () => {
+    const exec = makeExec();
+    for (const code of ["released-code", "kept-code"]) {
+      await exec.run(
+        `INSERT INTO codes_mirror (code_hash, shift_id, gtin14, serial, scanned_at, box_id)
+         VALUES (?,?,?,?,?,?)`,
+        [code, "s1", "04600000000015", code, "2026-09-25T08:00:00.000Z", null],
+      );
+    }
+    const props: WorkScreenProps = {
+      exec,
+      shiftId: "s1",
+      terminalId: "dev-1",
+      operatorId: "operator-1",
+      expectedGtin14: "04600000000015",
+      productName: "Water 0.5",
+      source: manualSource(),
+      sound: { muted: true, volume: 1 },
+      onExit: () => {},
+      pendingSync: 0,
+      // Ten units from other terminals; this terminal's two are counted live.
+      shiftProgress: {
+        shiftId: "s1",
+        acceptedUnits: 12,
+        deviceAcceptedUnits: 2,
+        asOf: new Date().toISOString(),
+        fetchedAt: new Date().toISOString(),
+      },
+      syncLastSuccessAt: 1_000,
+      issuerPrefix: null,
+      boxCapacity: null,
+      verifyPrintedLabel: false,
+    };
+    const view = render(<WorkScreen {...props} />);
+    await waitFor(() => expect(screen.getByTestId("shift-total").textContent).toBe("12"));
+
+    // The drain applied a server release: the code left this device's mirror,
+    // and the progress step brought no new answer (suspended or failing).
+    await exec.run("DELETE FROM codes_mirror WHERE code_hash = ?", ["released-code"]);
+    view.rerender(<WorkScreen {...props} syncLastSuccessAt={2_000} />);
+
+    await waitFor(() => expect(screen.getByTestId("shift-total").textContent).toBe("11"));
+  });
+
   it("counts an invalid scan as a journal error without moving the shift total", async () => {
     const source = manualSource();
     renderWorkScreen({ source });

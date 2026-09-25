@@ -2166,6 +2166,7 @@ export function App() {
               }}
               pendingSync={syncState.pending}
               shiftProgress={syncState.shiftProgress}
+              syncLastSuccessAt={syncState.lastSuccessAt}
               onWatchShiftProgress={watchShiftProgress}
               // Read off `shift_mirror` alongside `shiftContext` above (Task 13
               // review, Finding 1) -- null for a validation-mode shift, or a
