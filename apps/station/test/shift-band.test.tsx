@@ -94,6 +94,59 @@ describe("ShiftBand", () => {
     );
   });
 
+  it("keeps the plan percentage beside the stale note, which replaces the terminal share", () => {
+    const othersAsOf = "2026-09-25T08:58:00.000Z";
+    const { container } = render(
+      <ShiftBand
+        productName="Widget"
+        counterpartyName={null}
+        total={{
+          scope: "all",
+          total: 1302,
+          planned: 9580,
+          planRatio: 1302 / 9580,
+          terminal: 302,
+          othersAsOf,
+        }}
+        locale="en-US"
+        labels={labels}
+      />,
+    );
+    const time = new Intl.DateTimeFormat("en-US", { timeStyle: "short" }).format(
+      new Date(othersAsOf),
+    );
+    expect(container.querySelector(".work-shift-band__meta")?.textContent).toBe(
+      `14% of plan · other terminals as of ${time}`,
+    );
+    expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe("1302");
+  });
+
+  it("shows only this terminal's share without a plan: no percentage and no bar", () => {
+    const { container } = render(
+      <ShiftBand
+        productName="Widget"
+        counterpartyName={null}
+        total={{
+          scope: "all",
+          total: 1302,
+          planned: null,
+          planRatio: null,
+          terminal: 302,
+          othersAsOf: null,
+        }}
+        locale="en-US"
+        labels={labels}
+      />,
+    );
+    expect(screen.getByText("In shift · all terminals")).toBeDefined();
+    // No «/ plan» after the number.
+    expect(container.querySelector(".work-shift-band__value")?.textContent).toBe("1,302");
+    expect(container.querySelector(".work-shift-band__meta")?.textContent).toBe(
+      "this terminal 302",
+    );
+    expect(screen.queryByRole("progressbar")).toBeNull();
+  });
+
   it("seeds the accent from the GTIN and falls back to a monogram without a photo", () => {
     const { container, rerender } = render(
       <ShiftBand

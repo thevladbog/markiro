@@ -908,6 +908,7 @@ async function renderAtFloorStage(
 async function renderActiveShiftForOperatorSwitch(
   pendingBoxPrint = false,
   productionDate: string | null = null,
+  shiftNumber: string | null = null,
 ) {
   lockdownMock.snapshot = { mode: "locked", pending: false, error: null };
   lockdownMock.getSnapshot.mockImplementation(() => lockdownMock.snapshot);
@@ -991,6 +992,7 @@ async function renderActiveShiftForOperatorSwitch(
             name: "Cola",
             counterparty_name: null,
             production_date: productionDate,
+            number: shiftNumber,
           },
         ]);
       }
@@ -2345,6 +2347,25 @@ describe("App", () => {
       await waitFor(() => expect(observedProductionDates).toContain("2026-08-20"));
     } finally {
       workScreenSpy.mockRestore();
+    }
+  });
+
+  // The work screen's band names the product, so the header names a numbered
+  // shift by its number alone; only a shift without a number falls back to it.
+  it.each([
+    ["by its number, never the product", "SEP26-021", "SEP26-021"],
+    ["by its product when it has no number", null, "Cola"],
+  ])("names the active shift in the header %s", async (_name, shiftNumber, label) => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await renderActiveShiftForOperatorSwitch(false, null, shiftNumber);
+      const header = screen.getByRole("banner", { name: "Station status" });
+      await waitFor(() =>
+        expect(within(header).getByTestId("shift-status").textContent).toBe(label),
+      );
+      if (shiftNumber !== null) expect(header.textContent).not.toContain("Cola");
+    } finally {
+      consoleErrorSpy.mockRestore();
     }
   });
 

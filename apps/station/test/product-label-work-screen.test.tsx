@@ -141,7 +141,7 @@ describe("duplicate printing through the real WorkScreen scanner", () => {
     // back as still pending after the remount instead of silently vanishing.
     const status = await screen.findByTestId("validation-processing-status");
     expect(
-      within(status).getByText(i18n.t("productLabels.processingPending", { count: 1 }), {
+      await within(status).findByText(i18n.t("productLabels.processingPending", { count: 1 }), {
         exact: false,
       }),
     ).toBeDefined();
@@ -201,7 +201,7 @@ describe("duplicate printing through the real WorkScreen scanner", () => {
     // The accepted code's reprocessing-check row is durable too.
     const status = await screen.findByTestId("validation-processing-status");
     expect(
-      within(status).getByText(i18n.t("productLabels.processingPending", { count: 1 }), {
+      await within(status).findByText(i18n.t("productLabels.processingPending", { count: 1 }), {
         exact: false,
       }),
     ).toBeDefined();
