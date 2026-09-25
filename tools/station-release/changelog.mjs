@@ -11,7 +11,11 @@ const MAX_GIT_BYTES = 1024 * 1024;
 const MAX_HIGHLIGHTS_BYTES = 8 * 1024;
 const MAX_ENTRIES = 10_000;
 const SHA = /^[0-9a-f]{40}$/;
-const SECRET_TEXT = /ghp_|github_pat_|TAURI_SIGNING_PRIVATE_KEY|api[_ -]?key|pairing_code/i;
+// Token formats are secrets wherever they appear. Credential prose (an API key
+// header, a pairing code) is only barred from text the notes actually publish.
+const SECRET_TOKEN = /ghp_|github_pat_|TAURI_SIGNING_PRIVATE_KEY/i;
+const SECRET_PROSE = /api[_ -]?key|pairing_code/i;
+const SECRET_TEXT = new RegExp(`${SECRET_TOKEN.source}|${SECRET_PROSE.source}`, "i");
 const UNSAFE_CONTROL_TEXT = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
 const DIRECT_STATION_PATHS = [
   "apps/station/",
@@ -36,13 +40,13 @@ function hasExactKeys(value, keys) {
 
 function ensureText(
   value,
-  { allowEmpty = false, allowSecretText = false, maxBytes = MAX_INPUT_BYTES } = {},
+  { allowEmpty = false, secretPattern = SECRET_TEXT, maxBytes = MAX_INPUT_BYTES } = {},
 ) {
   if (
     typeof value !== "string" ||
     (!allowEmpty && value.length === 0) ||
     Buffer.byteLength(value) > maxBytes ||
-    (!allowSecretText && SECRET_TEXT.test(value)) ||
+    (secretPattern !== null && secretPattern.test(value)) ||
     UNSAFE_CONTROL_TEXT.test(value)
   ) {
     invalid();
@@ -123,8 +127,16 @@ function normalizedEntry(entry, { allowSecretText = false } = {}) {
   if (!hasExactKeys(entry, ["sha", "subject", "body", "files"]) || !SHA.test(entry.sha)) {
     invalid();
   }
-  ensureText(entry.subject, { allowSecretText, maxBytes: 16 * 1024 });
-  ensureText(entry.body, { allowEmpty: true, allowSecretText, maxBytes: 64 * 1024 });
+  // Only the display line below reaches the notes. The raw subject of a merge
+  // and every body stay in git, so they may name a credential in prose (#641
+  // mentioned the X-Api-Key header) but must never carry a token.
+  const rawSecretPattern = allowSecretText ? null : SECRET_TOKEN;
+  ensureText(entry.subject, { secretPattern: rawSecretPattern, maxBytes: 16 * 1024 });
+  ensureText(entry.body, {
+    allowEmpty: true,
+    secretPattern: rawSecretPattern,
+    maxBytes: 64 * 1024,
+  });
   if (
     !Array.isArray(entry.files) ||
     entry.files.length > 10_000 ||
@@ -138,7 +150,7 @@ function normalizedEntry(entry, { allowSecretText = false } = {}) {
     .map((line) => line.trim())
     .find(Boolean);
   const display = (isMerge ? mergeTitle : entry.subject)?.trim();
-  if (!display) invalid();
+  if (!display || (!allowSecretText && SECRET_TEXT.test(display))) invalid();
   return { ...entry, display };
 }
 
