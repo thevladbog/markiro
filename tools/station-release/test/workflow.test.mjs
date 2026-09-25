@@ -592,6 +592,7 @@ test("the workflow CORS gate pins the production API and Windows webview origin"
     ["/station/grants/v1/configuration", "POST", "content-type,x-api-key,x-station-capabilities"],
     ["/station/grants/v1/device", "POST", "content-type,x-api-key,x-station-capabilities"],
     ["/station/grants/v1/tasks", "POST", "content-type,x-api-key,x-station-capabilities"],
+    ["/station/grants/v1/readiness", "POST", "content-type,x-api-key,x-station-capabilities"],
     ["/station/grants/v1/evidence/scans", "POST", "content-type,x-api-key,x-station-capabilities"],
     [
       "/station/grants/v1/evidence/shift-closures",
@@ -609,9 +610,30 @@ test("the workflow CORS gate pins the production API and Windows webview origin"
       "content-type,x-api-key,x-station-capabilities",
     ],
     ["/station/pair", "POST", "content-type,x-station-capabilities"],
+    ["/station/pair/recovery", "POST", "content-type,x-station-capabilities"],
     ["/station/identity", "GET", "content-type,x-api-key,x-station-capabilities"],
     ["/station/heartbeat", "POST", "content-type,x-api-key,x-station-capabilities"],
     ["/station/operators", "GET", "content-type,x-api-key,x-station-capabilities"],
+    [
+      "/station/device-replacement-intent/v1",
+      "GET",
+      "content-type,x-api-key,x-station-capabilities",
+    ],
+    [
+      "/station/device-replacement-intent/v1/acknowledge",
+      "POST",
+      "content-type,x-api-key,x-station-capabilities",
+    ],
+    [
+      "/station/device-replacement-readiness",
+      "POST",
+      "content-type,x-api-key,x-station-capabilities",
+    ],
+    [
+      "/station/replacement-recovery/readiness",
+      "POST",
+      "content-type,x-api-key,x-station-capabilities",
+    ],
     [
       "/station/products/00000000-0000-0000-0000-000000000000/image/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "GET",
