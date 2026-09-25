@@ -6,6 +6,25 @@ import {
 } from "../src/lib/credential-recovery.js";
 import { redeemStationPairing } from "../src/lib/pairing.js";
 
+/**
+ * An externally-settleable `fetch` result, so a test can control exactly when
+ * one concurrent request's `fetch` settles relative to another's -- no timers
+ * or sleeps needed for deterministic ordering.
+ */
+function deferredResponse(): {
+  promise: Promise<Response>;
+  resolve: (response: Response) => void;
+  reject: (reason: unknown) => void;
+} {
+  let resolve!: (response: Response) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<Response>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
   vi.useRealTimers();
@@ -85,6 +104,104 @@ describe("createStationClient", () => {
     // The same failure on an ordinary read still reports the server unreachable.
     await expect(client.get("/station/shifts/s1/progress")).rejects.toBe(refusal);
     expect(onReachabilityChange.mock.calls).toEqual([["unreachable"]]);
+  });
+
+  // A display-only read must never take the newest sequence number for
+  // itself: doing so (the bug this replaces) makes every earlier in-flight
+  // request's later report stale, so a concurrent display-only GET can
+  // silence the heartbeat or any other request that is still awaiting its
+  // own answer.
+  it("reports the plain request unreachable even though a display-only read overtook it and failed first", async () => {
+    const plainFetch = deferredResponse();
+    const displayFetch = deferredResponse();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockReturnValueOnce(plainFetch.promise)
+      .mockReturnValueOnce(displayFetch.promise);
+    const onReachabilityChange = vi.fn();
+    const client = createStationClient(
+      { apiKey: "key", serverUrl: "https://station.example" },
+      { onReachabilityChange },
+    );
+
+    const plain = client.get("/shifts");
+    const display = client.get("/station/shifts/s1/progress", { displayOnly: true });
+
+    const displayFailure = new TypeError("Failed to fetch");
+    displayFetch.reject(displayFailure);
+    await expect(display).rejects.toBe(displayFailure);
+    expect(onReachabilityChange).not.toHaveBeenCalled();
+
+    const plainFailure = new TypeError("Failed to fetch");
+    plainFetch.reject(plainFailure);
+    await expect(plain).rejects.toBe(plainFailure);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(onReachabilityChange.mock.calls).toEqual([["unreachable"]]);
+  });
+
+  it("reports a display-only read's HTTP answer as reachable, then still reports the plain request's own failure as unreachable", async () => {
+    const plainFetch = deferredResponse();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockReturnValueOnce(plainFetch.promise)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ shiftId: "s1" }), { status: 200 }));
+    const onReachabilityChange = vi.fn();
+    const client = createStationClient(
+      { apiKey: "key", serverUrl: "https://station.example" },
+      { onReachabilityChange },
+    );
+
+    const plain = client.get("/shifts");
+    await client.get("/station/shifts/s1/progress", { displayOnly: true });
+    expect(onReachabilityChange.mock.calls).toEqual([["reachable"]]);
+
+    const plainFailure = new TypeError("Failed to fetch");
+    plainFetch.reject(plainFailure);
+    await expect(plain).rejects.toBe(plainFailure);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(onReachabilityChange.mock.calls).toEqual([["reachable"], ["unreachable"]]);
+  });
+
+  it("does not let a display-only read's late answer report once a newer request has started", async () => {
+    const displayFetch = deferredResponse();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockReturnValueOnce(displayFetch.promise)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+    const onReachabilityChange = vi.fn();
+    const client = createStationClient(
+      { apiKey: "key", serverUrl: "https://station.example" },
+      { onReachabilityChange },
+    );
+
+    const display = client.get("/station/shifts/s1/progress", { displayOnly: true });
+    await client.get("/shifts");
+    expect(onReachabilityChange.mock.calls).toEqual([["reachable"]]);
+
+    displayFetch.resolve(new Response(JSON.stringify({ shiftId: "s1" }), { status: 200 }));
+    await display;
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(onReachabilityChange.mock.calls).toEqual([["reachable"]]);
+  });
+
+  it("reports nothing for a display-only read that fails without a response when no other request is in flight", async () => {
+    const refusal = new TypeError("Failed to fetch");
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(refusal);
+    const onReachabilityChange = vi.fn();
+    const client = createStationClient(
+      { apiKey: "key", serverUrl: "https://station.example" },
+      { onReachabilityChange },
+    );
+
+    await expect(client.get("/station/shifts/s1/progress", { displayOnly: true })).rejects.toBe(
+      refusal,
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(onReachabilityChange).not.toHaveBeenCalled();
   });
 
   it.each([
