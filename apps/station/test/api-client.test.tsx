@@ -66,6 +66,64 @@ describe("createStationClient", () => {
     expect(onReachabilityChange).toHaveBeenLastCalledWith("unreachable");
   });
 
+  // An older server's CORS policy does not list a newer display-only route,
+  // so the webview's preflight fails and fetch rejects without a response.
+  it("leaves reachability to the sync requests when a display-only read gets no response", async () => {
+    const refusal = new TypeError("Failed to fetch");
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(refusal);
+    const onReachabilityChange = vi.fn();
+    const client = createStationClient(
+      { apiKey: "key", serverUrl: "https://station.example" },
+      { onReachabilityChange },
+    );
+
+    await expect(client.get("/station/shifts/s1/progress", { displayOnly: true })).rejects.toBe(
+      refusal,
+    );
+    expect(onReachabilityChange).not.toHaveBeenCalled();
+
+    // The same failure on an ordinary read still reports the server unreachable.
+    await expect(client.get("/station/shifts/s1/progress")).rejects.toBe(refusal);
+    expect(onReachabilityChange.mock.calls).toEqual([["unreachable"]]);
+  });
+
+  it.each([
+    ["an answer", () => new Response(JSON.stringify({ shiftId: "s1" }), { status: 200 })],
+    ["a 404", () => new Response(JSON.stringify({ message: "Not Found" }), { status: 404 })],
+  ])("still reports %s to a display-only read as reachable", async (_name, response) => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(response());
+    const onReachabilityChange = vi.fn();
+    const client = createStationClient(
+      { apiKey: "key", serverUrl: "https://station.example" },
+      { onReachabilityChange },
+    );
+
+    await client.get("/station/shifts/s1/progress", { displayOnly: true }).catch(() => undefined);
+
+    expect(onReachabilityChange.mock.calls).toEqual([["reachable"]]);
+  });
+
+  it("seals the credential generation when a display-only read is refused as revoked", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ message: "revoked", code: "STATION_CREDENTIAL_REVOKED" }), {
+        status: 401,
+      }),
+    );
+    const generation = createCredentialGeneration();
+    const onCredentialRejected = vi.fn();
+    const client = createStationClient(
+      { machineId: "m1", apiKey: "revoked", serverUrl: "http://localhost:3000" },
+      { credentialBoundary: { machineId: "m1", generation, onCredentialRejected } },
+    );
+
+    await expect(client.get("/station/shifts/s1/progress", { displayOnly: true })).rejects.toEqual(
+      new StationApiError(401, "revoked", "STATION_CREDENTIAL_REVOKED"),
+    );
+
+    expect(generation.phase).toBe("sealed");
+    expect(onCredentialRejected).toHaveBeenCalledTimes(1);
+  });
+
   it("ignores an older transport failure after a newer request received an HTTP response", async () => {
     let rejectOlder: ((reason?: unknown) => void) | undefined;
     vi.spyOn(globalThis, "fetch")

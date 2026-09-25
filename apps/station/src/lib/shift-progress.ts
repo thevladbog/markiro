@@ -177,7 +177,12 @@ export function createShiftProgressTracker(deps: {
       lastAttemptAt = at;
       let raw: unknown;
       try {
-        raw = await deps.client.get(`/station/shifts/${encodeURIComponent(shiftId)}/progress`);
+        // Display-only: this GET ends every drain, and an older server's CORS
+        // policy refuses it without a response; the server pill stays with
+        // the requests that carry sync.
+        raw = await deps.client.get(`/station/shifts/${encodeURIComponent(shiftId)}/progress`, {
+          displayOnly: true,
+        });
       } catch (error) {
         if (error instanceof StationApiError && error.status === 404) {
           suspendedUntil = at + SHIFT_PROGRESS_UNSUPPORTED_RETRY_MS;

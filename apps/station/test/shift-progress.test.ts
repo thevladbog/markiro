@@ -125,7 +125,9 @@ describe("createShiftProgressTracker", () => {
     const tracker = createShiftProgressTracker({ exec, client: { get }, now: () => 1_000_000 });
     tracker.watch("s1");
     await tracker.refresh(() => true);
-    expect(get).toHaveBeenCalledWith("/station/shifts/s1/progress");
+    // Display-only: a CORS refusal by an older server must not paint the
+    // header's server pill «Нет связи» after every drain.
+    expect(get).toHaveBeenCalledWith("/station/shifts/s1/progress", { displayOnly: true });
     expect(await tracker.current()).toMatchObject(answer);
 
     const restarted = createShiftProgressTracker({ exec, client: {}, now: () => 1_000_000 });

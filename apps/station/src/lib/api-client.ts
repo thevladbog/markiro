@@ -29,8 +29,18 @@ export function isStationCredentialRejection(error: unknown): error is StationAp
   );
 }
 
+export interface StationGetOptions {
+  /**
+   * A display-only read: a failure without any response (a network error, a
+   * CORS rejection by an older server, a timeout) leaves reachability to the
+   * requests that carry sync. An HTTP answer still reports the server
+   * reachable, and a credential rejection still applies.
+   */
+  readonly displayOnly?: boolean;
+}
+
 export interface StationClient {
-  get<T>(path: string): Promise<T>;
+  get<T>(path: string, options?: StationGetOptions): Promise<T>;
   download(path: string): Promise<Blob>;
   post<T>(path: string, body?: unknown): Promise<T>;
   /**
@@ -169,8 +179,9 @@ export function createStationClient(
   }
 
   /**
-   * `retriedElsewhere` names failures the caller answers with a second route;
-   * such a failure without a response leaves reachability to that attempt.
+   * `retriedElsewhere` names failures whose reachability another request
+   * reports: a second route the caller tries next, or the sync requests for a
+   * display-only read. Such a failure without a response reports nothing.
    */
   async function request<T>(
     method: "GET" | "POST",
@@ -228,7 +239,8 @@ export function createStationClient(
   }
 
   return {
-    get: (path) => request("GET", path),
+    get: (path, options) =>
+      request("GET", path, undefined, undefined, options?.displayOnly ? () => true : undefined),
     // Binary media is an optional display enhancement. Generic image/CDN
     // failures must not seal the line's credential generation, but an explicit
     // server revocation code still crosses the same credential boundary as any

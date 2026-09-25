@@ -205,6 +205,10 @@ describe("useSyncEngine", () => {
       }),
     };
     rerender({ exec, client: second, machineId: "m1" });
-    await waitFor(() => expect(second.get).toHaveBeenCalledWith("/station/shifts/s1/progress"));
+    await waitFor(() =>
+      expect(second.get).toHaveBeenCalledWith("/station/shifts/s1/progress", {
+        displayOnly: true,
+      }),
+    );
   });
 });
