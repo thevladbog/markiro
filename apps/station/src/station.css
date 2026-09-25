@@ -3945,10 +3945,12 @@ body,
   gap: 6px;
 }
 
+/* Spaced like the sentence it is, «Паллета 15 / 66 коробов · 23 %»: a
+   word-sized gap is what lets the Russian readout fit the strip at 1024 px. */
 .pallet-strip__readout {
   display: flex;
   min-width: 0;
-  gap: var(--sp-2);
+  gap: var(--sp-1);
   align-items: baseline;
   font-variant-numeric: tabular-nums;
 }
@@ -3960,16 +3962,23 @@ body,
   font: var(--floor-body-strong);
 }
 
+/* «15 / 66 коробов»: the unit word gives way first on a narrow strip; the
+   count and the percentage beside it never do. */
 .pallet-strip__progress {
   overflow: hidden;
   min-width: 0;
-  color: var(--fg-1);
-  font: 700 24px/30px var(--font-ui);
+  color: var(--fg-2);
+  font: var(--floor-body);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.pallet-strip__progress[data-highlight="true"] {
+.pallet-strip__count {
+  color: var(--fg-1);
+  font: 600 24px/30px var(--font-mono);
+}
+
+.pallet-strip__count[data-highlight="true"] {
   animation: pallet-count-added 300ms ease-out;
 }
 
@@ -3980,12 +3989,12 @@ body,
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .pallet-strip__progress[data-highlight="true"] {
+  .pallet-strip__count[data-highlight="true"] {
     animation: none;
   }
 }
 
-.pallet-strip__readout > span {
+.pallet-strip__percent {
   flex: 0 0 auto;
   color: var(--fg-2);
   font: var(--floor-body);

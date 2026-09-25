@@ -227,6 +227,20 @@ function renderWork(overrides: RenderWorkOptions = {}) {
   );
 }
 
+/**
+ * Waits until the pallet strip reports `boxes / capacity`. The visible readout
+ * sets the count apart from its unit word, so this reads the one string that
+ * still carries both: the progress bar's `aria-valuetext`.
+ */
+async function findPalletProgress(boxes: number, capacity: number): Promise<HTMLElement> {
+  const valueText = i18n.t("pallet.progress", { boxes, capacity });
+  return waitFor(() => {
+    const bar = screen.getByRole("progressbar", { name: i18n.t("pallet.current") });
+    expect(bar.getAttribute("aria-valuetext")).toBe(valueText);
+    return bar;
+  });
+}
+
 describe("PalletStrip", () => {
   it("shows 42 of 66 as a continuous progress bar and exposes the two pallet actions", () => {
     const onShowContents = vi.fn();
@@ -253,7 +267,10 @@ describe("PalletStrip", () => {
 
   it("shows the box/capacity readout and warns without blocking when the pallet pool is dry", () => {
     render(<PalletStrip boxCount={13} capacity={12} serials="empty" />);
-    expect(screen.getByText(i18n.t("pallet.progress", { boxes: 13, capacity: 12 }))).toBeDefined();
+    expect(screen.getByText("13 / 12")).toBeDefined();
+    expect(screen.getByRole("progressbar").getAttribute("aria-valuetext")).toBe(
+      i18n.t("pallet.progress", { boxes: 13, capacity: 12 }),
+    );
     // The over-capacity warning is TEXT, never colour alone (project
     // accessibility rule) -- and its presence does not remove or disable
     // anything else on the strip.
@@ -262,7 +279,7 @@ describe("PalletStrip", () => {
 
   it("shows no warning at all while this device can still close the pallet", () => {
     render(<PalletStrip boxCount={3} capacity={12} serials="available" />);
-    expect(screen.getByText(i18n.t("pallet.progress", { boxes: 3, capacity: 12 }))).toBeDefined();
+    expect(screen.getByText("3 / 12")).toBeDefined();
     expect(screen.queryByText(i18n.t("pallet.noSerials"))).toBeNull();
   });
 
@@ -294,6 +311,28 @@ describe("PalletStrip", () => {
     );
     const actions = container.querySelector(".pallet-strip__actions");
     expect(actions?.querySelectorAll("button")).toHaveLength(2);
+  });
+
+  it("reads «Паллета 15 / 66 коробов · 23 %» with the count set apart for the mono face", () => {
+    const { container, rerender } = render(
+      <PalletStrip boxCount={15} capacity={66} serials="available" />,
+    );
+    const count = () => container.querySelector(".pallet-strip__count");
+    expect(count()?.textContent).toBe("15 / 66");
+    expect(container.querySelector(".pallet-strip__progress")?.textContent).toBe(
+      `15 / 66 ${i18n.t("pallet.progressUnit")}`,
+    );
+    expect(container.querySelector(".pallet-strip__percent")?.textContent).toMatch(/^· 23\s%$/);
+    // The bar still announces the whole readout in one phrase.
+    expect(screen.getByRole("progressbar").getAttribute("aria-valuetext")).toBe(
+      i18n.t("pallet.progress", { boxes: 15, capacity: 66 }),
+    );
+    expect(count()?.hasAttribute("data-highlight")).toBe(false);
+
+    // A box added to the pallet flashes the count, not the unit word.
+    rerender(<PalletStrip boxCount={16} capacity={66} serials="available" />);
+    expect(count()?.textContent).toBe("16 / 66");
+    expect(count()?.getAttribute("data-highlight")).toBe("true");
   });
 });
 
@@ -476,7 +515,7 @@ describe("WorkScreen pallet strip", () => {
     await seedPallet(exec, { palletId: "p1", shiftId: "s1", terminalId: "dev-1", boxCount: 42 });
     await seedPallet(exec, { palletId: "other", shiftId: "s1", terminalId: "dev-2", boxCount: 1 });
     renderWork({ exec, source, palletBoxCapacity: 66 });
-    await screen.findByText(i18n.t("pallet.progress", { boxes: 42, capacity: 66 }));
+    await findPalletProgress(42, 66);
     fireEvent.click(screen.getByRole("button", { name: i18n.t("pallet.contents") }));
     await screen.findByText("sscc-p1-box-41");
     expect(screen.queryByText("sscc-other-box-0")).toBeNull();
@@ -496,7 +535,7 @@ describe("WorkScreen pallet strip", () => {
     await seedShift(exec, { shiftId: "s1", palletBoxCapacity: 66 });
     await seedPallet(exec, { palletId: "p1", shiftId: "s1", terminalId: "dev-1", boxCount: 42 });
     renderWork({ exec, palletBoxCapacity: 66 });
-    await screen.findByText(i18n.t("pallet.progress", { boxes: 42, capacity: 66 }));
+    await findPalletProgress(42, 66);
     fireEvent.click(screen.getByRole("button", { name: i18n.t("pallet.closeCurrent") }));
     await screen.findByText(i18n.t("pallet.earlyCloseDetail", { count: 42, capacity: 66 }));
     const rows = await exec.all<{ closed_at: string | null }>(
@@ -511,9 +550,7 @@ describe("WorkScreen pallet strip", () => {
     await seedPallet(exec, { palletId: "p1", shiftId: "s1", terminalId: "dev-1", boxCount: 3 });
 
     renderWork({ exec, palletBoxCapacity: 12 });
-    expect(
-      await screen.findByText(i18n.t("pallet.progress", { boxes: 3, capacity: 12 })),
-    ).toBeDefined();
+    expect(await findPalletProgress(3, 12)).toBeDefined();
 
     cleanup();
     const exec2 = makeExec();
@@ -531,7 +568,7 @@ describe("WorkScreen pallet early close", () => {
     await seedPallet(exec, { palletId: "p1", shiftId: "s1", terminalId: "dev-1", boxCount: 3 });
 
     renderWork({ exec, palletBoxCapacity: 12 });
-    await screen.findByText(i18n.t("pallet.progress", { boxes: 3, capacity: 12 }));
+    await findPalletProgress(3, 12);
 
     expect(screen.queryByRole("button", { name: "Ещё" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: i18n.t("pallet.closeCurrent") }));
@@ -561,7 +598,7 @@ describe("WorkScreen pallet early close", () => {
       printing: { target: PRINT_TARGET, language: "zpl", print },
       palletPrinting: null,
     });
-    await screen.findByText(i18n.t("pallet.progress", { boxes: 3, capacity: 12 }));
+    await findPalletProgress(3, 12);
     fireEvent.click(screen.getByRole("button", { name: i18n.t("pallet.closeCurrent") }));
     fireEvent.click(screen.getByRole("button", { name: i18n.t("box.confirmAction") }));
     await screen.findByText(i18n.t("box.printRecovery.errors.printerUnconfigured"));
@@ -593,7 +630,7 @@ describe("WorkScreen pallet early close", () => {
       printing: { target: PRINT_TARGET, language: "zpl", print: vi.fn() },
       palletPrinting: { target: { kind: "usb", printer: "Pallet labels" }, language: "zpl", print },
     });
-    await screen.findByText(i18n.t("pallet.progress", { boxes: 3, capacity: 12 }));
+    await findPalletProgress(3, 12);
 
     fireEvent.click(screen.getByRole("button", { name: i18n.t("pallet.closeCurrent") }));
     fireEvent.click(screen.getByRole("button", { name: i18n.t("box.confirmAction") }));
@@ -620,7 +657,7 @@ describe("WorkScreen shift close blocked by an open pallet", () => {
     const onCloseShift = vi.fn();
 
     renderWork({ exec, palletBoxCapacity: 12, onCloseShift });
-    await screen.findByText(i18n.t("pallet.progress", { boxes: 7, capacity: 12 }));
+    await findPalletProgress(7, 12);
 
     fireEvent.click(screen.getByRole("button", { name: i18n.t("work.closeShift") }));
     expect(
@@ -662,7 +699,7 @@ describe("WorkScreen shift close blocked by an open pallet", () => {
       onCloseShift,
       printing: { target: PRINT_TARGET, language: "zpl", print },
     });
-    await screen.findByText(i18n.t("pallet.progress", { boxes: 7, capacity: 12 }));
+    await findPalletProgress(7, 12);
 
     fireEvent.click(screen.getByRole("button", { name: i18n.t("work.closeShift") }));
     fireEvent.click(
@@ -686,7 +723,7 @@ describe("WorkScreen shift close blocked by an open pallet", () => {
     const onCloseShift = vi.fn();
 
     renderWork({ exec, palletBoxCapacity: 12, onCloseShift });
-    await screen.findByText(i18n.t("pallet.progress", { boxes: 7, capacity: 12 }));
+    await findPalletProgress(7, 12);
 
     fireEvent.click(screen.getByRole("button", { name: i18n.t("work.closeShift") }));
     fireEvent.click(

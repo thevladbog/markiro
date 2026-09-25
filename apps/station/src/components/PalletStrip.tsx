@@ -43,16 +43,20 @@ export function PalletStrip({
       data-serials={serials}
     >
       <div className="pallet-strip__summary">
+        {/* «Паллета 15 / 66 коробов · 23 %»: the count in mono, the unit in the UI font. */}
         <div className="pallet-strip__readout">
           <h2>{t("pallet.title")}</h2>
-          <strong
-            key={highlight}
-            data-highlight={highlight > 0 ? "true" : undefined}
-            className="pallet-strip__progress"
-          >
-            {t("pallet.progress", { boxes: boxCount, capacity })}
-          </strong>
-          <span>{percent}</span>
+          <span className="pallet-strip__progress">
+            <strong
+              key={highlight}
+              data-highlight={highlight > 0 ? "true" : undefined}
+              className="pallet-strip__count"
+            >
+              {`${boxCount} / ${capacity}`}
+            </strong>{" "}
+            {t("pallet.progressUnit")}
+          </span>
+          <span className="pallet-strip__percent">{`· ${percent}`}</span>
         </div>
         <div
           className="pallet-strip__bar"

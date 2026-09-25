@@ -827,6 +827,7 @@
   "pallet": {
     "title": "Паллета",
     "progress": "{{boxes}} / {{capacity}} коробов",
+    "progressUnit": "коробов",
     "noSerials": "нет серий для паллеты",
     "closed": "Паллета закрыта",
     "sscc": "SSCC паллеты",

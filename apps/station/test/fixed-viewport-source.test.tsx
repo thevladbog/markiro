@@ -170,6 +170,18 @@ describe("fixed station viewport source contract", () => {
     );
     // Both pallet actions sit side by side instead of stacking.
     expect(css).toMatch(/\.pallet-strip__actions\s*\{[^}]*grid-auto-flow:\s*column;/s);
+    // «Паллета 15 / 66 коробов · 23 %»: the count in mono, the unit in the UI
+    // font; the unit gives way first on a narrow strip, never the percentage.
+    // Word-sized gaps are what fit the Russian readout at 1024 px (measured
+    // in a browser: 8 px gaps cut «коробов» to «короб…»).
+    expect(css).toMatch(/\.pallet-strip__readout\s*\{[^}]*gap:\s*var\(--sp-1\);/s);
+    expect(css).toMatch(
+      /\.pallet-strip__count\s*\{[^}]*font:\s*600 24px\/30px var\(--font-mono\);/s,
+    );
+    expect(css).toMatch(
+      /\.pallet-strip__progress\s*\{[^}]*font:\s*var\(--floor-body\);[^}]*text-overflow:\s*ellipsis;/s,
+    );
+    expect(css).toMatch(/\.pallet-strip__percent\s*\{[^}]*flex:\s*0 0 auto;/s);
     expect(css).not.toContain(".work-counters");
     expect(css).not.toContain("data-identity-only");
     expect(css).toMatch(

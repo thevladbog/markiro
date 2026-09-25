@@ -732,7 +732,14 @@ describe("development screen gallery", () => {
       "этот терминал 302",
     );
     expect(view.container.querySelectorAll(".work-box-fill__cell")).toHaveLength(20);
-    expect(within(view.container).getByText("15 / 66 коробов")).toBeDefined();
+    // «Паллета 15 / 66 коробов · 23 %», the count in its own (mono) element.
+    expect(within(view.container).getByText("15 / 66").className).toBe("pallet-strip__count");
+    expect(view.container.querySelector(".pallet-strip__progress")?.textContent).toBe(
+      "15 / 66 коробов",
+    );
+    expect(view.container.querySelector(".pallet-strip__percent")?.textContent).toMatch(
+      /^· 23\s%$/,
+    );
   });
 
   it("says how old the other terminals' share is when the answer is stale", () => {

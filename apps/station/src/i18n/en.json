@@ -827,6 +827,7 @@
   "pallet": {
     "title": "Pallet",
     "progress": "{{boxes}} / {{capacity}} boxes",
+    "progressUnit": "boxes",
     "noSerials": "no pallet serials left",
     "closed": "Pallet closed",
     "sscc": "Pallet SSCC",
