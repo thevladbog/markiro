@@ -110,9 +110,11 @@ describe("ShiftSelection barcode scanning", () => {
     expect(post).toHaveBeenCalledWith(`/shifts/${SHIFT_ID}/open`, { entryMethod: "task_barcode" });
   });
 
-  it("enters a scanned active shift without asking the server to open it again", async () => {
+  it("records the paper entry into a scanned active shift without opening it again", async () => {
     const scan = scanner();
-    const post = vi.fn<PostMock>();
+    const post = vi
+      .fn<PostMock>()
+      .mockResolvedValue({ id: SHIFT_ID, status: "active", mode: "validation" });
     const onSelected = vi.fn<OnSelectedMock>();
     renderSelection({ scan, post, onSelected, items: [activeShift()] });
 
@@ -120,7 +122,9 @@ describe("ShiftSelection barcode scanning", () => {
     act(() => scan.scan(`markiro:shift:v1:${SHIFT_ID}`));
 
     await waitFor(() => expect(onSelected).toHaveBeenCalled());
-    expect(post).not.toHaveBeenCalled();
+    expect(post.mock.calls).toEqual([
+      [`/shifts/${SHIFT_ID}/enter`, { entryMethod: "task_barcode" }],
+    ]);
   });
 
   it("says the shift is closed rather than pretending the barcode is unreadable", async () => {
