@@ -829,13 +829,14 @@ export class StationShiftProgressController {
     @Req() req: RequestWithTenant,
     @Param("id") id: string,
   ): Promise<StationShiftProgressDto> {
-    if (!req.deviceId) throw new ForbiddenException("Station device authentication required");
-    return this.service.progress(req.tenantId!, id, req.deviceId);
+    // TenantGuard and StationOnlyGuard set both; the check narrows them without `!`.
+    if (!req.tenantId || !req.deviceId) {
+      throw new ForbiddenException("Station device authentication required");
+    }
+    return this.service.progress(req.tenantId, id, req.deviceId);
   }
 }
 ```
-
-`req.tenantId!` follows every station controller in the module (TenantGuard guarantees it); keep that established shape.
 
 In `apps/api/src/modules/shifts/shifts.module.ts`, import both classes and register them:
 
