@@ -574,35 +574,136 @@ describe("ShiftSelection", () => {
     expect(owned.release).toHaveBeenCalledOnce();
   });
 
-  it("rejoins an active shift without posting an open request", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          items: [
-            {
-              id: "s1",
-              status: "active",
-              mode: "aggregation",
-              productName: "Cola",
-              plannedQty: null,
-            },
-          ],
-        }),
-        { status: 200 },
-      ),
+  function activeShiftList(): Response {
+    return new Response(
+      JSON.stringify({
+        items: [
+          {
+            id: "s1",
+            status: "active",
+            mode: "aggregation",
+            productName: "Cola",
+            plannedQty: null,
+          },
+        ],
+      }),
+      { status: 200 },
     );
-    const onSelected = vi.fn();
+  }
+
+  it("records a rejoin through the station entry endpoint before entering", async () => {
+    const order: string[] = [];
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(activeShiftList())
+      .mockImplementationOnce(async () => {
+        order.push("enter");
+        return new Response(JSON.stringify({ id: "s1", status: "active", mode: "aggregation" }), {
+          status: 200,
+        });
+      });
+    const onSelected = vi.fn(() => {
+      order.push("selected");
+    });
 
     render(<ShiftSelection client={client} onSelected={onSelected} onNew={() => {}} />);
-    await waitFor(() => expect(screen.getByRole("button", { name: "Rejoin" })).toBeDefined());
-    fireEvent.click(screen.getByRole("button", { name: "Rejoin" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Rejoin" }));
 
     await waitFor(() =>
       expect(onSelected).toHaveBeenCalledWith(
         expect.objectContaining({ id: "s1", status: "active", mode: "aggregation" }),
       ),
     );
-    expect(fetchSpy).toHaveBeenCalledOnce();
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    const [url, init] = fetchSpy.mock.calls[1]!;
+    expect(url).toBe("http://localhost:3000/shifts/s1/enter");
+    expect(init).toMatchObject({ method: "POST", body: JSON.stringify({ entryMethod: "list" }) });
+    expect(order).toEqual(["enter", "selected"]);
+  });
+
+  it.each([
+    ["the server is unreachable", () => Promise.reject(new TypeError("Failed to fetch"))],
+    [
+      "a proxy answers for a stopped server",
+      () => Promise.resolve(new Response("Bad Gateway", { status: 502 })),
+    ],
+    [
+      "the entry report is throttled",
+      () =>
+        Promise.resolve(
+          new Response(JSON.stringify({ message: "Too Many Requests" }), { status: 429 }),
+        ),
+    ],
+    [
+      "the subscription is read-only",
+      () =>
+        Promise.resolve(
+          new Response(JSON.stringify({ code: "subscription_read_only" }), { status: 403 }),
+        ),
+    ],
+    [
+      "a replacement drain has no server record of the shift",
+      () =>
+        Promise.resolve(
+          new Response(JSON.stringify({ code: "device_replacement_draining" }), { status: 409 }),
+        ),
+    ],
+  ])("still rejoins locally when %s", async (_case, enterResponse) => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(activeShiftList())
+      .mockImplementationOnce(enterResponse);
+    const onSelected = vi.fn();
+
+    render(<ShiftSelection client={client} onSelected={onSelected} onNew={() => {}} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Rejoin" }));
+
+    await waitFor(() =>
+      expect(onSelected).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "s1", status: "active", mode: "aggregation" }),
+      ),
+    );
+    expect(fetchSpy.mock.calls[1]?.[0]).toBe("http://localhost:3000/shifts/s1/enter");
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it.each([
+    [
+      "the server has closed the shift",
+      409,
+      { statusCode: 409, message: "Closed shifts cannot be entered", error: "Conflict" },
+      "This shift is closed.",
+    ],
+    [
+      "the station must be updated first",
+      409,
+      {
+        code: "STATION_UPDATE_REQUIRED",
+        message: "Update the station before using duplicate printing",
+      },
+      "Update the station before using duplicate printing",
+    ],
+    ["the station credential is rejected", 401, { message: "Unauthorized" }, "Unauthorized"],
+  ])("does not rejoin when %s", async (_case, status, body, message) => {
+    const owned = entryLease();
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(activeShiftList())
+      .mockResolvedValueOnce(new Response(JSON.stringify(body), { status }));
+    const onSelected = vi.fn();
+
+    render(
+      <ShiftSelection
+        client={client}
+        acquireShiftEntry={async () => owned.lease}
+        onSelected={onSelected}
+        onNew={() => {}}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Rejoin" }));
+
+    await waitFor(() => expect(screen.getByText(message)).toBeDefined());
+    expect(onSelected).not.toHaveBeenCalled();
+    expect(owned.release).toHaveBeenCalledOnce();
   });
 
   it("keeps shift entry blocked while the shared updater cancellation barrier is pending", async () => {
@@ -610,22 +711,14 @@ describe("ShiftSelection", () => {
     const entryBarrier = new Promise<void>((resolve) => {
       releaseEntry = resolve;
     });
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          items: [
-            {
-              id: "s1",
-              status: "active",
-              mode: "aggregation",
-              productName: "Cola",
-              plannedQty: null,
-            },
-          ],
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(activeShiftList())
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "s1", status: "active", mode: "aggregation" }), {
+          status: 200,
         }),
-        { status: 200 },
-      ),
-    );
+      );
     const owned = entryLease();
     const acquireShiftEntry = vi.fn(async () => {
       await entryBarrier;
@@ -648,11 +741,14 @@ describe("ShiftSelection", () => {
     await waitFor(() => expect((rejoin as HTMLButtonElement).disabled).toBe(true));
     expect(acquireShiftEntry).toHaveBeenCalledOnce();
     expect(onSelected).not.toHaveBeenCalled();
+    // The entry is reported only by the operation that owns the entry lease.
+    expect(fetchSpy).toHaveBeenCalledOnce();
     expect((screen.getByRole("button", { name: "Conflicts" }) as HTMLButtonElement).disabled).toBe(
       true,
     );
     releaseEntry();
     await waitFor(() => expect(onSelected).toHaveBeenCalledWith(expect.any(Object), owned.lease));
+    expect(fetchSpy.mock.calls[1]?.[0]).toBe("http://localhost:3000/shifts/s1/enter");
     expect(owned.release).toHaveBeenCalledOnce();
   });
 
