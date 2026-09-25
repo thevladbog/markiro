@@ -52,3 +52,9 @@ apps/handheld/
 # this file byte for byte. Reformatting it would make the lock compare the
 # renderer against Prettier's opinion instead of against the shipped artefact.
 apps/api/test/fixtures/inventory-task-form.snapshot.html
+
+# Characterisation fixtures for the printable forms: these bytes ARE the
+# contract while the forms move into @markiro/domain. print-forms-snapshot.test.ts
+# compares every render with its file byte for byte; reformatting would compare
+# the renderers against Prettier's opinion instead of the shipped output.
+apps/api/test/fixtures/print-forms/
