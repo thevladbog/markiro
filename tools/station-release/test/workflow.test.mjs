@@ -610,6 +610,7 @@ test("the workflow CORS gate pins the production API and Windows webview origin"
     ],
     ["/station/pair", "POST", "content-type,x-station-capabilities"],
     ["/station/identity", "GET", "content-type,x-api-key,x-station-capabilities"],
+    ["/station/heartbeat", "GET", "content-type,x-api-key,x-station-capabilities"],
     ["/station/operators", "GET", "content-type,x-api-key,x-station-capabilities"],
     [
       "/station/products/00000000-0000-0000-0000-000000000000/image/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
