@@ -394,6 +394,160 @@ describe("createStationClient", () => {
   });
 });
 
+describe("whoami presence probe", () => {
+  const cfg = { machineId: "m1", apiKey: "mk_key", serverUrl: "http://localhost:3000" };
+  const HEARTBEAT_URL = "http://localhost:3000/station/heartbeat";
+  const LEGACY_PROBE_URL = "http://localhost:3000/shifts?status=active";
+
+  function requestedUrls(fetchMock: { mock: { calls: unknown[][] } }): string[] {
+    return fetchMock.mock.calls.map(([url]) => String(url));
+  }
+
+  it("asks only the dedicated heartbeat route, with the device key", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(null, { status: 204 }));
+    const onReachabilityChange = vi.fn();
+    const client = createStationClient(cfg, { onReachabilityChange });
+
+    await expect(client.whoami()).resolves.toEqual({ ok: true });
+
+    expect(requestedUrls(fetchMock)).toEqual([HEARTBEAT_URL]);
+    const init = fetchMock.mock.calls[0]![1]!;
+    expect(init.method).toBe("GET");
+    expect((init.headers as Record<string, string>)["x-api-key"]).toBe("mk_key");
+    expect(onReachabilityChange.mock.calls).toEqual([["reachable"]]);
+  });
+
+  it.each([404, 405])(
+    "falls back to the bounded active-shift probe when an older server answers %s",
+    async (status) => {
+      const fetchMock = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ message: "Cannot GET /station/heartbeat" }), { status }),
+        )
+        .mockResolvedValueOnce(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+      const client = createStationClient(cfg);
+
+      await expect(client.whoami()).resolves.toEqual({ ok: true });
+
+      expect(requestedUrls(fetchMock)).toEqual([HEARTBEAT_URL, LEGACY_PROBE_URL]);
+    },
+  );
+
+  // A browser never shows the station an older server's 404: that server's
+  // CORS policy does not list the new path, so the preflight fails and fetch
+  // rejects without any response.
+  it("falls back without flashing unreachable when an older server refuses the new route's preflight", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+    const onReachabilityChange = vi.fn();
+    const client = createStationClient(cfg, { onReachabilityChange });
+
+    await expect(client.whoami()).resolves.toEqual({ ok: true });
+
+    expect(requestedUrls(fetchMock)).toEqual([HEARTBEAT_URL, LEGACY_PROBE_URL]);
+    expect(onReachabilityChange.mock.calls).toEqual([["reachable"]]);
+  });
+
+  it("reports one unreachable result when neither probe reaches the server", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockRejectedValue(new TypeError("Failed to fetch"));
+    const onReachabilityChange = vi.fn();
+    const client = createStationClient(cfg, { onReachabilityChange });
+
+    await expect(client.whoami()).rejects.toBeInstanceOf(TypeError);
+
+    expect(requestedUrls(fetchMock)).toEqual([HEARTBEAT_URL, LEGACY_PROBE_URL]);
+    expect(onReachabilityChange.mock.calls).toEqual([["unreachable"]]);
+  });
+
+  it.each([
+    ["generic 401", 401],
+    ["403", 403],
+    ["429", 429],
+    ["503", 503],
+  ])("does not retry through the legacy probe after a server %s", async (_name, status) => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => new Response(JSON.stringify({ message: "no" }), { status }));
+    const client = createStationClient(cfg);
+
+    await expect(client.whoami()).rejects.toEqual(new StationApiError(status, "no"));
+
+    expect(requestedUrls(fetchMock)).toEqual([HEARTBEAT_URL]);
+  });
+
+  it("does not stack a second attempt on a heartbeat that timed out", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(
+      (_url, init?: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            reject(new DOMException("The operation was aborted.", "AbortError"));
+          });
+        }),
+    );
+    const onReachabilityChange = vi.fn();
+    const client = createStationClient(cfg, { onReachabilityChange });
+
+    const pending = client.whoami();
+    const assertion = expect(pending).rejects.toThrow(/abort/i);
+    await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS + 1_000);
+    await assertion;
+
+    expect(requestedUrls(fetchMock)).toEqual([HEARTBEAT_URL]);
+    expect(onReachabilityChange.mock.calls).toEqual([["unreachable"]]);
+  });
+
+  it("seals the credential generation on explicit revocation without asking the legacy route", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ message: "revoked", code: "STATION_CREDENTIAL_REVOKED" }), {
+        status: 401,
+      }),
+    );
+    const generation = createCredentialGeneration();
+    const onCredentialRejected = vi.fn();
+    const client = createStationClient(cfg, {
+      credentialBoundary: { machineId: "m1", generation, onCredentialRejected },
+    });
+
+    await expect(client.whoami()).rejects.toEqual(
+      new StationApiError(401, "revoked", "STATION_CREDENTIAL_REVOKED"),
+    );
+
+    expect(requestedUrls(fetchMock)).toEqual([HEARTBEAT_URL]);
+    expect(generation.phase).toBe("sealed");
+    expect(onCredentialRejected).toHaveBeenCalledTimes(1);
+  });
+
+  it("seals the credential generation when an older server revokes it on the legacy probe", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("{}", { status: 404 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ message: "revoked", code: "STATION_CREDENTIAL_REVOKED" }), {
+          status: 401,
+        }),
+      );
+    const generation = createCredentialGeneration();
+    const onCredentialRejected = vi.fn();
+    const client = createStationClient(cfg, {
+      credentialBoundary: { machineId: "m1", generation, onCredentialRejected },
+    });
+
+    await expect(client.whoami()).rejects.toEqual(
+      new StationApiError(401, "revoked", "STATION_CREDENTIAL_REVOKED"),
+    );
+
+    expect(generation.phase).toBe("sealed");
+    expect(onCredentialRejected).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("redeemStationPairing", () => {
   it("posts the code without an enrolled-device credential", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(

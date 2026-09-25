@@ -506,6 +506,59 @@ describe("Enrollment", () => {
     await waitFor(() => expect(newEnrolled).toHaveBeenCalledTimes(1), { timeout: 1200 });
   });
 
+  it.each([
+    [
+      "a current server",
+      () => [new Response(null, { status: 204 })],
+      ["https://service.factory.example/station/heartbeat"],
+    ],
+    [
+      "an older server without the heartbeat route",
+      () => [
+        new Response(JSON.stringify({ message: "Cannot GET /station/heartbeat" }), { status: 404 }),
+        new Response(JSON.stringify({ items: [] }), { status: 200 }),
+      ],
+      [
+        "https://service.factory.example/station/heartbeat",
+        "https://service.factory.example/shifts?status=active",
+      ],
+    ],
+  ])(
+    "proves service credentials against %s before persisting them",
+    async (_server, responses, expectedUrls) => {
+      const queued = responses();
+      const fetchMock = vi.fn(
+        async (_url: string) => queued.shift() ?? new Response(null, { status: 500 }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      render(
+        <Enrollment
+          machineId="machine-1"
+          onEnrolled={() => {}}
+          pairingServerUrl="https://api.factory.example"
+        />,
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Service setup" }));
+      fireEvent.change(screen.getByLabelText("Server URL"), {
+        target: { value: "https://service.factory.example" },
+      });
+      fireEvent.change(screen.getByLabelText("Device key"), { target: { value: "service-key" } });
+      fireEvent.click(screen.getByRole("button", { name: "Connect service credentials" }));
+
+      await waitFor(() =>
+        expect(invokeMock).toHaveBeenCalledWith("write_config", {
+          cfg: expect.objectContaining({
+            machine_id: "machine-1",
+            api_key: "service-key",
+            server_url: "https://service.factory.example",
+          }),
+        }),
+      );
+      expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(expectedUrls);
+    },
+  );
+
   it("resets pending service state and clears secret inputs on a normal lifecycle change", async () => {
     let resolveOldWhoami!: (response: Response) => void;
     vi.stubGlobal(
