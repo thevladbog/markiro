@@ -53,6 +53,7 @@ function isStationRequest(req: Request): boolean {
     (method === "POST" &&
       (path === "/station/pair" ||
         path === "/station/pair/recovery" ||
+        path === "/station/heartbeat" ||
         path === "/station/codes/releases" ||
         path === "/station/boxes/reconciliation" ||
         path === "/station/conflicts/status" ||

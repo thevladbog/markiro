@@ -1073,6 +1073,7 @@ export function App() {
   // Keep the server-side station heartbeat fresh even when the line is idle
   // and there are no scans to drain. TenantGuard records lastSeenAt on this
   // authenticated probe, which is what the cabinet uses for line presence.
+  // `whoami` asks the constant-cost heartbeat route, not the shift history.
   useEffect(() => {
     if (!authenticatedClient) return;
     const heartbeat = () => {

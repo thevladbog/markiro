@@ -31,6 +31,7 @@ const expected = [
   ["/station/pair", "POST", "content-type,x-station-capabilities"],
   ["/station/pair/recovery", "POST", "content-type,x-station-capabilities"],
   ["/station/identity", "GET", "content-type,x-api-key,x-station-capabilities"],
+  ["/station/heartbeat", "POST", "content-type,x-api-key,x-station-capabilities"],
   ["/station/operators", "GET", "content-type,x-api-key,x-station-capabilities"],
   ["/station/device-replacement-intent/v1", "GET", "content-type,x-api-key,x-station-capabilities"],
   [

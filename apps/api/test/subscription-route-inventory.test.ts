@@ -822,6 +822,11 @@ const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
     reason:
       "unpaired kiosk has no device identity; PairingService resolves the authoritative tenant and enforces write access",
   },
+  "StationHeartbeatController.heartbeat": {
+    reason:
+      "line presence carries no business data and must stay visible under every subscription state; TenantGuard records only the authenticated device's lastSeenAt",
+    requiredGuards: ["TenantGuard", "StationOnlyGuard"],
+  },
   "StationPairController.recovery": {
     reason:
       "recovery authenticates the single-use code and expected identity; StationPairingService enforces authoritative tenant write/quota access",
