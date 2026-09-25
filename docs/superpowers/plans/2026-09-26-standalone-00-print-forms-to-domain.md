@@ -286,7 +286,7 @@ Run:
 
 ```bash
 CI=true pnpm --filter @markiro/api exec vitest run test/print-forms-snapshot.test.ts
-node_modules/.bin/prettier --check .prettierignore apps/api/test/print-forms-snapshot.test.ts
+node_modules/.bin/prettier --check apps/api/test/print-forms-snapshot.test.ts
 ```
 
 Expected: 8 PASS; Prettier — «All matched files use Prettier code style!». Проверка отрицательного случая: временно заменить в `apps/api/test/fixtures/print-forms/box-report.html` любой символ, повторить первую команду — ожидается FAIL «mismatched»; вернуть файл командой `git checkout -- apps/api/test/fixtures/print-forms/box-report.html`, если он уже закоммичен, иначе перегенерировать шагом 3.
@@ -716,7 +716,7 @@ Run:
 
 ```bash
 grep -rn --include='*.ts' --include='*.tsx' --include='*.mjs' -E "modules/(code-search/(contents-report|box-report|pallet-report|pallet-placard)|print/task-form-chrome|shifts/shift-task-form)" apps packages tools | grep -v -E "node_modules|/dist/" || echo "no stale imports"
-node_modules/.bin/prettier --check .prettierignore packages/domain/src/index.ts packages/domain/src/print-forms packages/domain/test apps/api/src/modules/code-search apps/api/src/modules/shifts apps/api/src/modules/inventories/inventory-task-form.ts apps/api/test/box-report-query.test.ts apps/admin/test/browser/box-report-render.mjs
+node_modules/.bin/prettier --check packages/domain/src/index.ts packages/domain/src/print-forms packages/domain/test apps/api/src/modules/code-search apps/api/src/modules/shifts apps/api/src/modules/inventories/inventory-task-form.ts apps/api/test/box-report-query.test.ts apps/admin/test/browser/box-report-render.mjs
 git diff --check
 ```
 
