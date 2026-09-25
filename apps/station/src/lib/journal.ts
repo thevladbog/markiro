@@ -126,6 +126,39 @@ export async function findLatestAcceptedOperation(
   return rows[0] ? presentOperation(rows[0]) : null;
 }
 
+/** A shift's durable counts on THIS device: what the work screen's band and journal head show. */
+export interface ShiftJournalCounts {
+  /** Units the shift holds here: the same view shift close and the plan prompt count. */
+  accepted: number;
+  /** Journal rows rejected for any reason other than a duplicate. */
+  errors: number;
+  duplicates: number;
+}
+
+export async function readShiftJournalCounts(
+  exec: SqlExecutor,
+  shiftId: string,
+): Promise<ShiftJournalCounts> {
+  const [verdicts, processed] = await Promise.all([
+    exec.all<{ duplicates: number | null; errors: number | null }>(
+      `SELECT SUM(CASE WHEN verdict = 'duplicate' THEN 1 ELSE 0 END) AS duplicates,
+              SUM(CASE WHEN verdict NOT IN ('ok', 'duplicate') THEN 1 ELSE 0 END) AS errors
+         FROM scan_events_mirror
+        WHERE shift_id = ?`,
+      [shiftId],
+    ),
+    exec.all<{ accepted: number }>(
+      "SELECT COUNT(*) AS accepted FROM station_processed_codes WHERE shift_id = ?",
+      [shiftId],
+    ),
+  ]);
+  return {
+    accepted: processed[0]?.accepted ?? 0,
+    errors: verdicts[0]?.errors ?? 0,
+    duplicates: verdicts[0]?.duplicates ?? 0,
+  };
+}
+
 /**
  * Every accepted code key on this device, as a Set for the domain's
  * SYNCHRONOUS `isDuplicate(key)` contract (SQLite itself is async, so the

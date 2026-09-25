@@ -8,6 +8,7 @@ import {
   findLatestAcceptedOperation,
   listRecentOperations,
   loadCodeKeys,
+  readShiftJournalCounts,
   recordScan,
   undoLastScan,
 } from "../src/lib/journal.js";
@@ -865,6 +866,48 @@ describe("box id and operator id", () => {
     const out = await exec.all<{ operator_id: string }>(`SELECT operator_id FROM outbox`);
     expect(ev[0]!.operator_id).toBe("op-1");
     expect(out[0]!.operator_id).toBe("op-1");
+  });
+});
+
+describe("readShiftJournalCounts", () => {
+  it("counts accepted units, duplicates and other rejections of one shift only", async () => {
+    const exec = makeExec();
+    const verdicts: Array<[string, string]> = [
+      ["s1", "ok"],
+      ["s1", "ok"],
+      ["s1", "duplicate"],
+      ["s1", "invalid"],
+      ["s1", "wrong_gtin"],
+      ["s2", "duplicate"],
+    ];
+    for (const [shiftId, verdict] of verdicts) {
+      await exec.run(
+        `INSERT INTO scan_events_mirror (shift_id, terminal_id, raw, verdict, scanned_at)
+         VALUES (?, ?, ?, ?, ?)`,
+        [shiftId, "t1", "RAW", verdict, "2026-09-25T09:00:00.000Z"],
+      );
+    }
+    for (const [codeHash, shiftId] of [
+      ["a".repeat(64), "s1"],
+      ["b".repeat(64), "s1"],
+      ["c".repeat(64), "s2"],
+    ] as const) {
+      await exec.run(
+        `INSERT INTO codes_mirror (code_hash, shift_id, gtin14, serial, scanned_at)
+         VALUES (?, ?, ?, ?, ?)`,
+        [codeHash, shiftId, "04600000000015", codeHash.slice(0, 4), "2026-09-25T09:00:00.000Z"],
+      );
+    }
+    expect(await readShiftJournalCounts(exec, "s1")).toEqual({
+      accepted: 2,
+      errors: 2,
+      duplicates: 1,
+    });
+    expect(await readShiftJournalCounts(exec, "s3")).toEqual({
+      accepted: 0,
+      errors: 0,
+      duplicates: 0,
+    });
   });
 });
 
