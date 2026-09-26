@@ -707,15 +707,6 @@ body,
   grid-template-rows: minmax(0, 1fr) 64px;
 }
 
-.gallery-pager {
-  display: grid;
-  gap: var(--sp-3);
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-  align-items: center;
-  font: var(--floor-body-strong);
-  text-align: center;
-}
-
 .gallery-three-cards,
 .gallery-two-cards,
 .gallery-work-grid {

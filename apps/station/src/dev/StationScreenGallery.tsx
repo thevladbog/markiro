@@ -16,7 +16,7 @@ import {
   type CSSProperties,
   type MutableRefObject,
 } from "react";
-import { Alert, Button, Card, PinPad, SignalOverlay } from "@markiro/ui";
+import { Alert, Button, Card, Pager, PinPad, SignalOverlay } from "@markiro/ui";
 import type { OperatorMirrorRecord } from "@markiro/db/station-sqlite";
 import { SHIFT_CLOSE_REASON_CODES } from "@markiro/domain";
 import type { StationInventoryBundleManifest } from "@markiro/domain";
@@ -101,7 +101,6 @@ const COPY = {
   ru: {
     back: "Назад",
     continue: "Продолжить",
-    page: (page: number) => `Страница ${page} из 2`,
     station: "Демо-станция 01",
     line: "Тестовая линия А",
     operator: "Оператор Тестов",
@@ -117,7 +116,6 @@ const COPY = {
   en: {
     back: "Back",
     continue: "Continue",
-    page: (page: number) => `Page ${page} of 2`,
     station: "Demo station 01",
     line: "Test line A",
     operator: "Sample Operator",
@@ -204,6 +202,13 @@ export function StationScreenGallery({ request }: StationScreenGalleryProps) {
     fixture.kind === "shift" ||
     fixture.kind === "inventory" ||
     rendersActiveShiftWorkScreen;
+  // App.tsx turns the printer summary into the «Принтеры N / 3» button only
+  // while no floor task is active and setup is closed: the shift list and the
+  // inventory task list, which the printed instructions capture.
+  const rendersTaskSelection =
+    fixture.kind === "shift" ||
+    (fixture.kind === "inventory" &&
+      (fixture.variant === "task-selection" || fixture.variant === "other-line-confirmation"));
   const headerControls = !withActiveShiftControls
     ? null
     : {
@@ -255,9 +260,12 @@ export function StationScreenGallery({ request }: StationScreenGalleryProps) {
         serverReachability={syncVariant === "offline" ? "unreachable" : "reachable"}
         scanner="connected"
         printerConfigured={fixture.kind !== "setup" || fixture.variant !== "printers-empty"}
-        {...(fixture.kind === "setup"
+        {...(fixture.kind === "setup" || rendersTaskSelection
           ? {
-              printerSummary: galleryPrinterSummary(fixture.variant, request.locale),
+              printerSummary: galleryPrinterSummary(
+                fixture.kind === "setup" ? fixture.variant : "printers",
+                request.locale,
+              ),
               onOpenPrinters: () => undefined,
             }
           : {})}
@@ -478,6 +486,9 @@ function InventoryTaskSelectionFixture({ locale }: { locale: GalleryLocale }) {
         onShiftSelected={() => undefined}
         onInventorySelected={() => undefined}
         onNew={() => undefined}
+        // App.tsx passes both, so the footer carries setup and the conflicts list.
+        onSetup={() => undefined}
+        onConflicts={() => undefined}
       />
     </div>
   );
@@ -1398,14 +1409,38 @@ function NewShiftFixture({ view, locale }: { view: string; locale: GalleryLocale
   );
 }
 
+/**
+ * The footer of production `ShiftSelection` as the floor sees it: the new
+ * shift action, then refresh, workstation setup and the code conflicts list.
+ * The printed operator instructions capture this screen, so it must not be a
+ * stand-in.
+ */
+function ShiftListFooter({ locale }: { locale: GalleryLocale }) {
+  const t = i18n.getFixedT(locale);
+  return (
+    <FloorFooter ariaLabel={t("shifts.actions")}>
+      <Button size="floor">{t("shifts.new")}</Button>
+      <div className="shift-selection__secondary-actions">
+        <Button size="floor" variant="secondary">
+          {t("shifts.refresh")}
+        </Button>
+        <Button size="floor" variant="secondary">
+          {t("shell.setup")}
+        </Button>
+        <Button size="floor" variant="secondary">
+          {t("shell.conflicts")}
+        </Button>
+      </div>
+    </FloorFooter>
+  );
+}
+
 function ShiftFixture({ variant, locale }: { variant: string; locale: GalleryLocale }) {
   const ru = locale === "ru";
+  const t = i18n.getFixedT(locale);
   if (variant === "loading" || variant === "read-error" || variant === "empty") {
     return (
-      <StationScreen
-        title={ru ? "Смены" : "Shifts"}
-        actions={<GalleryFooter locale={locale} primary={ru ? "Новая смена" : "New shift"} />}
-      >
+      <StationScreen title={t("shifts.title")} actions={<ShiftListFooter locale={locale} />}>
         <div className="gallery-centered-card">
           {variant === "read-error" ? (
             <Alert
@@ -1491,18 +1526,18 @@ function ShiftFixture({ variant, locale }: { variant: string; locale: GalleryLoc
         ];
   return (
     <StationScreen
-      title={ru ? "Смены" : "Shifts"}
+      title={t("shifts.title")}
       header={
         <>
           <div className="shift-selection__message" aria-hidden="true" />
           <div className="shift-selection__header-action">
             <Button size="floor" variant="secondary">
-              {ru ? "Складские операции 1" : "Warehouse operations 1"}
+              {t("inventory.categories.warehouse", { count: 1 })}
             </Button>
           </div>
         </>
       }
-      actions={<GalleryFooter locale={locale} primary={ru ? "Новая смена" : "New shift"} />}
+      actions={<ShiftListFooter locale={locale} />}
     >
       <div className="shift-selection__content">
         <div className="shift-selection__slot">
@@ -1515,34 +1550,24 @@ function ShiftFixture({ variant, locale }: { variant: string; locale: GalleryLoc
                 productFullName={shift.fullName}
                 gtin={shift.gtin}
                 plannedDate={`2026-08-${String(21 - index - (page - 1) * 2).padStart(2, "0")}`}
-                plannedDateLabel={ru ? "Смена" : "Shift"}
+                plannedDateLabel={t("shifts.shiftDateShort")}
                 productionDate={index === 0 ? "2026-08-15" : null}
-                productionDateLabel={ru ? "Производство" : "Produced"}
+                productionDateLabel={t("shifts.productionShort")}
                 locale={locale}
                 plannedQty={shift.plannedQty}
                 mode={shift.mode}
                 palletsEnabled={"palletsEnabled" in shift && shift.palletsEnabled === true}
-                palletsLabel={ru ? "Паллеты" : "Pallets"}
+                palletsLabel={t("shifts.withPallets")}
                 status={shift.active ? "active" : "planned"}
                 modeLabel={
-                  shift.mode === "aggregation"
-                    ? ru
-                      ? "Агрегация"
-                      : "Aggregation"
-                    : ru
-                      ? "Валидация"
-                      : "Validation"
+                  shift.mode === "aggregation" ? t("shifts.aggregation") : t("shifts.validation")
                 }
-                statusLabel={
-                  shift.active ? (ru ? "Активна" : "Active") : ru ? "Запланирована" : "Planned"
-                }
-                plannedLabel={ru ? "план" : "plan"}
-                noPlanLabel={ru ? "без плана" : "no plan"}
+                statusLabel={shift.active ? t("shifts.active") : t("shifts.notStarted")}
+                plannedLabel={t("shifts.planned")}
+                noPlanLabel={t("shifts.noPlan")}
                 counterpartyName={null}
-                counterpartyLabel={ru ? "Для" : "For"}
-                actionLabel={
-                  shift.active ? (ru ? "Присоединиться" : "Join") : ru ? "Открыть" : "Open"
-                }
+                counterpartyLabel={t("shifts.forCounterparty")}
+                actionLabel={shift.active ? t("shifts.rejoin") : t("shifts.open")}
                 active={shift.active}
                 disabled={false}
                 onSelect={() => undefined}
@@ -1553,11 +1578,15 @@ function ShiftFixture({ variant, locale }: { variant: string; locale: GalleryLoc
             ))}
           </div>
         </div>
-        <GalleryPager
+        <Pager
           page={page}
-          previousLabel={ru ? "Назад" : "Previous"}
-          nextLabel={ru ? "Далее" : "Next"}
-          pageLabel={COPY[locale].page(page)}
+          pageCount={2}
+          onPageChange={() => undefined}
+          ariaLabel={t("shifts.pagination")}
+          previousLabel={t("shifts.previousPage")}
+          nextLabel={t("shifts.nextPage")}
+          pageLabel={(current, pageCount) => t("shifts.page", { page: current, pageCount })}
+          className="shift-selection__pager"
         />
       </div>
     </StationScreen>
@@ -2687,29 +2716,5 @@ function GalleryFooter({
       </Button>
       {primary ? <Button size="floor">{primary}</Button> : null}
     </FloorFooter>
-  );
-}
-
-function GalleryPager({
-  page,
-  previousLabel,
-  nextLabel,
-  pageLabel,
-}: {
-  page: number;
-  previousLabel: string;
-  nextLabel: string;
-  pageLabel: string;
-}) {
-  return (
-    <nav className="mk-pager gallery-pager" aria-label={pageLabel}>
-      <Button size="floor" variant="secondary" fullWidth disabled={page === 1}>
-        {previousLabel}
-      </Button>
-      <span>{pageLabel}</span>
-      <Button size="floor" variant="secondary" fullWidth disabled={page === 2}>
-        {nextLabel}
-      </Button>
-    </nav>
   );
 }
