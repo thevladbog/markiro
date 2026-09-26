@@ -4793,6 +4793,24 @@ export const STATION_MIGRATIONS: string[] = [
      ON scan_events_mirror(shift_id,verdict);`,
   `CREATE INDEX IF NOT EXISTS codes_mirror_shift_idx
      ON codes_mirror(shift_id);`,
+  // A box taken apart is never reconciled again, so the issue it carried could
+  // never be confirmed away. Its retirement drops the issue in the same
+  // statement. IF NOT EXISTS for the reason station-sqlite-314 has it: the DROP
+  // and the CREATE can land on different pooled connections, and a plain
+  // CREATE parsed against a stale schema fails with "already exists" where IF
+  // NOT EXISTS re-prepares against the current schema and creates the trigger.
+  `DROP TRIGGER IF EXISTS box_exception_disassemble_local;`,
+  `CREATE TRIGGER IF NOT EXISTS box_exception_disassemble_local
+     AFTER INSERT ON box_exceptions_mirror
+     WHEN NEW.kind = 'disassemble'
+     BEGIN
+       DELETE FROM codes_mirror WHERE box_id = NEW.box_id;
+       UPDATE boxes_mirror SET disassembled_at = NEW.at WHERE box_id = NEW.box_id;
+       DELETE FROM box_reconciliation_issues WHERE box_id = NEW.box_id;
+     END;`,
+  // Issues an older station left on boxes it had already taken apart.
+  `DELETE FROM box_reconciliation_issues
+    WHERE box_id IN (SELECT box_id FROM boxes_mirror WHERE disassembled_at IS NOT NULL);`,
 ];
 
 export interface StationMigrationEntry {
