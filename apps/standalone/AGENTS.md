@@ -152,6 +152,11 @@ together with `src/host/client.ts`, `src/host/device.ts` and
 - Every write sends the loaded record's `expectedRev`. On `stale_revision`
   the page offers to load the data again and drops the user's edits; it
   never retries with `details.currentRev`.
+- Roles (spec §4.8) are enforced by the host. The office hides menu items by
+  role (`OFFICE_NAV`) and wraps administrator-only routes in `RequireRole`,
+  which shows «Нет доступа» when a role changes mid-session. An
+  administrator's own row in «Пользователи» changes only the name: another
+  administrator changes their role or access.
 
 ## Marking rules
 

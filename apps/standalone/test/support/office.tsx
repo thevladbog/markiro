@@ -4,7 +4,12 @@ import { vi, type Mock } from "vitest";
 import { ThemeProvider } from "@markiro/ui";
 
 import type { HostApi } from "../../src/host/api.js";
-import type { OfficeUser, OrgProfile, SsccState } from "../../src/host/protocol.js";
+import type {
+  OfficeUser,
+  OfficeUserRecord,
+  OrgProfile,
+  SsccState,
+} from "../../src/host/protocol.js";
 import { Office } from "../../src/office/Office.js";
 import type { OfficeSessionValue } from "../../src/office/office-session.js";
 import { SESSION } from "./fixtures.js";
@@ -73,6 +78,28 @@ export const TECHNOLOGIST: OfficeUser = {
   name: "Павел Орлов",
   role: "technologist",
 };
+
+/** The signed-in administrator (the `SESSION` user) and the technologist. */
+export const OFFICE_USERS: OfficeUserRecord[] = [
+  {
+    id: SESSION.user.id,
+    login: "admin",
+    name: "Ирина Смирнова",
+    role: "admin",
+    active: true,
+    createdAt: "2026-09-26T09:15:00Z",
+    rev: 1,
+  },
+  {
+    id: TECHNOLOGIST.id,
+    login: "tech",
+    name: "Павел Орлов",
+    role: "technologist",
+    active: true,
+    createdAt: "2026-09-26T09:20:00Z",
+    rev: 3,
+  },
+];
 
 export const ORG_PROFILE: OrgProfile = {
   name: "ООО «Атолл»",

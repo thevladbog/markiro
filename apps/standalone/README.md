@@ -24,6 +24,10 @@ changes: [AGENTS.md](AGENTS.md).
    `~/Library/Application Support/app.markiro.standalone` on macOS); delete
    it to pair again.
 
+   In the office an administrator edits the organization profile, the SSCC
+   counters and block sizes, and the office users; a technologist sees the
+   organization and SSCC read-only. «Выйти в цех» ends the office session.
+
 ## Tests
 
 - Rust: `cargo test --manifest-path apps/standalone/Cargo.toml --workspace`
