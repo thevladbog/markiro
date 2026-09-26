@@ -95,7 +95,9 @@ The header navigation, the footer columns and the light-theme fixes that the fil
 - Modify: `apps/landing/src/content/ui.ts` (`common.nav` in RU lines 11-17 and EN lines 185-191)
 - Modify: `apps/landing/src/components/LandingHeader.astro`
 - Modify: `apps/landing/src/components/LandingFooter.astro`
-- Modify: `apps/landing/src/styles/landing.css` (header 133-146, menu trigger 242-251, mobile nav 1537-1560, footer 1234-1290)
+- Modify: `apps/landing/src/components/ConsentPanel.astro` (the panel stays dark on light pages)
+- Modify: `apps/landing/src/styles/landing.css` (header 133-146, menu trigger 242-251, mobile nav 1537-1560, footer 1234-1290, consent panel 1293-1302)
+- Modify: `apps/landing/src/styles/film.css` (the two light-theme rules at lines 32-42 move to `landing.css`)
 - Test: `apps/landing/test/rendered-page.test.ts`
 
 **Interfaces:**
@@ -193,12 +195,21 @@ Add to the `describe` block of `apps/landing/test/rendered-page.test.ts`, after 
         ?.getAttribute("content"),
     ).toBe("#131216");
   });
+
+  it("keeps the cookie panel dark on every page", () => {
+    for (const route of ["/", "/en/", "/sscc-i-agregatsiya/"]) {
+      expect(
+        documents.get(route)?.querySelector("[data-consent-panel]")?.getAttribute("data-theme"),
+        route,
+      ).toBe("dark");
+    }
+  });
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `pnpm_config_verify_deps_before_run=false pnpm --filter @markiro/landing exec vitest run test/rendered-page.test.ts -t "header navigation|footer into|dark theme"`
-Expected: the navigation and footer tests FAIL (old labels and no `[data-footer-column]`); the dark-theme test passes already.
+Run: `pnpm_config_verify_deps_before_run=false pnpm --filter @markiro/landing exec vitest run test/rendered-page.test.ts -t "header navigation|footer into|dark theme|cookie panel dark"`
+Expected: the navigation, footer and cookie-panel tests FAIL (old labels, no `[data-footer-column]`, no `data-theme` on the panel); the dark-theme test passes already.
 
 - [ ] **Step 3: Give BaseLayout a theme**
 
@@ -488,6 +499,14 @@ Every match outside the block from item 5 is inside a `@media` rule. Delete thos
   }
 ```
 
+7. The cookie panel keeps its dark look on light pages. In `.consent-panel` add `color: var(--fg-1);` and `color-scheme: dark;` next to `background: #19181d;` (`color` is inherited already computed from the body, so the panel re-reads it from its own dark tokens), and in `apps/landing/src/components/ConsentPanel.astro` change the root element to:
+
+```astro
+<section class="consent-panel" data-consent-panel data-theme="dark" aria-label={copy.label} hidden>
+```
+
+8. In `apps/landing/src/styles/film.css` delete the two rules the shared rules of item 4 now cover: `.film-top[data-theme="light"] .language-switch a[aria-current="page"] { … }` and `.film-top[data-theme="light"] .button:hover, .film-chapter[data-theme="light"] .button:hover { … }`, with their two comments.
+
 - [ ] **Step 8: Run the tests to verify they pass**
 
 Run: `pnpm_config_verify_deps_before_run=false pnpm --filter @markiro/landing exec vitest run test/rendered-page.test.ts`
@@ -497,13 +516,13 @@ Expected: PASS, including the existing brand-link, cookie-settings and Station-f
 
 Stop any server on port 5473 first (`lsof -nP -iTCP:5473 -sTCP:LISTEN`), then run outside the sandbox:
 
-Run: `cd tools/production-browser && CI=1 pnpm --ignore-workspace exec playwright test --config landing.playwright.config.ts -g "film page|footer aligned|brand in its header"`
+Run: `CI=1 pnpm --dir tools/production-browser --ignore-workspace exec playwright test --config landing.playwright.config.ts -g "film page|footer aligned|brand in its header|cookie panel"`
 Expected: all selected tests pass.
 
 - [ ] **Step 10: Commit**
 
 ```bash
-git add apps/landing/src/layouts/BaseLayout.astro apps/landing/src/content/ui.ts apps/landing/src/components/LandingHeader.astro apps/landing/src/components/LandingFooter.astro apps/landing/src/styles/landing.css apps/landing/test/rendered-page.test.ts
+git add apps/landing/src/layouts/BaseLayout.astro apps/landing/src/content/ui.ts apps/landing/src/components/LandingHeader.astro apps/landing/src/components/LandingFooter.astro apps/landing/src/components/ConsentPanel.astro apps/landing/src/styles/landing.css apps/landing/src/styles/film.css apps/landing/test/rendered-page.test.ts
 git commit -m "feat(landing): shared header, footer and layout theme for light pages" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
@@ -3150,9 +3169,21 @@ const SCREENS: Readonly<Record<ProductPartId, HomeScreenId>> = {
 
 - [ ] **Step 4: Write the section styles**
 
-Append to `apps/landing/src/styles/home.css` (sizes follow the pen.dev frame `HP · Главная · направление A · полная страница · 1440`: 7rem vertical rhythm, 27.5rem text column, 34 px row titles, 26 px card titles):
+Append to `apps/landing/src/styles/home.css` (sizes follow the pen.dev frame `HP · Главная · направление A · полная страница · 1440`: 7rem vertical rhythm, 27.5rem text column, 34 px row titles, 26 px card titles, 15 px links in `--fg-1`). The shared `.text-link` is 12 px mono in the accent green, which fails contrast on paper and breaks the rule that green stays on buttons, dots and list markers, so the home page overrides it:
 
 ```css
+/* Links read as text on the home page; green stays on buttons, dots and list markers. */
+.home .text-link {
+  margin-top: 0;
+  color: var(--fg-1);
+  font: 600 0.9375rem / 1.2 var(--font-ui);
+}
+
+.home .text-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 0.3em;
+}
+
 /* 01 Product */
 
 .home-product {
@@ -4126,6 +4157,11 @@ In `apps/landing/src/styles/landing.css` delete everything from the comment `/* 
 Append to `apps/landing/src/styles/home.css`:
 
 ```css
+/* 08 Demo: the phone number reads as text; green stays on the submit button. */
+.home .demo-phone {
+  color: var(--fg-1);
+}
+
 /* 05 Rollout */
 
 .home-rollout {
@@ -4615,10 +4651,12 @@ Serve the built site (`node tools/production-browser/scripts/serve-landing.mjs`,
 
 - [ ] **Step 10: Commit**
 
+The deletions are staged by `git rm` in Step 1. Stage the modified files by name (add `apps/landing/src/components/HomePage.astro` and `apps/landing/src/styles/home.css` only if this task changed them):
+
 ```bash
-git add -A apps/landing/src/components apps/landing/src/assets apps/landing/src/content/ui.ts apps/landing/src/styles/landing.css apps/landing/test/rendered-page.test.ts tools/production-browser/tests/landing-seo.spec.ts
+git add apps/landing/src/content/ui.ts apps/landing/src/styles/landing.css apps/landing/test/rendered-page.test.ts tools/production-browser/tests/landing-seo.spec.ts
 git status --short
 git commit -m "refactor(landing): remove the old home sections" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
-Check `git status --short` before committing: only the files above are staged, and nothing under `output/`, `.claude/` or `.superpowers/`.
+Check `git status --short` before committing: only the deletions and the files above are staged, and nothing under `output/`, `.claude/` or `.superpowers/`.
