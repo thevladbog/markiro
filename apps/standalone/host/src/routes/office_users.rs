@@ -10,7 +10,7 @@ use markiro_proto::{
 use serde_json::json;
 use sqlx::SqliteConnection;
 
-use crate::audit::{self, Actor, Entry, Outcome};
+use crate::audit::{self, actions, Actor, Entry, Outcome};
 use crate::auth::OfficeContext;
 use crate::db::{begin_write, next_revision};
 use crate::error::{ApiError, ApiJson, ApiPath};
@@ -89,7 +89,7 @@ pub(crate) async fn replace_password(
         at,
         Entry {
             actor,
-            action: "office_user.password",
+            action: actions::OFFICE_USER_PASSWORD,
             target_type: Some("office_user"),
             target_id: Some(user_id),
             outcome: Outcome::Ok,
@@ -159,7 +159,7 @@ pub async fn create_user(
         &at,
         Entry {
             actor: context.actor(),
-            action: "office_user.create",
+            action: actions::OFFICE_USER_CREATE,
             target_type: Some("office_user"),
             target_id: Some(&id),
             outcome: Outcome::Ok,
@@ -211,21 +211,19 @@ pub async fn update_user(
             ));
         }
     }
-    let mut changed = Vec::new();
-    if current.name != name {
-        changed.push("name");
-    }
-    if current.role != update.role {
-        changed.push("role");
-    }
-    if current.active != update.active {
-        changed.push("active");
-    }
-    if changed.is_empty() {
+    let Some(details) = audit::update_details(&[
+        ("name", json!(current.name), json!(name)),
+        (
+            "role",
+            json!(current.role.as_str()),
+            json!(update.role.as_str()),
+        ),
+        ("active", json!(current.active), json!(update.active)),
+    ]) else {
         // Nothing actually changed: report the record as-is without bumping
         // the revision, writing a row nobody changed, or auditing a no-op.
         return Ok(Json(current));
-    }
+    };
     let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
     sqlx::query("UPDATE office_users SET name = ?, role = ?, active = ?, rev = ? WHERE id = ?")
         .bind(&name)
@@ -248,11 +246,11 @@ pub async fn update_user(
         &at,
         Entry {
             actor: context.actor(),
-            action: "office_user.update",
+            action: actions::OFFICE_USER_UPDATE,
             target_type: Some("office_user"),
             target_id: Some(&id),
             outcome: Outcome::Ok,
-            details: json!({ "changed": changed }),
+            details,
         },
     )
     .await

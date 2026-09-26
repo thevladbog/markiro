@@ -4,6 +4,58 @@
 use serde_json::Value;
 use sqlx::SqliteConnection;
 
+/// Action names of `audit_log.action`. A new writer adds its name here, so
+/// the audit screen (plan 5) translates one list.
+pub mod actions {
+    pub const HOST_BOOTSTRAP: &str = "host.bootstrap";
+    pub const DEVICE_LOCAL_PAIR: &str = "device.local_pair";
+    pub const OFFICE_LOGIN: &str = "office.login";
+    pub const OFFICE_LOGOUT: &str = "office.logout";
+    pub const OFFICE_USER_CREATE: &str = "office_user.create";
+    pub const OFFICE_USER_UPDATE: &str = "office_user.update";
+    /// An administrator set someone's password, or a user changed their own
+    /// (then `actor_id == target_id`).
+    pub const OFFICE_USER_PASSWORD: &str = "office_user.password";
+    pub const ORG_UPDATE: &str = "org.update";
+    pub const SSCC_COUNTER_UPDATE: &str = "sscc.counter.update";
+    pub const SSCC_BLOCK_SIZES_UPDATE: &str = "sscc.block_sizes.update";
+}
+
+/// `details.reason` of a denied row: every denial names one.
+pub mod reasons {
+    /// The typed login is not a valid login at all; its text is not recorded.
+    pub const INVALID_LOGIN: &str = "invalid_login";
+    /// No such login; its text is not recorded either.
+    pub const UNKNOWN_LOGIN: &str = "unknown_login";
+    pub const WRONG_PASSWORD: &str = "wrong_password";
+    pub const INACTIVE: &str = "inactive";
+    /// The record changed while the password was being hashed.
+    pub const CHANGED: &str = "changed";
+    pub const WRONG_CURRENT_PASSWORD: &str = "wrong_current_password";
+}
+
+/// `details` of an update row: `changed` names the changed fields in order,
+/// and each of them also appears as `{ "from": …, "to": … }`. `None` when
+/// nothing changed, so the caller can return the record as-is.
+pub fn update_details(fields: &[(&str, Value, Value)]) -> Option<Value> {
+    let mut details = serde_json::Map::new();
+    let mut changed = Vec::new();
+    for (name, from, to) in fields {
+        if from != to {
+            changed.push(Value::String((*name).to_owned()));
+            details.insert(
+                (*name).to_owned(),
+                serde_json::json!({ "from": from, "to": to }),
+            );
+        }
+    }
+    if changed.is_empty() {
+        return None;
+    }
+    details.insert("changed".to_owned(), Value::Array(changed));
+    Some(Value::Object(details))
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum Actor<'a> {
     OfficeUser(&'a str),
@@ -57,4 +109,36 @@ pub async fn record(
     .execute(conn)
     .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::update_details;
+
+    #[test]
+    fn update_details_lists_changed_fields_with_their_values() {
+        let details = update_details(&[
+            ("name", json!("Старое"), json!("Новое")),
+            ("role", json!("admin"), json!("admin")),
+            ("active", json!(true), json!(false)),
+        ]);
+        assert_eq!(
+            details,
+            Some(json!({
+                "changed": ["name", "active"],
+                "name": { "from": "Старое", "to": "Новое" },
+                "active": { "from": true, "to": false },
+            }))
+        );
+    }
+
+    #[test]
+    fn update_details_is_none_when_nothing_changed() {
+        assert_eq!(
+            update_details(&[("name", json!("Та же"), json!("Та же"))]),
+            None
+        );
+    }
 }

@@ -10,7 +10,7 @@ use markiro_proto::{codes, BlockSizesUpdate, SsccCounter, SsccCounterUpdate, Ssc
 use serde_json::json;
 use sqlx::SqliteConnection;
 
-use crate::audit::{self, Entry, Outcome};
+use crate::audit::{self, actions, Entry, Outcome};
 use crate::auth::OfficeContext;
 use crate::db::{begin_write, next_revision};
 use crate::error::{ApiError, ApiJson, ApiPath};
@@ -149,11 +149,14 @@ pub async fn put_counter(
         &at,
         Entry {
             actor: context.actor(),
-            action: "sscc.counter.update",
+            action: actions::SSCC_COUNTER_UPDATE,
             target_type: Some("sscc_counter"),
             target_id: Some(&target),
             outcome: Outcome::Ok,
-            details: json!({ "from": current, "to": update.next_serial }),
+            details: json!({
+                "changed": ["nextSerial"],
+                "nextSerial": { "from": current, "to": update.next_serial },
+            }),
         },
     )
     .await
@@ -221,14 +224,23 @@ pub async fn put_block_sizes(
         &at,
         Entry {
             actor: context.actor(),
-            action: "sscc.block_sizes.update",
+            action: actions::SSCC_BLOCK_SIZES_UPDATE,
             target_type: Some("site"),
             target_id: Some("1"),
             outcome: Outcome::Ok,
-            details: json!({
-                "boxBlockSize": update.box_block_size,
-                "palletBlockSize": update.pallet_block_size,
-            }),
+            details: audit::update_details(&[
+                (
+                    "boxBlockSize",
+                    json!(current_box),
+                    json!(update.box_block_size),
+                ),
+                (
+                    "palletBlockSize",
+                    json!(current_pallet),
+                    json!(update.pallet_block_size),
+                ),
+            ])
+            .unwrap_or_else(|| json!({ "changed": [] })),
         },
     )
     .await

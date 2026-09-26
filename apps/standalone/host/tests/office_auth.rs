@@ -124,7 +124,7 @@ async fn wrong_password_unknown_login_and_inactive_user_are_denied_and_audited()
             Some("office_user".into()),
             Some(user_id.clone()),
             "denied".into(),
-            json!({ "login": "irina" })
+            json!({ "reason": "wrong_password" })
         )
     );
 
@@ -140,12 +140,12 @@ async fn wrong_password_unknown_login_and_inactive_user_are_denied_and_audited()
         last_audit(&app).await,
         (
             "device".into(),
-            Some(device_id),
+            Some(device_id.clone()),
             "office.login".into(),
             Some("office_user".into()),
             None,
             "denied".into(),
-            json!({ "login": "nobody" })
+            json!({ "reason": "unknown_login" })
         )
     );
 
@@ -165,6 +165,53 @@ async fn wrong_password_unknown_login_and_inactive_user_are_denied_and_audited()
         body["error"]["details"]["credential"], "password",
         "an inactive user is a password-style rejection, not a session one"
     );
+    assert_eq!(
+        last_audit(&app).await,
+        (
+            "device".into(),
+            Some(device_id.clone()),
+            "office.login".into(),
+            Some("office_user".into()),
+            Some(user_id.clone()),
+            "denied".into(),
+            json!({ "reason": "inactive" })
+        )
+    );
+}
+
+#[tokio::test]
+async fn a_session_ends_exactly_30_idle_minutes_after_its_last_activity() {
+    let app = TestApp::new().await;
+    let (_, key) = pair_device(&app, "office").await;
+    seed_office_user(&app, "irina", "admin", "correct horse battery").await;
+    let token = login(&app, &key, "irina", "correct horse battery").await;
+
+    app.clock
+        .advance(time::Duration::minutes(30) - time::Duration::seconds(1));
+    let (status, _) = app
+        .send(empty(with_session(
+            request("GET", "/v1/office/me"),
+            &key,
+            &token,
+        )))
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "29:59 of idleness still keeps the session"
+    );
+
+    // That request was activity: the idle limit now counts from it.
+    app.clock.advance(time::Duration::minutes(30));
+    let (status, body) = app
+        .send(empty(with_session(
+            request("GET", "/v1/office/me"),
+            &key,
+            &token,
+        )))
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["error"]["details"]["credential"], "session");
 }
 
 #[tokio::test]

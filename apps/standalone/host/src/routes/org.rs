@@ -7,7 +7,7 @@ use markiro_proto::{OrgProfile, OrgProfileInput, OrgProfileUpdate};
 use serde_json::json;
 use sqlx::SqliteConnection;
 
-use crate::audit::{self, Entry, Outcome};
+use crate::audit::{self, actions, Entry, Outcome};
 use crate::auth::OfficeContext;
 use crate::db::{begin_write, next_revision};
 use crate::error::{ApiError, ApiJson};
@@ -66,27 +66,21 @@ pub async fn put_org(
     if current.rev != update.expected_rev {
         return Err(ApiError::stale_revision(current.rev));
     }
-    let mut changed = Vec::new();
-    if current.name != org.name {
-        changed.push("name");
-    }
-    if current.inn != org.inn {
-        changed.push("inn");
-    }
-    if current.gln != org.gln {
-        changed.push("gln");
-    }
-    if current.gs1_prefixes != org.gs1_prefixes {
-        changed.push("gs1Prefixes");
-    }
-    if current.time_zone != org.time_zone {
-        changed.push("timeZone");
-    }
-    if changed.is_empty() {
+    let Some(details) = audit::update_details(&[
+        ("name", json!(current.name), json!(org.name)),
+        ("inn", json!(current.inn), json!(org.inn)),
+        ("gln", json!(current.gln), json!(org.gln)),
+        (
+            "gs1Prefixes",
+            json!(current.gs1_prefixes),
+            json!(org.gs1_prefixes),
+        ),
+        ("timeZone", json!(current.time_zone), json!(org.time_zone)),
+    ]) else {
         // Nothing actually changed: report the profile as-is without bumping
         // the revision, writing a row nobody changed, or auditing a no-op.
         return Ok(Json(current));
-    }
+    };
     let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
     sqlx::query(
         "UPDATE org_profile SET name = ?, inn = ?, gln = ?, gs1_prefixes = ?, time_zone = ?, rev = ? WHERE id = 1",
@@ -121,11 +115,11 @@ pub async fn put_org(
         &at,
         Entry {
             actor: context.actor(),
-            action: "org.update",
+            action: actions::ORG_UPDATE,
             target_type: Some("org_profile"),
             target_id: Some("1"),
             outcome: Outcome::Ok,
-            details: json!({ "changed": changed }),
+            details,
         },
     )
     .await

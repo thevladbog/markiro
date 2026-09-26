@@ -112,7 +112,14 @@ async fn the_wizard_initializes_the_host_and_signs_the_admin_in() {
     assert_eq!(action, "host.bootstrap");
     assert_eq!(
         serde_json::from_str::<Value>(&details).unwrap(),
-        json!({ "adminLogin": "admin", "orgName": "ООО «Атолл»", "issuerPrefix": "460068200", "lineCount": 2 })
+        json!({
+            "adminLogin": "admin",
+            "orgName": "ООО «Атолл»",
+            "issuerPrefix": "460068200",
+            "lineCount": 2,
+            "boxNextSerial": 1500,
+            "palletNextSerial": 40
+        })
     );
 
     let token = session["token"].as_str().unwrap();
@@ -350,7 +357,14 @@ async fn the_org_profile_is_read_by_all_and_changed_by_admins_with_revisions() {
     );
     assert_eq!(
         serde_json::from_str::<Value>(&details).unwrap(),
-        json!({ "changed": ["name", "inn", "gln", "gs1Prefixes", "timeZone"] })
+        json!({
+            "changed": ["name", "inn", "gln", "gs1Prefixes", "timeZone"],
+            "name": { "from": "ООО «Атолл»", "to": "ООО «Атолл-Юг»" },
+            "inn": { "from": "7701234567", "to": null },
+            "gln": { "from": "4600682000010", "to": "4607091000017" },
+            "gs1Prefixes": { "from": ["4600682"], "to": ["4600682", "4607091"] },
+            "timeZone": { "from": "Europe/Moscow", "to": "Europe/Samara" }
+        })
     );
 
     let (status, sscc) = app

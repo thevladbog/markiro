@@ -11,7 +11,7 @@ use markiro_proto::{
 };
 use serde_json::json;
 
-use crate::audit::{self, Actor, Entry, Outcome};
+use crate::audit::{self, actions, reasons, Actor, Entry, Outcome};
 use crate::auth::{end_session, open_session, AuthDevice, OfficeContext};
 use crate::clock::format_timestamp;
 use crate::db::begin_write;
@@ -44,11 +44,11 @@ pub async fn login(
             &at,
             Entry {
                 actor: Actor::Device(&device.id),
-                action: "office.login",
+                action: actions::OFFICE_LOGIN,
                 target_type: Some("office_user"),
                 target_id: None,
                 outcome: Outcome::Denied,
-                details: json!({ "reason": "invalid_login" }),
+                details: json!({ "reason": reasons::INVALID_LOGIN }),
             },
         )
         .await
@@ -86,23 +86,29 @@ pub async fn login(
     // deactivation committed while PBKDF2 was running (outside any
     // transaction) must not let this request open a session on a value that
     // no longer holds.
-    let accepted = match (row.as_ref(), stored_phc.as_ref()) {
-        (Some((id, ..)), Some(verified_phc)) if password_ok => {
-            let current: Option<(String, i64)> =
-                sqlx::query_as("SELECT password_phc, active FROM office_users WHERE id = ?")
-                    .bind(id)
-                    .fetch_optional(&mut *tx)
-                    .await
-                    .map_err(ApiError::internal)?;
-            matches!(
-                current,
-                Some((current_phc, active)) if &current_phc == verified_phc && active == 1
-            )
+    let current: Option<(String, i64)> = match row.as_ref() {
+        Some((id, ..)) if password_ok => {
+            sqlx::query_as("SELECT password_phc, active FROM office_users WHERE id = ?")
+                .bind(id)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(ApiError::internal)?
         }
-        _ => false,
+        _ => None,
     };
-    match row {
-        Some((id, login, name, role, _, _)) if accepted => {
+    // Why the sign-in is refused, if it is. The typed login is never recorded:
+    // it could be a password typed into the wrong field.
+    let refusal = match (row.as_ref(), stored_phc.as_ref(), current.as_ref()) {
+        (None, ..) => Some(reasons::UNKNOWN_LOGIN),
+        (Some(_), ..) if !password_ok => Some(reasons::WRONG_PASSWORD),
+        (Some(_), _, Some((_, active))) if *active == 0 => Some(reasons::INACTIVE),
+        (Some(_), Some(verified_phc), Some((current_phc, _))) if current_phc == verified_phc => {
+            None
+        }
+        (Some(_), ..) => Some(reasons::CHANGED),
+    };
+    match (row, refusal) {
+        (Some((id, login, name, role, _, _)), None) => {
             let role: OfficeRole = serde_json::from_value(serde_json::Value::String(role))
                 .map_err(ApiError::internal)?;
             let (token, expires) = open_session(&mut tx, &id, &device.id, now)
@@ -113,7 +119,7 @@ pub async fn login(
                 &at,
                 Entry {
                     actor: Actor::Device(&device.id),
-                    action: "office.login",
+                    action: actions::OFFICE_LOGIN,
                     target_type: Some("office_user"),
                     target_id: Some(&id),
                     outcome: Outcome::Ok,
@@ -134,18 +140,20 @@ pub async fn login(
                 expires_at: format_timestamp(expires),
             }))
         }
-        other => {
-            let target = other.as_ref().map(|row| row.0.as_str());
+        (row, refusal) => {
+            // `(None, None)` cannot happen: no row always refuses.
+            let reason = refusal.unwrap_or(reasons::UNKNOWN_LOGIN);
+            let target = row.as_ref().map(|row| row.0.as_str());
             audit::record(
                 &mut tx,
                 &at,
                 Entry {
                     actor: Actor::Device(&device.id),
-                    action: "office.login",
+                    action: actions::OFFICE_LOGIN,
                     target_type: Some("office_user"),
                     target_id: target,
                     outcome: Outcome::Denied,
-                    details: json!({ "login": login_input }),
+                    details: json!({ "reason": reason }),
                 },
             )
             .await
@@ -173,7 +181,7 @@ pub async fn logout(
         &at,
         Entry {
             actor: context.actor(),
-            action: "office.logout",
+            action: actions::OFFICE_LOGOUT,
             target_type: Some("office_user"),
             target_id: Some(&context.user.id),
             outcome: Outcome::Ok,
@@ -229,26 +237,36 @@ pub async fn change_password(
         .fetch_one(&mut *tx)
         .await
         .map_err(ApiError::internal)?;
-    let Some(new_phc) = new_phc.filter(|_| current == stored) else {
-        audit::record(
-            &mut tx,
-            &at,
-            Entry {
-                actor: context.actor(),
-                action: "office_user.password",
-                target_type: Some("office_user"),
-                target_id: Some(&context.user.id),
-                outcome: Outcome::Denied,
-                details: json!({ "reason": "wrong_current_password" }),
-            },
-        )
-        .await
-        .map_err(ApiError::internal)?;
-        tx.commit().await.map_err(ApiError::internal)?;
-        return Err(ApiError::unauthorized(
-            credentials::PASSWORD,
-            "the current password is wrong",
-        ));
+    let new_phc = match new_phc {
+        Some(phc) if current == stored => phc,
+        verified => {
+            // A right current password against a hash an administrator
+            // replaced meanwhile is "changed", not "wrong".
+            let reason = if verified.is_some() {
+                reasons::CHANGED
+            } else {
+                reasons::WRONG_CURRENT_PASSWORD
+            };
+            audit::record(
+                &mut tx,
+                &at,
+                Entry {
+                    actor: context.actor(),
+                    action: actions::OFFICE_USER_PASSWORD,
+                    target_type: Some("office_user"),
+                    target_id: Some(&context.user.id),
+                    outcome: Outcome::Denied,
+                    details: json!({ "reason": reason }),
+                },
+            )
+            .await
+            .map_err(ApiError::internal)?;
+            tx.commit().await.map_err(ApiError::internal)?;
+            return Err(ApiError::unauthorized(
+                credentials::PASSWORD,
+                "the current password is wrong",
+            ));
+        }
     };
     // Other sessions of this user end; the one making this request stays.
     replace_password(

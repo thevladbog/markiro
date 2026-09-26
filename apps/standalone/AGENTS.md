@@ -38,8 +38,16 @@ pair only with a one-time code (plan 1c).
 ## Audit
 
 Every office change, login outcome, pairing and initialization writes one
-`audit_log` row. Tests assert the exact actor, action, target, result and
-details; details never hold secrets, salts or hashes.
+`audit_log` row. Action names come only from `audit::actions`; a new writer
+adds its name there. Every `denied` row carries `details.reason` from
+`audit::reasons`. An update row carries `details.changed` (field names) and
+`{ from, to }` for each changed field (`audit::update_details`). Details never
+hold pairing codes, keys, tokens, passwords, salts or hashes, and a refused
+login never records the typed login. An attempt refused by a rate limiter
+writes no row, so a flood cannot fill the log. `office_user.password` covers
+both an administrator's reset and a user's own change (`actor_id ==
+target_id`). Tests assert the exact actor, action, target, result and parsed
+details.
 
 ## Databases
 

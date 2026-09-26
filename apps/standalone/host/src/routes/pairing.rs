@@ -9,7 +9,7 @@ use axum::Json;
 use markiro_proto::{DeviceInfo, DeviceKind, LocalPairRequest, PairResponse, PROTOCOL_HEADER};
 use serde_json::json;
 
-use crate::audit::{self, Actor, Entry, Outcome};
+use crate::audit::{self, actions, Actor, Entry, Outcome};
 use crate::auth::{require_loopback, AuthDevice};
 use crate::db::begin_write;
 use crate::error::{ApiError, ApiJson};
@@ -86,7 +86,7 @@ pub async fn local_pair(
         &now,
         Entry {
             actor: Actor::Device(&id),
-            action: "device.local_pair",
+            action: actions::DEVICE_LOCAL_PAIR,
             target_type: Some("device"),
             target_id: Some(&id),
             outcome: Outcome::Ok,

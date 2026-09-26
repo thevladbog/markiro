@@ -72,6 +72,11 @@ pub async fn start(paths: &HostPaths, options: StartOptions) -> Result<RunningHo
     let lock = paths.lock()?;
     let config = HostConfig::load_or_create(paths, options.port_override)?;
     let pool = db::open(&paths.database_file()).await?;
+    // Build the unknown-login verifier now, off the async threads, so the
+    // first unknown login does not pay for building it.
+    tokio::task::spawn_blocking(|| {
+        secrets::dummy_password_phc();
+    });
     let identity = TlsIdentity::load_or_create(&paths.tls_dir(), &config.host_id)?;
     let bind = options
         .bind

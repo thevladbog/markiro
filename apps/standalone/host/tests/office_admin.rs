@@ -199,7 +199,7 @@ async fn sscc_counters_move_only_forward_within_capacity() {
         "sscc.counter.update",
         "sscc_counter",
         "460068200/0",
-        json!({ "from": 1500, "to": 2000 }),
+        json!({ "changed": ["nextSerial"], "nextSerial": { "from": 1500, "to": 2000 } }),
     )
     .await;
 
@@ -313,7 +313,11 @@ async fn block_sizes_are_validated_and_versioned() {
         "sscc.block_sizes.update",
         "site",
         "1",
-        json!({ "boxBlockSize": 5000, "palletBlockSize": 500 }),
+        json!({
+            "changed": ["boxBlockSize", "palletBlockSize"],
+            "boxBlockSize": { "from": 2000, "to": 5000 },
+            "palletBlockSize": { "from": 200, "to": 500 }
+        }),
     )
     .await;
 
@@ -601,7 +605,7 @@ async fn users_are_created_updated_and_the_last_admin_is_protected() {
         "office_user.update",
         "office_user",
         &tech_id,
-        json!({ "changed": ["role"] }),
+        json!({ "changed": ["role"], "role": { "from": "technologist", "to": "admin" } }),
     )
     .await;
 

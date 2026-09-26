@@ -13,7 +13,7 @@ use markiro_proto::{
 };
 use serde_json::json;
 
-use crate::audit::{self, Actor, Entry, Outcome};
+use crate::audit::{self, actions, Actor, Entry, Outcome};
 use crate::auth::{open_session, require_loopback, AuthDevice};
 use crate::clock::format_timestamp;
 use crate::db::{begin_write, next_revision};
@@ -157,7 +157,7 @@ pub async fn bootstrap(
         &at,
         Entry {
             actor: Actor::Device(&device.id),
-            action: "host.bootstrap",
+            action: actions::HOST_BOOTSTRAP,
             target_type: Some("office_user"),
             target_id: Some(&admin_id),
             outcome: Outcome::Ok,
@@ -166,6 +166,8 @@ pub async fn bootstrap(
                 "orgName": org.name,
                 "issuerPrefix": prefix,
                 "lineCount": lines.len(),
+                "boxNextSerial": request.sscc.box_next_serial,
+                "palletNextSerial": request.sscc.pallet_next_serial,
             }),
         },
     )

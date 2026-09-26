@@ -76,6 +76,29 @@ async fn a_local_station_pairs_and_only_the_key_hash_is_stored() {
 }
 
 #[tokio::test]
+async fn refused_local_pairing_writes_no_audit_row() {
+    let app = TestApp::new().await;
+    let (status, _) = app
+        .send_from(
+            LAN,
+            json_request(
+                request("POST", "/v1/local-pair"),
+                json!({ "kind": "station", "name": "Станция", "appVersion": "0.1.0" }),
+            ),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = app
+        .send(json_request(
+            request("POST", "/v1/local-pair"),
+            json!({ "kind": "handheld", "name": "ТСД", "appVersion": "0.1.0" }),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(audit_rows(&app).await.is_empty());
+}
+
+#[tokio::test]
 async fn local_pairing_from_the_network_is_refused() {
     let app = TestApp::new().await;
     let (status, body) = app
