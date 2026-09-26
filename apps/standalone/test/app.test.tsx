@@ -195,6 +195,8 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Сменить" }));
     expect(await screen.findByText("Вход в офис")).toBeTruthy();
     expect(screen.getByText("Сессия офиса закончилась. Войдите снова.")).toBeTruthy();
+    // Only `forbidden` should trigger the refresh.
+    expect(host.officeMe).not.toHaveBeenCalled();
   });
 
   it("re-reads the signed-in user when the host answers forbidden", async () => {
@@ -225,6 +227,38 @@ describe("App", () => {
     expect(await screen.findByText("Ирина Орлова")).toBeTruthy();
     expect(screen.getByText("технолог")).toBeTruthy();
     expect(host.officeMe).toHaveBeenCalledWith("office-session-token");
+  });
+
+  it("routes a failed refresh after forbidden like any other call", async () => {
+    const host = fakeHost();
+    host.officeChangePassword.mockRejectedValueOnce(
+      new HostError({ kind: "api", code: "forbidden", status: 403, message: "not allowed" }),
+    );
+    host.officeMe.mockRejectedValueOnce(
+      new HostError({
+        kind: "api",
+        code: "unauthorized",
+        status: 401,
+        message: "office session ended",
+        details: { credential: "session" },
+      }),
+    );
+    renderApp({ probe: probeAnswering(true), device: fakeDevice(DEVICE_STATUS), host });
+    fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
+    await signIn();
+    fireEvent.click(await screen.findByRole("button", { name: "Сменить пароль" }));
+    fireEvent.change(await screen.findByLabelText("Текущий пароль"), {
+      target: { value: "correct horse battery" },
+    });
+    fireEvent.change(screen.getByLabelText("Новый пароль"), {
+      target: { value: "another long password" },
+    });
+    fireEvent.change(screen.getByLabelText("Повторите новый пароль"), {
+      target: { value: "another long password" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Сменить" }));
+    expect(await screen.findByText("Вход в офис")).toBeTruthy();
+    expect(screen.getByText("Сессия офиса закончилась. Войдите снова.")).toBeTruthy();
   });
 
   it("ends the session when leaving the office, so coming back asks to sign in", async () => {

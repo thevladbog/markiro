@@ -16,7 +16,8 @@ export function OfficeShell() {
   const dark = theme === "dark";
   const [passwordOpen, setPasswordOpen] = useState(false);
   const location = useLocation();
-  // The page the password was changed on; the notice stays on that page only.
+  // The navigation entry the password was changed on; the notice goes away
+  // with the next navigation.
   const [passwordChangedAt, setPasswordChangedAt] = useState<string | null>(null);
   const items = useMemo<SidebarItem[]>(
     () =>
@@ -73,7 +74,7 @@ export function OfficeShell() {
           </div>
         </header>
         <main className="office-shell__content">
-          {passwordChangedAt === location.pathname && (
+          {passwordChangedAt === location.key && (
             <Alert tone="ok">{t("office.password.done")}</Alert>
           )}
           <Outlet />
@@ -84,7 +85,7 @@ export function OfficeShell() {
         onClose={() => setPasswordOpen(false)}
         onChanged={() => {
           setPasswordOpen(false);
-          setPasswordChangedAt(location.pathname);
+          setPasswordChangedAt(location.key);
         }}
       />
     </div>

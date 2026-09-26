@@ -1,4 +1,4 @@
-import { QueryClientProvider } from "@tanstack/react-query";
+import { onlineManager, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -59,6 +59,24 @@ describe("useOfficeQuery", () => {
     await waitFor(() => expect(result.current.isError).toBe(true));
     expect(result.current.error).toBe(failure);
     expect(session.api.getOrg).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps reading over IPC while the webview reports itself offline", async () => {
+    // Calls go over Tauri IPC to a host on the same PC, not the network: the
+    // webview's online state says nothing about whether the host answers.
+    onlineManager.setOnline(false);
+    try {
+      const session = fakeOfficeSession();
+      session.api.getOrg.mockResolvedValue(PROFILE);
+      const { result } = renderHook(
+        () => useOfficeQuery(officeKeys.org, (api, token) => api.getOrg(token)),
+        { wrapper: wrapperFor(session) },
+      );
+      await waitFor(() => expect(result.current.data).toEqual(PROFILE));
+      expect(session.api.getOrg).toHaveBeenCalledWith("office-session-token");
+    } finally {
+      onlineManager.setOnline(true);
+    }
   });
 });
 

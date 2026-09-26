@@ -21,13 +21,22 @@ export const officeKeys = {
  * One cache per office session: `Office` creates it on mount, and `App`
  * remounts `Office` for every session, so no data outlives its session.
  * A host error is an answer, not a flake: the page explains it and offers
- * a retry, so nothing retries on its own.
+ * a retry, so nothing retries on its own. Calls go over Tauri IPC to a host
+ * on the same PC, not the network, so the webview's online state says
+ * nothing about whether the host answers: `networkMode: "always"` keeps
+ * queries and mutations running (and erroring normally) instead of pausing
+ * silently when the OS reports the webview offline.
  */
 export function createOfficeQueryClient(): QueryClient {
   return new QueryClient({
     defaultOptions: {
-      queries: { retry: false, refetchOnWindowFocus: false },
-      mutations: { retry: false },
+      queries: {
+        retry: false,
+        refetchOnWindowFocus: false,
+        refetchOnReconnect: false,
+        networkMode: "always",
+      },
+      mutations: { retry: false, networkMode: "always" },
     },
   });
 }

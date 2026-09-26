@@ -105,7 +105,7 @@ describe("Office", () => {
 
   it("switches the theme", async () => {
     renderOffice(fakeOfficeSession());
-    const toggle = screen.getByRole("button", { name: "Включить светлую тему" });
+    const toggle = await screen.findByRole("button", { name: "Включить светлую тему" });
     expect(toggle.querySelector('[aria-hidden="true"]')?.textContent).toBe("☀");
     fireEvent.click(toggle);
     expect(document.documentElement.getAttribute("data-theme")).toBe("light");
