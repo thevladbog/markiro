@@ -40,12 +40,12 @@ const DESCRIPTION_BY_CODE = {
     en: "Printable scanning-station operator instruction: badge sign-in, shift selection or creation, and starting work.",
   },
   "MKR-INS-02": {
-    ru: "Печатная инструкция оператора: цикл сканирования, сигналы станции, наполнение и закрытие коробов, работа без сети и закрытие смены.",
-    en: "Printable operator instruction: the scanning cycle, station signals, box filling and closing, offline work, and closing the shift.",
+    ru: "Печатная инструкция оператора: цикл сканирования, сигналы станции, наполнение и закрытие коробов, сборка паллет, работа без сети и закрытие смены.",
+    en: "Printable operator instruction: the scanning cycle, station signals, box filling and closing, pallet assembly, offline work, and closing the shift.",
   },
   "MKR-INS-03": {
-    ru: "Печатная инструкция оператора для нештатных ситуаций: перепечатка этикетки, расформирование короба, сбой печати, коды, занятые другим терминалом.",
-    en: "Printable operator instruction for exceptions: label reprint, box disassembly, print recovery, and codes claimed by another terminal.",
+    ru: "Печатная инструкция оператора для нештатных ситуаций: перепечатка этикетки, расформирование короба и паллеты, сбой печати, коды, занятые другим терминалом.",
+    en: "Printable operator instruction for exceptions: label reprint, box and pallet disassembly, print recovery, and codes claimed by another terminal.",
   },
   "MKR-INS-04": {
     ru: "Печатная инструкция наладчика: привязка станции к кабинету, подключение сканера и принтера, звук и обновления станции.",

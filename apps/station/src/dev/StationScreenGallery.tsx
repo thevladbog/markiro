@@ -1,4 +1,6 @@
+import { PalletClose } from "../components/PalletClose.js";
 import { PalletContents } from "../components/PalletContents.js";
+import { PalletExceptions } from "../components/PalletExceptions.js";
 import { PalletStrip } from "../components/PalletStrip.js";
 import type { ProductLabelJobView } from "../lib/product-labels/types.js";
 import type { ProductLabelWork, ProductLabelWorkState } from "../lib/use-product-label-work.js";
@@ -15,6 +17,8 @@ import {
   useState,
   type CSSProperties,
   type MutableRefObject,
+  type ReactNode,
+  type RefObject,
 } from "react";
 import { Alert, Button, Card, Pager, PinPad, SignalOverlay } from "@markiro/ui";
 import type { OperatorMirrorRecord } from "@markiro/db/station-sqlite";
@@ -24,6 +28,8 @@ import type { StationInventoryBundleManifest } from "@markiro/domain";
 import { FloorChoiceGroup } from "../ui/FloorChoiceGroup.js";
 import i18n from "../i18n/index.js";
 import type { BoxPrintErrorCode, ClosedBoxSummary } from "../lib/boxes.js";
+import type { ClosedPalletSummary } from "../lib/pallets.js";
+import type { PrinterProfile } from "../lib/printer-routing.js";
 import type { HardwareContract, UsbPrinterInfo } from "../lib/hardware.js";
 import type { HardwareConfig } from "../lib/hardware-config.js";
 import type { SqlExecutor } from "../lib/mirror.js";
@@ -181,9 +187,13 @@ export function StationScreenGallery({ request }: StationScreenGalleryProps) {
   // every variant uniformly (not per-variant), so the collapsed bar and the
   // fabricated shift label can never appear on an inventory screen the way
   // they never can in production.
+  // The box and pallet exception flows and the pallet close dialog are all
+  // WorkScreen states too -- they only ever open while `shift !== null`.
   const rendersActiveShiftWorkScreen =
     fixture.kind === "work" ||
     fixture.kind === "product-label" ||
+    fixture.kind === "exception" ||
+    fixture.kind === "pallet" ||
     (fixture.kind === "box" && fixture.variant === "full") ||
     syncVariant === "offline";
   // Unconditional operatorControl/windowControl/update is a SEPARATE fact
@@ -308,6 +318,8 @@ function GalleryState({ fixture, locale }: { fixture: GalleryFixture; locale: Ga
       return <ProductLabelFixture variant={fixture.variant} locale={locale} />;
     case "work":
       return <WorkFixture mode={fixture.variant} locale={locale} />;
+    case "pallet":
+      return <PalletFixture variant={fixture.variant} locale={locale} />;
     case "work-overlay":
       return <WorkOverlayFixture overlay={fixture.variant} locale={locale} />;
     case "signal":
@@ -1678,18 +1690,25 @@ function ProductLabelFixture({ variant, locale }: { variant: string; locale: Gal
   );
 }
 
-const galleryPalletExecutor: SqlExecutor = {
-  all<T>() {
-    return Promise.resolve(
-      Array.from({ length: 42 }, (_, index) => ({
-        box_id: `gallery-pallet-box-${index}`,
-        sscc: `00460123456${String(42 - index).padStart(7, "0")}`,
-        closed_at: new Date(Date.UTC(2026, 8, 12, 11, 42 - index)).toISOString(),
-      })) as T[],
-    );
-  },
-  async run() {},
-};
+/** The boxes on a gallery pallet, newest first, ending with the strip's last box. */
+function galleryPalletExecutor(boxCount: number, lastSerial: number): SqlExecutor {
+  return {
+    all<T>() {
+      return Promise.resolve(
+        Array.from({ length: boxCount }, (_, index) => ({
+          box_id: `gallery-pallet-box-${index}`,
+          sscc: `00460123456${String(lastSerial - index).padStart(7, "0")}`,
+          closed_at: new Date(Date.UTC(2026, 8, 12, 11, 42 - index)).toISOString(),
+        })) as T[],
+      );
+    },
+    async run() {},
+  };
+}
+// The contents agree with each strip: 42 boxes ending …0000042 on pallet 66,
+// 15 ending …0619998 on the owner's pallet 20.
+const galleryPallet66Executor = galleryPalletExecutor(42, 42);
+const galleryPallet20Executor = galleryPalletExecutor(15, 619998);
 const galleryPalletIdle = async () => {};
 
 const GALLERY_PROGRESS_NOW = Date.parse("2026-09-25T09:00:00.000Z");
@@ -1847,7 +1866,7 @@ function WorkFixture({
       />
       {showPalletContents ? (
         <PalletContents
-          exec={galleryPalletExecutor}
+          exec={pallet20 ? galleryPallet20Executor : galleryPallet66Executor}
           shiftId="gallery-shift"
           terminalId="gallery-terminal"
           palletId="gallery-pallet"
@@ -2151,7 +2170,7 @@ function galleryExceptionScanSource(): ScanSource {
  * calls for.
  */
 function ExceptionFixture({ stage, locale }: { stage: string; locale: GalleryLocale }) {
-  const rootRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLElement>(null);
 
   useLayoutEffect(() => {
     if (stage === "action") return;
@@ -2190,7 +2209,7 @@ function ExceptionFixture({ stage, locale }: { stage: string; locale: GalleryLoc
   }, [stage, locale]);
 
   return (
-    <div ref={rootRef} className="gallery-exception-flow">
+    <ActiveWorkScreenFixture locale={locale} rootRef={rootRef}>
       <ExceptionFlow
         boxes={GALLERY_EXCEPTION_BOXES}
         canUndo
@@ -2217,7 +2236,124 @@ function ExceptionFixture({ stage, locale }: { stage: string; locale: GalleryLoc
           />
         }
       />
+    </ActiveWorkScreenFixture>
+  );
+}
+
+/**
+ * The work screen around a flow WorkScreen shows in place of its instruments
+ * (the box and pallet exception flows). Production keeps the work footer
+ * under those flows, so the gallery does too.
+ */
+function ActiveWorkScreenFixture({
+  locale,
+  rootRef,
+  children,
+}: {
+  locale: GalleryLocale;
+  rootRef?: RefObject<HTMLElement | null>;
+  children: ReactNode;
+}) {
+  const t = i18n.getFixedT(locale);
+  const workLabels = buildWorkLabels(t, locale, 1);
+  return (
+    <main
+      ref={rootRef}
+      className="work-screen"
+      aria-label={locale === "ru" ? "Тестовый товар А" : "Sample product A"}
+    >
+      <div className="work-screen__content">{children}</div>
+      <WorkFooter
+        labels={workLabels.footer}
+        onExceptions={() => undefined}
+        onPause={() => undefined}
+        onClose={() => undefined}
+      />
+    </main>
+  );
+}
+
+/** A closed pallet of the owner's 66-box capacity; the SSCC carries a valid check digit. */
+const GALLERY_CLOSED_PALLET: ClosedPalletSummary = {
+  palletId: "gallery-pallet-closed",
+  sscc: "146012345600000150",
+  boxCount: 66,
+  closedAt: "2026-08-13T14:40:00+03:00",
+};
+
+function PalletFixture({ variant, locale }: { variant: string; locale: GalleryLocale }) {
+  return variant === "exceptions-reason" ? (
+    <PalletExceptionsFixture locale={locale} />
+  ) : (
+    <PalletCloseFixture unknown={variant === "close-unknown"} locale={locale} />
+  );
+}
+
+/**
+ * The production `PalletClose` dialog. The label's printer line offers
+ * «Сменить принтер» only when the print failed or its outcome is unknown,
+ * exactly as WorkScreen passes `onChoose`.
+ */
+function PalletCloseFixture({ unknown, locale }: { unknown: boolean; locale: GalleryLocale }) {
+  const printers = useMemo(() => galleryPrinterProfiles("printers", locale), [locale]);
+  const [printerId, setPrinterId] = useState(printers[2]?.id ?? null);
+  const printer = printers.find((candidate) => candidate.id === printerId) ?? null;
+  return (
+    <div className="gallery-production-recovery">
+      <PalletClose
+        destination={
+          <PrinterDestination
+            purpose="pallet"
+            printer={printer}
+            printers={printers}
+            {...(unknown
+              ? {
+                  onChoose: (next: PrinterProfile) => {
+                    setPrinterId(next.id);
+                    return Promise.resolve();
+                  },
+                }
+              : {})}
+          />
+        }
+        result={{
+          status: "closed",
+          sscc: GALLERY_CLOSED_PALLET.sscc,
+          boxCount: GALLERY_CLOSED_PALLET.boxCount,
+        }}
+        print={unknown ? "unknown" : "printed"}
+        onRetry={() => undefined}
+        onSetup={() => undefined}
+        onSkip={() => undefined}
+        onConfirmPrinted={() => undefined}
+        onReprint={() => undefined}
+        onContinue={() => undefined}
+      />
     </div>
+  );
+}
+
+/** The production pallet exceptions, driven to the disassembly reasons of a single closed pallet. */
+function PalletExceptionsFixture({ locale }: { locale: GalleryLocale }) {
+  const rootRef = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    const label = i18n.getFixedT(locale)("pallet.disassembleAction");
+    const timer = setTimeout(() => {
+      Array.from(rootRef.current?.querySelectorAll("button") ?? [])
+        .find((button) => button.textContent?.trim() === label)
+        ?.click();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [locale]);
+  return (
+    <ActiveWorkScreenFixture locale={locale} rootRef={rootRef}>
+      <PalletExceptions
+        pallets={[GALLERY_CLOSED_PALLET]}
+        onReprint={() => Promise.resolve()}
+        onDisassemble={() => Promise.resolve()}
+        onBack={() => undefined}
+      />
+    </ActiveWorkScreenFixture>
   );
 }
 

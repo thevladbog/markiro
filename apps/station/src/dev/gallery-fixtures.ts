@@ -11,6 +11,9 @@ const VISUAL_STRESS_GALLERY_STATE_IDS = [
   "work-pallet-66",
   "work-pallet-20",
   "work-pallet-20-stale",
+  "pallet-close-printed",
+  "pallet-close-unknown",
+  "pallet-exceptions-reason",
   "work-aggregation-waiting",
   "work-close-reason",
   "pairing-recovery",
@@ -70,6 +73,7 @@ export type GalleryFixtureKind =
   | "new-shift"
   | "shift"
   | "work"
+  | "pallet"
   | "product-label"
   | "work-overlay"
   | "signal"
@@ -243,6 +247,17 @@ export const GALLERY_FIXTURES: readonly GalleryFixture[] = [
   // The owner's 2026-09-25 photo: a 20-place box with two items on pallet
   // 15 of 66, the shift total counting another terminal.
   { id: "work-pallet-20", kind: "work", variant: "aggregation-pallet-20", source: "synthetic" },
+  // The pallet screens the printed instructions (MKR-INS-02/03) show: a closed
+  // pallet whose label printed, one whose print outcome is unknown after an
+  // interruption, and the pallet disassembly reasons.
+  { id: "pallet-close-printed", kind: "pallet", variant: "close-printed", source: "synthetic" },
+  { id: "pallet-close-unknown", kind: "pallet", variant: "close-unknown", source: "synthetic" },
+  {
+    id: "pallet-exceptions-reason",
+    kind: "pallet",
+    variant: "exceptions-reason",
+    source: "synthetic",
+  },
   {
     id: "work-pallet-20-stale",
     kind: "work",
