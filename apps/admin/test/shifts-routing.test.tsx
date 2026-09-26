@@ -298,16 +298,12 @@ it("shows the closed shift in the drawer after the filtered list drops its row",
   expect(await within(panel).findByRole("radio", { name: EXPORT_FORMAT.label })).toBeDefined();
   expect(screen.queryByText("Смена не найдена")).toBeNull();
 
-  // The success toast renders into its own root on `document.body`, which
-  // RTL's cleanup never sees; dismissing it keeps a four-second
-  // `role="status"` from bleeding into the next test.
+  // The success toast renders into its own root on `document.body`; the test
+  // setup resets that root after every test, so it cannot reach the next one.
   const toasts = Array.from(
     document.querySelectorAll<HTMLElement>("[data-mk-toast-root] [role='status']"),
   );
   expect(toasts.map((node) => node.textContent ?? "").join(" ")).toContain("Смена закрыта");
-  for (const node of toasts) {
-    await user.click(within(node).getByRole("button", { name: "Закрыть" }));
-  }
 });
 
 it("keeps the create panel open and shows the server message after a conflict", async () => {

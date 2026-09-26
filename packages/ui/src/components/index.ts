@@ -81,7 +81,7 @@ export type { FilterBarProps } from "./FilterBar.js";
 export { RowActions } from "./RowActions.js";
 export type { RowActionsProps } from "./RowActions.js";
 
-export { toast } from "./Toast.js";
+export { resetToasts, toast } from "./Toast.js";
 export type { ToastTone } from "./Toast.js";
 
 export { PinPad } from "./PinPad.js";
