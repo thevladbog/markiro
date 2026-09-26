@@ -69,7 +69,10 @@ describe("legal document registry", () => {
       // -- the pallet strip, automatic and early pallet close with its label,
       // the contents view and closing a shift with an open pallet (02), and
       // pallet reprint and disassembly among the exceptions (03).
-      "MKR-INS-01": "2026.09/03",
+      // 2026-09-26, last: creating a shift on the station gained its pallet
+      // choice -- «Без паллет» / «С паллетами» with the capacity from the
+      // product card and the pallet label template -- so 01 was reissued.
+      "MKR-INS-01": "2026.09/04",
       "MKR-INS-02": "2026.09/03",
       "MKR-INS-03": "2026.09/04",
       "MKR-INS-04": "2026.09/01",

@@ -475,7 +475,7 @@ describe("deterministic branded DOCX", () => {
 describe("instruction rendering", () => {
   const instructionRequest = {
     code: "MKR-INS-01",
-    revision: "2026.09/03",
+    revision: "2026.09/04",
     effectiveDate: "2026-09-26",
     locale: "ru",
     kind: "legal-pdf",
