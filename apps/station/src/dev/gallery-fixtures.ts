@@ -4,6 +4,7 @@ import {
 } from "../ui/persistent-station-states.js";
 
 const VISUAL_STRESS_GALLERY_STATE_IDS = [
+  "new-shift-pallets",
   "printer-recovery-box",
   "setup-printers",
   "setup-printers-empty",
@@ -212,6 +213,7 @@ export const GALLERY_FIXTURES: readonly GalleryFixture[] = [
     variant: "not-found",
     source: "synthetic",
   },
+  { id: "new-shift-pallets", kind: "new-shift", variant: "pallets", source: "synthetic" },
   {
     id: "new-shift-pallet-template",
     kind: "new-shift",
