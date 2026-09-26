@@ -80,6 +80,8 @@ pub fn pinned_client(fingerprint: &str) -> reqwest::Client {
         .with_no_client_auth();
     reqwest::Client::builder()
         .use_preconfigured_tls(config)
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .unwrap()
 }

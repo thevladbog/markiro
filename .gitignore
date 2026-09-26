@@ -71,3 +71,6 @@ packages/legal-documents/.local/
 *.p12
 *.pfx
 keystore.properties
+
+# Development data directory of markiro-host (TLS key, database), wherever it is started
+.markiro-host/

@@ -68,7 +68,9 @@ pub struct TlsListener {
 
 impl TlsListener {
     pub async fn bind(addr: SocketAddr, tls: Arc<rustls::ServerConfig>) -> std::io::Result<Self> {
-        let tcp = TcpListener::bind(addr).await?;
+        let tcp = TcpListener::bind(addr).await.map_err(|error| {
+            std::io::Error::new(error.kind(), format!("cannot listen on {addr}: {error}"))
+        })?;
         let bound = tcp.local_addr()?;
         let (sender, connections) = mpsc::channel(64);
         let acceptor = TlsAcceptor::from(tls);

@@ -64,4 +64,4 @@ packages/domain/test/fixtures/print-forms/
 # Prettier does not read.
 apps/standalone/target/
 apps/standalone/src-tauri/gen/schemas/
-apps/standalone/.markiro-host/
+.markiro-host/

@@ -111,11 +111,15 @@ fn run_service() -> Result<(), BoxError> {
 
 fn print_fingerprint(data_dir: PathBuf) -> Result<(), BoxError> {
     let paths = HostPaths::new(data_dir);
-    paths.ensure()?;
-    let config = HostConfig::load_or_create(&paths, None)?;
-    let identity =
-        markiro_host::tls::TlsIdentity::load_or_create(&paths.tls_dir(), &config.host_id)?;
+    // Proves the directory is an existing host: never creates a host.json or
+    // a TLS identity that was not there already.
+    HostConfig::load(&paths)?;
+    let identity = markiro_host::tls::TlsIdentity::load(&paths.tls_dir())?;
     println!("{}", identity.fingerprint);
+    println!(
+        "{}",
+        markiro_proto::display_fingerprint(&identity.fingerprint)
+    );
     Ok(())
 }
 
@@ -146,5 +150,12 @@ mod tests {
         assert!(parse(&args(&["service", "--port", "1"])).is_err());
         assert!(parse(&args(&["print-fingerprint", "--port", "1"])).is_err());
         assert!(parse(&args(&["serve"])).is_err());
+    }
+
+    #[test]
+    fn print_fingerprint_on_an_empty_dir_is_an_error_and_writes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(print_fingerprint(dir.path().to_path_buf()).is_err());
+        assert!(std::fs::read_dir(dir.path()).unwrap().next().is_none());
     }
 }

@@ -18,6 +18,8 @@ pub enum TlsError {
     },
     #[error("only one of cert.der and key.der exists in {dir}; restore both or remove both")]
     Incomplete { dir: PathBuf },
+    #[error("no TLS identity in {dir}")]
+    Missing { dir: PathBuf },
     #[error("certificate generation failed: {0}")]
     Generate(String),
     #[error("TLS configuration rejected the host key: {0}")]
@@ -41,6 +43,34 @@ impl std::fmt::Debug for TlsIdentity {
 }
 
 impl TlsIdentity {
+    /// Load an existing TLS identity without creating or modifying anything,
+    /// and validate the key against the certificate via [`Self::server_config`]
+    /// (rustls rejects a key that does not match the certificate).
+    pub fn load(tls_dir: &Path) -> Result<Self, TlsError> {
+        let cert_path = tls_dir.join("cert.der");
+        let key_path = tls_dir.join("key.der");
+        match (cert_path.exists(), key_path.exists()) {
+            (true, true) => {
+                let cert_der = read(&cert_path)?;
+                let private_der = read(&key_path)?;
+                let fingerprint = markiro_proto::certificate_fingerprint(&cert_der);
+                let identity = Self {
+                    cert_der,
+                    private_der,
+                    fingerprint,
+                };
+                identity.server_config()?;
+                Ok(identity)
+            }
+            (false, false) => Err(TlsError::Missing {
+                dir: tls_dir.to_path_buf(),
+            }),
+            _ => Err(TlsError::Incomplete {
+                dir: tls_dir.to_path_buf(),
+            }),
+        }
+    }
+
     pub fn load_or_create(tls_dir: &Path, host_id: &str) -> Result<Self, TlsError> {
         let cert_path = tls_dir.join("cert.der");
         let key_path = tls_dir.join("key.der");
@@ -110,25 +140,19 @@ fn write_file(path: &Path, bytes: &[u8]) -> Result<(), TlsError> {
 /// Owner-only on Unix. On Windows the file inherits the data directory's ACL;
 /// the installer hardens that directory in stage 5.
 fn write_private(path: &Path, bytes: &[u8]) -> Result<(), TlsError> {
+    use std::io::Write;
+    let io = |source: std::io::Error| TlsError::Io {
+        path: path.to_path_buf(),
+        source,
+    };
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
     #[cfg(unix)]
     {
-        use std::io::Write;
         use std::os::unix::fs::OpenOptionsExt;
-        let io = |source: std::io::Error| TlsError::Io {
-            path: path.to_path_buf(),
-            source,
-        };
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(path)
-            .map_err(io)?;
-        file.write_all(bytes).map_err(io)?;
-        file.sync_all().map_err(io)
+        options.mode(0o600);
     }
-    #[cfg(not(unix))]
-    {
-        write_file(path, bytes)
-    }
+    let mut file = options.open(path).map_err(io)?;
+    file.write_all(bytes).map_err(io)?;
+    file.sync_all().map_err(io)
 }

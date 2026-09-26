@@ -60,6 +60,8 @@ pub async fn observe_hello(address: &str) -> Result<HelloObservation, ProbeError
     let client = reqwest::Client::builder()
         .use_preconfigured_tls(config)
         .timeout(PROBE_TIMEOUT)
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|_| ProbeError::Unreachable)?;
     let response = client

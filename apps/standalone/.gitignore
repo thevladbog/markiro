@@ -2,5 +2,3 @@
 /target/
 # Tauri-generated capability schemas, regenerated on every build
 /src-tauri/gen/schemas
-# Development data directory of `markiro-host run`
-/.markiro-host/
