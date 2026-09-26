@@ -12,14 +12,14 @@
 
 ## Global Constraints
 
-- `three` and `@types/three` at exactly `0.186.0` in `apps/landing`. three 0.186.0 was published on 2026-09-08 and @types/three 0.186.0 on 2026-09-11, both past the seven-day `minimum-release-age` in `.npmrc`; 0.186.1 is too new. Install with pnpm only; never edit `pnpm-lock.yaml` by hand.
+- `three` and `@types/three` at exactly `0.186.0` in `apps/landing`. three 0.186.0 was published on 2026-09-08 and @types/three 0.186.0 on 2026-09-11, both older than the seven-day release-age policy; 0.186.1 is too new. pnpm 11 does not read `save-exact` or `minimum-release-age` from `.npmrc`, so pass `--save-exact` and check the age of every new lockfile entry yourself. Install with pnpm only; never edit `pnpm-lock.yaml` by hand.
 - No CDN or runtime network dependency: three and every asset are bundled; the landing CSP allows `script-src 'self'`.
 - Copy comes verbatim from the spec tables (RU and EN). The demo button label is the shared `copy.common.requestDemoShort`. Film copy contains no em dash (U+2014) and no en dash (U+2013); a test enforces it.
-- Green `#3DDC7A` only on meshes named `code`, `scanner-lamp`, `scan-line`, `printer-led`, `handheld-screen`, `mast-lamp`, `kiosk-ok`, on queue tiles while they sync, on the active rail marker and on the call to action. Amber `#DD9420` only on the mast while offline. Red `#C0392B` only on rejected codes.
+- Green `#3DDC7A` only where a code has passed, on indicators and on the call to action: meshes named `code`, `scanner-lamp`, `scan-line`, `printer-led`, `handheld-screen`, `mast-lamp`, `kiosk-ok`, queue tiles while they sync, the box cells and progress bars drawn on the station and kiosk screen textures, the active rail marker and the call to action. Amber `#DD9420` only on the mast while offline. Red `#C0392B` only on rejected codes.
 - Everything on screen is a function of film time. Nothing accumulates between frames.
 - The 3D chunk loads only after the first scroll, wheel, pointer, touch or key event. `prefers-reduced-motion`, missing WebGL 2, a failed load, or a median frame time above 50 ms over the first 2 s of rendering keep the posters.
 - Lighthouse on `/kak-rabotaet/`, mobile and desktop: performance ≥ 0.9, accessibility 1, SEO 1, best practices ≥ 0.95.
-- TypeScript strict with `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes`. In `src`: no `any`, no non-null assertions, no `as` casts outside tests; `import type` for type-only imports. `astro check` typechecks tests too.
+- TypeScript strict with `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes`. In `src`: no `any`, no non-null assertions, no `as` type casts outside tests (`as const` is fine); `import type` for type-only imports. `astro check` typechecks tests too.
 - Unit tests live next to their module in `src/**` (repo convention) and are linted with type-aware rules. Build-level page tests live in `apps/landing/test/`.
 - In a fresh worktree build dependencies first: `pnpm turbo run build --filter='@markiro/landing^...'`.
 - The code blocks in this plan are not Prettier-formatted. Before each commit run `pnpm exec prettier --write` on the files you touched.
@@ -1653,11 +1653,12 @@ git commit -m "feat(landing): film quality tiers and frame budget" -m "Co-Author
 
 Run:
 ```bash
-pnpm --filter @markiro/landing add three@0.186.0
-pnpm --filter @markiro/landing add -D @types/three@0.186.0
+pnpm --filter @markiro/landing add --save-exact three@0.186.0
+pnpm --filter @markiro/landing add --save-exact -D @types/three@0.186.0
 git diff apps/landing/package.json
+git diff pnpm-lock.yaml | grep -E '^\+  [^ ]+@[0-9]' | sort -u
 ```
-Expected: `"three": "0.186.0"` in `dependencies` and `"@types/three": "0.186.0"` in `devDependencies`, no `^`. If pnpm refuses a transitive version because of the release-age policy, stop and report it; do not bypass the policy.
+Expected: `"three": "0.186.0"` in `dependencies` and `"@types/three": "0.186.0"` in `devDependencies`, no `^`. For every new package in the last command's output check `npm view <name>@<version> time --json`: each must be older than seven days. If one is newer, stop and report it; do not add exclusions or bypass the policy.
 
 - [ ] **Step 2: Write the failing test**
 
@@ -1905,27 +1906,31 @@ export class Kit {
   private readonly boxes = new Map<string, RoundedBoxGeometry>();
   private nightMix = 0;
 
+  /** The shared matte material of a palette role. */
   material(role: Role): MeshStandardMaterial {
-    let material = this.materials.get(role);
-    if (material === undefined) {
-      material = new MeshStandardMaterial({ color: this.colorOf(role), roughness: 0.9, metalness: 0 });
-      material.name = role;
-      this.materials.set(role, material);
-    }
-    return material;
+    return this.cached(this.materials, role, false);
   }
 
+  /** The same colour with flat shading, for faceted shapes such as tree crowns. */
   flat(role: Role): MeshStandardMaterial {
-    let material = this.flatMaterials.get(role);
+    return this.cached(this.flatMaterials, role, true);
+  }
+
+  private cached(
+    cache: Map<Role, MeshStandardMaterial>,
+    role: Role,
+    flatShading: boolean,
+  ): MeshStandardMaterial {
+    let material = cache.get(role);
     if (material === undefined) {
       material = new MeshStandardMaterial({
         color: this.colorOf(role),
         roughness: 0.9,
         metalness: 0,
-        flatShading: true,
+        flatShading,
       });
       material.name = role;
-      this.flatMaterials.set(role, material);
+      cache.set(role, material);
     }
     return material;
   }
@@ -3705,8 +3710,18 @@ function fakeRuntime(overrides: Partial<FilmRuntime> = {}) {
   };
 }
 
+/** Thirty scroll steps, each rendered frame taking 120 ms. */
+function scrollSlowly(fake: ReturnType<typeof fakeRuntime>, scrollTo: (y: number) => void): void {
+  for (let step = 1; step <= 30; step += 1) {
+    scrollTo(step * 40);
+    fake.scroll();
+    fake.flush(120);
+  }
+}
+
 afterEach(() => {
   document.body.innerHTML = "";
+  vi.restoreAllMocks();
 });
 
 describe("film entry script", () => {
@@ -3738,13 +3753,15 @@ describe("film entry script", () => {
     expect(film.classList.contains("film--live")).toBe(false);
   });
 
-  it("keeps the posters when the world fails to load", async () => {
+  it("keeps the posters and warns when the world fails to load", async () => {
     const { film } = mountFilm();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const fake = fakeRuntime({ loadWorld: () => Promise.reject(new Error("no context")) });
     initFilm(document, fake.runtime);
     fake.interact();
     await settle();
     expect(film.classList.contains("film--live")).toBe(false);
+    expect(warn).toHaveBeenCalledOnce();
   });
 
   it("marks the current chapter in the rail and hides the rail on chapter one", () => {
@@ -3790,11 +3807,7 @@ describe("film entry script", () => {
     fake.interact();
     await settle();
     fake.flush();
-    for (let step = 1; step <= 30; step += 1) {
-      scrollTo(step * 40);
-      fake.scroll();
-      fake.flush(120);
-    }
+    scrollSlowly(fake, scrollTo);
     expect(fake.world.dispose).toHaveBeenCalled();
     expect(film.classList.contains("film--live")).toBe(false);
   });
@@ -3806,11 +3819,7 @@ describe("film entry script", () => {
     fake.interact();
     await settle();
     fake.flush();
-    for (let step = 1; step <= 30; step += 1) {
-      scrollTo(step * 40);
-      fake.scroll();
-      fake.flush(120);
-    }
+    scrollSlowly(fake, scrollTo);
     expect(fake.world.dispose).not.toHaveBeenCalled();
     expect(film.classList.contains("film--live")).toBe(true);
   });
@@ -3940,7 +3949,9 @@ export function initFilm(root: Document, runtime: FilmRuntime): () => void {
             film.classList.add("film--live");
             schedule();
           })
-          .catch(() => {
+          .catch((error: unknown) => {
+            // The posters already tell the story; leave a trace for debugging.
+            console.warn("Markiro film: the 3D stage is unavailable, keeping the posters", error);
             stopWorld();
           });
       }),
