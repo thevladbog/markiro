@@ -1,0 +1,33 @@
+/* Standalone shell layout; colours and type come from @markiro/ui tokens. */
+.standalone-screen {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+  background: var(--surface-page);
+  color: var(--fg-1);
+  font-family: var(--font-ui);
+}
+
+.standalone-card {
+  width: min(560px, 100%);
+}
+
+.standalone-card p {
+  margin: 0 0 16px;
+}
+
+.standalone-probing {
+  display: grid;
+  justify-items: center;
+  gap: 16px;
+}
+
+.standalone-fingerprint-label {
+  color: var(--fg-2);
+}
+
+.standalone-fingerprint {
+  font-family: var(--font-mono);
+  letter-spacing: 0.08em;
+}
