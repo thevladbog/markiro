@@ -400,3 +400,191 @@
     scroll-padding-inline: 1rem;
   }
 }
+
+/* Links read as text on the home page; green stays on buttons, dots and list markers. */
+.home .text-link {
+  margin-top: 0;
+  color: var(--fg-1);
+  font: 600 0.9375rem / 1.2 var(--font-ui);
+}
+
+.home .text-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 0.3em;
+}
+
+/* 01 Product */
+
+.home-product {
+  padding-block: 7rem;
+}
+
+.home-product__row {
+  display: grid;
+  grid-template-columns: minmax(0, 27.5rem) minmax(0, 1fr);
+  align-items: center;
+  gap: 4.5rem;
+  margin-top: 7rem;
+}
+
+.home-product__row--reverse {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 27.5rem);
+}
+
+.home-product__row--reverse > .home-product__text {
+  order: 2;
+}
+
+.home-product__text,
+.home-product__card {
+  display: grid;
+  align-content: start;
+  justify-items: start;
+  gap: 1.125rem;
+}
+
+.home-product__text h3,
+.home-product__card h3 {
+  margin: 0;
+  font: 700 clamp(1.625rem, 2.4vw, 2.125rem) / 1.1 var(--font-ui);
+  letter-spacing: -0.03em;
+}
+
+.home-product__body {
+  margin: 0;
+  color: var(--fg-2);
+  font: 400 1.0625rem / 1.55 var(--font-ui);
+}
+
+.home-product__cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 1.5rem;
+  margin-top: 7rem;
+}
+
+.home-product__card {
+  padding: 2rem;
+  border-radius: 6px;
+  background: var(--surface-panel);
+}
+
+.home-product__card h3 {
+  font-size: 1.625rem;
+}
+
+.home-product__card .home-product__body {
+  font-size: 1rem;
+}
+
+.home-product__card .screen-frame {
+  width: 100%;
+  justify-items: start;
+}
+
+/* The handheld is drawn as a device: graphite body, red scanner window, side scan triggers. */
+.handheld-frame {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  justify-items: center;
+}
+
+.handheld-frame__body {
+  position: relative;
+  width: 20.75rem;
+  padding: 2.75rem 1.125rem;
+  border: 1px solid #44464e;
+  border-radius: 2.625rem;
+  background: linear-gradient(180deg, #2c2d33, #1e1f24);
+  box-shadow: 0 1.625rem 3.125rem rgb(23 22 26 / 27%);
+}
+
+.handheld-frame__body::before,
+.handheld-frame__body::after {
+  position: absolute;
+  top: 14.75rem;
+  width: 0.5rem;
+  height: 4.75rem;
+  border-radius: 3px;
+  background: #3b3d44;
+  content: "";
+}
+
+.handheld-frame__body::before {
+  left: -0.5rem;
+}
+
+.handheld-frame__body::after {
+  right: -0.5rem;
+}
+
+.handheld-frame__scanner {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 6.25rem;
+  height: 0.5625rem;
+  transform: translateX(-50%);
+  border-radius: 0 0 5px 5px;
+  background: #6b2323;
+}
+
+.handheld-frame__speaker {
+  position: absolute;
+  top: 1.375rem;
+  left: 50%;
+  width: 3.5rem;
+  height: 0.3125rem;
+  transform: translateX(-50%);
+  border-radius: 3px;
+  background: #121317;
+}
+
+.handheld-frame img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 2px solid #0e0f12;
+  border-radius: 0.75rem;
+}
+
+@media (max-width: 1023px) {
+  .home-product__row,
+  .home-product__row--reverse {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2.5rem;
+    margin-top: 4.5rem;
+  }
+
+  .home-product__row--reverse > .home-product__text {
+    order: 0;
+  }
+
+  .home-product__cards {
+    grid-template-columns: minmax(0, 1fr);
+    margin-top: 4.5rem;
+  }
+}
+
+@media (max-width: 767px) {
+  .home-product {
+    padding-block: 4.5rem;
+  }
+
+  .home-product__card {
+    padding: 1.25rem;
+  }
+
+  .handheld-frame__body {
+    width: 16.5rem;
+    padding: 2.25rem 0.875rem;
+    border-radius: 2.125rem;
+  }
+
+  .handheld-frame__body::before,
+  .handheld-frame__body::after {
+    top: 11.75rem;
+  }
+}

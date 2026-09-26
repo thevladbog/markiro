@@ -8,12 +8,10 @@ import "../styles/home.css";
 import DemoSection from "./DemoSection.astro";
 import HomeMaterials from "./HomeMaterials.astro";
 import HomeMapHero from "./home/HomeMapHero.astro";
+import HomeProduct from "./home/HomeProduct.astro";
 import ImplementationSteps from "./ImplementationSteps.astro";
 import LandingFooter from "./LandingFooter.astro";
 import LandingHeader from "./LandingHeader.astro";
-import PlatformModules from "./PlatformModules.astro";
-import ProductModes from "./ProductModes.astro";
-import ProductionCycle from "./ProductionCycle.astro";
 import TraceLog from "./TraceLog.astro";
 
 interface Props { page: SeoPageDefinition }
@@ -35,6 +33,8 @@ const siteConfig = readPublicSiteConfig(
   <main id="main" class="home">
     <HomeMapHero locale={page.locale} phone={siteConfig.phone} />
 
+    <HomeProduct locale={page.locale} />
+
     <section class="section section--continuity" id="continuity" aria-labelledby="continuity-title">
       <div class="container">
         <div class="continuity-statement" data-reveal>
@@ -53,10 +53,7 @@ const siteConfig = readPublicSiteConfig(
       </div>
     </section>
 
-    <ProductionCycle locale={page.locale} />
-    <ProductModes locale={page.locale} />
     <TraceLog locale={page.locale} />
-    <PlatformModules locale={page.locale} />
     <ImplementationSteps locale={page.locale} />
     <HomeMaterials locale={page.locale} />
     <DemoSection

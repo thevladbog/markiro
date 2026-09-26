@@ -1156,14 +1156,59 @@ describe("rendered landing page", () => {
     for (const sectionId of [
       "hero",
       "continuity",
-      "cycle",
       "product",
       "traceability",
-      "platform",
       "implementation",
       "demo",
     ]) {
       expect(document.querySelector(`section#${sectionId}[aria-labelledby]`)).not.toBeNull();
+    }
+  });
+
+  it("shows every product part on a framed screen and links it to its page", () => {
+    for (const [route, links] of [
+      [
+        "/",
+        [
+          "/markirovka-chestny-znak/",
+          "/kak-rabotaet/#warehouse",
+          "/instruktsii/",
+          "/kiosk-samovydachi/",
+          "/integratsiya-1c/",
+        ],
+      ],
+      [
+        "/en/",
+        [
+          "/en/chestny-znak-serialization/",
+          "/en/how-it-works/#warehouse",
+          "/en/instructions/",
+          "/en/self-service-pickup-kiosk/",
+          "/en/1c-integration/",
+        ],
+      ],
+    ] as const) {
+      const section = documents.get(route)?.querySelector("section#product");
+      const parts = [...(section?.querySelectorAll("article[id^='product-']") ?? [])];
+      expect(
+        parts.map((part) => part.id),
+        route,
+      ).toEqual([
+        "product-line",
+        "product-handheld",
+        "product-office",
+        "product-kiosk",
+        "product-integrations",
+      ]);
+      expect(parts.map((part) => part.querySelector("a.text-link")?.getAttribute("href"))).toEqual(
+        links,
+      );
+      expect(section?.querySelectorAll("figure.screen-frame img[alt]")).toHaveLength(4);
+      expect(section?.querySelectorAll("figure.handheld-frame img[alt]")).toHaveLength(1);
+      for (const image of section?.querySelectorAll("img") ?? []) {
+        expect(image.getAttribute("loading")).toBe("lazy");
+      }
+      expect(section?.textContent ?? "").not.toMatch(/НАСТОЯЩИЙ ЭКРАН|REAL SCREEN/u);
     }
   });
 
