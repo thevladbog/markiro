@@ -148,8 +148,14 @@ export function closedCase(
   group.rotation.y = rotationY;
   kit.block(group, 0.62, 0.5, 0.44, "card", 0, 0, 0, 0.014);
   kit.block(group, 0.63, 0.012, 0.09, "tape", 0, 0.495, 0, 0.004, { castShadow: false });
-  kit.place(group, shapes.caseLabel, label, 0.12, 0.27, 0.2215, { castShadow: false }).name =
+  // SSCC transport labels on two adjacent sides, as on shipped cases: the front
+  // (+z) and the left (-x), so one of them faces whoever scans the case.
+  kit.place(group, shapes.caseLabel, label, 0.12, 0.32, 0.2215, { castShadow: false }).name =
     "label";
+  kit.place(group, shapes.caseLabel, label, -0.3115, 0.32, 0.06, {
+    castShadow: false,
+    rotationY: -Math.PI / 2,
+  }).name = "label";
   parent.add(group);
   return group;
 }
@@ -188,7 +194,8 @@ export function pallet(
       ),
     );
   }
-  kit.place(group, shapes.palletLabel, label, -0.05, 0.3, 0.472, { castShadow: false }).name =
+  // On the wrap across the seam, in the gap between the two bottom case labels.
+  kit.place(group, shapes.palletLabel, label, 0.12, 0.3, 0.472, { castShadow: false }).name =
     "pallet-label";
   parent.add(group);
   return { group, cases };

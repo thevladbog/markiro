@@ -522,7 +522,9 @@ export function buildPlant(kit: Kit, parent: Object3D, screens: ScreenTextures):
 
   person(kit, plant, TABLE.x + 0.02, TABLE.z + 0.86, Math.PI, "work");
   person(kit, plant, CONVEYOR.x0 + 0.45, CONVEYOR.z + 0.72, Math.PI - 0.15, "work");
-  person(kit, plant, 2.05, 2.05, Math.atan2(2.45 - 2.05, 1.2 - 2.05), "device");
+  // The warehouse worker faces the pallet's front row and holds the handheld about
+  // 12 cm in front of the transport label on the front-right top case.
+  person(kit, plant, 3.08, 2.25, Math.PI, "device");
   person(kit, plant, -4.35, 0.75, Math.PI / 2 - 0.35, "walk");
 
   const mastLamp = mast(kit, plant, 4.3, -3.9);

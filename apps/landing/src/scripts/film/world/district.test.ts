@@ -1,4 +1,4 @@
-import { Group, Mesh, MeshStandardMaterial } from "three";
+import { Box3, Group, Mesh, MeshStandardMaterial, Vector3 } from "three";
 import { describe, expect, it } from "vitest";
 
 import { BELT, CASE_CAPACITY, PALLET_CAPACITY, QUEUE_TILES } from "../animations";
@@ -76,5 +76,33 @@ describe("film district", () => {
       if (node.name === "person") people += 1;
     });
     expect(people).toBeGreaterThanOrEqual(7);
+  });
+
+  it("holds the handheld in front of a transport label, not inside a case", () => {
+    const { root } = build();
+    root.updateMatrixWorld(true);
+    const device = root.getObjectByName("handheld-screen")?.parent ?? null;
+    expect(device).not.toBeNull();
+    if (device === null) return;
+    const deviceBox = new Box3().setFromObject(device);
+    const cases =
+      root.getObjectByName("pallet")?.children.filter((child) => child.name === "closed-case") ??
+      [];
+    expect(cases).toHaveLength(PALLET_CAPACITY);
+    for (const box of cases) {
+      expect(new Box3().setFromObject(box).intersectsBox(deviceBox)).toBe(false);
+    }
+    const labels: Mesh[] = [];
+    for (const box of cases) {
+      box.traverse((node) => {
+        if (isMesh(node) && node.name === "label") labels.push(node);
+      });
+    }
+    expect(labels).toHaveLength(PALLET_CAPACITY * 2);
+    const centre = deviceBox.getCenter(new Vector3());
+    const nearest = Math.min(
+      ...labels.map((label) => label.getWorldPosition(new Vector3()).distanceTo(centre)),
+    );
+    expect(nearest).toBeLessThan(0.3);
   });
 });

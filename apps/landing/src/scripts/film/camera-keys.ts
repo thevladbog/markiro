@@ -13,8 +13,8 @@ const CLOSE_TALL: Vec2 = [0, 0.22];
 const PLANT_WIDE: Vec2 = [0.2, 0];
 const PLANT_TALL: Vec2 = [0, 0.24];
 const PACKING_TALL: Vec2 = [0, -0.06];
-const HANDHELD_WIDE: Vec2 = [0.32, 0.06];
-const HANDHELD_TALL: Vec2 = [0.06, 0];
+const HANDHELD_WIDE: Vec2 = [0.38, 0.06];
+const HANDHELD_TALL: Vec2 = [-0.14, -0.04];
 const OFFLINE_WIDE: Vec2 = [0.2, 0.17];
 const OFFLINE_TALL: Vec2 = [0, 0.14];
 const KIOSK_WIDE: Vec2 = [0.2, 0.26];
@@ -42,7 +42,7 @@ export const CAMERA_KEYS: readonly CameraKey[] = [
   orbitKey(2, [0.8, 0.9, -1.0], 10, 55, 8, 38, CLOSE_WIDE, CLOSE_TALL),
   orbitKey(2.5, [1.8, 1.0, -1.15], 62, 45, 4.5, 36, CLOSE_WIDE, PACKING_TALL),
   orbitKey(3, [1.2, 1.0, 0.6], -40, 66, 7.5, 38, CLOSE_WIDE, CLOSE_TALL),
-  orbitKey(3.5, [2.2, 1.0, 1.55], -85, 38, 4.6, 38, HANDHELD_WIDE, HANDHELD_TALL),
+  orbitKey(3.5, [2.7, 1.0, 1.8], -40, 26, 4.4, 38, HANDHELD_WIDE, HANDHELD_TALL),
   orbitKey(4, [0.5, 0.8, -0.5], -42, 40, 34, 22, PLANT_WIDE, PLANT_TALL),
   orbitKey(4.5, [1.8, 3.23, -2.2], -32, 30, 30.4, 22, OFFLINE_WIDE, OFFLINE_TALL),
   orbitKey(5, [-2.5, 1.5, 1.0], -25, 30, 12, 30, CLOSE_WIDE, CLOSE_TALL),

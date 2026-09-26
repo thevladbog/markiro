@@ -1,4 +1,4 @@
-import { Group, Mesh, MeshBasicMaterial } from "three";
+import { Box3, Group, Mesh, MeshBasicMaterial, Vector3 } from "three";
 import { describe, expect, it } from "vitest";
 
 import { parseHex } from "../color";
@@ -62,6 +62,33 @@ describe("film model kit", () => {
     expect(codes).toHaveLength(6);
     expect(codes.every((mesh) => mesh.material === kit.signals.verified)).toBe(true);
     expect(pallet(kit, root, 0, 0, 0, 8, new MeshBasicMaterial()).cases).toHaveLength(8);
+  });
+
+  it("keeps the pallet label clear of the case labels on the pallet front", () => {
+    const kit = new Kit();
+    const root = new Group();
+    const { group } = pallet(kit, root, 0, 0, 0, 8, new MeshBasicMaterial());
+    root.updateMatrixWorld(true);
+    const tag = group.getObjectByName("pallet-label");
+    expect(tag).toBeDefined();
+    if (tag === undefined) return;
+    const tagBox = new Box3().setFromObject(tag);
+    const front = meshes(group).filter(
+      (mesh) =>
+        mesh.name === "label" &&
+        mesh.getWorldDirection(new Vector3()).z > 0.99 &&
+        mesh.getWorldPosition(new Vector3()).z > 0.4,
+    );
+    expect(front).toHaveLength(4);
+    for (const label of front) {
+      const box = new Box3().setFromObject(label);
+      const covered =
+        box.min.x < tagBox.max.x &&
+        tagBox.min.x < box.max.x &&
+        box.min.y < tagBox.max.y &&
+        tagBox.min.y < box.max.y;
+      expect(covered).toBe(false);
+    }
   });
 
   it("dresses people in coats and gives the handheld worker a green screen", () => {
