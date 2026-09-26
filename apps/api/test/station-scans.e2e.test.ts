@@ -658,6 +658,180 @@ describe.skipIf(!ready)("station-scans e2e", () => {
     expect(await serverPalletLink(standing.tenantId, standing.boxId)).toEqual(aggregated);
   });
 
+  /**
+   * A station box of two codes and what the operator does next with the same
+   * two codes: releases them at 10:04 and scans them again at 10:05. Each test
+   * decides how those facts are split into sync batches.
+   */
+  async function repackFixture(serial: number) {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const apiKey = await deviceKey(agent);
+    const shiftId = await openShift(agent);
+    const oldBox = `repack-old-${randomUUID()}`;
+    const newBox = `repack-new-${randomUUID()}`;
+    const oldSscc = buildSscc(0, "034600682", serial);
+    const newSscc = buildSscc(0, "034600682", serial + 1);
+    const post = async (body: Record<string, unknown>) =>
+      request(app!.getHttpServer())
+        .post("/station/scans")
+        .set("x-api-key", apiKey)
+        .send({ batchId: `repack-${randomUUID()}`, items: [], ...body })
+        .expect(201);
+    const closure = (boxId: string, sscc: string, closedAt: string) => ({
+      boxId,
+      shiftId,
+      terminalId: "t1",
+      sscc,
+      closedAt,
+      operatorId: null,
+    });
+    const release = (kind: "clear" | "disassemble", boxId: string) => ({
+      kind,
+      boxId,
+      codeHash: null,
+      shiftId,
+      terminalId: "t1",
+      operatorId: null,
+      reason: kind === "disassemble" ? "Пересборка" : null,
+      occurredAt: "2026-07-28T10:04:00.000Z",
+    });
+    const rescan = (boxId: string) =>
+      [1, 2].map((n) => item(shiftId, n, { boxId, scannedAt: `2026-07-28T10:05:0${n}.000Z` }));
+    const fact = (boxId: string, sscc: string, scans: ScanItemDto[]) => ({
+      shiftId,
+      boxId,
+      sscc,
+      closedAt: "2026-07-28T10:06:00.000Z",
+      devicePalletId: null,
+      itemCount: scans.length,
+      membershipDigest: boxMembershipDigestV1(scans.map((scan) => scan.code!.codeHash)),
+      digestVersion: 1,
+    });
+    /** Both codes are held by their re-scans, as if the release had come first. */
+    const expectHeldBy = async (
+      delivered: { body: { conflicts?: unknown } },
+      boxId: string,
+      sscc: string,
+    ) => {
+      expect(delivered.body.conflicts).toEqual([]);
+      const scans = rescan(boxId);
+      const owners = await Promise.all(
+        scans.map((scan) => registryOwner(tenantId, scan.code!.codeHash)),
+      );
+      expect(owners.map((owner) => owner?.scannedAt.toISOString())).toEqual(
+        scans.map((scan) => scan.scannedAt),
+      );
+      expect(await reconcileBox(apiKey, fact(boxId, sscc, scans))).toEqual([
+        { boxId, status: "confirmed", reasonCode: "matched", serverItemCount: 2 },
+      ]);
+    };
+    return {
+      tenantId,
+      apiKey,
+      shiftId,
+      oldBox,
+      newBox,
+      oldSscc,
+      newSscc,
+      post,
+      closure,
+      release,
+      rescan,
+      fact,
+      expectHeldBy,
+      packed: [1, 2].map((n) => item(shiftId, n, { boxId: oldBox })),
+    };
+  }
+
+  it("keeps codes re-packed in the same batch that takes their old box apart", async () => {
+    const box = await repackFixture(1600);
+    await box.post({
+      items: box.packed,
+      boxes: [box.closure(box.oldBox, box.oldSscc, "2026-07-28T10:01:00.000Z")],
+    });
+    const delivered = await box.post({
+      exceptions: [box.release("disassemble", box.oldBox)],
+      items: box.rescan(box.newBox),
+      boxes: [box.closure(box.newBox, box.newSscc, "2026-07-28T10:06:00.000Z")],
+    });
+    await box.expectHeldBy(delivered, box.newBox, box.newSscc);
+  });
+
+  it("keeps codes packed, taken apart and re-packed within one offline batch", async () => {
+    const box = await repackFixture(1602);
+    const delivered = await box.post({
+      items: [...box.packed, ...box.rescan(box.newBox)],
+      boxes: [
+        box.closure(box.oldBox, box.oldSscc, "2026-07-28T10:01:00.000Z"),
+        box.closure(box.newBox, box.newSscc, "2026-07-28T10:06:00.000Z"),
+      ],
+      exceptions: [box.release("disassemble", box.oldBox)],
+    });
+    await box.expectHeldBy(delivered, box.newBox, box.newSscc);
+  });
+
+  it("keeps codes scanned again into the box the same batch cleared", async () => {
+    const box = await repackFixture(1604);
+    await box.post({ items: box.packed });
+    const delivered = await box.post({
+      exceptions: [box.release("clear", box.oldBox)],
+      items: box.rescan(box.oldBox),
+      boxes: [box.closure(box.oldBox, box.oldSscc, "2026-07-28T10:06:00.000Z")],
+    });
+    await box.expectHeldBy(delivered, box.oldBox, box.oldSscc);
+  });
+
+  it("keeps codes re-packed after their old box's disassembly was delivered", async () => {
+    const box = await repackFixture(1606);
+    await box.post({
+      items: box.packed,
+      boxes: [box.closure(box.oldBox, box.oldSscc, "2026-07-28T10:01:00.000Z")],
+    });
+    await box.post({ exceptions: [box.release("disassemble", box.oldBox)] });
+    const delivered = await box.post({
+      items: box.rescan(box.newBox),
+      boxes: [box.closure(box.newBox, box.newSscc, "2026-07-28T10:06:00.000Z")],
+    });
+    await box.expectHeldBy(delivered, box.newBox, box.newSscc);
+  });
+
+  it("does not revive a re-scan that the same batch undoes", async () => {
+    const box = await repackFixture(1608);
+    await box.post({
+      items: box.packed,
+      boxes: [box.closure(box.oldBox, box.oldSscc, "2026-07-28T10:01:00.000Z")],
+    });
+    const [undone, kept] = box.rescan(box.newBox) as [ScanItemDto, ScanItemDto];
+    const delivered = await box.post({
+      exceptions: [
+        box.release("disassemble", box.oldBox),
+        {
+          kind: "undo",
+          boxId: box.newBox,
+          codeHash: undone.code!.codeHash,
+          targetScannedAt: undone.scannedAt,
+          shiftId: box.shiftId,
+          terminalId: "t1",
+          operatorId: null,
+          reason: null,
+          occurredAt: "2026-07-28T10:05:30.000Z",
+        },
+      ],
+      items: [undone, kept],
+      boxes: [box.closure(box.newBox, box.newSscc, "2026-07-28T10:06:00.000Z")],
+    });
+
+    expect(delivered.body.conflicts).toEqual([]);
+    expect(await registryOwner(box.tenantId, undone.code!.codeHash)).toBeUndefined();
+    expect((await registryOwner(box.tenantId, kept.code!.codeHash))?.scannedAt.toISOString()).toBe(
+      kept.scannedAt,
+    );
+    expect(await reconcileBox(box.apiKey, box.fact(box.newBox, box.newSscc, [kept]))).toEqual([
+      { boxId: box.newBox, status: "confirmed", reasonCode: "matched", serverItemCount: 1 },
+    ]);
+  });
+
   it("does not expose another station's box or accept a cabinet session", async () => {
     const agent = request.agent(app!.getHttpServer());
     await signUpAndActivate(agent);

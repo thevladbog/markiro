@@ -3,8 +3,11 @@ import {
   collapseClaims,
   conflictsAgainstOwner,
   displacedIncumbents,
+  heldScans,
+  type BatchScan,
   type ClaimItem,
   type OwnerRow,
+  type ReleaseFact,
 } from "../src/modules/station-scans/conflict-resolution";
 
 const HASH = "a".repeat(64);
@@ -225,5 +228,92 @@ describe("displacedIncumbents", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]!.losing.shiftId).toBe("s1");
     expect(rows[0]!.winning.shiftId).toBe("s2");
+  });
+});
+
+describe("heldScans", () => {
+  const BOX = "b1";
+  function scan(codeHash: string, boxId: string | null, iso: string): BatchScan {
+    return { ...item(codeHash, "t1", iso), boxId };
+  }
+  function release(
+    kind: ReleaseFact["kind"],
+    boxId: string,
+    occurredAt: string,
+    target: { codeHash: string; scannedAt: string } | null = null,
+  ): ReleaseFact {
+    return {
+      kind,
+      boxId,
+      shiftId: "s1",
+      codeHash: target?.codeHash ?? null,
+      targetScannedAt: target?.scannedAt ?? null,
+      occurredAt,
+    };
+  }
+
+  it("keeps a scan no exception reaches, boxed or not", () => {
+    const boxed = scan(HASH, BOX, "2026-07-28T10:05:00.000Z");
+    const loose = scan(OTHER, null, "2026-07-28T10:05:00.000Z");
+    const held = heldScans(
+      [boxed, loose],
+      [release("disassemble", "b2", "2026-07-28T10:06:00.000Z")],
+    );
+    expect(held.get(HASH)).toEqual([boxed]);
+    expect(held.get(OTHER)).toEqual([loose]);
+  });
+
+  it("releases every scan of a box that is taken apart", () => {
+    const held = heldScans(
+      [scan(HASH, BOX, "2026-07-28T10:00:00.000Z"), scan(OTHER, BOX, "2026-07-28T10:00:01.000Z")],
+      [release("disassemble", BOX, "2026-07-28T10:04:00.000Z")],
+    );
+    expect(held.size).toBe(0);
+  });
+
+  it("releases the scans a clear reaches and keeps the ones after it", () => {
+    const before = scan(HASH, BOX, "2026-07-28T10:00:00.000Z");
+    const atClear = scan(OTHER, BOX, "2026-07-28T10:04:00.000Z");
+    const after = scan(HASH, BOX, "2026-07-28T10:05:00.000Z");
+    const held = heldScans(
+      [before, atClear, after],
+      [release("clear", BOX, "2026-07-28T10:04:00.000Z")],
+    );
+    expect(held.get(HASH)).toEqual([after]);
+    expect(held.has(OTHER)).toBe(false);
+  });
+
+  it("releases only the scan an undo names", () => {
+    const undone = scan(HASH, BOX, "2026-07-28T10:05:00.000Z");
+    const kept = scan(OTHER, BOX, "2026-07-28T10:05:00.000Z");
+    const held = heldScans(
+      [undone, kept],
+      [
+        release("undo", BOX, "2026-07-28T10:05:30.000Z", {
+          codeHash: HASH,
+          scannedAt: "2026-07-28T10:05:00.000Z",
+        }),
+      ],
+    );
+    expect(held.has(HASH)).toBe(false);
+    expect(held.get(OTHER)).toEqual([kept]);
+  });
+
+  it("does not let another shift's box or a reprint release a scan", () => {
+    const kept = scan(HASH, BOX, "2026-07-28T10:00:00.000Z");
+    const held = heldScans(
+      [kept],
+      [
+        { ...release("disassemble", BOX, "2026-07-28T10:04:00.000Z"), shiftId: "s2" },
+        release("reprint", BOX, "2026-07-28T10:04:00.000Z"),
+      ],
+    );
+    expect(held.get(HASH)).toEqual([kept]);
+  });
+
+  it("lists a code's held scans earliest first", () => {
+    const later = scan(HASH, "b3", "2026-07-28T10:07:00.000Z");
+    const earlier = scan(HASH, "b2", "2026-07-28T10:05:00.000Z");
+    expect(heldScans([later, earlier], []).get(HASH)).toEqual([earlier, later]);
   });
 });
