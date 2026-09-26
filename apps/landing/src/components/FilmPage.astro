@@ -31,7 +31,7 @@ const lastIndex = page.chapters.length - 1;
 
 <BaseLayout metadata={page} graph={buildFilmPageGraph(page)}>
   <div class="film-top" data-theme="light" data-film-chrome>
-    <LandingHeader page={page} phone={siteConfig.phone} />
+    <LandingHeader page={page} phone={siteConfig.phone} demoHref="#demo" />
   </div>
 
   <main id="main">
@@ -63,12 +63,12 @@ const lastIndex = page.chapters.length - 1;
                   <a class="button" href="#demo" data-analytics="landing_demo_click" data-placement="film_hero">
                     {copy.common.requestDemoShort} <span aria-hidden="true">→</span>
                   </a>
-                  <a class="film-link" href={page.heroSecondary.href}>{page.heroSecondary.label}</a>
+                  <a class="film-link" href={page.heroSecondary.href}>{page.heroSecondary.label} <span aria-hidden="true">↓</span></a>
                 </div>
                 <ul class="film-tags">
                   {chapter.tags.map((tag) => <li>{tag}</li>)}
                 </ul>
-                <p class="film-hero__hint">{page.scrollHint}</p>
+                <p class="film-hero__hint">{page.scrollHint} <span aria-hidden="true">↓</span></p>
               </div>
             ) : (
               <div class="film-card">
@@ -93,7 +93,7 @@ const lastIndex = page.chapters.length - 1;
                     <a class="button" href="#demo" data-analytics="landing_demo_click" data-placement="film_final">
                       {copy.common.requestDemoShort} <span aria-hidden="true">→</span>
                     </a>
-                    <a class="film-link" href={page.finalSecondary.href}>{page.finalSecondary.label}</a>
+                    <a class="film-link" href={page.finalSecondary.href}>{page.finalSecondary.label} <span aria-hidden="true">→</span></a>
                   </div>
                 )}
               </div>

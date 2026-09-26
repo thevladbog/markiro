@@ -7,7 +7,8 @@ import type { WorldHandle } from "./world/runtime";
 
 const VIEWPORT = 1000;
 const SPANS = [2.6, 1.3, 1.3, 1.35, 1.45, 1.35, 1.6];
-const TOTAL_SCROLL = SPANS.reduce((sum, span) => sum + span * VIEWPORT, 0) - VIEWPORT;
+const FILM_HEIGHT = SPANS.reduce((sum, span) => sum + span * VIEWPORT, 0);
+const TOTAL_SCROLL = FILM_HEIGHT - VIEWPORT;
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 function mountFilm() {
@@ -20,6 +21,9 @@ function mountFilm() {
     </div>`;
   let scrollY = 0;
   let start = 0;
+  const film = document.querySelector("[data-film]") as HTMLElement;
+  film.getBoundingClientRect = () =>
+    ({ top: -scrollY, height: FILM_HEIGHT, bottom: FILM_HEIGHT - scrollY }) as DOMRect;
   for (const [index, section] of [
     ...document.querySelectorAll<HTMLElement>("[data-film-chapter]"),
   ].entries()) {
@@ -29,7 +33,7 @@ function mountFilm() {
     start += height;
   }
   return {
-    film: document.querySelector("[data-film]") as HTMLElement,
+    film,
     chrome: document.querySelector("[data-film-chrome]") as HTMLElement,
     scrollTo: (y: number) => {
       scrollY = y;
@@ -171,6 +175,24 @@ describe("film entry script", () => {
       null,
       null,
     ]);
+  });
+
+  it("hides the rail once the film has scrolled past", () => {
+    const { scrollTo } = mountFilm();
+    const fake = fakeRuntime();
+    initFilm(document, fake.runtime);
+    fake.flush();
+    const rail = document.querySelector("[data-film-rail]");
+    // Still inside the last chapter, with the film's bottom well below the viewport bottom.
+    scrollTo(TOTAL_SCROLL - 500);
+    fake.scroll();
+    fake.flush();
+    expect(rail?.classList.contains("is-visible")).toBe(true);
+    // The film has scrolled past: its bottom (500 px) now sits above the viewport bottom.
+    scrollTo(TOTAL_SCROLL + 500);
+    fake.scroll();
+    fake.flush();
+    expect(rail?.classList.contains("is-visible")).toBe(false);
   });
 
   it("turns the film and the header chrome dark at night", () => {

@@ -8,9 +8,11 @@ import BrandMark from "./BrandMark.astro";
 interface Props {
   page: Pick<PageMetadata, "locale" | "path" | "alternatePath">;
   phone: PublicPhone | null;
+  /** Overrides the demo button's target for a page with its own #demo section, such as the film. */
+  demoHref?: string;
 }
 
-const { page, phone } = Astro.props;
+const { page, phone, demoHref } = Astro.props;
 const copy = getUiCopy(page.locale).common;
 const homePath = page.locale === "ru" ? "/" : "/en/";
 const ruPath = page.locale === "ru" ? page.path : (page.alternatePath ?? "/");
@@ -58,7 +60,7 @@ const paths = page.locale === "ru"
     </span>
   </nav>
 
-  <a class="button button--compact landing-header__cta" href={`${homePath}#demo`} data-analytics="landing_demo_click" data-placement="header">
+  <a class="button button--compact landing-header__cta" href={demoHref ?? `${homePath}#demo`} data-analytics="landing_demo_click" data-placement="header">
     {copy.requestDemoShort}
   </a>
   <button

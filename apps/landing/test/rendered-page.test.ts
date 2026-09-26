@@ -1721,4 +1721,29 @@ describe("rendered film page", () => {
     const link = home.querySelector<HTMLAnchorElement>(`.hero a[href="${href}"]`);
     expect(link?.textContent?.trim()).toBe(label);
   });
+
+  it("keeps the header demo button on the film page instead of sending visitors home", () => {
+    for (const route of FILM_ROUTES) {
+      const film = documents.get(route) as Document;
+      expect(film.querySelector(".landing-header__cta")?.getAttribute("href")).toBe("#demo");
+    }
+    expect(documents.get("/")?.querySelector(".landing-header__cta")?.getAttribute("href")).toBe(
+      "/#demo",
+    );
+    expect(documents.get("/en/")?.querySelector(".landing-header__cta")?.getAttribute("href")).toBe(
+      "/en/#demo",
+    );
+  });
+
+  it("keeps the decorative arrows out of the film links and the scroll hint", () => {
+    for (const route of FILM_ROUTES) {
+      const film = documents.get(route) as Document;
+      const links = [...film.querySelectorAll(".film-link")];
+      expect(links.length).toBeGreaterThan(0);
+      for (const link of links) {
+        expect(link.querySelector('span[aria-hidden="true"]')).not.toBeNull();
+      }
+      expect(film.querySelector('.film-hero__hint span[aria-hidden="true"]')).not.toBeNull();
+    }
+  });
 });

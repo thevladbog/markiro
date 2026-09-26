@@ -59,9 +59,9 @@ const RU: FilmPageDefinition = {
   socialImageAlt: "Markiro: маркировка, агрегация и прослеживаемость производства",
   reviewedAt: REVIEWED,
   railLabel: "Главы",
-  scrollHint: "Листайте вниз: пройдём по производству от линии до офиса ↓",
-  heroSecondary: { label: "Как это работает ↓", href: "#line" },
-  finalSecondary: { label: "Как проходит внедрение →", href: "/#implementation" },
+  scrollHint: "Листайте вниз: пройдём по производству от линии до офиса",
+  heroSecondary: { label: "Как это работает", href: "#line" },
+  finalSecondary: { label: "Как проходит внедрение", href: "/#implementation" },
   chapters: [
     {
       id: "district",
@@ -149,9 +149,9 @@ const EN: FilmPageDefinition = {
   socialImageAlt: "Markiro: production serialization, aggregation and traceability",
   reviewedAt: REVIEWED,
   railLabel: "Chapters",
-  scrollHint: "Scroll down: we go through production from the line to the office ↓",
-  heroSecondary: { label: "How it works ↓", href: "#line" },
-  finalSecondary: { label: "How implementation works →", href: "/en/#implementation" },
+  scrollHint: "Scroll down: we go through production from the line to the office",
+  heroSecondary: { label: "How it works", href: "#line" },
+  finalSecondary: { label: "How implementation works", href: "/en/#implementation" },
   chapters: [
     {
       id: "district",

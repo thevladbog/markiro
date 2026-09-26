@@ -35,6 +35,7 @@ export function initFilm(root: Document, runtime: FilmRuntime): () => void {
   let pending = false;
   let lastFilmTime = Number.NaN;
   let lastChapter = -1;
+  let railShown: boolean | null = null;
   let measuredMs = 0;
   let warmUpPending = true;
   let disposed = false;
@@ -83,11 +84,18 @@ export function initFilm(root: Document, runtime: FilmRuntime): () => void {
     if (index !== lastChapter) {
       lastChapter = index;
       film.dataset.chapter = String(index + 1);
-      rail?.classList.toggle("is-visible", index > 0);
       railLinks.forEach((link, linkIndex) => {
         if (linkIndex === index) link.setAttribute("aria-current", "step");
         else link.removeAttribute("aria-current");
       });
+    }
+    // Once the film has scrolled past (the demo section below has taken over the viewport),
+    // the rail must leave with it: it stays fixed, so a stale visible rail would paint under
+    // the next section and keep tab order walking through links nobody can see.
+    const showRail = index > 0 && film.getBoundingClientRect().bottom > runtime.viewportHeight();
+    if (showRail !== railShown) {
+      railShown = showRail;
+      rail?.classList.toggle("is-visible", showRail);
     }
     if (world === null || filmTime === lastFilmTime) return;
     world.render(filmTime);

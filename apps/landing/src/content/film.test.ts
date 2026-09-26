@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { FILM_PAGES, FILM_SEARCH_PAGES, findFilmPage } from "./film";
 
 const DASHES = /[–—]/u;
+const ARROWS = /[↓→]/u;
 
 function visibleStrings(locale: "ru" | "en"): string[] {
   const page = findFilmPage(locale);
@@ -48,6 +49,16 @@ describe("film page copy", () => {
   it.each(["ru", "en"] as const)("writes the %s copy without dashes", (locale) => {
     for (const text of visibleStrings(locale)) expect(text, text).not.toMatch(DASHES);
   });
+
+  it.each(["ru", "en"] as const)(
+    "keeps the %s decorative arrows out of the visible labels",
+    (locale) => {
+      const page = findFilmPage(locale);
+      for (const text of [page.heroSecondary.label, page.finalSecondary.label, page.scrollHint]) {
+        expect(text, text).not.toMatch(ARROWS);
+      }
+    },
+  );
 
   it("numbers the kickers of chapters two to seven", () => {
     for (const page of FILM_PAGES) {

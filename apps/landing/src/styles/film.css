@@ -34,6 +34,13 @@
   color: var(--fg-1);
 }
 
+/* The shared hover green is too dark under the button's dark text in the light theme. */
+.film-top[data-theme="light"] .button:hover,
+.film-chapter[data-theme="light"] .button:hover {
+  border-color: var(--accent-module);
+  background: var(--accent-module);
+}
+
 .film {
   position: relative;
   isolation: isolate;
