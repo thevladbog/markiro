@@ -3032,3 +3032,13 @@ git commit -m "ci(standalone): задания Rust и Windows, руководс�
 - [ ] `node --test tools/ci/test/affected.test.mjs tools/ci/test/required-results.test.mjs` и `pnpm --config.verifyDepsBeforeRun=false exec node --test tools/ci/test/workflow.test.mjs` — PASS.
 - [ ] `node_modules/.bin/prettier --check apps/standalone AGENTS.md tools/ci .github/workflows/ci.yml` и `git diff --check` — чисто.
 - [ ] В отчёте отдельно: задание `standalone-windows-build` (служба Windows, сборка Tauri на Windows) и ручная проверка окна на Windows локально не выполнялись.
+
+## Отклонения при исполнении
+
+Записано по итогам исполнения 2026-09-26; код в ветке соответствует этому разделу, а не буквальному тексту задач выше там, где они расходятся.
+
+- **Форматирование Rust.** Весь воркспейс прогнан через `cargo fmt`; код задач выше местами отформатирован иначе. Задание `standalone-rust` получило компонент `rustfmt` и шаг `cargo fmt --manifest-path apps/standalone/Cargo.toml --all -- --check`, а `apps/standalone/AGENTS.md` — соответствующий пункт в разделе проверок.
+- **`details` в теле ошибки** — объект с обеих сторон: в Rust `Option<serde_json::Map<String, serde_json::Value>>` вместо `Option<serde_json::Value>`, в Zod — `z.record(...)`; тесты с обеих сторон отвергают не-объект.
+- **`TlsListener` и адрес клиента.** Прямая реализация `Connected<IncomingStream<'_, TlsListener>>` для `SocketAddr` нарушает правило сиротских реализаций (E0117), поэтому `serve()` оборачивает слушатель штатным `ListenerExt::tap_io` из axum; поведение приёма и рукопожатия не изменилось.
+- **Тест фикстур протокола** (`test/protocol.test.ts`) сначала сохраняет `import.meta.url` в константу: встроенный плагин Vite `vite:asset-import-meta-url` переписывает `new URL(<шаблон>, import.meta.url)` в окружении jsdom.
+- **Не выполнено локально:** ручная проверка окна `tauri dev` (нет графической сессии) и задание `standalone-windows-build`. Модуль службы Windows проверен `cargo check --target x86_64-pc-windows-msvc` во временном крейте против `windows-service 0.8.1`; сам крейт хоста под Windows локально не собирается из-за C-зависимостей (`aws-lc-sys`, `libsqlite3-sys`).
