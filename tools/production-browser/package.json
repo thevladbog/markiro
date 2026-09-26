@@ -29,6 +29,7 @@
     "test:catalog-regulatory": "playwright test --config catalog-regulatory.playwright.config.ts",
     "render:film-posters": "node scripts/render-film-posters.mjs",
     "render:home-images": "node scripts/render-home-images.mjs",
+    "render:instruction-covers": "node scripts/render-instruction-covers.mjs",
     "capture:station-screens": "node scripts/capture-station-screens.mjs"
   },
   "devDependencies": {
