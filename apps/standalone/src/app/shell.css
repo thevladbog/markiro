@@ -79,3 +79,53 @@
   margin: 0;
   font-family: var(--font-mono);
 }
+
+.office-shell {
+  display: flex;
+  min-height: 100vh;
+  background: var(--surface-page);
+  color: var(--fg-1);
+  font-family: var(--font-ui);
+}
+
+.office-shell__main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.office-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--line);
+}
+
+.office-header__user {
+  display: flex;
+  flex-direction: column;
+}
+
+.office-header__name {
+  font-weight: 600;
+}
+
+.office-header__role {
+  color: var(--fg-2);
+}
+
+.office-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.office-shell__content {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+  padding: 24px;
+}

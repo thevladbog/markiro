@@ -1,0 +1,70 @@
+import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
+import { NavLink, Outlet } from "react-router";
+
+import { Button, cn, IconButton, Sidebar, useTheme, type SidebarItem } from "@markiro/ui";
+
+import { OFFICE_NAV } from "./nav.js";
+import { useOfficeSession } from "./office-session.js";
+
+/** Office layout after `apps/admin/src/layout/AppShell.tsx`: sidebar, header, page. */
+export function OfficeShell() {
+  const { t } = useTranslation();
+  const session = useOfficeSession();
+  const { theme, setTheme } = useTheme();
+  const dark = theme === "dark";
+  const items = useMemo<SidebarItem[]>(
+    () =>
+      OFFICE_NAV.filter((item) => item.roles.includes(session.user.role)).map((item) => ({
+        to: item.to,
+        labelKey: t(item.labelKey),
+        section: t(item.sectionKey),
+      })),
+    [session.user.role, t],
+  );
+
+  return (
+    <div className="office-shell">
+      <Sidebar
+        items={items}
+        navLabel={t("office.nav.label")}
+        renderLink={(item, content) => (
+          <NavLink
+            to={item.to}
+            end
+            className={({ isActive }) =>
+              cn("mk-sidebar__link", isActive && "mk-sidebar__link--active")
+            }
+          >
+            {content}
+          </NavLink>
+        )}
+      />
+      <div className="office-shell__main">
+        <header className="office-header">
+          <div className="office-header__user">
+            <span className="office-header__name">{session.user.name}</span>
+            <span className="office-header__role">{t(`office.roles.${session.user.role}`)}</span>
+          </div>
+          <div className="office-header__actions">
+            <IconButton
+              variant="secondary"
+              icon={dark ? "☀" : "☾"}
+              aria-label={t(dark ? "office.header.lightTheme" : "office.header.darkTheme")}
+              onClick={() => setTheme(dark ? "light" : "dark")}
+            />
+            <Button variant="secondary" onClick={session.leave}>
+              {t("office.header.toFloor")}
+            </Button>
+            <Button variant="secondary" onClick={() => void session.logout()}>
+              {t("office.header.logout")}
+            </Button>
+          </div>
+        </header>
+        <main className="office-shell__content">
+          <Outlet />
+        </main>
+      </div>
+    </div>
+  );
+}

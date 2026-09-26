@@ -103,6 +103,37 @@
       "rejected": "Хост не принял это значение. Проверьте его."
     }
   },
+  "office": {
+    "login": {
+      "title": "Вход в офис",
+      "login": "Логин",
+      "password": "Пароль",
+      "submit": "Войти",
+      "back": "В цех",
+      "sessionEnded": "Сессия офиса закончилась. Войдите снова.",
+      "required": "Заполните поле"
+    },
+    "nav": {
+      "label": "Разделы офиса",
+      "sections": { "office": "Офис" },
+      "overview": "Обзор"
+    },
+    "header": {
+      "toFloor": "В цех",
+      "logout": "Выйти",
+      "darkTheme": "Включить тёмную тему",
+      "lightTheme": "Включить светлую тему"
+    },
+    "overview": {
+      "title": "Офис",
+      "greeting": "Вы вошли как {{name}}.",
+      "role": "Роль: {{role}}."
+    },
+    "roles": {
+      "admin": "администратор",
+      "technologist": "технолог"
+    }
+  },
   "errors": {
     "unknown": "Что-то пошло не так. Повторите попытку.",
     "transport": {
