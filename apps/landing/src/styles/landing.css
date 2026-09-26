@@ -142,7 +142,7 @@ input:focus-visible {
   width: min(75rem, calc(100% - 5rem));
   min-height: 5rem;
   transform: translateX(-50%);
-  border-bottom: 1px solid rgb(250 250 248 / 12%);
+  border-bottom: 1px solid var(--line);
 }
 
 .landing-header__brand {
@@ -239,6 +239,16 @@ input:focus-visible {
   font-size: 0.75rem;
 }
 
+/* Light pages: the current language and the button hover need more contrast on paper. */
+[data-theme="light"] .language-switch a[aria-current="page"] {
+  color: var(--fg-1);
+}
+
+[data-theme="light"] .button:hover {
+  border-color: var(--accent-module);
+  background: var(--accent-module);
+}
+
 .menu-trigger {
   display: none;
   width: 2.75rem;
@@ -246,7 +256,7 @@ input:focus-visible {
   padding: 0.8125rem;
   border: 1px solid var(--line-strong);
   border-radius: var(--r-1);
-  background: rgb(19 18 22 / 78%);
+  background: color-mix(in srgb, var(--surface-page) 86%, transparent);
   cursor: pointer;
 }
 
@@ -1233,15 +1243,19 @@ input:focus-visible {
 
 .landing-footer {
   border-top: 1px solid var(--line);
+  background: var(--surface-page);
+}
+
+[data-theme="dark"] .landing-footer {
   background: #0d0c0f;
 }
 
 .landing-footer__inner {
   display: grid;
-  grid-template-columns: minmax(10rem, 1fr) auto auto;
+  grid-template-columns: minmax(12rem, 1.2fr) repeat(3, minmax(0, 1fr));
   align-items: start;
   gap: var(--sp-7) var(--sp-8);
-  padding-block: var(--sp-7);
+  padding-block: var(--sp-8);
 }
 
 .landing-footer__meta {
@@ -1260,34 +1274,40 @@ input:focus-visible {
   font: 500 0.6875rem / 1 var(--font-mono);
 }
 
-.landing-footer nav {
-  display: flex;
-  gap: var(--sp-6);
+.landing-footer__column {
+  display: grid;
+  gap: var(--sp-3);
+  align-content: start;
+  justify-items: start;
 }
 
-.landing-footer nav:first-of-type {
-  justify-self: end;
-}
-
-.landing-footer__legal {
-  justify-self: start;
-}
-
-.landing-footer nav a {
+.landing-footer__heading {
+  margin: 0 0 var(--sp-2);
   color: var(--fg-3);
-  font: 500 0.6875rem / 1 var(--font-mono);
-  text-decoration: none;
+  font: 600 0.6875rem / 1 var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
-.landing-footer nav button {
+.landing-footer__column a,
+.landing-footer__column button {
   padding: 0;
   border: 0;
-  color: var(--fg-3);
   background: transparent;
-  font: 500 0.6875rem / 1 var(--font-mono);
+  color: var(--fg-2);
+  font: 400 0.875rem / 1.4 var(--font-ui);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.landing-footer__column a:hover,
+.landing-footer__column button:hover {
+  color: var(--fg-1);
+}
+
+.landing-footer__column button {
   text-decoration: underline;
   text-underline-offset: 0.2em;
-  cursor: pointer;
 }
 
 .consent-panel {
@@ -1299,6 +1319,8 @@ input:focus-visible {
   overscroll-behavior: contain;
   border-top: 1px solid var(--line);
   background: #19181d;
+  color: var(--fg-1);
+  color-scheme: dark;
 }
 
 .consent-panel [hidden] {
@@ -1546,8 +1568,8 @@ input:focus-visible {
     opacity: 0;
     transform: translateY(-0.5rem);
     border: 1px solid var(--line-strong);
-    background: #151419;
-    box-shadow: 0 1.5rem 3rem rgb(0 0 0 / 40%);
+    background: var(--surface-card);
+    box-shadow: 0 1.5rem 3rem rgb(0 0 0 / 24%);
     transition:
       opacity 180ms var(--landing-ease),
       transform 180ms var(--landing-ease),
@@ -1828,17 +1850,6 @@ input:focus-visible {
 
   .demo-form {
     padding: var(--sp-4);
-  }
-
-  .landing-footer__inner {
-    grid-template-columns: 1fr;
-    padding-block: var(--sp-6);
-  }
-
-  .landing-footer nav {
-    grid-column: 1;
-    grid-row: auto;
-    flex-wrap: wrap;
   }
 }
 
@@ -3073,21 +3084,11 @@ input:focus-visible {
   }
 
   .landing-footer__inner {
-    grid-template-columns: 1fr;
-    gap: var(--sp-6);
-    padding-block: var(--sp-6);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .landing-footer nav:first-of-type,
-  .landing-footer__legal {
-    grid-column: 1;
-    grid-row: auto;
-    justify-self: start;
-  }
-
-  .landing-footer nav {
-    flex-wrap: wrap;
-    gap: var(--sp-4) var(--sp-6);
+  .landing-footer__meta {
+    grid-column: 1 / -1;
   }
 }
 

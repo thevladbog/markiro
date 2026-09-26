@@ -20,9 +20,11 @@ interface Props {
   metadata: PageMetadata;
   graph: PageGraph;
   noindex?: boolean;
+  /** The home page is light; every other page keeps the dark theme until its own redesign. */
+  theme?: "dark" | "light";
 }
 
-const { metadata: page, graph, noindex = false } = Astro.props;
+const { metadata: page, graph, noindex = false, theme = "dark" } = Astro.props;
 const canonicalUrl = new URL(page.path, Astro.site);
 const socialImageUrl = new URL(page.socialImage, Astro.site);
 const socialImageSize = socialImageDimensions(page.socialImage);
@@ -43,7 +45,7 @@ const jsonLd = serializeJsonLd(
 ---
 
 <!doctype html>
-<html lang={page.locale} data-theme="dark">
+<html lang={page.locale} data-theme={theme}>
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -52,7 +54,7 @@ const jsonLd = serializeJsonLd(
     ))}
     <meta name="description" content={page.description} />
     <meta name="robots" content={noindex ? "noindex,follow" : "index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1"} />
-    <meta name="theme-color" content="#131216" />
+    <meta name="theme-color" content={theme === "light" ? "#fafaf8" : "#131216"} />
     <meta property="og:type" content={page.ogType ?? "website"} />
     {page.publishedAt && <meta property="article:published_time" content={page.publishedAt} />}
     {page.modifiedAt && <meta property="article:modified_time" content={page.modifiedAt} />}

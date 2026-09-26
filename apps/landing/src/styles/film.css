@@ -29,18 +29,6 @@
   background: color-mix(in srgb, var(--surface-page) 86%, transparent);
 }
 
-/* The shared header marks the current language in the accent green, too light on paper. */
-.film-top[data-theme="light"] .language-switch a[aria-current="page"] {
-  color: var(--fg-1);
-}
-
-/* The shared hover green is too dark under the button's dark text in the light theme. */
-.film-top[data-theme="light"] .button:hover,
-.film-chapter[data-theme="light"] .button:hover {
-  border-color: var(--accent-module);
-  background: var(--accent-module);
-}
-
 .film {
   position: relative;
   isolation: isolate;

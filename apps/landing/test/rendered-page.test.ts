@@ -1017,6 +1017,103 @@ describe("rendered landing page", () => {
     expect(enLink?.textContent?.trim()).toBe("Station for Windows");
   });
 
+  it("links the shared header navigation on every page", () => {
+    const ru = [
+      ["/#product", "Продукт"],
+      ["/kak-rabotaet/", "Как работает"],
+      ["/instruktsii/", "Инструкции"],
+      ["/stati/", "Статьи"],
+      ["/faq/", "Вопросы"],
+    ];
+    const en = [
+      ["/en/#product", "Product"],
+      ["/en/how-it-works/", "How it works"],
+      ["/en/instructions/", "Instructions"],
+      ["/en/articles/", "Articles"],
+      ["/en/faq/", "Questions"],
+    ];
+    for (const [route, expected] of [
+      ["/", ru],
+      ["/sscc-i-agregatsiya/", ru],
+      ["/en/", en],
+      ["/en/sscc-and-aggregation/", en],
+    ] as const) {
+      const links = [
+        ...(documents
+          .get(route)
+          ?.querySelectorAll("header .landing-nav > a:not(.landing-nav__phone)") ?? []),
+      ].map((link) => [link.getAttribute("href"), link.textContent?.trim()]);
+      expect(links, route).toEqual(expected);
+    }
+  });
+
+  it("groups the footer into product, materials and company columns", () => {
+    const columns = (route: string) =>
+      [...(documents.get(route)?.querySelectorAll("footer [data-footer-column]") ?? [])].map(
+        (column) => ({
+          heading: column.querySelector("[data-footer-heading]")?.textContent?.trim(),
+          links: [...column.querySelectorAll("a")].map((link) => link.getAttribute("href")),
+        }),
+      );
+
+    expect(columns("/")).toEqual([
+      {
+        heading: "Продукт",
+        links: [
+          "/markirovka-chestny-znak/",
+          "/sscc-i-agregatsiya/",
+          "/rabochee-mesto-upakovki/",
+          "/oflayn-rabota/",
+          "/kiosk-samovydachi/",
+          "/integratsiya-1c/",
+        ],
+      },
+      { heading: "Материалы", links: ["/kak-rabotaet/", "/stati/", "/instruktsii/", "/faq/"] },
+      { heading: "Компания", links: ["/legal/", "/privacy/", "/personal-data-consent/"] },
+    ]);
+    expect(columns("/en/")).toEqual([
+      {
+        heading: "Product",
+        links: [
+          "/en/chestny-znak-serialization/",
+          "/en/sscc-and-aggregation/",
+          "/en/packing-workstation/",
+          "/en/offline-production/",
+          "/en/self-service-pickup-kiosk/",
+          "/en/1c-integration/",
+        ],
+      },
+      {
+        heading: "Materials",
+        links: ["/en/how-it-works/", "/en/articles/", "/en/instructions/", "/en/faq/"],
+      },
+      { heading: "Company", links: ["/en/legal/", "/en/privacy/", "/en/personal-data-consent/"] },
+    ]);
+    expect(
+      documents.get("/")?.querySelector("footer [data-footer-column] [data-consent-settings]"),
+    ).not.toBeNull();
+  });
+
+  it("keeps topic pages on the dark theme", () => {
+    const html = documents.get("/sscc-i-agregatsiya/")?.documentElement;
+    expect(html?.getAttribute("data-theme")).toBe("dark");
+    expect(
+      documents
+        .get("/sscc-i-agregatsiya/")
+        ?.querySelector('meta[name="theme-color"]')
+        ?.getAttribute("content"),
+    ).toBe("#131216");
+  });
+
+  it("keeps the cookie panel dark on every page", () => {
+    for (const route of ["/", "/en/", "/sscc-i-agregatsiya/"]) {
+      expect(
+        documents.get(route)?.querySelector("[data-consent-panel]")?.getAttribute("data-theme"),
+        route,
+      ).toBe("dark");
+    }
+  });
+
   it("activates the shared dark design tokens", () => {
     expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
   });
