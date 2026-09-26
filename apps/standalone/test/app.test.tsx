@@ -159,6 +159,35 @@ describe("App", () => {
     });
   });
 
+  it("routes a password change through the token-scoped call, ending the session", async () => {
+    const host = fakeHost();
+    host.officeChangePassword.mockRejectedValueOnce(
+      new HostError({
+        kind: "api",
+        code: "unauthorized",
+        status: 401,
+        message: "office session ended",
+        details: { credential: "session" },
+      }),
+    );
+    renderApp({ probe: probeAnswering(true), device: fakeDevice(DEVICE_STATUS), host });
+    fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
+    await signIn();
+    fireEvent.click(await screen.findByRole("button", { name: "Сменить пароль" }));
+    fireEvent.change(await screen.findByLabelText("Текущий пароль"), {
+      target: { value: "correct horse battery" },
+    });
+    fireEvent.change(screen.getByLabelText("Новый пароль"), {
+      target: { value: "another long password" },
+    });
+    fireEvent.change(screen.getByLabelText("Повторите новый пароль"), {
+      target: { value: "another long password" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Сменить" }));
+    expect(await screen.findByText("Вход в офис")).toBeTruthy();
+    expect(screen.getByText("Сессия офиса закончилась. Войдите снова.")).toBeTruthy();
+  });
+
   it("keeps the session when going back to the floor", async () => {
     const host = fakeHost();
     renderApp({ probe: probeAnswering(true), device: fakeDevice(DEVICE_STATUS), host });

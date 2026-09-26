@@ -10,7 +10,7 @@ use markiro_proto::{
 use serde_json::json;
 use sqlx::SqliteConnection;
 
-use crate::audit::{self, Entry, Outcome};
+use crate::audit::{self, Actor, Entry, Outcome};
 use crate::auth::OfficeContext;
 use crate::db::{begin_write, next_revision};
 use crate::error::{ApiError, ApiJson, ApiPath};
@@ -53,6 +53,51 @@ async fn hash(password: Secret) -> Result<String, ApiError> {
     tokio::task::spawn_blocking(move || hash_password(password.expose()))
         .await
         .map_err(ApiError::internal)
+}
+
+/// The write tail shared by an admin resetting another user's password
+/// (`set_password`) and a user changing their own (`office_auth::change_password`):
+/// bump the revision, store the new hash, end every other session of that
+/// user (ending sessions on a password change is a security rule, kept in
+/// one place), and write the `ok` audit row. The caller has already verified
+/// the request (rights, the current password where relevant, the new
+/// password's shape) and commits the transaction afterwards.
+pub(crate) async fn replace_password(
+    conn: &mut SqliteConnection,
+    at: &str,
+    actor: Actor<'_>,
+    user_id: &str,
+    keep_session_id: &str,
+    password_phc: &str,
+) -> Result<(), ApiError> {
+    let rev = next_revision(conn).await.map_err(ApiError::internal)?;
+    sqlx::query("UPDATE office_users SET password_phc = ?, rev = ? WHERE id = ?")
+        .bind(password_phc)
+        .bind(rev)
+        .bind(user_id)
+        .execute(&mut *conn)
+        .await
+        .map_err(ApiError::internal)?;
+    sqlx::query("DELETE FROM office_sessions WHERE user_id = ? AND id <> ?")
+        .bind(user_id)
+        .bind(keep_session_id)
+        .execute(&mut *conn)
+        .await
+        .map_err(ApiError::internal)?;
+    audit::record(
+        conn,
+        at,
+        Entry {
+            actor,
+            action: "office_user.password",
+            target_type: Some("office_user"),
+            target_id: Some(user_id),
+            outcome: Outcome::Ok,
+            details: json!({}),
+        },
+    )
+    .await
+    .map_err(ApiError::internal)
 }
 
 pub async fn list_users(
@@ -234,35 +279,16 @@ pub async fn set_password(
     if read_user(&mut tx, &id).await?.is_none() {
         return Err(ApiError::not_found("no such office user"));
     }
-    let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
-    sqlx::query("UPDATE office_users SET password_phc = ?, rev = ? WHERE id = ?")
-        .bind(&password_phc)
-        .bind(rev)
-        .bind(&id)
-        .execute(&mut *tx)
-        .await
-        .map_err(ApiError::internal)?;
     // Every other session of that user ends; the caller's own session stays.
-    sqlx::query("DELETE FROM office_sessions WHERE user_id = ? AND id <> ?")
-        .bind(&id)
-        .bind(&context.session_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(ApiError::internal)?;
-    audit::record(
+    replace_password(
         &mut tx,
         &at,
-        Entry {
-            actor: context.actor(),
-            action: "office_user.password",
-            target_type: Some("office_user"),
-            target_id: Some(&id),
-            outcome: Outcome::Ok,
-            details: json!({}),
-        },
+        context.actor(),
+        &id,
+        &context.session_id,
+        &password_phc,
     )
-    .await
-    .map_err(ApiError::internal)?;
+    .await?;
     tx.commit().await.map_err(ApiError::internal)?;
     Ok(StatusCode::NO_CONTENT)
 }

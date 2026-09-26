@@ -1,5 +1,5 @@
 //! Office sign-in: `POST /v1/office/login`, `POST /v1/office/logout`,
-//! `GET /v1/office/me`.
+//! `GET /v1/office/me`, `PUT /v1/office/me/password`.
 
 use std::net::SocketAddr;
 
@@ -14,8 +14,9 @@ use serde_json::json;
 use crate::audit::{self, Actor, Entry, Outcome};
 use crate::auth::{end_session, open_session, AuthDevice, OfficeContext};
 use crate::clock::format_timestamp;
-use crate::db::{begin_write, next_revision};
+use crate::db::begin_write;
 use crate::error::{ApiError, ApiJson};
+use crate::routes::office_users::replace_password;
 use crate::secrets::{dummy_password_phc, hash_password, verify_password};
 use crate::server::AppState;
 use crate::validate;
@@ -249,34 +250,16 @@ pub async fn change_password(
             "the current password is wrong",
         ));
     };
-    let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
-    sqlx::query("UPDATE office_users SET password_phc = ?, rev = ? WHERE id = ?")
-        .bind(&new_phc)
-        .bind(rev)
-        .bind(&context.user.id)
-        .execute(&mut *tx)
-        .await
-        .map_err(ApiError::internal)?;
-    sqlx::query("DELETE FROM office_sessions WHERE user_id = ? AND id <> ?")
-        .bind(&context.user.id)
-        .bind(&context.session_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(ApiError::internal)?;
-    audit::record(
+    // Other sessions of this user end; the one making this request stays.
+    replace_password(
         &mut tx,
         &at,
-        Entry {
-            actor: context.actor(),
-            action: "office_user.password",
-            target_type: Some("office_user"),
-            target_id: Some(&context.user.id),
-            outcome: Outcome::Ok,
-            details: json!({}),
-        },
+        context.actor(),
+        &context.user.id,
+        &context.session_id,
+        &new_phc,
     )
-    .await
-    .map_err(ApiError::internal)?;
+    .await?;
     tx.commit().await.map_err(ApiError::internal)?;
     Ok(StatusCode::NO_CONTENT)
 }

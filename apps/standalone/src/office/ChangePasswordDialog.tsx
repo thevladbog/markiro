@@ -55,6 +55,9 @@ export function ChangePasswordDialog({ open, onClose, onChanged }: ChangePasswor
     errorProp(message === undefined ? undefined : t(message));
 
   const close = () => {
+    // Escape, the overlay click and the × all route here too: a request in
+    // flight must not be abandoned or have its error state wiped from under it.
+    if (isSubmitting) return;
     reset();
     setSubmitError(null);
     onClose();
@@ -91,7 +94,7 @@ export function ChangePasswordDialog({ open, onClose, onChanged }: ChangePasswor
       open={open}
       title={t("office.password.title")}
       onClose={close}
-      closeLabel={t("office.password.cancel")}
+      closeLabel={t("office.password.close")}
       footer={
         <>
           <Button variant="secondary" onClick={close} disabled={isSubmitting}>

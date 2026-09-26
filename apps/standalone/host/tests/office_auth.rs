@@ -650,6 +650,56 @@ async fn changing_a_password_needs_an_office_session() {
 }
 
 #[tokio::test]
+async fn password_change_attempts_are_rate_limited_and_shared_with_login() {
+    let app = TestApp::new().await;
+    let (_, key) = pair_device(&app, "office").await;
+    seed_office_user(&app, "tech", "technologist", "correct horse battery").await;
+    let token = login(&app, &key, "tech", "correct horse battery").await;
+    let attempt = |peer: ([u8; 4], u16)| {
+        let app = &app;
+        let key = key.clone();
+        let token = token.clone();
+        async move {
+            app.send_from(
+                peer,
+                json_request(
+                    with_session(request("PUT", "/v1/office/me/password"), &key, &token),
+                    change("not the password", "another long password"),
+                ),
+            )
+            .await
+        }
+    };
+    for _ in 0..10 {
+        assert_eq!(attempt(LAN).await.0, StatusCode::UNAUTHORIZED);
+    }
+    let (status, body) = attempt(LAN).await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(body["error"]["code"], "rate_limited");
+
+    // The limiter is shared with login: the same address is also blocked there.
+    let (status, body) = app
+        .send_from(
+            LAN,
+            json_request(
+                with_device(request("POST", "/v1/office/login"), &key),
+                json!({ "login": "tech", "password": "correct horse battery" }),
+            ),
+        )
+        .await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(body["error"]["code"], "rate_limited");
+
+    // The limit is per address: loopback is unaffected.
+    let (status, body) = attempt(LOOPBACK).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["error"]["details"]["credential"], "password");
+
+    app.clock.advance(time::Duration::seconds(61));
+    assert_eq!(attempt(LAN).await.0, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
 async fn me_is_denied_and_the_session_is_deleted_when_the_user_is_deactivated() {
     let app = TestApp::new().await;
     let (_, key) = pair_device(&app, "office").await;

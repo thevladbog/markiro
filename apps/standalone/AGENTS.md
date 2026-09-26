@@ -66,7 +66,10 @@ migration is never edited — add a new one; sqlx verifies checksums at start.
   the transaction, in addition to the early `require_admin` rejection. The
   extractor's role and active flag are read before the request hashes a
   password; re-checking inside the transaction stops a write a demotion or
-  deactivation ended in that window.
+  deactivation ended in that window. Self-service writes any office user may
+  make on their own record (their own password) re-check the same way with
+  `OfficeContext::require_session_in` instead; admin writes keep using
+  `require_admin_in`.
 
 ## Protocol
 
