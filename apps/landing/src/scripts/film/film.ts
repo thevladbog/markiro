@@ -17,6 +17,9 @@ export interface FilmRuntime {
   loadWorld(canvas: HTMLCanvasElement, tier: QualityTier): Promise<WorldHandle>;
 }
 
+/** Samples longer than this are a hidden tab or a stall; they count as one very slow frame. */
+const MAX_FRAME_SAMPLE_MS = 1000;
+
 export function initFilm(root: Document, runtime: FilmRuntime): () => void {
   const film = root.querySelector<HTMLElement>("[data-film]");
   const canvas = root.querySelector<HTMLCanvasElement>("[data-film-canvas]");
@@ -31,6 +34,10 @@ export function initFilm(root: Document, runtime: FilmRuntime): () => void {
   let world: WorldHandle | null = null;
   let pending = false;
   let lastFilmTime = Number.NaN;
+  let lastChapter = -1;
+  let measuredMs = 0;
+  let warmUpPending = true;
+  let disposed = false;
 
   const stopWorld = (): void => {
     world?.dispose();
@@ -43,16 +50,26 @@ export function initFilm(root: Document, runtime: FilmRuntime): () => void {
     lastFilmTime = Number.NaN;
   };
 
-  // The next frame starts only after the rendered one is presented, so the gap
-  // between the two callbacks is the real cost of the frame, GPU included.
+  // Each render asks for one more animation frame; the gap between the two callbacks is how
+  // long the rendered frame held the page. The budget window advances by measured frame time
+  // only, so reading pauses between scrolls do not count, and the first frame after loading
+  // (shader compilation) is skipped.
   const measure =
     (renderedAt: number) =>
     (now: number): void => {
-      if (world !== null && budget.push(now - renderedAt, now) === "too-slow") stopWorld();
+      if (world === null) return;
+      if (warmUpPending) {
+        warmUpPending = false;
+        return;
+      }
+      const frameMs = Math.min(now - renderedAt, MAX_FRAME_SAMPLE_MS);
+      measuredMs += frameMs;
+      if (budget.push(frameMs, measuredMs) === "too-slow") stopWorld();
     };
 
   const update = (now: number): void => {
     pending = false;
+    if (disposed) return;
     const boxes: SectionBox[] = sections.map((section) => {
       const rect = section.getBoundingClientRect();
       return { top: rect.top, height: rect.height };
@@ -63,12 +80,15 @@ export function initFilm(root: Document, runtime: FilmRuntime): () => void {
     for (const element of themed) {
       if (element.dataset.theme !== theme) element.dataset.theme = theme;
     }
-    film.dataset.chapter = String(index + 1);
-    rail?.classList.toggle("is-visible", index > 0);
-    railLinks.forEach((link, linkIndex) => {
-      if (linkIndex === index) link.setAttribute("aria-current", "step");
-      else link.removeAttribute("aria-current");
-    });
+    if (index !== lastChapter) {
+      lastChapter = index;
+      film.dataset.chapter = String(index + 1);
+      rail?.classList.toggle("is-visible", index > 0);
+      railLinks.forEach((link, linkIndex) => {
+        if (linkIndex === index) link.setAttribute("aria-current", "step");
+        else link.removeAttribute("aria-current");
+      });
+    }
     if (world === null || filmTime === lastFilmTime) return;
     world.render(filmTime);
     lastFilmTime = filmTime;
@@ -96,6 +116,10 @@ export function initFilm(root: Document, runtime: FilmRuntime): () => void {
         void runtime
           .loadWorld(canvas, runtime.tier)
           .then((handle) => {
+            if (disposed) {
+              handle.dispose();
+              return;
+            }
             world = handle;
             resizeWorld();
             film.classList.add("film--live");
@@ -112,6 +136,7 @@ export function initFilm(root: Document, runtime: FilmRuntime): () => void {
 
   schedule();
   return () => {
+    disposed = true;
     for (const cleanup of cleanups) cleanup();
     stopWorld();
   };

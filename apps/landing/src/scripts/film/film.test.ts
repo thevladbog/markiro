@@ -87,8 +87,12 @@ function fakeRuntime(overrides: Partial<FilmRuntime> = {}) {
         frames.shift()?.(clock);
       }
     },
+    wait: (ms: number) => {
+      clock += ms;
+    },
     scroll: () => listeners.get("scroll")?.(),
     interact: () => interaction?.(),
+    hasListeners: () => listeners.size > 0 || interaction !== null,
   };
 }
 
@@ -214,5 +218,73 @@ describe("film entry script", () => {
     await settle();
     cleanup();
     expect(fake.world.dispose).toHaveBeenCalled();
+    expect(fake.hasListeners()).toBe(false);
+  });
+
+  it("never loads the world without WebGL", async () => {
+    const { film } = mountFilm();
+    const fake = fakeRuntime({ webgl: false });
+    initFilm(document, fake.runtime);
+    fake.interact();
+    await settle();
+    expect(fake.loadWorld).not.toHaveBeenCalled();
+    expect(film.classList.contains("film--live")).toBe(false);
+  });
+
+  it("disposes a world that finishes loading after cleanup", async () => {
+    const { film } = mountFilm();
+    let finish: (handle: WorldHandle) => void = () => undefined;
+    const fake = fakeRuntime({
+      loadWorld: () =>
+        new Promise<WorldHandle>((resolve) => {
+          finish = resolve;
+        }),
+    });
+    const cleanup = initFilm(document, fake.runtime);
+    fake.interact();
+    cleanup();
+    finish(fake.world);
+    await settle();
+    expect(fake.world.dispose).toHaveBeenCalled();
+    expect(film.classList.contains("film--live")).toBe(false);
+  });
+
+  it("ignores the warm-up frame and reading pauses", async () => {
+    const { film, scrollTo } = mountFilm();
+    const fake = fakeRuntime();
+    initFilm(document, fake.runtime);
+    fake.interact();
+    await settle();
+    fake.flush(300);
+    fake.wait(3000);
+    for (let step = 1; step <= 150; step += 1) {
+      scrollTo(step * 10);
+      fake.scroll();
+      fake.flush(16);
+    }
+    expect(fake.world.dispose).not.toHaveBeenCalled();
+    expect(film.classList.contains("film--live")).toBe(true);
+  });
+
+  it("counts a hidden-tab gap as one slow frame", async () => {
+    const { film, scrollTo } = mountFilm();
+    const fake = fakeRuntime();
+    initFilm(document, fake.runtime);
+    fake.interact();
+    await settle();
+    fake.flush();
+    scrollTo(10);
+    fake.scroll();
+    fake.flush(16);
+    scrollTo(20);
+    fake.scroll();
+    fake.flush(10_000);
+    for (let step = 1; step <= 80; step += 1) {
+      scrollTo(20 + step * 10);
+      fake.scroll();
+      fake.flush(16);
+    }
+    expect(fake.world.dispose).not.toHaveBeenCalled();
+    expect(film.classList.contains("film--live")).toBe(true);
   });
 });
