@@ -29,7 +29,7 @@ export const STATION_EXCEPTIONS_CONTENT = {
           {
             kind: "step",
             title: "Откройте экран «Исключения»",
-            text: "Нажмите кнопку «Исключения» на рабочем экране. Станция покажет действия над закрытыми коробами этой смены: «Перепечатать этикетку» и «Расформировать короб». Кнопка «Вернуться к работе» в любой момент возвращает к сканированию.",
+            text: "Нажмите кнопку «Исключения» на рабочем экране. Станция покажет действия с коробами: для открытого короба — «Отменить последний скан» и «Очистить короб», для закрытых коробов этой смены — «Перепечатать этикетку» и «Расформировать короб»; недоступное сейчас действие неактивно. Кнопка «Назад» возвращает на шаг назад, а с первого экрана — к сканированию; после выполненного действия станция предложит «Вернуться к работе».",
             image: { id: "exception-action", caption: "Экран «Исключения»: выбор действия" },
           },
         ],
@@ -83,7 +83,7 @@ export const STATION_EXCEPTIONS_CONTENT = {
           {
             kind: "step",
             title: "Подтвердите необратимое действие",
-            text: "Станция предупредит: «Действие необратимо» — номер короба будет аннулирован навсегда. Проверьте, что выбран нужный короб, и нажмите «Расформировать безвозвратно».",
+            text: "Станция спросит: «Расформировать короб безвозвратно?» — номер SSCC короба будет аннулирован, и его нельзя будет использовать повторно. Проверьте, что выбран нужный короб, и нажмите «Расформировать безвозвратно».",
             image: { id: "exception-confirm", caption: "Двойное подтверждение расформирования" },
             expected: "Станция показала «Действие выполнено», короб пропал из списка закрытых.",
           },
@@ -136,12 +136,12 @@ export const STATION_EXCEPTIONS_CONTENT = {
         blocks: [
           {
             kind: "paragraph",
-            text: "Если один и тот же код прошёл через две станции, код закрепляется за терминалом, отсканировавшим его раньше. На проигравшей станции такой код попадает в список расхождений, а счётчик «Дубли» в строке состояния растёт. Это не авария и не ошибка оператора.",
+            text: "Если один и тот же код прошёл через две станции, код закрепляется за терминалом, отсканировавшим его раньше. На проигравшей станции такой код попадает в список расхождений, а счётчик «Конфликты» в строке состояния растёт. Это не авария и не ошибка оператора. Не путайте его со счётчиком «Дубли» в журнале смены: тот считает повторные сканы, которые отклонила сама станция.",
           },
           {
             kind: "step",
             title: "Посмотрите список расхождений",
-            text: "Откройте «Дубли кодов» с рабочего экрана. Для каждой позиции указано, за каким терминалом закреплён код и когда: «Закреплён за … в …».",
+            text: "Список открывает кнопка «Конфликты кодов» на экране выбора смены — туда станция возвращается после «Пауза» или закрытия смены. Для каждой позиции указано, за каким терминалом закреплён код и когда: «Закреплён за … в …».",
             image: { id: "conflicts", caption: "Список кодов, занятых другим терминалом" },
           },
           {
@@ -192,7 +192,7 @@ export const STATION_EXCEPTIONS_CONTENT = {
                   "«Короб не найден среди закрытых коробов этой смены» — этикетка от короба другой смены или станции. Выберите короб из списка или обратитесь к мастеру.",
               },
               {
-                term: "Счётчик «Дубли» вырос",
+                term: "Счётчик «Конфликты» вырос",
                 detail:
                   "Это список кодов, занятых другим терминалом (раздел 6). Работу не останавливайте, повторно не сканируйте.",
               },
@@ -239,7 +239,7 @@ export const STATION_EXCEPTIONS_CONTENT = {
           {
             kind: "step",
             title: "Open the “Exceptions” screen",
-            text: "Tap the “Exceptions” button on the work screen. The station shows the actions available for this shift's closed boxes: “Reprint label” and “Disassemble box”. The “Back to work” button returns to scanning at any moment.",
+            text: "Tap the “Exceptions” button on the work screen. The station shows the box actions: for the open box, “Undo last scan” and “Clear box”; for this shift's closed boxes, “Reprint label” and “Disassemble box”; an action that is not available right now is disabled. The “Back” button steps back, and from the first screen it returns to scanning; once an action is completed, the station offers “Back to work”.",
             image: {
               id: "exception-action",
               caption: "The “Exceptions” screen: choosing an action",
@@ -296,7 +296,7 @@ export const STATION_EXCEPTIONS_CONTENT = {
           {
             kind: "step",
             title: "Confirm the irreversible action",
-            text: "The station warns: “This cannot be undone” — the box number will be voided forever. Check that the right box is selected and tap “Disassemble permanently”.",
+            text: "The station asks: “Disassemble this box permanently?” — the box's SSCC number will be retired and cannot be reused. Check that the right box is selected and tap “Disassemble permanently”.",
             image: { id: "exception-confirm", caption: "Double confirmation of the disassembly" },
             expected:
               "The station showed “Action completed” and the box disappeared from the closed list.",
@@ -350,12 +350,12 @@ export const STATION_EXCEPTIONS_CONTENT = {
         blocks: [
           {
             kind: "paragraph",
-            text: "If the same code passed through two stations, the code is kept by the terminal that scanned it first. On the losing station the code goes into the discrepancy list, and the “Conflicts” counter in the status bar grows. This is not an emergency and not an operator error.",
+            text: "If the same code passed through two stations, the code is kept by the terminal that scanned it first. On the losing station the code goes into the discrepancy list, and the “Conflicts” counter in the status bar grows. This is not an emergency and not an operator error. Do not confuse it with the “Duplicates” counter in the shift journal: that one counts repeat scans the station itself rejected.",
           },
           {
             kind: "step",
             title: "Review the discrepancy list",
-            text: "Open “Conflicts” from the work screen. Each entry shows which terminal keeps the code and when: “Kept by … at …”.",
+            text: "The list opens with the “Conflicts” button on the shift selection screen — the station returns there after “Pause” or after the shift is closed. Each entry shows which terminal keeps the code and when: “Kept by … at …”.",
             image: { id: "conflicts", caption: "The list of codes kept by another terminal" },
           },
           {

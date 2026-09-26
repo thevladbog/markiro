@@ -298,22 +298,15 @@ function artifactEntry(
   // (see registry.test.ts for the reasons); MKR-INS-09 first shipped in the
   // September series; the pallet reissue moved MKR-INS-08 to 2026.09/02 and
   // MKR-INS-09 to 2026.09/04; the readiness/attributes reissue moved
-  // MKR-INS-10 to 2026.09/02; every other code is still on its first
+  // MKR-INS-10 to 2026.09/02; the small-screen work screen reissue moved
+  // MKR-INS-01/02/03 to 2026.09/02; every other code is still on its first
   // revision.
-  const SEPTEMBER_CODES = [
-    "MKR-INS-01",
-    "MKR-INS-02",
-    "MKR-INS-03",
-    "MKR-INS-05",
-    "MKR-INS-06",
-    "MKR-INS-08",
-    "MKR-INS-10",
-    "MKR-INS-11",
-  ];
+  const SEPTEMBER_CODES = ["MKR-INS-05", "MKR-INS-06", "MKR-INS-08", "MKR-INS-10", "MKR-INS-11"];
+  const WORK_SCREEN_CODES = ["MKR-INS-01", "MKR-INS-02", "MKR-INS-03"];
   const revision =
     code === "MKR-INS-09"
       ? "2026.09/04"
-      : code === "MKR-INS-08" || code === "MKR-INS-10"
+      : code === "MKR-INS-08" || code === "MKR-INS-10" || WORK_SCREEN_CODES.includes(code)
         ? "2026.09/02"
         : SEPTEMBER_CODES.includes(code)
           ? "2026.09/01"
@@ -329,8 +322,9 @@ function artifactEntry(
     entry: {
       code,
       revision,
-      effectiveDate:
-        code === "MKR-INS-08" || code === "MKR-INS-09" || code === "MKR-INS-10"
+      effectiveDate: WORK_SCREEN_CODES.includes(code)
+        ? "2026-09-26"
+        : code === "MKR-INS-08" || code === "MKR-INS-09" || code === "MKR-INS-10"
           ? "2026-09-19"
           : code === "MKR-INS-11"
             ? "2026-09-11"
@@ -1314,12 +1308,12 @@ describe("legal artifact release generation", () => {
       "MKR-BRD-01|ru|template-docx|https://markiro.app/d/MKR-BRD-01/2026.08/01/15.08.2026",
       "MKR-BRD-01|en|legal-pdf|https://markiro.app/d/MKR-BRD-01/2026.08/01/15.08.2026",
       "MKR-BRD-01|en|template-docx|https://markiro.app/d/MKR-BRD-01/2026.08/01/15.08.2026",
-      "MKR-INS-01|ru|legal-pdf|https://markiro.app/d/MKR-INS-01/2026.09/01/02.09.2026",
-      "MKR-INS-01|en|legal-pdf|https://markiro.app/d/MKR-INS-01/2026.09/01/02.09.2026",
-      "MKR-INS-02|ru|legal-pdf|https://markiro.app/d/MKR-INS-02/2026.09/01/02.09.2026",
-      "MKR-INS-02|en|legal-pdf|https://markiro.app/d/MKR-INS-02/2026.09/01/02.09.2026",
-      "MKR-INS-03|ru|legal-pdf|https://markiro.app/d/MKR-INS-03/2026.09/01/02.09.2026",
-      "MKR-INS-03|en|legal-pdf|https://markiro.app/d/MKR-INS-03/2026.09/01/02.09.2026",
+      "MKR-INS-01|ru|legal-pdf|https://markiro.app/d/MKR-INS-01/2026.09/02/26.09.2026",
+      "MKR-INS-01|en|legal-pdf|https://markiro.app/d/MKR-INS-01/2026.09/02/26.09.2026",
+      "MKR-INS-02|ru|legal-pdf|https://markiro.app/d/MKR-INS-02/2026.09/02/26.09.2026",
+      "MKR-INS-02|en|legal-pdf|https://markiro.app/d/MKR-INS-02/2026.09/02/26.09.2026",
+      "MKR-INS-03|ru|legal-pdf|https://markiro.app/d/MKR-INS-03/2026.09/02/26.09.2026",
+      "MKR-INS-03|en|legal-pdf|https://markiro.app/d/MKR-INS-03/2026.09/02/26.09.2026",
       "MKR-INS-04|ru|legal-pdf|https://markiro.app/d/MKR-INS-04/2026.08/02/01.09.2026",
       "MKR-INS-04|en|legal-pdf|https://markiro.app/d/MKR-INS-04/2026.08/02/01.09.2026",
       "MKR-INS-05|ru|legal-pdf|https://markiro.app/d/MKR-INS-05/2026.09/01/02.09.2026",
@@ -1341,7 +1335,15 @@ describe("legal artifact release generation", () => {
       new Set(["2026.08/01", "2026.08/02", "2026.08/03", "2026.09/01", "2026.09/02", "2026.09/04"]),
     );
     expect(new Set(entries.map(({ effectiveDate }) => effectiveDate))).toEqual(
-      new Set(["2026-08-15", "2026-09-01", "2026-09-02", "2026-09-10", "2026-09-11", "2026-09-19"]),
+      new Set([
+        "2026-08-15",
+        "2026-09-01",
+        "2026-09-02",
+        "2026-09-10",
+        "2026-09-11",
+        "2026-09-19",
+        "2026-09-26",
+      ]),
     );
     expect(entries.filter(({ kind }) => kind === "pdfa-2b")).toHaveLength(30);
     expect(await readdir(path.dirname(outDir))).toEqual(["legal"]);
@@ -1484,7 +1486,7 @@ describe("instruction artifact bounds", () => {
         kind: "legal-pdf",
         verificationUrl: legalVerificationUrl(release),
       }),
-    ).toBe("markiro_mkr-ins-01_2026.09-01_ru.pdf");
+    ).toBe("markiro_mkr-ins-01_2026.09-02_ru.pdf");
     expect(
       artifactFileName({
         code: "MKR-INS-01",
@@ -1494,7 +1496,7 @@ describe("instruction artifact bounds", () => {
         kind: "legal-pdf",
         verificationUrl: legalVerificationUrl(release),
       }),
-    ).toBe("markiro_mkr-ins-01_2026.09-01_en.pdf");
+    ).toBe("markiro_mkr-ins-01_2026.09-02_en.pdf");
     // The catalog pair completed the English series, so an instruction no
     // longer has an unpublished locale to refuse -- both now name an English
     // PDF the same way the station set does.
