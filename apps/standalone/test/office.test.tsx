@@ -18,8 +18,7 @@ function sessionFor(user: OfficeUser = SESSION.user) {
   return {
     user,
     call: <T,>(operation: (token: string) => Promise<T>) => operation(SESSION.token),
-    leave: vi.fn(),
-    logout: vi.fn(async () => {}),
+    logout: vi.fn(),
     changePassword: vi.fn(async () => {}),
   } satisfies OfficeSessionValue;
 }
@@ -80,6 +79,11 @@ describe("OfficeLogin", () => {
     fireEvent.click(screen.getByRole("button", { name: "В цех" }));
     expect(onBack).toHaveBeenCalledTimes(1);
   });
+
+  it("says the host was already set up when the wizard found it initialized", () => {
+    render(<OfficeLogin notice="already_initialized" onLogin={vi.fn()} onBack={vi.fn()} />);
+    expect(screen.getByText("Хост уже настроен. Войдите в офис.")).toBeTruthy();
+  });
 });
 
 describe("Office", () => {
@@ -110,13 +114,14 @@ describe("Office", () => {
     expect(await screen.findByText("технолог")).toBeTruthy();
   });
 
-  it("goes back to the floor and signs out from the header", async () => {
+  it("leaves for the floor from the header, ending the session", async () => {
     const session = sessionFor();
     renderOffice(session);
-    fireEvent.click(await screen.findByRole("button", { name: "В цех" }));
-    expect(session.leave).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole("button", { name: "Выйти" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Выйти в цех" }));
     expect(session.logout).toHaveBeenCalledTimes(1);
+    // One way out: no button that would hide the office and keep the session.
+    expect(screen.queryByRole("button", { name: "В цех" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Выйти" })).toBeNull();
   });
 
   it("switches the theme", async () => {

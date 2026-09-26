@@ -52,7 +52,7 @@ export function OfficeShell() {
           <div className="office-header__actions">
             <IconButton
               variant="secondary"
-              icon={dark ? "☀" : "☾"}
+              icon={<span aria-hidden="true">{dark ? "☀" : "☾"}</span>}
               aria-label={t(dark ? "office.header.lightTheme" : "office.header.darkTheme")}
               onClick={() => setTheme(dark ? "light" : "dark")}
             />
@@ -65,10 +65,7 @@ export function OfficeShell() {
             >
               {t("office.password.open")}
             </Button>
-            <Button variant="secondary" onClick={session.leave}>
-              {t("office.header.toFloor")}
-            </Button>
-            <Button variant="secondary" onClick={() => void session.logout()}>
+            <Button variant="secondary" onClick={session.logout}>
               {t("office.header.logout")}
             </Button>
           </div>

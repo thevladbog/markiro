@@ -122,9 +122,10 @@ together with `src/host/client.ts`, `src/host/device.ts` and
   gets `DeviceStatus`, and `host_request` attaches the key in Rust. A file
   written on another system or for another Windows user is
   `config_unreadable`; the app offers to reset and pair again.
-- The office session token lives only in webview memory. «В цех» hides the
-  office and keeps the session until the host expires it; «Выйти» ends it on
-  the host.
+- The office session token lives only in webview memory. «Выйти в цех» ends
+  the session at once: the app returns to the floor, drops the token and
+  tells the host in the background. There is no hidden session (owner
+  decision 2026-09-26), so coming back to the office always asks to sign in.
 - Every office user, the technologist included, changes their own password
   with the current one (`PUT /v1/office/me/password`); the user's other
   sessions end and the current one stays.

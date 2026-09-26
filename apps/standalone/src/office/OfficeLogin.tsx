@@ -6,6 +6,7 @@ import { z } from "zod";
 
 import { Alert, Button, Card, Input } from "@markiro/ui";
 
+import type { OfficeLoginNotice } from "../app/shell.js";
 import { errorMessageKey } from "../host/errors.js";
 import type { OfficeLoginRequest } from "../host/protocol.js";
 import { errorProp } from "../lib/form-error.js";
@@ -18,7 +19,7 @@ const loginSchema = z.object({
 type LoginValues = z.infer<typeof loginSchema>;
 
 export interface OfficeLoginProps {
-  notice: "session_ended" | null;
+  notice: OfficeLoginNotice | null;
   /**
    * Rejects with a `HostError` the form explains. A function-typed property
    * (not a TS method) so it can be passed around unbound without tripping
@@ -27,6 +28,11 @@ export interface OfficeLoginProps {
   onLogin: (request: OfficeLoginRequest) => Promise<void>;
   onBack: () => void;
 }
+
+const NOTICE_TEXT: Readonly<Record<OfficeLoginNotice, string>> = {
+  session_ended: "office.login.sessionEnded",
+  already_initialized: "office.login.alreadyInitialized",
+};
 
 export function OfficeLogin({ notice, onLogin, onBack }: OfficeLoginProps) {
   const { t } = useTranslation();
@@ -54,7 +60,7 @@ export function OfficeLogin({ notice, onLogin, onBack }: OfficeLoginProps) {
   return (
     <Card className="standalone-card" title={t("office.login.title")} titleAs="h2">
       <form className="standalone-form" onSubmit={(event) => void submit(event)} noValidate>
-        {notice === "session_ended" && <Alert tone="info">{t("office.login.sessionEnded")}</Alert>}
+        {notice && <Alert tone="info">{t(NOTICE_TEXT[notice])}</Alert>}
         {submitError && <Alert tone="error">{t(submitError)}</Alert>}
         <Input
           label={t("office.login.login")}

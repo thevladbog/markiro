@@ -19,12 +19,18 @@ export type PairingState =
 /** Why the host no longer accepts this device. */
 export type RejectionReason = "key_rejected" | "host_changed";
 
-export interface OfficeState {
-  visible: boolean;
-  /** Kept only in memory; the host ends it after 30 idle minutes. */
-  session: OfficeSession | null;
-  notice: "session_ended" | null;
-}
+/** Why the office sign-in shows a note. */
+export type OfficeLoginNotice = "session_ended" | "already_initialized";
+
+/**
+ * The office: closed (the floor shows), signing in, or open with a session
+ * kept only in memory. There is no hidden session: leaving the office ends
+ * it (owner decision 2026-09-26), so coming back always asks to sign in.
+ */
+export type OfficeState =
+  | { kind: "closed" }
+  | { kind: "signing_in"; notice: OfficeLoginNotice | null }
+  | { kind: "open"; session: OfficeSession };
 
 export interface ShellState {
   device: DeviceState;
@@ -43,7 +49,7 @@ export type ShellView =
   | { kind: "pair_failed"; code: DeviceErrorCode }
   | { kind: "device_rejected"; reason: RejectionReason }
   | { kind: "floor" }
-  | { kind: "office_login"; notice: "session_ended" | null }
+  | { kind: "office_login"; notice: OfficeLoginNotice | null }
   | { kind: "office"; session: OfficeSession };
 
 export type ShellAction =
@@ -56,14 +62,13 @@ export type ShellAction =
   | { type: "pairing_retried" }
   | { type: "forgotten" }
   | { type: "host_initialized" }
-  | { type: "office_requested" }
+  | { type: "office_requested"; notice?: OfficeLoginNotice }
   | { type: "office_opened"; session: OfficeSession }
-  | { type: "office_left" }
-  | { type: "logged_out" }
+  | { type: "office_closed" }
   | { type: "session_ended"; token: string }
   | { type: "device_rejected"; reason: RejectionReason; token?: string };
 
-const CLOSED_OFFICE: OfficeState = { visible: false, session: null, notice: null };
+const CLOSED_OFFICE: OfficeState = { kind: "closed" };
 
 export const initialShellState: ShellState = {
   device: { kind: "loading" },
@@ -114,9 +119,14 @@ export function nextShellView(state: ShellState, localAddress: string): ShellVie
       return { kind: "host_missing", reason: localHost.reason };
     }
   }
-  if (!state.office.visible) return { kind: "floor" };
-  if (state.office.session) return { kind: "office", session: state.office.session };
-  return { kind: "office_login", notice: state.office.notice };
+  switch (state.office.kind) {
+    case "closed":
+      return { kind: "floor" };
+    case "signing_in":
+      return { kind: "office_login", notice: state.office.notice };
+    case "open":
+      return { kind: "office", session: state.office.session };
+  }
 }
 
 export function shellReducer(state: ShellState, action: ShellAction): ShellState {
@@ -161,33 +171,29 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
         },
       };
     case "office_requested":
-      return { ...state, office: { ...state.office, visible: true, notice: null } };
+      return { ...state, office: { kind: "signing_in", notice: action.notice ?? null } };
     case "office_opened":
-      return { ...state, office: { visible: true, session: action.session, notice: null } };
-    case "office_left":
-      return { ...state, office: { ...state.office, visible: false, notice: null } };
-    case "logged_out":
+      return { ...state, office: { kind: "open", session: action.session } };
+    case "office_closed":
       return { ...state, office: CLOSED_OFFICE };
     case "session_ended": {
       // A late failure from a session the user already left or replaced
-      // (by signing out, or signing back in) must not disturb the current
-      // one: only the session that actually ended may ask for a new sign-in.
-      if (state.office.session?.token !== action.token) return state;
-      return {
-        ...state,
-        office: {
-          visible: state.office.visible,
-          session: null,
-          notice: state.office.visible ? "session_ended" : null,
-        },
-      };
+      // (by leaving the office, or signing back in) must not disturb the
+      // current one: only the session that actually ended asks to sign in.
+      if (state.office.kind !== "open" || state.office.session.token !== action.token) {
+        return state;
+      }
+      return { ...state, office: { kind: "signing_in", notice: "session_ended" } };
     }
     case "device_rejected": {
       // A tokened rejection (from an in-flight `call`) only applies to the
       // session that issued it, so a late answer from a superseded session
       // cannot mark a fresh pairing rejected. An untokened rejection (from
       // sign-in or the wizard, where no session exists yet) always applies.
-      if (action.token !== undefined && state.office.session?.token !== action.token) {
+      if (
+        action.token !== undefined &&
+        (state.office.kind !== "open" || state.office.session.token !== action.token)
+      ) {
         return state;
       }
       return { ...state, rejection: action.reason, office: CLOSED_OFFICE };

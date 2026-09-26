@@ -146,7 +146,7 @@ export function App({ probe, device, host, address = LOCAL_HOST_ADDRESS }: AppPr
       } catch (error) {
         if (error instanceof HostError && error.code === "already_initialized") {
           dispatch({ type: "host_initialized" });
-          dispatch({ type: "office_requested" });
+          dispatch({ type: "office_requested", notice: "already_initialized" });
           return;
         }
         // No session exists yet during the wizard, so any rejection applies
@@ -198,14 +198,11 @@ export function App({ probe, device, host, address = LOCAL_HOST_ADDRESS }: AppPr
       user: session.user,
       call,
       changePassword: (request) => call((token) => hostApi.officeChangePassword(token, request)),
-      leave: () => dispatch({ type: "office_left" }),
-      logout: async () => {
-        try {
-          await hostApi.officeLogout(session.token);
-        } catch {
-          // The session ends on this device regardless; the host expires it on its own.
-        }
-        dispatch({ type: "logged_out" });
+      logout: () => {
+        dispatch({ type: "office_closed" });
+        // The token is already gone from this device; if the host cannot be
+        // told now, it expires the session on its own after 30 idle minutes.
+        void hostApi.officeLogout(session.token).catch(() => undefined);
       },
     };
   }, [session, hostApi]);
@@ -252,7 +249,7 @@ export function App({ probe, device, host, address = LOCAL_HOST_ADDRESS }: AppPr
         <OfficeLogin
           notice={view.notice}
           onLogin={login}
-          onBack={() => dispatch({ type: "office_left" })}
+          onBack={() => dispatch({ type: "office_closed" })}
         />
       )}
     </main>

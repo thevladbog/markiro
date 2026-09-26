@@ -134,14 +134,12 @@ describe("nextShellView", () => {
   it("shows the floor, the office sign-in and the office", () => {
     expect(nextShellView(paired(), ADDRESS)).toEqual({ kind: "floor" });
     expect(
-      nextShellView(
-        paired({ office: { visible: true, session: null, notice: "session_ended" } }),
-        ADDRESS,
-      ),
+      nextShellView(paired({ office: { kind: "signing_in", notice: "session_ended" } }), ADDRESS),
     ).toEqual({ kind: "office_login", notice: "session_ended" });
-    expect(
-      nextShellView(paired({ office: { visible: true, session: SESSION, notice: null } }), ADDRESS),
-    ).toEqual({ kind: "office", session: SESSION });
+    expect(nextShellView(paired({ office: { kind: "open", session: SESSION } }), ADDRESS)).toEqual({
+      kind: "office",
+      session: SESSION,
+    });
   });
 
   it("puts a rejected device before everything else", () => {
@@ -149,7 +147,7 @@ describe("nextShellView", () => {
       nextShellView(
         paired({
           rejection: "key_rejected",
-          office: { visible: true, session: SESSION, notice: null },
+          office: { kind: "open", session: SESSION },
         }),
         ADDRESS,
       ),
@@ -158,14 +156,24 @@ describe("nextShellView", () => {
 });
 
 describe("shellReducer", () => {
-  it("keeps the session when the office is left and drops it on sign-out", () => {
+  it("opens the office sign-in, with a note when there is one", () => {
+    expect(shellReducer(paired(), { type: "office_requested" }).office).toEqual({
+      kind: "signing_in",
+      notice: null,
+    });
+    expect(
+      shellReducer(paired(), { type: "office_requested", notice: "already_initialized" }).office,
+    ).toEqual({ kind: "signing_in", notice: "already_initialized" });
+  });
+
+  it("drops the session when the office is closed: there is no hidden session", () => {
     const open = shellReducer(paired(), { type: "office_opened", session: SESSION });
-    const left = shellReducer(open, { type: "office_left" });
-    expect(left.office).toEqual({ visible: false, session: SESSION, notice: null });
-    expect(shellReducer(left, { type: "office_requested" }).office.visible).toBe(true);
-    expect(shellReducer(open, { type: "logged_out" }).office).toEqual({
-      visible: false,
-      session: null,
+    expect(open.office).toEqual({ kind: "open", session: SESSION });
+    const closed = shellReducer(open, { type: "office_closed" });
+    expect(closed.office).toEqual({ kind: "closed" });
+    // Coming back asks for the password again.
+    expect(shellReducer(closed, { type: "office_requested" }).office).toEqual({
+      kind: "signing_in",
       notice: null,
     });
   });
@@ -173,26 +181,17 @@ describe("shellReducer", () => {
   it("asks for a new sign-in when its own session ends", () => {
     const open = shellReducer(paired(), { type: "office_opened", session: SESSION });
     expect(shellReducer(open, { type: "session_ended", token: SESSION.token }).office).toEqual({
-      visible: true,
-      session: null,
+      kind: "signing_in",
       notice: "session_ended",
-    });
-  });
-
-  it("keeps a hidden office hidden when its session ends", () => {
-    const open = shellReducer(paired(), { type: "office_opened", session: SESSION });
-    const left = shellReducer(open, { type: "office_left" });
-    expect(shellReducer(left, { type: "session_ended", token: SESSION.token }).office).toEqual({
-      visible: false,
-      session: null,
-      notice: null,
     });
   });
 
   it("ignores a stale session_ended for a token that is not the current session", () => {
     const open = shellReducer(paired(), { type: "office_opened", session: SESSION });
     expect(shellReducer(open, { type: "session_ended", token: "some-other-token" })).toEqual(open);
-    // No session at all (e.g. on the floor): still nothing to end.
+    // A late failure of a session the user already left changes nothing.
+    const closed = shellReducer(open, { type: "office_closed" });
+    expect(shellReducer(closed, { type: "session_ended", token: SESSION.token })).toEqual(closed);
     expect(shellReducer(paired(), { type: "session_ended", token: SESSION.token })).toEqual(
       paired(),
     );
@@ -202,12 +201,12 @@ describe("shellReducer", () => {
     const open = shellReducer(paired(), { type: "office_opened", session: SESSION });
     const rejected = shellReducer(open, { type: "device_rejected", reason: "host_changed" });
     expect(rejected.rejection).toBe("host_changed");
-    expect(rejected.office).toEqual({ visible: false, session: null, notice: null });
+    expect(rejected.office).toEqual({ kind: "closed" });
     const forgotten = shellReducer(rejected, { type: "forgotten" });
     expect(forgotten.device).toEqual({ kind: "ready", status: null });
     expect(forgotten.rejection).toBeNull();
     expect(forgotten.pairing).toEqual({ kind: "idle" });
-    expect(forgotten.office).toEqual({ visible: false, session: null, notice: null });
+    expect(forgotten.office).toEqual({ kind: "closed" });
   });
 
   it("ignores a tokened device_rejected for a different session, but an untokened one always applies", () => {
@@ -221,7 +220,7 @@ describe("shellReducer", () => {
 
     const applied = shellReducer(open, { type: "device_rejected", reason: "key_rejected" });
     expect(applied.rejection).toBe("key_rejected");
-    expect(applied.office.visible).toBe(false);
+    expect(applied.office).toEqual({ kind: "closed" });
   });
 
   it("marks the local host initialized after the wizard", () => {

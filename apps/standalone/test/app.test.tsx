@@ -140,7 +140,7 @@ describe("App", () => {
       password: "correct horse battery",
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Выйти" }));
+    fireEvent.click(screen.getByRole("button", { name: "Выйти в цех" }));
     expect(await screen.findByText("Цех")).toBeTruthy();
     expect(host.officeLogout).toHaveBeenCalledWith("office-session-token");
   });
@@ -197,20 +197,34 @@ describe("App", () => {
     expect(screen.getByText("Сессия офиса закончилась. Войдите снова.")).toBeTruthy();
   });
 
-  it("keeps the session when going back to the floor", async () => {
+  it("ends the session when leaving the office, so coming back asks to sign in", async () => {
     const host = fakeHost();
     renderApp({ probe: probeAnswering(true), device: fakeDevice(DEVICE_STATUS), host });
     fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
     await signIn();
-    // The login form's own back button shares the "В цех" name with the
-    // office header's; wait for the office to actually be open (the login
-    // form unmounted) so this query is unambiguous.
-    await screen.findByText("Вы вошли как Ирина Смирнова.");
-    fireEvent.click(await screen.findByRole("button", { name: "В цех" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
-    expect(await screen.findByText("Вы вошли как Ирина Смирнова.")).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: "Выйти в цех" }));
+    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(host.officeLogout).toHaveBeenCalledTimes(1);
+    expect(host.officeLogout).toHaveBeenCalledWith("office-session-token");
+
+    fireEvent.click(screen.getByRole("button", { name: "Офис" }));
+    expect(await screen.findByText("Вход в офис")).toBeTruthy();
     expect(host.officeLogin).toHaveBeenCalledTimes(1);
-    expect(host.officeLogout).not.toHaveBeenCalled();
+  });
+
+  it("returns to the floor even when the host cannot be told about leaving", async () => {
+    const host = fakeHost();
+    host.officeLogout.mockRejectedValueOnce(
+      new HostError({ kind: "transport", code: "unreachable", message: "host down" }),
+    );
+    renderApp({ probe: probeAnswering(true), device: fakeDevice(DEVICE_STATUS), host });
+    fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
+    await signIn();
+    fireEvent.click(await screen.findByRole("button", { name: "Выйти в цех" }));
+    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(
+      screen.queryByText("Нет связи с хостом. Проверьте, что ПК-хост включён и служба запущена."),
+    ).toBeNull();
   });
 
   it("adopts a pairing another start of the app already made", async () => {
@@ -294,6 +308,22 @@ describe("App", () => {
     expect(host.bootstrap).toHaveBeenCalledTimes(2);
   });
 
+  it("sends the wizard to the office sign-in when the host was set up meanwhile", async () => {
+    const host = fakeHost();
+    host.bootstrap.mockRejectedValueOnce(
+      new HostError({
+        kind: "api",
+        code: "already_initialized",
+        status: 409,
+        message: "the host is already initialized",
+      }),
+    );
+    renderApp({ probe: probeAnswering(false), device: fakeDevice(null), host });
+    await completeWizard();
+    expect(await screen.findByText("Вход в офис")).toBeTruthy();
+    expect(screen.getByText("Хост уже настроен. Войдите в офис.")).toBeTruthy();
+  });
+
   it("offers to reset an unreadable device config", async () => {
     const device = fakeDevice(new DeviceError("config_unreadable", "broken"));
     renderApp({ probe: probeAnswering(true), device, host: fakeHost() });
@@ -355,7 +385,7 @@ describe("App", () => {
 
   it("recovers from a reinstalled host: rejects, reconnects, re-pairs and reaches the floor", async () => {
     // The local host now presents a different identity than the one pinned
-    // at pairing (a reinstall, or a database restored from a copy).
+    // at pairing (a reinstall).
     const reinstalled = observation(true);
     reinstalled.hello.hostId = "0e2b1f7a-6c1d-4b8e-9f3a-2d4c5b6a7e8f";
     reinstalled.fingerprint = "cd".repeat(32);
