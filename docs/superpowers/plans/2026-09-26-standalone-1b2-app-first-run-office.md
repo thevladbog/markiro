@@ -24,6 +24,7 @@
 - Схемы Zod: полезная нагрузка, которую пересобирает Rust (`hello`, `DeviceStatus`, обёртка ответа `{ status, body }`), — строгая (`.strict()`); тела ответов хоста — нестрогие; тела запросов — строгие, как `deny_unknown_fields` на хосте.
 - Весь текст интерфейса — через i18n (`src/i18n/ru.json`); отсутствующий ключ роняет тесты. Только компоненты `@markiro/ui`: ESLint запрещает нативные элементы форм в `apps/standalone/src`.
 - Формы проверяют поля правилами хоста и `@markiro/domain` до отправки: логин `[A-Za-z0-9._-]{3,64}`, пароль 8–128 символов, GLN — 13 цифр с верной контрольной цифрой (`hasValidCheckDigit`), префикс GS1 — 4–12 цифр (не больше 10), ИНН — пусто, 10 или 12 цифр, номер SSCC — целое от 1 (короб) или 0 (паллета) меньше `ssccSerialCapacity(первые 9 цифр GLN)`, 1–20 линий по 1–100 символов без повторов без учёта регистра.
+- Любой офисный пользователь, включая технолога, меняет свой пароль сам: `PUT /v1/office/me/password` с текущим паролем; остальные его сессии закрываются, текущая остаётся (решение владельца 2026-09-26, задача 10).
 - `apps/station` не меняется. Коммиты — явные пути, трейлер ровно `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 
 ## Заметки для исполнения
@@ -59,6 +60,7 @@ apps/standalone/src/office/*, test/office.test.tsx                        зад
 apps/standalone/src/app/{shell.ts,screens.tsx,App.tsx}, test/{shell.test.ts,app.test.tsx}   задача 8
 apps/standalone/src/i18n/ru.json, src/app/shell.css                       задачи 5–8
 apps/standalone/AGENTS.md, apps/standalone/README.md                      задача 9
+host/src/routes/office_auth.rs, src/office/ChangePasswordDialog.tsx, proto/fixtures/password-change.json   задача 10 (после задачи 8, до задачи 9)
 ```
 
 ---
@@ -5335,6 +5337,770 @@ Run: `node_modules/.bin/prettier --check apps/standalone/AGENTS.md apps/standalo
 ```bash
 git add apps/standalone/AGENTS.md apps/standalone/README.md
 git commit -m "docs(standalone): ключ устройства, сессия офиса и первый запуск приложения" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 10: Смена собственного пароля в офисе
+
+> Добавлена по решению владельца 2026-09-26: любой офисный пользователь, в том числе технолог, меняет свой пароль сам. Выполняется после задачи 8 и до задачи 9. Восстановление забытого пароля администратора — команда хоста в плане 5 (в этом плане только запись в спецификации).
+
+**Files:**
+
+- Modify: `apps/standalone/proto/src/lib.rs`, `apps/standalone/proto/tests/fixtures.rs`, `apps/standalone/host/src/auth.rs`, `apps/standalone/host/src/routes/office_auth.rs`, `apps/standalone/host/src/server.rs`, `apps/standalone/host/tests/office_auth.rs`, `apps/standalone/src/host/protocol.ts`, `apps/standalone/test/protocol.test.ts`, `apps/standalone/src/host/api.ts`, `apps/standalone/src/office/office-session.tsx`, `apps/standalone/src/office/OfficeShell.tsx`, `apps/standalone/src/app/App.tsx`, `apps/standalone/src/i18n/ru.json`, `apps/standalone/test/office.test.tsx`, `apps/standalone/test/app.test.tsx`, `docs/superpowers/specs/2026-09-26-standalone-01-foundation-design.md`
+- Create: `apps/standalone/proto/fixtures/password-change.json`, `apps/standalone/src/office/ChangePasswordDialog.tsx`
+
+**Interfaces:**
+
+- Consumes: `OfficeContext` (`user`, `session_id`, `actor()`), `require_admin_in`, `credentials::{PASSWORD, SESSION}`, `ApiError::unauthorized(credential, message)`, `validate::password`, `secrets::{hash_password, verify_password}`, `db::{begin_write, next_revision}`, `state.login_limiter` (план 1b1); `HostApi`, `HostError`, `errorMessageKey`, `OfficeSessionValue`, `OfficeShell`, `App` (задачи 5, 7, 8).
+- Produces:
+  - proto: `PasswordChange { current_password: Secret, new_password: Secret }` (`deny_unknown_fields`), фикстура `password-change.json`.
+  - host: `OfficeContext::require_session_in(&self, conn) -> Result<(), ApiError>` (сессия жива, пользователь активен); маршрут `PUT /v1/office/me/password` → `204`; неверный текущий пароль — `401 unauthorized` с `details.credential = "password"` и строкой журнала `office_user.password` с результатом `denied`; успех — новый хеш, ревизия ровно +1, остальные сессии пользователя удалены, текущая остаётся, строка журнала `office_user.password` (`ok`, `details {}`), где исполнитель и объект — сам пользователь.
+  - webview: `passwordChangeSchema`/`PasswordChange`; `HostApi.officeChangePassword(token, request): Promise<void>`; `OfficeSessionValue.changePassword(request): Promise<void>`; `ChangePasswordDialog({ open, onClose, onChanged })`; кнопка «Сменить пароль» в шапке офиса.
+
+- [ ] **Step 1: Протокол и фикстура**
+
+В `apps/standalone/proto/src/lib.rs` после `PasswordSet` добавить:
+
+```rust
+/// `PUT /v1/office/me/password`: a signed-in office user changes their own password.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PasswordChange {
+    pub current_password: Secret,
+    pub new_password: Secret,
+}
+```
+
+`apps/standalone/proto/fixtures/password-change.json`:
+
+```json
+{ "currentPassword": "correct horse battery", "newPassword": "another long password" }
+```
+
+В `apps/standalone/proto/tests/fixtures.rs` добавить `PasswordChange` к импорту и тест:
+
+```rust
+#[test]
+fn password_change_fixture_round_trips_without_leaking() {
+    let change: PasswordChange = round_trip("password-change.json");
+    assert_ne!(change.current_password, change.new_password);
+    let debug = format!("{change:?}");
+    assert!(!debug.contains(change.current_password.expose()));
+    assert!(!debug.contains(change.new_password.expose()));
+}
+```
+
+- [ ] **Step 2: Написать падающие тесты хоста**
+
+В конец `apps/standalone/host/tests/office_auth.rs` добавить (помощники `pair_device`, `seed_office_user`, `login`, `with_device`, `with_session`, `request`, `empty`, `json_request` уже импортированы в этом файле; добавить недостающие к импорту `support::app::{…}`):
+
+```rust
+async fn host_revision(app: &TestApp) -> i64 {
+    sqlx::query_scalar("SELECT rev FROM host_revision WHERE id = 1")
+        .fetch_one(&app.state.pool)
+        .await
+        .unwrap()
+}
+
+type AuditRow = (String, Option<String>, String, Option<String>, Option<String>, String, String);
+
+async fn password_audit(app: &TestApp, result: &str) -> Vec<AuditRow> {
+    sqlx::query_as(
+        "SELECT actor_kind, actor_id, action, target_type, target_id, result, details \
+         FROM audit_log WHERE action = 'office_user.password' AND result = ? ORDER BY id",
+    )
+    .bind(result)
+    .fetch_all(&app.state.pool)
+    .await
+    .unwrap()
+}
+
+fn change(current: &str, new: &str) -> Value {
+    json!({ "currentPassword": current, "newPassword": new })
+}
+
+#[tokio::test]
+async fn a_user_changes_their_own_password() {
+    let app = TestApp::new().await;
+    let (_, key) = pair_device(&app, "office").await;
+    let (_, other_key) = pair_device(&app, "office").await;
+    let tech_id = seed_office_user(&app, "tech", "technologist", "correct horse battery").await;
+    let token = login(&app, &key, "tech", "correct horse battery").await;
+    let other_token = login(&app, &other_key, "tech", "correct horse battery").await;
+    let before = host_revision(&app).await;
+
+    let (status, body) = app
+        .send(json_request(
+            with_session(request("PUT", "/v1/office/me/password"), &key, &token),
+            change("correct horse battery", "another long password"),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    assert_eq!(host_revision(&app).await, before + 1);
+    let me = app
+        .send(empty(with_session(request("GET", "/v1/office/me"), &key, &token)))
+        .await;
+    assert_eq!(me.0, StatusCode::OK, "the caller's own session stays");
+    let other = app
+        .send(empty(with_session(request("GET", "/v1/office/me"), &other_key, &other_token)))
+        .await;
+    assert_eq!(other.0, StatusCode::UNAUTHORIZED, "sessions on other devices end");
+
+    login(&app, &key, "tech", "another long password").await;
+    let (status, _) = app
+        .send(json_request(
+            with_device(request("POST", "/v1/office/login"), &key),
+            json!({ "login": "tech", "password": "correct horse battery" }),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        password_audit(&app, "ok").await,
+        vec![(
+            "office_user".into(),
+            Some(tech_id.clone()),
+            "office_user.password".into(),
+            Some("office_user".into()),
+            Some(tech_id),
+            "ok".into(),
+            "{}".into()
+        )]
+    );
+}
+
+#[tokio::test]
+async fn a_wrong_current_password_changes_nothing() {
+    let app = TestApp::new().await;
+    let (_, key) = pair_device(&app, "office").await;
+    let tech_id = seed_office_user(&app, "tech", "technologist", "correct horse battery").await;
+    let token = login(&app, &key, "tech", "correct horse battery").await;
+    let phc: String = sqlx::query_scalar("SELECT password_phc FROM office_users WHERE id = ?")
+        .bind(&tech_id)
+        .fetch_one(&app.state.pool)
+        .await
+        .unwrap();
+    let before = host_revision(&app).await;
+
+    let (status, body) = app
+        .send(json_request(
+            with_session(request("PUT", "/v1/office/me/password"), &key, &token),
+            change("not the password", "another long password"),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["error"]["code"], "unauthorized");
+    assert_eq!(body["error"]["details"]["credential"], "password");
+    let after: String = sqlx::query_scalar("SELECT password_phc FROM office_users WHERE id = ?")
+        .bind(&tech_id)
+        .fetch_one(&app.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(after, phc);
+    assert_eq!(host_revision(&app).await, before);
+    let me = app
+        .send(empty(with_session(request("GET", "/v1/office/me"), &key, &token)))
+        .await;
+    assert_eq!(me.0, StatusCode::OK);
+    assert_eq!(
+        password_audit(&app, "denied").await,
+        vec![(
+            "office_user".into(),
+            Some(tech_id.clone()),
+            "office_user.password".into(),
+            Some("office_user".into()),
+            Some(tech_id),
+            "denied".into(),
+            r#"{"reason":"wrong_current_password"}"#.into()
+        )]
+    );
+}
+
+#[tokio::test]
+async fn the_new_password_is_validated() {
+    let app = TestApp::new().await;
+    let (_, key) = pair_device(&app, "office").await;
+    seed_office_user(&app, "tech", "technologist", "correct horse battery").await;
+    let token = login(&app, &key, "tech", "correct horse battery").await;
+    let (status, body) = app
+        .send(json_request(
+            with_session(request("PUT", "/v1/office/me/password"), &key, &token),
+            change("correct horse battery", "short"),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["error"]["details"]["field"], "newPassword");
+    let (status, body) = app
+        .send(json_request(
+            with_session(request("PUT", "/v1/office/me/password"), &key, &token),
+            json!({ "currentPassword": "correct horse battery", "newPassword": "another long password", "extra": 1 }),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["error"]["code"], "validation_failed");
+}
+
+#[tokio::test]
+async fn changing_a_password_needs_an_office_session() {
+    let app = TestApp::new().await;
+    let (_, key) = pair_device(&app, "office").await;
+    let (status, body) = app
+        .send(json_request(
+            with_device(request("PUT", "/v1/office/me/password"), &key),
+            change("correct horse battery", "another long password"),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["error"]["details"]["credential"], "session");
+}
+```
+
+- [ ] **Step 3: Убедиться, что тесты падают**
+
+Run: `cargo test --manifest-path apps/standalone/Cargo.toml -p markiro-host --offline --test office_auth` и `-p markiro-proto --test fixtures`
+Expected: FAIL — нет `PasswordChange` и маршрута.
+
+- [ ] **Step 4: Реализовать на хосте**
+
+В `apps/standalone/host/src/auth.rs` вынести общую часть `require_admin_in` в приватный помощник и добавить проверку живой сессии для не-админских записей:
+
+```rust
+    /// Re-check inside the caller's write transaction that this session still
+    /// exists and its user is active; returns the user's current role.
+    async fn live_role_in(&self, conn: &mut SqliteConnection) -> Result<OfficeRole, ApiError> {
+        let row: Option<(i64, String)> = sqlx::query_as(
+            "SELECT u.active, u.role FROM office_sessions s \
+             JOIN office_users u ON u.id = s.user_id \
+             WHERE s.id = ?",
+        )
+        .bind(&self.session_id)
+        .fetch_optional(conn)
+        .await
+        .map_err(ApiError::internal)?;
+        let (active, role) = row
+            .ok_or_else(|| ApiError::unauthorized(credentials::SESSION, "office session ended"))?;
+        if active == 0 {
+            return Err(ApiError::unauthorized(credentials::SESSION, "office session ended"));
+        }
+        serde_json::from_value(serde_json::Value::String(role)).map_err(ApiError::internal)
+    }
+
+    /// For writes any office user may make (their own password): the session
+    /// must still be live inside the transaction.
+    pub async fn require_session_in(&self, conn: &mut SqliteConnection) -> Result<(), ApiError> {
+        self.live_role_in(conn).await.map(|_| ())
+    }
+```
+
+а тело `require_admin_in` (doc-комментарий остаётся) заменить на:
+
+```rust
+        if self.live_role_in(conn).await? == OfficeRole::Admin {
+            Ok(())
+        } else {
+            Err(ApiError::forbidden("the administrator role is required"))
+        }
+```
+
+В `apps/standalone/host/src/routes/office_auth.rs` добавить (к импортам — `markiro_proto::{credentials, PasswordChange}`, `crate::db::next_revision`, `crate::secrets::hash_password`, `crate::validate`, если их там нет):
+
+```rust
+/// `PUT /v1/office/me/password`: any signed-in office user changes their own
+/// password with the current one. Their other sessions end; this one stays.
+pub async fn change_password(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    context: OfficeContext,
+    ApiJson(body): ApiJson<PasswordChange>,
+) -> Result<StatusCode, ApiError> {
+    // A stolen session must not be a way to guess the current password.
+    state.login_limiter.check(peer.ip())?;
+    validate::password("newPassword", body.new_password.expose())?;
+    let stored: String = sqlx::query_scalar("SELECT password_phc FROM office_users WHERE id = ?")
+        .bind(&context.user.id)
+        .fetch_one(&state.pool)
+        .await
+        .map_err(ApiError::internal)?;
+    let PasswordChange {
+        current_password,
+        new_password,
+    } = body;
+    let verified = stored.clone();
+    // PBKDF2 before the write lock, off the async threads; the new hash only
+    // when the current password is right.
+    let new_phc = tokio::task::spawn_blocking(move || {
+        verify_password(&verified, current_password.expose())
+            .then(|| hash_password(new_password.expose()))
+    })
+    .await
+    .map_err(ApiError::internal)?;
+
+    let at = state.timestamp();
+    let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
+    context.require_session_in(&mut tx).await?;
+    // The password may have changed while PBKDF2 ran; accept only the one verified.
+    let current: String = sqlx::query_scalar("SELECT password_phc FROM office_users WHERE id = ?")
+        .bind(&context.user.id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(ApiError::internal)?;
+    let Some(new_phc) = new_phc.filter(|_| current == stored) else {
+        audit::record(
+            &mut tx,
+            &at,
+            Entry {
+                actor: context.actor(),
+                action: "office_user.password",
+                target_type: Some("office_user"),
+                target_id: Some(&context.user.id),
+                outcome: Outcome::Denied,
+                details: json!({ "reason": "wrong_current_password" }),
+            },
+        )
+        .await
+        .map_err(ApiError::internal)?;
+        tx.commit().await.map_err(ApiError::internal)?;
+        return Err(ApiError::unauthorized(
+            credentials::PASSWORD,
+            "the current password is wrong",
+        ));
+    };
+    let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
+    sqlx::query("UPDATE office_users SET password_phc = ?, rev = ? WHERE id = ?")
+        .bind(&new_phc)
+        .bind(rev)
+        .bind(&context.user.id)
+        .execute(&mut *tx)
+        .await
+        .map_err(ApiError::internal)?;
+    sqlx::query("DELETE FROM office_sessions WHERE user_id = ? AND id <> ?")
+        .bind(&context.user.id)
+        .bind(&context.session_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(ApiError::internal)?;
+    audit::record(
+        &mut tx,
+        &at,
+        Entry {
+            actor: context.actor(),
+            action: "office_user.password",
+            target_type: Some("office_user"),
+            target_id: Some(&context.user.id),
+            outcome: Outcome::Ok,
+            details: json!({}),
+        },
+    )
+    .await
+    .map_err(ApiError::internal)?;
+    tx.commit().await.map_err(ApiError::internal)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+```
+
+В `apps/standalone/host/src/server.rs` в `protected_routes` добавить `.route("/v1/office/me/password", put(crate::routes::office_auth::change_password))`.
+
+- [ ] **Step 5: Тесты хоста проходят**
+
+Run: `cargo test --manifest-path apps/standalone/Cargo.toml --workspace --offline` (вне песочницы)
+Expected: PASS, включая 4 новых теста `office_auth.rs` и тест фикстуры.
+
+- [ ] **Step 6: Написать падающие тесты вебвью**
+
+В `apps/standalone/test/protocol.test.ts` добавить `passwordChangeSchema` к импорту и строку `["password-change.json", passwordChangeSchema],` в `REQUESTS`.
+
+В `apps/standalone/test/office.test.tsx`: в `sessionFor` добавить поле `changePassword: vi.fn(async () => {}),`; дописать:
+
+```tsx
+describe("ChangePasswordDialog", () => {
+  beforeEach(() => {
+    localStorage.removeItem("markiro.theme");
+  });
+
+  function renderOffice(session: OfficeSessionValue) {
+    return render(
+      <ThemeProvider defaultTheme="dark">
+        <Office session={session} />
+      </ThemeProvider>,
+    );
+  }
+
+  async function openDialog(): Promise<void> {
+    fireEvent.click(await screen.findByRole("button", { name: "Сменить пароль" }));
+    await screen.findByText("Смена пароля");
+  }
+
+  it("changes the password with the current one", async () => {
+    const session = sessionFor();
+    renderOffice(session);
+    await openDialog();
+    type("Текущий пароль", "correct horse battery");
+    type("Новый пароль", "another long password");
+    type("Повторите новый пароль", "another long password");
+    fireEvent.click(screen.getByRole("button", { name: "Сменить" }));
+    await waitFor(() =>
+      expect(session.changePassword).toHaveBeenCalledWith({
+        currentPassword: "correct horse battery",
+        newPassword: "another long password",
+      }),
+    );
+    expect(
+      await screen.findByText("Пароль изменён. На других устройствах нужно войти заново."),
+    ).toBeTruthy();
+    expect(screen.queryByText("Смена пароля")).toBeNull();
+  });
+
+  it("checks the repeated password before calling the host", async () => {
+    const session = sessionFor();
+    renderOffice(session);
+    await openDialog();
+    type("Текущий пароль", "correct horse battery");
+    type("Новый пароль", "another long password");
+    type("Повторите новый пароль", "a different one here");
+    fireEvent.click(screen.getByRole("button", { name: "Сменить" }));
+    expect(await screen.findByText("Пароли не совпадают")).toBeTruthy();
+    expect(session.changePassword).not.toHaveBeenCalled();
+  });
+
+  it("says when the current password is wrong", async () => {
+    const session = sessionFor();
+    session.changePassword.mockRejectedValueOnce(
+      new HostError({
+        kind: "api",
+        code: "unauthorized",
+        status: 401,
+        message: "the current password is wrong",
+        details: { credential: "password" },
+      }),
+    );
+    renderOffice(session);
+    await openDialog();
+    type("Текущий пароль", "not the password");
+    type("Новый пароль", "another long password");
+    type("Повторите новый пароль", "another long password");
+    fireEvent.click(screen.getByRole("button", { name: "Сменить" }));
+    expect(await screen.findByText("Текущий пароль неверен.")).toBeTruthy();
+  });
+});
+```
+
+В `apps/standalone/test/app.test.tsx`: в `fakeHost` добавить `officeChangePassword: vi.fn<HostApi["officeChangePassword"]>(async () => {}),` и тест в `describe("App")`:
+
+```tsx
+it("changes the office user's own password with the session token", async () => {
+  const host = fakeHost();
+  renderApp({ probe: probeAnswering(true), device: fakeDevice(DEVICE_STATUS), host });
+  fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
+  await signIn();
+  fireEvent.click(await screen.findByRole("button", { name: "Сменить пароль" }));
+  fireEvent.change(await screen.findByLabelText("Текущий пароль"), {
+    target: { value: "correct horse battery" },
+  });
+  fireEvent.change(screen.getByLabelText("Новый пароль"), {
+    target: { value: "another long password" },
+  });
+  fireEvent.change(screen.getByLabelText("Повторите новый пароль"), {
+    target: { value: "another long password" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Сменить" }));
+  await screen.findByText("Пароль изменён. На других устройствах нужно войти заново.");
+  expect(host.officeChangePassword).toHaveBeenCalledWith("office-session-token", {
+    currentPassword: "correct horse battery",
+    newPassword: "another long password",
+  });
+});
+```
+
+- [ ] **Step 7: Убедиться, что тесты падают**
+
+Run: `pnpm --config.verifyDepsBeforeRun=false --filter @markiro/standalone exec vitest run test/protocol.test.ts test/office.test.tsx test/app.test.tsx`
+Expected: FAIL — нет схемы, диалога и метода API.
+
+- [ ] **Step 8: Реализовать в вебвью**
+
+В `apps/standalone/src/i18n/ru.json` в объект `office` добавить ключ `password`:
+
+```json
+"password": {
+  "open": "Сменить пароль",
+  "title": "Смена пароля",
+  "current": "Текущий пароль",
+  "new": "Новый пароль",
+  "hint": "От 8 до 128 символов",
+  "confirm": "Повторите новый пароль",
+  "submit": "Сменить",
+  "cancel": "Отмена",
+  "done": "Пароль изменён. На других устройствах нужно войти заново.",
+  "required": "Заполните поле",
+  "length": "Пароль — от 8 до 128 символов",
+  "mismatch": "Пароли не совпадают",
+  "wrongCurrent": "Текущий пароль неверен."
+}
+```
+
+В `apps/standalone/src/host/protocol.ts` после `passwordSetSchema` добавить:
+
+```ts
+export const passwordChangeSchema = z
+  .object({ currentPassword: z.string(), newPassword: z.string() })
+  .strict();
+export type PasswordChange = z.infer<typeof passwordChangeSchema>;
+```
+
+В `apps/standalone/src/host/api.ts`: импортировать тип `PasswordChange`; в интерфейс `HostApi` добавить `officeChangePassword(token: string, request: PasswordChange): Promise<void>;`, а в `createHostApi`:
+
+```ts
+    officeChangePassword: async (token, request) => {
+      await client.request("PUT", "/v1/office/me/password", {
+        body: request,
+        officeToken: token,
+        schema: z.null(),
+      });
+    },
+```
+
+В `apps/standalone/src/office/office-session.tsx`: импортировать тип `PasswordChange`; в `OfficeSessionValue` добавить:
+
+```ts
+  /** Changes the signed-in user's own password; the host ends their other sessions. */
+  changePassword(request: PasswordChange): Promise<void>;
+```
+
+В `apps/standalone/src/app/App.tsx` в `useMemo` сессии офиса вынести `call` в константу и добавить `changePassword`:
+
+```tsx
+const officeSession = useMemo<OfficeSessionValue | null>(() => {
+  if (!session) return null;
+  const call = async <T,>(operation: (token: string) => Promise<T>): Promise<T> => {
+    try {
+      return await operation(session.token);
+    } catch (error) {
+      const action = shellActionFor(error);
+      if (action) dispatch(action);
+      throw error;
+    }
+  };
+  return {
+    user: session.user,
+    call,
+    changePassword: (request) => call((token) => hostApi.officeChangePassword(token, request)),
+    leave: () => dispatch({ type: "office_left" }),
+    logout: async () => {
+      try {
+        await hostApi.officeLogout(session.token);
+      } catch {
+        // The session ends on this device regardless; the host expires it on its own.
+      }
+      dispatch({ type: "logged_out" });
+    },
+  };
+}, [session, hostApi]);
+```
+
+`apps/standalone/src/office/ChangePasswordDialog.tsx`:
+
+```tsx
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useState } from "react";
+import { useForm } from "react-hook-form";
+import { useTranslation } from "react-i18next";
+import { z } from "zod";
+
+import { Alert, Button, Input, Modal } from "@markiro/ui";
+
+import { HostError } from "../host/client.js";
+import { errorMessageKey } from "../host/errors.js";
+import { errorProp } from "../lib/form-error.js";
+import { useOfficeSession } from "./office-session.js";
+
+/** Characters as the host counts them (Unicode scalar values). */
+function characters(text: string): number {
+  return [...text].length;
+}
+
+const passwordSchema = z.object({
+  currentPassword: z.string().min(1, "office.password.required"),
+  newPassword: z
+    .string()
+    .refine(
+      (password) => characters(password) >= 8 && characters(password) <= 128,
+      "office.password.length",
+    ),
+  confirmPassword: z.string(),
+});
+
+type PasswordValues = z.infer<typeof passwordSchema>;
+
+const FORM_ID = "office-password-form";
+
+export interface ChangePasswordDialogProps {
+  open: boolean;
+  onClose(): void;
+  onChanged(): void;
+}
+
+export function ChangePasswordDialog({ open, onClose, onChanged }: ChangePasswordDialogProps) {
+  const { t } = useTranslation();
+  const session = useOfficeSession();
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const {
+    register,
+    handleSubmit,
+    setError,
+    reset,
+    formState: { errors, isSubmitting },
+  } = useForm<PasswordValues>({
+    resolver: zodResolver(passwordSchema),
+    defaultValues: { currentPassword: "", newPassword: "", confirmPassword: "" },
+  });
+  const fieldError = (message: string | undefined) =>
+    errorProp(message === undefined ? undefined : t(message));
+
+  const close = () => {
+    reset();
+    setSubmitError(null);
+    onClose();
+  };
+
+  const submit = handleSubmit(async (values) => {
+    setSubmitError(null);
+    if (values.newPassword !== values.confirmPassword) {
+      setError("confirmPassword", { type: "validate", message: "office.password.mismatch" });
+      return;
+    }
+    try {
+      await session.changePassword({
+        currentPassword: values.currentPassword,
+        newPassword: values.newPassword,
+      });
+      reset();
+      onChanged();
+    } catch (error) {
+      if (error instanceof HostError && error.credential === "password") {
+        setError("currentPassword", { type: "server", message: "office.password.wrongCurrent" });
+        return;
+      }
+      if (error instanceof HostError && error.field === "newPassword") {
+        setError("newPassword", { type: "server", message: "office.password.length" });
+        return;
+      }
+      setSubmitError(errorMessageKey(error));
+    }
+  });
+
+  return (
+    <Modal
+      open={open}
+      title={t("office.password.title")}
+      onClose={close}
+      closeLabel={t("office.password.cancel")}
+      footer={
+        <>
+          <Button variant="secondary" onClick={close} disabled={isSubmitting}>
+            {t("office.password.cancel")}
+          </Button>
+          <Button type="submit" form={FORM_ID} loading={isSubmitting}>
+            {t("office.password.submit")}
+          </Button>
+        </>
+      }
+    >
+      <form
+        id={FORM_ID}
+        className="standalone-form"
+        onSubmit={(event) => void submit(event)}
+        noValidate
+      >
+        {submitError && <Alert tone="error">{t(submitError)}</Alert>}
+        <Input
+          type="password"
+          autoComplete="current-password"
+          label={t("office.password.current")}
+          {...fieldError(errors.currentPassword?.message)}
+          {...register("currentPassword")}
+        />
+        <Input
+          type="password"
+          autoComplete="new-password"
+          label={t("office.password.new")}
+          hint={t("office.password.hint")}
+          {...fieldError(errors.newPassword?.message)}
+          {...register("newPassword")}
+        />
+        <Input
+          type="password"
+          autoComplete="new-password"
+          label={t("office.password.confirm")}
+          {...fieldError(errors.confirmPassword?.message)}
+          {...register("confirmPassword")}
+        />
+      </form>
+    </Modal>
+  );
+}
+```
+
+В `apps/standalone/src/office/OfficeShell.tsx`: импортировать `useState` и `Alert` (из `@markiro/ui`) и `ChangePasswordDialog`; в компоненте добавить состояния
+
+```tsx
+const [passwordOpen, setPasswordOpen] = useState(false);
+const [passwordChanged, setPasswordChanged] = useState(false);
+```
+
+в `office-header__actions` перед кнопкой «В цех» добавить
+
+```tsx
+<Button
+  variant="secondary"
+  onClick={() => {
+    setPasswordChanged(false);
+    setPasswordOpen(true);
+  }}
+>
+  {t("office.password.open")}
+</Button>
+```
+
+в `<main className="office-shell__content">` перед `<Outlet />` добавить `{passwordChanged && <Alert tone="ok">{t("office.password.done")}</Alert>}`, а после закрывающего `</div>` блока `office-shell__main` (внутри `office-shell`) —
+
+```tsx
+<ChangePasswordDialog
+  open={passwordOpen}
+  onClose={() => setPasswordOpen(false)}
+  onChanged={() => {
+    setPasswordOpen(false);
+    setPasswordChanged(true);
+  }}
+/>
+```
+
+- [ ] **Step 9: Спецификация**
+
+В `docs/superpowers/specs/2026-09-26-standalone-01-foundation-design.md`:
+
+- в таблице раздела 4.5 после строки `POST /v1/office/logout`, `GET /v1/office/me` добавить строку: `PUT /v1/office/me/password` | офисная сессия, ограничение частоты | Смена своего пароля: `{ currentPassword, newPassword }`; остальные сессии пользователя закрываются, текущая остаётся;
+- в таблице раздела 4.8 добавить строку «Свой пароль» — «смена» для администратора и для технолога;
+- в раздел 10 добавить пункт: «**Забытый пароль администратора.** Без облака пароль единственного администратора восстанавливается командой службы на ПК-хосте (`markiro-host reset-password --login <логин>`, запись в журнал действий от имени `system`); команда появится в плане 5.»
+
+- [ ] **Step 10: Проверки и коммит**
+
+Run:
+
+```bash
+cargo test --manifest-path apps/standalone/Cargo.toml --workspace --offline
+cargo fmt --manifest-path apps/standalone/Cargo.toml --all -- --check
+pnpm --config.verifyDepsBeforeRun=false --filter @markiro/standalone test
+pnpm --config.verifyDepsBeforeRun=false --filter @markiro/standalone typecheck
+pnpm --config.verifyDepsBeforeRun=false --filter @markiro/standalone lint
+node_modules/.bin/prettier --check apps/standalone/src apps/standalone/test apps/standalone/proto/fixtures docs/superpowers/specs/2026-09-26-standalone-01-foundation-design.md
+git diff --check
+```
+
+Expected: всё зелёное (cargo — вне песочницы).
+
+```bash
+git add apps/standalone/proto apps/standalone/host apps/standalone/src apps/standalone/test docs/superpowers/specs/2026-09-26-standalone-01-foundation-design.md
+git commit -m "feat(standalone): смена собственного пароля в офисе" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
