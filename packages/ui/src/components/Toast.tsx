@@ -1,5 +1,5 @@
 import { useSyncExternalStore, type ReactNode } from "react";
-import { createRoot } from "react-dom/client";
+import { createRoot, type Root } from "react-dom/client";
 
 import { cn } from "../cn.js";
 import type { AlertTone } from "./Alert.js";
@@ -43,6 +43,7 @@ const TONE_GLYPH: Record<ToastTone, string> = {
 };
 
 let container: HTMLDivElement | null = null;
+let root: Root | null = null;
 let entries: ToastEntry[] = [];
 let nextId = 0;
 const listeners = new Set<() => void>();
@@ -53,7 +54,8 @@ function ensureMounted() {
   container = document.createElement("div");
   container.setAttribute("data-mk-toast-root", "");
   document.body.appendChild(container);
-  createRoot(container).render(<ToastViewport />);
+  root = createRoot(container);
+  root.render(<ToastViewport />);
 }
 
 function setEntries(next: ToastEntry[]) {
@@ -77,6 +79,23 @@ function dismiss(id: number) {
     timers.delete(id);
   }
   setEntries(entries.filter((entry) => entry.id !== id));
+}
+
+/**
+ * Removes every toast, cancels their auto-dismiss timers and unmounts the
+ * viewport; the next `toast()` mounts a fresh one. The viewport otherwise
+ * lives as long as the page, in a root no test renderer tracks, so a test
+ * environment -- which ends sooner -- calls this after each test to leave no
+ * timer that would commit into that root once the DOM is gone.
+ */
+export function resetToasts(): void {
+  timers.forEach((timer) => clearTimeout(timer));
+  timers.clear();
+  entries = [];
+  root?.unmount();
+  root = null;
+  container?.remove();
+  container = null;
 }
 
 /**

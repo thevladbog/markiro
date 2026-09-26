@@ -14,6 +14,7 @@ import {
   Sidebar,
   SignalOverlay,
   Spinner,
+  resetToasts,
   toast,
   type AlertTone,
   type SidebarItem,
@@ -370,7 +371,31 @@ describe("toast", () => {
   });
 
   afterEach(() => {
+    // The viewport outlives RTL's cleanup; reset it while the fake timers
+    // that its toasts armed are still the ones installed.
+    act(() => resetToasts());
     vi.useRealTimers();
+  });
+
+  it("resets to no viewport, no toast and no pending dismiss timer", () => {
+    const timersBefore = vi.getTimerCount();
+    act(() => {
+      toast("ok", "Смена закрыта", 4000);
+    });
+    expect(document.querySelector("[data-mk-toast-root]")).not.toBeNull();
+    expect(vi.getTimerCount()).toBe(timersBefore + 1);
+
+    act(() => resetToasts());
+
+    expect(document.querySelector("[data-mk-toast-root]")).toBeNull();
+    expect(screen.queryByText("Смена закрыта")).toBeNull();
+    expect(vi.getTimerCount()).toBe(timersBefore);
+
+    // The next toast mounts a fresh viewport.
+    act(() => {
+      toast("ok", "Смена открыта", 4000);
+    });
+    expect(screen.getByText("Смена открыта").closest("[data-mk-toast-root]")).not.toBeNull();
   });
 
   it("renders into a portal container appended to document.body with the tone's glyph", () => {
@@ -453,7 +478,8 @@ describe("toast", () => {
     // This tests the race condition where toast() is called before the viewport
     // has had a chance to subscribe to the store.
     vi.resetModules();
-    const { toast: freshToast } = await import("../src/components/Toast.js");
+    const { toast: freshToast, resetToasts: resetFreshToasts } =
+      await import("../src/components/Toast.js");
 
     // Call toast bare (no act()) before any React render has subscribed.
     // This simulates the real-world case where toast() might be called in a
@@ -473,6 +499,10 @@ describe("toast", () => {
 
     // Confirm it rendered exactly once (not duplicated or dropped).
     expect(screen.queryAllByText("cold-path-race-xyz-unique").length).toBe(1);
+
+    // The fresh module owns its own root and a real four-second timer; leave
+    // neither behind for the rest of the file.
+    act(() => resetFreshToasts());
 
     // Restore fake timers for remaining tests in this suite.
     vi.useFakeTimers();
