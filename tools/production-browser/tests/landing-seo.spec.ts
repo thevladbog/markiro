@@ -90,15 +90,20 @@ const routes = [
   ...verificationRoutes,
 ];
 const MARKIRO_MODULE_LAYOUT = [
-  { x: "14", y: "14", color: "rgb(19, 18, 22)" },
-  { x: "14", y: "26", color: "rgb(19, 18, 22)" },
-  { x: "14", y: "38", color: "rgb(19, 18, 22)" },
-  { x: "26", y: "22", color: "rgb(19, 18, 22)" },
-  { x: "38", y: "14", color: "rgb(19, 18, 22)" },
-  { x: "38", y: "26", color: "rgb(19, 18, 22)" },
-  { x: "38", y: "38", color: "rgb(19, 18, 22)" },
-  { x: "26", y: "42", color: "rgb(61, 220, 122)" },
+  { x: "14", y: "14", accent: false },
+  { x: "14", y: "26", accent: false },
+  { x: "14", y: "38", accent: false },
+  { x: "26", y: "22", accent: false },
+  { x: "38", y: "14", accent: false },
+  { x: "38", y: "26", accent: false },
+  { x: "38", y: "38", accent: false },
+  { x: "26", y: "42", accent: true },
 ];
+
+const BRAND_COLORS = {
+  dark: { module: "rgb(19, 18, 22)", accent: "rgb(61, 220, 122)", tile: "rgb(250, 250, 248)" },
+  light: { module: "rgb(250, 250, 248)", accent: "rgb(15, 175, 86)", tile: "rgb(23, 22, 26)" },
+} as const;
 
 test("cookie panel reveals granular controls only after an explicit settings action", async ({
   page,
@@ -367,12 +372,15 @@ test("article hero keeps a clear heading hierarchy", async ({ page }) => {
   expect(sizes.heading).toBeGreaterThan(sizes.lead * 1.5);
 });
 
-for (const [route, wordmark] of [
-  ["/", "маркиро"],
-  ["/en/", "MARKIRO"],
+for (const [route, wordmark, theme] of [
+  ["/", "маркиро", "light"],
+  ["/en/", "MARKIRO", "light"],
+  ["/sscc-i-agregatsiya/", "маркиро", "dark"],
+  ["/en/sscc-and-aggregation/", "MARKIRO", "dark"],
 ] as const) {
   test(`${route} renders the localized exact brand in its header and footer`, async ({ page }) => {
     await page.goto(route);
+    const colors = BRAND_COLORS[theme as "light" | "dark"];
     for (const brand of [page.locator("header .brand-mark"), page.locator("footer .brand-mark")]) {
       await expect(brand.locator(".brand-mark__word")).toHaveText(wordmark);
       await expect(brand.locator("[data-brand-module]")).toHaveCount(8);
@@ -390,17 +398,17 @@ for (const [route, wordmark] of [
           }),
         ),
       ).toEqual(
-        MARKIRO_MODULE_LAYOUT.map(({ x, y, color }) => ({
+        MARKIRO_MODULE_LAYOUT.map(({ x, y, accent }) => ({
           x,
           y,
           width: "8",
           height: "8",
-          color,
+          color: accent ? colors.accent : colors.module,
         })),
       );
       expect(
         await brand.locator(".brand-mark__tile").evaluate((tile) => getComputedStyle(tile).fill),
-      ).toBe("rgb(250, 250, 248)");
+      ).toBe(colors.tile);
       await expect(brand.locator("[data-brand-accent]")).toHaveCount(1);
       await expect(brand.locator("[data-brand-accent]")).toHaveAttribute("x", "26");
       await expect(brand.locator("[data-brand-accent]")).toHaveAttribute("y", "42");
