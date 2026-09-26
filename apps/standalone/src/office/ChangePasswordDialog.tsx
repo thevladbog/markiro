@@ -1,5 +1,5 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { z } from "zod";
@@ -29,8 +29,6 @@ const passwordSchema = z.object({
 
 type PasswordValues = z.infer<typeof passwordSchema>;
 
-const FORM_ID = "office-password-form";
-
 export interface ChangePasswordDialogProps {
   open: boolean;
   onClose: () => void;
@@ -40,6 +38,7 @@ export interface ChangePasswordDialogProps {
 export function ChangePasswordDialog({ open, onClose, onChanged }: ChangePasswordDialogProps) {
   const { t } = useTranslation();
   const session = useOfficeSession();
+  const formId = useId();
   const [submitError, setSubmitError] = useState<string | null>(null);
   const {
     register,
@@ -100,14 +99,14 @@ export function ChangePasswordDialog({ open, onClose, onChanged }: ChangePasswor
           <Button variant="secondary" onClick={close} disabled={isSubmitting}>
             {t("office.password.cancel")}
           </Button>
-          <Button type="submit" form={FORM_ID} loading={isSubmitting}>
+          <Button type="submit" form={formId} loading={isSubmitting}>
             {t("office.password.submit")}
           </Button>
         </>
       }
     >
       <form
-        id={FORM_ID}
+        id={formId}
         className="standalone-form"
         onSubmit={(event) => void submit(event)}
         noValidate

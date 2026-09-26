@@ -66,4 +66,14 @@ describe("BootstrapWizard", () => {
     expect(await screen.findByText("Служба хоста на этом компьютере не отвечает.")).toBeTruthy();
     expect(screen.getByText("Шаг 5 из 5 · Проверка")).toBeTruthy();
   });
+
+  it("clears the submit error banner when going back to fix a step", async () => {
+    const onSubmit = vi.fn().mockRejectedValue(new DeviceError("unreachable", "down"));
+    render(<BootstrapWizard onSubmit={onSubmit} />);
+    await completeWizard();
+    expect(await screen.findByText("Служба хоста на этом компьютере не отвечает.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Назад" }));
+    await screen.findByText("Шаг 4 из 5 · Линии");
+    expect(screen.queryByText("Служба хоста на этом компьютере не отвечает.")).toBeNull();
+  });
 });

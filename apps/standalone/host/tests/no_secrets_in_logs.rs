@@ -104,6 +104,48 @@ async fn secrets_never_reach_the_process_log() {
         .unwrap();
     assert_eq!(password_changed.status(), 204);
 
+    // The admin's reset ended the technologist's session, so they log back in
+    // with the password just set...
+    let tech_relogin: serde_json::Value = client
+        .post(format!("{base}/v1/office/login"))
+        .header(protocol.0, &protocol.1)
+        .bearer_auth(&key)
+        .json(&json!({ "login": "tech", "password": tech_new_password }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let tech_new_token = tech_relogin["token"].as_str().unwrap().to_owned();
+
+    // ...and changes their own password: first rejected with the wrong
+    // current password...
+    let wrong_current_password = "wrong technologist current password";
+    let third_password = "third long technologist password";
+    let self_change_wrong = client
+        .put(format!("{base}/v1/office/me/password"))
+        .header(protocol.0, &protocol.1)
+        .header(markiro_proto::OFFICE_SESSION_HEADER, &tech_new_token)
+        .bearer_auth(&key)
+        .json(&json!({ "currentPassword": wrong_current_password, "newPassword": third_password }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(self_change_wrong.status(), 401);
+
+    // ...then accepted with the right one.
+    let self_change = client
+        .put(format!("{base}/v1/office/me/password"))
+        .header(protocol.0, &protocol.1)
+        .header(markiro_proto::OFFICE_SESSION_HEADER, &tech_new_token)
+        .bearer_auth(&key)
+        .json(&json!({ "currentPassword": tech_new_password, "newPassword": third_password }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(self_change.status(), 204);
+
     // A wrong device key and a wrong session token are both rejected...
     let wrong_device_key = "not-a-real-device-key";
     let wrong_device = client
@@ -157,10 +199,13 @@ async fn secrets_never_reach_the_process_log() {
         key,
         token,
         tech_token,
+        tech_new_token,
         "correct horse battery".to_owned(),
         "not the password".to_owned(),
         "technologist password".to_owned(),
         tech_new_password.to_owned(),
+        wrong_current_password.to_owned(),
+        third_password.to_owned(),
         wrong_device_key.to_owned(),
         wrong_session_token.to_owned(),
         salt_hex,

@@ -227,7 +227,15 @@ export function App({ probe, device, host, address = LOCAL_HOST_ADDRESS }: AppPr
       {view.kind === "bootstrap" && <BootstrapWizard onSubmit={bootstrap} />}
       {view.kind === "pairing" && <WaitScreen messageKey="shell.pairing.title" />}
       {view.kind === "pair_failed" && (
-        <PairFailedScreen code={view.code} onRetry={() => dispatch({ type: "pairing_retried" })} />
+        <PairFailedScreen
+          code={view.code}
+          onRetry={() => {
+            // A stale probe snapshot can carry the wrong host identity (e.g.
+            // after a host swap): re-probe as well, not just the pairing.
+            dispatch({ type: "pairing_retried" });
+            retryProbe();
+          }}
+        />
       )}
       {view.kind === "device_rejected" && (
         <DeviceRejectedScreen

@@ -27,8 +27,16 @@ function probeAnswering(...answers: Array<boolean | HostProbeError>) {
   return { hello };
 }
 
-/** `pairLocally` rejects with `already_paired` once paired, like the real shell. */
-function fakeDevice(initial: DeviceStatus | null | DeviceError) {
+/**
+ * `pairLocally` rejects with `already_paired` once paired, like the real
+ * shell. `pairResult` is what a fresh `pairLocally` call returns; it defaults
+ * to `DEVICE_STATUS` and only needs overriding when a test pairs against a
+ * host whose identity differs from that fixture (e.g. a reinstalled host).
+ */
+function fakeDevice(
+  initial: DeviceStatus | null | DeviceError,
+  pairResult: DeviceStatus = DEVICE_STATUS,
+) {
   let paired: DeviceStatus | null = initial instanceof DeviceError ? null : initial;
   let broken = initial instanceof DeviceError ? initial : null;
   return {
@@ -38,8 +46,8 @@ function fakeDevice(initial: DeviceStatus | null | DeviceError) {
     }),
     pairLocally: vi.fn<DeviceApi["pairLocally"]>(async () => {
       if (paired) throw new DeviceError("already_paired", "already paired");
-      paired = DEVICE_STATUS;
-      return DEVICE_STATUS;
+      paired = pairResult;
+      return pairResult;
     }),
     forget: vi.fn<DeviceApi["forget"]>(async () => {
       paired = null;
@@ -103,7 +111,7 @@ describe("App", () => {
     expect(device.pairLocally).not.toHaveBeenCalled();
   });
 
-  it("adopts pairing under StrictMode's double effects", async () => {
+  it("pairs this computer exactly once under StrictMode", async () => {
     const device = fakeDevice(null);
     const host = fakeHost();
     render(
@@ -114,6 +122,7 @@ describe("App", () => {
       </StrictMode>,
     );
     expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(device.pairLocally).toHaveBeenCalledTimes(1);
   });
 
   it("pairs with an initialized host and opens the office from the floor", async () => {
@@ -302,7 +311,7 @@ describe("App", () => {
     expect(await screen.findByText("Настройки подключения повреждены")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Сбросить подключение" }));
     expect(
-      await screen.findByText("Не удалось сохранить настройки подключения на этом компьютере."),
+      await screen.findByText("Не удалось изменить настройки подключения на этом компьютере."),
     ).toBeTruthy();
     expect(screen.getByText("Настройки подключения повреждены")).toBeTruthy();
     expect(device.forget).toHaveBeenCalledTimes(1);
@@ -330,13 +339,56 @@ describe("App", () => {
     ).toBeTruthy();
   });
 
-  it("retries a failed pairing", async () => {
+  it("retries a failed pairing by re-probing the host, not just the pairing", async () => {
     const device = fakeDevice(null);
     device.pairLocally.mockRejectedValueOnce(new DeviceError("pair_rejected", "no"));
-    renderApp({ probe: probeAnswering(true), device, host: fakeHost() });
+    const probe = probeAnswering(true);
+    renderApp({ probe, device, host: fakeHost() });
     expect(await screen.findByText("Не удалось подключиться к хосту")).toBeTruthy();
     expect(screen.getByText("Хост отказал в подключении этого устройства.")).toBeTruthy();
+    const helloCallsBeforeRetry = probe.hello.mock.calls.length;
     fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
     expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(probe.hello.mock.calls.length).toBe(helloCallsBeforeRetry + 1);
+    expect(device.pairLocally).toHaveBeenCalledTimes(2);
+  });
+
+  it("recovers from a reinstalled host: rejects, reconnects, re-pairs and reaches the floor", async () => {
+    // The local host now presents a different identity than the one pinned
+    // at pairing (a reinstall, or a database restored from a copy).
+    const reinstalled = observation(true);
+    reinstalled.hello.hostId = "0e2b1f7a-6c1d-4b8e-9f3a-2d4c5b6a7e8f";
+    reinstalled.fingerprint = "cd".repeat(32);
+    const probe = { hello: vi.fn<HostProbe["hello"]>(async () => reinstalled) };
+    const newStatus: DeviceStatus = {
+      ...DEVICE_STATUS,
+      hostId: reinstalled.hello.hostId,
+      fingerprint: reinstalled.fingerprint,
+    };
+    const device = fakeDevice(DEVICE_STATUS, newStatus);
+    renderApp({ probe, device, host: fakeHost() });
+    expect(
+      await screen.findByText(
+        "Хост на этом компьютере сменился: его сертификат не совпадает с сохранённым при подключении.",
+      ),
+    ).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Подключить заново" }));
+    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(device.forget).toHaveBeenCalledTimes(1);
+    expect(device.pairLocally).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the version screen, not the floor, for a paired device behind an incompatible host", async () => {
+    renderApp({
+      probe: probeAnswering(new HostProbeError("app_too_old", "old")),
+      device: fakeDevice(DEVICE_STATUS),
+      host: fakeHost(),
+    });
+    expect(await screen.findByText("Версии не совпадают")).toBeTruthy();
+    expect(
+      screen.getByText("Это приложение старее службы «Markiro Хост». Обновите приложение."),
+    ).toBeTruthy();
+    expect(screen.queryByText("Цех")).toBeNull();
   });
 });

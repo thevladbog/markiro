@@ -33,7 +33,9 @@ pub enum RequestError {
     CertificateMismatch,
     /// The host answered with a body that is not JSON.
     InvalidResponse,
-    /// The method or path is not allowed.
+    /// The request cannot be sent as asked: the method or path is not
+    /// allowed, the office token is not a valid header value, or the host
+    /// address is not HTTPS.
     InvalidRequest,
 }
 

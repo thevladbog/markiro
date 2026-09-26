@@ -138,7 +138,10 @@ fn write_owner_only(path: &Path, data: &[u8]) -> std::io::Result<()> {
     file.sync_all()
 }
 
-/// Make the rename durable (Unix); Windows commits the rename itself.
+/// Make the rename durable on Unix by syncing the directory. On Windows this
+/// is a no-op: `std::fs::rename` does not ask for write-through, so a power
+/// loss right after it can bring back the previous `device.json` (or none);
+/// the new file's contents were already synced before the rename.
 #[cfg(unix)]
 fn sync_dir(dir: &Path) -> std::io::Result<()> {
     fs::File::open(dir)?.sync_all()

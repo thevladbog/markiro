@@ -70,6 +70,7 @@ export function BootstrapWizard({ onSubmit }: BootstrapWizardProps) {
   };
 
   const goNext = () => {
+    setSubmitError(null);
     clearErrors();
     const issues = validateStep(step, getValues());
     if (issues.length > 0) {
@@ -81,6 +82,7 @@ export function BootstrapWizard({ onSubmit }: BootstrapWizardProps) {
   };
 
   const goBack = () => {
+    setSubmitError(null);
     clearErrors();
     const previous = WIZARD_STEPS[position - 1];
     if (previous) setStep(previous);
