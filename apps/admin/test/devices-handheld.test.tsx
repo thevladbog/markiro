@@ -6,8 +6,10 @@ import { afterEach, expect, it, vi } from "vitest";
 import { CABINET_CAPABILITY } from "@markiro/domain";
 import { ThemeProvider } from "@markiro/ui";
 import { AccessProvider } from "../src/access/context.js";
+import { AuthClientProvider } from "../src/auth/client.js";
 import i18n from "../src/i18n/index.js";
 import { DevicesPage } from "../src/pages/devices/index.js";
+import { inertAuthClient } from "./helpers/auth-client.js";
 
 vi.mock("../src/layout/useActiveOrg.js", () => ({
   useActiveOrg: () => ({ orgId: "org-1", orgName: "Factory" }),
@@ -48,20 +50,22 @@ function renderPage(fetchMock: ReturnType<typeof vi.fn>) {
       }
     >
       <ThemeProvider defaultTheme="light">
-        <MemoryRouter>
-          <AccessProvider
-            value={{
-              roles: ["admin"],
-              capabilities: [
-                CABINET_CAPABILITY.OPERATIONS_READ,
-                CABINET_CAPABILITY.OPERATIONS_WRITE,
-                CABINET_CAPABILITY.CREDENTIALS_MANAGE,
-              ],
-            }}
-          >
-            <DevicesPage />
-          </AccessProvider>
-        </MemoryRouter>
+        <AuthClientProvider client={inertAuthClient()}>
+          <MemoryRouter>
+            <AccessProvider
+              value={{
+                roles: ["admin"],
+                capabilities: [
+                  CABINET_CAPABILITY.OPERATIONS_READ,
+                  CABINET_CAPABILITY.OPERATIONS_WRITE,
+                  CABINET_CAPABILITY.CREDENTIALS_MANAGE,
+                ],
+              }}
+            >
+              <DevicesPage />
+            </AccessProvider>
+          </MemoryRouter>
+        </AuthClientProvider>
       </ThemeProvider>
     </QueryClientProvider>,
   );

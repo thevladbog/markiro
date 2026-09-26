@@ -10,11 +10,13 @@ import { ThemeProvider } from "@markiro/ui";
 
 import type { AccessDocument } from "../src/access/api.js";
 import { AccessProvider, RequireCapability } from "../src/access/context.js";
+import { AuthClientProvider } from "../src/auth/client.js";
 import i18n from "../src/i18n/index.js";
 import type * as KiosksApiModule from "../src/pages/kiosks/api.js";
 import { KioskPairingPanelRoute } from "../src/pages/kiosks/KioskPairingPanelRoute.js";
 import { KioskCreatePanelRoute, KioskEditPanelRoute } from "../src/pages/kiosks/KioskPanelRoute.js";
 import { DevicesPage } from "../src/pages/devices/index.js";
+import { inertAuthClient } from "./helpers/auth-client.js";
 import { jsonResponse } from "./helpers/http.js";
 
 vi.mock("../src/layout/useActiveOrg.js", () => ({
@@ -203,9 +205,11 @@ function renderKiosksRouter(
   render(
     <QueryClientProvider client={queryClient}>
       <ThemeProvider defaultTheme="light">
-        <AccessProvider value={access}>
-          <RouterProvider router={router} />
-        </AccessProvider>
+        <AuthClientProvider client={inertAuthClient()}>
+          <AccessProvider value={access}>
+            <RouterProvider router={router} />
+          </AccessProvider>
+        </AuthClientProvider>
       </ThemeProvider>
     </QueryClientProvider>,
   );

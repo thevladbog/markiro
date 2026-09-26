@@ -6,17 +6,17 @@ import { afterEach, expect, it, vi } from "vitest";
 import { CABINET_CAPABILITY } from "@markiro/domain";
 import { ThemeProvider } from "@markiro/ui";
 import { AccessProvider } from "../src/access/context.js";
-import { AuthClientProvider, type AuthClientLike } from "../src/auth/client.js";
+import { AuthClientProvider } from "../src/auth/client.js";
 import i18n from "../src/i18n/index.js";
 import { DevicesPage } from "../src/pages/devices/index.js";
+
+import { inertAuthClient } from "./helpers/auth-client.js";
 
 vi.mock("../src/layout/useActiveOrg.js", () => ({
   useActiveOrg: () => ({ orgId: "org-1", orgName: "Factory" }),
 }));
 
-const testAuthClient = {
-  useSession: () => ({ data: null, isPending: false, error: null, refetch: async () => undefined }),
-} as unknown as AuthClientLike;
+const testAuthClient = inertAuthClient();
 
 function response(body: unknown): Response {
   return {
@@ -241,20 +241,22 @@ it("sends filter and pager state to the bounded devices endpoint", async () => {
       client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
     >
       <ThemeProvider defaultTheme="light">
-        <MemoryRouter>
-          <AccessProvider
-            value={{
-              roles: ["admin"],
-              capabilities: [
-                CABINET_CAPABILITY.OPERATIONS_READ,
-                CABINET_CAPABILITY.OPERATIONS_WRITE,
-                CABINET_CAPABILITY.CREDENTIALS_MANAGE,
-              ],
-            }}
-          >
-            <DevicesPage />
-          </AccessProvider>
-        </MemoryRouter>
+        <AuthClientProvider client={testAuthClient}>
+          <MemoryRouter>
+            <AccessProvider
+              value={{
+                roles: ["admin"],
+                capabilities: [
+                  CABINET_CAPABILITY.OPERATIONS_READ,
+                  CABINET_CAPABILITY.OPERATIONS_WRITE,
+                  CABINET_CAPABILITY.CREDENTIALS_MANAGE,
+                ],
+              }}
+            >
+              <DevicesPage />
+            </AccessProvider>
+          </MemoryRouter>
+        </AuthClientProvider>
       </ThemeProvider>
     </QueryClientProvider>,
   );
@@ -288,13 +290,15 @@ it("hydrates and clears URL filters independently while resetting the page", asy
       client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
     >
       <ThemeProvider defaultTheme="light">
-        <MemoryRouter initialEntries={["/devices?type=kiosk&status=offline&page=2"]}>
-          <AccessProvider
-            value={{ roles: ["admin"], capabilities: [CABINET_CAPABILITY.OPERATIONS_READ] }}
-          >
-            <DevicesPage />
-          </AccessProvider>
-        </MemoryRouter>
+        <AuthClientProvider client={testAuthClient}>
+          <MemoryRouter initialEntries={["/devices?type=kiosk&status=offline&page=2"]}>
+            <AccessProvider
+              value={{ roles: ["admin"], capabilities: [CABINET_CAPABILITY.OPERATIONS_READ] }}
+            >
+              <DevicesPage />
+            </AccessProvider>
+          </MemoryRouter>
+        </AuthClientProvider>
       </ThemeProvider>
     </QueryClientProvider>,
   );
@@ -321,11 +325,15 @@ it("keeps the stable Station download available when the grant cannot create dev
       client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
     >
       <ThemeProvider defaultTheme="light">
-        <MemoryRouter>
-          <AccessProvider value={{ roles: [], capabilities: [CABINET_CAPABILITY.OPERATIONS_READ] }}>
-            <DevicesPage />
-          </AccessProvider>
-        </MemoryRouter>
+        <AuthClientProvider client={testAuthClient}>
+          <MemoryRouter>
+            <AccessProvider
+              value={{ roles: [], capabilities: [CABINET_CAPABILITY.OPERATIONS_READ] }}
+            >
+              <DevicesPage />
+            </AccessProvider>
+          </MemoryRouter>
+        </AuthClientProvider>
       </ThemeProvider>
     </QueryClientProvider>,
   );
@@ -385,19 +393,21 @@ it("lets a credentials-only operator create and pair a station without operation
       }
     >
       <ThemeProvider defaultTheme="light">
-        <MemoryRouter>
-          <AccessProvider
-            value={{
-              roles: [],
-              capabilities: [
-                CABINET_CAPABILITY.OPERATIONS_READ,
-                CABINET_CAPABILITY.CREDENTIALS_MANAGE,
-              ],
-            }}
-          >
-            <DevicesPage />
-          </AccessProvider>
-        </MemoryRouter>
+        <AuthClientProvider client={testAuthClient}>
+          <MemoryRouter>
+            <AccessProvider
+              value={{
+                roles: [],
+                capabilities: [
+                  CABINET_CAPABILITY.OPERATIONS_READ,
+                  CABINET_CAPABILITY.CREDENTIALS_MANAGE,
+                ],
+              }}
+            >
+              <DevicesPage />
+            </AccessProvider>
+          </MemoryRouter>
+        </AuthClientProvider>
       </ThemeProvider>
     </QueryClientProvider>,
   );
@@ -443,19 +453,21 @@ it("lets an operations-only user create a kiosk without issuing a pairing code",
       }
     >
       <ThemeProvider defaultTheme="light">
-        <MemoryRouter>
-          <AccessProvider
-            value={{
-              roles: ["manager"],
-              capabilities: [
-                CABINET_CAPABILITY.OPERATIONS_READ,
-                CABINET_CAPABILITY.OPERATIONS_WRITE,
-              ],
-            }}
-          >
-            <DevicesPage />
-          </AccessProvider>
-        </MemoryRouter>
+        <AuthClientProvider client={testAuthClient}>
+          <MemoryRouter>
+            <AccessProvider
+              value={{
+                roles: ["manager"],
+                capabilities: [
+                  CABINET_CAPABILITY.OPERATIONS_READ,
+                  CABINET_CAPABILITY.OPERATIONS_WRITE,
+                ],
+              }}
+            >
+              <DevicesPage />
+            </AccessProvider>
+          </MemoryRouter>
+        </AuthClientProvider>
       </ThemeProvider>
     </QueryClientProvider>,
   );
@@ -495,20 +507,22 @@ it("keeps the drawer open in its code stage after creating a kiosk", async () =>
       }
     >
       <ThemeProvider defaultTheme="light">
-        <MemoryRouter>
-          <AccessProvider
-            value={{
-              roles: ["admin"],
-              capabilities: [
-                CABINET_CAPABILITY.OPERATIONS_READ,
-                CABINET_CAPABILITY.OPERATIONS_WRITE,
-                CABINET_CAPABILITY.CREDENTIALS_MANAGE,
-              ],
-            }}
-          >
-            <DevicesPage />
-          </AccessProvider>
-        </MemoryRouter>
+        <AuthClientProvider client={testAuthClient}>
+          <MemoryRouter>
+            <AccessProvider
+              value={{
+                roles: ["admin"],
+                capabilities: [
+                  CABINET_CAPABILITY.OPERATIONS_READ,
+                  CABINET_CAPABILITY.OPERATIONS_WRITE,
+                  CABINET_CAPABILITY.CREDENTIALS_MANAGE,
+                ],
+              }}
+            >
+              <DevicesPage />
+            </AccessProvider>
+          </MemoryRouter>
+        </AuthClientProvider>
       </ThemeProvider>
     </QueryClientProvider>,
   );
