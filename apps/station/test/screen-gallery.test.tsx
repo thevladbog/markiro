@@ -749,6 +749,96 @@ describe("development screen gallery", () => {
     },
   );
 
+  // MKR-INS-02 and 03 capture the pallet screens, so they render the production
+  // components rather than stand-ins.
+  it.each(["ru", "en"] as const)("renders a closed pallet whose label printed in %s", (locale) => {
+    const t = i18n.getFixedT(locale);
+    render(<StationScreenGallery request={{ state: "pallet-close-printed", locale }} />);
+
+    const dialog = screen.getByRole("dialog", { name: t("pallet.closed") });
+    expect(within(dialog).getByText(t("pallet.boxCount", { count: 66 }))).toBeDefined();
+    expect(within(dialog).getByText(t("pallet.sscc"))).toBeDefined();
+    expect(within(dialog).getByText(t("pallet.printed"))).toBeDefined();
+    expect(within(dialog).getByRole("button", { name: t("work.continue") })).toBeDefined();
+    expect(within(dialog).queryByRole("button", { name: t("printerRouting.changePrinter") })).toBe(
+      null,
+    );
+  });
+
+  it.each(["ru", "en"] as const)(
+    "renders a closed pallet whose label print is unknown in %s",
+    (locale) => {
+      const t = i18n.getFixedT(locale);
+      render(<StationScreenGallery request={{ state: "pallet-close-unknown", locale }} />);
+
+      const dialog = screen.getByRole("dialog", { name: t("pallet.closed") });
+      expect(within(dialog).getByText(t("pallet.printUnknown"))).toBeDefined();
+      expect(
+        within(dialog).getByRole("button", { name: t("pallet.confirmPrinted") }),
+      ).toBeDefined();
+      expect(within(dialog).getByRole("button", { name: t("pallet.reprint") })).toBeDefined();
+      expect(
+        within(dialog).getByRole("button", { name: t("printerRouting.changePrinter") }),
+      ).toBeDefined();
+    },
+  );
+
+  it.each(["ru", "en"] as const)(
+    "renders the pallet disassembly reasons inside the active work screen in %s",
+    async (locale) => {
+      const t = i18n.getFixedT(locale);
+      render(<StationScreenGallery request={{ state: "pallet-exceptions-reason", locale }} />);
+
+      expect(
+        await screen.findByRole("heading", { name: t("pallet.disassembleAction") }),
+      ).toBeDefined();
+      for (const reason of [
+        t("pallet.reasons.disassemble.damagedPallet"),
+        t("pallet.reasons.disassemble.wrongBoxes"),
+        t("pallet.reasons.disassemble.qualityRejected"),
+        t("box.reasons.other"),
+      ]) {
+        expect(screen.getByRole("button", { name: reason })).toBeDefined();
+      }
+      expectActiveShiftChrome(t);
+    },
+  );
+
+  it("lists the same boxes in the pallet contents as the owner's pallet strip counts", async () => {
+    const t = i18n.getFixedT("ru");
+    render(<StationScreenGallery request={{ state: "work-pallet-20", locale: "ru" }} />);
+
+    fireEvent.click(screen.getByRole("button", { name: t("pallet.contents") }));
+    const contents = await screen.findByRole("region", { name: t("pallet.contents") });
+    expect(await within(contents).findByText(t("pallet.boxCount", { count: 15 }))).toBeDefined();
+    expect(within(contents).getAllByRole("row")).toHaveLength(16);
+    expect(within(contents).getByText("004601234560619998")).toBeDefined();
+  });
+
+  // WorkScreen keeps its footer under the exception flows, and an active shift
+  // collapses the status bar, so the gallery must show both.
+  it.each(["exception-action", "exception-reason", "exception-result"] as const)(
+    "renders %s inside the active work screen chrome",
+    async (state) => {
+      const t = i18n.getFixedT("ru");
+      render(<StationScreenGallery request={{ state, locale: "ru" }} />);
+      await waitFor(() => expectActiveShiftChrome(t));
+    },
+  );
+
+  function expectActiveShiftChrome(t: ReturnType<typeof i18n.getFixedT>): void {
+    const statusBar = screen.getByRole("banner", { name: t("shell.statusBar") });
+    expect(statusBar.getAttribute("data-collapsed")).toBe("true");
+    const footer = screen.getByRole("contentinfo", {
+      name: `${t("work.exceptions")}, ${t("work.pause")}, ${t("work.closeShift")}`,
+    });
+    expect(
+      within(footer)
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual([t("work.exceptions"), t("work.pause"), t("work.closeShift")]);
+  }
+
   it("renders deterministic installed metadata in the current-version gallery", async () => {
     render(<StationScreenGallery request={{ state: "update-current", locale: "ru" }} />);
 
