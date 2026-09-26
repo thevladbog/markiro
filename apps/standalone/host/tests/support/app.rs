@@ -108,3 +108,46 @@ pub async fn pair_device(app: &TestApp, kind: &str) -> (String, String) {
         body["deviceKey"].as_str().unwrap().to_owned(),
     )
 }
+
+/// Insert an active office user directly; returns its id.
+pub async fn seed_office_user(app: &TestApp, login: &str, role: &str, password: &str) -> String {
+    let id = uuid::Uuid::new_v4().to_string();
+    let phc = markiro_host::secrets::hash_password(password);
+    let mut tx = markiro_host::db::begin_write(&app.state.pool)
+        .await
+        .unwrap();
+    let rev = markiro_host::db::next_revision(&mut tx).await.unwrap();
+    sqlx::query(
+        "INSERT INTO office_users (id, login, name, role, password_phc, active, created_at, rev) \
+         VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
+    )
+    .bind(&id)
+    .bind(login)
+    .bind(format!("Пользователь {login}"))
+    .bind(role)
+    .bind(phc)
+    .bind(app.state.timestamp())
+    .bind(rev)
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+    id
+}
+
+/// Add the device key and the office session token.
+pub fn with_session(builder: Builder, device_key: &str, token: &str) -> Builder {
+    with_device(builder, device_key).header(markiro_proto::OFFICE_SESSION_HEADER, token)
+}
+
+/// Log in on the device; returns the session token.
+pub async fn login(app: &TestApp, device_key: &str, login: &str, password: &str) -> String {
+    let (status, body) = app
+        .send(json(
+            with_device(request("POST", "/v1/office/login"), device_key),
+            serde_json::json!({ "login": login, "password": password }),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    body["token"].as_str().unwrap().to_owned()
+}

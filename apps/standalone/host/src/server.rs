@@ -28,6 +28,7 @@ pub struct AppState {
     pub pool: SqlitePool,
     pub host_id: String,
     pub clock: Arc<dyn Clock>,
+    pub login_limiter: Arc<crate::rate_limit::RateLimiter>,
 }
 
 impl AppState {
@@ -35,6 +36,11 @@ impl AppState {
         Self {
             pool,
             host_id,
+            login_limiter: Arc::new(crate::rate_limit::RateLimiter::new(
+                10,
+                time::Duration::minutes(1),
+                clock.clone(),
+            )),
             clock,
         }
     }
@@ -63,6 +69,12 @@ fn protected_routes() -> Router<AppState> {
     Router::new()
         .route("/v1/local-pair", post(crate::routes::pairing::local_pair))
         .route("/v1/device", get(crate::routes::pairing::device_info))
+        .route("/v1/office/login", post(crate::routes::office_auth::login))
+        .route(
+            "/v1/office/logout",
+            post(crate::routes::office_auth::logout),
+        )
+        .route("/v1/office/me", get(crate::routes::office_auth::me))
 }
 
 /// Every route except `hello` requires a supported protocol version

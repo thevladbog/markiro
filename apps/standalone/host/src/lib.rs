@@ -8,12 +8,14 @@ pub mod config;
 pub mod db;
 pub mod error;
 pub mod logging;
+pub mod rate_limit;
 pub mod routes;
 pub mod secrets;
 pub mod server;
 #[cfg(windows)]
 pub mod service;
 pub mod tls;
+pub mod validate;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 

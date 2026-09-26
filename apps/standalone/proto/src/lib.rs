@@ -19,6 +19,8 @@ pub const PROTOCOL_VERSION: u32 = 1;
 pub const MIN_PROTOCOL_VERSION: u32 = 1;
 /// Request header carrying the client's protocol version.
 pub const PROTOCOL_HEADER: &str = "x-markiro-protocol";
+/// Request header carrying the office session token.
+pub const OFFICE_SESSION_HEADER: &str = "x-office-session";
 /// `product` value the host reports in [`Hello`].
 pub const HOST_PRODUCT: &str = "markiro-host";
 /// Default TCP port of the host (IANA-unassigned range 45679-45823).
@@ -197,4 +199,49 @@ pub struct DeviceInfo {
     pub name: String,
     pub line_id: Option<String>,
     pub paired_at: String,
+}
+
+/// Role of an office user.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OfficeRole {
+    Admin,
+    Technologist,
+}
+
+impl OfficeRole {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            OfficeRole::Admin => "admin",
+            OfficeRole::Technologist => "technologist",
+        }
+    }
+}
+
+/// `POST /v1/office/login`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OfficeLoginRequest {
+    pub login: String,
+    pub password: String,
+}
+
+/// The signed-in office user.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OfficeUser {
+    pub id: String,
+    pub login: String,
+    pub name: String,
+    pub role: OfficeRole,
+}
+
+/// A new office session; the token is shown exactly once.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OfficeSession {
+    pub token: String,
+    pub user: OfficeUser,
+    /// Absolute expiry; the session also ends after 30 idle minutes.
+    pub expires_at: String,
 }

@@ -1,7 +1,8 @@
 use markiro_proto::{
     certificate_fingerprint, codes, compatibility, compatibility_for, display_fingerprint,
     Compatibility, DeviceInfo, DeviceKind, ErrorBody, Hello, HelloEnvelope, LocalPairRequest,
-    PairResponse, HOST_PRODUCT, PROTOCOL_VERSION,
+    OfficeLoginRequest, OfficeRole, OfficeSession, OfficeUser, PairResponse, HOST_PRODUCT,
+    PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -96,4 +97,13 @@ fn requests_reject_unknown_fields() {
     let mut value = fixture("local-pair-request.json");
     value["extra"] = Value::Bool(true);
     assert!(serde_json::from_value::<LocalPairRequest>(value).is_err());
+}
+
+#[test]
+fn office_auth_fixtures_round_trip() {
+    let _: OfficeLoginRequest = round_trip("office-login-request.json");
+    let user: OfficeUser = round_trip("office-user.json");
+    assert_eq!(user.role, OfficeRole::Admin);
+    let session: OfficeSession = round_trip("office-session.json");
+    assert_eq!(session.user, user);
 }
