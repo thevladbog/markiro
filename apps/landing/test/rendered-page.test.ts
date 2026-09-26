@@ -8,6 +8,7 @@ import { JSDOM } from "jsdom";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { findFilmPage } from "../src/content/film";
+import { projectHomeMap } from "../src/scripts/film/world/home-map";
 
 const appRoot = fileURLToPath(new URL("../", import.meta.url));
 const outputDirectory = mkdtempSync(path.join(tmpdir(), "markiro-landing-render-"));
@@ -1344,6 +1345,7 @@ describe("rendered landing page", () => {
       "#product-kiosk",
       "#product-office",
     ];
+    const points = projectHomeMap();
     for (const [route, heading, alt, labels] of [
       ["/", "Линия идёт.", "Макет завода", ["Линия", "Упаковка", "Склад", "Киоск", "Офис"]],
       [
@@ -1360,11 +1362,16 @@ describe("rendered landing page", () => {
         labels,
       );
       expect(spots.map((spot) => spot.querySelector("a")?.getAttribute("href"))).toEqual(targets);
-      for (const spot of spots) {
+      for (const [index, spot] of spots.entries()) {
         const [, left, top] =
           /left: ([\d.]+)%; top: ([\d.]+)%/u.exec(spot.getAttribute("style") ?? "") ?? [];
         expect(Number(left)).toBeGreaterThan(42);
         expect(Number(top)).toBeGreaterThan(8);
+        const point = points[index];
+        expect(point, `${route} spot ${index}`).toBeDefined();
+        if (point === undefined) continue;
+        expect(Number(left)).toBeCloseTo(point.x * 100, 1);
+        expect(Number(top)).toBeCloseTo(point.y * 100, 1);
         const tipId = spot.querySelector("a")?.getAttribute("aria-describedby") ?? "";
         expect(hero?.querySelector(`#${tipId}[role="tooltip"] img[alt]`), tipId).not.toBeNull();
       }
@@ -1842,7 +1849,7 @@ describe("rendered film page", () => {
   ] as const)("%s links its hero to the film", (route, href, label) => {
     const home = documents.get(route) as Document;
     const link = home.querySelector<HTMLAnchorElement>(`#hero a[href="${href}"]`);
-    expect(link?.textContent?.replace(/\s+/g, " ").trim()).toContain(label);
+    expect(link?.textContent?.replace(/\s+/g, " ").trim()).toBe(`${label} →`);
   });
 
   it("keeps the header demo button on the film page instead of sending visitors home", () => {

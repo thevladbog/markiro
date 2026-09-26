@@ -33,6 +33,26 @@ const [wideAvif, wideWebp, phoneAvif, phoneWebp] = await Promise.all([
 ---
 
 <section class="home-hero" id="hero" aria-labelledby="hero-title">
+  <div class="container home-hero__content">
+    <p class="section-index">{copy.kicker}</p>
+    <h1 id="hero-title">{copy.heading[0]}<br />{copy.heading[1]}</h1>
+    <p class="home-hero__lead">{copy.lead}</p>
+    <div class="home-hero__actions">
+      <a class="button" href="#demo" data-analytics="landing_demo_click" data-placement="hero">
+        {ui.common.requestDemoShort} <span aria-hidden="true">→</span>
+      </a>
+      {phone && (
+        <a class="home-hero__phone" href={phone.href} data-analytics="landing_phone_click" data-placement="hero">
+          {phone.display}
+        </a>
+      )}
+      <a class="home-hero__film-link" href={findFilmPage(locale).path}>
+        {copy.filmLink} <span aria-hidden="true">→</span>
+      </a>
+    </div>
+    <p class="home-hero__hint">{copy.hint}</p>
+  </div>
+
   <div class="home-hero__stage">
     <picture>
       <source media="(max-width: 1023px)" type="image/avif" srcset={phoneAvif.srcSet.attribute} sizes="100vw" />
@@ -82,26 +102,6 @@ const [wideAvif, wideWebp, phoneAvif, phoneWebp] = await Promise.all([
         );
       })}
     </ul>
-  </div>
-
-  <div class="container home-hero__content">
-    <p class="section-index">{copy.kicker}</p>
-    <h1 id="hero-title">{copy.heading[0]}<br />{copy.heading[1]}</h1>
-    <p class="home-hero__lead">{copy.lead}</p>
-    <div class="home-hero__actions">
-      <a class="button" href="#demo" data-analytics="landing_demo_click" data-placement="hero">
-        {ui.common.requestDemoShort} <span aria-hidden="true">→</span>
-      </a>
-      {phone && (
-        <a class="home-hero__phone" href={phone.href} data-analytics="landing_phone_click" data-placement="hero">
-          {phone.display}
-        </a>
-      )}
-      <a class="home-hero__film-link" href={findFilmPage(locale).path}>
-        {copy.filmLink} <span aria-hidden="true">→</span>
-      </a>
-    </div>
-    <p class="home-hero__hint">{copy.hint}</p>
   </div>
 
   <nav class="home-hero__strip" aria-label={copy.stripLabel}>
