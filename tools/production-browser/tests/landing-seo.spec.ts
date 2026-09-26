@@ -3,6 +3,12 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+// Headless Chromium has no GPU; SwiftShader provides WebGL 2 for the film tests below.
+// This config caps workers at 1, so a describe-scoped override would need a second
+// worker and Playwright refuses; the flags are harmless for the file's other, non-WebGL
+// pages, so they are declared once for the whole file instead.
+test.use({ launchOptions: { args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"] } });
+
 interface LegalArtifactManifestEntry {
   readonly fileName: string;
   readonly bytes: number;
@@ -52,6 +58,7 @@ const routes = [
   "/integratsiya-1c/",
   "/oflayn-rabota/",
   "/faq/",
+  "/kak-rabotaet/",
   "/en/",
   "/en/chestny-znak-serialization/",
   "/en/sscc-and-aggregation/",
@@ -69,6 +76,7 @@ const routes = [
   "/en/1c-integration/",
   "/en/offline-production/",
   "/en/faq/",
+  "/en/how-it-works/",
   "/legal/",
   "/privacy/",
   "/personal-data-consent/",
@@ -640,3 +648,44 @@ for (const route of ["/d/mkr-pd-01/2026.08/01/15.08.2026", "/d/MKR-PD-01/2026.08
     expect(body).not.toContain("artifacts.json");
   });
 }
+
+test.describe("film page", () => {
+  test("starts the 3D stage only after the first scroll", async ({ page }) => {
+    await page.goto("/kak-rabotaet/", { waitUntil: "networkidle" });
+    const film = page.locator("[data-film]");
+    await expect(film).not.toHaveClass(/film--live/);
+    await page.evaluate(() => window.scrollBy({ top: 400, behavior: "instant" }));
+    await expect(film).toHaveClass(/film--live/, { timeout: 20_000 });
+    await expect
+      .poll(async () => Number(await film.getAttribute("data-film-time")), { timeout: 10_000 })
+      .toBeGreaterThan(0);
+  });
+
+  test("marks the chapter the rail links to", async ({ page, isMobile }) => {
+    test.skip(isMobile, "the rail is hidden on phones");
+    // The rail follows the scroll position, not the 3D stage. With motion allowed, the first
+    // scroll starts the stage, and on a CI browser without a GPU its build and first
+    // software-rendered frames hold the main thread past this test's timeout.
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/kak-rabotaet/");
+    await page.evaluate(() => window.scrollBy({ top: 2000, behavior: "instant" }));
+    const link = page.locator('[data-film-rail] a[href="#warehouse"]');
+    await expect(link).toBeVisible();
+    await link.click();
+    await expect(link).toHaveAttribute("aria-current", "step");
+  });
+
+  test("keeps the posters and never goes live with reduced motion", async ({ browser }) => {
+    const context = await browser.newContext({
+      baseURL: "http://127.0.0.1:5473",
+      reducedMotion: "reduce",
+    });
+    const page = await context.newPage();
+    await page.goto("/kak-rabotaet/");
+    await page.evaluate(() => window.scrollBy({ top: 1400, behavior: "instant" }));
+    await page.waitForTimeout(1_000);
+    await expect(page.locator("[data-film]")).not.toHaveClass(/film--live/);
+    await expect(page.locator("#line .film-chapter__poster img")).toBeVisible();
+    await context.close();
+  });
+});

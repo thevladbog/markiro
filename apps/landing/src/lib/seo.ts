@@ -4,6 +4,7 @@ import { LEGAL_SEARCH_PAGES } from "../content/legal-pages";
 import { ARTICLE_SEARCH_PAGES, type ArticlePageDefinition } from "../content/articles";
 import { HUB_SEARCH_PAGES, findHubPage, hubPath, type HubPageDefinition } from "../content/hubs";
 import { articlesForLocale } from "../content/articles";
+import { FILM_SEARCH_PAGES, type FilmPageDefinition } from "../content/film";
 import { mirrorPathFor } from "./mirror-path.ts";
 
 export { mirrorPathFor };
@@ -19,6 +20,7 @@ const ORGANIZATION_EMAIL = OPERATOR_PROFILES["operator-2026-08-15"].email;
 const ORGANIZATION_LOGO_PATH = "/brand/markiro-logo.svg";
 const INDEXABLE_PAGES: readonly SearchPageRecord[] = [
   ...MARKETING_SEARCH_PAGES,
+  ...FILM_SEARCH_PAGES,
   ...HUB_SEARCH_PAGES,
   ...ARTICLE_SEARCH_PAGES,
   ...LEGAL_SEARCH_PAGES,
@@ -288,6 +290,27 @@ export function buildHubPageGraph(hub: HubPageDefinition, items: readonly HubIte
           name: item.name,
           url: absoluteUrl(item.path),
         })),
+      },
+    ],
+  };
+}
+
+export function buildFilmPageGraph(page: FilmPageDefinition): PageGraph {
+  const pageUrl = absoluteUrl(page.path);
+  return {
+    "@context": "https://schema.org",
+    "@graph": [
+      websiteNode(),
+      organizationNode(),
+      {
+        "@type": "WebPage",
+        "@id": `${pageUrl}#webpage`,
+        url: pageUrl,
+        name: page.title,
+        description: page.description,
+        inLanguage: page.locale,
+        dateModified: page.reviewedAt,
+        isPartOf: { "@id": `${SITE_URL}/#website` },
       },
     ],
   };

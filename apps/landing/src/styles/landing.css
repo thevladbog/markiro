@@ -331,6 +331,13 @@ input:focus-visible {
   text-underline-offset: 0.3rem;
 }
 
+.hero__film-link {
+  color: var(--fg-1);
+  font: 600 0.875rem / 1 var(--font-ui);
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 0.3rem;
+}
+
 .hero__note {
   margin: var(--sp-6) 0 0;
   color: var(--fg-3);

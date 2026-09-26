@@ -26,7 +26,8 @@
     "test:tenant-billing": "playwright test --config tenant-billing.playwright.config.ts",
     "test:tenant-equipment": "playwright test --config tenant-equipment.playwright.config.ts",
     "test:service-periods": "playwright test --config service-periods.playwright.config.ts",
-    "test:catalog-regulatory": "playwright test --config catalog-regulatory.playwright.config.ts"
+    "test:catalog-regulatory": "playwright test --config catalog-regulatory.playwright.config.ts",
+    "render:film-posters": "node scripts/render-film-posters.mjs"
   },
   "devDependencies": {
     "@playwright/test": "1.62.0",

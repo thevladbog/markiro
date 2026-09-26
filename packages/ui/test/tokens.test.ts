@@ -66,3 +66,27 @@ describe("токены тегов", () => {
     },
   );
 });
+
+describe("светлая тема на поддереве тёмной страницы", () => {
+  /**
+   * Лендинг работает в тёмной теме, а утренние главы фильма «Как работает»
+   * светлые. Поддерево с data-theme="light" получает светлые токены без
+   * второго набора значений в самом лендинге.
+   */
+  it("возвращает светлые значения элементу с data-theme=light", () => {
+    document.documentElement.dataset.theme = "dark";
+    const island = document.createElement("div");
+    island.dataset.theme = "light";
+    document.body.append(island);
+    try {
+      const page = getComputedStyle(document.documentElement);
+      const light = getComputedStyle(island);
+      expect(page.getPropertyValue("--surface-page").trim()).toBe("#131216");
+      expect(light.getPropertyValue("--surface-page").trim()).toBe("#fafaf8");
+      expect(light.getPropertyValue("--fg-1").trim()).toBe("#17161a");
+      expect(light.getPropertyValue("--accent").trim()).toBe("#0faf56");
+    } finally {
+      island.remove();
+    }
+  });
+});

@@ -1,0 +1,404 @@
+/* Лендинг-фильм «Как работает». Цвета из токенов @markiro/ui: элемент с
+   data-theme="light" получает светлые значения, с "dark" остаётся тёмным.
+   Скрипт фильма переключает тему шапки и фильма вместе со временем суток. */
+
+.film-top::before {
+  position: fixed;
+  z-index: 19;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 6.5rem;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--surface-page) 88%, transparent) 40%,
+    transparent
+  );
+  content: "";
+  pointer-events: none;
+}
+
+/* The header stays over every frame of the film. */
+.film-top .landing-header {
+  position: fixed;
+  border-bottom-color: var(--line);
+}
+
+.film-top .menu-trigger {
+  border-color: var(--line-strong);
+  background: color-mix(in srgb, var(--surface-page) 86%, transparent);
+}
+
+/* The shared header marks the current language in the accent green, too light on paper. */
+.film-top[data-theme="light"] .language-switch a[aria-current="page"] {
+  color: var(--fg-1);
+}
+
+/* The shared hover green is too dark under the button's dark text in the light theme. */
+.film-top[data-theme="light"] .button:hover,
+.film-chapter[data-theme="light"] .button:hover {
+  border-color: var(--accent-module);
+  background: var(--accent-module);
+}
+
+.film {
+  position: relative;
+  isolation: isolate;
+  background: var(--surface-page);
+}
+
+.film__stage {
+  position: sticky;
+  z-index: 0;
+  top: 0;
+  height: 100lvh;
+  margin-bottom: -100lvh;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.film__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.film-chapter {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-height: calc(var(--span) * 100lvh);
+  padding: 0 var(--landing-section-inline) 3.5rem;
+  /* A chapter link lands in the middle of the chapter, where its card rests. */
+  scroll-margin-top: calc((1 - var(--span) / 2) * 100lvh);
+  color: var(--fg-1);
+}
+
+.film-chapter--hero {
+  justify-content: flex-start;
+  scroll-margin-top: 0;
+}
+
+.film-chapter__poster {
+  position: absolute;
+  z-index: -2;
+  inset: 0;
+  pointer-events: none;
+  transition:
+    opacity 480ms var(--landing-ease),
+    visibility 0s linear 0s;
+}
+
+/* Posters fade out over the stage, which draws its first frame within the fade. */
+.film--live .film-chapter__poster {
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 480ms var(--landing-ease),
+    visibility 0s linear 480ms;
+}
+
+.film-chapter__poster picture {
+  position: sticky;
+  top: 0;
+  display: block;
+  height: 100lvh;
+}
+
+.film-chapter__poster img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* The veil sits behind the hero text only, so the model stays clear for the rest of chapter 1. */
+.film-chapter--hero::before {
+  position: absolute;
+  z-index: -1;
+  inset: 0 45% auto 0;
+  height: 100lvh;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--surface-page) 72%, transparent),
+    transparent
+  );
+  content: "";
+  pointer-events: none;
+}
+
+.film-hero {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  max-width: 40rem;
+  min-height: 100lvh;
+  padding-top: 5rem;
+}
+
+.film-kicker {
+  margin: 0;
+  color: var(--fg-2);
+  font: var(--landing-kicker);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.film-hero__title {
+  max-width: 38rem;
+  margin: 1.75rem 0 0;
+  font: var(--landing-display-xl);
+  letter-spacing: -0.055em;
+}
+
+.film-hero__lead {
+  max-width: 32rem;
+  margin: 1.75rem 0 0;
+  color: var(--fg-2);
+  font: var(--landing-lead);
+}
+
+.film-hero__actions,
+.film-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1.5rem 1.75rem;
+  margin-top: 1.75rem;
+}
+
+.film-link {
+  color: var(--fg-1);
+  font: 600 0.9375rem / 1.2 var(--font-ui);
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 0.3rem;
+}
+
+.film-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 1.25rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.film-tags li {
+  padding: 0.375rem 0.625rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+  color: var(--fg-2);
+  font: 500 0.75rem / 1 var(--font-mono);
+}
+
+.film-hero__hint {
+  margin: 3.5rem 0 0;
+  color: var(--fg-3);
+  font: 500 0.6875rem / 1.4 var(--font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.film-card {
+  position: sticky;
+  bottom: 3.5rem;
+  width: min(35rem, 100%);
+  padding: 2rem;
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+  background: color-mix(in srgb, var(--surface-page) 92%, transparent);
+  backdrop-filter: blur(16px);
+}
+
+.film-chapter[data-theme="dark"] .film-card {
+  background: color-mix(in srgb, var(--surface-page) 84%, transparent);
+}
+
+.film-card__progress {
+  display: none;
+  margin: 0 0 0.75rem;
+  color: var(--fg-3);
+  font: 500 0.6875rem / 1 var(--font-mono);
+  letter-spacing: 0.1em;
+}
+
+.film-card__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 1rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--warn-border);
+  border-radius: var(--r-1);
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+  font: 600 0.75rem / 1.2 var(--font-mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.film-card__status-icon {
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+
+.film-card__status-icon circle {
+  fill: currentColor;
+  stroke: none;
+}
+
+.film-card__title {
+  margin: 1rem 0 0;
+  font: 600 clamp(1.75rem, 2.6vw, 2.5rem) / 1.08 var(--font-ui);
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+}
+
+.film-card__body {
+  margin: 1rem 0 0;
+  color: var(--fg-2);
+  font: 400 1.0625rem / 1.55 var(--font-ui);
+}
+
+.film__rail {
+  position: fixed;
+  z-index: 5;
+  top: 50%;
+  right: max(1.5rem, calc((100vw - 75rem) / 2 - 3rem));
+  padding: 1rem;
+  border-radius: var(--r-3);
+  background: color-mix(in srgb, var(--surface-page) 88%, transparent);
+  backdrop-filter: blur(12px);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-50%);
+  transition:
+    opacity 240ms var(--landing-ease),
+    visibility 240ms;
+}
+
+.film__rail.is-visible,
+.film__rail:focus-within {
+  opacity: 1;
+  visibility: visible;
+}
+
+.film__rail ol {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.film__rail a {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  color: var(--fg-3);
+  font: 500 0.75rem / 1 var(--font-mono);
+  text-decoration: none;
+}
+
+.film__rail a[aria-current="step"] {
+  color: var(--fg-1);
+  font-weight: 600;
+}
+
+.film__rail-mark {
+  width: 0.5rem;
+  height: 0.5rem;
+  border: 1.5px solid currentColor;
+}
+
+/* The active chapter carries the green module of the brand mark. */
+.film__rail a[aria-current="step"] .film__rail-mark {
+  border-color: transparent;
+  background: var(--accent-module);
+}
+
+@media (max-width: 860px) {
+  .film-chapter {
+    padding: 0;
+  }
+
+  .film-chapter--hero::before {
+    inset: 0 0 auto;
+    background: linear-gradient(
+      0deg,
+      color-mix(in srgb, var(--surface-page) 90%, transparent) 45%,
+      transparent 70%
+    );
+  }
+
+  /* Tighter rhythm leaves the top of the first screen to the model, above the headline. */
+  .film-hero {
+    justify-content: flex-end;
+    padding: 6rem 1.25rem 1.5rem;
+  }
+
+  .film-hero__title {
+    margin-top: 1rem;
+    font: 600 2.5rem / 1.02 var(--font-ui);
+    letter-spacing: -0.03em;
+  }
+
+  .film-hero__lead {
+    margin-top: 1rem;
+  }
+
+  .film-hero__actions {
+    gap: 1rem 1.75rem;
+    margin-top: 1.25rem;
+  }
+
+  .film-hero__hint {
+    margin-top: 1.5rem;
+  }
+
+  .film-card {
+    bottom: 0;
+    width: 100%;
+    padding: 1.25rem 1.25rem 1.75rem;
+    border-width: 1px 0 0;
+    border-radius: 1rem 1rem 0 0;
+  }
+
+  .film-card__progress {
+    display: block;
+  }
+
+  .film-card__title {
+    font-size: 1.625rem;
+  }
+
+  .film-card__body {
+    font-size: 0.9375rem;
+  }
+
+  .film__rail {
+    display: none;
+  }
+}
+
+@media (max-width: 47.9375rem) {
+  /* The shared phone menu is painted dark; follow the film theme instead. */
+  .film-top .landing-nav {
+    background: var(--surface-card);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .film__stage {
+    display: none;
+  }
+
+  .film-chapter__poster {
+    transition: none;
+  }
+}
