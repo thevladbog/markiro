@@ -113,6 +113,24 @@ describe("SSCC page", () => {
     type("Следующий номер", "50");
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Сохранить" }));
     expect(await screen.findByText("Номер должен быть не меньше 60")).toBeTruthy();
+    // The host's newer floor must stick: a retry below it fails the same way,
+    // client-side, without asking the host again.
+    type("Следующий номер", "55");
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Сохранить" }));
+    expect(await screen.findByText("Номер должен быть не меньше 60")).toBeTruthy();
+    expect(session.api.updateSsccCounter).toHaveBeenCalledTimes(1);
+  });
+
+  it("checks a counter's value against its upper bound", async () => {
+    const session = adminSession();
+    await openSscc(session);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Изменить счётчик: Короба, префикс 460709100" }),
+    );
+    type("Следующий номер", "10000000");
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Сохранить" }));
+    expect(await screen.findByText("Укажите целое число от 1 до 9999999")).toBeTruthy();
+    expect(session.api.updateSsccCounter).not.toHaveBeenCalled();
   });
 
   it("offers to load the counters again after a stale change", async () => {
@@ -168,5 +186,30 @@ describe("SSCC page", () => {
     expect(await screen.findByText("Укажите целое число от 1 до 100 000")).toBeTruthy();
     expect(screen.getByText("Укажите целое число от 1 до 10 000")).toBeTruthy();
     expect(session.api.updateBlockSizes).not.toHaveBeenCalled();
+  });
+
+  it("offers to load the block sizes again after a stale change", async () => {
+    const session = adminSession();
+    session.api.getSscc
+      .mockResolvedValueOnce(SSCC_STATE)
+      .mockResolvedValueOnce({ ...SSCC_STATE, boxBlockSize: 5000, blockSizesRev: 9 });
+    session.api.updateBlockSizes.mockRejectedValueOnce(
+      new HostError({
+        kind: "api",
+        code: "stale_revision",
+        status: 409,
+        message: "stale",
+        details: { currentRev: 9 },
+      }),
+    );
+    await openSscc(session);
+    await screen.findByLabelText("Номеров в блоке для коробов");
+    type("Номеров в блоке для коробов", "3000");
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Загрузить заново" }));
+    await waitFor(() =>
+      expect(screen.getByLabelText("Номеров в блоке для коробов")).toHaveProperty("value", "5000"),
+    );
+    expect(session.api.getSscc).toHaveBeenCalledTimes(2);
   });
 });

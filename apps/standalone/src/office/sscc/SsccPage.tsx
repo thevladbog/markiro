@@ -130,6 +130,7 @@ function SsccContent() {
           columns={columns}
           rows={orderedCounters(state)}
           getRowKey={(counter) => `${counter.issuerPrefix}-${counter.extension}`}
+          empty={t("office.sscc.noCounters")}
           scrollLabel={t("office.sscc.countersTitle")}
         />
       </Card>

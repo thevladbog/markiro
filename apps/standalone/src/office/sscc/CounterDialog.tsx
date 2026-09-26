@@ -43,10 +43,10 @@ export function CounterDialog({ counter, onClose, onSaved, onReload }: CounterDi
         nextSerial: z
           .number({ error: "office.sscc.errors.range" })
           .int("office.sscc.errors.range")
-          .min(counter.nextSerial, "office.sscc.errors.belowFloor")
+          .min(floor, "office.sscc.errors.belowFloor")
           .max(counter.maxSerial, "office.sscc.errors.range"),
       }),
-    [counter],
+    [floor, counter.maxSerial],
   );
   const update = useOfficeMutation((api, token, nextSerial: number) =>
     api.updateSsccCounter(
