@@ -132,6 +132,7 @@ async fn sscc_counters_move_only_forward_within_capacity() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(state["boxBlockSize"], 2000);
     assert_eq!(state["palletBlockSize"], 200);
+    assert_eq!(state["currentIssuerPrefix"], "460068200");
     let counter = &state["counters"][0];
     assert_eq!(counter["issuerPrefix"], "460068200");
     assert_eq!(counter["extension"], 0);
@@ -916,7 +917,32 @@ async fn require_admin_in_rechecks_role_and_session_inside_the_transaction() {
         .await
         .unwrap();
 
-    // 2. The session was ended after the extractor ran (e.g. a logout from
+    // 2. The user was deactivated after the extractor ran; the session row
+    //    itself still exists, so the join finds it, but the fresh `active =
+    //    0` must still refuse with the same session-credential 401 an
+    //    inactive user gets anywhere else.
+    sqlx::query("UPDATE office_users SET active = 0 WHERE id = ?")
+        .bind(&admin.id)
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let mut tx = markiro_host::db::begin_write(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let error = context.require_admin_in(&mut tx).await.unwrap_err();
+    tx.rollback().await.unwrap();
+    let (status, body) = error_body(error).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["error"]["code"], "unauthorized");
+    assert_eq!(body["error"]["details"]["credential"], "session");
+
+    sqlx::query("UPDATE office_users SET active = 1 WHERE id = ?")
+        .bind(&admin.id)
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+
+    // 3. The session was ended after the extractor ran (e.g. a logout from
     //    another request racing this one): the transaction finds no row and
     //    refuses with a session-credential 401.
     sqlx::query("DELETE FROM office_sessions WHERE id = ?")

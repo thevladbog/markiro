@@ -83,7 +83,7 @@ fn decode_canonical(text: &str, expected_bytes: usize) -> Option<Vec<u8>> {
 /// deterministic computation `hash_password` runs with a fresh random salt.
 /// Factored out so a test can prove this host reproduces an
 /// independently-generated PHC string byte for byte.
-pub fn hash_password_with_salt(password: &str, salt: &[u8; SALT_BYTES], iterations: u32) -> String {
+fn hash_password_with_salt(password: &str, salt: &[u8; SALT_BYTES], iterations: u32) -> String {
     let mut digest = [0u8; DIGEST_BYTES];
     pbkdf2::derive(
         pbkdf2::PBKDF2_HMAC_SHA256,

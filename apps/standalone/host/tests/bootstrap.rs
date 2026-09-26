@@ -353,6 +353,16 @@ async fn the_org_profile_is_read_by_all_and_changed_by_admins_with_revisions() {
         json!({ "changed": ["name", "inn", "gln", "gs1Prefixes", "timeZone"] })
     );
 
+    let (status, sscc) = app
+        .send(empty(with_session(
+            request("GET", "/v1/office/sscc"),
+            &key,
+            &admin_token,
+        )))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(sscc["currentIssuerPrefix"], "460709100");
+
     // Switching back onto a prefix that already has counters (the original
     // 460068200) must not reset or duplicate them: `ON CONFLICT DO NOTHING`
     // leaves the existing rows exactly as they were.
@@ -385,6 +395,16 @@ async fn the_org_profile_is_read_by_all_and_changed_by_admins_with_revisions() {
         ("460068200".into(), 1, 40, 1),
         "the original prefix's pallet counter must be untouched by ON CONFLICT DO NOTHING"
     );
+
+    let (status, sscc) = app
+        .send(empty(with_session(
+            request("GET", "/v1/office/sscc"),
+            &key,
+            &admin_token,
+        )))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(sscc["currentIssuerPrefix"], "460068200");
 }
 
 #[tokio::test]

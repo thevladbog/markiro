@@ -34,11 +34,11 @@ fn counter(
 }
 
 /// Read the counters, block sizes and current issuer prefix through `conn`.
-/// Callers pass either a plain pooled connection (`get_sscc`) or the open
-/// write transaction (`put_block_sizes`): reading through the transaction
-/// keeps this off `state.pool` while a write transaction is open, and lets a
-/// caller return a consistent snapshot of what it just wrote before
-/// releasing the write lock.
+/// Both callers pass an open transaction: `get_sscc` a plain deferred read
+/// transaction (one consistent WAL snapshot for all three queries below) and
+/// `put_block_sizes` its write transaction (so the response reflects exactly
+/// what it just wrote, read before the commit releases the write lock,
+/// without a second connection from `state.pool`).
 async fn read_state(conn: &mut SqliteConnection) -> Result<SsccState, ApiError> {
     let rows: Vec<(String, i64, i64, i64)> = sqlx::query_as(
         "SELECT issuer_prefix, extension, next_serial, rev FROM sscc_counters ORDER BY issuer_prefix, extension",
@@ -51,14 +51,15 @@ async fn read_state(conn: &mut SqliteConnection) -> Result<SsccState, ApiError> 
             .fetch_one(&mut *conn)
             .await
             .map_err(ApiError::internal)?;
-    // Office routes only ever run after the wizard has created `org_profile`
-    // (an office session requires an office user, and the first one is
-    // created in the same transaction as the organization), so this row
-    // always exists.
-    let gln: String = sqlx::query_scalar("SELECT gln FROM org_profile WHERE id = 1")
-        .fetch_one(&mut *conn)
+    // Same defensive pattern as `read_org` (routes/org.rs): office routes
+    // only ever run after the wizard has created `org_profile`, but a
+    // missing row becomes `not_found`, not a 500, if that invariant is ever
+    // violated.
+    let gln: Option<String> = sqlx::query_scalar("SELECT gln FROM org_profile WHERE id = 1")
+        .fetch_optional(&mut *conn)
         .await
         .map_err(ApiError::internal)?;
+    let gln = gln.ok_or_else(|| ApiError::not_found("the host is not initialized"))?;
     Ok(SsccState {
         counters: rows
             .into_iter()
@@ -75,8 +76,17 @@ pub async fn get_sscc(
     State(state): State<AppState>,
     _context: OfficeContext,
 ) -> Result<Json<SsccState>, ApiError> {
-    let mut conn = state.pool.acquire().await.map_err(ApiError::internal)?;
-    read_state(&mut conn).await.map(Json)
+    // A plain deferred transaction (`BEGIN`, not `BEGIN IMMEDIATE`) gives the
+    // three reads inside `read_state` one consistent WAL snapshot. Without
+    // it, each read runs as its own implicit transaction on the pooled
+    // connection, so a write landing between them — a GLN change, say —
+    // could report a `currentIssuerPrefix` whose counters are missing from
+    // the counter list. Nothing here writes, so the transaction is rolled
+    // back rather than committed.
+    let mut tx = state.pool.begin().await.map_err(ApiError::internal)?;
+    let snapshot = read_state(&mut tx).await;
+    tx.rollback().await.map_err(ApiError::internal)?;
+    snapshot.map(Json)
 }
 
 pub async fn put_counter(
