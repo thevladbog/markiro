@@ -60,7 +60,7 @@ const RU = {
       email: "Email",
       heading: "Покажем Markiro на вашей линии.",
       kicker: "08 / ДЕМО НА ВАШЕЙ ЛИНИИ",
-      lead: "Разберём ваш процесс и покажем рабочий сценарий без абстрактной презентации.",
+      lead: "Разберём ваш процесс, сверим правила вашей товарной группы и покажем сценарий на вашем продукте.",
       legal: {
         consent: "согласия",
         prefix: "Даю согласие на обработку персональных данных на условиях",
@@ -248,17 +248,17 @@ const RU = {
       covers: [
         {
           alt: "Первая страница инструкции MKR-INS-01",
-          caption: "MKR-INS-01 · СТАНЦИЯ: ВХОД И СМЕНА",
+          caption: "MKR-INS-01 · СТАНЦИЯ: ВХОД ОПЕРАТОРА И СТАРТ СМЕНЫ",
           code: "mkr-ins-01",
         },
         {
           alt: "Первая страница инструкции MKR-INS-02",
-          caption: "MKR-INS-02 · СТАНЦИЯ: РАБОТА НА ЛИНИИ",
+          caption: "MKR-INS-02 · СТАНЦИЯ: РАБОЧИЙ ЦИКЛ",
           code: "mkr-ins-02",
         },
         {
           alt: "Первая страница инструкции MKR-INS-09",
-          caption: "MKR-INS-09 · КАБИНЕТ: СВОДКА И ВЫГРУЗКИ",
+          caption: "MKR-INS-09 · КАБИНЕТ: ЗАКРЫТИЕ И ОТЧЁТЫ СМЕНЫ",
           code: "mkr-ins-09",
         },
       ],
@@ -295,10 +295,8 @@ const RU = {
     },
     materials: {
       allArticles: "Все статьи",
-      allInstructions: "Инструкции для станции и кабинета",
-      heading: ["Разборы с линии.", "Без общих обещаний."],
-      kicker: "07 / МАТЕРИАЛЫ",
-      lead: "Статьи о реальных задачах маркировки пива и печатные инструкции для операторов, наладчиков и менеджеров.",
+      heading: "Разборы задач с линии.",
+      kicker: "07 / СТАТЬИ",
     },
     lineConsole: {
       accepted: "Код принят",
@@ -439,9 +437,9 @@ const EN = {
       company: "Company",
       contactNote: "A contact number will appear when the public phone line is connected.",
       email: "Email",
-      heading: "See Markiro on your production line.",
+      heading: "We will show Markiro on your line.",
       kicker: "08 / DEMO ON YOUR LINE",
-      lead: "We will examine your process and demonstrate a working scenario instead of an abstract presentation.",
+      lead: "We will walk through your process, check the rules of your product group and show the scenario on your product.",
       legal: {
         consent: "personal-data consent",
         prefix: "I consent to the processing of my personal data under the",
@@ -629,17 +627,17 @@ const EN = {
       covers: [
         {
           alt: "First page of instruction MKR-INS-01",
-          caption: "MKR-INS-01 · STATION: SIGN-IN AND SHIFT",
+          caption: "MKR-INS-01 · STATION: OPERATOR SIGN-IN AND SHIFT START",
           code: "mkr-ins-01",
         },
         {
           alt: "First page of instruction MKR-INS-02",
-          caption: "MKR-INS-02 · STATION: WORK ON THE LINE",
+          caption: "MKR-INS-02 · STATION: THE WORK CYCLE",
           code: "mkr-ins-02",
         },
         {
           alt: "First page of instruction MKR-INS-09",
-          caption: "MKR-INS-09 · ADMIN PANEL: SUMMARY AND EXPORTS",
+          caption: "MKR-INS-09 · ADMIN PANEL: CLOSING AND SHIFT REPORTS",
           code: "mkr-ins-09",
         },
       ],
@@ -673,10 +671,8 @@ const EN = {
     },
     materials: {
       allArticles: "All articles",
-      allInstructions: "Station and cabinet instructions",
-      heading: ["Notes from the line.", "No vague promises."],
-      kicker: "07 / MATERIALS",
-      lead: "Articles on real beer-marking problems and printable instructions for operators, technicians, and managers.",
+      heading: "Field notes from the line.",
+      kicker: "07 / ARTICLES",
     },
     lineConsole: {
       accepted: "Code accepted",

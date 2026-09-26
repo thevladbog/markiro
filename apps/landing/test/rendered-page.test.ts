@@ -1160,6 +1160,8 @@ describe("rendered landing page", () => {
       "traceability",
       "film",
       "implementation",
+      "documents",
+      "materials",
       "demo",
     ]) {
       expect(document.querySelector(`section#${sectionId}[aria-labelledby]`)).not.toBeNull();
@@ -1232,25 +1234,34 @@ describe("rendered landing page", () => {
     }
   });
 
-  it("publishes the current product-category boundary on the home and SSCC pages", () => {
+  it("states the product-group boundary on the home pages and keeps the SSCC pages' current one", () => {
+    for (const [route, groups, check] of [
+      ["/", "любой маркируемой продукции", "Особенности вашей товарной группы сверяем до запуска"],
+      ["/en/", "any marked goods", "We check the rules of your product group before launch"],
+    ] as const) {
+      const text = documents.get(route)?.body.textContent?.replace(/\s+/g, " ") ?? "";
+      expect(text, route).toContain(groups);
+      expect(text, route).toContain(check);
+      expect(text, route).not.toContain("Сейчас — пиво, сидр");
+      expect(text, route).not.toContain("Currently focused on beer");
+      expect(text, route).not.toContain("Новые товарные группы добавляются поэтапно");
+      expect(text, route).not.toContain("Additional product categories are being added gradually");
+    }
+
     const ruCategory = "Пиво, напитки, изготавливаемые на основе пива, слабоалкогольные напитки";
     const enCategory = "Beer, beverages made from beer and low-alcohol beverages";
-
-    for (const route of ["/", "/sscc-i-agregatsiya/"] as const) {
-      const text = documents.get(route)?.body.textContent?.replace(/\s+/g, " ") ?? "";
-      expect(text).toContain(ruCategory);
-      expect(text.toLowerCase()).toContain("сидр");
-      expect(text).toContain("Новые товарные группы добавляются поэтапно");
-      expect(text).not.toContain("внедряется для производителей");
-    }
-
-    for (const route of ["/en/", "/en/sscc-and-aggregation/"] as const) {
-      const text = documents.get(route)?.body.textContent?.replace(/\s+/g, " ") ?? "";
-      expect(text).toContain(enCategory);
-      expect(text.toLowerCase()).toContain("cider");
-      expect(text).toContain("Additional product categories are being added gradually");
-      expect(text).not.toContain("is currently deployed");
-    }
+    const ruSsccText =
+      documents.get("/sscc-i-agregatsiya/")?.body.textContent?.replace(/\s+/g, " ") ?? "";
+    expect(ruSsccText).toContain(ruCategory);
+    expect(ruSsccText.toLowerCase()).toContain("сидр");
+    expect(ruSsccText).toContain("Новые товарные группы добавляются поэтапно");
+    expect(ruSsccText).not.toContain("внедряется для производителей");
+    const enSsccText =
+      documents.get("/en/sscc-and-aggregation/")?.body.textContent?.replace(/\s+/g, " ") ?? "";
+    expect(enSsccText).toContain(enCategory);
+    expect(enSsccText.toLowerCase()).toContain("cider");
+    expect(enSsccText).toContain("Additional product categories are being added gradually");
+    expect(enSsccText).not.toContain("is currently deployed");
 
     const ruSscc = documents.get("/sscc-i-agregatsiya/")?.body.textContent ?? "";
     expect(ruSscc).toContain("Текущий поддерживаемый уровень — цепочка «единица → короб»");
@@ -1270,6 +1281,34 @@ describe("rendered landing page", () => {
       documents.get("/en/chestny-znak-serialization/")?.body.textContent ?? "";
     expect(enSerialization).toContain("the relationship between an item and its case");
     expect(enSerialization).not.toContain("the relationship between an item, case, or pallet");
+  });
+
+  it("renders the rollout, documents, articles and demo sections", () => {
+    for (const [route, instructionsPath, legalPath, articlesHeading] of [
+      ["/", "/instruktsii/", "/legal/", "Разборы задач с линии."],
+      ["/en/", "/en/instructions/", "/en/legal/", "Field notes from the line."],
+    ] as const) {
+      const page = documents.get(route);
+      const rollout = page?.querySelector("section#implementation");
+      expect(rollout?.querySelectorAll(".home-rollout__steps li"), route).toHaveLength(4);
+      expect(rollout?.querySelectorAll(".home-rollout__label img[alt]")).toHaveLength(2);
+      const docs = page?.querySelector("section#documents");
+      expect(docs?.querySelectorAll(".home-documents__covers img[alt]")).toHaveLength(3);
+      expect(
+        [...(docs?.querySelectorAll("a") ?? [])].map((link) => link.getAttribute("href")),
+      ).toEqual([instructionsPath, legalPath]);
+      expect(page?.querySelector("section#materials h2")?.textContent).toBe(articlesHeading);
+      expect(page?.querySelector("section#demo")?.getAttribute("data-theme")).toBe("dark");
+    }
+  });
+
+  it("numbers the home sections in page order", () => {
+    for (const route of ["/", "/en/"] as const) {
+      const kickers = [
+        ...(documents.get(route)?.querySelectorAll("main section:not(#hero) .section-index") ?? []),
+      ].map((kicker) => kicker.textContent?.trim().slice(0, 2));
+      expect(kickers, route).toEqual(["01", "02", "03", "04", "05", "06", "07", "08"]);
+    }
   });
 
   it("renders the four visible fields in the accessible order with optional phone copy", () => {
@@ -1565,7 +1604,7 @@ describe("rendered landing page", () => {
       materialLinks.filter((href) => href?.startsWith("/stati/") && href !== "/stati/"),
     ).toHaveLength(3);
     expect(materialLinks).toContain("/stati/");
-    expect(materialLinks).toContain("/instruktsii/");
+    expect(document.querySelector('#documents a[href="/instruktsii/"]')).not.toBeNull();
     expect(document.querySelector('header nav a[href="/stati/"]')).not.toBeNull();
     expect(document.querySelector('footer nav a[href="/stati/"]')).not.toBeNull();
     expect(document.querySelector('footer nav a[href="/instruktsii/"]')).not.toBeNull();

@@ -6,12 +6,13 @@ import BaseLayout from "../layouts/BaseLayout.astro";
 import "../styles/home.css";
 import DemoSection from "./DemoSection.astro";
 import HomeMaterials from "./HomeMaterials.astro";
+import HomeDocuments from "./home/HomeDocuments.astro";
 import HomeFilmBlock from "./home/HomeFilmBlock.astro";
 import HomeMapHero from "./home/HomeMapHero.astro";
 import HomeOffline from "./home/HomeOffline.astro";
 import HomeProduct from "./home/HomeProduct.astro";
+import HomeRollout from "./home/HomeRollout.astro";
 import HomeTraceability from "./home/HomeTraceability.astro";
-import ImplementationSteps from "./ImplementationSteps.astro";
 import LandingFooter from "./LandingFooter.astro";
 import LandingHeader from "./LandingHeader.astro";
 
@@ -38,7 +39,8 @@ const siteConfig = readPublicSiteConfig(
     <HomeOffline locale={page.locale} />
     <HomeTraceability locale={page.locale} />
     <HomeFilmBlock locale={page.locale} />
-    <ImplementationSteps locale={page.locale} />
+    <HomeRollout locale={page.locale} />
+    <HomeDocuments locale={page.locale} />
     <HomeMaterials locale={page.locale} />
     <DemoSection
       locale={page.locale}

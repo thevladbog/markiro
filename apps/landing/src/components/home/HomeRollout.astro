@@ -1,0 +1,50 @@
+---
+import { Picture } from "astro:assets";
+
+import { HOME_LABELS } from "../../content/home-images";
+import type { Locale } from "../../content/pages";
+import { getUiCopy } from "../../content/ui";
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const copy = getUiCopy(locale).home.rollout;
+---
+
+<section class="section home-rollout" id="implementation" aria-labelledby="implementation-title">
+  <div class="container">
+    <div class="home-rollout__top">
+      <div>
+        <p class="section-index">{copy.kicker}</p>
+        <h2 id="implementation-title" class="display-heading display-heading--sentence">{copy.heading}</h2>
+        <p class="section-lead">{copy.lead}</p>
+      </div>
+      <div class="home-rollout__labels">
+        {copy.labels.map((label) => (
+          <figure class="home-rollout__label">
+            <Picture
+              src={HOME_LABELS[label.id]}
+              alt={label.alt}
+              widths={[180, 360, 540]}
+              formats={["avif", "webp"]}
+              sizes="11.25rem"
+              loading="lazy"
+            />
+            <figcaption class="home-caption">{label.caption}</figcaption>
+          </figure>
+        ))}
+      </div>
+    </div>
+    <ol class="home-rollout__steps" role="list">
+      {copy.steps.map(([title, text], index) => (
+        <li>
+          <span class="home-rollout__number" aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>
+          <h3>{title}</h3>
+          <p>{text}</p>
+        </li>
+      ))}
+    </ol>
+  </div>
+</section>
