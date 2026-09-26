@@ -75,6 +75,11 @@ fn protected_routes() -> Router<AppState> {
             post(crate::routes::office_auth::logout),
         )
         .route("/v1/office/me", get(crate::routes::office_auth::me))
+        .route("/v1/bootstrap", post(crate::routes::bootstrap::bootstrap))
+        .route(
+            "/v1/office/org",
+            get(crate::routes::org::get_org).put(crate::routes::org::put_org),
+        )
 }
 
 /// Every route except `hello` requires a supported protocol version

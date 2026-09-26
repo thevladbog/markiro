@@ -1,8 +1,8 @@
 use markiro_proto::{
     certificate_fingerprint, codes, compatibility, compatibility_for, display_fingerprint,
-    Compatibility, DeviceInfo, DeviceKind, ErrorBody, Hello, HelloEnvelope, LocalPairRequest,
-    OfficeLoginRequest, OfficeRole, OfficeSession, OfficeUser, PairResponse, HOST_PRODUCT,
-    PROTOCOL_VERSION,
+    BootstrapRequest, BootstrapResponse, Compatibility, DeviceInfo, DeviceKind, ErrorBody, Hello,
+    HelloEnvelope, LocalPairRequest, OfficeLoginRequest, OfficeRole, OfficeSession, OfficeUser,
+    OrgProfile, OrgProfileUpdate, PairResponse, HOST_PRODUCT, PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -106,4 +106,16 @@ fn office_auth_fixtures_round_trip() {
     assert_eq!(user.role, OfficeRole::Admin);
     let session: OfficeSession = round_trip("office-session.json");
     assert_eq!(session.user, user);
+}
+
+#[test]
+fn bootstrap_and_org_fixtures_round_trip() {
+    let bootstrap: BootstrapRequest = round_trip("bootstrap-request.json");
+    assert_eq!(bootstrap.sscc.pallet_next_serial, 0);
+    assert_eq!(bootstrap.lines, vec!["Линия 1".to_owned()]);
+    let response: BootstrapResponse = round_trip("bootstrap-response.json");
+    assert_eq!(response.session.user.login, "admin");
+    let _: OrgProfile = round_trip("org-profile.json");
+    let update: OrgProfileUpdate = round_trip("org-profile-update.json");
+    assert!(update.inn.is_none());
 }

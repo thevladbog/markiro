@@ -245,3 +245,77 @@ pub struct OfficeSession {
     /// Absolute expiry; the session also ends after 30 idle minutes.
     pub expires_at: String,
 }
+
+/// A new office user created by the first-run wizard (always an administrator).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NewOfficeUser {
+    pub login: String,
+    pub name: String,
+    pub password: String,
+}
+
+/// Organization fields as entered in the wizard.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OrgProfileInput {
+    pub name: String,
+    #[serde(default)]
+    pub inn: Option<String>,
+    pub gln: String,
+    pub gs1_prefixes: Vec<String>,
+    pub time_zone: String,
+}
+
+/// First serials of the SSCC counters; needed when the company already
+/// printed SSCC with other software.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SsccStart {
+    pub box_next_serial: u64,
+    pub pallet_next_serial: u64,
+}
+
+/// `POST /v1/bootstrap`: the first-run wizard.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BootstrapRequest {
+    pub admin: NewOfficeUser,
+    pub org: OrgProfileInput,
+    pub sscc: SsccStart,
+    /// Names of the first production lines (1-20).
+    pub lines: Vec<String>,
+}
+
+/// Response of `POST /v1/bootstrap`: the administrator is signed in on the
+/// device that ran the wizard.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootstrapResponse {
+    pub session: OfficeSession,
+}
+
+/// `GET /v1/office/org`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrgProfile {
+    pub name: String,
+    pub inn: Option<String>,
+    pub gln: String,
+    pub gs1_prefixes: Vec<String>,
+    pub time_zone: String,
+    pub rev: i64,
+}
+
+/// `PUT /v1/office/org`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OrgProfileUpdate {
+    pub name: String,
+    #[serde(default)]
+    pub inn: Option<String>,
+    pub gln: String,
+    pub gs1_prefixes: Vec<String>,
+    pub time_zone: String,
+    pub expected_rev: i64,
+}

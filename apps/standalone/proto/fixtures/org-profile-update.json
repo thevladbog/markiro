@@ -1,0 +1,8 @@
+{
+  "name": "ООО «Атолл»",
+  "inn": null,
+  "gln": "4600682000010",
+  "gs1Prefixes": ["4600682", "4607091"],
+  "timeZone": "Europe/Samara",
+  "expectedRev": 1
+}

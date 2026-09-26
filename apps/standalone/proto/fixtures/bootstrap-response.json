@@ -1,0 +1,12 @@
+{
+  "session": {
+    "token": "Zx8c1Qe-3aTf9GhJkLm2Np4Rs6Uv8Wy0Ab2Cd4Ef6Gh",
+    "user": {
+      "id": "1b4e28ba-2fa1-41d2-883f-0016d3cca427",
+      "login": "admin",
+      "name": "Ирина Смирнова",
+      "role": "admin"
+    },
+    "expiresAt": "2026-09-26T21:15:00Z"
+  }
+}

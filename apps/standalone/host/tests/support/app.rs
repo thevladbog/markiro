@@ -151,3 +151,31 @@ pub async fn login(app: &TestApp, device_key: &str, login: &str, password: &str)
     assert_eq!(status, StatusCode::OK, "{body}");
     body["token"].as_str().unwrap().to_owned()
 }
+
+/// A valid wizard request.
+pub fn bootstrap_body() -> Value {
+    serde_json::json!({
+        "admin": { "login": "admin", "name": "Ирина Смирнова", "password": "correct horse battery" },
+        "org": {
+            "name": "ООО «Атолл»",
+            "inn": "7701234567",
+            "gln": "4600682000010",
+            "gs1Prefixes": ["4600682"],
+            "timeZone": "Europe/Moscow"
+        },
+        "sscc": { "boxNextSerial": 1500, "palletNextSerial": 40 },
+        "lines": ["Линия 1", "Линия 2"]
+    })
+}
+
+/// Run the wizard from loopback with `device_key`; returns the admin's token.
+pub async fn bootstrap(app: &TestApp, device_key: &str) -> String {
+    let (status, body) = app
+        .send(json(
+            with_device(request("POST", "/v1/bootstrap"), device_key),
+            bootstrap_body(),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    body["session"]["token"].as_str().unwrap().to_owned()
+}
