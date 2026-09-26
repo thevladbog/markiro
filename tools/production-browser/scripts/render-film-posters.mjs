@@ -28,22 +28,25 @@ try {
   const browser = await chromium.launch({
     args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"],
   });
-  for (const layout of LAYOUTS) {
-    const context = await browser.newContext({ ...layout, reducedMotion: "no-preference" });
-    const page = await context.newPage();
-    await openLiveFilm(page, { sceneOnly: true });
-    for (const [index, id] of CHAPTERS.entries()) {
-      await scrollToFilmTime(page, index === 0 ? 0 : index + 0.5);
-      await page.screenshot({
-        path: path.join(outputRoot, `${id}-${layout.name}.jpg`),
-        type: "jpeg",
-        quality: 88,
-      });
-      console.log(`rendered ${id}-${layout.name}.jpg`);
+  try {
+    for (const layout of LAYOUTS) {
+      const context = await browser.newContext({ ...layout, reducedMotion: "no-preference" });
+      const page = await context.newPage();
+      await openLiveFilm(page, { sceneOnly: true });
+      for (const [index, id] of CHAPTERS.entries()) {
+        await scrollToFilmTime(page, index === 0 ? 0 : index + 0.5);
+        await page.screenshot({
+          path: path.join(outputRoot, `${id}-${layout.name}.jpg`),
+          type: "jpeg",
+          quality: 88,
+        });
+        console.log(`rendered ${id}-${layout.name}.jpg`);
+      }
+      await context.close();
     }
-    await context.close();
+  } finally {
+    await browser.close();
   }
-  await browser.close();
 } finally {
   server.kill("SIGTERM");
 }

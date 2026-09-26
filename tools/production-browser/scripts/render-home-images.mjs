@@ -28,28 +28,31 @@ try {
   const browser = await chromium.launch({
     args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"],
   });
-  for (const shot of [
-    { file: "map-wide.jpg", sceneOnly: true, time: filmTime, crop: "map-phone.jpg" },
-    { file: "film-page.jpg", sceneOnly: false, time: FILM_PAGE_TIME, crop: null },
-  ]) {
-    const context = await browser.newContext(FRAME);
-    const page = await context.newPage();
-    await openLiveFilm(page, { sceneOnly: shot.sceneOnly });
-    await scrollToFilmTime(page, shot.time);
-    await page.screenshot({ path: path.join(outputRoot, shot.file), type: "jpeg", quality: 86 });
-    console.log(`rendered ${shot.file} at film time ${shot.time}`);
-    if (shot.crop !== null) {
-      await page.screenshot({
-        path: path.join(outputRoot, shot.crop),
-        type: "jpeg",
-        quality: 86,
-        clip: PHONE_CROP,
-      });
-      console.log(`rendered ${shot.crop}`);
+  try {
+    for (const shot of [
+      { file: "map-wide.jpg", sceneOnly: true, time: filmTime, crop: "map-phone.jpg" },
+      { file: "film-page.jpg", sceneOnly: false, time: FILM_PAGE_TIME, crop: null },
+    ]) {
+      const context = await browser.newContext(FRAME);
+      const page = await context.newPage();
+      await openLiveFilm(page, { sceneOnly: shot.sceneOnly });
+      await scrollToFilmTime(page, shot.time);
+      await page.screenshot({ path: path.join(outputRoot, shot.file), type: "jpeg", quality: 86 });
+      console.log(`rendered ${shot.file} at film time ${shot.time}`);
+      if (shot.crop !== null) {
+        await page.screenshot({
+          path: path.join(outputRoot, shot.crop),
+          type: "jpeg",
+          quality: 86,
+          clip: PHONE_CROP,
+        });
+        console.log(`rendered ${shot.crop}`);
+      }
+      await context.close();
     }
-    await context.close();
+  } finally {
+    await browser.close();
   }
-  await browser.close();
 } finally {
   server.kill("SIGTERM");
 }

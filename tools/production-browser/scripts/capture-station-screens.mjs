@@ -29,31 +29,39 @@ const server = spawn(
   { cwd: stationRoot, stdio: "inherit" },
 );
 try {
-  await waitForServer(`${baseUrl}/`, server);
-  const browser = await chromium.launch();
-  for (const locale of ["ru", "en"]) {
-    const outputRoot = path.join(landingRoot, "src/assets/home/screens", locale);
-    mkdirSync(outputRoot, { recursive: true });
-    const context = await browser.newContext({
-      viewport: { width: 1280, height: 800 },
-      deviceScaleFactor: 1.25,
-      colorScheme: "dark",
-    });
-    await context.addInitScript(() => localStorage.setItem("markiro.theme", "dark"));
-    const page = await context.newPage();
-    for (const [state, file] of SHOTS) {
-      await page.goto(`${baseUrl}/?gallery=1&state=${state}&locale=${locale}&profile=landing`, {
-        waitUntil: "networkidle",
-      });
-      await page.locator('[data-testid="station-screen-gallery"]').waitFor();
-      await page.evaluate(() => document.fonts.ready);
-      await page.waitForTimeout(300);
-      await page.screenshot({ path: path.join(outputRoot, `${file}.png`) });
-      console.log(`captured ${locale}/${file}.png`);
-    }
-    await context.close();
+  try {
+    await waitForServer(`${baseUrl}/`, server);
+  } catch (error) {
+    server.kill("SIGTERM");
+    throw error;
   }
-  await browser.close();
+  const browser = await chromium.launch();
+  try {
+    for (const locale of ["ru", "en"]) {
+      const outputRoot = path.join(landingRoot, "src/assets/home/screens", locale);
+      mkdirSync(outputRoot, { recursive: true });
+      const context = await browser.newContext({
+        viewport: { width: 1280, height: 800 },
+        deviceScaleFactor: 1.25,
+        colorScheme: "dark",
+      });
+      await context.addInitScript(() => localStorage.setItem("markiro.theme", "dark"));
+      const page = await context.newPage();
+      for (const [state, file] of SHOTS) {
+        await page.goto(`${baseUrl}/?gallery=1&state=${state}&locale=${locale}&profile=landing`, {
+          waitUntil: "networkidle",
+        });
+        await page.locator('[data-testid="station-screen-gallery"]').waitFor();
+        await page.evaluate(() => document.fonts.ready);
+        await page.waitForTimeout(300);
+        await page.screenshot({ path: path.join(outputRoot, `${file}.png`) });
+        console.log(`captured ${locale}/${file}.png`);
+      }
+      await context.close();
+    }
+  } finally {
+    await browser.close();
+  }
 } finally {
   server.kill("SIGTERM");
 }

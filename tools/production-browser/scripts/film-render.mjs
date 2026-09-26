@@ -32,7 +32,12 @@ export async function startLandingServer() {
   const server = spawn(process.execPath, [path.join(toolRoot, "scripts/serve-landing.mjs")], {
     stdio: "inherit",
   });
-  await waitForServer(`${baseUrl}/kak-rabotaet/`, server);
+  try {
+    await waitForServer(`${baseUrl}/kak-rabotaet/`, server);
+  } catch (error) {
+    server.kill("SIGTERM");
+    throw error;
+  }
   return server;
 }
 
