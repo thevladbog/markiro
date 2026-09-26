@@ -332,3 +332,80 @@ async fn login_attempts_are_limited_per_address() {
     app.clock.advance(time::Duration::seconds(61));
     assert_eq!(attempt(LAN).await.0, StatusCode::UNAUTHORIZED);
 }
+
+#[tokio::test]
+async fn malformed_logins_are_denied_without_recording_the_input() {
+    let app = TestApp::new().await;
+    let (device_id, key) = pair_device(&app, "office").await;
+
+    let huge_login = "a".repeat(10_000);
+    let (status, body) = app
+        .send(json_request(
+            with_device(request("POST", "/v1/office/login"), &key),
+            json!({ "login": huge_login, "password": "correct horse battery" }),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["error"]["code"], "unauthorized");
+    assert_eq!(
+        last_audit(&app).await,
+        (
+            "device".into(),
+            Some(device_id.clone()),
+            "office.login".into(),
+            None,
+            "denied".into(),
+            json!({ "reason": "invalid_login" })
+        )
+    );
+
+    let (status, body) = app
+        .send(json_request(
+            with_device(request("POST", "/v1/office/login"), &key),
+            json!({ "login": "ирина", "password": "correct horse battery" }),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["error"]["code"], "unauthorized");
+    assert_eq!(
+        last_audit(&app).await,
+        (
+            "device".into(),
+            Some(device_id),
+            "office.login".into(),
+            None,
+            "denied".into(),
+            json!({ "reason": "invalid_login" })
+        )
+    );
+}
+
+#[tokio::test]
+async fn me_is_denied_and_the_session_is_deleted_when_the_user_is_deactivated() {
+    let app = TestApp::new().await;
+    let (_, key) = pair_device(&app, "office").await;
+    let user_id = seed_office_user(&app, "irina", "admin", "correct horse battery").await;
+    let token = login(&app, &key, "irina", "correct horse battery").await;
+
+    sqlx::query("UPDATE office_users SET active = 0 WHERE id = ?")
+        .bind(&user_id)
+        .execute(&app.state.pool)
+        .await
+        .unwrap();
+
+    let (status, _) = app
+        .send(empty(with_session(
+            request("GET", "/v1/office/me"),
+            &key,
+            &token,
+        )))
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let remaining: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM office_sessions WHERE token_hash = ?")
+            .bind(key_hash(&token))
+            .fetch_one(&app.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(remaining, 0, "a deactivated user's session is deleted");
+}
