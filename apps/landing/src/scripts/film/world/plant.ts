@@ -44,6 +44,7 @@ export interface PlantHandles {
   readonly caseProducts: readonly Object3D[];
   readonly labelTongue: Mesh;
   readonly palletCases: readonly Object3D[];
+  readonly palletLabel: Mesh;
   readonly queueTiles: readonly Mesh[];
   readonly queueBase: Vec3Tuple;
   readonly mastLamp: Mesh;
@@ -523,7 +524,8 @@ export function buildPlant(kit: Kit, parent: Object3D, screens: ScreenTextures):
   person(kit, plant, TABLE.x + 0.02, TABLE.z + 0.86, Math.PI, "work");
   person(kit, plant, CONVEYOR.x0 + 0.45, CONVEYOR.z + 0.72, Math.PI - 0.15, "work");
   // The warehouse worker faces the pallet's front row and holds the handheld about
-  // 12 cm in front of the transport label on the front-right top case.
+  // 12 cm in front of the transport label on the front-right top case, the last case
+  // the pallet receives.
   person(kit, plant, 3.08, 2.25, Math.PI, "device");
   person(kit, plant, -4.35, 0.75, Math.PI / 2 - 0.35, "walk");
 
@@ -544,6 +546,7 @@ export function buildPlant(kit: Kit, parent: Object3D, screens: ScreenTextures):
     caseProducts: packing.products,
     labelTongue,
     palletCases: loaded.cases,
+    palletLabel: loaded.label,
     queueTiles,
     queueBase,
     mastLamp,

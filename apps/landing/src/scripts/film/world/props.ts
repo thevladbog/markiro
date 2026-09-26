@@ -168,7 +168,7 @@ export function pallet(
   z: number,
   capacity: number,
   label: Material,
-): { readonly group: Group; readonly cases: readonly Group[] } {
+): { readonly group: Group; readonly cases: readonly Group[]; readonly label: Mesh } {
   const group = new Group();
   group.name = "pallet";
   group.position.set(x, y, z);
@@ -179,6 +179,7 @@ export function pallet(
     kit.block(group, 0.13, 0.035, 0.94, "pallet", -0.57 + board * 0.19, 0.1, 0, 0.008);
   }
   const cases: Group[] = [];
+  // Each layer fills from the back row to the front, left before right.
   for (let slot = 0; slot < capacity; slot += 1) {
     const layer = Math.floor(slot / 4);
     const place = slot % 4;
@@ -188,17 +189,17 @@ export function pallet(
         group,
         place % 2 === 0 ? -0.32 : 0.32,
         0.135 + layer * 0.505,
-        place < 2 ? 0.225 : -0.225,
+        place < 2 ? -0.225 : 0.225,
         0,
         label,
       ),
     );
   }
   // On the wrap across the seam, in the gap between the two bottom case labels.
-  kit.place(group, shapes.palletLabel, label, 0.12, 0.3, 0.472, { castShadow: false }).name =
-    "pallet-label";
+  const tag = kit.place(group, shapes.palletLabel, label, 0.12, 0.3, 0.472, { castShadow: false });
+  tag.name = "pallet-label";
   parent.add(group);
-  return { group, cases };
+  return { group, cases, label: tag };
 }
 
 export function rack(kit: Kit, parent: Object3D, x0: number, z0: number): void {

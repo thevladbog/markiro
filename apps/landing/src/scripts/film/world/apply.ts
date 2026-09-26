@@ -1,6 +1,6 @@
 import type { Material, MeshBasicMaterial, Texture } from "three";
 
-import { PRODUCT_KINDS, type FilmAnimationState } from "../animations";
+import { PALLET_CAPACITY, PRODUCT_KINDS, type FilmAnimationState } from "../animations";
 import type { Kit } from "./kit";
 import { BELT_TOP, CONVEYOR, type PlantHandles } from "./plant";
 import type { ScreenTextures } from "./textures";
@@ -43,6 +43,8 @@ export function applyAnimation(
   handles.palletCases.forEach((item, index) => {
     item.visible = index < state.palletCases;
   });
+  // The pallet gets its own SSCC label once the handheld has put its last case on.
+  handles.palletLabel.visible = state.palletCases >= PALLET_CAPACITY;
   const [qx, qy, qz] = handles.queueBase;
   handles.queueTiles.forEach((tile, index) => {
     tile.visible = index < state.queueCount && state.queueFlush < 1;

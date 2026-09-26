@@ -1,7 +1,12 @@
 import { Group, PointLight } from "three";
 import { describe, expect, it } from "vitest";
 
-import { animationAt, PRODUCT_KINDS, type FilmAnimationState } from "../animations";
+import {
+  animationAt,
+  PALLET_CAPACITY,
+  PRODUCT_KINDS,
+  type FilmAnimationState,
+} from "../animations";
 import { lightingAt } from "../lighting";
 import { applyAnimation } from "./apply";
 import { buildDistrict } from "./district";
@@ -27,6 +32,14 @@ describe("applying film state to the scene", () => {
     applyAnimation(handles, kit, screens, state({ caseFill: 3, palletCases: 5 }), false, 0);
     expect(handles.caseProducts.filter((product) => product.visible)).toHaveLength(3);
     expect(handles.palletCases.filter((item) => item.visible)).toHaveLength(5);
+  });
+
+  it("labels the pallet only once its last case is on", () => {
+    const { kit, screens, handles } = setup();
+    applyAnimation(handles, kit, screens, state({ palletCases: PALLET_CAPACITY - 1 }), false, 0);
+    expect(handles.palletLabel.visible).toBe(false);
+    applyAnimation(handles, kit, screens, state({ palletCases: PALLET_CAPACITY }), false, 0);
+    expect(handles.palletLabel.visible).toBe(true);
   });
 
   it("stacks the offline queue and hides it once it is flushed", () => {

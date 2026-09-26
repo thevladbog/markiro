@@ -60,6 +60,11 @@ describe("film animation state", () => {
     expect(animationAt(2.9).labelOut).toBe(1);
   });
 
+  it("completes the pallet while the camera holds on the handheld", () => {
+    expect(animationAt(3.35).palletCases).toBeLessThan(PALLET_CAPACITY);
+    expect(animationAt(3.4).palletCases).toBe(PALLET_CAPACITY);
+  });
+
   it("goes offline in chapter five, queues operations and flushes them", () => {
     expect(animationAt(3.9).networkOnline).toBe(true);
     expect(animationAt(4.3).networkOnline).toBe(false);

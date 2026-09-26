@@ -67,11 +67,9 @@ describe("film model kit", () => {
   it("keeps the pallet label clear of the case labels on the pallet front", () => {
     const kit = new Kit();
     const root = new Group();
-    const { group } = pallet(kit, root, 0, 0, 0, 8, new MeshBasicMaterial());
+    const { group, label: tag } = pallet(kit, root, 0, 0, 0, 8, new MeshBasicMaterial());
     root.updateMatrixWorld(true);
-    const tag = group.getObjectByName("pallet-label");
-    expect(tag).toBeDefined();
-    if (tag === undefined) return;
+    expect(tag.name).toBe("pallet-label");
     const tagBox = new Box3().setFromObject(tag);
     const front = meshes(group).filter(
       (mesh) =>

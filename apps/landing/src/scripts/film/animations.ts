@@ -72,7 +72,9 @@ export function animationAt(filmTime: number): FilmAnimationState {
     belt: beltAt(filmTime),
     caseFill: steps(ramp(filmTime, 2.05, 2.55), CASE_CAPACITY),
     labelOut: ramp(filmTime, 2.55, 2.8),
-    palletCases: 4 + steps(ramp(filmTime, 3.1, 3.7), PALLET_CAPACITY - 4),
+    // The top layer lands while the camera flies in to the handheld, so the pallet
+    // is complete, and labelled, while the camera holds there.
+    palletCases: 4 + steps(ramp(filmTime, 3.0, 3.4), PALLET_CAPACITY - 4),
     queueCount: filmTime < 4.1 ? 0 : Math.ceil(ramp(filmTime, 4.1, 4.6) * QUEUE_TILES - 1e-9),
     queueFlush: ramp(filmTime, 4.7, 4.95),
     networkOnline: !offline,

@@ -41,6 +41,7 @@ describe("film district", () => {
     }
     expect(handles.caseProducts).toHaveLength(CASE_CAPACITY);
     expect(handles.palletCases).toHaveLength(PALLET_CAPACITY);
+    expect(handles.palletLabel.name).toBe("pallet-label");
     expect(handles.queueTiles).toHaveLength(QUEUE_TILES);
     expect(handles.lampSpots).toHaveLength(4);
     expect(handles.contactShadow.transparent).toBe(true);
@@ -104,5 +105,18 @@ describe("film district", () => {
       ...labels.map((label) => label.getWorldPosition(new Vector3()).distanceTo(centre)),
     );
     expect(nearest).toBeLessThan(0.3);
+  });
+
+  it("puts the case at the handheld on the pallet last", () => {
+    const { root, handles } = build();
+    root.updateMatrixWorld(true);
+    const screen = root.getObjectByName("handheld-screen");
+    expect(screen).toBeDefined();
+    if (screen === undefined) return;
+    const point = screen.getWorldPosition(new Vector3());
+    const distances = handles.palletCases.map((box) =>
+      new Box3().setFromObject(box).distanceToPoint(point),
+    );
+    expect(distances.indexOf(Math.min(...distances))).toBe(PALLET_CAPACITY - 1);
   });
 });
