@@ -8,11 +8,12 @@ import { chromium } from "@playwright/test";
 
 const execFileAsync = promisify(execFile);
 export const LIGHTHOUSE_RUN_COUNT = 3;
-/** The home page, one commercial topic page and one article: the three page templates that carry leads. */
+/** The home page, one commercial topic page, one article and the film: the page templates that carry leads. */
 export const LIGHTHOUSE_ROUTES = Object.freeze([
   "/",
   "/markirovka-chestny-znak/",
   "/stati/markirovka-piva-2026/",
+  "/kak-rabotaet/",
 ]);
 export const LIGHTHOUSE_THRESHOLDS = Object.freeze({
   seo: 1,
