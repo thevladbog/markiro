@@ -78,7 +78,7 @@ export const STATION_OPERATOR_SHIFT_CONTENT = {
           {
             kind: "step",
             title: "Выберите смену из списка",
-            text: "На экране выбора смены найдите нужную смену по номеру, продукту и дате и нажмите на её карточке «Открыть» — или «Присоединиться», если смена уже идёт. Закрытые смены в списке не показываются.",
+            text: "На экране выбора смены найдите нужную смену по номеру, продукту и дате и нажмите на её карточке «Открыть» — или «Присоединиться», если смена уже идёт. Закрытые смены в списке не показываются. Смена со сборкой паллет помечена на карточке меткой «Паллеты» рядом с режимом.",
             image: {
               id: "shift-select",
               caption: "Список смен: карточки с номером, продуктом и датой",
@@ -93,13 +93,30 @@ export const STATION_OPERATOR_SHIFT_CONTENT = {
         blocks: [
           {
             kind: "step",
-            title: "Создайте новую смену",
-            text: "Если нужной смены нет в списке, нажмите «Новая смена». Отсканируйте код продукта с упаковки или выберите продукт вручную, проверьте дату производства и подтвердите создание.",
+            title: "Найдите продукт",
+            text: "Если нужной смены нет в списке, нажмите «Новая смена». Отсканируйте штрихкод продукта или код маркировки с упаковки — или введите GTIN вручную и нажмите «Открыть». Если станция сообщит «Товар не найден в каталоге», товар сначала нужно добавить в кабинете — обратитесь к администратору.",
+            image: { id: "new-shift", caption: "Новая смена: поле для GTIN продукта" },
+            expected: "Станция нашла продукт и показала его название и GTIN.",
+          },
+          {
+            kind: "step",
+            title: "Выберите режим и сборку паллет",
+            text: "Выберите режим смены — «Проверка» или «Агрегация»; чем они отличаются, описано в инструкции MKR-INS-02. В режиме «Агрегация» ниже появятся кнопки «Без паллет» и «С паллетами». Выберите «С паллетами», если закрытые короба этой смены нужно собирать в паллеты. Под кнопками станция показывает, сколько коробов встаёт на паллету: это число берётся из карточки товара, например «66 коробов на паллете · из карточки товара». Если в карточке товара оно не указано, кнопка «С паллетами» неактивна. Затем проверьте дату производства — поле необязательное, дату берите с продукции — и нажмите «Начать».",
             image: {
-              id: "new-shift",
-              caption: "Создание смены: выбор продукта и даты производства",
+              id: "new-shift-pallets",
+              caption: "Новая смена в режиме «Агрегация» со сборкой паллет",
             },
+          },
+          {
+            kind: "step",
+            title: "Для агрегации выберите шаблоны этикеток",
+            text: "В режиме «Агрегация» станция покажет список «Шаблон этикетки короба». Шаблон с отметкой «По умолчанию» уже выбран; при необходимости выберите другой. В смене с паллетами кнопка внизу называется «Далее»: за ней так же выбирается «Этикетка паллеты». Нажмите «Начать».",
             expected: "Станция создала смену и открыла рабочий экран.",
+          },
+          {
+            kind: "callout",
+            tone: "info",
+            text: "Как станция собирает паллеты во время смены — ставит на паллету каждый закрытый короб, закрывает заполненную паллету и печатает её этикетку, — описано в инструкции MKR-INS-02, раздел 5.",
           },
           {
             kind: "callout",
@@ -146,6 +163,11 @@ export const STATION_OPERATOR_SHIFT_CONTENT = {
                 term: "Нужной смены нет в списке",
                 detail:
                   "Создайте новую смену (раздел 5) или уточните у мастера, на какой станции была открыта смена.",
+              },
+              {
+                term: "Кнопка «С паллетами» неактивна",
+                detail:
+                  "В карточке товара не указано, сколько коробов встаёт на паллету. Попросите администратора указать это число в карточке товара в кабинете, затем начните создание смены заново.",
               },
               {
                 term: "Строка состояния показывает ошибку оборудования",
@@ -242,7 +264,7 @@ export const STATION_OPERATOR_SHIFT_CONTENT = {
           {
             kind: "step",
             title: "Select a shift from the list",
-            text: "On the shift selection screen, find the shift by its number, product and date, and tap “Open” on its card — or “Rejoin” if the shift is already running. Closed shifts are not shown in the list.",
+            text: "On the shift selection screen, find the shift by its number, product and date, and tap “Open” on its card — or “Rejoin” if the shift is already running. Closed shifts are not shown in the list. A shift that builds pallets carries a “Pallets” tag next to its mode on the card.",
             image: {
               id: "shift-select",
               caption: "Shift list: cards with the number, product and date",
@@ -257,13 +279,30 @@ export const STATION_OPERATOR_SHIFT_CONTENT = {
         blocks: [
           {
             kind: "step",
-            title: "Create a new shift",
-            text: "If the shift you need is not in the list, tap “New shift”. Scan the product code from the packaging or pick the product manually, check the production date and confirm the creation.",
+            title: "Find the product",
+            text: "If the shift you need is not in the list, tap “New shift”. Scan the product barcode or a marking code from the packaging — or type the GTIN and tap “Open”. If the station reports “Product is not in the catalog”, the product has to be added in the cabinet first — contact an administrator.",
+            image: { id: "new-shift", caption: "New shift: the product GTIN field" },
+            expected: "The station found the product and showed its name and GTIN.",
+          },
+          {
+            kind: "step",
+            title: "Choose the mode and pallet assembly",
+            text: "Choose the shift mode — “Validation” or “Aggregation”; instruction MKR-INS-02 explains the difference. For “Aggregation”, the “Without pallets” and “With pallets” buttons appear below. Choose “With pallets” if the shift's closed boxes are to be built into pallets. Under the buttons the station shows how many boxes go on a pallet: the number comes from the product card, for example “66 boxes per pallet · from the product card”. If the product card has no such number, “With pallets” is unavailable. Then check the production date — the field is optional, take the date from the product — and tap “Start”.",
             image: {
-              id: "new-shift",
-              caption: "Creating a shift: choosing the product and the production date",
+              id: "new-shift-pallets",
+              caption: "A new shift in “Aggregation” mode with pallet assembly",
             },
+          },
+          {
+            kind: "step",
+            title: "For aggregation, choose the label templates",
+            text: "In “Aggregation” mode the station shows the “Box label template” list. A template marked “Default” is already selected; pick another one if needed. On a shift with pallets the button at the bottom reads “Next”, and after it you choose the “Pallet label template” the same way. Tap “Start”.",
             expected: "The station created the shift and opened the work screen.",
+          },
+          {
+            kind: "callout",
+            tone: "info",
+            text: "How the station builds pallets during the shift — it puts every closed box onto the pallet, closes a full pallet and prints its label — is covered in instruction MKR-INS-02, section 5.",
           },
           {
             kind: "callout",
@@ -310,6 +349,11 @@ export const STATION_OPERATOR_SHIFT_CONTENT = {
                 term: "The shift you need is not in the list",
                 detail:
                   "Create a new shift (section 5) or check with your supervisor which station the shift was opened on.",
+              },
+              {
+                term: "The “With pallets” button is unavailable",
+                detail:
+                  "The product card does not say how many boxes go on a pallet. Ask an administrator to set this number on the product card in the cabinet, then start creating the shift again.",
               },
               {
                 term: "The status bar shows a hardware error",
