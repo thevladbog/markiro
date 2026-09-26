@@ -4,24 +4,36 @@
 //! pairing code confirms it), `Pin` accepts only the fingerprint saved at
 //! pairing. The aws-lc-rs provider is always selected explicitly.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::crypto::{verify_tls12_signature, verify_tls13_signature, CryptoProvider};
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
-use rustls::{DigitallySignedStruct, SignatureScheme};
+use rustls::{CertificateError, DigitallySignedStruct, OtherError, SignatureScheme};
 
 #[derive(Debug, Clone)]
 pub enum FingerprintPolicy {
     /// Accept any certificate and record its fingerprint.
     Observe(Arc<Mutex<Option<String>>>),
-    /// Accept only `expected`; set `mismatch` when another certificate is presented.
-    Pin {
-        expected: String,
-        mismatch: Arc<AtomicBool>,
-    },
+    /// Accept only the certificate whose fingerprint is `expected`.
+    Pin { expected: String },
 }
+
+/// Marks a certificate rejection as a fingerprint mismatch (as opposed to any
+/// other TLS or connection failure). `host_client` downcasts to this type
+/// while walking a failed request's error chain, since a `rustls::Error`
+/// returned by the verifier ends up wrapped several `io::Error`s deep by the
+/// time reqwest reports it.
+#[derive(Debug)]
+pub struct FingerprintMismatch;
+
+impl std::fmt::Display for FingerprintMismatch {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("host certificate fingerprint mismatch")
+    }
+}
+
+impl std::error::Error for FingerprintMismatch {}
 
 pub fn client_config(policy: FingerprintPolicy) -> Result<rustls::ClientConfig, rustls::Error> {
     let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
@@ -55,14 +67,13 @@ impl ServerCertVerifier for FingerprintVerifier {
                 *seen.lock().expect("fingerprint lock") = Some(fingerprint);
                 Ok(ServerCertVerified::assertion())
             }
-            FingerprintPolicy::Pin { expected, mismatch } => {
+            FingerprintPolicy::Pin { expected } => {
                 if &fingerprint == expected {
                     Ok(ServerCertVerified::assertion())
                 } else {
-                    mismatch.store(true, Ordering::SeqCst);
-                    Err(rustls::Error::General(
-                        "host certificate fingerprint mismatch".into(),
-                    ))
+                    Err(rustls::Error::InvalidCertificate(CertificateError::Other(
+                        OtherError(Arc::new(FingerprintMismatch)),
+                    )))
                 }
             }
         }

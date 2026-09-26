@@ -209,6 +209,9 @@ impl DeviceState {
         body: Option<&Value>,
         office_token: Option<&str>,
     ) -> Result<HostResponse, DeviceError> {
+        if !webview_may_reach(path) {
+            return Err(DeviceError::Request(RequestError::InvalidRequest));
+        }
         let device = match &*self.current.lock().expect("device lock") {
             Current::Paired(device) => device.clone(),
             Current::Unpaired => return Err(DeviceError::NotPaired),
@@ -221,7 +224,7 @@ impl DeviceState {
                 path,
                 body,
                 Credentials {
-                    device_key: Some(device.key.expose()),
+                    device_key: Some(&device.key),
                     office_token,
                 },
             )
@@ -238,5 +241,71 @@ impl DeviceState {
         device_config::clear(&self.dir).map_err(|_| DeviceError::Storage)?;
         *self.current.lock().expect("device lock") = Current::Unpaired;
         Ok(())
+    }
+}
+
+/// Routes the webview may reach through `host_request`. Pairing routes are
+/// excluded: their answers carry a new device key, which must never cross
+/// IPC.
+fn webview_may_reach(path: &str) -> bool {
+    let route = path.split('?').next().unwrap_or(path);
+    route == "/v1/device"
+        || route.starts_with("/v1/device/")
+        || route == "/v1/bootstrap"
+        || route.starts_with("/v1/office/")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn webview_reachable_routes_exclude_pairing() {
+        for route in [
+            "/v1/device",
+            "/v1/device/foo",
+            "/v1/bootstrap",
+            "/v1/office/me",
+            "/v1/office/logout",
+            "/v1/office/sscc/counters/460068200/0?since=1",
+        ] {
+            assert!(webview_may_reach(route), "{route}");
+        }
+        for route in [
+            "/v1/local-pair",
+            "/v1/pairing/claim",
+            "/v1/hello",
+            "/v1/devices",
+            "/v1/bootstrap-status",
+        ] {
+            assert!(!webview_may_reach(route), "{route}");
+        }
+    }
+
+    #[test]
+    fn device_status_serializes_to_the_expected_camel_case_keys_only() {
+        let status = DeviceStatus {
+            host_address: "https://127.0.0.1:45710".into(),
+            fingerprint: "ab".repeat(32),
+            host_id: "3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f".into(),
+            device_id: "7c9e6679-7425-40de-944b-e07fc1f90ae7".into(),
+            kind: DeviceKind::Station,
+            line_id: None,
+        };
+        let value = serde_json::to_value(&status).expect("DeviceStatus serializes");
+        let object = value.as_object().expect("DeviceStatus is a JSON object");
+        let mut keys: Vec<&str> = object.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        let mut expected = vec![
+            "hostAddress",
+            "fingerprint",
+            "hostId",
+            "deviceId",
+            "kind",
+            "lineId",
+        ];
+        expected.sort_unstable();
+        assert_eq!(keys, expected);
+        assert!(!object.contains_key("key"));
     }
 }

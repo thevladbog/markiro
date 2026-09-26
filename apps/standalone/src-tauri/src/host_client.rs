@@ -3,16 +3,14 @@
 //! pinned at pairing. No proxy, no redirects, short timeouts, and the
 //! protocol header on every request.
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 use std::time::Duration;
 
-use markiro_proto::{OFFICE_SESSION_HEADER, PROTOCOL_HEADER, PROTOCOL_VERSION};
+use markiro_proto::{Secret, OFFICE_SESSION_HEADER, PROTOCOL_HEADER, PROTOCOL_VERSION};
 use reqwest::Method;
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::tls::{self, FingerprintPolicy};
+use crate::tls::{self, FingerprintMismatch, FingerprintPolicy};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -51,28 +49,44 @@ impl RequestError {
     }
 }
 
-/// Credentials attached to one request.
-#[derive(Debug, Clone, Copy, Default)]
+/// Credentials attached to one request. `Debug` never prints the key or the
+/// office token: both are secrets that must not reach logs.
+#[derive(Clone, Copy, Default)]
 pub struct Credentials<'a> {
-    pub device_key: Option<&'a str>,
+    pub device_key: Option<&'a Secret>,
     pub office_token: Option<&'a str>,
+}
+
+impl std::fmt::Debug for Credentials<'_> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fn redacted<T>(value: Option<T>) -> &'static str {
+            if value.is_some() {
+                "Some(***)"
+            } else {
+                "None"
+            }
+        }
+        write!(
+            formatter,
+            "Credentials {{ device_key: {}, office_token: {} }}",
+            redacted(self.device_key),
+            redacted(self.office_token)
+        )
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct PinnedClient {
     client: reqwest::Client,
     address: String,
-    mismatch: Arc<AtomicBool>,
 }
 
 impl PinnedClient {
     /// A client for `address` (`https://host:port`) that trusts only the
     /// certificate with this lower-case hex SHA-256 `fingerprint`.
     pub fn new(address: &str, fingerprint: &str) -> Result<Self, RequestError> {
-        let mismatch = Arc::new(AtomicBool::new(false));
         let config = tls::client_config(FingerprintPolicy::Pin {
             expected: fingerprint.to_owned(),
-            mismatch: mismatch.clone(),
         })
         .map_err(|_| RequestError::Unreachable)?;
         let client = reqwest::Client::builder()
@@ -80,13 +94,13 @@ impl PinnedClient {
             .connect_timeout(CONNECT_TIMEOUT)
             .timeout(REQUEST_TIMEOUT)
             .no_proxy()
+            .https_only(true)
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|_| RequestError::Unreachable)?;
         Ok(Self {
             client,
             address: address.trim_end_matches('/').to_owned(),
-            mismatch,
         })
     }
 
@@ -104,7 +118,7 @@ impl PinnedClient {
             .request(method, format!("{}{path}", self.address))
             .header(PROTOCOL_HEADER, PROTOCOL_VERSION.to_string());
         if let Some(key) = credentials.device_key {
-            request = request.bearer_auth(key);
+            request = request.bearer_auth(key.expose());
         }
         if let Some(token) = credentials.office_token {
             request = request.header(OFFICE_SESSION_HEADER, token);
@@ -114,7 +128,8 @@ impl PinnedClient {
         }
         let response = match request.send().await {
             Ok(response) => response,
-            Err(_) if self.mismatch.swap(false, Ordering::SeqCst) => {
+            Err(error) if error.is_builder() => return Err(RequestError::InvalidRequest),
+            Err(error) if is_fingerprint_mismatch(&error) => {
                 return Err(RequestError::CertificateMismatch)
             }
             Err(_) => return Err(RequestError::Unreachable),
@@ -143,7 +158,10 @@ fn allowed_method(method: &str) -> Result<Method, RequestError> {
     }
 }
 
-/// Only host API paths: `/v1/…` of plain URL characters, no traversal.
+/// Only host API paths: `/v1/…` of plain URL characters, no traversal. `%` is
+/// excluded: none of our routes need percent-encoding, and allowing it would
+/// let an encoded `..` or `/` reach the host after the `url` crate normalizes
+/// it, bypassing the checks above.
 fn validate_path(path: &str) -> Result<(), RequestError> {
     let safe = path.starts_with("/v1/")
         && path.len() <= MAX_PATH_LENGTH
@@ -151,12 +169,46 @@ fn validate_path(path: &str) -> Result<(), RequestError> {
         && !path.contains("//")
         && path
             .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || b"/_.~?=&%-".contains(&byte));
+            .all(|byte| byte.is_ascii_alphanumeric() || b"/_.~?=&-".contains(&byte));
     if safe {
         Ok(())
     } else {
         Err(RequestError::InvalidRequest)
     }
+}
+
+/// Whether a failed request's error chain contains the pin verifier's
+/// [`FingerprintMismatch`]. A `rustls::Error` returned by the certificate
+/// verifier is not directly visible through `std::error::Error::source()`:
+/// `tokio-rustls` reports the TLS failure as a nested `std::io::Error`, and
+/// `io::Error::source()` skips the error it wraps (it delegates straight to
+/// that error's own source), so the wrapped error is only reachable through
+/// `io::Error::get_ref()`, followed recursively.
+fn is_fingerprint_mismatch(error: &reqwest::Error) -> bool {
+    let mut current: &(dyn std::error::Error + 'static) = error;
+    loop {
+        if wraps_fingerprint_mismatch(current) {
+            return true;
+        }
+        match current.source() {
+            Some(source) => current = source,
+            None => return false,
+        }
+    }
+}
+
+fn wraps_fingerprint_mismatch(error: &(dyn std::error::Error + 'static)) -> bool {
+    if let Some(rustls::Error::InvalidCertificate(rustls::CertificateError::Other(other))) =
+        error.downcast_ref::<rustls::Error>()
+    {
+        return other.0.downcast_ref::<FingerprintMismatch>().is_some();
+    }
+    if let Some(io_error) = error.downcast_ref::<std::io::Error>() {
+        if let Some(inner) = io_error.get_ref() {
+            return wraps_fingerprint_mismatch(inner);
+        }
+    }
+    false
 }
 
 #[cfg(test)]
@@ -181,6 +233,9 @@ mod tests {
             "/v1//device",
             "/v1/device name",
             "/v1/device\n",
+            "/v1/%2e%2e/x",
+            "/v1/.%2E/x",
+            "/v1/office%2Fx",
             too_long.as_str(),
         ] {
             assert_eq!(
@@ -203,5 +258,27 @@ mod tests {
                 "{method}"
             );
         }
+    }
+
+    #[test]
+    fn credentials_debug_output_hides_the_key_and_the_token() {
+        let key = Secret::from("device-key-value".to_owned());
+        let credentials = Credentials {
+            device_key: Some(&key),
+            office_token: Some("office-token-value"),
+        };
+        let debug = format!("{credentials:?}");
+        assert!(!debug.contains("device-key-value"), "{debug}");
+        assert!(!debug.contains("office-token-value"), "{debug}");
+        assert_eq!(
+            debug,
+            "Credentials { device_key: Some(***), office_token: Some(***) }"
+        );
+
+        let empty = format!("{:?}", Credentials::default());
+        assert_eq!(
+            empty,
+            "Credentials { device_key: None, office_token: None }"
+        );
     }
 }

@@ -1,4 +1,4 @@
-//! `device.json` in the app's config directory (spec §5.2): the host this
+//! `device.json` in the app's local data directory (spec §5.2): the host this
 //! device is paired with and its protected key. Written atomically: a crash
 //! leaves either the old file or the new one, never a torn file.
 

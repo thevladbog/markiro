@@ -220,3 +220,94 @@ async fn an_unreadable_config_is_reported_until_forgotten() {
     assert_eq!(state.status(), Ok(None));
     assert!(!app_dir.path().join("device.json").exists());
 }
+
+/// F1: pairing answers carry a new device key, so `host_request` must never
+/// forward them, even from a device that is already paired.
+#[tokio::test]
+async fn pairing_routes_are_not_reachable_through_host_request() {
+    let host_dir = tempfile::tempdir().unwrap();
+    let app_dir = tempfile::tempdir().unwrap();
+    let host = start_host(host_dir.path()).await;
+    let state = DeviceState::load(app_dir.path().to_path_buf());
+    state
+        .local_pair(&address(&host), NAME, "0.1.0")
+        .await
+        .unwrap();
+
+    let pair_again = json!({
+        "kind": "office",
+        "name": "Пробуем перевыпустить ключ",
+        "appVersion": "0.1.0",
+        "capabilities": []
+    });
+    assert_eq!(
+        state
+            .request("POST", "/v1/local-pair", Some(&pair_again), None)
+            .await,
+        Err(DeviceError::Request(RequestError::InvalidRequest))
+    );
+    assert_eq!(
+        state
+            .request("POST", "/v1/pairing/claim", Some(&pair_again), None)
+            .await,
+        Err(DeviceError::Request(RequestError::InvalidRequest))
+    );
+    assert_eq!(
+        state.request("GET", "/v1/hello", None, None).await,
+        Err(DeviceError::Request(RequestError::InvalidRequest))
+    );
+    host.stop().await.unwrap();
+}
+
+/// F6: an invalid header value must fail on the `RequestBuilder` before the
+/// client ever tries to connect; a closed port proves no I/O was attempted.
+#[tokio::test]
+async fn a_malformed_office_token_is_invalid_before_any_io() {
+    let client = PinnedClient::new(&closed_address(), &"00".repeat(32)).unwrap();
+    assert_eq!(
+        client
+            .send(
+                "GET",
+                "/v1/device",
+                None,
+                Credentials {
+                    device_key: None,
+                    office_token: Some("bad\ntoken"),
+                },
+            )
+            .await,
+        Err(RequestError::InvalidRequest)
+    );
+}
+
+/// F8: the host's own validation (name 1-100 characters) surfaces as
+/// `PairRejected`, and the failed attempt leaves nothing paired.
+#[tokio::test]
+async fn a_name_longer_than_the_hosts_limit_is_rejected() {
+    let host_dir = tempfile::tempdir().unwrap();
+    let app_dir = tempfile::tempdir().unwrap();
+    let host = start_host(host_dir.path()).await;
+    let state = DeviceState::load(app_dir.path().to_path_buf());
+    let too_long = "И".repeat(101);
+    assert_eq!(
+        state.local_pair(&address(&host), &too_long, "0.1.0").await,
+        Err(DeviceError::PairRejected)
+    );
+    assert_eq!(state.status(), Ok(None));
+    host.stop().await.unwrap();
+}
+
+/// F8: `local_pair` also refuses to run while `device.json` is unreadable.
+#[tokio::test]
+async fn local_pair_on_an_unreadable_config_is_reported() {
+    let host_dir = tempfile::tempdir().unwrap();
+    let app_dir = tempfile::tempdir().unwrap();
+    let host = start_host(host_dir.path()).await;
+    std::fs::write(app_dir.path().join("device.json"), "{").unwrap();
+    let state = DeviceState::load(app_dir.path().to_path_buf());
+    assert_eq!(
+        state.local_pair(&address(&host), NAME, "0.1.0").await,
+        Err(DeviceError::ConfigUnreadable)
+    );
+    host.stop().await.unwrap();
+}
