@@ -317,14 +317,18 @@ loading
 - **Клиент хоста.** `reqwest =0.13.4` с rustls и собственным проверяющим сертификата:
   соединение принимается, только если SHA-256 сертификата совпадает с сохранённым
   отпечатком. Команды: `host_hello(address)` (без закрепления, возвращает и
-  наблюдаемый отпечаток), `host_local_pair`, `host_claim(address, fingerprint, code, device)`,
-  `host_request(method, path, body, officeToken?)`. Таймауты: соединение 2 с,
-  запрос 10 с.
+  наблюдаемый отпечаток), `device_status()`, `host_local_pair`, `host_claim(address, fingerprint, code, device)`,
+  `host_request(method, path, body, officeToken?)`, `device_forget()`. Таймауты: соединение 2 с,
+  запрос 10 с. `host_request` пропускает только маршруты `/v1/device[/…]`,
+  `/v1/bootstrap` и `/v1/office/…`: маршруты подключения возвращают новый ключ
+  устройства и доступны только своими командами, ключ в вебвью не попадает.
 - **Поток изменений.** Фоновая задача держит SSE, переподключается с паузой от 1 до
   30 с и шлёт в интерфейс события `standalone://host-status`
   (`online | connecting | offline`, время последней связи, последняя ошибка) и
   `standalone://host-revision` (`{ rev }`).
-- **Конфигурация устройства.** `device.json` в каталоге конфигурации: адрес хоста,
+- **Конфигурация устройства.** `device.json` в локальном каталоге данных приложения
+  (`app_local_data_dir`; на Windows — `%LOCALAPPDATA%`, не перемещаемый профиль, иначе
+  ключ и отпечаток уйдут с профилем на другой ПК и устройство раздвоится): адрес хоста,
   отпечаток, `hostId`, `deviceId`, тип, линия. Ключ устройства на Windows хранится под
   защитой DPAPI (по образцу `apps/signer/signer-core/src/storage_dpapi.rs`), на других
   ОС — в файле с правами `0600`. Запись атомарная (как `config.rs` станции).

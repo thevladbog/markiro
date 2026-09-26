@@ -85,12 +85,50 @@ compatibility (`host_too_old`, `app_too_old`) before parsing the rest.
 
 ## Network and TLS
 
-The webview never performs HTTP. Rust calls the host with the aws-lc-rs
-provider selected explicitly. Authenticated calls (from plan 1c) verify the
-pinned certificate fingerprint (`markiro_proto::certificate_fingerprint`);
-today only `host_probe` exists, and it observes a fingerprint without
-trusting it. `host_probe` accepts any certificate and exists only to
-discover a host before a person or a pairing code confirms the fingerprint.
+The webview never performs HTTP: every call to the host is a shell command.
+Rust calls the host with the aws-lc-rs provider selected explicitly
+(`src-tauri/src/tls.rs`). `host_client` trusts only the certificate whose
+SHA-256 was saved at pairing (`FingerprintPolicy::Pin`); it uses no proxy,
+follows no redirects, speaks HTTPS only and gives up after 2 s to connect and
+10 s per request. A pin mismatch is recognized per request from the error
+chain (`tls::FingerprintMismatch`) and reported as `certificate_mismatch`,
+never as `unreachable`. `host_probe` observes a fingerprint without trusting
+it (`FingerprintPolicy::Observe`) and exists only to discover a host before
+loopback, a person or a pairing code confirms it.
+
+`host_request`, the webview's only way to reach the host, accepts `GET`,
+`POST`, `PUT` and `DELETE`, paths of `[A-Za-z0-9/_.~?=&-]` without `..` or
+`//`, and only the routes `/v1/device[/…]`, `/v1/bootstrap` and
+`/v1/office/…`. Pairing routes return a new device key, so they stay behind
+their own commands (`host_local_pair`, later `host_claim`) and the key never
+reaches the webview. `%` is refused because an encoded `..` would slip past
+the route check. Add a route the webview needs to that list deliberately;
+never let a listed prefix cover a route that returns a secret.
+
+## Device key and office session
+
+- The device key lives only in `device.json` in the app's local data
+  directory (`app_local_data_dir`, `%LOCALAPPDATA%` on Windows):
+  DPAPI-protected for the Windows user on Windows, plain in an owner-only
+  (0600) file elsewhere. Never move it to a roaming directory: a roaming or
+  redirected profile would carry the key and the pinned fingerprint to
+  another PC and clone the device. The key never crosses IPC: the webview
+  gets `DeviceStatus`, and `host_request` attaches the key in Rust. A file
+  written on another system or for another Windows user is
+  `config_unreadable`; the app offers to reset and pair again.
+- The office session token lives only in webview memory. «В цех» hides the
+  office and keeps the session until the host expires it; «Выйти» ends it on
+  the host.
+- Every office user, the technologist included, changes their own password
+  with the current one (`PUT /v1/office/me/password`); the user's other
+  sessions end and the current one stays.
+- Screens pick text by error code (`src/host/errors.ts`). An `unauthorized`
+  answer names its `details.credential`: `device` (and a
+  `certificate_mismatch`) sends the app to re-pairing, `session` to the office
+  sign-in, `password` stays a form error.
+- UI text goes through `src/i18n/ru.json`; controls come from `@markiro/ui`
+  (ESLint bans native form elements in `src/`); forms check the host's and
+  `@markiro/domain` rules before sending.
 
 ## Marking rules
 
@@ -110,6 +148,8 @@ hash or the TLS private key.
   Tauri crate needs `apps/standalone/dist`: build the webview first with
   `pnpm turbo run build --filter='@markiro/standalone...'`.
 - `pnpm --filter @markiro/standalone test`, `typecheck`, `lint`, `build`.
-- The Windows service (and later DPAPI and kiosk mode) is only compiled by
-  the `standalone-windows-build` job; running it needs a manual check on
-  Windows; a host run on macOS proves none of it.
+- The Windows service and DPAPI run only in the `standalone-windows-build`
+  job: it compiles the service and the Tauri app for Windows, and its cargo
+  tests round-trip a key through DPAPI. A real Windows user profile, the
+  service at runtime and (later) kiosk mode still need a manual check on
+  Windows; a run on macOS proves none of it.
