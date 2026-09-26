@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import { StrictMode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { ThemeProvider } from "@markiro/ui";
@@ -26,6 +27,7 @@ function probeAnswering(...answers: Array<boolean | HostProbeError>) {
   return { hello };
 }
 
+/** `pairLocally` rejects with `already_paired` once paired, like the real shell. */
 function fakeDevice(initial: DeviceStatus | null | DeviceError) {
   let paired: DeviceStatus | null = initial instanceof DeviceError ? null : initial;
   let broken = initial instanceof DeviceError ? initial : null;
@@ -35,6 +37,7 @@ function fakeDevice(initial: DeviceStatus | null | DeviceError) {
       return paired;
     }),
     pairLocally: vi.fn<DeviceApi["pairLocally"]>(async () => {
+      if (paired) throw new DeviceError("already_paired", "already paired");
       paired = DEVICE_STATUS;
       return DEVICE_STATUS;
     }),
@@ -68,6 +71,13 @@ async function signIn(): Promise<void> {
   fireEvent.click(screen.getByRole("button", { name: "Войти" }));
 }
 
+/** The first call order of a mock, asserted to exist rather than cast away. */
+function firstCallOrder(mockFn: { mock: { invocationCallOrder: number[] } }): number {
+  const [order] = mockFn.mock.invocationCallOrder;
+  if (order === undefined) throw new Error("expected the mock to have been called");
+  return order;
+}
+
 describe("App", () => {
   it("creates the site on a fresh host and opens the office", async () => {
     const device = fakeDevice(null);
@@ -78,6 +88,8 @@ describe("App", () => {
     expect(await screen.findByText("Вы вошли как Ирина Смирнова.")).toBeTruthy();
     expect(device.pairLocally).toHaveBeenCalledWith("Рабочее место хоста");
     expect(host.bootstrap).toHaveBeenCalledWith(EXPECTED_REQUEST);
+    // The site must not be created on this computer before it is paired.
+    expect(firstCallOrder(device.pairLocally)).toBeLessThan(firstCallOrder(host.bootstrap));
   });
 
   it("finishes the wizard without pairing again when the device is already paired", async () => {
@@ -88,6 +100,19 @@ describe("App", () => {
     await completeWizard();
     expect(await screen.findByText("Вы вошли как Ирина Смирнова.")).toBeTruthy();
     expect(device.pairLocally).not.toHaveBeenCalled();
+  });
+
+  it("adopts pairing under StrictMode's double effects", async () => {
+    const device = fakeDevice(null);
+    const host = fakeHost();
+    render(
+      <StrictMode>
+        <ThemeProvider defaultTheme="dark">
+          <App probe={probeAnswering(true)} device={device} host={host} address={ADDRESS} />
+        </ThemeProvider>
+      </StrictMode>,
+    );
+    expect(await screen.findByText("Цех")).toBeTruthy();
   });
 
   it("pairs with an initialized host and opens the office from the floor", async () => {
@@ -157,6 +182,56 @@ describe("App", () => {
     expect(device.pairLocally).toHaveBeenCalledTimes(1);
   });
 
+  it("routes a rejected device from the wizard back to pairing", async () => {
+    const device = fakeDevice(DEVICE_STATUS);
+    const host = fakeHost();
+    host.bootstrap.mockRejectedValueOnce(
+      new HostError({
+        kind: "api",
+        code: "unauthorized",
+        status: 401,
+        message: "unknown or revoked device key",
+        details: { credential: "device" },
+      }),
+    );
+    renderApp({ probe: probeAnswering(false), device, host });
+    await screen.findByText("Первый запуск");
+    await completeWizard();
+    expect(await screen.findByText("Хост не принимает это устройство")).toBeTruthy();
+  });
+
+  it("does not pair again when a rejected bootstrap is corrected and resubmitted", async () => {
+    const device = fakeDevice(null);
+    const host = fakeHost();
+    host.bootstrap
+      .mockRejectedValueOnce(
+        new HostError({
+          kind: "api",
+          code: "validation_failed",
+          status: 422,
+          message: "this GLN is already registered to another site",
+          details: { field: "org.gln" },
+        }),
+      )
+      .mockResolvedValueOnce({ session: SESSION });
+    renderApp({ probe: probeAnswering(false), device, host });
+    await screen.findByText("Первый запуск");
+    await completeWizard();
+    // Rejected: the wizard jumps back to the org step with the field error;
+    // the GLN is already valid, so stepping forward again is enough.
+    await screen.findByText("Шаг 2 из 5 · Организация");
+    fireEvent.click(screen.getByRole("button", { name: "Далее" }));
+    await screen.findByText("Шаг 3 из 5 · Номера SSCC");
+    fireEvent.click(screen.getByRole("button", { name: "Далее" }));
+    await screen.findByText("Шаг 4 из 5 · Линии");
+    fireEvent.click(screen.getByRole("button", { name: "Далее" }));
+    await screen.findByText("Шаг 5 из 5 · Проверка");
+    fireEvent.click(screen.getByRole("button", { name: "Создать" }));
+    expect(await screen.findByText("Вы вошли как Ирина Смирнова.")).toBeTruthy();
+    expect(device.pairLocally).toHaveBeenCalledTimes(1);
+    expect(host.bootstrap).toHaveBeenCalledTimes(2);
+  });
+
   it("offers to reset an unreadable device config", async () => {
     const device = fakeDevice(new DeviceError("config_unreadable", "broken"));
     renderApp({ probe: probeAnswering(true), device, host: fakeHost() });
@@ -165,6 +240,19 @@ describe("App", () => {
     expect(await screen.findByText("Цех")).toBeTruthy();
     expect(device.forget).toHaveBeenCalledTimes(1);
     expect(device.pairLocally).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a repair failure on the config-error screen and keeps it visible", async () => {
+    const device = fakeDevice(new DeviceError("config_unreadable", "broken"));
+    device.forget.mockRejectedValueOnce(new DeviceError("storage", "disk full"));
+    renderApp({ probe: probeAnswering(true), device, host: fakeHost() });
+    expect(await screen.findByText("Настройки подключения повреждены")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Сбросить подключение" }));
+    expect(
+      await screen.findByText("Не удалось сохранить настройки подключения на этом компьютере."),
+    ).toBeTruthy();
+    expect(screen.getByText("Настройки подключения повреждены")).toBeTruthy();
+    expect(device.forget).toHaveBeenCalledTimes(1);
   });
 
   it("explains a missing host and finds it after a retry", async () => {

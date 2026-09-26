@@ -53,12 +53,23 @@ export function HostMissingScreen({
   );
 }
 
-export function ConfigErrorScreen({ onReset }: { onReset: () => void }) {
+export function ConfigErrorScreen({
+  busy,
+  error,
+  onReset,
+}: {
+  busy: boolean;
+  error: DeviceErrorCode | null;
+  onReset: () => void;
+}) {
   const { t } = useTranslation();
   return (
     <Card className="standalone-card" title={t("shell.configError.title")} titleAs="h2">
       <p>{t("shell.configError.body")}</p>
-      <Button onClick={onReset}>{t("shell.configError.reset")}</Button>
+      {error && <Alert tone="error">{t(`errors.device.${error}`)}</Alert>}
+      <Button onClick={onReset} loading={busy}>
+        {t("shell.configError.reset")}
+      </Button>
     </Card>
   );
 }
@@ -81,9 +92,13 @@ export function PairFailedScreen({
 
 export function DeviceRejectedScreen({
   reason,
+  busy,
+  error,
   onRepair,
 }: {
   reason: RejectionReason;
+  busy: boolean;
+  error: DeviceErrorCode | null;
   onRepair: () => void;
 }) {
   const { t } = useTranslation();
@@ -96,7 +111,10 @@ export function DeviceRejectedScreen({
             : "shell.deviceRejected.hostChanged",
         )}
       </Alert>
-      <Button onClick={onRepair}>{t("shell.deviceRejected.repair")}</Button>
+      {error && <Alert tone="error">{t(`errors.device.${error}`)}</Alert>}
+      <Button onClick={onRepair} loading={busy}>
+        {t("shell.deviceRejected.repair")}
+      </Button>
     </Card>
   );
 }

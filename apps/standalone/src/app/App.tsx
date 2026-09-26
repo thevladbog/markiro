@@ -3,7 +3,12 @@ import { useTranslation } from "react-i18next";
 
 import { createHostApi, type HostApi } from "../host/api.js";
 import { createTauriHostClient, HostError } from "../host/client.js";
-import { createTauriDeviceApi, DeviceError, type DeviceApi } from "../host/device.js";
+import {
+  createTauriDeviceApi,
+  DeviceError,
+  type DeviceApi,
+  type DeviceErrorCode,
+} from "../host/device.js";
 import { createTauriHostProbe, HostProbeError, type HostProbe } from "../host/probe.js";
 import {
   LOCAL_HOST_ADDRESS,
@@ -39,7 +44,8 @@ export function App({ probe, device, host, address = LOCAL_HOST_ADDRESS }: AppPr
   const hostApi = useMemo(() => host ?? createHostApi(createTauriHostClient()), [host]);
   const [state, dispatch] = useReducer(shellReducer, initialShellState);
   const [probeAttempt, setProbeAttempt] = useState(0);
-  const view = nextShellView(state);
+  const [repairState, setRepairState] = useState<"idle" | "busy" | DeviceErrorCode>("idle");
+  const view = nextShellView(state, address);
   const localName = t("device.localName");
 
   useEffect(() => {
@@ -114,13 +120,17 @@ export function App({ probe, device, host, address = LOCAL_HOST_ADDRESS }: AppPr
   }, []);
 
   const repair = useCallback(() => {
+    setRepairState("busy");
     deviceApi.forget().then(
       () => {
+        setRepairState("idle");
         dispatch({ type: "forgotten" });
         retryProbe();
       },
-      () => {
-        // The config could not be removed; this screen stays and offers the same action again.
+      (error: unknown) => {
+        // The config could not be removed; this screen stays and offers the
+        // same action again, now explaining why it did not work.
+        setRepairState(error instanceof DeviceError ? error.code : "unreachable");
       },
     );
   }, [deviceApi, retryProbe]);
@@ -139,6 +149,13 @@ export function App({ probe, device, host, address = LOCAL_HOST_ADDRESS }: AppPr
           dispatch({ type: "office_requested" });
           return;
         }
+        // No session exists yet during the wizard, so any rejection applies
+        // unconditionally (`shellActionFor(error, null)`).
+        const action = shellActionFor(error, null);
+        if (action?.type === "device_rejected") {
+          dispatch(action);
+          return;
+        }
         throw error;
       }
     },
@@ -150,7 +167,8 @@ export function App({ probe, device, host, address = LOCAL_HOST_ADDRESS }: AppPr
       try {
         dispatch({ type: "office_opened", session: await hostApi.officeLogin(request) });
       } catch (error) {
-        const action = shellActionFor(error);
+        // No session exists yet during sign-in either.
+        const action = shellActionFor(error, null);
         if (action?.type === "device_rejected") {
           dispatch(action);
           return;
@@ -170,7 +188,10 @@ export function App({ probe, device, host, address = LOCAL_HOST_ADDRESS }: AppPr
         try {
           return await operation(session.token);
         } catch (error) {
-          const action = shellActionFor(error);
+          // Scoped to this session's token: a late failure from a session the
+          // user already left or replaced must not pull them back into
+          // sign-in or mark a fresh pairing rejected.
+          const action = shellActionFor(error, session.token);
           if (action) dispatch(action);
           throw error;
         }
@@ -189,10 +210,15 @@ export function App({ probe, device, host, address = LOCAL_HOST_ADDRESS }: AppPr
 
   if (officeSession) return <Office session={officeSession} />;
 
+  const repairBusy = repairState === "busy";
+  const repairError = repairState === "idle" || repairState === "busy" ? null : repairState;
+
   return (
     <main className="standalone-screen">
       {view.kind === "loading" && <WaitScreen messageKey="shell.loading" />}
-      {view.kind === "config_error" && <ConfigErrorScreen onReset={repair} />}
+      {view.kind === "config_error" && (
+        <ConfigErrorScreen busy={repairBusy} error={repairError} onReset={repair} />
+      )}
       {view.kind === "host_missing" && (
         <HostMissingScreen reason={view.reason} address={address} onRetry={retryProbe} />
       )}
@@ -202,7 +228,12 @@ export function App({ probe, device, host, address = LOCAL_HOST_ADDRESS }: AppPr
         <PairFailedScreen code={view.code} onRetry={() => dispatch({ type: "pairing_retried" })} />
       )}
       {view.kind === "device_rejected" && (
-        <DeviceRejectedScreen reason={view.reason} onRepair={repair} />
+        <DeviceRejectedScreen
+          reason={view.reason}
+          busy={repairBusy}
+          error={repairError}
+          onRepair={repair}
+        />
       )}
       {view.kind === "floor" && (
         <FloorScreen onOffice={() => dispatch({ type: "office_requested" })} />
