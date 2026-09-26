@@ -303,7 +303,7 @@ function artifactEntry(
       readonly [PublishedLegalArtifact["revision"], PublishedLegalArtifact["effectiveDate"]]
     >
   > = {
-    "MKR-INS-01": ["2026.09/03", "2026-09-26"],
+    "MKR-INS-01": ["2026.09/04", "2026-09-26"],
     "MKR-INS-02": ["2026.09/03", "2026-09-26"],
     "MKR-INS-03": ["2026.09/04", "2026-09-26"],
     "MKR-INS-04": ["2026.09/01", "2026-09-26"],
@@ -1297,8 +1297,8 @@ describe("legal artifact release generation", () => {
       "MKR-BRD-01|ru|template-docx|https://markiro.app/d/MKR-BRD-01/2026.08/01/15.08.2026",
       "MKR-BRD-01|en|legal-pdf|https://markiro.app/d/MKR-BRD-01/2026.08/01/15.08.2026",
       "MKR-BRD-01|en|template-docx|https://markiro.app/d/MKR-BRD-01/2026.08/01/15.08.2026",
-      "MKR-INS-01|ru|legal-pdf|https://markiro.app/d/MKR-INS-01/2026.09/03/26.09.2026",
-      "MKR-INS-01|en|legal-pdf|https://markiro.app/d/MKR-INS-01/2026.09/03/26.09.2026",
+      "MKR-INS-01|ru|legal-pdf|https://markiro.app/d/MKR-INS-01/2026.09/04/26.09.2026",
+      "MKR-INS-01|en|legal-pdf|https://markiro.app/d/MKR-INS-01/2026.09/04/26.09.2026",
       "MKR-INS-02|ru|legal-pdf|https://markiro.app/d/MKR-INS-02/2026.09/03/26.09.2026",
       "MKR-INS-02|en|legal-pdf|https://markiro.app/d/MKR-INS-02/2026.09/03/26.09.2026",
       "MKR-INS-03|ru|legal-pdf|https://markiro.app/d/MKR-INS-03/2026.09/04/26.09.2026",
@@ -1467,7 +1467,7 @@ describe("instruction artifact bounds", () => {
         kind: "legal-pdf",
         verificationUrl: legalVerificationUrl(release),
       }),
-    ).toBe("markiro_mkr-ins-01_2026.09-03_ru.pdf");
+    ).toBe("markiro_mkr-ins-01_2026.09-04_ru.pdf");
     expect(
       artifactFileName({
         code: "MKR-INS-01",
@@ -1477,7 +1477,7 @@ describe("instruction artifact bounds", () => {
         kind: "legal-pdf",
         verificationUrl: legalVerificationUrl(release),
       }),
-    ).toBe("markiro_mkr-ins-01_2026.09-03_en.pdf");
+    ).toBe("markiro_mkr-ins-01_2026.09-04_en.pdf");
     // The catalog pair completed the English series, so an instruction no
     // longer has an unpublished locale to refuse -- both now name an English
     // PDF the same way the station set does.

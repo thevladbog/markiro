@@ -18,6 +18,9 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+/** The gallery's demo shift, which App.tsx only ever names while a shift is active. */
+const GALLERY_SHIFT_LABEL = { ru: "Смена ДЕМО-01", en: "Shift DEMO-01" } as const;
+
 describe("development screen gallery", () => {
   it.each(["ru", "en"] as const)(
     "keeps the selected recovery printer when switching from %s",
@@ -663,7 +666,7 @@ describe("development screen gallery", () => {
   });
 
   it.each([
-    ["new-shift-input", "GTIN товара"],
+    ["new-shift-input", "Введите или отсканируйте GTIN"],
     ["new-shift-found", "Тестовый товар А"],
     ["new-shift-not-found", "Товар не найден"],
     [
@@ -740,12 +743,73 @@ describe("development screen gallery", () => {
         expect(screen.getAllByText(label).length).toBeGreaterThan(0);
       }
 
-      // With no floor task active, App.tsx makes the printer summary a button.
+      // With no floor task active, App.tsx makes the printer summary a button
+      // and has no shift to name in the header.
       const statusBar = screen.getByRole("banner", { name: t("shell.statusBar") });
       const printers = within(statusBar).getByRole("button", {
         name: new RegExp(`^${t("setup.printer")}:`),
       });
       expect(printers.textContent).toContain("3 / 3");
+      expect(statusBar.textContent).not.toContain(GALLERY_SHIFT_LABEL[locale]);
+    },
+  );
+
+  // MKR-INS-01 captures the new-shift screens, so they render the production
+  // NewShift under the header App.tsx shows while no shift is active.
+  it.each(["ru", "en"] as const)(
+    "renders the production new-shift input under the no-shift header in %s",
+    async (locale) => {
+      const t = i18n.getFixedT(locale);
+      render(<StationScreenGallery request={{ state: "new-shift-input", locale }} />);
+
+      expect(await screen.findByLabelText(t("shifts.gtinPrompt"))).toBeDefined();
+      const footer = screen.getByRole("contentinfo", { name: t("shifts.newActions") });
+      expect(
+        within(footer)
+          .getAllByRole("button")
+          .map((button) => button.textContent),
+      ).toEqual([t("shifts.open"), t("shifts.back")]);
+
+      const statusBar = screen.getByRole("banner", { name: t("shell.statusBar") });
+      expect(statusBar.textContent).not.toContain(GALLERY_SHIFT_LABEL[locale]);
+      const printers = within(statusBar).getByRole("button", {
+        name: new RegExp(`^${t("setup.printer")}:`),
+      });
+      expect(printers.textContent).toContain("3 / 3");
+      expect(
+        within(statusBar).getByRole("button", {
+          name: locale === "ru" ? "Сменить оператора" : "Change operator",
+        }),
+      ).toBeDefined();
+    },
+  );
+
+  it.each(["ru", "en"] as const)(
+    "renders the production new-shift form with pallet assembly chosen in %s",
+    async (locale) => {
+      const t = i18n.getFixedT(locale);
+      render(<StationScreenGallery request={{ state: "new-shift-pallets", locale }} />);
+
+      expect(
+        await screen.findByRole("button", { name: t("shifts.palletsOn"), pressed: true }),
+      ).toBeDefined();
+      expect(
+        screen.getByRole("button", { name: t("shifts.palletsOff"), pressed: false }),
+      ).toBeDefined();
+      expect(
+        screen.getByRole("button", { name: t("shifts.modeAggregation"), pressed: true }),
+      ).toBeDefined();
+      expect(
+        screen.getByText(t("shifts.palletCapacityFromProduct", { capacity: 66 })),
+      ).toBeDefined();
+      const footer = screen.getByRole("contentinfo", { name: t("shifts.newActions") });
+      expect(
+        within(footer)
+          .getAllByRole("button")
+          .map((button) => button.textContent),
+      ).toEqual([t("shifts.start"), t("shifts.back")]);
+      const statusBar = screen.getByRole("banner", { name: t("shell.statusBar") });
+      expect(statusBar.textContent).not.toContain(GALLERY_SHIFT_LABEL[locale]);
     },
   );
 

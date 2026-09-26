@@ -210,15 +210,25 @@ export function StationScreenGallery({ request }: StationScreenGalleryProps) {
     headerVariant !== null ||
     fixture.kind === "setup" ||
     fixture.kind === "shift" ||
+    fixture.kind === "new-shift" ||
     fixture.kind === "inventory" ||
     rendersActiveShiftWorkScreen;
   // App.tsx turns the printer summary into the «Принтеры N / 3» button only
-  // while no floor task is active and setup is closed: the shift list and the
-  // inventory task list, which the printed instructions capture.
+  // while no floor task is active and setup is closed: the shift list, the
+  // new-shift form and the inventory task list, which the printed
+  // instructions capture.
   const rendersTaskSelection =
     fixture.kind === "shift" ||
+    fixture.kind === "new-shift" ||
     (fixture.kind === "inventory" &&
       (fixture.variant === "task-selection" || fixture.variant === "other-line-confirmation"));
+  // App.tsx names a shift in the header only while one is active, so the
+  // shift list and the new-shift form carry no shift label.
+  const rendersNoShift =
+    fixture.kind === "inventory" ||
+    fixture.kind === "setup" ||
+    fixture.kind === "shift" ||
+    fixture.kind === "new-shift";
   const headerControls = !withActiveShiftControls
     ? null
     : {
@@ -260,13 +270,7 @@ export function StationScreenGallery({ request }: StationScreenGalleryProps) {
         stationName={headerVariant ? copy.longStation : copy.station}
         lineName={headerVariant ? copy.longLine : copy.line}
         operatorName={headerVariant ? copy.longOperator : copy.operator}
-        shiftLabel={
-          headerVariant
-            ? copy.longShift
-            : fixture.kind === "inventory" || fixture.kind === "setup"
-              ? null
-              : copy.shift
-        }
+        shiftLabel={headerVariant ? copy.longShift : rendersNoShift ? null : copy.shift}
         serverReachability={syncVariant === "offline" ? "unreachable" : "reachable"}
         scanner="connected"
         printerConfigured={fixture.kind !== "setup" || fixture.variant !== "printers-empty"}
@@ -1180,9 +1184,26 @@ function LoginFixture({ variant, locale }: { variant: string; locale: GalleryLoc
   );
 }
 
-/** Drives the real creation form to a review state. This client cannot create/open shifts. */
+/**
+ * Drives the real creation form to a review state. This client cannot
+ * create/open shifts. "input" leaves the scanner silent so the form waits for
+ * a product; "pallets" stops on the product form with pallet assembly chosen.
+ */
 function NewShiftPlanningFixture({ variant, locale }: { variant: string; locale: GalleryLocale }) {
   const root = useRef<HTMLDivElement>(null);
+  const aggregation = variant === "pallet-template" || variant === "pallets";
+  // MKR-INS-01 shows the pallet choice on the demo product of the other printed
+  // frames. The real form validates the check digit, so this GTIN is a valid one.
+  const product =
+    variant === "pallets"
+      ? {
+          gtin14: "04607000000045",
+          name: locale === "ru" ? "Тестовый товар А" : "Sample product A",
+        }
+      : {
+          gtin14: "04600000000015",
+          name: locale === "ru" ? "Кега · тестовый продукт" : "Keg · sample product",
+        };
   const client = useMemo<StationClient>(
     () => ({
       get<T>(path: string): Promise<T> {
@@ -1191,9 +1212,9 @@ function NewShiftPlanningFixture({ variant, locale }: { variant: string; locale:
             items: [
               {
                 id: "11111111-1111-4111-8111-111111111111",
-                gtin14: "04600000000015",
-                name: locale === "ru" ? "Кега · тестовый продукт" : "Keg · sample product",
-                boxCapacity: variant === "pallet-template" ? 10 : null,
+                gtin14: product.gtin14,
+                name: product.name,
+                boxCapacity: aggregation ? 10 : null,
                 palletBoxCapacity: 66,
               },
             ],
@@ -1242,40 +1263,39 @@ function NewShiftPlanningFixture({ variant, locale }: { variant: string; locale:
       },
       post<T>(path: string): Promise<T> {
         if (path === "/products/gtin-check")
-          return Promise.resolve({ gtin14: "04600000000015", owner: "own" } as T);
+          return Promise.resolve({ gtin14: product.gtin14, owner: "own" } as T);
         return Promise.reject(new Error("Shift writes are disabled in the gallery"));
       },
       download: () => Promise.reject(new Error("Gallery download unavailable")),
       whoami: () => Promise.resolve({ ok: true }),
     }),
-    [locale, variant],
+    [aggregation, locale, product.gtin14, product.name],
   );
   const source = useMemo<ScanSource>(
     () => ({
       start(listener) {
-        let active = true;
+        let active = variant !== "input";
         queueMicrotask(() => {
-          if (active) listener("04600000000015");
+          if (active) listener(product.gtin14);
         });
         return () => {
           active = false;
         };
       },
     }),
-    [],
+    [variant, product.gtin14],
   );
   useEffect(() => {
     const container = root.current;
     if (!container) return;
     let step = 0;
     const advance = () => {
-      if (variant === "pallet-template") {
-        const keys = [
-          "shifts.modeAggregation",
-          "shifts.palletsOn",
-          "shifts.start",
-          "shifts.palletNext",
-        ];
+      if (variant === "input") return;
+      if (variant === "pallet-template" || variant === "pallets") {
+        const keys =
+          variant === "pallets"
+            ? ["shifts.modeAggregation", "shifts.palletsOn"]
+            : ["shifts.modeAggregation", "shifts.palletsOn", "shifts.start", "shifts.palletNext"];
         const key = keys[step];
         if (!key) return;
         const label = i18n.getFixedT(locale)(key);
@@ -1335,7 +1355,12 @@ function NewShiftPlanningFixture({ variant, locale }: { variant: string; locale:
 }
 
 function NewShiftFixture({ view, locale }: { view: string; locale: GalleryLocale }) {
-  if (view.startsWith("print-") || view === "pallet-template")
+  if (
+    view.startsWith("print-") ||
+    view === "input" ||
+    view === "pallets" ||
+    view === "pallet-template"
+  )
     return <NewShiftPlanningFixture key={view} variant={view} locale={locale} />;
   const ru = locale === "ru";
   const notFound = view === "not-found";
