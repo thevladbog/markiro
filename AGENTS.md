@@ -38,6 +38,8 @@ than maintaining a second rule set. Before editing an area, read its scoped guid
   TypeScript/Kotlin contract fixtures.
 - [API](apps/api/AGENTS.md): route access policies, platform isolation and durable
   report jobs.
+- [Standalone](apps/standalone/AGENTS.md): single-site data model, the three
+  identities, the host protocol and fixtures, and Windows-only checks.
 
 For cross-surface contract changes, also read the affected consumer's guide even
 when its files do not initially appear in the diff. Scoped guides supplement these
@@ -56,6 +58,11 @@ rules; keep shared policies here and detailed procedures beside their code.
   Rust crate. Runs on a tenant's UKEP machine and keeps a fresh Chestny ZNAK
   True API token in the cloud by signing the auth challenge with a GOST
   certificate. Windows-only; its Cargo workspace is `signer-core` + `src-tauri`.
+- `apps/standalone`: cloud-less desktop product («Markiro Автоном») for sites
+  without a cloud: a React/Vite webview plus a Cargo workspace — `host`
+  (`markiro-host`, the LAN service with the master SQLite), `src-tauri` (the
+  station and office shell) and `proto` (wire types and fixtures shared with
+  the Zod schemas). Single site, no tenants; see its scoped guide.
 - `apps/handheld`: native Android (Kotlin, Compose) app for industrial handheld
   terminals (ТСД). Pairs and authenticates as a station device of kind
   `handheld`, keeps an offline operator roster, and receives scans from the
@@ -364,29 +371,32 @@ browser deployment work.
 
 ### Minimum checks by change area
 
-| Changed area                     | Minimum relevant verification                                                   | Important caveat                                                                          |
-| -------------------------------- | ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `packages/domain`                | focused test, package test, typecheck, lint, build                              | run affected consumer tests for contract changes                                          |
-| `packages/db`                    | focused schema/migration tests, package test, typecheck, lint, build            | apply/inspect migrations in the actual test DB; rebuild before consumer tests             |
-| `apps/api`                       | focused Vitest/e2e, package test, typecheck, lint, build                        | database and service env may be required; assert tenant denial and exact audit output     |
-| `apps/admin`                     | focused component/API-client test, package test, typecheck, lint, build         | automated DOM tests are not visual browser confirmation                                   |
-| `apps/kiosk`                     | focused IndexedDB/sync/UI tests, package test, typecheck, lint, build           | build domain/UI first in fresh worktrees; exercise offline restart and old queues         |
-| `apps/station`                   | focused journal/sync/hardware/UI tests, package test, typecheck, lint, build    | Rust, Windows, scanner, printer, sound, and updater behavior need separate checks         |
-| `apps/handheld`                  | focused Kotlin/Compose tests, `testDebugUnitTest`, `lintDebug`, `assembleDebug` | see scoped guide for shared fixtures; emulator tests do not prove vendor scanner behavior |
-| `apps/signer`                    | focused UI test, package test, typecheck, lint, build, plus Cargo tests         | host Cargo tests do not prove CryptoAPI signing, DPAPI storage, or Windows behavior       |
-| `apps/saas-admin`                | focused component/API-client test, package test, typecheck, lint, build         | assert the platform auth boundary and capabilities separately from tenant routes          |
-| `apps/landing`                   | focused test, package test, typecheck, lint, build                              | SEO, Lighthouse, CSP, and legal-artifact publication are separate browser checks          |
-| `packages/platform-contracts`    | focused schema test, package test, typecheck, lint, build                       | run affected API and saas-admin consumers; schemas are `.strict()`, so fields break       |
-| `packages/ui` / `packages/email` | focused render/component test, package test, typecheck, lint, build             | check consuming surfaces and email-client/browser rendering when material                 |
-| `packages/legal-documents`       | focused test, package test, typecheck, lint, build, `artifacts:verify`          | regenerating PDFs also means updating the production attestation; see below               |
-| `deploy/production`              | production bundle contracts and affected focused Node tests                     | live DNS/TLS/registry/cloud verification remains external                                 |
+| Changed area                     | Minimum relevant verification                                                                  | Important caveat                                                                          |
+| -------------------------------- | ---------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `packages/domain`                | focused test, package test, typecheck, lint, build                                             | run affected consumer tests for contract changes                                          |
+| `packages/db`                    | focused schema/migration tests, package test, typecheck, lint, build                           | apply/inspect migrations in the actual test DB; rebuild before consumer tests             |
+| `apps/api`                       | focused Vitest/e2e, package test, typecheck, lint, build                                       | database and service env may be required; assert tenant denial and exact audit output     |
+| `apps/admin`                     | focused component/API-client test, package test, typecheck, lint, build                        | automated DOM tests are not visual browser confirmation                                   |
+| `apps/kiosk`                     | focused IndexedDB/sync/UI tests, package test, typecheck, lint, build                          | build domain/UI first in fresh worktrees; exercise offline restart and old queues         |
+| `apps/station`                   | focused journal/sync/hardware/UI tests, package test, typecheck, lint, build                   | Rust, Windows, scanner, printer, sound, and updater behavior need separate checks         |
+| `apps/handheld`                  | focused Kotlin/Compose tests, `testDebugUnitTest`, `lintDebug`, `assembleDebug`                | see scoped guide for shared fixtures; emulator tests do not prove vendor scanner behavior |
+| `apps/signer`                    | focused UI test, package test, typecheck, lint, build, plus Cargo tests                        | host Cargo tests do not prove CryptoAPI signing, DPAPI storage, or Windows behavior       |
+| `apps/standalone`                | focused Vitest and cargo tests, package test, typecheck, lint, build, `cargo test --workspace` | the Windows service, LAN pairing and kiosk need Windows and manual checks                 |
+| `apps/saas-admin`                | focused component/API-client test, package test, typecheck, lint, build                        | assert the platform auth boundary and capabilities separately from tenant routes          |
+| `apps/landing`                   | focused test, package test, typecheck, lint, build                                             | SEO, Lighthouse, CSP, and legal-artifact publication are separate browser checks          |
+| `packages/platform-contracts`    | focused schema test, package test, typecheck, lint, build                                      | run affected API and saas-admin consumers; schemas are `.strict()`, so fields break       |
+| `packages/ui` / `packages/email` | focused render/component test, package test, typecheck, lint, build                            | check consuming surfaces and email-client/browser rendering when material                 |
+| `packages/legal-documents`       | focused test, package test, typecheck, lint, build, `artifacts:verify`                         | regenerating PDFs also means updating the production attestation; see below               |
+| `deploy/production`              | production bundle contracts and affected focused Node tests                                    | live DNS/TLS/registry/cloud verification remains external                                 |
 
-For Rust changes under `apps/station/src-tauri` or in the `apps/signer` Cargo
-workspace, also use the appropriate Cargo checks, for example:
+For Rust changes under `apps/station/src-tauri` or in the `apps/signer` or
+`apps/standalone` Cargo workspaces, also use the appropriate Cargo checks, for
+example:
 
 ```bash
 cargo test --manifest-path apps/station/src-tauri/Cargo.toml
 cargo test --manifest-path apps/signer/Cargo.toml --workspace
+cargo test --manifest-path apps/standalone/Cargo.toml --workspace
 ```
 
 Do not claim Windows or hardware confirmation from a host-only Cargo test.

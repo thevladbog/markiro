@@ -20,6 +20,8 @@ const heavyJobs = [
   ["signer-rust", "signer_rust"],
   ["signer-windows-build", "signer_windows_build"],
   ["handheld-android", "handheld_android"],
+  ["standalone-rust", "standalone_rust"],
+  ["standalone-windows-build", "standalone_windows_build"],
 ];
 
 function stepByName(job, name) {

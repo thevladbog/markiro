@@ -18,6 +18,8 @@ const jobNames = [
   "signer_rust",
   "signer_windows_build",
   "handheld_android",
+  "standalone_rust",
+  "standalone_windows_build",
 ];
 
 const signerOnly = {
@@ -33,6 +35,8 @@ const signerOnly = {
     signer_rust: true,
     signer_windows_build: true,
     handheld_android: false,
+    standalone_rust: false,
+    standalone_windows_build: false,
   },
 };
 
@@ -92,6 +96,30 @@ test("Station native and web changes select different downstream work", () => {
   ]);
 });
 
+test("Standalone native and web changes select their jobs", () => {
+  for (const path of [
+    "apps/standalone/host/src/server.rs",
+    "apps/standalone/src-tauri/src/lib.rs",
+    "apps/standalone/Cargo.lock",
+  ]) {
+    assert.deepEqual(
+      enabledJobs(classifyChangedFiles([path])),
+      ["standalone_rust", "standalone_windows_build"],
+      path,
+    );
+  }
+  for (const path of [
+    "apps/standalone/src/app/App.tsx",
+    "apps/standalone/proto/fixtures/hello.json",
+  ]) {
+    assert.deepEqual(
+      enabledJobs(classifyChangedFiles([path])),
+      ["verify_static", "verify_app_tests", "standalone_rust", "standalone_windows_build"],
+      path,
+    );
+  }
+});
+
 test("application changes select their documented jobs", () => {
   const cases = [
     [
@@ -124,6 +152,8 @@ test("shared packages fan out to their current consumers", () => {
         "station_windows_build",
         "signer_rust",
         "signer_windows_build",
+        "standalone_rust",
+        "standalone_windows_build",
       ],
     ],
     [
@@ -303,6 +333,8 @@ test("CLI writes exact GitHub outputs for a NUL-delimited diff", () => {
       "signer_rust=true",
       "signer_windows_build=true",
       "handheld_android=false",
+      "standalone_rust=false",
+      "standalone_windows_build=false",
       "",
     ].join("\n"),
   );

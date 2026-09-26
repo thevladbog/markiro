@@ -13,10 +13,13 @@ export const HEAVY_JOBS = Object.freeze([
   "signer_rust",
   "signer_windows_build",
   "handheld_android",
+  "standalone_rust",
+  "standalone_windows_build",
 ]);
 
 const signerJobs = ["signer_rust", "signer_windows_build"];
 const stationJobs = ["station_rust", "station_windows_build"];
+const standaloneJobs = ["standalone_rust", "standalone_windows_build"];
 
 const appJobs = Object.freeze({
   api: ["verify_static", "verify_api_tests", "tenant_team_infrastructure", "production_bundle"],
@@ -27,7 +30,14 @@ const appJobs = Object.freeze({
 });
 
 const sharedJobs = Object.freeze({
-  ui: ["verify_static", "verify_app_tests", "production_bundle", ...stationJobs, ...signerJobs],
+  ui: [
+    "verify_static",
+    "verify_app_tests",
+    "production_bundle",
+    ...stationJobs,
+    ...signerJobs,
+    ...standaloneJobs,
+  ],
   domain: [
     "verify_static",
     "verify_api_tests",
@@ -152,6 +162,20 @@ function jobsForPath(path) {
   if (path.startsWith("apps/station/")) {
     if (path.startsWith("apps/station/src-tauri/")) return stationJobs;
     return ["verify_static", "verify_app_tests", "production_bundle", ...stationJobs];
+  }
+
+  // Host and shell crates run only the Rust jobs; everything else in the app
+  // (webview, protocol fixtures read by both suites, package files) also runs
+  // the JavaScript gates.
+  if (path.startsWith("apps/standalone/")) {
+    if (
+      path.startsWith("apps/standalone/host/") ||
+      path.startsWith("apps/standalone/src-tauri/") ||
+      /^apps\/standalone\/Cargo\.(?:toml|lock)$/u.test(path)
+    ) {
+      return standaloneJobs;
+    }
+    return ["verify_static", "verify_app_tests", ...standaloneJobs];
   }
 
   // The Android app is a Gradle project outside the pnpm workspace: only its own job runs.
