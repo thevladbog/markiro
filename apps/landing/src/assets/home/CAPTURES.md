@@ -1,0 +1,17 @@
+# Home page captures
+
+Frames shown on the home page. Retake them when the screens change.
+
+| File | Source | How |
+| --- | --- | --- |
+| `map-wide.jpg`, `map-phone.jpg`, `film-page.jpg` | Film scene | `pnpm --dir tools/production-browser --ignore-workspace render:home-images` |
+| `screens/*/station-*.png` | Station screen gallery, `profile=landing` | `pnpm --dir tools/production-browser --ignore-workspace capture:station-screens` |
+| `screens/*/cabinet-*.png` | Admin panel on a seeded stand | Plan task 6, steps 1, 2 and 4 |
+| `screens/ru/kiosk.png` | Kiosk harness twin with a realistic cart | Plan task 6, step 5 |
+| `screens/ru/handheld.png` | Handheld on the Android emulator | Plan task 6, step 3 |
+| `labels/*.png` | Copies of `examples/labels/*/box-100x150.png` | `apps/landing/test/home-assets.test.ts` checks them |
+| `docs/*.png` | First pages of the published instructions, Russian and English | `pnpm --dir tools/production-browser --ignore-workspace render:instruction-covers` |
+
+Stand used on 2026-09-26/27: organization «Демо-производство», lines «Линия 1…3», products «Сок яблочный, 1 л», «Нектар вишнёвый, 1 л», «Крем для рук, 75 мл» and six more for the catalog, operator «Мария Соколова». Production data comes from handheld scans on the emulator (codes generated for the stand's GTINs); the overview therefore shows two days. The stand has no Chestny ZNAK connection, so the catalog's National Catalog links were inserted into the stand database (`national_catalog_product_links`: seven published, one on moderation, one not linked). The kiosk frame comes from a temporary copy of `apps/kiosk/test/touch-flow.html` with a three-line cart; the copy was deleted after the capture.
+
+Plan: `docs/superpowers/plans/2026-09-26-landing-home-redesign.md`.
