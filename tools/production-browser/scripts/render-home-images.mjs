@@ -9,8 +9,9 @@ const outputRoot = path.join(landingRoot, "src/assets/home");
 const { filmTime } = JSON.parse(
   readFileSync(path.join(landingRoot, "src/content/home-map.json"), "utf8"),
 );
-// The film page image shows the warehouse chapter with its card over the scene.
-const FILM_PAGE_TIME = 3.5;
+// The film page image shows the warehouse chapter with its card over the scene. At 3.8 the
+// packing chapter's card has left the frame and the camera shows the whole hall.
+const FILM_PAGE_TIME = 3.8;
 // Phones show a crop around the hall in the stage's 16:10 shape (CSS pixels of the 1440 × 900 frame).
 const PHONE_CROP = { x: 576, y: 180, width: 752, height: 470 };
 const FRAME = {
