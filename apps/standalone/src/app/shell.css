@@ -31,3 +31,51 @@
   font-family: var(--font-mono);
   letter-spacing: 0.08em;
 }
+
+.standalone-form {
+  display: grid;
+  gap: 16px;
+}
+
+.standalone-form p {
+  margin: 0;
+}
+
+.standalone-form__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.standalone-wizard__step,
+.standalone-wizard__note {
+  color: var(--fg-2);
+}
+
+.standalone-wizard__line {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: end;
+  gap: 8px;
+}
+
+.standalone-wizard__review {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.standalone-wizard__review div {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: 16px;
+}
+
+.standalone-wizard__review dt {
+  color: var(--fg-2);
+}
+
+.standalone-wizard__review dd {
+  margin: 0;
+  font-family: var(--font-mono);
+}
