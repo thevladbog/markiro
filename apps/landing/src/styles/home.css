@@ -171,6 +171,12 @@
   font: 500 0.75rem / 1.4 var(--font-mono);
 }
 
+@media (hover: none) {
+  .home-hero__hint {
+    display: none;
+  }
+}
+
 /* Only the dots take the pointer; the list lets clicks through to the text under it. */
 .home-hero__spots {
   position: absolute;

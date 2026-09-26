@@ -699,6 +699,24 @@ test.describe("film page", () => {
 });
 
 test.describe("home page", () => {
+  test("cookie panel buttons keep readable hover colors on the light home", async ({ page }) => {
+    await page.goto("/");
+    const panel = page.locator("[data-consent-panel]");
+    await expect(panel).toBeVisible();
+
+    const reject = page.locator("[data-consent-reject]");
+    await reject.hover();
+    await expect
+      .poll(() => reject.evaluate((element) => getComputedStyle(element).backgroundColor))
+      .toBe("rgba(0, 0, 0, 0)");
+
+    const accept = page.locator("[data-consent-accept]");
+    await accept.hover();
+    await expect
+      .poll(() => accept.evaluate((element) => getComputedStyle(element).backgroundColor))
+      .toBe("rgb(107, 229, 153)");
+  });
+
   test("hotspots show their screen on hover and focus, and Escape hides it", async ({
     page,
     isMobile,
@@ -748,6 +766,7 @@ test.describe("home page", () => {
 
   for (const viewport of [
     { width: 390, height: 844 },
+    { width: 412, height: 915 },
     { width: 1440, height: 900 },
   ] as const) {
     test(`fits ${viewport.width} px without horizontal scrolling`, async ({ page }) => {

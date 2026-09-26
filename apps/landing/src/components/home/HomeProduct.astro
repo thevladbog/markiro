@@ -47,7 +47,7 @@ const SCREENS: Readonly<Record<ProductPartId, HomeScreenId>> = {
           <p class="home-kicker">{row.kicker}</p>
           <h3 id={`product-${row.id}-title`}>{row.title}</h3>
           <p class="home-product__body">{row.text}</p>
-          <ul class="home-list">{row.bullets.map((bullet) => <li>{bullet}</li>)}</ul>
+          <ul class="home-list" role="list">{row.bullets.map((bullet) => <li>{bullet}</li>)}</ul>
           <a class="text-link" href={LINKS[row.id]}>{row.link} <span aria-hidden="true">→</span></a>
         </div>
         {row.id === "handheld" ? (

@@ -23,7 +23,7 @@ const copy = getUiCopy(locale).home.offline;
         {copy.heading[0]}<br />{copy.heading[1]}
       </h2>
       <p class="section-lead">{copy.lead}</p>
-      <ul class="home-offline__points">
+      <ul class="home-offline__points" role="list">
         {copy.points.map(([title, text], index) => (
           <li>
             <span class="home-offline__number" aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>

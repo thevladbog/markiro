@@ -83,11 +83,6 @@ input:focus-visible {
   letter-spacing: -0.045em;
 }
 
-.display-heading--wide {
-  font: var(--landing-display-xl);
-  letter-spacing: -0.055em;
-}
-
 .display-heading--sentence {
   max-width: 48rem;
   font: var(--landing-display-md);
@@ -605,6 +600,16 @@ input:focus-visible {
   border-color: var(--line-strong);
   color: var(--fg-1);
   background: transparent;
+}
+
+.consent-panel .button.button--quiet:hover {
+  border-color: var(--fg-3);
+  background: transparent;
+}
+
+.consent-panel .button:not(.button--quiet):hover {
+  border-color: var(--accent-strong);
+  background: var(--accent-strong);
 }
 
 .consent-panel__details {

@@ -71,7 +71,7 @@ const [wideAvif, wideWebp, phoneAvif, phoneWebp] = await Promise.all([
         data-hero-image
       />
     </picture>
-    <ul class="home-hero__spots" aria-label={copy.stripLabel}>
+    <ul class="home-hero__spots" role="list" aria-label={copy.stripLabel}>
       {copy.spots.map((spot) => {
         const point = points.get(spot.id);
         if (point === undefined) throw new Error(`no map point for ${spot.id}`);
