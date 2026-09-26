@@ -145,7 +145,9 @@ together with `src/host/client.ts`, `src/host/device.ts` and
   re-pairing, and re-reads the user on `forbidden`. Pages never call
   `invoke`, `HostClient` or `createHostApi` themselves.
 - React Query keeps one cache per office session (`Office` is keyed by the
-  session token), with no retries and no refetch on window focus: a host
+  session token), with no retries, no refetch on window focus or reconnect,
+  and `networkMode: "always"`: calls go over IPC to the host, and the
+  webview's online flag says nothing about whether the host answers. A host
   error is an answer the page explains, with a retry button.
 - Every write sends the loaded record's `expectedRev`. On `stale_revision`
   the page offers to load the data again and drops the user's edits; it

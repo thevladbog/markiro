@@ -129,3 +129,13 @@
   gap: 16px;
   padding: 24px;
 }
+
+/* Focus lands on the page container only programmatically, after a menu navigation. */
+.office-shell__content:focus {
+  outline: none;
+}
+
+.office-note {
+  margin: 0;
+  color: var(--fg-2);
+}

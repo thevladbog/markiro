@@ -73,6 +73,11 @@ describe("office user rules", () => {
     expect(passwordRule.safeParse("seven77").error?.issues[0]?.message).toBe("rules.password");
     // Eight Cyrillic letters are 16 bytes but 8 characters, as the host counts.
     expect(passwordRule.safeParse("пароль12").success).toBe(true);
+    // Four emoji are 8 UTF-16 code units but 4 characters: too short, as the host counts.
+    expect(passwordRule.safeParse("😀".repeat(4)).success).toBe(false);
+    expect(passwordRule.safeParse("😀".repeat(8)).success).toBe(true);
+    // 100 emoji are 200 code units but 100 characters: still a valid name.
+    expect(personNameRule.safeParse("😀".repeat(100)).success).toBe(true);
     expect(passwordRule.safeParse("x".repeat(129)).success).toBe(false);
   });
 });

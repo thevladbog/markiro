@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HostError } from "../src/host/client.js";
 import { OfficeLogin } from "../src/office/OfficeLogin.js";
-import { fakeOfficeSession, renderOffice } from "./support/office.js";
+import { fakeOfficeSession, ORG_PROFILE, renderOffice, TECHNOLOGIST } from "./support/office.js";
 import { SESSION } from "./support/fixtures.js";
 
 function type(label: string, value: string): void {
@@ -110,6 +110,21 @@ describe("Office", () => {
     fireEvent.click(toggle);
     expect(document.documentElement.getAttribute("data-theme")).toBe("light");
     expect(screen.getByRole("button", { name: "Включить тёмную тему" })).toBeTruthy();
+  });
+
+  it("offers the organization profile to both roles", async () => {
+    renderOffice(fakeOfficeSession({ user: TECHNOLOGIST }));
+    expect(await screen.findByRole("link", { name: "Профиль" })).toBeTruthy();
+    expect(screen.getByText("Организация")).toBeTruthy();
+  });
+
+  it("moves focus to the page after a menu navigation", async () => {
+    const session = fakeOfficeSession();
+    session.api.getOrg.mockResolvedValue(ORG_PROFILE);
+    renderOffice(session);
+    fireEvent.click(await screen.findByRole("link", { name: "Профиль" }));
+    await screen.findByRole("heading", { name: "Профиль организации" });
+    expect(document.activeElement).toBe(screen.getByRole("main"));
   });
 });
 
@@ -256,5 +271,23 @@ describe("ChangePasswordDialog", () => {
     expect(
       await screen.findByText("Пароль изменён. На других устройствах нужно войти заново."),
     ).toBeTruthy();
+  });
+
+  it("keeps the password notice on the page it was changed on", async () => {
+    const session = fakeOfficeSession();
+    session.api.officeChangePassword.mockResolvedValue(undefined);
+    session.api.getOrg.mockResolvedValue(ORG_PROFILE);
+    renderOffice(session);
+    await openDialog();
+    fill("correct horse battery", "another long password");
+    fireEvent.click(screen.getByRole("button", { name: "Сменить" }));
+    const notice = "Пароль изменён. На других устройствах нужно войти заново.";
+    expect(await screen.findByText(notice)).toBeTruthy();
+    fireEvent.click(screen.getByRole("link", { name: "Профиль" }));
+    await screen.findByRole("heading", { name: "Профиль организации" });
+    expect(screen.queryByText(notice)).toBeNull();
+    fireEvent.click(screen.getByRole("link", { name: "Обзор" }));
+    await screen.findByText("Вы вошли как Ирина Смирнова.");
+    expect(screen.queryByText(notice)).toBeNull();
   });
 });

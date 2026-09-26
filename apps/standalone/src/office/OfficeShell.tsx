@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { NavLink, Outlet, useLocation } from "react-router";
 
@@ -16,6 +16,15 @@ export function OfficeShell() {
   const dark = theme === "dark";
   const [passwordOpen, setPasswordOpen] = useState(false);
   const location = useLocation();
+  const mainRef = useRef<HTMLElement>(null);
+  const shownPath = useRef(location.pathname);
+  useEffect(() => {
+    // After a menu navigation, move focus to the new page so a screen
+    // reader announces it; the first page keeps the browser's focus.
+    if (shownPath.current === location.pathname) return;
+    shownPath.current = location.pathname;
+    mainRef.current?.focus();
+  }, [location.pathname]);
   // The navigation entry the password was changed on; the notice goes away
   // with the next navigation.
   const [passwordChangedAt, setPasswordChangedAt] = useState<string | null>(null);
@@ -73,7 +82,7 @@ export function OfficeShell() {
             </Button>
           </div>
         </header>
-        <main className="office-shell__content">
+        <main ref={mainRef} tabIndex={-1} className="office-shell__content">
           {passwordChangedAt === location.key && (
             <Alert tone="ok">{t("office.password.done")}</Alert>
           )}

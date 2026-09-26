@@ -4,7 +4,7 @@ import { vi, type Mock } from "vitest";
 import { ThemeProvider } from "@markiro/ui";
 
 import type { HostApi } from "../../src/host/api.js";
-import type { OfficeUser } from "../../src/host/protocol.js";
+import type { OfficeUser, OrgProfile } from "../../src/host/protocol.js";
 import { Office } from "../../src/office/Office.js";
 import type { OfficeSessionValue } from "../../src/office/office-session.js";
 import { SESSION } from "./fixtures.js";
@@ -72,4 +72,13 @@ export const TECHNOLOGIST: OfficeUser = {
   login: "tech",
   name: "Павел Орлов",
   role: "technologist",
+};
+
+export const ORG_PROFILE: OrgProfile = {
+  name: "ООО «Атолл»",
+  inn: "7701234567",
+  gln: "4600682000013",
+  gs1Prefixes: ["4600682"],
+  timeZone: "Europe/Moscow",
+  rev: 4,
 };

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { StrictMode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
@@ -11,7 +11,7 @@ import { DeviceError, type DeviceApi } from "../src/host/device.js";
 import { HostProbeError, type HostProbe } from "../src/host/probe.js";
 import type { DeviceStatus } from "../src/host/protocol.js";
 import { DEVICE_STATUS, observation, SESSION } from "./support/fixtures.js";
-import { fakeHostApi } from "./support/office.js";
+import { fakeHostApi, ORG_PROFILE } from "./support/office.js";
 import { completeWizard, EXPECTED_REQUEST } from "./support/wizard.js";
 
 const ADDRESS = "https://127.0.0.1:45710";
@@ -486,5 +486,48 @@ describe("App", () => {
       screen.getByText("Это приложение старее службы «Markiro Хост». Обновите приложение."),
     ).toBeTruthy();
     expect(screen.queryByText("Цех")).toBeNull();
+  });
+
+  it("ignores a late answer from a session the user already left", async () => {
+    const host = fakeHost();
+    let failFirstRead: (error: unknown) => void = () => undefined;
+    host.getOrg
+      .mockImplementationOnce(
+        () =>
+          new Promise((_resolve, reject) => {
+            failFirstRead = reject;
+          }),
+      )
+      .mockResolvedValue(ORG_PROFILE);
+    host.officeLogin
+      .mockResolvedValueOnce(SESSION)
+      .mockResolvedValueOnce({ ...SESSION, token: "second-session-token" });
+    renderApp({ probe: probeAnswering(true), device: fakeDevice(DEVICE_STATUS), host });
+    fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
+    await signIn();
+    fireEvent.click(await screen.findByRole("link", { name: "Профиль" }));
+    await waitFor(() => expect(host.getOrg).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole("button", { name: "Выйти в цех" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
+    await signIn();
+    fireEvent.click(await screen.findByRole("link", { name: "Профиль" }));
+    expect(await screen.findByLabelText("Название организации")).toBeTruthy();
+
+    // The first session's read now fails as an ended session; the second
+    // session must not be sent back to the sign-in.
+    failFirstRead(
+      new HostError({
+        kind: "api",
+        code: "unauthorized",
+        status: 401,
+        message: "office session ended",
+        details: { credential: "session" },
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.queryByText("Вход в офис")).toBeNull();
+    expect(screen.getByLabelText("Название организации")).toBeTruthy();
+    expect(host.getOrg).toHaveBeenLastCalledWith("second-session-token");
   });
 });
