@@ -182,20 +182,22 @@ export function App({ probe, device, host, address = LOCAL_HOST_ADDRESS }: AppPr
   const session = view.kind === "office" ? view.session : null;
   const officeSession = useMemo<OfficeSessionValue | null>(() => {
     if (!session) return null;
+    const call = async <T,>(operation: (token: string) => Promise<T>): Promise<T> => {
+      try {
+        return await operation(session.token);
+      } catch (error) {
+        // Scoped to this session's token: a late failure from a session the
+        // user already left or replaced must not pull them back into
+        // sign-in or mark a fresh pairing rejected.
+        const action = shellActionFor(error, session.token);
+        if (action) dispatch(action);
+        throw error;
+      }
+    };
     return {
       user: session.user,
-      call: async <T,>(operation: (token: string) => Promise<T>): Promise<T> => {
-        try {
-          return await operation(session.token);
-        } catch (error) {
-          // Scoped to this session's token: a late failure from a session the
-          // user already left or replaced must not pull them back into
-          // sign-in or mark a fresh pairing rejected.
-          const action = shellActionFor(error, session.token);
-          if (action) dispatch(action);
-          throw error;
-        }
-      },
+      call,
+      changePassword: (request) => call((token) => hostApi.officeChangePassword(token, request)),
       leave: () => dispatch({ type: "office_left" }),
       logout: async () => {
         try {

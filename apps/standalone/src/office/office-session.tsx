@@ -1,6 +1,6 @@
 import { createContext, useContext, type ReactNode } from "react";
 
-import type { OfficeUser } from "../host/protocol.js";
+import type { OfficeUser, PasswordChange } from "../host/protocol.js";
 
 /**
  * The open office session, provided by the shell to every office screen.
@@ -20,6 +20,8 @@ export interface OfficeSessionValue {
   leave: () => void;
   /** Ends the session on the host and returns to the floor. */
   logout: () => Promise<void>;
+  /** Changes the signed-in user's own password; the host ends their other sessions. */
+  changePassword: (request: PasswordChange) => Promise<void>;
 }
 
 const OfficeSessionContext = createContext<OfficeSessionValue | null>(null);

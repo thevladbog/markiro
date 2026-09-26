@@ -6,15 +6,17 @@ use std::net::SocketAddr;
 use axum::extract::{ConnectInfo, State};
 use axum::http::StatusCode;
 use axum::Json;
-use markiro_proto::{credentials, OfficeLoginRequest, OfficeRole, OfficeSession, OfficeUser};
+use markiro_proto::{
+    credentials, OfficeLoginRequest, OfficeRole, OfficeSession, OfficeUser, PasswordChange,
+};
 use serde_json::json;
 
 use crate::audit::{self, Actor, Entry, Outcome};
 use crate::auth::{end_session, open_session, AuthDevice, OfficeContext};
 use crate::clock::format_timestamp;
-use crate::db::begin_write;
+use crate::db::{begin_write, next_revision};
 use crate::error::{ApiError, ApiJson};
-use crate::secrets::{dummy_password_phc, verify_password};
+use crate::secrets::{dummy_password_phc, hash_password, verify_password};
 use crate::server::AppState;
 use crate::validate;
 
@@ -185,4 +187,96 @@ pub async fn logout(
 
 pub async fn me(context: OfficeContext) -> Json<OfficeUser> {
     Json(context.user)
+}
+
+/// `PUT /v1/office/me/password`: any signed-in office user changes their own
+/// password with the current one. Their other sessions end; this one stays.
+pub async fn change_password(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    context: OfficeContext,
+    ApiJson(body): ApiJson<PasswordChange>,
+) -> Result<StatusCode, ApiError> {
+    // A stolen session must not be a way to guess the current password.
+    state.login_limiter.check(peer.ip())?;
+    validate::password("newPassword", body.new_password.expose())?;
+    let stored: String = sqlx::query_scalar("SELECT password_phc FROM office_users WHERE id = ?")
+        .bind(&context.user.id)
+        .fetch_one(&state.pool)
+        .await
+        .map_err(ApiError::internal)?;
+    let PasswordChange {
+        current_password,
+        new_password,
+    } = body;
+    let verified = stored.clone();
+    // PBKDF2 before the write lock, off the async threads; the new hash only
+    // when the current password is right.
+    let new_phc = tokio::task::spawn_blocking(move || {
+        verify_password(&verified, current_password.expose())
+            .then(|| hash_password(new_password.expose()))
+    })
+    .await
+    .map_err(ApiError::internal)?;
+
+    let at = state.timestamp();
+    let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
+    context.require_session_in(&mut tx).await?;
+    // The password may have changed while PBKDF2 ran; accept only the one verified.
+    let current: String = sqlx::query_scalar("SELECT password_phc FROM office_users WHERE id = ?")
+        .bind(&context.user.id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(ApiError::internal)?;
+    let Some(new_phc) = new_phc.filter(|_| current == stored) else {
+        audit::record(
+            &mut tx,
+            &at,
+            Entry {
+                actor: context.actor(),
+                action: "office_user.password",
+                target_type: Some("office_user"),
+                target_id: Some(&context.user.id),
+                outcome: Outcome::Denied,
+                details: json!({ "reason": "wrong_current_password" }),
+            },
+        )
+        .await
+        .map_err(ApiError::internal)?;
+        tx.commit().await.map_err(ApiError::internal)?;
+        return Err(ApiError::unauthorized(
+            credentials::PASSWORD,
+            "the current password is wrong",
+        ));
+    };
+    let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
+    sqlx::query("UPDATE office_users SET password_phc = ?, rev = ? WHERE id = ?")
+        .bind(&new_phc)
+        .bind(rev)
+        .bind(&context.user.id)
+        .execute(&mut *tx)
+        .await
+        .map_err(ApiError::internal)?;
+    sqlx::query("DELETE FROM office_sessions WHERE user_id = ? AND id <> ?")
+        .bind(&context.user.id)
+        .bind(&context.session_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(ApiError::internal)?;
+    audit::record(
+        &mut tx,
+        &at,
+        Entry {
+            actor: context.actor(),
+            action: "office_user.password",
+            target_type: Some("office_user"),
+            target_id: Some(&context.user.id),
+            outcome: Outcome::Ok,
+            details: json!({}),
+        },
+    )
+    .await
+    .map_err(ApiError::internal)?;
+    tx.commit().await.map_err(ApiError::internal)?;
+    Ok(StatusCode::NO_CONTENT)
 }

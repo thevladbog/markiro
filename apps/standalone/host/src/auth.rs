@@ -109,13 +109,9 @@ impl OfficeContext {
         }
     }
 
-    /// Re-check admin rights inside the caller's write transaction. The
-    /// extractor's role and active flag were read before the request started
-    /// hashing a password (0.3-1s of PBKDF2 outside any transaction); a
-    /// demotion or deactivation committed in that window must still stop the
-    /// write, so every admin write calls this again right after
-    /// `begin_write`, in addition to the early `require_admin` rejection.
-    pub async fn require_admin_in(&self, conn: &mut SqliteConnection) -> Result<(), ApiError> {
+    /// Re-check inside the caller's write transaction that this session still
+    /// exists and its user is active; returns the user's current role.
+    async fn live_role_in(&self, conn: &mut SqliteConnection) -> Result<OfficeRole, ApiError> {
         let row: Option<(i64, String)> = sqlx::query_as(
             "SELECT u.active, u.role FROM office_sessions s \
              JOIN office_users u ON u.id = s.user_id \
@@ -133,9 +129,23 @@ impl OfficeContext {
                 "office session ended",
             ));
         }
-        let role: OfficeRole =
-            serde_json::from_value(serde_json::Value::String(role)).map_err(ApiError::internal)?;
-        if role == OfficeRole::Admin {
+        serde_json::from_value(serde_json::Value::String(role)).map_err(ApiError::internal)
+    }
+
+    /// For writes any office user may make (their own password): the session
+    /// must still be live inside the transaction.
+    pub async fn require_session_in(&self, conn: &mut SqliteConnection) -> Result<(), ApiError> {
+        self.live_role_in(conn).await.map(|_| ())
+    }
+
+    /// Re-check admin rights inside the caller's write transaction. The
+    /// extractor's role and active flag were read before the request started
+    /// hashing a password (0.3-1s of PBKDF2 outside any transaction); a
+    /// demotion or deactivation committed in that window must still stop the
+    /// write, so every admin write calls this again right after
+    /// `begin_write`, in addition to the early `require_admin` rejection.
+    pub async fn require_admin_in(&self, conn: &mut SqliteConnection) -> Result<(), ApiError> {
+        if self.live_role_in(conn).await? == OfficeRole::Admin {
             Ok(())
         } else {
             Err(ApiError::forbidden("the administrator role is required"))

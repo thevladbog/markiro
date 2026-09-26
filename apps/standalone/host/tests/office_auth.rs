@@ -467,6 +467,188 @@ async fn malformed_logins_are_denied_without_recording_the_input() {
     );
 }
 
+async fn host_revision(app: &TestApp) -> i64 {
+    sqlx::query_scalar("SELECT rev FROM host_revision WHERE id = 1")
+        .fetch_one(&app.state.pool)
+        .await
+        .unwrap()
+}
+
+type AuditRow = (
+    String,
+    Option<String>,
+    String,
+    Option<String>,
+    Option<String>,
+    String,
+    String,
+);
+
+async fn password_audit(app: &TestApp, result: &str) -> Vec<AuditRow> {
+    sqlx::query_as(
+        "SELECT actor_kind, actor_id, action, target_type, target_id, result, details \
+         FROM audit_log WHERE action = 'office_user.password' AND result = ? ORDER BY id",
+    )
+    .bind(result)
+    .fetch_all(&app.state.pool)
+    .await
+    .unwrap()
+}
+
+fn change(current: &str, new: &str) -> Value {
+    json!({ "currentPassword": current, "newPassword": new })
+}
+
+#[tokio::test]
+async fn a_user_changes_their_own_password() {
+    let app = TestApp::new().await;
+    let (_, key) = pair_device(&app, "office").await;
+    let (_, other_key) = pair_device(&app, "office").await;
+    let tech_id = seed_office_user(&app, "tech", "technologist", "correct horse battery").await;
+    let token = login(&app, &key, "tech", "correct horse battery").await;
+    let other_token = login(&app, &other_key, "tech", "correct horse battery").await;
+    let before = host_revision(&app).await;
+
+    let (status, body) = app
+        .send(json_request(
+            with_session(request("PUT", "/v1/office/me/password"), &key, &token),
+            change("correct horse battery", "another long password"),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    assert_eq!(host_revision(&app).await, before + 1);
+    let me = app
+        .send(empty(with_session(
+            request("GET", "/v1/office/me"),
+            &key,
+            &token,
+        )))
+        .await;
+    assert_eq!(me.0, StatusCode::OK, "the caller's own session stays");
+    let other = app
+        .send(empty(with_session(
+            request("GET", "/v1/office/me"),
+            &other_key,
+            &other_token,
+        )))
+        .await;
+    assert_eq!(
+        other.0,
+        StatusCode::UNAUTHORIZED,
+        "sessions on other devices end"
+    );
+
+    login(&app, &key, "tech", "another long password").await;
+    let (status, _) = app
+        .send(json_request(
+            with_device(request("POST", "/v1/office/login"), &key),
+            json!({ "login": "tech", "password": "correct horse battery" }),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        password_audit(&app, "ok").await,
+        vec![(
+            "office_user".into(),
+            Some(tech_id.clone()),
+            "office_user.password".into(),
+            Some("office_user".into()),
+            Some(tech_id),
+            "ok".into(),
+            "{}".into()
+        )]
+    );
+}
+
+#[tokio::test]
+async fn a_wrong_current_password_changes_nothing() {
+    let app = TestApp::new().await;
+    let (_, key) = pair_device(&app, "office").await;
+    let tech_id = seed_office_user(&app, "tech", "technologist", "correct horse battery").await;
+    let token = login(&app, &key, "tech", "correct horse battery").await;
+    let phc: String = sqlx::query_scalar("SELECT password_phc FROM office_users WHERE id = ?")
+        .bind(&tech_id)
+        .fetch_one(&app.state.pool)
+        .await
+        .unwrap();
+    let before = host_revision(&app).await;
+
+    let (status, body) = app
+        .send(json_request(
+            with_session(request("PUT", "/v1/office/me/password"), &key, &token),
+            change("not the password", "another long password"),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["error"]["code"], "unauthorized");
+    assert_eq!(body["error"]["details"]["credential"], "password");
+    let after: String = sqlx::query_scalar("SELECT password_phc FROM office_users WHERE id = ?")
+        .bind(&tech_id)
+        .fetch_one(&app.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(after, phc);
+    assert_eq!(host_revision(&app).await, before);
+    let me = app
+        .send(empty(with_session(
+            request("GET", "/v1/office/me"),
+            &key,
+            &token,
+        )))
+        .await;
+    assert_eq!(me.0, StatusCode::OK);
+    assert_eq!(
+        password_audit(&app, "denied").await,
+        vec![(
+            "office_user".into(),
+            Some(tech_id.clone()),
+            "office_user.password".into(),
+            Some("office_user".into()),
+            Some(tech_id),
+            "denied".into(),
+            r#"{"reason":"wrong_current_password"}"#.into()
+        )]
+    );
+}
+
+#[tokio::test]
+async fn the_new_password_is_validated() {
+    let app = TestApp::new().await;
+    let (_, key) = pair_device(&app, "office").await;
+    seed_office_user(&app, "tech", "technologist", "correct horse battery").await;
+    let token = login(&app, &key, "tech", "correct horse battery").await;
+    let (status, body) = app
+        .send(json_request(
+            with_session(request("PUT", "/v1/office/me/password"), &key, &token),
+            change("correct horse battery", "short"),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["error"]["details"]["field"], "newPassword");
+    let (status, body) = app
+        .send(json_request(
+            with_session(request("PUT", "/v1/office/me/password"), &key, &token),
+            json!({ "currentPassword": "correct horse battery", "newPassword": "another long password", "extra": 1 }),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["error"]["code"], "validation_failed");
+}
+
+#[tokio::test]
+async fn changing_a_password_needs_an_office_session() {
+    let app = TestApp::new().await;
+    let (_, key) = pair_device(&app, "office").await;
+    let (status, body) = app
+        .send(json_request(
+            with_device(request("PUT", "/v1/office/me/password"), &key),
+            change("correct horse battery", "another long password"),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["error"]["details"]["credential"], "session");
+}
+
 #[tokio::test]
 async fn me_is_denied_and_the_session_is_deleted_when_the_user_is_deactivated() {
     let app = TestApp::new().await;

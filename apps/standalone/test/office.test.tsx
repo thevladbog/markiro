@@ -20,6 +20,7 @@ function sessionFor(user: OfficeUser = SESSION.user) {
     call: <T,>(operation: (token: string) => Promise<T>) => operation(SESSION.token),
     leave: vi.fn(),
     logout: vi.fn(async () => {}),
+    changePassword: vi.fn(async () => {}),
   } satisfies OfficeSessionValue;
 }
 
@@ -123,5 +124,76 @@ describe("Office", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Включить светлую тему" }));
     expect(document.documentElement.getAttribute("data-theme")).toBe("light");
     expect(screen.getByRole("button", { name: "Включить тёмную тему" })).toBeTruthy();
+  });
+});
+
+describe("ChangePasswordDialog", () => {
+  beforeEach(() => {
+    localStorage.removeItem("markiro.theme");
+  });
+
+  function renderOffice(session: OfficeSessionValue) {
+    return render(
+      <ThemeProvider defaultTheme="dark">
+        <Office session={session} />
+      </ThemeProvider>,
+    );
+  }
+
+  async function openDialog(): Promise<void> {
+    fireEvent.click(await screen.findByRole("button", { name: "Сменить пароль" }));
+    await screen.findByText("Смена пароля");
+  }
+
+  it("changes the password with the current one", async () => {
+    const session = sessionFor();
+    renderOffice(session);
+    await openDialog();
+    type("Текущий пароль", "correct horse battery");
+    type("Новый пароль", "another long password");
+    type("Повторите новый пароль", "another long password");
+    fireEvent.click(screen.getByRole("button", { name: "Сменить" }));
+    await waitFor(() =>
+      expect(session.changePassword).toHaveBeenCalledWith({
+        currentPassword: "correct horse battery",
+        newPassword: "another long password",
+      }),
+    );
+    expect(
+      await screen.findByText("Пароль изменён. На других устройствах нужно войти заново."),
+    ).toBeTruthy();
+    expect(screen.queryByText("Смена пароля")).toBeNull();
+  });
+
+  it("checks the repeated password before calling the host", async () => {
+    const session = sessionFor();
+    renderOffice(session);
+    await openDialog();
+    type("Текущий пароль", "correct horse battery");
+    type("Новый пароль", "another long password");
+    type("Повторите новый пароль", "a different one here");
+    fireEvent.click(screen.getByRole("button", { name: "Сменить" }));
+    expect(await screen.findByText("Пароли не совпадают")).toBeTruthy();
+    expect(session.changePassword).not.toHaveBeenCalled();
+  });
+
+  it("says when the current password is wrong", async () => {
+    const session = sessionFor();
+    session.changePassword.mockRejectedValueOnce(
+      new HostError({
+        kind: "api",
+        code: "unauthorized",
+        status: 401,
+        message: "the current password is wrong",
+        details: { credential: "password" },
+      }),
+    );
+    renderOffice(session);
+    await openDialog();
+    type("Текущий пароль", "not the password");
+    type("Новый пароль", "another long password");
+    type("Повторите новый пароль", "another long password");
+    fireEvent.click(screen.getByRole("button", { name: "Сменить" }));
+    expect(await screen.findByText("Текущий пароль неверен.")).toBeTruthy();
   });
 });

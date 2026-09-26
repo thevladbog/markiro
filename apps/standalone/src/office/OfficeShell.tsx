@@ -1,9 +1,10 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { NavLink, Outlet } from "react-router";
 
-import { Button, cn, IconButton, Sidebar, useTheme, type SidebarItem } from "@markiro/ui";
+import { Alert, Button, cn, IconButton, Sidebar, useTheme, type SidebarItem } from "@markiro/ui";
 
+import { ChangePasswordDialog } from "./ChangePasswordDialog.js";
 import { OFFICE_NAV } from "./nav.js";
 import { useOfficeSession } from "./office-session.js";
 
@@ -13,6 +14,8 @@ export function OfficeShell() {
   const session = useOfficeSession();
   const { theme, setTheme } = useTheme();
   const dark = theme === "dark";
+  const [passwordOpen, setPasswordOpen] = useState(false);
+  const [passwordChanged, setPasswordChanged] = useState(false);
   const items = useMemo<SidebarItem[]>(
     () =>
       OFFICE_NAV.filter((item) => item.roles.includes(session.user.role)).map((item) => ({
@@ -53,6 +56,15 @@ export function OfficeShell() {
               aria-label={t(dark ? "office.header.lightTheme" : "office.header.darkTheme")}
               onClick={() => setTheme(dark ? "light" : "dark")}
             />
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setPasswordChanged(false);
+                setPasswordOpen(true);
+              }}
+            >
+              {t("office.password.open")}
+            </Button>
             <Button variant="secondary" onClick={session.leave}>
               {t("office.header.toFloor")}
             </Button>
@@ -62,9 +74,18 @@ export function OfficeShell() {
           </div>
         </header>
         <main className="office-shell__content">
+          {passwordChanged && <Alert tone="ok">{t("office.password.done")}</Alert>}
           <Outlet />
         </main>
       </div>
+      <ChangePasswordDialog
+        open={passwordOpen}
+        onClose={() => setPasswordOpen(false)}
+        onChanged={() => {
+          setPasswordOpen(false);
+          setPasswordChanged(true);
+        }}
+      />
     </div>
   );
 }

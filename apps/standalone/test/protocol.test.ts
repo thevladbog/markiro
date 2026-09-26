@@ -18,6 +18,7 @@ import {
   officeUserUpdateSchema,
   orgProfileSchema,
   orgProfileUpdateSchema,
+  passwordChangeSchema,
   passwordSetSchema,
   ssccCounterUpdateSchema,
   ssccStateSchema,
@@ -87,6 +88,7 @@ const REQUESTS = [
   ["office-user-create.json", officeUserCreateSchema],
   ["office-user-update.json", officeUserUpdateSchema],
   ["password-set.json", passwordSetSchema],
+  ["password-change.json", passwordChangeSchema],
 ] as const;
 
 function extended(name: string): Record<string, unknown> {

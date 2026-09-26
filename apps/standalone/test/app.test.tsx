@@ -53,6 +53,7 @@ function fakeHost() {
     bootstrap: vi.fn<HostApi["bootstrap"]>(async () => ({ session: SESSION })),
     officeLogin: vi.fn<HostApi["officeLogin"]>(async () => SESSION),
     officeLogout: vi.fn<HostApi["officeLogout"]>(async () => {}),
+    officeChangePassword: vi.fn<HostApi["officeChangePassword"]>(async () => {}),
   };
 }
 
@@ -133,6 +134,29 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Выйти" }));
     expect(await screen.findByText("Цех")).toBeTruthy();
     expect(host.officeLogout).toHaveBeenCalledWith("office-session-token");
+  });
+
+  it("changes the office user's own password with the session token", async () => {
+    const host = fakeHost();
+    renderApp({ probe: probeAnswering(true), device: fakeDevice(DEVICE_STATUS), host });
+    fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
+    await signIn();
+    fireEvent.click(await screen.findByRole("button", { name: "Сменить пароль" }));
+    fireEvent.change(await screen.findByLabelText("Текущий пароль"), {
+      target: { value: "correct horse battery" },
+    });
+    fireEvent.change(screen.getByLabelText("Новый пароль"), {
+      target: { value: "another long password" },
+    });
+    fireEvent.change(screen.getByLabelText("Повторите новый пароль"), {
+      target: { value: "another long password" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Сменить" }));
+    await screen.findByText("Пароль изменён. На других устройствах нужно войти заново.");
+    expect(host.officeChangePassword).toHaveBeenCalledWith("office-session-token", {
+      currentPassword: "correct horse battery",
+      newPassword: "another long password",
+    });
   });
 
   it("keeps the session when going back to the floor", async () => {

@@ -75,6 +75,10 @@ fn protected_routes() -> Router<AppState> {
             post(crate::routes::office_auth::logout),
         )
         .route("/v1/office/me", get(crate::routes::office_auth::me))
+        .route(
+            "/v1/office/me/password",
+            put(crate::routes::office_auth::change_password),
+        )
         .route("/v1/bootstrap", post(crate::routes::bootstrap::bootstrap))
         .route(
             "/v1/office/org",

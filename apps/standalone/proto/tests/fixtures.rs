@@ -3,8 +3,8 @@ use markiro_proto::{
     display_fingerprint, BlockSizesUpdate, BootstrapRequest, BootstrapResponse, Compatibility,
     DeviceInfo, DeviceKind, ErrorBody, Hello, HelloEnvelope, LocalPairRequest, OfficeLoginRequest,
     OfficeRole, OfficeSession, OfficeUser, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate,
-    OrgProfile, OrgProfileUpdate, PairResponse, PasswordSet, SsccCounterUpdate, SsccState,
-    HOST_PRODUCT, PROTOCOL_VERSION,
+    OrgProfile, OrgProfileUpdate, PairResponse, PasswordChange, PasswordSet, SsccCounterUpdate,
+    SsccState, HOST_PRODUCT, PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -141,6 +141,15 @@ fn sscc_and_user_admin_fixtures_round_trip() {
     let _: OfficeUserCreate = round_trip("office-user-create.json");
     let _: OfficeUserUpdate = round_trip("office-user-update.json");
     let _: PasswordSet = round_trip("password-set.json");
+}
+
+#[test]
+fn password_change_fixture_round_trips_without_leaking() {
+    let change: PasswordChange = round_trip("password-change.json");
+    assert_ne!(change.current_password, change.new_password);
+    let debug = format!("{change:?}");
+    assert!(!debug.contains(change.current_password.expose()));
+    assert!(!debug.contains(change.new_password.expose()));
 }
 
 #[test]

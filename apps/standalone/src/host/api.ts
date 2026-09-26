@@ -8,6 +8,7 @@ import {
   type BootstrapResponse,
   type OfficeLoginRequest,
   type OfficeSession,
+  type PasswordChange,
 } from "./protocol.js";
 
 /** Host endpoints the shell uses; office screens add their own (plan 1b3). */
@@ -15,6 +16,7 @@ export interface HostApi {
   bootstrap(request: BootstrapRequest): Promise<BootstrapResponse>;
   officeLogin(request: OfficeLoginRequest): Promise<OfficeSession>;
   officeLogout(token: string): Promise<void>;
+  officeChangePassword(token: string, request: PasswordChange): Promise<void>;
 }
 
 export function createHostApi(client: HostClient): HostApi {
@@ -25,6 +27,13 @@ export function createHostApi(client: HostClient): HostApi {
       client.request("POST", "/v1/office/login", { body: request, schema: officeSessionSchema }),
     officeLogout: async (token) => {
       await client.request("POST", "/v1/office/logout", {
+        officeToken: token,
+        schema: z.null(),
+      });
+    },
+    officeChangePassword: async (token, request) => {
+      await client.request("PUT", "/v1/office/me/password", {
+        body: request,
         officeToken: token,
         schema: z.null(),
       });

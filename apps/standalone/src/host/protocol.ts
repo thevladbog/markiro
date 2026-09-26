@@ -234,3 +234,8 @@ export type OfficeUserUpdate = z.infer<typeof officeUserUpdateSchema>;
 
 export const passwordSetSchema = z.object({ password: z.string() }).strict();
 export type PasswordSet = z.infer<typeof passwordSetSchema>;
+
+export const passwordChangeSchema = z
+  .object({ currentPassword: z.string(), newPassword: z.string() })
+  .strict();
+export type PasswordChange = z.infer<typeof passwordChangeSchema>;

@@ -441,3 +441,11 @@ pub struct OfficeUserUpdate {
 pub struct PasswordSet {
     pub password: Secret,
 }
+
+/// `PUT /v1/office/me/password`: a signed-in office user changes their own password.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PasswordChange {
+    pub current_password: Secret,
+    pub new_password: Secret,
+}
