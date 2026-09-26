@@ -4,7 +4,7 @@ import { vi, type Mock } from "vitest";
 import { ThemeProvider } from "@markiro/ui";
 
 import type { HostApi } from "../../src/host/api.js";
-import type { OfficeUser, OrgProfile } from "../../src/host/protocol.js";
+import type { OfficeUser, OrgProfile, SsccState } from "../../src/host/protocol.js";
 import { Office } from "../../src/office/Office.js";
 import type { OfficeSessionValue } from "../../src/office/office-session.js";
 import { SESSION } from "./fixtures.js";
@@ -81,4 +81,18 @@ export const ORG_PROFILE: OrgProfile = {
   gs1Prefixes: ["4600682"],
   timeZone: "Europe/Moscow",
   rev: 4,
+};
+
+/** Two prefixes: the current GLN's (460709100) and an earlier one's. */
+export const SSCC_STATE: SsccState = {
+  counters: [
+    { issuerPrefix: "460068200", extension: 0, nextSerial: 1500, maxSerial: 9999999, rev: 1 },
+    { issuerPrefix: "460068200", extension: 1, nextSerial: 40, maxSerial: 9999999, rev: 1 },
+    { issuerPrefix: "460709100", extension: 0, nextSerial: 1, maxSerial: 9999999, rev: 2 },
+    { issuerPrefix: "460709100", extension: 1, nextSerial: 0, maxSerial: 9999999, rev: 2 },
+  ],
+  boxBlockSize: 2000,
+  palletBlockSize: 200,
+  currentIssuerPrefix: "460709100",
+  blockSizesRev: 3,
 };

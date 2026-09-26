@@ -3,6 +3,7 @@ import type { RouteObject } from "react-router";
 import { OfficeOverview } from "./OfficeOverview.js";
 import { OfficeShell } from "./OfficeShell.js";
 import { OrgProfilePage } from "./org/OrgProfilePage.js";
+import { SsccPage } from "./sscc/SsccPage.js";
 
 /** Office routes; paths match `OFFICE_NAV`. */
 export const officeRoutes: RouteObject[] = [
@@ -12,6 +13,7 @@ export const officeRoutes: RouteObject[] = [
     children: [
       { index: true, element: <OfficeOverview /> },
       { path: "org", element: <OrgProfilePage /> },
+      { path: "sscc", element: <SsccPage /> },
     ],
   },
 ];

@@ -21,4 +21,10 @@ export const OFFICE_NAV: readonly OfficeNavItem[] = [
     sectionKey: "office.nav.sections.organization",
     roles: ["admin", "technologist"],
   },
+  {
+    to: "/sscc",
+    labelKey: "office.nav.sscc",
+    sectionKey: "office.nav.sections.organization",
+    roles: ["admin", "technologist"],
+  },
 ];
