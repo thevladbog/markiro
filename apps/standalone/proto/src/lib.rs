@@ -27,7 +27,18 @@ pub const DEFAULT_PORT: u16 = 45710;
 /// Stable error codes of [`ErrorDetail::code`]; clients show text by code.
 pub mod codes {
     pub const NOT_FOUND: &str = "not_found";
+    pub const METHOD_NOT_ALLOWED: &str = "method_not_allowed";
     pub const PROTOCOL_UNSUPPORTED: &str = "protocol_unsupported";
+    pub const VALIDATION_FAILED: &str = "validation_failed";
+    pub const UNAUTHORIZED: &str = "unauthorized";
+    pub const FORBIDDEN: &str = "forbidden";
+    pub const STALE_REVISION: &str = "stale_revision";
+    pub const CONFLICT: &str = "conflict";
+    pub const LAST_ADMIN: &str = "last_admin";
+    pub const SSCC_BELOW_FLOOR: &str = "sscc_below_floor";
+    pub const ALREADY_INITIALIZED: &str = "already_initialized";
+    pub const LOOPBACK_ONLY: &str = "loopback_only";
+    pub const RATE_LIMITED: &str = "rate_limited";
     pub const INTERNAL: &str = "internal";
 }
 

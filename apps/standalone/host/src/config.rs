@@ -24,6 +24,8 @@ pub enum ConfigError {
     Invalid { path: PathBuf, reason: String },
     #[error("no host.json in {path}: check --data-dir; a new host creates it on first start, an existing one needs it restored from a backup")]
     Missing { path: PathBuf },
+    #[error("another markiro-host is using this data directory ({path} is locked)")]
+    Locked { path: PathBuf },
 }
 
 /// Every file the host owns lives under one data directory.
@@ -75,6 +77,30 @@ impl HostPaths {
             })?;
         }
         Ok(())
+    }
+
+    pub fn lock_file(&self) -> PathBuf {
+        self.data_dir.join("host.lock")
+    }
+
+    /// An exclusive lock on the data directory, held while the returned file
+    /// is alive: two hosts must never open the same database and TLS identity.
+    pub fn lock(&self) -> Result<fs::File, ConfigError> {
+        let path = self.lock_file();
+        let file = fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(&path)
+            .map_err(|source| ConfigError::Io {
+                path: path.clone(),
+                source,
+            })?;
+        match file.try_lock() {
+            Ok(()) => Ok(file),
+            Err(fs::TryLockError::WouldBlock) => Err(ConfigError::Locked { path }),
+            Err(fs::TryLockError::Error(source)) => Err(ConfigError::Io { path, source }),
+        }
     }
 }
 

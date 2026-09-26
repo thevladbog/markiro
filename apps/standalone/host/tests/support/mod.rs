@@ -1,6 +1,11 @@
 //! HTTPS client that trusts exactly one certificate fingerprint, the way a
 //! paired device will (plan 1c).
 
+// Each integration-test binary uses a different subset of these helpers.
+#![allow(dead_code)]
+
+pub mod app;
+
 use std::sync::Arc;
 
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};

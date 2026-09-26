@@ -1,3 +1,11 @@
 [workspace]
 resolver = "2"
 members = ["proto", "host", "src-tauri"]
+
+# PBKDF2 with 600 000 iterations runs in tests too; optimise the crypto
+# primitives even in debug builds, or every password hash takes seconds.
+[profile.dev.package.aws-lc-sys]
+opt-level = 3
+
+[profile.dev.package.aws-lc-rs]
+opt-level = 3

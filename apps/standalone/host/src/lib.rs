@@ -1,6 +1,7 @@
 //! Markiro standalone host library. `src/main.rs` wires it into the
 //! `run` / `service` / `print-fingerprint` commands; tests start it directly.
 
+pub mod clock;
 pub mod config;
 pub mod db;
 pub mod error;
@@ -17,6 +18,9 @@ use sqlx::SqlitePool;
 use tls::TlsIdentity;
 
 pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
+
+/// How long `stop` waits for open connections before aborting them.
+const SHUTDOWN_DEADLINE: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// How to start the host. The default listens on every interface at the
 /// configured port; tests bind `127.0.0.1:0`.
@@ -36,12 +40,20 @@ pub struct RunningHost {
     shutdown: tokio::sync::oneshot::Sender<()>,
     task: tokio::task::JoinHandle<std::io::Result<()>>,
     pool: SqlitePool,
+    _lock: std::fs::File,
 }
 
 impl RunningHost {
     pub async fn stop(self) -> Result<(), BoxError> {
         let _ = self.shutdown.send(());
-        self.task.await??;
+        let mut task = self.task;
+        match tokio::time::timeout(SHUTDOWN_DEADLINE, &mut task).await {
+            Ok(joined) => joined??,
+            Err(_) => {
+                tracing::warn!("graceful shutdown timed out; aborting open connections");
+                task.abort();
+            }
+        }
         self.pool.close().await;
         tracing::info!("markiro-host stopped");
         Ok(())
@@ -51,6 +63,7 @@ impl RunningHost {
 /// Open everything under `paths` and start serving.
 pub async fn start(paths: &HostPaths, options: StartOptions) -> Result<RunningHost, BoxError> {
     paths.ensure()?;
+    let lock = paths.lock()?;
     let config = HostConfig::load_or_create(paths, options.port_override)?;
     let pool = db::open(&paths.database_file()).await?;
     let identity = TlsIdentity::load_or_create(&paths.tls_dir(), &config.host_id)?;
@@ -60,10 +73,11 @@ pub async fn start(paths: &HostPaths, options: StartOptions) -> Result<RunningHo
     let listener = server::TlsListener::bind(bind, identity.server_config()?).await?;
     let addr = listener.bound_addr();
     let (shutdown, shutdown_signal) = tokio::sync::oneshot::channel::<()>();
-    let state = server::AppState {
-        pool: pool.clone(),
-        host_id: config.host_id.clone(),
-    };
+    let state = server::AppState::new(
+        pool.clone(),
+        config.host_id.clone(),
+        std::sync::Arc::new(clock::SystemClock),
+    );
     let task = tokio::spawn(server::serve(listener, state, async move {
         let _ = shutdown_signal.await;
     }));
@@ -81,5 +95,6 @@ pub async fn start(paths: &HostPaths, options: StartOptions) -> Result<RunningHo
         shutdown,
         task,
         pool,
+        _lock: lock,
     })
 }
