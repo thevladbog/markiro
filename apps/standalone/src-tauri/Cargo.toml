@@ -21,6 +21,11 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri = { version = "2.11", features = [] }
 tauri-plugin-single-instance = "2"
+thiserror = "2"
+
+[target.'cfg(windows)'.dependencies]
+base64 = "=0.22.1"
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Security_Cryptography"] }
 
 [dev-dependencies]
 markiro-host = { path = "../host" }

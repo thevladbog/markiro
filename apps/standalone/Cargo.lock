@@ -2493,6 +2493,7 @@ dependencies = [
 name = "markiro-standalone"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "markiro-host",
  "markiro-proto",
  "reqwest",
@@ -2503,7 +2504,9 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-single-instance",
  "tempfile",
+ "thiserror 2.0.21",
  "tokio",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

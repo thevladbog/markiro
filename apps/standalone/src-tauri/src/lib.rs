@@ -2,7 +2,9 @@
 //! network requests itself: every call to the host goes through commands
 //! here, so certificate checks stay in Rust.
 
+pub mod device_config;
 pub mod host_probe;
+pub mod secret_store;
 
 #[tauri::command]
 async fn host_hello(address: String) -> Result<host_probe::HelloObservation, String> {
