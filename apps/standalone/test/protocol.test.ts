@@ -37,4 +37,11 @@ describe("protocol schemas parse the shared Rust fixtures", () => {
     const hello = { ...(fixture("hello.json") as Record<string, unknown>), extra: true };
     expect(helloSchema.safeParse(hello).success).toBe(false);
   });
+
+  it("rejects non-object error details, like the Rust Map type", () => {
+    const body = fixture("error-with-details.json") as { error: Record<string, unknown> };
+    expect(
+      errorBodySchema.safeParse({ error: { ...body.error, details: "not an object" } }).success,
+    ).toBe(false);
+  });
 });

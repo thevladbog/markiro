@@ -63,8 +63,9 @@ pub struct ErrorDetail {
     pub code: String,
     /// Diagnostic text for logs; never shown to a person.
     pub message: String,
+    /// Structured detail; always a JSON object when present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub details: Option<serde_json::Value>,
+    pub details: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
 impl ErrorBody {

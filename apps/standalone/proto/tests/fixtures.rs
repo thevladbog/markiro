@@ -54,3 +54,10 @@ fn fingerprint_is_lower_case_hex_sha256() {
         "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     );
 }
+
+#[test]
+fn error_details_must_be_an_object() {
+    let mut value = fixture("error-with-details.json");
+    value["error"]["details"] = Value::String("not an object".into());
+    assert!(serde_json::from_value::<ErrorBody>(value).is_err());
+}
