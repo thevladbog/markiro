@@ -15,24 +15,42 @@ async fn last_audit(
     Option<String>,
     String,
     Option<String>,
+    Option<String>,
     String,
     Value,
 ) {
-    let (actor_kind, actor_id, action, target_id, result, details): (String, Option<String>, String, Option<String>, String, String) =
-        sqlx::query_as(
-            "SELECT actor_kind, actor_id, action, target_id, result, details FROM audit_log ORDER BY id DESC LIMIT 1",
-        )
-        .fetch_one(&app.state.pool)
-        .await
-        .unwrap();
+    let (actor_kind, actor_id, action, target_type, target_id, result, details): (
+        String,
+        Option<String>,
+        String,
+        Option<String>,
+        Option<String>,
+        String,
+        String,
+    ) = sqlx::query_as(
+        "SELECT actor_kind, actor_id, action, target_type, target_id, result, details \
+         FROM audit_log ORDER BY id DESC LIMIT 1",
+    )
+    .fetch_one(&app.state.pool)
+    .await
+    .unwrap();
     (
         actor_kind,
         actor_id,
         action,
+        target_type,
         target_id,
         result,
         serde_json::from_str(&details).unwrap(),
     )
+}
+
+async fn session_last_seen(app: &TestApp, token: &str) -> String {
+    sqlx::query_scalar("SELECT last_seen_at FROM office_sessions WHERE token_hash = ?")
+        .bind(key_hash(token))
+        .fetch_one(&app.state.pool)
+        .await
+        .unwrap()
 }
 
 #[tokio::test]
@@ -74,6 +92,7 @@ async fn login_opens_a_session_bound_to_the_device() {
             "device".into(),
             Some(device_id),
             "office.login".into(),
+            Some("office_user".into()),
             Some(user_id),
             "ok".into(),
             json!({ "login": "irina" })
@@ -95,31 +114,35 @@ async fn wrong_password_unknown_login_and_inactive_user_are_denied_and_audited()
         .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     assert_eq!(body["error"]["code"], "unauthorized");
+    assert_eq!(body["error"]["details"]["credential"], "password");
     assert_eq!(
         last_audit(&app).await,
         (
             "device".into(),
             Some(device_id.clone()),
             "office.login".into(),
+            Some("office_user".into()),
             Some(user_id.clone()),
             "denied".into(),
             json!({ "login": "irina" })
         )
     );
 
-    let (status, _) = app
+    let (status, body) = app
         .send(json_request(
             with_device(request("POST", "/v1/office/login"), &key),
             json!({ "login": "nobody", "password": "correct horse battery" }),
         ))
         .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["error"]["details"]["credential"], "password");
     assert_eq!(
         last_audit(&app).await,
         (
             "device".into(),
             Some(device_id),
             "office.login".into(),
+            Some("office_user".into()),
             None,
             "denied".into(),
             json!({ "login": "nobody" })
@@ -131,26 +154,35 @@ async fn wrong_password_unknown_login_and_inactive_user_are_denied_and_audited()
         .execute(&app.state.pool)
         .await
         .unwrap();
-    let (status, _) = app
+    let (status, body) = app
         .send(json_request(
             with_device(request("POST", "/v1/office/login"), &key),
             json!({ "login": "irina", "password": "correct horse battery" }),
         ))
         .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        body["error"]["details"]["credential"], "password",
+        "an inactive user is a password-style rejection, not a session one"
+    );
 }
 
 #[tokio::test]
 async fn login_requires_a_device() {
     let app = TestApp::new().await;
     seed_office_user(&app, "irina", "admin", "correct horse battery").await;
-    let (status, _) = app
+    let (status, body) = app
         .send(json_request(
             request("POST", "/v1/office/login"),
             json!({ "login": "irina", "password": "correct horse battery" }),
         ))
         .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["error"]["code"], "unauthorized");
+    assert_eq!(
+        body["error"]["details"]["credential"], "device",
+        "a missing device key is a device-credential rejection, not a password one"
+    );
 }
 
 #[tokio::test]
@@ -185,7 +217,7 @@ async fn me_reloads_role_and_rejects_foreign_devices() {
         .await;
     assert_eq!(body["role"], "technologist");
 
-    let (status, _) = app
+    let (status, body) = app
         .send(empty(with_session(
             request("GET", "/v1/office/me"),
             &other_key,
@@ -193,10 +225,15 @@ async fn me_reloads_role_and_rejects_foreign_devices() {
         )))
         .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
-    let (status, _) = app
+    assert_eq!(
+        body["error"]["details"]["credential"], "session",
+        "a token bound to a different device is a session-credential rejection"
+    );
+    let (status, body) = app
         .send(empty(with_device(request("GET", "/v1/office/me"), &key)))
         .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["error"]["details"]["credential"], "session");
 }
 
 #[tokio::test]
@@ -225,6 +262,7 @@ async fn sessions_end_after_idle_and_absolute_limits() {
         .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     assert_eq!(body["error"]["message"], "office session expired");
+    assert_eq!(body["error"]["details"]["credential"], "session");
     let remaining: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM office_sessions WHERE token_hash = ?")
             .bind(key_hash(&token))
@@ -261,6 +299,48 @@ async fn sessions_end_after_idle_and_absolute_limits() {
 }
 
 #[tokio::test]
+async fn session_heartbeat_is_throttled_to_once_a_minute() {
+    let app = TestApp::new().await;
+    let (_, key) = pair_device(&app, "office").await;
+    seed_office_user(&app, "irina", "admin", "correct horse battery").await;
+    let token = login(&app, &key, "irina", "correct horse battery").await;
+    let created_at = session_last_seen(&app, &token).await;
+
+    // Well inside the same minute: the write is skipped, like the device's
+    // own throttled `last_seen_at`.
+    app.clock.advance(time::Duration::seconds(30));
+    let (status, _) = app
+        .send(empty(with_session(
+            request("GET", "/v1/office/me"),
+            &key,
+            &token,
+        )))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        session_last_seen(&app, &token).await,
+        created_at,
+        "an office request inside the same minute must not rewrite last_seen_at"
+    );
+
+    // A minute after the last write: the heartbeat updates.
+    app.clock.advance(time::Duration::seconds(31));
+    let (status, _) = app
+        .send(empty(with_session(
+            request("GET", "/v1/office/me"),
+            &key,
+            &token,
+        )))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        session_last_seen(&app, &token).await,
+        app.state.timestamp(),
+        "a minute after the last write, the office session heartbeat updates"
+    );
+}
+
+#[tokio::test]
 async fn logout_ends_the_session_and_is_audited() {
     let app = TestApp::new().await;
     let (_, key) = pair_device(&app, "office").await;
@@ -284,12 +364,14 @@ async fn logout_ends_the_session_and_is_audited() {
         )))
         .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
-    let (actor_kind, actor_id, action, target_id, result, details) = last_audit(&app).await;
+    let (actor_kind, actor_id, action, target_type, target_id, result, details) =
+        last_audit(&app).await;
     assert_eq!(
         (
             actor_kind.as_str(),
             actor_id.as_deref(),
             action.as_str(),
+            target_type.as_deref(),
             target_id.as_deref(),
             result.as_str()
         ),
@@ -297,6 +379,7 @@ async fn logout_ends_the_session_and_is_audited() {
             "office_user",
             Some(user_id.as_str()),
             "office.logout",
+            Some("office_user"),
             Some(user_id.as_str()),
             "ok"
         )
@@ -347,12 +430,14 @@ async fn malformed_logins_are_denied_without_recording_the_input() {
         .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     assert_eq!(body["error"]["code"], "unauthorized");
+    assert_eq!(body["error"]["details"]["credential"], "password");
     assert_eq!(
         last_audit(&app).await,
         (
             "device".into(),
             Some(device_id.clone()),
             "office.login".into(),
+            Some("office_user".into()),
             None,
             "denied".into(),
             json!({ "reason": "invalid_login" })
@@ -367,12 +452,14 @@ async fn malformed_logins_are_denied_without_recording_the_input() {
         .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     assert_eq!(body["error"]["code"], "unauthorized");
+    assert_eq!(body["error"]["details"]["credential"], "password");
     assert_eq!(
         last_audit(&app).await,
         (
             "device".into(),
             Some(device_id),
             "office.login".into(),
+            Some("office_user".into()),
             None,
             "denied".into(),
             json!({ "reason": "invalid_login" })

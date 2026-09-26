@@ -172,6 +172,7 @@ async fn a_device_reads_itself_with_its_key_until_revoked() {
         .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     assert_eq!(body["error"]["code"], "unauthorized");
+    assert_eq!(body["error"]["details"]["credential"], "device");
 
     sqlx::query("UPDATE devices SET revoked_at = ? WHERE id = ?")
         .bind(app.state.timestamp())
@@ -179,10 +180,12 @@ async fn a_device_reads_itself_with_its_key_until_revoked() {
         .execute(&app.state.pool)
         .await
         .unwrap();
-    let (status, _) = app
+    let (status, body) = app
         .send(empty(with_device(request("GET", "/v1/device"), &key)))
         .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
-    let (status, _) = app.send(empty(request("GET", "/v1/device"))).await;
+    assert_eq!(body["error"]["details"]["credential"], "device");
+    let (status, body) = app.send(empty(request("GET", "/v1/device"))).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["error"]["details"]["credential"], "device");
 }

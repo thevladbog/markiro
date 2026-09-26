@@ -8,6 +8,7 @@ use axum::http::StatusCode;
 use axum::Json;
 use markiro_proto::{codes, BlockSizesUpdate, SsccCounter, SsccCounterUpdate, SsccState};
 use serde_json::json;
+use sqlx::SqliteConnection;
 
 use crate::audit::{self, Entry, Outcome};
 use crate::auth::OfficeContext;
@@ -32,18 +33,32 @@ fn counter(
     })
 }
 
-async fn read_state(state: &AppState) -> Result<SsccState, ApiError> {
+/// Read the counters, block sizes and current issuer prefix through `conn`.
+/// Callers pass either a plain pooled connection (`get_sscc`) or the open
+/// write transaction (`put_block_sizes`): reading through the transaction
+/// keeps this off `state.pool` while a write transaction is open, and lets a
+/// caller return a consistent snapshot of what it just wrote before
+/// releasing the write lock.
+async fn read_state(conn: &mut SqliteConnection) -> Result<SsccState, ApiError> {
     let rows: Vec<(String, i64, i64, i64)> = sqlx::query_as(
         "SELECT issuer_prefix, extension, next_serial, rev FROM sscc_counters ORDER BY issuer_prefix, extension",
     )
-    .fetch_all(&state.pool)
+    .fetch_all(&mut *conn)
     .await
     .map_err(ApiError::internal)?;
-    let (box_block_size, pallet_block_size, rev): (i64, i64, i64) =
+    let (box_block_size, pallet_block_size, block_sizes_rev): (i64, i64, i64) =
         sqlx::query_as("SELECT box_block_size, pallet_block_size, rev FROM site WHERE id = 1")
-            .fetch_one(&state.pool)
+            .fetch_one(&mut *conn)
             .await
             .map_err(ApiError::internal)?;
+    // Office routes only ever run after the wizard has created `org_profile`
+    // (an office session requires an office user, and the first one is
+    // created in the same transaction as the organization), so this row
+    // always exists.
+    let gln: String = sqlx::query_scalar("SELECT gln FROM org_profile WHERE id = 1")
+        .fetch_one(&mut *conn)
+        .await
+        .map_err(ApiError::internal)?;
     Ok(SsccState {
         counters: rows
             .into_iter()
@@ -51,7 +66,8 @@ async fn read_state(state: &AppState) -> Result<SsccState, ApiError> {
             .collect::<Result<_, _>>()?,
         box_block_size: u32::try_from(box_block_size).map_err(ApiError::internal)?,
         pallet_block_size: u32::try_from(pallet_block_size).map_err(ApiError::internal)?,
-        rev,
+        current_issuer_prefix: validate::issuer_prefix(&gln).to_owned(),
+        block_sizes_rev,
     })
 }
 
@@ -59,7 +75,8 @@ pub async fn get_sscc(
     State(state): State<AppState>,
     _context: OfficeContext,
 ) -> Result<Json<SsccState>, ApiError> {
-    read_state(&state).await.map(Json)
+    let mut conn = state.pool.acquire().await.map_err(ApiError::internal)?;
+    read_state(&mut conn).await.map(Json)
 }
 
 pub async fn put_counter(
@@ -71,6 +88,7 @@ pub async fn put_counter(
     context.require_admin()?;
     let at = state.timestamp();
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
+    context.require_admin_in(&mut tx).await?;
     let row: Option<(i64, i64)> = sqlx::query_as(
         "SELECT next_serial, rev FROM sscc_counters WHERE issuer_prefix = ? AND extension = ?",
     )
@@ -101,7 +119,7 @@ pub async fn put_counter(
             codes::SSCC_BELOW_FLOOR,
             "an SSCC counter only moves forward",
         )
-        .with_details(json!({ "currentNextSerial": current })));
+        .with_details(json!({ "minSerial": current })));
     }
     validate::sscc_serial("nextSerial", extension, &prefix, update.next_serial)?;
     let new_rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
@@ -160,6 +178,7 @@ pub async fn put_block_sizes(
     }
     let at = state.timestamp();
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
+    context.require_admin_in(&mut tx).await?;
     let (current_box, current_pallet, rev): (i64, i64, i64) =
         sqlx::query_as("SELECT box_block_size, pallet_block_size, rev FROM site WHERE id = 1")
             .fetch_one(&mut *tx)
@@ -172,8 +191,12 @@ pub async fn put_block_sizes(
         && i64::from(update.pallet_block_size) == current_pallet
     {
         // Nothing actually changed: report state as-is without bumping the
-        // revision, writing a row nobody changed, or auditing a no-op.
-        return read_state(&state).await.map(Json);
+        // revision, writing a row nobody changed, or auditing a no-op. Read
+        // through the still-open transaction, then let it roll back on drop:
+        // taking a second pooled connection here (pool size 4) could wait
+        // behind another writer's busy_timeout instead of returning at once.
+        let unchanged = read_state(&mut tx).await?;
+        return Ok(Json(unchanged));
     }
     let new_rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
     sqlx::query("UPDATE site SET box_block_size = ?, pallet_block_size = ?, rev = ? WHERE id = 1")
@@ -200,6 +223,11 @@ pub async fn put_block_sizes(
     )
     .await
     .map_err(ApiError::internal)?;
+    // Read the just-written state through the same transaction, before the
+    // commit below releases the write lock: reading afterward on a fresh
+    // pooled connection could race a later writer and return state this
+    // request never wrote.
+    let updated = read_state(&mut tx).await?;
     tx.commit().await.map_err(ApiError::internal)?;
-    read_state(&state).await.map(Json)
+    Ok(Json(updated))
 }

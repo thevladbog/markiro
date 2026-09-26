@@ -6,7 +6,7 @@ use std::net::SocketAddr;
 use axum::extract::{ConnectInfo, State};
 use axum::http::StatusCode;
 use axum::Json;
-use markiro_proto::{OfficeLoginRequest, OfficeRole, OfficeSession, OfficeUser};
+use markiro_proto::{credentials, OfficeLoginRequest, OfficeRole, OfficeSession, OfficeUser};
 use serde_json::json;
 
 use crate::audit::{self, Actor, Entry, Outcome};
@@ -51,7 +51,10 @@ pub async fn login(
         .await
         .map_err(ApiError::internal)?;
         tx.commit().await.map_err(ApiError::internal)?;
-        return Err(ApiError::unauthorized("wrong login or password"));
+        return Err(ApiError::unauthorized(
+            credentials::PASSWORD,
+            "wrong login or password",
+        ));
     }
 
     let row: Option<UserRow> = sqlx::query_as(
@@ -145,7 +148,10 @@ pub async fn login(
             .await
             .map_err(ApiError::internal)?;
             tx.commit().await.map_err(ApiError::internal)?;
-            Err(ApiError::unauthorized("wrong login or password"))
+            Err(ApiError::unauthorized(
+                credentials::PASSWORD,
+                "wrong login or password",
+            ))
         }
     }
 }

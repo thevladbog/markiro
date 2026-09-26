@@ -85,8 +85,12 @@ impl ApiError {
         Self::new(StatusCode::BAD_REQUEST, codes::VALIDATION_FAILED, message)
     }
 
-    pub fn unauthorized(message: impl Into<String>) -> Self {
+    /// `credential` is one of [`markiro_proto::credentials`]: which credential
+    /// failed, so the client can tell "re-pair this device" from "sign in
+    /// again" from "wrong password" apart (spec §4.6).
+    pub fn unauthorized(credential: &str, message: impl Into<String>) -> Self {
         Self::new(StatusCode::UNAUTHORIZED, codes::UNAUTHORIZED, message)
+            .with_details(json!({ "credential": credential }))
     }
 
     pub fn forbidden(message: impl Into<String>) -> Self {

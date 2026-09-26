@@ -1,10 +1,10 @@
 use markiro_proto::{
-    certificate_fingerprint, codes, compatibility, compatibility_for, display_fingerprint,
-    BlockSizesUpdate, BootstrapRequest, BootstrapResponse, Compatibility, DeviceInfo, DeviceKind,
-    ErrorBody, Hello, HelloEnvelope, LocalPairRequest, OfficeLoginRequest, OfficeRole,
-    OfficeSession, OfficeUser, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate, OrgProfile,
-    OrgProfileUpdate, PairResponse, PasswordSet, SsccCounterUpdate, SsccState, HOST_PRODUCT,
-    PROTOCOL_VERSION,
+    certificate_fingerprint, codes, compatibility, compatibility_for, credentials,
+    display_fingerprint, BlockSizesUpdate, BootstrapRequest, BootstrapResponse, Compatibility,
+    DeviceInfo, DeviceKind, ErrorBody, Hello, HelloEnvelope, LocalPairRequest, OfficeLoginRequest,
+    OfficeRole, OfficeSession, OfficeUser, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate,
+    OrgProfile, OrgProfileUpdate, PairResponse, PasswordSet, SsccCounterUpdate, SsccState,
+    HOST_PRODUCT, PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -43,6 +43,12 @@ fn error_fixtures_round_trip() {
     assert!(not_found.error.details.is_none());
     let unsupported: ErrorBody = round_trip("error-with-details.json");
     assert_eq!(unsupported.error.code, codes::PROTOCOL_UNSUPPORTED);
+    let unauthorized: ErrorBody = round_trip("error-unauthorized.json");
+    assert_eq!(unauthorized.error.code, codes::UNAUTHORIZED);
+    assert_eq!(
+        unauthorized.error.details.unwrap()["credential"],
+        credentials::SESSION
+    );
 }
 
 #[test]
@@ -126,6 +132,8 @@ fn bootstrap_and_org_fixtures_round_trip() {
 fn sscc_and_user_admin_fixtures_round_trip() {
     let state: SsccState = round_trip("sscc-state.json");
     assert_eq!(state.counters[0].max_serial, 9_999_999);
+    assert_eq!(state.current_issuer_prefix, "460068200");
+    assert_eq!(state.block_sizes_rev, 1);
     let _: SsccCounterUpdate = round_trip("sscc-counter-update.json");
     let _: BlockSizesUpdate = round_trip("block-sizes-update.json");
     let record: OfficeUserRecord = round_trip("office-user-record.json");

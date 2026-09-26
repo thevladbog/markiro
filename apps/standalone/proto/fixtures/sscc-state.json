@@ -17,5 +17,6 @@
   ],
   "boxBlockSize": 2000,
   "palletBlockSize": 200,
-  "rev": 1
+  "currentIssuerPrefix": "460068200",
+  "blockSizesRev": 1
 }

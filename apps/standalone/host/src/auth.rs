@@ -7,7 +7,9 @@ use axum::extract::FromRequestParts;
 use axum::http::header::AUTHORIZATION;
 use axum::http::request::Parts;
 use axum::http::StatusCode;
-use markiro_proto::{codes, DeviceKind, OfficeRole, OfficeUser, OFFICE_SESSION_HEADER};
+use markiro_proto::{
+    codes, credentials, DeviceKind, OfficeRole, OfficeUser, OFFICE_SESSION_HEADER,
+};
 use sqlx::SqliteConnection;
 use time::OffsetDateTime;
 
@@ -38,7 +40,9 @@ impl FromRequestParts<AppState> for AuthDevice {
             .and_then(|value| value.to_str().ok())
             .and_then(|value| value.strip_prefix("Bearer "))
             .filter(|key| !key.is_empty())
-            .ok_or_else(|| ApiError::unauthorized("a device key is required"))?;
+            .ok_or_else(|| {
+                ApiError::unauthorized(credentials::DEVICE, "a device key is required")
+            })?;
         let row: Option<(String, String)> = sqlx::query_as(
             "SELECT id, kind FROM devices WHERE key_hash = ? AND revoked_at IS NULL",
         )
@@ -46,8 +50,9 @@ impl FromRequestParts<AppState> for AuthDevice {
         .fetch_optional(&state.pool)
         .await
         .map_err(ApiError::internal)?;
-        let (id, kind) =
-            row.ok_or_else(|| ApiError::unauthorized("unknown or revoked device key"))?;
+        let (id, kind) = row.ok_or_else(|| {
+            ApiError::unauthorized(credentials::DEVICE, "unknown or revoked device key")
+        })?;
         let kind: DeviceKind =
             serde_json::from_value(serde_json::Value::String(kind)).map_err(ApiError::internal)?;
         // Record activity at most once a minute to keep writes rare.
@@ -103,6 +108,39 @@ impl OfficeContext {
             Err(ApiError::forbidden("the administrator role is required"))
         }
     }
+
+    /// Re-check admin rights inside the caller's write transaction. The
+    /// extractor's role and active flag were read before the request started
+    /// hashing a password (0.3-1s of PBKDF2 outside any transaction); a
+    /// demotion or deactivation committed in that window must still stop the
+    /// write, so every admin write calls this again right after
+    /// `begin_write`, in addition to the early `require_admin` rejection.
+    pub async fn require_admin_in(&self, conn: &mut SqliteConnection) -> Result<(), ApiError> {
+        let row: Option<(i64, String)> = sqlx::query_as(
+            "SELECT u.active, u.role FROM office_sessions s \
+             JOIN office_users u ON u.id = s.user_id \
+             WHERE s.id = ?",
+        )
+        .bind(&self.session_id)
+        .fetch_optional(conn)
+        .await
+        .map_err(ApiError::internal)?;
+        let (active, role) = row
+            .ok_or_else(|| ApiError::unauthorized(credentials::SESSION, "office session ended"))?;
+        if active == 0 {
+            return Err(ApiError::unauthorized(
+                credentials::SESSION,
+                "office session ended",
+            ));
+        }
+        let role: OfficeRole =
+            serde_json::from_value(serde_json::Value::String(role)).map_err(ApiError::internal)?;
+        if role == OfficeRole::Admin {
+            Ok(())
+        } else {
+            Err(ApiError::forbidden("the administrator role is required"))
+        }
+    }
 }
 
 type SessionRow = (String, String, String, String, String, String, String, i64);
@@ -120,7 +158,9 @@ impl FromRequestParts<AppState> for OfficeContext {
             .get(OFFICE_SESSION_HEADER)
             .and_then(|value| value.to_str().ok())
             .filter(|token| !token.is_empty())
-            .ok_or_else(|| ApiError::unauthorized("an office session is required"))?;
+            .ok_or_else(|| {
+                ApiError::unauthorized(credentials::SESSION, "an office session is required")
+            })?;
         let row: Option<SessionRow> = sqlx::query_as(
             "SELECT s.id, s.last_seen_at, s.expires_at, u.id, u.login, u.name, u.role, u.active \
              FROM office_sessions s JOIN office_users u ON u.id = s.user_id \
@@ -131,8 +171,10 @@ impl FromRequestParts<AppState> for OfficeContext {
         .fetch_optional(&state.pool)
         .await
         .map_err(ApiError::internal)?;
-        let (session_id, last_seen_at, expires_at, user_id, login, name, role, active) =
-            row.ok_or_else(|| ApiError::unauthorized("unknown or ended office session"))?;
+        let (session_id, last_seen_at, expires_at, user_id, login, name, role, active) = row
+            .ok_or_else(|| {
+                ApiError::unauthorized(credentials::SESSION, "unknown or ended office session")
+            })?;
         let now = state.now();
         let last_seen = parse_timestamp(&last_seen_at).map_err(ApiError::internal)?;
         let expires = parse_timestamp(&expires_at).map_err(ApiError::internal)?;
@@ -141,14 +183,23 @@ impl FromRequestParts<AppState> for OfficeContext {
             end_session(&mut conn, &session_id)
                 .await
                 .map_err(ApiError::internal)?;
-            return Err(ApiError::unauthorized("office session expired"));
+            return Err(ApiError::unauthorized(
+                credentials::SESSION,
+                "office session expired",
+            ));
         }
-        sqlx::query("UPDATE office_sessions SET last_seen_at = ? WHERE id = ?")
-            .bind(format_timestamp(now))
-            .bind(&session_id)
-            .execute(&state.pool)
-            .await
-            .map_err(ApiError::internal)?;
+        // Record activity at most once a minute, like the device's
+        // `last_seen_at`: every office request otherwise fsyncs a write
+        // (`synchronous=FULL`) that nobody reads at that resolution.
+        sqlx::query(
+            "UPDATE office_sessions SET last_seen_at = ? WHERE id = ? AND last_seen_at <= ?",
+        )
+        .bind(format_timestamp(now))
+        .bind(&session_id)
+        .bind(format_timestamp(now - time::Duration::minutes(1)))
+        .execute(&state.pool)
+        .await
+        .map_err(ApiError::internal)?;
         let role: OfficeRole =
             serde_json::from_value(serde_json::Value::String(role)).map_err(ApiError::internal)?;
         Ok(Self {

@@ -1,5 +1,7 @@
 mod support;
 
+use std::time::Duration;
+
 use axum::http::StatusCode;
 use markiro_host::secrets::{key_hash, verify_password};
 use serde_json::{json, Value};
@@ -75,6 +77,11 @@ async fn assert_audit(
     target_id: &str,
     details: Value,
 ) {
+    assert_eq!(
+        audit_count(admin, action, target_id).await,
+        1,
+        "expected exactly one audit row for {action}/{target_id}"
+    );
     type Row = (
         String,
         Option<String>,
@@ -142,7 +149,7 @@ async fn sscc_counters_move_only_forward_within_capacity() {
         .await;
     assert_eq!(status, StatusCode::CONFLICT);
     assert_eq!(body["error"]["code"], "sscc_below_floor");
-    assert_eq!(body["error"]["details"]["currentNextSerial"], 1500);
+    assert_eq!(body["error"]["details"]["minSerial"], 1500);
     let (status, body) = admin
         .call(
             "PUT",
@@ -170,6 +177,10 @@ async fn sscc_counters_move_only_forward_within_capacity() {
     // None of the failed attempts above touched anything: the global
     // revision is still exactly what bootstrap left it at.
     let rev_before_move = host_revision(&admin).await;
+    assert_eq!(
+        rev_before_move, 1,
+        "the conflict, validation and stale-revision attempts above must not bump the global revision"
+    );
     let (status, body) = admin
         .call(
             "PUT",
@@ -264,7 +275,7 @@ async fn sscc_counters_move_only_forward_within_capacity() {
 async fn block_sizes_are_validated_and_versioned() {
     let admin = admin().await;
     let (_, state) = admin.call("GET", "/v1/office/sscc", None).await;
-    let rev = state["rev"].as_i64().unwrap();
+    let rev = state["blockSizesRev"].as_i64().unwrap();
     let (status, body) = admin
         .call(
             "PUT",
@@ -293,7 +304,7 @@ async fn block_sizes_are_validated_and_versioned() {
         ),
         (json!(5000), json!(500))
     );
-    let new_rev = body["rev"].as_i64().unwrap();
+    let new_rev = body["blockSizesRev"].as_i64().unwrap();
     assert_eq!(new_rev, rev_before + 1);
     assert_eq!(host_revision(&admin).await, new_rev);
     assert_audit(
@@ -315,7 +326,7 @@ async fn block_sizes_are_validated_and_versioned() {
         )
         .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["rev"].as_i64().unwrap(), new_rev);
+    assert_eq!(body["blockSizesRev"].as_i64().unwrap(), new_rev);
     assert_eq!(
         host_revision(&admin).await,
         new_rev,
@@ -326,6 +337,54 @@ async fn block_sizes_are_validated_and_versioned() {
         audit_rows_before_noop,
         "a no-op must not write a new audit row"
     );
+}
+
+/// Regression for the pool-exhaustion bug: `put_block_sizes` must read its
+/// response through the open write transaction, never by taking a second
+/// connection from `state.pool`. The pool has 4 connections; holding 3 here
+/// leaves exactly one spare, which the request's own write transaction takes.
+/// The old no-op path additionally called `state.pool.acquire()` for its
+/// read and would then wait behind the held connections until they were
+/// released — past the 5-second timeout used here.
+#[tokio::test]
+async fn block_size_updates_do_not_wait_on_a_second_pooled_connection() {
+    let admin = admin().await;
+    let (_, state) = admin.call("GET", "/v1/office/sscc", None).await;
+    let rev = state["blockSizesRev"].as_i64().unwrap();
+
+    let held = [
+        admin.app.state.pool.acquire().await.unwrap(),
+        admin.app.state.pool.acquire().await.unwrap(),
+        admin.app.state.pool.acquire().await.unwrap(),
+    ];
+
+    let (status, body) = tokio::time::timeout(
+        Duration::from_secs(5),
+        admin.call(
+            "PUT",
+            "/v1/office/sscc/block-sizes",
+            Some(json!({ "boxBlockSize": 2000, "palletBlockSize": 200, "expectedRev": rev })),
+        ),
+    )
+    .await
+    .expect("a no-op block-size update must not wait for a pooled connection");
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["blockSizesRev"].as_i64().unwrap(), rev);
+
+    let (status, body) = tokio::time::timeout(
+        Duration::from_secs(5),
+        admin.call(
+            "PUT",
+            "/v1/office/sscc/block-sizes",
+            Some(json!({ "boxBlockSize": 3000, "palletBlockSize": 300, "expectedRev": rev })),
+        ),
+    )
+    .await
+    .expect("a changing block-size update must not wait for a pooled connection");
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["boxBlockSize"], 3000);
+
+    drop(held);
 }
 
 #[tokio::test]
@@ -598,6 +657,20 @@ async fn deactivation_and_password_changes_end_the_users_sessions() {
     let tech_id = created["id"].as_str().unwrap().to_owned();
     let tech_token = login(&admin.app, &admin.key, "tech", "correct horse battery").await;
 
+    // A bystander: a second technologist, unrelated to `tech`. Neither the
+    // password change nor the deactivation below must touch their session.
+    let (_, second) = admin
+        .call(
+            "POST",
+            "/v1/office/users",
+            Some(
+                json!({ "login": "second", "name": "Ольга", "role": "technologist", "password": "correct horse battery" }),
+            ),
+        )
+        .await;
+    let second_id = second["id"].as_str().unwrap().to_owned();
+    let second_token = login(&admin.app, &admin.key, "second", "correct horse battery").await;
+
     let (status, _) = admin
         .call(
             "PUT",
@@ -643,6 +716,28 @@ async fn deactivation_and_password_changes_end_the_users_sessions() {
     )
     .await;
 
+    // The bystander's session is untouched by tech's password change.
+    let (status, _) = admin
+        .app
+        .send(empty(with_session(
+            request("GET", "/v1/office/me"),
+            &admin.key,
+            &second_token,
+        )))
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "an unrelated user's session must survive another user's password change"
+    );
+    let bystander_sessions_after_password_change: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM office_sessions WHERE user_id = ?")
+            .bind(&second_id)
+            .fetch_one(&admin.app.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(bystander_sessions_after_password_change, 1);
+
     let tech_token = login(&admin.app, &admin.key, "tech", "another long password").await;
     let (_, list) = admin.call("GET", "/v1/office/users", None).await;
     let rev = list
@@ -685,6 +780,28 @@ async fn deactivation_and_password_changes_end_the_users_sessions() {
         )))
         .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    // The bystander's session also survives tech's deactivation.
+    let (status, _) = admin
+        .app
+        .send(empty(with_session(
+            request("GET", "/v1/office/me"),
+            &admin.key,
+            &second_token,
+        )))
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "an unrelated user's session must survive another user's deactivation"
+    );
+    let bystander_sessions_after_deactivation: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM office_sessions WHERE user_id = ?")
+            .bind(&second_id)
+            .fetch_one(&admin.app.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(bystander_sessions_after_deactivation, 1);
 }
 
 #[tokio::test]
@@ -736,4 +853,84 @@ async fn admin_changing_their_own_password_keeps_the_callers_session() {
             .await
             .unwrap();
     assert_eq!(remaining, 0, "the other device's session row must be gone");
+}
+
+/// `require_admin_in` re-reads the caller's session and role inside the
+/// transaction, not the (possibly stale) values the `OfficeContext` extractor
+/// captured before the request began hashing a password. Built directly
+/// against the auth API, bypassing HTTP, so the scenario is deterministic:
+/// no race against a concurrent hashing request is needed to prove the
+/// recheck runs.
+#[tokio::test]
+async fn require_admin_in_rechecks_role_and_session_inside_the_transaction() {
+    use axum::response::IntoResponse;
+    use http_body_util::BodyExt;
+    use markiro_host::auth::OfficeContext;
+    use markiro_proto::{OfficeRole, OfficeUser};
+
+    async fn error_body(error: markiro_host::error::ApiError) -> (StatusCode, Value) {
+        let response = error.into_response();
+        let status = response.status();
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        (status, serde_json::from_slice(&bytes).unwrap())
+    }
+
+    let admin = admin().await;
+    let session_id: String = sqlx::query_scalar("SELECT id FROM office_sessions WHERE user_id = ?")
+        .bind(&admin.id)
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let context = OfficeContext {
+        device_id: "unused-by-require-admin-in".to_owned(),
+        session_id: session_id.clone(),
+        user: OfficeUser {
+            id: admin.id.clone(),
+            login: "admin".to_owned(),
+            name: "Ирина Смирнова".to_owned(),
+            role: OfficeRole::Admin,
+        },
+    };
+
+    // 1. The user was demoted after the extractor ran (e.g. by another admin,
+    //    while this request was still hashing a password): the transaction
+    //    must see the fresh role and refuse the write with 403, not the
+    //    "still an admin" the extractor captured.
+    sqlx::query("UPDATE office_users SET role = 'technologist' WHERE id = ?")
+        .bind(&admin.id)
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let mut tx = markiro_host::db::begin_write(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let error = context.require_admin_in(&mut tx).await.unwrap_err();
+    tx.rollback().await.unwrap();
+    let (status, body) = error_body(error).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["error"]["code"], "forbidden");
+
+    sqlx::query("UPDATE office_users SET role = 'admin' WHERE id = ?")
+        .bind(&admin.id)
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+
+    // 2. The session was ended after the extractor ran (e.g. a logout from
+    //    another request racing this one): the transaction finds no row and
+    //    refuses with a session-credential 401.
+    sqlx::query("DELETE FROM office_sessions WHERE id = ?")
+        .bind(&session_id)
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let mut tx = markiro_host::db::begin_write(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let error = context.require_admin_in(&mut tx).await.unwrap_err();
+    tx.rollback().await.unwrap();
+    let (status, body) = error_body(error).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["error"]["code"], "unauthorized");
+    assert_eq!(body["error"]["details"]["credential"], "session");
 }

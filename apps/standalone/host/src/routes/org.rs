@@ -61,6 +61,7 @@ pub async fn put_org(
     )?;
     let at = state.timestamp();
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
+    context.require_admin_in(&mut tx).await?;
     let current = read_org(&mut tx).await?;
     if current.rev != update.expected_rev {
         return Err(ApiError::stale_revision(current.rev));

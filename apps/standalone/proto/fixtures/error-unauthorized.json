@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "unauthorized",
+    "message": "office session expired",
+    "details": { "credential": "session" }
+  }
+}

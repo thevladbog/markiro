@@ -44,6 +44,15 @@ pub mod codes {
     pub const INTERNAL: &str = "internal";
 }
 
+/// Values of an `unauthorized` error's `details.credential`: which credential
+/// the request failed on, so the client can tell "re-pair this device" from
+/// "sign in again" from "wrong password" (spec §4.6).
+pub mod credentials {
+    pub const DEVICE: &str = "device";
+    pub const SESSION: &str = "session";
+    pub const PASSWORD: &str = "password";
+}
+
 /// Lower-case hex SHA-256 of a certificate's DER: the value devices pin and
 /// the pairing payload carries.
 pub fn certificate_fingerprint(der: &[u8]) -> String {
@@ -339,8 +348,11 @@ pub struct SsccState {
     pub counters: Vec<SsccCounter>,
     pub box_block_size: u32,
     pub pallet_block_size: u32,
-    /// Revision of the block sizes (site settings).
-    pub rev: i64,
+    /// The issuer prefix derived from the organization's current GLN
+    /// (`validate::issuer_prefix`), so the UI never re-derives the rule.
+    pub current_issuer_prefix: String,
+    /// Revision of the block sizes (site settings), not of the whole state.
+    pub block_sizes_rev: i64,
 }
 
 /// `PUT /v1/office/sscc/counters/{prefix}/{extension}`: move a counter forward.

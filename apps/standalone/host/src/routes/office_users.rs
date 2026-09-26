@@ -86,6 +86,7 @@ pub async fn create_user(
     let at = state.timestamp();
     let id = uuid::Uuid::new_v4().to_string();
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
+    context.require_admin_in(&mut tx).await?;
     let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
     let inserted = sqlx::query(
         "INSERT INTO office_users (id, login, name, role, password_phc, active, created_at, rev) \
@@ -139,6 +140,7 @@ pub async fn update_user(
     let name = validate::person_name("name", &update.name)?;
     let at = state.timestamp();
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
+    context.require_admin_in(&mut tx).await?;
     let current = read_user(&mut tx, &id)
         .await?
         .ok_or_else(|| ApiError::not_found("no such office user"))?;
@@ -228,6 +230,7 @@ pub async fn set_password(
     let password_phc = hash(body.password).await?;
     let at = state.timestamp();
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
+    context.require_admin_in(&mut tx).await?;
     if read_user(&mut tx, &id).await?.is_none() {
         return Err(ApiError::not_found("no such office user"));
     }
