@@ -1,0 +1,57 @@
+---
+import { Picture } from "astro:assets";
+
+import { posterFor } from "../../content/film-posters";
+import { homeScreen } from "../../content/home-images";
+import type { Locale } from "../../content/pages";
+import { getUiCopy } from "../../content/ui";
+import ScreenFrame from "./ScreenFrame.astro";
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const copy = getUiCopy(locale).home.offline;
+---
+
+<section class="section home-offline" id="offline" data-theme="dark" aria-labelledby="offline-title">
+  <div class="container home-offline__grid">
+    <div>
+      <p class="section-index">{copy.kicker}</p>
+      <h2 id="offline-title" class="display-heading display-heading--sentence">
+        {copy.heading[0]}<br />{copy.heading[1]}
+      </h2>
+      <p class="section-lead">{copy.lead}</p>
+      <ul class="home-offline__points">
+        {copy.points.map(([title, text], index) => (
+          <li>
+            <span class="home-offline__number" aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>
+            <div>
+              <h3>{title}</h3>
+              <p>{text}</p>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+    <div class="home-offline__visual">
+      <Picture
+        src={posterFor("offline").wide}
+        alt={copy.imageAlt}
+        widths={[720, 1080, 1440]}
+        formats={["avif", "webp"]}
+        sizes="(max-width: 1023px) 100vw, 42.5rem"
+        loading="lazy"
+        class="home-offline__scene"
+      />
+      <ScreenFrame
+        image={homeScreen(locale, "station-offline")}
+        alt={copy.screenAlt}
+        caption={copy.caption}
+        widths={[480, 960]}
+        sizes="(max-width: 1023px) 60vw, 28.75rem"
+      />
+    </div>
+  </div>
+</section>

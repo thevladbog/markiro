@@ -1,22 +1,22 @@
 ---
 import type { SeoPageDefinition } from "../content/pages";
-import { getUiCopy } from "../content/ui";
 import { readPublicSiteConfig } from "../lib/site-config";
 import { buildPageGraph } from "../lib/seo";
 import BaseLayout from "../layouts/BaseLayout.astro";
 import "../styles/home.css";
 import DemoSection from "./DemoSection.astro";
 import HomeMaterials from "./HomeMaterials.astro";
+import HomeFilmBlock from "./home/HomeFilmBlock.astro";
 import HomeMapHero from "./home/HomeMapHero.astro";
+import HomeOffline from "./home/HomeOffline.astro";
 import HomeProduct from "./home/HomeProduct.astro";
+import HomeTraceability from "./home/HomeTraceability.astro";
 import ImplementationSteps from "./ImplementationSteps.astro";
 import LandingFooter from "./LandingFooter.astro";
 import LandingHeader from "./LandingHeader.astro";
-import TraceLog from "./TraceLog.astro";
 
 interface Props { page: SeoPageDefinition }
 const { page } = Astro.props;
-const copy = getUiCopy(page.locale);
 const siteConfig = readPublicSiteConfig(
   {
     PUBLIC_DEMO_SUBMISSION_ENABLED: import.meta.env.PUBLIC_DEMO_SUBMISSION_ENABLED,
@@ -35,25 +35,9 @@ const siteConfig = readPublicSiteConfig(
 
     <HomeProduct locale={page.locale} />
 
-    <section class="section section--continuity" id="continuity" aria-labelledby="continuity-title">
-      <div class="container">
-        <div class="continuity-statement" data-reveal>
-          <span aria-hidden="true"></span>
-          <div>
-            <p class="section-index">{copy.home.continuity.kicker}</p>
-            <h2 id="continuity-title">{copy.home.continuity.heading[0]}<br />{copy.home.continuity.heading[1]}</h2>
-            <p>{copy.home.continuity.lead}</p>
-          </div>
-        </div>
-        <div class="continuity-points" data-reveal-group>
-          {copy.home.continuity.points.map(([title, description], index) => (
-            <article data-reveal><span>{String(index + 1).padStart(2, "0")}</span><h3>{title}</h3><p>{description}</p></article>
-          ))}
-        </div>
-      </div>
-    </section>
-
-    <TraceLog locale={page.locale} />
+    <HomeOffline locale={page.locale} />
+    <HomeTraceability locale={page.locale} />
+    <HomeFilmBlock locale={page.locale} />
     <ImplementationSteps locale={page.locale} />
     <HomeMaterials locale={page.locale} />
     <DemoSection

@@ -1155,9 +1155,10 @@ describe("rendered landing page", () => {
 
     for (const sectionId of [
       "hero",
-      "continuity",
       "product",
+      "offline",
       "traceability",
+      "film",
       "implementation",
       "demo",
     ]) {
@@ -1209,6 +1210,25 @@ describe("rendered landing page", () => {
         expect(image.getAttribute("loading")).toBe("lazy");
       }
       expect(section?.textContent ?? "").not.toMatch(/НАСТОЯЩИЙ ЭКРАН|REAL SCREEN/u);
+    }
+  });
+
+  it("renders the offline, traceability and film sections", () => {
+    for (const [route, filmPath] of [
+      ["/", "/kak-rabotaet/"],
+      ["/en/", "/en/how-it-works/"],
+    ] as const) {
+      const page = documents.get(route);
+      const offline = page?.querySelector("section#offline");
+      expect(offline?.getAttribute("data-theme"), route).toBe("dark");
+      expect(offline?.querySelectorAll(".home-offline__points li")).toHaveLength(3);
+      expect(offline?.querySelectorAll("img[alt]")).toHaveLength(2);
+      expect(
+        page?.querySelector("section#traceability figure.screen-frame img[alt]"),
+      ).not.toBeNull();
+      const panel = page?.querySelector("section#film [data-theme='dark']");
+      expect(panel?.querySelector("a.button")?.getAttribute("href")).toBe(filmPath);
+      expect(panel?.querySelector("img[alt]")).not.toBeNull();
     }
   });
 
@@ -1363,14 +1383,6 @@ describe("rendered landing page", () => {
     expect(document.documentElement.outerHTML).not.toContain("screenshot-127.0.0.1");
     expect(document.documentElement.outerHTML).not.toContain("+7 800 555");
     expect(document.querySelector('a[href^="tel:"]')).toBeNull();
-  });
-
-  it("does not expose a fake retry control in the illustrative event log", () => {
-    expect(
-      [...document.querySelectorAll("button")].find(
-        (button) => button.textContent?.trim() === "Повторить печать",
-      ),
-    ).toBeUndefined();
   });
 
   it("ships an Apple touch icon and links it from every page", () => {

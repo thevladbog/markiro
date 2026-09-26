@@ -588,3 +588,212 @@
     top: 11.75rem;
   }
 }
+
+/* Dark parts of the light page. `color` is inherited already computed from the light body, so a
+   dark part sets it again from its own tokens. The light page darkens the button hover
+   (landing.css); dark parts keep the dark theme's hover. */
+.home [data-theme="dark"] {
+  color: var(--fg-1);
+  color-scheme: dark;
+}
+
+.home [data-theme="dark"] .button:hover {
+  border-color: var(--accent-strong);
+  background: var(--accent-strong);
+}
+
+/* 02 Without a network */
+
+.home-offline {
+  padding-block: 7rem;
+  background: var(--surface-page);
+}
+
+.home-offline__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 31.25rem) minmax(0, 1fr);
+  align-items: start;
+  gap: 4.5rem;
+}
+
+.home-offline__points {
+  display: grid;
+  margin: 2rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.home-offline__points li {
+  display: flex;
+  gap: 1rem;
+  padding-block: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.home-offline__number {
+  flex: none;
+  color: var(--fg-3);
+  font: 500 0.75rem / 1.6 var(--font-mono);
+}
+
+.home-offline__points h3 {
+  margin: 0;
+  font: 600 1rem / 1.3 var(--font-ui);
+}
+
+.home-offline__points p {
+  margin: 0.25rem 0 0;
+  color: var(--fg-2);
+  font: 400 0.9375rem / 1.45 var(--font-ui);
+}
+
+/* The sunset scene with the station's offline screen over its lower left. */
+.home-offline__visual {
+  position: relative;
+  padding-bottom: 7rem;
+}
+
+.home-offline__visual > picture {
+  display: block;
+}
+
+.home-offline__scene {
+  display: block;
+  width: calc(100% - 2.5rem);
+  height: auto;
+  margin-left: 2.5rem;
+  border-radius: 6px;
+}
+
+.home-offline__visual .screen-frame {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 61%;
+  justify-items: start;
+}
+
+.home-offline .home-caption {
+  padding: 0.3125rem 0.5625rem;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: var(--surface-card);
+}
+
+/* 03 Traceability */
+
+.home-traceability {
+  padding-block: 7rem;
+}
+
+.home-traceability__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 30rem);
+  align-items: center;
+  gap: 4.5rem;
+}
+
+.home-traceability .screen-frame {
+  order: -1;
+  justify-items: start;
+}
+
+/* 04 The film: a dark panel inside the light page. */
+
+.home .home-film {
+  padding-block: 0 7rem;
+  border-top: 0;
+}
+
+.home-film__panel {
+  display: grid;
+  grid-template-columns: minmax(0, 28.75rem) minmax(0, 1fr);
+  min-height: 33.75rem;
+  overflow: hidden;
+  border-radius: var(--r-2);
+  background: var(--surface-page);
+}
+
+.home-film__text {
+  display: grid;
+  align-content: center;
+  justify-items: start;
+  gap: 1.25rem;
+  padding: 3.5rem;
+}
+
+.home-film__text .section-index {
+  margin: 0;
+}
+
+.home-film h2 {
+  margin: 0;
+  font: 700 clamp(1.75rem, 2.5vw, 2.25rem) / 1.1 var(--font-ui);
+  letter-spacing: -0.03em;
+}
+
+.home-film__lead {
+  margin: 0;
+  color: var(--fg-2);
+  font: 400 1.0625rem / 1.55 var(--font-ui);
+}
+
+.home-film__panel .button {
+  border-color: var(--fg-1);
+  background: var(--fg-1);
+  color: var(--fg-on-inverse);
+}
+
+.home .home-film__panel .button:hover {
+  border-color: var(--fg-2);
+  background: var(--fg-2);
+}
+
+.home-film__panel > picture {
+  display: block;
+}
+
+.home-film__image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+@media (max-width: 1023px) {
+  .home-offline__grid,
+  .home-traceability__grid,
+  .home-film__panel {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 3rem;
+  }
+
+  .home-traceability .screen-frame {
+    order: 0;
+  }
+
+  .home-film__panel {
+    gap: 0;
+    min-height: 0;
+  }
+
+  .home-film__image {
+    height: auto;
+    aspect-ratio: 16 / 10;
+  }
+}
+
+@media (max-width: 767px) {
+  .home-offline,
+  .home-traceability {
+    padding-block: 4.5rem;
+  }
+
+  .home .home-film {
+    padding-bottom: 4.5rem;
+  }
+
+  .home-film__text {
+    padding: 2rem 1.25rem;
+  }
+}

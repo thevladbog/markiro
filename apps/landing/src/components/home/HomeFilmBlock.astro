@@ -1,0 +1,37 @@
+---
+import { Picture } from "astro:assets";
+
+import { findFilmPage } from "../../content/film";
+import { HOME_FILM_PAGE_IMAGE } from "../../content/home-images";
+import type { Locale } from "../../content/pages";
+import { getUiCopy } from "../../content/ui";
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const copy = getUiCopy(locale).home.filmBlock;
+---
+
+<section class="section home-film" id="film" aria-labelledby="film-title">
+  <div class="container">
+    <div class="home-film__panel" data-theme="dark">
+      <div class="home-film__text">
+        <p class="section-index">{copy.kicker}</p>
+        <h2 id="film-title">{copy.heading}</h2>
+        <p class="home-film__lead">{copy.lead}</p>
+        <a class="button" href={findFilmPage(locale).path}>{copy.button} <span aria-hidden="true">→</span></a>
+      </div>
+      <Picture
+        src={HOME_FILM_PAGE_IMAGE}
+        alt={copy.imageAlt}
+        widths={[880, 1320, 1760]}
+        formats={["avif", "webp"]}
+        sizes="(max-width: 1023px) 100vw, 46rem"
+        loading="lazy"
+        class="home-film__image"
+      />
+    </div>
+  </div>
+</section>
