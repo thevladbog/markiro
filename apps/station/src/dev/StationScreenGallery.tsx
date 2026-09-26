@@ -84,6 +84,12 @@ import {
   galleryProductImageExecutor,
   galleryProductImageFor,
 } from "./gallery-product-image.js";
+import {
+  GalleryProfileContext,
+  galleryProfile,
+  useGalleryProfile,
+  type GalleryProfile,
+} from "./gallery-profile.js";
 
 /**
  * The second card on every page carries a studio photo (shot on white) and the
@@ -139,6 +145,7 @@ const COPY = {
 export function StationScreenGallery({ request }: StationScreenGalleryProps) {
   const fixture = getGalleryFixture(request.state);
   const copy = COPY[request.locale];
+  const profile = galleryProfile(request.profile ?? "instructions", request.locale);
 
   useLayoutEffect(() => {
     void i18n.changeLanguage(request.locale);
@@ -155,14 +162,16 @@ export function StationScreenGallery({ request }: StationScreenGalleryProps) {
     // clip the PIN keypad's last row (login) or show chrome the pairing
     // screen never has -- a capture artifact the real screens never have.
     return (
-      <div
-        className="station-gallery-capture station-window-frame"
-        data-testid="station-screen-gallery"
-        data-gallery-state={fixture.id}
-        data-gallery-locale={request.locale}
-      >
-        <GalleryState fixture={fixture} locale={request.locale} />
-      </div>
+      <GalleryProfileContext.Provider value={profile}>
+        <div
+          className="station-gallery-capture station-window-frame"
+          data-testid="station-screen-gallery"
+          data-gallery-state={fixture.id}
+          data-gallery-locale={request.locale}
+        >
+          <GalleryState fixture={fixture} locale={request.locale} />
+        </div>
+      </GalleryProfileContext.Provider>
     );
   }
 
@@ -260,45 +269,47 @@ export function StationScreenGallery({ request }: StationScreenGalleryProps) {
         ),
       };
   return (
-    <div
-      className="station-gallery-capture"
-      data-testid="station-screen-gallery"
-      data-gallery-state={fixture.id}
-      data-gallery-locale={request.locale}
-    >
-      <FloorShell
-        stationName={headerVariant ? copy.longStation : copy.station}
-        lineName={headerVariant ? copy.longLine : copy.line}
-        operatorName={headerVariant ? copy.longOperator : copy.operator}
-        shiftLabel={headerVariant ? copy.longShift : rendersNoShift ? null : copy.shift}
-        serverReachability={syncVariant === "offline" ? "unreachable" : "reachable"}
-        scanner="connected"
-        printerConfigured={fixture.kind !== "setup" || fixture.variant !== "printers-empty"}
-        {...(fixture.kind === "setup" || rendersTaskSelection
-          ? {
-              printerSummary: galleryPrinterSummary(
-                fixture.kind === "setup" ? fixture.variant : "printers",
-                request.locale,
-              ),
-              onOpenPrinters: () => undefined,
-            }
-          : {})}
-        syncPending={syncVariant === "stuck" ? 18 : syncVariant === "offline" ? 7 : 0}
-        syncStuck={syncVariant === "stuck"}
-        conflicts={fixture.kind === "conflicts" ? 4 : 0}
-        statusBarCollapsible={rendersActiveShiftWorkScreen}
-        {...(headerControls
-          ? {
-              update: headerControls.update,
-              onOpenUpdates: () => undefined,
-              operatorControl: headerControls.operatorControl,
-              windowControl: headerControls.windowControl,
-            }
-          : {})}
+    <GalleryProfileContext.Provider value={profile}>
+      <div
+        className="station-gallery-capture"
+        data-testid="station-screen-gallery"
+        data-gallery-state={fixture.id}
+        data-gallery-locale={request.locale}
       >
-        <GalleryState fixture={fixture} locale={request.locale} />
-      </FloorShell>
-    </div>
+        <FloorShell
+          stationName={headerVariant ? copy.longStation : profile.station}
+          lineName={headerVariant ? copy.longLine : profile.line}
+          operatorName={headerVariant ? copy.longOperator : profile.operator}
+          shiftLabel={headerVariant ? copy.longShift : rendersNoShift ? null : profile.shift}
+          serverReachability={syncVariant === "offline" ? "unreachable" : "reachable"}
+          scanner="connected"
+          printerConfigured={fixture.kind !== "setup" || fixture.variant !== "printers-empty"}
+          {...(fixture.kind === "setup" || rendersTaskSelection
+            ? {
+                printerSummary: galleryPrinterSummary(
+                  fixture.kind === "setup" ? fixture.variant : "printers",
+                  request.locale,
+                ),
+                onOpenPrinters: () => undefined,
+              }
+            : {})}
+          syncPending={syncVariant === "stuck" ? 18 : syncVariant === "offline" ? 7 : 0}
+          syncStuck={syncVariant === "stuck"}
+          conflicts={fixture.kind === "conflicts" ? 4 : 0}
+          statusBarCollapsible={rendersActiveShiftWorkScreen}
+          {...(headerControls
+            ? {
+                update: headerControls.update,
+                onOpenUpdates: () => undefined,
+                operatorControl: headerControls.operatorControl,
+                windowControl: headerControls.windowControl,
+              }
+            : {})}
+        >
+          <GalleryState fixture={fixture} locale={request.locale} />
+        </FloorShell>
+      </div>
+    </GalleryProfileContext.Provider>
   );
 }
 
@@ -1747,8 +1758,8 @@ function WorkFixture({
   locale: GalleryLocale;
   productLabel?: { job: ProductLabelJobView | null; busy: boolean };
 }) {
+  const profile = useGalleryProfile();
   const [showPalletContents, setShowPalletContents] = useState(false);
-  const ru = locale === "ru";
   const t = i18n.getFixedT(locale);
   // "box-full" is a filled box moments before it closes -- still an ordinary
   // scanning shift, just with the box panel at capacity, so it shares the
@@ -1765,7 +1776,7 @@ function WorkFixture({
   // `SignalFixture`).
   const waiting = mode === "validation" || mode === "aggregation-waiting";
   const workLabels = buildWorkLabels(t, locale, 1);
-  const operations = waiting ? [] : galleryRecentOperations();
+  const operations = waiting ? [] : galleryRecentOperations(profile.serial);
   // Validation-mode shifts carry a plan target the way the shift list's own
   // validation-mode card does (see ShiftFixture's AUG26-041); aggregation-mode
   // shifts in this gallery have no plan, matching the shift list there too.
@@ -1782,7 +1793,7 @@ function WorkFixture({
   // owner's 20-place box.
   const boxCapacity = boxFull ? 120 : pallet20 ? 20 : 10;
   const boxItemCount = boxFull ? 120 : 2;
-  const productName = ru ? "Тестовый товар А" : "Sample product A";
+  const productName = profile.productName;
   const total = shiftTotalView({
     shiftId: "gallery-shift",
     snapshot: pallet20
@@ -1810,7 +1821,7 @@ function WorkFixture({
             productId="gallery-product-berry-syrup"
             image={galleryProductImage}
             productName={productName}
-            counterpartyName={ru ? "ООО «Тестовый производитель»" : "Sample Manufacturer Ltd"}
+            counterpartyName={profile.counterpartyName}
             gtin="04607000000042"
             total={total}
             locale={workLabels.locale}
@@ -1903,7 +1914,7 @@ function WorkFixture({
   );
 }
 
-function galleryRecentOperations(): RecentOperation[] {
+function galleryRecentOperations(serial: GalleryProfile["serial"]): RecentOperation[] {
   const identityForSerial = (serial: string) => {
     const crypto = [
       { ai: "91" as const, value: "ABCD" },
@@ -1928,7 +1939,7 @@ function galleryRecentOperations(): RecentOperation[] {
     verdict: "ok",
     scannedAt: `2026-08-13T14:32:0${8 - index}+03:00`,
     codeSuffix: null,
-    identity: identityForSerial(`DEMO-SERIAL-00012${8 - index}`),
+    identity: identityForSerial(serial(128 - index)),
   }));
 }
 
@@ -2391,40 +2402,45 @@ interface GalleryConflictRow {
   serial: string | null;
 }
 
-const GALLERY_CONFLICT_ROWS: GalleryConflictRow[] = [
-  {
-    code_hash: "gallery-conflict-1",
-    winning_terminal_id: "DEMO-TERM-11",
-    winning_scanned_at: "2026-08-21T09:14:22+03:00",
-    detected_at: "2026-08-21T09:15:03+03:00",
-    gtin14: "04607000000042",
-    serial: "DEMO-SERIAL-000128",
-  },
-  {
-    code_hash: "gallery-conflict-2",
-    winning_terminal_id: "DEMO-TERM-12",
-    winning_scanned_at: "2026-08-21T09:18:47+03:00",
-    detected_at: "2026-08-21T09:19:10+03:00",
-    gtin14: "04607000000042",
-    serial: "DEMO-SERIAL-000129",
-  },
-  {
-    code_hash: "gallery-conflict-3",
-    winning_terminal_id: "DEMO-TERM-21",
-    winning_scanned_at: "2026-08-21T10:02:31+03:00",
-    detected_at: "2026-08-21T10:03:05+03:00",
-    gtin14: "04607000000042",
-    serial: "DEMO-SERIAL-000130",
-  },
-  {
-    code_hash: "gallery-conflict-4",
-    winning_terminal_id: "DEMO-TERM-22",
-    winning_scanned_at: "2026-08-21T10:07:58+03:00",
-    detected_at: "2026-08-21T10:08:40+03:00",
-    gtin14: "04607000000042",
-    serial: "DEMO-SERIAL-000131",
-  },
-];
+/** The four conflict rows the gallery shows, keyed to the active profile's
+ * serial/terminal generators so "landing" never leaks the instructions
+ * profile's `DEMO-*` literals. */
+function galleryConflictRows(profile: GalleryProfile): GalleryConflictRow[] {
+  return [
+    {
+      code_hash: "gallery-conflict-1",
+      winning_terminal_id: profile.terminal(11),
+      winning_scanned_at: "2026-08-21T09:14:22+03:00",
+      detected_at: "2026-08-21T09:15:03+03:00",
+      gtin14: "04607000000042",
+      serial: profile.serial(128),
+    },
+    {
+      code_hash: "gallery-conflict-2",
+      winning_terminal_id: profile.terminal(12),
+      winning_scanned_at: "2026-08-21T09:18:47+03:00",
+      detected_at: "2026-08-21T09:19:10+03:00",
+      gtin14: "04607000000042",
+      serial: profile.serial(129),
+    },
+    {
+      code_hash: "gallery-conflict-3",
+      winning_terminal_id: profile.terminal(21),
+      winning_scanned_at: "2026-08-21T10:02:31+03:00",
+      detected_at: "2026-08-21T10:03:05+03:00",
+      gtin14: "04607000000042",
+      serial: profile.serial(130),
+    },
+    {
+      code_hash: "gallery-conflict-4",
+      winning_terminal_id: profile.terminal(22),
+      winning_scanned_at: "2026-08-21T10:07:58+03:00",
+      detected_at: "2026-08-21T10:08:40+03:00",
+      gtin14: "04607000000042",
+      serial: profile.serial(131),
+    },
+  ];
+}
 
 /** Answers exactly the two queries `readConflicts` issues (see
  * `apps/station/src/lib/conflicts.ts`), so `ConflictList` -- the real
@@ -2432,8 +2448,8 @@ const GALLERY_CONFLICT_ROWS: GalleryConflictRow[] = [
  * "loading" never resolves, reproducing the interstitial for a static
  * capture; "read-error" rejects the count query the way a corrupt local
  * mirror would. */
-function galleryConflictExecutor(variant: string): SqlExecutor {
-  const rows = variant === "empty" ? [] : GALLERY_CONFLICT_ROWS;
+function galleryConflictExecutor(variant: string, profile: GalleryProfile): SqlExecutor {
+  const rows = variant === "empty" ? [] : galleryConflictRows(profile);
   return {
     run: () => Promise.resolve(),
     all<T>(sql: string, params?: unknown[]): Promise<T[]> {
@@ -2463,7 +2479,8 @@ function galleryConflictExecutor(variant: string): SqlExecutor {
  */
 function ConflictFixture({ variant, locale }: { variant: string; locale: GalleryLocale }) {
   const rootRef = useRef<HTMLDivElement>(null);
-  const exec = useMemo(() => galleryConflictExecutor(variant), [variant]);
+  const profile = useGalleryProfile();
+  const exec = useMemo(() => galleryConflictExecutor(variant, profile), [variant, profile]);
 
   useLayoutEffect(() => {
     if (variant !== "2") return;

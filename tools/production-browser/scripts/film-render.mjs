@@ -14,7 +14,7 @@ export const SCENE_ONLY = `
 
 export const HIDE_CONSENT = "[data-consent-panel] { display: none !important; }";
 
-async function waitForServer(url, child) {
+export async function waitForServer(url, child) {
   for (let attempt = 0; attempt < 240; attempt += 1) {
     if (child.exitCode !== null) throw new Error("landing server exited early");
     try {
