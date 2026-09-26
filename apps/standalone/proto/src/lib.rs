@@ -28,7 +28,10 @@ pub mod codes {
 /// Lower-case hex SHA-256 of a certificate's DER: the value devices pin and
 /// the pairing payload carries.
 pub fn certificate_fingerprint(der: &[u8]) -> String {
-    Sha256::digest(der).iter().map(|byte| format!("{byte:02x}")).collect()
+    Sha256::digest(der)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 /// `GET /v1/hello`: who answers, which protocol range it understands, and
@@ -67,7 +70,11 @@ pub struct ErrorDetail {
 impl ErrorBody {
     pub fn new(code: &str, message: impl Into<String>) -> Self {
         Self {
-            error: ErrorDetail { code: code.to_owned(), message: message.into(), details: None },
+            error: ErrorDetail {
+                code: code.to_owned(),
+                message: message.into(),
+                details: None,
+            },
         }
     }
 }

@@ -1,10 +1,13 @@
-use markiro_proto::{certificate_fingerprint, codes, ErrorBody, Hello, HOST_PRODUCT, PROTOCOL_VERSION};
+use markiro_proto::{
+    certificate_fingerprint, codes, ErrorBody, Hello, HOST_PRODUCT, PROTOCOL_VERSION,
+};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
 
 fn fixture(name: &str) -> Value {
     let path = format!("{}/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
-    let text = std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("read {path}: {error}"));
+    let text =
+        std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("read {path}: {error}"));
     serde_json::from_str(&text).unwrap_or_else(|error| panic!("parse {path}: {error}"))
 }
 
@@ -13,7 +16,11 @@ fn round_trip<T: DeserializeOwned + Serialize>(name: &str) -> T {
     let original = fixture(name);
     let typed: T =
         serde_json::from_value(original.clone()).unwrap_or_else(|error| panic!("{name}: {error}"));
-    assert_eq!(serde_json::to_value(&typed).unwrap(), original, "{name} changed on round trip");
+    assert_eq!(
+        serde_json::to_value(&typed).unwrap(),
+        original,
+        "{name} changed on round trip"
+    );
     typed
 }
 
