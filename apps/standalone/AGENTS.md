@@ -46,10 +46,11 @@ compatibility (`host_too_old`, `app_too_old`) before parsing the rest.
 ## Network and TLS
 
 The webview never performs HTTP. Rust calls the host with the aws-lc-rs
-provider selected explicitly and verifies the pinned certificate fingerprint
-(`markiro_proto::certificate_fingerprint`). `host_probe` accepts any
-certificate and exists only to discover a host before a person or a pairing
-code confirms the fingerprint.
+provider selected explicitly. Authenticated calls (from plan 1c) verify the
+pinned certificate fingerprint (`markiro_proto::certificate_fingerprint`);
+today only `host_probe` exists, and it observes a fingerprint without
+trusting it. `host_probe` accepts any certificate and exists only to
+discover a host before a person or a pairing code confirms the fingerprint.
 
 ## Marking rules
 
@@ -69,6 +70,6 @@ hash or the TLS private key.
   Tauri crate needs `apps/standalone/dist`: build the webview first with
   `pnpm turbo run build --filter='@markiro/standalone...'`.
 - `pnpm --filter @markiro/standalone test`, `typecheck`, `lint`, `build`.
-- The Windows service (and later DPAPI and kiosk mode) is exercised only by
-  the `standalone-windows-build` job and manual checks; a host run on macOS
-  proves none of it.
+- The Windows service (and later DPAPI and kiosk mode) is only compiled by
+  the `standalone-windows-build` job; running it needs a manual check on
+  Windows; a host run on macOS proves none of it.
