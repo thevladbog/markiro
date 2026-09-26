@@ -9,6 +9,7 @@ import {
 } from "../src/dev/gallery-fixtures.js";
 import { shouldRenderGallery } from "../src/dev/gallery-guard.js";
 import { StationScreenGallery } from "../src/dev/StationScreenGallery.js";
+import i18n from "../src/i18n/index.js";
 import { PERSISTENT_GALLERY_STATE_IDS } from "../src/ui/persistent-station-states.js";
 
 afterEach(() => {
@@ -704,6 +705,49 @@ describe("development screen gallery", () => {
       expect(view.container.textContent).toContain(expectedCopy);
     });
   });
+
+  // The printed operator instructions (MKR-INS-01) capture this state, so it
+  // must read like production ShiftSelection, not like a stand-in.
+  it.each(["ru", "en"] as const)(
+    "renders the shift list with the production footer, pager and card labels in %s",
+    (locale) => {
+      const t = i18n.getFixedT(locale);
+      render(<StationScreenGallery request={{ state: "shift-page-1", locale }} />);
+
+      const footer = screen.getByRole("contentinfo", { name: t("shifts.actions") });
+      expect(
+        within(footer)
+          .getAllByRole("button")
+          .map((button) => button.textContent),
+      ).toEqual([t("shifts.new"), t("shifts.refresh"), t("shell.setup"), t("shell.conflicts")]);
+
+      const pager = screen.getByRole("navigation", { name: t("shifts.pagination") });
+      expect(
+        within(pager)
+          .getAllByRole("button")
+          .map((button) => button.textContent),
+      ).toEqual([t("shifts.previousPage"), t("shifts.nextPage")]);
+      expect(pager.textContent).toContain(t("shifts.page", { page: 1, pageCount: 2 }));
+
+      for (const label of [
+        t("shifts.validation"),
+        t("shifts.aggregation"),
+        t("shifts.notStarted"),
+        t("shifts.active"),
+        t("shifts.open"),
+        t("shifts.rejoin"),
+      ]) {
+        expect(screen.getAllByText(label).length).toBeGreaterThan(0);
+      }
+
+      // With no floor task active, App.tsx makes the printer summary a button.
+      const statusBar = screen.getByRole("banner", { name: t("shell.statusBar") });
+      const printers = within(statusBar).getByRole("button", {
+        name: new RegExp(`^${t("setup.printer")}:`),
+      });
+      expect(printers.textContent).toContain("3 / 3");
+    },
+  );
 
   it("renders deterministic installed metadata in the current-version gallery", async () => {
     render(<StationScreenGallery request={{ state: "update-current", locale: "ru" }} />);

@@ -206,7 +206,7 @@ export const STATION_INVENTORY_COUNT_CONTENT = {
           {
             kind: "step",
             title: "Если этикетка не напечатана",
-            text: "Терминал сообщит причину: «В задании нет шаблона этикетки», «Принтер не настроен», «Не удалось подготовить этикетку» или «Принтер не подтвердил печать». Устраните причину (лента, кабель, замятие) и нажмите «Повторить печать»; кнопка «Настроить принтер» открывает настройку рабочего места.",
+            text: "Терминал сообщит причину: «В задании нет шаблона этикетки», «Принтер не настроен», «Не удалось подготовить этикетку» или «Принтер не подтвердил печать». Устраните причину (лента, кабель, замятие) и нажмите «Повторить печать»; кнопка «Настроить принтер» открывает настройку рабочего места. Над кнопками указан принтер этой этикетки: чтобы напечатать её на другом принтере станции, нажмите «Сменить принтер», выберите принтер и нажмите «Использовать для этой этикетки».",
             image: { id: "print-recovery", caption: "Этикетка не напечатана: повтор печати" },
           },
           {
@@ -497,7 +497,7 @@ export const STATION_INVENTORY_COUNT_CONTENT = {
           {
             kind: "step",
             title: "If the label was not printed",
-            text: "The terminal reports the cause: “The task has no label template”, “Printer is not configured”, “Could not prepare the label” or “The printer did not confirm printing”. Fix the cause (ribbon, cable, jam) and tap “Retry printing”; the “Configure printer” button opens the workstation setup.",
+            text: "The terminal reports the cause: “The task has no label template”, “Printer is not configured”, “Could not prepare the label” or “The printer did not confirm printing”. Fix the cause (ribbon, cable, jam) and tap “Retry printing”; the “Configure printer” button opens the workstation setup. The label's printer is shown above the buttons: to print the label on another printer of the station, tap “Change printer”, choose the printer and tap “Use for this label”.",
             image: {
               id: "print-recovery",
               caption: "The label was not printed: retrying the print",

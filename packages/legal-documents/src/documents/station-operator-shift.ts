@@ -78,7 +78,7 @@ export const STATION_OPERATOR_SHIFT_CONTENT = {
           {
             kind: "step",
             title: "Выберите смену из списка",
-            text: "На экране выбора смены найдите нужную смену по номеру, продукту и дате производства и нажмите на её карточку. Открытые смены отображаются первыми.",
+            text: "На экране выбора смены найдите нужную смену по номеру, продукту и дате и нажмите на её карточке «Открыть» — или «Присоединиться», если смена уже идёт. Закрытые смены в списке не показываются.",
             image: {
               id: "shift-select",
               caption: "Список смен: карточки с номером, продуктом и датой",
@@ -242,7 +242,7 @@ export const STATION_OPERATOR_SHIFT_CONTENT = {
           {
             kind: "step",
             title: "Select a shift from the list",
-            text: "On the shift selection screen, find the shift by its number, product and production date, and tap its card. Open shifts are listed first.",
+            text: "On the shift selection screen, find the shift by its number, product and date, and tap “Open” on its card — or “Rejoin” if the shift is already running. Closed shifts are not shown in the list.",
             image: {
               id: "shift-select",
               caption: "Shift list: cards with the number, product and date",

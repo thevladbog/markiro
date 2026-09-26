@@ -121,13 +121,13 @@
   },
   {
     "code": "MKR-INS-01",
-    "revision": "2026.09/02",
+    "revision": "2026.09/03",
     "effectiveDate": "2026-09-26",
     "locale": "en",
     "kind": "pdfa-2b",
-    "fileName": "markiro_mkr-ins-01_2026.09-02_en.pdf",
-    "bytes": 389180,
-    "sha256": "e7d5b645de7dc66f7364c5145c011f8efe121b11ca6c7565ca733447f5cb6ab3",
+    "fileName": "markiro_mkr-ins-01_2026.09-03_en.pdf",
+    "bytes": 399050,
+    "sha256": "bf4e1732fad0e3de87f8db72228345c2f208a24be8674b0dfb4b0638e7fd7505",
     "mediaType": "application/pdf",
     "generator": {
       "docx": "9.7.1",
@@ -137,13 +137,13 @@
   },
   {
     "code": "MKR-INS-01",
-    "revision": "2026.09/02",
+    "revision": "2026.09/03",
     "effectiveDate": "2026-09-26",
     "locale": "ru",
     "kind": "pdfa-2b",
-    "fileName": "markiro_mkr-ins-01_2026.09-02_ru.pdf",
-    "bytes": 378378,
-    "sha256": "759f16f1d47b64cb7b97bec506d92b60dca0b0ce2e29b01b867b144cc0295be9",
+    "fileName": "markiro_mkr-ins-01_2026.09-03_ru.pdf",
+    "bytes": 391658,
+    "sha256": "fdf508518212898ee426f97ead31af251b673e69135e860aafb6b1045d1bee8b",
     "mediaType": "application/pdf",
     "generator": {
       "docx": "9.7.1",
@@ -185,13 +185,13 @@
   },
   {
     "code": "MKR-INS-03",
-    "revision": "2026.09/02",
+    "revision": "2026.09/03",
     "effectiveDate": "2026-09-26",
     "locale": "en",
     "kind": "pdfa-2b",
-    "fileName": "markiro_mkr-ins-03_2026.09-02_en.pdf",
-    "bytes": 471647,
-    "sha256": "1a2a60c85b193c3067f4972dc49281f5545b7bc7cc2023662f3d4187346d1c1a",
+    "fileName": "markiro_mkr-ins-03_2026.09-03_en.pdf",
+    "bytes": 474313,
+    "sha256": "2902093d577927e2c0240ba839087776514e455b75ce3b91e94d3633ab19d99c",
     "mediaType": "application/pdf",
     "generator": {
       "docx": "9.7.1",
@@ -201,77 +201,77 @@
   },
   {
     "code": "MKR-INS-03",
+    "revision": "2026.09/03",
+    "effectiveDate": "2026-09-26",
+    "locale": "ru",
+    "kind": "pdfa-2b",
+    "fileName": "markiro_mkr-ins-03_2026.09-03_ru.pdf",
+    "bytes": 463970,
+    "sha256": "1c86aa9f4428904d41e05fef685ff58a1bc0e48f511e70b82c03409ff9f13e4e",
+    "mediaType": "application/pdf",
+    "generator": {
+      "docx": "9.7.1",
+      "libreOffice": "26.2.5",
+      "veraPdf": "1.30.2"
+    }
+  },
+  {
+    "code": "MKR-INS-04",
+    "revision": "2026.09/01",
+    "effectiveDate": "2026-09-26",
+    "locale": "en",
+    "kind": "pdfa-2b",
+    "fileName": "markiro_mkr-ins-04_2026.09-01_en.pdf",
+    "bytes": 671817,
+    "sha256": "c660c54e1dd6ee441dbce5efc6fe7a50e43763b8ed2d770bf2727652b4876436",
+    "mediaType": "application/pdf",
+    "generator": {
+      "docx": "9.7.1",
+      "libreOffice": "26.2.5",
+      "veraPdf": "1.30.2"
+    }
+  },
+  {
+    "code": "MKR-INS-04",
+    "revision": "2026.09/01",
+    "effectiveDate": "2026-09-26",
+    "locale": "ru",
+    "kind": "pdfa-2b",
+    "fileName": "markiro_mkr-ins-04_2026.09-01_ru.pdf",
+    "bytes": 688646,
+    "sha256": "41922d814b60d820a268d026285e0efa812537521e246ede6ff764bb3f1b2542",
+    "mediaType": "application/pdf",
+    "generator": {
+      "docx": "9.7.1",
+      "libreOffice": "26.2.5",
+      "veraPdf": "1.30.2"
+    }
+  },
+  {
+    "code": "MKR-INS-05",
+    "revision": "2026.09/02",
+    "effectiveDate": "2026-09-26",
+    "locale": "en",
+    "kind": "pdfa-2b",
+    "fileName": "markiro_mkr-ins-05_2026.09-02_en.pdf",
+    "bytes": 1124312,
+    "sha256": "a3a8b3702ca00dc7e6a66ec953863496aa129dfca6c87716b1a57ff622e3e02e",
+    "mediaType": "application/pdf",
+    "generator": {
+      "docx": "9.7.1",
+      "libreOffice": "26.2.5",
+      "veraPdf": "1.30.2"
+    }
+  },
+  {
+    "code": "MKR-INS-05",
     "revision": "2026.09/02",
     "effectiveDate": "2026-09-26",
     "locale": "ru",
     "kind": "pdfa-2b",
-    "fileName": "markiro_mkr-ins-03_2026.09-02_ru.pdf",
-    "bytes": 461129,
-    "sha256": "2d08deb63a0dbb30d06230cd884a3b64a25e4eec1d0df5d70c044adb490bc9b4",
-    "mediaType": "application/pdf",
-    "generator": {
-      "docx": "9.7.1",
-      "libreOffice": "26.2.5",
-      "veraPdf": "1.30.2"
-    }
-  },
-  {
-    "code": "MKR-INS-04",
-    "revision": "2026.08/02",
-    "effectiveDate": "2026-09-01",
-    "locale": "en",
-    "kind": "pdfa-2b",
-    "fileName": "markiro_mkr-ins-04_2026.08-02_en.pdf",
-    "bytes": 543252,
-    "sha256": "0087f6e79d70101b18037e7f82ccf03cca512c2a0a90dd6dc723dc7f7b9c410f",
-    "mediaType": "application/pdf",
-    "generator": {
-      "docx": "9.7.1",
-      "libreOffice": "26.2.5",
-      "veraPdf": "1.30.2"
-    }
-  },
-  {
-    "code": "MKR-INS-04",
-    "revision": "2026.08/02",
-    "effectiveDate": "2026-09-01",
-    "locale": "ru",
-    "kind": "pdfa-2b",
-    "fileName": "markiro_mkr-ins-04_2026.08-02_ru.pdf",
-    "bytes": 530566,
-    "sha256": "f53360adbea28e112b339a59d9f32d6209d0a068a24ded7d87109a6c98f617a0",
-    "mediaType": "application/pdf",
-    "generator": {
-      "docx": "9.7.1",
-      "libreOffice": "26.2.5",
-      "veraPdf": "1.30.2"
-    }
-  },
-  {
-    "code": "MKR-INS-05",
-    "revision": "2026.09/01",
-    "effectiveDate": "2026-09-02",
-    "locale": "en",
-    "kind": "pdfa-2b",
-    "fileName": "markiro_mkr-ins-05_2026.09-01_en.pdf",
-    "bytes": 1124797,
-    "sha256": "291dc37dd53d5a83e9267bebeab2d095b9c48f5be5cdfe90bfa3fdc67affeaaf",
-    "mediaType": "application/pdf",
-    "generator": {
-      "docx": "9.7.1",
-      "libreOffice": "26.2.5",
-      "veraPdf": "1.30.2"
-    }
-  },
-  {
-    "code": "MKR-INS-05",
-    "revision": "2026.09/01",
-    "effectiveDate": "2026-09-02",
-    "locale": "ru",
-    "kind": "pdfa-2b",
-    "fileName": "markiro_mkr-ins-05_2026.09-01_ru.pdf",
-    "bytes": 1056188,
-    "sha256": "03c825a31766e0f29e9257ff31f01c655a9841ce89d9d34c58466f3077fd0148",
+    "fileName": "markiro_mkr-ins-05_2026.09-02_ru.pdf",
+    "bytes": 1056325,
+    "sha256": "befff2736092e8243ae67aca8620e0da671b742b39ae5c68c5fafb8dcf07d62b",
     "mediaType": "application/pdf",
     "generator": {
       "docx": "9.7.1",

@@ -159,8 +159,10 @@ export const STATION_EXCEPTIONS_CONTENT = {
             kind: "unordered-list",
             items: [
               "Сканер показывает «Нет связи» — остановите работу, проверьте кабель сканера. Если связь не вернулась, позовите наладчика.",
+              "«Часть сканеров недоступна» — на рабочем месте несколько сканеров, и один из них отключился. Продолжайте работу подключённым сканером и проверьте кабель второго; если связь не вернулась, позовите наладчика.",
+              "«Клавиатурный» у сканера — станция принимает сканы как ввод с клавиатуры, так работают сканеры в режиме клавиатуры. Это не ошибка; если сканы при этом не доходят до станции, позовите наладчика.",
               "Принтер не печатает — станция сама покажет экран восстановления при закрытии короба (раздел 5). Проверьте ленту, питание и кабель принтера.",
-              "Строка состояния показывает «Не настроено» у сканера или принтера — рабочее место не настроено до конца, работать нельзя, позовите наладчика.",
+              "Индикатор «Принтер» в строке состояния показывает, на сколько из трёх видов этикеток (короб, дубль кода, паллета) назначен принтер, например 2 / 3. Меньше трёх — нормально, если смена эти этикетки не печатает. Если нужной этикетке принтер не назначен, при печати станция покажет «Принтер не настроен» — позовите наладчика.",
             ],
           },
           {
@@ -372,9 +374,11 @@ export const STATION_EXCEPTIONS_CONTENT = {
           {
             kind: "unordered-list",
             items: [
-              "The scanner shows “No connection” — stop working and check the scanner cable. If the connection does not come back, call a technician.",
+              "The scanner shows “No signal” — stop working and check the scanner cable. If the connection does not come back, call a technician.",
+              "“Some scanners disconnected” — the workstation has several scanners and one of them dropped off. Keep working with the connected scanner and check the other one's cable; if the connection does not come back, call a technician.",
+              "“Keyboard” for the scanner — the station receives scans as keyboard input, which is how scanners in keyboard mode work. This is not an error; if scans do not reach the station, call a technician.",
               "The printer does not print — the station itself shows the recovery screen when a box is closed (section 5). Check the printer's ribbon, power and cable.",
-              "The status bar shows “Not configured” for the scanner or the printer — the workstation setup is incomplete, work must not continue; call a technician.",
+              "The “Printer” indicator in the status bar shows how many of the three label types (box, code duplicate, pallet) have a printer assigned, for example 2 / 3. Fewer than three is fine if the shift does not print those labels. If a label the shift needs has no printer, the station shows “Printer is not configured” when printing — call a technician.",
             ],
           },
           {
