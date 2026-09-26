@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { NavLink, Outlet } from "react-router";
+import { NavLink, Outlet, useLocation } from "react-router";
 
 import { Alert, Button, cn, IconButton, Sidebar, useTheme, type SidebarItem } from "@markiro/ui";
 
@@ -15,7 +15,9 @@ export function OfficeShell() {
   const { theme, setTheme } = useTheme();
   const dark = theme === "dark";
   const [passwordOpen, setPasswordOpen] = useState(false);
-  const [passwordChanged, setPasswordChanged] = useState(false);
+  const location = useLocation();
+  // The page the password was changed on; the notice stays on that page only.
+  const [passwordChangedAt, setPasswordChangedAt] = useState<string | null>(null);
   const items = useMemo<SidebarItem[]>(
     () =>
       OFFICE_NAV.filter((item) => item.roles.includes(session.user.role)).map((item) => ({
@@ -59,7 +61,7 @@ export function OfficeShell() {
             <Button
               variant="secondary"
               onClick={() => {
-                setPasswordChanged(false);
+                setPasswordChangedAt(null);
                 setPasswordOpen(true);
               }}
             >
@@ -71,7 +73,9 @@ export function OfficeShell() {
           </div>
         </header>
         <main className="office-shell__content">
-          {passwordChanged && <Alert tone="ok">{t("office.password.done")}</Alert>}
+          {passwordChangedAt === location.pathname && (
+            <Alert tone="ok">{t("office.password.done")}</Alert>
+          )}
           <Outlet />
         </main>
       </div>
@@ -80,7 +84,7 @@ export function OfficeShell() {
         onClose={() => setPasswordOpen(false)}
         onChanged={() => {
           setPasswordOpen(false);
-          setPasswordChanged(true);
+          setPasswordChangedAt(location.pathname);
         }}
       />
     </div>

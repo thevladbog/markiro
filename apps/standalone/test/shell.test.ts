@@ -221,6 +221,21 @@ describe("shellReducer", () => {
     const applied = shellReducer(open, { type: "device_rejected", reason: "key_rejected" });
     expect(applied.rejection).toBe("key_rejected");
     expect(applied.office).toEqual({ kind: "closed" });
+
+    // A late tokened rejection from a session the user already left changes nothing.
+    const closed = shellReducer(open, { type: "office_closed" });
+    expect(
+      shellReducer(closed, {
+        type: "device_rejected",
+        reason: "key_rejected",
+        token: SESSION.token,
+      }),
+    ).toEqual(closed);
+    // Nor does a late session_ended while the user is signing in again.
+    const signingIn = shellReducer(closed, { type: "office_requested" });
+    expect(shellReducer(signingIn, { type: "session_ended", token: SESSION.token })).toEqual(
+      signingIn,
+    );
   });
 
   it("marks the local host initialized after the wizard", () => {
@@ -232,6 +247,26 @@ describe("shellReducer", () => {
   it("retries a failed pairing", () => {
     const failed = unpaired({ pairing: { kind: "failed", code: "unreachable" } });
     expect(shellReducer(failed, { type: "pairing_retried" }).pairing).toEqual({ kind: "idle" });
+  });
+
+  it("takes a re-read user only for its own session", () => {
+    const open = shellReducer(paired(), { type: "office_opened", session: SESSION });
+    const renamed = { ...SESSION.user, name: "Ирина Орлова", role: "technologist" as const };
+    expect(
+      shellReducer(open, { type: "office_user_refreshed", token: SESSION.token, user: renamed })
+        .office,
+    ).toEqual({ kind: "open", session: { ...SESSION, user: renamed } });
+    expect(
+      shellReducer(open, {
+        type: "office_user_refreshed",
+        token: "some-other-token",
+        user: renamed,
+      }),
+    ).toEqual(open);
+    const closed = shellReducer(open, { type: "office_closed" });
+    expect(
+      shellReducer(closed, { type: "office_user_refreshed", token: SESSION.token, user: renamed }),
+    ).toEqual(closed);
   });
 });
 

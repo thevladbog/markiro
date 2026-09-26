@@ -8,8 +8,9 @@ import { Alert, Button, Input, Modal } from "@markiro/ui";
 
 import { HostError } from "../host/client.js";
 import { errorMessageKey } from "../host/errors.js";
+import type { PasswordChange } from "../host/protocol.js";
 import { errorProp } from "../lib/form-error.js";
-import { useOfficeSession } from "./office-session.js";
+import { useOfficeMutation } from "./office-query.js";
 
 /** Characters as the host counts them (Unicode scalar values). */
 function characters(text: string): number {
@@ -37,7 +38,9 @@ export interface ChangePasswordDialogProps {
 
 export function ChangePasswordDialog({ open, onClose, onChanged }: ChangePasswordDialogProps) {
   const { t } = useTranslation();
-  const session = useOfficeSession();
+  const change = useOfficeMutation((api, token, request: PasswordChange) =>
+    api.officeChangePassword(token, request),
+  );
   const formId = useId();
   const [submitError, setSubmitError] = useState<string | null>(null);
   const {
@@ -69,7 +72,7 @@ export function ChangePasswordDialog({ open, onClose, onChanged }: ChangePasswor
       return;
     }
     try {
-      await session.changePassword({
+      await change.mutateAsync({
         currentPassword: values.currentPassword,
         newPassword: values.newPassword,
       });

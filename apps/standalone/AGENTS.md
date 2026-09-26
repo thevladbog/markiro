@@ -137,6 +137,20 @@ together with `src/host/client.ts`, `src/host/device.ts` and
   (ESLint bans native form elements in `src/`); forms check the host's and
   `@markiro/domain` rules before sending.
 
+## Office pages
+
+- Every office request goes through `session.call` with `session.api`
+  (`useOfficeQuery`, `useOfficeMutation` in `src/office/office-query.ts`).
+  `call` routes an ended session to the sign-in and a rejected device to
+  re-pairing, and re-reads the user on `forbidden`. Pages never call
+  `invoke`, `HostClient` or `createHostApi` themselves.
+- React Query keeps one cache per office session (`Office` is keyed by the
+  session token), with no retries and no refetch on window focus: a host
+  error is an answer the page explains, with a retry button.
+- Every write sends the loaded record's `expectedRev`. On `stale_revision`
+  the page offers to load the data again and drops the user's edits; it
+  never retries with `details.currentRev`.
+
 ## Marking rules
 
 GS1, KM, SSCC and label rules stay in `@markiro/domain`; the host stores and

@@ -1,26 +1,13 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ThemeProvider } from "@markiro/ui";
-
 import { HostError } from "../src/host/client.js";
-import type { OfficeUser } from "../src/host/protocol.js";
-import { Office } from "../src/office/Office.js";
 import { OfficeLogin } from "../src/office/OfficeLogin.js";
-import type { OfficeSessionValue } from "../src/office/office-session.js";
+import { fakeOfficeSession, renderOffice } from "./support/office.js";
 import { SESSION } from "./support/fixtures.js";
 
 function type(label: string, value: string): void {
   fireEvent.change(screen.getByLabelText(label), { target: { value } });
-}
-
-function sessionFor(user: OfficeUser = SESSION.user) {
-  return {
-    user,
-    call: <T,>(operation: (token: string) => Promise<T>) => operation(SESSION.token),
-    logout: vi.fn(),
-    changePassword: vi.fn(async () => {}),
-  } satisfies OfficeSessionValue;
 }
 
 describe("OfficeLogin", () => {
@@ -92,16 +79,8 @@ describe("Office", () => {
     localStorage.removeItem("markiro.theme");
   });
 
-  function renderOffice(session: OfficeSessionValue) {
-    return render(
-      <ThemeProvider defaultTheme="dark">
-        <Office session={session} />
-      </ThemeProvider>,
-    );
-  }
-
   it("shows who is signed in and the sections of their role", async () => {
-    renderOffice(sessionFor());
+    renderOffice(fakeOfficeSession());
     expect(await screen.findByText("Ирина Смирнова")).toBeTruthy();
     expect(screen.getByText("администратор")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Обзор" })).toBeTruthy();
@@ -110,12 +89,12 @@ describe("Office", () => {
   });
 
   it("names the technologist role", async () => {
-    renderOffice(sessionFor({ ...SESSION.user, role: "technologist" }));
+    renderOffice(fakeOfficeSession({ user: { ...SESSION.user, role: "technologist" } }));
     expect(await screen.findByText("технолог")).toBeTruthy();
   });
 
   it("leaves for the floor from the header, ending the session", async () => {
-    const session = sessionFor();
+    const session = fakeOfficeSession();
     renderOffice(session);
     fireEvent.click(await screen.findByRole("button", { name: "Выйти в цех" }));
     expect(session.logout).toHaveBeenCalledTimes(1);
@@ -125,8 +104,10 @@ describe("Office", () => {
   });
 
   it("switches the theme", async () => {
-    renderOffice(sessionFor());
-    fireEvent.click(await screen.findByRole("button", { name: "Включить светлую тему" }));
+    renderOffice(fakeOfficeSession());
+    const toggle = screen.getByRole("button", { name: "Включить светлую тему" });
+    expect(toggle.querySelector('[aria-hidden="true"]')?.textContent).toBe("☀");
+    fireEvent.click(toggle);
     expect(document.documentElement.getAttribute("data-theme")).toBe("light");
     expect(screen.getByRole("button", { name: "Включить тёмную тему" })).toBeTruthy();
   });
@@ -137,21 +118,20 @@ describe("ChangePasswordDialog", () => {
     localStorage.removeItem("markiro.theme");
   });
 
-  function renderOffice(session: OfficeSessionValue) {
-    return render(
-      <ThemeProvider defaultTheme="dark">
-        <Office session={session} />
-      </ThemeProvider>,
-    );
-  }
-
   async function openDialog(): Promise<void> {
     fireEvent.click(await screen.findByRole("button", { name: "Сменить пароль" }));
     await screen.findByText("Смена пароля");
   }
 
+  function fill(current: string, next: string, repeat = next): void {
+    type("Текущий пароль", current);
+    type("Новый пароль", next);
+    type("Повторите новый пароль", repeat);
+  }
+
   it("changes the password with the current one", async () => {
-    const session = sessionFor();
+    const session = fakeOfficeSession();
+    session.api.officeChangePassword.mockResolvedValue(undefined);
     renderOffice(session);
     await openDialog();
     type("Текущий пароль", "correct horse battery");
@@ -159,7 +139,7 @@ describe("ChangePasswordDialog", () => {
     type("Повторите новый пароль", "another long password");
     fireEvent.click(screen.getByRole("button", { name: "Сменить" }));
     await waitFor(() =>
-      expect(session.changePassword).toHaveBeenCalledWith({
+      expect(session.api.officeChangePassword).toHaveBeenCalledWith("office-session-token", {
         currentPassword: "correct horse battery",
         newPassword: "another long password",
       }),
@@ -171,7 +151,7 @@ describe("ChangePasswordDialog", () => {
   });
 
   it("checks the repeated password before calling the host", async () => {
-    const session = sessionFor();
+    const session = fakeOfficeSession();
     renderOffice(session);
     await openDialog();
     type("Текущий пароль", "correct horse battery");
@@ -179,12 +159,12 @@ describe("ChangePasswordDialog", () => {
     type("Повторите новый пароль", "a different one here");
     fireEvent.click(screen.getByRole("button", { name: "Сменить" }));
     expect(await screen.findByText("Пароли не совпадают")).toBeTruthy();
-    expect(session.changePassword).not.toHaveBeenCalled();
+    expect(session.api.officeChangePassword).not.toHaveBeenCalled();
   });
 
   it("says when the current password is wrong", async () => {
-    const session = sessionFor();
-    session.changePassword.mockRejectedValueOnce(
+    const session = fakeOfficeSession();
+    session.api.officeChangePassword.mockRejectedValueOnce(
       new HostError({
         kind: "api",
         code: "unauthorized",
@@ -200,5 +180,81 @@ describe("ChangePasswordDialog", () => {
     type("Повторите новый пароль", "another long password");
     fireEvent.click(screen.getByRole("button", { name: "Сменить" }));
     expect(await screen.findByText("Текущий пароль неверен.")).toBeTruthy();
+  });
+
+  it("checks the new password's length before calling the host", async () => {
+    const session = fakeOfficeSession();
+    renderOffice(session);
+    await openDialog();
+    fill("correct horse battery", "short");
+    fireEvent.click(screen.getByRole("button", { name: "Сменить" }));
+    expect(await screen.findByText("Пароль — от 8 до 128 символов")).toBeTruthy();
+    expect(session.api.officeChangePassword).not.toHaveBeenCalled();
+  });
+
+  it("puts the host's refusal of the new password under its field", async () => {
+    const session = fakeOfficeSession();
+    session.api.officeChangePassword.mockRejectedValueOnce(
+      new HostError({
+        kind: "api",
+        code: "validation_failed",
+        status: 400,
+        message: "the password must be 8-128 characters",
+        details: { field: "newPassword" },
+      }),
+    );
+    renderOffice(session);
+    await openDialog();
+    fill("correct horse battery", "another long password");
+    fireEvent.click(screen.getByRole("button", { name: "Сменить" }));
+    expect(await screen.findByText("Пароль — от 8 до 128 символов")).toBeTruthy();
+  });
+
+  it("explains any other failure above the form and stays open", async () => {
+    const session = fakeOfficeSession();
+    session.api.officeChangePassword.mockRejectedValueOnce(
+      new HostError({ kind: "api", code: "rate_limited", status: 429, message: "slow down" }),
+    );
+    renderOffice(session);
+    await openDialog();
+    fill("correct horse battery", "another long password");
+    fireEvent.click(screen.getByRole("button", { name: "Сменить" }));
+    expect(
+      await screen.findByText("Слишком много попыток. Подождите минуту и попробуйте снова."),
+    ).toBeTruthy();
+    expect(screen.getByText("Смена пароля")).toBeTruthy();
+  });
+
+  it("starts empty again after being cancelled", async () => {
+    renderOffice(fakeOfficeSession());
+    await openDialog();
+    type("Текущий пароль", "correct horse battery");
+    fireEvent.click(screen.getByRole("button", { name: "Отмена" }));
+    expect(screen.queryByText("Смена пароля")).toBeNull();
+    await openDialog();
+    expect(screen.getByLabelText("Текущий пароль")).toHaveProperty("value", "");
+  });
+
+  it("cannot be closed while the change is being sent", async () => {
+    const session = fakeOfficeSession();
+    let finish: () => void = () => undefined;
+    session.api.officeChangePassword.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    renderOffice(session);
+    await openDialog();
+    fill("correct horse battery", "another long password");
+    fireEvent.click(screen.getByRole("button", { name: "Сменить" }));
+    await waitFor(() => expect(session.api.officeChangePassword).toHaveBeenCalledTimes(1));
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    fireEvent.click(screen.getByRole("button", { name: "Закрыть" }));
+    expect(screen.getByText("Смена пароля")).toBeTruthy();
+    finish();
+    expect(
+      await screen.findByText("Пароль изменён. На других устройствах нужно войти заново."),
+    ).toBeTruthy();
   });
 });

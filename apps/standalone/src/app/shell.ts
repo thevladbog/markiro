@@ -1,7 +1,7 @@
 import { HostError } from "../host/client.js";
 import type { DeviceErrorCode } from "../host/device.js";
 import type { HelloObservation, HostProbeErrorCode } from "../host/probe.js";
-import type { DeviceStatus, OfficeSession } from "../host/protocol.js";
+import type { DeviceStatus, OfficeSession, OfficeUser } from "../host/protocol.js";
 
 /** What the probe of the host on this computer found. */
 export type LocalHostState =
@@ -62,11 +62,14 @@ export type ShellAction =
   | { type: "pairing_retried" }
   | { type: "forgotten" }
   | { type: "host_initialized" }
-  | { type: "office_requested"; notice?: OfficeLoginNotice }
+  // "session_ended" is set only by the reducer's own `session_ended` branch;
+  // nothing outside the reducer may request that notice directly.
+  | { type: "office_requested"; notice?: Exclude<OfficeLoginNotice, "session_ended"> }
   | { type: "office_opened"; session: OfficeSession }
   | { type: "office_closed" }
   | { type: "session_ended"; token: string }
-  | { type: "device_rejected"; reason: RejectionReason; token?: string };
+  | { type: "device_rejected"; reason: RejectionReason; token?: string }
+  | { type: "office_user_refreshed"; token: string; user: OfficeUser };
 
 const CLOSED_OFFICE: OfficeState = { kind: "closed" };
 
@@ -198,6 +201,15 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
       }
       return { ...state, rejection: action.reason, office: CLOSED_OFFICE };
     }
+    case "office_user_refreshed":
+      // Only the session the answer belongs to takes the new name and role.
+      if (state.office.kind !== "open" || state.office.session.token !== action.token) {
+        return state;
+      }
+      return {
+        ...state,
+        office: { kind: "open", session: { ...state.office.session, user: action.user } },
+      };
   }
 }
 

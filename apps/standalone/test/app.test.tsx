@@ -11,6 +11,7 @@ import { DeviceError, type DeviceApi } from "../src/host/device.js";
 import { HostProbeError, type HostProbe } from "../src/host/probe.js";
 import type { DeviceStatus } from "../src/host/protocol.js";
 import { DEVICE_STATUS, observation, SESSION } from "./support/fixtures.js";
+import { fakeHostApi } from "./support/office.js";
 import { completeWizard, EXPECTED_REQUEST } from "./support/wizard.js";
 
 const ADDRESS = "https://127.0.0.1:45710";
@@ -57,12 +58,11 @@ function fakeDevice(
 }
 
 function fakeHost() {
-  return {
+  return fakeHostApi({
     bootstrap: vi.fn<HostApi["bootstrap"]>(async () => ({ session: SESSION })),
     officeLogin: vi.fn<HostApi["officeLogin"]>(async () => SESSION),
-    officeLogout: vi.fn<HostApi["officeLogout"]>(async () => {}),
-    officeChangePassword: vi.fn<HostApi["officeChangePassword"]>(async () => {}),
-  };
+    officeChangePassword: vi.fn<HostApi["officeChangePassword"]>(async () => undefined),
+  });
 }
 
 function renderApp(services: { probe: HostProbe; device: DeviceApi; host: HostApi }) {
@@ -197,6 +197,36 @@ describe("App", () => {
     expect(screen.getByText("Сессия офиса закончилась. Войдите снова.")).toBeTruthy();
   });
 
+  it("re-reads the signed-in user when the host answers forbidden", async () => {
+    const host = fakeHost();
+    host.officeChangePassword.mockRejectedValueOnce(
+      new HostError({ kind: "api", code: "forbidden", status: 403, message: "not allowed" }),
+    );
+    host.officeMe.mockResolvedValueOnce({
+      ...SESSION.user,
+      name: "Ирина Орлова",
+      role: "technologist",
+    });
+    renderApp({ probe: probeAnswering(true), device: fakeDevice(DEVICE_STATUS), host });
+    fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
+    await signIn();
+    fireEvent.click(await screen.findByRole("button", { name: "Сменить пароль" }));
+    fireEvent.change(await screen.findByLabelText("Текущий пароль"), {
+      target: { value: "correct horse battery" },
+    });
+    fireEvent.change(screen.getByLabelText("Новый пароль"), {
+      target: { value: "another long password" },
+    });
+    fireEvent.change(screen.getByLabelText("Повторите новый пароль"), {
+      target: { value: "another long password" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Сменить" }));
+    expect(await screen.findByText("Недостаточно прав для этого действия.")).toBeTruthy();
+    expect(await screen.findByText("Ирина Орлова")).toBeTruthy();
+    expect(screen.getByText("технолог")).toBeTruthy();
+    expect(host.officeMe).toHaveBeenCalledWith("office-session-token");
+  });
+
   it("ends the session when leaving the office, so coming back asks to sign in", async () => {
     const host = fakeHost();
     renderApp({ probe: probeAnswering(true), device: fakeDevice(DEVICE_STATUS), host });
@@ -222,6 +252,8 @@ describe("App", () => {
     await signIn();
     fireEvent.click(await screen.findByRole("button", { name: "Выйти в цех" }));
     expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(host.officeLogout).toHaveBeenCalledWith("office-session-token");
+    // The swallow itself is guarded by Vitest failing the run on an unhandled rejection.
     expect(
       screen.queryByText("Нет связи с хостом. Проверьте, что ПК-хост включён и служба запущена."),
     ).toBeNull();

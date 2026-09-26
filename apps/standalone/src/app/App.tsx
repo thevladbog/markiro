@@ -182,22 +182,40 @@ export function App({ probe, device, host, address = LOCAL_HOST_ADDRESS }: AppPr
   const session = view.kind === "office" ? view.session : null;
   const officeSession = useMemo<OfficeSessionValue | null>(() => {
     if (!session) return null;
+    // Scoped to this session's token: a late failure from a session the
+    // user already left or replaced must not pull them back into sign-in or
+    // mark a fresh pairing rejected.
+    const route = (error: unknown): void => {
+      const action = shellActionFor(error, session.token);
+      if (action) dispatch(action);
+    };
+    const refreshUser = async (): Promise<void> => {
+      try {
+        const user = await hostApi.officeMe(session.token);
+        dispatch({ type: "office_user_refreshed", token: session.token, user });
+      } catch (error) {
+        route(error);
+        throw error;
+      }
+    };
     const call = async <T,>(operation: (token: string) => Promise<T>): Promise<T> => {
       try {
         return await operation(session.token);
       } catch (error) {
-        // Scoped to this session's token: a late failure from a session the
-        // user already left or replaced must not pull them back into
-        // sign-in or mark a fresh pairing rejected.
-        const action = shellActionFor(error, session.token);
-        if (action) dispatch(action);
+        route(error);
+        if (error instanceof HostError && error.code === "forbidden") {
+          // The role changed on the host: read the user again so the menu
+          // and the pages follow it. A failure there is routed like any other.
+          void refreshUser().catch(() => undefined);
+        }
         throw error;
       }
     };
     return {
       user: session.user,
+      api: hostApi,
       call,
-      changePassword: (request) => call((token) => hostApi.officeChangePassword(token, request)),
+      refreshUser,
       logout: () => {
         dispatch({ type: "office_closed" });
         // The token is already gone from this device; if the host cannot be
@@ -207,7 +225,7 @@ export function App({ probe, device, host, address = LOCAL_HOST_ADDRESS }: AppPr
     };
   }, [session, hostApi]);
 
-  if (officeSession) return <Office session={officeSession} />;
+  if (session && officeSession) return <Office key={session.token} session={officeSession} />;
 
   const repairBusy = repairState === "busy";
   const repairError = repairState === "idle" || repairState === "busy" ? null : repairState;

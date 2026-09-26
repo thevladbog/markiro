@@ -1,6 +1,7 @@
 import { createContext, useContext, type ReactNode } from "react";
 
-import type { OfficeUser, PasswordChange } from "../host/protocol.js";
+import type { HostApi } from "../host/api.js";
+import type { OfficeUser } from "../host/protocol.js";
 
 /**
  * The open office session, provided by the shell to every office screen.
@@ -12,8 +13,14 @@ import type { OfficeUser, PasswordChange } from "../host/protocol.js";
 export interface OfficeSessionValue {
   user: OfficeUser;
   /**
+   * Host endpoints. Office screens reach them only through `call` — via
+   * `useOfficeQuery` and `useOfficeMutation` — never directly.
+   */
+  api: HostApi;
+  /**
    * Runs a host call with the session token. An ended session or a rejected
-   * device is routed to the shell before the error is rethrown.
+   * device is routed to the shell before the error is rethrown; `forbidden`
+   * also re-reads the user, whose role may have changed on the host.
    */
   call: <T>(operation: (token: string) => Promise<T>) => Promise<T>;
   /**
@@ -21,8 +28,8 @@ export interface OfficeSessionValue {
    * dropped — and tells the host in the background.
    */
   logout: () => void;
-  /** Changes the signed-in user's own password; the host ends their other sessions. */
-  changePassword: (request: PasswordChange) => Promise<void>;
+  /** Re-reads the signed-in user (name, role) from the host into the shell. */
+  refreshUser: () => Promise<void>;
 }
 
 const OfficeSessionContext = createContext<OfficeSessionValue | null>(null);
