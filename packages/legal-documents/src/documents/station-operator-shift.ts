@@ -115,7 +115,7 @@ export const STATION_OPERATOR_SHIFT_CONTENT = {
           {
             kind: "step",
             title: "Проверьте рабочий экран",
-            text: "Перед первым сканированием убедитесь: в шапке — ваша линия и смена; в карточке товара — нужный продукт и план; счётчики обнулены или соответствуют уже сделанному. Индикаторы состояния в шапке свёрнуты в точки, пока всё в порядке; проблемный индикатор сам раскрывается подписью, а кнопка «Развернуть» показывает полную панель состояния.",
+            text: "Перед первым сканированием убедитесь: в шапке — ваша линия и смена; на ленте смены вверху экрана — нужный продукт и план; итог «В смене» равен нулю или тому, что в смене уже сделано. Индикаторы состояния в шапке свёрнуты в точки, пока всё в порядке; проблемный индикатор сам раскрывается подписью, а кнопка «Развернуть» показывает полную панель состояния.",
             image: {
               id: "work-start",
               caption: "Рабочий экран: смена открыта, станция готова к сканированию",
@@ -279,7 +279,7 @@ export const STATION_OPERATOR_SHIFT_CONTENT = {
           {
             kind: "step",
             title: "Check the work screen",
-            text: "Before the first scan make sure: the header shows your line and shift; the product card shows the right product and plan; the counters are at zero or match the work already done. The status indicators in the header collapse into dots while everything is fine; a problem indicator expands into a caption by itself, and the “Expand” button opens the full status panel.",
+            text: "Before the first scan make sure: the header shows your line and shift; the shift band at the top of the screen shows the right product and plan; the “In shift” total is zero or matches the work already done in the shift. The status indicators in the header collapse into dots while everything is fine; a problem indicator expands into a caption by itself, and the “Expand” button opens the full status panel.",
             image: {
               id: "work-start",
               caption: "Work screen: the shift is open, the station is ready to scan",

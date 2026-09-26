@@ -31,6 +31,10 @@ export const STATION_WORK_CYCLE_CONTENT = {
         heading: "2. Цикл сканирования и сигналы",
         blocks: [
           {
+            kind: "paragraph",
+            text: "Рабочий экран устроен так: вверху — лента смены с продуктом (фото, название, GTIN) и итогом смены; слева — результат последнего скана, а в режиме агрегации — открытый короб; справа — журнал смены с последними сканами этой станции. Внизу — кнопки «Исключения», «Пауза» и «Закрыть смену».",
+          },
+          {
             kind: "step",
             title: "Отсканируйте код маркировки",
             text: "Возьмите единицу продукции и наведите сканер на код DataMatrix. Станция обрабатывает сканы по одному: дождитесь сигнала по текущей единице, прежде чем сканировать следующую.",
@@ -40,7 +44,7 @@ export const STATION_WORK_CYCLE_CONTENT = {
           {
             kind: "step",
             title: "Код принят — продолжайте",
-            text: "Принятый скан станция показывает на рабочем экране: зелёная панель с галочкой и кодом, счётчик «Принято» увеличивается. В режиме агрегации положите единицу в открытый короб; в режиме проверки — передайте дальше по линии.",
+            text: "Принятый скан станция показывает на рабочем экране: в режиме проверки — зелёная панель с галочкой и кодом, в режиме агрегации — галочка с серийным номером на панели короба. Итог «В смене» на ленте смены увеличивается. В режиме агрегации положите единицу в открытый короб; в режиме проверки — передайте дальше по линии.",
             image: { id: "scan-ok", caption: "Рабочий экран: код принят (зелёная панель)" },
           },
           {
@@ -58,7 +62,7 @@ export const STATION_WORK_CYCLE_CONTENT = {
           {
             kind: "callout",
             tone: "info",
-            text: "Полноэкранный сигнал гаснет сам через несколько секунд. Если вы отвлеклись — сверьтесь с панелью «Последние операции»: там видны последние сканы с вердиктами и временем.",
+            text: "Полноэкранный сигнал гаснет сам через несколько секунд. Если вы отвлеклись — сверьтесь с панелью «Журнал смены»: там видны последние сканы с вердиктом, серийным номером и временем.",
           },
         ],
       },
@@ -73,9 +77,11 @@ export const STATION_WORK_CYCLE_CONTENT = {
           {
             kind: "unordered-list",
             items: [
-              "Счётчики «Принято» и «Отклонено» показывают ход смены; если задан план, под продуктом отображается «План: N».",
-              "Панель «Последние операции» показывает недавние сканы с серийными номерами и временем.",
-              "При выполнении плана станция сообщит «План выполнен» — дальше действуйте по указанию мастера.",
+              "Ход смены показывает лента смены: «В смене · все терминалы» — сколько единиц приняли в смене все терминалы. Если задан план, после итога указан план, ниже — полоса и процент выполнения, например «14 % плана». Если в смене работают и другие терминалы, добавляется доля этой станции — «этот терминал 302».",
+              "Подпись «В смене · этот терминал» станция показывает, пока не получила итог с сервера, — например, если смену открыли без связи: тогда в числе только её собственные сканы. Если итог с сервера не обновлялся дольше двух минут, а в смене работают другие терминалы, вместо доли станции указано время последнего ответа — «другие терминалы — на 11:58».",
+              "Панель «Журнал смены» показывает последние сканы этой станции: вердикт, серийный номер и время. GTIN указан только в строках «ЧУЖОЙ ГТИН»; отмена последнего скана добавляет строку «Отменено».",
+              "Счётчики «Ошибки» и «Дубли» в заголовке журнала считают отклонённые сканы этой станции за всю смену и не обнуляются после паузы, смены оператора или перезапуска станции.",
+              "Когда план наберут сканы этой станции, она сообщит «План выполнен» — дальше действуйте по указанию мастера.",
             ],
           },
         ],
@@ -87,17 +93,20 @@ export const STATION_WORK_CYCLE_CONTENT = {
           {
             kind: "step",
             title: "Наполняйте открытый короб",
-            text: "Панель короба на рабочем экране показывает его номер («Короб № 1») и число позиций. Кладите единицу в короб только после зелёной панели принятого кода.",
+            text: "Панель короба показывает его номер («Короб № 1»), заполнение — сколько позиций уже в коробе из его вместимости — и серийный номер последнего принятого кода с галочкой. Кладите единицу в короб только после того, как на панели появилась галочка с её серийным номером.",
             image: {
               id: "work-aggregation",
-              caption: "Рабочий экран агрегации: панель «Открытый короб»",
+              caption: "Рабочий экран агрегации: панель открытого короба",
             },
           },
           {
             kind: "step",
-            title: "Закройте заполненный короб",
-            text: "Когда короб набрал вместимость, закройте его кнопкой «Закрыть короб». Станция присвоит коробу номер SSCC и отправит этикетку на принтер. Наклейте этикетку на этот короб сразу — не откладывайте её в сторону.",
-            image: { id: "box-full", caption: "Короб заполнен и готов к закрытию" },
+            title: "Заполненный короб станция закрывает сама",
+            text: "Когда в короб легла последняя позиция по его вместимости, станция сама закрывает его: присваивает коробу номер SSCC и отправляет этикетку на принтер. Наклейте этикетку на этот короб сразу — не откладывайте её в сторону. Кнопка «Закрыть короб» закрывает короб раньше — например, неполный короб в конце смены. Если на панели написано «Вместимость не задана», станция не знает, когда короб полон, — закрывайте каждый короб этой кнопкой.",
+            image: {
+              id: "box-full",
+              caption: "Короб заполнен: станция закрывает его и печатает этикетку",
+            },
             expected: "Принтер напечатал этикетку короба.",
           },
           {
@@ -115,7 +124,7 @@ export const STATION_WORK_CYCLE_CONTENT = {
           {
             kind: "callout",
             tone: "info",
-            text: "Неполный короб в конце смены закрывается той же кнопкой «Закрыть короб». Кнопка «Отменить последний скан» убирает из короба последнюю добавленную позицию, «Очистить короб» удаляет все позиции открытого короба — используйте их только по указанию мастера.",
+            text: "Кнопка «Отменить последний скан» убирает из открытого короба последнюю добавленную позицию, «Очистить короб» удаляет все его позиции — используйте их только по указанию мастера.",
           },
         ],
       },
@@ -126,14 +135,14 @@ export const STATION_WORK_CYCLE_CONTENT = {
           {
             kind: "step",
             title: "Продолжайте работать при «Нет связи»",
-            text: "Если в строке состояния «Сервер: Нет связи», станция продолжает принимать сканы и копит их локально — счётчик «Не отправлено» показывает очередь. Работайте как обычно: при восстановлении связи данные уйдут на сервер сами.",
+            text: "Если в строке состояния у индикатора «Сервер» появилась подпись «Нет связи», станция продолжает принимать сканы и копит их локально — сколько сканов ждут отправки, показывает индикатор «Синх.». Работайте как обычно: при восстановлении связи данные уйдут на сервер сами. Итог «В смене» тем временем учитывает сканы других терминалов на момент последнего ответа сервера (см. раздел 3).",
             image: { id: "offline", caption: "Работа без сети: сканы копятся на станции" },
-            expected: "После восстановления связи счётчик уменьшается до «Синхронизировано».",
+            expected: "После восстановления связи число у индикатора «Синх.» уменьшается до нуля.",
           },
           {
             kind: "callout",
             tone: "warning",
-            text: "Позовите администратора, если при работающей сети счётчик «Не отправлено» долго не уменьшается или в строке состояния «Синхронизация: Не отправляется». В режиме агрегации долгий офлайн может исчерпать запас номеров коробов — станция сообщит «Номера для коробов закончились» и приостановит сканирование до восстановления связи.",
+            text: "Позовите администратора, если при работающей сети число у индикатора «Синх.» долго не уменьшается или у индикатора появилась подпись «Не отправляется». В режиме агрегации долгий офлайн может исчерпать запас номеров коробов — станция сообщит «Номера для коробов закончились» и приостановит сканирование до восстановления связи.",
           },
         ],
       },
@@ -143,13 +152,13 @@ export const STATION_WORK_CYCLE_CONTENT = {
         blocks: [
           {
             kind: "step",
-            title: "Прервитесь через «Пауза / завершить»",
-            text: "Кнопка «Пауза» приостанавливает работу на перерыв. «Выйти из смены» освобождает станцию, не закрывая смену — её продолжите вы после перерыва или другой оператор. Если часть сканов ещё не дошла до сервера, станция предупредит об этом; данные сохраняются на станции и уйдут при связи.",
+            title: "Прервитесь кнопкой «Пауза»",
+            text: "Кнопка «Пауза» выводит вас из смены, не закрывая её: станция возвращается к экрану выбора смены, а продолжить смену после перерыва можете вы или другой оператор. Если часть сканов ещё не дошла до сервера, станция предупредит об этом и предложит «Остаться» или «Всё равно выйти»; данные сохраняются на станции и уйдут при связи.",
           },
           {
             kind: "step",
             title: "Закройте смену в конце работы",
-            text: "Нажмите «Закрыть смену». В режиме агрегации сначала закройте открытый короб — станция напомнит: «Сначала закройте открытый короб». Если фактическое количество не совпало с планом, станция попросит указать причину расхождения. После закрытия показываются «Итоги смены».",
+            text: "Нажмите «Закрыть смену». В режиме агрегации сначала закройте открытый короб — станция напомнит: «Сначала закройте открытый короб». Если фактическое количество не совпало с планом, станция попросит указать причину расхождения.",
             expected: "Смена закрыта, станция вернулась к экрану выбора смены.",
           },
         ],
@@ -177,7 +186,7 @@ export const STATION_WORK_CYCLE_CONTENT = {
                   "Запас номеров SSCC исчерпан в офлайне. Восстановите связь со станцией (позовите администратора), затем вернитесь к работе.",
               },
               {
-                term: "Счётчик «Не отправлено» растёт, хотя сеть работает",
+                term: "Число у индикатора «Синх.» растёт, хотя сеть работает",
                 detail:
                   "Не останавливайте работу — сканы не теряются. Сообщите администратору: очередь отправки требует внимания.",
               },
@@ -226,6 +235,10 @@ export const STATION_WORK_CYCLE_CONTENT = {
         heading: "2. The scan cycle and signals",
         blocks: [
           {
+            kind: "paragraph",
+            text: "The work screen is laid out as follows: at the top, the shift band with the product (photo, name, GTIN) and the shift total; on the left, the result of the last scan, and in aggregation mode the open box; on the right, the shift journal with this station's latest scans. At the bottom are the “Exceptions”, “Pause” and “Close shift” buttons.",
+          },
+          {
             kind: "step",
             title: "Scan a marking code",
             text: "Take a unit of product and point the scanner at the DataMatrix code. The station processes scans one at a time: wait for the signal for the current unit before scanning the next one.",
@@ -238,7 +251,7 @@ export const STATION_WORK_CYCLE_CONTENT = {
           {
             kind: "step",
             title: "Code accepted — keep going",
-            text: "The station shows an accepted scan on the work screen: a green panel with a check mark and the code, and the “Accepted” counter goes up. In aggregation mode, put the unit into the open box; in validation mode, pass it on down the line.",
+            text: "The station shows an accepted scan on the work screen: in validation mode, a green panel with a check mark and the code; in aggregation mode, a check mark with the serial number on the box panel. The “In shift” total on the shift band goes up. In aggregation mode, put the unit into the open box; in validation mode, pass it on down the line.",
             image: { id: "scan-ok", caption: "Work screen: the code is accepted (green panel)" },
           },
           {
@@ -259,7 +272,7 @@ export const STATION_WORK_CYCLE_CONTENT = {
           {
             kind: "callout",
             tone: "info",
-            text: "The full-screen signal fades out by itself after a few seconds. If you got distracted, check the “Recent operations” panel: it lists the latest scans with verdicts and times.",
+            text: "The full-screen signal fades out by itself after a few seconds. If you got distracted, check the “Shift journal” panel: it lists the latest scans with the verdict, serial number and time.",
           },
         ],
       },
@@ -274,9 +287,11 @@ export const STATION_WORK_CYCLE_CONTENT = {
           {
             kind: "unordered-list",
             items: [
-              "The “Accepted” and “Rejected” counters show the shift progress; if a plan is set, “Plan: N” is shown under the product.",
-              "The “Recent operations” panel shows recent scans with serial numbers and times.",
-              "When the plan is reached, the station reports “Plan completed” — follow your supervisor's directions from there.",
+              "The shift band shows the shift progress: “In shift · all terminals” is how many units all terminals have accepted in the shift. If a plan is set, the plan follows the total, with a bar and the share completed below, for example “14% of plan”. If other terminals work the shift too, this station's share is added — “this terminal 302”.",
+              "The station shows the “In shift · this terminal” label until it has received the total from the server — for example, when the shift was opened without a connection: the number then counts only its own scans. If the server total has not been refreshed for more than two minutes and other terminals work the shift, the time of the last answer replaces this station's share — “other terminals as of 11:58 AM”.",
+              "The “Shift journal” panel shows this station's latest scans: the verdict, serial number and time. The GTIN is shown only on “WRONG GTIN” rows; undoing the last scan adds an “Undone” row.",
+              "The “Errors” and “Duplicates” counters in the journal header count this station's rejected scans for the whole shift and are not reset by a pause, an operator change or a station restart.",
+              "When this station's own scans reach the plan, it reports “Plan completed” — follow your supervisor's directions from there.",
             ],
           },
         ],
@@ -288,7 +303,7 @@ export const STATION_WORK_CYCLE_CONTENT = {
           {
             kind: "step",
             title: "Fill the open box",
-            text: "The box panel on the work screen shows its number (“Box no. 1”) and the item count. Put a unit into the box only after the green accepted-code panel.",
+            text: "The box panel shows the box number (“Box no. 1”), how full it is — how many items are already in the box out of its capacity — and the serial number of the last accepted code with a check mark. Put a unit into the box only once the check mark with its serial number has appeared on the panel.",
             image: {
               id: "work-aggregation",
               caption: "Aggregation work screen: the open box panel",
@@ -296,9 +311,12 @@ export const STATION_WORK_CYCLE_CONTENT = {
           },
           {
             kind: "step",
-            title: "Close the full box",
-            text: "When the box reaches its capacity, close it with the “Close box” button. The station assigns the box an SSCC number and sends the label to the printer. Stick the label onto this box right away — do not put it aside.",
-            image: { id: "box-full", caption: "The box is full and ready to be closed" },
+            title: "The station closes a full box by itself",
+            text: "When the last item that fits the box's capacity goes in, the station closes the box by itself: it assigns the box an SSCC number and sends the label to the printer. Stick the label onto this box right away — do not put it aside. The “Close box” button closes a box earlier — for example, a partially filled box at the end of the shift. If the panel says “Capacity not set”, the station cannot tell when a box is full, so close every box with this button.",
+            image: {
+              id: "box-full",
+              caption: "The box is full: the station closes it and prints the label",
+            },
             expected: "The printer printed the box label.",
           },
           {
@@ -316,7 +334,7 @@ export const STATION_WORK_CYCLE_CONTENT = {
           {
             kind: "callout",
             tone: "info",
-            text: "A partially filled box at the end of the shift is closed with the same “Close box” button. “Undo last scan” removes the last added item from the box, and “Clear box” removes every item from the open box — use them only when your supervisor says so.",
+            text: "“Undo last scan” removes the last added item from the open box, and “Clear box” removes all of its items — use them only when your supervisor says so.",
           },
         ],
       },
@@ -327,14 +345,15 @@ export const STATION_WORK_CYCLE_CONTENT = {
           {
             kind: "step",
             title: "Keep working during “No connection”",
-            text: "If the status bar shows “Server: No connection”, the station keeps accepting scans and stores them locally — the “pending” counter shows the queue. Work as usual: once the connection is back, the data goes to the server by itself.",
+            text: "If the “Server” indicator in the status bar shows “No connection”, the station keeps accepting scans and stores them locally — the “Sync” indicator shows how many scans are waiting to be sent. Work as usual: once the connection is back, the data goes to the server by itself. Meanwhile the “In shift” total counts the other terminals' scans as of the server's last answer (see section 3).",
             image: { id: "offline", caption: "Working offline: scans accumulate on the station" },
-            expected: "After the connection is restored the counter goes down to “Synchronized”.",
+            expected:
+              "After the connection is restored the number on the “Sync” indicator goes down to zero.",
           },
           {
             kind: "callout",
             tone: "warning",
-            text: "Call an administrator if the “pending” counter does not go down for a long time while the network is up, or the status bar shows “Sync: Not syncing”. In aggregation mode a long offline period can exhaust the box number reserve — the station will report “Box numbers have run out” and pause scanning until the connection is back.",
+            text: "Call an administrator if the number on the “Sync” indicator does not go down for a long time while the network is up, or the indicator shows “Not syncing”. In aggregation mode a long offline period can exhaust the box number reserve — the station will report “Box numbers have run out” and pause scanning until the connection is back.",
           },
         ],
       },
@@ -344,13 +363,13 @@ export const STATION_WORK_CYCLE_CONTENT = {
         blocks: [
           {
             kind: "step",
-            title: "Take a break through “Pause / finish”",
-            text: "The “Pause” button suspends work for a break. “Leave shift” releases the station without closing the shift — you or another operator can continue it after the break. If some scans have not reached the server yet, the station warns about it; the data stays on the station and is sent once there is a connection.",
+            title: "Take a break with “Pause”",
+            text: "The “Pause” button takes you out of the shift without closing it: the station returns to the shift selection screen, and after the break you or another operator can continue the shift. If some scans have not reached the server yet, the station warns about it and offers “Stay” or “Leave anyway”; the data stays on the station and is sent once there is a connection.",
           },
           {
             kind: "step",
             title: "Close the shift at the end of work",
-            text: "Tap “Close shift”. In aggregation mode close the open box first — the station reminds you: “Close the open box first”. If the actual quantity does not match the plan, the station asks for the reason for the difference. After closing, the “Shift summary” is shown.",
+            text: "Tap “Close shift”. In aggregation mode close the open box first — the station reminds you: “Close the open box first”. If the actual quantity does not match the plan, the station asks for the reason for the difference.",
             expected: "The shift is closed and the station returned to the shift selection screen.",
           },
         ],
@@ -378,7 +397,7 @@ export const STATION_WORK_CYCLE_CONTENT = {
                   "The SSCC number reserve was exhausted while offline. Restore the station's connection (call an administrator), then get back to work.",
               },
               {
-                term: "The “pending” counter grows although the network is up",
+                term: "The number on the “Sync” indicator grows although the network is up",
                 detail:
                   "Do not stop working — scans are not lost. Tell an administrator: the send queue needs attention.",
               },
