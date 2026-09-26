@@ -1,3 +1,5 @@
+import type { ExceptionDto } from "./box-exceptions";
+
 /** A scan currently owning a code, as held by `code_registry`. */
 export interface OwnerRow {
   codeHash: string;
@@ -154,4 +156,58 @@ export function displacedIncumbents(
     rows.push({ codeHash: claim.codeHash, losing: sideOf(prior), winning: sideOf(claim) });
   }
   return rows;
+}
+
+/** A batch's claim together with the device-local box it was scanned into. */
+export interface BatchScan extends ClaimItem {
+  boxId: string | null;
+}
+
+/** The fields of an exception fact that decide which scans it releases. */
+export type ReleaseFact = Pick<
+  ExceptionDto,
+  "kind" | "boxId" | "shiftId" | "codeHash" | "targetScannedAt" | "occurredAt"
+>;
+
+/**
+ * The batch's scans of each code that none of the batch's own exceptions
+ * release, earliest first -- the first one is the scan still holding the code
+ * on the device when the batch ends. An exception reaches exactly what
+ * `applyExceptions` reaches: an undo its named scan, a clear the box's scans up
+ * to its instant, a disassembly every scan of the box.
+ */
+export function heldScans(
+  scans: readonly BatchScan[],
+  exceptions: readonly ReleaseFact[],
+): Map<string, BatchScan[]> {
+  const held = new Map<string, BatchScan[]>();
+  for (const scan of scans) {
+    if (exceptions.some((exception) => releases(exception, scan))) continue;
+    const list = held.get(scan.codeHash) ?? [];
+    list.push(scan);
+    held.set(scan.codeHash, list);
+  }
+  for (const list of held.values()) {
+    list.sort((a, b) => a.scannedAt.getTime() - b.scannedAt.getTime());
+  }
+  return held;
+}
+
+function releases(exception: ReleaseFact, scan: BatchScan): boolean {
+  if (scan.boxId === null || exception.boxId !== scan.boxId) return false;
+  if (exception.shiftId !== scan.shiftId) return false;
+  switch (exception.kind) {
+    case "disassemble":
+      return true;
+    case "clear":
+      return Date.parse(exception.occurredAt) >= scan.scannedAt.getTime();
+    case "undo":
+      return (
+        exception.codeHash === scan.codeHash &&
+        exception.targetScannedAt !== null &&
+        Date.parse(exception.targetScannedAt) === scan.scannedAt.getTime()
+      );
+    case "reprint":
+      return false;
+  }
 }
