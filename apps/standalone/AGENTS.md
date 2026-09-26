@@ -37,7 +37,11 @@ migration is never edited — add a new one; sqlx verifies checksums at start.
 Changing a wire shape means changing `proto`, the Zod schemas and the
 fixtures together; both test suites parse every fixture. Raise
 `PROTOCOL_VERSION` for an incompatible change; the host keeps accepting the
-previous version.
+previous version. Response types, which devices of different versions read,
+tolerate unknown fields; request types, which the host parses, reject them
+with `deny_unknown_fields`. The `product`, `protocol` and `minProtocol`
+fields of `hello` never change shape: read `HelloEnvelope` first and decide
+compatibility (`host_too_old`, `app_too_old`) before parsing the rest.
 
 ## Network and TLS
 

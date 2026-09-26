@@ -1,5 +1,6 @@
 use markiro_proto::{
-    certificate_fingerprint, codes, ErrorBody, Hello, HOST_PRODUCT, PROTOCOL_VERSION,
+    certificate_fingerprint, codes, compatibility, compatibility_for, display_fingerprint,
+    Compatibility, ErrorBody, Hello, HelloEnvelope, HOST_PRODUCT, PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -41,10 +42,28 @@ fn error_fixtures_round_trip() {
 }
 
 #[test]
-fn unknown_fields_are_rejected() {
-    let mut value = fixture("hello.json");
-    value["extra"] = Value::Bool(true);
-    assert!(serde_json::from_value::<Hello>(value).is_err());
+fn hello_ignores_fields_added_by_newer_hosts() {
+    let hello: Hello = serde_json::from_value(fixture("hello-future.json")).unwrap();
+    assert_eq!(hello.protocol, 3);
+    assert!(hello.initialized);
+}
+
+#[test]
+fn envelope_decides_compatibility_before_the_rest() {
+    let future: HelloEnvelope = serde_json::from_value(fixture("hello-future.json")).unwrap();
+    assert_eq!(compatibility_for(1, &future), Compatibility::AppTooOld);
+    assert_eq!(compatibility_for(2, &future), Compatibility::Compatible);
+    assert_eq!(compatibility_for(4, &future), Compatibility::HostTooOld);
+    let current: HelloEnvelope = serde_json::from_value(fixture("hello.json")).unwrap();
+    assert_eq!(compatibility(&current), Compatibility::Compatible);
+}
+
+#[test]
+fn display_fingerprint_groups_the_first_32_characters() {
+    assert_eq!(
+        display_fingerprint(&"0123456789abcdef".repeat(4)),
+        "0123 4567 89AB CDEF 0123 4567 89AB CDEF"
+    );
 }
 
 #[test]

@@ -3,12 +3,15 @@ import { z } from "zod";
 
 import { helloSchema, type Hello } from "./protocol.js";
 
-export type HostProbeErrorCode = "unreachable" | "not_markiro_host" | "invalid_response";
+export type HostProbeErrorCode =
+  "unreachable" | "not_markiro_host" | "invalid_response" | "host_too_old" | "app_too_old";
 
 const ERROR_CODES: readonly HostProbeErrorCode[] = [
   "unreachable",
   "not_markiro_host",
   "invalid_response",
+  "host_too_old",
+  "app_too_old",
 ];
 
 export class HostProbeError extends Error {

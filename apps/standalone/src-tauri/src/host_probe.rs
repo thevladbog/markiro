@@ -7,7 +7,10 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use markiro_proto::{Hello, HOST_PRODUCT, PROTOCOL_HEADER, PROTOCOL_VERSION};
+use markiro_proto::{
+    compatibility, Compatibility, Hello, HelloEnvelope, HOST_PRODUCT, PROTOCOL_HEADER,
+    PROTOCOL_VERSION,
+};
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::crypto::{verify_tls12_signature, verify_tls13_signature, CryptoProvider};
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
@@ -32,6 +35,10 @@ pub enum ProbeError {
     NotMarkiroHost,
     /// A Markiro host answered with a body this build cannot read.
     InvalidResponse,
+    /// The host speaks an older protocol than this app: update the host.
+    HostTooOld,
+    /// This app is older than the host accepts: update the app.
+    AppTooOld,
 }
 
 impl ProbeError {
@@ -41,6 +48,8 @@ impl ProbeError {
             ProbeError::Unreachable => "unreachable",
             ProbeError::NotMarkiroHost => "not_markiro_host",
             ProbeError::InvalidResponse => "invalid_response",
+            ProbeError::HostTooOld => "host_too_old",
+            ProbeError::AppTooOld => "app_too_old",
         }
     }
 }
@@ -77,16 +86,29 @@ pub async fn observe_hello(address: &str) -> Result<HelloObservation, ProbeError
         .json()
         .await
         .map_err(|_| ProbeError::NotMarkiroHost)?;
-    if body.get("product").and_then(serde_json::Value::as_str) != Some(HOST_PRODUCT) {
-        return Err(ProbeError::NotMarkiroHost);
-    }
-    let hello: Hello = serde_json::from_value(body).map_err(|_| ProbeError::InvalidResponse)?;
+    let hello = classify_hello(body)?;
     let fingerprint = seen
         .lock()
         .expect("fingerprint lock")
         .clone()
         .ok_or(ProbeError::Unreachable)?;
     Ok(HelloObservation { hello, fingerprint })
+}
+
+/// Classify a `/v1/hello` response body: foreign service, incompatible
+/// protocol, unreadable body, or a usable `Hello`.
+pub fn classify_hello(body: serde_json::Value) -> Result<Hello, ProbeError> {
+    let envelope: HelloEnvelope =
+        serde_json::from_value(body.clone()).map_err(|_| ProbeError::NotMarkiroHost)?;
+    if envelope.product != HOST_PRODUCT {
+        return Err(ProbeError::NotMarkiroHost);
+    }
+    match compatibility(&envelope) {
+        Compatibility::Compatible => {}
+        Compatibility::HostTooOld => return Err(ProbeError::HostTooOld),
+        Compatibility::AppTooOld => return Err(ProbeError::AppTooOld),
+    }
+    serde_json::from_value(body).map_err(|_| ProbeError::InvalidResponse)
 }
 
 #[derive(Debug)]
@@ -141,5 +163,66 @@ impl ServerCertVerifier for ObservingVerifier {
         self.provider
             .signature_verification_algorithms
             .supported_schemes()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn a_foreign_body_is_not_a_markiro_host() {
+        assert_eq!(
+            classify_hello(json!({"status": "ok"})),
+            Err(ProbeError::NotMarkiroHost)
+        );
+    }
+
+    #[test]
+    fn a_wrong_product_is_not_a_markiro_host() {
+        assert_eq!(
+            classify_hello(json!({"product": "other", "protocol": 1, "minProtocol": 1})),
+            Err(ProbeError::NotMarkiroHost)
+        );
+    }
+
+    #[test]
+    fn a_host_older_than_this_app_is_rejected() {
+        assert_eq!(
+            classify_hello(json!({"product": HOST_PRODUCT, "protocol": 0, "minProtocol": 0})),
+            Err(ProbeError::HostTooOld)
+        );
+    }
+
+    #[test]
+    fn an_app_older_than_the_host_accepts_is_rejected() {
+        assert_eq!(
+            classify_hello(json!({"product": HOST_PRODUCT, "protocol": 9, "minProtocol": 5})),
+            Err(ProbeError::AppTooOld)
+        );
+    }
+
+    #[test]
+    fn a_compatible_envelope_with_an_unreadable_body_is_invalid() {
+        assert_eq!(
+            classify_hello(json!({"product": HOST_PRODUCT, "protocol": 1, "minProtocol": 1})),
+            Err(ProbeError::InvalidResponse)
+        );
+    }
+
+    #[test]
+    fn a_compatible_hello_is_read() {
+        let hello = classify_hello(json!({
+            "product": "markiro-host",
+            "protocol": 1,
+            "minProtocol": 1,
+            "hostId": "3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f",
+            "version": "0.1.0",
+            "time": "2026-09-26T09:15:00Z",
+            "initialized": false
+        }))
+        .unwrap();
+        assert_eq!(hello.host_id, "3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f");
     }
 }

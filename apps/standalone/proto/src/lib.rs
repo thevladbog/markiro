@@ -3,6 +3,12 @@
 //! fixture in `fixtures/`: `tests/fixtures.rs` round-trips them here and
 //! `apps/standalone/test/protocol.test.ts` parses the same files with the Zod
 //! schemas, so a shape cannot change on one side only.
+//!
+//! Response types, which devices of different versions read, tolerate
+//! unknown fields; request types, which the host parses, reject them with
+//! `deny_unknown_fields`. The `product`, `protocol` and `minProtocol` fields
+//! of [`Hello`] never change shape: clients read [`HelloEnvelope`] first and
+//! decide [`compatibility`] before parsing the rest.
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -37,7 +43,7 @@ pub fn certificate_fingerprint(der: &[u8]) -> String {
 /// `GET /v1/hello`: who answers, which protocol range it understands, and
 /// whether the first-run wizard has completed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct Hello {
     pub product: String,
     pub protocol: u32,
@@ -49,15 +55,66 @@ pub struct Hello {
     pub initialized: bool,
 }
 
+/// The part of `hello` that keeps its shape in every protocol version.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HelloEnvelope {
+    pub product: String,
+    pub protocol: u32,
+    pub min_protocol: u32,
+}
+
+/// Whether this build can talk to a host.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Compatibility {
+    Compatible,
+    /// The host is older than this app: update the host.
+    HostTooOld,
+    /// This app is older than the host accepts: update the app.
+    AppTooOld,
+}
+
+/// Compatibility of a client speaking `client_protocol` with a host that
+/// accepts clients from `min_protocol` up to `protocol`.
+pub fn compatibility_for(client_protocol: u32, host: &HelloEnvelope) -> Compatibility {
+    if client_protocol > host.protocol {
+        Compatibility::HostTooOld
+    } else if client_protocol < host.min_protocol {
+        Compatibility::AppTooOld
+    } else {
+        Compatibility::Compatible
+    }
+}
+
+/// [`compatibility_for`] with this build's [`PROTOCOL_VERSION`].
+pub fn compatibility(host: &HelloEnvelope) -> Compatibility {
+    compatibility_for(PROTOCOL_VERSION, host)
+}
+
+/// Fingerprint for visual comparison with another screen: the first 32 hex
+/// characters, upper-cased, in eight groups of four (as the webview's
+/// `formatFingerprint`).
+pub fn display_fingerprint(hex: &str) -> String {
+    let head: Vec<char> = hex
+        .chars()
+        .take(32)
+        .map(|c| c.to_ascii_uppercase())
+        .collect();
+    head.chunks(4)
+        .map(|group| group.iter().collect::<String>())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// Body of every non-2xx response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct ErrorBody {
     pub error: ErrorDetail,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct ErrorDetail {
     /// One of [`codes`].
     pub code: String,

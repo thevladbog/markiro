@@ -22,13 +22,16 @@ describe("Tauri host probe", () => {
     expect(call).toHaveBeenCalledWith("host_hello", { address: "https://127.0.0.1:45710" });
   });
 
-  it.each(["unreachable", "not_markiro_host", "invalid_response"] as const)(
-    "keeps the shell's %s code",
-    async (code) => {
-      const call = vi.fn().mockRejectedValue(code);
-      await expect(createTauriHostProbe(call).hello("https://h")).rejects.toMatchObject({ code });
-    },
-  );
+  it.each([
+    "unreachable",
+    "not_markiro_host",
+    "invalid_response",
+    "host_too_old",
+    "app_too_old",
+  ] as const)("keeps the shell's %s code", async (code) => {
+    const call = vi.fn().mockRejectedValue(code);
+    await expect(createTauriHostProbe(call).hello("https://h")).rejects.toMatchObject({ code });
+  });
 
   it("treats an unexpected shell error as unreachable", async () => {
     const call = vi.fn().mockRejectedValue(new Error("boom"));

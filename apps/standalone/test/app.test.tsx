@@ -45,4 +45,15 @@ describe("App shell", () => {
     render(<App probe={{ hello }} />);
     expect(await screen.findByText("По этому адресу отвечает не служба Markiro.")).toBeTruthy();
   });
+
+  it("explains a version mismatch instead of a missing host", async () => {
+    const hello = vi
+      .fn<HostProbe["hello"]>()
+      .mockRejectedValue(new HostProbeError("app_too_old", "old"));
+    render(<App probe={{ hello }} />);
+    expect(await screen.findByText("Версии не совпадают")).toBeTruthy();
+    expect(
+      screen.getByText("Это приложение старее службы «Markiro Хост». Обновите приложение."),
+    ).toBeTruthy();
+  });
 });
