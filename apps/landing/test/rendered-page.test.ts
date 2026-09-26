@@ -7,6 +7,8 @@ import { fileURLToPath } from "node:url";
 import { JSDOM } from "jsdom";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { findFilmPage } from "../src/content/film";
+
 const appRoot = fileURLToPath(new URL("../", import.meta.url));
 const outputDirectory = mkdtempSync(path.join(tmpdir(), "markiro-landing-render-"));
 const enabledOutputDirectory = mkdtempSync(path.join(tmpdir(), "markiro-landing-enabled-render-"));
@@ -37,6 +39,7 @@ const SAMPLE_CLUSTER_ROUTES = [
   "/stati/markirovka-piva-2026/",
   "/instruktsii/stantsiya-vkhod-i-start-smeny/",
 ] as const;
+const FILM_ROUTES = ["/kak-rabotaet/", "/en/how-it-works/"] as const;
 
 beforeAll(() => {
   execFileSync(
@@ -78,7 +81,12 @@ beforeAll(() => {
     },
   );
 
-  for (const route of [...EXPECTED_ROUTES, ...HUB_ROUTES, ...SAMPLE_CLUSTER_ROUTES]) {
+  for (const route of [
+    ...EXPECTED_ROUTES,
+    ...HUB_ROUTES,
+    ...SAMPLE_CLUSTER_ROUTES,
+    ...FILM_ROUTES,
+  ]) {
     const outputPath =
       route === "/"
         ? path.join(outputDirectory, "index.html")
@@ -1430,8 +1438,15 @@ describe("rendered landing page", () => {
       }
 
       if (route !== "/" && route !== "/en/") {
-        const breadcrumbsLabel = route.startsWith("/en/") ? "Breadcrumbs" : "Хлебные крошки";
-        expect(routeDocument.querySelector(`nav[aria-label="${breadcrumbsLabel}"]`)).not.toBeNull();
+        // The film page is a full-bleed cinematic page like the home page: it
+        // carries breadcrumb structured data but, deliberately, no visible
+        // breadcrumb chrome.
+        if (!(FILM_ROUTES as readonly string[]).includes(route)) {
+          const breadcrumbsLabel = route.startsWith("/en/") ? "Breadcrumbs" : "Хлебные крошки";
+          expect(
+            routeDocument.querySelector(`nav[aria-label="${breadcrumbsLabel}"]`),
+          ).not.toBeNull();
+        }
         expect(graph["@graph"].some((entry) => entry["@type"] === "BreadcrumbList")).toBe(true);
       }
     }
@@ -1609,5 +1624,87 @@ describe("rendered landing page", () => {
       const relatedLinks = [...routeDocument.querySelectorAll('[data-related-pages] a[href^="/"]')];
       expect(relatedLinks.length).toBeGreaterThanOrEqual(2);
     }
+  });
+});
+
+describe("rendered film page", () => {
+  it.each([
+    ["/kak-rabotaet/", "ru"],
+    ["/en/how-it-works/", "en"],
+  ] as const)("%s tells the seven chapters as HTML", (route, locale) => {
+    const film = documents.get(route) as Document;
+    const page = findFilmPage(locale);
+    expect(film.documentElement.getAttribute("lang")).toBe(locale);
+    expect(film.querySelectorAll("h1")).toHaveLength(1);
+    expect(film.querySelector("h1")?.textContent?.trim()).toBe(page.chapters[0]?.title);
+    expect(film.querySelectorAll("section[data-film-chapter]")).toHaveLength(7);
+    expect(film.querySelectorAll("section[data-film-chapter] h2")).toHaveLength(6);
+    expect(film.querySelectorAll("[data-film-rail] a")).toHaveLength(7);
+    expect(film.querySelector("canvas[data-film-canvas]")).not.toBeNull();
+    const text = film.body.textContent?.replace(/\s+/gu, " ") ?? "";
+    for (const chapter of page.chapters) {
+      for (const phrase of [chapter.kicker, chapter.title, chapter.body, ...chapter.tags]) {
+        expect(text, phrase).toContain(phrase);
+      }
+      if (chapter.status !== undefined) expect(text).toContain(chapter.status);
+    }
+  });
+
+  it.each([
+    ["/kak-rabotaet/", "ru", "/en/how-it-works/"],
+    ["/en/how-it-works/", "en", "/kak-rabotaet/"],
+  ] as const)(
+    "%s publishes canonical, hreflang, JSON-LD and the demo form",
+    (route, locale, alternate) => {
+      const film = documents.get(route) as Document;
+      expect(film.querySelector('link[rel="canonical"]')?.getAttribute("href")).toBe(
+        `https://markiro.app${route}`,
+      );
+      expect(
+        film
+          .querySelector(`link[rel="alternate"][hreflang="${locale === "ru" ? "en" : "ru"}"]`)
+          ?.getAttribute("href"),
+      ).toBe(`https://markiro.app${alternate}`);
+      const graph = JSON.parse(
+        film.querySelector('script[type="application/ld+json"]')?.textContent ?? "",
+      ) as { "@graph": Array<Record<string, unknown>> };
+      expect(graph["@graph"].find((entry) => entry["@type"] === "WebPage")).toMatchObject({
+        url: `https://markiro.app${route}`,
+        inLanguage: locale,
+      });
+      expect(film.querySelector("main#main #demo")).not.toBeNull();
+      expect(
+        enabledDocuments.get(route)?.querySelector("main#main [data-demo-form]"),
+      ).not.toBeNull();
+    },
+  );
+
+  it("keeps the morning light, the night dark and the header in step", () => {
+    const film = documents.get("/kak-rabotaet/") as Document;
+    expect(
+      [...film.querySelectorAll<HTMLElement>("section[data-film-chapter]")].map(
+        (section) => section.dataset.theme,
+      ),
+    ).toEqual(["light", "light", "light", "light", "light", "dark", "dark"]);
+    const chrome = film.querySelector(".film-top");
+    expect(chrome?.getAttribute("data-theme")).toBe("light");
+    expect(chrome?.hasAttribute("data-film-chrome")).toBe(true);
+  });
+
+  it("loads the first poster eagerly, the rest lazily, all decorative and art-directed", () => {
+    const film = documents.get("/kak-rabotaet/") as Document;
+    const images = [...film.querySelectorAll<HTMLImageElement>(".film-chapter__poster img")];
+    expect(images).toHaveLength(7);
+    expect(images[0]?.getAttribute("loading")).toBe("eager");
+    expect(images[0]?.getAttribute("fetchpriority")).toBe("high");
+    for (const image of images.slice(1)) expect(image.getAttribute("loading")).toBe("lazy");
+    for (const image of images) {
+      expect(image.getAttribute("alt")).toBe("");
+      expect(image.getAttribute("width")).not.toBeNull();
+      expect(image.getAttribute("height")).not.toBeNull();
+    }
+    expect(
+      film.querySelectorAll('.film-chapter__poster source[media="(max-width: 860px)"]'),
+    ).toHaveLength(14);
   });
 });
