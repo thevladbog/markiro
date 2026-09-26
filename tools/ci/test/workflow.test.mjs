@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -270,6 +278,40 @@ test("product-labels browser contract runs in the Chromium job after both app bu
   assert.match(config, /"PRODUCT_LABELS_ADMIN_PORT", 43181/);
   assert.match(config, /"PRODUCT_LABELS_STATION_PORT", 43182/);
   assert.equal(config.match(/--strictPort/g)?.length, 2);
+});
+
+test("production-bundle reserves every browser harness port Linux could hand out as a source port", () => {
+  const job = workflow.jobs["production-bundle"];
+  const reserve = stepByName(job, "Reserve browser harness ports");
+  assert.ok(reserve, "production-bundle must reserve its browser harness ports");
+  const range = /^sudo sysctl -w net\.ipv4\.ip_local_reserved_ports=(\d+)-(\d+)$/.exec(
+    reserve.run.trim(),
+  );
+  assert.ok(range, "the reservation must be one sysctl range");
+  const [low, high] = [Number(range[1]), Number(range[2])];
+  // Before the first suite opens a loopback connection that could take one of them.
+  const firstBrowser = job.steps.findIndex((step) =>
+    /tools\/production-browser|:browser\b/.test(step.run ?? ""),
+  );
+  assert.ok(firstBrowser >= 0 && job.steps.indexOf(reserve) < firstBrowser);
+
+  const ports = new Set();
+  for (const name of readdirSync("tools/production-browser")) {
+    if (!name.endsWith(".playwright.config.ts")) continue;
+    const config = readFileSync(join("tools/production-browser", name), "utf8");
+    for (const match of config.matchAll(
+      /(?:--port[ =]|port = |_PORT", |(?:127\.0\.0\.1|localhost):)(\d[\d_]*)/g,
+    )) {
+      ports.add(Number(match[1].replaceAll("_", "")));
+    }
+  }
+  // The scan must still see the harnesses, or the check below proves nothing.
+  for (const known of [43179, 43182, 43188, 61593]) assert.ok(ports.has(known), `port ${known}`);
+  // ubuntu-latest hands out source ports from 32768-60999.
+  const exposed = [...ports]
+    .filter((port) => port >= 32768 && port <= 60999 && (port < low || port > high))
+    .sort((a, b) => a - b);
+  assert.deepEqual(exposed, []);
 });
 
 test("Android gate verifies original signed and budget fixture byte parity before Gradle", () => {
