@@ -5,7 +5,7 @@ export const STATION_EXCEPTIONS_CONTENT = {
     locale: "ru",
     title: "Станция сканирования: исключения и восстановление",
     summary:
-      "Пошаговая инструкция оператора для нештатных ситуаций: перепечатка этикетки, расформирование короба, сбой печати, коды, занятые другим терминалом.",
+      "Пошаговая инструкция оператора для нештатных ситуаций: перепечатка этикетки, расформирование короба, перепечатка и расформирование паллеты, сбой печати, коды, занятые другим терминалом.",
     sections: [
       {
         id: "purpose",
@@ -13,7 +13,7 @@ export const STATION_EXCEPTIONS_CONTENT = {
         blocks: [
           {
             kind: "paragraph",
-            text: "Инструкция описывает действия оператора в нештатных ситуациях: испорченная или потерянная этикетка короба, короб собран с ошибкой, принтер не напечатал этикетку, станция показывает коды, занятые другим терминалом. Вход на станцию описан в инструкции MKR-INS-01, штатный рабочий цикл — в MKR-INS-02.",
+            text: "Инструкция описывает действия оператора в нештатных ситуациях: испорченная или потерянная этикетка короба, короб собран с ошибкой, паллету нужно перепечатать или расформировать, принтер не напечатал этикетку, станция показывает коды, занятые другим терминалом. Вход на станцию описан в инструкции MKR-INS-01, штатный рабочий цикл — в MKR-INS-02.",
           },
           {
             kind: "callout",
@@ -29,7 +29,7 @@ export const STATION_EXCEPTIONS_CONTENT = {
           {
             kind: "step",
             title: "Откройте экран «Исключения»",
-            text: "Нажмите кнопку «Исключения» на рабочем экране. Станция покажет действия с коробами: для открытого короба — «Отменить последний скан» и «Очистить короб», для закрытых коробов этой смены — «Перепечатать этикетку» и «Расформировать короб»; недоступное сейчас действие неактивно. Кнопка «Назад» возвращает на шаг назад, а с первого экрана — к сканированию; после выполненного действия станция предложит «Вернуться к работе».",
+            text: "Нажмите кнопку «Исключения» на рабочем экране. Станция покажет действия с коробами: для открытого короба — «Отменить последний скан» и «Очистить короб», для закрытых коробов этой смены — «Перепечатать этикетку» и «Расформировать короб»; недоступное сейчас действие неактивно. Кнопка «Назад» возвращает на шаг назад, а с первого экрана — к сканированию; после выполненного действия станция предложит «Вернуться к работе». В смене с паллетами здесь же есть кнопка «Действия с паллетой» (раздел 5).",
             image: { id: "exception-action", caption: "Экран «Исключения»: выбор действия" },
           },
         ],
@@ -101,8 +101,41 @@ export const STATION_EXCEPTIONS_CONTENT = {
         ],
       },
       {
+        id: "pallets",
+        heading: "5. Исключения с паллетами",
+        blocks: [
+          {
+            kind: "paragraph",
+            text: "В смене с паллетами на экране «Исключения» под действиями с коробами есть кнопка «Действия с паллетой». Она открывает действия над закрытыми паллетами этой станции в текущей смене: «Перепечатать паллету» и «Расформировать паллету». Если закрытых паллет нет, станция сообщит «Сейчас нет закрытых паллет.», и обе кнопки будут неактивны. Кнопка «Назад» возвращает на шаг назад, а с первого экрана — к сканированию.",
+          },
+          {
+            kind: "step",
+            title: "Перепечатайте этикетку паллеты",
+            text: "Выберите «Перепечатать паллету». Если закрытых паллет несколько, выберите нужную в списке «Выберите закрытую паллету» — там указаны номер SSCC и число коробов. Укажите причину — «Этикетка повреждена», «Этикетка не читается», «Замятие принтера / нет печати», «Запрос контроля качества» или «Другая причина» — и нажмите «Подтвердить». Станция напечатает ту же этикетку с тем же SSCC.",
+            expected: "Станция показала «Действие выполнено», принтер напечатал этикетку паллеты.",
+          },
+          {
+            kind: "callout",
+            tone: "warning",
+            text: "Убедитесь, что этикетка вышла: если принтер её не напечатал, повторите перепечатку. Старую этикетку паллеты снимите и уничтожьте — на паллете должна остаться одна.",
+          },
+          {
+            kind: "step",
+            title: "Расформируйте паллету",
+            text: "Выберите «Расформировать паллету», паллету и причину — «Поддон повреждён», «Не те короба на паллете», «Отклонено контролем качества» или «Другая причина» — и нажмите «Подтвердить». Станция спросит «Расформировать паллету безвозвратно?»: номер SSCC паллеты будет аннулирован, и его нельзя будет использовать повторно. Проверьте номер и нажмите «Расформировать безвозвратно».",
+            image: { id: "pallet-exceptions", caption: "Расформирование паллеты: выбор причины" },
+            expected: "Станция показала «Действие выполнено», паллета пропала из списка закрытых.",
+          },
+          {
+            kind: "callout",
+            tone: "warning",
+            text: "Расформирование нельзя отменить. Короба с расформированной паллеты остаются закрытыми и учтёнными; этикетку паллеты снимите и уничтожьте, а как дальше собирать эти короба, решает мастер.",
+          },
+        ],
+      },
+      {
         id: "box-print-recovery",
-        heading: "5. Сбой печати при закрытии короба",
+        heading: "6. Сбой печати при закрытии короба",
         blocks: [
           {
             kind: "step",
@@ -132,7 +165,7 @@ export const STATION_EXCEPTIONS_CONTENT = {
       },
       {
         id: "conflicts",
-        heading: "6. Коды, занятые другим терминалом",
+        heading: "7. Коды, занятые другим терминалом",
         blocks: [
           {
             kind: "paragraph",
@@ -153,7 +186,7 @@ export const STATION_EXCEPTIONS_CONTENT = {
       },
       {
         id: "hardware",
-        heading: "7. Оборудование посреди смены",
+        heading: "8. Оборудование посреди смены",
         blocks: [
           {
             kind: "unordered-list",
@@ -161,7 +194,7 @@ export const STATION_EXCEPTIONS_CONTENT = {
               "Сканер показывает «Нет связи» — остановите работу, проверьте кабель сканера. Если связь не вернулась, позовите наладчика.",
               "«Часть сканеров недоступна» — на рабочем месте несколько сканеров, и один из них отключился. Продолжайте работу подключённым сканером и проверьте кабель второго; если связь не вернулась, позовите наладчика.",
               "«Клавиатурный» у сканера — станция принимает сканы как ввод с клавиатуры, так работают сканеры в режиме клавиатуры. Это не ошибка; если сканы при этом не доходят до станции, позовите наладчика.",
-              "Принтер не печатает — станция сама покажет экран восстановления при закрытии короба (раздел 5). Проверьте ленту, питание и кабель принтера.",
+              "Принтер не печатает — станция сама покажет экран восстановления при закрытии короба (раздел 6). Проверьте ленту, питание и кабель принтера.",
               "Индикатор «Принтер» в строке состояния показывает, на сколько из трёх видов этикеток (короб, дубль кода, паллета) назначен принтер, например 2 / 3. Меньше трёх — нормально, если смена эти этикетки не печатает. Если нужной этикетке принтер не назначен, при печати станция покажет «Принтер не настроен» — позовите наладчика.",
             ],
           },
@@ -173,7 +206,7 @@ export const STATION_EXCEPTIONS_CONTENT = {
       },
       {
         id: "troubleshooting",
-        heading: "8. Частые вопросы",
+        heading: "9. Частые вопросы",
         blocks: [
           {
             kind: "definition-list",
@@ -196,7 +229,7 @@ export const STATION_EXCEPTIONS_CONTENT = {
               {
                 term: "Счётчик «Конфликты» вырос",
                 detail:
-                  "Это список кодов, занятых другим терминалом (раздел 6). Работу не останавливайте, повторно не сканируйте.",
+                  "Это список кодов, занятых другим терминалом (раздел 7). Работу не останавливайте, повторно не сканируйте.",
               },
               {
                 term: "Закрыл короб без этикетки и забыл какой",
@@ -217,7 +250,7 @@ export const STATION_EXCEPTIONS_CONTENT = {
     locale: "en",
     title: "Scanning station: exceptions and recovery",
     summary:
-      "This is an informational translation. The matching Russian revision is authoritative. Step-by-step operator guide for unusual situations: reprinting a label, disassembling a box, print failures, and codes kept by another terminal.",
+      "This is an informational translation. The matching Russian revision is authoritative. Step-by-step operator guide for unusual situations: reprinting a label, disassembling a box, reprinting and disassembling a pallet, print failures, and codes kept by another terminal.",
     sections: [
       {
         id: "purpose",
@@ -225,7 +258,7 @@ export const STATION_EXCEPTIONS_CONTENT = {
         blocks: [
           {
             kind: "paragraph",
-            text: "This instruction covers the operator's actions in unusual situations: a damaged or lost box label, a box assembled by mistake, a printer that did not print the label, or the station showing codes kept by another terminal. Signing in is covered by instruction MKR-INS-01, the normal work cycle by MKR-INS-02.",
+            text: "This instruction covers the operator's actions in unusual situations: a damaged or lost box label, a box assembled by mistake, a pallet that needs a reprint or a disassembly, a printer that did not print the label, or the station showing codes kept by another terminal. Signing in is covered by instruction MKR-INS-01, the normal work cycle by MKR-INS-02.",
           },
           {
             kind: "callout",
@@ -241,7 +274,7 @@ export const STATION_EXCEPTIONS_CONTENT = {
           {
             kind: "step",
             title: "Open the “Exceptions” screen",
-            text: "Tap the “Exceptions” button on the work screen. The station shows the box actions: for the open box, “Undo last scan” and “Clear box”; for this shift's closed boxes, “Reprint label” and “Disassemble box”; an action that is not available right now is disabled. The “Back” button steps back, and from the first screen it returns to scanning; once an action is completed, the station offers “Back to work”.",
+            text: "Tap the “Exceptions” button on the work screen. The station shows the box actions: for the open box, “Undo last scan” and “Clear box”; for this shift's closed boxes, “Reprint label” and “Disassemble box”; an action that is not available right now is disabled. The “Back” button steps back, and from the first screen it returns to scanning; once an action is completed, the station offers “Back to work”. On a pallet shift, the screen also has a “Pallet actions” button (section 5).",
             image: {
               id: "exception-action",
               caption: "The “Exceptions” screen: choosing an action",
@@ -317,8 +350,46 @@ export const STATION_EXCEPTIONS_CONTENT = {
         ],
       },
       {
+        id: "pallets",
+        heading: "5. Pallet exceptions",
+        blocks: [
+          {
+            kind: "paragraph",
+            text: "On a pallet shift, the “Exceptions” screen has a “Pallet actions” button under the box actions. It opens the actions for this station's closed pallets in the current shift: “Reprint pallet” and “Disassemble pallet”. If there are no closed pallets, the station says “There are no closed pallets right now.” and both buttons are disabled. The “Back” button steps back, and from the first screen it returns to scanning.",
+          },
+          {
+            kind: "step",
+            title: "Reprint a pallet label",
+            text: "Choose “Reprint pallet”. If there are several closed pallets, pick one in the “Select a closed pallet” list, which shows the SSCC number and the box count. Pick a reason — “Label damaged”, “Label unreadable”, “Printer jam / no output”, “Quality control request” or “Other reason” — and tap “Confirm”. The station prints the same label with the same SSCC.",
+            expected:
+              "The station showed “Action completed” and the printer printed the pallet label.",
+          },
+          {
+            kind: "callout",
+            tone: "warning",
+            text: "Make sure the label came out: if the printer did not print it, repeat the reprint. Remove and destroy the old pallet label — exactly one label must remain on the pallet.",
+          },
+          {
+            kind: "step",
+            title: "Disassemble a pallet",
+            text: "Choose “Disassemble pallet”, the pallet and a reason — “Pallet damaged”, “Wrong boxes on pallet”, “Rejected by quality control” or “Other reason” — and tap “Confirm”. The station asks “Disassemble the pallet permanently?”: the pallet's SSCC number will be retired and cannot be reused. Check the number and tap “Disassemble permanently”.",
+            image: {
+              id: "pallet-exceptions",
+              caption: "Disassembling a pallet: choosing the reason",
+            },
+            expected:
+              "The station showed “Action completed” and the pallet disappeared from the closed list.",
+          },
+          {
+            kind: "callout",
+            tone: "warning",
+            text: "A disassembly cannot be undone. The boxes from a disassembled pallet stay closed and recorded; remove and destroy the pallet label, and your supervisor decides how to stack those boxes next.",
+          },
+        ],
+      },
+      {
         id: "box-print-recovery",
-        heading: "5. A print failure while closing a box",
+        heading: "6. A print failure while closing a box",
         blocks: [
           {
             kind: "step",
@@ -348,7 +419,7 @@ export const STATION_EXCEPTIONS_CONTENT = {
       },
       {
         id: "conflicts",
-        heading: "6. Codes kept by another terminal",
+        heading: "7. Codes kept by another terminal",
         blocks: [
           {
             kind: "paragraph",
@@ -369,7 +440,7 @@ export const STATION_EXCEPTIONS_CONTENT = {
       },
       {
         id: "hardware",
-        heading: "7. Hardware in the middle of a shift",
+        heading: "8. Hardware in the middle of a shift",
         blocks: [
           {
             kind: "unordered-list",
@@ -377,7 +448,7 @@ export const STATION_EXCEPTIONS_CONTENT = {
               "The scanner shows “No signal” — stop working and check the scanner cable. If the connection does not come back, call a technician.",
               "“Some scanners disconnected” — the workstation has several scanners and one of them dropped off. Keep working with the connected scanner and check the other one's cable; if the connection does not come back, call a technician.",
               "“Keyboard” for the scanner — the station receives scans as keyboard input, which is how scanners in keyboard mode work. This is not an error; if scans do not reach the station, call a technician.",
-              "The printer does not print — the station itself shows the recovery screen when a box is closed (section 5). Check the printer's ribbon, power and cable.",
+              "The printer does not print — the station itself shows the recovery screen when a box is closed (section 6). Check the printer's ribbon, power and cable.",
               "The “Printer” indicator in the status bar shows how many of the three label types (box, code duplicate, pallet) have a printer assigned, for example 2 / 3. Fewer than three is fine if the shift does not print those labels. If a label the shift needs has no printer, the station shows “Printer is not configured” when printing — call a technician.",
             ],
           },
@@ -389,7 +460,7 @@ export const STATION_EXCEPTIONS_CONTENT = {
       },
       {
         id: "troubleshooting",
-        heading: "8. Frequently asked questions",
+        heading: "9. Frequently asked questions",
         blocks: [
           {
             kind: "definition-list",
@@ -412,7 +483,7 @@ export const STATION_EXCEPTIONS_CONTENT = {
               {
                 term: "The “Conflicts” counter grew",
                 detail:
-                  "This is the list of codes kept by another terminal (section 6). Do not stop working and do not rescan them.",
+                  "This is the list of codes kept by another terminal (section 7). Do not stop working and do not rescan them.",
               },
               {
                 term: "Closed a box without a label and forgot which one",
