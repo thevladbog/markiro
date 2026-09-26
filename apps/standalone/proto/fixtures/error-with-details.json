@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "protocol_unsupported",
+    "message": "protocol 7 is outside 1..=1",
+    "details": { "protocol": 7, "minProtocol": 1, "maxProtocol": 1 }
+  }
+}

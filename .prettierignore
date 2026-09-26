@@ -58,3 +58,10 @@ apps/api/test/fixtures/inventory-task-form.snapshot.html
 # compares every render with its file byte for byte; reformatting would compare
 # the renderers against Prettier's opinion instead of the shipped output.
 packages/domain/test/fixtures/print-forms/
+
+# Rust build output, Tauri schemas and the dev host data directory of the
+# standalone workspace: gitignored in apps/standalone/.gitignore, which
+# Prettier does not read.
+apps/standalone/target/
+apps/standalone/src-tauri/gen/schemas/
+apps/standalone/.markiro-host/

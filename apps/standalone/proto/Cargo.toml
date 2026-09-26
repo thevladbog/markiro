@@ -1,0 +1,12 @@
+[package]
+name = "markiro-proto"
+version = "0.1.0"
+description = "Wire contract between the Markiro standalone host and its devices"
+edition = "2021"
+license-file = "../../../LICENSE"
+publish = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
