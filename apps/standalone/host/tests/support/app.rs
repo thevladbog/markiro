@@ -88,3 +88,23 @@ pub fn json(builder: Builder, body: Value) -> Request<Body> {
 pub fn empty(builder: Builder) -> Request<Body> {
     builder.body(Body::empty()).unwrap()
 }
+
+/// Add `Authorization: Bearer <key>`.
+pub fn with_device(builder: Builder, key: &str) -> Builder {
+    builder.header("authorization", format!("Bearer {key}"))
+}
+
+/// Pair a device of `kind` from loopback; returns its id and key.
+pub async fn pair_device(app: &TestApp, kind: &str) -> (String, String) {
+    let (status, body) = app
+        .send(json(
+            request("POST", "/v1/local-pair"),
+            serde_json::json!({ "kind": kind, "name": "Тестовое устройство", "appVersion": "0.1.0" }),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    (
+        body["deviceId"].as_str().unwrap().to_owned(),
+        body["deviceKey"].as_str().unwrap().to_owned(),
+    )
+}

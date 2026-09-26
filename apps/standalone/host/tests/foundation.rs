@@ -96,7 +96,7 @@ async fn migrations_apply_once_and_site_starts_uninitialized() {
         .fetch_one(&reopened)
         .await
         .unwrap();
-    assert_eq!(applied, 1);
+    assert_eq!(applied, i64::try_from(db::MIGRATOR.iter().count()).unwrap());
     let journal: String = sqlx::query_scalar("PRAGMA journal_mode")
         .fetch_one(&reopened)
         .await

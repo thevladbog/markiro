@@ -1,11 +1,15 @@
 //! Markiro standalone host library. `src/main.rs` wires it into the
 //! `run` / `service` / `print-fingerprint` commands; tests start it directly.
 
+pub mod audit;
+pub mod auth;
 pub mod clock;
 pub mod config;
 pub mod db;
 pub mod error;
 pub mod logging;
+pub mod routes;
+pub mod secrets;
 pub mod server;
 #[cfg(windows)]
 pub mod service;

@@ -7,9 +7,9 @@ use std::time::Duration;
 
 use axum::extract::{Request, State};
 use axum::http::{Method, Uri};
-use axum::middleware::Next;
+use axum::middleware::{self, Next};
 use axum::response::Response;
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use sqlx::SqlitePool;
 use time::OffsetDateTime;
@@ -52,9 +52,17 @@ impl AppState {
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/v1/hello", get(hello))
+        .merge(protected_routes().route_layer(middleware::from_fn(protocol_guard)))
         .method_not_allowed_fallback(method_not_allowed)
         .fallback(not_found)
         .with_state(state)
+}
+
+/// Routes behind the protocol guard.
+fn protected_routes() -> Router<AppState> {
+    Router::new()
+        .route("/v1/local-pair", post(crate::routes::pairing::local_pair))
+        .route("/v1/device", get(crate::routes::pairing::device_info))
 }
 
 /// Every route except `hello` requires a supported protocol version

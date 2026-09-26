@@ -147,3 +147,54 @@ impl ErrorBody {
         }
     }
 }
+
+/// Kind of a paired device.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeviceKind {
+    Station,
+    Office,
+    Handheld,
+}
+
+impl DeviceKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DeviceKind::Station => "station",
+            DeviceKind::Office => "office",
+            DeviceKind::Handheld => "handheld",
+        }
+    }
+}
+
+/// `POST /v1/local-pair`: a device on the host's own computer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LocalPairRequest {
+    pub kind: DeviceKind,
+    pub name: String,
+    pub app_version: String,
+    #[serde(default)]
+    pub capabilities: Vec<String>,
+}
+
+/// Response of `local-pair` (and, from plan 1c, `pairing/claim`). The device
+/// key is shown exactly once.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PairResponse {
+    pub device_id: String,
+    pub device_key: String,
+    pub host_id: String,
+}
+
+/// `GET /v1/device`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceInfo {
+    pub id: String,
+    pub kind: DeviceKind,
+    pub name: String,
+    pub line_id: Option<String>,
+    pub paired_at: String,
+}

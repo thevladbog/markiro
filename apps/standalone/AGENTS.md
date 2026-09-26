@@ -27,6 +27,20 @@ Office users (login and password, a session bound to a device), operators
 (PIN and badge, verified on the device) and devices (a per-device key) never
 grant each other's rights. A device key alone never opens office routes.
 
+## Local pairing trust
+
+`POST /v1/local-pair` and `POST /v1/bootstrap` accept only loopback peers, and
+loopback is their only gate: any process on the host PC can pair a device.
+That is acceptable because the host PC is the site's trusted machine; the
+app pins the certificate it observed over loopback. Devices on the network
+pair only with a one-time code (plan 1c).
+
+## Audit
+
+Every office change, login outcome, pairing and initialization writes one
+`audit_log` row. Tests assert the exact actor, action, target, result and
+details; details never hold secrets, salts or hashes.
+
 ## Databases
 
 DDL lives only in `host/migrations` and `src-tauri/migrations`. An applied

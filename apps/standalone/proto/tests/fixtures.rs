@@ -1,6 +1,7 @@
 use markiro_proto::{
     certificate_fingerprint, codes, compatibility, compatibility_for, display_fingerprint,
-    Compatibility, ErrorBody, Hello, HelloEnvelope, HOST_PRODUCT, PROTOCOL_VERSION,
+    Compatibility, DeviceInfo, DeviceKind, ErrorBody, Hello, HelloEnvelope, LocalPairRequest,
+    PairResponse, HOST_PRODUCT, PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -79,4 +80,20 @@ fn error_details_must_be_an_object() {
     let mut value = fixture("error-with-details.json");
     value["error"]["details"] = Value::String("not an object".into());
     assert!(serde_json::from_value::<ErrorBody>(value).is_err());
+}
+
+#[test]
+fn pairing_fixtures_round_trip() {
+    let request: LocalPairRequest = round_trip("local-pair-request.json");
+    assert_eq!(request.kind, DeviceKind::Station);
+    let _: PairResponse = round_trip("pair-response.json");
+    let info: DeviceInfo = round_trip("device-info.json");
+    assert!(info.line_id.is_none());
+}
+
+#[test]
+fn requests_reject_unknown_fields() {
+    let mut value = fixture("local-pair-request.json");
+    value["extra"] = Value::Bool(true);
+    assert!(serde_json::from_value::<LocalPairRequest>(value).is_err());
 }
