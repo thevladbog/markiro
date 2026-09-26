@@ -6,6 +6,8 @@ import { BELT_TOP, CONVEYOR, type PlantHandles } from "./plant";
 import type { ScreenTextures } from "./textures";
 
 const QUEUE_STEP = 0.14;
+/** Fully lit office windows glow at 0.85 of their colour, below the bloom threshold. */
+const WINDOW_GLOW = 0.85;
 
 function setMap(material: MeshBasicMaterial, texture: Texture): void {
   if (material.map !== texture) material.map = texture;
@@ -55,5 +57,5 @@ export function applyAnimation(
   setMap(handles.monitorScreen.material, screens.station(dark));
   setMap(handles.kioskScreen.material, screens.kiosk(dark, state.kioskStep));
   handles.windows.color.set(kit.colorOf("glass"));
-  handles.windows.emissiveIntensity = 1.4 * lamps * (0.35 + 0.65 * state.officeLights);
+  handles.windows.emissiveIntensity = WINDOW_GLOW * lamps * (0.35 + 0.65 * state.officeLights);
 }

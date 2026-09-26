@@ -83,8 +83,6 @@ export function createStage(canvas: HTMLCanvasElement, settings: TierSettings): 
   if (tiltH !== null && tiltV !== null) {
     composer.addPass(tiltH);
     composer.addPass(tiltV);
-    setUniform(tiltH, "r", TILT_FOCUS);
-    setUniform(tiltV, "r", TILT_FOCUS);
   }
   composer.addPass(new OutputPass());
   let width = 1;
@@ -119,6 +117,10 @@ export function createStage(canvas: HTMLCanvasElement, settings: TierSettings): 
         width,
         height,
       );
+      // The sharp band follows the lens shift, so it stays on the subject.
+      const focus = TILT_FOCUS + shift[1] / 2;
+      setUniform(tiltH, "r", focus);
+      setUniform(tiltV, "r", focus);
       background.set(lighting.background);
       if (ambient !== null) ambient.blendIntensity = lighting.ambientOcclusion;
       if (bloom !== null) {
