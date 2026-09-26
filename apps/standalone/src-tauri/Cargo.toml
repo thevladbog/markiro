@@ -30,6 +30,7 @@ windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Secu
 
 [dev-dependencies]
 markiro-host = { path = "../host" }
+tauri = { version = "2.11", features = ["test"] }
 tempfile = "3"
 tokio = { version = "=1.53.1", features = ["macros", "rt-multi-thread"] }
 

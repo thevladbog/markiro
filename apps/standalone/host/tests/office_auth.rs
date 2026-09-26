@@ -566,6 +566,8 @@ async fn a_wrong_current_password_changes_nothing() {
     let (_, key) = pair_device(&app, "office").await;
     let tech_id = seed_office_user(&app, "tech", "technologist", "correct horse battery").await;
     let token = login(&app, &key, "tech", "correct horse battery").await;
+    let (_, other_key) = pair_device(&app, "office").await;
+    let other_token = login(&app, &other_key, "tech", "correct horse battery").await;
     let phc: String = sqlx::query_scalar("SELECT password_phc FROM office_users WHERE id = ?")
         .bind(&tech_id)
         .fetch_one(&app.state.pool)
@@ -597,6 +599,14 @@ async fn a_wrong_current_password_changes_nothing() {
         )))
         .await;
     assert_eq!(me.0, StatusCode::OK);
+    let other = app
+        .send(empty(with_session(
+            request("GET", "/v1/office/me"),
+            &other_key,
+            &other_token,
+        )))
+        .await;
+    assert_eq!(other.0, StatusCode::OK, "a refused change ends no session");
     assert_eq!(
         password_audit(&app, "denied").await,
         vec![(
@@ -615,8 +625,15 @@ async fn a_wrong_current_password_changes_nothing() {
 async fn the_new_password_is_validated() {
     let app = TestApp::new().await;
     let (_, key) = pair_device(&app, "office").await;
-    seed_office_user(&app, "tech", "technologist", "correct horse battery").await;
+    let tech_id = seed_office_user(&app, "tech", "technologist", "correct horse battery").await;
     let token = login(&app, &key, "tech", "correct horse battery").await;
+    let phc: String = sqlx::query_scalar("SELECT password_phc FROM office_users WHERE id = ?")
+        .bind(&tech_id)
+        .fetch_one(&app.state.pool)
+        .await
+        .unwrap();
+    let before = host_revision(&app).await;
+
     let (status, body) = app
         .send(json_request(
             with_session(request("PUT", "/v1/office/me/password"), &key, &token),
@@ -633,6 +650,17 @@ async fn the_new_password_is_validated() {
         .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(body["error"]["code"], "validation_failed");
+
+    // A refused request changes nothing and leaves no audit row.
+    let after: String = sqlx::query_scalar("SELECT password_phc FROM office_users WHERE id = ?")
+        .bind(&tech_id)
+        .fetch_one(&app.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(after, phc);
+    assert_eq!(host_revision(&app).await, before);
+    assert!(password_audit(&app, "ok").await.is_empty());
+    assert!(password_audit(&app, "denied").await.is_empty());
 }
 
 #[tokio::test]
@@ -671,7 +699,9 @@ async fn password_change_attempts_are_rate_limited_and_shared_with_login() {
         }
     };
     for _ in 0..10 {
-        assert_eq!(attempt(LAN).await.0, StatusCode::UNAUTHORIZED);
+        let (status, body) = attempt(LAN).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert_eq!(body["error"]["details"]["credential"], "password");
     }
     let (status, body) = attempt(LAN).await;
     assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
@@ -696,7 +726,9 @@ async fn password_change_attempts_are_rate_limited_and_shared_with_login() {
     assert_eq!(body["error"]["details"]["credential"], "password");
 
     app.clock.advance(time::Duration::seconds(61));
-    assert_eq!(attempt(LAN).await.0, StatusCode::UNAUTHORIZED);
+    let (status, body) = attempt(LAN).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["error"]["details"]["credential"], "password");
 }
 
 #[tokio::test]

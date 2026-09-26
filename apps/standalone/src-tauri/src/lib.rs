@@ -65,6 +65,19 @@ async fn device_forget(state: tauri::State<'_, DeviceState>) -> Result<(), Strin
         .map_err(|error| error.code().to_owned())
 }
 
+/// The shell's commands. `run` registers them; `tests/ipc.rs` drives the
+/// same list through Tauri's mock runtime to pin the webview's IPC contract.
+pub fn invoke_handler<R: tauri::Runtime>(
+) -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
+    tauri::generate_handler![
+        host_hello,
+        device_status,
+        host_local_pair,
+        host_request,
+        device_forget
+    ]
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -77,13 +90,7 @@ pub fn run() {
             app.manage(DeviceState::load(dir));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
-            host_hello,
-            device_status,
-            host_local_pair,
-            host_request,
-            device_forget
-        ])
+        .invoke_handler(invoke_handler())
         .run(tauri::generate_context!())
         .expect("error while running the Markiro standalone app");
 }

@@ -105,6 +105,12 @@ reaches the webview. `%` is refused because an encoded `..` would slip past
 the route check. Add a route the webview needs to that list deliberately;
 never let a listed prefix cover a route that returns a secret.
 
+The webview's IPC contract — command names, argument names such as
+`officeToken`, the `{ status, body }` answer and bare-string rejections — is
+pinned by `src-tauri/tests/ipc.rs` through Tauri's mock runtime. Change it
+together with `src/host/client.ts`, `src/host/device.ts` and
+`src/host/probe.ts`.
+
 ## Device key and office session
 
 - The device key lives only in `device.json` in the app's local data
