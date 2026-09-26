@@ -70,21 +70,9 @@ export function OfficeLogin({ notice, onLogin, onBack }: OfficeLoginProps) {
           {...register("password")}
         />
         <div className="standalone-form__actions">
-          {/*
-           * Hidden rather than merely disabled while submitting: this button's
-           * label ("office.login.back") is the same RU string as the office
-           * shell's "leave office" button ("office.header.toFloor"), both
-           * "В цех". A disabled button still matches `getByRole`, so a test
-           * that waits for that role+name right after signing in can grab
-           * this (inert) button instead of the shell's, before the async
-           * login settles. Removing it from the tree while submitting makes
-           * the wait unambiguous.
-           */}
-          {!isSubmitting && (
-            <Button variant="secondary" onClick={onBack}>
-              {t("office.login.back")}
-            </Button>
-          )}
+          <Button variant="secondary" onClick={onBack} disabled={isSubmitting}>
+            {t("office.login.back")}
+          </Button>
           <Button type="submit" loading={isSubmitting}>
             {t("office.login.submit")}
           </Button>

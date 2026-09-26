@@ -115,6 +115,10 @@ describe("App", () => {
     renderApp({ probe: probeAnswering(true), device: fakeDevice(DEVICE_STATUS), host });
     fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
     await signIn();
+    // The login form's own back button shares the "В цех" name with the
+    // office header's; wait for the office to actually be open (the login
+    // form unmounted) so this query is unambiguous.
+    await screen.findByText("Вы вошли как Ирина Смирнова.");
     fireEvent.click(await screen.findByRole("button", { name: "В цех" }));
     fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
     expect(await screen.findByText("Вы вошли как Ирина Смирнова.")).toBeTruthy();
