@@ -1514,6 +1514,24 @@ describe("rendered landing page", () => {
     expect(heroImage?.getAttribute("fetchpriority")).toBe("high");
   });
 
+  it("gives every home image alt text and loads only the map eagerly", () => {
+    for (const route of ["/", "/en/"] as const) {
+      const images = [...(documents.get(route)?.querySelectorAll("main img") ?? [])];
+      expect(images.length, route).toBeGreaterThan(15);
+      expect(
+        images.filter((image) => image.hasAttribute("data-hero-image")),
+        route,
+      ).toHaveLength(1);
+      for (const image of images) {
+        const name = image.getAttribute("src") ?? route;
+        expect(image.hasAttribute("alt"), name).toBe(true);
+        expect(image.getAttribute("loading"), name).toBe(
+          image.hasAttribute("data-hero-image") ? "eager" : "lazy",
+        );
+      }
+    }
+  });
+
   it("renders complete unique metadata for every canonical route", () => {
     const titles = new Set<string>();
     const descriptions = new Set<string>();

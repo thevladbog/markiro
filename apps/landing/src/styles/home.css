@@ -253,6 +253,7 @@
 }
 
 /* A transparent bridge across the gap so the pointer never leaves .map-spot mid-crossing. */
+/* The bridge inherits the tooltip's visibility and opacity, so it only takes the pointer while the tooltip shows. */
 .map-spot__tip::before {
   position: absolute;
   right: 0;
@@ -326,6 +327,12 @@
 
 .home-hero__strip {
   display: none;
+}
+
+@media (max-width: 1279px) {
+  .home-hero__lead {
+    max-width: 27rem;
+  }
 }
 
 /* Tablets and phones: the crop sits under the header, the text follows, then the card strip. */

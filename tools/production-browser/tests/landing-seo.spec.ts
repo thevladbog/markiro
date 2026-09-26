@@ -689,3 +689,68 @@ test.describe("film page", () => {
     await context.close();
   });
 });
+
+test.describe("home page", () => {
+  test("hotspots show their screen on hover and focus, and Escape hides it", async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(isMobile, "phones get the card strip instead of hotspots");
+    await page.goto("/");
+    await page.locator("[data-consent-reject]").click();
+    const spot = page.locator("[data-map-spot]").filter({ hasText: "Склад" });
+    const tip = spot.locator('[role="tooltip"]');
+    await expect(tip).toBeHidden();
+    await spot.locator("a").hover();
+    await expect(tip).toBeVisible();
+    await expect(tip.locator("img")).toHaveAttribute("alt", /ТСД/u);
+    await page.mouse.move(1, 1);
+    await expect(tip).toBeHidden();
+    await spot.locator("a").focus();
+    await expect(tip).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(tip).toBeHidden();
+  });
+
+  test("the warehouse hotspot or card leads to the handheld row", async ({ page, isMobile }) => {
+    await page.goto("/");
+    await page.locator("[data-consent-reject]").click();
+    const link = isMobile
+      ? page.locator(".home-hero__strip a").filter({ hasText: "Склад" })
+      : page.locator("[data-map-spot]").filter({ hasText: "Склад" }).locator("a");
+    await link.click();
+    await expect(page).toHaveURL(/#product-handheld$/u);
+    await expect(page.locator("#product-handheld")).toBeInViewport();
+  });
+
+  test("loads no 3D code", async ({ page }) => {
+    const scripts: Promise<string>[] = [];
+    page.on("response", (response) => {
+      if (response.request().resourceType() === "script") scripts.push(response.text());
+    });
+    await page.goto("/", { waitUntil: "networkidle" });
+    await page.evaluate(() =>
+      window.scrollTo({ top: document.body.scrollHeight, behavior: "instant" }),
+    );
+    await page.waitForLoadState("networkidle");
+    const bodies = await Promise.all(scripts);
+    expect(bodies.length).toBeGreaterThan(0);
+    for (const body of bodies) expect(body).not.toContain("WebGLRenderer");
+  });
+
+  for (const viewport of [
+    { width: 390, height: 844 },
+    { width: 1440, height: 900 },
+  ] as const) {
+    test(`fits ${viewport.width} px without horizontal scrolling`, async ({ page }) => {
+      await page.setViewportSize(viewport);
+      for (const route of ["/", "/en/"]) {
+        await page.goto(route, { waitUntil: "networkidle" });
+        expect(
+          await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+          route,
+        ).toBe(true);
+      }
+    });
+  }
+});

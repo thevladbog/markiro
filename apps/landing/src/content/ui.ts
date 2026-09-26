@@ -4,7 +4,6 @@ const RU = {
   common: {
     breadcrumbsLabel: "Хлебные крошки",
     discussTask: "Обсудить задачу",
-    footerLabel: "Ссылки в подвале",
     homeLabel: "Маркиро, на главную страницу",
     menuClose: "Закрыть меню",
     menuOpen: "Открыть меню",
@@ -31,29 +30,6 @@ const RU = {
     skipLink: "Перейти к содержанию",
   },
   home: {
-    continuity: {
-      heading: ["Сеть может исчезнуть.", "Производство не должно."],
-      kicker: "01 / НЕПРЕРЫВНОСТЬ",
-      lead: "Станция работает локально и синхронизирует операции, когда соединение возвращается.",
-      points: [
-        ["Проверка на месте", "Коды проходят проверку на станции без ожидания ответа сервера."],
-        [
-          "Операции сохраняются",
-          "Каждое действие остаётся в локальном журнале до уверенной отправки.",
-        ],
-        ["Линия продолжает работу", "Оператор видит состояние и может восстановиться после сбоя."],
-      ],
-    },
-    cycle: {
-      heading: ["КОД ПРОШЁЛ.", "КОРОБ СОБРАН."],
-      kicker: "02 / ПРОИЗВОДСТВЕННЫЙ ЦИКЛ",
-      lead: "Оператор последовательно проверяет код на бутылке или банке, собирает короб и печатает этикетку с SSCC.",
-      stages: [
-        ["Проверка кода", "Система сверяет код и не пропускает проблемный."],
-        ["Сборка короба", "Товар собирается в короб с сохранением связи каждого кода с SSCC."],
-        ["Этикетка и печать", "Макет строится из тех же данных, которые прошли проверку."],
-      ],
-    },
     demo: {
       company: "Компания",
       contactNote: "Контактный телефон появится после подключения публичной линии.",
@@ -267,93 +243,10 @@ const RU = {
       lead: "Инструкции для станции и кабинета, договор и регламенты опубликованы на сайте. Их можно прочитать до разговора с нами.",
       legal: "Договор и регламенты",
     },
-    hero: {
-      filmLink: "Посмотреть, как это работает",
-      heading: ["Маркировка и агрегация.", "Линия идёт."],
-      imageAlt: "Оператор у конвейера линии розлива: бутылки с напитком движутся по ленте",
-      kicker: "МАРКИРОВКА / АГРЕГАЦИЯ / ПРОСЛЕЖИВАЕМОСТЬ",
-      lead: "Производственная система для пива, сидра и слабоалкогольных напитков: проверяем коды, собираем короба, печатаем этикетки и сохраняем операции при нестабильной сети.",
-      note: "ДЛЯ ПРОИЗВОДСТВЕННЫХ ЛИНИЙ, КОТОРЫЕ НЕЛЬЗЯ ОСТАНАВЛИВАТЬ",
-    },
-    implementation: {
-      heading: "Сейчас — пиво, сидр и слабоалкогольные напитки.",
-      kicker: "06 / ТЕКУЩАЯ СПЕЦИАЛИЗАЦИЯ",
-      lead: "Markiro сейчас ориентирован на производителей пива, сидра и другой продукции товарной группы «Пиво, напитки, изготавливаемые на основе пива, слабоалкогольные напитки». Принадлежность конкретного товара проверяется по ТН ВЭД ЕАЭС и ОКПД 2. Новые товарные группы добавляются поэтапно.",
-      link: "Обсудить первую линию",
-      steps: [
-        [
-          "Проверяем продукцию",
-          "Фиксируем товарную группу, форм-фактор упаковки и действующие правила учёта.",
-        ],
-        ["Разбираем линию", "Сопоставляем оборудование, роли и текущий маршрут кодов."],
-        ["Запускаем один сценарий", "Настраиваем рабочую станцию под конкретный продукт и короб."],
-        [
-          "Проверяем на смене",
-          "Работаем вместе с оператором и проверяем восстановление после ошибок.",
-        ],
-      ],
-    },
     materials: {
       allArticles: "Все статьи",
       heading: "Разборы задач с линии.",
       kicker: "07 / СТАТЬИ",
-    },
-    lineConsole: {
-      accepted: "Код принят",
-      assembly: "СБОРКА",
-      caseAssembly: "Сборка короба",
-      codes: "КОДОВ МАРКИРОВКИ",
-      illustrativeNote: "Иллюстрация интерфейса станции, значения условные.",
-      lineActive: "ЛИНИЯ АКТИВНА",
-      station: "СТАНЦИЯ 03 / АГРЕГАЦИЯ",
-      shiftAccepted: "ПРИНЯТО ЗА СМЕНУ",
-      timeValue: "52,40",
-      timeUnit: "сек",
-    },
-    platform: {
-      heading: ["Одна линия сегодня.", "Платформа завтра."],
-      kicker: "05 / ПЛАТФОРМА",
-      lead: "Подключайте новые контуры по готовности, не заменяя уже работающий процесс.",
-      modules: [
-        [
-          "Кабинет производства",
-          "Задания, шаблоны этикеток, история операций и управление площадкой.",
-        ],
-        ["Киоск выбытия", "Самообслуживание со сканером и восстановлением после разрыва связи."],
-        ["1С и API", "Обмен заданиями и статусами без ручного переноса данных."],
-      ],
-    },
-    product: {
-      codeAccepted: "КОД ПРИНЯТ",
-      codeCheck: "ПРОВЕРКА КОДА",
-      firstDescription: "Оператор видит, прошёл продукт проверку или требует отдельного решения.",
-      firstHeading: "Код проверяется сразу после сканирования",
-      heading: ["Не очередной кабинет.", "Инструмент для линии."],
-      kicker: "03 / ДВА РЕЖИМА",
-      labelsReady: ["ЭТИКЕТКИ", "ГОТОВЫ"],
-      lead: "Каждый экран отвечает на один вопрос оператора и не прячет состояние за таблицами.",
-      productFound: "Продукт найден",
-      productName: "Сидр яблочный 0,45 л",
-      productNumber: "ПРОДУКТ 404123",
-      secondDescription:
-        "Предпросмотр и печать используют один макет. Оператор не сверяет поля на глаз.",
-      secondHeading: "Этикетка строится из проверенных данных",
-      verified: "ПРОВЕРЕНО",
-    },
-    trace: {
-      benefits: ["Точное место сбоя", "История действий", "Понятный следующий шаг"],
-      events: [
-        ["14:21:03", "Код принят", "Марка связана с товаром", "ok"],
-        ["14:21:08", "Короб закрыт", "24 единицы в группе", "ok"],
-        ["14:21:12", "Этикетка отправлена на печать", "Принтер линии 02", "ok"],
-        ["14:21:18", "Печать не подтвердилась", "Нужно действие оператора", "problem"],
-      ],
-      heading: ["Ошибка не исчезает.", "Она получает понятный маршрут."],
-      kicker: "04 / ПРОСЛЕЖИВАЕМОСТЬ",
-      lead: "Каждое действие остаётся в истории. Проблемную операцию можно понять, повторить или передать ответственному.",
-      panelLabel: "Пример журнала событий",
-      station: "СТАНЦИЯ 03",
-      toolbar: "ИСТОРИЯ КОРОБА 24",
     },
   },
   hub: {
@@ -371,7 +264,6 @@ const EN = {
   common: {
     breadcrumbsLabel: "Breadcrumbs",
     discussTask: "Discuss your workflow",
-    footerLabel: "Footer links",
     homeLabel: "Markiro home page",
     menuClose: "Close menu",
     menuOpen: "Open menu",
@@ -398,41 +290,6 @@ const EN = {
     skipLink: "Skip to content",
   },
   home: {
-    continuity: {
-      heading: ["The network may disappear.", "Production must not."],
-      kicker: "01 / CONTINUITY",
-      lead: "The station operates locally and synchronizes its operations when connectivity returns.",
-      points: [
-        [
-          "Validate on the spot",
-          "Codes are validated at the station without waiting for a server response.",
-        ],
-        [
-          "Keep every operation",
-          "Each action remains in the local journal until delivery is confirmed.",
-        ],
-        [
-          "Keep the line moving",
-          "Operators see the current state and can recover after a failure.",
-        ],
-      ],
-    },
-    cycle: {
-      heading: ["CODE VERIFIED.", "CASE COMPLETE."],
-      kicker: "02 / PRODUCTION CYCLE",
-      lead: "The operator verifies the code on a bottle or can, assembles the case, and prints its SSCC label.",
-      stages: [
-        [
-          "Code verification",
-          "The system validates the code and stops invalid data at the operation boundary.",
-        ],
-        [
-          "Pack aggregation",
-          "Products become cases while each serialized code remains linked to the case SSCC.",
-        ],
-        ["Label and print", "The layout uses the same data that passed validation."],
-      ],
-    },
     demo: {
       company: "Company",
       contactNote: "A contact number will appear when the public phone line is connected.",
@@ -646,88 +503,10 @@ const EN = {
       lead: "Station and admin panel instructions, the agreement and the regulations are published on the site. You can read them before you talk to us.",
       legal: "Agreement and regulations",
     },
-    hero: {
-      filmLink: "See how it works",
-      heading: ["Serialization and aggregation.", "Keep the line moving."],
-      imageAlt: "An operator at a bottling line watching bottles move along the conveyor",
-      kicker: "SERIALIZATION / AGGREGATION / TRACEABILITY",
-      lead: "A production system for beer, cider and low-alcohol beverages: verify codes, aggregate cases, print labels, and retain operations through unstable connectivity.",
-      note: "FOR PRODUCTION LINES THAT CANNOT AFFORD TO STOP",
-    },
-    implementation: {
-      heading: "Currently focused on beer, cider and low-alcohol beverages.",
-      kicker: "06 / CURRENT PRODUCT FOCUS",
-      lead: "Markiro currently focuses on producers of beer, cider, and other products in the Chestny ZNAK product group “Beer, beverages made from beer and low-alcohol beverages”. Applicability to a specific product is checked against its TN VED EAEU and OKPD 2 codes. Additional product categories are being added gradually.",
-      link: "Discuss the first line",
-      steps: [
-        [
-          "Confirm the product",
-          "Document the product group, packaging format, and applicable traceability rules.",
-        ],
-        ["Understand the line", "Map the equipment, roles, and current route of serialized codes."],
-        ["Launch one workflow", "Configure the workstation for the actual product and case."],
-        ["Validate during a shift", "Work with an operator and test recovery from real errors."],
-      ],
-    },
     materials: {
       allArticles: "All articles",
       heading: "Field notes from the line.",
       kicker: "07 / ARTICLES",
-    },
-    lineConsole: {
-      accepted: "Code accepted",
-      assembly: "PACKING",
-      caseAssembly: "Case assembly",
-      codes: "SERIALIZED CODES",
-      illustrativeNote: "Station interface illustration, values are illustrative.",
-      lineActive: "LINE ACTIVE",
-      station: "STATION 03 / AGGREGATION",
-      shiftAccepted: "ACCEPTED THIS SHIFT",
-      timeValue: "52.40",
-      timeUnit: "sec",
-    },
-    platform: {
-      heading: ["One line today.", "A platform tomorrow."],
-      kicker: "05 / PLATFORM",
-      lead: "Connect new production areas when they are ready without replacing an already working process.",
-      modules: [
-        ["Production office", "Orders, label templates, operation history, and site management."],
-        ["Disposal kiosk", "Scanner-led self-service with recovery after a lost connection."],
-        ["1C and API", "Exchange orders and statuses without transferring data manually."],
-      ],
-    },
-    product: {
-      codeAccepted: "CODE ACCEPTED",
-      codeCheck: "CODE VERIFICATION",
-      firstDescription:
-        "The operator immediately sees whether the product passed validation or needs a separate decision.",
-      firstHeading: "Validate the code immediately after scanning",
-      heading: ["Not another back office.", "A tool for the line."],
-      kicker: "03 / TWO OPERATING MODES",
-      labelsReady: ["LABELS", "READY"],
-      lead: "Each screen answers one operator question and never hides the current state behind tables.",
-      productFound: "Product found",
-      productName: "Apple cider 0.45 L",
-      productNumber: "PRODUCT 404123",
-      secondDescription:
-        "Preview and print use one layout. The operator never has to compare fields by eye.",
-      secondHeading: "Build labels from verified data",
-      verified: "VERIFIED",
-    },
-    trace: {
-      benefits: ["Exact failure location", "Complete action history", "A clear next step"],
-      events: [
-        ["14:21:03", "Code accepted", "Serialized code linked to product", "ok"],
-        ["14:21:08", "Case closed", "24 items in the group", "ok"],
-        ["14:21:12", "Label sent to print", "Line printer 02", "ok"],
-        ["14:21:18", "Print not confirmed", "Operator action required", "problem"],
-      ],
-      heading: ["An error does not disappear.", "It gets a clear recovery path."],
-      kicker: "04 / TRACEABILITY",
-      lead: "Every action stays in the history. A failed operation can be understood, retried safely, or assigned to the right person.",
-      panelLabel: "Example event log",
-      station: "STATION 03",
-      toolbar: "CASE 24 HISTORY",
     },
   },
   hub: {
