@@ -73,6 +73,7 @@ const RU = {
       unavailableContact: "Напишите нам на",
     },
     hero: {
+      filmLink: "Посмотреть, как это работает",
       heading: ["Маркировка и агрегация.", "Линия идёт."],
       imageAlt: "Оператор у конвейера линии розлива: бутылки с напитком движутся по ленте",
       kicker: "МАРКИРОВКА / АГРЕГАЦИЯ / ПРОСЛЕЖИВАЕМОСТЬ",
@@ -258,6 +259,7 @@ const EN = {
       unavailableContact: "Email us at",
     },
     hero: {
+      filmLink: "See how it works",
       heading: ["Serialization and aggregation.", "Keep the line moving."],
       imageAlt: "An operator at a bottling line watching bottles move along the conveyor",
       kicker: "SERIALIZATION / AGGREGATION / TRACEABILITY",

@@ -1712,4 +1712,13 @@ describe("rendered film page", () => {
       film.querySelectorAll('.film-chapter__poster source[media="(max-width: 860px)"]'),
     ).toHaveLength(14);
   });
+
+  it.each([
+    ["/", "/kak-rabotaet/", "Посмотреть, как это работает"],
+    ["/en/", "/en/how-it-works/", "See how it works"],
+  ] as const)("%s links its hero to the film", (route, href, label) => {
+    const home = documents.get(route) as Document;
+    const link = home.querySelector<HTMLAnchorElement>(`.hero a[href="${href}"]`);
+    expect(link?.textContent?.trim()).toBe(label);
+  });
 });
