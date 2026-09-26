@@ -81,6 +81,11 @@ pub async fn put_org(
     if current.time_zone != org.time_zone {
         changed.push("timeZone");
     }
+    if changed.is_empty() {
+        // Nothing actually changed: report the profile as-is without bumping
+        // the revision, writing a row nobody changed, or auditing a no-op.
+        return Ok(Json(current));
+    }
     let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
     sqlx::query(
         "UPDATE org_profile SET name = ?, inn = ?, gln = ?, gs1_prefixes = ?, time_zone = ?, rev = ? WHERE id = 1",
@@ -99,7 +104,8 @@ pub async fn put_org(
     let prefix = validate::issuer_prefix(&org.gln).to_owned();
     for extension in [0_u8, 1] {
         sqlx::query(
-            "INSERT OR IGNORE INTO sscc_counters (issuer_prefix, extension, next_serial, rev) VALUES (?, ?, ?, ?)",
+            "INSERT INTO sscc_counters (issuer_prefix, extension, next_serial, rev) VALUES (?, ?, ?, ?) \
+             ON CONFLICT (issuer_prefix, extension) DO NOTHING",
         )
         .bind(&prefix)
         .bind(i64::from(extension))

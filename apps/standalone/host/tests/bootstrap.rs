@@ -230,6 +230,14 @@ async fn the_org_profile_is_read_by_all_and_changed_by_admins_with_revisions() {
     let app = TestApp::new().await;
     let (_, key) = pair_device(&app, "station").await;
     let admin_token = bootstrap(&app, &key).await;
+    let (_, me) = app
+        .send(empty(with_session(
+            request("GET", "/v1/office/me"),
+            &key,
+            &admin_token,
+        )))
+        .await;
+    let admin_id = me["id"].as_str().unwrap().to_owned();
     seed_office_user(&app, "tech", "technologist", "correct horse battery").await;
     let tech_token = login(&app, &key, "tech", "correct horse battery").await;
 
@@ -271,6 +279,10 @@ async fn the_org_profile_is_read_by_all_and_changed_by_admins_with_revisions() {
     assert_eq!(body["error"]["code"], "stale_revision");
     assert_eq!(body["error"]["details"]["currentRev"], rev);
 
+    let global_before: i64 = sqlx::query_scalar("SELECT rev FROM host_revision WHERE id = 1")
+        .fetch_one(&app.state.pool)
+        .await
+        .unwrap();
     let (status, body) = app
         .send(json_request(
             with_session(request("PUT", "/v1/office/org"), &key, &admin_token),
@@ -280,35 +292,119 @@ async fn the_org_profile_is_read_by_all_and_changed_by_admins_with_revisions() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["name"], "ООО «Атолл-Юг»");
     assert_eq!(body["inn"], Value::Null);
-    assert!(body["rev"].as_i64().unwrap() > rev);
+    let new_rev = body["rev"].as_i64().unwrap();
+    assert_eq!(new_rev, global_before + 1);
     let global: i64 = sqlx::query_scalar("SELECT rev FROM host_revision WHERE id = 1")
         .fetch_one(&app.state.pool)
         .await
         .unwrap();
-    assert_eq!(body["rev"].as_i64().unwrap(), global);
+    assert_eq!(new_rev, global);
 
-    let counters: Vec<(String, i64, i64)> =
-        sqlx::query_as("SELECT issuer_prefix, extension, next_serial FROM sscc_counters ORDER BY issuer_prefix, extension")
-            .fetch_all(&app.state.pool)
-            .await
-            .unwrap();
+    let counters: Vec<(String, i64, i64, i64)> = sqlx::query_as(
+        "SELECT issuer_prefix, extension, next_serial, rev FROM sscc_counters ORDER BY issuer_prefix, extension",
+    )
+    .fetch_all(&app.state.pool)
+    .await
+    .unwrap();
     assert_eq!(
         counters,
         vec![
-            ("460068200".into(), 0, 1500),
-            ("460068200".into(), 1, 40),
-            ("460709100".into(), 0, 1),
-            ("460709100".into(), 1, 0),
+            ("460068200".into(), 0, 1500, 1),
+            ("460068200".into(), 1, 40, 1),
+            ("460709100".into(), 0, 1, new_rev),
+            ("460709100".into(), 1, 0, new_rev),
         ]
     );
-    let details: String = sqlx::query_scalar(
-        "SELECT details FROM audit_log WHERE action = 'org.update' ORDER BY id DESC LIMIT 1",
+    let (actor_kind, actor_id, action, target_type, target_id, result, details): (
+        String,
+        Option<String>,
+        String,
+        Option<String>,
+        Option<String>,
+        String,
+        String,
+    ) = sqlx::query_as(
+        "SELECT actor_kind, actor_id, action, target_type, target_id, result, details FROM audit_log WHERE action = 'org.update' ORDER BY id DESC LIMIT 1",
     )
     .fetch_one(&app.state.pool)
     .await
     .unwrap();
     assert_eq!(
+        (
+            actor_kind.as_str(),
+            actor_id.as_deref(),
+            action.as_str(),
+            target_type.as_deref(),
+            target_id.as_deref(),
+            result.as_str()
+        ),
+        (
+            "office_user",
+            Some(admin_id.as_str()),
+            "org.update",
+            Some("org_profile"),
+            Some("1"),
+            "ok"
+        )
+    );
+    assert_eq!(
         serde_json::from_str::<Value>(&details).unwrap(),
         json!({ "changed": ["name", "inn", "gln", "gs1Prefixes", "timeZone"] })
     );
+}
+
+#[tokio::test]
+async fn putting_the_org_profile_unchanged_is_a_no_op() {
+    let app = TestApp::new().await;
+    let (_, key) = pair_device(&app, "station").await;
+    let admin_token = bootstrap(&app, &key).await;
+
+    let (status, org) = app
+        .send(empty(with_session(
+            request("GET", "/v1/office/org"),
+            &key,
+            &admin_token,
+        )))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let rev = org["rev"].as_i64().unwrap();
+    let global_before: i64 = sqlx::query_scalar("SELECT rev FROM host_revision WHERE id = 1")
+        .fetch_one(&app.state.pool)
+        .await
+        .unwrap();
+    let audit_count_before: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM audit_log WHERE action = 'org.update'")
+            .fetch_one(&app.state.pool)
+            .await
+            .unwrap();
+
+    // Exactly the org fields `bootstrap_body()` set, unchanged.
+    let unchanged = json!({
+        "name": "ООО «Атолл»",
+        "inn": "7701234567",
+        "gln": "4600682000010",
+        "gs1Prefixes": ["4600682"],
+        "timeZone": "Europe/Moscow",
+        "expectedRev": rev
+    });
+    let (status, body) = app
+        .send(json_request(
+            with_session(request("PUT", "/v1/office/org"), &key, &admin_token),
+            unchanged,
+        ))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["rev"].as_i64().unwrap(), rev);
+
+    let global_after: i64 = sqlx::query_scalar("SELECT rev FROM host_revision WHERE id = 1")
+        .fetch_one(&app.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(global_after, global_before);
+    let audit_count_after: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM audit_log WHERE action = 'org.update'")
+            .fetch_one(&app.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(audit_count_after, audit_count_before);
 }
