@@ -475,8 +475,8 @@ describe("deterministic branded DOCX", () => {
 describe("instruction rendering", () => {
   const instructionRequest = {
     code: "MKR-INS-01",
-    revision: "2026.09/01",
-    effectiveDate: "2026-09-02",
+    revision: "2026.09/02",
+    effectiveDate: "2026-09-26",
     locale: "ru",
     kind: "legal-pdf",
     verificationUrl: legalVerificationUrl(findLegalRelease("MKR-INS-01")),
@@ -743,11 +743,14 @@ describe("wordmark alignment across the registry", () => {
     // revisions, so both dropped off the list and are now centred.
     // 13 -> 12: the readiness/attributes reissue moved MKR-INS-10 to a new
     // revision, so it dropped off the list too.
-    expect(legacyWordmarkReleaseKeys()).toHaveLength(12);
+    // 12 -> 9: the small-screen work screen reissue moved MKR-INS-01, 02 and
+    // 03 to new revisions.
+    expect(legacyWordmarkReleaseKeys()).toHaveLength(9);
   });
 
   it("gives a release that is not on the list the corrected header", () => {
-    expect(isLegacyWordmarkRelease("MKR-INS-01", "2026.09/01")).toBe(true);
+    expect(isLegacyWordmarkRelease("MKR-INS-05", "2026.09/01")).toBe(true);
+    expect(isLegacyWordmarkRelease("MKR-INS-05", "2026.09/02")).toBe(false);
     expect(isLegacyWordmarkRelease("MKR-INS-01", "2026.09/02")).toBe(false);
   });
 });

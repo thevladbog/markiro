@@ -57,9 +57,13 @@ describe("legal document registry", () => {
       // 2026-09-02: the station instruction set (01/02/03/05) was reissued in
       // one sweep -- the floor header collapsed into status dots, the work
       // screen got its product hero, and the demo product image was redrawn.
-      "MKR-INS-01": "2026.09/01",
-      "MKR-INS-02": "2026.09/01",
-      "MKR-INS-03": "2026.09/01",
+      // 2026-09-26: the work screen was redesigned for small monitors -- a
+      // shift band with the total across terminals, a shift journal with its
+      // own error and duplicate counters, and «Конфликты» in the header -- so
+      // 01, 02 and 03, which show or describe it, were reissued again.
+      "MKR-INS-01": "2026.09/02",
+      "MKR-INS-02": "2026.09/02",
+      "MKR-INS-03": "2026.09/02",
       "MKR-INS-04": "2026.08/02",
       "MKR-INS-05": "2026.09/01",
       // 2026-09-10: обе редакции исправлены по факту экрана при съёмке
@@ -104,9 +108,9 @@ describe("legal document registry", () => {
           code !== "MKR-INS-11",
       ).every(({ effectiveDate }) => effectiveDate === "2026-08-15"),
     ).toBe(true);
-    expect(findLegalRelease("MKR-INS-01").effectiveDate).toBe("2026-09-02");
-    expect(findLegalRelease("MKR-INS-02").effectiveDate).toBe("2026-09-02");
-    expect(findLegalRelease("MKR-INS-03").effectiveDate).toBe("2026-09-02");
+    expect(findLegalRelease("MKR-INS-01").effectiveDate).toBe("2026-09-26");
+    expect(findLegalRelease("MKR-INS-02").effectiveDate).toBe("2026-09-26");
+    expect(findLegalRelease("MKR-INS-03").effectiveDate).toBe("2026-09-26");
     expect(findLegalRelease("MKR-INS-04").effectiveDate).toBe("2026-09-01");
     expect(findLegalRelease("MKR-INS-05").effectiveDate).toBe("2026-09-02");
     expect(findLegalRelease("MKR-INS-06").effectiveDate).toBe("2026-09-10");

@@ -17,9 +17,8 @@ import type { LegalDocumentCode, LegalRevision } from "../types.js";
 const LEGACY_WORDMARK_RELEASES: ReadonlySet<string> = new Set([
   "MKR-BRD-01/2026.08/01",
   "MKR-DPA-01/2026.08/01",
-  "MKR-INS-01/2026.09/01",
-  "MKR-INS-02/2026.09/01",
-  "MKR-INS-03/2026.09/01",
+  // MKR-INS-01, 02 and 03 left this list with the small-screen work screen
+  // reissue (2026.09/02) for the same reason as 08-10 below.
   "MKR-INS-04/2026.08/02",
   "MKR-INS-05/2026.09/01",
   "MKR-INS-06/2026.09/01",
