@@ -18,7 +18,7 @@ import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js"
 import { HorizontalTiltShiftShader } from "three/addons/shaders/HorizontalTiltShiftShader.js";
 import { VerticalTiltShiftShader } from "three/addons/shaders/VerticalTiltShiftShader.js";
 
-import type { CameraPose } from "../camera-path";
+import type { CameraPose, Vec2 } from "../camera-path";
 import type { LightingState } from "../lighting";
 import type { TierSettings } from "../quality";
 
@@ -35,6 +35,33 @@ const TILT_FOCUS = 0.5;
 function setUniform(pass: ShaderPass | null, name: string, value: number): void {
   const uniform = pass?.uniforms[name];
   if (uniform !== undefined) uniform.value = value;
+}
+
+/**
+ * Points the camera along the pose for a screen of this size and returns the lens shift
+ * it used: the target lands at the shift, in normalised device units.
+ */
+export function aimCamera(
+  camera: PerspectiveCamera,
+  pose: CameraPose,
+  width: number,
+  height: number,
+): Vec2 {
+  camera.fov = pose.fov;
+  camera.aspect = width / height;
+  camera.position.set(pose.position[0], pose.position[1], pose.position[2]);
+  camera.lookAt(pose.target[0], pose.target[1], pose.target[2]);
+  const shift = width >= height ? pose.shiftWide : pose.shiftTall;
+  // setViewOffset also refreshes the projection matrix after the fov change.
+  camera.setViewOffset(
+    width,
+    height,
+    (-shift[0] * width) / 2,
+    (shift[1] * height) / 2,
+    width,
+    height,
+  );
+  return shift;
 }
 
 export function createStage(canvas: HTMLCanvasElement, settings: TierSettings): Stage {
@@ -103,20 +130,7 @@ export function createStage(canvas: HTMLCanvasElement, settings: TierSettings): 
       camera.updateProjectionMatrix();
     },
     render(pose, lighting) {
-      camera.fov = pose.fov;
-      camera.position.set(pose.position[0], pose.position[1], pose.position[2]);
-      camera.lookAt(pose.target[0], pose.target[1], pose.target[2]);
-      // Lens shift: the target lands at `shift` in normalised device units.
-      // setViewOffset also refreshes the projection matrix after the fov change.
-      const shift = width >= height ? pose.shiftWide : pose.shiftTall;
-      camera.setViewOffset(
-        width,
-        height,
-        (-shift[0] * width) / 2,
-        (shift[1] * height) / 2,
-        width,
-        height,
-      );
+      const shift = aimCamera(camera, pose, width, height);
       // The sharp band follows the lens shift, so it stays on the subject.
       const focus = TILT_FOCUS + shift[1] / 2;
       setUniform(tiltH, "r", focus);

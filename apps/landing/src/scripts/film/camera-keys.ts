@@ -4,7 +4,9 @@ import { orbitKey, type CameraKey, type Vec2, type Vec3 } from "./camera-path";
 // portrait screens it sits above the bottom sheet. On the first phone screen
 // the plant sits between the header and the headline. In the middle of a
 // chapter the previous bottom sheet is still leaving the top of a phone
-// screen, so the middle keys hold the subject lower there.
+// screen, so the middle keys hold the subject lower there. The warehouse
+// subject runs from the handheld down to the pallet label, so on phones it
+// fills the gap between the leaving sheet and the chapter card instead.
 const HERO_TALL: Vec2 = [0, 0.57];
 const OVERVIEW_WIDE: Vec2 = [0.28, 0];
 const OVERVIEW_TALL: Vec2 = [0, 0.3];
@@ -14,7 +16,7 @@ const PLANT_WIDE: Vec2 = [0.2, 0];
 const PLANT_TALL: Vec2 = [0, 0.24];
 const PACKING_TALL: Vec2 = [0, -0.06];
 const HANDHELD_WIDE: Vec2 = [0.38, 0.06];
-const HANDHELD_TALL: Vec2 = [-0.14, -0.04];
+const HANDHELD_TALL: Vec2 = [-0.14, 0.12];
 const OFFLINE_WIDE: Vec2 = [0.2, 0.17];
 const OFFLINE_TALL: Vec2 = [0, 0.14];
 const KIOSK_WIDE: Vec2 = [0.2, 0.26];
