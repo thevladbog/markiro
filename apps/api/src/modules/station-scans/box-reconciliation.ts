@@ -49,8 +49,16 @@ export async function reconcileStationBoxes(
         sscc: schema.boxes.sscc,
         closedAt: schema.boxes.closedAt,
         palletId: schema.boxes.palletId,
+        palletKind: schema.pallets.kind,
       })
       .from(schema.boxes)
+      .leftJoin(
+        schema.pallets,
+        and(
+          eq(schema.pallets.tenantId, schema.boxes.tenantId),
+          eq(schema.pallets.id, schema.boxes.palletId),
+        ),
+      )
       .where(
         and(
           eq(schema.boxes.tenantId, tenantId),
@@ -89,6 +97,7 @@ export async function reconcileStationBoxes(
               id: schema.pallets.id,
               shiftId: schema.pallets.shiftId,
               devicePalletId: schema.pallets.devicePalletId,
+              disassembledAt: schema.pallets.disassembledAt,
             })
             .from(schema.pallets)
             .where(
@@ -179,8 +188,11 @@ export async function reconcileStationBoxes(
       } else if (found.closedAt === null || found.sscc === null) {
         results.push(result("replay_required", "closure_absent", count));
       } else if (requested.devicePalletId === null) {
+        // A handheld may put a closed box that stands on no pallet onto a
+        // warehouse pallet at any later time, and the station never learns of
+        // it. Only a production link contradicts the station's own closure.
         results.push(
-          found.palletId === null
+          found.palletId === null || found.palletKind === "warehouse"
             ? result("confirmed", "matched", count)
             : result("identity_conflict", "pallet_conflict", count),
         );
@@ -193,7 +205,13 @@ export async function reconcileStationBoxes(
               : result("identity_conflict", "pallet_conflict", count),
           );
         } else if (found.palletId !== null && found.palletId !== pallet.id) {
-          results.push(result("identity_conflict", "pallet_conflict", count));
+          // Taking the station's pallet apart frees its boxes for a warehouse
+          // pallet; while it still stands, the two links contradict each other.
+          results.push(
+            pallet.disassembledAt !== null && found.palletKind === "warehouse"
+              ? result("confirmed", "matched", count)
+              : result("identity_conflict", "pallet_conflict", count),
+          );
         } else if (found.palletId === null) {
           const updated = await tx
             .update(schema.boxes)
