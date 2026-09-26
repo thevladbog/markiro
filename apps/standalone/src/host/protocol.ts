@@ -7,7 +7,12 @@ export const DEFAULT_HOST_PORT = 45710;
 /** The host on this computer, when the app runs next to the service. */
 export const LOCAL_HOST_ADDRESS = `https://127.0.0.1:${DEFAULT_HOST_PORT}`;
 
-/** Mirrors `markiro_proto::Hello`; `.strict()` matches `deny_unknown_fields`. */
+/**
+ * Mirrors `markiro_proto::Hello`. Strict because the Rust shell rebuilds this
+ * payload from the proto type: an unknown key means the webview and the shell
+ * come from different builds. Host responses passed to the webview without
+ * that rebuild (plan 1b) use non-strict schemas, like the lenient Rust types.
+ */
 export const helloSchema = z
   .object({
     product: z.literal("markiro-host"),

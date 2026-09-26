@@ -33,7 +33,7 @@ describe("protocol schemas parse the shared Rust fixtures", () => {
     });
   });
 
-  it("rejects unknown fields, like serde's deny_unknown_fields", () => {
+  it("rejects unknown fields in payloads the Rust shell rebuilds from proto types", () => {
     const hello = { ...(fixture("hello.json") as Record<string, unknown>), extra: true };
     expect(helloSchema.safeParse(hello).success).toBe(false);
   });

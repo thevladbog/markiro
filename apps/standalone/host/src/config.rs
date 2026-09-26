@@ -22,7 +22,7 @@ pub enum ConfigError {
     },
     #[error("host config {path}: {reason}")]
     Invalid { path: PathBuf, reason: String },
-    #[error("no host.json in {path}: start the host once or pass the right --data-dir")]
+    #[error("no host.json in {path}: check --data-dir; a new host creates it on first start, an existing one needs it restored from a backup")]
     Missing { path: PathBuf },
 }
 

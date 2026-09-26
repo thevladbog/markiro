@@ -35,7 +35,8 @@ migration is never edited — add a new one; sqlx verifies checksums at start.
 ## Protocol
 
 Changing a wire shape means changing `proto`, the Zod schemas and the
-fixtures together; both test suites parse every fixture. Raise
+fixtures together; the Rust tests parse every fixture, and the Vitest suite
+parses every fixture whose shape crosses the IPC boundary. Raise
 `PROTOCOL_VERSION` for an incompatible change; the host keeps accepting the
 previous version. Response types, which devices of different versions read,
 tolerate unknown fields; request types, which the host parses, reject them

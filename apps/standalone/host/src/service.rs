@@ -17,7 +17,9 @@ use crate::{BoxError, StartOptions};
 pub const SERVICE_NAME: &str = "MarkiroHost";
 
 /// Recovery actions configured on the service (installer, stage 5) must see a
-/// failure, not a clean stop, or Windows will not restart it.
+/// failure, not a clean stop. The installer must also enable failure actions
+/// for non-crash exits (`sc failureflag MarkiroHost 1`), or Windows ignores
+/// this exit code.
 const FAILURE_EXIT_CODE: u32 = 1;
 
 define_windows_service!(ffi_service_main, service_main);
