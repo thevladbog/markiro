@@ -1,7 +1,19 @@
-import { hasValidCheckDigit, ssccSerialCapacity } from "@markiro/domain";
+import { ssccSerialCapacity } from "@markiro/domain";
 import { z } from "zod";
 
 import type { BootstrapRequest } from "../host/protocol.js";
+import {
+  characters,
+  issuerPrefix,
+  loginRule,
+  ORG_HOST_FIELDS,
+  orgFieldsSchema,
+  passwordRule,
+  personNameRule,
+  THIRTEEN_DIGITS,
+  toOrgInput,
+} from "../lib/rules.js";
+import { DEFAULT_TIME_ZONE } from "../lib/time-zones.js";
 
 /** Administrator, organization, SSCC starts and lines (stage 1 spec §1), then a review. */
 export const WIZARD_STEPS = ["admin", "org", "sscc", "lines", "review"] as const;
@@ -9,7 +21,6 @@ export type WizardStep = (typeof WIZARD_STEPS)[number];
 
 /** At most 20 lines, as on the host. */
 export const MAX_LINES = 20;
-export const DEFAULT_TIME_ZONE = "Europe/Moscow";
 
 export interface WizardValues {
   login: string;
@@ -67,64 +78,10 @@ export function defaultWizardValues(firstLineName: string): WizardValues {
   };
 }
 
-/** The SSCC issuer prefix the host derives from a GLN: its first 9 digits, as in the cloud. */
-export function issuerPrefix(gln: string): string {
-  return gln.slice(0, 9);
-}
-
-/** Split on commas, semicolons and spaces; repeats collapse. */
-export function parsePrefixList(text: string): string[] {
-  return [...new Set(text.split(/[\s,;]+/).filter((prefix) => prefix.length > 0))];
-}
-
-/** Characters as the host counts them (Unicode scalar values). */
-function characters(text: string): number {
-  return [...text].length;
-}
-
-function isValidPrefixList(text: string): boolean {
-  const prefixes = parsePrefixList(text);
-  return prefixes.length <= 10 && prefixes.every((prefix) => /^\d{4,12}$/.test(prefix));
-}
-
-const THIRTEEN_DIGITS = /^\d{13}$/;
-
 const adminSchema = z.object({
-  login: z
-    .string()
-    .trim()
-    .regex(/^[A-Za-z0-9._-]{3,64}$/, "wizard.errors.login"),
-  adminName: z
-    .string()
-    .trim()
-    .refine((name) => characters(name) >= 1 && characters(name) <= 100, "wizard.errors.name"),
-  password: z
-    .string()
-    .refine(
-      (password) => characters(password) >= 8 && characters(password) <= 128,
-      "wizard.errors.password",
-    ),
-});
-
-const orgSchema = z.object({
-  orgName: z
-    .string()
-    .trim()
-    .refine((name) => characters(name) >= 1 && characters(name) <= 200, "wizard.errors.orgName"),
-  inn: z
-    .string()
-    .trim()
-    .regex(/^(\d{10}|\d{12})?$/, "wizard.errors.inn"),
-  gln: z
-    .string()
-    .trim()
-    .regex(THIRTEEN_DIGITS, "wizard.errors.gln")
-    .refine(
-      (gln) => !THIRTEEN_DIGITS.test(gln) || hasValidCheckDigit(gln),
-      "wizard.errors.glnCheckDigit",
-    ),
-  gs1Prefixes: z.string().refine(isValidPrefixList, "wizard.errors.gs1Prefixes"),
-  timeZone: z.string().min(1, "wizard.errors.timeZone"),
+  login: loginRule,
+  adminName: personNameRule,
+  password: passwordRule,
 });
 
 function isPlainField(value: string): value is (typeof PLAIN_FIELDS)[number] {
@@ -191,12 +148,12 @@ export function validateStep(step: WizardStep, values: WizardValues): FieldIssue
     case "admin": {
       const issues = issuesOf(adminSchema.safeParse(values).error);
       if (values.password !== values.passwordConfirm) {
-        issues.push({ field: "passwordConfirm", message: "wizard.errors.passwordConfirm" });
+        issues.push({ field: "passwordConfirm", message: "rules.passwordConfirm" });
       }
       return issues;
     }
     case "org":
-      return issuesOf(orgSchema.safeParse(values).error);
+      return issuesOf(orgFieldsSchema.safeParse(values).error);
     case "sscc":
       return ssccIssues(values);
     case "lines":
@@ -209,20 +166,13 @@ export function validateStep(step: WizardStep, values: WizardValues): FieldIssue
 }
 
 export function toBootstrapRequest(values: WizardValues): BootstrapRequest {
-  const inn = values.inn.trim();
   return {
     admin: {
       login: values.login.trim(),
       name: values.adminName.trim(),
       password: values.password,
     },
-    org: {
-      name: values.orgName.trim(),
-      inn: inn === "" ? null : inn,
-      gln: values.gln.trim(),
-      gs1Prefixes: parsePrefixList(values.gs1Prefixes),
-      timeZone: values.timeZone,
-    },
+    org: toOrgInput(values),
     sscc: { boxNextSerial: values.boxNextSerial, palletNextSerial: values.palletNextSerial },
     lines: values.lines.map((line) => line.name.trim()),
   };
@@ -232,11 +182,6 @@ const HOST_FIELDS: Readonly<Record<string, WizardField>> = {
   "admin.login": "login",
   "admin.name": "adminName",
   "admin.password": "password",
-  "org.name": "orgName",
-  "org.inn": "inn",
-  "org.gln": "gln",
-  "org.gs1Prefixes": "gs1Prefixes",
-  "org.timeZone": "timeZone",
   "sscc.boxNextSerial": "boxNextSerial",
   "sscc.palletNextSerial": "palletNextSerial",
   lines: "lines.0.name",
@@ -246,6 +191,7 @@ const HOST_FIELDS: Readonly<Record<string, WizardField>> = {
 export function fieldFromHost(path: string): WizardField | null {
   const line = /^lines\.(\d+)$/.exec(path);
   if (line) return `lines.${Number(line[1])}.name`;
+  if (path.startsWith("org.")) return ORG_HOST_FIELDS[path.slice("org.".length)] ?? null;
   return HOST_FIELDS[path] ?? null;
 }
 

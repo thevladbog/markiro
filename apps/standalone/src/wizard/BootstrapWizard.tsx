@@ -1,5 +1,5 @@
 import { ssccSerialCapacity } from "@markiro/domain";
-import { useMemo, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { Controller, useFieldArray, useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 
@@ -9,11 +9,11 @@ import { HostError } from "../host/client.js";
 import { errorMessageKey } from "../host/errors.js";
 import type { BootstrapRequest } from "../host/protocol.js";
 import { errorProp } from "../lib/form-error.js";
+import { issuerPrefix } from "../lib/rules.js";
+import { TIME_ZONE_OPTIONS } from "../lib/time-zones.js";
 import {
-  DEFAULT_TIME_ZONE,
   defaultWizardValues,
   fieldFromHost,
-  issuerPrefix,
   MAX_LINES,
   stepOf,
   toBootstrapRequest,
@@ -23,9 +23,6 @@ import {
   type WizardStep,
   type WizardValues,
 } from "./wizard-form.js";
-
-/** IANA zones this runtime knows, the default first. */
-const TIME_ZONES = [...new Set([DEFAULT_TIME_ZONE, ...Intl.supportedValuesOf("timeZone")])];
 
 export interface BootstrapWizardProps {
   /** Pairs this computer if needed and creates the site; rejects with a `HostError` or a `DeviceError`. */
@@ -52,15 +49,6 @@ export function BootstrapWizard({ onSubmit }: BootstrapWizardProps) {
   const position = WIZARD_STEPS.indexOf(step);
   const gln = watch("gln").trim();
   const prefix = /^\d{13}$/.test(gln) ? issuerPrefix(gln) : null;
-  const zones = useMemo(
-    () =>
-      TIME_ZONES.map((zone) => ({
-        value: zone,
-        label: zone.replaceAll("_", " "),
-        keywords: [zone],
-      })),
-    [],
-  );
 
   const fieldError = (message: string | undefined) =>
     errorProp(message === undefined ? undefined : t(message));
@@ -104,7 +92,7 @@ export function BootstrapWizard({ onSubmit }: BootstrapWizardProps) {
       const field = error instanceof HostError && error.field ? fieldFromHost(error.field) : null;
       if (field) {
         setStep(stepOf(field));
-        setError(field, { type: "server", message: "wizard.errors.rejected" });
+        setError(field, { type: "server", message: "rules.rejected" });
         return;
       }
       setSubmitError(errorMessageKey(error));
@@ -168,29 +156,29 @@ export function BootstrapWizard({ onSubmit }: BootstrapWizardProps) {
           <>
             <p>{t("wizard.org.intro")}</p>
             <Input
-              label={t("wizard.org.name")}
+              label={t("org.name")}
               {...fieldError(errors.orgName?.message)}
               {...register("orgName")}
             />
             <Input
-              label={t("wizard.org.inn")}
-              hint={t("wizard.org.innHint")}
+              label={t("org.inn")}
+              hint={t("org.innHint")}
               inputMode="numeric"
               mono
               {...fieldError(errors.inn?.message)}
               {...register("inn")}
             />
             <Input
-              label={t("wizard.org.gln")}
-              hint={t("wizard.org.glnHint")}
+              label={t("org.gln")}
+              hint={t("org.glnHint")}
               inputMode="numeric"
               mono
               {...fieldError(errors.gln?.message)}
               {...register("gln")}
             />
             <Input
-              label={t("wizard.org.gs1Prefixes")}
-              hint={t("wizard.org.gs1PrefixesHint")}
+              label={t("org.gs1Prefixes")}
+              hint={t("org.gs1PrefixesHint")}
               mono
               {...fieldError(errors.gs1Prefixes?.message)}
               {...register("gs1Prefixes")}
@@ -200,14 +188,14 @@ export function BootstrapWizard({ onSubmit }: BootstrapWizardProps) {
               name="timeZone"
               render={({ field }) => (
                 <Combobox
-                  label={t("wizard.org.timeZone")}
-                  options={zones}
+                  label={t("org.timeZone")}
+                  options={TIME_ZONE_OPTIONS}
                   value={field.value}
                   onValueChange={field.onChange}
-                  placeholder={t("wizard.org.timeZonePlaceholder")}
-                  searchPlaceholder={t("wizard.org.timeZoneSearch")}
-                  emptyText={t("wizard.org.timeZoneEmpty")}
-                  loadingText={t("wizard.org.timeZoneLoading")}
+                  placeholder={t("org.timeZonePlaceholder")}
+                  searchPlaceholder={t("org.timeZoneSearch")}
+                  emptyText={t("org.timeZoneEmpty")}
+                  loadingText={t("org.timeZoneLoading")}
                   {...fieldError(errors.timeZone?.message)}
                 />
               )}

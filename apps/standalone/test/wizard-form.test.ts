@@ -31,38 +31,38 @@ describe("wizard steps", () => {
 
   it("check the administrator", () => {
     expect(validateStep("admin", values({ login: "ад" }))).toEqual([
-      { field: "login", message: "wizard.errors.login" },
+      { field: "login", message: "rules.login" },
     ]);
     expect(validateStep("admin", values({ adminName: "я".repeat(101) }))).toEqual([
-      { field: "adminName", message: "wizard.errors.name" },
+      { field: "adminName", message: "rules.name" },
     ]);
     expect(validateStep("admin", values({ password: "short", passwordConfirm: "short" }))).toEqual([
-      { field: "password", message: "wizard.errors.password" },
+      { field: "password", message: "rules.password" },
     ]);
     expect(validateStep("admin", values({ passwordConfirm: "another one" }))).toEqual([
-      { field: "passwordConfirm", message: "wizard.errors.passwordConfirm" },
+      { field: "passwordConfirm", message: "rules.passwordConfirm" },
     ]);
   });
 
   it("check the organization, including the GLN check digit", () => {
     expect(validateStep("org", values({ gln: "460068200001" }))).toEqual([
-      { field: "gln", message: "wizard.errors.gln" },
+      { field: "gln", message: "rules.gln" },
     ]);
     expect(validateStep("org", values({ gln: "4600682000010" }))).toEqual([
-      { field: "gln", message: "wizard.errors.glnCheckDigit" },
+      { field: "gln", message: "rules.glnCheckDigit" },
     ]);
     expect(validateStep("org", values({ inn: "77012345678" }))).toEqual([
-      { field: "inn", message: "wizard.errors.inn" },
+      { field: "inn", message: "rules.inn" },
     ]);
     expect(validateStep("org", values({ gs1Prefixes: "12, 4600682" }))).toEqual([
-      { field: "gs1Prefixes", message: "wizard.errors.gs1Prefixes" },
+      { field: "gs1Prefixes", message: "rules.gs1Prefixes" },
     ]);
     const eleven = Array.from({ length: 11 }, (_, index) => String(4600680 + index)).join(",");
     expect(validateStep("org", values({ gs1Prefixes: eleven }))).toEqual([
-      { field: "gs1Prefixes", message: "wizard.errors.gs1Prefixes" },
+      { field: "gs1Prefixes", message: "rules.gs1Prefixes" },
     ]);
     expect(validateStep("org", values({ orgName: "  " }))).toEqual([
-      { field: "orgName", message: "wizard.errors.orgName" },
+      { field: "orgName", message: "rules.orgName" },
     ]);
   });
 
