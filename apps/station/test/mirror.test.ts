@@ -13,7 +13,7 @@ import {
   type SqlExecutor,
   type StationBundle,
 } from "../src/lib/mirror.js";
-import { openFileDatabase } from "./support/sqlite-exec.js";
+import { makeRotatingExec, openFileDatabase } from "./support/sqlite-exec.js";
 import { closeShiftOffline, markShiftCloseAccepted } from "../src/lib/shift-close.js";
 
 function nodeExecutor(db = new DatabaseSync(":memory:")): SqlExecutor {
@@ -87,6 +87,53 @@ describe("mirror", () => {
       "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='offline_grant_scan_evidence_outbox'",
     );
     expect(trigger?.sql).toContain("NEW.replay_origin=0");
+  });
+  it("swaps in the issue-dropping disassembly trigger over pooled connections and clears older issues", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "station-disassembled-issues-"));
+    const path = join(dir, "station.sqlite");
+    // Two connections taking turns, as tauri-plugin-sql's pool does: the swap's
+    // DROP and CREATE land on different ones.
+    const [first, second] = [openFileDatabase(path), openFileDatabase(path)];
+    try {
+      const exec = makeRotatingExec([first, second]);
+      await applyMigrations(exec);
+      // What an older station leaves behind: a retired box whose reconciliation
+      // issue nothing can resolve, since retired boxes are never checked again.
+      first
+        .prepare(
+          `INSERT INTO boxes_mirror(box_id,shift_id,terminal_id,sscc,opened_at,closed_at,acked_at,disassembled_at)
+           VALUES(?,?,?,?,?,?,?,?)`,
+        )
+        .run(
+          "b1",
+          "s1",
+          "dev-1",
+          "123456789012345675",
+          "2026-09-23T00:00:00.000Z",
+          "2026-09-23T00:03:00.000Z",
+          "2026-09-23T00:04:00.000Z",
+          "2026-09-24T10:00:00.000Z",
+        );
+      first
+        .prepare(
+          `INSERT INTO box_reconciliation_issues
+           (box_id,shift_id,status,reason_code,local_item_count,server_item_count,checked_at)
+           VALUES(?,?,?,?,?,?,?)`,
+        )
+        .run("b1", "s1", "content_mismatch", "count_mismatch", 2, 0, "2026-09-24T09:00:00.000Z");
+
+      await applyMigrations(exec);
+
+      expect(await exec.all("SELECT box_id FROM box_reconciliation_issues")).toEqual([]);
+      const [trigger] = await exec.all<{ sql: string }>(
+        "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='box_exception_disassemble_local'",
+      );
+      expect(trigger?.sql).toContain("DELETE FROM box_reconciliation_issues");
+    } finally {
+      first.close();
+      second.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
   it.each([false, true])(
     "does not reopen a locally closed shift from a stale bundle (acknowledged: %s)",

@@ -8,9 +8,11 @@ import {
   sealCredentialGeneration,
 } from "../src/lib/credential-recovery.js";
 import { createSyncEngine } from "../src/lib/sync.js";
+import { disassembleBox } from "../src/lib/boxes.js";
 import {
   applyBoxReconciliationResults,
   readBoxReconciliationBatch,
+  readBoxReconciliationIssues,
   readBoxReconciliationSummary,
   requestFullShiftReconciliation,
 } from "../src/lib/box-reconciliation.js";
@@ -457,6 +459,30 @@ describe("closed-box reconciliation", () => {
       pending: 0,
       issues: 0,
     });
+  });
+
+  it("drops the issue of a box the operator takes apart", async () => {
+    const { db, exec } = fixture();
+    box(db, "b1");
+    scans(db, "b1", 1);
+    const facts = await readBoxReconciliationBatch(exec, "shift-1");
+    await applyBoxReconciliationResults(exec, facts, [
+      { boxId: "b1", status: "content_mismatch", reasonCode: "count_mismatch", serverItemCount: 0 },
+    ]);
+    expect(await readBoxReconciliationSummary(exec, "shift-1")).toMatchObject({ issues: 1 });
+
+    // A disassembled box is never checked again, so only its retirement can
+    // resolve the issue it carried.
+    await disassembleBox(exec, {
+      boxId: "b1",
+      shiftId: "shift-1",
+      terminalId: "dev-1",
+      operatorId: null,
+      reason: "Пересборка",
+      at: "2026-09-26T10:00:00.000Z",
+    });
+    expect(await readBoxReconciliationSummary(exec, "shift-1")).toMatchObject({ issues: 0 });
+    expect(await readBoxReconciliationIssues(exec)).toEqual([]);
   });
 
   it("stops automatic replay when the server still reports the box absent after re-ack", async () => {
