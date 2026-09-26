@@ -126,28 +126,28 @@ describe("office users", () => {
 
   it("sorts a new user the way the host does: ASCII case folded, then by byte", async () => {
     const session = fakeOfficeSession();
-    const aMinusB: OfficeUserRecord = {
+    const aMinusBc: OfficeUserRecord = {
       id: "11111111-1111-4111-8111-111111111111",
-      login: "a-b",
+      login: "a-bc",
       name: "Первая",
       role: "technologist",
       active: true,
       createdAt: "2026-09-26T09:00:00Z",
       rev: 1,
     };
-    const ab: OfficeUserRecord = {
+    const abc: OfficeUserRecord = {
       id: "22222222-2222-4222-8222-222222222222",
-      login: "ab",
+      login: "abc",
       name: "Вторая",
       role: "technologist",
       active: true,
       createdAt: "2026-09-26T09:05:00Z",
       rev: 1,
     };
-    session.api.listUsers.mockResolvedValue([aMinusB, ab]);
+    session.api.listUsers.mockResolvedValue([aMinusBc, abc]);
     session.api.createUser.mockResolvedValue({
       id: "33333333-3333-4333-8333-333333333333",
-      login: "a_b",
+      login: "A_bc",
       name: "Третья",
       role: "technologist",
       active: true,
@@ -156,20 +156,23 @@ describe("office users", () => {
     });
     renderOffice(session);
     fireEvent.click(await screen.findByRole("link", { name: "Пользователи" }));
-    await screen.findByText("a-b");
+    await screen.findByText("a-bc");
     fireEvent.click(screen.getByRole("button", { name: "Добавить пользователя" }));
-    type("Логин", "a_b");
+    type("Логин", "A_bc");
     type("Имя", "Третья");
     type("Пароль", "another long password");
     type("Повторите пароль", "another long password");
     fireEvent.click(within(dialog()).getByRole("button", { name: "Добавить" }));
-    expect(await screen.findByText("Пользователь a_b добавлен.")).toBeTruthy();
-    // The host orders by `login COLLATE NOCASE`: `-` (0x2D) < `_` (0x5F) < `b` (0x62),
-    // unlike `localeCompare`, which treats `-` and `_` as close to equal.
+    expect(await screen.findByText("Пользователь A_bc добавлен.")).toBeTruthy();
+    // The host orders by `login COLLATE NOCASE`: case folded first, then by
+    // byte (`-` 0x2D < `_` 0x5F < `b` 0x62), so `A_bc` sorts between `a-bc`
+    // and `abc` even though raw `A` (0x41) sorts before lowercase `a`
+    // (0x61) — a `byLogin` without case folding, like the old
+    // `localeCompare`, would put `A_bc` first instead.
     const table = screen.getByRole("table");
     const rows = within(table).getAllByRole("row").slice(1);
     const logins = rows.map((row) => within(row).getAllByRole("cell")[0]?.textContent);
-    expect(logins).toEqual(["a-b", "a_b", "ab"]);
+    expect(logins).toEqual(["a-bc", "A_bc", "abc"]);
   });
 
   it("re-reads the whole list after adding a user onto a list that failed to load", async () => {

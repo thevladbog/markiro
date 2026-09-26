@@ -1,7 +1,7 @@
 import { onlineManager, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { HostError } from "../src/host/client.js";
 import type { OrgProfile } from "../src/host/protocol.js";
@@ -13,6 +13,11 @@ import {
 } from "../src/office/office-query.js";
 import { OfficeSessionProvider, type OfficeSessionValue } from "../src/office/office-session.js";
 import { fakeOfficeSession } from "./support/office.js";
+
+// A safety net for the offline test's `finally`: if an assertion throws
+// before it runs, the online flag must not stay off for this file's later
+// tests.
+afterEach(() => onlineManager.setOnline(true));
 
 const PROFILE: OrgProfile = {
   name: "ООО «Атолл»",
