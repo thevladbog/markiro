@@ -5,7 +5,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::Json;
 use markiro_proto::{
-    codes, OfficeRole, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate, PasswordSet,
+    codes, OfficeRole, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate, PasswordSet, Secret,
 };
 use serde_json::json;
 use sqlx::SqliteConnection;
@@ -49,8 +49,8 @@ async fn read_user(
     row.map(record).transpose()
 }
 
-async fn hash(password: String) -> Result<String, ApiError> {
-    tokio::task::spawn_blocking(move || hash_password(&password))
+async fn hash(password: Secret) -> Result<String, ApiError> {
+    tokio::task::spawn_blocking(move || hash_password(password.expose()))
         .await
         .map_err(ApiError::internal)
 }
@@ -81,7 +81,7 @@ pub async fn create_user(
     let login = create.login.trim().to_owned();
     validate::office_login("login", &login)?;
     let name = validate::person_name("name", &create.name)?;
-    validate::password("password", &create.password)?;
+    validate::password("password", create.password.expose())?;
     let password_phc = hash(create.password).await?;
     let at = state.timestamp();
     let id = uuid::Uuid::new_v4().to_string();
@@ -226,7 +226,7 @@ pub async fn set_password(
     ApiJson(body): ApiJson<PasswordSet>,
 ) -> Result<StatusCode, ApiError> {
     context.require_admin()?;
-    validate::password("password", &body.password)?;
+    validate::password("password", body.password.expose())?;
     let password_phc = hash(body.password).await?;
     let at = state.timestamp();
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;

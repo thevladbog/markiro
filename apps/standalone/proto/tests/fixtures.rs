@@ -142,3 +142,28 @@ fn sscc_and_user_admin_fixtures_round_trip() {
     let _: OfficeUserUpdate = round_trip("office-user-update.json");
     let _: PasswordSet = round_trip("password-set.json");
 }
+
+#[test]
+fn secrets_never_appear_in_debug_output() {
+    let pair: PairResponse = serde_json::from_value(fixture("pair-response.json")).unwrap();
+    let login: OfficeLoginRequest =
+        serde_json::from_value(fixture("office-login-request.json")).unwrap();
+    let session: OfficeSession = serde_json::from_value(fixture("office-session.json")).unwrap();
+    let bootstrap: BootstrapRequest =
+        serde_json::from_value(fixture("bootstrap-request.json")).unwrap();
+    let create: OfficeUserCreate =
+        serde_json::from_value(fixture("office-user-create.json")).unwrap();
+    let password: PasswordSet = serde_json::from_value(fixture("password-set.json")).unwrap();
+    let debug = format!("{pair:?} {login:?} {session:?} {bootstrap:?} {create:?} {password:?}");
+    for secret in [
+        pair.device_key.expose(),
+        login.password.expose(),
+        session.token.expose(),
+        bootstrap.admin.password.expose(),
+        create.password.expose(),
+        password.password.expose(),
+    ] {
+        assert!(!debug.contains(secret), "Debug output leaks a secret");
+    }
+    assert_eq!(debug.matches("Secret(***)").count(), 6);
+}

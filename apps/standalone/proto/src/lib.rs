@@ -159,6 +159,36 @@ impl ErrorBody {
     }
 }
 
+/// A secret on the wire: a device key, a session token or a password. It
+/// serializes as a plain JSON string, but `Debug` never prints the value, so
+/// a stray `{:?}` or a `tracing` field cannot leak it.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct Secret(String);
+
+impl Secret {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    /// The secret itself; call only where the value is actually needed.
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<String> for Secret {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl std::fmt::Debug for Secret {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("Secret(***)")
+    }
+}
+
 /// Kind of a paired device.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -195,7 +225,7 @@ pub struct LocalPairRequest {
 #[serde(rename_all = "camelCase")]
 pub struct PairResponse {
     pub device_id: String,
-    pub device_key: String,
+    pub device_key: Secret,
     pub host_id: String,
 }
 
@@ -232,7 +262,7 @@ impl OfficeRole {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct OfficeLoginRequest {
     pub login: String,
-    pub password: String,
+    pub password: Secret,
 }
 
 /// The signed-in office user.
@@ -249,7 +279,7 @@ pub struct OfficeUser {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OfficeSession {
-    pub token: String,
+    pub token: Secret,
     pub user: OfficeUser,
     /// Absolute expiry; the session also ends after 30 idle minutes.
     pub expires_at: String,
@@ -261,7 +291,7 @@ pub struct OfficeSession {
 pub struct NewOfficeUser {
     pub login: String,
     pub name: String,
-    pub password: String,
+    pub password: Secret,
 }
 
 /// Organization fields as entered in the wizard.
@@ -392,7 +422,7 @@ pub struct OfficeUserCreate {
     pub login: String,
     pub name: String,
     pub role: OfficeRole,
-    pub password: String,
+    pub password: Secret,
 }
 
 /// `PUT /v1/office/users/{id}`.
@@ -409,5 +439,5 @@ pub struct OfficeUserUpdate {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PasswordSet {
-    pub password: String,
+    pub password: Secret,
 }

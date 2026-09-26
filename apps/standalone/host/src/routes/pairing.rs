@@ -98,7 +98,7 @@ pub async fn local_pair(
     tx.commit().await.map_err(ApiError::internal)?;
     Ok(Json(PairResponse {
         device_id: id,
-        device_key: key,
+        device_key: key.into(),
         host_id: state.host_id.clone(),
     }))
 }

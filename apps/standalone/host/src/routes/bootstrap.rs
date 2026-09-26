@@ -32,7 +32,7 @@ pub async fn bootstrap(
     let login = request.admin.login.trim().to_owned();
     validate::office_login("admin.login", &login)?;
     let name = validate::person_name("admin.name", &request.admin.name)?;
-    validate::password("admin.password", &request.admin.password)?;
+    validate::password("admin.password", request.admin.password.expose())?;
     let org = validate::org("org", &request.org)?;
     let prefix = validate::issuer_prefix(&org.gln).to_owned();
     validate::sscc_serial(
@@ -63,7 +63,7 @@ pub async fn bootstrap(
     // Hash before taking the write lock: PBKDF2 takes a noticeable fraction
     // of a second.
     let password = request.admin.password.clone();
-    let password_phc = tokio::task::spawn_blocking(move || hash_password(&password))
+    let password_phc = tokio::task::spawn_blocking(move || hash_password(password.expose()))
         .await
         .map_err(ApiError::internal)?;
 
@@ -175,7 +175,7 @@ pub async fn bootstrap(
 
     Ok(Json(BootstrapResponse {
         session: OfficeSession {
-            token,
+            token: token.into(),
             user: OfficeUser {
                 id: admin_id,
                 login,

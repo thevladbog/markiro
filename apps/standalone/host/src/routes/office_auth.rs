@@ -73,7 +73,7 @@ pub async fn login(
         let phc = verify_phc
             .as_deref()
             .unwrap_or_else(|| dummy_password_phc());
-        verify_password(phc, &password)
+        verify_password(phc, password.expose())
     })
     .await
     .map_err(ApiError::internal)?;
@@ -121,7 +121,7 @@ pub async fn login(
             .map_err(ApiError::internal)?;
             tx.commit().await.map_err(ApiError::internal)?;
             Ok(Json(OfficeSession {
-                token,
+                token: token.into(),
                 user: OfficeUser {
                     id,
                     login,
