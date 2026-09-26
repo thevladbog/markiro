@@ -10,7 +10,7 @@ import { isMainModule } from "./cli-main.mjs";
 
 const SHA256 = /^[0-9a-f]{64}$/;
 const execFile = promisify(execFileCallback);
-const RELEASE_ID = "MKR-LEGAL-2026.09-25-2026-09-26";
+const RELEASE_ID = "MKR-LEGAL-2026.09-26-2026-09-26";
 const EXPECTED_PDFS = Object.freeze([
   "markiro_mkr-brd-01_2026.08-01_en.pdf",
   "markiro_mkr-brd-01_2026.08-01_ru.pdf",
@@ -18,10 +18,10 @@ const EXPECTED_PDFS = Object.freeze([
   "markiro_mkr-dpa-01_2026.08-01_ru.pdf",
   "markiro_mkr-ins-01_2026.09-03_en.pdf",
   "markiro_mkr-ins-01_2026.09-03_ru.pdf",
-  "markiro_mkr-ins-02_2026.09-02_en.pdf",
-  "markiro_mkr-ins-02_2026.09-02_ru.pdf",
-  "markiro_mkr-ins-03_2026.09-03_en.pdf",
-  "markiro_mkr-ins-03_2026.09-03_ru.pdf",
+  "markiro_mkr-ins-02_2026.09-03_en.pdf",
+  "markiro_mkr-ins-02_2026.09-03_ru.pdf",
+  "markiro_mkr-ins-03_2026.09-04_en.pdf",
+  "markiro_mkr-ins-03_2026.09-04_ru.pdf",
   "markiro_mkr-ins-04_2026.09-01_en.pdf",
   "markiro_mkr-ins-04_2026.09-01_ru.pdf",
   "markiro_mkr-ins-05_2026.09-02_en.pdf",

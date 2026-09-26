@@ -65,9 +65,13 @@ describe("legal document registry", () => {
       // product -- the shift list's card buttons (01), the header's scanner
       // and printer indicators (03), printers assigned by label type (04) and
       // the one-line floor header on the inventory frames (05).
+      // 2026-09-26, later still: pallet work was documented for the operator
+      // -- the pallet strip, automatic and early pallet close with its label,
+      // the contents view and closing a shift with an open pallet (02), and
+      // pallet reprint and disassembly among the exceptions (03).
       "MKR-INS-01": "2026.09/03",
-      "MKR-INS-02": "2026.09/02",
-      "MKR-INS-03": "2026.09/03",
+      "MKR-INS-02": "2026.09/03",
+      "MKR-INS-03": "2026.09/04",
       "MKR-INS-04": "2026.09/01",
       "MKR-INS-05": "2026.09/02",
       // 2026-09-10: обе редакции исправлены по факту экрана при съёмке
