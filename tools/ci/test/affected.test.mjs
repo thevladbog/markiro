@@ -165,6 +165,8 @@ test("shared packages fan out to their current consumers", () => {
         "production_bundle",
         "station_rust",
         "station_windows_build",
+        "standalone_rust",
+        "standalone_windows_build",
       ],
     ],
     [
@@ -394,6 +396,8 @@ test("offline grant protocol and signed fixture changes exercise every native co
         "station_rust",
         "station_windows_build",
         "handheld_android",
+        "standalone_rust",
+        "standalone_windows_build",
       ],
       path,
     );

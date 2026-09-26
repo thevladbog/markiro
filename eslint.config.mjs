@@ -33,7 +33,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ["apps/admin/src/**/*.{ts,tsx}"],
+    files: ["apps/admin/src/**/*.{ts,tsx}", "apps/standalone/src/**/*.{ts,tsx}"],
     rules: {
       "no-restricted-syntax": [
         "error",

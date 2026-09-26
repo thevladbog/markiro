@@ -44,6 +44,7 @@ const sharedJobs = Object.freeze({
     "verify_app_tests",
     "production_bundle",
     ...stationJobs,
+    ...standaloneJobs,
   ],
   db: [
     "verify_static",
