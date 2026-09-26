@@ -1,7 +1,7 @@
 import { Group, PointLight } from "three";
 import { describe, expect, it } from "vitest";
 
-import { animationAt, type FilmAnimationState } from "../animations";
+import { animationAt, PRODUCT_KINDS, type FilmAnimationState } from "../animations";
 import { lightingAt } from "../lighting";
 import { applyAnimation } from "./apply";
 import { buildDistrict } from "./district";
@@ -59,7 +59,7 @@ describe("applying film state to the scene", () => {
     applyAnimation(handles, kit, screens, film, false, 0);
     film.belt.forEach((item, index) => {
       const slot = handles.belt[index];
-      expect(slot?.products[item.kind].visible).toBe(true);
+      expect(PRODUCT_KINDS.filter((kind) => slot?.products[kind].visible)).toEqual([item.kind]);
       const expected =
         item.code === "verified"
           ? kit.signals.verified

@@ -121,7 +121,10 @@ export function createStage(canvas: HTMLCanvasElement, settings: TierSettings): 
       );
       background.set(lighting.background);
       if (ambient !== null) ambient.blendIntensity = lighting.ambientOcclusion;
-      if (bloom !== null) bloom.strength = lighting.bloom;
+      if (bloom !== null) {
+        bloom.strength = lighting.bloom;
+        bloom.enabled = lighting.bloom > 0;
+      }
       composer.render();
     },
     dispose() {
