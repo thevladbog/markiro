@@ -1,0 +1,122 @@
+---
+import { Picture, getImage } from "astro:assets";
+
+import { findFilmPage } from "../../content/film";
+import { posterFor } from "../../content/film-posters";
+import {
+  HOME_MAP_IMAGE,
+  HOME_MAP_PHONE_IMAGE,
+  SPOT_SCREENS,
+  homeScreen,
+} from "../../content/home-images";
+import type { Locale } from "../../content/pages";
+import { getUiCopy } from "../../content/ui";
+import type { PublicPhone } from "../../lib/site-config";
+import { projectHomeMap } from "../../scripts/film/world/home-map";
+
+interface Props {
+  locale: Locale;
+  phone: PublicPhone | null;
+}
+
+const { locale, phone } = Astro.props;
+const ui = getUiCopy(locale);
+const copy = ui.home.mapHero;
+const points = new Map(projectHomeMap().map((point) => [point.id, point]));
+// Phones get the crop around the hall; both stills share the stage's 16:10 shape.
+const [wideAvif, wideWebp, phoneAvif, phoneWebp] = await Promise.all([
+  getImage({ src: HOME_MAP_IMAGE, widths: [1440, 2160, 2880], format: "avif" }),
+  getImage({ src: HOME_MAP_IMAGE, widths: [1440, 2160, 2880], format: "webp" }),
+  getImage({ src: HOME_MAP_PHONE_IMAGE, widths: [780, 1170, 1500], format: "avif" }),
+  getImage({ src: HOME_MAP_PHONE_IMAGE, widths: [780, 1170, 1500], format: "webp" }),
+]);
+---
+
+<section class="home-hero" id="hero" aria-labelledby="hero-title">
+  <div class="home-hero__stage">
+    <picture>
+      <source media="(max-width: 1023px)" type="image/avif" srcset={phoneAvif.srcSet.attribute} sizes="100vw" />
+      <source media="(max-width: 1023px)" type="image/webp" srcset={phoneWebp.srcSet.attribute} sizes="100vw" />
+      <source type="image/avif" srcset={wideAvif.srcSet.attribute} sizes="100vw" />
+      <source type="image/webp" srcset={wideWebp.srcSet.attribute} sizes="100vw" />
+      <img
+        class="home-hero__image"
+        src={wideWebp.src}
+        width={HOME_MAP_IMAGE.width}
+        height={HOME_MAP_IMAGE.height}
+        alt={copy.imageAlt}
+        loading="eager"
+        fetchpriority="high"
+        decoding="sync"
+        data-hero-image
+      />
+    </picture>
+    <ul class="home-hero__spots" aria-label={copy.stripLabel}>
+      {copy.spots.map((spot) => {
+        const point = points.get(spot.id);
+        if (point === undefined) throw new Error(`no map point for ${spot.id}`);
+        return (
+          <li
+            class="map-spot"
+            data-map-spot
+            data-tip={point.y < 0.55 ? "below" : "above"}
+            style={`left: ${(point.x * 100).toFixed(2)}%; top: ${(point.y * 100).toFixed(2)}%;`}
+          >
+            <a class="map-spot__link" href={spot.target} aria-describedby={`map-tip-${spot.id}`}>
+              <span class="map-spot__dot" aria-hidden="true"></span>
+              <span class="map-spot__label">{spot.label}</span>
+            </a>
+            <div class="map-spot__tip" role="tooltip" id={`map-tip-${spot.id}`}>
+              <p class="map-spot__title">{spot.label}</p>
+              <p class="map-spot__line">{spot.line}</p>
+              <Picture
+                src={homeScreen(locale, SPOT_SCREENS[spot.id])}
+                alt={spot.screenAlt}
+                widths={[480, 720]}
+                formats={["avif", "webp"]}
+                sizes="15.25rem"
+                loading="lazy"
+              />
+            </div>
+          </li>
+        );
+      })}
+    </ul>
+  </div>
+
+  <div class="container home-hero__content">
+    <p class="section-index">{copy.kicker}</p>
+    <h1 id="hero-title">{copy.heading[0]}<br />{copy.heading[1]}</h1>
+    <p class="home-hero__lead">{copy.lead}</p>
+    <div class="home-hero__actions">
+      <a class="button" href="#demo" data-analytics="landing_demo_click" data-placement="hero">
+        {ui.common.requestDemoShort} <span aria-hidden="true">→</span>
+      </a>
+      {phone && (
+        <a class="home-hero__phone" href={phone.href} data-analytics="landing_phone_click" data-placement="hero">
+          {phone.display}
+        </a>
+      )}
+      <a class="home-hero__film-link" href={findFilmPage(locale).path}>
+        {copy.filmLink} <span aria-hidden="true">→</span>
+      </a>
+    </div>
+    <p class="home-hero__hint">{copy.hint}</p>
+  </div>
+
+  <nav class="home-hero__strip" aria-label={copy.stripLabel}>
+    {copy.spots.map((spot) => (
+      <a class="home-hero__stop" href={spot.target}>
+        <Picture
+          src={posterFor(spot.id).wide}
+          alt=""
+          widths={[264, 396]}
+          formats={["avif", "webp"]}
+          sizes="8.25rem"
+          loading="lazy"
+        />
+        <span>{spot.label} <span aria-hidden="true">→</span></span>
+      </a>
+    ))}
+  </nav>
+</section>

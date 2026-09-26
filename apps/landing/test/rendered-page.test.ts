@@ -1114,8 +1114,14 @@ describe("rendered landing page", () => {
     }
   });
 
-  it("activates the shared dark design tokens", () => {
-    expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+  it("renders the home page on the light theme", () => {
+    for (const route of ["/", "/en/"] as const) {
+      const home = documents.get(route);
+      expect(home?.documentElement.getAttribute("data-theme"), route).toBe("light");
+      expect(home?.querySelector('meta[name="theme-color"]')?.getAttribute("content")).toBe(
+        "#fafaf8",
+      );
+    }
   });
 
   it("sets a mobile-safe viewport without disabling zoom", () => {
@@ -1330,11 +1336,52 @@ describe("rendered landing page", () => {
     }
   });
 
-  it("describes the hero photograph for image search", () => {
-    expect(document.querySelector("[data-hero-image]")?.getAttribute("alt")).toContain("розлива");
-    expect(
-      documents.get("/en/")?.querySelector("[data-hero-image]")?.getAttribute("alt"),
-    ).toContain("bottling line");
+  it("renders the map hero with five hotspots and a card strip for phones", () => {
+    const targets = [
+      "#product-line",
+      "#product-line",
+      "#product-handheld",
+      "#product-kiosk",
+      "#product-office",
+    ];
+    for (const [route, heading, alt, labels] of [
+      ["/", "Линия идёт.", "Макет завода", ["Линия", "Упаковка", "Склад", "Киоск", "Офис"]],
+      [
+        "/en/",
+        "Keep the line moving.",
+        "Scale model of a plant",
+        ["Line", "Packing", "Warehouse", "Kiosk", "Office"],
+      ],
+    ] as const) {
+      const hero = documents.get(route)?.querySelector("section#hero");
+      expect(hero?.querySelector("h1")?.textContent, route).toContain(heading);
+      const spots = [...(hero?.querySelectorAll("[data-map-spot]") ?? [])];
+      expect(spots.map((spot) => spot.querySelector(".map-spot__label")?.textContent)).toEqual(
+        labels,
+      );
+      expect(spots.map((spot) => spot.querySelector("a")?.getAttribute("href"))).toEqual(targets);
+      for (const spot of spots) {
+        const [, left, top] =
+          /left: ([\d.]+)%; top: ([\d.]+)%/u.exec(spot.getAttribute("style") ?? "") ?? [];
+        expect(Number(left)).toBeGreaterThan(42);
+        expect(Number(top)).toBeGreaterThan(8);
+        const tipId = spot.querySelector("a")?.getAttribute("aria-describedby") ?? "";
+        expect(hero?.querySelector(`#${tipId}[role="tooltip"] img[alt]`), tipId).not.toBeNull();
+      }
+      expect(
+        [...(hero?.querySelectorAll(".home-hero__strip a") ?? [])].map((link) =>
+          link.getAttribute("href"),
+        ),
+      ).toEqual(targets);
+      const image = hero?.querySelector("img[data-hero-image]");
+      expect(image?.getAttribute("loading")).toBe("eager");
+      expect(image?.getAttribute("fetchpriority")).toBe("high");
+      expect(image?.getAttribute("alt")).toContain(alt);
+      expect(hero?.querySelectorAll('picture source[media="(max-width: 1023px)"]')).toHaveLength(2);
+      for (const other of hero?.querySelectorAll("img:not([data-hero-image])") ?? []) {
+        expect(other.getAttribute("loading")).toBe("lazy");
+      }
+    }
   });
 
   it("keeps card links short so the anchor text is the title alone", () => {
@@ -1504,11 +1551,6 @@ describe("rendered landing page", () => {
       expect(routeDocument.querySelector('a[hreflang="ru"]')).not.toBeNull();
       expect(routeDocument.querySelector('a[hreflang="en"][aria-current="page"]')).not.toBeNull();
     }
-  });
-
-  it("keeps locale-specific time punctuation in the illustrative console", () => {
-    expect(documents.get("/")?.body.textContent).toContain("52,40 сек");
-    expect(documents.get("/en/")?.body.textContent).toContain("52.40 sec");
   });
 
   it("renders parseable structured data that matches visible navigation", () => {
@@ -1687,22 +1729,6 @@ describe("rendered landing page", () => {
     expect(article.querySelector('picture source[type="image/avif"]')).not.toBeNull();
   });
 
-  it("labels the illustrative station console so extracted text is not read as a fact", () => {
-    for (const [route, note] of [
-      ["/", "значения условные"],
-      ["/en/", "values are illustrative"],
-    ] as const) {
-      const routeDocument = documents.get(route) as Document;
-      const consoles = [...routeDocument.querySelectorAll(".line-console")];
-      expect(consoles.length, route).toBeGreaterThanOrEqual(1);
-      for (const element of consoles) {
-        expect(element.querySelector("[data-illustrative-note]")?.textContent, route).toContain(
-          note,
-        );
-      }
-    }
-  });
-
   it("describes the kiosk as a disposal flow for employees, not a customer pickup point", () => {
     const ru = documents.get("/kiosk-samovydachi/")?.body.textContent ?? "";
     expect(ru).toContain("выбыти");
@@ -1815,8 +1841,8 @@ describe("rendered film page", () => {
     ["/en/", "/en/how-it-works/", "See how it works"],
   ] as const)("%s links its hero to the film", (route, href, label) => {
     const home = documents.get(route) as Document;
-    const link = home.querySelector<HTMLAnchorElement>(`.hero a[href="${href}"]`);
-    expect(link?.textContent?.trim()).toBe(label);
+    const link = home.querySelector<HTMLAnchorElement>(`#hero a[href="${href}"]`);
+    expect(link?.textContent?.replace(/\s+/g, " ").trim()).toContain(label);
   });
 
   it("keeps the header demo button on the film page instead of sending visitors home", () => {

@@ -1,18 +1,16 @@
 ---
-import { Picture } from "astro:assets";
-
-import factoryImage from "../assets/factory-line.jpg";
 import type { SeoPageDefinition } from "../content/pages";
 import { getUiCopy } from "../content/ui";
 import { readPublicSiteConfig } from "../lib/site-config";
 import { buildPageGraph } from "../lib/seo";
 import BaseLayout from "../layouts/BaseLayout.astro";
+import "../styles/home.css";
 import DemoSection from "./DemoSection.astro";
 import HomeMaterials from "./HomeMaterials.astro";
+import HomeMapHero from "./home/HomeMapHero.astro";
 import ImplementationSteps from "./ImplementationSteps.astro";
 import LandingFooter from "./LandingFooter.astro";
 import LandingHeader from "./LandingHeader.astro";
-import LineConsole from "./LineConsole.astro";
 import PlatformModules from "./PlatformModules.astro";
 import ProductModes from "./ProductModes.astro";
 import ProductionCycle from "./ProductionCycle.astro";
@@ -31,48 +29,11 @@ const siteConfig = readPublicSiteConfig(
 );
 ---
 
-<BaseLayout metadata={page} graph={buildPageGraph(page)}>
+<BaseLayout metadata={page} graph={buildPageGraph(page)} theme="light">
   <LandingHeader page={page} phone={siteConfig.phone} />
 
-  <main id="main">
-    <section class="hero" id="hero" aria-labelledby="hero-title">
-      <div class="hero__media" aria-hidden="true">
-        <Picture
-          src={factoryImage}
-          alt={copy.home.hero.imageAlt}
-          widths={[640, 960, 1376]}
-          formats={["avif", "webp"]}
-          sizes="(max-width: 767px) 100vw, 64vw"
-          loading="eager"
-          fetchpriority="high"
-          data-hero-image
-        />
-      </div>
-      <div class="hero__shade"></div>
-      <div class="container hero__content">
-        <p class="section-index" data-reveal>{copy.home.hero.kicker}</p>
-        <h1 id="hero-title" data-reveal>{copy.home.hero.heading[0]}<br />{copy.home.hero.heading[1]}</h1>
-        <p class="hero__lead" data-reveal>{copy.home.hero.lead}</p>
-        <div class="hero__actions" data-reveal>
-          <a class="button" href="#demo" data-analytics="landing_demo_click" data-placement="hero">{copy.common.requestDemoShort} <span aria-hidden="true">→</span></a>
-          {siteConfig.phone && (
-            <a
-              class="hero__phone"
-              href={siteConfig.phone.href}
-              data-analytics="landing_phone_click"
-              data-placement="hero"
-            >
-              {siteConfig.phone.display}
-            </a>
-          )}
-          <a class="hero__film-link" href={page.locale === "ru" ? "/kak-rabotaet/" : "/en/how-it-works/"}>
-            {copy.home.hero.filmLink}
-          </a>
-        </div>
-        <p class="hero__note" data-reveal>{copy.home.hero.note}</p>
-      </div>
-      <div class="hero__console" data-reveal><LineConsole locale={page.locale} /></div>
-    </section>
+  <main id="main" class="home">
+    <HomeMapHero locale={page.locale} phone={siteConfig.phone} />
 
     <section class="section section--continuity" id="continuity" aria-labelledby="continuity-title">
       <div class="container">
@@ -113,9 +74,11 @@ const siteConfig = readPublicSiteConfig(
 
   <script>
     import { browserDemoFormRuntime, initDemoForm } from "../scripts/demo-form";
+    import { initHomeMap } from "../scripts/home/map";
     import { browserLandingRuntime, initLanding } from "../scripts/site";
 
     initLanding(document, browserLandingRuntime(window));
+    initHomeMap(document);
     const demoForm = document.querySelector<HTMLFormElement>("[data-demo-form]");
     if (demoForm !== null) initDemoForm(demoForm, browserDemoFormRuntime(window));
   </script>
