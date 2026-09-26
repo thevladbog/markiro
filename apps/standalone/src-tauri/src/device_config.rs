@@ -72,7 +72,13 @@ pub fn save(dir: &Path, config: &DeviceConfig) -> Result<(), DeviceConfigError> 
     // A leftover from a crash may have other permissions; start clean.
     let _ = fs::remove_file(&temporary);
     let data = serde_json::to_vec_pretty(config).expect("DeviceConfig serializes");
-    write_owner_only(&temporary, &data).map_err(io(&temporary))?;
+    if let Err(source) = write_owner_only(&temporary, &data) {
+        let _ = fs::remove_file(&temporary);
+        return Err(DeviceConfigError::Io {
+            path: temporary,
+            source,
+        });
+    }
     if let Err(source) = fs::rename(&temporary, &target) {
         let _ = fs::remove_file(&temporary);
         return Err(DeviceConfigError::Io {
@@ -83,15 +89,39 @@ pub fn save(dir: &Path, config: &DeviceConfig) -> Result<(), DeviceConfigError> 
     sync_dir(dir).map_err(io(dir))
 }
 
+/// Remove `device.json` and, on Unix, the plaintext key a leftover temporary
+/// file may still hold. Tolerates either file already being absent.
 pub fn clear(dir: &Path) -> Result<(), DeviceConfigError> {
-    let path = path(dir);
-    match fs::remove_file(&path) {
-        Ok(()) => sync_dir(dir).map_err(|source| DeviceConfigError::Io {
+    let target = path(dir);
+    let mut removed_any = false;
+    match fs::remove_file(&target) {
+        Ok(()) => removed_any = true,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(source) => {
+            return Err(DeviceConfigError::Io {
+                path: target,
+                source,
+            })
+        }
+    }
+    let temporary = dir.join(TEMPORARY_NAME);
+    match fs::remove_file(&temporary) {
+        Ok(()) => removed_any = true,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(source) => {
+            return Err(DeviceConfigError::Io {
+                path: temporary,
+                source,
+            })
+        }
+    }
+    if removed_any {
+        sync_dir(dir).map_err(|source| DeviceConfigError::Io {
             path: dir.to_path_buf(),
             source,
-        }),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(source) => Err(DeviceConfigError::Io { path, source }),
+        })
+    } else {
+        Ok(())
     }
 }
 
@@ -201,5 +231,15 @@ mod tests {
         clear(dir.path()).unwrap();
         assert_eq!(load(dir.path()).unwrap(), None);
         clear(dir.path()).unwrap();
+    }
+
+    #[test]
+    fn clear_removes_a_stray_temporary_file_too() {
+        let dir = tempfile::tempdir().unwrap();
+        save(dir.path(), &sample()).unwrap();
+        fs::write(dir.path().join(TEMPORARY_NAME), "leftover key material").unwrap();
+        clear(dir.path()).unwrap();
+        assert_eq!(load(dir.path()).unwrap(), None);
+        assert!(!dir.path().join(TEMPORARY_NAME).exists());
     }
 }

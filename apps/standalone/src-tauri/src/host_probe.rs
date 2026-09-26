@@ -2,7 +2,8 @@
 //! The verifier accepts any certificate and records its fingerprint, so this
 //! module only *discovers* a host: the fingerprint is shown to a person or
 //! compared with a scanned pairing code before anything is trusted.
-//! Authenticated requests use a pinning verifier (plan 1c).
+//! Authenticated requests use `host_client`, which pins the fingerprint saved
+//! at pairing.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -11,11 +12,9 @@ use markiro_proto::{
     compatibility, Compatibility, Hello, HelloEnvelope, HOST_PRODUCT, PROTOCOL_HEADER,
     PROTOCOL_VERSION,
 };
-use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
-use rustls::crypto::{verify_tls12_signature, verify_tls13_signature, CryptoProvider};
-use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
-use rustls::{DigitallySignedStruct, SignatureScheme};
 use serde::Serialize;
+
+use crate::tls::{self, FingerprintPolicy};
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 
@@ -56,16 +55,8 @@ impl ProbeError {
 
 pub async fn observe_hello(address: &str) -> Result<HelloObservation, ProbeError> {
     let seen = Arc::new(Mutex::new(None::<String>));
-    let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
-    let config = rustls::ClientConfig::builder_with_provider(provider.clone())
-        .with_safe_default_protocol_versions()
-        .map_err(|_| ProbeError::Unreachable)?
-        .dangerous()
-        .with_custom_certificate_verifier(Arc::new(ObservingVerifier {
-            seen: seen.clone(),
-            provider,
-        }))
-        .with_no_client_auth();
+    let config = tls::client_config(FingerprintPolicy::Observe(seen.clone()))
+        .map_err(|_| ProbeError::Unreachable)?;
     let client = reqwest::Client::builder()
         .use_preconfigured_tls(config)
         .timeout(PROBE_TIMEOUT)
@@ -109,61 +100,6 @@ pub fn classify_hello(body: serde_json::Value) -> Result<Hello, ProbeError> {
         Compatibility::AppTooOld => return Err(ProbeError::AppTooOld),
     }
     serde_json::from_value(body).map_err(|_| ProbeError::InvalidResponse)
-}
-
-#[derive(Debug)]
-struct ObservingVerifier {
-    seen: Arc<Mutex<Option<String>>>,
-    provider: Arc<CryptoProvider>,
-}
-
-impl ServerCertVerifier for ObservingVerifier {
-    fn verify_server_cert(
-        &self,
-        end_entity: &CertificateDer<'_>,
-        _intermediates: &[CertificateDer<'_>],
-        _server_name: &ServerName<'_>,
-        _ocsp_response: &[u8],
-        _now: UnixTime,
-    ) -> Result<ServerCertVerified, rustls::Error> {
-        let fingerprint = markiro_proto::certificate_fingerprint(end_entity.as_ref());
-        *self.seen.lock().expect("fingerprint lock") = Some(fingerprint);
-        Ok(ServerCertVerified::assertion())
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        message: &[u8],
-        cert: &CertificateDer<'_>,
-        dss: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        verify_tls12_signature(
-            message,
-            cert,
-            dss,
-            &self.provider.signature_verification_algorithms,
-        )
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        message: &[u8],
-        cert: &CertificateDer<'_>,
-        dss: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        verify_tls13_signature(
-            message,
-            cert,
-            dss,
-            &self.provider.signature_verification_algorithms,
-        )
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        self.provider
-            .signature_verification_algorithms
-            .supported_schemes()
-    }
 }
 
 #[cfg(test)]
