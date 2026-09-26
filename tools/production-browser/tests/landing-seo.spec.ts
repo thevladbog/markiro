@@ -663,6 +663,10 @@ test.describe("film page", () => {
 
   test("marks the chapter the rail links to", async ({ page, isMobile }) => {
     test.skip(isMobile, "the rail is hidden on phones");
+    // The rail follows the scroll position, not the 3D stage. With motion allowed, the first
+    // scroll starts the stage, and on a CI browser without a GPU its build and first
+    // software-rendered frames hold the main thread past this test's timeout.
+    await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto("/kak-rabotaet/");
     await page.evaluate(() => window.scrollBy({ top: 2000, behavior: "instant" }));
     const link = page.locator('[data-film-rail] a[href="#warehouse"]');
