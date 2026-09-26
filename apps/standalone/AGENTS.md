@@ -46,6 +46,28 @@ details; details never hold secrets, salts or hashes.
 DDL lives only in `host/migrations` and `src-tauri/migrations`. An applied
 migration is never edited — add a new one; sqlx verifies checksums at start.
 
+## Writes
+
+- Every multi-statement write uses `db::begin_write` (`BEGIN IMMEDIATE`), not a
+  deferred `pool.begin()`: a deferred transaction that reads then writes can
+  hit `SQLITE_BUSY` on a stale WAL snapshot before `busy_timeout` gets a
+  chance to help.
+- One `next_revision` per changing transaction, stamped on every row that
+  transaction changes.
+- Never touch `state.pool` while a write transaction is open. Read through
+  the transaction (`&mut *tx`) instead of acquiring a second pooled
+  connection: the pool has only 4 connections, and a second acquire can wait
+  behind another writer's `busy_timeout` instead of returning at once.
+- Hash passwords (PBKDF2) before `begin_write`, off the async runtime
+  (`spawn_blocking`); never hold the write lock across that work.
+- Return no-ops before `next_revision`: no revision bump, no row write, no
+  audit row for a request that changes nothing.
+- Admin writes re-check rights with `OfficeContext::require_admin_in` inside
+  the transaction, in addition to the early `require_admin` rejection. The
+  extractor's role and active flag are read before the request hashes a
+  password; re-checking inside the transaction stops a write a demotion or
+  deactivation ended in that window.
+
 ## Protocol
 
 Changing a wire shape means changing `proto`, the Zod schemas and the

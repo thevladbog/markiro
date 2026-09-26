@@ -27,6 +27,18 @@ async fn a_wrong_method_gets_the_protocol_error_body() {
     assert_eq!(body["error"]["message"], "POST is not allowed on /v1/hello");
 }
 
+/// The protocol guard's `route_layer` wraps only the protected routes; a
+/// wrong method on one of them must still reach the router's own
+/// `method_not_allowed_fallback`, not fall through to `not_found` or bypass
+/// the guard's error body.
+#[tokio::test]
+async fn a_wrong_method_on_a_protected_route_is_also_method_not_allowed() {
+    let app = TestApp::new().await;
+    let (status, body) = app.send(empty(request("DELETE", "/v1/device"))).await;
+    assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED);
+    assert_eq!(body["error"]["code"], "method_not_allowed");
+}
+
 #[tokio::test]
 async fn unknown_routes_stay_not_found_without_a_protocol_header() {
     let app = TestApp::new().await;

@@ -108,7 +108,8 @@ apps/standalone/
 - Каталог данных по умолчанию: Windows — `%ProgramData%\Markiro\Host`; другие ОС —
   `./.markiro-host` (только для разработки). Внутри: `host.db` (+ `-wal`, `-shm`),
   `tls/cert.der`, `tls/key.der` (права только для владельца), `host.json`
-  (идентификатор хоста, порт), `logs/`.
+  (идентификатор хоста, порт), `host.lock` (эксклюзивная блокировка работающего
+  хоста — не данные; в резервную копию и восстановление не входит), `logs/`.
 - Старт: конфигурация (создаёт `hostId` — UUID — при первом запуске) → база и
   миграции → сертификат (создаёт при отсутствии) → HTTPS на `0.0.0.0:<порт>` →
   запись в журнал: версия, порт, отпечаток.
@@ -224,7 +225,10 @@ default_box_template_id, default_pallet_template_id, default_duplicate_template_
 
 Формат: HTTP-статус и тело `{ "error": { "code": "<snake_case>", "message": "<для журнала>", "details": { … } } }`.
 Интерфейс показывает текст по коду через i18n, `message` пользователю не выводится.
-Коды этапа: `unauthorized`, `forbidden`, `not_found`, `method_not_allowed`, `validation_failed` (с полями
+Коды этапа: `unauthorized` (с `details.credential` — какой признак не прошёл
+проверку: `device` — приложение предлагает переподключить это устройство,
+`session` — войти в офис заново, `password` — показывает текст под неверный
+логин или пароль), `forbidden`, `not_found`, `method_not_allowed`, `validation_failed` (с полями
 в `details`), `stale_revision`, `conflict` (с `details.constraint`: `gtin`, `login`,
 `badge`, `line_name`), `template_is_default`, `last_admin`, `sscc_below_floor`,
 `pairing_code_invalid`, `pairing_code_expired`, `already_initialized`,

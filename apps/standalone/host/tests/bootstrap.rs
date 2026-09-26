@@ -76,14 +76,15 @@ async fn the_wizard_initializes_the_host_and_signs_the_admin_in() {
         ]
     );
 
-    let (phc, role): (String, String) =
-        sqlx::query_as("SELECT password_phc, role FROM office_users WHERE id = ?")
+    let (phc, role, admin_rev): (String, String, i64) =
+        sqlx::query_as("SELECT password_phc, role, rev FROM office_users WHERE id = ?")
             .bind(&admin_id)
             .fetch_one(&app.state.pool)
             .await
             .unwrap();
     assert!(verify_password(&phc, "correct horse battery"));
     assert_eq!(role, "admin");
+    assert_eq!(admin_rev, 1);
 
     let (actor_kind, actor_id, action, target_type, target_id, result, details): (String, Option<String>, String, Option<String>, Option<String>, String, String) =
         sqlx::query_as(
@@ -350,6 +351,39 @@ async fn the_org_profile_is_read_by_all_and_changed_by_admins_with_revisions() {
     assert_eq!(
         serde_json::from_str::<Value>(&details).unwrap(),
         json!({ "changed": ["name", "inn", "gln", "gs1Prefixes", "timeZone"] })
+    );
+
+    // Switching back onto a prefix that already has counters (the original
+    // 460068200) must not reset or duplicate them: `ON CONFLICT DO NOTHING`
+    // leaves the existing rows exactly as they were.
+    let (status, body) = app
+        .send(json_request(
+            with_session(request("PUT", "/v1/office/org"), &key, &admin_token),
+            update(new_rev, "4600682000010"),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let counters_after_switch_back: Vec<(String, i64, i64, i64)> = sqlx::query_as(
+        "SELECT issuer_prefix, extension, next_serial, rev FROM sscc_counters ORDER BY issuer_prefix, extension",
+    )
+    .fetch_all(&app.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        counters_after_switch_back.len(),
+        4,
+        "switching back onto an existing prefix must not duplicate its counters"
+    );
+    assert_eq!(
+        counters_after_switch_back[0],
+        ("460068200".into(), 0, 1500, 1),
+        "the original prefix's box counter must be untouched by ON CONFLICT DO NOTHING"
+    );
+    assert_eq!(
+        counters_after_switch_back[1],
+        ("460068200".into(), 1, 40, 1),
+        "the original prefix's pallet counter must be untouched by ON CONFLICT DO NOTHING"
     );
 }
 

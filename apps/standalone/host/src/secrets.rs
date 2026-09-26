@@ -79,23 +79,31 @@ fn decode_canonical(text: &str, expected_bytes: usize) -> Option<Vec<u8>> {
     (bytes.len() == expected_bytes && STANDARD.encode(&bytes) == text).then_some(bytes)
 }
 
-/// Hash a password for storage with a fresh random salt.
-pub fn hash_password(password: &str) -> String {
-    let mut salt = [0u8; SALT_BYTES];
-    aws_lc_rs::rand::fill(&mut salt).expect("the system random generator is available");
+/// Encode a password with a given salt and iteration count: the same
+/// deterministic computation `hash_password` runs with a fresh random salt.
+/// Factored out so a test can prove this host reproduces an
+/// independently-generated PHC string byte for byte.
+pub fn hash_password_with_salt(password: &str, salt: &[u8; SALT_BYTES], iterations: u32) -> String {
     let mut digest = [0u8; DIGEST_BYTES];
     pbkdf2::derive(
         pbkdf2::PBKDF2_HMAC_SHA256,
-        NonZeroU32::new(PASSWORD_ITERATIONS).expect("non-zero"),
-        &salt,
+        NonZeroU32::new(iterations).expect("non-zero"),
+        salt,
         password.as_bytes(),
         &mut digest,
     );
     format!(
-        "pbkdf2$sha256${PASSWORD_ITERATIONS}${}${}",
+        "pbkdf2$sha256${iterations}${}${}",
         STANDARD.encode(salt),
         STANDARD.encode(digest)
     )
+}
+
+/// Hash a password for storage with a fresh random salt.
+pub fn hash_password(password: &str) -> String {
+    let mut salt = [0u8; SALT_BYTES];
+    aws_lc_rs::rand::fill(&mut salt).expect("the system random generator is available");
+    hash_password_with_salt(password, &salt, PASSWORD_ITERATIONS)
 }
 
 /// Constant-time check of `password` against a stored PHC string; a
@@ -175,6 +183,26 @@ mod tests {
         assert!(verify_password(&text("passwordPhc"), &text("password")));
         assert!(verify_password(&text("pinPhc"), &text("pin")));
         assert_eq!(parse_phc(&text("pinPhc")).unwrap().iterations, 100_000);
+    }
+
+    /// The host's own PBKDF2 encoder reproduces the fixture's
+    /// independently-computed PHC string byte for byte, not merely a string
+    /// this same encoder would also accept.
+    #[test]
+    fn hash_password_with_salt_reproduces_the_fixture_phc_string() {
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../../proto/fixtures/phc-password.json")).unwrap();
+        let password = fixture["password"].as_str().unwrap();
+        let expected_phc = fixture["passwordPhc"].as_str().unwrap();
+        let salt: [u8; SALT_BYTES] = parse_phc(expected_phc)
+            .unwrap()
+            .salt
+            .try_into()
+            .expect("the fixture salt is 16 bytes");
+        assert_eq!(
+            hash_password_with_salt(password, &salt, 600_000),
+            expected_phc
+        );
     }
 
     #[test]
