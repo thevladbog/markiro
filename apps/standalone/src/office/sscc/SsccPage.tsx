@@ -145,6 +145,7 @@ function SsccContent() {
               queryClient.setQueryData(officeKeys.sscc, next);
               setSaved("blocks");
             }}
+            onSubmitStart={() => setSaved(null)}
             onReload={() => void sscc.refetch()}
           />
         ) : (
@@ -169,7 +170,7 @@ function SsccContent() {
           </>
         )}
       </Card>
-      {editing && (
+      {admin && editing && (
         <CounterDialog
           counter={editing}
           onClose={() => setEditing(null)}

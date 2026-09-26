@@ -32,11 +32,12 @@ const BLOCK_FIELDS = { boxBlockSize: "boxBlockSize", palletBlockSize: "palletBlo
 export interface BlockSizesFormProps {
   state: SsccState;
   onSaved: (state: SsccState) => void;
+  onSubmitStart: () => void;
   onReload: () => void;
 }
 
 /** How many serials a station takes at a time; administrators only. */
-export function BlockSizesForm({ state, onSaved, onReload }: BlockSizesFormProps) {
+export function BlockSizesForm({ state, onSaved, onSubmitStart, onReload }: BlockSizesFormProps) {
   const { t } = useTranslation();
   const [failure, setFailure] = useState<
     { kind: "stale" } | { kind: "alert"; message: string } | null
@@ -57,6 +58,7 @@ export function BlockSizesForm({ state, onSaved, onReload }: BlockSizesFormProps
     errorProp(message === undefined ? undefined : t(message));
 
   const submit = handleSubmit(async (sizes) => {
+    onSubmitStart();
     setFailure(null);
     try {
       onSaved(await update.mutateAsync(sizes));

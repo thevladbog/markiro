@@ -229,6 +229,16 @@ fn a_paired_device_reaches_the_host_through_the_ipc_shapes() {
     .unwrap();
     assert_eq!(logout, json!({ "status": 204, "body": null }));
 
+    // Forgetting the pairing: no arguments, an empty answer, then no pairing.
+    assert_eq!(
+        invoke(&webview, "device_forget", json!({})),
+        Ok(Value::Null)
+    );
+    assert_eq!(
+        invoke(&webview, "device_status", json!({})),
+        Ok(Value::Null)
+    );
+
     drop(webview);
     host.stop();
 }

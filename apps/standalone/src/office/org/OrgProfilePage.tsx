@@ -58,6 +58,7 @@ function OrgProfileContent() {
           key={org.data.rev}
           profile={org.data}
           onSaved={saved}
+          onSubmitStart={() => setSavedRev(null)}
           onReload={() => void org.refetch()}
         />
       ) : (
@@ -70,10 +71,11 @@ function OrgProfileContent() {
 interface OrgProfileFormProps {
   profile: OrgProfile;
   onSaved: (profile: OrgProfile) => void;
+  onSubmitStart: () => void;
   onReload: () => void;
 }
 
-function OrgProfileForm({ profile, onSaved, onReload }: OrgProfileFormProps) {
+function OrgProfileForm({ profile, onSaved, onSubmitStart, onReload }: OrgProfileFormProps) {
   const { t } = useTranslation();
   const [failure, setFailure] = useState<
     { kind: "stale" } | { kind: "alert"; message: string } | null
@@ -106,6 +108,7 @@ function OrgProfileForm({ profile, onSaved, onReload }: OrgProfileFormProps) {
       : null;
 
   const submit = handleSubmit(async (values) => {
+    onSubmitStart();
     setFailure(null);
     try {
       onSaved(await update.mutateAsync(values));

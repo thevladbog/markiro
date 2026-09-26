@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { HostError } from "../src/host/client.js";
-import { writeFailure } from "../src/office/form-errors.js";
+import { failureMessage, writeFailure } from "../src/office/form-errors.js";
 
 const FIELDS = { name: "orgName", gln: "gln" } as const;
 
@@ -53,5 +53,17 @@ describe("writeFailure", () => {
       kind: "alert",
       message: "errors.unknown",
     });
+  });
+});
+
+describe("failureMessage", () => {
+  it("shows the alert's own message", () => {
+    expect(failureMessage({ kind: "alert", message: "errors.api.validation_failed" })).toBe(
+      "errors.api.validation_failed",
+    );
+  });
+
+  it("falls back to the stale-revision text for anything without a message", () => {
+    expect(failureMessage({ kind: "stale" })).toBe("errors.api.stale_revision");
   });
 });

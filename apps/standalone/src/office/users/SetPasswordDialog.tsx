@@ -7,7 +7,7 @@ import { Alert, Button, Input, Modal } from "@markiro/ui";
 
 import type { OfficeUserRecord } from "../../host/protocol.js";
 import { errorProp } from "../../lib/form-error.js";
-import { writeFailure } from "../form-errors.js";
+import { failureMessage, writeFailure } from "../form-errors.js";
 import { useOfficeMutation } from "../office-query.js";
 import { passwordSetFormSchema, type PasswordSetValues } from "./user-forms.js";
 
@@ -53,7 +53,7 @@ export function SetPasswordDialog({ user, onClose, onChanged }: SetPasswordDialo
       if (outcome.kind === "field") {
         setError(outcome.field, { type: "server", message: outcome.message });
       } else {
-        setFailure(outcome.kind === "alert" ? outcome.message : "errors.api.stale_revision");
+        setFailure(failureMessage(outcome));
       }
     }
   });

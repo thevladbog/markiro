@@ -25,3 +25,8 @@ export function writeFailure<F extends string>(
   }
   return { kind: "alert", message: errorMessageKey(error) };
 }
+
+/** The alert text for a failure that is not a field error; a stale write reads as `stale_revision`. */
+export function failureMessage(failure: Exclude<WriteFailure<string>, { kind: "field" }>): string {
+  return failure.kind === "alert" ? failure.message : "errors.api.stale_revision";
+}

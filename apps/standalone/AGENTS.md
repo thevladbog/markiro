@@ -149,14 +149,25 @@ together with `src/host/client.ts`, `src/host/device.ts` and
   and `networkMode: "always"`: calls go over IPC to the host, and the
   webview's online flag says nothing about whether the host answers. A host
   error is an answer the page explains, with a retry button.
-- Every write sends the loaded record's `expectedRev`. On `stale_revision`
+- Every update of a revisioned record sends the loaded record's
+  `expectedRev`. Creates and password routes carry none. On `stale_revision`
   the page offers to load the data again and drops the user's edits; it
   never retries with `details.currentRev`.
+- A success notice is an `Alert` on the page or dialog; it goes away when
+  the next save starts (or the next dialog opens).
+- `@markiro/ui` has English defaults: `Table` shows «No data» without
+  `empty`, and `Modal` names its × «Close» without `closeLabel`. Every
+  office table passes a localized `empty`, and every dialog passes
+  `closeLabel={t("office.common.close")}`.
 - Roles (spec §4.8) are enforced by the host. The office hides menu items by
   role (`OFFICE_NAV`) and wraps administrator-only routes in `RequireRole`,
   which shows «Нет доступа» when a role changes mid-session. An
-  administrator's own row in «Пользователи» changes only the name: another
-  administrator changes their role or access.
+  administrator's own row in «Пользователи» changes only the name — a UI
+  rule: the host itself guards only the last active administrator, so
+  another administrator changes one's role or access, and one's own
+  password goes through «Сменить пароль» with the current password.
+- An ended session unmounts the office: unsaved edits are lost, and the next
+  sign-in starts at «Обзор».
 
 ## Marking rules
 

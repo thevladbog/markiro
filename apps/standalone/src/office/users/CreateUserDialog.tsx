@@ -8,7 +8,7 @@ import { Alert, Button, Input, Modal } from "@markiro/ui";
 import { HostError } from "../../host/client.js";
 import type { OfficeUserRecord } from "../../host/protocol.js";
 import { errorProp } from "../../lib/form-error.js";
-import { writeFailure } from "../form-errors.js";
+import { failureMessage, writeFailure } from "../form-errors.js";
 import { useOfficeMutation } from "../office-query.js";
 import { RoleRadios } from "./RoleRadios.js";
 import { newUserSchema, type NewUserValues } from "./user-forms.js";
@@ -66,7 +66,7 @@ export function CreateUserDialog({ onClose, onCreated }: CreateUserDialogProps) 
       if (outcome.kind === "field") {
         setError(outcome.field, { type: "server", message: outcome.message });
       } else {
-        setFailure(outcome.kind === "alert" ? outcome.message : "errors.api.stale_revision");
+        setFailure(failureMessage(outcome));
       }
     }
   });

@@ -108,7 +108,7 @@ export function EditUserDialog({ user, own, onClose, onSaved, onReload }: EditUs
               value={field.value}
               onChange={field.onChange}
               disabled={own}
-              hint={own ? t("office.users.ownHint") : null}
+              hint={own ? t("office.users.ownRoleHint") : null}
             />
           )}
         />
@@ -121,6 +121,7 @@ export function EditUserDialog({ user, own, onClose, onSaved, onReload }: EditUs
               checked={field.value}
               onCheckedChange={field.onChange}
               disabled={own}
+              {...(own ? { hint: t("office.users.ownAccessHint") } : {})}
             />
           )}
         />

@@ -61,19 +61,43 @@ describe("useOfficeQuery", () => {
     expect(session.api.getOrg).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps reading over IPC while the webview reports itself offline", async () => {
-    // Calls go over Tauri IPC to a host on the same PC, not the network: the
-    // webview's online state says nothing about whether the host answers.
+  it("keeps reading and writing over IPC while the webview reports itself offline", async () => {
+    // Calls go over IPC to the host, and the webview's online flag says
+    // nothing about whether the host answers.
     onlineManager.setOnline(false);
     try {
       const session = fakeOfficeSession();
       session.api.getOrg.mockResolvedValue(PROFILE);
+      session.api.updateOrg.mockResolvedValue({ ...PROFILE, rev: 5 });
       const { result } = renderHook(
-        () => useOfficeQuery(officeKeys.org, (api, token) => api.getOrg(token)),
+        () => ({
+          query: useOfficeQuery(officeKeys.org, (api, token) => api.getOrg(token)),
+          mutation: useOfficeMutation((api, token, expectedRev: number) =>
+            api.updateOrg(token, {
+              name: PROFILE.name,
+              inn: null,
+              gln: PROFILE.gln,
+              gs1Prefixes: [],
+              timeZone: PROFILE.timeZone,
+              expectedRev,
+            }),
+          ),
+        }),
         { wrapper: wrapperFor(session) },
       );
-      await waitFor(() => expect(result.current.data).toEqual(PROFILE));
+      await waitFor(() => expect(result.current.query.data).toEqual(PROFILE));
       expect(session.api.getOrg).toHaveBeenCalledWith("office-session-token");
+
+      // A mutation must not stay paused offline either: without
+      // `networkMode: "always"` in the mutations defaults, this hangs and
+      // the test times out instead of resolving.
+      await act(async () => {
+        await expect(result.current.mutation.mutateAsync(4)).resolves.toMatchObject({ rev: 5 });
+      });
+      expect(session.api.updateOrg).toHaveBeenCalledWith(
+        "office-session-token",
+        expect.objectContaining({ expectedRev: 4 }),
+      );
     } finally {
       onlineManager.setOnline(true);
     }

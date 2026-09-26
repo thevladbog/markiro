@@ -9,7 +9,7 @@ import { HostError } from "../host/client.js";
 import { errorMessageKey } from "../host/errors.js";
 import type { BootstrapRequest } from "../host/protocol.js";
 import { errorProp } from "../lib/form-error.js";
-import { issuerPrefix } from "../lib/rules.js";
+import { issuerPrefix, THIRTEEN_DIGITS } from "../lib/rules.js";
 import { TIME_ZONE_OPTIONS } from "../lib/time-zones.js";
 import {
   defaultWizardValues,
@@ -48,7 +48,7 @@ export function BootstrapWizard({ onSubmit }: BootstrapWizardProps) {
   const lines = useFieldArray({ control, name: "lines" });
   const position = WIZARD_STEPS.indexOf(step);
   const gln = watch("gln").trim();
-  const prefix = /^\d{13}$/.test(gln) ? issuerPrefix(gln) : null;
+  const prefix = THIRTEEN_DIGITS.test(gln) ? issuerPrefix(gln) : null;
 
   const fieldError = (message: string | undefined) =>
     errorProp(message === undefined ? undefined : t(message));

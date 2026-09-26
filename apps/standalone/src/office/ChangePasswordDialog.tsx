@@ -10,21 +10,12 @@ import { HostError } from "../host/client.js";
 import { errorMessageKey } from "../host/errors.js";
 import type { PasswordChange } from "../host/protocol.js";
 import { errorProp } from "../lib/form-error.js";
+import { passwordRule } from "../lib/rules.js";
 import { useOfficeMutation } from "./office-query.js";
-
-/** Characters as the host counts them (Unicode scalar values). */
-function characters(text: string): number {
-  return [...text].length;
-}
 
 const passwordSchema = z.object({
   currentPassword: z.string().min(1, "office.password.required"),
-  newPassword: z
-    .string()
-    .refine(
-      (password) => characters(password) >= 8 && characters(password) <= 128,
-      "office.password.length",
-    ),
+  newPassword: passwordRule,
   confirmPassword: z.string(),
 });
 
@@ -68,7 +59,7 @@ export function ChangePasswordDialog({ open, onClose, onChanged }: ChangePasswor
   const submit = handleSubmit(async (values) => {
     setSubmitError(null);
     if (values.newPassword !== values.confirmPassword) {
-      setError("confirmPassword", { type: "validate", message: "office.password.mismatch" });
+      setError("confirmPassword", { type: "validate", message: "rules.passwordConfirm" });
       return;
     }
     try {
@@ -84,7 +75,7 @@ export function ChangePasswordDialog({ open, onClose, onChanged }: ChangePasswor
         return;
       }
       if (error instanceof HostError && error.field === "newPassword") {
-        setError("newPassword", { type: "server", message: "office.password.length" });
+        setError("newPassword", { type: "server", message: "rules.password" });
         return;
       }
       setSubmitError(errorMessageKey(error));
@@ -96,11 +87,11 @@ export function ChangePasswordDialog({ open, onClose, onChanged }: ChangePasswor
       open={open}
       title={t("office.password.title")}
       onClose={close}
-      closeLabel={t("office.password.close")}
+      closeLabel={t("office.common.close")}
       footer={
         <>
           <Button variant="secondary" onClick={close} disabled={isSubmitting}>
-            {t("office.password.cancel")}
+            {t("office.common.cancel")}
           </Button>
           <Button type="submit" form={formId} loading={isSubmitting}>
             {t("office.password.submit")}

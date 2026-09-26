@@ -66,6 +66,33 @@ describe("organization profile", () => {
     expect(session.api.getOrg).toHaveBeenCalledTimes(1);
   });
 
+  it("clears the success notice when the next save starts", async () => {
+    const session = adminSession();
+    session.api.updateOrg
+      .mockResolvedValueOnce({ ...ORG_PROFILE, name: "ООО «Атолл-Юг»", rev: 5 })
+      .mockRejectedValueOnce(
+        new HostError({
+          kind: "api",
+          code: "validation_failed",
+          status: 400,
+          message: "the GLN must be 13 digits",
+          details: { field: "gln" },
+        }),
+      );
+    await openProfile(session);
+    const name = await screen.findByLabelText("Название организации");
+    fireEvent.change(name, { target: { value: "ООО «Атолл-Юг»" } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    expect(await screen.findByText("Изменения сохранены.")).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText("Название организации"), {
+      target: { value: "ООО «Атолл-Запад»" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    await screen.findByText("Хост не принял это значение. Проверьте его.");
+    expect(screen.queryByText("Изменения сохранены.")).toBeNull();
+  });
+
   it("checks the GLN's check digit before calling the host", async () => {
     const session = adminSession();
     await openProfile(session);

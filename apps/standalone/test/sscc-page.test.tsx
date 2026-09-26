@@ -176,6 +176,31 @@ describe("SSCC page", () => {
     expect(screen.getByLabelText("Номеров в блоке для коробов")).toHaveProperty("value", "1000");
   });
 
+  it("clears the block-size success notice when the next save starts", async () => {
+    const session = adminSession();
+    session.api.updateBlockSizes
+      .mockResolvedValueOnce({ ...SSCC_STATE, boxBlockSize: 1000, blockSizesRev: 8 })
+      .mockRejectedValueOnce(
+        new HostError({
+          kind: "api",
+          code: "validation_failed",
+          status: 400,
+          message: "the box block size is out of range",
+          details: { field: "boxBlockSize" },
+        }),
+      );
+    await openSscc(session);
+    await screen.findByLabelText("Номеров в блоке для коробов");
+    type("Номеров в блоке для коробов", "1000");
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    expect(await screen.findByText("Изменения сохранены.")).toBeTruthy();
+
+    type("Номеров в блоке для коробов", "1500");
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    await screen.findByText("Хост не принял это значение. Проверьте его.");
+    expect(screen.queryByText("Изменения сохранены.")).toBeNull();
+  });
+
   it("checks the block sizes against the host's limits", async () => {
     const session = adminSession();
     await openSscc(session);

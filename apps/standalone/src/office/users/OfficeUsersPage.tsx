@@ -27,11 +27,17 @@ type UsersDialog =
   | { kind: "edit"; user: OfficeUserRecord }
   | { kind: "password"; user: OfficeUserRecord };
 
+/** The host's order: `ORDER BY login COLLATE NOCASE` (ASCII case folded, then bytes). */
+function byLogin(a: OfficeUserRecord, b: OfficeUserRecord): number {
+  const left = a.login.toLowerCase();
+  const right = b.login.toLowerCase();
+  if (left < right) return -1;
+  return left > right ? 1 : 0;
+}
+
 /** Replace or add `user`, keeping the host's order (by login, case-insensitive). */
 function withUser(list: readonly OfficeUserRecord[], user: OfficeUserRecord): OfficeUserRecord[] {
-  return [...list.filter((each) => each.id !== user.id), user].sort((a, b) =>
-    a.login.localeCompare(b.login, undefined, { sensitivity: "base" }),
-  );
+  return [...list.filter((each) => each.id !== user.id), user].sort(byLogin);
 }
 
 /** Office users (spec §4.8, administrators only; the route is wrapped in `RequireRole`). */
@@ -48,9 +54,13 @@ export function OfficeUsersPage() {
     setDialog(next);
   };
   const store = (user: OfficeUserRecord) => {
-    queryClient.setQueryData<OfficeUserRecord[]>(officeKeys.users, (list) =>
-      withUser(list ?? [], user),
-    );
+    const list = queryClient.getQueryData<OfficeUserRecord[]>(officeKeys.users);
+    if (list) {
+      queryClient.setQueryData(officeKeys.users, withUser(list, user));
+    } else {
+      // No loaded list to update: read the whole list again rather than show one row.
+      void queryClient.invalidateQueries({ queryKey: officeKeys.users });
+    }
   };
 
   const columns: TableColumn<OfficeUserRecord>[] = [
@@ -128,6 +138,7 @@ export function OfficeUsersPage() {
           columns={columns}
           rows={users.data}
           getRowKey={(user) => user.id}
+          empty={t("office.users.empty")}
           scrollLabel={t("office.users.title")}
         />
       </Card>

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { ThemeProvider } from "@markiro/ui";
 
 import { HostError } from "../src/host/client.js";
+import type { OfficeUserRecord } from "../src/host/protocol.js";
 import { Office } from "../src/office/Office.js";
 import { OfficeSessionProvider } from "../src/office/office-session.js";
 import { RequireRole } from "../src/office/RequireRole.js";
@@ -123,6 +124,89 @@ describe("office users", () => {
     expect(rowOf("anna")).toBeTruthy();
   });
 
+  it("sorts a new user the way the host does: ASCII case folded, then by byte", async () => {
+    const session = fakeOfficeSession();
+    const aMinusB: OfficeUserRecord = {
+      id: "11111111-1111-4111-8111-111111111111",
+      login: "a-b",
+      name: "Первая",
+      role: "technologist",
+      active: true,
+      createdAt: "2026-09-26T09:00:00Z",
+      rev: 1,
+    };
+    const ab: OfficeUserRecord = {
+      id: "22222222-2222-4222-8222-222222222222",
+      login: "ab",
+      name: "Вторая",
+      role: "technologist",
+      active: true,
+      createdAt: "2026-09-26T09:05:00Z",
+      rev: 1,
+    };
+    session.api.listUsers.mockResolvedValue([aMinusB, ab]);
+    session.api.createUser.mockResolvedValue({
+      id: "33333333-3333-4333-8333-333333333333",
+      login: "a_b",
+      name: "Третья",
+      role: "technologist",
+      active: true,
+      createdAt: "2026-09-26T09:10:00Z",
+      rev: 1,
+    });
+    renderOffice(session);
+    fireEvent.click(await screen.findByRole("link", { name: "Пользователи" }));
+    await screen.findByText("a-b");
+    fireEvent.click(screen.getByRole("button", { name: "Добавить пользователя" }));
+    type("Логин", "a_b");
+    type("Имя", "Третья");
+    type("Пароль", "another long password");
+    type("Повторите пароль", "another long password");
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Добавить" }));
+    expect(await screen.findByText("Пользователь a_b добавлен.")).toBeTruthy();
+    // The host orders by `login COLLATE NOCASE`: `-` (0x2D) < `_` (0x5F) < `b` (0x62),
+    // unlike `localeCompare`, which treats `-` and `_` as close to equal.
+    const table = screen.getByRole("table");
+    const rows = within(table).getAllByRole("row").slice(1);
+    const logins = rows.map((row) => within(row).getAllByRole("cell")[0]?.textContent);
+    expect(logins).toEqual(["a-b", "a_b", "ab"]);
+  });
+
+  it("re-reads the whole list after adding a user onto a list that failed to load", async () => {
+    const session = fakeOfficeSession();
+    session.api.listUsers
+      .mockRejectedValueOnce(
+        new HostError({ kind: "transport", code: "unreachable", message: "down" }),
+      )
+      .mockResolvedValueOnce(OFFICE_USERS);
+    session.api.createUser.mockResolvedValue({
+      id: "5d2f0a1c-3b4e-4f6a-8c9d-0e1f2a3b4c5d",
+      login: "anna",
+      name: "Анна Козлова",
+      role: "technologist",
+      active: true,
+      createdAt: "2026-09-26T10:00:00Z",
+      rev: 9,
+    });
+    renderOffice(session);
+    fireEvent.click(await screen.findByRole("link", { name: "Пользователи" }));
+    await screen.findByText(
+      "Нет связи с хостом. Проверьте, что ПК-хост включён и служба запущена.",
+    );
+    // The header's "add" button stays even though the list failed to load.
+    fireEvent.click(screen.getByRole("button", { name: "Добавить пользователя" }));
+    type("Логин", "anna");
+    type("Имя", "Анна Козлова");
+    type("Пароль", "anna long password");
+    type("Повторите пароль", "anna long password");
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Добавить" }));
+    expect(await screen.findByText("Пользователь anna добавлен.")).toBeTruthy();
+    await waitFor(() => expect(session.api.listUsers).toHaveBeenCalledTimes(2));
+    // The re-read list (admin and tech), not a one-row list of just the new user.
+    expect(await screen.findByText("Павел Орлов")).toBeTruthy();
+    expect(rowOf("admin")).toBeTruthy();
+  });
+
   it("says when the login is taken", async () => {
     const session = adminSession();
     session.api.createUser.mockRejectedValueOnce(
@@ -199,7 +283,10 @@ describe("office users", () => {
       true,
     );
     expect(
-      within(dialog()).getByText("Свою роль и доступ может изменить только другой администратор."),
+      within(dialog()).getByText("Свою роль может изменить только другой администратор."),
+    ).toBeTruthy();
+    expect(
+      within(dialog()).getByText("Свой доступ может изменить только другой администратор."),
     ).toBeTruthy();
     type("Имя", "Ирина Орлова");
     fireEvent.click(within(dialog()).getByRole("button", { name: "Сохранить" }));
