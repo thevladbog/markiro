@@ -1437,18 +1437,16 @@ describe("rendered landing page", () => {
         );
       }
 
-      if (route !== "/" && route !== "/en/") {
-        // The film page is a full-bleed cinematic page like the home page: it
-        // carries breadcrumb structured data but, deliberately, no visible
-        // breadcrumb chrome.
-        if (!(FILM_ROUTES as readonly string[]).includes(route)) {
-          const breadcrumbsLabel = route.startsWith("/en/") ? "Breadcrumbs" : "Хлебные крошки";
-          expect(
-            routeDocument.querySelector(`nav[aria-label="${breadcrumbsLabel}"]`),
-          ).not.toBeNull();
-        }
-        expect(graph["@graph"].some((entry) => entry["@type"] === "BreadcrumbList")).toBe(true);
-      }
+      const breadcrumbsLabel = route.startsWith("/en/") ? "Breadcrumbs" : "Хлебные крошки";
+      const showsBreadcrumbs =
+        routeDocument.querySelector(`nav[aria-label="${breadcrumbsLabel}"]`) !== null;
+      // Structured breadcrumbs describe only a trail the page shows; the home
+      // pages and the film pages show none.
+      expect(
+        graph["@graph"].some((entry) => entry["@type"] === "BreadcrumbList"),
+        route,
+      ).toBe(showsBreadcrumbs);
+      expect(showsBreadcrumbs, route).toBe(!["/", "/en/", ...FILM_ROUTES].includes(route));
     }
   });
 
@@ -1641,6 +1639,13 @@ describe("rendered film page", () => {
     expect(film.querySelectorAll("section[data-film-chapter] h2")).toHaveLength(6);
     expect(film.querySelectorAll("[data-film-rail] a")).toHaveLength(7);
     expect(film.querySelector("canvas[data-film-canvas]")).not.toBeNull();
+    const sectionIds = [...film.querySelectorAll("section[data-film-chapter]")].map(
+      (section) => section.id,
+    );
+    expect(
+      [...film.querySelectorAll("[data-film-rail] a")].map((link) => link.getAttribute("href")),
+    ).toEqual(sectionIds.map((id) => `#${id}`));
+    expect(film.querySelector(page.heroSecondary.href)).not.toBeNull();
     const text = film.body.textContent?.replace(/\s+/gu, " ") ?? "";
     for (const chapter of page.chapters) {
       for (const phrase of [chapter.kicker, chapter.title, chapter.body, ...chapter.tags]) {

@@ -532,6 +532,9 @@ describe("film page search surfaces", () => {
     expect(sitemap).toContain(
       '<xhtml:link rel="alternate" hreflang="en" href="https://markiro.app/en/how-it-works/" />',
     );
+    expect(sitemap).toContain(
+      '<xhtml:link rel="alternate" hreflang="ru" href="https://markiro.app/kak-rabotaet/" />',
+    );
   });
 
   it("describes the film in llms.txt for both languages", () => {
@@ -540,18 +543,13 @@ describe("film page search surfaces", () => {
     expect(llms).toContain("- [How it works](https://markiro.app/en/how-it-works/): ");
   });
 
-  it("builds a web page graph with a breadcrumb to the home page", () => {
+  it("builds a web page graph without breadcrumbs, like the home page", () => {
     const nodes = buildFilmPageGraph(findFilmPage("ru"))["@graph"];
     expect(nodes.find((node) => node["@type"] === "WebPage")).toMatchObject({
       url: "https://markiro.app/kak-rabotaet/",
       inLanguage: "ru",
       dateModified: "2026-09-26",
     });
-    expect(nodes.find((node) => node["@type"] === "BreadcrumbList")).toMatchObject({
-      itemListElement: [
-        { position: 1, name: "Markiro", item: "https://markiro.app/" },
-        { position: 2, name: "Как работает", item: "https://markiro.app/kak-rabotaet/" },
-      ],
-    });
+    expect(nodes.some((node) => node["@type"] === "BreadcrumbList")).toBe(false);
   });
 });

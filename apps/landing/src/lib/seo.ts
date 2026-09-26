@@ -312,7 +312,6 @@ export function buildFilmPageGraph(page: FilmPageDefinition): PageGraph {
         dateModified: page.reviewedAt,
         isPartOf: { "@id": `${SITE_URL}/#website` },
       },
-      breadcrumbList(page.locale, [{ name: page.navigationLabel, path: page.path }]),
     ],
   };
 }

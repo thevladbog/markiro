@@ -29,6 +29,11 @@
   background: color-mix(in srgb, var(--surface-page) 86%, transparent);
 }
 
+/* The shared header marks the current language in the accent green, too light on paper. */
+.film-top[data-theme="light"] .language-switch a[aria-current="page"] {
+  color: var(--fg-1);
+}
+
 .film {
   position: relative;
   isolation: isolate;
@@ -268,7 +273,8 @@
     visibility 240ms;
 }
 
-.film__rail.is-visible {
+.film__rail.is-visible,
+.film__rail:focus-within {
   opacity: 1;
   visibility: visible;
 }
