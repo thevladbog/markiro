@@ -4,6 +4,7 @@
 
 mod support;
 
+use base64::Engine;
 use markiro_host::config::HostPaths;
 use markiro_host::{start, StartOptions};
 use serde_json::json;
@@ -73,6 +74,57 @@ async fn secrets_never_reach_the_process_log() {
         .await
         .unwrap();
     assert_eq!(created.status(), 200);
+    let created: serde_json::Value = created.json().await.unwrap();
+    let tech_id = created["id"].as_str().unwrap().to_owned();
+
+    // The technologist can log in with the password just set...
+    let tech_session: serde_json::Value = client
+        .post(format!("{base}/v1/office/login"))
+        .header(protocol.0, &protocol.1)
+        .bearer_auth(&key)
+        .json(&json!({ "login": "tech", "password": "technologist password" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let tech_token = tech_session["token"].as_str().unwrap().to_owned();
+
+    // ...and the administrator can rotate that password.
+    let tech_new_password = "another long technologist password";
+    let password_changed = client
+        .put(format!("{base}/v1/office/users/{tech_id}/password"))
+        .header(protocol.0, &protocol.1)
+        .header(markiro_proto::OFFICE_SESSION_HEADER, &token)
+        .bearer_auth(&key)
+        .json(&json!({ "password": tech_new_password }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(password_changed.status(), 204);
+
+    // A wrong device key and a wrong session token are both rejected...
+    let wrong_device_key = "not-a-real-device-key";
+    let wrong_device = client
+        .get(format!("{base}/v1/office/me"))
+        .header(protocol.0, &protocol.1)
+        .header(markiro_proto::OFFICE_SESSION_HEADER, &token)
+        .bearer_auth(wrong_device_key)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(wrong_device.status(), 401);
+    let wrong_session_token = "not-a-real-session-token";
+    let wrong_session = client
+        .get(format!("{base}/v1/office/me"))
+        .header(protocol.0, &protocol.1)
+        .header(markiro_proto::OFFICE_SESSION_HEADER, wrong_session_token)
+        .bearer_auth(&key)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(wrong_session.status(), 401);
 
     let pool = markiro_host::db::open(&paths.database_file())
         .await
@@ -100,13 +152,19 @@ async fn secrets_never_reach_the_process_log() {
         "the log must not be empty"
     );
     let salt_hex: String = salt.iter().map(|byte| format!("{byte:02x}")).collect();
+    let salt_standard_base64 = base64::engine::general_purpose::STANDARD.encode(&salt);
     let mut secrets = vec![
         key,
         token,
+        tech_token,
         "correct horse battery".to_owned(),
         "not the password".to_owned(),
         "technologist password".to_owned(),
+        tech_new_password.to_owned(),
+        wrong_device_key.to_owned(),
+        wrong_session_token.to_owned(),
         salt_hex,
+        salt_standard_base64,
         "pbkdf2$".to_owned(),
     ];
     secrets.extend(hashes);

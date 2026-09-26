@@ -84,6 +84,17 @@ pub async fn put_counter(
         return Err(ApiError::stale_revision(rev));
     }
     let current = u64::try_from(current).map_err(ApiError::internal)?;
+    if update.next_serial == current {
+        // Nothing actually changed: report the counter as-is without bumping
+        // the revision, writing a row nobody changed, or auditing a no-op.
+        return counter(
+            prefix,
+            i64::from(extension),
+            i64::try_from(current).map_err(ApiError::internal)?,
+            rev,
+        )
+        .map(Json);
+    }
     if update.next_serial < current {
         return Err(ApiError::new(
             StatusCode::CONFLICT,
@@ -149,12 +160,20 @@ pub async fn put_block_sizes(
     }
     let at = state.timestamp();
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
-    let rev: i64 = sqlx::query_scalar("SELECT rev FROM site WHERE id = 1")
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(ApiError::internal)?;
+    let (current_box, current_pallet, rev): (i64, i64, i64) =
+        sqlx::query_as("SELECT box_block_size, pallet_block_size, rev FROM site WHERE id = 1")
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(ApiError::internal)?;
     if rev != update.expected_rev {
         return Err(ApiError::stale_revision(rev));
+    }
+    if i64::from(update.box_block_size) == current_box
+        && i64::from(update.pallet_block_size) == current_pallet
+    {
+        // Nothing actually changed: report state as-is without bumping the
+        // revision, writing a row nobody changed, or auditing a no-op.
+        return read_state(&state).await.map(Json);
     }
     let new_rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
     sqlx::query("UPDATE site SET box_block_size = ?, pallet_block_size = ?, rev = ? WHERE id = 1")

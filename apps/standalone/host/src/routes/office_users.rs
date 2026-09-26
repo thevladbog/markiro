@@ -174,6 +174,11 @@ pub async fn update_user(
     if current.active != update.active {
         changed.push("active");
     }
+    if changed.is_empty() {
+        // Nothing actually changed: report the record as-is without bumping
+        // the revision, writing a row nobody changed, or auditing a no-op.
+        return Ok(Json(current));
+    }
     let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
     sqlx::query("UPDATE office_users SET name = ?, role = ?, active = ?, rev = ? WHERE id = ?")
         .bind(&name)
