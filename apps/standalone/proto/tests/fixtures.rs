@@ -1,8 +1,10 @@
 use markiro_proto::{
     certificate_fingerprint, codes, compatibility, compatibility_for, display_fingerprint,
-    BootstrapRequest, BootstrapResponse, Compatibility, DeviceInfo, DeviceKind, ErrorBody, Hello,
-    HelloEnvelope, LocalPairRequest, OfficeLoginRequest, OfficeRole, OfficeSession, OfficeUser,
-    OrgProfile, OrgProfileUpdate, PairResponse, HOST_PRODUCT, PROTOCOL_VERSION,
+    BlockSizesUpdate, BootstrapRequest, BootstrapResponse, Compatibility, DeviceInfo, DeviceKind,
+    ErrorBody, Hello, HelloEnvelope, LocalPairRequest, OfficeLoginRequest, OfficeRole,
+    OfficeSession, OfficeUser, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate, OrgProfile,
+    OrgProfileUpdate, PairResponse, PasswordSet, SsccCounterUpdate, SsccState, HOST_PRODUCT,
+    PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -118,4 +120,17 @@ fn bootstrap_and_org_fixtures_round_trip() {
     let _: OrgProfile = round_trip("org-profile.json");
     let update: OrgProfileUpdate = round_trip("org-profile-update.json");
     assert!(update.inn.is_none());
+}
+
+#[test]
+fn sscc_and_user_admin_fixtures_round_trip() {
+    let state: SsccState = round_trip("sscc-state.json");
+    assert_eq!(state.counters[0].max_serial, 9_999_999);
+    let _: SsccCounterUpdate = round_trip("sscc-counter-update.json");
+    let _: BlockSizesUpdate = round_trip("block-sizes-update.json");
+    let record: OfficeUserRecord = round_trip("office-user-record.json");
+    assert!(record.active);
+    let _: OfficeUserCreate = round_trip("office-user-create.json");
+    let _: OfficeUserUpdate = round_trip("office-user-update.json");
+    let _: PasswordSet = round_trip("password-set.json");
 }

@@ -133,7 +133,8 @@ apps/standalone/
 - `org_profile(id=1, name, inn, gln, gs1_prefixes JSON, time_zone,
 default_box_template_id, default_pallet_template_id, default_duplicate_template_id, rev)`.
   Проверки хоста: GLN — 13 цифр, каждый префикс — 4–12 цифр, часовой пояс — непустая
-  строка. Проверка IANA-имени — в интерфейсе.
+  строка. Проверка IANA-имени — в интерфейсе. Столбцы шаблонов по умолчанию
+  добавляются миграцией плана 1e вместе с таблицей шаблонов.
 - `counterparties(id, name, inn, gln, gs1_prefixes JSON, archived, rev)`.
 - `sscc_counters(issuer_prefix, extension, next_serial, rev, PRIMARY KEY(issuer_prefix, extension))`,
   где `extension` 0 — короб, 1 — паллета, как в облаке. На этапе 1 счётчик можно
@@ -144,10 +145,14 @@ default_box_template_id, default_pallet_template_id, default_duplicate_template_
   даёт выключить, понизить или удалить последнего активного администратора
   (`last_admin`).
 - `office_sessions(id, token_hash UNIQUE, user_id, device_id, created_at, last_seen_at, expires_at)`.
+  Закрытая или истёкшая сессия удаляется; историю входов хранит журнал действий.
 - `devices(id, kind CHECK(kind IN ('station','office','handheld')), name, line_id NULL, key_hash UNIQUE, app_version, protocol, capabilities JSON, paired_at, last_seen_at, revoked_at)`.
 - `pairing_codes(id, code_hash UNIQUE, created_by, created_at, expires_at, used_at, failed_attempts)`.
 - `lines(id, name, archived, rev)`, уникальность имени среди неархивных (частичный
-  уникальный индекс без учёта регистра).
+  уникальный индекс без учёта регистра). Таблица создаётся миграцией плана 1b1
+  вместе с `devices`, первые линии создаёт мастер; уникальность имени без учёта
+  регистра обеспечивает столбец `name_key` (обрезанное имя в нижнем регистре по
+  Unicode, считает хост), потому что `lower()` SQLite складывает только ASCII.
 - `operators(id, login UNIQUE, name, role, pin_phc, active, rev)`. Табельный номер —
   3–12 цифр, как в облаке (`apps/api/src/modules/operators/dto.ts`); это проверяет
   хост. PIN — 4–6 цифр; его проверяет интерфейс до расчёта хеша, хост видит только
@@ -219,7 +224,7 @@ default_box_template_id, default_pallet_template_id, default_duplicate_template_
 
 Формат: HTTP-статус и тело `{ "error": { "code": "<snake_case>", "message": "<для журнала>", "details": { … } } }`.
 Интерфейс показывает текст по коду через i18n, `message` пользователю не выводится.
-Коды этапа: `unauthorized`, `forbidden`, `not_found`, `validation_failed` (с полями
+Коды этапа: `unauthorized`, `forbidden`, `not_found`, `method_not_allowed`, `validation_failed` (с полями
 в `details`), `stale_revision`, `conflict` (с `details.constraint`: `gtin`, `login`,
 `badge`, `line_name`), `template_is_default`, `last_admin`, `sscc_below_floor`,
 `pairing_code_invalid`, `pairing_code_expired`, `already_initialized`,

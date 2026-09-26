@@ -319,3 +319,83 @@ pub struct OrgProfileUpdate {
     pub time_zone: String,
     pub expected_rev: i64,
 }
+
+/// One SSCC counter (`GET /v1/office/sscc`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SsccCounter {
+    pub issuer_prefix: String,
+    /// 0 = box, 1 = pallet.
+    pub extension: u8,
+    pub next_serial: u64,
+    pub max_serial: u64,
+    pub rev: i64,
+}
+
+/// `GET /v1/office/sscc`: counters and the device block sizes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SsccState {
+    pub counters: Vec<SsccCounter>,
+    pub box_block_size: u32,
+    pub pallet_block_size: u32,
+    /// Revision of the block sizes (site settings).
+    pub rev: i64,
+}
+
+/// `PUT /v1/office/sscc/counters/{prefix}/{extension}`: move a counter forward.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SsccCounterUpdate {
+    pub next_serial: u64,
+    pub expected_rev: i64,
+}
+
+/// `PUT /v1/office/sscc/block-sizes`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BlockSizesUpdate {
+    pub box_block_size: u32,
+    pub pallet_block_size: u32,
+    pub expected_rev: i64,
+}
+
+/// An office user as the administrator sees it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OfficeUserRecord {
+    pub id: String,
+    pub login: String,
+    pub name: String,
+    pub role: OfficeRole,
+    pub active: bool,
+    pub created_at: String,
+    pub rev: i64,
+}
+
+/// `POST /v1/office/users`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OfficeUserCreate {
+    pub login: String,
+    pub name: String,
+    pub role: OfficeRole,
+    pub password: String,
+}
+
+/// `PUT /v1/office/users/{id}`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OfficeUserUpdate {
+    pub name: String,
+    pub role: OfficeRole,
+    pub active: bool,
+    pub expected_rev: i64,
+}
+
+/// `PUT /v1/office/users/{id}/password`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PasswordSet {
+    pub password: String,
+}

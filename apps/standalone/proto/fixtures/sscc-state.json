@@ -1,0 +1,21 @@
+{
+  "counters": [
+    {
+      "issuerPrefix": "460068200",
+      "extension": 0,
+      "nextSerial": 1500,
+      "maxSerial": 9999999,
+      "rev": 1
+    },
+    {
+      "issuerPrefix": "460068200",
+      "extension": 1,
+      "nextSerial": 40,
+      "maxSerial": 9999999,
+      "rev": 1
+    }
+  ],
+  "boxBlockSize": 2000,
+  "palletBlockSize": 200,
+  "rev": 1
+}

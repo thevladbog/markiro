@@ -9,7 +9,7 @@ use axum::extract::{Request, State};
 use axum::http::{Method, Uri};
 use axum::middleware::{self, Next};
 use axum::response::Response;
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use sqlx::SqlitePool;
 use time::OffsetDateTime;
@@ -79,6 +79,28 @@ fn protected_routes() -> Router<AppState> {
         .route(
             "/v1/office/org",
             get(crate::routes::org::get_org).put(crate::routes::org::put_org),
+        )
+        .route("/v1/office/sscc", get(crate::routes::sscc::get_sscc))
+        .route(
+            "/v1/office/sscc/counters/{prefix}/{extension}",
+            put(crate::routes::sscc::put_counter),
+        )
+        .route(
+            "/v1/office/sscc/block-sizes",
+            put(crate::routes::sscc::put_block_sizes),
+        )
+        .route(
+            "/v1/office/users",
+            get(crate::routes::office_users::list_users)
+                .post(crate::routes::office_users::create_user),
+        )
+        .route(
+            "/v1/office/users/{id}",
+            put(crate::routes::office_users::update_user),
+        )
+        .route(
+            "/v1/office/users/{id}/password",
+            put(crate::routes::office_users::set_password),
         )
 }
 
