@@ -321,6 +321,10 @@ In `%LOCALAPPDATA%\app.markiro.signer\`, next to `EBWebView\`:
   `Global\` (tauri-plugin-single-instance 2.4.3
   `src/platform_impl/windows.rs:67`), so it is per logon session. Two
   sessions of one user on a terminal server could otherwise resolve at once.
+  If the lock cannot be taken, nothing moves or cleans up that run, but the
+  record still decides: it is only ever replaced by an atomic rename, so it
+  is read without the lock, and a committed record keeps the local folder
+  authoritative (S6).
 
 The record lives in the local folder on purpose. Neither a roaming download
 nor another computer can make this computer believe a move is done or not
@@ -351,8 +355,11 @@ Under the lock:
    - In the background, if the legacy folder holds `signer.json`: parse only
      `agentId` and report `RoamedCopyPresent { sameAgent }`. Never load that
      file and never delete it.
-   - An unreadable record counts as committed when the local folder holds
-     `signer.json`, and as absent otherwise. Neither case deletes anything.
+   - A record that does not parse counts as committed when the local folder
+     holds `signer.json` (the background check still runs), and as absent
+     otherwise. A record that exists but cannot be opened (an antivirus scan,
+     a sharing violation) keeps the local folder and moves nothing (S7, S8).
+     No case deletes anything.
 2. **No record, and the durability guard (7.5) finds the local folder less
    durable.** Use the legacy folder, write nothing, report the reason.
 3. **Look at the legacy folder.**
@@ -381,8 +388,10 @@ Under the lock:
    - In `retiredDir`, delete `signer.json` only if its bytes equal what was
      copied, then delete the journal files.
    - Remove the folder if it is empty, and record `cleanup: done`.
-   - Anything else stays and is reported: a `signer.json` that another
-     computer changed in the meantime, or unknown files.
+   - A `signer.json` that another computer changed in the meantime stays
+     and is reported at every start: the background check also looks in
+     retired folders. Unknown files stay and are not reported, because they
+     are not ours (S9).
    - If the rename is refused (folder in use, share unreachable): keep
      `cleanup: pending`, report `LegacyCleanupPending`, and retry at the next
      start. The local copy is already authoritative, so a pending cleanup
@@ -662,6 +671,19 @@ Decided by the owner on 2026-09-27:
   pairing, as part of this change. Rejected: today's wipe.
 - **S4. Option C becomes a separate spec after A ships.** Rejected: including
   it in this change; not doing it.
+
+Decided by the owner during the implementation review on 2026-09-27:
+
+- **S6. A lock failure reads the record anyway.** A committed record keeps the
+  local folder; nothing moves or cleans up without the lock. Rejected: falling
+  back to the roaming folder.
+- **S7. A record that exists but cannot be opened counts as moved:** the local
+  folder stays and nothing moves. Rejected: treating it like a corrupt record.
+- **S8. The roamed-copy check runs while the record does not parse** and the
+  local folder holds `signer.json`.
+- **S9. A changed `signer.json` left in a retired folder is reported at every
+  start; unknown files are not reported.** Rejected: reporting unknown files
+  in the journal; reporting the changed file only on the move run.
 
 Still open:
 

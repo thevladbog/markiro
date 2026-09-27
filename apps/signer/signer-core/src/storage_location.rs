@@ -269,16 +269,23 @@ pub fn resolve(
     }
     let _lock = match lock_local(local_dir) {
         Ok(lock) => lock,
-        Err(_) => return Resolution::legacy(legacy_dir, StorageNotice::MovePostponed),
+        Err(_) => return resolve_without_lock(legacy_dir, local_dir),
     };
     match read_record(local_dir) {
         RecordState::Committed(record) => {
             return finish_committed(legacy_dir, local_dir, record, hooks)
         }
-        // Never guess at a record we cannot read: the local copy stays
+        // The record exists but cannot be opened right now (an antivirus scan,
+        // a sharing violation): a move has happened, so the local folder stays
+        // authoritative and nothing moves this run.
+        RecordState::Inaccessible => return Resolution::local(local_dir),
+        // Never guess at a record we cannot parse: the local copy stays
         // authoritative and nothing is deleted.
         RecordState::Unreadable if local_dir.join(CONFIG_FILE).exists() => {
-            return Resolution::local(local_dir)
+            return Resolution {
+                check_roamed_copy: true,
+                ..Resolution::local(local_dir)
+            }
         }
         RecordState::Unreadable | RecordState::Absent => {}
     }
@@ -305,19 +312,66 @@ pub fn resolve(
     migrate(legacy_dir, local_dir, &legacy, hooks)
 }
 
-/// Reports pairing data that turned up in the roaming folder after the move.
-/// It is never loaded and never deleted (station decision D3): it may be
-/// another computer's live copy. Run it off the startup path, because a
-/// redirected share can hang for its whole network timeout; every error
-/// counts as "nothing there".
+/// The lock could not be taken, so nothing may move or clean up this run.
+/// The record still decides where the agent lives: it is only ever replaced
+/// by an atomic rename, so reading it without the lock is safe.
+fn resolve_without_lock(legacy_dir: &Path, local_dir: &Path) -> Resolution {
+    match read_record(local_dir) {
+        RecordState::Committed(record) if record.cleanup == Some(Cleanup::Pending) => {
+            Resolution {
+                notices: vec![StorageNotice::LegacyCleanupPending],
+                ..Resolution::local(local_dir)
+            }
+        }
+        RecordState::Committed(_) => Resolution {
+            check_roamed_copy: true,
+            ..Resolution::local(local_dir)
+        },
+        RecordState::Inaccessible => Resolution::local(local_dir),
+        RecordState::Unreadable if local_dir.join(CONFIG_FILE).exists() => Resolution {
+            check_roamed_copy: true,
+            ..Resolution::local(local_dir)
+        },
+        RecordState::Unreadable | RecordState::Absent => {
+            Resolution::legacy(legacy_dir, StorageNotice::MovePostponed)
+        }
+    }
+}
+
+/// Reports pairing data in the roaming profile after the move: a
+/// `signer.json` that turned up in the roaming folder, or one the retire step
+/// had to leave in a retired folder because it changed. It is never loaded
+/// and never deleted (station decision D3): it may be another computer's live
+/// copy. Run it off the startup path, because a redirected share can hang for
+/// its whole network timeout; every error counts as "nothing there".
 pub fn roamed_copy(legacy_dir: &Path, local_dir: &Path) -> Option<StorageNotice> {
-    let theirs = legacy_dir.join(CONFIG_FILE);
-    if !fs::exists(&theirs).unwrap_or(false) {
+    let copies = roaming_configs(legacy_dir);
+    if copies.is_empty() {
         return None;
     }
+    let ours = local_dir.join(CONFIG_FILE);
     Some(StorageNotice::RoamedCopyPresent {
-        same_agent: same_agent(&theirs, &local_dir.join(CONFIG_FILE)),
+        same_agent: copies.iter().any(|theirs| same_agent(theirs, &ours)),
     })
+}
+
+/// `signer.json` in the roaming folder and in its retired siblings
+/// (`<legacy>.retired-*`).
+fn roaming_configs(legacy_dir: &Path) -> Vec<PathBuf> {
+    let mut configs = vec![legacy_dir.join(CONFIG_FILE)];
+    if let (Some(parent), Some(name)) = (legacy_dir.parent(), legacy_dir.file_name()) {
+        let prefix = format!("{}.retired-", name.to_string_lossy());
+        if let Ok(entries) = fs::read_dir(parent) {
+            configs.extend(
+                entries
+                    .filter_map(Result::ok)
+                    .filter(|entry| entry.file_name().to_string_lossy().starts_with(&prefix))
+                    .map(|entry| entry.path().join(CONFIG_FILE)),
+            );
+        }
+    }
+    configs.retain(|config| fs::exists(config).unwrap_or(false));
+    configs
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -398,6 +452,9 @@ impl Fingerprint {
 enum RecordState {
     Absent,
     Committed(Record),
+    /// The record exists but cannot be opened right now.
+    Inaccessible,
+    /// The record exists but does not parse.
     Unreadable,
 }
 
@@ -408,7 +465,7 @@ fn read_record(local_dir: &Path) -> RecordState {
             Err(_) => RecordState::Unreadable,
         },
         Err(error) if error.kind() == io::ErrorKind::NotFound => RecordState::Absent,
-        Err(_) => RecordState::Unreadable,
+        Err(_) => RecordState::Inaccessible,
     }
 }
 
@@ -851,7 +908,7 @@ mod move_tests {
     fn record(dirs: &Dirs) -> Option<Record> {
         match read_record(&dirs.local) {
             RecordState::Committed(record) => Some(record),
-            RecordState::Absent | RecordState::Unreadable => None,
+            RecordState::Absent | RecordState::Inaccessible | RecordState::Unreadable => None,
         }
     }
 
@@ -1248,6 +1305,7 @@ mod move_tests {
 
         assert_eq!(resolution.dir, dirs.local);
         assert!(!resolution.moved);
+        assert!(resolution.check_roamed_copy, "spec §7.3 step 1: the roamed-copy check still runs");
         assert_eq!(fs::read(dirs.local.join(CONFIG_FILE)).unwrap(), OTHER_AGENT);
         assert_eq!(fs::read(dirs.legacy.join(CONFIG_FILE)).unwrap(), PAIRED);
     }
@@ -1294,6 +1352,120 @@ mod move_tests {
         assert_eq!(Fingerprint::of(b"a").fnv1a64, "af63dc4c8601ec8c");
         assert_eq!(Fingerprint::of(b"foobar").fnv1a64, "85944171f73967e8");
         assert_eq!(Fingerprint::of(b"foobar").len, 6);
+    }
+
+    /// Replaces a file with an empty directory of the same name, so opening
+    /// it fails with an error other than "not found" on every platform.
+    fn make_unopenable(path: &Path) {
+        fs::remove_file(path).unwrap();
+        fs::create_dir(path).unwrap();
+    }
+
+    #[test]
+    fn a_lock_failure_after_the_move_keeps_the_local_folder() {
+        let dirs = dirs();
+        seed_legacy(&dirs);
+        resolve_local(&dirs);
+        make_unopenable(&dirs.local.join(LOCK_FILE));
+        write(&dirs.legacy.join(CONFIG_FILE), OTHER_AGENT);
+
+        let resolution = resolve_local(&dirs);
+
+        assert_eq!(resolution.dir, dirs.local);
+        assert!(!resolution.moved);
+        assert!(resolution.check_roamed_copy);
+        assert_eq!(fs::read(dirs.local.join(CONFIG_FILE)).unwrap(), PAIRED);
+        assert_eq!(fs::read(dirs.legacy.join(CONFIG_FILE)).unwrap(), OTHER_AGENT, "never loaded or deleted");
+    }
+
+    #[test]
+    fn a_lock_failure_during_a_pending_cleanup_keeps_the_local_folder() {
+        let dirs = dirs();
+        seed_legacy(&dirs);
+        resolve(&dirs.legacy, &dirs.local, &Local, &FailAt(Step::Retire));
+        make_unopenable(&dirs.local.join(LOCK_FILE));
+
+        let resolution = resolve_local(&dirs);
+
+        assert_eq!(resolution.dir, dirs.local);
+        assert_eq!(resolution.notices, vec![StorageNotice::LegacyCleanupPending]);
+        assert!(!resolution.check_roamed_copy, "our own unretired copy is not a roamed copy");
+        assert!(dirs.legacy.join(CONFIG_FILE).exists(), "nothing is cleaned up without the lock");
+    }
+
+    #[test]
+    fn a_lock_failure_before_any_move_postpones_it() {
+        let dirs = dirs();
+        seed_legacy(&dirs);
+        fs::create_dir_all(dirs.local.join(LOCK_FILE)).unwrap();
+
+        let resolution = resolve_local(&dirs);
+
+        assert_eq!(resolution.dir, dirs.legacy);
+        assert_eq!(resolution.notices, vec![StorageNotice::MovePostponed]);
+        assert!(record(&dirs).is_none());
+        assert_eq!(fs::read(dirs.legacy.join(CONFIG_FILE)).unwrap(), PAIRED);
+    }
+
+    #[test]
+    fn a_record_that_cannot_be_opened_keeps_the_local_folder_and_moves_nothing() {
+        let dirs = dirs();
+        resolve_local(&dirs);
+        make_unopenable(&dirs.local.join(RECORD_FILE));
+        write(&dirs.legacy.join(CONFIG_FILE), OTHER_AGENT);
+
+        let resolution = resolve_local(&dirs);
+
+        assert_eq!(resolution.dir, dirs.local);
+        assert!(!resolution.moved);
+        assert!(!dirs.local.join(CONFIG_FILE).exists(), "another computer's pairing is not adopted");
+        assert_eq!(fs::read(dirs.legacy.join(CONFIG_FILE)).unwrap(), OTHER_AGENT);
+    }
+
+    #[test]
+    fn a_config_left_in_a_retired_folder_is_reported_at_every_start() {
+        let dirs = dirs();
+        seed_legacy(&dirs);
+        let roaming = dirs.legacy.parent().unwrap().to_path_buf();
+        resolve(
+            &dirs.legacy,
+            &dirs.local,
+            &Local,
+            &At(Step::DeleteRetired, || {
+                let retired = fs::read_dir(&roaming)
+                    .unwrap()
+                    .map(|entry| entry.unwrap().path())
+                    .find(|path| path.to_string_lossy().contains(".retired-"))
+                    .unwrap();
+                fs::write(retired.join(CONFIG_FILE), PAIRED_OTHER_CERT).unwrap();
+            }),
+        );
+
+        let next = resolve_local(&dirs);
+
+        assert!(next.check_roamed_copy);
+        assert_eq!(
+            roamed_copy(&dirs.legacy, &dirs.local),
+            Some(StorageNotice::RoamedCopyPresent { same_agent: true })
+        );
+    }
+
+    #[test]
+    fn unknown_files_keep_the_retired_folder_but_are_not_reported() {
+        let dirs = dirs();
+        seed_legacy(&dirs);
+        write(&dirs.legacy.join("notes.txt"), b"not ours");
+
+        let resolution = resolve_local(&dirs);
+
+        assert!(resolution.moved);
+        assert!(resolution.notices.is_empty());
+        let leftovers = roaming_leftovers(&dirs);
+        assert_eq!(leftovers.len(), 1);
+        let retired = dirs.legacy.parent().unwrap().join(&leftovers[0]);
+        assert_eq!(fs::read(retired.join("notes.txt")).unwrap(), b"not ours");
+        assert!(!retired.join(CONFIG_FILE).exists());
+        assert_eq!(roamed_copy(&dirs.legacy, &dirs.local), None);
     }
 
     #[cfg(windows)]
