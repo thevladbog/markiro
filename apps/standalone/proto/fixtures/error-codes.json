@@ -1,0 +1,20 @@
+{
+  "codes": [
+    "not_found",
+    "method_not_allowed",
+    "protocol_unsupported",
+    "validation_failed",
+    "unauthorized",
+    "forbidden",
+    "stale_revision",
+    "conflict",
+    "last_admin",
+    "sscc_below_floor",
+    "already_initialized",
+    "loopback_only",
+    "rate_limited",
+    "internal",
+    "pairing_code_invalid",
+    "pairing_code_expired"
+  ]
+}

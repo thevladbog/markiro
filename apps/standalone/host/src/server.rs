@@ -39,6 +39,9 @@ pub struct AppState {
     pub host_id: String,
     pub clock: Arc<dyn Clock>,
     pub login_limiter: Arc<crate::rate_limit::RateLimiter>,
+    /// Pairing claims, per address; separate from `login_limiter`, so a
+    /// mistyped pairing code never locks the office out on the same computer.
+    pub claim_limiter: Arc<crate::rate_limit::RateLimiter>,
     pub endpoint: Endpoint,
 }
 
@@ -48,6 +51,11 @@ impl AppState {
             pool,
             host_id,
             login_limiter: Arc::new(crate::rate_limit::RateLimiter::new(
+                10,
+                time::Duration::minutes(1),
+                clock.clone(),
+            )),
+            claim_limiter: Arc::new(crate::rate_limit::RateLimiter::new(
                 10,
                 time::Duration::minutes(1),
                 clock.clone(),
@@ -142,12 +150,19 @@ fn protected_routes() -> Router<AppState> {
             "/v1/office/pairing-codes",
             post(crate::routes::pairing::create_code),
         )
+        .route("/v1/pairing/claim", post(crate::routes::pairing::claim))
 }
+
+/// The protocol version the client sent, set by [`protocol_guard`] for every
+/// route behind it: handlers that record it read this instead of parsing the
+/// header again.
+#[derive(Debug, Clone, Copy)]
+pub struct ClientProtocol(pub u32);
 
 /// Every route except `hello` requires a supported protocol version
 /// (spec §4.5). Apply with `route_layer` on the protected routes only, so
 /// `hello` answers any version and unknown paths stay `not_found`.
-pub async fn protocol_guard(request: Request, next: Next) -> Result<Response, ApiError> {
+pub async fn protocol_guard(mut request: Request, next: Next) -> Result<Response, ApiError> {
     let version = request
         .headers()
         .get(markiro_proto::PROTOCOL_HEADER)
@@ -158,6 +173,7 @@ pub async fn protocol_guard(request: Request, next: Next) -> Result<Response, Ap
             if (markiro_proto::MIN_PROTOCOL_VERSION..=markiro_proto::PROTOCOL_VERSION)
                 .contains(&version) =>
         {
+            request.extensions_mut().insert(ClientProtocol(version));
             Ok(next.run(request).await)
         }
         other => Err(ApiError::protocol_unsupported(other)),

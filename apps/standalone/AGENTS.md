@@ -32,8 +32,14 @@ grant each other's rights. A device key alone never opens office routes.
 `POST /v1/local-pair` and `POST /v1/bootstrap` accept only loopback peers, and
 loopback is their only gate: any process on the host PC can pair a device.
 That is acceptable because the host PC is the site's trusted machine; the
-app pins the certificate it observed over loopback. Devices on the network
-pair only with a one-time code (plan 1c).
+app pins the certificate it observed over loopback.
+Devices on the network pair only with a one-time code. An administrator
+creates it (`POST /v1/office/pairing-codes`); it lives 10 minutes, is stored
+as a hash, is claimed once (`POST /v1/pairing/claim`, 10 attempts a minute
+per address) and dies after 5 failed claims — a wrong code counts against
+every live code, since the hash cannot tell which one was meant. The claiming
+device pins the fingerprint from the scanned payload, or one a person
+compared with the office screen.
 
 ## Audit
 

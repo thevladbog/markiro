@@ -1,5 +1,6 @@
-//! Per-address attempt limit for office login (and, from plan 1c, pairing
-//! claims): at most `max` attempts within a sliding `window`.
+//! Per-address attempt limit (office login and password change share one;
+//! pairing claims have their own): at most `max` attempts within a sliding
+//! `window`.
 
 use std::collections::{HashMap, VecDeque};
 use std::net::IpAddr;

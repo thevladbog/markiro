@@ -17,6 +17,8 @@ export const API_ERROR_CODES = [
   "loopback_only",
   "rate_limited",
   "internal",
+  "pairing_code_invalid",
+  "pairing_code_expired",
 ] as const;
 
 const API_CODES: ReadonlySet<string> = new Set(API_ERROR_CODES);

@@ -4,6 +4,7 @@
 
 mod support;
 
+use base64::engine::general_purpose::{STANDARD, STANDARD_NO_PAD, URL_SAFE_NO_PAD};
 use base64::Engine;
 use markiro_host::config::HostPaths;
 use markiro_host::{start, StartOptions};
@@ -146,6 +147,33 @@ async fn secrets_never_reach_the_process_log() {
         .unwrap();
     assert_eq!(self_change.status(), 204);
 
+    // A pairing code and a device paired with it: neither the code, the
+    // payload carrying it, nor the new device key may reach the log.
+    let pairing: serde_json::Value = client
+        .post(format!("{base}/v1/office/pairing-codes"))
+        .header(protocol.0, &protocol.1)
+        .header(markiro_proto::OFFICE_SESSION_HEADER, &token)
+        .bearer_auth(&key)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let pairing_code = pairing["code"].as_str().unwrap().to_owned();
+    let pairing_payload = pairing["payload"].as_str().unwrap().to_owned();
+    let claimed: serde_json::Value = client
+        .post(format!("{base}/v1/pairing/claim"))
+        .header(protocol.0, &protocol.1)
+        .json(&json!({ "code": pairing_code, "kind": "station", "name": "Станция 2", "appVersion": "0.1.0" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let claimed_key = claimed["deviceKey"].as_str().unwrap().to_owned();
+
     // A wrong device key and a wrong session token are both rejected...
     let wrong_device_key = "not-a-real-device-key";
     let wrong_device = client
@@ -179,6 +207,7 @@ async fn secrets_never_reach_the_process_log() {
         .fetch_one(&pool)
         .await
         .unwrap();
+    let key_der = std::fs::read(paths.tls_dir().join("key.der")).unwrap();
     pool.close().await;
 
     drop(client);
@@ -208,8 +237,19 @@ async fn secrets_never_reach_the_process_log() {
         third_password.to_owned(),
         wrong_device_key.to_owned(),
         wrong_session_token.to_owned(),
+        pairing_code,
+        pairing_payload,
+        claimed_key,
+        format!("{salt:?}"),
         salt_hex,
         salt_standard_base64,
+        STANDARD_NO_PAD.encode(&salt),
+        URL_SAFE_NO_PAD.encode(&salt),
+        STANDARD.encode(&key_der),
+        key_der
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>(),
         "pbkdf2$".to_owned(),
     ];
     secrets.extend(hashes);

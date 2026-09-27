@@ -1,10 +1,10 @@
 use markiro_proto::{
     certificate_fingerprint, codes, compatibility, compatibility_for, credentials,
-    display_fingerprint, BlockSizesUpdate, BootstrapRequest, BootstrapResponse, Compatibility,
-    DeviceInfo, DeviceKind, ErrorBody, Hello, HelloEnvelope, LocalPairRequest, OfficeLoginRequest,
-    OfficeRole, OfficeSession, OfficeUser, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate,
-    OrgProfile, OrgProfileUpdate, PairResponse, PairingCode, PasswordChange, PasswordSet,
-    SsccCounterUpdate, SsccState, HOST_PRODUCT, PROTOCOL_VERSION,
+    display_fingerprint, BlockSizesUpdate, BootstrapRequest, BootstrapResponse, ClaimRequest,
+    Compatibility, DeviceInfo, DeviceKind, ErrorBody, Hello, HelloEnvelope, LocalPairRequest,
+    OfficeLoginRequest, OfficeRole, OfficeSession, OfficeUser, OfficeUserCreate, OfficeUserRecord,
+    OfficeUserUpdate, OrgProfile, OrgProfileUpdate, PairResponse, PairingCode, PasswordChange,
+    PasswordSet, SsccCounterUpdate, SsccState, HOST_PRODUCT, PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -183,4 +183,28 @@ fn secrets_never_appear_in_debug_output() {
         assert!(!debug.contains(secret), "Debug output leaks a secret");
     }
     assert_eq!(debug.matches("Secret(***)").count(), 6);
+}
+
+#[test]
+fn claim_request_round_trips_rejects_unknown_fields_and_hides_the_code() {
+    let request: ClaimRequest = round_trip("claim-request.json");
+    assert!(!format!("{request:?}").contains("7K3MQ9XV2D"));
+    let mut value = fixture("claim-request.json");
+    value["extra"] = Value::Bool(true);
+    assert!(serde_json::from_value::<ClaimRequest>(value).is_err());
+}
+
+#[test]
+fn the_error_code_fixture_lists_every_code() {
+    let listed = fixture("error-codes.json");
+    let mut listed: Vec<&str> = listed["codes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|code| code.as_str().unwrap())
+        .collect();
+    listed.sort_unstable();
+    let mut known = markiro_proto::codes::ALL.to_vec();
+    known.sort_unstable();
+    assert_eq!(listed, known);
 }

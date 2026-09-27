@@ -153,6 +153,40 @@ pub fn first_serial(extension: u8) -> u64 {
     }
 }
 
+/// A device's own description at pairing (`local-pair` and `pairing/claim`):
+/// returns the trimmed name and app version.
+pub fn device_registration<'a>(
+    name: &'a str,
+    app_version: &'a str,
+    capabilities: &[String],
+) -> Result<(&'a str, &'a str), ApiError> {
+    let name = name.trim();
+    if name.is_empty() || name.chars().count() > 100 {
+        return Err(ApiError::validation(
+            "name",
+            "the name must be 1-100 characters",
+        ));
+    }
+    let app_version = app_version.trim();
+    if app_version.is_empty() || app_version.len() > 50 {
+        return Err(ApiError::validation(
+            "appVersion",
+            "the app version must be 1-50 characters",
+        ));
+    }
+    if capabilities.len() > 32
+        || capabilities
+            .iter()
+            .any(|capability| capability.is_empty() || capability.len() > 64)
+    {
+        return Err(ApiError::validation(
+            "capabilities",
+            "at most 32 capabilities of 1-64 characters",
+        ));
+    }
+    Ok((name, app_version))
+}
+
 /// A production line name: trimmed, 1-100 characters. Returns the name and
 /// its uniqueness key (Unicode lower case; SQLite's `lower()` folds ASCII only).
 pub fn line_name(field: &str, name: &str) -> Result<(String, String), ApiError> {

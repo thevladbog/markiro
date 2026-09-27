@@ -42,6 +42,28 @@ pub mod codes {
     pub const LOOPBACK_ONLY: &str = "loopback_only";
     pub const RATE_LIMITED: &str = "rate_limited";
     pub const INTERNAL: &str = "internal";
+    pub const PAIRING_CODE_INVALID: &str = "pairing_code_invalid";
+    pub const PAIRING_CODE_EXPIRED: &str = "pairing_code_expired";
+
+    /// Every code above, for the parity fixture the webview also reads.
+    pub const ALL: &[&str] = &[
+        NOT_FOUND,
+        METHOD_NOT_ALLOWED,
+        PROTOCOL_UNSUPPORTED,
+        VALIDATION_FAILED,
+        UNAUTHORIZED,
+        FORBIDDEN,
+        STALE_REVISION,
+        CONFLICT,
+        LAST_ADMIN,
+        SSCC_BELOW_FLOOR,
+        ALREADY_INITIALIZED,
+        LOOPBACK_ONLY,
+        RATE_LIMITED,
+        INTERNAL,
+        PAIRING_CODE_INVALID,
+        PAIRING_CODE_EXPIRED,
+    ];
 }
 
 /// Values of an `unauthorized` error's `details.credential`: which credential
@@ -219,8 +241,21 @@ pub struct LocalPairRequest {
     pub capabilities: Vec<String>,
 }
 
-/// Response of `local-pair` (and, from plan 1c, `pairing/claim`). The device
-/// key is shown exactly once.
+/// `POST /v1/pairing/claim`: a device in the local network pairs with a
+/// one-time code from the office.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ClaimRequest {
+    pub code: Secret,
+    pub kind: DeviceKind,
+    pub name: String,
+    pub app_version: String,
+    #[serde(default)]
+    pub capabilities: Vec<String>,
+}
+
+/// Response of `local-pair` and `pairing/claim`. The device key is shown
+/// exactly once.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PairResponse {

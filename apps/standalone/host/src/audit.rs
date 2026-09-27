@@ -20,6 +20,7 @@ pub mod actions {
     pub const SSCC_COUNTER_UPDATE: &str = "sscc.counter.update";
     pub const SSCC_BLOCK_SIZES_UPDATE: &str = "sscc.block_sizes.update";
     pub const PAIRING_CODE_CREATE: &str = "pairing_code.create";
+    pub const DEVICE_CLAIM: &str = "device.claim";
 }
 
 /// `details.reason` of a denied row: every denial names one.
@@ -33,6 +34,11 @@ pub mod reasons {
     /// The record changed while the password was being hashed.
     pub const CHANGED: &str = "changed";
     pub const WRONG_CURRENT_PASSWORD: &str = "wrong_current_password";
+    /// No live code matches (or the input is not a code at all).
+    pub const UNKNOWN_CODE: &str = "unknown_code";
+    pub const CODE_USED: &str = "code_used";
+    pub const TOO_MANY_ATTEMPTS: &str = "too_many_attempts";
+    pub const CODE_EXPIRED: &str = "code_expired";
 }
 
 /// `details` of an update row: `changed` names the changed fields in order,
