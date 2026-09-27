@@ -11,6 +11,7 @@
 use markiro_host::config::HostPaths;
 use markiro_host::{start, RunningHost, StartOptions};
 use markiro_standalone_lib::device::DeviceState;
+use markiro_standalone_lib::local_db::LocalDbState;
 use serde_json::{json, Value};
 use tauri::test::{
     get_ipc_response, mock_builder, mock_context, noop_assets, MockRuntime, INVOKE_KEY,
@@ -59,11 +60,15 @@ impl Host {
     }
 }
 
-/// The app's own command list on the mock runtime, with `state` managed.
-/// The `App` is returned too: it must outlive the webview.
-fn mock_app(state: DeviceState) -> (App<MockRuntime>, WebviewWindow<MockRuntime>) {
+/// The app's own command list on the mock runtime, with the shell's states
+/// managed. The `App` is returned too: it must outlive the webview.
+fn mock_app_with(
+    device: DeviceState,
+    local: LocalDbState,
+) -> (App<MockRuntime>, WebviewWindow<MockRuntime>) {
     let app = mock_builder()
-        .manage(state)
+        .manage(device)
+        .manage(local)
         .invoke_handler(markiro_standalone_lib::invoke_handler())
         .build(mock_context(noop_assets()))
         .unwrap();
@@ -71,6 +76,11 @@ fn mock_app(state: DeviceState) -> (App<MockRuntime>, WebviewWindow<MockRuntime>
         .build()
         .unwrap();
     (app, webview)
+}
+
+/// The shell without a local database, as when it could not be opened.
+fn mock_app(device: DeviceState) -> (App<MockRuntime>, WebviewWindow<MockRuntime>) {
+    mock_app_with(device, LocalDbState::unavailable())
 }
 
 /// Invokes `command` with `args` as the webview's `invoke` does; a rejection
@@ -241,4 +251,83 @@ fn a_paired_device_reaches_the_host_through_the_ipc_shapes() {
 
     drop(webview);
     host.stop();
+}
+
+/// The arguments `src/local/executor.ts` sends: `params` for a query,
+/// `statements` of `{ sql, values, expectedChanges? }` for a batch.
+#[test]
+fn the_local_database_answers_through_the_ipc_shapes() {
+    const LINE: &str = "5f0c6a52-6a3e-4b9f-9d3c-2b1a0e8f7d61";
+    let app_dir = tempfile::tempdir().unwrap();
+    let local = tauri::async_runtime::block_on(LocalDbState::open(app_dir.path()));
+    let (_app, webview) = mock_app_with(DeviceState::load(app_dir.path().to_path_buf()), local);
+
+    let changes = invoke(
+        &webview,
+        "local_transaction",
+        json!({ "statements": [
+            {
+                "sql": "INSERT INTO ref_lines (id, name, archived, rev) VALUES (?, ?, ?, ?)",
+                "values": [LINE, "Линия 1", 0, 1]
+            },
+            {
+                "sql": "UPDATE ref_lines SET rev = ? WHERE id = ?",
+                "values": [2, LINE],
+                "expectedChanges": 1
+            }
+        ] }),
+    )
+    .unwrap();
+    assert_eq!(changes, json!([1, 1]));
+
+    let rows = invoke(
+        &webview,
+        "local_query",
+        json!({ "sql": "SELECT id, name, rev FROM ref_lines WHERE archived = ?", "params": [0] }),
+    )
+    .unwrap();
+    assert_eq!(rows, json!([{ "id": LINE, "name": "Линия 1", "rev": 2 }]));
+
+    assert_eq!(
+        invoke(
+            &webview,
+            "local_query",
+            json!({ "sql": "DELETE FROM ref_lines", "params": [] })
+        ),
+        Err(json!("invalid_statement"))
+    );
+    assert_eq!(
+        invoke(
+            &webview,
+            "local_transaction",
+            json!({ "statements": [{
+                "sql": "UPDATE ref_lines SET rev = 3 WHERE id = ?",
+                "values": ["no-such-line"],
+                "expectedChanges": 1
+            }] }),
+        ),
+        Err(json!("changes_mismatch"))
+    );
+}
+
+#[test]
+fn without_a_local_database_the_local_commands_say_so() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_app, webview) = mock_app(DeviceState::load(dir.path().to_path_buf()));
+    assert_eq!(
+        invoke(
+            &webview,
+            "local_query",
+            json!({ "sql": "SELECT 1", "params": [] })
+        ),
+        Err(json!("local_db_unavailable"))
+    );
+    assert_eq!(
+        invoke(
+            &webview,
+            "local_transaction",
+            json!({ "statements": [{ "sql": "SELECT 1", "values": [] }] })
+        ),
+        Err(json!("local_db_unavailable"))
+    );
 }

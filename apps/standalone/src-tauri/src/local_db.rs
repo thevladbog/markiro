@@ -1,0 +1,401 @@
+//! The station's local SQLite (stage 1 spec §5.2–5.3): copies of the host's
+//! reference records, kept by the webview's reference sync. The webview
+//! reads with [`LocalDb::query`] (`local_query`) on read-only connections
+//! and writes only with [`LocalDb::transaction`] (`local_transaction`): one
+//! `BEGIN IMMEDIATE` transaction per call on the single writer connection.
+//! DDL lives only in `src-tauri/migrations`.
+//!
+//! Statements carry literals as parameters: `;`, `--` and `/*` are refused,
+//! and so are words that control transactions, connections or the schema.
+//! A large reference page goes in as one JSON parameter per entity
+//! (`json_each`), so the limits bound SQL, not rows.
+
+use std::path::Path;
+use std::time::Duration;
+
+use serde::Deserialize;
+use serde_json::{Map, Number, Value};
+use sqlx::migrate::Migrator;
+use sqlx::query::Query;
+use sqlx::sqlite::{
+    SqliteArguments, SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions,
+    SqliteRow, SqliteSynchronous,
+};
+use sqlx::{Column, Row, Sqlite, TypeInfo, ValueRef};
+
+pub const FILE_NAME: &str = "standalone-station.db";
+pub const MAX_STATEMENTS: usize = 32;
+pub const MAX_SQL_BYTES: usize = 64 * 1024;
+pub const MAX_VALUES: usize = 256;
+
+const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// `src-tauri/migrations`, embedded at compile time. Applied migrations are
+/// never edited: sqlx refuses to open a database whose checksums changed.
+pub static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
+
+/// Words a webview statement may not contain: the shell owns transactions,
+/// connections and the schema.
+const FORBIDDEN_WORDS: &[&str] = &[
+    "BEGIN",
+    "COMMIT",
+    "ROLLBACK",
+    "SAVEPOINT",
+    "RELEASE",
+    "ATTACH",
+    "DETACH",
+    "PRAGMA",
+    "VACUUM",
+    "CREATE",
+    "DROP",
+    "ALTER",
+    "REINDEX",
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LocalDbError {
+    /// The database could not be opened or migrated when the app started.
+    Unavailable,
+    /// The statement or the batch breaks the rules in the module comment.
+    InvalidStatement,
+    /// A parameter is not a scalar, an integer does not fit 64 bits, or a
+    /// result column holds a BLOB.
+    UnsupportedValue,
+    /// SQLite refused or failed the statement; a batch rolled back whole.
+    StatementFailed,
+    /// A statement changed another number of rows than `expectedChanges`;
+    /// the batch rolled back whole.
+    ChangesMismatch,
+}
+
+impl LocalDbError {
+    /// Stable codes the webview maps to text (`src/local/executor.ts`).
+    pub fn code(self) -> &'static str {
+        match self {
+            LocalDbError::Unavailable => "local_db_unavailable",
+            LocalDbError::InvalidStatement => "invalid_statement",
+            LocalDbError::UnsupportedValue => "unsupported_value",
+            LocalDbError::StatementFailed => "statement_failed",
+            LocalDbError::ChangesMismatch => "changes_mismatch",
+        }
+    }
+}
+
+/// One statement of `local_transaction`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LocalStatement {
+    pub sql: String,
+    #[serde(default)]
+    pub values: Vec<Value>,
+    /// Roll the batch back unless the statement changes exactly this many rows.
+    #[serde(default)]
+    pub expected_changes: Option<u64>,
+}
+
+pub struct LocalDb {
+    writer: SqlitePool,
+    readers: SqlitePool,
+}
+
+impl LocalDb {
+    /// Open `standalone-station.db` in `dir`, creating the directory, the
+    /// file and the schema as needed.
+    pub async fn open(dir: &Path) -> Result<Self, sqlx::Error> {
+        std::fs::create_dir_all(dir)?;
+        let path = dir.join(FILE_NAME);
+        let writer = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(&path)
+                    .create_if_missing(true)
+                    .journal_mode(SqliteJournalMode::Wal)
+                    .synchronous(SqliteSynchronous::Full)
+                    .foreign_keys(true)
+                    .busy_timeout(BUSY_TIMEOUT),
+            )
+            .await?;
+        MIGRATOR.run(&writer).await?;
+        let readers = SqlitePoolOptions::new()
+            .max_connections(2)
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(&path)
+                    .read_only(true)
+                    .busy_timeout(BUSY_TIMEOUT),
+            )
+            .await?;
+        Ok(Self { writer, readers })
+    }
+
+    /// Run one `SELECT` or `WITH` statement on a read-only connection. Each
+    /// row becomes an object keyed by column name: alias duplicate names.
+    pub async fn query(
+        &self,
+        sql: &str,
+        params: Vec<Value>,
+    ) -> Result<Vec<Map<String, Value>>, LocalDbError> {
+        check_statement(sql, params.len())?;
+        if !is_query(sql) {
+            return Err(LocalDbError::InvalidStatement);
+        }
+        let rows = bind(sqlx::query(sql), params)?
+            .fetch_all(&self.readers)
+            .await
+            .map_err(|_| LocalDbError::StatementFailed)?;
+        rows.iter().map(row_object).collect()
+    }
+
+    /// Run `statements` in one `BEGIN IMMEDIATE` transaction on the writer
+    /// connection and return the rows each changed. Any failure and any
+    /// `expectedChanges` mismatch rolls back every statement.
+    pub async fn transaction(
+        &self,
+        statements: Vec<LocalStatement>,
+    ) -> Result<Vec<u64>, LocalDbError> {
+        if statements.is_empty() || statements.len() > MAX_STATEMENTS {
+            return Err(LocalDbError::InvalidStatement);
+        }
+        for statement in &statements {
+            check_statement(&statement.sql, statement.values.len())?;
+        }
+        let mut tx = self
+            .writer
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(|_| LocalDbError::StatementFailed)?;
+        let mut changes = Vec::with_capacity(statements.len());
+        for LocalStatement {
+            sql,
+            values,
+            expected_changes,
+        } in statements
+        {
+            let changed = bind(sqlx::query(&sql), values)?
+                .execute(&mut *tx)
+                .await
+                .map_err(|_| LocalDbError::StatementFailed)?
+                .rows_affected();
+            if expected_changes.is_some_and(|expected| expected != changed) {
+                return Err(LocalDbError::ChangesMismatch);
+            }
+            changes.push(changed);
+        }
+        tx.commit()
+            .await
+            .map_err(|_| LocalDbError::StatementFailed)?;
+        Ok(changes)
+    }
+}
+
+/// Tauri state: the local database, or `None` when it could not be opened.
+/// The app still starts — the office works without it — and the local
+/// commands answer `local_db_unavailable`.
+pub struct LocalDbState(Option<LocalDb>);
+
+impl LocalDbState {
+    pub async fn open(dir: &Path) -> Self {
+        Self(LocalDb::open(dir).await.ok())
+    }
+
+    pub fn unavailable() -> Self {
+        Self(None)
+    }
+
+    pub fn get(&self) -> Result<&LocalDb, LocalDbError> {
+        self.0.as_ref().ok_or(LocalDbError::Unavailable)
+    }
+}
+
+/// One statement within the size limits: no second statement, no comment,
+/// no word that controls transactions, connections or the schema.
+fn check_statement(sql: &str, values: usize) -> Result<(), LocalDbError> {
+    let trimmed = sql.trim();
+    if trimmed.is_empty() || sql.len() > MAX_SQL_BYTES || values > MAX_VALUES {
+        return Err(LocalDbError::InvalidStatement);
+    }
+    let body = trimmed.strip_suffix(';').unwrap_or(trimmed);
+    if body.contains(';') || body.contains("--") || body.contains("/*") {
+        return Err(LocalDbError::InvalidStatement);
+    }
+    let forbidden = words(body).any(|word| {
+        FORBIDDEN_WORDS
+            .iter()
+            .any(|forbidden| word.eq_ignore_ascii_case(forbidden))
+    });
+    if forbidden {
+        Err(LocalDbError::InvalidStatement)
+    } else {
+        Ok(())
+    }
+}
+
+fn is_query(sql: &str) -> bool {
+    words(sql.trim_start()).next().is_some_and(|first| {
+        first.eq_ignore_ascii_case("SELECT") || first.eq_ignore_ascii_case("WITH")
+    })
+}
+
+/// SQL split into words of letters, digits and `_`; `created_at` stays one word.
+fn words(sql: &str) -> impl Iterator<Item = &str> {
+    sql.split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
+}
+
+fn bind<'q>(
+    mut query: Query<'q, Sqlite, SqliteArguments<'q>>,
+    values: Vec<Value>,
+) -> Result<Query<'q, Sqlite, SqliteArguments<'q>>, LocalDbError> {
+    for value in values {
+        query = match value {
+            Value::Null => query.bind(None::<String>),
+            Value::Bool(value) => query.bind(value),
+            Value::String(value) => query.bind(value),
+            Value::Number(number) => match number.as_i64() {
+                Some(integer) => query.bind(integer),
+                // Above i64::MAX: SQLite cannot hold it as an integer.
+                None if number.is_u64() => return Err(LocalDbError::UnsupportedValue),
+                None => query.bind(number.as_f64().ok_or(LocalDbError::UnsupportedValue)?),
+            },
+            Value::Array(_) | Value::Object(_) => return Err(LocalDbError::UnsupportedValue),
+        };
+    }
+    Ok(query)
+}
+
+/// A row as a JSON object keyed by column name, typed by the value SQLite
+/// actually holds (not the declared column type).
+fn row_object(row: &SqliteRow) -> Result<Map<String, Value>, LocalDbError> {
+    let mut object = Map::new();
+    for column in row.columns() {
+        let index = column.ordinal();
+        let raw = row
+            .try_get_raw(index)
+            .map_err(|_| LocalDbError::StatementFailed)?;
+        let value = if raw.is_null() {
+            Value::Null
+        } else {
+            let type_info = raw.type_info();
+            match type_info.name() {
+                "INTEGER" => Value::from(decode::<i64>(row, index)?),
+                "REAL" => Number::from_f64(decode::<f64>(row, index)?)
+                    .map(Value::Number)
+                    .ok_or(LocalDbError::UnsupportedValue)?,
+                "TEXT" => Value::String(decode::<String>(row, index)?),
+                _ => return Err(LocalDbError::UnsupportedValue),
+            }
+        };
+        object.insert(column.name().to_owned(), value);
+    }
+    Ok(object)
+}
+
+fn decode<'r, T: sqlx::Decode<'r, Sqlite>>(
+    row: &'r SqliteRow,
+    index: usize,
+) -> Result<T, LocalDbError> {
+    row.try_get_unchecked(index)
+        .map_err(|_| LocalDbError::StatementFailed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn single_statements_with_parameters_pass() {
+        for sql in [
+            "SELECT id, name FROM ref_lines WHERE archived = ?",
+            "WITH live AS (SELECT * FROM ref_lines) SELECT count(*) FROM live;",
+            "INSERT INTO ref_lines (id, name, archived, rev) VALUES (?, ?, ?, ?)",
+            "INSERT OR REPLACE INTO sync_state (key, value) VALUES ('last_rev', ?)",
+            "SELECT created_at, begin_date, dropped FROM events",
+        ] {
+            assert_eq!(check_statement(sql, 4), Ok(()), "{sql}");
+        }
+    }
+
+    #[test]
+    fn second_statements_comments_and_control_words_are_refused() {
+        for sql in [
+            "",
+            "   ",
+            "SELECT 1; SELECT 2",
+            "SELECT 1 -- note",
+            "SELECT /* note */ 1",
+            "BEGIN",
+            "commit",
+            "ROLLBACK",
+            "SAVEPOINT a",
+            "RELEASE a",
+            "PRAGMA journal_mode",
+            "ATTACH 'other.db' AS other",
+            "DETACH other",
+            "VACUUM",
+            "CREATE TABLE extra (x)",
+            "DROP TABLE ref_lines",
+            "ALTER TABLE ref_lines ADD COLUMN x",
+            "REINDEX",
+        ] {
+            assert_eq!(
+                check_statement(sql, 0),
+                Err(LocalDbError::InvalidStatement),
+                "{sql:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn statement_size_and_value_count_are_bounded() {
+        let long = format!("SELECT '{}'", "x".repeat(MAX_SQL_BYTES));
+        assert_eq!(
+            check_statement(&long, 0),
+            Err(LocalDbError::InvalidStatement)
+        );
+        assert_eq!(check_statement("SELECT ?", MAX_VALUES), Ok(()));
+        assert_eq!(
+            check_statement("SELECT ?", MAX_VALUES + 1),
+            Err(LocalDbError::InvalidStatement)
+        );
+    }
+
+    #[test]
+    fn only_select_and_with_are_queries() {
+        assert!(is_query("select 1"));
+        assert!(is_query("  WITH live AS (SELECT 1) SELECT * FROM live"));
+        for sql in [
+            "INSERT INTO t VALUES (1)",
+            "UPDATE t SET x = 1",
+            "DELETE FROM t",
+            "REPLACE INTO t VALUES (1)",
+            "VALUES (1)",
+            "(SELECT 1)",
+        ] {
+            assert!(!is_query(sql), "{sql}");
+        }
+    }
+
+    #[test]
+    fn error_codes_are_stable() {
+        let codes: Vec<&str> = [
+            LocalDbError::Unavailable,
+            LocalDbError::InvalidStatement,
+            LocalDbError::UnsupportedValue,
+            LocalDbError::StatementFailed,
+            LocalDbError::ChangesMismatch,
+        ]
+        .into_iter()
+        .map(LocalDbError::code)
+        .collect();
+        assert_eq!(
+            codes,
+            [
+                "local_db_unavailable",
+                "invalid_statement",
+                "unsupported_value",
+                "statement_failed",
+                "changes_mismatch"
+            ]
+        );
+    }
+}

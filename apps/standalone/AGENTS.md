@@ -60,6 +60,25 @@ details.
 DDL lives only in `host/migrations` and `src-tauri/migrations`. An applied
 migration is never edited — add a new one; sqlx verifies checksums at start.
 
+## Local database
+
+`src-tauri/src/local_db.rs` keeps `standalone-station.db` in the app's local
+data directory, next to `device.json`: WAL, `synchronous=FULL`, foreign
+keys, a 5 s busy timeout, migrations in `src-tauri/migrations`. The webview
+reads it with `local_query` — one `SELECT` or `WITH` statement on read-only
+connections, rows as objects keyed by column name — and writes it only with
+`local_transaction`: up to 32 statements of at most 64 KB and 256 values
+each, run in one `BEGIN IMMEDIATE` transaction on the single writer
+connection and rolled back whole on any error or `expectedChanges`
+mismatch. Statements carry literals as parameters (no `;`, `--` or `/*`),
+never control transactions, connections or the schema (`BEGIN`, `PRAGMA`,
+`ATTACH`, `CREATE`, `DROP`, `ALTER`, …) and never read BLOBs. A large
+reference page goes in as one JSON parameter per entity through
+`json_each`, so the limits bound SQL, not rows. Rejections are bare codes:
+`local_db_unavailable` (the database did not open; the app starts anyway),
+`invalid_statement`, `unsupported_value`, `statement_failed`,
+`changes_mismatch`.
+
 ## Writes
 
 - Every multi-statement write uses `db::begin_write` (`BEGIN IMMEDIATE`), not a

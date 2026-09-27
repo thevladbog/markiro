@@ -6,14 +6,16 @@ pub mod device;
 pub mod device_config;
 pub mod host_client;
 pub mod host_probe;
+pub mod local_db;
 pub mod secret_store;
 pub mod tls;
 
-use serde_json::Value;
+use serde_json::{Map, Value};
 use tauri::Manager;
 
 use device::{DeviceState, DeviceStatus};
 use host_client::HostResponse;
+use local_db::{LocalDbState, LocalStatement};
 
 /// The host service on this computer.
 fn local_host_address() -> String {
@@ -65,6 +67,29 @@ async fn device_forget(state: tauri::State<'_, DeviceState>) -> Result<(), Strin
         .map_err(|error| error.code().to_owned())
 }
 
+#[tauri::command]
+async fn local_query(
+    state: tauri::State<'_, LocalDbState>,
+    sql: String,
+    params: Vec<Value>,
+) -> Result<Vec<Map<String, Value>>, String> {
+    let db = state.get().map_err(|error| error.code().to_owned())?;
+    db.query(&sql, params)
+        .await
+        .map_err(|error| error.code().to_owned())
+}
+
+#[tauri::command]
+async fn local_transaction(
+    state: tauri::State<'_, LocalDbState>,
+    statements: Vec<LocalStatement>,
+) -> Result<Vec<u64>, String> {
+    let db = state.get().map_err(|error| error.code().to_owned())?;
+    db.transaction(statements)
+        .await
+        .map_err(|error| error.code().to_owned())
+}
+
 /// The shell's commands. `run` registers them; `tests/ipc.rs` drives the
 /// same list through Tauri's mock runtime to pin the webview's IPC contract.
 pub fn invoke_handler<R: tauri::Runtime>(
@@ -74,7 +99,9 @@ pub fn invoke_handler<R: tauri::Runtime>(
         device_status,
         host_local_pair,
         host_request,
-        device_forget
+        device_forget,
+        local_query,
+        local_transaction
     ]
 }
 
@@ -87,7 +114,10 @@ pub fn run() {
             // config directory: the device identity must stay on this
             // computer and never follow a Windows user profile elsewhere.
             let dir = app.path().app_local_data_dir()?;
-            app.manage(DeviceState::load(dir));
+            app.manage(DeviceState::load(dir.clone()));
+            // The local database opens before the window shows. When it
+            // cannot open, the app still starts and the local commands say so.
+            app.manage(tauri::async_runtime::block_on(LocalDbState::open(&dir)));
             Ok(())
         })
         .invoke_handler(invoke_handler())
