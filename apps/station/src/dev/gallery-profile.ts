@@ -13,6 +13,8 @@ export interface GalleryProfile {
   readonly line: string;
   readonly operator: string;
   readonly shift: string;
+  /** The GTIN-14 of the demo product. */
+  readonly gtin: string;
   /** The serial of the n-th demo marking code. */
   readonly serial: (n: number) => string;
   /** The label of the n-th demo terminal. */
@@ -49,6 +51,7 @@ const PROFILES: Readonly<
       line: "Тестовая линия А",
       operator: "Оператор Тестов",
       shift: "Смена ДЕМО-01",
+      gtin: "04607000000042",
       serial: instructionSerial,
       terminal: (n) => `DEMO-TERM-${n}`,
     },
@@ -59,6 +62,7 @@ const PROFILES: Readonly<
       line: "Test line A",
       operator: "Sample Operator",
       shift: "Shift DEMO-01",
+      gtin: "04607000000042",
       serial: instructionSerial,
       terminal: (n) => `DEMO-TERM-${n}`,
     },
@@ -71,6 +75,7 @@ const PROFILES: Readonly<
       line: "Линия 1",
       operator: "Мария Соколова",
       shift: "Смена 12",
+      gtin: "04600000000015",
       serial: landingSerial,
       terminal: (n) => `Терминал ${n}`,
     },
@@ -81,6 +86,7 @@ const PROFILES: Readonly<
       line: "Line 1",
       operator: "Maria Sokolova",
       shift: "Shift 12",
+      gtin: "04600000000015",
       serial: landingSerial,
       terminal: (n) => `Terminal ${n}`,
     },

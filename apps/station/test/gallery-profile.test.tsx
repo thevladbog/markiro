@@ -33,6 +33,7 @@ describe("gallery profiles", () => {
       ru.line,
       ru.operator,
       ru.shift,
+      ru.gtin,
     ]).toEqual([
       "Тестовый товар А",
       "ООО «Тестовый производитель»",
@@ -40,11 +41,13 @@ describe("gallery profiles", () => {
       "Тестовая линия А",
       "Оператор Тестов",
       "Смена ДЕМО-01",
+      "04607000000042",
     ]);
-    expect([en.productName, en.line, en.shift]).toEqual([
+    expect([en.productName, en.line, en.shift, en.gtin]).toEqual([
       "Sample product A",
       "Test line A",
       "Shift DEMO-01",
+      "04607000000042",
     ]);
     expect([ru.serial(128), ru.serial(123), ru.terminal(11)]).toEqual([
       "DEMO-SERIAL-000128",
@@ -65,6 +68,8 @@ describe("gallery profiles", () => {
         expect(text, `${state} ${locale}`).not.toMatch(
           /Тестов|Демо-станция|DEMO-|Sample product|Sample Manufacturer|Test line|Demo station/u,
         );
+        expect(text, `${state} ${locale}`).not.toContain("04607000000042");
+        expect(text, `${state} ${locale}`).toContain("04600000000015");
         cleanup();
       }
     },

@@ -1776,7 +1776,7 @@ function WorkFixture({
   // `SignalFixture`).
   const waiting = mode === "validation" || mode === "aggregation-waiting";
   const workLabels = buildWorkLabels(t, locale, 1);
-  const operations = waiting ? [] : galleryRecentOperations(profile.serial);
+  const operations = waiting ? [] : galleryRecentOperations(profile);
   // Validation-mode shifts carry a plan target the way the shift list's own
   // validation-mode card does (see ShiftFixture's AUG26-041); aggregation-mode
   // shifts in this gallery have no plan, matching the shift list there too.
@@ -1822,7 +1822,7 @@ function WorkFixture({
             image={galleryProductImage}
             productName={productName}
             counterpartyName={profile.counterpartyName}
-            gtin="04607000000042"
+            gtin={profile.gtin}
             total={total}
             locale={workLabels.locale}
             labels={workLabels.band}
@@ -1914,7 +1914,7 @@ function WorkFixture({
   );
 }
 
-function galleryRecentOperations(serial: GalleryProfile["serial"]): RecentOperation[] {
+function galleryRecentOperations(profile: GalleryProfile): RecentOperation[] {
   const identityForSerial = (serial: string) => {
     const crypto = [
       { ai: "91" as const, value: "ABCD" },
@@ -1925,11 +1925,11 @@ function galleryRecentOperations(serial: GalleryProfile["serial"]): RecentOperat
       { ai: "93" as const, value: "XYZ1" },
     ];
     return {
-      gtin14: "04607000000042",
+      gtin14: profile.gtin,
       serial,
       crypto,
       normalized: [
-        "(01)04607000000042",
+        `(01)${profile.gtin}`,
         `(21)${serial}`,
         ...crypto.map(({ ai, value }) => `(${ai})${value}`),
       ].join(" "),
@@ -1939,7 +1939,7 @@ function galleryRecentOperations(serial: GalleryProfile["serial"]): RecentOperat
     verdict: "ok",
     scannedAt: `2026-08-13T14:32:0${8 - index}+03:00`,
     codeSuffix: null,
-    identity: identityForSerial(serial(128 - index)),
+    identity: identityForSerial(profile.serial(128 - index)),
   }));
 }
 
@@ -2412,7 +2412,7 @@ function galleryConflictRows(profile: GalleryProfile): GalleryConflictRow[] {
       winning_terminal_id: profile.terminal(11),
       winning_scanned_at: "2026-08-21T09:14:22+03:00",
       detected_at: "2026-08-21T09:15:03+03:00",
-      gtin14: "04607000000042",
+      gtin14: profile.gtin,
       serial: profile.serial(128),
     },
     {
@@ -2420,7 +2420,7 @@ function galleryConflictRows(profile: GalleryProfile): GalleryConflictRow[] {
       winning_terminal_id: profile.terminal(12),
       winning_scanned_at: "2026-08-21T09:18:47+03:00",
       detected_at: "2026-08-21T09:19:10+03:00",
-      gtin14: "04607000000042",
+      gtin14: profile.gtin,
       serial: profile.serial(129),
     },
     {
@@ -2428,7 +2428,7 @@ function galleryConflictRows(profile: GalleryProfile): GalleryConflictRow[] {
       winning_terminal_id: profile.terminal(21),
       winning_scanned_at: "2026-08-21T10:02:31+03:00",
       detected_at: "2026-08-21T10:03:05+03:00",
-      gtin14: "04607000000042",
+      gtin14: profile.gtin,
       serial: profile.serial(130),
     },
     {
@@ -2436,7 +2436,7 @@ function galleryConflictRows(profile: GalleryProfile): GalleryConflictRow[] {
       winning_terminal_id: profile.terminal(22),
       winning_scanned_at: "2026-08-21T10:07:58+03:00",
       detected_at: "2026-08-21T10:08:40+03:00",
-      gtin14: "04607000000042",
+      gtin14: profile.gtin,
       serial: profile.serial(131),
     },
   ];
