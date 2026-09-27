@@ -317,10 +317,10 @@ describe("reference sync", () => {
     const recorded = counting(executor);
     await syncReferences({ changes, local: recorded.executor, hostId: HOST_ID });
     expect(tables(db)).toEqual(before);
-    // The guard passed (0: `host_id` still matched), the three upserts found
-    // nothing newer and nothing was quarantined to lift; only the sync state
-    // was written.
-    expect(recorded.batches).toEqual([[0, 0, 0, 0, 0, 3]]);
+    // The guard passed (1: `host_id` still matched and was touched), the
+    // three upserts found nothing newer and nothing was quarantined to lift;
+    // only the sync state was written.
+    expect(recorded.batches).toEqual([[1, 0, 0, 0, 0, 3]]);
   });
 
   it("deletes by tombstone, but never a record newer than the tombstone", async () => {
@@ -350,12 +350,18 @@ describe("reference sync", () => {
       { id: LINE_1, name: "Линия 1 (из копии)", archived: 0, rev: 12 },
     ]);
     expect(tables(db).state).toEqual(state(12));
+    // The deferred wipe clears the quarantine along with the copies (there
+    // was nothing quarantined here, but the wipe covers the table all the
+    // same — see "keeps a quarantine entry through a rollback…" below for a
+    // case where it actually holds an entry).
+    expect(quarantine(db)).toEqual([]);
   });
 
   it("keeps the previous copies when the rollback's own refetch fails", async () => {
     const { db, executor } = openLocalDb();
     await syncedTwoLines(executor);
     const before = tables(db);
+    const quarantineBefore = quarantine(db);
     // The host went back (rev < since), but the refetch from zero — the
     // request that would carry the deferred wipe — never lands.
     const changes = vi.fn(async (since: number) => {
@@ -368,6 +374,7 @@ describe("reference sync", () => {
     expect(changes.mock.calls).toEqual([[20], [0]]);
     // Spec §5.4: the copies stay until the first new page actually lands.
     expect(tables(db)).toEqual(before);
+    expect(quarantine(db)).toEqual(quarantineBefore);
   });
 
   it("gives up when the host goes back twice in one sync", async () => {
@@ -677,18 +684,58 @@ describe("reference sync", () => {
     });
   });
 
+  it("fails a page committed after clear_copies wiped the local copies mid-flight, instead of resurrecting them", async () => {
+    const { db, executor } = openLocalDb();
+    await syncReferences({
+      changes: feed({ 0: page(10, [line(LINE_1, 10, "Линия 1")]) }),
+      local: executor,
+      hostId: HOST_ID,
+    });
+    // The next sync's fetch is held open, as if `device_forget` ran while it
+    // was still in flight.
+    let resolve: ((value: ChangesResponse) => void) | undefined;
+    const held = vi.fn(
+      () =>
+        new Promise<ChangesResponse>((resolveFetch) => {
+          resolve = resolveFetch;
+        }),
+    );
+    const run = syncReferences({ changes: held, local: executor, hostId: HOST_ID });
+    await vi.waitFor(() => expect(held).toHaveBeenCalledWith(10));
+
+    // `clear_copies` (`device_forget`) deletes every row of every table,
+    // `sync_state` included, in one transaction of its own.
+    for (const table of ["ref_org", "ref_site", "ref_lines", "sync_quarantine", "sync_state"]) {
+      db.prepare(`DELETE FROM ${table}`).run();
+    }
+
+    resolve?.(page(11, [line(LINE_1, 11, "Линия 1 (после сброса)")]));
+    const error: unknown = await run.then(
+      () => {
+        throw new Error("expected the page to fail against the cleared copies");
+      },
+      (caught: unknown) => caught,
+    );
+    expect(error).toBeInstanceOf(LocalDbError);
+    expect(error).toMatchObject({ code: "changes_mismatch" });
+    expect(tables(db)).toEqual({ org: [], site: [], lines: [], state: [] });
+    expect(quarantine(db)).toEqual([]);
+  });
+
   it("stops at a feed from another host without applying anything, even with a deferred wipe pending", async () => {
     const { db, executor } = openLocalDb();
     await syncedTwoLines(executor);
     // A build with a different entity set arms a deferred wipe for the next page.
     db.prepare("UPDATE sync_state SET value = 'org_profile,lines' WHERE key = 'entity_set'").run();
     const before = tables(db);
+    const quarantineBefore = quarantine(db);
     const changes = feed({ 0: page(42, [ORG, line(LINE_1, 42, "Линия 1")], false, OTHER_HOST) });
     await expect(syncReferences({ changes, local: executor, hostId: HOST_ID })).resolves.toEqual({
       kind: "other_host",
     });
     // The armed wipe never ran: `other_host` short-circuits before any transaction.
     expect(tables(db)).toEqual(before);
+    expect(quarantine(db)).toEqual(quarantineBefore);
   });
 
   it("syncs from zero for another entity set, keeping the copies until a page arrives", async () => {
@@ -759,12 +806,17 @@ describe("sync quarantine", () => {
   it("fails closed: an unreadable record newer than the copy deletes it, an older one does not", async () => {
     const { db, executor } = openLocalDb();
     await syncedTwoLines(executor);
+    // Only a replay produces LINE_2's page here: outside a rollback, the
+    // host feed never sends an older revision of a record after a newer
+    // one, so a real host would never actually follow LINE_2's rev-20 copy
+    // with a rev-15 poison in a forward-moving page.
     const changes = feed({ 20: page(30, [brokenLine(LINE_1, 25), brokenLine(LINE_2, 15)]) });
     await expect(
       syncReferences({ changes, local: executor, hostId: HOST_ID, now: () => SEEN_AT }),
     ).resolves.toEqual({ kind: "synced", rev: 30, quarantined: 2 });
     // LINE_1 was at revision 10, older than its unreadable 25: it goes.
-    // LINE_2 was at 20, newer than its unreadable 15: it stays.
+    // LINE_2 was at 20, newer than its unreadable 15: it stays — quarantined
+    // and intact at once.
     expect(tables(db).lines).toEqual([{ id: LINE_2, name: "Линия 2", archived: 0, rev: 20 }]);
     expect(tables(db).state).toEqual(state(30));
     expect(quarantine(db)).toEqual([
@@ -785,7 +837,9 @@ describe("sync quarantine", () => {
     expect(quarantine(db)).toHaveLength(2);
 
     // The host fixed the site; a tombstone older than the quarantined line
-    // changes nothing.
+    // changes nothing. Only a replay produces that tombstone here too:
+    // outside a rollback, the host never sends a tombstone older than a
+    // revision it already quarantined.
     await expect(
       syncReferences({
         changes: feed({ 42: page(50, [{ ...SITE, rev: 45 }, tombstone(LINE_1, 40)]) }),
@@ -814,6 +868,29 @@ describe("sync quarantine", () => {
         hostId: HOST_ID,
       }),
     ).resolves.toEqual({ kind: "synced", rev: 60, quarantined: 0 });
+    expect(quarantine(db)).toEqual([]);
+  });
+
+  it("lifts a quarantine for a readable record at exactly the quarantined revision", async () => {
+    const { db, executor } = openLocalDb();
+    await syncReferences({
+      changes: feed({ 0: page(42, [brokenLine(LINE_1, 42)]) }),
+      local: executor,
+      hostId: HOST_ID,
+      now: () => SEEN_AT,
+    });
+    expect(quarantine(db)).toHaveLength(1);
+
+    // The host resent the very same revision, now readable: `>=`, not a
+    // strictly newer `>`, is what lifts the quarantine.
+    await expect(
+      syncReferences({
+        changes: feed({ 42: page(42, [line(LINE_1, 42, "Линия 1")]) }),
+        local: executor,
+        hostId: HOST_ID,
+      }),
+    ).resolves.toEqual({ kind: "synced", rev: 42, quarantined: 0 });
+    expect(tables(db).lines).toEqual([{ id: LINE_1, name: "Линия 1", archived: 0, rev: 42 }]);
     expect(quarantine(db)).toEqual([]);
   });
 
@@ -925,6 +1002,43 @@ describe("sync quarantine", () => {
     await expect(
       syncReferences({ changes: offline, local: executor, hostId: OTHER_HOST }),
     ).rejects.toThrow("host unreachable");
+    expect(quarantine(db)).toEqual([]);
+  });
+
+  it("keeps a quarantine entry through a rollback until the first new page lands, not merely the rollback itself", async () => {
+    const { db, executor } = openLocalDb();
+    await syncReferences({
+      changes: feed({ 0: page(20, [brokenLine(LINE_1, 20)]) }),
+      local: executor,
+      hostId: HOST_ID,
+      now: () => SEEN_AT,
+    });
+    expect(quarantine(db)).toHaveLength(1);
+
+    // The host went back (rev < since), but the refetch from zero — the
+    // request that would carry the deferred wipe — never lands.
+    const failingRefetch = vi.fn(async (since: number) => {
+      if (since === 20) return page(12, []);
+      throw new Error("host unreachable");
+    });
+    await expect(
+      syncReferences({ changes: failingRefetch, local: executor, hostId: HOST_ID }),
+    ).rejects.toThrow("host unreachable");
+    // Deferred: the entry survives, since the wipe waits for the first new
+    // page to actually land.
+    expect(quarantine(db)).toHaveLength(1);
+
+    // The refetch succeeds this time: the deferred wipe finally runs, and
+    // the quarantine goes with the rest of the copies.
+    const changes = feed({
+      20: page(12, []),
+      0: page(12, [line(LINE_1, 12, "Линия 1 (из копии)")]),
+    });
+    await expect(syncReferences({ changes, local: executor, hostId: HOST_ID })).resolves.toEqual({
+      kind: "synced",
+      rev: 12,
+      quarantined: 0,
+    });
     expect(quarantine(db)).toEqual([]);
   });
 

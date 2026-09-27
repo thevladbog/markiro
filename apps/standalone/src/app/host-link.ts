@@ -4,7 +4,11 @@ import { HostError } from "../host/client.js";
 import type { ConnectionApi } from "../host/connection.js";
 import type { ChangesResponse } from "../host/protocol.js";
 import { LocalDbError, type LocalExecutor } from "../local/executor.js";
-import { createSyncScheduler, syncReferences } from "../local/reference-sync.js";
+import {
+  createSyncScheduler,
+  readQuarantineCount,
+  syncReferences,
+} from "../local/reference-sync.js";
 import { shellActionFor, type ShellAction, type SyncFailure } from "./shell.js";
 
 /** The waits before the first retries of a failed sync, in milliseconds. */
@@ -110,7 +114,13 @@ export function useHostLink({
           scheduler.stop();
           dispatch(action);
         }
-        dispatch({ type: "sync_failed", failure: syncFailureOf(error) });
+        // Worth reading only when nothing else is about to reset the sync
+        // state on its own (a rejection here, `paired`/`forgotten` on a new
+        // pairing): `null` leaves the reducer's last known count alone,
+        // instead of a read racing a wipe that is about to happen anyway.
+        const quarantined = action === null ? await readQuarantineCount(local) : null;
+        if (!active) return;
+        dispatch({ type: "sync_failed", failure: syncFailureOf(error), quarantined });
         if (action === null) {
           failures += 1;
           if (online) {

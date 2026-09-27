@@ -113,7 +113,7 @@ export type ShellAction =
   | { type: "host_revision"; rev: number }
   | { type: "sync_started" }
   | { type: "sync_finished"; result: SyncResult }
-  | { type: "sync_failed"; failure: SyncFailure }
+  | { type: "sync_failed"; failure: SyncFailure; quarantined: number | null }
   | { type: "line_selected"; status: DeviceStatus };
 
 const CLOSED_OFFICE: OfficeState = { kind: "closed" };
@@ -326,7 +326,18 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
       };
     case "sync_failed":
       if (state.sync.kind === "other_host") return state;
-      return { ...state, sync: { ...state.sync, kind: "failed", failure: action.failure } };
+      return {
+        ...state,
+        sync: {
+          ...state.sync,
+          kind: "failed",
+          failure: action.failure,
+          // `null` means the run never read a count of its own (say, a
+          // rejection): keep whatever the last successful run reported
+          // rather than resetting it to zero.
+          quarantined: action.quarantined ?? state.sync.quarantined,
+        },
+      };
     case "line_selected":
       return { ...state, device: { kind: "ready", status: action.status } };
   }

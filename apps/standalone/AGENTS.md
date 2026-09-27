@@ -126,8 +126,13 @@ to `src-tauri/tests/fixtures/local-sql.json`.
 `device_forget` clears the local copies before it removes `device.json`:
 `LocalDb::clear_copies` deletes every row of every table but
 `_sqlx_migrations`, in one writer transaction with foreign keys checked at
-the commit. The tables come from `sqlite_master`, so one a later migration
-adds is covered, PIN and badge hashes included. If clearing fails, the
+the commit. The tables come from `pragma_table_list` (`type IN ('table',
+'virtual')`), so one a later migration adds is covered, PIN and badge hashes
+included. Every table here is treated as a disposable copy of the host's
+data: the first plan that adds data this device owns instead of copies —
+the scan journal, boxes, the outbox (stage 1 spec §6.2) — must exclude those
+tables from `clear_copies` and block or confirm a forget while unsynced
+records exist, not extend this list silently. If clearing fails, the
 command fails with `storage` and the pairing stays for another try; without
 a local database (it did not open) there is nothing this app can clear, and
 forgetting goes on; plan 1d3 revisits this before PIN and badge hashes land.
@@ -200,7 +205,7 @@ fails it (damaged, or newer than this build reads) fails closed (owner
 decision 2026-09-27): it is not applied, its local copy goes if the
 record's revision is newer (the tombstone rule), and it waits in
 `sync_quarantine` while the rest of the page applies and the revision
-advances. A newer readable record, or a tombstone at least as new, lifts
+advances. A readable record or a tombstone at least as new lifts
 the quarantine; so does a build that reads the record, since it syncs
 from zero. `reason` holds Zod issue paths and codes only
 (`archived: invalid_type`, at most 200 characters), never a value:
@@ -232,19 +237,30 @@ first sync when no `host_id` is stored at all — stamps `sync_state.host_id`
 to this run's host before the first fetch (a re-pair wipes in the same
 transaction, since another host's records must not stay usable; a first
 sync has nothing to wipe, since there are never copies without a
-`host_id`), with no `last_rev`: the copies still read as unsynced, and
-`hostGuard` (a no-op `UPDATE sync_state SET value = value WHERE key =
-'host_id' AND value <> ?` with `expectedChanges: 0`, first in every batch,
-before any statement that could delete the `host_id` row it reads) then
-aborts a stale in-flight sync for the wrong host with `changes_mismatch`
-once its page finally arrives, in every ordering — including two first
-syncs racing each other before either has stamped anything.
-`SyncScheduler.stop` cannot cancel a request already sent, and without
-this guard a late page for the old host would win `excluded.rev > rev`
-against the new host's rows under the same ids (`ref_org`/`ref_site` are
-keyed `'1'` on every host). A feed from another
-host than the paired one stops the sync with `other_host` and applies
-nothing. `createSyncScheduler` runs one sync at a time: triggers during a
+`host_id`), with no `last_rev`: the copies still read as unsynced. The
+continuing branch (this run's `hostId` already stored, with a matching
+`entity_set` and a `last_rev`) leaves that stamp alone, since a completed
+run always wrote it together with `last_rev` and `entity_set`, and is taken
+only when the stored `host_id` actually equals this run's — a state some
+other build left with `entity_set` and `last_rev` but no matching `host_id`
+falls through to the branch that stamps instead of failing forever.
+`hostGuard` (`UPDATE sync_state SET value = value WHERE key = 'host_id' AND
+value = ?` with `expectedChanges: 1`, first in every batch, before any
+statement that could touch the `host_id` row it reads) requires that stamp
+to still be there and still equal this run's `hostId`: it aborts a stale
+in-flight sync for the wrong host with `changes_mismatch` once its page
+finally arrives, in every ordering — including two first syncs racing each
+other before either has stamped anything. `SyncScheduler.stop` cannot
+cancel a request already sent, and without this guard a late page for the
+old host would win `excluded.rev > rev` against the new host's rows under
+the same ids (`ref_org`/`ref_site` are keyed `'1'` on every host). The same
+guard also catches a page that outlives `device_forget`'s `clear_copies`,
+which deletes the `host_id` row along with everything else: without it
+requiring the row to still match, a page fetched before the forget and
+committed after the clear would find nothing to conflict with and rewrite
+the old pairing's copies into a device that was told to forget them. A feed
+from another host than the paired one stops the sync with `other_host` and
+applies nothing. `createSyncScheduler` runs one sync at a time: triggers during a
 run ask for exactly one more, and a failed run waits for the next trigger;
 `run` must report its own failure, since the scheduler swallows every
 rejection. A host restored from a copy that has already passed the
@@ -368,7 +384,14 @@ run's error sets the sync state's `failure`: `local` for a
 `HostError` with code `invalid_response`), a `SyncFeedError` or anything
 else; `host` for every other `HostError`. It stays through the retry's
 own run, so a warning does not flicker; a successful run clears it and
-sets `quarantined`. A link
+sets `quarantined` from `readQuarantineCount` (`src/local/reference-sync.ts`,
+also used by a successful run itself, so the query lives in one place). A
+failed run whose error is not a rejection reads the same count and carries
+it too, so a restart with the host permanently away still shows how many
+records are quarantined instead of a bare zero; `readQuarantineCount`
+returns `null` if the read itself fails, and the reducer takes `null` as
+"keep whatever count is already shown" rather than resetting it — only a
+number replaces it. A link
 `lastError` of `key_rejected` or `certificate_mismatch` is a rejected
 device, exactly like the same answer to an office call. A new revision
 re-reads the signed-in user (`Office`, `hostRevision`); it does not reload an

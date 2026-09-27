@@ -413,9 +413,11 @@ fn forgetting_the_device_clears_the_local_copies_first() {
 
 /// Without a local database (it never opened) there is nothing this app can
 /// clear: `device_forget` still removes `device.json` on its own. This test
-/// needs no host, so it runs in the sandbox — unlike the test above, which
-/// pairs a real `markiro-host` and needs a loopback socket. Plan 1d3 revisits
-/// this decision before PIN and badge hashes live in the local database.
+/// needs no host, so it runs in the sandbox — so does the test above, which
+/// also uses an unreadable config and no host, but opens a working local
+/// database with copies to clear instead of leaving it unopened. Plan 1d3
+/// revisits this decision before PIN and badge hashes live in the local
+/// database.
 #[test]
 fn forgetting_the_device_without_a_local_database_still_forgets() {
     let app_dir = tempfile::tempdir().unwrap();

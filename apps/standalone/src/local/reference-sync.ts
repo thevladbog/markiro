@@ -203,28 +203,55 @@ const WRITE_HOST_ID =
   "ON CONFLICT (key) DO UPDATE SET value = excluded.value";
 
 /**
- * Aborts the batch (`changes_mismatch`) if another run has already
- * repointed `sync_state.host_id` away from `hostId` since this run read it.
- * A device can be re-paired while a run's request to the old host is still
- * in flight (up to 10 s); `SyncScheduler.stop` does not cancel that request,
- * so its page can arrive after a new run already wiped and restamped
- * `host_id` for the new host. Without this guard, that late page would
- * commit under the old host's higher revisions and win `excluded.rev > rev`
- * against the new host's rows — both hosts use the same ids (`'1'` for
- * `ref_org`/`ref_site`), so it would resurrect the old host's org and site
- * data. Placed first in every batch: a `DELETE FROM sync_state` later in
- * the same batch would remove the `host_id` row this statement reads.
+ * Aborts the batch (`changes_mismatch`) unless `sync_state.host_id` is still
+ * stamped to `hostId`. Two things can make it not be, since a run's request
+ * can stay in flight for up to 10 s after either happens:
+ * - a re-pair repoints `host_id` to another host (`SyncScheduler.stop` does
+ *   not cancel the old host's in-flight request), so its late page would
+ *   otherwise commit under the old host's higher revisions and win
+ *   `excluded.rev > rev` against the new host's rows — both hosts use the
+ *   same ids (`'1'` for `ref_org`/`ref_site`), so it would resurrect the old
+ *   host's org and site data;
+ * - `device_forget`'s `clear_copies` deletes the `host_id` row along with
+ *   every other row, so a page fetched before the forget and committed
+ *   after the clear would otherwise find nothing to conflict with and
+ *   rewrite the old pairing's copies into a device that was told to forget
+ *   them.
+ *
+ * Every run stamps `host_id` to its own `hostId` before its first fetch (the
+ * two branches above, in `syncReferences`), so a well-behaved run always
+ * satisfies this. Placed first in every batch: a `DELETE FROM sync_state`
+ * later in the same batch would remove the `host_id` row this statement
+ * reads.
  */
 function hostGuard(hostId: string): LocalStatement {
   return {
-    sql: "UPDATE sync_state SET value = value WHERE key = 'host_id' AND value <> ?",
+    sql: "UPDATE sync_state SET value = value WHERE key = 'host_id' AND value = ?",
     values: [hostId],
-    expectedChanges: 0,
+    expectedChanges: 1,
   };
 }
 
 const stateRow = z.object({ key: z.string(), value: z.string() });
 const countRow = z.object({ n: z.number().int().nonnegative() });
+
+/**
+ * `sync_quarantine`'s current size. A successful run reports it as
+ * `SyncResult.quarantined`; a failed run's catch (`useHostLink`) reads it
+ * too, so the station and the office still show how many records are
+ * quarantined after a run that never got that far — a restart with the host
+ * away, say. Returns `null` if the query itself fails, so a caller with
+ * nothing better to show can keep whatever count it already had instead of
+ * replacing it with a wrong zero.
+ */
+export async function readQuarantineCount(local: LocalExecutor): Promise<number | null> {
+  try {
+    const [count] = await local.query("SELECT count(*) AS n FROM sync_quarantine", [], countRow);
+    return count?.n ?? 0;
+  } catch {
+    return null;
+  }
+}
 
 interface StoredState {
   lastRev: number | null;
@@ -319,7 +346,11 @@ export async function syncReferences({
     // and a stale in-flight run for the old host is still caught below by
     // `hostGuard`, bound to that old host's id, once it reaches its batch.
     await local.transaction([...WIPE, { sql: WRITE_HOST_ID, values: [hostId] }]);
-  } else if (stored.entitySet === ENTITY_SET && stored.lastRev !== null) {
+  } else if (
+    stored.hostId === hostId &&
+    stored.entitySet === ENTITY_SET &&
+    stored.lastRev !== null
+  ) {
     since = stored.lastRev;
   } else {
     if (stored.hostId === null) {
@@ -369,8 +400,11 @@ export async function syncReferences({
     wipe = false;
     since = page.rev;
     if (!page.hasMore) {
-      const [count] = await local.query("SELECT count(*) AS n FROM sync_quarantine", [], countRow);
-      return { kind: "synced", rev: page.rev, quarantined: count?.n ?? 0 };
+      return {
+        kind: "synced",
+        rev: page.rev,
+        quarantined: (await readQuarantineCount(local)) ?? 0,
+      };
     }
   }
 }

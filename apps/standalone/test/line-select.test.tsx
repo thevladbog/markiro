@@ -94,6 +94,16 @@ describe("LineSelect", () => {
     expect(await screen.findByText("На хосте нет активных линий.")).toBeTruthy();
   });
 
+  it("says no line can be chosen when the copies have quarantined records", async () => {
+    renderLineSelect({ kind: "done", synced: 1, failure: null, quarantined: 2 });
+    expect(
+      await screen.findByText(
+        "Нет линий, которые можно выбрать: часть записей справочников не принята.",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText("На хосте нет активных линий.")).toBeNull();
+  });
+
   it("chooses a line with the host", async () => {
     const { db, props, view } = renderLineSelect(syncState("running", 0));
     insertLine(db, LINE_2, "Линия 2");
@@ -175,6 +185,74 @@ describe("LineSelect", () => {
     view.rerender(<LineSelect {...props} sync={{ ...syncState("failed", 1), failure: "host" }} />);
     expect(screen.getByText("Не удалось получить справочники с хоста.")).toBeTruthy();
     expect(screen.queryByText("Не удалось прочитать справочники на этом компьютере.")).toBeNull();
+  });
+
+  it("stops showing a stale read failure once a new sync succeeds, before the new read itself resolves", async () => {
+    let calls = 0;
+    const local: LocalExecutor = {
+      query: <T,>(): Promise<T[]> => {
+        calls += 1;
+        // The first read (for `synced: 1`) fails; every read after that
+        // stays pending, so the assertions below land in the gap before a
+        // later read has had any chance to resolve.
+        return calls === 1
+          ? Promise.reject(new LocalDbError("statement_failed", "disk I/O error"))
+          : new Promise<T[]>(() => undefined);
+      },
+      transaction: () => Promise.reject(new LocalDbError("statement_failed", "disk I/O error")),
+    };
+    const { props, view } = renderLineSelect(syncState("done", 1), { local });
+    await screen.findByText("Не удалось прочитать справочники на этом компьютере.");
+
+    // A new sync succeeds (`synced: 2`); the stale failure — pinned to
+    // `synced: 1` — must stop showing at once, not only once this new read
+    // (still pending) resolves.
+    view.rerender(<LineSelect {...props} sync={syncState("done", 2)} />);
+    expect(screen.getByText("Получаем справочники с хоста…")).toBeTruthy();
+    expect(screen.queryByText("Не удалось прочитать справочники на этом компьютере.")).toBeNull();
+  });
+
+  it("shows a local failure exactly once when no lines are listed, not doubled by the status line", () => {
+    renderLineSelect(
+      { kind: "failed", synced: 0, failure: "local", quarantined: 0 },
+      { link: { state: "online", lastContactAt: 1_790_000_000_000, lastError: null, seq: 1 } },
+    );
+    // Before the fix, the status line repeated the same text (`errors.sync.local`
+    // is also its own reason for this failure class) next to this screen's own
+    // alert.
+    expect(screen.getAllByText("Не удалось записать справочники на этом компьютере.")).toHaveLength(
+      1,
+    );
+  });
+
+  it("shows no failure line while a retry runs with no lines listed yet", () => {
+    renderLineSelect(
+      { kind: "running", synced: 0, failure: "host", quarantined: 0 },
+      { link: { state: "online", lastContactAt: 1_790_000_000_000, lastError: null, seq: 1 } },
+    );
+    expect(screen.getByText("Получаем справочники с хоста…")).toBeTruthy();
+    expect(screen.queryByText("Справочники не обновились — повторим автоматически")).toBeNull();
+  });
+
+  it("shows the failure line once lines are already listed, since nothing else reports it", async () => {
+    const { db, props, view } = renderLineSelect(syncState("running", 0), {
+      link: { state: "online", lastContactAt: 1_790_000_000_000, lastError: null, seq: 1 },
+    });
+    insertLine(db, LINE_2, "Линия 2");
+    view.rerender(<LineSelect {...props} sync={syncState("done", 1)} />);
+    await screen.findByRole("button", { name: "Линия 2" });
+
+    // A later, background run fails while the previously read lines stay on
+    // screen (the read effect does not rerun: `sync.synced` did not change).
+    view.rerender(
+      <LineSelect
+        {...props}
+        sync={{ kind: "failed", synced: 1, failure: "host", quarantined: 0 }}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Линия 2" })).toBeTruthy();
+    expect(screen.getByText("Справочники не обновились — повторим автоматически")).toBeTruthy();
+    expect(screen.getByText("Запрос к хосту не удался.")).toBeTruthy();
   });
 
   it("shows the link and opens the office", () => {

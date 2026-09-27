@@ -218,6 +218,11 @@ impl LocalDb {
     /// Delete every row of every table but sqlx's migration journal, in one
     /// writer transaction: forgetting the device must not leave another
     /// pairing's copies behind (from plan 1d3 on, PIN and badge hashes).
+    /// Every table here is treated as a disposable copy of the host's data;
+    /// the first plan that adds data this device owns instead of a copy —
+    /// the scan journal, boxes, the outbox (stage 1 spec §6.2) — must
+    /// exclude those tables from this list and block or confirm a forget
+    /// while unsynced records exist, not extend this silently.
     /// The tables come from `pragma_table_list`, so one a later migration
     /// adds is covered without a change here; `type IN ('table', 'virtual')`
     /// excludes a virtual table's own shadow tables (FTS5, RTree), which

@@ -43,6 +43,13 @@ async fn lines(db: &LocalDb) -> Value {
     Value::Array(rows.into_iter().map(Value::Object).collect())
 }
 
+/// Pins today's user tables. `clear_copies` treats every one of them as a
+/// disposable copy of the host's data (see its doc comment); a new
+/// migration that adds a table makes this assertion fail, on purpose, so
+/// whoever adds it must decide whether it is another copy (extend the list
+/// here) or the first data this device owns instead — the scan journal,
+/// boxes, the outbox (stage 1 spec §6.2) — which `clear_copies` and
+/// `device_forget` then need to treat deliberately, not silently wipe.
 #[tokio::test]
 async fn opening_creates_the_reference_tables_in_wal_mode_and_keeps_data() {
     let (dir, db) = open().await;
@@ -329,7 +336,7 @@ async fn one_statement_upserts_a_whole_page_through_json_each() {
 
 /// Forgetting the device (`device_forget`) clears every table but sqlx's
 /// migration journal: tables a later migration adds too, since the list
-/// comes from `sqlite_master`, and in any order despite foreign keys.
+/// comes from `pragma_table_list`, and in any order despite foreign keys.
 #[tokio::test]
 async fn clearing_the_copies_empties_every_table_but_the_migration_journal() {
     let (dir, db) = open().await;

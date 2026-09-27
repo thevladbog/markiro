@@ -364,11 +364,15 @@ describe("link and reference sync", () => {
     expect(done.sync).toEqual({ kind: "done", synced: 1, failure: null, quarantined: 0 });
     const again = shellReducer(done, { type: "sync_started" });
     expect(again.sync).toEqual({ kind: "running", synced: 1, failure: null, quarantined: 0 });
-    expect(shellReducer(again, { type: "sync_failed", failure: "host" }).sync).toEqual({
+    // A number carried on the action replaces the count: the run's own catch
+    // read it fresh (say, right after a restart with the host away).
+    expect(
+      shellReducer(again, { type: "sync_failed", failure: "host", quarantined: 3 }).sync,
+    ).toEqual({
       kind: "failed",
       synced: 1,
       failure: "host",
-      quarantined: 0,
+      quarantined: 3,
     });
   });
 
@@ -376,23 +380,39 @@ describe("link and reference sync", () => {
     const failed = shellReducer(shellReducer(paired(), { type: "sync_started" }), {
       type: "sync_failed",
       failure: "host",
+      quarantined: null,
     });
     // The retry's run keeps the warning, so it does not flicker away.
     const retrying = shellReducer(failed, { type: "sync_started" });
     expect(retrying.sync).toEqual({ kind: "running", synced: 0, failure: "host", quarantined: 0 });
-    const local = shellReducer(retrying, { type: "sync_failed", failure: "local" });
+    const local = shellReducer(retrying, {
+      type: "sync_failed",
+      failure: "local",
+      quarantined: null,
+    });
     expect(local.sync).toEqual({ kind: "failed", synced: 0, failure: "local", quarantined: 0 });
     const done = shellReducer(shellReducer(local, { type: "sync_started" }), {
       type: "sync_finished",
       result: { kind: "synced", rev: 43, quarantined: 2 },
     });
     expect(done.sync).toEqual({ kind: "done", synced: 1, failure: null, quarantined: 2 });
-    // A later failure keeps the count the last successful run read.
+    // A later failure with `quarantined: null` (the run never read a count of
+    // its own) keeps the count the last successful run read, rather than
+    // resetting it to zero.
     const feed = shellReducer(shellReducer(done, { type: "sync_started" }), {
       type: "sync_failed",
       failure: "feed",
+      quarantined: null,
     });
     expect(feed.sync).toEqual({ kind: "failed", synced: 1, failure: "feed", quarantined: 2 });
+    // But a failed run that did read a fresh count replaces it with that
+    // number instead, even when it differs from the last success's.
+    const recounted = shellReducer(done, {
+      type: "sync_failed",
+      failure: "host",
+      quarantined: 5,
+    });
+    expect(recounted.sync).toEqual({ kind: "failed", synced: 1, failure: "host", quarantined: 5 });
   });
 
   it("stops at another host before anything else but a rejected device", () => {
@@ -416,7 +436,9 @@ describe("link and reference sync", () => {
     // can still land here (`useHostLink` stops the scheduler, but not before
     // this): none of these may leave `other_host` or count as a sync.
     expect(shellReducer(other, { type: "sync_started" }).sync).toEqual(other.sync);
-    expect(shellReducer(other, { type: "sync_failed", failure: "host" }).sync).toEqual(other.sync);
+    expect(
+      shellReducer(other, { type: "sync_failed", failure: "host", quarantined: 1 }).sync,
+    ).toEqual(other.sync);
     expect(
       shellReducer(other, {
         type: "sync_finished",

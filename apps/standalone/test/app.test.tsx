@@ -17,6 +17,7 @@ import type {
   HostStatus,
 } from "../src/host/protocol.js";
 import type { LocalExecutor } from "../src/local/executor.js";
+import { ENTITY_SET } from "../src/local/reference-sync.js";
 import {
   DEVICE_STATUS,
   HOST_ID,
@@ -1168,6 +1169,28 @@ describe("reference sync retries", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it("leaves no retry behind and syncs no more once the link reports a rejected key", async () => {
+    fakeRetryTimers();
+    const link = fakeConnection();
+    const host = fakeHost();
+    host.getChanges.mockRejectedValueOnce(hostDown());
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(NEW_STATION),
+      host,
+      connection: link.connection,
+    });
+    await firstSyncFailed();
+    expect(vi.getTimerCount()).toBe(1);
+
+    await link.status({ state: "offline", lastContactAt: null, lastError: "key_rejected", seq: 2 });
+    expect(await screen.findByText("Хост не принимает это устройство")).toBeTruthy();
+    expect(vi.getTimerCount()).toBe(0);
+
+    await elapse(120_000);
+    expect(host.getChanges).toHaveBeenCalledTimes(1);
+  });
+
   it("resets the failure count after a successful run, so the next failure waits 2 s again", async () => {
     fakeRetryTimers();
     const link = fakeConnection();
@@ -1278,5 +1301,42 @@ describe("reference sync health on screen", () => {
     renderApp({ probe: probeAnswering(true), device: fakeDevice(DEVICE_STATUS), host });
     expect(await screen.findByText("Не приняты записи справочников: 1")).toBeTruthy();
     expect(screen.getByText("Цех")).toBeTruthy();
+  });
+
+  it("shows the quarantine count after a run that failed with the host away, as after a restart", async () => {
+    const { db, executor } = openLocalDb();
+    // A previous run already quarantined a record and reached revision 10;
+    // this run starts from that state, as a restart would.
+    db.prepare(
+      "INSERT INTO sync_quarantine (entity, id, rev, reason, seen_at) VALUES (?, ?, ?, ?, ?)",
+    ).run("lines", LINE_ID, 10, "archived: invalid_type", 1_790_000_000_000);
+    db.prepare(
+      "INSERT INTO sync_state (key, value) VALUES ('last_rev', '10'), ('host_id', ?), ('entity_set', ?)",
+    ).run(HOST_ID, ENTITY_SET);
+    const host = fakeHost();
+    host.getChanges.mockRejectedValue(hostDown());
+    const connection: ConnectionApi = {
+      watch: vi.fn(async (next: ConnectionHandlers) => {
+        next.onStatus({ state: "offline", lastContactAt: null, lastError: "unreachable", seq: 1 });
+        return () => undefined;
+      }),
+    };
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(DEVICE_STATUS),
+      host,
+      connection,
+      local: executor,
+    });
+    // The run fails (the host is unreachable and the link is offline), but
+    // the count it read before failing still shows.
+    expect(await screen.findByText("Не приняты записи справочников: 1")).toBeTruthy();
+    expect(screen.getByText("Цех")).toBeTruthy();
+
+    // Reachable offline too: the office header shows it after signing in.
+    fireEvent.click(screen.getByRole("button", { name: "Офис" }));
+    await signIn();
+    await screen.findByText("Вы вошли как Ирина Смирнова.");
+    expect(screen.getByText("Не приняты записи справочников: 1")).toBeTruthy();
   });
 });

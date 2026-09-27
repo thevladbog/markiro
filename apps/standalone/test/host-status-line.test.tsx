@@ -155,13 +155,20 @@ describe("HostStatusLine", () => {
     expect(screen.queryByText(SYNC_FAILED)).toBeNull();
   });
 
-  it("counts the records the copies did not accept, with the host or without it", () => {
-    render(
-      <HostStatusLine
-        status={status({ state: "offline", lastContactAt: null, lastError: "unreachable" })}
-        sync={sync({ quarantined: 3 })}
-      />,
-    );
+  it.each<[string, HostStatus | null]>([
+    ["an online link", status({})],
+    ["a connecting link", status({ state: "connecting", lastError: null })],
+    [
+      "an offline link",
+      status({ state: "offline", lastContactAt: null, lastError: "unreachable" }),
+    ],
+    // Before the shell's first status (also the office header outside the
+    // app): a restart with the host away must still show a count read after
+    // the failed run, so this case matters for the reducer's `sync_failed`
+    // handling, not only for this component.
+    ["no link status yet", null],
+  ])("counts the records the copies did not accept, with %s", (_label, linkStatus) => {
+    render(<HostStatusLine status={linkStatus} sync={sync({ quarantined: 3 })} />);
     const count = screen.getByText("Не приняты записи справочников: 3");
     expect(count.closest(".host-status")?.getAttribute("role")).toBe("status");
   });

@@ -58,7 +58,12 @@ export interface LineSelectProps {
 export function LineSelect({ local, sync, link, onSelect, onSync, onOffice }: LineSelectProps) {
   const { t } = useTranslation();
   const [lines, setLines] = useState<Line[] | null>(null);
-  const [readFailed, setReadFailed] = useState(false);
+  // The `sync.synced` a read failed at, so a later successful sync's own
+  // effect run stops showing it at once instead of waiting for the new
+  // read to resolve (which would otherwise leave the stale failure on
+  // screen for that gap): `null` once the most recent read for the current
+  // `sync.synced` has not failed.
+  const [readFailedAt, setReadFailedAt] = useState<number | null>(null);
   const [choosing, setChoosing] = useState<string | null>(null);
   const [failure, setFailure] = useState<DeviceErrorCode | null>(null);
 
@@ -69,10 +74,10 @@ export function LineSelect({ local, sync, link, onSelect, onSync, onOffice }: Li
       (rows) => {
         if (cancelled) return;
         setLines([...rows].sort((a, b) => BY_NAME.compare(a.name, b.name)));
-        setReadFailed(false);
+        setReadFailedAt(null);
       },
       () => {
-        if (!cancelled) setReadFailed(true);
+        if (!cancelled) setReadFailedAt(sync.synced);
       },
     );
     return () => {
@@ -99,7 +104,11 @@ export function LineSelect({ local, sync, link, onSelect, onSync, onOffice }: Li
     if (lines === null) {
       // The latest failure: a sync failed after the last read, or the read
       // failed after the last sync. A sync in progress, the retry's too,
-      // shows progress instead of an older failure.
+      // shows progress instead of an older failure. The read failure is
+      // pinned to the `sync.synced` it happened at, so a later successful
+      // sync stops showing it the moment that sync finishes, not only once
+      // its own (still pending) read resolves.
+      const readFailed = readFailedAt === sync.synced;
       if (sync.kind === "failed" || (readFailed && sync.kind !== "running")) {
         return (
           <Alert
@@ -125,7 +134,13 @@ export function LineSelect({ local, sync, link, onSelect, onSync, onOffice }: Li
         </div>
       );
     }
-    if (lines.length === 0) return <p>{t("shell.lineSelect.empty")}</p>;
+    if (lines.length === 0) {
+      return (
+        <p>
+          {t(sync.quarantined > 0 ? "shell.lineSelect.emptyQuarantined" : "shell.lineSelect.empty")}
+        </p>
+      );
+    }
     return (
       <div className="line-select">
         {lines.map((line) => (
@@ -145,13 +160,21 @@ export function LineSelect({ local, sync, link, onSelect, onSync, onOffice }: Li
     );
   };
 
+  // While no lines are listed, the content area above already names a
+  // failed sync in its own words (the host's, or the status line's for
+  // `local`/`feed`): the status line repeats only `quarantined`, not
+  // `failure`, so the same failure is not explained twice. Once lines are
+  // listed, nothing else on this screen reports a later failure, so the
+  // status line takes the real sync state.
+  const statusSync = lines === null ? { ...sync, failure: null } : sync;
+
   return (
     <Card className="standalone-card" title={t("shell.lineSelect.title")} titleAs="h2">
       <div className="standalone-form">
         <p>{t("shell.lineSelect.body")}</p>
         {failure && <Alert tone="error">{t(failureKey(failure))}</Alert>}
         {content()}
-        <HostStatusLine status={link} sync={sync} />
+        <HostStatusLine status={link} sync={statusSync} />
         <div className="standalone-form__actions">
           <Button variant="secondary" onClick={onOffice}>
             {t("floor.office")}
