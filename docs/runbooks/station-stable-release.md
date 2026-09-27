@@ -234,17 +234,23 @@ stable Overall `FAIL`, остановитесь для incident recovery и не
 только когда exact current candidate stable снова является подтверждённой целью
 обоих manifests и default alias.
 
-Rollback channel pointer влияет только на ещё не обновившихся клиентов. Для уже
-обновлённой Station закройте активную смену, проверьте SQLite compatibility
-window и SHA-256, затем вручную установите предыдущий accepted immutable stable.
-Application ID, pairing, settings, journals, boxes, exceptions и outbox
-сохраняются; удаление данных запрещено. Сборка до переноса хранилища читает
-только перемещаемую папку. Перед её установкой закройте станцию и переместите
-(не копируйте) `station.json`, `station-mirror.db*` и `.station-*.bak` из
-`%LOCALAPPDATA%\app.markiro.station` в `%APPDATA%\app.markiro.station`, затем
-удалите `%LOCALAPPDATA%\app.markiro.station\station-storage.json`. Без
-перемещения старая сборка запустится без привязки. Если скопировать файлы
-вместо перемещения или оставить запись, сломается следующее обновление: оно
+Rollback channel pointer влияет только на ещё не обновившихся клиентов. Перед
+откатом откройте Центр обновлений → «Данные станции» и убедитесь, что там
+указано «Хранятся на этом компьютере:» с `%LOCALAPPDATA%\app.markiro.station`;
+если вместо этого показана папка `…migrating-…` или «Хранятся в перемещаемом
+профиле Windows:», откат не делайте — следуйте
+`docs/runbooks/station-storage-recovery.md` или обратитесь к разработчикам.
+Для уже обновлённой Station закройте активную смену, проверьте SQLite
+compatibility window и SHA-256, затем вручную установите предыдущий accepted
+immutable stable. Application ID, pairing, settings, journals, boxes,
+exceptions и outbox сохраняются; удаление данных запрещено. Сборка до переноса
+хранилища читает только перемещаемую папку. Перед её установкой закройте
+станцию и переместите (не копируйте) `station.json`, `station-mirror.db*` и
+`.station-*.bak` из `%LOCALAPPDATA%\app.markiro.station` в
+`%APPDATA%\app.markiro.station`, затем удалите
+`%LOCALAPPDATA%\app.markiro.station\station-storage.json`. Без перемещения
+старая сборка запустится без привязки. Если скопировать файлы вместо
+перемещения или оставить запись, сломается следующее обновление: оно
 продолжит работу с устаревшей локальной копией (курсор SSCC откатится, SSCC и
 batch id повторятся), запустится без привязки или остановится до вмешательства
 поддержки.

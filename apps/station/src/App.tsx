@@ -1438,7 +1438,7 @@ export function App() {
       <main className="station-centered-screen">
         <Card style={{ maxWidth: 720, padding: 32 }}>
           <h1>{t("enroll.recoveryTitle")}</h1>
-          <p role="alert">
+          <p role="alert" className="station-blocked-reason">
             {storageBlockedReason !== null
               ? t("storage.blocked", { reason: storageBlockedReason })
               : t(

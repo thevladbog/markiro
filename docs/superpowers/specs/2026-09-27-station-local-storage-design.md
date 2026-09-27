@@ -340,8 +340,15 @@ batch ids keep colliding. That runbook is a follow-up.
 
 The updater never installs an older version (`updater.rs:599`, `version <= current`
 is denied). A manually installed older build reads the legacy path, finds
-nothing, and starts unenrolled; the data stays intact in Local. Manual rollback,
-with the station closed:
+nothing, and starts unenrolled; the data stays intact in Local.
+
+Before rolling back, open the Update screen → "Station data" and confirm it
+shows "Stored on this computer:" with `%LOCALAPPDATA%\app.markiro.station`; if
+it shows a `…migrating-…` folder or "Stored in the roaming Windows profile:"
+instead, do not roll back — follow `docs/runbooks/station-storage-recovery.md`
+or contact the developers.
+
+Manual rollback, with the station closed:
 
 1. Move (do not copy) `station.json`, `station-mirror.db*` and `.station-*.bak`
    from `%LOCALAPPDATA%\app.markiro.station\` to

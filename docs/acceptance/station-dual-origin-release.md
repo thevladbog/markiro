@@ -362,17 +362,21 @@ recovery. Do not leave a channel deliberately rolled back while marking
 acceptance `PASS`; Overall cannot become `PASS` until the exact candidate is
 again the verified public channel and alias target.
 
-Channel rollback affects only clients that have not updated. For an already
-updated station, close the active shift, confirm the SQLite compatibility
-window and retained installer hash, and manually install the previous accepted
-immutable NSIS. Preserve application ID, pairing, settings, journals, boxes,
-exceptions, and outbox; deletion is not rollback. A build from before the
-storage move reads only the roaming folder. Before installing it, with the
-station closed, move (do not copy) `station.json`, `station-mirror.db*` and
-`.station-*.bak` from `%LOCALAPPDATA%\app.markiro.station` to
-`%APPDATA%\app.markiro.station`, then delete
-`%LOCALAPPDATA%\app.markiro.station\station-storage.json`. Skipping the move
-makes the older build start unpaired. Copying instead of moving, or keeping the
-record, breaks the next upgrade: it resumes from the stale local copy (the SSCC
-cursor rewinds, so SSCCs and batch ids repeat), starts unpaired, or stops for
-support.
+Channel rollback affects only clients that have not updated. Before rolling
+back, open the Update screen → "Station data" and confirm it shows "Stored on
+this computer:" with `%LOCALAPPDATA%\app.markiro.station`; if it shows a
+`…migrating-…` folder or "Stored in the roaming Windows profile:" instead, do
+not roll back — follow `docs/runbooks/station-storage-recovery.md` or contact
+the developers. For an already updated station, close the active shift,
+confirm the SQLite compatibility window and retained installer hash, and
+manually install the previous accepted immutable NSIS. Preserve application
+ID, pairing, settings, journals, boxes, exceptions, and outbox; deletion is not
+rollback. A build from before the storage move reads only the roaming folder.
+Before installing it, with the station closed, move (do not copy)
+`station.json`, `station-mirror.db*` and `.station-*.bak` from
+`%LOCALAPPDATA%\app.markiro.station` to `%APPDATA%\app.markiro.station`, then
+delete `%LOCALAPPDATA%\app.markiro.station\station-storage.json`. Skipping the
+move makes the older build start unpaired. Copying instead of moving, or
+keeping the record, breaks the next upgrade: it resumes from the stale local
+copy (the SSCC cursor rewinds, so SSCCs and batch ids repeat), starts
+unpaired, or stops for support.
