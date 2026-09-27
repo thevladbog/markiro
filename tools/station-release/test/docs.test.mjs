@@ -107,7 +107,7 @@ const expectedBootstrapScenarios = [
   ],
   [
     "BOOTSTRAP-PRESERVE-02",
-    "the resolved Station SQLite path and `station-mirror.db` remain unchanged, readable, and contain the prior data",
+    "`station-mirror.db` stays readable with the prior data at the resolved Station SQLite path, which a storage-move build relocates once from the roaming profile to the local app data folder",
     "BOOTSTRAP_READY",
     "Windows data preservation",
     "NOT_RUN",
@@ -330,7 +330,7 @@ const expectedBetaScenarios = [
   ],
   [
     "BETA-PRESERVE-02",
-    "the resolved Station SQLite path and `station-mirror.db` remain unchanged and readable after validation/candidate update",
+    "`station-mirror.db` stays readable at the resolved Station SQLite path after validation/candidate update; a storage-move build relocates it once from the roaming profile to the local app data folder",
     "BETA_SIGN_OFF",
     "Windows data preservation",
     "NOT_RUN",
@@ -652,7 +652,7 @@ const expectedStableScenarios = [
   ],
   [
     "PRESERVE-02",
-    "the resolved Station SQLite path and `station-mirror.db` remain unchanged and readable",
+    "`station-mirror.db` stays readable at the resolved Station SQLite path; a storage-move build relocates it once from the roaming profile to the local app data folder",
     "EVERY_STABLE_SIGN_OFF",
     "Windows data preservation",
     "NOT_RUN",

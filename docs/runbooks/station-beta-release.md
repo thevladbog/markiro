@@ -280,12 +280,13 @@ install-over поверх существующей установки. В каж
 новый dual-origin adapter и выполните beta → beta acceptance.
 
 До и после install-over зафиксируйте application ID `app.markiro.station`,
-фактический абсолютный путь к SQLite и относительное имя
-`sqlite:station-mirror.db`, Station identity, pairing, hardware settings,
-журналы, короба, исключения и pending outbox. Путь берите из реально
-установленной Windows Station, не восстанавливайте его по предположению о
-профиле пользователя. Удаление или создание новой SQLite/outbox не является
-migration или recovery.
+фактический абсолютный путь к SQLite (Центр обновлений → «Данные станции»),
+Station identity, pairing, hardware settings, журналы, короба, исключения и
+pending outbox. Путь берите из реально установленной Windows Station, не
+восстанавливайте его по предположению о профиле пользователя. Первая сборка с
+переносом хранилища один раз переносит базу из перемещаемого профиля в
+`%LOCALAPPDATA%\app.markiro.station`; дальше путь не меняется. Удаление или
+создание новой SQLite/outbox не является migration или recovery.
 
 Центр обновлений работает вручную (manual-only). Он подсвечивает релиз старше 7 дней
 (срочно — старше 30), но не начинает действие без подтверждения оператора.

@@ -82,23 +82,22 @@ corepack pnpm evidence:init -- evidence/INV-20260824-pilot-01 INV-20260824-pilot
 
 ## Получите дату из зеркала Station без записи в базу
 
-Текущая Station загружает `sqlite:station-mirror.db`. Закреплённый в Cargo.lock
-`tauri-plugin-sql` 2.4.0 разрешает этот относительный URL от app-scoped каталога
-конфигурации Tauri `BaseDirectory::AppConfig`. Идентификатор приложения равен
-`app.markiro.station`, поэтому ожидаемый путь в Windows:
+Путь к базе показывает сама Station: Центр обновлений → «Данные станции».
+Начиная со сборки с переносом хранилища база лежит в неперемещаемой папке:
 
 ```text
-%APPDATA%\app.markiro.station\station-mirror.db
+%LOCALAPPDATA%\app.markiro.station\station-mirror.db
 ```
 
-Этот путь выведен из текущего кода и зависимости. Он не проверен на рабочем
-Windows-устройстве. Перед чтением закройте Station, чтобы зафиксировать снимок.
+Если в «Данных станции» указан перемещаемый профиль (`%APPDATA%`), перенос
+отложен: используйте путь, который показан там. Перед чтением закройте
+Station, чтобы зафиксировать снимок.
 В PowerShell задайте выбранные значения, проверьте файл и запустите диагностику:
 
 ```powershell
 $operationRoot = 'D:\private-evidence\INV-20260824-pilot-01'
 $shiftId = '00000000-0000-0000-0000-000000000001'
-$stationDb = Join-Path $env:APPDATA 'app.markiro.station\station-mirror.db'
+$stationDb = Join-Path $env:LOCALAPPDATA 'app.markiro.station\station-mirror.db'
 $output = Join-Path $operationRoot 'exports\system\rehearsal-date\station-production-date.json'
 if (-not (Test-Path -LiteralPath $stationDb -PathType Leaf)) { throw 'Station DB not found' }
 corepack pnpm evidence:station-date -- $stationDb $shiftId $output

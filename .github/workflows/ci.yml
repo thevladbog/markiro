@@ -592,6 +592,12 @@ jobs:
       # built for the same reason as the `station-rust` job above.
       - name: Build station webview + workspace deps
         run: pnpm turbo build --filter '@markiro/station...'
+      # `#[cfg(windows)]` tests (storage move, exclusive handles, profile
+      # probe) must at least compile on Windows. They are not launched: on
+      # Windows Server 2025 the Tauri test harness can fail before main() with
+      # STATUS_ENTRYPOINT_NOT_FOUND (see station-stable-release.yml).
+      - name: Compile station Rust tests for Windows
+        run: cargo test --manifest-path apps/station/src-tauri/Cargo.toml --no-run
       - name: Compile the Windows Tauri application
         run: pnpm --filter @markiro/station tauri build --debug --no-bundle
 

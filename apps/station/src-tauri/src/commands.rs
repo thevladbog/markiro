@@ -7,36 +7,98 @@ pub fn hello(name: &str) -> String {
 use tauri::{AppHandle, Manager};
 
 use crate::config::{self, StationConfig};
+use crate::storage::{self, StationStorage, StorageGate};
 
-/// Reads the on-disk station config from the OS app-config dir, minting a
-/// stable machine id on first run.
+/// Reads `station.json` from the resolved storage folder, minting a stable
+/// machine id on first run. Waits until storage is resolved; a blocked
+/// resolution is an error and never mints a new identity.
 #[tauri::command]
-pub fn read_config(app: AppHandle) -> Result<StationConfig, String> {
-    let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
-    config::read_config(&dir)
+pub async fn read_config(gate: State<'_, StorageGate>) -> Result<StationConfig, String> {
+    read_config_in(gate.inner()).await
 }
 
 /// Persists the station config (mode 0600 on unix). `server_url`, when set,
 /// is validated as http(s) with no userinfo before the write is attempted.
 #[tauri::command]
-pub fn write_config(app: AppHandle, cfg: StationConfig) -> Result<(), String> {
-    if let Some(url) = &cfg.server_url {
-        config::validate_http_url(url)?;
-    }
-    let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
-    config::write_config(&dir, &cfg)
+pub async fn write_config(gate: State<'_, StorageGate>, cfg: StationConfig) -> Result<(), String> {
+    write_config_in(gate.inner(), &cfg).await
 }
 
 /// Clears only the rejected station credential and reproducible display
 /// metadata. `machine_id` and `device_id` stay durable for a same-record
 /// recovery pairing; local production facts live in SQLite and are untouched.
 #[tauri::command]
-pub fn clear_credential(app: AppHandle) -> Result<(), String> {
-    let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
-    config::clear_credential(&dir)
+pub async fn clear_credential(gate: State<'_, StorageGate>) -> Result<(), String> {
+    clear_credential_in(gate.inner()).await
 }
 
-use std::sync::Mutex;
+/// The `sqlite:` URL `src/lib/sqlite.ts` opens. Never the plugin's relative
+/// form, which resolves against the roaming app-config folder.
+#[tauri::command]
+pub async fn station_database_url(gate: State<'_, StorageGate>) -> Result<String, String> {
+    database_url_in(gate.inner()).await
+}
+
+/// Storage folder, mode and notices for the Update screen.
+#[tauri::command]
+pub async fn station_storage_status(
+    gate: State<'_, StorageGate>,
+) -> Result<StationStorage, String> {
+    gate.ready().await
+}
+
+/// Async commands no longer run one at a time on the main thread. This keeps
+/// the synchronous `station.json` calls serialized, so `clear_credential`'s
+/// read-modify-write never interleaves with `write_config`. It guards no data
+/// and is never held across an `.await`.
+static CONFIG_FILE_LOCK: Mutex<()> = Mutex::new(());
+
+fn lock_config_file() -> MutexGuard<'static, ()> {
+    CONFIG_FILE_LOCK
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Where `read_config` may mint a first identity. A claimed folder always
+/// holds the station files, so a missing `station.json` there means another
+/// logon session finished the move: minting would split the identity.
+fn mintable_config_dir(storage: StationStorage) -> Result<PathBuf, String> {
+    if storage.runs_from_claim() && !storage.dir.join(storage::CONFIG_FILE).exists() {
+        return Err(format!(
+            "station.json is missing from the claimed folder {}; another session may have finished moving the station files, so restart the station",
+            storage.dir.display()
+        ));
+    }
+    Ok(storage.dir)
+}
+
+async fn read_config_in(gate: &StorageGate) -> Result<StationConfig, String> {
+    let storage = gate.ready().await?;
+    let _config_file = lock_config_file();
+    config::read_config(&mintable_config_dir(storage)?)
+}
+
+async fn write_config_in(gate: &StorageGate, cfg: &StationConfig) -> Result<(), String> {
+    if let Some(url) = &cfg.server_url {
+        config::validate_http_url(url)?;
+    }
+    let dir = gate.ready().await?.dir;
+    let _config_file = lock_config_file();
+    config::write_config(&dir, cfg)
+}
+
+async fn clear_credential_in(gate: &StorageGate) -> Result<(), String> {
+    let storage = gate.ready().await?;
+    let _config_file = lock_config_file();
+    config::clear_credential(&mintable_config_dir(storage)?)
+}
+
+async fn database_url_in(gate: &StorageGate) -> Result<String, String> {
+    Ok(storage::database_url(&gate.ready().await?.database_path()))
+}
+
+use std::path::PathBuf;
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use tauri::State;
 
@@ -197,5 +259,105 @@ mod tests {
     fn lockdown_state_starts_unlocked() {
         let state = LockdownState::default();
         assert!(!*state.0.lock().expect("lockdown mutex should be available"));
+    }
+
+    fn runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime")
+    }
+
+    fn temp_dir() -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("markiro-station-commands-{}", uuid::Uuid::new_v4()))
+    }
+
+    #[test]
+    fn config_commands_use_the_resolved_folder() {
+        runtime().block_on(async {
+            let dir = temp_dir();
+            let (sender, gate) = storage::storage_gate();
+            sender.resolve(Ok(StationStorage {
+                dir: dir.clone(),
+                mode: crate::storage::StorageMode::Local,
+                notices: Vec::new(),
+            }));
+            let mut cfg = read_config_in(&gate).await.unwrap();
+            assert!(dir.join("station.json").exists());
+            cfg.api_key = Some("credential-placeholder".into());
+            cfg.server_url = Some("https://api.example".into());
+            write_config_in(&gate, &cfg).await.unwrap();
+            clear_credential_in(&gate).await.unwrap();
+            assert_eq!(read_config_in(&gate).await.unwrap().api_key, None);
+            assert_eq!(
+                database_url_in(&gate).await.unwrap(),
+                storage::database_url(&dir.join("station-mirror.db"))
+            );
+        });
+    }
+
+    fn legacy_gate(dir: &std::path::Path) -> StorageGate {
+        let (sender, gate) = storage::storage_gate();
+        sender.resolve(Ok(StationStorage {
+            dir: dir.to_path_buf(),
+            mode: crate::storage::StorageMode::Legacy,
+            notices: vec![crate::storage::StorageNotice::LegacyInUse],
+        }));
+        gate
+    }
+
+    /// Another logon session can finish the move while this one runs from the
+    /// claimed folder: its `station.json` is then gone, never to be minted.
+    #[test]
+    fn a_claimed_folder_without_its_config_never_mints() {
+        runtime().block_on(async {
+            let claim = temp_dir().join("app.markiro.station.migrating-1");
+            std::fs::create_dir_all(&claim).unwrap();
+            let gate = legacy_gate(&claim);
+            let error = read_config_in(&gate).await.unwrap_err();
+            assert!(error.contains(&claim.display().to_string()), "{error}");
+            assert!(clear_credential_in(&gate).await.is_err());
+            assert!(!claim.join("station.json").exists());
+
+            // While the claimed folder holds its config, it serves as before.
+            let mut cfg = config::read_config(&temp_dir()).unwrap();
+            cfg.api_key = Some("credential-placeholder".into());
+            config::write_config(&claim, &cfg).unwrap();
+            assert_eq!(read_config_in(&gate).await.unwrap(), cfg);
+            clear_credential_in(&gate).await.unwrap();
+            assert_eq!(read_config_in(&gate).await.unwrap().api_key, None);
+
+            // A fresh station kept in the roaming folder still gets an identity.
+            let roaming = temp_dir().join("app.markiro.station");
+            assert!(read_config_in(&legacy_gate(&roaming)).await.is_ok());
+            assert!(roaming.join("station.json").exists());
+        });
+    }
+
+    #[test]
+    fn a_blocked_gate_refuses_every_command_and_mints_nothing() {
+        runtime().block_on(async {
+            let (sender, gate) = storage::storage_gate();
+            sender.resolve(Err("blocked".into()));
+            assert_eq!(read_config_in(&gate).await, Err("blocked".to_string()));
+            assert!(clear_credential_in(&gate).await.is_err());
+            assert!(database_url_in(&gate).await.is_err());
+            let cfg = StationConfig {
+                machine_id: "machine-1".into(),
+                tenant_id: None,
+                device_id: None,
+                device_name: None,
+                organization_name: None,
+                line_id: None,
+                line_name: None,
+                api_key: None,
+                server_url: Some("ftp://nope".into()),
+            };
+            // URL validation still runs first, as before.
+            assert!(write_config_in(&gate, &cfg)
+                .await
+                .unwrap_err()
+                .contains("scheme"));
+        });
     }
 }

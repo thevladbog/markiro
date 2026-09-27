@@ -979,5 +979,28 @@
     },
     "waitingTitle": "Waiting to start work",
     "waitingHint": "The old device may work offline until {{time}}. Stay connected: work will unlock when the server confirms the safe handover."
+  },
+  "storage": {
+    "title": "Station data",
+    "mode": {
+      "local": "Stored on this computer:",
+      "legacy": "Stored in the roaming Windows profile:"
+    },
+    "notices": {
+      "legacy_in_use": "Station data is in use by another process, usually a station on another computer under the same Windows account, or antivirus. The move to the local folder is postponed and retried at the next start; if this repeats, contact your administrator.",
+      "move_failed": "Station data could not be moved to the local folder. The station works as before and retries the move at the next start.",
+      "local_less_durable": {
+        "temporary_profile": "Windows loaded a temporary profile: station data will be deleted at sign-out. Do not pair this station; sign out and contact your administrator.",
+        "mandatory_profile": "A mandatory Windows profile does not keep data after sign-out. Run the station under a local account.",
+        "delete_roaming_cache": "A Windows policy deletes the local profile copy at sign-out, so station data stays in the roaming profile. Run the station under a local account."
+      },
+      "roamed_copy_present": {
+        "sameMachine": "This station's data reappeared in the roaming profile: a copy of it may be running on another computer. Contact support.",
+        "otherMachine": "Another station's data was found in the roaming profile. This station does not use it. Tell your administrator."
+      },
+      "claim_leftovers": "The old station data folder was not removed completely. Work is not affected; tell your administrator."
+    },
+    "pairingUnsafe": "Windows loaded a temporary or mandatory profile: after sign-out the station would lose its pairing and data. Do not pair it on this profile; contact your administrator.",
+    "blocked": "Station data is blocked: {{reason}}. Do not delete anything; contact support."
   }
 }

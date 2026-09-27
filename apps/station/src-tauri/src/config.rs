@@ -65,7 +65,7 @@ pub fn read_config(dir: &Path) -> Result<StationConfig, String> {
 /// Atomically replaces `station.json` (create dir, write a private sibling,
 /// sync, then replace). A failed write restores the previous readable
 /// provisioning bundle instead of truncating it. On Unix the sibling is
-/// created at mode 0600; Windows uses the per-user app-config directory.
+/// created at mode 0600; on Windows the per-user local app-data folder's ACL applies.
 pub fn write_config(dir: &Path, cfg: &StationConfig) -> Result<(), String> {
     write_config_with_parent_syncs(dir, cfg, sync_parent_directory, sync_parent_directory)
 }
@@ -179,7 +179,7 @@ fn restore_config_from_backup(dir: &Path, backup: &Path, destination: &Path) -> 
 /// atomically installs the completed sibling. A first write has no destination
 /// and uses `MoveFileExW` with write-through semantics instead.
 #[cfg(windows)]
-fn replace_config_file(temporary: &Path, destination: &Path) -> std::io::Result<()> {
+pub(crate) fn replace_config_file(temporary: &Path, destination: &Path) -> std::io::Result<()> {
     use std::iter::once;
     use std::os::windows::ffi::OsStrExt;
     use std::ptr::null;
@@ -223,24 +223,24 @@ fn replace_config_file(temporary: &Path, destination: &Path) -> std::io::Result<
 }
 
 #[cfg(not(windows))]
-fn replace_config_file(temporary: &Path, destination: &Path) -> std::io::Result<()> {
+pub(crate) fn replace_config_file(temporary: &Path, destination: &Path) -> std::io::Result<()> {
     fs::rename(temporary, destination)
 }
 
 #[cfg(unix)]
-fn sync_parent_directory(dir: &Path) -> Result<(), String> {
+pub(crate) fn sync_parent_directory(dir: &Path) -> Result<(), String> {
     fs::File::open(dir)
         .and_then(|directory| directory.sync_all())
         .map_err(|e| e.to_string())
 }
 
 #[cfg(not(unix))]
-fn sync_parent_directory(_dir: &Path) -> Result<(), String> {
+pub(crate) fn sync_parent_directory(_dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
 #[cfg(unix)]
-fn write_owner_only(path: &Path, data: &[u8]) -> Result<(), String> {
+pub(crate) fn write_owner_only(path: &Path, data: &[u8]) -> Result<(), String> {
     use std::os::unix::fs::OpenOptionsExt;
     let mut file = fs::OpenOptions::new()
         .write(true)
@@ -254,7 +254,7 @@ fn write_owner_only(path: &Path, data: &[u8]) -> Result<(), String> {
 }
 
 #[cfg(not(unix))]
-fn write_owner_only(path: &Path, data: &[u8]) -> Result<(), String> {
+pub(crate) fn write_owner_only(path: &Path, data: &[u8]) -> Result<(), String> {
     let mut file = fs::File::create(path).map_err(|e| e.to_string())?;
     file.write_all(data).map_err(|e| e.to_string())?;
     file.sync_all().map_err(|e| e.to_string())

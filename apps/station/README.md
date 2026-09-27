@@ -6,7 +6,8 @@ Markiro line station — a Tauri 2.11 + React 19 floor-mode app. Reuses
 ## Offline model
 
 The station is offline-first. At enrollment it stores a device api-key + server
-URL in a `0600` `station.json` (OS app-config dir). A shift is downloaded in
+URL in a `0600` `station.json` in machine-local app data
+(`%LOCALAPPDATA%\app.markiro.station` on Windows, next to the SQLite mirror). A shift is downloaded in
 full via `GET /shifts/:id/bundle` into a local SQLite mirror
 (`tauri-plugin-sql`, schema from `@markiro/db` `STATION_MIGRATIONS`). Operators
 sign in **offline** by PIN/badge, verified locally against `operators_mirror`
@@ -16,6 +17,32 @@ Interrupted-print recovery uses `GET /shifts/:id/reference-bundle` instead.
 That response refreshes the mirrored shift/product/template references with
 `sscc: null`; it never allocates server serial state and the recovery mirror
 never calls the device's local `addRange` path.
+
+## Windows account and station data
+
+Station keeps `station.json` and `station-mirror.db` in
+`%LOCALAPPDATA%\app.markiro.station`. Builds before the storage move kept them
+in the roaming `%APPDATA%\app.markiro.station`; the first start of a newer
+build moves them once (design:
+`docs/superpowers/specs/2026-09-27-station-local-storage-design.md`).
+
+- Run the station under a local Windows account, or a domain account without a
+  roaming profile or AppData folder redirection. On a temporary, mandatory or
+  "delete cached copies" roaming profile the station keeps its data in the
+  roaming folder and says so on the Update screen; pairing warns as well.
+- Pair a station after disk imaging, never before: an image of a paired station
+  clones its identity.
+- After the move, point every path-based setting at
+  `%LOCALAPPDATA%\app.markiro.station` instead of
+  `%APPDATA%\app.markiro.station`: backups, antivirus exclusions and above all
+  write-filter exclusions (UWF, Deep Freeze). On a write-filtered PC excluded
+  only for the old path, every reboot rewinds the station to the same snapshot,
+  and it prints duplicate SSCCs.
+- Update screen → «Данные станции» shows the data folder and any storage
+  notices.
+- A station that stops with «Данные станции заблокированы» must not be cleaned
+  up by hand: support follows
+  [`docs/runbooks/station-storage-recovery.md`](../../docs/runbooks/station-storage-recovery.md).
 
 ## Dev run (macOS)
 

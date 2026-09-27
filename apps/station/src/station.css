@@ -32,6 +32,12 @@ body,
   place-items: center;
 }
 
+/* A claimed-folder path carries a UUID and no spaces, so it has no break
+   opportunity of its own; without this the recovery reason can be cut off. */
+.station-blocked-reason {
+  overflow-wrap: anywhere;
+}
+
 .station-window-frame {
   position: relative;
   width: 100%;
@@ -5065,6 +5071,13 @@ body,
   max-width: 62ch;
   color: var(--fg-2);
   font: var(--floor-body);
+}
+
+.station-update-center__storage-folder {
+  margin: 0;
+  color: var(--fg-2);
+  font: var(--floor-body);
+  overflow-wrap: anywhere;
 }
 
 .station-update-center__progress {
