@@ -218,9 +218,13 @@ impl LocalDb {
     /// Delete every row of every table but sqlx's migration journal, in one
     /// writer transaction: forgetting the device must not leave another
     /// pairing's copies behind (from plan 1d3 on, PIN and badge hashes).
-    /// The tables come from `sqlite_master`, so one a later migration adds is
-    /// covered without a change here. Foreign keys are checked at the commit,
-    /// when every table is empty, so the order of the deletes does not matter.
+    /// The tables come from `pragma_table_list`, so one a later migration
+    /// adds is covered without a change here; `type IN ('table', 'virtual')`
+    /// excludes a virtual table's own shadow tables (FTS5, RTree), which
+    /// `sqlite_master` lists as ordinary tables but a bare `DELETE` would
+    /// corrupt instead of clearing through the virtual table itself. Foreign
+    /// keys are checked at the commit, when every table is empty, so the
+    /// order of the deletes does not matter.
     pub async fn clear_copies(&self) -> Result<(), LocalDbError> {
         let mut tx = self
             .writer
@@ -232,8 +236,9 @@ impl LocalDb {
             .await
             .map_err(|_| LocalDbError::StatementFailed)?;
         let tables: Vec<String> = sqlx::query_scalar(
-            "SELECT name FROM sqlite_master WHERE type = 'table' \
-             AND name <> '_sqlx_migrations' AND name NOT GLOB 'sqlite_*' ORDER BY name",
+            "SELECT name FROM pragma_table_list WHERE schema = 'main' \
+             AND type IN ('table', 'virtual') AND name <> '_sqlx_migrations' \
+             AND name NOT GLOB 'sqlite_*' ORDER BY name",
         )
         .fetch_all(&mut *tx)
         .await

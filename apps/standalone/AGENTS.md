@@ -129,8 +129,8 @@ to `src-tauri/tests/fixtures/local-sql.json`.
 the commit. The tables come from `sqlite_master`, so one a later migration
 adds is covered, PIN and badge hashes included. If clearing fails, the
 command fails with `storage` and the pairing stays for another try; without
-a local database (it did not open) there is nothing to clear, and
-forgetting goes on.
+a local database (it did not open) there is nothing this app can clear, and
+forgetting goes on; plan 1d3 revisits this before PIN and badge hashes land.
 
 ## Writes
 

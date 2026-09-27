@@ -11,9 +11,12 @@
 
 use markiro_host::config::HostPaths;
 use markiro_host::{start, RunningHost, StartOptions};
+use markiro_proto::DeviceKind;
 use markiro_standalone_lib::connection::ConnectionState;
 use markiro_standalone_lib::device::DeviceState;
+use markiro_standalone_lib::device_config::{self, DeviceConfig};
 use markiro_standalone_lib::local_db::{LocalDbState, FILE_NAME};
+use markiro_standalone_lib::secret_store::{ProtectedSecret, Scheme};
 use serde_json::{json, Value};
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{ConnectOptions, Connection};
@@ -356,14 +359,19 @@ fn forgetting_the_device_clears_the_local_copies_first() {
         ] }),
     )
     .unwrap();
-    // A table whose rows refuse to go.
+    // A table whose rows refuse to go. Named to sort last (after ref_lines,
+    // ref_org, ref_site, sync_quarantine and sync_state), so every other
+    // table's delete has already run by the time this one aborts: an
+    // implementation that committed each delete on its own, instead of one
+    // transaction, would still show `n = 3` if the refusing table sorted
+    // first, since nothing else would have been touched yet either way.
     run_raw(
         app_dir.path(),
         &[
-            "CREATE TABLE extra_kept (id TEXT PRIMARY KEY)",
-            "CREATE TRIGGER extra_kept_stays BEFORE DELETE ON extra_kept \
+            "CREATE TABLE zz_kept (id TEXT PRIMARY KEY)",
+            "CREATE TRIGGER zz_kept_stays BEFORE DELETE ON zz_kept \
              BEGIN SELECT RAISE(ABORT, 'kept'); END",
-            "INSERT INTO extra_kept (id) VALUES ('k')",
+            "INSERT INTO zz_kept (id) VALUES ('k')",
         ],
     );
     let copies = || {
@@ -372,7 +380,7 @@ fn forgetting_the_device_clears_the_local_copies_first() {
             "local_query",
             json!({
                 "sql": "SELECT (SELECT count(*) FROM ref_lines) + (SELECT count(*) FROM sync_state) \
-                        + (SELECT count(*) FROM extra_kept) AS n",
+                        + (SELECT count(*) FROM zz_kept) AS n",
                 "params": []
             }),
         )
@@ -390,7 +398,7 @@ fn forgetting_the_device_clears_the_local_copies_first() {
         "the clearing rolled back whole"
     );
 
-    run_raw(app_dir.path(), &["DROP TRIGGER extra_kept_stays"]);
+    run_raw(app_dir.path(), &["DROP TRIGGER zz_kept_stays"]);
     assert_eq!(
         invoke(&webview, "device_forget", json!({})),
         Ok(Value::Null)
@@ -401,6 +409,40 @@ fn forgetting_the_device_clears_the_local_copies_first() {
         invoke(&webview, "device_status", json!({})),
         Ok(Value::Null)
     );
+}
+
+/// Without a local database (it never opened) there is nothing this app can
+/// clear: `device_forget` still removes `device.json` on its own. This test
+/// needs no host, so it runs in the sandbox — unlike the test above, which
+/// pairs a real `markiro-host` and needs a loopback socket. Plan 1d3 revisits
+/// this decision before PIN and badge hashes live in the local database.
+#[test]
+fn forgetting_the_device_without_a_local_database_still_forgets() {
+    let app_dir = tempfile::tempdir().unwrap();
+    let config = app_dir.path().join("device.json");
+    device_config::save(
+        app_dir.path(),
+        &DeviceConfig {
+            host_address: "https://127.0.0.1:45710".into(),
+            fingerprint: "ab".repeat(32),
+            host_id: "3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f".into(),
+            device_id: "7c9e6679-7425-40de-944b-e07fc1f90ae7".into(),
+            kind: DeviceKind::Station,
+            line_id: None,
+            device_key: ProtectedSecret {
+                scheme: Scheme::Plain,
+                value: "device-key-value".into(),
+            },
+        },
+    )
+    .unwrap();
+    let (_app, webview) = mock_app(DeviceState::load(app_dir.path().to_path_buf()));
+
+    assert_eq!(
+        invoke(&webview, "device_forget", json!({})),
+        Ok(Value::Null)
+    );
+    assert!(!config.exists());
 }
 
 #[test]

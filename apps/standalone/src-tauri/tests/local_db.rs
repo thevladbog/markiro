@@ -393,3 +393,52 @@ async fn clearing_the_copies_empties_every_table_but_the_migration_journal() {
         Ok(vec![1])
     );
 }
+
+/// An FTS5 virtual table's shadow tables (`search_data`, `search_idx`, …)
+/// hold its index; `sqlite_master` lists them as ordinary tables, but
+/// deleting their rows directly — instead of through the virtual table —
+/// corrupts the index. `clear_copies` must clear through the virtual table
+/// and leave it fully usable afterwards.
+#[tokio::test]
+async fn clearing_the_copies_leaves_a_virtual_table_usable() {
+    let (dir, db) = open().await;
+    let mut raw = SqliteConnectOptions::new()
+        .filename(dir.path().join(FILE_NAME))
+        .connect()
+        .await
+        .unwrap();
+    sqlx::query("CREATE VIRTUAL TABLE search USING fts5(body)")
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO search (rowid, body) VALUES (1, 'первая строка')")
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    raw.close().await.unwrap();
+
+    assert_eq!(db.clear_copies().await, Ok(()));
+
+    let empty = db
+        .query("SELECT count(*) AS n FROM search", vec![])
+        .await
+        .unwrap();
+    assert_eq!(Value::Object(empty[0].clone()), json!({ "n": 0 }));
+    db.transaction(vec![statement(
+        "INSERT INTO search (rowid, body) VALUES (1, ?)",
+        json!(["вторая строка"]),
+    )])
+    .await
+    .unwrap();
+    let found = db
+        .query(
+            "SELECT body FROM search WHERE search MATCH 'вторая' ORDER BY rowid",
+            vec![],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        Value::Object(found[0].clone()),
+        json!({ "body": "вторая строка" })
+    );
+}
