@@ -23,6 +23,27 @@ export const CONVEYOR = { x0: -5.2, x1: 0.55, z: -1.1, y: 0.78, width: 0.62 } as
 export const BELT_TOP = CONVEYOR.y + 0.01;
 
 const TABLE = { x: 1.55, z: -1.1, width: 1.7, depth: 1.1, height: 0.76 } as const;
+
+const PALLET_AT = { x: 2.45, z: 1.2 } as const;
+const KIOSK_AT = { x: -4.75, z: 3.05 } as const;
+const OFFICE_AT = { x: 6.2, z: -2.75 } as const;
+
+export type PlantSpotId = "line" | "packing" | "warehouse" | "kiosk" | "office";
+
+export interface PlantSpot {
+  readonly id: PlantSpotId;
+  readonly position: Vec3Tuple;
+}
+
+/** The home page's map hotspots: the places the film's chapters are about. */
+export const PLANT_SPOTS: readonly PlantSpot[] = [
+  { id: "line", position: [BELT.archX, FLOOR + 1.1, CONVEYOR.z] },
+  { id: "packing", position: [TABLE.x, FLOOR + TABLE.height + 0.3, TABLE.z] },
+  { id: "warehouse", position: [PALLET_AT.x, FLOOR + 1.1, PALLET_AT.z] },
+  { id: "kiosk", position: [KIOSK_AT.x, FLOOR + 1.3, KIOSK_AT.z] },
+  { id: "office", position: [OFFICE_AT.x, FLOOR + 1.6, OFFICE_AT.z] },
+];
+
 const COLUMN_HEIGHT = 2.9;
 const TRUSS_X = [-3.8, -1.3, 1.1] as const;
 const PRODUCTS_FACE = (-30 * Math.PI) / 180;
@@ -517,7 +538,7 @@ export function buildPlant(kit: Kit, parent: Object3D, screens: ScreenTextures):
     queueTiles.push(tile);
   }
 
-  const loaded = pallet(kit, plant, 2.45, FLOOR, 1.2, PALLET_CAPACITY, label);
+  const loaded = pallet(kit, plant, PALLET_AT.x, FLOOR, PALLET_AT.z, PALLET_CAPACITY, label);
   rack(kit, plant, -5.9, HALL.z0);
   rack(kit, plant, -4.05, HALL.z0);
 
@@ -530,7 +551,7 @@ export function buildPlant(kit: Kit, parent: Object3D, screens: ScreenTextures):
   person(kit, plant, -4.35, 0.75, Math.PI / 2 - 0.35, "walk");
 
   const mastLamp = mast(kit, plant, 4.3, -3.9);
-  const kioskScreen = checkpoint(kit, plant, screens, -4.75, 3.05);
+  const kioskScreen = checkpoint(kit, plant, screens, KIOSK_AT.x, KIOSK_AT.z);
   const windows = new MeshStandardMaterial({
     color: kit.colorOf("glass"),
     emissive: "#f2d2a6",
@@ -538,7 +559,7 @@ export function buildPlant(kit: Kit, parent: Object3D, screens: ScreenTextures):
     roughness: 0.25,
   });
   windows.name = "window";
-  office(kit, plant, 6.2, -2.75, windows);
+  office(kit, plant, OFFICE_AT.x, OFFICE_AT.z, windows);
   van(kit, plant, 5.3, 1.25, label);
 
   return {

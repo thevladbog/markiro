@@ -8,7 +8,7 @@ import {
 } from "@markiro/legal-documents";
 
 import { articlesForLocale } from "../content/articles";
-import type { HubPageDefinition } from "../content/hubs";
+import { hubGroupId, type HubPageDefinition } from "../content/hubs";
 import { ACTIVE_LEGAL_RELEASES, getLegalDocumentPage } from "../content/legal-pages";
 import { getUiCopy } from "../content/ui";
 import { buildHubPageGraph, type HubItem } from "../lib/seo";
@@ -32,6 +32,7 @@ interface HubEntry extends HubItem {
 }
 
 interface HubGroup {
+  id: string;
   kicker: string;
   heading: string;
   entries: HubEntry[];
@@ -41,9 +42,15 @@ const { hub, phone } = Astro.props;
 const copy = getUiCopy(hub.locale);
 const homePath = hub.locale === "ru" ? "/" : "/en/";
 
+function titlePrefix(title: string): string | undefined {
+  const [prefix, ...rest] = title.split(":");
+  return rest.length > 0 && prefix !== undefined ? prefix.trim() : undefined;
+}
+
 const groups: HubGroup[] = [];
 if (hub.kind === "articles") {
   groups.push({
+    id: hubGroupId("articles"),
     kicker: copy.hub.articlesKicker,
     heading: copy.hub.articlesHeading,
     entries: articlesForLocale(hub.locale).map((article) => ({
@@ -62,11 +69,16 @@ if (hub.kind === "articles") {
     if (!legalReleaseLocales(release.code).includes(hub.locale)) continue;
     const content = requireLegalContent(findLegalDocument(release.code), hub.locale);
     const page = getLegalDocumentPage(release.code, hub.locale);
-    const [prefix, ...rest] = content.title.split(":");
-    const groupHeading = rest.length > 0 && prefix !== undefined ? prefix.trim() : copy.hub.otherGroup;
-    let group = groups.find((candidate) => candidate.heading === groupHeading);
+    const groupHeading = titlePrefix(content.title) ?? copy.hub.otherGroup;
+    // The English title names the group in both hubs, so a link can use the same anchor.
+    const englishTitle = legalReleaseLocales(release.code).includes("en")
+      ? requireLegalContent(findLegalDocument(release.code), "en").title
+      : "";
+    const groupId = hubGroupId(titlePrefix(englishTitle) ?? "other");
+    let group = groups.find((candidate) => candidate.id === groupId);
     if (group === undefined) {
       group = {
+        id: groupId,
         kicker: `${String(groups.length + 1).padStart(2, "0")} / ${copy.hub.instructionsKicker}`,
         heading: groupHeading,
         entries: [],
@@ -104,10 +116,10 @@ const graph = buildHubPageGraph(
     </header>
 
     {groups.map((group) => (
-      <section class="container legal-registry" aria-labelledby={`hub-group-${group.heading}`}>
+      <section class="container legal-registry" id={group.id} aria-labelledby={`${group.id}-title`}>
         <div class="legal-registry__heading">
           <p class="section-index">{group.kicker}</p>
-          <h2 id={`hub-group-${group.heading}`}>{group.heading}</h2>
+          <h2 id={`${group.id}-title`}>{group.heading}</h2>
         </div>
         <div class="legal-registry__list">
           {group.entries.map((entry) => (

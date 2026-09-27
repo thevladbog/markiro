@@ -44,7 +44,7 @@ const copy = locale === "ru"
 const privacyPath = locale === "ru" ? "/privacy/" : "/en/privacy/";
 ---
 
-<section class="consent-panel" data-consent-panel aria-label={copy.label} hidden>
+<section class="consent-panel" data-consent-panel data-theme="dark" aria-label={copy.label} hidden>
   <div class="container consent-panel__inner">
     <div class="consent-panel__intro">
       <p class="consent-panel__eyebrow">{copy.label}</p>

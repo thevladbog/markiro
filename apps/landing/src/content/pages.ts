@@ -79,17 +79,17 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     path: "/",
     alternatePath: "/en/",
     locale: "ru",
-    title: "ПО для маркировки пива и агрегации коробов — Markiro",
+    title: "ПО для маркировки и агрегации по Честному знаку — Markiro",
     description:
-      "ПО для маркировки пива и слабоалкогольных напитков: проверка кодов, агрегация коробов и работа станции при нестабильной сети.",
+      "Проверка кодов на линии, сборка коробов и паллет, печать этикеток и работа без сети. Для соков, молочной продукции, пива, косметики и другой маркируемой продукции.",
     heading: "Маркировка и агрегация. Линия идёт.",
     navigationLabel: "Markiro",
     eyebrow: "Маркировка / агрегация / прослеживаемость",
     introduction:
-      "Производственная система для пива, сидра и слабоалкогольных напитков: проверка кодов, упаковка, агрегация и восстановление операций без остановки линии.",
+      "Производственная система для любой маркируемой продукции: проверка кодов, сборка коробов и паллет, печать этикеток и работа станции без сети.",
     socialImage: SHARED_IMAGE,
     socialImageAlt: SHARED_IMAGE_ALT,
-    reviewedAt: REVIEWED,
+    reviewedAt: "2026-09-26",
     summary: [],
     relatedPaths: ["/markirovka-chestny-znak/", "/sscc-i-agregatsiya/", "/oflayn-rabota/"],
     relatedArticlePaths: [],
@@ -109,7 +109,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       "Markiro объединяет операции с кодами маркировки в последовательный производственный поток: код проверяется, наносится, связывается с упаковкой и остаётся в журнале прослеживаемости.",
     socialImage: SHARED_IMAGE,
     socialImageAlt: SHARED_IMAGE_ALT,
-    reviewedAt: REVIEWED,
+    reviewedAt: "2026-09-27",
     summary: [
       "Код маркировки проверяется на станции в момент сканирования: структура GS1, контрольное число GTIN, разделитель GS, принадлежность товару смены и повторы.",
       "Markiro не заказывает коды. Коды получает производитель в системе «Честный знак», а Markiro фиксирует их проверку, нанесение и упаковку.",
@@ -151,7 +151,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
         ],
         bullets: [
           "результат проверки кода;",
-          "связь единицы с коробом;",
+          "связь единицы с коробом и короба с паллетой;",
           "ошибки и действия восстановления;",
           "состояние синхронизации локальных операций.",
         ],
@@ -190,7 +190,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
         heading: "Граница ответственности",
         paragraphs: [
           "Markiro управляет производственным контуром и прослеживаемостью операций. Обмен с внешними системами настраивается по подтверждённому контракту; конкретный состав интеграции зависит от действующего процесса предприятия.",
-          "Сейчас Markiro ориентирован на товарную группу «Пиво, напитки, изготавливаемые на основе пива, слабоалкогольные напитки», включая сидр. Поддерживаемый уровень агрегации — единица → короб; паллетная агрегация будет добавлена отдельным этапом.",
+          "Сейчас Markiro ориентирован на товарную группу «Пиво, напитки, изготавливаемые на основе пива, слабоалкогольные напитки», включая сидр. Поддерживаемые уровни агрегации — единица → короб → паллета.",
         ],
       },
     ],
@@ -231,18 +231,18 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       "Markiro собирает маркированное пиво и слабоалкогольные напитки в короба, проверяет SSCC и сохраняет историю агрегации и восстановления.",
     heading: "SSCC и агрегация коробов для пивной продукции",
     navigationLabel: "SSCC и агрегация",
-    eyebrow: "Единица → короб",
+    eyebrow: "Единица → короб → паллета",
     introduction:
       "Markiro сейчас ориентирован на производственные сценарии товарной группы «Пиво, напитки, изготавливаемые на основе пива, слабоалкогольные напитки», включая сидр. Новые товарные группы добавляются поэтапно. Для конкретного товара применимость проверяется по кодам ТН ВЭД ЕАЭС и ОКПД 2 и фактическому процессу линии.",
     socialImage: SHARED_IMAGE,
     socialImageAlt: SHARED_IMAGE_ALT,
-    reviewedAt: REVIEWED,
+    reviewedAt: "2026-09-27",
     summary: [
-      "SSCC — 18-значный номер логистической единицы. В текущем сценарии Markiro он идентифицирует короб, а код маркировки — потребительскую единицу внутри него.",
+      "SSCC — 18-значный номер логистической единицы. Markiro присваивает его коробам и паллетам, а код маркировки идентифицирует потребительскую единицу внутри короба.",
       "Станция получает диапазон SSCC заранее и расходует номера последовательно; после расформирования короба его номер не используется повторно.",
       "Состав короба проверяется до закрытия: формат кода, принадлежность заданию, повтор, ожидаемое количество и подтверждение печати.",
       "Агрегация продолжается без сети, а очередь отправляется повторяемо; конфликт между терминалами остаётся видимым, а не скрывается.",
-      "Поддерживаемый уровень — единица → короб; паллетная агрегация будет добавлена отдельным этапом.",
+      "Поддерживаемые уровни — единица → короб → паллета.",
     ],
     relatedPaths: ["/markirovka-chestny-znak/", "/rabochee-mesto-upakovki/", "/oflayn-rabota/"],
     relatedArticlePaths: [
@@ -254,7 +254,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       {
         heading: "Что такое SSCC в агрегации",
         paragraphs: [
-          "SSCC — 18-значный идентификатор логистической единицы: например, короба или паллеты. В текущем сценарии Markiro он идентифицирует короб. В штрихкоде и при обмене с внешними системами SSCC может передаваться с идентификатором применения GS1 AI (00), поэтому оператор видит 20 цифр, а система хранит нормализованное 18-значное значение.",
+          "SSCC — 18-значный идентификатор логистической единицы: например, короба или паллеты. Markiro присваивает SSCC коробам и паллетам. В штрихкоде и при обмене с внешними системами SSCC может передаваться с идентификатором применения GS1 AI (00), поэтому оператор видит 20 цифр, а система хранит нормализованное 18-значное значение.",
           "Код единицы товара и SSCC решают разные задачи. Код маркировки идентифицирует конкретную потребительскую упаковку, а SSCC связывает транспортную упаковку с её составом и уровнем в иерархии.",
         ],
       },
@@ -262,7 +262,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
         heading: "Как единицы собираются в короб",
         paragraphs: [
           "Оператор открывает короб на рабочей станции и последовательно сканирует коды маркировки бутылок, банок или другой потребительской упаковки. Markiro связывает принятые коды с открытым коробом и показывает его заполнение. После проверки состава оператор закрывает короб и печатает его этикетку.",
-          "Текущий поддерживаемый уровень — цепочка «единица → короб». Паллетная агрегация, где закрытые короба становятся вложениями паллеты, будет добавлена отдельным следующим этапом.",
+          "Поддерживается цепочка «единица → короб → паллета». Закрытые короба становятся вложениями паллеты, у паллеты свой SSCC и своя этикетка. Собирать паллеты можно на станции упаковки и на ТСД.",
         ],
         bullets: [
           "рабочая станция получает доступный диапазон SSCC и расходует номера последовательно;",
@@ -313,7 +313,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
         bullets: [
           "вид продукции и коды ТН ВЭД ЕАЭС и ОКПД 2;",
           "тип потребительской и транспортной упаковки;",
-          "количество единиц в коробе и, если это требуется в будущем, планируемое количество коробов на паллете;",
+          "количество единиц в коробе и количество коробов на паллете;",
           "модели сканеров и принтеров;",
           "источник производственного задания и диапазонов SSCC;",
           "состав обмена с 1С и системой маркировки.",
@@ -324,7 +324,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       {
         question: "Чем SSCC отличается от кода маркировки?",
         answer:
-          "SSCC — 18-значный номер логистической единицы, у Markiro это короб. Код маркировки идентифицирует потребительскую единицу, а SSCC связывает короб с его составом и уровнем в иерархии упаковки.",
+          "SSCC — 18-значный номер логистической единицы, в Markiro это короб или паллета. Код маркировки идентифицирует потребительскую единицу, а SSCC связывает короб или паллету с составом и уровнем в иерархии упаковки.",
       },
       {
         question: "Откуда станция берёт номера SSCC?",
@@ -339,7 +339,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       {
         question: "Поддерживается ли паллетная агрегация?",
         answer:
-          "Пока нет. Текущий поддерживаемый уровень — единица → короб. Паллетная агрегация, где закрытые короба становятся вложениями паллеты, будет добавлена отдельным этапом.",
+          "Да. Закрытые короба собираются в паллету с собственным SSCC и этикеткой: на станции упаковки или на ТСД. Цепочка агрегации — единица → короб → паллета.",
       },
     ],
   },
@@ -588,7 +588,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       "Интеграция с 1С — это управляемая граница обмена, а не прямой доступ учётной системы к рабочему месту. Markiro принимает проверяемые данные и возвращает явный результат обработки.",
     socialImage: SHARED_IMAGE,
     socialImageAlt: SHARED_IMAGE_ALT,
-    reviewedAt: REVIEWED,
+    reviewedAt: "2026-09-27",
     summary: [
       "1С подключается к Markiro по стандартному протоколу «Обмен с сайтом» через CommerceML; дорабатывать типовую конфигурацию не нужно.",
       "Из 1С приходят цены, штрихкоды GTIN и фото товаров; карточки связываются автоматически по GTIN, незнакомые позиции ждут решения человека.",
@@ -654,7 +654,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       {
         heading: "Что не входит в обмен сегодня",
         paragraphs: [
-          "Результаты производственных смен передаются файлами выгрузки: отчёт смены в TXT и CSV, XML агрегации для ГИС МТ. Для других систем предприятия есть публичный REST API с документацией OpenAPI и ключами доступа с правами на чтение или запись. Выгрузка отгрузок по CommerceML запланирована после паллетной агрегации.",
+          "Результаты производственных смен передаются файлами выгрузки: отчёт смены в TXT и CSV, XML агрегации для ГИС МТ. Для других систем предприятия есть публичный REST API с документацией OpenAPI и ключами доступа с правами на чтение или запись. Выгрузка отгрузок по CommerceML запланирована следующим этапом.",
         ],
       },
       {
@@ -683,7 +683,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       {
         question: "Можно ли передавать данные смены в 1С?",
         answer:
-          "Сегодня — файлами выгрузки из кабинета или через публичный REST API. Выгрузка отгрузок по CommerceML запланирована как следующий этап после паллетной агрегации.",
+          "Сегодня — файлами выгрузки из кабинета или через публичный REST API. Выгрузка отгрузок по CommerceML запланирована следующим этапом.",
       },
     ],
   },
@@ -805,10 +805,10 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       "Здесь собраны ответы о границах продукта и основных производственных сценариях. Детали внедрения проверяются на данных и оборудовании конкретного предприятия.",
     socialImage: SHARED_IMAGE,
     socialImageAlt: SHARED_IMAGE_ALT,
-    reviewedAt: REVIEWED,
+    reviewedAt: "2026-09-27",
     summary: [
-      "Markiro — производственная система маркировки: проверка кодов на линии, агрегация в короба с SSCC, печать этикеток, журнал и выгрузки для ГИС МТ.",
-      "Сейчас поддерживается товарная группа пива, сидра и слабоалкогольных напитков и уровень агрегации единица → короб.",
+      "Markiro — производственная система маркировки: проверка кодов на линии, агрегация в короба и паллеты с SSCC, печать этикеток, журнал и выгрузки для ГИС МТ.",
+      "Сейчас поддерживается товарная группа пива, сидра и слабоалкогольных напитков и уровни агрегации единица → короб → паллета.",
       "Станция работает на Windows без сети, кабинет — в браузере, киоск выбытия — на планшете или моноблоке.",
     ],
     relatedPaths: ["/markirovka-chestny-znak/", "/sscc-i-agregatsiya/", "/oflayn-rabota/"],
@@ -842,7 +842,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       {
         question: "Поддерживается ли паллетная агрегация?",
         answer:
-          "Пока нет. Текущий уровень — единица → короб: единицы собираются в короб с SSCC. Паллетная агрегация будет добавлена отдельным этапом.",
+          "Да. Единицы собираются в короб с SSCC, короба — в паллету со своим SSCC: на станции упаковки или на ТСД.",
       },
       {
         question: "Markiro работает со сканерами и принтерами?",
@@ -900,17 +900,17 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     path: "/en/",
     alternatePath: "/",
     locale: "en",
-    title: "Beer serialization and case aggregation software — Markiro",
+    title: "Serialization and aggregation software for Chestny ZNAK — Markiro",
     description:
-      "Serialization software for beer and low-alcohol beverages: code verification, case aggregation, and resilient workstation operation.",
+      "Code verification on the line, case and pallet aggregation, label printing and offline work. For juice, dairy, beer, cosmetics and other marked goods.",
     heading: "Serialization and aggregation. Keep the line moving.",
     navigationLabel: "Markiro",
     eyebrow: "Serialization / aggregation / traceability",
     introduction:
-      "A production system for beer, cider and low-alcohol beverages: code verification, packing, aggregation, and recoverable operations without stopping the line.",
+      "A production system for any marked goods: code verification, case and pallet aggregation, label printing, and station work without a network.",
     socialImage: SHARED_IMAGE,
     socialImageAlt: SHARED_IMAGE_ALT_EN,
-    reviewedAt: REVIEWED,
+    reviewedAt: "2026-09-26",
     summary: [],
     relatedPaths: [
       "/en/chestny-znak-serialization/",
@@ -934,7 +934,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       "Markiro turns serialization operations into one production flow: codes are verified, applied, connected to packs, and retained in the traceability log.",
     socialImage: SHARED_IMAGE,
     socialImageAlt: SHARED_IMAGE_ALT_EN,
-    reviewedAt: REVIEWED,
+    reviewedAt: "2026-09-27",
     summary: [
       "A serialized code is validated at the station the moment it is scanned: GS1 structure, GTIN check digit, GS separator, membership in the shift's product, and duplicates.",
       "Markiro does not order codes. The manufacturer obtains them from Chestny ZNAK; Markiro records their verification, application and packing.",
@@ -976,7 +976,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
         ],
         bullets: [
           "code validation results;",
-          "the relationship between an item and its case;",
+          "the relationship between an item and its case, and between a case and its pallet;",
           "errors and recovery actions;",
           "the synchronization state of local operations.",
         ],
@@ -1015,7 +1015,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
         heading: "Clear responsibility boundaries",
         paragraphs: [
           "Markiro controls the production workflow and its traceability. External exchanges follow an agreed contract, and the exact integration scope depends on the plant's operating process.",
-          "Markiro currently focuses on the product group “Beer, beverages made from beer and low-alcohol beverages”, including cider. The supported aggregation level is item-to-case; pallet aggregation will be added as a separate stage.",
+          "Markiro currently focuses on the product group “Beer, beverages made from beer and low-alcohol beverages”, including cider. The supported aggregation levels are item → case → pallet.",
         ],
       },
     ],
@@ -1056,18 +1056,18 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       "Markiro aggregates serialized beer and low-alcohol beverages into cases, validates SSCC relationships, and retains recovery history.",
     heading: "SSCC case aggregation for beer production",
     navigationLabel: "SSCC and aggregation",
-    eyebrow: "Item → case",
+    eyebrow: "Item → case → pallet",
     introduction:
       "Markiro currently focuses on production workflows for the Chestny ZNAK product group “Beer, beverages made from beer and low-alcohol beverages”, including cider. Additional product categories are being added gradually. Applicability to a specific product is checked against its TN VED EAEU and OKPD 2 codes and the actual line process.",
     socialImage: SHARED_IMAGE,
     socialImageAlt: SHARED_IMAGE_ALT_EN,
-    reviewedAt: REVIEWED,
+    reviewedAt: "2026-09-27",
     summary: [
-      "An SSCC is the 18-digit number of a logistics unit. In Markiro's current workflow it identifies a case, while a serialized code identifies the consumer unit inside it.",
+      "An SSCC is the 18-digit number of a logistics unit. Markiro assigns it to cases and pallets, while a serialized code identifies the consumer unit inside a case.",
       "The station receives an SSCC range in advance and consumes numbers sequentially; after a case is disassembled its number is never reused.",
       "Case contents are validated before closing: code format, order membership, duplicates, expected quantity and print confirmation.",
       "Aggregation continues offline and the queue is submitted idempotently; a cross-terminal conflict stays visible instead of being hidden.",
-      "The supported level is item-to-case; pallet aggregation will be added as a separate stage.",
+      "The supported levels are item → case → pallet.",
     ],
     relatedPaths: [
       "/en/chestny-znak-serialization/",
@@ -1083,7 +1083,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       {
         heading: "What an SSCC means in aggregation",
         paragraphs: [
-          "An SSCC is the 18-digit identifier of a logistics unit such as a case or pallet. In Markiro's current workflow it identifies a case. In a barcode and external exchange the SSCC can be represented with the GS1 Application Identifier (00), so the operator may see 20 digits while the system stores the normalized 18-digit value.",
+          "An SSCC is the 18-digit identifier of a logistics unit such as a case or pallet. Markiro assigns SSCCs to cases and pallets. In a barcode and external exchange the SSCC can be represented with the GS1 Application Identifier (00), so the operator may see 20 digits while the system stores the normalized 18-digit value.",
           "A serialized product code and an SSCC serve different purposes. The serialized code identifies an individual consumer unit; the SSCC connects a transport pack to its contents and its level in the packaging hierarchy.",
         ],
       },
@@ -1091,7 +1091,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
         heading: "How items become cases",
         paragraphs: [
           "The operator opens a case at the workstation and scans the serialized codes on bottles, cans, or other consumer packs. Markiro connects accepted codes to that open case and displays its fill state. After validating the contents, the operator closes the case and prints its label.",
-          "The currently supported level is the item-to-case chain. Pallet aggregation, where closed cases become items inside a pallet, will be added as a separate next stage.",
+          "The item → case → pallet chain is supported. Closed cases become items inside a pallet, and the pallet gets its own SSCC and label. Pallets are built on the packing workstation and on the handheld.",
         ],
         bullets: [
           "the workstation receives an available SSCC range and consumes numbers sequentially;",
@@ -1142,7 +1142,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
         bullets: [
           "product type and its TN VED EAEU and OKPD 2 codes;",
           "consumer and transport packaging formats;",
-          "items per case and, when relevant for future scope, the planned number of cases per pallet;",
+          "items per case and the number of cases per pallet;",
           "scanner and printer models;",
           "the source of production orders and SSCC ranges;",
           "the required exchange with 1C and the serialization system.",
@@ -1153,7 +1153,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       {
         question: "How does an SSCC differ from a serialized code?",
         answer:
-          "An SSCC is the 18-digit number of a logistics unit, a case in Markiro. A serialized code identifies one consumer unit, while the SSCC connects the case to its contents and its level in the packaging hierarchy.",
+          "An SSCC is the 18-digit number of a logistics unit, a case or a pallet in Markiro. A serialized code identifies one consumer unit, while the SSCC connects the case or pallet to its contents and its level in the packaging hierarchy.",
       },
       {
         question: "Where does the station get SSCC numbers?",
@@ -1168,7 +1168,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       {
         question: "Is pallet aggregation supported?",
         answer:
-          "Not yet. The currently supported level is item-to-case. Pallet aggregation, where closed cases become items inside a pallet, will be added as a separate stage.",
+          "Yes. Closed cases are aggregated into a pallet with its own SSCC and label, on the packing workstation or on the handheld. The aggregation chain is item → case → pallet.",
       },
     ],
   },
@@ -1421,7 +1421,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       "A 1C integration is a controlled exchange boundary, not direct access from the accounting system to a workstation. Markiro validates incoming data and returns an explicit processing result.",
     socialImage: SHARED_IMAGE,
     socialImageAlt: SHARED_IMAGE_ALT_EN,
-    reviewedAt: REVIEWED,
+    reviewedAt: "2026-09-27",
     summary: [
       "1C connects to Markiro through the standard “site exchange” protocol over CommerceML; a typical configuration needs no customization.",
       "Prices, GTIN barcodes and product photos arrive from 1C; cards link automatically by GTIN, unknown items wait for a human decision.",
@@ -1487,7 +1487,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       {
         heading: "What the exchange does not cover today",
         paragraphs: [
-          "Production shift results are transferred as export files: a shift report in TXT and CSV, and an aggregation XML for GIS MT. For other plant systems there is a public REST API with OpenAPI documentation and access keys with read or write scopes. Shipment export over CommerceML is planned after pallet aggregation.",
+          "Production shift results are transferred as export files: a shift report in TXT and CSV, and an aggregation XML for GIS MT. For other plant systems there is a public REST API with OpenAPI documentation and access keys with read or write scopes. Shipment export over CommerceML is planned as the next stage.",
         ],
       },
       {
@@ -1516,7 +1516,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       {
         question: "Can shift data be transferred to 1C?",
         answer:
-          "Today as export files from the cabinet or through the public REST API. Shipment export over CommerceML is planned as the next stage after pallet aggregation.",
+          "Today as export files from the cabinet or through the public REST API. Shipment export over CommerceML is planned as the next stage.",
       },
     ],
   },
@@ -1642,10 +1642,10 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       "These answers define the product boundaries and core production workflows. Implementation details are validated against each plant's data and equipment.",
     socialImage: SHARED_IMAGE,
     socialImageAlt: SHARED_IMAGE_ALT_EN,
-    reviewedAt: REVIEWED,
+    reviewedAt: "2026-09-27",
     summary: [
-      "Markiro is a production serialization system: code validation on the line, item-to-case aggregation with SSCC, label printing, a journal and exports for GIS MT.",
-      "The supported product group is currently beer, cider and low-alcohol beverages, and the supported aggregation level is item-to-case.",
+      "Markiro is a production serialization system: code validation on the line, case and pallet aggregation with SSCC, label printing, a journal and exports for GIS MT.",
+      "The supported product group is currently beer, cider and low-alcohol beverages, and the supported aggregation levels are item → case → pallet.",
       "The station runs on Windows without a network, the cabinet runs in a browser, and the disposal kiosk runs on a tablet or an all-in-one.",
     ],
     relatedPaths: [
@@ -1683,7 +1683,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       {
         question: "Is pallet aggregation supported?",
         answer:
-          "Not yet. The current level is item-to-case: items are aggregated into a case with an SSCC. Pallet aggregation will be added as a separate stage.",
+          "Yes. Items are aggregated into a case with an SSCC, and cases into a pallet with its own SSCC, on the packing workstation or on the handheld.",
       },
       {
         question: "Does Markiro work with scanners and printers?",

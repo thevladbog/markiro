@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -90,15 +90,20 @@ const routes = [
   ...verificationRoutes,
 ];
 const MARKIRO_MODULE_LAYOUT = [
-  { x: "14", y: "14", color: "rgb(19, 18, 22)" },
-  { x: "14", y: "26", color: "rgb(19, 18, 22)" },
-  { x: "14", y: "38", color: "rgb(19, 18, 22)" },
-  { x: "26", y: "22", color: "rgb(19, 18, 22)" },
-  { x: "38", y: "14", color: "rgb(19, 18, 22)" },
-  { x: "38", y: "26", color: "rgb(19, 18, 22)" },
-  { x: "38", y: "38", color: "rgb(19, 18, 22)" },
-  { x: "26", y: "42", color: "rgb(61, 220, 122)" },
+  { x: "14", y: "14", accent: false },
+  { x: "14", y: "26", accent: false },
+  { x: "14", y: "38", accent: false },
+  { x: "26", y: "22", accent: false },
+  { x: "38", y: "14", accent: false },
+  { x: "38", y: "26", accent: false },
+  { x: "38", y: "38", accent: false },
+  { x: "26", y: "42", accent: true },
 ];
+
+const BRAND_COLORS = {
+  dark: { module: "rgb(19, 18, 22)", accent: "rgb(61, 220, 122)", tile: "rgb(250, 250, 248)" },
+  light: { module: "rgb(250, 250, 248)", accent: "rgb(15, 175, 86)", tile: "rgb(23, 22, 26)" },
+} as const;
 
 test("cookie panel reveals granular controls only after an explicit settings action", async ({
   page,
@@ -367,12 +372,15 @@ test("article hero keeps a clear heading hierarchy", async ({ page }) => {
   expect(sizes.heading).toBeGreaterThan(sizes.lead * 1.5);
 });
 
-for (const [route, wordmark] of [
-  ["/", "маркиро"],
-  ["/en/", "MARKIRO"],
+for (const [route, wordmark, theme] of [
+  ["/", "маркиро", "light"],
+  ["/en/", "MARKIRO", "light"],
+  ["/sscc-i-agregatsiya/", "маркиро", "dark"],
+  ["/en/sscc-and-aggregation/", "MARKIRO", "dark"],
 ] as const) {
   test(`${route} renders the localized exact brand in its header and footer`, async ({ page }) => {
     await page.goto(route);
+    const colors = BRAND_COLORS[theme as "light" | "dark"];
     for (const brand of [page.locator("header .brand-mark"), page.locator("footer .brand-mark")]) {
       await expect(brand.locator(".brand-mark__word")).toHaveText(wordmark);
       await expect(brand.locator("[data-brand-module]")).toHaveCount(8);
@@ -390,17 +398,17 @@ for (const [route, wordmark] of [
           }),
         ),
       ).toEqual(
-        MARKIRO_MODULE_LAYOUT.map(({ x, y, color }) => ({
+        MARKIRO_MODULE_LAYOUT.map(({ x, y, accent }) => ({
           x,
           y,
           width: "8",
           height: "8",
-          color,
+          color: accent ? colors.accent : colors.module,
         })),
       );
       expect(
         await brand.locator(".brand-mark__tile").evaluate((tile) => getComputedStyle(tile).fill),
-      ).toBe("rgb(250, 250, 248)");
+      ).toBe(colors.tile);
       await expect(brand.locator("[data-brand-accent]")).toHaveCount(1);
       await expect(brand.locator("[data-brand-accent]")).toHaveAttribute("x", "26");
       await expect(brand.locator("[data-brand-accent]")).toHaveAttribute("y", "42");
@@ -482,16 +490,25 @@ for (const [route, terms] of [
     await page.goto(route);
     const rows = page.locator(".legal-definitions > div");
     await expect(rows).toHaveCount(terms.length);
+    // Each entry is one run-in paragraph: the term and its dash end on the row where the
+    // definition's first line starts, so compare line boxes, not the wrapped elements' boxes.
+    const lineBox = (selector: string, line: "first" | "last", index: number) =>
+      rows
+        .nth(index)
+        .locator(selector)
+        .evaluate((element, which) => {
+          const lines = [...element.getClientRects()];
+          const rect = which === "first" ? lines[0] : lines.at(-1);
+          return rect ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height } : null;
+        }, line);
     for (const [index, term] of terms.entries()) {
       await expect(rows.nth(index).locator("dt")).toHaveText(`${term} —`);
-      const definitionBox = await rows.nth(index).locator("dd").boundingBox();
-      const termBox = await rows.nth(index).locator("dt").boundingBox();
-      expect(definitionBox).not.toBeNull();
-      expect(termBox).not.toBeNull();
-      if (!definitionBox || !termBox) throw new Error(`Missing definition geometry for ${term}`);
-      expect(definitionBox.x).toBeGreaterThanOrEqual(termBox.x + termBox.width - 1);
-      expect(definitionBox.y).toBeLessThan(termBox.y + termBox.height);
-      expect(termBox.y).toBeLessThan(definitionBox.y + definitionBox.height);
+      const definitionLine = await lineBox("dd", "first", index);
+      const termLine = await lineBox("dt", "last", index);
+      if (!definitionLine || !termLine) throw new Error(`Missing definition geometry for ${term}`);
+      expect(definitionLine.x).toBeGreaterThanOrEqual(termLine.x + termLine.width - 1);
+      expect(definitionLine.y).toBeLessThan(termLine.y + termLine.height);
+      expect(termLine.y).toBeLessThan(definitionLine.y + definitionLine.height);
     }
   });
 }
@@ -688,4 +705,229 @@ test.describe("film page", () => {
     await expect(page.locator("#line .film-chapter__poster img")).toBeVisible();
     await context.close();
   });
+});
+
+test.describe("home page", () => {
+  test("cookie panel buttons keep readable hover colors on the light home", async ({ page }) => {
+    await page.goto("/");
+    const panel = page.locator("[data-consent-panel]");
+    await expect(panel).toBeVisible();
+
+    const reject = page.locator("[data-consent-reject]");
+    await reject.hover();
+    // The resting background is already transparent, so polling it alone could pass before the
+    // hover style actually applied. Poll the border color (which only changes on hover) first to
+    // synchronize on the hover state, then assert the background it implies.
+    await expect
+      .poll(() => reject.evaluate((element) => getComputedStyle(element).borderTopColor))
+      .toBe("rgb(142, 139, 131)");
+    await expect
+      .poll(() => reject.evaluate((element) => getComputedStyle(element).backgroundColor))
+      .toBe("rgba(0, 0, 0, 0)");
+
+    const accept = page.locator("[data-consent-accept]");
+    await accept.hover();
+    await expect
+      .poll(() => accept.evaluate((element) => getComputedStyle(element).backgroundColor))
+      .toBe("rgb(107, 229, 153)");
+  });
+
+  test("hotspots show their screen on hover and focus, and Escape hides it", async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(isMobile, "phones get the card strip instead of hotspots");
+    await page.goto("/");
+    await page.locator("[data-consent-reject]").click();
+    const spot = page.locator("[data-map-spot]").filter({ hasText: "Склад" });
+    const tip = spot.locator('[role="tooltip"]');
+    await expect(tip).toBeHidden();
+    await spot.locator("a").hover();
+    await expect(tip).toBeVisible();
+    await expect(tip.locator("img")).toHaveAttribute("alt", /ТСД/u);
+    await page.mouse.move(1, 1);
+    await expect(tip).toBeHidden();
+    await spot.locator("a").focus();
+    await expect(tip).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(tip).toBeHidden();
+  });
+
+  test("the warehouse hotspot or card leads to the handheld row", async ({ page, isMobile }) => {
+    await page.goto("/");
+    await page.locator("[data-consent-reject]").click();
+    const link = isMobile
+      ? page.locator(".home-hero__strip a").filter({ hasText: "Склад" })
+      : page.locator("[data-map-spot]").filter({ hasText: "Склад" }).locator("a");
+    await link.click();
+    await expect(page).toHaveURL(/#product-handheld$/u);
+    await expect(page.locator("#product-handheld")).toBeInViewport();
+  });
+
+  test("the kiosk and integrations cards line up their frames and links", async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(isMobile, "the cards stack on phones");
+    const box = (selector: string) =>
+      page.locator(selector).evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        return { top: Math.round(rect.top), bottom: Math.round(rect.bottom) };
+      });
+    for (const width of [1440, 1024]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto("/");
+      expect(await box("#product-integrations"), `${width} card`).toEqual(
+        await box("#product-kiosk"),
+      );
+      for (const part of [".screen-frame", ".text-link"]) {
+        const kiosk = await box(`#product-kiosk ${part}`);
+        const integrations = await box(`#product-integrations ${part}`);
+        expect(integrations.top, `${width} ${part}`).toBe(kiosk.top);
+      }
+    }
+  });
+
+  test("loads no 3D code", async ({ page }) => {
+    const scripts: Promise<string>[] = [];
+    page.on("response", (response) => {
+      if (response.request().resourceType() === "script") scripts.push(response.text());
+    });
+    await page.goto("/", { waitUntil: "networkidle" });
+    await page.evaluate(() =>
+      window.scrollTo({ top: document.body.scrollHeight, behavior: "instant" }),
+    );
+    await page.waitForLoadState("networkidle");
+    const bodies = await Promise.all(scripts);
+    expect(bodies.length).toBeGreaterThan(0);
+    for (const body of bodies) expect(body).not.toContain("WebGLRenderer");
+  });
+
+  for (const viewport of [
+    { width: 390, height: 844 },
+    { width: 412, height: 915 },
+    { width: 1440, height: 900 },
+  ] as const) {
+    test(`fits ${viewport.width} px without horizontal scrolling`, async ({ page }) => {
+      await page.setViewportSize(viewport);
+      for (const route of ["/", "/en/"]) {
+        await page.goto(route, { waitUntil: "networkidle" });
+        expect(
+          await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+          route,
+        ).toBe(true);
+      }
+    });
+  }
+});
+
+test.describe("document pages", () => {
+  test("page and section titles render at heading size", async ({ page }) => {
+    for (const [route, selector, minimum] of [
+      ["/stati/", "h1", 40],
+      ["/instruktsii/stantsiya-vkhod-i-start-smeny/", "h1", 40],
+      ["/instruktsii/stantsiya-vkhod-i-start-smeny/", ".legal-document h2", 24],
+    ] as const) {
+      await page.goto(route);
+      const size = await page
+        .locator(selector)
+        .first()
+        .evaluate((element) => parseFloat(getComputedStyle(element).fontSize));
+      expect(size, `${route} ${selector}`).toBeGreaterThanOrEqual(minimum);
+    }
+  });
+
+  test("the release card keeps its padding and answers wrap to the left edge", async ({ page }) => {
+    await page.goto("/instruktsii/stantsiya-vkhod-i-start-smeny/");
+    const padding = await page.locator("section.legal-artifacts").evaluate((element) => {
+      const style = getComputedStyle(element);
+      return [style.paddingTop, style.paddingRight, style.paddingBottom, style.paddingLeft];
+    });
+    for (const side of padding) expect(parseFloat(side)).toBeGreaterThanOrEqual(16);
+
+    const entries = await page.locator(".legal-definitions > div").evaluateAll((items) =>
+      items.map((item) => ({
+        left: Math.round(item.getBoundingClientRect().left),
+        wrapped: [...(item.querySelector("dd")?.getClientRects() ?? [])]
+          .slice(1)
+          .map((rect) => Math.round(rect.left)),
+      })),
+    );
+    expect(entries.some((entry) => entry.wrapped.length > 0)).toBe(true);
+    for (const entry of entries) for (const left of entry.wrapped) expect(left).toBe(entry.left);
+  });
+});
+
+test.describe("header", () => {
+  // The suite builds with PUBLIC_PHONE set, so the header carries the phone link. At every width
+  // either the whole navigation fits on one line or the header folds it into the menu: nothing is
+  // cut off and no link or button breaks onto a second line.
+  const problems = (page: Page) =>
+    page.locator("[data-header]").evaluate((header) => {
+      const edge = header.getBoundingClientRect();
+      const shown = (element: Element) => {
+        const rect = element.getBoundingClientRect();
+        return (
+          rect.width > 0 && rect.height > 0 && getComputedStyle(element).visibility !== "hidden"
+        );
+      };
+      const label = (element: Element) => element.textContent?.trim() || element.className;
+      const cutOff = [...header.querySelectorAll("a, button, .language-switch")]
+        .filter(shown)
+        .map((element) => {
+          const rect = element.getBoundingClientRect();
+          const past = Math.max(
+            edge.left - rect.left,
+            rect.right - edge.right,
+            rect.right - innerWidth,
+          );
+          return { label: label(element), past: Math.round(past) };
+        })
+        .filter((item) => item.past > 0);
+      const wrapped = [...header.querySelectorAll(".landing-nav a, .landing-header__cta")]
+        .filter(shown)
+        .filter((element) => {
+          const range = document.createRange();
+          range.selectNodeContents(element);
+          const tops = [...range.getClientRects()].map((rect) => rect.top);
+          return tops.length > 0 && Math.max(...tops) - Math.min(...tops) > 4;
+        })
+        .map(label);
+      return { cutOff, wrapped };
+    });
+
+  // 768-880 px fold into the menu; 1024 px is the narrowest width that shows the whole row and
+  // 1200 px the first one with the full spacing.
+  for (const width of [768, 800, 840, 880, 1024, 1200] as const) {
+    test(`fits ${width} px with the phone number on light and dark pages`, async ({
+      page,
+      isMobile,
+    }) => {
+      test.skip(isMobile, "the width is set explicitly, one project covers it");
+      await page.setViewportSize({ width, height: 900 });
+      for (const route of [
+        "/",
+        "/en/",
+        "/markirovka-chestny-znak/",
+        "/en/chestny-znak-serialization/",
+      ]) {
+        await page.goto(route);
+        const phone = page.locator('[data-header] a[href^="tel:"][data-placement="header"]');
+        await expect(phone, route).toHaveCount(1);
+        expect(await problems(page), `${route} at ${width} px`).toEqual({
+          cutOff: [],
+          wrapped: [],
+        });
+        const trigger = page.locator("[data-menu-trigger]");
+        if (await trigger.isVisible()) {
+          await trigger.click();
+          await expect(phone, `${route} at ${width} px, menu open`).toBeVisible();
+          expect(await problems(page), `${route} at ${width} px, menu open`).toEqual({
+            cutOff: [],
+            wrapped: [],
+          });
+        }
+      }
+    });
+  }
 });

@@ -29,11 +29,11 @@ export const BEER_CASE_AGGREGATION_ARTICLE = {
   socialImage: "/og-beer-case-aggregation.jpg",
   socialImageAlt: "Markiro — агрегация пива в короба на производственной линии",
   publishedAt: "2026-08-26",
-  modifiedAt: "2026-08-26",
+  modifiedAt: "2026-09-27",
   authorName: "Команда Markiro",
   readingTimeMinutes: 8,
   ogType: "article",
-  lastModified: "2026-08-26",
+  lastModified: "2026-09-27",
 } as const satisfies ArticlePageDefinition;
 
 export const BEER_MARKING_2026_ARTICLE = {
@@ -51,11 +51,11 @@ export const BEER_MARKING_2026_ARTICLE = {
   socialImage: "/og-beer-marking-2026.jpg",
   socialImageAlt: "Markiro — проверка готовности линии маркировки пива в 2026 году",
   publishedAt: "2026-08-26",
-  modifiedAt: "2026-08-26",
+  modifiedAt: "2026-09-27",
   authorName: "Команда Markiro",
   readingTimeMinutes: 6,
   ogType: "article",
-  lastModified: "2026-08-26",
+  lastModified: "2026-09-27",
 } as const satisfies ArticlePageDefinition;
 
 export const BEER_CASE_AGGREGATION_ARTICLE_EN = {
@@ -73,11 +73,11 @@ export const BEER_CASE_AGGREGATION_ARTICLE_EN = {
   socialImage: "/og-beer-case-aggregation.jpg",
   socialImageAlt: "Markiro — beer case aggregation on a production line",
   publishedAt: "2026-08-26",
-  modifiedAt: "2026-08-26",
+  modifiedAt: "2026-09-27",
   authorName: "Markiro team",
   readingTimeMinutes: 7,
   ogType: "article",
-  lastModified: "2026-08-26",
+  lastModified: "2026-09-27",
 } as const satisfies ArticlePageDefinition;
 
 export const BEER_MARKING_2026_ARTICLE_EN = {
@@ -95,11 +95,11 @@ export const BEER_MARKING_2026_ARTICLE_EN = {
   socialImage: "/og-beer-marking-2026.jpg",
   socialImageAlt: "Markiro — production-line readiness for beer marking in Russia in 2026",
   publishedAt: "2026-08-26",
-  modifiedAt: "2026-08-26",
+  modifiedAt: "2026-09-27",
   authorName: "Markiro team",
   readingTimeMinutes: 6,
   ogType: "article",
-  lastModified: "2026-08-26",
+  lastModified: "2026-09-27",
 } as const satisfies ArticlePageDefinition;
 
 export const BEER_DATAMATRIX_DIAGNOSTICS_ARTICLE = {
@@ -117,11 +117,11 @@ export const BEER_DATAMATRIX_DIAGNOSTICS_ARTICLE = {
   socialImage: "/og-beer-datamatrix-diagnostics.jpg",
   socialImageAlt: "Markiro — диагностика чтения Data Matrix на бутылке пива",
   publishedAt: "2026-08-26",
-  modifiedAt: "2026-08-26",
+  modifiedAt: "2026-09-27",
   authorName: "Команда Markiro",
   readingTimeMinutes: 9,
   ogType: "article",
-  lastModified: "2026-08-26",
+  lastModified: "2026-09-27",
 } as const satisfies ArticlePageDefinition;
 
 export const BEER_DATAMATRIX_DIAGNOSTICS_ARTICLE_EN = {
@@ -139,11 +139,11 @@ export const BEER_DATAMATRIX_DIAGNOSTICS_ARTICLE_EN = {
   socialImage: "/og-beer-datamatrix-diagnostics.jpg",
   socialImageAlt: "Markiro — diagnosing a Data Matrix scan on a beer bottle",
   publishedAt: "2026-08-26",
-  modifiedAt: "2026-08-26",
+  modifiedAt: "2026-09-27",
   authorName: "Markiro team",
   readingTimeMinutes: 9,
   ogType: "article",
-  lastModified: "2026-08-26",
+  lastModified: "2026-09-27",
 } as const satisfies ArticlePageDefinition;
 
 export const BEER_MARKING_EQUIPMENT_ARTICLE = {
@@ -161,11 +161,11 @@ export const BEER_MARKING_EQUIPMENT_ARTICLE = {
   socialImage: "/og-beer-marking-equipment.jpg",
   socialImageAlt: "Markiro — оборудование линии маркировки пива",
   publishedAt: "2026-08-26",
-  modifiedAt: "2026-08-26",
+  modifiedAt: "2026-09-27",
   authorName: "Команда Markiro",
   readingTimeMinutes: 10,
   ogType: "article",
-  lastModified: "2026-08-26",
+  lastModified: "2026-09-27",
 } as const satisfies ArticlePageDefinition;
 
 export const BEER_MARKING_EQUIPMENT_ARTICLE_EN = {
@@ -183,11 +183,11 @@ export const BEER_MARKING_EQUIPMENT_ARTICLE_EN = {
   socialImage: "/og-beer-marking-equipment.jpg",
   socialImageAlt: "Markiro — beer marking line equipment for Russia",
   publishedAt: "2026-08-26",
-  modifiedAt: "2026-08-26",
+  modifiedAt: "2026-09-27",
   authorName: "Markiro team",
   readingTimeMinutes: 10,
   ogType: "article",
-  lastModified: "2026-08-26",
+  lastModified: "2026-09-27",
 } as const satisfies ArticlePageDefinition;
 
 export const BEER_MARKING_COST_ARTICLE = {
@@ -205,11 +205,11 @@ export const BEER_MARKING_COST_ARTICLE = {
   socialImage: "/og-beer-marking-cost.jpg",
   socialImageAlt: "Markiro — доступное рабочее место маркировки для небольшой пивоварни",
   publishedAt: "2026-08-26",
-  modifiedAt: "2026-08-26",
+  modifiedAt: "2026-09-27",
   authorName: "Команда Markiro",
   readingTimeMinutes: 9,
   ogType: "article",
-  lastModified: "2026-08-26",
+  lastModified: "2026-09-27",
 } as const satisfies ArticlePageDefinition;
 
 export const BEER_MARKING_COST_ARTICLE_EN = {
@@ -227,11 +227,11 @@ export const BEER_MARKING_COST_ARTICLE_EN = {
   socialImage: "/og-beer-marking-cost.jpg",
   socialImageAlt: "Markiro — an accessible beer marking workstation for a smaller producer",
   publishedAt: "2026-08-26",
-  modifiedAt: "2026-08-26",
+  modifiedAt: "2026-09-27",
   authorName: "Markiro team",
   readingTimeMinutes: 9,
   ogType: "article",
-  lastModified: "2026-08-26",
+  lastModified: "2026-09-27",
 } as const satisfies ArticlePageDefinition;
 
 export const BEER_DATAMATRIX_APPLICATION_ARTICLE = {
@@ -249,11 +249,11 @@ export const BEER_DATAMATRIX_APPLICATION_ARTICLE = {
   socialImage: "/og-beer-datamatrix-application.jpg",
   socialImageAlt: "Markiro — сравнение способов нанесения Data Matrix на пиво",
   publishedAt: "2026-08-26",
-  modifiedAt: "2026-08-26",
+  modifiedAt: "2026-09-27",
   authorName: "Команда Markiro",
   readingTimeMinutes: 10,
   ogType: "article",
-  lastModified: "2026-08-26",
+  lastModified: "2026-09-27",
 } as const satisfies ArticlePageDefinition;
 
 export const BEER_DATAMATRIX_APPLICATION_ARTICLE_EN = {
@@ -271,11 +271,11 @@ export const BEER_DATAMATRIX_APPLICATION_ARTICLE_EN = {
   socialImage: "/og-beer-datamatrix-application.jpg",
   socialImageAlt: "Markiro — comparison of Data Matrix application methods for beer",
   publishedAt: "2026-08-26",
-  modifiedAt: "2026-08-26",
+  modifiedAt: "2026-09-27",
   authorName: "Markiro team",
   readingTimeMinutes: 10,
   ogType: "article",
-  lastModified: "2026-08-26",
+  lastModified: "2026-09-27",
 } as const satisfies ArticlePageDefinition;
 
 export const OFFLINE_BEER_MARKING_ARTICLE = {
@@ -293,11 +293,11 @@ export const OFFLINE_BEER_MARKING_ARTICLE = {
   socialImage: "/og-offline-beer-marking.jpg",
   socialImageAlt: "Markiro — локальная работа станции маркировки пива при потере сети",
   publishedAt: "2026-08-26",
-  modifiedAt: "2026-08-26",
+  modifiedAt: "2026-09-27",
   authorName: "Команда Markiro",
   readingTimeMinutes: 10,
   ogType: "article",
-  lastModified: "2026-08-26",
+  lastModified: "2026-09-27",
 } as const satisfies ArticlePageDefinition;
 
 export const OFFLINE_BEER_MARKING_ARTICLE_EN = {
@@ -315,11 +315,11 @@ export const OFFLINE_BEER_MARKING_ARTICLE_EN = {
   socialImage: "/og-offline-beer-marking.jpg",
   socialImageAlt: "Markiro — a beer marking station operating locally during a network outage",
   publishedAt: "2026-08-26",
-  modifiedAt: "2026-08-26",
+  modifiedAt: "2026-09-27",
   authorName: "Markiro team",
   readingTimeMinutes: 10,
   ogType: "article",
-  lastModified: "2026-08-26",
+  lastModified: "2026-09-27",
 } as const satisfies ArticlePageDefinition;
 
 export const DUPLICATE_BEER_MARKING_ARTICLE = {
@@ -337,11 +337,11 @@ export const DUPLICATE_BEER_MARKING_ARTICLE = {
   socialImage: "/og-duplicate-beer-marking.jpg",
   socialImageAlt: "Markiro — оператор выясняет причину дубликата кода маркировки пива",
   publishedAt: "2026-08-27",
-  modifiedAt: "2026-08-27",
+  modifiedAt: "2026-09-27",
   authorName: "Команда Markiro",
   readingTimeMinutes: 11,
   ogType: "article",
-  lastModified: "2026-08-27",
+  lastModified: "2026-09-27",
 } as const satisfies ArticlePageDefinition;
 
 export const DUPLICATE_BEER_MARKING_ARTICLE_EN = {
@@ -359,11 +359,11 @@ export const DUPLICATE_BEER_MARKING_ARTICLE_EN = {
   socialImage: "/og-duplicate-beer-marking.jpg",
   socialImageAlt: "Markiro — an operator diagnosing a duplicate beer marking code",
   publishedAt: "2026-08-27",
-  modifiedAt: "2026-08-27",
+  modifiedAt: "2026-09-27",
   authorName: "Markiro team",
   readingTimeMinutes: 11,
   ogType: "article",
-  lastModified: "2026-08-27",
+  lastModified: "2026-09-27",
 } as const satisfies ArticlePageDefinition;
 
 export const BEER_APPLICATION_REPORT_ARTICLE = {

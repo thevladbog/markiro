@@ -27,7 +27,10 @@
     "test:tenant-equipment": "playwright test --config tenant-equipment.playwright.config.ts",
     "test:service-periods": "playwright test --config service-periods.playwright.config.ts",
     "test:catalog-regulatory": "playwright test --config catalog-regulatory.playwright.config.ts",
-    "render:film-posters": "node scripts/render-film-posters.mjs"
+    "render:film-posters": "node scripts/render-film-posters.mjs",
+    "render:home-images": "node scripts/render-home-images.mjs",
+    "render:instruction-covers": "node scripts/render-instruction-covers.mjs",
+    "capture:station-screens": "node scripts/capture-station-screens.mjs"
   },
   "devDependencies": {
     "@playwright/test": "1.62.0",

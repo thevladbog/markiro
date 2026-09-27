@@ -8,6 +8,7 @@ import { JSDOM } from "jsdom";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { findFilmPage } from "../src/content/film";
+import { projectHomeMap } from "../src/scripts/film/world/home-map";
 
 const appRoot = fileURLToPath(new URL("../", import.meta.url));
 const outputDirectory = mkdtempSync(path.join(tmpdir(), "markiro-landing-render-"));
@@ -167,7 +168,7 @@ describe("rendered landing page", () => {
       articleDocument.querySelector('script[type="application/ld+json"]')?.textContent ?? "",
     ) as { "@graph": Array<Record<string, unknown>> };
     expect(graph["@graph"].find((entry) => entry["@type"] === "Article")).toMatchObject({
-      dateModified: "2026-08-26",
+      dateModified: "2026-09-27",
       datePublished: "2026-08-26",
       headline: "Агрегация пива в короба: как не остановить производственную линию",
       image: "https://markiro.app/og-beer-case-aggregation.jpg",
@@ -175,10 +176,11 @@ describe("rendered landing page", () => {
     });
 
     const bodyText = articleDocument.body.textContent?.replace(/\s+/g, " ") ?? "";
-    expect(bodyText).toContain("Текущий контур Markiro — «единица → короб → SSCC»");
-    expect(bodyText).toContain("Паллетная агрегация относится к следующему этапу");
+    expect(bodyText).toContain("Текущий контур Markiro — «единица → короб → паллета»");
+    expect(bodyText).toContain("У короба и у паллеты свой SSCC");
     expect(bodyText).toContain("Новые товарные группы добавляются поэтапно");
     expect(bodyText).not.toContain("внедряется для производителей");
+    expect(bodyText).not.toContain("относится к следующему этапу");
     expect(
       articleDocument.querySelector('a[href="https://www.gs1ru.org/gs1_system/capture/sscc/"]'),
     ).not.toBeNull();
@@ -223,7 +225,7 @@ describe("rendered landing page", () => {
       articleDocument.querySelector('script[type="application/ld+json"]')?.textContent ?? "",
     ) as { "@graph": Array<Record<string, unknown>> };
     expect(graph["@graph"].find((entry) => entry["@type"] === "Article")).toMatchObject({
-      dateModified: "2026-08-26",
+      dateModified: "2026-09-27",
       datePublished: "2026-08-26",
       headline: "Маркировка пива в 2026 году: что проверить производителю на линии",
       image: "https://markiro.app/og-beer-marking-2026.jpg",
@@ -233,9 +235,10 @@ describe("rendered landing page", () => {
     const bodyText = articleDocument.body.textContent?.replace(/\s+/g, " ") ?? "";
     expect(bodyText).toContain("Адаптационный период не отменяет требования");
     expect(bodyText).toContain("отсутствие регистрации, МОД или подключения к ЭДО");
-    expect(bodyText).toContain("Текущий контур Markiro — «единица → короб → SSCC»");
-    expect(bodyText).toContain("Паллетная агрегация относится к следующему этапу");
+    expect(bodyText).toContain("Текущий контур Markiro — «единица → короб → паллета»");
+    expect(bodyText).toContain("У короба и у паллеты свой SSCC");
     expect(bodyText).not.toContain("требования отложены для всех");
+    expect(bodyText).not.toContain("относится к следующему этапу");
 
     for (const href of [
       "https://markirovka.ru/knowledge/tovarnye-gruppy/pivo-pivniye-napitki/perenos-srokov-po-ekzemplyarnomu-uchetu-piva",
@@ -377,7 +380,7 @@ describe("rendered landing page", () => {
         localizedDocument.querySelector('script[type="application/ld+json"]')?.textContent ?? "",
       ) as { "@graph": Array<Record<string, unknown>> };
       expect(graph["@graph"].find((entry) => entry["@type"] === "Article")).toMatchObject({
-        dateModified: "2026-08-26",
+        dateModified: "2026-09-27",
         datePublished: "2026-08-26",
         inLanguage: article.lang,
       });
@@ -454,7 +457,7 @@ describe("rendered landing page", () => {
         localizedDocument.querySelector('script[type="application/ld+json"]')?.textContent ?? "",
       ) as { "@graph": Array<Record<string, unknown>> };
       expect(graph["@graph"].find((entry) => entry["@type"] === "Article")).toMatchObject({
-        dateModified: "2026-08-26",
+        dateModified: "2026-09-27",
         datePublished: "2026-08-26",
         inLanguage: article.lang,
       });
@@ -464,7 +467,7 @@ describe("rendered landing page", () => {
       expect(bodyText).toMatch(/ZPL.*TSPL|ZPL and TSPL/);
       expect(bodyText).toMatch(/1\.5 \(C\)|class 1\.5 \(C\)/);
       expect(bodyText).toMatch(/совместимость.*конкретн|compatibility.*facility/i);
-      expect(bodyText).toMatch(/item → case → SSCC|единица → короб → SSCC/);
+      expect(bodyText).toMatch(/item → case → pallet|единица → короб → паллета/);
       expect(bodyText).not.toMatch(/универсальный обязательный список|universal mandatory list/i);
 
       for (const href of [
@@ -537,7 +540,7 @@ describe("rendered landing page", () => {
         localizedDocument.querySelector('script[type="application/ld+json"]')?.textContent ?? "",
       ) as { "@graph": Array<Record<string, unknown>> };
       expect(graph["@graph"].find((entry) => entry["@type"] === "Article")).toMatchObject({
-        dateModified: "2026-08-26",
+        dateModified: "2026-09-27",
         datePublished: "2026-08-26",
         inLanguage: article.lang,
       });
@@ -547,7 +550,7 @@ describe("rendered landing page", () => {
       expect(bodyText).toMatch(/50 копеек.*61 копейку|RUB 0\.50.*RUB 0\.61/);
       expect(bodyText).toMatch(/одной станции|one workstation/i);
       expect(bodyText).toMatch(/совместим|compatib/i);
-      expect(bodyText).toMatch(/единица → короб → SSCC|item → case → SSCC/);
+      expect(bodyText).toMatch(/единица → короб → паллета|item → case → pallet/);
       expect(bodyText).not.toMatch(/Markiro (?:стоит|от \d|costs|from RUB)/i);
 
       for (const href of [
@@ -570,7 +573,7 @@ describe("rendered landing page", () => {
         alternateLang: "en",
         diagramPrefix: "nanesenie-data-matrix-pivo",
         methods: /этикетк.*типограф.*прям/i,
-        boundary: "единица → короб → SSCC",
+        boundary: "единица → короб → паллета",
         backlinkRoute: "stati/oborudovanie-dlya-markirovki-piva",
       },
       {
@@ -581,7 +584,7 @@ describe("rendered landing page", () => {
         alternateLang: "ru",
         diagramPrefix: "beer-datamatrix-application",
         methods: /label.*preprint.*direct print/i,
-        boundary: "item → case → SSCC",
+        boundary: "item → case → pallet",
         backlinkRoute: "en/articles/beer-marking-line-equipment",
       },
     ] as const) {
@@ -624,7 +627,7 @@ describe("rendered landing page", () => {
         localizedDocument.querySelector('script[type="application/ld+json"]')?.textContent ?? "",
       ) as { "@graph": Array<Record<string, unknown>> };
       expect(graph["@graph"].find((entry) => entry["@type"] === "Article")).toMatchObject({
-        dateModified: "2026-08-26",
+        dateModified: "2026-09-27",
         datePublished: "2026-08-26",
         image: "https://markiro.app/og-beer-datamatrix-application.jpg",
         inLanguage: article.lang,
@@ -662,7 +665,7 @@ describe("rendered landing page", () => {
         alternate: "/en/articles/offline-beer-marking-russia/",
         alternateLang: "en",
         diagramPrefix: "markirovka-piva-offline",
-        localBoundary: "единица → короб → SSCC",
+        localBoundary: "единица → короб → паллета",
         durableClaim: /журнал.*перезапуск|перезапуск.*журнал/i,
         noFalseSuccess: /не.*зелёный успех|не показывать ложный успех/i,
         backlinkRoute: "stati/agregatsiya-piva-v-koroba",
@@ -674,7 +677,7 @@ describe("rendered landing page", () => {
         alternate: "/stati/markirovka-piva-bez-interneta/",
         alternateLang: "ru",
         diagramPrefix: "offline-beer-marking",
-        localBoundary: "item → case → SSCC",
+        localBoundary: "item → case → pallet",
         durableClaim: /journal.*restart|restart.*journal/i,
         noFalseSuccess: /must not invent|never display false success/i,
         backlinkRoute: "en/articles/beer-case-aggregation",
@@ -718,7 +721,7 @@ describe("rendered landing page", () => {
         localizedDocument.querySelector('script[type="application/ld+json"]')?.textContent ?? "",
       ) as { "@graph": Array<Record<string, unknown>> };
       expect(graph["@graph"].find((entry) => entry["@type"] === "Article")).toMatchObject({
-        dateModified: "2026-08-26",
+        dateModified: "2026-09-27",
         datePublished: "2026-08-26",
         image: "https://markiro.app/og-offline-beer-marking.jpg",
         inLanguage: article.lang,
@@ -756,7 +759,7 @@ describe("rendered landing page", () => {
         alternate: "/en/articles/duplicate-beer-marking-code-russia/",
         alternateLang: "en",
         diagramPrefix: "dubl-koda-markirovki-pivo",
-        chain: "единица → короб → SSCC",
+        chain: "единица → короб → паллета",
         reportClaim: /потерянный ответ не доказывает/i,
         identityClaim: /один товар — одна уникальная идентичность/i,
         backlinkRoute: "stati/markirovka-piva-bez-interneta",
@@ -768,7 +771,7 @@ describe("rendered landing page", () => {
         alternate: "/stati/dubl-koda-markirovki-pivo/",
         alternateLang: "ru",
         diagramPrefix: "duplicate-beer-marking-code",
-        chain: "item → case → SSCC",
+        chain: "item → case → pallet",
         reportClaim: /missing response does not prove/i,
         identityClaim: /one physical product, one unique identity/i,
         backlinkRoute: "en/articles/offline-beer-marking-russia",
@@ -812,7 +815,7 @@ describe("rendered landing page", () => {
         localizedDocument.querySelector('script[type="application/ld+json"]')?.textContent ?? "",
       ) as { "@graph": Array<Record<string, unknown>> };
       expect(graph["@graph"].find((entry) => entry["@type"] === "Article")).toMatchObject({
-        dateModified: "2026-08-27",
+        dateModified: "2026-09-27",
         datePublished: "2026-08-27",
         image: "https://markiro.app/og-duplicate-beer-marking.jpg",
         inLanguage: article.lang,
@@ -1017,8 +1020,111 @@ describe("rendered landing page", () => {
     expect(enLink?.textContent?.trim()).toBe("Station for Windows");
   });
 
-  it("activates the shared dark design tokens", () => {
-    expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+  it("links the shared header navigation on every page", () => {
+    const ru = [
+      ["/#product", "Продукт"],
+      ["/kak-rabotaet/", "Как работает"],
+      ["/instruktsii/", "Инструкции"],
+      ["/stati/", "Статьи"],
+      ["/faq/", "Вопросы"],
+    ];
+    const en = [
+      ["/en/#product", "Product"],
+      ["/en/how-it-works/", "How it works"],
+      ["/en/instructions/", "Instructions"],
+      ["/en/articles/", "Articles"],
+      ["/en/faq/", "Questions"],
+    ];
+    for (const [route, expected] of [
+      ["/", ru],
+      ["/sscc-i-agregatsiya/", ru],
+      ["/en/", en],
+      ["/en/sscc-and-aggregation/", en],
+    ] as const) {
+      const links = [
+        ...(documents
+          .get(route)
+          ?.querySelectorAll("header .landing-nav > a:not(.landing-nav__phone)") ?? []),
+      ].map((link) => [link.getAttribute("href"), link.textContent?.trim()]);
+      expect(links, route).toEqual(expected);
+    }
+  });
+
+  it("groups the footer into product, materials and company columns", () => {
+    const columns = (route: string) =>
+      [...(documents.get(route)?.querySelectorAll("footer [data-footer-column]") ?? [])].map(
+        (column) => ({
+          heading: column.querySelector("[data-footer-heading]")?.textContent?.trim(),
+          links: [...column.querySelectorAll("a")].map((link) => link.getAttribute("href")),
+        }),
+      );
+
+    expect(columns("/")).toEqual([
+      {
+        heading: "Продукт",
+        links: [
+          "/markirovka-chestny-znak/",
+          "/sscc-i-agregatsiya/",
+          "/rabochee-mesto-upakovki/",
+          "/oflayn-rabota/",
+          "/kiosk-samovydachi/",
+          "/integratsiya-1c/",
+        ],
+      },
+      { heading: "Материалы", links: ["/kak-rabotaet/", "/stati/", "/instruktsii/", "/faq/"] },
+      { heading: "Компания", links: ["/legal/", "/privacy/", "/personal-data-consent/"] },
+    ]);
+    expect(columns("/en/")).toEqual([
+      {
+        heading: "Product",
+        links: [
+          "/en/chestny-znak-serialization/",
+          "/en/sscc-and-aggregation/",
+          "/en/packing-workstation/",
+          "/en/offline-production/",
+          "/en/self-service-pickup-kiosk/",
+          "/en/1c-integration/",
+        ],
+      },
+      {
+        heading: "Materials",
+        links: ["/en/how-it-works/", "/en/articles/", "/en/instructions/", "/en/faq/"],
+      },
+      { heading: "Company", links: ["/en/legal/", "/en/privacy/", "/en/personal-data-consent/"] },
+    ]);
+    expect(
+      documents.get("/")?.querySelector("footer [data-footer-column] [data-consent-settings]"),
+    ).not.toBeNull();
+  });
+
+  it("keeps topic pages on the dark theme", () => {
+    const html = documents.get("/sscc-i-agregatsiya/")?.documentElement;
+    expect(html?.getAttribute("data-theme")).toBe("dark");
+    expect(
+      documents
+        .get("/sscc-i-agregatsiya/")
+        ?.querySelector('meta[name="theme-color"]')
+        ?.getAttribute("content"),
+    ).toBe("#131216");
+  });
+
+  it("keeps the cookie panel dark on every page", () => {
+    for (const route of ["/", "/en/", "/sscc-i-agregatsiya/"]) {
+      expect(
+        documents.get(route)?.querySelector("[data-consent-panel]")?.getAttribute("data-theme"),
+        route,
+      ).toBe("dark");
+    }
+  });
+
+  it("renders the home page on the light theme", () => {
+    for (const route of ["/", "/en/"] as const) {
+      const home = documents.get(route);
+      expect(home?.documentElement.getAttribute("data-theme"), route).toBe("light");
+      expect(home?.querySelector('meta[name="theme-color"]')?.getAttribute("content")).toBe(
+        "#fafaf8",
+      );
+    }
   });
 
   it("sets a mobile-safe viewport without disabling zoom", () => {
@@ -1051,56 +1157,253 @@ describe("rendered landing page", () => {
 
     for (const sectionId of [
       "hero",
-      "continuity",
-      "cycle",
       "product",
+      "offline",
       "traceability",
-      "platform",
+      "film",
       "implementation",
+      "documents",
+      "materials",
       "demo",
     ]) {
       expect(document.querySelector(`section#${sectionId}[aria-labelledby]`)).not.toBeNull();
     }
   });
 
-  it("publishes the current product-category boundary on the home and SSCC pages", () => {
+  it("links the office row to the admin panel group of the instructions hub", () => {
+    for (const [route, hub, prefix] of [
+      ["/", "/instruktsii/", "Кабинет:"],
+      ["/en/", "/en/instructions/", "Cabinet:"],
+    ] as const) {
+      const href =
+        documents.get(route)?.querySelector("#product-office a.text-link")?.getAttribute("href") ??
+        "";
+      const [target, fragment = ""] = href.split("#");
+      expect(target, route).toBe(hub);
+      const group = documents.get(hub)?.getElementById(fragment);
+      expect(group, `${route} -> ${href}`).not.toBeNull();
+      const titles = [...(group?.querySelectorAll(".legal-registry__title") ?? [])].map(
+        (title) => title.textContent ?? "",
+      );
+      expect(titles.length, href).toBeGreaterThan(0);
+      for (const title of titles) expect(title.startsWith(prefix), title).toBe(true);
+    }
+  });
+
+  it("gives every hub group an id without spaces that labels its section", () => {
+    for (const hub of HUB_ROUTES) {
+      const document = documents.get(hub);
+      for (const section of document?.querySelectorAll("section.legal-registry") ?? []) {
+        expect(section.id, hub).toMatch(/^hub-group-[a-z0-9]+(-[a-z0-9]+)*$/u);
+        const label = section.getAttribute("aria-labelledby") ?? "";
+        expect(label, hub).toMatch(/^\S+$/u);
+        expect(document?.getElementById(label)?.tagName, `${hub} ${label}`).toBe("H2");
+      }
+    }
+  });
+
+  it("shows every product part on a framed screen and links it to its page", () => {
+    for (const [route, links] of [
+      [
+        "/",
+        [
+          "/markirovka-chestny-znak/",
+          "/kak-rabotaet/#warehouse",
+          "/instruktsii/#hub-group-cabinet",
+          "/kiosk-samovydachi/",
+          "/integratsiya-1c/",
+        ],
+      ],
+      [
+        "/en/",
+        [
+          "/en/chestny-znak-serialization/",
+          "/en/how-it-works/#warehouse",
+          "/en/instructions/#hub-group-cabinet",
+          "/en/self-service-pickup-kiosk/",
+          "/en/1c-integration/",
+        ],
+      ],
+    ] as const) {
+      const section = documents.get(route)?.querySelector("section#product");
+      const parts = [...(section?.querySelectorAll("article[id^='product-']") ?? [])];
+      expect(
+        parts.map((part) => part.id),
+        route,
+      ).toEqual([
+        "product-line",
+        "product-handheld",
+        "product-office",
+        "product-kiosk",
+        "product-integrations",
+      ]);
+      expect(parts.map((part) => part.querySelector("a.text-link")?.getAttribute("href"))).toEqual(
+        links,
+      );
+      expect(section?.querySelectorAll("figure.screen-frame img[alt]")).toHaveLength(4);
+      expect(section?.querySelectorAll("figure.handheld-frame img[alt]")).toHaveLength(1);
+      for (const image of section?.querySelectorAll("img") ?? []) {
+        expect(image.getAttribute("loading")).toBe("lazy");
+      }
+      expect(section?.textContent ?? "").not.toMatch(/НАСТОЯЩИЙ ЭКРАН|REAL SCREEN/u);
+    }
+  });
+
+  it("opens the film page with a title of its own, different from the home hero", () => {
+    // The home title is two spans, so compare the letters without any whitespace.
+    const heading = (route: string) =>
+      documents.get(route)?.querySelector("h1")?.textContent?.replace(/\s+/gu, "") ?? "";
+    for (const [home, film] of [
+      ["/", "/kak-rabotaet/"],
+      ["/en/", "/en/how-it-works/"],
+    ] as const) {
+      expect(heading(film), film).not.toBe("");
+      expect(heading(film), film).not.toBe(heading(home));
+    }
+  });
+
+  it("renders the offline, traceability and film sections", () => {
+    for (const [route, filmPath] of [
+      ["/", "/kak-rabotaet/"],
+      ["/en/", "/en/how-it-works/"],
+    ] as const) {
+      const page = documents.get(route);
+      const offline = page?.querySelector("section#offline");
+      expect(offline?.getAttribute("data-theme"), route).toBe("dark");
+      expect(offline?.querySelectorAll(".home-offline__points li")).toHaveLength(3);
+      // One close-up of the offline station screen; each point of the list has a numbered mark on it.
+      expect(offline?.querySelectorAll("img[alt]")).toHaveLength(1);
+      const numbers = [...(offline?.querySelectorAll(".home-offline__number") ?? [])].map(
+        (element) => element.textContent?.trim(),
+      );
+      const marks = [...(offline?.querySelectorAll(".home-offline__marks li") ?? [])];
+      expect(
+        marks.map((mark) => mark.textContent?.trim()),
+        route,
+      ).toEqual(numbers);
+      for (const mark of marks) {
+        expect(["left", "below"], route).toContain(mark.getAttribute("data-side"));
+        const style = mark.getAttribute("style") ?? "";
+        for (const axis of ["x", "y"]) {
+          const value = Number(new RegExp(`--${axis}:\\s*([\\d.]+)%`, "u").exec(style)?.[1]);
+          expect(value, `${route} ${style}`).toBeGreaterThan(0);
+          expect(value, `${route} ${style}`).toBeLessThan(100);
+        }
+      }
+      expect(
+        page?.querySelector("section#traceability figure.screen-frame img[alt]"),
+      ).not.toBeNull();
+      const panel = page?.querySelector("section#film [data-theme='dark']");
+      expect(panel?.querySelector("a.button")?.getAttribute("href")).toBe(filmPath);
+      expect(panel?.querySelector("img[alt]")).not.toBeNull();
+    }
+  });
+
+  it("states the product-group boundary on the home pages and keeps the SSCC pages' current one", () => {
+    for (const [route, groups, check] of [
+      ["/", "любой маркируемой продукции", "Особенности вашей товарной группы сверяем до запуска"],
+      ["/en/", "any marked goods", "We check the rules of your product group before launch"],
+    ] as const) {
+      const text = documents.get(route)?.body.textContent?.replace(/\s+/g, " ") ?? "";
+      expect(text, route).toContain(groups);
+      expect(text, route).toContain(check);
+      expect(text, route).not.toContain("Сейчас — пиво, сидр");
+      expect(text, route).not.toContain("Currently focused on beer");
+      expect(text, route).not.toContain("Новые товарные группы добавляются поэтапно");
+      expect(text, route).not.toContain("Additional product categories are being added gradually");
+    }
+
     const ruCategory = "Пиво, напитки, изготавливаемые на основе пива, слабоалкогольные напитки";
     const enCategory = "Beer, beverages made from beer and low-alcohol beverages";
-
-    for (const route of ["/", "/sscc-i-agregatsiya/"] as const) {
-      const text = documents.get(route)?.body.textContent?.replace(/\s+/g, " ") ?? "";
-      expect(text).toContain(ruCategory);
-      expect(text.toLowerCase()).toContain("сидр");
-      expect(text).toContain("Новые товарные группы добавляются поэтапно");
-      expect(text).not.toContain("внедряется для производителей");
-    }
-
-    for (const route of ["/en/", "/en/sscc-and-aggregation/"] as const) {
-      const text = documents.get(route)?.body.textContent?.replace(/\s+/g, " ") ?? "";
-      expect(text).toContain(enCategory);
-      expect(text.toLowerCase()).toContain("cider");
-      expect(text).toContain("Additional product categories are being added gradually");
-      expect(text).not.toContain("is currently deployed");
-    }
+    const ruSsccText =
+      documents.get("/sscc-i-agregatsiya/")?.body.textContent?.replace(/\s+/g, " ") ?? "";
+    expect(ruSsccText).toContain(ruCategory);
+    expect(ruSsccText.toLowerCase()).toContain("сидр");
+    expect(ruSsccText).toContain("Новые товарные группы добавляются поэтапно");
+    expect(ruSsccText).not.toContain("внедряется для производителей");
+    const enSsccText =
+      documents.get("/en/sscc-and-aggregation/")?.body.textContent?.replace(/\s+/g, " ") ?? "";
+    expect(enSsccText).toContain(enCategory);
+    expect(enSsccText.toLowerCase()).toContain("cider");
+    expect(enSsccText).toContain("Additional product categories are being added gradually");
+    expect(enSsccText).not.toContain("is currently deployed");
 
     const ruSscc = documents.get("/sscc-i-agregatsiya/")?.body.textContent ?? "";
-    expect(ruSscc).toContain("Текущий поддерживаемый уровень — цепочка «единица → короб»");
-    expect(ruSscc).toContain("Паллетная агрегация");
-    expect(ruSscc).toContain("будет добавлена отдельным следующим этапом");
+    expect(ruSscc).toContain("Поддерживается цепочка «единица → короб → паллета»");
+    expect(ruSscc).toContain("у паллеты свой SSCC и своя этикетка");
+    expect(ruSscc).not.toContain("будет добавлена отдельным следующим этапом");
+    expect(ruSscc).not.toContain("Пока нет");
+    expect(ruSscc).not.toContain("у Markiro это короб.");
+    expect(ruSscc).not.toContain("связывает короб с его составом");
 
     const enSscc = documents.get("/en/sscc-and-aggregation/")?.body.textContent ?? "";
-    expect(enSscc).toContain("The currently supported level is the item-to-case chain");
-    expect(enSscc).toContain("Pallet aggregation");
-    expect(enSscc).toContain("will be added as a separate next stage");
+    expect(enSscc).toContain("The item → case → pallet chain is supported");
+    expect(enSscc).toContain("the pallet gets its own SSCC and label");
+    expect(enSscc).not.toContain("will be added as a separate next stage");
+    expect(enSscc).not.toContain("Not yet");
+    expect(enSscc).not.toContain("a case in Markiro");
+    expect(enSscc).not.toContain("connects the case to its contents");
 
     const ruSerialization = documents.get("/markirovka-chestny-znak/")?.body.textContent ?? "";
-    expect(ruSerialization).toContain("связь единицы с коробом");
+    expect(ruSerialization).toContain("связь единицы с коробом и короба с паллетой");
     expect(ruSerialization).not.toContain("связь единицы с коробом или паллетой");
 
     const enSerialization =
       documents.get("/en/chestny-znak-serialization/")?.body.textContent ?? "";
-    expect(enSerialization).toContain("the relationship between an item and its case");
+    expect(enSerialization).toContain(
+      "the relationship between an item and its case, and between a case and its pallet",
+    );
     expect(enSerialization).not.toContain("the relationship between an item, case, or pallet");
+
+    const ruFaq = documents.get("/faq/")?.body.textContent ?? "";
+    expect(ruFaq).toContain(
+      "Да. Единицы собираются в короб с SSCC, короба — в паллету со своим SSCC: на станции упаковки или на ТСД.",
+    );
+    expect(ruFaq).not.toContain("Пока нет");
+    expect(ruFaq).not.toContain("после паллетной агрегации");
+
+    const enFaq = documents.get("/en/faq/")?.body.textContent ?? "";
+    expect(enFaq).toContain(
+      "Yes. Items are aggregated into a case with an SSCC, and cases into a pallet with its own SSCC, on the packing workstation or on the handheld.",
+    );
+    expect(enFaq).not.toContain("Not yet");
+    expect(enFaq).not.toContain("after pallet aggregation");
+
+    const ru1c = documents.get("/integratsiya-1c/")?.body.textContent ?? "";
+    expect(ru1c).toContain("Выгрузка отгрузок по CommerceML запланирована следующим этапом.");
+    expect(ru1c).not.toContain("после паллетной агрегации");
+
+    const en1c = documents.get("/en/1c-integration/")?.body.textContent ?? "";
+    expect(en1c).toContain("Shipment export over CommerceML is planned as the next stage.");
+    expect(en1c).not.toContain("after pallet aggregation");
+  });
+
+  it("renders the rollout, documents, articles and demo sections", () => {
+    for (const [route, instructionsPath, legalPath, articlesHeading] of [
+      ["/", "/instruktsii/", "/legal/", "Разборы задач с линии."],
+      ["/en/", "/en/instructions/", "/en/legal/", "Field notes from the line."],
+    ] as const) {
+      const page = documents.get(route);
+      const rollout = page?.querySelector("section#implementation");
+      expect(rollout?.querySelectorAll(".home-rollout__steps li"), route).toHaveLength(4);
+      expect(rollout?.querySelectorAll(".home-rollout__label img[alt]")).toHaveLength(2);
+      const docs = page?.querySelector("section#documents");
+      expect(docs?.querySelectorAll(".home-documents__covers img[alt]")).toHaveLength(3);
+      expect(
+        [...(docs?.querySelectorAll("a") ?? [])].map((link) => link.getAttribute("href")),
+      ).toEqual([instructionsPath, legalPath]);
+      expect(page?.querySelector("section#materials h2")?.textContent).toBe(articlesHeading);
+      expect(page?.querySelector("section#demo")?.getAttribute("data-theme")).toBe("dark");
+    }
+  });
+
+  it("numbers the home sections in page order", () => {
+    for (const route of ["/", "/en/"] as const) {
+      const kickers = [
+        ...(documents.get(route)?.querySelectorAll("main section:not(#hero) .section-index") ?? []),
+      ].map((kicker) => kicker.textContent?.trim().slice(0, 2));
+      expect(kickers, route).toEqual(["01", "02", "03", "04", "05", "06", "07", "08"]);
+    }
   });
 
   it("renders the four visible fields in the accessible order with optional phone copy", () => {
@@ -1216,14 +1519,6 @@ describe("rendered landing page", () => {
     expect(document.querySelector('a[href^="tel:"]')).toBeNull();
   });
 
-  it("does not expose a fake retry control in the illustrative event log", () => {
-    expect(
-      [...document.querySelectorAll("button")].find(
-        (button) => button.textContent?.trim() === "Повторить печать",
-      ),
-    ).toBeUndefined();
-  });
-
   it("ships an Apple touch icon and links it from every page", () => {
     expect(existsSync(path.join(outputDirectory, "apple-touch-icon.png"))).toBe(true);
     for (const [route, routeDocument] of documents) {
@@ -1233,11 +1528,58 @@ describe("rendered landing page", () => {
     }
   });
 
-  it("describes the hero photograph for image search", () => {
-    expect(document.querySelector("[data-hero-image]")?.getAttribute("alt")).toContain("розлива");
-    expect(
-      documents.get("/en/")?.querySelector("[data-hero-image]")?.getAttribute("alt"),
-    ).toContain("bottling line");
+  it("renders the map hero with five hotspots and a card strip for phones", () => {
+    const targets = [
+      "#product-line",
+      "#product-line",
+      "#product-handheld",
+      "#product-kiosk",
+      "#product-office",
+    ];
+    const points = projectHomeMap();
+    for (const [route, heading, alt, labels] of [
+      ["/", "Линия идёт.", "Макет завода", ["Линия", "Упаковка", "Склад", "Киоск", "Офис"]],
+      [
+        "/en/",
+        "Keep the line moving.",
+        "Scale model of a plant",
+        ["Line", "Packing", "Warehouse", "Kiosk", "Office"],
+      ],
+    ] as const) {
+      const hero = documents.get(route)?.querySelector("section#hero");
+      expect(hero?.querySelector("h1")?.textContent, route).toContain(heading);
+      const spots = [...(hero?.querySelectorAll("[data-map-spot]") ?? [])];
+      expect(spots.map((spot) => spot.querySelector(".map-spot__label")?.textContent)).toEqual(
+        labels,
+      );
+      expect(spots.map((spot) => spot.querySelector("a")?.getAttribute("href"))).toEqual(targets);
+      for (const [index, spot] of spots.entries()) {
+        const [, left, top] =
+          /left: ([\d.]+)%; top: ([\d.]+)%/u.exec(spot.getAttribute("style") ?? "") ?? [];
+        expect(Number(left)).toBeGreaterThan(42);
+        expect(Number(top)).toBeGreaterThan(8);
+        const point = points[index];
+        expect(point, `${route} spot ${index}`).toBeDefined();
+        if (point === undefined) continue;
+        expect(Number(left)).toBeCloseTo(point.x * 100, 1);
+        expect(Number(top)).toBeCloseTo(point.y * 100, 1);
+        const tipId = spot.querySelector("a")?.getAttribute("aria-describedby") ?? "";
+        expect(hero?.querySelector(`#${tipId}[role="tooltip"] img[alt]`), tipId).not.toBeNull();
+      }
+      expect(
+        [...(hero?.querySelectorAll(".home-hero__strip a") ?? [])].map((link) =>
+          link.getAttribute("href"),
+        ),
+      ).toEqual(targets);
+      const image = hero?.querySelector("img[data-hero-image]");
+      expect(image?.getAttribute("loading")).toBe("eager");
+      expect(image?.getAttribute("fetchpriority")).toBe("high");
+      expect(image?.getAttribute("alt")).toContain(alt);
+      expect(hero?.querySelectorAll('picture source[media="(max-width: 1023px)"]')).toHaveLength(2);
+      for (const other of hero?.querySelectorAll("img:not([data-hero-image])") ?? []) {
+        expect(other.getAttribute("loading")).toBe("lazy");
+      }
+    }
   });
 
   it("keeps card links short so the anchor text is the title alone", () => {
@@ -1265,6 +1607,24 @@ describe("rendered landing page", () => {
     expect(Number(heroImage?.getAttribute("width"))).toBeGreaterThan(0);
     expect(Number(heroImage?.getAttribute("height"))).toBeGreaterThan(0);
     expect(heroImage?.getAttribute("fetchpriority")).toBe("high");
+  });
+
+  it("gives every home image alt text and loads only the map eagerly", () => {
+    for (const route of ["/", "/en/"] as const) {
+      const images = [...(documents.get(route)?.querySelectorAll("main img") ?? [])];
+      expect(images.length, route).toBeGreaterThan(15);
+      expect(
+        images.filter((image) => image.hasAttribute("data-hero-image")),
+        route,
+      ).toHaveLength(1);
+      for (const image of images) {
+        const name = image.getAttribute("src") ?? route;
+        expect(image.hasAttribute("alt"), name).toBe(true);
+        expect(image.getAttribute("loading"), name).toBe(
+          image.hasAttribute("data-hero-image") ? "eager" : "lazy",
+        );
+      }
+    }
   });
 
   it("renders complete unique metadata for every canonical route", () => {
@@ -1357,7 +1717,7 @@ describe("rendered landing page", () => {
       materialLinks.filter((href) => href?.startsWith("/stati/") && href !== "/stati/"),
     ).toHaveLength(3);
     expect(materialLinks).toContain("/stati/");
-    expect(materialLinks).toContain("/instruktsii/");
+    expect(document.querySelector('#documents a[href="/instruktsii/"]')).not.toBeNull();
     expect(document.querySelector('header nav a[href="/stati/"]')).not.toBeNull();
     expect(document.querySelector('footer nav a[href="/stati/"]')).not.toBeNull();
     expect(document.querySelector('footer nav a[href="/instruktsii/"]')).not.toBeNull();
@@ -1407,11 +1767,6 @@ describe("rendered landing page", () => {
       expect(routeDocument.querySelector('a[hreflang="ru"]')).not.toBeNull();
       expect(routeDocument.querySelector('a[hreflang="en"][aria-current="page"]')).not.toBeNull();
     }
-  });
-
-  it("keeps locale-specific time punctuation in the illustrative console", () => {
-    expect(documents.get("/")?.body.textContent).toContain("52,40 сек");
-    expect(documents.get("/en/")?.body.textContent).toContain("52.40 sec");
   });
 
   it("renders parseable structured data that matches visible navigation", () => {
@@ -1590,22 +1945,6 @@ describe("rendered landing page", () => {
     expect(article.querySelector('picture source[type="image/avif"]')).not.toBeNull();
   });
 
-  it("labels the illustrative station console so extracted text is not read as a fact", () => {
-    for (const [route, note] of [
-      ["/", "значения условные"],
-      ["/en/", "values are illustrative"],
-    ] as const) {
-      const routeDocument = documents.get(route) as Document;
-      const consoles = [...routeDocument.querySelectorAll(".line-console")];
-      expect(consoles.length, route).toBeGreaterThanOrEqual(1);
-      for (const element of consoles) {
-        expect(element.querySelector("[data-illustrative-note]")?.textContent, route).toContain(
-          note,
-        );
-      }
-    }
-  });
-
   it("describes the kiosk as a disposal flow for employees, not a customer pickup point", () => {
     const ru = documents.get("/kiosk-samovydachi/")?.body.textContent ?? "";
     expect(ru).toContain("выбыти");
@@ -1718,8 +2057,8 @@ describe("rendered film page", () => {
     ["/en/", "/en/how-it-works/", "See how it works"],
   ] as const)("%s links its hero to the film", (route, href, label) => {
     const home = documents.get(route) as Document;
-    const link = home.querySelector<HTMLAnchorElement>(`.hero a[href="${href}"]`);
-    expect(link?.textContent?.trim()).toBe(label);
+    const link = home.querySelector<HTMLAnchorElement>(`#hero a[href="${href}"]`);
+    expect(link?.textContent?.replace(/\s+/g, " ").trim()).toBe(`${label} →`);
   });
 
   it("keeps the header demo button on the film page instead of sending visitors home", () => {
