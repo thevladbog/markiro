@@ -48,6 +48,14 @@ sends the canonical code only through a client that pins it. A refused claim
 comes back as `pairing_code_invalid`, `pairing_code_expired` or `rate_limited`;
 anything else is `pair_rejected`.
 
+The webview checks a typed code with `normalizePairingCode` and reads the
+office's DataMatrix payload with `parsePairingPayload`
+(`src/host/pairing-code.ts`), including a payload a keyboard-wedge scanner
+typed under the Russian layout. `normalizePairingCode` is
+`markiro_proto::pairing::normalize` rewritten: `proto/fixtures/pairing-codes.json`
+holds the cases both must answer alike, and the Rust and Vitest suites check
+every one, so changing either rule means changing the fixture.
+
 ## Audit
 
 Every office change, login outcome, pairing and initialization writes one

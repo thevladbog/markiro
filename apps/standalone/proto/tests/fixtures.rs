@@ -240,3 +240,18 @@ fn the_error_code_fixture_lists_every_code() {
     known.sort_unstable();
     assert_eq!(listed, known);
 }
+
+#[test]
+fn the_pairing_code_fixture_matches_normalize() {
+    let fixture = fixture("pairing-codes.json");
+    let cases = fixture["cases"].as_array().expect("cases");
+    assert_eq!(cases.len(), 24);
+    for case in cases {
+        let input = case["input"].as_str().expect("input");
+        assert_eq!(
+            markiro_proto::pairing::normalize(input).as_deref(),
+            case["normalized"].as_str(),
+            "{input:?}"
+        );
+    }
+}
