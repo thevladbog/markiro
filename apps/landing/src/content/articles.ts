@@ -33,7 +33,7 @@ export const BEER_CASE_AGGREGATION_ARTICLE = {
   authorName: "Команда Markiro",
   readingTimeMinutes: 8,
   ogType: "article",
-  lastModified: "2026-08-26",
+  lastModified: "2026-09-27",
 } as const satisfies ArticlePageDefinition;
 
 export const BEER_MARKING_2026_ARTICLE = {
@@ -55,7 +55,7 @@ export const BEER_MARKING_2026_ARTICLE = {
   authorName: "Команда Markiro",
   readingTimeMinutes: 6,
   ogType: "article",
-  lastModified: "2026-08-26",
+  lastModified: "2026-09-27",
 } as const satisfies ArticlePageDefinition;
 
 export const BEER_CASE_AGGREGATION_ARTICLE_EN = {
@@ -77,7 +77,7 @@ export const BEER_CASE_AGGREGATION_ARTICLE_EN = {
   authorName: "Markiro team",
   readingTimeMinutes: 7,
   ogType: "article",
-  lastModified: "2026-08-26",
+  lastModified: "2026-09-27",
 } as const satisfies ArticlePageDefinition;
 
 export const BEER_MARKING_2026_ARTICLE_EN = {
@@ -99,7 +99,7 @@ export const BEER_MARKING_2026_ARTICLE_EN = {
   authorName: "Markiro team",
   readingTimeMinutes: 6,
   ogType: "article",
-  lastModified: "2026-08-26",
+  lastModified: "2026-09-27",
 } as const satisfies ArticlePageDefinition;
 
 export const BEER_DATAMATRIX_DIAGNOSTICS_ARTICLE = {
@@ -121,7 +121,7 @@ export const BEER_DATAMATRIX_DIAGNOSTICS_ARTICLE = {
   authorName: "Команда Markiro",
   readingTimeMinutes: 9,
   ogType: "article",
-  lastModified: "2026-08-26",
+  lastModified: "2026-09-27",
 } as const satisfies ArticlePageDefinition;
 
 export const BEER_DATAMATRIX_DIAGNOSTICS_ARTICLE_EN = {
@@ -143,7 +143,7 @@ export const BEER_DATAMATRIX_DIAGNOSTICS_ARTICLE_EN = {
   authorName: "Markiro team",
   readingTimeMinutes: 9,
   ogType: "article",
-  lastModified: "2026-08-26",
+  lastModified: "2026-09-27",
 } as const satisfies ArticlePageDefinition;
 
 export const BEER_MARKING_EQUIPMENT_ARTICLE = {
@@ -165,7 +165,7 @@ export const BEER_MARKING_EQUIPMENT_ARTICLE = {
   authorName: "Команда Markiro",
   readingTimeMinutes: 10,
   ogType: "article",
-  lastModified: "2026-08-26",
+  lastModified: "2026-09-27",
 } as const satisfies ArticlePageDefinition;
 
 export const BEER_MARKING_EQUIPMENT_ARTICLE_EN = {
@@ -187,7 +187,7 @@ export const BEER_MARKING_EQUIPMENT_ARTICLE_EN = {
   authorName: "Markiro team",
   readingTimeMinutes: 10,
   ogType: "article",
-  lastModified: "2026-08-26",
+  lastModified: "2026-09-27",
 } as const satisfies ArticlePageDefinition;
 
 export const BEER_MARKING_COST_ARTICLE = {
@@ -209,7 +209,7 @@ export const BEER_MARKING_COST_ARTICLE = {
   authorName: "Команда Markiro",
   readingTimeMinutes: 9,
   ogType: "article",
-  lastModified: "2026-08-26",
+  lastModified: "2026-09-27",
 } as const satisfies ArticlePageDefinition;
 
 export const BEER_MARKING_COST_ARTICLE_EN = {
@@ -231,7 +231,7 @@ export const BEER_MARKING_COST_ARTICLE_EN = {
   authorName: "Markiro team",
   readingTimeMinutes: 9,
   ogType: "article",
-  lastModified: "2026-08-26",
+  lastModified: "2026-09-27",
 } as const satisfies ArticlePageDefinition;
 
 export const BEER_DATAMATRIX_APPLICATION_ARTICLE = {
@@ -253,7 +253,7 @@ export const BEER_DATAMATRIX_APPLICATION_ARTICLE = {
   authorName: "Команда Markiro",
   readingTimeMinutes: 10,
   ogType: "article",
-  lastModified: "2026-08-26",
+  lastModified: "2026-09-27",
 } as const satisfies ArticlePageDefinition;
 
 export const BEER_DATAMATRIX_APPLICATION_ARTICLE_EN = {
@@ -275,7 +275,7 @@ export const BEER_DATAMATRIX_APPLICATION_ARTICLE_EN = {
   authorName: "Markiro team",
   readingTimeMinutes: 10,
   ogType: "article",
-  lastModified: "2026-08-26",
+  lastModified: "2026-09-27",
 } as const satisfies ArticlePageDefinition;
 
 export const OFFLINE_BEER_MARKING_ARTICLE = {

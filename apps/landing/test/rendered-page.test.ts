@@ -176,10 +176,11 @@ describe("rendered landing page", () => {
     });
 
     const bodyText = articleDocument.body.textContent?.replace(/\s+/g, " ") ?? "";
-    expect(bodyText).toContain("Текущий контур Markiro — «единица → короб → SSCC»");
-    expect(bodyText).toContain("Паллетная агрегация относится к следующему этапу");
+    expect(bodyText).toContain("Текущий контур Markiro — «единица → короб → паллета»");
+    expect(bodyText).toContain("У короба и у паллеты свой SSCC");
     expect(bodyText).toContain("Новые товарные группы добавляются поэтапно");
     expect(bodyText).not.toContain("внедряется для производителей");
+    expect(bodyText).not.toContain("относится к следующему этапу");
     expect(
       articleDocument.querySelector('a[href="https://www.gs1ru.org/gs1_system/capture/sscc/"]'),
     ).not.toBeNull();
@@ -234,9 +235,10 @@ describe("rendered landing page", () => {
     const bodyText = articleDocument.body.textContent?.replace(/\s+/g, " ") ?? "";
     expect(bodyText).toContain("Адаптационный период не отменяет требования");
     expect(bodyText).toContain("отсутствие регистрации, МОД или подключения к ЭДО");
-    expect(bodyText).toContain("Текущий контур Markiro — «единица → короб → SSCC»");
-    expect(bodyText).toContain("Паллетная агрегация относится к следующему этапу");
+    expect(bodyText).toContain("Текущий контур Markiro — «единица → короб → паллета»");
+    expect(bodyText).toContain("У короба и у паллеты свой SSCC");
     expect(bodyText).not.toContain("требования отложены для всех");
+    expect(bodyText).not.toContain("относится к следующему этапу");
 
     for (const href of [
       "https://markirovka.ru/knowledge/tovarnye-gruppy/pivo-pivniye-napitki/perenos-srokov-po-ekzemplyarnomu-uchetu-piva",
@@ -465,7 +467,7 @@ describe("rendered landing page", () => {
       expect(bodyText).toMatch(/ZPL.*TSPL|ZPL and TSPL/);
       expect(bodyText).toMatch(/1\.5 \(C\)|class 1\.5 \(C\)/);
       expect(bodyText).toMatch(/совместимость.*конкретн|compatibility.*facility/i);
-      expect(bodyText).toMatch(/item → case → SSCC|единица → короб → SSCC/);
+      expect(bodyText).toMatch(/item → case → pallet|единица → короб → паллета/);
       expect(bodyText).not.toMatch(/универсальный обязательный список|universal mandatory list/i);
 
       for (const href of [
@@ -548,7 +550,7 @@ describe("rendered landing page", () => {
       expect(bodyText).toMatch(/50 копеек.*61 копейку|RUB 0\.50.*RUB 0\.61/);
       expect(bodyText).toMatch(/одной станции|one workstation/i);
       expect(bodyText).toMatch(/совместим|compatib/i);
-      expect(bodyText).toMatch(/единица → короб → SSCC|item → case → SSCC/);
+      expect(bodyText).toMatch(/единица → короб → паллета|item → case → pallet/);
       expect(bodyText).not.toMatch(/Markiro (?:стоит|от \d|costs|from RUB)/i);
 
       for (const href of [
@@ -571,7 +573,7 @@ describe("rendered landing page", () => {
         alternateLang: "en",
         diagramPrefix: "nanesenie-data-matrix-pivo",
         methods: /этикетк.*типограф.*прям/i,
-        boundary: "единица → короб → SSCC",
+        boundary: "единица → короб → паллета",
         backlinkRoute: "stati/oborudovanie-dlya-markirovki-piva",
       },
       {
@@ -582,7 +584,7 @@ describe("rendered landing page", () => {
         alternateLang: "ru",
         diagramPrefix: "beer-datamatrix-application",
         methods: /label.*preprint.*direct print/i,
-        boundary: "item → case → SSCC",
+        boundary: "item → case → pallet",
         backlinkRoute: "en/articles/beer-marking-line-equipment",
       },
     ] as const) {
@@ -1264,22 +1266,26 @@ describe("rendered landing page", () => {
     expect(enSsccText).not.toContain("is currently deployed");
 
     const ruSscc = documents.get("/sscc-i-agregatsiya/")?.body.textContent ?? "";
-    expect(ruSscc).toContain("Текущий поддерживаемый уровень — цепочка «единица → короб»");
-    expect(ruSscc).toContain("Паллетная агрегация");
-    expect(ruSscc).toContain("будет добавлена отдельным следующим этапом");
+    expect(ruSscc).toContain("Поддерживается цепочка «единица → короб → паллета»");
+    expect(ruSscc).toContain("у паллеты свой SSCC и своя этикетка");
+    expect(ruSscc).not.toContain("будет добавлена отдельным следующим этапом");
+    expect(ruSscc).not.toContain("Пока нет");
 
     const enSscc = documents.get("/en/sscc-and-aggregation/")?.body.textContent ?? "";
-    expect(enSscc).toContain("The currently supported level is the item-to-case chain");
-    expect(enSscc).toContain("Pallet aggregation");
-    expect(enSscc).toContain("will be added as a separate next stage");
+    expect(enSscc).toContain("The item → case → pallet chain is supported");
+    expect(enSscc).toContain("the pallet gets its own SSCC and label");
+    expect(enSscc).not.toContain("will be added as a separate next stage");
+    expect(enSscc).not.toContain("Not yet");
 
     const ruSerialization = documents.get("/markirovka-chestny-znak/")?.body.textContent ?? "";
-    expect(ruSerialization).toContain("связь единицы с коробом");
+    expect(ruSerialization).toContain("связь единицы с коробом и короба с паллетой");
     expect(ruSerialization).not.toContain("связь единицы с коробом или паллетой");
 
     const enSerialization =
       documents.get("/en/chestny-znak-serialization/")?.body.textContent ?? "";
-    expect(enSerialization).toContain("the relationship between an item and its case");
+    expect(enSerialization).toContain(
+      "the relationship between an item and its case, and between a case and its pallet",
+    );
     expect(enSerialization).not.toContain("the relationship between an item, case, or pallet");
   });
 
