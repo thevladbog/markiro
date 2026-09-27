@@ -34,6 +34,51 @@ pub fn person_name(field: &str, name: &str) -> Result<String, ApiError> {
     }
 }
 
+/// An operator's personnel number: 3-12 ASCII digits, as in the cloud
+/// (`apps/api/src/modules/operators/dto.ts`). Leading zeros are part of it.
+pub fn operator_login(field: &str, login: &str) -> Result<(), ApiError> {
+    if (3..=12).contains(&login.len()) && login.bytes().all(|byte| byte.is_ascii_digit()) {
+        Ok(())
+    } else {
+        Err(ApiError::validation(
+            field,
+            "the personnel number must be 3-12 digits",
+        ))
+    }
+}
+
+/// Optional free text: trimmed, blank is none, at most `max` characters.
+fn optional_text(field: &str, text: Option<&str>, max: usize) -> Result<Option<String>, ApiError> {
+    match text.map(str::trim) {
+        None | Some("") => Ok(None),
+        Some(text) if text.chars().count() <= max => Ok(Some(text.to_owned())),
+        Some(_) => Err(ApiError::validation(
+            field,
+            format!("at most {max} characters"),
+        )),
+    }
+}
+
+/// An operator's role: free text like the cloud's employee role (at most
+/// 120 characters), or none.
+pub fn operator_role(field: &str, role: Option<&str>) -> Result<Option<String>, ApiError> {
+    optional_text(field, role, 120)
+}
+
+/// A PIN verifier the office computed: a PHC string in the `@markiro/domain`
+/// format with `secrets::MIN_ITERATIONS..=secrets::MAX_ITERATIONS`
+/// iterations. The host never sees the PIN, so this is all it can check.
+pub fn pin_phc(field: &str, phc: &str) -> Result<(), ApiError> {
+    if crate::secrets::parse_phc(phc).is_some() {
+        Ok(())
+    } else {
+        Err(ApiError::validation(
+            field,
+            "a PBKDF2 PHC string with 10000-1000000 iterations is required",
+        ))
+    }
+}
+
 /// A password: 8-128 characters (the upper bound keeps PBKDF2 input small).
 pub fn password(field: &str, password: &str) -> Result<(), ApiError> {
     if (8..=128).contains(&password.chars().count()) {
@@ -323,5 +368,41 @@ mod tests {
             field(company("", "Берег", None, GLN, &eleven)),
             "gs1Prefixes"
         );
+    }
+
+    #[test]
+    fn a_personnel_number_is_3_to_12_ascii_digits() {
+        for login in ["042", "0042", "123456789012"] {
+            assert!(operator_login("login", login).is_ok(), "{login}");
+        }
+        for login in ["42", "1234567890123", "12a4", "٠١٢٣", " 0042", ""] {
+            assert_eq!(field(operator_login("login", login)), "login", "{login:?}");
+        }
+    }
+
+    #[test]
+    fn a_role_is_optional_trimmed_text_of_at_most_120_characters() {
+        assert_eq!(operator_role("role", None).unwrap(), None);
+        assert_eq!(operator_role("role", Some("  ")).unwrap(), None);
+        assert_eq!(
+            operator_role("role", Some(" Упаковщик "))
+                .unwrap()
+                .as_deref(),
+            Some("Упаковщик")
+        );
+        assert!(operator_role("role", Some(&"м".repeat(120))).is_ok());
+        assert_eq!(field(operator_role("role", Some(&"м".repeat(121)))), "role");
+    }
+
+    #[test]
+    fn a_pin_hash_is_a_domain_phc_string_within_the_iteration_bounds() {
+        let phc = |iterations: u32| {
+            format!("pbkdf2$sha256${iterations}$bWFya2lyby1waW4tc2FsdA==$3OKvrZ2+EfTB2zsCso90r5g8c6Ib6t+Bv+cGJOpgPmU=")
+        };
+        assert!(pin_phc("pinPhc", &phc(100_000)).is_ok());
+        assert!(pin_phc("pinPhc", &phc(1_000_000)).is_ok());
+        for bad in [phc(9_999), phc(1_000_001), "4821".to_owned(), String::new()] {
+            assert_eq!(field(pin_phc("pinPhc", &bad)), "pinPhc", "{bad}");
+        }
     }
 }

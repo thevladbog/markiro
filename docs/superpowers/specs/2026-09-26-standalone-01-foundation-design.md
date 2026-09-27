@@ -166,8 +166,12 @@ default_box_template_id, default_pallet_template_id, default_duplicate_template_
   устройства на линии (план 1d2); выбрать архивную линию станция не может.
 - `operators(id, login UNIQUE, name, role, pin_phc, active, rev)`. Табельный номер —
   3–12 цифр, как в облаке (`apps/api/src/modules/operators/dto.ts`); это проверяет
-  хост. PIN — 4–6 цифр; его проверяет интерфейс до расчёта хеша, хост видит только
-  хеш и проверяет формат PHC.
+  хост, повтор — `conflict` с `constraint: login`, ведущие нули — часть номера, и
+  номер не меняется. PIN — 4–6 цифр; его проверяет интерфейс до расчёта хеша, хост
+  видит только хеш и проверяет формат PHC и число итераций — от 10 000 до
+  1 000 000: станция проверяет PIN с числом итераций из хеша, и потолок не даёт
+  затянуть вход. Должность (`role`) — свободный текст до 120 символов или пусто,
+  как в облаке. Офис хеша не получает: только `hasPin` и сведения о бейджах.
 - `operator_badges(id, operator_id, badge_phc, label, created_at, revoked_at, rev)`;
   частичный уникальный индекс по `badge_phc` среди неотозванных: одинаковый бейдж
   не может принадлежать двум операторам (соль общая, значит одинаковый код даёт
@@ -249,7 +253,10 @@ default_box_template_id, default_pallet_template_id, default_duplicate_template_
 - контрагенты — `counterparty-record.json` (ответ), `counterparty-create.json`,
   `counterparty-update.json` (`PUT` — запись целиком с `archived` и `expectedRev`);
 - линии — `office-line.json` (ответ, в списке и архивные), `line-create.json`,
-  `line-update.json` (`PUT` меняет только присланные `name` и `archived`).
+  `line-update.json` (`PUT` меняет только присланные `name` и `archived`);
+- операторы — `office-operator.json` (ответ: `hasPin` и бейджи без хешей),
+  `operator-create.json`, `operator-update.json` (`PUT` меняет только присланные
+  поля; `role: null` очищает должность, её отсутствие — оставляет).
 
 ### 4.6. Ошибки
 

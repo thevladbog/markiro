@@ -4,10 +4,10 @@ use markiro_proto::{
     ClaimRequest, Compatibility, CounterpartyCreate, CounterpartyRecord, CounterpartyUpdate,
     DeviceInfo, DeviceKind, DeviceLineRequest, DeviceRecord, ErrorBody, Hello, HelloEnvelope,
     LineCreate, LineRecord, LineUpdate, LocalPairRequest, OfficeLine, OfficeLoginRequest,
-    OfficeRole, OfficeSession, OfficeUser, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate,
-    OperatorBadgeRecord, OperatorRecord, OrgProfile, OrgProfileUpdate, OrgRecord, PairResponse,
-    PairingCode, PasswordChange, PasswordSet, SiteRecord, SsccCounterUpdate, SsccState,
-    HOST_PRODUCT, PROTOCOL_VERSION,
+    OfficeOperator, OfficeRole, OfficeSession, OfficeUser, OfficeUserCreate, OfficeUserRecord,
+    OfficeUserUpdate, OperatorBadgeRecord, OperatorCreate, OperatorRecord, OperatorUpdate,
+    OrgProfile, OrgProfileUpdate, OrgRecord, PairResponse, PairingCode, PasswordChange,
+    PasswordSet, SiteRecord, SsccCounterUpdate, SsccState, HOST_PRODUCT, PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -280,6 +280,39 @@ fn line_fixtures_round_trip_and_an_update_carries_only_what_changes() {
     let mut value = fixture("line-update.json");
     value["rename"] = Value::Bool(true);
     assert!(serde_json::from_value::<LineUpdate>(value).is_err());
+}
+
+#[test]
+fn operator_fixtures_round_trip_without_leaking_the_pin_hash() {
+    let operator: OfficeOperator = round_trip("office-operator.json");
+    assert!(operator.has_pin);
+    assert_eq!(
+        operator.badges[1].revoked_at.as_deref(),
+        Some("2026-09-27T08:00:00Z")
+    );
+    let create: OperatorCreate = round_trip("operator-create.json");
+    let update: OperatorUpdate = round_trip("operator-update.json");
+    // `role: null` clears the role; an absent role keeps it.
+    assert_eq!(
+        (update.name.clone(), update.role.clone()),
+        (None, Some(None))
+    );
+    let absent: OperatorUpdate =
+        serde_json::from_value(serde_json::json!({ "expectedRev": 55 })).unwrap();
+    assert_eq!(absent.role, None);
+    assert_eq!(
+        serde_json::to_value(&absent).unwrap(),
+        serde_json::json!({ "expectedRev": 55 })
+    );
+    let debug = format!("{create:?} {update:?}");
+    assert!(!debug.contains("pbkdf2"), "{debug}");
+    // A raw PIN is not a field, and the personnel number never changes.
+    let mut value = fixture("operator-create.json");
+    value["pin"] = Value::String("4821".into());
+    assert!(serde_json::from_value::<OperatorCreate>(value).is_err());
+    let mut value = fixture("operator-update.json");
+    value["login"] = Value::String("0043".into());
+    assert!(serde_json::from_value::<OperatorUpdate>(value).is_err());
 }
 
 #[test]

@@ -26,6 +26,8 @@ pub mod actions {
     pub const COUNTERPARTY_UPDATE: &str = "counterparty.update";
     pub const LINE_CREATE: &str = "line.create";
     pub const LINE_UPDATE: &str = "line.update";
+    pub const OPERATOR_CREATE: &str = "operator.create";
+    pub const OPERATOR_UPDATE: &str = "operator.update";
 }
 
 /// `details.reason` of a denied row: every denial names one.
@@ -50,6 +52,16 @@ pub mod reasons {
 /// and each of them also appears as `{ "from": …, "to": … }`. `None` when
 /// nothing changed, so the caller can return the record as-is.
 pub fn update_details(fields: &[(&str, Value, Value)]) -> Option<Value> {
+    update_details_hiding(fields, &[])
+}
+
+/// [`update_details`] plus fields whose values never enter the log (a PIN
+/// hash): a changed one is named in `changed`, after the others, and has no
+/// `{ from, to }`.
+pub fn update_details_hiding(
+    fields: &[(&str, Value, Value)],
+    hidden: &[(&str, bool)],
+) -> Option<Value> {
     let mut details = serde_json::Map::new();
     let mut changed = Vec::new();
     for (name, from, to) in fields {
@@ -59,6 +71,11 @@ pub fn update_details(fields: &[(&str, Value, Value)]) -> Option<Value> {
                 (*name).to_owned(),
                 serde_json::json!({ "from": from, "to": to }),
             );
+        }
+    }
+    for (name, did_change) in hidden {
+        if *did_change {
+            changed.push(Value::String((*name).to_owned()));
         }
     }
     if changed.is_empty() {
@@ -127,7 +144,32 @@ pub async fn record(
 mod tests {
     use serde_json::json;
 
-    use super::update_details;
+    use super::{update_details, update_details_hiding};
+
+    #[test]
+    fn hidden_fields_are_named_without_their_values() {
+        assert_eq!(
+            update_details_hiding(
+                &[("name", json!("Анна"), json!("Анна Петрова"))],
+                &[("pinPhc", true)]
+            ),
+            Some(json!({
+                "changed": ["name", "pinPhc"],
+                "name": { "from": "Анна", "to": "Анна Петрова" },
+            }))
+        );
+        assert_eq!(
+            update_details_hiding(&[], &[("pinPhc", true)]),
+            Some(json!({ "changed": ["pinPhc"] }))
+        );
+        assert_eq!(
+            update_details_hiding(
+                &[("name", json!("Анна"), json!("Анна"))],
+                &[("pinPhc", false)]
+            ),
+            None
+        );
+    }
 
     #[test]
     fn update_details_lists_changed_fields_with_their_values() {

@@ -7,6 +7,7 @@ pub mod devices;
 pub mod lines;
 pub mod office_auth;
 pub mod office_users;
+pub mod operators;
 pub mod org;
 pub mod pairing;
 pub mod sscc;

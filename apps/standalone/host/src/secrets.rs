@@ -36,7 +36,12 @@ pub const PASSWORD_ITERATIONS: u32 = 600_000;
 const SALT_BYTES: usize = 16;
 const DIGEST_BYTES: usize = 32;
 /// The domain's floor: a tampered verifier must not cheapen the work.
-const MIN_ITERATIONS: u32 = 10_000;
+pub const MIN_ITERATIONS: u32 = 10_000;
+/// The ceiling. A station verifies a PIN or a badge with the count its hash
+/// carries, so more work than this could stall a sign-in; ten times the
+/// domain's 100 000 leaves room to raise the default, and office passwords
+/// (600 000) fit under it too.
+pub const MAX_ITERATIONS: u32 = 1_000_000;
 
 /// A parsed `pbkdf2$sha256$<iterations>$<salt>$<digest>` string.
 pub struct Phc {
@@ -47,7 +52,8 @@ pub struct Phc {
 
 /// Parse a PHC string in the `@markiro/domain` format: canonical standard
 /// base64 with padding, a 16-byte salt and a 32-byte digest. Stricter than
-/// `parsePhc` on the iteration count, which must be plain ASCII digits.
+/// `parsePhc` on the iteration count, which must be plain ASCII digits
+/// within `MIN_ITERATIONS..=MAX_ITERATIONS`.
 pub fn parse_phc(text: &str) -> Option<Phc> {
     let mut parts = text.split('$');
     let (Some("pbkdf2"), Some("sha256"), Some(iterations), Some(salt), Some(digest), None) = (
@@ -64,7 +70,7 @@ pub fn parse_phc(text: &str) -> Option<Phc> {
         return None;
     }
     let iterations: u32 = iterations.parse().ok()?;
-    if iterations < MIN_ITERATIONS {
+    if !(MIN_ITERATIONS..=MAX_ITERATIONS).contains(&iterations) {
         return None;
     }
     Some(Phc {
@@ -206,9 +212,23 @@ mod tests {
     }
 
     #[test]
+    fn the_iteration_count_is_bounded_on_both_sides() {
+        let phc = |iterations: u32| {
+            format!("pbkdf2$sha256${iterations}$bWFya2lyby1zdGFuZGFsbw==$33q/nWS7HYqVkEapiJW+qfJkAK+dEw5JDvZadD5palE=")
+        };
+        let iterations = |iterations: u32| parse_phc(&phc(iterations)).map(|phc| phc.iterations);
+        assert_eq!(iterations(10_000), Some(10_000));
+        assert_eq!(iterations(1_000_000), Some(1_000_000));
+        assert_eq!(iterations(9_999), None);
+        assert_eq!(iterations(1_000_001), None);
+        assert_eq!(iterations(u32::MAX), None);
+    }
+
+    #[test]
     fn malformed_verifiers_never_match() {
         for bad in [
             "pbkdf2$sha256$9999$bWFya2lyby1zdGFuZGFsbw==$33q/nWS7HYqVkEapiJW+qfJkAK+dEw5JDvZadD5palE=",
+            "pbkdf2$sha256$1000001$bWFya2lyby1zdGFuZGFsbw==$33q/nWS7HYqVkEapiJW+qfJkAK+dEw5JDvZadD5palE=",
             "pbkdf2$sha256$10000$bWFya2lyby1zdGFuZGFsbw$33q/nWS7HYqVkEapiJW+qfJkAK+dEw5JDvZadD5palE=",
             "pbkdf2$sha1$10000$bWFya2lyby1zdGFuZGFsbw==$33q/nWS7HYqVkEapiJW+qfJkAK+dEw5JDvZadD5palE=",
             "pbkdf2$sha256$+10000$bWFya2lyby1zdGFuZGFsbw==$33q/nWS7HYqVkEapiJW+qfJkAK+dEw5JDvZadD5palE=",

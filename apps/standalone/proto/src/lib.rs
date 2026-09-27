@@ -77,6 +77,30 @@ pub mod credentials {
 
 pub mod pairing;
 
+/// Serde for a field of a partial update that may be absent (keep the stored
+/// value), `null` (clear it) or a value (set it): an `Option<Option<T>>` with
+/// `#[serde(default, skip_serializing_if = "Option::is_none", with = "nullable")]`.
+/// Plain serde reads `null` as an absent field.
+pub mod nullable {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<T: Serialize, S: Serializer>(
+        value: &Option<Option<T>>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        match value {
+            Some(inner) => inner.serialize(serializer),
+            None => serializer.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, T: Deserialize<'de>, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<Option<T>>, D::Error> {
+        Option::<T>::deserialize(deserializer).map(Some)
+    }
+}
+
 /// Lower-case hex SHA-256 of a certificate's DER: the value devices pin and
 /// the pairing payload carries.
 pub fn certificate_fingerprint(der: &[u8]) -> String {
@@ -679,5 +703,60 @@ pub struct LineUpdate {
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub archived: Option<bool>,
+    pub expected_rev: i64,
+}
+
+/// A badge as the administrator sees it: never its hash. Revoked badges are
+/// listed too, with `revoked_at`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BadgeInfo {
+    pub id: String,
+    pub label: Option<String>,
+    pub created_at: String,
+    pub revoked_at: Option<String>,
+}
+
+/// An operator as the administrator sees it (`GET /v1/office/operators`):
+/// never a hash, only whether a PIN is set and the badges' metadata.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OfficeOperator {
+    pub id: String,
+    /// Personnel number: 3-12 digits; it never changes.
+    pub login: String,
+    pub name: String,
+    pub role: Option<String>,
+    pub active: bool,
+    pub has_pin: bool,
+    pub badges: Vec<BadgeInfo>,
+    pub rev: i64,
+}
+
+/// `POST /v1/office/operators`: the office computed `pin_phc` from the PIN
+/// with `@markiro/domain`; the host never sees the PIN.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OperatorCreate {
+    pub login: String,
+    pub name: String,
+    #[serde(default)]
+    pub role: Option<String>,
+    pub pin_phc: Secret,
+}
+
+/// `PUT /v1/office/operators/{id}`: only the fields sent change; `role:
+/// null` clears the role, and a new `pin_phc` replaces the PIN.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OperatorUpdate {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "nullable")]
+    pub role: Option<Option<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pin_phc: Option<Secret>,
     pub expected_rev: i64,
 }

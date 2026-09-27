@@ -176,6 +176,15 @@ fn protected_routes() -> Router<AppState> {
             put(crate::routes::lines::update_line),
         )
         .route(
+            "/v1/office/operators",
+            get(crate::routes::operators::list_operators)
+                .post(crate::routes::operators::create_operator),
+        )
+        .route(
+            "/v1/office/operators/{id}",
+            put(crate::routes::operators::update_operator),
+        )
+        .route(
             "/v1/office/users",
             get(crate::routes::office_users::list_users)
                 .post(crate::routes::office_users::create_user),
