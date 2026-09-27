@@ -8,6 +8,7 @@
 //! docs/superpowers/specs/2026-09-27-station-local-storage-design.md.
 
 mod copy;
+mod gate;
 mod probe;
 mod record;
 
@@ -15,6 +16,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
+pub use gate::{storage_gate, StorageGate, StorageGateSender};
 pub use probe::{profile_facts, LessDurableReason, ProfileFacts};
 
 pub(crate) const CONFIG_FILE: &str = "station.json";
