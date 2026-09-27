@@ -353,6 +353,10 @@ may already hold `station.json` or `station-mirror.db*` (or a `.migrating-`
 folder may exist next to it), and this move would overwrite another station's
 data or leave a stale copy for the older build to run from; follow
 `docs/runbooks/station-storage-recovery.md` or contact the developers instead.
+The warnings reflect the station's last start, so with the station closed also
+check that `%APPDATA%\app.markiro.station` holds no `station.json` or
+`station-mirror.db*` and that no `app.markiro.station.migrating-*` folder sits
+next to it; if the move asks to replace any file, stop.
 
 Manual rollback, with the station closed:
 
