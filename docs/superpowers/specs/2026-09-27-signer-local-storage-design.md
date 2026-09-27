@@ -1,10 +1,11 @@
 # Signer credential off the Windows roaming profile — design proposal
 
-**Status:** design decisions S1-S4 accepted by the owner on 2026-09-27
-(section 13). S5 is an operational step and stays open. The investigation was
-read-only and nothing is implemented; implementation waits for the owner's
-go-ahead. The accepted scope changes only `apps/signer`: no cloud API,
-contract, Postgres or installer change.
+**Status:** implemented on branch `claude/beautiful-chaum-eac340` on
+2026-09-27; the owner's decisions S1-S4 and S6-S13 are in section 13, and S5
+is an operational step that stays open. The release waits for the Windows
+checks in section 10, run on a manually installed build before **Publish
+signer stable** (section 11). The change stays inside `apps/signer`: no cloud
+API, contract, Postgres or installer change.
 
 ## Summary
 
@@ -352,14 +353,16 @@ Under the lock:
 0. **Same folder** (macOS). Record `committed/same-directory` and use it.
 1. **The record says `committed`.** Use the local folder.
    - If `cleanup` is pending, retry step 6 (best effort).
-   - In the background, if the legacy folder holds `signer.json`: parse only
-     `agentId` and report `RoamedCopyPresent { sameAgent }`. Never load that
-     file and never delete it.
+   - In the background, if the legacy folder or a retired sibling
+     (`<legacy>.retired-*`) holds `signer.json`: parse only `agentId` and
+     report `RoamedCopyPresent { sameAgent }`. Never load that file and never
+     delete it.
    - A record that does not parse counts as committed when the local folder
      holds `signer.json` (the background check still runs), and as absent
      otherwise. A record that exists but cannot be opened (an antivirus scan,
      a sharing violation) keeps the local folder and moves nothing (S7, S8).
-     No case deletes anything.
+     Only the absent case runs the move, and the move deletes nothing it has
+     not verified as copied.
 2. **No record, and the durability guard (7.5) finds the local folder less
    durable.** Use the legacy folder, write nothing, report the reason.
 3. **Look at the legacy folder.**
@@ -381,9 +384,16 @@ Under the lock:
      folder is still authoritative.
    - If anything fails on `signer.json`, use the legacy folder for this run
      and report `MovePostponed`.
-5. **Commit.** Record `committed/migrated { cleanup: pending, retiredDir }`,
-   with `retiredDir = <legacy>.retired-<uuid>` chosen at this point.
+5. **Commit.** Record
+   `committed/migrated { cleanup: pending, retiredDir, copiedConfig }`, with
+   `retiredDir = <legacy>.retired-<nanos>-<pid>` chosen at this point and
+   `copiedConfig` holding the FNV-1a fingerprint and length of the copied
+   `signer.json` (no credential material), so step 6 still recognises the file
+   after a restart.
 6. **Retire.**
+   - Before renaming, compare the roaming `signer.json` with `copiedConfig`. A
+     different file belongs to someone else: leave the folder in place, and
+     the background check reports it.
    - Rename the legacy folder to `retiredDir`: same parent, one atomic rename.
    - In `retiredDir`, delete `signer.json` only if its bytes equal what was
      copied, then delete the journal files.
@@ -468,7 +478,10 @@ or mandatory profile.
   holds the qualified certificate.
 - `CredentialUnreadable`: see 7.6.
 
-A one-time journal entry records the move itself.
+A one-time journal entry records the move itself. Every fallback also
+journals its step and OS error (`Resolution.diagnostics`), for example
+`copy signer.json: Access is denied. (os error 5)`; these lines are never
+shown in the UI.
 
 ### 7.8 Copies that already exist
 
@@ -629,11 +642,16 @@ None of these can be claimed from host tests.
 
 A signer-only change: no API, Postgres or contract change.
 
-1. Ship it as a beta (`releases.markiro.app/signer/beta`).
-2. Run section 10 against the beta.
-3. Promote it with `signer-stable-release.yml`.
+The signer has only a stable channel: `signer-stable-release.yml` is its one
+release workflow, and `tools/signer-release` rejects beta versions. Every
+operator who accepts the update runs the move on the next start, so the
+checks come first:
 
-The first start of the new version moves the folder.
+1. Build the release commit and install it by hand over a paired 0.1.4 on
+   Windows 10 and Windows 11; run section 10 as far as the environment allows.
+2. Confirm that `signer-windows-build` ran on the pull request: it is the only
+   job that runs the `#[cfg(windows)]` tests.
+3. Publish with `signer-stable-release.yml`.
 
 For tenants known to use roaming profiles or redirection, revoke and pair
 again after the upgrade, so the copies in profile-share backups become
@@ -684,6 +702,17 @@ Decided by the owner during the implementation review on 2026-09-27:
 - **S9. A changed `signer.json` left in a retired folder is reported at every
   start; unknown files are not reported.** Rejected: reporting unknown files
   in the journal; reporting the changed file only on the move run.
+
+Decided by the owner in the final review on 2026-09-27:
+
+- **S10. Every fallback journals why** (the step and the OS error), without a
+  new notice.
+- **S11. A roaming journal folder that cannot be listed no longer postpones
+  the move;** the journal stays behind, as step 4 allows.
+- **S12. The unreadable-credential notice suggests revoking the previous
+  agent** in the cabinet after pairing again.
+- **S13. The release is verified on a manually installed build** before
+  **Publish signer stable**, because the signer has no beta channel.
 
 Still open:
 
