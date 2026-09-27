@@ -3817,7 +3817,7 @@ git commit -m "feat(standalone): выбор линии станцией и ст�
 
 Сканирование. Поле кода получает фокус при открытии экрана; клавиатурный сканер набирает машиночитаемый код и Enter. Все адреса из кода опрашиваются одновременно: мёртвый адрес стоит таймаута соединения, а виртуальные адаптеры (Hyper-V, WSL) стоят в списке первыми. Код уходит на первый адрес, чей сертификат совпал с отпечатком из кода. Человека не спрашивают: код пришёл с экрана офиса.
 
-Ручной ввод. Человек вводит адрес и код. Экран запрашивает `hello` и показывает отпечаток хоста. Код уходит, только когда человек подтвердил, что отпечаток совпадает с экраном офиса.
+Ручной ввод. Человек вводит адрес и код. Экран запрашивает `hello` и показывает отпечаток хоста. Код уходит, только когда человек подтвердил, что отпечаток совпадает с экраном офиса. Код, набранный русскими буквами, по раскладке не переводится: кириллическая буква, набранная вместо похожей латинской, стала бы другим допустимым символом, и хост засчитал бы неверный код всем живым кодам. Экран просит переключить раскладку. Запятая в адресе читается как точка: при русской раскладке клавиша точки на цифровом блоке печатает запятую.
 
 Код не того вида не уходит никуда. Отказ хоста не повторяется сам: код, погашенный чужими неверными попытками, выглядит как `pairing_code_invalid`, и его текст уже велит получить новый код.
 
@@ -3827,7 +3827,7 @@ git commit -m "feat(standalone): выбор линии станцией и ст�
 
 - Create: `apps/standalone/src/app/host-search.ts`, `apps/standalone/src/app/NetworkPairing.tsx`
 - Create: `apps/standalone/test/host-search.test.ts`, `apps/standalone/test/network-pairing.test.tsx`
-- Modify: `apps/standalone/src/app/shell.ts`, `apps/standalone/src/app/screens.tsx`, `apps/standalone/src/app/App.tsx`, `apps/standalone/src/i18n/ru.json`
+- Modify: `apps/standalone/src/app/shell.ts`, `apps/standalone/src/app/screens.tsx`, `apps/standalone/src/app/App.tsx`, `apps/standalone/src/i18n/ru.json`, `apps/standalone/src/host/pairing-code.ts`
 - Modify: `apps/standalone/test/app.test.tsx`, `apps/standalone/test/shell.test.ts`
 - Modify: `apps/standalone/AGENTS.md`, `docs/superpowers/specs/2026-09-26-standalone-01-foundation-design.md` (§4.7, §5.1)
 
@@ -3843,6 +3843,7 @@ git commit -m "feat(standalone): выбор линии станцией и ст�
   - `type HostSearch = { kind: "found"; address: string } | { kind: "other_host" } | { kind: "incompatible"; reason: "host_too_old" | "app_too_old" } | { kind: "unreachable" }`;
   - `findHost(probe: HostProbe, candidates: readonly string[], fingerprint: string): Promise<HostSearch>`;
   - `interface NetworkPairingProps { probe: HostProbe; onClaim: (input: ClaimInput) => Promise<void>; onBack: () => void }`, `NetworkPairing(props: NetworkPairingProps)`;
+  - `hasCyrillic(text: string): boolean` (`src/host/pairing-code.ts`);
   - у `HostMissingScreen` новое свойство `onNetwork: (() => void) | null`.
 
 - [ ] **Step 1: Тесты (падающие)**
@@ -3870,6 +3871,7 @@ describe("parseHostAddress", () => {
     [" 192.168.1.10:8443 ", "https://192.168.1.10:8443"],
     ["host-pc", "https://host-pc:45710"],
     ["host-pc.local:45710", "https://host-pc.local:45710"],
+    ["192,168,1,10", "https://192.168.1.10:45710"],
   ])("reads %j", (input, url) => {
     expect(parseHostAddress(input)).toBe(url);
   });
@@ -4151,6 +4153,22 @@ describe("NetworkPairing", () => {
     expect(props.probe.hello).not.toHaveBeenCalled();
   });
 
+  it("asks to switch the layout for a code typed in Russian letters", async () => {
+    const props = renderPairing();
+    fireEvent.click(screen.getByRole("button", { name: "Ввести адрес и код вручную" }));
+    // The keypad's decimal key types a comma under the Russian layout.
+    type("Адрес хоста", "192,168,1,10");
+    // «7k3mq-9xv2d» typed on the same keys under the Russian layout.
+    type("Код подключения", "7л3ьй-9чм2в");
+    fireEvent.click(screen.getByRole("button", { name: "Далее" }));
+    expect(
+      await screen.findByText("Код набран русскими буквами — переключите раскладку на английскую"),
+    ).toBeTruthy();
+    expect(screen.queryByText("Проверьте код: 10 символов")).toBeNull();
+    expect(screen.queryByText("Укажите адрес: 192.168.1.10 или 192.168.1.10:45710")).toBeNull();
+    expect(props.probe.hello).not.toHaveBeenCalled();
+  });
+
   it("explains a host that does not answer in network words", async () => {
     renderPairing();
     fireEvent.click(screen.getByRole("button", { name: "Ввести адрес и код вручную" }));
@@ -4310,10 +4328,11 @@ const HOST_NAME = /^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/;
 
 /**
  * A host address a person typed — `host` or `host:port`, port 45710 when
- * left out — as the URL the shell calls; `null` when it is neither.
+ * left out — as the URL the shell calls; `null` when it is neither. A comma
+ * reads as a dot: under the Russian layout the keypad's decimal key types one.
  */
 export function parseHostAddress(input: string): string | null {
-  const match = /^([^:\s]+)(?::(\d{1,5}))?$/.exec(input.trim());
+  const match = /^([^:\s]+)(?::(\d{1,5}))?$/.exec(input.trim().replace(/,/g, "."));
   if (match === null) return null;
   const [, host = "", port] = match;
   const number = port === undefined ? DEFAULT_HOST_PORT : Number(port);
@@ -4382,12 +4401,21 @@ import { useTranslation } from "react-i18next";
 import { Alert, Button, Card, Input } from "@markiro/ui";
 
 import { DeviceError, type ClaimInput, type DeviceErrorCode } from "../host/device.js";
-import { normalizePairingCode, parsePairingPayload } from "../host/pairing-code.js";
+import { hasCyrillic, normalizePairingCode, parsePairingPayload } from "../host/pairing-code.js";
 import { HostProbeError, type HostProbe } from "../host/probe.js";
 import { errorProp } from "../lib/form-error.js";
 import { personNameRule } from "../lib/rules.js";
 import { formatFingerprint } from "./fingerprint.js";
 import { findHost, hostUrl, parseHostAddress, type HostSearch } from "./host-search.js";
+
+/** What a typed code that cannot be a code is told. */
+const CODE_ERRORS = {
+  invalid: "shell.networkPairing.codeInvalid",
+  // Cyrillic is not read by key position, as a scan is: a Cyrillic letter
+  // typed for its Latin look-alike would become another valid symbol and
+  // count against every live code on the host.
+  layout: "shell.networkPairing.codeLayout",
+} as const;
 
 export interface NetworkPairingProps {
   probe: HostProbe;
@@ -4465,7 +4493,7 @@ export function NetworkPairing({ probe, onClaim, onBack }: NetworkPairingProps) 
   const [address, setAddress] = useState("");
   const [addressInvalid, setAddressInvalid] = useState(false);
   const [code, setCode] = useState("");
-  const [codeInvalid, setCodeInvalid] = useState(false);
+  const [codeError, setCodeError] = useState<keyof typeof CODE_ERRORS | null>(null);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState(false);
@@ -4530,7 +4558,9 @@ export function NetworkPairing({ probe, onClaim, onBack }: NetworkPairingProps) 
     // counts against every live code.
     const canonical = normalizePairingCode(code);
     setAddressInvalid(url === null);
-    setCodeInvalid(canonical === null);
+    let codeProblem: keyof typeof CODE_ERRORS | null = null;
+    if (canonical === null) codeProblem = hasCyrillic(code) ? "layout" : "invalid";
+    setCodeError(codeProblem);
     if (deviceName === null || url === null || canonical === null) return;
     setBusy(true);
     try {
@@ -4607,7 +4637,7 @@ export function NetworkPairing({ probe, onClaim, onBack }: NetworkPairingProps) 
             mono
             value={code}
             onChange={(event) => setCode(event.target.value)}
-            {...errorProp(codeInvalid ? t("shell.networkPairing.codeInvalid") : undefined)}
+            {...errorProp(codeError === null ? undefined : t(CODE_ERRORS[codeError]))}
           />
           <div className="standalone-form__actions">
             <Button
@@ -4959,6 +4989,7 @@ import { NetworkPairing } from "./NetworkPairing.js";
       "code": "Код подключения",
       "codeHint": "10 символов с экрана офиса",
       "codeInvalid": "Проверьте код: 10 символов",
+      "codeLayout": "Код набран русскими буквами — переключите раскладку на английскую",
       "next": "Далее",
       "fingerprintBody": "Сверьте отпечаток ниже с отпечатком хоста на экране офиса. Код уйдёт на хост, только если они совпадают.",
       "fingerprintLabel": "Отпечаток хоста {{address}}",
@@ -4979,10 +5010,25 @@ import { NetworkPairing } from "./NetworkPairing.js";
     "pairFailed": {
 ```
 
+7. В `apps/standalone/src/host/pairing-code.ts` после строки
+
+```ts
+const CYRILLIC = /[\u0400-\u04ff]/;
+```
+
+добавить
+
+```ts
+/** Whether the text holds a Cyrillic letter, as typed under the Russian layout. */
+export function hasCyrillic(text: string): boolean {
+  return CYRILLIC.test(text);
+}
+```
+
 - [ ] **Step 4: Запустить тесты — они проходят**
 
 Run: `pnpm --config.verifyDepsBeforeRun=false --filter @markiro/standalone exec vitest run test/host-search.test.ts test/network-pairing.test.tsx test/shell.test.ts test/app.test.tsx`
-Expected: PASS — 16 тестов в `host-search.test.ts`, 15 в `network-pairing.test.tsx`, 34 в `shell.test.ts`, 37 в `app.test.tsx`.
+Expected: PASS — 17 тестов в `host-search.test.ts`, 16 в `network-pairing.test.tsx`, 34 в `shell.test.ts`, 37 в `app.test.tsx`.
 
 - [ ] **Step 5: Документы**
 
@@ -4995,7 +5041,11 @@ address at once (`findHost`), and the code goes only to the address whose
 certificate matches `f`; a typed address and code show the observed
 fingerprint (`formatFingerprint`) and send the code only after a person
 confirmed it against the office screen. A code that cannot be a code never
-leaves the device, and a refused claim is never retried on its own.
+leaves the device, and a refused claim is never retried on its own. A typed
+code in Cyrillic is refused with a hint to switch the layout, not read by
+key position like a scan: a Cyrillic letter typed for its Latin look-alike
+would become another valid symbol. A comma in a typed address reads as a
+dot (the keypad under the Russian layout).
 ```
 
 2. В спецификации, §4.7, фрагмент
@@ -5034,7 +5084,7 @@ Run: `pnpm --config.verifyDepsBeforeRun=false --filter @markiro/standalone test`
 Expected: всё зелёное.
 
 ```bash
-git add apps/standalone/src/app/host-search.ts apps/standalone/src/app/NetworkPairing.tsx apps/standalone/test/host-search.test.ts apps/standalone/test/network-pairing.test.tsx apps/standalone/src/app/shell.ts apps/standalone/src/app/screens.tsx apps/standalone/src/app/App.tsx apps/standalone/src/i18n/ru.json apps/standalone/test/app.test.tsx apps/standalone/test/shell.test.ts apps/standalone/AGENTS.md docs/superpowers/specs/2026-09-26-standalone-01-foundation-design.md
+git add apps/standalone/src/app/host-search.ts apps/standalone/src/app/NetworkPairing.tsx apps/standalone/src/host/pairing-code.ts apps/standalone/test/host-search.test.ts apps/standalone/test/network-pairing.test.tsx apps/standalone/src/app/shell.ts apps/standalone/src/app/screens.tsx apps/standalone/src/app/App.tsx apps/standalone/src/i18n/ru.json apps/standalone/test/app.test.tsx apps/standalone/test/shell.test.ts apps/standalone/AGENTS.md docs/superpowers/specs/2026-09-26-standalone-01-foundation-design.md
 git commit -m "feat(standalone): подключение к хосту в сети по коду" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
