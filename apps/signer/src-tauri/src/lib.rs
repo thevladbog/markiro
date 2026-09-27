@@ -5,6 +5,7 @@ mod tray;
 use std::sync::Arc;
 
 use signer_core::runtime::Runtime;
+use signer_core::storage_location::{self, NoHooks, SystemProfileProbe};
 #[cfg(windows)]
 use signer_core::signer::Signer;
 #[cfg(windows)]
@@ -37,7 +38,14 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            let config_dir = app.path().app_config_dir()?;
+            // Releases up to 0.1.4 kept the agent state in the roaming
+            // %APPDATA% folder; it moves once into %LOCALAPPDATA%, which
+            // Windows neither roams nor redirects
+            // (docs/superpowers/specs/2026-09-27-signer-local-storage-design.md).
+            let legacy_dir = app.path().app_config_dir()?;
+            let local_dir = app.path().app_local_data_dir()?;
+            let storage =
+                storage_location::resolve(&legacy_dir, &local_dir, &SystemProfileProbe, &NoHooks);
             let version = app.package_info().version.to_string();
 
             #[cfg(windows)]
@@ -58,7 +66,8 @@ pub fn run() {
             // `Runtime::new` builds its own HTTP client, which is fallible (a
             // broken TLS backend or resolver), so surface that through `setup`'s
             // `Result` rather than unwrapping and taking the whole agent down.
-            let runtime = Runtime::new(config_dir, signer, secrets, version)?;
+            let runtime = Runtime::new(storage.dir.clone(), signer, secrets, version)?;
+            runtime.apply_storage_resolution(&storage);
             let runtime = Arc::new(runtime);
             if let Some(window) = app.get_webview_window("main") {
                 window.set_icon(SIGNER_ICON.clone())?;
@@ -94,6 +103,23 @@ pub fn run() {
             app.manage(commands::SignerState {
                 runtime: runtime.clone(),
             });
+
+            if storage.check_roamed_copy {
+                // Off the startup path: a redirected roaming share can hang for
+                // its whole network timeout.
+                let runtime = runtime.clone();
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    if let Some(notice) = storage_location::roamed_copy(&legacy_dir, &local_dir) {
+                        runtime.report_storage_notice(notice);
+                        let status = runtime.status();
+                        handle
+                            .state::<tray::TrayController>()
+                            .update_status(&handle, &status);
+                        let _ = handle.emit(STATUS_EVENT, status);
+                    }
+                });
+            }
 
             let animation_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
