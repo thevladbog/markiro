@@ -91,6 +91,12 @@ registry, `save-exact`, `engine-strict`, `minimum-release-age=10080`
 - **Local DB:** SQLite via `tauri-plugin-sql`, accessed with
   `drizzle-orm/sqlite-proxy`; schema defined in `packages/db`, mirrors the
   server's shift entities (shift, codes, scan journal, boxes, pallets).
+- **Local storage location:** `station.json` (device identity and key) and
+  `station-mirror.db` live together in machine-local app data
+  (`%LOCALAPPDATA%\app.markiro.station`), never in a roaming or redirected
+  profile: a copy on another PC prints duplicate SSCCs offline and stalls its
+  outbox on batch-id collisions. Older installs move there once, crash-safely
+  (`apps/station/src-tauri/src/storage/`).
 - **Updates:** Tauri updater. **All assets bundled** — fonts (IBM Plex,
   OFL), icons, sounds; zero CDN (the shop floor is offline).
 - Windows targets for MVP; Linux later; Android deferred (serial is painful).

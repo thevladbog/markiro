@@ -156,10 +156,11 @@ tree: сохраните evidence, расследуйте collision/audit и в�
 автоматической установки или restart нет.
 
 До и после установки зафиксируйте application ID `app.markiro.station`,
-фактический абсолютный путь к базе и относительное имя
-`sqlite:station-mirror.db`, pairing, settings, journals, boxes, exceptions и
-pending outbox. Не выводите путь из предположения о Windows user profile:
-снимите его с установленной Station до и после install-over.
+фактический абсолютный путь к базе (Центр обновлений → «Данные станции»),
+pairing, settings, journals, boxes, exceptions и pending outbox. Не выводите
+путь из предположения о Windows user profile: снимите его с установленной
+Station до и после install-over. Первая сборка с переносом хранилища один раз
+переносит базу из перемещаемого профиля в `%LOCALAPPDATA%\app.markiro.station`.
 Проверьте offline restart/reconnect и последующую синхронизацию outbox. Нельзя
 считать удаление SQLite или outbox допустимым rollback.
 
@@ -237,4 +238,8 @@ Rollback channel pointer влияет только на ещё не обнови
 обновлённой Station закройте активную смену, проверьте SQLite compatibility
 window и SHA-256, затем вручную установите предыдущий accepted immutable stable.
 Application ID, SQLite path, pairing, settings, journals, boxes, exceptions и
-outbox сохраняются; удаление данных запрещено.
+outbox сохраняются; удаление данных запрещено. Сборка до переноса хранилища
+читает только перемещаемую папку: перед её установкой верните `station.json` и
+`station-mirror.db*` из `%LOCALAPPDATA%\app.markiro.station` в
+`%APPDATA%\app.markiro.station` и удалите там `station-storage.json`, иначе
+станция запустится без привязки.

@@ -490,3 +490,59 @@ Still open:
 
 - **D5. CI:** run station `cargo test` on `windows-latest` in PR CI
   (recommended); or rely on the beta release job.
+
+## 13. Implementation notes (plan 2026-09-27)
+
+These supersede the named parts of sections 6-8.
+
+- **Probe (6.1).** It is a function, `profile_facts()`, not a trait: `resolve`
+  takes the resulting `ProfileFacts` value, and tests pass values directly. It
+  reports temporary, mandatory and roaming profiles plus the
+  `DeleteRoamingCache` policy. It has no folder-redirection check: no decision
+  needs one, and the record's `legacy_dir` shows a UNC path when redirected.
+  Test 15 drops its `FOLDERID_RoamingAppData` assertion.
+- **Notices (6.6).**
+  - The notices are `LegacyInUse`, `MoveFailed`,
+    `LocalLessDurable { reason }`, `RoamedCopyPresent { same_machine_id }` and
+    `ClaimLeftovers`.
+  - `TemporaryProfile` is `LocalLessDurable { reason: temporary_profile }`.
+  - A committed station whose profile later becomes less durable stays local
+    and reports `LocalLessDurable`.
+- **Extra blocks (6.3).** A claimed folder with station files but no record
+  blocks, because this machine's record may be lost. So does a recorded claim
+  whose folder holds no station files.
+- **Stale sidecars (6.3 step 4).** Before a resumed install, every
+  `station.json`, `station-mirror.db` and `-journal`/`-wal`/`-shm` in the local
+  folder is removed. SQLite would otherwise replay a stale journal next to a
+  fresh copy.
+- **UI (D4).** No diagnostics screen exists. The Update screen gets a "Station
+  data" section (folder and notices), and the pairing screen warns on
+  temporary and mandatory profiles (6.5).
+- **CI (D5).** PR CI compiles the Windows-only tests
+  (`cargo test --no-run` in `station-windows-build`) but does not run them. On
+  Windows Server 2025 the Tauri test harness can fail before `main()` with
+  `STATUS_ENTRYPOINT_NOT_FOUND`, so the stable gate is also compile-only.
+  Running them needs a follow-up: a Tauri-free storage crate, or a test-binary
+  manifest fix.
+- **Rollback (6.8).** The release acceptance and runbooks now say that
+  installing a build from before the move requires restoring the files to the
+  roaming folder first.
+
+- **Resolve after review (Task 5 fixes, owner-approved).**
+  - A failed claim rename is decided by what is on disk. If the claimed folder
+    holds the station files, the move continues. If the roaming folder still
+    holds them, the intent is withdrawn and the station runs there with
+    `LegacyInUse`. If neither does, the station is blocked. Retries stop on
+    `NotFound`, because an earlier attempt may have landed without saying so.
+  - Under the durability guard, a pending claim is renamed back to the roaming
+    folder (`Step::Undo`), then any partial local copy and the record are
+    dropped. A failed rename back is also decided by disk.
+  - The guard never points the station at an empty roaming folder while the
+    station files sit in Local (it adopts Local and reports
+    `LocalLessDurable`) or in an unfinished claim (it blocks).
+  - A claimed folder with station files and no record blocks the start on
+    every branch. This supersedes 6.7 row 2 for a computer whose roaming copy
+    sits next to another computer's stuck claimed folder: that computer stays
+    blocked until support clears the folder.
+  - Discarding local files never touches `station-storage.json` or
+    `station-storage.lock`.
