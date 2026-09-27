@@ -913,21 +913,6 @@ describe("App", () => {
     expect(device.selectLine).toHaveBeenCalledWith(LINE_ID);
   });
 
-  it("retries a failed reference sync from the line-select screen", async () => {
-    const device = fakeDevice(NEW_STATION);
-    const host = fakeHost();
-    host.getChanges
-      .mockRejectedValueOnce(
-        new HostError({ kind: "transport", code: "unreachable", message: "host down" }),
-      )
-      .mockResolvedValueOnce(feedPage(42, [lineItem(42, "Линия 1")]));
-    renderApp({ probe: probeAnswering(true), device, host });
-    expect(await screen.findByText("Не удалось получить справочники с хоста.")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
-    expect(await screen.findByRole("button", { name: "Линия 1" })).toBeTruthy();
-    expect(host.getChanges).toHaveBeenCalledTimes(2);
-  });
-
   it("sends a station whose key the host refuses while choosing a line to pairing again", async () => {
     const device = fakeDevice(NEW_STATION);
     device.selectLine.mockRejectedValueOnce(new DeviceError("key_rejected", "revoked"));
@@ -1059,14 +1044,35 @@ describe("reference sync retries", () => {
     renderApp({ probe: probeAnswering(true), device: fakeDevice(NEW_STATION), host });
     await firstSyncFailed();
     expect(host.getChanges).toHaveBeenCalledTimes(1);
-    await elapse(1000);
+    await elapse(500);
     expect(host.getChanges).toHaveBeenCalledTimes(1);
-    await elapse(1500);
+    await elapse(2000);
     expect(host.getChanges).toHaveBeenCalledTimes(2);
     // The second failure in a row waits twice as long.
     await elapse(2000);
     expect(host.getChanges).toHaveBeenCalledTimes(2);
     await elapse(2500);
+    expect(host.getChanges).toHaveBeenCalledTimes(3);
+    expect(await screen.findByRole("button", { name: "Линия 1" })).toBeTruthy();
+  });
+
+  it("retries a failed reference sync from the line-select screen, and a request drops the pending retry", async () => {
+    fakeRetryTimers();
+    const host = fakeHost();
+    host.getChanges
+      .mockRejectedValueOnce(hostDown())
+      .mockRejectedValueOnce(hostDown())
+      .mockResolvedValueOnce(feedPage(42, [lineItem(42, "Линия 1")]));
+    renderApp({ probe: probeAnswering(true), device: fakeDevice(NEW_STATION), host });
+    await firstSyncFailed();
+    fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
+    await waitFor(() => expect(host.getChanges).toHaveBeenCalledTimes(2));
+    // The request replaced the first failure's pending retry and ran at
+    // once; the streak of failures continues, so the next automatic retry
+    // waits 4 s, not 2 s again.
+    await elapse(2500);
+    expect(host.getChanges).toHaveBeenCalledTimes(2);
+    await elapse(2000);
     expect(host.getChanges).toHaveBeenCalledTimes(3);
     expect(await screen.findByRole("button", { name: "Линия 1" })).toBeTruthy();
   });
@@ -1160,5 +1166,71 @@ describe("reference sync retries", () => {
     await elapse(120_000);
     expect(host.getChanges).toHaveBeenCalledTimes(2);
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("resets the failure count after a successful run, so the next failure waits 2 s again", async () => {
+    fakeRetryTimers();
+    const link = fakeConnection();
+    const host = fakeHost();
+    host.getChanges
+      .mockRejectedValueOnce(hostDown())
+      .mockResolvedValueOnce(feedPage(42))
+      .mockRejectedValueOnce(hostDown())
+      // `rev: 42` again, matching the sync state's revision after the first
+      // success: a lower `rev` here would read as the host rolling back and
+      // cost this run a second, internal `getChanges` call of its own.
+      .mockResolvedValueOnce(feedPage(42));
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(NEW_STATION),
+      host,
+      connection: link.connection,
+    });
+    await firstSyncFailed();
+    // The retry succeeds: the failure count resets to zero.
+    await elapse(2500);
+    expect(host.getChanges).toHaveBeenCalledTimes(2);
+    expect(await screen.findByText("На хосте нет активных линий.")).toBeTruthy();
+
+    // A revision starts a new run, independent of the retry; it fails again.
+    await link.revision(43);
+    await waitFor(() => expect(host.getChanges).toHaveBeenCalledTimes(3));
+    // If the count had not reset, this would be attempt 2 (a 4 s wait); it
+    // is attempt 1 again, so the retry comes after 2 s.
+    await elapse(500);
+    expect(host.getChanges).toHaveBeenCalledTimes(3);
+    await elapse(2000);
+    expect(host.getChanges).toHaveBeenCalledTimes(4);
+  });
+
+  it("does not arm a retry while the link is not online, and syncs at once once it is", async () => {
+    fakeRetryTimers();
+    let handlers: ConnectionHandlers | null = null;
+    const connection: ConnectionApi = {
+      watch: vi.fn(async (next: ConnectionHandlers) => {
+        handlers = next;
+        next.onStatus({ state: "connecting", lastContactAt: null, lastError: null, seq: 1 });
+        return () => {
+          handlers = null;
+        };
+      }),
+    };
+    const host = fakeHost();
+    host.getChanges.mockRejectedValueOnce(hostDown()).mockResolvedValueOnce(feedPage(7));
+    renderApp({ probe: probeAnswering(true), device: fakeDevice(NEW_STATION), host, connection });
+    await firstSyncFailed();
+    // Not online: nothing was worth arming a retry against.
+    expect(vi.getTimerCount()).toBe(0);
+
+    await act(async () => {
+      handlers?.onStatus({
+        state: "online",
+        lastContactAt: 1_790_000_000_000,
+        lastError: null,
+        seq: 2,
+      });
+    });
+    await waitFor(() => expect(host.getChanges).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("На хосте нет активных линий.")).toBeTruthy();
   });
 });

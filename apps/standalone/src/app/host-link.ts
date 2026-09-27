@@ -21,9 +21,10 @@ export function nextSyncRetryMs(attempt: number): number {
 }
 
 /**
- * Why a run failed, for the status line: the host did not answer (a
- * `HostError`), this computer could not write (`LocalDbError`), or the feed
- * could not be applied — an answer from the host this build cannot read
+ * Why a run failed, for the status line: the host could not be reached, or
+ * it refused or failed the request (a `HostError`, except an answer this
+ * build cannot read); this computer could not write (`LocalDbError`); or the
+ * feed could not be applied — an answer from the host this build cannot read
  * (`HostError` `invalid_response`), a `SyncFeedError`, and anything else the
  * run did not expect.
  */

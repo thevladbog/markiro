@@ -38,10 +38,11 @@ export type OfficeState =
   | { kind: "open"; session: OfficeSession };
 
 /**
- * Why a reference sync failed: the host did not answer the request
- * (`HostError`), this computer could not write its copies (`LocalDbError`),
- * or the host's feed could not be applied (an answer this build cannot read,
- * a `SyncFeedError`, anything else).
+ * Why a reference sync failed: the host could not be reached, or it refused
+ * or failed the request (`HostError`, except an answer this build cannot
+ * read); this computer could not write its copies (`LocalDbError`); or the
+ * host's feed could not be applied (an answer this build cannot read, a
+ * `SyncFeedError`, anything else).
  */
 export type SyncFailure = "host" | "local" | "feed";
 
