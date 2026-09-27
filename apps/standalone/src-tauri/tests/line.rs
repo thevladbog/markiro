@@ -149,7 +149,14 @@ async fn the_webview_reaches_the_feed_but_not_the_stream_or_the_line_route() {
         .unwrap();
     assert_eq!(feed.status, 200);
     assert_eq!(feed.body.unwrap()["hostId"], host.host_id);
-    for (method, path) in [("GET", "/v1/changes/stream"), ("PUT", "/v1/device/line")] {
+    for (method, path) in [
+        ("GET", "/v1/changes/stream"),
+        ("PUT", "/v1/device/line"),
+        // A `.` segment the `url` crate would collapse to `/v1/device/line`,
+        // bypassing `webview_may_reach`'s `LINE_ROUTE` exclusion were
+        // `validate_path` not also refusing it.
+        ("PUT", "/v1/device/./line"),
+    ] {
         assert_eq!(
             station
                 .request(method, path, Some(&json!({ "lineId": UNKNOWN_LINE })), None)

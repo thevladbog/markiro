@@ -163,12 +163,17 @@ fn allowed_method(method: &str) -> Result<Method, RequestError> {
 /// Only host API paths: `/v1/…` of plain URL characters, no traversal. `%` is
 /// excluded: none of our routes need percent-encoding, and allowing it would
 /// let an encoded `..` or `/` reach the host after the `url` crate normalizes
-/// it, bypassing the checks above.
+/// it, bypassing the checks above. A `.` path segment is refused for the same
+/// reason: `url` collapses `/v1/device/./line` to `/v1/device/line`, which
+/// would reach a route that a caller-side check, such as
+/// `device::webview_may_reach`'s `LINE_ROUTE` exclusion, meant to stop.
 fn validate_path(path: &str) -> Result<(), RequestError> {
+    let route = path.split('?').next().unwrap_or(path);
     let safe = path.starts_with("/v1/")
         && path.len() <= MAX_PATH_LENGTH
         && !path.contains("..")
         && !path.contains("//")
+        && !route.split('/').any(|segment| segment == ".")
         && path
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || b"/_.~?=&-".contains(&byte));
@@ -223,6 +228,10 @@ mod tests {
             "/v1/device",
             "/v1/office/sscc/counters/460068200/0",
             "/v1/changes?since=5&limit=100",
+            // A dot in the query part is not a path segment: it never
+            // reaches `route.split('/')`, so it is unaffected by the `.`
+            // segment check.
+            "/v1/device?x=1.5",
         ] {
             assert_eq!(validate_path(path), Ok(()), "{path}");
         }
@@ -239,6 +248,12 @@ mod tests {
             "/v1/.%2E/x",
             "/v1/office%2Fx",
             too_long.as_str(),
+            // A `.` segment: the `url` crate collapses this to
+            // `/v1/device/line`, which would reach the host's line route
+            // even though `device::webview_may_reach` refused `LINE_ROUTE`.
+            "/v1/device/./line",
+            "/v1/office/./users",
+            "/v1/device/line/.",
         ] {
             assert_eq!(
                 validate_path(path),

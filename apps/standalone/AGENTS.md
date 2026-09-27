@@ -159,7 +159,7 @@ never as `unreachable`. `host_probe` observes a fingerprint without trusting
 it (`FingerprintPolicy::Observe`) and exists only to discover a host before
 loopback, a person or a pairing code confirms it.
 
-`host_request`, the webview's only way to reach the host, accepts `GET`,
+`host_request`, the webview's generic way to reach the host, accepts `GET`,
 `POST`, `PUT` and `DELETE`, paths of `[A-Za-z0-9/_.~?=&-]` without `..` or
 `//`, and only the routes `/v1/device[/…]` except `/v1/device/line`,
 `/v1/bootstrap`, `/v1/changes` (not `/v1/changes/stream`) and
