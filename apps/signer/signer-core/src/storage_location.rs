@@ -232,6 +232,9 @@ pub struct Resolution {
     /// Run `roamed_copy` off the startup path: the local folder is
     /// authoritative and the roaming folder should hold nothing of ours.
     pub check_roamed_copy: bool,
+    /// Why a fallback happened, one line per problem: the step and the OS
+    /// error. Journaled at startup for support; never shown in the UI.
+    pub diagnostics: Vec<String>,
 }
 
 impl Resolution {
@@ -242,7 +245,14 @@ impl Resolution {
             moved: false,
             journal_left_behind: false,
             check_roamed_copy: false,
+            diagnostics: Vec::new(),
         }
+    }
+
+    /// Records why this run fell back: the step and the OS error.
+    fn because(mut self, step: impl std::fmt::Display, error: &io::Error) -> Self {
+        self.diagnostics.push(format!("{step}: {error}"));
+        self
     }
 
     fn legacy(dir: &Path, notice: StorageNotice) -> Self {
@@ -269,7 +279,10 @@ pub fn resolve(
     }
     let _lock = match lock_local(local_dir) {
         Ok(lock) => lock,
-        Err(_) => return resolve_without_lock(legacy_dir, local_dir),
+        Err(error) => {
+            return resolve_without_lock(legacy_dir, local_dir)
+                .because(format_args!("lock {LOCK_FILE}"), &error)
+        }
     };
     match read_record(local_dir) {
         RecordState::Committed(record) => {
@@ -278,7 +291,10 @@ pub fn resolve(
         // The record exists but cannot be opened right now (an antivirus scan,
         // a sharing violation): a move has happened, so the local folder stays
         // authoritative and nothing moves this run.
-        RecordState::Inaccessible => return Resolution::local(local_dir),
+        RecordState::Inaccessible(error) => {
+            return Resolution::local(local_dir)
+                .because(format_args!("open {RECORD_FILE}"), &error)
+        }
         // Never guess at a record we cannot parse: the local copy stays
         // authoritative and nothing is deleted.
         RecordState::Unreadable if local_dir.join(CONFIG_FILE).exists() => {
@@ -294,7 +310,10 @@ pub fn resolve(
     }
     let legacy = match LegacyContents::read(legacy_dir) {
         Ok(legacy) => legacy,
-        Err(_) => return Resolution::legacy(legacy_dir, StorageNotice::MovePostponed),
+        Err(error) => {
+            return Resolution::legacy(legacy_dir, StorageNotice::MovePostponed)
+                .because("read the roaming folder", &error)
+        }
     };
     if legacy.is_empty() {
         let how = if local_dir.join(CONFIG_FILE).exists() {
@@ -305,8 +324,12 @@ pub fn resolve(
         // A `fresh` record matters: without it, a copy that roams in later
         // would be moved in as if it were ours.
         return match write_record(local_dir, &Record::committed(how)) {
-            Ok(()) => Resolution::local(local_dir),
-            Err(_) => Resolution::legacy(legacy_dir, StorageNotice::MovePostponed),
+            Ok(()) => Resolution {
+                diagnostics: legacy.journal_error.into_iter().collect(),
+                ..Resolution::local(local_dir)
+            },
+            Err(error) => Resolution::legacy(legacy_dir, StorageNotice::MovePostponed)
+                .because(format_args!("write {RECORD_FILE}"), &error),
         };
     }
     migrate(legacy_dir, local_dir, &legacy, hooks)
@@ -327,7 +350,9 @@ fn resolve_without_lock(legacy_dir: &Path, local_dir: &Path) -> Resolution {
             check_roamed_copy: true,
             ..Resolution::local(local_dir)
         },
-        RecordState::Inaccessible => Resolution::local(local_dir),
+        RecordState::Inaccessible(error) => {
+            Resolution::local(local_dir).because(format_args!("open {RECORD_FILE}"), &error)
+        }
         RecordState::Unreadable if local_dir.join(CONFIG_FILE).exists() => Resolution {
             check_roamed_copy: true,
             ..Resolution::local(local_dir)
@@ -453,7 +478,7 @@ enum RecordState {
     Absent,
     Committed(Record),
     /// The record exists but cannot be opened right now.
-    Inaccessible,
+    Inaccessible(io::Error),
     /// The record exists but does not parse.
     Unreadable,
 }
@@ -465,7 +490,7 @@ fn read_record(local_dir: &Path) -> RecordState {
             Err(_) => RecordState::Unreadable,
         },
         Err(error) if error.kind() == io::ErrorKind::NotFound => RecordState::Absent,
-        Err(_) => RecordState::Inaccessible,
+        Err(error) => RecordState::Inaccessible(error),
     }
 }
 
@@ -490,6 +515,9 @@ fn lock_local(local_dir: &Path) -> io::Result<File> {
 struct LegacyContents {
     config: Option<Vec<u8>>,
     journal: Vec<OsString>,
+    /// The journal folder exists but could not be listed: the journal stays
+    /// behind, which the spec allows (§7.3 step 4), and the move goes on.
+    journal_error: Option<String>,
 }
 
 impl LegacyContents {
@@ -500,9 +528,14 @@ impl LegacyContents {
             Err(error) if error.kind() == io::ErrorKind::NotFound => None,
             Err(error) => return Err(error),
         };
+        let (journal, journal_error) = match journal_files(&legacy_dir.join(JOURNAL_DIR)) {
+            Ok(names) => (names, None),
+            Err(error) => (Vec::new(), Some(format!("list the roaming journal: {error}"))),
+        };
         Ok(Self {
             config,
-            journal: journal_files(&legacy_dir.join(JOURNAL_DIR))?,
+            journal,
+            journal_error,
         })
     }
 
@@ -549,32 +582,48 @@ fn migrate(
     // Until the record is written the legacy folder stays authoritative, so
     // anything already in the local folder is a leftover of an interrupted run
     // and is overwritten.
+    let mut diagnostics: Vec<String> = legacy.journal_error.iter().cloned().collect();
     let copied_config = match &legacy.config {
         Some(bytes) => match copy_verified(local_dir, bytes, hooks) {
             Ok(()) => Some(Fingerprint::of(bytes)),
-            Err(_) => return Resolution::legacy(legacy_dir, StorageNotice::MovePostponed),
+            Err(error) => {
+                return Resolution {
+                    diagnostics,
+                    ..Resolution::legacy(legacy_dir, StorageNotice::MovePostponed)
+                }
+                .because("copy signer.json", &error)
+            }
         },
         None => None,
     };
     // The journal is diagnostics: a failed copy is noted, not fatal.
-    let journal_left_behind = copy_journal(legacy_dir, local_dir, &legacy.journal, hooks).is_err();
+    let mut journal_left_behind = legacy.journal_error.is_some();
+    if let Err(error) = copy_journal(legacy_dir, local_dir, &legacy.journal, hooks) {
+        journal_left_behind = true;
+        diagnostics.push(format!("copy the journal: {error}"));
+    }
 
     let record = Record::migrated(retired_dir_for(legacy_dir), copied_config);
-    if hooks
+    if let Err(error) = hooks
         .before(Step::Commit)
         .and_then(|()| write_record(local_dir, &record))
-        .is_err()
     {
-        return Resolution::legacy(legacy_dir, StorageNotice::MovePostponed);
+        return Resolution {
+            diagnostics,
+            ..Resolution::legacy(legacy_dir, StorageNotice::MovePostponed)
+        }
+        .because(format_args!("write {RECORD_FILE}"), &error);
     }
 
     // From here on the local folder is authoritative.
     let cleanup = finish_cleanup(legacy_dir, local_dir, record, hooks);
+    diagnostics.extend(cleanup.diagnostics);
     Resolution {
         notices: cleanup.notices,
         moved: true,
         journal_left_behind,
         check_roamed_copy: cleanup.check_roamed_copy,
+        diagnostics,
         ..Resolution::local(local_dir)
     }
 }
@@ -638,6 +687,7 @@ fn finish_committed(
             let cleanup = finish_cleanup(legacy_dir, local_dir, record, hooks);
             resolution.notices = cleanup.notices;
             resolution.check_roamed_copy = cleanup.check_roamed_copy;
+            resolution.diagnostics = cleanup.diagnostics;
         }
         _ => resolution.check_roamed_copy = true,
     }
@@ -647,6 +697,7 @@ fn finish_committed(
 struct CleanupOutcome {
     notices: Vec<StorageNotice>,
     check_roamed_copy: bool,
+    diagnostics: Vec<String>,
 }
 
 /// Retires the legacy folder named in the record and records the result.
@@ -660,6 +711,7 @@ fn finish_cleanup(
         return CleanupOutcome {
             notices: Vec::new(),
             check_roamed_copy: true,
+            diagnostics: Vec::new(),
         };
     };
     match retire(legacy_dir, &retired_dir, record.copied_config.as_ref(), hooks) {
@@ -682,13 +734,15 @@ fn finish_cleanup(
                 // `Foreign` left a roaming `signer.json` in place: the
                 // background check reports it.
                 check_roamed_copy: true,
+                diagnostics: Vec::new(),
             }
         }
         // The legacy folder still holds our own copy; reporting it as a
         // roamed copy would be a false alarm.
-        Err(_) => CleanupOutcome {
+        Err(error) => CleanupOutcome {
             notices: vec![StorageNotice::LegacyCleanupPending],
             check_roamed_copy: false,
+            diagnostics: vec![format!("retire the roaming folder: {error}")],
         },
     }
 }
@@ -729,7 +783,8 @@ fn retire(
     }
     remove_if_present(&retired_dir.join(CONFIG_TEMP_FILE))?;
     let journal = retired_dir.join(JOURNAL_DIR);
-    for name in journal_files(&journal)? {
+    // A journal that cannot be listed stays behind like any unknown file.
+    for name in journal_files(&journal).unwrap_or_default() {
         fs::remove_file(journal.join(name))?;
     }
     // Both succeed only when empty: unknown files stay where they are.
@@ -908,7 +963,7 @@ mod move_tests {
     fn record(dirs: &Dirs) -> Option<Record> {
         match read_record(&dirs.local) {
             RecordState::Committed(record) => Some(record),
-            RecordState::Absent | RecordState::Inaccessible | RecordState::Unreadable => None,
+            RecordState::Absent | RecordState::Inaccessible(_) | RecordState::Unreadable => None,
         }
     }
 
@@ -1466,6 +1521,73 @@ mod move_tests {
         assert_eq!(fs::read(retired.join("notes.txt")).unwrap(), b"not ours");
         assert!(!retired.join(CONFIG_FILE).exists());
         assert_eq!(roamed_copy(&dirs.legacy, &dirs.local), None);
+    }
+
+    #[test]
+    fn a_failed_step_says_why_in_the_diagnostics() {
+        for (step, expected) in [
+            (Step::CopyConfig, "copy signer.json: injected failure"),
+            (Step::Commit, "write signer-storage.json: injected failure"),
+            (Step::Retire, "retire the roaming folder: injected failure"),
+            (Step::CopyJournal, "copy the journal: injected failure"),
+        ] {
+            let dirs = dirs();
+            seed_legacy(&dirs);
+
+            let resolution = resolve(&dirs.legacy, &dirs.local, &Local, &FailAt(step));
+
+            assert_eq!(resolution.diagnostics, vec![expected.to_string()], "{step:?}");
+        }
+    }
+
+    #[test]
+    fn lock_record_and_share_problems_say_why_in_the_diagnostics() {
+        let locked = dirs();
+        seed_legacy(&locked);
+        fs::create_dir_all(locked.local.join(LOCK_FILE)).unwrap();
+        let resolution = resolve_local(&locked);
+        assert_eq!(resolution.diagnostics.len(), 1);
+        assert!(resolution.diagnostics[0].starts_with("lock signer-storage.lock: "), "{:?}", resolution.diagnostics);
+
+        let unopenable = dirs();
+        resolve_local(&unopenable);
+        make_unopenable(&unopenable.local.join(RECORD_FILE));
+        let resolution = resolve_local(&unopenable);
+        assert_eq!(resolution.diagnostics.len(), 1);
+        assert!(resolution.diagnostics[0].starts_with("open signer-storage.json: "), "{:?}", resolution.diagnostics);
+
+        let root = tempfile::tempdir().unwrap();
+        let resolution = resolve(
+            &root.path().join("Roaming").join("app.markiro.signer"),
+            &root.path().join("Local").join("app.markiro.signer"),
+            &Local,
+            &NoHooks,
+        );
+        assert_eq!(resolution.diagnostics.len(), 1);
+        assert!(resolution.diagnostics[0].starts_with("read the roaming folder: "), "{:?}", resolution.diagnostics);
+    }
+
+    #[test]
+    fn a_roaming_journal_that_cannot_be_listed_does_not_stop_the_move() {
+        let dirs = dirs();
+        write(&dirs.legacy.join(CONFIG_FILE), PAIRED);
+        // A file where the journal folder should be: listing it fails with an
+        // error other than "not found".
+        write(&dirs.legacy.join("journal"), b"not a folder");
+
+        let resolution = resolve_local(&dirs);
+
+        assert!(resolution.moved);
+        assert!(resolution.journal_left_behind);
+        assert!(resolution.notices.is_empty());
+        assert_eq!(resolution.diagnostics.len(), 1);
+        assert!(resolution.diagnostics[0].starts_with("list the roaming journal: "), "{:?}", resolution.diagnostics);
+        assert_eq!(fs::read(dirs.local.join(CONFIG_FILE)).unwrap(), PAIRED);
+        assert_eq!(record(&dirs).unwrap().cleanup, Some(Cleanup::Done));
+        // The unlistable item stays in the retired folder, like any unknown file.
+        let leftovers = roaming_leftovers(&dirs);
+        assert_eq!(leftovers.len(), 1);
+        assert!(!dirs.legacy.parent().unwrap().join(&leftovers[0]).join(CONFIG_FILE).exists());
     }
 
     #[cfg(windows)]

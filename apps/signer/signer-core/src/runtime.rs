@@ -83,7 +83,9 @@ pub fn backoff_for(attempt: u32) -> Duration {
 }
 
 /// The outcome of decrypting the stored credential for one loop iteration.
-#[derive(Debug, PartialEq, Eq)]
+/// `Debug` exists only in tests: `Secret` holds the plaintext agent secret,
+/// and the crate never formats a credential outside a test.
+#[cfg_attr(test, derive(Debug, PartialEq, Eq))]
 enum Unlock {
     /// Decrypted. `recovered`: the previous attempt had failed, so the UI must
     /// leave the pairing screen it was showing.
@@ -287,6 +289,9 @@ impl Runtime {
             if resolution.journal_left_behind {
                 self.note("The previous journal could not be carried over completely", None);
             }
+        }
+        for detail in &resolution.diagnostics {
+            self.note("Agent data storage fallback", Some(detail));
         }
         for notice in &resolution.notices {
             self.report_storage_notice(notice.clone());
@@ -1046,6 +1051,7 @@ mod tests {
             moved: true,
             journal_left_behind: true,
             check_roamed_copy: false,
+            diagnostics: vec!["retire the roaming folder: injected".into()],
         };
 
         runtime.apply_storage_resolution(&resolution);
@@ -1068,6 +1074,10 @@ mod tests {
             journal_count(&runtime, StorageNotice::LegacyCleanupPending.journal_message()),
             1
         );
+        assert!(runtime.status().journal.iter().any(|entry| {
+            entry.message == "Agent data storage fallback"
+                && entry.detail.as_deref() == Some("retire the roaming folder: injected")
+        }));
     }
 
     #[test]
