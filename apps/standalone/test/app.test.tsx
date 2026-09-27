@@ -74,13 +74,19 @@ function fakeConnection() {
   return {
     connection,
     stop,
+    // An async `act`: what the event sets off (a user refresh, a sync)
+    // settles inside it instead of updating the app outside `act`.
     status: async (status: HostStatus) => {
       await subscribed();
-      act(() => handlers?.onStatus(status));
+      await act(async () => {
+        handlers?.onStatus(status);
+      });
     },
     revision: async (rev: number) => {
       await subscribed();
-      act(() => handlers?.onRevision(rev));
+      await act(async () => {
+        handlers?.onRevision(rev);
+      });
     },
   };
 }
@@ -639,16 +645,18 @@ describe("App", () => {
 
     // The first session's read now fails as an ended session; the second
     // session must not be sent back to the sign-in.
-    failFirstRead(
-      new HostError({
-        kind: "api",
-        code: "unauthorized",
-        status: 401,
-        message: "office session ended",
-        details: { credential: "session" },
-      }),
-    );
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await act(async () => {
+      failFirstRead(
+        new HostError({
+          kind: "api",
+          code: "unauthorized",
+          status: 401,
+          message: "office session ended",
+          details: { credential: "session" },
+        }),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
     expect(screen.queryByText("Вход в офис")).toBeNull();
     expect(screen.getByLabelText("Название организации")).toBeTruthy();
     expect(host.getOrg).toHaveBeenLastCalledWith("second-session-token");
