@@ -6,6 +6,7 @@ import { SyncDetailsDialog } from "./ui/SyncDetailsDialog.js";
 import { replacementBlocksNewWork, replacementCanEnterTask } from "./lib/device-replacement.js";
 import { configuredPrinterOutput, configuredPrinterRouting } from "./lib/printer-routing.js";
 import { RecoveryWorkSummary } from "./ui/RecoveryWorkSummary.js";
+import { readStorageStatus, type StationStorageStatus } from "./lib/storage-status.js";
 import {
   initializeDeviceRecovery,
   readDeviceRecovery,
@@ -263,6 +264,7 @@ export function App() {
   const [deviceRecovery, setDeviceRecovery] = useState<DeviceRecoveryView | null>(null);
   const [startupRecoveryFailed, setStartupRecoveryFailed] = useState(false);
   const [savedWork, setSavedWork] = useState<SealedWorkSummary | undefined>();
+  const [storageStatus, setStorageStatus] = useState<StationStorageStatus | null>(null);
   const configRef = useRef<StationConfig | null>(null);
   const configTransitions = useRef(new ConfigTransitionCoordinator());
   const [operator, setOperator] = useState<OperatorMirrorRecord | null>(null);
@@ -664,6 +666,18 @@ export function App() {
       stopPolling();
     };
   }, [shift, shiftBundleRevision]);
+
+  // Diagnostics only: `readStorageStatus` never rejects, and a blocked
+  // storage already stops startup through `readConfig`.
+  useEffect(() => {
+    let cancelled = false;
+    void readStorageStatus().then((status) => {
+      if (!cancelled) setStorageStatus(status);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -1461,6 +1475,7 @@ export function App() {
           runConfigTransition={runEnrollmentConfigTransition}
           scanSource={scanSource}
           pairingServerUrl={pairingServerUrl(config, configuredStationApiUrl())}
+          {...(storageStatus ? { storageNotices: storageStatus.notices } : {})}
         />,
       );
     }
@@ -1578,6 +1593,7 @@ export function App() {
         onSetup={() => setShowSetup(true)}
         scanSource={scanSource}
         pairingServerUrl={pairingServerUrl(config, configuredStationApiUrl())}
+        {...(storageStatus ? { storageNotices: storageStatus.notices } : {})}
       />,
     );
   }
@@ -1989,6 +2005,7 @@ export function App() {
           controller={updater}
           activeShift={activeFloorTask !== null}
           pendingOutbox={syncState.pending}
+          storageStatus={storageStatus}
           onBack={() => {
             void updater.cancel();
             setShowUpdates(false);

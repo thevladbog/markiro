@@ -209,4 +209,50 @@ describe("UpdateCenter", () => {
     view.unmount();
     expect(controller.cancel).toHaveBeenCalledTimes(2);
   });
+
+  it("shows where station data lives and every storage notice", () => {
+    render(
+      <UpdateCenter
+        controller={controllerFixture()}
+        activeShift={false}
+        pendingOutbox={0}
+        onBack={() => {}}
+        storageStatus={{
+          dir: "C:\\Users\\op\\AppData\\Roaming\\app.markiro.station",
+          mode: "legacy",
+          notices: [
+            { kind: "legacy_in_use" },
+            { kind: "roamed_copy_present", sameMachineId: true },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Station data")).toBeDefined();
+    expect(screen.getByText("Stored in the roaming Windows profile:")).toBeDefined();
+    expect(screen.getByText("C:\\Users\\op\\AppData\\Roaming\\app.markiro.station")).toBeDefined();
+    expect(
+      screen.getByText(
+        "Station data is open on another computer under the same Windows account. The move to the local folder is postponed. Contact your administrator.",
+      ),
+    ).toBeDefined();
+    expect(
+      screen.getByText(
+        "This station's data reappeared in the roaming profile: a copy of it may be running on another computer. Contact support.",
+      ),
+    ).toBeDefined();
+  });
+
+  it("leaves the station data section out until its status is known", () => {
+    render(
+      <UpdateCenter
+        controller={controllerFixture()}
+        activeShift={false}
+        pendingOutbox={0}
+        onBack={() => {}}
+      />,
+    );
+
+    expect(screen.queryByText("Station data")).toBeNull();
+  });
 });

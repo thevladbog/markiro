@@ -16,6 +16,7 @@ import {
   type PairingError,
 } from "../lib/pairing.js";
 import { tauriExecutor } from "../lib/sqlite.js";
+import { pairingUnsafe, type StorageNotice } from "../lib/storage-status.js";
 import type { ScanSource } from "../lib/scan-source.js";
 import type { SealedWorkSummary } from "../lib/credential-recovery.js";
 import { StationBrand } from "../ui/StationBrand.js";
@@ -32,6 +33,9 @@ export interface EnrollmentProps {
   scanSource?: ScanSource;
   /** Serializes credential/config persistence with any identity migration. */
   runConfigTransition?: (transition: () => Promise<void>) => Promise<void>;
+  /** From `station_storage_status`: a temporary or mandatory Windows profile
+   * would lose the pairing and every local fact at sign-out. */
+  storageNotices?: readonly StorageNotice[];
 }
 
 export type EnrollmentState = "waiting" | "redeeming" | "success" | "service";
@@ -79,6 +83,7 @@ export function Enrollment({
   onSetup,
   scanSource,
   runConfigTransition = directConfigTransition,
+  storageNotices,
 }: EnrollmentProps) {
   const { t } = useTranslation();
   const [code, setCode] = useState("");
@@ -336,6 +341,9 @@ export function Enrollment({
           <Alert tone="warn">
             <RecoveryWorkSummary summary={sealedWork} />
           </Alert>
+        ) : null}
+        {storageNotices && pairingUnsafe(storageNotices) ? (
+          <Alert tone="warn">{t("storage.pairingUnsafe")}</Alert>
         ) : null}
         {status}
       </div>

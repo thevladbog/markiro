@@ -5067,6 +5067,13 @@ body,
   font: var(--floor-body);
 }
 
+.station-update-center__storage-folder {
+  margin: 0;
+  color: var(--fg-2);
+  font: var(--floor-body);
+  overflow-wrap: anywhere;
+}
+
 .station-update-center__progress {
   width: min(720px, 100%);
   height: 20px;
