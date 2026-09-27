@@ -1,9 +1,9 @@
 use serde::Deserialize;
 use serde_json::Value;
 use sqlx::{sqlite::SqliteConnectOptions, Connection, Executor, SqliteConnection};
-use tauri::Manager;
 
-const DATABASE_NAME: &str = "station-mirror.db";
+use crate::storage::StorageGate;
+
 const MAX_STATEMENTS: usize = 32;
 const MAX_SQL_BYTES: usize = 64 * 1024;
 const MAX_VALUES: usize = 256;
@@ -113,15 +113,15 @@ async fn execute(
 
 #[tauri::command]
 pub async fn grant_atomic_execute(
-    app: tauri::AppHandle,
+    gate: tauri::State<'_, StorageGate>,
     statements: Vec<AtomicStatement>,
 ) -> Result<Vec<u64>, String> {
     validate(&statements)?;
-    let path = app
-        .path()
-        .app_config_dir()
+    let path = gate
+        .ready()
+        .await
         .map_err(|_| "station database directory unavailable".to_string())?
-        .join(DATABASE_NAME);
+        .database_path();
     let options = SqliteConnectOptions::new()
         .filename(path)
         .create_if_missing(false);

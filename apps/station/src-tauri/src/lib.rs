@@ -30,6 +30,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
             app.manage(scanner::manager(app.handle().clone()));
+            start_storage_resolution(app)?;
             if let Some(window) = app.get_webview_window("main") {
                 window.set_icon(STATION_ICON.clone())?;
             }
@@ -53,6 +54,8 @@ pub fn run() {
             commands::read_config,
             commands::write_config,
             commands::clear_credential,
+            commands::station_database_url,
+            commands::station_storage_status,
             commands::enter_lockdown,
             commands::exit_lockdown,
             grant_clock::grant_clock_sample,
@@ -70,4 +73,36 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Markiro station");
+}
+
+/// Resolves where `station.json` and `station-mirror.db` live, on a background
+/// thread: `setup` runs on the UI thread after the main window exists, and the
+/// one-time move copies the database. Storage commands wait on the gate.
+fn start_storage_resolution(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    let (resolved, gate) = storage::storage_gate();
+    app.manage(gate);
+    let legacy_dir = app.path().app_config_dir()?;
+    let local_dir = app.path().app_local_data_dir()?;
+    std::thread::Builder::new()
+        .name("station-storage".into())
+        .spawn(move || {
+            let resolution = storage::resolve(
+                &legacy_dir,
+                &local_dir,
+                storage::profile_facts(),
+                &mut |_| Ok(()),
+            );
+            match &resolution {
+                Ok(storage) if !storage.notices.is_empty() => eprintln!(
+                    "station: storage {:?} in {} with notices {:?}",
+                    storage.mode,
+                    storage.dir.display(),
+                    storage.notices
+                ),
+                Ok(_) => {}
+                Err(reason) => eprintln!("station: storage blocked: {reason}"),
+            }
+            resolved.resolve(resolution);
+        })?;
+    Ok(())
 }

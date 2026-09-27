@@ -17,9 +17,9 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-pub use gate::{storage_gate, StorageGate, StorageGateSender};
-pub use probe::{profile_facts, LessDurableReason, ProfileFacts};
-pub use resolve::{resolve, Step};
+pub use gate::{storage_gate, StorageGate};
+pub use probe::{profile_facts, LessDurableReason};
+pub use resolve::resolve;
 
 pub(crate) const CONFIG_FILE: &str = "station.json";
 pub(crate) const DATABASE_FILE: &str = "station-mirror.db";
