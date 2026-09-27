@@ -4,9 +4,17 @@ import type { SqlExecutor } from "./mirror.js";
 
 let dbPromise: Promise<Database> | null = null;
 
-/** Opens (once) the on-device SQLite mirror DB via tauri-plugin-sql. */
+/**
+ * Opens (once) the on-device SQLite mirror DB via tauri-plugin-sql. The Rust
+ * side says where it lives (`station_database_url`): the machine-local folder,
+ * or the roaming one while the one-time move is postponed. Never the relative
+ * `sqlite:station-mirror.db`, which the plugin resolves against the roaming
+ * app-config folder.
+ */
 function db(): Promise<Database> {
-  if (!dbPromise) dbPromise = Database.load("sqlite:station-mirror.db");
+  if (!dbPromise) {
+    dbPromise = invoke<string>("station_database_url").then((url) => Database.load(url));
+  }
   return dbPromise;
 }
 
