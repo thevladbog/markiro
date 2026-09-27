@@ -10,7 +10,7 @@ import type {
   OrgProfile,
   SsccState,
 } from "../../src/host/protocol.js";
-import { Office } from "../../src/office/Office.js";
+import { Office, type OfficeProps } from "../../src/office/Office.js";
 import type { OfficeSessionValue } from "../../src/office/office-session.js";
 import { SESSION } from "./fixtures.js";
 
@@ -65,10 +65,13 @@ export function fakeOfficeSession(
 }
 
 /** The office as the shell renders it, in the dark theme. */
-export function renderOffice(session: OfficeSessionValue): RenderResult {
+export function renderOffice(
+  session: OfficeSessionValue,
+  props: Omit<OfficeProps, "session"> = {},
+): RenderResult {
   return render(
     <ThemeProvider defaultTheme="dark">
-      <Office session={session} />
+      <Office session={session} {...props} />
     </ThemeProvider>,
   );
 }

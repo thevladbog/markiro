@@ -1,7 +1,10 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { ThemeProvider } from "@markiro/ui";
+
 import { HostError } from "../src/host/client.js";
+import { Office } from "../src/office/Office.js";
 import { OfficeLogin } from "../src/office/OfficeLogin.js";
 import { fakeOfficeSession, ORG_PROFILE, renderOffice, TECHNOLOGIST } from "./support/office.js";
 import { SESSION } from "./support/fixtures.js";
@@ -116,6 +119,26 @@ describe("Office", () => {
     renderOffice(fakeOfficeSession({ user: TECHNOLOGIST }));
     expect(await screen.findByRole("link", { name: "Профиль" })).toBeTruthy();
     expect(screen.getByText("Организация")).toBeTruthy();
+  });
+
+  it("re-reads the signed-in user on a new host revision and leaves the open page alone", async () => {
+    const session = fakeOfficeSession();
+    session.api.getOrg.mockResolvedValue(ORG_PROFILE);
+    const view = renderOffice(session, { hostRevision: 3 });
+    fireEvent.click(await screen.findByRole("link", { name: "Профиль" }));
+    await screen.findByLabelText("Название организации");
+    // The revision the office opened with is not news.
+    expect(session.api.getOrg).toHaveBeenCalledTimes(1);
+    expect(session.refreshUser).not.toHaveBeenCalled();
+
+    view.rerender(
+      <ThemeProvider defaultTheme="dark">
+        <Office session={session} hostRevision={4} />
+      </ThemeProvider>,
+    );
+    await waitFor(() => expect(session.refreshUser).toHaveBeenCalledTimes(1));
+    // The open form is not reloaded under the user.
+    expect(session.api.getOrg).toHaveBeenCalledTimes(1);
   });
 
   it("moves focus to the page after a menu navigation", async () => {

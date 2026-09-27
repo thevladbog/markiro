@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { StrictMode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
@@ -7,14 +7,63 @@ import { ThemeProvider } from "@markiro/ui";
 import { App } from "../src/app/App.js";
 import type { HostApi } from "../src/host/api.js";
 import { HostError } from "../src/host/client.js";
+import type { ConnectionApi, ConnectionHandlers } from "../src/host/connection.js";
 import { DeviceError, type DeviceApi } from "../src/host/device.js";
 import { HostProbeError, type HostProbe } from "../src/host/probe.js";
-import type { DeviceStatus } from "../src/host/protocol.js";
-import { DEVICE_STATUS, observation, SESSION } from "./support/fixtures.js";
+import type {
+  ChangeItem,
+  ChangesResponse,
+  DeviceStatus,
+  HostStatus,
+} from "../src/host/protocol.js";
+import type { LocalExecutor } from "../src/local/executor.js";
+import { DEVICE_STATUS, HOST_ID, LINE_ID, observation, SESSION } from "./support/fixtures.js";
+import { openLocalDb } from "./support/local-db.js";
 import { fakeHostApi, ORG_PROFILE } from "./support/office.js";
 import { completeWizard, EXPECTED_REQUEST } from "./support/wizard.js";
 
 const ADDRESS = "https://127.0.0.1:45710";
+const REMOTE_ADDRESS = "https://192.168.1.10:45710";
+const OTHER_HOST_ID = "0e2b1f7a-6c1d-4b8e-9f3a-2d4c5b6a7e8f";
+const ONLINE: HostStatus = {
+  state: "online",
+  lastContactAt: 1_790_000_000_000,
+  lastError: null,
+  seq: 1,
+};
+
+function feedPage(rev: number, items: ChangeItem[] = [], hostId = HOST_ID): ChangesResponse {
+  return { hostId, rev, hasMore: false, items };
+}
+
+function lineItem(rev: number, name: string): ChangeItem {
+  return { entity: "lines", id: LINE_ID, rev, deleted: false, data: { name, archived: false } };
+}
+
+/**
+ * The shell's link as the test drives it: `watch` reports "online" at once,
+ * `status` and `revision` reach the app like shell events.
+ */
+function fakeConnection() {
+  let handlers: ConnectionHandlers | null = null;
+  const stop = vi.fn();
+  const connection: ConnectionApi = {
+    watch: vi.fn(async (next: ConnectionHandlers) => {
+      handlers = next;
+      next.onStatus(ONLINE);
+      return () => {
+        handlers = null;
+        stop();
+      };
+    }),
+  };
+  return {
+    connection,
+    stop,
+    status: (status: HostStatus) => act(() => handlers?.onStatus(status)),
+    revision: (rev: number) => act(() => handlers?.onRevision(rev)),
+  };
+}
 
 /** Answers `hello` in order; the last answer repeats. `true`/`false` is `initialized`. */
 function probeAnswering(...answers: Array<boolean | HostProbeError>) {
@@ -68,13 +117,27 @@ function fakeHost() {
     bootstrap: vi.fn<HostApi["bootstrap"]>(async () => ({ session: SESSION })),
     officeLogin: vi.fn<HostApi["officeLogin"]>(async () => SESSION),
     officeChangePassword: vi.fn<HostApi["officeChangePassword"]>(async () => undefined),
+    getChanges: vi.fn<HostApi["getChanges"]>(async () => feedPage(0)),
   });
 }
 
-function renderApp(services: { probe: HostProbe; device: DeviceApi; host: HostApi }) {
+interface Services {
+  probe: HostProbe;
+  device: DeviceApi;
+  host: HostApi;
+  connection?: ConnectionApi;
+  local?: LocalExecutor;
+}
+
+/** The app with fakes; the link stays online and the local database is a fresh one. */
+function renderApp({
+  connection = fakeConnection().connection,
+  local = openLocalDb().executor,
+  ...services
+}: Services) {
   return render(
     <ThemeProvider defaultTheme="dark">
-      <App {...services} address={ADDRESS} />
+      <App {...services} connection={connection} local={local} address={ADDRESS} />
     </ThemeProvider>,
   );
 }
@@ -123,7 +186,14 @@ describe("App", () => {
     render(
       <StrictMode>
         <ThemeProvider defaultTheme="dark">
-          <App probe={probeAnswering(true)} device={device} host={host} address={ADDRESS} />
+          <App
+            probe={probeAnswering(true)}
+            device={device}
+            host={host}
+            connection={fakeConnection().connection}
+            local={openLocalDb().executor}
+            address={ADDRESS}
+          />
         </ThemeProvider>
       </StrictMode>,
     );
@@ -535,5 +605,121 @@ describe("App", () => {
     expect(screen.queryByText("Вход в офис")).toBeNull();
     expect(screen.getByLabelText("Название организации")).toBeTruthy();
     expect(host.getOrg).toHaveBeenLastCalledWith("second-session-token");
+  });
+
+  it("keeps the local copies in step with the host: at start and after every revision", async () => {
+    const { db, executor } = openLocalDb();
+    const link = fakeConnection();
+    const host = fakeHost();
+    host.getChanges
+      .mockResolvedValueOnce(feedPage(42, [lineItem(42, "Линия 1")]))
+      .mockResolvedValueOnce(feedPage(43, [lineItem(43, "Линия 1 (упаковка)")]));
+    const lineNames = () =>
+      Array.from(db.prepare("SELECT name FROM ref_lines").all(), (row) => row.name);
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(DEVICE_STATUS),
+      host,
+      connection: link.connection,
+      local: executor,
+    });
+    await waitFor(() => expect(lineNames()).toEqual(["Линия 1"]));
+    expect(host.getChanges).toHaveBeenCalledWith(0);
+
+    link.revision(43);
+    await waitFor(() => expect(lineNames()).toEqual(["Линия 1 (упаковка)"]));
+    expect(host.getChanges).toHaveBeenLastCalledWith(42);
+  });
+
+  it("sends a device whose key the host refuses on the link to pairing again", async () => {
+    const link = fakeConnection();
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(DEVICE_STATUS),
+      host: fakeHost(),
+      connection: link.connection,
+    });
+    await screen.findByText("Цех");
+    link.status({ state: "offline", lastContactAt: null, lastError: "key_rejected", seq: 2 });
+    expect(await screen.findByText("Хост не принимает это устройство")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Хост не узнаёт ключ этого устройства: устройство могли отключить в офисе или восстановить базу хоста из копии.",
+      ),
+    ).toBeTruthy();
+    // The link stops with the pairing it no longer serves.
+    expect(link.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it("names the remote host whose certificate changed on the link", async () => {
+    const link = fakeConnection();
+    renderApp({
+      probe: probeAnswering(new HostProbeError("unreachable", "no host on this computer")),
+      device: fakeDevice({ ...DEVICE_STATUS, hostAddress: REMOTE_ADDRESS }),
+      host: fakeHost(),
+      connection: link.connection,
+    });
+    await screen.findByText("Цех");
+    link.status({
+      state: "offline",
+      lastContactAt: 1_790_000_000_000,
+      lastError: "certificate_mismatch",
+      seq: 2,
+    });
+    expect(
+      await screen.findByText(
+        `Хост по адресу ${REMOTE_ADDRESS} сменился: его сертификат не совпадает с сохранённым при подключении.`,
+      ),
+    ).toBeTruthy();
+  });
+
+  it("stops at a host that is not the paired one and pairs again from scratch", async () => {
+    const link = fakeConnection();
+    const device = fakeDevice(DEVICE_STATUS);
+    const host = fakeHost();
+    host.getChanges.mockResolvedValueOnce(feedPage(7, [], OTHER_HOST_ID));
+    renderApp({ probe: probeAnswering(true), device, host, connection: link.connection });
+    expect(await screen.findByText("Устройство подключено к другому хосту")).toBeTruthy();
+    expect(
+      screen.getByText(
+        `По адресу ${ADDRESS} отвечает хост, к которому это устройство не подключали. Справочники с него не загружаются. Подключите устройство заново.`,
+      ),
+    ).toBeTruthy();
+    expect(link.stop).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Подключить заново" }));
+    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(device.forget).toHaveBeenCalledTimes(1);
+    expect(device.pairLocally).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads the signed-in user again when the host announces a revision and leaves the open page alone", async () => {
+    const link = fakeConnection();
+    const host = fakeHost();
+    host.getOrg.mockResolvedValue(ORG_PROFILE);
+    host.officeMe.mockResolvedValue({ ...SESSION.user, name: "Ирина Орлова" });
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(DEVICE_STATUS),
+      host,
+      connection: link.connection,
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
+    await signIn();
+    fireEvent.click(await screen.findByRole("link", { name: "Профиль" }));
+    await screen.findByLabelText("Название организации");
+    expect(host.getOrg).toHaveBeenCalledTimes(1);
+    expect(host.officeMe).not.toHaveBeenCalled();
+
+    link.revision(44);
+    // The header shows `session.user.name`; waiting for the new name is what
+    // makes the negative assertion below meaningful — it proves the
+    // refreshed session was actually applied, not merely that nothing fired.
+    expect(await screen.findByText("Ирина Орлова")).toBeTruthy();
+    expect(host.officeMe).toHaveBeenCalledWith("office-session-token");
+    // Flush any other pending work the revision could have triggered.
+    await act(async () => {});
+    expect(host.getOrg).toHaveBeenCalledTimes(1);
+    expect(screen.getByLabelText("Название организации")).toBeTruthy();
   });
 });

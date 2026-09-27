@@ -1,5 +1,5 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createMemoryRouter, RouterProvider } from "react-router";
 
 import { createOfficeQueryClient } from "./office-query.js";
@@ -8,6 +8,12 @@ import { officeRoutes } from "./routes.js";
 
 export interface OfficeProps {
   session: OfficeSessionValue;
+  /**
+   * The latest revision the host announced (`null` before the first). When
+   * it changes, the signed-in user is read again, so a new name or role
+   * shows without a new sign-in. Open pages are not reloaded under the user.
+   */
+  hostRevision?: number | null;
 }
 
 /**
@@ -15,9 +21,19 @@ export interface OfficeProps {
  * a query cache, both living exactly as long as one session — `App` mounts
  * `Office` with the session token as its key.
  */
-export function Office({ session }: OfficeProps) {
+export function Office({ session, hostRevision = null }: OfficeProps) {
   const [router] = useState(() => createMemoryRouter(officeRoutes, { initialEntries: ["/"] }));
   const [queryClient] = useState(createOfficeQueryClient);
+  const shownRevision = useRef(hostRevision);
+  useEffect(() => {
+    if (shownRevision.current === hostRevision) return;
+    shownRevision.current = hostRevision;
+    // The user's name and role follow the host at once. Pages read fresh
+    // data whenever they open (`staleTime` 0); an open page is not reloaded
+    // under the user, so a form keeps what was typed and a save over a newer
+    // record meets `stale_revision` instead of losing the edits silently.
+    void session.refreshUser().catch(() => undefined);
+  }, [hostRevision, session]);
   return (
     <QueryClientProvider client={queryClient}>
       <OfficeSessionProvider value={session}>

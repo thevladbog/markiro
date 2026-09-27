@@ -295,6 +295,21 @@ each revision and never opens the stream itself.
   (ESLint bans native form elements in `src/`); forms check the host's and
   `@markiro/domain` rules before sending.
 
+## App shell
+
+`src/app/shell.ts` holds the screen state; `nextShellView` picks the screen
+in a fixed order: the device config, pairing, a rejected device, another
+host, the local host's version and identity, then the office or the floor.
+While a host is paired, `useHostLink` (`src/app/host-link.ts`) follows the
+shell's link and syncs reference data at start and after every revision
+event; it stops when the pairing ends, is rejected or turns out to belong
+to another host (`other_host`, which only a new pairing clears). A link
+`lastError` of `key_rejected` or `certificate_mismatch` is a rejected
+device, exactly like the same answer to an office call. A new revision
+re-reads the signed-in user (`Office`, `hostRevision`); it does not reload an
+open page, so a form keeps what was typed and a save over a newer record meets
+`stale_revision`. Pages read fresh data whenever they open (`staleTime` 0).
+
 ## Office pages
 
 - Every office request goes through `session.call` with `session.api`

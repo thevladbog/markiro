@@ -92,28 +92,59 @@ export function PairFailedScreen({
 
 export function DeviceRejectedScreen({
   reason,
+  remoteAddress,
   busy,
   error,
   onRepair,
 }: {
   reason: RejectionReason;
+  /** The paired host's address when that host is not on this computer. */
+  remoteAddress: string | null;
+  busy: boolean;
+  error: DeviceErrorCode | null;
+  onRepair: () => void;
+}) {
+  const { t } = useTranslation();
+  let explanation = t("shell.deviceRejected.keyRejected");
+  if (reason === "host_changed") {
+    explanation =
+      remoteAddress === null
+        ? t("shell.deviceRejected.hostChanged")
+        : t("shell.deviceRejected.hostChangedRemote", { address: remoteAddress });
+  }
+  return (
+    <Card className="standalone-card" title={t("shell.deviceRejected.title")} titleAs="h2">
+      <Alert tone="warn">{explanation}</Alert>
+      {error && <Alert tone="error">{t(`errors.device.${error}`)}</Alert>}
+      <Button onClick={onRepair} loading={busy}>
+        {t("shell.deviceRejected.repair")}
+      </Button>
+    </Card>
+  );
+}
+
+/**
+ * The change feed came from another host than the paired one (spec §5.4):
+ * nothing more is synced, and the device pairs again from scratch.
+ */
+export function OtherHostScreen({
+  hostAddress,
+  busy,
+  error,
+  onRepair,
+}: {
+  hostAddress: string;
   busy: boolean;
   error: DeviceErrorCode | null;
   onRepair: () => void;
 }) {
   const { t } = useTranslation();
   return (
-    <Card className="standalone-card" title={t("shell.deviceRejected.title")} titleAs="h2">
-      <Alert tone="warn">
-        {t(
-          reason === "key_rejected"
-            ? "shell.deviceRejected.keyRejected"
-            : "shell.deviceRejected.hostChanged",
-        )}
-      </Alert>
+    <Card className="standalone-card" title={t("shell.otherHost.title")} titleAs="h2">
+      <Alert tone="warn">{t("shell.otherHost.body", { address: hostAddress })}</Alert>
       {error && <Alert tone="error">{t(`errors.device.${error}`)}</Alert>}
       <Button onClick={onRepair} loading={busy}>
-        {t("shell.deviceRejected.repair")}
+        {t("shell.otherHost.repair")}
       </Button>
     </Card>
   );

@@ -1,7 +1,8 @@
 import { HostError } from "../host/client.js";
 import type { DeviceErrorCode } from "../host/device.js";
 import type { HelloObservation, HostProbeErrorCode } from "../host/probe.js";
-import type { DeviceStatus, OfficeSession, OfficeUser } from "../host/protocol.js";
+import type { DeviceStatus, HostStatus, OfficeSession, OfficeUser } from "../host/protocol.js";
+import type { SyncResult } from "../local/reference-sync.js";
 
 /** What the probe of the host on this computer found. */
 export type LocalHostState =
@@ -32,12 +33,28 @@ export type OfficeState =
   | { kind: "signing_in"; notice: OfficeLoginNotice | null }
   | { kind: "open"; session: OfficeSession };
 
+/**
+ * The reference sync (`src/local/reference-sync.ts`): what the latest run
+ * is doing or how it ended, and how many runs brought the local copies up
+ * to date since the pairing, so a screen reading them knows when to read
+ * again.
+ */
+export interface SyncState {
+  kind: "idle" | "running" | "done" | "failed" | "other_host";
+  synced: number;
+}
+
 export interface ShellState {
   device: DeviceState;
   localHost: LocalHostState;
   pairing: PairingState;
   rejection: RejectionReason | null;
   office: OfficeState;
+  /** The link to the host as the shell reports it; `null` before the first status. */
+  link: HostStatus | null;
+  sync: SyncState;
+  /** The latest revision the host announced; open office data reloads when it changes. */
+  hostRevision: number | null;
 }
 
 export type ShellView =
@@ -48,6 +65,7 @@ export type ShellView =
   | { kind: "pairing" }
   | { kind: "pair_failed"; code: DeviceErrorCode }
   | { kind: "device_rejected"; reason: RejectionReason }
+  | { kind: "other_host"; hostAddress: string }
   | { kind: "floor" }
   | { kind: "office_login"; notice: OfficeLoginNotice | null }
   | { kind: "office"; session: OfficeSession };
@@ -69,9 +87,15 @@ export type ShellAction =
   | { type: "office_closed" }
   | { type: "session_ended"; token: string }
   | { type: "device_rejected"; reason: RejectionReason; token?: string }
-  | { type: "office_user_refreshed"; token: string; user: OfficeUser };
+  | { type: "office_user_refreshed"; token: string; user: OfficeUser }
+  | { type: "link_status"; status: HostStatus }
+  | { type: "host_revision"; rev: number }
+  | { type: "sync_started" }
+  | { type: "sync_finished"; result: SyncResult }
+  | { type: "sync_failed" };
 
 const CLOSED_OFFICE: OfficeState = { kind: "closed" };
+const IDLE_SYNC: SyncState = { kind: "idle", synced: 0 };
 
 export const initialShellState: ShellState = {
   device: { kind: "loading" },
@@ -79,7 +103,20 @@ export const initialShellState: ShellState = {
   pairing: { kind: "idle" },
   rejection: null,
   office: CLOSED_OFFICE,
+  link: null,
+  sync: IDLE_SYNC,
+  hostRevision: null,
 };
+
+/**
+ * A link failure that no retry can cure: the host refuses this device's key,
+ * or presents another certificate than the one pinned at pairing.
+ */
+function linkRejection(status: HostStatus): RejectionReason | null {
+  if (status.lastError === "key_rejected") return "key_rejected";
+  if (status.lastError === "certificate_mismatch") return "host_changed";
+  return null;
+}
 
 /**
  * The screen for a snapshot (stage 1 spec §5.1), a pure function like the
@@ -105,6 +142,9 @@ export function nextShellView(state: ShellState, localAddress: string): ShellVie
     return { kind: "pairing" };
   }
   if (state.rejection) return { kind: "device_rejected", reason: state.rejection };
+  if (state.sync.kind === "other_host") {
+    return { kind: "other_host", hostAddress: status.hostAddress };
+  }
   if (status.hostAddress === localAddress) {
     if (localHost.kind === "found") {
       const { hello, fingerprint } = localHost.observation;
@@ -160,6 +200,9 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
         pairing: { kind: "idle" },
         rejection: null,
         office: CLOSED_OFFICE,
+        link: null,
+        sync: IDLE_SYNC,
+        hostRevision: null,
       };
     case "host_initialized":
       if (state.localHost.kind !== "found") return state;
@@ -210,6 +253,23 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
         ...state,
         office: { kind: "open", session: { ...state.office.session, user: action.user } },
       };
+    case "link_status": {
+      const rejection = linkRejection(action.status);
+      if (rejection === null) return { ...state, link: action.status };
+      return { ...state, link: action.status, rejection, office: CLOSED_OFFICE };
+    }
+    case "host_revision":
+      return { ...state, hostRevision: action.rev };
+    case "sync_started":
+      return { ...state, sync: { ...state.sync, kind: "running" } };
+    case "sync_finished":
+      if (action.result.kind === "other_host") {
+        // Office requests would reach a host this device was never paired with.
+        return { ...state, sync: { ...state.sync, kind: "other_host" }, office: CLOSED_OFFICE };
+      }
+      return { ...state, sync: { kind: "done", synced: state.sync.synced + 1 } };
+    case "sync_failed":
+      return { ...state, sync: { ...state.sync, kind: "failed" } };
   }
 }
 

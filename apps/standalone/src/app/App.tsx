@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import { createHostApi, type HostApi } from "../host/api.js";
 import { createTauriHostClient, HostError } from "../host/client.js";
+import { createTauriConnectionApi, type ConnectionApi } from "../host/connection.js";
 import {
   createTauriDeviceApi,
   DeviceError,
@@ -16,15 +17,18 @@ import {
   type DeviceStatus,
   type OfficeLoginRequest,
 } from "../host/protocol.js";
+import { createTauriLocalExecutor, type LocalExecutor } from "../local/executor.js";
 import { Office } from "../office/Office.js";
 import { OfficeLogin } from "../office/OfficeLogin.js";
 import type { OfficeSessionValue } from "../office/office-session.js";
 import { BootstrapWizard } from "../wizard/BootstrapWizard.js";
+import { useHostLink } from "./host-link.js";
 import {
   ConfigErrorScreen,
   DeviceRejectedScreen,
   FloorScreen,
   HostMissingScreen,
+  OtherHostScreen,
   PairFailedScreen,
   WaitScreen,
 } from "./screens.js";
@@ -34,19 +38,45 @@ export interface AppProps {
   probe?: HostProbe;
   device?: DeviceApi;
   host?: HostApi;
+  connection?: ConnectionApi;
+  local?: LocalExecutor;
   address?: string;
 }
 
-export function App({ probe, device, host, address = LOCAL_HOST_ADDRESS }: AppProps) {
+export function App({
+  probe,
+  device,
+  host,
+  connection,
+  local,
+  address = LOCAL_HOST_ADDRESS,
+}: AppProps) {
   const { t } = useTranslation();
   const hostProbe = useMemo(() => probe ?? createTauriHostProbe(), [probe]);
   const deviceApi = useMemo(() => device ?? createTauriDeviceApi(), [device]);
   const hostApi = useMemo(() => host ?? createHostApi(createTauriHostClient()), [host]);
+  const connectionApi = useMemo(() => connection ?? createTauriConnectionApi(), [connection]);
+  const localDb = useMemo(() => local ?? createTauriLocalExecutor(), [local]);
   const [state, dispatch] = useReducer(shellReducer, initialShellState);
   const [probeAttempt, setProbeAttempt] = useState(0);
   const [repairState, setRepairState] = useState<"idle" | "busy" | DeviceErrorCode>("idle");
   const view = nextShellView(state, address);
   const localName = t("device.localName");
+  const pairedStatus = state.device.kind === "ready" ? state.device.status : null;
+  // The pairing's host when it is not the one on this computer.
+  const remoteAddress =
+    pairedStatus !== null && pairedStatus.hostAddress !== address ? pairedStatus.hostAddress : null;
+
+  useHostLink({
+    hostId:
+      pairedStatus !== null && state.rejection === null && state.sync.kind !== "other_host"
+        ? pairedStatus.hostId
+        : null,
+    connection: connectionApi,
+    local: localDb,
+    changes: hostApi.getChanges,
+    dispatch,
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -225,7 +255,9 @@ export function App({ probe, device, host, address = LOCAL_HOST_ADDRESS }: AppPr
     };
   }, [session, hostApi]);
 
-  if (session && officeSession) return <Office key={session.token} session={officeSession} />;
+  if (session && officeSession) {
+    return <Office key={session.token} session={officeSession} hostRevision={state.hostRevision} />;
+  }
 
   const repairBusy = repairState === "busy";
   const repairError = repairState === "idle" || repairState === "busy" ? null : repairState;
@@ -255,6 +287,15 @@ export function App({ probe, device, host, address = LOCAL_HOST_ADDRESS }: AppPr
       {view.kind === "device_rejected" && (
         <DeviceRejectedScreen
           reason={view.reason}
+          remoteAddress={remoteAddress}
+          busy={repairBusy}
+          error={repairError}
+          onRepair={repair}
+        />
+      )}
+      {view.kind === "other_host" && (
+        <OtherHostScreen
+          hostAddress={view.hostAddress}
           busy={repairBusy}
           error={repairError}
           onRepair={repair}

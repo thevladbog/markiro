@@ -5,9 +5,11 @@ import {
   nextShellView,
   shellActionFor,
   shellReducer,
+  type ShellAction,
   type ShellState,
 } from "../src/app/shell.js";
 import { HostError } from "../src/host/client.js";
+import type { HostStatus } from "../src/host/protocol.js";
 import { DEVICE_STATUS, observation, SESSION } from "./support/fixtures.js";
 
 /** The address `App` probes; `DEVICE_STATUS.hostAddress` matches it by default. */
@@ -15,6 +17,16 @@ const ADDRESS = DEVICE_STATUS.hostAddress;
 
 function unpaired(overrides: Partial<ShellState> = {}): ShellState {
   return { ...initialShellState, device: { kind: "ready", status: null }, ...overrides };
+}
+
+function linkStatus(overrides: Partial<HostStatus> = {}): HostStatus {
+  return {
+    state: "online",
+    lastContactAt: 1_790_000_000_000,
+    lastError: null,
+    seq: 3,
+    ...overrides,
+  };
 }
 
 function paired(overrides: Partial<ShellState> = {}): ShellState {
@@ -267,6 +279,84 @@ describe("shellReducer", () => {
     expect(
       shellReducer(closed, { type: "office_user_refreshed", token: SESSION.token, user: renamed }),
     ).toEqual(closed);
+  });
+});
+
+describe("link and reference sync", () => {
+  it("keeps the link status the shell reports", () => {
+    expect(shellReducer(paired(), { type: "link_status", status: linkStatus() }).link).toEqual(
+      linkStatus(),
+    );
+  });
+
+  it("treats a refused key or a changed certificate on the link as a rejected device", () => {
+    const open = shellReducer(paired(), { type: "office_opened", session: SESSION });
+    const refused = shellReducer(open, {
+      type: "link_status",
+      status: linkStatus({ state: "offline", lastError: "key_rejected" }),
+    });
+    expect(refused.rejection).toBe("key_rejected");
+    expect(refused.office).toEqual({ kind: "closed" });
+    const changed = shellReducer(paired(), {
+      type: "link_status",
+      status: linkStatus({ state: "connecting", lastError: "certificate_mismatch" }),
+    });
+    expect(nextShellView(changed, ADDRESS)).toEqual({
+      kind: "device_rejected",
+      reason: "host_changed",
+    });
+    const unreachable = shellReducer(paired(), {
+      type: "link_status",
+      status: linkStatus({ state: "offline", lastError: "unreachable" }),
+    });
+    expect(unreachable.rejection).toBeNull();
+    expect(nextShellView(unreachable, ADDRESS)).toEqual({ kind: "floor" });
+  });
+
+  it("keeps the latest revision the host announced", () => {
+    expect(shellReducer(paired(), { type: "host_revision", rev: 42 }).hostRevision).toBe(42);
+  });
+
+  it("counts the syncs that brought the copies up to date", () => {
+    const running = shellReducer(paired(), { type: "sync_started" });
+    expect(running.sync).toEqual({ kind: "running", synced: 0 });
+    const done = shellReducer(running, {
+      type: "sync_finished",
+      result: { kind: "synced", rev: 42 },
+    });
+    expect(done.sync).toEqual({ kind: "done", synced: 1 });
+    const again = shellReducer(done, { type: "sync_started" });
+    expect(again.sync).toEqual({ kind: "running", synced: 1 });
+    expect(shellReducer(again, { type: "sync_failed" }).sync).toEqual({
+      kind: "failed",
+      synced: 1,
+    });
+  });
+
+  it("stops at another host before anything else but a rejected device", () => {
+    const open = shellReducer(paired(), { type: "office_opened", session: SESSION });
+    const other = shellReducer(open, { type: "sync_finished", result: { kind: "other_host" } });
+    expect(other.office).toEqual({ kind: "closed" });
+    expect(nextShellView(other, ADDRESS)).toEqual({
+      kind: "other_host",
+      hostAddress: DEVICE_STATUS.hostAddress,
+    });
+    expect(nextShellView({ ...other, rejection: "key_rejected" }, ADDRESS)).toEqual({
+      kind: "device_rejected",
+      reason: "key_rejected",
+    });
+  });
+
+  it("forgets the link, the sync and the revision with the pairing", () => {
+    const actions: ShellAction[] = [
+      { type: "link_status", status: linkStatus() },
+      { type: "host_revision", rev: 42 },
+      { type: "sync_finished", result: { kind: "other_host" } },
+    ];
+    const forgotten = shellReducer(actions.reduce(shellReducer, paired()), { type: "forgotten" });
+    expect(forgotten.link).toBeNull();
+    expect(forgotten.hostRevision).toBeNull();
+    expect(forgotten.sync).toEqual({ kind: "idle", synced: 0 });
   });
 });
 
