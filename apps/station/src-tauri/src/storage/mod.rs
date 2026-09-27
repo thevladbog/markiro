@@ -11,6 +11,7 @@ mod copy;
 mod gate;
 mod probe;
 mod record;
+mod resolve;
 
 use std::path::{Path, PathBuf};
 
@@ -18,6 +19,7 @@ use serde::Serialize;
 
 pub use gate::{storage_gate, StorageGate, StorageGateSender};
 pub use probe::{profile_facts, LessDurableReason, ProfileFacts};
+pub use resolve::{resolve, Step};
 
 pub(crate) const CONFIG_FILE: &str = "station.json";
 pub(crate) const DATABASE_FILE: &str = "station-mirror.db";
