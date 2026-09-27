@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { PAIRING_CODE_ALPHABET, PAIRING_CODE_LENGTH } from "./pairing-code.js";
+
 /** Mirrors `markiro_proto::PROTOCOL_VERSION` (apps/standalone/proto). */
 export const PROTOCOL_VERSION = 1;
 /** Mirrors `markiro_proto::DEFAULT_PORT`. */
@@ -187,7 +189,7 @@ export type BootstrapResponse = z.infer<typeof bootstrapResponseSchema>;
 
 /** `POST /v1/office/pairing-codes`: a one-time code; the payload is what the DataMatrix encodes. */
 export const pairingCodeSchema = z.object({
-  code: z.string().regex(/^[0-9A-HJKMNP-TV-Z]{10}$/),
+  code: z.string().regex(new RegExp(`^[${PAIRING_CODE_ALPHABET}]{${PAIRING_CODE_LENGTH}}$`)),
   expiresAt: z.iso.datetime(),
   payload: z.string().startsWith("markiro-host:1?"),
 });

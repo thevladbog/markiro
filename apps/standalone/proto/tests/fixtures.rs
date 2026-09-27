@@ -245,7 +245,7 @@ fn the_error_code_fixture_lists_every_code() {
 fn the_pairing_code_fixture_matches_normalize() {
     let fixture = fixture("pairing-codes.json");
     let cases = fixture["cases"].as_array().expect("cases");
-    assert_eq!(cases.len(), 24);
+    assert_eq!(cases.len(), 31);
     for case in cases {
         let input = case["input"].as_str().expect("input");
         assert_eq!(

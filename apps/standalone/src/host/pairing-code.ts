@@ -64,7 +64,8 @@ export function fromRussianLayout(text: string): string {
 }
 
 const CYRILLIC = /[\u0400-\u04ff]/;
-const IPV4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
+/** Each octet as `Ipv4Addr::from_str` reads it: no leading zero besides a bare `0`. */
+const IPV4 = /^(0|[1-9]\d{0,2})\.(0|[1-9]\d{0,2})\.(0|[1-9]\d{0,2})\.(0|[1-9]\d{0,2})$/;
 const FINGERPRINT = /^[0-9a-f]{64}$/;
 
 function isIpv4(address: string): boolean {
@@ -73,13 +74,39 @@ function isIpv4(address: string): boolean {
 }
 
 /**
+ * A Cyrillic letter with its case swapped; anything else unchanged. Caps
+ * Lock inverts the case of every letter key, including the three letters
+ * that type `,`, `.` and `:`/`;` on the US layout, so a scan taken with Caps
+ * Lock on has every Cyrillic letter's case flipped from the plain one,
+ * punctuation letters included, while digits, `-`, `=` and the shifted
+ * digit-row symbols (not letters) stay the same either way.
+ */
+function withCyrillicCaseSwapped(text: string): string {
+  return Array.from(text, (symbol) => {
+    if (!CYRILLIC.test(symbol)) return symbol;
+    const lower = symbol.toLowerCase();
+    return symbol === lower ? symbol.toUpperCase() : lower;
+  }).join("");
+}
+
+/**
  * The office's pairing payload, as a scanner typed it: under the Russian
- * layout, with Caps Lock, or behind the AIM identifier `]d1` a scanner may
- * prepend. `null` when the text is not a payload of protocol 1.
+ * layout, Caps Lock included (recovered by retrying with every Cyrillic
+ * letter's case swapped, since only one of the two variants can match the
+ * scheme, `:` vs `;`), with Caps Lock under the US layout, or behind the
+ * AIM identifier `]d1`/`]D1` a scanner may prepend. `null` when the text is
+ * not a payload of protocol 1.
  */
 export function parsePairingPayload(text: string): PairingPayload | null {
-  const typed = (CYRILLIC.test(text) ? fromRussianLayout(text) : text).trim();
-  const body = typed.replace(/^\]d\d/, "");
+  if (!CYRILLIC.test(text)) return parseTyped(text.trim());
+  const plain = parseTyped(fromRussianLayout(text).trim());
+  if (plain !== null) return plain;
+  return parseTyped(fromRussianLayout(withCyrillicCaseSwapped(text)).trim());
+}
+
+/** The body already mapped out of the Russian layout (if it was in it) and trimmed. */
+function parseTyped(typed: string): PairingPayload | null {
+  const body = typed.replace(/^\][dD]\d/, "");
   const query = body.indexOf("?");
   if (query < 0 || body.slice(0, query).toLowerCase() !== "markiro-host:1") return null;
   const fields = new Map<string, string>();
