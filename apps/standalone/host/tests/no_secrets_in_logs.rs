@@ -1,6 +1,7 @@
 //! Spec §4.10: the process log never holds device keys, session tokens,
-//! passwords, password hashes or the badge salt. Its own binary, because it
-//! installs the global tracing subscriber.
+//! passwords, password hashes, pairing codes, the badge salt or the TLS
+//! private key. Its own binary, because it installs the global tracing
+//! subscriber.
 
 mod support;
 
@@ -174,6 +175,16 @@ async fn secrets_never_reach_the_process_log() {
         .unwrap();
     let claimed_key = claimed["deviceKey"].as_str().unwrap().to_owned();
 
+    // A refused claim (wrong code) is logged too, on the denied path.
+    let refused_claim = client
+        .post(format!("{base}/v1/pairing/claim"))
+        .header(protocol.0, &protocol.1)
+        .json(&json!({ "code": "0000000000", "kind": "station", "name": "Станция 3", "appVersion": "0.1.0" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refused_claim.status(), 400);
+
     // A wrong device key and a wrong session token are both rejected...
     let wrong_device_key = "not-a-real-device-key";
     let wrong_device = client
@@ -203,6 +214,15 @@ async fn secrets_never_reach_the_process_log() {
         .fetch_all(&pool)
         .await
         .unwrap();
+    let device_key_hashes: Vec<String> = sqlx::query_scalar("SELECT key_hash FROM devices")
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    let pairing_code_hashes: Vec<String> =
+        sqlx::query_scalar("SELECT code_hash FROM pairing_codes")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
     let salt: Vec<u8> = sqlx::query_scalar("SELECT badge_salt FROM site WHERE id = 1")
         .fetch_one(&pool)
         .await
@@ -224,6 +244,11 @@ async fn secrets_never_reach_the_process_log() {
     );
     let salt_hex: String = salt.iter().map(|byte| format!("{byte:02x}")).collect();
     let salt_standard_base64 = base64::engine::general_purpose::STANDARD.encode(&salt);
+    let key_der_base64 = STANDARD.encode(&key_der);
+    let key_der_base64_first_line = key_der_base64
+        .get(..64)
+        .expect("a DER-encoded TLS key base64-encodes to more than 64 characters")
+        .to_owned();
     let mut secrets = vec![
         key,
         token,
@@ -245,7 +270,11 @@ async fn secrets_never_reach_the_process_log() {
         salt_standard_base64,
         STANDARD_NO_PAD.encode(&salt),
         URL_SAFE_NO_PAD.encode(&salt),
-        STANDARD.encode(&key_der),
+        format!("{key_der:?}"),
+        // A PEM dump wraps at 64 columns, so the full base64 string might
+        // never appear contiguous in a formatted log; its first line would.
+        key_der_base64_first_line,
+        key_der_base64,
         key_der
             .iter()
             .map(|byte| format!("{byte:02x}"))
@@ -253,6 +282,8 @@ async fn secrets_never_reach_the_process_log() {
         "pbkdf2$".to_owned(),
     ];
     secrets.extend(hashes);
+    secrets.extend(device_key_hashes);
+    secrets.extend(pairing_code_hashes);
     for secret in secrets {
         assert!(!log.contains(&secret), "the process log contains a secret");
     }

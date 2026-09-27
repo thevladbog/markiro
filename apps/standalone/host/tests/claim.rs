@@ -183,10 +183,9 @@ async fn a_code_is_claimed_once() {
         .await
         .unwrap();
     assert_eq!(devices, 2, "the host device and the one that claimed first");
-    assert_eq!(
-        claim_audit(&app).await[1],
-        denied("code_used", Some(&code_id))
-    );
+    let rows = claim_audit(&app).await;
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[1], denied("code_used", Some(&code_id)));
 }
 
 #[tokio::test]
@@ -224,7 +223,41 @@ async fn five_wrong_codes_kill_every_live_code() {
     let rows = claim_audit(&app).await;
     assert_eq!(rows.len(), 6);
     assert_eq!(rows[0], denied("unknown_code", None));
+    assert_eq!(rows[1], denied("unknown_code", None));
+    assert_eq!(rows[2], denied("unknown_code", None));
+    assert_eq!(rows[3], denied("unknown_code", None));
+    assert_eq!(rows[4], denied("unknown_code", None));
     assert_eq!(rows[5], denied("too_many_attempts", Some(&code_id)));
+}
+
+#[tokio::test]
+async fn a_wrong_code_counts_against_every_live_code_only() {
+    let app = TestApp::new().await;
+    let (key, token) = host(&app).await;
+    // A, B and C exist before any clock movement.
+    let (_, a_id) = new_code(&app, &key, &token).await;
+    let (_, b_id) = new_code(&app, &key, &token).await;
+    let (c_code, c_id) = new_code(&app, &key, &token).await;
+    assert_eq!(claim(&app, claim_body(&c_code)).await.0, StatusCode::OK);
+    // D shares A and B's expiry window: created at the same instant.
+    let (_, d_id) = new_code(&app, &key, &token).await;
+    // Exactly one code lifetime later, A, B and D (all unused) are expired;
+    // C is excluded from expiry entirely because it is already used.
+    app.clock.advance(time::Duration::minutes(10));
+    // E and F are fresh, live codes created after the advance.
+    let (_, e_id) = new_code(&app, &key, &token).await;
+    let (_, f_id) = new_code(&app, &key, &token).await;
+
+    let (status, body) = claim(&app, claim_body("0000000000")).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["error"]["code"], "pairing_code_invalid");
+
+    assert_eq!(failed_attempts(&app, &a_id).await, 0, "A is expired");
+    assert_eq!(failed_attempts(&app, &b_id).await, 0, "B is expired");
+    assert_eq!(failed_attempts(&app, &c_id).await, 0, "C is used");
+    assert_eq!(failed_attempts(&app, &d_id).await, 0, "D is expired");
+    assert_eq!(failed_attempts(&app, &e_id).await, 1, "E is live");
+    assert_eq!(failed_attempts(&app, &f_id).await, 1, "F is live");
 }
 
 #[tokio::test]
@@ -275,15 +308,19 @@ async fn a_claim_is_checked_before_the_code() {
     let (key, token) = host(&app).await;
     let (code, code_id) = new_code(&app, &key, &token).await;
 
+    // Both invalid requests carry a wrong code, not the live one: if
+    // validation ran after the code lookup, a wrong code would already have
+    // reached the every-live-code counting branch by the time validation
+    // failed, which the assertions below would catch.
     let (status, body) = claim(
         &app,
-        json!({ "code": code, "kind": "station", "name": "  ", "appVersion": "0.1.0" }),
+        json!({ "code": "0000000000", "kind": "station", "name": "  ", "appVersion": "0.1.0" }),
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(body["error"]["code"], "validation_failed");
     assert_eq!(body["error"]["details"]["field"], "name");
-    let mut extra = claim_body(&code);
+    let mut extra = claim_body("0000000000");
     extra["extra"] = json!(true);
     let (status, body) = claim(&app, extra).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
@@ -291,6 +328,9 @@ async fn a_claim_is_checked_before_the_code() {
 
     assert_eq!(failed_attempts(&app, &code_id).await, 0);
     assert!(claim_audit(&app).await.is_empty());
+
+    // The real code was never touched by either invalid attempt: it still works.
+    assert_eq!(claim(&app, claim_body(&code)).await.0, StatusCode::OK);
 }
 
 #[tokio::test]
