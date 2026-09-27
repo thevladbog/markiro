@@ -64,6 +64,10 @@ export function fromRussianLayout(text: string): string {
 }
 
 const CYRILLIC = /[\u0400-\u04ff]/;
+/** Whether the text holds a Cyrillic letter, as typed under the Russian layout. */
+export function hasCyrillic(text: string): boolean {
+  return CYRILLIC.test(text);
+}
 /** Each octet as `Ipv4Addr::from_str` reads it: no leading zero besides a bare `0`. */
 const IPV4 = /^(0|[1-9]\d{0,2})\.(0|[1-9]\d{0,2})\.(0|[1-9]\d{0,2})\.(0|[1-9]\d{0,2})$/;
 const FINGERPRINT = /^[0-9a-f]{64}$/;

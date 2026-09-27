@@ -77,6 +77,21 @@ describe("nextShellView", () => {
     ).toEqual({ kind: "pair_failed", code: "pair_rejected" });
   });
 
+  it("pairs in the network when asked, whatever the local host says", () => {
+    const network = shellReducer(
+      unpaired({ localHost: { kind: "missing", reason: "unreachable" } }),
+      { type: "network_pairing_requested" },
+    );
+    expect(nextShellView(network, ADDRESS)).toEqual({ kind: "network_pairing" });
+    expect(nextShellView({ ...network, localHost: { kind: "probing" } }, ADDRESS)).toEqual({
+      kind: "network_pairing",
+    });
+    const back = shellReducer(network, { type: "network_pairing_cancelled" });
+    expect(nextShellView(back, ADDRESS)).toEqual({ kind: "host_missing", reason: "unreachable" });
+    const claimed = shellReducer(network, { type: "paired", status: NEW_STATION });
+    expect(claimed.pairing).toEqual({ kind: "idle" });
+  });
+
   it("finishes the wizard for a paired device whose local host is not initialized", () => {
     expect(
       nextShellView(

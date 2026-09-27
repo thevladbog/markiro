@@ -14,8 +14,12 @@ export type LocalHostState =
 export type DeviceState =
   { kind: "loading" } | { kind: "unreadable" } | { kind: "ready"; status: DeviceStatus | null };
 
+/** Pairing: with the host on this computer (idle, pairing, failed) or one in the network. */
 export type PairingState =
-  { kind: "idle" } | { kind: "pairing" } | { kind: "failed"; code: DeviceErrorCode };
+  | { kind: "idle" }
+  | { kind: "pairing" }
+  | { kind: "failed"; code: DeviceErrorCode }
+  | { kind: "network" };
 
 /** Why the host no longer accepts this device. */
 export type RejectionReason = "key_rejected" | "host_changed";
@@ -63,6 +67,7 @@ export type ShellView =
   | { kind: "host_missing"; reason: HostProbeErrorCode }
   | { kind: "bootstrap" }
   | { kind: "pairing" }
+  | { kind: "network_pairing" }
   | { kind: "pair_failed"; code: DeviceErrorCode }
   | { kind: "device_rejected"; reason: RejectionReason }
   | { kind: "other_host"; hostAddress: string }
@@ -79,6 +84,8 @@ export type ShellAction =
   | { type: "paired"; status: DeviceStatus }
   | { type: "pairing_failed"; code: DeviceErrorCode }
   | { type: "pairing_retried" }
+  | { type: "network_pairing_requested" }
+  | { type: "network_pairing_cancelled" }
   | { type: "forgotten" }
   | { type: "host_initialized" }
   // "session_ended" is set only by the reducer's own `session_ended` branch;
@@ -122,9 +129,9 @@ function linkRejection(status: HostStatus): RejectionReason | null {
 
 /**
  * The screen for a snapshot (stage 1 spec §5.1), a pure function like the
- * station's `nextStationView`. Code pairing and line selection arrive in
- * plan 1c; until then an unpaired device can only pair with the host on
- * this computer.
+ * station's `nextStationView`. An unpaired device pairs with the host on
+ * this computer on its own, or with a host in the network by a code when
+ * the user asks for it; a paired station without a line chooses one.
  *
  * `localAddress` is the address `host_probe` was asked about (`App`'s
  * `address` prop). A paired device whose own `hostAddress` differs from it
@@ -137,6 +144,7 @@ export function nextShellView(state: ShellState, localAddress: string): ShellVie
   if (device.kind === "unreadable") return { kind: "config_error" };
   const status = device.status;
   if (status === null) {
+    if (state.pairing.kind === "network") return { kind: "network_pairing" };
     if (localHost.kind === "probing") return { kind: "loading" };
     if (localHost.kind === "missing") return { kind: "host_missing", reason: localHost.reason };
     if (!localHost.observation.hello.initialized) return { kind: "bootstrap" };
@@ -207,6 +215,10 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
     case "pairing_failed":
       return { ...state, pairing: { kind: "failed", code: action.code } };
     case "pairing_retried":
+      return { ...state, pairing: { kind: "idle" } };
+    case "network_pairing_requested":
+      return { ...state, pairing: { kind: "network" } };
+    case "network_pairing_cancelled":
       return { ...state, pairing: { kind: "idle" } };
     case "forgotten":
       return {

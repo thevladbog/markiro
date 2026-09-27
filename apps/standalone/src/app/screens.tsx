@@ -34,11 +34,14 @@ export function HostMissingScreen({
   reason,
   address,
   onRetry,
+  onNetwork,
 }: {
   reason: HostProbeErrorCode;
   address: string;
   /** Function-typed property, not a TS method: kept safe to pass around unbound. */
   onRetry: () => void;
+  /** Pair with a host in the network instead; `null` for a device that is already paired. */
+  onNetwork: (() => void) | null;
 }) {
   const { t } = useTranslation();
   const versionMismatch = reason === "host_too_old" || reason === "app_too_old";
@@ -50,7 +53,14 @@ export function HostMissingScreen({
     >
       {!versionMismatch && <p>{t("shell.hostMissing.body", { address })}</p>}
       <Alert tone="warn">{t(PROBE_REASON_KEY[reason])}</Alert>
-      <Button onClick={onRetry}>{t("shell.hostMissing.retry")}</Button>
+      <div className="standalone-form__actions">
+        {onNetwork && (
+          <Button variant="secondary" onClick={onNetwork}>
+            {t("shell.hostMissing.network")}
+          </Button>
+        )}
+        <Button onClick={onRetry}>{t("shell.hostMissing.retry")}</Button>
+      </div>
     </Card>
   );
 }

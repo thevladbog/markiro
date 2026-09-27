@@ -106,8 +106,10 @@ function fakeDevice(
       paired = pairResult;
       return pairResult;
     }),
-    claim: vi.fn<DeviceApi["claim"]>(async () => {
-      throw new Error("pairing by code is not part of the app yet");
+    claim: vi.fn<DeviceApi["claim"]>(async ({ address, fingerprint }) => {
+      if (paired) throw new DeviceError("already_paired", "already paired");
+      paired = { ...NEW_STATION, hostAddress: address, fingerprint };
+      return paired;
     }),
     selectLine: vi.fn<DeviceApi["selectLine"]>(async (lineId) => {
       if (!paired) throw new DeviceError("not_paired", "not paired");
@@ -892,5 +894,55 @@ describe("App", () => {
     await signIn();
     await screen.findByText("Вы вошли как Ирина Смирнова.");
     expect(screen.getByText("Нет связи с хостом")).toBeTruthy();
+  });
+
+  it("pairs a second computer by a scanned code, then chooses its line", async () => {
+    const payload = `markiro-host:1?h=192.168.1.10&p=45710&f=${"ab".repeat(32)}&c=7K3MQ9XV2D`;
+    const probe = {
+      hello: vi.fn<HostProbe["hello"]>(async (address) => {
+        if (address !== REMOTE_ADDRESS) throw new HostProbeError("unreachable", "no host here");
+        return observation(true);
+      }),
+    };
+    const device = fakeDevice(null);
+    const host = fakeHost();
+    host.getChanges.mockResolvedValueOnce(feedPage(42, [lineItem(42, "Линия 1")]));
+    renderApp({ probe, device, host });
+    fireEvent.click(await screen.findByRole("button", { name: "Подключиться к хосту в сети" }));
+    fireEvent.change(await screen.findByLabelText("Код с экрана офиса"), {
+      target: { value: payload },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Подключить" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Линия 1" }));
+    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(device.claim).toHaveBeenCalledWith({
+      address: REMOTE_ADDRESS,
+      fingerprint: "ab".repeat(32),
+      code: "7K3MQ9XV2D",
+      name: "Станция",
+    });
+    expect(device.pairLocally).not.toHaveBeenCalled();
+    expect(host.getChanges).toHaveBeenCalledWith(0);
+  });
+
+  it("goes back from pairing in the network to the missing local host", async () => {
+    renderApp({
+      probe: probeAnswering(new HostProbeError("unreachable", "down")),
+      device: fakeDevice(null),
+      host: fakeHost(),
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Подключиться к хосту в сети" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Назад" }));
+    expect(await screen.findByText("Служба хоста не отвечает")).toBeTruthy();
+  });
+
+  it("offers pairing in the network only to a device that is not paired", async () => {
+    renderApp({
+      probe: probeAnswering(new HostProbeError("app_too_old", "old")),
+      device: fakeDevice(DEVICE_STATUS),
+      host: fakeHost(),
+    });
+    await screen.findByText("Версии не совпадают");
+    expect(screen.queryByRole("button", { name: "Подключиться к хосту в сети" })).toBeNull();
   });
 });

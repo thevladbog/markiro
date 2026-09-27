@@ -56,6 +56,18 @@ typed under the Russian layout. `normalizePairingCode` is
 holds the cases both must answer alike, and the Rust and Vitest suites check
 every one, so changing either rule means changing the fixture.
 
+Pairing with a host in the network (`src/app/NetworkPairing.tsx`) sends
+the code only to a confirmed host: a scanned payload is probed on every
+address at once (`findHost`), and the code goes only to the address whose
+certificate matches `f`; a typed address and code show the observed
+fingerprint (`formatFingerprint`) and send the code only after a person
+confirmed it against the office screen. A code that cannot be a code never
+leaves the device, and a refused claim is never retried on its own. A typed
+code in Cyrillic is refused with a hint to switch the layout, not read by
+key position like a scan: a Cyrillic letter typed for its Latin look-alike
+would become another valid symbol. A comma in a typed address reads as a
+dot (the keypad under the Russian layout).
+
 ## Audit
 
 Every office change, login outcome, pairing and initialization writes one

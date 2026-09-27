@@ -7,6 +7,7 @@ import { createTauriConnectionApi, type ConnectionApi } from "../host/connection
 import {
   createTauriDeviceApi,
   DeviceError,
+  type ClaimInput,
   type DeviceApi,
   type DeviceErrorCode,
 } from "../host/device.js";
@@ -24,6 +25,7 @@ import type { OfficeSessionValue } from "../office/office-session.js";
 import { BootstrapWizard } from "../wizard/BootstrapWizard.js";
 import { useHostLink } from "./host-link.js";
 import { LineSelect } from "./LineSelect.js";
+import { NetworkPairing } from "./NetworkPairing.js";
 import {
   ConfigErrorScreen,
   DeviceRejectedScreen,
@@ -144,6 +146,13 @@ export function App({
         }),
     );
   }, [pairingDue, pairLocally]);
+
+  const claim = useCallback(
+    async (input: ClaimInput) => {
+      dispatch({ type: "paired", status: await deviceApi.claim(input) });
+    },
+    [deviceApi],
+  );
 
   const selectLine = useCallback(
     async (lineId: string) => {
@@ -296,10 +305,22 @@ export function App({
         <ConfigErrorScreen busy={repairBusy} error={repairError} onReset={repair} />
       )}
       {view.kind === "host_missing" && (
-        <HostMissingScreen reason={view.reason} address={address} onRetry={retryProbe} />
+        <HostMissingScreen
+          reason={view.reason}
+          address={address}
+          onRetry={retryProbe}
+          onNetwork={unpaired ? () => dispatch({ type: "network_pairing_requested" }) : null}
+        />
       )}
       {view.kind === "bootstrap" && <BootstrapWizard onSubmit={bootstrap} />}
       {view.kind === "pairing" && <WaitScreen messageKey="shell.pairing.title" />}
+      {view.kind === "network_pairing" && (
+        <NetworkPairing
+          probe={hostProbe}
+          onClaim={claim}
+          onBack={() => dispatch({ type: "network_pairing_cancelled" })}
+        />
+      )}
       {view.kind === "pair_failed" && (
         <PairFailedScreen
           code={view.code}
