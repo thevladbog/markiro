@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
 import type { ConnectionApi } from "../host/connection.js";
 import type { ChangesResponse } from "../host/protocol.js";
@@ -21,7 +21,7 @@ export interface HostLinkOptions {
  * reference copies in step with a sync once `watch` has subscribed (or
  * failed to) and after every revision event. The first event after each
  * reconnect carries the host's current revision, so catching up needs
- * nothing more.
+ * nothing more. Returns a function that asks for a sync now.
  */
 export function useHostLink({
   hostId,
@@ -29,7 +29,8 @@ export function useHostLink({
   local,
   changes,
   dispatch,
-}: HostLinkOptions): void {
+}: HostLinkOptions): () => void {
+  const syncNow = useRef<() => void>(() => undefined);
   useEffect(() => {
     if (hostId === null) return;
     // Nothing reaches the shell state after the pairing changed or ended.
@@ -61,6 +62,7 @@ export function useHostLink({
         dispatch({ type: "sync_failed" });
       }
     });
+    syncNow.current = scheduler.trigger;
     let unwatch: (() => void) | null = null;
     connection
       .watch({
@@ -92,8 +94,10 @@ export function useHostLink({
       );
     return () => {
       active = false;
+      syncNow.current = () => undefined;
       scheduler.stop();
       unwatch?.();
     };
   }, [hostId, connection, local, changes, dispatch]);
+  return useCallback(() => syncNow.current(), []);
 }

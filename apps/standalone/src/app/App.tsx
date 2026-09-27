@@ -23,6 +23,7 @@ import { OfficeLogin } from "../office/OfficeLogin.js";
 import type { OfficeSessionValue } from "../office/office-session.js";
 import { BootstrapWizard } from "../wizard/BootstrapWizard.js";
 import { useHostLink } from "./host-link.js";
+import { LineSelect } from "./LineSelect.js";
 import {
   ConfigErrorScreen,
   DeviceRejectedScreen,
@@ -67,7 +68,7 @@ export function App({
   const remoteAddress =
     pairedStatus !== null && pairedStatus.hostAddress !== address ? pairedStatus.hostAddress : null;
 
-  useHostLink({
+  const requestSync = useHostLink({
     hostId:
       pairedStatus !== null && state.rejection === null && state.sync.kind !== "other_host"
         ? pairedStatus.hostId
@@ -143,6 +144,21 @@ export function App({
         }),
     );
   }, [pairingDue, pairLocally]);
+
+  const selectLine = useCallback(
+    async (lineId: string) => {
+      try {
+        dispatch({ type: "line_selected", status: await deviceApi.selectLine(lineId) });
+      } catch (error) {
+        if (error instanceof DeviceError && error.code === "key_rejected") {
+          dispatch({ type: "device_rejected", reason: "key_rejected" });
+          return;
+        }
+        throw error;
+      }
+    },
+    [deviceApi],
+  );
 
   const retryProbe = useCallback(() => {
     dispatch({ type: "host_probed", localHost: { kind: "probing" } });
@@ -256,7 +272,14 @@ export function App({
   }, [session, hostApi]);
 
   if (session && officeSession) {
-    return <Office key={session.token} session={officeSession} hostRevision={state.hostRevision} />;
+    return (
+      <Office
+        key={session.token}
+        session={officeSession}
+        link={state.link}
+        hostRevision={state.hostRevision}
+      />
+    );
   }
 
   const repairBusy = repairState === "busy";
@@ -301,8 +324,18 @@ export function App({
           onRepair={repair}
         />
       )}
+      {view.kind === "line_select" && (
+        <LineSelect
+          local={localDb}
+          sync={state.sync}
+          link={state.link}
+          onSelect={selectLine}
+          onSync={requestSync}
+          onOffice={() => dispatch({ type: "office_requested" })}
+        />
+      )}
       {view.kind === "floor" && (
-        <FloorScreen onOffice={() => dispatch({ type: "office_requested" })} />
+        <FloorScreen link={state.link} onOffice={() => dispatch({ type: "office_requested" })} />
       )}
       {view.kind === "office_login" && (
         <OfficeLogin

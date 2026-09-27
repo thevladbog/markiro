@@ -310,6 +310,16 @@ re-reads the signed-in user (`Office`, `hostRevision`); it does not reload an
 open page, so a form keeps what was typed and a save over a newer record meets
 `stale_revision`. Pages read fresh data whenever they open (`staleTime` 0).
 
+A paired station without a line chooses one (`LineSelect`) among the active
+lines of the local copies, read only after a sync in this session brought
+them up to date and again after every sync, so a previous pairing's lines
+never show; the host's answer goes to `device.json` through
+`device_select_line`. `HostStatusLine` shows the link on the floor, on the
+line screen and in the office header — online, connecting, or silent since
+the last contact, with the reason — as a phase tag with words in a polite
+live region. There is no blocking overlay while the host is away: office
+pages explain their own failed requests and offer a retry.
+
 ## Office pages
 
 - Every office request goes through `session.call` with `session.api`

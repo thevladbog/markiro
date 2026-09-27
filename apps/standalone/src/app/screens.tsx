@@ -4,6 +4,8 @@ import { Alert, Button, Card, Spinner } from "@markiro/ui";
 
 import type { DeviceErrorCode } from "../host/device.js";
 import type { HostProbeErrorCode } from "../host/probe.js";
+import type { HostStatus } from "../host/protocol.js";
+import { HostStatusLine } from "./HostStatusLine.js";
 import type { RejectionReason } from "./shell.js";
 
 const PROBE_REASON_KEY = {
@@ -150,13 +152,18 @@ export function OtherHostScreen({
   );
 }
 
-/** The floor placeholder until plan 1f: the way into the office. */
-export function FloorScreen({ onOffice }: { onOffice: () => void }) {
+/** The floor placeholder until plan 1f: the link to the host and the way into the office. */
+export function FloorScreen({ link, onOffice }: { link: HostStatus | null; onOffice: () => void }) {
   const { t } = useTranslation();
   return (
     <Card className="standalone-card" title={t("floor.title")} titleAs="h2">
-      <p>{t("floor.body")}</p>
-      <Button onClick={onOffice}>{t("floor.office")}</Button>
+      <div className="standalone-form">
+        <p>{t("floor.body")}</p>
+        <HostStatusLine status={link} />
+        <div className="standalone-form__actions">
+          <Button onClick={onOffice}>{t("floor.office")}</Button>
+        </div>
+      </div>
     </Card>
   );
 }

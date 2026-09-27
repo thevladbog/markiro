@@ -17,7 +17,14 @@ import type {
   HostStatus,
 } from "../src/host/protocol.js";
 import type { LocalExecutor } from "../src/local/executor.js";
-import { DEVICE_STATUS, HOST_ID, LINE_ID, observation, SESSION } from "./support/fixtures.js";
+import {
+  DEVICE_STATUS,
+  HOST_ID,
+  LINE_ID,
+  NEW_STATION,
+  observation,
+  SESSION,
+} from "./support/fixtures.js";
 import { openLocalDb } from "./support/local-db.js";
 import { fakeHostApi, ORG_PROFILE } from "./support/office.js";
 import { completeWizard, EXPECTED_REQUEST } from "./support/wizard.js";
@@ -102,8 +109,10 @@ function fakeDevice(
     claim: vi.fn<DeviceApi["claim"]>(async () => {
       throw new Error("pairing by code is not part of the app yet");
     }),
-    selectLine: vi.fn<DeviceApi["selectLine"]>(async () => {
-      throw new Error("line selection is not part of the app yet");
+    selectLine: vi.fn<DeviceApi["selectLine"]>(async (lineId) => {
+      if (!paired) throw new DeviceError("not_paired", "not paired");
+      paired = { ...paired, lineId };
+      return paired;
     }),
     forget: vi.fn<DeviceApi["forget"]>(async () => {
       paired = null;
@@ -813,5 +822,45 @@ describe("App", () => {
     await act(async () => {});
     expect(host.getOrg).toHaveBeenCalledTimes(1);
     expect(screen.getByLabelText("Название организации")).toBeTruthy();
+  });
+
+  it("has a freshly paired station choose its line before the floor", async () => {
+    const device = fakeDevice(null, NEW_STATION);
+    const host = fakeHost();
+    host.getChanges.mockResolvedValueOnce(feedPage(42, [lineItem(42, "Линия 1")]));
+    renderApp({ probe: probeAnswering(true), device, host });
+    expect(await screen.findByText("Выбор линии")).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: "Линия 1" }));
+    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(device.selectLine).toHaveBeenCalledWith(LINE_ID);
+  });
+
+  it("sends a station whose key the host refuses while choosing a line to pairing again", async () => {
+    const device = fakeDevice(NEW_STATION);
+    device.selectLine.mockRejectedValueOnce(new DeviceError("key_rejected", "revoked"));
+    const host = fakeHost();
+    host.getChanges.mockResolvedValueOnce(feedPage(42, [lineItem(42, "Линия 1")]));
+    renderApp({ probe: probeAnswering(true), device, host });
+    fireEvent.click(await screen.findByRole("button", { name: "Линия 1" }));
+    expect(await screen.findByText("Хост не принимает это устройство")).toBeTruthy();
+  });
+
+  it("shows the link on the floor and in the office header", async () => {
+    const link = fakeConnection();
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(DEVICE_STATUS),
+      host: fakeHost(),
+      connection: link.connection,
+    });
+    expect(await screen.findByText("На связи с хостом")).toBeTruthy();
+    link.status({ state: "offline", lastContactAt: null, lastError: "unreachable", seq: 2 });
+    expect(await screen.findByText("Нет связи с хостом")).toBeTruthy();
+    expect(screen.getByText("Хост не отвечает.")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Офис" }));
+    await signIn();
+    await screen.findByText("Вы вошли как Ирина Смирнова.");
+    expect(screen.getByText("Нет связи с хостом")).toBeTruthy();
   });
 });

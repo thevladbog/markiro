@@ -4,14 +4,17 @@ import { NavLink, Outlet, useLocation } from "react-router";
 
 import { Alert, Button, cn, IconButton, Sidebar, useTheme, type SidebarItem } from "@markiro/ui";
 
+import { HostStatusLine } from "../app/HostStatusLine.js";
 import { ChangePasswordDialog } from "./ChangePasswordDialog.js";
 import { OFFICE_NAV } from "./nav.js";
+import { useOfficeLink } from "./office-link.js";
 import { useOfficeSession } from "./office-session.js";
 
 /** Office layout after `apps/admin/src/layout/AppShell.tsx`: sidebar, header, page. */
 export function OfficeShell() {
   const { t } = useTranslation();
   const session = useOfficeSession();
+  const link = useOfficeLink();
   const { theme, setTheme } = useTheme();
   const dark = theme === "dark";
   const [passwordOpen, setPasswordOpen] = useState(false);
@@ -61,6 +64,7 @@ export function OfficeShell() {
             <span className="office-header__name">{session.user.name}</span>
             <span className="office-header__role">{t(`office.roles.${session.user.role}`)}</span>
           </div>
+          <HostStatusLine status={link} />
           <div className="office-header__actions">
             <IconButton
               variant="secondary"

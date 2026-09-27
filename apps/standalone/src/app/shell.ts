@@ -66,6 +66,7 @@ export type ShellView =
   | { kind: "pair_failed"; code: DeviceErrorCode }
   | { kind: "device_rejected"; reason: RejectionReason }
   | { kind: "other_host"; hostAddress: string }
+  | { kind: "line_select" }
   | { kind: "floor" }
   | { kind: "office_login"; notice: OfficeLoginNotice | null }
   | { kind: "office"; session: OfficeSession };
@@ -92,7 +93,8 @@ export type ShellAction =
   | { type: "host_revision"; rev: number }
   | { type: "sync_started" }
   | { type: "sync_finished"; result: SyncResult }
-  | { type: "sync_failed" };
+  | { type: "sync_failed" }
+  | { type: "line_selected"; status: DeviceStatus };
 
 const CLOSED_OFFICE: OfficeState = { kind: "closed" };
 const IDLE_SYNC: SyncState = { kind: "idle", synced: 0 };
@@ -164,6 +166,8 @@ export function nextShellView(state: ShellState, localAddress: string): ShellVie
   }
   switch (state.office.kind) {
     case "closed":
+      // A station works on one line and chooses it before the floor.
+      if (status.kind === "station" && status.lineId === null) return { kind: "line_select" };
       return { kind: "floor" };
     case "signing_in":
       return { kind: "office_login", notice: state.office.notice };
@@ -288,6 +292,8 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
     case "sync_failed":
       if (state.sync.kind === "other_host") return state;
       return { ...state, sync: { ...state.sync, kind: "failed" } };
+    case "line_selected":
+      return { ...state, device: { kind: "ready", status: action.status } };
   }
 }
 

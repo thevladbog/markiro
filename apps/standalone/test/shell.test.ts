@@ -10,7 +10,7 @@ import {
 } from "../src/app/shell.js";
 import { HostError } from "../src/host/client.js";
 import type { HostStatus } from "../src/host/protocol.js";
-import { DEVICE_STATUS, observation, SESSION } from "./support/fixtures.js";
+import { DEVICE_STATUS, NEW_STATION, observation, SESSION } from "./support/fixtures.js";
 
 /** The address `App` probes; `DEVICE_STATUS.hostAddress` matches it by default. */
 const ADDRESS = DEVICE_STATUS.hostAddress;
@@ -154,6 +154,21 @@ describe("nextShellView", () => {
     });
   });
 
+  it("has a station without a line choose it, unless the office is open or opening", () => {
+    const station = paired({ device: { kind: "ready", status: NEW_STATION } });
+    expect(nextShellView(station, ADDRESS)).toEqual({ kind: "line_select" });
+    expect(
+      nextShellView({ ...station, office: { kind: "signing_in", notice: null } }, ADDRESS),
+    ).toEqual({ kind: "office_login", notice: null });
+    expect(
+      nextShellView({ ...station, office: { kind: "open", session: SESSION } }, ADDRESS),
+    ).toEqual({ kind: "office", session: SESSION });
+    const office = paired({
+      device: { kind: "ready", status: { ...NEW_STATION, kind: "office" } },
+    });
+    expect(nextShellView(office, ADDRESS)).toEqual({ kind: "floor" });
+  });
+
   it("puts a rejected device before everything else", () => {
     expect(
       nextShellView(
@@ -254,6 +269,13 @@ describe("shellReducer", () => {
     const fresh = unpaired({ localHost: { kind: "found", observation: observation(false) } });
     const next = shellReducer(fresh, { type: "host_initialized" });
     expect(next.localHost).toEqual({ kind: "found", observation: observation(true) });
+  });
+
+  it("keeps the line the host confirmed", () => {
+    const station = paired({ device: { kind: "ready", status: NEW_STATION } });
+    const chosen = shellReducer(station, { type: "line_selected", status: DEVICE_STATUS });
+    expect(chosen.device).toEqual({ kind: "ready", status: DEVICE_STATUS });
+    expect(nextShellView(chosen, ADDRESS)).toEqual({ kind: "floor" });
   });
 
   it("retries a failed pairing", () => {

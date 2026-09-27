@@ -23,6 +23,22 @@
   gap: 16px;
 }
 
+.line-select {
+  display: grid;
+  gap: 8px;
+}
+
+.host-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.host-status__reason {
+  color: var(--fg-2);
+}
+
 .standalone-fingerprint-label {
   color: var(--fg-2);
 }
