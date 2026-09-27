@@ -12,7 +12,7 @@ use sqlx::SqliteConnection;
 
 use crate::audit::{self, actions, Actor, Entry, Outcome};
 use crate::auth::OfficeContext;
-use crate::db::{begin_write, next_revision};
+use crate::db::{begin_write, commit_with_revision, next_revision};
 use crate::error::{ApiError, ApiJson, ApiPath};
 use crate::secrets::hash_password;
 use crate::server::AppState;
@@ -61,7 +61,8 @@ async fn hash(password: Secret) -> Result<String, ApiError> {
 /// user (ending sessions on a password change is a security rule, kept in
 /// one place), and write the `ok` audit row. The caller has already verified
 /// the request (rights, the current password where relevant, the new
-/// password's shape) and commits the transaction afterwards.
+/// password's shape) and commits the transaction afterwards, through
+/// `commit_with_revision` with the revision returned here.
 pub(crate) async fn replace_password(
     conn: &mut SqliteConnection,
     at: &str,
@@ -69,7 +70,7 @@ pub(crate) async fn replace_password(
     user_id: &str,
     keep_session_id: &str,
     password_phc: &str,
-) -> Result<(), ApiError> {
+) -> Result<i64, ApiError> {
     let rev = next_revision(conn).await.map_err(ApiError::internal)?;
     sqlx::query("UPDATE office_users SET password_phc = ?, rev = ? WHERE id = ?")
         .bind(password_phc)
@@ -97,7 +98,8 @@ pub(crate) async fn replace_password(
         },
     )
     .await
-    .map_err(ApiError::internal)
+    .map_err(ApiError::internal)?;
+    Ok(rev)
 }
 
 pub async fn list_users(
@@ -171,7 +173,9 @@ pub async fn create_user(
     let created = read_user(&mut tx, &id)
         .await?
         .ok_or_else(|| ApiError::internal("user vanished"))?;
-    tx.commit().await.map_err(ApiError::internal)?;
+    commit_with_revision(tx, &state.revisions, rev)
+        .await
+        .map_err(ApiError::internal)?;
     Ok(Json(created))
 }
 
@@ -258,7 +262,9 @@ pub async fn update_user(
     let updated = read_user(&mut tx, &id)
         .await?
         .ok_or_else(|| ApiError::internal("user vanished"))?;
-    tx.commit().await.map_err(ApiError::internal)?;
+    commit_with_revision(tx, &state.revisions, rev)
+        .await
+        .map_err(ApiError::internal)?;
     Ok(Json(updated))
 }
 
@@ -278,7 +284,7 @@ pub async fn set_password(
         return Err(ApiError::not_found("no such office user"));
     }
     // Every other session of that user ends; the caller's own session stays.
-    replace_password(
+    let rev = replace_password(
         &mut tx,
         &at,
         context.actor(),
@@ -287,6 +293,8 @@ pub async fn set_password(
         &password_phc,
     )
     .await?;
-    tx.commit().await.map_err(ApiError::internal)?;
+    commit_with_revision(tx, &state.revisions, rev)
+        .await
+        .map_err(ApiError::internal)?;
     Ok(StatusCode::NO_CONTENT)
 }

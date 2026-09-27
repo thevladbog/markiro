@@ -8,6 +8,7 @@ use sqlx::sqlite::{
     SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions, SqliteSynchronous,
 };
 use sqlx::{Sqlite, SqliteConnection, Transaction};
+use tokio::sync::watch;
 
 /// `host/migrations`, embedded at compile time. Applied migrations are never
 /// edited: sqlx refuses to start when a checksum changes.
@@ -52,4 +53,24 @@ pub async fn next_revision(conn: &mut SqliteConnection) -> Result<i64, sqlx::Err
     sqlx::query_scalar("UPDATE host_revision SET rev = rev + 1 WHERE id = 1 RETURNING rev")
         .fetch_one(conn)
         .await
+}
+
+/// Commit a write transaction that moved the global revision to `rev`, then
+/// wake change-stream subscribers. Notifying only after the commit means a
+/// device that reacts at once already reads the new rows.
+pub async fn commit_with_revision(
+    tx: Transaction<'_, Sqlite>,
+    revisions: &watch::Sender<i64>,
+    rev: i64,
+) -> Result<(), sqlx::Error> {
+    tx.commit().await?;
+    revisions.send_if_modified(|latest| {
+        if rev > *latest {
+            *latest = rev;
+            true
+        } else {
+            false
+        }
+    });
+    Ok(())
 }

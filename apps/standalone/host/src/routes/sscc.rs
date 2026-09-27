@@ -12,7 +12,7 @@ use sqlx::SqliteConnection;
 
 use crate::audit::{self, actions, Entry, Outcome};
 use crate::auth::OfficeContext;
-use crate::db::{begin_write, next_revision};
+use crate::db::{begin_write, commit_with_revision, next_revision};
 use crate::error::{ApiError, ApiJson, ApiPath};
 use crate::server::AppState;
 use crate::validate;
@@ -161,7 +161,9 @@ pub async fn put_counter(
     )
     .await
     .map_err(ApiError::internal)?;
-    tx.commit().await.map_err(ApiError::internal)?;
+    commit_with_revision(tx, &state.revisions, new_rev)
+        .await
+        .map_err(ApiError::internal)?;
     counter(
         prefix,
         i64::from(extension),
@@ -250,6 +252,8 @@ pub async fn put_block_sizes(
     // pooled connection could race a later writer and return state this
     // request never wrote.
     let updated = read_state(&mut tx).await?;
-    tx.commit().await.map_err(ApiError::internal)?;
+    commit_with_revision(tx, &state.revisions, new_rev)
+        .await
+        .map_err(ApiError::internal)?;
     Ok(Json(updated))
 }

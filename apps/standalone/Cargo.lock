@@ -2469,6 +2469,7 @@ dependencies = [
  "aws-lc-rs",
  "axum",
  "base64 0.22.1",
+ "futures-util",
  "http-body-util",
  "if-addrs",
  "markiro-proto",

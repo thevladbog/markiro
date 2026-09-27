@@ -14,7 +14,7 @@ use serde_json::json;
 use crate::audit::{self, actions, reasons, Actor, Entry, Outcome};
 use crate::auth::{end_session, open_session, AuthDevice, OfficeContext};
 use crate::clock::format_timestamp;
-use crate::db::begin_write;
+use crate::db::{begin_write, commit_with_revision};
 use crate::error::{ApiError, ApiJson};
 use crate::routes::office_users::replace_password;
 use crate::secrets::{dummy_password_phc, hash_password, verify_password};
@@ -269,7 +269,7 @@ pub async fn change_password(
         }
     };
     // Other sessions of this user end; the one making this request stays.
-    replace_password(
+    let rev = replace_password(
         &mut tx,
         &at,
         context.actor(),
@@ -278,6 +278,8 @@ pub async fn change_password(
         &new_phc,
     )
     .await?;
-    tx.commit().await.map_err(ApiError::internal)?;
+    commit_with_revision(tx, &state.revisions, rev)
+        .await
+        .map_err(ApiError::internal)?;
     Ok(StatusCode::NO_CONTENT)
 }

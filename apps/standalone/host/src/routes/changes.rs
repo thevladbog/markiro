@@ -3,12 +3,18 @@
 //! Adding an entity means a branch in `FEED_KEYS` and in `record`, its proto
 //! record type, Zod schema and fixture, and a tombstone wherever it is deleted.
 
+use std::convert::Infallible;
+
 use axum::extract::State;
+use axum::response::sse::{Event, KeepAlive, Sse};
+use axum::response::IntoResponse;
 use axum::Json;
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
+use futures_util::stream::unfold;
 use markiro_proto::{entities, ChangeItem, ChangesResponse, LineRecord, OrgRecord, SiteRecord};
 use serde::Deserialize;
+use serde_json::json;
 use sqlx::SqliteConnection;
 
 use crate::auth::AuthDevice;
@@ -207,4 +213,58 @@ async fn record(conn: &mut SqliteConnection, key: &Key) -> Result<serde_json::Va
         }
     };
     value.map_err(ApiError::internal)
+}
+
+/// `GET /v1/changes/stream`: server-sent events. The first `rev` event
+/// carries the current revision, then one follows every commit that moved
+/// it; a comment line every heartbeat keeps the connection alive. The stream
+/// ends when the host stops.
+pub async fn stream(
+    State(state): State<AppState>,
+    _device: AuthDevice,
+) -> Result<impl IntoResponse, ApiError> {
+    // Subscribe before reading the current revision: a commit in between
+    // then shows up as one more event instead of being missed.
+    let revisions = state.revisions.subscribe();
+    let stopping = state.stopping.subscribe();
+    let current: i64 = sqlx::query_scalar("SELECT rev FROM host_revision WHERE id = 1")
+        .fetch_one(&state.pool)
+        .await
+        .map_err(ApiError::internal)?;
+    let events = unfold(
+        (Some(current), revisions, stopping),
+        |(first, mut revisions, mut stopping)| async move {
+            if let Some(rev) = first {
+                return Some((
+                    Ok::<_, Infallible>(rev_event(rev)),
+                    (None, revisions, stopping),
+                ));
+            }
+            if *stopping.borrow() {
+                return None;
+            }
+            // `select!` cannot move `stopping` or `revisions` into its own
+            // arm bodies: the macro keeps both arms' futures (one still
+            // borrowing `stopping` through `wait_for`) alive until the whole
+            // `select!` expression finishes. Resolve only the new revision
+            // here, then build the next `unfold` state in a later statement,
+            // once that borrow has ended.
+            let rev = tokio::select! {
+                changed = revisions.changed() => {
+                    changed.ok()?;
+                    Some(*revisions.borrow_and_update())
+                }
+                _ = stopping.wait_for(|stopping| *stopping) => None,
+            };
+            let rev = rev?;
+            Some((Ok(rev_event(rev)), (None, revisions, stopping)))
+        },
+    );
+    Ok(Sse::new(events).keep_alive(KeepAlive::new().interval(state.stream_heartbeat)))
+}
+
+fn rev_event(rev: i64) -> Event {
+    Event::default()
+        .event("rev")
+        .data(json!({ "rev": rev }).to_string())
 }

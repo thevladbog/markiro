@@ -16,7 +16,7 @@ use serde_json::json;
 use crate::audit::{self, actions, Actor, Entry, Outcome};
 use crate::auth::{open_session, require_loopback, AuthDevice};
 use crate::clock::format_timestamp;
-use crate::db::{begin_write, next_revision};
+use crate::db::{begin_write, commit_with_revision, next_revision};
 use crate::error::{ApiError, ApiJson};
 use crate::secrets::hash_password;
 use crate::server::AppState;
@@ -173,7 +173,9 @@ pub async fn bootstrap(
     )
     .await
     .map_err(ApiError::internal)?;
-    tx.commit().await.map_err(ApiError::internal)?;
+    commit_with_revision(tx, &state.revisions, rev)
+        .await
+        .map_err(ApiError::internal)?;
 
     Ok(Json(BootstrapResponse {
         session: OfficeSession {

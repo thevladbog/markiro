@@ -9,7 +9,7 @@ use sqlx::SqliteConnection;
 
 use crate::audit::{self, actions, Entry, Outcome};
 use crate::auth::OfficeContext;
-use crate::db::{begin_write, next_revision};
+use crate::db::{begin_write, commit_with_revision, next_revision};
 use crate::error::{ApiError, ApiJson};
 use crate::server::AppState;
 use crate::validate;
@@ -125,6 +125,8 @@ pub async fn put_org(
     .await
     .map_err(ApiError::internal)?;
     let updated = read_org(&mut tx).await?;
-    tx.commit().await.map_err(ApiError::internal)?;
+    commit_with_revision(tx, &state.revisions, rev)
+        .await
+        .map_err(ApiError::internal)?;
     Ok(Json(updated))
 }

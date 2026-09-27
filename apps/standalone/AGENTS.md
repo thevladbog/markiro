@@ -68,6 +68,9 @@ migration is never edited — add a new one; sqlx verifies checksums at start.
   chance to help.
 - One `next_revision` per changing transaction, stamped on every row that
   transaction changes.
+- A transaction that called `next_revision` commits through
+  `db::commit_with_revision`, which wakes change-stream subscribers only
+  after the commit: a device that reacts at once already reads the new rows.
 - Never touch `state.pool` while a write transaction is open. Read through
   the transaction (`&mut *tx`) instead of acquiring a second pooled
   connection: the pool has only 4 connections, and a second acquire can wait
@@ -84,6 +87,20 @@ migration is never edited — add a new one; sqlx verifies checksums at start.
   make on their own record (their own password) re-check the same way with
   `OfficeContext::require_session_in` instead; admin writes keep using
   `require_admin_in`.
+
+## Change feed
+
+`GET /v1/changes?since=<rev>&limit=<n>` (`routes/changes.rs`) returns the
+station-visible reference records changed after a device's revision:
+`org_profile`, `site` (badge salt and block sizes), `lines`, plus deletions
+from `tombstones`. Pages are ordered by `(rev, entity, id)` and never split a
+revision; with `hasMore = false`, `rev` is the host's current revision, so
+revisions that changed only office data still move a device forward.
+`GET /v1/changes/stream` sends the current revision first and then one `rev`
+event per commit that moved it, with a comment heartbeat every 15 s; streams
+end when the host stops. A new feed entity needs a branch in `FEED_KEYS` and
+in `record`, its proto record type, Zod schema and fixture, a tombstone
+wherever it is deleted, and the station's local table.
 
 ## Protocol
 

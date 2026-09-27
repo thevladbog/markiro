@@ -14,7 +14,7 @@ use axum::{Json, Router};
 use sqlx::SqlitePool;
 use time::OffsetDateTime;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use tokio_rustls::server::TlsStream;
 use tokio_rustls::TlsAcceptor;
 
@@ -43,6 +43,13 @@ pub struct AppState {
     /// mistyped pairing code never locks the office out on the same computer.
     pub claim_limiter: Arc<crate::rate_limit::RateLimiter>,
     pub endpoint: Endpoint,
+    /// The newest committed revision; change streams wait on it.
+    pub revisions: Arc<watch::Sender<i64>>,
+    /// Becomes `true` once when the host stops; open change streams end.
+    pub stopping: Arc<watch::Sender<bool>>,
+    /// How often a change stream writes a comment to keep the connection
+    /// alive (15 s; tests shorten it).
+    pub stream_heartbeat: Duration,
 }
 
 impl AppState {
@@ -65,6 +72,9 @@ impl AppState {
                 port: markiro_proto::DEFAULT_PORT,
                 addresses: Arc::new(crate::network::lan_ipv4_addresses),
             },
+            revisions: Arc::new(watch::channel(0).0),
+            stopping: Arc::new(watch::channel(false).0),
+            stream_heartbeat: Duration::from_secs(15),
             clock,
         }
     }
@@ -93,6 +103,12 @@ impl AppState {
         self.endpoint.addresses = Arc::new(addresses);
         self
     }
+
+    /// Change-stream heartbeat interval; tests use a short one.
+    pub fn with_stream_heartbeat(mut self, heartbeat: Duration) -> Self {
+        self.stream_heartbeat = heartbeat;
+        self
+    }
 }
 
 pub fn router(state: AppState) -> Router {
@@ -111,6 +127,7 @@ fn protected_routes() -> Router<AppState> {
         .route("/v1/device", get(crate::routes::devices::device_info))
         .route("/v1/device/line", put(crate::routes::devices::select_line))
         .route("/v1/changes", get(crate::routes::changes::changes))
+        .route("/v1/changes/stream", get(crate::routes::changes::stream))
         .route(
             "/v1/office/devices",
             get(crate::routes::devices::list_devices),

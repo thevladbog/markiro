@@ -45,7 +45,7 @@ pub struct RunningHost {
     pub addr: SocketAddr,
     pub fingerprint: String,
     pub host_id: String,
-    shutdown: tokio::sync::oneshot::Sender<()>,
+    stopping: std::sync::Arc<tokio::sync::watch::Sender<bool>>,
     task: tokio::task::JoinHandle<std::io::Result<()>>,
     pool: SqlitePool,
     _lock: std::fs::File,
@@ -53,7 +53,7 @@ pub struct RunningHost {
 
 impl RunningHost {
     pub async fn stop(self) -> Result<(), BoxError> {
-        let _ = self.shutdown.send(());
+        self.stopping.send_replace(true);
         let mut task = self.task;
         match tokio::time::timeout(SHUTDOWN_DEADLINE, &mut task).await {
             Ok(joined) => joined??,
@@ -85,15 +85,16 @@ pub async fn start(paths: &HostPaths, options: StartOptions) -> Result<RunningHo
         .unwrap_or_else(|| SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), config.port));
     let listener = server::TlsListener::bind(bind, identity.server_config()?).await?;
     let addr = listener.bound_addr();
-    let (shutdown, shutdown_signal) = tokio::sync::oneshot::channel::<()>();
     let state = server::AppState::new(
         pool.clone(),
         config.host_id.clone(),
         std::sync::Arc::new(clock::SystemClock),
     )
     .with_endpoint(identity.fingerprint.clone(), addr.port());
+    let stopping = state.stopping.clone();
+    let mut stopped = state.stopping.subscribe();
     let task = tokio::spawn(server::serve(listener, state, async move {
-        let _ = shutdown_signal.await;
+        let _ = stopped.wait_for(|stopping| *stopping).await;
     }));
     tracing::info!(
         version = env!("CARGO_PKG_VERSION"),
@@ -106,7 +107,7 @@ pub async fn start(paths: &HostPaths, options: StartOptions) -> Result<RunningHo
         addr,
         fingerprint: identity.fingerprint.clone(),
         host_id: config.host_id,
-        shutdown,
+        stopping,
         task,
         pool,
         _lock: lock,
