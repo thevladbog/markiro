@@ -1,7 +1,10 @@
-//! The change feed (spec §4.4): `GET /v1/changes` returns reference records
-//! changed after a device's revision, in pages that never split a revision.
-//! Adding an entity means a branch in `FEED_KEYS` and in `record`, its proto
-//! record type, Zod schema and fixture, and a tombstone wherever it is deleted.
+//! The change feed (spec §4.4) and its live stream (spec §4.5). `GET
+//! /v1/changes` returns reference records changed after a device's revision,
+//! in pages that never split a revision; `GET /v1/changes/stream` follows up
+//! with server-sent events so a device does not have to poll for the next
+//! one. Adding an entity means a branch in `FEED_KEYS` and in `record`, its
+//! proto record type, Zod schema and fixture, and a tombstone wherever it is
+//! deleted.
 
 use std::convert::Infallible;
 
@@ -18,6 +21,7 @@ use serde_json::json;
 use sqlx::SqliteConnection;
 
 use crate::auth::AuthDevice;
+use crate::db;
 use crate::error::{ApiError, ApiQuery};
 use crate::server::AppState;
 
@@ -73,8 +77,7 @@ pub async fn changes(
     // One read transaction: the records and the current revision come from
     // one WAL snapshot, so a concurrent write cannot slip between them.
     let mut tx = state.pool.begin().await.map_err(ApiError::internal)?;
-    let current: i64 = sqlx::query_scalar("SELECT rev FROM host_revision WHERE id = 1")
-        .fetch_one(&mut *tx)
+    let current = db::current_revision(&mut tx)
         .await
         .map_err(ApiError::internal)?;
     let page = page(&mut tx, since, limit).await?;
@@ -86,7 +89,9 @@ pub async fn changes(
     Ok(Json(ChangesResponse {
         host_id: state.host_id.clone(),
         rev: page.more_after.unwrap_or(current),
-        has_more: page.more_after.is_some(),
+        // `more_after` can equal `current` when the last page happens to end
+        // exactly on the host's newest revision: that is not "more to fetch".
+        has_more: page.more_after.is_some_and(|rev| rev < current),
         items,
     }))
 }
@@ -95,13 +100,14 @@ pub async fn changes(
 /// revision alone is larger than a page, it comes whole.
 async fn page(conn: &mut SqliteConnection, since: i64, limit: u32) -> Result<Page, ApiError> {
     let limit = usize::try_from(limit).map_err(ApiError::internal)?;
-    let fetched: Vec<Key> =
-        sqlx::query_as(&format!("{FEED_KEYS} ORDER BY rev, entity, id LIMIT ?2"))
-            .bind(since)
-            .bind(i64::try_from(limit + 1).map_err(ApiError::internal)?)
-            .fetch_all(&mut *conn)
-            .await
-            .map_err(ApiError::internal)?;
+    let fetched: Vec<Key> = sqlx::query_as(&format!(
+        "{FEED_KEYS} ORDER BY rev, entity, id, deleted DESC LIMIT ?2"
+    ))
+    .bind(since)
+    .bind(i64::try_from(limit + 1).map_err(ApiError::internal)?)
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(ApiError::internal)?;
     if fetched.len() <= limit {
         return Ok(Page {
             keys: fetched,
@@ -131,7 +137,8 @@ async fn page(conn: &mut SqliteConnection, since: i64, limit: u32) -> Result<Pag
     }
     // ...unless that revision alone fills the page: send all of it.
     let keys: Vec<Key> = sqlx::query_as(&format!(
-        "SELECT entity, id, rev, deleted FROM ({FEED_KEYS}) WHERE rev = ?2 ORDER BY entity, id"
+        "SELECT entity, id, rev, deleted FROM ({FEED_KEYS}) WHERE rev = ?2 \
+         ORDER BY entity, id, deleted DESC"
     ))
     .bind(since)
     .bind(last)
@@ -216,9 +223,11 @@ async fn record(conn: &mut SqliteConnection, key: &Key) -> Result<serde_json::Va
 }
 
 /// `GET /v1/changes/stream`: server-sent events. The first `rev` event
-/// carries the current revision, then one follows every commit that moved
-/// it; a comment line every heartbeat keeps the connection alive. The stream
-/// ends when the host stops.
+/// carries the current revision; after that, an event whenever the revision
+/// grew. Events are strictly increasing, so a burst of commits collapses
+/// into one, and an event means "fetch since your revision", not "a commit
+/// happened". A comment line every heartbeat keeps the connection alive; the
+/// stream ends when the host stops.
 pub async fn stream(
     State(state): State<AppState>,
     _device: AuthDevice,
@@ -227,37 +236,54 @@ pub async fn stream(
     // then shows up as one more event instead of being missed.
     let revisions = state.revisions.subscribe();
     let stopping = state.stopping.subscribe();
-    let current: i64 = sqlx::query_scalar("SELECT rev FROM host_revision WHERE id = 1")
-        .fetch_one(&state.pool)
-        .await
-        .map_err(ApiError::internal)?;
+    let current = {
+        let mut conn = state.pool.acquire().await.map_err(ApiError::internal)?;
+        db::current_revision(&mut conn)
+            .await
+            .map_err(ApiError::internal)?
+    };
     let events = unfold(
-        (Some(current), revisions, stopping),
-        |(first, mut revisions, mut stopping)| async move {
+        (Some(current), current, revisions, stopping),
+        |(first, mut last, mut revisions, mut stopping)| async move {
             if let Some(rev) = first {
+                last = rev;
                 return Some((
                     Ok::<_, Infallible>(rev_event(rev)),
-                    (None, revisions, stopping),
+                    (None, last, revisions, stopping),
                 ));
             }
-            if *stopping.borrow() {
-                return None;
-            }
-            // `select!` cannot move `stopping` or `revisions` into its own
-            // arm bodies: the macro keeps both arms' futures (one still
-            // borrowing `stopping` through `wait_for`) alive until the whole
-            // `select!` expression finishes. Resolve only the new revision
-            // here, then build the next `unfold` state in a later statement,
-            // once that borrow has ended.
-            let rev = tokio::select! {
-                changed = revisions.changed() => {
-                    changed.ok()?;
-                    Some(*revisions.borrow_and_update())
+            loop {
+                if *stopping.borrow() {
+                    return None;
                 }
-                _ = stopping.wait_for(|stopping| *stopping) => None,
-            };
-            let rev = rev?;
-            Some((Ok(rev_event(rev)), (None, revisions, stopping)))
+                // `select!` cannot move `stopping` or `revisions` into its
+                // own arm bodies: building both arms' futures needs `&mut`
+                // borrows of both receivers alive at once. The borrow on
+                // `stopping` itself comes from the `watch::Ref` that
+                // `wait_for` resolves to; that Ref lives in `select!`'s own
+                // output until the expression ends, not because a live arm
+                // future holds it. Resolve only the new revision here, then
+                // build the next `unfold` state in a later statement, once
+                // that borrow has ended.
+                let rev = tokio::select! {
+                    changed = revisions.changed() => {
+                        changed.ok()?;
+                        Some(*revisions.borrow_and_update())
+                    }
+                    _ = stopping.wait_for(|stopping| *stopping) => None,
+                };
+                let rev = rev?;
+                // A watch change is not always news: a burst of commits can
+                // coalesce into one wakeup, and a value at or below `last`
+                // (nothing yet on the host, or a lower value written
+                // directly, as in tests) is not forward progress. Keep
+                // waiting for a revision the device has not already been
+                // told about instead of sending a non-increasing event.
+                if rev > last {
+                    last = rev;
+                    return Some((Ok(rev_event(rev)), (None, last, revisions, stopping)));
+                }
+            }
         },
     );
     Ok(Sse::new(events).keep_alive(KeepAlive::new().interval(state.stream_heartbeat)))

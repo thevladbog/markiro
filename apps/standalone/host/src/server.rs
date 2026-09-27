@@ -43,7 +43,9 @@ pub struct AppState {
     /// mistyped pairing code never locks the office out on the same computer.
     pub claim_limiter: Arc<crate::rate_limit::RateLimiter>,
     pub endpoint: Endpoint,
-    /// The newest committed revision; change streams wait on it.
+    /// Raised by `commit_with_revision` after each commit that moved the
+    /// revision; it starts at 0, so read `db::current_revision` for the
+    /// current value.
     pub revisions: Arc<watch::Sender<i64>>,
     /// Becomes `true` once when the host stops; open change streams end.
     pub stopping: Arc<watch::Sender<bool>>,

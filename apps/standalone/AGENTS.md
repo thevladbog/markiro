@@ -96,11 +96,15 @@ station-visible reference records changed after a device's revision:
 from `tombstones`. Pages are ordered by `(rev, entity, id)` and never split a
 revision; with `hasMore = false`, `rev` is the host's current revision, so
 revisions that changed only office data still move a device forward.
-`GET /v1/changes/stream` sends the current revision first and then one `rev`
-event per commit that moved it, with a comment heartbeat every 15 s; streams
-end when the host stops. A new feed entity needs a branch in `FEED_KEYS` and
-in `record`, its proto record type, Zod schema and fixture, a tombstone
-wherever it is deleted, and the station's local table.
+`GET /v1/changes/stream` sends the current revision as its first event, then
+an event whenever the revision grew: events are strictly increasing, so a
+burst of commits collapses into one, and an event means "fetch since your
+revision", not "a commit happened"; a comment heartbeat keeps the connection
+alive every 15 s, and streams end when the host stops. A new feed entity
+needs a branch in `FEED_KEYS` and in `record`, its proto record type, Zod
+schema and fixture, a tombstone wherever it is deleted, the station's local
+table, an index on the new table's `rev` (as `lines_rev`), and that
+re-creating a key deletes its tombstone.
 
 ## Protocol
 

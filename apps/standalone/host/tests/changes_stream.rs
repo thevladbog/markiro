@@ -92,6 +92,42 @@ async fn the_stream_sends_the_current_revision_then_every_new_one() {
     );
 }
 
+/// A watch value at or below the last one sent (here, a test forcing the
+/// channel back to 0) must never produce a second, non-increasing event: the
+/// stream keeps waiting until a real commit moves the revision forward.
+///
+/// Reads the next chunk concurrently with the real commit (`tokio::join!`),
+/// the way a live connection is actually driven. A sequential await here
+/// would let the real commit's `send_if_modified` overwrite the `0` before
+/// the stream ever polls the channel, silently passing even a stream that
+/// forwards every change unfiltered.
+#[tokio::test]
+async fn a_lower_watch_value_never_produces_a_non_increasing_event() {
+    let app = TestApp::new().await;
+    let (_, key) = pair_device(&app, "station").await;
+    let token = bootstrap(&app, &key).await;
+
+    let (status, _, mut body) = open_stream(&app, &key).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(next_text(&mut body).await, rev_event(1));
+
+    app.state.revisions.send_replace(0);
+
+    let (next, (put_status, org)) = tokio::join!(
+        next_text(&mut body),
+        app.send(json_request(
+            with_session(request("PUT", "/v1/office/org"), &key, &token),
+            org_update(1),
+        )),
+    );
+    assert_eq!(put_status, StatusCode::OK, "{org}");
+    assert_eq!(
+        next,
+        rev_event(org["rev"].as_i64().unwrap()),
+        "the next chunk is the new revision, not the lower value written in between"
+    );
+}
+
 #[tokio::test]
 async fn the_stream_sends_a_heartbeat_comment() {
     let mut app = TestApp::new().await;
@@ -208,6 +244,29 @@ async fn every_revision_bump_wakes_subscribers_after_its_commit() {
     assert_eq!(latest(), host_revision(&app).await, "own password change");
 }
 
+/// In-process counterpart of `open_streams_end_when_the_host_stops`, without
+/// binding a real socket: flips the same `stopping` watch the host's `stop`
+/// uses, and checks the body frame the SSE stream itself produces.
+#[tokio::test]
+async fn a_stream_ends_when_the_host_starts_stopping() {
+    let app = TestApp::new().await;
+    let (_, key) = pair_device(&app, "station").await;
+
+    let (status, _, mut body) = open_stream(&app, &key).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(next_text(&mut body).await, rev_event(0));
+
+    app.state.stopping.send_replace(true);
+
+    let frame = tokio::time::timeout(Duration::from_secs(5), body.frame())
+        .await
+        .expect("the stream ends within 5 s of the host starting to stop");
+    assert!(
+        frame.is_none(),
+        "the stream ended cleanly when the host started stopping"
+    );
+}
+
 #[tokio::test]
 async fn open_streams_end_when_the_host_stops() {
     let dir = tempfile::tempdir().unwrap();
@@ -244,14 +303,12 @@ async fn open_streams_end_when_the_host_stops() {
     let first = stream.chunk().await.unwrap().expect("the first event");
     assert_eq!(String::from_utf8(first.to_vec()).unwrap(), rev_event(0));
 
-    let started = std::time::Instant::now();
     tokio::time::timeout(Duration::from_secs(5), host.stop())
         .await
         .expect("the host stops without waiting for the stream")
         .unwrap();
-    assert!(started.elapsed() < Duration::from_secs(5));
     assert!(
-        !matches!(stream.chunk().await, Ok(Some(_))),
-        "the stream ended with the host"
+        matches!(stream.chunk().await, Ok(None)),
+        "the stream ended cleanly with the host"
     );
 }

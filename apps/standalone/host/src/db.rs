@@ -55,6 +55,15 @@ pub async fn next_revision(conn: &mut SqliteConnection) -> Result<i64, sqlx::Err
         .await
 }
 
+/// The host's current revision (spec §4.4): what `GET /v1/changes` reports as
+/// `rev` once nothing more follows, and what the change stream's first event
+/// carries.
+pub async fn current_revision(conn: &mut SqliteConnection) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar("SELECT rev FROM host_revision WHERE id = 1")
+        .fetch_one(conn)
+        .await
+}
+
 /// Commit a write transaction that moved the global revision to `rev`, then
 /// wake change-stream subscribers. Notifying only after the commit means a
 /// device that reacts at once already reads the new rows.

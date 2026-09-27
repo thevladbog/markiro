@@ -87,14 +87,12 @@ describe("protocol schemas parse the shared Rust fixtures", () => {
   });
 
   it("change feed", () => {
-    const changes = changesResponseSchema.parse(fixture("changes-response.json"));
+    const rawChanges = fixture("changes-response.json") as { items: Array<{ data?: unknown }> };
+    const changes = changesResponseSchema.parse(rawChanges);
     expect(changes.items).toHaveLength(4);
-    expect(lineRecordSchema.parse(changes.items[0]?.data)).toEqual({
-      name: "Линия 2",
-      archived: false,
-    });
-    expect(orgRecordSchema.parse(changes.items[1]?.data).inn).toBeNull();
-    expect(siteRecordSchema.parse(changes.items[2]?.data).boxBlockSize).toBe(2000);
+    expect(lineRecordSchema.parse(changes.items[0]?.data)).toEqual(rawChanges.items[0]?.data);
+    expect(orgRecordSchema.parse(changes.items[1]?.data)).toEqual(rawChanges.items[1]?.data);
+    expect(siteRecordSchema.parse(changes.items[2]?.data)).toEqual(rawChanges.items[2]?.data);
     expect(changes.items[3]).toMatchObject({ deleted: true });
     expect(changes.items[3]?.data).toBeUndefined();
   });
@@ -104,6 +102,7 @@ describe("protocol schemas parse the shared Rust fixtures", () => {
 // response types. Requests are strict, like the host's deny_unknown_fields.
 const RESPONSES = [
   ["device-info.json", deviceInfoSchema],
+  ["device-record.json", deviceRecordSchema],
   ["office-user.json", officeUserSchema],
   ["office-session.json", officeSessionSchema],
   ["bootstrap-response.json", bootstrapResponseSchema],
@@ -111,6 +110,8 @@ const RESPONSES = [
   ["sscc-state.json", ssccStateSchema],
   ["office-user-record.json", officeUserRecordSchema],
   ["error-unauthorized.json", errorBodySchema],
+  ["pairing-code.json", pairingCodeSchema],
+  ["changes-response.json", changesResponseSchema],
 ] as const;
 
 const REQUESTS = [

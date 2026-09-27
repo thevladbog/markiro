@@ -144,7 +144,8 @@ async fn a_page_never_splits_a_revision() {
     assert_eq!(keys(&body).len(), 4);
     assert_eq!(
         (body["rev"].clone(), body["hasMore"].clone()),
-        (json!(1), json!(true))
+        (json!(1), json!(false)),
+        "revision 1 is whole and also the host's current revision: nothing more follows"
     );
     let (_, body) = changes(&app, &key, "?since=1&limit=2").await;
     assert_eq!(
@@ -190,6 +191,28 @@ async fn a_page_never_splits_a_revision() {
     );
 }
 
+/// A regression to "rev of the last item" instead of the host's current
+/// revision would still pass every other test in this file: they all happen
+/// to end on a revision that also has a feed record.
+#[tokio::test]
+async fn the_last_page_carries_the_current_revision_past_its_items() {
+    let app = TestApp::new().await;
+    let (_, key) = pair_device(&app, "station").await;
+    bootstrap(&app, &key).await;
+    let (a, rev_a) = add_lines(&app, &["Линия A"]).await;
+    // Office users are not in the feed, but they still move the host's
+    // revision forward past the last item the feed can return.
+    seed_office_user(&app, "tech", "technologist", "technologist password").await;
+
+    let (status, body) = changes(&app, &key, "?since=1").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(keys(&body), vec![("lines".to_owned(), a[0].clone(), rev_a)]);
+    assert_eq!(
+        (body["rev"].clone(), body["hasMore"].clone()),
+        (json!(3), json!(false))
+    );
+}
+
 #[tokio::test]
 async fn archived_lines_stay_and_deleted_records_come_as_tombstones() {
     let app = TestApp::new().await;
@@ -225,6 +248,55 @@ async fn archived_lines_stay_and_deleted_records_come_as_tombstones() {
     assert_eq!(body["items"], Value::Array(expected));
 }
 
+/// A key deleted and re-created in the same transaction (a tombstone and a
+/// live row sharing entity, id and revision) must sort with the tombstone
+/// first, so a station that applies items in order ends with the live row.
+#[tokio::test]
+async fn a_key_deleted_and_recreated_in_one_transaction_ends_live() {
+    let app = TestApp::new().await;
+    let (_, key) = pair_device(&app, "station").await;
+    bootstrap(&app, &key).await;
+    let lines = line_ids_by_name(&app).await;
+    let line_id = &lines[0];
+
+    let mut tx = markiro_host::db::begin_write(&app.state.pool)
+        .await
+        .unwrap();
+    let rev = markiro_host::db::next_revision(&mut tx).await.unwrap();
+    // The line row survives unchanged apart from its revision: the net
+    // effect of the transaction is that the key is still live.
+    sqlx::query("UPDATE lines SET rev = ? WHERE id = ?")
+        .bind(rev)
+        .bind(line_id)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO tombstones (entity, id, rev) VALUES ('lines', ?, ?)")
+        .bind(line_id)
+        .bind(rev)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+
+    let (_, body) = changes(&app, &key, "?since=1").await;
+    let items = body["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2, "{body}");
+    assert_eq!(items[0]["id"], json!(line_id), "{body}");
+    assert_eq!(
+        items[0]["deleted"],
+        json!(true),
+        "the tombstone sorts first: {body}"
+    );
+    assert_eq!(items[1]["id"], json!(line_id), "{body}");
+    assert_eq!(
+        items[1]["deleted"],
+        json!(false),
+        "then the re-created live row: {body}"
+    );
+    assert_eq!(items[1]["data"]["name"], json!("Линия 1"), "{body}");
+}
+
 #[tokio::test]
 async fn the_feed_checks_its_query() {
     let app = TestApp::new().await;
@@ -242,6 +314,18 @@ async fn the_feed_checks_its_query() {
     let (status, body) = changes(&app, &key, "?since=abc").await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(body["error"]["code"], "validation_failed");
+
+    // An unknown field is rejected by `deny_unknown_fields`, not silently
+    // ignored.
+    let (status, body) = changes(&app, &key, "?foo=1").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["error"]["code"], "validation_failed");
+
+    // The limit's boundary values are valid, not off-by-one rejections.
+    for query in ["?limit=1", "?limit=1000"] {
+        let (status, body) = changes(&app, &key, query).await;
+        assert_eq!(status, StatusCode::OK, "{query}: {body}");
+    }
 }
 
 #[tokio::test]

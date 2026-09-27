@@ -75,6 +75,8 @@ pub mod credentials {
     pub const PASSWORD: &str = "password";
 }
 
+pub mod pairing;
+
 /// Lower-case hex SHA-256 of a certificate's DER: the value devices pin and
 /// the pairing payload carries.
 pub fn certificate_fingerprint(der: &[u8]) -> String {

@@ -43,6 +43,25 @@ mod tests {
     use super::usable;
 
     #[test]
+    fn the_real_lan_addresses_are_sorted_deduped_and_exclude_reserved_ranges() {
+        // Exercises the actual adapter enumeration (`if_addrs::get_if_addrs`),
+        // not just the `usable` filter above: it is the only automated check
+        // of the Windows adapter path the CI job for that platform runs. A
+        // machine without a LAN reports an empty list, so nothing here
+        // depends on an address existing.
+        let addresses = super::lan_ipv4_addresses();
+        let mut sorted = addresses.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(addresses, sorted, "sorted ascending, without duplicates");
+        for address in &addresses {
+            assert!(!address.is_loopback(), "loopback address: {address}");
+            assert!(!address.is_link_local(), "link-local address: {address}");
+            assert!(!address.is_unspecified(), "0.0.0.0: {address}");
+        }
+    }
+
+    #[test]
     fn only_up_lan_addresses_remain_sorted_without_repeats() {
         let candidates = [
             (Ipv4Addr::new(192, 168, 1, 10), true),

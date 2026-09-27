@@ -128,9 +128,9 @@ export const orgRecordSchema = z.object({
 });
 export type OrgRecord = z.infer<typeof orgRecordSchema>;
 
-/** `data` of a `site` item: the badge salt is standard base64 with padding. */
+/** `data` of a `site` item: the badge salt is 16 bytes, standard base64 with padding. */
 export const siteRecordSchema = z.object({
-  badgeSalt: z.string().min(1),
+  badgeSalt: z.base64().length(24),
   boxBlockSize: z.number().int().positive(),
   palletBlockSize: z.number().int().positive(),
 });
