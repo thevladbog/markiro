@@ -38,22 +38,24 @@ fn validate(statements: &[AtomicStatement]) -> Result<(), String> {
             return Err("each transaction element must contain one statement".into());
         }
         let normalized = without_terminal.to_ascii_uppercase();
-        let forbidden = normalized
-            .split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
-            .any(|token| {
-                matches!(
-                    token,
-                    "BEGIN"
-                        | "COMMIT"
-                        | "ROLLBACK"
-                        | "SAVEPOINT"
-                        | "RELEASE"
-                        | "ATTACH"
-                        | "DETACH"
-                        | "PRAGMA"
-                )
-            });
-        if forbidden {
+        let separator = |character: char| !character.is_ascii_alphanumeric() && character != '_';
+        let forbidden = normalized.split(separator).any(|token| {
+            matches!(
+                token,
+                "BEGIN"
+                    | "COMMIT"
+                    | "ROLLBACK"
+                    | "SAVEPOINT"
+                    | "RELEASE"
+                    | "ATTACH"
+                    | "DETACH"
+                    | "PRAGMA"
+            )
+        });
+        // SQLite runs a leading `END` (or `END TRANSACTION`) as `COMMIT`. `END`
+        // cannot join the words above: `CASE … END` uses it mid-statement.
+        let ends_transaction = normalized.split(separator).next() == Some("END");
+        if forbidden || ends_transaction {
             return Err("transaction control is owned by the native command".into());
         }
     }
@@ -64,6 +66,7 @@ async fn execute(
     connection: &mut SqliteConnection,
     statements: Vec<AtomicStatement>,
 ) -> Result<Vec<u64>, String> {
+    validate(&statements)?;
     let mut transaction = connection
         .begin()
         .await
@@ -116,7 +119,6 @@ pub async fn grant_atomic_execute(
     app: tauri::AppHandle,
     statements: Vec<AtomicStatement>,
 ) -> Result<Vec<u64>, String> {
-    validate(&statements)?;
     let path = app
         .path()
         .app_config_dir()
@@ -162,6 +164,37 @@ mod tests {
             expected_changes: None
         }])
         .is_err());
+    }
+
+    #[test]
+    fn rejects_a_leading_end_but_not_a_case_expression() {
+        // SQLite runs `END` and `END TRANSACTION` as `COMMIT`.
+        for sql in ["END", "end transaction", "END;"] {
+            assert!(
+                validate(&[AtomicStatement {
+                    sql: sql.into(),
+                    values: vec![],
+                    expected_changes: None,
+                }])
+                .is_err(),
+                "{sql}"
+            );
+        }
+        for sql in [
+            // An owner statement the inventory journal commits through this command.
+            "UPDATE inventory_scan_events_mirror SET commit_state=CASE WHEN json_extract((SELECT decision_json FROM offline_grant_decisions WHERE event_id=?),'$.allow')=1 THEN 'committed' ELSE 'failed' END,legacy_audit_version=1 WHERE inventory_id=? AND snapshot_id=? AND event_id=? AND commit_state='pending'",
+            "UPDATE facts SET value=CASE WHEN value=? THEN 'on' ELSE 'off' END;",
+        ] {
+            assert!(
+                validate(&[AtomicStatement {
+                    sql: sql.into(),
+                    values: vec![],
+                    expected_changes: None,
+                }])
+                .is_ok(),
+                "{sql}"
+            );
+        }
     }
 
     #[test]
@@ -239,6 +272,48 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(value, "before");
+        });
+    }
+
+    #[test]
+    fn rejects_a_batch_with_a_bare_end_before_running_any_statement() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let mut connection = SqliteConnection::connect("sqlite::memory:").await.unwrap();
+            connection
+                .execute("CREATE TABLE facts(id INTEGER PRIMARY KEY,value TEXT NOT NULL)")
+                .await
+                .unwrap();
+            let insert = |value: &str| AtomicStatement {
+                sql: "INSERT INTO facts(id,value) VALUES(1,?)".into(),
+                values: vec![Value::String(value.into())],
+                expected_changes: None,
+            };
+            let result = execute(
+                &mut connection,
+                vec![
+                    insert("kept?"),
+                    AtomicStatement {
+                        sql: "END".into(),
+                        values: vec![],
+                        expected_changes: None,
+                    },
+                    insert("duplicate"),
+                ],
+            )
+            .await;
+            assert_eq!(
+                result,
+                Err("transaction control is owned by the native command".into())
+            );
+            let count: i64 = sqlx::query_scalar("SELECT count(*) FROM facts")
+                .fetch_one(&mut connection)
+                .await
+                .unwrap();
+            assert_eq!(count, 0);
         });
     }
 }
