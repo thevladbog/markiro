@@ -51,16 +51,29 @@ function isStatus(value: unknown): value is StationStorageStatus {
 }
 
 /**
- * Where the station files live and why, for diagnostics. Never rejects: a
- * blocked storage already stops startup through `readConfig`, and a missing
- * or unknown answer only hides the diagnostics.
+ * What `station_storage_status` answered: where the station files live, why
+ * the storage is blocked (the Rust gate rejects with that text), or nothing
+ * usable.
  */
-export async function readStorageStatus(): Promise<StationStorageStatus | null> {
+export type StorageStatusResult =
+  | { kind: "ready"; status: StationStorageStatus }
+  | { kind: "blocked"; reason: string }
+  | { kind: "unknown" };
+
+/**
+ * Where the station files live and why, for diagnostics. Never rejects: a
+ * blocked storage already stops startup through `readConfig`; its reason only
+ * explains the recovery screen, and a missing or unknown answer only hides the
+ * diagnostics.
+ */
+export async function readStorageStatus(): Promise<StorageStatusResult> {
   try {
     const status: unknown = await invoke("station_storage_status");
-    return isStatus(status) ? status : null;
-  } catch {
-    return null;
+    return isStatus(status) ? { kind: "ready", status } : { kind: "unknown" };
+  } catch (error: unknown) {
+    return typeof error === "string" && error !== ""
+      ? { kind: "blocked", reason: error }
+      : { kind: "unknown" };
   }
 }
 

@@ -36,13 +36,24 @@ describe("readStorageStatus", () => {
     };
     invokeMock.mockResolvedValue(status);
 
-    await expect(readStorageStatus()).resolves.toEqual(status);
+    await expect(readStorageStatus()).resolves.toEqual({ kind: "ready", status });
     expect(invokeMock).toHaveBeenCalledWith("station_storage_status");
   });
 
-  it("hides diagnostics instead of failing on an error or an unknown shape", async () => {
-    invokeMock.mockRejectedValueOnce(new Error("station files exist in both folders"));
-    await expect(readStorageStatus()).resolves.toBeNull();
+  it("carries the reason a blocked storage gives", async () => {
+    // Tauri rejects with the command's `Err(String)` as it is.
+    const reason =
+      "the station storage record C:\\Users\\op\\AppData\\Local\\app.markiro.station\\station-storage.json is damaged: EOF while parsing an object at line 1 column 1";
+    invokeMock.mockRejectedValueOnce(reason);
+
+    await expect(readStorageStatus()).resolves.toEqual({ kind: "blocked", reason });
+  });
+
+  it("hides diagnostics instead of failing on another error or an unknown shape", async () => {
+    invokeMock.mockRejectedValueOnce(new Error("IPC unavailable"));
+    await expect(readStorageStatus()).resolves.toEqual({ kind: "unknown" });
+    invokeMock.mockRejectedValueOnce("");
+    await expect(readStorageStatus()).resolves.toEqual({ kind: "unknown" });
 
     for (const value of [
       undefined,
@@ -52,7 +63,7 @@ describe("readStorageStatus", () => {
       { dir: "x", mode: "local", notices: [{ kind: "new_kind" }] },
     ]) {
       invokeMock.mockResolvedValueOnce(value);
-      await expect(readStorageStatus()).resolves.toBeNull();
+      await expect(readStorageStatus()).resolves.toEqual({ kind: "unknown" });
     }
   });
 });
@@ -70,6 +81,7 @@ describe("storage notices", () => {
       "storage.mode.local",
       "storage.mode.legacy",
       "storage.pairingUnsafe",
+      "storage.blocked",
     ]) {
       for (const lng of ["ru", "en"]) {
         expect(i18n.exists(key, { lng }), `${key} (${lng})`).toBe(true);

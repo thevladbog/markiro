@@ -233,7 +233,7 @@ describe("UpdateCenter", () => {
     expect(screen.getByText("C:\\Users\\op\\AppData\\Roaming\\app.markiro.station")).toBeDefined();
     expect(
       screen.getByText(
-        "Station data is open on another computer under the same Windows account. The move to the local folder is postponed. Contact your administrator.",
+        "Station data is in use by another process, usually a station on another computer under the same Windows account, or antivirus. The move to the local folder is postponed and retried at the next start; if this repeats, contact your administrator.",
       ),
     ).toBeDefined();
     expect(

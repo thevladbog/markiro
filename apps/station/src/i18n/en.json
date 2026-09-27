@@ -987,7 +987,7 @@
       "legacy": "Stored in the roaming Windows profile:"
     },
     "notices": {
-      "legacy_in_use": "Station data is open on another computer under the same Windows account. The move to the local folder is postponed. Contact your administrator.",
+      "legacy_in_use": "Station data is in use by another process, usually a station on another computer under the same Windows account, or antivirus. The move to the local folder is postponed and retried at the next start; if this repeats, contact your administrator.",
       "move_failed": "Station data could not be moved to the local folder. The station works as before and retries the move at the next start.",
       "local_less_durable": {
         "temporary_profile": "Windows loaded a temporary profile: station data will be deleted at sign-out. Do not pair this station; sign out and contact your administrator.",
@@ -1000,6 +1000,7 @@
       },
       "claim_leftovers": "The old station data folder was not removed completely. Work is not affected; tell your administrator."
     },
-    "pairingUnsafe": "Windows loaded a temporary or mandatory profile: after sign-out the station would lose its pairing and data. Do not pair it on this profile; contact your administrator."
+    "pairingUnsafe": "Windows loaded a temporary or mandatory profile: after sign-out the station would lose its pairing and data. Do not pair it on this profile; contact your administrator.",
+    "blocked": "Station data is blocked: {{reason}}. Do not delete anything; contact support."
   }
 }

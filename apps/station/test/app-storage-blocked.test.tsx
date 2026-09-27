@@ -3,20 +3,25 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import type * as HardwareModule from "../src/lib/hardware.js";
 import type * as LockdownModule from "../src/lib/lockdown.js";
 
-// Station files in both folders, or an unreadable move record, make
-// `station_database_url` fail. The mocks below are the smallest set the
-// first render of <App /> needs; test/App.test.tsx lines 16-148 are the
-// full reference if another boundary turns out to be required.
+// Station files in both folders, or an unreadable move record, block the
+// storage gate: every command that waits on it rejects with the same reason
+// string (Tauri passes the command's `Err(String)` as it is). The mocks below
+// are the smallest set the first render of <App /> needs; test/App.test.tsx
+// lines 16-148 are the full reference if another boundary turns out to be
+// required.
 const mocks = vi.hoisted(() => {
   const snapshot = {
     mode: "locked",
     pending: false,
     error: null,
   } as LockdownModule.LockdownSnapshot;
+  const reason =
+    "station files exist in both C:\\Users\\op\\AppData\\Roaming\\app.markiro.station and C:\\Users\\op\\AppData\\Local\\app.markiro.station, and this computer has no record of a move between them; support must decide which copy is current";
   return {
+    reason,
     invoke: vi.fn<(command: string, payload?: unknown) => Promise<unknown>>(async (command) => {
-      if (command === "station_database_url") {
-        throw new Error("station files exist in both the roaming and the local folder");
+      if (command === "station_database_url" || command === "station_storage_status") {
+        throw reason;
       }
       return undefined;
     }),
@@ -67,14 +72,15 @@ beforeAll(async () => {
 });
 
 describe("App with blocked station storage", () => {
-  it("stops on the recovery screen and never reads or mints the config", async () => {
+  it("stops on the recovery screen with the reason and never reads or mints the config", async () => {
     render(<App />);
 
     expect(
       await screen.findByText(
-        "Local work is sealed, but station recovery could not be completed. Retry or contact support.",
+        `Station data is blocked: ${mocks.reason}. Do not delete anything; contact support.`,
       ),
     ).toBeDefined();
+    expect(screen.getByText("Pairing needs attention")).toBeDefined();
     expect(mocks.load).not.toHaveBeenCalled();
     expect(mocks.invoke.mock.calls.map(([command]) => command)).not.toContain("read_config");
     expect(screen.queryByText("Connect station")).toBeNull();

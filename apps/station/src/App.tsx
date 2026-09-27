@@ -6,7 +6,7 @@ import { SyncDetailsDialog } from "./ui/SyncDetailsDialog.js";
 import { replacementBlocksNewWork, replacementCanEnterTask } from "./lib/device-replacement.js";
 import { configuredPrinterOutput, configuredPrinterRouting } from "./lib/printer-routing.js";
 import { RecoveryWorkSummary } from "./ui/RecoveryWorkSummary.js";
-import { readStorageStatus, type StationStorageStatus } from "./lib/storage-status.js";
+import { readStorageStatus, type StorageStatusResult } from "./lib/storage-status.js";
 import {
   initializeDeviceRecovery,
   readDeviceRecovery,
@@ -264,7 +264,9 @@ export function App() {
   const [deviceRecovery, setDeviceRecovery] = useState<DeviceRecoveryView | null>(null);
   const [startupRecoveryFailed, setStartupRecoveryFailed] = useState(false);
   const [savedWork, setSavedWork] = useState<SealedWorkSummary | undefined>();
-  const [storageStatus, setStorageStatus] = useState<StationStorageStatus | null>(null);
+  const [storageRead, setStorageRead] = useState<StorageStatusResult>({ kind: "unknown" });
+  const storageStatus = storageRead.kind === "ready" ? storageRead.status : null;
+  const storageBlockedReason = storageRead.kind === "blocked" ? storageRead.reason : null;
   const configRef = useRef<StationConfig | null>(null);
   const configTransitions = useRef(new ConfigTransitionCoordinator());
   const [operator, setOperator] = useState<OperatorMirrorRecord | null>(null);
@@ -668,11 +670,12 @@ export function App() {
   }, [shift, shiftBundleRevision]);
 
   // Diagnostics only: `readStorageStatus` never rejects, and a blocked
-  // storage already stops startup through `readConfig`.
+  // storage already stops startup through `readConfig`; its reason is shown
+  // on the recovery screen.
   useEffect(() => {
     let cancelled = false;
-    void readStorageStatus().then((status) => {
-      if (!cancelled) setStorageStatus(status);
+    void readStorageStatus().then((result) => {
+      if (!cancelled) setStorageRead(result);
     });
     return () => {
       cancelled = true;
@@ -1436,7 +1439,13 @@ export function App() {
         <Card style={{ maxWidth: 720, padding: 32 }}>
           <h1>{t("enroll.recoveryTitle")}</h1>
           <p role="alert">
-            {t(startupRecoveryFailed ? "enroll.recoveryFailed" : "enroll.errors.owner_unresolved")}
+            {storageBlockedReason !== null
+              ? t("storage.blocked", { reason: storageBlockedReason })
+              : t(
+                  startupRecoveryFailed
+                    ? "enroll.recoveryFailed"
+                    : "enroll.errors.owner_unresolved",
+                )}
           </p>
           <RecoveryWorkSummary {...(savedWork ? { summary: savedWork } : {})} />
         </Card>
