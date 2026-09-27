@@ -1,3 +1,4 @@
+use std::ffi::{OsStr, OsString};
 use std::fs::{self, File};
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -7,7 +8,7 @@ use std::time::Duration;
 use uuid::Uuid;
 
 use super::copy::{self, CopyError};
-use super::probe::ProfileFacts;
+use super::probe::{LessDurableReason, ProfileFacts};
 use super::record::{self, Origin, StorageRecord, RECORD_FILE};
 use super::{StationStorage, StorageMode, StorageNotice, CONFIG_FILE, DATABASE_FILE};
 
@@ -94,28 +95,42 @@ fn decide(
     facts: ProfileFacts,
     hook: &mut Hook<'_>,
 ) -> Result<StationStorage, String> {
-    if let Some(reason) = facts.local_less_durable() {
-        return Ok(legacy(
-            legacy_dir,
-            vec![StorageNotice::LocalLessDurable { reason }],
-        ));
+    let in_legacy = has_station_files(legacy_dir)?;
+    let in_local = has_station_files(local_dir)?;
+    let orphaned = !in_legacy && unfinished_claim_exists(legacy_dir)?;
+    let guard = facts.local_less_durable();
+    if let Some(reason) = guard {
+        // Stay in the roaming folder where the files are, or where a fresh
+        // station starts; never point at an empty one while they sit elsewhere.
+        if in_legacy || (!in_local && !orphaned) {
+            return Ok(legacy(
+                legacy_dir,
+                vec![StorageNotice::LocalLessDurable { reason }],
+            ));
+        }
     }
-    match (has_station_files(legacy_dir)?, has_station_files(local_dir)?) {
+    let mut storage = match (in_legacy, in_local) {
         (true, true) => {
-            Err("station files exist in both the roaming and the local folder".to_string())
+            return Err("station files exist in both the roaming and the local folder".to_string())
         }
-        (true, false) => migrate(legacy_dir, local_dir, hook),
-        (false, true) => Ok(commit_without_move(local_dir, Origin::Adopted)),
-        (false, false) => {
-            if unfinished_claim_exists(legacy_dir)? {
-                return Err(
-                    "an unfinished move of station files was found next to the roaming folder"
-                        .to_string(),
-                );
-            }
-            Ok(commit_without_move(local_dir, Origin::Fresh))
+        (true, false) => return migrate(legacy_dir, local_dir, hook),
+        // This machine's record may have been lost, and the claimed files may be
+        // newer than any local copy: neither side can be declared authoritative.
+        (false, _) if orphaned => {
+            return Err(
+                "an unfinished move of station files was found next to the roaming folder"
+                    .to_string(),
+            )
         }
+        (false, true) => commit_without_move(local_dir, Origin::Adopted),
+        (false, false) => commit_without_move(local_dir, Origin::Fresh),
+    };
+    if let Some(reason) = guard {
+        storage
+            .notices
+            .push(StorageNotice::LocalLessDurable { reason });
     }
+    Ok(storage)
 }
 
 /// A failed record write is harmless here: without a record the next start
@@ -156,16 +171,19 @@ fn claim(
     local_dir: &Path,
     hook: &mut Hook<'_>,
 ) -> Result<StationStorage, String> {
-    if hook(Step::Claim)
-        .and_then(|()| rename_with_retries(legacy_dir, claim_dir))
-        .is_err()
-    {
+    let renamed = hook(Step::Claim).and_then(|()| rename_with_retries(legacy_dir, claim_dir));
+    // What is on disk decides: over SMB a rename can land and still report an
+    // error when the server's reply is lost.
+    if renamed.is_ok() || has_station_files(claim_dir)? {
+        return move_claimed(claim_dir, local_dir, hook);
+    }
+    if has_station_files(legacy_dir)? {
         // Another computer holds the database over SMB, or a scanner holds a
         // file. Withdraw the intent: nothing moved, and the next start retries.
         let _ = record::remove(local_dir);
         return Ok(legacy(legacy_dir, vec![StorageNotice::LegacyInUse]));
     }
-    move_claimed(claim_dir, local_dir, hook)
+    Err("the station files disappeared while they were being claimed".to_string())
 }
 
 fn rename_with_retries(from: &Path, to: &Path) -> Result<(), String> {
@@ -173,7 +191,10 @@ fn rename_with_retries(from: &Path, to: &Path) -> Result<(), String> {
     loop {
         match fs::rename(from, to) {
             Ok(()) => return Ok(()),
-            Err(error) if attempt >= CLAIM_ATTEMPTS => return Err(error.to_string()),
+            // Gone: an earlier attempt may have landed without saying so.
+            Err(error) if attempt >= CLAIM_ATTEMPTS || error.kind() == ErrorKind::NotFound => {
+                return Err(error.to_string())
+            }
             Err(_) => {
                 attempt += 1;
                 sleep(CLAIM_RETRY_DELAY);
@@ -224,20 +245,7 @@ fn copy_into_local(
     names.retain(|name| name.as_os_str() != RECORD_FILE && name.as_os_str() != LOCK_FILE);
     // The record proves the local folder held no station files before the
     // claim, so anything named like one is a leftover of an earlier attempt.
-    let database_sidecars = DATABASE_SIDECARS.map(|suffix| format!("{DATABASE_FILE}{suffix}"));
-    let fixed = [CONFIG_FILE, DATABASE_FILE]
-        .into_iter()
-        .chain(database_sidecars.iter().map(String::as_str));
-    for name in fixed
-        .map(std::ffi::OsStr::new)
-        .chain(names.iter().map(|name| name.as_os_str()))
-    {
-        match fs::remove_file(local_dir.join(name)) {
-            Ok(()) => {}
-            Err(error) if error.kind() == ErrorKind::NotFound => {}
-            Err(error) => return Err(error.into()),
-        }
-    }
+    discard_station_files(local_dir, &names)?;
     hook(Step::Hold).map_err(|_| CopyError::InUse)?;
     let mut held = copy::hold(claim_dir, &names)?;
     held.copy_to(staging)?;
@@ -354,10 +362,7 @@ fn resume(
             return Err("the claimed folder of an unfinished move holds no station files".into());
         }
         if let Some(reason) = guard {
-            return Ok(legacy(
-                claim_dir,
-                vec![StorageNotice::LocalLessDurable { reason }],
-            ));
+            return Ok(undo_claim(legacy_dir, claim_dir, local_dir, reason));
         }
         remove_stale_staging(local_dir);
         return move_claimed(claim_dir, local_dir, hook);
@@ -365,15 +370,61 @@ fn resume(
     if has_station_files(legacy_dir)? {
         // The intent was recorded, but the rename never happened.
         if let Some(reason) = guard {
-            let _ = record::remove(local_dir);
-            return Ok(legacy(
-                legacy_dir,
-                vec![StorageNotice::LocalLessDurable { reason }],
-            ));
+            return Ok(forget_move(legacy_dir, local_dir, reason));
         }
         return claim(legacy_dir, claim_dir, local_dir, hook);
     }
     Err("station files named by an unfinished move are missing".to_string())
+}
+
+/// The profile now wipes local data, and the record would go with it. Put the
+/// claimed folder back under its roaming name and forget the move, so the
+/// next start finds the files where it looks without any record.
+fn undo_claim(
+    legacy_dir: &Path,
+    claim_dir: &Path,
+    local_dir: &Path,
+    reason: LessDurableReason,
+) -> StationStorage {
+    // tauri-plugin-sql recreates an empty roaming folder whenever the station
+    // opens its database; `remove_dir` only ever removes an empty one.
+    let _ = fs::remove_dir(legacy_dir);
+    if fs::rename(claim_dir, legacy_dir).is_err() {
+        // The record still names the claim: run from it and retry next start.
+        return legacy(claim_dir, vec![StorageNotice::LocalLessDurable { reason }]);
+    }
+    forget_move(legacy_dir, local_dir, reason)
+}
+
+/// Drops any partial local copy, then the record. The other order would leave
+/// station files on both sides, which blocks the next start.
+fn forget_move(legacy_dir: &Path, local_dir: &Path, reason: LessDurableReason) -> StationStorage {
+    let names = copy::store_files(legacy_dir).unwrap_or_default();
+    if discard_station_files(local_dir, &names).is_ok() {
+        let _ = record::remove(local_dir);
+    }
+    legacy(legacy_dir, vec![StorageNotice::LocalLessDurable { reason }])
+}
+
+/// Removes `station.json`, the database with its SQLite sidecars and `extra`
+/// from the local folder. Only called while the record says the local folder
+/// is not authoritative.
+fn discard_station_files(local_dir: &Path, extra: &[OsString]) -> std::io::Result<()> {
+    let database_sidecars = DATABASE_SIDECARS.map(|suffix| format!("{DATABASE_FILE}{suffix}"));
+    let fixed = [CONFIG_FILE, DATABASE_FILE]
+        .into_iter()
+        .chain(database_sidecars.iter().map(String::as_str));
+    for name in fixed
+        .map(OsStr::new)
+        .chain(extra.iter().map(|name| name.as_os_str()))
+    {
+        match fs::remove_file(local_dir.join(name)) {
+            Ok(()) => {}
+            Err(error) if error.kind() == ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
 }
 
 fn remove_stale_staging(local_dir: &Path) {
@@ -966,6 +1017,177 @@ mod tests {
         );
         assert_eq!(files(&dirs.local), original);
         assert_eq!(record::read(&dirs.local).unwrap(), None);
+    }
+
+    #[test]
+    fn a_claim_rename_that_lands_but_reports_an_error_still_moves_the_pair() {
+        let dirs = fresh_dirs();
+        let original = seed(&dirs.legacy, "machine-1");
+        let (legacy_dir, local_dir) = (dirs.legacy.clone(), dirs.local.clone());
+        let storage = resolve(&dirs.legacy, &dirs.local, local_profile(), &mut |step| {
+            if step == Step::Claim {
+                // Over SMB the rename lands on the server, but the reply is lost.
+                let Some(StorageRecord::Claiming { claim_dir, .. }) = record::read(&local_dir).unwrap()
+                else {
+                    panic!("the intent is recorded before the claim");
+                };
+                fs::rename(&legacy_dir, claim_dir).unwrap();
+                return Err("the network name is no longer available".to_string());
+            }
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(storage, local(&dirs.local, Vec::new()));
+        assert_eq!(files(&dirs.local), original);
+        assert!(claims(&dirs).is_empty());
+    }
+
+    #[test]
+    fn station_files_that_vanish_during_the_claim_block() {
+        let dirs = fresh_dirs();
+        seed(&dirs.legacy, "machine-1");
+        let legacy_dir = dirs.legacy.clone();
+        let result = resolve(&dirs.legacy, &dirs.local, local_profile(), &mut |step| {
+            if step == Step::Claim {
+                fs::remove_dir_all(&legacy_dir).unwrap();
+                return Err("not found".to_string());
+            }
+            Ok(())
+        });
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn a_pending_claim_is_put_back_when_the_profile_starts_wiping_local_data() {
+        let dirs = fresh_dirs();
+        let original = seed(&dirs.legacy, "machine-1");
+        // Start 1: the claim lands, but another computer holds the database.
+        resolve(&dirs.legacy, &dirs.local, local_profile(), &mut |step| {
+            if step == Step::Hold {
+                Err("in use".to_string())
+            } else {
+                Ok(())
+            }
+        })
+        .unwrap();
+        assert_eq!(claims(&dirs).len(), 1);
+        // A partial install, and the empty roaming folder tauri-plugin-sql
+        // recreates whenever the station opens its database.
+        fs::write(dirs.local.join(DATABASE_FILE), b"partial").unwrap();
+        fs::create_dir_all(&dirs.legacy).unwrap();
+
+        // Start 2: the delete-cache policy has arrived.
+        let wiping = ProfileFacts {
+            roaming: true,
+            delete_roaming_cache: true,
+            ..ProfileFacts::default()
+        };
+        let notice = vec![StorageNotice::LocalLessDurable {
+            reason: LessDurableReason::DeleteRoamingCache,
+        }];
+        assert_eq!(
+            run(&dirs, wiping).unwrap(),
+            legacy(&dirs.legacy, notice.clone())
+        );
+        assert_eq!(files(&dirs.legacy), original);
+        assert!(claims(&dirs).is_empty());
+        assert!(files(&dirs.local).is_empty());
+        assert_eq!(record::read(&dirs.local).unwrap(), None);
+
+        // Sign-out wipes the local profile copy; the files are still found.
+        fs::remove_dir_all(&dirs.local).unwrap();
+        assert_eq!(run(&dirs, wiping).unwrap(), legacy(&dirs.legacy, notice));
+        // Once the policy is gone, the move goes ahead.
+        assert_eq!(
+            run(&dirs, local_profile()).unwrap(),
+            local(&dirs.local, Vec::new())
+        );
+        assert_eq!(files(&dirs.local), original);
+    }
+
+    #[test]
+    fn the_guard_never_points_at_an_empty_roaming_folder_while_files_are_elsewhere() {
+        let wiping = ProfileFacts {
+            temporary: true,
+            ..ProfileFacts::default()
+        };
+        // Files only in the local folder: use them, and say so.
+        let dirs = fresh_dirs();
+        let placed = seed(&dirs.local, "machine-1");
+        assert_eq!(
+            run(&dirs, wiping).unwrap(),
+            local(
+                &dirs.local,
+                vec![StorageNotice::LocalLessDurable {
+                    reason: LessDurableReason::TemporaryProfile
+                }]
+            )
+        );
+        assert_eq!(files(&dirs.local), placed);
+
+        // An orphaned claim: block rather than start empty.
+        let dirs = fresh_dirs();
+        seed(
+            &dirs
+                .legacy
+                .with_file_name("app.markiro.station.migrating-orphan"),
+            "machine-1",
+        );
+        assert!(run(&dirs, wiping).is_err());
+    }
+
+    #[test]
+    fn an_orphaned_claim_is_never_shadowed_by_a_stale_local_copy() {
+        let dirs = fresh_dirs();
+        seed(&dirs.local, "machine-1");
+        seed(
+            &dirs
+                .legacy
+                .with_file_name("app.markiro.station.migrating-orphan"),
+            "machine-1",
+        );
+        assert!(run(&dirs, local_profile()).is_err());
+    }
+
+    #[test]
+    fn failed_record_writes_follow_what_is_on_disk() {
+        // The intent never reached the disk: nothing moved.
+        let dirs = fresh_dirs();
+        let original = seed(&dirs.legacy, "machine-1");
+        let storage = resolve(&dirs.legacy, &dirs.local, local_profile(), &mut |step| {
+            if step == Step::Record {
+                Err("disk full".to_string())
+            } else {
+                Ok(())
+            }
+        })
+        .unwrap();
+        assert_eq!(
+            storage,
+            legacy(&dirs.legacy, vec![StorageNotice::MoveFailed])
+        );
+        assert_eq!(files(&dirs.legacy), original);
+        assert_eq!(record::read(&dirs.local).unwrap(), None);
+
+        // The commit never reached the disk: the claim stays authoritative.
+        let dirs = fresh_dirs();
+        let original = seed(&dirs.legacy, "machine-1");
+        let storage = resolve(&dirs.legacy, &dirs.local, local_profile(), &mut |step| {
+            if step == Step::Commit {
+                Err("disk full".to_string())
+            } else {
+                Ok(())
+            }
+        })
+        .unwrap();
+        assert_eq!(storage.mode, StorageMode::Legacy);
+        assert_eq!(storage.notices, vec![StorageNotice::MoveFailed]);
+        assert_eq!(files(&storage.dir), original);
+        assert_eq!(
+            run(&dirs, local_profile()).unwrap(),
+            local(&dirs.local, Vec::new())
+        );
+        assert_eq!(files(&dirs.local), original);
     }
 
     fn runtime() -> tokio::runtime::Runtime {
