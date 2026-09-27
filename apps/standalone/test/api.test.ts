@@ -167,6 +167,14 @@ describe("HostApi office endpoints", () => {
     });
   });
 
+  it("reads the change feed with the device key only, no office session", async () => {
+    const { api, sent } = recording(fixture("changes-response.json"));
+    await expect(api.getChanges(41)).resolves.toMatchObject({ rev: 42, hasMore: false });
+    expect(sent).toEqual([
+      { method: "GET", path: "/v1/changes?since=41", body: undefined, officeToken: undefined },
+    ]);
+  });
+
   it("rejects a users answer that is not a list", async () => {
     const { api } = recording(fixture("office-user-record.json"));
     await expect(api.listUsers(TOKEN)).rejects.toThrow();

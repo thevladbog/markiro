@@ -40,6 +40,7 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
     createUser: vi.fn<HostApi["createUser"]>(() => unexpected("createUser")),
     updateUser: vi.fn<HostApi["updateUser"]>(() => unexpected("updateUser")),
     setUserPassword: vi.fn<HostApi["setUserPassword"]>(() => unexpected("setUserPassword")),
+    getChanges: vi.fn<HostApi["getChanges"]>(() => unexpected("getChanges")),
     ...overrides,
   };
 }

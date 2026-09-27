@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { HostClient } from "./client.js";
 import {
   bootstrapResponseSchema,
+  changesResponseSchema,
   officeSessionSchema,
   officeUserRecordSchema,
   officeUserSchema,
@@ -12,6 +13,7 @@ import {
   type BlockSizesUpdate,
   type BootstrapRequest,
   type BootstrapResponse,
+  type ChangesResponse,
   type OfficeLoginRequest,
   type OfficeSession,
   type OfficeUser,
@@ -58,6 +60,8 @@ export interface HostApi {
   createUser: (token: string, create: OfficeUserCreate) => Promise<OfficeUserRecord>;
   updateUser: (token: string, id: string, update: OfficeUserUpdate) => Promise<OfficeUserRecord>;
   setUserPassword: (token: string, id: string, request: PasswordSet) => Promise<void>;
+  /** Reference records changed after revision `since`; the device key only, no office session. */
+  getChanges: (since: number) => Promise<ChangesResponse>;
 }
 
 /** A 204 answer parses as `null`. */
@@ -130,5 +134,7 @@ export function createHostApi(client: HostClient): HostApi {
         schema: NO_CONTENT,
       });
     },
+    getChanges: (since) =>
+      client.request("GET", `/v1/changes?since=${since}`, { schema: changesResponseSchema }),
   };
 }
