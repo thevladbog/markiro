@@ -1,3 +1,5 @@
+import { useMemo } from "react";
+
 import { renderLiteralDataMatrixSvg } from "@markiro/domain";
 
 /**
@@ -7,12 +9,16 @@ import { renderLiteralDataMatrixSvg } from "@markiro/domain";
  * and the fingerprint beside it stay the way to pair by hand.
  */
 export default function PairingDataMatrix({ payload, label }: { payload: string; label: string }) {
-  let svg: string | null;
-  try {
-    svg = renderLiteralDataMatrixSvg(payload);
-  } catch {
-    svg = null;
-  }
+  // The dialog's countdown re-renders this component every second; the
+  // encoder is expensive enough (bwip-js) that it must not re-run while the
+  // payload it is given is unchanged.
+  const svg = useMemo(() => {
+    try {
+      return renderLiteralDataMatrixSvg(payload);
+    } catch {
+      return null;
+    }
+  }, [payload]);
   if (svg === null) return null;
   return (
     <div

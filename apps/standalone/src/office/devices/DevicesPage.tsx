@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { z } from "zod";
 
@@ -23,6 +23,14 @@ interface Pairing {
   code: PairingCode;
   /** When the host issued the code, by its clock: a device paired since took the code. */
   issuedAt: number;
+  /**
+   * When the dialog stops showing the code, by this PC's own clock
+   * (`receivedAt + CODE_LIFETIME_MS`). The office can run on a PC other than
+   * the host, and a cloud-less LAN site cannot promise the two clocks agree,
+   * so the countdown is anchored to when this PC received the code, never to
+   * the host's `expiresAt`.
+   */
+  deadline: number;
 }
 
 /** Line names from this installation's local copies; a line not there yet shows its id. */
@@ -53,14 +61,37 @@ export function DevicesPage() {
       : devices.data?.find((device) => Date.parse(device.pairedAt) >= pairing.issuedAt);
   const dialogOpen = pairing !== null && joined === undefined;
 
+  // A request still in flight when the dialog closes -- by hand, or because
+  // a device joined while a fresh code was being requested -- must not act
+  // on its answer: reopening the dialog with a code nobody asked to see
+  // anymore, or showing a stray failure for an abandoned action. Bumping the
+  // generation on every render where the dialog is not open (including the
+  // very first, before any request exists) invalidates whatever request
+  // started before that close.
+  const requestGeneration = useRef(0);
+  useEffect(() => {
+    if (!dialogOpen) requestGeneration.current++;
+  }, [dialogOpen]);
+
   const newCode = async () => {
     setFailure(null);
     // A new attempt from the page drops the last notice.
     if (!dialogOpen) setPairing(null);
+    const generation = ++requestGeneration.current;
     try {
       const code = await create.mutateAsync();
-      setPairing({ code, issuedAt: Date.parse(code.expiresAt) - CODE_LIFETIME_MS });
+      if (generation !== requestGeneration.current) return;
+      // Anchored to this PC's own clock at the moment it received the code,
+      // not to the host's `expiresAt`: the office can run on a PC other than
+      // the host, and the two clocks are not promised to agree.
+      const receivedAt = Date.now();
+      setPairing({
+        code,
+        issuedAt: Date.parse(code.expiresAt) - CODE_LIFETIME_MS,
+        deadline: receivedAt + CODE_LIFETIME_MS,
+      });
     } catch (error) {
+      if (generation !== requestGeneration.current) return;
       setFailure(errorMessageKey(error));
     }
   };
@@ -153,6 +184,7 @@ export function DevicesPage() {
       {pairing && dialogOpen && (
         <PairingCodeDialog
           code={pairing.code}
+          deadline={pairing.deadline}
           regenerating={create.isPending}
           failure={failure}
           onRegenerate={() => void newCode()}

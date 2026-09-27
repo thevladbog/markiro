@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -26,20 +26,30 @@ function formatCountdown(ms: number): string {
   return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
-/** Milliseconds until `expiresAt`, ticking every second (after the admin's pairing panel). */
-function useRemainingMs(expiresAt: string): number {
-  const expiry = useMemo(() => new Date(expiresAt).getTime(), [expiresAt]);
+/**
+ * Milliseconds until `deadline`, ticking every second (after the admin's
+ * pairing panel). `deadline` is this PC's own clock reading
+ * (`receivedAt + CODE_LIFETIME_MS`, set once in `DevicesPage` when the code
+ * arrives), never the host's `expiresAt`: the office can run on a PC other
+ * than the host, and a cloud-less LAN site cannot promise the two clocks
+ * agree. Comparing the host's timestamp against this PC's `Date.now()` would
+ * make the countdown wrong by however far the clocks have drifted — showing
+ * an already-expired fresh code, or a many-hours-long one.
+ */
+function useRemainingMs(deadline: number): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     setNow(Date.now());
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
-  }, [expiry]);
-  return Number.isNaN(expiry) ? 0 : Math.max(0, expiry - now);
+  }, [deadline]);
+  return Math.max(0, deadline - now);
 }
 
 export interface PairingCodeDialogProps {
   code: PairingCode;
+  /** When the code stops showing, by this PC's own clock; see `useRemainingMs`. */
+  deadline: number;
   regenerating: boolean;
   /** Why a new code could not be created, as an i18n key. */
   failure: string | null;
@@ -54,6 +64,7 @@ export interface PairingCodeDialogProps {
  */
 export function PairingCodeDialog({
   code,
+  deadline,
   regenerating,
   failure,
   onRegenerate,
@@ -65,7 +76,7 @@ export function PairingCodeDialog({
   useOfficeQuery(officeKeys.devices, (api, token) => api.listDevices(token), {
     refetchInterval: DEVICE_POLL_MS,
   });
-  const remainingMs = useRemainingMs(code.expiresAt);
+  const remainingMs = useRemainingMs(deadline);
   const payload = parsePairingPayload(code.payload);
   const details: DefinitionGridItem[] = [];
   if (payload !== null) {
