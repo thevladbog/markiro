@@ -811,3 +811,40 @@ test.describe("home page", () => {
     });
   }
 });
+
+test.describe("document pages", () => {
+  test("page and section titles render at heading size", async ({ page }) => {
+    for (const [route, selector, minimum] of [
+      ["/stati/", "h1", 40],
+      ["/instruktsii/stantsiya-vkhod-i-start-smeny/", "h1", 40],
+      ["/instruktsii/stantsiya-vkhod-i-start-smeny/", ".legal-document h2", 24],
+    ] as const) {
+      await page.goto(route);
+      const size = await page
+        .locator(selector)
+        .first()
+        .evaluate((element) => parseFloat(getComputedStyle(element).fontSize));
+      expect(size, `${route} ${selector}`).toBeGreaterThanOrEqual(minimum);
+    }
+  });
+
+  test("the release card keeps its padding and answers wrap to the left edge", async ({ page }) => {
+    await page.goto("/instruktsii/stantsiya-vkhod-i-start-smeny/");
+    const padding = await page.locator("section.legal-artifacts").evaluate((element) => {
+      const style = getComputedStyle(element);
+      return [style.paddingTop, style.paddingRight, style.paddingBottom, style.paddingLeft];
+    });
+    for (const side of padding) expect(parseFloat(side)).toBeGreaterThanOrEqual(16);
+
+    const entries = await page.locator(".legal-definitions > div").evaluateAll((items) =>
+      items.map((item) => ({
+        left: Math.round(item.getBoundingClientRect().left),
+        wrapped: [...(item.querySelector("dd")?.getClientRects() ?? [])]
+          .slice(1)
+          .map((rect) => Math.round(rect.left)),
+      })),
+    );
+    expect(entries.some((entry) => entry.wrapped.length > 0)).toBe(true);
+    for (const entry of entries) for (const left of entry.wrapped) expect(left).toBe(entry.left);
+  });
+});
