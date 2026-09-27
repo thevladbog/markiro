@@ -8,6 +8,7 @@
 //! docs/superpowers/specs/2026-09-27-station-local-storage-design.md.
 
 mod probe;
+mod record;
 
 use std::path::{Path, PathBuf};
 
