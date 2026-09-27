@@ -51,25 +51,25 @@
 Для каждой строки укажите `PASS`, `FAIL` или `NOT RUN`, оператора, UTC timestamp,
 идентификатор устройства/Windows и безопасный evidence path/hash.
 
-| Проверка                                                            | Результат | Evidence required             |
-| ------------------------------------------------------------------- | --------- | ----------------------------- |
-| SmartScreen/unsigned NSIS boundary recorded                         | NOT RUN   | Screenshot + operator result  |
-| Restricted-network install-over from Yandex default alias           | NOT RUN   | URL + installer hash          |
-| beta → stable manual install outside active shift                   | NOT RUN   | Versions + installer hash     |
-| stable → stable manual updater flow                                 | NOT RUN   | Both immutable versions       |
-| Application identity remains unchanged                              | NOT RUN   | Before/after application ID   |
-| Station SQLite database unchanged; path local after the first start | NOT RUN   | Path + before/after counts    |
-| Pairing identity and credentials remain usable                      | NOT RUN   | Outcome without credentials   |
-| Local settings remain present                                       | NOT RUN   | Safe settings inventory       |
-| Scan/print journals and boxes remain present                        | NOT RUN   | Before/after safe identifiers |
-| Exceptions remain visible and recoverable                           | NOT RUN   | Before/after safe identifiers |
-| Pending outbox survives install and later synchronizes              | NOT RUN   | Counts and final outcome      |
-| Scanner serial and keyboard-wedge paths                             | NOT RUN   | Real scans                    |
-| Printer print, failure, retry and scan-back                         | NOT RUN   | Physical labels               |
-| Sound, touch, fullscreen and WebView2                               | NOT RUN   | Packaged Windows evidence     |
-| Offline restart and reconnect                                       | NOT RUN   | Journal/outbox evidence       |
-| Installation denied during active shift without blocking work       | NOT RUN   | Screen/video                  |
-| Stable rollback uses retained immutable installer without loss      | NOT RUN   | Version + schema window       |
+| Проверка                                                                                                                      | Результат | Evidence required             |
+| ----------------------------------------------------------------------------------------------------------------------------- | --------- | ----------------------------- |
+| SmartScreen/unsigned NSIS boundary recorded                                                                                   | NOT RUN   | Screenshot + operator result  |
+| Restricted-network install-over from Yandex default alias                                                                     | NOT RUN   | URL + installer hash          |
+| beta → stable manual install outside active shift                                                                             | NOT RUN   | Versions + installer hash     |
+| stable → stable manual updater flow                                                                                           | NOT RUN   | Both immutable versions       |
+| Application identity remains unchanged                                                                                        | NOT RUN   | Before/after application ID   |
+| Station SQLite database unchanged; path local after the first start; no station files left in `%APPDATA%\app.markiro.station` | NOT RUN   | Path + before/after counts    |
+| Pairing identity and credentials remain usable                                                                                | NOT RUN   | Outcome without credentials   |
+| Local settings remain present                                                                                                 | NOT RUN   | Safe settings inventory       |
+| Scan/print journals and boxes remain present                                                                                  | NOT RUN   | Before/after safe identifiers |
+| Exceptions remain visible and recoverable                                                                                     | NOT RUN   | Before/after safe identifiers |
+| Pending outbox survives install and later synchronizes                                                                        | NOT RUN   | Counts and final outcome      |
+| Scanner serial and keyboard-wedge paths                                                                                       | NOT RUN   | Real scans                    |
+| Printer print, failure, retry and scan-back                                                                                   | NOT RUN   | Physical labels               |
+| Sound, touch, fullscreen and WebView2                                                                                         | NOT RUN   | Packaged Windows evidence     |
+| Offline restart and reconnect                                                                                                 | NOT RUN   | Journal/outbox evidence       |
+| Installation denied during active shift without blocking work                                                                 | NOT RUN   | Screen/video                  |
+| Stable rollback uses retained immutable installer without loss                                                                | NOT RUN   | Version + schema window       |
 
 ## Final result
 

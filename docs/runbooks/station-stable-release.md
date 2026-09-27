@@ -237,9 +237,14 @@ stable Overall `FAIL`, остановитесь для incident recovery и не
 Rollback channel pointer влияет только на ещё не обновившихся клиентов. Для уже
 обновлённой Station закройте активную смену, проверьте SQLite compatibility
 window и SHA-256, затем вручную установите предыдущий accepted immutable stable.
-Application ID, SQLite path, pairing, settings, journals, boxes, exceptions и
-outbox сохраняются; удаление данных запрещено. Сборка до переноса хранилища
-читает только перемещаемую папку: перед её установкой верните `station.json` и
-`station-mirror.db*` из `%LOCALAPPDATA%\app.markiro.station` в
-`%APPDATA%\app.markiro.station` и удалите там `station-storage.json`, иначе
-станция запустится без привязки.
+Application ID, pairing, settings, journals, boxes, exceptions и outbox
+сохраняются; удаление данных запрещено. Сборка до переноса хранилища читает
+только перемещаемую папку. Перед её установкой закройте станцию и переместите
+(не копируйте) `station.json`, `station-mirror.db*` и `.station-*.bak` из
+`%LOCALAPPDATA%\app.markiro.station` в `%APPDATA%\app.markiro.station`, затем
+удалите `%LOCALAPPDATA%\app.markiro.station\station-storage.json`. Без
+перемещения старая сборка запустится без привязки. Если скопировать файлы
+вместо перемещения или оставить запись, сломается следующее обновление: оно
+продолжит работу с устаревшей локальной копией (курсор SSCC откатится, SSCC и
+batch id повторятся), запустится без привязки или остановится до вмешательства
+поддержки.

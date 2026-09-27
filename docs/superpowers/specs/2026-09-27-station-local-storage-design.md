@@ -1,8 +1,10 @@
 # Station storage off the Windows roaming profile — design proposal
 
-**Status:** design decisions D1-D4 accepted by the owner on 2026-09-27 (section
-12). D5 is still open. Nothing implemented; implementation waits for the owner's
-go-ahead. No cloud API change, no Postgres or SQLite schema change.
+**Status:** decisions D1-D5 taken by the owner on 2026-09-27 (section 12); D5
+as compile-only Windows tests in PR CI. Implemented by plan
+`docs/superpowers/plans/2026-09-27-station-local-storage.md`; section 13
+records where the implementation departs from sections 6-8. No cloud API
+change, no Postgres or SQLite schema change.
 
 ## Summary
 
@@ -338,11 +340,19 @@ batch ids keep colliding. That runbook is a follow-up.
 
 The updater never installs an older version (`updater.rs:599`, `version <= current`
 is denied). A manually installed older build reads the legacy path, finds
-nothing, and starts unenrolled; the data stays intact in Local. Manual recovery:
+nothing, and starts unenrolled; the data stays intact in Local. Manual rollback,
+with the station closed:
 
-1. Copy `station.json` and `station-mirror.db*` back to
+1. Move (do not copy) `station.json`, `station-mirror.db*` and `.station-*.bak`
+   from `%LOCALAPPDATA%\app.markiro.station\` to
    `%APPDATA%\app.markiro.station\`.
-2. Delete `station-storage.json`.
+2. Delete `%LOCALAPPDATA%\app.markiro.station\station-storage.json`.
+3. Install the older build.
+
+Skipping step 1 makes the older build start unpaired. Copying instead of
+moving, or keeping the record, breaks the next upgrade: it resumes from the
+stale local copy (the SSCC cursor rewinds, so SSCCs and batch ids repeat),
+starts unpaired, or stops for support.
 
 ## 7. Tests
 
@@ -386,9 +396,10 @@ probe and the step hook:
     A `Blocked` gate returns an error and never calls `config::read_config`,
     which would mint.
 
-**Rust on Windows only** (`#[cfg(windows)]`). The `cargo test` step of
-`.github/workflows/station-beta-release.yml:173` runs these; decision D5 would
-add them to PR CI (`ci.yml` today only compiles on Windows):
+**Rust on Windows only** (`#[cfg(windows)]`). The beta workflow runs these only
+in `seed-baseline` mode (the `cargo test` step of
+`.github/workflows/station-beta-release.yml`); PR CI compiles them
+(`cargo test --no-run` in `station-windows-build`, decision D5):
 
 14. A live SQLite connection on the legacy database makes the claim or the
     exclusive open fail, which gives Legacy mode.
@@ -485,11 +496,8 @@ Decided by the owner on 2026-09-27:
   notice.** It may be another computer's live data. Rejected: delete it.
 - **D4. Notices: station diagnostics and the log**, with ru/en strings.
   Rejected: log only.
-
-Still open:
-
-- **D5. CI:** run station `cargo test` on `windows-latest` in PR CI
-  (recommended); or rely on the beta release job.
+- **D5. CI: PR CI compiles the Windows-only tests but does not run them**
+  (section 13). Running them on `windows-latest` is a follow-up.
 
 ## 13. Implementation notes (plan 2026-09-27)
 
@@ -515,6 +523,15 @@ These supersede the named parts of sections 6-8.
   `station.json`, `station-mirror.db` and `-journal`/`-wal`/`-shm` in the local
   folder is removed. SQLite would otherwise replay a stale journal next to a
   fresh copy.
+- **WAL (6.3 step 4).** tauri-plugin-sql creates the database in WAL mode
+  (sqlx `create_database`), and the station can exit without a checkpoint, so
+  committed facts may live only in `-wal`. The `-wal` travels with the
+  database; `-shm` is skipped and rebuilt on open.
+- **Same folder (6.3 step 0).** When `legacy_dir == local_dir` (macOS),
+  resolution takes no lock and writes no record.
+- **Cleanup (6.3 step 7).** Cleanup removes every top-level file of the
+  recorded claimed folder, not only the verified ones: the verified names are
+  not persisted, and the other files are transient.
 - **UI (D4).** No diagnostics screen exists. The Update screen gets a "Station
   data" section (folder and notices), and the pairing screen warns on
   temporary and mandatory profiles (6.5).
@@ -525,8 +542,8 @@ These supersede the named parts of sections 6-8.
   Running them needs a follow-up: a Tauri-free storage crate, or a test-binary
   manifest fix.
 - **Rollback (6.8).** The release acceptance and runbooks now say that
-  installing a build from before the move requires restoring the files to the
-  roaming folder first.
+  installing a build from before the move requires moving the files back to
+  the roaming folder and deleting the record first, with the station closed.
 
 - **Resolve after review (Task 5 fixes, owner-approved).**
   - A failed claim rename is decided by what is on disk. If the claimed folder
@@ -546,3 +563,24 @@ These supersede the named parts of sections 6-8.
     blocked until support clears the folder.
   - Discarding local files never touches `station-storage.json` or
     `station-storage.lock`.
+- **Final review fixes (owner-approved).**
+  - An empty roaming folder only means a fresh install when `%APPDATA%` itself
+    exists. Windows reports an unreachable redirected folder as not found, so
+    a missing or unreachable `%APPDATA%` blocks instead of minting in Local.
+  - Station files on both sides with no record block before the durability
+    guard is considered.
+  - Every blocked message names the folders involved. The recovery screen
+    shows it («Данные станции заблокированы: …») instead of the generic
+    `enroll.recoveryFailed` text, which supersedes 6.6 for storage;
+    `docs/runbooks/station-storage-recovery.md` explains each message.
+  - `read_config` and `clear_credential` never mint in a claimed folder whose
+    `station.json` is gone (another logon session finished the move).
+  - A process-wide mutex serializes the config commands, as the main thread
+    did before they became async.
+  - On Unix, copies keep the source file's permissions (0600 for the key file
+    and its backups).
+  - A pending cleanup only touches a `<legacy name>.migrating-*` sibling of
+    the roaming folder; any other folder the record names is kept and reported
+    as `ClaimLeftovers`.
+  - Stale `.migration-*` staging folders and `.station-storage-*.tmp` record
+    writes are removed when a move resumes and when the guard forgets one.

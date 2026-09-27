@@ -32,8 +32,17 @@ build moves them once (design:
   roaming folder and says so on the Update screen; pairing warns as well.
 - Pair a station after disk imaging, never before: an image of a paired station
   clones its identity.
+- After the move, point every path-based setting at
+  `%LOCALAPPDATA%\app.markiro.station` instead of
+  `%APPDATA%\app.markiro.station`: backups, antivirus exclusions and above all
+  write-filter exclusions (UWF, Deep Freeze). On a write-filtered PC excluded
+  only for the old path, every reboot rewinds the station to the same snapshot,
+  and it prints duplicate SSCCs.
 - Update screen → «Данные станции» shows the data folder and any storage
   notices.
+- A station that stops with «Данные станции заблокированы» must not be cleaned
+  up by hand: support follows
+  [`docs/runbooks/station-storage-recovery.md`](../../docs/runbooks/station-storage-recovery.md).
 
 ## Dev run (macOS)
 

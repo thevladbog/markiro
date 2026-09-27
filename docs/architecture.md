@@ -93,10 +93,12 @@ registry, `save-exact`, `engine-strict`, `minimum-release-age=10080`
   server's shift entities (shift, codes, scan journal, boxes, pallets).
 - **Local storage location:** `station.json` (device identity and key) and
   `station-mirror.db` live together in machine-local app data
-  (`%LOCALAPPDATA%\app.markiro.station`), never in a roaming or redirected
-  profile: a copy on another PC prints duplicate SSCCs offline and stalls its
-  outbox on batch-id collisions. Older installs move there once, crash-safely
-  (`apps/station/src-tauri/src/storage/`).
+  (`%LOCALAPPDATA%\app.markiro.station`): a copy on another PC prints duplicate
+  SSCCs offline and stalls its outbox on batch-id collisions. Older installs
+  move out of the roaming profile once, crash-safely
+  (`apps/station/src-tauri/src/storage/`), unless the profile wipes local data
+  at sign-out (then the data stays in the roaming folder and the station says
+  so).
 - **Updates:** Tauri updater. **All assets bundled** — fonts (IBM Plex,
   OFL), icons, sounds; zero CDN (the shop floor is offline).
 - Windows targets for MVP; Linux later; Android deferred (serial is painful).
