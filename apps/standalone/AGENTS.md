@@ -65,8 +65,10 @@ confirmed it against the office screen. A code that cannot be a code never
 leaves the device, and a refused claim is never retried on its own. A typed
 code in Cyrillic is refused with a hint to switch the layout, not read by
 key position like a scan: a Cyrillic letter typed for its Latin look-alike
-would become another valid symbol. A comma in a typed address reads as a
-dot (the keypad under the Russian layout).
+would become another valid symbol. A typed address is read by key position
+under the Russian layout — nothing counts against an address and the
+fingerprint is confirmed — and a comma reads as a dot (the keypad's decimal
+key).
 
 ## Audit
 

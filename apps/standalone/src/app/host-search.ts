@@ -1,3 +1,4 @@
+import { fromRussianLayout, hasCyrillic, isIpv4 } from "../host/pairing-code.js";
 import { HostProbeError, type HostProbe } from "../host/probe.js";
 import { DEFAULT_HOST_PORT } from "../host/protocol.js";
 
@@ -6,20 +7,34 @@ export function hostUrl(host: string, port: number): string {
   return `https://${host}:${port}`;
 }
 
-/** An IPv4 address or a host name: letters, digits, dots and inner hyphens. */
+/** A host name: letters, digits, dots and inner hyphens. */
 const HOST_NAME = /^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/;
+/** Nothing but digits and dots: must be a strict IPv4 address, not a name. */
+const NUMERIC_HOST = /^[0-9.]+$/;
 
 /**
  * A host address a person typed — `host` or `host:port`, port 45710 when
- * left out — as the URL the shell calls; `null` when it is neither. A comma
- * reads as a dot: under the Russian layout the keypad's decimal key types one.
+ * left out — as the URL the shell calls; `null` when it is neither.
+ *
+ * Read by key position under the Russian layout when the text holds
+ * Cyrillic letters: safe for an address, unlike the code, since nothing
+ * counts against a wrong one and the fingerprint is confirmed before the
+ * code leaves. A comma reads as a dot either way, since the keypad's decimal
+ * key types one under the Russian layout.
+ *
+ * A host of only digits and dots must be a strict IPv4 address (`isIpv4`),
+ * not the looser host-name pattern: the WHATWG URL rules the host's HTTP
+ * client uses read a partial or zero-padded one (`192.168.1`,
+ * `192.168.1.010`) as a different address than its text suggests.
  */
 export function parseHostAddress(input: string): string | null {
-  const match = /^([^:\s]+)(?::(\d{1,5}))?$/.exec(input.trim().replace(/,/g, "."));
+  const keyed = hasCyrillic(input) ? fromRussianLayout(input) : input;
+  const match = /^([^:\s]+)(?::(\d{1,5}))?$/.exec(keyed.trim().replace(/,/g, "."));
   if (match === null) return null;
   const [, host = "", port] = match;
   const number = port === undefined ? DEFAULT_HOST_PORT : Number(port);
-  if (!HOST_NAME.test(host) || number < 1 || number > 65535) return null;
+  const validHost = NUMERIC_HOST.test(host) ? isIpv4(host) : HOST_NAME.test(host);
+  if (!validHost || number < 1 || number > 65535) return null;
   return hostUrl(host, number);
 }
 

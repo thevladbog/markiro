@@ -1,7 +1,11 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { NetworkPairing, type NetworkPairingProps } from "../src/app/NetworkPairing.js";
+import {
+  MAYBE_SPENT,
+  NetworkPairing,
+  type NetworkPairingProps,
+} from "../src/app/NetworkPairing.js";
 import { DeviceError } from "../src/host/device.js";
 import { HostProbeError, type HelloObservation, type HostProbe } from "../src/host/probe.js";
 import { observation } from "./support/fixtures.js";
@@ -49,6 +53,21 @@ function scan(text: string): void {
 describe("NetworkPairing", () => {
   it("waits for the scanner in a focused field", () => {
     renderPairing();
+    expect(document.activeElement).toBe(screen.getByLabelText("Код с экрана офиса"));
+  });
+
+  it("returns focus to the scan field after visiting the manual form and back", () => {
+    renderPairing();
+    const manualButton = screen.getByRole("button", { name: "Ввести адрес и код вручную" });
+    // jsdom's fireEvent.click alone does not move focus: without it, this
+    // test would pass even if the scan field never got focus back. The
+    // native focus() call is wrapped in act() because it blurs the
+    // previously-focused Input outside fireEvent's own act() batching.
+    act(() => manualButton.focus());
+    fireEvent.click(manualButton);
+    const scanInsteadButton = screen.getByRole("button", { name: "Отсканировать код" });
+    act(() => scanInsteadButton.focus());
+    fireEvent.click(scanInsteadButton);
     expect(document.activeElement).toBe(screen.getByLabelText("Код с экрана офиса"));
   });
 
@@ -130,6 +149,20 @@ describe("NetworkPairing", () => {
     expect(props.onClaim).not.toHaveBeenCalled();
   });
 
+  it("shows the version-mismatch text when the scan search finds an old host", async () => {
+    const probe = {
+      hello: vi.fn<HostProbe["hello"]>(async () => {
+        throw new HostProbeError("host_too_old", "old host");
+      }),
+    };
+    const props = renderPairing({ probe });
+    scan(PAYLOAD);
+    expect(
+      await screen.findByText("Служба «Markiro Хост» старее этого приложения. Обновите службу."),
+    ).toBeTruthy();
+    expect(props.onClaim).not.toHaveBeenCalled();
+  });
+
   it("explains a refused code and never sends it again on its own", async () => {
     const onClaim = vi.fn<NetworkPairingProps["onClaim"]>(async () => {
       throw new DeviceError("pairing_code_invalid", "refused");
@@ -145,19 +178,22 @@ describe("NetworkPairing", () => {
     expect(onClaim).toHaveBeenCalledTimes(1);
   });
 
-  it("asks for a new code when the host may already have taken this one", async () => {
-    const onClaim = vi.fn<NetworkPairingProps["onClaim"]>(async () => {
-      throw new DeviceError("storage", "could not save the pairing");
-    });
-    renderPairing({ onClaim });
-    scan(PAYLOAD);
-    expect(
-      await screen.findByText(
-        "Подключение не завершилось, а хост мог уже принять код. Получите в офисе новый код и подключитесь снова.",
-      ),
-    ).toBeTruthy();
-    expect(onClaim).toHaveBeenCalledTimes(1);
-  });
+  it.each([...MAYBE_SPENT])(
+    "asks for a new code when the host may already have taken this one (%s)",
+    async (code) => {
+      const onClaim = vi.fn<NetworkPairingProps["onClaim"]>(async () => {
+        throw new DeviceError(code, "could not save the pairing");
+      });
+      renderPairing({ onClaim });
+      scan(PAYLOAD);
+      expect(
+        await screen.findByText(
+          "Подключение не завершилось, а хост мог уже принять код. Получите в офисе новый код и подключитесь снова.",
+        ),
+      ).toBeTruthy();
+      expect(onClaim).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it("asks for a device name before anything reaches the network", async () => {
     const props = renderPairing();
@@ -186,6 +222,29 @@ describe("NetworkPairing", () => {
         name: "Станция",
       }),
     );
+  });
+
+  it("returns to the manual form with the refusal after a confirmed claim fails", async () => {
+    const onClaim = vi.fn<NetworkPairingProps["onClaim"]>(async () => {
+      throw new DeviceError("pairing_code_invalid", "refused");
+    });
+    renderPairing({ onClaim });
+    fireEvent.click(screen.getByRole("button", { name: "Ввести адрес и код вручную" }));
+    type("Адрес хоста", "192.168.1.10");
+    type("Код подключения", "7K3MQ9XV2D");
+    fireEvent.click(screen.getByRole("button", { name: "Далее" }));
+    await screen.findByText("Отпечаток хоста https://192.168.1.10:45710");
+    fireEvent.click(screen.getByRole("button", { name: "Отпечаток совпадает" }));
+    expect(
+      await screen.findByText(
+        "Код подключения неверен или больше не действует. Получите новый код в офисе.",
+      ),
+    ).toBeTruthy();
+    // Back on the manual form, not stuck on the confirmation screen, and the
+    // typed address is still there.
+    expect(screen.getByLabelText("Адрес хоста")).toHaveProperty("value", "192.168.1.10");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(onClaim).toHaveBeenCalledTimes(1);
   });
 
   it("goes back without the code when the fingerprint differs", async () => {
@@ -240,6 +299,20 @@ describe("NetworkPairing", () => {
         "Хост не отвечает по этому адресу. Проверьте адрес и что ПК-хост включён.",
       ),
     ).toBeTruthy();
+  });
+
+  it("names a non-Markiro host in network words on the manual path", async () => {
+    const probe = {
+      hello: vi.fn<HostProbe["hello"]>(async () => {
+        throw new HostProbeError("not_markiro_host", "wrong service");
+      }),
+    };
+    renderPairing({ probe });
+    fireEvent.click(screen.getByRole("button", { name: "Ввести адрес и код вручную" }));
+    type("Адрес хоста", "192.168.1.10");
+    type("Код подключения", "7K3MQ9XV2D");
+    fireEvent.click(screen.getByRole("button", { name: "Далее" }));
+    expect(await screen.findByText("По этому адресу отвечает не служба Markiro.")).toBeTruthy();
   });
 
   it("goes back", () => {

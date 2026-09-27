@@ -72,7 +72,7 @@ export function hasCyrillic(text: string): boolean {
 const IPV4 = /^(0|[1-9]\d{0,2})\.(0|[1-9]\d{0,2})\.(0|[1-9]\d{0,2})\.(0|[1-9]\d{0,2})$/;
 const FINGERPRINT = /^[0-9a-f]{64}$/;
 
-function isIpv4(address: string): boolean {
+export function isIpv4(address: string): boolean {
   const match = IPV4.exec(address);
   return match !== null && match.slice(1).every((octet) => Number(octet) <= 255);
 }

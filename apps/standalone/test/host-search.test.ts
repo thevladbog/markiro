@@ -7,6 +7,7 @@ import { observation } from "./support/fixtures.js";
 const FINGERPRINT = "ab".repeat(32);
 const VIRTUAL = "https://172.20.0.1:45710";
 const LAN = "https://192.168.1.10:45710";
+const FOREIGN = "https://192.168.1.20:45710";
 
 function seen(fingerprint: string): HelloObservation {
   return { ...observation(true), fingerprint };
@@ -19,6 +20,10 @@ describe("parseHostAddress", () => {
     ["host-pc", "https://host-pc:45710"],
     ["host-pc.local:45710", "https://host-pc.local:45710"],
     ["192,168,1,10", "https://192.168.1.10:45710"],
+    // A keyboard-wedge scanner types by key position under the Russian
+    // layout: the main-row period key types "ю", Shift+";" types "Ж".
+    ["192ю168ю1ю10Ж8443", "https://192.168.1.10:8443"],
+    ["рщые-зс", "https://host-pc:45710"],
   ])("reads %j", (input, url) => {
     expect(parseHostAddress(input)).toBe(url);
   });
@@ -32,6 +37,13 @@ describe("parseHostAddress", () => {
     "192.168.1.10 45710",
     "-host",
     "host_pc",
+    // Digits and dots that are not a strict IPv4 address: the WHATWG URL
+    // rules the host's HTTP client uses would read these differently than
+    // their text suggests (e.g. "192.168.1" as 192.168.0.1).
+    "192.168.1",
+    "192.168.1.010",
+    "10.1",
+    "123",
   ])("refuses %j", (input) => {
     expect(parseHostAddress(input)).toBeNull();
   });
@@ -62,11 +74,26 @@ describe("findHost", () => {
   it("prefers a version to update over a foreign or a dead host", async () => {
     const hello = vi.fn<HostProbe["hello"]>(async (address) => {
       if (address === VIRTUAL) throw new HostProbeError("unreachable", "down");
+      if (address === FOREIGN) return seen("cd".repeat(32));
       throw new HostProbeError("app_too_old", "old");
     });
-    await expect(findHost({ hello }, [VIRTUAL, LAN], FINGERPRINT)).resolves.toEqual({
+    await expect(findHost({ hello }, [VIRTUAL, FOREIGN, LAN], FINGERPRINT)).resolves.toEqual({
       kind: "incompatible",
       reason: "app_too_old",
+    });
+  });
+
+  it("returns the matching host even when a foreign one answers first", async () => {
+    const hello = vi.fn<HostProbe["hello"]>(async (address) => {
+      if (address === FOREIGN) return seen("cd".repeat(32));
+      // Resolve one microtask tick after the foreign host's answer above, so
+      // its failure is recorded before the matching host succeeds.
+      await Promise.resolve();
+      return seen(FINGERPRINT);
+    });
+    await expect(findHost({ hello }, [FOREIGN, LAN], FINGERPRINT)).resolves.toEqual({
+      kind: "found",
+      address: LAN,
     });
   });
 

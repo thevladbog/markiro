@@ -55,7 +55,7 @@ function failureKey(error: unknown): string {
  * was unreadable, came from another host, or could not be saved here): the
  * code may be spent, so the text asks for a new one instead of a retry.
  */
-const MAYBE_SPENT: ReadonlySet<DeviceErrorCode> = new Set([
+export const MAYBE_SPENT: ReadonlySet<DeviceErrorCode> = new Set([
   "invalid_response",
   "host_changed",
   "storage",
@@ -225,7 +225,12 @@ export function NetworkPairing({ probe, onClaim, onBack }: NetworkPairingProps) 
     }
     if (manual) {
       return (
-        <form className="standalone-form" onSubmit={(event) => void submitManual(event)} noValidate>
+        <form
+          key="manual"
+          className="standalone-form"
+          onSubmit={(event) => void submitManual(event)}
+          noValidate
+        >
           {nameField}
           <Input
             label={t("shell.networkPairing.address")}
@@ -261,7 +266,12 @@ export function NetworkPairing({ probe, onClaim, onBack }: NetworkPairingProps) 
       );
     }
     return (
-      <form className="standalone-form" onSubmit={(event) => void submitScan(event)} noValidate>
+      <form
+        key="scan"
+        className="standalone-form"
+        onSubmit={(event) => void submitScan(event)}
+        noValidate
+      >
         {nameField}
         {/* A keyboard-wedge scanner types into the focused field and presses Enter. */}
         <Input
