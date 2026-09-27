@@ -66,10 +66,10 @@ describe("SEO generators", () => {
     );
     expect(sitemap).toContain("<loc>https://markiro.app/en/offline-production/</loc>");
     expect(sitemap).toMatch(
-      /<loc>https:\/\/markiro\.app\/stati\/agregatsiya-piva-v-koroba\/<\/loc>[\s\S]*?<lastmod>2026-08-26<\/lastmod>/,
+      /<loc>https:\/\/markiro\.app\/stati\/agregatsiya-piva-v-koroba\/<\/loc>[\s\S]*?<lastmod>2026-09-27<\/lastmod>/,
     );
     expect(sitemap).toMatch(
-      /<loc>https:\/\/markiro\.app\/stati\/markirovka-piva-2026\/<\/loc>[\s\S]*?<lastmod>2026-08-26<\/lastmod>/,
+      /<loc>https:\/\/markiro\.app\/stati\/markirovka-piva-2026\/<\/loc>[\s\S]*?<lastmod>2026-09-27<\/lastmod>/,
     );
     expect(sitemap).toContain("<loc>https://markiro.app/en/articles/beer-case-aggregation/</loc>");
     expect(sitemap).toContain("<loc>https://markiro.app/en/articles/beer-marking-2026/</loc>");
@@ -121,6 +121,16 @@ describe("SEO generators", () => {
     const llms = renderLlmsTxt();
 
     expect(llms).toContain("# Markiro");
+    expect(llms).toContain(
+      "- Товарные группы: любая маркируемая продукция, например соки и вода, молочная продукция, пиво, косметика. Правила конкретной товарной группы сверяются до запуска.",
+    );
+    expect(llms).toContain(
+      "- Product groups: any marked goods, for example juice and water, dairy, beer and cosmetics. The rules of a specific product group are checked before launch.",
+    );
+    expect(llms).toContain("- Уровни агрегации: единица → короб → паллета.");
+    expect(llms).toContain("- Aggregation levels: item → case → pallet.");
+    expect(llms).not.toContain("Паллетная агрегация запланирована");
+    expect(llms).not.toContain("для линий розлива");
     expect(llms).toContain(
       "> Производственная система для маркировки, агрегации и прослеживаемости с локальной работой станций.",
     );
@@ -491,14 +501,15 @@ describe("SEO generators", () => {
 
     expect(ru).toMatchObject({
       url: "https://markiro.app/",
-      operatingSystem: "Windows, Web",
+      operatingSystem: "Windows, Android, Web",
       softwareHelp: { "@type": "CreativeWork", url: "https://markiro.app/instruktsii/" },
     });
     expect(ru?.featureList).toEqual([
       "Проверка кодов маркировки Data Matrix на линии",
-      "Агрегация единиц в короба с SSCC",
+      "Агрегация в короба и паллеты с SSCC",
       "Печать этикеток ZPL и TSPL",
       "Офлайн-работа станции с локальным журналом",
+      "Сборка паллет и инвентаризация на ТСД с Android",
       "Обмен с 1С по CommerceML",
       "Выгрузки отчётов смены для ГИС МТ",
     ]);
@@ -507,9 +518,10 @@ describe("SEO generators", () => {
     });
     expect(en?.featureList).toEqual([
       "Data Matrix code verification on the line",
-      "Item-to-case aggregation with SSCC",
+      "Case and pallet aggregation with SSCC",
       "ZPL and TSPL label printing",
       "Offline station with a local journal",
+      "Pallet building and inventory on an Android handheld",
       "1C exchange over CommerceML",
       "Shift report exports for GIS MT",
     ]);

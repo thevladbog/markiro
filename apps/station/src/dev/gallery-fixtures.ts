@@ -3,6 +3,8 @@ import {
   type PersistentGalleryStateId,
 } from "../ui/persistent-station-states.js";
 
+import type { GalleryProfileId } from "./gallery-profile.js";
+
 const VISUAL_STRESS_GALLERY_STATE_IDS = [
   "new-shift-pallets",
   "printer-recovery-box",
@@ -63,6 +65,8 @@ export type GalleryLocale = "ru" | "en";
 export interface GalleryRequest {
   state: GalleryStateId;
   locale: GalleryLocale;
+  /** Omitted for the original demo data. */
+  profile?: GalleryProfileId;
 }
 
 export type GalleryFixtureKind =
@@ -438,5 +442,6 @@ export function resolveGalleryRequest(
       ? (requestedState as GalleryStateId)
       : "pairing-waiting";
   const locale: GalleryLocale = params.get("locale") === "en" ? "en" : "ru";
-  return { state, locale };
+  const profile: GalleryProfileId | null = params.get("profile") === "landing" ? "landing" : null;
+  return profile === null ? { state, locale } : { state, locale, profile };
 }

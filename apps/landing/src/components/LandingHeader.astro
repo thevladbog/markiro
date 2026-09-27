@@ -18,18 +18,8 @@ const homePath = page.locale === "ru" ? "/" : "/en/";
 const ruPath = page.locale === "ru" ? page.path : (page.alternatePath ?? "/");
 const enPath = page.locale === "en" ? page.path : (page.alternatePath ?? "/en/");
 const paths = page.locale === "ru"
-  ? {
-      aggregation: "/sscc-i-agregatsiya/",
-      faq: "/faq/",
-      offline: "/oflayn-rabota/",
-      serialization: "/markirovka-chestny-znak/",
-    }
-  : {
-      aggregation: "/en/sscc-and-aggregation/",
-      faq: "/en/faq/",
-      offline: "/en/offline-production/",
-      serialization: "/en/chestny-znak-serialization/",
-    };
+  ? { faq: "/faq/", film: "/kak-rabotaet/" }
+  : { faq: "/en/faq/", film: "/en/how-it-works/" };
 ---
 
 <header class="landing-header" data-header>
@@ -38,9 +28,9 @@ const paths = page.locale === "ru"
   </a>
 
   <nav class="landing-nav" id="landing-navigation" aria-label={copy.navigationLabel} data-menu>
-    <a href={paths.serialization}>{copy.nav.serialization}</a>
-    <a href={paths.aggregation}>{copy.nav.aggregation}</a>
-    <a href={paths.offline}>{copy.nav.offline}</a>
+    <a href={`${homePath}#product`}>{copy.nav.product}</a>
+    <a href={paths.film}>{copy.nav.howItWorks}</a>
+    <a href={hubPath(page.locale, "instructions")}>{copy.nav.instructions}</a>
     <a href={hubPath(page.locale, "articles")}>{copy.nav.articles}</a>
     <a href={paths.faq}>{copy.nav.faq}</a>
     {phone && (

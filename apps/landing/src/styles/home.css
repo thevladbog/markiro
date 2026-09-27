@@ -1,0 +1,1087 @@
+/* Home page (`/`, `/en/`). Light tokens from @markiro/ui; dark parts set data-theme="dark". */
+
+.home .section-index {
+  color: var(--fg-3);
+  font: 500 0.8125rem / 1.3 var(--font-mono);
+}
+
+.home-kicker {
+  margin: 0;
+  color: var(--fg-3);
+  font: 500 0.75rem / 1.3 var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.home-caption {
+  color: var(--fg-3);
+  font: 500 0.6875rem / 1.35 var(--font-mono);
+  letter-spacing: 0.08em;
+}
+
+.home-list {
+  display: grid;
+  gap: 0.625rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.home-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font: 400 0.9375rem / 1.4 var(--font-ui);
+}
+
+.home-list li::before {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  background: var(--accent);
+  content: "";
+}
+
+/* A real screen: white frame, soft shadow, mono caption under it (right-aligned by default). */
+.screen-frame {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  justify-items: end;
+}
+
+.screen-frame > picture {
+  justify-self: stretch;
+}
+
+.screen-frame img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 6px solid var(--surface-card);
+  border-radius: 6px;
+  box-shadow: 0 1.125rem 2.75rem rgb(23 22 26 / 19%);
+}
+
+/* Hero: the plant map. The stage keeps the stills' 16:10 shape so the dots stay on their places. */
+
+.home-hero {
+  position: relative;
+  background: var(--surface-page);
+}
+
+.home-hero__stage {
+  position: relative;
+  aspect-ratio: 16 / 10;
+}
+
+.home-hero__stage > picture {
+  position: absolute;
+  inset: 0;
+}
+
+.home-hero__image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* The header sits over the still; a paper fade keeps its links readable. */
+.home-hero__stage::before {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 6.5rem;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--surface-page) 88%, transparent) 40%,
+    transparent
+  );
+  content: "";
+  pointer-events: none;
+}
+
+/* The left of the still fades into the page under the text. */
+.home-hero__stage::after {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--surface-page) 94%, transparent) 0%,
+    color-mix(in srgb, var(--surface-page) 80%, transparent) 30%,
+    transparent 52%
+  );
+  content: "";
+  pointer-events: none;
+}
+
+.home-hero__content {
+  position: absolute;
+  z-index: 2;
+  top: clamp(6.5rem, 10.5vw, 9.5rem);
+  left: 50%;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.home-hero__content > * {
+  pointer-events: auto;
+}
+
+.home-hero h1 {
+  max-width: 38rem;
+  margin: 0;
+  font: var(--landing-display-xl);
+  letter-spacing: -0.055em;
+}
+
+.home-hero__lead {
+  max-width: 32.5rem;
+  margin: var(--sp-6) 0 0;
+  color: var(--fg-2);
+  font: var(--landing-lead);
+}
+
+.home-hero__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-5) var(--sp-7);
+  margin-top: var(--sp-7);
+}
+
+.home-hero__phone,
+.home-hero__film-link {
+  color: var(--fg-1);
+  font: 600 0.9375rem / 1 var(--font-ui);
+  text-underline-offset: 0.3em;
+}
+
+.home-hero__phone {
+  font-family: var(--font-mono);
+}
+
+.home-hero__hint {
+  margin: 2.5rem 0 0;
+  color: var(--fg-3);
+  font: 500 0.75rem / 1.4 var(--font-mono);
+}
+
+@media (hover: none) {
+  .home-hero__hint {
+    display: none;
+  }
+}
+
+/* Only the dots take the pointer; the list lets clicks through to the text under it. */
+.home-hero__spots {
+  position: absolute;
+  z-index: 3;
+  inset: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  pointer-events: none;
+}
+
+.map-spot {
+  position: absolute;
+  transform: translate(-0.375rem, -50%);
+  pointer-events: auto;
+}
+
+.map-spot:is(:hover, :focus-within) {
+  z-index: 1;
+}
+
+.map-spot__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--fg-1);
+  text-decoration: none;
+}
+
+.map-spot__link:focus-visible {
+  border-radius: var(--r-1);
+  outline: var(--focus-ring-w) solid var(--focus-ring);
+  outline-offset: 0.25rem;
+}
+
+.map-spot__dot {
+  position: relative;
+  flex: none;
+  width: 0.75rem;
+  height: 0.75rem;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 0.5rem color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.map-spot__label {
+  padding: 0.375rem 0.625rem;
+  border: 1px solid var(--line);
+  border-radius: var(--r-1);
+  background: color-mix(in srgb, var(--surface-card) 94%, transparent);
+  font: 600 0.8125rem / 1 var(--font-ui);
+  white-space: nowrap;
+}
+
+.map-spot__tip {
+  position: absolute;
+  z-index: 4;
+  left: 50%;
+  width: 17rem;
+  padding: 0.875rem;
+  visibility: hidden;
+  opacity: 0;
+  transform: translateX(-50%);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface-card);
+  box-shadow: 0 1rem 2.5rem rgb(23 22 26 / 18%);
+  transition:
+    opacity 140ms ease,
+    visibility 140ms;
+}
+
+.map-spot[data-tip="above"] .map-spot__tip {
+  bottom: calc(100% + 0.75rem);
+}
+
+.map-spot[data-tip="below"] .map-spot__tip {
+  top: calc(100% + 0.75rem);
+}
+
+/* A transparent bridge across the gap so the pointer never leaves .map-spot mid-crossing. */
+/* The bridge inherits the tooltip's visibility and opacity, so it only takes the pointer while the tooltip shows. */
+.map-spot__tip::before {
+  position: absolute;
+  right: 0;
+  left: 0;
+  height: 0.75rem;
+  content: "";
+}
+
+.map-spot[data-tip="above"] .map-spot__tip::before {
+  top: 100%;
+}
+
+.map-spot[data-tip="below"] .map-spot__tip::before {
+  bottom: 100%;
+}
+
+.map-spot:hover .map-spot__tip,
+.map-spot:focus-within .map-spot__tip {
+  visibility: visible;
+  opacity: 1;
+}
+
+.map-spot[data-dismissed] .map-spot__tip {
+  visibility: hidden;
+  opacity: 0;
+}
+
+.map-spot__title {
+  margin: 0;
+  font: 700 0.9375rem / 1.2 var(--font-ui);
+}
+
+.map-spot__line {
+  margin: 0.375rem 0 0.625rem;
+  color: var(--fg-2);
+  font: 400 0.8125rem / 1.45 var(--font-ui);
+}
+
+.map-spot__tip img {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  max-height: 15rem;
+  margin-inline: auto;
+  border-radius: var(--r-1);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .map-spot__dot::after {
+    position: absolute;
+    inset: -0.625rem;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--accent) 30%, transparent);
+    content: "";
+    animation: map-spot-pulse 2.4s var(--landing-ease) infinite;
+  }
+}
+
+@keyframes map-spot-pulse {
+  from {
+    opacity: 0.9;
+    transform: scale(0.6);
+  }
+
+  to {
+    opacity: 0;
+    transform: scale(1.8);
+  }
+}
+
+.home-hero__strip {
+  display: none;
+}
+
+@media (max-width: 1279px) {
+  .home-hero__lead {
+    max-width: 27rem;
+  }
+}
+
+/* Tablets and phones: the crop sits under the header, the text follows, then the card strip. */
+@media (max-width: 1023px) {
+  .home-hero {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .home-hero__stage {
+    order: -1;
+    margin-top: 5rem;
+  }
+
+  .home-hero__stage::before,
+  .home-hero__stage::after,
+  .home-hero__spots,
+  .home-hero__hint {
+    display: none;
+  }
+
+  .home-hero__content {
+    position: static;
+    padding-block: var(--sp-6) var(--sp-5);
+    transform: none;
+  }
+
+  .home-hero h1 {
+    font-size: clamp(2.25rem, 8vw, 3rem);
+  }
+
+  .home-hero__strip {
+    display: flex;
+    gap: var(--sp-3);
+    padding: 0 3rem var(--sp-8);
+    scroll-padding-inline: 3rem;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+  }
+
+  .home-hero__stop {
+    display: grid;
+    flex: 0 0 8.25rem;
+    gap: var(--sp-2);
+    color: var(--fg-1);
+    font: 600 0.8125rem / 1.2 var(--font-ui);
+    text-decoration: none;
+    scroll-snap-align: start;
+  }
+
+  .home-hero__stop img {
+    display: block;
+    width: 100%;
+    height: auto;
+    aspect-ratio: 16 / 10;
+    object-fit: cover;
+    border-radius: var(--r-1);
+  }
+}
+
+@media (max-width: 767px) {
+  .home-hero__stage {
+    margin-top: 4.5rem;
+  }
+
+  .home-hero__actions .button {
+    width: 100%;
+  }
+
+  .home-hero__strip {
+    padding-inline: 1rem;
+    scroll-padding-inline: 1rem;
+  }
+}
+
+/* Links read as text on the home page; green stays on buttons, dots and list markers. */
+.home .text-link {
+  margin-top: 0;
+  color: var(--fg-1);
+  font: 600 0.9375rem / 1.2 var(--font-ui);
+}
+
+.home .text-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 0.3em;
+}
+
+/* 01 Product */
+
+.home-product {
+  padding-block: 7rem;
+}
+
+.home-product__row {
+  display: grid;
+  grid-template-columns: minmax(0, 27.5rem) minmax(0, 1fr);
+  align-items: center;
+  gap: 4.5rem;
+  margin-top: 7rem;
+}
+
+.home-product__row--reverse {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 27.5rem);
+}
+
+.home-product__row--reverse > .home-product__text {
+  order: 2;
+}
+
+.home-product__text,
+.home-product__card {
+  display: grid;
+  align-content: start;
+  justify-items: start;
+  gap: 1.125rem;
+}
+
+.home-product__text h3,
+.home-product__card h3 {
+  margin: 0;
+  font: 700 clamp(1.625rem, 2.4vw, 2.125rem) / 1.1 var(--font-ui);
+  letter-spacing: -0.03em;
+}
+
+.home-product__body {
+  margin: 0;
+  color: var(--fg-2);
+  font: 400 1.0625rem / 1.55 var(--font-ui);
+}
+
+.home-product__cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.125rem 1.5rem;
+  margin-top: 7rem;
+}
+
+.home-product__card {
+  padding: 2rem;
+  border-radius: 6px;
+  background: var(--surface-panel);
+}
+
+/* Both cards share five row tracks (kicker, title, text, frame, link), so a longer text in
+   one card moves the frame and the link down in both and the cards end at the same height. */
+@supports (grid-template-rows: subgrid) {
+  .home-product__card {
+    grid-row: span 5;
+    grid-template-rows: subgrid;
+  }
+}
+
+.home-product__card h3 {
+  font-size: 1.625rem;
+}
+
+.home-product__card .home-product__body {
+  font-size: 1rem;
+}
+
+.home-product__card .screen-frame {
+  width: 100%;
+  justify-items: start;
+}
+
+/* The handheld is drawn as a device: graphite body, red scanner window, side scan triggers. */
+.handheld-frame {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  justify-items: center;
+}
+
+.handheld-frame__body {
+  position: relative;
+  width: 20.75rem;
+  padding: 2.75rem 1.125rem;
+  border: 1px solid #44464e;
+  border-radius: 2.625rem;
+  background: linear-gradient(180deg, #2c2d33, #1e1f24);
+  box-shadow: 0 1.625rem 3.125rem rgb(23 22 26 / 27%);
+}
+
+.handheld-frame__body::before,
+.handheld-frame__body::after {
+  position: absolute;
+  top: 14.75rem;
+  width: 0.5rem;
+  height: 4.75rem;
+  border-radius: 3px;
+  background: #3b3d44;
+  content: "";
+}
+
+.handheld-frame__body::before {
+  left: -0.5rem;
+}
+
+.handheld-frame__body::after {
+  right: -0.5rem;
+}
+
+.handheld-frame__scanner {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 6.25rem;
+  height: 0.5625rem;
+  transform: translateX(-50%);
+  border-radius: 0 0 5px 5px;
+  background: #6b2323;
+}
+
+.handheld-frame__speaker {
+  position: absolute;
+  top: 1.375rem;
+  left: 50%;
+  width: 3.5rem;
+  height: 0.3125rem;
+  transform: translateX(-50%);
+  border-radius: 3px;
+  background: #121317;
+}
+
+.handheld-frame img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 2px solid #0e0f12;
+  border-radius: 0.75rem;
+}
+
+@media (max-width: 1023px) {
+  .home-product__row,
+  .home-product__row--reverse {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2.5rem;
+    margin-top: 4.5rem;
+  }
+
+  .home-product__row--reverse > .home-product__text {
+    order: 0;
+  }
+
+  .home-product__cards {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1.5rem;
+    margin-top: 4.5rem;
+  }
+
+  .home-product__card {
+    grid-row: auto;
+    grid-template-rows: none;
+  }
+}
+
+@media (max-width: 767px) {
+  .home-product {
+    padding-block: 4.5rem;
+  }
+
+  .home-product__card {
+    padding: 1.25rem;
+  }
+
+  .handheld-frame__body {
+    width: 16.5rem;
+    padding: 2.25rem 0.875rem;
+    border-radius: 2.125rem;
+  }
+
+  .handheld-frame__body::before,
+  .handheld-frame__body::after {
+    top: 11.75rem;
+  }
+}
+
+/* Dark parts of the light page. `color` is inherited already computed from the light body, so a
+   dark part sets it again from its own tokens. The light page darkens the button hover
+   (landing.css); dark parts keep the dark theme's hover. */
+.home [data-theme="dark"] {
+  color: var(--fg-1);
+  color-scheme: dark;
+}
+
+.home [data-theme="dark"] .button:hover {
+  border-color: var(--accent-strong);
+  background: var(--accent-strong);
+}
+
+/* 02 Without a network */
+
+.home-offline {
+  padding-block: 7rem;
+  background: var(--surface-page);
+}
+
+.home-offline__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 31.25rem) minmax(0, 1fr);
+  align-items: start;
+  gap: 4.5rem;
+}
+
+.home-offline__points {
+  display: grid;
+  margin: 2rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.home-offline__points li {
+  display: flex;
+  gap: 1rem;
+  padding-block: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+/* The list numbers and the marks on the close-up share one badge, so each point finds its place. */
+.home-offline__number,
+.home-offline__marks li {
+  display: grid;
+  place-items: center;
+  min-width: 1.75rem;
+  height: 1.75rem;
+  padding: 0 0.375rem;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #0b1a11;
+  font: 600 0.75rem / 1 var(--font-mono);
+}
+
+.home-offline__number {
+  flex: none;
+}
+
+.home-offline__points h3 {
+  margin: 0;
+  font: 600 1rem / 1.3 var(--font-ui);
+}
+
+.home-offline__points p {
+  margin: 0.25rem 0 0;
+  color: var(--fg-2);
+  font: 400 0.9375rem / 1.45 var(--font-ui);
+}
+
+/* A close-up of the station working offline: status pills, the shift counter and the journal. */
+.home-offline__visual {
+  display: grid;
+  gap: 0.75rem;
+  justify-items: start;
+  margin: 0;
+}
+
+.home-offline__closeup {
+  position: relative;
+  justify-self: stretch;
+}
+
+.home-offline__closeup img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 6px solid var(--surface-card);
+  border-radius: 6px;
+  box-shadow: 0 1.125rem 2.75rem rgb(0 0 0 / 35%);
+}
+
+/* The marks sit inside the frame's border, so their fractions map onto the picture itself. */
+.home-offline__marks {
+  position: absolute;
+  inset: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  pointer-events: none;
+}
+
+.home-offline__marks li {
+  position: absolute;
+  top: var(--y);
+  left: var(--x);
+  box-shadow: 0 0 0 3px var(--surface-page);
+}
+
+/* The mark's point is the edge it touches; the badge hangs off it and covers no text. */
+.home-offline__marks li[data-side="below"] {
+  transform: translateX(-50%);
+}
+
+.home-offline__marks li[data-side="left"] {
+  transform: translate(-100%, -50%);
+}
+
+.home-offline .home-caption {
+  padding: 0.3125rem 0.5625rem;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: var(--surface-card);
+}
+
+/* 03 Traceability */
+
+.home-traceability {
+  padding-block: 7rem;
+}
+
+.home-traceability__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 30rem);
+  align-items: center;
+  gap: 4.5rem;
+}
+
+.home-traceability .screen-frame {
+  order: -1;
+  justify-items: start;
+}
+
+/* 04 The film: a dark panel inside the light page. */
+
+.home .home-film {
+  padding-block: 0 7rem;
+  border-top: 0;
+}
+
+.home-film__panel {
+  display: grid;
+  grid-template-columns: minmax(0, 28.75rem) minmax(0, 1fr);
+  min-height: 33.75rem;
+  overflow: hidden;
+  border-radius: var(--r-2);
+  background: var(--surface-page);
+}
+
+.home-film__text {
+  display: grid;
+  align-content: center;
+  justify-items: start;
+  gap: 1.25rem;
+  padding: 3.5rem;
+}
+
+.home-film__text .section-index {
+  margin: 0;
+}
+
+.home-film h2 {
+  margin: 0;
+  font: 700 clamp(1.75rem, 2.5vw, 2.25rem) / 1.1 var(--font-ui);
+  letter-spacing: -0.03em;
+}
+
+.home-film__lead {
+  margin: 0;
+  color: var(--fg-2);
+  font: 400 1.0625rem / 1.55 var(--font-ui);
+}
+
+.home-film__panel .button {
+  border-color: var(--fg-1);
+  background: var(--fg-1);
+  color: var(--fg-on-inverse);
+}
+
+.home .home-film__panel .button:hover {
+  border-color: var(--fg-2);
+  background: var(--fg-2);
+}
+
+.home-film__panel > picture {
+  display: block;
+}
+
+.home-film__image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+@media (max-width: 1023px) {
+  .home-offline__grid,
+  .home-traceability__grid,
+  .home-film__panel {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 3rem;
+  }
+
+  .home-traceability .screen-frame {
+    order: 0;
+  }
+
+  .home-film__panel {
+    gap: 0;
+    min-height: 0;
+  }
+
+  .home-film__image {
+    height: auto;
+    aspect-ratio: 16 / 10;
+  }
+}
+
+@media (max-width: 767px) {
+  .home-offline,
+  .home-traceability {
+    padding-block: 4.5rem;
+  }
+
+  /* The close-up shrinks to half size on phones; the marks shrink with it. */
+  .home-offline__marks li {
+    min-width: 1.25rem;
+    height: 1.25rem;
+    padding: 0 0.1875rem;
+    font-size: 0.5625rem;
+  }
+
+  .home .home-film {
+    padding-bottom: 4.5rem;
+  }
+
+  .home-film__text {
+    padding: 2rem 1.25rem;
+  }
+}
+
+/* 08 Demo: the phone number reads as text; green stays on the submit button. */
+.home .demo-phone {
+  color: var(--fg-1);
+}
+
+/* 05 Rollout */
+
+.home-rollout {
+  padding-block: 7rem;
+  background: var(--surface-panel);
+}
+
+.home-rollout__top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 4.5rem;
+}
+
+.home-rollout__labels {
+  display: flex;
+  gap: 1.25rem;
+}
+
+.home-rollout__label {
+  display: grid;
+  gap: 0.625rem;
+  margin: 0;
+}
+
+.home-rollout__label img {
+  display: block;
+  width: 11.25rem;
+  height: auto;
+  border: 1px solid var(--line);
+  background: #fff;
+  box-shadow: 0 0.625rem 1.5rem rgb(23 22 26 / 12%);
+}
+
+.home-rollout__steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 3.5rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.home-rollout__steps li {
+  display: grid;
+  align-content: start;
+  gap: 0.625rem;
+  padding: 1.5rem 1.5rem 0 0;
+  border-top: 1px solid var(--line-strong);
+}
+
+.home-rollout__number {
+  color: var(--fg-3);
+  font: 500 0.75rem / 1.3 var(--font-mono);
+}
+
+.home-rollout__steps h3 {
+  margin: 0.25rem 0 0;
+  font: 600 1.125rem / 1.3 var(--font-ui);
+}
+
+.home-rollout__steps p {
+  margin: 0;
+  color: var(--fg-2);
+  font: 400 0.9375rem / 1.5 var(--font-ui);
+}
+
+/* 06 Open documents */
+
+.home-documents {
+  padding-block: 7rem;
+}
+
+.home-documents__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 28.75rem) minmax(0, 1fr);
+  align-items: center;
+  gap: 4.5rem;
+}
+
+.home-documents__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.75rem;
+  margin: 2rem 0 0;
+}
+
+.home-documents__covers {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.home-documents__covers figure {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+}
+
+.home-documents__covers img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  background: #fff;
+  box-shadow: 0 0.75rem 2rem rgb(23 22 26 / 12%);
+}
+
+/* 07 Articles: follows the documents without a divider. */
+
+.home .home-materials {
+  padding-block: 0 7rem;
+  border-top: 0;
+}
+
+.home-materials__heading {
+  margin: 0;
+  font: 700 clamp(1.75rem, 2.4vw, 2.125rem) / 1.15 var(--font-ui);
+  letter-spacing: -0.03em;
+}
+
+.home-materials__grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1.5rem;
+  margin: 2.5rem 0;
+}
+
+.materials-card {
+  position: relative;
+  display: grid;
+  align-content: start;
+  gap: 0.75rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--line-strong);
+}
+
+/* The title is the only anchor text; its pseudo-element makes the whole card clickable. */
+.materials-card__link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.materials-card__link::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+}
+
+.materials-card:hover {
+  border-top-color: var(--fg-1);
+}
+
+.materials-card h3 {
+  margin: 0;
+  font: 600 1.1875rem / 1.3 var(--font-ui);
+}
+
+.materials-card p {
+  margin: 0;
+  color: var(--fg-2);
+  font: 400 0.9375rem / 1.5 var(--font-ui);
+}
+
+.materials-card__meta {
+  display: flex;
+  gap: 0.25rem;
+  color: var(--fg-3);
+  font: 500 0.75rem / 1.4 var(--font-mono);
+}
+
+@media (max-width: 1023px) {
+  .home-rollout__top,
+  .home-documents__grid,
+  .home-materials__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .home-rollout__top,
+  .home-documents__grid {
+    gap: 2.5rem;
+  }
+
+  .home-rollout__steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    row-gap: 2rem;
+  }
+}
+
+@media (max-width: 767px) {
+  .home-rollout,
+  .home-documents {
+    padding-block: 4.5rem;
+  }
+
+  .home .home-materials {
+    padding-bottom: 4.5rem;
+  }
+
+  .home-rollout__steps {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .home-rollout__label img {
+    width: 9rem;
+  }
+
+  .home-documents__covers {
+    gap: 0.75rem;
+  }
+}

@@ -7,35 +7,72 @@ interface Props { page: Pick<PageMetadata, "locale"> }
 const { page } = Astro.props;
 const copy = getUiCopy(page.locale).common;
 const homePath = page.locale === "ru" ? "/" : "/en/";
-const paths = page.locale === "ru"
+const columns = page.locale === "ru"
   ? [
-      ["/markirovka-chestny-znak/", "Маркировка"],
-      ["/sscc-i-agregatsiya/", "SSCC"],
-      ["/rabochee-mesto-upakovki/", "Station для Windows"],
-      ["/integratsiya-1c/", "Интеграция с 1С"],
-      ["/stati/", "Статьи"],
-      ["/instruktsii/", "Инструкции"],
-      ["/faq/", "Вопросы"],
+      {
+        id: "product",
+        heading: "Продукт",
+        links: [
+          ["/markirovka-chestny-znak/", "Маркировка"],
+          ["/sscc-i-agregatsiya/", "SSCC и агрегация"],
+          ["/rabochee-mesto-upakovki/", "Station для Windows"],
+          ["/oflayn-rabota/", "Работа без сети"],
+          ["/kiosk-samovydachi/", "Киоск самовыдачи"],
+          ["/integratsiya-1c/", "Интеграция с 1С"],
+        ],
+      },
+      {
+        id: "materials",
+        heading: "Материалы",
+        links: [
+          ["/kak-rabotaet/", "Как работает"],
+          ["/stati/", "Статьи"],
+          ["/instruktsii/", "Инструкции"],
+          ["/faq/", "Вопросы"],
+        ],
+      },
+      {
+        id: "company",
+        heading: "Компания",
+        links: [
+          ["/legal/", "Документы"],
+          ["/privacy/", "Политика обработки данных"],
+          ["/personal-data-consent/", "Согласие"],
+        ],
+      },
     ]
   : [
-      ["/en/chestny-znak-serialization/", "Serialization"],
-      ["/en/sscc-and-aggregation/", "SSCC"],
-      ["/en/packing-workstation/", "Station for Windows"],
-      ["/en/1c-integration/", "1C integration"],
-      ["/en/articles/", "Articles"],
-      ["/en/instructions/", "Instructions"],
-      ["/en/faq/", "Questions"],
-    ];
-const legalPaths = page.locale === "ru"
-  ? [
-      ["/legal/", "Документы"],
-      ["/privacy/", "Политика обработки данных"],
-      ["/personal-data-consent/", "Согласие"],
-    ]
-  : [
-      ["/en/legal/", "Legal documents"],
-      ["/en/privacy/", "Processing policy"],
-      ["/en/personal-data-consent/", "Consent"],
+      {
+        id: "product",
+        heading: "Product",
+        links: [
+          ["/en/chestny-znak-serialization/", "Serialization"],
+          ["/en/sscc-and-aggregation/", "SSCC and aggregation"],
+          ["/en/packing-workstation/", "Station for Windows"],
+          ["/en/offline-production/", "Work without a network"],
+          ["/en/self-service-pickup-kiosk/", "Self-service kiosk"],
+          ["/en/1c-integration/", "1C integration"],
+        ],
+      },
+      {
+        id: "materials",
+        heading: "Materials",
+        links: [
+          ["/en/how-it-works/", "How it works"],
+          ["/en/articles/", "Articles"],
+          ["/en/instructions/", "Instructions"],
+          ["/en/faq/", "Questions"],
+        ],
+      },
+      {
+        id: "company",
+        heading: "Company",
+        links: [
+          ["/en/legal/", "Legal documents"],
+          ["/en/privacy/", "Processing policy"],
+          ["/en/personal-data-consent/", "Consent"],
+        ],
+      },
     ];
 const consentSettingsLabel = page.locale === "ru" ? "Настройки cookies" : "Cookie settings";
 ---
@@ -46,12 +83,14 @@ const consentSettingsLabel = page.locale === "ru" ? "Настройки cookies"
       <a href={homePath} aria-label={copy.homeLabel}><BrandMark locale={page.locale} /></a>
       <span data-footer-year>© 2026</span>
     </div>
-    <nav aria-label={copy.footerLabel}>
-      {paths.map(([path, label]) => <a href={path}>{label}</a>)}
-    </nav>
-    <nav class="landing-footer__legal" aria-label={page.locale === "ru" ? "Юридические документы" : "Legal documents"}>
-      {legalPaths.map(([path, label]) => <a href={path}>{label}</a>)}
-      <button type="button" data-consent-settings>{consentSettingsLabel}</button>
-    </nav>
+    {columns.map((column) => (
+      <nav class="landing-footer__column" aria-labelledby={`footer-${column.id}`} data-footer-column>
+        <p class="landing-footer__heading" id={`footer-${column.id}`} data-footer-heading>{column.heading}</p>
+        {column.links.map(([path, label]) => <a href={path}>{label}</a>)}
+        {column.id === "company" && (
+          <button type="button" data-consent-settings>{consentSettingsLabel}</button>
+        )}
+      </nav>
+    ))}
   </div>
 </footer>
