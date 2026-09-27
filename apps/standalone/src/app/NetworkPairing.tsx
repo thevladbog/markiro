@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Alert, Button, Card, Input } from "@markiro/ui";
@@ -122,7 +122,9 @@ export function NetworkPairing({ probe, onClaim, onBack }: NetworkPairingProps) 
   // After "Далее" the manual form unmounts; move focus to the fingerprint
   // block instead of letting it drop to <body>. Never to the confirm button:
   // a focused "Отпечаток совпадает" invites pressing Enter without comparing.
-  useEffect(() => {
+  // Both focus moves run as layout effects: focus lands in the same commit
+  // as the new view, before a scanner can type into the page.
+  useLayoutEffect(() => {
     if (confirmation) fingerprintRef.current?.focus();
   }, [confirmation]);
 
@@ -130,7 +132,7 @@ export function NetworkPairing({ probe, onClaim, onBack }: NetworkPairingProps) 
   // then disabled while busy: the next scanner input would go nowhere. Any
   // notice on the scan form (not a code, no addresses, no host found, a
   // refused claim) returns focus to the scan field.
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!manual && !confirmation && notice) {
       scanFieldHostRef.current?.querySelector("input")?.focus();
     }

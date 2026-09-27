@@ -49,7 +49,10 @@ function lineItem(rev: number, name: string): ChangeItem {
 
 /**
  * The shell's link as the test drives it: `watch` reports "online" at once,
- * `status` and `revision` reach the app like shell events.
+ * `status` and `revision` reach the app like shell events. `useHostLink`
+ * subscribes in an effect that React runs after the commit showing the
+ * screen, so an event waits until the app has subscribed instead of being
+ * dropped.
  */
 function fakeConnection() {
   let handlers: ConnectionHandlers | null = null;
@@ -64,11 +67,21 @@ function fakeConnection() {
       };
     }),
   };
+  const subscribed = () =>
+    waitFor(() => {
+      if (handlers === null) throw new Error("the app has not subscribed to the link yet");
+    });
   return {
     connection,
     stop,
-    status: (status: HostStatus) => act(() => handlers?.onStatus(status)),
-    revision: (rev: number) => act(() => handlers?.onRevision(rev)),
+    status: async (status: HostStatus) => {
+      await subscribed();
+      act(() => handlers?.onStatus(status));
+    },
+    revision: async (rev: number) => {
+      await subscribed();
+      act(() => handlers?.onRevision(rev));
+    },
   };
 }
 
@@ -660,7 +673,7 @@ describe("App", () => {
     await waitFor(() => expect(lineNames()).toEqual(["Линия 1"]));
     expect(host.getChanges).toHaveBeenCalledWith(0);
 
-    link.revision(43);
+    await link.revision(43);
     await waitFor(() => expect(lineNames()).toEqual(["Линия 1 (упаковка)"]));
     expect(host.getChanges).toHaveBeenLastCalledWith(42);
   });
@@ -679,7 +692,8 @@ describe("App", () => {
       connection,
     });
     expect(await screen.findByText("Цех")).toBeTruthy();
-    expect(host.getChanges).toHaveBeenCalledTimes(1);
+    // The sync starts in the link effect, which runs after the floor shows.
+    await waitFor(() => expect(host.getChanges).toHaveBeenCalledTimes(1));
   });
 
   it("syncs only after watch settles, not before, even though the fake connection usually resolves at once", async () => {
@@ -723,15 +737,17 @@ describe("App", () => {
       connection: link.connection,
     });
     await screen.findByText("Цех");
-    link.status({ state: "offline", lastContactAt: null, lastError: "key_rejected", seq: 2 });
+    await link.status({ state: "offline", lastContactAt: null, lastError: "key_rejected", seq: 2 });
     expect(await screen.findByText("Хост не принимает это устройство")).toBeTruthy();
     expect(
       screen.getByText(
         "Хост не узнаёт ключ этого устройства: устройство могли отключить в офисе или восстановить базу хоста из копии.",
       ),
     ).toBeTruthy();
-    // The link stops with the pairing it no longer serves.
-    expect(link.stop).toHaveBeenCalledTimes(1);
+    // The link stops with the pairing it no longer serves. It stops in the
+    // effect cleanup, which React runs after the commit that shows the
+    // screen, so the assertion waits for it.
+    await waitFor(() => expect(link.stop).toHaveBeenCalledTimes(1));
   });
 
   it("stops the link and shows the rejected-device screen when a sync's error refuses the device's key", async () => {
@@ -756,7 +772,7 @@ describe("App", () => {
     // Same rejection screen and the same stopped link as a link status
     // refusing the key (above) — this time the refusal came from the sync
     // itself, through `shellActionFor`, not through `onStatus`.
-    expect(link.stop).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(link.stop).toHaveBeenCalledTimes(1));
   });
 
   it("names the remote host whose certificate changed on the link", async () => {
@@ -768,7 +784,7 @@ describe("App", () => {
       connection: link.connection,
     });
     await screen.findByText("Цех");
-    link.status({
+    await link.status({
       state: "offline",
       lastContactAt: 1_790_000_000_000,
       lastError: "certificate_mismatch",
@@ -803,11 +819,11 @@ describe("App", () => {
     // The request-count assertion below catches that even with the guard in
     // place: it proves the second run never reached the host at all, not
     // merely that the screen still looks right.
-    link.revision(7);
+    await link.revision(7);
     resolveFirst(feedPage(7, [], OTHER_HOST_ID));
 
     expect(await screen.findByText("Устройство подключено к другому хосту")).toBeTruthy();
-    expect(link.stop).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(link.stop).toHaveBeenCalledTimes(1));
     expect(host.getChanges).toHaveBeenCalledTimes(1);
   });
 
@@ -823,7 +839,7 @@ describe("App", () => {
         `По адресу ${ADDRESS} отвечает хост, к которому это устройство не подключали. Справочники с него не загружаются. Подключите устройство заново.`,
       ),
     ).toBeTruthy();
-    expect(link.stop).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(link.stop).toHaveBeenCalledTimes(1));
 
     fireEvent.click(screen.getByRole("button", { name: "Подключить заново" }));
     expect(await screen.findByText("Цех")).toBeTruthy();
@@ -849,7 +865,7 @@ describe("App", () => {
     expect(host.getOrg).toHaveBeenCalledTimes(1);
     expect(host.officeMe).not.toHaveBeenCalled();
 
-    link.revision(44);
+    await link.revision(44);
     // The header shows `session.user.name`; waiting for the new name is what
     // makes the negative assertion below meaningful — it proves the
     // refreshed session was actually applied, not merely that nothing fired.
@@ -921,7 +937,7 @@ describe("App", () => {
       connection: link.connection,
     });
     expect(await screen.findByText("На связи с хостом")).toBeTruthy();
-    link.status({ state: "offline", lastContactAt: null, lastError: "unreachable", seq: 2 });
+    await link.status({ state: "offline", lastContactAt: null, lastError: "unreachable", seq: 2 });
     expect(await screen.findByText("Нет связи с хостом")).toBeTruthy();
     expect(screen.getByText("Хост не отвечает.")).toBeTruthy();
 
