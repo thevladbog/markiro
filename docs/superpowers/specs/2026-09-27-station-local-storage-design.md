@@ -343,10 +343,16 @@ is denied). A manually installed older build reads the legacy path, finds
 nothing, and starts unenrolled; the data stays intact in Local.
 
 Before rolling back, open the Update screen → "Station data" and confirm it
-shows "Stored on this computer:" with `%LOCALAPPDATA%\app.markiro.station`; if
-it shows a `…migrating-…` folder or "Stored in the roaming Windows profile:"
-instead, do not roll back — follow `docs/runbooks/station-storage-recovery.md`
-or contact the developers.
+shows "Stored on this computer:" with `%LOCALAPPDATA%\app.markiro.station` and
+no warnings are shown under it; if it instead shows a `…migrating-…` folder,
+"Stored in the roaming Windows profile:", or any warning — for example
+"Another station's data was found in the roaming profile…", "This station's
+data reappeared in the roaming profile…", or "The old station data folder was
+not removed completely…" — do not roll back: `%APPDATA%\app.markiro.station`
+may already hold `station.json` or `station-mirror.db*` (or a `.migrating-`
+folder may exist next to it), and this move would overwrite another station's
+data or leave a stale copy for the older build to run from; follow
+`docs/runbooks/station-storage-recovery.md` or contact the developers instead.
 
 Manual rollback, with the station closed:
 
