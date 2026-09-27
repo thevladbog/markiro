@@ -61,7 +61,9 @@ pub fn profile_facts() -> ProfileFacts {
 fn policy_dword(key: &str, value: &str) -> Option<u32> {
     use std::iter::once;
     use windows_sys::Win32::Foundation::ERROR_SUCCESS;
-    use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_DWORD};
+    use windows_sys::Win32::System::Registry::{
+        RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_DWORD,
+    };
 
     let key: Vec<u16> = key.encode_utf16().chain(once(0)).collect();
     let value: Vec<u16> = value.encode_utf16().chain(once(0)).collect();
@@ -95,22 +97,39 @@ mod tests {
     fn only_profiles_that_lose_local_data_keep_the_roaming_folder() {
         let local = ProfileFacts::default();
         assert_eq!(local.local_less_durable(), None);
-        let roaming = ProfileFacts { roaming: true, ..local };
+        let roaming = ProfileFacts {
+            roaming: true,
+            ..local
+        };
         assert_eq!(roaming.local_less_durable(), None);
-        let deleting = ProfileFacts { delete_roaming_cache: true, ..roaming };
+        let deleting = ProfileFacts {
+            delete_roaming_cache: true,
+            ..roaming
+        };
         assert_eq!(
             deleting.local_less_durable(),
             Some(LessDurableReason::DeleteRoamingCache)
         );
         // The policy only deletes roaming profiles' local copies.
-        let local_with_policy = ProfileFacts { delete_roaming_cache: true, ..local };
+        let local_with_policy = ProfileFacts {
+            delete_roaming_cache: true,
+            ..local
+        };
         assert_eq!(local_with_policy.local_less_durable(), None);
         assert_eq!(
-            ProfileFacts { temporary: true, ..local }.local_less_durable(),
+            ProfileFacts {
+                temporary: true,
+                ..local
+            }
+            .local_less_durable(),
             Some(LessDurableReason::TemporaryProfile)
         );
         assert_eq!(
-            ProfileFacts { mandatory: true, ..local }.local_less_durable(),
+            ProfileFacts {
+                mandatory: true,
+                ..local
+            }
+            .local_less_durable(),
             Some(LessDurableReason::MandatoryProfile)
         );
     }

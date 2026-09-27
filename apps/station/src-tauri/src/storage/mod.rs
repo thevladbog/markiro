@@ -23,6 +23,8 @@ pub use resolve::resolve;
 
 pub(crate) const CONFIG_FILE: &str = "station.json";
 pub(crate) const DATABASE_FILE: &str = "station-mirror.db";
+/// A claimed roaming folder is named `<legacy name>.migrating-<uuid>`.
+pub(crate) const CLAIM_MARKER: &str = ".migrating-";
 
 /// Where this process reads and writes the station files.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -66,6 +68,16 @@ pub enum StorageNotice {
 impl StationStorage {
     pub fn database_path(&self) -> PathBuf {
         self.dir.join(DATABASE_FILE)
+    }
+
+    /// Legacy mode from a claimed folder: the move is under way, and the
+    /// folder is only authoritative while it holds the station files.
+    pub fn runs_from_claim(&self) -> bool {
+        self.mode == StorageMode::Legacy
+            && self
+                .dir
+                .file_name()
+                .is_some_and(|name| name.to_string_lossy().contains(CLAIM_MARKER))
     }
 }
 

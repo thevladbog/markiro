@@ -3,6 +3,8 @@ name = "markiro-station"
 version = "0.1.0"
 description = "Markiro line station"
 edition = "2021"
+# storage/resolve.rs locks with `std::fs::File::lock`, stable since 1.89.
+rust-version = "1.89"
 license-file = "../../../LICENSE"
 publish = false
 

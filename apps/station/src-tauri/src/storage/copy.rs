@@ -19,7 +19,9 @@ impl From<io::Error> for CopyError {
 /// The files that make up a station store: every top-level regular file
 /// except interrupted config writes (`*.tmp`) and SQLite shared memory
 /// (`-shm`, rebuilt on open). The database's `-journal` is included: an exact
-/// copy lets SQLite roll back a hot journal where it lands.
+/// copy lets SQLite roll back a hot journal where it lands. So is its `-wal`:
+/// tauri-plugin-sql creates the database in WAL mode, and the station can exit
+/// without a checkpoint, so committed facts may live only there.
 pub(crate) fn store_files(dir: &Path) -> io::Result<Vec<OsString>> {
     let mut names = Vec::new();
     for entry in fs::read_dir(dir)? {
@@ -83,6 +85,10 @@ impl HeldFiles {
                 .write(true)
                 .create_new(true)
                 .open(staging.join(&*name))?;
+            // Before any byte lands: the umask must not widen the 0600 of
+            // `station.json` and its backups, which hold the device key.
+            #[cfg(unix)]
+            target.set_permissions(source.metadata()?.permissions())?;
             io::copy(source, &mut target)?;
             target.sync_all()?;
         }
@@ -189,6 +195,31 @@ mod tests {
         flipped[150_000] ^= 1;
         fs::write(staging.join("station-mirror.db"), flipped).unwrap();
         assert!(matches!(held.verify(&staging), Err(CopyError::Failed(_))));
+    }
+
+    /// `station.json` and its `.bak` copies hold the device key at 0600; the
+    /// umask must neither widen nor narrow any copied file's mode.
+    #[cfg(unix)]
+    #[test]
+    fn copies_keep_the_source_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let source = temp_dir();
+        for (name, mode) in [("station.json", 0o600), ("station-mirror.db", 0o644)] {
+            fs::write(source.join(name), name).unwrap();
+            fs::set_permissions(source.join(name), fs::Permissions::from_mode(mode)).unwrap();
+        }
+        let names = store_files(&source).unwrap();
+
+        let staging = temp_dir().join("staging");
+        hold(&source, &names).unwrap().copy_to(&staging).unwrap();
+        for (name, mode) in [("station.json", 0o600), ("station-mirror.db", 0o644)] {
+            let copied = fs::metadata(staging.join(name))
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(copied & 0o777, mode, "{name}");
+        }
     }
 
     /// SQLite opens files with read/write sharing but no exclusive access.

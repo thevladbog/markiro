@@ -47,26 +47,58 @@ pub async fn station_storage_status(
     gate.ready().await
 }
 
+/// Async commands no longer run one at a time on the main thread. This keeps
+/// the synchronous `station.json` calls serialized, so `clear_credential`'s
+/// read-modify-write never interleaves with `write_config`. It guards no data
+/// and is never held across an `.await`.
+static CONFIG_FILE_LOCK: Mutex<()> = Mutex::new(());
+
+fn lock_config_file() -> MutexGuard<'static, ()> {
+    CONFIG_FILE_LOCK
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Where `read_config` may mint a first identity. A claimed folder always
+/// holds the station files, so a missing `station.json` there means another
+/// logon session finished the move: minting would split the identity.
+fn mintable_config_dir(storage: StationStorage) -> Result<PathBuf, String> {
+    if storage.runs_from_claim() && !storage.dir.join(storage::CONFIG_FILE).exists() {
+        return Err(format!(
+            "station.json is missing from the claimed folder {}; another session may have finished moving the station files, so restart the station",
+            storage.dir.display()
+        ));
+    }
+    Ok(storage.dir)
+}
+
 async fn read_config_in(gate: &StorageGate) -> Result<StationConfig, String> {
-    config::read_config(&gate.ready().await?.dir)
+    let storage = gate.ready().await?;
+    let _config_file = lock_config_file();
+    config::read_config(&mintable_config_dir(storage)?)
 }
 
 async fn write_config_in(gate: &StorageGate, cfg: &StationConfig) -> Result<(), String> {
     if let Some(url) = &cfg.server_url {
         config::validate_http_url(url)?;
     }
-    config::write_config(&gate.ready().await?.dir, cfg)
+    let dir = gate.ready().await?.dir;
+    let _config_file = lock_config_file();
+    config::write_config(&dir, cfg)
 }
 
 async fn clear_credential_in(gate: &StorageGate) -> Result<(), String> {
-    config::clear_credential(&gate.ready().await?.dir)
+    let storage = gate.ready().await?;
+    let _config_file = lock_config_file();
+    config::clear_credential(&mintable_config_dir(storage)?)
 }
 
 async fn database_url_in(gate: &StorageGate) -> Result<String, String> {
     Ok(storage::database_url(&gate.ready().await?.database_path()))
 }
 
-use std::sync::Mutex;
+use std::path::PathBuf;
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use tauri::State;
 
@@ -261,6 +293,44 @@ mod tests {
                 database_url_in(&gate).await.unwrap(),
                 storage::database_url(&dir.join("station-mirror.db"))
             );
+        });
+    }
+
+    fn legacy_gate(dir: &std::path::Path) -> StorageGate {
+        let (sender, gate) = storage::storage_gate();
+        sender.resolve(Ok(StationStorage {
+            dir: dir.to_path_buf(),
+            mode: crate::storage::StorageMode::Legacy,
+            notices: vec![crate::storage::StorageNotice::LegacyInUse],
+        }));
+        gate
+    }
+
+    /// Another logon session can finish the move while this one runs from the
+    /// claimed folder: its `station.json` is then gone, never to be minted.
+    #[test]
+    fn a_claimed_folder_without_its_config_never_mints() {
+        runtime().block_on(async {
+            let claim = temp_dir().join("app.markiro.station.migrating-1");
+            std::fs::create_dir_all(&claim).unwrap();
+            let gate = legacy_gate(&claim);
+            let error = read_config_in(&gate).await.unwrap_err();
+            assert!(error.contains(&claim.display().to_string()), "{error}");
+            assert!(clear_credential_in(&gate).await.is_err());
+            assert!(!claim.join("station.json").exists());
+
+            // While the claimed folder holds its config, it serves as before.
+            let mut cfg = config::read_config(&temp_dir()).unwrap();
+            cfg.api_key = Some("credential-placeholder".into());
+            config::write_config(&claim, &cfg).unwrap();
+            assert_eq!(read_config_in(&gate).await.unwrap(), cfg);
+            clear_credential_in(&gate).await.unwrap();
+            assert_eq!(read_config_in(&gate).await.unwrap().api_key, None);
+
+            // A fresh station kept in the roaming folder still gets an identity.
+            let roaming = temp_dir().join("app.markiro.station");
+            assert!(read_config_in(&legacy_gate(&roaming)).await.is_ok());
+            assert!(roaming.join("station.json").exists());
         });
     }
 

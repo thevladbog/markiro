@@ -8,6 +8,8 @@ use uuid::Uuid;
 use crate::config;
 
 pub(crate) const RECORD_FILE: &str = "station-storage.json";
+/// Record writes go through `.station-storage-<uuid>.tmp`.
+pub(crate) const TEMP_PREFIX: &str = ".station-storage-";
 const RECORD_VERSION: u32 = 1;
 
 /// Progress of the move. It lives in the machine-local folder, so neither a
@@ -45,17 +47,29 @@ struct RecordFile {
     record: StorageRecord,
 }
 
+/// The errors name the record file: support reads them on the station.
 pub(crate) fn read(local_dir: &Path) -> Result<Option<StorageRecord>, String> {
-    let data = match fs::read(local_dir.join(RECORD_FILE)) {
+    let path = local_dir.join(RECORD_FILE);
+    let data = match fs::read(&path) {
         Ok(data) => data,
         Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(format!("station storage record unreadable: {error}")),
+        Err(error) => {
+            return Err(format!(
+                "the station storage record {} is unreadable: {error}",
+                path.display()
+            ))
+        }
     };
-    let file: RecordFile = serde_json::from_slice(&data)
-        .map_err(|error| format!("station storage record invalid: {error}"))?;
+    let file: RecordFile = serde_json::from_slice(&data).map_err(|error| {
+        format!(
+            "the station storage record {} is damaged: {error}",
+            path.display()
+        )
+    })?;
     if file.version != RECORD_VERSION {
         return Err(format!(
-            "station storage record version {} is not supported",
+            "the station storage record {} has version {}, which this station version does not support",
+            path.display(),
             file.version
         ));
     }
@@ -70,7 +84,7 @@ pub(crate) fn write(local_dir: &Path, record: &StorageRecord) -> Result<(), Stri
         record: record.clone(),
     })
     .map_err(|error| error.to_string())?;
-    let temporary = local_dir.join(format!(".station-storage-{}.tmp", Uuid::new_v4()));
+    let temporary = local_dir.join(format!("{TEMP_PREFIX}{}.tmp", Uuid::new_v4()));
     if let Err(error) = config::write_owner_only(&temporary, &data) {
         let _ = fs::remove_file(&temporary);
         return Err(error);
@@ -135,18 +149,24 @@ mod tests {
         assert_eq!(names, vec![std::ffi::OsString::from(RECORD_FILE)]);
     }
 
+    /// Support reads these errors on the station: they name the record file.
     #[test]
     fn garbage_or_an_unknown_version_is_an_error() {
         let dir = temp_dir();
+        let path = dir.join(RECORD_FILE).display().to_string();
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join(RECORD_FILE), b"{not json").unwrap();
-        assert!(read(&dir).is_err());
+        assert!(read(&dir).unwrap_err().contains(&path));
         fs::write(
             dir.join(RECORD_FILE),
             br#"{"version":2,"record":{"state":"committed","origin":"fresh","pending_cleanup":null}}"#,
         )
         .unwrap();
-        assert!(read(&dir).is_err());
+        let error = read(&dir).unwrap_err();
+        assert!(
+            error.contains(&path) && error.contains("version 2"),
+            "{error}"
+        );
     }
 
     #[test]
