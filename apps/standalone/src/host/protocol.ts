@@ -74,6 +74,30 @@ export const hostResponseSchema = z
   .strict();
 export type HostResponse = z.infer<typeof hostResponseSchema>;
 
+/** `connection_status` and `standalone://host-status`: the link to the host. */
+export const hostStatusSchema = z
+  .object({
+    state: z.enum(["online", "connecting", "offline"]),
+    /** When the host last sent anything, in milliseconds since the Unix epoch. */
+    lastContactAt: z.number().int().nonnegative().nullable(),
+    lastError: z
+      .enum([
+        "unreachable",
+        "certificate_mismatch",
+        "key_rejected",
+        "stream_refused",
+        "stream_ended",
+      ])
+      .nullable(),
+    /** Grows with every status the shell publishes. */
+    seq: z.number().int().nonnegative(),
+  })
+  .strict();
+export type HostStatus = z.infer<typeof hostStatusSchema>;
+
+/** `standalone://host-revision`: the host committed revision `rev`. */
+export const hostRevisionSchema = z.object({ rev: z.number().int().nonnegative() }).strict();
+
 // --- Host responses (lenient) ---
 
 /** `GET /v1/device`. */

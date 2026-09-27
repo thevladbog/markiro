@@ -88,6 +88,10 @@ JSON parameter per entity through
 `invalid_statement`, `unsupported_value`, `statement_failed`,
 `changes_mismatch`.
 
+The webview reaches it only through `LocalExecutor` (`src/local/executor.ts`);
+Vitest runs the same migrations on node:sqlite behind the same interface
+(`test/support/local-db.ts`), so SQL in tests never drifts from the schema.
+
 ## Writes
 
 - Every multi-statement write uses `db::begin_write` (`BEGIN IMMEDIATE`), not a
@@ -177,8 +181,8 @@ a secret.
 The webview's IPC contract — command names, argument names such as
 `officeToken`, the `{ status, body }` answer and bare-string rejections — is
 pinned by `src-tauri/tests/ipc.rs` through Tauri's mock runtime. Change it
-together with `src/host/client.ts`, `src/host/device.ts` and
-`src/host/probe.ts`.
+together with `src/host/client.ts`,
+`device.ts`, `probe.ts` and `connection.ts` and `src/local/executor.ts`.
 
 ## Connection to the host
 

@@ -50,6 +50,12 @@ function fakeDevice(
       paired = pairResult;
       return pairResult;
     }),
+    claim: vi.fn<DeviceApi["claim"]>(async () => {
+      throw new Error("pairing by code is not part of the app yet");
+    }),
+    selectLine: vi.fn<DeviceApi["selectLine"]>(async () => {
+      throw new Error("line selection is not part of the app yet");
+    }),
     forget: vi.fn<DeviceApi["forget"]>(async () => {
       paired = null;
       broken = null;

@@ -40,6 +40,28 @@ describe("Tauri device API", () => {
     expect(call).toHaveBeenCalledWith("device_forget", {});
   });
 
+  it("pairs by code with the host's address, the confirmed fingerprint and a name", async () => {
+    const call = vi.fn().mockResolvedValue(DEVICE_STATUS);
+    const input = {
+      address: "https://192.168.1.10:45710",
+      fingerprint: "ab".repeat(32),
+      code: "7KQ2M9XRTD",
+      name: "Станция на линии 2",
+    };
+    await expect(createTauriDeviceApi(call).claim(input)).resolves.toEqual(DEVICE_STATUS);
+    expect(call).toHaveBeenCalledWith("host_claim", input);
+  });
+
+  it("selects the station's line", async () => {
+    const lineId = "5f0c6a52-6a3e-4b9f-9d3c-2b1a0e8f7d61";
+    const call = vi.fn().mockResolvedValue({ ...DEVICE_STATUS, lineId });
+    await expect(createTauriDeviceApi(call).selectLine(lineId)).resolves.toEqual({
+      ...DEVICE_STATUS,
+      lineId,
+    });
+    expect(call).toHaveBeenCalledWith("device_select_line", { lineId });
+  });
+
   it.each(DEVICE_ERROR_CODES)("keeps the shell's %s code", async (code) => {
     const call = vi.fn().mockRejectedValue(code);
     expect((await failure(createTauriDeviceApi(call).pairLocally("x"))).code).toBe(code);

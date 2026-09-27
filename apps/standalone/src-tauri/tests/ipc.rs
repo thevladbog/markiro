@@ -1,8 +1,9 @@
 //! The IPC contract between the webview and the shell, driven through
 //! Tauri's mock runtime: command names, argument names (`officeToken`),
 //! JSON shapes and bare-string rejections, exactly as `src/host/client.ts`,
-//! `src/host/device.ts` and `src/host/probe.ts` send and read them. A real
-//! `markiro-host` answers on 127.0.0.1.
+//! `src/host/device.ts`, `src/host/probe.ts`, `src/host/connection.ts` and
+//! `src/local/executor.ts` send and read them. A real `markiro-host` answers
+//! on 127.0.0.1.
 //!
 //! `host_local_pair` always targets port 45710 (the host on this computer),
 //! so these tests pair through `DeviceState` directly and then load the
