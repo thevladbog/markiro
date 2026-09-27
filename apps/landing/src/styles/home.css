@@ -657,10 +657,22 @@
   border-top: 1px solid var(--line);
 }
 
+/* The list numbers and the marks on the close-up share one badge, so each point finds its place. */
+.home-offline__number,
+.home-offline__marks li {
+  display: grid;
+  place-items: center;
+  min-width: 1.75rem;
+  height: 1.75rem;
+  padding: 0 0.375rem;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #0b1a11;
+  font: 600 0.75rem / 1 var(--font-mono);
+}
+
 .home-offline__number {
   flex: none;
-  color: var(--fg-3);
-  font: 500 0.75rem / 1.6 var(--font-mono);
 }
 
 .home-offline__points h3 {
@@ -674,30 +686,52 @@
   font: 400 0.9375rem / 1.45 var(--font-ui);
 }
 
-/* The sunset scene with the station's offline screen over its lower left. */
+/* A close-up of the station working offline: status pills, the shift counter and the journal. */
 .home-offline__visual {
-  position: relative;
-  padding-bottom: 7rem;
-}
-
-.home-offline__visual > picture {
-  display: block;
-}
-
-.home-offline__scene {
-  display: block;
-  width: calc(100% - 2.5rem);
-  height: auto;
-  margin-left: 2.5rem;
-  border-radius: 6px;
-}
-
-.home-offline__visual .screen-frame {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  width: 61%;
+  display: grid;
+  gap: 0.75rem;
   justify-items: start;
+  margin: 0;
+}
+
+.home-offline__closeup {
+  position: relative;
+  justify-self: stretch;
+}
+
+.home-offline__closeup img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 6px solid var(--surface-card);
+  border-radius: 6px;
+  box-shadow: 0 1.125rem 2.75rem rgb(0 0 0 / 35%);
+}
+
+/* The marks sit inside the frame's border, so their fractions map onto the picture itself. */
+.home-offline__marks {
+  position: absolute;
+  inset: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  pointer-events: none;
+}
+
+.home-offline__marks li {
+  position: absolute;
+  top: var(--y);
+  left: var(--x);
+  box-shadow: 0 0 0 3px var(--surface-page);
+}
+
+/* The mark's point is the edge it touches; the badge hangs off it and covers no text. */
+.home-offline__marks li[data-side="below"] {
+  transform: translateX(-50%);
+}
+
+.home-offline__marks li[data-side="left"] {
+  transform: translate(-100%, -50%);
 }
 
 .home-offline .home-caption {
@@ -814,6 +848,14 @@
   .home-offline,
   .home-traceability {
     padding-block: 4.5rem;
+  }
+
+  /* The close-up shrinks to half size on phones; the marks shrink with it. */
+  .home-offline__marks li {
+    min-width: 1.25rem;
+    height: 1.25rem;
+    padding: 0 0.1875rem;
+    font-size: 0.5625rem;
   }
 
   .home .home-film {

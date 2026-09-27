@@ -166,7 +166,6 @@ const RU = {
     offline: {
       caption: "СТАНЦИЯ БЕЗ СЕТИ",
       heading: ["Сеть может исчезнуть.", "Производство не должно."],
-      imageAlt: "Макет завода на закате",
       kicker: "02 / БЕЗ СЕТИ",
       lead: "Станция пишет операции в свой журнал и отправляет их на сервер, когда связь вернётся. Если записи с разных станций не сошлись, это видно в разделе «Конфликты».",
       points: [
@@ -177,7 +176,8 @@ const RU = {
           "Оператор видит, что происходит, и продолжает смену после сбоя.",
         ],
       ],
-      screenAlt: "Экран станции без связи с сервером",
+      screenAlt:
+        "Станция без связи с сервером: «Сервер: нет связи», «Синх. 7», счётчик смены и журнал с принятыми кодами",
     },
     traceability: {
       caption: "СТАНЦИЯ · КОНФЛИКТЫ",
@@ -426,7 +426,6 @@ const EN = {
     offline: {
       caption: "STATION WITHOUT A NETWORK",
       heading: ["The network may disappear.", "Production must not."],
-      imageAlt: "Scale model of a plant at sunset",
       kicker: "02 / WITHOUT A NETWORK",
       lead: "The station writes operations to its own journal and sends them to the server when the connection returns. If records from different stations disagree, they show up under Conflicts.",
       points: [
@@ -437,7 +436,8 @@ const EN = {
           "The operator sees what is happening and carries on after a failure.",
         ],
       ],
-      screenAlt: "Station screen without a server connection",
+      screenAlt:
+        "Station without a server connection: Server No connection, Sync 7, the shift counter and the journal of accepted codes",
     },
     traceability: {
       caption: "STATION · CONFLICTS",

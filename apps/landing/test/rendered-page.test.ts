@@ -1239,7 +1239,25 @@ describe("rendered landing page", () => {
       const offline = page?.querySelector("section#offline");
       expect(offline?.getAttribute("data-theme"), route).toBe("dark");
       expect(offline?.querySelectorAll(".home-offline__points li")).toHaveLength(3);
-      expect(offline?.querySelectorAll("img[alt]")).toHaveLength(2);
+      // One close-up of the offline station screen; each point of the list has a numbered mark on it.
+      expect(offline?.querySelectorAll("img[alt]")).toHaveLength(1);
+      const numbers = [...(offline?.querySelectorAll(".home-offline__number") ?? [])].map(
+        (element) => element.textContent?.trim(),
+      );
+      const marks = [...(offline?.querySelectorAll(".home-offline__marks li") ?? [])];
+      expect(
+        marks.map((mark) => mark.textContent?.trim()),
+        route,
+      ).toEqual(numbers);
+      for (const mark of marks) {
+        expect(["left", "below"], route).toContain(mark.getAttribute("data-side"));
+        const style = mark.getAttribute("style") ?? "";
+        for (const axis of ["x", "y"]) {
+          const value = Number(new RegExp(`--${axis}:\\s*([\\d.]+)%`, "u").exec(style)?.[1]);
+          expect(value, `${route} ${style}`).toBeGreaterThan(0);
+          expect(value, `${route} ${style}`).toBeLessThan(100);
+        }
+      }
       expect(
         page?.querySelector("section#traceability figure.screen-frame img[alt]"),
       ).not.toBeNull();
