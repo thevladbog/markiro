@@ -38,13 +38,74 @@ function collapse(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
+// Elements that start a new block on the page. The built HTML has no whitespace between tags,
+// so `<h3>Title</h3><p>Text</p>` arrives with nothing between the two texts.
+const BLOCK_TAGS = new Set([
+  "ADDRESS",
+  "ARTICLE",
+  "ASIDE",
+  "BLOCKQUOTE",
+  "DD",
+  "DIV",
+  "DL",
+  "DT",
+  "FIGCAPTION",
+  "FIGURE",
+  "FOOTER",
+  "H1",
+  "H2",
+  "H3",
+  "H4",
+  "H5",
+  "H6",
+  "HEADER",
+  "LI",
+  "OL",
+  "P",
+  "PICTURE",
+  "PRE",
+  "SECTION",
+  "TABLE",
+  "TD",
+  "TH",
+  "TR",
+  "UL",
+]);
+
+function isElement(node: Node): node is Element {
+  return node.nodeType === node.ELEMENT_NODE;
+}
+
+// Two elements side by side (spans of a card, links in a row) or a block next to anything are
+// separate texts on the page; a text node next to an inline element (H<sub>2</sub>O) is not.
+function separated(previous: Node, next: Node): boolean {
+  if (isElement(previous) && isElement(next)) return true;
+  return [previous, next].some((node) => isElement(node) && BLOCK_TAGS.has(node.tagName));
+}
+
+function inlineChildren(element: Element, baseUrl: string): string {
+  const children = [...element.childNodes];
+  return children
+    .map((child, index) => {
+      const text = inline(child, baseUrl);
+      const previous = children[index - 1];
+      return previous !== undefined && separated(previous, child) ? ` ${text}` : text;
+    })
+    .join("");
+}
+
 function inline(node: Node, baseUrl: string): string {
   if (node.nodeType === node.TEXT_NODE) return node.textContent ?? "";
-  if (node.nodeType !== node.ELEMENT_NODE) return "";
-  const element = node as Element;
+  if (!isElement(node)) return "";
+  const element = node;
   if (isSkipped(element)) return "";
   if (element.tagName === "BR") return " ";
-  const inner = [...element.childNodes].map((child) => inline(child, baseUrl)).join("");
+  const inner = inlineChildren(element, baseUrl);
+  // A heading inside a list item or a card keeps its weight as bold text.
+  if (/^H[1-6]$/.test(element.tagName)) {
+    const text = collapse(inner);
+    return text.length > 0 ? `**${text}**` : "";
+  }
   if (element.tagName === "A") {
     const href = element.getAttribute("href");
     const text = collapse(inner);
@@ -79,7 +140,7 @@ function walk(element: Element, blocks: string[], baseUrl: string): void {
     const tag = child.tagName;
     if (/^H[1-6]$/.test(tag)) {
       const level = Number(tag.slice(1));
-      const text = collapse(inline(child, baseUrl));
+      const text = collapse(inlineChildren(child, baseUrl));
       if (text.length > 0) blocks.push(`${"#".repeat(level)} ${text}`);
       continue;
     }
