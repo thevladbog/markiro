@@ -3786,17 +3786,21 @@ import { hostRevisionSchema, hostStatusSchema, type HostStatus } from "./protoco
 export const HOST_STATUS_EVENT = "standalone://host-status";
 export const HOST_REVISION_EVENT = "standalone://host-revision";
 
+/**
+ * Function-typed properties, not methods: `watch` destructures them, and
+ * `@typescript-eslint/unbound-method` refuses to destructure methods.
+ */
 export interface ConnectionHandlers {
   /** The current status first, then every newer one. */
-  onStatus(status: HostStatus): void;
+  onStatus: (status: HostStatus) => void;
   /** The host committed revision `rev`: time to sync reference data. */
-  onRevision(rev: number): void;
+  onRevision: (rev: number) => void;
 }
 
 /** The link to the host, as the shell's connection task reports it. */
 export interface ConnectionApi {
   /** Follow the link until the returned function is called. */
-  watch(handlers: ConnectionHandlers): Promise<() => void>;
+  watch: (handlers: ConnectionHandlers) => Promise<() => void>;
 }
 
 type Invoke = (command: string, args: Record<string, unknown>) => Promise<unknown>;
