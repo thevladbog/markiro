@@ -1,5 +1,7 @@
 # US-06 — Trace graph, search and completeness — Design Spec
 
+> Superseded technical draft. Use the [2026-09-27 current US-06 design](2026-09-27-us-06-current-trace-search-readiness-design.md) for implementation and the revised [U.S. design brief 04](../../design-briefs/us/04-trace-and-readiness.md) for the office presentation. The older options below are preserved as design history, not current instructions.
+
 > Revised 2026-09-04: read the [shared MVP contract](../../us/mvp-contract.md) first. It resolves cross-slice scope and safety rules and supersedes conflicting draft recommendations below. Design only; implementation is not claimed.
 
 **Date:** 2026-09-03

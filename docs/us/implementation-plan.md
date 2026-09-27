@@ -126,6 +126,8 @@ The requirement matrix owns per-requirement status and slice assignments. A boun
 
 Slice status values: Not started, In progress, Done. A slice is Done only when its Definition of Done from MUS-001 §10.2 is met and its verification report (see [acceptance.md](acceptance.md)) is filed.
 
+The [current US-06 design](../superpowers/specs/2026-09-27-us-06-current-trace-search-readiness-design.md) supersedes its earlier draft. Its P0 phases are server current trace, search/lot card, concrete readiness findings and U.S. office UI; TRC-007 and TRC-010 remain P1. This design checkpoint does not change the slice's implementation status.
+
 ### US-05 Shipping office UI checkpoint — 2026-09-27
 
 The isolated U.S. Events workspace now opens Shipping drafts and saved records. Writers select

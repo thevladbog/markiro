@@ -1,16 +1,14 @@
 # U.S. Design Brief 04 — Search, Lot Card, Trace Graph and Readiness
 
-> Revised 2026-09-04: read the [shared MVP contract](../../us/mvp-contract.md) first. It resolves cross-slice scope and safety rules and supersedes conflicting draft recommendations below. Design only; implementation is not claimed.
+> Revised 2026-09-27 to match the [current US-06 design](../../superpowers/specs/2026-09-27-us-06-current-trace-search-readiness-design.md) and the [shared MVP contract](../../us/mvp-contract.md). Design only; implementation is not claimed.
 
 > Fourth brief of the U.S. series. Office mode, desktop-first 1440px, adaptive down to 1024.
 > Users: the QA / Traceability Manager (runs traces, watches readiness), the Auditor / Read-only
 > user (reviews history), the Owner / Tenant Admin (readiness on the dashboard) and the three
 > operators (look up a lot before recording an event). English primary, U.S. Spanish secondary;
-> light + dark. This is a **delta to RU brief 03 §5 (History & codes)**: the U.S. equivalent of
-> the code page and the aggregation tree, drawn for lots and events instead of marking codes
-> and boxes. Do not redesign the RU code search; reuse its lookup box, card and left-border
-> timeline. Grounded in slice spec US-06 and the lot card notes of US-02; open UI choices are
-> collected at the end.
+> light + dark. Build inside the isolated U.S. workspace, alongside its existing Events and Lots
+> views. Do not import RU code-search, its routes, or RU translation requirements. Reuse shared
+> UI components and tokens; keep record navigation tied to exact U.S. event revisions.
 
 ## Purpose
 
@@ -18,37 +16,42 @@ After brief 03 the tenant holds lots, three kinds of finalized events and geneal
 recall, an auditor or a mock trace request asks four questions: where did this output lot come
 from, where did this input lot go, which lot carries TLC X / BOL-0916-H / this SSCC, and what
 is still missing before we can answer. The 24-hour trace request workflow (brief 05) starts
-from a search on these screens, and the P1 performance targets, measured but not gating P0, are: a trace graph in under
-2 s, an exact lookup in under 1 s. Everything here is read-only over brief 03's data.
+from a search on these screens. The P1 performance targets, measured but not gating P0, are a
+trace graph in under 2 s and an exact lookup in under 1 s. These US-06 views are read-only.
 
 ## Design principle: one trace result
 
-A trace is **one query result** — nodes (lots and locations), edges (received from, genealogy,
-shipped to, each with quantity and unit), the events behind them, the events **excluded** with a
-reason (void, superseded, draft), and provenance. The graph draws nodes + edges; the table
-lists edges; the counts are therefore identical by construction, and both views show the same
-metric strip (nodes / edges / excluded). If the two ever disagree, the UI must show it, not
-hide it — an auditor will compare them.
+A current trace is **one server result** — lot, location, Transformation-event and non-FTL
+material nodes; exact frozen-line edges; and provenance. Receiving connects a source location
+to its lot, Transformation connects input lines through an event node to output lines, and
+Shipping connects a lot to its recipient. The graph draws nodes and edges; the table lists the
+same edge array, so counts match by construction. Void, amended, superseded and draft revisions
+are **not** drawn as current evidence: show them in a separate Excluded/history section with
+reason and revision links.
 
-Two rules follow. **Provenance everywhere**: every row, node and number carries the event
-number and revision it came from, as a link. **Readiness is data completeness, never
-compliance**: the dashboard score is labelled "Data readiness" with the hint "Explanatory only,
-not a compliance score", findings are missing or inconsistent elements, and product coverage
-remains a manual review that the screen never decides for the user.
+Two rules follow. **Provenance everywhere**: every event-derived row and number links to the
+event, revision and frozen line that supplied it; an independent lot identity links to its lot
+record. **Readiness reports evidence gaps, never compliance**: P0 shows concrete findings and
+counts, not a percentage or grade; product coverage remains a manual review.
 
 ## Screens
 
 ### 1. Search
 
-Route `Traceability → Search`. Top: an **exact lookup box** (monospace) for a TLC, a reference
-number, an SSCC (scanned `(00)` prefix stripped) or a lot id; the server classifies the input
-and answers an exact hit in under 1 s. Below: a filter row — product, TLC list (chips), **TLC
+U.S. workspace view `Traceability → Search`. Top: an **exact lookup box** (monospace) for a TLC,
+reference number, SSCC (scanned `(00)` prefix stripped) or lot ID. An ambiguous value can match
+multiple types or multiple source-qualified TLCs: list every legitimate hit with its match
+reason rather than silently redirecting to the first one. The under-1-second seed target is
+measured and reported in P0, not a P0 gate. Below: a filter row — product, TLC list (chips), **TLC
 range** with the visible note "text order (A–Z), not numeric", date range, CTE type, location,
 reference type + number, SSCC, lot status.
 
 Results are lot rows: TLC (mono), product snapshot summary, source, status chip, chain counts
 (Receiving 1 · Transformation 1 · Shipping 1), first / last event date, "matched by" chips
-(TLC, reference, SSCC, product, location, date). Row click opens the lot card. Header action
+(TLC, reference, SSCC, product, location, date). Equal TLCs show their distinct sources in
+the result rows. An SSCC hit names current or historical link status, timestamps and synthetic
+or existing-record provenance; it never implies a physical scan or pack. Row click opens the
+lot card. Header action
 "Create trace request from these results" (QA capability) hands the applied filters to brief
 05 as a scope summary — no second search there.
 
@@ -64,25 +67,25 @@ paging at 50 per page; the TLC-range filter open with its note.
 
 ### 2. Lot card
 
-Route `/traceability/lots/:id`. U.S. brief 02 draws the header and body groups; this brief
-adds the trace actions and the panels, and restates the header so the mockup is coherent.
+Lot detail inside the U.S. workspace. U.S. brief 02 draws the header and body groups; this
+brief adds the trace actions and panels, and restates the header so the mockup is coherent.
 **Header**:
 TLC (mono), status chip (Active / Consumed / Shipped / Quarantined / Recalled / Archived, plus
 the derived "Partially shipped" label), assignment basis (Imported / Transformation / Exempt
 supplier receipt), product description snapshot, TLC source (location card or reference),
 origin event link, balance ("0.000 of 100.000 case remaining"; "balance unknown" for manual
-lots), production / expiry dates marked operational. Actions: **Trace backward**, **Trace
+lots), and production / expiry dates when recorded (operational, P1). Actions: **Trace backward**, **Trace
 forward**, Change status (reason required), Link cases (P0 server-side only).
 
 **Panels**, each with a provenance column (event number + revision, linked):
 
-| Panel        | Content                                                                                                                                                                                      |
-| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| CTE timeline | Left-border list as on the RU code page: date, type, event number, revision, status, location, quantity; amended chains collapsed under the current revision; void events greyed with reason |
-| Documents    | Type, number as snapshotted, event, link                                                                                                                                                     |
-| Cases        | Active link count and SSCC rows; synthetic demo / existing record provenance, manual / demo seed link origin, audited history and unlink reason (P0 server-side; no Station action)          |
-| Findings     | Completeness findings for this lot: severity chip with text, field, message, deep link; "No gaps found" when clean                                                                           |
-| Genealogy    | Inputs and outputs as lot links (2 inputs for the demo output; 1 output for each input)                                                                                                      |
+| Panel        | Content                                                                                                                                                                             |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CTE timeline | Current finalized entries: date, type, event number, revision, location and exact line quantity; an adjacent expandable history lists draft/amended/void revisions with reason      |
+| Documents    | Type, number as snapshotted, event, link                                                                                                                                            |
+| Cases        | Active link count and SSCC rows; synthetic demo / existing record provenance, manual / demo seed link origin, audited history and unlink reason (P0 server-side; no Station action) |
+| Findings     | Completeness findings for this lot: severity chip with text, field, message, deep link; "No gaps found" when clean                                                                  |
+| Genealogy    | Inputs and outputs as lot links (2 inputs for the demo output; 1 output for each input)                                                                                             |
 
 Demo: `NRF-260915-APL01` — Transformation, source North River Fresh Foods LLC (Portland, OR),
 Fresh-Cut Apple Snack Cups, Shipped, 0 of 100 case; timeline `TRN-26-0001` rev 1 09/15/2026
@@ -98,44 +101,43 @@ generic-profile variant (Scenario B banner, "lot source" instead of "TLC source"
 
 ### 3. Trace view
 
-Route `/traceability/lots/:id/trace`. Controls: direction segmented control **Backward |
-Forward | Both** (text labels), depth (default 16), "include drafts" toggle (operators only,
-off by default, never in export-ready views). A metric strip — nodes, edges, excluded — sits
+Trace detail inside the U.S. workspace. Controls: direction segmented
+control **Backward | Forward | Both** (text labels) and depth (default 16). No draft toggle
+alters the current graph; drafts are available only in Excluded/history. A metric strip — nodes,
+edges, excluded — sits
 above the **Graph | Table** tabs and reads the same on both.
 
-**Graph** — a hand-drawn layered SVG, no graph library, sized for small graphs: layers by depth
-from the root, nodes ordered deterministically within a layer — lot nodes by TLC then id,
-location nodes by kind, then name, then id — straight edges. Lot nodes are rounded
-rectangles (TLC mono, product short name, status chip); location nodes are outlined hexagons
-with a pin glyph (business name, city, state). Edge labels: quantity + unit and the event
-number. Excluded events (void, superseded) are drawn greyed and dashed with the reason in a
-tooltip and in the table. Shapes and glyphs carry meaning; color never alone. Selecting a table
-row highlights the node; arrow keys through the table walk the graph (keyboard navigation of
-the graph is the table). The SVG has `role="img"`, an `aria-label` with the counts and a
-visually hidden list of nodes.
+**Graph** — a deterministic layered view sized for small graphs: lot, location, Transformation
+event and non-FTL material nodes have distinct shapes and text labels. Exact input quantities
+label input-lot/material → Transformation edges; exact output quantities label Transformation →
+output-lot edges. Direct lot→lot genealogy links, if shown as navigation, have **no quantity**:
+2→2 records do not allocate each input across each output. Receiving and Shipping edges use
+their own frozen line quantities. Shapes and glyphs carry meaning; color never alone. Selecting
+a table row highlights its edge; the table is the full keyboard-accessible representation.
+The SVG has `role="img"`, an `aria-label` with counts and a visually hidden node list.
 
-**Table** — one row per edge: from, to, kind (received from / genealogy / shipped to),
-quantity + unit, event number, revision, status, date, provenance link.
+**Table** — one row per current edge: from, to, kind (received from / Transformation input /
+Transformation output / shipped to), exact quantity + unit, event number, revision, line,
+date and provenance link. Excluded revisions are in a separate table.
 
-Demo backward from `NRF-260915-APL01`: nodes Orchard Slice Supply LLC (location),
-`OSS-260914-A1`, `OSS-260914-A2`, `NRF-260915-APL01`; edges Orchard → A1 received from 500 lb
-`REC-26-0001`, Orchard → A2 500 lb `REC-26-0001`, A1 → APL01 genealogy 500 lb `TRN-26-0001`,
-A2 → APL01 500 lb; strip 4 / 4 / 0. Forward from `OSS-260914-A1`: A1 → APL01 (`TRN-26-0001`),
-APL01 → Harbor Market Distribution Center shipped to 100 case `SHP-26-0001`; strip 3 / 2 / 0.
+Demo backward from `NRF-260915-APL01`: Orchard → A1 and A2 Receiving lines, A1 and A2 →
+`TRN-26-0001` input lines, then `TRN-26-0001` → APL01 output line. The two `500 lb` input
+values and `100 case` output value stay on their respective lines; no invented conversion or
+per-pair allocation appears. Forward from A1 continues through the same event node to APL01
+and its Shipping recipient. Node/edge strip values come from the returned graph, not mockup
+constants.
 
-States to draw: backward; forward; both (root in the middle); **no genealogy yet** (a freshly
-received lot: root only, "This lot has not been transformed or shipped yet"); with an excluded
-void event (greyed, "Excluded: void — reason"); with a superseded revision excluded; **depth
-limit** ("Stopped at depth 16 — 3 lots not expanded", with a deeper-depth action); drafts
-included with a warning strip; loading ("Building trace…" progress line, target under 2 s, no
-spinner-only); timeout ("The trace took too long — try a smaller depth"); error; not found.
+States to draw: backward; forward; both; **no genealogy yet**; separate excluded void,
+superseded and draft history with reasons; **traversal limit** with returned counts and an
+"incomplete" warning on both tabs; **origin gap** as a different finding; loading; timeout
+as a retryable error rather than a successful partial graph; storage error; not found.
 
 ### 4. Readiness dashboard
 
-Route `Traceability → Readiness`. Metric strip: **Data readiness** (hint "Explanatory only,
-not a compliance score"), checks run, errors, warnings, infos; scope line "last 24 months"
-with a date window, product and lot filters. Group-by select **CTE | Product | Partner |
-Severity**; a grouped table with severity chip (text), CTE, product, partner, field, message
+U.S. workspace view `Traceability → Readiness`. Metric strip: **Data readiness** with records
+checked, errors, warnings and infos — **no percentage or score in P0**. Scope line "last 24 months"
+with a date window, product and lot filters. Group-by select **CTE | Product | Severity** in
+P0; a grouped table with severity chip (text), CTE, product, field, message
 and a record link (event number + revision, or lot TLC) — every gap deep-links to the event
 or lot it belongs to. An info alert states that coverage status remains a manual review.
 
@@ -148,8 +150,8 @@ elements missing". A second mock: `REC-26-0001` rev 1 · Line 2 · "TLC source l
 reference is missing" (error); lot `OSS-260914-A3` · "created by a void event" (warning);
 product Fresh-Cut Apple Snack Cups · "coverage status unknown — review required" (error).
 
-States to draw: empty ("Nothing to check yet" when there are no lots); all clear; findings
-grouped by each of the four group-bys; filtered to one product; date window changed; loading
+States to draw: empty ("Nothing to check yet" when there are no lots); no gaps in the displayed
+scope; findings grouped by each P0 group-by; filtered to one product; date window changed; loading
 ("Checking 3 events, 3 lots…"); error with retry; generic-profile variant (Scenario B banner,
 FTL rules absent); P1 partner group present.
 
@@ -165,15 +167,16 @@ TLC OSS-260914-A1 · source disagrees                                  Error
   Open lot · Open event
 ```
 
-When the later value comes from an amended revision, the severity is Info and the card cites
-the amendment: "changed in REC-26-0001 rev 2 — reason: supplier corrected the source". There
-is no "fix" button; corrections go through the amendment flow of brief 03. Other cross-record
-rules (lot without events, output lot without genealogy, broken event–lot link, incomplete
+An unresolved mismatch in the **current** chain remains Error even when a revision number is
+greater than one. A separately resolved historical discrepancy may be Info and cite the
+amendment reason; revision number alone never downgrades the current finding. There is no
+"fix" button; corrections go through the owning event or permitted lot-source correction
+flow. Other cross-record rules (lot without events, output lot without genealogy, broken event–lot link, incomplete
 location snapshot, missing or zero quantity, missing reference document) are one-line
 findings: field, message, deep link, and the rule code as a small mono tag for support.
 
-States to draw: error; info with amendment cited; the same finding as a row in the readiness
-table and in the lot card findings panel.
+States to draw: current error; resolved historical info with amendment cited; the same current
+finding as a row in the readiness table and in the lot card findings panel.
 
 ## Cross-cutting notes
 
@@ -192,16 +195,17 @@ table and in the lot card findings panel.
   Provenance distinguishes `synthetic_demo` from `existing_record`, independently from
   `manual`/`demo_seed` link origin. Read-only users have no mutation controls. An origin gap
   retains active links and unlink but blocks new links. No edit affordances on events here.
-- **Wording.** "Data readiness", "data completeness", "required elements", "gaps"; nothing
-  from the not-allowed column of `docs/us/limitations.md`. Generic-profile screens carry the
+- **Wording.** "Data readiness", "data completeness", "required elements", "gaps"; no P0
+  percentage or grade and nothing from the not-allowed column of `docs/us/limitations.md`.
+  Generic-profile screens carry the
   Scenario B statement ("FTR applicability not assessed in this profile; general lot traceability only").
 - **Formats.** Dates MM/DD/YYYY in tenant time; quantities decimal + explicit unit; TLC and
   SSCC always monospace.
 - **Spanish strings.** Check "Estado de los datos", "Rastrear hacia atrás / adelante", "Excluido:
   anulado", "Faltan datos obligatorios" in the strip, the segmented
   control and the finding card at 1024.
-- **Dark mode.** Graph edges, edge labels and greyed excluded nodes need dedicated tokens; the
-  SVG must use the same chip tokens as the rest of the page.
+- **Dark mode.** Graph edges and edge labels need dedicated tokens; excluded revisions use
+  readable history-row styles, not dashed current nodes. The SVG uses shared chip tokens.
 - **Accessibility (NFR-012).** Filters are labelled controls; the table is the accessible
   representation of the graph; severity and status are text + icon; focus is visible on nodes
   reached through the table.
@@ -220,25 +224,18 @@ table and in the lot card findings panel.
 - **More CTE kinds** add edge kinds (harvested at, cooled at): one more edge style each, the
   same table.
 
-## Questions for the designer
+## Resolved layout decisions and remaining detail
 
-1. Screen 3: Graph | Table as tabs (spec) or side by side at 1440 and tabbed below it?
-2. Screen 3: lot node content — TLC only with a tooltip, or TLC + product short name? Decide
-   the truncation rule for 120-character TLCs.
-3. Screen 3: locations as nodes (spec) or as swimlane headers grouping lots by site?
-4. Screen 3: "Both" — one graph with the root in the middle, or backward and forward stacked?
-5. Screen 3: excluded void events drawn greyed in place, or removed from the drawing and kept
-   only in the table and the excluded count?
-6. Screen 4: score as a percentage ring or as "N of M checks passed" only? A ring may read as
-   a grade, which the wording rules want to avoid.
-7. Screens 2 and 4: does a finding deep link open the event page or a side panel showing just
-   the relevant KDE group?
-8. Screen 1: rich lot cards or dense rows as the default result layout, and is a toggle worth
-   it?
+Graph | Table are tabs over one result; excluded history is a separate section, not dashed
+current evidence. Locations and Transformation events are nodes. P0 readiness uses counts and
+findings, not a percentage ring. Search defaults to dense, source-qualified rows. The
+implementation plan may settle responsive truncation and whether a provenance link focuses an
+inline section or opens the existing event detail, but it must preserve the exact revision and
+line in either presentation.
 
 ## Incomplete trace state
 
-A depth-limited result shows “Trace incomplete: traversal limit reached” with the returned counts; graph and table show the same warning. It cannot seed an export-ready package until the full requested scope is available. TLC search can return several source-qualified matches. SSCC search and Cases panels are P0 under MUS-CR-001. Show synthetic linkage provenance and audited link/unlink history; no scan/print success is implied. Zero case links is not a missing KDE, but fails the separate 100-case demo acceptance.
+A depth-limited result shows “Trace incomplete: traversal limit reached” with the returned counts; graph and table show the same warning. A timeout or storage inconsistency instead shows a retryable error, never a partial-success graph. A limited trace cannot seed an export-ready package until the full requested scope is available. TLC search can return several source-qualified matches. SSCC search and Cases panels are P0 under MUS-CR-001. Show synthetic linkage provenance and audited link/unlink history; no scan/print success is implied. Zero case links is not a missing KDE, but fails the separate 100-case demo acceptance.
 
 ## Available-records handoff — 2026-09-05
 
