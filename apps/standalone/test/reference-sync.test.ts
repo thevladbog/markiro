@@ -4,13 +4,20 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { ChangeItem, ChangesResponse } from "../src/host/protocol.js";
 import { LocalDbError, type LocalExecutor, type LocalStatement } from "../src/local/executor.js";
-import { createSyncScheduler, ENTITY_SET, syncReferences } from "../src/local/reference-sync.js";
+import {
+  createSyncScheduler,
+  ENTITY_SET,
+  SyncFeedError,
+  syncReferences,
+} from "../src/local/reference-sync.js";
 import { HOST_ID } from "./support/fixtures.js";
 import { openLocalDb } from "./support/local-db.js";
 
 const OTHER_HOST = "0e2b1f7a-6c1d-4b8e-9f3a-2d4c5b6a7e8f";
 const LINE_1 = "5f0c6a52-6a3e-4b9f-9d3c-2b1a0e8f7d61";
 const LINE_2 = "0b7e7dcb-3f56-4c43-9a4b-1f0b3b3f8a21";
+/** When a test's pages are applied, on this computer's clock. */
+const SEEN_AT = 1_790_000_000_000;
 
 const ORG: ChangeItem = {
   entity: "org_profile",
@@ -41,6 +48,11 @@ function tombstone(id: string, rev: number): ChangeItem {
   return { entity: "lines", id, rev, deleted: true };
 }
 
+/** A line whose `archived` is not a boolean: it fails its schema. */
+function brokenLine(id: string, rev: number): ChangeItem {
+  return { entity: "lines", id, rev, deleted: false, data: { name: "Линия 1", archived: "да" } };
+}
+
 function page(rev: number, items: ChangeItem[], more = false, hostId = HOST_ID): ChangesResponse {
   return { hostId, rev, hasMore: more, items };
 }
@@ -63,6 +75,12 @@ function tables(db: DatabaseSync) {
     lines: rows("SELECT id, name, archived, rev FROM ref_lines ORDER BY name"),
     state: rows("SELECT key, value FROM sync_state ORDER BY key"),
   };
+}
+
+/** The quarantined records as plain rows. */
+function quarantine(db: DatabaseSync) {
+  const sql = "SELECT entity, id, rev, reason, seen_at FROM sync_quarantine ORDER BY entity, id";
+  return Array.from(db.prepare(sql).all(), (row) => ({ ...row }));
 }
 
 function state(lastRev: number, hostId = HOST_ID) {
@@ -149,10 +167,10 @@ function heldOps(executor: LocalExecutor) {
 }
 
 describe("ENTITY_SET", () => {
-  it("stays org_profile,site,lines", () => {
-    // Derived from the entity table; pinned so a build cannot update one and
-    // forget the other.
-    expect(ENTITY_SET).toBe("org_profile,site,lines");
+  it("names the kept entities and the version of their records", () => {
+    // Derived from the entity table and `SYNC_SCHEMA_VERSION`; pinned so a
+    // build cannot change one and forget the other.
+    expect(ENTITY_SET).toBe("org_profile,site,lines;v2");
   });
 });
 
@@ -165,6 +183,7 @@ describe("reference sync", () => {
     await expect(syncReferences({ changes, local: executor, hostId: HOST_ID })).resolves.toEqual({
       kind: "synced",
       rev: 42,
+      quarantined: 0,
     });
     expect(changes).toHaveBeenCalledWith(0);
     expect(tables(db)).toEqual({
@@ -273,6 +292,7 @@ describe("reference sync", () => {
     await expect(syncReferences({ changes, local: executor, hostId: HOST_ID })).resolves.toEqual({
       kind: "synced",
       rev: 42,
+      quarantined: 0,
     });
     expect(changes.mock.calls).toEqual([[0], [41]]);
     expect(tables(db).lines).toEqual([{ id: LINE_1, name: "Линия 1", archived: 0, rev: 42 }]);
@@ -297,9 +317,10 @@ describe("reference sync", () => {
     const recorded = counting(executor);
     await syncReferences({ changes, local: recorded.executor, hostId: HOST_ID });
     expect(tables(db)).toEqual(before);
-    // The guard passed (0: `host_id` still matched) and the three upserts
-    // found nothing newer; only the sync state was written.
-    expect(recorded.batches).toEqual([[0, 0, 0, 0, 3]]);
+    // The guard passed (0: `host_id` still matched), the three upserts found
+    // nothing newer and nothing was quarantined to lift; only the sync state
+    // was written.
+    expect(recorded.batches).toEqual([[0, 0, 0, 0, 0, 3]]);
   });
 
   it("deletes by tombstone, but never a record newer than the tombstone", async () => {
@@ -322,6 +343,7 @@ describe("reference sync", () => {
     await expect(syncReferences({ changes, local: executor, hostId: HOST_ID })).resolves.toEqual({
       kind: "synced",
       rev: 12,
+      quarantined: 0,
     });
     expect(changes.mock.calls).toEqual([[20], [0]]);
     expect(tables(db).lines).toEqual([
@@ -356,9 +378,9 @@ describe("reference sync", () => {
       0: page(8, [line(LINE_1, 8, "Линия 1")], true),
       8: page(5, []),
     });
-    await expect(syncReferences({ changes, local: executor, hostId: HOST_ID })).rejects.toThrow(
-      /went back twice/,
-    );
+    const run = syncReferences({ changes, local: executor, hostId: HOST_ID });
+    await expect(run).rejects.toThrow(/went back twice/);
+    await expect(run).rejects.toBeInstanceOf(SyncFeedError);
     // The second rollback's page (empty, at rev 5) is caught before any
     // transaction: the copies still hold exactly what the first restart
     // applied (page 8's single line), untouched by the second.
@@ -383,9 +405,9 @@ describe("reference sync", () => {
       if (calls > 5) throw new Error("the loop did not stop");
       return page(since, [], true);
     });
-    await expect(syncReferences({ changes, local: executor, hostId: HOST_ID })).rejects.toThrow(
-      /no progress/,
-    );
+    const run = syncReferences({ changes, local: executor, hostId: HOST_ID });
+    await expect(run).rejects.toThrow(/no progress/);
+    await expect(run).rejects.toBeInstanceOf(SyncFeedError);
     // The guard's own message, not the bound's: proves the guard stopped the
     // loop, not the counter. Caught on the first page, not after looping.
     expect(changes).toHaveBeenCalledTimes(1);
@@ -464,7 +486,7 @@ describe("reference sync", () => {
         local: executor,
         hostId: OTHER_HOST,
       }),
-    ).resolves.toEqual({ kind: "synced", rev: 20 });
+    ).resolves.toEqual({ kind: "synced", rev: 20, quarantined: 0 });
 
     // A's late page arrives, with a *higher* row revision for the same org id
     // ('1' on every host): unguarded, `excluded.rev > ref_org.rev` would let
@@ -565,7 +587,7 @@ describe("reference sync", () => {
 
     // B's page lands second.
     resolveB?.(page(20, [line(LINE_2, 20, "Линия B")], false, OTHER_HOST));
-    await expect(runB).resolves.toEqual({ kind: "synced", rev: 20 });
+    await expect(runB).resolves.toEqual({ kind: "synced", rev: 20, quarantined: 0 });
     expect(tables(db)).toEqual({
       org: [],
       site: [],
@@ -643,7 +665,10 @@ describe("reference sync", () => {
     // page succeeds — the stale rival's first sync never got a chance to
     // corrupt it, even though both started from the very same empty state.
     resolveNew?.(page(20, [line(LINE_2, 20, "Линия нового хоста")], false, OTHER_HOST));
-    await expect(runNew).resolves.toEqual({ kind: "synced", rev: 20 });
+    // Its closing read of the quarantine count is held like every read.
+    await vi.waitFor(() => expect(held.readCount()).toBe(1));
+    held.releaseRead();
+    await expect(runNew).resolves.toEqual({ kind: "synced", rev: 20, quarantined: 0 });
     expect(tables(db)).toEqual({
       org: [],
       site: [],
@@ -687,21 +712,6 @@ describe("reference sync", () => {
     expect(tables(db).state).toEqual(state(20));
   });
 
-  it("applies nothing of a page with an unreadable record, even with a deferred wipe pending", async () => {
-    const { db, executor } = openLocalDb();
-    await syncedTwoLines(executor);
-    // A build with a different entity set arms a deferred wipe for the next page.
-    db.prepare("UPDATE sync_state SET value = 'org_profile,lines' WHERE key = 'entity_set'").run();
-    const before = tables(db);
-    const broken: ChangeItem = { ...SITE, data: { badgeSalt: "short", boxBlockSize: 2000 } };
-    const changes = feed({ 0: page(42, [line(LINE_1, 40, "Линия 1"), broken]) });
-    await expect(syncReferences({ changes, local: executor, hostId: HOST_ID })).rejects.toThrow(
-      /site record 1/,
-    );
-    // The armed wipe never ran: the bad record fails before any transaction.
-    expect(tables(db)).toEqual(before);
-  });
-
   it("skips entities this build does not keep", async () => {
     const { db, executor } = openLocalDb();
     const operator: ChangeItem = {
@@ -715,7 +725,239 @@ describe("reference sync", () => {
     await expect(syncReferences({ changes, local: executor, hostId: HOST_ID })).resolves.toEqual({
       kind: "synced",
       rev: 42,
+      quarantined: 0,
     });
+    expect(tables(db).lines).toEqual([{ id: LINE_1, name: "Линия 1", archived: 0, rev: 42 }]);
+    // Records of another build's entities are not this build's to judge.
+    expect(quarantine(db)).toEqual([]);
+  });
+});
+
+describe("sync quarantine", () => {
+  it("quarantines a record that fails its schema and applies the rest of the page", async () => {
+    const { db, executor } = openLocalDb();
+    const broken: ChangeItem = { ...SITE, data: { badgeSalt: "short", boxBlockSize: 2000 } };
+    const changes = feed({ 0: page(42, [ORG, broken, line(LINE_1, 42, "Линия 1")]) });
+    await expect(
+      syncReferences({ changes, local: executor, hostId: HOST_ID, now: () => SEEN_AT }),
+    ).resolves.toEqual({ kind: "synced", rev: 42, quarantined: 1 });
+    expect(tables(db).org).toHaveLength(1);
+    expect(tables(db).site).toEqual([]);
+    expect(tables(db).lines).toEqual([{ id: LINE_1, name: "Линия 1", archived: 0, rev: 42 }]);
+    expect(tables(db).state).toEqual(state(42));
+    expect(quarantine(db)).toEqual([
+      {
+        entity: "site",
+        id: "1",
+        rev: 41,
+        reason: "badgeSalt: invalid_format; badgeSalt: too_small; palletBlockSize: invalid_type",
+        seen_at: SEEN_AT,
+      },
+    ]);
+  });
+
+  it("fails closed: an unreadable record newer than the copy deletes it, an older one does not", async () => {
+    const { db, executor } = openLocalDb();
+    await syncedTwoLines(executor);
+    const changes = feed({ 20: page(30, [brokenLine(LINE_1, 25), brokenLine(LINE_2, 15)]) });
+    await expect(
+      syncReferences({ changes, local: executor, hostId: HOST_ID, now: () => SEEN_AT }),
+    ).resolves.toEqual({ kind: "synced", rev: 30, quarantined: 2 });
+    // LINE_1 was at revision 10, older than its unreadable 25: it goes.
+    // LINE_2 was at 20, newer than its unreadable 15: it stays.
+    expect(tables(db).lines).toEqual([{ id: LINE_2, name: "Линия 2", archived: 0, rev: 20 }]);
+    expect(tables(db).state).toEqual(state(30));
+    expect(quarantine(db)).toEqual([
+      { entity: "lines", id: LINE_2, rev: 15, reason: "archived: invalid_type", seen_at: SEEN_AT },
+      { entity: "lines", id: LINE_1, rev: 25, reason: "archived: invalid_type", seen_at: SEEN_AT },
+    ]);
+  });
+
+  it("lifts a quarantine for a newer readable record or tombstone, never for an older one", async () => {
+    const { db, executor } = openLocalDb();
+    const broken: ChangeItem = { ...SITE, data: { badgeSalt: "short", boxBlockSize: 2000 } };
+    await syncReferences({
+      changes: feed({ 0: page(42, [broken, brokenLine(LINE_1, 42)]) }),
+      local: executor,
+      hostId: HOST_ID,
+      now: () => SEEN_AT,
+    });
+    expect(quarantine(db)).toHaveLength(2);
+
+    // The host fixed the site; a tombstone older than the quarantined line
+    // changes nothing.
+    await expect(
+      syncReferences({
+        changes: feed({ 42: page(50, [{ ...SITE, rev: 45 }, tombstone(LINE_1, 40)]) }),
+        local: executor,
+        hostId: HOST_ID,
+      }),
+    ).resolves.toEqual({ kind: "synced", rev: 50, quarantined: 1 });
+    expect(tables(db).site).toEqual([
+      {
+        id: "1",
+        badge_salt: "AAECAwQFBgcICQoLDA0ODw==",
+        box_block_size: 2000,
+        pallet_block_size: 200,
+        rev: 45,
+      },
+    ]);
+    expect(quarantine(db)).toEqual([
+      { entity: "lines", id: LINE_1, rev: 42, reason: "archived: invalid_type", seen_at: SEEN_AT },
+    ]);
+
+    // The host deleted the line.
+    await expect(
+      syncReferences({
+        changes: feed({ 50: page(60, [tombstone(LINE_1, 55)]) }),
+        local: executor,
+        hostId: HOST_ID,
+      }),
+    ).resolves.toEqual({ kind: "synced", rev: 60, quarantined: 0 });
+    expect(quarantine(db)).toEqual([]);
+  });
+
+  it("keeps one entry per record: a newer unreadable revision replaces it, the same page again does not", async () => {
+    const { db, executor } = openLocalDb();
+    const first = feed({ 0: page(42, [brokenLine(LINE_1, 42)]) });
+    await syncReferences({ changes: first, local: executor, hostId: HOST_ID, now: () => SEEN_AT });
+    // As if the revision were lost: the same page arrives again, later.
+    db.prepare("UPDATE sync_state SET value = '0' WHERE key = 'last_rev'").run();
+    await syncReferences({
+      changes: first,
+      local: executor,
+      hostId: HOST_ID,
+      now: () => SEEN_AT + 1000,
+    });
+    expect(quarantine(db)).toEqual([
+      { entity: "lines", id: LINE_1, rev: 42, reason: "archived: invalid_type", seen_at: SEEN_AT },
+    ]);
+
+    const renamed: ChangeItem = {
+      entity: "lines",
+      id: LINE_1,
+      rev: 50,
+      deleted: false,
+      data: { name: 7, archived: false },
+    };
+    await syncReferences({
+      changes: feed({ 42: page(50, [renamed]) }),
+      local: executor,
+      hostId: HOST_ID,
+      now: () => SEEN_AT + 2000,
+    });
+    expect(quarantine(db)).toEqual([
+      {
+        entity: "lines",
+        id: LINE_1,
+        rev: 50,
+        reason: "name: invalid_type",
+        seen_at: SEEN_AT + 2000,
+      },
+    ]);
+  });
+
+  it("builds the reason from issue paths and codes, never a value, in at most 200 characters", async () => {
+    const { db, executor } = openLocalDb();
+    const leaky: ChangeItem = {
+      entity: "org_profile",
+      id: "1",
+      rev: 41,
+      deleted: false,
+      data: {
+        name: 7,
+        inn: "7701234567",
+        gln: "4600682000013",
+        gs1Prefixes: Array.from({ length: 30 }, () => 4607091),
+        timeZone: "Europe/Moscow",
+      },
+    };
+    const empty: ChangeItem = { entity: "lines", id: LINE_1, rev: 42, deleted: false };
+    await syncReferences({
+      changes: feed({ 0: page(42, [leaky, empty]) }),
+      local: executor,
+      hostId: HOST_ID,
+      now: () => SEEN_AT,
+    });
+    const [lineEntry, orgEntry] = quarantine(db);
+    expect(lineEntry).toMatchObject({ entity: "lines", reason: "data: invalid_type" });
+    const reason = String(orgEntry?.reason);
+    expect(reason).toHaveLength(200);
+    expect(reason).toMatch(/^name: invalid_type; gs1Prefixes\.0: invalid_type; gs1Prefixes\.1: /);
+    for (const value of ["7701234567", "4600682000013", "4607091", "Europe/Moscow"]) {
+      expect(reason).not.toContain(value);
+    }
+  });
+
+  it("clears the quarantine whenever the copies start from zero", async () => {
+    const { db, executor } = openLocalDb();
+    await syncReferences({
+      changes: feed({ 0: page(42, [brokenLine(LINE_1, 42)]) }),
+      local: executor,
+      hostId: HOST_ID,
+      now: () => SEEN_AT,
+    });
+    // Written by the build before this one: the same entities, records of
+    // the first version. A build that reads the record syncs from zero.
+    db.prepare(
+      "UPDATE sync_state SET value = 'org_profile,site,lines' WHERE key = 'entity_set'",
+    ).run();
+    const again = feed({ 0: page(43, [line(LINE_1, 43, "Линия 1")]) });
+    await expect(
+      syncReferences({ changes: again, local: executor, hostId: HOST_ID }),
+    ).resolves.toEqual({ kind: "synced", rev: 43, quarantined: 0 });
+    expect(again).toHaveBeenCalledWith(0);
+    expect(tables(db).lines).toEqual([{ id: LINE_1, name: "Линия 1", archived: 0, rev: 43 }]);
+    expect(quarantine(db)).toEqual([]);
+
+    // Paired with another host now, out of reach: the immediate wipe clears
+    // the quarantine with the copies.
+    await syncReferences({
+      changes: feed({ 43: page(44, [brokenLine(LINE_2, 44)]) }),
+      local: executor,
+      hostId: HOST_ID,
+      now: () => SEEN_AT,
+    });
+    expect(quarantine(db)).toHaveLength(1);
+    const offline = vi.fn(async (): Promise<ChangesResponse> => {
+      throw new Error("host unreachable");
+    });
+    await expect(
+      syncReferences({ changes: offline, local: executor, hostId: OTHER_HOST }),
+    ).rejects.toThrow("host unreachable");
+    expect(quarantine(db)).toEqual([]);
+  });
+
+  it("fits the worst-case page in one batch, within the shell's 32 statements", async () => {
+    const { db, executor } = openLocalDb();
+    const recorded = counting(executor);
+    // A first sync (its first page carries the deferred wipe), and every
+    // kept entity with a tombstone, a readable and an unreadable record.
+    const items: ChangeItem[] = [
+      { entity: "org_profile", id: "0", rev: 40, deleted: true },
+      ORG,
+      { ...ORG, id: "2", data: { name: "ООО «Атолл»" } },
+      { entity: "site", id: "0", rev: 40, deleted: true },
+      SITE,
+      { ...SITE, id: "2", data: { badgeSalt: "short" } },
+      tombstone(LINE_2, 40),
+      line(LINE_1, 42, "Линия 1"),
+      brokenLine("9b2e4a6c-0000-4000-8000-000000000000", 42),
+    ];
+    await expect(
+      syncReferences({
+        changes: feed({ 0: page(42, items) }),
+        local: recorded.executor,
+        hostId: HOST_ID,
+        now: () => SEEN_AT,
+      }),
+    ).resolves.toEqual({ kind: "synced", rev: 42, quarantined: 3 });
+    // The `host_id` stamp, then the page: the guard, the wipe (3 copy
+    // tables, the quarantine, the sync state), per entity one delete and one
+    // upsert, the quarantine upsert, the quarantine lift and the sync state:
+    // 3 × 3 + 6 = 15. Each new entity adds 3 (a wipe, a delete, an upsert),
+    // so plan 1d3's operators and badges make it 21, within the shell's 32.
+    expect(recorded.batches.map((batch) => batch.length)).toEqual([1, 15]);
     expect(tables(db).lines).toEqual([{ id: LINE_1, name: "Линия 1", archived: 0, rev: 42 }]);
   });
 });

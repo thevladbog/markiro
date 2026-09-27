@@ -113,6 +113,7 @@ describe("local database on node:sqlite", () => {
       "ref_lines",
       "ref_org",
       "ref_site",
+      "sync_quarantine",
       "sync_state",
     ]);
   });

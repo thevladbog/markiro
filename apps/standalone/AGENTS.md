@@ -171,7 +171,9 @@ re-creating a key deletes its tombstone.
 
 On the device side a new entity also needs its entry in `ENTITIES`
 (`src/local/reference-sync.ts`), which derives `ENTITY_SET`; a new entity
-there changes `ENTITY_SET` and makes every device sync from zero once.
+there changes `ENTITY_SET` and makes every device sync from zero once. It
+also adds three statements to the worst-case page batch (see "Reference
+sync"), which must stay within the shell's 32.
 
 ## Reference sync
 
@@ -180,15 +182,39 @@ there changes `ENTITY_SET` and makes every device sync from zero once.
 `host_id`, `entity_set`) and fetches `GET /v1/changes?since=<last_rev>`
 (`HostApi.getChanges`, the device key only) until `hasMore` is false. Each
 page is one `local_transaction`: a `hostGuard` statement first (below),
-then per entity one conditional delete for its tombstones (only rows older
-than the tombstone) and one `json_each` upsert for its live records (only
-when the revision is newer), then the page's revision. Records are checked
-with their Zod schemas before anything is written, so a bad record leaves
-the whole page unapplied; entities this build does not keep are skipped,
-and applying a page again changes nothing. A page that claims `hasMore`
-without moving past the revision it was fetched at is an error, not a
-silent infinite loop.
-The copies start from zero when `host_id` names another host, when
+then per entity one conditional delete for its tombstones and quarantined
+records (only rows older than them) and one `json_each` upsert for its
+accepted records (only when the revision is newer), then one quarantine
+upsert, one quarantine lift and the page's revision. Every live record is
+checked with its Zod schema before anything is written. A record that
+fails it (damaged, or newer than this build reads) fails closed (owner
+decision 2026-09-27): it is not applied, its local copy goes if the
+record's revision is newer (the tombstone rule), and it waits in
+`sync_quarantine` while the rest of the page applies and the revision
+advances. A newer readable record, or a tombstone at least as new, lifts
+the quarantine; so does a build that reads the record, since it syncs
+from zero. `reason` holds Zod issue paths and codes only
+(`archived: invalid_type`, at most 200 characters), never a value:
+operator records will carry PIN and badge hashes. `seen_at` is a
+parameter from the webview's clock, never SQL time. Entities this build
+does not keep are skipped, not quarantined, and applying a page again
+changes nothing. A successful run reports the quarantine's size
+(`quarantined`). A feed that breaks its own contract (it went back twice
+in one run, or claims `hasMore` without moving past the revision it was
+fetched at) fails the run with `SyncFeedError`, not a silent infinite
+loop.
+For E kept entities a page batch holds at most 3E + 6 statements: the
+guard, a deferred wipe (E copy tables, the quarantine, the sync state),
+two per entity, the quarantine upsert and lift, and the sync state. That
+is 15 today and 21 with plan 1d3's operators and badges, within the
+shell's 32 (E = 8 at most); a test builds the worst-case page.
+`ENTITY_SET` names the kept entities and `SYNC_SCHEMA_VERSION`
+(`"org_profile,site,lines;v2"`): raise the version whenever a record
+schema or the meaning of a copy table changes, so every device syncs
+from zero once and gets back what an older build quarantined or kept
+differently.
+The copies, and the quarantine with them, start from zero when `host_id`
+names another host, when
 `entity_set` is not this build's `ENTITY_SET`, or when the feed answers
 `rev < since` (the host went back to an older copy; once per run). The
 last two drop the old copies in the transaction of the first new page, so

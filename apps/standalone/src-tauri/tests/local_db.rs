@@ -57,7 +57,16 @@ async fn opening_creates_the_reference_tables_in_wal_mode_and_keeps_data() {
         .iter()
         .map(|row| row["name"].as_str().unwrap())
         .collect();
-    assert_eq!(names, ["ref_lines", "ref_org", "ref_site", "sync_state"]);
+    assert_eq!(
+        names,
+        [
+            "ref_lines",
+            "ref_org",
+            "ref_site",
+            "sync_quarantine",
+            "sync_state"
+        ]
+    );
 
     let mut raw = SqliteConnectOptions::new()
         .filename(dir.path().join(FILE_NAME))

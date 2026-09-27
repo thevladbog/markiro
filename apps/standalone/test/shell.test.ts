@@ -359,7 +359,7 @@ describe("link and reference sync", () => {
     expect(running.sync).toEqual({ kind: "running", synced: 0 });
     const done = shellReducer(running, {
       type: "sync_finished",
-      result: { kind: "synced", rev: 42 },
+      result: { kind: "synced", rev: 42, quarantined: 0 },
     });
     expect(done.sync).toEqual({ kind: "done", synced: 1 });
     const again = shellReducer(done, { type: "sync_started" });
@@ -393,7 +393,10 @@ describe("link and reference sync", () => {
     expect(shellReducer(other, { type: "sync_started" }).sync).toEqual(other.sync);
     expect(shellReducer(other, { type: "sync_failed" }).sync).toEqual(other.sync);
     expect(
-      shellReducer(other, { type: "sync_finished", result: { kind: "synced", rev: 1 } }).sync,
+      shellReducer(other, {
+        type: "sync_finished",
+        result: { kind: "synced", rev: 1, quarantined: 0 },
+      }).sync,
     ).toEqual(other.sync);
     // Only a new pairing clears it.
     expect(shellReducer(other, { type: "forgotten" }).sync).toEqual({ kind: "idle", synced: 0 });
