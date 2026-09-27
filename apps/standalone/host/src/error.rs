@@ -41,6 +41,11 @@ impl ApiError {
         &self.body.error.code
     }
 
+    /// The structured detail, if any (`field`, `constraint`, `currentRev`, …).
+    pub fn details(&self) -> Option<&serde_json::Map<String, Value>> {
+        self.body.error.details.as_ref()
+    }
+
     pub fn not_found(message: impl Into<String>) -> Self {
         Self::new(StatusCode::NOT_FOUND, codes::NOT_FOUND, message)
     }

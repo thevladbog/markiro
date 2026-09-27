@@ -1,12 +1,12 @@
 use markiro_proto::{
     certificate_fingerprint, codes, compatibility, compatibility_for, credentials,
     display_fingerprint, BlockSizesUpdate, BootstrapRequest, BootstrapResponse, ChangesResponse,
-    ClaimRequest, Compatibility, DeviceInfo, DeviceKind, DeviceLineRequest, DeviceRecord,
-    ErrorBody, Hello, HelloEnvelope, LineRecord, LocalPairRequest, OfficeLoginRequest, OfficeRole,
-    OfficeSession, OfficeUser, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate,
-    OperatorBadgeRecord, OperatorRecord, OrgProfile, OrgProfileUpdate, OrgRecord, PairResponse,
-    PairingCode, PasswordChange, PasswordSet, SiteRecord, SsccCounterUpdate, SsccState,
-    HOST_PRODUCT, PROTOCOL_VERSION,
+    ClaimRequest, Compatibility, CounterpartyCreate, CounterpartyRecord, CounterpartyUpdate,
+    DeviceInfo, DeviceKind, DeviceLineRequest, DeviceRecord, ErrorBody, Hello, HelloEnvelope,
+    LineRecord, LocalPairRequest, OfficeLoginRequest, OfficeRole, OfficeSession, OfficeUser,
+    OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate, OperatorBadgeRecord, OperatorRecord,
+    OrgProfile, OrgProfileUpdate, OrgRecord, PairResponse, PairingCode, PasswordChange,
+    PasswordSet, SiteRecord, SsccCounterUpdate, SsccState, HOST_PRODUCT, PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -250,6 +250,22 @@ fn the_people_feed_fixture_round_trips_without_leaking_hashes() {
         .all(|item| item.deleted && item.data.is_none()));
     let debug = format!("{operator:?} {badge:?}");
     assert!(!debug.contains("pbkdf2"), "{debug}");
+}
+
+#[test]
+fn counterparty_fixtures_round_trip_and_requests_reject_unknown_fields() {
+    let record: CounterpartyRecord = round_trip("counterparty-record.json");
+    assert!(!record.archived);
+    let create: CounterpartyCreate = round_trip("counterparty-create.json");
+    assert_eq!(create.inn, None);
+    let update: CounterpartyUpdate = round_trip("counterparty-update.json");
+    assert!(update.archived);
+    let mut value = fixture("counterparty-create.json");
+    value["notes"] = Value::Bool(true);
+    assert!(serde_json::from_value::<CounterpartyCreate>(value).is_err());
+    let mut value = fixture("counterparty-update.json");
+    value["notes"] = Value::Bool(true);
+    assert!(serde_json::from_value::<CounterpartyUpdate>(value).is_err());
 }
 
 #[test]

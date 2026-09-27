@@ -22,6 +22,8 @@ pub mod actions {
     pub const PAIRING_CODE_CREATE: &str = "pairing_code.create";
     pub const DEVICE_CLAIM: &str = "device.claim";
     pub const DEVICE_LINE: &str = "device.line";
+    pub const COUNTERPARTY_CREATE: &str = "counterparty.create";
+    pub const COUNTERPARTY_UPDATE: &str = "counterparty.update";
 }
 
 /// `details.reason` of a denied row: every denial names one.

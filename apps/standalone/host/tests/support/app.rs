@@ -190,3 +190,137 @@ pub async fn bootstrap(app: &TestApp, device_key: &str) -> String {
     assert_eq!(status, StatusCode::OK, "{body}");
     body["session"]["token"].as_str().unwrap().to_owned()
 }
+
+/// A host after the wizard, with the administrator signed in on the station
+/// that ran it.
+pub struct Admin {
+    pub app: TestApp,
+    pub key: String,
+    pub token: String,
+    pub id: String,
+}
+
+/// A new host: a paired station runs the wizard, and the administrator's
+/// session stays open on it.
+pub async fn admin() -> Admin {
+    let app = TestApp::new().await;
+    let (_, key) = pair_device(&app, "station").await;
+    let token = bootstrap(&app, &key).await;
+    let (status, me) = app
+        .send(empty(with_session(
+            request("GET", "/v1/office/me"),
+            &key,
+            &token,
+        )))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{me}");
+    let id = me["id"].as_str().unwrap().to_owned();
+    Admin {
+        app,
+        key,
+        token,
+        id,
+    }
+}
+
+impl Admin {
+    /// An office request with the administrator's session.
+    pub async fn call(&self, method: &str, path: &str, body: Option<Value>) -> (StatusCode, Value) {
+        self.call_as(&self.token, method, path, body).await
+    }
+
+    /// An office request with another session on the same station.
+    pub async fn call_as(
+        &self,
+        token: &str,
+        method: &str,
+        path: &str,
+        body: Option<Value>,
+    ) -> (StatusCode, Value) {
+        let builder = with_session(request(method, path), &self.key, token);
+        match body {
+            Some(body) => self.app.send(json(builder, body)).await,
+            None => self.app.send(empty(builder)).await,
+        }
+    }
+
+    /// A technologist signed in on the same station; returns the token.
+    pub async fn technologist(&self) -> String {
+        seed_office_user(&self.app, "tech", "technologist", "technologist password").await;
+        login(&self.app, &self.key, "tech", "technologist password").await
+    }
+
+    /// The `ok` audit row a change by this administrator writes.
+    pub fn row(
+        &self,
+        action: &str,
+        target_type: &str,
+        target_id: &str,
+        details: Value,
+    ) -> AuditRow {
+        (
+            "office_user".to_owned(),
+            Some(self.id.clone()),
+            action.to_owned(),
+            Some(target_type.to_owned()),
+            Some(target_id.to_owned()),
+            "ok".to_owned(),
+            details,
+        )
+    }
+}
+
+/// The host's current revision (`host_revision.rev`).
+pub async fn host_revision(app: &TestApp) -> i64 {
+    sqlx::query_scalar("SELECT rev FROM host_revision WHERE id = 1")
+        .fetch_one(&app.state.pool)
+        .await
+        .unwrap()
+}
+
+/// An audit row: actor kind and id, action, target type and id, result and
+/// the parsed `details`.
+pub type AuditRow = (
+    String,
+    Option<String>,
+    String,
+    Option<String>,
+    Option<String>,
+    String,
+    Value,
+);
+
+/// Every audit row of `action`, oldest first.
+pub async fn audit_trail(app: &TestApp, action: &str) -> Vec<AuditRow> {
+    let rows: Vec<(
+        String,
+        Option<String>,
+        String,
+        Option<String>,
+        Option<String>,
+        String,
+        String,
+    )> = sqlx::query_as(
+        "SELECT actor_kind, actor_id, action, target_type, target_id, result, details \
+         FROM audit_log WHERE action = ? ORDER BY id",
+    )
+    .bind(action)
+    .fetch_all(&app.state.pool)
+    .await
+    .unwrap();
+    rows.into_iter()
+        .map(
+            |(kind, id, action, target_type, target_id, result, details)| {
+                (
+                    kind,
+                    id,
+                    action,
+                    target_type,
+                    target_id,
+                    result,
+                    serde_json::from_str(&details).unwrap(),
+                )
+            },
+        )
+        .collect()
+}

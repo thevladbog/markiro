@@ -82,7 +82,11 @@ adds its name there. Every `denied` row carries `details.reason` from
 `{ from, to }` for each changed field (`audit::update_details`). Details never
 hold pairing codes, keys, tokens, passwords, salts or hashes, and a refused
 login never records the typed login. An attempt refused by a rate limiter
-writes no row, so a flood cannot fill the log. `office_user.password` covers
+writes no row, so a flood cannot fill the log. An office write the host
+refuses (`validation_failed`, `forbidden`, `not_found`, `stale_revision`,
+`conflict`) changed nothing and writes no row either, as for every office
+writer since plan 1b1: the `denied` rows are refused sign-ins, password
+changes and pairing claims. `office_user.password` covers
 both an administrator's reset and a user's own change (`actor_id ==
 target_id`). Tests assert the exact actor, action, target, result and parsed
 details.

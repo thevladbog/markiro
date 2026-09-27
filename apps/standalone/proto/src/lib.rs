@@ -613,3 +613,42 @@ pub struct PasswordChange {
     pub current_password: Secret,
     pub new_password: Secret,
 }
+
+/// A counterparty (`GET /v1/office/counterparties`): a customer of contract
+/// manufacturing. Archived instead of deleted; not in the station feed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CounterpartyRecord {
+    pub id: String,
+    pub name: String,
+    pub inn: Option<String>,
+    pub gln: String,
+    pub gs1_prefixes: Vec<String>,
+    pub archived: bool,
+    pub rev: i64,
+}
+
+/// `POST /v1/office/counterparties`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CounterpartyCreate {
+    pub name: String,
+    #[serde(default)]
+    pub inn: Option<String>,
+    pub gln: String,
+    pub gs1_prefixes: Vec<String>,
+}
+
+/// `PUT /v1/office/counterparties/{id}`: every field, like the organization
+/// profile; `archived: true` archives.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CounterpartyUpdate {
+    pub name: String,
+    #[serde(default)]
+    pub inn: Option<String>,
+    pub gln: String,
+    pub gs1_prefixes: Vec<String>,
+    pub archived: bool,
+    pub expected_rev: i64,
+}

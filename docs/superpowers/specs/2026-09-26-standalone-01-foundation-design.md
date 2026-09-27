@@ -139,7 +139,11 @@ default_box_template_id, default_pallet_template_id, default_duplicate_template_
   Проверки хоста: GLN — 13 цифр, каждый префикс — 4–12 цифр, часовой пояс — непустая
   строка. Проверка IANA-имени — в интерфейсе. Столбцы шаблонов по умолчанию
   добавляются миграцией плана 1e вместе с таблицей шаблонов.
-- `counterparties(id, name, inn, gln, gs1_prefixes JSON, archived, rev)`.
+- `counterparties(id, name, inn, gln, gs1_prefixes JSON, archived, rev)`. Проверки
+  хоста — как у профиля организации (`validate::company`): имя 1–200 символов,
+  ИНН 10 или 12 цифр либо пусто, GLN 13 цифр, не больше 10 префиксов по 4–12 цифр.
+  Уникальности нет; архивирование — `archived`, удаления нет; в ленту станций не
+  входят.
 - `sscc_counters(issuer_prefix, extension, next_serial, rev, PRIMARY KEY(issuer_prefix, extension))`,
   где `extension` 0 — короб, 1 — паллета, как в облаке. На этапе 1 счётчик можно
   только сдвинуть вперёд (`sscc_below_floor`); проверки активных смен и выданных
@@ -237,6 +241,11 @@ default_box_template_id, default_pallet_template_id, default_duplicate_template_
 Офисные маршруты требуют и ключ устройства, и токен сессии этого же устройства
 (заголовок `X-Office-Session`).
 
+Формы запросов и ответов плана 1d2 закреплены фикстурами `proto/fixtures`:
+
+- контрагенты — `counterparty-record.json` (ответ), `counterparty-create.json`,
+  `counterparty-update.json` (`PUT` — запись целиком с `archived` и `expectedRev`).
+
 ### 4.6. Ошибки
 
 Формат: HTTP-статус и тело `{ "error": { "code": "<snake_case>", "message": "<для журнала>", "details": { … } } }`.
@@ -289,6 +298,11 @@ default_box_template_id, default_pallet_template_id, default_duplicate_template_
 подключение и отзыв устройства, инициализация — отдельная запись: кто (вид и
 идентификатор), что, над чем, результат и существенные детали (например, какие
 поля изменились, без значений PIN, паролей и хешей). Экран журнала — этап 5.
+
+Отказанная запись офиса (ошибка проверки, нет прав, нет записи, `stale_revision`,
+`conflict`) ничего не изменила и строки не пишет — так пишут все писатели офиса с
+плана 1b1, план 1d2 записал это правилом. Строки с результатом `denied` — отказы
+входа, смены своего пароля и подключения по коду.
 
 ### 4.10. Ограничение частоты и журналы процесса
 

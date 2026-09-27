@@ -159,6 +159,15 @@ fn protected_routes() -> Router<AppState> {
             put(crate::routes::sscc::put_block_sizes),
         )
         .route(
+            "/v1/office/counterparties",
+            get(crate::routes::counterparties::list_counterparties)
+                .post(crate::routes::counterparties::create_counterparty),
+        )
+        .route(
+            "/v1/office/counterparties/{id}",
+            put(crate::routes::counterparties::update_counterparty),
+        )
+        .route(
             "/v1/office/users",
             get(crate::routes::office_users::list_users)
                 .post(crate::routes::office_users::create_user),

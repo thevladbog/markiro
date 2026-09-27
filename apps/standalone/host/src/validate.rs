@@ -60,59 +60,98 @@ fn digits(text: &str, lengths: std::ops::RangeInclusive<usize>) -> bool {
     lengths.contains(&text.len()) && text.bytes().all(|byte| byte.is_ascii_digit())
 }
 
-/// Validate organization fields; `prefix` is the JSON path of the object in
-/// the request (`org` in the wizard, empty for `PUT /v1/office/org`).
-pub fn org(prefix: &str, input: &OrgProfileInput) -> Result<ValidOrg, ApiError> {
-    let field = |name: &str| {
-        if prefix.is_empty() {
-            name.to_owned()
-        } else {
-            format!("{prefix}.{name}")
-        }
-    };
-    let name = input.name.trim();
+/// The JSON path of the field `name` in the object at `prefix` (empty for the
+/// request's top level).
+fn path(prefix: &str, name: &str) -> String {
+    if prefix.is_empty() {
+        name.to_owned()
+    } else {
+        format!("{prefix}.{name}")
+    }
+}
+
+/// Company fields after validation (trimmed, normalized): the organization's
+/// and a counterparty's.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValidCompany {
+    pub name: String,
+    pub inn: Option<String>,
+    pub gln: String,
+    pub gs1_prefixes: Vec<String>,
+}
+
+/// Validate company fields: a name of 1-200 characters, an INN of 10 or 12
+/// digits or none (blank is none), a 13-digit GLN, at most 10 distinct GS1
+/// prefixes of 4-12 digits. `prefix` is the JSON path of the object in the
+/// request.
+pub fn company(
+    prefix: &str,
+    name: &str,
+    inn: Option<&str>,
+    gln: &str,
+    gs1_prefixes: &[String],
+) -> Result<ValidCompany, ApiError> {
+    let name = name.trim();
     if name.is_empty() || name.chars().count() > 200 {
         return Err(ApiError::validation(
-            &field("name"),
+            &path(prefix, "name"),
             "the name must be 1-200 characters",
         ));
     }
-    let inn = match input.inn.as_deref().map(str::trim) {
+    let inn = match inn.map(str::trim) {
         None | Some("") => None,
         Some(inn) if digits(inn, 10..=10) || digits(inn, 12..=12) => Some(inn.to_owned()),
         Some(_) => {
             return Err(ApiError::validation(
-                &field("inn"),
+                &path(prefix, "inn"),
                 "the INN must be 10 or 12 digits",
             ))
         }
     };
-    let gln = input.gln.trim();
+    let gln = gln.trim();
     if !digits(gln, 13..=13) {
         return Err(ApiError::validation(
-            &field("gln"),
+            &path(prefix, "gln"),
             "the GLN must be 13 digits",
         ));
     }
-    let mut gs1_prefixes: Vec<String> = Vec::new();
-    for gs1_prefix in &input.gs1_prefixes {
+    let mut valid_prefixes: Vec<String> = Vec::new();
+    for gs1_prefix in gs1_prefixes {
         let gs1_prefix = gs1_prefix.trim();
         if !digits(gs1_prefix, 4..=12) {
             return Err(ApiError::validation(
-                &field("gs1Prefixes"),
+                &path(prefix, "gs1Prefixes"),
                 "each GS1 prefix must be 4-12 digits",
             ));
         }
-        if !gs1_prefixes.iter().any(|known| known == gs1_prefix) {
-            gs1_prefixes.push(gs1_prefix.to_owned());
+        if !valid_prefixes.iter().any(|known| known == gs1_prefix) {
+            valid_prefixes.push(gs1_prefix.to_owned());
         }
     }
-    if gs1_prefixes.len() > 10 {
+    if valid_prefixes.len() > 10 {
         return Err(ApiError::validation(
-            &field("gs1Prefixes"),
+            &path(prefix, "gs1Prefixes"),
             "at most 10 GS1 prefixes",
         ));
     }
+    Ok(ValidCompany {
+        name: name.to_owned(),
+        inn,
+        gln: gln.to_owned(),
+        gs1_prefixes: valid_prefixes,
+    })
+}
+
+/// Validate organization fields; `prefix` is the JSON path of the object in
+/// the request (`org` in the wizard, empty for `PUT /v1/office/org`).
+pub fn org(prefix: &str, input: &OrgProfileInput) -> Result<ValidOrg, ApiError> {
+    let company = company(
+        prefix,
+        &input.name,
+        input.inn.as_deref(),
+        &input.gln,
+        &input.gs1_prefixes,
+    )?;
     let time_zone = input.time_zone.trim();
     let time_zone_ok = (1..=64).contains(&time_zone.len())
         && time_zone
@@ -120,15 +159,15 @@ pub fn org(prefix: &str, input: &OrgProfileInput) -> Result<ValidOrg, ApiError> 
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'_' | b'-' | b'+'));
     if !time_zone_ok {
         return Err(ApiError::validation(
-            &field("timeZone"),
+            &path(prefix, "timeZone"),
             "an IANA time zone name is required",
         ));
     }
     Ok(ValidOrg {
-        name: name.to_owned(),
-        inn,
-        gln: gln.to_owned(),
-        gs1_prefixes,
+        name: company.name,
+        inn: company.inn,
+        gln: company.gln,
+        gs1_prefixes: company.gs1_prefixes,
         time_zone: time_zone.to_owned(),
     })
 }
@@ -214,5 +253,75 @@ pub fn sscc_serial(field: &str, extension: u8, prefix: &str, serial: u64) -> Res
         ))
     } else {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The `details.field` of a validation error.
+    fn field<T: std::fmt::Debug>(result: Result<T, ApiError>) -> String {
+        let error = result.expect_err("a validation error");
+        assert_eq!(error.code(), "validation_failed");
+        error
+            .details()
+            .and_then(|details| details.get("field"))
+            .and_then(|field| field.as_str())
+            .expect("details.field")
+            .to_owned()
+    }
+
+    const GLN: &str = "4601234000017";
+
+    #[test]
+    fn company_fields_are_trimmed_and_normalized() {
+        let prefixes = [
+            " 4601234 ".to_owned(),
+            "4601234".to_owned(),
+            "4609876".to_owned(),
+        ];
+        assert_eq!(
+            company("", " ООО «Берег» ", Some(" "), " 4601234000017 ", &prefixes).unwrap(),
+            ValidCompany {
+                name: "ООО «Берег»".to_owned(),
+                inn: None,
+                gln: GLN.to_owned(),
+                gs1_prefixes: vec!["4601234".to_owned(), "4609876".to_owned()],
+            }
+        );
+        let twelve = company("", "Берег", Some("781234567890"), GLN, &[]).unwrap();
+        assert_eq!(twelve.inn.as_deref(), Some("781234567890"));
+        assert_eq!(
+            company("", &"я".repeat(200), None, GLN, &[])
+                .unwrap()
+                .name
+                .chars()
+                .count(),
+            200
+        );
+    }
+
+    #[test]
+    fn company_errors_name_the_field_under_its_prefix() {
+        assert_eq!(field(company("", " ", None, GLN, &[])), "name");
+        assert_eq!(field(company("", &"я".repeat(201), None, GLN, &[])), "name");
+        assert_eq!(
+            field(company("org", "Берег", Some("12345678901"), GLN, &[])),
+            "org.inn"
+        );
+        assert_eq!(
+            field(company("", "Берег", None, "460123400001", &[])),
+            "gln"
+        );
+        assert_eq!(
+            field(company("", "Берег", None, GLN, &["460".to_owned()])),
+            "gs1Prefixes"
+        );
+        let eleven: Vec<String> = (0..11).map(|n| format!("46012{n:02}")).collect();
+        assert_eq!(
+            field(company("", "Берег", None, GLN, &eleven)),
+            "gs1Prefixes"
+        );
     }
 }
