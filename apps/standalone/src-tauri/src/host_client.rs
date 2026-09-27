@@ -1,7 +1,8 @@
 //! Authenticated calls to the paired host (spec §5.2). A connection is
 //! accepted only when the host certificate's SHA-256 equals the fingerprint
 //! pinned at pairing. No proxy, no redirects, short timeouts, and the
-//! protocol header on every request.
+//! protocol header on every request. [`StreamClient`] holds the change stream
+//! the same way, limited by silence instead of a total time.
 
 use std::time::Duration;
 
@@ -15,6 +16,9 @@ use crate::tls::{self, FingerprintMismatch, FingerprintPolicy};
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_PATH_LENGTH: usize = 512;
+/// How long a stream may stay silent before the link counts as lost: three
+/// missed 15 s heartbeats.
+pub const STREAM_SILENCE_LIMIT: Duration = Duration::from_secs(45);
 
 /// Any HTTP answer, error statuses included: the webview reads the error
 /// body's code itself.
@@ -87,17 +91,8 @@ impl PinnedClient {
     /// A client for `address` (`https://host:port`) that trusts only the
     /// certificate with this lower-case hex SHA-256 `fingerprint`.
     pub fn new(address: &str, fingerprint: &str) -> Result<Self, RequestError> {
-        let config = tls::client_config(FingerprintPolicy::Pin {
-            expected: fingerprint.to_owned(),
-        })
-        .map_err(|_| RequestError::Unreachable)?;
-        let client = reqwest::Client::builder()
-            .use_preconfigured_tls(config)
-            .connect_timeout(CONNECT_TIMEOUT)
+        let client = pinned_builder(fingerprint)?
             .timeout(REQUEST_TIMEOUT)
-            .no_proxy()
-            .https_only(true)
-            .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|_| RequestError::Unreachable)?;
         Ok(Self {
@@ -148,6 +143,99 @@ impl PinnedClient {
         };
         Ok(HostResponse { status, body })
     }
+}
+
+/// A long-lived request to the paired host — the change stream — with the
+/// same pinned certificate, headers and path rules as [`PinnedClient`], but
+/// no limit on the whole exchange: only on silence.
+#[derive(Debug, Clone)]
+pub struct StreamClient {
+    client: reqwest::Client,
+    address: String,
+}
+
+/// The answer to a stream request.
+#[derive(Debug)]
+pub enum StreamOpen {
+    /// A 2xx answer: read it with [`HostStream::chunk`].
+    Open(HostStream),
+    /// Any other answer, read whole.
+    Refused(HostResponse),
+}
+
+#[derive(Debug)]
+pub struct HostStream {
+    response: reqwest::Response,
+}
+
+impl StreamClient {
+    pub fn new(address: &str, fingerprint: &str) -> Result<Self, RequestError> {
+        let client = pinned_builder(fingerprint)?
+            .read_timeout(STREAM_SILENCE_LIMIT)
+            .build()
+            .map_err(|_| RequestError::Unreachable)?;
+        Ok(Self {
+            client,
+            address: address.trim_end_matches('/').to_owned(),
+        })
+    }
+
+    /// `GET path` with the device key.
+    pub async fn open(&self, path: &str, key: &Secret) -> Result<StreamOpen, RequestError> {
+        validate_path(path)?;
+        let sent = self
+            .client
+            .get(format!("{}{path}", self.address))
+            .header(PROTOCOL_HEADER, PROTOCOL_VERSION.to_string())
+            .bearer_auth(key.expose())
+            .send()
+            .await;
+        let response = match sent {
+            Ok(response) => response,
+            Err(error) if is_fingerprint_mismatch(&error) => {
+                return Err(RequestError::CertificateMismatch)
+            }
+            Err(_) => return Err(RequestError::Unreachable),
+        };
+        if response.status().is_success() {
+            return Ok(StreamOpen::Open(HostStream { response }));
+        }
+        let status = response.status().as_u16();
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(|_| RequestError::Unreachable)?;
+        Ok(StreamOpen::Refused(HostResponse {
+            status,
+            body: serde_json::from_slice(&bytes).ok(),
+        }))
+    }
+}
+
+impl HostStream {
+    /// The next bytes, `None` once the host closed the stream. Silence past
+    /// [`STREAM_SILENCE_LIMIT`] is an error.
+    pub async fn chunk(&mut self) -> Result<Option<Vec<u8>>, RequestError> {
+        match self.response.chunk().await {
+            Ok(chunk) => Ok(chunk.map(|bytes| bytes.to_vec())),
+            Err(_) => Err(RequestError::Unreachable),
+        }
+    }
+}
+
+/// A client builder that trusts only the certificate with `fingerprint`:
+/// no proxy, no redirects, HTTPS only, 2 s to connect.
+fn pinned_builder(fingerprint: &str) -> Result<reqwest::ClientBuilder, RequestError> {
+    let config = tls::client_config(FingerprintPolicy::Pin {
+        expected: fingerprint.to_owned(),
+    })
+    .map_err(|_| RequestError::Unreachable)?;
+    Ok(reqwest::Client::builder()
+        .use_preconfigured_tls(config)
+        .connect_timeout(CONNECT_TIMEOUT)
+        .no_proxy()
+        .https_only(true)
+        .redirect(reqwest::redirect::Policy::none()))
 }
 
 fn allowed_method(method: &str) -> Result<Method, RequestError> {
@@ -228,10 +316,12 @@ mod tests {
             "/v1/device",
             "/v1/office/sscc/counters/460068200/0",
             "/v1/changes?since=5&limit=100",
-            // A dot in the query part is not a path segment: it never
-            // reaches `route.split('/')`, so it is unaffected by the `.`
-            // segment check.
+            // The query part is never split into path segments (`route`
+            // stops at `?`), so a `.` there is unaffected by the `.` segment
+            // check — whether it stands alone or, as in the second case,
+            // forms what would look like a `/.` segment inside a path.
             "/v1/device?x=1.5",
+            "/v1/device?x=/.",
         ] {
             assert_eq!(validate_path(path), Ok(()), "{path}");
         }

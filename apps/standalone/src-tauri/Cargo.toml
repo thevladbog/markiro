@@ -23,7 +23,7 @@ sqlx = { version = "=0.8.6", default-features = false, features = ["runtime-toki
 tauri = { version = "2.11", features = [] }
 tauri-plugin-single-instance = "2"
 thiserror = "2"
-tokio = { version = "=1.53.1", features = ["sync"] }
+tokio = { version = "=1.53.1", features = ["sync", "macros", "time"] }
 
 [target.'cfg(windows)'.dependencies]
 base64 = "=0.22.1"

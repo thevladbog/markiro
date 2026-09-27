@@ -12,6 +12,7 @@ use markiro_proto::{
 };
 use serde::Serialize;
 use serde_json::Value;
+use tokio::sync::watch;
 
 use crate::device_config::{self, DeviceConfig};
 use crate::host_client::{Credentials, HostResponse, PinnedClient, RequestError};
@@ -32,6 +33,29 @@ pub struct DeviceStatus {
     pub device_id: String,
     pub kind: DeviceKind,
     pub line_id: Option<String>,
+}
+
+/// What the connection task needs to reach the paired host. The key stays
+/// in Rust: `Debug` hides it, and nothing serializes this type.
+#[derive(Debug, Clone)]
+pub struct HostLink {
+    pub address: String,
+    pub fingerprint: String,
+    key: Secret,
+}
+
+impl HostLink {
+    pub fn new(address: String, fingerprint: String, key: Secret) -> Self {
+        Self {
+            address,
+            fingerprint,
+            key,
+        }
+    }
+
+    pub fn key(&self) -> &Secret {
+        &self.key
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -119,6 +143,14 @@ impl PairedDevice {
             line_id: self.config.line_id.clone(),
         }
     }
+
+    fn link(&self) -> Arc<HostLink> {
+        Arc::new(HostLink::new(
+            self.config.host_address.clone(),
+            self.config.fingerprint.clone(),
+            self.key.clone(),
+        ))
+    }
 }
 
 enum Current {
@@ -132,6 +164,9 @@ pub struct DeviceState {
     dir: PathBuf,
     current: Mutex<Current>,
     pairing: tokio::sync::Mutex<()>,
+    /// The host the connection task should hold a stream to; `None` while
+    /// unpaired. Replaced on pairing and forgetting.
+    link: watch::Sender<Option<Arc<HostLink>>>,
 }
 
 impl DeviceState {
@@ -146,10 +181,15 @@ impl DeviceState {
             },
             Err(_) => Current::Unreadable,
         };
+        let link = match &current {
+            Current::Paired(device) => Some(device.link()),
+            _ => None,
+        };
         Self {
             dir,
             current: Mutex::new(current),
             pairing: tokio::sync::Mutex::new(()),
+            link: watch::channel(link).0,
         }
     }
 
@@ -159,6 +199,12 @@ impl DeviceState {
             Current::Paired(device) => Ok(Some(device.status())),
             Current::Unreadable => Err(DeviceError::ConfigUnreadable),
         }
+    }
+
+    /// Follow the pairing: the connection task holds a stream while this is
+    /// `Some` and stays offline while it is `None`.
+    pub fn watch_link(&self) -> watch::Receiver<Option<Arc<HostLink>>> {
+        self.link.subscribe()
     }
 
     /// Pair with the host at `address` over loopback (`POST /v1/local-pair`)
@@ -353,7 +399,9 @@ impl DeviceState {
             config,
         });
         let status = device.status();
+        let link = device.link();
         *self.current.lock().expect("device lock") = Current::Paired(device);
+        self.link.send_replace(Some(link));
         Ok(status)
     }
 
@@ -393,6 +441,7 @@ impl DeviceState {
         let _pairing = self.pairing.lock().await;
         device_config::clear(&self.dir).map_err(|_| DeviceError::Storage)?;
         *self.current.lock().expect("device lock") = Current::Unpaired;
+        self.link.send_replace(None);
         Ok(())
     }
 }
@@ -401,6 +450,10 @@ impl DeviceState {
 /// excluded: their answers carry a new device key, which must never cross
 /// IPC. The line goes through [`DeviceState::select_line`], which also keeps
 /// it in `device.json`; the change stream belongs to the connection task.
+/// This string-level exclusion of `LINE_ROUTE` only holds because
+/// `host_client::validate_path` separately refuses a `.` path segment: it
+/// stops a spelling such as `/v1/device/./line`, which a URL parser would
+/// otherwise normalize past this check, from ever reaching the host.
 fn webview_may_reach(path: &str) -> bool {
     let route = path.split('?').next().unwrap_or(path);
     let device_route =

@@ -160,23 +160,43 @@ it (`FingerprintPolicy::Observe`) and exists only to discover a host before
 loopback, a person or a pairing code confirms it.
 
 `host_request`, the webview's generic way to reach the host, accepts `GET`,
-`POST`, `PUT` and `DELETE`, paths of `[A-Za-z0-9/_.~?=&-]` without `..` or
-`//`, and only the routes `/v1/device[/…]` except `/v1/device/line`,
-`/v1/bootstrap`, `/v1/changes` (not `/v1/changes/stream`) and
-`/v1/office/…`. The line goes through `device_select_line`, which also keeps
-the host's answer in `device.json`, so the station opens on its line with the
-host away; the change stream belongs to the connection task. Pairing routes
-return a new device key, so they stay behind their own commands
-(`host_local_pair`, `host_claim`) and the key never reaches the webview. `%`
-is refused because an encoded `..` would slip past the route check. Add a
-route the webview needs to that list deliberately; never let a listed prefix
-cover a route that returns a secret.
+`POST`, `PUT` and `DELETE`, paths of `[A-Za-z0-9/_.~?=&-]` without `..`, `//`
+or a `.` segment, and only the routes `/v1/device[/…]` except
+`/v1/device/line`, `/v1/bootstrap`, `/v1/changes` (not `/v1/changes/stream`)
+and `/v1/office/…`. The line goes through `device_select_line`, which also
+keeps the host's answer in `device.json`, so the station opens on its line
+with the host away; the change stream belongs to the connection task.
+Pairing routes return a new device key, so they stay behind their own
+commands (`host_local_pair`, `host_claim`) and the key never reaches the
+webview. `%` is refused because an encoded `..` would slip past the route
+check; a `.` segment is refused for the same reason, since the URL parser
+would normalize it past the route checks. Add a route the webview needs to
+that list deliberately; never let a listed prefix cover a route that returns
+a secret.
 
 The webview's IPC contract — command names, argument names such as
 `officeToken`, the `{ status, body }` answer and bare-string rejections — is
 pinned by `src-tauri/tests/ipc.rs` through Tauri's mock runtime. Change it
 together with `src/host/client.ts`, `src/host/device.ts` and
 `src/host/probe.ts`.
+
+## Connection to the host
+
+`src-tauri/src/connection.rs` runs one background task per app. It follows
+the pairing (`DeviceState::watch_link`). While paired it holds
+`GET /v1/changes/stream` with the device key and the pinned certificate
+(`host_client::StreamClient`: no overall timeout, but 45 s of silence —
+three missed heartbeats — drops the connection) and reconnects after a
+pause of 1 s doubling to 30 s, back to 1 s after a stream that was online.
+While unpaired it stays offline and tries nothing. It emits
+`standalone://host-status` (`{ state: online | connecting | offline,
+lastContactAt, lastError, seq }`, `lastError` one of `unreachable`,
+`certificate_mismatch`, `key_rejected`, `stream_refused`, `stream_ended`)
+and `standalone://host-revision` (`{ rev }` for every stream event, the
+first one after each connect included). `connection_status` answers the
+latest status; `seq` grows with every status, so the webview subscribes
+first, then asks, and keeps whichever is newest. The webview syncs reference
+data on each revision and never opens the stream itself.
 
 ## Device key and office session
 

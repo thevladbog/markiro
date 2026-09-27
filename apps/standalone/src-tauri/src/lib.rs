@@ -2,6 +2,7 @@
 //! network requests itself: every call to the host goes through commands
 //! here, so certificate checks and the device key stay in Rust.
 
+pub mod connection;
 pub mod device;
 pub mod device_config;
 pub mod host_client;
@@ -10,9 +11,12 @@ pub mod local_db;
 pub mod secret_store;
 pub mod tls;
 
-use serde_json::{Map, Value};
-use tauri::Manager;
+use std::sync::Arc;
 
+use serde_json::{Map, Value};
+use tauri::{Emitter, Manager, Runtime};
+
+use connection::{Backoff, ConnectionState, HostRevision, HostStatus, LinkEvents};
 use device::{DeviceState, DeviceStatus};
 use host_client::HostResponse;
 use local_db::{LocalDbState, LocalStatement};
@@ -20,6 +24,20 @@ use local_db::{LocalDbState, LocalStatement};
 /// The host service on this computer.
 fn local_host_address() -> String {
     format!("https://127.0.0.1:{}", markiro_proto::DEFAULT_PORT)
+}
+
+/// The connection task's reports as Tauri events (`src/host/connection.ts`).
+struct TauriLinkEvents<R: Runtime>(tauri::AppHandle<R>);
+
+impl<R: Runtime> LinkEvents for TauriLinkEvents<R> {
+    fn status(&self, status: &HostStatus) {
+        // A closed window hears nothing; the next status replaces this one.
+        let _ = self.0.emit(connection::STATUS_EVENT, status);
+    }
+
+    fn revision(&self, revision: HostRevision) {
+        let _ = self.0.emit(connection::REVISION_EVENT, revision);
+    }
 }
 
 #[tauri::command]
@@ -121,6 +139,11 @@ async fn local_transaction(
         .map_err(|error| error.code().to_owned())
 }
 
+#[tauri::command]
+fn connection_status(state: tauri::State<'_, ConnectionState>) -> HostStatus {
+    state.snapshot()
+}
+
 /// The shell's commands. `run` registers them; `tests/ipc.rs` drives the
 /// same list through Tauri's mock runtime to pin the webview's IPC contract.
 pub fn invoke_handler<R: tauri::Runtime>(
@@ -134,7 +157,8 @@ pub fn invoke_handler<R: tauri::Runtime>(
         device_select_line,
         device_forget,
         local_query,
-        local_transaction
+        local_transaction,
+        connection_status
     ]
 }
 
@@ -147,10 +171,20 @@ pub fn run() {
             // config directory: the device identity must stay on this
             // computer and never follow a Windows user profile elsewhere.
             let dir = app.path().app_local_data_dir()?;
-            app.manage(DeviceState::load(dir.clone()));
+            let device = DeviceState::load(dir.clone());
+            let link = device.watch_link();
+            app.manage(device);
             // The local database opens before the window shows. When it
             // cannot open, the app still starts and the local commands say so.
             app.manage(tauri::async_runtime::block_on(LocalDbState::open(&dir)));
+            let status = ConnectionState::default();
+            app.manage(status.clone());
+            tauri::async_runtime::spawn(connection::supervise(
+                link,
+                Arc::new(TauriLinkEvents(app.handle().clone())),
+                status,
+                Backoff::default(),
+            ));
             Ok(())
         })
         .invoke_handler(invoke_handler())

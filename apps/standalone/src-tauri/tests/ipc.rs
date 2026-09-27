@@ -10,6 +10,7 @@
 
 use markiro_host::config::HostPaths;
 use markiro_host::{start, RunningHost, StartOptions};
+use markiro_standalone_lib::connection::ConnectionState;
 use markiro_standalone_lib::device::DeviceState;
 use markiro_standalone_lib::local_db::LocalDbState;
 use serde_json::{json, Value};
@@ -69,6 +70,7 @@ fn mock_app_with(
     let app = mock_builder()
         .manage(device)
         .manage(local)
+        .manage(ConnectionState::default())
         .invoke_handler(markiro_standalone_lib::invoke_handler())
         .build(mock_context(noop_assets()))
         .unwrap();
@@ -443,4 +445,15 @@ fn a_station_selects_its_line_through_the_ipc_shapes() {
 
     drop(webview);
     host.stop();
+}
+
+/// `src/host/connection.ts` reads this snapshot before the first event.
+#[test]
+fn the_connection_status_has_the_webview_shape() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_app, webview) = mock_app(DeviceState::load(dir.path().to_path_buf()));
+    assert_eq!(
+        invoke(&webview, "connection_status", json!({})),
+        Ok(json!({ "state": "offline", "lastContactAt": null, "lastError": null, "seq": 0 }))
+    );
 }
