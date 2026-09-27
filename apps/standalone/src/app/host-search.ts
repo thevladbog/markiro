@@ -16,8 +16,12 @@ const NUMERIC_HOST = /^[0-9.]+$/;
  * A host address a person typed — `host` or `host:port`, port 45710 when
  * left out — as the URL the shell calls; `null` when it is neither.
  *
- * Read by key position under the Russian layout when the text holds
- * Cyrillic letters: safe for an address, unlike the code, since nothing
+ * Each character is read by key position under the Russian layout only when
+ * it is itself Cyrillic, one at a time: an already-correct dot, comma or
+ * colon typed alongside a Cyrillic one (from the numpad, or a digit-row
+ * shifted key that types a symbol directly under this layout) is left
+ * untouched instead of being remapped as if the whole string were typed
+ * under one layout. Safe for an address, unlike the code, since nothing
  * counts against a wrong one and the fingerprint is confirmed before the
  * code leaves. A comma reads as a dot either way, since the keypad's decimal
  * key types one under the Russian layout.
@@ -28,7 +32,9 @@ const NUMERIC_HOST = /^[0-9.]+$/;
  * `192.168.1.010`) as a different address than its text suggests.
  */
 export function parseHostAddress(input: string): string | null {
-  const keyed = hasCyrillic(input) ? fromRussianLayout(input) : input;
+  const keyed = Array.from(input, (symbol) =>
+    hasCyrillic(symbol) ? fromRussianLayout(symbol) : symbol,
+  ).join("");
   const match = /^([^:\s]+)(?::(\d{1,5}))?$/.exec(keyed.trim().replace(/,/g, "."));
   if (match === null) return null;
   const [, host = "", port] = match;

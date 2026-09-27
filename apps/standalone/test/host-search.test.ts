@@ -20,10 +20,18 @@ describe("parseHostAddress", () => {
     ["host-pc", "https://host-pc:45710"],
     ["host-pc.local:45710", "https://host-pc.local:45710"],
     ["192,168,1,10", "https://192.168.1.10:45710"],
-    // A keyboard-wedge scanner types by key position under the Russian
-    // layout: the main-row period key types "ю", Shift+";" types "Ж".
+    // A person types by key position under the Russian layout: the
+    // main-row period key types "ю", Shift+";" types "Ж".
     ["192ю168ю1ю10Ж8443", "https://192.168.1.10:8443"],
     ["рщые-зс", "https://host-pc:45710"],
+    // Only the Cyrillic characters are read by key position: an already
+    // correct dot, comma or colon typed alongside them (from the numpad, or
+    // a digit-row shifted key that types ":" directly under this layout)
+    // passes through unchanged instead of being remapped as text.
+    ["192,168,1,10Ж8443", "https://192.168.1.10:8443"],
+    ["192,168,1ю10", "https://192.168.1.10:45710"],
+    ["192ю168ю1ю10:8443", "https://192.168.1.10:8443"],
+    ["192.168.1.10Ж8443", "https://192.168.1.10:8443"],
   ])("reads %j", (input, url) => {
     expect(parseHostAddress(input)).toBe(url);
   });

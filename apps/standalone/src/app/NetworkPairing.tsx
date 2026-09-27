@@ -55,7 +55,7 @@ function failureKey(error: unknown): string {
  * was unreadable, came from another host, or could not be saved here): the
  * code may be spent, so the text asks for a new one instead of a retry.
  */
-export const MAYBE_SPENT: ReadonlySet<DeviceErrorCode> = new Set([
+const MAYBE_SPENT: ReadonlySet<DeviceErrorCode> = new Set([
   "invalid_response",
   "host_changed",
   "storage",

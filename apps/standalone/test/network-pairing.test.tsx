@@ -1,11 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import {
-  MAYBE_SPENT,
-  NetworkPairing,
-  type NetworkPairingProps,
-} from "../src/app/NetworkPairing.js";
+import { NetworkPairing, type NetworkPairingProps } from "../src/app/NetworkPairing.js";
 import { DeviceError } from "../src/host/device.js";
 import { HostProbeError, type HelloObservation, type HostProbe } from "../src/host/probe.js";
 import { observation } from "./support/fixtures.js";
@@ -178,7 +174,7 @@ describe("NetworkPairing", () => {
     expect(onClaim).toHaveBeenCalledTimes(1);
   });
 
-  it.each([...MAYBE_SPENT])(
+  it.each(["invalid_response", "host_changed", "storage"] as const)(
     "asks for a new code when the host may already have taken this one (%s)",
     async (code) => {
       const onClaim = vi.fn<NetworkPairingProps["onClaim"]>(async () => {
