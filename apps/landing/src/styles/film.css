@@ -374,8 +374,8 @@
   }
 }
 
-@media (max-width: 47.9375rem) {
-  /* The shared phone menu is painted dark; follow the film theme instead. */
+@media (max-width: 63.9375rem) {
+  /* The shared folded menu is painted dark; follow the film theme instead. */
   .film-top .landing-nav {
     background: var(--surface-card);
   }
