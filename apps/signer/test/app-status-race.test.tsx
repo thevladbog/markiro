@@ -42,6 +42,7 @@ const eventStatus: AgentStatus = {
   lastTokenExpiresAt: null,
   lastError: "boom",
   journal: [],
+  storageNotices: [],
 };
 
 const staleSnapshot: AgentStatus = {
@@ -53,6 +54,7 @@ const staleSnapshot: AgentStatus = {
   lastTokenExpiresAt: null,
   lastError: null,
   journal: [],
+  storageNotices: [],
 };
 
 describe("App status race", () => {

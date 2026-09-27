@@ -78,5 +78,19 @@
     "exporting": "Exporting…",
     "exported": "Journal saved: {{path}}",
     "exportFailed": "Could not export the journal. Choose another folder and try again."
+  },
+  "storage": {
+    "localLessDurable": {
+      "temporaryProfile": "Windows signed you in with a temporary profile. The pairing will be lost when you sign out. Ask your IT team to fix the profile, then pair the agent.",
+      "mandatoryProfile": "This Windows profile is mandatory: changes, including the pairing, are discarded at sign-out. Ask your IT team for a regular profile on this computer.",
+      "deleteRoamingCache": "A domain policy deletes the local profile copy at sign-out, so the agent keeps its data in the roaming profile, which can follow you to other computers. Ask your IT team to review the policy for this computer."
+    },
+    "movePostponed": "The agent data could not be moved out of the roaming profile yet. The agent keeps working and will retry at the next start.",
+    "legacyCleanupPending": "The old copy of the agent data in the roaming profile could not be removed yet. This computer no longer uses it; the agent will retry at the next start.",
+    "roamedCopy": {
+      "sameAgent": "A copy of this agent's pairing appeared in the roaming profile. If the agent also runs on another computer under this Windows account, revoke it in the cabinet and pair only the computer that holds the qualified certificate.",
+      "otherAgent": "Another pairing appeared in the roaming profile. This computer does not use it."
+    },
+    "credentialUnreadable": "The saved pairing cannot be read by this Windows user on this computer. If you have just signed in to the domain, wait a minute; otherwise pair the agent again."
   }
 }
