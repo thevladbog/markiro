@@ -1,7 +1,7 @@
 //! Error responses: an HTTP status plus the protocol's `ErrorBody`, and the
 //! extractors whose rejections must use that body too.
 
-use axum::extract::{FromRequest, FromRequestParts, Path, Request};
+use axum::extract::{FromRequest, FromRequestParts, Path, Query, Request};
 use axum::http::request::Parts;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -161,6 +161,24 @@ where
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         match Path::<T>::from_request_parts(parts, state).await {
             Ok(Path(value)) => Ok(Self(value)),
+            Err(rejection) => Err(ApiError::malformed(rejection.body_text())),
+        }
+    }
+}
+
+/// `Query<T>` whose rejections become `validation_failed`.
+pub struct ApiQuery<T>(pub T);
+
+impl<S, T> FromRequestParts<S> for ApiQuery<T>
+where
+    T: DeserializeOwned,
+    S: Send + Sync,
+{
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        match Query::<T>::from_request_parts(parts, state).await {
+            Ok(Query(value)) => Ok(Self(value)),
             Err(rejection) => Err(ApiError::malformed(rejection.body_text())),
         }
     }

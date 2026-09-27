@@ -1,11 +1,11 @@
 use markiro_proto::{
     certificate_fingerprint, codes, compatibility, compatibility_for, credentials,
-    display_fingerprint, BlockSizesUpdate, BootstrapRequest, BootstrapResponse, ClaimRequest,
-    Compatibility, DeviceInfo, DeviceKind, DeviceLineRequest, DeviceRecord, ErrorBody, Hello,
-    HelloEnvelope, LocalPairRequest, OfficeLoginRequest, OfficeRole, OfficeSession, OfficeUser,
-    OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate, OrgProfile, OrgProfileUpdate,
-    PairResponse, PairingCode, PasswordChange, PasswordSet, SsccCounterUpdate, SsccState,
-    HOST_PRODUCT, PROTOCOL_VERSION,
+    display_fingerprint, BlockSizesUpdate, BootstrapRequest, BootstrapResponse, ChangesResponse,
+    ClaimRequest, Compatibility, DeviceInfo, DeviceKind, DeviceLineRequest, DeviceRecord,
+    ErrorBody, Hello, HelloEnvelope, LineRecord, LocalPairRequest, OfficeLoginRequest, OfficeRole,
+    OfficeSession, OfficeUser, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate, OrgProfile,
+    OrgProfileUpdate, OrgRecord, PairResponse, PairingCode, PasswordChange, PasswordSet,
+    SiteRecord, SsccCounterUpdate, SsccState, HOST_PRODUCT, PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -205,6 +205,25 @@ fn device_line_and_record_fixtures_round_trip() {
     let record: DeviceRecord = round_trip("device-record.json");
     assert_eq!(record.kind, DeviceKind::Station);
     assert_eq!(record.revoked_at, None);
+}
+
+#[test]
+fn the_change_feed_fixture_round_trips_with_typed_records() {
+    let changes: ChangesResponse = round_trip("changes-response.json");
+    assert_eq!(changes.items.len(), 4);
+    let line: LineRecord = serde_json::from_value(changes.items[0].data.clone().unwrap()).unwrap();
+    assert_eq!(
+        line,
+        LineRecord {
+            name: "Линия 2".into(),
+            archived: false
+        }
+    );
+    let org: OrgRecord = serde_json::from_value(changes.items[1].data.clone().unwrap()).unwrap();
+    assert_eq!(org.inn, None);
+    let site: SiteRecord = serde_json::from_value(changes.items[2].data.clone().unwrap()).unwrap();
+    assert_eq!(site.badge_salt.len(), 24);
+    assert!(changes.items[3].deleted && changes.items[3].data.is_none());
 }
 
 #[test]

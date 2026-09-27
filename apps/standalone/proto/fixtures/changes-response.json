@@ -1,0 +1,39 @@
+{
+  "hostId": "3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f",
+  "rev": 42,
+  "hasMore": false,
+  "items": [
+    {
+      "entity": "lines",
+      "id": "5f0c6a52-6a3e-4b9f-9d3c-2b1a0e8f7d61",
+      "rev": 40,
+      "deleted": false,
+      "data": { "name": "Линия 2", "archived": false }
+    },
+    {
+      "entity": "org_profile",
+      "id": "1",
+      "rev": 41,
+      "deleted": false,
+      "data": {
+        "name": "ООО «Атолл»",
+        "inn": null,
+        "gln": "4600682000013",
+        "gs1Prefixes": ["4600682"],
+        "timeZone": "Europe/Moscow"
+      }
+    },
+    {
+      "entity": "site",
+      "id": "1",
+      "rev": 41,
+      "deleted": false,
+      "data": {
+        "badgeSalt": "AAECAwQFBgcICQoLDA0ODw==",
+        "boxBlockSize": 2000,
+        "palletBlockSize": 200
+      }
+    },
+    { "entity": "lines", "id": "0b7e7dcb-3f56-4c43-9a4b-1f0b3b3f8a21", "rev": 42, "deleted": true }
+  ]
+}

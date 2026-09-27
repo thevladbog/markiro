@@ -99,6 +99,47 @@ export const deviceRecordSchema = z.object({
 });
 export type DeviceRecord = z.infer<typeof deviceRecordSchema>;
 
+/** One changed or deleted reference record of `GET /v1/changes`. */
+export const changeItemSchema = z.object({
+  entity: z.string().min(1),
+  id: z.string().min(1),
+  rev: z.number().int().nonnegative(),
+  deleted: z.boolean(),
+  data: z.unknown().optional(),
+});
+export type ChangeItem = z.infer<typeof changeItemSchema>;
+
+/** `GET /v1/changes`: apply `items`, keep `rev`, ask again while `hasMore`. */
+export const changesResponseSchema = z.object({
+  hostId: z.uuid(),
+  rev: z.number().int().nonnegative(),
+  hasMore: z.boolean(),
+  items: z.array(changeItemSchema),
+});
+export type ChangesResponse = z.infer<typeof changesResponseSchema>;
+
+/** `data` of an `org_profile` item. */
+export const orgRecordSchema = z.object({
+  name: z.string(),
+  inn: z.string().nullable(),
+  gln: z.string(),
+  gs1Prefixes: z.array(z.string()),
+  timeZone: z.string(),
+});
+export type OrgRecord = z.infer<typeof orgRecordSchema>;
+
+/** `data` of a `site` item: the badge salt is standard base64 with padding. */
+export const siteRecordSchema = z.object({
+  badgeSalt: z.string().min(1),
+  boxBlockSize: z.number().int().positive(),
+  palletBlockSize: z.number().int().positive(),
+});
+export type SiteRecord = z.infer<typeof siteRecordSchema>;
+
+/** `data` of a `lines` item. */
+export const lineRecordSchema = z.object({ name: z.string(), archived: z.boolean() });
+export type LineRecord = z.infer<typeof lineRecordSchema>;
+
 /** The signed-in office user. */
 export const officeUserSchema = z.object({
   id: z.uuid(),

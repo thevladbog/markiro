@@ -308,6 +308,71 @@ pub struct DeviceRecord {
     pub revoked_at: Option<String>,
 }
 
+/// Entities of the change feed (spec §4.4). Plans 1d and 1e add operators,
+/// badges, products, templates and template defaults.
+pub mod entities {
+    pub const ORG_PROFILE: &str = "org_profile";
+    pub const SITE: &str = "site";
+    pub const LINES: &str = "lines";
+}
+
+/// `GET /v1/changes`: reference records changed after `since`, oldest first.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangesResponse {
+    /// A device paired with another host stops syncing on a mismatch.
+    pub host_id: String,
+    /// Apply `items`, remember this revision, and ask again with `since = rev`
+    /// while `has_more`. Without more items it is the host's current revision.
+    pub rev: i64,
+    pub has_more: bool,
+    pub items: Vec<ChangeItem>,
+}
+
+/// One changed or deleted reference record.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangeItem {
+    /// One of [`entities`].
+    pub entity: String,
+    pub id: String,
+    pub rev: i64,
+    pub deleted: bool,
+    /// The record ([`OrgRecord`], [`SiteRecord`], [`LineRecord`], …); absent
+    /// when `deleted`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<serde_json::Value>,
+}
+
+/// `data` of an `org_profile` item.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrgRecord {
+    pub name: String,
+    pub inn: Option<String>,
+    pub gln: String,
+    pub gs1_prefixes: Vec<String>,
+    pub time_zone: String,
+}
+
+/// `data` of a `site` item: only what stations use.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SiteRecord {
+    /// The site's badge salt: 16 bytes, standard base64 with padding.
+    pub badge_salt: String,
+    pub box_block_size: u32,
+    pub pallet_block_size: u32,
+}
+
+/// `data` of a `lines` item.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LineRecord {
+    pub name: String,
+    pub archived: bool,
+}
+
 /// Role of an office user.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

@@ -6,11 +6,13 @@ import {
   blockSizesUpdateSchema,
   bootstrapRequestSchema,
   bootstrapResponseSchema,
+  changesResponseSchema,
   credentialSchema,
   deviceInfoSchema,
   deviceRecordSchema,
   errorBodySchema,
   helloSchema,
+  lineRecordSchema,
   officeLoginRequestSchema,
   officeSessionSchema,
   officeUserCreateSchema,
@@ -19,9 +21,11 @@ import {
   officeUserUpdateSchema,
   orgProfileSchema,
   orgProfileUpdateSchema,
+  orgRecordSchema,
   pairingCodeSchema,
   passwordChangeSchema,
   passwordSetSchema,
+  siteRecordSchema,
   ssccCounterUpdateSchema,
   ssccStateSchema,
 } from "../src/host/protocol.js";
@@ -80,6 +84,19 @@ describe("protocol schemas parse the shared Rust fixtures", () => {
       lineId: "5f0c6a52-6a3e-4b9f-9d3c-2b1a0e8f7d61",
       revokedAt: null,
     });
+  });
+
+  it("change feed", () => {
+    const changes = changesResponseSchema.parse(fixture("changes-response.json"));
+    expect(changes.items).toHaveLength(4);
+    expect(lineRecordSchema.parse(changes.items[0]?.data)).toEqual({
+      name: "Линия 2",
+      archived: false,
+    });
+    expect(orgRecordSchema.parse(changes.items[1]?.data).inn).toBeNull();
+    expect(siteRecordSchema.parse(changes.items[2]?.data).boxBlockSize).toBe(2000);
+    expect(changes.items[3]).toMatchObject({ deleted: true });
+    expect(changes.items[3]?.data).toBeUndefined();
   });
 });
 
