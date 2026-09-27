@@ -168,7 +168,7 @@ describe("rendered landing page", () => {
       articleDocument.querySelector('script[type="application/ld+json"]')?.textContent ?? "",
     ) as { "@graph": Array<Record<string, unknown>> };
     expect(graph["@graph"].find((entry) => entry["@type"] === "Article")).toMatchObject({
-      dateModified: "2026-08-26",
+      dateModified: "2026-09-27",
       datePublished: "2026-08-26",
       headline: "Агрегация пива в короба: как не остановить производственную линию",
       image: "https://markiro.app/og-beer-case-aggregation.jpg",
@@ -225,7 +225,7 @@ describe("rendered landing page", () => {
       articleDocument.querySelector('script[type="application/ld+json"]')?.textContent ?? "",
     ) as { "@graph": Array<Record<string, unknown>> };
     expect(graph["@graph"].find((entry) => entry["@type"] === "Article")).toMatchObject({
-      dateModified: "2026-08-26",
+      dateModified: "2026-09-27",
       datePublished: "2026-08-26",
       headline: "Маркировка пива в 2026 году: что проверить производителю на линии",
       image: "https://markiro.app/og-beer-marking-2026.jpg",
@@ -380,7 +380,7 @@ describe("rendered landing page", () => {
         localizedDocument.querySelector('script[type="application/ld+json"]')?.textContent ?? "",
       ) as { "@graph": Array<Record<string, unknown>> };
       expect(graph["@graph"].find((entry) => entry["@type"] === "Article")).toMatchObject({
-        dateModified: "2026-08-26",
+        dateModified: "2026-09-27",
         datePublished: "2026-08-26",
         inLanguage: article.lang,
       });
@@ -457,7 +457,7 @@ describe("rendered landing page", () => {
         localizedDocument.querySelector('script[type="application/ld+json"]')?.textContent ?? "",
       ) as { "@graph": Array<Record<string, unknown>> };
       expect(graph["@graph"].find((entry) => entry["@type"] === "Article")).toMatchObject({
-        dateModified: "2026-08-26",
+        dateModified: "2026-09-27",
         datePublished: "2026-08-26",
         inLanguage: article.lang,
       });
@@ -540,7 +540,7 @@ describe("rendered landing page", () => {
         localizedDocument.querySelector('script[type="application/ld+json"]')?.textContent ?? "",
       ) as { "@graph": Array<Record<string, unknown>> };
       expect(graph["@graph"].find((entry) => entry["@type"] === "Article")).toMatchObject({
-        dateModified: "2026-08-26",
+        dateModified: "2026-09-27",
         datePublished: "2026-08-26",
         inLanguage: article.lang,
       });
@@ -627,7 +627,7 @@ describe("rendered landing page", () => {
         localizedDocument.querySelector('script[type="application/ld+json"]')?.textContent ?? "",
       ) as { "@graph": Array<Record<string, unknown>> };
       expect(graph["@graph"].find((entry) => entry["@type"] === "Article")).toMatchObject({
-        dateModified: "2026-08-26",
+        dateModified: "2026-09-27",
         datePublished: "2026-08-26",
         image: "https://markiro.app/og-beer-datamatrix-application.jpg",
         inLanguage: article.lang,
@@ -665,7 +665,7 @@ describe("rendered landing page", () => {
         alternate: "/en/articles/offline-beer-marking-russia/",
         alternateLang: "en",
         diagramPrefix: "markirovka-piva-offline",
-        localBoundary: "единица → короб → SSCC",
+        localBoundary: "единица → короб → паллета",
         durableClaim: /журнал.*перезапуск|перезапуск.*журнал/i,
         noFalseSuccess: /не.*зелёный успех|не показывать ложный успех/i,
         backlinkRoute: "stati/agregatsiya-piva-v-koroba",
@@ -677,7 +677,7 @@ describe("rendered landing page", () => {
         alternate: "/stati/markirovka-piva-bez-interneta/",
         alternateLang: "ru",
         diagramPrefix: "offline-beer-marking",
-        localBoundary: "item → case → SSCC",
+        localBoundary: "item → case → pallet",
         durableClaim: /journal.*restart|restart.*journal/i,
         noFalseSuccess: /must not invent|never display false success/i,
         backlinkRoute: "en/articles/beer-case-aggregation",
@@ -721,7 +721,7 @@ describe("rendered landing page", () => {
         localizedDocument.querySelector('script[type="application/ld+json"]')?.textContent ?? "",
       ) as { "@graph": Array<Record<string, unknown>> };
       expect(graph["@graph"].find((entry) => entry["@type"] === "Article")).toMatchObject({
-        dateModified: "2026-08-26",
+        dateModified: "2026-09-27",
         datePublished: "2026-08-26",
         image: "https://markiro.app/og-offline-beer-marking.jpg",
         inLanguage: article.lang,
@@ -759,7 +759,7 @@ describe("rendered landing page", () => {
         alternate: "/en/articles/duplicate-beer-marking-code-russia/",
         alternateLang: "en",
         diagramPrefix: "dubl-koda-markirovki-pivo",
-        chain: "единица → короб → SSCC",
+        chain: "единица → короб → паллета",
         reportClaim: /потерянный ответ не доказывает/i,
         identityClaim: /один товар — одна уникальная идентичность/i,
         backlinkRoute: "stati/markirovka-piva-bez-interneta",
@@ -771,7 +771,7 @@ describe("rendered landing page", () => {
         alternate: "/stati/dubl-koda-markirovki-pivo/",
         alternateLang: "ru",
         diagramPrefix: "duplicate-beer-marking-code",
-        chain: "item → case → SSCC",
+        chain: "item → case → pallet",
         reportClaim: /missing response does not prove/i,
         identityClaim: /one physical product, one unique identity/i,
         backlinkRoute: "en/articles/offline-beer-marking-russia",
@@ -815,7 +815,7 @@ describe("rendered landing page", () => {
         localizedDocument.querySelector('script[type="application/ld+json"]')?.textContent ?? "",
       ) as { "@graph": Array<Record<string, unknown>> };
       expect(graph["@graph"].find((entry) => entry["@type"] === "Article")).toMatchObject({
-        dateModified: "2026-08-27",
+        dateModified: "2026-09-27",
         datePublished: "2026-08-27",
         image: "https://markiro.app/og-duplicate-beer-marking.jpg",
         inLanguage: article.lang,
@@ -1270,12 +1270,16 @@ describe("rendered landing page", () => {
     expect(ruSscc).toContain("у паллеты свой SSCC и своя этикетка");
     expect(ruSscc).not.toContain("будет добавлена отдельным следующим этапом");
     expect(ruSscc).not.toContain("Пока нет");
+    expect(ruSscc).not.toContain("у Markiro это короб.");
+    expect(ruSscc).not.toContain("связывает короб с его составом");
 
     const enSscc = documents.get("/en/sscc-and-aggregation/")?.body.textContent ?? "";
     expect(enSscc).toContain("The item → case → pallet chain is supported");
     expect(enSscc).toContain("the pallet gets its own SSCC and label");
     expect(enSscc).not.toContain("will be added as a separate next stage");
     expect(enSscc).not.toContain("Not yet");
+    expect(enSscc).not.toContain("a case in Markiro");
+    expect(enSscc).not.toContain("connects the case to its contents");
 
     const ruSerialization = documents.get("/markirovka-chestny-znak/")?.body.textContent ?? "";
     expect(ruSerialization).toContain("связь единицы с коробом и короба с паллетой");
@@ -1287,6 +1291,28 @@ describe("rendered landing page", () => {
       "the relationship between an item and its case, and between a case and its pallet",
     );
     expect(enSerialization).not.toContain("the relationship between an item, case, or pallet");
+
+    const ruFaq = documents.get("/faq/")?.body.textContent ?? "";
+    expect(ruFaq).toContain(
+      "Да. Единицы собираются в короб с SSCC, короба — в паллету со своим SSCC: на станции упаковки или на ТСД.",
+    );
+    expect(ruFaq).not.toContain("Пока нет");
+    expect(ruFaq).not.toContain("после паллетной агрегации");
+
+    const enFaq = documents.get("/en/faq/")?.body.textContent ?? "";
+    expect(enFaq).toContain(
+      "Yes. Items are aggregated into a case with an SSCC, and cases into a pallet with its own SSCC, on the packing workstation or on the handheld.",
+    );
+    expect(enFaq).not.toContain("Not yet");
+    expect(enFaq).not.toContain("after pallet aggregation");
+
+    const ru1c = documents.get("/integratsiya-1c/")?.body.textContent ?? "";
+    expect(ru1c).toContain("Выгрузка отгрузок по CommerceML запланирована следующим этапом.");
+    expect(ru1c).not.toContain("после паллетной агрегации");
+
+    const en1c = documents.get("/en/1c-integration/")?.body.textContent ?? "";
+    expect(en1c).toContain("Shipment export over CommerceML is planned as the next stage.");
+    expect(en1c).not.toContain("after pallet aggregation");
   });
 
   it("renders the rollout, documents, articles and demo sections", () => {

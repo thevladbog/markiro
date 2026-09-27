@@ -231,7 +231,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       "Markiro собирает маркированное пиво и слабоалкогольные напитки в короба, проверяет SSCC и сохраняет историю агрегации и восстановления.",
     heading: "SSCC и агрегация коробов для пивной продукции",
     navigationLabel: "SSCC и агрегация",
-    eyebrow: "Единица → короб",
+    eyebrow: "Единица → короб → паллета",
     introduction:
       "Markiro сейчас ориентирован на производственные сценарии товарной группы «Пиво, напитки, изготавливаемые на основе пива, слабоалкогольные напитки», включая сидр. Новые товарные группы добавляются поэтапно. Для конкретного товара применимость проверяется по кодам ТН ВЭД ЕАЭС и ОКПД 2 и фактическому процессу линии.",
     socialImage: SHARED_IMAGE,
@@ -324,7 +324,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       {
         question: "Чем SSCC отличается от кода маркировки?",
         answer:
-          "SSCC — 18-значный номер логистической единицы, у Markiro это короб. Код маркировки идентифицирует потребительскую единицу, а SSCC связывает короб с его составом и уровнем в иерархии упаковки.",
+          "SSCC — 18-значный номер логистической единицы, в Markiro это короб или паллета. Код маркировки идентифицирует потребительскую единицу, а SSCC связывает короб или паллету с составом и уровнем в иерархии упаковки.",
       },
       {
         question: "Откуда станция берёт номера SSCC?",
@@ -1056,7 +1056,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       "Markiro aggregates serialized beer and low-alcohol beverages into cases, validates SSCC relationships, and retains recovery history.",
     heading: "SSCC case aggregation for beer production",
     navigationLabel: "SSCC and aggregation",
-    eyebrow: "Item → case",
+    eyebrow: "Item → case → pallet",
     introduction:
       "Markiro currently focuses on production workflows for the Chestny ZNAK product group “Beer, beverages made from beer and low-alcohol beverages”, including cider. Additional product categories are being added gradually. Applicability to a specific product is checked against its TN VED EAEU and OKPD 2 codes and the actual line process.",
     socialImage: SHARED_IMAGE,
@@ -1153,7 +1153,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       {
         question: "How does an SSCC differ from a serialized code?",
         answer:
-          "An SSCC is the 18-digit number of a logistics unit, a case in Markiro. A serialized code identifies one consumer unit, while the SSCC connects the case to its contents and its level in the packaging hierarchy.",
+          "An SSCC is the 18-digit number of a logistics unit, a case or a pallet in Markiro. A serialized code identifies one consumer unit, while the SSCC connects the case or pallet to its contents and its level in the packaging hierarchy.",
       },
       {
         question: "Where does the station get SSCC numbers?",

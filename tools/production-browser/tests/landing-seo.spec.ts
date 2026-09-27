@@ -706,6 +706,12 @@ test.describe("home page", () => {
 
     const reject = page.locator("[data-consent-reject]");
     await reject.hover();
+    // The resting background is already transparent, so polling it alone could pass before the
+    // hover style actually applied. Poll the border color (which only changes on hover) first to
+    // synchronize on the hover state, then assert the background it implies.
+    await expect
+      .poll(() => reject.evaluate((element) => getComputedStyle(element).borderTopColor))
+      .toBe("rgb(142, 139, 131)");
     await expect
       .poll(() => reject.evaluate((element) => getComputedStyle(element).backgroundColor))
       .toBe("rgba(0, 0, 0, 0)");
