@@ -293,12 +293,22 @@ describe("reference sync", () => {
 
   it("refuses a feed that claims more pages without advancing the revision", async () => {
     const { executor } = openLocalDb();
-    // Answers every `since` with a page at that same revision, forever.
-    const changes = vi.fn(async (since: number) => page(since, [], true));
+    // Answers every `since` with a page at that same revision, forever — but
+    // bounded, so a regression that drops the guard fails this test fast
+    // (a distinct error) instead of hanging it: the retry loop only awaits
+    // already-resolved promises, so it starves Vitest's own timer and its
+    // `--testTimeout` never fires (see the fix-round report).
+    let calls = 0;
+    const changes = vi.fn(async (since: number) => {
+      calls += 1;
+      if (calls > 5) throw new Error("the loop did not stop");
+      return page(since, [], true);
+    });
     await expect(syncReferences({ changes, local: executor, hostId: HOST_ID })).rejects.toThrow(
       /no progress/,
     );
-    // Caught on the first page, not after looping.
+    // The guard's own message, not the bound's: proves the guard stopped the
+    // loop, not the counter. Caught on the first page, not after looping.
     expect(changes).toHaveBeenCalledTimes(1);
   });
 
