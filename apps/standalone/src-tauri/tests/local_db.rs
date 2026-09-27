@@ -48,8 +48,9 @@ async fn lines(db: &LocalDb) -> Value {
 /// migration that adds a table makes this assertion fail, on purpose, so
 /// whoever adds it must decide whether it is another copy (extend the list
 /// here) or the first data this device owns instead — the scan journal,
-/// boxes, the outbox (stage 1 spec §6.2) — which `clear_copies` and
-/// `device_forget` then need to treat deliberately, not silently wipe.
+/// boxes, the outbox (the station design's §6.2, "Логическая модель") —
+/// which `clear_copies` and `device_forget` then need to treat deliberately,
+/// not silently wipe.
 #[tokio::test]
 async fn opening_creates_the_reference_tables_in_wal_mode_and_keeps_data() {
     let (dir, db) = open().await;

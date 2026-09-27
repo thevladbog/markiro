@@ -225,6 +225,18 @@ describe("LineSelect", () => {
     );
   });
 
+  it("shows the quarantine count while no lines are listed and the sync failed, without the failure line", () => {
+    // The restart case for a station without a line yet: the run that just
+    // failed still read a count (item A), and it must show here too, even
+    // though the failure line itself is left to this screen's own alert.
+    renderLineSelect(
+      { kind: "failed", synced: 0, failure: "host", quarantined: 2 },
+      { link: { state: "online", lastContactAt: 1_790_000_000_000, lastError: null, seq: 1 } },
+    );
+    expect(screen.getByText("Не приняты записи справочников: 2")).toBeTruthy();
+    expect(screen.queryByText("Справочники не обновились — повторим автоматически")).toBeNull();
+  });
+
   it("shows no failure line while a retry runs with no lines listed yet", () => {
     renderLineSelect(
       { kind: "running", synced: 0, failure: "host", quarantined: 0 },

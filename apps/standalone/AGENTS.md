@@ -130,8 +130,8 @@ the commit. The tables come from `pragma_table_list` (`type IN ('table',
 'virtual')`), so one a later migration adds is covered, PIN and badge hashes
 included. Every table here is treated as a disposable copy of the host's
 data: the first plan that adds data this device owns instead of copies —
-the scan journal, boxes, the outbox (stage 1 spec §6.2) — must exclude those
-tables from `clear_copies` and block or confirm a forget while unsynced
+the scan journal, boxes, the outbox (the design's §6.2, "Логическая модель")
+— must exclude those tables from `clear_copies` and block or confirm a forget while unsynced
 records exist, not extend this list silently. If clearing fails, the
 command fails with `storage` and the pairing stays for another try; without
 a local database (it did not open) there is nothing this app can clear, and

@@ -360,8 +360,15 @@ describe("reference sync", () => {
   it("keeps the previous copies when the rollback's own refetch fails", async () => {
     const { db, executor } = openLocalDb();
     await syncedTwoLines(executor);
+    // A quarantined record, so the assertion below actually proves something
+    // survives, not merely that an already-empty table stays empty.
+    db.prepare(
+      "INSERT INTO sync_quarantine (entity, id, rev, reason, seen_at) " +
+        "VALUES ('site', '1', 5, 'badgeSalt: invalid_format', 1790000000000)",
+    ).run();
     const before = tables(db);
     const quarantineBefore = quarantine(db);
+    expect(quarantineBefore).toHaveLength(1);
     // The host went back (rev < since), but the refetch from zero — the
     // request that would carry the deferred wipe — never lands.
     const changes = vi.fn(async (since: number) => {
@@ -684,6 +691,32 @@ describe("reference sync", () => {
     });
   });
 
+  it("recovers from a state with entity_set and last_rev but no host_id row, instead of looping on changes_mismatch forever", async () => {
+    const { db, executor } = openLocalDb();
+    // A state today's writers cannot produce (every write sets `host_id`
+    // together with `entity_set`/`last_rev`), but a partial restore, a manual
+    // edit, or a future writer could: the "no copies without a host_id"
+    // invariant broken.
+    db.prepare(
+      "INSERT INTO sync_state (key, value) VALUES ('last_rev', '99'), ('entity_set', ?)",
+    ).run(ENTITY_SET);
+    const changes = feed({
+      0: page(12, [line(LINE_1, 12, "Линия 1")]),
+      // Only reached if a regression drops `stored.hostId === hostId` from
+      // the continuing branch: it would treat the seeded (host-id-less)
+      // state as already synced and fetch from here instead of zero.
+      99: page(100, [line(LINE_1, 100, "Линия 1 (в потоке 99)")]),
+    });
+    await expect(syncReferences({ changes, local: executor, hostId: HOST_ID })).resolves.toEqual({
+      kind: "synced",
+      rev: 12,
+      quarantined: 0,
+    });
+    expect(changes).toHaveBeenCalledTimes(1);
+    expect(changes).toHaveBeenCalledWith(0);
+    expect(tables(db).state).toEqual(state(12));
+  });
+
   it("fails a page committed after clear_copies wiped the local copies mid-flight, instead of resurrecting them", async () => {
     const { db, executor } = openLocalDb();
     await syncReferences({
@@ -727,8 +760,15 @@ describe("reference sync", () => {
     await syncedTwoLines(executor);
     // A build with a different entity set arms a deferred wipe for the next page.
     db.prepare("UPDATE sync_state SET value = 'org_profile,lines' WHERE key = 'entity_set'").run();
+    // A quarantined record, so the assertion below actually proves the armed
+    // wipe never ran, not merely that an already-empty table stays empty.
+    db.prepare(
+      "INSERT INTO sync_quarantine (entity, id, rev, reason, seen_at) " +
+        "VALUES ('site', '1', 5, 'badgeSalt: invalid_format', 1790000000000)",
+    ).run();
     const before = tables(db);
     const quarantineBefore = quarantine(db);
+    expect(quarantineBefore).toHaveLength(1);
     const changes = feed({ 0: page(42, [ORG, line(LINE_1, 42, "Линия 1")], false, OTHER_HOST) });
     await expect(syncReferences({ changes, local: executor, hostId: HOST_ID })).resolves.toEqual({
       kind: "other_host",
@@ -777,6 +817,24 @@ describe("reference sync", () => {
     expect(tables(db).lines).toEqual([{ id: LINE_1, name: "Линия 1", archived: 0, rev: 42 }]);
     // Records of another build's entities are not this build's to judge.
     expect(quarantine(db)).toEqual([]);
+  });
+
+  it("fails the run when a successful page's own count read fails, instead of reporting quarantined: 0", async () => {
+    const { executor } = openLocalDb();
+    // The page's own write succeeds; only the trailing count read fails.
+    const local: LocalExecutor = {
+      query: (sql, params, row) => {
+        if (sql.includes("sync_quarantine")) {
+          return Promise.reject(new LocalDbError("statement_failed", "disk I/O error"));
+        }
+        return executor.query(sql, params, row);
+      },
+      transaction: (statements) => executor.transaction(statements),
+    };
+    const changes = feed({ 0: page(42, [line(LINE_1, 42, "Линия 1")]) });
+    const run = syncReferences({ changes, local, hostId: HOST_ID });
+    await expect(run).rejects.toBeInstanceOf(LocalDbError);
+    await expect(run).rejects.toMatchObject({ code: "statement_failed" });
   });
 });
 

@@ -218,11 +218,14 @@ const WRITE_HOST_ID =
  *   rewrite the old pairing's copies into a device that was told to forget
  *   them.
  *
- * Every run stamps `host_id` to its own `hostId` before its first fetch (the
- * two branches above, in `syncReferences`), so a well-behaved run always
- * satisfies this. Placed first in every batch: a `DELETE FROM sync_state`
- * later in the same batch would remove the `host_id` row this statement
- * reads.
+ * Every run stamps `host_id` to its own `hostId` before its first fetch: two
+ * of the three branches of `syncReferences` (below) write that stamp
+ * themselves (a re-pair, or this device's very first sync); the third, the
+ * continuing branch, writes nothing and instead requires the stamp a
+ * previous run already left to still read `hostId`, so a well-behaved run
+ * always satisfies this guard. Placed first in every batch: a `DELETE FROM
+ * sync_state` later in the same batch would remove the `host_id` row this
+ * statement reads.
  */
 function hostGuard(hostId: string): LocalStatement {
   return {
@@ -236,18 +239,31 @@ const stateRow = z.object({ key: z.string(), value: z.string() });
 const countRow = z.object({ n: z.number().int().nonnegative() });
 
 /**
- * `sync_quarantine`'s current size. A successful run reports it as
- * `SyncResult.quarantined`; a failed run's catch (`useHostLink`) reads it
- * too, so the station and the office still show how many records are
- * quarantined after a run that never got that far — a restart with the host
- * away, say. Returns `null` if the query itself fails, so a caller with
+ * `sync_quarantine`'s current size, for a successful run's own
+ * `SyncResult.quarantined`. Throws if the read itself fails: a page that
+ * just committed cleanly must not be reported `quarantined: 0` merely
+ * because the trailing count could not be read — the run fails instead,
+ * exactly as a failure earlier in the same page would.
+ */
+async function countQuarantined(local: LocalExecutor): Promise<number> {
+  const [count] = await local.query("SELECT count(*) AS n FROM sync_quarantine", [], countRow);
+  return count?.n ?? 0;
+}
+
+/**
+ * `sync_quarantine`'s current size for a run that did not reach
+ * `countQuarantined` above — a failed run's catch (`useHostLink`) reads it,
+ * so the station and the office still show how many records are quarantined
+ * after a run that never got that far, a restart with the host away
+ * included. Returns `null` if the query itself fails, so a caller with
  * nothing better to show can keep whatever count it already had instead of
- * replacing it with a wrong zero.
+ * replacing it with a wrong zero; unlike `countQuarantined`, that fallback is
+ * the right call here, since there is no page write for a read failure to
+ * contradict.
  */
 export async function readQuarantineCount(local: LocalExecutor): Promise<number | null> {
   try {
-    const [count] = await local.query("SELECT count(*) AS n FROM sync_quarantine", [], countRow);
-    return count?.n ?? 0;
+    return await countQuarantined(local);
   } catch {
     return null;
   }
@@ -400,11 +416,7 @@ export async function syncReferences({
     wipe = false;
     since = page.rev;
     if (!page.hasMore) {
-      return {
-        kind: "synced",
-        rev: page.rev,
-        quarantined: (await readQuarantineCount(local)) ?? 0,
-      };
+      return { kind: "synced", rev: page.rev, quarantined: await countQuarantined(local) };
     }
   }
 }
