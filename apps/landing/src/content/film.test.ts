@@ -121,9 +121,23 @@ describe("film page copy", () => {
     }
   });
 
+  it("opens as a tour of one production day, with its own copy", () => {
+    const [ruDistrict] = findFilmPage("ru").chapters;
+    expect([ruDistrict?.kicker, ruDistrict?.title, ruDistrict?.body]).toEqual([
+      "КАК РАБОТАЕТ MARKIRO",
+      "Один день на производстве",
+      "От утренней смены до ночи: линия, упаковка, склад, работа без сети, киоск и офис. На каждой остановке видно, что делает Markiro и кто с ним работает.",
+    ]);
+    const [enDistrict] = findFilmPage("en").chapters;
+    expect([enDistrict?.kicker, enDistrict?.title, enDistrict?.body]).toEqual([
+      "HOW MARKIRO WORKS",
+      "A day at the plant",
+      "From the morning shift to night: the line, packing, the warehouse, working offline, the kiosk and the office. Each stop shows what Markiro does and who uses it.",
+    ]);
+  });
+
   it("uses the reviewed Russian copy", () => {
-    const [district, line] = findFilmPage("ru").chapters;
-    expect(district?.title).toBe("Маркировка и агрегация. Линия идёт.");
+    const [, line] = findFilmPage("ru").chapters;
     expect(line?.title).toBe("Каждый код проверяем до короба.");
     expect(line?.body).toBe(
       "Станция не пустит в короб повторный код, код чужого товара или код с ошибкой. Оператор видит причину на экране.",

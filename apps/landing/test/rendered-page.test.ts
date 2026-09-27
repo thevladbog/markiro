@@ -1217,6 +1217,19 @@ describe("rendered landing page", () => {
     }
   });
 
+  it("opens the film page with a title of its own, different from the home hero", () => {
+    // The home title is two spans, so compare the letters without any whitespace.
+    const heading = (route: string) =>
+      documents.get(route)?.querySelector("h1")?.textContent?.replace(/\s+/gu, "") ?? "";
+    for (const [home, film] of [
+      ["/", "/kak-rabotaet/"],
+      ["/en/", "/en/how-it-works/"],
+    ] as const) {
+      expect(heading(film), film).not.toBe("");
+      expect(heading(film), film).not.toBe(heading(home));
+    }
+  });
+
   it("renders the offline, traceability and film sections", () => {
     for (const [route, filmPath] of [
       ["/", "/kak-rabotaet/"],
