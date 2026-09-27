@@ -1,9 +1,11 @@
-//! On-disk agent state under `%APPDATA%\app.markiro.signer\signer.json`.
+//! On-disk agent state: `signer.json` in `%LOCALAPPDATA%\app.markiro.signer\`,
+//! moved once from the roaming `%APPDATA%` folder by `storage_location`.
 //!
 //! The agent secret is never stored in the clear: `agent_secret_protected`
-//! holds a base64 DPAPI blob (see `storage_dpapi.rs`), which is bound to the
-//! Windows user account, so copying the file to another machine or profile
-//! yields nothing.
+//! holds a base64 user-scope DPAPI blob (see `storage_dpapi.rs`). Another
+//! Windows user cannot decrypt it, but the same user can on any computer that
+//! has their DPAPI keys, which a roaming profile or redirected AppData
+//! provides. That is why this file must stay in non-roaming storage.
 
 use std::fs;
 use std::io::Write as _;

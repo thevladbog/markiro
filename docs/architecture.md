@@ -472,6 +472,13 @@ external integration, or production environment.
   single-consumption, attempt-lockout, and source/global rate-limit policy —
   not credential generation. Their credentials retain separate headers,
   guards, persistence, and device tables.
+- **Signer agent: separate secret.** The Chestny ZNAK signer redeems a
+  single-use pairing code for a random agent secret; the API stores only its
+  hash and authenticates `x-signer-token` against it. The agent keeps the
+  secret under user-scope DPAPI in `%LOCALAPPDATA%`, never in the roaming
+  profile: DPAPI user keys roam with a roaming profile or redirected AppData,
+  so a roamed copy would decrypt on another computer and clone the agent
+  (`docs/superpowers/specs/2026-09-27-signer-local-storage-design.md`).
 
 ### Cabinet authorization
 

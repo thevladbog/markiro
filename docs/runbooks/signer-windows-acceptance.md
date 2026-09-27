@@ -65,6 +65,39 @@ operator, date, and result next to the release evidence.
 - [ ] A successful installation relaunches the new version and retains pairing,
       certificate selection, and the DPAPI-protected agent credential.
 
+## Local storage
+
+Run these on the first release that moves the agent data out of the roaming
+profile (`docs/superpowers/specs/2026-09-27-signer-local-storage-design.md`),
+starting from a paired previous stable with a selected certificate.
+
+- [ ] After the update the agent keeps its identity: the cabinet shows no new
+      agent, the certificate selection is kept, and the next token refresh
+      completes through CryptoPoint.
+- [ ] `%LOCALAPPDATA%\app.markiro.signer\` holds `signer.json`,
+      `signer-storage.json` and `journal\`; `%APPDATA%\app.markiro.signer\`
+      no longer exists.
+- [ ] The journal shows "Agent data moved out of the roaming profile" once, and
+      the earlier events are still listed.
+- [ ] Restarting the agent moves nothing again and adds no storage entry.
+- [ ] Copy `signer.json` from the local folder into a new
+      `%APPDATA%\app.markiro.signer\` and restart: the agent keeps working, the
+      Status tab reports a copy of this agent's pairing in the roaming profile,
+      and the copy is left untouched.
+
+### Domain checks (test Active Directory)
+
+- [ ] Roaming profile: move on computer A, sign out, and check that the profile
+      share no longer holds `app.markiro.signer`. Sign in on computer B with the
+      Signer installed: it shows the pairing screen, not A's identity.
+- [ ] AppData(Roaming) redirection: computer B still on the previous version
+      shows the pairing screen within one poll after A upgrades.
+- [ ] Redirection without Offline Files, share taken offline: the Status or
+      pairing screen reports an unreadable credential, `signer.json` is kept,
+      and the agent recovers when the share returns.
+- [ ] `DeleteRoamingCache = 1`, a temporary profile and a mandatory profile:
+      nothing moves and the Status tab explains why.
+
 ## Evidence
 
 Attach screenshots of all five badge colors on both taskbar themes, the manual
