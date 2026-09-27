@@ -1170,6 +1170,38 @@ describe("rendered landing page", () => {
     }
   });
 
+  it("links the office row to the admin panel group of the instructions hub", () => {
+    for (const [route, hub, prefix] of [
+      ["/", "/instruktsii/", "Кабинет:"],
+      ["/en/", "/en/instructions/", "Cabinet:"],
+    ] as const) {
+      const href =
+        documents.get(route)?.querySelector("#product-office a.text-link")?.getAttribute("href") ??
+        "";
+      const [target, fragment = ""] = href.split("#");
+      expect(target, route).toBe(hub);
+      const group = documents.get(hub)?.getElementById(fragment);
+      expect(group, `${route} -> ${href}`).not.toBeNull();
+      const titles = [...(group?.querySelectorAll(".legal-registry__title") ?? [])].map(
+        (title) => title.textContent ?? "",
+      );
+      expect(titles.length, href).toBeGreaterThan(0);
+      for (const title of titles) expect(title.startsWith(prefix), title).toBe(true);
+    }
+  });
+
+  it("gives every hub group an id without spaces that labels its section", () => {
+    for (const hub of HUB_ROUTES) {
+      const document = documents.get(hub);
+      for (const section of document?.querySelectorAll("section.legal-registry") ?? []) {
+        expect(section.id, hub).toMatch(/^hub-group-[a-z0-9]+(-[a-z0-9]+)*$/u);
+        const label = section.getAttribute("aria-labelledby") ?? "";
+        expect(label, hub).toMatch(/^\S+$/u);
+        expect(document?.getElementById(label)?.tagName, `${hub} ${label}`).toBe("H2");
+      }
+    }
+  });
+
   it("shows every product part on a framed screen and links it to its page", () => {
     for (const [route, links] of [
       [
@@ -1177,7 +1209,7 @@ describe("rendered landing page", () => {
         [
           "/markirovka-chestny-znak/",
           "/kak-rabotaet/#warehouse",
-          "/instruktsii/",
+          "/instruktsii/#hub-group-cabinet",
           "/kiosk-samovydachi/",
           "/integratsiya-1c/",
         ],
@@ -1187,7 +1219,7 @@ describe("rendered landing page", () => {
         [
           "/en/chestny-znak-serialization/",
           "/en/how-it-works/#warehouse",
-          "/en/instructions/",
+          "/en/instructions/#hub-group-cabinet",
           "/en/self-service-pickup-kiosk/",
           "/en/1c-integration/",
         ],
