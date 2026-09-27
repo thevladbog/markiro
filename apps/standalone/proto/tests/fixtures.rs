@@ -1,10 +1,11 @@
 use markiro_proto::{
     certificate_fingerprint, codes, compatibility, compatibility_for, credentials,
     display_fingerprint, BlockSizesUpdate, BootstrapRequest, BootstrapResponse, ClaimRequest,
-    Compatibility, DeviceInfo, DeviceKind, ErrorBody, Hello, HelloEnvelope, LocalPairRequest,
-    OfficeLoginRequest, OfficeRole, OfficeSession, OfficeUser, OfficeUserCreate, OfficeUserRecord,
-    OfficeUserUpdate, OrgProfile, OrgProfileUpdate, PairResponse, PairingCode, PasswordChange,
-    PasswordSet, SsccCounterUpdate, SsccState, HOST_PRODUCT, PROTOCOL_VERSION,
+    Compatibility, DeviceInfo, DeviceKind, DeviceLineRequest, DeviceRecord, ErrorBody, Hello,
+    HelloEnvelope, LocalPairRequest, OfficeLoginRequest, OfficeRole, OfficeSession, OfficeUser,
+    OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate, OrgProfile, OrgProfileUpdate,
+    PairResponse, PairingCode, PasswordChange, PasswordSet, SsccCounterUpdate, SsccState,
+    HOST_PRODUCT, PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -192,6 +193,18 @@ fn claim_request_round_trips_rejects_unknown_fields_and_hides_the_code() {
     let mut value = fixture("claim-request.json");
     value["extra"] = Value::Bool(true);
     assert!(serde_json::from_value::<ClaimRequest>(value).is_err());
+}
+
+#[test]
+fn device_line_and_record_fixtures_round_trip() {
+    let request: DeviceLineRequest = round_trip("device-line-request.json");
+    assert_eq!(request.line_id, "5f0c6a52-6a3e-4b9f-9d3c-2b1a0e8f7d61");
+    let mut value = fixture("device-line-request.json");
+    value["extra"] = Value::Bool(true);
+    assert!(serde_json::from_value::<DeviceLineRequest>(value).is_err());
+    let record: DeviceRecord = round_trip("device-record.json");
+    assert_eq!(record.kind, DeviceKind::Station);
+    assert_eq!(record.revoked_at, None);
 }
 
 #[test]

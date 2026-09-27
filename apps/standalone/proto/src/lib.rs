@@ -287,6 +287,27 @@ pub struct DeviceInfo {
     pub paired_at: String,
 }
 
+/// `PUT /v1/device/line`: a station chooses the line it works on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DeviceLineRequest {
+    pub line_id: String,
+}
+
+/// A paired device as the administrator sees it (`GET /v1/office/devices`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceRecord {
+    pub id: String,
+    pub kind: DeviceKind,
+    pub name: String,
+    pub line_id: Option<String>,
+    pub app_version: String,
+    pub paired_at: String,
+    pub last_seen_at: Option<String>,
+    pub revoked_at: Option<String>,
+}
+
 /// Role of an office user.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

@@ -1,6 +1,6 @@
-//! Device pairing: the local device (`POST /v1/local-pair`), one-time codes
-//! for devices in the network (`POST /v1/office/pairing-codes`, `POST
-//! /v1/pairing/claim`) and device self-information (`GET /v1/device`).
+//! Device pairing: the local device (`POST /v1/local-pair`) and one-time
+//! codes for devices in the network (`POST /v1/office/pairing-codes`, `POST
+//! /v1/pairing/claim`).
 
 use std::net::SocketAddr;
 
@@ -8,14 +8,13 @@ use axum::extract::{ConnectInfo, State};
 use axum::http::StatusCode;
 use axum::{Extension, Json};
 use markiro_proto::{
-    codes, ClaimRequest, DeviceInfo, DeviceKind, LocalPairRequest, PairResponse, PairingCode,
-    Secret,
+    codes, ClaimRequest, DeviceKind, LocalPairRequest, PairResponse, PairingCode, Secret,
 };
 use serde_json::json;
 use sqlx::SqliteConnection;
 
 use crate::audit::{self, actions, reasons, Actor, Entry, Outcome};
-use crate::auth::{require_loopback, AuthDevice, OfficeContext};
+use crate::auth::{require_loopback, OfficeContext};
 use crate::clock::format_timestamp;
 use crate::db::begin_write;
 use crate::error::{ApiError, ApiJson};
@@ -252,25 +251,6 @@ pub async fn claim(
         device_id,
         device_key: key.into(),
         host_id: state.host_id.clone(),
-    }))
-}
-
-pub async fn device_info(
-    State(state): State<AppState>,
-    device: AuthDevice,
-) -> Result<Json<DeviceInfo>, ApiError> {
-    let (name, line_id, paired_at): (String, Option<String>, String) =
-        sqlx::query_as("SELECT name, line_id, paired_at FROM devices WHERE id = ?")
-            .bind(&device.id)
-            .fetch_one(&state.pool)
-            .await
-            .map_err(ApiError::internal)?;
-    Ok(Json(DeviceInfo {
-        id: device.id,
-        kind: device.kind,
-        name,
-        line_id,
-        paired_at,
     }))
 }
 

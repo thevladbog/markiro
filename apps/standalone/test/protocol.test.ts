@@ -8,6 +8,7 @@ import {
   bootstrapResponseSchema,
   credentialSchema,
   deviceInfoSchema,
+  deviceRecordSchema,
   errorBodySchema,
   helloSchema,
   officeLoginRequestSchema,
@@ -70,6 +71,14 @@ describe("protocol schemas parse the shared Rust fixtures", () => {
     expect(pairingCodeSchema.parse(fixture("pairing-code.json"))).toMatchObject({
       code: "7K3MQ9XV2D",
       expiresAt: "2026-09-26T09:25:00Z",
+    });
+  });
+
+  it("device record", () => {
+    expect(deviceRecordSchema.parse(fixture("device-record.json"))).toMatchObject({
+      kind: "station",
+      lineId: "5f0c6a52-6a3e-4b9f-9d3c-2b1a0e8f7d61",
+      revokedAt: null,
     });
   });
 });

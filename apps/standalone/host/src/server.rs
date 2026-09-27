@@ -108,7 +108,12 @@ pub fn router(state: AppState) -> Router {
 fn protected_routes() -> Router<AppState> {
     Router::new()
         .route("/v1/local-pair", post(crate::routes::pairing::local_pair))
-        .route("/v1/device", get(crate::routes::pairing::device_info))
+        .route("/v1/device", get(crate::routes::devices::device_info))
+        .route("/v1/device/line", put(crate::routes::devices::select_line))
+        .route(
+            "/v1/office/devices",
+            get(crate::routes::devices::list_devices),
+        )
         .route("/v1/office/login", post(crate::routes::office_auth::login))
         .route(
             "/v1/office/logout",

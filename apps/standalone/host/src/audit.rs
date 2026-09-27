@@ -21,6 +21,7 @@ pub mod actions {
     pub const SSCC_BLOCK_SIZES_UPDATE: &str = "sscc.block_sizes.update";
     pub const PAIRING_CODE_CREATE: &str = "pairing_code.create";
     pub const DEVICE_CLAIM: &str = "device.claim";
+    pub const DEVICE_LINE: &str = "device.line";
 }
 
 /// `details.reason` of a denied row: every denial names one.

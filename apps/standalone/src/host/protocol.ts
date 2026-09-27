@@ -86,6 +86,19 @@ export const deviceInfoSchema = z.object({
 });
 export type DeviceInfo = z.infer<typeof deviceInfoSchema>;
 
+/** `GET /v1/office/devices`: a paired device as the administrator sees it. */
+export const deviceRecordSchema = z.object({
+  id: z.uuid(),
+  kind: deviceKindSchema,
+  name: z.string(),
+  lineId: z.uuid().nullable(),
+  appVersion: z.string(),
+  pairedAt: z.iso.datetime(),
+  lastSeenAt: z.iso.datetime().nullable(),
+  revokedAt: z.iso.datetime().nullable(),
+});
+export type DeviceRecord = z.infer<typeof deviceRecordSchema>;
+
 /** The signed-in office user. */
 export const officeUserSchema = z.object({
   id: z.uuid(),
