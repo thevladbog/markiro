@@ -123,8 +123,8 @@ Record the date, the CryptoPro version, and the verdict below.
   `CRYPTO_CONTAINER_UNAVAILABLE` and the cabinet journal must show the same
   code — not a generic error.
 - Revoke the agent in the cabinet: the tray window must return to the pairing
-  screen on the next poll, and `%APPDATA%\app.markiro.signer\signer.json` must
-  no longer contain `agentSecretProtected`.
+  screen on the next poll, and `%LOCALAPPDATA%\app.markiro.signer\signer.json`
+  must no longer contain `agentSecretProtected`.
 - Stop the API: the agent must back off and recover on its own once the API
   returns, without failing the claimed task.
 

@@ -15,6 +15,7 @@ use crate::contracts::{cap_cert_subject, SignerErrorCode, TaskComplete, TaskFail
 use crate::journal::{redact, Journal, JournalEntry, JournalExportMetadata};
 use crate::signer::Signer;
 use crate::storage::{self, AgentConfig, SecretStore};
+use crate::storage_location::{Resolution, StorageNotice};
 use crate::trueapi::obtain_token;
 use crate::SignerError;
 
@@ -49,6 +50,10 @@ pub struct AgentStatus {
     pub last_token_expires_at: Option<String>,
     pub last_error: Option<String>,
     pub journal: Vec<JournalEntry>,
+    /// Storage facts the operator should see: where the data lives and why,
+    /// and a credential DPAPI cannot read (spec
+    /// `2026-09-27-signer-local-storage-design.md` §7.7).
+    pub storage_notices: Vec<StorageNotice>,
 }
 
 /// Which failures are worth telling the cloud about. True API transport errors
@@ -75,6 +80,18 @@ pub fn short_thumbprint(thumbprint: &str) -> String {
 pub fn backoff_for(attempt: u32) -> Duration {
     let seconds = 2u64.saturating_pow(attempt.min(6) + 1);
     Duration::from_secs(seconds).min(MAX_BACKOFF)
+}
+
+/// The outcome of decrypting the stored credential for one loop iteration.
+/// `Debug` exists only in tests: `Secret` holds the plaintext agent secret,
+/// and the crate never formats a credential outside a test.
+#[cfg_attr(test, derive(Debug, PartialEq, Eq))]
+enum Unlock {
+    /// Decrypted. `recovered`: the previous attempt had failed, so the UI must
+    /// leave the pairing screen it was showing.
+    Secret { secret: String, recovered: bool },
+    /// DPAPI refused; the file is kept (spec §7.6).
+    Unreadable,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -144,6 +161,7 @@ pub struct Runtime {
     /// Holding them here makes `status()` read the real, current value.
     last_token_expires_at: Mutex<Option<String>>,
     last_error: Mutex<Option<String>>,
+    storage_notices: Mutex<Vec<StorageNotice>>,
     /// Built once and reused for every True API round trip. `Client::new()`
     /// panics if the TLS backend or resolver cannot initialise, which would
     /// abort the agent task with no journal entry and no UI signal; building
@@ -163,7 +181,7 @@ impl Runtime {
         let http = reqwest::Client::builder()
             .build()
             .map_err(|e| SignerError::Network(e.to_string()))?;
-        let journal = match Journal::open(config_dir.join("journal")) {
+        let journal = match Journal::open(config_dir.join(crate::journal::JOURNAL_DIR)) {
             Ok(journal) => journal,
             Err(error) => {
                 tracing::warn!(%error, "could not open persistent signer journal");
@@ -189,6 +207,7 @@ impl Runtime {
             phase: Mutex::new(phase),
             last_token_expires_at: Mutex::new(None),
             last_error: Mutex::new(None),
+            storage_notices: Mutex::new(Vec::new()),
             http,
         })
     }
@@ -254,6 +273,82 @@ impl Runtime {
             last_token_expires_at: self.last_token_expires_at.lock().ok().and_then(|g| g.clone()),
             last_error: self.last_error.lock().ok().and_then(|g| g.clone()),
             journal: self.journal_entries(),
+            storage_notices: self
+                .storage_notices
+                .lock()
+                .map(|notices| notices.clone())
+                .unwrap_or_default(),
+        }
+    }
+
+    /// Journals what `storage_location::resolve` did at startup and keeps its
+    /// notices for `status()`.
+    pub fn apply_storage_resolution(&self, resolution: &Resolution) {
+        if resolution.moved {
+            self.note("Agent data moved out of the roaming profile", None);
+            if resolution.journal_left_behind {
+                self.note("The previous journal could not be carried over completely", None);
+            }
+        }
+        for detail in &resolution.diagnostics {
+            self.note("Agent data storage fallback", Some(detail));
+        }
+        for notice in &resolution.notices {
+            self.report_storage_notice(notice.clone());
+        }
+    }
+
+    /// Shows `notice` in the status and journals it the first time.
+    pub fn report_storage_notice(&self, notice: StorageNotice) {
+        if self.add_notice(notice.clone()) {
+            self.note(notice.journal_message(), None);
+        }
+    }
+
+    /// Adds `notice` unless it is already shown; true when it was added.
+    fn add_notice(&self, notice: StorageNotice) -> bool {
+        let Ok(mut notices) = self.storage_notices.lock() else {
+            return false;
+        };
+        if notices.contains(&notice) {
+            return false;
+        }
+        notices.push(notice);
+        true
+    }
+
+    /// True when `notice` was shown and is now gone.
+    fn remove_notice(&self, notice: &StorageNotice) -> bool {
+        let Ok(mut notices) = self.storage_notices.lock() else {
+            return false;
+        };
+        let before = notices.len();
+        notices.retain(|shown| shown != notice);
+        notices.len() != before
+    }
+
+    /// Decrypts the stored credential for one loop iteration. A failure never
+    /// deletes it (spec §7.6): the blob may belong to another Windows user, or
+    /// DPAPI may be unable to reach this user's keys right now, for example
+    /// when a redirected roaming folder's share is offline. The pairing screen
+    /// explains, the loop keeps trying, and a new pairing overwrites the file.
+    fn unlock_secret(&self, protected: &str) -> Unlock {
+        match self.secrets.unprotect(protected) {
+            Ok(secret) => {
+                let recovered = self.remove_notice(&StorageNotice::CredentialUnreadable);
+                if recovered {
+                    self.note("Stored credential is readable again", None);
+                    self.set_phase(AgentPhase::Idle);
+                }
+                Unlock::Secret { secret, recovered }
+            }
+            Err(error) => {
+                if self.add_notice(StorageNotice::CredentialUnreadable) {
+                    self.note("Stored credential is unreadable", Some(&error.to_string()));
+                }
+                self.set_phase(AgentPhase::Unpaired);
+                Unlock::Unreadable
+            }
         }
     }
 
@@ -283,6 +378,7 @@ impl Runtime {
             },
         )
         .map_err(|e| PairError::Network(e.to_string()))?;
+        self.remove_notice(&StorageNotice::CredentialUnreadable);
         self.set_phase(AgentPhase::Idle);
         self.note("Agent paired", Some(&paired.tenant_name));
         Ok(paired.tenant_name)
@@ -292,6 +388,7 @@ impl Runtime {
     /// request.
     pub fn unpair(&self) -> Result<(), SignerError> {
         storage::clear_credential(&self.config_dir)?;
+        self.remove_notice(&StorageNotice::CredentialUnreadable);
         self.set_last_token_expires_at(None);
         self.set_last_error(None);
         self.set_phase(AgentPhase::Unpaired);
@@ -326,19 +423,16 @@ impl Runtime {
                 tokio::time::sleep(Duration::from_secs(2)).await;
                 continue;
             };
-            let secret = match self.secrets.unprotect(&protected) {
-                Ok(secret) => secret,
-                Err(error) => {
-                    // The blob belongs to another user or profile: pairing again
-                    // is the only recovery.
-                    self.note("Stored credential is unreadable", Some(&error.to_string()));
-                    if let Err(unpair_error) = self.unpair() {
-                        // `unpair` failing (read-only profile, full disk) means
-                        // `is_paired()` still reports true, so without the
-                        // backoff below this branch would busy-spin, firing
-                        // `on_change` at full speed.
-                        self.note("Could not clear the local credential", Some(&unpair_error.to_string()));
+            let secret = match self.unlock_secret(&protected) {
+                Unlock::Secret { secret, recovered } => {
+                    if recovered {
+                        on_change(self.status());
                     }
+                    secret
+                }
+                Unlock::Unreadable => {
+                    // `is_paired()` stays true while the file is kept, so the
+                    // backoff is what stops this branch from busy-spinning.
                     on_change(self.status());
                     tokio::time::sleep(backoff_for(failures)).await;
                     failures = failures.saturating_add(1);
@@ -682,6 +776,68 @@ mod tests {
         }
     }
 
+    /// Refuses to decrypt until `readable` is set, like DPAPI when the blob
+    /// belongs to another Windows user or the user's keys are out of reach.
+    struct ToggleStore {
+        readable: std::sync::atomic::AtomicBool,
+    }
+    impl ToggleStore {
+        fn unreadable() -> Self {
+            Self {
+                readable: std::sync::atomic::AtomicBool::new(false),
+            }
+        }
+        fn make_readable(&self) {
+            self.readable.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+    impl SecretStore for ToggleStore {
+        fn protect(&self, plaintext: &str) -> Result<String, SignerError> {
+            Ok(plaintext.to_string())
+        }
+        fn unprotect(&self, protected: &str) -> Result<String, SignerError> {
+            if self.readable.load(std::sync::atomic::Ordering::SeqCst) {
+                Ok(protected.to_string())
+            } else {
+                Err(SignerError::Storage(
+                    "DPAPI could not read the stored secret; re-pair this agent".into(),
+                ))
+            }
+        }
+    }
+
+    fn paired_config() -> AgentConfig {
+        AgentConfig {
+            agent_id: Some("a-1".into()),
+            tenant_name: Some("ООО Ромашка".into()),
+            server_url: Some("https://admin.markiro.app".into()),
+            cert_thumbprint: Some("AB12".into()),
+            agent_secret_protected: Some("protected".into()),
+        }
+    }
+
+    fn runtime_with_store(store: Arc<ToggleStore>) -> (tempfile::TempDir, Runtime) {
+        let dir = tempfile::tempdir().unwrap();
+        storage::write_config(dir.path(), &paired_config()).unwrap();
+        let runtime = Runtime::new(
+            dir.path().to_path_buf(),
+            Arc::new(NoSigner),
+            store,
+            "0.1.0".into(),
+        )
+        .unwrap();
+        (dir, runtime)
+    }
+
+    fn journal_count(runtime: &Runtime, message: &str) -> usize {
+        runtime
+            .status()
+            .journal
+            .iter()
+            .filter(|entry| entry.message == message)
+            .count()
+    }
+
     struct PayloadSigner;
     impl Signer for PayloadSigner {
         fn list_certificates(&self) -> Result<Vec<CertificateSummary>, SignerError> {
@@ -803,6 +959,138 @@ mod tests {
 
         assert_eq!(status.phase, AgentPhase::Reconnecting);
         assert_eq!(status.app_version, "0.1.0");
+    }
+
+    #[test]
+    fn an_unreadable_credential_is_kept_and_asks_for_a_new_pairing() {
+        let (dir, runtime) = runtime_with_store(Arc::new(ToggleStore::unreadable()));
+
+        assert_eq!(runtime.unlock_secret("protected"), Unlock::Unreadable);
+        assert_eq!(runtime.unlock_secret("protected"), Unlock::Unreadable);
+
+        // The file keeps the credential: a local decryption failure is not a
+        // reason to destroy it (spec §7.6).
+        assert_eq!(storage::read_config(dir.path()).unwrap(), paired_config());
+        let status = runtime.status();
+        assert_eq!(status.phase, AgentPhase::Unpaired);
+        assert_eq!(status.storage_notices, vec![StorageNotice::CredentialUnreadable]);
+        assert_eq!(journal_count(&runtime, "Stored credential is unreadable"), 1);
+    }
+
+    #[test]
+    fn a_credential_that_becomes_readable_again_returns_to_work() {
+        let store = Arc::new(ToggleStore::unreadable());
+        let (_dir, runtime) = runtime_with_store(store.clone());
+        assert_eq!(runtime.unlock_secret("protected"), Unlock::Unreadable);
+
+        store.make_readable();
+
+        assert_eq!(
+            runtime.unlock_secret("protected"),
+            Unlock::Secret {
+                secret: "protected".into(),
+                recovered: true
+            }
+        );
+        let status = runtime.status();
+        assert_eq!(status.phase, AgentPhase::Idle);
+        assert!(status.storage_notices.is_empty());
+        assert_eq!(
+            runtime.unlock_secret("protected"),
+            Unlock::Secret {
+                secret: "protected".into(),
+                recovered: false
+            }
+        );
+    }
+
+    #[test]
+    fn unpairing_clears_the_unreadable_notice() {
+        let (dir, runtime) = runtime_with_store(Arc::new(ToggleStore::unreadable()));
+        runtime.unlock_secret("protected");
+
+        runtime.unpair().unwrap();
+
+        assert!(runtime.status().storage_notices.is_empty());
+        assert_eq!(storage::read_config(dir.path()).unwrap().agent_secret_protected, None);
+    }
+
+    #[tokio::test]
+    async fn pairing_again_clears_the_unreadable_notice() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/signer-agent/pair"))
+            .respond_with(ResponseTemplate::new(201).set_body_string(
+                r#"{"agentId":"3f0e0f5e-8d1c-4d7a-9b1a-111111111111",
+                    "agentSecret":"example-agent-secret-not-a-real-credential",
+                    "tenantName":"ООО Ромашка"}"#,
+            ))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let (dir, runtime) = runtime_with_store(Arc::new(ToggleStore::unreadable()));
+        runtime.unlock_secret("protected");
+
+        runtime.pair(&server.uri(), "01234567").await.unwrap();
+
+        let status = runtime.status();
+        assert!(status.storage_notices.is_empty());
+        assert_eq!(status.phase, AgentPhase::Idle);
+        assert_eq!(
+            storage::read_config(dir.path()).unwrap().agent_secret_protected.as_deref(),
+            Some("example-agent-secret-not-a-real-credential")
+        );
+    }
+
+    #[test]
+    fn storage_notices_reach_the_status_and_the_journal_once() {
+        let (_dir, runtime) = test_runtime();
+        let resolution = Resolution {
+            dir: std::path::PathBuf::from("unused"),
+            notices: vec![StorageNotice::LegacyCleanupPending],
+            moved: true,
+            journal_left_behind: true,
+            check_roamed_copy: false,
+            diagnostics: vec!["retire the roaming folder: injected".into()],
+        };
+
+        runtime.apply_storage_resolution(&resolution);
+        runtime.report_storage_notice(StorageNotice::LegacyCleanupPending);
+        runtime.report_storage_notice(StorageNotice::RoamedCopyPresent { same_agent: true });
+
+        assert_eq!(
+            runtime.status().storage_notices,
+            vec![
+                StorageNotice::LegacyCleanupPending,
+                StorageNotice::RoamedCopyPresent { same_agent: true },
+            ]
+        );
+        assert_eq!(journal_count(&runtime, "Agent data moved out of the roaming profile"), 1);
+        assert_eq!(
+            journal_count(&runtime, "The previous journal could not be carried over completely"),
+            1
+        );
+        assert_eq!(
+            journal_count(&runtime, StorageNotice::LegacyCleanupPending.journal_message()),
+            1
+        );
+        assert!(runtime.status().journal.iter().any(|entry| {
+            entry.message == "Agent data storage fallback"
+                && entry.detail.as_deref() == Some("retire the roaming folder: injected")
+        }));
+    }
+
+    #[test]
+    fn the_status_carries_storage_notices_for_the_webview() {
+        let (_dir, runtime) = test_runtime();
+        runtime.report_storage_notice(StorageNotice::RoamedCopyPresent { same_agent: true });
+
+        let json = serde_json::to_value(runtime.status()).unwrap();
+
+        assert_eq!(
+            json["storageNotices"],
+            serde_json::json!([{ "kind": "roamedCopyPresent", "sameAgent": true }])
+        );
     }
 
     #[test]

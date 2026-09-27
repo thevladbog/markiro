@@ -5,6 +5,7 @@ import { bridge, type AgentStatus } from "../lib/bridge.js";
 import { AutostartControl } from "../components/AutostartControl.js";
 import { CertificatePicker } from "../components/CertificatePicker.js";
 import { JournalList } from "../components/JournalList.js";
+import { StorageNotices } from "../components/StorageNotices.js";
 import { UpdateControl } from "../components/UpdateControl.js";
 import type { UpdateCheckResult } from "../lib/updates.js";
 
@@ -112,6 +113,7 @@ export function Status({
                 : t("status.noToken")}
             </p>
             {status.lastError ? <p className="signer-status__error">{status.lastError}</p> : null}
+            <StorageNotices notices={status.storageNotices} />
           </section>
 
           <section className="signer-status__section">

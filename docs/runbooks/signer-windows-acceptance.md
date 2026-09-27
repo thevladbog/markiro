@@ -65,6 +65,62 @@ operator, date, and result next to the release evidence.
 - [ ] A successful installation relaunches the new version and retains pairing,
       certificate selection, and the DPAPI-protected agent credential.
 
+## Local storage
+
+Run these on the first release that moves the agent data out of the roaming
+profile (`docs/superpowers/specs/2026-09-27-signer-local-storage-design.md`),
+starting from a paired previous stable with a selected certificate. The Signer
+has only a stable channel, so run this section on a manually installed build
+of the release commit before **Publish signer stable**: once published, every
+operator's agent moves its data on the next start.
+
+- [ ] After the update the agent keeps its identity: the cabinet shows no new
+      agent, the certificate selection is kept, and the next token refresh
+      completes through CryptoPro.
+- [ ] Repeat the upgrade check on Windows 10 and on Windows 11.
+- [ ] `%LOCALAPPDATA%\app.markiro.signer\` holds `signer.json`,
+      `signer-storage.json` and `journal\`; `%APPDATA%\app.markiro.signer\`
+      no longer exists.
+- [ ] The journal shows "Agent data moved out of the roaming profile" once, and
+      the earlier events are still listed.
+- [ ] Restarting the agent moves nothing again and adds no storage entry.
+- [ ] Copy `signer.json` from the local folder into a new
+      `%APPDATA%\app.markiro.signer\` and restart: the agent keeps working, the
+      Status tab reports a copy of this agent's pairing in the roaming profile,
+      and the copy is left untouched. Delete the copied folder afterwards.
+- [ ] Credential from another Windows user (real DPAPI): copy `signer.json`
+      from user A's `%LOCALAPPDATA%\app.markiro.signer\` into user B's and
+      start the Signer as B: the pairing screen shows the unreadable-credential
+      warning, the file stays unchanged, and pairing as B overwrites it.
+- [ ] On a paired 0.1.4, before installing the build, create an empty folder
+      named `signer-storage.lock` in `%LOCALAPPDATA%\app.markiro.signer\`, so
+      the move cannot take its lock. Install: the Status tab says the move was
+      postponed, and the journal shows "Agent data storage fallback" with the
+      failed step and the Windows error. Delete that folder and restart: the
+      move completes. (Do not deny write access to the whole folder: it also
+      holds the WebView2 profile, and the window would fail to open.)
+- [ ] Uninstall without "Delete application data", then reinstall: the agent
+      is still paired. Uninstall with it ticked: both
+      `%LOCALAPPDATA%\app.markiro.signer` and `%APPDATA%\app.markiro.signer`
+      are removed; an `app.markiro.signer.retired-*` folder, if any, stays.
+
+### Domain checks (test Active Directory)
+
+- [ ] Roaming profile: move on computer A, sign out, and check that the profile
+      share no longer holds `app.markiro.signer`. Sign in on computer B with the
+      Signer installed: it shows the pairing screen, not A's identity.
+- [ ] AppData(Roaming) redirection: computer B still on the previous version
+      shows the pairing screen within one poll after A upgrades.
+- [ ] Redirection without Offline Files, share taken offline: the Status or
+      pairing screen reports an unreadable credential, `signer.json` is kept,
+      and the agent recovers when the share returns.
+- [ ] `DeleteRoamingCache = 1`, a temporary profile and a mandatory profile:
+      nothing moves and the Status tab explains why.
+- [ ] First start of the new version with the redirected share offline:
+      without Offline Files the Status tab says the move was postponed and
+      nothing is committed (the move happens once the share is back); with
+      Offline Files the move completes from the cached copy.
+
 ## Evidence
 
 Attach screenshots of all five badge colors on both taskbar themes, the manual
