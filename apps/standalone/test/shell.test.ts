@@ -347,6 +347,25 @@ describe("link and reference sync", () => {
     });
   });
 
+  it("keeps sync at other_host until a new pairing, absorbing every other sync action", () => {
+    const other = shellReducer(paired(), { type: "sync_finished", result: { kind: "other_host" } });
+    expect(other.sync).toEqual({ kind: "other_host", synced: 0 });
+    // A run a revision already queued during the run that found `other_host`
+    // can still land here (`useHostLink` stops the scheduler, but not before
+    // this): none of these may leave `other_host` or count as a sync.
+    expect(shellReducer(other, { type: "sync_started" }).sync).toEqual(other.sync);
+    expect(shellReducer(other, { type: "sync_failed" }).sync).toEqual(other.sync);
+    expect(
+      shellReducer(other, { type: "sync_finished", result: { kind: "synced", rev: 1 } }).sync,
+    ).toEqual(other.sync);
+    // Only a new pairing clears it.
+    expect(shellReducer(other, { type: "forgotten" }).sync).toEqual({ kind: "idle", synced: 0 });
+    expect(shellReducer(other, { type: "paired", status: DEVICE_STATUS }).sync).toEqual({
+      kind: "idle",
+      synced: 0,
+    });
+  });
+
   it("forgets the link, the sync and the revision with the pairing", () => {
     const actions: ShellAction[] = [
       { type: "link_status", status: linkStatus() },
@@ -357,6 +376,19 @@ describe("link and reference sync", () => {
     expect(forgotten.link).toBeNull();
     expect(forgotten.hostRevision).toBeNull();
     expect(forgotten.sync).toEqual({ kind: "idle", synced: 0 });
+  });
+
+  it("resets the link, the sync and the revision on a new pairing, not just on forgetting", () => {
+    const busy: ShellState = {
+      ...paired(),
+      link: linkStatus(),
+      sync: { kind: "done", synced: 1 },
+      hostRevision: 42,
+    };
+    const next = shellReducer(busy, { type: "paired", status: DEVICE_STATUS });
+    expect(next.link).toBeNull();
+    expect(next.sync).toEqual({ kind: "idle", synced: 0 });
+    expect(next.hostRevision).toBeNull();
   });
 });
 

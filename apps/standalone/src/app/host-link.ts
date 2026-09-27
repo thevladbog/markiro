@@ -20,8 +20,8 @@ export interface HostLinkOptions {
  * While a host is paired: follows the shell's link to it and keeps the local
  * reference copies in step with a sync once `watch` has subscribed (or
  * failed to) and after every revision event. The first event after each
- * reconnect carries the host's current
- * revision, so catching up needs nothing more.
+ * reconnect carries the host's current revision, so catching up needs
+ * nothing more.
  */
 export function useHostLink({
   hostId,
@@ -39,12 +39,25 @@ export function useHostLink({
       dispatch({ type: "sync_started" });
       try {
         const result = await syncReferences({ changes, local, hostId });
-        if (active) dispatch({ type: "sync_finished", result });
+        if (!active) return;
+        if (result.kind === "other_host") {
+          // A run a revision already queued during this one must not also
+          // reach that host: the effect's cleanup (`active = false`, which
+          // also stops the scheduler) only runs after React re-renders with
+          // `hostId: null`, and that is later than this microtask chain.
+          scheduler.stop();
+        }
+        dispatch({ type: "sync_finished", result });
       } catch (error) {
         if (!active) return;
         // A rejected key or a changed certificate needs a new pairing.
         const action = shellActionFor(error, null);
-        if (action) dispatch(action);
+        if (action) {
+          // Same reasoning as above: nothing more should reach a host that
+          // just refused this device's key or presented another certificate.
+          scheduler.stop();
+          dispatch(action);
+        }
         dispatch({ type: "sync_failed" });
       }
     });

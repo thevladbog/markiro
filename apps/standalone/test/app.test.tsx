@@ -538,7 +538,24 @@ describe("App", () => {
       fingerprint: reinstalled.fingerprint,
     };
     const device = fakeDevice(DEVICE_STATUS, newStatus);
-    renderApp({ probe, device, host: fakeHost() });
+    const host = fakeHost();
+    // Before the repair, a sync still runs against the old pairing: the real
+    // shell would report the same certificate mismatch the local probe
+    // already sees. After re-pairing, the feed matches the reinstalled host,
+    // so the floor is the settled screen here, not a stop at "another host"
+    // (which is what a feed still pinned to the old fixture `HOST_ID` would
+    // cause once the post-repair sync actually completes).
+    host.getChanges.mockImplementation(async () => {
+      if (device.pairLocally.mock.calls.length === 0) {
+        throw new HostError({
+          kind: "transport",
+          code: "certificate_mismatch",
+          message: "reinstalled",
+        });
+      }
+      return feedPage(1, [], newStatus.hostId);
+    });
+    renderApp({ probe, device, host });
     expect(
       await screen.findByText(
         "Хост на этом компьютере сменился: его сертификат не совпадает с сохранённым при подключении.",
@@ -549,6 +566,12 @@ describe("App", () => {
     expect(await screen.findByText("Цех")).toBeTruthy();
     expect(device.forget).toHaveBeenCalledTimes(1);
     expect(device.pairLocally).toHaveBeenCalledTimes(1);
+
+    // Let the sync against the reinstalled host actually finish before
+    // checking that the floor is the settled screen, not a fleeting one.
+    await waitFor(() => expect(host.getChanges).toHaveBeenCalledTimes(2));
+    expect(screen.getByText("Цех")).toBeTruthy();
+    expect(screen.queryByText("Устройство подключено к другому хосту")).toBeNull();
   });
 
   it("shows the version screen, not the floor, for a paired device behind an incompatible host", async () => {
@@ -631,7 +654,24 @@ describe("App", () => {
     expect(host.getChanges).toHaveBeenLastCalledWith(42);
   });
 
-  it("sends a device whose key the host refuses on the link to pairing again", async () => {
+  it("still syncs once when the link's watch itself fails, and reaches the floor", async () => {
+    const host = fakeHost();
+    const connection: ConnectionApi = {
+      watch: vi.fn(async () => {
+        throw new Error("the connection task could not be reached");
+      }),
+    };
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(DEVICE_STATUS),
+      host,
+      connection,
+    });
+    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(host.getChanges).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops the link and shows the rejected-device screen when a link status refuses the device's key", async () => {
     const link = fakeConnection();
     renderApp({
       probe: probeAnswering(true),
@@ -648,6 +688,31 @@ describe("App", () => {
       ),
     ).toBeTruthy();
     // The link stops with the pairing it no longer serves.
+    expect(link.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops the link and shows the rejected-device screen when a sync's error refuses the device's key", async () => {
+    const link = fakeConnection();
+    const host = fakeHost();
+    host.getChanges.mockRejectedValueOnce(
+      new HostError({
+        kind: "api",
+        code: "unauthorized",
+        status: 401,
+        message: "unknown or revoked device key",
+        details: { credential: "device" },
+      }),
+    );
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(DEVICE_STATUS),
+      host,
+      connection: link.connection,
+    });
+    expect(await screen.findByText("Хост не принимает это устройство")).toBeTruthy();
+    // Same rejection screen and the same stopped link as a link status
+    // refusing the key (above) — this time the refusal came from the sync
+    // itself, through `shellActionFor`, not through `onStatus`.
     expect(link.stop).toHaveBeenCalledTimes(1);
   });
 
@@ -671,6 +736,33 @@ describe("App", () => {
         `Хост по адресу ${REMOTE_ADDRESS} сменился: его сертификат не совпадает с сохранённым при подключении.`,
       ),
     ).toBeTruthy();
+  });
+
+  it("stops at another host even when a revision arrives during the first sync", async () => {
+    const link = fakeConnection();
+    const device = fakeDevice(DEVICE_STATUS);
+    const host = fakeHost();
+    let resolveFirst: (page: ChangesResponse) => void = () => undefined;
+    host.getChanges.mockImplementationOnce(
+      () =>
+        new Promise<ChangesResponse>((resolve) => {
+          resolveFirst = resolve;
+        }),
+    );
+    renderApp({ probe: probeAnswering(true), device, host, connection: link.connection });
+    await waitFor(() => expect(host.getChanges).toHaveBeenCalledTimes(1));
+
+    // A revision arrives while the first sync is still in flight; the
+    // scheduler queues a second run for it. The default answer for that
+    // second call would be the paired host's own page (`feedPage(0)`,
+    // `HOST_ID`) — if it ever reached the host, this test would not catch
+    // the race, so it must never happen.
+    link.revision(7);
+    resolveFirst(feedPage(7, [], OTHER_HOST_ID));
+
+    expect(await screen.findByText("Устройство подключено к другому хосту")).toBeTruthy();
+    expect(link.stop).toHaveBeenCalledTimes(1);
+    expect(host.getChanges).toHaveBeenCalledTimes(1);
   });
 
   it("stops at a host that is not the paired one and pairs again from scratch", async () => {

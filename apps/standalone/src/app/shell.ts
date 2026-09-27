@@ -53,7 +53,7 @@ export interface ShellState {
   /** The link to the host as the shell reports it; `null` before the first status. */
   link: HostStatus | null;
   sync: SyncState;
-  /** The latest revision the host announced; open office data reloads when it changes. */
+  /** The latest revision the host announced; the office re-reads the signed-in user when it changes. */
   hostRevision: number | null;
 }
 
@@ -183,11 +183,22 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
     case "pairing_started":
       return { ...state, pairing: { kind: "pairing" } };
     case "paired":
+      // Between `dispatch({ type: "forgotten" })` and the effect's cleanup
+      // (which only runs after React re-renders), a run still in flight for
+      // the old host can land a late `sync_finished`/`sync_failed`; reset
+      // the same fields `forgotten` resets, so this new pairing never starts
+      // already `{ kind: "done" }` (or worse, `hostRevision` set) from a sync
+      // it never ran against the old host. `paired` is dispatched only from
+      // an unpaired device (`pairLocally` when pairing is due, `bootstrap`
+      // when unpaired), so the reset is always correct here.
       return {
         ...state,
         device: { kind: "ready", status: action.status },
         pairing: { kind: "idle" },
         rejection: null,
+        link: null,
+        sync: IDLE_SYNC,
+        hostRevision: null,
       };
     case "pairing_failed":
       return { ...state, pairing: { kind: "failed", code: action.code } };
@@ -261,14 +272,21 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
     case "host_revision":
       return { ...state, hostRevision: action.rev };
     case "sync_started":
+      // Absorbing: `other_host` only a new pairing clears (`paired`,
+      // `forgotten`). Second line of defence — `useHostLink` also stops the
+      // scheduler as soon as a run finds `other_host` or a rejection, but a
+      // run already queued by a revision can still land here first.
+      if (state.sync.kind === "other_host") return state;
       return { ...state, sync: { ...state.sync, kind: "running" } };
     case "sync_finished":
+      if (state.sync.kind === "other_host") return state;
       if (action.result.kind === "other_host") {
         // Office requests would reach a host this device was never paired with.
         return { ...state, sync: { ...state.sync, kind: "other_host" }, office: CLOSED_OFFICE };
       }
       return { ...state, sync: { kind: "done", synced: state.sync.synced + 1 } };
     case "sync_failed":
+      if (state.sync.kind === "other_host") return state;
       return { ...state, sync: { ...state.sync, kind: "failed" } };
   }
 }
