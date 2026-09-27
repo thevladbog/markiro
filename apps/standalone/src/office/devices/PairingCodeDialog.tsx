@@ -21,6 +21,9 @@ const PairingDataMatrix = lazy(() => import("./PairingDataMatrix.js"));
 /** How often the device list is read while a code is shown. */
 export const DEVICE_POLL_MS = 3000;
 
+/** How long a code lives once requested (`pairing_code::CODE_LIFETIME`, spec §4.7). */
+export const CODE_LIFETIME_MS = 10 * 60 * 1000;
+
 function formatCountdown(ms: number): string {
   const seconds = Math.ceil(Math.max(0, ms) / 1000);
   return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
@@ -29,12 +32,16 @@ function formatCountdown(ms: number): string {
 /**
  * Milliseconds until `deadline`, ticking every second (after the admin's
  * pairing panel). `deadline` is this PC's own clock reading
- * (`receivedAt + CODE_LIFETIME_MS`, set once in `DevicesPage` when the code
- * arrives), never the host's `expiresAt`: the office can run on a PC other
- * than the host, and a cloud-less LAN site cannot promise the two clocks
- * agree. Comparing the host's timestamp against this PC's `Date.now()` would
- * make the countdown wrong by however far the clocks have drifted — showing
- * an already-expired fresh code, or a many-hours-long one.
+ * (`requestedAt + CODE_LIFETIME_MS`, captured in `DevicesPage` just before
+ * the request is sent, not after it resolves), never the host's
+ * `expiresAt`: the office can run on a PC other than the host, and a
+ * cloud-less LAN site cannot promise the two clocks agree. Comparing the
+ * host's timestamp against this PC's `Date.now()` would make the countdown
+ * wrong by however far the clocks have drifted — showing an already-expired
+ * fresh code, or a many-hours-long one. Clamped to `CODE_LIFETIME_MS`: right
+ * after a fresh `deadline` arrives, this hook can still be rendering with a
+ * `now` reading from the previous tick, up to a second old, which would
+ * otherwise read as "10:01" for that one frame.
  */
 function useRemainingMs(deadline: number): number {
   const [now, setNow] = useState(() => Date.now());
@@ -43,7 +50,7 @@ function useRemainingMs(deadline: number): number {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, [deadline]);
-  return Math.max(0, deadline - now);
+  return Math.max(0, Math.min(deadline - now, CODE_LIFETIME_MS));
 }
 
 export interface PairingCodeDialogProps {

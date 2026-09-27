@@ -10,10 +10,7 @@ import type { DeviceRecord, PairingCode } from "../../host/protocol.js";
 import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.js";
 import { useOfficeLocal } from "../office-local.js";
 import { LoadError, PageLoading } from "../page-state.js";
-import { PairingCodeDialog } from "./PairingCodeDialog.js";
-
-/** How long a code lives on the host (`pairing_code::CODE_LIFETIME`, spec §4.7). */
-const CODE_LIFETIME_MS = 10 * 60 * 1000;
+import { CODE_LIFETIME_MS, PairingCodeDialog } from "./PairingCodeDialog.js";
 
 const DATE_TIME = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" });
 
@@ -25,9 +22,10 @@ interface Pairing {
   issuedAt: number;
   /**
    * When the dialog stops showing the code, by this PC's own clock
-   * (`receivedAt + CODE_LIFETIME_MS`). The office can run on a PC other than
-   * the host, and a cloud-less LAN site cannot promise the two clocks agree,
-   * so the countdown is anchored to when this PC received the code, never to
+   * (`requestedAt + CODE_LIFETIME_MS`, `requestedAt` captured just before
+   * the request was sent — see `newCode`). The office can run on a PC other
+   * than the host, and a cloud-less LAN site cannot promise the two clocks
+   * agree, so the countdown is anchored to this PC's own clock, never to
    * the host's `expiresAt`.
    */
   deadline: number;
@@ -61,13 +59,19 @@ export function DevicesPage() {
       : devices.data?.find((device) => Date.parse(device.pairedAt) >= pairing.issuedAt);
   const dialogOpen = pairing !== null && joined === undefined;
 
-  // A request still in flight when the dialog closes -- by hand, or because
-  // a device joined while a fresh code was being requested -- must not act
-  // on its answer: reopening the dialog with a code nobody asked to see
-  // anymore, or showing a stray failure for an abandoned action. Bumping the
-  // generation on every render where the dialog is not open (including the
-  // very first, before any request exists) invalidates whatever request
-  // started before that close.
+  // A request still in flight when the dialog closes -- by a click on
+  // "Закрыть", Escape, or because a device joined while a fresh code was
+  // being requested -- must not act on its answer: reopening the dialog
+  // with a code nobody asked to see anymore, or showing a stray failure for
+  // an abandoned action. This effect runs whenever `dialogOpen` changes
+  // value, not on every render, bumping the generation each time the new
+  // value is `false` -- including its first run at mount, before any
+  // request exists, which is harmless. It relies on React flushing passive
+  // effects synchronously for the commit that flips `dialogOpen`: a click
+  // or an Escape keydown commits on the synchronous lane, and so does the
+  // `useSyncExternalStore` update React Query uses to publish a fresh poll
+  // result (the joined device arriving) -- in both cases the bump has
+  // already happened by the time a pending request's `await` settles.
   const requestGeneration = useRef(0);
   useEffect(() => {
     if (!dialogOpen) requestGeneration.current++;
@@ -78,17 +82,19 @@ export function DevicesPage() {
     // A new attempt from the page drops the last notice.
     if (!dialogOpen) setPairing(null);
     const generation = ++requestGeneration.current;
+    // Captured before the request, not after it resolves: the host stamps
+    // the code's `expiresAt` before a database write that can wait up to
+    // its 5 s busy timeout, so a deadline taken after the answer arrives
+    // could read later than the host's own expiry. Taking the local time
+    // first keeps this PC's deadline at or before the host's.
+    const requestedAt = Date.now();
     try {
       const code = await create.mutateAsync();
       if (generation !== requestGeneration.current) return;
-      // Anchored to this PC's own clock at the moment it received the code,
-      // not to the host's `expiresAt`: the office can run on a PC other than
-      // the host, and the two clocks are not promised to agree.
-      const receivedAt = Date.now();
       setPairing({
         code,
         issuedAt: Date.parse(code.expiresAt) - CODE_LIFETIME_MS,
-        deadline: receivedAt + CODE_LIFETIME_MS,
+        deadline: requestedAt + CODE_LIFETIME_MS,
       });
     } catch (error) {
       if (generation !== requestGeneration.current) return;

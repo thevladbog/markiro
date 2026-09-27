@@ -5,6 +5,7 @@ import { renderLiteralDataMatrixSvg } from "@markiro/domain";
 import type * as MarkiroDomain from "@markiro/domain";
 
 import { HostError } from "../src/host/client.js";
+import { CODE_LIFETIME_MS } from "../src/office/devices/PairingCodeDialog.js";
 import type { DeviceRecord, PairingCode } from "../src/host/protocol.js";
 import { LINE_ID } from "./support/fixtures.js";
 import { openLocalDb } from "./support/local-db.js";
@@ -23,9 +24,6 @@ vi.mock("@markiro/domain", async (importOriginal) => {
   const actual = await importOriginal<typeof MarkiroDomain>();
   return { ...actual, renderLiteralDataMatrixSvg: vi.fn(actual.renderLiteralDataMatrixSvg) };
 });
-
-/** Mirrors `DevicesPage`'s own constant: how long a shown code lives. */
-const CODE_LIFETIME_MS = 10 * 60 * 1000;
 
 const FINGERPRINT = "ab".repeat(32);
 const HOST_PC: DeviceRecord = {
@@ -273,7 +271,7 @@ describe("office devices", () => {
     const dialog = await screen.findByRole("dialog");
     // The "Новый код" request from inside the dialog never resolves until we
     // say so.
-    let resolveSecond!: (code: PairingCode) => void;
+    let resolveSecond: (code: PairingCode) => void = () => undefined;
     session.api.createPairingCode.mockImplementationOnce(
       () =>
         new Promise((resolve) => {
@@ -298,7 +296,7 @@ describe("office devices", () => {
     await openDevices(session);
     fireEvent.click(screen.getByRole("button", { name: "Подключить устройство" }));
     const dialog = await screen.findByRole("dialog");
-    let resolveSecond!: (code: PairingCode) => void;
+    let resolveSecond: (code: PairingCode) => void = () => undefined;
     session.api.createPairingCode.mockImplementationOnce(
       () =>
         new Promise((resolve) => {
@@ -332,13 +330,51 @@ describe("office devices", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  it("shows no stray failure when a request abandoned by closing the dialog later fails", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const session = adminSession();
+    session.api.createPairingCode.mockResolvedValueOnce(pairingCode(0));
+    await openDevices(session);
+    fireEvent.click(screen.getByRole("button", { name: "Подключить устройство" }));
+    const dialog = await screen.findByRole("dialog");
+    let rejectSecond: (error: unknown) => void = () => undefined;
+    session.api.createPairingCode.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectSecond = reject;
+        }),
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Новый код" }));
+    fireEvent.click(within(dialog).getByText("Закрыть"));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    // The abandoned request finally fails: it must not show a page-level
+    // error for an action nobody is looking at anymore.
+    await act(async () => {
+      rejectSecond(
+        new HostError({ kind: "api", code: "forbidden", status: 403, message: "admins only" }),
+      );
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.queryByText("Недостаточно прав для этого действия.")).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
   it("replaces the old code and restarts the countdown when a new one is requested while one is live", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     const session = adminSession();
     session.api.createPairingCode.mockResolvedValueOnce(pairingCode(0));
     await openDevices(session);
     fireEvent.click(screen.getByRole("button", { name: "Подключить устройство" }));
     let dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText("7K3MQ 9XV2D")).toBeTruthy();
+
+    // Two minutes into the first code's countdown: both codes being fresh
+    // would make the final assertion below hold either way, so this advance
+    // is what makes it actually prove a restart, not just a fresh display.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2 * 60 * 1000);
+    });
+    expect(within(dialog).queryByText(/^Код действует ещё (10:00|09:59)$/)).toBeNull();
 
     const secondCode: PairingCode = {
       code: "AAAAABBBBB",
@@ -380,12 +416,21 @@ describe("office devices", () => {
     session.api.createPairingCode.mockResolvedValue(pairingCode(0));
     await openDevices(session);
     fireEvent.click(screen.getByRole("button", { name: "Подключить устройство" }));
-    await screen.findByRole("dialog");
-    expect(encode).toHaveBeenCalledTimes(1);
+    const dialog = await screen.findByRole("dialog");
+    // The dialog itself is not enough to wait for: `PairingDataMatrix` loads
+    // behind a `Suspense` fallback, so when this test runs alone (nothing
+    // has warmed up that lazy chunk yet) the dialog can appear before any
+    // encoding has happened. Waiting for the image is not quite enough
+    // either -- the first mount while the chunk is loading can still run the
+    // memo more than once -- so this records whatever it took to get there
+    // and only checks that ticking the countdown afterward adds no more.
+    await within(dialog).findByRole("img", { name: "Код подключения для сканера" });
+    const shown = encode.mock.calls.length;
+    expect(shown).toBeGreaterThan(0);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5000); // five countdown ticks, no re-encode
     });
-    expect(encode).toHaveBeenCalledTimes(1);
+    expect(encode).toHaveBeenCalledTimes(shown);
   });
 
   it("explains a code the host would not create", async () => {

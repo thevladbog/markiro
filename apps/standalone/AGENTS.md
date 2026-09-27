@@ -373,7 +373,10 @@ pages explain their own failed requests and offer a retry.
   dialog reads the list every 3 s (`DEVICE_POLL_MS`) and closes once a
   device paired after the code was issued appears. The DataMatrix encoder
   loads lazily (`PairingDataMatrix`); when it fails, the typed code, the
-  fingerprint and the host's addresses stay the way to pair.
+  fingerprint and the host's addresses stay the way to pair. The code's own
+  countdown runs on this PC's clock from the moment the code was requested,
+  since the host and the office PCs on a cloud-less LAN are not promised to
+  agree on the time; join detection compares host timestamps only.
 
 ## Marking rules
 
