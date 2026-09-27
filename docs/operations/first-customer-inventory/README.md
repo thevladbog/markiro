@@ -82,28 +82,25 @@ corepack pnpm evidence:init -- evidence/INV-20260824-pilot-01 INV-20260824-pilot
 
 ## Получите дату из зеркала Station без записи в базу
 
-Путь к базе показывает сама Station: Центр обновлений → «Данные станции».
-Начиная со сборки с переносом хранилища база лежит в неперемещаемой папке:
-
-```text
-%LOCALAPPDATA%\app.markiro.station\station-mirror.db
-```
-
-Если в «Данных станции» указан перемещаемый профиль (`%APPDATA%`), перенос
-отложен: используйте путь, который показан там. Перед чтением закройте
-Station, чтобы зафиксировать снимок.
-В PowerShell задайте выбранные значения, проверьте файл и запустите диагностику:
+Папку с базой показывает сама Station: Центр обновлений → «Данные станции».
+Обычно это `%LOCALAPPDATA%\app.markiro.station`, но на некоторых профилях
+Windows база остаётся в `%APPDATA%`: берите папку, которую показала Station, а
+не выводите её из профиля. Перед чтением закройте Station, чтобы зафиксировать
+снимок. В PowerShell задайте выбранные значения, проверьте файл и запустите
+диагностику:
 
 ```powershell
 $operationRoot = 'D:\private-evidence\INV-20260824-pilot-01'
 $shiftId = '00000000-0000-0000-0000-000000000001'
-$stationDb = Join-Path $env:LOCALAPPDATA 'app.markiro.station\station-mirror.db'
+$stationDir = 'C:\Users\operator\AppData\Local\app.markiro.station'
+$stationDb = Join-Path $stationDir 'station-mirror.db'
 $output = Join-Path $operationRoot 'exports\system\rehearsal-date\station-production-date.json'
 if (-not (Test-Path -LiteralPath $stationDb -PathType Leaf)) { throw 'Station DB not found' }
 corepack pnpm evidence:station-date -- $stationDb $shiftId $output
 ```
 
-Замените только примерные корень операции и ID смены. Команда открывает SQLite
+Замените только примерные корень операции и ID смены, а в `$stationDir`
+впишите папку из «Данных станции». Команда открывает SQLite
 в режиме `readOnly`, выполняет параметризованный запрос
 `SELECT id, production_date FROM shift_mirror WHERE id = ?`, требует ровно одну
 строку и отказывается перезаписывать существующий результат. Она записывает
