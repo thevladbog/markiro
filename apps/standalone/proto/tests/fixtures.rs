@@ -3,8 +3,8 @@ use markiro_proto::{
     display_fingerprint, BlockSizesUpdate, BootstrapRequest, BootstrapResponse, Compatibility,
     DeviceInfo, DeviceKind, ErrorBody, Hello, HelloEnvelope, LocalPairRequest, OfficeLoginRequest,
     OfficeRole, OfficeSession, OfficeUser, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate,
-    OrgProfile, OrgProfileUpdate, PairResponse, PasswordChange, PasswordSet, SsccCounterUpdate,
-    SsccState, HOST_PRODUCT, PROTOCOL_VERSION,
+    OrgProfile, OrgProfileUpdate, PairResponse, PairingCode, PasswordChange, PasswordSet,
+    SsccCounterUpdate, SsccState, HOST_PRODUCT, PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -150,6 +150,14 @@ fn password_change_fixture_round_trips_without_leaking() {
     let debug = format!("{change:?}");
     assert!(!debug.contains(change.current_password.expose()));
     assert!(!debug.contains(change.new_password.expose()));
+}
+
+#[test]
+fn pairing_code_fixture_round_trips_without_leaking() {
+    let code: PairingCode = round_trip("pairing-code.json");
+    let debug = format!("{code:?}");
+    assert!(!debug.contains(code.code.expose()), "{debug}");
+    assert!(!debug.contains("markiro-host:1"), "{debug}");
 }
 
 #[test]

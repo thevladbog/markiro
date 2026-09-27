@@ -1,7 +1,7 @@
 //! HTTPS server: router, TLS accept loop and graceful shutdown.
 
 use std::future::Future;
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -23,12 +23,23 @@ use crate::error::ApiError;
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// How other devices reach this host: what a pairing payload carries.
+#[derive(Clone)]
+pub struct Endpoint {
+    /// SHA-256 of the TLS certificate, lower-case hex.
+    pub fingerprint: String,
+    pub port: u16,
+    /// This host's addresses in the local network, read for every new code.
+    pub addresses: Arc<dyn Fn() -> Vec<Ipv4Addr> + Send + Sync>,
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub pool: SqlitePool,
     pub host_id: String,
     pub clock: Arc<dyn Clock>,
     pub login_limiter: Arc<crate::rate_limit::RateLimiter>,
+    pub endpoint: Endpoint,
 }
 
 impl AppState {
@@ -41,6 +52,11 @@ impl AppState {
                 time::Duration::minutes(1),
                 clock.clone(),
             )),
+            endpoint: Endpoint {
+                fingerprint: String::new(),
+                port: markiro_proto::DEFAULT_PORT,
+                addresses: Arc::new(crate::network::lan_ipv4_addresses),
+            },
             clock,
         }
     }
@@ -52,6 +68,22 @@ impl AppState {
     /// `now()` in the stored timestamp format.
     pub fn timestamp(&self) -> String {
         format_timestamp(self.now())
+    }
+
+    /// The certificate fingerprint and the port other devices connect to.
+    pub fn with_endpoint(mut self, fingerprint: String, port: u16) -> Self {
+        self.endpoint.fingerprint = fingerprint;
+        self.endpoint.port = port;
+        self
+    }
+
+    /// Replace the address lookup; tests use fixed addresses.
+    pub fn with_addresses(
+        mut self,
+        addresses: impl Fn() -> Vec<Ipv4Addr> + Send + Sync + 'static,
+    ) -> Self {
+        self.endpoint.addresses = Arc::new(addresses);
+        self
     }
 }
 
@@ -105,6 +137,10 @@ fn protected_routes() -> Router<AppState> {
         .route(
             "/v1/office/users/{id}/password",
             put(crate::routes::office_users::set_password),
+        )
+        .route(
+            "/v1/office/pairing-codes",
+            post(crate::routes::pairing::create_code),
         )
 }
 

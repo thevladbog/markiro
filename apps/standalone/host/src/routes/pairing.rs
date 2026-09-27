@@ -1,18 +1,23 @@
-//! Device pairing: the local device (`POST /v1/local-pair`) and device
-//! self-information (`GET /v1/device`). Code pairing arrives in plan 1c.
+//! Device pairing: the local device (`POST /v1/local-pair`), one-time codes
+//! for devices in the network (`POST /v1/office/pairing-codes`) and device
+//! self-information (`GET /v1/device`).
 
 use std::net::SocketAddr;
 
 use axum::extract::{ConnectInfo, State};
 use axum::http::HeaderMap;
 use axum::Json;
-use markiro_proto::{DeviceInfo, DeviceKind, LocalPairRequest, PairResponse, PROTOCOL_HEADER};
+use markiro_proto::{
+    DeviceInfo, DeviceKind, LocalPairRequest, PairResponse, PairingCode, Secret, PROTOCOL_HEADER,
+};
 use serde_json::json;
 
 use crate::audit::{self, actions, Actor, Entry, Outcome};
-use crate::auth::{require_loopback, AuthDevice};
+use crate::auth::{require_loopback, AuthDevice, OfficeContext};
+use crate::clock::format_timestamp;
 use crate::db::begin_write;
 use crate::error::{ApiError, ApiJson};
+use crate::pairing_code;
 use crate::secrets::{key_hash, random_key};
 use crate::server::AppState;
 
@@ -119,5 +124,60 @@ pub async fn device_info(
         name,
         line_id,
         paired_at,
+    }))
+}
+
+/// `POST /v1/office/pairing-codes` (administrators): a one-time code for a
+/// device in the local network. Only its hash is stored; the code and the
+/// payload are returned once.
+pub async fn create_code(
+    State(state): State<AppState>,
+    context: OfficeContext,
+) -> Result<Json<PairingCode>, ApiError> {
+    context.require_admin()?;
+    let code = pairing_code::generate();
+    let now = state.now();
+    let at = format_timestamp(now);
+    let expires = format_timestamp(now + pairing_code::CODE_LIFETIME);
+    let id = uuid::Uuid::new_v4().to_string();
+    let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
+    context.require_admin_in(&mut tx).await?;
+    sqlx::query(
+        "INSERT INTO pairing_codes (id, code_hash, created_by, created_at, expires_at) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind(&id)
+    .bind(key_hash(&code))
+    .bind(&context.user.id)
+    .bind(&at)
+    .bind(&expires)
+    .execute(&mut *tx)
+    .await
+    .map_err(ApiError::internal)?;
+    audit::record(
+        &mut tx,
+        &at,
+        Entry {
+            actor: context.actor(),
+            action: actions::PAIRING_CODE_CREATE,
+            target_type: Some("pairing_code"),
+            target_id: Some(&id),
+            outcome: Outcome::Ok,
+            details: json!({ "expiresAt": expires }),
+        },
+    )
+    .await
+    .map_err(ApiError::internal)?;
+    tx.commit().await.map_err(ApiError::internal)?;
+    let addresses = (state.endpoint.addresses)();
+    let payload = pairing_code::payload(
+        &addresses,
+        state.endpoint.port,
+        &state.endpoint.fingerprint,
+        &code,
+    );
+    Ok(Json(PairingCode {
+        code: Secret::new(code),
+        expires_at: expires,
+        payload: Secret::new(payload),
     }))
 }

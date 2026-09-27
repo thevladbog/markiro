@@ -8,6 +8,8 @@ pub mod config;
 pub mod db;
 pub mod error;
 pub mod logging;
+pub mod network;
+pub mod pairing_code;
 pub mod rate_limit;
 pub mod routes;
 pub mod secrets;
@@ -88,7 +90,8 @@ pub async fn start(paths: &HostPaths, options: StartOptions) -> Result<RunningHo
         pool.clone(),
         config.host_id.clone(),
         std::sync::Arc::new(clock::SystemClock),
-    );
+    )
+    .with_endpoint(identity.fingerprint.clone(), addr.port());
     let task = tokio::spawn(server::serve(listener, state, async move {
         let _ = shutdown_signal.await;
     }));

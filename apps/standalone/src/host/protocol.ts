@@ -107,6 +107,14 @@ export type OfficeSession = z.infer<typeof officeSessionSchema>;
 export const bootstrapResponseSchema = z.object({ session: officeSessionSchema });
 export type BootstrapResponse = z.infer<typeof bootstrapResponseSchema>;
 
+/** `POST /v1/office/pairing-codes`: a one-time code; the payload is what the DataMatrix encodes. */
+export const pairingCodeSchema = z.object({
+  code: z.string().regex(/^[0-9A-HJKMNP-TV-Z]{10}$/),
+  expiresAt: z.iso.datetime(),
+  payload: z.string().startsWith("markiro-host:1?"),
+});
+export type PairingCode = z.infer<typeof pairingCodeSchema>;
+
 /** `GET /v1/office/org`. */
 export const orgProfileSchema = z.object({
   name: z.string(),

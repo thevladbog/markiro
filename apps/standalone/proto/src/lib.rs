@@ -229,6 +229,18 @@ pub struct PairResponse {
     pub host_id: String,
 }
 
+/// `POST /v1/office/pairing-codes`: a one-time code for pairing another
+/// device. The code and the payload carrying it are shown once.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PairingCode {
+    /// 10 Crockford base32 characters.
+    pub code: Secret,
+    pub expires_at: String,
+    /// `markiro-host:1?h=<addresses>&p=<port>&f=<fingerprint>&c=<code>`.
+    pub payload: Secret,
+}
+
 /// `GET /v1/device`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

@@ -1,7 +1,7 @@
 //! In-process router harness: real SQLite in a temp dir, a manual clock, and
 //! `MockConnectInfo` so routes that check the peer address can be exercised.
 
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
 use axum::body::Body;
@@ -20,6 +20,15 @@ pub const LAN: ([u8; 4], u16) = ([192, 168, 1, 20], 50_000);
 /// 2026-09-21T14:13:20Z — a fixed start for the manual clock.
 pub const START: i64 = 1_790_000_000;
 
+/// The certificate fingerprint `TestApp` reports: "ab" 32 times.
+pub fn test_fingerprint() -> String {
+    "ab".repeat(32)
+}
+
+/// The LAN addresses `TestApp` reports for pairing payloads.
+pub const TEST_ADDRESSES: [Ipv4Addr; 2] =
+    [Ipv4Addr::new(10, 0, 0, 5), Ipv4Addr::new(192, 168, 1, 10)];
+
 pub struct TestApp {
     pub state: AppState,
     pub clock: Arc<ManualClock>,
@@ -35,7 +44,9 @@ impl TestApp {
         let clock = Arc::new(ManualClock::new(
             time::OffsetDateTime::from_unix_timestamp(START).unwrap(),
         ));
-        let state = AppState::new(pool, uuid::Uuid::new_v4().to_string(), clock.clone());
+        let state = AppState::new(pool, uuid::Uuid::new_v4().to_string(), clock.clone())
+            .with_endpoint(test_fingerprint(), 45710)
+            .with_addresses(|| TEST_ADDRESSES.to_vec());
         Self {
             state,
             clock,

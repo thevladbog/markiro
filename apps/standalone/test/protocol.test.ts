@@ -18,6 +18,7 @@ import {
   officeUserUpdateSchema,
   orgProfileSchema,
   orgProfileUpdateSchema,
+  pairingCodeSchema,
   passwordChangeSchema,
   passwordSetSchema,
   ssccCounterUpdateSchema,
@@ -63,6 +64,13 @@ describe("protocol schemas parse the shared Rust fixtures", () => {
     expect(
       errorBodySchema.safeParse({ error: { ...body.error, details: "not an object" } }).success,
     ).toBe(false);
+  });
+
+  it("pairing code", () => {
+    expect(pairingCodeSchema.parse(fixture("pairing-code.json"))).toMatchObject({
+      code: "7K3MQ9XV2D",
+      expiresAt: "2026-09-26T09:25:00Z",
+    });
   });
 });
 

@@ -19,6 +19,7 @@ pub mod actions {
     pub const ORG_UPDATE: &str = "org.update";
     pub const SSCC_COUNTER_UPDATE: &str = "sscc.counter.update";
     pub const SSCC_BLOCK_SIZES_UPDATE: &str = "sscc.block_sizes.update";
+    pub const PAIRING_CODE_CREATE: &str = "pairing_code.create";
 }
 
 /// `details.reason` of a denied row: every denial names one.
