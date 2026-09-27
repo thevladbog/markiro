@@ -7,6 +7,7 @@
 //! installation there exactly once. Design:
 //! docs/superpowers/specs/2026-09-27-station-local-storage-design.md.
 
+mod copy;
 mod probe;
 mod record;
 
