@@ -74,7 +74,7 @@
   - `host_id` другого хоста — очистка сразу, отдельной транзакцией;
   - `entity_set` не равен `ENTITY_SET` или нет `last_rev` — очистка в транзакции первой новой порции;
   - ответ `rev < since` (хост откатился) — так же, не больше одного раза за прогон; второй откат — ошибка.
-- `hostId` ленты не равен подключённому — результат `other_host`, ничего не применяется.
+- `hostId` ленты не равен подключённому — результат `other_host`, ничего не применяется; синхронизация останавливается до нового подключения, включая прогон, уже поставленный ревизией (исполнение задачи 3).
 - Планировщик: один прогон за раз; запуски во время прогона дают ровно один следующий прогон; неудачный прогон ждёт следующего запуска.
 
 **Код подключения и машиночитаемый код**
@@ -2983,7 +2983,7 @@ import {
 - новые тесты в конец `describe("App")` — фрагмент
 
 ```tsx
-    expect(host.officeMe).toHaveBeenCalledWith("office-session-token");
+    expect(screen.getByLabelText("Название организации")).toBeTruthy();
   });
 });
 ```
@@ -2991,7 +2991,7 @@ import {
 заменить на
 
 ```tsx
-    expect(host.officeMe).toHaveBeenCalledWith("office-session-token");
+    expect(screen.getByLabelText("Название организации")).toBeTruthy();
   });
 
   it("has a freshly paired station choose its line before the floor", async () => {
@@ -3305,6 +3305,7 @@ export function useOfficeLink(): HostStatus | null {
 
 ```ts
     case "sync_failed":
+      if (state.sync.kind === "other_host") return state;
       return { ...state, sync: { ...state.sync, kind: "failed" } };
   }
 }
@@ -3314,6 +3315,7 @@ export function useOfficeLink(): HostStatus | null {
 
 ```ts
     case "sync_failed":
+      if (state.sync.kind === "other_host") return state;
       return { ...state, sync: { ...state.sync, kind: "failed" } };
     case "line_selected":
       return { ...state, device: { kind: "ready", status: action.status } };
@@ -3338,15 +3340,16 @@ import { useCallback, useEffect, useRef } from "react";
 - фрагмент
 
 ```ts
- * revision, so catching up needs nothing more.
+ * reconnect carries the host's current revision, so catching up needs
+ * nothing more.
  */
 ```
 
 заменить на
 
 ```ts
- * revision, so catching up needs nothing more. Returns a function that asks
- * for a sync now.
+ * reconnect carries the host's current revision, so catching up needs
+ * nothing more. Returns a function that asks for a sync now.
  */
 ```
 
@@ -3762,7 +3765,7 @@ import { useOfficeSession } from "./office-session.js";
 - [ ] **Step 4: Запустить тесты — они проходят**
 
 Run: `pnpm --config.verifyDepsBeforeRun=false --filter @markiro/standalone exec vitest run test/host-status-line.test.tsx test/line-select.test.tsx test/shell.test.ts test/app.test.tsx`
-Expected: PASS — 6 тестов в `host-status-line.test.tsx`, 8 в `line-select.test.tsx`, 31 в `shell.test.ts`, 31 в `app.test.tsx`.
+Expected: PASS — 6 тестов в `host-status-line.test.tsx`, 8 в `line-select.test.tsx`, 33 в `shell.test.ts`, 34 в `app.test.tsx` (задача 3 добавила по ревью 2 и 3 теста).
 
 - [ ] **Step 5: Документы**
 
@@ -4979,7 +4982,7 @@ import { NetworkPairing } from "./NetworkPairing.js";
 - [ ] **Step 4: Запустить тесты — они проходят**
 
 Run: `pnpm --config.verifyDepsBeforeRun=false --filter @markiro/standalone exec vitest run test/host-search.test.ts test/network-pairing.test.tsx test/shell.test.ts test/app.test.tsx`
-Expected: PASS — 16 тестов в `host-search.test.ts`, 15 в `network-pairing.test.tsx`, 32 в `shell.test.ts`, 34 в `app.test.tsx`.
+Expected: PASS — 16 тестов в `host-search.test.ts`, 15 в `network-pairing.test.tsx`, 34 в `shell.test.ts`, 37 в `app.test.tsx`.
 
 - [ ] **Step 5: Документы**
 
