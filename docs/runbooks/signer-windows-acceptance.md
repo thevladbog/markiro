@@ -73,7 +73,7 @@ starting from a paired previous stable with a selected certificate.
 
 - [ ] After the update the agent keeps its identity: the cabinet shows no new
       agent, the certificate selection is kept, and the next token refresh
-      completes through CryptoPoint.
+      completes through CryptoPro.
 - [ ] `%LOCALAPPDATA%\app.markiro.signer\` holds `signer.json`,
       `signer-storage.json` and `journal\`; `%APPDATA%\app.markiro.signer\`
       no longer exists.
