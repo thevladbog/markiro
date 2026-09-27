@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -856,4 +856,78 @@ test.describe("document pages", () => {
     expect(entries.some((entry) => entry.wrapped.length > 0)).toBe(true);
     for (const entry of entries) for (const left of entry.wrapped) expect(left).toBe(entry.left);
   });
+});
+
+test.describe("header", () => {
+  // The suite builds with PUBLIC_PHONE set, so the header carries the phone link. At every width
+  // either the whole navigation fits on one line or the header folds it into the menu: nothing is
+  // cut off and no link or button breaks onto a second line.
+  const problems = (page: Page) =>
+    page.locator("[data-header]").evaluate((header) => {
+      const edge = header.getBoundingClientRect();
+      const shown = (element: Element) => {
+        const rect = element.getBoundingClientRect();
+        return (
+          rect.width > 0 && rect.height > 0 && getComputedStyle(element).visibility !== "hidden"
+        );
+      };
+      const label = (element: Element) => element.textContent?.trim() || element.className;
+      const cutOff = [...header.querySelectorAll("a, button, .language-switch")]
+        .filter(shown)
+        .map((element) => {
+          const rect = element.getBoundingClientRect();
+          const past = Math.max(
+            edge.left - rect.left,
+            rect.right - edge.right,
+            rect.right - innerWidth,
+          );
+          return { label: label(element), past: Math.round(past) };
+        })
+        .filter((item) => item.past > 0);
+      const wrapped = [...header.querySelectorAll(".landing-nav a, .landing-header__cta")]
+        .filter(shown)
+        .filter((element) => {
+          const range = document.createRange();
+          range.selectNodeContents(element);
+          const tops = [...range.getClientRects()].map((rect) => rect.top);
+          return tops.length > 0 && Math.max(...tops) - Math.min(...tops) > 4;
+        })
+        .map(label);
+      return { cutOff, wrapped };
+    });
+
+  // 768-880 px fold into the menu; 1024 px is the narrowest width that shows the whole row and
+  // 1200 px the first one with the full spacing.
+  for (const width of [768, 800, 840, 880, 1024, 1200] as const) {
+    test(`fits ${width} px with the phone number on light and dark pages`, async ({
+      page,
+      isMobile,
+    }) => {
+      test.skip(isMobile, "the width is set explicitly, one project covers it");
+      await page.setViewportSize({ width, height: 900 });
+      for (const route of [
+        "/",
+        "/en/",
+        "/markirovka-chestny-znak/",
+        "/en/chestny-znak-serialization/",
+      ]) {
+        await page.goto(route);
+        const phone = page.locator('[data-header] a[href^="tel:"][data-placement="header"]');
+        await expect(phone, route).toHaveCount(1);
+        expect(await problems(page), `${route} at ${width} px`).toEqual({
+          cutOff: [],
+          wrapped: [],
+        });
+        const trigger = page.locator("[data-menu-trigger]");
+        if (await trigger.isVisible()) {
+          await trigger.click();
+          await expect(phone, `${route} at ${width} px, menu open`).toBeVisible();
+          expect(await problems(page), `${route} at ${width} px, menu open`).toEqual({
+            cutOff: [],
+            wrapped: [],
+          });
+        }
+      }
+    });
+  }
 });

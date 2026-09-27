@@ -159,6 +159,7 @@ input:focus-visible {
   color: var(--fg-2);
   font: 500 0.8125rem / 1 var(--font-ui);
   text-decoration: none;
+  white-space: nowrap;
 }
 
 .landing-nav a::after {
@@ -713,29 +714,24 @@ input:focus-visible {
     width: calc(100% - 6rem);
   }
 
+  /* The full row is about 970 px with the default spacing; tighter gaps bring it to about
+     870 px, so the whole row still fits in the 928 px header of a 1024 px window. */
+  .landing-header {
+    gap: var(--sp-6);
+  }
+
+  .landing-nav {
+    gap: var(--sp-5);
+  }
+
   .demo-grid {
     gap: 4rem;
   }
 }
 
-@media (max-width: 47.9375rem) {
-  :root {
-    --landing-display-xl: 700 clamp(2.625rem, 12vw, 3.25rem) / 0.98 var(--font-ui);
-    --landing-display-lg: 700 clamp(2.25rem, 10vw, 2.875rem) / 1 var(--font-ui);
-    --landing-display-md: 700 clamp(2rem, 8.8vw, 2.5rem) / 1.02 var(--font-ui);
-    --landing-lead: 400 1rem / 1.5 var(--font-ui);
-    --landing-section-inline: 1rem;
-  }
-
-  .container,
-  .landing-header {
-    width: calc(100% - 2rem);
-  }
-
-  .section-index {
-    margin-bottom: var(--sp-5);
-  }
-
+/* Below 1024 px the row does not fit even with the tighter gaps, so the navigation folds into
+   the menu behind the trigger. */
+@media (max-width: 63.9375rem) {
   .landing-header {
     grid-template-columns: 1fr auto auto;
     gap: var(--sp-2);
@@ -750,7 +746,7 @@ input:focus-visible {
     position: absolute;
     top: 4.25rem;
     right: 0;
-    left: 0;
+    width: min(100%, 22rem);
     display: grid;
     gap: 0;
     padding: var(--sp-2);
@@ -807,6 +803,31 @@ input:focus-visible {
 
   .menu-trigger[aria-expanded="true"] span:last-child {
     transform: translateY(-0.15625rem) rotate(-45deg);
+  }
+}
+
+@media (max-width: 47.9375rem) {
+  :root {
+    --landing-display-xl: 700 clamp(2.625rem, 12vw, 3.25rem) / 0.98 var(--font-ui);
+    --landing-display-lg: 700 clamp(2.25rem, 10vw, 2.875rem) / 1 var(--font-ui);
+    --landing-display-md: 700 clamp(2rem, 8.8vw, 2.5rem) / 1.02 var(--font-ui);
+    --landing-lead: 400 1rem / 1.5 var(--font-ui);
+    --landing-section-inline: 1rem;
+  }
+
+  .container,
+  .landing-header {
+    width: calc(100% - 2rem);
+  }
+
+  .section-index {
+    margin-bottom: var(--sp-5);
+  }
+
+  /* On phones the menu spans the whole header. */
+  .landing-nav {
+    left: 0;
+    width: auto;
   }
 
   .section--demo {
