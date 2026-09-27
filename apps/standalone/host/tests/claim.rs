@@ -241,12 +241,18 @@ async fn a_wrong_code_counts_against_every_live_code_only() {
     assert_eq!(claim(&app, claim_body(&c_code)).await.0, StatusCode::OK);
     // D shares A and B's expiry window: created at the same instant.
     let (_, d_id) = new_code(&app, &key, &token).await;
-    // Exactly one code lifetime later, A, B and D (all unused) are expired;
-    // C is excluded from expiry entirely because it is already used.
+    // Exactly one code lifetime later, A, B and D (all unused) are expired,
+    // and so is C: being used does not exempt a code from also expiring. C
+    // is excluded from the counter below by both conditions at once, which
+    // is why G exists — it isolates `used_at IS NULL` on its own.
     app.clock.advance(time::Duration::minutes(10));
     // E and F are fresh, live codes created after the advance.
     let (_, e_id) = new_code(&app, &key, &token).await;
     let (_, f_id) = new_code(&app, &key, &token).await;
+    // G is claimed right after the advance too, so — unlike C — it is used
+    // well before its own expiry: only `used_at IS NULL` excludes it below.
+    let (g_code, g_id) = new_code(&app, &key, &token).await;
+    assert_eq!(claim(&app, claim_body(&g_code)).await.0, StatusCode::OK);
 
     let (status, body) = claim(&app, claim_body("0000000000")).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
@@ -256,6 +262,7 @@ async fn a_wrong_code_counts_against_every_live_code_only() {
     assert_eq!(failed_attempts(&app, &b_id).await, 0, "B is expired");
     assert_eq!(failed_attempts(&app, &c_id).await, 0, "C is used");
     assert_eq!(failed_attempts(&app, &d_id).await, 0, "D is expired");
+    assert_eq!(failed_attempts(&app, &g_id).await, 0, "G is used");
     assert_eq!(failed_attempts(&app, &e_id).await, 1, "E is live");
     assert_eq!(failed_attempts(&app, &f_id).await, 1, "F is live");
 }

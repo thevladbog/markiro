@@ -175,15 +175,20 @@ async fn secrets_never_reach_the_process_log() {
         .unwrap();
     let claimed_key = claimed["deviceKey"].as_str().unwrap().to_owned();
 
-    // A refused claim (wrong code) is logged too, on the denied path.
+    // A refused claim is logged too, on the denied path: reusing the
+    // already-claimed code produces a `code_used` refusal, and the code
+    // itself is already a `secrets` needle below (an arbitrary wrong code,
+    // such as "0000000000", would not be, so it would not prove anything).
     let refused_claim = client
         .post(format!("{base}/v1/pairing/claim"))
         .header(protocol.0, &protocol.1)
-        .json(&json!({ "code": "0000000000", "kind": "station", "name": "Станция 3", "appVersion": "0.1.0" }))
+        .json(&json!({ "code": pairing_code, "kind": "station", "name": "Станция 3", "appVersion": "0.1.0" }))
         .send()
         .await
         .unwrap();
     assert_eq!(refused_claim.status(), 400);
+    let refused_claim: serde_json::Value = refused_claim.json().await.unwrap();
+    assert_eq!(refused_claim["error"]["code"], "pairing_code_invalid");
 
     // A wrong device key and a wrong session token are both rejected...
     let wrong_device_key = "not-a-real-device-key";
