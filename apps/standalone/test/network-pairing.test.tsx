@@ -41,6 +41,21 @@ function type(label: string, value: string): void {
   fireEvent.change(screen.getByLabelText(label), { target: { value } });
 }
 
+/** Types the address and code, confirms, and lets the host refuse the claim. */
+async function refuseManual(onClaim: NetworkPairingProps["onClaim"]): Promise<NetworkPairingProps> {
+  const props = renderPairing({ onClaim });
+  fireEvent.click(screen.getByRole("button", { name: "Ввести адрес и код вручную" }));
+  type("Адрес хоста", "192.168.1.10");
+  type("Код подключения", "7K3MQ9XV2D");
+  fireEvent.click(screen.getByRole("button", { name: "Далее" }));
+  await screen.findByText("Отпечаток хоста https://192.168.1.10:45710");
+  fireEvent.click(screen.getByRole("button", { name: "Отпечаток совпадает" }));
+  // Waits for the claim's rejection to settle (inside `waitFor`'s own act()
+  // wrapping) before returning, so the caller's assertions never race it.
+  await waitFor(() => expect(onClaim).toHaveBeenCalledTimes(1));
+  return props;
+}
+
 function scan(text: string): void {
   type("Код с экрана офиса", text);
   const button = screen.getByRole("button", { name: "Подключить" });
@@ -332,6 +347,70 @@ describe("NetworkPairing", () => {
     expect(props.probe.hello).toHaveBeenCalledTimes(1);
     expect(onClaim).toHaveBeenCalledTimes(1);
   });
+
+  it.each([
+    [
+      "pairing_code_invalid",
+      "Код подключения неверен или больше не действует. Получите новый код в офисе.",
+    ],
+    ["pairing_code_expired", "Срок кода подключения истёк. Получите новый код в офисе."],
+    [
+      "invalid_response",
+      "Подключение не завершилось, а хост мог уже принять код. Получите в офисе новый код и подключитесь снова.",
+    ],
+    [
+      "host_changed",
+      "Подключение не завершилось, а хост мог уже принять код. Получите в офисе новый код и подключитесь снова.",
+    ],
+    [
+      "storage",
+      "Подключение не завершилось, а хост мог уже принять код. Получите в офисе новый код и подключитесь снова.",
+    ],
+  ] as const)(
+    "remembers a %s refusal: a second submit of the same code neither probes nor claims again",
+    async (code, text) => {
+      const onClaim = vi.fn<NetworkPairingProps["onClaim"]>(async () => {
+        throw new DeviceError(code, "refused");
+      });
+      const props = await refuseManual(onClaim);
+      await screen.findByText(text);
+      expect(props.probe.hello).toHaveBeenCalledTimes(1);
+      expect(onClaim).toHaveBeenCalledTimes(1);
+
+      // Same code still in the field; submitting again must not reach the
+      // network at all — a wrong code counts against every live code.
+      fireEvent.click(screen.getByRole("button", { name: "Далее" }));
+      expect(await screen.findByText(text)).toBeTruthy();
+      expect(props.probe.hello).toHaveBeenCalledTimes(1);
+      expect(onClaim).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([
+    ["rate_limited", "Слишком много попыток подключения. Подождите минуту и попробуйте снова."],
+    ["unreachable", "Хост не отвечает по этому адресу. Проверьте адрес и что ПК-хост включён."],
+  ] as const)(
+    "does not remember a %s refusal: a second submit of the same code probes and claims again",
+    async (code, text) => {
+      const onClaim = vi.fn<NetworkPairingProps["onClaim"]>(async () => {
+        throw new DeviceError(code, "refused");
+      });
+      const props = await refuseManual(onClaim);
+      await screen.findByText(text);
+      expect(props.probe.hello).toHaveBeenCalledTimes(1);
+      expect(onClaim).toHaveBeenCalledTimes(1);
+
+      // Neither code judges the code itself (a rate limit, or a transport
+      // failure that never reached the host): the same code must still be
+      // usable, so submitting again goes through the full flow again.
+      fireEvent.click(screen.getByRole("button", { name: "Далее" }));
+      await screen.findByText("Отпечаток хоста https://192.168.1.10:45710");
+      fireEvent.click(screen.getByRole("button", { name: "Отпечаток совпадает" }));
+      expect(await screen.findByText(text)).toBeTruthy();
+      expect(props.probe.hello).toHaveBeenCalledTimes(2);
+      expect(onClaim).toHaveBeenCalledTimes(2);
+    },
+  );
 
   it("goes back without the code when the fingerprint differs", async () => {
     const props = renderPairing();

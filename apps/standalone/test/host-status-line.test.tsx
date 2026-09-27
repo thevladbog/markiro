@@ -52,6 +52,24 @@ describe("HostStatusLine", () => {
     expect(screen.getByText("Хост не отвечает.")).toBeTruthy();
   });
 
+  it("shows the date when the last contact was the same day of an earlier month", () => {
+    // A day-of-month-only comparison (27 == 27) would wrongly call this
+    // "today" and hide the date: 27 August is not 27 September.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 8, 27, 9, 0));
+    const lastMonthSameDate = new Date(2026, 7, 27, 14, 5).getTime();
+    render(
+      <HostStatusLine
+        status={status({
+          state: "offline",
+          lastError: "unreachable",
+          lastContactAt: lastMonthSameDate,
+        })}
+      />,
+    );
+    expect(screen.getByText("Нет связи с хостом с 27.08 14:05")).toBeTruthy();
+  });
+
   it("says it is connecting and why the last attempt failed", () => {
     render(<HostStatusLine status={status({ state: "connecting", lastError: "stream_ended" })} />);
     expect(screen.getByText("Подключение к хосту…")).toBeTruthy();

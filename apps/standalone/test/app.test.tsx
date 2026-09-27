@@ -871,8 +871,11 @@ describe("App", () => {
     // refreshed session was actually applied, not merely that nothing fired.
     expect(await screen.findByText("Ирина Орлова")).toBeTruthy();
     expect(host.officeMe).toHaveBeenCalledWith("office-session-token");
-    // Flush any other pending work the revision could have triggered.
-    await act(async () => {});
+    // Two setImmediate turns, not act(async () => {}): a passive effect that
+    // invalidated queries on every session change would run in a later
+    // setImmediate task, which only real turns like these wait for.
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
     expect(host.getOrg).toHaveBeenCalledTimes(1);
     expect(screen.getByLabelText("Название организации")).toBeTruthy();
   });
