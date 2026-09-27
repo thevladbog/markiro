@@ -3,9 +3,10 @@ use markiro_proto::{
     display_fingerprint, BlockSizesUpdate, BootstrapRequest, BootstrapResponse, ChangesResponse,
     ClaimRequest, Compatibility, DeviceInfo, DeviceKind, DeviceLineRequest, DeviceRecord,
     ErrorBody, Hello, HelloEnvelope, LineRecord, LocalPairRequest, OfficeLoginRequest, OfficeRole,
-    OfficeSession, OfficeUser, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate, OrgProfile,
-    OrgProfileUpdate, OrgRecord, PairResponse, PairingCode, PasswordChange, PasswordSet,
-    SiteRecord, SsccCounterUpdate, SsccState, HOST_PRODUCT, PROTOCOL_VERSION,
+    OfficeSession, OfficeUser, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate,
+    OperatorBadgeRecord, OperatorRecord, OrgProfile, OrgProfileUpdate, OrgRecord, PairResponse,
+    PairingCode, PasswordChange, PasswordSet, SiteRecord, SsccCounterUpdate, SsccState,
+    HOST_PRODUCT, PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -224,6 +225,31 @@ fn the_change_feed_fixture_round_trips_with_typed_records() {
     let site: SiteRecord = serde_json::from_value(changes.items[2].data.clone().unwrap()).unwrap();
     assert_eq!(site.badge_salt.len(), 24);
     assert!(changes.items[3].deleted && changes.items[3].data.is_none());
+}
+
+#[test]
+fn the_people_feed_fixture_round_trips_without_leaking_hashes() {
+    let changes: ChangesResponse = round_trip("changes-people.json");
+    assert_eq!(changes.items.len(), 4);
+    let operator: OperatorRecord =
+        serde_json::from_value(changes.items[0].data.clone().unwrap()).unwrap();
+    // The PIN hash is the one TypeScript computed for the PIN 4821.
+    assert_eq!(
+        operator.pin_phc.expose(),
+        fixture("phc-password.json")["pinPhc"].as_str().unwrap()
+    );
+    let badge: OperatorBadgeRecord =
+        serde_json::from_value(changes.items[1].data.clone().unwrap()).unwrap();
+    assert_eq!(badge.operator_id, changes.items[0].id);
+    assert_eq!(badge.label, None);
+    // The badge is hashed with the site's badge salt.
+    let salt = fixture("changes-response.json")["items"][2]["data"]["badgeSalt"].clone();
+    assert_eq!(badge.badge_phc.expose().split('$').nth(3), salt.as_str());
+    assert!(changes.items[2..]
+        .iter()
+        .all(|item| item.deleted && item.data.is_none()));
+    let debug = format!("{operator:?} {badge:?}");
+    assert!(!debug.contains("pbkdf2"), "{debug}");
 }
 
 #[test]

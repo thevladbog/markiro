@@ -310,12 +310,14 @@ pub struct DeviceRecord {
     pub revoked_at: Option<String>,
 }
 
-/// Entities of the change feed (spec §4.4). Plans 1d and 1e add operators,
-/// badges, products, templates and template defaults.
+/// Entities of the change feed (spec §4.4). Plan 1e adds products,
+/// templates and template defaults.
 pub mod entities {
     pub const ORG_PROFILE: &str = "org_profile";
     pub const SITE: &str = "site";
     pub const LINES: &str = "lines";
+    pub const OPERATORS: &str = "operators";
+    pub const OPERATOR_BADGES: &str = "operator_badges";
 }
 
 /// `GET /v1/changes`: reference records changed after `since`, oldest first.
@@ -340,8 +342,8 @@ pub struct ChangeItem {
     pub id: String,
     pub rev: i64,
     pub deleted: bool,
-    /// The record ([`OrgRecord`], [`SiteRecord`], [`LineRecord`], …); absent
-    /// when `deleted`.
+    /// The record ([`OrgRecord`], [`SiteRecord`], [`LineRecord`],
+    /// [`OperatorRecord`], [`OperatorBadgeRecord`]); absent when `deleted`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data: Option<serde_json::Value>,
 }
@@ -373,6 +375,33 @@ pub struct SiteRecord {
 pub struct LineRecord {
     pub name: String,
     pub archived: bool,
+}
+
+/// `data` of an `operators` item. Only an active operator is in the feed: a
+/// deactivation arrives as a tombstone, never as a flag (spec §4.4), and a
+/// PIN change as a record with the new hash.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OperatorRecord {
+    /// Personnel number: 3-12 digits, typed on the station keypad.
+    pub login: String,
+    pub name: String,
+    pub role: Option<String>,
+    /// PBKDF2 PHC string of the PIN (`@markiro/domain`).
+    pub pin_phc: Secret,
+}
+
+/// `data` of an `operator_badges` item. Only a badge that is not revoked is
+/// in the feed: a revocation arrives as a tombstone. A badge grants nothing
+/// by itself: a station signs in with it only while the record of its
+/// operator is there.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OperatorBadgeRecord {
+    pub operator_id: String,
+    /// PBKDF2 PHC string of the badge code, with the site's badge salt.
+    pub badge_phc: Secret,
+    pub label: Option<String>,
 }
 
 /// Role of an office user.

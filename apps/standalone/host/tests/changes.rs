@@ -335,3 +335,237 @@ async fn the_feed_needs_a_device_key_but_no_office_session() {
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     assert_eq!(body["error"]["details"]["credential"], "device");
 }
+
+/// `pinPhc` of `proto/fixtures/phc-password.json`: the PIN 4821.
+const PIN_PHC: &str =
+    "pbkdf2$sha256$100000$bWFya2lyby1waW4tc2FsdA==$3OKvrZ2+EfTB2zsCso90r5g8c6Ib6t+Bv+cGJOpgPmU=";
+/// A badge verifier, stored as the office computed it.
+const BADGE_PHC: &str =
+    "pbkdf2$sha256$100000$AAECAwQFBgcICQoLDA0ODw==$LEcu0ewwRD5rBHrpCjvxni/q2cURiavbRlNRgDPb+n0=";
+
+/// Insert an active operator at a new revision; returns its id and the revision.
+async fn add_operator(app: &TestApp, login: &str) -> (String, i64) {
+    let mut tx = markiro_host::db::begin_write(&app.state.pool)
+        .await
+        .unwrap();
+    let rev = markiro_host::db::next_revision(&mut tx).await.unwrap();
+    let id = uuid::Uuid::new_v4().to_string();
+    sqlx::query(
+        "INSERT INTO operators (id, login, name, role, pin_phc, active, rev) \
+         VALUES (?, ?, ?, NULL, ?, 1, ?)",
+    )
+    .bind(&id)
+    .bind(login)
+    .bind(format!("Оператор {login}"))
+    .bind(PIN_PHC)
+    .bind(rev)
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+    (id, rev)
+}
+
+/// Insert a badge of `operator_id` at a new revision; returns its id and the
+/// revision, or the database's refusal.
+async fn insert_badge(
+    app: &TestApp,
+    operator_id: &str,
+    badge_phc: &str,
+) -> Result<(String, i64), sqlx::Error> {
+    let mut tx = markiro_host::db::begin_write(&app.state.pool).await?;
+    let rev = markiro_host::db::next_revision(&mut tx).await?;
+    let id = uuid::Uuid::new_v4().to_string();
+    sqlx::query(
+        "INSERT INTO operator_badges (id, operator_id, badge_phc, label, created_at, rev) \
+         VALUES (?, ?, ?, 'Пропуск 1', ?, ?)",
+    )
+    .bind(&id)
+    .bind(operator_id)
+    .bind(badge_phc)
+    .bind(app.state.timestamp())
+    .bind(rev)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok((id, rev))
+}
+
+/// Deactivate or reactivate an operator at a new revision the way the office
+/// writers do: a deactivation writes the tombstone, a reactivation drops it.
+/// Returns the revision.
+async fn set_active(app: &TestApp, id: &str, active: bool) -> i64 {
+    let mut tx = markiro_host::db::begin_write(&app.state.pool)
+        .await
+        .unwrap();
+    let rev = markiro_host::db::next_revision(&mut tx).await.unwrap();
+    sqlx::query("UPDATE operators SET active = ?, rev = ? WHERE id = ?")
+        .bind(active)
+        .bind(rev)
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    if active {
+        markiro_host::feed::restore(&mut tx, "operators", id)
+            .await
+            .unwrap();
+    } else {
+        markiro_host::feed::remove(&mut tx, "operators", id, rev)
+            .await
+            .unwrap();
+    }
+    tx.commit().await.unwrap();
+    rev
+}
+
+/// Revoke a badge at a new revision with its tombstone; returns the revision.
+async fn revoke_badge(app: &TestApp, id: &str) -> i64 {
+    let mut tx = markiro_host::db::begin_write(&app.state.pool)
+        .await
+        .unwrap();
+    let rev = markiro_host::db::next_revision(&mut tx).await.unwrap();
+    sqlx::query("UPDATE operator_badges SET revoked_at = ?, rev = ? WHERE id = ?")
+        .bind(app.state.timestamp())
+        .bind(rev)
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    markiro_host::feed::remove(&mut tx, "operator_badges", id, rev)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    rev
+}
+
+fn operator_item(id: &str, rev: i64) -> Value {
+    json!({
+        "entity": "operators", "id": id, "rev": rev, "deleted": false,
+        "data": { "login": "0042", "name": "Оператор 0042", "role": null, "pinPhc": PIN_PHC }
+    })
+}
+
+fn badge_item(id: &str, operator_id: &str, rev: i64) -> Value {
+    json!({
+        "entity": "operator_badges", "id": id, "rev": rev, "deleted": false,
+        "data": { "operatorId": operator_id, "badgePhc": BADGE_PHC, "label": "Пропуск 1" }
+    })
+}
+
+fn tombstone(entity: &str, id: &str, rev: i64) -> Value {
+    json!({ "entity": entity, "id": id, "rev": rev, "deleted": true })
+}
+
+#[tokio::test]
+async fn active_operators_and_their_badges_ride_the_feed() {
+    let app = TestApp::new().await;
+    let (_, key) = pair_device(&app, "station").await;
+    bootstrap(&app, &key).await;
+    let (operator, operator_rev) = add_operator(&app, "0042").await;
+    let (badge, badge_rev) = insert_badge(&app, &operator, BADGE_PHC).await.unwrap();
+
+    let (status, body) = changes(&app, &key, "?since=1").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["items"],
+        json!([
+            operator_item(&operator, operator_rev),
+            badge_item(&badge, &operator, badge_rev)
+        ])
+    );
+}
+
+#[tokio::test]
+async fn a_deactivated_operator_leaves_the_feed_as_a_tombstone() {
+    let app = TestApp::new().await;
+    let (_, key) = pair_device(&app, "station").await;
+    bootstrap(&app, &key).await;
+    let (operator, _) = add_operator(&app, "0042").await;
+    let (badge, badge_rev) = insert_badge(&app, &operator, BADGE_PHC).await.unwrap();
+    let off = set_active(&app, &operator, false).await;
+
+    // A station that has the operator learns that it is gone...
+    let (_, body) = changes(&app, &key, &format!("?since={badge_rev}")).await;
+    assert_eq!(
+        body["items"],
+        json!([tombstone("operators", &operator, off)])
+    );
+    // ...and one syncing from zero never gets the record: only the badge,
+    // which grants nothing without it, and the tombstone.
+    let (_, body) = changes(&app, &key, "?since=1").await;
+    assert_eq!(
+        body["items"],
+        json!([
+            badge_item(&badge, &operator, badge_rev),
+            tombstone("operators", &operator, off)
+        ])
+    );
+}
+
+#[tokio::test]
+async fn a_reactivated_operator_comes_back_without_its_tombstone() {
+    let app = TestApp::new().await;
+    let (_, key) = pair_device(&app, "station").await;
+    bootstrap(&app, &key).await;
+    let (operator, _) = add_operator(&app, "0042").await;
+    let off = set_active(&app, &operator, false).await;
+    let on = set_active(&app, &operator, true).await;
+
+    let tombstones: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tombstones")
+        .fetch_one(&app.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(tombstones, 0, "re-creating a key drops its tombstone");
+    // A station that applied the tombstone gets the record back...
+    let (_, body) = changes(&app, &key, &format!("?since={off}")).await;
+    assert_eq!(body["items"], json!([operator_item(&operator, on)]));
+    // ...and one syncing from zero sees only the record, never both.
+    let (_, body) = changes(&app, &key, "?since=1").await;
+    assert_eq!(body["items"], json!([operator_item(&operator, on)]));
+}
+
+#[tokio::test]
+async fn a_revoked_badge_leaves_the_feed_as_a_tombstone() {
+    let app = TestApp::new().await;
+    let (_, key) = pair_device(&app, "station").await;
+    bootstrap(&app, &key).await;
+    let (operator, operator_rev) = add_operator(&app, "0042").await;
+    let (badge, badge_rev) = insert_badge(&app, &operator, BADGE_PHC).await.unwrap();
+    let revoked = revoke_badge(&app, &badge).await;
+
+    let (_, body) = changes(&app, &key, &format!("?since={badge_rev}")).await;
+    assert_eq!(
+        body["items"],
+        json!([tombstone("operator_badges", &badge, revoked)])
+    );
+    let (_, body) = changes(&app, &key, "?since=1").await;
+    assert_eq!(
+        body["items"],
+        json!([
+            operator_item(&operator, operator_rev),
+            tombstone("operator_badges", &badge, revoked)
+        ])
+    );
+}
+
+#[tokio::test]
+async fn one_badge_is_active_for_one_operator_at_a_time() {
+    let app = TestApp::new().await;
+    let (_, key) = pair_device(&app, "station").await;
+    bootstrap(&app, &key).await;
+    let (first, _) = add_operator(&app, "0042").await;
+    let (second, _) = add_operator(&app, "0043").await;
+    let (badge, _) = insert_badge(&app, &first, BADGE_PHC).await.unwrap();
+
+    let error = insert_badge(&app, &second, BADGE_PHC).await.unwrap_err();
+    assert!(
+        error
+            .as_database_error()
+            .is_some_and(|error| error.is_unique_violation()),
+        "{error}"
+    );
+    // A revoked badge frees its code for another operator.
+    revoke_badge(&app, &badge).await;
+    insert_badge(&app, &second, BADGE_PHC).await.unwrap();
+}

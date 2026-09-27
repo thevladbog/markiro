@@ -169,19 +169,33 @@ forgetting goes on; plan 1d3 revisits this before PIN and badge hashes land.
 
 `GET /v1/changes?since=<rev>&limit=<n>` (`routes/changes.rs`) returns the
 station-visible reference records changed after a device's revision:
-`org_profile`, `site` (badge salt and block sizes), `lines`, plus deletions
-from `tombstones`. Pages are ordered by `(rev, entity, id)` and never split a
-revision; with `hasMore = false`, `rev` is the host's current revision, so
-revisions that changed only office data still move a device forward.
+`org_profile`, `site` (badge salt and block sizes), `lines`, `operators`,
+`operator_badges`, plus deletions from `tombstones`. Pages are ordered by
+`(rev, entity, id)` and never split a revision; with `hasMore = false`,
+`rev` is the host's current revision, so revisions that changed only office
+data still move a device forward.
 `GET /v1/changes/stream` sends the current revision as its first event, then
 an event whenever the revision grew: events are strictly increasing, so a
 burst of commits collapses into one, and an event means "fetch since your
 revision", not "a commit happened"; a comment heartbeat keeps the connection
 alive every 15 s, and streams end when the host stops. A new feed entity
 needs a branch in `FEED_KEYS` and in `record`, its proto record type, Zod
-schema and fixture, a tombstone wherever it is deleted, the station's local
-table, an index on the new table's `rev` (as `lines_rev`), and that
-re-creating a key deletes its tombstone.
+schema and fixture, a tombstone wherever it is deleted or stops granting
+access, the station's local table, an index on the new table's `rev` (as
+`lines_rev`), and that re-creating a key deletes its tombstone. Writers use
+`feed::remove` and `feed::restore` for both.
+
+A change that removes access rides the feed as a tombstone, never as a
+flag: the webview reads records with `z.object`, which drops unknown keys,
+so a newer host expressing a revocation as a new field would leave an older
+station with the access. An operator is in the feed only while active: a
+deactivation writes a tombstone for its id, and a reactivation drops the
+tombstone and sends the record again with a new `rev`. A badge is in the
+feed only while not revoked: a revocation writes a tombstone, and a revoked
+badge never comes back — a new badge gets a new id. A PIN change is a record
+update carrying the new `pinPhc`, so the station replaces the hash and the
+old PIN stops working. A badge record never grants access on its own: the
+station's operator login (plan 1f) requires the record of its `operatorId`.
 
 On the device side a new entity also needs its entry in `ENTITIES`
 (`src/local/reference-sync.ts`), which derives `ENTITY_SET`; a new entity

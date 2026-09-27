@@ -4,7 +4,7 @@
 //! with server-sent events so a device does not have to poll for the next
 //! one. Adding an entity means a branch in `FEED_KEYS` and in `record`, its
 //! proto record type, Zod schema and fixture, and a tombstone wherever it is
-//! deleted.
+//! deleted or stops granting access (`feed`).
 
 use std::convert::Infallible;
 
@@ -15,7 +15,10 @@ use axum::Json;
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 use futures_util::stream::unfold;
-use markiro_proto::{entities, ChangeItem, ChangesResponse, LineRecord, OrgRecord, SiteRecord};
+use markiro_proto::{
+    entities, ChangeItem, ChangesResponse, LineRecord, OperatorBadgeRecord, OperatorRecord,
+    OrgRecord, Secret, SiteRecord,
+};
 use serde::Deserialize;
 use serde_json::json;
 use sqlx::SqliteConnection;
@@ -29,11 +32,15 @@ pub const DEFAULT_LIMIT: u32 = 500;
 pub const MAX_LIMIT: u32 = 1000;
 
 /// Every feed record changed after `?1`: live rows of each entity, then
-/// tombstones. `site` joins only once the wizard has initialized the host.
+/// tombstones. `site` joins only once the wizard has initialized the host;
+/// an operator only while active and a badge only while not revoked, since
+/// their tombstones say they left.
 const FEED_KEYS: &str = "\
     SELECT 'org_profile' AS entity, '1' AS id, rev, 0 AS deleted FROM org_profile WHERE rev > ?1 \
     UNION ALL SELECT 'site', '1', rev, 0 FROM site WHERE rev > ?1 AND initialized_at IS NOT NULL \
     UNION ALL SELECT 'lines', id, rev, 0 FROM lines WHERE rev > ?1 \
+    UNION ALL SELECT 'operators', id, rev, 0 FROM operators WHERE rev > ?1 AND active = 1 \
+    UNION ALL SELECT 'operator_badges', id, rev, 0 FROM operator_badges WHERE rev > ?1 AND revoked_at IS NULL \
     UNION ALL SELECT entity, id, rev, 1 FROM tombstones WHERE rev > ?1";
 
 #[derive(Debug, Deserialize)]
@@ -212,6 +219,34 @@ async fn record(conn: &mut SqliteConnection, key: &Key) -> Result<serde_json::Va
                     .await
                     .map_err(ApiError::internal)?;
             serde_json::to_value(LineRecord { name, archived })
+        }
+        entities::OPERATORS => {
+            let (login, name, role, pin_phc): (String, String, Option<String>, String) =
+                sqlx::query_as("SELECT login, name, role, pin_phc FROM operators WHERE id = ?")
+                    .bind(&key.id)
+                    .fetch_one(&mut *conn)
+                    .await
+                    .map_err(ApiError::internal)?;
+            serde_json::to_value(OperatorRecord {
+                login,
+                name,
+                role,
+                pin_phc: Secret::new(pin_phc),
+            })
+        }
+        entities::OPERATOR_BADGES => {
+            let (operator_id, badge_phc, label): (String, String, Option<String>) = sqlx::query_as(
+                "SELECT operator_id, badge_phc, label FROM operator_badges WHERE id = ?",
+            )
+            .bind(&key.id)
+            .fetch_one(&mut *conn)
+            .await
+            .map_err(ApiError::internal)?;
+            serde_json::to_value(OperatorBadgeRecord {
+                operator_id,
+                badge_phc: Secret::new(badge_phc),
+                label,
+            })
         }
         other => {
             return Err(ApiError::internal(format!(
