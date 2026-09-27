@@ -259,7 +259,11 @@ jobs:
     # The job then took 26-34 minutes (runs 36142260084, 36147194885,
     # 36150539644); the product-labels contract adds about 2 more (59 tests,
     # 1.8 minutes locally), so keep the same headroom above that.
-    timeout-minutes: 45
+    # Main later took 33-42 minutes (42.3 on run 36257096021). The landing home
+    # redesign adds about 3 more (image build +48s, landing browser and
+    # Lighthouse gates +91s) and was cancelled at 45.1 minutes in the last step
+    # of run 36310376201, so the budget moves to 60 minutes.
+    timeout-minutes: 60
     env:
       COMPOSE_PROJECT_NAME: markiro-production
       MARKIRO_IMAGE_TAG: ${{ github.sha }}
