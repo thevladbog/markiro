@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::config;
+use crate::config::{self, ReplaceFailure};
 
 pub(crate) const RECORD_FILE: &str = "station-storage.json";
 /// Record writes go through `.station-storage-<uuid>.tmp`.
@@ -78,6 +78,16 @@ pub(crate) fn read(local_dir: &Path) -> Result<Option<StorageRecord>, String> {
 
 /// Atomic replace with the same primitives as `station.json`.
 pub(crate) fn write(local_dir: &Path, record: &StorageRecord) -> Result<(), String> {
+    write_with(local_dir, record, &config::replace_config_file)
+}
+
+/// The replace primitive is injected only so the failure paths can be proven
+/// in unit tests.
+fn write_with(
+    local_dir: &Path,
+    record: &StorageRecord,
+    replace: &dyn Fn(&Path, &Path) -> std::io::Result<()>,
+) -> Result<(), String> {
     fs::create_dir_all(local_dir).map_err(|error| error.to_string())?;
     let data = serde_json::to_vec_pretty(&RecordFile {
         version: RECORD_VERSION,
@@ -89,9 +99,21 @@ pub(crate) fn write(local_dir: &Path, record: &StorageRecord) -> Result<(), Stri
         let _ = fs::remove_file(&temporary);
         return Err(error);
     }
-    if let Err(error) = config::replace_config_file(&temporary, &local_dir.join(RECORD_FILE)) {
-        let _ = fs::remove_file(&temporary);
-        return Err(error.to_string());
+    let destination = local_dir.join(RECORD_FILE);
+    let had_destination = fs::symlink_metadata(&destination).is_ok();
+    match config::install_replacement(&temporary, &destination, had_destination, replace) {
+        Ok(()) => {}
+        Err(ReplaceFailure::Unchanged(error)) => {
+            let _ = fs::remove_file(&temporary);
+            return Err(error.to_string());
+        }
+        Err(ReplaceFailure::Stranded(error)) => {
+            return Err(format!(
+                "the station storage record {} could not be replaced and is missing: {error}; the new record is kept in {}",
+                destination.display(),
+                temporary.display()
+            ));
+        }
     }
     config::sync_parent_directory(local_dir)
 }
@@ -124,7 +146,7 @@ mod tests {
         assert_eq!(read(&dir).unwrap(), Some(claiming));
     }
 
-    /// On Windows the second write goes through `ReplaceFileW`.
+    /// On Windows the second write replaces the first through `MoveFileExW`.
     #[test]
     fn a_second_write_replaces_the_first_without_leftovers() {
         let dir = temp_dir();
@@ -184,5 +206,65 @@ mod tests {
         .unwrap();
         remove(&dir).unwrap();
         assert_eq!(read(&dir).unwrap(), None);
+    }
+
+    fn committed(pending_cleanup: Option<PathBuf>) -> StorageRecord {
+        StorageRecord::Committed {
+            origin: Origin::Migrated,
+            pending_cleanup,
+        }
+    }
+
+    /// Fails the way `ReplaceFileW` did with error 1176: the record is gone
+    /// and the replacement keeps its own name.
+    fn lose_record(_temporary: &Path, destination: &Path) -> std::io::Result<()> {
+        let _ = fs::remove_file(destination);
+        Err(std::io::Error::other("injected: replacement not renamed"))
+    }
+
+    #[test]
+    fn a_failed_replace_that_loses_the_record_installs_the_new_one() {
+        let dir = temp_dir();
+        write(&dir, &committed(Some(PathBuf::from("/roaming/claimed")))).unwrap();
+        let attempts = std::cell::Cell::new(0);
+
+        write_with(
+            &dir,
+            &committed(None),
+            &|temporary: &Path, destination: &Path| {
+                attempts.set(attempts.get() + 1);
+                if attempts.get() == 1 {
+                    lose_record(temporary, destination)
+                } else {
+                    config::replace_config_file(temporary, destination)
+                }
+            },
+        )
+        .unwrap();
+
+        assert_eq!(read(&dir).unwrap(), Some(committed(None)));
+        let names: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(names, vec![std::ffi::OsString::from(RECORD_FILE)]);
+    }
+
+    #[test]
+    fn a_lost_record_that_cannot_be_reinstalled_keeps_the_new_one() {
+        let dir = temp_dir();
+        write(&dir, &committed(Some(PathBuf::from("/roaming/claimed")))).unwrap();
+
+        let error = write_with(&dir, &committed(None), &lose_record).unwrap_err();
+
+        assert_eq!(read(&dir).unwrap(), None);
+        let kept: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect();
+        assert_eq!(kept.len(), 1, "{kept:?}");
+        let file: RecordFile = serde_json::from_slice(&fs::read(&kept[0]).unwrap()).unwrap();
+        assert_eq!(file.record, committed(None));
+        assert!(error.contains(&kept[0].display().to_string()), "{error}");
     }
 }
