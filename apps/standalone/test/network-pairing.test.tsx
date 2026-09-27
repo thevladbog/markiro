@@ -43,7 +43,12 @@ function type(label: string, value: string): void {
 
 function scan(text: string): void {
   type("Код с экрана офиса", text);
-  fireEvent.click(screen.getByRole("button", { name: "Подключить" }));
+  const button = screen.getByRole("button", { name: "Подключить" });
+  // jsdom does not move focus on click: focus the button first, as a mouse
+  // click would in a real browser, so a regression that leaves focus there
+  // after a notice (item D) is actually visible to the assertions below.
+  act(() => button.focus());
+  fireEvent.click(button);
 }
 
 describe("NetworkPairing", () => {
@@ -65,6 +70,30 @@ describe("NetworkPairing", () => {
     act(() => scanInsteadButton.focus());
     fireEvent.click(scanInsteadButton);
     expect(document.activeElement).toBe(screen.getByLabelText("Код с экрана офиса"));
+  });
+
+  it("moves focus to the fingerprint block after confirming the manual form, never to the confirm button", async () => {
+    renderPairing();
+    fireEvent.click(screen.getByRole("button", { name: "Ввести адрес и код вручную" }));
+    type("Адрес хоста", "192.168.1.10");
+    type("Код подключения", "7K3MQ9XV2D");
+    const nextButton = screen.getByRole("button", { name: "Далее" });
+    // jsdom does not move focus on click: focus "Далее" first, so leaving
+    // focus there (or dropping it to <body>) would actually show up below.
+    act(() => nextButton.focus());
+    fireEvent.click(nextButton);
+    await screen.findByText("Отпечаток хоста https://192.168.1.10:45710");
+    const fingerprintBlock = screen
+      .getByText(
+        "Сверьте отпечаток ниже с отпечатком хоста на экране офиса. Код уйдёт на хост, только если они совпадают.",
+      )
+      .closest('[tabindex="-1"]');
+    expect(fingerprintBlock).toBeTruthy();
+    expect(document.activeElement).toBe(fingerprintBlock);
+    expect(document.activeElement).not.toBe(
+      screen.getByRole("button", { name: "Отпечаток совпадает" }),
+    );
+    expect(document.activeElement).not.toBe(document.body);
   });
 
   it("pairs with a scanned code: every address at once, the code's certificate, no question", async () => {
@@ -104,6 +133,9 @@ describe("NetworkPairing", () => {
       await screen.findByText("Это не код подключения Markiro. Отсканируйте код с экрана офиса."),
     ).toBeTruthy();
     expect(props.probe.hello).not.toHaveBeenCalled();
+    // Focus returns to the scan field, not left on the disabled-while-busy
+    // "Подключить" button, so the next scanner input is not lost.
+    expect(document.activeElement).toBe(screen.getByLabelText("Код с экрана офиса"));
   });
 
   it("warns when the code carries no host address", async () => {
@@ -115,6 +147,7 @@ describe("NetworkPairing", () => {
       ),
     ).toBeTruthy();
     expect(props.probe.hello).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(screen.getByLabelText("Код с экрана офиса"));
   });
 
   it("names the addresses when none answers with the code's certificate", async () => {
@@ -131,6 +164,7 @@ describe("NetworkPairing", () => {
       ),
     ).toBeTruthy();
     expect(props.onClaim).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(screen.getByLabelText("Код с экрана офиса"));
   });
 
   it("keeps the code from a host with another certificate", async () => {
@@ -171,6 +205,32 @@ describe("NetworkPairing", () => {
       ),
     ).toBeTruthy();
     await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(onClaim).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).toBe(screen.getByLabelText("Код с экрана офиса"));
+  });
+
+  it("does not probe or claim again with a code the host already refused on this screen (scan path)", async () => {
+    const onClaim = vi.fn<NetworkPairingProps["onClaim"]>(async () => {
+      throw new DeviceError("pairing_code_invalid", "refused");
+    });
+    const props = renderPairing({ onClaim });
+    scan(PAYLOAD);
+    await screen.findByText(
+      "Код подключения неверен или больше не действует. Получите новый код в офисе.",
+    );
+    // Both addresses were probed once each for this first, genuine attempt.
+    expect(props.probe.hello).toHaveBeenCalledTimes(2);
+    expect(onClaim).toHaveBeenCalledTimes(1);
+
+    // The very same payload, scanned again: the code is remembered as
+    // refused, so it must not spend another of the host's five attempts.
+    scan(PAYLOAD);
+    expect(
+      await screen.findByText(
+        "Код подключения неверен или больше не действует. Получите новый код в офисе.",
+      ),
+    ).toBeTruthy();
+    expect(props.probe.hello).toHaveBeenCalledTimes(2);
     expect(onClaim).toHaveBeenCalledTimes(1);
   });
 
@@ -240,6 +300,36 @@ describe("NetworkPairing", () => {
     // typed address is still there.
     expect(screen.getByLabelText("Адрес хоста")).toHaveProperty("value", "192.168.1.10");
     await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(onClaim).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not probe or claim again with a code the host already refused on this screen (manual path)", async () => {
+    const onClaim = vi.fn<NetworkPairingProps["onClaim"]>(async () => {
+      throw new DeviceError("pairing_code_invalid", "refused");
+    });
+    const props = renderPairing({ onClaim });
+    fireEvent.click(screen.getByRole("button", { name: "Ввести адрес и код вручную" }));
+    type("Адрес хоста", "192.168.1.10");
+    type("Код подключения", "7K3MQ9XV2D");
+    fireEvent.click(screen.getByRole("button", { name: "Далее" }));
+    await screen.findByText("Отпечаток хоста https://192.168.1.10:45710");
+    fireEvent.click(screen.getByRole("button", { name: "Отпечаток совпадает" }));
+    await screen.findByText(
+      "Код подключения неверен или больше не действует. Получите новый код в офисе.",
+    );
+    expect(props.probe.hello).toHaveBeenCalledTimes(1);
+    expect(onClaim).toHaveBeenCalledTimes(1);
+
+    // Back on the manual form with the same refused code still in the field
+    // (item H says it stays); submitting again must not probe or claim again.
+    expect(screen.getByLabelText("Код подключения")).toHaveProperty("value", "7K3MQ9XV2D");
+    fireEvent.click(screen.getByRole("button", { name: "Далее" }));
+    expect(
+      await screen.findByText(
+        "Код подключения неверен или больше не действует. Получите новый код в офисе.",
+      ),
+    ).toBeTruthy();
+    expect(props.probe.hello).toHaveBeenCalledTimes(1);
     expect(onClaim).toHaveBeenCalledTimes(1);
   });
 

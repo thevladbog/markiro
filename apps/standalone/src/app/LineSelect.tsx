@@ -13,6 +13,16 @@ import type { SyncState } from "./shell.js";
 const lineRow = z.object({ id: z.string(), name: z.string() });
 type Line = z.infer<typeof lineRow>;
 
+/**
+ * `errors.device.<code>`, except `unreachable`: a station can reach this
+ * screen already paired with a host elsewhere on the network, so the text
+ * must not claim the unreachable host is this computer's own service.
+ * `NetworkPairing.failureKey` handles the same code the same way.
+ */
+function failureKey(code: DeviceErrorCode): string {
+  return code === "unreachable" ? "errors.link.unreachable" : `errors.device.${code}`;
+}
+
 /** «Линия 2» before «Линия 10». */
 const BY_NAME = new Intl.Collator("ru", { numeric: true });
 
@@ -120,7 +130,7 @@ export function LineSelect({ local, sync, link, onSelect, onSync, onOffice }: Li
     <Card className="standalone-card" title={t("shell.lineSelect.title")} titleAs="h2">
       <div className="standalone-form">
         <p>{t("shell.lineSelect.body")}</p>
-        {failure && <Alert tone="error">{t(`errors.device.${failure}`)}</Alert>}
+        {failure && <Alert tone="error">{t(failureKey(failure))}</Alert>}
         {content()}
         <HostStatusLine status={link} />
         <div className="standalone-form__actions">

@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Alert, Button, Card, Input } from "@markiro/ui";
@@ -61,6 +61,19 @@ const MAYBE_SPENT: ReadonlySet<DeviceErrorCode> = new Set([
   "storage",
 ]);
 
+/**
+ * Refusals worth remembering for this screen (item H,
+ * `apps/standalone/AGENTS.md` "Local pairing trust"): a wrong code counts
+ * against every live code on the host, so a code already refused with one of
+ * these must never be sent again from here. `rate_limited` and a transport
+ * failure do not judge the code itself, so they are not remembered.
+ */
+const REMEMBER_REFUSAL: ReadonlySet<DeviceErrorCode> = new Set([
+  "pairing_code_invalid",
+  "pairing_code_expired",
+  ...MAYBE_SPENT,
+]);
+
 function claimFailureKey(error: unknown): string {
   if (error instanceof DeviceError && MAYBE_SPENT.has(error.code)) {
     return "shell.networkPairing.errors.codeMaybeSpent";
@@ -100,6 +113,28 @@ export function NetworkPairing({ probe, onClaim, onBack }: NetworkPairingProps) 
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState(false);
+  // Canonical codes the host already refused on this screen (item H): plain
+  // component state, so leaving this screen (a fresh mount) forgets them.
+  const [refusedCodes, setRefusedCodes] = useState<ReadonlyMap<string, string>>(new Map());
+  const fingerprintRef = useRef<HTMLDivElement>(null);
+  const scanFieldHostRef = useRef<HTMLDivElement>(null);
+
+  // After "Далее" the manual form unmounts; move focus to the fingerprint
+  // block instead of letting it drop to <body>. Never to the confirm button:
+  // a focused "Отпечаток совпадает" invites pressing Enter without comparing.
+  useEffect(() => {
+    if (confirmation) fingerprintRef.current?.focus();
+  }, [confirmation]);
+
+  // A scan submitted with the mouse leaves focus on "Подключить", which is
+  // then disabled while busy: the next scanner input would go nowhere. Any
+  // notice on the scan form (not a code, no addresses, no host found, a
+  // refused claim) returns focus to the scan field.
+  useEffect(() => {
+    if (!manual && !confirmation && notice) {
+      scanFieldHostRef.current?.querySelector("input")?.focus();
+    }
+  }, [notice, manual, confirmation]);
 
   const checkedName = (): string | null => {
     const parsed = personNameRule.safeParse(name);
@@ -113,7 +148,11 @@ export function NetworkPairing({ probe, onClaim, onBack }: NetworkPairingProps) 
       await onClaim(input);
     } catch (error) {
       setConfirmation(null);
-      setNotice({ key: claimFailureKey(error) });
+      const key = claimFailureKey(error);
+      setNotice({ key });
+      if (error instanceof DeviceError && REMEMBER_REFUSAL.has(error.code)) {
+        setRefusedCodes((codes) => new Map(codes).set(input.code, key));
+      }
       setBusy(false);
     }
   };
@@ -136,6 +175,13 @@ export function NetworkPairing({ probe, onClaim, onBack }: NetworkPairingProps) 
       return;
     }
     if (deviceName === null) return;
+    const remembered = refusedCodes.get(payload.code);
+    if (remembered !== undefined) {
+      // Already refused from this screen: do not spend another of the
+      // host's five attempts probing or claiming with it again.
+      setNotice({ key: remembered });
+      return;
+    }
     setBusy(true);
     const candidates = payload.addresses.map((host) => hostUrl(host, payload.port));
     const search = await findHost(probe, candidates, payload.fingerprint);
@@ -165,6 +211,13 @@ export function NetworkPairing({ probe, onClaim, onBack }: NetworkPairingProps) 
     if (canonical === null) codeProblem = hasCyrillic(code) ? "layout" : "invalid";
     setCodeError(codeProblem);
     if (deviceName === null || url === null || canonical === null) return;
+    const remembered = refusedCodes.get(canonical);
+    if (remembered !== undefined) {
+      // Already refused from this screen: skip the probe entirely, so a
+      // retry with the same code cannot reach `claim` either.
+      setNotice({ key: remembered });
+      return;
+    }
     setBusy(true);
     try {
       const observation = await probe.hello(url);
@@ -199,7 +252,10 @@ export function NetworkPairing({ probe, onClaim, onBack }: NetworkPairingProps) 
   const body = () => {
     if (confirmation) {
       return (
-        <>
+        // `tabIndex={-1}`: focused programmatically on mount (the effect
+        // above), never reachable by Tab, so the confirm button never
+        // inherits it.
+        <div ref={fingerprintRef} tabIndex={-1} className="standalone-form">
           <p>{t("shell.networkPairing.fingerprintBody")}</p>
           <p className="standalone-fingerprint-label">
             {t("shell.networkPairing.fingerprintLabel", { address: confirmation.address })}
@@ -220,7 +276,7 @@ export function NetworkPairing({ probe, onClaim, onBack }: NetworkPairingProps) 
               {t("shell.networkPairing.fingerprintMatches")}
             </Button>
           </div>
-        </>
+        </div>
       );
     }
     if (manual) {
@@ -274,14 +330,18 @@ export function NetworkPairing({ probe, onClaim, onBack }: NetworkPairingProps) 
       >
         {nameField}
         {/* A keyboard-wedge scanner types into the focused field and presses Enter. */}
-        <Input
-          label={t("shell.networkPairing.scan")}
-          hint={t("shell.networkPairing.scanHint")}
-          value={scan}
-          onChange={(event) => setScan(event.target.value)}
-          autoFocus
-          spellCheck={false}
-        />
+        {/* `Input` does not forward a ref: this host queries the field it
+            renders instead, to move focus back after a notice (item D). */}
+        <div ref={scanFieldHostRef}>
+          <Input
+            label={t("shell.networkPairing.scan")}
+            hint={t("shell.networkPairing.scanHint")}
+            value={scan}
+            onChange={(event) => setScan(event.target.value)}
+            autoFocus
+            spellCheck={false}
+          />
+        </div>
         <div className="standalone-form__actions">
           <Button
             variant="secondary"

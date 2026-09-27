@@ -90,7 +90,8 @@
     "online": "На связи с хостом",
     "connecting": "Подключение к хосту…",
     "offline": "Нет связи с хостом",
-    "offlineSince": "Нет связи с хостом с {{time}}"
+    "offlineSince": "Нет связи с хостом с {{time}}",
+    "offlineSinceDate": "Нет связи с хостом с {{date}} {{time}}"
   },
   "floor": {
     "title": "Цех",

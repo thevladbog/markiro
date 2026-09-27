@@ -104,6 +104,20 @@ describe("LineSelect", () => {
     expect(screen.getByRole("button", { name: "Линия 10" })).toBeTruthy();
   });
 
+  it("explains an unreachable host in words true for a remote station too", async () => {
+    const onSelect = vi.fn<LineSelectProps["onSelect"]>(async () => {
+      throw new DeviceError("unreachable", "host down");
+    });
+    const { db, props, view } = renderLineSelect({ kind: "running", synced: 0 }, { onSelect });
+    insertLine(db, LINE_2, "Линия 2");
+    view.rerender(<LineSelect {...props} sync={{ kind: "done", synced: 1 }} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Линия 2" }));
+    // Not "Служба хоста на этом компьютере не отвечает.": this station's
+    // paired host can be a different PC on the network.
+    expect(await screen.findByText("Хост не отвечает.")).toBeTruthy();
+    expect(screen.queryByText("Служба хоста на этом компьютере не отвечает.")).toBeNull();
+  });
+
   it("explains any other refusal without syncing", async () => {
     const onSelect = vi.fn<LineSelectProps["onSelect"]>(async () => {
       throw new DeviceError("request_failed", "host error");

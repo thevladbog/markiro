@@ -62,13 +62,16 @@ address at once (`findHost`), and the code goes only to the address whose
 certificate matches `f`; a typed address and code show the observed
 fingerprint (`formatFingerprint`) and send the code only after a person
 confirmed it against the office screen. A code that cannot be a code never
-leaves the device, and a refused claim is never retried on its own. A typed
-code in Cyrillic is refused with a hint to switch the layout, not read by
-key position like a scan: a Cyrillic letter typed for its Latin look-alike
-would become another valid symbol. A typed address is read by key position
-under the Russian layout — nothing counts against an address and the
-fingerprint is confirmed — and a comma reads as a dot (the keypad's decimal
-key).
+leaves the device, and a refused claim is never retried on its own — nor
+sent again from the same screen: the screen remembers a code the host
+already refused there and repeats the same refusal for it without probing
+or claiming again. A typed code in Cyrillic is refused with a hint to
+switch the layout, not read by key position like a scan: a Cyrillic letter
+typed for its Latin look-alike would become another valid symbol. A typed
+address's Cyrillic characters are read by key position under the Russian
+layout, and everything else is kept — nothing counts against an address and
+the fingerprint is confirmed — and a comma reads as a dot (the keypad's
+decimal key).
 
 ## Audit
 
@@ -325,14 +328,16 @@ open page, so a form keeps what was typed and a save over a newer record meets
 `stale_revision`. Pages read fresh data whenever they open (`staleTime` 0).
 
 A paired station without a line chooses one (`LineSelect`) among the active
-lines of the local copies, read only after a sync in this session brought
-them up to date and again after every sync, so a previous pairing's lines
-never show; the host's answer goes to `device.json` through
-`device_select_line`. `HostStatusLine` shows the link on the floor, on the
-line screen and in the office header — online, connecting, or silent since
-the last contact, with the reason — as a phase tag with words in a polite
-live region. There is no blocking overlay while the host is away: office
-pages explain their own failed requests and offer a retry.
+lines of the local copies, read only after a sync in this session brought them
+up to date and again after every sync, so a previous pairing's lines never
+show; the host's answer goes to `device.json` through `device_select_line`. A
+refused device key or a changed certificate from that call is a rejected device
+— `key_rejected` or `host_changed` — exactly as on every other host path.
+`HostStatusLine` shows the link on the floor, on the line screen and in the
+office header — online, connecting, or silent since the last contact, with the
+reason — as a phase tag with words in a polite live region. There is no
+blocking overlay while the host is away: office pages explain their own failed
+requests and offer a retry.
 
 ## Office pages
 

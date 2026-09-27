@@ -201,8 +201,9 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
       // the same fields `forgotten` resets, so this new pairing never starts
       // already `{ kind: "done" }` (or worse, `hostRevision` set) from a sync
       // it never ran against the old host. `paired` is dispatched only from
-      // an unpaired device (`pairLocally` when pairing is due, `bootstrap`
-      // when unpaired), so the reset is always correct here.
+      // an unpaired device: `pairLocally` (on its own when pairing is due, or
+      // from `bootstrap`) and network pairing's `claim` are the only
+      // dispatchers, so the reset is always correct here.
       return {
         ...state,
         device: { kind: "ready", status: action.status },

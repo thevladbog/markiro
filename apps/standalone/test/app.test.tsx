@@ -682,6 +682,38 @@ describe("App", () => {
     expect(host.getChanges).toHaveBeenCalledTimes(1);
   });
 
+  it("syncs only after watch settles, not before, even though the fake connection usually resolves at once", async () => {
+    const host = fakeHost();
+    // Unlike `fakeConnection()`, this `watch` stays pending until resolved by
+    // hand: the default fake resolves synchronously, so a reducer or effect
+    // that fired `trigger()` too early would still pass the other tests by
+    // accident of timing.
+    let resolveWatch: ((stop: () => void) => void) | undefined;
+    const connection: ConnectionApi = {
+      watch: vi.fn(
+        () =>
+          new Promise<() => void>((resolve) => {
+            resolveWatch = resolve;
+          }),
+      ),
+    };
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(DEVICE_STATUS),
+      host,
+      connection,
+    });
+    await screen.findByText("Цех");
+    await waitFor(() => expect(connection.watch).toHaveBeenCalledTimes(1));
+    // Flush pending microtasks: with `watch` still unresolved, no sync must
+    // have started.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(host.getChanges).not.toHaveBeenCalled();
+
+    resolveWatch?.(() => undefined);
+    await waitFor(() => expect(host.getChanges).toHaveBeenCalledTimes(1));
+  });
+
   it("stops the link and shows the rejected-device screen when a link status refuses the device's key", async () => {
     const link = fakeConnection();
     renderApp({
@@ -764,10 +796,13 @@ describe("App", () => {
     await waitFor(() => expect(host.getChanges).toHaveBeenCalledTimes(1));
 
     // A revision arrives while the first sync is still in flight; the
-    // scheduler queues a second run for it. The default answer for that
-    // second call would be the paired host's own page (`feedPage(0)`,
-    // `HOST_ID`) — if it ever reached the host, this test would not catch
-    // the race, so it must never happen.
+    // scheduler queues a second run for it. That second call would succeed
+    // against the default fake host (`feedPage(0)`, `HOST_ID`) and, without
+    // the reducer's guard against a further `sync_finished` once
+    // `other_host` is already set, would flip the screen back to the floor.
+    // The request-count assertion below catches that even with the guard in
+    // place: it proves the second run never reached the host at all, not
+    // merely that the screen still looks right.
     link.revision(7);
     resolveFirst(feedPage(7, [], OTHER_HOST_ID));
 

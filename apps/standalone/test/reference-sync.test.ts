@@ -330,6 +330,24 @@ describe("reference sync", () => {
     expect(tables(db).state).toEqual(state(12));
   });
 
+  it("keeps the previous copies when the rollback's own refetch fails", async () => {
+    const { db, executor } = openLocalDb();
+    await syncedTwoLines(executor);
+    const before = tables(db);
+    // The host went back (rev < since), but the refetch from zero — the
+    // request that would carry the deferred wipe — never lands.
+    const changes = vi.fn(async (since: number) => {
+      if (since === 20) return page(12, []);
+      throw new Error("host unreachable");
+    });
+    await expect(syncReferences({ changes, local: executor, hostId: HOST_ID })).rejects.toThrow(
+      "host unreachable",
+    );
+    expect(changes.mock.calls).toEqual([[20], [0]]);
+    // Spec §5.4: the copies stay until the first new page actually lands.
+    expect(tables(db)).toEqual(before);
+  });
+
   it("gives up when the host goes back twice in one sync", async () => {
     const { db, executor } = openLocalDb();
     await syncedTwoLines(executor);
