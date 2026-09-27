@@ -167,17 +167,22 @@ The copies start from zero when `host_id` names another host, when
 `entity_set` is not this build's `ENTITY_SET`, or when the feed answers
 `rev < since` (the host went back to an older copy; once per run). The
 last two drop the old copies in the transaction of the first new page, so
-a failed fetch keeps them. The first — a re-pair — wipes at once (another
-host's records must not stay usable) and, in that same transaction, stamps
-`sync_state.host_id` to the new host with no `last_rev`: the copies still
-read as unsynced, and `hostGuard` (a no-op `UPDATE ... WHERE host_id <> ?`
-with `expectedChanges: 0`, first in every batch, before any statement that
-could delete the `host_id` row it reads) then aborts a stale in-flight
-sync for the old host with `changes_mismatch` once its page finally
-arrives — `SyncScheduler.stop` cannot cancel a request already sent, and
-without this guard a late page for the old host would win
-`excluded.rev > rev` against the new host's rows under the same ids
-(`ref_org`/`ref_site` are keyed `'1'` on every host). A feed from another
+a failed fetch keeps them. The first — a re-pair, or this device's very
+first sync when no `host_id` is stored at all — stamps `sync_state.host_id`
+to this run's host before the first fetch (a re-pair wipes in the same
+transaction, since another host's records must not stay usable; a first
+sync has nothing to wipe, since there are never copies without a
+`host_id`), with no `last_rev`: the copies still read as unsynced, and
+`hostGuard` (a no-op `UPDATE sync_state SET value = value WHERE key =
+'host_id' AND value <> ?` with `expectedChanges: 0`, first in every batch,
+before any statement that could delete the `host_id` row it reads) then
+aborts a stale in-flight sync for the wrong host with `changes_mismatch`
+once its page finally arrives, in every ordering — including two first
+syncs racing each other before either has stamped anything.
+`SyncScheduler.stop` cannot cancel a request already sent, and without
+this guard a late page for the old host would win `excluded.rev > rev`
+against the new host's rows under the same ids (`ref_org`/`ref_site` are
+keyed `'1'` on every host). A feed from another
 host than the paired one stops the sync with `other_host` and applies
 nothing. `createSyncScheduler` runs one sync at a time: triggers during a
 run ask for exactly one more, and a failed run waits for the next trigger;

@@ -212,6 +212,18 @@ export async function syncReferences({ changes, local, hostId }: SyncOptions): P
   } else if (stored.entitySet === ENTITY_SET && stored.lastRev !== null) {
     since = stored.lastRev;
   } else {
+    if (stored.hostId === null) {
+      // No pairing recorded yet: there are never copies without a `host_id`,
+      // so there is nothing to wipe, but the stamp itself cannot wait for
+      // the first page. Without it, a concurrent first sync for a different
+      // host that also reads no `host_id` takes this same branch, and
+      // whichever of the two pages commits first passes `hostGuard` (it
+      // finds no row to compare against) while the other — even though it
+      // may be the pairing that is actually current — then fails its own
+      // guard against the first one's stamp. Stamping up front means every
+      // ordering has a `host_id` row in place before either page can land.
+      await local.transaction([{ sql: WRITE_HOST_ID, values: [hostId] }]);
+    }
     // Another build's entity set, or no sync yet: start from zero and drop
     // the old copies with the first page, so a failed fetch keeps them.
     wipe = true;

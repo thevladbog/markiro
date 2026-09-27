@@ -3,7 +3,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ChangeItem, ChangesResponse } from "../src/host/protocol.js";
-import { LocalDbError, type LocalExecutor } from "../src/local/executor.js";
+import { LocalDbError, type LocalExecutor, type LocalStatement } from "../src/local/executor.js";
 import { createSyncScheduler, ENTITY_SET, syncReferences } from "../src/local/reference-sync.js";
 import { HOST_ID } from "./support/fixtures.js";
 import { openLocalDb } from "./support/local-db.js";
@@ -94,6 +94,58 @@ function counting(executor: LocalExecutor) {
     },
   };
   return { executor: counted, batches };
+}
+
+/**
+ * An executor whose `query` reads immediately (capturing whatever is
+ * committed at that instant) but only delivers the result once released,
+ * and whose `transaction` does not run at all until released — so two
+ * `syncReferences` runs can be made to race deterministically: both reading
+ * `sync_state` before either writes, and their writes ordered by choice
+ * rather than by whichever happens to reach `transaction` first. Reads are
+ * released oldest-first (their order of arrival is reliable, since nothing
+ * else runs between two synchronous `releaseRead` calls); writes are found
+ * by a value one of their statements carries, since two racing preambles
+ * can reach `transaction` in either order. `stopHoldingWrites` lets every
+ * write after the ones the test cared about (each run's own page batch,
+ * once the preamble race is already settled) proceed immediately, so the
+ * test does not also have to schedule those.
+ */
+function heldOps(executor: LocalExecutor) {
+  const reads: Array<() => void> = [];
+  const writes: Array<{ statements: readonly LocalStatement[]; run: () => void }> = [];
+  let holdWrites = true;
+  const held: LocalExecutor = {
+    query: async (sql, params, row) => {
+      const result = await executor.query(sql, params, row);
+      await new Promise<void>((resolve) => reads.push(resolve));
+      return result;
+    },
+    transaction: (statements) => {
+      if (!holdWrites) return executor.transaction(statements);
+      return new Promise<number[]>((resolve, reject) => {
+        writes.push({
+          statements,
+          run: () => executor.transaction(statements).then(resolve, reject),
+        });
+      });
+    },
+  };
+  return {
+    executor: held,
+    readCount: () => reads.length,
+    writeCount: () => writes.length,
+    releaseRead: () => reads.shift()?.(),
+    /** Releases the queued write with a statement whose `values` include `marker`. */
+    releaseWrite: (marker: string) => {
+      const index = writes.findIndex((w) => w.statements.some((s) => s.values?.includes(marker)));
+      const [write] = writes.splice(index, 1);
+      write?.run();
+    },
+    stopHoldingWrites: () => {
+      holdWrites = false;
+    },
+  };
 }
 
 describe("ENTITY_SET", () => {
@@ -279,7 +331,7 @@ describe("reference sync", () => {
   });
 
   it("gives up when the host goes back twice in one sync", async () => {
-    const { executor } = openLocalDb();
+    const { db, executor } = openLocalDb();
     await syncedTwoLines(executor);
     const changes = feed({
       20: page(12, []),
@@ -289,6 +341,15 @@ describe("reference sync", () => {
     await expect(syncReferences({ changes, local: executor, hostId: HOST_ID })).rejects.toThrow(
       /went back twice/,
     );
+    // The second rollback's page (empty, at rev 5) is caught before any
+    // transaction: the copies still hold exactly what the first restart
+    // applied (page 8's single line), untouched by the second.
+    expect(tables(db)).toEqual({
+      org: [],
+      site: [],
+      lines: [{ id: LINE_1, name: "Линия 1", archived: 0, rev: 8 }],
+      state: state(8),
+    });
   });
 
   it("refuses a feed that claims more pages without advancing the revision", async () => {
@@ -297,7 +358,7 @@ describe("reference sync", () => {
     // bounded, so a regression that drops the guard fails this test fast
     // (a distinct error) instead of hanging it: the retry loop only awaits
     // already-resolved promises, so it starves Vitest's own timer and its
-    // `--testTimeout` never fires (see the fix-round report).
+    // `--testTimeout` never fires.
     let calls = 0;
     const changes = vi.fn(async (since: number) => {
       calls += 1;
@@ -377,17 +438,20 @@ describe("reference sync", () => {
         timeZone: "Asia/Yekaterinburg",
       },
     };
+    // With `hasMore: false`, the page's own `rev` must be at least every
+    // item's `rev` — B's page is at revision 20, matching `orgB`.
     await expect(
       syncReferences({
-        changes: feed({ 0: page(5, [orgB], false, OTHER_HOST) }),
+        changes: feed({ 0: page(20, [orgB], false, OTHER_HOST) }),
         local: executor,
         hostId: OTHER_HOST,
       }),
-    ).resolves.toEqual({ kind: "synced", rev: 5 });
+    ).resolves.toEqual({ kind: "synced", rev: 20 });
 
     // A's late page arrives, with a *higher* row revision for the same org id
     // ('1' on every host): unguarded, `excluded.rev > ref_org.rev` would let
-    // it win and resurrect A's (stale) org profile over B's.
+    // it win and resurrect A's (stale) org profile over B's. The page's own
+    // `rev` (50) matches `orgA`'s, for the same reason as B's above.
     const orgA: ChangeItem = {
       entity: "org_profile",
       id: "1",
@@ -401,7 +465,7 @@ describe("reference sync", () => {
         timeZone: "Europe/Moscow",
       },
     };
-    resolveA?.(page(11, [orgA], false, HOST_ID));
+    resolveA?.(page(50, [orgA], false, HOST_ID));
 
     // It must be rejected instead.
     const error: unknown = await runA.then(
@@ -411,7 +475,7 @@ describe("reference sync", () => {
       (caught: unknown) => caught,
     );
     expect(error).toBeInstanceOf(LocalDbError);
-    expect((error as LocalDbError).code).toBe("changes_mismatch");
+    expect(error).toMatchObject({ code: "changes_mismatch" });
     expect(tables(db)).toEqual({
       org: [
         {
@@ -426,7 +490,147 @@ describe("reference sync", () => {
       ],
       site: [],
       lines: [],
-      state: state(5, OTHER_HOST),
+      state: state(20, OTHER_HOST),
+    });
+  });
+
+  it("fails the old host's page as soon as the re-pair's own preamble commits, before B's page even lands", async () => {
+    const { db, executor } = openLocalDb();
+    // Host A is fully synced.
+    await syncReferences({
+      changes: feed({ 0: page(10, []) }),
+      local: executor,
+      hostId: HOST_ID,
+    });
+    // A's next sync starts a request that stays in flight.
+    let resolveA: ((value: ChangesResponse) => void) | undefined;
+    const aChanges = vi.fn(
+      () =>
+        new Promise<ChangesResponse>((resolve) => {
+          resolveA = resolve;
+        }),
+    );
+    const runA = syncReferences({ changes: aChanges, local: executor, hostId: HOST_ID });
+    await vi.waitFor(() => expect(aChanges).toHaveBeenCalledWith(10));
+
+    // B re-pairs; B's own fetch is held open too, but its preamble — the
+    // immediate wipe and `host_id` stamp — runs synchronously before any
+    // fetch, so it does not need to win a race against A's pending one.
+    let resolveB: ((value: ChangesResponse) => void) | undefined;
+    const bChanges = vi.fn(
+      () =>
+        new Promise<ChangesResponse>((resolve) => {
+          resolveB = resolve;
+        }),
+    );
+    const runB = syncReferences({ changes: bChanges, local: executor, hostId: OTHER_HOST });
+    await vi.waitFor(() => expect(bChanges).toHaveBeenCalledWith(0));
+
+    // A's page lands first, while B's is still pending.
+    resolveA?.(page(11, [line(LINE_1, 11, "Линия A (поздно)")], false, HOST_ID));
+    const error: unknown = await runA.then(
+      () => {
+        throw new Error("expected A's stale sync to fail");
+      },
+      (caught: unknown) => caught,
+    );
+    expect(error).toBeInstanceOf(LocalDbError);
+    expect(error).toMatchObject({ code: "changes_mismatch" });
+    // B's preamble already wiped A's copies and claimed `host_id`, even
+    // though B's own page has not landed yet.
+    expect(tables(db)).toEqual({
+      org: [],
+      site: [],
+      lines: [],
+      state: [{ key: "host_id", value: OTHER_HOST }],
+    });
+
+    // B's page lands second.
+    resolveB?.(page(20, [line(LINE_2, 20, "Линия B")], false, OTHER_HOST));
+    await expect(runB).resolves.toEqual({ kind: "synced", rev: 20 });
+    expect(tables(db)).toEqual({
+      org: [],
+      site: [],
+      lines: [{ id: LINE_2, name: "Линия B", archived: 0, rev: 20 }],
+      state: state(20, OTHER_HOST),
+    });
+  });
+
+  it("stamps host_id before the first fetch, so a fresh pairing's own first sync is not rejected by a stale rival's own first sync", async () => {
+    const { db, executor } = openLocalDb();
+    const held = heldOps(executor);
+
+    // Two first syncs start "at the same time": both read `sync_state`
+    // before either has had a chance to act on it — for example, a
+    // device's very first sync for host X is still reading state when it
+    // is re-paired to Y, and Y's own first sync starts and reads the same
+    // still-empty state before X has committed anything.
+    let resolveOld: ((value: ChangesResponse) => void) | undefined;
+    const oldChanges = vi.fn(
+      () =>
+        new Promise<ChangesResponse>((resolve) => {
+          resolveOld = resolve;
+        }),
+    );
+    const runOld = syncReferences({ changes: oldChanges, local: held.executor, hostId: HOST_ID });
+    await vi.waitFor(() => expect(held.readCount()).toBe(1));
+
+    let resolveNew: ((value: ChangesResponse) => void) | undefined;
+    const newChanges = vi.fn(
+      () =>
+        new Promise<ChangesResponse>((resolve) => {
+          resolveNew = resolve;
+        }),
+    );
+    const runNew = syncReferences({
+      changes: newChanges,
+      local: held.executor,
+      hostId: OTHER_HOST,
+    });
+    await vi.waitFor(() => expect(held.readCount()).toBe(2));
+
+    // Release both reads: each already captured `sync_state` completely
+    // empty, since neither run could have written anything before both
+    // reads were issued. Each now queues its own preamble stamp instead of
+    // running it, so the order of those two writes can be chosen below
+    // rather than left to chance.
+    held.releaseRead();
+    held.releaseRead();
+    await vi.waitFor(() => expect(held.writeCount()).toBe(2));
+
+    // Old's stamp commits first, New's second: New ends up "claiming"
+    // `host_id`, exactly as if the re-pair to New happened a moment after
+    // Old's own first sync had already started. From here on, each run's
+    // own page batch (the only other transaction either will run) can
+    // proceed on its own: the preamble race is already settled.
+    held.releaseWrite(HOST_ID);
+    await vi.waitFor(() => expect(held.writeCount()).toBe(1));
+    held.releaseWrite(OTHER_HOST);
+    held.stopHoldingWrites();
+    await vi.waitFor(() => expect(oldChanges).toHaveBeenCalledWith(0));
+    await vi.waitFor(() => expect(newChanges).toHaveBeenCalledWith(0));
+
+    // Old's page lands...
+    resolveOld?.(page(10, [line(LINE_1, 10, "Линия старого хоста")], false, HOST_ID));
+    const error: unknown = await runOld.then(
+      () => {
+        throw new Error("expected the stale first sync to fail");
+      },
+      (caught: unknown) => caught,
+    );
+    expect(error).toBeInstanceOf(LocalDbError);
+    expect(error).toMatchObject({ code: "changes_mismatch" });
+
+    // ...and, since New's stamp is what `host_id` ended up holding, its own
+    // page succeeds — the stale rival's first sync never got a chance to
+    // corrupt it, even though both started from the very same empty state.
+    resolveNew?.(page(20, [line(LINE_2, 20, "Линия нового хоста")], false, OTHER_HOST));
+    await expect(runNew).resolves.toEqual({ kind: "synced", rev: 20 });
+    expect(tables(db)).toEqual({
+      org: [],
+      site: [],
+      lines: [{ id: LINE_2, name: "Линия нового хоста", archived: 0, rev: 20 }],
+      state: state(20, OTHER_HOST),
     });
   });
 
