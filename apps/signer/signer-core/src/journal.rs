@@ -15,7 +15,9 @@ use zip::write::SimpleFileOptions;
 const DEFAULT_CAPACITY: usize = 200;
 const DEFAULT_MAX_FILE_SIZE: u64 = 1024 * 1024;
 const DEFAULT_MAX_FILES: usize = 7;
-const LOG_FILE_NAME: &str = "signer.jsonl";
+/// The folder, under the agent state folder, that holds the journal files.
+pub(crate) const JOURNAL_DIR: &str = "journal";
+pub(crate) const LOG_FILE_NAME: &str = "signer.jsonl";
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "camelCase")]

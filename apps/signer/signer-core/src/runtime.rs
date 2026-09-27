@@ -163,7 +163,7 @@ impl Runtime {
         let http = reqwest::Client::builder()
             .build()
             .map_err(|e| SignerError::Network(e.to_string()))?;
-        let journal = match Journal::open(config_dir.join("journal")) {
+        let journal = match Journal::open(config_dir.join(crate::journal::JOURNAL_DIR)) {
             Ok(journal) => journal,
             Err(error) => {
                 tracing::warn!(%error, "could not open persistent signer journal");
