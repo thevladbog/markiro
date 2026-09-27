@@ -53,6 +53,23 @@ describe("useOfficeQuery", () => {
     expect(session.api.getOrg).toHaveBeenCalledWith("office-session-token");
   });
 
+  it("reads again at the interval it is given, and never without one", async () => {
+    const session = fakeOfficeSession();
+    session.api.getOrg.mockResolvedValue(PROFILE);
+    session.api.listUsers.mockResolvedValue([]);
+    renderHook(
+      () => ({
+        once: useOfficeQuery(officeKeys.org, (api, token) => api.getOrg(token)),
+        polled: useOfficeQuery(officeKeys.users, (api, token) => api.listUsers(token), {
+          refetchInterval: 20,
+        }),
+      }),
+      { wrapper: wrapperFor(session) },
+    );
+    await waitFor(() => expect(session.api.listUsers.mock.calls.length).toBeGreaterThan(2));
+    expect(session.api.getOrg).toHaveBeenCalledTimes(1);
+  });
+
   it("does not retry a failed read: the page explains it and offers a retry", async () => {
     const failure = new HostError({ kind: "api", code: "internal", status: 500, message: "boom" });
     const session = fakeOfficeSession();

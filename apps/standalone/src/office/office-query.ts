@@ -15,6 +15,9 @@ export const officeKeys = {
   org: ["office", "org"],
   sscc: ["office", "sscc"],
   users: ["office", "users"],
+  devices: ["office", "devices"],
+  /** Line names from this installation's local copies, not from the host. */
+  lineNames: ["office", "line-names"],
 } as const;
 
 /**
@@ -41,13 +44,23 @@ export function createOfficeQueryClient(): QueryClient {
   });
 }
 
+export interface OfficeQueryOptions {
+  /** Read again every this many milliseconds while mounted; never by default. */
+  refetchInterval?: number;
+}
+
 /** Reads office data through `session.call`. */
 export function useOfficeQuery<T>(
   key: QueryKey,
   read: (api: HostApi, token: string) => Promise<T>,
+  options: OfficeQueryOptions = {},
 ): UseQueryResult<T, Error> {
   const { api, call } = useOfficeSession();
-  return useQuery({ queryKey: key, queryFn: () => call((token) => read(api, token)) });
+  return useQuery({
+    queryKey: key,
+    queryFn: () => call((token) => read(api, token)),
+    refetchInterval: options.refetchInterval ?? false,
+  });
 }
 
 /** Writes office data through `session.call`. */

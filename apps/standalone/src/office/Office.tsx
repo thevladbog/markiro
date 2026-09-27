@@ -3,7 +3,9 @@ import { useEffect, useRef, useState } from "react";
 import { createMemoryRouter, RouterProvider } from "react-router";
 
 import type { HostStatus } from "../host/protocol.js";
+import type { LocalExecutor } from "../local/executor.js";
 import { OfficeLinkProvider } from "./office-link.js";
+import { OfficeLocalProvider } from "./office-local.js";
 import { createOfficeQueryClient } from "./office-query.js";
 import { OfficeSessionProvider, type OfficeSessionValue } from "./office-session.js";
 import { officeRoutes } from "./routes.js";
@@ -12,6 +14,8 @@ export interface OfficeProps {
   session: OfficeSessionValue;
   /** The link to the host, shown in the header; `null` before the first status. */
   link?: HostStatus | null;
+  /** This installation's local copies; «Устройства» names lines from them. */
+  local?: LocalExecutor | null;
   /**
    * The latest revision the host announced (`null` before the first). When
    * it changes, the signed-in user is read again, so a new name or role
@@ -25,7 +29,7 @@ export interface OfficeProps {
  * a query cache, both living exactly as long as one session — `App` mounts
  * `Office` with the session token as its key.
  */
-export function Office({ session, link = null, hostRevision = null }: OfficeProps) {
+export function Office({ session, link = null, local = null, hostRevision = null }: OfficeProps) {
   const [router] = useState(() => createMemoryRouter(officeRoutes, { initialEntries: ["/"] }));
   const [queryClient] = useState(createOfficeQueryClient);
   const shownRevision = useRef(hostRevision);
@@ -42,7 +46,9 @@ export function Office({ session, link = null, hostRevision = null }: OfficeProp
     <QueryClientProvider client={queryClient}>
       <OfficeSessionProvider value={session}>
         <OfficeLinkProvider value={link}>
-          <RouterProvider router={router} />
+          <OfficeLocalProvider value={local}>
+            <RouterProvider router={router} />
+          </OfficeLocalProvider>
         </OfficeLinkProvider>
       </OfficeSessionProvider>
     </QueryClientProvider>

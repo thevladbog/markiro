@@ -1,5 +1,6 @@
 import type { RouteObject } from "react-router";
 
+import { DevicesPage } from "./devices/DevicesPage.js";
 import { OfficeOverview } from "./OfficeOverview.js";
 import { OfficeShell } from "./OfficeShell.js";
 import { OrgProfilePage } from "./org/OrgProfilePage.js";
@@ -16,6 +17,14 @@ export const officeRoutes: RouteObject[] = [
       { index: true, element: <OfficeOverview /> },
       { path: "org", element: <OrgProfilePage /> },
       { path: "sscc", element: <SsccPage /> },
+      {
+        path: "devices",
+        element: (
+          <RequireRole roles={["admin"]}>
+            <DevicesPage />
+          </RequireRole>
+        ),
+      },
       {
         path: "users",
         element: (

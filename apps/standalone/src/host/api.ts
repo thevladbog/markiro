@@ -4,16 +4,19 @@ import type { HostClient } from "./client.js";
 import {
   bootstrapResponseSchema,
   changesResponseSchema,
+  deviceRecordSchema,
   officeSessionSchema,
   officeUserRecordSchema,
   officeUserSchema,
   orgProfileSchema,
+  pairingCodeSchema,
   ssccCounterSchema,
   ssccStateSchema,
   type BlockSizesUpdate,
   type BootstrapRequest,
   type BootstrapResponse,
   type ChangesResponse,
+  type DeviceRecord,
   type OfficeLoginRequest,
   type OfficeSession,
   type OfficeUser,
@@ -22,6 +25,7 @@ import {
   type OfficeUserUpdate,
   type OrgProfile,
   type OrgProfileUpdate,
+  type PairingCode,
   type PasswordChange,
   type PasswordSet,
   type SsccCounter,
@@ -62,6 +66,8 @@ export interface HostApi {
   setUserPassword: (token: string, id: string, request: PasswordSet) => Promise<void>;
   /** Reference records changed after revision `since`; the device key only, no office session. */
   getChanges: (since: number) => Promise<ChangesResponse>;
+  listDevices: (token: string) => Promise<DeviceRecord[]>;
+  createPairingCode: (token: string) => Promise<PairingCode>;
 }
 
 /** A 204 answer parses as `null`. */
@@ -136,5 +142,15 @@ export function createHostApi(client: HostClient): HostApi {
     },
     getChanges: (since) =>
       client.request("GET", `/v1/changes?since=${since}`, { schema: changesResponseSchema }),
+    listDevices: (token) =>
+      client.request("GET", "/v1/office/devices", {
+        officeToken: token,
+        schema: z.array(deviceRecordSchema),
+      }),
+    createPairingCode: (token) =>
+      client.request("POST", "/v1/office/pairing-codes", {
+        officeToken: token,
+        schema: pairingCodeSchema,
+      }),
   };
 }

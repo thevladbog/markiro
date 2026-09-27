@@ -138,6 +138,18 @@ const CASES: Case[] = [
     },
   ],
   [
+    "listDevices",
+    [fixture("device-record.json")],
+    (api) => api.listDevices(TOKEN),
+    { method: "GET", path: "/v1/office/devices", body: undefined },
+  ],
+  [
+    "createPairingCode",
+    fixture("pairing-code.json"),
+    (api) => api.createPairingCode(TOKEN),
+    { method: "POST", path: "/v1/office/pairing-codes", body: undefined },
+  ],
+  [
     "setUserPassword",
     null,
     (api) => api.setUserPassword(TOKEN, USER_ID, { password: "a new long password" }),

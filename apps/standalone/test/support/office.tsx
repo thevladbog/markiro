@@ -41,6 +41,8 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
     updateUser: vi.fn<HostApi["updateUser"]>(() => unexpected("updateUser")),
     setUserPassword: vi.fn<HostApi["setUserPassword"]>(() => unexpected("setUserPassword")),
     getChanges: vi.fn<HostApi["getChanges"]>(() => unexpected("getChanges")),
+    listDevices: vi.fn<HostApi["listDevices"]>(() => unexpected("listDevices")),
+    createPairingCode: vi.fn<HostApi["createPairingCode"]>(() => unexpected("createPairingCode")),
     ...overrides,
   };
 }

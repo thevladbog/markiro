@@ -365,6 +365,15 @@ pages explain their own failed requests and offer a retry.
   password goes through «Сменить пароль» with the current password.
 - An ended session unmounts the office: unsaved edits are lost, and the next
   sign-in starts at «Обзор».
+- «Устройства» lists `GET /v1/office/devices`; line names come from this
+  installation's local copies (`useQuery` with `officeKeys.lineNames` — a
+  local read, not a host request), and `lastSeenAt` is «Последний раз»,
+  never «на связи»: the host touches it at most once a minute and a stream
+  only when it opens. A claim raises no revision, so the pairing-code
+  dialog reads the list every 3 s (`DEVICE_POLL_MS`) and closes once a
+  device paired after the code was issued appears. The DataMatrix encoder
+  loads lazily (`PairingDataMatrix`); when it fails, the typed code, the
+  fingerprint and the host's addresses stay the way to pair.
 
 ## Marking rules
 

@@ -290,6 +290,7 @@ export function App({
         key={session.token}
         session={officeSession}
         link={state.link}
+        local={localDb}
         hostRevision={state.hostRevision}
       />
     );
