@@ -77,15 +77,18 @@ connections, rows as objects keyed by column name — and writes it only with
 `local_transaction`: up to 32 statements of at most 64 KB and 256 values
 each, run in one `BEGIN IMMEDIATE` transaction on the single writer
 connection and rolled back whole on any error or `expectedChanges`
-mismatch. Statements carry literals as parameters (no `;`, `--` or `/*`),
-never control transactions, connections or the schema (`BEGIN`, `END`,
-`PRAGMA`, `ATTACH`, `CREATE`, `DROP`, `ALTER`, …; a statement may not start
-with `END`, since SQLite treats it as `COMMIT`, but `CASE … END` mid-statement
-is unaffected) and never read BLOBs. A large reference page goes in as one
-JSON parameter per entity through
-`json_each`, so the limits bound SQL, not rows. Rejections are bare codes:
-`local_db_unavailable` (the database did not open; the app starts anyway),
-`invalid_statement`, `unsupported_value`, `statement_failed`,
+mismatch. `changes`/`expectedChanges` are meaningful only for `INSERT`,
+`UPDATE`, `DELETE` and `REPLACE`: SQLite does not reset its changed-row
+count for a non-writing statement, so a `SELECT` in a batch reports the
+connection's last real write count, not zero. Statements carry literals as
+parameters (no `;`, `--` or `/*`), never control transactions, connections
+or the schema (`BEGIN`, `END`, `PRAGMA`, `ATTACH`, `CREATE`, `DROP`, `ALTER`,
+`ANALYZE`, …; a statement may not start with `END`, since SQLite treats it
+as `COMMIT`, but `CASE … END` mid-statement is unaffected) and never read
+BLOBs. A large reference page goes in as one JSON parameter per entity
+through `json_each`, so the limits bound SQL, not rows. Rejections are bare
+codes: `local_db_unavailable` (the database did not open; the app starts
+anyway), `invalid_statement`, `unsupported_value`, `statement_failed`,
 `changes_mismatch`.
 
 The webview reaches it only through `LocalExecutor` (`src/local/executor.ts`);
@@ -156,12 +159,15 @@ The webview never performs HTTP: every call to the host is a shell command.
 Rust calls the host with the aws-lc-rs provider selected explicitly
 (`src-tauri/src/tls.rs`). `host_client` trusts only the certificate whose
 SHA-256 was saved at pairing (`FingerprintPolicy::Pin`); it uses no proxy,
-follows no redirects, speaks HTTPS only and gives up after 2 s to connect and
-10 s per request. A pin mismatch is recognized per request from the error
-chain (`tls::FingerprintMismatch`) and reported as `certificate_mismatch`,
-never as `unreachable`. `host_probe` observes a fingerprint without trusting
-it (`FingerprintPolicy::Observe`) and exists only to discover a host before
-loopback, a person or a pairing code confirms it.
+follows no redirects, speaks HTTPS only and gives up after 2 s to connect.
+`PinnedClient` also gives up after 10 s per request; `StreamClient` (the
+change stream, "Connection to the host" below) has no per-request limit and
+instead treats 45 s of silence as a lost connection. A pin mismatch is
+recognized per request from the error chain (`tls::FingerprintMismatch`) and
+reported as `certificate_mismatch`, never as `unreachable`. `host_probe`
+observes a fingerprint without trusting it (`FingerprintPolicy::Observe`)
+and exists only to discover a host before loopback, a person or a pairing
+code confirms it.
 
 `host_request`, the webview's generic way to reach the host, accepts `GET`,
 `POST`, `PUT` and `DELETE`, paths of `[A-Za-z0-9/_.~?=&-]` without `..`, `//`
@@ -181,8 +187,8 @@ a secret.
 The webview's IPC contract — command names, argument names such as
 `officeToken`, the `{ status, body }` answer and bare-string rejections — is
 pinned by `src-tauri/tests/ipc.rs` through Tauri's mock runtime. Change it
-together with `src/host/client.ts`,
-`device.ts`, `probe.ts` and `connection.ts` and `src/local/executor.ts`.
+together with `src/host/client.ts`, `src/host/device.ts`, `src/host/probe.ts`,
+`src/host/connection.ts` and `src/local/executor.ts`.
 
 ## Connection to the host
 
@@ -196,11 +202,15 @@ While unpaired it stays offline and tries nothing. It emits
 `standalone://host-status` (`{ state: online | connecting | offline,
 lastContactAt, lastError, seq }`, `lastError` one of `unreachable`,
 `certificate_mismatch`, `key_rejected`, `stream_refused`, `stream_ended`)
-and `standalone://host-revision` (`{ rev }` for every stream event, the
-first one after each connect included). `connection_status` answers the
-latest status; `seq` grows with every status, so the webview subscribes
-first, then asks, and keeps whichever is newest. The webview syncs reference
-data on each revision and never opens the stream itself.
+and `standalone://host-revision` (for every `rev` event, the first one
+after each connect included). `connection_status` answers the latest
+status; `seq` grows with every status, so the webview subscribes first,
+then asks, and keeps whichever is newest. A heartbeat advances
+`lastContactAt` without publishing a new status (no new `seq`), so
+`connection_status` can report a newer contact time than the last event the
+webview received; an event's own `lastContactAt` is always the value
+current when that event was published. The webview syncs reference data on
+each revision and never opens the stream itself.
 
 ## Device key and office session
 

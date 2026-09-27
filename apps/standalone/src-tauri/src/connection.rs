@@ -55,7 +55,12 @@ pub enum LinkError {
 pub struct HostStatus {
     pub state: LinkState,
     /// When the host last sent anything on the stream, in milliseconds since
-    /// the Unix epoch; `None` before the first contact and while unpaired.
+    /// the Unix epoch; `None` before the first contact and while unpaired. A
+    /// heartbeat advances this without publishing a new status (no new
+    /// `seq`), so `connection_status` can report a newer `lastContactAt`
+    /// than the last event the webview received; an event's own
+    /// `lastContactAt` is always the value current when that event was
+    /// published, never read again afterward.
     pub last_contact_at: Option<u64>,
     /// Why the last attempt failed; `None` while online and while unpaired.
     pub last_error: Option<LinkError>,
@@ -96,15 +101,29 @@ impl ConnectionState {
         self.0.lock().expect("status lock").clone()
     }
 
+    /// Record contact with the host without publishing a status: a heartbeat
+    /// (or any stream data) advances `last_contact_at` on its own, so
+    /// `connection_status` can report it before the next status that bumps
+    /// `seq`.
     fn touch(&self) {
         self.0.lock().expect("status lock").last_contact_at = Some(now_ms());
     }
 
     fn publish(&self, events: &dyn LinkEvents, state: LinkState, last_error: Option<LinkError>) {
-        let status = {
-            let mut current = self.0.lock().expect("status lock");
+        self.publish_with(events, |current| {
             current.state = state;
             current.last_error = last_error;
+        });
+    }
+
+    /// Apply `update` and publish the result in one critical section, so a
+    /// `connection_status` racing the update never sees a status with some
+    /// fields already changed and others still old (as a status built from
+    /// two separate lock acquisitions could).
+    fn publish_with(&self, events: &dyn LinkEvents, update: impl FnOnce(&mut HostStatus)) {
+        let status = {
+            let mut current = self.0.lock().expect("status lock");
+            update(&mut current);
             current.seq += 1;
             current.clone()
         };
@@ -113,8 +132,11 @@ impl ConnectionState {
 
     /// Offline with nothing to report: the device is not paired.
     fn unpaired(&self, events: &dyn LinkEvents) {
-        self.0.lock().expect("status lock").last_contact_at = None;
-        self.publish(events, LinkState::Offline, None);
+        self.publish_with(events, |current| {
+            current.state = LinkState::Offline;
+            current.last_error = None;
+            current.last_contact_at = None;
+        });
     }
 }
 
@@ -138,6 +160,16 @@ impl Backoff {
     fn after(self, pause: Duration) -> Duration {
         pause.saturating_mul(2).min(self.max)
     }
+}
+
+/// The pause `hold` should sleep for now and carry into its next iteration,
+/// given the pause carried from the previous one and whether the session
+/// that just ended had come online. A session that came online resets to
+/// `initial`, no matter how far the pause had grown; otherwise it keeps
+/// doubling from wherever it left off.
+fn next_pause(backoff: Backoff, pause: Duration, came_online: bool) -> (Duration, Duration) {
+    let sleep_now = if came_online { backoff.initial } else { pause };
+    (sleep_now, backoff.after(sleep_now))
 }
 
 /// Follow the pairing: hold the stream while paired, stay offline and try
@@ -176,16 +208,26 @@ async fn hold(
 ) -> Infallible {
     let mut pause = backoff.initial;
     let mut last_error = None;
+    // A quick forget-and-re-pair can coalesce the transient `unpaired`
+    // status in the watch channel (only the latest value survives), so this
+    // link's first status clears the previous host's contact time itself
+    // rather than relying on having observed that transient status.
+    let mut fresh_link = true;
     loop {
-        state.publish(events, LinkState::Connecting, last_error);
+        state.publish_with(events, |current| {
+            current.state = LinkState::Connecting;
+            current.last_error = last_error;
+            if fresh_link {
+                current.last_contact_at = None;
+            }
+        });
+        fresh_link = false;
         let (error, came_online) = follow(link, events, state).await;
         last_error = Some(error);
         state.publish(events, LinkState::Offline, last_error);
-        if came_online {
-            pause = backoff.initial;
-        }
-        tokio::time::sleep(pause).await;
-        pause = backoff.after(pause);
+        let (sleep_now, next) = next_pause(backoff, pause, came_online);
+        tokio::time::sleep(sleep_now).await;
+        pause = next;
     }
 }
 
@@ -398,6 +440,33 @@ mod tests {
     }
 
     #[test]
+    fn next_pause_grows_when_the_link_never_came_online() {
+        let backoff = Backoff::default();
+        let mut pause = backoff.initial;
+        let mut seconds = vec![pause.as_secs()];
+        for _ in 0..6 {
+            let (sleep_now, next) = next_pause(backoff, pause, false);
+            assert_eq!(
+                sleep_now, pause,
+                "sleeps the carried-over pause, not the grown one"
+            );
+            pause = next;
+            seconds.push(pause.as_secs());
+        }
+        assert_eq!(seconds, [1, 2, 4, 8, 16, 30, 30]);
+    }
+
+    #[test]
+    fn next_pause_resets_to_initial_after_a_session_that_came_online() {
+        let backoff = Backoff::default();
+        // However far the pause had grown, a session that came online
+        // resets it, and doubling starts over from `initial` again.
+        let (sleep_now, next) = next_pause(backoff, backoff.max, true);
+        assert_eq!(sleep_now, backoff.initial);
+        assert_eq!(next, backoff.after(backoff.initial));
+    }
+
+    #[test]
     fn a_rejected_device_key_is_told_apart_from_other_refusals() {
         let refused = |status: u16, body: serde_json::Value| {
             refusal(&HostResponse {
@@ -411,6 +480,15 @@ mod tests {
                 json!({ "error": { "code": "unauthorized", "message": "", "details": { "credential": "device" } } })
             ),
             LinkError::KeyRejected
+        );
+        // A rejected office session, not the device key: no reason to send
+        // this device back to re-pairing.
+        assert_eq!(
+            refused(
+                401,
+                json!({ "error": { "code": "unauthorized", "message": "", "details": { "credential": "session" } } })
+            ),
+            LinkError::StreamRefused
         );
         assert_eq!(
             refused(
@@ -426,6 +504,31 @@ mod tests {
             }),
             LinkError::StreamRefused
         );
+    }
+
+    /// Every wire string plan 1c3 relies on: its `errors.link.*` i18n keys
+    /// and its zod enum for `state`/`lastError` are built from these exact
+    /// values.
+    #[test]
+    fn every_link_state_and_error_serializes_to_its_wire_string() {
+        let states = [
+            (LinkState::Online, "online"),
+            (LinkState::Connecting, "connecting"),
+            (LinkState::Offline, "offline"),
+        ];
+        for (state, wire) in states {
+            assert_eq!(serde_json::to_value(state).unwrap(), json!(wire));
+        }
+        let errors = [
+            (LinkError::Unreachable, "unreachable"),
+            (LinkError::CertificateMismatch, "certificate_mismatch"),
+            (LinkError::KeyRejected, "key_rejected"),
+            (LinkError::StreamRefused, "stream_refused"),
+            (LinkError::StreamEnded, "stream_ended"),
+        ];
+        for (error, wire) in errors {
+            assert_eq!(serde_json::to_value(error).unwrap(), json!(wire));
+        }
     }
 
     #[test]

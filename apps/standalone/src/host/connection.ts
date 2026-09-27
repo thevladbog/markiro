@@ -20,7 +20,12 @@ export interface ConnectionHandlers {
 
 /** The link to the host, as the shell's connection task reports it. */
 export interface ConnectionApi {
-  /** Follow the link until the returned function is called. */
+  /**
+   * Follow the link until the returned function is called. A revision
+   * announced before `watch` resolves is not replayed: a caller that needs
+   * the host's revision as of subscribing syncs once after `watch` resolves,
+   * the same way it would after missing any other event.
+   */
   watch: (handlers: ConnectionHandlers) => Promise<() => void>;
 }
 

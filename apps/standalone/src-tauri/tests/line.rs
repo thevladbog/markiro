@@ -156,6 +156,10 @@ async fn the_webview_reaches_the_feed_but_not_the_stream_or_the_line_route() {
         // bypassing `webview_may_reach`'s `LINE_ROUTE` exclusion were
         // `validate_path` not also refusing it.
         ("PUT", "/v1/device/./line"),
+        // A trailing slash: `webview_may_reach`'s string-level `LINE_ROUTE`
+        // exclusion does not match it either, so `validate_path` is what
+        // stops it from ever reaching the host.
+        ("PUT", "/v1/device/line/"),
     ] {
         assert_eq!(
             station

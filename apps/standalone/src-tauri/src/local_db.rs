@@ -50,6 +50,8 @@ const FORBIDDEN_WORDS: &[&str] = &[
     "DROP",
     "ALTER",
     "REINDEX",
+    // Creates `sqlite_stat1`: a schema-level effect that belongs to migrations.
+    "ANALYZE",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,7 +90,11 @@ pub struct LocalStatement {
     pub sql: String,
     #[serde(default)]
     pub values: Vec<Value>,
-    /// Roll the batch back unless the statement changes exactly this many rows.
+    /// Roll the batch back unless the statement changes exactly this many
+    /// rows. Meaningful only for `INSERT`, `UPDATE`, `DELETE` and `REPLACE`:
+    /// SQLite does not reset its changed-row count for a non-writing
+    /// statement, so pinning this on, say, a `SELECT` checks the previous
+    /// write's count, not zero.
     #[serde(default)]
     pub expected_changes: Option<u64>,
 }
@@ -106,6 +112,19 @@ impl LocalDb {
         let path = dir.join(FILE_NAME);
         let writer = SqlitePoolOptions::new()
             .max_connections(1)
+            // sqlx tracks each connection's transaction depth itself. If a
+            // `ROLLBACK` it issues on drop ever fails — SQLite already ended
+            // the transaction on its own (`SQLITE_FULL`, `IOERR`, `NOMEM`) or
+            // a migration used `RAISE(ROLLBACK)` — that depth is left stuck
+            // above zero, and every later `begin_with("BEGIN IMMEDIATE")` on
+            // this connection fails until the pool recycles it (`max_lifetime`,
+            // 30 min by default). Refuse to hand out a connection whose depth
+            // is not zero, so the pool closes it and opens a fresh one instead.
+            .before_acquire(|conn, _| {
+                Box::pin(async move {
+                    Ok(<sqlx::sqlite::SqliteTransactionManager as sqlx::TransactionManager>::get_transaction_depth(conn) == 0)
+                })
+            })
             .connect_with(
                 SqliteConnectOptions::new()
                     .filename(&path)
@@ -149,7 +168,11 @@ impl LocalDb {
 
     /// Run `statements` in one `BEGIN IMMEDIATE` transaction on the writer
     /// connection and return the rows each changed. Any failure and any
-    /// `expectedChanges` mismatch rolls back every statement.
+    /// `expectedChanges` mismatch rolls back every statement. The changed-rows
+    /// count is meaningful only for `INSERT`, `UPDATE`, `DELETE` and
+    /// `REPLACE`: SQLite does not reset it for a non-writing statement, so a
+    /// `SELECT` in a batch reports the connection's last real write count,
+    /// not zero.
     pub async fn transaction(
         &self,
         statements: Vec<LocalStatement>,
@@ -241,8 +264,9 @@ fn is_query(sql: &str) -> bool {
     })
 }
 
-/// The statement's first word (see `words`), or `None` before any letter,
-/// digit or `_`.
+/// The statement's first word (see `words`): `Some("")` before any letter,
+/// digit or `_` (`str::split` always yields at least one item, so this is
+/// never actually `None`).
 fn first_word(sql: &str) -> Option<&str> {
     words(sql.trim_start()).next()
 }
@@ -420,5 +444,66 @@ mod tests {
                 "changes_mismatch"
             ]
         );
+    }
+
+    /// `check_statement`/`is_query` against the fixture plans 1c3–1e also run
+    /// their TypeScript port (`test/support/local-db.ts`) against, so a
+    /// statement the shell refuses fails in webview tests too.
+    #[test]
+    fn the_shared_sql_fixture_matches_the_rules() {
+        #[derive(Deserialize)]
+        struct Cases {
+            accepted: Vec<String>,
+            refused: Vec<String>,
+        }
+        #[derive(Deserialize)]
+        struct Fixture {
+            statements: Cases,
+            queries: Cases,
+        }
+        let fixture: Fixture =
+            serde_json::from_str(include_str!("../tests/fixtures/local-sql.json")).unwrap();
+        for sql in &fixture.statements.accepted {
+            assert_eq!(check_statement(sql, 0), Ok(()), "{sql:?}");
+        }
+        for sql in &fixture.statements.refused {
+            assert_eq!(
+                check_statement(sql, 0),
+                Err(LocalDbError::InvalidStatement),
+                "{sql:?}"
+            );
+        }
+        for sql in &fixture.queries.accepted {
+            assert!(is_query(sql), "{sql:?}");
+        }
+        for sql in &fixture.queries.refused {
+            assert!(!is_query(sql), "{sql:?}");
+        }
+    }
+
+    /// A connection sqlx left with a stuck non-zero transaction depth (its own
+    /// background `ROLLBACK` failed because SQLite had already ended the
+    /// transaction) must never be handed back out: every later
+    /// `begin_with("BEGIN IMMEDIATE")` on it would fail forever.
+    #[tokio::test]
+    async fn a_writer_connection_with_a_stuck_transaction_is_never_reused() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = LocalDb::open(dir.path()).await.unwrap();
+
+        // Commit with a raw statement instead of `tx.commit()`: sqlx's own
+        // depth bookkeeping never learns about it, so when `tx` drops without
+        // an explicit commit or rollback, its background `ROLLBACK` finds no
+        // transaction to roll back, fails, and leaves the connection's depth
+        // stuck at 1.
+        let mut tx = db.writer.begin_with("BEGIN IMMEDIATE").await.unwrap();
+        sqlx::query("COMMIT").execute(&mut *tx).await.unwrap();
+        drop(tx);
+
+        let probe = vec![LocalStatement {
+            sql: "INSERT INTO sync_state (key, value) VALUES ('probe', '1')".to_owned(),
+            values: Vec::new(),
+            expected_changes: None,
+        }];
+        assert_eq!(db.transaction(probe).await, Ok(vec![1]));
     }
 }

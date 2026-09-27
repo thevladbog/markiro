@@ -328,7 +328,7 @@ impl DeviceState {
             .map_err(DeviceError::Request)?;
         match response.status {
             200 => {}
-            400 => return Err(DeviceError::LineRejected),
+            400 => return Err(line_refusal(response.body.as_ref())),
             401 => return Err(DeviceError::KeyRejected),
             _ => return Err(DeviceError::RequestFailed),
         }
@@ -486,6 +486,29 @@ fn claim_refusal(body: Option<&Value>) -> DeviceError {
     }
 }
 
+/// The error for a refused line selection: a `validation_failed` naming the
+/// `lineId` field means the host rejected the chosen line itself; any other
+/// 400 — `protocol_unsupported` after a host upgrade, a malformed body's own
+/// `validation_failed` on some other field, or anything else — is the
+/// host's to explain, like any other unexpected refusal.
+fn line_refusal(body: Option<&Value>) -> DeviceError {
+    let field = body
+        .and_then(|body| serde_json::from_value::<ErrorBody>(body.clone()).ok())
+        .filter(|body| body.error.code == codes::VALIDATION_FAILED)
+        .and_then(|body| body.error.details)
+        .and_then(|details| {
+            details
+                .get("field")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        });
+    if field.as_deref() == Some("lineId") {
+        DeviceError::LineRejected
+    } else {
+        DeviceError::RequestFailed
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -579,6 +602,38 @@ mod tests {
             DeviceError::PairRejected
         );
         assert_eq!(claim_refusal(None), DeviceError::PairRejected);
+    }
+
+    #[test]
+    fn line_refusals_keep_the_reason_the_webview_explains() {
+        let validation = |field: &str| json!({ "error": { "code": "validation_failed", "message": "refused", "details": { "field": field } } });
+        assert_eq!(
+            line_refusal(Some(&validation("lineId"))),
+            DeviceError::LineRejected
+        );
+        // `validation_failed` on some other field is not about the chosen
+        // line: the webview should not be told to try a different line.
+        assert_eq!(
+            line_refusal(Some(&validation("name"))),
+            DeviceError::RequestFailed
+        );
+        assert_eq!(
+            line_refusal(Some(
+                &json!({ "error": { "code": "validation_failed", "message": "malformed body" } })
+            )),
+            DeviceError::RequestFailed
+        );
+        assert_eq!(
+            line_refusal(Some(
+                &json!({ "error": { "code": "protocol_unsupported", "message": "" } })
+            )),
+            DeviceError::RequestFailed
+        );
+        assert_eq!(
+            line_refusal(Some(&json!("not an error body"))),
+            DeviceError::RequestFailed
+        );
+        assert_eq!(line_refusal(None), DeviceError::RequestFailed);
     }
 
     #[test]

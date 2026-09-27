@@ -90,6 +90,16 @@ async fn status_in(heard: &mut mpsc::UnboundedReceiver<Heard>, state: LinkState)
     }
 }
 
+/// The very next report, whatever it is; panics if it is not a status. Used
+/// to pin an exact sequence, unlike `status_in`, which skips over reports
+/// that do not match.
+async fn next_status(heard: &mut mpsc::UnboundedReceiver<Heard>) -> HostStatus {
+    match until(heard, |_| true).await {
+        Heard::Status(status) => status,
+        Heard::Revision(rev) => panic!("expected a status, heard revision {rev}"),
+    }
+}
+
 async fn next_revision(heard: &mut mpsc::UnboundedReceiver<Heard>) -> i64 {
     match until(heard, |heard| matches!(heard, Heard::Revision(_))).await {
         Heard::Revision(rev) => rev,
@@ -151,7 +161,20 @@ async fn a_paired_device_comes_online_and_hears_every_revision() {
     let device = paired(&host, app_dir.path()).await;
     let (mut heard, state, task) = follow(device.watch_link());
 
-    let online = status_in(&mut heard, LinkState::Online).await;
+    // The exact first two statuses the webview relies on: `Connecting` with
+    // `seq` 1 and no error or contact yet, then `Online` with `seq` 2.
+    assert_eq!(
+        next_status(&mut heard).await,
+        HostStatus {
+            state: LinkState::Connecting,
+            last_contact_at: None,
+            last_error: None,
+            seq: 1,
+        }
+    );
+    let online = next_status(&mut heard).await;
+    assert_eq!(online.state, LinkState::Online);
+    assert_eq!(online.seq, 2);
     assert_eq!(online.last_error, None);
     assert!(online.last_contact_at.is_some());
     assert_eq!(
@@ -190,6 +213,15 @@ async fn the_link_goes_offline_with_the_host_and_returns_with_it() {
             Some(LinkError::StreamEnded | LinkError::Unreachable)
         ),
         "{offline:?}"
+    );
+    // `Offline` is immediately followed by a `Connecting` retry with a
+    // higher `seq`, before the link eventually comes back `Online`.
+    let connecting = next_status(&mut heard).await;
+    assert_eq!(connecting.state, LinkState::Connecting);
+    assert_eq!(
+        connecting.seq,
+        offline.seq + 1,
+        "{connecting:?} after {offline:?}"
     );
 
     // The same host comes back on the same address: the link returns on its own.

@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
@@ -6,7 +8,19 @@ import {
   LOCAL_DB_ERROR_CODES,
   LocalDbError,
 } from "../src/local/executor.js";
-import { openLocalDb } from "./support/local-db.js";
+import { checkStatement, isQuery, openLocalDb } from "./support/local-db.js";
+
+// Bind the module URL before use: the jsdom environment rewrites a literal
+// `new URL(..., import.meta.url)` (see test/protocol.test.ts).
+const moduleUrl = import.meta.url;
+const SQL_FIXTURE_URL = new URL("../src-tauri/tests/fixtures/local-sql.json", moduleUrl);
+interface SqlCases {
+  accepted: string[];
+  refused: string[];
+}
+const sqlFixture: { statements: SqlCases; queries: SqlCases } = JSON.parse(
+  readFileSync(SQL_FIXTURE_URL, "utf8"),
+);
 
 const LINE = "5f0c6a52-6a3e-4b9f-9d3c-2b1a0e8f7d61";
 const INSERT_LINE = "INSERT INTO ref_lines (id, name, archived, rev) VALUES (?, ?, ?, ?)";
@@ -131,6 +145,28 @@ describe("local database on node:sqlite", () => {
     ).resolves.toEqual([{ id: LINE, name: "Линия 1", archived: 0, rev: 1 }]);
   });
 
+  it("binds an integral number as an integer, not a real", async () => {
+    const { executor } = openLocalDb();
+    // The shell binds an integral JSON number as INTEGER (`serde_json`'s
+    // `as_i64`): a TEXT column stores it without a decimal point, `'5'`, not
+    // `'5.0'` — and `WHERE value = ?` with `5` matches the same rows in tests
+    // and in the shell.
+    await executor.transaction([
+      { sql: "INSERT INTO sync_state (key, value) VALUES ('last_rev', ?)", values: [5] },
+    ]);
+    await expect(
+      executor.query(
+        "SELECT value FROM sync_state WHERE key = 'last_rev'",
+        [],
+        z.object({ value: z.string() }),
+      ),
+    ).resolves.toEqual([{ value: "5" }]);
+    // A REAL still reads back as a REAL.
+    await expect(
+      executor.query("SELECT ? AS x", [1.5], z.object({ x: z.number() })),
+    ).resolves.toEqual([{ x: 1.5 }]);
+  });
+
   it("upserts a whole page through json_each as the shell does", async () => {
     const { executor } = openLocalDb();
     const page = JSON.stringify(
@@ -155,5 +191,30 @@ describe("local database on node:sqlite", () => {
       executor.transaction([{ sql: INSERT_LINE, values: [LINE, ["nested"], 0, 1] }]),
     );
     expect(error.code).toBe("unsupported_value");
+  });
+});
+
+describe("SQL rules match the shell (shared fixture)", () => {
+  it.each(sqlFixture.statements.accepted)("accepts %s as a statement", (sql) => {
+    expect(checkStatement(sql, 0)).toBe(true);
+  });
+
+  it.each(sqlFixture.statements.refused)("refuses %s as a statement", (sql) => {
+    expect(checkStatement(sql, 0)).toBe(false);
+  });
+
+  it.each(sqlFixture.queries.accepted)("accepts %s as a query", (sql) => {
+    expect(isQuery(sql)).toBe(true);
+  });
+
+  it.each(sqlFixture.queries.refused)("refuses %s as a query", (sql) => {
+    expect(isQuery(sql)).toBe(false);
+  });
+
+  it("refuses a batch of 33 statements", async () => {
+    const { executor } = openLocalDb();
+    const tooMany = Array.from({ length: 33 }, () => ({ sql: "SELECT 1" }));
+    const error = await failure(executor.transaction(tooMany));
+    expect(error.code).toBe("invalid_statement");
   });
 });

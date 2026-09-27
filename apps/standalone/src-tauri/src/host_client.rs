@@ -254,13 +254,18 @@ fn allowed_method(method: &str) -> Result<Method, RequestError> {
 /// it, bypassing the checks above. A `.` path segment is refused for the same
 /// reason: `url` collapses `/v1/device/./line` to `/v1/device/line`, which
 /// would reach a route that a caller-side check, such as
-/// `device::webview_may_reach`'s `LINE_ROUTE` exclusion, meant to stop.
+/// `device::webview_may_reach`'s `LINE_ROUTE` exclusion, meant to stop. A
+/// route ending in `/` is refused too: no host route has a trailing slash, so
+/// `/v1/device/line/` can only be an attempt to reach `/v1/device/line` past
+/// such a caller-side check — today it is harmless only because the host
+/// does not normalize a trailing slash away, but nothing guarantees that.
 fn validate_path(path: &str) -> Result<(), RequestError> {
     let route = path.split('?').next().unwrap_or(path);
     let safe = path.starts_with("/v1/")
         && path.len() <= MAX_PATH_LENGTH
         && !path.contains("..")
         && !path.contains("//")
+        && !route.ends_with('/')
         && !route.split('/').any(|segment| segment == ".")
         && path
             .bytes()
@@ -344,6 +349,11 @@ mod tests {
             "/v1/device/./line",
             "/v1/office/./users",
             "/v1/device/line/.",
+            // No host route ends with `/`; a caller-side exclusion like
+            // `LINE_ROUTE` compares the route string exactly, so a trailing
+            // slash must not be allowed to slip past it either.
+            "/v1/device/line/",
+            "/v1/office/",
         ] {
             assert_eq!(
                 validate_path(path),
