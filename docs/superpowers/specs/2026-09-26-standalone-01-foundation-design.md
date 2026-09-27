@@ -161,6 +161,9 @@ default_box_template_id, default_pallet_template_id, default_duplicate_template_
   вместе с `devices`, первые линии создаёт мастер; уникальность имени без учёта
   регистра обеспечивает столбец `name_key` (обрезанное имя в нижнем регистре по
   Unicode, считает хост), потому что `lower()` SQLite складывает только ASCII.
+  Имя, занятое активной линией, — `conflict` с `constraint: line_name` при
+  создании, переименовании и возврате из архива. Архивирование не трогает
+  устройства на линии (план 1d2); выбрать архивную линию станция не может.
 - `operators(id, login UNIQUE, name, role, pin_phc, active, rev)`. Табельный номер —
   3–12 цифр, как в облаке (`apps/api/src/modules/operators/dto.ts`); это проверяет
   хост. PIN — 4–6 цифр; его проверяет интерфейс до расчёта хеша, хост видит только
@@ -244,7 +247,9 @@ default_box_template_id, default_pallet_template_id, default_duplicate_template_
 Формы запросов и ответов плана 1d2 закреплены фикстурами `proto/fixtures`:
 
 - контрагенты — `counterparty-record.json` (ответ), `counterparty-create.json`,
-  `counterparty-update.json` (`PUT` — запись целиком с `archived` и `expectedRev`).
+  `counterparty-update.json` (`PUT` — запись целиком с `archived` и `expectedRev`);
+- линии — `office-line.json` (ответ, в списке и архивные), `line-create.json`,
+  `line-update.json` (`PUT` меняет только присланные `name` и `archived`).
 
 ### 4.6. Ошибки
 

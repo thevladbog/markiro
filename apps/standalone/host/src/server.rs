@@ -168,6 +168,14 @@ fn protected_routes() -> Router<AppState> {
             put(crate::routes::counterparties::update_counterparty),
         )
         .route(
+            "/v1/office/lines",
+            get(crate::routes::lines::list_lines).post(crate::routes::lines::create_line),
+        )
+        .route(
+            "/v1/office/lines/{id}",
+            put(crate::routes::lines::update_line),
+        )
+        .route(
             "/v1/office/users",
             get(crate::routes::office_users::list_users)
                 .post(crate::routes::office_users::create_user),

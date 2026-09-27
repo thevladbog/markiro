@@ -652,3 +652,32 @@ pub struct CounterpartyUpdate {
     pub archived: bool,
     pub expected_rev: i64,
 }
+
+/// A production line as the office sees it (`GET /v1/office/lines`,
+/// archived lines included).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OfficeLine {
+    pub id: String,
+    pub name: String,
+    pub archived: bool,
+    pub rev: i64,
+}
+
+/// `POST /v1/office/lines`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LineCreate {
+    pub name: String,
+}
+
+/// `PUT /v1/office/lines/{id}`: only the fields sent change.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LineUpdate {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archived: Option<bool>,
+    pub expected_rev: i64,
+}

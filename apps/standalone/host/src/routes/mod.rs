@@ -4,6 +4,7 @@ pub mod bootstrap;
 pub mod changes;
 pub mod counterparties;
 pub mod devices;
+pub mod lines;
 pub mod office_auth;
 pub mod office_users;
 pub mod org;

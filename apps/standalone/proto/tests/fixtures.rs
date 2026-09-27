@@ -3,10 +3,11 @@ use markiro_proto::{
     display_fingerprint, BlockSizesUpdate, BootstrapRequest, BootstrapResponse, ChangesResponse,
     ClaimRequest, Compatibility, CounterpartyCreate, CounterpartyRecord, CounterpartyUpdate,
     DeviceInfo, DeviceKind, DeviceLineRequest, DeviceRecord, ErrorBody, Hello, HelloEnvelope,
-    LineRecord, LocalPairRequest, OfficeLoginRequest, OfficeRole, OfficeSession, OfficeUser,
-    OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate, OperatorBadgeRecord, OperatorRecord,
-    OrgProfile, OrgProfileUpdate, OrgRecord, PairResponse, PairingCode, PasswordChange,
-    PasswordSet, SiteRecord, SsccCounterUpdate, SsccState, HOST_PRODUCT, PROTOCOL_VERSION,
+    LineCreate, LineRecord, LineUpdate, LocalPairRequest, OfficeLine, OfficeLoginRequest,
+    OfficeRole, OfficeSession, OfficeUser, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate,
+    OperatorBadgeRecord, OperatorRecord, OrgProfile, OrgProfileUpdate, OrgRecord, PairResponse,
+    PairingCode, PasswordChange, PasswordSet, SiteRecord, SsccCounterUpdate, SsccState,
+    HOST_PRODUCT, PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -266,6 +267,19 @@ fn counterparty_fixtures_round_trip_and_requests_reject_unknown_fields() {
     let mut value = fixture("counterparty-update.json");
     value["notes"] = Value::Bool(true);
     assert!(serde_json::from_value::<CounterpartyUpdate>(value).is_err());
+}
+
+#[test]
+fn line_fixtures_round_trip_and_an_update_carries_only_what_changes() {
+    let line: OfficeLine = round_trip("office-line.json");
+    assert!(!line.archived);
+    let create: LineCreate = round_trip("line-create.json");
+    assert_eq!(create.name, "Линия 3");
+    let update: LineUpdate = round_trip("line-update.json");
+    assert_eq!((update.name, update.archived), (None, Some(true)));
+    let mut value = fixture("line-update.json");
+    value["rename"] = Value::Bool(true);
+    assert!(serde_json::from_value::<LineUpdate>(value).is_err());
 }
 
 #[test]

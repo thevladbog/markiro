@@ -24,6 +24,8 @@ pub mod actions {
     pub const DEVICE_LINE: &str = "device.line";
     pub const COUNTERPARTY_CREATE: &str = "counterparty.create";
     pub const COUNTERPARTY_UPDATE: &str = "counterparty.update";
+    pub const LINE_CREATE: &str = "line.create";
+    pub const LINE_UPDATE: &str = "line.update";
 }
 
 /// `details.reason` of a denied row: every denial names one.
