@@ -100,6 +100,37 @@ describe("markdown mirrors", () => {
     expect(markdown).not.toContain("Хлебные крошки");
   });
 
+  it("keeps blocks and neighbouring elements apart when the build left no whitespace", () => {
+    // The built site has no whitespace between tags, so these shapes from the home page, the
+    // article hubs and the articles used to come out as "Проверка на местеКоды проверяются…".
+    const html = page({
+      route: "/faq/",
+      title: "FAQ — Markiro",
+      description: "Answers",
+      body:
+        '<ul><li><span aria-hidden="true">01</span><div><h3>Проверка на месте</h3><p>Коды проверяются на станции.</p></div></li></ul>' +
+        "<ol><li><h3>Открыть смену</h3><p>Станция знает продукт.</p></li></ol>" +
+        '<a href="/stati/dubl/"><span>11 мин чтения</span><span>Дубликат кода</span><span><time datetime="2026-08-27">27.08.2026</time></span><span aria-hidden="true">→</span></a>' +
+        '<p><a href="/instruktsii/">Все инструкции</a><a href="/legal/">Договор и регламенты</a></p>' +
+        '<ul><li><figure><img alt="Обложка" src="/cover.png"><figcaption>MKR-INS-01</figcaption></figure></li></ul>' +
+        '<ul><li><a href="#line"><span aria-hidden="true"></span><span>Линия</span></a><div role="tooltip"><p>Линия</p><p>Станция проверяет код.</p></div></li></ul>' +
+        "<p>H<sub>2</sub>O и <strong>вода</strong>.</p>",
+    });
+
+    const markdown = htmlToMarkdown(html, "https://markiro.app/faq/");
+
+    const blocks = [
+      "- **Проверка на месте** Коды проверяются на станции.",
+      "1. **Открыть смену** Станция знает продукт.",
+      "[11 мин чтения Дубликат кода 27.08.2026](https://markiro.app/stati/dubl/)",
+      "[Все инструкции](https://markiro.app/instruktsii/) [Договор и регламенты](https://markiro.app/legal/)",
+      "- ![Обложка](https://markiro.app/cover.png) MKR-INS-01",
+      "- [Линия](https://markiro.app/faq/#line) Линия Станция проверяет код.",
+      "H2O и вода.",
+    ];
+    expect(markdown.split("---\n\n")[1]).toBe(`${blocks.join("\n\n")}\n`);
+  });
+
   it("writes one mirror per indexable page plus a combined llms-full.txt", async () => {
     const root = await fixture({
       "index.html": page({
