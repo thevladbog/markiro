@@ -835,6 +835,21 @@ describe("App", () => {
     expect(device.selectLine).toHaveBeenCalledWith(LINE_ID);
   });
 
+  it("retries a failed reference sync from the line-select screen", async () => {
+    const device = fakeDevice(NEW_STATION);
+    const host = fakeHost();
+    host.getChanges
+      .mockRejectedValueOnce(
+        new HostError({ kind: "transport", code: "unreachable", message: "host down" }),
+      )
+      .mockResolvedValueOnce(feedPage(42, [lineItem(42, "Линия 1")]));
+    renderApp({ probe: probeAnswering(true), device, host });
+    expect(await screen.findByText("Не удалось получить справочники с хоста.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
+    expect(await screen.findByRole("button", { name: "Линия 1" })).toBeTruthy();
+    expect(host.getChanges).toHaveBeenCalledTimes(2);
+  });
+
   it("sends a station whose key the host refuses while choosing a line to pairing again", async () => {
     const device = fakeDevice(NEW_STATION);
     device.selectLine.mockRejectedValueOnce(new DeviceError("key_rejected", "revoked"));
@@ -843,6 +858,21 @@ describe("App", () => {
     renderApp({ probe: probeAnswering(true), device, host });
     fireEvent.click(await screen.findByRole("button", { name: "Линия 1" }));
     expect(await screen.findByText("Хост не принимает это устройство")).toBeTruthy();
+  });
+
+  it("sends a station whose certificate changed while choosing a line to pairing again", async () => {
+    const device = fakeDevice(NEW_STATION);
+    device.selectLine.mockRejectedValueOnce(new DeviceError("certificate_mismatch", "reinstalled"));
+    const host = fakeHost();
+    host.getChanges.mockResolvedValueOnce(feedPage(42, [lineItem(42, "Линия 1")]));
+    renderApp({ probe: probeAnswering(true), device, host });
+    fireEvent.click(await screen.findByRole("button", { name: "Линия 1" }));
+    expect(await screen.findByText("Хост не принимает это устройство")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Хост на этом компьютере сменился: его сертификат не совпадает с сохранённым при подключении.",
+      ),
+    ).toBeTruthy();
   });
 
   it("shows the link on the floor and in the office header", async () => {

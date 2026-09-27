@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { LineSelect, type LineSelectProps } from "../src/app/LineSelect.js";
@@ -35,10 +35,13 @@ function renderLineSelect(sync: SyncState, overrides: Partial<LineSelectProps> =
 }
 
 describe("LineSelect", () => {
-  it("waits for a sync in this session before it reads the lines", () => {
+  it("waits for a sync in this session before it reads the lines", async () => {
     const { db, props, view } = renderLineSelect({ kind: "running", synced: 0 });
     insertLine(db, LINE_2, "Линия 2");
     view.rerender(<LineSelect {...props} />);
+    // Flush the microtask a query would resolve on, so a guard that failed
+    // to skip the read would actually show up before the assertions run.
+    await act(async () => {});
     expect(screen.getByText("Получаем справочники с хоста…")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Линия 2" })).toBeNull();
   });

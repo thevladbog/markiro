@@ -154,6 +154,10 @@ export function App({
           dispatch({ type: "device_rejected", reason: "key_rejected" });
           return;
         }
+        if (error instanceof DeviceError && error.code === "certificate_mismatch") {
+          dispatch({ type: "device_rejected", reason: "host_changed" });
+          return;
+        }
         throw error;
       }
     },
