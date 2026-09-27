@@ -33,19 +33,20 @@ grant each other's rights. A device key alone never opens office routes.
 loopback is their only gate: any process on the host PC can pair a device.
 That is acceptable because the host PC is the site's trusted machine; the
 app pins the certificate it observed over loopback.
-Devices on the network pair only with a one-time code. An administrator
-creates it (`POST /v1/office/pairing-codes`); it lives 10 minutes, is stored
-as a hash, is claimed once (`POST /v1/pairing/claim`, 10 attempts a minute
-per address) and dies after 5 failed claims — a wrong code counts against
-every live code, since the hash cannot tell which one was meant. The claiming
-device pins the fingerprint from the scanned payload, or one a
-person compared with the office screen: `host_claim` refuses a malformed
-fingerprint (`invalid_request`) and a code that cannot be a code
-(`pairing_code_invalid`, checked with `markiro_proto::pairing::normalize`, so
-a typo never burns the host's live codes) before any I/O, observes `hello`
-and stops unless the observed fingerprint equals the confirmed one, and sends
-the canonical code only through a client that pins it. A refused claim comes back as `pairing_code_invalid`,
-`pairing_code_expired` or `rate_limited`; anything else is `pair_rejected`.
+Devices on the network pair only with a one-time code. An administrator creates
+it (`POST /v1/office/pairing-codes`); it lives 10 minutes, is stored as a hash,
+is claimed once (`POST /v1/pairing/claim`, 10 attempts a minute per address)
+and dies after 5 failed claims — a wrong code counts against every live code,
+since the hash cannot tell which one was meant. The claiming device pins the
+fingerprint from the scanned payload, or one a person compared with the office
+screen: `host_claim` refuses a malformed fingerprint (`invalid_request`) and a
+code that cannot be a code (`pairing_code_invalid`, checked with
+`markiro_proto::pairing::normalize`, so a code of the wrong length or with a
+symbol outside the alphabet never reaches the host) before any I/O, observes
+`hello` and stops unless the observed fingerprint equals the confirmed one, and
+sends the canonical code only through a client that pins it. A refused claim
+comes back as `pairing_code_invalid`, `pairing_code_expired` or `rate_limited`;
+anything else is `pair_rejected`.
 
 ## Audit
 
@@ -160,12 +161,16 @@ loopback, a person or a pairing code confirms it.
 
 `host_request`, the webview's only way to reach the host, accepts `GET`,
 `POST`, `PUT` and `DELETE`, paths of `[A-Za-z0-9/_.~?=&-]` without `..` or
-`//`, and only the routes `/v1/device[/…]`, `/v1/bootstrap` and
-`/v1/office/…`. Pairing routes return a new device key, so they stay behind
-their own commands (`host_local_pair`, `host_claim`) and the key never
-reaches the webview. `%` is refused because an encoded `..` would slip past
-the route check. Add a route the webview needs to that list deliberately;
-never let a listed prefix cover a route that returns a secret.
+`//`, and only the routes `/v1/device[/…]` except `/v1/device/line`,
+`/v1/bootstrap`, `/v1/changes` (not `/v1/changes/stream`) and
+`/v1/office/…`. The line goes through `device_select_line`, which also keeps
+the host's answer in `device.json`, so the station opens on its line with the
+host away; the change stream belongs to the connection task. Pairing routes
+return a new device key, so they stay behind their own commands
+(`host_local_pair`, `host_claim`) and the key never reaches the webview. `%`
+is refused because an encoded `..` would slip past the route check. Add a
+route the webview needs to that list deliberately; never let a listed prefix
+cover a route that returns a secret.
 
 The webview's IPC contract — command names, argument names such as
 `officeToken`, the `{ status, body }` answer and bare-string rejections — is

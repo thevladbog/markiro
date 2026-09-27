@@ -381,3 +381,66 @@ fn a_device_claims_a_code_through_the_ipc_shapes() {
     drop(webview);
     host.stop();
 }
+
+/// Line selection with the webview's `lineId`, the feed through
+/// `host_request`, and the stream refused there.
+#[test]
+fn a_station_selects_its_line_through_the_ipc_shapes() {
+    let host = Host::start();
+    let app_dir = tempfile::tempdir().unwrap();
+    let pairing = DeviceState::load(app_dir.path().to_path_buf());
+    host.runtime
+        .block_on(pairing.local_pair(&host.address(), NAME, "0.1.0"))
+        .unwrap();
+    let bootstrap: Value = serde_json::from_str(BOOTSTRAP).unwrap();
+    let created = host
+        .runtime
+        .block_on(pairing.request("POST", "/v1/bootstrap", Some(&bootstrap), None))
+        .unwrap();
+    assert_eq!(created.status, 200);
+    drop(pairing);
+    let (_app, webview) = mock_app(DeviceState::load(app_dir.path().to_path_buf()));
+
+    let feed = invoke(
+        &webview,
+        "host_request",
+        request("GET", "/v1/changes?since=0", Value::Null, None),
+    )
+    .unwrap();
+    assert_eq!(feed["status"], 200);
+    let line = feed["body"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["entity"] == "lines")
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    assert_eq!(
+        invoke(
+            &webview,
+            "device_select_line",
+            json!({ "lineId": "9b2e4a6c-0000-4000-8000-000000000000" })
+        ),
+        Err(json!("line_rejected"))
+    );
+    let status = invoke(&webview, "device_select_line", json!({ "lineId": line })).unwrap();
+    assert_eq!(status["lineId"], line);
+    assert_eq!(
+        invoke(&webview, "device_status", json!({})).unwrap()["lineId"],
+        line
+    );
+    assert_eq!(
+        invoke(
+            &webview,
+            "host_request",
+            request("GET", "/v1/changes/stream", Value::Null, None)
+        ),
+        Err(json!("invalid_request"))
+    );
+
+    drop(webview);
+    host.stop();
+}

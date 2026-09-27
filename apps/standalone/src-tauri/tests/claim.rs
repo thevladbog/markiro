@@ -81,7 +81,7 @@ async fn a_second_device_pairs_with_a_code_and_the_confirmed_fingerprint() {
     let code = new_code(&office, &token).await;
 
     // Typed the way a person copies it from the office screen: lower case,
-    // split in two. The shell sends the canonical form.
+    // split in two. The typed form pairs.
     let typed = format!("{}-{}", &code[..5], &code[5..]).to_lowercase();
     let station = DeviceState::load(station_dir.path().to_path_buf());
     let status = station
@@ -116,8 +116,8 @@ async fn a_second_device_pairs_with_a_code_and_the_confirmed_fingerprint() {
 }
 
 /// With another fingerprint the code never leaves the device: had it reached
-/// the host, the host would have paired it (or counted it), and the same
-/// code would not pair afterwards.
+/// the host, the host would have paired it, and the same code would not pair
+/// afterwards.
 #[tokio::test]
 async fn another_fingerprint_keeps_the_code_on_the_device() {
     let host_dir = tempfile::tempdir().unwrap();

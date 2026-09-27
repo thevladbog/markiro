@@ -1,12 +1,14 @@
 //! The paired device (spec §5.2): `device.json`, local pairing with the host
-//! on this computer, and authenticated requests. The device key never leaves
-//! this module: the webview sees `DeviceStatus`, never the key.
+//! on this computer, pairing by code, line selection, and authenticated
+//! requests. The device key never leaves this module: the webview sees
+//! `DeviceStatus`, never the key.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use markiro_proto::{
-    codes, pairing, ClaimRequest, DeviceKind, ErrorBody, LocalPairRequest, PairResponse, Secret,
+    codes, pairing, ClaimRequest, DeviceInfo, DeviceKind, DeviceLineRequest, ErrorBody,
+    LocalPairRequest, PairResponse, Secret,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -15,6 +17,10 @@ use crate::device_config::{self, DeviceConfig};
 use crate::host_client::{Credentials, HostResponse, PinnedClient, RequestError};
 use crate::host_probe::{self, HelloObservation, ProbeError};
 use crate::secret_store;
+
+/// A station's line (`PUT /v1/device/line`): only [`DeviceState::select_line`]
+/// reaches it, so `device.json` always holds the line the host confirmed.
+const LINE_ROUTE: &str = "/v1/device/line";
 
 /// What the webview may know about the pairing.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -36,7 +42,7 @@ pub enum DeviceError {
     Storage,
     /// A request needs a paired device and there is none.
     NotPaired,
-    /// Local pairing was asked for a device that is already paired.
+    /// Pairing was asked for a device that is already paired.
     AlreadyPaired,
     /// Discovering the host failed.
     Probe(ProbeError),
@@ -46,12 +52,20 @@ pub enum DeviceError {
     PairRejected,
     /// The host that answered the pairing is not the one `hello` described.
     HostChanged,
-    /// The host refused the pairing code: unknown, used or out of attempts.
+    /// The code cannot be a code, or the host refused it: unknown, used or
+    /// out of attempts.
     CodeInvalid,
     /// The pairing code has expired.
     CodeExpired,
     /// Too many pairing attempts from this computer; wait a minute.
     RateLimited,
+    /// The host refused the chosen line: it is archived or does not exist.
+    LineRejected,
+    /// The host no longer accepts this device's key (for example, it was
+    /// revoked in the office): the device needs a new pairing.
+    KeyRejected,
+    /// The host answered a device request with another error.
+    RequestFailed,
 }
 
 impl DeviceError {
@@ -69,6 +83,9 @@ impl DeviceError {
             DeviceError::CodeInvalid => codes::PAIRING_CODE_INVALID,
             DeviceError::CodeExpired => codes::PAIRING_CODE_EXPIRED,
             DeviceError::RateLimited => codes::RATE_LIMITED,
+            DeviceError::LineRejected => "line_rejected",
+            DeviceError::KeyRejected => "key_rejected",
+            DeviceError::RequestFailed => "request_failed",
         }
     }
 }
@@ -200,8 +217,10 @@ impl DeviceState {
         if !is_fingerprint(fingerprint) {
             return Err(DeviceError::Request(RequestError::InvalidRequest));
         }
-        // The host counts a wrong code against every live code: a typo must
-        // not reach it.
+        // The host counts a wrong code against every live code; `normalize`
+        // only stops a code of the wrong length or with a symbol outside the
+        // alphabet before it reaches the host, not a typo that keeps the
+        // code's shape.
         let Some(code) = pairing::normalize(code) else {
             return Err(DeviceError::CodeInvalid);
         };
@@ -235,6 +254,63 @@ impl DeviceState {
             return Err(claim_refusal(response.body.as_ref()));
         }
         self.remember(address, observation, client, response.body)
+    }
+
+    /// Choose the line this station works on (`PUT /v1/device/line`) and
+    /// keep the host's answer in `device.json`, so the station opens on its
+    /// line even while the host is away. Serialised with pairing and
+    /// forgetting, so it never writes over a pairing that changed meanwhile.
+    pub async fn select_line(&self, line_id: &str) -> Result<DeviceStatus, DeviceError> {
+        let _pairing = self.pairing.lock().await;
+        let device = self.paired()?;
+        let body = serde_json::to_value(DeviceLineRequest {
+            line_id: line_id.to_owned(),
+        })
+        .expect("DeviceLineRequest serializes");
+        let response = device
+            .client
+            .send(
+                "PUT",
+                LINE_ROUTE,
+                Some(&body),
+                Credentials {
+                    device_key: Some(&device.key),
+                    office_token: None,
+                },
+            )
+            .await
+            .map_err(DeviceError::Request)?;
+        match response.status {
+            200 => {}
+            400 => return Err(DeviceError::LineRejected),
+            401 => return Err(DeviceError::KeyRejected),
+            _ => return Err(DeviceError::RequestFailed),
+        }
+        let info: DeviceInfo = response
+            .body
+            .and_then(|body| serde_json::from_value(body).ok())
+            .ok_or(DeviceError::Request(RequestError::InvalidResponse))?;
+        let config = DeviceConfig {
+            line_id: info.line_id,
+            ..device.config.clone()
+        };
+        device_config::save(&self.dir, &config).map_err(|_| DeviceError::Storage)?;
+        let updated = Arc::new(PairedDevice {
+            config,
+            key: device.key.clone(),
+            client: device.client.clone(),
+        });
+        let status = updated.status();
+        *self.current.lock().expect("device lock") = Current::Paired(updated);
+        Ok(status)
+    }
+
+    fn paired(&self) -> Result<Arc<PairedDevice>, DeviceError> {
+        match &*self.current.lock().expect("device lock") {
+            Current::Paired(device) => Ok(device.clone()),
+            Current::Unpaired => Err(DeviceError::NotPaired),
+            Current::Unreadable => Err(DeviceError::ConfigUnreadable),
+        }
     }
 
     fn ensure_unpaired(&self) -> Result<(), DeviceError> {
@@ -293,11 +369,7 @@ impl DeviceState {
         if !webview_may_reach(path) {
             return Err(DeviceError::Request(RequestError::InvalidRequest));
         }
-        let device = match &*self.current.lock().expect("device lock") {
-            Current::Paired(device) => device.clone(),
-            Current::Unpaired => return Err(DeviceError::NotPaired),
-            Current::Unreadable => return Err(DeviceError::ConfigUnreadable),
-        };
+        let device = self.paired()?;
         device
             .client
             .send(
@@ -327,12 +399,15 @@ impl DeviceState {
 
 /// Routes the webview may reach through `host_request`. Pairing routes are
 /// excluded: their answers carry a new device key, which must never cross
-/// IPC.
+/// IPC. The line goes through [`DeviceState::select_line`], which also keeps
+/// it in `device.json`; the change stream belongs to the connection task.
 fn webview_may_reach(path: &str) -> bool {
     let route = path.split('?').next().unwrap_or(path);
-    route == "/v1/device"
-        || route.starts_with("/v1/device/")
+    let device_route =
+        route == "/v1/device" || (route.starts_with("/v1/device/") && route != LINE_ROUTE);
+    device_route
         || route == "/v1/bootstrap"
+        || route == "/v1/changes"
         || route.starts_with("/v1/office/")
 }
 
@@ -364,11 +439,13 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn webview_reachable_routes_exclude_pairing() {
+    fn webview_reachable_routes_exclude_pairing_the_line_and_the_stream() {
         for route in [
             "/v1/device",
             "/v1/device/foo",
             "/v1/bootstrap",
+            "/v1/changes",
+            "/v1/changes?since=5&limit=100",
             "/v1/office/me",
             "/v1/office/logout",
             "/v1/office/sscc/counters/460068200/0?since=1",
@@ -381,9 +458,21 @@ mod tests {
             "/v1/hello",
             "/v1/devices",
             "/v1/bootstrap-status",
+            "/v1/device/line",
+            "/v1/device/line?lineId=1",
+            "/v1/changes/stream",
+            "/v1/changes/",
+            "/v1/changesx",
         ] {
             assert!(!webview_may_reach(route), "{route}");
         }
+    }
+
+    #[test]
+    fn line_and_key_error_codes_are_stable() {
+        assert_eq!(DeviceError::LineRejected.code(), "line_rejected");
+        assert_eq!(DeviceError::KeyRejected.code(), "key_rejected");
+        assert_eq!(DeviceError::RequestFailed.code(), "request_failed");
     }
 
     #[test]

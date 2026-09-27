@@ -80,6 +80,17 @@ async fn host_request(
 }
 
 #[tauri::command]
+async fn device_select_line(
+    state: tauri::State<'_, DeviceState>,
+    line_id: String,
+) -> Result<DeviceStatus, String> {
+    state
+        .select_line(&line_id)
+        .await
+        .map_err(|error| error.code().to_owned())
+}
+
+#[tauri::command]
 async fn device_forget(state: tauri::State<'_, DeviceState>) -> Result<(), String> {
     state
         .forget()
@@ -120,6 +131,7 @@ pub fn invoke_handler<R: tauri::Runtime>(
         host_local_pair,
         host_claim,
         host_request,
+        device_select_line,
         device_forget,
         local_query,
         local_transaction
