@@ -24,6 +24,10 @@ use sqlx::sqlite::{
 use sqlx::{Column, Row, Sqlite, TypeInfo, ValueRef};
 
 pub const FILE_NAME: &str = "standalone-station.db";
+/// `MAX_STATEMENTS`, `MAX_SQL_BYTES` and `MAX_VALUES` here, and
+/// `FORBIDDEN_WORDS` below, are mirrored for tests in
+/// `apps/standalone/test/support/local-db.ts`. A rule change here updates
+/// that file too and adds a case to `src-tauri/tests/fixtures/local-sql.json`.
 pub const MAX_STATEMENTS: usize = 32;
 pub const MAX_SQL_BYTES: usize = 64 * 1024;
 pub const MAX_VALUES: usize = 256;

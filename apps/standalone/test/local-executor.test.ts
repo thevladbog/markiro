@@ -217,4 +217,50 @@ describe("SQL rules match the shell (shared fixture)", () => {
     const error = await failure(executor.transaction(tooMany));
     expect(error.code).toBe("invalid_statement");
   });
+
+  // Mirrors the shell's `statement_size_and_value_count_are_bounded`
+  // (`src-tauri/src/local_db.rs`): same two boundaries, run against the
+  // node:sqlite executor so a passing statement really executes.
+  it("accepts a statement of exactly MAX_SQL_BYTES bytes and refuses one byte more", async () => {
+    const { executor } = openLocalDb();
+    const MAX_SQL_BYTES = 64 * 1024;
+    const prefix = "SELECT '";
+    const suffix = "' AS x";
+    const overhead = Buffer.byteLength(prefix + suffix, "utf8");
+    // One "я" (2 bytes, 1 UTF-16 unit) in the padding: a check based on
+    // `.length` instead of `Buffer.byteLength` would misjudge this boundary,
+    // since `.length` under-counts a string that contains it.
+    const padding = (byteLength: number): string => `я${"x".repeat(byteLength - 2)}`;
+    const statement = (extra: number): string =>
+      `${prefix}${padding(MAX_SQL_BYTES - overhead + extra)}${suffix}`;
+
+    const atLimit = statement(0);
+    expect(Buffer.byteLength(atLimit, "utf8")).toBe(MAX_SQL_BYTES);
+    await expect(executor.query(atLimit, [], z.object({ x: z.string() }))).resolves.toEqual([
+      { x: padding(MAX_SQL_BYTES - overhead) },
+    ]);
+
+    const overLimit = statement(1);
+    expect(Buffer.byteLength(overLimit, "utf8")).toBe(MAX_SQL_BYTES + 1);
+    const error = await failure(executor.query(overLimit, [], z.object({ x: z.string() })));
+    expect(error.code).toBe("invalid_statement");
+  });
+
+  it("accepts 256 bound values and refuses 257", async () => {
+    const { executor } = openLocalDb();
+    const jsonArrayOf = (count: number): { sql: string; values: number[] } => ({
+      sql: `SELECT json_array(${Array.from({ length: count }, () => "?").join(", ")}) AS list`,
+      values: Array.from({ length: count }, (_, index) => index),
+    });
+    const row = z.object({ list: z.string() });
+
+    const atLimit = jsonArrayOf(256);
+    await expect(executor.query(atLimit.sql, atLimit.values, row)).resolves.toEqual([
+      { list: JSON.stringify(atLimit.values) },
+    ]);
+
+    const overLimit = jsonArrayOf(257);
+    const error = await failure(executor.query(overLimit.sql, overLimit.values, row));
+    expect(error.code).toBe("invalid_statement");
+  });
 });

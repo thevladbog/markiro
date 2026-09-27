@@ -111,6 +111,8 @@ test("Standalone native and web changes select their jobs", () => {
   for (const path of [
     "apps/standalone/src/app/App.tsx",
     "apps/standalone/proto/fixtures/hello.json",
+    "apps/standalone/src-tauri/migrations/0001_reference_data.sql",
+    "apps/standalone/src-tauri/tests/fixtures/local-sql.json",
   ]) {
     assert.deepEqual(
       enabledJobs(classifyChangedFiles([path])),

@@ -167,8 +167,19 @@ function jobsForPath(path) {
 
   // Host and shell crates run only the Rust jobs; everything else in the app
   // (webview, protocol fixtures read by both suites, package files) also runs
-  // the JavaScript gates.
+  // the JavaScript gates. Two directories inside the shell crate are also
+  // inputs to the webview's Vitest suite, so they must run both: sqlx
+  // migrations under `src-tauri/migrations/` are applied to node:sqlite by
+  // `test/support/local-db.ts`, and the SQL-rule fixtures under
+  // `src-tauri/tests/fixtures/` (`local-sql.json`) are asserted by both a
+  // Rust unit test and `test/local-executor.test.ts`.
   if (path.startsWith("apps/standalone/")) {
+    if (
+      path.startsWith("apps/standalone/src-tauri/migrations/") ||
+      path.startsWith("apps/standalone/src-tauri/tests/fixtures/")
+    ) {
+      return ["verify_static", "verify_app_tests", ...standaloneJobs];
+    }
     if (
       path.startsWith("apps/standalone/host/") ||
       path.startsWith("apps/standalone/src-tauri/") ||

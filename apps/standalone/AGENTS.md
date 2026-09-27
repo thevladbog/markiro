@@ -94,6 +94,9 @@ anyway), `invalid_statement`, `unsupported_value`, `statement_failed`,
 The webview reaches it only through `LocalExecutor` (`src/local/executor.ts`);
 Vitest runs the same migrations on node:sqlite behind the same interface
 (`test/support/local-db.ts`), so SQL in tests never drifts from the schema.
+That file also mirrors `local_db.rs`'s statement rules and limits; a rule
+change there means updating `test/support/local-db.ts` too and adding a case
+to `src-tauri/tests/fixtures/local-sql.json`.
 
 ## Writes
 
