@@ -9,11 +9,16 @@ let dbPromise: Promise<Database> | null = null;
  * side says where it lives (`station_database_url`): the machine-local folder,
  * or the roaming one while the one-time move is postponed. Never the relative
  * `sqlite:station-mirror.db`, which the plugin resolves against the roaming
- * app-config folder.
+ * app-config folder. A failed open is not cached: the next call opens again.
  */
 function db(): Promise<Database> {
   if (!dbPromise) {
-    dbPromise = invoke<string>("station_database_url").then((url) => Database.load(url));
+    dbPromise = invoke<string>("station_database_url")
+      .then((url) => Database.load(url))
+      .catch((error: unknown) => {
+        dbPromise = null;
+        throw error;
+      });
   }
   return dbPromise;
 }
