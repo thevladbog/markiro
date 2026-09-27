@@ -490,16 +490,25 @@ for (const [route, terms] of [
     await page.goto(route);
     const rows = page.locator(".legal-definitions > div");
     await expect(rows).toHaveCount(terms.length);
+    // Each entry is one run-in paragraph: the term and its dash end on the row where the
+    // definition's first line starts, so compare line boxes, not the wrapped elements' boxes.
+    const lineBox = (selector: string, line: "first" | "last", index: number) =>
+      rows
+        .nth(index)
+        .locator(selector)
+        .evaluate((element, which) => {
+          const lines = [...element.getClientRects()];
+          const rect = which === "first" ? lines[0] : lines.at(-1);
+          return rect ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height } : null;
+        }, line);
     for (const [index, term] of terms.entries()) {
       await expect(rows.nth(index).locator("dt")).toHaveText(`${term} —`);
-      const definitionBox = await rows.nth(index).locator("dd").boundingBox();
-      const termBox = await rows.nth(index).locator("dt").boundingBox();
-      expect(definitionBox).not.toBeNull();
-      expect(termBox).not.toBeNull();
-      if (!definitionBox || !termBox) throw new Error(`Missing definition geometry for ${term}`);
-      expect(definitionBox.x).toBeGreaterThanOrEqual(termBox.x + termBox.width - 1);
-      expect(definitionBox.y).toBeLessThan(termBox.y + termBox.height);
-      expect(termBox.y).toBeLessThan(definitionBox.y + definitionBox.height);
+      const definitionLine = await lineBox("dd", "first", index);
+      const termLine = await lineBox("dt", "last", index);
+      if (!definitionLine || !termLine) throw new Error(`Missing definition geometry for ${term}`);
+      expect(definitionLine.x).toBeGreaterThanOrEqual(termLine.x + termLine.width - 1);
+      expect(definitionLine.y).toBeLessThan(termLine.y + termLine.height);
+      expect(termLine.y).toBeLessThan(definitionLine.y + definitionLine.height);
     }
   });
 }
