@@ -57,19 +57,16 @@ describe("storage notices", () => {
   });
 
   it("shows every notice on the status tab", () => {
-    render(
+    const { container } = render(
       <Status
-        status={status({
-          storageNotices: [
-            { kind: "roamedCopyPresent", sameAgent: true },
-            { kind: "movePostponed" },
-          ],
-        })}
+        status={status({ storageNotices: EVERY_NOTICE })}
         onChanged={vi.fn()}
         onCheckForUpdate={vi.fn().mockResolvedValue({ status: "current" })}
       />,
     );
 
+    const notices = container.querySelector(".signer-storage-notices");
+    expect(notices?.querySelectorAll('[role="alert"]').length).toBe(EVERY_NOTICE.length);
     expect(screen.getByText(/копия привязки этого агента/)).toBeDefined();
     expect(screen.getByText(/пока не удалось перенести/)).toBeDefined();
   });
