@@ -38,14 +38,26 @@ export type OfficeState =
   | { kind: "open"; session: OfficeSession };
 
 /**
+ * Why a reference sync failed: the host did not answer the request
+ * (`HostError`), this computer could not write its copies (`LocalDbError`),
+ * or the host's feed could not be applied (an answer this build cannot read,
+ * a `SyncFeedError`, anything else).
+ */
+export type SyncFailure = "host" | "local" | "feed";
+
+/**
  * The reference sync (`src/local/reference-sync.ts`): what the latest run
- * is doing or how it ended, and how many runs brought the local copies up
- * to date since the pairing, so a screen reading them knows when to read
- * again.
+ * is doing or how it ended; how many runs brought the local copies up to
+ * date since the pairing, so a screen reading them knows when to read
+ * again; why the last failed run failed, kept through the retry's own run
+ * until one succeeds; and how many feed records the copies hold in
+ * quarantine, as the last successful run counted them.
  */
 export interface SyncState {
   kind: "idle" | "running" | "done" | "failed" | "other_host";
   synced: number;
+  failure: SyncFailure | null;
+  quarantined: number;
 }
 
 export interface ShellState {
@@ -100,11 +112,11 @@ export type ShellAction =
   | { type: "host_revision"; rev: number }
   | { type: "sync_started" }
   | { type: "sync_finished"; result: SyncResult }
-  | { type: "sync_failed" }
+  | { type: "sync_failed"; failure: SyncFailure }
   | { type: "line_selected"; status: DeviceStatus };
 
 const CLOSED_OFFICE: OfficeState = { kind: "closed" };
-const IDLE_SYNC: SyncState = { kind: "idle", synced: 0 };
+const IDLE_SYNC: SyncState = { kind: "idle", synced: 0, failure: null, quarantined: 0 };
 
 export const initialShellState: ShellState = {
   device: { kind: "loading" },
@@ -292,7 +304,8 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
       // Absorbing: `other_host` only a new pairing clears (`paired`,
       // `forgotten`). Second line of defence — `useHostLink` also stops the
       // scheduler as soon as a run finds `other_host` or a rejection, but a
-      // run already queued by a revision can still land here first.
+      // run already queued by a revision can still land here first. A
+      // retry keeps the last failure, so the warning does not flicker.
       if (state.sync.kind === "other_host") return state;
       return { ...state, sync: { ...state.sync, kind: "running" } };
     case "sync_finished":
@@ -301,10 +314,18 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
         // Office requests would reach a host this device was never paired with.
         return { ...state, sync: { ...state.sync, kind: "other_host" }, office: CLOSED_OFFICE };
       }
-      return { ...state, sync: { kind: "done", synced: state.sync.synced + 1 } };
+      return {
+        ...state,
+        sync: {
+          kind: "done",
+          synced: state.sync.synced + 1,
+          failure: null,
+          quarantined: action.result.quarantined,
+        },
+      };
     case "sync_failed":
       if (state.sync.kind === "other_host") return state;
-      return { ...state, sync: { ...state.sync, kind: "failed" } };
+      return { ...state, sync: { ...state.sync, kind: "failed", failure: action.failure } };
     case "line_selected":
       return { ...state, device: { kind: "ready", status: action.status } };
   }

@@ -346,7 +346,18 @@ host, the local host's version and identity, then the office or the floor.
 While a host is paired, `useHostLink` (`src/app/host-link.ts`) follows the
 shell's link and syncs reference data at start and after every revision
 event; it stops when the pairing ends, is rejected or turns out to belong
-to another host (`other_host`, which only a new pairing clears). A link
+to another host (`other_host`, which only a new pairing clears). A failed
+run (neither another host nor a rejected device) is retried while the link
+is online: after 2, 4, 8, 16 and 32 s, then every 60 s (`nextSyncRetryMs`).
+A successful run starts the count again, any other run replaces the
+pending retry, a status that is not `online` drops it, and an `online`
+status after a failed run whose retry was dropped syncs at once. The
+run's error sets the sync state's `failure`: `local` for a
+`LocalDbError`; `feed` for an answer this build cannot read (a
+`HostError` with code `invalid_response`), a `SyncFeedError` or anything
+else; `host` for every other `HostError`. It stays through the retry's
+own run, so a warning does not flicker; a successful run clears it and
+sets `quarantined`. A link
 `lastError` of `key_rejected` or `certificate_mismatch` is a rejected
 device, exactly like the same answer to an office call. A new revision
 re-reads the signed-in user (`Office`, `hostRevision`); it does not reload an

@@ -20,6 +20,11 @@ function insertLine(db: DatabaseSync, id: string, name: string, archived = 0): v
   );
 }
 
+/** A sync state with no failure and nothing quarantined. */
+function syncState(kind: SyncState["kind"], synced: number): SyncState {
+  return { kind, synced, failure: null, quarantined: 0 };
+}
+
 function renderLineSelect(sync: SyncState, overrides: Partial<LineSelectProps> = {}) {
   const { db, executor } = openLocalDb();
   const props: LineSelectProps = {
@@ -36,7 +41,7 @@ function renderLineSelect(sync: SyncState, overrides: Partial<LineSelectProps> =
 
 describe("LineSelect", () => {
   it("waits for a sync in this session before it reads the lines", async () => {
-    const { db, props, view } = renderLineSelect({ kind: "running", synced: 0 });
+    const { db, props, view } = renderLineSelect(syncState("running", 0));
     insertLine(db, LINE_2, "Линия 2");
     view.rerender(<LineSelect {...props} />);
     // Flush the microtask a query would resolve on, so a guard that failed
@@ -47,11 +52,11 @@ describe("LineSelect", () => {
   });
 
   it("lists the active lines by name once the copies are up to date", async () => {
-    const { db, props, view } = renderLineSelect({ kind: "running", synced: 0 });
+    const { db, props, view } = renderLineSelect(syncState("running", 0));
     insertLine(db, LINE_10, "Линия 10");
     insertLine(db, LINE_2, "Линия 2");
     insertLine(db, OLD_LINE, "Старая линия", 1);
-    view.rerender(<LineSelect {...props} sync={{ kind: "done", synced: 1 }} />);
+    view.rerender(<LineSelect {...props} sync={syncState("done", 1)} />);
     await screen.findByRole("button", { name: "Линия 2" });
     const names = screen
       .getAllByRole("button")
@@ -62,21 +67,21 @@ describe("LineSelect", () => {
   });
 
   it("explains a failed first sync and syncs again on request", () => {
-    const { props } = renderLineSelect({ kind: "failed", synced: 0 });
+    const { props } = renderLineSelect(syncState("failed", 0));
     expect(screen.getByText("Не удалось получить справочники с хоста.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
     expect(props.onSync).toHaveBeenCalledTimes(1);
   });
 
   it("says when the host has no active lines", async () => {
-    renderLineSelect({ kind: "done", synced: 1 });
+    renderLineSelect(syncState("done", 1));
     expect(await screen.findByText("На хосте нет активных линий.")).toBeTruthy();
   });
 
   it("chooses a line with the host", async () => {
-    const { db, props, view } = renderLineSelect({ kind: "running", synced: 0 });
+    const { db, props, view } = renderLineSelect(syncState("running", 0));
     insertLine(db, LINE_2, "Линия 2");
-    view.rerender(<LineSelect {...props} sync={{ kind: "done", synced: 1 }} />);
+    view.rerender(<LineSelect {...props} sync={syncState("done", 1)} />);
     fireEvent.click(await screen.findByRole("button", { name: "Линия 2" }));
     await waitFor(() => expect(props.onSelect).toHaveBeenCalledWith(LINE_2));
   });
@@ -85,10 +90,10 @@ describe("LineSelect", () => {
     const onSelect = vi.fn<LineSelectProps["onSelect"]>(async () => {
       throw new DeviceError("line_rejected", "archived meanwhile");
     });
-    const { db, props, view } = renderLineSelect({ kind: "running", synced: 0 }, { onSelect });
+    const { db, props, view } = renderLineSelect(syncState("running", 0), { onSelect });
     insertLine(db, LINE_2, "Линия 2");
     insertLine(db, LINE_10, "Линия 10");
-    view.rerender(<LineSelect {...props} sync={{ kind: "done", synced: 1 }} />);
+    view.rerender(<LineSelect {...props} sync={syncState("done", 1)} />);
     fireEvent.click(await screen.findByRole("button", { name: "Линия 2" }));
     expect(
       await screen.findByText(
@@ -99,7 +104,7 @@ describe("LineSelect", () => {
 
     // The sync brings the archive flag; the list follows it.
     db.prepare("UPDATE ref_lines SET archived = 1 WHERE id = ?").run(LINE_2);
-    view.rerender(<LineSelect {...props} sync={{ kind: "done", synced: 2 }} />);
+    view.rerender(<LineSelect {...props} sync={syncState("done", 2)} />);
     await waitFor(() => expect(screen.queryByRole("button", { name: "Линия 2" })).toBeNull());
     expect(screen.getByRole("button", { name: "Линия 10" })).toBeTruthy();
   });
@@ -108,9 +113,9 @@ describe("LineSelect", () => {
     const onSelect = vi.fn<LineSelectProps["onSelect"]>(async () => {
       throw new DeviceError("unreachable", "host down");
     });
-    const { db, props, view } = renderLineSelect({ kind: "running", synced: 0 }, { onSelect });
+    const { db, props, view } = renderLineSelect(syncState("running", 0), { onSelect });
     insertLine(db, LINE_2, "Линия 2");
-    view.rerender(<LineSelect {...props} sync={{ kind: "done", synced: 1 }} />);
+    view.rerender(<LineSelect {...props} sync={syncState("done", 1)} />);
     fireEvent.click(await screen.findByRole("button", { name: "Линия 2" }));
     // Not "Служба хоста на этом компьютере не отвечает.": this station's
     // paired host can be a different PC on the network.
@@ -122,19 +127,18 @@ describe("LineSelect", () => {
     const onSelect = vi.fn<LineSelectProps["onSelect"]>(async () => {
       throw new DeviceError("request_failed", "host error");
     });
-    const { db, props, view } = renderLineSelect({ kind: "running", synced: 0 }, { onSelect });
+    const { db, props, view } = renderLineSelect(syncState("running", 0), { onSelect });
     insertLine(db, LINE_2, "Линия 2");
-    view.rerender(<LineSelect {...props} sync={{ kind: "done", synced: 1 }} />);
+    view.rerender(<LineSelect {...props} sync={syncState("done", 1)} />);
     fireEvent.click(await screen.findByRole("button", { name: "Линия 2" }));
     expect(await screen.findByText("Хост не выполнил запрос. Повторите попытку.")).toBeTruthy();
     expect(props.onSync).not.toHaveBeenCalled();
   });
 
   it("shows the link and opens the office", () => {
-    const { props } = renderLineSelect(
-      { kind: "failed", synced: 0 },
-      { link: { state: "offline", lastContactAt: null, lastError: "unreachable", seq: 4 } },
-    );
+    const { props } = renderLineSelect(syncState("failed", 0), {
+      link: { state: "offline", lastContactAt: null, lastError: "unreachable", seq: 4 },
+    });
     expect(screen.getByText("Нет связи с хостом")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Офис" }));
     expect(props.onOffice).toHaveBeenCalledTimes(1);

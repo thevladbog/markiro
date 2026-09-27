@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { StrictMode } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ThemeProvider } from "@markiro/ui";
 
@@ -45,6 +45,11 @@ function feedPage(rev: number, items: ChangeItem[] = [], hostId = HOST_ID): Chan
 
 function lineItem(rev: number, name: string): ChangeItem {
   return { entity: "lines", id: LINE_ID, rev, deleted: false, data: { name, archived: false } };
+}
+
+/** The feed's request did not reach the host. */
+function hostDown(): HostError {
+  return new HostError({ kind: "transport", code: "unreachable", message: "host down" });
 }
 
 /**
@@ -702,6 +707,11 @@ describe("App", () => {
     expect(await screen.findByText("Цех")).toBeTruthy();
     // The sync starts in the link effect, which runs after the floor shows.
     await waitFor(() => expect(host.getChanges).toHaveBeenCalledTimes(1));
+    // Exactly once: settle, then check again. React runs passive effects in
+    // `setImmediate` tasks, which `waitFor`'s `setTimeout(0)` does not wait for.
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(host.getChanges).toHaveBeenCalledTimes(1);
   });
 
   it("syncs only after watch settles, not before, even though the fake connection usually resolves at once", async () => {
@@ -734,6 +744,10 @@ describe("App", () => {
 
     resolveWatch?.(() => undefined);
     await waitFor(() => expect(host.getChanges).toHaveBeenCalledTimes(1));
+    // Exactly once: settle, then check again (see the test above).
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(host.getChanges).toHaveBeenCalledTimes(1);
   });
 
   it("stops the link and shows the rejected-device screen when a link status refuses the device's key", async () => {
@@ -1006,5 +1020,145 @@ describe("App", () => {
     });
     await screen.findByText("Версии не совпадают");
     expect(screen.queryByRole("button", { name: "Подключиться к хосту в сети" })).toBeNull();
+  });
+});
+
+describe("reference sync retries", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /**
+   * Only `setTimeout` is fake, and it also advances with real time: React's
+   * scheduler (`setImmediate`) and Testing Library's polling stay real, and
+   * `elapse` jumps the retry waits.
+   */
+  function fakeRetryTimers(): void {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+  }
+
+  /** Moves the clock on by `ms`; what the timers set off settles inside `act`. */
+  async function elapse(ms: number): Promise<void> {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+  }
+
+  /** The station without a line says the first sync failed. */
+  async function firstSyncFailed(): Promise<void> {
+    expect(await screen.findByText("Не удалось получить справочники с хоста.")).toBeTruthy();
+  }
+
+  it("retries a failed sync after 2 s, then after 4 s, while the link is online", async () => {
+    fakeRetryTimers();
+    const host = fakeHost();
+    host.getChanges
+      .mockRejectedValueOnce(hostDown())
+      .mockRejectedValueOnce(hostDown())
+      .mockResolvedValueOnce(feedPage(42, [lineItem(42, "Линия 1")]));
+    renderApp({ probe: probeAnswering(true), device: fakeDevice(NEW_STATION), host });
+    await firstSyncFailed();
+    expect(host.getChanges).toHaveBeenCalledTimes(1);
+    await elapse(1000);
+    expect(host.getChanges).toHaveBeenCalledTimes(1);
+    await elapse(1500);
+    expect(host.getChanges).toHaveBeenCalledTimes(2);
+    // The second failure in a row waits twice as long.
+    await elapse(2000);
+    expect(host.getChanges).toHaveBeenCalledTimes(2);
+    await elapse(2500);
+    expect(host.getChanges).toHaveBeenCalledTimes(3);
+    expect(await screen.findByRole("button", { name: "Линия 1" })).toBeTruthy();
+  });
+
+  it("stops retrying once a sync succeeds", async () => {
+    fakeRetryTimers();
+    const host = fakeHost();
+    host.getChanges.mockRejectedValueOnce(hostDown());
+    renderApp({ probe: probeAnswering(true), device: fakeDevice(NEW_STATION), host });
+    await firstSyncFailed();
+    await elapse(2500);
+    expect(host.getChanges).toHaveBeenCalledTimes(2);
+    expect(await screen.findByText("На хосте нет активных линий.")).toBeTruthy();
+    await elapse(120_000);
+    expect(host.getChanges).toHaveBeenCalledTimes(2);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("drops the pending retry while the link is down and syncs at once when it is back", async () => {
+    fakeRetryTimers();
+    const link = fakeConnection();
+    const host = fakeHost();
+    host.getChanges.mockRejectedValueOnce(hostDown());
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(NEW_STATION),
+      host,
+      connection: link.connection,
+    });
+    await firstSyncFailed();
+    expect(vi.getTimerCount()).toBe(1);
+    await link.status({
+      state: "offline",
+      lastContactAt: 1_790_000_000_000,
+      lastError: "unreachable",
+      seq: 2,
+    });
+    expect(vi.getTimerCount()).toBe(0);
+    await elapse(120_000);
+    expect(host.getChanges).toHaveBeenCalledTimes(1);
+    // Back online: no need to wait for the next revision event.
+    await link.status({ ...ONLINE, seq: 3 });
+    await waitFor(() => expect(host.getChanges).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("На хосте нет активных линий.")).toBeTruthy();
+  });
+
+  it("syncs at once on a revision, dropping the pending retry", async () => {
+    fakeRetryTimers();
+    const link = fakeConnection();
+    const host = fakeHost();
+    host.getChanges.mockRejectedValueOnce(hostDown()).mockRejectedValueOnce(hostDown());
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(NEW_STATION),
+      host,
+      connection: link.connection,
+    });
+    await firstSyncFailed();
+    await link.revision(43);
+    await waitFor(() => expect(host.getChanges).toHaveBeenCalledTimes(2));
+    // The second failure in a row waits 4 s; the first one's 2 s wait is gone.
+    await elapse(2500);
+    expect(host.getChanges).toHaveBeenCalledTimes(2);
+    await elapse(2000);
+    expect(host.getChanges).toHaveBeenCalledTimes(3);
+  });
+
+  it("leaves no retry behind when the app unmounts", async () => {
+    fakeRetryTimers();
+    const host = fakeHost();
+    host.getChanges.mockRejectedValueOnce(hostDown());
+    const view = renderApp({ probe: probeAnswering(true), device: fakeDevice(NEW_STATION), host });
+    await firstSyncFailed();
+    expect(vi.getTimerCount()).toBe(1);
+    view.unmount();
+    expect(vi.getTimerCount()).toBe(0);
+    await elapse(120_000);
+    expect(host.getChanges).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves no retry behind when a retry finds another host", async () => {
+    fakeRetryTimers();
+    const host = fakeHost();
+    host.getChanges
+      .mockRejectedValueOnce(hostDown())
+      .mockResolvedValueOnce(feedPage(7, [], OTHER_HOST_ID));
+    renderApp({ probe: probeAnswering(true), device: fakeDevice(NEW_STATION), host });
+    await firstSyncFailed();
+    await elapse(2500);
+    expect(await screen.findByText("Устройство подключено к другому хосту")).toBeTruthy();
+    await elapse(120_000);
+    expect(host.getChanges).toHaveBeenCalledTimes(2);
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

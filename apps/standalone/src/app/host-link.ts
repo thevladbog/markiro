@@ -1,10 +1,39 @@
 import { useCallback, useEffect, useRef } from "react";
 
+import { HostError } from "../host/client.js";
 import type { ConnectionApi } from "../host/connection.js";
 import type { ChangesResponse } from "../host/protocol.js";
-import type { LocalExecutor } from "../local/executor.js";
+import { LocalDbError, type LocalExecutor } from "../local/executor.js";
 import { createSyncScheduler, syncReferences } from "../local/reference-sync.js";
-import { shellActionFor, type ShellAction } from "./shell.js";
+import { shellActionFor, type ShellAction, type SyncFailure } from "./shell.js";
+
+/** The waits before the first retries of a failed sync, in milliseconds. */
+const RETRY_MS = [2000, 4000, 8000, 16000, 32000] as const;
+/** The wait before every later retry. */
+const RETRY_CAP_MS = 60_000;
+
+/**
+ * How long to wait before retrying after `attempt` failed runs in a row (1
+ * after the first): 2 s, 4 s, 8 s, 16 s, 32 s, then 60 s for every later one.
+ */
+export function nextSyncRetryMs(attempt: number): number {
+  return RETRY_MS[attempt - 1] ?? RETRY_CAP_MS;
+}
+
+/**
+ * Why a run failed, for the status line: the host did not answer (a
+ * `HostError`), this computer could not write (`LocalDbError`), or the feed
+ * could not be applied — an answer from the host this build cannot read
+ * (`HostError` `invalid_response`), a `SyncFeedError`, and anything else the
+ * run did not expect.
+ */
+export function syncFailureOf(error: unknown): SyncFailure {
+  if (error instanceof HostError) {
+    return error.kind === "transport" && error.code === "invalid_response" ? "feed" : "host";
+  }
+  if (error instanceof LocalDbError) return "local";
+  return "feed";
+}
 
 export interface HostLinkOptions {
   /** The paired host; `null` while unpaired, rejected or stopped at another host. */
@@ -21,7 +50,10 @@ export interface HostLinkOptions {
  * reference copies in step with a sync once `watch` has subscribed (or
  * failed to) and after every revision event. The first event after each
  * reconnect carries the host's current revision, so catching up needs
- * nothing more. Returns a function that asks for a sync now.
+ * nothing more. A failed run — not another host, not a rejected device — is
+ * retried while the link is online, after `nextSyncRetryMs`; a lost link
+ * drops the pending retry, and the link coming back syncs at once. Returns
+ * a function that asks for a sync now.
  */
 export function useHostLink({
   hostId,
@@ -35,12 +67,30 @@ export function useHostLink({
     if (hostId === null) return;
     // Nothing reaches the shell state after the pairing changed or ended.
     let active = true;
+    // The link's latest status is `online`: only then is a retry worth it.
+    let online = false;
+    let running = false;
+    // Failed runs in a row; a successful run starts the count again.
+    let failures = 0;
+    // The pending retry. It exists only while no run is in flight, the last
+    // run failed and the link is online.
+    let retry: ReturnType<typeof setTimeout> | null = null;
+    const cancelRetry = () => {
+      if (retry === null) return;
+      clearTimeout(retry);
+      retry = null;
+    };
     const scheduler = createSyncScheduler(async () => {
       if (!active) return;
+      // Any run — a revision's, a request's or the retry itself — replaces
+      // the pending retry.
+      cancelRetry();
+      running = true;
       dispatch({ type: "sync_started" });
       try {
         const result = await syncReferences({ changes, local, hostId });
         if (!active) return;
+        failures = 0;
         if (result.kind === "other_host") {
           // A run a revision already queued during this one must not also
           // reach that host: the effect's cleanup (`active = false`, which
@@ -59,7 +109,18 @@ export function useHostLink({
           scheduler.stop();
           dispatch(action);
         }
-        dispatch({ type: "sync_failed" });
+        dispatch({ type: "sync_failed", failure: syncFailureOf(error) });
+        if (action === null) {
+          failures += 1;
+          if (online) {
+            retry = setTimeout(() => {
+              retry = null;
+              scheduler.trigger();
+            }, nextSyncRetryMs(failures));
+          }
+        }
+      } finally {
+        running = false;
       }
     });
     syncNow.current = scheduler.trigger;
@@ -67,7 +128,18 @@ export function useHostLink({
     connection
       .watch({
         onStatus: (status) => {
-          if (active) dispatch({ type: "link_status", status });
+          if (!active) return;
+          dispatch({ type: "link_status", status });
+          online = status.state === "online";
+          if (!online) {
+            // Nothing to retry against: the first revision event after the
+            // reconnect syncs again.
+            cancelRetry();
+          } else if (failures > 0 && !running && retry === null) {
+            // Back online after a failed run whose retry the lost link
+            // dropped: no need to wait for the revision event.
+            scheduler.trigger();
+          }
         },
         onRevision: (rev) => {
           if (!active) return;
@@ -96,6 +168,7 @@ export function useHostLink({
       active = false;
       syncNow.current = () => undefined;
       scheduler.stop();
+      cancelRetry();
       unwatch?.();
     };
   }, [hostId, connection, local, changes, dispatch]);

@@ -356,18 +356,43 @@ describe("link and reference sync", () => {
 
   it("counts the syncs that brought the copies up to date", () => {
     const running = shellReducer(paired(), { type: "sync_started" });
-    expect(running.sync).toEqual({ kind: "running", synced: 0 });
+    expect(running.sync).toEqual({ kind: "running", synced: 0, failure: null, quarantined: 0 });
     const done = shellReducer(running, {
       type: "sync_finished",
       result: { kind: "synced", rev: 42, quarantined: 0 },
     });
-    expect(done.sync).toEqual({ kind: "done", synced: 1 });
+    expect(done.sync).toEqual({ kind: "done", synced: 1, failure: null, quarantined: 0 });
     const again = shellReducer(done, { type: "sync_started" });
-    expect(again.sync).toEqual({ kind: "running", synced: 1 });
-    expect(shellReducer(again, { type: "sync_failed" }).sync).toEqual({
+    expect(again.sync).toEqual({ kind: "running", synced: 1, failure: null, quarantined: 0 });
+    expect(shellReducer(again, { type: "sync_failed", failure: "host" }).sync).toEqual({
       kind: "failed",
       synced: 1,
+      failure: "host",
+      quarantined: 0,
     });
+  });
+
+  it("keeps why a sync failed through its retry, and the quarantine of the last success", () => {
+    const failed = shellReducer(shellReducer(paired(), { type: "sync_started" }), {
+      type: "sync_failed",
+      failure: "host",
+    });
+    // The retry's run keeps the warning, so it does not flicker away.
+    const retrying = shellReducer(failed, { type: "sync_started" });
+    expect(retrying.sync).toEqual({ kind: "running", synced: 0, failure: "host", quarantined: 0 });
+    const local = shellReducer(retrying, { type: "sync_failed", failure: "local" });
+    expect(local.sync).toEqual({ kind: "failed", synced: 0, failure: "local", quarantined: 0 });
+    const done = shellReducer(shellReducer(local, { type: "sync_started" }), {
+      type: "sync_finished",
+      result: { kind: "synced", rev: 43, quarantined: 2 },
+    });
+    expect(done.sync).toEqual({ kind: "done", synced: 1, failure: null, quarantined: 2 });
+    // A later failure keeps the count the last successful run read.
+    const feed = shellReducer(shellReducer(done, { type: "sync_started" }), {
+      type: "sync_failed",
+      failure: "feed",
+    });
+    expect(feed.sync).toEqual({ kind: "failed", synced: 1, failure: "feed", quarantined: 2 });
   });
 
   it("stops at another host before anything else but a rejected device", () => {
@@ -386,12 +411,12 @@ describe("link and reference sync", () => {
 
   it("keeps sync at other_host until a new pairing, absorbing every other sync action", () => {
     const other = shellReducer(paired(), { type: "sync_finished", result: { kind: "other_host" } });
-    expect(other.sync).toEqual({ kind: "other_host", synced: 0 });
+    expect(other.sync).toEqual({ kind: "other_host", synced: 0, failure: null, quarantined: 0 });
     // A run a revision already queued during the run that found `other_host`
     // can still land here (`useHostLink` stops the scheduler, but not before
     // this): none of these may leave `other_host` or count as a sync.
     expect(shellReducer(other, { type: "sync_started" }).sync).toEqual(other.sync);
-    expect(shellReducer(other, { type: "sync_failed" }).sync).toEqual(other.sync);
+    expect(shellReducer(other, { type: "sync_failed", failure: "host" }).sync).toEqual(other.sync);
     expect(
       shellReducer(other, {
         type: "sync_finished",
@@ -399,11 +424,9 @@ describe("link and reference sync", () => {
       }).sync,
     ).toEqual(other.sync);
     // Only a new pairing clears it.
-    expect(shellReducer(other, { type: "forgotten" }).sync).toEqual({ kind: "idle", synced: 0 });
-    expect(shellReducer(other, { type: "paired", status: DEVICE_STATUS }).sync).toEqual({
-      kind: "idle",
-      synced: 0,
-    });
+    const idle = { kind: "idle", synced: 0, failure: null, quarantined: 0 };
+    expect(shellReducer(other, { type: "forgotten" }).sync).toEqual(idle);
+    expect(shellReducer(other, { type: "paired", status: DEVICE_STATUS }).sync).toEqual(idle);
   });
 
   it("forgets the link, the sync and the revision with the pairing", () => {
@@ -415,19 +438,19 @@ describe("link and reference sync", () => {
     const forgotten = shellReducer(actions.reduce(shellReducer, paired()), { type: "forgotten" });
     expect(forgotten.link).toBeNull();
     expect(forgotten.hostRevision).toBeNull();
-    expect(forgotten.sync).toEqual({ kind: "idle", synced: 0 });
+    expect(forgotten.sync).toEqual({ kind: "idle", synced: 0, failure: null, quarantined: 0 });
   });
 
   it("resets the link, the sync and the revision on a new pairing, not just on forgetting", () => {
     const busy: ShellState = {
       ...paired(),
       link: linkStatus(),
-      sync: { kind: "done", synced: 1 },
+      sync: { kind: "failed", synced: 1, failure: "feed", quarantined: 3 },
       hostRevision: 42,
     };
     const next = shellReducer(busy, { type: "paired", status: DEVICE_STATUS });
     expect(next.link).toBeNull();
-    expect(next.sync).toEqual({ kind: "idle", synced: 0 });
+    expect(next.sync).toEqual({ kind: "idle", synced: 0, failure: null, quarantined: 0 });
     expect(next.hostRevision).toBeNull();
   });
 });
