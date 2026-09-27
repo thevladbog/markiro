@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-27
 
-**Status:** Conversational design approved; written specification awaiting owner review. No implementation is claimed.
+**Status:** Written specification approved by the owner on 2026-09-27. No implementation is claimed.
 
 **Scope:** Isolated U.S. edition, P0 read-only traceability views. This design supersedes the technical and UI recommendations in the [2026-09-03 US-06 draft](2026-09-03-us-06-trace-search-completeness-design.md) where they differ.
 

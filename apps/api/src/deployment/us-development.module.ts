@@ -8,6 +8,7 @@ import {
 } from "@nestjs/common";
 import { allowedInterfaceLocales } from "@markiro/domain";
 import { UsCatalogController } from "./us-catalog.controller";
+import { UsTraceController } from "./us-trace.controller";
 import { UsLotController } from "./us-lot.controller";
 import { UsProductProfileController } from "./us-product-profile.controller";
 import { UsRuntime } from "./us-runtime";
@@ -70,6 +71,7 @@ export class UsDevelopmentModule {
         UsShippingController,
         UsShippingBalanceController,
         UsEventsController,
+        UsTraceController,
       ],
       providers: [{ provide: UsRuntime, useValue: runtime }, UsSessionGuard],
     };

@@ -614,6 +614,14 @@ export type {
 export { usEventListQuerySchema, usEventListSchema } from "./traceability/events.js";
 export type { UsEventListQuery, UsEventSummary, UsEventList } from "./traceability/events.js";
 export {
+  usCurrentTraceQuerySchema,
+  usCurrentTraceResultSchema,
+  usTraceHistoryQuerySchema,
+  usTraceHistoryCursorSchema,
+  usTraceHistoryPageSchema,
+} from "./traceability/current-trace.js";
+export type { UsCurrentTraceResult, UsTraceHistoryPage } from "./traceability/current-trace.js";
+export {
   transformationGenealogyRequestSchema,
   transformationGenealogyResultSchema,
 } from "./traceability/transformation-genealogy.js";

@@ -18,6 +18,7 @@ import { UsCaseStore } from "../modules/traceability/cases/us-case-store";
 import { UsTransformationStore } from "../modules/traceability/transformation/us-transformation-store";
 import { UsShippingStore } from "../modules/traceability/shipping/us-shipping-store";
 import { UsEventsStore } from "../modules/traceability/events/us-events-store";
+import { UsTraceStore } from "../modules/traceability/trace/us-trace-store";
 
 /** Owns only the explicitly supplied US pool; never imports RU application providers. */
 export class UsRuntime implements OnApplicationShutdown {
@@ -34,6 +35,7 @@ export class UsRuntime implements OnApplicationShutdown {
   readonly transformation: UsTransformationStore;
   readonly shipping: UsShippingStore;
   readonly events: UsEventsStore;
+  readonly trace: UsTraceStore;
 
   constructor(
     readonly env: Env,
@@ -56,6 +58,7 @@ export class UsRuntime implements OnApplicationShutdown {
     this.transformation = new UsTransformationStore(connection.db);
     this.shipping = new UsShippingStore(connection.db);
     this.events = new UsEventsStore(connection.db);
+    this.trace = new UsTraceStore(connection.db);
     // Idle-pool failures must not crash the metadata/liveness process or log SQL.
     connection.pool.on("error", () => {});
   }

@@ -555,3 +555,77 @@ test("US Shipping proxy admits only exact method and bounded path/query pairs", 
       check(method, path, false);
   }
 });
+test("US trace proxy admits exact bounded GET routes and rejects writes and untrusted queries", async () => {
+  const { createUsAdminConfig } = await import("../../../apps/admin/vite.us.config.ts");
+  const config = createUsAdminConfig({ VITE_DEPLOYMENT_EDITION: "US" }, "test");
+  const id = "a0000000-0000-4000-8000-000000000001";
+  const path = `/api/us/traceability/lots/${id}/trace`;
+  const accepted = [
+    path,
+    `${path}?direction=both&maxDepth=20&maxNodes=500`,
+    `${path}?maxDepth=0`,
+    `${path}/history`,
+    `${path}/history?limit=100&cursor=abc_-`,
+  ];
+  const rejected = [
+    `${path}?tenantId=x`,
+    `${path}?maxDepth=1&maxDepth=2`,
+    `${path}?maxDepth=21`,
+    `${path}?maxNodes=501`,
+    `${path}?maxNodes=0`,
+    `${path}/history?limit=101`,
+    `${path}/history?limit=1&limit=2`,
+    `${path}/history?cursor=a&cursor=b`,
+    `${path}/history?tenantId=x`,
+    `${path}/extra`,
+    path.replace(id, "not-a-uuid"),
+  ];
+  const entries = Object.entries(config.server.proxy);
+  for (const url of accepted) {
+    const route = entries.find(([pattern]) => new RegExp(pattern).test(url));
+    assert.ok(route, url);
+    assert.equal(route[1].target, "http://localhost:3100");
+    assert.equal(route[1].rewrite(url), url.replace(/^\/api\/us/, ""));
+  }
+  for (const url of rejected)
+    assert.equal(
+      entries.some(([pattern]) => new RegExp(pattern).test(url)),
+      false,
+      url,
+    );
+  const guard = config.plugins.find((plugin) => plugin.name === "us-api-allowlist");
+  for (const hook of ["configureServer", "configurePreviewServer"]) {
+    let middleware;
+    guard[hook]({
+      middlewares: {
+        use: (handler) => {
+          middleware = handler;
+        },
+      },
+    });
+    for (const [method, url, allowed] of [
+      ...accepted.map((url) => ["GET", url, true]),
+      ...rejected.map((url) => ["GET", url, false]),
+      ...["POST", "PUT", "PATCH", "DELETE", "HEAD"].flatMap((method) =>
+        accepted.map((url) => [method, url, false]),
+      ),
+    ]) {
+      let next = false,
+        status;
+      middleware(
+        { method, url },
+        {
+          writeHead: (value) => {
+            status = value;
+          },
+          end() {},
+        },
+        () => {
+          next = true;
+        },
+      );
+      assert.equal(next, allowed, `${method} ${url}`);
+      assert.equal(status, allowed ? undefined : 404);
+    }
+  }
+});

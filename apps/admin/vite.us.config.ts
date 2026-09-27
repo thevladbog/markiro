@@ -21,6 +21,20 @@ export function createUsAdminConfig(raw: NodeJS.ProcessEnv, mode: string) {
     `(\\?${receivingQueryField}(?:&${receivingQueryField}){0,4})?$`;
   const uuid = "[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}";
   const pageField = "(?:limit=(?:[1-9]|[1-9][0-9]|100)|offset=(?:0|[1-9][0-9]{0,4}|100000))";
+  const traceField =
+    "(?:direction=(?:backward|forward|both)|maxDepth=(?:[0-9]|1[0-9]|20)|maxNodes=(?:[1-9]|[1-9][0-9]|[1-4][0-9]{2}|500))";
+  const tracePath =
+    `^/api/us/traceability/lots/${uuid}/trace` +
+    ["direction", "maxDepth", "maxNodes"]
+      .map((key) => `(?!.*[?&]${key}=[^&]*(?:&[^&]*)*&${key}=)`)
+      .join("") +
+    `(\\?${traceField}(?:&${traceField}){0,2})?$`;
+  const traceHistoryField = "(?:limit=(?:[1-9]|[1-9][0-9]|100)|cursor=[A-Za-z0-9_-]{1,512})";
+  const traceHistoryPath =
+    `^/api/us/traceability/lots/${uuid}/trace/history` +
+    ["limit", "cursor"].map((key) => `(?!.*[?&]${key}=[^&]*(?:&[^&]*)*&${key}=)`).join("") +
+    `(\\?${traceHistoryField}(?:&${traceHistoryField})?)?$`;
+  const traceRoutes = [new RegExp(tracePath), new RegExp(traceHistoryPath)];
   const lifecyclePagePath =
     `^/api/us/traceability/(?:receiving/${uuid}/revisions|lots/${uuid}/receiving-basis)` +
     ["limit", "offset"].map((key) => `(?!.*[?&]${key}=[^&]*(?:&[^&]*)*&${key}=)`).join("") +
@@ -63,6 +77,16 @@ export function createUsAdminConfig(raw: NodeJS.ProcessEnv, mode: string) {
       .join("") +
     `(\\?${casesQueryField}(?:&${casesQueryField}){0,2})?$`;
   const proxy = {
+    [tracePath]: {
+      target: "http://localhost:3100",
+      changeOrigin: true,
+      rewrite: (path: string) => path.replace(/^\/api\/us/, ""),
+    },
+    [traceHistoryPath]: {
+      target: "http://localhost:3100",
+      changeOrigin: true,
+      rewrite: (path: string) => path.replace(/^\/api\/us/, ""),
+    },
     [eventsListPath]: {
       target: "http://localhost:3100",
       changeOrigin: true,
@@ -226,7 +250,9 @@ export function createUsAdminConfig(raw: NodeJS.ProcessEnv, mode: string) {
                 (!path.includes("expectedDraftVersion=") ||
                   Number(path.slice(path.lastIndexOf("=") + 1)) <= 2147483647),
             )
-          : !Object.keys(proxy).some((pattern) => new RegExp(pattern).test(path)))
+          : /^\/api\/us\/traceability\/lots\/[^/]+\/trace(?:[/?]|$)/.test(path)
+            ? request.method !== "GET" || !traceRoutes.some((pattern) => pattern.test(path))
+            : !Object.keys(proxy).some((pattern) => new RegExp(pattern).test(path)))
       ) {
         response.writeHead(404, { "Cache-Control": "no-store" });
         response.end();

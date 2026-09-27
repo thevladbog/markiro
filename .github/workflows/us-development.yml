@@ -55,6 +55,14 @@ jobs:
           pnpm --filter @markiro/platform-contracts exec vitest run test/us-receiving-csv.test.ts test/us-receiving-csv-commands.test.ts test/us-receiving-csv-http.test.ts test/us-receiving-csv-export.test.ts
           pnpm --filter @markiro/platform-contracts exec vitest run test/us-transformation-http.test.ts test/us-events.test.ts
           pnpm --filter @markiro/api exec vitest run test/us-receiving-csv-input.test.ts test/us-receiving-csv-preview.test.ts
+      - name: Verify US current trace contracts and projection
+        run: |
+          pnpm --filter @markiro/platform-contracts exec vitest run test/us-current-trace.test.ts
+          pnpm --filter @markiro/api exec vitest run test/us-trace-project.test.ts
+      - name: Verify US current trace storage history and HTTP
+        env:
+          US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
+        run: pnpm --filter @markiro/api exec vitest run test/us-trace-store.e2e.test.ts test/us-trace-evidence.e2e.test.ts test/us-trace-history.e2e.test.ts test/us-trace-http.e2e.test.ts
       - name: Build shared browser components
         run: pnpm --filter @markiro/ui build
       - name: Verify US browser flow and contracts
