@@ -1,6 +1,7 @@
 -- The station's copies of the host's reference records (stage 1 spec §5.3),
 -- each with the host revision it last changed at. The webview's reference
--- sync is the only writer. Operators, badges, products and templates join
+-- sync writes the rows; `device_forget` empties every table
+-- (`LocalDb::clear_copies`). Operators, badges, products and templates join
 -- with plans 1d and 1e.
 CREATE TABLE ref_org (
   id TEXT PRIMARY KEY,

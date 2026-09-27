@@ -336,7 +336,9 @@ loading
   наблюдаемый отпечаток), `device_status()`, `host_local_pair`, `host_claim(address, fingerprint, code, name)` (устройство подключается видом `station`),
   `host_request(method, path, body, officeToken?)`,
   `device_select_line(lineId)` (выбор линии; ответ хоста сохраняется в
-  `device.json`), `device_forget()`. Таймауты: соединение 2 с,
+  `device.json`), `device_forget()` (сначала очищает локальную базу — все таблицы,
+  кроме журнала миграций; если очистка не удалась, подключение остаётся). Таймауты:
+  соединение 2 с,
   запрос 10 с. `host_request` пропускает только маршруты `/v1/device[/…]` (кроме
   `/v1/device/line`), `/v1/bootstrap`, `/v1/changes` (без `/stream`) и
   `/v1/office/…`: маршруты подключения возвращают новый ключ

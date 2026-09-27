@@ -326,3 +326,70 @@ async fn one_statement_upserts_a_whole_page_through_json_each() {
         json!({ "lines": 1000, "rev": 7 })
     );
 }
+
+/// Forgetting the device (`device_forget`) clears every table but sqlx's
+/// migration journal: tables a later migration adds too, since the list
+/// comes from `sqlite_master`, and in any order despite foreign keys.
+#[tokio::test]
+async fn clearing_the_copies_empties_every_table_but_the_migration_journal() {
+    let (dir, db) = open().await;
+    db.transaction(vec![
+        statement(INSERT_LINE, json!([LINE_1, "Линия 1", 0, 3])),
+        statement(
+            "INSERT INTO sync_state (key, value) VALUES ('last_rev', '3')",
+            json!([]),
+        ),
+        statement(
+            "INSERT INTO sync_quarantine (entity, id, rev, reason, seen_at) \
+             VALUES ('lines', ?, 4, 'archived: invalid_type', 1790000000000)",
+            json!([LINE_2]),
+        ),
+    ])
+    .await
+    .unwrap();
+    // Tables as a later migration might add them, the second referring to
+    // the first; the webview may not create tables, so a raw connection
+    // does. `extra_holder` sorts first, so its delete runs while
+    // `extra_item` still refers to it.
+    let mut raw = SqliteConnectOptions::new()
+        .filename(dir.path().join(FILE_NAME))
+        .connect()
+        .await
+        .unwrap();
+    for sql in [
+        "CREATE TABLE extra_holder (id TEXT PRIMARY KEY)",
+        "CREATE TABLE extra_item (id TEXT PRIMARY KEY, \
+         holder_id TEXT NOT NULL REFERENCES extra_holder (id))",
+        "INSERT INTO extra_holder (id) VALUES ('h')",
+        "INSERT INTO extra_item (id, holder_id) VALUES ('i', 'h')",
+    ] {
+        sqlx::query(sql).execute(&mut raw).await.unwrap();
+    }
+    raw.close().await.unwrap();
+    let journal = "SELECT count(*) AS n FROM _sqlx_migrations";
+    let migrations = db.query(journal, vec![]).await.unwrap();
+
+    assert_eq!(db.clear_copies().await, Ok(()));
+
+    let left = db
+        .query(
+            "SELECT (SELECT count(*) FROM ref_org) + (SELECT count(*) FROM ref_site) \
+             + (SELECT count(*) FROM ref_lines) + (SELECT count(*) FROM sync_state) \
+             + (SELECT count(*) FROM sync_quarantine) + (SELECT count(*) FROM extra_holder) \
+             + (SELECT count(*) FROM extra_item) AS n",
+            vec![],
+        )
+        .await
+        .unwrap();
+    assert_eq!(Value::Object(left[0].clone()), json!({ "n": 0 }));
+    assert_eq!(db.query(journal, vec![]).await.unwrap(), migrations);
+    // The database takes writes afterwards as before.
+    assert_eq!(
+        db.transaction(vec![statement(
+            INSERT_LINE,
+            json!([LINE_1, "Линия 1", 0, 5])
+        )])
+        .await,
+        Ok(vec![1])
+    );
+}

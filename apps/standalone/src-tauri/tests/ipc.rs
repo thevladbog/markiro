@@ -13,8 +13,10 @@ use markiro_host::config::HostPaths;
 use markiro_host::{start, RunningHost, StartOptions};
 use markiro_standalone_lib::connection::ConnectionState;
 use markiro_standalone_lib::device::DeviceState;
-use markiro_standalone_lib::local_db::LocalDbState;
+use markiro_standalone_lib::local_db::{LocalDbState, FILE_NAME};
 use serde_json::{json, Value};
+use sqlx::sqlite::SqliteConnectOptions;
+use sqlx::{ConnectOptions, Connection};
 use tauri::test::{
     get_ipc_response, mock_builder, mock_context, noop_assets, MockRuntime, INVOKE_KEY,
 };
@@ -310,6 +312,94 @@ fn the_local_database_answers_through_the_ipc_shapes() {
             }] }),
         ),
         Err(json!("changes_mismatch"))
+    );
+}
+
+/// Statements a later migration might run, on the app's database behind
+/// the webview's back: the webview may not create tables or triggers.
+fn run_raw(dir: &std::path::Path, statements: &[&str]) {
+    tauri::async_runtime::block_on(async {
+        let mut raw = SqliteConnectOptions::new()
+            .filename(dir.join(FILE_NAME))
+            .connect()
+            .await
+            .unwrap();
+        for sql in statements {
+            sqlx::query(sql).execute(&mut raw).await.unwrap();
+        }
+        raw.close().await.unwrap();
+    });
+}
+
+/// `device_forget` clears the local copies before it removes `device.json`:
+/// when clearing fails, the command answers `storage` and the pairing stays,
+/// so the user can try again.
+#[test]
+fn forgetting_the_device_clears_the_local_copies_first() {
+    const LINE: &str = "5f0c6a52-6a3e-4b9f-9d3c-2b1a0e8f7d61";
+    let app_dir = tempfile::tempdir().unwrap();
+    // A pairing the app cannot read: the config-error screen offers exactly
+    // this reset, and no host has to answer.
+    let config = app_dir.path().join("device.json");
+    std::fs::write(&config, "{").unwrap();
+    let local = tauri::async_runtime::block_on(LocalDbState::open(app_dir.path()));
+    let (_app, webview) = mock_app_with(DeviceState::load(app_dir.path().to_path_buf()), local);
+    invoke(
+        &webview,
+        "local_transaction",
+        json!({ "statements": [
+            {
+                "sql": "INSERT INTO ref_lines (id, name, archived, rev) VALUES (?, ?, ?, ?)",
+                "values": [LINE, "Линия 1", 0, 1]
+            },
+            { "sql": "INSERT INTO sync_state (key, value) VALUES ('last_rev', '1')" }
+        ] }),
+    )
+    .unwrap();
+    // A table whose rows refuse to go.
+    run_raw(
+        app_dir.path(),
+        &[
+            "CREATE TABLE extra_kept (id TEXT PRIMARY KEY)",
+            "CREATE TRIGGER extra_kept_stays BEFORE DELETE ON extra_kept \
+             BEGIN SELECT RAISE(ABORT, 'kept'); END",
+            "INSERT INTO extra_kept (id) VALUES ('k')",
+        ],
+    );
+    let copies = || {
+        invoke(
+            &webview,
+            "local_query",
+            json!({
+                "sql": "SELECT (SELECT count(*) FROM ref_lines) + (SELECT count(*) FROM sync_state) \
+                        + (SELECT count(*) FROM extra_kept) AS n",
+                "params": []
+            }),
+        )
+        .unwrap()
+    };
+
+    assert_eq!(
+        invoke(&webview, "device_forget", json!({})),
+        Err(json!("storage"))
+    );
+    assert!(config.exists(), "the pairing stays for another try");
+    assert_eq!(
+        copies(),
+        json!([{ "n": 3 }]),
+        "the clearing rolled back whole"
+    );
+
+    run_raw(app_dir.path(), &["DROP TRIGGER extra_kept_stays"]);
+    assert_eq!(
+        invoke(&webview, "device_forget", json!({})),
+        Ok(Value::Null)
+    );
+    assert!(!config.exists());
+    assert_eq!(copies(), json!([{ "n": 0 }]));
+    assert_eq!(
+        invoke(&webview, "device_status", json!({})),
+        Ok(Value::Null)
     );
 }
 

@@ -17,7 +17,7 @@ use serde_json::{Map, Value};
 use tauri::{Emitter, Manager, Runtime};
 
 use connection::{Backoff, ConnectionState, HostRevision, HostStatus, LinkEvents};
-use device::{DeviceState, DeviceStatus};
+use device::{DeviceError, DeviceState, DeviceStatus};
 use host_client::HostResponse;
 use local_db::{LocalDbState, LocalStatement};
 
@@ -108,8 +108,20 @@ async fn device_select_line(
         .map_err(|error| error.code().to_owned())
 }
 
+/// Forget the pairing: the local copies go first, so when clearing them
+/// fails the command answers `storage` and `device.json` stays for another
+/// try. Without a local database (it did not open) there is nothing this
+/// app can clear, and forgetting goes on: the reset must stay possible.
 #[tauri::command]
-async fn device_forget(state: tauri::State<'_, DeviceState>) -> Result<(), String> {
+async fn device_forget(
+    state: tauri::State<'_, DeviceState>,
+    local: tauri::State<'_, LocalDbState>,
+) -> Result<(), String> {
+    if let Ok(db) = local.get() {
+        db.clear_copies()
+            .await
+            .map_err(|_| DeviceError::Storage.code().to_owned())?;
+    }
     state
         .forget()
         .await

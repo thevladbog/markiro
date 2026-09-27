@@ -123,6 +123,15 @@ That file also mirrors `local_db.rs`'s statement rules and limits; a rule
 change there means updating `test/support/local-db.ts` too and adding a case
 to `src-tauri/tests/fixtures/local-sql.json`.
 
+`device_forget` clears the local copies before it removes `device.json`:
+`LocalDb::clear_copies` deletes every row of every table but
+`_sqlx_migrations`, in one writer transaction with foreign keys checked at
+the commit. The tables come from `sqlite_master`, so one a later migration
+adds is covered, PIN and badge hashes included. If clearing fails, the
+command fails with `storage` and the pairing stays for another try; without
+a local database (it did not open) there is nothing to clear, and
+forgetting goes on.
+
 ## Writes
 
 - Every multi-statement write uses `db::begin_write` (`BEGIN IMMEDIATE`), not a

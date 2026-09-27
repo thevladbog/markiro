@@ -2,8 +2,9 @@
 -- record that fails its schema (damaged, or newer than this build reads) is
 -- not applied, and an older local copy of it is deleted; it waits here until
 -- the host changes it again or a build that reads it syncs from zero. The
--- webview's reference sync is the only writer. `reason` holds schema issue
--- paths and codes only, never a value; `seen_at` is Unix milliseconds on this
+-- webview's reference sync writes the rows; `device_forget` empties every
+-- table (`LocalDb::clear_copies`). `reason` holds schema issue paths and
+-- codes only, never a value; `seen_at` is Unix milliseconds on this
 -- computer's clock.
 CREATE TABLE sync_quarantine (
   entity TEXT NOT NULL,

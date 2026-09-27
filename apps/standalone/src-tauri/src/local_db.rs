@@ -214,6 +214,39 @@ impl LocalDb {
             .map_err(|_| LocalDbError::StatementFailed)?;
         Ok(changes)
     }
+
+    /// Delete every row of every table but sqlx's migration journal, in one
+    /// writer transaction: forgetting the device must not leave another
+    /// pairing's copies behind (from plan 1d3 on, PIN and badge hashes).
+    /// The tables come from `sqlite_master`, so one a later migration adds is
+    /// covered without a change here. Foreign keys are checked at the commit,
+    /// when every table is empty, so the order of the deletes does not matter.
+    pub async fn clear_copies(&self) -> Result<(), LocalDbError> {
+        let mut tx = self
+            .writer
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(|_| LocalDbError::StatementFailed)?;
+        sqlx::query("PRAGMA defer_foreign_keys = ON")
+            .execute(&mut *tx)
+            .await
+            .map_err(|_| LocalDbError::StatementFailed)?;
+        let tables: Vec<String> = sqlx::query_scalar(
+            "SELECT name FROM sqlite_master WHERE type = 'table' \
+             AND name <> '_sqlx_migrations' AND name NOT GLOB 'sqlite_*' ORDER BY name",
+        )
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(|_| LocalDbError::StatementFailed)?;
+        for table in tables {
+            let delete = format!("DELETE FROM \"{}\"", table.replace('"', "\"\""));
+            sqlx::query(&delete)
+                .execute(&mut *tx)
+                .await
+                .map_err(|_| LocalDbError::StatementFailed)?;
+        }
+        tx.commit().await.map_err(|_| LocalDbError::StatementFailed)
+    }
 }
 
 /// Tauri state: the local database, or `None` when it could not be opened.
