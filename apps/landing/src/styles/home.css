@@ -472,8 +472,7 @@
 .home-product__cards {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-items: start;
-  gap: 1.5rem;
+  gap: 1.125rem 1.5rem;
   margin-top: 7rem;
 }
 
@@ -481,6 +480,15 @@
   padding: 2rem;
   border-radius: 6px;
   background: var(--surface-panel);
+}
+
+/* Both cards share five row tracks (kicker, title, text, frame, link), so a longer text in
+   one card moves the frame and the link down in both and the cards end at the same height. */
+@supports (grid-template-rows: subgrid) {
+  .home-product__card {
+    grid-row: span 5;
+    grid-template-rows: subgrid;
+  }
 }
 
 .home-product__card h3 {
@@ -577,7 +585,13 @@
 
   .home-product__cards {
     grid-template-columns: minmax(0, 1fr);
+    gap: 1.5rem;
     margin-top: 4.5rem;
+  }
+
+  .home-product__card {
+    grid-row: auto;
+    grid-template-rows: none;
   }
 }
 

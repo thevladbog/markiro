@@ -755,6 +755,30 @@ test.describe("home page", () => {
     await expect(page.locator("#product-handheld")).toBeInViewport();
   });
 
+  test("the kiosk and integrations cards line up their frames and links", async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(isMobile, "the cards stack on phones");
+    const box = (selector: string) =>
+      page.locator(selector).evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        return { top: Math.round(rect.top), bottom: Math.round(rect.bottom) };
+      });
+    for (const width of [1440, 1024]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto("/");
+      expect(await box("#product-integrations"), `${width} card`).toEqual(
+        await box("#product-kiosk"),
+      );
+      for (const part of [".screen-frame", ".text-link"]) {
+        const kiosk = await box(`#product-kiosk ${part}`);
+        const integrations = await box(`#product-integrations ${part}`);
+        expect(integrations.top, `${width} ${part}`).toBe(kiosk.top);
+      }
+    }
+  });
+
   test("loads no 3D code", async ({ page }) => {
     const scripts: Promise<string>[] = [];
     page.on("response", (response) => {
