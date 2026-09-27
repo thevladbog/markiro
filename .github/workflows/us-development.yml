@@ -16,7 +16,7 @@ concurrency:
 jobs:
   isolation:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     services:
       us-postgres:
         image: postgres:17-alpine

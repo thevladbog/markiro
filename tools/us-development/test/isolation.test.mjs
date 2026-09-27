@@ -35,6 +35,14 @@ test("US checks run on the development branch and cannot write repository or pac
   assert.doesNotMatch(JSON.stringify(workflow), /secrets\./);
 });
 
+test("US check-only job has enough time for its serial disposable-database suites", () => {
+  const job = workflows()["us-development.yml"].jobs.isolation;
+  assert.ok(
+    job["timeout-minutes"] >= 30,
+    "the full serial US suite exceeded the former 15-minute job limit",
+  );
+});
+
 test("release checker fails on a pull request to main, even with all workflows locked", () => {
   const result = spawnSync(process.execPath, ["tools/us-development/check-isolation.mjs"], {
     encoding: "utf8",
