@@ -256,15 +256,12 @@ pub async fn stream(
                 if *stopping.borrow() {
                     return None;
                 }
-                // `select!` cannot move `stopping` or `revisions` into its
-                // own arm bodies: building both arms' futures needs `&mut`
-                // borrows of both receivers alive at once. The borrow on
-                // `stopping` itself comes from the `watch::Ref` that
-                // `wait_for` resolves to; that Ref lives in `select!`'s own
-                // output until the expression ends, not because a live arm
-                // future holds it. Resolve only the new revision here, then
-                // build the next `unfold` state in a later statement, once
-                // that borrow has ended.
+                // An arm body cannot move `stopping` into the next `unfold`
+                // state: `wait_for` resolves to a `watch::Ref` that borrows
+                // `stopping` and lives in `select!`'s output until the whole
+                // expression ends. Resolve only the new revision here, then
+                // build the next state in a later statement, once that
+                // borrow has ended.
                 let rev = tokio::select! {
                     changed = revisions.changed() => {
                         changed.ok()?;

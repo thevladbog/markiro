@@ -85,6 +85,7 @@
 
 - Устройство подключается видом `station`.
 - Отпечаток — ровно 64 hex-символа в нижнем регистре. Иначе `invalid_request`, до любого обращения к сети.
+- Код приводится к каноническому виду функцией `markiro_proto::pairing::normalize` (перенесена в `proto` доработкой плана 1c1 по итоговому ревью). Код не того вида — `pairing_code_invalid` до любого обращения к сети: хост засчитывает неверный код всем живым кодам, и опечатка не должна тратить их попытки.
 - Сначала `hello` с наблюдением отпечатка: несовпадение с `fingerprint` — это `certificate_mismatch`, и код не отправляется.
 - Сам код уходит только клиентом с закреплённым `fingerprint`.
 - `hostId` из ответа должен совпасть с `hello`, иначе `host_changed`.
@@ -1132,11 +1133,11 @@ git commit -m "feat(standalone): локальная база станции — 
 
 Второе устройство подключается одноразовым кодом из офиса (спецификация, §4.7). Экран подключения (план 1c3) даёт адрес хоста и отпечаток его сертификата — из отсканированного кода или сверенный человеком с экраном офиса — плюс сам код и имя устройства. Оболочка отправляет код, только когда сертификат хоста совпал с этим отпечатком:
 
-1. Отпечаток плохого вида отвергается до обращения к сети.
+1. Отпечаток плохого вида и код не того вида отвергаются до обращения к сети.
 2. Наблюдаемый `hello` должен показать тот же отпечаток.
-3. Сам код уходит клиентом, который закрепил этот отпечаток.
+3. Сам код в каноническом виде уходит клиентом, который закрепил этот отпечаток.
 
-Так код не достаётся чужому узлу в сети, даже если тот подменит сертификат между шагами. Ответ хоста сохраняется так же, как при локальном подключении: общий метод `remember`.
+Так код не достаётся чужому узлу в сети, даже если тот подменит сертификат между шагами. Опечатка в коде тоже не уходит на хост: там неверный код засчитывается всем живым кодам. Ответ хоста сохраняется так же, как при локальном подключении: общий метод `remember`.
 
 **Files:**
 
@@ -1147,7 +1148,7 @@ git commit -m "feat(standalone): локальная база станции — 
 
 **Interfaces:**
 
-- Consumes: `host_probe::{observe_hello, HelloObservation}`, `PinnedClient`, `Credentials`, `markiro_proto::{ClaimRequest, ErrorBody, PairResponse, codes}`, маршруты хоста `POST /v1/office/pairing-codes` и `POST /v1/pairing/claim` (план 1c1), `mock_app` в `tests/ipc.rs` (задача 1).
+- Consumes: `host_probe::{observe_hello, HelloObservation}`, `PinnedClient`, `Credentials`, `markiro_proto::{ClaimRequest, ErrorBody, PairResponse, codes}`, `markiro_proto::pairing::normalize(input: &str) -> Option<String>` (доработка 1c1), маршруты хоста `POST /v1/office/pairing-codes` и `POST /v1/pairing/claim` (план 1c1), `mock_app` в `tests/ipc.rs` (задача 1).
 - Produces:
   - `DeviceState::claim(&self, address: &str, fingerprint: &str, code: &str, name: &str, app_version: &str) -> Result<DeviceStatus, DeviceError>`;
   - новые варианты `DeviceError::{CodeInvalid, CodeExpired, RateLimited}` с кодами `pairing_code_invalid`, `pairing_code_expired`, `rate_limited`;
@@ -1240,9 +1241,12 @@ async fn a_second_device_pairs_with_a_code_and_the_confirmed_fingerprint() {
     let (office, token) = office(&host, office_dir.path()).await;
     let code = new_code(&office, &token).await;
 
+    // Typed the way a person copies it from the office screen: lower case,
+    // split in two. The shell sends the canonical form.
+    let typed = format!("{}-{}", &code[..5], &code[5..]).to_lowercase();
     let station = DeviceState::load(station_dir.path().to_path_buf());
     let status = station
-        .claim(&address(&host), &host.fingerprint, &code, STATION, "0.1.0")
+        .claim(&address(&host), &host.fingerprint, &typed, STATION, "0.1.0")
         .await
         .unwrap();
     assert_eq!(status.host_address, address(&host));
@@ -1345,7 +1349,7 @@ async fn refused_codes_come_back_as_their_own_errors() {
 }
 
 #[tokio::test]
-async fn a_malformed_fingerprint_is_refused_before_any_io() {
+async fn a_malformed_fingerprint_or_code_is_refused_before_any_io() {
     let station_dir = tempfile::tempdir().unwrap();
     let station = DeviceState::load(station_dir.path().to_path_buf());
     let upper = "AB".repeat(32);
@@ -1360,7 +1364,18 @@ async fn a_malformed_fingerprint_is_refused_before_any_io() {
             "{fingerprint:?}"
         );
     }
-    // A well-formed fingerprint does reach the network, and finds nothing.
+    // A code that cannot be a code never reaches the host, where every wrong
+    // code counts against all live codes.
+    for code in ["", "hello", "12345", "0000000000X", "UUUUUUUUUU"] {
+        assert_eq!(
+            station
+                .claim(&closed_address(), &"ab".repeat(32), code, STATION, "0.1.0")
+                .await,
+            Err(DeviceError::CodeInvalid),
+            "{code:?}"
+        );
+    }
+    // A well-formed fingerprint and code do reach the network, and find nothing.
     assert_eq!(
         station
             .claim(&closed_address(), &"ab".repeat(32), WRONG_CODE, STATION, "0.1.0")
@@ -1435,7 +1450,7 @@ Expected: ошибка компиляции — нет `DeviceState::claim` и �
 
 ```rust
 use markiro_proto::{
-    codes, ClaimRequest, DeviceKind, ErrorBody, LocalPairRequest, PairResponse, Secret,
+    codes, pairing, ClaimRequest, DeviceKind, ErrorBody, LocalPairRequest, PairResponse, Secret,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -1504,9 +1519,10 @@ use crate::secret_store;
     /// Pair with the host at `address` using a one-time `code` from the
     /// office (`POST /v1/pairing/claim`). `fingerprint` is the one in the
     /// scanned pairing code, or one a person compared with the office
-    /// screen. The code goes out only after `hello` showed that certificate,
-    /// and only through a client that pins it, so no other machine on the
-    /// network ever receives it.
+    /// screen. A code that cannot be a code is refused before any I/O; a real
+    /// one goes out in canonical form only after `hello` showed that
+    /// certificate, and only through a client that pins it, so no other
+    /// machine on the network ever receives it.
     pub async fn claim(
         &self,
         address: &str,
@@ -1518,6 +1534,11 @@ use crate::secret_store;
         if !is_fingerprint(fingerprint) {
             return Err(DeviceError::Request(RequestError::InvalidRequest));
         }
+        // The host counts a wrong code against every live code: a typo must
+        // not reach it.
+        let Some(code) = pairing::normalize(code) else {
+            return Err(DeviceError::CodeInvalid);
+        };
         let _pairing = self.pairing.lock().await;
         self.ensure_unpaired()?;
         let observation = host_probe::observe_hello(address)
@@ -1684,9 +1705,11 @@ Expected: PASS — модульные тесты `device.rs`, `claim.rs` (4 те
 ```text
 The claiming device pins the fingerprint from the scanned payload, or one a
 person compared with the office screen: `host_claim` refuses a malformed
-fingerprint before any I/O, observes `hello` and stops unless the observed
-fingerprint equals the confirmed one, and sends the code only through a
-client that pins it. A refused claim comes back as `pairing_code_invalid`,
+fingerprint (`invalid_request`) and a code that cannot be a code
+(`pairing_code_invalid`, checked with `markiro_proto::pairing::normalize`, so
+a typo never burns the host's live codes) before any I/O, observes `hello`
+and stops unless the observed fingerprint equals the confirmed one, and sends
+the canonical code only through a client that pins it. A refused claim comes back as `pairing_code_invalid`,
 `pairing_code_expired` or `rate_limited`; anything else is `pair_rejected`.
 ```
 
@@ -1994,7 +2017,7 @@ Expected: ошибка компиляции — нет `DeviceState::select_line
 
 В `apps/standalone/src-tauri/src/device.rs`:
 
-1. Импорт proto дополнить: `use markiro_proto::{codes, ClaimRequest, DeviceInfo, DeviceKind, DeviceLineRequest, ErrorBody, LocalPairRequest, PairResponse, Secret};`.
+1. Импорт proto дополнить: `use markiro_proto::{codes, pairing, ClaimRequest, DeviceInfo, DeviceKind, DeviceLineRequest, ErrorBody, LocalPairRequest, PairResponse, Secret};`.
 
 2. После импортов добавить:
 
