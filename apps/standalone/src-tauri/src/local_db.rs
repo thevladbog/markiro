@@ -224,7 +224,11 @@ fn check_statement(sql: &str, values: usize) -> Result<(), LocalDbError> {
             .iter()
             .any(|forbidden| word.eq_ignore_ascii_case(forbidden))
     });
-    if forbidden {
+    // SQLite treats a bare `END` (or `END TRANSACTION`) as `COMMIT`, so a
+    // leading `END` is refused like the words above. It cannot join
+    // `FORBIDDEN_WORDS`, because `CASE … END` needs the word mid-statement.
+    let starts_with_end = first_word(body).is_some_and(|first| first.eq_ignore_ascii_case("END"));
+    if forbidden || starts_with_end {
         Err(LocalDbError::InvalidStatement)
     } else {
         Ok(())
@@ -232,9 +236,15 @@ fn check_statement(sql: &str, values: usize) -> Result<(), LocalDbError> {
 }
 
 fn is_query(sql: &str) -> bool {
-    words(sql.trim_start()).next().is_some_and(|first| {
+    first_word(sql).is_some_and(|first| {
         first.eq_ignore_ascii_case("SELECT") || first.eq_ignore_ascii_case("WITH")
     })
+}
+
+/// The statement's first word (see `words`), or `None` before any letter,
+/// digit or `_`.
+fn first_word(sql: &str) -> Option<&str> {
+    words(sql.trim_start()).next()
 }
 
 /// SQL split into words of letters, digits and `_`; `created_at` stays one word.
@@ -310,6 +320,8 @@ mod tests {
             "INSERT INTO ref_lines (id, name, archived, rev) VALUES (?, ?, ?, ?)",
             "INSERT OR REPLACE INTO sync_state (key, value) VALUES ('last_rev', ?)",
             "SELECT created_at, begin_date, dropped FROM events",
+            // `END` mid-statement (`CASE … END`) is not a leading `END`.
+            "SELECT CASE WHEN archived = 1 THEN 'a' END FROM ref_lines",
         ] {
             assert_eq!(check_statement(sql, 4), Ok(()), "{sql}");
         }
@@ -326,6 +338,9 @@ mod tests {
             "BEGIN",
             "commit",
             "ROLLBACK",
+            "END",
+            "end transaction",
+            "END;",
             "SAVEPOINT a",
             "RELEASE a",
             "PRAGMA journal_mode",
@@ -347,9 +362,17 @@ mod tests {
 
     #[test]
     fn statement_size_and_value_count_are_bounded() {
-        let long = format!("SELECT '{}'", "x".repeat(MAX_SQL_BYTES));
+        // `SELECT '` + padding + `'` must add up to exactly `MAX_SQL_BYTES`.
+        let overhead = "SELECT ''".len();
+        let padded =
+            |extra: usize| format!("SELECT '{}'", "x".repeat(MAX_SQL_BYTES - overhead + extra));
+        let exactly_max = padded(0);
+        assert_eq!(exactly_max.len(), MAX_SQL_BYTES);
+        assert_eq!(check_statement(&exactly_max, 0), Ok(()));
+        let one_over = padded(1);
+        assert_eq!(one_over.len(), MAX_SQL_BYTES + 1);
         assert_eq!(
-            check_statement(&long, 0),
+            check_statement(&one_over, 0),
             Err(LocalDbError::InvalidStatement)
         );
         assert_eq!(check_statement("SELECT ?", MAX_VALUES), Ok(()));

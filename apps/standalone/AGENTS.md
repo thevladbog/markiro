@@ -71,9 +71,11 @@ connections, rows as objects keyed by column name — and writes it only with
 each, run in one `BEGIN IMMEDIATE` transaction on the single writer
 connection and rolled back whole on any error or `expectedChanges`
 mismatch. Statements carry literals as parameters (no `;`, `--` or `/*`),
-never control transactions, connections or the schema (`BEGIN`, `PRAGMA`,
-`ATTACH`, `CREATE`, `DROP`, `ALTER`, …) and never read BLOBs. A large
-reference page goes in as one JSON parameter per entity through
+never control transactions, connections or the schema (`BEGIN`, `END`,
+`PRAGMA`, `ATTACH`, `CREATE`, `DROP`, `ALTER`, …; a statement may not start
+with `END`, since SQLite treats it as `COMMIT`, but `CASE … END` mid-statement
+is unaffected) and never read BLOBs. A large reference page goes in as one
+JSON parameter per entity through
 `json_each`, so the limits bound SQL, not rows. Rejections are bare codes:
 `local_db_unavailable` (the database did not open; the app starts anyway),
 `invalid_statement`, `unsupported_value`, `statement_failed`,

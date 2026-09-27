@@ -7,6 +7,12 @@ use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{ConnectOptions, Connection};
 
 const INSERT_LINE: &str = "INSERT INTO ref_lines (id, name, archived, rev) VALUES (?, ?, ?, ?)";
+// A genuine no-op write: SQLite's `sqlite3_changes()` (`rows_affected()`)
+// only updates for a completed INSERT/UPDATE/DELETE, so an executed `SELECT`
+// does not reset it to 0 — it keeps reporting whatever the connection's last
+// real write changed. `NOOP_UPDATE` is a real `UPDATE` that reliably touches
+// no row, so batches built from it have a predictable, deterministic count.
+const NOOP_UPDATE: &str = "UPDATE ref_lines SET rev = rev WHERE 1 = 0";
 const LINE_1: &str = "5f0c6a52-6a3e-4b9f-9d3c-2b1a0e8f7d61";
 const LINE_2: &str = "0b7e7dcb-3f56-4c43-9a4b-1f0b3b3f8a21";
 
@@ -197,6 +203,9 @@ async fn batches_and_values_outside_the_rules_are_refused() {
         db.transaction(vec![]).await,
         Err(LocalDbError::InvalidStatement)
     );
+    let exactly_max: Vec<LocalStatement> =
+        (0..32).map(|_| statement(NOOP_UPDATE, json!([]))).collect();
+    assert_eq!(db.transaction(exactly_max).await, Ok(vec![0; 32]));
     let too_many: Vec<LocalStatement> = (0..33).map(|_| statement("SELECT 1", json!([]))).collect();
     assert_eq!(
         db.transaction(too_many).await,
@@ -206,6 +215,7 @@ async fn batches_and_values_outside_the_rules_are_refused() {
         "CREATE TABLE extra (x)",
         "PRAGMA foreign_keys = OFF",
         "BEGIN",
+        "END",
         "DROP TABLE ref_lines",
     ] {
         assert_eq!(
@@ -240,6 +250,34 @@ async fn batches_and_values_outside_the_rules_are_refused() {
         Err(LocalDbError::UnsupportedValue)
     );
     assert_eq!(lines(&db).await, json!([]));
+}
+
+/// SQLite treats a bare `END` as `COMMIT`. If it slipped past `check_statement`,
+/// a batch with `END` in the middle would commit early right there, so the
+/// duplicate `INSERT` after it would fail against already-committed data
+/// instead of rolling back, and the writer's transaction depth would stay
+/// wrong for later batches. `END` must be refused before any statement in
+/// the batch runs.
+#[tokio::test]
+async fn a_bare_end_inside_a_batch_is_refused_before_any_write() {
+    let (_dir, db) = open().await;
+    let result = db
+        .transaction(vec![
+            statement(INSERT_LINE, json!([LINE_1, "Линия 1", 0, 1])),
+            statement("END", json!([])),
+            statement(INSERT_LINE, json!([LINE_1, "Линия 1 опять", 0, 1])),
+        ])
+        .await;
+    assert_eq!(result, Err(LocalDbError::InvalidStatement));
+    assert_eq!(lines(&db).await, json!([]));
+    assert_eq!(
+        db.transaction(vec![statement(
+            INSERT_LINE,
+            json!([LINE_1, "Линия 1", 0, 1])
+        )])
+        .await,
+        Ok(vec![1])
+    );
 }
 
 /// The reference sync (plan 1c3) applies a feed page as one statement per
