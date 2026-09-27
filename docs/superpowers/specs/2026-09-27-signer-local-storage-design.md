@@ -361,8 +361,8 @@ Under the lock:
      holds `signer.json` (the background check still runs), and as absent
      otherwise. A record that exists but cannot be opened (an antivirus scan,
      a sharing violation) keeps the local folder and moves nothing (S7, S8).
-     Only the absent case runs the move, and the move deletes nothing it has
-     not verified as copied.
+     Only the absent case runs the move, and the move never deletes a
+     `signer.json` it has not verified as copied.
 2. **No record, and the durability guard (7.5) finds the local folder less
    durable.** Use the legacy folder, write nothing, report the reason.
 3. **Look at the legacy folder.**

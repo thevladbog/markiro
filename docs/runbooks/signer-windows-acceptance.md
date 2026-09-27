@@ -92,10 +92,13 @@ operator's agent moves its data on the next start.
       from user A's `%LOCALAPPDATA%\app.markiro.signer\` into user B's and
       start the Signer as B: the pairing screen shows the unreadable-credential
       warning, the file stays unchanged, and pairing as B overwrites it.
-- [ ] Deny write access to `%LOCALAPPDATA%\app.markiro.signer\` on a
-      computer that has not moved yet and restart: the Status tab says the move
-      was postponed, and the journal shows "Agent data storage fallback" with
-      the failed step and the Windows error. Restore access afterwards.
+- [ ] On a paired 0.1.4, before installing the build, create an empty folder
+      named `signer-storage.lock` in `%LOCALAPPDATA%\app.markiro.signer\`, so
+      the move cannot take its lock. Install: the Status tab says the move was
+      postponed, and the journal shows "Agent data storage fallback" with the
+      failed step and the Windows error. Delete that folder and restart: the
+      move completes. (Do not deny write access to the whole folder: it also
+      holds the WebView2 profile, and the window would fail to open.)
 - [ ] Uninstall without "Delete application data", then reinstall: the agent
       is still paired. Uninstall with it ticked: both
       `%LOCALAPPDATA%\app.markiro.signer` and `%APPDATA%\app.markiro.signer`
