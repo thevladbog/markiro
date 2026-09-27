@@ -1,7 +1,8 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createMemoryRouter, RouterProvider } from "react-router";
 
+import type { SyncState } from "../app/shell.js";
 import type { HostStatus } from "../host/protocol.js";
 import type { LocalExecutor } from "../local/executor.js";
 import { OfficeLinkProvider } from "./office-link.js";
@@ -14,6 +15,8 @@ export interface OfficeProps {
   session: OfficeSessionValue;
   /** The link to the host, shown in the header; `null` before the first status. */
   link?: HostStatus | null;
+  /** The reference sync, shown in the header with the link; `null` outside the app. */
+  sync?: SyncState | null;
   /** This installation's local copies; «Устройства» names lines from them. */
   local?: LocalExecutor | null;
   /**
@@ -29,7 +32,13 @@ export interface OfficeProps {
  * a query cache, both living exactly as long as one session — `App` mounts
  * `Office` with the session token as its key.
  */
-export function Office({ session, link = null, local = null, hostRevision = null }: OfficeProps) {
+export function Office({
+  session,
+  link = null,
+  sync = null,
+  local = null,
+  hostRevision = null,
+}: OfficeProps) {
   const [router] = useState(() => createMemoryRouter(officeRoutes, { initialEntries: ["/"] }));
   const [queryClient] = useState(createOfficeQueryClient);
   const shownRevision = useRef(hostRevision);
@@ -42,10 +51,11 @@ export function Office({ session, link = null, local = null, hostRevision = null
     // record meets `stale_revision` instead of losing the edits silently.
     void session.refreshUser().catch(() => undefined);
   }, [hostRevision, session]);
+  const officeLink = useMemo(() => ({ status: link, sync }), [link, sync]);
   return (
     <QueryClientProvider client={queryClient}>
       <OfficeSessionProvider value={session}>
-        <OfficeLinkProvider value={link}>
+        <OfficeLinkProvider value={officeLink}>
           <OfficeLocalProvider value={local}>
             <RouterProvider router={router} />
           </OfficeLocalProvider>

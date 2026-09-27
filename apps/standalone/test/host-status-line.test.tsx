@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { HostStatusLine } from "../src/app/HostStatusLine.js";
+import type { SyncFailure, SyncState } from "../src/app/shell.js";
 import { hostStatusSchema, type HostStatus } from "../src/host/protocol.js";
 import i18n from "../src/i18n/index.js";
 
@@ -10,8 +11,14 @@ const AT_14_05 = new Date(2026, 8, 27, 14, 5).getTime();
 /** 14:05 the day before `AT_14_05`, same clock. */
 const YESTERDAY_AT_14_05 = new Date(2026, 8, 26, 14, 5).getTime();
 
+const SYNC_FAILED = "Справочники не обновились — повторим автоматически";
+
 function status(overrides: Partial<HostStatus>): HostStatus {
   return { state: "online", lastContactAt: AT_14_05, lastError: null, seq: 1, ...overrides };
+}
+
+function sync(overrides: Partial<SyncState>): SyncState {
+  return { kind: "done", synced: 1, failure: null, quarantined: 0, ...overrides };
 }
 
 describe("HostStatusLine", () => {
@@ -20,7 +27,7 @@ describe("HostStatusLine", () => {
   });
 
   it("says the host is online, politely for screen readers", () => {
-    render(<HostStatusLine status={status({})} />);
+    render(<HostStatusLine status={status({})} sync={null} />);
     const line = screen.getByText("На связи с хостом").closest(".host-status");
     expect(line?.getAttribute("aria-live")).toBe("polite");
     expect(line?.getAttribute("role")).toBe("status");
@@ -31,7 +38,12 @@ describe("HostStatusLine", () => {
     // depend on the real date the suite happens to run on.
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 8, 27, 18, 30));
-    render(<HostStatusLine status={status({ state: "offline", lastError: "unreachable" })} />);
+    render(
+      <HostStatusLine
+        status={status({ state: "offline", lastError: "unreachable" })}
+        sync={null}
+      />,
+    );
     expect(screen.getByText("Нет связи с хостом с 14:05")).toBeTruthy();
     expect(screen.getByText("Хост не отвечает.")).toBeTruthy();
   });
@@ -46,6 +58,7 @@ describe("HostStatusLine", () => {
           lastError: "unreachable",
           lastContactAt: YESTERDAY_AT_14_05,
         })}
+        sync={null}
       />,
     );
     expect(screen.getByText("Нет связи с хостом с 26.09 14:05")).toBeTruthy();
@@ -65,13 +78,19 @@ describe("HostStatusLine", () => {
           lastError: "unreachable",
           lastContactAt: lastMonthSameDate,
         })}
+        sync={null}
       />,
     );
     expect(screen.getByText("Нет связи с хостом с 27.08 14:05")).toBeTruthy();
   });
 
   it("says it is connecting and why the last attempt failed", () => {
-    render(<HostStatusLine status={status({ state: "connecting", lastError: "stream_ended" })} />);
+    render(
+      <HostStatusLine
+        status={status({ state: "connecting", lastError: "stream_ended" })}
+        sync={null}
+      />,
+    );
     expect(screen.getByText("Подключение к хосту…")).toBeTruthy();
     expect(screen.getByText("Связь с хостом прервалась.")).toBeTruthy();
   });
@@ -80,6 +99,7 @@ describe("HostStatusLine", () => {
     render(
       <HostStatusLine
         status={status({ state: "offline", lastContactAt: null, lastError: "key_rejected" })}
+        sync={null}
       />,
     );
     expect(screen.getByText("Нет связи с хостом")).toBeTruthy();
@@ -95,11 +115,61 @@ describe("HostStatusLine", () => {
   });
 
   it("renders the live region empty before the first status, so a screen reader already watches it", () => {
-    const { container } = render(<HostStatusLine status={null} />);
+    const { container } = render(<HostStatusLine status={null} sync={null} />);
     const line = container.querySelector(".host-status");
     expect(line).toBeTruthy();
     expect(line?.getAttribute("role")).toBe("status");
     expect(line?.getAttribute("aria-live")).toBe("polite");
     expect(line?.textContent).toBe("");
+  });
+
+  it.each<[SyncFailure, string]>([
+    ["host", "Запрос к хосту не удался."],
+    ["local", "Не удалось записать справочники на этом компьютере."],
+    ["feed", "Ленту изменений хоста не удалось применить."],
+  ])(
+    "warns while the host answers that the copies did not update (%s), in the live region",
+    (failure, reason) => {
+      render(<HostStatusLine status={status({})} sync={sync({ kind: "failed", failure })} />);
+      const warning = screen.getByText(SYNC_FAILED);
+      expect(warning.closest(".host-status")?.getAttribute("aria-live")).toBe("polite");
+      expect(screen.getByText(reason)).toBeTruthy();
+    },
+  );
+
+  it("keeps the warning through the retry's own run", () => {
+    render(
+      <HostStatusLine status={status({})} sync={sync({ kind: "running", failure: "host" })} />,
+    );
+    expect(screen.getByText(SYNC_FAILED)).toBeTruthy();
+  });
+
+  it("leaves a failed sync to the link's own words while the host is away", () => {
+    render(
+      <HostStatusLine
+        status={status({ state: "offline", lastContactAt: null, lastError: "unreachable" })}
+        sync={sync({ kind: "failed", failure: "host" })}
+      />,
+    );
+    expect(screen.getByText("Нет связи с хостом")).toBeTruthy();
+    expect(screen.queryByText(SYNC_FAILED)).toBeNull();
+  });
+
+  it("counts the records the copies did not accept, with the host or without it", () => {
+    render(
+      <HostStatusLine
+        status={status({ state: "offline", lastContactAt: null, lastError: "unreachable" })}
+        sync={sync({ quarantined: 3 })}
+      />,
+    );
+    const count = screen.getByText("Не приняты записи справочников: 3");
+    expect(count.closest(".host-status")?.getAttribute("role")).toBe("status");
+  });
+
+  it("says nothing more while the copies are up to date", () => {
+    render(<HostStatusLine status={status({})} sync={sync({})} />);
+    expect(screen.getByText("На связи с хостом")).toBeTruthy();
+    expect(screen.queryByText(SYNC_FAILED)).toBeNull();
+    expect(screen.queryByText(/Не приняты записи справочников/)).toBeNull();
   });
 });

@@ -374,7 +374,14 @@ refused device key or a changed certificate from that call is a rejected device
 — `key_rejected` or `host_changed` — exactly as on every other host path.
 `HostStatusLine` shows the link on the floor, on the line screen and in the
 office header — online, connecting, or silent since the last contact, with the
-reason — as a phase tag with words in a polite live region. There is no
+reason — as a phase tag with words in a polite live region. In the same region
+it warns, while the link is online, that the copies did not update and will be
+retried, with the failure's reason (`errors.sync.<failure>`), and at any link
+state how many feed records the copies did not accept (`quarantined`); the
+office header reads the sync state next to the link (`OfficeLinkProvider`).
+The line screen's alert names a failed sync by its class in the same words
+(its own host wording for `host`, `errors.sync.local` and `errors.sync.feed`
+otherwise) and a copy it cannot read as this computer's failure. There is no
 blocking overlay while the host is away: office pages explain their own failed
 requests and offer a retry.
 

@@ -28,7 +28,14 @@
   gap: 8px;
 }
 
+/* One line for the link, then one for each warning about the local copies. */
 .host-status {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+}
+
+.host-status__line {
   display: flex;
   flex-wrap: wrap;
   align-items: center;

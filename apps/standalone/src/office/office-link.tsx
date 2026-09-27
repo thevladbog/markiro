@@ -1,21 +1,28 @@
 import { createContext, useContext, type ReactNode } from "react";
 
+import type { SyncState } from "../app/shell.js";
 import type { HostStatus } from "../host/protocol.js";
 
-const OfficeLinkContext = createContext<HostStatus | null>(null);
+/** The link to the host and the reference sync as the shell reports them, for the office header. */
+export interface OfficeLink {
+  /** `null` before the shell's first status and outside the app. */
+  status: HostStatus | null;
+  /** `null` outside the app. */
+  sync: SyncState | null;
+}
 
-/** The link to the host as the shell reports it, for the office header. */
+const OfficeLinkContext = createContext<OfficeLink>({ status: null, sync: null });
+
 export function OfficeLinkProvider({
   value,
   children,
 }: {
-  value: HostStatus | null;
+  value: OfficeLink;
   children: ReactNode;
 }) {
   return <OfficeLinkContext.Provider value={value}>{children}</OfficeLinkContext.Provider>;
 }
 
-/** `null` before the shell's first status and outside the office. */
-export function useOfficeLink(): HostStatus | null {
+export function useOfficeLink(): OfficeLink {
   return useContext(OfficeLinkContext);
 }

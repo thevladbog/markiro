@@ -1234,3 +1234,49 @@ describe("reference sync retries", () => {
     expect(await screen.findByText("На хосте нет активных линий.")).toBeTruthy();
   });
 });
+
+describe("reference sync health on screen", () => {
+  it("shows a failed sync on the floor and in the office header until a sync succeeds", async () => {
+    const link = fakeConnection();
+    const host = fakeHost();
+    // Every sync fails, the retries too, until the host answers below.
+    host.getChanges.mockRejectedValue(hostDown());
+    host.officeMe.mockResolvedValue(SESSION.user);
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(DEVICE_STATUS),
+      host,
+      connection: link.connection,
+    });
+    expect(
+      await screen.findByText("Справочники не обновились — повторим автоматически"),
+    ).toBeTruthy();
+    expect(screen.getByText("Запрос к хосту не удался.")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Офис" }));
+    await signIn();
+    await screen.findByText("Вы вошли как Ирина Смирнова.");
+    expect(screen.getByText("Справочники не обновились — повторим автоматически")).toBeTruthy();
+
+    host.getChanges.mockResolvedValue(feedPage(43));
+    await link.revision(43);
+    await waitFor(() =>
+      expect(screen.queryByText("Справочники не обновились — повторим автоматически")).toBeNull(),
+    );
+  });
+
+  it("shows how many feed records the copies did not accept", async () => {
+    const host = fakeHost();
+    const unreadable: ChangeItem = {
+      entity: "lines",
+      id: LINE_ID,
+      rev: 42,
+      deleted: false,
+      data: { name: "Линия 1", archived: "да" },
+    };
+    host.getChanges.mockResolvedValueOnce(feedPage(42, [unreadable]));
+    renderApp({ probe: probeAnswering(true), device: fakeDevice(DEVICE_STATUS), host });
+    expect(await screen.findByText("Не приняты записи справочников: 1")).toBeTruthy();
+    expect(screen.getByText("Цех")).toBeTruthy();
+  });
+});

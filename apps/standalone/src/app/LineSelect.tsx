@@ -8,7 +8,7 @@ import { DeviceError, type DeviceErrorCode } from "../host/device.js";
 import type { HostStatus } from "../host/protocol.js";
 import type { LocalExecutor } from "../local/executor.js";
 import { HostStatusLine } from "./HostStatusLine.js";
-import type { SyncState } from "./shell.js";
+import type { SyncFailure, SyncState } from "./shell.js";
 
 const lineRow = z.object({ id: z.string(), name: z.string() });
 type Line = z.infer<typeof lineRow>;
@@ -22,6 +22,16 @@ type Line = z.infer<typeof lineRow>;
 function failureKey(code: DeviceErrorCode): string {
   return code === "unreachable" ? "errors.link.unreachable" : `errors.device.${code}`;
 }
+
+/**
+ * The alert for a failed sync, by its class: the host's own wording, or the
+ * status line's reason when this computer or the host's feed is to blame.
+ */
+const SYNC_FAILED_KEY = {
+  host: "shell.lineSelect.syncFailed",
+  local: "errors.sync.local",
+  feed: "errors.sync.feed",
+} as const satisfies Record<SyncFailure, string>;
 
 /** «Линия 2» before «Линия 10». */
 const BY_NAME = new Intl.Collator("ru", { numeric: true });
@@ -41,7 +51,9 @@ export interface LineSelectProps {
  * A paired station chooses its line (spec §5.1) among the active lines of
  * the local copies. They are read only once a sync in this session brought
  * them up to date, and again after every sync, so a previous pairing's lines
- * never show.
+ * never show. A failed sync is explained by its class, in the status line's
+ * words; a copy that cannot be read is this computer's failure, not the
+ * host's, and the screen says so.
  */
 export function LineSelect({ local, sync, link, onSelect, onSync, onOffice }: LineSelectProps) {
   const { t } = useTranslation();
@@ -85,7 +97,10 @@ export function LineSelect({ local, sync, link, onSelect, onSync, onOffice }: Li
 
   const content = () => {
     if (lines === null) {
-      if (sync.kind === "failed" || readFailed) {
+      // The latest failure: a sync failed after the last read, or the read
+      // failed after the last sync. A sync in progress, the retry's too,
+      // shows progress instead of an older failure.
+      if (sync.kind === "failed" || (readFailed && sync.kind !== "running")) {
         return (
           <Alert
             tone="error"
@@ -95,7 +110,11 @@ export function LineSelect({ local, sync, link, onSelect, onSync, onOffice }: Li
               </Button>
             }
           >
-            {t("shell.lineSelect.syncFailed")}
+            {t(
+              sync.kind === "failed"
+                ? SYNC_FAILED_KEY[sync.failure ?? "host"]
+                : "shell.lineSelect.readFailed",
+            )}
           </Alert>
         );
       }
@@ -132,7 +151,7 @@ export function LineSelect({ local, sync, link, onSelect, onSync, onOffice }: Li
         <p>{t("shell.lineSelect.body")}</p>
         {failure && <Alert tone="error">{t(failureKey(failure))}</Alert>}
         {content()}
-        <HostStatusLine status={link} />
+        <HostStatusLine status={link} sync={sync} />
         <div className="standalone-form__actions">
           <Button variant="secondary" onClick={onOffice}>
             {t("floor.office")}

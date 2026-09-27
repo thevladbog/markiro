@@ -290,6 +290,7 @@ export function App({
         key={session.token}
         session={officeSession}
         link={state.link}
+        sync={state.sync}
         local={localDb}
         hostRevision={state.hostRevision}
       />
@@ -361,7 +362,11 @@ export function App({
         />
       )}
       {view.kind === "floor" && (
-        <FloorScreen link={state.link} onOffice={() => dispatch({ type: "office_requested" })} />
+        <FloorScreen
+          link={state.link}
+          sync={state.sync}
+          onOffice={() => dispatch({ type: "office_requested" })}
+        />
       )}
       {view.kind === "office_login" && (
         <OfficeLogin

@@ -4,13 +4,20 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest";
 
 import { LineSelect, type LineSelectProps } from "../src/app/LineSelect.js";
-import type { SyncState } from "../src/app/shell.js";
+import type { SyncFailure, SyncState } from "../src/app/shell.js";
 import { DeviceError } from "../src/host/device.js";
+import { LocalDbError, type LocalExecutor } from "../src/local/executor.js";
 import { openLocalDb } from "./support/local-db.js";
 
 const LINE_2 = "5f0c6a52-6a3e-4b9f-9d3c-2b1a0e8f7d61";
 const LINE_10 = "0b7e7dcb-3f56-4c43-9a4b-1f0b3b3f8a21";
 const OLD_LINE = "9b2e4a6c-0000-4000-8000-000000000000";
+
+/** Copies this computer cannot read. */
+const UNREADABLE: LocalExecutor = {
+  query: () => Promise.reject(new LocalDbError("statement_failed", "disk I/O error")),
+  transaction: () => Promise.reject(new LocalDbError("statement_failed", "disk I/O error")),
+};
 
 function insertLine(db: DatabaseSync, id: string, name: string, archived = 0): void {
   db.prepare("INSERT INTO ref_lines (id, name, archived, rev) VALUES (?, ?, ?, 1)").run(
@@ -73,6 +80,15 @@ describe("LineSelect", () => {
     expect(props.onSync).toHaveBeenCalledTimes(1);
   });
 
+  it.each<[SyncFailure, string]>([
+    ["local", "Не удалось записать справочники на этом компьютере."],
+    ["feed", "Ленту изменений хоста не удалось применить."],
+  ])("explains a failed first sync by its class (%s), as the status line does", (failure, text) => {
+    renderLineSelect({ ...syncState("failed", 0), failure });
+    expect(screen.getByText(text)).toBeTruthy();
+    expect(screen.queryByText("Не удалось получить справочники с хоста.")).toBeNull();
+  });
+
   it("says when the host has no active lines", async () => {
     renderLineSelect(syncState("done", 1));
     expect(await screen.findByText("На хосте нет активных линий.")).toBeTruthy();
@@ -133,6 +149,32 @@ describe("LineSelect", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Линия 2" }));
     expect(await screen.findByText("Хост не выполнил запрос. Повторите попытку.")).toBeTruthy();
     expect(props.onSync).not.toHaveBeenCalled();
+  });
+
+  it("says a copy that cannot be read is this computer's, not the host's", async () => {
+    const { props } = renderLineSelect(syncState("done", 1), { local: UNREADABLE });
+    expect(
+      await screen.findByText("Не удалось прочитать справочники на этом компьютере."),
+    ).toBeTruthy();
+    expect(screen.queryByText("Не удалось получить справочники с хоста.")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
+    expect(props.onSync).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows progress, not the older alert, while the retry syncs", async () => {
+    const { props, view } = renderLineSelect(syncState("done", 1), { local: UNREADABLE });
+    await screen.findByText("Не удалось прочитать справочники на этом компьютере.");
+    view.rerender(<LineSelect {...props} sync={syncState("running", 1)} />);
+    expect(screen.getByText("Получаем справочники с хоста…")).toBeTruthy();
+    expect(screen.queryByText("Не удалось прочитать справочники на этом компьютере.")).toBeNull();
+  });
+
+  it("explains the latest failure: a sync that failed after the copy could not be read", async () => {
+    const { props, view } = renderLineSelect(syncState("done", 1), { local: UNREADABLE });
+    await screen.findByText("Не удалось прочитать справочники на этом компьютере.");
+    view.rerender(<LineSelect {...props} sync={{ ...syncState("failed", 1), failure: "host" }} />);
+    expect(screen.getByText("Не удалось получить справочники с хоста.")).toBeTruthy();
+    expect(screen.queryByText("Не удалось прочитать справочники на этом компьютере.")).toBeNull();
   });
 
   it("shows the link and opens the office", () => {

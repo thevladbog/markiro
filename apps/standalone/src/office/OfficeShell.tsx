@@ -64,7 +64,7 @@ export function OfficeShell() {
             <span className="office-header__name">{session.user.name}</span>
             <span className="office-header__role">{t(`office.roles.${session.user.role}`)}</span>
           </div>
-          <HostStatusLine status={link} />
+          <HostStatusLine status={link.status} sync={link.sync} />
           <div className="office-header__actions">
             <IconButton
               variant="secondary"
