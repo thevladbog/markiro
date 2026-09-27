@@ -5,6 +5,7 @@ mod grant_transaction;
 mod power;
 mod printer;
 mod scanner;
+mod storage;
 mod updater;
 
 use tauri::Manager;

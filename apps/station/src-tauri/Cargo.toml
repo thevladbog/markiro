@@ -51,6 +51,11 @@ windows-sys = { version = "0.61", features = [
   "Win32_Security",
   "Win32_System_Power",
   "Win32_System_Threading",
+  # storage/probe.rs: GetProfileType (UI_Shell), its PT_* flags (GroupPolicy)
+  # and the DeleteRoamingCache policy value (Registry).
+  "Win32_System_GroupPolicy",
+  "Win32_System_Registry",
+  "Win32_UI_Shell",
 ] }
 
 [features]
