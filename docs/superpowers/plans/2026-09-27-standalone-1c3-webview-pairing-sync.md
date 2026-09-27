@@ -111,14 +111,14 @@
   7. выбор линии (станция без линии);
   8. цех.
 - `lastError` связи `key_rejected` — отказ `key_rejected`, `certificate_mismatch` — отказ `host_changed`. Офис при этом закрывается, как при таком же ответе на запрос офиса.
-- Связь и синхронизация идут, пока устройство подключено, не отвергнуто и не остановлено на другом хосте: одна подписка `connection.watch`, один планировщик. Синхронизация — при старте и на каждое событие ревизии; первое событие после переподключения несёт текущую ревизию.
+- Связь и синхронизация идут, пока устройство подключено, не отвергнуто и не остановлено на другом хосте: одна подписка `connection.watch`, один планировщик. Первая синхронизация — когда `watch` подписался (или не смог): ревизии до подписки не повторяются, и ранний прогон мог бы пропустить коммит между своим запросом и подпиской. Дальше — на каждое событие ревизии; первое событие после переподключения несёт текущую ревизию.
 - Подключение в сети:
   - адреса из кода опрашиваются одновременно; код уходит только на адрес, чей сертификат совпал с `f`, без вопроса человеку;
   - при ручном вводе (`host` или `host:порт`, порт по умолчанию 45710) сначала `hello`, затем отпечаток `formatFingerprint(observed)`, и только после «Отпечаток совпадает» — `claim` с наблюдённым отпечатком;
   - код не того вида — «Проверьте код: 10 символов», без обращения к сети;
   - имя устройства — 1–100 символов после обрезки, по умолчанию «Станция»;
   - отказ `claim` никогда не повторяется сам;
-  - отказ, после которого хост мог уже принять код (`invalid_response`, `host_changed`, `storage` из `claim`), просит получить новый код: повтор тем же кодом упрётся в `pairing_code_invalid`.
+  - отказ, после которого хост мог уже принять код (`invalid_response`, `host_changed`, `storage` из `claim`), просит получить новый код: повтор тем же кодом упрётся в `pairing_code_invalid`. `unreachable` из `claim` тоже бывает после приёма (обрыв после отправки), но чаще значит «хост не ответил» — ему оставлен обычный текст: повтор в худшем случае упрётся в `pairing_code_invalid` с просьбой о новом коде.
 - Выбор линии:
   - активные линии `ref_lines` (`archived = 0`) по имени через `Intl.Collator("ru", { numeric: true })`;
   - читаются только после удачной синхронизации в этом сеансе и заново после каждой следующей;
@@ -2147,8 +2147,9 @@ export interface HostLinkOptions {
 
 /**
  * While a host is paired: follows the shell's link to it and keeps the local
- * reference copies in step with a sync at start and after every revision
- * event. The first event after each reconnect carries the host's current
+ * reference copies in step with a sync once `watch` has subscribed (or
+ * failed to) and after every revision event. The first event after each
+ * reconnect carries the host's current
  * revision, so catching up needs nothing more.
  */
 export function useHostLink({
@@ -2190,14 +2191,21 @@ export function useHostLink({
       })
       .then(
         (stop) => {
-          if (active) unwatch = stop;
-          else stop();
+          if (!active) {
+            stop();
+            return;
+          }
+          unwatch = stop;
+          // Sync only now: revisions announced before `watch` resolved are
+          // not replayed, so a sync started earlier could miss a commit that
+          // landed between its fetch and the listener.
+          scheduler.trigger();
         },
         () => {
-          // Without events the copies still sync at start and on request.
+          // Without events the copies still sync once here and on request.
+          if (active) scheduler.trigger();
         },
       );
-    scheduler.trigger();
     return () => {
       active = false;
       scheduler.stop();
