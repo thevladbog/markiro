@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { assessReceivingRevisionReadiness, type ReceivingReadinessInput } from "@markiro/domain";
 import { receivingRevisionReadinessSchema } from "@markiro/platform-contracts";
-import { sql } from "drizzle-orm";
 import type { UsMasterDataTransaction } from "../master-data/us-master-data-support";
 import { readReceivingWorkingDraft } from "./us-receiving-working-draft";
 import { readReceivingReferenceFacts } from "./us-receiving-reference-context";
@@ -18,12 +17,6 @@ export async function readReceivingRevisionContext(
   lockReferences = false,
 ) {
   const working = await readReceivingWorkingDraft(tx, tenantId, eventId, expectedDraftVersion);
-  // No persisted downstream model is registered yet. Receiving-only integrity
-  // must be established even for empty drafts; unknown kinds cannot mean no dependencies.
-  const kinds = await tx.execute<{ invalid: boolean }>(sql`SELECT EXISTS (
-    SELECT 1 FROM traceability_events WHERE tenant_id=${tenantId} AND type<>'receiving'
-  ) AS invalid`);
-  if (kinds.rows[0]?.invalid !== false) throw unavailable();
   const priorLotIds =
     working.predecessor?.draft.items.flatMap((line) => (line.lotId === null ? [] : [line.lotId])) ??
     [];

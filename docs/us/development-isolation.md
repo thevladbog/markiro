@@ -151,6 +151,124 @@ Profile tenant and actor are derived from the verified session, never client IDs
 
 After building, `node --test tools/us-development/test/runtime-entry.smoke.mjs` exercises the actual executables, including rejection and graceful shutdown. It temporarily reserves port 3100; stop a manually running US API before this check.
 
+## Receiving CSV storage boundary — 2026-09-08
+
+The [CSV preview storage checkpoint](../superpowers/plans/2026-09-08-us-03-receiving-csv-storage.md)
+adds migration0127 and an independent tenant-anchored preview table. It retains
+original bytes/hash, original header, findings and nullable proposed draft/digest,
+with a 256 KiB byte cap and exactly 24 hours of apply lifetime. File hashes are
+not unique; expired evidence is not automatically deleted. Migration generation
+adds no extension and changes no existing table. Only fixture-owned disposable
+US databases are migrated by verification, never the base or primary database.
+
+This is a storage seam, not an exposed import feature. Full JSON validation,
+current authorization, tenant reference resolution, preview audit and atomic
+apply/result binding still belong to the next server increments. The storage
+checks do not prove those service boundaries. No CSV HTTP route or browser proxy
+path is registered, no body limit is changed, and startup never migrates or
+imports. The check-only US workflow includes the bounded input and new storage
+tests; operational workflow locks and deployment permissions are unchanged.
+
+## Receiving CSV internal preview service — 2026-09-08
+
+The subsequent [preview service checkpoint](../superpowers/plans/2026-09-08-us-03-receiving-csv-preview-service.md)
+implements internal create/read operations over migration0127. Both reload current
+Receiving-write membership and the US profile before parsing inputs or reading a
+preview. Creation resolves exact IDs/canonical GTIN within the tenant, locks
+references in the existing Receiving order, and stores the preview with a
+metadata-only audit in one repeatable-read transaction. Invalid files/rows and
+missing or inactive references retain findings without an applicable proposal.
+No receiving event, lot, operation receipt or finalization is created.
+
+Reads validate saved parser evidence, row bindings and normalized proposal/digest;
+corruption fails closed without repair or raw-data errors. An expired preview can
+still be inspected under current writer authority. Reopening never retargets a
+saved GTIN to today's catalog entry and does not certify current apply eligibility.
+The apply command must separately revalidate expiry and references.
+
+This supersedes the storage checkpoint's unimplemented preview-service boundary,
+not its HTTP/release restrictions. The service is not registered in a controller
+or runtime module; CSV HTTP/proxy paths remain closed. Session/MFA integration,
+HTTP body limits, atomic apply/replay, browser confirmation and CSV output are not
+established by internal-service tests. Operational jobs remain unconditionally
+locked; the existing check-only job selects the new tests.
+
+## Receiving CSV apply binding storage — 2026-09-08
+
+The [apply binding checkpoint](../superpowers/plans/2026-09-08-us-03-receiving-csv-apply-storage.md)
+adds migration0128 and `receiving_csv_applications`. It binds one preview to an
+existing `receiving.csv.apply` operation using composite tenant/content foreign
+keys. A preview without a proposal, another tenant's row or a different digest
+cannot satisfy the binding. Identical files can still have independent previews
+and operation keys; multiple same-content previews can refer to one saved result.
+The existing operation primary key and event FK remain unchanged. No historic
+preview, receipt, draft or frozen snapshot JSON is rewritten.
+
+Only the SQL command allowlist is extended; current Receiving acknowledgement
+unions and runtime commands are unchanged. This is a storage prerequisite, not
+the atomic apply service. The following service checkpoint must authorize and
+lock, validate receipt JSON, check first-application expiry and current references,
+create the draft through shared transaction primitives, then store the receipt,
+binding and exact audits together. SQL intentionally does not prohibit retaining
+expired evidence or implement time-dependent first-application validation.
+
+The relation has no runtime writer or automatic cleanup. HTTP/proxy paths,
+body limits, browser behavior, MFA boundaries, dependencies and operational locks
+are unchanged. The existing check-only US job selects the new migration tests.
+Verification migrates only fixture-owned disposable US databases. Base/primary
+databases, hosted infrastructure and production workflows remain untouched.
+
+## Receiving CSV internal atomic apply — 2026-09-09
+
+The [atomic apply service checkpoint](../superpowers/plans/2026-09-09-us-03-receiving-csv-apply-service.md)
+implements `applyPreview` internally over migration0128. Current Receiving-write
+membership/profile is reloaded before parsing, locking or replay. First application
+checks saved evidence/digest and expiry, resolves current tenant references, and
+rejects changed resolution rather than retargeting a GTIN. An additional expiry
+check before returning from the transaction prevents lock waits from extending
+first-apply eligibility. Failure rolls back the complete transaction.
+
+Original draft creation now uses a shared transaction-level helper. The CSV
+command commits root/header/ordered children, canonical operation receipt,
+preview binding, draft-created audit and metadata-only import-applied audit
+together. Existing legacy/versioned Receiving endpoints retain their command
+contracts and replay behavior. No automatic finalization or lot assignment occurs.
+
+Successful replay ignores today's expiry/catalog/lifecycle state but still
+validates saved evidence and the original result/binding under current authority.
+The same key/content can bind another preview to that result; a different key on
+an already-applied preview returns the original receipt without another operation
+or audit. Contradictory already-committed key/preview results conflict. The private
+receipt retains its original key and preview ID; it is not a transport-level
+acknowledgement of a new key or a substitute for a live-record GET.
+
+No controller/module registration, HTTP/proxy route, body limit, UI, dependency,
+migration or hosted resource is added. Public acknowledgement correlation,
+session/MFA transport checks, browser recovery and CSV output remain unimplemented.
+The existing check-only US workflow selects the new tests; operational locks and
+publication permissions remain unchanged.
+
+## Receiving CSV isolated HTTP — 2026-09-09
+
+The [HTTP checkpoint](../superpowers/plans/2026-09-09-us-03-receiving-csv-http.md)
+supersedes the previous internal-only registration boundary. Only the US runtime
+now exposes preview POST, saved GET and apply POST under
+`/traceability/receiving/imports`. Every route requires real US session/MFA and
+current Receiving WRITE capability. The preview-only JSON cap is 512 KiB with a
+256 KiB decoded-file cap; apply and unrelated import paths remain at 16 KiB.
+
+Public preview responses contain bounded saved findings and normalized proposal,
+not file bytes or original raw header. Apply responses separate current request
+correlation from the unchanged original receipt, including different-key and
+alias-preview retries. Clients must GET the live event after acknowledgement;
+the response does not assert the event remains a draft. Raw data/SQL never appears
+in error bodies. Real HTTP tests use disposable synthetic databases and MFA.
+
+Browser routes/proxy, confirmation/recovery UI and safe CSV output remain open.
+The check-only workflow includes the shared HTTP contract suite and existing
+Receiving HTTP suite. Operational locks, dependencies, migrations and release
+permissions are unchanged; no hosted settings were modified or verified.
+
 ## Isolated profile persistence tests
 
 The US profile store has both direct persistence and real HTTP integration tests. Start only the US PostgreSQL service above, build `@markiro/db` and `@markiro/platform-contracts`, then run from the US worktree root:
@@ -212,6 +330,14 @@ pnpm --filter @markiro/api exec vitest run test/us-catalog.e2e.test.ts test/us-c
 The local checks pass six DB cases, nine operational cases and real store/HTTP catalog cases; current totals and review status are in the [implementation progress](implementation-plan.md#us-02-catalog-persistence-increment--2026-09-05). The shared column permits null, but RU DTOs, Station payloads/mirrors and GTIN-dependent operations retain strict boundaries. The new update timestamp dates pre-existing products to the migration baseline; it is not reconstructed historical activity. No browser, hardware, provider or hosted acceptance is established by these tests. Broader package-test infrastructure limits remain separate from the successful US-specific checks.
 
 ## Before release enablement
+
+The [Receiving CSV browser checkpoint](../superpowers/plans/2026-09-09-us-03-receiving-csv-browser.md)
+adds only the grouped import UI/client, exact existing-route proxy entries, tests
+and documentation. Real browser verification uses disposable synthetic US
+databases and temporary loopback listeners. The check-only workflow includes the
+new client/UI suites; no operational workflow lock or deployment permission is
+changed. The base database and primary checkout remain untouched. CSV output and
+release enablement still require their separate decisions.
 
 The 2026-09-08 [amendment editor increment](receiving-browser.md#amendment-editor-and-frozen-comparison--2026-09-08)
 adds only US browser editing/comparison, regression selection and local synthetic

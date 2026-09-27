@@ -50,7 +50,12 @@ export const lotCopy = {
     currentNames:
       "Product and location names are current reference data, not a historical event snapshot.",
     generic: "General lot traceability only. FTR applicability is not assessed in this profile.",
-    unavailableFeatures: "Full event history, genealogy and balances are not connected yet.",
+    unavailableFeatures:
+      "Case links and genealogy below are separate evidence; they do not confirm inventory or export readiness.",
+    transformationOrigin: "Current Transformation origin",
+    nonTransformationOrigin: "This lot was created independently of Transformation.",
+    openTransformationOrigin: "Open current Transformation origin",
+    originUnknown: "Current Transformation origin cannot be confirmed.",
     receivingBasis: "Current receiving basis",
     receivingMissing: "No current receiving basis",
     receivingCount: "Supporting revisions: {{count}}",
@@ -151,7 +156,11 @@ export const lotCopy = {
     generic:
       "Solo trazabilidad general de lotes. La aplicabilidad de FTR no se evalúa en este perfil.",
     unavailableFeatures:
-      "El historial completo de eventos, la genealogía y los saldos aún no están conectados.",
+      "Los vínculos de cajas y la genealogía son evidencia separada; no confirman el inventario ni la preparación para exportar.",
+    transformationOrigin: "Origen vigente de transformación",
+    nonTransformationOrigin: "Este lote se creó independientemente de una transformación.",
+    openTransformationOrigin: "Abrir origen vigente de transformación",
+    originUnknown: "No se puede confirmar el origen vigente de transformación.",
     receivingBasis: "Base de recepción vigente",
     receivingMissing: "Sin base de recepción vigente",
     receivingCount: "Revisiones de respaldo: {{count}}",

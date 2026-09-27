@@ -21,6 +21,7 @@ export function mountUsHttp(app: INestApplication, runtime: UsRuntime): void {
   const host = new URL(runtime.env.BETTER_AUTH_URL).host;
   const parseJson = json({ limit: "16kb", inflate: false });
   const parseReceivingJson = json({ limit: "256kb", inflate: false });
+  const parseReceivingCsvJson = json({ limit: "512kb", inflate: false });
   const authHandler = toNodeHandler((request) =>
     handleUsAuth(runtime.auth, request, () => runtime.assertDatabaseReady()),
   );
@@ -48,7 +49,26 @@ export function mountUsHttp(app: INestApplication, runtime: UsRuntime): void {
         /^\/traceability\/receiving\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/?$/i.test(
           request.path,
         ));
-    const parseBody = receivingWrite ? parseReceivingJson : parseJson;
+    const csvPreviewWrite =
+      request.method === "POST" &&
+      /^\/traceability\/receiving\/imports\/preview\/?$/i.test(request.path);
+    const transformationWrite =
+      (request.method === "POST" && /^\/traceability\/transformation\/?$/i.test(request.path)) ||
+      (request.method === "PUT" &&
+        /^\/traceability\/transformation\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/?$/i.test(
+          request.path,
+        ));
+    const shippingWrite =
+      (request.method === "POST" && /^\/traceability\/shipments\/?$/i.test(request.path)) ||
+      (request.method === "PUT" &&
+        /^\/traceability\/shipments\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/?$/i.test(
+          request.path,
+        ));
+    const parseBody = csvPreviewWrite
+      ? parseReceivingCsvJson
+      : receivingWrite || transformationWrite || shippingWrite
+        ? parseReceivingJson
+        : parseJson;
     parseBody(request, response, (error: unknown) => {
       if (error) {
         const status = typeof error === "object" && "status" in error ? error.status : undefined;

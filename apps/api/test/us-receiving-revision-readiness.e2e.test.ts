@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { seedTransformationDraft } from "./support/us-transformation-draft-fixture";
 import { schema } from "@markiro/db";
 import { receivingAmendmentDraftSchema, type ReceivingDraft } from "@markiro/platform-contracts";
 import { eq } from "drizzle-orm";
@@ -335,43 +336,13 @@ describe.skipIf(!url)("Receiving revision readiness v4", () => {
       response: { code: "receiving_lifecycle_conflict" },
     });
   });
-  it("fails closed on unsupported persisted CTEs even when the checked draft has no lots", async () => {
+  it("supports revision-readiness alongside a valid Transformation draft", async () => {
     const saved = await create({ ...c.draft, items: [] });
-    const unknown = await create();
-    const constraint = (
-      await f.pool.query<{ definition: string }>(
-        "SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint WHERE conrelid='traceability_events'::regclass AND conname='traceability_events_lifecycle_valid'",
-      )
-    ).rows[0]?.definition;
-    if (!constraint) throw new Error("Missing synthetic constraint");
-    const connection = await f.pool.connect();
-    try {
-      await connection.query(
-        "BEGIN; SET LOCAL session_replication_role='replica'; ALTER TABLE traceability_events DROP CONSTRAINT traceability_events_lifecycle_valid",
-      );
-      await connection.query(
-        "UPDATE traceability_events SET type='shipping' WHERE tenant_id=$1 AND id=$2",
-        [c.tenant, unknown.id],
-      );
-      await connection.query("COMMIT");
-      const before = await state();
-      await expect(check(saved.id)).rejects.toMatchObject({
-        status: 503,
-        response: { code: "us_database_unavailable" },
-      });
-      expect(await state()).toEqual(before);
-    } finally {
-      await connection.query("BEGIN; SET LOCAL session_replication_role='replica'");
-      await connection.query(
-        "UPDATE traceability_events SET type='receiving' WHERE tenant_id=$1 AND id=$2",
-        [c.tenant, unknown.id],
-      );
-      await connection.query(
-        `ALTER TABLE traceability_events ADD CONSTRAINT traceability_events_lifecycle_valid ${constraint}`,
-      );
-      await connection.query("COMMIT");
-      connection.release();
-    }
+    const before = await check(saved.id);
+    await seedTransformationDraft(f, c.tenant, c.actor);
+    const stateBefore = await state();
+    expect(await check(saved.id)).toEqual({ ...before, checkedAt: expect.any(String) });
+    expect(await state()).toEqual(stateBefore);
   });
   it("does not ignore a missing predecessor lot merely because its line was removed", async () => {
     const { started, draft } = await start();

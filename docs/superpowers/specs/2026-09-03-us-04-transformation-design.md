@@ -1,6 +1,6 @@
 # US-04 — Transformation CTE and shift/box bridge — Design Spec
 
-> Revised 2026-09-04: read the [shared MVP contract](../../us/mvp-contract.md) first. It resolves cross-slice scope and safety rules and supersedes conflicting draft recommendations below. Design only; implementation is not claimed.
+> Historical draft. The [2026-09-26 current US-04 design](2026-09-26-us-04-transformation-current-design.md) supersedes this document for implementation. Read the [shared MVP contract](../../us/mvp-contract.md) first. The shift and Station assumptions below are not P0 requirements. Design only; implementation is not claimed.
 
 **Date:** 2026-09-03
 

@@ -95,7 +95,7 @@ export async function exerciseUsReceivingHistory({ page, expect, screenshots, fi
   }
   await page.getByRole("button", { name: "Idioma", exact: true }).click();
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.getByRole("button", { name: "Back to receiving", exact: true }).click();
+  await page.getByRole("button", { name: "Back to events", exact: true }).click();
   await page.getByRole("combobox", { name: "Status", exact: true }).click();
   await page.getByRole("option", { name: "Amended", exact: true }).click();
   await expect(page.getByRole("combobox", { name: "History selection", exact: true })).toHaveText(
@@ -105,13 +105,13 @@ export async function exerciseUsReceivingHistory({ page, expect, screenshots, fi
   await expect(
     page.getByRole("button", { name: "Open current receipt", exact: true }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Back to receiving", exact: true }).click();
+  await page.getByRole("button", { name: "Back to events", exact: true }).click();
   await expect(page.getByRole("combobox", { name: "Status", exact: true })).toHaveText("Amended");
   await expect(page.getByRole("combobox", { name: "History selection", exact: true })).toHaveText(
     "All revisions",
   );
   await page.getByRole("combobox", { name: "History selection", exact: true }).click();
-  await page.getByRole("option", { name: "Current receipts and drafts", exact: true }).click();
+  await page.getByRole("option", { name: "Current events and drafts", exact: true }).click();
   await expect(page.getByRole("combobox", { name: "Status", exact: true })).toHaveText(
     "All statuses",
   );

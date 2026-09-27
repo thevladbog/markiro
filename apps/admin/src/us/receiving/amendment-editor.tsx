@@ -18,6 +18,7 @@ export function ReceivingAmendmentEditor(
     initial: ReceivingDraftView;
     timeZone: string;
     canManageQa?: boolean;
+    canExport?: boolean;
     onClose: () => void;
     backLabel?: string;
     onOpenRecord: (record: ReceivingLiveRecord) => void;

@@ -25,6 +25,7 @@ import {
   lotSourceColumns,
   sourceIdentityPredicate,
 } from "./us-lot-support";
+import { invalidateShippingStatusEffect } from "../shipping/us-shipping-status-effects";
 
 const lots = schema.traceabilityLots;
 
@@ -254,6 +255,8 @@ export class UsLotStore {
         throw new ConflictException({ code: "lot_revision_conflict" });
       }
       applyLotRule(() => assertLotTransition(current.status, value.status));
+      if (current.status !== value.status)
+        await invalidateShippingStatusEffect(tx, tenantId, lotId, value.reason);
       const [updated] = await tx
         .update(lots)
         .set({

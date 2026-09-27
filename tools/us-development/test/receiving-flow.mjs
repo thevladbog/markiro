@@ -11,8 +11,10 @@ import { exerciseUsReceivingTlcInput } from "./receiving-tlc-input-flow.mjs";
 /** Real saved drafts; only the first response is intentionally lost after server commit. */
 export async function exerciseUsReceiving({ page, expect, screenshots, fixture }) {
   await page.getByRole("button", { name: "Open reference data", exact: true }).click();
-  await page.getByRole("button", { name: "Receiving", exact: true }).click();
-  await expect(page.getByText("No receiving records match this search.")).toBeVisible();
+  await page.getByRole("button", { name: "Events", exact: true }).click();
+  await page.getByRole("combobox", { name: "Event type", exact: true }).click();
+  await page.getByRole("option", { name: "Receiving", exact: true }).click();
+  await expect(page.getByText("No events match these filters.")).toBeVisible();
   await page.getByRole("button", { name: "New receiving", exact: true }).click();
   await page.getByLabel("Date received", { exact: true }).fill("2026-09-07");
   await page.getByLabel("Dock / note", { exact: true }).fill("Dock 2");
@@ -86,7 +88,7 @@ export async function exerciseUsReceiving({ page, expect, screenshots, fixture }
   await expect(page.getByRole("button", { name: /finalize|import|delete/i })).toHaveCount(0);
 
   // Leave and reload the application, then reopen the server record.
-  await page.getByRole("button", { name: "Back to receiving", exact: true }).click();
+  await page.getByRole("button", { name: "Back to events", exact: true }).click();
   await expect(
     page.getByRole("button", { name: committed.eventNumber, exact: true }),
   ).toBeVisible();
@@ -97,7 +99,9 @@ export async function exerciseUsReceiving({ page, expect, screenshots, fixture }
   });
   await page.reload();
   await page.getByRole("button", { name: "Open reference data", exact: true }).click();
-  await page.getByRole("button", { name: "Receiving", exact: true }).click();
+  await page.getByRole("button", { name: "Events", exact: true }).click();
+  await page.getByRole("combobox", { name: "Event type", exact: true }).click();
+  await page.getByRole("option", { name: "Receiving", exact: true }).click();
   await page.getByRole("button", { name: committed.eventNumber, exact: true }).click();
   await expect(page.getByLabel("Quantity", { exact: true })).toHaveValue("500.000");
   await expect(page.getByText("BOL-260907-RECEIVING", { exact: true }).first()).toBeVisible();
@@ -277,7 +281,7 @@ export async function exerciseUsReceiving({ page, expect, screenshots, fixture }
     fixture.tenantId,
   ]);
   assert.deepEqual(events.rows, [{ id: committed.id }]);
-  await page.getByRole("button", { name: "Back to receiving", exact: true }).click();
+  await page.getByRole("button", { name: "Back to events", exact: true }).click();
   await page.getByRole("button", { name: "← Profile", exact: true }).click();
   const original = await exerciseUsReceivingFinalization({ page, expect, screenshots, fixture });
   await exerciseUsReceivingExemption({ page, expect, screenshots, fixture });

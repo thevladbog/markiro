@@ -7,7 +7,7 @@ import {
   receivingOperationReceiptV2Schema,
   saveReceivingAmendmentSchema,
 } from "@markiro/platform-contracts";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { authorizeUsMasterData, parseMasterDataInput } from "../master-data/us-master-data-support";
 import {
   lockReceivingOperation,
@@ -47,10 +47,6 @@ export function saveReceivingAmendment(
       .where(and(eq(events.tenantId, tenantId), eq(events.id, eventId)))
       .for("update");
     const before = await readReceivingLiveRecord(tx, tenantId, eventId);
-    const kinds = await tx.execute<{ invalid: boolean }>(sql`SELECT EXISTS (
-      SELECT 1 FROM traceability_events WHERE tenant_id=${tenantId} AND type<>'receiving'
-    ) AS invalid`);
-    if (kinds.rows[0]?.invalid !== false) throw unavailable();
     if (
       root.lifecycleVersion !== value.expectedLifecycleVersion ||
       before.status !== "draft" ||

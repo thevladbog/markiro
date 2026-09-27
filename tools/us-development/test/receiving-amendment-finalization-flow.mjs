@@ -82,7 +82,9 @@ export async function exerciseUsReceivingAmendmentFinalization({
     lotIds.map((id) => read(`lots/${id}/receiving-basis?limit=50&offset=0`)),
   );
   await page.getByRole("button", { name: "Open reference data", exact: true }).click();
-  await page.getByRole("button", { name: "Receiving", exact: true }).click();
+  await page.getByRole("button", { name: "Events", exact: true }).click();
+  await page.getByRole("combobox", { name: "Event type", exact: true }).click();
+  await page.getByRole("option", { name: "Receiving", exact: true }).click();
   await page.getByRole("button", { name: first.eventNumber, exact: true }).click();
   await page.getByRole("button", { name: "Correct receipt", exact: true }).click();
   await page

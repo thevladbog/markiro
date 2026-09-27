@@ -20,13 +20,13 @@ async function readRoot(tx: UsMasterDataTransaction, tenantId: string, id: strin
     .select({ rootId: events.rootEventId, number: events.eventNumber, type: events.type })
     .from(events)
     .where(and(eq(events.tenantId, tenantId), eq(events.id, id)));
-  if (!anchor) throw new NotFoundException({ code: "receiving_draft_not_found" });
+  if (!anchor || anchor.type !== "receiving")
+    throw new NotFoundException({ code: "receiving_draft_not_found" });
   const [root] = await tx
     .select()
     .from(roots)
     .where(and(eq(roots.tenantId, tenantId), eq(roots.id, anchor.rootId)));
-  if (!root || anchor.type !== "receiving" || root.eventNumber !== anchor.number)
-    throw unavailable();
+  if (!root || root.eventNumber !== anchor.number) throw unavailable();
   await assertReceivingRootsReadable(tx, tenantId, sql`r.id=${root.id}`);
   return root;
 }

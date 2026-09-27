@@ -217,7 +217,7 @@ describe.skipIf(!url)("Receiving current basis reads", () => {
       items: [{ eventId: b.id, lineNos: [1, 2] }],
     });
   });
-  it.each(["pointer", "counter", "snapshot", "unknown_kind", "missing_root"])(
+  it.each(["pointer", "counter", "snapshot", "wrong_type", "missing_root"])(
     "fails closed on %s corruption even outside the requested page",
     async (kind) => {
       const saved = await receipt();
@@ -226,13 +226,13 @@ describe.skipIf(!url)("Receiving current basis reads", () => {
         f.db.transaction(async (tx) => {
           // Corruption is transaction-local and rolled back, including any dropped check.
           await tx.execute(sql`SET LOCAL session_replication_role='replica'`);
-          if (kind === "unknown_kind") {
+          if (kind === "wrong_type") {
             await tx.execute(
               sql`ALTER TABLE traceability_events DROP CONSTRAINT traceability_events_lifecycle_valid`,
             );
             await tx
               .update(schema.traceabilityEvents)
-              .set({ type: "shipping" })
+              .set({ type: "transformation", eventNumber: "TRN-26-0001" })
               .where(eq(schema.traceabilityEvents.id, saved.id));
           } else if (kind === "pointer")
             await tx

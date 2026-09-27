@@ -5,6 +5,8 @@ import { useTranslation } from "react-i18next";
 import { UsClientError } from "../client.js";
 import { Pager, type MasterDataViewProps } from "../master-data/workspace-shared.js";
 import { ReceivingEditor } from "./editor.js";
+import { ReceivingCsvImport } from "./csv-import.js";
+import { ReceivingCsvExport } from "./csv-export.js";
 import { ReceivingAmendmentEditor } from "./amendment-editor.js";
 import { ReceivingFinalizedDetail } from "./finalized-detail.js";
 import { ReceivingLifecycleActions } from "./lifecycle-dialog.js";
@@ -20,7 +22,10 @@ export function ReceivingView(
   props: MasterDataViewProps & {
     timeZone: string;
     canManageQa?: boolean;
-    initialRecord?: ReceivingFrozenView;
+    canExport?: boolean;
+    initialRecord?: ReceivingLiveRecord;
+    startNew?: boolean;
+    startImport?: boolean;
     onOpenLot?: (id: string, record: ReceivingFrozenView) => void;
     onEntryBack?: () => void;
     backLabel?: string;
@@ -39,9 +44,14 @@ export function ReceivingView(
   const [opening, setOpening] = useState(false);
   const [openFailure, setOpenFailure] = useState(false);
   const [editor, setEditor] = useState<{ initial: ReceivingLiveRecord | null } | null>(
-    props.initialRecord ? { initial: props.initialRecord } : null,
+    props.initialRecord
+      ? { initial: props.initialRecord }
+      : props.startNew
+        ? { initial: null }
+        : null,
   );
   const [refresh, setRefresh] = useState(0);
+  const [importing, setImporting] = useState(props.startImport ?? false);
   const openRecord = useCallback((initial: ReceivingLiveRecord) => setEditor({ initial }), []);
   const run = useRef(0);
   const openRun = useRef(0);
@@ -108,29 +118,52 @@ export function ReceivingView(
     setEditor(null);
     setRefresh((n) => n + 1);
   };
-  if (editor?.initial && isReceivingFrozenView(editor.initial))
+  if (importing)
+    return (
+      <ReceivingCsvImport
+        {...props}
+        {...(props.backLabel ? { backLabel: props.backLabel } : {})}
+        onClose={() => {
+          setImporting(false);
+          if (props.onEntryBack) props.onEntryBack();
+          else setRefresh((value) => value + 1);
+        }}
+        onOpenRecord={(record) => {
+          setImporting(false);
+          openRecord(record);
+        }}
+      />
+    );
+  const frozen = editor?.initial;
+  if (frozen && isReceivingFrozenView(frozen))
     return (
       <ReceivingFinalizedDetail
-        record={editor.initial}
+        record={frozen}
         onClose={close}
         {...(props.backLabel ? { backLabel: props.backLabel } : {})}
         onOpenLot={props.onOpenLot ?? (() => {})}
         disabled={mutationPending}
         actions={
           <>
+            <ReceivingCsvExport
+              client={client}
+              record={frozen}
+              canExport={props.canExport ?? false}
+              dirty={false}
+              disabled={mutationPending}
+              onReload={() => void open(frozen.id)}
+              onForbidden={onForbidden}
+              onSessionLost={onSessionLost}
+            />
             <ReceivingRevisionNavigation
-              key={`${editor.initial.id}/${editor.initial.lifecycle.lifecycleVersion}`}
+              key={`${frozen.id}/${frozen.lifecycle.lifecycleVersion}`}
               {...props}
-              record={editor.initial}
+              record={frozen}
               disabled={mutationPending}
               onOpenRecord={openRecord}
             />
             {props.canManageQa ? (
-              <ReceivingLifecycleActions
-                {...props}
-                record={editor.initial}
-                onOpenRecord={openRecord}
-              />
+              <ReceivingLifecycleActions {...props} record={frozen} onOpenRecord={openRecord} />
             ) : null}
           </>
         }
@@ -228,12 +261,21 @@ export function ReceivingView(
           <p>{t("receiving.intro")}</p>
         </div>
         {canWrite ? (
-          <Button
-            disabled={opening || mutationPending}
-            onClick={() => setEditor({ initial: null })}
-          >
-            {t("receiving.new")}
-          </Button>
+          <div className="us-rec-csv-actions">
+            <Button
+              variant="secondary"
+              disabled={opening || mutationPending}
+              onClick={() => setImporting(true)}
+            >
+              {t("receivingCsv.title")}
+            </Button>
+            <Button
+              disabled={opening || mutationPending}
+              onClick={() => setEditor({ initial: null })}
+            >
+              {t("receiving.new")}
+            </Button>
+          </div>
         ) : null}
       </header>
       <form

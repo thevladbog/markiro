@@ -27,10 +27,11 @@ export async function lockReceivingRoot(
   const events = schema.traceabilityEvents;
   const roots = schema.receivingEventRoots;
   const [event] = await tx
-    .select({ rootEventId: events.rootEventId, eventNumber: events.eventNumber })
+    .select({ rootEventId: events.rootEventId, eventNumber: events.eventNumber, type: events.type })
     .from(events)
     .where(and(eq(events.tenantId, tenantId), eq(events.id, eventId)));
-  if (!event) throw new NotFoundException({ code: "receiving_draft_not_found" });
+  if (!event || event.type !== "receiving")
+    throw new NotFoundException({ code: "receiving_draft_not_found" });
   const [root] = await tx
     .select()
     .from(roots)

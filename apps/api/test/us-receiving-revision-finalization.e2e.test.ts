@@ -105,7 +105,7 @@ describe.skipIf(!url)("Receiving internal revision finalization", () => {
   const businessLots = async () =>
     (
       await f.pool.query(
-        "SELECT to_jsonb(l)-'receiving_basis_version' AS lot FROM traceability_lots l WHERE tenant_id=$1 ORDER BY id",
+        "SELECT to_jsonb(l)-'receiving_basis_version'-'current_dependency_version' AS lot FROM traceability_lots l WHERE tenant_id=$1 ORDER BY id",
         [c.tenant],
       )
     ).rows;
@@ -302,6 +302,18 @@ describe.skipIf(!url)("Receiving internal revision finalization", () => {
       result = await finalize(amended.eventId, 2);
     expect(await lots()).toHaveLength(3);
     expect(await businessLots()).toEqual(expect.arrayContaining(unchanged));
+    expect(
+      (
+        await f.pool.query(
+          "SELECT tlc,current_dependency_version AS epoch FROM traceability_lots WHERE tenant_id=$1 ORDER BY tlc",
+          [c.tenant],
+        )
+      ).rows,
+    ).toEqual([
+      { tlc: "00001", epoch: 2 },
+      { tlc: "000NEW", epoch: 1 },
+      { tlc: "ADDITIONAL-LOT", epoch: 2 },
+    ]);
     expect(await store.getLotReceivingBasis(c.tenant, c.actor, c.lot, {})).toMatchObject({
       state: "missing",
       supportCount: 0,
@@ -430,6 +442,17 @@ describe.skipIf(!url)("Receiving internal revision finalization", () => {
       },
     });
     expect(await businessLots()).toEqual(before);
+    expect(
+      (
+        await f.pool.query(
+          "SELECT tlc,current_dependency_version AS epoch FROM traceability_lots WHERE tenant_id=$1 ORDER BY tlc",
+          [c.tenant],
+        )
+      ).rows,
+    ).toEqual([
+      { tlc: "00001", epoch: 1 },
+      { tlc: "000NEW", epoch: 2 },
+    ]);
     const audit = (
       await f.db
         .select()

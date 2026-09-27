@@ -5,7 +5,7 @@ import { UsClientError, type UsBrowserClient } from "../client.js";
 import "./references.css";
 
 export type ReceivingReferenceKind = "product" | "location" | "lot" | "document" | "party";
-type LocationRole = "receive_at" | "tlc_source" | "supplier";
+type LocationRole = "receive_at" | "tlc_source" | "supplier" | "ship_from" | "recipient";
 type ReferenceOption = { value: string; label: string };
 
 const SEARCH_KEYS: Record<ReceivingReferenceKind, string> = {

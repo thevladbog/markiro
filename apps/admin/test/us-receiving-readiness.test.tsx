@@ -71,17 +71,27 @@ async function setup(
           ...(options.qa ? ["traceability.qa.manage"] : []),
         ],
       });
-    if (String(url).startsWith(`${path}?`)) {
-      const header = Object.fromEntries(Object.entries(record).filter(([key]) => key !== "draft"));
+    if (String(url).startsWith("/api/us/traceability/events?")) {
       return Response.json({
         items: [
           {
-            ...header,
-            dateReceived: null,
+            id,
+            rootId: id,
+            type: "receiving",
+            eventNumber: record.eventNumber,
+            revision: 1,
+            status: "draft",
+            lifecycleVersion: 1,
+            currentEventId: null,
+            pendingDraftId: id,
+            eventDate: null,
+            timeZone: record.timeZone,
             locationId: null,
+            locationDisplay: null,
             previousSourceLocationId: null,
             lineCount: 0,
             documentCount: 0,
+            updatedAt: record.updatedAt,
           },
         ],
         limit: 50,
@@ -144,7 +154,7 @@ async function setup(
   const user = userEvent.setup();
   await user.click(
     await screen.findByRole("button", {
-      name: options.locale === "es-US" ? "Recepción" : "Receiving",
+      name: options.locale === "es-US" ? "Eventos" : "Events",
     }),
   );
   await user.click(await screen.findByRole("button", { name: record.eventNumber }));
@@ -377,7 +387,7 @@ describe("saved receiving readiness", () => {
 
   it("requires saving a new draft without silently creating it", async () => {
     const { user, send } = await setup();
-    await user.click(screen.getByRole("button", { name: "Back to receiving" }));
+    await user.click(screen.getByRole("button", { name: "Back to events" }));
     await user.click(await screen.findByRole("button", { name: "New receiving" }));
     expect(screen.getByRole("button", { name: "Check saved draft" }).hasAttribute("disabled")).toBe(
       true,
@@ -445,7 +455,7 @@ describe("saved receiving readiness", () => {
       handle: (url) => (url.includes("/readiness") ? pending : undefined),
     });
     await user.click(screen.getByRole("button", { name: "Check saved draft" }));
-    await user.click(screen.getByRole("button", { name: "Back to receiving" }));
+    await user.click(screen.getByRole("button", { name: "Back to events" }));
     await act(async () => resolve?.(Response.json({ code: "session_required" }, { status: 401 })));
     expect(onSessionLost).not.toHaveBeenCalled();
     expect(screen.queryByRole("region", { name: "Saved-draft data check" })).toBeNull();

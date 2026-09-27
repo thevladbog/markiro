@@ -4,7 +4,9 @@ import assert from "node:assert/strict";
 export async function exerciseUsReceivingTlcInput({ page, expect }) {
   const base = "http://localhost:5174/api/us/traceability/receiving";
   await page.getByRole("button", { name: "Open reference data", exact: true }).click();
-  await page.getByRole("button", { name: "Receiving", exact: true }).click();
+  await page.getByRole("button", { name: "Events", exact: true }).click();
+  await page.getByRole("combobox", { name: "Event type", exact: true }).click();
+  await page.getByRole("option", { name: "Receiving", exact: true }).click();
   await page.getByRole("button", { name: "New receiving", exact: true }).click();
   await page.getByRole("button", { name: "Add line", exact: true }).click();
   const tlc = page.getByRole("textbox", { name: "Lot code (TLC)", exact: true });
@@ -54,7 +56,7 @@ export async function exerciseUsReceivingTlcInput({ page, expect }) {
     page.off("request", observe);
   }
   page.once("dialog", (dialog) => dialog.accept());
-  await page.getByRole("button", { name: "Back to receiving", exact: true }).click();
+  await page.getByRole("button", { name: "Back to events", exact: true }).click();
   await page.getByRole("button", { name: "← Profile", exact: true }).click();
   console.log(
     "Ordinary TLC: native 120 supplementary points saved exactly; 121st retained with validation error, no write, unchanged saved text and draft version.",

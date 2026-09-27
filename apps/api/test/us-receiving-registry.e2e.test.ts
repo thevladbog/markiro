@@ -343,7 +343,7 @@ describe.skipIf(!url)("Receiving current and historical registry", () => {
             );
             await tx
               .update(schema.traceabilityEvents)
-              .set({ type: "shipping" })
+              .set({ type: "transformation", eventNumber: "TRN-26-0001" })
               .where(eq(schema.traceabilityEvents.id, pending.eventId));
           }
           await expect(

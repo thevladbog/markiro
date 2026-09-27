@@ -114,8 +114,8 @@ The requirement matrix owns per-requirement status and slice assignments. A boun
 | US-01 | Parties and locations                    | LOC-001..008                        | 8–10  | US-00       | In progress |
 | US-02 | Product FTL profiles and TLC lots        | PRD-001..010, LOT-001..009          | 12–15 | US-01       | In progress |
 | US-03 | Receiving CTE                            | REC-001..008, DOC-001..002          | 8–10  | US-02       | In progress |
-| US-04 | Transformation and P0 server case bridge | TRN-001..014, LOT-010               | 14–18 | US-02/03    | Not started |
-| US-05 | Shipping CTE                             | SHP-001..010                        | 8–11  | US-04       | Not started |
+| US-04 | Transformation and P0 server case bridge | TRN-001..014, LOT-010               | 14–18 | US-02/03    | In progress |
+| US-05 | Shipping CTE                             | SHP-001..010                        | 8–11  | US-04       | In progress |
 | US-06 | Trace graph, search, completeness        | TRC-001..010                        | 9–12  | US-03/04/05 | Not started |
 | US-07 | FDA-aligned XLSX adapter                 | EXP-001..012                        | 12–16 | US-06       | Not started |
 | US-08 | Traceability Plan                        | PLN-001..010                        | 7–10  | US-00/02    | Not started |
@@ -125,6 +125,78 @@ The requirement matrix owns per-requirement status and slice assignments. A boun
 | US-12 | Optional landing and extra assets (P1)   | demo assets                         | 6–10  | US-11       | Not started |
 
 Slice status values: Not started, In progress, Done. A slice is Done only when its Definition of Done from MUS-001 §10.2 is met and its verification report (see [acceptance.md](acceptance.md)) is filed.
+
+### US-05 Shipping office UI checkpoint — 2026-09-27
+
+The isolated U.S. Events workspace now opens Shipping drafts and saved records. Writers select
+existing lots, an explicit quantity/UOM, ship-from and immediate subsequent recipient locations,
+and reference documents; QA can check saved-version readiness, finalize, amend or void, including
+cancellation of a pending amendment draft while its predecessor stays current. EN/ES readiness
+blockers identify the affected field or line and give path-specific repair guidance. Frozen
+ship-from, recipient and source Location Descriptions, Product Description, source reference and
+document issuer are readable from saved snapshots without live master-data hydration or write
+capability. Dates display MM/DD/YYYY in both languages, and audit instants use the tenant zone.
+Shipping neither creates a TLC nor selects cases/SSCCs. The draft now reads a tenant-scoped,
+event-derived current lot balance and origin UOM, with a contextual replacement preview for an
+amendment. It shows an exact decimal projection and refresh control; finalization rechecks the
+ledger under lock. Frozen Shipping detail keeps the recorded quantity and KDEs unchanged and
+shows a separately labeled current recorded lot balance. That value is not a historical
+before/after balance or warehouse stock; unknown and unavailable reads remain explicit.
+
+The post-review local admin suite passed 1,575 tests across 137 files; the focused
+Shipping/Events suites passed 26/26. Typecheck, lint and both
+standard/US builds passed after that fix. The US-only CI workflow owns the new
+admin tests; local isolation checks passed, but hosted CI has not run for this checkpoint. A
+bounded Chromium smoke on a disposable database passed real MFA, a saved 100-case Receiving
+origin, actionable EN/ES over-shipment blockers on a 200-case draft, correction and finalization
+of a 60-case shipment, server readback, and EN/light plus ES/dark frozen-detail screenshots at
+1024 px. This is local code/browser evidence, not a controlled 100-case US-11 demo,
+FDA export, physical dispatch, screen-reader acceptance, or hosted deployment.
+
+### US-04 server case bridge increment — 2026-09-26
+
+The isolated U.S. API now has the [server case/SSCC bridge](../superpowers/specs/2026-09-26-us-04-server-case-bridge-design.md): tenant-scoped case lookup, output-lot active/history list, atomic manual link of 1–100 distinct valid SSCCs, and reasoned unlink by exact active link ID. The bridge stores link history, operation receipts and trusted synthetic provenance separately from shared boxes. A case may have only one active lot link; a new link requires a current finalized Transformation output origin. Voiding that origin retains old links with an explicit gap and still permits unlink. Active-link count is independent of immutable event quantity; cursor pages read live history and can reflect concurrent inserts. The US-only controller is allowlisted without mounting RU box or Station controllers.
+
+At this server checkpoint, the controlled 100-case US-11 seed, unified Events UI and output-lot Cases panel remained pending. The later UI checkpoint below supersedes only the UI gap. The fixture's synthetic marker and automated checks do not establish physical closure, scanning, printing, a hosted U.S. deployment or regulatory acceptance.
+
+### US-04 Events and Transformation office UI — 2026-09-27
+
+The local office sidebar now opens a server-paginated mixed Events list with Receiving and
+Transformation type/status/history/search filters. Typed Receiving editors, CSV and lot links
+remain available. Transformation supports full draft replacement, saved-version readiness,
+QA finalization/amendment/void, frozen detail and revision history, current/pinned genealogy,
+and a separate Cases panel with audited links and synthetic/existing-record provenance.
+EN/ES copy preserves identifier and quantity values. Cases counts are independent of event
+quantity; void retains output lots and existing links with an explicit current-origin gap.
+
+The 11 focused admin suites passed 70 tests locally; the full admin suite passed 1,535 tests
+across 132 files without skips. Admin typecheck/lint and the standard and isolated US builds
+passed (five existing RU hook warnings and the existing large-chunk advisory remain).
+All 28 local Node isolation/proxy/ownership checks and the isolation checker passed;
+repository formatting and diff checks passed. Hosted CI has not run for this local increment.
+The disposable PostgreSQL browser
+walkthrough `tools/us-development/test/transformation-flow.smoke.mjs` passed with real MFA:
+mixed list, UI draft save, saved readiness, QA finalization, zero automatic case links,
+Receiving filter/detail navigation and EN/ES at 1024 px with complete TLC/lot UUID access.
+It uses `tools/us-development/browser-fixture.mjs`, creates only owned random child databases,
+and captures only safe post-authentication states. The initial sandbox run was blocked by
+loopback EPERM; the authorized local-runtime run passed. This is a local walkthrough, not
+US-11 demo seeding or a hosted CI result.
+
+The existing Receiving CSV companion and full Receiving browser regression also passed
+after the Events entry migration, including exact retry/audit, lifecycle, revision/basis
+navigation, multiple independent receiving bases and Unicode TLC boundaries. The mutation
+observers recognize only the strictly validated read-only genealogy POST; other commands
+remain checked exactly.
+
+Briefs 03/04 now reflect the P0 lifecycle and exact `/cases` routes. The affected `.pen`
+frames were not opened or revalidated and remain pending Pencil MCP acceptance. US-04 stays
+In progress; US-05 Shipping and US-11 controlled 100-case seed remain open. Fluent Spanish,
+screen-reader, hardware, scan/print, hosted CI and deployment acceptance remain separate.
+
+### US-04 Transformation HTTP and Events API increment — 2026-09-27
+
+The isolated U.S. API now exposes strict Transformation create/read/save/readiness/finalization/amendment/void/revision routes and a tenant-scoped, globally ordered Receiving/Transformation Events registry. The US controller allowlist and check-only workflow own the new contract and API suites. Local verification passed 8 focused contract tests and 86 tests across the five new API suites plus Receiving and Case HTTP regressions against disposable U.S. PostgreSQL child databases, without skips. The initial sandboxed database run was blocked by loopback `EPERM`; the authorized local-runtime rerun passed. This is local API evidence only. At this API checkpoint, Events/Transformation UI and browser walkthrough remained pending; the later office UI checkpoint above supersedes those two gaps. The 100-case seed, hosted CI and deployment remain pending; US-04 stays In progress.
 
 ### US-00 first increment — 2026-09-05
 

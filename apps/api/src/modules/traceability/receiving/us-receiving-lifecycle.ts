@@ -9,7 +9,7 @@ import {
   receivingOperationReceiptV2Schema,
   type ReceivingLiveRecord,
 } from "@markiro/platform-contracts";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import {
   authorizeUsMasterData,
   parseMasterDataInput,
@@ -29,6 +29,8 @@ import {
   replayReceivingLifecycle,
 } from "./us-receiving-operations";
 import { readReceivingBasis } from "./us-receiving-basis";
+import { bumpLotDependencyVersions } from "../lots/us-current-consumers";
+import { listCurrentDownstreamConsumers } from "../shipping/us-shipping-balance";
 
 const events = schema.traceabilityEvents,
   roots = schema.receivingEventRoots;
@@ -125,9 +127,12 @@ async function voidRevision(
       .for("update");
     if (!lot) throw unavailable();
   }
-  // Complete Receiving-only integrity is checked after all lot locks. Unknown
-  // kinds cannot stand in for unimplemented downstream dependency writers.
+  // Recheck current support and downstream evidence under all affected lot locks.
   for (const id of lotIds) await readReceivingBasis(tx, tenantId, id, { limit: 1, offset: 0 });
+  const blockers = await listCurrentDownstreamConsumers(tx, tenantId, lotIds);
+  if (blockers.length)
+    throw new ConflictException({ code: "traceability_downstream_blocked", blockers });
+  await bumpLotDependencyVersions(tx, tenantId, lotIds);
   await tx
     .update(events)
     .set({ status: "void", voidedAt: new Date(), voidedBy: actorUserId, voidReason: reason })
@@ -172,10 +177,6 @@ export function executeReceivingLifecycle(
       .where(and(eq(events.tenantId, tenantId), eq(events.id, eventId)))
       .for("update");
     const before = await readReceivingLiveRecord(tx, tenantId, eventId);
-    const kinds = await tx.execute<{ invalid: boolean }>(sql`SELECT EXISTS (
-      SELECT 1 FROM traceability_events WHERE tenant_id=${tenantId} AND type<>'receiving'
-    ) AS invalid`);
-    if (kinds.rows[0]?.invalid !== false) throw unavailable();
     if (root.lifecycleVersion !== value.expectedLifecycleVersion) throw conflict(before);
     const decision = assessReceivingTransition(
       {

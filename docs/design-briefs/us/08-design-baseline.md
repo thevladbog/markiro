@@ -43,6 +43,13 @@ The shared component sheet and navigation index are not included in the 128 scre
 
 ## Verification and limits
 
+2026-09-27 written reconciliation: the unified Events workspace, Transformation lifecycle,
+separate Cases counts/provenance and current-origin gaps follow the
+[approved UI specification](../../superpowers/specs/2026-09-26-us-04-transformation-http-events-ui-design.md).
+Affected `.pen` frames (Events, Transformation, revision/void, Cases and genealogy, EN/ES
+and 1024 px) have not been opened, edited or revalidated through Pencil MCP in this increment.
+Their visual acceptance remains pending; browser/component checks do not replace it.
+
 Pencil structural checks on 2026-09-05: 128 screens, 18 sections, no overlapping root frames, no clipped nodes, no unfinished placeholders. The text contrast pass checked 5,392 resolved text/background pairs with no failures against the applicable AA text thresholds. Reviewed representative light/dark, Spanish, narrow-office, mobile-access and Station screenshots.
 
 These are static design checks. They do not prove browser behavior, focus trapping, screen-reader support, localization key completeness, security, email delivery or physical scanner/printer acceptance. Spanish safety and regulatory wording needs fluent review before operational use. Not every screen is duplicated in Spanish or dark mode; production translation and theme coverage apply to every reachable U.S. screen.

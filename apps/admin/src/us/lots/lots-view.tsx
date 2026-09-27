@@ -10,6 +10,8 @@ import { allowedLotStatuses, lotSourceLabel } from "./shared.js";
 import { loadLotReferenceLabels } from "./reference-labels.js";
 import { LotReceivingBasisSection } from "./receiving-basis.js";
 import type { ReceivingFrozenView } from "../receiving/live-record.js";
+import { LotCasesPanel } from "../transformation/cases.js";
+import { TransformationGenealogyPanel } from "../transformation/genealogy.js";
 import "./lots.css";
 
 type Props = MasterDataViewProps & {
@@ -20,6 +22,8 @@ type Props = MasterDataViewProps & {
   onEntryBack?: () => void;
   entryBackLabel?: string;
   onOpenReceiving: (lotId: string, record: ReceivingFrozenView) => void;
+  onOpenTransformation: (eventId: string, lotId: string) => void;
+  canTransform: boolean;
 };
 
 export function LotsView(props: Props) {
@@ -33,6 +37,7 @@ export function LotsView(props: Props) {
     onForbidden,
     onSessionLost,
     onNotice,
+    onDirtyChange,
     entryLotId,
     onEntryBack,
   } = props;
@@ -49,6 +54,12 @@ export function LotsView(props: Props) {
   const [openFailure, setOpenFailure] = useState(false);
   const [lot, setLot] = useState<TraceabilityLot | null>(null);
   const [needsReload, setNeedsReload] = useState(false);
+  const [casesProtected, setCasesProtected] = useState(false);
+  const [origin, setOrigin] = useState<{
+    lotId: string;
+    eventId: string | null;
+    state: "current" | "gap" | "unknown";
+  } | null>(null);
   const [detailReferences, setDetailReferences] = useState<{
     lot: TraceabilityLot;
     labels: Record<string, string>;
@@ -60,6 +71,13 @@ export function LotsView(props: Props) {
   const openRun = useRef(0);
   const heading = useRef<HTMLHeadingElement>(null);
   const focusNeeded = useRef(true);
+  const handleCasesProtected = useCallback(
+    (protectedState: boolean) => {
+      setCasesProtected(protectedState);
+      onDirtyChange(protectedState);
+    },
+    [onDirtyChange],
+  );
 
   const load = useCallback(async () => {
     const current = ++run.current;
@@ -213,6 +231,8 @@ export function LotsView(props: Props) {
     />
   );
   if (lot) {
+    const currentOrigin = origin?.lotId === lot.id ? origin : null;
+    const originEventId = currentOrigin?.state === "current" ? currentOrigin.eventId : null;
     const labels = detailReferences?.lot === lot ? detailReferences.labels : {};
     const date = (value: string) =>
       new Intl.DateTimeFormat(i18n.language, {
@@ -229,6 +249,7 @@ export function LotsView(props: Props) {
             variant="secondary"
             disabled={opening || mutationPending}
             onClick={() => {
+              if (casesProtected && !window.confirm(t("md.discardConfirm"))) return;
               if (onEntryBack) {
                 onEntryBack();
                 return;
@@ -243,7 +264,7 @@ export function LotsView(props: Props) {
           </Button>
           <Button
             variant="secondary"
-            disabled={opening || mutationPending}
+            disabled={opening || mutationPending || casesProtected}
             onClick={() => void open(lot.id)}
           >
             {t("lots.reload")}
@@ -321,8 +342,11 @@ export function LotsView(props: Props) {
           {canWrite && !lot.sourceLockedAt ? (
             <Button
               variant="secondary"
-              disabled={opening || mutationPending || needsReload}
-              onClick={() => setEditor({ kind: "source", lot })}
+              disabled={opening || mutationPending || needsReload || casesProtected}
+              onClick={() => {
+                if (opening || mutationPending || needsReload || casesProtected) return;
+                setEditor({ kind: "source", lot });
+              }}
             >
               {t("lots.correct")}
             </Button>
@@ -330,8 +354,11 @@ export function LotsView(props: Props) {
           {canManageQa && allowedLotStatuses(lot).length > 0 ? (
             <Button
               variant="secondary"
-              disabled={opening || mutationPending || needsReload}
-              onClick={() => setEditor({ kind: "status", lot })}
+              disabled={opening || mutationPending || needsReload || casesProtected}
+              onClick={() => {
+                if (opening || mutationPending || needsReload || casesProtected) return;
+                setEditor({ kind: "status", lot });
+              }}
             >
               {t("lots.changeStatus")}
             </Button>
@@ -342,8 +369,53 @@ export function LotsView(props: Props) {
           key={lot.id}
           {...props}
           lot={lot}
-          mutationPending={mutationPending || opening}
+          mutationPending={mutationPending || opening || casesProtected}
           onOpenReceiving={(record) => props.onOpenReceiving(lot.id, record)}
+        />
+        <section className="us-lot-panel" aria-label={t("lots.transformationOrigin")}>
+          <h2>{t("lots.transformationOrigin")}</h2>
+          {lot.assignmentBasis !== "transformation" ? (
+            <p>{t("lots.nonTransformationOrigin")}</p>
+          ) : null}
+          {originEventId ? (
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={opening || mutationPending}
+              onClick={() => props.onOpenTransformation(originEventId, lot.id)}
+            >
+              {t("lots.openTransformationOrigin")}
+            </Button>
+          ) : (
+            <p role="status">
+              {t(
+                currentOrigin?.state === "gap"
+                  ? "transformation.cases.originGap"
+                  : "lots.originUnknown",
+              )}
+            </p>
+          )}
+        </section>
+        <TransformationGenealogyPanel
+          key={`${lot.id}/genealogy`}
+          client={client}
+          lotId={lot.id}
+          disabled={opening || mutationPending}
+          onForbidden={onForbidden}
+          onSessionLost={onSessionLost}
+          onCurrentOrigin={(eventId, state) => setOrigin({ lotId: lot.id, eventId, state })}
+        />
+        <LotCasesPanel
+          key={`${lot.id}/cases`}
+          client={client}
+          lotId={lot.id}
+          canWrite={props.canTransform}
+          disabled={opening || mutationPending}
+          timeZone={timeZone}
+          beginMutation={props.beginMutation}
+          onForbidden={onForbidden}
+          onSessionLost={onSessionLost}
+          onProtectedChange={handleCasesProtected}
         />
       </div>
     );

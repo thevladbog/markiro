@@ -1,5 +1,16 @@
 export { gs1CheckDigit, hasValidCheckDigit } from "./gs1/check-digit.js";
 export { DomainError } from "./errors.js";
+export {
+  parseReceivingCsv,
+  RECEIVING_CSV_COLUMNS,
+  RECEIVING_CSV_VERSION,
+} from "./traceability/receiving-csv.js";
+export type {
+  ReceivingCsvColumn,
+  ReceivingCsvFileErrorCode,
+  ReceivingCsvRawRow,
+  ReceivingCsvParseResult,
+} from "./traceability/receiving-csv.js";
 export { US_CAPABILITY, resolveUsAccess, hasUsCapabilities } from "./traceability/access.js";
 export type { UsCapability, UsRole, UsAccess } from "./traceability/access.js";
 export {
@@ -30,8 +41,40 @@ export { TRACEABILITY_LOT_STATUSES, assertLotTransition } from "./traceability/l
 export type { TraceabilityLotStatus } from "./traceability/lots/status.js";
 export { ancestorsOf, descendantsOf, wouldCreateCycle } from "./traceability/lots/genealogy.js";
 export type { LotGenealogyEdge } from "./traceability/lots/genealogy.js";
+export { projectTransformationGenealogy } from "./traceability/transformation-genealogy.js";
+export type {
+  TransformationGenealogyBalance,
+  TransformationGenealogyDiagnostic,
+  TransformationGenealogyEvent,
+  TransformationGenealogyLine,
+  TransformationGenealogyLink,
+  TransformationGenealogyLot,
+  TransformationGenealogyProjectionInput,
+  TransformationGenealogyProjectionResult,
+  TransformationGenealogySnapshot,
+} from "./traceability/transformation-genealogy.js";
 export { UOM_CODES_V1 } from "./traceability/uom.js";
 export { parseTraceabilityQuantity } from "./traceability/quantity.js";
+export {
+  computeShippingBalance,
+  projectShippingRemaining,
+} from "./traceability/shipping-balance.js";
+export type { ShippingBalance, ShippingBalanceInput } from "./traceability/shipping-balance.js";
+export { validateShippingReadiness } from "./traceability/shipping-readiness.js";
+export type { ShippingIssue, ShippingReadinessInput } from "./traceability/shipping-readiness.js";
+export {
+  classifyTransformationChange,
+  sameTransformationOutputIdentity,
+} from "./traceability/transformation-lifecycle.js";
+export {
+  assessTransformationReadiness,
+  TRANSFORMATION_READINESS_RULE_VERSION,
+} from "./traceability/transformation-readiness.js";
+export type {
+  TransformationDraftValue,
+  TransformationIssue,
+  TransformationReadinessInput,
+} from "./traceability/transformation-readiness.js";
 export {
   assessReceivingReadiness,
   assessReceivingRevisionReadiness,

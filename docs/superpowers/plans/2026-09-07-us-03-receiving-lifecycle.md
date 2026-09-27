@@ -2906,3 +2906,78 @@ CSV slice, but this checkpoint does not mark US-03 or the MVP complete. No new
 hosted/mail/object-storage/hardware/native-device/screen-reader acceptance is
 claimed. Primary checkout HEAD and its six unrelated untracked paths remain
 unchanged. Nothing is staged, committed, pushed, merged or deployed.
+
+## Pushed checkpoint and multiple-support visual matrix — 2026-09-08
+
+On the owner's explicit push request, the preceding accumulated changes were
+committed and pushed as `943713a11bcec99506677ea37f3d27a34e68a224` to
+`origin/codex/us-mvp`. Before committing, 60 focused admin tests in six files and
+19 isolation/browser-entry contracts passed, with clean staged diff checks.
+There was no PR, merge, release, hosted deployment or dependency change. Check-only
+GitHub run `34258995310` started for that exact SHA; the later test-only changes
+below are separate, local work and are not covered by that remote run.
+
+Continuing sequentially, the multiple-support browser companion now covers five
+states across both locales/themes and all three widths, producing 60 safe captures.
+Each view verifies exact translated counts/revision identities or the last-basis
+warning, keyboard focus, overflow and mobile controls/footer bounds. Reopening
+previews for locale/theme changes performs only reads; exact two-write/two-audit
+assertions and immutable lot/receipt checks still apply. Product source is unchanged.
+
+The expanded full browser journey passed 1/1 in 56.99 seconds (58.52 total), with
+artifacts in `markiro-us-browser-KiYUWX` under the existing temporary screenshot
+root. All five ES dark 390 originals, the ES light 1024 two-support card and EN
+light 1440 last-basis warning were inspected. This does not claim manual inspection
+of every capture, a pixel-baseline comparison, fluent Spanish or native devices.
+Scoped browser lint, 19 isolation/browser-entry contracts, repository formatting
+and diff checks passed. Full package gates were not repeated for this test-only
+extension; their verified results are in the preceding checkpoint.
+
+The repeated complete journey passed 1/1 in 57.15 seconds (58.75 total), with
+safe captures in `markiro-us-browser-NGyKA5`. Both runs had no skipped cases.
+At the last remote read, check-only run `34258995310` was still in progress;
+remote success is not claimed.
+
+Remaining visual follow-up is the localized QA-access recovery matrix. CSV and
+real downstream consumers remain separate, and US-03/MVP completion or release
+is not implied. New test/document edits stay local after the requested checkpoint
+push; the primary checkout and release locks remain untouched.
+
+## Localized QA-access recovery acceptance — 2026-09-08
+
+The fresh remote read confirms check-only GitHub run `34258995310` completed
+successfully for `943713a11bcec99506677ea37f3d27a34e68a224`. This supersedes the
+earlier in-progress observation, not the local-only status of subsequent changes.
+
+Continuing inline, the recovery companion now exercises both commands' denied
+and explicitly restored views in EN/ES, light/dark, at 1440/1024/390 (48 safe
+captures). It asserts the localized notice, absent actions/retry, available
+navigation, empty restored reason, focus, disabled confirmation, footer bounds,
+horizontal overflow, document language and actual theme. Role revocation and
+restoration still happen only in the owned disposable fixture. Exactly two real
+403 POSTs and complete unchanged receipt/audit assertions remain in force.
+No production source, business rule, dependency or workflow changed.
+
+The first complete journey passed 1/1 without skips in 80.89 seconds (83.98 total)
+with artifacts in temporary `markiro-us-browser-97hXkX`. All four ES dark mobile
+denied/restored originals were personally inspected. This is not every-capture
+manual review, pixel-baseline comparison, fluent Spanish or native-device proof.
+
+After adding explicit language/theme and full-notice viewport assertions, the
+final-source journey passed 1/1 without skips in 61.74 seconds (63.47 total),
+with exactly 48 access-recovery captures in `markiro-us-browser-jQBE2Z`.
+The ES light 1024 restored-void dialog and EN light 1440 denied-correction view
+were also personally inspected. Browser companion lint, 19 isolation/entry
+contracts, the release-isolation checker and repository format check passed.
+The existing Node module-type warning remains. Unchanged product packages were
+not rebuilt/retested for this test/document-only extension; earlier cross-package
+evidence remains separate from this run.
+
+Read-only cleanup checks found zero `markiro_us_profile_*` fixture databases and
+no listeners on 3100/5174. The primary checkout has concurrent unrelated Signer
+changes; this increment did not edit or stage them. The five scoped US test/doc
+files remain unstaged locally, with no new commit, push, PR, merge or deployment.
+The localized recovery matrix is covered; fixed-template Receiving CSV (INT-002)
+and actual downstream consumers remain next separate work. US-03 and MVP
+acceptance remain partial, with hosted, fluent-language, native-device and
+screen-reader checks outside this local checkpoint.

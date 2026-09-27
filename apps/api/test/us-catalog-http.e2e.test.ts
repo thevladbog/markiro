@@ -735,7 +735,10 @@ describe.skipIf(!base)("US catalog HTTP with real MFA and isolated PostgreSQL", 
     expect(
       (await catalogRequest(`/traceability/lots/${lot.id}`, "PATCH", { tlc: "changed" })).status,
     ).toBe(404);
-    expect((await catalogRequest("/traceability/events")).status).toBe(404);
+    const events = await catalogRequest("/traceability/events");
+    expect(events.status).toBe(200);
+    expect(await events.json()).toEqual({ items: [], limit: 50, offset: 0 });
+    expect((await catalogRequest("/traceability/events", "POST", {})).status).toBe(404);
   });
 
   it("US lots: enforces mutation transport and sanitized database failure", async () => {

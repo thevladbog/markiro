@@ -7,9 +7,9 @@ describe("receiving draft schema", () => {
     const events = getTableConfig(schema.traceabilityEvents);
     expect(events.columns.find((c) => c.name === "root_event_id")?.notNull).toBe(true);
     const reference = events.foreignKeys
-      .find((k) => k.getName() === "traceability_events_root_fk")
+      .find((k) => k.getName() === "traceability_events_receiving_root_fk")
       ?.reference();
-    expect(reference?.columns.map((c) => c.name)).toEqual(["tenant_id", "root_event_id"]);
+    expect(reference?.columns.map((c) => c.name)).toEqual(["tenant_id", "receiving_root_key"]);
     expect(reference?.foreignColumns.map((c) => c.name)).toEqual(["tenant_id", "id"]);
   });
   it("uses tenant composite foreign keys for every business reference", () => {

@@ -49,6 +49,8 @@ export const traceabilityLots = pgTable(
     revision: integer("revision").notNull().default(1),
     // Internal MVCC coordination token, not a support count or a business revision.
     receivingBasisVersion: integer("receiving_basis_version").notNull().default(1),
+    // Shared per-lot serialization epoch for current-origin and consumer changes.
+    currentDependencyVersion: integer("current_dependency_version").notNull().default(1),
     lastStatusReason: text("last_status_reason"),
     lastSourceReason: text("last_source_reason"),
     // Finalizers set this in their transaction; the database trigger prevents reversal.
@@ -96,6 +98,10 @@ export const traceabilityLots = pgTable(
     check(
       "traceability_lots_receiving_basis_version_positive",
       sql`${table.receivingBasisVersion} > 0`,
+    ),
+    check(
+      "traceability_lots_current_dependency_version_positive",
+      sql`${table.currentDependencyVersion} > 0`,
     ),
     check(
       "traceability_lots_source_shape",

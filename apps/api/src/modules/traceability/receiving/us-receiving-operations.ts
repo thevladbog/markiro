@@ -23,7 +23,7 @@ export function receivingLifecycleCommandDigest(command: Command, eventId: strin
 export async function lockReceivingOperation(
   tx: UsMasterDataTransaction,
   tenantId: string,
-  command: Command,
+  command: Command | "receiving.csv.apply",
   operationKey: string,
 ) {
   await tx.execute(
@@ -114,6 +114,17 @@ function retryable(error: unknown): boolean {
     error.table === "receiving_operations" &&
     "constraint" in error &&
     error.constraint === "receiving_operations_tenant_id_command_operation_key_pk"
+  )
+    return true;
+  // CSV replay can add only a preview binding, without updating the locked
+  // preview or a counter. A waiting snapshot must restart to see that binding.
+  if (
+    "code" in error &&
+    error.code === "23505" &&
+    "table" in error &&
+    error.table === "receiving_csv_applications" &&
+    "constraint" in error &&
+    error.constraint === "receiving_csv_applications_tenant_id_preview_id_pk"
   )
     return true;
   return "cause" in error && retryable(error.cause);

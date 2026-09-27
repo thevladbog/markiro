@@ -45,8 +45,8 @@ export async function readReceivingRecord(
     .from(events)
     .where(and(eq(events.tenantId, tenantId), eq(events.id, id)))
     .for(lock);
-  if (!header) throw new NotFoundException({ code: "receiving_draft_not_found" });
-  if (header.type !== "receiving") throw unavailable();
+  if (!header || header.type !== "receiving")
+    throw new NotFoundException({ code: "receiving_draft_not_found" });
   const metadata = {
     id: header.id,
     eventNumber: header.eventNumber,

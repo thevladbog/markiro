@@ -25,12 +25,131 @@ export function createUsAdminConfig(raw: NodeJS.ProcessEnv, mode: string) {
     `^/api/us/traceability/(?:receiving/${uuid}/revisions|lots/${uuid}/receiving-basis)` +
     ["limit", "offset"].map((key) => `(?!.*[?&]${key}=[^&]*(?:&[^&]*)*&${key}=)`).join("") +
     `(\\?${pageField}(?:&${pageField})?)?$`;
+  const eventsQueryField =
+    "(?:type=(?:all|receiving|transformation|shipping)|search=(?:%[a-fA-F0-9]{2}|[a-zA-Z0-9_.!~*'()+-]){0,1800}|status=(?:draft|finalized|amended|void)|history=(?:current|all)|limit=(?:[1-9]|[1-9][0-9]|100)|offset=(?:0|[1-9][0-9]{0,4}|100000))";
+  const eventsListPath =
+    "^/api/us/traceability/events" +
+    ["type", "search", "status", "history", "limit", "offset"]
+      .map((key) => `(?!.*[?&]${key}=[^&]*(?:&[^&]*)*&${key}=)`)
+      .join("") +
+    `(\\?${eventsQueryField}(?:&${eventsQueryField}){0,5})?$`;
+  const transformationRevisionPath =
+    `^/api/us/traceability/transformation/${uuid}/revisions` +
+    ["limit", "offset"].map((key) => `(?!.*[?&]${key}=[^&]*(?:&[^&]*)*&${key}=)`).join("") +
+    `(\\?${pageField}(?:&${pageField})?)?$`;
+  const shippingCollectionPath = "^/api/us/traceability/shipments$";
+  const shippingItemPath = `^/api/us/traceability/shipments/${uuid}$`;
+  const shippingCommandPath = `^/api/us/traceability/shipments/${uuid}/(?:finalize|amend|void)$`;
+  const shippingReadinessPath = `^/api/us/traceability/shipments/${uuid}/readiness\\?expectedDraftVersion=[1-9][0-9]{0,9}$`;
+  const shippingRevisionPath =
+    `^/api/us/traceability/shipments/${uuid}/revisions\\?` +
+    `(?:limit=(?:[1-9]|[1-9][0-9]|100)&offset=(?:0|[1-9][0-9]{0,4}|100000)|` +
+    `offset=(?:0|[1-9][0-9]{0,4}|100000)&limit=(?:[1-9]|[1-9][0-9]|100))$`;
+  const shippingBalancePath = `^/api/us/traceability/lots/${uuid}/shipping-balance(?:\\?contextDraftId=${uuid}&expectedDraftVersion=[1-9][0-9]{0,9})?$`;
+  const shippingRoutes = [
+    { pattern: new RegExp(shippingCollectionPath), methods: ["POST"] },
+    { pattern: new RegExp(shippingItemPath), methods: ["GET", "PUT"] },
+    { pattern: new RegExp(shippingCommandPath), methods: ["POST"] },
+    { pattern: new RegExp(shippingReadinessPath), methods: ["GET"] },
+    { pattern: new RegExp(shippingRevisionPath), methods: ["GET"] },
+    { pattern: new RegExp(shippingBalancePath), methods: ["GET"] },
+  ];
+  const casesQueryField =
+    "(?:limit=(?:[1-9]|[1-9][0-9]|100)|history=(?:true|false)|cursor=[A-Za-z0-9_-]{1,200})";
+  const casesListPath =
+    `^/api/us/traceability/lots/${uuid}/cases` +
+    ["limit", "history", "cursor"]
+      .map((key) => `(?!.*[?&]${key}=[^&]*(?:&[^&]*)*&${key}=)`)
+      .join("") +
+    `(\\?${casesQueryField}(?:&${casesQueryField}){0,2})?$`;
   const proxy = {
+    [eventsListPath]: {
+      target: "http://localhost:3100",
+      changeOrigin: true,
+      rewrite: (path: string) => path.replace(/^\/api\/us/, ""),
+    },
+    [shippingCollectionPath]: {
+      target: "http://localhost:3100",
+      changeOrigin: true,
+      rewrite: (path: string) => path.replace(/^\/api\/us/, ""),
+    },
+    [shippingItemPath]: {
+      target: "http://localhost:3100",
+      changeOrigin: true,
+      rewrite: (path: string) => path.replace(/^\/api\/us/, ""),
+    },
+    [shippingCommandPath]: {
+      target: "http://localhost:3100",
+      changeOrigin: true,
+      rewrite: (path: string) => path.replace(/^\/api\/us/, ""),
+    },
+    [shippingReadinessPath]: {
+      target: "http://localhost:3100",
+      changeOrigin: true,
+      rewrite: (path: string) => path.replace(/^\/api\/us/, ""),
+    },
+    [shippingRevisionPath]: {
+      target: "http://localhost:3100",
+      changeOrigin: true,
+      rewrite: (path: string) => path.replace(/^\/api\/us/, ""),
+    },
+    [shippingBalancePath]: {
+      target: "http://localhost:3100",
+      changeOrigin: true,
+      rewrite: (path: string) => path.replace(/^\/api\/us/, ""),
+    },
+    [transformationRevisionPath]: {
+      target: "http://localhost:3100",
+      changeOrigin: true,
+      rewrite: (path: string) => path.replace(/^\/api\/us/, ""),
+    },
+    [`^/api/us/traceability/transformation/${uuid}/readiness\\?expectedDraftVersion=[1-9][0-9]{0,9}$`]:
+      {
+        target: "http://localhost:3100",
+        changeOrigin: true,
+        rewrite: (path: string) => path.replace(/^\/api\/us/, ""),
+      },
+    [`^/api/us/traceability/transformation/${uuid}/(?:finalize|amend|void)$`]: {
+      target: "http://localhost:3100",
+      changeOrigin: true,
+      rewrite: (path: string) => path.replace(/^\/api\/us/, ""),
+    },
+    [`^/api/us/traceability/transformation/${uuid}$`]: {
+      target: "http://localhost:3100",
+      changeOrigin: true,
+      rewrite: (path: string) => path.replace(/^\/api\/us/, ""),
+    },
+    "^/api/us/traceability/transformation(?:/genealogy/query)?$": {
+      target: "http://localhost:3100",
+      changeOrigin: true,
+      rewrite: (path: string) => path.replace(/^\/api\/us/, ""),
+    },
+    [casesListPath]: {
+      target: "http://localhost:3100",
+      changeOrigin: true,
+      rewrite: (path: string) => path.replace(/^\/api\/us/, ""),
+    },
+    [`^/api/us/traceability/lots/${uuid}/cases/${uuid}/unlink$`]: {
+      target: "http://localhost:3100",
+      changeOrigin: true,
+      rewrite: (path: string) => path.replace(/^\/api\/us/, ""),
+    },
+    [`^/api/us/traceability/receiving/imports/(?:preview|${uuid}(?:/apply)?)$`]: {
+      target: "http://localhost:3100",
+      changeOrigin: true,
+      rewrite: (path: string) => path.replace(/^\/api\/us/, ""),
+    },
     [lifecyclePagePath]: {
       target: "http://localhost:3100",
       changeOrigin: true,
       rewrite: (path: string) => path.replace(/^\/api\/us/, ""),
     },
+    [`^/api/us/traceability/receiving/${uuid}/export\\.csv\\?expectedDraftVersion=[1-9][0-9]{0,9}&expectedLifecycleVersion=[1-9][0-9]{0,9}$`]:
+      {
+        target: "http://localhost:3100",
+        changeOrigin: true,
+        rewrite: (path: string) => path.replace(/^\/api\/us/, ""),
+      },
     [receivingListPath]: {
       target: "http://localhost:3100",
       changeOrigin: true,
@@ -99,7 +218,15 @@ export function createUsAdminConfig(raw: NodeJS.ProcessEnv, mode: string) {
       const path = request.url ?? "/";
       if (
         path.startsWith("/api/") &&
-        !Object.keys(proxy).some((pattern) => new RegExp(pattern).test(path))
+        (path.startsWith("/api/us/traceability/shipments") || path.includes("/shipping-balance")
+          ? !shippingRoutes.some(
+              (route) =>
+                route.pattern.test(path) &&
+                route.methods.includes(request.method ?? "") &&
+                (!path.includes("expectedDraftVersion=") ||
+                  Number(path.slice(path.lastIndexOf("=") + 1)) <= 2147483647),
+            )
+          : !Object.keys(proxy).some((pattern) => new RegExp(pattern).test(path)))
       ) {
         response.writeHead(404, { "Cache-Control": "no-store" });
         response.end();

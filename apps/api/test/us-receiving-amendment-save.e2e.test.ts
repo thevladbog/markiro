@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { seedTransformationDraft } from "./support/us-transformation-draft-fixture";
 import { schema } from "@markiro/db";
 import {
   receivingAmendmentDraftSchema,
@@ -96,79 +97,83 @@ describe.skipIf(!url)("Receiving amendment save", () => {
       )
     ).rows[0];
   }
-  it("saves corrections and reordering with exact retained lots, unchanged basis/root and a full audit", async () => {
-    const { original, started, draft } = await start();
-    const before = await state();
-    draft.notes = "Recount checked";
-    draft.items.reverse();
-    const first = draft.items[0];
-    if (!first) throw new Error("Missing line");
-    first.quantity = "0.25";
-    const command = input(draft);
-    const receipt = await store.saveAmendment(
-      c.tenant,
-      c.actor,
-      started.eventId,
-      command,
-      "save-request",
-    );
-    expect(receipt).toMatchObject({
-      receiptVersion: 2,
-      command: "receiving.save",
-      operationKey: command.operationKey,
-      eventId: started.eventId,
-      record: {
-        revision: 2,
-        draftVersion: 2,
-        updatedBy: c.actor,
-        lifecycle: started.record.lifecycle,
-        content: { kind: "draft", draft },
-      },
-    });
-    expect(receipt.record.id).toBe(started.eventId);
-    expect(receipt.record.eventNumber).toBe(original.eventNumber);
-    const after = await state();
-    expect(after?.lots).toEqual(before?.lots);
-    expect(after?.roots).toEqual(before?.roots);
-    expect((await store.getLiveRecord(c.tenant, c.actor, original.id)).content).toEqual({
-      kind: "finalized",
-      finalizedAt: original.finalizedAt,
-      finalizedBy: original.finalizedBy,
-      snapshot: original.snapshot,
-    });
-    expect(
-      (
-        await f.pool.query(
-          "SELECT organization_id,actor_user_id,action,outcome,target_type,target_id,before,after,request_id FROM tenant_audit_events WHERE organization_id=$1 AND action='traceability.receiving.draft_saved'",
-          [c.tenant],
-        )
-      ).rows,
-    ).toEqual([
-      {
-        organization_id: c.tenant,
-        actor_user_id: c.actor,
-        action: "traceability.receiving.draft_saved",
-        outcome: "success",
-        target_type: "traceability_event",
-        target_id: started.eventId,
-        before: started.record,
-        after: receipt.record,
-        request_id: "save-request",
-      },
-    ]);
-    expect(
-      (
-        await f.pool.query(
-          "SELECT event_id,result FROM receiving_operations WHERE tenant_id=$1 AND command='receiving.save' AND operation_key=$2",
-          [c.tenant, command.operationKey],
-        )
-      ).rows,
-    ).toEqual([{ event_id: started.eventId, result: receipt }]);
-    expect(await store.saveAmendment(c.tenant, c.actor, started.eventId, command, "retry")).toEqual(
-      receipt,
-    );
-    expect(await state()).toEqual(after);
-  });
+  it.each([false, true])(
+    "saves corrections with exact retained lots, basis/root and audit (Transformation: %s)",
+    async (mixed) => {
+      const { original, started, draft } = await start();
+      if (mixed) await seedTransformationDraft(f, c.tenant, c.actor);
+      const before = await state();
+      draft.notes = "Recount checked";
+      draft.items.reverse();
+      const first = draft.items[0];
+      if (!first) throw new Error("Missing line");
+      first.quantity = "0.25";
+      const command = input(draft);
+      const receipt = await store.saveAmendment(
+        c.tenant,
+        c.actor,
+        started.eventId,
+        command,
+        "save-request",
+      );
+      expect(receipt).toMatchObject({
+        receiptVersion: 2,
+        command: "receiving.save",
+        operationKey: command.operationKey,
+        eventId: started.eventId,
+        record: {
+          revision: 2,
+          draftVersion: 2,
+          updatedBy: c.actor,
+          lifecycle: started.record.lifecycle,
+          content: { kind: "draft", draft },
+        },
+      });
+      expect(receipt.record.id).toBe(started.eventId);
+      expect(receipt.record.eventNumber).toBe(original.eventNumber);
+      const after = await state();
+      expect(after?.lots).toEqual(before?.lots);
+      expect(after?.roots).toEqual(before?.roots);
+      expect((await store.getLiveRecord(c.tenant, c.actor, original.id)).content).toEqual({
+        kind: "finalized",
+        finalizedAt: original.finalizedAt,
+        finalizedBy: original.finalizedBy,
+        snapshot: original.snapshot,
+      });
+      expect(
+        (
+          await f.pool.query(
+            "SELECT organization_id,actor_user_id,action,outcome,target_type,target_id,before,after,request_id FROM tenant_audit_events WHERE organization_id=$1 AND action='traceability.receiving.draft_saved'",
+            [c.tenant],
+          )
+        ).rows,
+      ).toEqual([
+        {
+          organization_id: c.tenant,
+          actor_user_id: c.actor,
+          action: "traceability.receiving.draft_saved",
+          outcome: "success",
+          target_type: "traceability_event",
+          target_id: started.eventId,
+          before: started.record,
+          after: receipt.record,
+          request_id: "save-request",
+        },
+      ]);
+      expect(
+        (
+          await f.pool.query(
+            "SELECT event_id,result FROM receiving_operations WHERE tenant_id=$1 AND command='receiving.save' AND operation_key=$2",
+            [c.tenant, command.operationKey],
+          )
+        ).rows,
+      ).toEqual([{ event_id: started.eventId, result: receipt }]);
+      expect(
+        await store.saveAmendment(c.tenant, c.actor, started.eventId, command, "retry"),
+      ).toEqual(receipt);
+      expect(await state()).toEqual(after);
+    },
+  );
   it("remembers unchanged saves without updating timestamps, versions, audit or lots", async () => {
     const { started, draft } = await start();
     const before = await state();
@@ -749,46 +754,16 @@ describe.skipIf(!url)("Receiving amendment save", () => {
     ).rejects.toMatchObject({ status: 503, response: { code: "traceability_profile_invalid" } });
     expect(await state()).toEqual(before);
   });
-  it("fails closed on an unsupported stored CTE even for an unchanged save", async () => {
+  it("supports amendment-save alongside a valid Transformation draft", async () => {
     const { started, draft } = await start();
-    const unknown = await store.createDraft(
-      c.tenant,
-      c.actor,
-      { operationKey: randomUUID(), draft: { ...c.draft, items: [], documentIds: [] } },
-      "unknown-fixture",
-    );
-    const constraint = (
-      await f.pool.query<{ definition: string }>(
-        "SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint WHERE conrelid='traceability_events'::regclass AND conname='traceability_events_lifecycle_valid'",
-      )
-    ).rows[0]?.definition;
-    if (!constraint) throw new Error("Missing synthetic constraint");
-    const connection = await f.pool.connect();
-    try {
-      await connection.query(
-        "BEGIN; SET LOCAL session_replication_role='replica'; ALTER TABLE traceability_events DROP CONSTRAINT traceability_events_lifecycle_valid",
-      );
-      await connection.query(
-        "UPDATE traceability_events SET type='shipping' WHERE tenant_id=$1 AND id=$2",
-        [c.tenant, unknown.id],
-      );
-      await connection.query("COMMIT");
-      const before = await state();
-      await expect(
-        store.saveAmendment(c.tenant, c.actor, started.eventId, input(draft), "unknown-kind"),
-      ).rejects.toMatchObject({ status: 503 });
-      expect(await state()).toEqual(before);
-    } finally {
-      await connection.query("BEGIN; SET LOCAL session_replication_role='replica'");
-      await connection.query(
-        "UPDATE traceability_events SET type='receiving' WHERE tenant_id=$1 AND id=$2",
-        [c.tenant, unknown.id],
-      );
-      await connection.query(
-        `ALTER TABLE traceability_events ADD CONSTRAINT traceability_events_lifecycle_valid ${constraint}`,
-      );
-      await connection.query("COMMIT");
-      connection.release();
-    }
+    await seedTransformationDraft(f, c.tenant, c.actor);
+    const before = await state();
+    expect(
+      (await store.saveAmendment(c.tenant, c.actor, started.eventId, input(draft), "shared-kind"))
+        .record,
+    ).toEqual(started.record);
+    const after = await state();
+    expect(after).toEqual({ ...before, receipts: expect.any(Array) });
+    expect(after.receipts).toHaveLength(before.receipts.length + 1);
   });
 });

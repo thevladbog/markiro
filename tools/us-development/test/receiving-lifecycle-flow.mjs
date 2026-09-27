@@ -23,9 +23,11 @@ export async function exerciseUsReceivingLifecycle({
     lotIds.map((id) => read(`lots/${id}/receiving-basis?limit=1&offset=0`)),
   );
   await page.getByRole("button", { name: "Open reference data", exact: true }).click();
-  await page.getByRole("button", { name: "Receiving", exact: true }).click();
+  await page.getByRole("button", { name: "Events", exact: true }).click();
+  await page.getByRole("combobox", { name: "Event type", exact: true }).click();
+  await page.getByRole("option", { name: "Receiving", exact: true }).click();
   await page.getByRole("button", { name: original.eventNumber, exact: true }).click();
-  await exerciseUsReceivingAccessRecovery({ page, expect, fixture, original });
+  await exerciseUsReceivingAccessRecovery({ page, expect, screenshots, fixture, original });
 
   // Inspect both dialogs, translations and themes before sending any operation.
   for (const locale of ["en", "es"]) {
@@ -102,7 +104,7 @@ export async function exerciseUsReceivingLifecycle({
   await expect(
     page.getByRole("button", { name: "Retry same operation", exact: true }),
   ).toBeVisible();
-  await expect(page.getByRole("button", { name: "Back to receiving", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Back to events", exact: true })).toBeDisabled();
   await page.getByRole("button", { name: "Retry same operation", exact: true }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await page.unroute(amendPattern);
@@ -220,7 +222,7 @@ export async function exerciseUsReceivingLifecycle({
   assert.equal(cancelled.lifecycle.pendingDraftId, null);
   for (const id of lotIds)
     assert.equal((await read(`lots/${id}/receiving-basis?limit=1&offset=0`)).supportCount, 1);
-  await page.getByRole("button", { name: "Back to receiving", exact: true }).click();
+  await page.getByRole("button", { name: "Back to events", exact: true }).click();
   await page.getByRole("button", { name: original.eventNumber, exact: true }).click();
 
   // A cancelled revision remains historical; a new correction must get a new ID and number.
@@ -334,9 +336,7 @@ export async function exerciseUsReceivingLifecycle({
     await expect(
       page.getByRole("button", { name: "Retry current state", exact: true }),
     ).toBeDisabled();
-    await expect(
-      page.getByRole("button", { name: "Back to receiving", exact: true }),
-    ).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Back to events", exact: true })).toBeDisabled();
     await expect(page.getByRole("button", { name: "Products", exact: true })).toBeDisabled();
     await page.keyboard.press("Escape");
     await expect(dialog).toBeVisible();
@@ -401,7 +401,7 @@ export async function exerciseUsReceivingLifecycle({
       record,
     });
   }
-  await page.getByRole("button", { name: "Back to receiving", exact: true }).click();
+  await page.getByRole("button", { name: "Back to events", exact: true }).click();
   await page.getByRole("button", { name: "← Profile", exact: true }).click();
   console.log(
     "Receiving lifecycle: real amend/void with lost-response exact replay, cancelled revision 2 retained and never reused by revision 3, cancellations preserve basis, acknowledged void uses GET-only recovery, five exact audits and unchanged lot identity/source/status; EN/ES light/dark dialog layouts 1440/1024/390 passed.",

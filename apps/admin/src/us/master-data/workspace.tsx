@@ -8,7 +8,7 @@ import { LocationsView } from "./locations-view.js";
 import { PartiesView } from "./parties-view.js";
 import { ProductsView } from "../catalog/products-view.js";
 import { LotsView } from "../lots/lots-view.js";
-import { ReceivingView } from "../receiving/view.js";
+import { EventsView } from "../events/events-view.js";
 import { UsBrandMark } from "../brand-mark.js";
 import { navStyle, type NoticeKind } from "./workspace-shared.js";
 import "./master-data.css";
@@ -21,7 +21,7 @@ export type MasterDataProps = {
   onSessionLost: () => void;
 };
 
-type View = "parties" | "locations" | "products" | "lots" | "receiving";
+type View = "parties" | "locations" | "products" | "lots" | "events";
 type Notice = { kind: NoticeKind; key: string } | null;
 
 export function MasterDataWorkspace({
@@ -45,6 +45,11 @@ export function MasterDataWorkspace({
     lotId: string;
     record: ReceivingFrozenView;
   } | null>(null);
+  const [basisTransformationEntry, setBasisTransformationEntry] = useState<{
+    lotId: string;
+    eventId: string;
+  } | null>(null);
+  const [transformationLotEntry, setTransformationLotEntry] = useState<string | null>(null);
   const [mutationPending, setMutationPending] = useState(false);
   const mutationCount = useRef(0);
   const [editorDirty, setEditorDirty] = useState(false);
@@ -145,6 +150,8 @@ export function MasterDataWorkspace({
     setView(next);
     setReceivingLotEntry(null);
     setBasisReceivingEntry(null);
+    setBasisTransformationEntry(null);
+    setTransformationLotEntry(null);
     setViewGeneration((current) => current + 1);
   }
 
@@ -205,13 +212,13 @@ export function MasterDataWorkspace({
         <nav aria-label={t("md.referenceData")}>
           <Button
             variant="secondary"
-            className={`us-md-nav ${view === "receiving" ? "is-active" : ""}`}
-            style={navStyle(view === "receiving")}
+            className={`us-md-nav ${view === "events" ? "is-active" : ""}`}
+            style={navStyle(view === "events")}
             disabled={mutationPending}
-            aria-current={view === "receiving" ? "page" : undefined}
-            onClick={() => navigate("receiving")}
+            aria-current={view === "events" ? "page" : undefined}
+            onClick={() => navigate("events")}
           >
-            {t("receiving.title")}
+            {t("events.title")}
           </Button>
           <Button
             variant="secondary"
@@ -285,18 +292,21 @@ export function MasterDataWorkspace({
             {t(notice.key)}
           </div>
         ) : null}
-        {view === "receiving" ? (
-          <ReceivingView
-            key={`receiving-${viewGeneration}`}
+        {view === "events" ? (
+          <EventsView
+            key={`events-${viewGeneration}`}
             {...viewProps}
             timeZone={profile.timeZone}
+            canExport={
+              !accessError && !accessPending && capabilities.includes(US_CAPABILITY.EXPORT_READ)
+            }
             canManageQa={
               !accessError && !accessPending && capabilities.includes(US_CAPABILITY.QA_MANAGE)
             }
             {...(receivingLotEntry
-              ? { initialRecord: receivingLotEntry.record }
+              ? { initialReceiving: receivingLotEntry.record }
               : basisReceivingEntry
-                ? { initialRecord: basisReceivingEntry.record }
+                ? { initialReceiving: basisReceivingEntry.record }
                 : {})}
             {...(basisReceivingEntry
               ? {
@@ -308,13 +318,38 @@ export function MasterDataWorkspace({
                   },
                 }
               : {})}
+            {...(basisTransformationEntry
+              ? {
+                  initialTransformationId: basisTransformationEntry.eventId,
+                  backLabel: t("lots.backToLot"),
+                  onEntryBack: () => {
+                    setView("lots");
+                    setViewGeneration((n) => n + 1);
+                  },
+                }
+              : {})}
             onOpenLot={(lotId, record) => {
               setReceivingLotEntry({ lotId, record });
+              setTransformationLotEntry(null);
+              setView("lots");
+              setViewGeneration((n) => n + 1);
+            }}
+            onOpenTransformationLot={(lotId) => {
+              setReceivingLotEntry(null);
+              setTransformationLotEntry(lotId);
               setView("lots");
               setViewGeneration((n) => n + 1);
             }}
             canWrite={
               !accessError && !accessPending && capabilities.includes(US_CAPABILITY.RECEIVING_WRITE)
+            }
+            canTransform={
+              !accessError &&
+              !accessPending &&
+              capabilities.includes(US_CAPABILITY.TRANSFORMATION_WRITE)
+            }
+            canShip={
+              !accessError && !accessPending && capabilities.includes(US_CAPABILITY.SHIPPING_WRITE)
             }
           />
         ) : view === "lots" ? (
@@ -326,29 +361,62 @@ export function MasterDataWorkspace({
             onOpenReceiving={(lotId, record) => {
               setBasisReceivingEntry({ lotId, record });
               setReceivingLotEntry(null);
-              setView("receiving");
+              setView("events");
+              setViewGeneration((n) => n + 1);
+            }}
+            onOpenTransformation={(eventId, lotId) => {
+              if (mutationPending || (editorDirty && !window.confirm(t("md.discardConfirm"))))
+                return;
+              setBasisTransformationEntry({ eventId, lotId });
+              setBasisReceivingEntry(null);
+              setReceivingLotEntry(null);
+              setView("events");
               setViewGeneration((n) => n + 1);
             }}
             {...(receivingLotEntry
               ? {
                   entryLotId: receivingLotEntry.lotId,
                   onEntryBack: () => {
-                    setView("receiving");
+                    setView("events");
                     setViewGeneration((n) => n + 1);
                   },
                 }
-              : basisReceivingEntry
+              : transformationLotEntry
                 ? {
-                    entryLotId: basisReceivingEntry.lotId,
-                    entryBackLabel: t("lots.back"),
+                    entryLotId: transformationLotEntry,
+                    entryBackLabel: t("events.back"),
                     onEntryBack: () => {
-                      setBasisReceivingEntry(null);
+                      setTransformationLotEntry(null);
+                      setView("events");
                       setViewGeneration((n) => n + 1);
                     },
                   }
-                : {})}
+                : basisReceivingEntry
+                  ? {
+                      entryLotId: basisReceivingEntry.lotId,
+                      entryBackLabel: t("lots.back"),
+                      onEntryBack: () => {
+                        setBasisReceivingEntry(null);
+                        setViewGeneration((n) => n + 1);
+                      },
+                    }
+                  : basisTransformationEntry
+                    ? {
+                        entryLotId: basisTransformationEntry.lotId,
+                        entryBackLabel: t("lots.back"),
+                        onEntryBack: () => {
+                          setBasisTransformationEntry(null);
+                          setViewGeneration((n) => n + 1);
+                        },
+                      }
+                    : {})}
             canManageQa={
               !accessError && !accessPending && capabilities.includes(US_CAPABILITY.QA_MANAGE)
+            }
+            canTransform={
+              !accessError &&
+              !accessPending &&
+              capabilities.includes(US_CAPABILITY.TRANSFORMATION_WRITE)
             }
           />
         ) : view === "products" ? (

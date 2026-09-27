@@ -73,9 +73,9 @@ tenant's own site), counterpart (previous source for receiving, recipient for sh
 "2 inputs → 1 output" for transformation), lines, documents (count; numbers on hover),
 revision, updated. Row click opens the detail page; the row menu offers Open, Amend, Void (QA
 only). Filters mirror the query: type, status, date range, location, reference number, free
-text (event number, TLC, document number). A transformation created with a closed shift
-attached carries a **"from shift SEP26-003"** badge in the counterpart column — the same
-visual as the RU "created on line" badge on shifts. Demo rows: the three events of screens 2–4.
+text (event number, TLC, document number) is a future search design; the implemented Events
+registry searches event number and lists Receiving/Transformation only. Closed-shift badges
+are P1 Station design, not part of the P0 editor. Shipping demo rows remain US-05 work.
 
 States to draw: empty ("No traceability events yet" with the three create actions), loading
 (skeleton rows), error with retry, stale ("updated 40 s ago"), filtered-to-nothing, all four
@@ -147,13 +147,14 @@ after master-data edits. Retain EN/ES, both themes and the existing grouped layo
 **Header** (Production Operator, then QA; groups of data-dictionary §7.4) — `Reason` select
 (Commingling and repacking, Repacking, Relabeling, Processing, Other + note), `Completion
 date` with the tenant timezone as text, `Transformation location` (becomes the TLC source of
-every output — say so in a helper line), `Closed shift` (P1 only; optional combobox over closed shifts:
-number, product, production date, linkable cases; "100 cases will be linked at finalization").
+every output — say so in a helper line). No closed-shift selector appears in P0; Station
+selection is separate P1 work and cannot promise automatic links at finalization.
 
 **Inputs** — rows pick existing lots (combobox by TLC or product; option shows product, TLC,
-source, status chip), `Regulated` checkbox (FTL input that must carry a lot; off = free-text
-ingredient), `Quantity used` + unit, `Consumes lot` (default on). Demo: `OSS-260914-A1`
-500.000 lb and `OSS-260914-A2` 500.000 lb, both regulated, both consumed.
+source, status chip), or documented non-FTL inputs with a reviewed product and source reference.
+Product coverage determines classification; no checkbox overrides it. Quantities are frozen
+event facts, not a fabricated consumed status. Demo: `OSS-260914-A1` 500.000 lb and
+`OSS-260914-A2` 500.000 lb as FTL lot inputs.
 
 **Outputs** — rows create new lots: product combobox, `TLC` input with a **Suggest** button
 (`NRF-260915-APL01` pattern, editable), quantity + unit, production and expiry dates
@@ -168,8 +169,8 @@ all quantities share one unit, otherwise "not comparable across units". **Refere
 documents** — at least one of work order, batch log, production log. Demo:
 `WO-2026-0915-APPLECUP` (work order), `BATCH-2026-0915-01` (batch log).
 
-States to draw: empty; draft with two inputs, one output and the preview; shift selected with
-the cases hint; a quarantined input lot disabled in the picker with the reason; completeness
+States to draw: empty; draft with two inputs, one output and the preview;
+a quarantined input lot disabled in the picker with the reason; completeness
 row "output product coverage status unknown — review the product first" linking to the FTL
 card; finalized P0 view with output quantity 100 case and separate 100 synthetic linked SSCC records;
 multi-output draft with the "cases must be linked manually" hint.
@@ -186,9 +187,10 @@ operational `Carrier reference`.
 **Lines** — `Lot` picker (option: product, TLC in monospace, source, status chip, "100 case
 remaining"); TLC and product show read-only once picked, with a lock glyph and the tooltip
 "TLC comes from the lot". `Quantity` + unit (defaults to the lot's origin unit) with the
-balance beside it ("100.000 of 100.000 case"); a partial quantity shows "60 case will remain —
-partial shipment"; a quantity above the balance shows the over-shipment warning (warning, not
-error). `Cases` (P1, clearly marked optional): SSCC scan/paste list with the counter "N of 100
+current recorded balance beside it ("100.000 case"); a partial quantity shows an exact draft
+projection ("60 case will remain"). An over-shipment shows an actionable blocker and cannot be
+finalized. The read is event-derived, can be unknown, and is refreshed explicitly; finalization
+rechecks under the lot lock. `Cases` (P1, clearly marked optional): SSCC scan/paste list with the counter "N of 100
 cases in lot" and a "Set quantity from cases" button that never fires by itself.
 
 **Flow warnings (P1)** — when the recipient address normalizes to the ship-from address, or
@@ -202,7 +204,7 @@ Pkwy, Portland, OR 97203, +1 (503) 555-0120; recipient Harbor Market Distributio
 200 Example Harbor Ave, Seattle, WA 98134, +1 (206) 555-0147; line `NRF-260915-APL01`
 100.000 case, balance 100 → 0; documents `BOL-0916-H`, `INV-2026-0916-047`.
 
-States to draw: empty; one full line; partial shipment; over-shipment warning; blocked lot in
+States to draw: empty; one full line; partial shipment; over-shipment blocker; blocked lot in
 the picker (quarantined, recalled) and unavailable lot (consumed, archived); flow warning card
 with the classification select; P1 case selector with three SSCCs; finalized, lot Shipped.
 
@@ -240,10 +242,12 @@ the document rule is a warning.
 
 A confirm dialog restating what will be frozen: type, number, date, line count and total
 quantity per unit, documents, and the consequence per type — Receiving: "2 lots will be
-created"; Transformation: "1 lot will be created, 2 lots marked consumed, 100 cases linked";
+created"; Transformation: "1 output lot will be created; 2 input lots; 100 case recorded".
+P0 finalization creates the output lot and freezes event quantity; it does not link cases.
+The separate Cases panel reports active server links and synthetic/existing-record provenance.
 Shipping depends on the balance (OQ-US05-1 (a)): when the shipped quantity takes the balance to
 zero, "lot NRF-260915-APL01 will be marked shipped"; for a partial shipment, "lot NRF-260915-APL01
-balance 100 → 40 case; the lot stays active". Warnings are listed again. The primary
+balance 100 → 40 case; the lot stays active". Blocking findings are listed again. The primary
 button reads "Finalize" — never "Submit"; nothing is sent anywhere. States to draw: default;
 with warnings; in progress; failure (409 issue list inside the dialog, "Back to form").
 
@@ -285,9 +289,11 @@ release or that every void removes every lot's basis. The lifecycle design also
 requires explicit cancellation of a pending amendment before voiding the effective
 receipt; it does not silently cancel it.
 
-Transformation — refused while
-a finalized shipment uses the output lot (409 naming the shipment, with link), otherwise
-output lots are archived; Shipping — the lot balance is restored, status may return to Active.
+Transformation — current downstream consumers can block void, with bounded blocker evidence.
+After void, output lots and existing links remain with an explicit current-origin gap;
+new case links are blocked and unlink remains available. No automatic lot archival occurs.
+Shipping balance restoration follows current finalized event pointers; local automated checks
+cover amendment and void compensation. Physical dispatch and inventory are separate facts.
 States to draw: void dialog per type; refusal for transformation; voided detail; voided row.
 
 ### 9. Event detail page (finalized)

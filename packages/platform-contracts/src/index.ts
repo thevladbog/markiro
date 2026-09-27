@@ -487,7 +487,140 @@ export type {
   ReferenceDocument,
   ReferenceDocumentList,
 } from "./traceability/documents.js";
+export { parseReceivingCsvRow } from "./traceability/receiving-csv.js";
+export {
+  RECEIVING_CSV_EXPORT_VERSION,
+  RECEIVING_CSV_EXPORT_COLUMNS,
+  receivingCsvExportQuerySchema,
+  ReceivingCsvExportError,
+  encodeReceivingCsvExport,
+  decodeReceivingCsvExport,
+} from "./traceability/receiving-csv-export.js";
+export type { ReceivingCsvExportErrorCode } from "./traceability/receiving-csv-export.js";
+export {
+  receivingCsvPreviewInputSchema,
+  receivingCsvApplyInputSchema,
+} from "./traceability/receiving-csv-commands.js";
+export type {
+  ReceivingCsvPreviewInput,
+  ReceivingCsvApplyInput,
+} from "./traceability/receiving-csv-commands.js";
+export type {
+  ReceivingCsvProductSelector,
+  ReceivingCsvFieldIssue,
+  ReceivingCsvRowResult,
+} from "./traceability/receiving-csv.js";
 export { receivingDraftItemSchema, receivingDraftSchema } from "./traceability/receiving.js";
+export { transformationDraftSchema } from "./traceability/transformation-draft.js";
+export { shippingItemInputSchema, shippingDraftSchema } from "./traceability/shipping-draft.js";
+export type { ShippingDraft } from "./traceability/shipping-draft.js";
+export {
+  createShippingDraftSchema,
+  saveShippingDraftSchema,
+  shippingDraftRecordSchema,
+} from "./traceability/shipping-records.js";
+export type {
+  CreateShippingDraftInput,
+  SaveShippingDraftInput,
+  ShippingDraftRecord,
+} from "./traceability/shipping-records.js";
+export {
+  SHIPPING_READINESS_RULE_VERSION,
+  shippingReadinessQuerySchema,
+  shippingIssueSchema,
+  shippingReadinessSchema,
+  shippingBalanceQuerySchema,
+  shippingBalanceResponseSchema,
+} from "./traceability/shipping-http.js";
+export type { ShippingReadiness, ShippingBalanceResponse } from "./traceability/shipping-http.js";
+export {
+  finalizeShippingSchema,
+  shippingFinalizationSnapshotV1Schema,
+  shippingFinalizedRecordSchema,
+  shippingHttpRecordSchema,
+  shippingHttpErrorSchema,
+} from "./traceability/shipping-http.js";
+export type {
+  FinalizeShippingInput,
+  ShippingFinalizationSnapshotV1,
+  ShippingFinalizedRecord,
+} from "./traceability/shipping-http.js";
+export {
+  amendShippingSchema,
+  voidShippingSchema,
+  shippingHistoricalRecordSchema,
+  shippingLifecycleReceiptSchema,
+} from "./traceability/shipping-lifecycle.js";
+export type {
+  ShippingHistoricalRecord,
+  ShippingLifecycleReceipt,
+} from "./traceability/shipping-lifecycle.js";
+export {
+  shippingRevisionListQuerySchema,
+  shippingRevisionSummarySchema,
+  shippingRevisionListSchema,
+} from "./traceability/shipping-revisions.js";
+export type {
+  ShippingRevisionListQuery,
+  ShippingRevisionList,
+} from "./traceability/shipping-revisions.js";
+export type { TransformationDraft } from "./traceability/transformation-draft.js";
+export {
+  transformationIssueSchema,
+  transformationReadinessSchema,
+} from "./traceability/transformation-readiness.js";
+export type { TransformationReadiness } from "./traceability/transformation-readiness.js";
+export {
+  createTransformationDraftSchema,
+  saveTransformationDraftSchema,
+  finalizeTransformationSchema,
+  transformationDraftRecordSchema,
+  transformationFinalizationSnapshotV1Schema,
+  transformationFinalizedRecordSchema,
+} from "./traceability/transformation-records.js";
+export type {
+  CreateTransformationDraftInput,
+  SaveTransformationDraftInput,
+  FinalizeTransformationInput,
+  TransformationDraftRecord,
+  TransformationFinalizedRecord,
+  TransformationFinalizationSnapshotV1,
+} from "./traceability/transformation-records.js";
+export {
+  amendTransformationSchema,
+  voidTransformationSchema,
+  transformationHistoricalRecordSchema,
+  transformationLifecycleReceiptSchema,
+} from "./traceability/transformation-lifecycle.js";
+export type {
+  AmendTransformationInput,
+  VoidTransformationInput,
+  TransformationHistoricalRecord,
+  TransformationLifecycleReceipt,
+} from "./traceability/transformation-lifecycle.js";
+export {
+  transformationHttpRecordSchema,
+  transformationRevisionListQuerySchema,
+  transformationRevisionListSchema,
+  transformationHttpErrorSchema,
+} from "./traceability/transformation-http.js";
+export type {
+  TransformationHttpRecord,
+  TransformationRevisionSummary,
+  TransformationRevisionListQuery,
+  TransformationRevisionList,
+  TransformationHttpError,
+} from "./traceability/transformation-http.js";
+export { usEventListQuerySchema, usEventListSchema } from "./traceability/events.js";
+export type { UsEventListQuery, UsEventSummary, UsEventList } from "./traceability/events.js";
+export {
+  transformationGenealogyRequestSchema,
+  transformationGenealogyResultSchema,
+} from "./traceability/transformation-genealogy.js";
+export type {
+  TransformationGenealogyRequest,
+  TransformationGenealogyResult,
+} from "./traceability/transformation-genealogy.js";
 export {
   receivingLiveRecordSchema,
   receivingLiveRecordListSchema,
@@ -588,3 +721,36 @@ export {
   receivingFinalizationSnapshotV2Schema,
   type ReceivingFinalizationSnapshotV2,
 } from "./traceability/receiving-finalization-v2.js";
+export {
+  receivingCsvResolutionSchema,
+  receivingCsvReceiptSchema,
+  receivingCsvApplyResponseSchema,
+  receivingCsvPreviewSchema,
+  matchesReceivingCsvApplyResponse,
+  type ReceivingCsvResolution,
+  type ReceivingCsvReceipt,
+  type ReceivingCsvApplyResponse,
+  type ReceivingCsvPreview,
+} from "./traceability/receiving-csv-http.js";
+export {
+  caseLinkCommandSchema,
+  caseUnlinkCommandSchema,
+  caseListQuerySchema,
+  caseLookupQuerySchema,
+  caseRowSchema,
+  caseLinkResultSchema,
+  caseUnlinkResultSchema,
+  caseListResultSchema,
+  caseLookupResultSchema,
+} from "./traceability/case-bridge.js";
+export type {
+  CaseRow,
+  CaseLinkCommand,
+  CaseUnlinkCommand,
+  CaseListQuery,
+  CaseLookupQuery,
+  CaseLinkResult,
+  CaseUnlinkResult,
+  CaseListResult,
+  CaseLookupResult,
+} from "./traceability/case-bridge.js";

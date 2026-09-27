@@ -22,7 +22,12 @@ export async function migrateThrough(f: Fixture, index: number) {
 }
 
 /** Raw SQL is deliberate: exercise storage guarantees without the future API. */
-export async function amendment(tx: PoolClient, c: Specimen, previous = c.id) {
+export async function amendment(
+  tx: PoolClient,
+  c: Specimen,
+  previous = c.id,
+  dateColumn: "date_received" | "event_date" = "date_received",
+) {
   const id = randomUUID();
   const root = (
     await tx.query<{ next_revision: number }>(
@@ -33,8 +38,8 @@ export async function amendment(tx: PoolClient, c: Specimen, previous = c.id) {
   if (!root) throw new Error("Missing root fixture");
   await tx.query(
     `INSERT INTO traceability_events(id,tenant_id,root_event_id,event_number,revision,previous_revision_id,amendment_reason,
-    time_zone,date_received,location_id,previous_source_location_id,received_at_note,notes,created_by,updated_by)
-    SELECT $1,tenant_id,root_event_id,event_number,$2,id,'Correct receipt',time_zone,date_received,location_id,previous_source_location_id,
+    time_zone,${dateColumn},location_id,previous_source_location_id,received_at_note,notes,created_by,updated_by)
+    SELECT $1,tenant_id,root_event_id,event_number,$2,id,'Correct receipt',time_zone,${dateColumn},location_id,previous_source_location_id,
     received_at_note,notes,'qa-user','qa-user' FROM traceability_events WHERE tenant_id=$3 AND id=$4`,
     [id, root.next_revision, c.tenant, previous],
   );

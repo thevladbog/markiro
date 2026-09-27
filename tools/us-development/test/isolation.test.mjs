@@ -44,7 +44,7 @@ test("release checker fails on a pull request to main, even with all workflows l
   assert.match(result.stderr, /US development must not merge into main/);
 });
 
-test("US receiving storage and contract regressions run unconditionally in the isolated job", () => {
+test("US event storage and contract regressions run unconditionally in the isolated job", () => {
   const job = workflows()["us-development.yml"].jobs.isolation;
   assert.equal(job.if, undefined);
   for (const [pkg, file] of [
@@ -61,6 +61,25 @@ test("US receiving storage and contract regressions run unconditionally in the i
     ["api", "us-receiving-basis-version.e2e.test.ts"],
     ["db", "us-receiving-roots-migration.e2e.test.ts"],
     ["db", "us-receiving-lifecycle-migration.e2e.test.ts"],
+    ["db", "us-shared-event-foundation-schema.test.ts"],
+    ["db", "us-shared-event-foundation-migration.e2e.test.ts"],
+    ["domain", "us-transformation-readiness.test.ts"],
+    ["domain", "us-transformation-genealogy.test.ts"],
+    ["platform-contracts", "us-transformation-draft.test.ts"],
+    ["platform-contracts", "us-transformation-readiness.test.ts"],
+    ["platform-contracts", "us-transformation-records.test.ts"],
+    ["platform-contracts", "us-transformation-genealogy.test.ts"],
+    ["db", "us-transformation-schema.test.ts"],
+    ["db", "us-transformation-original-migration.e2e.test.ts"],
+    ["db", "us-transformation-revisions-migration.e2e.test.ts"],
+    ["api", "us-transformation-draft.e2e.test.ts"],
+    ["api", "us-transformation-readiness.e2e.test.ts"],
+    ["api", "us-transformation-finalization.e2e.test.ts"],
+    ["api", "us-transformation-finalization-concurrency.e2e.test.ts"],
+    ["api", "us-transformation-genealogy-fixture.e2e.test.ts"],
+    ["api", "us-transformation-genealogy.e2e.test.ts"],
+    ["api", "us-receiving-date-compatibility.e2e.test.ts"],
+    ["api", "us-receiving-shared-event-compatibility.e2e.test.ts"],
     ["api", "us-receiving-roots.e2e.test.ts"],
     ["api", "us-receiving-basis.e2e.test.ts"],
     ["api", "us-receiving-history.e2e.test.ts"],
@@ -96,7 +115,7 @@ test("US receiving storage and contract regressions run unconditionally in the i
             line.split(/\s+/).includes(`test/${file}`),
         ),
     );
-    assert.ok(step, `Missing ${pkg} receiving storage regression: ${file}`);
+    assert.ok(step, `Missing ${pkg} event storage regression: ${file}`);
     assert.equal(step.if, undefined);
     assert.equal(step["continue-on-error"], undefined);
     assert.equal(
@@ -106,6 +125,132 @@ test("US receiving storage and contract regressions run unconditionally in the i
         : "postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev",
     );
   }
+});
+
+test("US case bridge contract, migration, commands, concurrency, reads and HTTP suites run on disposable PostgreSQL", () => {
+  const job = workflows()["us-development.yml"].jobs.isolation;
+  for (const [pkg, file] of [
+    ["platform-contracts", "us-case-bridge.test.ts"],
+    ["db", "us-case-bridge-schema.test.ts"],
+    ["db", "us-case-bridge-migration.e2e.test.ts"],
+    ["api", "us-case-commands.e2e.test.ts"],
+    ["api", "us-case-concurrency.e2e.test.ts"],
+    ["api", "us-case-reads.e2e.test.ts"],
+    ["api", "us-case-http.e2e.test.ts"],
+  ]) {
+    const step = job.steps.find((candidate) =>
+      candidate.run
+        ?.split("\n")
+        .some(
+          (line) =>
+            line.startsWith(`pnpm --filter @markiro/${pkg} exec vitest run `) &&
+            line.split(/\s+/).includes(`test/${file}`),
+        ),
+    );
+    assert.ok(step, `Missing disposable-DB case regression: ${pkg}/${file}`);
+    assert.equal(step.if, undefined);
+    assert.equal(step["continue-on-error"], undefined);
+    assert.equal(
+      step.env?.US_TEST_DATABASE_URL,
+      "postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev",
+    );
+  }
+});
+
+test("US API allowlist mounts the case bridge without RU box, Station or release entrypoints", () => {
+  const module = readFileSync("apps/api/src/deployment/us-development.module.ts", "utf8");
+  assert.match(module, /controllers:\s*\[[^\]]*\bUsCaseController\b/s);
+  assert.doesNotMatch(module, /\bBoxesController\b|\bStation\w*Controller\b/);
+  const workflow = workflows()["us-development.yml"];
+  assert.doesNotMatch(
+    JSON.stringify(workflow),
+    /release-images\.yml|deploy-production\.yml|station-(?:beta|stable)-release\.yml/,
+  );
+});
+
+test("US Transformation and Events API suites are owned by the isolated check-only workflow", () => {
+  const job = workflows()["us-development.yml"].jobs.isolation;
+  const databaseUrl =
+    "postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev";
+  for (const [pkg, file] of [
+    ["platform-contracts", "us-transformation-http.test.ts"],
+    ["platform-contracts", "us-events.test.ts"],
+    ["api", "us-transformation-original-draft-void.e2e.test.ts"],
+    ["api", "us-transformation-revisions.e2e.test.ts"],
+    ["api", "us-transformation-http.e2e.test.ts"],
+    ["api", "us-events-registry.e2e.test.ts"],
+    ["api", "us-events-http.e2e.test.ts"],
+  ]) {
+    const step = job.steps.find((candidate) =>
+      candidate.run
+        ?.split("\n")
+        .some(
+          (line) =>
+            line.startsWith(`pnpm --filter @markiro/${pkg} exec vitest run `) &&
+            line.split(/\s+/).includes(`test/${file}`),
+        ),
+    );
+    assert.ok(step, `Missing isolated US API gate: ${pkg}/${file}`);
+    assert.equal(step.if, undefined);
+    assert.equal(step["continue-on-error"], undefined);
+    assert.equal(step.env?.US_TEST_DATABASE_URL, pkg === "api" ? databaseUrl : undefined);
+  }
+  assert.equal(job["continue-on-error"], undefined);
+  const module = readFileSync("apps/api/src/deployment/us-development.module.ts", "utf8");
+  assert.match(module, /controllers:\s*\[[^\]]*\bUsTransformationController\b/s);
+  assert.match(module, /controllers:\s*\[[^\]]*\bUsEventsController\b/s);
+  const workflow = workflows()["us-development.yml"];
+  assert.doesNotMatch(
+    JSON.stringify(workflow),
+    /release-images\.yml|deploy-production\.yml|station-(?:beta|stable)-release\.yml/,
+  );
+});
+
+test("US Shipping storage, finalization and HTTP suites stay in isolated check-only CI", () => {
+  const job = workflows()["us-development.yml"].jobs.isolation;
+  const databaseUrl =
+    "postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev";
+  for (const [pkg, file] of [
+    ["domain", "us-shipping-balance.test.ts"],
+    ["domain", "us-shipping-readiness.test.ts"],
+    ["platform-contracts", "us-shipping-contracts.test.ts"],
+    ["platform-contracts", "us-shipping-finalization.test.ts"],
+    ["db", "us-shipping-schema.test.ts"],
+    ["db", "us-shipping-migration.e2e.test.ts"],
+    ["api", "us-shipping-balance.e2e.test.ts"],
+    ["api", "us-shipping-balance-read.e2e.test.ts"],
+    ["api", "us-shipping-draft.e2e.test.ts"],
+    ["api", "us-shipping-readiness.e2e.test.ts"],
+    ["api", "us-shipping-status-effects.e2e.test.ts"],
+    ["api", "us-shipping-finalization.e2e.test.ts"],
+    ["api", "us-shipping-finalization-concurrency.e2e.test.ts"],
+    ["api", "us-shipping-http.e2e.test.ts"],
+    ["admin", "us-shipping-editor.test.tsx"],
+    ["admin", "us-shipping-readiness.test.tsx"],
+    ["admin", "us-shipping-detail.test.tsx"],
+    ["admin", "us-shipping-history.test.tsx"],
+    ["admin", "us-events-ui.test.tsx"],
+  ]) {
+    const step = job.steps.find((candidate) =>
+      candidate.run
+        ?.split("\n")
+        .some(
+          (line) =>
+            line.startsWith(`pnpm --filter @markiro/${pkg} exec vitest run `) &&
+            line.split(/\s+/).includes(`test/${file}`),
+        ),
+    );
+    assert.ok(step, `Missing isolated US Shipping gate: ${pkg}/${file}`);
+    assert.equal(step.if, undefined);
+    assert.equal(step["continue-on-error"], undefined);
+    assert.equal(
+      step.env?.US_TEST_DATABASE_URL,
+      pkg === "api" || pkg === "db" ? databaseUrl : undefined,
+    );
+  }
+  const module = readFileSync("apps/api/src/deployment/us-development.module.ts", "utf8");
+  assert.match(module, /controllers:\s*\[[^\]]*\bUsShippingController\b/s);
+  assert.doesNotMatch(readFileSync("apps/api/src/app.module.ts", "utf8"), /UsShippingController/);
 });
 
 test("US dependency stack has private ports and independently named persistent data", () => {

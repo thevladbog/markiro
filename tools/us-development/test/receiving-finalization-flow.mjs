@@ -84,7 +84,9 @@ export async function exerciseUsReceivingFinalization({ page, expect, screenshot
   };
   const saved = await post("receiving", { operationKey: randomUUID(), draft });
   await page.getByRole("button", { name: "Open reference data", exact: true }).click();
-  await page.getByRole("button", { name: "Receiving", exact: true }).click();
+  await page.getByRole("button", { name: "Events", exact: true }).click();
+  await page.getByRole("combobox", { name: "Event type", exact: true }).click();
+  await page.getByRole("option", { name: "Receiving", exact: true }).click();
   await page.getByRole("button", { name: saved.eventNumber, exact: true }).click();
   await expect(page.getByRole("button", { name: "Finalize", exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Save draft", exact: true }).click();
@@ -275,7 +277,9 @@ export async function exerciseUsReceivingFinalization({ page, expect, screenshot
   );
   await page.reload();
   await page.getByRole("button", { name: "Open reference data", exact: true }).click();
-  await page.getByRole("button", { name: "Receiving", exact: true }).click();
+  await page.getByRole("button", { name: "Events", exact: true }).click();
+  await page.getByRole("combobox", { name: "Event type", exact: true }).click();
+  await page.getByRole("option", { name: "Receiving", exact: true }).click();
   await page.getByRole("button", { name: saved.eventNumber, exact: true }).click();
   await expect(page.getByText("FIN-BOL-0001", { exact: true })).toBeVisible();
   await expect(page.getByText("Frozen apples confirmed", { exact: true })).toHaveCount(3);
@@ -321,7 +325,7 @@ export async function exerciseUsReceivingFinalization({ page, expect, screenshot
   await page.getByRole("button", { name: "Back to receiving", exact: true }).click();
   await page.unroute(lotPattern);
   await expect(page.getByText("FIN-BOL-0001", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Back to receiving", exact: true }).click();
+  await page.getByRole("button", { name: "Back to events", exact: true }).click();
   await page.getByRole("button", { name: "← Profile", exact: true }).click();
   // Current operator access can read history but cannot finalize a complete draft.
   const operatorDraft = await post("receiving", {
@@ -334,15 +338,17 @@ export async function exerciseUsReceivingFinalization({ page, expect, screenshot
   );
   try {
     await page.getByRole("button", { name: "Open reference data", exact: true }).click();
-    await page.getByRole("button", { name: "Receiving", exact: true }).click();
+    await page.getByRole("button", { name: "Events", exact: true }).click();
+    await page.getByRole("combobox", { name: "Event type", exact: true }).click();
+    await page.getByRole("option", { name: "Receiving", exact: true }).click();
     await page.getByRole("button", { name: operatorDraft.eventNumber, exact: true }).click();
     await page.getByRole("button", { name: "Check saved draft", exact: true }).click();
     await expect(page.getByText(/Complete — no blockers/)).toBeVisible();
     await expect(page.getByRole("button", { name: "Finalize", exact: true })).toHaveCount(0);
-    await page.getByRole("button", { name: "Back to receiving", exact: true }).click();
+    await page.getByRole("button", { name: "Back to events", exact: true }).click();
     await page.getByRole("button", { name: saved.eventNumber, exact: true }).click();
     await expect(page.getByText("FIN-BOL-0001", { exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "Back to receiving", exact: true }).click();
+    await page.getByRole("button", { name: "Back to events", exact: true }).click();
     await page.getByRole("button", { name: "← Profile", exact: true }).click();
   } finally {
     await fixture.pool.query(

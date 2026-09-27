@@ -80,7 +80,7 @@ forward**, Change status (reason required), Link cases (P0 server-side only).
 | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | CTE timeline | Left-border list as on the RU code page: date, type, event number, revision, status, location, quantity; amended chains collapsed under the current revision; void events greyed with reason |
 | Documents    | Type, number as snapshotted, event, link                                                                                                                                                     |
-| Cases        | Count, first / last SSCC, list with link source (shift link / manual), unlink with reason (P0 server-side; no Station action)                                                                |
+| Cases        | Active link count and SSCC rows; synthetic demo / existing record provenance, manual / demo seed link origin, audited history and unlink reason (P0 server-side; no Station action)          |
 | Findings     | Completeness findings for this lot: severity chip with text, field, message, deep link; "No gaps found" when clean                                                                           |
 | Genealogy    | Inputs and outputs as lot links (2 inputs for the demo output; 1 output for each input)                                                                                                      |
 
@@ -185,9 +185,13 @@ table and in the lot card findings panel.
   lot card, both with a reason and a confirm dialog. They are explicit exceptions owned by other
   slices: Change status is US-02 `POST /traceability/lots/:id/status` (`traceability.qa.manage`,
   audit `traceability.lot.status_changed`); Link / Unlink cases is US-04
-  `POST /traceability/lots/:lotId/boxes` and `/boxes/unlink` (`traceability.transformation.write`,
-  `unlink_reason` recorded, rows never deleted). Users without the capability see the affordance
-  disabled with the reason. No edit affordances on events here.
+  `POST /traceability/lots/:lotId/cases` and
+  `POST /traceability/lots/:lotId/cases/:linkId/unlink` (`traceability.transformation.write`,
+  reason recorded, rows never deleted). Reads use `GET /traceability/lots/:lotId/cases`
+  with bounded pagination and optional history, and `GET /traceability/cases/lookup?sscc=…`.
+  Provenance distinguishes `synthetic_demo` from `existing_record`, independently from
+  `manual`/`demo_seed` link origin. Read-only users have no mutation controls. An origin gap
+  retains active links and unlink but blocks new links. No edit affordances on events here.
 - **Wording.** "Data readiness", "data completeness", "required elements", "gaps"; nothing
   from the not-allowed column of `docs/us/limitations.md`. Generic-profile screens carry the
   Scenario B statement ("FTR applicability not assessed in this profile; general lot traceability only").

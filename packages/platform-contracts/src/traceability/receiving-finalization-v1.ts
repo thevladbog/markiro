@@ -38,7 +38,7 @@ const coordinate = (minimum: number, maximum: number) =>
   }, "Invalid frozen coordinate");
 const receivingFinalizationSnapshotV1RuleVersionSchema = z.literal("receiving-readiness-v2");
 
-const locationDescriptionSnapshotSchema = z
+export const locationDescriptionSnapshotSchema = z
   .object({
     schemaVersion: z.literal(1),
     locationId: losslessUuid,

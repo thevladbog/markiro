@@ -148,7 +148,9 @@ export async function exerciseUsReceivingExemption({ page, expect, screenshots, 
   assert.deepEqual(secondReadiness.exemptReviewRequiredLines, [1]);
 
   await page.getByRole("button", { name: "Open reference data", exact: true }).click();
-  await page.getByRole("button", { name: "Receiving", exact: true }).click();
+  await page.getByRole("button", { name: "Events", exact: true }).click();
+  await page.getByRole("combobox", { name: "Event type", exact: true }).click();
+  await page.getByRole("option", { name: "Receiving", exact: true }).click();
   await page.getByRole("button", { name: unicodeEntry.eventNumber, exact: true }).click();
   const unicodeProposal = page.getByLabel("Proposed TLC for own assignment", { exact: true });
   const validUnicodeProposal = "🚀".repeat(120);
@@ -182,7 +184,7 @@ export async function exerciseUsReceivingExemption({ page, expect, screenshots, 
     validUnicodeProposal,
   );
   page.once("dialog", (dialog) => dialog.accept());
-  await page.getByRole("button", { name: "Back to receiving", exact: true }).click();
+  await page.getByRole("button", { name: "Back to events", exact: true }).click();
   await page.getByRole("button", { name: saved.eventNumber, exact: true }).click();
   await expect(page.getByLabel("Lot code (TLC)", { exact: true }).first()).toHaveValue(
     preserved.tlc,
@@ -513,7 +515,7 @@ export async function exerciseUsReceivingExemption({ page, expect, screenshots, 
     },
   );
 
-  await page.getByRole("button", { name: "Back to receiving", exact: true }).click();
+  await page.getByRole("button", { name: "Back to events", exact: true }).click();
   await page.getByRole("button", { name: second.eventNumber, exact: true }).click();
   await page.getByRole("button", { name: "Check saved draft", exact: true }).click();
   await page.getByRole("button", { name: "Finalize", exact: true }).click();
@@ -522,7 +524,7 @@ export async function exerciseUsReceivingExemption({ page, expect, screenshots, 
     secondDialog.getByRole("checkbox", { name: "Review exemption for line 1", exact: true }),
   ).not.toBeChecked();
   await page.keyboard.press("Escape");
-  await page.getByRole("button", { name: "Back to receiving", exact: true }).click();
+  await page.getByRole("button", { name: "Back to events", exact: true }).click();
   await page.getByRole("button", { name: saved.eventNumber, exact: true }).click();
 
   await fixture.pool.query(
@@ -539,7 +541,9 @@ export async function exerciseUsReceivingExemption({ page, expect, screenshots, 
   );
   await page.reload();
   await page.getByRole("button", { name: "Open reference data", exact: true }).click();
-  await page.getByRole("button", { name: "Receiving", exact: true }).click();
+  await page.getByRole("button", { name: "Events", exact: true }).click();
+  await page.getByRole("combobox", { name: "Event type", exact: true }).click();
+  await page.getByRole("option", { name: "Receiving", exact: true }).click();
   await page.getByRole("button", { name: saved.eventNumber, exact: true }).click();
   await expect(page.getByText("Frozen exempt apples", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Live renamed exempt apples", { exact: true })).toHaveCount(0);
@@ -575,7 +579,7 @@ export async function exerciseUsReceivingExemption({ page, expect, screenshots, 
   }
   await page.getByRole("button", { name: "Idioma", exact: true }).click();
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.getByRole("button", { name: "Back to receiving", exact: true }).click();
+  await page.getByRole("button", { name: "Back to events", exact: true }).click();
   await page.getByRole("button", { name: "← Profile", exact: true }).click();
 
   await fixture.pool.query(

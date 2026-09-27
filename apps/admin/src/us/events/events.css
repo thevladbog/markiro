@@ -1,0 +1,122 @@
+.us-events-page,
+.us-event-summary {
+  min-width: 0;
+}
+
+.us-events-actions,
+.us-events-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 10px;
+}
+
+.us-events-actions {
+  justify-content: flex-end;
+}
+
+.us-events-filters {
+  margin-bottom: 20px;
+}
+
+.us-events-filters .mk-field:first-child {
+  flex: 1 1 210px;
+}
+
+.us-events-filters .mk-field {
+  flex: 0 1 180px;
+}
+
+.us-event-identity,
+.us-event-date {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.us-event-identity > span,
+.us-event-date small {
+  color: var(--fg-3);
+  font: var(--text-meta);
+}
+
+.us-event-code {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.us-event-type {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 600;
+}
+
+.us-event-type__icon {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  flex: none;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-1);
+  color: var(--fg-2);
+  font: var(--text-meta);
+}
+
+.us-event-summary__header {
+  margin: 32px 0 24px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.us-event-summary__header > span {
+  color: var(--fg-2);
+  font: var(--text-caption);
+}
+
+.us-event-summary__header h1 {
+  margin: 8px 0;
+  font: var(--text-display);
+}
+
+.us-event-summary__header p {
+  color: var(--fg-2);
+}
+
+.us-event-summary__facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 0 24px;
+  margin: 0;
+  border-top: 1px solid var(--line);
+}
+
+.us-event-summary__facts > div {
+  min-width: 0;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.us-event-summary__facts dt {
+  margin-bottom: 5px;
+  color: var(--fg-2);
+  font: var(--text-caption);
+}
+
+.us-event-summary__facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 1024px) {
+  .us-events-page .us-md-page-header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .us-events-actions {
+    justify-content: flex-start;
+  }
+}

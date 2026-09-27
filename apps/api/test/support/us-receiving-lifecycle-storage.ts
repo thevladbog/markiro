@@ -36,8 +36,8 @@ export function createStoredAmendment(f: Fixture, tenant: string, previous: stri
     const id = randomUUID();
     await tx.query(
       `INSERT INTO traceability_events(id,tenant_id,root_event_id,event_number,revision,previous_revision_id,amendment_reason,
-      time_zone,date_received,location_id,previous_source_location_id,received_at_note,notes,created_by,updated_by)
-      SELECT $1,tenant_id,root_event_id,event_number,$2,id,'Correct receipt',time_zone,date_received,location_id,
+      time_zone,event_date,location_id,previous_source_location_id,received_at_note,notes,created_by,updated_by)
+      SELECT $1,tenant_id,root_event_id,event_number,$2,id,'Correct receipt',time_zone,event_date,location_id,
       previous_source_location_id,received_at_note,notes,finalized_by,finalized_by FROM traceability_events WHERE tenant_id=$3 AND id=$4`,
       [id, row.next_revision, tenant, previous],
     );

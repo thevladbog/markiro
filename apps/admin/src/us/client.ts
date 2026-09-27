@@ -1,5 +1,11 @@
 import { z } from "zod";
 import {
+  receivingCsvPreviewInputSchema,
+  receivingCsvPreviewSchema,
+  receivingCsvApplyInputSchema,
+  receivingCsvApplyResponseSchema,
+  decodeReceivingCsvExport,
+  matchesReceivingCsvApplyResponse,
   createReceivingDraftSchema,
   finalizeReceivingCommandSchema,
   receivingFinalizeResultSchema,
@@ -54,6 +60,45 @@ import {
   usTraceabilityAccessSchema,
   usTraceabilityProfileSummarySchema,
   type ListUsLocationsQuery,
+  usEventListQuerySchema,
+  usEventListSchema,
+  transformationHttpRecordSchema,
+  createTransformationDraftSchema,
+  saveTransformationDraftSchema,
+  finalizeTransformationSchema,
+  transformationDraftRecordSchema,
+  transformationFinalizedRecordSchema,
+  transformationReadinessSchema,
+  amendTransformationSchema,
+  voidTransformationSchema,
+  transformationLifecycleReceiptSchema,
+  transformationRevisionListQuerySchema,
+  transformationRevisionListSchema,
+  transformationGenealogyRequestSchema,
+  transformationGenealogyResultSchema,
+  transformationHttpErrorSchema,
+  type TransformationHttpError,
+  createShippingDraftSchema,
+  saveShippingDraftSchema,
+  shippingDraftRecordSchema,
+  shippingHistoricalRecordSchema,
+  shippingFinalizedRecordSchema,
+  shippingReadinessSchema,
+  shippingBalanceQuerySchema,
+  shippingBalanceResponseSchema,
+  finalizeShippingSchema,
+  amendShippingSchema,
+  voidShippingSchema,
+  shippingLifecycleReceiptSchema,
+  shippingRevisionListQuerySchema,
+  shippingRevisionListSchema,
+  shippingHttpErrorSchema,
+  caseListQuerySchema,
+  caseListResultSchema,
+  caseLinkCommandSchema,
+  caseLinkResultSchema,
+  caseUnlinkCommandSchema,
+  caseUnlinkResultSchema,
 } from "@markiro/platform-contracts";
 import {
   matchesReceivingCreateAcknowledgement,
@@ -62,9 +107,32 @@ import {
   matchesReceivingAmendAcknowledgement,
   matchesReceivingVoidAcknowledgement,
 } from "./receiving/command-acknowledgement.js";
+import { matchesReceivingCsvPreview } from "./receiving/csv-integrity.js";
+
+type ShippingHttpError = z.infer<typeof shippingHttpErrorSchema>;
 
 export type UsClientErrorCode =
+  | "receiving_export_stale"
+  | "export_value_too_large"
+  | "receiving_csv_preview_expired"
+  | "receiving_csv_preview_stale"
+  | "receiving_csv_preview_conflict"
+  | "receiving_csv_preview_not_applicable"
+  | "receiving_csv_preview_not_found"
   | ReceivingLifecycleError["code"]
+  | TransformationHttpError["code"]
+  | ShippingHttpError["code"]
+  | "shipping_not_found"
+  | "shipping_reference_not_found"
+  | "case_not_found"
+  | "case_lot_not_found"
+  | "case_link_not_found"
+  | "case_operation_conflict"
+  | "case_disassembled"
+  | "case_sscc_inconsistent"
+  | "case_link_conflict"
+  | "case_origin_not_current"
+  | "case_link_stale"
   | "invalid_input"
   | "invalid_response"
   | "session_required"
@@ -92,11 +160,59 @@ export type UsClientErrorCode =
   | "unavailable"
   | "request_rejected";
 
+type TransformationConflict = Extract<
+  TransformationHttpError,
+  { code: "event_incomplete" | "traceability_downstream_blocked" }
+>;
+type ShippingConflict = Extract<
+  ShippingHttpError,
+  { code: "event_incomplete" | "traceability_downstream_blocked" }
+>;
+
 /** Safe translation key only. Never retain a raw response, payload or error cause. */
 export class UsClientError extends Error {
   constructor(readonly code: UsClientErrorCode) {
     super(code);
     this.name = "UsClientError";
+  }
+}
+
+export class UsShippingConflictError extends UsClientError {
+  readonly issues?: Extract<ShippingConflict, { code: "event_incomplete" }>["issues"];
+  readonly blockers?: Extract<
+    ShippingConflict,
+    { code: "traceability_downstream_blocked" }
+  >["blockers"];
+  readonly hasMore?: boolean;
+
+  constructor(detail: ShippingConflict) {
+    super(detail.code);
+    this.name = "UsShippingConflictError";
+    if (detail.code === "event_incomplete") this.issues = detail.issues;
+    else {
+      this.blockers = detail.blockers;
+      this.hasMore = detail.hasMore;
+    }
+  }
+}
+
+/** Parsed, bounded conflict evidence only; no server response or cause is retained. */
+export class UsTransformationConflictError extends UsClientError {
+  readonly issues?: Extract<TransformationConflict, { code: "event_incomplete" }>["issues"];
+  readonly blockers?: Extract<
+    TransformationConflict,
+    { code: "traceability_downstream_blocked" }
+  >["blockers"];
+  readonly hasMore?: boolean;
+
+  constructor(detail: TransformationConflict) {
+    super(detail.code);
+    this.name = "UsTransformationConflictError";
+    if (detail.code === "event_incomplete") this.issues = detail.issues;
+    else {
+      this.blockers = detail.blockers;
+      this.hasMore = detail.hasMore;
+    }
   }
 }
 
@@ -169,6 +285,23 @@ const locationsPath = "/api/us/traceability/locations";
 const productsPath = "/api/us/traceability/catalog/products";
 const lotsPath = "/api/us/traceability/lots";
 const receivingPath = "/api/us/traceability/receiving";
+const eventsPath = "/api/us/traceability/events";
+const transformationPath = "/api/us/traceability/transformation";
+const shippingPath = "/api/us/traceability/shipments";
+const casesPath = "/api/us/traceability/lots";
+const uuidPath = "[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}";
+const lotErrorRoute = new RegExp(`^${lotsPath}/${uuidPath}(?:/(?:source|status))?$`);
+const caseErrorRoute = new RegExp(
+  `^${casesPath}/${uuidPath}/cases(?:\\?[^#]*|/${uuidPath}/unlink)?$`,
+);
+const transformationErrorRoute = new RegExp(
+  `^${transformationPath}(?:/genealogy/query|/${uuidPath}(?:/(?:finalize|amend|void)|/readiness\\?expectedDraftVersion=[1-9][0-9]*|/revisions\\?limit=[1-9][0-9]*&offset=(?:0|[1-9][0-9]*))?)?$`,
+);
+const shippingErrorRoute = new RegExp(
+  `^${shippingPath}(?:/${uuidPath}(?:/(?:finalize|amend|void)|/readiness\\?expectedDraftVersion=[1-9][0-9]*|/revisions\\?limit=[1-9][0-9]*&offset=(?:0|[1-9][0-9]*))?)?$`,
+);
+const receivingCsvPath = `${receivingPath}/imports`;
+const maxReceivingExportBytes = 16 * 1024 * 1024;
 const documentsPath = "/api/us/traceability/reference-documents";
 const deploymentSchema = z
   .object({
@@ -219,6 +352,41 @@ function captureReceivingContext(
   return record;
 }
 
+async function readBoundedReceivingExport(response: Response): Promise<Uint8Array> {
+  const length = response.headers.get("Content-Length");
+  if (
+    length !== null &&
+    (!/^(0|[1-9][0-9]*)$/.test(length) || Number(length) > maxReceivingExportBytes)
+  )
+    throw new UsClientError("invalid_response");
+  if (!response.body) throw new UsClientError("invalid_response");
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const next = await reader.read();
+      if (next.done) break;
+      size += next.value.byteLength;
+      if (size > maxReceivingExportBytes) throw new UsClientError("invalid_response");
+      chunks.push(next.value);
+    }
+  } catch (error) {
+    await reader.cancel().catch(() => undefined);
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
+  if (length !== null && Number(length) !== size) throw new UsClientError("invalid_response");
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
+}
+
 /** Only fixed same-origin US routes; no RU client imports, retries or persistence.
  * The US browser entry must separately attest edition and configure its proxy.
  * Callers must keep enrollment material out of query caches and persistent stores.
@@ -252,6 +420,80 @@ export function createUsBrowserClient(send: typeof fetch = globalThis.fetch.bind
         if (response.ok) throw new UsClientError("invalid_response");
       }
       if (!response.ok) {
+        if (shippingErrorRoute.test(path) && [404, 409].includes(response.status)) {
+          if (response.status === 404) {
+            const missing = z
+              .object({ code: z.enum(["shipping_not_found", "shipping_reference_not_found"]) })
+              .strict()
+              .safeParse(value);
+            if (missing.success) throw new UsClientError(missing.data.code);
+          } else {
+            const conflict = shippingHttpErrorSchema.safeParse(value);
+            if (conflict.success) {
+              if (
+                conflict.data.code === "event_incomplete" ||
+                conflict.data.code === "traceability_downstream_blocked"
+              )
+                throw new UsShippingConflictError(conflict.data);
+              throw new UsClientError(conflict.data.code);
+            }
+          }
+        }
+        if (transformationErrorRoute.test(path)) {
+          if ([404, 409].includes(response.status)) {
+            const conflict = transformationHttpErrorSchema.safeParse(value);
+            if (conflict.success) {
+              const notFound =
+                conflict.data.code === "transformation_not_found" ||
+                conflict.data.code === "transformation_reference_not_found";
+              if (response.status === 404 && notFound) throw new UsClientError(conflict.data.code);
+              if (response.status === 409 && !notFound) {
+                if (
+                  conflict.data.code === "event_incomplete" ||
+                  conflict.data.code === "traceability_downstream_blocked"
+                )
+                  throw new UsTransformationConflictError(conflict.data);
+                throw new UsClientError(conflict.data.code);
+              }
+            }
+          }
+        }
+        if (caseErrorRoute.test(path) && [404, 409].includes(response.status)) {
+          const safeCaseError = z
+            .object({
+              code:
+                response.status === 404
+                  ? z.enum(["case_not_found", "case_lot_not_found", "case_link_not_found"])
+                  : z.enum([
+                      "case_operation_conflict",
+                      "case_disassembled",
+                      "case_sscc_inconsistent",
+                      "case_link_conflict",
+                      "case_origin_not_current",
+                      "case_link_stale",
+                    ]),
+            })
+            .strict()
+            .safeParse(value);
+          if (safeCaseError.success) throw new UsClientError(safeCaseError.data.code);
+        }
+        if (path.startsWith(`${receivingCsvPath}/`) && [404, 409].includes(response.status)) {
+          const issue = z
+            .object({
+              code:
+                response.status === 404
+                  ? z.literal("receiving_csv_preview_not_found")
+                  : z.enum([
+                      "receiving_csv_preview_expired",
+                      "receiving_csv_preview_stale",
+                      "receiving_csv_preview_conflict",
+                      "receiving_csv_preview_not_applicable",
+                    ]),
+            })
+            .strict()
+            .safeParse(value);
+          if (issue.success) throw new UsClientError(issue.data.code);
+        }
         if (path === receivingPath || path.startsWith(`${receivingPath}/`)) {
           if (response.status === 409) {
             const lifecycle = receivingLifecycleErrorSchema.safeParse(value);
@@ -300,7 +542,7 @@ export function createUsBrowserClient(send: typeof fetch = globalThis.fetch.bind
             .safeParse(value).success
         )
           throw new UsClientError("document_duplicate");
-        if (response.status === 409 && (path === lotsPath || path.startsWith(`${lotsPath}/`))) {
+        if (response.status === 409 && (path === lotsPath || lotErrorRoute.test(path))) {
           const duplicate = z
             .object({ code: z.literal("LOT_DUPLICATE"), existingId: platformUuidSchema })
             .strict()
@@ -359,6 +601,445 @@ export function createUsBrowserClient(send: typeof fetch = globalThis.fetch.bind
     }
   }
   return {
+    async listEvents(input: unknown = {}) {
+      const query = checked(usEventListQuerySchema, input, "invalid_input");
+      const params = new URLSearchParams({
+        type: query.type,
+        history: query.history,
+        limit: String(query.limit),
+        offset: String(query.offset),
+      });
+      if (query.status !== undefined) params.set("status", query.status);
+      if (query.search !== undefined) params.set("search", query.search);
+      const result = await request(`${eventsPath}?${params}`, usEventListSchema);
+      if (result.limit !== query.limit || result.offset !== query.offset)
+        throw new UsClientError("invalid_response");
+      return result;
+    },
+    async listShipping(input: unknown = {}) {
+      const query = checked(usEventListQuerySchema.omit({ type: true }), input, "invalid_input");
+      const params = new URLSearchParams({
+        type: "shipping",
+        history: query.history,
+        limit: String(query.limit),
+        offset: String(query.offset),
+      });
+      if (query.status !== undefined) params.set("status", query.status);
+      if (query.search !== undefined) params.set("search", query.search);
+      const result = await request(`${eventsPath}?${params}`, usEventListSchema);
+      if (
+        result.limit !== query.limit ||
+        result.offset !== query.offset ||
+        result.items.some((item) => item.type !== "shipping")
+      )
+        throw new UsClientError("invalid_response");
+      return result;
+    },
+    async getShipping(id: unknown) {
+      const eventId = checked(platformUuidSchema, id, "invalid_input");
+      const result = await request(`${shippingPath}/${eventId}`, shippingHistoricalRecordSchema);
+      if (result.id.toLowerCase() !== eventId.toLowerCase())
+        throw new UsClientError("invalid_response");
+      return result;
+    },
+    async getShippingBalance(lotIdInput: unknown, context: unknown = {}) {
+      const lotId = checked(platformUuidSchema, lotIdInput, "invalid_input");
+      const query = checked(shippingBalanceQuerySchema, context, "invalid_input");
+      const suffix =
+        "contextDraftId" in query
+          ? `?contextDraftId=${query.contextDraftId}&expectedDraftVersion=${query.expectedDraftVersion}`
+          : "";
+      const result = await request(
+        `/api/us/traceability/lots/${lotId}/shipping-balance${suffix}`,
+        shippingBalanceResponseSchema,
+      );
+      if (result.lotId.toLowerCase() !== lotId.toLowerCase())
+        throw new UsClientError("invalid_response");
+      return result;
+    },
+    async createShipping(input: unknown) {
+      const body = checked(createShippingDraftSchema, input, "invalid_input");
+      return request(shippingPath, shippingDraftRecordSchema, "POST", body);
+    },
+    async saveShipping(id: unknown, input: unknown) {
+      const eventId = checked(platformUuidSchema, id, "invalid_input");
+      const body = checked(saveShippingDraftSchema, input, "invalid_input");
+      const result = await request(
+        `${shippingPath}/${eventId}`,
+        shippingDraftRecordSchema,
+        "PUT",
+        body,
+      );
+      if (result.id.toLowerCase() !== eventId.toLowerCase())
+        throw new UsClientError("invalid_response");
+      return result;
+    },
+    async checkShippingReadiness(id: unknown, expectedDraftVersion: unknown) {
+      const eventId = checked(platformUuidSchema, id, "invalid_input");
+      const version = checked(
+        finalizeShippingSchema.shape.expectedDraftVersion,
+        expectedDraftVersion,
+        "invalid_input",
+      );
+      const result = await request(
+        `${shippingPath}/${eventId}/readiness?expectedDraftVersion=${version}`,
+        shippingReadinessSchema,
+      );
+      if (
+        result.eventId.toLowerCase() !== eventId.toLowerCase() ||
+        result.expectedDraftVersion !== version
+      )
+        throw new UsClientError("invalid_response");
+      return result;
+    },
+    async finalizeShipping(id: unknown, input: unknown) {
+      const eventId = checked(platformUuidSchema, id, "invalid_input");
+      const body = checked(finalizeShippingSchema, input, "invalid_input");
+      const result = await request(
+        `${shippingPath}/${eventId}/finalize`,
+        shippingFinalizedRecordSchema,
+        "POST",
+        body,
+      );
+      if (result.id.toLowerCase() !== eventId.toLowerCase())
+        throw new UsClientError("invalid_response");
+      return result;
+    },
+    async amendShipping(id: unknown, input: unknown) {
+      const eventId = checked(platformUuidSchema, id, "invalid_input");
+      const body = checked(amendShippingSchema, input, "invalid_input");
+      const result = await request(
+        `${shippingPath}/${eventId}/amend`,
+        shippingLifecycleReceiptSchema,
+        "POST",
+        body,
+      );
+      if (
+        result.command !== "shipping.amend" ||
+        result.operationKey.toLowerCase() !== body.operationKey.toLowerCase() ||
+        result.record.lifecycle?.previousRevisionId?.toLowerCase() !== eventId.toLowerCase() ||
+        result.record.lifecycle?.pendingDraftId?.toLowerCase() !== result.eventId.toLowerCase()
+      )
+        throw new UsClientError("invalid_response");
+      return result;
+    },
+    async voidShipping(id: unknown, input: unknown) {
+      const eventId = checked(platformUuidSchema, id, "invalid_input");
+      const body = checked(voidShippingSchema, input, "invalid_input");
+      const result = await request(
+        `${shippingPath}/${eventId}/void`,
+        shippingLifecycleReceiptSchema,
+        "POST",
+        body,
+      );
+      if (
+        result.command !== "shipping.void" ||
+        result.operationKey.toLowerCase() !== body.operationKey.toLowerCase() ||
+        result.eventId.toLowerCase() !== eventId.toLowerCase()
+      )
+        throw new UsClientError("invalid_response");
+      return result;
+    },
+    async listShippingRevisions(id: unknown, input: unknown = {}) {
+      const eventId = checked(platformUuidSchema, id, "invalid_input");
+      const query = checked(shippingRevisionListQuerySchema, input, "invalid_input");
+      const params = new URLSearchParams({
+        limit: String(query.limit),
+        offset: String(query.offset),
+      });
+      const result = await request(
+        `${shippingPath}/${eventId}/revisions?${params}`,
+        shippingRevisionListSchema,
+      );
+      if (
+        result.limit !== query.limit ||
+        result.offset !== query.offset ||
+        result.items.some(
+          (item) =>
+            item.rootId.toLowerCase() !==
+            (result.items[0]?.rootId.toLowerCase() ?? item.rootId.toLowerCase()),
+        )
+      )
+        throw new UsClientError("invalid_response");
+      return result;
+    },
+    async getTransformation(id: unknown) {
+      const eventId = checked(platformUuidSchema, id, "invalid_input");
+      const result = await request(
+        `${transformationPath}/${eventId}`,
+        transformationHttpRecordSchema,
+      );
+      if (result.id.toLowerCase() !== eventId.toLowerCase())
+        throw new UsClientError("invalid_response");
+      return result;
+    },
+    async createTransformation(input: unknown) {
+      const body = checked(createTransformationDraftSchema, input, "invalid_input");
+      return request(transformationPath, transformationDraftRecordSchema, "POST", body);
+    },
+    async saveTransformation(id: unknown, input: unknown) {
+      const eventId = checked(platformUuidSchema, id, "invalid_input");
+      const body = checked(saveTransformationDraftSchema, input, "invalid_input");
+      const result = await request(
+        `${transformationPath}/${eventId}`,
+        transformationDraftRecordSchema,
+        "PUT",
+        body,
+      );
+      if (result.id.toLowerCase() !== eventId.toLowerCase())
+        throw new UsClientError("invalid_response");
+      return result;
+    },
+    async checkTransformationReadiness(id: unknown, expectedDraftVersion: unknown) {
+      const eventId = checked(platformUuidSchema, id, "invalid_input");
+      const version = checked(
+        finalizeTransformationSchema.shape.expectedDraftVersion,
+        expectedDraftVersion,
+        "invalid_input",
+      );
+      const result = await request(
+        `${transformationPath}/${eventId}/readiness?expectedDraftVersion=${version}`,
+        transformationReadinessSchema,
+      );
+      if (
+        result.eventId.toLowerCase() !== eventId.toLowerCase() ||
+        result.expectedDraftVersion !== version
+      )
+        throw new UsClientError("invalid_response");
+      return result;
+    },
+    async finalizeTransformation(id: unknown, input: unknown) {
+      const eventId = checked(platformUuidSchema, id, "invalid_input");
+      const body = checked(finalizeTransformationSchema, input, "invalid_input");
+      const result = await request(
+        `${transformationPath}/${eventId}/finalize`,
+        transformationFinalizedRecordSchema,
+        "POST",
+        body,
+      );
+      if (result.id.toLowerCase() !== eventId.toLowerCase())
+        throw new UsClientError("invalid_response");
+      return result;
+    },
+    async amendTransformation(id: unknown, input: unknown) {
+      const eventId = checked(platformUuidSchema, id, "invalid_input");
+      const body = checked(amendTransformationSchema, input, "invalid_input");
+      const result = await request(
+        `${transformationPath}/${eventId}/amend`,
+        transformationLifecycleReceiptSchema,
+        "POST",
+        body,
+      );
+      if (
+        result.record.lifecycle?.previousRevisionId?.toLowerCase() !== eventId.toLowerCase() ||
+        result.record.lifecycle?.currentEventId?.toLowerCase() !== eventId.toLowerCase() ||
+        result.record.lifecycle?.pendingDraftId?.toLowerCase() !== result.eventId.toLowerCase() ||
+        (result.record.revision === 2 &&
+          result.record.lifecycle?.rootId.toLowerCase() !== eventId.toLowerCase()) ||
+        result.operationKey.toLowerCase() !== body.operationKey.toLowerCase() ||
+        result.command !== "transformation.amend"
+      )
+        throw new UsClientError("invalid_response");
+      return result;
+    },
+    async voidTransformation(id: unknown, input: unknown) {
+      const eventId = checked(platformUuidSchema, id, "invalid_input");
+      const body = checked(voidTransformationSchema, input, "invalid_input");
+      const result = await request(
+        `${transformationPath}/${eventId}/void`,
+        transformationLifecycleReceiptSchema,
+        "POST",
+        body,
+      );
+      if (
+        result.eventId.toLowerCase() !== eventId.toLowerCase() ||
+        result.operationKey.toLowerCase() !== body.operationKey.toLowerCase() ||
+        result.command !== "transformation.void"
+      )
+        throw new UsClientError("invalid_response");
+      return result;
+    },
+    async listTransformationRevisions(id: unknown, input: unknown = {}) {
+      const eventId = checked(platformUuidSchema, id, "invalid_input");
+      const query = checked(transformationRevisionListQuerySchema, input, "invalid_input");
+      const params = new URLSearchParams({
+        limit: String(query.limit),
+        offset: String(query.offset),
+      });
+      const result = await request(
+        `${transformationPath}/${eventId}/revisions?${params}`,
+        transformationRevisionListSchema,
+      );
+      if (
+        result.limit !== query.limit ||
+        result.offset !== query.offset ||
+        result.items.some(
+          (item) =>
+            item.rootId.toLowerCase() !==
+            (result.items[0]?.rootId.toLowerCase() ?? item.rootId.toLowerCase()),
+        )
+      )
+        throw new UsClientError("invalid_response");
+      return result;
+    },
+    async queryTransformationGenealogy(input: unknown) {
+      const body = checked(transformationGenealogyRequestSchema, input, "invalid_input");
+      const result = await request(
+        `${transformationPath}/genealogy/query`,
+        transformationGenealogyResultSchema,
+        "POST",
+        body,
+      );
+      if (
+        result.startLotId.toLowerCase() !== body.startLotId.toLowerCase() ||
+        result.direction !== body.direction ||
+        result.mode !== body.mode
+      )
+        throw new UsClientError("invalid_response");
+      return result;
+    },
+    async listLotCases(id: unknown, input: unknown = {}) {
+      const lotId = checked(platformUuidSchema, id, "invalid_input");
+      const query = checked(caseListQuerySchema, input, "invalid_input");
+      const params = new URLSearchParams({
+        limit: String(query.limit),
+        history: String(query.history),
+      });
+      if (query.cursor !== undefined) params.set("cursor", query.cursor);
+      const result = await request(`${casesPath}/${lotId}/cases?${params}`, caseListResultSchema);
+      if (result.lotId.toLowerCase() !== lotId.toLowerCase())
+        throw new UsClientError("invalid_response");
+      return result;
+    },
+    async linkLotCases(id: unknown, input: unknown) {
+      const lotId = checked(platformUuidSchema, id, "invalid_input");
+      const body = checked(caseLinkCommandSchema, input, "invalid_input");
+      const result = await request(
+        `${casesPath}/${lotId}/cases`,
+        caseLinkResultSchema,
+        "POST",
+        body,
+      );
+      if (result.lotId.toLowerCase() !== lotId.toLowerCase())
+        throw new UsClientError("invalid_response");
+      return result;
+    },
+    async unlinkLotCase(id: unknown, linkId: unknown, input: unknown) {
+      const lotId = checked(platformUuidSchema, id, "invalid_input");
+      const caseLinkId = checked(platformUuidSchema, linkId, "invalid_input");
+      const body = checked(caseUnlinkCommandSchema, input, "invalid_input");
+      const result = await request(
+        `${casesPath}/${lotId}/cases/${caseLinkId}/unlink`,
+        caseUnlinkResultSchema,
+        "POST",
+        body,
+      );
+      if (
+        result.lotId.toLowerCase() !== lotId.toLowerCase() ||
+        result.linkId.toLowerCase() !== caseLinkId.toLowerCase()
+      )
+        throw new UsClientError("invalid_response");
+      return result;
+    },
+    async exportReceivingCsv(captured: unknown) {
+      const selected = checked(receivingLiveRecordSchema, captured, "invalid_input");
+      const eventId = selected.id.toLowerCase();
+      const filename = `markiro-receiving-${eventId}-r${selected.revision}-d${selected.draftVersion}-l${selected.lifecycle.lifecycleVersion}.csv`;
+      const path = `${receivingPath}/${eventId}/export.csv?expectedDraftVersion=${selected.draftVersion}&expectedLifecycleVersion=${selected.lifecycle.lifecycleVersion}`;
+      const controller = new AbortController();
+      const timeout = globalThis.setTimeout(() => controller.abort(), 15_000);
+      try {
+        const response = await send(path, {
+          method: "GET",
+          credentials: "same-origin",
+          cache: "no-store",
+          redirect: "error",
+          signal: controller.signal,
+        });
+        if (!response.ok) {
+          if (response.status === 409) throw new UsClientError("receiving_export_stale");
+          if (response.status === 422) throw new UsClientError("export_value_too_large");
+          const errors: Record<number, UsClientErrorCode> = {
+            401: "session_required",
+            403: "forbidden",
+            429: "rate_limited",
+          };
+          throw new UsClientError(
+            errors[response.status] ??
+              (response.status >= 500 ? "unavailable" : "request_rejected"),
+          );
+        }
+        if (
+          response.headers.get("Content-Type")?.toLowerCase() !== "text/csv; charset=utf-8" ||
+          response.headers.get("Content-Disposition") !== `attachment; filename="${filename}"`
+        )
+          throw new UsClientError("invalid_response");
+        const digest = response.headers.get("X-Markiro-Export-SHA256");
+        if (!digest || !/^[a-f0-9]{64}$/.test(digest)) throw new UsClientError("invalid_response");
+        const bytes = await readBoundedReceivingExport(response);
+        const digestInput = new Uint8Array(new ArrayBuffer(bytes.byteLength));
+        digestInput.set(bytes);
+        const actualDigest = Array.from(
+          new Uint8Array(await globalThis.crypto.subtle.digest("SHA-256", digestInput)),
+        )
+          .map((value) => value.toString(16).padStart(2, "0"))
+          .join("");
+        if (actualDigest !== digest) throw new UsClientError("invalid_response");
+        const decoded = decodeReceivingCsvExport(bytes);
+        if (
+          decoded.record.id.toLowerCase() !== eventId ||
+          decoded.record.revision !== selected.revision ||
+          decoded.record.draftVersion !== selected.draftVersion ||
+          decoded.record.lifecycle.lifecycleVersion !== selected.lifecycle.lifecycleVersion
+        )
+          throw new UsClientError("invalid_response");
+        return { bytes, filename };
+      } catch (error) {
+        if (error instanceof UsClientError) throw error;
+        throw new UsClientError(
+          controller.signal.aborted || error instanceof TypeError
+            ? "unavailable"
+            : "invalid_response",
+        );
+      } finally {
+        globalThis.clearTimeout(timeout);
+      }
+    },
+    async previewReceivingCsv(input: unknown) {
+      const body = checked(receivingCsvPreviewInputSchema, input, "invalid_input");
+      const captured = structuredClone(input);
+      const result = await request(
+        `${receivingCsvPath}/preview`,
+        receivingCsvPreviewSchema,
+        "POST",
+        captured,
+      );
+      try {
+        if (await matchesReceivingCsvPreview(result, body)) return result;
+      } catch {
+        /* Sanitized below; no raw bytes or decoder cause retained. */
+      }
+      throw new UsClientError("invalid_response");
+    },
+    async getReceivingCsvPreview(id: unknown) {
+      const importId = checked(platformUuidSchema, id, "invalid_input");
+      const result = await request(`${receivingCsvPath}/${importId}`, receivingCsvPreviewSchema);
+      if (result.id.toLowerCase() !== importId) throw new UsClientError("invalid_response");
+      return result;
+    },
+    async applyReceivingCsv(id: unknown, input: unknown) {
+      const importId = checked(platformUuidSchema, id, "invalid_input");
+      const body = checked(receivingCsvApplyInputSchema, input, "invalid_input");
+      const result = await request(
+        `${receivingCsvPath}/${importId}/apply`,
+        receivingCsvApplyResponseSchema,
+        "POST",
+        body,
+      );
+      if (!matchesReceivingCsvApplyResponse(result, { importId, ...body }))
+        throw new UsClientError("invalid_response");
+      return result;
+    },
     async finalizeReceiving(id: unknown, input: unknown, captured?: unknown) {
       const eventId = checked(platformUuidSchema, id, "invalid_input");
       const body = checked(finalizeReceivingCommandSchema, input, "invalid_input");

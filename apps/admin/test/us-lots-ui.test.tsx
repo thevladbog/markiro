@@ -9,6 +9,7 @@ import { createUsBrowserClient } from "../src/us/client.js";
 import { masterDataCopy } from "../src/us/master-data/copy.js";
 import { MasterDataWorkspace } from "../src/us/master-data/workspace.js";
 import { amendmentFinalized } from "./support/us-receiving-revision-command-fixture.js";
+import { finalizedRecord } from "./support/us-transformation-ui-fixture.js";
 
 const product = {
   id: "b0000000-0000-4000-8000-000000000001",
@@ -63,6 +64,8 @@ async function setup(
     readOnly?: boolean;
     qaOnly?: boolean;
     locale?: string;
+    lotValue?: typeof lot;
+    transformWriter?: boolean;
     handle?: (url: string, init?: RequestInit) => Response | Promise<Response> | undefined;
   } = {},
 ) {
@@ -78,14 +81,16 @@ async function setup(
             : options.qaOnly
               ? ["traceability.qa.manage"]
               : ["traceability.master_data.write", "traceability.qa.manage"]),
+          ...(options.transformWriter ? ["traceability.transformation.write"] : []),
         ],
       });
     if (String(url).startsWith(`${path}?`))
-      return Response.json({ items: [lot], limit: 50, offset: 0 });
-    if (url === `${path}/${lot.id}`) return Response.json(lot);
-    if (String(url).startsWith(`${path}/${lot.id}/receiving-basis?`))
+      return Response.json({ items: [options.lotValue ?? lot], limit: 50, offset: 0 });
+    if (url === `${path}/${options.lotValue?.id ?? lot.id}`)
+      return Response.json(options.lotValue ?? lot);
+    if (String(url).startsWith(`${path}/${options.lotValue?.id ?? lot.id}/receiving-basis?`))
       return Response.json({
-        lotId: lot.id,
+        lotId: options.lotValue?.id ?? lot.id,
         basisVersion: 1,
         state: "missing",
         supportCount: 0,
@@ -102,6 +107,33 @@ async function setup(
     if (String(url).startsWith("/api/us/traceability/locations?"))
       return Response.json({ items: [location], limit: 50, offset: 0 });
     if (url === `/api/us/traceability/locations/${location.id}`) return Response.json(location);
+    if (String(url).endsWith("/transformation/genealogy/query")) {
+      const request = JSON.parse(String(init?.body)) as {
+        startLotId: string;
+        mode: string;
+        direction: string;
+      };
+      return Response.json({
+        startLotId: request.startLotId,
+        direction: request.direction,
+        mode: request.mode,
+        selectedRevisionIds: [],
+        lots: [{ id: request.startLotId, currentOrigin: false }],
+        events: [],
+        links: [],
+        complete: false,
+        diagnostics: [{ code: "origin_gap", lotId: request.startLotId }],
+        balance: { state: "unknown", values: [] },
+      });
+    }
+    if (String(url).includes("/cases?"))
+      return Response.json({
+        lotId: options.lotValue?.id ?? lot.id,
+        originState: "gap",
+        activeCount: 0,
+        rows: [],
+        nextCursor: null,
+      });
     return Response.json({ items: [], limit: 50, offset: 0 });
   });
   const instance = i18next.createInstance();
@@ -141,13 +173,185 @@ async function setup(
   await user.click(
     await screen.findByRole("button", { name: options.locale === "es-US" ? "Lotes" : "Lots" }),
   );
-  await screen.findByRole("button", { name: lot.tlc });
+  await screen.findByRole("button", { name: options.lotValue?.tlc ?? lot.tlc });
   return { user, send, instance, onSessionLost };
 }
-async function openLot(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole("button", { name: lot.tlc }));
-  await screen.findByRole("heading", { name: lot.tlc });
+async function openLot(user: ReturnType<typeof userEvent.setup>, tlc = lot.tlc) {
+  await user.click(screen.getByRole("button", { name: tlc }));
+  await screen.findByRole("heading", { name: tlc });
 }
+
+describe("lot Transformation origin and Cases", () => {
+  const record = finalizedRecord();
+  const output = record.snapshot.outputs[0]!;
+  const outputLot = {
+    ...lot,
+    id: output.lotId,
+    tlc: output.tlc,
+    assignmentBasis: "transformation",
+  };
+  const genealogy = {
+    startLotId: output.lotId,
+    direction: "upstream",
+    mode: "current",
+    selectedRevisionIds: [record.id],
+    lots: [
+      { id: record.snapshot.inputs[0]!.lotId, currentOrigin: false },
+      { id: output.lotId, currentOrigin: true },
+    ].sort((left, right) => left.id.localeCompare(right.id)),
+    events: [
+      {
+        id: record.id,
+        rootId: record.id,
+        revision: 1,
+        status: "finalized",
+        snapshot: record.snapshot,
+      },
+    ],
+    links: [
+      {
+        eventId: record.id,
+        inputLotId: record.snapshot.inputs[0]!.lotId,
+        outputLotId: output.lotId,
+      },
+    ],
+    complete: true,
+    diagnostics: [],
+    balance: {
+      state: "arithmetic",
+      unitOfMeasure: "kg",
+      inputQuantity: "2.5",
+      outputQuantity: "2.5",
+      deltaQuantity: "0",
+    },
+  };
+
+  it("opens only a corroborated current Transformation output origin", async () => {
+    const { user } = await setup({
+      readOnly: true,
+      lotValue: outputLot,
+      handle: (url) => {
+        if (url.endsWith("/genealogy/query")) return Response.json(genealogy);
+        if (url.includes(`/lots/${output.lotId}/cases?`))
+          return Response.json({
+            lotId: output.lotId,
+            originState: "current",
+            activeCount: 0,
+            rows: [],
+            nextCursor: null,
+          });
+        if (url === `/api/us/traceability/transformation/${record.id}`)
+          return Response.json(record);
+        if (url.includes("/revisions?"))
+          return Response.json({ items: [], limit: 50, offset: 0, lifecycleVersion: 2 });
+        return undefined;
+      },
+    });
+    await openLot(user, output.tlc);
+    expect(
+      await screen.findByRole("button", { name: "Open current Transformation origin" }),
+    ).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Open current Transformation origin" }));
+    expect(await screen.findByRole("heading", { name: record.eventNumber })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: output.tlc }));
+    await screen.findByRole("heading", { name: output.tlc });
+    await user.click(screen.getByRole("button", { name: "Products" }));
+    await screen.findByRole("heading", { name: "Products" });
+    await user.click(screen.getByRole("button", { name: "Lots" }));
+    expect(await screen.findByRole("heading", { name: "Lots" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: output.tlc })).toBeNull();
+  });
+
+  it.each(["Change status", "Correct source"])(
+    "blocks %s while Cases has unsent input or an uncertain command",
+    async (action) => {
+      const bodies: string[] = [];
+      const { user } = await setup({
+        transformWriter: true,
+        handle: (url, init) => {
+          if (url.includes("/cases?"))
+            return Response.json({
+              lotId: lot.id,
+              originState: "current",
+              activeCount: 0,
+              rows: [],
+              nextCursor: null,
+            });
+          if (url.endsWith("/cases") && init?.method === "POST") {
+            bodies.push(String(init.body));
+            if (bodies.length === 1) return Promise.reject(new TypeError("lost response"));
+            return Response.json({ lotId: lot.id, created: [], unchanged: [] });
+          }
+          return undefined;
+        },
+      });
+      await openLot(user);
+      await user.type(
+        await screen.findByRole("textbox", { name: "Case SSCC" }),
+        "000000000000000000",
+      );
+      expect(screen.getByRole("button", { name: action })).toHaveProperty("disabled", true);
+      await user.click(screen.getByRole("button", { name: action }));
+      expect(screen.getByRole("textbox", { name: "Case SSCC" })).toHaveProperty(
+        "value",
+        "000000000000000000",
+      );
+      await user.click(screen.getByRole("button", { name: "Link cases" }));
+      await screen.findByText(/Case command outcome is unknown/);
+      expect(screen.getByRole("button", { name: action })).toHaveProperty("disabled", true);
+      await user.click(screen.getByRole("button", { name: action }));
+      await user.click(screen.getByRole("button", { name: "Retry same operation" }));
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: action })).toHaveProperty("disabled", false),
+      );
+      expect(bodies).toHaveLength(2);
+      expect(bodies[1]).toBe(bodies[0]);
+    },
+  );
+
+  it("keeps incomplete and origin-gap lots explicit without an origin link", async () => {
+    const { user } = await setup({
+      readOnly: true,
+      lotValue: outputLot,
+      handle: (url) => {
+        if (url.endsWith("/genealogy/query"))
+          return Response.json({
+            ...genealogy,
+            complete: false,
+            diagnostics: [{ code: "origin_gap", lotId: output.lotId }],
+            lots: genealogy.lots.map((item) =>
+              item.id === output.lotId ? { ...item, currentOrigin: false } : item,
+            ),
+          });
+        if (url.includes(`/lots/${output.lotId}/cases?`))
+          return Response.json({
+            lotId: output.lotId,
+            originState: "gap",
+            activeCount: 0,
+            rows: [],
+            nextCursor: null,
+          });
+        return undefined;
+      },
+    });
+    await openLot(user, output.tlc);
+    expect(
+      await within(
+        await screen.findByRole("region", { name: "Current Transformation origin" }),
+      ).findByText("No current Transformation origin"),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Open current Transformation origin" })).toBeNull();
+  });
+
+  it("identifies an imported lot without claiming a Transformation origin", async () => {
+    const { user } = await setup({ readOnly: true });
+    await openLot(user);
+    expect(
+      await screen.findByText("This lot was created independently of Transformation."),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Open current Transformation origin" })).toBeNull();
+  });
+});
 
 const basisPath = `${path}/${lot.id}/receiving-basis`;
 const receiptPath = `/api/us/traceability/receiving/${amendmentFinalized.id}`;
@@ -186,6 +390,56 @@ const presentBasis = {
 };
 
 describe("lot current receiving basis", () => {
+  it("returns from an Events receipt to its linked lot and back to that receipt", async () => {
+    const { user } = await setup({
+      readOnly: true,
+      handle: (url) => {
+        if (url.startsWith("/api/us/traceability/events?"))
+          return Response.json({
+            items: [
+              {
+                id: amendmentFinalized.id,
+                rootId: amendmentFinalized.lifecycle.rootId,
+                type: "receiving",
+                eventNumber: amendmentFinalized.eventNumber,
+                revision: amendmentFinalized.revision,
+                status: "finalized",
+                lifecycleVersion: amendmentFinalized.lifecycle.lifecycleVersion,
+                currentEventId: amendmentFinalized.id,
+                pendingDraftId: null,
+                eventDate: null,
+                timeZone: amendmentFinalized.timeZone,
+                locationId: null,
+                locationDisplay: null,
+                documentCount: 0,
+                lineCount: 1,
+                previousSourceLocationId: null,
+                updatedAt: amendmentFinalized.updatedAt,
+              },
+            ],
+            limit: 50,
+            offset: 0,
+          });
+        if (url === receiptPath) return Response.json(supportingReceipt);
+      },
+    });
+    await user.click(screen.getByRole("button", { name: "Events" }));
+    await user.click(await screen.findByRole("button", { name: amendmentFinalized.eventNumber }));
+    await screen.findByRole("heading", { name: amendmentFinalized.eventNumber });
+    const lotLink = screen.getAllByText("Open current lot")[0];
+    if (!lotLink) throw new Error("Expected a frozen receipt lot link");
+    await user.click(lotLink);
+    await screen.findByRole("heading", { name: lot.tlc });
+    const backToReceiving = screen.getByText(/Back to receiving/).closest("button");
+    if (!backToReceiving) throw new Error("Expected the lot return control");
+    await user.click(backToReceiving);
+    expect(
+      await screen.findByRole("heading", { name: amendmentFinalized.eventNumber }),
+    ).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Back to events" }));
+    expect(await screen.findByRole("heading", { name: "Events" })).toBeTruthy();
+  });
+
   it("preserves both return contexts when a receipt's lot lookup fails", async () => {
     let lotUnavailable = false;
     const { user } = await setup({
@@ -304,7 +558,14 @@ describe("lot current receiving basis", () => {
     expect(await within(card).findByText("No current receiving basis")).toBeTruthy();
     expect(screen.getByText("Active")).toBeTruthy();
     expect(screen.getByText("Imported")).toBeTruthy();
-    expect(send.mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true);
+    expect(
+      send.mock.calls.every(
+        ([url, init]) =>
+          !init?.method ||
+          init.method === "GET" ||
+          (init.method === "POST" && String(url).endsWith("/transformation/genealogy/query")),
+      ),
+    ).toBe(true);
   });
 
   it("counts supporting revisions, not lines, and opens the exact revision with a return to the lot", async () => {
@@ -326,7 +587,14 @@ describe("lot current receiving basis", () => {
     await user.click(screen.getByRole("button", { name: /Back to lots/ }));
     await screen.findByRole("button", { name: lot.tlc });
     expect(send.mock.calls.filter(([url]) => url === receiptPath)).toHaveLength(1);
-    expect(send.mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true);
+    expect(
+      send.mock.calls.every(
+        ([url, init]) =>
+          !init?.method ||
+          init.method === "GET" ||
+          (init.method === "POST" && String(url).endsWith("/transformation/genealogy/query")),
+      ),
+    ).toBe(true);
   });
 
   it("shows loading then unavailable, never missing, and retries the failed basis read", async () => {
@@ -461,7 +729,14 @@ describe("connected US lots", () => {
     confirm.mockReturnValue(true);
     await user.click(screen.getByRole("button", { name: "Open existing lot" }));
     await screen.findByRole("heading", { name: lot.tlc });
-    expect(send.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+    expect(
+      send.mock.calls.filter(([url, init]) => url === path && init?.method === "POST"),
+    ).toHaveLength(1);
+    expect(
+      send.mock.calls.some(
+        ([url, init]) => String(url).includes("/cases") && init?.method === "POST",
+      ),
+    ).toBe(false);
   });
   it("holds navigation and repeated writes until the pending request settles", async () => {
     let release: (value: Response) => void = () => {

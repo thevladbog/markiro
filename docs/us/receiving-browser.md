@@ -328,6 +328,22 @@ mobile support states were inspected. No new Spanish-specific multiple-support,
 native-device, screen-reader or hosted acceptance is claimed. Delayed-read and
 lifecycle authorization recovery remain open before cross-task final gates.
 
+## Multiple-support visual matrix — 2026-09-08
+
+The multiple-support companion now captures all five states (two supports, one,
+none, before first void, before last void) in EN/ES, light/dark and 1440/1024/390:
+60 safe screenshots per run. It checks localized support counts and exact revision
+links, missing-state lists, the selected lot's presence/absence in both warnings,
+keyboard focus, 44px mobile revision targets, viewport-contained confirmation
+footers and horizontal overflow. Locale/theme changes and dismissed previews
+still produce no additional writes: the existing scenario keeps exactly two void
+commands/audits and unchanged lots/frozen content.
+
+This extends the earlier EN-only multiple-support proof. Representative originals
+were inspected across mobile/tablet/desktop, including every ES dark mobile state.
+It is not a pixel-baseline comparison or fluent-language/native-device review.
+The separate QA-access recovery matrix is recorded below.
+
 ## Delayed reads and lifecycle access recovery — 2026-09-08
 
 The synthetic `receiving-access-recovery-flow.mjs` companion holds an actual
@@ -350,9 +366,32 @@ A connected component test additionally resolves an old acknowledged read after
 QA loss/restoration and opening a new dialog. It cannot replace the view, clear
 the new reason or release the new dialog's lock. These are test-only acceptance
 additions for existing rules, not polling or automatic authorization refresh on
-external membership changes. New recovery scenarios use EN; hosted, native-device,
-screen-reader and fluent Spanish acceptance remain separate. Cross-task final
-gates and acceptance-document reconciliation are still required.
+external membership changes. The localized visual extension below covers the
+post-denial and explicitly restored states; hosted, native-device, screen-reader
+and fluent Spanish acceptance remain separate.
+
+## QA-access recovery visual matrix — 2026-09-08
+
+The existing real amend/void authorization scenario now captures the denied and
+explicitly restored states in EN/ES, light/dark, at 1440/1024/390: 48 safe
+screenshots per run. Denied states require the localized access-change notice,
+no confirmation/retry controls and enabled return navigation. Restored dialogs
+require a fresh empty reason, keyboard focus, disabled submission and a footer
+inside the viewport. Both states check horizontal overflow, actual document
+language and theme. Each dialog is dismissed before changing locale/theme.
+
+There are still exactly two rejected POSTs, both real 403 responses followed by
+real access reads. Reopening previews adds only reads, never a business write;
+the complete receipt and tenant audit rows remain unchanged. This adds browser
+acceptance, not a product rule or a new membership-management endpoint.
+
+The first full journey passed 1/1 without skips in 80.89 seconds (83.98 total),
+with captures under the temporary `markiro-us-browser-97hXkX` directory. The four
+ES dark 390 denied/restored originals were personally inspected: the notice and
+dialog content are readable, reasons are empty and confirmation footers fit.
+This is not manual inspection of every capture or pixel-baseline, fluent Spanish,
+native-device or screen-reader acceptance. Final-source rerun evidence is in the
+[lifecycle plan](../superpowers/plans/2026-09-07-us-03-receiving-lifecycle.md).
 
 ## Saved-draft data check — 2026-09-07
 
@@ -408,12 +447,57 @@ The final UI correction wave removed only the incompatible native UTF-16 cap fro
 
 The final existing Chromium journey passed 1/1 in 34.36 seconds (35.91 seconds including setup and cleanup) after all production formatting edits. Native `pressSequentially` entry preserved exactly 120 supplementary Unicode points, retained the saved value, accepted no 121st point at the contract boundary, and never used fill or a programmatic value setter. The same run proved the exact saved reference tuple (`web_url`, URL and resolved location with null physical source), kept evidence separate, displayed the pending line list `1, 2` in both locales, and retained the earlier MFA, finalization, delivery-loss, retry, audit, lot, frozen-history, operator-denial, viewport, theme and safety assertions. Safe final screenshots are under `/var/folders/1t/vr4lx9_x5zj65f1bhlk6q5b40000gn/T/markiro-us-browser-AuCcFK`; the EN desktop and ES mobile source-reference and pending-notice originals were inspected without a material defect. Production source hashes matched before and after the final browser run. The owned database contained no leftover temporary browser database, and ports 3100 and 5174 had no listeners. Unaffected backend, domain and DB suites were deliberately not repeated for this frontend-only correction.
 
+## Grouped Receiving CSV import — 2026-09-09
+
+The [CSV browser checkpoint](../superpowers/plans/2026-09-09-us-03-receiving-csv-browser.md)
+connects the approved file/header → read-only preview → explicit draft-confirmation
+flow. It preserves raw-file identity, shows errors and normalizations, and recovers
+unknown results with the same operation key. After acknowledgement only a live
+GET can open the editor, with read-only retries if that GET fails. Access loss
+clears captured data; reload does not automatically reapply an import.
+
+The focused client/registry/import set passes 41 tests. Real Chromium checks
+exercise MFA, disposable-database persistence, exact audits, response loss,
+keyboard confirmation, EN/ES and light/dark at 1440/1024/390 px. The blank template
+download is verified byte-for-byte. Original file bytes and validation are never
+truncated; only malformed extra-cell rendering is bounded and explicitly marked.
+The supplier upload template is separate from saved-record export.
+
+## Saved Receiving CSV export — 2026-09-26
+
+The [approved export design](../superpowers/specs/2026-09-09-us-03-receiving-csv-export-design.md)
+now has a local US-only implementation. An MFA-authenticated user with export-read
+access may download one selected saved Receiving revision, including a draft or
+frozen finalized/void revision. The request binds its event ID and exact draft
+and lifecycle versions. Generation reads that revision and writes an exact
+actor/tenant/event/version/byte-digest audit entry in one repeatable-read
+transaction before returning bytes; stale versions, foreign tenants and denied
+roles return no file. The endpoint does not edit Receiving business data.
+
+The output is the reversible `markiro-receiving-export-v1` format, not the
+supplier import template. It preserves typed saved content and the original
+generated bytes within 32,767 UTF-16 units per encoded cell, 201 data rows and
+16 MiB total. Before creating an object URL, the browser checks MIME, safe
+filename, exact byte digest, strict decode and selected identity/versions.
+Unsaved form edits block the action; stale state offers reload; other failures
+require an explicit retry. The UI uses EN-US/ES-US copy and no persistent export
+storage.
+
+Focused codec, server, client and component tests pass. The isolated Chromium
+journey passed with real MFA, a disposable US database, exact downloaded-byte
+decode/digest and one matching generation audit. Its saved-draft export views
+were captured in both locales, light/dark and 1440/1024/390 px; EN desktop and
+ES mobile originals were inspected, with no material export-control or overflow
+defect. This proves only local synthetic-browser behavior. Excel and LibreOffice
+opening or save/reopen, hosted infrastructure and real customer data were not
+tested. INT-002 and US-03 remain in progress pending broader acceptance.
+
 ## Limits
 
 Receiving amendment/void, exact revision history and independent lot support are
 implemented locally, with the dated recovery/browser evidence above. Cross-event
 completeness, actual downstream-consumer validation, Transformation, Shipping,
-genealogy, CSV, trace, balances and export remain unfinished. US-03 and the MVP
+genealogy, broader trace, balances and other exports remain unfinished. US-03 and the MVP
 remain partial. No hosted environment, real data, mail, object storage, hardware,
 native mobile device or screen reader was tested. Fluent Spanish review remains
 required before operational use. The full primary API/infrastructure suite is not

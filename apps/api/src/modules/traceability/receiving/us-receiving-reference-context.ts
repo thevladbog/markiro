@@ -27,10 +27,11 @@ import { profileDefaults, storedProfileResponse } from "../products/us-product-p
 import { unavailable } from "./us-receiving-persistence";
 
 const ruleVersion = RECEIVING_READINESS_RULE_VERSION;
-// Pin readiness v3 to its original inputs. The internal support token is for
-// lifecycle readiness v4; it must not silently change the existing digest.
+// Pin readiness v3 to its original inputs. Internal support/dependency tokens
+// must not silently change the existing digest.
 function readinessV3Lot({
   receivingBasisVersion: _version,
+  currentDependencyVersion: _dependencyVersion,
   ...original
 }: typeof schema.traceabilityLots.$inferSelect) {
   return original;

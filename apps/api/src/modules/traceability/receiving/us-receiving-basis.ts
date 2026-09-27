@@ -23,14 +23,14 @@ export async function readReceivingBasis(
     .where(and(eq(lots.tenantId, tenantId), eq(lots.id, lotId)));
   if (!lot) throw new NotFoundException({ code: "lot_not_found" });
   lotResponse(lot); // Corrupt business identity is unavailable, not a valid zero-support lot.
-  // Receiving-only storage cannot make completeness claims about an unregistered CTE.
-  // Also reject orphaned item/event/root relations rather than losing them in an inner join.
+  // This counts Receiving support only, not Transformation origin or downstream effects.
+  // Reject orphaned or wrong-type child relations rather than losing them in an inner join.
   const integrity = await tx.execute<{ invalid: boolean }>(sql`
-    SELECT EXISTS (SELECT 1 FROM traceability_events WHERE tenant_id=${tenantId} AND type<>'receiving')
-      OR EXISTS (SELECT 1 FROM receiving_event_items i
+    SELECT EXISTS (SELECT 1 FROM receiving_event_items i
         LEFT JOIN traceability_events e ON e.tenant_id=i.tenant_id AND e.id=i.event_id
         LEFT JOIN receiving_event_roots r ON r.tenant_id=e.tenant_id AND r.id=e.root_event_id
-        WHERE i.tenant_id=${tenantId} AND i.lot_id=${lot.id} AND (e.id IS NULL OR r.id IS NULL)) AS invalid
+        WHERE i.tenant_id=${tenantId} AND i.lot_id=${lot.id}
+          AND (e.id IS NULL OR e.type<>'receiving' OR r.id IS NULL)) AS invalid
   `);
   if (integrity.rows[0]?.invalid !== false) throw unavailable();
   await assertReceivingRootsReadable(

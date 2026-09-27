@@ -35,6 +35,19 @@ const record = {
   draft: empty,
 };
 const path = "/api/us/traceability/receiving";
+it("opens the grouped CSV flow for Receiving writers", async () => {
+  const { user } = await setup();
+  const entry = screen.queryByRole("button", { name: "Import CSV" });
+  expect(entry).not.toBeNull();
+  if (!entry) throw new Error("Missing CSV entry");
+  await user.click(entry);
+  expect(screen.getByRole("heading", { name: "Import CSV" })).toBeTruthy();
+  expect(screen.getByLabelText("CSV file")).toBeTruthy();
+});
+it("does not expose the CSV entry to read-only Receiving users", async () => {
+  await setup({ readOnly: true });
+  expect(screen.queryByRole("button", { name: "Import CSV" })).toBeNull();
+});
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -56,17 +69,27 @@ async function setup(
           ...(options.readOnly ? [] : ["traceability.receiving.write"]),
         ],
       });
-    if (String(url).startsWith(`${path}?`)) {
-      const header = Object.fromEntries(Object.entries(record).filter(([key]) => key !== "draft"));
+    if (String(url).startsWith("/api/us/traceability/events?")) {
       return Response.json({
         items: [
           {
-            ...header,
-            dateReceived: null,
+            id,
+            rootId: id,
+            type: "receiving",
+            eventNumber: record.eventNumber,
+            revision: 1,
+            status: "draft",
+            lifecycleVersion: 1,
+            currentEventId: null,
+            pendingDraftId: id,
+            eventDate: null,
+            timeZone: record.timeZone,
             locationId: null,
+            locationDisplay: null,
             previousSourceLocationId: null,
             lineCount: 0,
             documentCount: 0,
+            updatedAt: record.updatedAt,
           },
         ],
         limit: 50,
@@ -126,7 +149,7 @@ async function setup(
     </StrictMode>,
   );
   const user = userEvent.setup();
-  await user.click(await screen.findByRole("button", { name: "Receiving" }));
+  await user.click(await screen.findByRole("button", { name: "Events" }));
   await screen.findByRole("button", { name: record.eventNumber });
   return { user, send, instance, onSessionLost };
 }
@@ -217,7 +240,7 @@ describe("connected US receiving drafts", () => {
   });
   it("creates an incomplete draft and keeps its identity for subsequent saves", async () => {
     const { user, send } = await setup();
-    expect(screen.queryByRole("button", { name: "Refresh" })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Refresh events" })).not.toBeNull();
     await user.click(screen.getByRole("button", { name: "New receiving" }));
     await user.type(screen.getByLabelText("Receiving notes"), "Delivery started");
     await user.click(screen.getByRole("button", { name: "Save draft" }));

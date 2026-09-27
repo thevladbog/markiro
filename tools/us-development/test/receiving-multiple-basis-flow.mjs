@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
+import { transformationGenealogyRequestSchema } from "../../../packages/platform-contracts/dist/index.js";
+import { isBoundedGenealogyRead } from "./genealogy-read-observer.mjs";
 
 /** Two independent receipts support one lot; only real authenticated commands change them. */
 export async function exerciseUsMultipleReceivingBasis({
@@ -97,7 +99,12 @@ export async function exerciseUsMultipleReceivingBasis({
     ).toBeVisible();
   await capture("two");
   const writes = [];
+  const genealogyReads = [];
   const observe = (request) => {
+    if (isBoundedGenealogyRead(request, base)) {
+      genealogyReads.push(request.postDataJSON());
+      return;
+    }
     if (request.url().startsWith(base) && !["GET", "HEAD"].includes(request.method()))
       writes.push({ url: request.url(), method: request.method() });
   };
@@ -114,6 +121,7 @@ export async function exerciseUsMultipleReceivingBasis({
       await expect(
         page.getByRole("heading", { name: record.eventNumber, exact: true }),
       ).toBeFocused();
+      await capture(index === 0 ? "before-first" : "before-last", true);
       await page.getByRole("button", { name: "Void receipt", exact: true }).click();
       const dialog = page.getByRole("dialog", { name: "Void receipt", exact: true });
       await expect(
@@ -168,6 +176,17 @@ export async function exerciseUsMultipleReceivingBasis({
       }
       await capture(index === 0 ? "one" : "none");
     }
+    assert.ok(genealogyReads.length > 0);
+    for (const body of genealogyReads) {
+      assert.equal(transformationGenealogyRequestSchema.safeParse(body).success, true);
+      assert.deepEqual(body, {
+        startLotId: item.lotId,
+        mode: "current",
+        direction: "upstream",
+        maxDepth: 4,
+        maxNodes: 100,
+      });
+    }
     assert.deepEqual(
       writes,
       [final, second].map(({ id }) => ({ url: `${base}/receiving/${id}/void`, method: "POST" })),
@@ -200,21 +219,116 @@ export async function exerciseUsMultipleReceivingBasis({
     })),
   );
 
-  async function capture(state) {
-    for (const width of [1440, 390]) {
-      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
-      await card.scrollIntoViewIfNeeded();
-      assert.equal(
-        await card.evaluate((element) => element.scrollWidth <= element.clientWidth),
-        true,
-      );
-      await card.screenshot({
-        path: join(screenshots, `lot-multiple-basis-${state}-en-light-${width}.png`),
+  async function capture(state, preview = false) {
+    for (const locale of ["en", "es"]) {
+      if (locale === "es")
+        await page.getByRole("button", { name: "Language", exact: true }).click();
+      const regionName = preview
+        ? locale === "en"
+          ? "Void receipt"
+          : "Anular recepción"
+        : locale === "en"
+          ? "Current receiving basis"
+          : "Base de recepción vigente";
+      const region = page.getByRole(preview ? "dialog" : "region", {
+        name: regionName,
+        exact: true,
       });
+      const themeControl = page.getByRole("button", {
+        name: locale === "en" ? "Change theme" : "Cambiar tema",
+        exact: true,
+      });
+      for (const theme of ["light", "dark"]) {
+        if (theme === "dark") await themeControl.click();
+        if (preview) {
+          await page.getByRole("button", { name: regionName, exact: true }).click();
+          await expect(
+            region.getByRole("heading", {
+              name:
+                locale === "en"
+                  ? "Lots losing their last receiving basis"
+                  : "Lotes que pierden su último respaldo de recepción",
+              exact: true,
+            }),
+          ).toBeVisible();
+        }
+        for (const width of [1440, 1024, 390]) {
+          const height = width === 390 ? 844 : 900;
+          await page.setViewportSize({ width, height });
+          await region.scrollIntoViewIfNeeded();
+          if (preview) {
+            if (state === "before-first")
+              await expect(region.getByText(item.tlc, { exact: true })).toHaveCount(0);
+            else await expect(region.getByText(item.tlc, { exact: true })).toBeVisible();
+            const reason = region.getByRole("textbox", {
+              name: locale === "en" ? "Reason" : "Motivo",
+              exact: true,
+            });
+            await reason.focus();
+            await expect(reason).toBeFocused();
+            const confirm = region.getByRole("button", {
+              name: locale === "en" ? "Confirm void" : "Confirmar anulación",
+              exact: true,
+            });
+            await expect(confirm).toBeDisabled();
+            const box = await confirm.boundingBox();
+            assert.ok(
+              box && box.y >= 0 && box.y + box.height <= height,
+              "Void confirmation footer must fit the viewport",
+            );
+          } else {
+            const count = state === "two" ? 2 : state === "one" ? 1 : 0;
+            await expect(region.getByRole("listitem")).toHaveCount(count);
+            await expect(
+              region.getByText(
+                count
+                  ? `${locale === "en" ? "Supporting revisions" : "Revisiones de respaldo"}: ${count}`
+                  : locale === "en"
+                    ? "No current receiving basis"
+                    : "Sin base de recepción vigente",
+                { exact: true },
+              ),
+            ).toBeVisible();
+            for (const record of state === "two"
+              ? [final, second]
+              : state === "one"
+                ? [second]
+                : []) {
+              const link = region.getByRole("button", {
+                name: `${record.eventNumber} · ${locale === "en" ? "Revision" : "Revisión"} ${record.revision}`,
+                exact: true,
+              });
+              await link.focus();
+              await expect(link).toBeFocused();
+              if (width === 390) {
+                const box = await link.boundingBox();
+                assert.ok(box && box.height >= 44, "Mobile revision link needs a 44px target");
+              }
+            }
+          }
+          assert.equal(
+            await region.evaluate((element) => element.scrollWidth <= element.clientWidth),
+            true,
+          );
+          assert.equal(
+            await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+            true,
+          );
+          await region.screenshot({
+            path: join(screenshots, `lot-multiple-basis-${state}-${locale}-${theme}-${width}.png`),
+          });
+        }
+        if (preview) {
+          await page.keyboard.press("Escape");
+          await expect(region).toHaveCount(0);
+        }
+      }
+      await themeControl.click();
     }
+    await page.getByRole("button", { name: "Idioma", exact: true }).click();
     await page.setViewportSize({ width: 1440, height: 900 });
   }
   console.log(
-    "Multiple receiving basis: two independent roots, first void preserves exact remaining link, last void removes support, correct last-basis previews, unchanged lot and frozen receipts, two exact audits; EN 1440/390 passed.",
+    "Multiple receiving basis: two independent roots, first void preserves exact remaining link, last void removes support, correct last-basis previews, unchanged lot and frozen receipts, two exact audits; all five states EN/ES light/dark 1440/1024/390 passed.",
   );
 }

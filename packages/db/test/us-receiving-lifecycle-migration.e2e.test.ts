@@ -1,6 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { resolve } from "node:path";
-import { migrate } from "drizzle-orm/node-postgres/migrator";
 import type { PoolClient } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createUsProfileTestDatabase } from "./support/us-profile-database.js";
@@ -76,7 +74,7 @@ describe.skipIf(!url)("Receiving revision lifecycle storage", () => {
     lotBytes = (
       await f.pool.query("SELECT to_jsonb(l)::text AS bytes FROM traceability_lots l ORDER BY id")
     ).rows;
-    await migrate(f.db, { migrationsFolder: resolve("migrations") });
+    await migrateThrough(f, 126);
   }, 60_000);
   afterAll(async () => {
     await f?.close();
@@ -358,9 +356,7 @@ describe.skipIf(!url)("Receiving revision lifecycle storage", () => {
       await g.pool.query(
         "CREATE FUNCTION receiving_snapshot_v3_common(value jsonb) RETURNS jsonb LANGUAGE sql IMMUTABLE AS $$ SELECT value $$",
       );
-      await expect(
-        migrate(g.db, { migrationsFolder: resolve("migrations") }),
-      ).rejects.toMatchObject({ cause: { code: "42723" } });
+      await expect(migrateThrough(g, 126)).rejects.toMatchObject({ cause: { code: "42723" } });
       expect(
         (await g.pool.query("SELECT to_jsonb(e)::text AS bytes FROM traceability_events e")).rows,
       ).toEqual(before);
@@ -372,7 +368,7 @@ describe.skipIf(!url)("Receiving revision lifecycle storage", () => {
         ).rows,
       ).toEqual([]);
       await g.pool.query("DROP FUNCTION receiving_snapshot_v3_common(jsonb)");
-      await migrate(g.db, { migrationsFolder: resolve("migrations") });
+      await migrateThrough(g, 126);
       expect(
         (
           await g.pool.query(

@@ -5,12 +5,132 @@ import { load } from "js-yaml";
 
 const path = "apps/admin/vite.us.config.ts";
 
+test("Receiving read-only observer recognizes only a strict bounded genealogy POST", async () => {
+  const { isBoundedGenealogyRead } = await import("./genealogy-read-observer.mjs");
+  const base = "http://localhost:5174/api/us/traceability";
+  const id = "a0000000-0000-4000-8000-000000000001";
+  const body = {
+    startLotId: id,
+    mode: "current",
+    direction: "upstream",
+    maxDepth: 4,
+    maxNodes: 100,
+  };
+  const request = (path, data = body, method = "POST") => ({
+    url: () => base + path,
+    method: () => method,
+    postDataJSON: () => data,
+  });
+  assert.equal(isBoundedGenealogyRead(request("/transformation/genealogy/query"), base), true);
+  for (const candidate of [
+    request(`/transformation/${id}/finalize`),
+    request(`/lots/${id}/cases`),
+    request("/transformation/genealogy/query/extra"),
+    request("/transformation/genealogy/query?tenantId=x"),
+    request("/transformation/genealogy/query", { ...body, tenantId: id }),
+    request("/transformation/genealogy/query", { ...body, maxNodes: 101 }),
+    request("/transformation/genealogy/query", { ...body, startLotId: "invalid" }),
+    request("/transformation/genealogy/query", body, "PUT"),
+  ])
+    assert.equal(isBoundedGenealogyRead(candidate, base), false);
+});
+
+test("US dev and preview middleware reject unknown RU API routes before fallback", async () => {
+  const { createUsAdminConfig } = await import("../../../apps/admin/vite.us.config.ts");
+  const config = createUsAdminConfig({ VITE_DEPLOYMENT_EDITION: "US" }, "test");
+  const guard = config.plugins.find((plugin) => plugin.name === "us-api-allowlist");
+  for (const hook of ["configureServer", "configurePreviewServer"]) {
+    let middleware;
+    guard[hook]({
+      middlewares: {
+        use: (handler) => {
+          middleware = handler;
+        },
+      },
+    });
+    for (const url of [
+      "/api/auth/get-session",
+      "/api/boxes",
+      "/api/us/boxes",
+      "/api/us/traceability/events?type=shipping&tenantId=x",
+    ]) {
+      let ended = false;
+      middleware(
+        { url },
+        {
+          writeHead(status, headers) {
+            assert.equal(status, 404);
+            assert.deepEqual(headers, { "Cache-Control": "no-store" });
+          },
+          end() {
+            ended = true;
+          },
+        },
+        () => assert.fail(`Unknown route reached fallback: ${url}`),
+      );
+      assert.equal(ended, true);
+    }
+  }
+});
+
+test("US CI owns Events and Transformation browser contracts without release capabilities", () => {
+  const workflow = load(readFileSync(".github/workflows/us-development.yml", "utf8"));
+  const steps = workflow.jobs.isolation.steps;
+  const build = steps.findIndex((step) => step.run?.includes("--filter @markiro/ui build"));
+  for (const name of [
+    "us-events-client.test.ts",
+    "us-transformation-client.test.ts",
+    "us-cases-client.test.ts",
+    "us-events-ui.test.tsx",
+    "us-transformation-editor.test.tsx",
+    "us-transformation-readiness.test.tsx",
+    "us-transformation-finalization.test.tsx",
+    "us-transformation-detail.test.tsx",
+    "us-transformation-history.test.tsx",
+    "us-transformation-cases.test.tsx",
+    "us-transformation-genealogy.test.tsx",
+  ]) {
+    const index = steps.findIndex((step) => step.run?.includes(`test/${name}`));
+    assert.ok(index > build, `${name} must run after shared UI build`);
+    assert.equal(steps[index].if, undefined);
+  }
+  const entry = steps.find(
+    (step) => step.name === "Verify local-only browser entry and strict proxy",
+  );
+  assert.match(
+    entry?.run ?? "",
+    /node --test tools\/us-development\/test\/browser-entry\.test\.mjs/,
+  );
+  assert.equal(entry.if, undefined);
+  const usBuild = steps.find((step) => step.run === "pnpm --filter @markiro/admin build:us");
+  assert.equal(usBuild.env.VITE_DEPLOYMENT_EDITION, "US");
+  assert.deepEqual(workflow.permissions, { contents: "read" });
+  assert.equal(workflow.jobs.isolation.environment, undefined);
+  const commands = steps.map((step) => step.run ?? "").join("\n");
+  assert.doesNotMatch(
+    commands,
+    /gh workflow run|workflow_dispatch|docker push|deploy-production|release-images/,
+  );
+});
+
 test("US CI builds shared UI before importing its compiled components in tests", () => {
   const workflow = load(readFileSync(".github/workflows/us-development.yml", "utf8"));
   const steps = workflow.jobs.isolation.steps;
   const build = steps.findIndex((step) => step.run?.includes("--filter @markiro/ui build"));
   const testIndex = steps.findIndex((step) => step.run?.includes("test/us-app.test.tsx"));
   assert.ok(build >= 0 && testIndex > build, "shared UI must be built before UI tests");
+  for (const name of ["us-receiving-csv-client.test.ts", "us-receiving-csv-ui.test.tsx"]) {
+    const csvTest = steps.findIndex((step) => step.run?.includes(`test/${name}`));
+    assert.ok(csvTest > build, `${name} must run after the shared UI build`);
+    assert.equal(steps[csvTest].if, undefined);
+  }
+});
+
+test("US CI runs saved Receiving CSV codec and audited endpoint checks", () => {
+  const workflow = load(readFileSync(".github/workflows/us-development.yml", "utf8"));
+  const commands = workflow.jobs.isolation.steps.map((step) => step.run ?? "").join("\n");
+  assert.match(commands, /test\/us-receiving-csv-export\.test\.ts/);
+  assert.match(commands, /test\/us-receiving-csv-export\.e2e\.test\.ts/);
 });
 
 test("US generated output is excluded from source lint after a build", async () => {
@@ -96,6 +216,16 @@ test("US proxy never forwards RU routes and preserves configured API Host", asyn
     "/api/auth/get-session",
     "/api/boxes",
     "/api/us/boxes",
+    "/api/us/traceability/receiving/imports/preview?tenant=x",
+    "/api/us/traceability/receiving/imports/invalid-id",
+    "/api/us/traceability/receiving/imports/a0000000-0000-4000-8000-000000000001/apply/extra",
+    "/api/us/traceability/receiving/invalid-id/export.csv?expectedDraftVersion=1&expectedLifecycleVersion=1",
+    "/api/us/traceability/receiving/a0000000-0000-4000-8000-000000000001/export.csv",
+    "/api/us/traceability/receiving/a0000000-0000-4000-8000-000000000001/export.csv?expectedDraftVersion=01&expectedLifecycleVersion=1",
+    "/api/us/traceability/receiving/a0000000-0000-4000-8000-000000000001/export.csv?expectedLifecycleVersion=1&expectedDraftVersion=1",
+    "/api/us/traceability/receiving/a0000000-0000-4000-8000-000000000001/export.csv?expectedDraftVersion=1&expectedLifecycleVersion=1&tenantId=x",
+    "/api/us/traceability/receiving/a0000000-0000-4000-8000-000000000001/export.csv?expectedDraftVersion=1&expectedDraftVersion=2&expectedLifecycleVersion=1",
+    "/api/us/traceability/receiving/a0000000-0000-4000-8000-000000000001/export.csv/extra?expectedDraftVersion=1&expectedLifecycleVersion=1",
     "/api/us/traceability/receiving/invalid-id",
     "/api/us/traceability/receiving/invalid-id/readiness?expectedDraftVersion=1",
     "/api/us/traceability/receiving/a0000000-0000-4000-8000-000000000001/readiness",
@@ -138,6 +268,19 @@ test("US proxy never forwards RU routes and preserves configured API Host", asyn
       false,
     );
   for (const [input, output] of [
+    [
+      "/api/us/traceability/receiving/a0000000-0000-4000-8000-000000000001/export.csv?expectedDraftVersion=1&expectedLifecycleVersion=2",
+      "/traceability/receiving/a0000000-0000-4000-8000-000000000001/export.csv?expectedDraftVersion=1&expectedLifecycleVersion=2",
+    ],
+    ["/api/us/traceability/receiving/imports/preview", "/traceability/receiving/imports/preview"],
+    [
+      "/api/us/traceability/receiving/imports/a0000000-0000-4000-8000-000000000001",
+      "/traceability/receiving/imports/a0000000-0000-4000-8000-000000000001",
+    ],
+    [
+      "/api/us/traceability/receiving/imports/a0000000-0000-4000-8000-000000000001/apply",
+      "/traceability/receiving/imports/a0000000-0000-4000-8000-000000000001/apply",
+    ],
     [
       "/api/us/traceability/receiving?limit=50&offset=0",
       "/traceability/receiving?limit=50&offset=0",
@@ -272,5 +415,143 @@ test("US lifecycle proxy admits only exact UUID commands and bounded unique hist
       routes.some(([pattern]) => new RegExp(pattern).test(path.replace(id, "not-a-uuid"))),
       false,
     );
+  }
+});
+
+test("US Events, Transformation and Cases proxy admits exact bounded routes only", async () => {
+  const { createUsAdminConfig } = await import("../../../apps/admin/vite.us.config.ts");
+  const routes = Object.entries(
+    createUsAdminConfig({ VITE_DEPLOYMENT_EDITION: "US" }, "test").server.proxy,
+  );
+  const id = "a0000000-0000-4000-8000-000000000001";
+  const matches = (path) => routes.find(([pattern]) => new RegExp(pattern).test(path));
+  for (const path of [
+    "/api/us/traceability/events?type=transformation&limit=50&offset=0",
+    "/api/us/traceability/events?type=shipping&limit=50&offset=0",
+    `/api/us/traceability/transformation/${id}/revisions?offset=2&limit=1`,
+    `/api/us/traceability/transformation/${id}/readiness?expectedDraftVersion=1`,
+    `/api/us/traceability/transformation/${id}/finalize`,
+    "/api/us/traceability/transformation/genealogy/query",
+    `/api/us/traceability/lots/${id}/cases?limit=100&history=true`,
+    `/api/us/traceability/lots/${id}/cases/${id}/unlink`,
+  ]) {
+    const match = matches(path);
+    assert.ok(match, path);
+    assert.equal(match[1].rewrite(path), path.replace(/^\/api\/us/, ""));
+  }
+  for (const path of [
+    "/api/boxes",
+    "/api/us/boxes",
+    "/api/us/traceability/events?type=receiving&type=transformation",
+    "/api/us/traceability/events?limit=101",
+    "/api/us/traceability/events?tenantId=x",
+    `/api/us/traceability/transformation/${id}/revisions?limit=101`,
+    `/api/us/traceability/transformation/${id}/revisions?limit=1&limit=2`,
+    `/api/us/traceability/transformation/${id}/extra`,
+    `/api/us/traceability/transformation/not-a-uuid`,
+    `/api/us/traceability/transformation/${id}/readiness?expectedDraftVersion=01`,
+    `/api/us/traceability/lots/${id}/cases?limit=101`,
+    `/api/us/traceability/lots/${id}/cases?limit=1&limit=2`,
+    `/api/us/traceability/lots/not-a-uuid/cases`,
+    `/api/us/traceability/lots/${id}/cases/${id}/unlink/extra`,
+    `/api/us/traceability/lots/${id}/cases?tenantId=x`,
+  ])
+    assert.equal(matches(path), undefined, path);
+});
+
+test("US Shipping proxy admits only exact method and bounded path/query pairs", async () => {
+  const { createUsAdminConfig } = await import("../../../apps/admin/vite.us.config.ts");
+  const config = createUsAdminConfig({ VITE_DEPLOYMENT_EDITION: "US" }, "test");
+  const id = "a0000000-0000-4000-8000-000000000001";
+  const routes = Object.entries(config.server.proxy);
+  const matches = (path) => routes.some(([pattern]) => new RegExp(pattern).test(path));
+  for (const path of [
+    "/api/us/traceability/shipments",
+    `/api/us/traceability/shipments/${id}`,
+    `/api/us/traceability/shipments/${id}/readiness?expectedDraftVersion=1`,
+    `/api/us/traceability/shipments/${id}/revisions?limit=1&offset=0`,
+    `/api/us/traceability/shipments/${id}/finalize`,
+    `/api/us/traceability/shipments/${id}/amend`,
+    `/api/us/traceability/shipments/${id}/void`,
+    `/api/us/traceability/lots/${id}/shipping-balance`,
+    `/api/us/traceability/lots/${id}/shipping-balance?contextDraftId=${id}&expectedDraftVersion=2`,
+  ])
+    assert.equal(matches(path), true, path);
+  for (const path of [
+    "/api/us/traceability/shipments?tenantId=x",
+    `/api/us/traceability/shipments/${id}?tenantId=x`,
+    `/api/us/traceability/shipments/${id}/revisions?limit=1&limit=2`,
+    `/api/us/traceability/shipments/${id}/revisions?limit=101&offset=0`,
+    `/api/us/traceability/shipments/${id}/readiness?expectedDraftVersion=01`,
+    `/api/us/traceability/shipments/${id}/finalize?x=1`,
+    `/api/us/traceability/shipments/${id}/unknown`,
+    `/api/us/traceability/shipments/${id}/void/extra`,
+    "/api/us/traceability/shipments/not-a-uuid",
+    "/api/us/traceability/shipments/../profile",
+    "/api/us/traceability/shipments/%2e%2e/profile",
+    `/api/us/traceability/lots/${id}/shipping-balance?contextDraftId=${id}`,
+    `/api/us/traceability/lots/${id}/shipping-balance?contextDraftId=${id}&expectedDraftVersion=02`,
+    `/api/us/traceability/lots/${id}/shipping-balance?excludedEventId=${id}`,
+  ])
+    assert.equal(matches(path), false, path);
+  const guard = config.plugins.find((plugin) => plugin.name === "us-api-allowlist");
+  for (const hook of ["configureServer", "configurePreviewServer"]) {
+    let middleware;
+    guard[hook]({
+      middlewares: {
+        use: (handler) => {
+          middleware = handler;
+        },
+      },
+    });
+    const check = (method, url, accepted) => {
+      let status;
+      let next = false;
+      middleware(
+        { method, url },
+        {
+          writeHead: (value) => {
+            status = value;
+          },
+          end() {},
+        },
+        () => {
+          next = true;
+        },
+      );
+      assert.equal(next, accepted, `${method} ${url}`);
+      assert.equal(status, accepted ? undefined : 404);
+    };
+    for (const [method, path] of [
+      ["POST", "/api/us/traceability/shipments"],
+      ["GET", `/api/us/traceability/shipments/${id}`],
+      ["PUT", `/api/us/traceability/shipments/${id}`],
+      ["GET", `/api/us/traceability/shipments/${id}/readiness?expectedDraftVersion=1`],
+      ["GET", `/api/us/traceability/shipments/${id}/revisions?limit=1&offset=0`],
+      ["POST", `/api/us/traceability/shipments/${id}/finalize`],
+      ["POST", `/api/us/traceability/shipments/${id}/amend`],
+      ["POST", `/api/us/traceability/shipments/${id}/void`],
+      ["GET", `/api/us/traceability/lots/${id}/shipping-balance`],
+      [
+        "GET",
+        `/api/us/traceability/lots/${id}/shipping-balance?contextDraftId=${id}&expectedDraftVersion=2`,
+      ],
+    ])
+      check(method, path, true);
+    for (const [method, path] of [
+      ["GET", "/api/us/traceability/shipments"],
+      ["DELETE", "/api/us/traceability/shipments"],
+      ["POST", `/api/us/traceability/shipments/${id}`],
+      ["GET", `/api/us/traceability/shipments/${id}/finalize`],
+      ["POST", `/api/us/traceability/shipments/${id}/readiness?expectedDraftVersion=1`],
+      ["GET", `/api/us/traceability/shipments/${id}/readiness?expectedDraftVersion=2147483648`],
+      ["PATCH", `/api/us/traceability/shipments/${id}`],
+      ["POST", `/api/us/traceability/lots/${id}/shipping-balance`],
+      [
+        "GET",
+        `/api/us/traceability/lots/${id}/shipping-balance?contextDraftId=${id}&expectedDraftVersion=2&tenantId=x`,
+      ],
+    ])
+      check(method, path, false);
   }
 });

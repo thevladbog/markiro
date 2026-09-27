@@ -2,12 +2,20 @@ import { catalogCopy } from "../catalog/copy.js";
 import { lotCopy } from "../lots/copy.js";
 import { productProfileCopy } from "../catalog/profile-copy.js";
 import { receivingCopy } from "../receiving/copy.js";
+import { receivingCsvCopy } from "../receiving/csv-copy.js";
 import { referenceCopy } from "../receiving/reference-copy.js";
 import { readinessCopy } from "../receiving/readiness-copy.js";
 import { receivingConflictCopy } from "../receiving/conflict-copy.js";
+import { eventsCopy } from "../events/copy.js";
+import { transformationCopy } from "../transformation/copy.js";
+import { shippingCopy } from "../shipping/copy.js";
 
 export const masterDataCopy = {
   "en-US": {
+    events: eventsCopy["en-US"],
+    transformation: transformationCopy["en-US"],
+    shipping: shippingCopy["en-US"],
+    receivingCsv: receivingCsvCopy["en-US"],
     receivingConflict: receivingConflictCopy["en-US"],
     receivingReadiness: readinessCopy["en-US"],
     receiving: receivingCopy["en-US"],
@@ -132,6 +140,10 @@ export const masterDataCopy = {
     },
   },
   "es-US": {
+    events: eventsCopy["es-US"],
+    transformation: transformationCopy["es-US"],
+    shipping: shippingCopy["es-US"],
+    receivingCsv: receivingCsvCopy["es-US"],
     receivingConflict: receivingConflictCopy["es-US"],
     receivingReadiness: readinessCopy["es-US"],
     receiving: receivingCopy["es-US"],

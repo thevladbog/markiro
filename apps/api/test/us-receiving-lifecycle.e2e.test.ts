@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { seedTransformationDraft } from "./support/us-transformation-draft-fixture";
 import { schema } from "@markiro/db";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -54,10 +55,14 @@ describe.skipIf(!url)("Receiving lifecycle commands", () => {
   }
   async function lots() {
     return (
-      await f.pool.query<{ lot: Record<string, unknown> & { receiving_basis_version: number } }>(
-        "SELECT to_jsonb(l) AS lot FROM traceability_lots l WHERE tenant_id=$1 ORDER BY id",
-        [c.tenant],
-      )
+      await f.pool.query<{
+        lot: Record<string, unknown> & {
+          receiving_basis_version: number;
+          current_dependency_version: number;
+        };
+      }>("SELECT to_jsonb(l) AS lot FROM traceability_lots l WHERE tenant_id=$1 ORDER BY id", [
+        c.tenant,
+      ])
     ).rows;
   }
   async function businessState() {
@@ -75,94 +80,98 @@ describe.skipIf(!url)("Receiving lifecycle commands", () => {
       )
     ).rows;
   }
-  it("starts exactly one bound amendment and records the command, actor, reason and lifecycle atomically", async () => {
-    const original = await finalized();
-    const before = await store.getLiveRecord(c.tenant, c.actor, original.id);
-    const beforeLots = await lots();
-    const command = { ...amendInput(), reason: "  Correct receipt  " };
-    const receipt = await store.amend(
-      c.tenant,
-      c.actor,
-      original.id.toUpperCase(),
-      command,
-      "amend-request",
-    );
-    expect(receipt).toMatchObject({
-      receiptVersion: 2,
-      command: "receiving.amend",
-      operationKey: command.operationKey,
-      record: {
-        eventNumber: original.eventNumber,
-        revision: 2,
-        draftVersion: 1,
-        status: "draft",
-        createdBy: c.actor,
-        updatedBy: c.actor,
-        lifecycle: {
-          rootId: original.id,
-          lifecycleVersion: 3,
-          previousRevisionId: original.id,
-          currentEventId: original.id,
-          pendingDraftId: receipt.eventId,
-          amendmentReason: "Correct receipt",
-        },
-      },
-    });
-    expect(receipt.eventId).not.toBe(original.id);
-    expect(receipt.record.content).toEqual({
-      kind: "draft",
-      draft: {
-        ...c.draft,
-        items: c.draft.items.map((line, index) => ({
-          ...line,
-          exemptReceipt: null,
-          lotId: original.snapshot.items[index]?.lotId,
-          previousLineNo: index + 1,
-        })),
-      },
-    });
-    expect(await lots()).toEqual(beforeLots);
-    expect((await store.getLiveRecord(c.tenant, c.actor, original.id)).content).toEqual(
-      before.content,
-    );
-    const state = await businessState();
-    expect(await store.amend(c.tenant, c.actor, original.id, command, "retry")).toEqual(receipt);
-    expect(await businessState()).toEqual(state);
-    expect(
-      (
-        await f.pool.query(
-          "SELECT organization_id,actor_user_id,action,outcome,target_type,target_id,before,after,request_id FROM tenant_audit_events WHERE organization_id=$1 AND action='traceability.receiving.amendment_started'",
-          [c.tenant],
-        )
-      ).rows,
-    ).toEqual([
-      {
-        organization_id: c.tenant,
-        actor_user_id: c.actor,
-        action: "traceability.receiving.amendment_started",
-        outcome: "success",
-        target_type: "traceability_event",
-        target_id: receipt.eventId,
-        before,
-        after: {
-          rootId: original.id,
+  it.each([false, true])(
+    "starts one amendment with exact command, actor, reason and lifecycle (Transformation: %s)",
+    async (mixed) => {
+      const original = await finalized();
+      if (mixed) await seedTransformationDraft(f, c.tenant, c.actor);
+      const before = await store.getLiveRecord(c.tenant, c.actor, original.id);
+      const beforeLots = await lots();
+      const command = { ...amendInput(), reason: "  Correct receipt  " };
+      const receipt = await store.amend(
+        c.tenant,
+        c.actor,
+        original.id.toUpperCase(),
+        command,
+        "amend-request",
+      );
+      expect(receipt).toMatchObject({
+        receiptVersion: 2,
+        command: "receiving.amend",
+        operationKey: command.operationKey,
+        record: {
+          eventNumber: original.eventNumber,
           revision: 2,
-          reason: "Correct receipt",
-          result: "draft_started",
-          record: receipt.record,
+          draftVersion: 1,
+          status: "draft",
+          createdBy: c.actor,
+          updatedBy: c.actor,
+          lifecycle: {
+            rootId: original.id,
+            lifecycleVersion: 3,
+            previousRevisionId: original.id,
+            currentEventId: original.id,
+            pendingDraftId: receipt.eventId,
+            amendmentReason: "Correct receipt",
+          },
         },
-        request_id: "amend-request",
-      },
-    ]);
-    expect(
-      (
-        await f.pool.query(
-          "SELECT event_id,result FROM receiving_operations WHERE tenant_id=$1 AND command='receiving.amend' AND operation_key=$2",
-          [c.tenant, command.operationKey],
-        )
-      ).rows,
-    ).toEqual([{ event_id: receipt.eventId, result: receipt }]);
-  });
+      });
+      expect(receipt.eventId).not.toBe(original.id);
+      expect(receipt.record.content).toEqual({
+        kind: "draft",
+        draft: {
+          ...c.draft,
+          items: c.draft.items.map((line, index) => ({
+            ...line,
+            exemptReceipt: null,
+            lotId: original.snapshot.items[index]?.lotId,
+            previousLineNo: index + 1,
+          })),
+        },
+      });
+      expect(await lots()).toEqual(beforeLots);
+      expect((await store.getLiveRecord(c.tenant, c.actor, original.id)).content).toEqual(
+        before.content,
+      );
+      const state = await businessState();
+      expect(await store.amend(c.tenant, c.actor, original.id, command, "retry")).toEqual(receipt);
+      expect(await businessState()).toEqual(state);
+      expect(
+        (
+          await f.pool.query(
+            "SELECT organization_id,actor_user_id,action,outcome,target_type,target_id,before,after,request_id FROM tenant_audit_events WHERE organization_id=$1 AND action='traceability.receiving.amendment_started'",
+            [c.tenant],
+          )
+        ).rows,
+      ).toEqual([
+        {
+          organization_id: c.tenant,
+          actor_user_id: c.actor,
+          action: "traceability.receiving.amendment_started",
+          outcome: "success",
+          target_type: "traceability_event",
+          target_id: receipt.eventId,
+          before,
+          after: {
+            rootId: original.id,
+            revision: 2,
+            reason: "Correct receipt",
+            result: "draft_started",
+            record: receipt.record,
+          },
+          request_id: "amend-request",
+        },
+      ]);
+      expect(
+        (
+          await f.pool.query(
+            "SELECT event_id,result FROM receiving_operations WHERE tenant_id=$1 AND command='receiving.amend' AND operation_key=$2",
+            [c.tenant, command.operationKey],
+          )
+        ).rows,
+      ).toEqual([{ event_id: receipt.eventId, result: receipt }]);
+    },
+  );
   it("cancels the pending draft without changing basis and never reuses its revision", async () => {
     const original = await finalized();
     const started = await store.amend(c.tenant, c.actor, original.id, amendInput(), "amend");
@@ -191,67 +200,75 @@ describe.skipIf(!url)("Receiving lifecycle commands", () => {
       receipt,
     );
   });
-  it("voids an effective receipt without modifying frozen content or any lot business field", async () => {
-    const original = await finalized();
-    await f.db
-      .update(schema.traceabilityLots)
-      .set({ status: "recalled" })
-      .where(eq(schema.traceabilityLots.id, c.lot));
-    const beforeLots = await lots();
-    const before = await store.getLiveRecord(c.tenant, c.actor, original.id);
-    const command = voidInput(2, null);
-    const receipt = await store.void(c.tenant, c.actor, original.id, command, "void-finalized");
-    expect(receipt.record).toMatchObject({
-      status: "void",
-      lifecycle: {
-        currentEventId: null,
-        pendingDraftId: null,
-        lifecycleVersion: 3,
-        voidedBy: c.actor,
-        voidReason: command.reason,
-      },
-    });
-    expect(receipt.record.content).toEqual(before.content);
-    expect(await lots()).toEqual(
-      beforeLots.map(({ lot }) => ({
-        lot: { ...lot, receiving_basis_version: lot.receiving_basis_version + 1 },
-      })),
-    );
-    expect(await store.getLotReceivingBasis(c.tenant, c.actor, c.lot, {})).toMatchObject({
-      state: "missing",
-      supportCount: 0,
-      basisVersion: 3,
-    });
-    const state = await businessState();
-    expect(await store.void(c.tenant, c.actor, original.id, command, "retry")).toEqual(receipt);
-    expect(await businessState()).toEqual(state);
-    expect(
-      (
-        await f.pool.query(
-          "SELECT organization_id,actor_user_id,action,outcome,target_type,target_id,before,after,request_id FROM tenant_audit_events WHERE organization_id=$1 AND action='traceability.receiving.voided'",
-          [c.tenant],
-        )
-      ).rows,
-    ).toEqual([
-      {
-        organization_id: c.tenant,
-        actor_user_id: c.actor,
-        action: "traceability.receiving.voided",
-        outcome: "success",
-        target_type: "traceability_event",
-        target_id: original.id,
-        before,
-        after: {
-          rootId: original.id,
-          revision: 1,
-          reason: command.reason,
-          result: "voided",
-          record: receipt.record,
+  it.each([false, true])(
+    "voids a receipt with unchanged frozen content, lot fields and exact audit (Transformation: %s)",
+    async (mixed) => {
+      const original = await finalized();
+      if (mixed) await seedTransformationDraft(f, c.tenant, c.actor);
+      await f.db
+        .update(schema.traceabilityLots)
+        .set({ status: "recalled" })
+        .where(eq(schema.traceabilityLots.id, c.lot));
+      const beforeLots = await lots();
+      const before = await store.getLiveRecord(c.tenant, c.actor, original.id);
+      const command = voidInput(2, null);
+      const receipt = await store.void(c.tenant, c.actor, original.id, command, "void-finalized");
+      expect(receipt.record).toMatchObject({
+        status: "void",
+        lifecycle: {
+          currentEventId: null,
+          pendingDraftId: null,
+          lifecycleVersion: 3,
+          voidedBy: c.actor,
+          voidReason: command.reason,
         },
-        request_id: "void-finalized",
-      },
-    ]);
-  });
+      });
+      expect(receipt.record.content).toEqual(before.content);
+      expect(await lots()).toEqual(
+        beforeLots.map(({ lot }) => ({
+          lot: {
+            ...lot,
+            receiving_basis_version: lot.receiving_basis_version + 1,
+            current_dependency_version: lot.current_dependency_version + 1,
+          },
+        })),
+      );
+      expect(await store.getLotReceivingBasis(c.tenant, c.actor, c.lot, {})).toMatchObject({
+        state: "missing",
+        supportCount: 0,
+        basisVersion: 3,
+      });
+      const state = await businessState();
+      expect(await store.void(c.tenant, c.actor, original.id, command, "retry")).toEqual(receipt);
+      expect(await businessState()).toEqual(state);
+      expect(
+        (
+          await f.pool.query(
+            "SELECT organization_id,actor_user_id,action,outcome,target_type,target_id,before,after,request_id FROM tenant_audit_events WHERE organization_id=$1 AND action='traceability.receiving.voided'",
+            [c.tenant],
+          )
+        ).rows,
+      ).toEqual([
+        {
+          organization_id: c.tenant,
+          actor_user_id: c.actor,
+          action: "traceability.receiving.voided",
+          outcome: "success",
+          target_type: "traceability_event",
+          target_id: original.id,
+          before,
+          after: {
+            rootId: original.id,
+            revision: 1,
+            reason: command.reason,
+            result: "voided",
+            record: receipt.record,
+          },
+          request_id: "void-finalized",
+        },
+      ]);
+    },
+  );
   it("voids an incomplete original draft with its exact saved version and no frozen payload", async () => {
     const saved = await store.createDraft(
       c.tenant,
@@ -556,41 +573,15 @@ describe.skipIf(!url)("Receiving lifecycle commands", () => {
       ).toBe(kind === "amend" ? "draft" : "void");
     },
   );
-  it("fails closed on unknown stored CTE kinds before even a draft cancellation", async () => {
-    const saved = await create(),
-      unknown = await create();
-    const constraint = (
-      await f.pool.query<{ definition: string }>(
-        "SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint WHERE conrelid='traceability_events'::regclass AND conname='traceability_events_lifecycle_valid'",
-      )
-    ).rows[0]?.definition;
-    if (!constraint) throw new Error("Missing synthetic constraint");
-    const connection = await f.pool.connect();
-    try {
-      await connection.query(
-        "BEGIN; SET LOCAL session_replication_role='replica'; ALTER TABLE traceability_events DROP CONSTRAINT traceability_events_lifecycle_valid",
-      );
-      await connection.query(
-        "UPDATE traceability_events SET type='shipping' WHERE tenant_id=$1 AND id=$2",
-        [c.tenant, unknown.id],
-      );
-      await connection.query("COMMIT");
-      const before = await businessState();
-      await expect(
-        store.void(c.tenant, c.actor, saved.id, voidInput(1, 1), "unknown-kind"),
-      ).rejects.toMatchObject({ status: 503 });
-      expect(await businessState()).toEqual(before);
-    } finally {
-      await connection.query("BEGIN; SET LOCAL session_replication_role='replica'");
-      await connection.query(
-        "UPDATE traceability_events SET type='receiving' WHERE tenant_id=$1 AND id=$2",
-        [c.tenant, unknown.id],
-      );
-      await connection.query(
-        `ALTER TABLE traceability_events ADD CONSTRAINT traceability_events_lifecycle_valid ${constraint}`,
-      );
-      await connection.query("COMMIT");
-      connection.release();
-    }
+  it("supports lifecycle alongside a valid Transformation draft", async () => {
+    const saved = await create();
+    const transformation = await seedTransformationDraft(f, c.tenant, c.actor);
+    expect(
+      (await store.void(c.tenant, c.actor, saved.id, voidInput(1, 1), "shared-kind")).record.status,
+    ).toBe("void");
+    expect(
+      (await f.pool.query("SELECT status FROM traceability_events WHERE id=$1", [transformation]))
+        .rows,
+    ).toEqual([{ status: "draft" }]);
   });
 });

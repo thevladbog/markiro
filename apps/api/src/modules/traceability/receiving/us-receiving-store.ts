@@ -40,6 +40,7 @@ import {
   createReceivingDraftCommand,
   saveOriginalReceivingDraftCommand,
 } from "./us-receiving-draft-commands";
+import { exportReceivingCsv } from "./us-receiving-csv-export";
 
 const events = schema.traceabilityEvents,
   items = schema.receivingEventItems,
@@ -47,6 +48,10 @@ const events = schema.traceabilityEvents,
 
 export class UsReceivingStore {
   constructor(private readonly db: Db) {}
+
+  exportCsv(tenantId: string, actorUserId: string, id: unknown, query: unknown, requestId: string) {
+    return exportReceivingCsv(this.db, tenantId, actorUserId, id, query, requestId);
+  }
 
   // Authorizes before parsing either original or explicit revision HTTP input.
   finalizeCommand(

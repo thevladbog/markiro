@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { schema, type Db } from "@markiro/db";
 import { US_CAPABILITY } from "@markiro/domain";
@@ -13,7 +13,7 @@ import {
   type ReceivingLiveRecord,
   type ReceivingOperationReceiptV2,
 } from "@markiro/platform-contracts";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import {
   authorizeUsMasterData,
   parseMasterDataInput,
@@ -34,13 +34,13 @@ import {
   unavailable,
 } from "./us-receiving-persistence";
 import { assertReceivingReferences } from "./us-receiving-references";
-import { createReceivingRoot, lockReceivingRoot } from "./us-receiving-roots";
+import { lockReceivingRoot } from "./us-receiving-roots";
+import { insertReceivingDraft } from "./us-receiving-draft-create";
 
 type Result = ReceivingDraftRecord | ReceivingOperationReceiptV2;
 type Format = "legacy" | "versioned";
 type Command = "receiving.create" | "receiving.save";
 const events = schema.traceabilityEvents;
-const counters = schema.receivingCounters;
 const digest = (input: unknown) => createHash("sha256").update(JSON.stringify(input)).digest("hex");
 
 // Comparison only: never normalize remembered input or its historical digest.
@@ -195,51 +195,15 @@ export function createReceivingDraftCommand(
         receivingLifecycleCommandDigest("receiving.create", stored.eventId, value),
         format,
       );
-    await assertReceivingReferences(tx, tenantId, value.draft);
-    // Authorization holds the organization profile/timezone lock through commit.
-    const [profile] = await tx
-      .select({ timeZone: schema.orgProfiles.timeZone })
-      .from(schema.orgProfiles)
-      .where(eq(schema.orgProfiles.tenantId, tenantId));
-    if (!profile) throw unavailable();
-    const now = new Date();
-    const year = Number(
-      new Intl.DateTimeFormat("en-US", { timeZone: profile.timeZone, year: "numeric" }).format(now),
+    const result = await insertReceivingDraft(
+      tx,
+      tenantId,
+      actorUserId,
+      value.draft,
+      requestId,
+      format,
     );
-    const [counter] = await tx
-      .insert(counters)
-      .values({ tenantId, year, sequence: 1 })
-      .onConflictDoUpdate({
-        target: [counters.tenantId, counters.year],
-        set: { sequence: sql`${counters.sequence} + 1` },
-      })
-      .returning();
-    if (!counter) throw unavailable();
-    const eventNumber = `REC-${String(year).slice(-2).padStart(2, "0")}-${String(counter.sequence).padStart(4, "0")}`;
-    const eventId = randomUUID();
-    await createReceivingRoot(tx, { tenantId, eventId, eventNumber });
-    const [header] = await tx
-      .insert(events)
-      .values({
-        ...receivingHeader(value.draft),
-        id: eventId,
-        rootEventId: eventId,
-        tenantId,
-        eventNumber,
-        timeZone: profile.timeZone,
-        createdBy: actorUserId,
-        updatedBy: actorUserId,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning({ id: events.id });
-    if (!header) throw unavailable();
-    await replaceReceivingChildren(tx, tenantId, eventId, value.draft);
-    const result =
-      format === "versioned"
-        ? await readReceivingLiveRecord(tx, tenantId, eventId)
-        : await readReceivingDraft(tx, tenantId, eventId, "update");
-    await audit(tx, tenantId, actorUserId, requestId, null, result);
+    const eventId = result.id;
     const inputDigest =
       format === "versioned"
         ? receivingLifecycleCommandDigest("receiving.create", eventId, value)

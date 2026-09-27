@@ -24,6 +24,8 @@ import {
   type UsMasterDataTransaction,
 } from "../master-data/us-master-data-support";
 import { lotResponse, lotSourceColumns } from "../lots/us-lot-support";
+import { bumpLotDependencyVersions } from "../lots/us-current-consumers";
+import { listCurrentDownstreamConsumers } from "../shipping/us-shipping-balance";
 import {
   lockReceivingOperation,
   receivingLifecycleCommandDigest,
@@ -316,9 +318,16 @@ async function executeFinalization(
         : null;
       if (effect && (effect.invalidBindingLineNos.length || effect.identityLockedLineNos.length))
         throw unavailable();
-      // Context established complete Receiving-only integrity under lot coordination.
-      // Other CTEs must register real dependency writers before becoming supported.
+      // The locked context includes retained, linked and removed predecessor lots.
+      if (effect?.kind === "material") {
+        const blockers = await listCurrentDownstreamConsumers(tx, tenantId, effect.affectedLotIds);
+        if (blockers.length)
+          throw new ConflictException({ code: "traceability_downstream_blocked", blockers });
+      }
       await persistLots(tx, tenantId, actorUserId, eventId, requestId, now, context, snapshot);
+      // Newly allocated lots must exist before their first dependency epoch write.
+      if (effect?.kind === "material")
+        await bumpLotDependencyVersions(tx, tenantId, effect.affectedLotIds);
       const items = schema.receivingEventItems;
       for (const line of snapshot.items) {
         const [written] = await tx

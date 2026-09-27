@@ -28,6 +28,7 @@ import { ReceivingLifecycleNotice } from "./lifecycle-notice.js";
 import { ReceivingLifecycleActions } from "./lifecycle-dialog.js";
 import { ReceivingRevisionNavigation } from "./revision-history.js";
 import { ReceivingConflictDetails } from "./conflict-details.js";
+import { ReceivingCsvExport } from "./csv-export.js";
 
 const emptyDraft: ReceivingDraft = {
   dateReceived: null,
@@ -54,6 +55,7 @@ type Props = MasterDataViewProps & {
   onClose: () => void;
   backLabel?: string;
   canManageQa?: boolean;
+  canExport?: boolean;
   onOpenRecord?: (record: ReceivingLiveRecord) => void;
   predecessor?: ReceivingFrozenView;
 };
@@ -87,6 +89,7 @@ export function ReceivingEditor({
   onClose,
   backLabel,
   canManageQa = false,
+  canExport = false,
   onOpenRecord,
   predecessor,
 }: Props) {
@@ -503,6 +506,18 @@ export function ReceivingEditor({
           onSessionLost={onSessionLost}
           onForbidden={onForbidden}
           canNavigate={canLeave}
+        />
+      ) : null}
+      {record ? (
+        <ReceivingCsvExport
+          client={client}
+          record={record}
+          canExport={canExport}
+          dirty={dirty || uncertain || recovering || finalizationLocked}
+          disabled={pending || mutationPending || blocked}
+          onReload={() => void reload()}
+          onForbidden={onForbidden}
+          onSessionLost={onSessionLost}
         />
       ) : null}
       {isAmendment ? (

@@ -96,7 +96,7 @@ describe.skipIf(!url)("additive receiving basis version migration", () => {
     expect(
       (
         await fixture.pool.query(
-          "SELECT (to_jsonb(l)-'receiving_basis_version')::text AS exact FROM traceability_lots l ORDER BY id",
+          "SELECT (to_jsonb(l)-'receiving_basis_version'-'current_dependency_version')::text AS exact FROM traceability_lots l ORDER BY id",
         )
       ).rows,
     ).toEqual(before);

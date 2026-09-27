@@ -9,11 +9,14 @@ import {
   Put,
   Query,
   Req,
+  Res,
   UnauthorizedException,
   UseGuards,
 } from "@nestjs/common";
 import { ApiCookieAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from "@nestjs/swagger";
+import type { Response } from "express";
 import {
+  receivingCsvExportQuerySchema,
   createReceivingDraftSchema,
   listReceivingLiveRecordsQuerySchema,
   receivingLiveRecordListSchema,
@@ -121,6 +124,44 @@ export class UsReceivingController {
         requestId,
       ),
     );
+  }
+
+  @Get(":id/export.csv")
+  @ApiOperation({
+    summary: "Download one selected saved Receiving revision as CSV",
+    description:
+      "Requires current export-read capability, MFA and an exact draft/lifecycle version. Generates a bounded, reversible CSV from the saved record in one audited repeatable-read transaction; it does not edit Receiving data.",
+  })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiZodQuery(receivingCsvExportQuerySchema)
+  @ApiResponse({
+    status: 200,
+    description:
+      "UTF-8 saved-record CSV attachment; generation is audited before bytes are returned.",
+    content: { "text/csv": { schema: { type: "string", format: "binary" } } },
+  })
+  @ApiResponse({
+    status: 409,
+    description: "receiving_export_stale: reload the selected revision.",
+  })
+  @ApiResponse({ status: 422, description: "export_value_too_large: no partial artifact." })
+  async exportCsv(
+    @Req() request: UsRequest,
+    @Param("id") id: unknown,
+    @Query() query: unknown,
+    @Res() response: Response,
+  ) {
+    const principal = this.principal(request);
+    const requestId = this.requestId(request);
+    const result = await this.runtime.databaseOperation(() =>
+      this.runtime.receiving.exportCsv(principal.tenantId, principal.userId, id, query, requestId),
+    );
+    response.setHeader("Content-Type", "text/csv; charset=utf-8");
+    response.setHeader("Content-Disposition", `attachment; filename="${result.fileName}"`);
+    response.setHeader("Cache-Control", "no-store");
+    response.setHeader("X-Content-Type-Options", "nosniff");
+    response.setHeader("X-Markiro-Export-SHA256", result.sha256);
+    response.send(Buffer.from(result.bytes));
   }
 
   @Get(":id")

@@ -42,12 +42,19 @@ jobs:
       - name: Reject release capabilities and merges into main
         run: node tools/us-development/check-isolation.mjs
       - run: node --test tools/us-development/test/*.test.mjs
+      - name: Verify local-only browser entry and strict proxy
+        run: node --test tools/us-development/test/browser-entry.test.mjs
       - name: Verify shared domain foundation
         run: pnpm --filter @markiro/domain test && pnpm --filter @markiro/domain typecheck && pnpm --filter @markiro/domain lint && pnpm --filter @markiro/domain build
       - name: Build isolated API dependencies and entry points
         run: pnpm turbo build --filter '@markiro/api...'
       - name: Verify API entry boundaries
         run: pnpm --filter @markiro/api exec vitest run test/deployment-entry.test.ts test/us-development.e2e.test.ts test/env.test.ts test/health.e2e.test.ts
+      - name: Verify bounded receiving CSV inputs
+        run: |
+          pnpm --filter @markiro/platform-contracts exec vitest run test/us-receiving-csv.test.ts test/us-receiving-csv-commands.test.ts test/us-receiving-csv-http.test.ts test/us-receiving-csv-export.test.ts
+          pnpm --filter @markiro/platform-contracts exec vitest run test/us-transformation-http.test.ts test/us-events.test.ts
+          pnpm --filter @markiro/api exec vitest run test/us-receiving-csv-input.test.ts test/us-receiving-csv-preview.test.ts
       - name: Build shared browser components
         run: pnpm --filter @markiro/ui build
       - name: Verify US browser flow and contracts
@@ -56,23 +63,53 @@ jobs:
         run: pnpm --filter @markiro/admin exec vitest run test/us-receiving-client.test.ts test/us-receiving-command-acknowledgement.test.ts test/us-receiving-live-client.test.ts test/us-receiving-revision-acknowledgement.test.ts test/us-receiving-lifecycle-client.test.ts test/us-receiving-lifecycle.test.tsx test/us-receiving-amendment-editor.test.tsx test/us-receiving-amendment-finalization.test.tsx test/us-receiving-ui.test.tsx test/us-receiving-references.test.tsx test/us-receiving-readiness-client.test.ts test/us-receiving-readiness.test.tsx test/us-receiving-finalization-client.test.ts test/us-receiving-finalization.test.tsx test/us-receiving-exemption-client.test.ts test/us-receiving-exemption.test.tsx
       - name: Verify exact receiving revision navigation and Unicode TLC entry
         run: pnpm --filter @markiro/admin exec vitest run test/us-receiving-history.test.tsx test/us-receiving-tlc-input.test.tsx
+      - name: Verify receiving CSV browser confirmation and recovery
+        run: pnpm --filter @markiro/admin exec vitest run test/us-receiving-csv-client.test.ts test/us-receiving-csv-ui.test.tsx
+      - name: Verify Events and Transformation browser contracts
+        run: pnpm --filter @markiro/admin exec vitest run test/us-events-client.test.ts test/us-transformation-client.test.ts test/us-cases-client.test.ts test/us-events-ui.test.tsx test/us-transformation-editor.test.tsx test/us-transformation-readiness.test.tsx test/us-transformation-finalization.test.tsx test/us-transformation-detail.test.tsx test/us-transformation-history.test.tsx test/us-transformation-cases.test.tsx test/us-transformation-genealogy.test.tsx
+      - name: Verify Shipping office workflow
+        run: pnpm --filter @markiro/admin exec vitest run test/us-shipping-client.test.ts test/us-shipping-editor.test.tsx test/us-shipping-readiness.test.tsx test/us-shipping-detail.test.tsx test/us-shipping-history.test.tsx test/us-events-ui.test.tsx
       - name: Build local-only US browser entry
         env:
           VITE_DEPLOYMENT_EDITION: US
         run: pnpm --filter @markiro/admin build:us
       - name: Verify compiled local-only runtime
         run: node --test tools/us-development/test/runtime-entry.smoke.mjs tools/us-development/test/owner-command.smoke.mjs
+      - name: Verify US Shipping pure rules and strict contracts
+        run: |
+          pnpm --filter @markiro/domain exec vitest run test/us-shipping-balance.test.ts test/us-shipping-readiness.test.ts
+          pnpm --filter @markiro/platform-contracts exec vitest run test/us-shipping-contracts.test.ts test/us-shipping-finalization.test.ts
+      - name: Verify US Shipping storage on disposable databases
+        env:
+          US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
+        run: |
+          pnpm --filter @markiro/db exec vitest run test/us-shipping-schema.test.ts test/us-shipping-migration.e2e.test.ts
+      - name: Verify US Shipping API finalization and HTTP on disposable databases
+        env:
+          US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
+        run: |
+          pnpm --filter @markiro/api exec vitest run test/us-shipping-balance.e2e.test.ts test/us-shipping-balance-read.e2e.test.ts test/us-shipping-draft.e2e.test.ts test/us-shipping-readiness.e2e.test.ts test/us-shipping-status-effects.e2e.test.ts test/us-shipping-finalization.e2e.test.ts test/us-shipping-finalization-concurrency.e2e.test.ts test/us-shipping-http.e2e.test.ts
       - name: Verify US profile, session and master-data persistence on disposable databases
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
         run: |
+          pnpm --filter @markiro/platform-contracts exec vitest run test/us-case-bridge.test.ts
+          pnpm --filter @markiro/db exec vitest run test/us-case-bridge-schema.test.ts test/us-case-bridge-migration.e2e.test.ts
+          pnpm --filter @markiro/api exec vitest run test/us-case-commands.e2e.test.ts test/us-case-concurrency.e2e.test.ts test/us-case-reads.e2e.test.ts test/us-case-http.e2e.test.ts
+          pnpm --filter @markiro/domain exec vitest run test/us-transformation-readiness.test.ts test/us-transformation-genealogy.test.ts
+          pnpm --filter @markiro/platform-contracts exec vitest run test/us-transformation-draft.test.ts test/us-transformation-readiness.test.ts test/us-transformation-records.test.ts test/us-transformation-genealogy.test.ts
+          pnpm --filter @markiro/db exec vitest run test/us-transformation-schema.test.ts test/us-transformation-original-migration.e2e.test.ts test/us-transformation-revisions-migration.e2e.test.ts
+          pnpm --filter @markiro/api exec vitest run test/us-transformation-draft.e2e.test.ts test/us-transformation-readiness.e2e.test.ts test/us-transformation-finalization.e2e.test.ts test/us-transformation-finalization-concurrency.e2e.test.ts test/us-current-consumers.e2e.test.ts
+          pnpm --filter @markiro/api exec vitest run test/us-transformation-lifecycle.e2e.test.ts test/us-transformation-amendment-finalization.e2e.test.ts test/us-transformation-void.e2e.test.ts test/us-transformation-revision-concurrency.e2e.test.ts
+          pnpm --filter @markiro/api exec vitest run test/us-transformation-genealogy-fixture.e2e.test.ts test/us-transformation-genealogy.e2e.test.ts
+          pnpm --filter @markiro/api exec vitest run test/us-transformation-original-draft-void.e2e.test.ts test/us-transformation-revisions.e2e.test.ts test/us-transformation-http.e2e.test.ts test/us-events-registry.e2e.test.ts test/us-events-http.e2e.test.ts
           pnpm --filter @markiro/domain exec vitest run test/traceability-location-description.test.ts test/us-access.test.ts test/us-receiving-exemption.test.ts
           pnpm --filter @markiro/platform-contracts exec vitest run test/us-profile.test.ts test/us-access.test.ts test/us-master-data.test.ts test/us-catalog.test.ts test/us-product-profile.test.ts test/us-lot.test.ts test/us-lot-records.test.ts test/us-receiving-inputs.test.ts test/us-reference-documents.test.ts
           pnpm --filter @markiro/db exec vitest run test/traceability-profile-schema.test.ts test/traceability-profile-migration.e2e.test.ts test/us-auth-schema.test.ts test/us-auth-migration.e2e.test.ts test/traceability-master-data-schema.test.ts test/traceability-master-data-migration.e2e.test.ts test/us-catalog-schema.test.ts test/us-catalog-migration.e2e.test.ts test/us-product-profile-schema.test.ts test/us-product-profile-migration.e2e.test.ts test/us-lot-schema.test.ts test/us-lot-migration.e2e.test.ts test/us-lot-source-migration.e2e.test.ts test/us-reference-document-schema.test.ts test/us-reference-document-migration.e2e.test.ts
           pnpm --filter @markiro/api exec vitest run test/us-profile-store.e2e.test.ts test/us-auth.e2e.test.ts test/us-http.e2e.test.ts test/us-master-data.e2e.test.ts test/us-master-data-http.e2e.test.ts test/us-catalog-operational-boundaries.e2e.test.ts test/us-catalog.e2e.test.ts test/us-catalog-http.e2e.test.ts test/us-product-profile.e2e.test.ts test/us-lot.e2e.test.ts test/us-owner-command.test.ts test/us-development-owner.e2e.test.ts test/us-reference-document.e2e.test.ts
           pnpm --filter @markiro/platform-contracts exec vitest run test/us-receiving-records.test.ts test/us-receiving-readiness.test.ts test/us-receiving-finalization.test.ts test/us-receiving-exemption.test.ts test/us-receiving-finalization-v2.test.ts test/us-receiving-lifecycle.test.ts test/us-receiving-finalization-v3.test.ts test/us-receiving-live-records.test.ts
-          pnpm --filter @markiro/db exec vitest run test/us-receiving-schema.test.ts test/us-receiving-migration.e2e.test.ts test/us-receiving-finalization-migration.e2e.test.ts test/us-receiving-exemption-migration.e2e.test.ts test/us-receiving-basis-version-migration.e2e.test.ts test/us-receiving-roots-migration.e2e.test.ts test/us-receiving-lifecycle-migration.e2e.test.ts
-          pnpm --filter @markiro/api exec vitest run test/us-receiving.e2e.test.ts test/us-receiving-http.e2e.test.ts test/us-receiving-readiness.e2e.test.ts test/us-receiving-finalization.e2e.test.ts test/us-receiving-finalization-concurrency.e2e.test.ts test/us-receiving-finalization-child-concurrency.e2e.test.ts test/us-receiving-finalization-snapshot-guards.e2e.test.ts test/us-receiving-finalization-url-boundary.e2e.test.ts test/us-receiving-exemption.e2e.test.ts test/us-receiving-exemption-concurrency.e2e.test.ts test/us-receiving-exemption-compatibility.e2e.test.ts test/us-receiving-basis-version.e2e.test.ts test/us-receiving-roots.e2e.test.ts test/us-receiving-basis.e2e.test.ts test/us-receiving-history.e2e.test.ts test/us-receiving-read-concurrency.e2e.test.ts
+          pnpm --filter @markiro/db exec vitest run test/us-receiving-schema.test.ts test/us-receiving-migration.e2e.test.ts test/us-receiving-finalization-migration.e2e.test.ts test/us-receiving-exemption-migration.e2e.test.ts test/us-receiving-basis-version-migration.e2e.test.ts test/us-receiving-roots-migration.e2e.test.ts test/us-receiving-lifecycle-migration.e2e.test.ts test/us-receiving-csv-schema.test.ts test/us-receiving-csv-migration.e2e.test.ts test/us-receiving-csv-apply-schema.test.ts test/us-receiving-csv-apply-migration.e2e.test.ts test/us-shared-event-foundation-schema.test.ts test/us-shared-event-foundation-migration.e2e.test.ts
+          pnpm --filter @markiro/api exec vitest run test/us-receiving.e2e.test.ts test/us-receiving-http.e2e.test.ts test/us-receiving-readiness.e2e.test.ts test/us-receiving-finalization.e2e.test.ts test/us-receiving-finalization-concurrency.e2e.test.ts test/us-receiving-finalization-child-concurrency.e2e.test.ts test/us-receiving-finalization-snapshot-guards.e2e.test.ts test/us-receiving-finalization-url-boundary.e2e.test.ts test/us-receiving-exemption.e2e.test.ts test/us-receiving-exemption-concurrency.e2e.test.ts test/us-receiving-exemption-compatibility.e2e.test.ts test/us-receiving-basis-version.e2e.test.ts test/us-receiving-roots.e2e.test.ts test/us-receiving-basis.e2e.test.ts test/us-receiving-history.e2e.test.ts test/us-receiving-read-concurrency.e2e.test.ts test/us-receiving-date-compatibility.e2e.test.ts test/us-receiving-shared-event-compatibility.e2e.test.ts
           pnpm --filter @markiro/api exec vitest run test/us-receiving-lifecycle.e2e.test.ts test/us-receiving-lifecycle-concurrency.e2e.test.ts test/us-receiving-lifecycle-compatibility.e2e.test.ts test/us-receiving-original-command.e2e.test.ts
           pnpm --filter @markiro/api exec vitest run test/us-receiving-amendment-save.e2e.test.ts test/us-receiving-amendment-save-concurrency.e2e.test.ts
           pnpm --filter @markiro/platform-contracts exec vitest run test/us-receiving-revision-readiness.test.ts
@@ -84,3 +121,6 @@ jobs:
           pnpm --filter @markiro/api exec vitest run test/us-receiving-command-contracts.e2e.test.ts
           pnpm --filter @markiro/api exec vitest run test/us-receiving-draft-command-bridge.e2e.test.ts
           pnpm --filter @markiro/api exec vitest run test/us-receiving-finalization-command-bridge.e2e.test.ts
+          pnpm --filter @markiro/api exec vitest run test/us-receiving-csv-store.e2e.test.ts test/us-receiving-csv-concurrency.e2e.test.ts
+          pnpm --filter @markiro/api exec vitest run test/us-receiving-csv-apply.e2e.test.ts test/us-receiving-csv-apply-concurrency.e2e.test.ts
+          pnpm --filter @markiro/api exec vitest run test/us-receiving-csv-export.e2e.test.ts

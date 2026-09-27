@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import { seedTransformationDraft } from "./support/us-transformation-draft-fixture";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
@@ -8,6 +9,7 @@ import type { INestApplication } from "@nestjs/common";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import { createDb, schema } from "@markiro/db";
 import {
+  decodeReceivingCsvExport,
   receivingCreateResultSchema,
   receivingFinalizeResultSchema,
   receivingLiveRecordSchema,
@@ -15,6 +17,8 @@ import {
   receivingRevisionListSchema,
   receivingBasisSchema,
   receivingLifecycleErrorSchema,
+  receivingCsvPreviewSchema,
+  receivingCsvApplyResponseSchema,
 } from "@markiro/platform-contracts";
 import {
   receivingRevisionReadinessSchema,
@@ -28,6 +32,7 @@ import { UsReceivingStore } from "../src/modules/traceability/receiving/us-recei
 import { listenOnLoopback } from "./support/listen-loopback";
 import { currentUsTotp, UsAuthTestClient } from "./support/us-auth-client";
 import { createUsProfileTestDatabase } from "./support/us-profile-database";
+import { csvRequest, csvRow } from "./support/us-receiving-csv-fixture";
 import {
   emptyReceivingDraft as empty,
   emptyReceivingItem as item,
@@ -188,6 +193,441 @@ describe.skipIf(!base)("US receiving HTTP with real MFA", () => {
     expect(
       (await client.request("/organization/set-active", { organizationId: context.tenant })).status,
     ).toBe(200);
+  });
+
+  async function csvPreview(body = csvRequest([csvRow(context.product)])) {
+    const response = await request("/traceability/receiving/imports/preview", "POST", body);
+    expect(response.status).toBe(201);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    return receivingCsvPreviewSchema.parse(await response.json());
+  }
+  const csvApplyPath = (id: string) => `/traceability/receiving/imports/${id}/apply`;
+
+  it("downloads an audited binary CSV for the selected saved version", async () => {
+    const created = createdRecord(
+      await (await request("/traceability/receiving", "POST", createBody())).json(),
+    );
+    const path = `/traceability/receiving/${created.id}/export.csv?expectedDraftVersion=1&expectedLifecycleVersion=1`;
+    const response = await request(path);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toMatch(/^text\/csv; charset=utf-8/i);
+    expect(response.headers.get("content-disposition")).toContain("attachment;");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    expect(bytes.slice(0, 3)).toEqual(Uint8Array.of(0xef, 0xbb, 0xbf));
+    expect(decodeReceivingCsvExport(bytes).record.id).toBe(created.id);
+    expect(response.headers.get("x-markiro-export-sha256")).toMatch(/^[0-9a-f]{64}$/);
+    expect((await request(path, "GET", undefined, { cookie: "" })).status).toBe(401);
+  });
+
+  it("keeps wrong-type and foreign-tenant Receiving HTTP reads and commands at 404", async () => {
+    const wrongType = await seedTransformationDraft(fixture, context.tenant, context.actor);
+    const foreign = await seedCompleteReceiving(fixture.db);
+    const foreignRecord = await new UsReceivingStore(fixture.db).createDraft(
+      foreign.tenant,
+      foreign.actor,
+      { operationKey: randomUUID(), draft: foreign.draft },
+      "foreign",
+    );
+    for (const id of [wrongType, foreignRecord.id]) {
+      for (const path of [
+        `/traceability/receiving/${id}`,
+        `/traceability/receiving/${id}/revisions`,
+        `/traceability/receiving/${id}/readiness?expectedDraftVersion=1`,
+      ]) {
+        const response = await request(path);
+        expect(response.status).toBe(404);
+        expect(await response.json()).toEqual({ code: "receiving_draft_not_found" });
+      }
+      const response = await request(`/traceability/receiving/${id}/amend`, "POST", {
+        commandVersion: 2,
+        operationKey: randomUUID(),
+        expectedLifecycleVersion: 1,
+        reason: "Correct receipt",
+      });
+      expect(response.status).toBe(404);
+      expect(await response.json()).toEqual({ code: "receiving_draft_not_found" });
+    }
+  });
+
+  it("CSV HTTP separates a request from the immutable outcome and a live GET", async () => {
+    const preview = await csvPreview();
+    const reopened = await request(`/traceability/receiving/imports/${preview.id}`);
+    expect(reopened.status).toBe(200);
+    expect(await reopened.json()).toEqual(preview);
+    const body = { operationKey: randomUUID(), expectedPreviewDigest: preview.previewDigest };
+    const first = await request(csvApplyPath(preview.id), "POST", body, {
+      "x-request-id": "forged",
+    });
+    expect(first.status).toBe(200);
+    expect(first.headers.get("cache-control")).toBe("no-store");
+    expect(first.headers.get("x-request-id")).toMatch(/^[0-9a-f-]{36}$/);
+    const acknowledgement = receivingCsvApplyResponseSchema.parse(await first.json());
+    expect(acknowledgement.request).toEqual({ importId: preview.id, ...body });
+    expect(acknowledgement.receipt).toMatchObject({
+      importId: preview.id,
+      operationKey: body.operationKey,
+    });
+    const record = acknowledgement.receipt.record;
+    if (record.content.kind !== "draft") throw new Error("Expected CSV draft");
+    const save = await request(`/traceability/receiving/${record.id}`, "PUT", {
+      operationKey: randomUUID(),
+      expectedDraftVersion: 1,
+      draft: { ...record.content.draft, notes: "Current edited record" },
+    });
+    expect(save.status).toBe(200);
+    const retry = await request(csvApplyPath(preview.id), "POST", body);
+    expect(retry.status).toBe(200);
+    expect(await retry.json()).toEqual(acknowledgement);
+    const differentKey = { ...body, operationKey: randomUUID() };
+    const second = await request(csvApplyPath(preview.id), "POST", differentKey);
+    expect(second.status).toBe(200);
+    const secondAck = receivingCsvApplyResponseSchema.parse(await second.json());
+    expect(secondAck.request).toEqual({ importId: preview.id, ...differentKey });
+    expect(secondAck.receipt).toEqual(acknowledgement.receipt);
+    const alias = await csvPreview();
+    const aliasResponse = await request(csvApplyPath(alias.id), "POST", body);
+    expect(aliasResponse.status).toBe(200);
+    expect(await aliasResponse.json()).toEqual({
+      ...acknowledgement,
+      request: { importId: alias.id, ...body },
+    });
+    const live = await request(`/traceability/receiving/${record.id}`);
+    expect(live.status).toBe(200);
+    expect(receivingLiveRecordSchema.parse(await live.json())).toMatchObject({
+      draftVersion: 2,
+      content: { draft: { notes: "Current edited record" } },
+    });
+    const audits = await fixture.db
+      .select()
+      .from(schema.tenantAuditEvents)
+      .where(eq(schema.tenantAuditEvents.organizationId, context.tenant));
+    const applied = audits.filter((entry) => entry.action === "traceability.receiving.csv_applied");
+    expect(applied).toHaveLength(1);
+    expect(applied[0]).toMatchObject({
+      organizationId: context.tenant,
+      actorUserId: context.actor,
+      outcome: "success",
+      targetType: "receiving_csv_preview",
+      targetId: preview.id,
+      before: null,
+      requestId: first.headers.get("x-request-id"),
+    });
+    expect(applied[0]?.after).toEqual({
+      importId: preview.id,
+      eventId: record.id,
+      inputDigest: preview.previewDigest,
+      fileSha256: preview.fileSha256,
+      templateVersion: preview.templateVersion,
+      rowCount: preview.rowCount,
+    });
+    expect(
+      audits.filter((entry) => entry.action === "traceability.receiving.draft_created"),
+    ).toHaveLength(1);
+  });
+
+  it("CSV HTTP returns invalid file and row evidence without applying or leaking bytes", async () => {
+    const invalidFile = await csvPreview(csvRequest(["broken"]));
+    expect(invalidFile.proposedDraft).toBeNull();
+    expect(invalidFile.rows[0]?.issues).toEqual([{ column: null, code: "column_count" }]);
+    expect(invalidFile).not.toHaveProperty("fileBase64");
+    expect(invalidFile).not.toHaveProperty("originalHeader");
+    const invalidSyntax = await csvPreview({
+      ...csvRequest([]),
+      fileBase64: Buffer.from('"unterminated').toString("base64"),
+    });
+    expect(invalidSyntax.fileError).toMatchObject({ code: "syntax" });
+    expect(invalidSyntax.rows).toEqual([]);
+    const apply = await request(csvApplyPath(invalidFile.id), "POST", {
+      operationKey: randomUUID(),
+      expectedPreviewDigest: "a".repeat(64),
+    });
+    expect(apply.status).toBe(409);
+    expect(await apply.json()).toMatchObject({ code: "receiving_csv_preview_not_applicable" });
+  });
+
+  it("CSV HTTP scopes saved evidence and apply to the current tenant", async () => {
+    const preview = await csvPreview();
+    const other = await seedReceivingTenant(fixture.db);
+    await fixture.db.insert(schema.member).values({
+      id: randomUUID(),
+      organizationId: other.tenant,
+      userId: context.actor,
+      role: "owner",
+      createdAt: new Date(),
+    });
+    expect(
+      (await client.request("/organization/set-active", { organizationId: other.tenant })).status,
+    ).toBe(200);
+    for (const response of [
+      await request(`/traceability/receiving/imports/${preview.id}`),
+      await request(csvApplyPath(preview.id), "POST", {
+        operationKey: randomUUID(),
+        expectedPreviewDigest: preview.previewDigest,
+      }),
+    ]) {
+      expect(response.status).toBe(404);
+      expect(await response.json()).toMatchObject({ code: "receiving_csv_preview_not_found" });
+    }
+    const foreignProduct = await csvPreview();
+    expect(foreignProduct.proposedDraft).toBeNull();
+    expect(foreignProduct.resolution.rows[0]?.issues).toEqual([
+      { column: "product_id", code: "not_found" },
+    ]);
+  });
+
+  it("CSV HTTP requires a session, MFA and current WRITE capability even for saved GET/replay", async () => {
+    const preview = await csvPreview();
+    const body = { operationKey: randomUUID(), expectedPreviewDigest: preview.previewDigest };
+    expect((await request(csvApplyPath(preview.id), "POST", body)).status).toBe(200);
+    const paths = [
+      ["/traceability/receiving/imports/preview", "POST", csvRequest([csvRow(context.product)])],
+      [`/traceability/receiving/imports/${preview.id}`, "GET", undefined],
+      [csvApplyPath(preview.id), "POST", body],
+    ] as const;
+    for (const [path, method, input] of paths)
+      expect((await request(path, method, input, { cookie: "" })).status).toBe(401);
+    await fixture.db
+      .update(schema.member)
+      .set({ role: "traceability_auditor" })
+      .where(eq(schema.member.id, context.member));
+    for (const [path, method, input] of paths)
+      expect((await request(path, method, input)).status).toBe(403);
+    await fixture.db
+      .update(schema.member)
+      .set({ role: "owner" })
+      .where(eq(schema.member.id, context.member));
+    await fixture.pool.query(
+      "DELETE FROM us_session_assurances WHERE session_id IN (SELECT id FROM session WHERE user_id=$1)",
+      [context.actor],
+    );
+    for (const [path, method, input] of paths)
+      expect((await request(path, method, input)).status).toBe(403);
+  });
+
+  it("CSV HTTP rejects an absent profile without storing a preview", async () => {
+    await fixture.db
+      .delete(schema.traceabilityProfiles)
+      .where(eq(schema.traceabilityProfiles.tenantId, context.tenant));
+    const result = await request(
+      "/traceability/receiving/imports/preview",
+      "POST",
+      csvRequest([csvRow(context.product)]),
+    );
+    expect(result.status).toBe(403);
+    expect(await result.json()).toEqual({ code: "traceability_profile_required" });
+    expect(
+      await fixture.db
+        .select()
+        .from(schema.receivingCsvPreviews)
+        .where(eq(schema.receivingCsvPreviews.tenantId, context.tenant)),
+    ).toEqual([]);
+  });
+
+  it("CSV HTTP limits only preview POST to 512 KiB while retaining the decoded 256 KiB cap", async () => {
+    const body = csvRequest([csvRow(context.product)]);
+    const bytes = Buffer.from(body.fileBase64, "base64");
+    const padded = Buffer.concat([bytes, Buffer.alloc(262144 - bytes.length, 32)]);
+    const response = await request("/TrAcEaBiLiTy/ReCeIvInG/ImPoRtS/PrEvIeW/?probe=1", "POST", {
+      ...body,
+      fileBase64: padded.toString("base64"),
+    });
+    expect(response.status).toBe(201);
+    expect(receivingCsvPreviewSchema.parse(await response.json()).byteSize).toBe(262144);
+    const decodedOverflow = await request("/traceability/receiving/imports/preview", "POST", {
+      ...body,
+      fileBase64: Buffer.alloc(262145, 32).toString("base64"),
+    });
+    expect(decodedOverflow.status).toBe(400);
+    expect(await decodedOverflow.json()).toMatchObject({ code: "receiving_csv_input_invalid" });
+    for (const [path, method, size] of [
+      ["/traceability/receiving/imports/preview", "POST", 524288],
+      [csvApplyPath(randomUUID()), "POST", 16384],
+      ["/traceability/receiving/imports/preview/nested", "POST", 16384],
+      ["/traceability/receiving/imports/preview", "PUT", 16384],
+      ["/traceability/receiving", "POST", 262144],
+    ] as const) {
+      const result = await request(path, method, { padding: "x".repeat(size) });
+      expect(result.status).toBe(413);
+      expect(await result.json()).toEqual({ code: "us_body_too_large" });
+    }
+  });
+
+  it.each([
+    [{ origin: "https://foreign.example.test" }, 403, "us_origin_required"],
+    [{ host: "foreign.example.test" }, 403, "us_host_required"],
+    [{ "content-type": "text/csv" }, 415, "us_json_required"],
+    [{ "content-encoding": "gzip" }, 415, "us_invalid_body"],
+  ] as const)(
+    "CSV HTTP enforces host, origin and uncompressed JSON: %j",
+    async (extra, status, code) => {
+      const response = await request(
+        "/traceability/receiving/imports/preview",
+        "POST",
+        csvRequest([csvRow(context.product)]),
+        extra,
+      );
+      expect(response.status).toBe(status);
+      expect(await response.json()).toEqual({ code });
+    },
+  );
+
+  it("CSV HTTP sanitizes saved corruption and database failures", async () => {
+    const preview = await csvPreview();
+    await fixture.db
+      .update(schema.receivingCsvPreviews)
+      .set({ findings: { secret: "synthetic-private-input" } })
+      .where(eq(schema.receivingCsvPreviews.id, preview.id));
+    const response = await request(`/traceability/receiving/imports/${preview.id}`);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ code: "receiving_csv_preview_unavailable" });
+    await fixture.pool.query(
+      "ALTER TABLE receiving_csv_previews RENAME TO us_test_missing_csv_previews",
+    );
+    try {
+      const unavailable = await request(
+        "/traceability/receiving/imports/preview",
+        "POST",
+        csvRequest([csvRow(context.product)]),
+      );
+      expect(unavailable.status).toBe(503);
+      expect(await unavailable.json()).toEqual({ code: "us_database_unavailable" });
+    } finally {
+      await fixture.pool.query(
+        "ALTER TABLE us_test_missing_csv_previews RENAME TO receiving_csv_previews",
+      );
+    }
+  });
+
+  it("CSV HTTP distinguishes stale, expired, digest-conflicted and successful historical application", async () => {
+    const preview = await csvPreview();
+    const body = { operationKey: randomUUID(), expectedPreviewDigest: preview.previewDigest };
+    const conflict = await request(csvApplyPath(preview.id), "POST", {
+      ...body,
+      expectedPreviewDigest: "0".repeat(64),
+    });
+    expect(conflict.status).toBe(409);
+    expect(await conflict.json()).toEqual({ code: "receiving_csv_preview_conflict" });
+    await fixture.db
+      .update(schema.products)
+      .set({ archived: true })
+      .where(eq(schema.products.id, context.product));
+    const stale = await request(csvApplyPath(preview.id), "POST", body);
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toEqual({ code: "receiving_csv_preview_stale" });
+    // Reopening never re-resolves the now-archived product.
+    expect(await (await request(`/traceability/receiving/imports/${preview.id}`)).json()).toEqual(
+      preview,
+    );
+    await fixture.db
+      .update(schema.products)
+      .set({ archived: false })
+      .where(eq(schema.products.id, context.product));
+    const first = await request(csvApplyPath(preview.id), "POST", body);
+    expect(first.status).toBe(200);
+    const original = await first.json();
+    const unapplied = await csvPreview();
+    // Age only owned saved previews so the real session remains valid.
+    for (const id of [preview.id, unapplied.id]) {
+      await fixture.db
+        .update(schema.receivingCsvPreviews)
+        .set({
+          createdAt: new Date(clock - 86400000),
+          expiresAt: new Date(clock),
+        })
+        .where(eq(schema.receivingCsvPreviews.id, id));
+    }
+    const expired = await request(csvApplyPath(unapplied.id), "POST", {
+      ...body,
+      operationKey: randomUUID(),
+    });
+    expect(expired.status).toBe(409);
+    expect(await expired.json()).toEqual({ code: "receiving_csv_preview_expired" });
+    const reopened = await request(`/traceability/receiving/imports/${unapplied.id}`);
+    expect(reopened.status).toBe(200);
+    expect(receivingCsvPreviewSchema.parse(await reopened.json()).id).toBe(unapplied.id);
+    const historical = await request(csvApplyPath(preview.id), "POST", body);
+    expect(historical.status).toBe(200);
+    expect(await historical.json()).toEqual(original);
+  });
+
+  it("CSV HTTP strictly validates path/body context and never accepts tenant or actor overrides", async () => {
+    const preview = await csvPreview();
+    const body = { operationKey: randomUUID(), expectedPreviewDigest: preview.previewDigest };
+    for (const input of [
+      null,
+      [],
+      { ...body, tenantId: context.tenant },
+      { ...body, actorUserId: context.actor },
+      { ...body, importId: preview.id },
+      { ...body, operationKey: "not-uuid" },
+    ]) {
+      expect((await request(csvApplyPath(preview.id), "POST", input)).status).toBe(400);
+    }
+    expect((await request(csvApplyPath("not-uuid"), "POST", body)).status).toBe(400);
+    expect((await request("/traceability/receiving/imports/not-uuid")).status).toBe(400);
+    expect(
+      (
+        await request("/traceability/receiving/imports/preview", "POST", {
+          ...csvRequest([csvRow(context.product)]),
+          tenantId: context.tenant,
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      await fixture.db
+        .select()
+        .from(schema.receivingCsvApplications)
+        .where(eq(schema.receivingCsvApplications.tenantId, context.tenant)),
+    ).toEqual([]);
+    const audits = await fixture.db
+      .select()
+      .from(schema.tenantAuditEvents)
+      .where(eq(schema.tenantAuditEvents.organizationId, context.tenant));
+    const entries = audits.filter((entry) => entry.action.startsWith("traceability.receiving."));
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      actorUserId: context.actor,
+      organizationId: context.tenant,
+      action: "traceability.receiving.csv_previewed",
+      outcome: "success",
+      targetType: "receiving_csv_preview",
+      targetId: preview.id,
+      before: null,
+    });
+    expect(entries[0]?.after).toEqual({
+      importId: preview.id,
+      templateVersion: preview.templateVersion,
+      fileSha256: preview.fileSha256,
+      rowCount: 1,
+      hasProposal: true,
+      previewDigest: preview.previewDigest,
+    });
+  });
+
+  it("CSV HTTP documents only the three explicit authenticated import routes", () => {
+    const document = SwaggerModule.createDocument(
+      app,
+      new DocumentBuilder().addCookieAuth("markiro-us.session_token").build(),
+    );
+    const paths = Object.keys(document.paths).filter((path) => path.includes("/imports"));
+    expect(paths.sort()).toEqual(
+      [
+        "/traceability/receiving/imports/preview",
+        "/traceability/receiving/imports/{id}",
+        "/traceability/receiving/imports/{id}/apply",
+      ].sort(),
+    );
+    for (const [path, method, status] of [
+      ["/traceability/receiving/imports/preview", "post", "201"],
+      ["/traceability/receiving/imports/{id}", "get", "200"],
+      ["/traceability/receiving/imports/{id}/apply", "post", "200"],
+    ] as const) {
+      const operation = document.paths[path]?.[method];
+      expect(operation?.security).toEqual([{ "markiro-us.session_token": [] }]);
+      expect(operation?.responses[status]).toBeDefined();
+      expect(operation?.responses["403"]).toBeDefined();
+    }
   });
 
   it("separates a versioned acknowledgement from the current read and lifecycle readiness", async () => {
@@ -576,7 +1016,9 @@ describe.skipIf(!base)("US receiving HTTP with real MFA", () => {
       const original = await receipt(`${rootPath}/finalize`, "POST", originalCommand);
       const businessLots = async () =>
         (
-          await fixture.pool.query(
+          await fixture.pool.query<{
+            lot: Record<string, unknown> & { current_dependency_version: number };
+          }>(
             "SELECT to_jsonb(l)-'receiving_basis_version' AS lot FROM traceability_lots l WHERE tenant_id=$1 ORDER BY id",
             [context.tenant],
           )
@@ -660,7 +1102,11 @@ describe.skipIf(!base)("US receiving HTTP with real MFA", () => {
         lifecycle: { lifecycleVersion: 5, currentEventId: null, pendingDraftId: null },
         content: finalized.value.record.content,
       });
-      expect(await businessLots()).toEqual(beforeLots);
+      expect(await businessLots()).toEqual(
+        beforeLots.map(({ lot }) => ({
+          lot: { ...lot, current_dependency_version: lot.current_dependency_version + 1 },
+        })),
+      );
       const missing = receivingBasisSchema.parse(await (await request(basisPath)).json());
       expect(missing).toMatchObject({ state: "missing", supportCount: 0, items: [] });
       expect(missing.basisVersion).toBe(currentBasis.basisVersion + 1);

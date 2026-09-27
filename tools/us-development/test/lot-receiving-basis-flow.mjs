@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
+import { transformationGenealogyRequestSchema } from "../../../packages/platform-contracts/dist/index.js";
+import { isBoundedGenealogyRead } from "./genealogy-read-observer.mjs";
 
 /** Read-only basis and exact-revision navigation over the owned synthetic API fixture. */
 export async function exerciseUsLotReceivingBasis({ page, expect, screenshots, final }) {
@@ -16,7 +18,12 @@ export async function exerciseUsLotReceivingBasis({ page, expect, screenshots, f
   assert.equal(basis.supportCount, 1);
   assert.equal(basis.items[0].eventId, final.id);
   const writes = [];
+  const genealogyReads = [];
   const observe = (request) => {
+    if (isBoundedGenealogyRead(request, base)) {
+      genealogyReads.push(request.postDataJSON());
+      return;
+    }
     if (request.url().startsWith(base) && !["GET", "HEAD"].includes(request.method()))
       writes.push({ method: request.method(), url: request.url() });
   };
@@ -87,6 +94,20 @@ export async function exerciseUsLotReceivingBasis({ page, expect, screenshots, f
     assert.deepEqual(await read(`lots/${lotId}`), before);
     assert.deepEqual(await read(`lots/${missingLot.id}`), missingLot);
     assert.deepEqual(await read(`receiving/${final.id}`), final);
+    // Genealogy is a structured POST read. Recognize only its exact bounded query;
+    // every other non-GET/HEAD request remains a forbidden mutation above.
+    assert.ok(genealogyReads.length > 0);
+    for (const body of genealogyReads) {
+      assert.equal(transformationGenealogyRequestSchema.safeParse(body).success, true);
+      assert.ok([lotId, missingLot.id].includes(body.startLotId));
+      assert.deepEqual(body, {
+        startLotId: body.startLotId,
+        mode: "current",
+        direction: "upstream",
+        maxDepth: 4,
+        maxNodes: 100,
+      });
+    }
     assert.deepEqual(writes, []);
   } finally {
     page.off("request", observe);

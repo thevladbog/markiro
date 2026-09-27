@@ -15,6 +15,12 @@ import { UsProfileController, UsSessionGuard } from "./us-profile.controller";
 import { UsMasterDataController } from "./us-master-data.controller";
 import { UsReferenceDocumentController } from "./us-reference-document.controller";
 import { UsReceivingController } from "./us-receiving.controller";
+import { UsReceivingCsvController } from "./us-receiving-csv.controller";
+import { UsCaseController } from "./us-case.controller";
+import { UsTransformationController } from "./us-transformation.controller";
+import { UsShippingController } from "./us-shipping.controller";
+import { UsShippingBalanceController } from "./us-shipping-balance.controller";
+import { UsEventsController } from "./us-events.controller";
 
 @Controller()
 class UsDevelopmentController {
@@ -57,7 +63,13 @@ export class UsDevelopmentModule {
         UsLotController,
         UsProductProfileController,
         UsReferenceDocumentController,
+        UsReceivingCsvController,
         UsReceivingController,
+        UsCaseController,
+        UsTransformationController,
+        UsShippingController,
+        UsShippingBalanceController,
+        UsEventsController,
       ],
       providers: [{ provide: UsRuntime, useValue: runtime }, UsSessionGuard],
     };
