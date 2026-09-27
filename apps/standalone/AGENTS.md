@@ -144,9 +144,9 @@ schema and fixture, a tombstone wherever it is deleted, the station's local
 table, an index on the new table's `rev` (as `lines_rev`), and that
 re-creating a key deletes its tombstone.
 
-On the device side a new entity also needs its entry in `ENTITIES` and in
-`ENTITY_SET` (`src/local/reference-sync.ts`); a new `ENTITY_SET` makes
-every device sync from zero once.
+On the device side a new entity also needs its entry in `ENTITIES`
+(`src/local/reference-sync.ts`), which derives `ENTITY_SET`; a new entity
+there changes `ENTITY_SET` and makes every device sync from zero once.
 
 ## Reference sync
 
@@ -154,23 +154,36 @@ every device sync from zero once.
 (stage 1 spec §5.4). `syncReferences` reads `sync_state` (`last_rev`,
 `host_id`, `entity_set`) and fetches `GET /v1/changes?since=<last_rev>`
 (`HostApi.getChanges`, the device key only) until `hasMore` is false. Each
-page is one `local_transaction`: per entity one conditional delete for its
-tombstones (only rows older than the tombstone) and one `json_each` upsert
-for its live records (only when the revision is newer), then the page's
-revision. Records are checked with their Zod schemas before anything is
-written, so a bad record leaves the whole page unapplied; entities this
-build does not keep are skipped, and applying a page again changes nothing.
-The copies start from zero when `host_id` names another host (wiped at
-once: another host's records must not stay usable), when `entity_set` is
-not this build's `ENTITY_SET`, or when the feed answers `rev < since` (the
-host went back to an older copy; once per run). The last two drop the old
-copies in the transaction of the first new page, so a failed fetch keeps
-them. A feed from another host than the paired one stops the sync with
-`other_host` and applies nothing. `createSyncScheduler` runs one sync at a
-time: triggers during a run ask for exactly one more, and a failed run
-waits for the next trigger. A host restored from a copy that has already
-passed the device's revision goes unnoticed until the feed carries an
-epoch (plan 5).
+page is one `local_transaction`: a `hostGuard` statement first (below),
+then per entity one conditional delete for its tombstones (only rows older
+than the tombstone) and one `json_each` upsert for its live records (only
+when the revision is newer), then the page's revision. Records are checked
+with their Zod schemas before anything is written, so a bad record leaves
+the whole page unapplied; entities this build does not keep are skipped,
+and applying a page again changes nothing. A page that claims `hasMore`
+without moving past the revision it was fetched at is an error, not a
+silent infinite loop.
+The copies start from zero when `host_id` names another host, when
+`entity_set` is not this build's `ENTITY_SET`, or when the feed answers
+`rev < since` (the host went back to an older copy; once per run). The
+last two drop the old copies in the transaction of the first new page, so
+a failed fetch keeps them. The first — a re-pair — wipes at once (another
+host's records must not stay usable) and, in that same transaction, stamps
+`sync_state.host_id` to the new host with no `last_rev`: the copies still
+read as unsynced, and `hostGuard` (a no-op `UPDATE ... WHERE host_id <> ?`
+with `expectedChanges: 0`, first in every batch, before any statement that
+could delete the `host_id` row it reads) then aborts a stale in-flight
+sync for the old host with `changes_mismatch` once its page finally
+arrives — `SyncScheduler.stop` cannot cancel a request already sent, and
+without this guard a late page for the old host would win
+`excluded.rev > rev` against the new host's rows under the same ids
+(`ref_org`/`ref_site` are keyed `'1'` on every host). A feed from another
+host than the paired one stops the sync with `other_host` and applies
+nothing. `createSyncScheduler` runs one sync at a time: triggers during a
+run ask for exactly one more, and a failed run waits for the next trigger;
+`run` must report its own failure, since the scheduler swallows every
+rejection. A host restored from a copy that has already passed the
+device's revision goes unnoticed until the feed carries an epoch (plan 5).
 
 ## Protocol
 

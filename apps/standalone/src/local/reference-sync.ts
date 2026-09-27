@@ -9,14 +9,6 @@ import {
 } from "../host/protocol.js";
 import type { LocalExecutor, LocalStatement } from "./executor.js";
 
-/**
- * The feed entities this build keeps, in `sync_state.entity_set`. A build
- * that keeps more (plans 1d and 1e) finds another value there and syncs
- * from zero: the old build skipped those entities, so their records would
- * never come otherwise.
- */
-export const ENTITY_SET = "org_profile,site,lines";
-
 export type SyncResult = { kind: "synced"; rev: number } | { kind: "other_host" };
 
 export interface SyncOptions {
@@ -96,6 +88,16 @@ const ENTITIES: ReadonlyMap<string, EntityTable> = new Map([
 ]);
 
 /**
+ * The feed entities this build keeps, in `sync_state.entity_set`: derived
+ * from `ENTITIES` so a new entity cannot update that map and forget this
+ * one (or the reverse). Today: `"org_profile,site,lines"`. A build that
+ * keeps more (plans 1d and 1e) finds another value there and syncs from
+ * zero: the old build skipped those entities, so their records would never
+ * come otherwise.
+ */
+export const ENTITY_SET = [...ENTITIES.keys()].join(",");
+
+/**
  * Deletes the rows that tombstones of the page are newer than: a tombstone
  * older than a row (the key was created again) leaves it alone.
  */
@@ -115,6 +117,37 @@ const WIPE: readonly LocalStatement[] = [
 const WRITE_STATE =
   "INSERT INTO sync_state (key, value) VALUES ('last_rev', ?), ('host_id', ?), ('entity_set', ?) " +
   "ON CONFLICT (key) DO UPDATE SET value = excluded.value";
+
+/**
+ * Stamps only `host_id`, with no `last_rev`: the immediate wipe for a new
+ * host (`syncReferences`) must leave the copies looking unsynced, so
+ * `readState` still starts the next page from zero and a stale in-flight
+ * run for the old host is still caught by `hostGuard` below.
+ */
+const WRITE_HOST_ID =
+  "INSERT INTO sync_state (key, value) VALUES ('host_id', ?) " +
+  "ON CONFLICT (key) DO UPDATE SET value = excluded.value";
+
+/**
+ * Aborts the batch (`changes_mismatch`) if another run has already
+ * repointed `sync_state.host_id` away from `hostId` since this run read it.
+ * A device can be re-paired while a run's request to the old host is still
+ * in flight (up to 10 s); `SyncScheduler.stop` does not cancel that request,
+ * so its page can arrive after a new run already wiped and restamped
+ * `host_id` for the new host. Without this guard, that late page would
+ * commit under the old host's higher revisions and win `excluded.rev > rev`
+ * against the new host's rows — both hosts use the same ids (`'1'` for
+ * `ref_org`/`ref_site`), so it would resurrect the old host's org and site
+ * data. Placed first in every batch: a `DELETE FROM sync_state` later in
+ * the same batch would remove the `host_id` row this statement reads.
+ */
+function hostGuard(hostId: string): LocalStatement {
+  return {
+    sql: "UPDATE sync_state SET value = value WHERE key = 'host_id' AND value <> ?",
+    values: [hostId],
+    expectedChanges: 0,
+  };
+}
 
 const stateRow = z.object({ key: z.string(), value: z.string() });
 
@@ -136,11 +169,12 @@ async function readState(local: LocalExecutor): Promise<StoredState> {
 }
 
 /**
- * One page as one batch: per entity a conditional delete for its tombstones
- * and one upsert for its live records, then the page's revision. Records are
- * checked before anything is written. Entities this build does not keep are
- * skipped. At most one statement per table plus two per entity plus one: 11
- * with the wipe today, within the shell's 32.
+ * One page's own statements: per entity a conditional delete for its
+ * tombstones and one upsert for its live records, then the page's revision.
+ * Records are checked before anything is written. Entities this build does
+ * not keep are skipped. At most two statements per entity plus one: 7
+ * today. `syncReferences` prepends `hostGuard` and, when starting over,
+ * `WIPE`: guard (1) + wipe (4) + this (7) is 12, within the shell's 32.
  */
 function pageStatements(page: ChangesResponse, hostId: string): LocalStatement[] {
   const statements: LocalStatement[] = [];
@@ -170,8 +204,11 @@ export async function syncReferences({ changes, local, hostId }: SyncOptions): P
   let wipe = false;
   if (stored.hostId !== null && stored.hostId !== hostId) {
     // Copies from a pairing with another host must not stay usable while
-    // this host is out of reach.
-    await local.transaction(WIPE);
+    // this host is out of reach. No `last_rev` is written, so the copies
+    // still read as unsynced afterwards (start from zero next time too),
+    // and a stale in-flight run for the old host is still caught below by
+    // `hostGuard`, bound to that old host's id, once it reaches its batch.
+    await local.transaction([...WIPE, { sql: WRITE_HOST_ID, values: [hostId] }]);
   } else if (stored.entitySet === ENTITY_SET && stored.lastRev !== null) {
     since = stored.lastRev;
   } else {
@@ -192,8 +229,17 @@ export async function syncReferences({ changes, local, hostId }: SyncOptions): P
       wipe = true;
       continue;
     }
+    if (page.hasMore && page.rev <= since) {
+      // `rev >= since` is established above, so this is `rev === since`:
+      // the feed claims more pages without moving past the one just read.
+      // Left unchecked, this would fetch and commit the same page forever.
+      throw new Error(`the feed made no progress at rev ${page.rev} while claiming more pages`);
+    }
     const statements = pageStatements(page, hostId);
-    await local.transaction(wipe ? [...WIPE, ...statements] : statements);
+    const batch = wipe
+      ? [hostGuard(hostId), ...WIPE, ...statements]
+      : [hostGuard(hostId), ...statements];
+    await local.transaction(batch);
     wipe = false;
     since = page.rev;
     if (!page.hasMore) return { kind: "synced", rev: page.rev };
@@ -209,7 +255,10 @@ export interface SyncScheduler {
 
 /**
  * One sync at a time. Triggers during a run ask for exactly one more run
- * after it; a failed run just ends and waits for the next trigger.
+ * after it; a failed run just ends and waits for the next trigger. `run`
+ * must report its own failure (a status field, a logged error, a toast):
+ * this scheduler swallows every rejection and guarantees only the
+ * single-flight-plus-one-follow-up scheduling, nothing about the outcome.
  */
 export function createSyncScheduler(run: () => Promise<void>): SyncScheduler {
   let running = false;
