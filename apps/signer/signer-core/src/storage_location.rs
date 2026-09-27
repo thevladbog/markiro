@@ -250,7 +250,7 @@ impl Resolution {
     }
 
     /// Records why this run fell back: the step and the OS error.
-    fn because(mut self, step: impl std::fmt::Display, error: &io::Error) -> Self {
+    fn because(mut self, step: impl std::fmt::Display, error: impl std::fmt::Display) -> Self {
         self.diagnostics.push(format!("{step}: {error}"));
         self
     }
@@ -284,7 +284,7 @@ pub fn resolve(
                 .because(format_args!("lock {LOCK_FILE}"), &error)
         }
     };
-    match read_record(local_dir) {
+    let parse_problem = match read_record(local_dir) {
         RecordState::Committed(record) => {
             return finish_committed(legacy_dir, local_dir, record, hooks)
         }
@@ -297,14 +297,33 @@ pub fn resolve(
         }
         // Never guess at a record we cannot parse: the local copy stays
         // authoritative and nothing is deleted.
-        RecordState::Unreadable if local_dir.join(CONFIG_FILE).exists() => {
+        RecordState::Unreadable(error) if local_dir.join(CONFIG_FILE).exists() => {
             return Resolution {
                 check_roamed_copy: true,
                 ..Resolution::local(local_dir)
             }
+            .because(format_args!("parse {RECORD_FILE}"), &error)
         }
-        RecordState::Unreadable | RecordState::Absent => {}
+        // Without a local `signer.json` an unparsable record counts as absent;
+        // the move below rewrites it, and the journal still says why.
+        RecordState::Unreadable(error) => Some(format!("parse {RECORD_FILE}: {error}")),
+        RecordState::Absent => None,
+    };
+    let mut resolution = resolve_unrecorded(legacy_dir, local_dir, probe, hooks);
+    if let Some(problem) = parse_problem {
+        resolution.diagnostics.insert(0, problem);
     }
+    resolution
+}
+
+/// No committed record: the roaming folder stays authoritative until the move
+/// commits one.
+fn resolve_unrecorded(
+    legacy_dir: &Path,
+    local_dir: &Path,
+    probe: &dyn ProfileProbe,
+    hooks: &dyn Hooks,
+) -> Resolution {
     if let Some(reason) = probe.facts().local_less_durable() {
         return Resolution::legacy(legacy_dir, StorageNotice::LocalLessDurable { reason });
     }
@@ -353,13 +372,16 @@ fn resolve_without_lock(legacy_dir: &Path, local_dir: &Path) -> Resolution {
         RecordState::Inaccessible(error) => {
             Resolution::local(local_dir).because(format_args!("open {RECORD_FILE}"), &error)
         }
-        RecordState::Unreadable if local_dir.join(CONFIG_FILE).exists() => Resolution {
+        RecordState::Unreadable(error) if local_dir.join(CONFIG_FILE).exists() => Resolution {
             check_roamed_copy: true,
             ..Resolution::local(local_dir)
-        },
-        RecordState::Unreadable | RecordState::Absent => {
-            Resolution::legacy(legacy_dir, StorageNotice::MovePostponed)
         }
+        .because(format_args!("parse {RECORD_FILE}"), &error),
+        RecordState::Unreadable(error) => {
+            Resolution::legacy(legacy_dir, StorageNotice::MovePostponed)
+                .because(format_args!("parse {RECORD_FILE}"), &error)
+        }
+        RecordState::Absent => Resolution::legacy(legacy_dir, StorageNotice::MovePostponed),
     }
 }
 
@@ -480,14 +502,14 @@ enum RecordState {
     /// The record exists but cannot be opened right now.
     Inaccessible(io::Error),
     /// The record exists but does not parse.
-    Unreadable,
+    Unreadable(serde_json::Error),
 }
 
 fn read_record(local_dir: &Path) -> RecordState {
     match fs::read(local_dir.join(RECORD_FILE)) {
         Ok(bytes) => match serde_json::from_slice(&bytes) {
             Ok(record) => RecordState::Committed(record),
-            Err(_) => RecordState::Unreadable,
+            Err(error) => RecordState::Unreadable(error),
         },
         Err(error) if error.kind() == io::ErrorKind::NotFound => RecordState::Absent,
         Err(error) => RecordState::Inaccessible(error),
@@ -963,7 +985,7 @@ mod move_tests {
     fn record(dirs: &Dirs) -> Option<Record> {
         match read_record(&dirs.local) {
             RecordState::Committed(record) => Some(record),
-            RecordState::Absent | RecordState::Inaccessible(_) | RecordState::Unreadable => None,
+            RecordState::Absent | RecordState::Inaccessible(_) | RecordState::Unreadable(_) => None,
         }
     }
 
@@ -1361,6 +1383,8 @@ mod move_tests {
         assert_eq!(resolution.dir, dirs.local);
         assert!(!resolution.moved);
         assert!(resolution.check_roamed_copy, "spec §7.3 step 1: the roamed-copy check still runs");
+        assert_eq!(resolution.diagnostics.len(), 1);
+        assert!(resolution.diagnostics[0].starts_with("parse signer-storage.json: "), "{:?}", resolution.diagnostics);
         assert_eq!(fs::read(dirs.local.join(CONFIG_FILE)).unwrap(), OTHER_AGENT);
         assert_eq!(fs::read(dirs.legacy.join(CONFIG_FILE)).unwrap(), PAIRED);
     }
@@ -1371,7 +1395,10 @@ mod move_tests {
         seed_legacy(&dirs);
         write(&dirs.local.join(RECORD_FILE), b"{ not json");
 
-        assert!(resolve_local(&dirs).moved);
+        let resolution = resolve_local(&dirs);
+
+        assert!(resolution.moved);
+        assert!(resolution.diagnostics[0].starts_with("parse signer-storage.json: "), "{:?}", resolution.diagnostics);
         assert_eq!(record(&dirs).unwrap().how, How::Migrated);
     }
 
