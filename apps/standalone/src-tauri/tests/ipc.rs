@@ -331,3 +331,53 @@ fn without_a_local_database_the_local_commands_say_so() {
         Err(json!("local_db_unavailable"))
     );
 }
+
+/// A second installation pairs by code with the webview's arguments:
+/// `address`, `fingerprint`, `code` and `name` (`src/host/device.ts`).
+#[test]
+fn a_device_claims_a_code_through_the_ipc_shapes() {
+    let host = Host::start();
+    let office_dir = tempfile::tempdir().unwrap();
+    let office = DeviceState::load(office_dir.path().to_path_buf());
+    host.runtime
+        .block_on(office.local_pair(&host.address(), NAME, "0.1.0"))
+        .unwrap();
+    let bootstrap: Value = serde_json::from_str(BOOTSTRAP).unwrap();
+    let created = host
+        .runtime
+        .block_on(office.request("POST", "/v1/bootstrap", Some(&bootstrap), None))
+        .unwrap();
+    let token = created.body.unwrap()["session"]["token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let issued = host
+        .runtime
+        .block_on(office.request("POST", "/v1/office/pairing-codes", None, Some(&token)))
+        .unwrap();
+    let code = issued.body.unwrap()["code"].as_str().unwrap().to_owned();
+
+    let station_dir = tempfile::tempdir().unwrap();
+    let (_app, webview) = mock_app(DeviceState::load(station_dir.path().to_path_buf()));
+    let claim = |code: &str| {
+        json!({
+            "address": host.address(),
+            "fingerprint": host.running.fingerprint,
+            "code": code,
+            "name": "Станция на линии 2"
+        })
+    };
+    assert_eq!(
+        invoke(&webview, "host_claim", claim("0000000000")),
+        Err(json!("pairing_code_invalid"))
+    );
+    let status = invoke(&webview, "host_claim", claim(&code)).unwrap();
+    assert_eq!(status["hostId"], host.running.host_id);
+    assert_eq!(status["fingerprint"], host.running.fingerprint);
+    assert_eq!(status["kind"], "station");
+    assert_eq!(status["lineId"], Value::Null);
+    assert_eq!(invoke(&webview, "device_status", json!({})), Ok(status));
+
+    drop(webview);
+    host.stop();
+}

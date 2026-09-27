@@ -325,7 +325,7 @@ loading
 - **Клиент хоста.** `reqwest =0.13.4` с rustls и собственным проверяющим сертификата:
   соединение принимается, только если SHA-256 сертификата совпадает с сохранённым
   отпечатком. Команды: `host_hello(address)` (без закрепления, возвращает и
-  наблюдаемый отпечаток), `device_status()`, `host_local_pair`, `host_claim(address, fingerprint, code, device)`,
+  наблюдаемый отпечаток), `device_status()`, `host_local_pair`, `host_claim(address, fingerprint, code, name)` (устройство подключается видом `station`),
   `host_request(method, path, body, officeToken?)`, `device_forget()`. Таймауты: соединение 2 с,
   запрос 10 с. `host_request` пропускает только маршруты `/v1/device[/…]`,
   `/v1/bootstrap` и `/v1/office/…`: маршруты подключения возвращают новый ключ

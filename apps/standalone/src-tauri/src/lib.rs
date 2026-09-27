@@ -46,6 +46,26 @@ async fn host_local_pair(
 }
 
 #[tauri::command]
+async fn host_claim(
+    state: tauri::State<'_, DeviceState>,
+    address: String,
+    fingerprint: String,
+    code: String,
+    name: String,
+) -> Result<DeviceStatus, String> {
+    state
+        .claim(
+            &address,
+            &fingerprint,
+            &code,
+            &name,
+            env!("CARGO_PKG_VERSION"),
+        )
+        .await
+        .map_err(|error| error.code().to_owned())
+}
+
+#[tauri::command]
 async fn host_request(
     state: tauri::State<'_, DeviceState>,
     method: String,
@@ -98,6 +118,7 @@ pub fn invoke_handler<R: tauri::Runtime>(
         host_hello,
         device_status,
         host_local_pair,
+        host_claim,
         host_request,
         device_forget,
         local_query,
