@@ -1,7 +1,7 @@
 ---
 import { findFilmPage } from "../../content/film";
 import { homeScreen, type HomeScreenId } from "../../content/home-images";
-import { hubPath } from "../../content/hubs";
+import { hubGroupId, hubPath } from "../../content/hubs";
 import type { Locale } from "../../content/pages";
 import { getUiCopy } from "../../content/ui";
 import HandheldFrame from "./HandheldFrame.astro";
@@ -19,7 +19,8 @@ const ru = locale === "ru";
 const LINKS: Readonly<Record<ProductPartId, string>> = {
   line: ru ? "/markirovka-chestny-znak/" : "/en/chestny-znak-serialization/",
   handheld: `${findFilmPage(locale).path}#warehouse`,
-  office: hubPath(locale, "instructions"),
+  // The admin panel instructions are the "Cabinet: …" group of the instructions hub.
+  office: `${hubPath(locale, "instructions")}#${hubGroupId("Cabinet")}`,
   kiosk: ru ? "/kiosk-samovydachi/" : "/en/self-service-pickup-kiosk/",
   integrations: ru ? "/integratsiya-1c/" : "/en/1c-integration/",
 };
