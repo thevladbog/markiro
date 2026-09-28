@@ -2570,8 +2570,11 @@
         "frozenTemplate": "Template frozen when the shift opened"
       },
       "productLabels": {
-        "title": "Label history",
+        "title": "Print control",
         "hint": "Sending to a printer does not confirm physical printing. Verification is recorded only after scanning the label.",
+        "openHistory": "Open print log",
+        "closeHistory": "Hide print log",
+        "attentionHint": "Some labels require attention",
         "readError": "Could not load print history",
         "retry": "Retry",
         "more": "Load more",
