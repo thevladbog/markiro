@@ -9,7 +9,7 @@ use axum::extract::{Request, State};
 use axum::http::{Method, Uri};
 use axum::middleware::{self, Next};
 use axum::response::Response;
-use axum::routing::{get, post, put};
+use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use sqlx::SqlitePool;
 use time::OffsetDateTime;
@@ -183,6 +183,18 @@ fn protected_routes() -> Router<AppState> {
         .route(
             "/v1/office/operators/{id}",
             put(crate::routes::operators::update_operator),
+        )
+        .route(
+            "/v1/office/operators/{id}/badges",
+            post(crate::routes::operators::create_badge),
+        )
+        .route(
+            "/v1/office/operators/{id}/badges/{badge_id}",
+            delete(crate::routes::operators::revoke_badge),
+        )
+        .route(
+            "/v1/office/badge-salt",
+            get(crate::routes::operators::badge_salt),
         )
         .route(
             "/v1/office/users",

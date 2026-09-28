@@ -1,7 +1,7 @@
 //! Spec §4.10: the process log never holds device keys, session tokens,
-//! passwords, password hashes, pairing codes, the badge salt or the TLS
-//! private key. Its own binary, because it installs the global tracing
-//! subscriber.
+//! passwords, password, PIN and badge hashes, pairing codes, the badge salt
+//! or the TLS private key. Its own binary, because it installs the global
+//! tracing subscriber.
 
 mod support;
 
@@ -10,6 +10,10 @@ use base64::Engine;
 use markiro_host::config::HostPaths;
 use markiro_host::{start, StartOptions};
 use serde_json::json;
+
+/// `pinPhc` of `proto/fixtures/phc-password.json`: the PIN 4821.
+const PIN_PHC: &str =
+    "pbkdf2$sha256$100000$bWFya2lyby1waW4tc2FsdA==$3OKvrZ2+EfTB2zsCso90r5g8c6Ib6t+Bv+cGJOpgPmU=";
 
 #[tokio::test]
 async fn secrets_never_reach_the_process_log() {
@@ -190,6 +194,71 @@ async fn secrets_never_reach_the_process_log() {
     let refused_claim: serde_json::Value = refused_claim.json().await.unwrap();
     assert_eq!(refused_claim["error"]["code"], "pairing_code_invalid");
 
+    // An operator with a PIN, a badge added and revoked, and the feed that
+    // carries both hashes to stations: no hash may reach the log, and
+    // neither may the badge salt the office reads.
+    let operator: serde_json::Value = client
+        .post(format!("{base}/v1/office/operators"))
+        .header(protocol.0, &protocol.1)
+        .header(markiro_proto::OFFICE_SESSION_HEADER, &token)
+        .bearer_auth(&key)
+        .json(&json!({ "login": "0042", "name": "Анна", "pinPhc": PIN_PHC }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let operator_id = operator["id"].as_str().unwrap().to_owned();
+    let badge_salt: serde_json::Value = client
+        .get(format!("{base}/v1/office/badge-salt"))
+        .header(protocol.0, &protocol.1)
+        .header(markiro_proto::OFFICE_SESSION_HEADER, &token)
+        .bearer_auth(&key)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let badge_phc = format!(
+        "pbkdf2$sha256$100000${}${}",
+        badge_salt["badgeSalt"].as_str().unwrap(),
+        STANDARD.encode([7u8; 32])
+    );
+    let badge: serde_json::Value = client
+        .post(format!("{base}/v1/office/operators/{operator_id}/badges"))
+        .header(protocol.0, &protocol.1)
+        .header(markiro_proto::OFFICE_SESSION_HEADER, &token)
+        .bearer_auth(&key)
+        .json(&json!({ "badgePhc": badge_phc }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let feed = client
+        .get(format!("{base}/v1/changes?since=0"))
+        .header(protocol.0, &protocol.1)
+        .bearer_auth(&key)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(feed.status(), 200);
+    let revoked = client
+        .delete(format!(
+            "{base}/v1/office/operators/{operator_id}/badges/{}",
+            badge["id"].as_str().unwrap()
+        ))
+        .header(protocol.0, &protocol.1)
+        .header(markiro_proto::OFFICE_SESSION_HEADER, &token)
+        .bearer_auth(&key)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(revoked.status(), 204);
+
     // A wrong device key and a wrong session token are both rejected...
     let wrong_device_key = "not-a-real-device-key";
     let wrong_device = client
@@ -270,6 +339,10 @@ async fn secrets_never_reach_the_process_log() {
         pairing_code,
         pairing_payload,
         claimed_key,
+        PIN_PHC.to_owned(),
+        "3OKvrZ2+EfTB2zsCso90r5g8c6Ib6t+Bv+cGJOpgPmU=".to_owned(),
+        badge_phc,
+        STANDARD.encode([7u8; 32]),
         format!("{salt:?}"),
         salt_hex,
         salt_standard_base64,

@@ -1,13 +1,14 @@
 use markiro_proto::{
     certificate_fingerprint, codes, compatibility, compatibility_for, credentials,
-    display_fingerprint, BlockSizesUpdate, BootstrapRequest, BootstrapResponse, ChangesResponse,
-    ClaimRequest, Compatibility, CounterpartyCreate, CounterpartyRecord, CounterpartyUpdate,
-    DeviceInfo, DeviceKind, DeviceLineRequest, DeviceRecord, ErrorBody, Hello, HelloEnvelope,
-    LineCreate, LineRecord, LineUpdate, LocalPairRequest, OfficeLine, OfficeLoginRequest,
-    OfficeOperator, OfficeRole, OfficeSession, OfficeUser, OfficeUserCreate, OfficeUserRecord,
-    OfficeUserUpdate, OperatorBadgeRecord, OperatorCreate, OperatorRecord, OperatorUpdate,
-    OrgProfile, OrgProfileUpdate, OrgRecord, PairResponse, PairingCode, PasswordChange,
-    PasswordSet, SiteRecord, SsccCounterUpdate, SsccState, HOST_PRODUCT, PROTOCOL_VERSION,
+    display_fingerprint, BadgeCreate, BadgeSalt, BlockSizesUpdate, BootstrapRequest,
+    BootstrapResponse, ChangesResponse, ClaimRequest, Compatibility, CounterpartyCreate,
+    CounterpartyRecord, CounterpartyUpdate, DeviceInfo, DeviceKind, DeviceLineRequest,
+    DeviceRecord, ErrorBody, Hello, HelloEnvelope, LineCreate, LineRecord, LineUpdate,
+    LocalPairRequest, OfficeLine, OfficeLoginRequest, OfficeOperator, OfficeRole, OfficeSession,
+    OfficeUser, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate, OperatorBadgeRecord,
+    OperatorCreate, OperatorRecord, OperatorUpdate, OrgProfile, OrgProfileUpdate, OrgRecord,
+    PairResponse, PairingCode, PasswordChange, PasswordSet, SiteRecord, SsccCounterUpdate,
+    SsccState, HOST_PRODUCT, PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -313,6 +314,24 @@ fn operator_fixtures_round_trip_without_leaking_the_pin_hash() {
     let mut value = fixture("operator-update.json");
     value["login"] = Value::String("0043".into());
     assert!(serde_json::from_value::<OperatorUpdate>(value).is_err());
+}
+
+#[test]
+fn badge_fixtures_round_trip_without_leaking() {
+    let create: BadgeCreate = round_trip("badge-create.json");
+    let salt: BadgeSalt = round_trip("badge-salt.json");
+    // The badge is hashed with the salt the office read.
+    assert_eq!(
+        create.badge_phc.expose().split('$').nth(3),
+        Some(salt.badge_salt.expose())
+    );
+    let debug = format!("{create:?} {salt:?}");
+    assert!(!debug.contains("pbkdf2"), "{debug}");
+    assert!(!debug.contains(salt.badge_salt.expose()), "{debug}");
+    // The badge code itself is never a field.
+    let mut value = fixture("badge-create.json");
+    value["code"] = Value::String("MRK-000742".into());
+    assert!(serde_json::from_value::<BadgeCreate>(value).is_err());
 }
 
 #[test]

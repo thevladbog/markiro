@@ -175,7 +175,12 @@ default_box_template_id, default_pallet_template_id, default_duplicate_template_
 - `operator_badges(id, operator_id, badge_phc, label, created_at, revoked_at, rev)`;
   частичный уникальный индекс по `badge_phc` среди неотозванных: одинаковый бейдж
   не может принадлежать двум операторам (соль общая, значит одинаковый код даёт
-  одинаковый хеш).
+  одинаковый хеш). Поэтому хеш бейджа обязан нести соль площадки
+  (`GET /v1/office/badge-salt`) и ровно 100 000 итераций, как `hashBadgeWithSalt`
+  облака: с другим числом итераций копия бейджа прошла бы мимо индекса. Повтор —
+  `conflict` с `constraint: badge`. Подпись (`label`) — до 100 символов или пусто.
+  Отзыв — `DELETE …/badges/{badgeId}`: `revoked_at` и надгробие; повторный отзыв
+  ничего не меняет.
 - `chz_product_groups(code PRIMARY KEY, alias UNIQUE, name)` — 51 строка из облачной
   миграции `0099`.
 - `products(id, gtin14 CHECK(length=14 AND цифры), name, print_name, chz_group_code REFERENCES chz_product_groups, box_capacity, pallet_box_capacity, shelf_life_days, default_box_template_id, default_pallet_template_id, archived, status GENERATED ALWAYS AS (CASE WHEN chz_group_code IS NOT NULL AND box_capacity IS NOT NULL AND pallet_box_capacity IS NOT NULL THEN 'active' ELSE 'draft' END) VIRTUAL, rev)`;
@@ -256,7 +261,10 @@ default_box_template_id, default_pallet_template_id, default_duplicate_template_
   `line-update.json` (`PUT` меняет только присланные `name` и `archived`);
 - операторы — `office-operator.json` (ответ: `hasPin` и бейджи без хешей),
   `operator-create.json`, `operator-update.json` (`PUT` меняет только присланные
-  поля; `role: null` очищает должность, её отсутствие — оставляет).
+  поля; `role: null` очищает должность, её отсутствие — оставляет);
+- бейджи — `badge-create.json` (`badgePhc` с солью площадки и `label`; ответ —
+  сведения о бейдже, как в `office-operator.json`), `badge-salt.json` (ответ
+  `GET /v1/office/badge-salt`).
 
 ### 4.6. Ошибки
 

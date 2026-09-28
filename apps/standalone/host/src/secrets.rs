@@ -42,12 +42,23 @@ pub const MIN_ITERATIONS: u32 = 10_000;
 /// domain's 100 000 leaves room to raise the default, and office passwords
 /// (600 000) fit under it too.
 pub const MAX_ITERATIONS: u32 = 1_000_000;
+/// Iterations of a badge verifier: exactly the domain's `PHC_ITERATIONS`, as
+/// the cloud hashes badges (`hashBadgeWithSalt` in apps/api), so one badge
+/// code under the site's salt always gives one PHC string.
+pub const BADGE_ITERATIONS: u32 = 100_000;
 
 /// A parsed `pbkdf2$sha256$<iterations>$<salt>$<digest>` string.
 pub struct Phc {
     pub iterations: u32,
     salt: Vec<u8>,
     digest: Vec<u8>,
+}
+
+impl Phc {
+    /// The decoded salt: 16 bytes.
+    pub fn salt(&self) -> &[u8] {
+        &self.salt
+    }
 }
 
 /// Parse a PHC string in the `@markiro/domain` format: canonical standard

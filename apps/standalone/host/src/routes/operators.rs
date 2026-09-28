@@ -1,15 +1,23 @@
 //! Operators (spec §4.3), administrators only: `GET /v1/office/operators`,
-//! `POST` and `PUT …/{id}` (`PUT` with `expectedRev`). The office computes
-//! the PIN's PHC string with `@markiro/domain`; the host checks its format
-//! and never returns a hash (`hasPin` instead). An operator is in the station
-//! feed only while active: a deactivation writes a tombstone and a
-//! reactivation drops it (`feed`).
+//! `POST` and `PUT …/{id}` (`PUT` with `expectedRev`), their badges (`POST
+//! …/{id}/badges`, `DELETE …/{id}/badges/{badge_id}`) and the site's badge
+//! salt (`GET /v1/office/badge-salt`). The office computes PIN and badge PHC
+//! strings with `@markiro/domain`; the host checks their format and never
+//! returns a hash (`hasPin` and badge metadata instead). An operator is in
+//! the station feed only while active and a badge only while not revoked:
+//! leaving it writes a tombstone (`feed`).
 
 use std::collections::HashMap;
 
 use axum::extract::State;
+use axum::http::StatusCode;
 use axum::Json;
-use markiro_proto::{entities, BadgeInfo, OfficeOperator, OperatorCreate, OperatorUpdate};
+use base64::engine::general_purpose::STANDARD;
+use base64::Engine;
+use markiro_proto::{
+    entities, BadgeCreate, BadgeInfo, BadgeSalt, OfficeOperator, OperatorCreate, OperatorUpdate,
+    Secret,
+};
 use serde_json::json;
 use sqlx::SqliteConnection;
 
@@ -281,4 +289,158 @@ pub async fn update_operator(
         .await
         .map_err(ApiError::internal)?;
     Ok(Json(updated))
+}
+
+/// The site's badge salt; `not_found` before the wizard created it.
+async fn site_salt(conn: &mut SqliteConnection) -> Result<Vec<u8>, ApiError> {
+    let salt: Option<Vec<u8>> = sqlx::query_scalar("SELECT badge_salt FROM site WHERE id = 1")
+        .fetch_one(conn)
+        .await
+        .map_err(ApiError::internal)?;
+    salt.ok_or_else(|| ApiError::not_found("the host is not initialized"))
+}
+
+/// A write that hit `operator_badges_active_phc`: the badge is already an
+/// active badge of some operator.
+fn badge_taken(error: sqlx::Error) -> ApiError {
+    match error.as_database_error() {
+        Some(database) if database.is_unique_violation() => {
+            ApiError::conflict("badge", "this badge already belongs to an operator")
+        }
+        _ => ApiError::internal(error),
+    }
+}
+
+/// `GET /v1/office/badge-salt` (administrators): the salt the office hashes
+/// badge codes with, as stations and the cloud do.
+pub async fn badge_salt(
+    State(state): State<AppState>,
+    context: OfficeContext,
+) -> Result<Json<BadgeSalt>, ApiError> {
+    context.require_admin()?;
+    let mut conn = state.pool.acquire().await.map_err(ApiError::internal)?;
+    let salt = site_salt(&mut conn).await?;
+    Ok(Json(BadgeSalt {
+        badge_salt: Secret::new(STANDARD.encode(salt)),
+    }))
+}
+
+/// `POST /v1/office/operators/{id}/badges` (administrators): a badge hashed
+/// with the site's salt. A badge code belongs to one operator at a time.
+pub async fn create_badge(
+    State(state): State<AppState>,
+    context: OfficeContext,
+    ApiPath(operator_id): ApiPath<String>,
+    ApiJson(create): ApiJson<BadgeCreate>,
+) -> Result<Json<BadgeInfo>, ApiError> {
+    context.require_admin()?;
+    let label = validate::badge_label("label", create.label.as_deref())?;
+    let at = state.timestamp();
+    let id = uuid::Uuid::new_v4().to_string();
+    let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
+    context.require_admin_in(&mut tx).await?;
+    let salt = site_salt(&mut tx).await?;
+    validate::badge_phc("badgePhc", create.badge_phc.expose(), &salt)?;
+    let operator: Option<i64> = sqlx::query_scalar("SELECT 1 FROM operators WHERE id = ?")
+        .bind(&operator_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(ApiError::internal)?;
+    if operator.is_none() {
+        return Err(ApiError::not_found("no such operator"));
+    }
+    let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
+    sqlx::query(
+        "INSERT INTO operator_badges (id, operator_id, badge_phc, label, created_at, rev) \
+         VALUES (?, ?, ?, ?, ?, ?)",
+    )
+    .bind(&id)
+    .bind(&operator_id)
+    .bind(create.badge_phc.expose())
+    .bind(&label)
+    .bind(&at)
+    .bind(rev)
+    .execute(&mut *tx)
+    .await
+    .map_err(badge_taken)?;
+    audit::record(
+        &mut tx,
+        &at,
+        Entry {
+            actor: context.actor(),
+            action: actions::OPERATOR_BADGE_CREATE,
+            target_type: Some("operator_badge"),
+            target_id: Some(&id),
+            outcome: Outcome::Ok,
+            details: json!({ "operatorId": operator_id, "label": label }),
+        },
+    )
+    .await
+    .map_err(ApiError::internal)?;
+    commit_with_revision(tx, &state.revisions, rev)
+        .await
+        .map_err(ApiError::internal)?;
+    Ok(Json(BadgeInfo {
+        id,
+        label,
+        created_at: at,
+        revoked_at: None,
+    }))
+}
+
+/// `DELETE /v1/office/operators/{id}/badges/{badge_id}` (administrators):
+/// revoke the badge. It leaves the station feed as a tombstone and never
+/// comes back; revoking a revoked badge changes nothing.
+pub async fn revoke_badge(
+    State(state): State<AppState>,
+    context: OfficeContext,
+    ApiPath((operator_id, badge_id)): ApiPath<(String, String)>,
+) -> Result<StatusCode, ApiError> {
+    context.require_admin()?;
+    let at = state.timestamp();
+    let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
+    context.require_admin_in(&mut tx).await?;
+    let revoked_at: Option<Option<String>> = sqlx::query_scalar(
+        "SELECT revoked_at FROM operator_badges WHERE id = ? AND operator_id = ?",
+    )
+    .bind(&badge_id)
+    .bind(&operator_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(ApiError::internal)?;
+    match revoked_at {
+        None => return Err(ApiError::not_found("no such badge of this operator")),
+        // Already revoked: no revision, no row write, no audit row.
+        Some(Some(_)) => return Ok(StatusCode::NO_CONTENT),
+        Some(None) => {}
+    }
+    let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
+    sqlx::query("UPDATE operator_badges SET revoked_at = ?, rev = ? WHERE id = ?")
+        .bind(&at)
+        .bind(rev)
+        .bind(&badge_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(ApiError::internal)?;
+    feed::remove(&mut tx, entities::OPERATOR_BADGES, &badge_id, rev)
+        .await
+        .map_err(ApiError::internal)?;
+    audit::record(
+        &mut tx,
+        &at,
+        Entry {
+            actor: context.actor(),
+            action: actions::OPERATOR_BADGE_REVOKE,
+            target_type: Some("operator_badge"),
+            target_id: Some(&badge_id),
+            outcome: Outcome::Ok,
+            details: json!({ "operatorId": operator_id }),
+        },
+    )
+    .await
+    .map_err(ApiError::internal)?;
+    commit_with_revision(tx, &state.revisions, rev)
+        .await
+        .map_err(ApiError::internal)?;
+    Ok(StatusCode::NO_CONTENT)
 }

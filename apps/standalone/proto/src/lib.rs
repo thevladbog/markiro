@@ -760,3 +760,22 @@ pub struct OperatorUpdate {
     pub pin_phc: Option<Secret>,
     pub expected_rev: i64,
 }
+
+/// `POST /v1/office/operators/{id}/badges`: the office hashed the badge code
+/// with the site's badge salt (`GET /v1/office/badge-salt`) and the domain's
+/// 100 000 iterations; the host never sees the code.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BadgeCreate {
+    pub badge_phc: Secret,
+    #[serde(default)]
+    pub label: Option<String>,
+}
+
+/// `GET /v1/office/badge-salt`: the site's badge salt, 16 bytes in standard
+/// base64 with padding — the value the feed's `site` record carries.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BadgeSalt {
+    pub badge_salt: Secret,
+}

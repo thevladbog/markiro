@@ -65,6 +65,31 @@ pub fn operator_role(field: &str, role: Option<&str>) -> Result<Option<String>, 
     optional_text(field, role, 120)
 }
 
+/// A badge's label: free text of at most 100 characters, or none.
+pub fn badge_label(field: &str, label: Option<&str>) -> Result<Option<String>, ApiError> {
+    optional_text(field, label, 100)
+}
+
+/// A badge verifier the office computed: a PHC string in the
+/// `@markiro/domain` format with exactly `secrets::BADGE_ITERATIONS` and the
+/// site's badge salt, as the cloud hashes badges. One badge code then always
+/// gives one string, so the partial unique index keeps it on one operator;
+/// another count or salt would let a copy of the badge through.
+pub fn badge_phc(field: &str, phc: &str, site_salt: &[u8]) -> Result<(), ApiError> {
+    match crate::secrets::parse_phc(phc) {
+        Some(parsed)
+            if parsed.iterations == crate::secrets::BADGE_ITERATIONS
+                && parsed.salt() == site_salt =>
+        {
+            Ok(())
+        }
+        _ => Err(ApiError::validation(
+            field,
+            "a PBKDF2 PHC string with 100000 iterations and the site's badge salt is required",
+        )),
+    }
+}
+
 /// A PIN verifier the office computed: a PHC string in the `@markiro/domain`
 /// format with `secrets::MIN_ITERATIONS..=secrets::MAX_ITERATIONS`
 /// iterations. The host never sees the PIN, so this is all it can check.
@@ -392,6 +417,36 @@ mod tests {
         );
         assert!(operator_role("role", Some(&"м".repeat(120))).is_ok());
         assert_eq!(field(operator_role("role", Some(&"м".repeat(121)))), "role");
+    }
+
+    #[test]
+    fn a_badge_hash_carries_the_site_salt_and_exactly_the_domain_iterations() {
+        let salt: Vec<u8> = (0..16).collect();
+        let phc = |iterations: u32, salt: &str| {
+            format!(
+                "pbkdf2$sha256${iterations}${salt}$LEcu0ewwRD5rBHrpCjvxni/q2cURiavbRlNRgDPb+n0="
+            )
+        };
+        assert!(badge_phc("badgePhc", &phc(100_000, "AAECAwQFBgcICQoLDA0ODw=="), &salt).is_ok());
+        for bad in [
+            phc(200_000, "AAECAwQFBgcICQoLDA0ODw=="),
+            phc(10_000, "AAECAwQFBgcICQoLDA0ODw=="),
+            phc(100_000, "bWFya2lyby1waW4tc2FsdA=="),
+            "MRK-000742".to_owned(),
+        ] {
+            assert_eq!(
+                field(badge_phc("badgePhc", &bad, &salt)),
+                "badgePhc",
+                "{bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_badge_label_is_optional_text_of_at_most_100_characters() {
+        assert_eq!(badge_label("label", Some(" ")).unwrap(), None);
+        assert!(badge_label("label", Some(&"п".repeat(100))).is_ok());
+        assert_eq!(field(badge_label("label", Some(&"п".repeat(101)))), "label");
     }
 
     #[test]

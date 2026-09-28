@@ -28,6 +28,8 @@ pub mod actions {
     pub const LINE_UPDATE: &str = "line.update";
     pub const OPERATOR_CREATE: &str = "operator.create";
     pub const OPERATOR_UPDATE: &str = "operator.update";
+    pub const OPERATOR_BADGE_CREATE: &str = "operator_badge.create";
+    pub const OPERATOR_BADGE_REVOKE: &str = "operator_badge.revoke";
 }
 
 /// `details.reason` of a denied row: every denial names one.

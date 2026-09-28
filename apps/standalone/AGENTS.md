@@ -207,6 +207,24 @@ there changes `ENTITY_SET` and makes every device sync from zero once. It
 also adds three statements to the worst-case page batch (see "Reference
 sync"), which must stay within the shell's 32.
 
+## Operators and badges
+
+Operators sign in on stations with a personnel number and a PIN, or with a
+badge (plan 1f). The office hashes both with `@markiro/domain`, so the host
+never sees a PIN or a badge code: it stores PHC strings and checks their
+format with `secrets::parse_phc` — canonical base64, a 16-byte salt, a
+32-byte digest and 10 000–1 000 000 iterations, since a station verifies
+with the count the hash carries. A badge hash must also carry exactly the
+domain's 100 000 iterations and the site's badge salt
+(`GET /v1/office/badge-salt`, the same value as the `site` record's
+`badgeSalt`), as the cloud hashes badges: one badge code then always gives
+one string, and the partial unique index `operator_badges_active_phc` keeps
+it on one operator (`conflict` with `constraint: badge`). The office never
+gets a hash back: operator reads carry `hasPin` and each badge's `id`,
+`label`, `createdAt` and `revokedAt`. Revoking a badge is
+`DELETE …/badges/{badgeId}`, and revoking it again changes nothing.
+Operators, badges and the salt are for administrators only, reads included.
+
 ## Reference sync
 
 `src/local/reference-sync.ts` keeps the local copies in step with the host
