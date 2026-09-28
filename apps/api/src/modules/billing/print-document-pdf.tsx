@@ -20,6 +20,7 @@ import { sanitizeOfferTermsHtml } from "../platform-offers/offer-terms";
 import {
   amountInWords,
   documentBarcodeValue,
+  documentVatBasis,
   documentVatLabel,
   documentKindLabel,
   documentSubject,
@@ -403,6 +404,7 @@ function Signature({ label, signed }: { label: string; signed: boolean }) {
 }
 
 function Closing({ model, signed }: { model: PrintDocumentModel; signed: boolean }) {
+  const vatBasis = documentVatBasis(model);
   return (
     <>
       <View style={styles.totals} wrap={false}>
@@ -419,6 +421,7 @@ function Closing({ model, signed }: { model: PrintDocumentModel; signed: boolean
           <Text style={[styles.mono, styles.grandTotalValue]}>{formatMoney(model.total)}</Text>
         </View>
         <Text style={styles.amountWords}>{amountInWords(model.total)}</Text>
+        {vatBasis ? <Text style={styles.amountWords}>{vatBasis}</Text> : null}
       </View>
       {model.kind === "offer" && model.termsHtml ? (
         <View style={styles.noteSection}>

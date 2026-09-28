@@ -53,4 +53,67 @@ describe("print document model", () => {
       total: "120.00",
     });
   });
+
+  it("carries the frozen registration number kind and seller tax policy", () => {
+    const model = toInvoicePrintModel({
+      number: "INV-000002",
+      status: "issued",
+      issueDate: new Date("2026-09-29T09:00:00.000Z"),
+      dueDate: null,
+      sellerSnapshot: {
+        kind: "sole_proprietor",
+        fullName: "ИП Оператор",
+        inn: "234106228141",
+        kpp: null,
+        ogrn: null,
+        ogrnip: "324237500123456",
+        taxPolicy: { kind: "without_vat", regime: "npd" },
+      },
+      buyerSnapshot: {
+        kind: "legal_entity",
+        fullName: "ООО Покупатель",
+        inn: "7812014560",
+        kpp: "781201001",
+        ogrn: "1027800000000",
+        ogrnip: null,
+      },
+      subtotal: "100.00",
+      vatTotal: "0.00",
+      total: "100.00",
+      lines: [],
+    });
+
+    expect(model.seller).toMatchObject({
+      registrationId: "324237500123456",
+      registrationKind: "ogrnip",
+      taxPolicy: { kind: "without_vat", regime: "npd" },
+    });
+    expect(model.buyer).toMatchObject({
+      registrationId: "1027800000000",
+      registrationKind: "ogrn",
+      taxPolicy: null,
+    });
+  });
+
+  it("keeps snapshots frozen before the tax policy was recorded without a tax basis", () => {
+    const model = toInvoicePrintModel({
+      number: "INV-000003",
+      status: "issued",
+      issueDate: new Date("2026-08-12T00:00:00.000Z"),
+      dueDate: null,
+      sellerSnapshot: { legalName: "ООО Оператор", registrationId: "1027700132195" },
+      buyerSnapshot: {
+        legalName: "ИП Покупатель",
+        kind: "sole_proprietor",
+        ogrnip: "324237500123456",
+      },
+      subtotal: "0.00",
+      vatTotal: "0.00",
+      total: "0.00",
+      lines: [],
+    });
+
+    expect(model.seller).toMatchObject({ registrationKind: "ogrn", taxPolicy: null });
+    expect(model.buyer).toMatchObject({ registrationKind: "ogrnip", taxPolicy: null });
+  });
 });

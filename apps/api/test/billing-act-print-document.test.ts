@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
+import { renderPrintHtml } from "../src/modules/billing/print-document-html";
 import {
   documentBarcodeValue,
   documentKindLabel,
   documentSubject,
+  documentVatBasis,
 } from "../src/modules/billing/print-document-layout";
 import { toBillingActPrintModel } from "../src/modules/billing/print-document-model";
 import { renderPrintPdf } from "../src/modules/billing/print-document-pdf";
@@ -111,5 +113,79 @@ describe("generated billing act document", () => {
     const retry = await renderPrintPdf(model);
 
     expect(first.equals(retry)).toBe(true);
+  });
+
+  it("keeps the frozen NPD seller basis and ОГРНИП in deterministic act bytes", async () => {
+    const actFor = (regime: "npd" | "other") =>
+      toBillingActPrintModel(
+        {
+          number: "MRK-ACT-000022",
+          createdAt: new Date("2026-09-29T10:00:00.000Z"),
+          periodStart: "2026-09-01",
+          periodEnd: "2026-09-30",
+        },
+        {
+          number: "MRK-INV-000022",
+          status: "paid",
+          issueDate: new Date("2026-09-01T10:00:00.000Z"),
+          dueDate: null,
+          sellerSnapshot: {
+            kind: "sole_proprietor",
+            fullName: "ИП Оператор",
+            inn: "234106228141",
+            kpp: null,
+            ogrn: null,
+            ogrnip: "324237500123456",
+            taxPolicy: { kind: "without_vat", regime },
+          },
+          buyerSnapshot: {
+            kind: "legal_entity",
+            fullName: "ООО Фабрика",
+            inn: "7812014560",
+            kpp: "781201001",
+            ogrn: "1027800000000",
+            ogrnip: null,
+          },
+          subtotal: "15000.00",
+          vatTotal: "0.00",
+          total: "15000.00",
+          lines: [
+            {
+              position: 1,
+              commercialTerms: {
+                version: 1,
+                subject: "service",
+                documentNameRu: "Настройка интеграции",
+                documentNameEn: null,
+                sellerPolicyRevision: 1,
+                billingPeriod: null,
+                billingTimezone: null,
+                activationRule: null,
+              },
+              nameRu: "Настройка интеграции",
+              descriptionRu: null,
+              unit: "услуга",
+              quantity: 1,
+              agreedUnitPrice: "15000.00",
+              vatRate: null,
+              vatIncluded: false,
+              lineTotal: "15000.00",
+            },
+          ],
+        },
+      );
+    const model = actFor("npd");
+
+    expect(documentVatBasis(model)).toBe(
+      "Без НДС: Исполнитель применяет НПД; основание — часть 9 статьи 2 Федерального закона от 27.11.2018 № 422-ФЗ.",
+    );
+    expect(documentVatBasis(actFor("other"))).toBeNull();
+    expect(renderPrintHtml(model)).toContain("ИНН 234106228141 · ОГРНИП 324237500123456");
+
+    const first = await renderPrintPdf(model);
+    const retry = await renderPrintPdf(actFor("npd"));
+
+    expect(first.equals(retry)).toBe(true);
+    expect(first.equals(await renderPrintPdf(actFor("other")))).toBe(false);
   });
 });
