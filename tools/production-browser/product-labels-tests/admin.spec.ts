@@ -200,6 +200,10 @@ test("admin freezes active policy and shows distinct production and label totals
   ).toBeDisabled();
   await page.screenshot({ path: info.outputPath("admin-active-policy.png") });
   await open(page, `/shifts/${shiftId}`);
+  await expect(page.getByRole("heading", { name: "Контроль печати" })).toBeVisible();
+  await expect(page.getByText("…IAL-42", { exact: true })).toHaveCount(0);
+  await page.screenshot({ path: info.outputPath("admin-print-control-collapsed.png") });
+  await page.getByRole("button", { name: "Открыть журнал печати" }).click();
   await expect(page.getByText("…IAL-42", { exact: true })).toBeVisible();
   await expect(page.getByText("Отправки на принтер", { exact: true })).toBeVisible();
   await expect(page.getByText("Проверенные этикетки", { exact: true })).toBeVisible();
