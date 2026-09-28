@@ -37,6 +37,7 @@ const content = pairLocaleContent(
 );
 
 let documentXml = "";
+let settingsXml = "";
 
 beforeAll(async () => {
   const bytes = await renderLegalDocxBilingual({
@@ -49,9 +50,13 @@ beforeAll(async () => {
     operatorProfileId: "operator-2026-08-15",
     content,
   });
-  const entry = unzipSync(bytes)["word/document.xml"];
+  const entries = unzipSync(bytes);
+  const entry = entries["word/document.xml"];
   if (!entry) throw new Error("no word/document.xml in the rendered package");
   documentXml = new TextDecoder().decode(entry);
+  const settings = entries["word/settings.xml"];
+  if (!settings) throw new Error("no word/settings.xml in the rendered package");
+  settingsXml = new TextDecoder().decode(settings);
 });
 
 describe("renderLegalDocxBilingual", () => {
@@ -70,6 +75,10 @@ describe("renderLegalDocxBilingual", () => {
 
   it("gives every appendix its own page", () => {
     expect(documentXml).toContain("w:pageBreakBefore");
+  });
+
+  it("does not make Word offer to update fields on open", () => {
+    expect(settingsXml).not.toContain("w:updateFields");
   });
 
   it("renders a bilingual heading on both sides", () => {
