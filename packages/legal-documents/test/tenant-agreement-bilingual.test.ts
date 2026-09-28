@@ -99,6 +99,30 @@ describe("bilingual agreement", () => {
     expect(blank).not.toContain("[полное наименование юридического лица / ИП]");
   });
 
+  it("agrees the Russian column with the customer's form and keeps the English one neutral", () => {
+    const fields: TenantAgreementFields = {
+      ...FILLED,
+      customer: { ...ORG_CUSTOMER, name: "Общество с ограниченной ответственностью «Атолл»" },
+    };
+    expect(() => pair(fields)).not.toThrow();
+    const paragraphs = (locale: "ru" | "en") =>
+      buildTenantAgreement(fields, locale)
+        .sections.flatMap(({ blocks }) => blocks)
+        .flatMap((block) => (block.kind === "paragraph" ? [block.text] : []))
+        .join("\n");
+    const ru = paragraphs("ru");
+    expect(ru).toContain("именуемое «Заказчик», а в лицензионных отношениях — «Лицензиат»");
+    expect(ru).toContain(
+      "— поручает Исполнителю (ИП Богатырев Владислав Сергеевич, ИНН [ИНН]) обработку",
+    );
+    // English has neither gender nor case to agree, so one wording serves every customer.
+    const en = paragraphs("en");
+    expect(en).toContain(
+      'referred to as the "Customer" and, in licensing relations, as the "Licensee"',
+    );
+    expect(en).toMatch(/— instructs .+ to process the personal data listed below/);
+  });
+
   it("translates appendices 1 and 2", () => {
     const byId = new Map(
       buildTenantAgreement(FILLED, "en").sections.map((section) => [section.id, section]),

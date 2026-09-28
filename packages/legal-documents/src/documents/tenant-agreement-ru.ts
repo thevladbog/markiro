@@ -776,7 +776,7 @@ export function buildRuAgreementSections(
       blocks: [
         {
           kind: "paragraph",
-          text: `3-А.1. Заказчик — ${partyLine(customer, "[полное наименование / Ф. И. О. ИП]")}, адрес ${agreementField(customer.address, "[адрес]")} — поручает ${partyLine(contractor, CONTRACTOR_DEFAULT_NAME)} обработку перечисленных ниже персональных данных для согласованных функций Маркиро. Заказчик определяет цели и состав данных и является оператором. Исполнитель обрабатывает их по документированным инструкциям и не приобретает полномочий представителя Заказчика.`,
+          text: `3-А.1. Заказчик — ${partyLine(customer, "[полное наименование / Ф. И. О. ИП]")}, адрес ${agreementField(customer.address, "[адрес]")} — поручает Исполнителю (${partyLine(contractor, CONTRACTOR_DEFAULT_NAME)}) обработку перечисленных ниже персональных данных для согласованных функций Маркиро. Заказчик определяет цели и состав данных и является оператором. Исполнитель обрабатывает их по документированным инструкциям и не приобретает полномочий представителя Заказчика.`,
         },
         {
           kind: "paragraph",
@@ -1624,6 +1624,39 @@ function partyLine(party: PartyRequisites | undefined, namePlaceholder: string):
   return `${partyName(party, namePlaceholder)}, ИНН ${agreementField(party?.inn, "[ИНН]")}`;
 }
 
+// Формы записаны строчными и без «ё»: наименование сравнивается в том же виде.
+const NEUTER_LEGAL_FORMS = [
+  "общество",
+  "акционерное общество",
+  "публичное акционерное общество",
+  "товарищество",
+  "партнерство",
+  // Сокращения тех же форм: заказчика чаще всего вносят как «ООО «…»».
+  "ооо",
+  "ао",
+  "пао",
+] as const;
+
+const FEMININE_LEGAL_FORMS = ["компания", "фирма", "корпорация", "организация"] as const;
+
+/**
+ * «именуемый / именуемое / именуемая» — причастие во вводной части
+ * согласуется с организационной формой, с которой начинается наименование:
+ * «Общество … именуемое», «Компания … именуемая». Произвольное наименование
+ * шаблон не разбирает, поэтому узнаёт только перечисленные формы, а прочие,
+ * как и ИП с физическим лицом, остаются в мужском роде.
+ */
+export function referredAs(party: PartyRequisites): "именуемый" | "именуемое" | "именуемая" {
+  if (isSoleProprietorOrIndividual(party.kind)) return "именуемый";
+  const name = party.name.trim().toLocaleLowerCase("ru").replaceAll("ё", "е");
+  // Целое слово: «Фирмачи …» — не «Фирма».
+  const startsWith = (form: string) =>
+    name.startsWith(form) && !/\p{L}/u.test(name.charAt(form.length));
+  if (NEUTER_LEGAL_FORMS.some(startsWith)) return "именуемое";
+  if (FEMININE_LEGAL_FORMS.some(startsWith)) return "именуемая";
+  return "именуемый";
+}
+
 function preamble(
   contractor: PartyRequisites | undefined,
   customer: PartyRequisites,
@@ -1638,7 +1671,7 @@ function preamble(
     `ИНН ${agreementField(customer.inn, "[ИНН Заказчика]")}, ` +
     `${registryCell(customer, "[номер]")}, ` +
     `в лице ${representative(signatory)}, ` +
-    `именуемый «Заказчик», а в лицензионных отношениях — «Лицензиат», с другой стороны, ` +
+    `${referredAs(customer)} «Заказчик», а в лицензионных отношениях — «Лицензиат», с другой стороны, ` +
     `совместно именуемые «Стороны», заключили настоящий договор (далее — «Договор»).`
   );
 }
