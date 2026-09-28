@@ -4,7 +4,7 @@ import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import {
   buildDuplicateLabelTemplate,
   duplicatePayloadDigest,
@@ -315,6 +315,32 @@ describe.skipIf(!ready)("product label history", () => {
       .expect(403);
     for (const query of ["limit=0", "limit=101", "cursor=bad", "limit=1.2"])
       await agent.get(`/shifts/${f.shiftId}/product-labels?${query}`).expect(400);
+  });
+  it("reconstructs epoch-aware full transaction IDs around xid wraparound", async () => {
+    const result = await db.execute<{ fullXid: string; visible: boolean }>(sql`
+      WITH boundary AS (
+        SELECT value,
+          pg_snapshot_xmax(value)::text::bigint AS xmax,
+          (pg_snapshot_xmax(value)::xid)::text::bigint AS xmax32
+        FROM (SELECT '4294967294:4294967302:4294967294,4294967297'::pg_snapshot AS value) snapshot
+      ), samples(ordinal,raw) AS (
+        VALUES (1,4294967293::bigint),(2,4294967294::bigint),(3,0::bigint),(4,1::bigint),(5,6::bigint)
+      )
+      SELECT reconstructed.full_xid::text AS "fullXid",
+        pg_visible_in_snapshot(reconstructed.full_xid,boundary.value) AS visible
+      FROM boundary CROSS JOIN samples
+      CROSS JOIN LATERAL (
+        SELECT (boundary.xmax + ((((samples.raw-boundary.xmax32+2147483648) & 4294967295)-2147483648)))::text::xid8 AS full_xid
+      ) reconstructed
+      ORDER BY samples.ordinal
+    `);
+    expect(result.rows).toEqual([
+      { fullXid: "4294967293", visible: true },
+      { fullXid: "4294967294", visible: false },
+      { fullXid: "4294967296", visible: true },
+      { fullXid: "4294967297", visible: false },
+      { fullXid: "4294967302", visible: false },
+    ]);
   });
   it("paginates colliding device-local IDs without mixing devices", async () => {
     const f = await fixture();

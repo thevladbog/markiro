@@ -78,6 +78,8 @@ export async function readProductLabelHistory(
     (SELECT count(*)::int FROM product_label_jobs job WHERE job.tenant_id=${tenantId} AND job.shift_id=${shiftId} AND job.projection->>'status'<>'completed') AS "unresolvedJobs",
     (SELECT count(DISTINCT (event.device_id,event.event->>'attemptId'))::int FROM product_label_events event JOIN product_label_jobs job ON job.tenant_id=event.tenant_id AND job.device_id=event.device_id AND job.job_id=event.job_id WHERE job.tenant_id=${tenantId} AND job.shift_id=${shiftId} AND event.receive_status='accepted' AND event.event->>'kind'='prepared' AND (event.event->>'attemptNo')::bigint>1) AS "reprintAttempts"
   `);
+      // Heap xmin is a wrapping 32-bit xid. Rebuild its full xid8 by applying the
+      // nearest signed 32-bit delta to the saved snapshot's epoch-aware xmax.
       const rows = await tx.execute<{
         jobId: string;
         deviceId: string;
@@ -89,7 +91,12 @@ export async function readProductLabelHistory(
         ownershipConflict: boolean;
         attentionRank: number;
       }>(sql`
-   WITH snapshot_jobs AS (
+   WITH snapshot_boundary AS (
+     SELECT value,
+       pg_snapshot_xmax(value)::text::bigint AS xmax,
+       (pg_snapshot_xmax(value)::xid)::text::bigint AS xmax32
+     FROM (SELECT ${snapshot}::pg_snapshot AS value) parsed_snapshot
+   ), snapshot_jobs AS (
      SELECT job.job_id AS "jobId",job.device_id AS "deviceId",COALESCE(right(code.serial,6),'') AS "codeSuffix",job.accepted_at AS "acceptedAt",
        CASE COALESCE(state_event.kind,job.projection->>'status')
          WHEN 'verified' THEN 'completed'
@@ -107,9 +114,10 @@ export async function readProductLabelHistory(
        COALESCE((prepared_event.event->>'attemptNo')::int,(job.projection->>'attemptNo')::int) AS "attemptNo",
        (EXISTS (SELECT 1 FROM code_conflicts conflict WHERE conflict.tenant_id=job.tenant_id AND conflict.losing_shift_id=job.shift_id AND conflict.losing_terminal_id=job.device_id::text AND conflict.code_hash=job.code_hash AND conflict.losing_scanned_at=job.accepted_at) OR EXISTS (SELECT 1 FROM station_sync_quarantine denied WHERE denied.tenant_id=job.tenant_id AND denied.terminal_id=job.device_id AND denied.shift_id=job.shift_id AND denied.record_kind='product_label_event' AND denied.reason='ownership_conflict' AND denied.payload->>'jobId'=job.job_id::text)) AS "ownershipConflict"
      FROM product_label_jobs job
+     CROSS JOIN snapshot_boundary boundary
      LEFT JOIN codes code ON code.tenant_id=job.tenant_id AND code.shift_id=job.shift_id AND code.code_hash=job.code_hash AND code.scanned_at=job.accepted_at
-     JOIN LATERAL (SELECT event.event->>'kind' AS kind FROM product_label_events event WHERE event.tenant_id=job.tenant_id AND event.device_id=job.device_id AND event.job_id=job.job_id AND event.receive_status='accepted' AND pg_visible_in_snapshot(event.xmin::text::xid8,${snapshot}::pg_snapshot) AND event.event->>'kind'<>'verification_rejected' ORDER BY event.sequence DESC LIMIT 1) state_event ON true
-     JOIN LATERAL (SELECT event.event FROM product_label_events event WHERE event.tenant_id=job.tenant_id AND event.device_id=job.device_id AND event.job_id=job.job_id AND event.receive_status='accepted' AND pg_visible_in_snapshot(event.xmin::text::xid8,${snapshot}::pg_snapshot) AND event.event->>'kind'='prepared' ORDER BY event.sequence DESC LIMIT 1) prepared_event ON true
+     JOIN LATERAL (SELECT event.event->>'kind' AS kind FROM product_label_events event WHERE event.tenant_id=job.tenant_id AND event.device_id=job.device_id AND event.job_id=job.job_id AND event.receive_status='accepted' AND pg_visible_in_snapshot((boundary.xmax + ((((event.xmin::text::bigint-boundary.xmax32+2147483648) & 4294967295)-2147483648)))::text::xid8,boundary.value) AND event.event->>'kind'<>'verification_rejected' ORDER BY event.sequence DESC LIMIT 1) state_event ON true
+     JOIN LATERAL (SELECT event.event FROM product_label_events event WHERE event.tenant_id=job.tenant_id AND event.device_id=job.device_id AND event.job_id=job.job_id AND event.receive_status='accepted' AND pg_visible_in_snapshot((boundary.xmax + ((((event.xmin::text::bigint-boundary.xmax32+2147483648) & 4294967295)-2147483648)))::text::xid8,boundary.value) AND event.event->>'kind'='prepared' ORDER BY event.sequence DESC LIMIT 1) prepared_event ON true
      WHERE job.tenant_id=${tenantId} AND job.shift_id=${shiftId}
    ), ranked_jobs AS (
      SELECT snapshot_jobs.*,CASE WHEN status<>'completed' THEN 1 ELSE 0 END AS "attentionRank" FROM snapshot_jobs
